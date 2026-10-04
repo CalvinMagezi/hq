@@ -1,0 +1,29 @@
+# Generic personal-data patterns for scripts/personal-data-scan.sh.
+# Plain lines are extended regexes that count as findings. Lines starting with
+# "!" are benign shapes removed from a line before the findings are matched
+# (documentation placeholders, public no-reply addresses).
+# Instance-specific names, hosts and addresses belong in the optional
+# PERSONAL_DENYLIST (Actions secret or variable), never in this file.
+
+/Users/[A-Za-z]
+/home/[A-Za-z]
+\.ts\.net
+[A-Za-z0-9._%+-]+@[A-Za-z0-9-]+(\.[A-Za-z0-9-]+)*\.[A-Za-z]{2,}
+
+!/Users/(user|username|you|example|runner|Shared|Public)([^A-Za-z0-9_-]|$)
+!/home/(user|username|you|example|runner|gha-runner|ubuntu|hq|git|linuxbrew)([^A-Za-z0-9_-]|$)
+!/(Users|home)/<[^>]*>
+!/(Users|home)/\$[{A-Za-z]
+!/(Users|home)/\*
+!@(example\.(com|org|net)|users\.noreply\.github\.com|localhost|domain\.tld)([^A-Za-z0-9_-]|$)
+!(noreply|no-reply|git|me|you|user|admin|name|email|alerts?|ops|security|hello|test|foo|someone)@[A-Za-z0-9.-]+
+!@anthropic\.com([^A-Za-z0-9_-]|$)
+!@[a-z]+\.(png|jpg|jpeg|webp|svg|gif)([^A-Za-z0-9_-]|$)
+!@[0-9]+x([^A-Za-z0-9_-]|$)
+# Placeholder users, hosts and addresses used in tests and docs.
+!/(Users|home)/(test|testuser|alice|u|me)([^A-Za-z0-9_-]|$)
+!@(b\.com|y\.com|co\.com|evil\.test|[a-z0-9-]+\.example)([^A-Za-z0-9-]|$)
+!example\.ts\.net
+!gserviceaccount\.com
+!script\.google\.com/[h]ome/usersettings
+!googleapis\.com/[A-Za-z0-9/_.-]*/[u]sers/me

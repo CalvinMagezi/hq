@@ -1,0 +1,54 @@
+#!/usr/bin/env bash
+# Pre-commit hook: block personal data from being committed.
+# Scans staged files for personal hostnames, hardcoded home paths,
+# API keys, and other sensitive patterns.
+# Install once per clone: ln -sf ../../scripts/pre-commit .git/hooks/pre-commit
+
+set -euo pipefail
+
+RED='\033[0;31m'
+NC='\033[0m'
+
+# Generic secret shapes. Personal identifiers (names, hosts, paths, IDs) live
+# in a denylist outside the repo: one extended regex per line, read from
+# $AGENT_HQ_DENYLIST or ~/.config/agent-hq/denylist. CI reads the same list
+# from the PERSONAL_DENYLIST secret via scripts/personal-data-scan.sh.
+PATTERNS=(
+    'sk-[a-zA-Z0-9]{20,}'
+    'AKIA[0-9A-Z]{16}'
+    'ghp_[a-zA-Z0-9]{36}'
+    'xoxb-[0-9]+'
+)
+DENYLIST="${AGENT_HQ_DENYLIST:-$HOME/.config/agent-hq/denylist}"
+if [ -s "$DENYLIST" ]; then
+    while IFS= read -r line; do
+        [ -n "$line" ] && PATTERNS+=("$line")
+    done < "$DENYLIST"
+fi
+
+# Files to skip (binary, lockfiles, the hook itself)
+SKIP_PATTERN='(\.lock$|\.png$|\.jpg$|\.gif$|\.ico$|\.woff|\.ttf|Cargo\.lock$|package-lock\.json$|\.git/)'
+
+FOUND=0
+
+for pattern in "${PATTERNS[@]}"; do
+    # Only scan staged (added/modified) files, not deletions
+    matches=$(git diff --cached --diff-filter=ACMR -U0 -- | grep -E "^\+" | grep -v "^\\+\\+\\+" | grep -iE "$pattern" || true)
+    if [ -n "$matches" ]; then
+        if [ "$FOUND" -eq 0 ]; then
+            echo -e "${RED}ERROR: Personal/sensitive data detected in staged changes:${NC}"
+            FOUND=1
+        fi
+        echo "$matches" | head -5 | sed 's/^/    /'
+        echo ""
+    fi
+done
+
+if [ "$FOUND" -ne 0 ]; then
+    echo -e "${RED}Commit blocked. Remove personal data before committing.${NC}"
+    echo "  Hint: Use environment variables or .example templates for machine-specific values."
+    echo "  To bypass (emergency only): git commit --no-verify"
+    exit 1
+fi
+
+exit 0

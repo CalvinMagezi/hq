@@ -1,0 +1,36 @@
+[Unit]
+Description=Agent HQ
+After=network-online.target tailscaled.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=hq
+Group=hq
+ExecStart=/usr/local/bin/hq start all
+Environment=HQ_VAULT_PATH=/opt/hq/.vault
+Environment=HQ_CONFIG_PATH=/opt/hq/config.yaml
+# Belt-and-suspenders for probe_can_build_self(): the compiled-in checkout
+# path is baked in at build time from wherever `cargo build` ran, so this
+# only matters if that path ever goes stale. See `probe_can_build_self` in hq-core's `machine` module.
+Environment=AGENT_HQ_SRC=/opt/hq/src
+Environment=RUST_LOG=info
+# Optional provider and gws credentials (chmod 600). The leading `-` lets a fresh VPS start without them.
+EnvironmentFile=-/opt/hq/openrouter.env
+EnvironmentFile=-/opt/hq/gws.env
+# Optional: GH_TOKEN=... (root-owned, chmod 600) authenticates `gh` and git over HTTPS for HQ
+# and every agent it starts. See deploy/README.md, "GitHub access".
+EnvironmentFile=-/opt/hq/gh.env
+WorkingDirectory=/opt/hq
+Restart=always
+RestartSec=5
+
+# Hardening
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/opt/hq
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target

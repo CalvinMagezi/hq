@@ -1,0 +1,26 @@
+#cloud-config
+# Release runner droplet. Fill the four @PLACEHOLDERS@ (RUNBOOK.md has the sed
+# line), then: doctl compute droplet create ... --user-data-file cloud-init.yaml
+#
+# Droplet user-data is readable by any process on the droplet through the
+# metadata service, so no secret goes in here. The runner registration token
+# is supplied afterwards over SSH or the console (RUNBOOK.md, "Register the runner").
+#
+#   @REPO@          OWNER/REPO of the repository the runner serves
+#   @REF@           commit SHA of that repository to fetch provision.sh from
+#   @SHA256@        sha256 of deploy/runner/provision.sh at that commit
+#   @ADMIN_CIDR@    your admin address as CIDR, for example 203.0.113.7/32
+package_update: true
+package_upgrade: true
+packages:
+  - curl
+  - ca-certificates
+
+runcmd:
+  - - bash
+    - -ec
+    - |
+      curl --fail --silent --show-error --location --proto '=https' -o /root/provision.sh \
+        "https://raw.githubusercontent.com/@REPO@/@REF@/deploy/runner/provision.sh"
+      echo "@SHA256@  /root/provision.sh" | sha256sum -c -
+      bash /root/provision.sh --repo "@REPO@" --admin-cidr "@ADMIN_CIDR@"

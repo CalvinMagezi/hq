@@ -1,0 +1,105 @@
+# cargo-deny policy for an MIT-licensed project. Run: cargo deny check
+[graph]
+targets = ["x86_64-unknown-linux-gnu", "aarch64-apple-darwin"]
+
+[advisories]
+version = 2
+yanked = "deny"
+# Each ignore needs the advisory id and a reason. Keep each reason current.
+ignore = [
+    { id = "RUSTSEC-2025-0012", reason = "backoff is unmaintained (no vulnerability). Pulled in only by async-openai 0.27; drop when async-openai is upgraded." },
+    { id = "RUSTSEC-2024-0384", reason = "instant is unmaintained (no vulnerability). Transitive via backoff, same exit as RUSTSEC-2025-0012." },
+    { id = "RUSTSEC-2024-0436", reason = "paste is an unmaintained proc-macro that runs at build time only. Transitive via rav1e/ravif/image." },
+    { id = "RUSTSEC-2026-0173", reason = "proc-macro-error2 is an unmaintained build-time proc-macro. Transitive via aquamarine/teloxide." },
+    { id = "RUSTSEC-2026-0192", reason = "ttf-parser is unmaintained (no vulnerability). Transitive via lopdf/pdf-extract and ab_glyph/imageproc." },
+]
+
+[licenses]
+version = 2
+confidence-threshold = 0.9
+# Permissive licenses only. MPL-2.0 is file-level copyleft and is fine for
+# unmodified dependencies. GPL/AGPL/LGPL-only crates are rejected by omission.
+allow = [
+    "MIT", "MIT-0", "Apache-2.0", "Apache-2.0 WITH LLVM-exception",
+    "BSD-2-Clause", "BSD-3-Clause", "ISC", "Zlib", "0BSD", "CC0-1.0",
+    "Unlicense", "Unicode-3.0", "Unicode-DFS-2016", "BSL-1.0",
+    "bzip2-1.0.6", "MPL-2.0",
+]
+
+# Workspace crates do not yet set `license.workspace = true` (crates/ is out of
+# scope for the CI change). Drop these clarifications once they do.
+
+[[licenses.clarify]]
+crate = "hq-agent"
+expression = "MIT"
+license-files = [{ path = "../../LICENSE", hash = 0 }]
+
+[[licenses.clarify]]
+crate = "hq-cli"
+expression = "MIT"
+license-files = [{ path = "../../LICENSE", hash = 0 }]
+
+[[licenses.clarify]]
+crate = "hq-convert"
+expression = "MIT"
+license-files = [{ path = "../../LICENSE", hash = 0 }]
+
+[[licenses.clarify]]
+crate = "hq-core"
+expression = "MIT"
+license-files = [{ path = "../../LICENSE", hash = 0 }]
+
+[[licenses.clarify]]
+crate = "hq-daemon"
+expression = "MIT"
+license-files = [{ path = "../../LICENSE", hash = 0 }]
+
+[[licenses.clarify]]
+crate = "hq-db"
+expression = "MIT"
+license-files = [{ path = "../../LICENSE", hash = 0 }]
+
+[[licenses.clarify]]
+crate = "hq-llm"
+expression = "MIT"
+license-files = [{ path = "../../LICENSE", hash = 0 }]
+
+[[licenses.clarify]]
+crate = "hq-mcp"
+expression = "MIT"
+license-files = [{ path = "../../LICENSE", hash = 0 }]
+
+[[licenses.clarify]]
+crate = "hq-memory"
+expression = "MIT"
+license-files = [{ path = "../../LICENSE", hash = 0 }]
+
+[[licenses.clarify]]
+crate = "hq-relay"
+expression = "MIT"
+license-files = [{ path = "../../LICENSE", hash = 0 }]
+
+[[licenses.clarify]]
+crate = "hq-tools"
+expression = "MIT"
+license-files = [{ path = "../../LICENSE", hash = 0 }]
+
+[[licenses.clarify]]
+crate = "hq-vault"
+expression = "MIT"
+license-files = [{ path = "../../LICENSE", hash = 0 }]
+
+[[licenses.clarify]]
+crate = "hq-web"
+expression = "MIT"
+license-files = [{ path = "../../LICENSE", hash = 0 }]
+
+[bans]
+multiple-versions = "allow"
+wildcards = "allow"
+
+[sources]
+unknown-registry = "deny"
+unknown-git = "deny"
+allow-registry = ["https://github.com/rust-lang/crates.io-index"]
+allow-git = []

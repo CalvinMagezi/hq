@@ -1,0 +1,23 @@
+target/
+.vault/
+.git/
+node_modules/
+*.db
+*.db-wal
+*.db-shm
+# apps/hq-desktop/src-tauri is a Cargo workspace member (see Cargo.toml) —
+# `cargo build -p hq-cli` still needs its manifest to resolve the workspace
+# graph even though it isn't built, so exclude the other apps/* dirs
+# individually instead of the whole apps/ tree.
+apps/hq-web/
+apps/hq-mobile/
+apps/hq-pty-agent/
+apps/hq-desktop/dist/
+apps/hq-desktop/node_modules/
+packages/
+web/node_modules/
+web/.next/
+bridges/
+.env
+.env.*
+Dockerfile.test

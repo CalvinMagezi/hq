@@ -1,0 +1,45 @@
+##
+# Reference VPS Caddyfile for the full stack (MCP endpoint + PWA control
+# center). Replace `your-domain.com` / `mcp.your-domain.com` with your own
+# domain. For just the MCP endpoint on a minimal deploy, see
+# Caddyfile.production instead.
+##
+
+{
+	servers {
+		protocols h1 h2
+	}
+}
+
+# Bare domain → MCP
+your-domain.com {
+	redir https://mcp.your-domain.com{uri} permanent
+}
+
+# MCP endpoint on the public internet, API key auth in headers. Only /mcp and
+# /health are proxied: /api and /ws run tool-using agent sessions and must stay
+# off the public host (same rule as Caddyfile.production).
+mcp.your-domain.com {
+	@mcp path /mcp
+	handle @mcp {
+		reverse_proxy 127.0.0.1:5678 {
+			flush_interval -1
+			transport http {
+				versions 1.1
+			}
+		}
+	}
+
+	@health path /health
+	handle @health {
+		reverse_proxy 127.0.0.1:5678
+	}
+
+	handle {
+		respond "Not found" 404
+	}
+}
+
+# HQ Web UI, Tailscale-only via `tailscale serve`. The site block lives in
+# Caddyfile.pwa so there is one copy of it.
+import Caddyfile.pwa

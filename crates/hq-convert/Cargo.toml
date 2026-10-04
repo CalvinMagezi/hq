@@ -1,0 +1,22 @@
+[package]
+name = "hq-convert"
+version.workspace = true
+edition.workspace = true
+description = "Bidirectional file conversion: any-format→Markdown (via transmutation) and Markdown→any-format (via pandoc)"
+
+[dependencies]
+thiserror = { workspace = true }
+tracing = { workspace = true }
+tokio = { workspace = true }
+serde = { workspace = true }
+serde_yaml = { workspace = true }
+dirs = { workspace = true }
+which = { workspace = true }
+
+# Inbound: any-format → Markdown (pure Rust, no Python)
+# 0.3.5 is the first release on lopdf 0.42+ and quick-xml 0.41+ (RUSTSEC-2026-0187, -0194, -0195).
+transmutation = { version = "0.3.5", features = ["office"] }
+tempfile = "3"
+
+[features]
+default = []

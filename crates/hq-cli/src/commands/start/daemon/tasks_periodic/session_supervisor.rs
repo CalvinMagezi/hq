@@ -1,0 +1,1534 @@
+//! Session supervisor: reconciles the harness_sessions registry against what
+//! Herdr reports every minute. It asks each host once, snapshots the screen of
+//! every live session, alerts when one blocks on a dialog, marks sessions whose
+//! agent is gone as exited, and surfaces transitions on the value bus so the
+//! operator hears about them on Telegram/Discord.
+//!
+//! A host that cannot be reached (a laptop that is asleep or off the tailnet)
+//! says nothing about its sessions, so they are skipped rather than marked
+//! exited. They are picked up again the moment the host answers.
+//!
+//! The value-bus FYI announces the exit but carries no output, which left the
+//! operator to ask what the session actually said. On the same transition the
+//! supervisor also posts the session's final output to the `relay` mailbox, so
+//! the platform bridges deliver the result without being asked. That output is
+//! the last screen snapshot taken while the agent was alive: Herdr cannot read
+//! a pane that no longer has an agent, so a session that dies before its first
+//! sweep has none.
+//!
+//! A session launched for an HQ task also records each transition on that task
+//! (`harness_session::mission`), right after the claim that makes it happen
+//! once, so the task stays the durable record across daemon restarts.
+//!
+//! A session a web chat watches (`owner_thread`) sends nothing to the relay or
+//! the value bus: each event becomes a durable wake on its row, and the web
+//! server's session driver posts it into that chat or drives the session.
+
+use anyhow::{Result, anyhow, bail};
+use hq_core::config::HqConfig;
+use hq_core::types::{ChatMessage, MailboxMessageType, MessageRole, ValueItem, ValueKind};
+use hq_db::Database;
+use hq_db::harness_sessions_registry as registry;
+use hq_tools::harness_session::mission::{self, Event};
+use hq_tools::harness_session::{Liveness, liveness, poll_hosts_with};
+use hq_tools::herdr::{AgentInfo, AgentStatus, HerdrHost};
+use std::collections::HashMap;
+use std::future::Future;
+use std::path::Path;
+use std::pin::Pin;
+use std::sync::Arc;
+use std::time::{Duration, Instant};
+
+/// Pane lines kept per stored snapshot.
+const SNAPSHOT_LINES: usize = 200;
+
+/// Ceiling on the output excerpt carried in the mailbox body.
+const MAX_TAIL_BYTES: usize = 3500;
+
+/// Delimiters around the raw excerpt. A markdown fence would be closed early by
+/// the first triple backtick the harness itself printed, and coding harnesses
+/// print those constantly.
+const OUTPUT_OPEN: &str = "----- session output -----";
+const OUTPUT_CLOSE: &str = "----- end session output -----";
+
+const SUMMARY_PROMPT: &str = "Summarize this coding-agent session output for the operator in 150 words or fewer: outcome (done/blocked/failed), key findings or changes, and open items. Output plain text, no markdown headers.";
+
+/// Total time one sweep may spend summarizing, across every session that exited
+/// in it. The daemon kills a fast-tier task at 30 seconds and drops the future;
+/// the exit is claimed before the summarizer runs, so the next sweep will not
+/// list that session again and an overrun loses its completion message for
+/// good. This budget is what keeps the sweep inside the task timeout no matter
+/// how many sessions ended at once.
+const SUMMARY_SWEEP_BUDGET: Duration = Duration::from_secs(20);
+
+/// Time the hosts get per sweep, on top of the summary budget. The task timeout
+/// is 30 seconds, so this and `SUMMARY_SWEEP_BUDGET` must stay under it
+/// together. A laptop that is asleep costs at most this much, not the ssh
+/// connect timeout per session.
+const HOST_SWEEP_BUDGET: Duration = Duration::from_secs(6);
+
+/// A host call always gets at least this, so an almost spent budget still lets
+/// a healthy local Herdr answer.
+const MIN_HOST_CALL: Duration = Duration::from_secs(1);
+
+/// Below this there is no point starting another summary: deliver the raw
+/// excerpt, which costs nothing, and let the remaining exits through.
+const MIN_SUMMARY_BUDGET: Duration = Duration::from_secs(3);
+
+type SummaryFuture = Pin<Box<dyn Future<Output = Result<String>> + Send>>;
+
+/// The exit summarizer, boxed so tests can drive the supervisor with a stub
+/// instead of an LLM. `None` means deliver the raw excerpt.
+pub type Summarizer = Arc<dyn Fn(String) -> SummaryFuture + Send + Sync>;
+
+/// Time a dismissal's re-read and key press get on the host.
+const DISMISS_HOST_TIMEOUT: Duration = Duration::from_secs(3);
+
+/// Screen lines quoted in a blocked-agent alert.
+const BLOCKED_EXCERPT_LINES: usize = 15;
+
+/// Resolves a registry host name to a Herdr host. Tests supply fakes.
+type HostResolver = Arc<dyn Fn(&str) -> Result<HerdrHost> + Send + Sync>;
+
+/// What the hosts said this sweep: who is alive, and each live session's screen.
+struct HostPhase {
+    polled: hq_tools::harness_session::HostPoll,
+    screens: HashMap<String, String>,
+}
+
+/// Every host call of a sweep, under one deadline. Blocking (ssh, subprocesses),
+/// so it runs on the blocking pool, and it finishes inside `budget` even when a
+/// host never answers; sessions it could not reach are treated as unknown.
+fn gather_hosts(
+    rows: &[registry::HarnessSessionRow],
+    resolve: &HostResolver,
+    budget: Duration,
+) -> HostPhase {
+    let deadline = Instant::now() + budget;
+    let within_budget = move |host: HerdrHost| {
+        host.with_command_timeout(
+            deadline
+                .saturating_duration_since(Instant::now())
+                .max(MIN_HOST_CALL),
+        )
+    };
+    let polled = poll_hosts_with(rows, |name| (resolve.as_ref())(name).map(within_budget));
+
+    let mut screens = HashMap::new();
+    for row in rows {
+        if !matches!(liveness(&polled, row), Liveness::Alive(_)) || Instant::now() >= deadline {
+            continue;
+        }
+        let read = (resolve.as_ref())(&row.host)
+            .map(within_budget)
+            .and_then(|host| Ok(host.read(&row.agent_name, SNAPSHOT_LINES)?));
+        match read {
+            Ok(raw) => {
+                screens.insert(row.id.clone(), clean_pty_text(&raw));
+            }
+            Err(e) => {
+                tracing::warn!(session = %row.id, error = %e, "session-supervisor: screen read failed");
+            }
+        }
+    }
+    HostPhase { polled, screens }
+}
+
+/// Drop ANSI escape sequences and stray control bytes.
+///
+/// Handles the three forms a harness TUI actually emits: CSI (colour, cursor,
+/// erase), OSC (window title, terminated by BEL or ST), and two-byte escapes
+/// such as charset selection.
+fn strip_ansi(s: &str) -> String {
+    let mut out = String::with_capacity(s.len());
+    let mut chars = s.chars().peekable();
+    while let Some(c) = chars.next() {
+        if c != '\x1b' {
+            if c == '\n' || c == '\t' || !c.is_control() {
+                out.push(c);
+            }
+            continue;
+        }
+        match chars.peek() {
+            Some('[') => {
+                chars.next();
+                while let Some(&next) = chars.peek() {
+                    chars.next();
+                    if next.is_ascii_alphabetic() {
+                        break;
+                    }
+                }
+            }
+            Some(']') => {
+                chars.next();
+                while let Some(&next) = chars.peek() {
+                    chars.next();
+                    if next == '\x07' {
+                        break;
+                    }
+                    if next == '\x1b' && chars.peek() == Some(&'\\') {
+                        chars.next();
+                        break;
+                    }
+                }
+            }
+            Some(_) => {
+                chars.next();
+            }
+            None => {}
+        }
+    }
+    out
+}
+
+/// Turn pty output into text a person can read: real newlines, no escapes, no
+/// leading or trailing blank screen.
+fn clean_pty_text(raw: &str) -> String {
+    let normalized = raw.replace("\r\n", "\n").replace('\r', "\n");
+    let lines: Vec<String> = normalized
+        .lines()
+        .map(|line| strip_ansi(line).trim_end().to_string())
+        .collect();
+    let start = lines
+        .iter()
+        .position(|l| !l.trim().is_empty())
+        .unwrap_or(lines.len());
+    let end = lines
+        .iter()
+        .rposition(|l| !l.trim().is_empty())
+        .map(|i| i + 1)
+        .unwrap_or(start);
+    lines[start..end].join("\n")
+}
+
+fn last_lines(text: &str, max_lines: usize) -> String {
+    let lines: Vec<&str> = text.lines().collect();
+    if lines.len() <= max_lines {
+        return text.to_string();
+    }
+    lines[lines.len() - max_lines..].join("\n")
+}
+
+/// Byte-safe excerpt keeping the *end* of the text: a harness writes its answer
+/// last, so trimming the front is what preserves the useful part. The cap is on
+/// bytes because that is what the delivery surfaces charge for, and the cut
+/// walks forward to a char boundary so multibyte output cannot panic or split.
+fn tail_excerpt(text: &str, max_bytes: usize) -> String {
+    if text.len() <= max_bytes {
+        return text.to_string();
+    }
+    let start = text.ceil_char_boundary(text.len() - max_bytes);
+    format!("…{}", &text[start..])
+}
+
+/// Cleaned final output for a session: the newest stored snapshot.
+fn final_output(db: &Arc<Database>, session_id: &str) -> Option<String> {
+    let id = session_id.to_string();
+    db.with_conn(move |c| registry::last_snapshot(c, &id))
+        .ok()
+        .flatten()
+        .map(|raw| clean_pty_text(&raw))
+        .filter(|text| !text.trim().is_empty())
+}
+
+/// Summarizer backed by the shared router. The `notification` alias is a scored
+/// pool with failover, and it errors rather than hangs when nothing is
+/// reachable, which is exactly what the raw-excerpt fallback needs.
+fn llm_summarizer(timeout_secs: u64) -> Summarizer {
+    Arc::new(move |text: String| -> SummaryFuture {
+        Box::pin(async move {
+            use hq_llm::LlmProvider;
+            let router = hq_llm::router::LlmRouter::from_env();
+            let request = hq_llm::provider::ChatRequest {
+                model: "notification".to_string(),
+                messages: vec![ChatMessage {
+                    image_parts: Vec::new(),
+                    role: MessageRole::User,
+                    content: format!("{SUMMARY_PROMPT}\n\n{text}"),
+                    tool_calls: vec![],
+                    tool_call_id: None,
+                    reasoning_content: None,
+                }],
+                ..Default::default()
+            };
+            let response =
+                tokio::time::timeout(Duration::from_secs(timeout_secs), router.chat(&request))
+                    .await
+                    .map_err(|_| anyhow!("summary timed out after {timeout_secs}s"))??;
+            let summary = response.message.content.trim().to_string();
+            if summary.is_empty() {
+                bail!("summary came back empty");
+            }
+            Ok(summary)
+        })
+    })
+}
+
+pub async fn run_session_supervisor(
+    vault_path: &Path,
+    db: &Database,
+    config: &HqConfig,
+) -> Result<()> {
+    let summarizer = summarizer_for(config);
+    let resolve: HostResolver = Arc::new(|name| hq_tools::herdr::host(Some(name)));
+    supervise(
+        vault_path,
+        db,
+        summarizer.as_ref(),
+        resolve,
+        HOST_SWEEP_BUDGET,
+    )
+    .await
+}
+
+fn summarizer_for(config: &HqConfig) -> Option<Summarizer> {
+    config
+        .relay
+        .summarize_session_exits
+        .then(|| llm_summarizer(config.relay.session_exit_summary_timeout_secs))
+}
+
+/// Store a live session's screen, keep its resume token current, and alert
+/// once when it blocks on a dialog.
+fn sweep_alive(
+    db: &Database,
+    vault_path: &Path,
+    row: &registry::HarnessSessionRow,
+    agent: &AgentInfo,
+    screen: &str,
+    dismissed: bool,
+) {
+    let db_arc = Arc::new(db.clone());
+    let (id, status) = (row.id.clone(), agent.status.as_str());
+    if let Err(e) = db.with_conn(move |c| registry::set_seen(c, &id, status)) {
+        tracing::warn!(session = %row.id, error = %e, "session-supervisor: status store failed");
+    }
+    if !screen.trim().is_empty() {
+        let _ = hq_tools::harness_session::harvest_resume_token(&db_arc, &row.id, screen);
+        let (id, snapshot) = (row.id.clone(), last_lines(screen, SNAPSHOT_LINES));
+        if let Err(e) = db.with_conn(move |c| registry::set_last_snapshot(c, &id, &snapshot)) {
+            tracing::warn!(session = %row.id, error = %e, "session-supervisor: snapshot store failed");
+        }
+    }
+    match agent.status {
+        // Only the survey's own block is silenced. A finished turn always alerts: it carries
+        // the driver's wake, and a state change after the keypress must not lose it.
+        AgentStatus::Blocked if dismissed => {}
+        AgentStatus::Blocked => alert_blocked(db, row, agent, screen),
+        AgentStatus::Done => alert_finished(db, vault_path, row, agent, screen),
+        _ => {}
+    }
+}
+
+/// Answer a known harmless prompt (Claude Code's feedback survey) in a Drive-on session with a
+/// fixed key. Observe-only sessions are never typed into. True when a key was sent, so the
+/// caller does not alert about a prompt that is already gone.
+async fn dismiss_survey(
+    db: &Database,
+    row: &registry::HarnessSessionRow,
+    screen: &str,
+    working: bool,
+    resolve: &HostResolver,
+) -> bool {
+    use hq_tools::harness_session::dismiss::{Outcome, PressError, dismiss_known_prompt};
+    if working || !row.drive || row.owner_thread.is_none() || screen.is_empty() {
+        return false;
+    }
+    let (db2, row2, screen2, resolve2) =
+        (db.clone(), row.clone(), screen.to_string(), resolve.clone());
+    let outcome = tokio::task::spawn_blocking(move || {
+        let host =
+            (resolve2.as_ref())(&row2.host).map(|h| h.with_command_timeout(DISMISS_HOST_TIMEOUT));
+        let (reread_host, press_host) = (host.as_ref().ok().cloned(), host.as_ref().ok().cloned());
+        let target = row2.agent_name.clone();
+        let reread_target = target.clone();
+        dismiss_known_prompt(
+            &db2,
+            &row2,
+            &screen2,
+            working,
+            move || {
+                let raw = reread_host?.read(&reread_target, SNAPSHOT_LINES).ok()?;
+                Some(clean_pty_text(&raw))
+            },
+            move |keys| {
+                let host = press_host.ok_or(PressError::NotSent)?;
+                host.send_keys(&target, keys).map_err(|e| {
+                    // An answer from Herdr means it refused the keys; silence or a lost
+                    // connection may still have delivered them.
+                    if e.is_unreachable() { PressError::MaybeSent } else { PressError::NotSent }
+                })
+            },
+        )
+    })
+    .await
+    .unwrap_or(Outcome::Untouched);
+    match outcome {
+        Outcome::Dismissed { first } => {
+            tracing::info!(session = %row.id, "session-supervisor: dismissed the feedback survey");
+            if first {
+                record_on_task(db, row, Event::PromptDismissed);
+            }
+            true
+        }
+        Outcome::CapReached => {
+            notify_dismiss_cap(db, row, "showed the same known prompt more than the allowed number of times");
+            false
+        }
+        Outcome::Stuck => {
+            notify_dismiss_cap(db, row, "kept showing a known prompt that did not close after the key was sent");
+            false
+        }
+        Outcome::Failed | Outcome::Untouched => false,
+    }
+}
+
+/// Fixed text, never screen text: the harness keeps showing a prompt HQ keeps dismissing.
+fn notify_dismiss_cap(db: &Database, row: &registry::HarnessSessionRow, why: &str) {
+    let item = ValueItem::new(
+        "session-supervisor",
+        ValueKind::ActionNeeded,
+        format!("Harness session '{}' keeps showing a prompt", session_label(row)),
+        format!(
+            "Session {} on {} {why}. HQ stopped dismissing it automatically (at most {} keys per session). Read it with `harness_session_logs` and clear it by hand.",
+            row.id,
+            row.host,
+            registry::DISMISSAL_CAP
+        ),
+    )
+    .with_dedup_key(format!("session-dismiss-cap-{}", row.id));
+    let _ = hq_db::value_items::emit(db, &item);
+}
+
+/// An agent that finished its turn and sits waiting for the next instruction
+/// never exits, so without this the operator would only hear about it when the
+/// session is eventually stopped. Herdr reports `done` for a finished turn no
+/// one has looked at yet.
+fn alert_finished(
+    db: &Database,
+    vault_path: &Path,
+    row: &registry::HarnessSessionRow,
+    agent: &AgentInfo,
+    screen: &str,
+) {
+    let (id, seq) = (row.id.clone(), agent.state_change_seq);
+    match db.with_conn(move |c| registry::claim_state_alert(c, &id, seq)) {
+        Ok(true) => {}
+        _ => return,
+    }
+    let link = record_on_task(db, row, Event::Finished);
+    if hand_to_chat(db, row, WAKE_FINISHED) {
+        return;
+    }
+    let label = session_label(row);
+    let excerpt = tail_excerpt(screen, MAX_TAIL_BYTES);
+    let task_line = task_line(link.as_ref());
+    let body = format!(
+        "Session {} on {} finished its task and is waiting for the next instruction.\n{OUTPUT_OPEN}\n{excerpt}\n{OUTPUT_CLOSE}\nGive it more work with `harness_session_send`, or end it with `harness_session_stop`.{task_line}",
+        row.id,
+        row.host,
+    );
+    post_relay_nudge(
+        vault_path,
+        &row.id,
+        &format!("Harness session '{label}' finished its task"),
+        &body,
+        false,
+    );
+    tracing::info!(session = %row.id, host = %row.host, "session-supervisor: agent finished, alert sent");
+}
+
+/// Untagged, so the notification gate sends it to the digest: a finished
+/// session is a status update (FR-001 criterion 3). `interrupt` is for the few
+/// that need the operator now; a session blocked on a dialog alerts through
+/// `alert_blocked` instead.
+fn post_relay_nudge(vault_path: &Path, session_id: &str, subject: &str, body: &str, interrupt: bool) {
+    let mut msg = hq_core::mailbox::new_message(
+        "session-supervisor",
+        "relay",
+        MailboxMessageType::Nudge,
+        Some(subject),
+        body,
+        None,
+    );
+    if interrupt {
+        msg.meta
+            .insert(hq_core::mailbox::META_INTERRUPT.to_string(), "true".to_string());
+    }
+    if let Err(e) = hq_core::mailbox::send_message(vault_path, &msg) {
+        tracing::warn!(session = %session_id, error = %e, "session-supervisor: relay mailbox post failed");
+    }
+}
+
+fn alert_blocked(
+    db: &Database,
+    row: &registry::HarnessSessionRow,
+    agent: &AgentInfo,
+    screen: &str,
+) {
+    let (id, seq) = (row.id.clone(), agent.state_change_seq);
+    match db.with_conn(move |c| registry::claim_state_alert(c, &id, seq)) {
+        Ok(true) => {}
+        _ => return,
+    }
+    let link = record_on_task(db, row, Event::Blocked);
+    if hand_to_chat(db, row, WAKE_BLOCKED) {
+        badge_web_inbox(db, row, seq);
+        return;
+    }
+    let label = session_label(row);
+    let excerpt = last_lines(screen, BLOCKED_EXCERPT_LINES);
+    let task_line = task_line(link.as_ref());
+    let item = ValueItem::new(
+        "session-supervisor",
+        ValueKind::ActionNeeded,
+        format!("Harness session '{label}' is waiting for you"),
+        format!(
+            "Session {} on {} is blocked on a prompt or approval:\n{OUTPUT_OPEN}\n{excerpt}\n{OUTPUT_CLOSE}\nRead it with `harness_session_logs`, answer with `harness_session_send` (text, or `keys` such as down and enter).{task_line}",
+            row.id, row.host
+        ),
+    )
+    .with_dedup_key(format!("session-blocked-{}-{seq}", row.id));
+    let _ = hq_db::value_items::emit(db, &item);
+    tracing::info!(session = %row.id, host = %row.host, "session-supervisor: agent blocked, alert sent");
+}
+
+/// Record `event` on the session's HQ task. Logged, never raised: one broken
+/// task must not end the sweep for every other session.
+fn record_on_task(
+    db: &Database,
+    row: &registry::HarnessSessionRow,
+    event: Event,
+) -> Option<mission::TaskLink> {
+    db.with_conn(|c| mission::record(c, row, event))
+        .inspect_err(|e| tracing::warn!(session = %row.id, error = %e, "session-supervisor: task update failed"))
+        .ok()
+        .flatten()
+}
+
+const WAKE_FINISHED: &str = "finished";
+const WAKE_BLOCKED: &str = "blocked";
+const WAKE_EXITED: &str = "exited";
+
+/// For a session a web chat watches, leave the event as a durable wake for the
+/// web driver and report true, so the caller sends nothing to the relay.
+fn hand_to_chat(db: &Database, row: &registry::HarnessSessionRow, reason: &str) -> bool {
+    if row.owner_thread.is_none() {
+        return false;
+    }
+    match db.with_conn(|c| registry::set_wake(c, &row.id, reason)) {
+        Ok(woke) => woke,
+        Err(e) => {
+            tracing::warn!(session = %row.id, error = %e, "session-supervisor: chat wake failed, using the relay");
+            false
+        }
+    }
+}
+
+/// A chat-watched session that blocks may sit unseen in a chat no one has
+/// open, so it also gets a web-only inbox item, which badges the app.
+fn badge_web_inbox(db: &Database, row: &registry::HarnessSessionRow, seq: u64) {
+    let item = ValueItem::new(
+        WEB_INBOX_SOURCE,
+        ValueKind::ActionNeeded,
+        format!("Harness session '{}' needs an answer", session_label(row)),
+        format!(
+            "Session {} on {} is waiting at a prompt. Its chat has the details.",
+            row.id, row.host
+        ),
+    )
+    .with_dedup_key(format!("session-blocked-{}-{seq}", row.id));
+    let _ = hq_db::value_items::emit(db, &item);
+}
+
+/// Must stay in `hq_daemon::value_bus::WEB_ONLY_SOURCES`, so it never reaches the relay.
+const WEB_INBOX_SOURCE: &str = "session_chat";
+
+/// The line that tells the operator where the linked task now stands.
+fn task_line(link: Option<&mission::TaskLink>) -> String {
+    link.map_or_else(String::new, |l| {
+        format!("\nTask {} is {}.", l.display_id, l.status.replace('_', " "))
+    })
+}
+
+/// An exit that just left the linked task blocked means work stopped with no
+/// one on it: that interrupts. Every other exit is a status update.
+fn exit_interrupts(link: Option<&mission::TaskLink>) -> bool {
+    link.is_some_and(|l| l.moved && l.status == hq_db::tasks::STATUS_BLOCKED)
+}
+
+fn session_label(row: &registry::HarnessSessionRow) -> String {
+    if row.label.is_empty() {
+        row.harness.clone()
+    } else {
+        format!("{} ({})", row.label, row.harness)
+    }
+}
+
+async fn supervise(
+    vault_path: &Path,
+    db: &Database,
+    summarizer: Option<&Summarizer>,
+    resolve: HostResolver,
+    host_budget: Duration,
+) -> Result<()> {
+    let db_arc = Arc::new(db.clone());
+    let running = db.with_conn(|c| registry::list(c, Some(registry::STATUS_RUNNING), 100))?;
+    let (rows, resolver) = (running.clone(), resolve.clone());
+    let phase =
+        tokio::task::spawn_blocking(move || gather_hosts(&rows, &resolver, host_budget)).await?;
+    // Started after the host phase so a slow host cannot spend the summaries' time.
+    let summary_deadline = Instant::now() + SUMMARY_SWEEP_BUDGET;
+
+    for row in running {
+        match liveness(&phase.polled, &row) {
+            Liveness::HostUnreachable(detail) => {
+                tracing::debug!(session = %row.id, host = %row.host, %detail, "session-supervisor: host unreachable, session left as is");
+                continue;
+            }
+            Liveness::Alive(agent) => {
+                let screen = phase.screens.get(&row.id).map_or("", String::as_str);
+                let dismissed = dismiss_survey(
+                    db,
+                    &row,
+                    screen,
+                    matches!(agent.status, AgentStatus::Working),
+                    &resolve,
+                )
+                .await;
+                sweep_alive(db, vault_path, &row, &agent, screen, dismissed);
+                continue;
+            }
+            Liveness::Gone => {}
+        }
+
+        // Claim the transition inside the UPDATE. Two overlapping sweeps would
+        // otherwise both see `running` and both notify.
+        let id = row.id.clone();
+        if !db.with_conn(move |c| registry::set_status_exited_if_running(c, &id))? {
+            continue;
+        }
+        let token = row.resume_token.clone();
+        tracing::info!(session = %row.id, harness = %row.harness, "session-supervisor: marked exited");
+        // Before the summarizer: the daemon may kill this sweep at its timeout,
+        // and the claim above means no later sweep would record the exit.
+        let link = record_on_task(db, &row, Event::Exited);
+        if hand_to_chat(db, &row, WAKE_EXITED) {
+            continue;
+        }
+        let task_line = task_line(link.as_ref());
+
+        let label = session_label(&row);
+        let item = ValueItem::new(
+            "session-supervisor",
+            ValueKind::Fyi,
+            format!("Harness session '{label}' ended"),
+            format!(
+                "Session {} exited.{} `harness_session_logs` shows its last screen; `harness_session_resume` continues it.",
+                row.id,
+                if token.is_some() {
+                    " Resume token saved."
+                } else {
+                    ""
+                }
+            ),
+        )
+        .with_dedup_key(format!("session-exit-{}", row.id));
+        let _ = hq_db::value_items::emit(db, &item);
+
+        let output = final_output(&db_arc, &row.id);
+        // Two limits, different jobs: the summarizer caps a single call at the
+        // configured timeout, and what is left of the sweep budget caps how
+        // long this exit may hold up the ones behind it.
+        let budget_left = summary_deadline.saturating_duration_since(Instant::now());
+        let summary = match (summarizer, &output) {
+            (Some(summarize), Some(text)) if budget_left >= MIN_SUMMARY_BUDGET => {
+                let call = (**summarize)(tail_excerpt(text, MAX_TAIL_BYTES));
+                match tokio::time::timeout(budget_left, call).await {
+                    Ok(Ok(summary)) => Some(summary),
+                    Ok(Err(e)) => {
+                        tracing::warn!(session = %row.id, error = %e, "session-supervisor: summary failed, sending raw output");
+                        None
+                    }
+                    Err(_) => {
+                        tracing::warn!(session = %row.id, "session-supervisor: sweep summary budget spent, sending raw output");
+                        None
+                    }
+                }
+            }
+            _ => None,
+        };
+        let output_block = match (summary, output) {
+            (Some(summary), _) => summary,
+            (None, Some(text)) => format!(
+                "Final output:\n{OUTPUT_OPEN}\n{}\n{OUTPUT_CLOSE}",
+                tail_excerpt(&text, MAX_TAIL_BYTES)
+            ),
+            (None, None) => "Final output: no output was captured for this session.".to_string(),
+        };
+
+        let subject = format!("Harness session '{label}' finished");
+        let body = format!(
+            "{output_block}\n\nSession `{}` ({}) exited. Resume token {}.\nContinue it with `harness_session_resume` on session `{}`.{task_line}",
+            row.id,
+            row.harness,
+            if token.is_some() {
+                "saved"
+            } else {
+                "not found"
+            },
+            row.id
+        );
+        post_relay_nudge(vault_path, &row.id, &subject, &body, exit_interrupts(link.as_ref()));
+    }
+
+    Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use hq_core::config::{HerdrConfig, LOCAL_HOST};
+    use std::os::unix::fs::PermissionsExt;
+    use std::path::PathBuf;
+
+    /// A pane redraw as a terminal would have logged it: cursor hiding, screen
+    /// erase, an OSC title, colour runs, and carriage returns between rows.
+    const ANSI_SAMPLE: &str = "\x1b[?25l\x1b[2J\x1b[H\x1b]0;osc-window-title\x07\r\x1b[38;5;242m> working\x1b[0m\r\n\x1b[1mFINAL ANSWER: 42\x1b[0m\r\n\x1b[?25h";
+
+    /// A Herdr host whose `agent list` reports `agents` and whose `agent read`
+    /// prints `screen`.
+    fn fake_host(dir: &Path, agents: &[(&str, &str, u64)], screen: &str) -> HerdrHost {
+        let list: Vec<String> = agents
+            .iter()
+            .map(|(name, status, seq)| {
+                format!(
+                    r#"{{"agent":"claude","agent_status":"{status}","cwd":"/tmp","name":"{name}","pane_id":"w1:p1","workspace_id":"w1","state_change_seq":{seq}}}"#
+                )
+            })
+            .collect();
+        let script = format!(
+            "#!/bin/sh\ncase \"$*\" in\n  *\"agent list\"*) printf '%s' '{{\"id\":\"x\",\"result\":{{\"agents\":[{}]}}}}' ;;\n  *\"agent read\"*) printf '%s' '{}' ;;\n  *) exit 2 ;;\nesac\n",
+            list.join(","),
+            screen.replace('\'', "")
+        );
+        let path = dir.join("herdr");
+        std::fs::write(&path, script).unwrap();
+        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o755)).unwrap();
+        let cfg = HerdrConfig {
+            binary: path.to_string_lossy().to_string(),
+            ..HerdrConfig::default()
+        };
+        HerdrHost::from_config(&cfg, LOCAL_HOST).unwrap()
+    }
+
+    fn gone_host(dir: &Path) -> HerdrHost {
+        fake_host(dir, &[], "")
+    }
+
+    fn seed(db: &Database, id: &str) {
+        seed_for(db, id, None);
+    }
+
+    /// An in-progress HQ task, FR-001, with one session working on it.
+    fn seed_with_task(db: &Database, id: &str) -> String {
+        use hq_db::tasks as t;
+        let task = db
+            .with_conn(|c| {
+                c.execute(
+                    "INSERT INTO initiatives (id, space_id, name, slug, id_prefix) VALUES ('in-1', 'personal', 'Work', 'work', 'FR')",
+                    [],
+                )?;
+                let new = t::NewTask {
+                    title: "durable missions",
+                    created_by: "test",
+                    ..Default::default()
+                };
+                let task = t::create_task(c, "tk-1", "in-1", &new)?;
+                let patch = t::TaskPatch {
+                    status: Some(t::STATUS_IN_PROGRESS.into()),
+                    ..Default::default()
+                };
+                t::update_task(c, &task.id, &patch, None)?;
+                Ok(task.id)
+            })
+            .unwrap();
+        seed_for(db, id, Some(&task));
+        task
+    }
+
+    fn task_state(db: &Database, task: &str) -> (String, usize) {
+        db.with_conn(|c| {
+            let status = hq_db::tasks::get_task(c, task)?.unwrap().status;
+            Ok((status, hq_db::tasks::list_comments(c, task)?.len()))
+        })
+        .unwrap()
+    }
+
+    fn seed_for(db: &Database, id: &str, mission: Option<&str>) {
+        let id = id.to_string();
+        db.with_conn(move |c| {
+            registry::insert(
+                c,
+                &registry::NewSession {
+                    id: &id,
+                    harness: "claude-code",
+                    label: "auth refactor",
+                    cwd: "/tmp",
+                    mission_id: mission,
+                    placement: registry::Placement {
+                        host: "local",
+                        agent_name: &id,
+                        workspace_id: "w1",
+                        pane_id: "w1:p1",
+                    },
+                },
+            )
+        })
+        .unwrap();
+    }
+
+    fn store_snapshot(db: &Database, id: &str, snapshot: &str) {
+        let (id, snapshot) = (id.to_string(), snapshot.to_string());
+        db.with_conn(move |c| registry::set_last_snapshot(c, &id, &snapshot))
+            .unwrap();
+    }
+
+    fn mailbox_dir(vault: &Path) -> PathBuf {
+        vault.join(hq_core::mailbox::MAILBOX_DIR).join("relay")
+    }
+
+    fn mailbox_files(vault: &Path) -> Vec<String> {
+        std::fs::read_dir(mailbox_dir(vault))
+            .map(|rd| {
+                rd.filter_map(|e| e.ok())
+                    .map(|e| e.file_name().to_string_lossy().to_string())
+                    .filter(|n| n.ends_with(".json"))
+                    .collect()
+            })
+            .unwrap_or_default()
+    }
+
+    fn only_message(vault: &Path) -> String {
+        let files = mailbox_files(vault);
+        assert_eq!(files.len(), 1, "expected one relay message, got {files:?}");
+        std::fs::read_to_string(mailbox_dir(vault).join(&files[0])).unwrap()
+    }
+
+    /// The message body as the operator receives it, unescaped from the JSON.
+    fn only_body(vault: &Path) -> String {
+        let raw = only_message(vault);
+        let value: serde_json::Value = serde_json::from_str(&raw).unwrap();
+        value
+            .get("content")
+            .and_then(|c| c.as_str())
+            .unwrap()
+            .to_string()
+    }
+
+    /// Summarizer stub. `Ok` text is delivered as the summary, `Err` forces the
+    /// raw-excerpt fallback. No LLM is reachable from a test.
+    fn stub_summarizer(outcome: std::result::Result<&'static str, &'static str>) -> Summarizer {
+        Arc::new(move |_text: String| -> SummaryFuture {
+            Box::pin(async move {
+                match outcome {
+                    Ok(summary) => Ok(summary.to_string()),
+                    Err(e) => bail!("{e}"),
+                }
+            })
+        })
+    }
+
+    /// The production budget is sized for a real sweep. A loaded test machine
+    /// can take longer than that to fork the fake host's shell, which reads as
+    /// an unreachable host and posts nothing, so behaviour tests get room.
+    const TEST_HOST_BUDGET: Duration = Duration::from_secs(60);
+
+    async fn sweep(vault: &Path, db: &Database, host: &HerdrHost, s: Option<&Summarizer>) {
+        let host = host.clone();
+        let resolve: HostResolver = Arc::new(move |_| Ok(host.clone()));
+        supervise(vault, db, s, resolve, TEST_HOST_BUDGET)
+            .await
+            .unwrap();
+    }
+
+    fn status_of(db: &Database, id: &str) -> String {
+        let id = id.to_string();
+        db.with_conn(move |c| registry::get(c, &id))
+            .unwrap()
+            .unwrap()
+            .status
+    }
+
+    #[tokio::test]
+    async fn dead_session_posts_final_output_to_relay() {
+        let tmp = tempfile::tempdir().unwrap();
+        let db = Database::open_memory().unwrap();
+        seed(&db, "hs-dead");
+        // Backticks in the output are what a markdown fence would choke on.
+        store_snapshot(
+            &db,
+            "hs-dead",
+            "```rust\nfn main() {}\n```\nFINAL ANSWER: 42\n",
+        );
+
+        sweep(tmp.path(), &db, &gone_host(tmp.path()), None).await;
+
+        assert_eq!(status_of(&db, "hs-dead"), registry::STATUS_EXITED);
+        let msg = only_message(tmp.path());
+        assert!(msg.contains("hs-dead"));
+        assert!(msg.contains("FINAL ANSWER: 42"));
+        assert!(msg.contains("harness_session_resume"));
+        assert!(msg.contains(OUTPUT_OPEN));
+        assert!(msg.contains(OUTPUT_CLOSE));
+    }
+
+    #[tokio::test]
+    async fn second_sweep_sends_nothing_more() {
+        let tmp = tempfile::tempdir().unwrap();
+        let db = Database::open_memory().unwrap();
+        seed(&db, "hs-once");
+        store_snapshot(&db, "hs-once", "done");
+        let host = gone_host(tmp.path());
+
+        sweep(tmp.path(), &db, &host, None).await;
+        sweep(tmp.path(), &db, &host, None).await;
+
+        assert_eq!(mailbox_files(tmp.path()).len(), 1);
+    }
+
+    #[tokio::test]
+    async fn a_session_that_died_before_any_snapshot_still_notifies() {
+        let tmp = tempfile::tempdir().unwrap();
+        let db = Database::open_memory().unwrap();
+        seed(&db, "hs-nosnap");
+
+        sweep(tmp.path(), &db, &gone_host(tmp.path()), None).await;
+
+        let body = only_body(tmp.path());
+        assert!(body.contains("hs-nosnap"));
+        assert!(body.contains("no output was captured for this session"));
+    }
+
+    #[tokio::test]
+    async fn ansi_dense_snapshot_is_delivered_clean() {
+        let tmp = tempfile::tempdir().unwrap();
+        let db = Database::open_memory().unwrap();
+        seed(&db, "hs-ansi");
+        store_snapshot(&db, "hs-ansi", ANSI_SAMPLE);
+
+        sweep(tmp.path(), &db, &gone_host(tmp.path()), None).await;
+
+        let body = only_body(tmp.path());
+        assert!(body.contains("FINAL ANSWER: 42"));
+        assert!(body.contains("> working"));
+        assert!(!body.contains('\x1b'), "escape survived: {body:?}");
+        assert!(!body.contains('\r'), "carriage return survived: {body:?}");
+        assert!(!body.contains("[0m"));
+        assert!(
+            !body.contains("osc-window-title"),
+            "OSC title survived: {body:?}"
+        );
+    }
+
+    #[tokio::test]
+    async fn alive_session_is_snapshotted_not_reported() {
+        let tmp = tempfile::tempdir().unwrap();
+        let db = Database::open_memory().unwrap();
+        seed(&db, "hs-alive");
+        let host = fake_host(tmp.path(), &[("hs-alive", "working", 3)], "PANE-READY");
+
+        sweep(tmp.path(), &db, &host, None).await;
+
+        assert_eq!(status_of(&db, "hs-alive"), registry::STATUS_RUNNING);
+        assert!(mailbox_files(tmp.path()).is_empty());
+        let snapshot = db
+            .with_conn(|c| registry::last_snapshot(c, "hs-alive"))
+            .unwrap()
+            .unwrap_or_default();
+        assert!(snapshot.contains("PANE-READY"));
+    }
+
+    #[tokio::test]
+    async fn an_unreachable_host_leaves_its_sessions_running() {
+        let tmp = tempfile::tempdir().unwrap();
+        let db = Database::open_memory().unwrap();
+        seed(&db, "hs-away");
+        store_snapshot(&db, "hs-away", "last known screen");
+
+        let resolve: HostResolver = Arc::new(|name| bail!("host '{name}' unreachable: no route"));
+        supervise(tmp.path(), &db, None, resolve, HOST_SWEEP_BUDGET)
+            .await
+            .unwrap();
+
+        assert_eq!(status_of(&db, "hs-away"), registry::STATUS_RUNNING);
+        assert!(
+            mailbox_files(tmp.path()).is_empty(),
+            "laptop asleep is not an exit"
+        );
+    }
+
+    #[tokio::test]
+    async fn a_host_that_never_answers_is_cut_off_at_the_host_budget() {
+        let tmp = tempfile::tempdir().unwrap();
+        let db = Database::open_memory().unwrap();
+        seed(&db, "hs-hung");
+        let path = tmp.path().join("herdr");
+        std::fs::write(&path, "#!/bin/sh\nsleep 30\n").unwrap();
+        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o755)).unwrap();
+        let cfg = HerdrConfig {
+            binary: path.to_string_lossy().to_string(),
+            command_timeout_secs: 30,
+            ..HerdrConfig::default()
+        };
+        let hung = HerdrHost::from_config(&cfg, LOCAL_HOST).unwrap();
+        let resolve: HostResolver = Arc::new(move |_| Ok(hung.clone()));
+
+        let started = Instant::now();
+        supervise(tmp.path(), &db, None, resolve, Duration::from_millis(500))
+            .await
+            .unwrap();
+
+        assert!(
+            started.elapsed() < Duration::from_secs(8),
+            "a hung host held the sweep for {:?}",
+            started.elapsed()
+        );
+        assert_eq!(status_of(&db, "hs-hung"), registry::STATUS_RUNNING);
+        assert!(mailbox_files(tmp.path()).is_empty());
+    }
+
+    fn alert_count(db: &Database) -> i64 {
+        db.with_conn(|c| {
+            Ok(c.query_row(
+                "SELECT COUNT(*) FROM value_items WHERE dedup_key LIKE 'session-blocked-%'",
+                [],
+                |r| r.get::<_, i64>(0),
+            )?)
+        })
+        .unwrap()
+    }
+
+    #[tokio::test]
+    async fn a_blocked_agent_alerts_once_until_its_state_changes() {
+        let tmp = tempfile::tempdir().unwrap();
+        let db = Database::open_memory().unwrap();
+        seed(&db, "hs-blocked");
+        let blocked = fake_host(
+            tmp.path(),
+            &[("hs-blocked", "blocked", 4)],
+            "Do you want to proceed?",
+        );
+
+        sweep(tmp.path(), &db, &blocked, None).await;
+        sweep(tmp.path(), &db, &blocked, None).await;
+        assert_eq!(alert_count(&db), 1, "same block must not re-alert");
+        assert_eq!(status_of(&db, "hs-blocked"), registry::STATUS_RUNNING);
+
+        let blocked_again = fake_host(
+            tmp.path(),
+            &[("hs-blocked", "blocked", 9)],
+            "Approve the edit?",
+        );
+        sweep(tmp.path(), &db, &blocked_again, None).await;
+        assert_eq!(alert_count(&db), 2, "a new block is a new alert");
+    }
+
+    #[tokio::test]
+    async fn a_finished_agent_alerts_once_and_stays_running() {
+        let tmp = tempfile::tempdir().unwrap();
+        let db = Database::open_memory().unwrap();
+        seed(&db, "hs-done");
+        let done = fake_host(
+            tmp.path(),
+            &[("hs-done", "done", 6)],
+            "All tests pass. Nothing left to do.",
+        );
+
+        sweep(tmp.path(), &db, &done, None).await;
+        sweep(tmp.path(), &db, &done, None).await;
+
+        let body = only_body(tmp.path());
+        assert!(body.contains("finished its task"), "{body}");
+        assert!(body.contains("All tests pass"), "{body}");
+        let msg: serde_json::Value = serde_json::from_str(&only_message(tmp.path())).unwrap();
+        assert!(
+            msg["meta"].get(hq_core::mailbox::META_INTERRUPT).is_none(),
+            "a finished turn goes to the digest, not an interrupt: {msg}"
+        );
+        assert_eq!(status_of(&db, "hs-done"), registry::STATUS_RUNNING);
+
+        let idle = fake_host(tmp.path(), &[("hs-done", "idle", 6)], "");
+        sweep(tmp.path(), &db, &idle, None).await;
+        assert_eq!(mailbox_files(tmp.path()).len(), 1, "idle is not an alert");
+    }
+
+    #[tokio::test]
+    async fn an_exit_is_recorded_on_the_task_once_across_sweeps() {
+        let tmp = tempfile::tempdir().unwrap();
+        let db = Database::open_memory().unwrap();
+        let task = seed_with_task(&db, "hs-task");
+        store_snapshot(&db, "hs-task", "panic: boom");
+        let host = gone_host(tmp.path());
+
+        // The second sweep stands in for a daemon restart re-reading the registry.
+        sweep(tmp.path(), &db, &host, None).await;
+        sweep(tmp.path(), &db, &host, None).await;
+
+        assert_eq!(task_state(&db, &task), (hq_db::tasks::STATUS_BLOCKED.into(), 1));
+        let body = only_body(tmp.path());
+        assert!(body.contains("Task FR-001 is blocked"), "{body}");
+        assert!(interrupts(tmp.path()), "stopped work on a task is a blocker, not digest news");
+    }
+
+    fn interrupts(vault: &Path) -> bool {
+        let msg: serde_json::Value = serde_json::from_str(&only_message(vault)).unwrap();
+        msg["meta"].get(hq_core::mailbox::META_INTERRUPT).is_some()
+    }
+
+    #[tokio::test]
+    async fn an_exit_without_a_task_stays_a_digest_update() {
+        let tmp = tempfile::tempdir().unwrap();
+        let db = Database::open_memory().unwrap();
+        seed(&db, "hs-plain");
+
+        sweep(tmp.path(), &db, &gone_host(tmp.path()), None).await;
+
+        assert!(!interrupts(tmp.path()));
+    }
+
+    #[tokio::test]
+    async fn routine_sweeps_of_a_working_task_session_notify_nothing() {
+        let tmp = tempfile::tempdir().unwrap();
+        let db = Database::open_memory().unwrap();
+        let task = seed_with_task(&db, "hs-busy");
+        let working = fake_host(tmp.path(), &[("hs-busy", "working", 2)], "editing files");
+
+        for _ in 0..3 {
+            sweep(tmp.path(), &db, &working, None).await;
+        }
+
+        assert!(mailbox_files(tmp.path()).is_empty());
+        assert_eq!(alert_count(&db), 0);
+        assert_eq!(task_state(&db, &task), (hq_db::tasks::STATUS_IN_PROGRESS.into(), 0));
+    }
+
+    #[tokio::test]
+    async fn an_unreachable_host_leaves_the_task_untouched() {
+        let tmp = tempfile::tempdir().unwrap();
+        let db = Database::open_memory().unwrap();
+        let task = seed_with_task(&db, "hs-laptop");
+
+        let resolve: HostResolver = Arc::new(|name| bail!("host '{name}' unreachable: no route"));
+        supervise(tmp.path(), &db, None, resolve, HOST_SWEEP_BUDGET)
+            .await
+            .unwrap();
+
+        assert_eq!(task_state(&db, &task), (hq_db::tasks::STATUS_IN_PROGRESS.into(), 0));
+    }
+
+    #[tokio::test]
+    async fn a_finished_turn_puts_the_task_up_for_review_not_complete() {
+        let tmp = tempfile::tempdir().unwrap();
+        let db = Database::open_memory().unwrap();
+        let task = seed_with_task(&db, "hs-review");
+        let done = fake_host(tmp.path(), &[("hs-review", "done", 3)], "All tests pass.");
+
+        sweep(tmp.path(), &db, &done, None).await;
+        sweep(tmp.path(), &db, &done, None).await;
+
+        assert_eq!(
+            task_state(&db, &task),
+            (hq_db::tasks::STATUS_READY_FOR_REVIEW.into(), 1)
+        );
+        assert!(only_body(tmp.path()).contains("Task FR-001 is ready for review"));
+        assert!(!interrupts(tmp.path()), "a finished turn is a digest update");
+    }
+
+    #[tokio::test]
+    async fn a_task_session_blocked_on_a_dialog_raises_one_action_item() {
+        let tmp = tempfile::tempdir().unwrap();
+        let db = Database::open_memory().unwrap();
+        let task = seed_with_task(&db, "hs-ask");
+        let blocked = fake_host(tmp.path(), &[("hs-ask", "blocked", 7)], "Approve the edit?");
+
+        sweep(tmp.path(), &db, &blocked, None).await;
+        sweep(tmp.path(), &db, &blocked, None).await;
+
+        assert_eq!(alert_count(&db), 1);
+        let body: String = db
+            .with_conn(|c| {
+                Ok(c.query_row(
+                    "SELECT body FROM value_items WHERE dedup_key LIKE 'session-blocked-%'",
+                    [],
+                    |r| r.get(0),
+                )?)
+            })
+            .unwrap();
+        assert!(body.contains("Task FR-001 is in progress"), "{body}");
+        assert_eq!(task_state(&db, &task), (hq_db::tasks::STATUS_IN_PROGRESS.into(), 1));
+    }
+
+    fn watch_from_chat(db: &Database, id: &str) {
+        db.with_conn(|c| registry::set_owner(c, id, Some("th-web"))).unwrap();
+    }
+
+    fn row_of(db: &Database, id: &str) -> registry::HarnessSessionRow {
+        db.with_conn(|c| registry::get(c, id)).unwrap().unwrap()
+    }
+
+    fn value_item_count(db: &Database) -> i64 {
+        db.with_conn(|c| Ok(c.query_row("SELECT COUNT(*) FROM value_items", [], |r| r.get::<_, i64>(0))?))
+            .unwrap()
+    }
+
+    #[tokio::test]
+    async fn a_watched_session_wakes_its_chat_instead_of_the_relay() {
+        let tmp = tempfile::tempdir().unwrap();
+        let db = Database::open_memory().unwrap();
+        let task = seed_with_task(&db, "hs-web");
+        watch_from_chat(&db, "hs-web");
+
+        let done = fake_host(tmp.path(), &[("hs-web", "done", 4)], "All tests pass.");
+        sweep(tmp.path(), &db, &done, None).await;
+        let row = row_of(&db, "hs-web");
+        assert_eq!(row.pm_wake.as_deref(), Some(WAKE_FINISHED));
+        assert_eq!(row.last_agent_status.as_deref(), Some("done"));
+        assert!(mailbox_files(tmp.path()).is_empty(), "web chat only: nothing for Telegram");
+        assert_eq!(task_state(&db, &task).0, hq_db::tasks::STATUS_READY_FOR_REVIEW);
+
+        let blocked = fake_host(tmp.path(), &[("hs-web", "blocked", 5)], "Approve the edit?");
+        sweep(tmp.path(), &db, &blocked, None).await;
+        assert_eq!(row_of(&db, "hs-web").pm_wake.as_deref(), Some(WAKE_BLOCKED));
+        assert_eq!(value_item_count(&db), 1, "one web-inbox badge for the block");
+        assert!(
+            hq_daemon::value_bus::WEB_ONLY_SOURCES.contains(&WEB_INBOX_SOURCE),
+            "the badge must never reach Telegram"
+        );
+
+        sweep(tmp.path(), &db, &gone_host(tmp.path()), None).await;
+        let row = row_of(&db, "hs-web");
+        assert_eq!(row.status, registry::STATUS_EXITED);
+        assert_eq!(row.pm_wake.as_deref(), Some(WAKE_EXITED));
+        assert!(mailbox_files(tmp.path()).is_empty());
+        assert_eq!(value_item_count(&db), 1, "the exit adds nothing for the relay");
+    }
+
+    #[tokio::test]
+    async fn a_working_watched_session_only_updates_its_seen_status() {
+        let tmp = tempfile::tempdir().unwrap();
+        let db = Database::open_memory().unwrap();
+        seed(&db, "hs-quiet");
+        watch_from_chat(&db, "hs-quiet");
+        let working = fake_host(tmp.path(), &[("hs-quiet", "working", 1)], "editing");
+
+        sweep(tmp.path(), &db, &working, None).await;
+
+        let row = row_of(&db, "hs-quiet");
+        assert_eq!(row.last_agent_status.as_deref(), Some("working"));
+        assert!(row.pm_wake.is_none());
+    }
+
+    #[tokio::test]
+    async fn summary_replaces_the_raw_excerpt() {
+        let tmp = tempfile::tempdir().unwrap();
+        let db = Database::open_memory().unwrap();
+        seed(&db, "hs-sum");
+        store_snapshot(&db, "hs-sum", "RAW PANE TEXT\nFINAL ANSWER: 42");
+
+        let summarizer = stub_summarizer(Ok("Done: refactored auth, no open items."));
+        sweep(tmp.path(), &db, &gone_host(tmp.path()), Some(&summarizer)).await;
+
+        let body = only_body(tmp.path());
+        assert!(body.contains("Done: refactored auth, no open items."));
+        assert!(!body.contains("RAW PANE TEXT"));
+        assert!(!body.contains(OUTPUT_OPEN));
+        assert!(body.contains("harness_session_resume"));
+    }
+
+    #[tokio::test]
+    async fn summarizer_failure_falls_back_to_the_raw_excerpt() {
+        let tmp = tempfile::tempdir().unwrap();
+        let db = Database::open_memory().unwrap();
+        seed(&db, "hs-fail");
+        store_snapshot(&db, "hs-fail", "RAW PANE TEXT\nFINAL ANSWER: 42");
+
+        let summarizer = stub_summarizer(Err("provider unreachable"));
+        sweep(tmp.path(), &db, &gone_host(tmp.path()), Some(&summarizer)).await;
+
+        let body = only_body(tmp.path());
+        assert!(body.contains("RAW PANE TEXT"));
+        assert!(body.contains("FINAL ANSWER: 42"));
+        assert!(body.contains(OUTPUT_OPEN));
+    }
+
+    #[test]
+    fn disabled_summary_config_means_no_summarizer() {
+        let off = HqConfig {
+            relay: hq_core::config::RelayConfig {
+                summarize_session_exits: false,
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+        assert!(summarizer_for(&off).is_none());
+        assert!(summarizer_for(&HqConfig::default()).is_some());
+    }
+
+    #[test]
+    fn tail_excerpt_keeps_the_end_char_safely() {
+        let short = "all of it";
+        assert_eq!(tail_excerpt(short, 100), short);
+
+        let long: String = (0..200)
+            .map(|i| char::from(b'a' + (i % 26) as u8))
+            .collect();
+        let cut = tail_excerpt(&long, 50);
+        assert_eq!(cut.chars().count(), 51); // 50 + ellipsis
+        assert!(cut.ends_with(&long[long.len() - 10..]));
+    }
+
+    #[test]
+    fn tail_excerpt_caps_bytes_on_multibyte_text() {
+        // Four bytes per rocket: a byte cap that lands mid-character must walk
+        // forward, never split, and never exceed the cap.
+        let emoji = "🚀".repeat(200);
+        let cut = tail_excerpt(&emoji, 50);
+        let kept = cut.strip_prefix('…').unwrap();
+        assert_eq!(kept.len(), 48);
+        assert_eq!(kept.chars().count(), 12);
+        assert!(emoji.ends_with(kept));
+
+        let mixed = format!("{}{}", "é".repeat(100), "tail");
+        let cut = tail_excerpt(&mixed, 25);
+        let kept = cut.strip_prefix('…').unwrap();
+        assert!(kept.len() <= 25);
+        assert!(kept.ends_with("tail"));
+    }
+
+    #[test]
+    fn clean_pty_text_flattens_carriage_returns() {
+        let cleaned = clean_pty_text("first\rsecond\r\nthird\r");
+        assert_eq!(cleaned, "first\nsecond\nthird");
+    }
+
+    #[test]
+    fn last_lines_keeps_the_tail() {
+        let text = (0..10)
+            .map(|i| i.to_string())
+            .collect::<Vec<_>>()
+            .join("\n");
+        assert_eq!(last_lines(&text, 3), "7\n8\n9");
+        assert_eq!(last_lines(&text, 50), text);
+    }
+
+    const SURVEY_SCREEN: &str = "6\n\n● How is Claude doing this session? (optional)\n  1: Bad  2: Fine  3: Good  0: Dismiss\n  Update installed · Restart to update";
+
+    /// Like `fake_host`, but `agent send-keys` appends its arguments to a log file. The screen
+    /// gains a `tick N` line per key received, as a pane that reacted to the key would.
+    fn keylogging_host(dir: &Path, name: &str, status: &str, screen: &str) -> (HerdrHost, PathBuf) {
+        keylogging_host_with(dir, name, status, screen, true)
+    }
+
+    fn keylogging_host_with(
+        dir: &Path,
+        name: &str,
+        status: &str,
+        screen: &str,
+        reacts: bool,
+    ) -> (HerdrHost, PathBuf) {
+        let log = dir.join("keys.log");
+        let tick = u8::from(reacts);
+        let script = format!(
+            "#!/bin/sh\ncase \"$*\" in\n  *\"agent list\"*) n=$(wc -l < '{log}' 2>/dev/null || echo 0); printf '{{\"id\":\"x\",\"result\":{{\"agents\":[{{\"agent\":\"claude\",\"agent_status\":\"{status}\",\"cwd\":\"/tmp\",\"name\":\"{name}\",\"pane_id\":\"w1:p1\",\"workspace_id\":\"w1\",\"state_change_seq\":%d}}]}}}}' \"$((3 + n))\" ;;\n  *\"agent read\"*) n=$(wc -l < '{log}' 2>/dev/null || echo 0); if [ {tick} = 1 ]; then printf '%s\\ntick %s' '{screen}' \"$n\"; else printf '%s' '{screen}'; fi ;;\n  *\"send-keys\"*) echo \"$*\" >> '{log}'; printf '%s' '{{\"id\":\"x\",\"result\":{{}}}}' ;;\n  *) exit 2 ;;\nesac\n",
+            screen = screen.replace('\'', ""),
+            log = log.display()
+        );
+        let path = dir.join("herdr");
+        std::fs::write(&path, script).unwrap();
+        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o755)).unwrap();
+        let cfg = HerdrConfig {
+            binary: path.to_string_lossy().to_string(),
+            ..HerdrConfig::default()
+        };
+        (HerdrHost::from_config(&cfg, LOCAL_HOST).unwrap(), log)
+    }
+
+    fn drive_on(db: &Database, id: &str) {
+        let id = id.to_string();
+        db.with_conn(move |c| {
+            registry::set_owner(c, &id, Some("th-1"))?;
+            registry::set_drive(c, &id, true)?;
+            Ok(())
+        })
+        .unwrap();
+    }
+
+    fn keys_logged(log: &Path) -> Vec<String> {
+        std::fs::read_to_string(log)
+            .unwrap_or_default()
+            .lines()
+            .map(str::to_string)
+            .collect()
+    }
+
+    #[tokio::test]
+    async fn a_driven_session_has_the_survey_dismissed_without_spending_allowances() {
+        let tmp = tempfile::tempdir().unwrap();
+        let db = Database::open_memory().unwrap();
+        let task = seed_with_task(&db, "hs-s");
+        drive_on(&db, "hs-s");
+        let (host, log) = keylogging_host(tmp.path(), "hs-s", "done", SURVEY_SCREEN);
+
+        sweep(tmp.path(), &db, &host, None).await;
+        sweep(tmp.path(), &db, &host, None).await;
+
+        let keys = keys_logged(&log);
+        assert_eq!(keys.len(), 2, "{keys:?}");
+        assert!(keys.iter().all(|k| k.ends_with("hs-s 0")), "{keys:?}");
+        let row = db.with_conn(|c| registry::get(c, "hs-s")).unwrap().unwrap();
+        assert_eq!((row.dismissals, row.nudges_sent, row.keys_sent), (2, 0, 0));
+        let survey_comments = db
+            .with_conn(|c| hq_db::tasks::list_comments(c, &task))
+            .unwrap()
+            .iter()
+            .filter(|c| c.body.contains("feedback survey"))
+            .count();
+        assert_eq!(survey_comments, 1, "one comment per session");
+        assert_eq!(alert_count(&db), 0);
+    }
+
+    #[tokio::test]
+    async fn an_observe_only_session_is_never_typed_into() {
+        let tmp = tempfile::tempdir().unwrap();
+        let db = Database::open_memory().unwrap();
+        seed(&db, "hs-o");
+        let (host, log) = keylogging_host(tmp.path(), "hs-o", "done", SURVEY_SCREEN);
+        sweep(tmp.path(), &db, &host, None).await;
+        assert!(keys_logged(&log).is_empty());
+    }
+
+    #[tokio::test]
+    async fn a_trust_dialog_is_reported_not_answered() {
+        let tmp = tempfile::tempdir().unwrap();
+        let db = Database::open_memory().unwrap();
+        seed(&db, "hs-t");
+        drive_on(&db, "hs-t");
+        let screen = format!(
+            "Do you trust the files in this folder?\n 1. Yes, proceed\n 2. No, exit\n{SURVEY_SCREEN}"
+        );
+        let (host, log) = keylogging_host(tmp.path(), "hs-t", "blocked", &screen);
+        sweep(tmp.path(), &db, &host, None).await;
+        assert!(keys_logged(&log).is_empty());
+        assert_eq!(alert_count(&db), 1);
+    }
+
+    #[tokio::test]
+    async fn dismissals_stop_at_the_cap_and_notify_once() {
+        let tmp = tempfile::tempdir().unwrap();
+        let db = Database::open_memory().unwrap();
+        seed(&db, "hs-c");
+        drive_on(&db, "hs-c");
+        let (host, log) = keylogging_host(tmp.path(), "hs-c", "done", SURVEY_SCREEN);
+        for _ in 0..registry::DISMISSAL_CAP + 3 {
+            sweep(tmp.path(), &db, &host, None).await;
+        }
+        assert_eq!(keys_logged(&log).len() as i64, registry::DISMISSAL_CAP);
+        let notices: i64 = db
+            .with_conn(|c| {
+                Ok(c.query_row(
+                    "SELECT COUNT(*) FROM value_items WHERE dedup_key = 'session-dismiss-cap-hs-c'",
+                    [],
+                    |r| r.get(0),
+                )?)
+            })
+            .unwrap();
+        assert_eq!(notices, 1, "one cap notice");
+    }
+
+    #[tokio::test]
+    async fn a_finished_alert_and_wake_survive_a_state_change_after_the_keypress() {
+        let tmp = tempfile::tempdir().unwrap();
+        let db = Database::open_memory().unwrap();
+        seed(&db, "hs-f");
+        drive_on(&db, "hs-f");
+        let (host, log) = keylogging_host(tmp.path(), "hs-f", "done", SURVEY_SCREEN);
+        let wake = |db: &Database| {
+            db.with_conn(|c| registry::get(c, "hs-f"))
+                .unwrap()
+                .unwrap()
+                .pm_wake
+        };
+
+        sweep(tmp.path(), &db, &host, None).await;
+        assert_eq!(keys_logged(&log).len(), 1);
+        assert_eq!(wake(&db).as_deref(), Some(WAKE_FINISHED), "wake despite dismissal");
+
+        // Herdr bumped state_change_seq after the key; the next finished turn must wake again.
+        db.with_conn(|c| {
+            c.execute("UPDATE harness_sessions SET pm_wake = NULL WHERE id = 'hs-f'", [])?;
+            Ok(())
+        })
+        .unwrap();
+        sweep(tmp.path(), &db, &host, None).await;
+        assert_eq!(wake(&db).as_deref(), Some(WAKE_FINISHED), "new seq, new wake");
+    }
+
+    #[tokio::test]
+    async fn survey_text_on_a_working_agent_gets_no_key() {
+        let tmp = tempfile::tempdir().unwrap();
+        let db = Database::open_memory().unwrap();
+        seed(&db, "hs-w");
+        drive_on(&db, "hs-w");
+        let (host, log) = keylogging_host(tmp.path(), "hs-w", "working", SURVEY_SCREEN);
+        sweep(tmp.path(), &db, &host, None).await;
+        assert!(keys_logged(&log).is_empty());
+    }
+
+    #[tokio::test]
+    async fn a_survey_beside_a_drafted_input_box_gets_no_key() {
+        let tmp = tempfile::tempdir().unwrap();
+        let db = Database::open_memory().unwrap();
+        seed(&db, "hs-x");
+        drive_on(&db, "hs-x");
+        let screen = format!("{SURVEY_SCREEN}\n│ > fix the login bug │");
+        let (host, log) = keylogging_host(tmp.path(), "hs-x", "done", &screen);
+        sweep(tmp.path(), &db, &host, None).await;
+        assert!(keys_logged(&log).is_empty());
+    }
+
+    #[tokio::test]
+    async fn a_survey_that_does_not_close_is_dismissed_once_then_reported() {
+        let tmp = tempfile::tempdir().unwrap();
+        let db = Database::open_memory().unwrap();
+        seed(&db, "hs-u");
+        drive_on(&db, "hs-u");
+        let (host, log) = keylogging_host_with(tmp.path(), "hs-u", "done", SURVEY_SCREEN, false);
+        for _ in 0..4 {
+            sweep(tmp.path(), &db, &host, None).await;
+        }
+        assert_eq!(keys_logged(&log).len(), 1, "an unchanged tail means the key did nothing");
+        let notices: i64 = db
+            .with_conn(|c| {
+                Ok(c.query_row(
+                    "SELECT COUNT(*) FROM value_items WHERE dedup_key = 'session-dismiss-cap-hs-u'",
+                    [],
+                    |r| r.get(0),
+                )?)
+            })
+            .unwrap();
+        assert_eq!(notices, 1);
+    }
+
+    #[tokio::test]
+    async fn the_observed_draft_pane_gets_no_key() {
+        let tmp = tempfile::tempdir().unwrap();
+        let db = Database::open_memory().unwrap();
+        seed(&db, "hs-g");
+        drive_on(&db, "hs-g");
+        let screen = format!("{SURVEY_SCREEN}\n\n\n❯ 00000");
+        let (host, log) = keylogging_host(tmp.path(), "hs-g", "done", &screen);
+        sweep(tmp.path(), &db, &host, None).await;
+        assert!(keys_logged(&log).is_empty());
+    }
+}

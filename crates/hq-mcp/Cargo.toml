@@ -1,0 +1,27 @@
+[package]
+name = "hq-mcp"
+version.workspace = true
+edition.workspace = true
+
+[features]
+default = [
+    "gws",
+]
+gws = ["hq-tools/gws"]
+
+[dependencies]
+hq-core = { workspace = true }
+hq-tools = { workspace = true }
+hq-vault = { workspace = true }
+hq-db = { workspace = true }
+rmcp = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+tokio = { workspace = true }
+anyhow = { workspace = true }
+uuid = { workspace = true }
+tracing = { workspace = true }
+
+[dev-dependencies]
+async-trait = { workspace = true }
+tempfile = { workspace = true }

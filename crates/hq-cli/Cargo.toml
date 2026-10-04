@@ -1,0 +1,59 @@
+[package]
+name = "hq-cli"
+version.workspace = true
+edition.workspace = true
+
+[[bin]]
+name = "hq"
+path = "src/main.rs"
+
+[features]
+default = ["discord", "telegram"]
+discord = ["hq-relay/discord"]
+telegram = ["hq-relay/telegram"]
+
+[dependencies]
+hq-core = { workspace = true }
+hq-vault = { workspace = true }
+hq-db = { workspace = true }
+hq-llm = { workspace = true }
+hq-tools = { workspace = true }
+hq-convert = { workspace = true }
+hq-update = { workspace = true }
+tokio = { workspace = true }
+clap = { workspace = true }
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true }
+anyhow = { workspace = true }
+dirs = { workspace = true }
+serde_json = { workspace = true }
+chrono = { workspace = true }
+uuid = { workspace = true }
+reqwest = { workspace = true }
+serde = { workspace = true }
+serde_yaml = { workspace = true }
+hq-web = { workspace = true }
+hq-daemon = { workspace = true }
+hq-relay = { workspace = true }
+hq-memory = { workspace = true }
+axum = { workspace = true }
+futures = { workspace = true }
+tokio-tungstenite = { workspace = true }
+
+hq-mcp = { workspace = true }
+rpassword = "7"
+hq-agent = { workspace = true }
+crossterm = "0.28"
+rusqlite.workspace = true
+mimalloc = { version = "0.1", default-features = false }
+
+# native-tls (pulled in transitively via reqwest/teloxide) links system
+# OpenSSL on Linux. Cross-compiling for Linux from a non-Linux host has no
+# target OpenSSL to find via pkg-config, so build OpenSSL from source
+# instead — irrelevant on macOS/Windows, where native-tls uses the
+# platform's own TLS backend and openssl-sys isn't even pulled in.
+[target.'cfg(target_os = "linux")'.dependencies]
+openssl-sys = { version = "*", features = ["vendored"] }
+
+[dev-dependencies]
+tempfile = { workspace = true }

@@ -1,0 +1,85 @@
+#!/usr/bin/env python3
+"""SSH forced-command gate that lets Agent HQ drive this machine's Herdr.
+
+HQ sends the herdr arguments as a JSON array on stdin, so no shell ever parses
+prompt text. Only the subcommands below run, and nothing else on this machine
+is reachable through the key. Herdr itself can still run commands in panes by
+design, so treat the key as shell access as you.
+
+Install on the machine that runs Herdr:
+
+    install -m 755 scripts/hq-herdr-gate ~/.local/bin/hq-herdr-gate
+
+then pin the HQ host's key in ~/.ssh/authorized_keys on ONE line:
+
+    restrict,from="<hq-host-tailscale-ip>",command="/home/you/.local/bin/hq-herdr-gate" ssh-ed25519 AAAA... hq-herdr
+
+Set HQ_HERDR_BIN to use a herdr binary that is not on PATH.
+"""
+
+import json
+import os
+import shutil
+import sys
+
+MAX_INPUT_BYTES = 1_000_000
+
+# `session` and `server` are left out on purpose: they stop or delete servers.
+ALLOWED_SUBCOMMANDS = {"agent", "pane", "workspace", "tab", "status"}
+
+# `--machine` and `--remote` would hop this host into another one.
+DENIED_FLAGS = {"--machine", "--remote"}
+
+FALLBACK_BINARIES = (
+    "/opt/homebrew/bin/herdr",
+    "/usr/local/bin/herdr",
+    "~/.local/bin/herdr",
+    "~/.cargo/bin/herdr",
+)
+
+
+def deny(message: str) -> None:
+    error = {"error": {"code": "gate_denied", "message": message}}
+    print(json.dumps(error), file=sys.stderr)
+    sys.exit(64)
+
+
+def find_herdr() -> str:
+    explicit = os.environ.get("HQ_HERDR_BIN")
+    candidates = [explicit] if explicit else [shutil.which("herdr"), *FALLBACK_BINARIES]
+    for candidate in candidates:
+        if candidate and os.access(os.path.expanduser(candidate), os.X_OK):
+            return os.path.expanduser(candidate)
+    deny("herdr binary not found; set HQ_HERDR_BIN")
+    return ""
+
+
+def parse_args(raw: str) -> list:
+    try:
+        args = json.loads(raw)
+    except ValueError:
+        deny("stdin must be a JSON array of strings")
+    if not isinstance(args, list) or not all(isinstance(a, str) for a in args):
+        deny("stdin must be a JSON array of strings")
+    return args
+
+
+def main() -> None:
+    raw = sys.stdin.read(MAX_INPUT_BYTES + 1)
+    if len(raw) > MAX_INPUT_BYTES:
+        deny("arguments too large")
+    args = parse_args(raw)
+
+    session_flag = args[:2] if args[:1] == ["--session"] and len(args) >= 2 else []
+    command = args[len(session_flag):]
+    if not command or command[0] not in ALLOWED_SUBCOMMANDS:
+        deny(f"subcommand not allowed: {command[:1]}")
+    if any(a in DENIED_FLAGS for a in command):
+        deny("routing flags are not allowed")
+
+    binary = find_herdr()
+    os.execv(binary, [binary, *session_flag, *command])
+
+
+if __name__ == "__main__":
+    main()

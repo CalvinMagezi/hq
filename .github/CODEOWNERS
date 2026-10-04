@@ -1,0 +1,10 @@
+/.github/ @CalvinMagezi
+/scripts/release/ @CalvinMagezi
+/deploy/runner/ @CalvinMagezi
+/release/ @CalvinMagezi
+/scripts/personal-data-scan.sh @CalvinMagezi
+/scripts/personal-data-baseline.txt @CalvinMagezi
+/.personal-data-allow @CalvinMagezi
+/.gitleaksignore @CalvinMagezi
+/.gitleaks.toml @CalvinMagezi
+/deny.toml @CalvinMagezi

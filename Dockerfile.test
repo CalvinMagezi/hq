@@ -1,0 +1,37 @@
+# Multi-stage build: compile hq-cli, then test in a clean environment
+# Usage: docker build -f Dockerfile.test -t hq-test . && docker run --rm hq-test
+
+# ── Stage 1: Build ───────────────────────────────────────────────────────────
+FROM rust:1.88-bookworm AS builder
+
+WORKDIR /build
+COPY Cargo.toml Cargo.lock ./
+COPY crates/ crates/
+
+# Build only the hq-cli binary in release mode
+RUN cargo build --release -p hq-cli 2>&1 && \
+    cp target/release/hq /usr/local/bin/hq
+
+# ── Stage 2: Test environment ────────────────────────────────────────────────
+FROM debian:bookworm-slim
+
+# Install minimal deps (sqlite, ca-certs for potential HTTPS)
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    ca-certificates \
+    libsqlite3-0 \
+    && rm -rf /var/lib/apt/lists/*
+
+# Create a non-root test user
+RUN useradd -m -s /bin/bash testuser
+USER testuser
+WORKDIR /home/testuser
+
+# Copy the built binary
+COPY --from=builder /usr/local/bin/hq /usr/local/bin/hq
+
+# Copy the test script
+COPY --chown=testuser:testuser tests/test_install_flow.sh /home/testuser/test_install_flow.sh
+RUN chmod +x /home/testuser/test_install_flow.sh
+
+# Run the test suite
+CMD ["/home/testuser/test_install_flow.sh"]

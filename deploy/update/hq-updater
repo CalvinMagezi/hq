@@ -1,0 +1,15 @@
+#!/bin/sh
+# Installed as /usr/local/lib/hq/hq-updater and run by hq-update.service as
+# root. All logic lives in `hq update` (signature checks, swaps, rollback);
+# this wrapper only pins the binary path so the unit never resolves it via
+# an environment the caller controls.
+set -eu
+umask 022
+PATH=/usr/local/bin:/usr/bin:/bin
+export PATH
+HQ_BIN=/usr/local/bin/hq
+if [ ! -x "$HQ_BIN" ]; then
+    echo "hq-updater: $HQ_BIN is missing; run deploy/install.sh" >&2
+    exit 1
+fi
+exec "$HQ_BIN" update --apply "$@"

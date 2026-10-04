@@ -1,0 +1,39 @@
+# Agent HQ VPS Production Caddyfile
+# Automatic TLS certificate provision & reverse proxy to HQ (`hq start all`) on :5678
+# Replace `your-domain.com` / `mcp.your-domain.com` with your actual live domain.
+
+{
+	servers {
+		protocols h1 h2
+	}
+}
+
+# Bare domain → MCP
+your-domain.com {
+	redir https://mcp.your-domain.com{uri} permanent
+}
+
+mcp.your-domain.com {
+	# MCP Streamable HTTP & JSON-RPC
+	@mcp path /mcp
+	handle @mcp {
+		reverse_proxy 127.0.0.1:5678 {
+			flush_interval -1
+			transport http {
+				versions 1.1
+			}
+		}
+	}
+
+	# /ws and /api/* run tool-using agent sessions. Even with web_auth_token set,
+	# keep them off the public host: reach the web UI over a private network
+	# (see Caddyfile.pwa) and expose only /health here.
+	@health path /health
+	handle @health {
+		reverse_proxy 127.0.0.1:5678
+	}
+
+	handle {
+		respond "Not found" 404
+	}
+}

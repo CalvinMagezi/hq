@@ -1,0 +1,27 @@
+[package]
+name = "hq-memory"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+hq-core = { workspace = true }
+hq-db = { workspace = true }
+hq-llm = { workspace = true }
+hq-vault = { workspace = true }
+tokio = { workspace = true }
+anyhow = { workspace = true }
+async-trait = { workspace = true }
+tracing = { workspace = true }
+chrono = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+rusqlite = { workspace = true }
+reqwest = { workspace = true }
+regex = { workspace = true }
+sha2 = { workspace = true }
+serde_yaml = { workspace = true }
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["test-util"] }
+tokio-stream = { workspace = true }
+tempfile = "3"

@@ -1,0 +1,34 @@
+[package]
+name = "hq-relay"
+version.workspace = true
+edition.workspace = true
+
+[features]
+default = []
+discord = ["dep:serenity"]
+telegram = ["dep:teloxide"]
+
+[dependencies]
+serenity = { workspace = true, optional = true }
+teloxide = { workspace = true, optional = true }
+hq-core = { workspace = true }
+hq-vault = { workspace = true }
+hq-db = { workspace = true }
+hq-llm = { workspace = true }
+hq-tools = { workspace = true }
+hq-convert = { workspace = true }
+hq-agent = { workspace = true }
+hq-daemon = { workspace = true }
+tokio = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+anyhow = { workspace = true }
+tracing = { workspace = true }
+chrono = { workspace = true }
+uuid = { workspace = true }
+reqwest = { workspace = true }
+hostname = { workspace = true }
+
+[dev-dependencies]
+tempfile = "3"
+tokio = { version = "1", features = ["rt", "macros"] }

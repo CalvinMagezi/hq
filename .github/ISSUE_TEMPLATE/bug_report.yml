@@ -1,0 +1,40 @@
+name: Bug report
+description: Something does not work as documented
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Do not report security problems here. Use the private process in SECURITY.md.
+        Redact tokens, hostnames and personal data from anything you paste.
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened
+      description: What you did, what you expected, and what you saw instead.
+    validations:
+      required: true
+  - type: textarea
+    id: repro
+    attributes:
+      label: Steps to reproduce
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: Version
+      description: Output of `hq version`.
+    validations:
+      required: true
+  - type: input
+    id: platform
+    attributes:
+      label: OS and install method
+      description: For example macOS 15 built from source, or Ubuntu 24.04 via deploy/install.sh.
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs
+      description: Relevant output from `hq logs --errors` or `hq doctor`.
+      render: text

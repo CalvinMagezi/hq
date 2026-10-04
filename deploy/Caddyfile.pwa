@@ -1,0 +1,21 @@
+## HQ Web UI — Tailscale-only via `tailscale serve`.
+# Caddy listens on loopback only; `tailscale serve` terminates TLS on the
+# tailnet and forwards to http://127.0.0.1:4749. Not reachable from the
+# public internet: nothing here binds a public interface.
+#
+# One-time on the VPS (443 is already taken by the public MCP Caddyfile, so
+# serve on an alternate HTTPS port instead of fighting over the shared bind):
+#   tailscale serve --bg --https=8443 http://127.0.0.1:4749
+# Access: https://hq.example.ts.net:8443/
+#
+# hq.service serves everything on :5678: the PWA's static build, /api, /ws
+# and /mcp. HTTP/1.1 keeps the /ws upgrade working through the proxy.
+:4749 {
+	bind 127.0.0.1
+
+	reverse_proxy localhost:5678 {
+		transport http {
+			versions 1.1
+		}
+	}
+}

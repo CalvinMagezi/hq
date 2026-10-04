@@ -1,0 +1,21 @@
+//! Periodic daemon tasks (seconds — minutes cadence).
+//!
+//! Each domain lives in its own submodule. This module re-exports every public
+//! task function so callers can continue using `tasks_periodic::run_*` paths.
+
+pub mod copilot_usage;
+pub mod disk_watchdog;
+pub mod email_ingest;
+pub mod embeddings;
+pub mod health;
+pub mod session_supervisor;
+pub mod subagent_supervisor;
+pub mod turn_reconcile;
+
+pub use copilot_usage::run_copilot_usage;
+pub use disk_watchdog::run_disk_watchdog;
+pub use email_ingest::run_email_poll;
+pub use embeddings::{run_embeddings, run_inbox_triage};
+pub use health::{run_heartbeat, run_memory_consolidation};
+pub use subagent_supervisor::run_subagent_supervisor;
+pub use turn_reconcile::run_turn_reconcile;

@@ -1,0 +1,74 @@
+# Build artifacts
+/target
+*.db
+*.db-wal
+*.db-shm
+
+# Vault data (private knowledge base)
+# Matches the directory and, since the vault moved out of TCC-protected
+# ~/Documents, the symlink that now stands in its place.
+.vault
+.vault/
+
+# Agent-generated memory proposals — contain raw session transcript snippets
+_pending/
+
+# Git worktrees
+.worktrees/
+.playwright-mcp/
+
+# Secrets — NEVER commit these
+.env
+.env.local
+.env.*.local
+.mcp.json
+*.pem
+*.key
+*.crt
+*.secret
+config.yaml
+config.yml
+config.local.yaml
+config.local.yml
+
+# Personal / local-only
+.claude/
+.gemini/
+download.*
+**/Caddyfile
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Node/Bun (PWA)
+node_modules/
+web/node_modules/
+web/dist/
+apps/hq-web/node_modules/
+apps/hq-web/dist/
+apps/hq-web/.tanstack/
+apps/hq-web/package-lock.json
+
+# Build artifacts (Vite)
+vite.config.timestamp_*.js
+apps/hq-web/vite.config.timestamp_*.js
+
+# Screenshots and stray images
+hq-pwa-screenshot.png
+terraces-full.png
+turboquant_arxiv.png
+
+# Redis snapshots
+*.rdb
+dump.rdb
+
+# Logs
+/tmp/
+*.log
+
+.worktrees/
+
+# subagent-driven-development scratch (ledger, briefs, review packages)
+.superpowers/
+autoresearch-results.tsv

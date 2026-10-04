@@ -1,0 +1,22 @@
+# SearxNG settings override for HQ's web_search tool.
+# Layered on top of upstream defaults (use_default_settings: true) — only
+# the keys below diverge from stock SearxNG.
+#
+# secret_key is a placeholder. scripts/setup-searxng.sh generates a real one
+# with `openssl rand -hex 32` into ~/.hq/searxng/settings.yml at install
+# time; this checked-in copy is never used directly by a running container.
+
+use_default_settings: true
+
+search:
+  formats:
+    - html
+    - json
+
+server:
+  secret_key: "REPLACED_AT_INSTALL_TIME"
+  # SearxNG's own bot-detection middleware otherwise 403s a plain reqwest
+  # client — the exact failure mode this SearxNG setup exists to escape
+  # (DuckDuckGo's bot-detection interstitial). Safe to disable: this
+  # instance is a local, single-operator backend, not public-facing.
+  limiter: false

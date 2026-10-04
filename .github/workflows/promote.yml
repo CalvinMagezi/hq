@@ -1,0 +1,80 @@
+name: Promote
+
+# Points the stable channel at an existing main-built release. Manual runs
+# only, and always from main. It signs a new channel pointer and changes no
+# release artifact.
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Release tag to promote, for example v0.9.1-main.57"
+        required: true
+        type: string
+
+permissions: {}
+
+concurrency:
+  group: promote
+  cancel-in-progress: false
+
+jobs:
+  promote:
+    name: Verify and publish channel-stable
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    environment: release
+    permissions:
+      contents: write # create releases and upload assets
+    env:
+      GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
+      TAG: ${{ inputs.tag }}
+    steps:
+      - name: Refuse any ref but main, and a malformed tag
+        env:
+          REF: ${{ github.ref }}
+        run: |
+          [ "$REF" = "refs/heads/main" ] || { echo "promote runs from main only" >&2; exit 1; }
+          [[ "$TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-main\.[0-9]+)?$ ]] || { echo "bad tag '$TAG'" >&2; exit 1; }
+
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Install pinned minisign and jq
+        run: |
+          dir=$(bash scripts/release/install-tools.sh "$RUNNER_TEMP/tools")
+          echo "$dir" >> "$GITHUB_PATH"
+
+      - name: Check the release exists and was built from main
+        run: |
+          gh release view "$TAG" --json tagName > /dev/null
+          tag_sha=$(gh api "repos/$GH_REPO/commits/$TAG" --jq .sha)
+          git merge-base --is-ancestor "$tag_sha" origin/main ||
+            { echo "$TAG ($tag_sha) is not on main" >&2; exit 1; }
+          echo "TAG_SHA=$tag_sha" >> "$GITHUB_ENV"
+
+      - name: Verify signature and checksums with the repo public key
+        run: |
+          rm -rf promote-dl
+          bash scripts/release/verify.sh --repo "$GH_REPO" --tag "$TAG" --pubkey release/minisign.pub --dir promote-dl
+          manifest_sha=$(jq -r .git_sha promote-dl/manifest.json)
+          [ "$manifest_sha" = "$TAG_SHA" ] || { echo "manifest git_sha does not match the tag" >&2; exit 1; }
+          [ "v$(jq -r .version promote-dl/manifest.json)" = "$TAG" ] || { echo "manifest version does not match the tag" >&2; exit 1; }
+          [ "$(jq -r .channel promote-dl/manifest.json)" = "main" ] || { echo "release was not built for the main channel" >&2; exit 1; }
+
+      - name: Sign and publish channel-stable
+        env:
+          MINISIGN_KEY: ${{ secrets.MINISIGN_KEY }}
+          MINISIGN_PASSWORD: ${{ secrets.MINISIGN_PASSWORD }}
+          RUN_NUMBER: ${{ github.run_number }}
+          ATTEMPT: ${{ github.run_attempt }}
+        run: |
+          bash scripts/release/channel.sh --channel stable --manifest promote-dl/manifest.json --repo "$GH_REPO" --seq "$((RUN_NUMBER * 1000 + ATTEMPT))" --out promote-dl/channel-stable.json
+          bash scripts/release/sign.sh promote-dl/channel-stable.json
+          gh release view channel-stable > /dev/null 2>&1 ||
+            gh release create channel-stable --title "channel-stable" \
+              --notes "Signed pointer to the promoted release. Not a downloadable build."
+          gh release upload channel-stable promote-dl/channel-stable.json promote-dl/channel-stable.json.minisig --clobber

@@ -1,0 +1,30 @@
+[package]
+name = "hq-llm"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+hq-core = { workspace = true }
+async-openai = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+anyhow = { workspace = true }
+thiserror = { workspace = true }
+tracing = { workspace = true }
+tokio = { workspace = true }
+tokio-stream = { workspace = true }
+futures = { workspace = true }
+reqwest = { workspace = true }
+async-trait = { workspace = true }
+chrono = { workspace = true }
+rand = { workspace = true }
+
+[features]
+# Local TurboQuant CUDA inference server; off by default so hosts without one
+# skip the startup probe of localhost:14747.
+turboquant = []
+
+[dev-dependencies]
+serde_yaml = { workspace = true }
+tempfile = "3"
+wiremock = "0.6"

@@ -1,0 +1,152 @@
+[workspace]
+resolver = "2"
+members = [
+    "crates/hq-cli",
+    "crates/hq-core",
+    "crates/hq-vault",
+    "crates/hq-db",
+    "crates/hq-llm",
+    "crates/hq-agent",
+    "crates/hq-daemon",
+    "crates/hq-relay",
+    "crates/hq-mcp",
+    "crates/hq-tools",
+    "crates/hq-web",
+
+    "crates/hq-memory",
+    "crates/hq-convert",
+    "crates/hq-update",
+
+]
+
+[workspace.package]
+version = "0.9.0"
+edition = "2024"
+license = "MIT"
+repository = "https://github.com/CalvinMagezi/hq"
+
+[workspace.dependencies]
+# Async runtime
+tokio = { version = "1", features = ["full"] }
+
+# Audio
+
+# CLI
+clap = { version = "4", features = ["derive", "env"] }
+
+# LLM
+async-openai = "0.27"
+
+# MCP
+rmcp = { version = "3", features = ["server", "transport-io"] }
+
+# SQLite
+rusqlite = { version = "0.33", features = ["bundled", "vtab"] }
+r2d2 = "0.8"
+
+# Serialization
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+serde_yaml = "0.9"
+
+# Markdown + frontmatter
+pulldown-cmark = "0.12"
+gray_matter = "0.2"
+
+# File watching
+notify = "7"
+
+# Specta for IPC
+
+# Web
+axum = { version = "0.8", features = ["ws"] }
+tower = "0.5"
+tower-http = { version = "0.6", features = ["cors", "fs", "compression-gzip", "compression-br"] }
+
+# Discord
+# native-tls because the rustls backend pins rustls-webpki 0.102 (RUSTSEC-2026-0049, -0098, -0099, -0104).
+serenity = { version = "0.12", default-features = false, features = ["default_no_backend", "native_tls_backend", "client", "gateway", "model"] }
+
+# Telegram
+teloxide = { version = "0.17", features = ["macros"] }
+
+# Error handling
+thiserror = "2"
+anyhow = "1"
+
+# Logging / tracing
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
+
+# Config
+figment = { version = "0.10", features = ["yaml", "env", "toml"] }
+
+# HTTP client
+reqwest = { version = "0.12", features = ["json", "stream", "multipart"] }
+
+# Document conversion (inbound: transmutation, outbound: pandoc)
+hq-convert = { path = "crates/hq-convert" }
+
+# HTML processing
+html2text = "0.14"
+
+# Utilities
+uuid = { version = "1", features = ["v4", "serde"] }
+chrono = { version = "0.4", features = ["serde"] }
+tokio-stream = "0.1"
+tokio-util = "0.7"
+futures = "0.3"
+tokio-tungstenite = { version = "0.28", features = ["connect", "native-tls"] }
+sha2 = "0.10"
+hex = "0.4"
+dirs = "6"
+hostname = "0.4"
+rand = "0.8"
+base64 = "0.22"
+async-trait = "0.1"
+async-stream = "0.3"
+tempfile = "3"
+resvg = "0.47"
+regex = "1"
+url = "2"
+which = "7"
+tiktoken-rs = "0.6"
+lru = "0.18"
+blake3 = "1.5"
+once_cell = "1"
+sysinfo = "0.33"
+
+# Update system (OSS-3): minisign (Ed25519) verification, tar.gz artifacts
+minisign-verify = "0.2"
+tar = { version = "0.4", default-features = false }
+flate2 = "1"
+toml = "0.8"
+semver = "1"
+
+# Embeddings
+
+# Workspace crates (internal)
+hq-core = { path = "crates/hq-core" }
+hq-vault = { path = "crates/hq-vault" }
+hq-db = { path = "crates/hq-db" }
+hq-llm = { path = "crates/hq-llm" }
+hq-agent = { path = "crates/hq-agent" }
+hq-daemon = { path = "crates/hq-daemon" }
+hq-relay = { path = "crates/hq-relay" }
+hq-mcp = { path = "crates/hq-mcp" }
+hq-tools = { path = "crates/hq-tools" }
+hq-web = { path = "crates/hq-web" }
+
+hq-memory = { path = "crates/hq-memory" }
+hq-update = { path = "crates/hq-update" }
+
+
+[profile.release]
+lto = "thin"
+codegen-units = 1
+strip = true
+panic = "abort"
+
+[profile.release-small]
+inherits = "release"
+opt-level = "z"

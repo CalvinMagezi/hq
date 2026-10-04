@@ -1,0 +1,11 @@
+[Unit]
+Description=Check for Agent HQ updates every 10 minutes
+
+[Timer]
+OnCalendar=*:0/10
+RandomizedDelaySec=120
+AccuracySec=30s
+Persistent=true
+
+[Install]
+WantedBy=timers.target

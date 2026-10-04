@@ -1,0 +1,40 @@
+[Unit]
+Description=Herdr server (coding-agent runtime for Agent HQ)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=hq
+Group=hq
+# The hq user has a nologin shell; panes still need a real one.
+Environment=SHELL=/bin/bash
+Environment=HOME=/opt/hq
+# Panes inherit this unit's environment, not hq.service's, so `hq chat` in a
+# pane needs the same config and vault paths as the daemon, plus the LLM
+# provider and GitHub credentials, to reach the same backends. Every agent in a
+# pane can read these. Google Workspace credentials (gws.env) are deliberately
+# not loaded: they would reach every agent HQ ever starts.
+Environment=HQ_VAULT_PATH=/opt/hq/.vault
+Environment=HQ_CONFIG_PATH=/opt/hq/config.yaml
+EnvironmentFile=-/opt/hq/openrouter.env
+EnvironmentFile=-/opt/hq/copilot.env
+EnvironmentFile=-/opt/hq/deepseek.env
+EnvironmentFile=-/opt/hq/github.env
+EnvironmentFile=-/opt/hq/gh.env
+WorkingDirectory=/opt/hq
+# Its own unit, so restarting or redeploying hq.service never takes the
+# running coding agents down with it.
+ExecStart=/usr/local/bin/herdr server
+Restart=always
+RestartSec=5
+
+# Hardening (same boundary as hq.service)
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/opt/hq
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,67 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+    Agent HQ — combined daemon LaunchAgent template.
+
+    DO NOT load this file directly. Use scripts/install-launchagent.sh
+    which substitutes __HOME__ / __HQ_BIN__ and bootstraps it via launchctl.
+-->
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.agent-hq.hq-all</string>
+
+    <key>ProgramArguments</key>
+    <array>
+        <string>__HQ_BIN__</string>
+        <string>start</string>
+        <string>all</string>
+    </array>
+
+    <!-- Make sure ollama, gemini, gh, etc. are findable at runtime. -->
+    <key>EnvironmentVariables</key>
+    <dict>
+        <key>HOME</key>
+        <string>__HOME__</string>
+        <key>PATH</key>
+        <string>__HOME__/bin:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
+        <key>GROQ_API_KEY</key>
+        <string>__GROQ_API_KEY__</string>
+        <key>CEREBRAS_API_KEY</key>
+        <string>__CEREBRAS_API_KEY__</string>
+        <key>ANTHROPIC_API_KEY</key>
+        <string>__ANTHROPIC_API_KEY__</string>
+        <key>OPENROUTER_API_KEY</key>
+        <string>__OPENROUTER_API_KEY__</string>
+        <key>HQ_LAUNCHED_BY_LAUNCHD</key>
+        <string>1</string>
+    </dict>
+
+    <key>WorkingDirectory</key>
+    <string>__HOME__</string>
+
+    <!-- Run as soon as bootstrapped and after every login. -->
+    <key>RunAtLoad</key>
+    <true/>
+
+    <!-- Always restart on ANY exit (clean, error, or crash). The only way to
+         stop the daemon for real is `launchctl bootout` (which is what the
+         --uninstall flag of install-launchagent.sh does). A plain SIGTERM via
+         `kill` or `hq stop` will be revived within ThrottleInterval seconds. -->
+    <key>KeepAlive</key>
+    <true/>
+
+    <!-- Wait between restarts so a tight crash loop doesn't melt the laptop. -->
+    <key>ThrottleInterval</key>
+    <integer>10</integer>
+
+    <key>StandardOutPath</key>
+    <string>__HOME__/Library/Logs/hq-agent.log</string>
+
+    <key>StandardErrorPath</key>
+    <string>__HOME__/Library/Logs/hq-agent.error.log</string>
+
+    <key>ProcessType</key>
+    <string>Background</string>
+</dict>
+</plist>

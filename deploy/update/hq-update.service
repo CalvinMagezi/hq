@@ -1,0 +1,33 @@
+[Unit]
+Description=Agent HQ pull-based updater
+After=network-online.target
+Wants=network-online.target
+# Never start while a manual update or rollback is mid-flight; the updater
+# also takes its own flock, this only avoids a pointless wake-up.
+ConditionPathExists=/usr/local/bin/hq
+ConditionPathExists=/etc/hq/update.conf
+
+[Service]
+Type=oneshot
+# Root-owned on purpose: hq.service keeps NoNewPrivileges and ProtectSystem=strict
+# because the only privileged step (swap files, restart) lives here instead.
+ExecStart=/usr/local/lib/hq/hq-updater
+# 75 means another update holds the lock; the next timer tick retries.
+SuccessExitStatus=75
+TimeoutStartSec=20min
+Nice=10
+IOSchedulingClass=idle
+
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+ReadWritePaths=-/usr/local/bin -/usr/local/share/hq -/opt/hq -/var/lib/hq-update
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictSUIDSGID=true
+LockPersonality=true
+# Root for file swaps and ownership fixes; setuid/setgid for dropping to the
+# hq user before running anything downloaded.
+CapabilityBoundingSet=CAP_CHOWN CAP_DAC_OVERRIDE CAP_FOWNER CAP_SETUID CAP_SETGID

@@ -1,0 +1,557 @@
+//! Disclosure-scoped wrapper for task tools (FR-073).
+//!
+//! A person's tasks live in the space `people-<slug>`. For a restricted
+//! audience, reads see only spaces labelled for everyone present, writes go
+//! only into the sole verified person's own space, and every tool this file
+//! cannot filter is refused.
+
+use anyhow::{Result, bail};
+use async_trait::async_trait;
+use hq_core::privacy::{
+    DENIED_MESSAGE, DisclosureScope, Label, PersonId, person_space_slug, space_label,
+};
+use hq_db::Database;
+use hq_db::tasks as t;
+use serde_json::{Value, json};
+use std::collections::HashMap;
+use std::sync::Arc;
+
+use super::placement::resolve_space_id;
+use crate::registry::{HqTool, ToolPolicy};
+use crate::util::generate_id;
+
+/// Tools whose only input is one task id under `id` or `task_id`, read-only.
+const TASK_READ_TOOLS: &[&str] = &["task_get", "task_comment_list"];
+/// Tools that change one task, so the task must be in the caller's own space.
+const TASK_WRITE_TOOLS: &[&str] = &["task_update", "task_delete", "task_comment_add"];
+
+struct ScopedTaskTool {
+    inner: Box<dyn HqTool>,
+    db: Arc<Database>,
+    scope: DisclosureScope,
+}
+
+pub fn scope_task_tools(
+    tools: Vec<Box<dyn HqTool>>,
+    db: Arc<Database>,
+    scope: &DisclosureScope,
+) -> Vec<Box<dyn HqTool>> {
+    if scope.is_unrestricted() {
+        return tools;
+    }
+    tools
+        .into_iter()
+        .map(|inner| -> Box<dyn HqTool> {
+            Box::new(ScopedTaskTool {
+                inner,
+                db: db.clone(),
+                scope: scope.clone(),
+            })
+        })
+        .collect()
+}
+
+/// Finds the person's task space or creates it. Safe to call repeatedly: the slug is
+/// unique, and a lost creation race falls back to the row the winner made.
+pub fn ensure_person_space(db: &Database, person: &PersonId) -> Result<t::Space> {
+    let Some(slug) = person_space_slug(person) else {
+        bail!("person has no usable slug");
+    };
+    db.with_conn(move |c| {
+        if let Some(found) = space_by_slug(c, &slug)? {
+            return Ok(found);
+        }
+        let name = format!("Person {}", slug.trim_start_matches("people-"));
+        match t::create_space(c, &generate_id("sp"), &name, &slug) {
+            Ok(space) => Ok(space),
+            Err(e) => space_by_slug(c, &slug)?.ok_or(e),
+        }
+    })
+}
+
+fn space_by_slug(c: &rusqlite::Connection, slug: &str) -> Result<Option<t::Space>> {
+    Ok(t::list_spaces(c)?.into_iter().find(|s| s.slug == slug))
+}
+
+fn label_of_space_id(c: &rusqlite::Connection, space_id: &str) -> Label {
+    match t::get_space(c, space_id) {
+        Ok(Some(space)) => space_label(&space.slug),
+        _ => Label::Unmarked,
+    }
+}
+
+fn label_of_initiative(c: &rusqlite::Connection, initiative_id: &str) -> Label {
+    match t::get_initiative(c, initiative_id) {
+        Ok(Some(i)) => label_of_space_id(c, &i.space_id),
+        _ => Label::Unmarked,
+    }
+}
+
+fn label_of_task(c: &rusqlite::Connection, id: &str) -> Label {
+    match t::get_task(c, id) {
+        Ok(Some(task)) => label_of_initiative(c, &task.initiative_id),
+        _ => Label::Unmarked,
+    }
+}
+
+fn str_list(args: &Value, key: &str) -> Vec<String> {
+    match args.get(key) {
+        Some(Value::String(s)) => vec![s.clone()],
+        Some(Value::Array(items)) => items
+            .iter()
+            .filter_map(|v| v.as_str().map(str::to_string))
+            .collect(),
+        _ => Vec::new(),
+    }
+}
+
+impl ScopedTaskTool {
+    fn writable(&self, label: &Label) -> bool {
+        matches!(label, Label::Private(_))
+            && self.scope.sole_person().is_some()
+            && self.scope.allows(label)
+    }
+
+    fn check_tasks(&self, ids: &[String], write: bool) -> Result<()> {
+        let labels: Vec<Label> = self
+            .db
+            .with_conn(|c| Ok(ids.iter().map(|id| label_of_task(c, id)).collect()))?;
+        let ok = labels.iter().all(|l| {
+            if write {
+                self.writable(l)
+            } else {
+                self.scope.allows(l)
+            }
+        });
+        if ids.is_empty() || !ok {
+            bail!(DENIED_MESSAGE);
+        }
+        Ok(())
+    }
+
+    fn own_space(&self) -> Result<t::Space> {
+        let Some(person) = self.scope.sole_person() else {
+            bail!(DENIED_MESSAGE);
+        };
+        ensure_person_space(&self.db, person).map_err(|e| {
+            tracing::warn!(error = %e, "task scope: could not prepare person space");
+            anyhow::anyhow!(DENIED_MESSAGE)
+        })
+    }
+
+    fn update_write_targets(args: &Value) -> Vec<String> {
+        let mut ids = str_list(args, "id");
+        for key in ["parent_id", "add_depends_on", "remove_depends_on"] {
+            ids.extend(str_list(args, key));
+        }
+        ids
+    }
+
+    fn create_write_targets(args: &Value) -> Vec<String> {
+        let mut ids = str_list(args, "parent_id");
+        ids.extend(str_list(args, "depends_on"));
+        ids
+    }
+
+    async fn create_task(&self, mut args: Value) -> Result<Value> {
+        let space = self.own_space()?;
+        let targets = Self::create_write_targets(&args);
+        if !targets.is_empty() {
+            self.check_tasks(&targets, true)?;
+        }
+        if let Some(iid) = args.get("initiative_id").and_then(Value::as_str) {
+            let label = self.db.with_conn(|c| Ok(label_of_initiative(c, iid)))?;
+            if !self.writable(&label) {
+                bail!(DENIED_MESSAGE);
+            }
+        }
+        args["space_id"] = json!(space.slug);
+        self.inner.execute(args).await
+    }
+
+    async fn create_in_space(&self, mut args: Value) -> Result<Value> {
+        let space = self.own_space()?;
+        if let Some(given) = args.get("space_id").and_then(Value::as_str) {
+            let resolved = self.db.with_conn(|c| resolve_space_id(c, given));
+            if resolved.as_deref().ok() != Some(space.id.as_str()) {
+                bail!(DENIED_MESSAGE);
+            }
+        }
+        args["space_id"] = json!(space.slug);
+        if let Some(obj) = args.as_object_mut() {
+            obj.remove("id_prefix");
+        }
+        self.inner.execute(args).await
+    }
+
+    async fn filtered_list(&self, args: Value, key: &str, space_of: SpaceOf) -> Result<Value> {
+        let mut result = self.inner.execute(args).await?;
+        let mut cache: HashMap<String, bool> = HashMap::new();
+        let Some(rows) = result.get_mut(key).and_then(Value::as_array_mut) else {
+            bail!(DENIED_MESSAGE);
+        };
+        let db = &self.db;
+        rows.retain(|row| {
+            let Some(anchor) = space_of.anchor(row) else {
+                return false;
+            };
+            *cache.entry(anchor.clone()).or_insert_with(|| {
+                let label = db
+                    .with_conn(|c| Ok(space_of.label(c, &anchor, row)))
+                    .unwrap_or(Label::Unmarked);
+                self.scope.allows(&label)
+            })
+        });
+        let n = rows.len();
+        if result.get("count").is_some() {
+            result["count"] = n.into();
+        }
+        Ok(result)
+    }
+}
+
+/// Which field of a listed row ties it to a space, and how to label it.
+#[derive(Clone, Copy)]
+enum SpaceOf {
+    Initiative,
+    SpaceId,
+    SpaceSlug,
+}
+
+impl SpaceOf {
+    fn anchor(self, row: &Value) -> Option<String> {
+        let field = match self {
+            Self::Initiative => "initiative_id",
+            Self::SpaceId => "space_id",
+            Self::SpaceSlug => "slug",
+        };
+        row.get(field).and_then(Value::as_str).map(str::to_string)
+    }
+
+    fn label(self, c: &rusqlite::Connection, anchor: &str, _row: &Value) -> Label {
+        match self {
+            Self::Initiative => label_of_initiative(c, anchor),
+            Self::SpaceId => label_of_space_id(c, anchor),
+            Self::SpaceSlug => space_label(anchor),
+        }
+    }
+}
+
+#[async_trait]
+impl HqTool for ScopedTaskTool {
+    fn name(&self) -> &str {
+        self.inner.name()
+    }
+    fn description(&self) -> &str {
+        self.inner.description()
+    }
+    fn parameters(&self) -> Value {
+        self.inner.parameters()
+    }
+    async fn validate(&self, args: &Value) -> hq_core::types::ValidationResult {
+        self.inner.validate(args).await
+    }
+    fn category(&self) -> &str {
+        self.inner.category()
+    }
+    fn search_hint(&self) -> Option<&str> {
+        self.inner.search_hint()
+    }
+    fn is_read_only(&self) -> bool {
+        self.inner.is_read_only()
+    }
+    fn is_destructive(&self) -> bool {
+        self.inner.is_destructive()
+    }
+    fn requires_live_user_turn(&self) -> bool {
+        self.inner.requires_live_user_turn()
+    }
+    fn tool_policy(&self) -> ToolPolicy {
+        self.inner.tool_policy()
+    }
+    fn timeout_ms(&self) -> Option<u64> {
+        self.inner.timeout_ms()
+    }
+    fn behavioral_prompt(&self) -> Option<&str> {
+        self.inner.behavioral_prompt()
+    }
+
+    async fn execute(&self, args: Value) -> Result<Value> {
+        let name = self.inner.name();
+        if TASK_READ_TOOLS.contains(&name) {
+            let ids = [str_list(&args, "id"), str_list(&args, "task_id")].concat();
+            self.check_tasks(&ids, false)?;
+            return self.inner.execute(args).await;
+        }
+        if TASK_WRITE_TOOLS.contains(&name) {
+            let mut ids = Self::update_write_targets(&args);
+            ids.extend(str_list(&args, "task_id"));
+            self.check_tasks(&ids, true)?;
+            return self.inner.execute(args).await;
+        }
+        match name {
+            "task_create" => self.create_task(args).await,
+            "folder_create" | "initiative_create" => self.create_in_space(args).await,
+            "task_list" => self.filtered_list(args, "tasks", SpaceOf::Initiative).await,
+            "initiative_list" | "folder_list" => {
+                let key = if name == "folder_list" {
+                    "folders"
+                } else {
+                    "initiatives"
+                };
+                self.filtered_list(args, key, SpaceOf::SpaceId).await
+            }
+            "space_list" => self.filtered_list(args, "spaces", SpaceOf::SpaceSlug).await,
+            _ => bail!(DENIED_MESSAGE),
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use hq_core::privacy::{IdentityClaim, PersonRegistry, resolve};
+    use hq_vault::VaultClient;
+    use std::path::PathBuf;
+
+    struct Fixture {
+        db: Arc<Database>,
+        path: PathBuf,
+        vault: Arc<VaultClient>,
+    }
+
+    fn fixture() -> Fixture {
+        let path = PathBuf::from("/tmp/test-vault");
+        Fixture {
+            db: Arc::new(Database::open_memory().unwrap()),
+            vault: Arc::new(VaultClient::new(path.clone()).unwrap()),
+            path,
+        }
+    }
+
+    fn registry() -> PersonRegistry {
+        let family = vec![
+            hq_core::config::DiscordFamilyUser {
+                user_id: 2,
+                name: "Bob".into(),
+            },
+            hq_core::config::DiscordFamilyUser {
+                user_id: 3,
+                name: "Carol".into(),
+            },
+        ];
+        PersonRegistry::from_discord(&[1], &family)
+    }
+
+    fn scope_for(account: &str) -> DisclosureScope {
+        DisclosureScope::for_person(&resolve(&registry(), &IdentityClaim::discord(account)))
+    }
+
+    fn tools_for(f: &Fixture, scope: &DisclosureScope) -> Vec<Box<dyn HqTool>> {
+        let all = super::super::create_task_tools(f.path.clone(), f.vault.clone(), f.db.clone());
+        scope_task_tools(all, f.db.clone(), scope)
+    }
+
+    async fn call(tools: &[Box<dyn HqTool>], name: &str, args: Value) -> Result<Value> {
+        tools
+            .iter()
+            .find(|t| t.name() == name)
+            .unwrap()
+            .execute(args)
+            .await
+    }
+
+    fn denied(r: &Result<Value>) -> bool {
+        r.as_ref().is_err_and(|e| e.to_string() == DENIED_MESSAGE)
+    }
+
+    async fn add(tools: &[Box<dyn HqTool>], title: &str) -> String {
+        let v = call(tools, "task_create", json!({ "title": title }))
+            .await
+            .unwrap();
+        v["id"].as_str().unwrap().to_string()
+    }
+
+    fn space_count(f: &Fixture, slug: &str) -> usize {
+        f.db.with_conn(|c| Ok(t::list_spaces(c)?.iter().filter(|s| s.slug == slug).count()))
+            .unwrap()
+    }
+
+    #[tokio::test]
+    async fn create_routes_to_own_space_and_ignores_requested_space() {
+        let f = fixture();
+        let bob = tools_for(&f, &scope_for("2"));
+        let v = call(
+            &bob,
+            "task_create",
+            json!({ "title": "buy paint", "space_id": "personal" }),
+        )
+        .await
+        .unwrap();
+        let iid = v["initiative_id"].as_str().unwrap().to_string();
+        let slug =
+            f.db.with_conn(|c| {
+                let i = t::get_initiative(c, &iid)?.unwrap();
+                Ok(t::get_space(c, &i.space_id)?.unwrap().slug)
+            })
+            .unwrap();
+        assert_eq!(slug, "people-bob");
+    }
+
+    #[tokio::test]
+    async fn space_is_reused_and_not_duplicated() {
+        let f = fixture();
+        let bob = tools_for(&f, &scope_for("2"));
+        add(&bob, "one").await;
+        add(&bob, "two").await;
+        assert_eq!(space_count(&f, "people-bob"), 1);
+        let person = PersonId::from_name("bob");
+        let again = ensure_person_space(&f.db, &person).unwrap();
+        assert_eq!(again.slug, "people-bob");
+        assert_eq!(space_count(&f, "people-bob"), 1);
+    }
+
+    #[tokio::test]
+    async fn member_cannot_read_or_change_another_persons_task() {
+        let f = fixture();
+        let carol = tools_for(&f, &scope_for("3"));
+        let secret = add(&carol, "carol private").await;
+        let bob = tools_for(&f, &scope_for("2"));
+        for tool in [
+            "task_get",
+            "task_update",
+            "task_delete",
+            "task_comment_list",
+        ] {
+            let args = json!({ "id": secret, "task_id": secret, "title": "x" });
+            assert!(denied(&call(&bob, tool, args).await), "{tool}");
+        }
+        let comment = json!({ "task_id": secret, "body": "hi" });
+        assert!(denied(&call(&bob, "task_comment_add", comment).await));
+        assert!(
+            call(&carol, "task_get", json!({ "id": secret }))
+                .await
+                .is_ok()
+        );
+    }
+
+    #[tokio::test]
+    async fn lists_are_filtered_per_person() {
+        let f = fixture();
+        let carol = tools_for(&f, &scope_for("3"));
+        add(&carol, "carol private").await;
+        let bob = tools_for(&f, &scope_for("2"));
+        add(&bob, "bob private").await;
+        let owner = tools_for(&f, &scope_for("1"));
+        f.db.with_conn(|c| {
+            t::create_space(c, "sp-biz", "Business", "business")?;
+            Ok(())
+        })
+        .unwrap();
+
+        let tasks = call(&bob, "task_list", json!({})).await.unwrap();
+        assert_eq!(tasks["count"], 1);
+        assert_eq!(tasks["tasks"][0]["title"], "bob private");
+        let spaces = call(&bob, "space_list", json!({})).await.unwrap();
+        let slugs: Vec<&str> = spaces["spaces"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .filter_map(|s| s["slug"].as_str())
+            .collect();
+        assert!(slugs.contains(&"people-bob"));
+        assert!(!slugs.contains(&"people-carol") && !slugs.contains(&"business"));
+        let inits = call(&bob, "initiative_list", json!({})).await.unwrap();
+        assert_eq!(inits["initiatives"].as_array().unwrap().len(), 1);
+        let all = call(&owner, "task_list", json!({})).await.unwrap();
+        assert_eq!(all["count"], 2);
+    }
+
+    #[tokio::test]
+    async fn unresolved_and_shared_audiences_cannot_create_or_read() {
+        let f = fixture();
+        let bob = tools_for(&f, &scope_for("2"));
+        let id = add(&bob, "bob private").await;
+        let stranger = tools_for(&f, &scope_for("999"));
+        let denied_create = call(&stranger, "task_create", json!({ "title": "x" })).await;
+        assert!(denied(&denied_create));
+        assert!(denied(
+            &call(&stranger, "task_get", json!({ "id": id })).await
+        ));
+        assert_eq!(space_count(&f, "people-999"), 0);
+
+        let audience = [
+            resolve(&registry(), &IdentityClaim::discord("2")),
+            resolve(&registry(), &IdentityClaim::discord("3")),
+        ];
+        let shared = tools_for(&f, &DisclosureScope::for_audience(&audience));
+        assert!(denied(
+            &call(&shared, "task_create", json!({ "title": "x" })).await
+        ));
+        assert!(denied(
+            &call(&shared, "task_get", json!({ "id": id })).await
+        ));
+        let deny_all = tools_for(&f, &DisclosureScope::deny_all());
+        assert!(denied(
+            &call(&deny_all, "task_create", json!({ "title": "x" })).await
+        ));
+    }
+
+    #[tokio::test]
+    async fn cross_person_links_and_unfilterable_tools_are_refused() {
+        let f = fixture();
+        let carol = tools_for(&f, &scope_for("3"));
+        let theirs = add(&carol, "carol private").await;
+        let bob = tools_for(&f, &scope_for("2"));
+        let sub = json!({ "title": "x", "parent_id": theirs });
+        assert!(denied(&call(&bob, "task_create", sub).await));
+        let dep = json!({ "title": "x", "depends_on": [theirs] });
+        assert!(denied(&call(&bob, "task_create", dep).await));
+        let foreign =
+            f.db.with_conn(|c| Ok(t::list_initiatives(c, None, None)?[0].id.clone()))
+                .unwrap();
+        let filed = json!({ "title": "x", "initiative_id": foreign });
+        assert!(denied(&call(&bob, "task_create", filed).await));
+        for tool in [
+            "space_create",
+            "space_update",
+            "task_related",
+            "task_create_from_note",
+        ] {
+            assert!(
+                denied(&call(&bob, tool, json!({ "id": theirs, "name": "n" })).await),
+                "{tool}"
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn folders_and_initiatives_stay_in_own_space() {
+        let f = fixture();
+        let bob = tools_for(&f, &scope_for("2"));
+        add(&bob, "seed").await;
+        let other = json!({ "space_id": "people-carol", "name": "Plans" });
+        assert!(denied(&call(&bob, "folder_create", other).await));
+        let own = json!({ "name": "Plans" });
+        assert!(call(&bob, "folder_create", own.clone()).await.is_ok());
+        assert!(call(&bob, "folder_create", own).await.is_ok());
+        let folders = f.db.with_conn(|c| t::list_folders(c, None)).unwrap();
+        assert_eq!(folders.len(), 1);
+        let init = call(&bob, "initiative_create", json!({ "name": "Garden" })).await;
+        assert!(init.is_ok());
+    }
+
+    #[tokio::test]
+    async fn owner_is_unwrapped() {
+        let f = fixture();
+        let owner = tools_for(&f, &scope_for("1"));
+        let v = call(
+            &owner,
+            "task_create",
+            json!({ "title": "biz", "space_id": "professional" }),
+        )
+        .await;
+        assert!(v.is_ok());
+        assert_eq!(space_count(&f, "people-owner"), 0);
+    }
+}

@@ -1,0 +1,6 @@
+# Used by .github/workflows/ci.yml. Reviewed historical findings are
+# fingerprinted in .gitleaksignore (see docs/security/SECRET_SCAN.md).
+title = "agent-hq gitleaks config"
+
+[extend]
+useDefault = true
