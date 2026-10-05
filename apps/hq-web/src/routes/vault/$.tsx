@@ -174,7 +174,8 @@ function VaultFileView({ filePath, content, isDir, dirEntries }: {
             return
         }
         // Escape filename and sanitize html to prevent XSS in the print window
-        const safeFilename = filename.replace(/[<>&"']/g, c => ({ '<': '&lt;', '>': '&gt;', '&': '&amp;', '"': '&quot;', "'": '&#39;' }[c] ?? c))
+        const escapeHtml = (s: string) => s.replace(/[<>&"']/g, c => ({ '<': '&lt;', '>': '&gt;', '&': '&amp;', '"': '&quot;', "'": '&#39;' }[c] ?? c))
+        const safeFilename = escapeHtml(filename)
         const safeHtml = DOMPurify.sanitize(html, { USE_PROFILES: { html: true } })
 
         const win = window.open('', '_blank', 'width=900,height=700')
@@ -238,7 +239,7 @@ function VaultFileView({ filePath, content, isDir, dirEntries }: {
 </head>
 <body>
 <h1>${safeFilename}</h1>
-<p class="meta">${filePath} · ${new Date().toLocaleDateString('en-GB', { day: 'numeric', month: 'long', year: 'numeric' })}</p>
+<p class="meta">${escapeHtml(filePath)} · ${new Date().toLocaleDateString('en-GB', { day: 'numeric', month: 'long', year: 'numeric' })}</p>
 ${safeHtml}
 <script>window.onload = () => { window.print(); }<\/script>
 </body>

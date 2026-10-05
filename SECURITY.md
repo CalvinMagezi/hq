@@ -7,8 +7,8 @@ Please report security problems privately, not in a public issue or pull request
 1. Preferred: use GitHub's private vulnerability reporting on this repository
    (Security tab, "Report a vulnerability"). This creates a private security
    advisory that only the maintainers can see.
-2. If that is unavailable, email `security@example.com` with "Agent-HQ security"
-   in the subject.
+2. If that is unavailable, open a public issue that says only that you have a
+   security report and asks for a private channel. Do not include details.
 
 Include what you found, how to reproduce it, the affected version or commit, and
 the impact you expect. You should get an acknowledgement within 7 days. Please

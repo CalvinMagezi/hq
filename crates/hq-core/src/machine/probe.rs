@@ -20,10 +20,16 @@ const AUTH_PROBE_TIMEOUT: Duration = Duration::from_secs(3);
 /// Every probe in this module must go through here — a profile that
 /// disagrees with reality is worse than no profile.
 pub fn which_binary(name: &str) -> Option<PathBuf> {
+    let valid = !name.is_empty()
+        && name.chars().all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '_' | '-'));
+    if !valid {
+        return None;
+    }
     let home = std::env::var("HOME").unwrap_or_default();
     let extra = format!("{home}/.local/bin:{home}/bin:/opt/homebrew/bin:/usr/local/bin");
+    // The name is a positional parameter, never part of the script text.
     Command::new("sh")
-        .args(["-c", &format!("PATH=\"{extra}:$PATH\" command -v {name}")])
+        .args(["-c", &format!("PATH=\"{extra}:$PATH\" command -v \"$1\""), "sh", name])
         .output()
         .ok()
         .filter(|o| o.status.success())
@@ -438,5 +444,18 @@ mod checkout_tests {
             find_agent_hq_checkout().is_some(),
             "must find the checkout this binary was built from"
         );
+    }
+}
+
+#[cfg(test)]
+mod which_tests {
+    use super::which_binary;
+
+    #[test]
+    fn rejects_names_that_are_not_plain_binary_names() {
+        assert!(which_binary("sh; echo pwned").is_none());
+        assert!(which_binary("$(id)").is_none());
+        assert!(which_binary("").is_none());
+        assert!(which_binary("sh").is_some());
     }
 }

@@ -74,7 +74,7 @@ impl HqTool for GitCommitTool {
         } else if let Some(files) = &files {
             for file in files {
                 let out = tokio::process::Command::new("git")
-                    .args(["add", file])
+                    .args(["add", "--", file])
                     .output()
                     .await?;
                 if !out.status.success() {
@@ -168,6 +168,10 @@ impl HqTool for GitDiffTool {
             cmd.arg("--stat");
         }
         if let Some(r) = args.get("ref").and_then(|v| v.as_str()) {
+            // A leading dash would be parsed as an option (`--output=<path>` writes a file).
+            if r.starts_with('-') {
+                return Ok(json!({"error": "ref must not start with '-'"}));
+            }
             cmd.arg(r);
         }
         if let Some(files) = args.get("files").and_then(|v| v.as_array()) {
@@ -456,5 +460,20 @@ impl HqTool for GitPrTool {
         } else {
             Ok(json!({"error": stderr, "output": stdout}))
         }
+    }
+}
+
+#[cfg(test)]
+mod option_injection_tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn git_diff_refuses_refs_that_look_like_options() {
+        let out = GitDiffTool
+            .execute(json!({"ref": "--output=/tmp/hq-should-not-exist"}))
+            .await
+            .unwrap();
+        assert!(out["error"].is_string(), "{out}");
+        assert!(!std::path::Path::new("/tmp/hq-should-not-exist").exists());
     }
 }
