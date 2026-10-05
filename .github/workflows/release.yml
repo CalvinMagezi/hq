@@ -1,11 +1,10 @@
 name: Release
 
-# Builds, signs and publishes a prerelease. Manual runs only by default. To
-# release on every push to main, uncomment the `push` trigger below. Trade-offs:
-# every merge then produces a signed release that instances on the main channel
-# install, it consumes hosted build minutes on every push, and it is only safe
-# with branch protection on main (required review, no admin bypass; see
-# deploy/runner/RUNBOOK.md, "Required GitHub settings").
+# Builds, signs and publishes a prerelease on every push to main and on manual
+# runs. Every merge therefore produces a signed release that instances on the
+# main channel install, so main must stay protected: pull requests only, with the
+# required checks (see deploy/runner/RUNBOOK.md, "Required GitHub settings").
+# Forks that want manual releases only can delete the `push` trigger.
 on:
   workflow_dispatch:
     inputs:
@@ -17,8 +16,8 @@ on:
         description: "Override the floor in release/min-updater-version. Leave empty. Raising it strands older updaters."
         type: string
         default: ""
-  # push:
-  #   branches: [main]
+  push:
+    branches: [main]
 
 permissions: {}
 
