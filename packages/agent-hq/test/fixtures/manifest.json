@@ -1,0 +1,21 @@
+{
+  "schema": 1,
+  "version": "0.9.1-main.6",
+  "git_sha": "6502f60e8d82112c815945db1d9ae4efc5aecd4c",
+  "channel": "main",
+  "built_at": "2026-10-05T11:21:15Z",
+  "min_updater_version": "0.9.0",
+  "requires_db_snapshot": false,
+  "artifacts": [
+    {
+      "name": "hq-0.9.1-main.6-linux-x86_64.tar.gz",
+      "sha256": "67c0a9c8335aa560c1b8190886dbacf2128f451827141bd03e198b13142ccf19",
+      "size": 23456135
+    },
+    {
+      "name": "hq-web-0.9.1-main.6.tar.gz",
+      "sha256": "cd391c5e3cc05091ee5efb6b5cb88fa30a1f43c3cc165f7c60ccf5f6e2448251",
+      "size": 3610908
+    }
+  ]
+}

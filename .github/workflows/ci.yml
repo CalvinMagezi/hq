@@ -108,6 +108,22 @@ jobs:
       - run: bun test
       - run: bun run build
 
+  npm-installer:
+    name: npm installer (test, linux install)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Unit tests
+        working-directory: packages/agent-hq
+        run: npm test
+      - name: Install the latest stable release for real
+        run: |
+          node packages/agent-hq/bin/agent-hq.js --prefix "$RUNNER_TEMP/bin"
+          "$RUNNER_TEMP/bin/hq" --version
+
   supply-chain:
     name: Supply chain (audit, deny)
     runs-on: ubuntu-latest

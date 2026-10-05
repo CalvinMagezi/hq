@@ -1,0 +1,9 @@
+{
+  "schema": 1,
+  "channel": "stable",
+  "version": "0.9.1-main.5",
+  "manifest_url": "https://github.com/CalvinMagezi/hq/releases/download/v0.9.1-main.5/manifest.json",
+  "manifest_sha256": "518f13ea23cfee2711b2d4b13e4ca9e306a6c49115bcfb774c4e444692cfedee",
+  "issued_at": "2026-10-05T10:45:10Z",
+  "seq": 1001
+}

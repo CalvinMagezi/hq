@@ -1,0 +1,16 @@
+{
+  "name": "agent-hq",
+  "version": "0.1.0",
+  "description": "Install HQ, a local-first AI agent hub, with one command.",
+  "type": "module",
+  "bin": { "agent-hq": "bin/agent-hq.js" },
+  "files": ["bin", "lib", "README.md"],
+  "engines": { "node": ">=18.17" },
+  "scripts": { "test": "node --test test/*.test.js" },
+  "repository": { "type": "git", "url": "git+https://github.com/CalvinMagezi/hq.git", "directory": "packages/agent-hq" },
+  "homepage": "https://github.com/CalvinMagezi/hq",
+  "bugs": "https://github.com/CalvinMagezi/hq/issues",
+  "license": "MIT",
+  "keywords": ["ai", "agents", "hq", "installer"],
+  "publishConfig": { "access": "public", "provenance": true }
+}
