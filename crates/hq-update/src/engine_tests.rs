@@ -1428,6 +1428,7 @@ mod http_integration {
             restarter: &f.world,
             health: &f.world,
             host: &f.world,
+            platform: crate::manifest::LEGACY_PLATFORM.into(),
         }
     }
 
@@ -1492,4 +1493,47 @@ mod http_integration {
         assert!(matches!(err, UpdateError::Signature { .. }), "{err}");
         assert!(f.installed_binary().contains(OLD_SHA));
     }
+}
+
+#[tokio::test]
+async fn each_platform_installs_its_own_artifact() {
+    for platform in ["linux-x86_64", "linux-aarch64", "darwin-aarch64"] {
+        let f = Fixture::new();
+        let mut spec = ReleaseSpec::new("0.9.1", NEW_SHA);
+        spec.extra_platforms = vec!["linux-aarch64", "darwin-aarch64"];
+        f.publish_and_point(&spec);
+        let mut engine = f.engine();
+        engine.platform = platform.into();
+        let outcome = engine.apply(&ApplyOptions::default()).await.unwrap();
+        assert!(applied(&outcome), "{platform}: {outcome:?}");
+        let installed = f.installed_binary();
+        if platform == "linux-x86_64" {
+            assert!(!installed.contains("platform="), "{installed}");
+        } else {
+            assert!(
+                installed.contains(&format!("platform={platform}")),
+                "{platform}: {installed}"
+            );
+        }
+    }
+}
+
+#[tokio::test]
+async fn missing_platform_artifact_fails_clearly_without_blocking_the_version() {
+    let f = fixture_with_release();
+    let mut engine = f.engine();
+    engine.platform = "darwin-aarch64".into();
+    let err = engine.apply(&ApplyOptions::default()).await.unwrap_err();
+    assert!(
+        matches!(err, UpdateError::NoPlatformArtifact { .. }),
+        "{err}"
+    );
+    assert!(err.to_string().contains("darwin-aarch64"), "{err}");
+    assert!(f.installed_binary().contains(OLD_SHA));
+    assert!(
+        !State::load(&Layout::from_config(&f.cfg))
+            .unwrap()
+            .is_blocked("0.9.1")
+    );
+    assert!(f.world.events().is_empty(), "{:?}", f.world.events());
 }

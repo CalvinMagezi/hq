@@ -14,7 +14,7 @@ publishes your releases.
 
 Order: provision with `setup-vps.sh` (steps 1 to 2), install HQ with
 `deploy/install.sh` (next section), then Caddy and Tailscale (steps 5 and 6).
-Use a fresh Ubuntu 22.04 or newer x86_64 server; the provisioning script runs
+Use a fresh Ubuntu 22.04 or newer server (x86_64 or aarch64; signed release binaries exist for both, and only x86_64 has run on a real host so far); the provisioning script runs
 `apt upgrade` and enables `ufw`, so keep a console session open in case a
 firewall rule locks out SSH. Steps 3 and 4 below are the manual alternative to
 `install.sh`, for hosts that build from source; do not do both.

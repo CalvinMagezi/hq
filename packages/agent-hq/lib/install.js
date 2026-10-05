@@ -1,10 +1,11 @@
 import { execFileSync, spawnSync } from "node:child_process";
 import { chmodSync, copyFileSync, mkdirSync, mkdtempSync, renameSync, rmSync, writeFileSync } from "node:fs";
-import { homedir, platform, arch, tmpdir } from "node:os";
+import { homedir, tmpdir } from "node:os";
 import { delimiter, join } from "node:path";
-import { DEFAULT_REPO, downloadArtifact, resolveRelease } from "./release.js";
+import { DEFAULT_REPO, downloadArtifact, hasPrebuiltFor, platformKey, resolveRelease } from "./release.js";
 
-export const hasPrebuilt = () => platform() === "linux" && arch() === "x64";
+// Platforms without a published binary (for example Intel Macs) build from source.
+export const hasPrebuilt = (platform = platformKey()) => hasPrebuiltFor(platform);
 
 export function defaultPrefix() {
   return join(homedir(), ".local", "bin");
@@ -28,10 +29,12 @@ export function extractBinary(tarball, destination) {
   }
 }
 
-export async function installPrebuilt({ repo = DEFAULT_REPO, channel = "stable", prefix = defaultPrefix(), log = console.log } = {}) {
+export async function installPrebuilt({ repo = DEFAULT_REPO, channel = "stable", prefix = defaultPrefix(), platform = platformKey(), log = console.log } = {}) {
   log(`Looking up the ${channel} release of ${repo}...`);
-  const release = await resolveRelease({ repo, channel });
-  if (!release.artifact) throw new Error(`release ${release.version} has no linux-x86_64 build`);
+  const release = await resolveRelease({ repo, channel, platform });
+  if (!release.artifact) {
+    throw new Error(`release ${release.version} has no ${platform} build yet; try --channel main or --from-source`);
+  }
   log(`Verified signature for ${release.version} (${String(release.gitSha).slice(0, 7)}). Downloading...`);
   const tarball = await downloadArtifact(release.artifact);
   const destination = { dir: prefix, file: join(prefix, "hq") };

@@ -34,6 +34,10 @@ pub enum UpdateError {
     },
     #[error("version {0} is blocked after a failed update; publish a newer release or use --pin")]
     Blocked(String),
+    #[error(
+        "release {version} has no {platform} binary; this platform is not published for that release"
+    )]
+    NoPlatformArtifact { version: String, platform: String },
     #[error("another update is already running")]
     Locked,
     #[error("unsafe archive: {0}")]

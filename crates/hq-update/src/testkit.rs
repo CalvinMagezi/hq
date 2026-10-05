@@ -86,6 +86,8 @@ pub struct ReleaseSpec {
     /// What the binary inside the tarball claims to be; defaults to the manifest.
     pub binary: Option<Vec<u8>>,
     pub web_items: Option<Vec<(String, Vec<u8>)>>,
+    /// Platforms published besides linux-x86_64; each binary says which it is.
+    pub extra_platforms: Vec<&'static str>,
 }
 
 impl ReleaseSpec {
@@ -98,6 +100,7 @@ impl ReleaseSpec {
             min_updater: "0.9.0".into(),
             binary: None,
             web_items: None,
+            extra_platforms: Vec::new(),
         }
     }
 }
@@ -143,6 +146,19 @@ impl FakeHttp {
             serde_json::json!({"name": bin_name, "sha256": sha256_hex(&bin_bytes), "size": bin_bytes.len()}),
         ];
         self.put(format!("{dir}/{bin_name}"), bin_bytes);
+        for platform in &spec.extra_platforms {
+            let name = manifest::binary_artifact_name_for(v, platform);
+            let tagged = [
+                content.clone(),
+                format!(" platform={platform}\n").into_bytes(),
+            ]
+            .concat();
+            let path = scratch.join(&name);
+            make_tgz(&path, &[Item::File("hq", &tagged)]);
+            let bytes = std::fs::read(&path).unwrap();
+            artifacts.push(serde_json::json!({"name": name, "sha256": sha256_hex(&bytes), "size": bytes.len()}));
+            self.put(format!("{dir}/{name}"), bytes);
+        }
 
         if spec.with_web {
             let web_name = manifest::web_artifact_name(v);
@@ -475,6 +491,7 @@ impl Fixture {
             restarter: &self.world,
             health: &self.world,
             host: &self.world,
+            platform: manifest::LEGACY_PLATFORM.into(),
         }
     }
 

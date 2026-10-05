@@ -91,6 +91,13 @@ install -m 755 target/release/hq ~/.local/bin/hq    # any directory on your PATH
 On macOS, `scripts/install-hq.sh` wraps the same build with code signing and a
 launchd service; it is macOS only and not needed on Linux.
 
+### Install a prebuilt binary
+
+`npx agent-hq` downloads the latest stable release, verifies its minisign
+signature and checksum, and installs `hq` into `~/.local/bin`. Prebuilt binaries
+exist for Linux x86_64, Linux aarch64 and macOS on Apple Silicon. Other
+platforms, including Intel Macs, build from source with `cargo`.
+
 The web UI is built separately (see [PWA Dashboard](#pwa-dashboard)) and needs [bun](https://bun.sh).
 
 ### First Run
@@ -120,7 +127,8 @@ hq update --rollback   # return to the previous binary
 
 The updater is new and has run on two real hosts so far; read
 [`docs/UPDATE_SYSTEM.md`](docs/UPDATE_SYSTEM.md) before relying on it. It supports
-`linux-x86_64` only (Ubuntu 22.04 or newer). It verifies a minisign signature, swaps the binary and web files,
+Linux on x86_64 and aarch64 (Ubuntu 22.04 or newer); `deploy/install.sh` picks the
+binary for the host CPU and refuses macOS. The updater verifies a minisign signature, swaps the binary and web files,
 restarts, checks `/health` and rolls back on failure. See
 [`deploy/README.md`](deploy/README.md) for the full walkthrough (Caddy, Tailscale,
 Herdr, GitHub access) and [`docs/UPDATE_SYSTEM.md`](docs/UPDATE_SYSTEM.md) for the

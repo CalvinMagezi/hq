@@ -8,8 +8,33 @@ pub const SCHEMA_VERSION: u32 = 1;
 pub const MANIFEST_NAME: &str = "manifest.json";
 pub const SIGNATURE_SUFFIX: &str = ".minisig";
 
+/// The platform every release must carry. Updaters released before
+/// multi-platform artifacts only look for this name, so it never changes.
+pub const LEGACY_PLATFORM: &str = "linux-x86_64";
+
+/// Maps `std::env::consts` OS and ARCH to the `<os>-<arch>` names used in
+/// artifact file names. Unknown values pass through and simply will not
+/// match any artifact.
+pub fn platform_name(os: &str, arch: &str) -> String {
+    let os = match os {
+        "macos" => "darwin",
+        other => other,
+    };
+    format!("{os}-{arch}")
+}
+
+/// The platform this binary was compiled for.
+pub fn host_platform() -> String {
+    platform_name(std::env::consts::OS, std::env::consts::ARCH)
+}
+
+pub fn binary_artifact_name_for(version: &str, platform: &str) -> String {
+    format!("hq-{version}-{platform}.tar.gz")
+}
+
+/// The linux-x86_64 artifact name, required in every manifest.
 pub fn binary_artifact_name(version: &str) -> String {
-    format!("hq-{version}-linux-x86_64.tar.gz")
+    binary_artifact_name_for(version, LEGACY_PLATFORM)
 }
 
 pub fn web_artifact_name(version: &str) -> String {
@@ -247,6 +272,40 @@ mod tests {
         let m = Manifest::parse(sample("0.9.1").to_string().as_bytes()).unwrap();
         assert_eq!(m.version, "0.9.1");
         assert!(!m.requires_db_snapshot);
+    }
+
+    #[test]
+    fn platform_names_map_rust_consts() {
+        assert_eq!(platform_name("linux", "x86_64"), "linux-x86_64");
+        assert_eq!(platform_name("linux", "aarch64"), "linux-aarch64");
+        assert_eq!(platform_name("macos", "aarch64"), "darwin-aarch64");
+        assert_eq!(platform_name("macos", "x86_64"), "darwin-x86_64");
+        assert_eq!(platform_name("freebsd", "x86_64"), "freebsd-x86_64");
+    }
+
+    #[test]
+    fn linux_x86_64_artifact_name_is_frozen() {
+        assert_eq!(
+            binary_artifact_name("0.9.1-main.6"),
+            "hq-0.9.1-main.6-linux-x86_64.tar.gz"
+        );
+        assert_eq!(
+            binary_artifact_name_for("0.9.1", LEGACY_PLATFORM),
+            binary_artifact_name("0.9.1")
+        );
+        assert_eq!(
+            binary_artifact_name_for("0.9.1", "darwin-aarch64"),
+            "hq-0.9.1-darwin-aarch64.tar.gz"
+        );
+    }
+
+    #[test]
+    fn extra_platform_artifacts_are_accepted() {
+        let mut v = sample("0.9.1");
+        v["artifacts"].as_array_mut().unwrap().push(serde_json::json!(
+            {"name": binary_artifact_name_for("0.9.1", "darwin-aarch64"), "sha256": "b".repeat(64), "size": 10}
+        ));
+        assert!(Manifest::parse(v.to_string().as_bytes()).is_ok());
     }
 
     #[test]

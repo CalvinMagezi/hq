@@ -220,11 +220,27 @@ Every build publishes a GitHub release with tag `v<version>` containing:
 
 | Asset | Content |
 |---|---|
-| `hq-<version>-linux-x86_64.tar.gz` | A tar.gz holding exactly one file, `hq` (a leading `./` is tolerated). |
+| `hq-<version>-<os>-<arch>.tar.gz` | One per platform, see the table below. A tar.gz holding exactly one file, `hq` (a leading `./` is tolerated). |
 | `hq-web-<version>.tar.gz` | The contents of `apps/hq-web/dist/client`, with `index.html`, `sw.js` and `manifest.json` at the top level. Optional for releases that do not change the web build. |
 | `SHA256SUMS` | `sha256sum` of the other assets, for humans. The updater does not read it. |
 | `manifest.json` | Described below. |
 | `manifest.json.minisig` | `minisign -S -m manifest.json` signature (prehashed). |
+
+Binary artifacts and the runners that build them:
+
+| Platform | Artifact | Built on | Notes |
+|---|---|---|---|
+| linux-x86_64 | `hq-<version>-linux-x86_64.tar.gz` | `ubuntu-22.04` | glibc 2.35 floor. Required in every manifest. The name is frozen: updaters released before multi-platform builds look for exactly this name. |
+| linux-aarch64 | `hq-<version>-linux-aarch64.tar.gz` | `ubuntu-22.04-arm` | Same glibc floor. |
+| darwin-aarch64 | `hq-<version>-darwin-aarch64.tar.gz` | `macos-14` | Apple Silicon. The CLI only; servers use Linux. |
+
+`<os>` is `linux` or `darwin` and `<arch>` is `x86_64` or `aarch64`. There is no
+`darwin-x86_64` build. The updater picks the artifact for the platform it was
+compiled for (`std::env::consts::OS` and `ARCH`, with `macos` written as
+`darwin`). If the manifest has no artifact for that platform it stops with an
+error naming the platform and does not block the version, because a missing
+build says nothing about the release itself; a build for that platform in a
+later release installs normally.
 
 `<version>` is semver without a leading `v`. Convention: stable releases are
 `X.Y.Z`; builds of `main` are `X.Y.Z-main.<run_number>` (a semver prerelease, so
@@ -244,6 +260,8 @@ increase monotonically within a channel; the updater only moves forward.
   "requires_db_snapshot": false,
   "artifacts": [
     { "name": "hq-0.9.1-linux-x86_64.tar.gz", "sha256": "<64 lowercase hex>", "size": 52428800 },
+    { "name": "hq-0.9.1-linux-aarch64.tar.gz", "sha256": "<64 lowercase hex>", "size": 50331648 },
+    { "name": "hq-0.9.1-darwin-aarch64.tar.gz", "sha256": "<64 lowercase hex>", "size": 46137344 },
     { "name": "hq-web-0.9.1.tar.gz", "sha256": "<64 lowercase hex>", "size": 1048576 }
   ]
 }
@@ -258,8 +276,10 @@ increase monotonically within a channel; the updater only moves forward.
 - `requires_db_snapshot`: set `true` for releases with schema changes that are
   not safe to run against an old binary, so a rollback always restores the
   pre-update database.
-- Artifact names must be plain file names (`A-Za-z0-9._-+`). The binary
-  artifact is required; the web artifact is optional.
+- Artifact names must be plain file names (`A-Za-z0-9._-+`). The linux-x86_64
+  binary artifact is required (it keeps older updaters working); other platform
+  binaries and the web artifact are optional. Adding platform artifacts is
+  additive: the schema stays `1` and `min_updater_version` is unchanged.
 
 ### Channel pointers
 
@@ -357,7 +377,6 @@ live one as `dist.prev`.
 
 - The binary swap is one atomic rename. The web swap is two renames (live to
   `dist.prev`, staged to live); a crash between them is repaired by the next run.
-- The manifest URL scheme only supports `linux-x86_64` binaries.
 - The updater needs systemd for restarts on Linux. The macOS path reuses
   hq-core's launchd kickstart and has no stop step.
 - The updater does not write `/opt/hq/deployed.sha` or fast-forward `/opt/hq/src`

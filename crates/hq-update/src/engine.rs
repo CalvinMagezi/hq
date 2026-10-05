@@ -87,6 +87,8 @@ pub struct Engine<'a> {
     pub restarter: &'a dyn Restarter,
     pub health: &'a dyn Health,
     pub host: &'a dyn Host,
+    /// `<os>-<arch>` of the running binary, see `manifest::host_platform`.
+    pub platform: String,
 }
 
 struct Resolved {
@@ -624,13 +626,16 @@ impl Engine<'_> {
         swap::make_private_dir(&work.0)?;
         let limits = &self.cfg.limits;
 
+        // A missing platform is not a bad build, so it must not block the version.
+        let bin_name = manifest::binary_artifact_name_for(&m.version, &self.platform);
+        if m.artifact(&bin_name).is_none() {
+            return Err(UpdateError::NoPlatformArtifact {
+                version: m.version.clone(),
+                platform: self.platform.clone(),
+            });
+        }
         let bin_tgz = self
-            .download_artifact(
-                resolved,
-                &manifest::binary_artifact_name(&m.version),
-                limits.max_binary_bytes,
-                &work.0,
-            )
+            .download_artifact(resolved, &bin_name, limits.max_binary_bytes, &work.0)
             .await?;
         let web_name = manifest::web_artifact_name(&m.version);
         let web_tgz = if m.artifact(&web_name).is_some() {
