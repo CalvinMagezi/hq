@@ -49,8 +49,8 @@ usage: install.sh --repo <owner>/<repo> --pubkey <minisign.pub> [options]
   --no-start                install everything but do not run the first update
 A re-run keeps channel and base_url from the existing update.conf unless you pass them again.
 Without --bootstrap-binary the first release is downloaded and its manifest
-signature is checked with the 'minisign' tool (apt install minisign), or
-pinned with --bootstrap-sha256 when minisign is unavailable.
+signature is checked with the 'minisign' tool when present, else with OpenSSL (1.1.1 or
+newer, already on Ubuntu 22.04), or pinned with --bootstrap-sha256.
 USAGE
     exit 2
 }
@@ -116,9 +116,59 @@ printf '%s' "$PUBKEY_LINE" | grep -Eq '^RW[A-Za-z0-9+/]{54,}={0,2}$' || die "$PU
     || die "run this from a checkout of the repository (deploy/ templates not found under $SRC_DIR)"
 
 # Fail before touching the system if the first download could not be verified.
-if [ ! -x "$BIN" ] && [ -z "$BOOTSTRAP_BIN" ] && [ -z "$BOOTSTRAP_SHA256" ] && ! command -v minisign >/dev/null 2>&1; then
-    die "cannot verify the first download: install minisign, or pass --bootstrap-sha256 or --bootstrap-binary"
+# Verifies a minisign signature (file signature and trusted comment) with OpenSSL 1.1.1 or newer,
+# so a host without the minisign tool (it is not packaged for Ubuntu 22.04) can still verify.
+verify_minisign_openssl() {
+    local msg="$1" sigfile="$2" publine="$3" w ok=1
+    command -v openssl >/dev/null 2>&1 || return 2
+    w="$(mktemp -d)"
+    {
+        printf '%s' "$publine" | base64 -d > "$w/pub.raw" 2>/dev/null &&
+        [ "$(wc -c < "$w/pub.raw")" -eq 42 ] &&
+        [ "$(head -c 2 "$w/pub.raw")" = "Ed" ] &&
+        tail -c 32 "$w/pub.raw" > "$w/key.raw" &&
+        { printf '\x30\x2a\x30\x05\x06\x03\x2b\x65\x70\x03\x21\x00'; cat "$w/key.raw"; } > "$w/pub.der" &&
+        sed -n 2p "$sigfile" | base64 -d > "$w/sig.raw" 2>/dev/null &&
+        [ "$(wc -c < "$w/sig.raw")" -eq 74 ] &&
+        [ "$(head -c 2 "$w/sig.raw" | tr -d '\0')" = "ED" ] &&
+        [ "$(dd if="$w/sig.raw" bs=1 skip=2 count=8 2>/dev/null | od -An -tx1 | tr -d ' \n')" = "$(dd if="$w/pub.raw" bs=1 skip=2 count=8 2>/dev/null | od -An -tx1 | tr -d ' \n')" ] &&
+        tail -c 64 "$w/sig.raw" > "$w/sig.bin" &&
+        openssl dgst -blake2b512 -binary "$msg" > "$w/hash.bin" &&
+        openssl pkeyutl -verify -pubin -inkey "$w/pub.der" -keyform DER -rawin -in "$w/hash.bin" -sigfile "$w/sig.bin" >/dev/null 2>&1 &&
+        { sed -n 3p "$sigfile" | sed 's/^trusted comment: //' | tr -d '\n' > "$w/comment.txt"; } &&
+        sed -n 4p "$sigfile" | base64 -d > "$w/global.bin" 2>/dev/null &&
+        [ "$(wc -c < "$w/global.bin")" -eq 64 ] &&
+        { cat "$w/sig.bin" "$w/comment.txt"; } > "$w/global.msg" &&
+        openssl pkeyutl -verify -pubin -inkey "$w/pub.der" -keyform DER -rawin -in "$w/global.msg" -sigfile "$w/global.bin" >/dev/null 2>&1
+    } && ok=0
+    rm -rf "$w"
+    return "$ok"
+}
+
+# Uses the minisign tool when present, else OpenSSL. Arguments: message-file signature-file.
+verify_signature() {
+    if command -v minisign >/dev/null 2>&1; then
+        minisign -V -P "$PUBKEY_LINE" -m "$1" -x "$2" >/dev/null 2>&1
+    else
+        verify_minisign_openssl "$1" "$2" "$PUBKEY_LINE"
+    fi
+}
+can_verify() { command -v minisign >/dev/null 2>&1 || command -v openssl >/dev/null 2>&1; }
+
+if [ ! -x "$BIN" ] && [ -z "$BOOTSTRAP_BIN" ] && [ -z "$BOOTSTRAP_SHA256" ] && ! can_verify; then
+    die "cannot verify the first download: install openssl or minisign, or pass --bootstrap-sha256 or --bootstrap-binary"
 fi
+
+# The agent bash tool refuses to run without an OS sandbox, so a fresh host needs bubblewrap.
+ensure_sandbox() {
+    command -v bwrap >/dev/null 2>&1 && return 0
+    if command -v apt-get >/dev/null 2>&1; then
+        log "installing bubblewrap (the bash tool sandbox)"
+        apt-get update -qq && apt-get install -y -qq bubblewrap && return 0
+    fi
+    echo "warning: bubblewrap is not installed, so the agent bash tool will refuse every command until it is." >&2
+    echo "         Install it, or set governance.bash.sandbox to best_effort in the config to run unwrapped." >&2
+}
 
 ensure_packages() {
     local missing=()
@@ -280,21 +330,21 @@ bootstrap_binary() {
     local name="hq-$version-$PLATFORM.tar.gz" want
     want="$(jq -er --arg n "$name" '.artifacts[] | select(.name == $n) | .sha256' "$TMP/manifest.json")" \
         || die "release $version has no $PLATFORM binary (see docs/UPDATE_SYSTEM.md for the platforms it publishes)"
-    if command -v minisign >/dev/null 2>&1; then
+    if can_verify; then
         fetch "$release/channel-$CHANNEL/channel-$CHANNEL.json.minisig" "$TMP/channel.json.minisig"
-        minisign -V -P "$PUBKEY_LINE" -m "$TMP/channel.json" -x "$TMP/channel.json.minisig" >/dev/null \
+        verify_signature "$TMP/channel.json" "$TMP/channel.json.minisig" \
             || die "channel pointer signature does not verify against $PUBKEY_FILE"
         [ "$(jq -er .channel "$TMP/channel.json")" = "$CHANNEL" ] || die "channel pointer is for a different channel"
         [ "$(sha256sum "$TMP/manifest.json" | cut -d' ' -f1)" = "$(jq -er .manifest_sha256 "$TMP/channel.json")" ] \
             || die "manifest does not match the channel pointer"
         fetch "$manifest_url.minisig" "$TMP/manifest.json.minisig"
-        minisign -V -P "$PUBKEY_LINE" -m "$TMP/manifest.json" -x "$TMP/manifest.json.minisig" >/dev/null \
+        verify_signature "$TMP/manifest.json" "$TMP/manifest.json.minisig" \
             || die "manifest signature does not verify against $PUBKEY_FILE"
         [ "$(jq -er .version "$TMP/manifest.json")" = "$version" ] || die "manifest version differs from the pointer"
     elif [ -n "$BOOTSTRAP_SHA256" ]; then
         want="$BOOTSTRAP_SHA256"
     else
-        die "cannot verify the first download: install minisign or pass --bootstrap-sha256 or --bootstrap-binary"
+        die "cannot verify the first download: install openssl or minisign, or pass --bootstrap-sha256 or --bootstrap-binary"
     fi
 
     fetch "${manifest_url%/*}/$name" "$TMP/$name"
@@ -332,6 +382,7 @@ enable_timer() {
 }
 
 ensure_packages
+ensure_sandbox
 ensure_user_and_dirs
 install_config
 install_units
