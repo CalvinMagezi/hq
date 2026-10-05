@@ -93,7 +93,7 @@ launchd service; it is macOS only and not needed on Linux.
 
 ### Install a prebuilt binary
 
-`npx agent-hq-cli` downloads the latest stable release, verifies its minisign
+`curl -fsSL https://agent-hq.online/install.sh | bash` (or `npx agent-hq-cli`, which needs Node 18.17+) downloads the latest stable release, verifies its minisign
 signature and checksum, and installs `hq` into `~/.local/bin`. Prebuilt binaries
 exist for Linux x86_64, Linux aarch64 and macOS on Apple Silicon. Other
 platforms, including Intel Macs, build from source with `cargo`.

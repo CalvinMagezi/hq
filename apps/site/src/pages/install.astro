@@ -25,6 +25,7 @@ const tsConfig = 'web_allowed_origins:\n  - https://hq.example.ts.net:8443\nweb_
 const tsOff = 'sudo tailscale serve --https=8443 off';
 
 const npx = installChannels.npx;
+const curl = installChannels.curl;
 ---
 
 <Layout
@@ -37,13 +38,14 @@ const npx = installChannels.npx;
       <span class="eyebrow">Install</span>
       <h1>Install Agent HQ</h1>
       <p class="lede prose">
-        There are four working ways in. The quickest is one command that downloads a verified release. Building from source runs on Linux and macOS. The server path
+        There are five working ways in. The quickest is one command that downloads a verified release. Building from source runs on Linux and macOS. The server path
         installs signed releases and updates itself, and it is Linux only. Tailscale is the
         optional way to open the web UI from your phone.
       </p>
       <nav aria-label="On this page">
         <ul class="toc">
-          <li><a href="#npx">Quick install with npx</a></li>
+          <li><a href="#script">Install script</a></li>
+          <li><a href="#npx">npx installer</a></li>
           <li><a href="#source">Build from source</a></li>
           <li><a href="#server">Server with signed releases</a></li>
           <li><a href="#tailscale">Remote access over Tailscale</a></li>
@@ -55,12 +57,31 @@ const npx = installChannels.npx;
 
   <div class="container">
     {
+      curl.available && (
+        <section class="doc-section" id="script" aria-labelledby="script-h">
+          <h2 id="script-h">{curl.title}</h2>
+          <div class="prose">
+            <p>
+              The quickest way in, with nothing to install first. It detects your platform (Linux x86_64 or
+              ARM, or an Apple Silicon Mac), downloads the latest stable release, verifies its minisign signature
+              and SHA-256 checksum against the project key, and installs <code>hq</code> into
+              <code>~/.local/bin</code>. It checks signatures with the <code>minisign</code> tool or with OpenSSL;
+              on a Mac, install one of them first (<code>brew install minisign</code>). Read the script before you
+              run it: <a href="/install.sh">install.sh</a>.
+            </p>
+            <CodeBlock id="curl-cmd" label="Shell" code={curl.command} />
+            <p>Then run <code>hq install</code>, add an API key with <code>hq env</code>, and check with <code>hq doctor</code>.</p>
+          </div>
+        </section>
+      )
+    }
+    {
       npx.available && (
         <section class="doc-section" id="npx" aria-labelledby="npx-h">
           <h2 id="npx-h">{npx.title}</h2>
           <div class="prose">
             <p>
-              Needs Node 18.17 or newer. It downloads the latest stable release for your platform, checks the
+              Needs Node 18.17 or newer, which stock Ubuntu 22.04 does not have; use the install script there. It downloads the latest stable release for your platform, checks the
               minisign signature and the SHA-256 checksum against the project key, and installs
               <code>hq</code> into <code>~/.local/bin</code>. On a platform without a prebuilt binary it
               builds from source with cargo.
@@ -237,7 +258,7 @@ const npx = installChannels.npx;
         </p>
         <ul class="facts">
           <li>Prebuilt binaries for Intel Macs and for Windows.</li>
-          <li>A <code>curl | sh</code> installer, a Homebrew tap and a Docker image.</li>
+          <li>A Homebrew tap and a Docker image.</li>
         </ul>
       </div>
     </section>

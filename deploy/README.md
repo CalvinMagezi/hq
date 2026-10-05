@@ -71,8 +71,9 @@ build side holds a key to the instance.
 sudo deploy/install.sh --repo CalvinMagezi/hq --channel stable --pubkey release/minisign.pub
 # Your own fork: --repo <owner>/<repo> --pubkey <your minisign public key>
 ```
-Install `minisign` first (`apt install minisign`) so the first download can be
-verified, or pass `--bootstrap-sha256`.
+The first download is verified with the `minisign` tool when it is installed, otherwise
+with OpenSSL (1.1.1 or newer, already present on Ubuntu 22.04). You can also pass
+`--bootstrap-sha256`.
 
 `--repo` is the GitHub repository that publishes the releases, `--channel` is
 `main` or `stable`, and `--pubkey` is the minisign public key that signs them.
