@@ -12,6 +12,13 @@ publishes your releases.
 
 ## One-time server setup
 
+Order: provision with `setup-vps.sh` (steps 1 to 2), install HQ with
+`deploy/install.sh` (next section), then Caddy and Tailscale (steps 5 and 6).
+Use a fresh Ubuntu 22.04 or newer x86_64 server; the provisioning script runs
+`apt upgrade` and enables `ufw`, so keep a console session open in case a
+firewall rule locks out SSH. Steps 3 and 4 below are the manual alternative to
+`install.sh`, for hosts that build from source; do not do both.
+
 1. Provision a VPS (any distro `apt` targets; the script assumes Debian or
    Ubuntu). Add an SSH alias for it, for example in `~/.ssh/config`:
    ```
@@ -60,8 +67,12 @@ web files, restarts, checks `/health` and rolls back on failure. Nothing on the
 build side holds a key to the instance.
 
 ```
-sudo deploy/install.sh --repo <owner>/<repo> --channel stable --pubkey ./update.pub
+# Official releases of this project:
+sudo deploy/install.sh --repo CalvinMagezi/hq --channel stable --pubkey release/minisign.pub
+# Your own fork: --repo <owner>/<repo> --pubkey <your minisign public key>
 ```
+Install `minisign` first (`apt install minisign`) so the first download can be
+verified, or pass `--bootstrap-sha256`.
 
 `--repo` is the GitHub repository that publishes the releases, `--channel` is
 `main` or `stable`, and `--pubkey` is the minisign public key that signs them.

@@ -1,5 +1,7 @@
 # Release runbook
 
+> Maintainer only. This is the optional fallback for building releases on your own droplet. You do not need it to install or run HQ.
+
 Releases are built and signed by GitHub Actions on **GitHub-hosted ephemeral runners** (`ubuntu-latest`). No server of ours takes part. The self-hosted release runner described under "Fallback" below stays in the repository as a documented fallback if GitHub starts charging for or limiting hosted minutes.
 
 ## Release model
