@@ -2,29 +2,29 @@
   {
     "id": "dashboard",
     "kind": "image",
-    "src": "/media/dashboard.png",
-    "alt": "The HQ web dashboard showing a streaming chat on the left and daemon status on the right.",
-    "caption": "The web dashboard: one chat, daemon status and search in a single PWA.",
-    "width": 1600,
-    "height": 1000
+    "src": "/media/dashboard.jpg",
+    "alt": "The HQ home screen: a vault search box, recent project notes as cards with tags, and a list of in-progress tasks.",
+    "caption": "The home screen: search, recent notes and in-progress tasks in one place. Demo data.",
+    "width": 1485,
+    "height": 812
   },
   {
     "id": "vault-browser",
     "kind": "image",
-    "src": "/media/vault-browser.png",
-    "alt": "The vault browser listing notebook folders with a markdown note open beside the list.",
-    "caption": "The vault browser: plain markdown notes, searchable, on your own disk.",
-    "width": 1600,
-    "height": 1000
+    "src": "/media/vault-browser.jpg",
+    "alt": "The vault explorer listing notebook folders beside a markdown note about webhook retries with a text code block.",
+    "caption": "The vault browser: plain markdown notes on your own disk, searchable. Demo data.",
+    "width": 1485,
+    "height": 812
   },
   {
     "id": "tasks-board",
     "kind": "image",
-    "src": "/media/tasks-board.png",
-    "alt": "The tasks board with cards arranged in columns by status.",
-    "caption": "The tasks board: spaces, initiatives, tasks and comments, as list, board or timeline.",
-    "width": 1600,
-    "height": 1000
+    "src": "/media/tasks-board.jpg",
+    "alt": "The tasks board with cards in To do, In progress, Blocked, Ready for review and Complete columns.",
+    "caption": "The tasks board: spaces, initiatives and tasks as a list, board or timeline. Demo data.",
+    "width": 1485,
+    "height": 812
   },
   {
     "id": "sessions-list",
