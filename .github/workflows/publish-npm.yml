@@ -1,7 +1,8 @@
 name: Publish npm installer
 
 # Publishes packages/agent-hq to npm with provenance. Manual only, from main.
-# Needs an `npm` environment holding an NPM_TOKEN secret (automation token).
+# Uses npm trusted publishing (OIDC): configure this workflow as a trusted publisher
+# for the package on npmjs.com. No npm token is stored in the repository.
 on:
   workflow_dispatch:
 
@@ -30,8 +31,7 @@ jobs:
         run: npm test
       - name: Publish
         working-directory: packages/agent-hq
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        # Trusted publishing: npm exchanges the workflow's OIDC token, so no npm token is stored.
         run: |
-          npm config set //registry.npmjs.org/:_authToken "$NODE_AUTH_TOKEN"
+          npm install --global npm@11.6.2 # zizmor: ignore[adhoc-packages] trusted publishing needs npm 11.5.1 or newer, pinned exactly
           npm publish --provenance --access public
