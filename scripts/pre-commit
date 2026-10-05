@@ -33,7 +33,7 @@ FOUND=0
 
 for pattern in "${PATTERNS[@]}"; do
     # Only scan staged (added/modified) files, not deletions
-    matches=$(git diff --cached --diff-filter=ACMR -U0 -- | grep -E "^\+" | grep -v "^\\+\\+\\+" | grep -iE "$pattern" || true)
+    matches=$(git diff --cached --diff-filter=ACMR -U0 -- | grep -E "^\+" | grep -vE '^\+\+\+' | grep -iE "$pattern" || true)
     if [ -n "$matches" ]; then
         if [ "$FOUND" -eq 0 ]; then
             echo -e "${RED}ERROR: Personal/sensitive data detected in staged changes:${NC}"
