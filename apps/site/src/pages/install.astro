@@ -1,0 +1,235 @@
+---
+import Layout from '../layouts/Layout.astro';
+import CodeBlock from '../components/CodeBlock.astro';
+import { installChannels } from '../data/install-channels';
+import { links, REPO } from '../data/site';
+
+const cloneCmd = `git clone ${REPO}.git\ncd hq`;
+const rustupCmd = "curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh";
+const linuxDeps = 'sudo apt install -y build-essential pkg-config perl libssl-dev';
+const buildCmd = 'cargo build --release -p hq-cli';
+const pathCmd = 'install -m 755 target/release/hq "$HOME/.local/bin/hq"';
+const firstRun = 'hq install   # scaffold the vault, seed the soul, write config\nhq env       # set LLM API keys interactively\nhq doctor    # verify the setup\nhq chat      # start an interactive session';
+const webBuild = 'cd apps/hq-web && bun install && bun run build\ncp -r dist/client ../../web/dist\ncd ../..\nhq start all   # API, WebSocket and the PWA on :5678\nhq pwa         # open http://localhost:5678';
+const mcpCmd = 'hq mcp install --target claude-code\nhq mcp status';
+
+const provision = "ssh <ssh-host> 'bash -s' < deploy/setup-vps.sh";
+const serverDeps = 'sudo apt install -y bubblewrap minisign';
+const serverInstall = 'sudo deploy/install.sh --repo CalvinMagezi/hq --channel stable --pubkey release/minisign.pub';
+const updateOps = 'hq update --check                  # exit 10 means an update is waiting\nhq update --apply --dry-run        # verify the release, change nothing\nhq update --apply\nhq update --pin <version> --apply  # exact version, downgrades allowed\nhq update --rollback               # previous binary and web files';
+
+const tsCaddy = 'sudo cp deploy/Caddyfile.pwa /etc/caddy/Caddyfile.pwa\necho "import Caddyfile.pwa" | sudo tee -a /etc/caddy/Caddyfile\nsudo caddy validate --config /etc/caddy/Caddyfile && sudo systemctl reload caddy';
+const tsUp = 'sudo tailscale up';
+const tsServe = 'sudo tailscale serve --bg --https=8443 http://127.0.0.1:4749\ntailscale serve status';
+const tsConfig = 'web_allowed_origins:\n  - https://hq.example.ts.net:8443\nweb_auth_token: "<a long random value>"';
+const tsOff = 'sudo tailscale serve --https=8443 off';
+
+const npx = installChannels.npx;
+---
+
+<Layout
+  title="Install"
+  description="Install Agent HQ: build from source with cargo, set up a server with signed releases, and reach the web UI over Tailscale. Every command can be copied."
+  path="/install/"
+>
+  <section class="band">
+    <div class="container section">
+      <span class="eyebrow">Install</span>
+      <h1>Install Agent HQ</h1>
+      <p class="lede prose">
+        There are three working ways in. Building from source runs on Linux and macOS. The server path
+        installs signed releases and updates itself, and it is Linux on x86_64 only. Tailscale is the
+        optional way to open the web UI from your phone.
+      </p>
+      <nav aria-label="On this page">
+        <ul class="toc">
+          <li><a href="#source">Build from source</a></li>
+          <li><a href="#server">Server with signed releases</a></li>
+          <li><a href="#tailscale">Remote access over Tailscale</a></li>
+          <li><a href="#soon">Not available yet</a></li>
+        </ul>
+      </nav>
+    </div>
+  </section>
+
+  <div class="container">
+    <section class="doc-section" id="source" aria-labelledby="source-h">
+      <h2 id="source-h">{installChannels.cargo.title}</h2>
+      <div class="prose">
+        <p>
+          You need git, a recent stable Rust toolchain and at least one LLM API key from OpenRouter,
+          Anthropic or Google AI. Edition 2024 needs Rust 1.85 or newer, and CI pins 1.98.1. The web UI
+          also needs <a href={links.bun}>bun</a>.
+        </p>
+      </div>
+      <ol class="steps">
+        <li>
+          <p>Install Rust with <a href={links.rustup}>rustup</a>, if you do not have it.</p>
+          <CodeBlock id="src-rustup" label="Install Rust" code={rustupCmd} />
+        </li>
+        <li>
+          <p>Clone the repository.</p>
+          <CodeBlock id="src-clone" label="Clone" code={cloneCmd} />
+        </li>
+        <li>
+          <p>On Debian or Ubuntu, install the build dependencies first.</p>
+          <CodeBlock id="src-deps" label="Linux build dependencies" code={linuxDeps} />
+        </li>
+        <li>
+          <p>Build the release binary. It is about 40 MB.</p>
+          <CodeBlock id="src-build" label="Build" code={buildCmd} />
+        </li>
+        <li>
+          <p>Put it on your PATH. Make sure <code>~/.local/bin</code> is on it.</p>
+          <CodeBlock id="src-path" label="Install the binary" code={pathCmd} />
+        </li>
+        <li>
+          <p>Run first-run setup.</p>
+          <CodeBlock id="src-first" label="First run" code={firstRun} />
+        </li>
+        <li>
+          <p>
+            Optional: build the web UI and serve it. The server serves <code>web/dist</code> next to
+            the vault, or the directory in <code>web_static_dir</code>.
+          </p>
+          <CodeBlock id="src-web" label="Web UI" code={webBuild} />
+        </li>
+        <li>
+          <p>Optional: connect an MCP client such as Claude Code.</p>
+          <CodeBlock id="src-mcp" label="MCP" code={mcpCmd} />
+        </li>
+      </ol>
+      <div class="prose">
+        <p>
+          Chat relays need a bot token in <code>~/.hq/config.yaml</code>. Then run
+          <code>hq pair</code> and send the code from your own account, so the bot knows who the owner
+          is. The <a href={links.readme}>README</a> has the config keys.
+        </p>
+        <p>
+          Agent shell commands need a sandbox. On macOS that is <code>sandbox-exec</code>, which ships
+          with the system. On Linux install bubblewrap, or HQ refuses to run model-written bash.
+        </p>
+      </div>
+    </section>
+
+    <section class="doc-section" id="server" aria-labelledby="server-h">
+      <h2 id="server-h">{installChannels.server.title}</h2>
+      <div class="prose">
+        <p>
+          For an always-on instance on a Debian or Ubuntu VPS. The installer sets up a systemd timer
+          that pulls minisign-verified releases, swaps the binary, checks <code>/health</code> and
+          rolls back if the check fails. It runs from a checkout of the repository on the server,
+          because it installs the unit files from there. Release binaries are Linux x86_64 only.
+        </p>
+      </div>
+      <ol class="steps">
+        <li>
+          <p>
+            Provision the box once from your machine. This installs Tailscale, Caddy, ufw and
+            <code>gh</code>, creates an unprivileged <code>hq</code> user and writes a starter config
+            with both chat relays disabled. <code>&lt;ssh-host&gt;</code> is an SSH alias for your
+            server.
+          </p>
+          <CodeBlock id="srv-provision" label="Provision" code={provision} />
+        </li>
+        <li>
+          <p>On the server, clone the repository (same commands as above).</p>
+          <CodeBlock id="srv-clone" label="Clone" code={cloneCmd} />
+        </li>
+        <li>
+          <p>
+            Install bubblewrap, which the default sandbox mode needs, and the <code>minisign</code>
+            tool, which the installer uses to check the first download.
+          </p>
+          <CodeBlock id="srv-deps" label="Dependencies" code={serverDeps} />
+        </li>
+        <li>
+          <p>
+            Run the installer with the official release key from the repository,
+            <a href={links.officialKey}><code>release/minisign.pub</code></a>. It creates the user and
+            directories, installs the units, writes <code>/etc/hq/update.conf</code> and the key,
+            bootstraps the first binary, runs the first signature-verified update and enables the
+            timer. It is safe to run again.
+          </p>
+          <CodeBlock id="srv-install" label="Install" code={serverInstall} />
+        </li>
+        <li>
+          <p>Day to day.</p>
+          <CodeBlock id="srv-ops" label="Updates" code={updateOps} />
+        </li>
+      </ol>
+      <div class="prose">
+        <p>
+          <code>deploy/install.sh</code> does not install Herdr. If you want coding-agent sessions on
+          the server, follow the local setup in <a href={links.herdrHarness}>the Herdr docs</a>. Pick one
+          deploy path per host: the updater owns the binary and web files, so do not also build on the
+          server. Full walkthrough: <a href={links.deployReadme}>deploy/README.md</a>. To check a
+          release by hand, see <a href="/security/#verify">verifying a release</a>.
+        </p>
+      </div>
+    </section>
+
+    <section class="doc-section" id="tailscale" aria-labelledby="ts-h">
+      <h2 id="ts-h">{installChannels.tailscale.title}</h2>
+      <div class="prose">
+        <p>
+          Optional. This puts the web UI on your tailnet over HTTPS, so your phone can reach it and the
+          public internet cannot. HQ stays on loopback, Caddy listens on <code>127.0.0.1:4749</code>,
+          and <a href={links.tailscaleServe}>tailscale serve</a> terminates TLS. HTTPS certificates
+          must be enabled for your tailnet. Run these on the server, from the repository checkout.
+          <code>hq.example.ts.net</code> stands for your server's own MagicDNS name.
+        </p>
+      </div>
+      <ol class="steps">
+        <li>
+          <p>Join the tailnet.</p>
+          <CodeBlock id="ts-up" label="Tailscale up" code={tsUp} />
+        </li>
+        <li>
+          <p>Add the loopback Caddy bridge.</p>
+          <CodeBlock id="ts-caddy" label="Caddy" code={tsCaddy} />
+        </li>
+        <li>
+          <p>
+            Serve it on an alternate HTTPS port. Port 443 is usually taken by a public Caddyfile.
+          </p>
+          <CodeBlock id="ts-serve" label="Serve" code={tsServe} />
+        </li>
+        <li>
+          <p>
+            List every origin you open the UI from in <code>/opt/hq/config.yaml</code>, and set a web
+            token. Without the origin you get a 403 about an unrecognised Host header. Restart HQ
+            afterwards.
+          </p>
+          <CodeBlock id="ts-config" label="config.yaml" code={tsConfig} />
+        </li>
+      </ol>
+      <div class="prose">
+        <p>To turn it off again, run this. Never publish <code>/ws</code> or <code>/api</code> on a public address.</p>
+        <CodeBlock id="ts-off" label="Tailscale serve off" code={tsOff} />
+      </div>
+    </section>
+
+    <section class="doc-section" id="soon" aria-labelledby="soon-h">
+      <h2 id="soon-h">Not available yet</h2>
+      <div class="callout prose">
+        <p>
+          These do not exist today. We list them so you do not go looking, and so you know they are not
+          promised for any date.
+        </p>
+        <ul class="facts">
+          {!npx.available && <li>An npx installer.</li>}
+          <li>Prebuilt release binaries for macOS or for Linux on ARM. Signed releases are Linux x86_64 only.</li>
+        </ul>
+      </div>
+      {
+        npx.available && (
+          <div class="prose">
+            <h3>{npx.title}</h3>
+            <CodeBlock id="npx-cmd" label="npx" code={npx.command} />
+          </div>
+        )
+      }
+    </section>
+  </div>
+</Layout>

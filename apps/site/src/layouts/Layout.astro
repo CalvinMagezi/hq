@@ -1,0 +1,108 @@
+---
+import '../styles/global.css';
+import { SITE_URL, links, nav } from '../data/site';
+
+interface Props {
+  title: string;
+  description: string;
+  path: string;
+  noindex?: boolean;
+}
+
+const { title, description, path, noindex = false } = Astro.props;
+const canonical = new URL(path, SITE_URL).href;
+const ogImage = `${SITE_URL}/og.png`;
+const fullTitle = path === '/' ? title : `${title} | Agent HQ`;
+const current = path;
+
+// Scripts and styles are all same-origin files, so no inline hashes are needed.
+const csp = [
+  "default-src 'none'",
+  "script-src 'self'",
+  "style-src 'self'",
+  "img-src 'self'",
+  "media-src 'self'",
+  "font-src 'self'",
+  "connect-src 'none'",
+  "object-src 'none'",
+  "base-uri 'self'",
+  "form-action 'none'",
+].join('; ');
+---
+
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta http-equiv="Content-Security-Policy" content={csp} />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="color-scheme" content="dark light" />
+    <title>{fullTitle}</title>
+    <meta name="description" content={description} />
+    {noindex && <meta name="robots" content="noindex" />}
+    <link rel="canonical" href={canonical} />
+    <link rel="icon" type="image/png" sizes="32x32" href="/icons/hq-favicon-32.png" />
+    <link rel="apple-touch-icon" href="/icons/hq-apple-touch-180.png" />
+    <link rel="sitemap" href="/sitemap.xml" />
+    <meta property="og:type" content="website" />
+    <meta property="og:site_name" content="Agent HQ" />
+    <meta property="og:title" content={fullTitle} />
+    <meta property="og:description" content={description} />
+    <meta property="og:url" content={canonical} />
+    <meta property="og:image" content={ogImage} />
+    <meta property="og:image:width" content="1200" />
+    <meta property="og:image:height" content="630" />
+    <meta property="og:image:alt" content="Agent HQ: a local-first AI agent hub. One Rust binary, a markdown vault, your machine." />
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="twitter:title" content={fullTitle} />
+    <meta name="twitter:description" content={description} />
+    <meta name="twitter:image" content={ogImage} />
+    <meta name="twitter:image:alt" content="Agent HQ: a local-first AI agent hub. One Rust binary, a markdown vault, your machine." />
+    <script is:inline src="/js/theme.js"></script>
+  </head>
+  <body>
+    <a class="skip-link" href="#main">Skip to content</a>
+    <header class="site-header">
+      <div class="container">
+        <a class="brand" href="/">
+          <img src="/icons/hq-mark-96.png" alt="" width="32" height="32" />
+          <span>Agent HQ</span>
+        </a>
+        <nav class="site-nav" aria-label="Main">
+          {
+            nav.map((item) => (
+              <a href={item.href} aria-current={current === item.href ? 'page' : undefined}>
+                {item.label}
+              </a>
+            ))
+          }
+          <span class="spacer"></span>
+          <a href={links.repo}>GitHub</a>
+          <button type="button" class="btn btn-sm theme-toggle" data-theme-toggle aria-pressed="false" hidden>
+            Light theme
+          </button>
+        </nav>
+      </div>
+    </header>
+    <main id="main" tabindex="-1">
+      <slot />
+    </main>
+    <footer class="site-footer">
+      <div class="container">
+        <ul class="footer-links">
+          <li><a href={links.repo}>GitHub</a></li>
+          <li><a href={links.license}>MIT license</a></li>
+          <li><a href={links.changelog}>Changelog</a></li>
+          <li><a href={links.securityPolicy}>Security policy</a></li>
+        </ul>
+        <p>
+          Agent HQ is an independent open-source project, released under the MIT license. It is not
+          affiliated with the other projects named on the comparison page.
+        </p>
+        <p>This site sets no cookies, runs no analytics and loads nothing from other origins.</p>
+      </div>
+    </footer>
+    <p id="copy-status" class="visually-hidden" role="status" aria-live="polite"></p>
+    <script is:inline src="/js/enhance.js" defer></script>
+  </body>
+</html>

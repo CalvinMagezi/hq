@@ -1,0 +1,221 @@
+---
+import Layout from '../layouts/Layout.astro';
+import { links } from '../data/site';
+
+const AS_OF = '2026-10-05';
+
+const OC = 'https://github.com/openclaw/openclaw';
+const OC_DOCS = 'https://docs.openclaw.ai';
+const OC_SANDBOX = 'https://docs.openclaw.ai/gateway/sandboxing';
+const OC_RELEASES = 'https://github.com/openclaw/openclaw/releases';
+const HA = 'https://github.com/NousResearch/hermes-agent';
+const HA_DOCS = 'https://hermes-agent.nousresearch.com/docs';
+const HA_RELEASES = 'https://github.com/NousResearch/hermes-agent/releases';
+
+type Cell = { text: string; src?: [string, string] };
+type Row = { topic: string; hq: Cell; oc: Cell; ha: Cell };
+
+const NOT_REVIEWED: Cell = { text: 'Not reviewed for this page.' };
+
+const rows: Row[] = [
+  {
+    topic: 'What it is',
+    hq: { text: 'A local-first agent hub. One Rust binary, a markdown vault, and a focus on running coding agents.', src: ['README', links.readme] },
+    oc: { text: 'A self-hosted personal assistant. One local Gateway process holds sessions, routing and channel connections.', src: ['docs', OC_DOCS] },
+    ha: { text: 'A self-improving agent with a learning loop that creates skills from experience and refines them.', src: ['repo', HA] },
+  },
+  {
+    topic: 'Language and license',
+    hq: { text: 'Rust (edition 2024). MIT.', src: ['LICENSE', links.license] },
+    oc: { text: 'TypeScript on Node. MIT.', src: ['repo', OC] },
+    ha: { text: 'Python, with some Node. MIT.', src: ['repo', HA] },
+  },
+  {
+    topic: 'Installing',
+    hq: { text: 'Build from source with cargo. For Linux servers, a script that installs signed releases for x86_64.', src: ['deploy docs', links.deployReadme] },
+    oc: { text: 'Install script, PowerShell installer, npm, Docker and Nix.', src: ['docs', OC_DOCS] },
+    ha: { text: 'Install script, PowerShell installer and an APT route for Termux.', src: ['repo', HA] },
+  },
+  {
+    topic: 'Chat channels',
+    hq: { text: 'Discord, Telegram, a web PWA and the terminal. No Slack or WhatsApp.', src: ['README', links.readme] },
+    oc: { text: 'Discord, iMessage, Slack, Teams, Telegram, WhatsApp, Google Chat, Signal and more. Plugins add others.', src: ['docs', OC_DOCS] },
+    ha: { text: 'Telegram, Discord, Slack, WhatsApp, Signal, Email and a CLI, through one gateway process. The docs list more platforms.', src: ['repo', HA] },
+  },
+  {
+    topic: 'Memory',
+    hq: { text: 'Markdown vault plus SQLite with FTS5 and embeddings. A consolidator and a forgetter tidy it over time.', src: ['architecture', '/architecture/#vault'] },
+    oc: NOT_REVIEWED,
+    ha: { text: 'Persistent memory, FTS5 cross-session search with LLM summarization, and Honcho user modeling.', src: ['repo', HA] },
+  },
+  {
+    topic: 'Extending it',
+    hq: { text: 'About 100 internal tools behind a two-tool MCP gateway, markdown skills, remote MCP servers bridged in. HQ is also an MCP server other agents can call.', src: ['README', links.readme] },
+    oc: { text: 'Skills, a plugin SDK for channels, providers and tools, the ClawHub marketplace, and companion apps for voice, Canvas, camera and screen.', src: ['docs', OC_DOCS] },
+    ha: { text: 'Skills compatible with agentskills.io and a Skills Hub, subagents, built-in cron and an MCP client.', src: ['repo', HA] },
+  },
+  {
+    topic: 'Supervising coding agents',
+    hq: { text: 'What HQ is built around. It starts, watches and steers Claude Code, Codex, OpenCode, Cursor, Copilot CLI and others as sessions in Herdr, locally or over SSH, and alerts you when one blocks. It never answers a trust prompt for you.', src: ['Herdr docs', links.herdrHarness] },
+    oc: { text: 'We have not verified how OpenClaw handles this.' },
+    ha: { text: 'We have not verified how Hermes Agent handles this.' },
+  },
+  {
+    topic: 'Isolating what the agent runs',
+    hq: { text: 'Agent shell commands run in a bubblewrap or sandbox-exec sandbox, required by default after 0.9.0, with an environment allowlist and taint tracking after untrusted reads.', src: ['bash sandbox', links.sec.bashSandbox] },
+    oc: { text: 'Sandboxing is off by default. When enabled, only tool execution moves into Docker, Podman, SSH, OpenShell or Crabbox while the Gateway stays on the host. The docs call it "not a perfect security boundary".', src: ['sandboxing docs', OC_SANDBOX] },
+    ha: { text: 'Command approval and container isolation. Execution backends include local, Docker, SSH, Singularity, Modal, Daytona and Vercel Sandbox.', src: ['docs', HA_DOCS] },
+  },
+  {
+    topic: 'Updates',
+    hq: { text: 'Servers pull minisign-signed releases on a timer and roll back on a failed health check.', src: ['update system', links.updateSystem] },
+    oc: NOT_REVIEWED,
+    ha: NOT_REVIEWED,
+  },
+  {
+    topic: 'Where it runs',
+    hq: { text: 'Your machine or a VPS you run. Tailscale is the recommended way to reach the web UI. There is no hosted service.', src: ['deploy docs', links.deployReadme] },
+    oc: { text: 'Self-hosted.', src: ['docs', OC_DOCS] },
+    ha: { text: 'Local, or on serverless backends such as Modal and Daytona.', src: ['docs', HA_DOCS] },
+  },
+  {
+    topic: 'Size and maturity',
+    hq: { text: 'Small and early: version 0.9.x, no outside audit.', src: ['changelog', links.changelog] },
+    oc: { text: `A very large community and frequent releases. At ${AS_OF} the latest was v2026.9.8, from 2026-10-03.`, src: ['releases', OC_RELEASES] },
+    ha: { text: `A large community and frequent releases. At ${AS_OF} the latest was v0.21.5, from 2026-09-24. Reported to have first shipped in February 2026.`, src: ['releases', HA_RELEASES] },
+  },
+  {
+    topic: 'Security record',
+    hq: { text: 'Too young to have one. The model and its known gaps are written down.', src: ['security page', '/security/'] },
+    oc: { text: 'Reported by third parties, and not verified by us: past vulnerabilities and malicious skills on its marketplace. Read the project advisories yourself.', src: ['repo', OC] },
+    ha: { text: 'Reported by third-party aggregators, and not verified by us: a number of mostly moderate CVEs in 2026. Read the project advisories yourself.', src: ['repo', HA] },
+  },
+];
+
+const picks = [
+  {
+    title: 'Pick OpenClaw when',
+    points: [
+      'You want the widest channel reach: Slack, WhatsApp, iMessage, Teams and more.',
+      'A large ecosystem, a plugin marketplace and companion apps matter to you.',
+      'You want a polished personal-assistant experience and are comfortable enabling its sandboxing yourself.',
+    ],
+  },
+  {
+    title: 'Pick Hermes Agent when',
+    points: [
+      'You want an agent that learns: it writes and refines its own skills.',
+      'Portable skills and a skills hub appeal to you.',
+      'You want cheap or serverless hosting, or many isolated places to execute code.',
+    ],
+  },
+  {
+    title: 'Pick Agent HQ when',
+    points: [
+      'Your main job for an agent is running and watching coding agents from your phone or a chat.',
+      'You want your memory as plain markdown on your own disk, in one small binary.',
+      'Discord, Telegram, the web and a terminal are enough channels, and you accept early software.',
+    ],
+  },
+];
+---
+
+<Layout
+  title="Compare"
+  description={`Agent HQ next to OpenClaw and Hermes Agent: what each is best at, sourced and dated ${AS_OF}. Written by the HQ maintainers, so read it with that in mind.`}
+  path="/compare/"
+>
+  <section class="band">
+    <div class="container section">
+      <span class="eyebrow">As of {AS_OF}</span>
+      <h1>HQ, OpenClaw and Hermes Agent</h1>
+      <p class="lede prose">
+        All three are open-source agents you run yourself. They overlap, and they are good at
+        different things. This page is written by the HQ maintainers, so weigh it accordingly.
+      </p>
+    </div>
+  </section>
+
+  <div class="container">
+    <section class="doc-section" aria-labelledby="how-h">
+      <h2 id="how-h">How this page was made</h2>
+      <div class="prose">
+        <ul class="facts">
+          <li>HQ facts come from HQ's own repository and docs. That is not an outside audit.</li>
+          <li>
+            Facts about OpenClaw and Hermes Agent come from their official repositories and docs,
+            checked on {AS_OF}, and each cell links its source. Both projects ship often, so details
+            will age.
+          </li>
+          <li>
+            "Reported" means we saw it from third parties and did not verify it. "Not reviewed" means
+            we did not look.
+          </li>
+          <li>
+            Found a mistake? <a href={links.issues}>Open an issue</a> and we will fix it.
+          </li>
+        </ul>
+      </div>
+    </section>
+
+    <section class="doc-section" aria-labelledby="table-h">
+      <h2 id="table-h">Side by side</h2>
+      <div class="table-scroll" tabindex="0" role="region" aria-label="Comparison table, scrollable">
+        <table>
+          <caption>Comparison as of {AS_OF}. Sources are linked in each cell.</caption>
+          <thead>
+            <tr>
+              <th scope="col">Topic</th>
+              <th scope="col">Agent HQ</th>
+              <th scope="col">OpenClaw</th>
+              <th scope="col">Hermes Agent</th>
+            </tr>
+          </thead>
+          <tbody>
+            {
+              rows.map((r) => (
+                <tr>
+                  <th scope="row">{r.topic}</th>
+                  {[r.hq, r.oc, r.ha].map((c) => (
+                    <td>
+                      {c.text}
+                      {c.src && (
+                        <span class="src">
+                          Source: <a href={c.src[1]}>{c.src[0]}</a>
+                        </span>
+                      )}
+                    </td>
+                  ))}
+                </tr>
+              ))
+            }
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <section class="doc-section" aria-labelledby="pick-h">
+      <h2 id="pick-h">When to pick which</h2>
+      <div class="grid">
+        {
+          picks.map((p) => (
+            <article class="card">
+              <h3>{p.title}</h3>
+              <ul class="facts">
+                {p.points.map((pt) => <li>{pt}</li>)}
+              </ul>
+            </article>
+          ))
+        }
+      </div>
+      <div class="prose">
+        <p>
+          These are not exclusive. Hermes Agent can import from OpenClaw
+          (<a href={HA}>its repository</a> documents <code>hermes claw migrate</code>), and nothing stops you from
+          running one agent for chat and HQ to keep an eye on your coding sessions. If you are unsure,
+          start with the one whose channels you already use.
+        </p>
+      </div>
+    </section>
+  </div>
+</Layout>

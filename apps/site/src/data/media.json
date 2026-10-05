@@ -1,0 +1,67 @@
+[
+  {
+    "id": "dashboard",
+    "kind": "image",
+    "src": "/media/dashboard.png",
+    "alt": "The HQ web dashboard showing a streaming chat on the left and daemon status on the right.",
+    "caption": "The web dashboard: one chat, daemon status and search in a single PWA.",
+    "width": 1600,
+    "height": 1000
+  },
+  {
+    "id": "vault-browser",
+    "kind": "image",
+    "src": "/media/vault-browser.png",
+    "alt": "The vault browser listing notebook folders with a markdown note open beside the list.",
+    "caption": "The vault browser: plain markdown notes, searchable, on your own disk.",
+    "width": 1600,
+    "height": 1000
+  },
+  {
+    "id": "tasks-board",
+    "kind": "image",
+    "src": "/media/tasks-board.png",
+    "alt": "The tasks board with cards arranged in columns by status.",
+    "caption": "The tasks board: spaces, initiatives, tasks and comments, as list, board or timeline.",
+    "width": 1600,
+    "height": 1000
+  },
+  {
+    "id": "sessions-list",
+    "kind": "image",
+    "src": "/media/sessions-list.png",
+    "alt": "The Sessions page listing supervised coding-agent sessions with host, task and live status.",
+    "caption": "The Sessions page: every supervised coding agent, its host, its task and its live state.",
+    "width": 1600,
+    "height": 1000
+  },
+  {
+    "id": "session-watch",
+    "kind": "gif",
+    "src": "/media/session-watch.gif",
+    "poster": "/media/session-watch-poster.png",
+    "alt": "A coding-agent session in watch mode: the pane text updates while HQ posts short status updates in the chat.",
+    "caption": "Watching a session: pane text on one side, short updates in the chat on the other.",
+    "width": 1280,
+    "height": 800
+  },
+  {
+    "id": "terminal-install",
+    "kind": "video",
+    "src": "/media/terminal-install.mp4",
+    "poster": "/media/terminal-install-poster.png",
+    "alt": "A terminal recording of building HQ from source, running hq install and then hq doctor.",
+    "caption": "From a fresh clone to a working install: build, hq install, hq doctor.",
+    "width": 1280,
+    "height": 720
+  },
+  {
+    "id": "architecture-overview",
+    "kind": "image",
+    "src": "/media/architecture-overview.png",
+    "alt": "An overview of HQ: channels feeding one agent, which reads and writes a markdown vault.",
+    "caption": "Architecture overview: channels in, one agent, one vault.",
+    "width": 1600,
+    "height": 1000
+  }
+]
