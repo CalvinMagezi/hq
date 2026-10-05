@@ -2227,7 +2227,7 @@ dependencies = [
 
 [[package]]
 name = "hq-agent"
-version = "0.9.0"
+version = "0.9.1"
 dependencies = [
  "anyhow",
  "async-stream",
@@ -2264,7 +2264,7 @@ dependencies = [
 
 [[package]]
 name = "hq-cli"
-version = "0.9.0"
+version = "0.9.1"
 dependencies = [
  "anyhow",
  "axum",
@@ -2304,7 +2304,7 @@ dependencies = [
 
 [[package]]
 name = "hq-convert"
-version = "0.9.0"
+version = "0.9.1"
 dependencies = [
  "dirs",
  "serde",
@@ -2319,7 +2319,7 @@ dependencies = [
 
 [[package]]
 name = "hq-core"
-version = "0.9.0"
+version = "0.9.1"
 dependencies = [
  "anyhow",
  "base64 0.22.1",
@@ -2345,7 +2345,7 @@ dependencies = [
 
 [[package]]
 name = "hq-daemon"
-version = "0.9.0"
+version = "0.9.1"
 dependencies = [
  "anyhow",
  "chrono",
@@ -2369,7 +2369,7 @@ dependencies = [
 
 [[package]]
 name = "hq-db"
-version = "0.9.0"
+version = "0.9.1"
 dependencies = [
  "anyhow",
  "chrono",
@@ -2384,7 +2384,7 @@ dependencies = [
 
 [[package]]
 name = "hq-llm"
-version = "0.9.0"
+version = "0.9.1"
 dependencies = [
  "anyhow",
  "async-openai",
@@ -2407,7 +2407,7 @@ dependencies = [
 
 [[package]]
 name = "hq-mcp"
-version = "0.9.0"
+version = "0.9.1"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -2426,7 +2426,7 @@ dependencies = [
 
 [[package]]
 name = "hq-memory"
-version = "0.9.0"
+version = "0.9.1"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -2450,7 +2450,7 @@ dependencies = [
 
 [[package]]
 name = "hq-relay"
-version = "0.9.0"
+version = "0.9.1"
 dependencies = [
  "anyhow",
  "chrono",
@@ -2476,7 +2476,7 @@ dependencies = [
 
 [[package]]
 name = "hq-tools"
-version = "0.9.0"
+version = "0.9.1"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -2513,7 +2513,7 @@ dependencies = [
 
 [[package]]
 name = "hq-update"
-version = "0.9.0"
+version = "0.9.1"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -2546,7 +2546,7 @@ dependencies = [
 
 [[package]]
 name = "hq-vault"
-version = "0.9.0"
+version = "0.9.1"
 dependencies = [
  "anyhow",
  "chrono",
@@ -2561,7 +2561,7 @@ dependencies = [
 
 [[package]]
 name = "hq-web"
-version = "0.9.0"
+version = "0.9.1"
 dependencies = [
  "anyhow",
  "async-trait",
