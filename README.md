@@ -9,7 +9,7 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/CalvinMagezi/hq/releases"><img src="https://img.shields.io/badge/version-0.9.0-blue" alt="Version" /></a>
+  <a href="https://github.com/CalvinMagezi/hq/releases"><img src="https://img.shields.io/badge/version-0.9.1-blue" alt="Version" /></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-green" alt="License" /></a>
 </p>
 
@@ -76,7 +76,7 @@ The vault is the center. Every agent reads from it and writes back to it. Switch
 
 ### Prerequisites
 
-- **Rust** 1.83+ (2024 edition): `curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh`
+- **Rust** 1.89 or newer (2024 edition): `curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh`
 - **At least one LLM API key**: OpenRouter, Anthropic, or Google AI
 
 ### Install from Source
@@ -84,18 +84,24 @@ The vault is the center. Every agent reads from it and writes back to it. Switch
 ```bash
 git clone https://github.com/CalvinMagezi/hq.git
 cd hq
-sudo ./scripts/install-hq.sh --link   # once per machine: /usr/local/bin/hq becomes a symlink to ~/bin/hq
-./scripts/install-hq.sh               # build a release binary (about 40 MB) and install it to ~/bin
+cargo build --release -p hq-cli
+install -m 755 target/release/hq ~/.local/bin/hq    # any directory on your PATH works
 ```
+
+On macOS, `scripts/install-hq.sh` wraps the same build with code signing and a
+launchd service; it is macOS only and not needed on Linux.
 
 The web UI is built separately (see [PWA Dashboard](#pwa-dashboard)) and needs [bun](https://bun.sh).
 
 ### First Run
 
 ```bash
-hq install             # scaffold vault, seed soul, write config
-hq doctor              # verify setup
+hq install             # scaffold vault, seed soul, write config (~/.hq/config.yaml)
+hq env                 # or edit config.yaml: add an LLM API key (OpenRouter, Anthropic or Google)
+hq doctor              # verify setup; a missing LLM key is expected until you add one
 hq chat                # start an interactive LLM session
+hq start all           # or run the daemon, API and web UI on :5678
+curl localhost:5678/health
 ```
 
 ### Deploy to a server
@@ -104,13 +110,17 @@ For an always-on instance on a Linux VPS, provision the box with
 `deploy/setup-vps.sh`, then install the signed pull-based updater:
 
 ```bash
-sudo deploy/install.sh --repo <owner>/<repo> --channel stable --pubkey ./update.pub
+# Official releases of this project (verify the key in release/minisign.pub):
+sudo deploy/install.sh --repo CalvinMagezi/hq --channel stable --pubkey release/minisign.pub
+# Your own fork: --repo <your-owner>/<your-repo> --pubkey <your minisign public key>
 hq update --check      # later: see whether a newer release exists
 hq update --apply      # or let the systemd timer do it
 hq update --rollback   # return to the previous binary
 ```
 
-The updater verifies a minisign signature, swaps the binary and web files,
+The updater is new and has run on two real hosts so far; read
+[`docs/UPDATE_SYSTEM.md`](docs/UPDATE_SYSTEM.md) before relying on it. It supports
+`linux-x86_64` only (Ubuntu 22.04 or newer). It verifies a minisign signature, swaps the binary and web files,
 restarts, checks `/health` and rolls back on failure. See
 [`deploy/README.md`](deploy/README.md) for the full walkthrough (Caddy, Tailscale,
 Herdr, GitHub access) and [`docs/UPDATE_SYSTEM.md`](docs/UPDATE_SYSTEM.md) for the
@@ -123,7 +133,7 @@ All configuration lives in `~/.hq/config.yaml`:
 ```yaml
 vault_path: /path/to/your/.vault
 openrouter_api_key: "your-api-key-here"
-default_model: "relay"  # Router alias: selects best model by cost/health scoring
+default_model: "anthropic/claude-sonnet-4"  # or a router alias such as "relay"
 ws_port: 5678
 
 relay:
@@ -359,7 +369,7 @@ Recurring work uses watches: `/watch <minutes> [for <N>h] <prompt>` registers a 
 
 ## Daemon
 
-The daemon ticks every 5 seconds and runs 16 interval tasks in three tiers: fast (approvals, harness-session supervision, heartbeat, value-bus delivery, email poll), memory (consolidation, embeddings, note tagging, forgetting), and maintenance (vault health, thread rotation, clean-up, disk watchdog, SQLite vacuum). Two loops run beside the scheduler: the agent worker, which triages inbound events and email, and the machine profile, which records the host's CLIs in `MACHINE.md`.
+The daemon ticks every 5 seconds and runs 18 interval tasks in three tiers: fast (approvals, harness-session supervision, heartbeat, value-bus delivery, email poll), memory (consolidation, embeddings, note tagging, forgetting), and maintenance (vault health, thread rotation, clean-up, disk watchdog, SQLite vacuum). Two loops run beside the scheduler: the agent worker, which triages inbound events and email, and the machine profile, which records the host's CLIs in `MACHINE.md`.
 
 Status is written to `.vault/DAEMON-STATUS.md` after every tick.
 
@@ -437,7 +447,7 @@ The PWA lives in `apps/hq-web/` and builds to a static single-page app that `hq 
 
 ```bash
 cd apps/hq-web && bun install && bun run build   # emits dist/client
-cp -r dist/client ../../web/dist                 # or set web_static_dir
+mkdir -p ~/web && cp -r dist/client ~/web/dist       # or set web_static_dir (or HQ_WEB_STATIC_DIR) to <repo>/apps/hq-web/dist/client
 hq start all                                      # API, WebSocket and the PWA on :5678
 hq pwa                                            # open http://localhost:5678
 bun run dev                                       # dev server on :4747, proxies /api and /ws to :5678

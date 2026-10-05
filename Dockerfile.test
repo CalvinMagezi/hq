@@ -2,7 +2,7 @@
 # Usage: docker build -f Dockerfile.test -t hq-test . && docker run --rm hq-test
 
 # ── Stage 1: Build ───────────────────────────────────────────────────────────
-FROM rust:1.88-bookworm AS builder
+FROM rust:1.98.1-bookworm AS builder
 
 WORKDIR /build
 COPY Cargo.toml Cargo.lock ./

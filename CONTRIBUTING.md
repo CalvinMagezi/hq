@@ -11,7 +11,7 @@ and what reviewers look for. By participating you agree to the
 
 ## Dev setup
 
-Requirements: Rust 1.83 or newer (edition 2024), a C toolchain and OpenSSL
+Requirements: Rust 1.89 or newer (edition 2024), a C toolchain and OpenSSL
 headers on Linux (`build-essential pkg-config libssl-dev`), and
 [bun](https://bun.sh) for the web UI. Ollama, SearxNG and Herdr are optional.
 
