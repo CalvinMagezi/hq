@@ -1,0 +1,209 @@
+---
+import Layout from '../layouts/Layout.astro';
+import CodeBlock from '../components/CodeBlock.astro';
+import { links, REPO } from '../data/site';
+
+const protects = [
+  ['A prompt-injected agent reading your secrets', 'Credential files such as ~/.ssh, cloud credentials and the HQ config are refused for every tool, always. Shell commands start with an empty environment plus a short allowlist, and the OS sandbox masks config, env files and private SSH keys.'],
+  ['Data leaving after untrusted content', 'Once a session reads a web page, mail, a converted document, another agent\'s mailbox, a pane or a remote MCP result, project secrets and outbound network from bash are denied. Sub-agents share the taint, so delegating does not clear it.'],
+  ['Server-side request forgery', 'web_fetch refuses loopback, private, link-local and metadata addresses, checks every redirect hop and pins the resolved address so DNS rebinding cannot move it.'],
+  ['A hostile web page talking to your local server', 'An origin guard refuses cross-origin requests and unknown Host names, which stops DNS rebinding. Tokens travel only in headers, and the chat socket opens with a single-use ticket.'],
+  ['A public MCP endpoint without a key', '/mcp refuses every request until a key is configured. Keys have scopes, and the gateway sets the scope itself.'],
+  ['Tampered or replayed updates', 'Releases and channel pointers are minisign-signed. The updater verifies hashes, rejects unsafe archives and lower sequence numbers, and rolls back on a failed health check. The build side holds no credential for any instance.'],
+  ['The agent replacing its own binary', 'Self-update tools are off by default. When on, installing needs an owner approval bound to the exact tree and binary hash.'],
+  ['The first stranger to message your bot', 'Chat relays no longer adopt the first sender as owner. You pair explicitly.'],
+  ['Cross-person disclosure in shared chats', 'Notes and tasks carry labels, and a shared channel sees only what every verified participant may see. Unknown identities get public content only.'],
+  ['Coding agents being clicked through', 'HQ never answers a trust dialog for you, and driving a session has mechanical limits that do not depend on the model deciding to stop.'],
+];
+
+const gaps = [
+  ['The model itself.', 'A refusal is a mitigation, not a boundary. The boundaries are the sandbox, the environment allowlist and the governance rules. A prompt injection that gets past those is in scope for a report. A model that merely behaves badly is not.'],
+  ['The bash text checks.', 'They catch honest mistakes and cheap tricks. Variables, string building, two-step commands and interpreter code can still get through, and the docs list the shapes. Without a working sandbox, you are relying on them plus the environment allowlist.'],
+  ['The sandbox itself.', 'HOME stays writable, so shell rc files can be changed and will run later outside the sandbox. The sandbox shares the host network unless you set network to false, and that cuts off gh and git from bash. On macOS, a bash child can still see the daemon\'s environment with ps.'],
+  ['Coding agents HQ starts.', 'A harness session is a separate program with its own shell. Herdr panes inherit whatever provider keys the Herdr service loads, and a prompt-injected session could read them. Load only what your agents need.'],
+  ['The handoff key.', 'It is equivalent to code execution on every Herdr host you configured. Bound it with herdr.handoff_cwd_allow, and give it only to callers you would give a shell.'],
+  ['An attacker who is already you.', 'Anyone who controls the host user, the vault directory or the config file is out of scope. On loopback with no token set, any process on the machine can call the API without an Origin header, so set a token on shared machines.'],
+  ['A stolen signing key, or a stale pointer.', 'Both are listed as not mitigated by the updater. A compromised service user can also fake a healthy /health answer to defeat the automatic rollback. Locally built self-update binaries are not signed.'],
+  ['Content already in the prompt.', 'Vault text the context engine injects, and earlier turns in a thread, are not tracked as taint. Only tool results in the current session are.'],
+  ['Independent review.', 'HQ has not had an outside security audit. It is version 0.9.x. Treat it that way.'],
+];
+
+const keyId = '51FDC63C4F4E8BD2';
+const keyLine = 'RWTSi05PPMb9UVVnGilhLWT7h/mjQ1VjfAEXszxJB/Er8UEsCXFc3o1/'; // gitleaks:allow
+const dl = `V=<version>   # for example 0.9.1, without the leading v\nB=${REPO}/releases/download/v$V\ncurl -fsSLO "$B/manifest.json"\ncurl -fsSLO "$B/manifest.json.minisig"\ncurl -fsSLO "$B/hq-$V-linux-x86_64.tar.gz"\ncurl -fsSLO "${REPO}/raw/main/release/minisign.pub"`;
+const verify = 'minisign -Vm manifest.json -p minisign.pub';
+const hashCheck = `jq -r '.artifacts[] | "\\(.sha256)  \\(.name)"' manifest.json | sha256sum -c --ignore-missing`;
+const dry = 'hq update --apply --dry-run';
+---
+
+<Layout
+  title="Security"
+  description="What Agent HQ protects against, what it does not, how to verify a signed release, and how to report a vulnerability."
+  path="/security/"
+>
+  <section class="band">
+    <div class="container section">
+      <span class="eyebrow">Security model</span>
+      <h1>Security</h1>
+      <p class="lede prose">
+        HQ runs tool-using agents that can execute shell commands. That is the risk, so this page says
+        what holds, what does not, and how to check the parts that ship to your server.
+      </p>
+      <nav aria-label="On this page">
+        <ul class="toc">
+          <li><a href="#shapes">Deployment shapes</a></li>
+          <li><a href="#protects">What it protects against</a></li>
+          <li><a href="#gaps">What it does not</a></li>
+          <li><a href="#verify">Verify a release</a></li>
+          <li><a href="#report">Report a problem</a></li>
+        </ul>
+      </nav>
+    </div>
+  </section>
+
+  <div class="container">
+    <section class="doc-section" id="shapes" aria-labelledby="shapes-h">
+      <h2 id="shapes-h">Supported deployment shapes</h2>
+      <div class="grid">
+        <article class="card">
+          <h3>Local, single user</h3>
+          <p>
+            The default. The web server binds to <code>127.0.0.1</code>. The machine and its user are
+            trusted. Set <code>web_auth_token</code> on a shared machine.
+          </p>
+        </article>
+        <article class="card">
+          <h3>Private network</h3>
+          <p>
+            HQ stays on loopback behind <code>tailscale serve</code> or a reverse proxy. List the
+            served origins in <code>web_allowed_origins</code>.
+          </p>
+        </article>
+        <article class="card">
+          <h3>Public /mcp</h3>
+          <p>
+            Only through a proxy that exposes <code>/mcp</code> and <code>/health</code> and nothing
+            else, with <code>AGENTHQ_API_KEY</code> set. <code>/ws</code> and <code>/api</code> must
+            never be public.
+          </p>
+        </article>
+      </div>
+    </section>
+
+    <section class="doc-section" id="protects" aria-labelledby="protects-h">
+      <h2 id="protects-h">What it protects against</h2>
+      <p class="prose muted">
+        Each line is a control that exists in the code and is described in the repository docs. None
+        of them is a promise that nothing can go wrong.
+      </p>
+      <dl class="stack">
+        {
+          protects.map(([threat, control]) => (
+            <div class="card">
+              <dt><h3>{threat}</h3></dt>
+              <dd>{control}</dd>
+            </div>
+          ))
+        }
+      </dl>
+    </section>
+
+    <section class="doc-section" id="gaps" aria-labelledby="gaps-h">
+      <h2 id="gaps-h">What it does not protect against</h2>
+      <p class="prose muted">
+        Plain list of limits, taken from the project's own security notes.
+      </p>
+      <ul class="list-plain stack">
+        {
+          gaps.map(([head, body]) => (
+            <li class="card">
+              <h3>{head}</h3>
+              <p>{body}</p>
+            </li>
+          ))
+        }
+      </ul>
+    </section>
+
+    <section class="doc-section" id="verify" aria-labelledby="verify-h">
+      <h2 id="verify-h">Verifying a signed release</h2>
+      <div class="prose">
+        <p>
+          The updater does this for you, in process, on every update. You can repeat it by hand. The
+          trust chain is the minisign signature on <code>manifest.json</code>, then the SHA-256 of
+          each artifact in that signed manifest. <code>SHA256SUMS</code> in the release is unsigned and
+          for humans, so do not rely on it alone.
+        </p>
+        <p>
+          Get the official public key from the repository file
+          <a href={links.officialKey}><code>release/minisign.pub</code></a>, not from a page that could
+          be altered, and compare. Its key id is <code>{keyId}</code> and its key line begins
+          <code>{keyLine.slice(0, 12)}</code>. Install the <a href={links.minisign}>minisign</a> tool
+          and <code>jq</code> first.
+        </p>
+      </div>
+      <ol class="steps">
+        <li>
+          <p>Download the manifest, its signature, the binary archive and the key.</p>
+          <CodeBlock id="ver-dl" label="Download" code={dl} />
+        </li>
+        <li>
+          <p>Verify the manifest signature. It must report a good signature.</p>
+          <CodeBlock id="ver-sig" label="Signature" code={verify} />
+        </li>
+        <li>
+          <p>Check each downloaded artifact against the hash in the signed manifest.</p>
+          <CodeBlock id="ver-hash" label="Hashes" code={hashCheck} />
+        </li>
+        <li>
+          <p>
+            On an instance, <code>--dry-run</code> repeats every check, including the channel pointer,
+            and changes nothing.
+          </p>
+          <CodeBlock id="ver-dry" label="Dry run" code={dry} />
+        </li>
+      </ol>
+      <div class="prose">
+        <p>
+          Channel pointers (<code>channel-stable.json</code> and <code>channel-main.json</code>) have
+          their own <code>.minisig</code>. Only prehashed signatures are accepted, which is the default
+          of <code>minisign -S</code>. Format and trust model:
+          <a href={links.updateSystem}>docs/UPDATE_SYSTEM.md</a>.
+        </p>
+      </div>
+    </section>
+
+    <section class="doc-section" id="report" aria-labelledby="report-h">
+      <h2 id="report-h">Reporting a vulnerability</h2>
+      <div class="prose">
+        <p>
+          Report privately, not in a public issue. Use
+          <a href={links.reportVulnerability}>GitHub's private vulnerability reporting</a> on the
+          repository. If that is unavailable, open a public issue that says only that you have a
+          security report and asks for a private channel, with no details.
+        </p>
+        <p>
+          Include what you found, how to reproduce it, the affected version and the impact you expect.
+          Expect an acknowledgement within 7 days, and please allow 90 days or until a fix ships before
+          disclosing. Do not include real credentials or other people's vault contents. Only the latest
+          release and the latest commit on <code>main</code> are supported.
+        </p>
+        <p>
+          The full policy, including what is in and out of scope, is in
+          <a href={links.securityPolicy}>SECURITY.md</a>.
+        </p>
+        <h3>Read the details</h3>
+        <ul class="facts">
+          <li><a href={links.sec.webAuth}>Web and MCP authentication</a></li>
+          <li><a href={links.sec.bashSandbox}>Bash isolation</a></li>
+          <li><a href={links.sec.promptInjection}>Prompt-injection containment</a></li>
+          <li><a href={links.sec.webFetch}>Outbound fetches</a></li>
+          <li><a href={links.sec.selfUpdate}>Self-update tools</a></li>
+          <li><a href={links.sec.herdrEnv}>Credentials Herdr panes inherit</a></li>
+          <li><a href={links.sec.identity}>Identity-scoped disclosure</a></li>
+          <li><a href={links.sec.releaseChecklist}>Release checklist</a></li>
+        </ul>
+      </div>
+    </section>
+  </div>
+</Layout>

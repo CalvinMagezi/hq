@@ -109,3 +109,6 @@
 | The health probe is unauthenticated loopback HTTP, so a compromised `hq` user (or a local process that grabs the port during the restart) can answer `ok` with the expected `git_sha` and defeat the automatic rollback. It gains no privilege. | A real fix needs a per-run challenge the new binary must echo, which changes `/health` and the daemon startup path owned by other work. | 2026-10-04 | crates/hq-update/src/real.rs (`HttpHealth`) |
 
 | `hq update --check` and `--dry-run` do not take the update lock or reconcile an interrupted update; only `--apply` and `--rollback` do. | Read-only commands should stay usable while an update runs. | 2026-10-04 | crates/hq-update/src/engine.rs (`apply`) |
+| Site uses the system-ui font stack, not the Clear Sans of the brand design system. | The font files were not available to ship, and external font hosts are ruled out for the site. | 2026-10-05 | apps/site/src/styles/global.css:1 |
+| Site axe, keyboard and theme checks run by hand (`bun run check:a11y`), not in CI. | They need Google Chrome on the runner and would make the cheap Site job slower. | 2026-10-05 | apps/site/scripts/a11y.mjs |
+| README says Rust 1.83+ but edition 2024 needs 1.85 or newer. The install page states 1.85. | Doc fix outside the site change. | 2026-10-05 | README.md (Prerequisites) |

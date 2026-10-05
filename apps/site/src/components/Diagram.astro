@@ -1,0 +1,81 @@
+---
+import type { DiagramSpec } from '../data/diagrams';
+
+interface Props {
+  d: DiagramSpec;
+}
+
+const { d } = Astro.props;
+const LINE = 18;
+const TITLE_BASELINE = 5;
+
+// Centers a title plus optional muted lines inside a node.
+function textLines(n: DiagramSpec['nodes'][number]) {
+  const rows = [{ t: n.title ?? '', cls: 'dg-text dg-strong' }];
+  for (const s of n.sub ?? []) rows.push({ t: s, cls: 'dg-text dg-sub' });
+  const top = n.y + n.h / 2 - ((rows.length - 1) * LINE) / 2 + TITLE_BASELINE;
+  return rows.map((r, i) => ({ ...r, y: top + i * LINE }));
+}
+
+const nodeClass = { box: 'dg-box', accent: 'dg-accent', store: 'dg-store', group: 'dg-group' } as const;
+const arrowId = `${d.id}-arrow`;
+const titleId = `${d.id}-title`;
+const descId = `${d.id}-desc`;
+---
+
+<figure class="diagram" id={d.id}>
+  <div class="diagram-scroll" tabindex="0" role="region" aria-label={`${d.title}, scrollable diagram`}>
+    <svg
+      viewBox={`0 0 ${d.width} ${d.height}`}
+      role="img"
+      aria-labelledby={`${titleId} ${descId}`}
+      focusable="false"
+    >
+      <title id={titleId}>{d.title}</title>
+      <desc id={descId}>{d.summary}</desc>
+      <defs>
+        <marker id={arrowId} viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+          <path d="M0,0 L10,5 L0,10 z" class="dg-head"></path>
+        </marker>
+      </defs>
+      {
+        d.nodes.map((n) => (
+          <g>
+            <rect class={nodeClass[n.kind ?? 'box']} x={n.x} y={n.y} width={n.w} height={n.h} rx={n.kind === 'group' ? 14 : 10} />
+            {n.kind === 'group' ? (
+              <text class="dg-group-label" x={n.x + 14} y={n.y + 20}>{n.title}</text>
+            ) : (
+              textLines(n).map((r) => (
+                <text class={r.cls} x={n.x + n.w / 2} y={r.y} text-anchor="middle">{r.t}</text>
+              ))
+            )}
+          </g>
+        ))
+      }
+      {
+        d.edges.map((e) => (
+          <g>
+            <polyline
+              class={e.dashed ? 'dg-edge dg-edge-dash' : 'dg-edge'}
+              points={e.pts.map((p) => p.join(',')).join(' ')}
+              marker-end={`url(#${arrowId})`}
+              marker-start={e.both ? `url(#${arrowId})` : undefined}
+            />
+            {e.label && (
+              <text class="dg-edge-label" x={e.label.x} y={e.label.y} text-anchor={e.label.anchor ?? 'middle'}>
+                {e.label.text}
+              </text>
+            )}
+          </g>
+        ))
+      }
+    </svg>
+  </div>
+  <figcaption>{d.caption}</figcaption>
+  <details>
+    <summary>Text description of this diagram</summary>
+    <ul>
+      {d.alt.map((line) => <li>{line}</li>)}
+    </ul>
+  </details>
+</figure>

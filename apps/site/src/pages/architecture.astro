@@ -1,0 +1,533 @@
+---
+import Layout from '../layouts/Layout.astro';
+import Diagram from '../components/Diagram.astro';
+import { links, REPO } from '../data/site';
+import {
+  processModel,
+  crateMap,
+  vaultMemory,
+  daemon,
+  channels,
+  mcpGateway,
+  herdr,
+  governance,
+  releasePipeline,
+  topologies,
+} from '../data/diagrams';
+
+const toc = [
+  ['process', 'Process model'],
+  ['crates', 'Crate map'],
+  ['vault', 'Vault and memory'],
+  ['daemon', 'Daemon'],
+  ['relays', 'Chat relays'],
+  ['web', 'Web PWA'],
+  ['mcp', 'MCP server'],
+  ['herdr', 'Herdr sessions'],
+  ['tasks', 'Tasks'],
+  ['governance', 'Governance and sandbox'],
+  ['updates', 'Signed updates'],
+  ['topologies', 'Deployment'],
+  ['source', 'Source map'],
+];
+
+const sourceMap = [
+  ['CLI binary', 'crates/hq-cli/src/main.rs'],
+  ['Agent session', 'crates/hq-agent/src/session/mod.rs'],
+  ['Context engine', 'crates/hq-agent/src/context/engine.rs'],
+  ['Daemon scheduler', 'crates/hq-cli/src/commands/start/daemon/mod.rs'],
+  ['MCP server', 'crates/hq-mcp/src/server.rs'],
+  ['Herdr driver', 'crates/hq-tools/src/herdr/'],
+  ['Harness sessions', 'crates/hq-tools/src/harness_session/'],
+  ['Bash sandbox', 'crates/hq-agent/src/bash_sandbox.rs'],
+  ['Governance rules', 'crates/hq-agent/src/governance/'],
+  ['Updater library', 'crates/hq-update/'],
+  ['Web auth and origin guard', 'crates/hq-web/src/auth.rs'],
+  ['Native tasks', 'crates/hq-db/src/tasks.rs'],
+];
+---
+
+<Layout
+  title="Architecture"
+  description="How Agent HQ is built: one Rust binary, a markdown and SQLite vault, a daemon, chat relays, a web PWA, an MCP gateway, supervised coding-agent sessions, a bash sandbox and a signed updater."
+  path="/architecture/"
+>
+  <section class="band">
+    <div class="container section">
+      <span class="eyebrow">For engineers</span>
+      <h1>Architecture</h1>
+      <p class="lede prose">
+        HQ is one Rust binary around one folder of markdown. This page walks through each part in the
+        order you would meet it, with the code paths to read. Everything here comes from the repository
+        documentation. Where a document and the code could drift, the page points at the file.
+      </p>
+      <nav aria-label="On this page">
+        <ul class="toc">
+          {toc.map(([id, label]) => <li><a href={`#${id}`}>{label}</a></li>)}
+        </ul>
+      </nav>
+    </div>
+  </section>
+
+  <div class="container">
+    <section class="doc-section" id="process" aria-labelledby="process-h">
+      <h2 id="process-h">Process model and the single binary</h2>
+      <div class="prose">
+        <p>
+          The <code>hq</code> binary is built from the <code>hq-cli</code> crate. A release build is
+          about 40 MB with LTO and symbol stripping. The same file runs the terminal chat, the
+          daemon, the Discord and Telegram relays, the web server and the MCP server. You pick the
+          role with a subcommand.
+        </p>
+        <p>
+          <code>hq start all</code> starts the long-lived components and <code>hq ps</code> lists the
+          managed processes. An MCP client does not need any of that: it launches
+          <code>hq mcp-serve</code> over stdio itself. <code>hq chat</code> runs the agent in
+          process, so the terminal works with nothing else running.
+        </p>
+        <p>
+          Configuration lives in <code>~/.hq/config.yaml</code>, or the file named by
+          <code>HQ_CONFIG_PATH</code>. Any key can also come from an <code>HQ_</code> environment
+          variable, with <code>__</code> for nesting. The file and its backups are written owner-only.
+        </p>
+      </div>
+      <Diagram d={processModel} />
+    </section>
+
+    <section class="doc-section" id="crates" aria-labelledby="crates-h">
+      <h2 id="crates-h">Crate map</h2>
+      <div class="prose">
+        <p>
+          The workspace is Rust edition 2024 with 14 crates. Foundations hold types, storage and the
+          LLM clients. The agent crate holds the session loop, sub-agents, governance and the context engine.
+          Services wrap those for a transport. <code>hq-cli</code> ties them into the binary.
+        </p>
+        <p>
+          The stack, in short: Tokio for async, Axum and tower-http for the web server, rusqlite
+          (bundled, WAL mode) for storage, rmcp for MCP, serenity for Discord, teloxide for Telegram,
+          clap for the CLI and figment for configuration. LLM calls go through async-openai with a
+          swappable base URL, which is how OpenRouter, Ollama and other OpenAI-compatible backends
+          plug in.
+        </p>
+      </div>
+      <Diagram d={crateMap} />
+    </section>
+
+    <section class="doc-section" id="vault" aria-labelledby="vault-h">
+      <h2 id="vault-h">The vault and the memory layers</h2>
+      <div class="prose">
+        <p>
+          The vault is a folder, <code>.vault/</code>, and it is the single source of truth. Notes,
+          memory, skills and conversation threads are markdown with YAML frontmatter. One SQLite file,
+          <code>.vault/_data/vault.db</code> in WAL mode, holds the indexes: FTS5 full-text search,
+          embedding vectors, link graphs and the registries the daemon and relays need. Delete the
+          database and the notes are still there.
+        </p>
+        <p>
+          Embeddings come from OpenRouter when a key is set, and from Ollama
+          (<code>nomic-embed-text</code> by default) when it is not. Memory, consolidation and skill
+          review call the router under the aliases <code>dream</code>, <code>bulk</code> and
+          <code>ingest</code>. Point those at a local model with a <code>backends:</code> block and
+          they stay on your machine.
+        </p>
+        <h3>Memory</h3>
+        <p>
+          The <code>hq-memory</code> crate has an ingester, a consolidator, a querier, a forgetter and
+          an entity graph. The daemon runs consolidation, embedding, note tagging and forgetting on
+          its memory tier, so memory is something the vault does for itself over time, not a log that
+          grows forever.
+        </p>
+        <h3>Context frames</h3>
+        <p>
+          Each turn, the context engine builds a token-budgeted frame from five layers: system, the
+          user message, memory, thread and injections. Surplus tokens cascade between layers, with the
+          thread getting 50 percent, injections 35 percent and memory 15 percent. Private tags are
+          stripped from the memory layer, and older thread messages are compacted.
+        </p>
+        <h3>Who may see what</h3>
+        <p>
+          Notes and tasks can carry a label: private to named people, shared, public, or unmarked,
+          which means owner only. A shared channel discloses only what every verified participant may
+          see, and an unresolved identity is denied by default.
+          <a href={links.sec.identity}>The design note</a> lists what is not covered yet.
+        </p>
+      </div>
+      <Diagram d={vaultMemory} />
+    </section>
+
+    <section class="doc-section" id="daemon" aria-labelledby="daemon-h">
+      <h2 id="daemon-h">The daemon and its scheduled tasks</h2>
+      <div class="prose">
+        <p>
+          The daemon is a plain interval scheduler. It ticks every 5 seconds and runs whichever tasks
+          are due, one after another, each with a timeout derived from its interval tier. A missed
+          task is detected on the next start. After every tick it writes
+          <code>DAEMON-STATUS.md</code> at the vault root, so you can read what ran with
+          <code>cat</code>.
+        </p>
+        <p>
+          The fast tier handles approvals, harness-session supervision, the heartbeat, value-bus
+          delivery and the email poll. The memory tier handles consolidation, embeddings, note tagging
+          and forgetting. The maintenance tier handles vault health, thread rotation, clean-up, a disk
+          watchdog and SQLite vacuum. Beside the scheduler, an agent worker triages inbound events and
+          email, and a machine profile records which CLIs the host has.
+        </p>
+        <p>
+          Recurring prompts are not daemon tasks. They are <code>/watch</code> rows, covered with the
+          relays below.
+        </p>
+      </div>
+      <Diagram d={daemon} />
+    </section>
+
+    <section class="doc-section" id="relays" aria-labelledby="relays-h">
+      <h2 id="relays-h">Chat relays</h2>
+      <div class="prose">
+        <p>
+          Discord and Telegram are built into <code>hq-relay</code> as feature-gated bridges behind
+          one unified bot. They share commands and watch firing, so behavior matches. Send
+          <code>!cancel</code> in either and the agent stops at the next tool boundary and replies
+          with a summary of turns and files touched. A heartbeat message shows the turn count and the
+          tool currently running.
+        </p>
+        <p>
+          Chat bridges are gated to an owner. Run <code>hq pair</code>, then send
+          <code>/pair &lt;code&gt;</code> in a private Telegram chat or <code>!pair &lt;code&gt;</code>
+          in a Discord DM. Earlier versions let the first sender become the owner. That was changed
+          because it hands the agent to whoever messages first.
+        </p>
+        <h3>Turns that outlive the chat</h3>
+        <p>
+          A turn has an ack window, 270 seconds by default. If the turn runs longer, the chat gets an
+          immediate acknowledgement and the session detaches into a persisted
+          <code>background_turns</code> table, then delivers its result when it finishes. A reconciler
+          runs at daemon start and every 6 hours. It marks rows that were running when something died
+          as interrupted, offers a <code>resume &lt;id&gt;</code>, and retires rows older than five
+          days.
+        </p>
+        <p>
+          <code>/watch &lt;minutes&gt; [for &lt;N&gt;h] &lt;prompt&gt;</code> stores a durable
+          recurring turn in the same table, so watches survive restarts. A reply containing
+          <code>WATCH_DONE</code> delivers once and stops the watch.
+        </p>
+        <h3>Session limits</h3>
+        <p>
+          Sessions have no turn-count ceiling. They end on completion, cancellation, an optional USD
+          budget cap, or a wall-clock limit that defaults to five hours.
+        </p>
+      </div>
+      <Diagram d={channels} />
+    </section>
+
+    <section class="doc-section" id="web" aria-labelledby="web-h">
+      <h2 id="web-h">The web PWA</h2>
+      <div class="prose">
+        <p>
+          The Control Center is a React 19 app on TanStack Start and Vite, built to a static
+          single-page bundle. <code>hq start all</code> serves it from <code>:5678</code> along with
+          the REST API and the chat socket, from <code>web/dist</code> next to the vault or the
+          directory in <code>web_static_dir</code>. There is no separate web server process.
+        </p>
+        <p>
+          It streams the agent live, browses and searches the vault, shows daemon status, runs the
+          tasks views, lists and drives sessions, renders DOCX, XLSX and PDF, and takes push
+          notifications. It installs on a phone like any PWA.
+        </p>
+        <h3>Auth in the browser</h3>
+        <p>
+          The server binds to <code>127.0.0.1</code> by default. With <code>web_auth_token</code> set,
+          the token is accepted only as a Bearer header, never in a URL. A browser cannot set headers
+          on a WebSocket, so the app asks <code>POST /api/ws-ticket</code> for a ticket that works
+          once, lasts 30 seconds and opens only <code>/ws</code>. An origin guard refuses requests from
+          origins that are not loopback, not the server's own and not listed in
+          <code>web_allowed_origins</code>, which also stops DNS rebinding. The response CSP has no
+          <code>unsafe-eval</code> and no script <code>unsafe-inline</code>, and remote images are
+          blocked on purpose, because an image URL is a way to send data out of a rendered note.
+          Details: <a href={links.sec.webAuth}>web and MCP auth</a>.
+        </p>
+      </div>
+    </section>
+
+    <section class="doc-section" id="mcp" aria-labelledby="mcp-h">
+      <h2 id="mcp-h">The MCP server and the two-tool gateway</h2>
+      <div class="prose">
+        <p>
+          HQ is an MCP server so the agents you already use can reach your vault, tasks and sessions.
+          A client always sees exactly two tools. <code>hq_discover</code> searches the registry by
+          keyword and returns matching tools with their descriptions. <code>hq_call</code> runs a tool
+          by name with JSON input. The registry behind them holds about a hundred tools, and a client
+          that calls <code>hq_discover</code> at runtime always sees the live list.
+        </p>
+        <p>
+          <code>hq mcp install --target claude-code</code> writes the client config for Claude Code,
+          Claude Desktop, Cursor, VS Code, Copilot, OpenCode, Antigravity or a project file, and
+          <code>hq mcp doctor</code> checks the connection.
+        </p>
+        <h3>Keys and scopes</h3>
+        <p>
+          Over HTTP, <code>/mcp</code> refuses every call unless a key is configured. There are three
+          scopes. A full key sees everything. A read-only key sees an allowlist. A handoff key gets that
+          read-only set, minus session logs, plus filing tasks, starting sessions and asking questions
+          in read-only mode, and nothing else. The gateway sets
+          the scope itself, so a client cannot claim a wider one. Treat the handoff key as the power to
+          start a coding agent anywhere you allow it, and set <code>herdr.handoff_cwd_allow</code> to
+          bound where.
+        </p>
+        <h3>Both directions</h3>
+        <p>
+          HQ also bridges remote MCP servers. Each <code>remote_mcp:</code> entry becomes a
+          <code>&lt;name&gt;_discover</code> and <code>&lt;name&gt;_call</code> pair in the registry,
+          kept out of unattended sessions by default. From outside, <code>hq_ask</code> lets an MCP
+          client put a question to HQ's own chat agent, in an ordinary web thread you can open and
+          continue (<a href={links.mcpAsk}>docs</a>).
+        </p>
+      </div>
+      <Diagram d={mcpGateway} />
+    </section>
+
+    <section class="doc-section" id="herdr" aria-labelledby="herdr-h">
+      <h2 id="herdr-h">Herdr and supervised coding-agent sessions</h2>
+      <div class="prose">
+        <p>
+          <a href={links.herdr}>Herdr</a> owns the terminals. It recognises which coding agent sits in
+          a pane and reports its state: idle, working, blocked on a dialog, or done. HQ drives it
+          through the <code>herdr</code> CLI. Claude Code, Codex, Cursor, Pi, OpenCode, Copilot CLI,
+          Kimi, Qwen and Antigravity are supported harnesses, and you can define your own profiles.
+          This replaced an earlier tmux runner that could only guess state from screen text.
+        </p>
+        <h3>Hosts</h3>
+        <p>
+          A host is a machine running Herdr. <code>local</code> is the machine HQ runs on. Any other
+          host is reached over ssh with a dedicated key that is pinned to one source address and to a
+          forced command, a small gate script that accepts the <code>herdr</code> CLI's arguments as
+          JSON on stdin and refuses <code>server</code>, <code>session</code>, <code>machine</code>
+          and remote flags. That is how HQ on a VPS can run and watch agents on a laptop, whenever the
+          laptop is on and reachable. Connections are reused between calls, and a write is never
+          retried because the gate may already have run it.
+        </p>
+        <h3>Spawning and watching</h3>
+        <p>
+          <code>harness_session_spawn</code> starts an agent and returns a session id. Send, wait,
+          logs, status, stop and resume sit beside it, and <code>hq sessions</code> mirrors them in the
+          CLI. A supervisor in the daemon polls every host once a minute. It alerts once when a
+          session blocks and once when an agent finishes a turn. A host that cannot be reached counts
+          as unknown, never as exited: a sleeping laptop leaves its sessions running and they are
+          watched again when it answers.
+        </p>
+        <p>
+          HQ does not answer dialogs for you. Claude Code's workspace-trust prompt defaults to "No,
+          exit", so pressing Enter would quit it. A blocked launch is reported with the screen, and you
+          answer with explicit keys.
+        </p>
+        <h3>Sessions that work on a task</h3>
+        <p>
+          A session can be linked to a task. Each event leaves a task comment, and the task moves from
+          in progress to ready for review or blocked as the session finishes or exits. HQ never marks a
+          task complete, because an agent saying it is done is not verification. Comments never quote
+          the pane, since pane text is untrusted input.
+        </p>
+        <h3>Handoff</h3>
+        <p>
+          <code>harness_session_handoff</code> lets an outside client, such as another agent over MCP,
+          start tracked work in one call. It files or reuses a task by an idempotency key, starts one
+          linked session with the acceptance criteria as its definition of done, and opens a chat
+          thread that owns the session. It is idempotent: the same key returns the same task, and a
+          task that already has a running session gets no second one.
+        </p>
+        <h3>Watching and driving from a web chat</h3>
+        <p>
+          A chat can watch a session. Watching posts short updates and never quotes the screen.
+          Driving lets HQ act as the session's project manager: read the session, send the next
+          instruction, approve a permission prompt or resume an exit, toward the linked task's goal. It
+          asks you instead when a step is destructive, touches credentials, deploys or spends money.
+          A new watch starts with Drive on only when the task gives it a usable goal, and
+          observation-only otherwise. A turn that has read untrusted content starts new watches with
+          Drive off, and a tool can never turn it back on once you switched it off. Mechanical limits cut it off
+          without relying on the model: an instruction budget per session, a cap on key presses, a
+          no-progress guard, and a cap on sessions driven at once. Each one switches Drive off and
+          says why. The Sessions page shows every session with its task, host, goal and live state.
+        </p>
+      </div>
+      <Diagram d={herdr} />
+      <p class="prose muted">
+        Full reference, including setup and troubleshooting:
+        <a href={links.herdrHarness}>docs/HERDR_HARNESS.md</a>.
+      </p>
+    </section>
+
+    <section class="doc-section" id="tasks" aria-labelledby="tasks-h">
+      <h2 id="tasks-h">Tasks</h2>
+      <div class="prose">
+        <p>
+          Tasks are native, with no external tracker to mirror. The model is spaces, then initiatives,
+          then tasks, then comments, with sub-tasks, start dates and soft dependencies. One shared
+          write surface in <code>hq-db</code> backs the MCP tools (<code>task_list</code>,
+          <code>task_create</code>, <code>task_update</code>, <code>task_comment_add</code> and
+          friends), the REST API with its WebSocket broadcast, and the web UI with list, board and
+          timeline views. Tasks have no CLI command.
+        </p>
+        <p>
+          Tagging a task routes it to an agent mailbox synchronously. A person's tasks live in a
+          private space that only that person's turns can read. See
+          <a href={links.nativeTasks}>the design note</a>.
+        </p>
+      </div>
+    </section>
+
+    <section class="doc-section" id="governance" aria-labelledby="governance-h">
+      <h2 id="governance-h">Governance and the bash sandbox</h2>
+      <div class="prose">
+        <p>
+          The agent's <code>bash</code> tool runs model-written shell commands, so HQ does not rely on
+          the model refusing. A governance layer denies dangerous effects mechanically, before a tool
+          runs, and it applies in permissive modes too.
+        </p>
+        <p>
+          Credential files such as <code>~/.ssh</code>, cloud credentials and the HQ config are
+          unreachable always. A session becomes tainted once a tool returns untrusted content: web
+          fetch and search, mail, converted documents, other agents' mailboxes, session logs, pane
+          reads, vault reads and any remote MCP result. Taint is shared with every sub-agent the
+          session spawns, so delegating cannot launder it. After taint, project secrets such as
+          <code>.env</code> files and outbound network from bash (<code>curl</code>,
+          <code>ssh</code>, <code>nc</code> and similar) are denied.
+        </p>
+        <p>
+          For bash, three layers follow. Text checks catch honest mistakes and cheap tricks, but about
+          100 known obfuscation shapes are pinned in tests and some still get through, so they are
+          speed bumps. An environment allowlist starts the child with an empty environment and a short
+          list of variables. HQ's own keys are refused even if you list them. Then the OS sandbox:
+          bubblewrap on Linux, <code>sandbox-exec</code> on macOS. On Linux it gives a read-only root,
+          a fresh <code>/proc</code> in a new pid namespace, writable binds only for home, the working
+          directory, temp and the vault, and optionally no network. Config, env files and private
+          SSH keys are masked.
+        </p>
+        <p>
+          <code>governance.bash.sandbox</code> takes <code>off</code>, <code>best_effort</code> or
+          <code>required</code>. After 0.9.0 the default is <code>required</code>: if no sandbox backend
+          works, every bash command is refused and <code>hq doctor</code> says so.
+        </p>
+      </div>
+      <Diagram d={governance} />
+      <p class="prose muted">
+        What this does not cover is on the <a href="/security/">security page</a>.
+      </p>
+    </section>
+
+    <section class="doc-section" id="updates" aria-labelledby="updates-h">
+      <h2 id="updates-h">The signed release and pull-updater pipeline</h2>
+      <div class="prose">
+        <p>
+          A server instance pulls its updates. Nothing on the build side holds a credential for any
+          instance, and instances hold only a public key.
+        </p>
+        <h3>Build side</h3>
+        <p>
+          Every merge to <code>main</code> runs tests, builds on an older Ubuntu image so the binary
+          needs only an older glibc, and publishes a signed prerelease named like
+          <code>0.9.1-main.6</code>. The job that runs repository build code never sees the signing
+          key: a separate sign job does. Each release carries the Linux x86_64 binary archive, the web
+          bundle, <code>SHA256SUMS</code>, a <code>manifest.json</code> and its
+          <code>.minisig</code>. Channel pointers (<code>channel-main</code>,
+          <code>channel-stable</code>) are small signed JSON files that say which release a channel
+          currently means. Promoting to stable signs a new pointer for an existing release. Nothing is
+          rebuilt.
+        </p>
+        <h3>Instance side</h3>
+        <ol class="facts">
+          <li>
+            A systemd timer fires every 10 minutes with a short random delay and runs
+            <code>hq update --apply</code> under an exclusive lock.
+          </li>
+          <li>
+            It verifies the pointer signature, checks that the manifest URL lives under the configured
+            repository, then verifies the manifest signature and its SHA-256, the schema and the
+            minimum updater version.
+          </li>
+          <li>
+            Equal or lower versions do nothing. A pointer with a lower sequence number than one already
+            accepted is refused as a replay.
+          </li>
+          <li>
+            It downloads with hard size caps, verifies each artifact's SHA-256 against the signed
+            manifest, and unpacks with a strict tar reader that rejects links, devices, absolute and
+            parent paths and duplicates.
+          </li>
+          <li>
+            It snapshots the vault database with <code>VACUUM INTO</code>, as the service user, never
+            as root.
+          </li>
+          <li>
+            It runs the staged binary as the service user with <code>--version</code> and requires the
+            exact build. This is the only downloaded code that runs before the swap.
+          </li>
+          <li>
+            It swaps the binary and web files by rename, keeping the last three binaries and one old
+            web tree, restarts the service and polls <code>/health</code> until it reports the new git
+            sha.
+          </li>
+          <li>
+            On success it runs <code>hq install --upgrade</code>. On failure it rolls back, restores
+            the database only if migrations ran, blocks that version for 24 hours and sends an alert.
+            A crash mid-update is recovered from a journal on the next run.
+          </li>
+        </ol>
+        <p>
+          Signatures are minisign (Ed25519), verified in process. The key is read from a root-owned
+          file or compiled in, and cannot be overridden by an environment variable. Key rotation is a
+          manual step. A compromised signing key and a stale-pointer freeze attack are listed as not
+          mitigated. Read <a href={links.updateSystem}>docs/UPDATE_SYSTEM.md</a> for the contract.
+        </p>
+      </div>
+      <Diagram d={releasePipeline} />
+    </section>
+
+    <section class="doc-section" id="topologies" aria-labelledby="topologies-h">
+      <h2 id="topologies-h">Deployment topologies</h2>
+      <div class="prose">
+        <p>
+          <strong>Laptop only.</strong> Run <code>hq start all</code>. The web server binds to loopback.
+          Set <code>web_auth_token</code> on a shared machine. This is the default and needs no network
+          setup.
+        </p>
+        <p>
+          <strong>VPS plus Tailscale.</strong> Provision a Debian or Ubuntu box with
+          <code>deploy/setup-vps.sh</code>, install the signed updater with
+          <code>deploy/install.sh</code>, and keep HQ on loopback. Caddy bridges to
+          <code>tailscale serve</code>, which terminates HTTPS on your tailnet only, so the UI never
+          touches the public internet. List every origin you serve the UI from in
+          <code>web_allowed_origins</code>. HQ on the VPS can then drive Herdr on a laptop over the
+          gated ssh key.
+        </p>
+        <p>
+          The only endpoint that may ever be public is <code>/mcp</code>, through a proxy that exposes
+          <code>/mcp</code> and <code>/health</code> and nothing else, with an API key set.
+          <code>/ws</code> and <code>/api</code> must never be public. A host runs one deploy path
+          only: the pull updater, or a manual build, not both. Steps are on the
+          <a href="/install/">install page</a> and in <a href={links.deployReadme}>deploy/README.md</a>.
+        </p>
+      </div>
+      <Diagram d={topologies} />
+    </section>
+
+    <section class="doc-section" id="source" aria-labelledby="source-h">
+      <h2 id="source-h">Source map</h2>
+      <p class="prose">Where to start reading, relative to <a href={REPO}>the repository</a>.</p>
+      <div class="table-scroll" tabindex="0" role="region" aria-label="Source map table">
+        <table>
+          <caption>Entry points</caption>
+          <thead><tr><th scope="col">Area</th><th scope="col">Path</th></tr></thead>
+          <tbody>
+            {
+              sourceMap.map(([area, path]) => (
+                <tr>
+                  <th scope="row">{area}</th>
+                  <td><a href={`${REPO}/${path.endsWith('/') ? 'tree' : 'blob'}/main/${path}`}><code>{path}</code></a></td>
+                </tr>
+              ))
+            }
+          </tbody>
+        </table>
+      </div>
+    </section>
+  </div>
+</Layout>

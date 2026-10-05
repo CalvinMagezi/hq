@@ -1,0 +1,104 @@
+---
+import { existsSync } from 'node:fs';
+import { join } from 'node:path';
+import manifest from '../data/media.json';
+
+interface Props {
+  id: string;
+}
+
+const { id } = Astro.props;
+const item = manifest.find((m) => m.id === id);
+if (!item) throw new Error(`media.json has no entry with id "${id}"`);
+
+// Decided at build time, so a strict CSP never needs an onerror handler.
+const onDisk = (src?: string) => Boolean(src) && existsSync(join(process.cwd(), 'public', src!));
+const hasFile = onDisk(item.src);
+const hasPoster = onDisk((item as { poster?: string }).poster);
+const poster = (item as { poster?: string }).poster;
+
+const KIND_LABEL: Record<string, string> = {
+  image: 'Screenshot',
+  gif: 'Short animation',
+  video: 'Short recording',
+};
+const PH_WIDTH = 640;
+const phHeight = Math.round((PH_WIDTH * item.height) / item.width);
+const showGif = item.kind === 'gif' && hasFile && hasPoster;
+---
+
+<figure class="media" data-media={item.id} data-anim={showGif ? '' : undefined}>
+  <div class="media-frame">
+    {
+      item.kind === 'image' && hasFile && (
+        <img
+          src={item.src}
+          alt={item.alt}
+          width={item.width}
+          height={item.height}
+          loading="lazy"
+          decoding="async"
+        />
+      )
+    }
+    {
+      showGif && (
+        <img
+          src={poster}
+          data-poster={poster}
+          data-anim-src={item.src}
+          alt={item.alt}
+          width={item.width}
+          height={item.height}
+          loading="lazy"
+          decoding="async"
+        />
+      )
+    }
+    {
+      item.kind === 'video' && hasFile && (
+        <video
+          controls
+          preload="none"
+          playsinline
+          width={item.width}
+          height={item.height}
+          poster={hasPoster ? poster : undefined}
+          aria-label={item.alt}
+        >
+          <source src={item.src} type="video/mp4" />
+          <p>
+            Your browser cannot play this video. <a href={item.src}>Download it</a>.
+          </p>
+        </video>
+      )
+    }
+    {
+      !(hasFile && (item.kind !== 'gif' || hasPoster)) && (
+        <svg viewBox={`0 0 ${PH_WIDTH} ${phHeight}`} aria-hidden="true" focusable="false">
+          <rect class="ph-bg" width={PH_WIDTH} height={phHeight} />
+          <rect class="ph-frame" x="12" y="12" width={PH_WIDTH - 24} height={phHeight - 24} rx="12" />
+          <text class="ph-text" x={PH_WIDTH / 2} y={phHeight / 2 - 4} text-anchor="middle">
+            {KIND_LABEL[item.kind]} coming soon
+          </text>
+          <text class="ph-sub" x={PH_WIDTH / 2} y={phHeight / 2 + 24} text-anchor="middle">
+            Agent HQ
+          </text>
+        </svg>
+      )
+    }
+  </div>
+  <figcaption>
+    {!(hasFile && (item.kind !== 'gif' || hasPoster)) && <span class="tag">Coming soon</span>}
+    {' '}{item.caption}
+  </figcaption>
+  {
+    showGif && (
+      <div class="media-controls" hidden>
+        <button type="button" class="btn btn-sm" data-anim-toggle aria-pressed="false">
+          Play animation
+        </button>
+      </div>
+    )
+  }
+</figure>

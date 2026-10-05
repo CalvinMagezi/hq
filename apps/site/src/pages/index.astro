@@ -1,0 +1,152 @@
+---
+import Layout from '../layouts/Layout.astro';
+import CodeBlock from '../components/CodeBlock.astro';
+import Diagram from '../components/Diagram.astro';
+import Media from '../components/Media.astro';
+import { channels } from '../data/diagrams';
+import manifest from '../data/media.json';
+import { links, REPO } from '../data/site';
+
+const installCmd = `git clone ${REPO}.git && cd hq && cargo build --release -p hq-cli`;
+
+const capabilities = [
+  {
+    title: 'One agent on every channel',
+    body: 'Discord, Telegram, a web app that installs as a PWA, and your terminal share one conversation history and one memory. Start a thread on your phone and finish it at your desk.',
+    icon: 'M4 5h7l4 7-4 7H4 M15 12h5',
+  },
+  {
+    title: 'A vault you can read',
+    body: 'Notes, memory, skills and threads are plain markdown files on your disk, plus one SQLite database for full-text search and embeddings. Nothing is locked inside a service.',
+    icon: 'M7 3h10a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2z M9 8h6 M9 12h6 M9 16h4',
+  },
+  {
+    title: 'Coding agents under supervision',
+    body: 'Start, watch, steer and resume Claude Code, Codex, OpenCode and others inside Herdr, on this machine or over SSH. HQ tells you when one blocks. It never answers a trust prompt for you.',
+    icon: 'M5 4h14a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2z M7 10l3 2-3 2 M13 15h4',
+  },
+  {
+    title: 'Tasks and sub-agents',
+    body: 'Spaces, initiatives, tasks and comments are built in, with list, board and timeline views. Sub-agents run single, parallel, race or graph. Long turns detach and report back, and /watch schedules recurring ones.',
+    icon: 'M4 7l2 2 3-3 M12 7h8 M4 16l2 2 3-3 M12 16h8',
+  },
+  {
+    title: 'An MCP server for your tools',
+    body: 'Two tools, hq_discover and hq_call, open the whole registry to Claude Code, Cursor, VS Code, Copilot and other MCP clients. Remote MCP servers can be bridged in the other direction.',
+    icon: 'M6 9.5a2.5 2.5 0 1 0 0 5 2.5 2.5 0 0 0 0-5z M18 3.5a2.5 2.5 0 1 0 0 5 2.5 2.5 0 0 0 0-5z M18 15.5a2.5 2.5 0 1 0 0 5 2.5 2.5 0 0 0 0-5z M8.3 10.8l7.4-4.1 M8.3 13.2l7.4 4.1',
+  },
+  {
+    title: 'Safe by default',
+    body: 'Agent shell commands run in a sandbox with an environment allowlist. Untrusted content taints a session and cuts off secrets and outbound network. Servers update from signed releases and roll back on a failed health check.',
+    icon: 'M12 3l8 3v6c0 4.5-3.2 8-8 9-4.8-1-8-4.5-8-9V6z M9 12l2 2 4-4',
+  },
+];
+---
+
+<Layout
+  title="Agent HQ: a local-first AI agent hub"
+  description="Agent HQ puts one AI agent on Discord, Telegram, the web and your terminal, keeps your data in a markdown vault on your own machine, and supervises your coding agents. One Rust binary. Open source, MIT."
+  path="/"
+>
+  <section class="band hero">
+    <div class="container">
+      <span class="eyebrow">Open source, local first, version 0.9.x</span>
+      <h1>One agent. Every channel. Your machine.</h1>
+      <div class="rule"></div>
+      <p class="lede">
+        Agent HQ (HQ for short) puts one AI agent on Discord, Telegram, a web app and your terminal.
+        It keeps your data in a markdown vault on your own disk and supervises the coding agents you
+        already use. One Rust binary of about 40 MB. No cloud backend.
+      </p>
+      <div class="prose">
+        <CodeBlock id="hero-install" label="Build from source" code={installCmd} />
+      </div>
+      <div class="hero-actions">
+        <a class="btn btn-primary" href="/install/">Install guide</a>
+        <a class="btn" href="/architecture/">How it works</a>
+        <a class="btn" href={links.repo}>View on GitHub</a>
+      </div>
+    </div>
+  </section>
+
+  <section class="section" aria-labelledby="cap-h">
+    <div class="container">
+      <span class="eyebrow">What it does</span>
+      <h2 id="cap-h">Six things HQ is built around</h2>
+      <div class="grid">
+        {
+          capabilities.map((c) => (
+            <article class="card">
+              <svg class="icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+                <path d={c.icon} />
+              </svg>
+              <h3>{c.title}</h3>
+              <p>{c.body}</p>
+            </article>
+          ))
+        }
+      </div>
+    </div>
+  </section>
+
+  <section class="section band" aria-labelledby="fit-h">
+    <div class="container">
+      <span class="eyebrow">How it fits together</span>
+      <h2 id="fit-h">Four ways in, one agent, one vault</h2>
+      <p class="lede prose">
+        Every channel reaches the same agent loop, and the agent reads and writes the same vault. That
+        is the whole idea. The <a href="/architecture/">architecture page</a> goes through each part.
+      </p>
+      <Diagram d={channels} />
+    </div>
+  </section>
+
+  <section class="section" aria-labelledby="see-h">
+    <div class="container">
+      <span class="eyebrow">See it</span>
+      <h2 id="see-h">Screenshots and short demos</h2>
+      <p class="prose muted">
+        Real captures are being added. Until a file lands, you see a labelled placeholder rather than a
+        broken image.
+      </p>
+      <div class="grid grid-2">
+        {manifest.map((m) => <Media id={m.id} />)}
+      </div>
+    </div>
+  </section>
+
+  <section class="section band" aria-labelledby="inst-h">
+    <div class="container">
+      <span class="eyebrow">Install</span>
+      <h2 id="inst-h">Three commands from a clone</h2>
+      <p class="prose muted">
+        Build the binary, scaffold a vault, check the setup. You need a recent stable Rust toolchain
+        and at least one LLM API key. Servers have a separate path with signed releases.
+      </p>
+      <div class="grid">
+        <CodeBlock id="strip-build" label="1. Build" code="cargo build --release -p hq-cli" />
+        <CodeBlock id="strip-install" label="2. Scaffold" code="./target/release/hq install" />
+        <CodeBlock id="strip-doctor" label="3. Check" code="./target/release/hq doctor" />
+      </div>
+      <p><a class="btn" href="/install/">All install options</a></p>
+    </div>
+  </section>
+
+  <section class="section" aria-labelledby="early-h">
+    <div class="container">
+      <div class="callout prose">
+        <h2 id="early-h">HQ is early</h2>
+        <p>
+          <strong>Version 0.9.x.</strong> Expect rough edges and changes between releases. Defaults have
+          tightened since 0.9.0: the bash sandbox is now required by default, and chat relays no longer
+          adopt the first sender as owner.
+        </p>
+        <p>
+          It talks to Discord and Telegram, not Slack or WhatsApp. Signed release binaries are built for
+          Linux on x86_64 only, so macOS runs from source. The <a href={links.changelog}>changelog</a>
+          lists every upgrade note.
+        </p>
+      </div>
+    </div>
+  </section>
+</Layout>
