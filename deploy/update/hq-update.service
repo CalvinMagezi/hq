@@ -30,4 +30,5 @@ RestrictSUIDSGID=true
 LockPersonality=true
 # Root for file swaps and ownership fixes; setuid/setgid for dropping to the
 # hq user before running anything downloaded.
-CapabilityBoundingSet=CAP_CHOWN CAP_DAC_OVERRIDE CAP_FOWNER CAP_SETUID CAP_SETGID
+# CAP_SETPCAP lets `setpriv --bounding-set=-all` drop capabilities from the staged-binary check.
+CapabilityBoundingSet=CAP_CHOWN CAP_DAC_OVERRIDE CAP_FOWNER CAP_SETUID CAP_SETGID CAP_SETPCAP
