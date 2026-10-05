@@ -14,6 +14,7 @@ fn git(args: &[&str]) -> Option<String> {
 
 fn main() {
     println!("cargo:rerun-if-env-changed=HQ_GIT_SHA");
+    println!("cargo:rerun-if-env-changed=HQ_BUILD_VERSION");
     println!("cargo:rerun-if-env-changed=SOURCE_DATE_EPOCH");
     println!("cargo:rerun-if-env-changed=HQ_UPDATE_PUBKEY");
     // Resolved through git so linked worktrees (where `.git` is a file) work.
@@ -32,6 +33,14 @@ fn main() {
         .or_else(|| git(&["rev-parse", "HEAD"]))
         .unwrap_or_else(|| "unknown".to_string());
     println!("cargo:rustc-env=HQ_GIT_SHA={sha}");
+
+    // Release builds carry a channel suffix (0.9.0-main.7) that Cargo.toml does not.
+    let version = std::env::var("HQ_BUILD_VERSION")
+        .ok()
+        .filter(|s| !s.trim().is_empty())
+        .or_else(|| std::env::var("CARGO_PKG_VERSION").ok())
+        .unwrap_or_else(|| "unknown".to_string());
+    println!("cargo:rustc-env=HQ_VERSION={version}");
 
     let built = std::env::var("SOURCE_DATE_EPOCH")
         .ok()
