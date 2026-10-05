@@ -151,6 +151,7 @@ keep_binaries = 3
 snapshots_keep = 5
 # max_pointer_age_secs = 604800   # optional: warn when the channel pointer is older than this
 blocked_ttl_secs = 86400     # how long a failed release is skipped
+allow_darwin = false         # macOS only: accept apply/rollback without a service stop step (see Limits)
 deadline_secs = 900          # whole-run limit, below the unit's TimeoutStartSec
 
 [notify]
@@ -378,7 +379,14 @@ live one as `dist.prev`.
 - The binary swap is one atomic rename. The web swap is two renames (live to
   `dist.prev`, staged to live); a crash between them is repaired by the next run.
 - The updater needs systemd for restarts on Linux. The macOS path reuses
-  hq-core's launchd kickstart and has no stop step.
+  hq-core's launchd kickstart and has no stop step, so a swap or a
+  `--rollback --restore-db` there happens under a live daemon. On a darwin
+  build `hq update --apply` and `--rollback` therefore refuse with a clear
+  message unless you set `HQ_UPDATE_ALLOW_DARWIN=1` or `allow_darwin = true`.
+  `--check` and `--dry-run` always work.
+- A build for a musl target (for example Alpine) selects no binary: the
+  published Linux builds link glibc, so the updater stops with a missing
+  `linux-<arch>-musl` platform error and does not block the version.
 - The updater does not write `/opt/hq/deployed.sha` or fast-forward `/opt/hq/src`
   as an older push-based deploy did. Anything that reads those must be retired
   on an updater-managed host.

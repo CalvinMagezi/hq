@@ -21,11 +21,22 @@ echo '//sw' > "$t/web/sw.js"
 echo '{}' > "$t/web/manifest.json"
 platforms="linux-x86_64 linux-aarch64 darwin-aarch64"
 bin_args=()
+# Real executable headers (ELF64 little-endian with e_machine at offset 18, Mach-O 64 with
+# cputype at offset 4), then a tag line that makes each binary, and so each tarball, distinct.
+fake_bin() {
+    case "$1" in
+        linux-x86_64) printf '\177ELF\002\001\001\000\000\000\000\000\000\000\000\000\002\000\076\000' ;;
+        linux-aarch64) printf '\177ELF\002\001\001\000\000\000\000\000\000\000\000\000\002\000\267\000' ;;
+        darwin-aarch64) printf '\317\372\355\376\014\000\000\001\000\000\000\000\002\000\000\000' ;;
+        *) echo "selftest: no fake header for $1" >&2; exit 1 ;;
+    esac > "$2"
+    printf '\n# %s hq %s\n' "$1" "$version" >> "$2"
+}
 for p in $platforms; do
-    # The platform in a comment makes each binary, and so each tarball, distinct.
-    printf '#!/bin/sh\n# %s\necho "hq %s (%s 0)"\n' "$p" "$version" "${sha:0:7}" > "$t/hq-$p"
+    fake_bin "$p" "$t/hq-$p"
     bin_args+=(--bin "$p=$t/hq-$p")
 done
+printf '#!/bin/sh\necho script\n' > "$t/hq-script"
 minisign -G -W -f -p "$t/pub" -s "$t/sec" > /dev/null
 echo 0.9.0 > "$t/floor"
 export MIN_UPDATER_FILE="$t/floor"
@@ -48,7 +59,7 @@ for p in $platforms; do
         echo "selftest: $f must hold exactly hq" >&2
         exit 1
     }
-    [ "$(tar -xzOf "$rel/$f" hq | sed -n 2p)" = "# $p" ] || { echo "selftest: $f holds the wrong platform's binary" >&2; exit 1; }
+    tar -xzOf "$rel/$f" hq | grep -aq "^# $p hq" || { echo "selftest: $f holds the wrong platform's binary" >&2; exit 1; }
     jq -e --arg n "$f" '.artifacts | map(.name) | index($n) != null' "$rel/manifest.json" > /dev/null ||
         { echo "selftest: manifest lacks $f" >&2; exit 1; }
     grep -q "  $f\$" "$rel/SHA256SUMS" || { echo "selftest: SHA256SUMS lacks $f" >&2; exit 1; }
@@ -65,6 +76,13 @@ expect_package_failure() {
 }
 expect_package_failure --bin "linux-aarch64=$t/hq-linux-aarch64"
 expect_package_failure --bin "linux-x86_64=$t/hq-linux-x86_64" --bin "linux-x86_64=$t/hq-linux-x86_64"
+# Labels that disagree with the executable header must be refused.
+expect_package_failure --bin "linux-x86_64=$t/hq-linux-aarch64"
+expect_package_failure --bin "linux-x86_64=$t/hq-linux-x86_64" --bin "linux-aarch64=$t/hq-linux-x86_64"
+expect_package_failure --bin "linux-x86_64=$t/hq-linux-x86_64" --bin "darwin-aarch64=$t/hq-linux-aarch64"
+expect_package_failure --bin "linux-x86_64=$t/hq-darwin-aarch64"
+expect_package_failure --bin "linux-x86_64=$t/hq-script"
+expect_package_failure --bin "linux-x86_64=$t/hq-linux-x86_64" --bin "linux-aarch64=$t/hq-darwin-aarch64"
 expect_package_failure --bin "linux-x86_64=$t/hq-linux-x86_64" --bin "freebsd-x86_64=$t/hq-linux-x86_64"
 expect_package_failure --bin "$t/hq-linux-x86_64"
 expect_package_failure --bin "linux-x86_64=$t/missing"

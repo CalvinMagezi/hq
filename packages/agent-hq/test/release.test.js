@@ -120,7 +120,7 @@ test("platformKey maps Node os and arch to artifact platform names", () => {
   assert.equal(platformKey("linux", "x64"), "linux-x86_64");
   assert.equal(platformKey("linux", "arm64"), "linux-aarch64");
   assert.equal(platformKey("darwin", "arm64"), "darwin-aarch64");
-  assert.equal(platformKey("darwin", "x64"), "darwin-x86_64");
+  assert.equal(platformKey("darwin", "x64", () => false), "darwin-x86_64");
   assert.equal(platformKey("win32", "x64"), null);
   assert.equal(platformKey("linux", "ia32"), null);
 });
@@ -147,4 +147,52 @@ test("the linux-x86_64 artifact name is unchanged and found in a real single-pla
   assert.equal(selectArtifact(manifest, MANIFEST_URL, "darwin-aarch64"), undefined);
   assert.equal(selectArtifact(manifest, MANIFEST_URL, "linux-aarch64"), undefined);
   assert.equal(selectArtifact(manifest, MANIFEST_URL, null), undefined);
+});
+
+test("platformKey gives an x64 Node under Rosetta the arm64 build, and only on macOS", () => {
+  const translated = () => true;
+  const native = () => false;
+  assert.equal(platformKey("darwin", "x64", translated), "darwin-aarch64");
+  assert.equal(platformKey("darwin", "x64", native), "darwin-x86_64");
+  assert.equal(platformKey("darwin", "arm64", translated), "darwin-aarch64");
+  assert.equal(platformKey("linux", "x64", translated), "linux-x86_64");
+  const probe = () => {
+    throw new Error("the probe must only run for x64 on macOS");
+  };
+  assert.equal(platformKey("linux", "x64", probe), "linux-x86_64");
+  assert.equal(platformKey("darwin", "arm64", probe), "darwin-aarch64");
+});
+
+import { chmodSync } from "node:fs";
+
+const script = (output) => `#!/bin/sh\necho "${output}"\n`;
+
+function existingInstall(dest) {
+  const bin = join(dest, "bin");
+  const file = join(bin, "hq");
+  mkdirSync(bin, { recursive: true });
+  writeFileSync(file, script("hq 0.9.0 (old)"));
+  chmodSync(file, 0o755);
+  return { dir: bin, file };
+}
+
+test("extractBinary runs the staged binary and swaps it in when it reports the release version", () => {
+  const dest = existingInstall(mkdtempSync(join(tmpdir(), "dest-")));
+  extractBinary(tarball({ hq: script("hq 1.2.3 (abc1234)") }), dest, { expectVersion: "1.2.3" });
+  assert.match(execFileSync(dest.file, ["--version"], { encoding: "utf8" }), /1\.2\.3/);
+  assert.equal(existsSync(join(dest.dir, ".hq.new")), false);
+});
+
+test("extractBinary keeps the old install and removes the staged file when the version is wrong", () => {
+  const dest = existingInstall(mkdtempSync(join(tmpdir(), "dest-")));
+  assert.throws(() => extractBinary(tarball({ hq: script("hq 9.9.9 (abc1234)") }), dest, { expectVersion: "1.2.3" }), /instead of version 1\.2\.3/);
+  assert.match(readText(dest.file, "utf8"), /0\.9\.0 \(old\)/);
+  assert.equal(existsSync(join(dest.dir, ".hq.new")), false);
+});
+
+test("extractBinary keeps the old install and mentions glibc and musl when the binary cannot run", () => {
+  const dest = existingInstall(mkdtempSync(join(tmpdir(), "dest-")));
+  assert.throws(() => extractBinary(tarball({ hq: "\u0000\u0001 not an executable" }), dest, { expectVersion: "1.2.3" }), /glibc.*musl/);
+  assert.match(readText(dest.file, "utf8"), /0\.9\.0 \(old\)/);
+  assert.equal(existsSync(join(dest.dir, ".hq.new")), false);
 });

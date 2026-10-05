@@ -34,10 +34,13 @@ env:
 # run on Ubuntu 22.04 hosts and newer. A newer runner image links against a newer
 # glibc and the updater refuses it on older hosts (its pre-swap `--version` check fails).
 
-# The jobs that run repository build code (`build` legs, `package`) never see
-# the signing key: they have no environment and no secrets. `sign` runs only the
-# release scripts. Change `runs-on` to move a job between a persistent
-# self-hosted runner and an ephemeral one.
+# Jobs that run repository build code (the `build` legs and `web`) never see the
+# signing key: they have no environment and no secrets. `package` runs no build
+# code at all, only scripts/release/package.sh on the downloaded artifacts, so a
+# hostile dependency in a build job cannot rewrite a binary between its build
+# and the hash in the manifest. `sign` runs only the release scripts and
+# re-checks the exact artifact set. Change `runs-on` to move a job between a
+# persistent self-hosted runner and an ephemeral one.
 jobs:
   test:
     name: Test
@@ -171,12 +174,11 @@ jobs:
           if-no-files-found: error
           retention-days: 7
 
-  package:
-    name: Package
+  web:
+    name: Build web
     if: github.ref == 'refs/heads/main'
-    needs: [version, build]
     runs-on: ubuntu-22.04
-    timeout-minutes: 60
+    timeout-minutes: 30
     permissions:
       contents: read # checkout only
     steps:
@@ -188,21 +190,43 @@ jobs:
         with:
           bun-version: ${{ env.BUN_VERSION }}
 
-      - name: Install pinned jq
-        run: |
-          dir=$(bash scripts/release/install-tools.sh "$RUNNER_TEMP/tools")
-          echo "$dir" >> "$GITHUB_PATH"
-
       - name: Build web
         working-directory: apps/hq-web
         run: |
           bun install --frozen-lockfile
           bun run build
 
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: web-dist
+          path: apps/hq-web/dist/client
+          if-no-files-found: error
+          retention-days: 7
+
+  # Runs no build code and installs nothing: only the release script, with the
+  # runner's own jq, on artifacts built by the jobs above.
+  package:
+    name: Package
+    if: github.ref == 'refs/heads/main'
+    needs: [version, build, web]
+    runs-on: ubuntu-22.04
+    timeout-minutes: 30
+    permissions:
+      contents: read # checkout only
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
       - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
           pattern: hq-bin-*
           path: hq-bins
+
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: web-dist
+          path: web-dist
 
       - name: Package (unsigned)
         env:
@@ -220,7 +244,7 @@ jobs:
           done
           bash scripts/release/package.sh --version "$VERSION" --git-sha "$GIT_SHA" --channel main \
             --requires-db-snapshot "$REQUIRES_SNAPSHOT" "${extra[@]}" \
-            "${bin_args[@]}" --web-dist apps/hq-web/dist/client --out dist-release
+            "${bin_args[@]}" --web-dist web-dist --out dist-release
 
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
@@ -277,6 +301,15 @@ jobs:
           [ "$(jq -r .version "$m")" = "$VERSION" ] || { echo "manifest version mismatch" >&2; exit 1; }
           [ "$(jq -r .git_sha "$m")" = "$GIT_SHA" ] || { echo "manifest git_sha mismatch" >&2; exit 1; }
           [ "$(jq -r .channel "$m")" = "main" ] || { echo "manifest channel mismatch" >&2; exit 1; }
+          # Exactly the expected artifacts, in the manifest and on disk, before anything is signed or uploaded.
+          expected=$(printf '%s\n' \
+            "hq-$VERSION-darwin-aarch64.tar.gz" "hq-$VERSION-linux-aarch64.tar.gz" \
+            "hq-$VERSION-linux-x86_64.tar.gz" "hq-web-$VERSION.tar.gz" | LC_ALL=C sort)
+          listed=$(jq -r '.artifacts[].name' "$m" | LC_ALL=C sort)
+          [ "$listed" = "$expected" ] || { echo "manifest artifacts are not the expected set:" >&2; echo "$listed" >&2; exit 1; }
+          on_disk=$(cd dist-release && find . -mindepth 1 | sed 's#^\./##' | LC_ALL=C sort)
+          want_disk=$(printf '%s\nSHA256SUMS\nmanifest.json\n' "$expected" | LC_ALL=C sort)
+          [ "$on_disk" = "$want_disk" ] || { echo "dist-release does not hold exactly the expected files:" >&2; echo "$on_disk" >&2; exit 1; }
 
       - name: Refuse to overwrite an existing release
         env:

@@ -373,7 +373,19 @@ impl Engine<'_> {
         })
     }
 
+    /// The macOS restarter cannot stop the service, so a swap or database
+    /// restore there would happen under a live daemon.
+    fn refuse_unmanaged_darwin(&self) -> Result<()> {
+        if manifest::is_darwin(&self.platform) && !self.cfg.allow_darwin {
+            return Err(UpdateError::DarwinNotAllowed);
+        }
+        Ok(())
+    }
+
     pub async fn apply(&self, opts: &ApplyOptions) -> Result<Outcome> {
+        if !opts.dry_run {
+            self.refuse_unmanaged_darwin()?;
+        }
         let explicit_pin = opts.pin.as_deref();
         let pin = explicit_pin.or(self.cfg.pin.as_deref());
 
@@ -1027,6 +1039,7 @@ impl Engine<'_> {
 
     /// `hq update --rollback`.
     pub async fn rollback(&self, restore_db: bool) -> Result<Outcome> {
+        self.refuse_unmanaged_darwin()?;
         let _lock = UpdateLock::acquire(&self.layout.lock_file())?;
         let mut state = State::load(&self.layout)?;
         self.reconcile(&mut state).await?;

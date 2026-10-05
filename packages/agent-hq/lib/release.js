@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import { execFileSync } from "node:child_process";
 import { arch as hostArch, platform as hostOs } from "node:os";
 import { parsePublicKey, verifyMinisign } from "./minisign.js";
 
@@ -17,8 +18,22 @@ export const PREBUILT_PLATFORMS = ["linux-x86_64", "linux-aarch64", "darwin-aarc
 const OS_NAMES = { linux: "linux", darwin: "darwin" };
 const ARCH_NAMES = { x64: "x86_64", arm64: "aarch64" };
 
-/** Maps Node's os.platform() and os.arch() to the artifact platform name, or null when unknown. */
-export function platformKey(os = hostOs(), arch = hostArch()) {
+/** True when this process is an x64 build running under Rosetta 2 on an Apple Silicon Mac. */
+export function runsUnderRosetta() {
+  try {
+    const out = execFileSync("sysctl", ["-n", "sysctl.proc_translated"], { encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] });
+    return out.trim() === "1";
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Maps Node's os.platform() and os.arch() to the artifact platform name, or null when unknown.
+ * An x64 Node under Rosetta on macOS reports x64 on an arm64 machine, so it gets the arm64 build.
+ */
+export function platformKey(os = hostOs(), arch = hostArch(), translated = runsUnderRosetta) {
+  if (os === "darwin" && arch === "x64" && translated()) arch = "arm64";
   return OS_NAMES[os] && ARCH_NAMES[arch] ? `${OS_NAMES[os]}-${ARCH_NAMES[arch]}` : null;
 }
 

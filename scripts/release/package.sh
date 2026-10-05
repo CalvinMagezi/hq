@@ -50,6 +50,37 @@ done
 [[ "$requires_snapshot" =~ ^(true|false)$ ]] || die "--requires-db-snapshot must be true or false"
 case " ${platforms[*]} " in *" linux-x86_64 "*) ;; *) die "--bin linux-x86_64=PATH is required" ;; esac
 for p in "${bin_paths[@]}"; do [ -f "$p" ] || die "binary not found: $p"; done
+
+# A label that disagrees with the file would ship, say, an arm64 build as x86_64, and the
+# updater would install it on hosts that cannot run it. Check the executable header instead.
+hex_at() { od -An -tx1 -j "$2" -N "$3" "$1" | tr -d ' \n'; }
+check_binary() {
+    local platform=$1 path=$2 magic want_machine=""
+    magic=$(hex_at "$path" 0 4)
+    case "$platform" in
+        linux-*)
+            [ "$magic" = "7f454c46" ] || die "$path is not an ELF file but is labelled $platform"
+            # ELF64 little-endian, then e_machine at offset 18 (0x3e x86-64, 0xb7 aarch64).
+            [ "$(hex_at "$path" 4 1)" = "02" ] && [ "$(hex_at "$path" 5 1)" = "01" ] ||
+                die "$path is not a 64-bit little-endian ELF file"
+            case "$platform" in
+                linux-x86_64) want_machine="3e00" ;;
+                linux-aarch64) want_machine="b700" ;;
+            esac
+            [ "$(hex_at "$path" 18 2)" = "$want_machine" ] || die "$path has the wrong CPU for $platform (ELF e_machine $(hex_at "$path" 18 2))"
+            ;;
+        darwin-*)
+            [ "$magic" = "cffaedfe" ] || die "$path is not a 64-bit Mach-O file but is labelled $platform"
+            # cputype at offset 4: 0x0100000c arm64, 0x01000007 x86_64 (little-endian bytes).
+            case "$platform" in
+                darwin-aarch64) want_machine="0c000001" ;;
+                darwin-x86_64) want_machine="07000001" ;;
+            esac
+            [ "$(hex_at "$path" 4 4)" = "$want_machine" ] || die "$path has the wrong CPU for $platform (Mach-O cputype $(hex_at "$path" 4 4))"
+            ;;
+    esac
+}
+for i in "${!platforms[@]}"; do check_binary "${platforms[$i]}" "${bin_paths[$i]}"; done
 [ -f "$web_dist/index.html" ] || die "web dist has no index.html: $web_dist"
 command -v jq >/dev/null || die "jq is required"
 if [ -z "$min_updater" ]; then

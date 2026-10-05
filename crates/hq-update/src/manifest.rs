@@ -14,18 +14,32 @@ pub const LEGACY_PLATFORM: &str = "linux-x86_64";
 
 /// Maps `std::env::consts` OS and ARCH to the `<os>-<arch>` names used in
 /// artifact file names. Unknown values pass through and simply will not
-/// match any artifact.
-pub fn platform_name(os: &str, arch: &str) -> String {
+/// match any artifact. A musl target gets a `-musl` suffix for the same
+/// reason: the published Linux binaries link glibc and must not be selected.
+pub fn platform_name(os: &str, arch: &str, env: &str) -> String {
     let os = match os {
         "macos" => "darwin",
         other => other,
     };
-    format!("{os}-{arch}")
+    match env {
+        "musl" => format!("{os}-{arch}-musl"),
+        _ => format!("{os}-{arch}"),
+    }
 }
 
 /// The platform this binary was compiled for.
 pub fn host_platform() -> String {
-    platform_name(std::env::consts::OS, std::env::consts::ARCH)
+    let env = if cfg!(target_env = "musl") {
+        "musl"
+    } else {
+        ""
+    };
+    platform_name(std::env::consts::OS, std::env::consts::ARCH, env)
+}
+
+/// Whether the updater has no stop step for this platform's service manager.
+pub fn is_darwin(platform: &str) -> bool {
+    platform.starts_with("darwin-")
 }
 
 pub fn binary_artifact_name_for(version: &str, platform: &str) -> String {
@@ -276,11 +290,16 @@ mod tests {
 
     #[test]
     fn platform_names_map_rust_consts() {
-        assert_eq!(platform_name("linux", "x86_64"), "linux-x86_64");
-        assert_eq!(platform_name("linux", "aarch64"), "linux-aarch64");
-        assert_eq!(platform_name("macos", "aarch64"), "darwin-aarch64");
-        assert_eq!(platform_name("macos", "x86_64"), "darwin-x86_64");
-        assert_eq!(platform_name("freebsd", "x86_64"), "freebsd-x86_64");
+        assert_eq!(platform_name("linux", "x86_64", ""), "linux-x86_64");
+        assert_eq!(platform_name("linux", "aarch64", "gnu"), "linux-aarch64");
+        assert_eq!(platform_name("macos", "aarch64", ""), "darwin-aarch64");
+        assert_eq!(platform_name("macos", "x86_64", ""), "darwin-x86_64");
+        assert_eq!(platform_name("freebsd", "x86_64", ""), "freebsd-x86_64");
+        assert_eq!(
+            platform_name("linux", "x86_64", "musl"),
+            "linux-x86_64-musl"
+        );
+        assert!(is_darwin("darwin-aarch64") && !is_darwin("linux-aarch64"));
     }
 
     #[test]

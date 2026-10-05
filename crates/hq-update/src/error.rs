@@ -38,6 +38,10 @@ pub enum UpdateError {
         "release {version} has no {platform} binary; this platform is not published for that release"
     )]
     NoPlatformArtifact { version: String, platform: String },
+    #[error(
+        "hq update on macOS cannot stop the service before swapping files, so --apply and --rollback are disabled; set HQ_UPDATE_ALLOW_DARWIN=1 or allow_darwin = true to accept that, or install a new release by hand"
+    )]
+    DarwinNotAllowed,
     #[error("another update is already running")]
     Locked,
     #[error("unsafe archive: {0}")]
