@@ -14,7 +14,7 @@ export const installChannels = {
     title: 'Remote web access over Tailscale',
   },
   npx: {
-    available: false,
+    available: true,
     title: 'npx installer',
     command: 'npx agent-hq-cli',
   },

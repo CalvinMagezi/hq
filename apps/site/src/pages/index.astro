@@ -7,7 +7,7 @@ import { channels } from '../data/diagrams';
 import manifest from '../data/media.json';
 import { links, REPO } from '../data/site';
 
-const installCmd = `git clone ${REPO}.git && cd hq && cargo build --release -p hq-cli`;
+const installCmd = 'npx agent-hq-cli';
 
 const capabilities = [
   {
@@ -59,7 +59,7 @@ const capabilities = [
         already use. One Rust binary of about 40 MB. No cloud backend.
       </p>
       <div class="prose">
-        <CodeBlock id="hero-install" label="Build from source" code={installCmd} />
+        <CodeBlock id="hero-install" label="Install" code={installCmd} />
       </div>
       <div class="hero-actions">
         <a class="btn btn-primary" href="/install/">Install guide</a>
@@ -143,7 +143,7 @@ const capabilities = [
         </p>
         <p>
           It talks to Discord and Telegram, not Slack or WhatsApp. Signed release binaries are built for
-          Linux on x86_64 only, so macOS runs from source. The <a href={links.changelog}>changelog</a>
+          Linux (x86_64 and ARM) and for Apple Silicon Macs; Intel Macs build from source. The <a href={links.changelog}>changelog</a>
           lists every upgrade note.
         </p>
       </div>

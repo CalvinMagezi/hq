@@ -425,7 +425,7 @@ const sourceMap = [
           Every merge to <code>main</code> runs tests, builds on an older Ubuntu image so the binary
           needs only an older glibc, and publishes a signed prerelease named like
           <code>0.9.1-main.6</code>. The job that runs repository build code never sees the signing
-          key: a separate sign job does. Each release carries the Linux x86_64 binary archive, the web
+          key: a separate sign job does. Each release carries a binary archive per platform (Linux x86_64, Linux ARM and Apple Silicon), the web
           bundle, <code>SHA256SUMS</code>, a <code>manifest.json</code> and its
           <code>.minisig</code>. Channel pointers (<code>channel-main</code>,
           <code>channel-stable</code>) are small signed JSON files that say which release a channel
