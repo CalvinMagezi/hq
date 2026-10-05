@@ -180,6 +180,7 @@ async fn run_inner(args: &CliArgs, ident: &BuildIdentity) -> Result<i32> {
         restarter: restarter.as_ref(),
         health: &health,
         host: &host,
+        platform: crate::manifest::host_platform(),
     };
     let pin = args.pin.as_deref();
 

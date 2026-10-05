@@ -1428,6 +1428,7 @@ mod http_integration {
             restarter: &f.world,
             health: &f.world,
             host: &f.world,
+            platform: crate::manifest::LEGACY_PLATFORM.into(),
         }
     }
 
@@ -1492,4 +1493,100 @@ mod http_integration {
         assert!(matches!(err, UpdateError::Signature { .. }), "{err}");
         assert!(f.installed_binary().contains(OLD_SHA));
     }
+}
+
+#[tokio::test]
+async fn each_platform_installs_its_own_artifact() {
+    for platform in ["linux-x86_64", "linux-aarch64", "darwin-aarch64"] {
+        let mut f = Fixture::new();
+        f.cfg.allow_darwin = true;
+        let mut spec = ReleaseSpec::new("0.9.1", NEW_SHA);
+        spec.extra_platforms = vec!["linux-aarch64", "darwin-aarch64"];
+        f.publish_and_point(&spec);
+        let mut engine = f.engine();
+        engine.platform = platform.into();
+        let outcome = engine.apply(&ApplyOptions::default()).await.unwrap();
+        assert!(applied(&outcome), "{platform}: {outcome:?}");
+        let installed = f.installed_binary();
+        if platform == "linux-x86_64" {
+            assert!(!installed.contains("platform="), "{installed}");
+        } else {
+            assert!(
+                installed.contains(&format!("platform={platform}")),
+                "{platform}: {installed}"
+            );
+        }
+    }
+}
+
+#[tokio::test]
+async fn missing_platform_artifact_fails_clearly_without_blocking_the_version() {
+    let mut f = fixture_with_release();
+    f.cfg.allow_darwin = true;
+    let mut engine = f.engine();
+    engine.platform = "darwin-aarch64".into();
+    let err = engine.apply(&ApplyOptions::default()).await.unwrap_err();
+    assert!(
+        matches!(err, UpdateError::NoPlatformArtifact { .. }),
+        "{err}"
+    );
+    assert!(err.to_string().contains("darwin-aarch64"), "{err}");
+    assert!(f.installed_binary().contains(OLD_SHA));
+    assert!(
+        !State::load(&Layout::from_config(&f.cfg))
+            .unwrap()
+            .is_blocked("0.9.1")
+    );
+    assert!(f.world.events().is_empty(), "{:?}", f.world.events());
+}
+
+#[tokio::test]
+async fn darwin_apply_and_rollback_refuse_without_opt_in_but_check_and_dry_run_work() {
+    let mut f = Fixture::new();
+    let mut spec = ReleaseSpec::new("0.9.1", NEW_SHA);
+    spec.extra_platforms = vec!["darwin-aarch64"];
+    f.publish_and_point(&spec);
+
+    let mut engine = f.engine();
+    engine.platform = "darwin-aarch64".into();
+    let err = engine.apply(&ApplyOptions::default()).await.unwrap_err();
+    assert!(matches!(err, UpdateError::DarwinNotAllowed), "{err}");
+    let err = engine.rollback(false).await.unwrap_err();
+    assert!(matches!(err, UpdateError::DarwinNotAllowed), "{err}");
+    assert!(f.installed_binary().contains(OLD_SHA));
+    assert!(f.world.events().is_empty(), "{:?}", f.world.events());
+
+    assert!(engine.check(None).await.unwrap().update_available);
+    let dry = ApplyOptions {
+        dry_run: true,
+        ..ApplyOptions::default()
+    };
+    assert!(matches!(
+        engine.apply(&dry).await.unwrap(),
+        Outcome::DryRun { .. }
+    ));
+
+    f.cfg.allow_darwin = true;
+    let mut engine = f.engine();
+    engine.platform = "darwin-aarch64".into();
+    let outcome = engine.apply(&ApplyOptions::default()).await.unwrap();
+    assert!(applied(&outcome), "{outcome:?}");
+}
+
+#[tokio::test]
+async fn musl_host_gets_a_clear_missing_platform_error_and_is_not_blocked() {
+    let f = fixture_with_release();
+    let mut engine = f.engine();
+    engine.platform = crate::manifest::platform_name("linux", "x86_64", "musl");
+    let err = engine.apply(&ApplyOptions::default()).await.unwrap_err();
+    assert!(
+        matches!(err, UpdateError::NoPlatformArtifact { .. }),
+        "{err}"
+    );
+    assert!(err.to_string().contains("musl"), "{err}");
+    assert!(
+        !State::load(&Layout::from_config(&f.cfg))
+            .unwrap()
+            .is_blocked("0.9.1")
+    );
 }

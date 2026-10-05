@@ -1,4 +1,6 @@
 import { createHash } from "node:crypto";
+import { execFileSync } from "node:child_process";
+import { arch as hostArch, platform as hostOs } from "node:os";
 import { parsePublicKey, verifyMinisign } from "./minisign.js";
 
 export const DEFAULT_REPO = "CalvinMagezi/hq";
@@ -9,6 +11,33 @@ const MAX_MANIFEST_BYTES = 1024 * 1024;
 export const PUBLIC_KEY_TEXT = `untrusted comment: minisign public key 51FDC63C4F4E8BD2
 RWTSi05PPMb9UVVnGilhLWT7h/mjQ1VjfAEXszxJB/Er8UEsCXFc3o1/
 `;
+
+// Release artifacts are named hq-<version>-<os>-<arch>.tar.gz. linux-x86_64 is the
+// original name and must never change; the others were added later.
+export const PREBUILT_PLATFORMS = ["linux-x86_64", "linux-aarch64", "darwin-aarch64"];
+const OS_NAMES = { linux: "linux", darwin: "darwin" };
+const ARCH_NAMES = { x64: "x86_64", arm64: "aarch64" };
+
+/** True when this process is an x64 build running under Rosetta 2 on an Apple Silicon Mac. */
+export function runsUnderRosetta() {
+  try {
+    const out = execFileSync("sysctl", ["-n", "sysctl.proc_translated"], { encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] });
+    return out.trim() === "1";
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Maps Node's os.platform() and os.arch() to the artifact platform name, or null when unknown.
+ * An x64 Node under Rosetta on macOS reports x64 on an arm64 machine, so it gets the arm64 build.
+ */
+export function platformKey(os = hostOs(), arch = hostArch(), translated = runsUnderRosetta) {
+  if (os === "darwin" && arch === "x64" && translated()) arch = "arm64";
+  return OS_NAMES[os] && ARCH_NAMES[arch] ? `${OS_NAMES[os]}-${ARCH_NAMES[arch]}` : null;
+}
+
+export const hasPrebuiltFor = (platform) => PREBUILT_PLATFORMS.includes(platform);
 
 const sha256 = (buffer) => createHash("sha256").update(buffer).digest("hex");
 
@@ -21,7 +50,7 @@ async function fetchBytes(url, limit) {
 }
 
 /** Fetches and fully verifies the channel pointer and manifest. Returns what to download. */
-export async function resolveRelease({ repo, channel, fetchFile = fetchBytes, publicKeyText = PUBLIC_KEY_TEXT }) {
+export async function resolveRelease({ repo, channel, platform = platformKey(), fetchFile = fetchBytes, publicKeyText = PUBLIC_KEY_TEXT }) {
   if (!/^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/.test(repo)) throw new Error("repo must look like owner/name");
   if (!/^[A-Za-z0-9_.-]+$/.test(channel)) throw new Error("channel must be a plain name");
   const key = parsePublicKey(publicKeyText);
@@ -47,18 +76,27 @@ export async function resolveRelease({ repo, channel, fetchFile = fetchBytes, pu
   if (manifest.version !== pointer.version) throw new Error("manifest version differs from the pointer");
   if (!/^[A-Za-z0-9._+-]+$/.test(manifest.version)) throw new Error("unexpected version string");
 
-  const name = `hq-${manifest.version}-linux-x86_64.tar.gz`;
-  const artifact = manifest.artifacts?.find((a) => a.name === name);
   return {
     version: manifest.version,
     gitSha: manifest.git_sha,
-    artifact: artifact && {
+    platform,
+    artifact: selectArtifact(manifest, pointer.manifest_url, platform),
+  };
+}
+
+/** The manifest's binary for `platform` with its download URL, or undefined when that platform is not published. */
+export function selectArtifact(manifest, manifestUrl, platform) {
+  if (!platform) return undefined;
+  const name = `hq-${manifest.version}-${platform}.tar.gz`;
+  const artifact = manifest.artifacts?.find((a) => a.name === name);
+  return (
+    artifact && {
       name,
       sha256: artifact.sha256,
       size: artifact.size,
-      url: `${pointer.manifest_url.slice(0, pointer.manifest_url.lastIndexOf("/"))}/${name}`,
-    },
-  };
+      url: `${manifestUrl.slice(0, manifestUrl.lastIndexOf("/"))}/${name}`,
+    }
+  );
 }
 
 export async function downloadArtifact(artifact, fetchFile = fetchBytes) {

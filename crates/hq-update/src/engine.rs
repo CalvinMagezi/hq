@@ -87,6 +87,8 @@ pub struct Engine<'a> {
     pub restarter: &'a dyn Restarter,
     pub health: &'a dyn Health,
     pub host: &'a dyn Host,
+    /// `<os>-<arch>` of the running binary, see `manifest::host_platform`.
+    pub platform: String,
 }
 
 struct Resolved {
@@ -371,7 +373,19 @@ impl Engine<'_> {
         })
     }
 
+    /// The macOS restarter cannot stop the service, so a swap or database
+    /// restore there would happen under a live daemon.
+    fn refuse_unmanaged_darwin(&self) -> Result<()> {
+        if manifest::is_darwin(&self.platform) && !self.cfg.allow_darwin {
+            return Err(UpdateError::DarwinNotAllowed);
+        }
+        Ok(())
+    }
+
     pub async fn apply(&self, opts: &ApplyOptions) -> Result<Outcome> {
+        if !opts.dry_run {
+            self.refuse_unmanaged_darwin()?;
+        }
         let explicit_pin = opts.pin.as_deref();
         let pin = explicit_pin.or(self.cfg.pin.as_deref());
 
@@ -624,13 +638,16 @@ impl Engine<'_> {
         swap::make_private_dir(&work.0)?;
         let limits = &self.cfg.limits;
 
+        // A missing platform is not a bad build, so it must not block the version.
+        let bin_name = manifest::binary_artifact_name_for(&m.version, &self.platform);
+        if m.artifact(&bin_name).is_none() {
+            return Err(UpdateError::NoPlatformArtifact {
+                version: m.version.clone(),
+                platform: self.platform.clone(),
+            });
+        }
         let bin_tgz = self
-            .download_artifact(
-                resolved,
-                &manifest::binary_artifact_name(&m.version),
-                limits.max_binary_bytes,
-                &work.0,
-            )
+            .download_artifact(resolved, &bin_name, limits.max_binary_bytes, &work.0)
             .await?;
         let web_name = manifest::web_artifact_name(&m.version);
         let web_tgz = if m.artifact(&web_name).is_some() {
@@ -1022,6 +1039,7 @@ impl Engine<'_> {
 
     /// `hq update --rollback`.
     pub async fn rollback(&self, restore_db: bool) -> Result<Outcome> {
+        self.refuse_unmanaged_darwin()?;
         let _lock = UpdateLock::acquire(&self.layout.lock_file())?;
         let mut state = State::load(&self.layout)?;
         self.reconcile(&mut state).await?;

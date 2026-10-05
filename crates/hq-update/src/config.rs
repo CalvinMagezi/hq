@@ -82,6 +82,8 @@ pub struct UpdateConfig {
     pub blocked_ttl_secs: u64,
     /// Total time one `hq update --apply` may take; keep below the unit's TimeoutStartSec.
     pub deadline_secs: u64,
+    /// The macOS restarter has no stop step; apply and rollback refuse there unless this is set.
+    pub allow_darwin: bool,
     pub notify: NotifyConfig,
     pub limits: Limits,
 }
@@ -113,6 +115,7 @@ impl Default for UpdateConfig {
             max_pointer_age_secs: None,
             blocked_ttl_secs: 24 * 3600,
             deadline_secs: 15 * 60,
+            allow_darwin: false,
             notify: NotifyConfig::default(),
             limits: Limits::default(),
         }
@@ -197,6 +200,9 @@ impl UpdateConfig {
         }
         if let Some(n) = get("HQ_UPDATE_HEALTH_INTERVAL_SECS").and_then(|v| v.parse().ok()) {
             self.health_interval_secs = n;
+        }
+        if let Some(v) = get("HQ_UPDATE_ALLOW_DARWIN") {
+            self.allow_darwin = matches!(v.as_str(), "1" | "true");
         }
         if let Some(v) = get("HQ_UPDATE_HEALTH_URL") {
             self.health_url = v;
@@ -359,6 +365,18 @@ mod tests {
         let tries = |k: &str| (k == "HQ_UPDATE_HEALTH_TRIES").then(|| "24".to_string());
         assert_eq!(UpdateConfig::load(&path, &tries).unwrap().health_tries, 24);
         assert_eq!(cfg.repo, "other/repo");
+    }
+
+    #[test]
+    fn allow_darwin_comes_from_the_file_or_env_and_defaults_off() {
+        assert!(!UpdateConfig::default().allow_darwin);
+        let cfg = UpdateConfig::parse("repo = \"a/b\"\nallow_darwin = true\n").unwrap();
+        assert!(cfg.allow_darwin);
+        let mut cfg = UpdateConfig::default();
+        cfg.apply_env(&|k| (k == "HQ_UPDATE_ALLOW_DARWIN").then(|| "1".to_string()));
+        assert!(cfg.allow_darwin);
+        cfg.apply_env(&|k| (k == "HQ_UPDATE_ALLOW_DARWIN").then(|| "0".to_string()));
+        assert!(!cfg.allow_darwin);
     }
 
     #[test]

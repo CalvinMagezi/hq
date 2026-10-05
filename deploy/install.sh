@@ -33,6 +33,7 @@ BIN=/usr/local/bin/hq
 UNIT_DIR=/etc/systemd/system
 SRC_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 TMP=""
+PLATFORM=""
 
 usage() {
     cat >&2 <<USAGE
@@ -75,6 +76,27 @@ while [ $# -gt 0 ]; do
         *) echo "unknown option: $1" >&2; usage ;;
     esac
 done
+
+# Release artifacts are named hq-<version>-<os>-<arch>.tar.gz. This installer sets up a
+# systemd server, so Linux x86_64 and aarch64 are the only targets.
+detect_platform() {
+    local os arch
+    os="$(uname -s)"
+    arch="$(uname -m)"
+    case "$os" in
+        Linux) ;;
+        Darwin)
+            die "macOS is not a server target for this installer (it needs systemd). To install the hq CLI on Apple Silicon run: npx agent-hq"
+            ;;
+        *) die "unsupported OS $os; this installer supports Linux x86_64 and aarch64" ;;
+    esac
+    case "$arch" in
+        x86_64|amd64) PLATFORM=linux-x86_64 ;;
+        aarch64|arm64) PLATFORM=linux-aarch64 ;;
+        *) die "unsupported CPU architecture $arch; releases are built for x86_64 and aarch64" ;;
+    esac
+}
+detect_platform
 
 [ "$(id -u)" -eq 0 ] || die "run as root"
 [ -n "$REPO" ] && [ -n "$PUBKEY_FILE" ] || usage
@@ -255,8 +277,9 @@ bootstrap_binary() {
     printf '%s' "$version" | grep -Eq '^[A-Za-z0-9._+-]+$' || die "unexpected version string in channel pointer"
     fetch "$manifest_url" "$TMP/manifest.json"
 
-    local name="hq-$version-linux-x86_64.tar.gz" want
-    want="$(jq -er --arg n "$name" '.artifacts[] | select(.name == $n) | .sha256' "$TMP/manifest.json")"
+    local name="hq-$version-$PLATFORM.tar.gz" want
+    want="$(jq -er --arg n "$name" '.artifacts[] | select(.name == $n) | .sha256' "$TMP/manifest.json")" \
+        || die "release $version has no $PLATFORM binary (see docs/UPDATE_SYSTEM.md for the platforms it publishes)"
     if command -v minisign >/dev/null 2>&1; then
         fetch "$release/channel-$CHANNEL/channel-$CHANNEL.json.minisig" "$TMP/channel.json.minisig"
         minisign -V -P "$PUBKEY_LINE" -m "$TMP/channel.json" -x "$TMP/channel.json.minisig" >/dev/null \
