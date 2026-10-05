@@ -1,0 +1,37 @@
+name: Publish npm installer
+
+# Publishes packages/agent-hq to npm with provenance. Manual only, from main.
+# Needs an `npm` environment holding an NPM_TOKEN secret (automation token).
+on:
+  workflow_dispatch:
+
+permissions: {}
+
+concurrency:
+  group: publish-npm
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    name: Publish agent-hq
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    environment: npm
+    permissions:
+      contents: read
+      id-token: write # npm provenance
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Test
+        working-directory: packages/agent-hq
+        run: npm test
+      - name: Publish
+        working-directory: packages/agent-hq
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: |
+          npm config set //registry.npmjs.org/:_authToken "$NODE_AUTH_TOKEN"
+          npm publish --provenance --access public
