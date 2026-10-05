@@ -203,6 +203,15 @@ if (existsSync(join(DIST, 'sitemap.xml'))) {
   }
 }
 
+// The install script embeds the release public key; it must match the repository's key file.
+{
+  const keyFile = join(import.meta.dirname, '..', '..', '..', 'release', 'minisign.pub');
+  const repoKey = readFileSync(keyFile, 'utf8').split('\n').filter((l) => l && !l.startsWith('untrusted comment:'))[0];
+  const script = readFileSync(join(import.meta.dirname, '..', 'public', 'install.sh'), 'utf8');
+  const embedded = script.match(/^PUBKEY_LINE="([^"]+)"/m)?.[1];
+  if (embedded !== repoKey) fail('install.sh', 'embedded public key does not match release/minisign.pub');
+}
+
 if (errors.length) {
   console.error(`check failed with ${errors.length} problem(s):\n` + errors.map((e) => `  - ${e}`).join('\n'));
   process.exit(1);

@@ -13,6 +13,11 @@ export const installChannels = {
     available: true,
     title: 'Remote web access over Tailscale',
   },
+  curl: {
+    available: true,
+    title: 'Install script',
+    command: 'curl -fsSL https://agent-hq.online/install.sh | bash',
+  },
   npx: {
     available: true,
     title: 'npx installer',
