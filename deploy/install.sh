@@ -86,7 +86,7 @@ detect_platform() {
     case "$os" in
         Linux) ;;
         Darwin)
-            die "macOS is not a server target for this installer (it needs systemd). To install the hq CLI on Apple Silicon run: npx agent-hq"
+            die "macOS is not a server target for this installer (it needs systemd). To install the hq CLI on Apple Silicon run: npx agent-hq-cli"
             ;;
         *) die "unsupported OS $os; this installer supports Linux x86_64 and aarch64" ;;
     esac

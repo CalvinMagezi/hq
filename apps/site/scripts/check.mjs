@@ -76,7 +76,7 @@ for (const file of pages) {
   if (banned) fail(page, `banned word "${banned[0]}"`);
   for (const re of BANNED_PHRASES) if (re.test(noScripts)) fail(page, `banned phrase ${re}`);
   if (/\bnot just\b[^.]{0,80}\bit['’]s\b/i.test(noScripts)) fail(page, 'uses the "not just X, it is Y" construction');
-  if (!installChannels.npx.available && /npx\s+agent-hq/.test(html)) fail(page, 'presents npx agent-hq while installChannels.npx.available is false');
+  if (!installChannels.npx.available && /npx\s+agent-hq-cli/.test(html)) fail(page, 'presents npx agent-hq-cli while installChannels.npx.available is false');
 
   // CSP friendliness: nothing inline.
   if (/<style\b/i.test(html)) fail(page, 'inline <style> block');

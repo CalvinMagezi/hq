@@ -1,5 +1,5 @@
 {
-  "name": "agent-hq",
+  "name": "agent-hq-cli",
   "version": "0.1.0",
   "description": "Install HQ, a local-first AI agent hub, with one command.",
   "type": "module",

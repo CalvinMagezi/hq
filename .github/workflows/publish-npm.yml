@@ -13,7 +13,7 @@ concurrency:
 
 jobs:
   publish:
-    name: Publish agent-hq
+    name: Publish agent-hq-cli
     if: github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     timeout-minutes: 10
