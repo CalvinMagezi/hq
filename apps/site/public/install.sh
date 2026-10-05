@@ -16,7 +16,9 @@ PUBKEY_LINE="RWTSi05PPMb9UVVnGilhLWT7h/mjQ1VjfAEXszxJB/Er8UEsCXFc3o1/"
 
 CHANNEL="stable"
 PREFIX="${HQ_PREFIX:-$HOME/.local/bin}"
+WEB=1
 WORK=""
+DATA_DIR="${XDG_DATA_HOME:-$HOME/.local/share}/agent-hq"
 
 die() { echo "install: $*" >&2; exit 1; }
 say() { echo "==> $*"; }
@@ -24,10 +26,11 @@ cleanup() { [ -z "$WORK" ] || rm -rf "$WORK"; }
 
 usage() {
     cat <<'USAGE'
-usage: install.sh [--channel stable|main] [--prefix DIR]
+usage: install.sh [--channel stable|main] [--prefix DIR] [--no-web]
 
   --channel  release channel (default: stable)
   --prefix   directory for the hq binary (default: ~/.local/bin, or $HQ_PREFIX)
+  --no-web   skip the web UI (installed under ~/.local/share/agent-hq/web)
 
 The first download is verified with the minisign tool when it is installed, otherwise with
 OpenSSL 1.1.1 or newer. On macOS the system OpenSSL cannot do this, so install minisign
@@ -128,11 +131,40 @@ check_can_verify() {
     die "cannot verify the download: install minisign (brew install minisign) or OpenSSL (apt install openssl, brew install openssl), then run this again"
 }
 
+# The web UI is a separate, shared archive named in the same signed manifest. HQ finds it at
+# ~/.local/share/agent-hq/web/dist without any configuration.
+install_web() {
+    local version="$1" manifest_url="$2" name want entries
+    name="hq-web-$version.tar.gz"
+    want="$(artifact_sha256 "$name" "$WORK/manifest.json")"
+    if ! printf '%s' "$want" | grep -Eq '^[0-9a-f]{64}$'; then
+        echo "note: release $version has no web UI archive; skipping it." >&2
+        return 0
+    fi
+    say "Downloading the web UI"
+    fetch "${manifest_url%/*}/$name" "$WORK/$name"
+    [ "$(sha256_of "$WORK/$name")" = "$want" ] || die "checksum mismatch for $name"
+    entries="$(tar -tzf "$WORK/$name")"
+    if printf '%s\n' "$entries" | grep -Eq '(^|/)\.\.(/|$)|^/'; then
+        die "$name contains unsafe paths"
+    fi
+    mkdir "$WORK/web"
+    tar -xzf "$WORK/$name" -C "$WORK/web"
+    [ -f "$WORK/web/index.html" ] || die "$name has no index.html"
+    mkdir -p "$DATA_DIR/web"
+    rm -rf "$DATA_DIR/web/dist.new"
+    mv "$WORK/web" "$DATA_DIR/web/dist.new"
+    rm -rf "$DATA_DIR/web/dist"
+    mv "$DATA_DIR/web/dist.new" "$DATA_DIR/web/dist"
+    say "Installed the web UI in $DATA_DIR/web/dist"
+}
+
 main() {
     while [ $# -gt 0 ]; do
         case "$1" in
             --channel) [ $# -ge 2 ] || die "--channel needs a value"; CHANNEL="$2"; shift 2 ;;
             --prefix) [ $# -ge 2 ] || die "--prefix needs a value"; PREFIX="$2"; shift 2 ;;
+            --no-web) WEB=0; shift ;;
             -h | --help) usage; exit 0 ;;
             *) die "unknown option: $1 (try --help)" ;;
         esac
@@ -192,6 +224,8 @@ main() {
     mv -f "$PREFIX/.hq.new" "$PREFIX/hq"
     say "Installed $PREFIX/hq: $("$PREFIX/hq" --version)"
 
+    [ "$WEB" -eq 0 ] || install_web "$version" "$manifest_url"
+
     case ":$PATH:" in
         *":$PREFIX:"*) ;;
         *) echo; echo "Add $PREFIX to your PATH, for example: export PATH=\"$PREFIX:\$PATH\"" ;;
@@ -202,7 +236,7 @@ Next steps:
   hq install        scaffold your vault and config
   hq env            add an LLM API key (OpenRouter, Anthropic or Google)
   hq doctor         check the setup
-  hq chat           talk to HQ, or: hq start all   (daemon, API and web UI on :5678)
+  hq chat           talk to HQ, or: hq start all   (daemon, API and web UI at http://localhost:5678)
 
 Always-on server with signed automatic updates: https://github.com/$REPO/blob/main/deploy/README.md
 NEXT

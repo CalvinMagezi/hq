@@ -65,7 +65,8 @@ const curl = installChannels.curl;
               The quickest way in, with nothing to install first. It detects your platform (Linux x86_64 or
               ARM, or an Apple Silicon Mac), downloads the latest stable release, verifies its minisign signature
               and SHA-256 checksum against the project key, and installs <code>hq</code> into
-              <code>~/.local/bin</code>. It checks signatures with the <code>minisign</code> tool or with OpenSSL;
+              <code>~/.local/bin</code> and the web UI into <code>~/.local/share/agent-hq/web</code>. After
+              <code>hq start all</code> the app is at <code>http://localhost:5678</code>. It checks signatures with the <code>minisign</code> tool or with OpenSSL;
               on a Mac, install one of them first (<code>brew install minisign</code>). Read the script before you
               run it: <a href="/install.sh">install.sh</a>.
             </p>
