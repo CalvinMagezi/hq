@@ -197,10 +197,10 @@ fn detect_total_memory_gb() -> u64 {
             for line in content.lines() {
                 if line.starts_with("MemTotal:") {
                     let parts: Vec<&str> = line.split_whitespace().collect();
-                    if let Some(kb_str) = parts.get(1) {
-                        if let Ok(kb) = kb_str.parse::<u64>() {
-                            return kb / (1024 * 1024);
-                        }
+                    if let Some(kb_str) = parts.get(1)
+                        && let Ok(kb) = kb_str.parse::<u64>()
+                    {
+                        return kb / (1024 * 1024);
                     }
                 }
             }
@@ -240,14 +240,13 @@ fn detect_gpu_type() -> GpuType {
         if let Ok(output) = Command::new("nvidia-smi")
             .args(["--query-gpu=memory.total", "--format=csv,noheader,nounits"])
             .output()
+            && output.status.success()
         {
-            if output.status.success() {
-                let vram_str = String::from_utf8_lossy(&output.stdout);
-                if let Ok(vram_mb) = vram_str.trim().lines().next().unwrap_or("0").parse::<u64>() {
-                    return GpuType::NvidiaCuda {
-                        vram_gb: vram_mb / 1024,
-                    };
-                }
+            let vram_str = String::from_utf8_lossy(&output.stdout);
+            if let Ok(vram_mb) = vram_str.trim().lines().next().unwrap_or("0").parse::<u64>() {
+                return GpuType::NvidiaCuda {
+                    vram_gb: vram_mb / 1024,
+                };
             }
         }
     }

@@ -200,7 +200,11 @@ mod tests {
     #[tokio::test]
     async fn logs_never_carry_command_arguments_that_hold_secrets() {
         let (logs, _guard) = hq_core::test_util::capture_logs();
-        let tool = BashTool::default();
+        // Hosts without bubblewrap would refuse under the default `required` mode.
+        let tool = BashTool::new(BashSettings {
+            sandbox: hq_core::config::BashSandboxMode::BestEffort,
+            ..BashSettings::default()
+        });
         let padding = "x".repeat(80);
         // Secrets at the very start of the arguments, in several shapes.
         let allowed = format!(
