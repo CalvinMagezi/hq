@@ -256,7 +256,7 @@ fn spawn_web_server(config: &HqConfig, vault: &Arc<VaultClient>, db: &Arc<Databa
         // and ring, so rustls cannot auto-pick and would panic.
         hq_web::install_default_crypto_provider();
         let repo_root = vault_path.parent().unwrap_or(&vault_path);
-        let static_dir = static_dir.unwrap_or_else(|| repo_root.join("web").join("dist"));
+        let static_dir = static_dir.unwrap_or_else(|| default_static_dir(repo_root));
         // Files are read per request, so a later web deploy is picked up
         // without restarting hq; a missing build is only a warning.
         if !static_dir.join("index.html").exists() {
@@ -347,4 +347,44 @@ async fn start_telegram(
     _db: Arc<Database>,
 ) -> Result<()> {
     anyhow::bail!("this build was compiled without the \"telegram\" feature")
+}
+
+
+/// Where the web UI is looked for when `web_static_dir` is unset. The first candidate with an
+/// `index.html` wins; with none, the first is returned so the "no web UI build" warning names it.
+fn default_static_dir(repo_root: &std::path::Path) -> std::path::PathBuf {
+    let mut candidates = vec![repo_root.join("web").join("dist")];
+    let data_home = std::env::var_os("XDG_DATA_HOME")
+        .map(std::path::PathBuf::from)
+        .or_else(|| std::env::var_os("HOME").map(|h| std::path::PathBuf::from(h).join(".local/share")));
+    if let Some(dir) = data_home {
+        // Where the install script puts the web UI.
+        candidates.push(dir.join("agent-hq").join("web").join("dist"));
+    }
+    candidates.push(std::path::PathBuf::from("/usr/local/share/hq/web/dist"));
+    first_with_index(candidates)
+}
+
+fn first_with_index(candidates: Vec<std::path::PathBuf>) -> std::path::PathBuf {
+    let first = candidates[0].clone();
+    candidates.into_iter().find(|c| c.join("index.html").exists()).unwrap_or(first)
+}
+
+#[cfg(test)]
+mod static_dir_tests {
+    use super::first_with_index;
+
+    #[test]
+    fn picks_the_first_candidate_that_has_an_index() {
+        let tmp = std::env::temp_dir().join(format!("hq-static-{}", std::process::id()));
+        let (a, b, c) = (tmp.join("a"), tmp.join("b"), tmp.join("c"));
+        for d in [&a, &b, &c] {
+            std::fs::create_dir_all(d).unwrap();
+        }
+        std::fs::write(b.join("index.html"), "x").unwrap();
+        std::fs::write(c.join("index.html"), "x").unwrap();
+        assert_eq!(first_with_index(vec![a.clone(), b.clone(), c]), b);
+        assert_eq!(first_with_index(vec![a.clone(), tmp.join("nope")]), a);
+        std::fs::remove_dir_all(&tmp).ok();
+    }
 }
