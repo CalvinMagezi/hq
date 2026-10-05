@@ -5,8 +5,9 @@ use hq_update::cli::{BuildIdentity, CliArgs, Mode};
 
 pub const GIT_SHA: &str = env!("HQ_GIT_SHA");
 pub const BUILD_TIME: &str = env!("HQ_BUILD_TIME");
+pub const VERSION: &str = env!("HQ_VERSION");
 pub const LONG_VERSION: &str = concat!(
-    env!("CARGO_PKG_VERSION"),
+    env!("HQ_VERSION"),
     " (",
     env!("HQ_GIT_SHA"),
     " ",
@@ -54,7 +55,7 @@ pub struct UpdateArgs {
 
 pub fn register_build_info() {
     hq_core::build_info::set(hq_core::build_info::BuildInfo {
-        version: env!("CARGO_PKG_VERSION").to_string(),
+        version: VERSION.to_string(),
         git_sha: GIT_SHA.to_string(),
         build_time: BUILD_TIME.to_string(),
     });
@@ -79,7 +80,7 @@ pub async fn run(args: UpdateArgs) -> i32 {
         conf: args.conf,
     };
     let ident = BuildIdentity {
-        version: env!("CARGO_PKG_VERSION").to_string(),
+        version: VERSION.to_string(),
         git_sha: GIT_SHA.to_string(),
         embedded_pubkey: EMBEDDED_PUBKEY.map(str::to_string),
     };
