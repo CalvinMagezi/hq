@@ -68,7 +68,13 @@ pub fn read_all_heartbeats(vault_path: &Path) -> Result<Vec<HarnessHeartbeat>> {
 /// Check if a process is alive by PID.
 pub fn is_pid_alive(pid: u32) -> bool {
     // On Unix, kill(pid, 0) checks if process exists without sending a signal
-    unsafe { libc::kill(pid as i32, 0) == 0 }
+    // pid 0 and values above i32::MAX would address a process group, not a process.
+    let Ok(pid) = i32::try_from(pid) else { return false };
+    if pid == 0 {
+        return false;
+    }
+    // EPERM means the process exists but belongs to someone else.
+    unsafe { libc::kill(pid, 0) == 0 || std::io::Error::last_os_error().raw_os_error() == Some(libc::EPERM) }
 }
 
 /// Detect dead harnesses: those with stale heartbeats or dead PIDs.
@@ -122,4 +128,16 @@ pub fn detect_dead_harnesses(
     }
 
     Ok(dead)
+}
+
+#[cfg(test)]
+mod pid_tests {
+    use super::is_pid_alive;
+
+    #[test]
+    fn own_pid_is_alive_and_invalid_pids_are_not() {
+        assert!(is_pid_alive(std::process::id()));
+        assert!(!is_pid_alive(0));
+        assert!(!is_pid_alive(u32::MAX));
+    }
 }
