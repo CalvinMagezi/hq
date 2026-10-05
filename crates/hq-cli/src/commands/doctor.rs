@@ -26,7 +26,8 @@ async fn report_web_search(config: &HqConfig) {
         let label = match (status.configured, status.answered) {
             (false, _) => "--",
             (true, Some(true)) => "ok",
-            (true, _) => "FAIL",
+            // Web search is optional, so an unreachable backend is a warning.
+            (true, _) => "warn",
         };
         println!("  {label}  {}", status.detail);
     }

@@ -20,6 +20,7 @@ const VAULT_DIRS: &[&str] = &[
     "_templates",
     "_data",
     "_agents",
+    "skills",
     "Notebooks/Memories",
     "Notebooks/Projects",
     "Notebooks/AI Intelligence",
