@@ -724,7 +724,7 @@ async fn dispatch(command: Commands, config: &HqConfig) -> Result<()> {
         Commands::Decisions { days, site } => commands::decisions::run(config, days, site.as_deref()),
 
         Commands::Version => {
-            println!("hq {} (rust)", env!("CARGO_PKG_VERSION"));
+            println!("hq {} (rust)", commands::update::VERSION);
             Ok(())
         }
     }

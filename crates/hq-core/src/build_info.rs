@@ -23,6 +23,11 @@ pub fn get() -> Option<&'static BuildInfo> {
     BUILD_INFO.get()
 }
 
+/// The running build's version, including any release channel suffix.
+pub fn version() -> &'static str {
+    get().map(|b| b.version.as_str()).unwrap_or(env!("CARGO_PKG_VERSION"))
+}
+
 /// The git commit the binary was built from, or `"unknown"` before `set`.
 pub fn git_sha() -> &'static str {
     get().map(|b| b.git_sha.as_str()).unwrap_or("unknown")

@@ -27,7 +27,7 @@ pub(crate) async fn health_handler(State(state): State<Arc<WsState>>) -> axum::r
     axum::Json(serde_json::json!({
         "status": "ok",
         "service": HEALTH_SERVICE,
-        "version": env!("CARGO_PKG_VERSION"),
+        "version": hq_core::build_info::version(),
         "git_sha": hq_core::build_info::git_sha(),
         "build_time": hq_core::build_info::build_time(),
         "mcp": state.registry.is_some(),
