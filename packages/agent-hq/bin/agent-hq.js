@@ -5,7 +5,7 @@ import { defaultPrefix, hasPrebuilt, installFromSource, installPrebuilt, pathAdv
 
 const HELP = `agent-hq: install HQ, the local-first AI agent hub
 
-usage: npx agent-hq [install] [options]
+usage: npx agent-hq-cli [install] [options]
 
 options:
   --channel <name>   release channel: stable (default) or main

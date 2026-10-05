@@ -16,6 +16,6 @@ export const installChannels = {
   npx: {
     available: false,
     title: 'npx installer',
-    command: 'npx agent-hq',
+    command: 'npx agent-hq-cli',
   },
 } as const;
