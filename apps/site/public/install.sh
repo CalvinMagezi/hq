@@ -226,6 +226,11 @@ main() {
 
     [ "$WEB" -eq 0 ] || install_web "$version" "$manifest_url"
 
+    if [ "$(uname -s)" = "Linux" ] && ! command -v bwrap >/dev/null 2>&1; then
+        echo
+        echo "note: the agent bash tool needs a sandbox. Install bubblewrap: sudo apt install bubblewrap"
+    fi
+
     case ":$PATH:" in
         *":$PREFIX:"*) ;;
         *) echo; echo "Add $PREFIX to your PATH, for example: export PATH=\"$PREFIX:\$PATH\"" ;;
