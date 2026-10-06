@@ -469,12 +469,12 @@ hq web                      # foreground on http://localhost:5678, opens the bro
 hq web --detach             # background; returns once it answers, then `hq web status` / `hq web stop`
 hq web --lan                # reachable from a phone or another machine; generates a token (see below)
 hq web --port 8080 --build  # another port; build the UI from this checkout first (needs bun)
-hq web --json --detach      # one JSON object: url, login_url, token, pid, log, static_dir
+hq web --json               # implies --detach; prints one JSON object: url, login_url, token, pid, log, static_dir
 ```
 
-`hq web` looks for the UI in `web_static_dir`, then `web/dist` next to the vault, then `apps/hq-web/dist/client` in a checkout, then the install locations. If none exists and you are in a checkout with bun, it builds the UI once. A non-loopback bind (`--lan`) requires a token: `hq web` uses `web_auth_token` if set, otherwise it generates one and keeps it in `~/.hq/web.token` (mode 0600) so the link survives restarts. Open the printed sign-in link once; the token travels in the `#token=` fragment, never the query string. `hq web` is for personal use; `hq start all` runs the full instance (daemon and relays) and serves the same UI.
+`hq web` looks for the UI in `web_static_dir`, then `web/dist` next to the vault, then `apps/hq-web/dist/client` in a checkout, then the install locations. If none exists it builds the UI once with bun (`bun install --frozen-lockfile`, then `bun run build`), but only in the checkout your vault lives in. In any other checkout, such as the current directory, it asks you to pass `--build` first, because a build runs that project's package scripts. A non-loopback bind (`--lan`) requires a token: `hq web` uses `web_auth_token` if set, otherwise it generates one and keeps it in `~/.hq/web.token` (mode 0600) so the link survives restarts. Open the printed sign-in link once; the token travels in the `#token=` fragment, never the query string. `hq web` is for personal use; `hq start all` runs the full instance (daemon and relays) and serves the same UI.
 
-Setting HQ up for someone else? `hq web --detach --json` is the one call to run, and `hq web status --json` (exit code 1 when down) confirms it afterwards.
+Setting HQ up for someone else? `hq web --json` is the one call to run, and `hq web status --json` (exit code 1 when down) confirms it afterwards.
 
 ```bash
 bun run dev                 # in apps/hq-web: dev server on :4747, proxies /api and /ws to :5678

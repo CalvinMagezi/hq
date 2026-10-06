@@ -13,6 +13,7 @@ use hq_core::config::HqConfig;
 use hq_db::Database;
 use hq_vault::VaultClient;
 use serde::{Deserialize, Serialize};
+use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
@@ -46,9 +47,24 @@ struct StartArgs {
     /// Build the web UI from this source checkout first (needs bun)
     #[arg(long)]
     build: bool,
-    /// Print one JSON object instead of text; never opens a browser
+    /// Print one JSON object instead of text; never opens a browser. Implies
+    /// `--detach`, so the call returns instead of serving forever.
     #[arg(long)]
     json: bool,
+    /// Internal: set on the background child so its log never holds the token
+    #[arg(long, hide = true)]
+    supervised: bool,
+}
+
+impl StartArgs {
+    fn detach(&self) -> bool {
+        self.detach || self.json
+    }
+
+    /// The user named an address, as opposed to taking the configured one.
+    fn names_bind(&self) -> bool {
+        self.lan || self.bind.is_some()
+    }
 }
 
 #[derive(Subcommand, Debug)]
@@ -90,7 +106,8 @@ struct Report {
     pid: Option<u32>,
     #[serde(skip_serializing_if = "Option::is_none")]
     network_url: Option<String>,
-    static_dir: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    static_dir: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     log: Option<String>,
 }
@@ -117,35 +134,35 @@ pub async fn run(config: &HqConfig, args: WebArgs) -> Result<()> {
     }
 }
 
-async fn start(config: &HqConfig, args: StartArgs) -> Result<()> {
+async fn start(config: &HqConfig, mut args: StartArgs) -> Result<()> {
+    args.detach = args.detach();
     let port = args.port.unwrap_or(config.ws_port);
     let bind = if args.lan {
         "0.0.0.0".to_string()
     } else {
         args.bind.clone().unwrap_or_else(|| config.web_bind.clone())
     };
-    let token = resolve_token(&bind, config.web_auth_token.as_deref())?;
-    // Same rule `hq start` applies; with the token above it only fails on a blank one.
-    hq_web::auth::check_web_bind(&bind, token.as_deref()).map_err(anyhow::Error::msg)?;
 
-    let static_dir = ensure_ui(config, args.build, args.json)?;
-    let mut report = Report::new(&bind, port, token, &static_dir);
-
-    match probe(port).await {
-        Probe::Hq => {
-            report.already_running = true;
-            return finish(report, &args);
-        }
+    // Ask before doing any work: an instance that is up needs no UI build or token.
+    match probe(probe_addr(&bind, port)?).await {
+        Probe::Hq => return report_running(config, &args, &bind, port),
         Probe::Other => bail!(
             "port {port} is taken by something that is not HQ. Pick another with `hq web --port <n>`."
         ),
         Probe::Free => {}
     }
 
+    let token = resolve_token(&bind, config.web_auth_token.as_deref())?;
+    // Same rule `hq start` applies; with the token above it only fails on a blank one.
+    hq_web::auth::check_web_bind(&bind, token.as_deref()).map_err(anyhow::Error::msg)?;
+
+    let static_dir = ensure_ui(config, args.build, args.json)?;
+    let mut report = Report::new(&bind, port, token, Some(&static_dir));
+
     if args.detach {
         let log = hq_dir().join("logs").join("web.log");
         report.log = Some(log.display().to_string());
-        report.pid = Some(spawn_detached(&bind, port, args.lan, &log).await?);
+        report.pid = Some(spawn_detached(&bind, port, args.lan, &static_dir, &log).await?);
         return finish(report, &args);
     }
 
@@ -159,9 +176,7 @@ async fn start(config: &HqConfig, args: StartArgs) -> Result<()> {
         Some(static_dir.clone()),
         report.token.clone(),
     );
-    let addr: std::net::SocketAddr = format!("{bind}:{port}")
-        .parse()
-        .with_context(|| format!("'{bind}' is not an IP address"))?;
+    let addr = listen_addr(&bind, port)?;
     let listener = tokio::net::TcpListener::bind(addr)
         .await
         .with_context(|| format!("could not listen on {addr}"))?;
@@ -183,50 +198,85 @@ async fn start(config: &HqConfig, args: StartArgs) -> Result<()> {
     served
 }
 
+/// An HQ server already answers on `port`: describe it as it is, not as this
+/// run's flags would have made it. Asking for a different address than the
+/// running one is refused rather than silently ignored.
+fn report_running(config: &HqConfig, args: &StartArgs, bind: &str, port: u16) -> Result<()> {
+    let running = read_state()
+        .filter(|s| s.port == port && super::stop::is_alive(s.pid))
+        .map(|s| s.bind)
+        .unwrap_or_else(|| config.web_bind.clone());
+    if args.names_bind() && !same_bind(&running, bind) {
+        bail!(
+            "HQ web is already running on {running}:{port}, not {bind}. Run `hq web stop` first \
+             (or `hq stop` if it came from `hq start all`), then start it again."
+        );
+    }
+    let token = resolve_token(&running, config.web_auth_token.as_deref())?;
+    let mut report = Report::new(&running, port, token, None);
+    report.already_running = true;
+    finish(report, args)
+}
+
 /// Prints the report (text or JSON) and opens the browser when appropriate.
 fn finish(report: Report, args: &StartArgs) -> Result<()> {
     if args.json {
         println!("{}", serde_json::to_string(&report)?);
         return Ok(());
     }
-    if report.already_running {
-        println!("HQ web is already running.");
-    } else if args.detach {
-        println!(
-            "HQ web is running in the background (pid {}).",
-            report.pid.unwrap_or(0)
-        );
-    } else {
-        println!("HQ web is starting. Press Ctrl+C to stop.");
-    }
-    println!("  Local:   {}", report.url);
-    if let Some(net) = &report.network_url {
-        println!("  Network: {net}");
-    }
-    if let Some(token) = &report.token {
-        println!("  Token:   {token}");
-        println!("  Sign-in link (keep it private): {}", report.login_url);
-    }
-    if let Some(log) = &report.log {
-        println!("  Log:     {log}");
-    }
-    if args.detach {
-        println!("Stop it with `hq web stop`.");
-    }
-    if !args.no_open && can_open_browser() {
+    print!("{}", render_text(&report, args.detach, args.supervised));
+    if !args.no_open && !args.supervised && can_open_browser() {
         open_browser(&report.login_url);
     }
     Ok(())
 }
 
+/// The human-readable report. The supervised background child writes it to a
+/// log file, so it never includes the token.
+fn render_text(report: &Report, detach: bool, supervised: bool) -> String {
+    let mut out = String::new();
+    if supervised {
+        out.push_str(&format!("hq web serving on {}\n", report.url));
+        return out;
+    }
+    if report.already_running {
+        out.push_str("HQ web is already running.\n");
+    } else if detach {
+        out.push_str(&format!(
+            "HQ web is running in the background (pid {}).\n",
+            report.pid.unwrap_or(0)
+        ));
+    } else {
+        out.push_str("HQ web is starting. Press Ctrl+C to stop.\n");
+    }
+    out.push_str(&format!("  Local:   {}\n", report.url));
+    if let Some(net) = &report.network_url {
+        out.push_str(&format!("  Network: {net}\n"));
+    }
+    if let Some(token) = &report.token {
+        out.push_str(&format!("  Token:   {token}\n"));
+        out.push_str(&format!(
+            "  Sign-in link (keep it private): {}\n",
+            report.login_url
+        ));
+    }
+    if let Some(log) = &report.log {
+        out.push_str(&format!("  Log:     {log}\n"));
+    }
+    if detach && !report.already_running {
+        out.push_str("Stop it with `hq web stop`.\n");
+    }
+    out
+}
+
 impl Report {
-    fn new(bind: &str, port: u16, token: Option<String>, static_dir: &Path) -> Self {
-        let url = format!("http://localhost:{port}");
+    fn new(bind: &str, port: u16, token: Option<String>, static_dir: Option<&Path>) -> Self {
+        let url = format!("http://{}:{port}", local_host(bind));
         let login_url = match &token {
             Some(t) => format!("{url}/#token={t}"),
             None => url.clone(),
         };
-        let network_url = (!is_loopback(bind)).then(|| {
+        let network_url = is_open_bind(bind).then(|| {
             let host = if bind == "0.0.0.0" || bind == "::" {
                 lan_ip().unwrap_or_else(|| bind.to_string())
             } else {
@@ -244,7 +294,7 @@ impl Report {
             token,
             pid: None,
             network_url,
-            static_dir: static_dir.display().to_string(),
+            static_dir: static_dir.map(|d| d.display().to_string()),
             log: None,
         }
     }
@@ -253,11 +303,16 @@ impl Report {
 async fn status(config: &HqConfig, json: bool) -> Result<()> {
     let state = read_state();
     let port = state.as_ref().map(|s| s.port).unwrap_or(config.ws_port);
-    let running = matches!(probe(port).await, Probe::Hq);
-    let url = format!("http://localhost:{port}");
-    let pid = state
-        .filter(|s| super::stop::is_alive(s.pid))
-        .map(|s| s.pid);
+    let bind = state
+        .as_ref()
+        .map(|s| s.bind.clone())
+        .unwrap_or_else(|| config.web_bind.clone());
+    let running = match probe_addr(&bind, port) {
+        Ok(addr) => matches!(probe(addr).await, Probe::Hq),
+        Err(_) => false,
+    };
+    let url = format!("http://{}:{port}", local_host(&bind));
+    let pid = state.filter(|s| is_our_server(s.pid)).map(|s| s.pid);
     if json {
         println!(
             "{}",
@@ -280,8 +335,10 @@ async fn status(config: &HqConfig, json: bool) -> Result<()> {
 }
 
 fn stop(_config: &HqConfig, json: bool) -> Result<()> {
+    // The pid in the state file may have been reused by an unrelated process
+    // since the server died, so only a process that still looks like `hq web` is signalled.
     let stopped = match read_state() {
-        Some(s) if super::stop::is_alive(s.pid) => {
+        Some(s) if is_our_server(s.pid) => {
             super::stop::kill_tree(s.pid);
             true
         }
@@ -300,36 +357,55 @@ fn stop(_config: &HqConfig, json: bool) -> Result<()> {
 
 // ─── UI bundle ──────────────────────────────────────────────────────────
 
-/// The directory holding the built UI, building it from a source checkout when
-/// asked (or when it is missing and bun is there to do it).
+/// The directory holding the built UI.
+///
+/// A build that already exists is always reused. Building runs `bun install`,
+/// which executes package scripts, so it only happens without being asked for
+/// the checkout the configured vault lives in (the user's own HQ), or for the
+/// checkout in the current directory when `--build` says so.
 fn ensure_ui(config: &HqConfig, build: bool, quiet: bool) -> Result<PathBuf> {
     let root = config.vault_path.parent().unwrap_or(&config.vault_path);
     let configured = config.web_static_dir.clone();
-    let found = || {
-        configured
-            .clone()
-            .unwrap_or_else(|| super::start::default_static_dir(root))
-    };
-    let dir = found();
-    let source = find_source_checkout(root);
+    let dir = configured
+        .clone()
+        .unwrap_or_else(|| super::start::default_static_dir(root));
+    let trusted = checkout_from(root);
+    let local = trusted.clone().or_else(|| {
+        std::env::current_dir()
+            .ok()
+            .and_then(|cwd| checkout_from(&cwd))
+    });
+
     if !build {
         if dir.join("index.html").exists() {
             return Ok(dir);
         }
         // A configured directory is taken as is; otherwise reuse a checkout's earlier build.
-        let built = source.as_ref().map(|s| s.join("apps/hq-web/dist/client"));
-        if let Some(built) = built.filter(|b| configured.is_none() && b.join("index.html").exists()) {
-            return Ok(built);
+        if configured.is_none() {
+            let built = local.as_ref().map(|c| c.join(BUILT_UI));
+            if let Some(built) = built.filter(|b| b.join("index.html").exists()) {
+                return Ok(built);
+            }
         }
     }
-    let Some(source) = source else {
-        if dir.join("index.html").exists() {
-            return Ok(dir);
-        }
+    let to_build = if build {
+        local.as_ref()
+    } else {
+        trusted.as_ref()
+    };
+    let Some(source) = to_build else {
+        let hint = match &local {
+            Some(c) => format!(
+                "A checkout is at {}; run `hq web --build` to build its UI.",
+                c.display()
+            ),
+            None => "Run `hq update --apply` to install the released web files, or run \
+                     `hq web --build` from a checkout, or point `web_static_dir` at a built \
+                     `apps/hq-web/dist/client`."
+                .to_string(),
+        };
         bail!(
-            "no web UI build found (looked for {}/index.html). Run `hq update --apply` to install \
-             the released web files, or build from a checkout with `hq web --build`, or point \
-             `web_static_dir` at a built `apps/hq-web/dist/client`.",
+            "no web UI build found (looked for {}/index.html). {hint}",
             dir.display()
         );
     };
@@ -346,7 +422,8 @@ fn ensure_ui(config: &HqConfig, build: bool, quiet: bool) -> Result<PathBuf> {
             app.display()
         );
     }
-    for step in [&["install"][..], &["run", "build"][..]] {
+    // --frozen-lockfile: install exactly what the lockfile pins, never newer.
+    for step in [&["install", "--frozen-lockfile"][..], &["run", "build"][..]] {
         let status = std::process::Command::new("bun")
             .args(step)
             .current_dir(&app)
@@ -363,8 +440,7 @@ fn ensure_ui(config: &HqConfig, build: bool, quiet: bool) -> Result<PathBuf> {
         }
     }
     // A configured directory wins; otherwise serve the fresh checkout build.
-    let built = app.join("dist").join("client");
-    let dir = configured.unwrap_or(built);
+    let dir = configured.unwrap_or_else(|| source.join(BUILT_UI));
     if !dir.join("index.html").exists() {
         bail!(
             "the build finished but {}/index.html is missing",
@@ -374,12 +450,13 @@ fn ensure_ui(config: &HqConfig, build: bool, quiet: bool) -> Result<PathBuf> {
     Ok(dir)
 }
 
-/// The nearest directory from `root` or the current directory upward that
-/// holds `apps/hq-web/package.json`.
-fn find_source_checkout(root: &Path) -> Option<PathBuf> {
-    let cwd = std::env::current_dir().ok();
-    root.ancestors()
-        .chain(cwd.iter().flat_map(|c| c.ancestors()))
+/// Where `bun run build` leaves the UI, relative to a checkout root.
+const BUILT_UI: &str = "apps/hq-web/dist/client";
+
+/// The nearest directory at or above `start` that holds `apps/hq-web/package.json`.
+fn checkout_from(start: &Path) -> Option<PathBuf> {
+    start
+        .ancestors()
         .find(|d| d.join("apps/hq-web/package.json").is_file())
         .map(Path::to_path_buf)
 }
@@ -396,15 +473,26 @@ fn which(program: &str) -> Option<PathBuf> {
 
 /// Re-runs this binary as `hq web` in its own process group with output going
 /// to `log`, then waits until it answers `/health`.
-async fn spawn_detached(bind: &str, port: u16, lan: bool, log: &Path) -> Result<u32> {
-    std::fs::create_dir_all(log.parent().unwrap_or(Path::new(".")))?;
-    let out = std::fs::OpenOptions::new()
-        .create(true)
-        .append(true)
-        .open(log)?;
+async fn spawn_detached(
+    bind: &str,
+    port: u16,
+    lan: bool,
+    static_dir: &Path,
+    log: &Path,
+) -> Result<u32> {
+    let out = open_log(log)?;
+    let addr = probe_addr(bind, port)?;
     let mut cmd =
         std::process::Command::new(std::env::current_exe().context("cannot find the hq binary")?);
-    cmd.args(["web", "--no-open", "--port", &port.to_string()]);
+    cmd.args([
+        "web",
+        "--no-open",
+        "--supervised",
+        "--port",
+        &port.to_string(),
+    ]);
+    // The child serves the directory the parent settled on, wherever it started from.
+    cmd.env("HQ_WEB_STATIC_DIR", static_dir);
     if lan {
         cmd.arg("--lan");
     } else {
@@ -421,7 +509,7 @@ async fn spawn_detached(bind: &str, port: u16, lan: bool, log: &Path) -> Result<
 
     let deadline = Instant::now() + Duration::from_secs(20);
     while Instant::now() < deadline {
-        if matches!(probe(port).await, Probe::Hq) {
+        if matches!(probe(addr).await, Probe::Hq) {
             return Ok(child.id());
         }
         if let Ok(Some(status)) = child.try_wait() {
@@ -447,9 +535,9 @@ enum Probe {
     Free,
 }
 
-/// Is an HQ server listening on `port`? Only an `agent-hq` `/health` counts,
+/// Is an HQ server listening on `addr`? Only an `agent-hq` `/health` counts,
 /// so another program on the port is never mistaken for HQ.
-async fn probe(port: u16) -> Probe {
+async fn probe(addr: SocketAddr) -> Probe {
     let client = match reqwest::Client::builder()
         .timeout(Duration::from_secs(2))
         .no_proxy()
@@ -458,11 +546,7 @@ async fn probe(port: u16) -> Probe {
         Ok(c) => c,
         Err(_) => return Probe::Free,
     };
-    match client
-        .get(format!("http://127.0.0.1:{port}/health"))
-        .send()
-        .await
-    {
+    match client.get(format!("http://{addr}/health")).send().await {
         Ok(resp) => {
             let is_hq = resp
                 .json::<serde_json::Value>()
@@ -477,8 +561,95 @@ async fn probe(port: u16) -> Probe {
     }
 }
 
-fn is_loopback(bind: &str) -> bool {
-    matches!(bind, "127.0.0.1" | "::1" | "localhost")
+/// Whether `bind` is reachable from other machines, by the same rule `hq start`
+/// uses to demand a token. Keeping one definition means the two cannot drift.
+fn is_open_bind(bind: &str) -> bool {
+    hq_web::auth::check_web_bind(bind, None).is_err()
+}
+
+/// The address to listen on. `localhost` is accepted because `web_bind` allows it.
+fn listen_addr(bind: &str, port: u16) -> Result<SocketAddr> {
+    let ip: IpAddr = if bind == "localhost" {
+        Ipv4Addr::LOCALHOST.into()
+    } else {
+        bind.parse()
+            .with_context(|| format!("'{bind}' is not an IP address (try 127.0.0.1 or 0.0.0.0)"))?
+    };
+    Ok(SocketAddr::new(ip, port))
+}
+
+/// Where a client on this machine reaches a server bound to `bind`: a wildcard
+/// bind answers on loopback, a specific address only on itself.
+fn probe_addr(bind: &str, port: u16) -> Result<SocketAddr> {
+    let mut addr = listen_addr(bind, port)?;
+    if addr.ip().is_unspecified() {
+        addr.set_ip(match addr.ip() {
+            IpAddr::V4(_) => Ipv4Addr::LOCALHOST.into(),
+            IpAddr::V6(_) => Ipv6Addr::LOCALHOST.into(),
+        });
+    }
+    Ok(addr)
+}
+
+/// Host to show for the local URL: `localhost` unless the server only answers
+/// on one specific address.
+fn local_host(bind: &str) -> String {
+    match listen_addr(bind, 0).map(|a| a.ip()) {
+        // Only the exact loopback addresses are what "localhost" resolves to; 127.0.0.2 is not.
+        Ok(ip) if ip.is_unspecified() || ip == Ipv4Addr::LOCALHOST || ip == Ipv6Addr::LOCALHOST => {
+            "localhost".to_string()
+        }
+        Ok(IpAddr::V6(v6)) => format!("[{v6}]"),
+        Ok(ip) => ip.to_string(),
+        Err(_) => "localhost".to_string(),
+    }
+}
+
+fn same_bind(a: &str, b: &str) -> bool {
+    match (listen_addr(a, 0), listen_addr(b, 0)) {
+        (Ok(x), Ok(y)) => x.ip() == y.ip(),
+        _ => a == b,
+    }
+}
+
+/// Is `pid` still a server this command started? `kill -0` alone would accept
+/// any process that inherited a dead server's pid.
+fn is_our_server(pid: u32) -> bool {
+    if !super::stop::is_alive(pid) {
+        return false;
+    }
+    std::process::Command::new("ps")
+        .args(["-o", "command=", "-p", &pid.to_string()])
+        .output()
+        .ok()
+        .and_then(|o| String::from_utf8(o.stdout).ok())
+        .is_some_and(|cmd| looks_like_hq_web(&cmd))
+}
+
+/// `…/hq web …` (or its `pwa`/`dashboard` aliases) as a process command line.
+fn looks_like_hq_web(cmdline: &str) -> bool {
+    let mut words = cmdline.split_whitespace();
+    let is_hq = words
+        .next()
+        .and_then(|exe| Path::new(exe).file_name())
+        .is_some_and(|name| name == "hq");
+    is_hq && words.any(|w| matches!(w, "web" | "pwa" | "dashboard"))
+}
+
+/// The supervised child's log. It is created owner-only and tightened if an
+/// older version left it readable, since the log is for the owner alone.
+fn open_log(log: &Path) -> Result<std::fs::File> {
+    if let Some(parent) = log.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+    let mut opts = std::fs::OpenOptions::new();
+    opts.create(true).append(true);
+    #[cfg(unix)]
+    std::os::unix::fs::OpenOptionsExt::mode(&mut opts, 0o600);
+    let file = opts.open(log)?;
+    #[cfg(unix)]
+    std::fs::set_permissions(log, std::os::unix::fs::PermissionsExt::from_mode(0o600))?;
+    Ok(file)
 }
 
 /// The token a server on `bind` needs: the configured one, else for a
@@ -489,7 +660,7 @@ fn resolve_token(bind: &str, configured: Option<&str>) -> Result<Option<String>>
     if let Some(t) = configured {
         return Ok(Some(t.to_string()));
     }
-    if is_loopback(bind) {
+    if !is_open_bind(bind) {
         return Ok(None);
     }
     let path = hq_dir().join("web.token");
@@ -574,9 +745,13 @@ fn open_browser(url: &str) {
 mod tests {
     use super::*;
 
+    fn text(report: &Report, detach: bool, supervised: bool) -> String {
+        render_text(report, detach, supervised)
+    }
+
     #[test]
     fn loopback_report_has_no_token_or_network_url() {
-        let r = Report::new("127.0.0.1", 5678, None, Path::new("/ui"));
+        let r = Report::new("127.0.0.1", 5678, None, Some(Path::new("/ui")));
         assert_eq!(r.url, "http://localhost:5678");
         assert_eq!(r.login_url, r.url);
         assert!(r.network_url.is_none() && r.token.is_none());
@@ -584,7 +759,7 @@ mod tests {
 
     #[test]
     fn token_goes_in_the_url_fragment_never_the_query() {
-        let r = Report::new("0.0.0.0", 9000, Some("abc".into()), Path::new("/ui"));
+        let r = Report::new("0.0.0.0", 9000, Some("abc".into()), Some(Path::new("/ui")));
         assert_eq!(r.login_url, "http://localhost:9000/#token=abc");
         assert!(
             r.network_url
@@ -612,6 +787,26 @@ mod tests {
     }
 
     #[test]
+    fn token_rule_is_the_one_hq_start_enforces() {
+        // A bind that `hq start` would refuse without a token must get one here too.
+        for bind in [
+            "127.0.0.1",
+            "::1",
+            "localhost",
+            "0.0.0.0",
+            "::",
+            "10.1.2.3",
+            "127.0.0.2",
+        ] {
+            assert_eq!(
+                is_open_bind(bind),
+                hq_web::auth::check_web_bind(bind, None).is_err(),
+                "{bind}"
+            );
+        }
+    }
+
+    #[test]
     fn state_file_round_trips() {
         let s = WebState {
             pid: 42,
@@ -623,41 +818,210 @@ mod tests {
     }
 
     #[test]
-    fn source_checkout_is_found_by_its_web_app_manifest() {
+    fn localhost_and_ipv6_binds_parse() {
+        assert_eq!(
+            listen_addr("localhost", 80).unwrap().to_string(),
+            "127.0.0.1:80"
+        );
+        assert_eq!(listen_addr("::1", 80).unwrap().to_string(), "[::1]:80");
+        assert_eq!(
+            listen_addr("0.0.0.0", 80).unwrap().to_string(),
+            "0.0.0.0:80"
+        );
+        assert!(listen_addr("example.com", 80).is_err());
+    }
+
+    #[test]
+    fn probing_a_wildcard_bind_uses_loopback_and_a_specific_bind_uses_itself() {
+        // The background child was killed as "not answering" when this probed the wrong address.
+        assert_eq!(probe_addr("0.0.0.0", 7).unwrap().to_string(), "127.0.0.1:7");
+        assert_eq!(probe_addr("::", 7).unwrap().to_string(), "[::1]:7");
+        assert_eq!(
+            probe_addr("127.0.0.2", 7).unwrap().to_string(),
+            "127.0.0.2:7"
+        );
+        assert_eq!(
+            probe_addr("192.0.2.5", 7).unwrap().to_string(),
+            "192.0.2.5:7"
+        );
+    }
+
+    #[test]
+    fn local_url_names_the_only_address_a_specific_bind_answers_on() {
+        assert_eq!(local_host("127.0.0.1"), "localhost");
+        assert_eq!(local_host("localhost"), "localhost");
+        assert_eq!(local_host("0.0.0.0"), "localhost");
+        assert_eq!(local_host("192.0.2.5"), "192.0.2.5");
+        assert_eq!(
+            local_host("127.0.0.2"),
+            "127.0.0.2",
+            "not what localhost resolves to"
+        );
+        assert_eq!(local_host("2001:db8::1"), "[2001:db8::1]");
+    }
+
+    #[test]
+    fn same_bind_compares_addresses_not_spellings() {
+        assert!(same_bind("localhost", "127.0.0.1"));
+        assert!(!same_bind("127.0.0.1", "0.0.0.0"));
+    }
+
+    #[test]
+    fn only_a_process_that_looks_like_hq_web_is_ours_to_stop() {
+        assert!(looks_like_hq_web(
+            "/usr/local/bin/hq web --no-open --port 5678"
+        ));
+        assert!(looks_like_hq_web("/home/u/bin/hq pwa"));
+        assert!(!looks_like_hq_web("sleep 300"));
+        assert!(
+            !looks_like_hq_web("/usr/bin/vim web"),
+            "right word, wrong program"
+        );
+        assert!(!looks_like_hq_web("/usr/local/bin/hq start all"));
+        assert!(!looks_like_hq_web(""));
+    }
+
+    #[test]
+    fn a_stale_pid_is_not_our_server() {
+        // This test process is alive but is not `hq web`.
+        assert!(!is_our_server(std::process::id()));
+    }
+
+    #[test]
+    fn the_background_log_never_gets_the_token_and_is_owner_only() {
+        let r = Report::new("0.0.0.0", 9000, Some("tok-123".into()), None);
+        let child = text(&r, false, true);
+        assert!(!child.contains("tok-123"), "{child}");
+        let user = text(&r, true, false);
+        assert!(
+            user.contains("tok-123"),
+            "the person who ran it does see it"
+        );
+
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let dir = tempfile::tempdir().unwrap();
+            let log = dir.path().join("logs/web.log");
+            drop(open_log(&log).unwrap());
+            assert_eq!(
+                std::fs::metadata(&log).unwrap().permissions().mode() & 0o777,
+                0o600
+            );
+            // A log an older version made world-readable is tightened.
+            std::fs::set_permissions(&log, std::fs::Permissions::from_mode(0o644)).unwrap();
+            drop(open_log(&log).unwrap());
+            assert_eq!(
+                std::fs::metadata(&log).unwrap().permissions().mode() & 0o777,
+                0o600
+            );
+        }
+    }
+
+    #[test]
+    fn json_implies_detach_so_an_agent_call_returns() {
+        let json = StartArgs {
+            json: true,
+            ..Default::default()
+        };
+        assert!(json.detach());
+        assert!(!StartArgs::default().detach());
+        assert!(!StartArgs::default().names_bind());
+        assert!(
+            StartArgs {
+                lan: true,
+                ..Default::default()
+            }
+            .names_bind()
+        );
+    }
+
+    #[test]
+    fn already_running_report_omits_the_stop_hint_and_the_build_dir() {
+        let mut r = Report::new("127.0.0.1", 5678, None, None);
+        r.already_running = true;
+        let out = text(&r, true, false);
+        assert!(out.contains("already running") && !out.contains("hq web stop"));
+        assert!(
+            serde_json::to_value(&r)
+                .unwrap()
+                .get("static_dir")
+                .is_none()
+        );
+    }
+
+    #[test]
+    fn checkout_is_found_by_its_web_app_manifest() {
         let tmp = tempfile::tempdir().unwrap();
         std::fs::create_dir_all(tmp.path().join("apps/hq-web")).unwrap();
         std::fs::write(tmp.path().join("apps/hq-web/package.json"), "{}").unwrap();
         std::fs::create_dir_all(tmp.path().join(".vault")).unwrap();
+        assert_eq!(checkout_from(tmp.path()).as_deref(), Some(tmp.path()));
         assert_eq!(
-            find_source_checkout(tmp.path()).as_deref(),
+            checkout_from(&tmp.path().join(".vault")).as_deref(),
             Some(tmp.path())
         );
     }
 
+    #[test]
+    fn an_existing_build_is_reused_without_bun_or_a_rebuild() {
+        let tmp = tempfile::tempdir().unwrap();
+        let built = tmp.path().join(BUILT_UI);
+        std::fs::create_dir_all(&built).unwrap();
+        std::fs::write(built.join("index.html"), "x").unwrap();
+        std::fs::create_dir_all(tmp.path().join("apps/hq-web")).unwrap();
+        std::fs::write(tmp.path().join("apps/hq-web/package.json"), "{}").unwrap();
+        let config = HqConfig {
+            vault_path: tmp.path().join(".vault"),
+            ..HqConfig::default()
+        };
+        assert_eq!(ensure_ui(&config, false, true).unwrap(), built);
+    }
+
+    #[test]
+    fn a_configured_directory_is_never_replaced_by_a_checkout_build() {
+        let tmp = tempfile::tempdir().unwrap();
+        let ui = tmp.path().join("ui");
+        std::fs::create_dir_all(&ui).unwrap();
+        std::fs::write(ui.join("index.html"), "x").unwrap();
+        let config = HqConfig {
+            vault_path: tmp.path().join(".vault"),
+            web_static_dir: Some(ui.clone()),
+            ..HqConfig::default()
+        };
+        assert_eq!(ensure_ui(&config, false, true).unwrap(), ui);
+    }
+
     #[tokio::test]
     async fn a_closed_port_probes_as_free() {
-        let port = {
+        let addr = {
             let l = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
-            l.local_addr().unwrap().port()
+            l.local_addr().unwrap()
         };
-        assert!(matches!(probe(port).await, Probe::Free));
+        assert!(matches!(probe(addr).await, Probe::Free));
     }
 
     #[tokio::test]
     async fn a_non_hq_listener_is_not_mistaken_for_hq() {
         use tokio::io::{AsyncReadExt, AsyncWriteExt};
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
-        let port = listener.local_addr().unwrap().port();
+        let addr = listener.local_addr().unwrap();
         tokio::spawn(async move {
             if let Ok((mut sock, _)) = listener.accept().await {
                 let mut buf = [0u8; 512];
                 let _ = sock.read(&mut buf).await;
                 let body = r#"{"service":"other"}"#;
                 let _ = sock
-                    .write_all(format!("HTTP/1.1 200 OK\r\ncontent-type: application/json\r\ncontent-length: {}\r\nconnection: close\r\n\r\n{body}", body.len()).as_bytes())
+                    .write_all(
+                        format!(
+                            "HTTP/1.1 200 OK\r\ncontent-type: application/json\r\ncontent-length: {}\r\nconnection: close\r\n\r\n{body}",
+                            body.len()
+                        )
+                        .as_bytes(),
+                    )
                     .await;
             }
         });
-        assert!(matches!(probe(port).await, Probe::Other));
+        assert!(matches!(probe(addr).await, Probe::Other));
     }
 }
