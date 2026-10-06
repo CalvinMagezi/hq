@@ -23,6 +23,11 @@ export const installChannels = {
     title: 'Homebrew',
     command: 'brew install CalvinMagezi/tap/agent-hq',
   },
+  docker: {
+    available: true,
+    title: 'Docker',
+    command: 'docker run -d --name hq --restart unless-stopped -p 127.0.0.1:5678:5678 -v hq-data:/data ghcr.io/calvinmagezi/hq',
+  },
   npx: {
     available: true,
     title: 'npx installer',

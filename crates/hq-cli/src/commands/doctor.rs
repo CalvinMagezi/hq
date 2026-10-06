@@ -142,11 +142,7 @@ fn describe_backend(
             format!("vault {} does not exist", config.vault_path.display()),
         )
     };
-    let has_key = |k: &Option<String>| k.as_deref().is_some_and(|k| !k.trim().is_empty());
-    let legacy = has_key(&config.openrouter_api_key)
-        || has_key(&config.anthropic_api_key)
-        || has_key(&config.google_ai_api_key)
-        || !config.providers.is_empty();
+    let legacy = config.has_llm_key();
     let llm_line = if config.backends.is_configured() {
         Line(
             "ok",

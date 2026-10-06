@@ -50,18 +50,6 @@ pub const ANTHROPIC_VERSION: &str = "2023-06-01";
 /// one so requests never fail validation for a missing field.
 pub const DEFAULT_MAX_TOKENS: u32 = 4096;
 
-pub const ANTHROPIC_MODELS: &[&str] = &[
-    "anthropic/claude-sonnet-4-6",
-    "anthropic/claude-sonnet-4",
-    "anthropic/claude-opus-4",
-    "anthropic/claude-haiku-4",
-];
-
-/// Check if a model ID is an Anthropic model.
-pub fn is_anthropic_model(model_id: &str) -> bool {
-    model_id.starts_with("anthropic/") || model_id.starts_with("claude-")
-}
-
 /// Native Anthropic Messages API provider.
 ///
 /// Reuses the shared HTTP client so no new connection pool is introduced.
@@ -92,12 +80,6 @@ impl AnthropicProvider {
             version: ANTHROPIC_VERSION.to_string(),
             default_max_tokens: DEFAULT_MAX_TOKENS,
         }
-    }
-
-    /// Override the `anthropic-version` header (some gateways pin a version).
-    pub fn with_version(mut self, version: impl Into<String>) -> Self {
-        self.version = version.into();
-        self
     }
 
     fn messages_url(&self) -> String {

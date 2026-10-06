@@ -157,15 +157,3 @@ fn parse_url_host_port(url: &str) -> Option<(String, u16)> {
         .unwrap_or_else(|| if url.starts_with("https") { 443 } else { 80 });
     Some((host, port))
 }
-
-/// Async health check: probe the local server.
-pub async fn is_available(base_url: &str) -> bool {
-    let base = base_url.trim_end_matches("/v1");
-    let health_url = format!("{}/models", base);
-    crate::http::SHARED_HTTP_CLIENT
-        .clone()
-        .get(&health_url)
-        .send()
-        .await
-        .is_ok()
-}

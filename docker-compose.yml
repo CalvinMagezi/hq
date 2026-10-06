@@ -1,0 +1,28 @@
+# HQ from the official image. Guide: docs/DOCKER.md
+#
+#   docker compose up -d
+#   docker compose logs hq        # the first start prints the web UI link and token once
+#
+# Put provider keys in a .env file next to this one (chmod 600), for example
+#   HQ_OPENROUTER_API_KEY=...
+# Compose reads it automatically. To pass other provider variables, add their names to the list below.
+services:
+  hq:
+    image: ghcr.io/calvinmagezi/hq:latest # or :main for every merge, or a fixed version tag
+    restart: unless-stopped
+    ports:
+      # Loopback only. Reach it from other machines through Tailscale or a reverse
+      # proxy (docs/DOCKER.md); never publish this port on a public address.
+      - "127.0.0.1:5678:5678"
+    volumes:
+      - hq-data:/data
+    environment:
+      # A name without a value is passed through from your shell or .env, and left unset
+      # when you have not defined it.
+      - HQ_OPENROUTER_API_KEY
+      - HQ_ANTHROPIC_API_KEY
+      # Optional: use your own web token instead of the generated one.
+      # - HQ_WEB_AUTH_TOKEN
+
+volumes:
+  hq-data:
