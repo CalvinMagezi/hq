@@ -80,7 +80,7 @@ pub async fn run(config: &HqConfig) -> Result<()> {
         let size = std::fs::metadata(&db_path).map(|m| m.len()).unwrap_or(0);
         ok(&format!("Database: {:.1} MB", size as f64 / 1_048_576.0));
     } else {
-        warn("Database not initialized (run hq setup)");
+        ok("Database: not created yet (HQ creates it on first start)");
     }
 
     // 5. Vault stats
