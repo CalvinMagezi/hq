@@ -1,0 +1,10 @@
+# Agent HQ
+
+> Open-source, local-first AI agent hub. One Rust binary runs a chat agent on Discord, Telegram, a web app and the terminal, keeps data in a markdown vault on your own machine, and supervises coding agents such as Claude Code and Codex. MIT licensed, version 0.9.x.
+
+- [Install guide](https://agent-hq.online/install/): curl script, Homebrew, npx, Docker and server setup
+- [Architecture](https://agent-hq.online/architecture/): how the daemon, vault, relays and MCP gateway fit together
+- [Compare](https://agent-hq.online/compare/): Agent HQ next to OpenClaw and Hermes Agent
+- [Security](https://agent-hq.online/security/): sandbox, signed releases, reporting a vulnerability
+- [Source code](https://github.com/CalvinMagezi/hq): repository, issues and changelog
+- [Agent setup guide](https://github.com/CalvinMagezi/hq/blob/main/AGENTS-SETUP.md): a file you can hand to your own AI agent so it installs HQ for you
