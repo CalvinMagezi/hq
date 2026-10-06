@@ -56,10 +56,10 @@ hq env
 
 `hq env` opens the setup for keys. If it is not interactive on their system, tell them to run `export HQ_OPENROUTER_API_KEY='their-key'` (or `HQ_ANTHROPIC_API_KEY`, `HQ_GOOGLE_AI_API_KEY`) in the terminal where HQ will start, or to paste the key into `~/.hq/config.yaml` themselves.
 
-Cost warning to give the user: every HQ message sends a large amount of background text to the model, so premium models (Claude, GPT flagship tiers) can cost around ten cents for a single short reply. Recommend a cheap model while they try HQ, and show them how to name it:
+Cost note to give the user: HQ starts on a low-cost model (`openai/gpt-6-luna` through OpenRouter). Every HQ message sends a large amount of background text to the model, so premium models (Claude, GPT flagship tiers) can cost around ten cents for one short reply. Only switch to one on purpose, with `hq env`, and name a model for a single chat with:
 
 ```bash
-hq chat -m <cheap-model-name>
+hq chat -m <model-name>
 ```
 
 ## Step 5: check it works
@@ -86,7 +86,7 @@ A reply containing `"status":"ok"` means it is running. To keep it running after
 
 ## Step 7: first message
 
-Ask the user to type a short hello into the web page, or run `hq chat -m <cheap-model-name>` and send one line. If it answers, setup is complete. Tell the user:
+Ask the user to type a short hello into the web page, or run `hq chat` and send one line. If it answers, setup is complete. Tell the user:
 
 - where their notes live (the vault folder `hq install` printed),
 - how to start HQ again (`hq start all`),
