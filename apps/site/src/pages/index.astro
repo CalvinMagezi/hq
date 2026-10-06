@@ -5,7 +5,7 @@ import Diagram from '../components/Diagram.astro';
 import Media from '../components/Media.astro';
 import { channels } from '../data/diagrams';
 import manifest from '../data/media.json';
-import { links, REPO } from '../data/site';
+import { links, REPO, SITE_URL } from '../data/site';
 
 const installCmd = 'curl -fsSL https://agent-hq.online/install.sh | bash';
 
@@ -45,8 +45,21 @@ const capabilities = [
 
 <Layout
   title="Agent HQ: a local-first AI agent hub"
-  description="Agent HQ puts one AI agent on Discord, Telegram, the web and your terminal, keeps your data in a markdown vault on your own machine, and supervises your coding agents. One Rust binary. Open source, MIT."
+  description="Open-source AI agent hub on Discord, Telegram, web and terminal. A markdown vault on your machine, supervised coding agents, one Rust binary."
   path="/"
+  jsonLd={{
+    '@context': 'https://schema.org',
+    '@type': 'SoftwareApplication',
+    name: 'Agent HQ',
+    alternateName: 'HQ',
+    description: 'Open-source, local-first AI agent hub that supervises coding agents and keeps a markdown vault on your own machine.',
+    url: SITE_URL,
+    applicationCategory: 'DeveloperApplication',
+    operatingSystem: 'Linux, macOS',
+    license: 'https://opensource.org/license/mit',
+    codeRepository: links.repo,
+    offers: { '@type': 'Offer', price: '0', priceCurrency: 'USD' },
+  }}
 >
   <section class="band hero">
     <div class="container">

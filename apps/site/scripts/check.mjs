@@ -82,8 +82,10 @@ for (const file of pages) {
   if (/<style\b/i.test(html)) fail(page, 'inline <style> block');
   if (/\sstyle="/i.test(html)) fail(page, 'inline style attribute');
   if (/\son[a-z]+="/i.test(html)) fail(page, 'inline event handler attribute');
-  for (const s of tags(html, 'script')) if (!s.a.src) fail(page, 'inline <script>');
-  if (/<script\b[^>]*>\s*\S/i.test(html.replace(/<script\b[^>]*src=[^>]*><\/script>/gi, ''))) fail(page, 'inline script content');
+  // JSON-LD is inert data the CSP does not govern; every executable script must be a file.
+  const executable = html.replace(/<script\b[^>]*type="application\/ld\+json"[^>]*>[\s\S]*?<\/script>/gi, '');
+  for (const s of tags(executable, 'script')) if (!s.a.src) fail(page, 'inline <script>');
+  if (/<script\b[^>]*>\s*\S/i.test(executable.replace(/<script\b[^>]*src=[^>]*><\/script>/gi, ''))) fail(page, 'inline script content');
 
   // Required document structure and meta.
   const need = (cond, what) => cond || fail(page, `missing ${what}`);

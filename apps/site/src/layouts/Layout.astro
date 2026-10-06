@@ -7,12 +7,13 @@ interface Props {
   description: string;
   path: string;
   noindex?: boolean;
+  jsonLd?: Record<string, unknown>;
 }
 
-const { title, description, path, noindex = false } = Astro.props;
+const { title, description, path, noindex = false, jsonLd } = Astro.props;
 const canonical = new URL(path, SITE_URL).href;
 const ogImage = `${SITE_URL}/og.png`;
-const fullTitle = path === '/' ? title : `${title} | Agent HQ`;
+const fullTitle = title.includes('Agent HQ') ? title : `${title} | Agent HQ`;
 const current = path;
 
 // Scripts and styles are all same-origin files, so no inline hashes are needed.
@@ -37,6 +38,8 @@ const csp = [
     <meta http-equiv="Content-Security-Policy" content={csp} />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <meta name="color-scheme" content="dark light" />
+    <meta name="theme-color" content="#000000" media="(prefers-color-scheme: dark)" />
+    <meta name="theme-color" content="#ffffff" media="(prefers-color-scheme: light)" />
     <title>{fullTitle}</title>
     <meta name="description" content={description} />
     {noindex && <meta name="robots" content="noindex" />}
@@ -46,6 +49,7 @@ const csp = [
     <link rel="sitemap" href="/sitemap.xml" />
     <meta property="og:type" content="website" />
     <meta property="og:site_name" content="Agent HQ" />
+    <meta property="og:locale" content="en_US" />
     <meta property="og:title" content={fullTitle} />
     <meta property="og:description" content={description} />
     <meta property="og:url" content={canonical} />
@@ -58,6 +62,7 @@ const csp = [
     <meta name="twitter:description" content={description} />
     <meta name="twitter:image" content={ogImage} />
     <meta name="twitter:image:alt" content="Agent HQ: a local-first AI agent hub. One Rust binary, a markdown vault, your machine." />
+    {jsonLd && <script is:inline type="application/ld+json" set:html={JSON.stringify(jsonLd)} />}
     <script is:inline src="/js/theme.js"></script>
   </head>
   <body>
@@ -78,7 +83,7 @@ const csp = [
           }
           <span class="spacer"></span>
           <a href={links.repo}>GitHub</a>
-          <button type="button" class="btn btn-sm theme-toggle" data-theme-toggle aria-pressed="false" hidden>
+          <button type="button" class="btn btn-sm theme-toggle" data-theme-toggle hidden>
             Light theme
           </button>
         </nav>

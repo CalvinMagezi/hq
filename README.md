@@ -74,6 +74,8 @@ The vault is the center. Every agent reads from it and writes back to it. Switch
 
 ## Quick Start
 
+Not a developer? Give [AGENTS-SETUP.md](AGENTS-SETUP.md) to your AI coding agent and ask it to set HQ up for you.
+
 ### Prerequisites
 
 - **Rust** 1.89 or newer (2024 edition): `curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh`

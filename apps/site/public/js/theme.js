@@ -18,12 +18,14 @@
   document.addEventListener('DOMContentLoaded', function () {
     var btn = document.querySelector('[data-theme-toggle]');
     if (!btn) return;
+    // The label names the theme a click switches to, so it must follow every change.
     function sync() {
       var now = effective();
-      btn.setAttribute('aria-pressed', now === 'light' ? 'true' : 'false');
+      btn.textContent = now === 'light' ? 'Dark theme' : 'Light theme';
     }
     btn.hidden = false;
     sync();
+    window.matchMedia('(prefers-color-scheme: light)').addEventListener('change', sync);
     btn.addEventListener('click', function () {
       var next = effective() === 'light' ? 'dark' : 'light';
       root.setAttribute('data-theme', next);
