@@ -52,10 +52,12 @@ firewall rule locks out SSH. Steps 3 and 4 below are the manual alternative to
    Git commits still need an identity (`git config --global user.name` and
    `user.email` as the `hq` user). `system_info` with check `gh_auth` reports
    what HQ sees.
-5. Install a Caddyfile: `deploy/Caddyfile.production` for just the MCP endpoint,
-   or `deploy/Caddyfile` for the full stack (MCP plus the web UI). Both are
-   templates with `your-domain.com` placeholders; edit before copying to
-   `/etc/caddy/Caddyfile` and `systemctl reload caddy`.
+5. Caddy: `setup-vps.sh` already installed a loopback-only Caddyfile (the web UI proxy on
+   `127.0.0.1:4749`) and opened no web ports. Only a server that serves a public domain
+   needs `deploy/Caddyfile.production` (MCP endpoint) or `deploy/Caddyfile` (MCP plus the
+   web UI). They are templates with `your-domain.com` placeholders: edit, copy to
+   `/etc/caddy/Caddyfile`, run `ufw allow 80/tcp && ufw allow 443/tcp`, then
+   `systemctl reload caddy`. Never publish `/ws` or `/api` on a public address.
 6. `tailscale up` on the server so it is reachable from your dev machine over
    the tailnet.
 
