@@ -389,3 +389,19 @@ fn debug_output_of_config_types_never_contains_a_secret() {
         "non-secret fields stay readable"
     );
 }
+
+#[test]
+fn has_llm_key_counts_config_keys_and_conventional_env_vars() {
+    let mut config = crate::config::HqConfig::default();
+    let none = |_: &str| None;
+    assert!(!config.has_llm_key_with(none));
+
+    let env = |name: &str| (name == "OPENROUTER_API_KEY").then(|| "sk-or-test".to_string());
+    assert!(config.has_llm_key_with(env));
+
+    let blank = |name: &str| (name == "OPENROUTER_API_KEY").then(|| "  ".to_string());
+    assert!(!config.has_llm_key_with(blank));
+
+    config.anthropic_api_key = Some("sk-ant-test".into());
+    assert!(config.has_llm_key_with(none));
+}
