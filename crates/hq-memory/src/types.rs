@@ -34,18 +34,6 @@ pub struct Memory {
     pub delta_summary: Option<String>,
 }
 
-/// A node in the memory entity graph.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct EntityNode {
-    pub id: i64,
-    pub canonical: String, // lowercase unique name
-    pub display_name: String,
-    pub entity_type: String, // person, org, tool, concept, unknown
-    pub mention_count: i64,
-    pub created_at: String,
-    pub updated_at: String,
-}
-
 /// An edge between entities (co-occurrence or direct relationship).
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct EntityEdge {

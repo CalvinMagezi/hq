@@ -242,23 +242,3 @@ fn cutoff_iso(days: i64) -> String {
     let cutoff = chrono::Utc::now() - chrono::Duration::days(days);
     cutoff.to_rfc3339()
 }
-
-// ─── Temporal Query Helpers (for memory compilation) ─────────────
-
-// ─── Contradiction Detection ──────────────────────────────────────
-
-// ─── Tiered Cognitive Maintenance helpers ──────────────────────────
-
-/// An incubation suggestion row from the database.
-#[derive(Debug, Clone)]
-pub struct IncubationSuggestion {
-    pub id: i64,
-    pub from_entity: String,
-    pub to_entity: String,
-    pub relationship: String,
-    pub context_snippet: String,
-    pub confidence: f64,
-    pub status: String,
-    pub created_at: String,
-    pub promoted_at: Option<String>,
-}

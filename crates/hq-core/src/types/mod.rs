@@ -109,18 +109,6 @@ pub enum SubagentType {
 }
 
 impl SubagentType {
-    /// Default harness for this agent type.
-    pub fn default_harness(&self) -> &'static str {
-        match self {
-            Self::General => "hq",
-            Self::Explorer => "hq",
-            Self::Planner => "hq",
-            Self::Verifier => "hq",
-            Self::Coder => "hq",
-            Self::Custom(_) => "hq",
-        }
-    }
-
     /// Whether this agent type is read-only (cannot write files).
     pub fn is_read_only(&self) -> bool {
         matches!(self, Self::Explorer | Self::Planner | Self::Verifier)
