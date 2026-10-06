@@ -83,22 +83,24 @@ fn prompt_pastes_then_presses_enter() {
 #[test]
 fn invalid_keys_send_nothing() {
     let host = Host::new();
-    host.spawn(SpawnSpec::new(
+    // Raw mode and no echo: the process sees exactly the bytes that were sent.
+    host.spawn(sh(
         "k",
-        vec!["cat".into()],
-        std::env::temp_dir(),
+        "stty raw -echo; dd bs=1 count=3 2>/dev/null | od -An -tx1; sleep 30",
     ))
     .unwrap();
+    std::thread::sleep(Duration::from_millis(300));
     let err = host
         .send_keys("k", &["enter".to_string(), "--help".to_string()])
         .unwrap_err();
     assert_eq!(err.code(), "invalid_keys");
-    host.send_text("k", "marker\r").unwrap();
-    let screen = wait_until_read(&host, "k", ReadSource::Visible, "marker");
+    host.send_text("k", "abc").unwrap();
+    let screen = wait_until_read(&host, "k", ReadSource::Visible, "63");
+    let bytes: Vec<&str> = screen.split_whitespace().collect();
     assert_eq!(
-        screen.lines().filter(|l| l.contains("marker")).count(),
-        2,
-        "{screen}"
+        bytes,
+        ["61", "62", "63"],
+        "unexpected bytes reached the process"
     );
     host.kill("k").unwrap();
 }
@@ -123,7 +125,8 @@ fn long_lines_wrap_on_screen_and_rejoin_when_unwrapped() {
     spec.cols = 80;
     host.spawn(spec).unwrap();
     wait_until_read(&host, "wrap", ReadSource::Recent, "0000");
-    std::thread::sleep(Duration::from_millis(200));
+    host.wait_quiet("wrap", Duration::from_millis(300), WAIT)
+        .unwrap();
     let displayed = host.read("wrap", ReadSource::Recent, 0).unwrap();
     assert_eq!(
         displayed.lines().filter(|l| l.starts_with('0')).count(),
@@ -242,5 +245,130 @@ fn dropping_the_host_kills_its_processes() {
         }
         assert!(Instant::now() < deadline, "process {pid} survived the host");
         std::thread::sleep(Duration::from_millis(100));
+    }
+}
+
+fn pid_alive(pid: u32) -> bool {
+    std::process::Command::new("kill")
+        .args(["-0", &pid.to_string()])
+        .status()
+        .unwrap()
+        .success()
+}
+
+fn wait_dead(pid: u32) {
+    let deadline = Instant::now() + WAIT;
+    while pid_alive(pid) {
+        assert!(Instant::now() < deadline, "process {pid} is still running");
+        std::thread::sleep(Duration::from_millis(100));
+    }
+}
+
+#[test]
+fn zero_and_absurd_sizes_are_refused() {
+    let host = Host::new();
+    for (rows, cols) in [(0, 80), (24, 0), (5000, 80), (24, 5000)] {
+        let mut spec = sh("sized", "sleep 30");
+        spec.rows = rows;
+        spec.cols = cols;
+        assert_eq!(
+            host.spawn(spec).unwrap_err().code(),
+            "invalid_size",
+            "{rows}x{cols}"
+        );
+    }
+    let mut spec = sh("sized", "sleep 30");
+    spec.scrollback_rows = usize::MAX;
+    host.spawn(spec).unwrap();
+    assert_eq!(
+        host.resize("sized", 0, 0).unwrap_err().code(),
+        "invalid_size"
+    );
+    host.kill("sized").unwrap();
+}
+
+#[test]
+fn a_working_directory_that_is_not_a_directory_is_an_error() {
+    let host = Host::new();
+    for cwd in ["/no/such/dir-hq-host", "relative/dir"] {
+        let spec = SpawnSpec::new("cwd", vec!["true".into()], cwd);
+        assert_eq!(
+            host.spawn(spec).unwrap_err().code(),
+            "spawn_failed",
+            "{cwd}"
+        );
+    }
+}
+
+#[test]
+fn kill_takes_down_a_child_that_ignores_hangup_and_its_children() {
+    let host = Host::new();
+    let info = host
+        .spawn(sh(
+            "stubborn",
+            "trap '' HUP; sleep 300 & echo child=$!; wait",
+        ))
+        .unwrap();
+    let shell = info.pid.expect("pid");
+    let screen = wait_until_read(&host, "stubborn", ReadSource::Visible, "child=");
+    let child: u32 = screen
+        .split("child=")
+        .nth(1)
+        .unwrap()
+        .split_whitespace()
+        .next()
+        .unwrap()
+        .parse()
+        .unwrap();
+    host.kill("stubborn").unwrap();
+    wait_dead(shell);
+    wait_dead(child);
+}
+
+#[test]
+fn remove_kills_and_frees_the_name_even_while_someone_waits() {
+    let host = std::sync::Arc::new(Host::new());
+    let info = host.spawn(sh("busy", "sleep 300")).unwrap();
+    let pid = info.pid.expect("pid");
+    let waiter = {
+        let host = host.clone();
+        std::thread::spawn(move || host.wait_exit("busy", Duration::from_secs(60)))
+    };
+    std::thread::sleep(Duration::from_millis(200));
+    host.remove("busy").unwrap();
+    wait_dead(pid);
+    assert!(
+        waiter.join().unwrap().is_ok(),
+        "the waiter should be released by the exit"
+    );
+    host.spawn(sh("busy", "true")).unwrap();
+}
+
+#[test]
+fn a_second_kill_after_exit_signals_nothing() {
+    let host = Host::new();
+    host.spawn(sh("done", "exit 0")).unwrap();
+    host.wait_exit("done", WAIT).unwrap();
+    host.kill("done").unwrap();
+    host.kill("done").unwrap();
+}
+
+#[test]
+fn output_is_complete_the_moment_exit_is_reported() {
+    let host = Host::new();
+    for i in 0..15 {
+        let name = format!("race{i}");
+        host.spawn(sh(
+            &name,
+            "i=0; while [ $i -lt 300 ]; do echo line$i; i=$((i+1)); done; echo END-MARKER; exit 3",
+        ))
+        .unwrap();
+        assert_eq!(host.wait_exit(&name, WAIT).unwrap(), 3);
+        let text = host.read(&name, ReadSource::Recent, 0).unwrap();
+        assert!(
+            text.contains("END-MARKER"),
+            "iteration {i} lost the tail:\n{}",
+            &text[text.len().saturating_sub(200)..]
+        );
     }
 }

@@ -15,6 +15,10 @@ const MAX_NAME_LEN: usize = 32;
 const DEFAULT_ROWS: u16 = 40;
 const DEFAULT_COLS: u16 = 120;
 const DEFAULT_SCROLLBACK_ROWS: usize = 10_000;
+/// Rows and columns each must be in `1..=MAX_DIMENSION`; the screen grid is
+/// allocated up front and a zero size panics inside the emulator.
+const MAX_DIMENSION: u16 = 1000;
+const MAX_SCROLLBACK_ROWS: usize = 100_000;
 /// Pause between pasting a prompt and pressing Enter, so a TUI that handles the
 /// paste first does not swallow the Enter.
 const PROMPT_ENTER_DELAY: Duration = Duration::from_millis(150);
@@ -119,10 +123,12 @@ impl Host {
         if !valid_name(&spec.name) {
             return Err(HostError::InvalidName(spec.name));
         }
-        let mut panes = lock(&self.panes);
-        if panes.contains_key(&spec.name) {
+        check_size(spec.rows, spec.cols)?;
+        if lock(&self.panes).contains_key(&spec.name) {
             return Err(HostError::NameTaken(spec.name));
         }
+        // Start the process without holding the registry lock: looking up the
+        // program and forking can be slow and must not stall every other call.
         let pane = Pane::spawn(
             LaunchArgs {
                 argv: spec.argv,
@@ -131,9 +137,18 @@ impl Host {
                 rows: spec.rows,
                 cols: spec.cols,
             },
-            Box::new(VtEmulator::new(spec.rows, spec.cols, spec.scrollback_rows)),
+            Box::new(VtEmulator::new(
+                spec.rows,
+                spec.cols,
+                spec.scrollback_rows.min(MAX_SCROLLBACK_ROWS),
+            )),
         )?;
         let pane = Arc::new(pane);
+        let mut panes = lock(&self.panes);
+        if panes.contains_key(&spec.name) {
+            pane.kill();
+            return Err(HostError::NameTaken(spec.name));
+        }
         panes.insert(spec.name.clone(), pane.clone());
         Ok(info_of(&spec.name, pane.as_ref()))
     }
@@ -149,12 +164,15 @@ impl Host {
             .collect()
     }
 
-    /// Forgets an agent. A running process is killed.
+    /// Forgets an agent and stops its process and the processes it started.
     pub fn remove(&self, name: &str) -> Result<(), HostError> {
-        lock(&self.panes)
+        let pane = lock(&self.panes)
             .remove(name)
-            .map(|_| ())
-            .ok_or_else(|| HostError::NotFound(name.to_string()))
+            .ok_or_else(|| HostError::NotFound(name.to_string()))?;
+        // Other threads may still hold the pane (a caller waiting on it), so
+        // stopping it cannot be left to the last reference being dropped.
+        pane.kill();
+        Ok(())
     }
 
     /// The last `lines` lines of the chosen view (all of them when `lines` is 0).
@@ -215,6 +233,7 @@ impl Host {
     }
 
     pub fn resize(&self, name: &str, rows: u16, cols: u16) -> Result<(), HostError> {
+        check_size(rows, cols)?;
         self.live_pane(name)?.resize(rows, cols)
     }
 
@@ -234,6 +253,19 @@ impl Host {
     pub fn kill(&self, name: &str) -> Result<(), HostError> {
         self.pane(name)?.kill();
         Ok(())
+    }
+}
+
+fn check_size(rows: u16, cols: u16) -> Result<(), HostError> {
+    let ok = |n: u16| (1..=MAX_DIMENSION).contains(&n);
+    if ok(rows) && ok(cols) {
+        Ok(())
+    } else {
+        Err(HostError::InvalidSize {
+            rows,
+            cols,
+            max: MAX_DIMENSION,
+        })
     }
 }
 

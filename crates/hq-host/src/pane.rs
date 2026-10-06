@@ -2,6 +2,8 @@
 
 use crate::emu::{Emulator, Row};
 use crate::error::HostError;
+use nix::sys::signal::{Signal, killpg};
+use nix::unistd::Pid;
 use portable_pty::{ChildKiller, CommandBuilder, MasterPty, PtySize, native_pty_system};
 use std::io::{Read, Write};
 use std::path::PathBuf;
@@ -9,6 +11,11 @@ use std::sync::{Arc, Condvar, Mutex, MutexGuard};
 use std::time::{Duration, Instant};
 
 const READ_CHUNK: usize = 16 * 1024;
+/// After SIGHUP, how long a process group gets to exit before SIGKILL.
+const KILL_GRACE: Duration = Duration::from_secs(2);
+/// After the process exits, how long to wait for the reader to drain what it
+/// printed last. Descendants that keep the terminal open must not block this.
+const DRAIN_GRACE: Duration = Duration::from_millis(300);
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PaneStatus {
@@ -20,6 +27,7 @@ struct State {
     last_output: Instant,
     bytes: u64,
     exit: Option<u32>,
+    reader_done: bool,
 }
 
 struct Shared {
@@ -30,6 +38,28 @@ struct Shared {
 
 fn lock<T>(m: &Mutex<T>) -> MutexGuard<'_, T> {
     m.lock().unwrap_or_else(|poisoned| poisoned.into_inner())
+}
+
+impl Shared {
+    /// Blocks until the process exits, returning its exit code.
+    fn wait_exit(&self, timeout: Duration) -> Result<u32, HostError> {
+        let deadline = Instant::now() + timeout;
+        let mut state = lock(&self.state);
+        loop {
+            if let Some(code) = state.exit {
+                return Ok(code);
+            }
+            let left = deadline.saturating_duration_since(Instant::now());
+            if left.is_zero() {
+                return Err(HostError::Timeout(timeout));
+            }
+            state = self
+                .changed
+                .wait_timeout(state, left)
+                .unwrap_or_else(|p| p.into_inner())
+                .0;
+        }
+    }
 }
 
 pub(crate) struct Pane {
@@ -62,6 +92,14 @@ impl Pane {
             .argv
             .split_first()
             .ok_or_else(|| spawn_err("empty command".into()))?;
+        // The pty library quietly starts the process in the home directory when
+        // the working directory is missing, so check it here.
+        if !args.cwd.is_absolute() || !args.cwd.is_dir() {
+            return Err(spawn_err(format!(
+                "working directory {} is not an existing absolute directory",
+                args.cwd.display()
+            )));
+        }
 
         let pair = native_pty_system()
             .openpty(PtySize {
@@ -70,6 +108,16 @@ impl Pane {
                 pixel_width: 0,
                 pixel_height: 0,
             })
+            .map_err(|e| spawn_err(e.to_string()))?;
+        // Take both ends before starting the process, so a failure here cannot
+        // leave an untracked child behind.
+        let reader = pair
+            .master
+            .try_clone_reader()
+            .map_err(|e| spawn_err(e.to_string()))?;
+        let writer = pair
+            .master
+            .take_writer()
             .map_err(|e| spawn_err(e.to_string()))?;
         let mut builder = CommandBuilder::new(program);
         builder.args(rest);
@@ -85,14 +133,6 @@ impl Pane {
         drop(pair.slave);
         let pid = child.process_id();
         let killer = child.clone_killer();
-        let reader = pair
-            .master
-            .try_clone_reader()
-            .map_err(|e| spawn_err(e.to_string()))?;
-        let writer = pair
-            .master
-            .take_writer()
-            .map_err(|e| spawn_err(e.to_string()))?;
 
         let shared = Arc::new(Shared {
             emu: Mutex::new(emu),
@@ -100,6 +140,7 @@ impl Pane {
                 last_output: Instant::now(),
                 bytes: 0,
                 exit: None,
+                reader_done: false,
             }),
             changed: Condvar::new(),
         });
@@ -171,29 +212,30 @@ impl Pane {
         Ok(())
     }
 
+    /// Stops the process and everything it started: SIGHUP to the process
+    /// group (the agent is its own session leader), then SIGKILL to the group
+    /// if the leader is still alive after a grace period. Does nothing once
+    /// the process has exited, so a recycled pid is never signalled.
     pub(crate) fn kill(&self) {
-        let _ = lock(&self.killer).kill();
+        if lock(&self.shared.state).exit.is_some() {
+            return;
+        }
+        let Some(pid) = self.pid.and_then(|p| i32::try_from(p).ok()) else {
+            let _ = lock(&self.killer).kill();
+            return;
+        };
+        let group = Pid::from_raw(pid);
+        let _ = killpg(group, Signal::SIGHUP);
+        let shared = self.shared.clone();
+        std::thread::spawn(move || {
+            if shared.wait_exit(KILL_GRACE).is_err() {
+                let _ = killpg(group, Signal::SIGKILL);
+            }
+        });
     }
 
-    /// Blocks until the process exits, returning its exit code.
     pub(crate) fn wait_exit(&self, timeout: Duration) -> Result<u32, HostError> {
-        let deadline = Instant::now() + timeout;
-        let mut state = lock(&self.shared.state);
-        loop {
-            if let Some(code) = state.exit {
-                return Ok(code);
-            }
-            let left = deadline.saturating_duration_since(Instant::now());
-            if left.is_zero() {
-                return Err(HostError::Timeout(timeout));
-            }
-            state = self
-                .shared
-                .changed
-                .wait_timeout(state, left)
-                .unwrap_or_else(|p| p.into_inner())
-                .0;
-        }
+        self.shared.wait_exit(timeout)
     }
 
     /// Blocks until the pane has printed nothing for `quiet`, or exits.
@@ -221,9 +263,7 @@ impl Pane {
 
 impl Drop for Pane {
     fn drop(&mut self) {
-        if self.status() == PaneStatus::Running {
-            self.kill();
-        }
+        self.kill();
     }
 }
 
@@ -241,13 +281,31 @@ fn spawn_reader(mut reader: Box<dyn Read + Send>, shared: Arc<Shared>) {
             drop(state);
             shared.changed.notify_all();
         }
+        lock(&shared.state).reader_done = true;
+        shared.changed.notify_all();
     });
 }
 
 fn spawn_waiter(mut child: Box<dyn portable_pty::Child + Send + Sync>, shared: Arc<Shared>) {
     std::thread::spawn(move || {
         let code = child.wait().map(|s| s.exit_code()).unwrap_or(u32::MAX);
-        lock(&shared.state).exit = Some(code);
+        // Publish the exit only after the reader has taken the last output, so
+        // a caller that sees the exit also sees everything the process printed.
+        let deadline = Instant::now() + DRAIN_GRACE;
+        let mut state = lock(&shared.state);
+        while !state.reader_done {
+            let left = deadline.saturating_duration_since(Instant::now());
+            if left.is_zero() {
+                break;
+            }
+            state = shared
+                .changed
+                .wait_timeout(state, left)
+                .unwrap_or_else(|p| p.into_inner())
+                .0;
+        }
+        state.exit = Some(code);
+        drop(state);
         shared.changed.notify_all();
     });
 }

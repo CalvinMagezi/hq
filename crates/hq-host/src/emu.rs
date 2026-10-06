@@ -40,9 +40,15 @@ impl VtEmulator {
         screen
             .rows(0, cols)
             .enumerate()
-            .map(|(i, text)| Row {
-                text: text.trim_end().to_string(),
-                wrapped: screen.row_wrapped(i as u16),
+            .map(|(i, text)| {
+                let wrapped = screen.row_wrapped(i as u16);
+                // A wrapped row's trailing spaces belong to the line it continues.
+                let text = if wrapped {
+                    text
+                } else {
+                    text.trim_end().to_string()
+                };
+                Row { text, wrapped }
             })
             .take(rows as usize)
             .collect()
@@ -134,6 +140,15 @@ mod tests {
         let rows = e.history();
         assert_eq!(rows.len(), 3);
         assert!(rows[0].wrapped && rows[1].wrapped && !rows[2].wrapped);
+    }
+
+    #[test]
+    fn spaces_at_a_wrap_boundary_are_kept() {
+        let mut e = fed(5, 4, "foo bar");
+        let rows = e.history();
+        assert_eq!(rows[0].text, "foo ");
+        let joined: String = rows.iter().map(|r| r.text.as_str()).collect();
+        assert_eq!(joined, "foo bar");
     }
 
     #[test]

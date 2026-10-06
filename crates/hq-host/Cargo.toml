@@ -8,8 +8,8 @@ description = "Agent HQ's built-in host for long-lived coding agents (pty hostin
 [dependencies]
 portable-pty = "0.9"
 vt100 = "0.16"
+nix = { version = "0.28", default-features = false, features = ["signal"] }
 thiserror = { workspace = true }
-tracing = { workspace = true }
 
 [dev-dependencies]
 tempfile = "3"

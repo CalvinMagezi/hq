@@ -2409,10 +2409,10 @@ dependencies = [
 name = "hq-host"
 version = "0.9.1"
 dependencies = [
+ "nix",
  "portable-pty",
  "tempfile",
  "thiserror 2.0.18",
- "tracing",
  "vt100",
 ]
 

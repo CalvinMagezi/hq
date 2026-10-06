@@ -12,6 +12,8 @@ pub enum HostError {
     InvalidKey(String),
     #[error("could not start '{command}': {detail}")]
     Spawn { command: String, detail: String },
+    #[error("invalid size {rows}x{cols}: rows and columns must each be 1 to {max}")]
+    InvalidSize { rows: u16, cols: u16, max: u16 },
     #[error("i/o error: {0}")]
     Io(String),
     #[error("timed out after {0:?}")]
@@ -29,6 +31,7 @@ impl HostError {
             HostError::InvalidName(_) => "invalid_name",
             HostError::InvalidKey(_) => "invalid_keys",
             HostError::Spawn { .. } => "spawn_failed",
+            HostError::InvalidSize { .. } => "invalid_size",
             HostError::Io(_) => "io",
             HostError::Timeout(_) => "timeout",
             HostError::Exited(_) => "agent_exited",
