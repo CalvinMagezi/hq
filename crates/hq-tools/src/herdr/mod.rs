@@ -9,6 +9,7 @@
 //! Every call is blocking and bounded by a deadline. `HerdrError::Unreachable`
 //! means "could not ask"; callers must not read it as "the agent is gone".
 
+mod backend;
 pub mod tools;
 mod transport;
 
@@ -18,8 +19,11 @@ use hq_core::config::{
 };
 use serde::Serialize;
 use serde_json::Value;
+use std::sync::Arc;
 use std::time::{Duration, Instant};
 use transport::{RawOutput, Transport};
+
+pub use backend::{Host, HostBackend};
 
 /// Herdr rejects explicit timeouts outside this window.
 const MIN_WAIT_MS: u64 = 3_000;
@@ -231,20 +235,20 @@ pub(crate) async fn blocking<T: Send + 'static>(
 }
 
 /// The host a caller named, or the configured default.
-pub fn host(name: Option<&str>) -> anyhow::Result<HerdrHost> {
+pub fn host(name: Option<&str>) -> anyhow::Result<Host> {
     let cfg = HqConfig::load()
         .context("loading config for herdr hosts")?
         .herdr;
-    HerdrHost::from_config(&cfg, name.unwrap_or(&cfg.default_host))
+    Ok(Arc::new(HerdrHost::from_config(&cfg, name.unwrap_or(&cfg.default_host))?))
 }
 
 /// The machine HQ itself runs on.
-pub fn local() -> anyhow::Result<HerdrHost> {
+pub fn local() -> anyhow::Result<Host> {
     host(Some(LOCAL_HOST))
 }
 
 /// This machine plus every configured remote.
-pub fn all_hosts() -> anyhow::Result<Vec<HerdrHost>> {
+pub fn all_hosts() -> anyhow::Result<Vec<Host>> {
     let cfg = HqConfig::load()
         .context("loading config for herdr hosts")?
         .herdr;
@@ -252,7 +256,7 @@ pub fn all_hosts() -> anyhow::Result<Vec<HerdrHost>> {
     names.extend(cfg.hosts.keys().cloned());
     names
         .iter()
-        .map(|n| HerdrHost::from_config(&cfg, n))
+        .map(|n| HerdrHost::from_config(&cfg, n).map(|h| Arc::new(h) as Host))
         .collect()
 }
 

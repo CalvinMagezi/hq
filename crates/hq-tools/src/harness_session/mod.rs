@@ -20,7 +20,7 @@ mod launch;
 mod origin;
 
 use crate::herdr::{
-    self, AgentInfo, AgentStatus, HerdrError, HerdrHost, LaunchRequest, Launched, PromptOutcome,
+    self, AgentInfo, AgentStatus, HerdrError, Host, HostBackend, LaunchRequest, Launched, PromptOutcome,
 };
 use anyhow::{Result, bail};
 use hq_db::Database;
@@ -69,7 +69,7 @@ pub fn poll_hosts(rows: &[HarnessSessionRow]) -> HostPoll {
 
 pub fn poll_hosts_with(
     rows: &[HarnessSessionRow],
-    resolve: impl Fn(&str) -> anyhow::Result<HerdrHost>,
+    resolve: impl Fn(&str) -> anyhow::Result<Host>,
 ) -> HostPoll {
     let mut polled = HostPoll::new();
     for row in rows {

@@ -38,7 +38,7 @@ pub(super) fn build_args(
 
 /// Everything `launch_session` needs beyond the harness spec.
 pub(super) struct Launch<'a> {
-    pub(super) host: HerdrHost,
+    pub(super) host: Host,
     pub(super) session_id: &'a str,
     pub(super) cwd: &'a str,
     pub(super) label: &'a str,
@@ -90,7 +90,7 @@ impl Drop for InFlight {
 /// `Launch` without borrows, so a launch can run on a task the caller's future
 /// does not own.
 pub(super) struct OwnedLaunch {
-    host: HerdrHost,
+    host: Host,
     session_id: String,
     cwd: String,
     label: String,
@@ -325,7 +325,7 @@ pub(super) struct Settled {
 }
 
 pub(super) fn settle_startup(
-    host: &HerdrHost,
+    host: &dyn HostBackend,
     name: &str,
     trust_pattern: Option<&str>,
     launched: &Launched,
@@ -465,7 +465,7 @@ pub async fn spawn_with(
 pub(crate) async fn spawn_on(
     vault_path: &Path,
     db: &Arc<Database>,
-    host: HerdrHost,
+    host: Host,
     req: SpawnRequest<'_>,
 ) -> Result<Value> {
     let harness = resolve(req.harness)?;
