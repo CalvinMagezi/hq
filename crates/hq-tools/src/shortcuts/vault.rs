@@ -236,6 +236,8 @@ impl HqTool for VaultLogShortcut {
             Err(e) => return Err(e.into()),
         };
         file.write_all(line.as_bytes()).await?;
+        // tokio files write on a blocking thread; dropping without a flush can lose the line.
+        file.flush().await?;
 
         Ok(json!({"logged": true}))
     }
