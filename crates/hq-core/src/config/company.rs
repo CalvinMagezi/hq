@@ -12,8 +12,6 @@ pub struct CompanyConfig {
     pub listeners: Vec<ListenerDef>,
     #[serde(default)]
     pub connectors: Vec<ConnectorBinding>,
-    #[serde(default)]
-    pub budget: CompanyBudget,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -45,27 +43,6 @@ pub struct CompanyIdentity {
     pub role: String,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct CompanyBudget {
-    #[serde(default)]
-    pub monthly_usd: f64,
-    #[serde(default = "default_alert_at")]
-    pub alert_at: f64,
-}
-
-fn default_alert_at() -> f64 {
-    0.8
-}
-
-impl Default for CompanyBudget {
-    fn default() -> Self {
-        Self {
-            monthly_usd: 0.0,
-            alert_at: default_alert_at(),
-        }
-    }
-}
-
 impl CompanyConfig {
     pub fn pending_emails_path(&self, vault_path: &Path) -> PathBuf {
         vault_path.join(&self.vault_prefix).join("PendingEmails")
@@ -93,10 +70,6 @@ mod tests {
                 vault_prefix: "Notebooks/Companies/northwind".into(),
                 listeners: vec![],
                 connectors: vec![],
-                budget: CompanyBudget {
-                    monthly_usd: 50.0,
-                    alert_at: 0.8,
-                },
             },
             CompanyConfig {
                 id: "acme".into(),
@@ -108,10 +81,6 @@ mod tests {
                 vault_prefix: "Notebooks/Companies/acme".into(),
                 listeners: vec![],
                 connectors: vec![],
-                budget: CompanyBudget {
-                    monthly_usd: 30.0,
-                    alert_at: 0.8,
-                },
             },
         ]
     }
@@ -140,6 +109,9 @@ connectors:
 flows:
   email-reply: inbox-lieutenant-send
   invoice-send: northwind-invoice
+budget:
+  monthly_usd: 50.0
+  alert_at: 0.8
 "#;
         let c: CompanyConfig = serde_yaml::from_str(yaml).unwrap();
         assert_eq!(c.listeners.len(), 1);
