@@ -1,6 +1,6 @@
 import { hqJson } from './hqAuth'
 
-export interface SettingsBackend {
+interface SettingsBackend {
   name: string
   kind: string | null
   model: string | null

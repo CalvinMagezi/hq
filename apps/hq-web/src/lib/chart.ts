@@ -1,8 +1,8 @@
 // Renders ```chart fenced blocks to inline SVG. Format: docs/CHART_BLOCKS.md.
 
-export type ChartType = 'line' | 'bar' | 'pie' | 'donut'
+type ChartType = 'line' | 'bar' | 'pie' | 'donut'
 
-export interface ChartSeries {
+interface ChartSeries {
   name: string
   values: number[]
 }
@@ -26,7 +26,7 @@ const MAX_TEXT = 120
 const MAX_TICK_LABEL = 10
 
 // Existing theme variables only, so the chart follows the app theme.
-export const SERIES_COLORS = [
+const SERIES_COLORS = [
   'var(--accent-blue)',
   'var(--accent-green)',
   'var(--accent-amber)',

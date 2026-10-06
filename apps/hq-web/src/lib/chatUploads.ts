@@ -10,7 +10,7 @@ export interface ChatAttachment {
 
 const BYTES_PER_MB = 1024 * 1024
 // Mirrors the server's caps in crates/hq-web/src/chat_uploads.rs.
-export const MAX_UPLOAD_BYTES = 25 * BYTES_PER_MB
+const MAX_UPLOAD_BYTES = 25 * BYTES_PER_MB
 export const MAX_ATTACHMENTS = 10
 
 // The server appends this to a saved user message; an unclosed tag is a preview cut mid-marker.

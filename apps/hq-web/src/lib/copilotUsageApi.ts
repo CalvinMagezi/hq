@@ -1,7 +1,7 @@
 import { queryOptions } from '@tanstack/react-query'
 import { hqJson } from './hqAuth'
 
-export interface CopilotQuota {
+interface CopilotQuota {
   login: string | null
   plan: string | null
   sku: string | null
@@ -14,7 +14,7 @@ export interface CopilotQuota {
   fetched_at: string
 }
 
-export interface BurnWindow {
+interface BurnWindow {
   window_hours: number
   credits_used: number | null
   per_hour: number | null

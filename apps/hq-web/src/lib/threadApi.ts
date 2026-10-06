@@ -35,7 +35,7 @@ function toThread(t: ApiThread): Thread {
 }
 
 /** One page of history; a full page means older messages may exist. */
-export const MESSAGE_PAGE_SIZE = 50
+const MESSAGE_PAGE_SIZE = 50
 
 /** A tool call as the server saved it with its reply (arguments and result are capped and redacted). */
 interface ApiToolStep {

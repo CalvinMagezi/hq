@@ -17,7 +17,7 @@ interface Props {
 const SKELETON_WIDTHS = ['w-3/4', 'w-1/2', 'w-5/6', 'w-2/3', 'w-1/3']
 
 /** Placeholder lines shown until the first screen read answers, which can take seconds on a remote host. */
-export function TerminalSkeleton() {
+function TerminalSkeleton() {
   return (
     <div role="status" aria-label="Loading terminal output" data-testid="terminal-skeleton" className="flex flex-col gap-2 animate-pulse">
       {SKELETON_WIDTHS.map((w) => (

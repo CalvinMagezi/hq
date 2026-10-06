@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useRef, useState } from 'react'
+import React, { useEffect, useRef, useState } from 'react'
 import { getVaultRoot } from '~/lib/vaultApi'
 
 export interface CopyMenuState {
@@ -107,45 +107,4 @@ export function CopyPathMenu({ menu, onClose }: { menu: CopyMenuState | null; on
             </button>
         </div>
     )
-}
-
-/** Long-press (touch) / long-right-click-free handler factory. */
-export function useLongPress(onLongPress: (x: number, y: number) => void, ms = 500) {
-    const timer = useRef<ReturnType<typeof setTimeout> | null>(null)
-    const fired = useRef(false)
-
-    const cancel = useCallback(() => {
-        if (timer.current) clearTimeout(timer.current)
-        timer.current = null
-    }, [])
-
-    const onTouchStart = useCallback((e: React.TouchEvent) => {
-        fired.current = false
-        const { clientX, clientY } = e.touches[0]
-        cancel()
-        timer.current = setTimeout(() => {
-            fired.current = true
-            onLongPress(clientX, clientY)
-        }, ms)
-    }, [onLongPress, ms, cancel])
-
-    const onTouchMove = useCallback(() => cancel(), [cancel])
-    const onTouchEnd = useCallback(() => cancel(), [cancel])
-
-    // Swallow the synthetic click that follows a long-press so cards don't navigate
-    const onClickCapture = useCallback((e: React.MouseEvent) => {
-        if (fired.current) {
-            e.preventDefault()
-            e.stopPropagation()
-            fired.current = false
-        }
-    }, [])
-
-    // Desktop convenience: right-click opens the same menu
-    const onContextMenu = useCallback((e: React.MouseEvent) => {
-        e.preventDefault()
-        onLongPress(e.clientX, e.clientY)
-    }, [onLongPress])
-
-    return { onTouchStart, onTouchMove, onTouchEnd, onClickCapture, onContextMenu }
 }

@@ -3,7 +3,7 @@ import { MAX_ATTACHMENTS, isPreviewableImage, rejectReason, uploadChatFile, type
 import type { PendingAttachment } from './AttachmentChips'
 
 // A chat that does not exist yet (the first message creates it) keeps its draft here.
-export const NEW_CHAT_KEY = 'new'
+const NEW_CHAT_KEY = 'new'
 const TEXT_STORAGE_KEY = 'hq.chat.drafts'
 
 interface Draft {
