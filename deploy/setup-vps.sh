@@ -40,6 +40,25 @@ echo "=== Installing Herdr (coding-agent runtime) ==="
 # Herdr verifies its own download against a SHA-256 from its release manifest.
 curl -fsSL https://herdr.dev/install.sh | HERDR_INSTALL_DIR=/usr/local/bin sh
 
+echo "=== Making Caddy loopback-only ==="
+# The package ships a default site on :80. Replace it with the HQ web UI proxy bound to
+# 127.0.0.1, which `tailscale serve` then publishes to your tailnet only.
+if [ ! -s /etc/caddy/Caddyfile ] || grep -q '^:80 {' /etc/caddy/Caddyfile; then
+  cat > /etc/caddy/Caddyfile <<'CADDY'
+# HQ web UI. Binds to loopback only; `tailscale serve` publishes it to the tailnet.
+:4749 {
+	bind 127.0.0.1
+
+	reverse_proxy localhost:5678 {
+		transport http {
+			versions 1.1
+		}
+	}
+}
+CADDY
+  systemctl reload caddy || systemctl restart caddy
+fi
+
 echo "=== Creating hq user and directories ==="
 useradd -r -s /usr/sbin/nologin -d /opt/hq hq || echo "User hq already exists"
 mkdir -p /opt/hq/.vault /opt/hq/data
@@ -53,8 +72,8 @@ echo "=== Configuring firewall ==="
 ufw default deny incoming
 ufw default allow outgoing
 ufw allow 22/tcp comment 'SSH'
-ufw allow 80/tcp comment 'HTTP redirect'
-ufw allow 443/tcp comment 'HTTPS'
+# No public web ports: the web UI is reached over Tailscale (see deploy/README.md).
+# Only a server that serves a public domain needs: ufw allow 80/tcp && ufw allow 443/tcp
 # Tailscale needs UDP 41641
 ufw allow 41641/udp comment 'Tailscale'
 echo "y" | ufw enable
@@ -78,4 +97,5 @@ echo "     'Pull-based updates'). It installs the hq binary, units and updater."
 echo "     Building from source instead: copy the binary to /usr/local/bin/hq and"
 echo "     install deploy/hq.service and deploy/herdr.service by hand."
 echo "  2. Run: tailscale up"
-echo "  3. Install a Caddyfile from deploy/"
+echo "  3. Publish the web UI to your tailnet: tailscale serve --bg --https=8443 http://127.0.0.1:4749"
+echo "     then open https://<this-host>.<your-tailnet>.ts.net:8443/ (see deploy/README.md, Tailscale)."
