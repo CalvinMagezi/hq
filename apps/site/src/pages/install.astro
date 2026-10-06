@@ -27,6 +27,7 @@ const tsOff = 'sudo tailscale serve --https=8443 off';
 const npx = installChannels.npx;
 const curl = installChannels.curl;
 const brew = installChannels.brew;
+const docker = installChannels.docker;
 ---
 
 <Layout
@@ -39,7 +40,7 @@ const brew = installChannels.brew;
       <span class="eyebrow">Install</span>
       <h1>Install Agent HQ</h1>
       <p class="lede prose">
-        There are six working ways in. The quickest is one command that downloads a verified release. Building from source runs on Linux and macOS. The server path
+        There are seven working ways in. The quickest is one command that downloads a verified release. Building from source runs on Linux and macOS. The server path
         installs signed releases and updates itself, and it is Linux only. Tailscale is the
         optional way to open the web UI from your phone.
       </p>
@@ -48,6 +49,7 @@ const brew = installChannels.brew;
           <li><a href="#script">Install script</a></li>
           <li><a href="#homebrew">Homebrew</a></li>
           <li><a href="#npx">npx installer</a></li>
+          <li><a href="#docker">Docker</a></li>
           <li><a href="#windows">Windows (WSL2)</a></li>
           <li><a href="#source">Build from source</a></li>
           <li><a href="#server">Server with signed releases</a></li>
@@ -108,6 +110,25 @@ const brew = installChannels.brew;
             </p>
             <CodeBlock id="npx-cmd" label="npx" code={npx.command} />
             <p>Then run <code>hq install</code>, add an API key with <code>hq env</code>, and check with <code>hq doctor</code>.</p>
+          </div>
+        </section>
+      )
+    }
+    {
+      docker.available && (
+        <section class="doc-section" id="docker" aria-labelledby="docker-h">
+          <h2 id="docker-h">{docker.title}</h2>
+          <div class="prose">
+            <p>
+              A multi-arch image (Linux x86_64 and ARM) assembled from the signed release, published to the GitHub
+              Container Registry. The server inside binds a public address, so HQ requires a web token: the first
+              run prints a link that carries it, once. The port is published on <code>127.0.0.1</code> only. Add
+              <code>-e HQ_OPENROUTER_API_KEY=...</code> (or another provider key) to give it a model. State lives in the
+              <code>hq-data</code> volume. Read the <a href="https://github.com/CalvinMagezi/hq/blob/main/docs/DOCKER.md">Docker guide</a>
+              for the sandbox note, backups and Tailscale.
+            </p>
+            <CodeBlock id="docker-cmd" label="Shell" code={docker.command} />
+            <p>Then run <code>docker logs hq</code> and open the link it prints.</p>
           </div>
         </section>
       )
@@ -289,7 +310,6 @@ const brew = installChannels.brew;
         </p>
         <ul class="facts">
           <li>Prebuilt binaries for Intel Macs, and a native Windows build. Windows runs HQ through WSL2 today.</li>
-          <li>A Docker image.</li>
         </ul>
       </div>
     </section>
