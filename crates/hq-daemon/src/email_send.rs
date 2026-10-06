@@ -37,7 +37,7 @@ pub async fn send_via_company(company_id: &str, to: &str, subject: &str, body: &
 #[cfg(test)]
 mod tests {
     use super::*;
-    use hq_core::config::{CompanyBudget, CompanyConfig, CompanyIdentity, ConnectorBinding};
+    use hq_core::config::{CompanyConfig, CompanyIdentity, ConnectorBinding};
 
     fn company(id: &str, connectors: Vec<ConnectorBinding>) -> CompanyConfig {
         CompanyConfig {
@@ -50,7 +50,6 @@ mod tests {
             vault_prefix: format!("Notebooks/Companies/{id}"),
             listeners: vec![],
             connectors,
-            budget: CompanyBudget::default(),
         }
     }
 
