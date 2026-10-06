@@ -1,6 +1,6 @@
 //! The control socket, exercised through real sockets and real processes.
 
-use hq_host::{Client, ClientError, Host, Server, socket_path};
+use hq_host::{Client, ClientError, Host, Limits, Server, socket_path};
 use serde_json::{Value, json};
 use std::io::{Read, Write};
 use std::os::unix::fs::PermissionsExt;
@@ -50,6 +50,7 @@ impl Drop for Running {
 
 fn raw(dir: &Path, line: &str) -> Value {
     let mut s = UnixStream::connect(socket_path(dir)).unwrap();
+    s.set_read_timeout(Some(WAIT)).unwrap();
     s.write_all(line.as_bytes()).unwrap();
     s.write_all(b"\n").unwrap();
     let mut buf = Vec::new();
@@ -271,4 +272,117 @@ fn host_stop_ends_serving_and_removes_the_socket() {
     c.call("host.stop", json!({})).unwrap();
     host.thread.take().unwrap().join().unwrap();
     assert!(!socket_path(&host.run_dir()).exists());
+}
+
+fn start_with(limits: Limits) -> Running {
+    let dir = tempfile::tempdir().unwrap();
+    let server =
+        Server::bind_with_limits(&dir.path().join("run"), Arc::new(Host::new()), limits).unwrap();
+    let stop = server.stop_handle();
+    let thread = std::thread::spawn(move || server.serve());
+    Running {
+        dir,
+        stop,
+        thread: Some(thread),
+    }
+}
+
+#[test]
+fn a_huge_read_is_cut_to_a_tail_that_fits_and_the_connection_stays_in_sync() {
+    let host = Running::start();
+    let mut c = host.client();
+    let script = "i=0; while [ $i -lt 3000 ]; do echo line$i-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx; i=$((i+1)); done; echo THE-END; sleep 30";
+    let mut params = spawn_params("big", script);
+    params["cols"] = json!(1000);
+    c.call("agent.spawn", params).unwrap();
+    read_until(&mut c, "big", "THE-END");
+    let read = c
+        .call("agent.read", json!({ "name": "big", "source": "recent" }))
+        .unwrap();
+    assert_eq!(read["truncated"], true);
+    let text = read["text"].as_str().unwrap();
+    assert!(text.len() < hq_host::MAX_LINE_BYTES && text.contains("THE-END"));
+    // The next call must still get its own reply.
+    assert_eq!(c.call("host.status", json!({})).unwrap()["agents"], 1);
+    c.call("agent.kill", json!({ "name": "big" })).unwrap();
+}
+
+#[test]
+fn stop_wakes_the_server_even_if_the_socket_file_is_gone() {
+    let mut host = Running::start();
+    std::fs::remove_file(socket_path(&host.run_dir())).unwrap();
+    host.stop.stop();
+    let thread = host.thread.take().unwrap();
+    let deadline = Instant::now() + WAIT;
+    while !thread.is_finished() {
+        assert!(
+            Instant::now() < deadline,
+            "serve() did not return after stop"
+        );
+        std::thread::sleep(Duration::from_millis(50));
+    }
+    thread.join().unwrap();
+}
+
+#[test]
+fn host_stop_answers_before_the_server_goes_away() {
+    for _ in 0..20 {
+        let mut host = Running::start();
+        let mut c = host.client();
+        assert!(
+            c.call("host.stop", json!({})).is_ok(),
+            "the reply to host.stop was lost"
+        );
+        host.thread.take().unwrap().join().unwrap();
+    }
+}
+
+#[test]
+fn connections_are_capped_and_idle_ones_time_out_before_hello() {
+    let limits = Limits {
+        max_connections: 3,
+        auth_timeout: Duration::from_millis(400),
+        ..Limits::default()
+    };
+    let host = start_with(limits);
+    let idle: Vec<UnixStream> = (0..3)
+        .map(|_| {
+            let s = UnixStream::connect(socket_path(&host.run_dir())).unwrap();
+            s.set_read_timeout(Some(WAIT)).unwrap();
+            s
+        })
+        .collect();
+    std::thread::sleep(Duration::from_millis(100));
+    let mut over = UnixStream::connect(socket_path(&host.run_dir())).unwrap();
+    over.set_read_timeout(Some(WAIT)).unwrap();
+    let mut out = String::new();
+    over.read_to_string(&mut out).ok();
+    assert!(out.contains("too_many_connections"), "{out:?}");
+    // The silent connections are dropped after the auth timeout, freeing slots.
+    std::thread::sleep(Duration::from_millis(900));
+    for mut s in idle {
+        let mut buf = [0u8; 1];
+        assert_eq!(
+            s.read(&mut buf).unwrap_or(0),
+            0,
+            "idle connection should have been closed"
+        );
+    }
+    host.client().call("host.status", json!({})).unwrap();
+}
+
+#[test]
+fn only_one_of_two_simultaneous_hosts_wins_the_directory() {
+    let dir = tempfile::tempdir().unwrap();
+    let run = dir.path().join("run");
+    let results: Vec<_> = (0..8)
+        .map(|_| {
+            let run = run.clone();
+            std::thread::spawn(move || Server::bind(&run, Arc::new(Host::new())).map(|s| (s, ())))
+        })
+        .collect::<Vec<_>>()
+        .into_iter()
+        .map(|t| t.join().unwrap())
+        .collect();
+    assert_eq!(results.iter().filter(|r| r.is_ok()).count(), 1);
 }

@@ -9,6 +9,9 @@ use std::os::unix::net::UnixStream;
 use std::path::Path;
 use std::time::Duration;
 
+/// How long the handshake may take before the host is taken for wedged.
+const HELLO_TIMEOUT: Duration = Duration::from_secs(10);
+
 #[derive(Debug, thiserror::Error)]
 pub enum ClientError {
     #[error("host unreachable: {0}")]
@@ -32,6 +35,8 @@ pub struct Client {
     reader: BufReader<UnixStream>,
     writer: UnixStream,
     next_id: u64,
+    /// Set when a reply could not be read whole; the stream is out of step.
+    broken: bool,
 }
 
 impl Client {
@@ -52,11 +57,14 @@ impl Client {
             reader: BufReader::new(stream),
             writer,
             next_id: 1,
+            broken: false,
         };
+        client.set_timeout(Some(HELLO_TIMEOUT));
         client.call(
             "hello",
             json!({ "protocol_version": PROTOCOL_VERSION, "token": token }),
         )?;
+        client.set_timeout(None);
         Ok(client)
     }
 
@@ -65,6 +73,11 @@ impl Client {
     }
 
     pub fn call(&mut self, method: &str, params: Value) -> Result<Value, ClientError> {
+        if self.broken {
+            return Err(ClientError::Unreachable(
+                "connection lost sync after an oversized reply; reconnect".into(),
+            ));
+        }
         let id = self.next_id;
         self.next_id += 1;
         let req = Request {
@@ -92,6 +105,14 @@ impl Client {
             }
             Err(e) => return Err(ClientError::Unreachable(e.to_string())),
             Ok(_) => {}
+        }
+        // A reply cut off at the limit leaves its tail in the stream; the next
+        // call would read that tail as its answer, so refuse to continue.
+        if reply.last() != Some(&b'\n') {
+            self.broken = true;
+            return Err(ClientError::Protocol(
+                "reply longer than the line limit".into(),
+            ));
         }
         let resp: Response =
             serde_json::from_slice(&reply).map_err(|e| ClientError::Protocol(e.to_string()))?;

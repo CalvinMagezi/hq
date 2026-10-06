@@ -18,10 +18,11 @@ All three take `--dir <path>` (default `~/.hq/run/host`). The directory is
 created with mode 0700 and holds:
 
 - `host.sock`: the control socket, mode 0600.
-- `operator.token`: a random secret, mode 0600, created on first start.
-
-A second `serve` on the same directory fails while the first answers. A socket
-left behind by a host that died is replaced.
+- `operator.token`: a random secret, mode 0600, created on first start. A token
+  file that is not a regular file owned by you with mode 0600 is refused, and so
+  is a `--dir` that is a symlink or belongs to someone else.
+- `host.lock`: held while a host runs. A second `serve` on the same directory
+  fails; a socket left behind by a host that died is replaced.
 
 ## Protocol
 
@@ -41,7 +42,7 @@ version gets `protocol_mismatch`.
 | `agent.spawn` | `name`, `argv`, `cwd`, optional `env` (object), `rows`, `cols`, `scrollback_rows` | agent info |
 | `agent.list` | none | `{"agents": [...]}` |
 | `agent.get` | `name` | agent info |
-| `agent.read` | `name`, optional `source` (`visible`, `recent`, `recent_unwrapped`; default `recent_unwrapped`), optional `lines` (last N, 0 or absent for all) | `{"text"}` |
+| `agent.read` | `name`, optional `source` (`visible`, `recent`, `recent_unwrapped`; default `recent_unwrapped`), optional `lines` (last N, 0 or absent for all) | `{"text", "truncated"}`; text is cut to its last 400 KiB, at a line start, when longer |
 | `agent.send_text` | `name`, `text` | `{}` (raw bytes, as given) |
 | `agent.paste` | `name`, `text` | `{}` (bracketed paste when the program enabled it) |
 | `agent.prompt` | `name`, `text` | `{}` (paste, short pause, Enter) |
@@ -50,6 +51,21 @@ version gets `protocol_mismatch`.
 | `agent.wait` | `name`, `until` (`exit` or `quiet`), optional `timeout_ms`, `quiet_ms` | `exit_code`, or agent info |
 | `agent.kill` | `name` | `{}` |
 | `agent.remove` | `name` | `{}` |
+
+Unknown fields in params are an `invalid_params` error. Rows and columns must be
+1 to 1000, `scrollback_rows` is capped at 100000, and `cwd` must be an existing
+absolute directory (otherwise `spawn_failed`; the host never falls back to the
+home directory).
+
+At most 64 connections are served at once (one more gets `too_many_connections`),
+a connection that sends no `hello` within 5 seconds is closed, and a reply that
+cannot be written within 10 seconds drops the connection. `host.stop` answers
+first and then stops the host.
+
+`agent.kill` and `agent.remove` stop the process and everything it started: the
+process group gets SIGHUP, then SIGKILL after 2 seconds if the leader is still
+running. `agent.wait` with `until: exit` returns only after the output the
+process printed last has been read, so a read right after it sees the tail.
 
 Agent names match `[a-z][a-z0-9_-]{0,31}` and are unique. Agent info has `name`,
 `argv`, `cwd`, `pid`, `status` (`running` or `exited`), `exit_code`, `rows`,
@@ -60,9 +76,13 @@ Agent names match `[a-z][a-z0-9_-]{0,31}` and are unique. Agent info has `name`,
 ## What an agent process inherits
 
 A pane starts from an empty environment plus: `PATH`, `HOME`, `USER`, `LOGNAME`,
-`SHELL`, `LANG`, `LANGUAGE`, `LC_*`, `XDG_*`, `TMPDIR`, `TZ`, `COLORTERM`,
-`SSH_AUTH_SOCK`, `DISPLAY`, `WAYLAND_DISPLAY`, `TERM=xterm-256color`, and
-whatever `env` the spawn request passes. Markers and secrets of whatever
+`SHELL`, `LANG`, `LANGUAGE`, `LC_*`, `TMPDIR`, `TZ`, `COLORTERM`,
+`XDG_CONFIG_HOME`, `XDG_DATA_HOME`, `XDG_CACHE_HOME`, `XDG_STATE_HOME`,
+`TERM=xterm-256color`, and whatever `env` the spawn request passes. Credential
+handles are deliberately not inherited: `SSH_AUTH_SOCK` would let an agent sign
+with your keys and `XDG_RUNTIME_DIR` reaches your dbus, gpg and systemd
+sockets. Pass one in `env` when an agent really needs it (for example git over
+ssh). Markers and secrets of whatever
 started the host (for example another agent session's `CLAUDE_CODE_*`
 variables, which switch transcript saving off) never reach an agent.
 

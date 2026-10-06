@@ -8,22 +8,53 @@ use crate::proto::{ErrorBody, MAX_LINE_BYTES, PROTOCOL_VERSION, Request, Respons
 use crate::token;
 use serde::Deserialize;
 use serde_json::{Value, json};
+use std::cell::Cell;
+use std::fs::{File, OpenOptions, TryLockError};
 use std::io::{BufRead, BufReader, Read, Write};
-use std::os::unix::fs::PermissionsExt;
+use std::os::unix::fs::{OpenOptionsExt, PermissionsExt};
 use std::os::unix::net::{UnixListener, UnixStream};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::time::Duration;
 
 const SOCKET_FILE: &str = "host.sock";
+const LOCK_FILE: &str = "host.lock";
 const SOCKET_MODE: u32 = 0o600;
 const DEFAULT_WAIT_TIMEOUT_MS: u64 = 30_000;
 const DEFAULT_QUIET_MS: u64 = 1_000;
 const HOST_VERSION: &str = env!("CARGO_PKG_VERSION");
+/// The accept loop checks the stop flag this often.
+const ACCEPT_POLL: Duration = Duration::from_millis(50);
+/// After an unexpected accept error (out of descriptors, say) wait before retrying.
+const ACCEPT_ERROR_BACKOFF: Duration = Duration::from_millis(200);
+/// Most text one `agent.read` returns. JSON escaping can double newlines and
+/// quotes, and the whole reply must stay under `MAX_LINE_BYTES`.
+const MAX_READ_TEXT_BYTES: usize = 400 * 1024;
 
 pub fn socket_path(dir: &Path) -> PathBuf {
     dir.join(SOCKET_FILE)
+}
+
+/// Bounds on what a client can tie up.
+#[derive(Debug, Clone)]
+pub struct Limits {
+    /// Connections served at once; one more is told `too_many_connections`.
+    pub max_connections: usize,
+    /// How long a connection may stay silent before `hello`.
+    pub auth_timeout: Duration,
+    /// How long a reply may take to write before the connection is dropped.
+    pub write_timeout: Duration,
+}
+
+impl Default for Limits {
+    fn default() -> Self {
+        Self {
+            max_connections: 64,
+            auth_timeout: Duration::from_secs(5),
+            write_timeout: Duration::from_secs(10),
+        }
+    }
 }
 
 pub struct Server {
@@ -32,72 +63,127 @@ pub struct Server {
     host: Arc<Host>,
     token: String,
     stop: Arc<AtomicBool>,
+    limits: Limits,
+    /// Held for the life of the server: one host per directory.
+    _lock: File,
 }
 
 /// Lets another thread end `Server::serve`.
 #[derive(Clone)]
 pub struct StopHandle {
     stop: Arc<AtomicBool>,
-    path: PathBuf,
 }
 
 impl StopHandle {
     pub fn stop(&self) {
         self.stop.store(true, Ordering::SeqCst);
-        // Wake the accept loop.
-        let _ = UnixStream::connect(&self.path);
     }
 }
 
 impl Server {
-    /// Binds `<dir>/host.sock` (0600), creating the directory (0700) and the
-    /// operator token if needed. A socket left by a dead host is replaced; one
-    /// that still answers is an error.
     pub fn bind(dir: &Path, host: Arc<Host>) -> std::io::Result<Self> {
+        Self::bind_with_limits(dir, host, Limits::default())
+    }
+
+    /// Binds `<dir>/host.sock` (0600), creating the directory (0700) and the
+    /// operator token if needed. Only one host can hold `<dir>/host.lock`, so a
+    /// second one is refused, and a socket file found while holding the lock is
+    /// stale and replaced.
+    pub fn bind_with_limits(dir: &Path, host: Arc<Host>, limits: Limits) -> std::io::Result<Self> {
         let token = token::load_or_create(dir)?;
-        let path = socket_path(dir);
-        if path.exists() {
-            if UnixStream::connect(&path).is_ok() {
+        let lock = OpenOptions::new()
+            .create(true)
+            .truncate(false)
+            .write(true)
+            .mode(SOCKET_MODE)
+            .open(dir.join(LOCK_FILE))?;
+        match lock.try_lock() {
+            Ok(()) => {}
+            Err(TryLockError::WouldBlock) => {
                 return Err(std::io::Error::new(
                     std::io::ErrorKind::AddrInUse,
-                    format!("a host is already serving {}", path.display()),
+                    format!("a host is already serving {}", dir.display()),
                 ));
             }
-            std::fs::remove_file(&path)?;
+            Err(TryLockError::Error(e)) => return Err(e),
+        }
+        let path = socket_path(dir);
+        match std::fs::remove_file(&path) {
+            Ok(()) => {}
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+            Err(e) => return Err(e),
         }
         let listener = UnixListener::bind(&path)?;
         std::fs::set_permissions(&path, std::fs::Permissions::from_mode(SOCKET_MODE))?;
+        listener.set_nonblocking(true)?;
         Ok(Self {
             listener,
             path,
             host,
             token,
             stop: Arc::new(AtomicBool::new(false)),
+            limits,
+            _lock: lock,
         })
     }
 
     pub fn stop_handle(&self) -> StopHandle {
         StopHandle {
             stop: self.stop.clone(),
-            path: self.path.clone(),
         }
     }
 
     /// Accepts connections until stopped.
     pub fn serve(self) {
-        for stream in self.listener.incoming() {
-            if self.stop.load(Ordering::SeqCst) {
-                break;
+        let open = Arc::new(AtomicUsize::new(0));
+        while !self.stop.load(Ordering::SeqCst) {
+            match self.listener.accept() {
+                Ok((stream, _)) => self.admit(stream, &open),
+                Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => {
+                    std::thread::sleep(ACCEPT_POLL);
+                }
+                Err(e)
+                    if matches!(
+                        e.kind(),
+                        std::io::ErrorKind::Interrupted | std::io::ErrorKind::ConnectionAborted
+                    ) => {}
+                Err(_) => std::thread::sleep(ACCEPT_ERROR_BACKOFF),
             }
-            let Ok(stream) = stream else { continue };
-            let ctx = Conn {
-                host: self.host.clone(),
-                token: self.token.clone(),
-                stop: self.stop_handle(),
-            };
-            std::thread::spawn(move || ctx.run(stream));
         }
         let _ = std::fs::remove_file(&self.path);
+    }
+
+    fn admit(&self, stream: UnixStream, open: &Arc<AtomicUsize>) {
+        // Some systems hand out sockets that inherit the listener's non-blocking mode.
+        if stream.set_nonblocking(false).is_err() {
+            return;
+        }
+        if open.fetch_add(1, Ordering::SeqCst) >= self.limits.max_connections {
+            open.fetch_sub(1, Ordering::SeqCst);
+            let mut stream = stream;
+            let _ = stream.set_write_timeout(Some(self.limits.write_timeout));
+            let _ = send(
+                &mut stream,
+                &Response::err(
+                    Value::Null,
+                    "too_many_connections",
+                    "the host is serving as many connections as it allows",
+                ),
+            );
+            return;
+        }
+        let conn = Conn {
+            host: self.host.clone(),
+            token: self.token.clone(),
+            stop: self.stop_handle(),
+            limits: self.limits.clone(),
+            stop_after_reply: Cell::new(false),
+        };
+        let open = open.clone();
+        std::thread::spawn(move || {
+            conn.run(stream);
+            open.fetch_sub(1, Ordering::SeqCst);
+        });
     }
 }
 
@@ -105,6 +191,8 @@ struct Conn {
     host: Arc<Host>,
     token: String,
     stop: StopHandle,
+    limits: Limits,
+    stop_after_reply: Cell<bool>,
 }
 
 impl Conn {
@@ -113,6 +201,8 @@ impl Conn {
             return;
         };
         let mut writer = write_half;
+        let _ = writer.set_write_timeout(Some(self.limits.write_timeout));
+        let _ = stream.set_read_timeout(Some(self.limits.auth_timeout));
         let mut reader = BufReader::new(stream);
         let mut authed = false;
         loop {
@@ -138,6 +228,14 @@ impl Conn {
             };
             if send(&mut writer, &response).is_err() {
                 return;
+            }
+            if self.stop_after_reply.get() {
+                self.stop.stop();
+                return;
+            }
+            if authed {
+                // Idle authenticated connections are normal; only the wait for hello is bounded.
+                let _ = reader.get_ref().set_read_timeout(None);
             }
         }
     }
@@ -168,6 +266,7 @@ impl Conn {
 
     fn hello(&self, params: &Value) -> Result<Value, ErrorBody> {
         #[derive(Deserialize)]
+        #[serde(deny_unknown_fields)]
         struct Hello {
             protocol_version: u32,
             token: String,
@@ -189,113 +288,128 @@ impl Conn {
     }
 
     fn call(&self, method: &str, params: Value) -> Result<Value, ErrorBody> {
-        let host = &self.host;
         match method {
             "host.status" => Ok(json!({
                 "protocol_version": PROTOCOL_VERSION,
                 "host_version": HOST_VERSION,
                 "pid": std::process::id(),
-                "agents": host.list().len(),
+                "agents": self.host.list().len(),
             })),
+            // The reply goes out first; the connection loop stops the host after it.
             "host.stop" => {
-                self.stop.stop();
+                self.stop_after_reply.set(true);
                 Ok(json!({}))
             }
+            m if m.starts_with("agent.") => self.agent_call(m, &params),
+            other => Err(body("unknown_method", format!("no method {other:?}"))),
+        }
+    }
+
+    fn agent_call(&self, method: &str, params: &Value) -> Result<Value, ErrorBody> {
+        let host = &self.host;
+        match method {
             "agent.spawn" => {
-                let p: SpawnParams = parse(&params)?;
+                let p: SpawnParams = parse(params)?;
                 let mut spec = SpawnSpec::new(p.name, p.argv, p.cwd);
                 spec.env = p.env.into_iter().collect();
-                if let Some(rows) = p.rows {
-                    spec.rows = rows;
-                }
-                if let Some(cols) = p.cols {
-                    spec.cols = cols;
-                }
-                if let Some(n) = p.scrollback_rows {
-                    spec.scrollback_rows = n;
-                }
+                spec.rows = p.rows.unwrap_or(spec.rows);
+                spec.cols = p.cols.unwrap_or(spec.cols);
+                spec.scrollback_rows = p.scrollback_rows.unwrap_or(spec.scrollback_rows);
                 Ok(info_json(&host.spawn(spec).map_err(host_err)?))
             }
             "agent.list" => {
                 Ok(json!({ "agents": host.list().iter().map(info_json).collect::<Vec<_>>() }))
             }
             "agent.get" => {
-                let p: Named = parse(&params)?;
+                let p: Named = parse(params)?;
                 Ok(info_json(&host.info(&p.name).map_err(host_err)?))
             }
             "agent.read" => {
-                let p: ReadParams = parse(&params)?;
+                let p: ReadParams = parse(params)?;
                 let text = host
-                    .read(&p.name, p.source, p.lines.unwrap_or(0))
+                    .read(&p.name, p.source.into(), p.lines.unwrap_or(0))
                     .map_err(host_err)?;
-                Ok(json!({ "text": text }))
+                let (text, truncated) = tail_that_fits(text);
+                Ok(json!({ "text": text, "truncated": truncated }))
             }
             "agent.send_text" => {
-                let p: TextParams = parse(&params)?;
-                host.send_text(&p.name, &p.text).map_err(host_err)?;
-                Ok(json!({}))
+                let p: TextParams = parse(params)?;
+                done(host.send_text(&p.name, &p.text))
             }
             "agent.paste" => {
-                let p: TextParams = parse(&params)?;
-                host.paste(&p.name, &p.text).map_err(host_err)?;
-                Ok(json!({}))
+                let p: TextParams = parse(params)?;
+                done(host.paste(&p.name, &p.text))
             }
             "agent.prompt" => {
-                let p: TextParams = parse(&params)?;
-                host.prompt(&p.name, &p.text).map_err(host_err)?;
-                Ok(json!({}))
+                let p: TextParams = parse(params)?;
+                done(host.prompt(&p.name, &p.text))
             }
             "agent.send_keys" => {
-                let p: KeysParams = parse(&params)?;
-                host.send_keys(&p.name, &p.keys).map_err(host_err)?;
-                Ok(json!({}))
+                let p: KeysParams = parse(params)?;
+                done(host.send_keys(&p.name, &p.keys))
             }
             "agent.resize" => {
-                let p: ResizeParams = parse(&params)?;
-                host.resize(&p.name, p.rows, p.cols).map_err(host_err)?;
-                Ok(json!({}))
+                let p: ResizeParams = parse(params)?;
+                done(host.resize(&p.name, p.rows, p.cols))
             }
-            "agent.wait" => {
-                let p: WaitParams = parse(&params)?;
-                let timeout =
-                    Duration::from_millis(p.timeout_ms.unwrap_or(DEFAULT_WAIT_TIMEOUT_MS));
-                match p.until.as_str() {
-                    "exit" => {
-                        let code = host.wait_exit(&p.name, timeout).map_err(host_err)?;
-                        Ok(json!({ "exit_code": code }))
-                    }
-                    "quiet" => {
-                        let quiet = Duration::from_millis(p.quiet_ms.unwrap_or(DEFAULT_QUIET_MS));
-                        host.wait_quiet(&p.name, quiet, timeout).map_err(host_err)?;
-                        Ok(info_json(&host.info(&p.name).map_err(host_err)?))
-                    }
-                    other => Err(body(
-                        "invalid_params",
-                        format!("until must be exit or quiet, got {other:?}"),
-                    )),
-                }
-            }
+            "agent.wait" => self.wait(parse(params)?),
             "agent.kill" => {
-                let p: Named = parse(&params)?;
-                host.kill(&p.name).map_err(host_err)?;
-                Ok(json!({}))
+                let p: Named = parse(params)?;
+                done(host.kill(&p.name))
             }
             "agent.remove" => {
-                let p: Named = parse(&params)?;
-                host.remove(&p.name).map_err(host_err)?;
-                Ok(json!({}))
+                let p: Named = parse(params)?;
+                done(host.remove(&p.name))
             }
             other => Err(body("unknown_method", format!("no method {other:?}"))),
         }
     }
+
+    fn wait(&self, p: WaitParams) -> Result<Value, ErrorBody> {
+        let timeout = Duration::from_millis(p.timeout_ms.unwrap_or(DEFAULT_WAIT_TIMEOUT_MS));
+        match p.until.as_str() {
+            "exit" => {
+                let code = self.host.wait_exit(&p.name, timeout).map_err(host_err)?;
+                Ok(json!({ "exit_code": code }))
+            }
+            "quiet" => {
+                let quiet = Duration::from_millis(p.quiet_ms.unwrap_or(DEFAULT_QUIET_MS));
+                self.host
+                    .wait_quiet(&p.name, quiet, timeout)
+                    .map_err(host_err)?;
+                Ok(info_json(&self.host.info(&p.name).map_err(host_err)?))
+            }
+            other => Err(body(
+                "invalid_params",
+                format!("until must be exit or quiet, got {other:?}"),
+            )),
+        }
+    }
+}
+
+/// The last part of `text` that fits in one reply, cut at a line start.
+fn tail_that_fits(text: String) -> (String, bool) {
+    if text.len() <= MAX_READ_TEXT_BYTES {
+        return (text, false);
+    }
+    let mut start = text.len() - MAX_READ_TEXT_BYTES;
+    while !text.is_char_boundary(start) {
+        start += 1;
+    }
+    if let Some(newline) = text[start..].find('\n') {
+        start += newline + 1;
+    }
+    (text[start..].to_string(), true)
 }
 
 #[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
 struct Named {
     name: String,
 }
 
 #[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
 struct SpawnParams {
     name: String,
     argv: Vec<String>,
@@ -307,56 +421,50 @@ struct SpawnParams {
     scrollback_rows: Option<usize>,
 }
 
-#[derive(Deserialize)]
+#[derive(Deserialize, Default, Clone, Copy)]
 #[serde(rename_all = "snake_case")]
 enum SourceParam {
     Visible,
     Recent,
+    #[default]
     RecentUnwrapped,
 }
 
-#[derive(Deserialize)]
-struct ReadRaw {
-    name: String,
-    source: Option<SourceParam>,
-    lines: Option<usize>,
-}
-
-struct ReadParams {
-    name: String,
-    source: ReadSource,
-    lines: Option<usize>,
-}
-
-impl<'de> Deserialize<'de> for ReadParams {
-    fn deserialize<D: serde::Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
-        let raw = ReadRaw::deserialize(d)?;
-        let source = match raw.source.unwrap_or(SourceParam::RecentUnwrapped) {
+impl From<SourceParam> for ReadSource {
+    fn from(p: SourceParam) -> Self {
+        match p {
             SourceParam::Visible => ReadSource::Visible,
             SourceParam::Recent => ReadSource::Recent,
             SourceParam::RecentUnwrapped => ReadSource::RecentUnwrapped,
-        };
-        Ok(Self {
-            name: raw.name,
-            source,
-            lines: raw.lines,
-        })
+        }
     }
 }
 
 #[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct ReadParams {
+    name: String,
+    #[serde(default)]
+    source: SourceParam,
+    lines: Option<usize>,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
 struct TextParams {
     name: String,
     text: String,
 }
 
 #[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
 struct KeysParams {
     name: String,
     keys: Vec<String>,
 }
 
 #[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
 struct ResizeParams {
     name: String,
     rows: u16,
@@ -364,6 +472,7 @@ struct ResizeParams {
 }
 
 #[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
 struct WaitParams {
     name: String,
     until: String,
@@ -380,6 +489,10 @@ fn body(code: &str, message: impl Into<String>) -> ErrorBody {
 
 fn host_err(e: HostError) -> ErrorBody {
     body(e.code(), e.to_string())
+}
+
+fn done(result: Result<(), HostError>) -> Result<Value, ErrorBody> {
+    result.map(|()| json!({})).map_err(host_err)
 }
 
 fn parse<T: serde::de::DeserializeOwned>(params: &Value) -> Result<T, ErrorBody> {
@@ -400,7 +513,7 @@ fn info_json(i: &PaneInfo) -> Value {
     json!({
         "name": i.name,
         "argv": i.argv,
-        "cwd": i.cwd,
+        "cwd": i.cwd.to_string_lossy(),
         "pid": i.pid,
         "status": status,
         "exit_code": exit_code,
