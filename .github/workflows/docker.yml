@@ -1,0 +1,280 @@
+name: Docker
+
+# Publishes ghcr.io/<owner>/hq from the signed release artifacts. Nothing is
+# compiled here: the image is assembled from hq-<version>-linux-<arch>.tar.gz and
+# hq-web-<version>.tar.gz after scripts/release/verify.sh accepted them.
+#
+# Runs after a successful Release (a new main build) or Promote (the stable
+# pointer moved), or by hand for one release tag. Tags: <version> always, `main`
+# when that version is the signed channel-main pointer, `latest` and `stable`
+# when it is the signed channel-stable pointer (docker/resolve-release.sh).
+# Both architectures build natively, so no QEMU: the arm64 leg runs on an arm runner.
+on:
+  workflow_run: # zizmor: ignore[dangerous-triggers] only our own Release and Promote runs on main, nothing from the triggering run is executed
+    workflows: [Release, Promote]
+    types: [completed]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Release tag to publish as an image, for example v0.9.1-main.57"
+        required: true
+        type: string
+
+permissions: {}
+
+# One group per triggering run, not one for the whole workflow: GitHub drops all but
+# the newest pending run in a group, which would silently lose the `latest` update
+# of a Promote that arrives behind a Release. Overlapping runs stay safe without
+# serializing: a moving tag is only moved by the version its signed pointer names
+# (checked again right before the move), and an existing version tag is never overwritten.
+concurrency:
+  group: docker-${{ github.event.workflow_run.id || github.run_id }}
+  cancel-in-progress: false
+
+jobs:
+  # Everything that reads release data and repository scripts. Read-only token.
+  resolve:
+    name: Verify release
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      (github.event.workflow_run.conclusion == 'success' &&
+       github.event.workflow_run.head_branch == 'main' &&
+       github.event.workflow_run.head_repository.full_name == github.repository)
+    runs-on: ubuntu-22.04
+    timeout-minutes: 20
+    permissions:
+      contents: read # checkout and public release assets
+    outputs:
+      tag: ${{ steps.resolve.outputs.tag }}
+      version: ${{ steps.resolve.outputs.version }}
+      revision: ${{ steps.resolve.outputs.revision }}
+      created: ${{ steps.resolve.outputs.created }}
+      extra_tags: ${{ steps.resolve.outputs.extra_tags }}
+      image: ${{ steps.image.outputs.image }}
+      exists: ${{ steps.exists.outputs.exists }}
+    steps:
+      - name: Refuse any ref but main
+        env:
+          REF: ${{ github.ref }}
+        run: '[ "$REF" = "refs/heads/main" ] || { echo "the image is published from main only" >&2; exit 1; }'
+
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Verify the release and pick its tags
+        id: resolve
+        env:
+          GH_TOKEN: ${{ github.token }}
+          EVENT: ${{ github.event_name }}
+          TRIGGER: ${{ github.event.workflow_run.name }}
+          TRIGGER_RUN_NUMBER: ${{ github.event.workflow_run.run_number }}
+          INPUT_TAG: ${{ inputs.tag }}
+          REPO: ${{ github.repository }}
+        run: |
+          # PATH for this step only: this workflow has a workflow_run trigger, so it never writes GITHUB_PATH.
+          PATH="$(bash scripts/release/install-tools.sh "$RUNNER_TEMP/tools"):$PATH"
+          args=(--repo "$REPO" --dir release-dl --pubkey release/minisign.pub)
+          if [ "$EVENT" = workflow_dispatch ]; then
+            args+=(--source dispatch --tag "$INPUT_TAG")
+          elif [ "$TRIGGER" = Promote ]; then
+            args+=(--source promote)
+          else
+            args+=(--source release --run-number "$TRIGGER_RUN_NUMBER")
+          fi
+          bash docker/resolve-release.sh "${args[@]}" | tee -a "$GITHUB_OUTPUT"
+
+      - name: Image name
+        id: image
+        env:
+          OWNER: ${{ github.repository_owner }}
+        run: echo "image=ghcr.io/${OWNER,,}/hq" >> "$GITHUB_OUTPUT"
+
+      # Anonymous on purpose: a private package reads as missing here, and the
+      # merge job re-checks with credentials before it writes anything.
+      - name: Check whether this version is already published
+        id: exists
+        env:
+          IMAGE: ${{ steps.image.outputs.image }}
+          VERSION: ${{ steps.resolve.outputs.version }}
+        run: |
+          if docker buildx imagetools inspect "$IMAGE:$VERSION" > /dev/null 2>&1; then
+            echo "exists=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "exists=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Stage the build context
+        env:
+          VERSION: ${{ steps.resolve.outputs.version }}
+        run: |
+          mkdir docker-context
+          cp "release-dl/hq-$VERSION-linux-x86_64.tar.gz" docker-context/hq-linux-amd64.tar.gz
+          cp "release-dl/hq-$VERSION-linux-aarch64.tar.gz" docker-context/hq-linux-arm64.tar.gz
+          cp "release-dl/hq-web-$VERSION.tar.gz" docker-context/hq-web.tar.gz
+          (cd docker-context && sha256sum hq-linux-amd64.tar.gz hq-linux-arm64.tar.gz hq-web.tar.gz > CHECKSUMS)
+
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: docker-context
+          path: docker-context
+          if-no-files-found: error
+          retention-days: 1
+
+  # One native leg per architecture: build, smoke test the image that was just
+  # built, and only then log in and push it by digest.
+  build:
+    name: Build ${{ matrix.platform }}
+    needs: [resolve]
+    if: needs.resolve.outputs.exists != 'true'
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 30
+    permissions:
+      contents: read # checkout
+      packages: write # push the image digest to ghcr.io
+    strategy:
+      fail-fast: true
+      matrix:
+        include:
+          - platform: linux/amd64
+            runner: ubuntu-22.04
+            arch: amd64
+          - platform: linux/arm64
+            runner: ubuntu-22.04-arm
+            arch: arm64
+    env:
+      PLATFORM: ${{ matrix.platform }}
+      ARCH: ${{ matrix.arch }}
+      IMAGE: ${{ needs.resolve.outputs.image }}
+      VERSION: ${{ needs.resolve.outputs.version }}
+      REVISION: ${{ needs.resolve.outputs.revision }}
+      CREATED: ${{ needs.resolve.outputs.created }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: docker-context
+          path: docker-context
+
+      - name: Check the artifacts and add the entrypoint
+        run: |
+          (cd docker-context && sha256sum --check CHECKSUMS)
+          install -m 0755 docker/entrypoint.sh docker-context/entrypoint.sh
+
+      - name: Create the builder
+        run: docker buildx create --name hq-builder --driver docker-container --use
+
+      - name: Build for the smoke test
+        run: |
+          docker buildx build --platform "$PLATFORM" --file docker/Dockerfile \
+            --build-arg "VERSION=$VERSION" --build-arg "REVISION=$REVISION" --build-arg "CREATED=$CREATED" \
+            --provenance=false --sbom=false --load --tag hq-smoke:local docker-context
+
+      - name: Smoke test
+        run: bash docker/smoke-test.sh hq-smoke:local
+
+      - name: Log in to ghcr.io
+        env:
+          GHCR_TOKEN: ${{ github.token }}
+          GHCR_USER: ${{ github.actor }}
+        run: printf '%s' "$GHCR_TOKEN" | docker login ghcr.io --username "$GHCR_USER" --password-stdin
+
+      - name: Push by digest
+        run: |
+          docker buildx build --platform "$PLATFORM" --file docker/Dockerfile \
+            --build-arg "VERSION=$VERSION" --build-arg "REVISION=$REVISION" --build-arg "CREATED=$CREATED" \
+            --provenance=false --sbom=false \
+            --output "type=image,name=$IMAGE,push-by-digest=true,name-canonical=true,push=true" \
+            --metadata-file build-metadata.json docker-context
+          digest=$(jq -r '."containerimage.digest"' build-metadata.json)
+          [[ "$digest" =~ ^sha256:[0-9a-f]{64}$ ]] || { echo "no image digest in the build metadata" >&2; exit 1; }
+          mkdir digests
+          echo "$digest" > "digests/$ARCH"
+
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: digest-${{ matrix.arch }}
+          path: digests/${{ matrix.arch }}
+          if-no-files-found: error
+          retention-days: 1
+
+  # Joins the two digests into one multi-arch tag and moves the other tags.
+  # A version tag that already exists is never overwritten.
+  merge:
+    name: Publish tags
+    needs: [resolve, build]
+    if: ${{ !cancelled() && needs.resolve.result == 'success' && (needs.build.result == 'success' || needs.build.result == 'skipped') }}
+    runs-on: ubuntu-22.04
+    timeout-minutes: 15
+    permissions:
+      contents: read # none needed beyond the default
+      packages: write # create the multi-arch manifest and tags on ghcr.io
+      id-token: write # keyless signing of the provenance attestation
+      attestations: write # store the provenance attestation
+    env:
+      IMAGE: ${{ needs.resolve.outputs.image }}
+      VERSION: ${{ needs.resolve.outputs.version }}
+      EXTRA_TAGS: ${{ needs.resolve.outputs.extra_tags }}
+    steps:
+      - name: Log in to ghcr.io
+        env:
+          GHCR_TOKEN: ${{ github.token }}
+          GHCR_USER: ${{ github.actor }}
+        run: printf '%s' "$GHCR_TOKEN" | docker login ghcr.io --username "$GHCR_USER" --password-stdin
+
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        if: needs.build.result == 'success'
+        with:
+          pattern: digest-*
+          path: digests
+          merge-multiple: true
+
+      - name: Create the version tag
+        id: version_tag
+        run: |
+          if docker buildx imagetools inspect "$IMAGE:$VERSION" > /dev/null 2>&1; then
+            echo "$IMAGE:$VERSION already exists, leaving it as it is"
+            echo "created=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          [ -f digests/amd64 ] && [ -f digests/arm64 ] || { echo "both architecture digests are required" >&2; exit 1; }
+          docker buildx imagetools create --tag "$IMAGE:$VERSION" \
+            "$IMAGE@$(cat digests/amd64)" "$IMAGE@$(cat digests/arm64)"
+          echo "created=true" >> "$GITHUB_OUTPUT"
+
+      - name: Check the manifest lists both architectures
+        run: |
+          docker buildx imagetools inspect "$IMAGE:$VERSION" --raw |
+            jq -e '[.manifests[].platform | select(.os == "linux") | .architecture] | sort == ["amd64","arm64"]'
+
+      # The pointers were verified when this run started. They are read again here, only
+      # to skip a move: a run that finishes after a newer one must not move a tag backwards.
+      - name: Move the other tags
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          for extra in $EXTRA_TAGS; do
+            channel=stable
+            [ "$extra" != main ] || channel=main
+            current=$(gh release download "channel-$channel" --pattern "channel-$channel.json" --output - | jq -r .version)
+            if [ "$current" != "$VERSION" ]; then
+              echo "not moving $extra: channel-$channel now names $current, not $VERSION"
+              continue
+            fi
+            docker buildx imagetools create --tag "$IMAGE:$extra" "$IMAGE:$VERSION"
+          done
+
+      - name: Read the published digest
+        id: digest
+        run: echo "digest=$(docker buildx imagetools inspect "$IMAGE:$VERSION" --format '{{.Manifest.Digest}}')" >> "$GITHUB_OUTPUT"
+
+      - uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
+        if: steps.version_tag.outputs.created == 'true'
+        with:
+          subject-name: ${{ env.IMAGE }}
+          subject-digest: ${{ steps.digest.outputs.digest }}
+          push-to-registry: true

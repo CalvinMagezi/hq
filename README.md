@@ -103,6 +103,8 @@ signature and checksum, and installs `hq` into `~/.local/bin` and the web UI int
 exist for Linux x86_64, Linux aarch64 and macOS on Apple Silicon. Other
 platforms, including Intel Macs, build from source with `cargo`.
 
+**Docker:** `docker run -d --init -p 127.0.0.1:5678:5678 -v hq-data:/data ghcr.io/calvinmagezi/hq` runs HQ with its web UI and prints a web token on first start. A Compose example and the details are in [docs/DOCKER.md](docs/DOCKER.md).
+
 The web UI is built separately (see [PWA Dashboard](#pwa-dashboard)) and needs [bun](https://bun.sh).
 
 ### First Run
