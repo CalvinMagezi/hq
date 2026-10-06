@@ -12,7 +12,7 @@ use serde_json::{Value, json};
 use std::cell::Cell;
 use std::fs::{File, OpenOptions, TryLockError};
 use std::io::{BufRead, BufReader, Read, Write};
-use std::os::unix::fs::{OpenOptionsExt, PermissionsExt};
+use std::os::unix::fs::{MetadataExt, OpenOptionsExt, PermissionsExt};
 use std::os::unix::net::{UnixListener, UnixStream};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -33,6 +33,43 @@ const ACCEPT_ERROR_BACKOFF: Duration = Duration::from_millis(200);
 /// Most text one `agent.read` returns. JSON escaping can double newlines and
 /// quotes, and the whole reply must stay under `MAX_LINE_BYTES`.
 const MAX_READ_TEXT_BYTES: usize = 400 * 1024;
+
+/// Identity of the executable file the host was started from. If the file on
+/// disk differs later (a new build was installed), the running host is stale.
+#[derive(Clone, PartialEq, Eq)]
+struct ExeStamp {
+    path: PathBuf,
+    dev: u64,
+    ino: u64,
+    mtime: i64,
+    size: u64,
+}
+
+impl ExeStamp {
+    fn of(path: &Path) -> Option<(u64, u64, i64, u64)> {
+        let m = std::fs::metadata(path).ok()?;
+        Some((m.dev(), m.ino(), m.mtime(), m.size()))
+    }
+
+    fn current() -> Option<Self> {
+        Self::at(std::env::current_exe().ok()?)
+    }
+
+    fn at(path: PathBuf) -> Option<Self> {
+        let (dev, ino, mtime, size) = Self::of(&path)?;
+        Some(Self {
+            path,
+            dev,
+            ino,
+            mtime,
+            size,
+        })
+    }
+
+    fn is_stale(&self) -> bool {
+        Self::of(&self.path) != Some((self.dev, self.ino, self.mtime, self.size))
+    }
+}
 
 pub fn socket_path(dir: &Path) -> PathBuf {
     dir.join(SOCKET_FILE)
@@ -66,6 +103,7 @@ pub struct Server {
     token: String,
     stop: Arc<AtomicBool>,
     limits: Limits,
+    exe: Option<ExeStamp>,
     /// Held for the life of the server: one host per directory.
     _lock: File,
 }
@@ -125,6 +163,7 @@ impl Server {
             token,
             stop: Arc::new(AtomicBool::new(false)),
             limits,
+            exe: ExeStamp::current(),
             _lock: lock,
         })
     }
@@ -152,6 +191,8 @@ impl Server {
                 Err(_) => std::thread::sleep(ACCEPT_ERROR_BACKOFF),
             }
         }
+        // Stop the agents but leave them listed for the next start.
+        self.host.shutdown();
         let _ = std::fs::remove_file(&self.path);
     }
 
@@ -179,6 +220,7 @@ impl Server {
             token: self.token.clone(),
             stop: self.stop_handle(),
             limits: self.limits.clone(),
+            exe: self.exe.clone(),
             stop_after_reply: Cell::new(false),
         };
         let open = open.clone();
@@ -194,6 +236,7 @@ struct Conn {
     token: String,
     stop: StopHandle,
     limits: Limits,
+    exe: Option<ExeStamp>,
     stop_after_reply: Cell<bool>,
 }
 
@@ -291,12 +334,19 @@ impl Conn {
 
     fn call(&self, method: &str, params: Value) -> Result<Value, ErrorBody> {
         match method {
-            "host.status" => Ok(json!({
-                "protocol_version": PROTOCOL_VERSION,
-                "host_version": HOST_VERSION,
-                "pid": std::process::id(),
-                "agents": self.host.list().len(),
-            })),
+            "host.status" => {
+                let agents = self.host.list();
+                let count = |state| agents.iter().filter(|a| a.state == Some(state)).count();
+                Ok(json!({
+                    "protocol_version": PROTOCOL_VERSION,
+                    "host_version": HOST_VERSION,
+                    "pid": std::process::id(),
+                    "agents": agents.len(),
+                    "agents_working": count(AgentState::Working),
+                    "agents_blocked": count(AgentState::Blocked),
+                    "binary_stale": self.exe.as_ref().is_some_and(ExeStamp::is_stale),
+                }))
+            }
             // The reply goes out first; the connection loop stops the host after it.
             "host.stop" => {
                 self.stop_after_reply.set(true);
@@ -314,6 +364,7 @@ impl Conn {
                 let p: SpawnParams = parse(params)?;
                 let mut spec = SpawnSpec::new(p.name, p.argv, p.cwd);
                 spec.agent = p.agent;
+                spec.resume_argv = p.resume_argv;
                 spec.env = p.env.into_iter().collect();
                 spec.rows = p.rows.unwrap_or(spec.rows);
                 spec.cols = p.cols.unwrap_or(spec.cols);
@@ -432,6 +483,7 @@ struct SpawnParams {
     argv: Vec<String>,
     cwd: PathBuf,
     agent: Option<String>,
+    resume_argv: Option<Vec<String>>,
     #[serde(default)]
     env: std::collections::BTreeMap<String, String>,
     rows: Option<u16>,
@@ -537,6 +589,7 @@ fn info_json(i: &PaneInfo) -> Value {
         "name": i.name,
         "argv": i.argv,
         "agent": i.agent,
+        "resumable": i.resumable,
         "title": i.title,
         "state": i.state.map(AgentState::as_str),
         "rule": i.rule,
@@ -550,4 +603,29 @@ fn info_json(i: &PaneInfo) -> Value {
         "quiet_ms": i.quiet_for.as_millis() as u64,
         "age_ms": i.age.as_millis() as u64,
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_replaced_or_removed_executable_makes_the_host_stale() {
+        let dir = tempfile::tempdir().unwrap();
+        let exe = dir.path().join("hq");
+        std::fs::write(&exe, "old build").unwrap();
+        let stamp = ExeStamp::at(exe.clone()).unwrap();
+        assert!(!stamp.is_stale());
+
+        // An install replaces the file by renaming a new one over it.
+        let new = dir.path().join("hq.new");
+        std::fs::write(&new, "new build, different size").unwrap();
+        std::fs::rename(&new, &exe).unwrap();
+        assert!(stamp.is_stale());
+
+        let fresh = ExeStamp::at(exe.clone()).unwrap();
+        assert!(!fresh.is_stale());
+        std::fs::remove_file(&exe).unwrap();
+        assert!(fresh.is_stale());
+    }
 }

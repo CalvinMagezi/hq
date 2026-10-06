@@ -13,6 +13,7 @@ mod keys;
 mod pane;
 mod proto;
 mod server;
+mod state;
 mod token;
 
 pub use client::{Client, ClientError};
@@ -20,7 +21,7 @@ pub use detect::{AgentState, Detection, Detector, ENGINE_VERSION, Input as Detec
 pub use emu::{Emulator, Row, VtEmulator};
 pub use env::pane_env;
 pub use error::HostError;
-pub use host::{Host, PaneInfo, PaneStatus, ReadSource, SpawnSpec, valid_name};
+pub use host::{Host, PaneInfo, PaneStatus, ReadSource, RestoreReport, SpawnSpec, valid_name};
 pub use keys::encode_key;
 pub use proto::{MAX_LINE_BYTES, PROTOCOL_VERSION, Request, Response};
 pub use server::{Limits, Server, StopHandle, socket_path};

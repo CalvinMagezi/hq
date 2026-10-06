@@ -22,8 +22,16 @@ pub async fn run(sub: &str, dir: Option<PathBuf>) -> Result<()> {
 }
 
 async fn serve(dir: PathBuf) -> Result<()> {
-    let server = Server::bind(&dir, Arc::new(Host::new()))
+    let host = Arc::new(Host::new().with_state_dir(&dir));
+    let server = Server::bind(&dir, host.clone())
         .with_context(|| format!("starting the host in {}", dir.display()))?;
+    let report = host.restore();
+    for name in &report.restored {
+        println!("hq host restored {name}");
+    }
+    for (name, why) in &report.skipped {
+        eprintln!("hq host could not restore {name}: {why}");
+    }
     let stop = server.stop_handle();
     println!("hq host serving {}", socket_path(&dir).display());
     let serving = tokio::task::spawn_blocking(move || server.serve());

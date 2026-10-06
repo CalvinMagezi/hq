@@ -6,7 +6,7 @@ All notable changes to Agent-HQ will be documented in this file.
 
 ### Added
 
-- **`hq host`**: a built-in host for long-lived coding agents (pseudo-terminals with a readable screen, a JSON control socket with an operator token). `hq host serve|status|stop`; it also detects whether Claude Code and Codex are idle, working or blocked from the screen. See `docs/AGENT_HOST.md`. HQ sessions still use herdr until the native backend lands.
+- **`hq host`**: a built-in host for long-lived coding agents (pseudo-terminals with a readable screen, a JSON control socket with an operator token). `hq host serve|status|stop`; it also detects whether Claude Code and Codex are idle, working or blocked from the screen. It brings agents spawned with a resume command back after a restart or crash (`session.json`, mode 0600) and reports when its binary has been replaced on disk. See `docs/AGENT_HOST.md`. HQ sessions still use herdr until the native backend lands.
 
 ### Upgrading from 0.9.0 or earlier
 

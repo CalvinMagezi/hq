@@ -37,9 +37,9 @@ version gets `protocol_mismatch`.
 
 | Method | Params | Result |
 |---|---|---|
-| `host.status` | none | `protocol_version`, `host_version`, `pid`, `agents` |
+| `host.status` | none | `protocol_version`, `host_version`, `pid`, `agents`, `agents_working`, `agents_blocked`, `binary_stale` |
 | `host.stop` | none | `{}` |
-| `agent.spawn` | `name`, `argv`, `cwd`, optional `agent` (kind, for state detection), `env` (object), `rows`, `cols`, `scrollback_rows` | agent info |
+| `agent.spawn` | `name`, `argv`, `cwd`, optional `agent` (kind, for state detection), `resume_argv` (see Restarts), `env` (object), `rows`, `cols`, `scrollback_rows` | agent info |
 | `agent.list` | none | `{"agents": [...]}` |
 | `agent.get` | `name` | agent info |
 | `agent.read` | `name`, optional `source` (`visible`, `recent`, `recent_unwrapped`; default `recent_unwrapped`), optional `lines` (last N, 0 or absent for all) | `{"text", "truncated"}`; text is cut to its last 400 KiB, at a line start, when longer |
@@ -68,7 +68,7 @@ running. `agent.wait` with `until: exit` returns only after the output the
 process printed last has been read, so a read right after it sees the tail.
 
 Agent names match `[a-z][a-z0-9_-]{0,31}` and are unique. Agent info has `name`,
-`argv`, `agent`, `title`, `state`, `rule`, `cwd`, `pid`, `status` (`running` or `exited`), `exit_code`, `rows`,
+`argv`, `agent`, `resumable`, `title`, `state`, `rule`, `cwd`, `pid`, `status` (`running` or `exited`), `exit_code`, `rows`,
 `cols`, `bytes_seen`, `quiet_ms`, `age_ms`. Error codes include `agent_not_found`,
 `name_taken`, `invalid_name`, `invalid_keys`, `spawn_failed`, `agent_exited`,
 `timeout`, `invalid_params`, `unknown_method`, `bad_request`.
@@ -90,6 +90,62 @@ there is no fetching from anywhere at run time. Screens captured from real
 Claude Code and Codex sessions, each labelled with the state the agent was really
 in, are in `crates/hq-host/tests/fixtures/` and are checked on every test run.
 
+## Restarts
+
+The host keeps `session.json` in its directory (mode 0600). It lists every
+running agent that was spawned with a `resume_argv`: the command that continues
+the old session, for example `["claude", "--continue"]`, together with its
+working directory, agent kind, size and the extra `env` it was started with
+(stored because the resumed process needs it again; the file is private to your
+user). The file is rewritten when an agent is spawned, removed, told to stop, or
+exits.
+
+On `hq host serve` the host starts each listed agent again with its
+`resume_argv`, in the same name and directory. These are fresh processes: what
+survives is whatever the agent itself resumes (Claude Code's conversation, for
+instance), not the old process or its scrollback. An agent that exited, was
+removed or was told to stop is not listed. One that cannot be started (its
+directory is gone, say) is reported and skipped; the others still come back.
+Agents spawned without a `resume_argv` are not brought back.
+
+A host that stops cleanly (`hq host stop`, SIGTERM, Ctrl-C) stops its agents but
+leaves them listed, so the next start brings them back. A host that is killed or
+crashes leaves the file as it was, with the same result.
+
+`session.json` holds commands the host will run, so it is used only when it is a
+regular file owned by you with mode 0600 inside a directory you own; otherwise it
+is ignored and reported. A file that does not parse is moved to
+`session.json.unreadable`.
+
+`host.status` has `binary_stale`: true when the executable the host started from
+has been replaced on disk (a new build was installed). A running host keeps
+working after its binary is replaced; restart it when `agents_working` and
+`agents_blocked` are 0, or when you choose to. Restarting means stopping the host
+and starting it again, normally through the service manager, for example
+`systemctl restart hq-host`.
+
+Example service files (not installed by HQ yet):
+
+```
+# /etc/systemd/system/hq-host.service
+[Service]
+User=hq
+ExecStart=/usr/local/bin/hq host serve --dir /var/lib/hq/host
+Restart=on-failure
+KillMode=process
+```
+
+```
+<!-- ~/Library/LaunchAgents/com.example.hq-host.plist -->
+<dict>
+  <key>Label</key><string>com.example.hq-host</string>
+  <key>ProgramArguments</key><array>
+    <string>/usr/local/bin/hq</string><string>host</string><string>serve</string>
+  </array>
+  <key>KeepAlive</key><true/>
+</dict>
+```
+
 ## What an agent process inherits
 
 A pane starts from an empty environment plus: `PATH`, `HOME`, `USER`, `LOGNAME`,
@@ -105,7 +161,6 @@ variables, which switch transcript saving off) never reach an agent.
 
 ## Not built yet
 
-Rule files for agents other than Claude Code and Codex, the "done" state (finished a turn you have not looked at yet), agent-reported state through hooks, persistence across a host
-restart, remote hosts, the backend that makes HQ sessions use this host, and
+Rule files for agents other than Claude Code and Codex, the "done" state (finished a turn you have not looked at yet), agent-reported state through hooks, remote hosts, the backend that makes HQ sessions use this host, and
 agent-to-agent messaging. Provenance of anything adapted from herdr is recorded
 in `docs/provenance/herdr.md`.

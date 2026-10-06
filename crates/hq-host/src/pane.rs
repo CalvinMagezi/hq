@@ -7,6 +7,7 @@ use nix::unistd::Pid;
 use portable_pty::{ChildKiller, CommandBuilder, MasterPty, PtySize, native_pty_system};
 use std::io::{Read, Write};
 use std::path::PathBuf;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Condvar, Mutex, MutexGuard};
 use std::time::{Duration, Instant};
 
@@ -62,13 +63,27 @@ impl Shared {
     }
 }
 
+/// Called once a pane's process has exited and its output has been read.
+pub(crate) type ExitHook = Arc<dyn Fn() + Send + Sync>;
+
+/// How to start a pane again after a host restart.
+#[derive(Clone)]
+pub(crate) struct Resume {
+    pub argv: Vec<String>,
+    pub env: Vec<(String, String)>,
+    pub scrollback_rows: usize,
+}
+
 pub(crate) struct Pane {
     pub(crate) argv: Vec<String>,
+    pub(crate) resume: Option<Resume>,
     pub(crate) agent: Option<String>,
     pub(crate) cwd: PathBuf,
     pub(crate) pid: Option<u32>,
     pub(crate) started: Instant,
     shared: Arc<Shared>,
+    /// Someone asked this process to stop; it may take a moment to exit.
+    stopping: AtomicBool,
     writer: Mutex<Box<dyn Write + Send>>,
     master: Mutex<Box<dyn MasterPty + Send>>,
     killer: Mutex<Box<dyn ChildKiller + Send + Sync>>,
@@ -76,6 +91,8 @@ pub(crate) struct Pane {
 
 pub(crate) struct LaunchArgs {
     pub argv: Vec<String>,
+    pub resume: Option<Resume>,
+    pub on_exit: Option<ExitHook>,
     pub agent: Option<String>,
     pub cwd: PathBuf,
     pub env: Vec<(String, String)>,
@@ -147,15 +164,17 @@ impl Pane {
             changed: Condvar::new(),
         });
         spawn_reader(reader, shared.clone());
-        spawn_waiter(child, shared.clone());
+        spawn_waiter(child, shared.clone(), args.on_exit);
 
         Ok(Self {
             argv: args.argv,
+            resume: args.resume,
             agent: args.agent,
             cwd: args.cwd,
             pid,
             started: Instant::now(),
             shared,
+            stopping: AtomicBool::new(false),
             writer: Mutex::new(writer),
             master: Mutex::new(pair.master),
             killer: Mutex::new(killer),
@@ -219,7 +238,12 @@ impl Pane {
     /// group (the agent is its own session leader), then SIGKILL to the group
     /// if the leader is still alive after a grace period. Does nothing once
     /// the process has exited, so a recycled pid is never signalled.
+    pub(crate) fn is_stopping(&self) -> bool {
+        self.stopping.load(Ordering::SeqCst)
+    }
+
     pub(crate) fn kill(&self) {
+        self.stopping.store(true, Ordering::SeqCst);
         if lock(&self.shared.state).exit.is_some() {
             return;
         }
@@ -289,7 +313,11 @@ fn spawn_reader(mut reader: Box<dyn Read + Send>, shared: Arc<Shared>) {
     });
 }
 
-fn spawn_waiter(mut child: Box<dyn portable_pty::Child + Send + Sync>, shared: Arc<Shared>) {
+fn spawn_waiter(
+    mut child: Box<dyn portable_pty::Child + Send + Sync>,
+    shared: Arc<Shared>,
+    on_exit: Option<ExitHook>,
+) {
     std::thread::spawn(move || {
         let code = child.wait().map(|s| s.exit_code()).unwrap_or(u32::MAX);
         // Publish the exit only after the reader has taken the last output, so
@@ -310,5 +338,8 @@ fn spawn_waiter(mut child: Box<dyn portable_pty::Child + Send + Sync>, shared: A
         state.exit = Some(code);
         drop(state);
         shared.changed.notify_all();
+        if let Some(hook) = on_exit {
+            hook();
+        }
     });
 }

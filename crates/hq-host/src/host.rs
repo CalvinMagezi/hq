@@ -6,9 +6,10 @@ use crate::env::pane_env;
 use crate::error::HostError;
 use crate::keys::encode_key;
 pub use crate::pane::PaneStatus;
-use crate::pane::{LaunchArgs, Pane};
+use crate::pane::{ExitHook, LaunchArgs, Pane, Resume};
+use crate::state::{PaneRecord, StateFile};
 use std::collections::BTreeMap;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, MutexGuard};
 use std::time::{Duration, Instant};
 
@@ -46,6 +47,9 @@ pub struct SpawnSpec {
     /// Which agent this is (`claude`, `codex`, ...), so its state can be
     /// detected from the screen. None for a plain process.
     pub agent: Option<String>,
+    /// How to start this agent again after a host restart (for example
+    /// `claude --continue`). Without it the agent is not brought back.
+    pub resume_argv: Option<Vec<String>>,
     pub rows: u16,
     pub cols: u16,
     pub scrollback_rows: usize,
@@ -59,6 +63,7 @@ impl SpawnSpec {
             cwd: cwd.into(),
             env: Vec::new(),
             agent: None,
+            resume_argv: None,
             rows: DEFAULT_ROWS,
             cols: DEFAULT_COLS,
             scrollback_rows: DEFAULT_SCROLLBACK_ROWS,
@@ -81,6 +86,8 @@ pub struct PaneInfo {
     pub name: String,
     pub argv: Vec<String>,
     pub agent: Option<String>,
+    /// Will be started again after a host restart.
+    pub resumable: bool,
     /// The terminal title the program set, or empty.
     pub title: String,
     /// Detected state; None when the agent kind has no rule file.
@@ -97,9 +104,20 @@ pub struct PaneInfo {
     pub age: Duration,
 }
 
+type Registry = Arc<Mutex<BTreeMap<String, Arc<Pane>>>>;
+
 pub struct Host {
-    panes: Mutex<BTreeMap<String, Arc<Pane>>>,
+    panes: Registry,
     detector: Detector,
+    state: Option<Arc<StateFile>>,
+}
+
+/// What `Host::restore` did.
+#[derive(Debug, Default)]
+pub struct RestoreReport {
+    pub restored: Vec<String>,
+    /// `(name, reason)`; the name is `session.json` when the file itself was refused.
+    pub skipped: Vec<(String, String)>,
 }
 
 impl Default for Host {
@@ -136,9 +154,16 @@ impl Host {
     /// local rule-file overrides loaded).
     pub fn with_detector(detector: Detector) -> Self {
         Self {
-            panes: Mutex::new(BTreeMap::new()),
+            panes: Arc::new(Mutex::new(BTreeMap::new())),
             detector,
+            state: None,
         }
+    }
+
+    /// A host that remembers its resumable agents in `<dir>/session.json`.
+    pub fn with_state_dir(mut self, dir: &Path) -> Self {
+        self.state = Some(Arc::new(StateFile::new(dir)));
+        self
     }
 
     fn pane(&self, name: &str) -> Result<Arc<Pane>, HostError> {
@@ -158,20 +183,28 @@ impl Host {
         }
         // Start the process without holding the registry lock: looking up the
         // program and forking can be slow and must not stall every other call.
+        let scrollback_rows = spec.scrollback_rows.min(MAX_SCROLLBACK_ROWS);
+        let resume = match spec.resume_argv {
+            Some(argv) if argv.is_empty() => return Err(HostError::InvalidResume),
+            Some(argv) => Some(Resume {
+                argv,
+                env: spec.env.clone(),
+                scrollback_rows,
+            }),
+            None => None,
+        };
         let pane = Pane::spawn(
             LaunchArgs {
                 argv: spec.argv,
+                resume,
+                on_exit: self.exit_hook(),
                 agent: spec.agent,
                 cwd: spec.cwd,
                 env: pane_env(&spec.env),
                 rows: spec.rows,
                 cols: spec.cols,
             },
-            Box::new(VtEmulator::new(
-                spec.rows,
-                spec.cols,
-                spec.scrollback_rows.min(MAX_SCROLLBACK_ROWS),
-            )),
+            Box::new(VtEmulator::new(spec.rows, spec.cols, scrollback_rows)),
         )?;
         let pane = Arc::new(pane);
         let mut panes = lock(&self.panes);
@@ -180,7 +213,68 @@ impl Host {
             return Err(HostError::NameTaken(spec.name));
         }
         panes.insert(spec.name.clone(), pane.clone());
+        drop(panes);
+        self.save();
         Ok(info_of(&spec.name, pane.as_ref(), &self.detector))
+    }
+
+    /// Rewrites the state file with the agents that are running and can be
+    /// resumed. A failure is reported on stderr and never fails the caller: an
+    /// agent that cannot be remembered still runs.
+    fn save(&self) {
+        save_state(&self.panes, self.state.as_deref());
+    }
+
+    fn exit_hook(&self) -> Option<ExitHook> {
+        let state = self.state.clone()?;
+        let panes = self.panes.clone();
+        Some(Arc::new(move || save_state(&panes, Some(&state))))
+    }
+
+    /// Starts again every agent the state file lists, using its resume
+    /// command. Call once, before serving.
+    pub fn restore(&self) -> RestoreReport {
+        let mut report = RestoreReport::default();
+        let Some(state) = &self.state else {
+            return report;
+        };
+        let records = match state.read() {
+            Ok(records) => records,
+            Err(e) => {
+                report
+                    .skipped
+                    .push(("session.json".to_string(), e.to_string()));
+                return report;
+            }
+        };
+        for rec in records {
+            let mut spec = SpawnSpec::new(rec.name.clone(), rec.resume_argv.clone(), rec.cwd);
+            spec.agent = rec.agent;
+            spec.env = rec.env;
+            spec.resume_argv = Some(rec.resume_argv);
+            spec.rows = rec.rows;
+            spec.cols = rec.cols;
+            spec.scrollback_rows = rec.scrollback_rows;
+            match self.spawn(spec) {
+                Ok(_) => report.restored.push(rec.name),
+                Err(e) => report.skipped.push((rec.name, e.to_string())),
+            }
+        }
+        report
+    }
+
+    /// Keeps the state file as it is, then stops every agent. Call when the
+    /// host is going away: the agents are stopped but still listed, so the next
+    /// start brings them back.
+    pub fn shutdown(&self) {
+        self.save();
+        if let Some(state) = &self.state {
+            state.freeze();
+        }
+        let panes: Vec<Arc<Pane>> = lock(&self.panes).values().cloned().collect();
+        for pane in panes {
+            pane.kill();
+        }
     }
 
     pub fn info(&self, name: &str) -> Result<PaneInfo, HostError> {
@@ -199,6 +293,7 @@ impl Host {
         let pane = lock(&self.panes)
             .remove(name)
             .ok_or_else(|| HostError::NotFound(name.to_string()))?;
+        self.save();
         // Other threads may still hold the pane (a caller waiting on it), so
         // stopping it cannot be left to the last reference being dropped.
         pane.kill();
@@ -319,7 +414,35 @@ impl Host {
 
     pub fn kill(&self, name: &str) -> Result<(), HostError> {
         self.pane(name)?.kill();
+        // Do not wait for the exit: a host that dies now must not bring it back.
+        self.save();
         Ok(())
+    }
+}
+
+/// Writes the resumable running agents to the state file, if there is one.
+fn save_state(panes: &Registry, state: Option<&StateFile>) {
+    let Some(state) = state else { return };
+    let records: Vec<PaneRecord> = lock(panes)
+        .iter()
+        .filter(|(_, pane)| pane.status() == PaneStatus::Running && !pane.is_stopping())
+        .filter_map(|(name, pane)| {
+            let resume = pane.resume.as_ref()?;
+            let (rows, cols) = pane.size();
+            Some(PaneRecord {
+                name: name.clone(),
+                resume_argv: resume.argv.clone(),
+                agent: pane.agent.clone(),
+                cwd: pane.cwd.clone(),
+                env: resume.env.clone(),
+                rows,
+                cols,
+                scrollback_rows: resume.scrollback_rows,
+            })
+        })
+        .collect();
+    if let Err(e) = state.write(&records) {
+        eprintln!("hq host: could not save session.json: {e}");
     }
 }
 
@@ -360,6 +483,7 @@ fn info_of(name: &str, pane: &Pane, detector: &Detector) -> PaneInfo {
         name: name.to_string(),
         argv: pane.argv.clone(),
         agent: pane.agent.clone(),
+        resumable: pane.resume.is_some(),
         title: pane.with_emu(|e| e.title()),
         state: detection.as_ref().map(|d| d.state),
         rule: detection.and_then(|d| d.rule),
