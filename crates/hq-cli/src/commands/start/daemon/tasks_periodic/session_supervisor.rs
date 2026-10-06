@@ -107,10 +107,10 @@ fn gather_hosts(
     let deadline = Instant::now() + budget;
     // A restarted built-in host holds agents until HQ supplies their env, and
     // an agent it does not list yet would be taken for gone below.
-    if rows.iter().any(|r| r.host == NATIVE_HOST) {
-        if let Ok(host) = (resolve.as_ref())(NATIVE_HOST) {
-            hq_tools::harness_session::resume_awaiting(rows, &host);
-        }
+    if rows.iter().any(|r| r.host == NATIVE_HOST)
+        && let Ok(host) = (resolve.as_ref())(NATIVE_HOST)
+    {
+        hq_tools::harness_session::resume_awaiting(rows, &host);
     }
     let within_budget = move |host: Host| {
         host.with_command_timeout_dyn(
