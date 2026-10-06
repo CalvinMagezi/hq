@@ -54,6 +54,7 @@ const docker = installChannels.docker;
           <li><a href="#source">Build from source</a></li>
           <li><a href="#server">Server with signed releases</a></li>
           <li><a href="#tailscale">Remote access over Tailscale</a></li>
+          <li><a href="#maintain">Updating and uninstalling</a></li>
           <li><a href="#soon">Not available yet</a></li>
         </ul>
       </nav>
@@ -301,6 +302,30 @@ const docker = installChannels.docker;
       </div>
     </section>
 
+    <section class="doc-section" id="maintain" aria-labelledby="maintain-h">
+      <h2 id="maintain-h">Updating and uninstalling</h2>
+      <div class="prose">
+        <p>
+          Each channel updates the way it installed. Your notes and config are never touched by an update.
+          <code>hq update</code> only manages servers set up with the server installer; on any other install it
+          tells you the right command.
+        </p>
+        <ul class="facts">
+          <li><strong>Install script or npx.</strong> Update by running the script again. Uninstall:
+            <code>rm ~/.local/bin/hq</code> and <code>rm -rf ~/.local/share/agent-hq</code>.</li>
+          <li><strong>Homebrew.</strong> <code>brew upgrade agent-hq</code>. Uninstall: <code>brew uninstall agent-hq</code>.</li>
+          <li><strong>Docker.</strong> <code>docker pull ghcr.io/calvinmagezi/hq</code>, then recreate the container.
+            Uninstall: <code>docker rm -f hq</code>; <code>docker volume rm hq-data</code> also deletes your data.</li>
+          <li><strong>Server.</strong> It updates itself from signed releases every ten minutes. To remove it, back up
+            <code>/opt/hq/.vault</code> first, then <code>systemctl disable --now hq herdr hq-update.timer</code> and delete
+            the unit files, <code>/usr/local/bin/hq</code>, <code>/etc/hq</code> and <code>/opt/hq</code>.</li>
+        </ul>
+        <p>
+          Your vault and config live in <code>~/.vault</code> and <code>~/.hq</code> on a personal install. Keep or delete them
+          as you like; nothing above removes them.
+        </p>
+      </div>
+    </section>
     <section class="doc-section" id="soon" aria-labelledby="soon-h">
       <h2 id="soon-h">Not available yet</h2>
       <div class="callout prose">
