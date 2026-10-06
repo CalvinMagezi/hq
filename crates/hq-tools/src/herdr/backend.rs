@@ -18,11 +18,7 @@ pub trait HostBackend: Send + Sync + std::fmt::Debug {
     fn agents(&self) -> Result<Vec<AgentInfo>, HerdrError>;
     fn agent(&self, target: &str) -> Result<Option<AgentInfo>, HerdrError>;
     fn launch(&self, req: &LaunchRequest) -> Result<Launched, HerdrError>;
-    fn await_started(
-        &self,
-        name: &str,
-        within: Duration,
-    ) -> Result<Option<AgentInfo>, HerdrError>;
+    fn await_started(&self, name: &str, within: Duration) -> Result<Option<AgentInfo>, HerdrError>;
     fn prompt(
         &self,
         target: &str,
@@ -78,11 +74,7 @@ impl HostBackend for HerdrHost {
     fn launch(&self, req: &LaunchRequest) -> Result<Launched, HerdrError> {
         HerdrHost::launch(self, req)
     }
-    fn await_started(
-        &self,
-        name: &str,
-        within: Duration,
-    ) -> Result<Option<AgentInfo>, HerdrError> {
+    fn await_started(&self, name: &str, within: Duration) -> Result<Option<AgentInfo>, HerdrError> {
         HerdrHost::await_started(self, name, within)
     }
     fn prompt(
@@ -156,11 +148,7 @@ impl<T: HostBackend + ?Sized> HostBackend for Arc<T> {
     fn launch(&self, req: &LaunchRequest) -> Result<Launched, HerdrError> {
         (**self).launch(req)
     }
-    fn await_started(
-        &self,
-        name: &str,
-        within: Duration,
-    ) -> Result<Option<AgentInfo>, HerdrError> {
+    fn await_started(&self, name: &str, within: Duration) -> Result<Option<AgentInfo>, HerdrError> {
         (**self).await_started(name, within)
     }
     fn prompt(

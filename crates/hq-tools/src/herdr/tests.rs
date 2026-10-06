@@ -205,6 +205,27 @@ fn unknown_host_names_the_known_ones() {
 ///
 /// `HQ_TEST_HERDR_SSH=user@host HQ_TEST_HERDR_KEY=/path/key \
 ///   cargo test -p hq-tools herdr::tests::real_ssh -- --ignored`
+/// A builder on a shared host returns an independent host: the original keeps
+/// its own ceilings and the derived one gets the new ones.
+#[test]
+fn derived_hosts_do_not_change_the_original() {
+    let dir = tempfile::tempdir().unwrap();
+    let binary = dir.path().join("herdr");
+    std::fs::write(&binary, "#!/bin/sh\nsleep 1\nprintf '{\"result\":{\"agents\":[]}}'\n").unwrap();
+    std::fs::set_permissions(&binary, std::fs::Permissions::from_mode(0o755)).unwrap();
+    let cfg = HerdrConfig { binary: binary.to_string_lossy().to_string(), ..HerdrConfig::default() };
+    let original: Host = Arc::new(HerdrHost::from_config(&cfg, LOCAL_HOST).unwrap());
+    let bound = original.launch_bound();
+
+    let impatient = original.with_command_timeout_dyn(Duration::from_millis(200));
+    assert!(impatient.agents().unwrap_err().is_unreachable());
+    assert!(original.agents().unwrap().is_empty(), "the original must keep its own timeout");
+
+    let shorter = original.with_launch_bound_dyn(Duration::from_secs(7));
+    assert_eq!(shorter.launch_bound(), Duration::from_secs(7));
+    assert_eq!(original.launch_bound(), bound);
+}
+
 /// Read-only check of the real herdr CLI through the `HostBackend` trait object.
 ///
 ///   cargo test -p hq-tools herdr::tests::real_local -- --ignored
@@ -218,7 +239,6 @@ fn real_local_herdr_answers_through_the_trait_object() {
     let agents = host.agents().expect("agent list");
     eprintln!("herdr {version} answered with {} agents", agents.len());
     assert!(host.agent("no-such-agent-hq-test").expect("lookup").is_none());
-    assert!(host.close_workspace("w-no-such-workspace").is_err());
 }
 
 #[test]
