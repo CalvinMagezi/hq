@@ -4,6 +4,16 @@ use std::collections::BTreeMap;
 /// Reserved host name for the machine HQ itself runs on.
 pub const LOCAL_HOST: &str = "local";
 
+/// Reserved host name for the built-in agent host (`hq host serve`). Set it as
+/// `default_host` to start new sessions there; sessions already running keep
+/// the host they were started on.
+pub const NATIVE_HOST: &str = "native";
+
+/// Where the built-in host keeps its socket, token and `session.json`.
+pub fn native_host_dir() -> std::path::PathBuf {
+    super::HqConfig::hq_dir().join("run").join("host")
+}
+
 /// Where coding-agent sessions run and how HQ reaches each machine's Herdr
 /// (herdr.dev). With no `hosts` configured every session runs on this machine.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -17,7 +27,8 @@ pub struct HerdrConfig {
     #[serde(default)]
     pub session: Option<String>,
 
-    /// Host that new sessions start on when the caller names none.
+    /// Host that new sessions start on when the caller names none: `local`, a
+    /// configured remote, or `native` for the built-in host.
     #[serde(default = "default_host")]
     pub default_host: String,
 

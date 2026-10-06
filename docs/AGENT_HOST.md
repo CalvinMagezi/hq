@@ -167,6 +167,16 @@ ssh). Markers and secrets of whatever
 started the host (for example another agent session's `CLAUDE_CODE_*`
 variables, which switch transcript saving off) never reach an agent.
 
+## Using it from HQ
+
+Set `herdr.default_host: native` in `~/.hq/config.yaml` and new coding-agent
+sessions start on the built-in host (run `hq host serve` first). `native` is a
+reserved host name next to `local`. A session keeps the host it was started on,
+so flipping the default never moves a running session, and sessions on `local`
+or a remote keep using herdr. After a host restart the supervisor starts any
+held agent again with the env HQ built for it at launch (profile variables and
+the session id), once per sweep.
+
 ## Not built yet
 
 Rule files for agents other than Claude Code and Codex, the "done" state (finished a turn you have not looked at yet), agent-reported state through hooks, remote hosts, the backend that makes HQ sessions use this host, and

@@ -36,6 +36,36 @@ pub(super) fn build_args(
     args
 }
 
+/// The extra environment a session's agent starts with: its profile's
+/// variables plus the session id. Launch and restart both build it here, so a
+/// restarted agent gets exactly what the original had.
+pub(super) fn launch_env(harness: &Harness, session_id: &str) -> Vec<(String, String)> {
+    let profile_env = harness.profile.iter().flat_map(|p| p.env.iter());
+    profile_env
+        .map(|(k, v)| (k.clone(), v.clone()))
+        .chain([(SESSION_ENV.to_string(), session_id.to_string())])
+        .collect()
+}
+
+/// Starts the agents a restarted built-in host is holding for their env.
+/// Best effort: one that cannot be resumed stays held and is tried next sweep.
+pub fn resume_awaiting(rows: &[HarnessSessionRow], host: &Host) {
+    let Ok(waiting) = host.awaiting() else { return };
+    for agent in waiting {
+        let on_host = |r: &&HarnessSessionRow| r.host == NATIVE_HOST && r.agent_name == agent.name;
+        let Some(row) = rows.iter().find(on_host) else {
+            continue;
+        };
+        let Ok(harness) = resolve(&row.harness) else {
+            continue;
+        };
+        let env = launch_env(&harness, &row.id);
+        if let Err(e) = host.resume_awaiting(&agent.name, env) {
+            tracing::warn!(session = %row.id, error = %e, "could not resume a held agent");
+        }
+    }
+}
+
 /// How the built-in host restarts this agent after the host itself restarts:
 /// only for harnesses that resume without a saved token.
 fn restart_args(harness: &Harness, vault_path: &Path, session_id: &str) -> Option<Vec<String>> {
@@ -197,17 +227,7 @@ pub(super) async fn run_launch(
         kind: harness.spec.kind.to_string(),
         cwd: l.cwd.to_string(),
         label: workspace_label(&harness.name, l.label),
-        env: profile
-            .map(|p| {
-                p.env
-                    .iter()
-                    .map(|(k, v)| (k.clone(), v.clone()))
-                    .collect::<Vec<_>>()
-            })
-            .unwrap_or_default()
-            .into_iter()
-            .chain([(SESSION_ENV.to_string(), l.session_id.to_string())])
-            .collect(),
+        env: launch_env(harness, l.session_id),
         args: build_args(
             harness,
             vault_path,

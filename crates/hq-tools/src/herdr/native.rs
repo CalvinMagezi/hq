@@ -1,5 +1,5 @@
 use super::{
-    AgentInfo, AgentStatus, HerdrError, Host, HostBackend, INVALID_KEYS_CODE, LaunchRequest,
+    AgentInfo, AgentStatus, AwaitingAgent, HerdrError, Host, HostBackend, INVALID_KEYS_CODE, LaunchRequest,
     Launched, PromptOutcome, shell_line, validate_keys,
 };
 use hq_host::{Client, ClientError};
@@ -34,6 +34,16 @@ impl NativeBackend {
             launch_bound: DEFAULT_LAUNCH_BOUND,
             command_timeout: DEFAULT_COMMAND_TIMEOUT,
         }
+    }
+
+    pub fn with_launch_bound(mut self, bound: Duration) -> Self {
+        self.launch_bound = bound;
+        self
+    }
+
+    pub fn with_command_timeout(mut self, timeout: Duration) -> Self {
+        self.command_timeout = timeout;
+        self
     }
 
     pub fn dir(&self) -> &Path {
@@ -119,6 +129,14 @@ fn parse_status(state: Option<&str>) -> AgentStatus {
         Some("blocked") => AgentStatus::Blocked,
         _ => AgentStatus::Unknown,
     }
+}
+
+fn parse_awaiting(v: &Value) -> Option<AwaitingAgent> {
+    let keys = v.get("env_keys")?.as_array()?;
+    Some(AwaitingAgent {
+        name: v.get("name")?.as_str()?.to_string(),
+        env_keys: keys.iter().filter_map(|k| k.as_str().map(str::to_string)).collect(),
+    })
 }
 
 fn parse_info(v: &Value) -> Option<AgentInfo> {
@@ -312,6 +330,21 @@ impl HostBackend for NativeBackend {
     fn shell_pid(&self, pane_id: &str) -> Option<u32> {
         let v = self.call("agent.get", json!({ "name": pane_id })).ok()?;
         v.get("pid")?.as_u64().map(|p| p as u32)
+    }
+
+    fn awaiting(&self) -> Result<Vec<AwaitingAgent>, HerdrError> {
+        let v = self.call("agent.awaiting", json!({}))?;
+        let list = v.get("agents").and_then(Value::as_array);
+        Ok(list
+            .map(|a| a.iter().filter_map(parse_awaiting).collect())
+            .unwrap_or_default())
+    }
+
+    fn resume_awaiting(&self, name: &str, env: Vec<(String, String)>) -> Result<(), HerdrError> {
+        let env: serde_json::Map<String, Value> =
+            env.into_iter().map(|(k, v)| (k, Value::String(v))).collect();
+        self.call("agent.resume", json!({ "name": name, "env": env }))
+            .map(|_| ())
     }
 
     fn with_launch_bound_dyn(&self, bound: Duration) -> Host {

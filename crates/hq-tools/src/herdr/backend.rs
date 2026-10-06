@@ -43,10 +43,29 @@ pub trait HostBackend: Send + Sync + std::fmt::Debug {
     fn close_workspace(&self, workspace_id: &str) -> Result<(), HerdrError>;
     fn shell_pid(&self, pane_id: &str) -> Option<u32>;
 
+    /// Agents the host restored but is holding until their env is supplied.
+    /// Only the built-in host has any.
+    fn awaiting(&self) -> Result<Vec<AwaitingAgent>, HerdrError> {
+        Ok(Vec::new())
+    }
+    fn resume_awaiting(&self, name: &str, _env: Vec<(String, String)>) -> Result<(), HerdrError> {
+        Err(HerdrError::Api {
+            code: "unsupported".into(),
+            message: format!("host '{}' does not hold agents for resume ({name})", self.name()),
+        })
+    }
+
     /// The same host with a different launch ceiling.
     fn with_launch_bound_dyn(&self, bound: Duration) -> Host;
     /// The same host with a different ceiling for non-wait calls.
     fn with_command_timeout_dyn(&self, timeout: Duration) -> Host;
+}
+
+/// A restored agent that cannot restart until HQ supplies its environment.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AwaitingAgent {
+    pub name: String,
+    pub env_keys: Vec<String>,
 }
 
 /// A shared handle to a host, as callers hold it.
@@ -191,6 +210,12 @@ impl<T: HostBackend + ?Sized> HostBackend for Arc<T> {
     }
     fn shell_pid(&self, pane_id: &str) -> Option<u32> {
         (**self).shell_pid(pane_id)
+    }
+    fn awaiting(&self) -> Result<Vec<AwaitingAgent>, HerdrError> {
+        (**self).awaiting()
+    }
+    fn resume_awaiting(&self, name: &str, env: Vec<(String, String)>) -> Result<(), HerdrError> {
+        (**self).resume_awaiting(name, env)
     }
     fn with_launch_bound_dyn(&self, bound: Duration) -> Host {
         (**self).with_launch_bound_dyn(bound)

@@ -25,7 +25,7 @@
 //! server's session driver posts it into that chat or drives the session.
 
 use anyhow::{Result, anyhow, bail};
-use hq_core::config::HqConfig;
+use hq_core::config::{HqConfig, NATIVE_HOST};
 use hq_core::types::{ChatMessage, MailboxMessageType, MessageRole, ValueItem, ValueKind};
 use hq_db::Database;
 use hq_db::harness_sessions_registry as registry;
@@ -105,6 +105,13 @@ fn gather_hosts(
     budget: Duration,
 ) -> HostPhase {
     let deadline = Instant::now() + budget;
+    // A restarted built-in host holds agents until HQ supplies their env, and
+    // an agent it does not list yet would be taken for gone below.
+    if rows.iter().any(|r| r.host == NATIVE_HOST) {
+        if let Ok(host) = (resolve.as_ref())(NATIVE_HOST) {
+            hq_tools::harness_session::resume_awaiting(rows, &host);
+        }
+    }
     let within_budget = move |host: Host| {
         host.with_command_timeout_dyn(
             deadline

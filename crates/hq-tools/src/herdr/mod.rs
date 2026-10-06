@@ -16,7 +16,7 @@ mod transport;
 
 use anyhow::Context;
 use hq_core::config::{
-    HerdrConfig, HqConfig, LOCAL_HOST, MAX_LAUNCH_BOUND_SECS, MIN_LAUNCH_BOUND_SECS,
+    HerdrConfig, HqConfig, LOCAL_HOST, NATIVE_HOST, native_host_dir, MAX_LAUNCH_BOUND_SECS, MIN_LAUNCH_BOUND_SECS,
 };
 use serde::Serialize;
 use serde_json::Value;
@@ -24,7 +24,7 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 use transport::{RawOutput, Transport};
 
-pub use backend::{Host, HostBackend};
+pub use backend::{AwaitingAgent, Host, HostBackend};
 pub use native::NativeBackend;
 
 /// Herdr rejects explicit timeouts outside this window.
@@ -244,7 +244,20 @@ pub fn host(name: Option<&str>) -> anyhow::Result<Host> {
     let cfg = HqConfig::load()
         .context("loading config for herdr hosts")?
         .herdr;
-    Ok(Arc::new(HerdrHost::from_config(&cfg, name.unwrap_or(&cfg.default_host))?))
+    build(&cfg, name.unwrap_or(&cfg.default_host))
+}
+
+fn build(cfg: &HerdrConfig, name: &str) -> anyhow::Result<Host> {
+    if name == NATIVE_HOST {
+        let launch = cfg
+            .launch_bound_secs
+            .clamp(MIN_LAUNCH_BOUND_SECS, MAX_LAUNCH_BOUND_SECS);
+        let host = NativeBackend::new(native_host_dir())
+            .with_launch_bound(Duration::from_secs(launch))
+            .with_command_timeout(Duration::from_secs(cfg.command_timeout_secs));
+        return Ok(Arc::new(host));
+    }
+    Ok(Arc::new(HerdrHost::from_config(cfg, name)?))
 }
 
 /// The machine HQ itself runs on.
@@ -259,10 +272,11 @@ pub fn all_hosts() -> anyhow::Result<Vec<Host>> {
         .herdr;
     let mut names = vec![LOCAL_HOST.to_string()];
     names.extend(cfg.hosts.keys().cloned());
-    names
-        .iter()
-        .map(|n| HerdrHost::from_config(&cfg, n).map(|h| Arc::new(h) as Host))
-        .collect()
+    let native_up = hq_host::socket_path(&native_host_dir()).exists();
+    if native_up || cfg.default_host == NATIVE_HOST {
+        names.push(NATIVE_HOST.to_string());
+    }
+    names.iter().map(|n| build(&cfg, n)).collect()
 }
 
 impl HerdrHost {

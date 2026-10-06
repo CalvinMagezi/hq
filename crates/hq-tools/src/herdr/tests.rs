@@ -527,3 +527,11 @@ fn writes_never_take_the_read_fallback() {
     assert_eq!(fake.calls().lines().count(), 1, "{}", fake.calls());
     assert!(!fake.calls().contains("visible"));
 }
+
+#[test]
+fn the_native_host_name_selects_the_built_in_host() {
+    let cfg = HerdrConfig::default();
+    assert_eq!(build(&cfg, NATIVE_HOST).unwrap().name(), "native");
+    assert_eq!(build(&cfg, LOCAL_HOST).unwrap().name(), LOCAL_HOST);
+    assert!(build(&cfg, "nowhere").is_err());
+}

@@ -1,14 +1,13 @@
 //! `hq host`: run or inspect the built-in agent host.
 
 use anyhow::{Context, Result, bail};
-use hq_core::config::HqConfig;
 use hq_host::{Client, Host, Server, socket_path};
 use serde_json::json;
 use std::path::PathBuf;
 use std::sync::Arc;
 
 fn default_dir() -> PathBuf {
-    HqConfig::hq_dir().join("run").join("host")
+    hq_core::config::native_host_dir()
 }
 
 pub async fn run(sub: &str, dir: Option<PathBuf>) -> Result<()> {
