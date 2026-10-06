@@ -98,4 +98,4 @@ echo "     Building from source instead: copy the binary to /usr/local/bin/hq an
 echo "     install deploy/hq.service and deploy/herdr.service by hand."
 echo "  2. Run: tailscale up"
 echo "  3. Publish the web UI to your tailnet: tailscale serve --bg --https=8443 http://127.0.0.1:4749"
-echo "     then open https://<this-host>.<your-tailnet>.ts.net:8443/ (see deploy/README.md, Tailscale)."
+echo "     then open the HTTPS address that Tailscale prints on port 8443 (see deploy/README.md, Tailscale)."
