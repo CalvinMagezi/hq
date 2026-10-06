@@ -8,8 +8,8 @@
 //! The bus-backed peer-messaging tools this module used to also expose
 //! (`agent_ask`, `agent_bus_inbox`, `agent_bus_reply`, `agent_broadcast_status`)
 //! were retired 2026-08-10 along with `hq-bus` itself: they existed for
-//! agent-to-agent messaging among `hermes`/`openclaw`/`asethu`, and none of
-//! those peers exist anymore. `agent_send_message`/`agent_read_inbox` are
+//! agent-to-agent messaging among peer agents, and none of those peers exist
+//! anymore. `agent_send_message`/`agent_read_inbox` are
 //! pure vault-mailbox reads/writes and needed no bus dependency to begin
 //! with, so they're unaffected.
 
