@@ -6,8 +6,6 @@ use std::sync::Arc;
 use tokio::io::AsyncWriteExt;
 
 pub struct VaultFindShortcut {
-    #[allow(dead_code)] // reserved for full-content fallback read
-    vault_path: PathBuf,
     db: Arc<Database>,
 }
 pub struct VaultNoteShortcut {
@@ -18,8 +16,8 @@ pub struct VaultLogShortcut {
 }
 
 impl VaultFindShortcut {
-    pub fn new(vault_path: PathBuf, db: Arc<Database>) -> Self {
-        Self { vault_path, db }
+    pub fn new(db: Arc<Database>) -> Self {
+        Self { db }
     }
 }
 impl VaultNoteShortcut {

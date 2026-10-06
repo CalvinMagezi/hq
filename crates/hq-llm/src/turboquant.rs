@@ -16,8 +16,6 @@ use crate::provider::{ChatRequest, ChatResponse, LlmProvider, StreamChunk};
 /// Configurable via TURBOQUANT_BASE_URL env var.
 pub struct TurboQuantProvider {
     client: Client<OpenAIConfig>,
-    #[allow(dead_code)]
-    base_url: String,
 }
 
 impl TurboQuantProvider {
@@ -28,7 +26,6 @@ impl TurboQuantProvider {
         let client = Client::with_config(config);
         Self {
             client,
-            base_url: base_url.to_string(),
         }
     }
 
