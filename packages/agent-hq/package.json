@@ -1,6 +1,6 @@
 {
   "name": "agent-hq-cli",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Install HQ, a local-first AI agent hub, with one command.",
   "type": "module",
   "bin": { "agent-hq": "bin/agent-hq.js" },
