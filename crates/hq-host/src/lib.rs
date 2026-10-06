@@ -4,6 +4,7 @@
 //! herdr is recorded.
 
 mod client;
+mod detect;
 mod emu;
 mod env;
 mod error;
@@ -15,6 +16,7 @@ mod server;
 mod token;
 
 pub use client::{Client, ClientError};
+pub use detect::{AgentState, Detection, Detector, ENGINE_VERSION, Input as DetectInput};
 pub use emu::{Emulator, Row, VtEmulator};
 pub use env::pane_env;
 pub use error::HostError;

@@ -1,0 +1,15 @@
+Agent HQ
+Copyright (c) 2026 Calvin Magezi, MIT License (see LICENSE).
+
+This product includes material derived from herdr (https://github.com/herdrdev/herdr),
+licensed under the Apache License, Version 2.0:
+
+  crates/hq-host/src/detect/manifests/claude.toml
+  crates/hq-host/src/detect/manifests/codex.toml
+    Agent screen-detection rules from src/detect/manifests/ at commit
+    3d9d2b18dab139ba226ebc5a1c9a9f2c9c3ee4df. Each file starts with a header naming
+    its origin and the change made (codex.toml has one rule appended by HQ).
+
+The Apache License 2.0 text is at https://www.apache.org/licenses/LICENSE-2.0.
+The rest of the repository is MIT. Details of what was taken and the rules for
+taking more are in docs/provenance/herdr.md.

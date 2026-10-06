@@ -1,6 +1,6 @@
 //! Runs real processes through the host. They use only `sh` and `cat`.
 
-use hq_host::{Host, HostError, PaneStatus, ReadSource, SpawnSpec};
+use hq_host::{AgentState, Host, HostError, PaneStatus, ReadSource, SpawnSpec};
 use std::time::{Duration, Instant};
 
 const WAIT: Duration = Duration::from_secs(10);
@@ -371,4 +371,124 @@ fn output_is_complete_the_moment_exit_is_reported() {
             &text[text.len().saturating_sub(200)..]
         );
     }
+}
+
+fn agent(name: &str, kind: &str, script: &str) -> SpawnSpec {
+    let mut spec = sh(name, script);
+    spec.agent = Some(kind.to_string());
+    spec
+}
+
+#[test]
+fn state_comes_from_the_screen_and_title_of_a_known_agent() {
+    let host = Host::new();
+    // Claude Code shows a spinner glyph in its terminal title while it works.
+    host.spawn(agent(
+        "busy",
+        "claude",
+        "printf '\\033]0;\\342\\227\\221 thinking\\007'; sleep 30",
+    ))
+    .unwrap();
+    let info = host
+        .wait_state(
+            "busy",
+            &[AgentState::Working],
+            Duration::from_millis(200),
+            WAIT,
+        )
+        .unwrap();
+    assert_eq!(info.state, Some(AgentState::Working));
+    assert_eq!(info.rule.as_deref(), Some("osc_title_working"));
+    assert_eq!(info.agent.as_deref(), Some("claude"));
+    assert!(info.title.contains("thinking"));
+    host.kill("busy").unwrap();
+}
+
+#[test]
+fn a_calm_screen_of_a_known_agent_is_idle_and_waiting_for_another_state_times_out() {
+    let host = Host::new();
+    host.spawn(agent("calm", "claude", "echo hello; sleep 30"))
+        .unwrap();
+    let info = host
+        .wait_state(
+            "calm",
+            &[AgentState::Idle],
+            Duration::from_millis(200),
+            WAIT,
+        )
+        .unwrap();
+    assert_eq!(info.state, Some(AgentState::Idle));
+    let err = host
+        .wait_state(
+            "calm",
+            &[AgentState::Blocked],
+            Duration::ZERO,
+            Duration::from_millis(400),
+        )
+        .unwrap_err();
+    assert_eq!(err.code(), "timeout");
+    host.kill("calm").unwrap();
+}
+
+#[test]
+fn a_blocked_dialog_is_seen_as_blocked() {
+    let host = Host::new();
+    let dialog = "printf '\\n  Hooks need review\\n\\n  1. Review hooks\\n\\n  Press enter to confirm or esc to go back\\n'; sleep 30";
+    host.spawn(agent("dialog", "codex", dialog)).unwrap();
+    let info = host
+        .wait_state(
+            "dialog",
+            &[AgentState::Blocked],
+            Duration::from_millis(200),
+            WAIT,
+        )
+        .unwrap();
+    assert_eq!(info.rule.as_deref(), Some("hooks_review_dialog"));
+    host.kill("dialog").unwrap();
+}
+
+#[test]
+fn an_agent_kind_without_rules_has_no_state() {
+    let host = Host::new();
+    host.spawn(agent("plain", "no-such-agent", "sleep 30"))
+        .unwrap();
+    assert!(host.info("plain").unwrap().state.is_none());
+    host.spawn(sh("noagent", "sleep 30")).unwrap();
+    assert!(host.info("noagent").unwrap().state.is_none());
+    assert_eq!(
+        host.wait_state(
+            "plain",
+            &[AgentState::Idle],
+            Duration::ZERO,
+            Duration::from_millis(300)
+        )
+        .unwrap_err()
+        .code(),
+        "timeout"
+    );
+    host.kill("plain").unwrap();
+    host.kill("noagent").unwrap();
+}
+
+#[test]
+fn a_flicker_shorter_than_the_stability_window_is_not_a_change() {
+    let host = Host::new();
+    // Working for about 300 ms, then calm for good.
+    let script =
+        "printf '\\033]0;\\342\\227\\221 x\\007'; sleep 0.3; printf '\\033]0;done\\007'; sleep 30";
+    host.spawn(agent("flick", "claude", script)).unwrap();
+    let err = host
+        .wait_state(
+            "flick",
+            &[AgentState::Working],
+            Duration::from_secs(2),
+            Duration::from_secs(3),
+        )
+        .unwrap_err();
+    assert_eq!(
+        err.code(),
+        "timeout",
+        "a 300 ms spinner must not count as a 2 s state"
+    );
+    host.kill("flick").unwrap();
 }

@@ -2,6 +2,7 @@
 //! thread per connection. A connection must say `hello` with the operator
 //! token before anything else.
 
+use crate::detect::AgentState;
 use crate::error::HostError;
 use crate::host::{Host, PaneInfo, PaneStatus, ReadSource, SpawnSpec};
 use crate::proto::{ErrorBody, MAX_LINE_BYTES, PROTOCOL_VERSION, Request, Response};
@@ -23,6 +24,7 @@ const LOCK_FILE: &str = "host.lock";
 const SOCKET_MODE: u32 = 0o600;
 const DEFAULT_WAIT_TIMEOUT_MS: u64 = 30_000;
 const DEFAULT_QUIET_MS: u64 = 1_000;
+const DEFAULT_STABLE_MS: u64 = 300;
 const HOST_VERSION: &str = env!("CARGO_PKG_VERSION");
 /// The accept loop checks the stop flag this often.
 const ACCEPT_POLL: Duration = Duration::from_millis(50);
@@ -311,6 +313,7 @@ impl Conn {
             "agent.spawn" => {
                 let p: SpawnParams = parse(params)?;
                 let mut spec = SpawnSpec::new(p.name, p.argv, p.cwd);
+                spec.agent = p.agent;
                 spec.env = p.env.into_iter().collect();
                 spec.rows = p.rows.unwrap_or(spec.rows);
                 spec.cols = p.cols.unwrap_or(spec.cols);
@@ -379,9 +382,23 @@ impl Conn {
                     .map_err(host_err)?;
                 Ok(info_json(&self.host.info(&p.name).map_err(host_err)?))
             }
+            "state" => {
+                if p.states.is_empty() {
+                    return Err(body(
+                        "invalid_params",
+                        "until state needs a non-empty states list",
+                    ));
+                }
+                let stable = Duration::from_millis(p.stable_ms.unwrap_or(DEFAULT_STABLE_MS));
+                let info = self
+                    .host
+                    .wait_state(&p.name, &p.states, stable, timeout)
+                    .map_err(host_err)?;
+                Ok(info_json(&info))
+            }
             other => Err(body(
                 "invalid_params",
-                format!("until must be exit or quiet, got {other:?}"),
+                format!("until must be exit, quiet or state, got {other:?}"),
             )),
         }
     }
@@ -414,6 +431,7 @@ struct SpawnParams {
     name: String,
     argv: Vec<String>,
     cwd: PathBuf,
+    agent: Option<String>,
     #[serde(default)]
     env: std::collections::BTreeMap<String, String>,
     rows: Option<u16>,
@@ -478,6 +496,11 @@ struct WaitParams {
     until: String,
     timeout_ms: Option<u64>,
     quiet_ms: Option<u64>,
+    /// For `until: "state"`: the states to wait for.
+    #[serde(default)]
+    states: Vec<AgentState>,
+    /// For `until: "state"`: how long the state must hold.
+    stable_ms: Option<u64>,
 }
 
 fn body(code: &str, message: impl Into<String>) -> ErrorBody {
@@ -513,6 +536,10 @@ fn info_json(i: &PaneInfo) -> Value {
     json!({
         "name": i.name,
         "argv": i.argv,
+        "agent": i.agent,
+        "title": i.title,
+        "state": i.state.map(AgentState::as_str),
+        "rule": i.rule,
         "cwd": i.cwd.to_string_lossy(),
         "pid": i.pid,
         "status": status,

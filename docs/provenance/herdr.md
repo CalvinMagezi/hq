@@ -30,7 +30,14 @@ terminal emulation backend is chosen separately.
 
 ## What has been taken so far
 
-Nothing. No herdr source or data file is copied into this repository yet.
+| File | Origin (at the pinned commit) | Change |
+|---|---|---|
+| `crates/hq-host/src/detect/manifests/claude.toml` | `src/detect/manifests/claude.toml` | header added, rules unchanged |
+| `crates/hq-host/src/detect/manifests/codex.toml` | `src/detect/manifests/codex.toml` | header added; one HQ rule appended (`hooks_review_dialog`), the herdr rules are unchanged |
+
+The rule-file format (regions, gates, priorities) follows herdr's documented
+behavior. The engine that reads it (`crates/hq-host/src/detect/`) was written
+for HQ and shares no code with herdr.
 
 ## Rules for anything taken later
 
@@ -39,8 +46,8 @@ Nothing. No herdr source or data file is copied into this repository yet.
    manifests.
 2. Every derived file starts with a header comment naming the origin file, the
    pinned commit above, the Apache-2.0 license, and that it was modified.
-3. The first derived file adds a `NOTICE` file at the repository root listing
-   herdr and the files derived from it, and updates this document.
+3. The root `NOTICE` file lists herdr and every file derived from it; add each
+   new derived file there and in the table above.
 4. A derived file keeps the Apache-2.0 terms for its own content. The rest of
    the repository stays MIT.
 5. If herdr's license changes again, the pinned commit stays usable under the

@@ -1,5 +1,6 @@
 //! The set of agents this host runs, and the operations on them.
 
+use crate::detect::{AgentState, Detector, Input};
 use crate::emu::{Row, VtEmulator};
 use crate::env::pane_env;
 use crate::error::HostError;
@@ -9,7 +10,7 @@ use crate::pane::{LaunchArgs, Pane};
 use std::collections::BTreeMap;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex, MutexGuard};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 const MAX_NAME_LEN: usize = 32;
 const DEFAULT_ROWS: u16 = 40;
@@ -22,6 +23,8 @@ const MAX_SCROLLBACK_ROWS: usize = 100_000;
 /// Pause between pasting a prompt and pressing Enter, so a TUI that handles the
 /// paste first does not swallow the Enter.
 const PROMPT_ENTER_DELAY: Duration = Duration::from_millis(150);
+/// How often `wait_state` looks at the screen again.
+const STATE_POLL: Duration = Duration::from_millis(100);
 const BRACKETED_PASTE_START: &[u8] = b"\x1b[200~";
 const BRACKETED_PASTE_END: &[u8] = b"\x1b[201~";
 
@@ -40,6 +43,9 @@ pub struct SpawnSpec {
     pub cwd: PathBuf,
     /// Variables the process gets in addition to the allowlisted ones.
     pub env: Vec<(String, String)>,
+    /// Which agent this is (`claude`, `codex`, ...), so its state can be
+    /// detected from the screen. None for a plain process.
+    pub agent: Option<String>,
     pub rows: u16,
     pub cols: u16,
     pub scrollback_rows: usize,
@@ -52,6 +58,7 @@ impl SpawnSpec {
             argv,
             cwd: cwd.into(),
             env: Vec::new(),
+            agent: None,
             rows: DEFAULT_ROWS,
             cols: DEFAULT_COLS,
             scrollback_rows: DEFAULT_SCROLLBACK_ROWS,
@@ -73,6 +80,13 @@ pub enum ReadSource {
 pub struct PaneInfo {
     pub name: String,
     pub argv: Vec<String>,
+    pub agent: Option<String>,
+    /// The terminal title the program set, or empty.
+    pub title: String,
+    /// Detected state; None when the agent kind has no rule file.
+    pub state: Option<AgentState>,
+    /// The rule that decided the state; None when the default applied.
+    pub rule: Option<String>,
     pub cwd: PathBuf,
     pub pid: Option<u32>,
     pub status: PaneStatus,
@@ -83,9 +97,15 @@ pub struct PaneInfo {
     pub age: Duration,
 }
 
-#[derive(Default)]
 pub struct Host {
     panes: Mutex<BTreeMap<String, Arc<Pane>>>,
+    detector: Detector,
+}
+
+impl Default for Host {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 fn lock<T>(m: &Mutex<T>) -> MutexGuard<'_, T> {
@@ -109,7 +129,16 @@ fn unwrap_rows(rows: Vec<Row>) -> Vec<String> {
 
 impl Host {
     pub fn new() -> Self {
-        Self::default()
+        Self::with_detector(Detector::builtin())
+    }
+
+    /// A host that detects agent state with `detector` (for example one with
+    /// local rule-file overrides loaded).
+    pub fn with_detector(detector: Detector) -> Self {
+        Self {
+            panes: Mutex::new(BTreeMap::new()),
+            detector,
+        }
     }
 
     fn pane(&self, name: &str) -> Result<Arc<Pane>, HostError> {
@@ -132,6 +161,7 @@ impl Host {
         let pane = Pane::spawn(
             LaunchArgs {
                 argv: spec.argv,
+                agent: spec.agent,
                 cwd: spec.cwd,
                 env: pane_env(&spec.env),
                 rows: spec.rows,
@@ -150,17 +180,17 @@ impl Host {
             return Err(HostError::NameTaken(spec.name));
         }
         panes.insert(spec.name.clone(), pane.clone());
-        Ok(info_of(&spec.name, pane.as_ref()))
+        Ok(info_of(&spec.name, pane.as_ref(), &self.detector))
     }
 
     pub fn info(&self, name: &str) -> Result<PaneInfo, HostError> {
-        Ok(info_of(name, self.pane(name)?.as_ref()))
+        Ok(info_of(name, self.pane(name)?.as_ref(), &self.detector))
     }
 
     pub fn list(&self) -> Vec<PaneInfo> {
         lock(&self.panes)
             .iter()
-            .map(|(n, p)| info_of(n, p))
+            .map(|(n, p)| info_of(n, p, &self.detector))
             .collect()
     }
 
@@ -250,6 +280,43 @@ impl Host {
         self.pane(name)?.wait_quiet(quiet, timeout)
     }
 
+    /// Waits until the detected state is one of `states` and has held for
+    /// `stable`, so a flicker between two screens is not taken for a change.
+    /// An agent kind without a rule file never matches and times out.
+    pub fn wait_state(
+        &self,
+        name: &str,
+        states: &[AgentState],
+        stable: Duration,
+        timeout: Duration,
+    ) -> Result<PaneInfo, HostError> {
+        let deadline = Instant::now() + timeout;
+        let mut since: Option<(AgentState, Instant)> = None;
+        loop {
+            let info = self.info(name)?;
+            match info.state {
+                Some(state) if states.contains(&state) => {
+                    let held = match since {
+                        Some((s, at)) if s == state => at,
+                        _ => Instant::now(),
+                    };
+                    since = Some((state, held));
+                    if held.elapsed() >= stable {
+                        return Ok(info);
+                    }
+                }
+                _ => since = None,
+            }
+            if info.status != PaneStatus::Running && info.state.is_none() {
+                return Err(HostError::Exited(name.to_string()));
+            }
+            if Instant::now() >= deadline {
+                return Err(HostError::Timeout(timeout));
+            }
+            std::thread::sleep(STATE_POLL);
+        }
+    }
+
     pub fn kill(&self, name: &str) -> Result<(), HostError> {
         self.pane(name)?.kill();
         Ok(())
@@ -269,11 +336,33 @@ fn check_size(rows: u16, cols: u16) -> Result<(), HostError> {
     }
 }
 
-fn info_of(name: &str, pane: &Pane) -> PaneInfo {
+/// The screen as detection sees it: visible rows as text, plus the title.
+fn screen_of(pane: &Pane) -> (String, String) {
+    pane.with_emu(|e| {
+        let rows: Vec<String> = e.visible().into_iter().map(|r| r.text).collect();
+        (rows.join("\n"), e.title())
+    })
+}
+
+fn info_of(name: &str, pane: &Pane, detector: &Detector) -> PaneInfo {
     let (rows, cols) = pane.size();
+    let detection = pane.agent.as_deref().and_then(|agent| {
+        let (screen, title) = screen_of(pane);
+        detector.detect(
+            agent,
+            Input {
+                screen: &screen,
+                osc_title: &title,
+            },
+        )
+    });
     PaneInfo {
         name: name.to_string(),
         argv: pane.argv.clone(),
+        agent: pane.agent.clone(),
+        title: pane.with_emu(|e| e.title()),
+        state: detection.as_ref().map(|d| d.state),
+        rule: detection.and_then(|d| d.rule),
         cwd: pane.cwd.clone(),
         pid: pane.pid,
         status: pane.status(),

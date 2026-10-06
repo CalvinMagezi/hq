@@ -386,3 +386,35 @@ fn only_one_of_two_simultaneous_hosts_wins_the_directory() {
         .collect();
     assert_eq!(results.iter().filter(|r| r.is_ok()).count(), 1);
 }
+
+#[test]
+fn state_is_reported_and_waited_for_over_the_socket() {
+    let host = Running::start();
+    let mut c = host.client();
+    let mut params = spawn_params(
+        "claude1",
+        "printf '\\033]0;\\342\\227\\221 busy\\007'; sleep 30",
+    );
+    params["agent"] = json!("claude");
+    let info = c.call("agent.spawn", params).unwrap();
+    assert_eq!(info["agent"], "claude");
+    let waited = c
+        .call("agent.wait", json!({ "name": "claude1", "until": "state", "states": ["working"], "stable_ms": 200, "timeout_ms": 10_000 }))
+        .unwrap();
+    assert_eq!(waited["state"], "working");
+    assert_eq!(waited["rule"], "osc_title_working");
+    let got = c.call("agent.get", json!({ "name": "claude1" })).unwrap();
+    assert!(got["title"].as_str().unwrap().contains("busy"));
+    let err = c
+        .call("agent.wait", json!({ "name": "claude1", "until": "state" }))
+        .unwrap_err();
+    assert_eq!(err.code(), Some("invalid_params"));
+    let err = c
+        .call(
+            "agent.wait",
+            json!({ "name": "claude1", "until": "state", "states": ["bogus"] }),
+        )
+        .unwrap_err();
+    assert_eq!(err.code(), Some("invalid_params"));
+    c.call("agent.kill", json!({ "name": "claude1" })).unwrap();
+}

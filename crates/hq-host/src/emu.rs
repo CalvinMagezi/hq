@@ -2,6 +2,7 @@
 //! without touching the host.
 
 use std::collections::BTreeMap;
+use std::sync::{Arc, Mutex};
 
 /// One screen row. `wrapped` means its text continues on the next row.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -21,17 +22,31 @@ pub trait Emulator: Send {
     fn history(&mut self) -> Vec<Row>;
     fn alt_screen(&self) -> bool;
     fn bracketed_paste(&self) -> bool;
+    /// The terminal title the program set, or empty.
+    fn title(&self) -> String;
+}
+
+/// Keeps the latest window title the program set.
+#[derive(Clone, Default)]
+struct TitleCapture(Arc<Mutex<String>>);
+
+impl vt100::Callbacks for TitleCapture {
+    fn set_window_title(&mut self, _: &mut vt100::Screen, title: &[u8]) {
+        let mut slot = self.0.lock().unwrap_or_else(|p| p.into_inner());
+        *slot = String::from_utf8_lossy(title).into_owned();
+    }
 }
 
 pub struct VtEmulator {
-    parser: vt100::Parser,
+    parser: vt100::Parser<TitleCapture>,
+    title: TitleCapture,
 }
 
 impl VtEmulator {
     pub fn new(rows: u16, cols: u16, scrollback_rows: usize) -> Self {
-        Self {
-            parser: vt100::Parser::new(rows, cols, scrollback_rows),
-        }
+        let title = TitleCapture::default();
+        let parser = vt100::Parser::new_with_callbacks(rows, cols, scrollback_rows, title.clone());
+        Self { parser, title }
     }
 
     fn page_rows(&self) -> Vec<Row> {
@@ -111,6 +126,14 @@ impl Emulator for VtEmulator {
     fn bracketed_paste(&self) -> bool {
         self.parser.screen().bracketed_paste()
     }
+
+    fn title(&self) -> String {
+        self.title
+            .0
+            .lock()
+            .unwrap_or_else(|p| p.into_inner())
+            .clone()
+    }
 }
 
 #[cfg(test)]
@@ -149,6 +172,14 @@ mod tests {
         assert_eq!(rows[0].text, "foo ");
         let joined: String = rows.iter().map(|r| r.text.as_str()).collect();
         assert_eq!(joined, "foo bar");
+    }
+
+    #[test]
+    fn the_window_title_is_captured() {
+        let mut e = fed(5, 20, "\x1b]0;first\x07\x1b]2;⠋ second\x1b\\");
+        assert_eq!(e.title(), "⠋ second");
+        e.process(b"\x1b]0;third\x07");
+        assert_eq!(e.title(), "third");
     }
 
     #[test]

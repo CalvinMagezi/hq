@@ -64,6 +64,7 @@ impl Shared {
 
 pub(crate) struct Pane {
     pub(crate) argv: Vec<String>,
+    pub(crate) agent: Option<String>,
     pub(crate) cwd: PathBuf,
     pub(crate) pid: Option<u32>,
     pub(crate) started: Instant,
@@ -75,6 +76,7 @@ pub(crate) struct Pane {
 
 pub(crate) struct LaunchArgs {
     pub argv: Vec<String>,
+    pub agent: Option<String>,
     pub cwd: PathBuf,
     pub env: Vec<(String, String)>,
     pub rows: u16,
@@ -149,6 +151,7 @@ impl Pane {
 
         Ok(Self {
             argv: args.argv,
+            agent: args.agent,
             cwd: args.cwd,
             pid,
             started: Instant::now(),

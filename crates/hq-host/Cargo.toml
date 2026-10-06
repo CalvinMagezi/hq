@@ -9,9 +9,11 @@ description = "Agent HQ's built-in host for long-lived coding agents (pty hostin
 portable-pty = "0.9"
 vt100 = "0.16"
 nix = { version = "0.28", default-features = false, features = ["signal", "user"] }
+regex = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 thiserror = { workspace = true }
+toml = { workspace = true }
 
 [dev-dependencies]
 tempfile = "3"
