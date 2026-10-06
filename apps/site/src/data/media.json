@@ -29,21 +29,21 @@
   {
     "id": "sessions-list",
     "kind": "image",
-    "src": "/media/sessions-list.png",
-    "alt": "The Sessions page listing supervised coding-agent sessions with host, task and live status.",
-    "caption": "The Sessions page: every supervised coding agent, its host, its task and its live state.",
-    "width": 1600,
-    "height": 1000
+    "src": "/media/sessions-list.jpg",
+    "alt": "The HQ Sessions page: a list of three supervised sessions (opencode, and two claude-code) with host and status, and the selected session's terminal output below its header.",
+    "caption": "The Sessions page: each supervised session with its host and state, and the selected one's terminal. The agents here are scripted stand-ins on a demo instance.",
+    "width": 1512,
+    "height": 771
   },
   {
     "id": "session-watch",
     "kind": "gif",
     "src": "/media/session-watch.gif",
-    "poster": "/media/session-watch-poster.png",
-    "alt": "A coding-agent session in watch mode: the pane text updates while HQ posts short status updates in the chat.",
-    "caption": "Watching a session: pane text on one side, short updates in the chat on the other.",
-    "width": 1280,
-    "height": 800
+    "poster": "/media/session-watch-poster.jpg",
+    "alt": "A short recording of the Sessions page: the terminal output of one session keeps growing as new lines arrive, then switches to a second session.",
+    "caption": "Watching a session: the pane refreshes every three seconds, and you can switch between sessions. Scripted stand-in agents on a demo instance, about 11 seconds.",
+    "width": 1200,
+    "height": 612
   },
   {
     "id": "terminal-install",
