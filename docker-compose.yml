@@ -5,11 +5,10 @@
 #
 # Put provider keys in a .env file next to this one (chmod 600), for example
 #   HQ_OPENROUTER_API_KEY=...
-# Compose reads it automatically. Empty values are ignored by HQ.
+# Compose reads it automatically. To pass other provider variables, add their names to the list below.
 services:
   hq:
     image: ghcr.io/calvinmagezi/hq:latest # or :main for every merge, or a fixed version tag
-    init: true
     restart: unless-stopped
     ports:
       # Loopback only. Reach it from other machines through Tailscale or a reverse
@@ -18,10 +17,12 @@ services:
     volumes:
       - hq-data:/data
     environment:
-      HQ_OPENROUTER_API_KEY: ${HQ_OPENROUTER_API_KEY:-}
-      HQ_ANTHROPIC_API_KEY: ${HQ_ANTHROPIC_API_KEY:-}
+      # A name without a value is passed through from your shell or .env, and left unset
+      # when you have not defined it.
+      - HQ_OPENROUTER_API_KEY
+      - HQ_ANTHROPIC_API_KEY
       # Optional: use your own web token instead of the generated one.
-      # HQ_WEB_AUTH_TOKEN: ${HQ_WEB_AUTH_TOKEN}
+      # - HQ_WEB_AUTH_TOKEN
 
 volumes:
   hq-data:

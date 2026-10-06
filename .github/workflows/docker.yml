@@ -9,6 +9,11 @@ name: Docker
 # when that version is the signed channel-main pointer, `latest` and `stable`
 # when it is the signed channel-stable pointer (docker/resolve-release.sh).
 # Both architectures build natively, so no QEMU: the arm64 leg runs on an arm runner.
+#
+# The Dockerfile and entrypoint come from main at the time of the run, not from the release
+# commit, so the image's revision label is the sha of this checkout and the release commit
+# is a separate label. docker/resolve-release.sh refuses releases older than the oldest one
+# the entrypoint was checked against (MIN_VERSION there, 0.9.1-main.10).
 on:
   workflow_run: # zizmor: ignore[dangerous-triggers] only our own Release and Promote runs on main, nothing from the triggering run is executed
     workflows: [Release, Promote]
@@ -21,6 +26,11 @@ on:
         type: string
 
 permissions: {}
+
+# bash with -e -o pipefail, so a failing script on the left of a pipe fails the step.
+defaults:
+  run:
+    shell: bash
 
 # One group per triggering run, not one for the whole workflow: GitHub drops all but
 # the newest pending run in a group, which would silently lose the `latest` update
@@ -50,6 +60,9 @@ jobs:
       revision: ${{ steps.resolve.outputs.revision }}
       created: ${{ steps.resolve.outputs.created }}
       extra_tags: ${{ steps.resolve.outputs.extra_tags }}
+      sha_amd64: ${{ steps.resolve.outputs.sha_amd64 }}
+      sha_arm64: ${{ steps.resolve.outputs.sha_arm64 }}
+      sha_web: ${{ steps.resolve.outputs.sha_web }}
       image: ${{ steps.image.outputs.image }}
       exists: ${{ steps.exists.outputs.exists }}
     steps:
@@ -112,7 +125,6 @@ jobs:
           cp "release-dl/hq-$VERSION-linux-x86_64.tar.gz" docker-context/hq-linux-amd64.tar.gz
           cp "release-dl/hq-$VERSION-linux-aarch64.tar.gz" docker-context/hq-linux-arm64.tar.gz
           cp "release-dl/hq-web-$VERSION.tar.gz" docker-context/hq-web.tar.gz
-          (cd docker-context && sha256sum hq-linux-amd64.tar.gz hq-linux-arm64.tar.gz hq-web.tar.gz > CHECKSUMS)
 
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
@@ -148,6 +160,10 @@ jobs:
       IMAGE: ${{ needs.resolve.outputs.image }}
       VERSION: ${{ needs.resolve.outputs.version }}
       REVISION: ${{ needs.resolve.outputs.revision }}
+      SOURCE_REVISION: ${{ github.sha }}
+      SHA_AMD64: ${{ needs.resolve.outputs.sha_amd64 }}
+      SHA_ARM64: ${{ needs.resolve.outputs.sha_arm64 }}
+      SHA_WEB: ${{ needs.resolve.outputs.sha_web }}
       CREATED: ${{ needs.resolve.outputs.created }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -159,9 +175,11 @@ jobs:
           name: docker-context
           path: docker-context
 
-      - name: Check the artifacts and add the entrypoint
+      # The hashes come from the signed manifest, read in the resolve job, not from the artifact.
+      - name: Check the artifacts against the signed manifest and add the entrypoint
         run: |
-          (cd docker-context && sha256sum --check CHECKSUMS)
+          printf '%s  hq-linux-amd64.tar.gz\n%s  hq-linux-arm64.tar.gz\n%s  hq-web.tar.gz\n' \
+            "$SHA_AMD64" "$SHA_ARM64" "$SHA_WEB" | (cd docker-context && sha256sum --check --strict -)
           install -m 0755 docker/entrypoint.sh docker-context/entrypoint.sh
 
       - name: Create the builder
@@ -170,7 +188,7 @@ jobs:
       - name: Build for the smoke test
         run: |
           docker buildx build --platform "$PLATFORM" --file docker/Dockerfile \
-            --build-arg "VERSION=$VERSION" --build-arg "REVISION=$REVISION" --build-arg "CREATED=$CREATED" \
+            --build-arg "VERSION=$VERSION" --build-arg "REVISION=$REVISION" --build-arg "SOURCE_REVISION=$SOURCE_REVISION" --build-arg "CREATED=$CREATED" \
             --provenance=false --sbom=false --load --tag hq-smoke:local docker-context
 
       - name: Smoke test
@@ -185,7 +203,7 @@ jobs:
       - name: Push by digest
         run: |
           docker buildx build --platform "$PLATFORM" --file docker/Dockerfile \
-            --build-arg "VERSION=$VERSION" --build-arg "REVISION=$REVISION" --build-arg "CREATED=$CREATED" \
+            --build-arg "VERSION=$VERSION" --build-arg "REVISION=$REVISION" --build-arg "SOURCE_REVISION=$SOURCE_REVISION" --build-arg "CREATED=$CREATED" \
             --provenance=false --sbom=false \
             --output "type=image,name=$IMAGE,push-by-digest=true,name-canonical=true,push=true" \
             --metadata-file build-metadata.json docker-context
@@ -209,6 +227,12 @@ jobs:
     if: ${{ !cancelled() && needs.resolve.result == 'success' && (needs.build.result == 'success' || needs.build.result == 'skipped') }}
     runs-on: ubuntu-22.04
     timeout-minutes: 15
+    # Two runs for the same version never interleave the exists-check and the create.
+    # A pending run for the same version is replaced by a newer one, which is fine because
+    # both publish the same image; the moving tags are re-checked against the pointers below.
+    concurrency:
+      group: docker-tags-${{ needs.resolve.outputs.version }}
+      cancel-in-progress: false
     permissions:
       contents: read # none needed beyond the default
       packages: write # create the multi-arch manifest and tags on ghcr.io
@@ -260,6 +284,7 @@ jobs:
           for extra in $EXTRA_TAGS; do
             channel=stable
             [ "$extra" != main ] || channel=main
+            # A failed read fails the step (pipefail plus -e) instead of silently skipping the move.
             current=$(gh release download "channel-$channel" --pattern "channel-$channel.json" --output - | jq -r .version)
             if [ "$current" != "$VERSION" ]; then
               echo "not moving $extra: channel-$channel now names $current, not $VERSION"

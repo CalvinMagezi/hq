@@ -10,7 +10,7 @@ the non-root user `hq` (uid 10001) and keeps all state under `/data`.
 ## Run it
 
 ```bash
-docker run -d --name hq --init --restart unless-stopped \
+docker run -d --name hq --restart unless-stopped \
   -p 127.0.0.1:5678:5678 -v hq-data:/data \
   -e HQ_OPENROUTER_API_KEY=... \
   ghcr.io/calvinmagezi/hq
@@ -63,8 +63,14 @@ With a bind mount the host directory must be writable by uid 10001
 
 Keys are read from the environment on every start and are never written into
 `/data/config.yaml` (the entrypoint removes any key `hq install` recorded). Set
-`HQ_OPENROUTER_API_KEY` or `HQ_ANTHROPIC_API_KEY`; any other config field follows the same
-rule: `HQ_` plus the upper-case field name, and `__` for nesting (see `.env.example`).
+`HQ_OPENROUTER_API_KEY` or `HQ_ANTHROPIC_API_KEY`. These `HQ_` names are the config fields,
+so every part of HQ sees them, the web settings page included. The router and `hq doctor`
+also accept the conventional unprefixed names (`OPENROUTER_API_KEY` and the like) in
+recent builds, and the router has always read them. Any other config field follows the
+same rule: `HQ_` plus the upper-case field name, and `__` for nesting (see `.env.example`).
+`HQ_WS_PORT` changes the port HQ listens on inside the container (default 5678); the first
+run banner and the health check follow it, and the banner shows that container port, so
+use the host port you mapped with `-p`.
 Recreate the container to apply a change (`docker compose up -d` does that).
 
 ## Using the CLI
@@ -95,7 +101,7 @@ Stop HQ so the SQLite files are consistent, then archive the volume:
 ```bash
 docker stop hq
 docker run --rm -v hq-data:/data -v "$PWD":/backup ubuntu:22.04 \
-  tar czf /backup/hq-data-$(date +%F).tgz -C /data .
+  sh -c 'umask 077 && tar czf /backup/hq-data-$(date +%F).tgz -C /data .'
 docker start hq
 ```
 
@@ -179,4 +185,11 @@ any image and is what the workflow runs before pushing. The first push creates t
 as private: make it public once in the package settings so `docker pull` works anonymously.
 To build locally, put `hq-linux-amd64.tar.gz`, `hq-linux-arm64.tar.gz`, `hq-web.tar.gz` and a
 copy of `docker/entrypoint.sh` in one directory (the release tarballs, renamed) and run
-`docker build -f docker/Dockerfile <dir>`.
+`docker build -f docker/Dockerfile <dir>` (BuildKit is required).
+
+The Dockerfile and entrypoint come from main when the workflow runs, not from the release
+commit. The image therefore carries two labels: `org.opencontainers.image.revision` is the
+commit of those files, and `dev.agent-hq.release-revision` is the commit the `hq` binary was
+built from. The entrypoint was checked against releases from `0.9.1-main.10` on, and
+`docker/resolve-release.sh` refuses anything older (`MIN_VERSION` in that script). The image
+runs `tini` as PID 1, so zombies from the bash tool are reaped without `--init`.

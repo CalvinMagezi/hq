@@ -6,12 +6,13 @@
 # `docker run IMAGE hq --version` and `docker run -it IMAGE bash` stay cheap.
 set -euo pipefail
 
-DATA_DIR=${HQ_DATA_DIR:-/data}
+DATA_DIR=/data
 TOKEN_FILE="$DATA_DIR/web-auth.env"
 TOKEN_VAR=HQ_WEB_AUTH_TOKEN
 TOKEN_BYTES=32
 VERSION_MARKER="$DATA_DIR/.hq-version"
-WEB_PORT=5678
+# The port inside the container; the host port is whatever -p maps to it.
+WEB_PORT=${HQ_WS_PORT:-5678}
 
 # hq install records provider keys it finds in the environment. Keys belong to the
 # container's environment, not to a file on the volume, so they are stripped again.
@@ -51,11 +52,14 @@ fi
 running_version=$(hq --version)
 if [ "$(cat "$VERSION_MARKER" 2> /dev/null || true)" != "$running_version" ]; then
     log "image changed ($running_version): upgrading the vault system files"
-    if hq install --upgrade --vault-path "$HQ_VAULT_PATH" > /dev/null 2>&1; then
+    upgrade_log=$(mktemp)
+    if hq install --upgrade --vault-path "$HQ_VAULT_PATH" > "$upgrade_log" 2>&1; then
         printf '%s\n' "$running_version" > "$VERSION_MARKER"
     else
-        log "hq install --upgrade failed; HQ will start anyway and retry on the next start"
+        log "hq install --upgrade failed; HQ will start anyway and retry on the next start. Last output:"
+        tail -n 20 "$upgrade_log" >&2
     fi
+    rm -f "$upgrade_log"
 fi
 
 new_token=""
@@ -87,6 +91,7 @@ if [ -n "$new_token" ]; then
    docker exec <container> cat $TOKEN_FILE
  To rotate it: delete that file and restart the container.
  Everything under /api and /ws is refused without it.
+ The port in the link is the container's. Use the host port you mapped with -p.
 ================================================================================
 
 EOF
