@@ -10,6 +10,7 @@ All notable changes to Agent-HQ will be documented in this file.
 - **Agent bash now needs a sandbox by default.** `governance.bash.sandbox` defaults to `required`. On a host without bubblewrap (Linux) or sandbox-exec (macOS) the `bash` tool refuses every command. Before upgrading such a host, run `apt install bubblewrap` (then restart HQ), or set `governance.bash.sandbox: best_effort` explicitly to keep running commands unwrapped. HQ logs an error at startup and files an owner notification when it is refusing; `hq doctor` shows the state.
 - **Chat relays no longer adopt the first sender as owner.** Set the owner in config, or run `hq pair` and send `/pair <code>` (Telegram, private chat) or `!pair <code>` (Discord DM). Existing owners recorded earlier keep working.
 - **Self-update install needs owner approval**, and the tools stay off unless `self_update.enabled` is true.
+- **Removed: `companies[].budget` (`monthly_usd`, `alert_at`).** Nothing ever read these settings. A config that still has them keeps loading, the keys are ignored, and they are dropped from `config.yaml` the next time HQ saves its config.
 
 ## [0.9.0] - 2026-05-24
 

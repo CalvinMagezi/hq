@@ -19,7 +19,7 @@ pub use agent::*;
 pub use backends::{BACKENDS_SCHEMA_VERSION, BackendEntry, BackendKind, BackendsConfig, WireApi};
 pub use collaboration::*;
 pub use company::{
-    CompanyBudget, CompanyConfig, CompanyIdentity, ConnectorBinding, ListenerDef, company_by_id,
+    CompanyConfig, CompanyIdentity, ConnectorBinding, ListenerDef, company_by_id,
 };
 pub use decisions::{
     DecisionMode, DecisionRoute, DecisionSite, DecisionsConfig, SITE_EMAIL_FYI, SITE_MEMORY_TURN,
