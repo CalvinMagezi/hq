@@ -72,6 +72,27 @@ jobs:
           HQ_REQUIRE_BUILT_APP: "1"
         run: cargo test --workspace --locked
 
+  rust-macos:
+    name: Rust (macOS build)
+    runs-on: macos-14
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Install Rust toolchain
+        run: |
+          rustup toolchain install "$RUST_TOOLCHAIN" --profile minimal
+          rustup default "$RUST_TOOLCHAIN"
+
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+
+      # The macOS binary ships in every release; a Linux-only call in a dependency or in our
+      # code compiles on Linux CI and breaks only here.
+      - name: Compile the CLI
+        run: cargo check -p hq-cli --all-targets --locked
+
   rustfmt:
     name: Rust (fmt, non-blocking)
     runs-on: ubuntu-latest
