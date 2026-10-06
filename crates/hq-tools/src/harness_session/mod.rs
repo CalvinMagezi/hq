@@ -262,9 +262,6 @@ const TRUST_SETTLE_TIMEOUT: Duration = Duration::from_secs(120);
 /// Screen lines shown to the caller when a launch stops at a dialog.
 const BLOCKED_SCREEN_LINES: usize = 40;
 
-/// Screen lines scanned for a resume token.
-const TOKEN_SCAN_LINES: usize = 2000;
-
 /// Longest a single `harness_session_wait` may block.
 pub const MAX_WAIT: Duration = Duration::from_secs(300);
 
@@ -1559,20 +1556,6 @@ pub fn harvest_resume_token(
             db.with_conn(move |c| registry::set_resume_token(c, &id, &t))?;
         }
     Ok(token)
-}
-
-/// Deeper scan than the supervisor's snapshot, for callers that want a token
-/// right after a session ended.
-pub fn harvest_resume_token_live(db: &Arc<Database>, session_id: &str) -> Result<Option<String>> {
-    let row = get_row(db, session_id)?;
-    let screen = locate(&row)
-        .ok()
-        .and_then(|(host, agent)| {
-            agent?;
-            host.read(&row.agent_name, TOKEN_SCAN_LINES).ok()
-        })
-        .unwrap_or_default();
-    harvest_resume_token(db, session_id, &screen)
 }
 
 #[cfg(test)]

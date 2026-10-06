@@ -6,18 +6,6 @@
 use anyhow::Result;
 use rusqlite::{Connection, params};
 
-/// One row in the `tool_usage` table.
-#[derive(Debug, Clone)]
-pub struct ToolUsageRow {
-    pub id: i64,
-    pub tool_name: String,
-    pub agent_name: String,
-    pub session_id: String,
-    pub timestamp: i64,
-    pub success: bool,
-    pub error_msg: Option<String>,
-}
-
 /// Record one tool call. Pass `success = false` and an `error_msg` on failure.
 pub fn record_tool_call(
     conn: &Connection,
