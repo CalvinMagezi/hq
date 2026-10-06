@@ -16,6 +16,7 @@ members = [
     "crates/hq-memory",
     "crates/hq-convert",
     "crates/hq-update",
+    "crates/hq-host",
 
 ]
 

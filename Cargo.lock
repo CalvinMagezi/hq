@@ -2383,6 +2383,10 @@ dependencies = [
 ]
 
 [[package]]
+name = "hq-host"
+version = "0.9.1"
+
+[[package]]
 name = "hq-llm"
 version = "0.9.1"
 dependencies = [

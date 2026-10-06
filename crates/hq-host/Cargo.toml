@@ -1,0 +1,6 @@
+[package]
+name = "hq-host"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Agent HQ's built-in host for long-lived coding agents (pty hosting, state detection, control API)"
