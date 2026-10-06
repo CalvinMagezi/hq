@@ -81,6 +81,16 @@ enum Commands {
         lines: usize,
     },
 
+    /// Run or inspect the built-in agent host (long-lived coding agents in pseudo-terminals)
+    Host {
+        /// serve (run the host in this terminal), status, or stop
+        #[arg(default_value = "status")]
+        sub: String,
+        /// Directory holding host.sock and operator.token (default: ~/.hq/run/host)
+        #[arg(long)]
+        dir: Option<std::path::PathBuf>,
+    },
+
     /// Internal: detached applier spawned by self_update_install
     #[command(name = "self-apply", hide = true)]
     SelfApply {
@@ -619,6 +629,7 @@ async fn dispatch(command: Commands, config: &HqConfig) -> Result<()> {
             host,
             lines,
         } => commands::sessions::run(config, &sub, arg, prompt, cwd, label, host, lines).await,
+        Commands::Host { sub, dir } => commands::host::run(&sub, dir).await,
         Commands::SelfApply { run_id } => commands::self_apply::run(config, run_id).await,
         Commands::NotifyRestart { phase, reason, sha } => {
             commands::notify_restart::run(config, &phase, &reason, sha.as_deref()).await

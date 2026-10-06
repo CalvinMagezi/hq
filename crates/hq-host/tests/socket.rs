@@ -1,0 +1,274 @@
+//! The control socket, exercised through real sockets and real processes.
+
+use hq_host::{Client, ClientError, Host, Server, socket_path};
+use serde_json::{Value, json};
+use std::io::{Read, Write};
+use std::os::unix::fs::PermissionsExt;
+use std::os::unix::net::UnixStream;
+use std::path::Path;
+use std::sync::Arc;
+use std::time::{Duration, Instant};
+
+const WAIT: Duration = Duration::from_secs(10);
+
+struct Running {
+    dir: tempfile::TempDir,
+    stop: hq_host::StopHandle,
+    thread: Option<std::thread::JoinHandle<()>>,
+}
+
+impl Running {
+    fn start() -> Self {
+        let dir = tempfile::tempdir().unwrap();
+        let server = Server::bind(&dir.path().join("run"), Arc::new(Host::new())).unwrap();
+        let stop = server.stop_handle();
+        let thread = std::thread::spawn(move || server.serve());
+        Self {
+            dir,
+            stop,
+            thread: Some(thread),
+        }
+    }
+
+    fn run_dir(&self) -> std::path::PathBuf {
+        self.dir.path().join("run")
+    }
+
+    fn client(&self) -> Client {
+        Client::connect(&self.run_dir()).unwrap()
+    }
+}
+
+impl Drop for Running {
+    fn drop(&mut self) {
+        self.stop.stop();
+        if let Some(t) = self.thread.take() {
+            let _ = t.join();
+        }
+    }
+}
+
+fn raw(dir: &Path, line: &str) -> Value {
+    let mut s = UnixStream::connect(socket_path(dir)).unwrap();
+    s.write_all(line.as_bytes()).unwrap();
+    s.write_all(b"\n").unwrap();
+    let mut buf = Vec::new();
+    let mut byte = [0u8; 1];
+    while s.read(&mut byte).unwrap() == 1 && byte[0] != b'\n' {
+        buf.push(byte[0]);
+    }
+    serde_json::from_slice(&buf).unwrap()
+}
+
+fn spawn_params(name: &str, script: &str) -> Value {
+    json!({ "name": name, "argv": ["sh", "-c", script], "cwd": std::env::temp_dir() })
+}
+
+fn read_until(c: &mut Client, name: &str, want: &str) -> String {
+    let deadline = Instant::now() + WAIT;
+    loop {
+        let text = c
+            .call("agent.read", json!({ "name": name, "source": "visible" }))
+            .unwrap()["text"]
+            .as_str()
+            .unwrap()
+            .to_string();
+        if text.contains(want) {
+            return text;
+        }
+        assert!(
+            Instant::now() < deadline,
+            "never saw {want:?}; screen:\n{text}"
+        );
+        std::thread::sleep(Duration::from_millis(50));
+    }
+}
+
+#[test]
+fn a_full_agent_round_trip_over_the_socket() {
+    let host = Running::start();
+    let mut c = host.client();
+    let info = c
+        .call(
+            "agent.spawn",
+            spawn_params("one", "read line; printf 'got:%s\\n' \"$line\"; exit 7"),
+        )
+        .unwrap();
+    assert_eq!(info["status"], "running");
+    c.call(
+        "agent.prompt",
+        json!({ "name": "one", "text": "hello socket" }),
+    )
+    .unwrap();
+    read_until(&mut c, "one", "got:hello socket");
+    let waited = c
+        .call(
+            "agent.wait",
+            json!({ "name": "one", "until": "exit", "timeout_ms": 10_000 }),
+        )
+        .unwrap();
+    assert_eq!(waited["exit_code"], 7);
+    assert_eq!(
+        c.call("agent.get", json!({ "name": "one" })).unwrap()["status"],
+        "exited"
+    );
+    assert_eq!(
+        c.call("agent.list", json!({})).unwrap()["agents"]
+            .as_array()
+            .unwrap()
+            .len(),
+        1
+    );
+    c.call("agent.remove", json!({ "name": "one" })).unwrap();
+    assert_eq!(c.call("host.status", json!({})).unwrap()["agents"], 0);
+}
+
+#[test]
+fn keys_resize_and_quiet_work_remotely() {
+    let host = Running::start();
+    let mut c = host.client();
+    c.call("agent.spawn", json!({ "name": "cat", "argv": ["cat"], "cwd": std::env::temp_dir(), "rows": 20, "cols": 60 })).unwrap();
+    c.call("agent.send_text", json!({ "name": "cat", "text": "abc\r" }))
+        .unwrap();
+    read_until(&mut c, "cat", "abc");
+    c.call(
+        "agent.resize",
+        json!({ "name": "cat", "rows": 10, "cols": 50 }),
+    )
+    .unwrap();
+    let quiet = c
+        .call(
+            "agent.wait",
+            json!({ "name": "cat", "until": "quiet", "quiet_ms": 300, "timeout_ms": 10_000 }),
+        )
+        .unwrap();
+    assert_eq!(
+        (quiet["rows"].as_u64(), quiet["cols"].as_u64()),
+        (Some(10), Some(50))
+    );
+    let err = c
+        .call(
+            "agent.send_keys",
+            json!({ "name": "cat", "keys": ["--nope"] }),
+        )
+        .unwrap_err();
+    assert_eq!(err.code(), Some("invalid_keys"));
+    c.call(
+        "agent.send_keys",
+        json!({ "name": "cat", "keys": ["ctrl+d"] }),
+    )
+    .unwrap();
+    assert_eq!(
+        c.call("agent.wait", json!({ "name": "cat", "until": "exit" }))
+            .unwrap()["exit_code"],
+        0
+    );
+}
+
+#[test]
+fn nothing_works_before_hello_and_the_token_is_checked() {
+    let host = Running::start();
+    let dir = host.run_dir();
+    let early = raw(&dir, r#"{"id":1,"method":"host.status","params":{}}"#);
+    assert_eq!(early["error"]["code"], "unauthenticated");
+    let wrong = raw(
+        &dir,
+        r#"{"id":2,"method":"hello","params":{"protocol_version":1,"token":"nope"}}"#,
+    );
+    assert_eq!(wrong["error"]["code"], "unauthorized");
+    match Client::connect_with_token(&dir, "nope") {
+        Err(e @ ClientError::Remote { .. }) => assert_eq!(e.code(), Some("unauthorized")),
+        other => panic!("expected unauthorized, got {:?}", other.map(|_| ())),
+    }
+}
+
+#[test]
+fn a_protocol_version_mismatch_is_refused() {
+    let host = Running::start();
+    let token = std::fs::read_to_string(hq_host::token_path(&host.run_dir())).unwrap();
+    let line = format!(
+        r#"{{"id":1,"method":"hello","params":{{"protocol_version":999,"token":"{}"}}}}"#,
+        token.trim()
+    );
+    assert_eq!(
+        raw(&host.run_dir(), &line)["error"]["code"],
+        "protocol_mismatch"
+    );
+}
+
+#[test]
+fn bad_requests_get_errors_not_silence() {
+    let host = Running::start();
+    let mut c = host.client();
+    assert_eq!(
+        c.call("agent.nope", json!({})).unwrap_err().code(),
+        Some("unknown_method")
+    );
+    assert_eq!(
+        c.call("agent.get", json!({})).unwrap_err().code(),
+        Some("invalid_params")
+    );
+    assert_eq!(
+        c.call("agent.get", json!({ "name": "ghost" }))
+            .unwrap_err()
+            .code(),
+        Some("agent_not_found")
+    );
+    assert_eq!(
+        c.call("agent.wait", json!({ "name": "x", "until": "never" }))
+            .unwrap_err()
+            .code(),
+        Some("invalid_params")
+    );
+    assert_eq!(
+        raw(&host.run_dir(), "this is not json")["error"]["code"],
+        "bad_request"
+    );
+}
+
+#[test]
+fn an_oversized_line_closes_the_connection() {
+    let host = Running::start();
+    let mut s = UnixStream::connect(socket_path(&host.run_dir())).unwrap();
+    s.write_all(&vec![b'x'; hq_host::MAX_LINE_BYTES + 10]).ok();
+    s.write_all(b"\n").ok();
+    let mut out = String::new();
+    s.read_to_string(&mut out).ok();
+    assert!(out.contains("line_too_long"), "{out:?}");
+}
+
+#[test]
+fn socket_and_directory_are_private() {
+    let host = Running::start();
+    let mode = |p: &Path| std::fs::metadata(p).unwrap().permissions().mode() & 0o777;
+    assert_eq!(mode(&host.run_dir()), 0o700);
+    assert_eq!(mode(&socket_path(&host.run_dir())), 0o600);
+    assert_eq!(mode(&hq_host::token_path(&host.run_dir())), 0o600);
+}
+
+#[test]
+fn a_live_host_blocks_a_second_one_but_a_stale_socket_is_replaced() {
+    let host = Running::start();
+    let err = Server::bind(&host.run_dir(), Arc::new(Host::new()))
+        .err()
+        .expect("second bind must fail");
+    assert_eq!(err.kind(), std::io::ErrorKind::AddrInUse);
+
+    let dir = tempfile::tempdir().unwrap();
+    let run = dir.path().join("run");
+    {
+        let first = Server::bind(&run, Arc::new(Host::new())).unwrap();
+        drop(first); // listener closed, socket file left behind
+    }
+    assert!(socket_path(&run).exists());
+    Server::bind(&run, Arc::new(Host::new())).expect("stale socket replaced");
+}
+
+#[test]
+fn host_stop_ends_serving_and_removes_the_socket() {
+    let mut host = Running::start();
+    let mut c = host.client();
+    c.call("host.stop", json!({})).unwrap();
+    host.thread.take().unwrap().join().unwrap();
+    assert!(!socket_path(&host.run_dir()).exists());
+}

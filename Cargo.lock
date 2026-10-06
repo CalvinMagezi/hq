@@ -2301,6 +2301,7 @@ dependencies = [
  "hq-core",
  "hq-daemon",
  "hq-db",
+ "hq-host",
  "hq-llm",
  "hq-mcp",
  "hq-memory",
@@ -2411,6 +2412,8 @@ version = "0.9.1"
 dependencies = [
  "nix",
  "portable-pty",
+ "serde",
+ "serde_json",
  "tempfile",
  "thiserror 2.0.18",
  "vt100",

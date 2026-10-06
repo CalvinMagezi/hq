@@ -9,6 +9,7 @@ pub mod decisions;
 pub mod doctor;
 pub mod env;
 pub mod health;
+pub mod host;
 pub mod install;
 pub mod kill;
 pub mod logs;

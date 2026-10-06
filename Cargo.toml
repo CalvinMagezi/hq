@@ -140,6 +140,7 @@ hq-web = { path = "crates/hq-web" }
 
 hq-memory = { path = "crates/hq-memory" }
 hq-update = { path = "crates/hq-update" }
+hq-host = { path = "crates/hq-host" }
 
 
 [profile.release]

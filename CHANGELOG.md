@@ -4,6 +4,10 @@ All notable changes to Agent-HQ will be documented in this file.
 
 ## [Unreleased]
 
+### Added
+
+- **`hq host`**: a built-in host for long-lived coding agents (pseudo-terminals with a readable screen, a JSON control socket with an operator token). `hq host serve|status|stop`; see `docs/AGENT_HOST.md`. HQ sessions still use herdr until the native backend lands.
+
 ### Upgrading from 0.9.0 or earlier
 
 - **`HTTP-Referer` is no longer sent by default.** It used to be a hardcoded URL. To keep OpenRouter app attribution, set `http_referer: <your url>` in `config.yaml` (or `HQ_HTTP_REFERER`) before upgrading.
