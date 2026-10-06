@@ -1,0 +1,253 @@
+//! One agent process in a pseudo-terminal, with its emulated screen.
+
+use crate::emu::{Emulator, Row};
+use crate::error::HostError;
+use portable_pty::{ChildKiller, CommandBuilder, MasterPty, PtySize, native_pty_system};
+use std::io::{Read, Write};
+use std::path::PathBuf;
+use std::sync::{Arc, Condvar, Mutex, MutexGuard};
+use std::time::{Duration, Instant};
+
+const READ_CHUNK: usize = 16 * 1024;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PaneStatus {
+    Running,
+    Exited { code: u32 },
+}
+
+struct State {
+    last_output: Instant,
+    bytes: u64,
+    exit: Option<u32>,
+}
+
+struct Shared {
+    emu: Mutex<Box<dyn Emulator>>,
+    state: Mutex<State>,
+    changed: Condvar,
+}
+
+fn lock<T>(m: &Mutex<T>) -> MutexGuard<'_, T> {
+    m.lock().unwrap_or_else(|poisoned| poisoned.into_inner())
+}
+
+pub(crate) struct Pane {
+    pub(crate) argv: Vec<String>,
+    pub(crate) cwd: PathBuf,
+    pub(crate) pid: Option<u32>,
+    pub(crate) started: Instant,
+    shared: Arc<Shared>,
+    writer: Mutex<Box<dyn Write + Send>>,
+    master: Mutex<Box<dyn MasterPty + Send>>,
+    killer: Mutex<Box<dyn ChildKiller + Send + Sync>>,
+}
+
+pub(crate) struct LaunchArgs {
+    pub argv: Vec<String>,
+    pub cwd: PathBuf,
+    pub env: Vec<(String, String)>,
+    pub rows: u16,
+    pub cols: u16,
+}
+
+impl Pane {
+    pub(crate) fn spawn(args: LaunchArgs, emu: Box<dyn Emulator>) -> Result<Self, HostError> {
+        let command = args.argv.join(" ");
+        let spawn_err = |detail: String| HostError::Spawn {
+            command: command.clone(),
+            detail,
+        };
+        let (program, rest) = args
+            .argv
+            .split_first()
+            .ok_or_else(|| spawn_err("empty command".into()))?;
+
+        let pair = native_pty_system()
+            .openpty(PtySize {
+                rows: args.rows,
+                cols: args.cols,
+                pixel_width: 0,
+                pixel_height: 0,
+            })
+            .map_err(|e| spawn_err(e.to_string()))?;
+        let mut builder = CommandBuilder::new(program);
+        builder.args(rest);
+        builder.cwd(&args.cwd);
+        builder.env_clear();
+        for (k, v) in &args.env {
+            builder.env(k, v);
+        }
+        let child = pair
+            .slave
+            .spawn_command(builder)
+            .map_err(|e| spawn_err(e.to_string()))?;
+        drop(pair.slave);
+        let pid = child.process_id();
+        let killer = child.clone_killer();
+        let reader = pair
+            .master
+            .try_clone_reader()
+            .map_err(|e| spawn_err(e.to_string()))?;
+        let writer = pair
+            .master
+            .take_writer()
+            .map_err(|e| spawn_err(e.to_string()))?;
+
+        let shared = Arc::new(Shared {
+            emu: Mutex::new(emu),
+            state: Mutex::new(State {
+                last_output: Instant::now(),
+                bytes: 0,
+                exit: None,
+            }),
+            changed: Condvar::new(),
+        });
+        spawn_reader(reader, shared.clone());
+        spawn_waiter(child, shared.clone());
+
+        Ok(Self {
+            argv: args.argv,
+            cwd: args.cwd,
+            pid,
+            started: Instant::now(),
+            shared,
+            writer: Mutex::new(writer),
+            master: Mutex::new(pair.master),
+            killer: Mutex::new(killer),
+        })
+    }
+
+    pub(crate) fn status(&self) -> PaneStatus {
+        match lock(&self.shared.state).exit {
+            Some(code) => PaneStatus::Exited { code },
+            None => PaneStatus::Running,
+        }
+    }
+
+    pub(crate) fn bytes_seen(&self) -> u64 {
+        lock(&self.shared.state).bytes
+    }
+
+    pub(crate) fn quiet_for(&self) -> Duration {
+        lock(&self.shared.state).last_output.elapsed()
+    }
+
+    pub(crate) fn size(&self) -> (u16, u16) {
+        lock(&self.shared.emu).size()
+    }
+
+    pub(crate) fn with_emu<T>(&self, f: impl FnOnce(&mut dyn Emulator) -> T) -> T {
+        f(lock(&self.shared.emu).as_mut())
+    }
+
+    pub(crate) fn rows(&self, whole_history: bool) -> Vec<Row> {
+        self.with_emu(|e| {
+            if whole_history {
+                e.history()
+            } else {
+                e.visible()
+            }
+        })
+    }
+
+    pub(crate) fn write(&self, bytes: &[u8]) -> Result<(), HostError> {
+        let mut w = lock(&self.writer);
+        w.write_all(bytes)
+            .and_then(|()| w.flush())
+            .map_err(|e| HostError::Io(e.to_string()))
+    }
+
+    pub(crate) fn resize(&self, rows: u16, cols: u16) -> Result<(), HostError> {
+        lock(&self.master)
+            .resize(PtySize {
+                rows,
+                cols,
+                pixel_width: 0,
+                pixel_height: 0,
+            })
+            .map_err(|e| HostError::Io(e.to_string()))?;
+        lock(&self.shared.emu).resize(rows, cols);
+        Ok(())
+    }
+
+    pub(crate) fn kill(&self) {
+        let _ = lock(&self.killer).kill();
+    }
+
+    /// Blocks until the process exits, returning its exit code.
+    pub(crate) fn wait_exit(&self, timeout: Duration) -> Result<u32, HostError> {
+        let deadline = Instant::now() + timeout;
+        let mut state = lock(&self.shared.state);
+        loop {
+            if let Some(code) = state.exit {
+                return Ok(code);
+            }
+            let left = deadline.saturating_duration_since(Instant::now());
+            if left.is_zero() {
+                return Err(HostError::Timeout(timeout));
+            }
+            state = self
+                .shared
+                .changed
+                .wait_timeout(state, left)
+                .unwrap_or_else(|p| p.into_inner())
+                .0;
+        }
+    }
+
+    /// Blocks until the pane has printed nothing for `quiet`, or exits.
+    pub(crate) fn wait_quiet(&self, quiet: Duration, timeout: Duration) -> Result<(), HostError> {
+        let deadline = Instant::now() + timeout;
+        let mut state = lock(&self.shared.state);
+        loop {
+            if state.exit.is_some() || state.last_output.elapsed() >= quiet {
+                return Ok(());
+            }
+            let until_quiet = quiet.saturating_sub(state.last_output.elapsed());
+            let left = deadline.saturating_duration_since(Instant::now());
+            if left.is_zero() {
+                return Err(HostError::Timeout(timeout));
+            }
+            state = self
+                .shared
+                .changed
+                .wait_timeout(state, until_quiet.min(left))
+                .unwrap_or_else(|p| p.into_inner())
+                .0;
+        }
+    }
+}
+
+impl Drop for Pane {
+    fn drop(&mut self) {
+        if self.status() == PaneStatus::Running {
+            self.kill();
+        }
+    }
+}
+
+fn spawn_reader(mut reader: Box<dyn Read + Send>, shared: Arc<Shared>) {
+    std::thread::spawn(move || {
+        let mut buf = vec![0u8; READ_CHUNK];
+        while let Ok(n) = reader.read(&mut buf) {
+            if n == 0 {
+                break;
+            }
+            lock(&shared.emu).process(&buf[..n]);
+            let mut state = lock(&shared.state);
+            state.last_output = Instant::now();
+            state.bytes += n as u64;
+            drop(state);
+            shared.changed.notify_all();
+        }
+    });
+}
+
+fn spawn_waiter(mut child: Box<dyn portable_pty::Child + Send + Sync>, shared: Arc<Shared>) {
+    std::thread::spawn(move || {
+        let code = child.wait().map(|s| s.exit_code()).unwrap_or(u32::MAX);
+        lock(&shared.state).exit = Some(code);
+        shared.changed.notify_all();
+    });
+}

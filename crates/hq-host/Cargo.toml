@@ -4,3 +4,12 @@ version.workspace = true
 edition.workspace = true
 license.workspace = true
 description = "Agent HQ's built-in host for long-lived coding agents (pty hosting, state detection, control API)"
+
+[dependencies]
+portable-pty = "0.9"
+vt100 = "0.16"
+thiserror = { workspace = true }
+tracing = { workspace = true }
+
+[dev-dependencies]
+tempfile = "3"
