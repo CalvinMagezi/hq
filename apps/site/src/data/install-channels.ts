@@ -18,6 +18,11 @@ export const installChannels = {
     title: 'Install script',
     command: 'curl -fsSL https://agent-hq.online/install.sh | bash',
   },
+  brew: {
+    available: true,
+    title: 'Homebrew',
+    command: 'brew install CalvinMagezi/tap/agent-hq',
+  },
   npx: {
     available: true,
     title: 'npx installer',

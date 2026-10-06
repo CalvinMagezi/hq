@@ -93,6 +93,9 @@ launchd service; it is macOS only and not needed on Linux.
 
 ### Install a prebuilt binary
 
+With Homebrew: `brew install CalvinMagezi/tap/agent-hq` (binary only).
+
+
 `curl -fsSL https://agent-hq.online/install.sh | bash` (or `npx agent-hq-cli`, which needs Node 18.17+) downloads the latest stable release, verifies its minisign
 signature and checksum, and installs `hq` into `~/.local/bin` and the web UI into
 `~/.local/share/agent-hq/web` (`hq start all` then serves it at http://localhost:5678). Prebuilt binaries
