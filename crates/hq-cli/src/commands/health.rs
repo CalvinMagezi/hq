@@ -68,6 +68,8 @@ pub async fn run(config: &HqConfig) -> Result<()> {
 
     if !keys.is_empty() {
         ok(&format!("API keys configured ({})", keys.join(" + ")));
+    } else if config.has_llm_key() {
+        ok("API key found in the environment (not saved to the config file)");
     } else {
         warn("No LLM API keys set — configure in ~/.hq/config.yaml or set HQ_OPENROUTER_API_KEY");
     }

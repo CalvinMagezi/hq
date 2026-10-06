@@ -454,6 +454,27 @@ impl HqConfig {
         figment
     }
 
+    /// Whether any LLM provider key is available, from the config or from the conventional
+    /// provider environment variables the router also reads at runtime. Display and
+    /// diagnostics only: environment keys are never written back into `config.yaml`.
+    pub fn has_llm_key(&self) -> bool {
+        self.has_llm_key_with(|name| std::env::var(name).ok())
+    }
+
+    fn has_llm_key_with(&self, env: impl Fn(&str) -> Option<String>) -> bool {
+        let set = |k: &Option<String>| k.as_deref().is_some_and(|k| !k.trim().is_empty());
+        let from_env = |names: &[&str]| {
+            names
+                .iter()
+                .any(|n| env(n).is_some_and(|v| !v.trim().is_empty()))
+        };
+        set(&self.openrouter_api_key)
+            || set(&self.anthropic_api_key)
+            || set(&self.google_ai_api_key)
+            || !self.providers.is_empty()
+            || from_env(&["OPENROUTER_API_KEY", "ANTHROPIC_API_KEY", "GOOGLE_AI_API_KEY", "GEMINI_API_KEY"])
+    }
+
     /// The guts of `load()`, parameterized on the config file path so it's
     /// testable without touching `HQ_CONFIG_PATH`/`~/.hq/config.yaml`.
     pub fn load_from_path(config_path: &std::path::Path) -> anyhow::Result<Self> {
