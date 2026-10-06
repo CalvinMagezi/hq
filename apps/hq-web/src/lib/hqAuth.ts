@@ -52,8 +52,8 @@ export function authHeaders(): Record<string, string> {
 }
 
 /** Header the server requires on session-changing requests; a cross-site form or fetch cannot add it without a CORS preflight. */
-export const CLIENT_HEADER = 'X-HQ-Client'
-export const CLIENT_HEADER_VALUE = 'web'
+const CLIENT_HEADER = 'X-HQ-Client'
+const CLIENT_HEADER_VALUE = 'web'
 
 const SAFE_METHODS = new Set(['GET', 'HEAD', 'OPTIONS'])
 

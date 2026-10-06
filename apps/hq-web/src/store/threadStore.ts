@@ -117,7 +117,7 @@ function finishSteps(steps: ToolStep[]): ToolStep[] {
  * 2. `createdAt` descending (newest thread)
  * 3. `threadId` descending (stable deterministic tie-break matching backend SQL)
  */
-export function sortThreads(threads: Thread[]): Thread[] {
+function sortThreads(threads: Thread[]): Thread[] {
   return [...threads].sort((a, b) => {
     if (b.updatedAt !== a.updatedAt) {
       return b.updatedAt - a.updatedAt

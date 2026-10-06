@@ -1,4 +1,4 @@
-export const BADGE_CAP = 99
+const BADGE_CAP = 99
 
 export interface InboxBadge {
   label: string

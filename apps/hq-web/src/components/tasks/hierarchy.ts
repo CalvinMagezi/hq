@@ -14,14 +14,14 @@ export function parentLabelFor(task: TaskItem, byId: Map<string, TaskItem>): str
   return parent ? `${parent.display_id} ${parent.title}` : undefined
 }
 
-export function taskActivityTime(task: TaskItem): number {
+function taskActivityTime(task: TaskItem): number {
   const raw = task.updated_at || task.created_at
   if (!raw) return 0
   const t = parseSqliteUtc(raw).getTime()
   return Number.isNaN(t) ? 0 : t
 }
 
-export function taskCreatedTime(task: TaskItem): number {
+function taskCreatedTime(task: TaskItem): number {
   const raw = task.created_at
   if (!raw) return 0
   const t = parseSqliteUtc(raw).getTime()
