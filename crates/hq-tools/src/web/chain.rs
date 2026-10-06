@@ -4,31 +4,36 @@ use super::*;
 pub(super) struct Budgets {
     pub(super) total: Duration,
     pub(super) searxng: Duration,
+    pub(super) native_engine: Duration,
     pub(super) brave: Duration,
 }
 
 pub(super) const DEFAULT_BUDGETS: Budgets = Budgets {
     total: SEARCH_DEADLINE,
     searxng: SEARXNG_TIMEOUT,
+    native_engine: NATIVE_ENGINE_TIMEOUT,
     brave: BRAVE_TIMEOUT,
 };
 
-/// Search the web: tries a self-hosted SearxNG instance first (free, no API
-/// key), falling back to the Brave Search API on failure or empty results if
-/// `brave_api_key` is set. Errors with remediation guidance if neither
-/// backend is configured, and with every attempt's reason if all fail.
+/// Search the web: a configured SearxNG instance first, then the built-in
+/// keyless engine pool (`native`), then the Brave Search API if
+/// `brave_api_key` is set. Each later backend is tried on failure or empty
+/// results. Errors with remediation guidance if none is enabled, and with
+/// every attempt's reason if all fail.
 pub async fn web_search(
     query: &str,
     opts: &SearchOptions,
     searxng_url: Option<&str>,
     brave_api_key: Option<&str>,
+    native: bool,
 ) -> Result<WebSearchResults> {
     let searxng_url = searxng_url.map(str::trim).filter(|s| !s.is_empty());
     let brave = brave_api_key
         .map(str::trim)
         .filter(|s| !s.is_empty())
         .map(|key| (BRAVE_ENDPOINT, key));
-    search_chain(query, opts, searxng_url, brave, &DEFAULT_BUDGETS).await
+    let env = native.then(NativeEnv::production);
+    search_chain(query, opts, searxng_url, brave, env.as_ref(), &DEFAULT_BUDGETS).await
 }
 
 pub(super) async fn search_chain(
@@ -36,9 +41,10 @@ pub(super) async fn search_chain(
     opts: &SearchOptions,
     searxng_url: Option<&str>,
     brave: Option<(&str, &str)>,
+    native: Option<&NativeEnv<'_>>,
     budgets: &Budgets,
 ) -> Result<WebSearchResults> {
-    if searxng_url.is_none() && brave.is_none() {
+    if searxng_url.is_none() && brave.is_none() && native.is_none() {
         return Err(no_backend_error());
     }
     let deadline = Instant::now() + budgets.total;
@@ -62,7 +68,7 @@ pub(super) async fn search_chain(
         )
         .await;
         if let Some(page) = page {
-            if !page.results.is_empty() || brave.is_none() {
+            if !page.results.is_empty() || (brave.is_none() && native.is_none()) {
                 return Ok(finish(
                     query,
                     opts,
@@ -73,6 +79,28 @@ pub(super) async fn search_chain(
                 ));
             }
             answered = Some(("searxng", page, searxng_unsupported(opts)));
+        }
+    }
+
+    if let Some(env) = native {
+        debug!(query = %query, "searching built-in engines");
+        let pool = native_search(query, opts, env, deadline, budgets.native_engine).await;
+        attempts.extend(pool.attempts);
+        if let Some(page) = pool.page {
+            // A pool with only Wikipedia or Hacker News answering is a last resort,
+            // so a configured Brave key still gets its turn.
+            let good_enough = !page.results.is_empty() && !pool.degraded;
+            if good_enough || brave.is_none() {
+                return Ok(finish(
+                    query,
+                    opts,
+                    "native",
+                    page,
+                    native_unsupported(opts),
+                    attempts,
+                ));
+            }
+            answered = Some(("native", page, native_unsupported(opts)));
         }
     }
 
@@ -118,6 +146,18 @@ pub(super) async fn search_chain(
     }
 }
 
+/// Filters the built-in pool cannot apply on every engine it queries.
+pub(super) fn native_unsupported(opts: &SearchOptions) -> Vec<String> {
+    let mut notes = Vec::new();
+    if opts.freshness.is_some() && opts.category == Some(Category::Science) {
+        notes.push("freshness (arXiv ignores it; OpenAlex applies it)".to_string());
+    }
+    if opts.freshness.is_some() && opts.category == Some(Category::News) {
+        notes.push("freshness (Bing News ignores it; Hacker News applies it)".to_string());
+    }
+    notes
+}
+
 pub(super) fn finish(
     query: &str,
     opts: &SearchOptions,
@@ -144,21 +184,10 @@ pub(super) fn finish(
 }
 
 pub(super) fn no_backend_error() -> anyhow::Error {
-    // Only name the setup script if this host actually has a checkout to run
-    // it from — naming a path that doesn't exist here is exactly FR-005's
-    // complaint (the message was unactionable on a checkout-less VPS).
-    if hq_core::machine::agent_hq_checkout_path().is_some() {
-        return anyhow::anyhow!(
-            "No web search backend available. Run `scripts/setup-searxng.sh` for a free \
-             self-hosted search backend, or set `brave_api_key` in ~/.hq/config.yaml \
-             (or HQ_BRAVE_API_KEY) for the paid Brave Search fallback."
-        );
-    }
     anyhow::anyhow!(
-        "No web search backend available, and this host has no source checkout to run a \
-         setup script from. Ask the operator to provision a backend directly: point \
-         `searxng_url` at a reachable SearxNG instance, or set `brave_api_key` \
-         (or HQ_BRAVE_API_KEY) for the paid Brave Search fallback."
+        "No web search backend is enabled. Set `web_search_native: true` (the default) in \
+         ~/.hq/config.yaml for the built-in engine, point `searxng_url` at a SearxNG \
+         instance, or set `brave_api_key` (or HQ_BRAVE_API_KEY) for the paid Brave Search API."
     )
 }
 
@@ -178,7 +207,7 @@ pub fn web_search_parameters() -> Value {
             },
             "page": {
                 "type": "integer",
-                "description": "1-based results page (default 1). Use next_page from a previous response. Brave serves pages 1-10."
+                "description": "1-based results page (default 1). Use next_page from a previous response. Some engines serve only page 1, and Brave serves pages 1-10."
             },
             "freshness": {
                 "type": "string",
@@ -191,7 +220,7 @@ pub fn web_search_parameters() -> Value {
             },
             "country": {
                 "type": "string",
-                "description": "2-letter country code, e.g. \"US\". SearxNG needs language as well."
+                "description": "2-letter country code, e.g. \"US\". SearxNG and DuckDuckGo need language as well."
             },
             "category": {
                 "type": "string",

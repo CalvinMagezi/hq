@@ -30,6 +30,7 @@ export interface HqSettings {
   integrations: {
     remote_mcp: { name: string; host: string; live_user_turn_only: boolean }[]
     searxng_host: string | null
+    web_search_native: boolean
     disk_watchdog_enabled: boolean
   }
 }

@@ -10,7 +10,7 @@ pub struct SearchResult {
     /// 1-based rank within the page the provider returned, before domain filtering.
     #[serde(default)]
     pub position: usize,
-    /// Backend that produced this result: `searxng` or `brave`.
+    /// Backend that produced this result: `searxng`, `native` or `brave`.
     #[serde(default)]
     pub provider: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -18,7 +18,7 @@ pub struct SearchResult {
     /// Publication or last-update date as the provider reported it.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub published: Option<String>,
-    /// Upstream engines SearxNG aggregated this result from.
+    /// Upstream engines this result came from (SearxNG or the built-in pool).
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub engines: Vec<String>,
 }

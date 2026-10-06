@@ -72,6 +72,17 @@ pub(super) struct Page {
 /// Send a backend request and decode JSON, classifying every failure.
 /// Credentials live in headers, never in the reason text.
 pub(super) async fn get_json(request: RequestBuilder) -> Result<Value, ProviderError> {
+    let body = get_body(request).await?;
+    serde_json::from_str(&body).map_err(|e| ProviderError::new(format!("malformed JSON: {e}")))
+}
+
+/// Like [`get_json`] for HTML and XML engines: the body travels as a string
+/// value so it can run through the same `try_backend` runner.
+pub(super) async fn get_text(request: RequestBuilder) -> Result<Value, ProviderError> {
+    get_body(request).await.map(Value::String)
+}
+
+async fn get_body(request: RequestBuilder) -> Result<String, ProviderError> {
     let resp = request.send().await.map_err(|e| {
         let kind = if e.is_timeout() {
             "request timed out"
@@ -82,11 +93,11 @@ pub(super) async fn get_json(request: RequestBuilder) -> Result<Value, ProviderE
         };
         ProviderError::new(format!("{kind}: {}", e.without_url()))
     })?;
-    decode_json(resp).await
+    read_body(resp).await
 }
 
-/// Classify a backend response that did arrive: status first, then JSON.
-pub(super) async fn decode_json(resp: reqwest::Response) -> Result<Value, ProviderError> {
+/// Classify a backend response that did arrive: status first, then the body.
+pub(super) async fn read_body(resp: reqwest::Response) -> Result<String, ProviderError> {
     let status = resp.status();
     if status.as_u16() == 429 {
         return Err(ProviderError {
@@ -102,10 +113,13 @@ pub(super) async fn decode_json(resp: reqwest::Response) -> Result<Value, Provid
     if !status.is_success() {
         return Err(ProviderError::new(format!("HTTP {status}")));
     }
-    let body = resp
-        .text()
+    resp.text()
         .await
-        .map_err(|e| ProviderError::new(format!("failed reading body: {}", e.without_url())))?;
+        .map_err(|e| ProviderError::new(format!("failed reading body: {}", e.without_url())))
+}
+
+pub(super) async fn decode_json(resp: reqwest::Response) -> Result<Value, ProviderError> {
+    let body = read_body(resp).await?;
     serde_json::from_str(&body).map_err(|e| ProviderError::new(format!("malformed JSON: {e}")))
 }
 

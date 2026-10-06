@@ -89,6 +89,7 @@ hq-convert = { path = "crates/hq-convert" }
 
 # HTML processing
 html2text = "0.14"
+scraper = "0.27"
 
 # Utilities
 uuid = { version = "1", features = ["v4", "serde"] }

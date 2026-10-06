@@ -50,17 +50,15 @@ fn spa_shell_heuristic_flags_genuinely_empty_text_regardless_of_size() {
 async fn no_backend_error_only_names_a_path_that_exists() {
     // Regression for FR-005: the error must not point at
     // scripts/setup-searxng.sh unless this host actually has a checkout
-    // to run it from. This crate's own tests always run from a checkout
-    // (CARGO_MANIFEST_DIR), so the message should name the script here.
-    let err = web_search("test query", &SearchOptions::default(), None, None)
+    // to run it from. With the built-in engines off and nothing else set, the
+    // error names every way to enable one and never a setup script path.
+    let err = web_search("test query", &SearchOptions::default(), None, None, false)
         .await
         .unwrap_err();
     let msg = err.to_string();
-    if hq_core::machine::agent_hq_checkout_path().is_some() {
-        assert!(msg.contains("scripts/setup-searxng.sh"), "{msg}");
-    } else {
-        assert!(!msg.contains("scripts/setup-searxng.sh"), "{msg}");
-    }
+    assert!(!msg.contains("scripts/setup-searxng.sh"), "{msg}");
+    assert!(msg.contains("web_search_native"), "{msg}");
+    assert!(msg.contains("searxng_url"), "{msg}");
     assert!(msg.contains("brave_api_key"), "{msg}");
 }
 
@@ -445,6 +443,7 @@ async fn garbage_pdf_fails_with_a_clear_reason() {
 const FAST: Budgets = Budgets {
     total: Duration::from_secs(5),
     searxng: Duration::from_millis(400),
+    native_engine: Duration::from_millis(400),
     brave: Duration::from_millis(400),
 };
 
@@ -497,7 +496,7 @@ async fn searxng_answers_with_filters_passed_through() {
         "category": "news", "include_domains": ["bbc.co.uk"]
     }))
     .unwrap();
-    let r = search_chain("rates", &opts, Some(&sx.uri()), None, &FAST)
+    let r = search_chain("rates", &opts, Some(&sx.uri()), None, None, &FAST)
         .await
         .unwrap();
     assert_eq!(r.backend.as_deref(), Some("searxng"));
@@ -525,7 +524,7 @@ async fn brave_receives_mapped_params_and_key_header() {
     )
     .unwrap();
     let endpoint = brave_endpoint(&br);
-    let r = search_chain("q", &opts, None, Some((&endpoint, "k")), &FAST)
+    let r = search_chain("q", &opts, None, Some((&endpoint, "k")), None, &FAST)
         .await
         .unwrap();
     assert_eq!(r.backend.as_deref(), Some("brave"));
@@ -551,7 +550,7 @@ async fn malformed_json_falls_back_and_cools_the_primary_down() {
     let endpoint = brave_endpoint(&br);
     let opts = SearchOptions::default();
 
-    let r = search_chain("q", &opts, Some(&sx.uri()), Some((&endpoint, "k")), &FAST)
+    let r = search_chain("q", &opts, Some(&sx.uri()), Some((&endpoint, "k")), None, &FAST)
         .await
         .unwrap();
     assert_eq!(r.backend.as_deref(), Some("brave"));
@@ -561,7 +560,7 @@ async fn malformed_json_falls_back_and_cools_the_primary_down() {
         r.attempts
     );
 
-    let again = search_chain("q", &opts, Some(&sx.uri()), Some((&endpoint, "k")), &FAST)
+    let again = search_chain("q", &opts, Some(&sx.uri()), Some((&endpoint, "k")), None, &FAST)
         .await
         .unwrap();
     assert!(
@@ -580,7 +579,7 @@ async fn invalid_shape_counts_as_a_failure() {
         ResponseTemplate::new(200).set_body_json(json!({ "unexpected": true })),
     )
     .await;
-    let err = search_chain("q", &SearchOptions::default(), Some(&sx.uri()), None, &FAST)
+    let err = search_chain("q", &SearchOptions::default(), Some(&sx.uri()), None, None, &FAST)
         .await
         .unwrap_err();
     assert!(err.to_string().contains("invalid response"), "{err}");
@@ -612,7 +611,7 @@ async fn timeout_is_bounded_and_falls_back() {
         &SearchOptions::default(),
         Some(&sx.uri()),
         Some((&endpoint, "k")),
-        &FAST,
+        None, &FAST,
     )
     .await
     .unwrap();
@@ -639,6 +638,7 @@ async fn overall_deadline_skips_the_fallback() {
     let tight = Budgets {
         total: Duration::from_millis(300),
         searxng: Duration::from_secs(5),
+        native_engine: Duration::from_secs(5),
         brave: Duration::from_secs(5),
     };
     let err = search_chain(
@@ -646,6 +646,7 @@ async fn overall_deadline_skips_the_fallback() {
         &SearchOptions::default(),
         Some(&sx.uri()),
         Some((&endpoint, "k")),
+        None,
         &tight,
     )
     .await
@@ -664,13 +665,13 @@ async fn rate_limit_then_cooldown_and_credentials_not_leaked() {
     mount(&br, "/res/v1/web/search", ResponseTemplate::new(429)).await;
     let endpoint = brave_endpoint(&br);
     let opts = SearchOptions::default();
-    let err = search_chain("q", &opts, None, Some((&endpoint, "secret-key")), &FAST)
+    let err = search_chain("q", &opts, None, Some((&endpoint, "secret-key")), None, &FAST)
         .await
         .unwrap_err()
         .to_string();
     assert!(err.contains("rate limited"), "{err}");
     assert!(!err.contains("secret-key"));
-    let err = search_chain("q", &opts, None, Some((&endpoint, "secret-key")), &FAST)
+    let err = search_chain("q", &opts, None, Some((&endpoint, "secret-key")), None, &FAST)
         .await
         .unwrap_err()
         .to_string();
@@ -689,7 +690,7 @@ async fn invalid_credentials_and_all_provider_failure() {
         &SearchOptions::default(),
         Some(&sx.uri()),
         Some((&endpoint, "bad")),
-        &FAST,
+        None, &FAST,
     )
     .await
     .unwrap_err()
@@ -708,7 +709,7 @@ async fn empty_results_are_an_answer_not_a_missing_backend() {
         ResponseTemplate::new(200).set_body_json(searxng_body(&[])),
     )
     .await;
-    let r = search_chain("q", &SearchOptions::default(), Some(&sx.uri()), None, &FAST)
+    let r = search_chain("q", &SearchOptions::default(), Some(&sx.uri()), None, None, &FAST)
         .await
         .unwrap();
     assert!(r.results.is_empty());
@@ -724,7 +725,7 @@ async fn brave_page_limit_is_reported() {
         page: 11,
         ..Default::default()
     };
-    let err = search_chain("q", &opts, None, Some((&endpoint, "k")), &FAST)
+    let err = search_chain("q", &opts, None, Some((&endpoint, "k")), None, &FAST)
         .await
         .unwrap_err();
     assert!(err.to_string().contains("pages 1..=10"), "{err}");
@@ -748,7 +749,7 @@ async fn live_filter_probe() {
         if sx.is_none() && key.is_none() {
             continue;
         }
-        let r = web_search("tokio release", &opts, sx, key).await.unwrap();
+        let r = web_search("tokio release", &opts, sx, key, false).await.unwrap();
         println!("{label}: {}", format_search_results(&r));
         assert!(r.results.iter().all(|x| x.url.contains("github.com")));
     }
