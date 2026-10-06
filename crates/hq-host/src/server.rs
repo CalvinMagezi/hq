@@ -374,6 +374,24 @@ impl Conn {
             "agent.list" => {
                 Ok(json!({ "agents": host.list().iter().map(info_json).collect::<Vec<_>>() }))
             }
+            "agent.awaiting" => {
+                let list: Vec<Value> = host
+                    .awaiting()
+                    .iter()
+                    .map(|a| {
+                        json!({
+                            "name": a.name, "agent": a.agent,
+                            "cwd": a.cwd.to_string_lossy(), "env_keys": a.env_keys,
+                        })
+                    })
+                    .collect();
+                Ok(json!({ "agents": list }))
+            }
+            "agent.resume" => {
+                let p: ResumeParams = parse(params)?;
+                let env = p.env.into_iter().collect();
+                Ok(info_json(&host.resume(&p.name, env).map_err(host_err)?))
+            }
             "agent.get" => {
                 let p: Named = parse(params)?;
                 Ok(info_json(&host.info(&p.name).map_err(host_err)?))
@@ -489,6 +507,14 @@ struct SpawnParams {
     rows: Option<u16>,
     cols: Option<u16>,
     scrollback_rows: Option<usize>,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct ResumeParams {
+    name: String,
+    #[serde(default)]
+    env: std::collections::BTreeMap<String, String>,
 }
 
 #[derive(Deserialize, Default, Clone, Copy)]

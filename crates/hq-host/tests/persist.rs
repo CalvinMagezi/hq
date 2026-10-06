@@ -204,3 +204,74 @@ fn an_agent_that_was_told_to_stop_is_not_brought_back_even_before_it_has_exited(
         "a killed agent was resurrected: {report:?}"
     );
 }
+
+const SECRET: &str = "s3cret-value-9f2";
+
+fn with_secret(name: &str) -> SpawnSpec {
+    let mut spec = resumable(name, "sleep 60", "echo got=$API_KEY; sleep 60");
+    spec.env = vec![("API_KEY".into(), SECRET.into())];
+    spec
+}
+
+#[test]
+fn env_values_never_reach_session_json() {
+    let (_t, dir) = state_dir();
+    let host = Host::new().with_state_dir(&dir);
+    host.spawn(with_secret("keyed")).unwrap();
+    let text = std::fs::read_to_string(dir.join("session.json")).unwrap();
+    assert!(!text.contains(SECRET), "secret leaked into: {text}");
+    assert!(text.contains("API_KEY"), "the key name is kept: {text}");
+}
+
+#[test]
+fn an_agent_that_needs_env_waits_until_it_is_supplied() {
+    let (_t1, dir1) = state_dir();
+    Host::new()
+        .with_state_dir(&dir1)
+        .spawn(with_secret("keyed"))
+        .unwrap();
+    let (_t2, dir2) = state_dir();
+    copy_state(&dir1, &dir2);
+
+    let next = Host::new().with_state_dir(&dir2);
+    let report = next.restore();
+    assert!(report.restored.is_empty(), "{report:?}");
+    assert_eq!(next.awaiting().len(), 1);
+    assert_eq!(next.awaiting()[0].env_keys, ["API_KEY"]);
+    assert!(next.list().is_empty());
+
+    // Still remembered after another agent changes the file.
+    next.spawn(resumable("other", "sleep 60", "sleep 60"))
+        .unwrap();
+    let text = std::fs::read_to_string(dir2.join("session.json")).unwrap();
+    assert!(
+        text.contains("keyed"),
+        "awaiting record was dropped: {text}"
+    );
+
+    let err = next.resume("keyed", vec![]).unwrap_err();
+    assert_eq!(err.code(), "missing_env");
+    assert_eq!(next.awaiting().len(), 1, "a failed resume keeps it waiting");
+
+    next.resume("keyed", vec![("API_KEY".into(), "fresh".into())])
+        .unwrap();
+    wait_for(&next, "keyed", "got=fresh");
+    assert!(next.awaiting().is_empty());
+}
+
+#[test]
+fn removing_a_waiting_agent_forgets_it() {
+    let (_t1, dir1) = state_dir();
+    Host::new()
+        .with_state_dir(&dir1)
+        .spawn(with_secret("keyed"))
+        .unwrap();
+    let (_t2, dir2) = state_dir();
+    copy_state(&dir1, &dir2);
+    let next = Host::new().with_state_dir(&dir2);
+    next.restore();
+    next.remove("keyed").unwrap();
+    assert!(next.awaiting().is_empty());
+    let text = std::fs::read_to_string(dir2.join("session.json")).unwrap();
+    assert!(!text.contains("keyed"));
+}

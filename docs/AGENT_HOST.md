@@ -49,6 +49,8 @@ version gets `protocol_mismatch`.
 | `agent.send_keys` | `name`, `keys` (`enter`, `esc`, `tab`, arrows, `pageup`, `ctrl+c`, ...) | `{}` |
 | `agent.resize` | `name`, `rows`, `cols` | `{}` |
 | `agent.wait` | `name`, `until` (`exit`, `quiet` or `state`), optional `timeout_ms`; for `quiet` `quiet_ms`; for `state` `states` (list, required) and `stable_ms` (default 300) | `exit_code`, or agent info |
+| `agent.awaiting` | none | `{"agents": [{name, agent, cwd, env_keys}]}`: restored agents waiting for their environment |
+| `agent.resume` | `name`, `env` (object, must cover every name in `env_keys`) | agent info; `missing_env` leaves it waiting |
 | `agent.kill` | `name` | `{}` |
 | `agent.remove` | `name` | `{}` |
 
@@ -95,9 +97,9 @@ in, are in `crates/hq-host/tests/fixtures/` and are checked on every test run.
 The host keeps `session.json` in its directory (mode 0600). It lists every
 running agent that was spawned with a `resume_argv`: the command that continues
 the old session, for example `["claude", "--continue"]`, together with its
-working directory, agent kind, size and the extra `env` it was started with
-(stored because the resumed process needs it again; the file is private to your
-user). The file is rewritten when an agent is spawned, removed, told to stop, or
+working directory, agent kind, size and the names (never the values) of the
+extra `env` variables it was started with, so no key or token is ever written
+to disk. The file is rewritten when an agent is spawned, removed, told to stop, or
 exits.
 
 On `hq host serve` the host starts each listed agent again with its
@@ -107,6 +109,12 @@ instance), not the old process or its scrollback. An agent that exited, was
 removed or was told to stop is not listed. One that cannot be started (its
 directory is gone, say) is reported and skipped; the others still come back.
 Agents spawned without a `resume_argv` are not brought back.
+
+An agent that was started with extra `env` is not started on its own, because
+the host no longer has those values. It is listed by `agent.awaiting` and starts
+when whoever launched it calls `agent.resume` with the values again (HQ rebuilds
+them from the same profile and session id it used at launch). An agent started
+without extra `env` still comes back by itself.
 
 A host that stops cleanly (`hq host stop`, SIGTERM, Ctrl-C) stops its agents but
 leaves them listed, so the next start brings them back. A host that is killed or
