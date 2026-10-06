@@ -1563,3 +1563,114 @@ fn configured_backends_take_every_alias() {
     }
     assert!(LlmRouter::from_backends(&hq_core::config::HqConfig::default()).is_none());
 }
+
+struct EchoModelProvider;
+
+#[async_trait]
+impl LlmProvider for EchoModelProvider {
+    fn name(&self) -> &str {
+        "openrouter"
+    }
+
+    async fn chat(&self, request: &ChatRequest) -> anyhow::Result<ChatResponse> {
+        Ok(ChatResponse {
+            message: ChatMessage {
+                image_parts: Vec::new(),
+                role: MessageRole::Assistant,
+                content: request.model.clone(),
+                tool_calls: vec![],
+                tool_call_id: None,
+                reasoning_content: None,
+            },
+            input_tokens: 1,
+            output_tokens: 1,
+            cache_read_tokens: 0,
+            cache_write_tokens: 0,
+            model: request.model.clone(),
+        })
+    }
+
+    async fn chat_stream(
+        &self,
+        request: &ChatRequest,
+    ) -> anyhow::Result<Pin<Box<dyn tokio_stream::Stream<Item = anyhow::Result<StreamChunk>> + Send>>>
+    {
+        Ok(response_to_stream(self.chat(request).await?))
+    }
+}
+
+#[tokio::test]
+async fn streaming_falls_back_to_the_only_provider_for_an_unrouted_vendor_model() {
+    use tokio_stream::StreamExt;
+    let mut router = LlmRouter::new();
+    router.add_provider("openrouter", Arc::new(EchoModelProvider));
+
+    // A fresh install's default model: no route, and no provider is named "anthropic".
+    let mut stream = router
+        .chat_stream(&make_request("anthropic/claude-sonnet-4"))
+        .await
+        .unwrap();
+    let first = stream.next().await.unwrap().unwrap();
+    assert!(format!("{first:?}").contains("anthropic/claude-sonnet-4"));
+}
+
+#[tokio::test]
+async fn streaming_with_no_providers_reports_that_none_is_configured() {
+    let router = LlmRouter::new();
+    let err = router
+        .chat_stream(&make_request("anthropic/claude-sonnet-4"))
+        .await
+        .err()
+        .expect("no providers must error");
+    assert!(err.to_string().contains("none is configured"));
+}
+
+#[tokio::test]
+async fn fallback_keeps_a_vendor_model_name_even_when_the_provider_has_an_alias_route() {
+    let mut router = LlmRouter::new();
+    router.add_provider("openrouter", Arc::new(EchoModelProvider));
+    router.add_route("relay", "openrouter", "some/alias-target", CostTier::Standard);
+
+    let resp = router
+        .chat(&make_request("anthropic/claude-sonnet-4"))
+        .await
+        .unwrap();
+    assert_eq!(resp.message.content, "anthropic/claude-sonnet-4");
+}
+
+struct FailsOnFirstChunk;
+
+#[async_trait]
+impl LlmProvider for FailsOnFirstChunk {
+    fn name(&self) -> &str {
+        "cerebras"
+    }
+
+    async fn chat(&self, _request: &ChatRequest) -> anyhow::Result<ChatResponse> {
+        bail!("404 Not Found")
+    }
+
+    async fn chat_stream(
+        &self,
+        _request: &ChatRequest,
+    ) -> anyhow::Result<Pin<Box<dyn tokio_stream::Stream<Item = anyhow::Result<StreamChunk>> + Send>>>
+    {
+        // Opens fine, then fails on the first chunk, as a 404 for an unknown model does.
+        Ok(Box::pin(tokio_stream::once(Err(anyhow::anyhow!("404 Not Found")))))
+    }
+}
+
+#[tokio::test]
+async fn streaming_fallback_skips_a_provider_whose_stream_fails_on_the_first_chunk() {
+    use tokio_stream::StreamExt;
+    let mut router = LlmRouter::new();
+    router.add_provider("cerebras", Arc::new(FailsOnFirstChunk));
+    router.add_provider("openrouter", Arc::new(EchoModelProvider));
+
+    let mut stream = router
+        .chat_stream(&make_request("anthropic/claude-sonnet-4"))
+        .await
+        .unwrap();
+    let first = stream.next().await.unwrap().unwrap();
+    assert!(format!("{first:?}").contains("anthropic/claude-sonnet-4"));
+}
