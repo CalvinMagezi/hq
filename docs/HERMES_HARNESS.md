@@ -10,8 +10,8 @@ retired in the same pass; see the git history of `CLAUDE.md` for the hq-bus side
 
 The owner stopped using Hermes and OpenClaw day to day — agent-hq's own
 sub-agent substrate (`spawn_subagents`/`AgentService`) absorbed the
-orchestration role both used to play. With Asethu (the third tier-1 bus
-peer) already gone independently, no peer remained for the `hq-bus`
+orchestration role both used to play. With the third tier-1 bus
+peer already gone independently, no peer remained for the `hq-bus`
 (RFC-001) communication fabric described throughout this doc to talk to, so
 it was retired as well, not just its Hermes-specific parts.
 
