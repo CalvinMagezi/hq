@@ -150,7 +150,7 @@ All configuration lives in `~/.hq/config.yaml`:
 ```yaml
 vault_path: /path/to/your/.vault
 openrouter_api_key: "your-api-key-here"
-default_model: "anthropic/claude-sonnet-4"  # or a router alias such as "relay"
+default_model: "openai/gpt-6-luna"  # a low-cost default; use "relay" or a premium model id if you prefer
 ws_port: 5678
 
 relay:

@@ -10,7 +10,7 @@ System-level configuration values. These are read by agents and the daemon at ru
 
 | Key | Value | Description |
 |-----|-------|-------------|
-| DEFAULT_MODEL | anthropic/claude-sonnet-4 | Default LLM for agent sessions |
+| DEFAULT_MODEL | openai/gpt-6-luna | Default LLM for agent sessions |
 | orchestration_mode | internal | How tasks are routed (internal, delegated, hybrid) |
 | heartbeat_interval | 120 | Seconds between daemon heartbeat cycles |
 | max_concurrent_agents | 3 | Maximum parallel sub-agent sessions |

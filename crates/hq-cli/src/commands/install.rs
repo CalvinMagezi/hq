@@ -206,6 +206,22 @@ fn key_status(key: &Option<String>) -> &'static str {
     }
 }
 
+const CHEAP_OPENROUTER_MODEL: &str = "openai/gpt-6-luna";
+const CHEAP_ANTHROPIC_MODEL: &str = "anthropic/claude-haiku-4";
+const CHEAP_GOOGLE_MODEL: &str = "google/gemini-2.5-flash";
+
+/// A fresh install starts on a low-cost model because every turn carries a large
+/// system prompt and tool schema; users opt in to premium models with `hq env`.
+fn default_model_for(keys: &ApiKeys) -> &'static str {
+    if non_empty(&keys.openrouter).is_none() && non_empty(&keys.anthropic).is_some() {
+        CHEAP_ANTHROPIC_MODEL
+    } else if non_empty(&keys.openrouter).is_none() && non_empty(&keys.google).is_some() {
+        CHEAP_GOOGLE_MODEL
+    } else {
+        CHEAP_OPENROUTER_MODEL
+    }
+}
+
 /// Step 5: write `~/.hq/config.yaml` when missing (or always with
 /// `--non-interactive`). Returns the config path.
 fn write_config(vault_path: &Path, keys: &ApiKeys, non_interactive: bool) -> Result<PathBuf> {
@@ -220,8 +236,9 @@ fn write_config(vault_path: &Path, keys: &ApiKeys, non_interactive: bool) -> Res
         return Ok(config_path);
     }
     let mut config_content = format!(
-        "vault_path: \"{}\"\ndefault_model: \"anthropic/claude-sonnet-4\"\nws_port: 5678\n",
-        vault_path.display()
+        "vault_path: \"{}\"\ndefault_model: \"{}\"\nws_port: 5678\n",
+        vault_path.display(),
+        default_model_for(keys)
     );
     let entries = [
         ("openrouter_api_key", &keys.openrouter),
@@ -401,6 +418,20 @@ fn detect_mcp_status() -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn keys(or: &str, an: &str, go: &str) -> ApiKeys {
+        let opt = |v: &str| Some(v.to_string()).filter(|v| !v.is_empty());
+        ApiKeys { openrouter: opt(or), anthropic: opt(an), google: opt(go) }
+    }
+
+    #[test]
+    fn fresh_install_defaults_to_a_cheap_model_for_the_provider_that_has_a_key() {
+        assert_eq!(default_model_for(&keys("k", "", "")), CHEAP_OPENROUTER_MODEL);
+        assert_eq!(default_model_for(&keys("", "", "")), CHEAP_OPENROUTER_MODEL);
+        assert_eq!(default_model_for(&keys("", "k", "")), CHEAP_ANTHROPIC_MODEL);
+        assert_eq!(default_model_for(&keys("", "", "k")), CHEAP_GOOGLE_MODEL);
+        assert_eq!(default_model_for(&keys("k", "k", "k")), CHEAP_OPENROUTER_MODEL);
+    }
 
     #[cfg(unix)]
     #[test]
