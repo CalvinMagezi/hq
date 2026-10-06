@@ -3,7 +3,7 @@
 //! way to prompt such an agent; sessions HQ launched go through
 //! `harness_session_*`.
 
-use super::{AgentStatus, HerdrHost, all_hosts, blocking, host};
+use super::{AgentStatus, HostBackend, all_hosts, blocking, host};
 use crate::registry::HqTool;
 use crate::util::{arg_str, arg_str_list};
 use anyhow::{Result, bail};
@@ -38,12 +38,12 @@ impl HqTool for HerdrHostsTool {
     }
     async fn execute(&self, _args: Value) -> Result<Value> {
         let hosts = all_hosts()?;
-        let rows = blocking(move || hosts.iter().map(host_status).collect::<Vec<_>>()).await?;
+        let rows = blocking(move || hosts.iter().map(|h| host_status(h.as_ref())).collect::<Vec<_>>()).await?;
         Ok(json!({ "hosts": rows }))
     }
 }
 
-fn host_status(h: &HerdrHost) -> Value {
+fn host_status(h: &dyn HostBackend) -> Value {
     match h.version() {
         Ok(version) => json!({ "host": h.name(), "reachable": true, "herdr_version": version }),
         Err(e) => json!({ "host": h.name(), "reachable": false, "error": e.to_string() }),
@@ -102,7 +102,7 @@ fn managed_names(db: &Database) -> Result<Vec<(String, String, String)>> {
         .collect())
 }
 
-fn agents_on(h: &HerdrHost, managed: &[(String, String, String)]) -> Value {
+fn agents_on(h: &dyn HostBackend, managed: &[(String, String, String)]) -> Value {
     let agents = match h.agents() {
         Ok(a) => a,
         Err(e) => return json!({ "host": h.name(), "reachable": false, "error": e.to_string() }),
@@ -213,7 +213,7 @@ impl HqTool for HerdrSendTool {
 }
 
 /// Checks the target first so a stale pane id or a sleeping host sends nothing.
-pub(super) fn send_to(h: &HerdrHost, target: &str, text: &str, keys: &[String]) -> Result<Value> {
+pub(super) fn send_to(h: &dyn HostBackend, target: &str, text: &str, keys: &[String]) -> Result<Value> {
     let agent = match h.agent(target) {
         Err(e) if e.is_unreachable() => bail!("host {} unreachable, nothing sent", h.name()),
         Err(e) => return Err(e.into()),

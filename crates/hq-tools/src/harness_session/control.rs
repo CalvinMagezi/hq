@@ -16,13 +16,13 @@ pub(super) fn get_row(db:&Arc<Database>, session_id: &str) -> Result<HarnessSess
 }
 
 /// The row's host and its agent, or an error naming why they are unavailable.
-pub(super) fn locate(row: &HarnessSessionRow) -> Result<(HerdrHost, Option<AgentInfo>)> {
+pub(super) fn locate(row: &HarnessSessionRow) -> Result<(Host, Option<AgentInfo>)> {
     let host = herdr::host(Some(&row.host))?;
     let agent = host.agent(&row.agent_name)?;
     Ok((host, agent))
 }
 
-pub(super) fn require_alive(row: &HarnessSessionRow) -> Result<HerdrHost> {
+pub(super) fn require_alive(row: &HarnessSessionRow) -> Result<Host> {
     let (host, agent) = locate(row)?;
     if agent.is_none() {
         bail!(
@@ -275,7 +275,7 @@ pub(super) fn agent_state(live: &Liveness) -> Value {
 /// Bring an agent Herdr already runs, one HQ did not launch in this chat (or
 /// at all), under this chat's watch. It starts observation-only: Drive comes
 /// later, through the goal and drive gate.
-pub fn attach(db: &Arc<Database>, host: &HerdrHost, target: &str, thread: &str) -> Result<Value> {
+pub fn attach(db: &Arc<Database>, host: &dyn HostBackend, target: &str, thread: &str) -> Result<Value> {
     let agent = host
         .agent(target)
         .map_err(|e| anyhow::anyhow!("cannot reach host '{}' to attach: {e}", host.name()))?

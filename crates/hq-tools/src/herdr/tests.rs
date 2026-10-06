@@ -205,6 +205,22 @@ fn unknown_host_names_the_known_ones() {
 ///
 /// `HQ_TEST_HERDR_SSH=user@host HQ_TEST_HERDR_KEY=/path/key \
 ///   cargo test -p hq-tools herdr::tests::real_ssh -- --ignored`
+/// Read-only check of the real herdr CLI through the `HostBackend` trait object.
+///
+///   cargo test -p hq-tools herdr::tests::real_local -- --ignored
+#[test]
+#[ignore = "needs a local herdr server"]
+fn real_local_herdr_answers_through_the_trait_object() {
+    let host: Host = Arc::new(
+        HerdrHost::from_config(&HerdrConfig::default(), LOCAL_HOST).expect("local host"),
+    );
+    let version = host.version().expect("herdr version");
+    let agents = host.agents().expect("agent list");
+    eprintln!("herdr {version} answered with {} agents", agents.len());
+    assert!(host.agent("no-such-agent-hq-test").expect("lookup").is_none());
+    assert!(host.close_workspace("w-no-such-workspace").is_err());
+}
+
 #[test]
 #[ignore = "needs an ssh host running Herdr behind hq-herdr-gate"]
 fn real_ssh_host_answers_through_the_gate() {

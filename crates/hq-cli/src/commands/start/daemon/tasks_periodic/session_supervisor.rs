@@ -31,7 +31,7 @@ use hq_db::Database;
 use hq_db::harness_sessions_registry as registry;
 use hq_tools::harness_session::mission::{self, Event};
 use hq_tools::harness_session::{Liveness, liveness, poll_hosts_with};
-use hq_tools::herdr::{AgentInfo, AgentStatus, HerdrHost};
+use hq_tools::herdr::{AgentInfo, AgentStatus, Host, HostBackend};
 use std::collections::HashMap;
 use std::future::Future;
 use std::path::Path;
@@ -88,7 +88,7 @@ const DISMISS_HOST_TIMEOUT: Duration = Duration::from_secs(3);
 const BLOCKED_EXCERPT_LINES: usize = 15;
 
 /// Resolves a registry host name to a Herdr host. Tests supply fakes.
-type HostResolver = Arc<dyn Fn(&str) -> Result<HerdrHost> + Send + Sync>;
+type HostResolver = Arc<dyn Fn(&str) -> Result<Host> + Send + Sync>;
 
 /// What the hosts said this sweep: who is alive, and each live session's screen.
 struct HostPhase {
@@ -105,8 +105,8 @@ fn gather_hosts(
     budget: Duration,
 ) -> HostPhase {
     let deadline = Instant::now() + budget;
-    let within_budget = move |host: HerdrHost| {
-        host.with_command_timeout(
+    let within_budget = move |host: Host| {
+        host.with_command_timeout_dyn(
             deadline
                 .saturating_duration_since(Instant::now())
                 .max(MIN_HOST_CALL),
@@ -252,7 +252,7 @@ async fn dismiss_survey(
         (db.clone(), row.clone(), screen.to_string(), resolve.clone());
     let outcome = tokio::task::spawn_blocking(move || {
         let host =
-            (resolve2.as_ref())(&row2.host).map(|h| h.with_command_timeout(DISMISS_HOST_TIMEOUT));
+            (resolve2.as_ref())(&row2.host).map(|h| h.with_command_timeout_dyn(DISMISS_HOST_TIMEOUT));
         let (reread_host, press_host) = (host.as_ref().ok().cloned(), host.as_ref().ok().cloned());
         let target = row2.agent_name.clone();
         let reread_target = target.clone();
