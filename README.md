@@ -606,7 +606,7 @@ Read [`SECURITY.md`](SECURITY.md) for the policy and how to report a vulnerabili
 
 ## Contributing
 
-Issues and pull requests are welcome. Start with [`CONTRIBUTING.md`](CONTRIBUTING.md) for dev setup and the checks a PR must pass, and please follow the [Code of Conduct](CODE_OF_CONDUCT.md). Report security problems privately as described in [`SECURITY.md`](SECURITY.md), not in a public issue.
+HQ's direction is set by its maintainer, so pull requests are limited to the maintainer. Issues are welcome for bugs and ideas, and you are free to fork the project (MIT) and build your own version. See [`CONTRIBUTING.md`](CONTRIBUTING.md) for dev setup, and please follow the [Code of Conduct](CODE_OF_CONDUCT.md). Report security problems privately as described in [`SECURITY.md`](SECURITY.md), not in a public issue.
 
 ---
 
