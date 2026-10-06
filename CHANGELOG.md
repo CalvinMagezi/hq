@@ -4,6 +4,10 @@ All notable changes to Agent-HQ will be documented in this file.
 
 ## [Unreleased]
 
+### Added
+
+- **`hq web` hosts the web UI with one command.** It starts only the web server (no daemon or relays), finds or builds the UI, and opens the browser. `--detach` runs it in the background, `hq web status` and `hq web stop` manage it, `--lan` makes it reachable from a phone or another machine with a generated token, and `--json` prints one object (`url`, `login_url`, `token`, `pid`) for agents that set HQ up for someone. Running it twice reuses the server already listening. `hq pwa` and `hq dashboard` are now aliases for it, and `hq pwa --port` still works.
+
 ### Upgrading from 0.9.0 or earlier
 
 - **`HTTP-Referer` is no longer sent by default.** It used to be a hardcoded URL. To keep OpenRouter app attribution, set `http_referer: <your url>` in `config.yaml` (or `HQ_HTTP_REFERER`) before upgrading.
