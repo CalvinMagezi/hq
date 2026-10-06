@@ -94,6 +94,7 @@ launchd service; it is macOS only and not needed on Linux.
 ### Install a prebuilt binary
 
 With Homebrew: `brew install CalvinMagezi/tap/agent-hq` (binary only).
+On Windows, use the install script inside WSL2 (an Ubuntu terminal).
 
 
 `curl -fsSL https://agent-hq.online/install.sh | bash` (or `npx agent-hq-cli`, which needs Node 18.17+) downloads the latest stable release, verifies its minisign
