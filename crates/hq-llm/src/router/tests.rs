@@ -19,7 +19,6 @@ use crate::provider::LlmError;
 struct MockProvider {
     name: String,
     fail_count: AtomicU32,
-    #[allow(dead_code)]
     fail_error: String,
     call_count: AtomicU32,
 }
@@ -41,11 +40,6 @@ impl MockProvider {
             fail_error: error.to_string(),
             call_count: AtomicU32::new(0),
         }
-    }
-
-    #[allow(dead_code)]
-    fn calls(&self) -> u32 {
-        self.call_count.load(AtomicOrdering::Relaxed)
     }
 }
 

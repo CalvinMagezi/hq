@@ -145,8 +145,6 @@ pub(crate) struct JsonRpcResponse {
     pub id: Option<u64>,
     pub result: Option<serde_json::Value>,
     pub error: Option<JsonRpcError>,
-    #[allow(dead_code)]
-    pub method: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]

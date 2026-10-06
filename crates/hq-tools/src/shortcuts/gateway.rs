@@ -151,7 +151,7 @@ impl HqGatewayTool {
     async fn dispatch(&self, canonical: &str, args: Value) -> anyhow::Result<Value> {
         match canonical {
             "vault_find" => {
-                vault::VaultFindShortcut::new(self.vault_path.clone(), self.db.clone())
+                vault::VaultFindShortcut::new(self.db.clone())
                     .execute(args)
                     .await
             }

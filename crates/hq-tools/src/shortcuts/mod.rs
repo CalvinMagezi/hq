@@ -22,10 +22,7 @@ pub fn create_shortcut_tools(
 ) -> Vec<Box<dyn HqTool>> {
     vec![
         // Vault shortcuts
-        Box::new(vault::VaultFindShortcut::new(
-            vault_path.clone(),
-            db.clone(),
-        )),
+        Box::new(vault::VaultFindShortcut::new(db.clone())),
         Box::new(vault::VaultNoteShortcut::new(vault_path.clone())),
         Box::new(vault::VaultLogShortcut::new(vault_path.clone())),
         // Fuzzy gateway (resolves any tool by name)

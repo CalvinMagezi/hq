@@ -42,7 +42,6 @@ pub enum SessionProfile {
 }
 
 impl SessionProfile {
-    #[allow(dead_code)] // wired into build() in Task 9 (easy-action-tools plan)
     pub(crate) fn max_policy(&self) -> hq_tools::registry::ToolPolicy {
         match self {
             SessionProfile::Weak => hq_tools::registry::ToolPolicy::Weak,
