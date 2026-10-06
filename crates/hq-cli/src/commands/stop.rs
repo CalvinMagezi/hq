@@ -120,7 +120,7 @@ fn pid_path_for(_config: &HqConfig, target: &str) -> PathBuf {
     pid_dir.join(format!("com.agent-hq.{}.pid", target))
 }
 
-fn is_alive(pid: u32) -> bool {
+pub(crate) fn is_alive(pid: u32) -> bool {
     #[cfg(unix)]
     {
         Command::new("kill")
@@ -137,7 +137,7 @@ fn is_alive(pid: u32) -> bool {
 }
 
 /// Kill a process and all its children.
-fn kill_tree(pid: u32) {
+pub(crate) fn kill_tree(pid: u32) {
     #[cfg(unix)]
     {
         // First try graceful SIGTERM to the process group

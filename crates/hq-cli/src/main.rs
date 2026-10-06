@@ -374,13 +374,9 @@ enum Commands {
 
 
     // ─── Web Dashboard ───────────────────────────────────────────────
-    /// Open HQ web dashboard
-    #[command(alias = "web", alias = "dashboard")]
-    Pwa {
-        /// Port where the built-in HQ web server is listening
-        #[arg(short, long, default_value = "5678")]
-        port: u16,
-    },
+    /// Host the web UI: start it, open the browser (`hq web --help` for more)
+    #[command(alias = "pwa", alias = "dashboard")]
+    Web(commands::web::WebArgs),
 
     // ─── Developer Workflow ───────────────────────────────────────
     /// Show LLM cost and tokens by model (same as `hq usage summary`)
@@ -715,7 +711,7 @@ async fn dispatch(command: Commands, config: &HqConfig) -> Result<()> {
         Commands::Summary => commands::usage::run(config, "daily").await,
 
         // Web Dashboard
-        Commands::Pwa { port } => commands::pwa::run(config, port).await,
+        Commands::Web(args) => commands::web::run(config, args).await,
 
         // Developer Workflow
         Commands::Shortcuts { sub } => commands::shortcuts::run(config, &sub).await,

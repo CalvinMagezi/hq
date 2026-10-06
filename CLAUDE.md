@@ -105,6 +105,7 @@ placeholders (`example.com`, `hq.example.ts.net`, `<owner>/<repo>`).
 | Context engine | `crates/hq-agent/src/context/engine.rs` |
 | Vault client | `crates/hq-vault/src/client.rs` |
 | Search (FTS5 + semantic) | `crates/hq-db/src/search/` |
+| `hq web` (host the web UI: foreground, `--detach`, `status`, `stop`, `--json`) | `crates/hq-cli/src/commands/web.rs`; shared server setup `build_web_state` and `default_static_dir` in `crates/hq-cli/src/commands/start/mod.rs`. Agents setting HQ up for someone should run `hq web --detach --json` and read `login_url`. |
 | Discord bridge | `crates/hq-relay/src/discord/` |
 | Telegram bridge | `crates/hq-relay/src/telegram/`; commands and watch firing shared by both bridges in `chat_commands.rs` and `watch_scheduler.rs` |
 | Remote MCP servers (`remote_mcp:` config) | `crates/hq-tools/src/remote_mcp.rs` |
