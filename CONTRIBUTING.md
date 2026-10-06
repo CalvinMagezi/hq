@@ -1,7 +1,9 @@
 # Contributing to Agent-HQ
 
-Thanks for helping. This file covers setup, the checks a pull request must pass,
-and what reviewers look for. By participating you agree to the
+Pull requests to this repository are limited to the maintainer, who sets the
+project's direction. Bug reports and ideas are welcome as issues, and forking is
+encouraged: HQ is MIT licensed, so you can build and run your own version. This
+file covers setup and the checks every pull request must pass. By participating you agree to the
 [Code of Conduct](CODE_OF_CONDUCT.md).
 
 ## Reporting bugs and security issues
