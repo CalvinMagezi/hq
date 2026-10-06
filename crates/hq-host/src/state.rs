@@ -27,9 +27,10 @@ pub struct PaneRecord {
     pub resume_argv: Vec<String>,
     pub agent: Option<String>,
     pub cwd: PathBuf,
-    /// The extra variables the agent was started with. Stored because the
-    /// resumed process needs them again; the file is private to this user.
-    pub env: Vec<(String, String)>,
+    /// Names of the extra variables the agent was started with. Values are
+    /// never written: whoever started the agent supplies them again on resume.
+    #[serde(default)]
+    pub env_keys: Vec<String>,
     pub rows: u16,
     pub cols: u16,
     pub scrollback_rows: usize,
@@ -133,7 +134,7 @@ mod tests {
             resume_argv: vec!["claude".into(), "--continue".into()],
             agent: Some("claude".into()),
             cwd: "/tmp".into(),
-            env: vec![("HQ_SESSION_ID".into(), name.into())],
+            env_keys: vec!["HQ_SESSION_ID".into()],
             rows: 40,
             cols: 120,
             scrollback_rows: 1000,

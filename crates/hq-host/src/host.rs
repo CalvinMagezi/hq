@@ -105,9 +105,23 @@ pub struct PaneInfo {
 }
 
 type Registry = Arc<Mutex<BTreeMap<String, Arc<Pane>>>>;
+/// Agents restored from the state file that cannot start until their
+/// environment is supplied again.
+type Awaiting = Arc<Mutex<BTreeMap<String, PaneRecord>>>;
+
+/// An agent that is waiting for its environment before it can resume.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AwaitingInfo {
+    pub name: String,
+    pub agent: Option<String>,
+    pub cwd: PathBuf,
+    /// The variables `Host::resume` must supply.
+    pub env_keys: Vec<String>,
+}
 
 pub struct Host {
     panes: Registry,
+    awaiting: Awaiting,
     detector: Detector,
     state: Option<Arc<StateFile>>,
 }
@@ -155,6 +169,7 @@ impl Host {
     pub fn with_detector(detector: Detector) -> Self {
         Self {
             panes: Arc::new(Mutex::new(BTreeMap::new())),
+            awaiting: Arc::new(Mutex::new(BTreeMap::new())),
             detector,
             state: None,
         }
@@ -178,7 +193,9 @@ impl Host {
             return Err(HostError::InvalidName(spec.name));
         }
         check_size(spec.rows, spec.cols)?;
-        if lock(&self.panes).contains_key(&spec.name) {
+        if lock(&self.panes).contains_key(&spec.name)
+            || lock(&self.awaiting).contains_key(&spec.name)
+        {
             return Err(HostError::NameTaken(spec.name));
         }
         // Start the process without holding the registry lock: looking up the
@@ -222,13 +239,16 @@ impl Host {
     /// resumed. A failure is reported on stderr and never fails the caller: an
     /// agent that cannot be remembered still runs.
     fn save(&self) {
-        save_state(&self.panes, self.state.as_deref());
+        save_state(&self.panes, &self.awaiting, self.state.as_deref());
     }
 
     fn exit_hook(&self) -> Option<ExitHook> {
         let state = self.state.clone()?;
         let panes = self.panes.clone();
-        Some(Arc::new(move || save_state(&panes, Some(&state))))
+        let awaiting = self.awaiting.clone();
+        Some(Arc::new(move || {
+            save_state(&panes, &awaiting, Some(&state))
+        }))
     }
 
     /// Starts again every agent the state file lists, using its resume
@@ -248,19 +268,61 @@ impl Host {
             }
         };
         for rec in records {
-            let mut spec = SpawnSpec::new(rec.name.clone(), rec.resume_argv.clone(), rec.cwd);
-            spec.agent = rec.agent;
-            spec.env = rec.env;
-            spec.resume_argv = Some(rec.resume_argv);
-            spec.rows = rec.rows;
-            spec.cols = rec.cols;
-            spec.scrollback_rows = rec.scrollback_rows;
-            match self.spawn(spec) {
-                Ok(_) => report.restored.push(rec.name),
-                Err(e) => report.skipped.push((rec.name, e.to_string())),
+            if !rec.env_keys.is_empty() {
+                lock(&self.awaiting).insert(rec.name.clone(), rec);
+                continue;
+            }
+            let name = rec.name.clone();
+            match self.spawn(spec_of(rec, Vec::new())) {
+                Ok(_) => report.restored.push(name),
+                Err(e) => report.skipped.push((name, e.to_string())),
             }
         }
         report
+    }
+
+    /// Agents restored from the state file that wait for their environment.
+    pub fn awaiting(&self) -> Vec<AwaitingInfo> {
+        lock(&self.awaiting)
+            .values()
+            .map(|r| AwaitingInfo {
+                name: r.name.clone(),
+                agent: r.agent.clone(),
+                cwd: r.cwd.clone(),
+                env_keys: r.env_keys.clone(),
+            })
+            .collect()
+    }
+
+    /// Starts a waiting agent with the environment its starter supplies again.
+    /// It stays waiting if a variable is missing or the start fails.
+    pub fn resume(&self, name: &str, env: Vec<(String, String)>) -> Result<PaneInfo, HostError> {
+        let rec = lock(&self.awaiting)
+            .get(name)
+            .cloned()
+            .ok_or_else(|| HostError::NotFound(name.to_string()))?;
+        let missing: Vec<&str> = rec
+            .env_keys
+            .iter()
+            .filter(|k| !env.iter().any(|(have, _)| have == *k))
+            .map(String::as_str)
+            .collect();
+        if !missing.is_empty() {
+            return Err(HostError::MissingEnv {
+                name: name.to_string(),
+                missing: missing.join(", "),
+            });
+        }
+        // Spawn sees the name as taken while it is waiting, so release it first
+        // and put it back if the start fails.
+        lock(&self.awaiting).remove(name);
+        match self.spawn(spec_of(rec.clone(), env)) {
+            Ok(info) => Ok(info),
+            Err(e) => {
+                lock(&self.awaiting).insert(rec.name.clone(), rec);
+                Err(e)
+            }
+        }
     }
 
     /// Keeps the state file as it is, then stops every agent. Call when the
@@ -290,9 +352,13 @@ impl Host {
 
     /// Forgets an agent and stops its process and the processes it started.
     pub fn remove(&self, name: &str) -> Result<(), HostError> {
-        let pane = lock(&self.panes)
-            .remove(name)
-            .ok_or_else(|| HostError::NotFound(name.to_string()))?;
+        let Some(pane) = lock(&self.panes).remove(name) else {
+            if lock(&self.awaiting).remove(name).is_some() {
+                self.save();
+                return Ok(());
+            }
+            return Err(HostError::NotFound(name.to_string()));
+        };
         self.save();
         // Other threads may still hold the pane (a caller waiting on it), so
         // stopping it cannot be left to the last reference being dropped.
@@ -421,8 +487,9 @@ impl Host {
 }
 
 /// Writes the resumable running agents to the state file, if there is one.
-fn save_state(panes: &Registry, state: Option<&StateFile>) {
+fn save_state(panes: &Registry, awaiting: &Awaiting, state: Option<&StateFile>) {
     let Some(state) = state else { return };
+    let waiting: Vec<PaneRecord> = lock(awaiting).values().cloned().collect();
     let records: Vec<PaneRecord> = lock(panes)
         .iter()
         .filter(|(_, pane)| pane.status() == PaneStatus::Running && !pane.is_stopping())
@@ -434,16 +501,28 @@ fn save_state(panes: &Registry, state: Option<&StateFile>) {
                 resume_argv: resume.argv.clone(),
                 agent: pane.agent.clone(),
                 cwd: pane.cwd.clone(),
-                env: resume.env.clone(),
+                env_keys: resume.env.iter().map(|(k, _)| k.clone()).collect(),
                 rows,
                 cols,
                 scrollback_rows: resume.scrollback_rows,
             })
         })
+        .chain(waiting)
         .collect();
     if let Err(e) = state.write(&records) {
         eprintln!("hq host: could not save session.json: {e}");
     }
+}
+
+fn spec_of(rec: PaneRecord, env: Vec<(String, String)>) -> SpawnSpec {
+    let mut spec = SpawnSpec::new(rec.name, rec.resume_argv.clone(), rec.cwd);
+    spec.agent = rec.agent;
+    spec.env = env;
+    spec.resume_argv = Some(rec.resume_argv);
+    spec.rows = rec.rows;
+    spec.cols = rec.cols;
+    spec.scrollback_rows = rec.scrollback_rows;
+    spec
 }
 
 fn check_size(rows: u16, cols: u16) -> Result<(), HostError> {

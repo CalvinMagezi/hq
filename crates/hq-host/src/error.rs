@@ -22,6 +22,8 @@ pub enum HostError {
     Timeout(Duration),
     #[error("'{0}' has exited")]
     Exited(String),
+    #[error("'{name}' needs these variables to resume: {missing}")]
+    MissingEnv { name: String, missing: String },
 }
 
 impl HostError {
@@ -38,6 +40,7 @@ impl HostError {
             HostError::Io(_) => "io",
             HostError::Timeout(_) => "timeout",
             HostError::Exited(_) => "agent_exited",
+            HostError::MissingEnv { .. } => "missing_env",
         }
     }
 }
