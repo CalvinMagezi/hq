@@ -48,6 +48,7 @@ const brew = installChannels.brew;
           <li><a href="#script">Install script</a></li>
           <li><a href="#homebrew">Homebrew</a></li>
           <li><a href="#npx">npx installer</a></li>
+          <li><a href="#windows">Windows (WSL2)</a></li>
           <li><a href="#source">Build from source</a></li>
           <li><a href="#server">Server with signed releases</a></li>
           <li><a href="#tailscale">Remote access over Tailscale</a></li>
@@ -111,6 +112,17 @@ const brew = installChannels.brew;
         </section>
       )
     }
+    <section class="doc-section" id="windows" aria-labelledby="windows-h">
+      <h2 id="windows-h">Windows</h2>
+      <div class="prose">
+        <p>
+          There is no native Windows build yet. HQ runs well inside WSL2, which is a normal Ubuntu: open
+          an Ubuntu terminal and use the install script above, exactly as on Linux. Open the web UI from
+          your Windows browser at <code>http://localhost:5678</code>. Install bubblewrap
+          (<code>sudo apt install bubblewrap</code>) so the agent's shell tool has its sandbox.
+        </p>
+      </div>
+    </section>
     <section class="doc-section" id="source" aria-labelledby="source-h">
       <h2 id="source-h">{installChannels.cargo.title}</h2>
       <div class="prose">
@@ -276,7 +288,7 @@ const brew = installChannels.brew;
           promised for any date.
         </p>
         <ul class="facts">
-          <li>Prebuilt binaries for Intel Macs and for Windows.</li>
+          <li>Prebuilt binaries for Intel Macs, and a native Windows build. Windows runs HQ through WSL2 today.</li>
           <li>A Docker image.</li>
         </ul>
       </div>
