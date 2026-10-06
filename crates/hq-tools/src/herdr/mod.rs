@@ -10,6 +10,7 @@
 //! means "could not ask"; callers must not read it as "the agent is gone".
 
 mod backend;
+mod native;
 pub mod tools;
 mod transport;
 
@@ -24,6 +25,7 @@ use std::time::{Duration, Instant};
 use transport::{RawOutput, Transport};
 
 pub use backend::{Host, HostBackend};
+pub use native::NativeBackend;
 
 /// Herdr rejects explicit timeouts outside this window.
 const MIN_WAIT_MS: u64 = 3_000;
@@ -188,6 +190,9 @@ pub struct LaunchRequest {
     /// for a launcher Herdr does not know by name. It must end up running a CLI
     /// Herdr recognizes as `kind`.
     pub command: Option<String>,
+    /// Arguments that bring this agent back after the host itself restarts.
+    /// Only the built-in host uses them; None means a restart leaves it gone.
+    pub resume_args: Option<Vec<String>>,
     pub start_timeout: Duration,
 }
 

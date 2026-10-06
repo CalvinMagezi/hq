@@ -36,6 +36,17 @@ pub(super) fn build_args(
     args
 }
 
+/// How the built-in host restarts this agent after the host itself restarts:
+/// only for harnesses that resume without a saved token.
+fn restart_args(harness: &Harness, vault_path: &Path, session_id: &str) -> Option<Vec<String>> {
+    let tokenless = match harness.spec.resume {
+        ResumeStrategy::Args(args) => !args.iter().any(|a| a.contains("{token}")),
+        ResumeStrategy::SessionDir => true,
+        ResumeStrategy::None => false,
+    };
+    tokenless.then(|| build_args(harness, vault_path, session_id, None, true))
+}
+
 /// Everything `launch_session` needs beyond the harness spec.
 pub(super) struct Launch<'a> {
     pub(super) host: Host,
@@ -205,6 +216,7 @@ pub(super) async fn run_launch(
             l.resuming,
         ),
         command: profile.and_then(|p| p.command.clone()),
+        resume_args: restart_args(harness, vault_path, l.session_id),
         start_timeout: l.host.launch_bound(),
     };
     let began = std::time::Instant::now();

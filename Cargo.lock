@@ -2528,6 +2528,7 @@ dependencies = [
  "hq-convert",
  "hq-core",
  "hq-db",
+ "hq-host",
  "hq-llm",
  "hq-memory",
  "hq-vault",
