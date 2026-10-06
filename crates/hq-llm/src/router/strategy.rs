@@ -185,17 +185,8 @@ impl LlmProvider for LlmRouter {
                 let idx = (start + i) % self.providers.len();
                 let (name, provider) = &self.providers[idx];
 
-                let fallback_model = self
-                    .routes
-                    .iter()
-                    .find(|r| {
-                        r.provider == *name && !r.model_id.is_empty() && !r.pattern.ends_with('*')
-                    })
-                    .map(|r| r.model_id.clone())
-                    .unwrap_or_else(|| request.model.clone());
-
                 let mut fallback_req = request.clone();
-                fallback_req.model = fallback_model;
+                fallback_req.model = self.fallback_model(name, &request.model);
 
                 let call_start = Instant::now();
                 match provider.chat(&fallback_req).await {
@@ -360,10 +351,88 @@ impl LlmProvider for LlmRouter {
                 },
             }
         }
+        // No route matched: like `chat`, try every registered provider in turn with the model name
+        // unchanged. Without this a fresh install's default model (anthropic/claude-sonnet-4) had no
+        // provider when OpenRouter was the only one configured.
+        if candidates.is_empty() {
+            let start = self.round_robin.load(std::sync::atomic::Ordering::Relaxed);
+            for i in 0..self.providers.len() {
+                let idx = (start + i) % self.providers.len();
+                let (name, provider) = &self.providers[idx];
+                let mut fallback_req = request.clone();
+                fallback_req.model = self.fallback_model(name, &request.model);
+
+                let call_start = Instant::now();
+                let opened = match provider.chat_stream(&fallback_req).await {
+                    Ok(s) => Ok(s),
+                    Err(_) => provider.chat(&fallback_req).await.map(response_to_stream),
+                };
+                // A stream can open and then fail on its first chunk (an unknown model is a 404
+                // there), so a provider only counts once it has produced something.
+                let outcome = match opened {
+                    Ok(mut s) => {
+                        match tokio::time::timeout(std::time::Duration::from_secs(30), s.next())
+                            .await
+                        {
+                            Ok(Some(Ok(first))) => {
+                                let prepended = futures::stream::once(async move { Ok(first) });
+                                Ok(Box::pin(prepended.chain(s))
+                                    as Pin<Box<dyn Stream<Item = Result<StreamChunk>> + Send>>)
+                            }
+                            Ok(Some(Err(e))) => Err(e),
+                            Ok(None) => Err(anyhow::anyhow!("empty stream")),
+                            Err(_) => Err(anyhow::anyhow!("stream timeout: no first chunk in 30s")),
+                        }
+                    }
+                    Err(e) => Err(e),
+                };
+                match outcome {
+                    Ok(s) => {
+                        self.round_robin
+                            .store(idx + 1, std::sync::atomic::Ordering::Relaxed);
+                        self.record_attempt_ok(
+                            name,
+                            &fallback_req.model,
+                            task,
+                            call_start.elapsed(),
+                            None,
+                        );
+                        return Ok(s);
+                    }
+                    Err(e) => {
+                        self.record_attempt_err(
+                            name,
+                            &fallback_req.model,
+                            task,
+                            call_start.elapsed(),
+                            &e,
+                        );
+                    }
+                }
+            }
+        }
         bail!(
-            "No provider found for model '{}' (streaming)",
+            "No provider could serve model '{}' (streaming); every registered provider failed or none is configured",
             request.model
         )
+    }
+}
+
+impl LlmRouter {
+    /// The model name to send a provider that no route claimed. A concrete `vendor/model` id goes
+    /// through unchanged. An alias such as `relay` becomes the provider's own explicit route target
+    /// when it has one, otherwise the alias unchanged.
+    fn fallback_model(&self, provider_name: &str, requested: &str) -> String {
+        if requested.contains('/') {
+            return requested.to_string();
+        }
+        self.routes
+            .iter()
+            .find(|r| {
+                r.provider == provider_name && !r.model_id.is_empty() && !r.pattern.ends_with('*')
+            })
+            .map(|r| r.model_id.clone())
+            .unwrap_or_else(|| requested.to_string())
     }
 }
 
