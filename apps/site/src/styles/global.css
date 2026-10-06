@@ -147,7 +147,9 @@ a:hover {
   text-decoration-thickness: 2px;
 }
 
-:focus-visible {
+:focus-visible,
+video:focus,
+video:focus-within {
   outline: 3px solid var(--focus-ring);
   outline-offset: 3px;
 }

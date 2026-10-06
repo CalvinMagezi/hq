@@ -50,18 +50,9 @@
     "kind": "video",
     "src": "/media/terminal-install.mp4",
     "poster": "/media/terminal-install-poster.png",
-    "alt": "A terminal recording of building HQ from source, running hq install and then hq doctor.",
-    "caption": "From a fresh clone to a working install: build, hq install, hq doctor.",
+    "alt": "A terminal recording of the install script downloading and verifying a release, then hq install scaffolding a vault and hq doctor checking the setup.",
+    "caption": "From nothing to a working install: the install script, hq install and hq doctor (about 25 seconds, waiting time cut).",
     "width": 1280,
     "height": 720
-  },
-  {
-    "id": "architecture-overview",
-    "kind": "image",
-    "src": "/media/architecture-overview.png",
-    "alt": "An overview of HQ: channels feeding one agent, which reads and writes a markdown vault.",
-    "caption": "Architecture overview: channels in, one agent, one vault.",
-    "width": 1600,
-    "height": 1000
   }
 ]
