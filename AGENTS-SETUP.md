@@ -19,7 +19,7 @@ Run `uname -sm`.
 
 - `Linux x86_64`, `Linux aarch64` and `Darwin arm64` (a Mac with Apple silicon) are supported by the prebuilt installer.
 - `Darwin x86_64` (an Intel Mac) has no prebuilt build. Use "Build from source" under Troubleshooting.
-- Windows: HQ runs inside WSL2 (an Ubuntu terminal). If the user is on plain Windows, ask them to open an Ubuntu (WSL2) terminal and restart this guide there. ASK if unsure.
+- Windows: there is no native build; HQ runs inside WSL2 (Ubuntu). Run `grep -qi microsoft /proc/version && echo wsl`: if it prints `wsl` you are already inside WSL2, continue. If you are in PowerShell or Command Prompt, follow `docs/WINDOWS.md` step 1 (it is `wsl --install -d Ubuntu`, then systemd and the packages), then restart this guide inside the Ubuntu terminal. ASK before running the PowerShell steps, since they may need a restart. In WSL2 keep the vault and projects in the Linux file system (`~/`), not under `/mnt/c`.
 
 ## Step 2: install
 
@@ -93,6 +93,13 @@ Ask the user to type a short hello into the web page, or run `hq chat` and send 
 - how to update (re-run the install command in step 2),
 - that HQ is early software (version 0.9.x) and that problems can be reported at https://github.com/CalvinMagezi/hq/issues with the output of `hq doctor` (remove any keys first).
 
+## Optional: coding agents on this machine, or on another one
+
+Do this only if the user wants HQ to run coding agents (Claude Code, Codex and others). The agent must already be installed and signed in on the machine that will run it.
+
+- Same machine as HQ: run `hq host install` (add `bubblewrap` first on Linux and WSL2: `sudo apt install bubblewrap`). Sessions then start on this machine.
+- A different machine than the one running HQ (an HQ on a server, a laptop or a Windows PC with WSL2): follow `docs/JOIN_A_MACHINE.md`. In short, `hq host join` on that machine prints a code, `hq host add <code>` on the HQ prints one `hq host authorize` command, run that on the machine, then `hq host check <name>` on the HQ. Both machines need Tailscale.
+
 ## Optional: Discord, Telegram, remote access
 
 Do these only if the user asks. Each needs a token the user must create themselves, so walk them through it without seeing the token.
@@ -104,7 +111,7 @@ Do these only if the user asks. Each needs a token the user must create themselv
 ## Troubleshooting
 
 - `hq: command not found`: run `export PATH="$HOME/.local/bin:$PATH"` and try again.
-- Install script says `bubblewrap` is missing (Linux): HQ can still run, but its command sandbox is weaker. Install it with the system package manager (`sudo apt install bubblewrap` on Ubuntu or Debian) after asking the user.
+- Install script says `bubblewrap` is missing (Linux and WSL2): HQ can still run, but its command sandbox is weaker. Install it with the system package manager (`sudo apt install bubblewrap` on Ubuntu or Debian) after asking the user.
 - Port 5678 already in use: another program holds it. Find it with `lsof -i :5678`, stop it with the user's approval, or set a different port in `~/.hq/config.yaml` (`ws_port`).
 - Build from source (Intel Mac, unsupported systems): install Rust from https://rustup.rs, then `git clone https://github.com/CalvinMagezi/hq.git && cd hq && cargo build --release -p hq-cli && install -m 755 target/release/hq ~/.local/bin/hq`. The first build takes several minutes. The web page needs bun (https://bun.sh): `cd apps/hq-web && bun install && bun run build`.
 - Docker instead of the script: `docker run -d --name hq --restart unless-stopped -p 127.0.0.1:5678:5678 -v hq-data:/data ghcr.io/calvinmagezi/hq`. The first start prints a web token in `docker logs hq`. Details in `docs/DOCKER.md`.

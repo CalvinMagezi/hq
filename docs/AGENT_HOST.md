@@ -3,7 +3,7 @@
 `hq host` is HQ's built-in host for long-lived coding agents. It runs each agent
 in a pseudo-terminal, keeps an emulated screen and scrollback you can read back,
 and accepts typed input. It is where every coding-agent session HQ starts runs,
-on this machine or on a machine you paired (see [JOIN_A_MACHINE.md](JOIN_A_MACHINE.md)).
+on this machine or on a machine you paired (see [JOIN_A_MACHINE.md](JOIN_A_MACHINE.md); on Windows the host runs inside WSL2, see [WINDOWS.md](WINDOWS.md)).
 
 ## Run it
 

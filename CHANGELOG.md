@@ -6,6 +6,7 @@ All notable changes to Agent-HQ will be documented in this file.
 
 ### Changed
 
+- **Windows is documented end to end**: `docs/WINDOWS.md` covers WSL2 setup (systemd, sandbox settings, Tailscale inside WSL2), running HQ on a Windows PC, and pairing a Windows PC as a coding-agent machine for an HQ elsewhere. The README, the install page, `llms.txt` and `AGENTS-SETUP.md` point to it, and `AGENTS-SETUP.md` now tells an agent how to detect WSL2 and set up a host.
 - **The `herdr` names are gone from the repo and the product.** The config section is `agent_host:` (a config that still says `herdr:` keeps loading, and `hq host add` renames the heading when it edits the file), the MCP tools are `host_list`, `host_agents`, `host_read` and `host_send` (the old `herdr_*` names no longer exist, so clients that called them must switch), the web settings API key is `agent_host`, `docs/HERDR_HARNESS.md` is `docs/AGENT_SESSIONS.md`, and CI fails if the retired name reappears outside NOTICE, provenance records and migrations.
 
 ### Removed

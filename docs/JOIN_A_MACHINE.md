@@ -60,22 +60,11 @@ control. Agents there run in a sandbox: they cannot read the host's own files or
 directories, and they reach only the sites the HQ allows (`agent_host.sandbox.allow_domains`; denied sites
 are logged so you can add what you need).
 
-## WSL2 on Windows
+## Windows
 
-The built-in host runs on Linux and macOS, so on Windows it runs inside WSL2 (Ubuntu):
-
-1. In PowerShell: `wsl --install -d Ubuntu`, then in the Ubuntu shell make systemd the init system:
-   add `[boot]` and `systemd=true` to `/etc/wsl.conf`, then `wsl --shutdown` and open Ubuntu again.
-2. Inside Ubuntu: `sudo apt install -y openssh-server bubblewrap` and
-   `sudo systemctl enable --now ssh`.
-3. Install Tailscale inside Ubuntu (`curl -fsSL https://tailscale.com/install.sh | sh`, then
-   `sudo tailscale up --hostname <name>-wsl`). WSL2 has its own network, so it is its own tailnet
-   node, separate from Windows; this is the address the HQ connects to.
-4. Ubuntu 24.04 blocks the user namespaces the sandbox needs. Allow them:
-   `sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0` and put the same line (as
-   `kernel.apparmor_restrict_unprivileged_userns = 0`) in `/etc/sysctl.d/60-hq.conf`.
-5. Keep the service running when no terminal is open: `sudo loginctl enable-linger $USER`.
-6. Install Claude Code and `hq` inside Ubuntu, sign in to Claude, then follow steps 1 to 4 above.
+The host runs on Linux and macOS, so on Windows it runs inside WSL2 (Ubuntu). The WSL2 setup,
+including the Tailscale and sandbox settings WSL2 needs, is in [WINDOWS.md](WINDOWS.md); once
+Ubuntu is ready, follow steps 1 to 4 above inside it.
 
 ## If you are an agent setting this up
 
