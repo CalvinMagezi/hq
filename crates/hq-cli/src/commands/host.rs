@@ -12,6 +12,8 @@ fn default_dir() -> PathBuf {
 
 pub struct HostArgs {
     pub sub: String,
+    pub arg: Option<String>,
+    pub addr: Option<String>,
     pub dir: Option<PathBuf>,
     pub allow_unsandboxed: bool,
     pub key: Option<String>,
@@ -22,7 +24,7 @@ pub struct HostArgs {
 }
 
 pub async fn run(args: HostArgs) -> Result<()> {
-    let HostArgs { sub, dir, allow_unsandboxed, key, from, port, unix, rest } = args;
+    let HostArgs { sub, arg, addr, dir, allow_unsandboxed, key, from, port, unix, rest } = args;
     let sub = sub.as_str();
     let dir_arg = dir.clone();
     let dir = dir.unwrap_or_else(default_dir);
@@ -35,6 +37,9 @@ pub async fn run(args: HostArgs) -> Result<()> {
         "relay" => relay(port, unix),
         "sandbox-init" => sandbox_init(port, unix, &rest),
         "install" => super::host_install::install(),
+        "join" => super::host_install::join(arg.as_deref(), addr.as_deref()),
+        "add" => super::host_install::add(arg.as_deref(), from.as_deref()),
+        "check" => super::host_install::check(arg.as_deref()),
         "authorize" => super::host_install::authorize(key.as_deref(), from.as_deref()),
         other => bail!("unknown subcommand '{other}': use serve, status, stop, install, authorize, report or gate"),
     }

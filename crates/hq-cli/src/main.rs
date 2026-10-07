@@ -83,9 +83,11 @@ enum Commands {
 
     /// Run or inspect the built-in agent host (long-lived coding agents in pseudo-terminals)
     Host {
-        /// serve (run the host in this terminal), status, stop, install (run it as a login service), authorize (pin a remote key to the gate), report (used by agent hooks), or gate (the ssh forced command for remote access)
+        /// serve (run the host in this terminal), status, stop, install (run it as a login service), join (print this machine's join code), add <code> (pair a machine, on the HQ side), check <host>, authorize (pin a remote key to the gate), report (used by agent hooks), or gate (the ssh forced command for remote access)
         #[arg(default_value = "status")]
         sub: String,
+        /// add: the join code; check: the host name; join: the name for this machine
+        arg: Option<String>,
         /// Directory holding host.sock and operator.token (default: ~/.hq/run/host)
         #[arg(long)]
         dir: Option<std::path::PathBuf>,
@@ -107,6 +109,9 @@ enum Commands {
         /// sandbox-init: the agent command to run after `--`
         #[arg(last = true)]
         rest: Vec<String>,
+        /// join: this machine's tailnet address when tailscale cannot be asked
+        #[arg(long)]
+        addr: Option<String>,
     },
 
     /// Internal: detached applier spawned by self_update_install
@@ -515,11 +520,13 @@ async fn async_main() -> Result<()> {
 
     // The host's hook reporter and ssh gate need no config, and the reporter
     // runs where the config is unreadable.
-    if let Some(Commands::Host { sub, dir, allow_unsandboxed, key, from, port, unix, rest }) = &cli.command
+    if let Some(Commands::Host { sub, arg, dir, allow_unsandboxed, key, from, port, unix, rest, addr }) = &cli.command
         && matches!(sub.as_str(), "report" | "gate" | "relay" | "sandbox-init")
     {
         return commands::host::run(commands::host::HostArgs {
             sub: sub.clone(),
+            arg: arg.clone(),
+            addr: addr.clone(),
             dir: dir.clone(),
             allow_unsandboxed: *allow_unsandboxed,
             key: key.clone(),
@@ -669,7 +676,7 @@ async fn dispatch(command: Commands, config: &HqConfig) -> Result<()> {
             host,
             lines,
         } => commands::sessions::run(config, &sub, arg, prompt, cwd, label, host, lines).await,
-        Commands::Host { sub, dir, allow_unsandboxed, key, from, port, unix, rest } => commands::host::run(commands::host::HostArgs { sub, dir, allow_unsandboxed, key, from, port, unix, rest }).await,
+        Commands::Host { sub, arg, dir, allow_unsandboxed, key, from, port, unix, rest, addr } => commands::host::run(commands::host::HostArgs { sub, arg, dir, allow_unsandboxed, key, from, port, unix, rest, addr }).await,
         Commands::SelfApply { run_id } => commands::self_apply::run(config, run_id).await,
         Commands::NotifyRestart { phase, reason, sha } => {
             commands::notify_restart::run(config, &phase, &reason, sha.as_deref()).await
