@@ -24,11 +24,14 @@ async-trait = { workspace = true }
 reqwest = { workspace = true }
 url = { workspace = true }
 sha2 = { workspace = true }
+# Hand-tuned SHA-256 for the Mojeek proof of work; already in the tree through rustls.
+ring = "0.17"
 hex = { workspace = true }
 dirs = { workspace = true }
 base64 = "0.22"
 which = { workspace = true }
 html2text = { workspace = true }
+scraper = { workspace = true }
 regex = { workspace = true }
 rusqlite = { workspace = true }
 

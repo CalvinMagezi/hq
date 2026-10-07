@@ -15,7 +15,7 @@ file covers setup and the checks every pull request must pass. By participating 
 
 Requirements: Rust 1.89 or newer (edition 2024), a C toolchain and OpenSSL
 headers on Linux (`build-essential pkg-config libssl-dev`), and
-[bun](https://bun.sh) for the web UI. Ollama, SearxNG and Herdr are optional.
+[bun](https://bun.sh) for the web UI. Ollama, SearxNG and Herdr are optional; web search works without them.
 
 ```bash
 git clone https://github.com/CalvinMagezi/hq.git
@@ -68,7 +68,8 @@ Notes:
 
 ## Optional integrations
 
-HQ works without Discord, Telegram, Google Workspace, Herdr, Ollama or SearxNG.
+HQ works without Discord, Telegram, Google Workspace, Herdr, Ollama or SearxNG
+(`web_search` has a built-in keyless engine pool).
 Code that depends on one must degrade cleanly when it is absent, and must never
 make an instance-specific service a default.
 

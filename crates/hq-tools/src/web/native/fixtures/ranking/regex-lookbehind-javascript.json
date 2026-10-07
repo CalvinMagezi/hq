@@ -1,0 +1,461 @@
+{
+ "category": "code",
+ "engines": [
+  {
+   "engine": "github",
+   "results": [
+    {
+     "published": "2022-12-20T14:06:58Z",
+     "snippet": "Criação de um cartão digital com validações rigorosas utilizando RegEx. (SCSS, 0 stars)",
+     "title": "Leo-Henrique/cartao-interativo",
+     "url": "https://github.com/Leo-Henrique/cartao-interativo"
+    }
+   ],
+   "weight": 1.0
+  },
+  {
+   "engine": "stack overflow",
+   "results": [
+    {
+     "published": "2011-09-11T04:06:12+00:00",
+     "snippet": "160 votes, 8 answers (answered); tags: javascript, regex",
+     "title": "javascript regex - look behind alternative?",
+     "url": "https://stackoverflow.com/questions/7376238/javascript-regex-look-behind-alternative"
+    },
+    {
+     "published": "2009-03-13T03:50:38+00:00",
+     "snippet": "179 votes, 11 answers (answered); tags: javascript, regex, negative-lookbehind",
+     "title": "Negative lookbehind equivalent in JavaScript",
+     "url": "https://stackoverflow.com/questions/641407/negative-lookbehind-equivalent-in-javascript"
+    },
+    {
+     "published": "2016-02-29T14:32:19+00:00",
+     "snippet": "2 votes, 2 answers (answered); tags: javascript, regex",
+     "title": "javascript regex lookbehind",
+     "url": "https://stackoverflow.com/questions/35702159/javascript-regex-lookbehind"
+    },
+    {
+     "published": "2015-01-11T21:27:41+00:00",
+     "snippet": "0 votes, 1 answers (answered); tags: javascript, jquery, regex, lookbehind",
+     "title": "javascript regex lookbehind and jQuery selector",
+     "url": "https://stackoverflow.com/questions/27892307/javascript-regex-lookbehind-and-jquery-selector"
+    },
+    {
+     "published": "2019-01-18T11:41:09+00:00",
+     "snippet": "0 votes, 3 answers (answered); tags: javascript, regex, regex-lookarounds, lookbehind",
+     "title": "Regex Lookbehind in Javascript Alternatives",
+     "url": "https://stackoverflow.com/questions/54253280/regex-lookbehind-in-javascript-alternatives"
+    },
+    {
+     "published": "2012-12-08T00:45:11+00:00",
+     "snippet": "3 votes, 2 answers (answered); tags: javascript, regex",
+     "title": "Regex lookbehind workaround for Javascript?",
+     "url": "https://stackoverflow.com/questions/13773268/regex-lookbehind-workaround-for-javascript"
+    },
+    {
+     "published": "2016-04-28T08:57:10+00:00",
+     "snippet": "0 votes, 2 answers (answered); tags: javascript, regex",
+     "title": "Javascript Regex Lookbehind Alternative",
+     "url": "https://stackoverflow.com/questions/36909848/javascript-regex-lookbehind-alternative"
+    },
+    {
+     "published": "2015-10-13T13:06:00+00:00",
+     "snippet": "0 votes, 2 answers (answered); tags: javascript, regex, lookbehind",
+     "title": "regex lookbehind in javascript",
+     "url": "https://stackoverflow.com/questions/33103504/regex-lookbehind-in-javascript"
+    },
+    {
+     "published": "2018-04-24T22:08:08+00:00",
+     "snippet": "18 votes, 4 answers (answered); tags: javascript, regex, firefox, regex-lookarounds",
+     "title": "Javascript regex (negative) lookbehind not working in firefox",
+     "url": "https://stackoverflow.com/questions/50011366/javascript-regex-negative-lookbehind-not-working-in-firefox"
+    },
+    {
+     "published": "2018-02-24T13:35:19+00:00",
+     "snippet": "1 votes, 0 answers (unanswered); tags: javascript",
+     "title": "Negative lookbehind and regex in javascript",
+     "url": "https://stackoverflow.com/questions/48963439/negative-lookbehind-and-regex-in-javascript"
+    },
+    {
+     "published": "2020-05-16T21:59:54+00:00",
+     "snippet": "2 votes, 4 answers (answered); tags: javascript, regex, regex-lookarounds",
+     "title": "Javascript regex lookbehind: Invalid regexp group",
+     "url": "https://stackoverflow.com/questions/61844157/javascript-regex-lookbehind-invalid-regexp-group"
+    },
+    {
+     "published": "2016-02-01T23:24:20+00:00",
+     "snippet": "5 votes, 2 answers (answered); tags: javascript, regex, regex-lookarounds",
+     "title": "Regex lookbehind not valid in JavaScript",
+     "url": "https://stackoverflow.com/questions/35142364/regex-lookbehind-not-valid-in-javascript"
+    },
+    {
+     "published": "2016-12-14T15:36:09+00:00",
+     "snippet": "0 votes, 1 answers (answered); tags: javascript, regex",
+     "title": "RegEx Javascript Positive Lookbehind",
+     "url": "https://stackoverflow.com/questions/41146448/regex-javascript-positive-lookbehind"
+    },
+    {
+     "published": "2014-12-08T01:40:00+00:00",
+     "snippet": "0 votes, 3 answers (answered); tags: javascript, regex, regex-lookarounds, negative-lookbehind",
+     "title": "Javascript regexes - Lookbehind and lookahead at the same time",
+     "url": "https://stackoverflow.com/questions/27350139/javascript-regexes-lookbehind-and-lookahead-at-the-same-time"
+    },
+    {
+     "published": "2012-12-06T15:23:10+00:00",
+     "snippet": "2 votes, 1 answers (answered); tags: javascript, regex, lookbehind",
+     "title": "How do I replicate this regex in JavaScript without lookbehind?",
+     "url": "https://stackoverflow.com/questions/13746825/how-do-i-replicate-this-regex-in-javascript-without-lookbehind"
+    },
+    {
+     "published": "2018-02-28T19:25:53+00:00",
+     "snippet": "0 votes, 2 answers (answered); tags: javascript, php, regex",
+     "title": "Regex: Negative Lookbehind + Lookahead in Javascript",
+     "url": "https://stackoverflow.com/questions/49037123/regex-negative-lookbehind-lookahead-in-javascript"
+    },
+    {
+     "published": "2017-04-07T08:53:03+00:00",
+     "snippet": "0 votes, 0 answers (unanswered); tags: javascript, regex, negative-lookbehind",
+     "title": "negative lookbehind regex javascript",
+     "url": "https://stackoverflow.com/questions/43273795/negative-lookbehind-regex-javascript"
+    },
+    {
+     "published": "2016-06-23T16:19:58+00:00",
+     "snippet": "1 votes, 1 answers (answered); tags: javascript, regex",
+     "title": "Matching this string without a lookbehind - Javascript Regex",
+     "url": "https://stackoverflow.com/questions/37996954/matching-this-string-without-a-lookbehind-javascript-regex"
+    },
+    {
+     "published": "2012-02-08T04:16:34+00:00",
+     "snippet": "1 votes, 1 answers (answered); tags: javascript, regex",
+     "title": "javascript regex, matching without groups or positive lookbehind",
+     "url": "https://stackoverflow.com/questions/9187778/javascript-regex-matching-without-groups-or-positive-lookbehind"
+    },
+    {
+     "published": "2016-04-25T20:13:10+00:00",
+     "snippet": "0 votes, 2 answers (answered); tags: javascript, regex",
+     "title": "Regex Javascript How To Imitate Negative Lookbehind from PHP Regex",
+     "url": "https://stackoverflow.com/questions/36850179/regex-javascript-how-to-imitate-negative-lookbehind-from-php-regex"
+    }
+   ],
+   "weight": 1.0
+  },
+  {
+   "engine": "askubuntu",
+   "results": [],
+   "weight": 0.4000000059604645
+  },
+  {
+   "engine": "superuser",
+   "results": [],
+   "weight": 0.4000000059604645
+  },
+  {
+   "engine": "mdn",
+   "results": [
+    {
+     "published": null,
+     "snippet": "A lookbehind assertion \"looks behind\": it attempts to match the previous input with the given pattern, but it does not consume any of the input — if the match is successful, the current position in the input stays the same. It matches each atom in its pattern in the reverse order.",
+     "title": "Lookbehind assertion: (?<=...), (?<!...)",
+     "url": "https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Regular_expressions/Lookbehind_assertion"
+    },
+    {
+     "published": null,
+     "snippet": "Checks if a regular expression is supported as a declarativeNetRequest.RuleCondition.regexFilter rule condition.",
+     "title": "declarativeNetRequest.isRegexSupported()",
+     "url": "https://developer.mozilla.org/en-US/docs/Mozilla/Add-ons/WebExtensions/API/declarativeNetRequest/isRegexSupported"
+    },
+    {
+     "published": null,
+     "snippet": "The JavaScript reference serves as a repository of facts about the JavaScript language. The entire language is described here in detail. As you write JavaScript code, you'll refer to these pages often (thus the title \"JavaScript reference\").",
+     "title": "JavaScript reference",
+     "url": "https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference"
+    },
+    {
+     "published": null,
+     "snippet": "The maximum number of regular expression rules that an extension can add.",
+     "title": "declarativeNetRequest.MAX_NUMBER_OF_REGEX_RULES",
+     "url": "https://developer.mozilla.org/en-US/docs/Mozilla/Add-ons/WebExtensions/API/declarativeNetRequest/MAX_NUMBER_OF_REGEX_RULES"
+    },
+    {
+     "published": null,
+     "snippet": "JavaScript (JS) is a lightweight interpreted (or just-in-time compiled) programming language with first-class functions. While it is most well-known as the scripting language for Web pages, many non-browser environments also use it, such as Node.js, Apache CouchDB and Adobe Acrobat. JavaScript is a prototype-based, garbage-collected, dynamic language, supporting multiple paradigms such as imperative, functional, and object-oriented.",
+     "title": "JavaScript",
+     "url": "https://developer.mozilla.org/en-US/docs/Web/JavaScript"
+    },
+    {
+     "published": null,
+     "snippet": "JavaScript (or \"JS\") is a programming language used most often for dynamic client-side scripts on webpages, but it is also often used on the server-side, using a runtime such as Node.js, Deno, and Bun.",
+     "title": "JavaScript",
+     "url": "https://developer.mozilla.org/en-US/docs/Glossary/JavaScript"
+    },
+    {
+     "published": null,
+     "snippet": "JavaScript URLs, URLs prefixed with the javascript: scheme, are used as fake navigation targets that execute JavaScript when the browser attempts to navigate. If the URL evaluates to a string, it is treated as HTML and rendered by the browser.",
+     "title": "javascript: URLs",
+     "url": "https://developer.mozilla.org/en-US/docs/Web/URI/Reference/Schemes/javascript"
+    },
+    {
+     "published": null,
+     "snippet": "The JavaScript Guide shows you how to use JavaScript and gives an overview of the language. If you need exhaustive information about a language feature, have a look at the JavaScript reference.",
+     "title": "JavaScript Guide",
+     "url": "https://developer.mozilla.org/en-US/docs/Web/JavaScript/Guide"
+    },
+    {
+     "published": null,
+     "snippet": "This guide gives you all you need to get started with JavaScript module syntax.",
+     "title": "JavaScript modules",
+     "url": "https://developer.mozilla.org/en-US/docs/Web/JavaScript/Guide/Modules"
+    },
+    {
+     "published": null,
+     "snippet": "In this module, we take a look at asynchronous JavaScript, why it is important, and how it can be used to effectively handle potential blocking operations, such as fetching resources from a server.",
+     "title": "Asynchronous JavaScript",
+     "url": "https://developer.mozilla.org/en-US/docs/Learn_web_development/Extensions/Async_JS"
+    }
+   ],
+   "weight": 0.4000000059604645
+  },
+  {
+   "engine": "crates.io",
+   "results": [
+    {
+     "published": "2026-08-23T22:32:55.828904Z",
+     "snippet": "A regular expression engine targeting EcmaScript syntax (v0.12.0, 45638913 downloads)",
+     "title": "regress (crates.io)",
+     "url": "https://crates.io/crates/regress"
+    },
+    {
+     "published": "2026-10-03T18:11:44.791051Z",
+     "snippet": "Find every regex in a codebase, and report which can be driven into catastrophic backtracking (v0.4.1, 151 downloads)",
+     "title": "regex-le (crates.io)",
+     "url": "https://crates.io/crates/regex-le"
+    },
+    {
+     "published": "2026-07-08T02:39:19.235034Z",
+     "snippet": "static ReDoS vulnerability analysis of ECMA-262 regex patterns (v0.2.0, 53 downloads)",
+     "title": "redos-detector (crates.io)",
+     "url": "https://crates.io/crates/redos-detector"
+    },
+    {
+     "published": "2026-07-17T15:34:16.937715Z",
+     "snippet": "Regex-anre is a full-featured, zero-dependency regular expression engine that supports both standard and ANRE regular expressions. (v2.1.2, 1954 downloads)",
+     "title": "regex-anre (crates.io)",
+     "url": "https://crates.io/crates/regex-anre"
+    },
+    {
+     "published": "2026-06-21T22:53:47.992766Z",
+     "snippet": "An advanced regular expression engine for Rust, inspired by mrab-regex (v0.1.5, 118 downloads)",
+     "title": "eregex (crates.io)",
+     "url": "https://crates.io/crates/eregex"
+    },
+    {
+     "published": "2026-04-30T11:50:02.931691Z",
+     "snippet": "CLI tool to check Obsidian plugin compliance with (un)official guidelines (v0.1.0, 20 downloads)",
+     "title": "oplint (crates.io)",
+     "url": "https://crates.io/crates/oplint"
+    },
+    {
+     "published": "2026-09-05T23:48:59.342357Z",
+     "snippet": "A high-performance JavaScript engine written in pure Rust. Library, C FFI, and CLI. (v0.0.9, 1100 downloads)",
+     "title": "kataan (crates.io)",
+     "url": "https://crates.io/crates/kataan"
+    },
+    {
+     "published": "2026-09-24T12:35:53.231149Z",
+     "snippet": "An AI coding agent hook that blocks destructive commands before they execute (v0.14.4, 398 downloads)",
+     "title": "destructive_command_guard (crates.io)",
+     "url": "https://crates.io/crates/destructive_command_guard"
+    }
+   ],
+   "weight": 0.4000000059604645
+  },
+  {
+   "engine": "npm",
+   "results": [
+    {
+     "published": "2025-12-09T01:33:47.153Z",
+     "snippet": "Regex template tag with extended syntax, context-aware interpolation, and always-on best practices (v6.1.0)",
+     "title": "regex (npm)",
+     "url": "https://www.npmjs.com/package/regex"
+    },
+    {
+     "published": "2026-09-15T17:11:44.000Z",
+     "snippet": "A regular expression to match all Emoji-only symbols as per the Unicode Standard. (v11.0.0)",
+     "title": "emoji-regex (npm)",
+     "url": "https://www.npmjs.com/package/emoji-regex"
+    },
+    {
+     "published": "2025-09-08T01:53:07.339Z",
+     "snippet": "<img src=\"https://github.com/JonasBa/eslint-plugin-no-lookahead-lookbehind-regexp/blob/main/example.gif?raw=true\" width=\"70%\"/> (v0.4.0)",
+     "title": "eslint-plugin-no-lookahead-lookbehind-regexp (npm)",
+     "url": "https://www.npmjs.com/package/eslint-plugin-no-lookahead-lookbehind-regexp"
+    },
+    {
+     "published": "2025-02-01T00:57:00.191Z",
+     "snippet": "Recursive matching plugin for Regex+ (v6.0.2)",
+     "title": "regex-recursion (npm)",
+     "url": "https://www.npmjs.com/package/regex-recursion"
+    },
+    {
+     "published": "2026-04-19T13:08:33.973Z",
+     "snippet": "Convert Oniguruma patterns to native JavaScript RegExp (v4.3.6)",
+     "title": "oniguruma-to-es (npm)",
+     "url": "https://www.npmjs.com/package/oniguruma-to-es"
+    },
+    {
+     "published": "2021-04-08T14:12:41.441Z",
+     "snippet": "Clone and modify a RegExp instance (v3.0.0)",
+     "title": "clone-regexp (npm)",
+     "url": "https://www.npmjs.com/package/clone-regexp"
+    },
+    {
+     "published": "2024-12-12T05:44:07.833Z",
+     "snippet": "Is this value a JS regex? Works cross-realm/iframe, and despite ES6 @@toStringTag (v1.2.1)",
+     "title": "is-regex (npm)",
+     "url": "https://www.npmjs.com/package/is-regex"
+    },
+    {
+     "published": "2019-04-07T06:04:37.030Z",
+     "snippet": "Pass two numbers, get a regex-compatible source string for matching ranges. Validated against more than 2.78 million test assertions. (v5.0.1)",
+     "title": "to-regex-range (npm)",
+     "url": "https://www.npmjs.com/package/to-regex-range"
+    },
+    {
+     "published": "2025-04-22T12:47:49.444Z",
+     "snippet": "A regular expression to match all emoji-only symbols (v2.0.1)",
+     "title": "emoji-regex-xs (npm)",
+     "url": "https://www.npmjs.com/package/emoji-regex-xs"
+    },
+    {
+     "published": "2025-11-04T09:30:12.779Z",
+     "snippet": "Make a regular expression time out if it takes too long to execute (v1.1.0)",
+     "title": "super-regex (npm)",
+     "url": "https://www.npmjs.com/package/super-regex"
+    },
+    {
+     "published": "2024-12-12T18:49:07.155Z",
+     "snippet": "Give a regex, get a robust predicate function that tests it against a string. (v1.1.0)",
+     "title": "safe-regex-test (npm)",
+     "url": "https://www.npmjs.com/package/safe-regex-test"
+    },
+    {
+     "published": "2026-09-27T03:34:44.568Z",
+     "snippet": "Regular expression for matching ANSI escape codes (v6.4.0)",
+     "title": "ansi-regex (npm)",
+     "url": "https://www.npmjs.com/package/ansi-regex"
+    },
+    {
+     "published": "2026-10-01T06:46:30.483Z",
+     "snippet": "Engine for Shiki using JavaScript's native RegExp (v4.5.0)",
+     "title": "@shikijs/engine-javascript (npm)",
+     "url": "https://www.npmjs.com/package/@shikijs/engine-javascript"
+    },
+    {
+     "published": "2026-10-03T12:33:56.984Z",
+     "snippet": "Weapon regeX mutates regular expressions for use in mutation testing. (v2.0.6)",
+     "title": "weapon-regex (npm)",
+     "url": "https://www.npmjs.com/package/weapon-regex"
+    },
+    {
+     "published": "2024-08-23T16:31:18.748Z",
+     "snippet": "Glob matching for javascript/node.js. A replacement and faster alternative to minimatch and multimatch. (v4.0.8)",
+     "title": "micromatch (npm)",
+     "url": "https://www.npmjs.com/package/micromatch"
+    },
+    {
+     "published": "2021-08-13T23:09:49.954Z",
+     "snippet": "Regular expression for matching a shebang line (v4.0.0)",
+     "title": "shebang-regex (npm)",
+     "url": "https://www.npmjs.com/package/shebang-regex"
+    },
+    {
+     "published": "2026-06-17T09:44:41.721Z",
+     "snippet": "Compile regular expressions using the `s` (`dotAll`) flag to ES5. (v8.0.1)",
+     "title": "@babel/plugin-transform-dotall-regex (npm)",
+     "url": "https://www.npmjs.com/package/@babel/plugin-transform-dotall-regex"
+    },
+    {
+     "published": "2026-06-17T09:45:10.519Z",
+     "snippet": "Compile regular expressions' unicodeSets (v) flag. (v8.0.1)",
+     "title": "@babel/plugin-transform-unicode-sets-regex (npm)",
+     "url": "https://www.npmjs.com/package/@babel/plugin-transform-unicode-sets-regex"
+    },
+    {
+     "published": "2026-06-17T09:44:42.931Z",
+     "snippet": "Compile regular expressions using duplicate named groups to index-based groups. (v8.0.1)",
+     "title": "@babel/plugin-transform-duplicate-named-capturing-groups-regex (npm)",
+     "url": "https://www.npmjs.com/package/@babel/plugin-transform-duplicate-named-capturing-groups-regex"
+    },
+    {
+     "published": "2026-06-17T09:44:52.839Z",
+     "snippet": "Compile regular expressions using named groups to ES5. (v8.0.1)",
+     "title": "@babel/plugin-transform-named-capturing-groups-regex (npm)",
+     "url": "https://www.npmjs.com/package/@babel/plugin-transform-named-capturing-groups-regex"
+    }
+   ],
+   "weight": 0.4000000059604645
+  }
+ ],
+ "labels": {
+  "https://github.com/Leo-Henrique/cartao-interativo": 0,
+  "https://stackoverflow.com/questions/7376238/javascript-regex-look-behind-alternative": 2,
+  "https://stackoverflow.com/questions/641407/negative-lookbehind-equivalent-in-javascript": 2,
+  "https://stackoverflow.com/questions/35702159/javascript-regex-lookbehind": 1,
+  "https://stackoverflow.com/questions/27892307/javascript-regex-lookbehind-and-jquery-selector": 0,
+  "https://stackoverflow.com/questions/54253280/regex-lookbehind-in-javascript-alternatives": 2,
+  "https://stackoverflow.com/questions/13773268/regex-lookbehind-workaround-for-javascript": 2,
+  "https://stackoverflow.com/questions/36909848/javascript-regex-lookbehind-alternative": 0,
+  "https://stackoverflow.com/questions/33103504/regex-lookbehind-in-javascript": 0,
+  "https://stackoverflow.com/questions/50011366/javascript-regex-negative-lookbehind-not-working-in-firefox": 0,
+  "https://stackoverflow.com/questions/48963439/negative-lookbehind-and-regex-in-javascript": 0,
+  "https://stackoverflow.com/questions/61844157/javascript-regex-lookbehind-invalid-regexp-group": 0,
+  "https://stackoverflow.com/questions/35142364/regex-lookbehind-not-valid-in-javascript": 0,
+  "https://stackoverflow.com/questions/41146448/regex-javascript-positive-lookbehind": 0,
+  "https://stackoverflow.com/questions/27350139/javascript-regexes-lookbehind-and-lookahead-at-the-same-time": 0,
+  "https://stackoverflow.com/questions/13746825/how-do-i-replicate-this-regex-in-javascript-without-lookbehind": 0,
+  "https://stackoverflow.com/questions/49037123/regex-negative-lookbehind-lookahead-in-javascript": 0,
+  "https://stackoverflow.com/questions/43273795/negative-lookbehind-regex-javascript": 0,
+  "https://stackoverflow.com/questions/37996954/matching-this-string-without-a-lookbehind-javascript-regex": 0,
+  "https://stackoverflow.com/questions/9187778/javascript-regex-matching-without-groups-or-positive-lookbehind": 0,
+  "https://stackoverflow.com/questions/36850179/regex-javascript-how-to-imitate-negative-lookbehind-from-php-regex": 0,
+  "https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Regular_expressions/Lookbehind_assertion": 2,
+  "https://developer.mozilla.org/en-US/docs/Mozilla/Add-ons/WebExtensions/API/declarativeNetRequest/isRegexSupported": 0,
+  "https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference": 0,
+  "https://developer.mozilla.org/en-US/docs/Mozilla/Add-ons/WebExtensions/API/declarativeNetRequest/MAX_NUMBER_OF_REGEX_RULES": 0,
+  "https://developer.mozilla.org/en-US/docs/Web/JavaScript": 0,
+  "https://developer.mozilla.org/en-US/docs/Glossary/JavaScript": 0,
+  "https://developer.mozilla.org/en-US/docs/Web/URI/Reference/Schemes/javascript": 0,
+  "https://developer.mozilla.org/en-US/docs/Web/JavaScript/Guide": 0,
+  "https://developer.mozilla.org/en-US/docs/Web/JavaScript/Guide/Modules": 0,
+  "https://developer.mozilla.org/en-US/docs/Learn_web_development/Extensions/Async_JS": 0,
+  "https://crates.io/crates/regress": 0,
+  "https://crates.io/crates/regex-le": 0,
+  "https://crates.io/crates/redos-detector": 0,
+  "https://crates.io/crates/regex-anre": 0,
+  "https://crates.io/crates/eregex": 0,
+  "https://crates.io/crates/oplint": 0,
+  "https://crates.io/crates/kataan": 0,
+  "https://crates.io/crates/destructive_command_guard": 0,
+  "https://www.npmjs.com/package/regex": 0,
+  "https://www.npmjs.com/package/emoji-regex": 0,
+  "https://www.npmjs.com/package/eslint-plugin-no-lookahead-lookbehind-regexp": 0,
+  "https://www.npmjs.com/package/regex-recursion": 0,
+  "https://www.npmjs.com/package/oniguruma-to-es": 0,
+  "https://www.npmjs.com/package/clone-regexp": 0,
+  "https://www.npmjs.com/package/is-regex": 0,
+  "https://www.npmjs.com/package/to-regex-range": 0,
+  "https://www.npmjs.com/package/emoji-regex-xs": 0,
+  "https://www.npmjs.com/package/super-regex": 0,
+  "https://www.npmjs.com/package/safe-regex-test": 0,
+  "https://www.npmjs.com/package/ansi-regex": 0,
+  "https://www.npmjs.com/package/@shikijs/engine-javascript": 0,
+  "https://www.npmjs.com/package/weapon-regex": 0,
+  "https://www.npmjs.com/package/micromatch": 0,
+  "https://www.npmjs.com/package/shebang-regex": 0,
+  "https://www.npmjs.com/package/@babel/plugin-transform-dotall-regex": 0,
+  "https://www.npmjs.com/package/@babel/plugin-transform-unicode-sets-regex": 0,
+  "https://www.npmjs.com/package/@babel/plugin-transform-duplicate-named-capturing-groups-regex": 0,
+  "https://www.npmjs.com/package/@babel/plugin-transform-named-capturing-groups-regex": 0
+ },
+ "query": "regex lookbehind javascript"
+}

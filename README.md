@@ -41,7 +41,8 @@ No cloud backend. No vendor lock-in. One binary of about 40 MB.
 - **MCP server.** A 2-tool gateway (`hq_discover`, `hq_call`) exposes the full tool registry to Claude Code, Cursor, VS Code, Copilot and other MCP clients.
 - **Safety by default.** Bash runs in a sandbox with an environment allowlist, untrusted content is tainted, and `/mcp` refuses requests without a key.
 - **Signed self-updates.** Servers pull minisign-verified releases and roll back on a failed health check.
-- **Optional integrations.** Google Workspace through the `gws` CLI, remote MCP servers, local models through Ollama, SearxNG for web search. None are required.
+- **Web search out of the box.** `web_search` queries several free engines in-process (no key, no Docker) and merges the results; a SearxNG instance or a Brave API key are optional upgrades.
+- **Optional integrations.** Google Workspace through the `gws` CLI, remote MCP servers, local models through Ollama. None are required.
 
 ---
 

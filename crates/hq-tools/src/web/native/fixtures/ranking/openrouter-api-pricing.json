@@ -1,0 +1,133 @@
+{
+  "query": "openrouter api pricing",
+  "category": null,
+  "engines": [
+    {
+      "engine": "google cse",
+      "weight": 1.0,
+      "results": [
+        {
+          "title": "Pricing - OpenRouter",
+          "url": "https://openrouter.ai/pricing",
+          "snippet": "Transparent pricing for OpenRouter. Pay only for what you use with access to ... Can I make sure to send API requests in specific regions? Does routing ...",
+          "published": null
+        },
+        {
+          "title": "Compare AI Models: Pricing, Context & Benchmarks - OpenRouter",
+          "url": "https://openrouter.ai/models",
+          "snippet": "Compare 500+ LLMs from OpenAI, Anthropic, Google, Meta and more \u2014 pricing, context length, and benchmarks side by side, all through one API.",
+          "published": null
+        },
+        {
+          "title": "OpenRouter Pricing Calculator & Cost Guide (Oct 2026) - CostGoat",
+          "url": "https://costgoat.com/pricing/openrouter",
+          "snippet": "22 hours ago ... OpenRouter Monthly Cost Estimates ; Hobby / Testing. $0-10/mo \u00b7 Free models only \u00b7 <200 req/day \u00b7 No credits needed ; Light Use. $10-50/mo \u00b7 Haiku / ...",
+          "published": null
+        },
+        {
+          "title": "OpenRouter Pricing 2026: Plans, Costs, and Hidden Fees",
+          "url": "https://www.truefoundry.com/blog/openrouter-pricing",
+          "snippet": "25 Aug 2026 ... Watch the platform fee: OpenRouter charges a 5.5% fee on credit purchases, so high-volume teams should compare that cost to direct provider ...",
+          "published": null
+        },
+        {
+          "title": "Fusion - API Pricing & Providers - OpenRouter",
+          "url": "https://openrouter.ai/openrouter/fusion",
+          "snippet": "The simplest way to get free inference. openrouter/free is a router that selects free models at random from the models available on OpenRouter. The router ...",
+          "published": null
+        },
+        {
+          "title": "Jev Latest - API Pricing & Providers - OpenRouter",
+          "url": "https://openrouter.ai/~typesafe/jev-latest",
+          "snippet": "Make your first request. Use ~typesafe/jev-latest with the OpenRouter API: This model does not generate text. It answers typed questions about a state ...",
+          "published": null
+        },
+        {
+          "title": "I made a list of models and their API pricing on OpenRouter ... - Reddit",
+          "url": "https://www.reddit.com/r/openclaw/comments/1rt27st/i_made_a_list_of_models_and_their_api_pricing_on/",
+          "snippet": "13 Mar 2026 ... I made a list of models and their API pricing on OpenRouter, and computed model Intelligence-per-Dollar value; to help me pick the best model ...",
+          "published": null
+        },
+        {
+          "title": "OpenRouter FAQ",
+          "url": "https://openrouter.ai/docs/faq",
+          "snippet": "\u200b. Pricing and fees \u00b7 What are the fees for using OpenRouter? OpenRouter charges a 5.5% ($0.80 minimum) fee when you purchase credits. \u00b7 Is there a fee for using ...",
+          "published": null
+        },
+        {
+          "title": "OpenRouter API Pricing 2026: Full Breakdown of Rates, Tiers, and ...",
+          "url": "https://zenmux.ai/blog/openrouter-api-pricing-2026-full-breakdown-of-rates-tiers-and-usage-costs",
+          "snippet": "5 Jan 2026 ... OpenRouter Pricing 2026 \u2014 What You Pay and Why It Matters. OpenRouter's 2026 pricing system is designed around clarity, scalability, and unified ...",
+          "published": null
+        },
+        {
+          "title": "Free Models Router - API Pricing & Providers - OpenRouter",
+          "url": "https://openrouter.ai/openrouter/free",
+          "snippet": "openrouter/free ... The simplest way to get free inference. openrouter/free is a router that selects free models at random from the models available on OpenRouter ...",
+          "published": null
+        },
+        {
+          "title": "OpenRouter LLM API Pricing | ComputePrices.com",
+          "url": "https://computeprices.com/providers/openrouter",
+          "snippet": "OpenRouter pricing by model \u00b7 GPT-OSS-120Bon 14 providersfrom $0.037/1M \u00b7 Kimi K2.6on 14 providersfrom $0.950/1M \u00b7 DeepSeek V4 Proon 13 providersfrom $0.660/1M ...",
+          "published": null
+        },
+        {
+          "title": "Sonar - API Pricing & Benchmarks - OpenRouter",
+          "url": "https://openrouter.ai/perplexity/sonar",
+          "snippet": "Exclusively available on the OpenRouter API, Sonar Pro's new Pro Search mode is Perplexity's most advanced agentic search system. It is designed for deeper ...",
+          "published": null
+        },
+        {
+          "title": "OpenRouter Pricing: Token Costs, Credit Fees and BYOK - OfoxAI",
+          "url": "https://ofox.ai/blog/openrouter-pricing-hidden-markup-breakdown-2026/",
+          "snippet": "23 May 2026 ... Every fee OpenRouter charges: the 5.5% card fee ($0.80 minimum), the BYOK tail now metered in dollars not requests, and why \"no markup\" holds ...",
+          "published": null
+        },
+        {
+          "title": "OpenRouter Pricing: Credits, Fees & Model Costs - APIMart",
+          "url": "https://apimart.ai/blog/openrouter-pricing-explained-model-costs-credits-provider-routing",
+          "snippet": "18 Jul 2026 ... Worked example: what a workload really costs ; Top-up fee, $0, +$17.88 (5.5%), $0 ; Effective total, $325.00, ~$342.88, ~$260.00.",
+          "published": null
+        },
+        {
+          "title": "OpenRouter Models - Unified Access to 400+ AI Models",
+          "url": "https://openrouter.ai/docs/guides/overview/models",
+          "snippet": "All pricing values are in USD per token/request/unit. A value of \"0\" indicates the feature is free.",
+          "published": null
+        },
+        {
+          "title": "You can use something like OpenRouter, which lets you access ...",
+          "url": "https://news.ycombinator.com/item?id=41449621",
+          "snippet": "Keep in mind that, while OpenRouter gives you the upstream price for OpenAI/Anthropic models (so you pay the same per token), there's a loading charge, so if ...",
+          "published": null
+        },
+        {
+          "title": "Feature Request: Get OpenRouter pricing from API #3055 - GitHub",
+          "url": "https://github.com/Aider-AI/aider/issues/3055",
+          "snippet": "28 Jan 2025 ... I know you can add configuration for model pricing locally, but OpenRouter provides access to other APIs and chooses the best one at all times, ...",
+          "published": null
+        },
+        {
+          "title": "Auto Router - API Pricing & Providers - OpenRouter",
+          "url": "https://openrouter.ai/openrouter/auto",
+          "snippet": "openrouter/auto ... The Auto Router automatically selects the best model for your prompt, powered by the wisdom of the market. It routes you based on what the ...",
+          "published": null
+        },
+        {
+          "title": "OpenRouter vs Crazyrouter: Pricing, Models, and Which API ...",
+          "url": "https://crazyrouter.com/en/blog/openrouter-vs-crazyrouter-ai-api-router-comparison-2026",
+          "snippet": "1 Mar 2026 ... Which router has more models?#. Crazyrouter currently lists 300+ models across text, image, video, audio, and music. OpenRouter offers 200+ ...",
+          "published": null
+        },
+        {
+          "title": "OpenRouter vs Direct API: Pricing, Latency, and Limits - Folding Sky",
+          "url": "https://folding-sky.com/blog/openrouter-vs-direct-api-keys-openai-anthropic-google",
+          "snippet": "23 Feb 2026 ... OpenRouter vs direct API access is a tradeoff. Direct APIs avoid an extra network hop and OpenRouter's credit-purchase fee. OpenRouter gives you ...",
+          "published": null
+        }
+      ]
+    }
+  ],
+  "labels": {}
+}

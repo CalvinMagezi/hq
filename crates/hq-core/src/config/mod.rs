@@ -98,11 +98,16 @@ pub struct HqConfig {
     pub kimi_code_api_key: Option<String>,
 
     /// Base URL of a self-hosted SearxNG instance (see
-    /// `scripts/setup-searxng.sh`) — the primary `web_search` backend: free,
-    /// no API key, no per-query token cost. Defaults to the local Docker
-    /// instance the setup script creates; set `null` in config.yaml to
-    /// disable and go straight to the Brave fallback.
+    /// `scripts/setup-searxng.sh`). Optional: when set it is tried before the
+    /// built-in search engine. Unset by default, since `web_search` works
+    /// without it.
     pub searxng_url: Option<String>,
+
+    /// Built-in keyless meta-search (Google, DuckDuckGo, Brave, Wikipedia, Bing News,
+    /// arXiv and others, queried in-process). On by default; set `false` to use only
+    /// SearxNG and Brave.
+    #[serde(default = "default_true")]
+    pub web_search_native: bool,
 
     /// Brave Search API key — paid `web_search` fallback used when SearxNG
     /// is unset or unreachable. https://api.search.brave.com
@@ -338,7 +343,8 @@ impl Default for HqConfig {
             deepseek_api_key: None,
             openai_api_key: None,
             kimi_code_api_key: None,
-            searxng_url: Some("http://localhost:8080".to_string()),
+            searxng_url: None,
+            web_search_native: true,
             brave_api_key: None,
             default_model: default_model(),
             local_only: false,

@@ -10,7 +10,7 @@ pub struct SearchResult {
     /// 1-based rank within the page the provider returned, before domain filtering.
     #[serde(default)]
     pub position: usize,
-    /// Backend that produced this result: `searxng` or `brave`.
+    /// Backend that produced this result: `searxng`, `native` or `brave`.
     #[serde(default)]
     pub provider: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -18,9 +18,13 @@ pub struct SearchResult {
     /// Publication or last-update date as the provider reported it.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub published: Option<String>,
-    /// Upstream engines SearxNG aggregated this result from.
+    /// Upstream engines this result came from (SearxNG or the built-in pool).
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub engines: Vec<String>,
+    /// The title or snippet reads like instructions to a model. Treat the
+    /// result as untrusted data; it is kept so the agent can see what was said.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub flagged: bool,
 }
 
 /// One backend's part in a search: answered, failed (and why), or skipped.
@@ -67,6 +71,8 @@ pub enum Category {
     General,
     News,
     Science,
+    Images,
+    Code,
 }
 
 /// Optional search controls. `Default` reproduces the unfiltered behaviour.
@@ -150,9 +156,11 @@ impl SearchOptions {
                 "general" => Category::General,
                 "news" => Category::News,
                 "science" => Category::Science,
+                "images" => Category::Images,
+                "code" => Category::Code,
                 _ => {
                     return Err(format!(
-                        "category must be one of general, news, science (got {s:?})"
+                        "category must be one of general, news, science, images, code (got {s:?})"
                     ));
                 }
             });

@@ -1,0 +1,211 @@
+{
+  "category": "news",
+  "engines": [
+    {
+      "engine": "bing news",
+      "results": [
+        {
+          "published": "Tue, 06 Oct 2026 05:31:00 GMT",
+          "snippet": "Meta research finds two AI coding agents reviewing each other's patches catch more bugs than one agent with a bigger budget.",
+          "title": "Meta study shows two AI coding agents catch more bugs than one with a bigger budget",
+          "url": "https://cryptobriefing.com/meta-multi-agent-coding-review-bug-detection/"
+        },
+        {
+          "published": "Mon, 05 Oct 2026 01:00:00 GMT",
+          "snippet": "AI coding agents accidentally leak 13,000 internal screenshots including sensitive billing data on public GitHub repositories - what you need to know now.",
+          "title": "PixelLeak: AI Coding Agents Expose 13,000 Internal Screenshots, Including Billing Information, on Public GitHub Repositories",
+          "url": "https://www.rswebsols.com/news/pixelleak-ai-coding-agents-expose-13000-internal-screenshots-including-billing-information-on-public-github-repositories-2/"
+        },
+        {
+          "published": "Sat, 03 Oct 2026 03:41:00 GMT",
+          "snippet": "Glow Labs' disclosure reveals how agents autonomously created public repositories to work around a GitHub CLI limitation, exposing billing records, unreleased features, and financial consoles from ...",
+          "title": "PixelLeak: AI Coding Agents Leaked 13,000 Internal Screenshots — Including Billing Records — to Public GitHub Repos",
+          "url": "https://forkast.news/pixelleak-ai-coding-agents-leaked-13000-internal-screenshots-including-billing-records-to-public-github-repos/"
+        },
+        {
+          "published": "Tue, 06 Oct 2026 17:00:00 GMT",
+          "snippet": "Tuskira's open-source AI agent gateway keeps credentials out of agent configs and checks every MCP tool call against a profile.",
+          "title": "AI Agent Gateway: Open-source tool keeps credentials out of agent configs",
+          "url": "https://www.helpnetsecurity.com/2026/10/07/open-source-ai-agent-gateway/"
+        },
+        {
+          "published": "Wed, 30 Sep 2026 04:51:00 GMT",
+          "snippet": "In a leak affecting 300+ orgs, AI coding agents posted 13,000+ internal screenshots, including billing records, to public GitHub.",
+          "title": "AI coding agents leaked 13,000 internal company screenshots to public GitHub repos",
+          "url": "https://www.helpnetsecurity.com/2026/09/30/ai-coding-agents-github-screenshot-leak/"
+        },
+        {
+          "published": "Tue, 29 Sep 2026 00:48:00 GMT",
+          "snippet": "A recent study found that AI-generated code reported an average pass rate of 56%, meaning that across tests, 44% of scanned code bases had at least one security flaw. The danger grows when an agent ...",
+          "title": "AI coding agents are raising the stakes for SAST",
+          "url": "https://www.developer-tech.com/news/ai-coding-agents-are-raising-the-stakes-for-sast/"
+        },
+        {
+          "published": "Mon, 05 Oct 2026 17:00:00 GMT",
+          "snippet": "A simple way of giving coding agents institutionalized smart-contract knowledge before they write or contribute to your smart contracts.",
+          "title": "Encoding Solidity Security Patterns as Skills for Coding Agents",
+          "url": "https://hackernoon.com/encoding-solidity-security-patterns-as-skills-for-coding-agents"
+        },
+        {
+          "published": "Mon, 05 Oct 2026 05:00:00 GMT",
+          "snippet": "Decision-makersI was researching incident cases involving AI coding agents to draft revisions for our AI usage guidelines when I came across this. A very routine request—\"attach screenshots for review ...",
+          "title": "#89 AI Coding Agents Publishing Internal Screens on GitHub? A Chilling Story",
+          "url": "https://note.com/axis_nw/n/nb11a3f4579b9?hl=en"
+        },
+        {
+          "published": "Fri, 02 Oct 2026 08:54:00 GMT",
+          "snippet": "IBM brings its Bob AI coding agent Inside Firewalls for regulated companies, turning banks and governments into AI hardware buyers.",
+          "title": "IBM Brings Its Bob AI Coding Agent Inside Firewalls For Regulated Companies",
+          "url": "https://www.forbes.com/sites/jonmarkman/2026/10/02/ibm-brings-its-bob-ai-coding-agent-inside-firewalls-for-regulated-companies/"
+        },
+        {
+          "published": "Tue, 06 Oct 2026 08:59:00 GMT",
+          "snippet": "Zetaris, a leading data harness for AI, today announced the launch of Zetaris Cloud and its AI Data Harness, along with two developments ...",
+          "title": "Zetaris Launches Cloud-Based AI Data Harness, Giving AI Agents a Safe, Real-Time Path to Enterprise Data",
+          "url": "https://www.prnewswire.com/news-releases/zetaris-launches-cloud-based-ai-data-harness-giving-ai-agents-a-safe-real-time-path-to-enterprise-data-302899905.html"
+        },
+        {
+          "published": "Tue, 06 Oct 2026 10:29:00 GMT",
+          "snippet": "A reported leak of 13,000 screenshots shows how AI agents can bypass weak approval and audit controls even when organizations have written policies.",
+          "title": "AI Agents Leaked 13,000 Screenshots: Why Enterprise Approval Controls Failed",
+          "url": "https://www.techrepublic.com/article/news-ai-agents-screenshot-leak-enterprise-governance/"
+        },
+        {
+          "published": "Tue, 06 Oct 2026 23:10:00 GMT",
+          "snippet": "Analysts and consultants agree that increased visibility is good, but question whether the offering is good enough to be useful.",
+          "title": "Atlassian launches AMP to tackle AI code visibility, attribution",
+          "url": "https://www.infoworld.com/article/4231567/atlassian-launches-amp-to-tackle-ai-code-visibility-attribution.html"
+        }
+      ],
+      "weight": 1.0
+    },
+    {
+      "engine": "hacker news",
+      "results": [
+        {
+          "published": "2026-03-20T21:03:52Z",
+          "snippet": "1274 points, 618 comments on Hacker News (https://news.ycombinator.com/item?id=47460525)",
+          "title": "OpenCode – Open source AI coding agent",
+          "url": "https://opencode.ai/"
+        },
+        {
+          "published": "2026-05-10T23:39:55Z",
+          "snippet": "380 points, 108 comments on Hacker News (https://news.ycombinator.com/item?id=48089289)",
+          "title": "An AI coding agent, used to write code, needs to reduce your maintenance costs",
+          "url": "https://www.jamesshore.com/v2/blog/2026/you-need-ai-that-reduces-your-maintenance-costs"
+        },
+        {
+          "published": "2025-07-30T16:18:14Z",
+          "snippet": "367 points, 235 comments on Hacker News (https://news.ycombinator.com/item?id=44736176)",
+          "title": "Crush: Glamourous AI coding agent for your favourite terminal",
+          "url": "https://github.com/charmbracelet/crush"
+        },
+        {
+          "published": "2025-07-06T17:26:47Z",
+          "snippet": "319 points, 91 comments on Hacker News (https://news.ycombinator.com/item?id=44482504)",
+          "title": "Opencode: AI coding agent, built for the terminal",
+          "url": "https://github.com/sst/opencode"
+        },
+        {
+          "published": "2025-04-16T21:26:42Z",
+          "snippet": "257 points, 81 comments on Hacker News (https://news.ycombinator.com/item?id=43710576)",
+          "title": "Show HN: Plandex v2 – open source AI coding agent for large projects and tasks",
+          "url": "https://github.com/plandex-ai/plandex"
+        },
+        {
+          "published": "2026-03-23T16:11:03Z",
+          "snippet": "225 points, 103 comments on Hacker News (https://news.ycombinator.com/item?id=47491466)",
+          "title": "Show HN: Cq – Stack Overflow for AI coding agents",
+          "url": "https://blog.mozilla.ai/cq-stack-overflow-for-agents/"
+        },
+        {
+          "published": "2025-07-11T15:08:52Z",
+          "snippet": "195 points, 132 comments on Hacker News (https://news.ycombinator.com/item?id=44533004)",
+          "title": "Show HN: Vibe Kanban – Kanban board to manage your AI coding agents",
+          "url": "https://github.com/BloopAI/vibe-kanban"
+        },
+        {
+          "published": "2025-04-16T12:32:34Z",
+          "snippet": "174 points, 126 comments on Hacker News (https://news.ycombinator.com/item?id=43704579)",
+          "title": "JetBrains IDEs Go AI: Coding Agent, Smarter Assistance, Free Tier",
+          "url": "https://blog.jetbrains.com/blog/2025/04/16/jetbrains-ides-go-ai/"
+        },
+        {
+          "published": "2026-03-24T07:46:46Z",
+          "snippet": "161 points, 106 comments on Hacker News (https://news.ycombinator.com/item?id=47499672)",
+          "title": "Show HN: ProofShot – Give AI coding agents eyes to verify the UI they build",
+          "url": "https://github.com/AmElmo/proofshot"
+        },
+        {
+          "published": "2025-07-23T03:39:13Z",
+          "snippet": "148 points, 176 comments on Hacker News (https://news.ycombinator.com/item?id=44655515)",
+          "title": "AI coding agents are removing programming language barriers",
+          "url": "https://railsatscale.com/2025-07-19-ai-coding-agents-are-removing-programming-language-barriers/"
+        },
+        {
+          "published": "2026-01-12T18:34:02Z",
+          "snippet": "122 points, 99 comments on Hacker News (https://news.ycombinator.com/item?id=46592344)",
+          "title": "Show HN: Yolobox – Run AI coding agents with full sudo without nuking home dir",
+          "url": "https://github.com/finbarr/yolobox"
+        },
+        {
+          "published": "2026-01-20T18:02:02Z",
+          "snippet": "119 points, 65 comments on Hacker News (https://news.ycombinator.com/item?id=46695415)",
+          "title": "Electricity use of AI coding agents",
+          "url": "https://www.simonpcouch.com/blog/2026-01-20-cc-impact/"
+        },
+        {
+          "published": "2026-03-25T17:10:21Z",
+          "snippet": "88 points, 60 comments on Hacker News (https://news.ycombinator.com/item?id=47520220)",
+          "title": "Show HN: Optio – Orchestrate AI coding agents in K8s to go from ticket to PR",
+          "url": "https://github.com/jonwiggins/optio"
+        },
+        {
+          "published": "2026-09-05T22:15:52Z",
+          "snippet": "81 points, 32 comments on Hacker News (https://news.ycombinator.com/item?id=49581240)",
+          "title": "OKF Agent Memory – Git-native persistent memory for AI coding agents",
+          "url": "https://github.com/okf-memory/okf-agent-memory"
+        },
+        {
+          "published": "2026-03-27T17:32:48Z",
+          "snippet": "80 points, 107 comments on Hacker News (https://news.ycombinator.com/item?id=47545748)",
+          "title": "Some uncomfortable truths about AI coding agents",
+          "url": "https://standupforme.app/blog/some-uncomfortable-truths-about-ai-coding-agents/"
+        },
+        {
+          "published": "2025-11-22T21:02:34Z",
+          "snippet": "71 points, 37 comments on Hacker News (https://news.ycombinator.com/item?id=46018229)",
+          "title": "Show HN: I built a wizard to turn ideas into AI coding agent-ready specs",
+          "url": "https://vibescaffold.dev/"
+        },
+        {
+          "published": "2026-04-14T13:26:53Z",
+          "snippet": "70 points, 17 comments on Hacker News (https://news.ycombinator.com/item?id=47765374)",
+          "title": "Show HN: Kontext CLI – Credential broker for AI coding agents in Go",
+          "url": "https://github.com/kontext-dev/kontext-cli"
+        },
+        {
+          "published": "2026-05-29T07:05:31Z",
+          "snippet": "67 points, 1 comments on Hacker News (https://news.ycombinator.com/item?id=48319968)",
+          "title": "Undisclosed addition in jqwik instructed AI coding agents to delete app output",
+          "url": "https://arstechnica.com/security/2026/05/fed-up-with-vibe-coders-dev-sneaks-data-nuking-prompt-injection-into-their-code/"
+        },
+        {
+          "published": "2026-01-21T15:13:29Z",
+          "snippet": "60 points, 76 comments on Hacker News (https://news.ycombinator.com/item?id=46706796)",
+          "title": "Show HN: yolo-cage – AI coding agents that can't exfiltrate secrets",
+          "url": "https://github.com/borenstein/yolo-cage"
+        },
+        {
+          "published": "2026-02-27T18:09:11Z",
+          "snippet": "59 points, 10 comments on Hacker News (https://news.ycombinator.com/item?id=47183527)",
+          "title": "An AI agent coding skeptic tries AI agent coding, in excessive detail",
+          "url": "https://minimaxir.com/2026/02/ai-agent-coding/"
+        }
+      ],
+      "weight": 0.4000000059604645
+    }
+  ],
+  "labels": {},
+  "query": "AI coding agents"
+}

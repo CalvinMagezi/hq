@@ -1,27 +1,64 @@
 //! Active `web_search` health check: one real query per configured backend.
 
 use super::{
-    BRAVE_ENDPOINT, Page, SearchOptions, brave_params, decode_json, error_chain, get_client,
-    parse_brave_results, parse_searxng_results, searxng_params,
+    BRAVE_ENDPOINT, NATIVE_ENGINE_TIMEOUT, NativeEnv, Page, SearchOptions, brave_params,
+    decode_json, error_chain, get_client, parse_brave_results, search_pool,
+    parse_searxng_results, searxng_params,
 };
 use hq_core::machine::WebSearchBackendStatus;
 use reqwest::RequestBuilder;
 use serde_json::Value;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 const PROBE_TIMEOUT: Duration = Duration::from_secs(8);
 const PROBE_QUERY: &str = "wikipedia";
 const PROBE_MAX_RESULTS: usize = 1;
 
 /// Send one small query to each configured backend, concurrently and each
-/// bounded by its own timeout. Brave spends one request of its quota. The
-/// cooldown state `web_search` keeps is left untouched.
+/// bounded by its own timeout. Brave spends one request of its quota. SearxNG
+/// and Brave leave the cooldown state `web_search` keeps untouched; the
+/// built-in pool runs through the normal path, so a failing engine starts
+/// its cooldown here exactly as it would during a search.
 pub async fn probe_search_backends(
     searxng_url: Option<&str>,
     brave_api_key: Option<&str>,
+    native: bool,
 ) -> Vec<WebSearchBackendStatus> {
     let brave = non_empty(brave_api_key).map(|key| (BRAVE_ENDPOINT, key));
-    probe_endpoints(non_empty(searxng_url), brave, PROBE_TIMEOUT).await
+    let (mut statuses, pool) = tokio::join!(
+        probe_endpoints(non_empty(searxng_url), brave, PROBE_TIMEOUT),
+        probe_native(native)
+    );
+    statuses.insert(1, pool);
+    statuses
+}
+
+async fn probe_native(enabled: bool) -> WebSearchBackendStatus {
+    if !enabled {
+        return not_configured("native");
+    }
+    let opts = SearchOptions {
+        max_results: PROBE_MAX_RESULTS,
+        ..SearchOptions::default()
+    };
+    let deadline = Instant::now() + PROBE_TIMEOUT;
+    // Uncached, so a repeat `hq doctor` really queries the engines again.
+    let (pool, _) = search_pool(
+        PROBE_QUERY,
+        &opts,
+        &NativeEnv::diagnostic(),
+        deadline,
+        NATIVE_ENGINE_TIMEOUT,
+    )
+    .await;
+    let engines: Vec<String> = pool
+        .attempts
+        .iter()
+        .map(|a| format!("{}: {}", a.provider, a.outcome))
+        .collect();
+    let detail = format!("built-in engines ({})", engines.join("; "));
+    let answered = !pool.degraded && pool.page.is_some_and(|p| !p.results.is_empty());
+    status("native", true, Some(answered), Some(answered), detail)
 }
 
 fn non_empty(value: Option<&str>) -> Option<&str> {

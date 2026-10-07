@@ -108,6 +108,7 @@ impl SessionBuilder {
             Box::new(crate::web::WebSearchTool::new(
                 self.config.searxng_url.clone(),
                 self.config.brave_api_key.clone(),
+                self.config.web_search_native,
             )),
             Box::new(crate::web::WebFetchTool),
         ]
