@@ -1,0 +1,71 @@
+# Pages an agent plausibly reads, one URL per line. "static" pages are server-rendered,
+# "app" pages are client-rendered or script-gated. Blank lines and # comments are skipped.
+# Docs and reference
+https://doc.rust-lang.org/book/ch04-01-what-is-ownership.html
+https://docs.rs/tokio/latest/tokio/runtime/struct.Runtime.html
+https://developer.mozilla.org/en-US/docs/Web/API/Fetch_API
+https://react.dev/learn/thinking-in-react
+https://nextjs.org/docs/app/building-your-application/routing
+https://vuejs.org/guide/introduction.html
+https://svelte.dev/docs/svelte/overview
+https://angular.dev/overview
+https://tailwindcss.com/docs/dark-mode
+https://docs.python.org/3/library/asyncio-task.html
+https://go.dev/doc/effective_go
+https://kubernetes.io/docs/concepts/workloads/pods/
+https://docs.docker.com/get-started/overview/
+https://www.postgresql.org/docs/current/indexes-intro.html
+https://sqlite.org/wal.html
+https://stripe.com/docs/payments/payment-intents
+https://vercel.com/docs/functions
+https://developers.cloudflare.com/workers/get-started/guide/
+https://docs.github.com/en/actions/about-github-actions/understanding-github-actions
+https://learn.microsoft.com/en-us/azure/aks/what-is-aks
+https://cloud.google.com/run/docs/overview/what-is-cloud-run
+https://platform.openai.com/docs/overview
+https://docs.anthropic.com/en/docs/intro
+https://huggingface.co/docs/transformers/index
+# Code hosts and registries
+https://github.com/tokio-rs/tokio
+https://github.com/tokio-rs/tokio/issues/6000
+https://github.com/rust-lang/rust/pull/100000
+https://gitlab.com/gitlab-org/gitlab
+https://crates.io/crates/serde
+https://www.npmjs.com/package/react
+https://pypi.org/project/requests/
+https://huggingface.co/meta-llama/Llama-3.1-8B
+https://hub.docker.com/_/nginx
+https://stackoverflow.com/questions/11227809/why-is-processing-a-sorted-array-faster-than-processing-an-unsorted-array
+# Reference and news
+https://en.wikipedia.org/wiki/Rust_(programming_language)
+https://arxiv.org/abs/1706.03762
+https://news.ycombinator.com/item?id=39547191
+https://www.reddit.com/r/rust/
+https://www.bbc.com/news
+https://www.theguardian.com/technology
+https://techcrunch.com/
+https://www.nytimes.com/section/technology
+https://www.reuters.com/technology/
+https://www.bloomberg.com/technology
+# Blogs, publishing, social
+https://medium.com/@karpathy
+https://dev.to/t/rust
+https://blog.rust-lang.org/
+https://simonwillison.net/
+https://paulgraham.com/greatwork.html
+https://substack.com/discover
+https://x.com/rustlang
+https://www.linkedin.com/company/anthropicresearch
+https://www.youtube.com/watch?v=dQw4w9WgXcQ
+https://www.producthunt.com/
+# Apps and dashboards that are mostly script
+https://hn.algolia.com/?q=rust
+https://www.notion.so/product
+https://app.netlify.com/
+https://excalidraw.com/
+https://codesandbox.io/
+https://play.rust-lang.org/
+https://caniuse.com/css-grid
+https://web.dev/articles/vitals
+https://status.openai.com/
+https://www.figma.com/community
