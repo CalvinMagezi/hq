@@ -230,8 +230,9 @@ pub struct HqConfig {
     pub budget: BudgetConfig,
 
     /// Where coding-agent sessions run: the built-in host on this machine or on
-    /// a paired one. Configs written before the rename call this section `herdr`.
-    #[serde(default, alias = "herdr")]
+    /// a paired one. (Configs written before the rename call this section by its
+    /// old name; `config_yaml` upgrades that heading as the file is read.)
+    #[serde(default)]
     pub agent_host: AgentHostConfig,
 
     /// GitHub Copilot CLI (`gh copilot`) headless harness settings.
@@ -423,6 +424,28 @@ pub fn http_referer() -> Option<String> {
     HTTP_REFERER.read().ok().and_then(|slot| slot.clone())
 }
 
+/// How configs written before the rename headed the agent-host section.
+const OLD_AGENT_HOST_HEADING: &str = "herdr:";
+
+/// The config file as a figment layer, with the agent-host section's old heading
+/// renamed when the file still uses it (figment's alias handling cannot cope with
+/// a defaults layer that already holds the new name). The file on disk is not
+/// touched. None when there is no readable file.
+fn config_yaml(path: &std::path::Path) -> Option<figment::providers::Data<Yaml>> {
+    const OLD: &str = OLD_AGENT_HOST_HEADING;
+    const NEW: &str = "agent_host:";
+    let text = std::fs::read_to_string(path).ok()?;
+    let has = |key: &str| text.lines().any(|l| l.starts_with(key));
+    if has(OLD) && !has(NEW) {
+        let upgraded: String = text
+            .split_inclusive('\n')
+            .map(|l| if l.starts_with(OLD) { l.replacen(OLD, NEW, 1) } else { l.to_string() })
+            .collect();
+        return Some(Yaml::string(&upgraded));
+    }
+    Some(Yaml::string(&text))
+}
+
 impl HqConfig {
     /// Load config from: defaults → config file → env vars. A machine with no
     /// per-user vault but the server's falls back to the server vault, as it
@@ -445,8 +468,8 @@ impl HqConfig {
     /// written back into the committed-shaped YAML file.
     fn file_layer_figment(config_path: &std::path::Path) -> Figment {
         let mut probe = Figment::new();
-        if config_path.exists() {
-            probe = probe.merge(Yaml::file(config_path));
+        if let Some(layer) = config_yaml(config_path) {
+            probe = probe.merge(layer);
         }
         probe = probe.merge(Env::prefixed("HQ_").split("__"));
         let instance_type = probe
@@ -462,8 +485,8 @@ impl HqConfig {
         };
 
         let mut figment = Figment::from(Serialized::defaults(base));
-        if config_path.exists() {
-            figment = figment.merge(Yaml::file(config_path));
+        if let Some(layer) = config_yaml(config_path) {
+            figment = figment.merge(layer);
         }
         figment
     }
@@ -523,7 +546,8 @@ impl HqConfig {
             return;
         };
         for key in user_keys.keys() {
-            if !known_keys.contains_key(key) {
+            let old_heading = key.as_str() == Some(OLD_AGENT_HOST_HEADING.trim_end_matches(':'));
+            if !known_keys.contains_key(key) && !old_heading {
                 tracing::warn!(
                     key = key.as_str().unwrap_or("?"),
                     path = %config_path.display(),
