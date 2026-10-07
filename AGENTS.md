@@ -65,7 +65,7 @@ The debug profile accumulates stale binaries Cargo never cleans. With 16 crates 
 | Search (FTS5 + semantic) | `crates/hq-db/src/search/` |
 | Discord bridge | `crates/hq-relay/src/discord/` |
 | Telegram bridge | `crates/hq-relay/src/telegram/` |
-| Coding-agent sessions (Herdr) | `crates/hq-tools/src/harness_session/`, `docs/HERDR_HARNESS.md` |
+| Coding-agent sessions (built-in host) | `crates/hq-tools/src/harness_session/`, `docs/AGENT_HOST.md` |
 | Memory system | `crates/hq-memory/src/lib.rs` |
 
 ## Crates

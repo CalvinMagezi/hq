@@ -1,7 +1,7 @@
 use super::*;
-use crate::herdr::HerdrHost;
+use crate::herdr::scripted::ScriptedHost as HerdrHost;
 use crate::registry::HqTool;
-use hq_core::config::{HerdrConfig, LOCAL_HOST};
+use hq_core::config::HerdrConfig;
 use std::os::unix::fs::PermissionsExt;
 
 const CREATED: &str = r#"{"id":"x","result":{"type":"workspace_created","workspace":{"workspace_id":"w9"},"root_pane":{"pane_id":"w9:p1"}}}"#;
@@ -41,12 +41,7 @@ fn fake_host_checking_binaries(
     let path = dir.path().join("herdr");
     std::fs::write(&path, script).unwrap();
     std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o755)).unwrap();
-    let cfg = HerdrConfig {
-        binary: path.to_string_lossy().to_string(),
-        ..HerdrConfig::default()
-    };
-    let host = HerdrHost::from_config(&cfg, LOCAL_HOST).unwrap();
-    (dir, host)
+    (dir, HerdrHost::new(path))
 }
 
 fn launch<'a>(host: HerdrHost, id: &'a str, prompt: Option<&'a str>) -> Launch<'a> {
@@ -1564,18 +1559,6 @@ async fn a_second_launch_of_the_same_agent_is_refused_while_the_first_is_still_r
 
     eventually("the first launch to be recorded", || get_row(&db, "hs-t10").is_ok()).await;
     eventually("the claim to be released", || InFlight::claim(&db, "local", "hs-t10").is_ok()).await;
-}
-
-#[test]
-fn the_launch_bound_comes_from_config_and_stays_under_the_transport_limit() {
-    let bound = |secs: u64| {
-        let cfg = HerdrConfig { launch_bound_secs: secs, ..HerdrConfig::default() };
-        HerdrHost::from_config(&cfg, LOCAL_HOST).unwrap().launch_bound()
-    };
-    assert_eq!(HerdrConfig::default().launch_bound_secs, 25);
-    assert_eq!(bound(25), Duration::from_secs(25));
-    assert_eq!(bound(1), Duration::from_secs(5));
-    assert_eq!(bound(600), Duration::from_secs(50));
 }
 
 fn tool(

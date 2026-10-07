@@ -1,5 +1,5 @@
 use super::{
-    AgentInfo, AgentStatus, HerdrError, HerdrHost, LaunchRequest, Launched, PromptOutcome,
+    AgentInfo, AgentStatus, HerdrError, LaunchRequest, Launched, PromptOutcome,
 };
 use std::sync::Arc;
 use std::time::Duration;
@@ -112,79 +112,6 @@ pub struct AwaitingAgent {
 /// A shared handle to a host, as callers hold it.
 pub type Host = Arc<dyn HostBackend>;
 
-impl HostBackend for HerdrHost {
-    fn name(&self) -> &str {
-        HerdrHost::name(self)
-    }
-    fn checks_binaries(&self) -> bool {
-        HerdrHost::checks_binaries(self)
-    }
-    fn launch_bound(&self) -> Duration {
-        HerdrHost::launch_bound(self)
-    }
-    fn version(&self) -> Result<String, HerdrError> {
-        HerdrHost::version(self)
-    }
-    fn agents(&self) -> Result<Vec<AgentInfo>, HerdrError> {
-        HerdrHost::agents(self)
-    }
-    fn agent(&self, target: &str) -> Result<Option<AgentInfo>, HerdrError> {
-        HerdrHost::agent(self, target)
-    }
-    fn launch(&self, req: &LaunchRequest) -> Result<Launched, HerdrError> {
-        HerdrHost::launch(self, req)
-    }
-    fn await_started(&self, name: &str, within: Duration) -> Result<Option<AgentInfo>, HerdrError> {
-        HerdrHost::await_started(self, name, within)
-    }
-    fn prompt(
-        &self,
-        target: &str,
-        text: &str,
-        wait: Option<Duration>,
-    ) -> Result<PromptOutcome, HerdrError> {
-        HerdrHost::prompt(self, target, text, wait)
-    }
-    fn submit(&self, target: &str, text: &str) -> Result<PromptOutcome, HerdrError> {
-        HerdrHost::submit(self, target, text)
-    }
-    fn send_keys(&self, target: &str, keys: &[String]) -> Result<(), HerdrError> {
-        HerdrHost::send_keys(self, target, keys)
-    }
-    fn send_text(&self, pane_id: &str, text: &str) -> Result<(), HerdrError> {
-        HerdrHost::send_text(self, pane_id, text)
-    }
-    fn read(&self, target: &str, lines: usize) -> Result<String, HerdrError> {
-        HerdrHost::read(self, target, lines)
-    }
-    fn read_sourced(
-        &self,
-        target: &str,
-        lines: usize,
-    ) -> Result<(String, &'static str), HerdrError> {
-        HerdrHost::read_sourced(self, target, lines)
-    }
-    fn wait(
-        &self,
-        target: &str,
-        until: &[AgentStatus],
-        timeout: Duration,
-    ) -> Result<AgentInfo, HerdrError> {
-        HerdrHost::wait(self, target, until, timeout)
-    }
-    fn close_workspace(&self, workspace_id: &str) -> Result<(), HerdrError> {
-        HerdrHost::close_workspace(self, workspace_id)
-    }
-    fn shell_pid(&self, pane_id: &str) -> Option<u32> {
-        HerdrHost::shell_pid(self, pane_id)
-    }
-    fn with_launch_bound_dyn(&self, bound: Duration) -> Host {
-        Arc::new(self.clone().with_launch_bound(bound))
-    }
-    fn with_command_timeout_dyn(&self, timeout: Duration) -> Host {
-        Arc::new(self.clone().with_command_timeout(timeout))
-    }
-}
 
 impl<T: HostBackend + ?Sized> HostBackend for Arc<T> {
     fn name(&self) -> &str {

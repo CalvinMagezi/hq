@@ -20,19 +20,12 @@ pub fn native_host_dir() -> std::path::PathBuf {
     }
 }
 
-/// Where coding-agent sessions run and how HQ reaches each machine's Herdr
-/// (herdr.dev). With no `hosts` configured every session runs on this machine.
+/// Where coding-agent sessions run and how HQ reaches each machine's built-in
+/// host. With no `hosts` configured every session runs on this machine. (Keys
+/// from the retired herdr setup, `binary`, `session` and a host's `kind`, are
+/// ignored if a config still has them.)
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct HerdrConfig {
-    /// Herdr binary on this machine; a bare name is resolved on PATH.
-    #[serde(default = "default_binary")]
-    pub binary: String,
-
-    /// Named Herdr session on this machine. Unset targets the default session,
-    /// which is the one a person sees when they open `herdr`.
-    #[serde(default)]
-    pub session: Option<String>,
-
     /// The HQ MCP endpoint a launched agent connects to with its own session
     /// token (for example `https://hq.example.ts.net:8444/mcp`), reachable from
     /// the machine the agent runs on. Unset leaves agents without it.
@@ -201,24 +194,9 @@ pub struct HarnessProfileConfig {
     pub env: BTreeMap<String, String>,
 }
 
-/// What runs agents on a remote machine.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
-#[serde(rename_all = "lowercase")]
-pub enum HostKind {
-    /// Herdr, driven through its CLI.
-    #[default]
-    Herdr,
-    /// HQ's built-in host (`hq host serve`), driven through `hq host gate`.
-    Native,
-}
-
-/// One remote machine running Herdr or HQ's built-in host, reached with `ssh`.
+/// One remote machine running HQ's built-in host, reached with `ssh`.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct HerdrHostConfig {
-    /// Which kind of host runs there. Defaults to herdr.
-    #[serde(default)]
-    pub kind: HostKind,
-
     /// `user@address` for ssh, usually a Tailscale address or MagicDNS name.
     pub ssh: String,
 
@@ -230,20 +208,10 @@ pub struct HerdrHostConfig {
     #[serde(default)]
     pub identity_file: Option<String>,
 
-    /// Command run after login. For herdr it receives the herdr arguments as a
-    /// JSON array on stdin (see `scripts/hq-herdr-gate`); for a native host it
-    /// is `hq host gate` and gets a method and its params. A forced-command
-    /// `authorized_keys` entry ignores this value.
+    /// Command run after login: `hq host gate`, which gets a method and its
+    /// params. A forced-command `authorized_keys` entry ignores this value.
     #[serde(default = "default_gate_command")]
     pub gate_command: String,
-
-    /// Named Herdr session on that machine. Unset targets its default session.
-    #[serde(default)]
-    pub session: Option<String>,
-}
-
-fn default_binary() -> String {
-    "herdr".to_string()
 }
 
 fn default_idle_reap_hours() -> u64 {
@@ -259,7 +227,7 @@ fn default_ssh_multiplex() -> bool {
 }
 
 fn default_gate_command() -> String {
-    "hq-herdr-gate".to_string()
+    "hq host gate".to_string()
 }
 
 /// Bounds for `HerdrConfig::launch_bound_secs`.
@@ -351,8 +319,6 @@ impl HerdrConfig {
 impl Default for HerdrConfig {
     fn default() -> Self {
         Self {
-            binary: default_binary(),
-            session: None,
             agent_mcp_url: None,
             default_host: default_host(),
             hosts: BTreeMap::new(),
@@ -386,7 +352,6 @@ mod tests {
         let cfg: HerdrConfig = serde_yaml::from_str("{}").unwrap();
         assert_eq!(cfg.default_host, NATIVE_HOST);
         assert!(cfg.hosts.is_empty());
-        assert_eq!(cfg.binary, "herdr");
         assert!(
             cfg.drive_new_watches,
             "new watches drive unless the config opts out"
@@ -448,8 +413,18 @@ mod tests {
             serde_yaml::from_str("hosts:\n  laptop:\n    ssh: me@100.64.0.1\n").unwrap();
         let laptop = &cfg.hosts["laptop"];
         assert_eq!(laptop.ssh, "me@100.64.0.1");
-        assert_eq!(laptop.gate_command, "hq-herdr-gate");
+        assert_eq!(laptop.gate_command, "hq host gate");
         assert!(laptop.identity_file.is_none());
+    }
+
+    #[test]
+    fn keys_from_the_retired_herdr_setup_are_ignored() {
+        let cfg: HerdrConfig = serde_yaml::from_str(
+            "binary: herdr\nsession: hq\nhosts:\n  laptop:\n    kind: herdr\n    ssh: me@100.64.0.1\n    session: x\n",
+        )
+        .unwrap();
+        assert_eq!(cfg.hosts["laptop"].ssh, "me@100.64.0.1");
+        assert_eq!(cfg.hosts["laptop"].gate_command, "hq host gate");
     }
 
     #[test]

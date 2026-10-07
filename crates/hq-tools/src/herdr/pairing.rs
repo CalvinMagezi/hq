@@ -7,7 +7,7 @@
 use anyhow::{Context, Result, bail};
 use base64::Engine;
 use base64::engine::general_purpose::URL_SAFE_NO_PAD;
-use hq_core::config::{HerdrHostConfig, HqConfig, HostKind, LOCAL_HOST, NATIVE_HOST};
+use hq_core::config::{HerdrHostConfig, HqConfig, LOCAL_HOST, NATIVE_HOST};
 use serde::{Deserialize, Serialize};
 use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
@@ -138,13 +138,13 @@ pub fn add_host_at(config_path: &Path, join_code: &str, gateway_addr: &str, ssh_
     let public_key = ensure_key(&identity, &join.name)?;
     let ssh = format!("{}@{}", join.user, join.addr);
     let entry: HerdrHostConfig = serde_yaml::from_str(&format!(
-        "kind: native\nssh: \"{ssh}\"\nidentity_file: \"{}\"\n",
+        "ssh: \"{ssh}\"\nidentity_file: \"{}\"\n",
         identity.display()
     ))?;
     let mut changed = false;
     HqConfig::save_patch_to_path(config_path, |c| {
         let same = c.herdr.hosts.get(&join.name).is_some_and(|h| {
-            h.kind == HostKind::Native && h.ssh == entry.ssh && h.identity_file == entry.identity_file
+            h.ssh == entry.ssh && h.identity_file == entry.identity_file
         });
         if !same {
             c.herdr.hosts.insert(join.name.clone(), entry.clone());

@@ -30,12 +30,11 @@ firewall rule locks out SSH. Steps 3 and 4 below are the manual alternative to
    It installs Tailscale, Caddy, ufw and `gh`, creates an unprivileged `hq`
    user, and writes a starter `/opt/hq/config.yaml` with both chat relays
    disabled (enable them there once you are ready).
-3. Install the systemd units: copy `deploy/herdr.service` and
-   `deploy/hq.service` to `/etc/systemd/system/`, then
-   `systemctl enable --now herdr hq`. Herdr is the runtime for coding-agent
-   sessions and runs as its own service so restarting `hq` never takes running
-   agents down with it. To also drive Herdr on a laptop over Tailscale, follow
-   `docs/HERDR_HARNESS.md`. `hq.service` also reads `/opt/hq/openrouter.env`
+3. Install the systemd unit: copy `deploy/hq.service` to `/etc/systemd/system/`,
+   then `systemctl enable --now hq`. Coding agents run on a machine that has
+   Claude Code or another agent installed, through HQ's built-in host: to use
+   a laptop over Tailscale, run `hq host join` there and follow
+   `docs/AGENT_HOST.md`. `hq.service` also reads `/opt/hq/openrouter.env`
    and `/opt/hq/gws.env` when they exist (chmod 600), so provider keys can stay
    out of `config.yaml`; neither is required to start.
 4. Optional: GitHub access for `gh` and git over HTTPS. Create a fine-grained
@@ -43,11 +42,9 @@ firewall rule locks out SSH. Steps 3 and 4 below are the manual alternative to
    and Pull requests: read and write), then on the server:
    ```
    (umask 077; printf 'GH_TOKEN=%s\n' '<token>' > /opt/hq/gh.env)
-   systemctl daemon-reload && systemctl restart hq herdr
+   systemctl daemon-reload && systemctl restart hq
    ```
-   Both units read the file at start (the leading `-` makes it optional).
-   Restarting `herdr` ends running agent sessions, so do it when none are
-   mid-task. To let plain `git push` use the token, run once
+   The unit reads the file at start (the leading `-` makes it optional). To let plain `git push` use the token, run once
    `sudo -u hq env HOME=/opt/hq gh auth setup-git --hostname github.com --force`.
    Git commits still need an identity (`git config --global user.name` and
    `user.email` as the `hq` user). `system_info` with check `gh_auth` reports
@@ -80,15 +77,14 @@ with OpenSSL (1.1.1 or newer, already present on Ubuntu 22.04). You can also pas
 `--repo` is the GitHub repository that publishes the releases, `--channel` is
 `main` or `stable`, and `--pubkey` is the minisign public key that signs them.
 The script is idempotent: it creates the `hq` user and `/opt/hq`, `/etc/hq`,
-`/usr/local/lib/hq`, installs `hq.service`, `herdr.service`, `hq-update.service`
+`/usr/local/lib/hq`, installs `hq.service`, `hq-update.service`
 and `hq-update.timer`, writes `/etc/hq/update.conf` and `/etc/hq/update.pub`,
 bootstraps the first binary (verified with the `minisign` tool, pinned with
 `--bootstrap-sha256`, or supplied with `--bootstrap-binary`), runs the first
-`hq update --apply --force` and enables everything. `herdr` itself is not
-installed by this script; see `setup-vps.sh`.
+`hq update --apply --force` and enables everything.
 
 A re-run keeps `channel` and `base_url` in an existing `update.conf` unless you
-pass them again, keeps edited `hq.service` and `herdr.service` (it prints a diff;
+pass them again, keeps an edited `hq.service` (it prints a diff;
 `--force-units` overwrites), and runs the first `hq update --apply --force` only
 after a fresh bootstrap of the binary.
 

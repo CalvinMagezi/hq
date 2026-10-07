@@ -45,7 +45,7 @@ usage: install.sh --repo <owner>/<repo> --pubkey <minisign.pub> [options]
   --base-url <url>          release host (default: https://github.com)
   --bootstrap-binary <file> use this hq binary for the first install
   --bootstrap-sha256 <hex>  download the first binary and require this SHA-256
-  --force-units             overwrite an existing hq.service / herdr.service (default: keep and show a diff)
+  --force-units             overwrite an existing hq.service (default: keep and show a diff)
   --no-start                install everything but do not run the first update
 A re-run keeps channel and base_url from the existing update.conf unless you pass them again.
 Without --bootstrap-binary the first release is downloaded and its manifest
@@ -292,7 +292,6 @@ seed_web() {
 install_units() {
     install -m 0755 -o root -g root "$SRC_DIR/deploy/update/hq-updater" "$LIB_DIR/hq-updater"
     install_unit_keep_edits "$SRC_DIR/deploy/hq.service"
-    install_unit_keep_edits "$SRC_DIR/deploy/herdr.service"
     for unit in "$SRC_DIR/deploy/update/hq-update.service" "$SRC_DIR/deploy/update/hq-update.timer"; do
         install -m 0644 -o root -g root "$unit" "$UNIT_DIR/$(basename "$unit")"
     done
@@ -366,11 +365,6 @@ scaffold_vault() {
 
 enable_services() {
     systemctl enable hq.service
-    if [ -x /usr/local/bin/herdr ]; then
-        systemctl enable herdr.service
-    else
-        echo "note: /usr/local/bin/herdr not found; herdr.service installed but not enabled (see deploy/setup-vps.sh)" >&2
-    fi
 }
 
 enable_timer() {
@@ -400,7 +394,6 @@ if [ "$START" -eq 1 ] && [ "$FRESH_BOOTSTRAP" -eq 1 ]; then
         echo "Check: journalctl -u hq ; $BIN update --check ; then re-run this script or: $BIN update --apply --force" >&2
         exit 1
     fi
-    systemctl start herdr.service 2>/dev/null || true
 fi
 enable_timer
 log "done. Status: $BIN update --check ; systemctl list-timers hq-update.timer"

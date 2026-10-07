@@ -216,8 +216,8 @@ fn quoted_screen(screen: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::herdr::HerdrHost;
-    use hq_core::config::{HerdrConfig, LOCAL_HOST};
+    use crate::herdr::scripted::ScriptedHost as HerdrHost;
+    use hq_core::config::HerdrConfig;
     use std::os::unix::fs::PermissionsExt;
 
     fn with_command(command: &str, env: &str) -> Harness {
@@ -279,7 +279,7 @@ mod tests {
 
     #[test]
     fn shell_syntax_in_a_command_is_never_a_hard_failure() {
-        let host = HerdrHost::from_config(&HerdrConfig::default(), LOCAL_HOST).unwrap();
+        let host = HerdrHost::new("/nonexistent/herdr");
         assert!(host.checks_binaries());
         for command in [
             "CLAUDE_CONFIG_DIR=/nowhere definitely-missing-xyz",

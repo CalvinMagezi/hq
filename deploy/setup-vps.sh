@@ -36,10 +36,6 @@ apt install -y gh
 echo "=== Installing Tailscale ==="
 curl -fsSL https://tailscale.com/install.sh | sh
 
-echo "=== Installing Herdr (coding-agent runtime) ==="
-# Herdr verifies its own download against a SHA-256 from its release manifest.
-curl -fsSL https://herdr.dev/install.sh | HERDR_INSTALL_DIR=/usr/local/bin sh
-
 echo "=== Making Caddy loopback-only ==="
 # The package ships a default site on :80. Replace it with the HQ web UI proxy bound to
 # 127.0.0.1, which `tailscale serve` then publishes to your tailnet only.
@@ -95,7 +91,7 @@ echo "Next steps:"
 echo "  1. Clone the repo on this host and run deploy/install.sh (see deploy/README.md,"
 echo "     'Pull-based updates'). It installs the hq binary, units and updater."
 echo "     Building from source instead: copy the binary to /usr/local/bin/hq and"
-echo "     install deploy/hq.service and deploy/herdr.service by hand."
+echo "     install deploy/hq.service by hand."
 echo "  2. Run: tailscale up"
 echo "  3. Publish the web UI to your tailnet: tailscale serve --bg --https=8443 http://127.0.0.1:4749"
 echo "     then open the HTTPS address that Tailscale prints on port 8443 (see deploy/README.md, Tailscale)."
