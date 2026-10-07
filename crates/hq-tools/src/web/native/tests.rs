@@ -1572,29 +1572,15 @@ fn single_topic_engines_rank_below_the_general_ones_for_a_query_they_do_not_fit(
 #[test]
 fn stack_exchange_queries_relax_in_steps_without_repeats() {
     use super::images_code::relaxations;
-    assert_eq!(
-        relaxations("tokio channel"),
-        ["tokio channel"],
-        "short queries stay as typed"
-    );
+    assert_eq!(relaxations("tokio channel"), ["tokio channel"], "short queries stay as typed");
     assert_eq!(
         relaxations("how do I use rust tokio mpsc channel backpressure"),
-        [
-            "how do I use rust tokio mpsc channel backpressure",
-            "rust tokio mpsc channel backpressure",
-            "rust tokio channel backpressure"
-        ],
-        "stopwords, then the four longest terms; the three-term form is cut by the request cap"
+        ["rust tokio mpsc channel backpressure", "tokio channel backpressure", "channel backpressure"],
+        "filler words go first, then the three and two longest terms"
     );
-    let long = relaxations("rust tokio mpsc channel backpressure");
-    assert_eq!(
-        long,
-        [
-            "rust tokio mpsc channel backpressure",
-            "rust tokio channel backpressure",
-            "tokio channel backpressure"
-        ]
-    );
+    assert_eq!(relaxations("rust tokio mpsc channel backpressure"), ["rust tokio mpsc channel backpressure", "tokio channel backpressure", "channel backpressure"]);
+    assert_eq!(relaxations("a the of"), ["a the of"], "a query of only filler words stays as typed");
+    assert_eq!(relaxations("rust tokio async"), ["rust tokio async", "tokio async"]);
 }
 
 #[tokio::test]
@@ -1606,7 +1592,7 @@ async fn a_stack_exchange_search_that_finds_nothing_retries_with_fewer_terms() {
         .respond_with(ResponseTemplate::new(200).set_body_json(json!({"items": []})))
         .mount(&server)
         .await;
-    Mock::given(method("GET")).and(path("/2.3/search/advanced")).and(query_param("q", "rust tokio channel backpressure"))
+    Mock::given(method("GET")).and(path("/2.3/search/advanced")).and(query_param("q", "tokio channel backpressure"))
         .respond_with(ResponseTemplate::new(200).set_body_json(json!({"items": [{"title": "Bounded channels", "link": "https://stackoverflow.com/q/9", "score": 5, "is_answered": true, "answer_count": 1, "tags": ["rust"]}]})))
         .with_priority(1).mount(&server).await;
     for engine_path in [
@@ -1653,7 +1639,7 @@ async fn a_stack_exchange_search_that_finds_nothing_retries_with_fewer_terms() {
         })
         .collect();
     assert_eq!(so_queries.len(), 2, "{so_queries:?}");
-    assert_eq!(so_queries[1], "rust tokio channel backpressure");
+    assert_eq!(so_queries[1], "tokio channel backpressure");
 }
 
 #[test]

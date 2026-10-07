@@ -11,8 +11,8 @@ use super::markup::{collapse_ws, html_text};
 const MAX_IMAGE_URL_CHARS: usize = 300;
 /// Most requests one Stack Exchange search may spend finding a form of the query that matches.
 const MAX_RELAXED_QUERIES: usize = 3;
-/// A term count that the relaxed forms shrink to, longest terms kept.
-const RELAXED_TERM_COUNTS: [usize; 2] = [4, 3];
+/// Term counts the relaxed forms shrink to, longest terms kept.
+const RELAXED_TERM_COUNTS: [usize; 2] = [3, 2];
 /// Words that add no constraint a question site would miss.
 const FILLER_WORDS: &[&str] = &[
     "a", "an", "the", "is", "are", "was", "were", "of", "in", "on", "to", "for", "and", "or",
@@ -443,9 +443,12 @@ fn parse_europe_pmc(body: &Value) -> Result<Vec<SearchResult>, String> {
         .collect())
 }
 
-/// The query as typed, then without filler words, then with only its longest
-/// four and three terms (rarer words are longer, and they carry the topic).
-/// At most [`MAX_RELAXED_QUERIES`] forms, without repeats.
+/// Forms of a query to try, strictest first. Stack Exchange needs every term to
+/// match and answered nothing for three-term forms of a real five-term query
+/// while two terms found it, so the ladder ends at the two longest terms (rarer
+/// words are longer, and they carry the topic). Filler words are dropped from the
+/// start, since a form with "how do I" in it matches almost nothing. At most
+/// [`MAX_RELAXED_QUERIES`] forms, without repeats.
 pub(super) fn relaxations(query: &str) -> Vec<String> {
     let all: Vec<&str> = query.split_whitespace().collect();
     let content: Vec<&str> = all
@@ -453,17 +456,20 @@ pub(super) fn relaxations(query: &str) -> Vec<String> {
         .copied()
         .filter(|t| !FILLER_WORDS.contains(&t.to_lowercase().as_str()))
         .collect();
-    let mut forms = vec![all.join(" ")];
+    if content.is_empty() {
+        return vec![all.join(" ")];
+    }
+    let base = content;
+    let mut forms = vec![base.join(" ")];
     let mut push = |terms: Vec<&str>| {
         let form = terms.join(" ");
         if !terms.is_empty() && !forms.contains(&form) {
             forms.push(form);
         }
     };
-    push(content.clone());
     for count in RELAXED_TERM_COUNTS {
-        if content.len() > count {
-            push(longest_terms(&content, count));
+        if base.len() > count {
+            push(longest_terms(&base, count));
         }
     }
     forms.truncate(MAX_RELAXED_QUERIES);
