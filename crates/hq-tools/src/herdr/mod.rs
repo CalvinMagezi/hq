@@ -24,7 +24,7 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 use transport::{RawOutput, Transport};
 
-pub use backend::{AwaitingAgent, Host, HostBackend};
+pub use backend::{AwaitingAgent, Host, HostBackend, HostEvent, HostEvents};
 pub use native::NativeBackend;
 
 /// Herdr rejects explicit timeouts outside this window.

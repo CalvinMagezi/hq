@@ -492,3 +492,24 @@ fn a_flicker_shorter_than_the_stability_window_is_not_a_change() {
     );
     host.kill("flick").unwrap();
 }
+
+#[test]
+fn event_numbers_keep_rising_across_a_host_restart() {
+    let sh = |s: &str| vec!["sh".to_string(), "-c".to_string(), s.to_string()];
+    let first = Host::new();
+    first
+        .spawn(SpawnSpec::new("a", sh("sleep 30"), std::env::temp_dir()))
+        .unwrap();
+    let before = first.events().last_seq();
+    drop(first);
+    std::thread::sleep(std::time::Duration::from_millis(20));
+
+    let second = Host::new();
+    second
+        .spawn(SpawnSpec::new("a", sh("sleep 30"), std::env::temp_dir()))
+        .unwrap();
+    assert!(
+        second.events().last_seq() > before,
+        "a restarted host's numbers must not fall below ones clients already saw"
+    );
+}

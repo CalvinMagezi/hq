@@ -4,6 +4,7 @@ use crate::detect::{AgentState, Detector, Input};
 use crate::emu::{Row, VtEmulator};
 use crate::env::pane_env;
 use crate::error::HostError;
+use crate::events::{EventKind, EventLog};
 use crate::keys::encode_key;
 use crate::report;
 use crate::token;
@@ -93,6 +94,10 @@ pub struct PaneInfo {
     /// The agent's own id for its conversation, once its hooks have reported
     /// it. This is what `--resume` takes for agents that have one.
     pub agent_session_id: Option<String>,
+    /// Goes up each time the agent's state changes; 0 before the first look.
+    pub state_seq: u64,
+    /// A turn finished and the agent has not worked since (herdr's `done`).
+    pub done: bool,
     /// The terminal title the program set, or empty.
     pub title: String,
     /// Detected state; None when the agent kind has no rule file.
@@ -108,6 +113,9 @@ pub struct PaneInfo {
     pub quiet_for: Duration,
     pub age: Duration,
 }
+
+/// How often the state watcher looks at every agent.
+const STATE_WATCH_INTERVAL: Duration = Duration::from_millis(250);
 
 /// Environment variables a pane gets so its hooks can reach the host.
 pub const PANE_TOKEN_ENV: &str = "HQ_HOST_TOKEN";
@@ -131,6 +139,7 @@ pub struct AwaitingInfo {
 pub struct Host {
     panes: Registry,
     awaiting: Awaiting,
+    events: Arc<EventLog>,
     /// Per-agent secret each pane gets so its hooks can report on itself and
     /// nothing else. Kept in memory only.
     pane_tokens: Mutex<BTreeMap<String, String>>,
@@ -184,6 +193,7 @@ impl Host {
         Self {
             panes: Arc::new(Mutex::new(BTreeMap::new())),
             awaiting: Arc::new(Mutex::new(BTreeMap::new())),
+            events: Arc::new(EventLog::from_clock()),
             pane_tokens: Mutex::new(BTreeMap::new()),
             run_dir: Mutex::new(None),
             detector,
@@ -236,7 +246,7 @@ impl Host {
             LaunchArgs {
                 argv: spec.argv,
                 resume,
-                on_exit: self.exit_hook(),
+                on_exit: Some(self.exit_hook(&spec.name)),
                 agent: spec.agent,
                 cwd: spec.cwd,
                 env,
@@ -254,6 +264,7 @@ impl Host {
         panes.insert(spec.name.clone(), pane.clone());
         drop(panes);
         lock(&self.pane_tokens).insert(spec.name.clone(), token);
+        self.events.push(&spec.name, EventKind::Spawned, None, None);
         self.save();
         Ok(info_of(&spec.name, pane.as_ref(), &self.detector))
     }
@@ -265,13 +276,21 @@ impl Host {
         save_state(&self.panes, &self.awaiting, self.state.as_deref());
     }
 
-    fn exit_hook(&self) -> Option<ExitHook> {
-        let state = self.state.clone()?;
-        let panes = self.panes.clone();
-        let awaiting = self.awaiting.clone();
-        Some(Arc::new(move || {
-            save_state(&panes, &awaiting, Some(&state))
-        }))
+    fn exit_hook(&self, name: &str) -> ExitHook {
+        // The registry is captured only to rewrite the state file. A host with
+        // none must not be kept alive by its own panes, or dropping it would
+        // leave the processes running.
+        let saver = self
+            .state
+            .clone()
+            .map(|state| (state, self.panes.clone(), self.awaiting.clone()));
+        let (events, name) = (self.events.clone(), name.to_string());
+        Arc::new(move || {
+            if let Some((state, panes, awaiting)) = &saver {
+                save_state(panes, awaiting, Some(state));
+            }
+            events.push(&name, EventKind::Exited, None, None);
+        })
     }
 
     /// Starts again every agent the state file lists, using its resume
@@ -362,6 +381,54 @@ impl Host {
         }
     }
 
+    pub fn events(&self) -> &EventLog {
+        &self.events
+    }
+
+    /// Starts a thread that announces state changes the screen shows, such as
+    /// a dialog appearing or an agent without hooks finishing. Changes an agent
+    /// reports are announced at once by `report`. It ends when `stop` is set.
+    pub fn watch_states(self: &Arc<Self>, stop: Arc<std::sync::atomic::AtomicBool>) {
+        let host = Arc::downgrade(self);
+        std::thread::spawn(move || {
+            while !stop.load(std::sync::atomic::Ordering::SeqCst) {
+                let Some(host) = host.upgrade() else { return };
+                let names: Vec<String> = lock(&host.panes).keys().cloned().collect();
+                for name in names {
+                    host.announce(&name);
+                }
+                drop(host);
+                std::thread::sleep(STATE_WATCH_INTERVAL);
+            }
+        });
+    }
+
+    /// Sends a `state` event if the agent's state differs from the last one
+    /// announced. A first sighting counts, so a report that lands before the
+    /// first look is not missed. The agent's change counter goes up before
+    /// `done` is set, so a reader that sees `done` also sees the number to
+    /// alert on.
+    fn announce(&self, name: &str) {
+        let Ok(pane) = self.pane(name) else { return };
+        let info = info_of(name, pane.as_ref(), &self.detector);
+        let Some(state) = info.state else { return };
+        let mut announced = pane.announced();
+        if *announced == Some(state) {
+            return;
+        }
+        let before = announced.replace(state);
+        if state == AgentState::Working {
+            pane.set_done(false);
+        }
+        let seq = self
+            .events
+            .push(name, EventKind::State, Some(state), info.rule);
+        pane.set_state_seq(seq);
+        if state == AgentState::Idle && before == Some(AgentState::Working) {
+            pane.set_done(true);
+        }
+    }
+
     /// Tells the host where its control socket is, so panes can be given the
     /// way to reach it. Called by the server when it binds.
     pub fn set_run_dir(&self, dir: &Path) {
@@ -402,6 +469,7 @@ impl Host {
     ) -> Result<(), HostError> {
         let pane = self.pane(name)?;
         pane.record_report(report::state_for(event, notification_type), event, session_id);
+        self.announce(name);
         Ok(())
     }
 
@@ -421,6 +489,7 @@ impl Host {
         let Some(pane) = lock(&self.panes).remove(name) else {
             if lock(&self.awaiting).remove(name).is_some() {
                 self.save();
+                self.events.push(name, EventKind::Removed, None, None);
                 return Ok(());
             }
             return Err(HostError::NotFound(name.to_string()));
@@ -429,6 +498,7 @@ impl Host {
         // Other threads may still hold the pane (a caller waiting on it), so
         // stopping it cannot be left to the last reference being dropped.
         pane.kill();
+        self.events.push(name, EventKind::Removed, None, None);
         Ok(())
     }
 
@@ -642,6 +712,8 @@ fn info_of(name: &str, pane: &Pane, detector: &Detector) -> PaneInfo {
         agent: pane.agent.clone(),
         resumable: pane.resume.is_some(),
         agent_session_id: pane.agent_session_id(),
+        state_seq: pane.state_seq(),
+        done: pane.is_done(),
         title: pane.with_emu(|e| e.title()),
         state,
         rule,

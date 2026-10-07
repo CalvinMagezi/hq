@@ -1,6 +1,7 @@
 use super::{
-    AgentInfo, AgentStatus, AwaitingAgent, HerdrError, Host, HostBackend, INVALID_KEYS_CODE,
-    LaunchRequest, Launched, PromptOutcome, shell_line, shell_quote, validate_keys,
+    AgentInfo, AgentStatus, AwaitingAgent, HerdrError, Host, HostBackend, HostEvent, HostEvents,
+    INVALID_KEYS_CODE, LaunchRequest, Launched, PromptOutcome, shell_line, shell_quote,
+    validate_keys,
 };
 use hq_host::{Client, ClientError};
 use serde_json::{Value, json};
@@ -211,10 +212,11 @@ fn parse_awaiting(v: &Value) -> Option<AwaitingAgent> {
 fn parse_info(v: &Value) -> Option<AgentInfo> {
     let name = v.get("name")?.as_str()?.to_string();
     let exited = v.get("status").and_then(Value::as_str) == Some("exited");
-    let status = if exited {
-        AgentStatus::Unknown
-    } else {
-        parse_status(v.get("state").and_then(Value::as_str))
+    let done = v.get("done").and_then(Value::as_bool).unwrap_or(false);
+    let status = match parse_status(v.get("state").and_then(Value::as_str)) {
+        _ if exited => AgentStatus::Unknown,
+        AgentStatus::Idle if done => AgentStatus::Done,
+        other => other,
     };
     let text = |key: &str| v.get(key).and_then(Value::as_str).map(str::to_string);
     Some(AgentInfo {
@@ -224,9 +226,8 @@ fn parse_info(v: &Value) -> Option<AgentInfo> {
         workspace_id: name.clone(),
         cwd: text("cwd").unwrap_or_default(),
         title: text("title").filter(|t| !t.is_empty()),
-        // The host has no change counter yet; age moves on every call, so
-        // callers that notify per change must key on status instead.
-        state_change_seq: 0,
+        // Goes up on each state change; the supervisor alerts once per value.
+        state_change_seq: v.get("state_seq").and_then(Value::as_u64).unwrap_or(0),
         launch_pending: false,
         agent_session_id: text("agent_session_id"),
         name: Some(name),
@@ -407,6 +408,31 @@ impl HostBackend for NativeBackend {
     fn shell_pid(&self, pane_id: &str) -> Option<u32> {
         let v = self.call("agent.get", json!({ "name": pane_id })).ok()?;
         v.get("pid")?.as_u64().map(|p| p as u32)
+    }
+
+    fn poll_events(&self, after: Option<u64>, wait: Duration) -> Result<HostEvents, HerdrError> {
+        let params = json!({ "after": after, "timeout_ms": wait.as_millis() as u64 });
+        let v = self.call_within("events.poll", params, wait + self.command_timeout)?;
+        let text = |e: &Value, k: &str| e.get(k).and_then(Value::as_str).map(str::to_string);
+        let events = v.get("events").and_then(Value::as_array);
+        Ok(HostEvents {
+            events: events
+                .map(|list| {
+                    list.iter()
+                        .filter_map(|e| {
+                            Some(HostEvent {
+                                seq: e.get("seq")?.as_u64()?,
+                                name: text(e, "name")?,
+                                kind: text(e, "kind")?,
+                                state: text(e, "state"),
+                            })
+                        })
+                        .collect()
+                })
+                .unwrap_or_default(),
+            last_seq: v.get("last_seq").and_then(Value::as_u64).unwrap_or(0),
+            lost: v.get("lost").and_then(Value::as_bool).unwrap_or(false),
+        })
     }
 
     fn update_resume(&self, name: &str, kind: &str, args: Vec<String>) -> Result<(), HerdrError> {

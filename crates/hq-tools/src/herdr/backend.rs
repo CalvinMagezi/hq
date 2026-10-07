@@ -43,6 +43,16 @@ pub trait HostBackend: Send + Sync + std::fmt::Debug {
     fn close_workspace(&self, workspace_id: &str) -> Result<(), HerdrError>;
     fn shell_pid(&self, pane_id: &str) -> Option<u32>;
 
+    /// Waits up to `wait` for events after `after` (`None` just reads the
+    /// current position). Only the built-in host can push events; others are
+    /// swept by polling.
+    fn poll_events(&self, _after: Option<u64>, _wait: Duration) -> Result<HostEvents, HerdrError> {
+        Err(HerdrError::Api {
+            code: "unsupported".into(),
+            message: format!("host '{}' has no event stream", self.name()),
+        })
+    }
+
     /// Agents the host restored but is holding until their env is supplied.
     /// Only the built-in host has any.
     fn awaiting(&self) -> Result<Vec<AwaitingAgent>, HerdrError> {
@@ -64,6 +74,26 @@ pub trait HostBackend: Send + Sync + std::fmt::Debug {
     fn with_launch_bound_dyn(&self, bound: Duration) -> Host;
     /// The same host with a different ceiling for non-wait calls.
     fn with_command_timeout_dyn(&self, timeout: Duration) -> Host;
+}
+
+/// One thing that happened to an agent on the host.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct HostEvent {
+    pub seq: u64,
+    pub name: String,
+    /// `spawned`, `state`, `exited` or `removed`.
+    pub kind: String,
+    pub state: Option<String>,
+}
+
+/// What a wait for host events returned.
+#[derive(Debug, Clone, Default)]
+pub struct HostEvents {
+    pub events: Vec<HostEvent>,
+    /// Pass this as `after` next time.
+    pub last_seq: u64,
+    /// The host dropped events the caller had not read; re-read everything.
+    pub lost: bool,
 }
 
 /// A restored agent that cannot restart until HQ supplies its environment.
@@ -215,6 +245,9 @@ impl<T: HostBackend + ?Sized> HostBackend for Arc<T> {
     }
     fn shell_pid(&self, pane_id: &str) -> Option<u32> {
         (**self).shell_pid(pane_id)
+    }
+    fn poll_events(&self, after: Option<u64>, wait: Duration) -> Result<HostEvents, HerdrError> {
+        (**self).poll_events(after, wait)
     }
     fn update_resume(&self, name: &str, kind: &str, args: Vec<String>) -> Result<(), HerdrError> {
         (**self).update_resume(name, kind, args)

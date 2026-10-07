@@ -538,3 +538,138 @@ fn an_unknown_token_is_unauthorized_and_the_operator_can_report_for_any_agent() 
         .unwrap_err();
     assert_eq!(err.code(), Some("invalid_params"));
 }
+
+/// Polls until an event of `kind` for `name` shows up; returns it and the new cursor.
+fn next_event(c: &mut Client, after: u64, name: &str, kind: &str) -> (Value, u64) {
+    let deadline = Instant::now() + WAIT;
+    let mut cursor = after;
+    loop {
+        let r = c
+            .call("events.poll", json!({ "after": cursor, "timeout_ms": 500 }))
+            .unwrap();
+        cursor = r["last_seq"].as_u64().unwrap();
+        let wanted = |e: &&Value| {
+            let kind_ok = e["name"] == name && (e["kind"] == kind || kind == "state:working");
+            kind_ok && (kind != "state:working" || e["state"] == "working")
+        };
+        if let Some(e) = r["events"].as_array().unwrap().iter().find(wanted) {
+            return (e.clone(), cursor);
+        }
+        assert!(Instant::now() < deadline, "no {kind} event for {name}");
+    }
+}
+
+#[test]
+fn a_client_hears_about_spawns_state_changes_exits_and_removals() {
+    let host = Running::start();
+    let mut c = host.client();
+    let start = c.call("events.poll", json!({})).unwrap();
+    assert_eq!(start["events"].as_array().unwrap().len(), 0);
+    let cursor = start["last_seq"].as_u64().unwrap();
+
+    let mut params = spawn_params("ev", "sleep 60");
+    params["agent"] = json!("claude");
+    c.call("agent.spawn", params).unwrap();
+    let (spawned, cursor) = next_event(&mut c, cursor, "ev", "spawned");
+    assert!(spawned["seq"].as_u64().unwrap() > 0);
+
+    c.call(
+        "agent.report",
+        json!({ "name": "ev", "event": "UserPromptSubmit" }),
+    )
+    .unwrap();
+    let (state, cursor) = next_event(&mut c, cursor, "ev", "state:working");
+    assert_eq!(state["state"], "working");
+    assert_eq!(state["rule"], "hook:UserPromptSubmit");
+
+    c.call("agent.kill", json!({ "name": "ev" })).unwrap();
+    let (_, cursor) = next_event(&mut c, cursor, "ev", "exited");
+    c.call("agent.remove", json!({ "name": "ev" })).unwrap();
+    next_event(&mut c, cursor, "ev", "removed");
+}
+
+#[test]
+fn an_idle_poll_waits_then_returns_empty_and_a_pane_token_cannot_poll() {
+    let host = Running::start();
+    let mut op = host.client();
+    let last = op.call("events.poll", json!({})).unwrap()["last_seq"]
+        .as_u64()
+        .unwrap();
+    let began = Instant::now();
+    let r = op
+        .call("events.poll", json!({ "after": last, "timeout_ms": 300 }))
+        .unwrap();
+    assert!(r["events"].as_array().unwrap().is_empty());
+    assert!(began.elapsed() >= Duration::from_millis(250));
+
+    let (token, dir) = spawn_reporter(&mut op, "poller");
+    let mut pane = Client::connect_with_token(std::path::Path::new(&dir), &token).unwrap();
+    let err = pane.call("events.poll", json!({})).unwrap_err();
+    assert_eq!(err.code(), Some("forbidden"));
+}
+
+#[test]
+fn each_state_change_bumps_the_agents_change_counter() {
+    let host = Running::start();
+    let mut c = host.client();
+    let mut params = spawn_params("seq", "sleep 60");
+    params["agent"] = json!("claude");
+    c.call("agent.spawn", params).unwrap();
+
+    let seq_of = |c: &mut Client| {
+        c.call("agent.get", json!({ "name": "seq" })).unwrap()["state_seq"]
+            .as_u64()
+            .unwrap()
+    };
+    let wait_past = |c: &mut Client, old: u64| {
+        let deadline = Instant::now() + WAIT;
+        loop {
+            let now = seq_of(c);
+            if now > old {
+                return now;
+            }
+            assert!(Instant::now() < deadline, "counter stuck at {old}");
+            std::thread::sleep(Duration::from_millis(50));
+        }
+    };
+    let first = wait_past(&mut c, 0);
+    c.call("agent.report", json!({ "name": "seq", "event": "UserPromptSubmit" })).unwrap();
+    let second = wait_past(&mut c, first);
+    c.call("agent.report", json!({ "name": "seq", "event": "Stop" })).unwrap();
+    let third = wait_past(&mut c, second);
+    assert!(first < second && second < third);
+    std::thread::sleep(Duration::from_millis(600));
+    assert_eq!(seq_of(&mut c), third, "no change, no bump");
+}
+
+#[test]
+fn a_finished_turn_is_done_until_the_agent_works_again() {
+    let host = Running::start();
+    let mut c = host.client();
+    let mut params = spawn_params("fin", "sleep 60");
+    params["agent"] = json!("claude");
+    c.call("agent.spawn", params).unwrap();
+
+    let info = |c: &mut Client| c.call("agent.get", json!({ "name": "fin" })).unwrap();
+    let wait_for = |c: &mut Client, want: bool| {
+        let deadline = Instant::now() + WAIT;
+        loop {
+            let i = c.call("agent.get", json!({ "name": "fin" })).unwrap();
+            if i["done"] == want && i["state"] == if want { "idle" } else { "working" } {
+                return i;
+            }
+            assert!(Instant::now() < deadline, "done never became {want}: {i}");
+            std::thread::sleep(Duration::from_millis(50));
+        }
+    };
+    assert_eq!(info(&mut c)["done"], false, "a fresh agent has not finished anything");
+
+    c.call("agent.report", json!({ "name": "fin", "event": "UserPromptSubmit" })).unwrap();
+    wait_for(&mut c, false);
+    c.call("agent.report", json!({ "name": "fin", "event": "Stop" })).unwrap();
+    let finished = wait_for(&mut c, true);
+
+    c.call("agent.report", json!({ "name": "fin", "event": "UserPromptSubmit" })).unwrap();
+    let working = wait_for(&mut c, false);
+    assert!(working["state_seq"].as_u64() > finished["state_seq"].as_u64());
+}

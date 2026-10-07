@@ -8,6 +8,7 @@ mod detect;
 mod emu;
 mod env;
 mod error;
+mod events;
 mod host;
 mod hooks;
 mod keys;
@@ -23,6 +24,7 @@ pub use detect::{AgentState, Detection, Detector, ENGINE_VERSION, Input as Detec
 pub use emu::{Emulator, Row, VtEmulator};
 pub use env::pane_env;
 pub use error::HostError;
+pub use events::{Event, EventKind, EventLog, Poll};
 pub use host::{
     AwaitingInfo, Host, PANE_TOKEN_ENV, RUN_DIR_ENV, PaneInfo, PaneStatus, ReadSource, RestoreReport, SpawnSpec, valid_name,
 };

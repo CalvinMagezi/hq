@@ -49,6 +49,7 @@ version gets `protocol_mismatch`.
 | `agent.send_keys` | `name`, `keys` (`enter`, `esc`, `tab`, arrows, `pageup`, `ctrl+c`, ...) | `{}` |
 | `agent.resize` | `name`, `rows`, `cols` | `{}` |
 | `agent.wait` | `name`, `until` (`exit`, `quiet` or `state`), optional `timeout_ms`; for `quiet` `quiet_ms`; for `state` `states` (list, required) and `stable_ms` (default 300) | `exit_code`, or agent info |
+| `events.poll` | optional `after` (a `last_seq`), `timeout_ms` (default 25000, at most 60000) | `{events, last_seq, lost}`: waits for events after `after`; without `after` it returns the current `last_seq` at once. An event is `{seq, name, kind (spawned, state, exited, removed), state, rule}`. `lost` means events were dropped, so re-read `agent.list`. Numbers start from the clock, so they keep rising across host restarts. |
 | `agent.report` | `event` (a hook event name), optional `session_id`, `notification_type`; `name` for the operator (a pane token implies its own) | `{}` |
 | `agent.set_resume` | `name`, `argv` | `{}`; replaces the command a restart runs (the agent must have been spawned with `resume_argv`) |
 | `agent.awaiting` | none | `{"agents": [{name, agent, cwd, env_keys}]}`: restored agents waiting for their environment |
@@ -93,6 +94,16 @@ priority decides. They are built into the binary (`crates/hq-host/src/detect/man
 there is no fetching from anywhere at run time. Screens captured from real
 Claude Code and Codex sessions, each labelled with the state the agent was really
 in, are in `crates/hq-host/tests/fixtures/` and are checked on every test run.
+
+### Done, the change counter and events
+
+Agent info also carries `done` (a turn finished and the agent has not worked
+since, herdr's `done`) and `state_seq`, a number that goes up each time the
+state changes. HQ alerts once per `state_seq` value, which is how a finished
+turn or a blocked dialog is reported once and not once a minute. The host sends
+an `events.poll` event for every change, whether an agent reported it or its
+screen showed it, and HQ's daemon long-polls it so the supervisor runs within
+seconds of a change; its once-a-minute sweep stays as the safety net.
 
 ### Agent-reported state
 
@@ -217,6 +228,6 @@ the session id), once per sweep.
 
 ## Not built yet
 
-Rule files for agents other than Claude Code and Codex, the "done" state (finished a turn you have not looked at yet), hooks for agents other than Claude Code, a pushed event stream (state is still polled), remote hosts, the backend that makes HQ sessions use this host, and
+Rule files for agents other than Claude Code and Codex, hooks for agents other than Claude Code, remote hosts, the backend that makes HQ sessions use this host, and
 agent-to-agent messaging. Provenance of anything adapted from herdr is recorded
 in `docs/provenance/herdr.md`.
