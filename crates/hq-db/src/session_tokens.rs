@@ -46,6 +46,18 @@ pub fn revoke(conn: &Connection, session_id: &str) -> Result<()> {
     Ok(())
 }
 
+/// Drops the secret of a launch that failed before its session was recorded. A
+/// session that is already recorded keeps its secret: its pane may be live and a
+/// late launch error must not lock it out. Returns whether a secret was dropped.
+pub fn revoke_if_unregistered(conn: &Connection, session_id: &str) -> Result<bool> {
+    let dropped = conn.execute(
+        "DELETE FROM harness_session_tokens WHERE session_id = ?1
+         AND NOT EXISTS (SELECT 1 FROM harness_sessions WHERE id = ?1)",
+        params![session_id],
+    )?;
+    Ok(dropped > 0)
+}
+
 /// How long a secret is honoured before its session row exists. The agent
 /// connects the moment it starts, while HQ is still finishing the launch.
 const LAUNCH_GRACE_SECONDS: i64 = 180;
@@ -199,6 +211,23 @@ mod tests {
             let (old, new) = (mint(c, "hs-a")?, mint(c, "hs-a")?);
             assert_eq!(session_for_token(c, &old)?, None);
             assert_eq!(session_for_token(c, &new)?.as_deref(), Some("hs-a"));
+            Ok(())
+        })
+        .unwrap();
+    }
+
+    #[test]
+    fn a_failed_launch_loses_its_secret_but_a_recorded_session_keeps_it() {
+        let db = Database::open_memory().unwrap();
+        db.with_conn(|c| {
+            let lost = mint(c, "hs-never-registered")?;
+            assert!(revoke_if_unregistered(c, "hs-never-registered")?);
+            assert_eq!(session_for_token(c, &lost)?, None);
+
+            session(c, "hs-live");
+            let kept = mint(c, "hs-live")?;
+            assert!(!revoke_if_unregistered(c, "hs-live")?);
+            assert_eq!(session_for_token(c, &kept)?.as_deref(), Some("hs-live"));
             Ok(())
         })
         .unwrap();

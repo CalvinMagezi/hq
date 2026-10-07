@@ -130,6 +130,27 @@ lives in memory only and stops working when the agent is removed. Anything the
 agent runs can read it, so it can also misreport its own state, which the
 agent could do by printing to its screen anyway.
 
+### What the host does not protect against
+
+An agent runs as the same operating-system user as the host. It can read
+`operator.token` in the host directory (the directory is in its environment as
+`HQ_HOST_DIR`), and with it do everything the operator can: read and type into
+other agents, start processes, stop the host. It can also read the MCP config
+files under `mcp/`, which hold the HQ tokens of the other sessions on that host.
+The pane token and the scope check keep an honest agent and its hooks in their
+lane; they are not a boundary against an agent that has been turned hostile.
+That boundary needs a separate account or a sandbox for the agents, which the
+host does not provide. Until then, run agents you would trust with your own
+login, and keep sessions that read untrusted content away from sessions that
+hold secrets.
+
+The host bounds what a client can make it hold: 128 agents, 64 KiB of command
+line each, window titles cut to 256 bytes, conversation ids limited to short
+plain tokens, `agent.wait` to 10 minutes, a reply that would not fit one
+protocol line replaced by an error, and a pane that stops reading its terminal
+fails a write after 5 seconds instead of holding the connection. A client also
+refuses a host directory that is not owned by you and private to you.
+
 ## Restarts
 
 The host keeps `session.json` in its directory (mode 0600). It lists every

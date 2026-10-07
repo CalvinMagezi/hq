@@ -225,11 +225,23 @@ impl Server {
             exe: self.exe.clone(),
             stop_after_reply: Cell::new(false),
         };
-        let open = open.clone();
-        std::thread::spawn(move || {
+        let slot = Slot(open.clone());
+        // A failed spawn drops the closure, and with it the slot, so the count
+        // stays right and the accept loop keeps running.
+        let _ = std::thread::Builder::new().spawn(move || {
+            let _slot = slot;
             conn.run(stream);
-            open.fetch_sub(1, Ordering::SeqCst);
         });
+    }
+}
+
+/// One of the host's connection slots, given back when this is dropped: when a
+/// connection ends, panics, or never got a thread.
+struct Slot(Arc<AtomicUsize>);
+
+impl Drop for Slot {
+    fn drop(&mut self) {
+        self.0.fetch_sub(1, Ordering::SeqCst);
     }
 }
 
@@ -503,7 +515,7 @@ impl Conn {
     }
 
     fn wait(&self, p: WaitParams) -> Result<Value, ErrorBody> {
-        let timeout = Duration::from_millis(p.timeout_ms.unwrap_or(DEFAULT_WAIT_TIMEOUT_MS));
+        let timeout = clamp_wait(p.timeout_ms);
         match p.until.as_str() {
             "exit" => {
                 let code = self.host.wait_exit(&p.name, timeout).map_err(host_err)?;
@@ -579,6 +591,13 @@ struct SpawnParams {
 struct PollParams {
     after: Option<u64>,
     timeout_ms: Option<u64>,
+}
+
+/// The longest an `agent.wait` may hold a connection, whatever the caller asks.
+const MAX_WAIT_TIMEOUT_MS: u64 = 10 * 60 * 1000;
+
+fn clamp_wait(requested: Option<u64>) -> Duration {
+    Duration::from_millis(requested.unwrap_or(DEFAULT_WAIT_TIMEOUT_MS).min(MAX_WAIT_TIMEOUT_MS))
 }
 
 /// How long an `events.poll` waits when the caller names no timeout, and the
@@ -735,6 +754,16 @@ fn parse<T: serde::de::DeserializeOwned>(params: &Value) -> Result<T, ErrorBody>
 
 fn send(w: &mut UnixStream, resp: &Response) -> std::io::Result<()> {
     let mut line = serde_json::to_vec(resp).map_err(std::io::Error::other)?;
+    if line.len() >= MAX_LINE_BYTES {
+        // A client refuses a line this long and gives up on the connection, so
+        // say what happened in a short reply instead.
+        line = serde_json::to_vec(&Response::err(
+            resp.id.clone(),
+            "reply_too_large",
+            "the reply is bigger than one protocol line; ask for less (a shorter read, one agent)",
+        ))
+        .map_err(std::io::Error::other)?;
+    }
     line.push(b'\n');
     w.write_all(&line)
 }
@@ -789,5 +818,40 @@ mod tests {
         assert!(!fresh.is_stale());
         std::fs::remove_file(&exe).unwrap();
         assert!(fresh.is_stale());
+    }
+
+    #[test]
+    fn a_wait_is_clamped_to_the_longest_the_host_allows() {
+        assert_eq!(clamp_wait(Some(u64::MAX)), Duration::from_millis(MAX_WAIT_TIMEOUT_MS));
+        assert_eq!(clamp_wait(Some(1500)), Duration::from_millis(1500));
+        assert_eq!(clamp_wait(None), Duration::from_millis(DEFAULT_WAIT_TIMEOUT_MS));
+    }
+
+    #[test]
+    fn a_connection_slot_comes_back_when_it_is_dropped_even_by_a_panic() {
+        let open = Arc::new(AtomicUsize::new(0));
+        open.fetch_add(1, Ordering::SeqCst);
+        let slot = Slot(open.clone());
+        let result = std::thread::spawn(move || {
+            let _held = slot;
+            panic!("a connection thread died");
+        })
+        .join();
+        assert!(result.is_err());
+        assert_eq!(open.load(Ordering::SeqCst), 0, "a panicking connection must not leak its slot");
+    }
+
+    #[test]
+    fn a_reply_too_big_for_one_line_becomes_a_short_error() {
+        let (mut a, b) = UnixStream::pair().unwrap();
+        let huge = Response::ok(json!(7), json!({ "text": "x".repeat(MAX_LINE_BYTES + 10) }));
+        let writer = std::thread::spawn(move || send(&mut a, &huge));
+        let mut line = String::new();
+        std::io::BufRead::read_line(&mut std::io::BufReader::new(b), &mut line).unwrap();
+        writer.join().unwrap().unwrap();
+        let reply: Value = serde_json::from_str(&line).unwrap();
+        assert_eq!(reply["id"], 7);
+        assert_eq!(reply["error"]["code"], "reply_too_large");
+        assert!(line.len() < 1024);
     }
 }

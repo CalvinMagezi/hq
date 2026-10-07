@@ -35,6 +35,54 @@ pub fn add_message(
     )?)
 }
 
+/// Like `add_message`, but inserts only while `from_session` has sent fewer than
+/// `limit` messages in the last `window_minutes`, decided in the same statement so
+/// concurrent senders cannot slip past it. None when the limit is reached.
+#[allow(clippy::too_many_arguments)]
+pub fn add_message_limited(
+    conn: &Connection,
+    task_id: &str,
+    from_session: &str,
+    to_session: &str,
+    body: &str,
+    reply_to: Option<i64>,
+    limit: i64,
+    window_minutes: i64,
+) -> Result<Option<TaskComment>> {
+    let inserted = conn.execute(
+        "INSERT INTO task_comments \
+         (task_id, author, body, kind, sender_session_id, to_session_id, reply_to) \
+         SELECT ?1, ?2, ?3, ?4, ?2, ?5, ?6 \
+         WHERE (SELECT COUNT(*) FROM task_comments \
+                WHERE sender_session_id = ?2 AND kind = ?4 \
+                  AND created_at >= datetime('now', ?8)) < ?7",
+        params![
+            task_id,
+            from_session,
+            body,
+            KIND_MESSAGE,
+            to_session,
+            reply_to,
+            limit,
+            format!("-{window_minutes} minutes")
+        ],
+    )?;
+    if inserted == 0 {
+        return Ok(None);
+    }
+    let id = conn.last_insert_rowid();
+    changed();
+    Ok(Some(conn.query_row(
+        &format!("SELECT {COLUMNS} FROM task_comments WHERE id = ?1"),
+        params![id],
+        row_to_comment,
+    )?))
+}
+
+/// Messages older than this are not delivered: a recipient that was away that
+/// long, or resumed days later, should not receive a stale instruction.
+const MESSAGE_TTL_HOURS: i64 = 24;
+
 /// Takes the oldest message nobody has delivered to `to_session` yet. The claim
 /// is one conditional write, so two sweeps cannot both deliver it. Give it back
 /// with `release_message` if typing it failed.
@@ -43,8 +91,9 @@ pub fn claim_next_message(conn: &Connection, to_session: &str) -> Result<Option<
         .query_row(
             "SELECT id FROM task_comments \
              WHERE to_session_id = ?1 AND kind = ?2 AND delivered_at IS NULL \
+               AND created_at >= datetime('now', ?3) \
              ORDER BY id LIMIT 1",
-            params![to_session, KIND_MESSAGE],
+            params![to_session, KIND_MESSAGE, format!("-{MESSAGE_TTL_HOURS} hours")],
             |r| r.get(0),
         )
         .optional()?;
@@ -160,5 +209,39 @@ mod tests {
         .unwrap();
         assert_eq!(db.with_conn(|c| messages_sent_since(c, "hs-a", 60)).unwrap(), 2);
         assert_eq!(db.with_conn(|c| messages_sent_since(c, "nobody", 60)).unwrap(), 0);
+    }
+
+    #[test]
+    fn the_limit_is_enforced_in_the_insert_itself() {
+        let (db, task) = setup();
+        let send = |n: i64| {
+            db.with_conn(|c| add_message_limited(c, &task, "hs-a", "hs-b", &format!("m{n}"), None, 2, 60))
+                .unwrap()
+        };
+        assert!(send(1).is_some() && send(2).is_some());
+        assert!(send(3).is_none(), "the third inside the window is refused, with no separate check to race");
+        let other = db
+            .with_conn(|c| add_message_limited(c, &task, "hs-z", "hs-b", "fine", None, 2, 60))
+            .unwrap();
+        assert!(other.is_some(), "the limit is per sender");
+    }
+
+    #[test]
+    fn a_message_nobody_took_in_a_day_is_never_delivered() {
+        let (db, task) = setup();
+        let old = db
+            .with_conn(|c| add_message(c, &task, "hs-a", "hs-b", "ancient", None))
+            .unwrap();
+        db.with_conn(|c| {
+            c.execute(
+                "UPDATE task_comments SET created_at = datetime('now', '-2 days') WHERE id = ?1",
+                params![old.id],
+            )?;
+            Ok(())
+        })
+        .unwrap();
+        assert!(db.with_conn(|c| claim_next_message(c, "hs-b")).unwrap().is_none());
+        db.with_conn(|c| add_message(c, &task, "hs-a", "hs-b", "fresh", None)).unwrap();
+        assert_eq!(db.with_conn(|c| claim_next_message(c, "hs-b")).unwrap().unwrap().body, "fresh");
     }
 }

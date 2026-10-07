@@ -306,3 +306,28 @@ fn only_a_resumable_agent_can_have_its_resume_command_changed() {
     assert_eq!(host.set_resume("some", vec![]).unwrap_err().code(), "invalid_resume");
     assert_eq!(host.set_resume("none", sh("true")).unwrap_err().code(), "agent_not_found");
 }
+
+#[test]
+fn a_restart_sweeps_hook_and_mcp_files_that_belong_to_no_agent() {
+    let (_t1, dir1) = state_dir();
+    let first = Host::new().with_state_dir(&dir1);
+    first.set_run_dir(&dir1);
+    first.spawn(resumable("kept", "sleep 60", "sleep 60")).unwrap();
+    for name in ["kept", "stray"] {
+        hq_host::write_claude_settings(&dir1, name, "c").unwrap();
+        hq_host::write_claude_mcp_config(&dir1, name, "u", "t").unwrap();
+    }
+    let (_t2, dir2) = state_dir();
+    copy_state(&dir1, &dir2);
+    for sub in ["hooks", "mcp"] {
+        std::fs::create_dir_all(dir2.join(sub)).unwrap();
+        for name in ["kept", "stray"] {
+            std::fs::copy(dir1.join(sub).join(format!("{name}.json")), dir2.join(sub).join(format!("{name}.json"))).unwrap();
+        }
+    }
+    let next = Host::new().with_state_dir(&dir2);
+    next.set_run_dir(&dir2);
+    assert_eq!(next.restore().restored, ["kept"]);
+    assert!(dir2.join("hooks/kept.json").exists() && dir2.join("mcp/kept.json").exists());
+    assert!(!dir2.join("hooks/stray.json").exists() && !dir2.join("mcp/stray.json").exists());
+}

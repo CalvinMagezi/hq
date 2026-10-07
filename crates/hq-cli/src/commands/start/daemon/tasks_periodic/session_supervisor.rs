@@ -423,6 +423,11 @@ async fn supervise(
         // Before the summarizer: the daemon may kill this sweep at its timeout,
         // and the claim above means no later sweep would record the exit.
         let link = record_on_task(db, &row, Event::Exited);
+        // Sessions started for one that ended on its own stop with it too.
+        let stopped = hq_tools::harness_session::stop_children(&db_arc, &row.id);
+        if !stopped.is_empty() {
+            tracing::info!(session = %row.id, ?stopped, "session-supervisor: stopped the children of an exited session");
+        }
         // A delegated session tells whoever delegated it.
         let last_output = final_output(&db_arc, &row.id).unwrap_or_default();
         if let Err(e) = hq_tools::a2a::report_to_parent(db, &row, "exited", &last_output) {

@@ -1,8 +1,10 @@
 //! The far end of a remote connection. HQ reaches a host on another machine
 //! over ssh, and the key it presents is pinned to one command, `hq host gate`.
 //! That command reads one request from stdin, checks the method against an
-//! allowlist, forwards it to the host's local socket and prints the reply, so
-//! the key reaches the host API and nothing else on the machine.
+//! allowlist, forwards it to the host's local socket and prints the reply. The
+//! key can therefore do nothing but call the host API. That API can start any
+//! command (`agent.spawn`), so the key is as powerful as a shell as the user who
+//! runs the host: pin it to one source address and treat it like an ssh login.
 
 use crate::client::{Client, ClientError};
 use serde_json::{Value, json};

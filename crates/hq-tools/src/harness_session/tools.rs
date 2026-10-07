@@ -91,6 +91,7 @@ impl HqTool for HarnessSessionSpawnTool {
                 label: &label,
                 mission_id: Some(task_id.as_str()).filter(|t| !t.is_empty()),
                 watch: self.chat.as_ref().map(|c| c.new_watch(&args)),
+                parent: None,
                 goal: super::GoalText {
                     goal: Some(goal.as_str()).filter(|g| !g.is_empty()),
                     done_criteria: Some(done.as_str()).filter(|d| !d.is_empty()),
@@ -178,7 +179,13 @@ impl HqTool for HarnessSessionStatusTool {
     async fn execute(&self, args: Value) -> Result<Value> {
         let db = self.db.clone();
         let id = arg_str(&args, "session_id");
-        tokio::task::spawn_blocking(move || super::status(&db, &id)).await?
+        let caller = super::caller_session(&args).map(str::to_string);
+        tokio::task::spawn_blocking(move || {
+            // A launched agent may look at itself, its parent and its children.
+            db.with_conn(|c| crate::a2a::check_session_access(c, caller.as_deref(), &id))?;
+            super::status(&db, &id)
+        })
+        .await?
     }
 }
 

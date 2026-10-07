@@ -51,14 +51,27 @@ delegator receives it the next time it is idle. A parent and a session it starte
 may message each other even though they work on different tasks, on the child's
 task thread.
 
-The worker runs as `claude-code` or as the delegator's own agent kind, never as a
-configured account profile the delegator is not already using (that would spend
-another account's credit). Delegations are taken one at a time, so two calls
+The worker always runs as the delegator's own agent, so it can never spend a
+different account's credit than the one the delegator is on. Delegations are taken one at a time, so two calls
 cannot both pass the limits before either worker exists.
 
 Limits: the chain is at most 2 levels deep, a session may have 3 children running
 at once, and may start 10 in an hour. Stopping a session stops the sessions
 started for it, and theirs.
+
+## What is checked, and what is cleaned
+
+A body, a title and a description are stripped of control characters and terminal
+escape sequences before they are stored or typed anywhere, and the host removes
+bracketed-paste markers from anything it pastes, so text cannot end a paste early
+and type keystrokes into the recipient. The frame around a message carries a
+random marker the sender never sees, so a body cannot close the frame and make
+what follows look like the user's own words. A message nobody took within a day
+is not delivered.
+
+The session-token tools only reach the session's own task, that task's parent and
+sub-tasks, and the tasks of its parent and children, and `harness_session_status`
+only itself, its parent and its children.
 
 ## Limits and risks
 
