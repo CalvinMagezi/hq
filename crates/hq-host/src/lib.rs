@@ -5,6 +5,7 @@
 
 mod client;
 mod detect;
+mod egress;
 mod emu;
 mod env;
 mod error;
@@ -22,6 +23,7 @@ mod token;
 
 pub use client::{Client, ClientError};
 pub use detect::{AgentState, Detection, Detector, ENGINE_VERSION, Input as DetectInput};
+pub use egress::{Decision, Egress, Rule, Verdict, decide as decide_egress, is_private};
 pub use emu::{Emulator, Row, VtEmulator};
 pub use env::pane_env;
 pub use error::HostError;
