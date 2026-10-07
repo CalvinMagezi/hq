@@ -40,7 +40,20 @@ impl BackendHealth {
 
 /// Keyed by endpoint, so two SearxNG instances (or a test server) never share a cooldown.
 pub(super) static HEALTH: std::sync::LazyLock<Mutex<HashMap<String, BackendHealth>>> =
-    std::sync::LazyLock::new(|| Mutex::new(HashMap::new()));
+    std::sync::LazyLock::new(|| {
+        // A restart right after a block must not walk straight back into it.
+        let resumed = super::state::load_health()
+            .into_iter()
+            .map(|(key, failures, left)| {
+                let health = BackendHealth {
+                    unreachable_until: Some(Instant::now() + left),
+                    consecutive_failures: failures,
+                };
+                (key, health)
+            })
+            .collect();
+        Mutex::new(resumed)
+    });
 
 pub(super) fn with_health<T>(key: &str, f: impl FnOnce(&mut BackendHealth) -> T) -> Option<T> {
     let mut map = HEALTH.lock().ok()?;
@@ -471,6 +484,7 @@ where
         Ok(Ok(json)) => match parse(&json) {
             Ok(page) => {
                 with_health(backend.key, BackendHealth::record_success);
+                super::state::save_health(backend.key, 0, None);
                 note(format!("ok, {} results", page.results.len()));
                 return Some(page);
             }
@@ -478,7 +492,14 @@ where
         },
     };
     let (base, cap) = (backend.backoff)(failure.class);
-    with_health(backend.key, |h| h.record_failure(base, cap));
+    let suspension = with_health(backend.key, |h| {
+        h.record_failure(base, cap);
+        let left = h.unreachable_until.map(|t| t.saturating_duration_since(Instant::now()));
+        (h.consecutive_failures, left)
+    });
+    if let Some((failures, left)) = suspension {
+        super::state::save_health(backend.key, failures, left);
+    }
     debug!(backend = backend.label, reason = %failure.reason, "web search backend failed");
     note(failure.reason);
     None

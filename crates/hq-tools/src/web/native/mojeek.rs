@@ -7,6 +7,7 @@
 use super::super::*;
 use super::engines::{BROWSER_USER_AGENT, accept_language, element_text, result};
 use super::markup::sel;
+use super::super::state;
 use ring::pbkdf2;
 use std::num::NonZeroU32;
 
@@ -25,19 +26,43 @@ const COOKIE_NAME: &str = "chllg";
 static COOKIES: std::sync::LazyLock<Mutex<HashMap<String, String>>> =
     std::sync::LazyLock::new(|| Mutex::new(HashMap::new()));
 
-fn cached_cookie(base: &str) -> Option<String> {
-    COOKIES.lock().ok()?.get(base).cloned()
+/// The cookie lasts about a month; renew a little before that.
+const COOKIE_TTL: Duration = Duration::from_secs(25 * 24 * 3600);
+
+fn cookie_row(base: &str) -> String {
+    format!("mojeek-cookie:{base}")
 }
 
-fn store_cookie(base: &str, cookie: String) {
+fn cached_cookie(base: &str) -> Option<String> {
+    if let Some(cookie) = COOKIES.lock().ok()?.get(base).cloned() {
+        return Some(cookie);
+    }
+    let stored = state::is_persistable(base)
+        .then(|| state::production()?.get(&cookie_row(base)))
+        .flatten()?;
+    store_in_memory(base, stored.clone());
+    Some(stored)
+}
+
+fn store_in_memory(base: &str, cookie: String) {
     if let Ok(mut c) = COOKIES.lock() {
         c.insert(base.to_string(), cookie);
     }
 }
 
+fn store_cookie(base: &str, cookie: String) {
+    if let (true, Some(store)) = (state::is_persistable(base), state::production()) {
+        store.put(&cookie_row(base), &cookie, COOKIE_TTL);
+    }
+    store_in_memory(base, cookie);
+}
+
 pub(super) fn forget_cookie(base: &str) {
     if let Ok(mut c) = COOKIES.lock() {
         c.remove(base);
+    }
+    if let (true, Some(store)) = (state::is_persistable(base), state::production()) {
+        store.remove(&cookie_row(base));
     }
 }
 
