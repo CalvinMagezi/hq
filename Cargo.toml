@@ -82,13 +82,14 @@ tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
 figment = { version = "0.10", features = ["yaml", "env", "toml"] }
 
 # HTTP client
-reqwest = { version = "0.12", features = ["json", "stream", "multipart"] }
+reqwest = { version = "0.12", features = ["json", "stream", "multipart", "gzip"] }
 
 # Document conversion (inbound: transmutation, outbound: pandoc)
 hq-convert = { path = "crates/hq-convert" }
 
 # HTML processing
 html2text = "0.14"
+scraper = "0.27"
 
 # Utilities
 uuid = { version = "1", features = ["v4", "serde"] }
@@ -146,6 +147,10 @@ lto = "thin"
 codegen-units = 1
 strip = true
 panic = "abort"
+
+# Debug builds run the Mojeek proof of work (thousands of PBKDF2 tries) too slowly otherwise.
+[profile.dev.package.ring]
+opt-level = 3
 
 [profile.release-small]
 inherits = "release"

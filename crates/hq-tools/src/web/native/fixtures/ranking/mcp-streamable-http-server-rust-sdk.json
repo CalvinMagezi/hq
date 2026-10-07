@@ -1,0 +1,133 @@
+{
+  "query": "mcp streamable http server rust sdk",
+  "category": null,
+  "engines": [
+    {
+      "engine": "google cse",
+      "weight": 1.0,
+      "results": [
+        {
+          "title": "The official Rust SDK for the Model Context Protocol - GitHub",
+          "url": "https://github.com/modelcontextprotocol/rust-sdk",
+          "snippet": "Protocol 2026-07-28 standardizes a set of Streamable HTTP request headers (SEP-2243) so proxies and gateways can route MCP traffic without parsing the JSON body ...",
+          "published": null
+        },
+        {
+          "title": "Implementing a Streamable HTTP MCP Server and Client in Rust ...",
+          "url": "https://medium.com/@pal.mohit.singh/implementing-a-streamable-http-mcp-server-and-client-in-rust-with-c-ffi-cdf6033cdda7",
+          "snippet": "14 Nov 2025 ... rmcp: Implements the Model Context Protocol (MCP), including macros and server-side support for streamable HTTP transport. \u00b7 axum: A web ...",
+          "published": null
+        },
+        {
+          "title": "rust-mcp-sdk - crates.io: Rust Package Registry",
+          "url": "https://crates.io/crates/rust-mcp-sdk",
+          "snippet": "27 Aug 2026 ... Creating a Streamable HTTP MCP server in rust-mcp-sdk allows multiple clients to connect simultaneously with no additional setup. The setup is ...",
+          "published": null
+        },
+        {
+          "title": "How to Build a Streamable HTTP MCP Server in Rust - Shuttle.dev",
+          "url": "https://www.shuttle.dev/blog/2025/10/29/stream-http-mcp",
+          "snippet": "28 Oct 2025 ... Learn how to build and deploy a task manager MCP server using streamable HTTP transport in Rust. This guide covers the MCP protocol, ...",
+          "published": null
+        },
+        {
+          "title": "Build an MCP server in Rust with rmcp: a walk-through",
+          "url": "https://dev.to/gde/build-an-mcp-server-in-rust-with-rmcp-a-walk-through-4cif",
+          "snippet": "16 Aug 2026 ... Step-by-step: scaffolding a real MCP server in Rust with the official rmcp SDK \u2014 tools, JSON schemas, AWS calls, stdio transport, ...",
+          "published": null
+        },
+        {
+          "title": "rmcp - Rust - Docs.rs",
+          "url": "https://docs.rs/rmcp",
+          "snippet": "The official Rust SDK for the Model Context Protocol. Build MCP servers that expose tools, resources, and prompts to AI assistants \u2014 or build clients that ...",
+          "published": null
+        },
+        {
+          "title": "Prism MCP Rust SDK v0.1.0 - Production-Grade Model Context ...",
+          "url": "https://users.rust-lang.org/t/prism-mcp-rust-sdk-v0-1-0-production-grade-model-context-protocol-implementation/133318",
+          "snippet": "22 Aug 2025 ... Streaming HTTP/2: Full multiplexing, server push, and flow control support \u00b7 Adaptive Compression: Dynamic selection of Gzip, Brotli, or Zstd ...",
+          "published": null
+        },
+        {
+          "title": "Introducing rmcp, maybe the best Rust MCP SDK implementation by ...",
+          "url": "https://www.reddit.com/r/rust/comments/1jglry7/introducing_rmcp_maybe_the_best_rust_mcp_sdk/",
+          "snippet": "21 Mar 2025 ... Hey there, congrats on also upstreaming it as the new official Rust sdk. It's put together nicely! Not exposing all the generics like the ...",
+          "published": null
+        },
+        {
+          "title": "GitHub - paiml/rust-mcp-sdk: Pragmatic AI Labs MCP SDK",
+          "url": "https://github.com/paiml/rust-mcp-sdk",
+          "snippet": "16 Aug 2026 ... Path 1: Config-Only Servers \u2014 No Rust Required (SQL & OpenAPI) ... New in v2.9 \u2014 this removes the biggest blocker to putting organizational ...",
+          "published": null
+        },
+        {
+          "title": "Building MCP Servers in Rust: Model Context Protocol Guide for 2026",
+          "url": "https://rustify.rs/articles/rust-for-mcp-model-context-protocol-servers-2026",
+          "snippet": "A production Rust MCP server has five distinct layers: typed input/output schemas, a validated tool registration pattern, a chosen transport (stdio or HTTP+SSE) ...",
+          "published": null
+        },
+        {
+          "title": "Build an MCP Server in Rust with the Official SDK - scriptable.com",
+          "url": "https://scriptable.com/posts/rust/mcp-server-rust/",
+          "snippet": "It builds the same kind of server \u2014 two tools and a resource \u2014 with the official Rust SDK ( rmcp ), served over the stdio transport so a local client launches ...",
+          "published": null
+        },
+        {
+          "title": "MCP's Streamable HTTP Handshake: The Notification You Can't Skip",
+          "url": "https://mcsoftsolution.com/blog/mcp-streamable-http-handshake",
+          "snippet": "30 Apr 2026 ... If you're using one of the official MCP SDKs \u2014 mcp for Python, @modelcontextprotocol/sdk for TypeScript, rmcp for Rust \u2014 you'll never see this.",
+          "published": null
+        },
+        {
+          "title": "Overview - What is the Model Context Protocol (MCP)?",
+          "url": "https://modelcontextprotocol.io/specification/2026-07-28/basic/transports",
+          "snippet": "28 Jul 2026 ... Streamable HTTP: each message is an HTTP POST to a single MCP ... server, and server-sent responses and notifications to the client. No ...",
+          "published": null
+        },
+        {
+          "title": "rmcp_server_kit - Rust - Docs.rs",
+          "url": "https://docs.rs/rmcp-server-kit",
+          "snippet": "OWASP-grade defaults: HSTS, CSP, X-Frame-Options , MCP Origin validation, and per-hop SSRF guards on outbound HTTP. ... Streamable HTTP transport and server entry ...",
+          "published": null
+        },
+        {
+          "title": "Build an MCP Server in Rust with rmcp and Claude Code",
+          "url": "https://systemprompt.io/guides/build-mcp-server-rust",
+          "snippet": "3 Feb 2026 ... The rmcp crate is the MCP SDK itself. The server feature enables server-side functionality. The transport-io feature gives us stdio transport.",
+          "published": null
+        },
+        {
+          "title": "RUSTSEC-2026-0189: rmcp",
+          "url": "https://rustsec.org/advisories/RUSTSEC-2026-0189.html",
+          "snippet": "30 Jun 2026 ... RUSTSEC-2026-0189. DNS rebinding vulnerability in rmcp Streamable HTTP server transport. Reported: April 29, 2026; Issued: June ...",
+          "published": null
+        },
+        {
+          "title": "Building MCP Server : SDK vs n8n, which one to choose? - Medium",
+          "url": "https://medium.com/@destiya.dian/building-mcp-server-sdk-vs-n8n-which-one-to-choose-af29f08e221c",
+          "snippet": "9 Jun 2025 ... Rust SDK is not listed in their documentation at the time of this ... Meanwhile the Streamable HTTP will expose HTTP POST and HTTP GET ...",
+          "published": null
+        },
+        {
+          "title": "An Empirical Study of Model Context Protocol Applications - arXiv",
+          "url": "https://arxiv.org/html/2607.25635v2",
+          "snippet": "29 Jul 2026 ... MCP also standardizes the transport mechanisms (Stdio and Streamable HTTP) utilized. ... MCPApp, MCP Server, SDK, and Documentation. There were ...",
+          "published": null
+        },
+        {
+          "title": "Bringing streamable HTTP transport and Python language support ...",
+          "url": "https://blog.cloudflare.com/streamable-http-mcp-servers-python/",
+          "snippet": "30 Apr 2025 ... Streamable HTTP Transport: The Agents SDK now supports the new Streamable HTTP transport, allowing you to future-proof your MCP server. \u00b7 Deploy ...",
+          "published": null
+        },
+        {
+          "title": "Rust MCP Server Quickstart | Claude Code Skill",
+          "url": "https://mcpmarket.com/tools/skills/rust-mcp-server-quickstart",
+          "snippet": "Rust MCP Server Quickstart ... This skill transforms Claude into an expert guide for the rmcp crate, a powerful SDK for the Model Context Protocol in Rust.",
+          "published": null
+        }
+      ]
+    }
+  ],
+  "labels": {}
+}

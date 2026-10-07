@@ -3,7 +3,8 @@
 //!
 //! The SearxNG URL (`searxng_url`) is deliberately outside this guard. It is
 //! operator configuration, not model input, and is usually a loopback or LAN
-//! address. Nothing a model supplies may reach `get_client()`.
+//! address. Nothing a model supplies may reach `get_client()`. The built-in
+//! search engines use the guarded client (`NATIVE_CLIENT`) instead.
 //!
 //! A proxy set through `HTTP_PROXY`/`HTTPS_PROXY` resolves names itself, so
 //! with one in place the proxy's egress policy is the control, not this guard.

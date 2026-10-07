@@ -1,6 +1,8 @@
 #!/bin/bash
-# setup-searxng.sh — stand up the self-hosted SearxNG instance HQ's
-# web_search tool uses as its free, no-API-key primary backend.
+# setup-searxng.sh — stand up an optional self-hosted SearxNG instance for
+# HQ's web_search tool. web_search works without it (built-in engine pool);
+# set `searxng_url: http://127.0.0.1:8080` in ~/.hq/config.yaml to have it
+# tried first.
 #
 # Idempotent: safe to re-run. Leaves an existing container running rather
 # than recreating it, and won't regenerate settings.yml's secret key once
@@ -104,7 +106,7 @@ fi
 log "waiting for $BASE_URL to come up"
 for _ in $(seq 1 30); do
     if check_health; then
-        log "ready — HQ's web_search will use this instance by default (searxng_url: $BASE_URL)"
+        log "ready — set searxng_url: $BASE_URL in ~/.hq/config.yaml to have HQ's web_search try it first"
         exit 0
     fi
     sleep 1

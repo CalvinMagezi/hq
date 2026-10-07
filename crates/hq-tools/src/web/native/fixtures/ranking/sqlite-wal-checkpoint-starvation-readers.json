@@ -1,0 +1,154 @@
+{
+ "query": "sqlite wal checkpoint starvation readers",
+ "category": null,
+ "engines": [
+  {
+   "engine": "google cse",
+   "weight": 1.0,
+   "results": [
+    {
+     "title": "Write-Ahead Logging - SQLite.org",
+     "url": "https://www.sqlite.org/wal.html",
+     "snippet": "25 Aug 2026 ... By default, SQLite does a checkpoint automatically when the WAL file reaches a threshold size of 1000 pages. (The ...",
+     "published": null
+    },
+    {
+     "title": "Checkpoint Starvation: connections vs. transactions - SQLite",
+     "url": "https://sqlite.org/forum/info/7da967e0141c7a1466755f8659f7cb5e38ddbdb9aec8c78df5cb0fea22f75cf6",
+     "snippet": "4 Jul 2024 ... In my application's setup I ran into growing WAL files, and reading ... wal.html#avoiding_excessively_large_wal_files) checkpoint starvation ...",
+     "published": null
+    },
+    {
+     "title": "better-sqlite3/docs/performance.md at master - GitHub",
+     "url": "https://github.com/WiseLibs/better-sqlite3/blob/master/docs/performance.md",
+     "snippet": "Checkpoint starvation is when SQLite is unable to recycle the WAL file due to everlasting concurrent reads to the database. If this happens, the WAL file will ...",
+     "published": null
+    },
+    {
+     "title": "They use WAL in SQLite. If I continuously perform reads/writes so ...",
+     "url": "https://news.ycombinator.com/item?id=48954157",
+     "snippet": "SQLite waits for a time window without any active reads/writes before starting a WAL checkpoint. If there isn't one, the WAL will grow indefinitely, eating up ...",
+     "published": null
+    },
+    {
+     "title": "Abusing SQLite to Handle Concurrency : r/Database - Reddit",
+     "url": "https://www.reddit.com/r/Database/comments/1j3gbyp/abusing_sqlite_to_handle_concurrency/",
+     "snippet": "4 Mar 2025 ... SQLite uses database-level locks that can counter-intuitively starve unlucky processes. If you must, use WAL mode and a high lock timeout value.",
+     "published": null
+    },
+    {
+     "title": "How Databases Checkpoint to Disk Without Stopping the World",
+     "url": "https://gauravsarma1992.medium.com/how-databases-checkpoint-to-disk-without-stopping-the-world-22723b4438f4",
+     "snippet": "16 Mar 2026 ... This means readers never block writers and writers never block readers, which is the headline feature of WAL mode. ... // Simplified: SQLite WAL ...",
+     "published": null
+    },
+    {
+     "title": "SQLite concurrent writes and \"database is locked\" errors",
+     "url": "https://tenthousandmeters.com/blog/sqlite-concurrent-writes-and-database-is-locked-errors/",
+     "snippet": "1 Feb 2025 ... This problem is known as checkpoint starvation. It has multiple solutions including manual checkpointing. You can learn more about it and other ...",
+     "published": null
+    },
+    {
+     "title": "Syncthing on SQLite -- help test! - Page 8",
+     "url": "https://forum.syncthing.net/t/syncthing-on-sqlite-help-test/23981?page=8",
+     "snippet": "13 Mar 2025 ... It's not just a reader. If there is a write after checkpoint started, it can't be finished, as it doesn't know how to roll a new WAL file.",
+     "published": null
+    },
+    {
+     "title": "sqlite3 unknown database schema when using a checkpoint?",
+     "url": "https://stackoverflow.com/questions/58655597/sqlite3-unknown-database-schema-when-using-a-checkpoint",
+     "snippet": "1 Nov 2019 ... In its default configuration, SQLite will checkpoint the WAL file at ... I think this is where the problem would be: Checkpoint starvation.",
+     "published": null
+    },
+    {
+     "title": "I want to warn that one huge issue with SQLite in WAL mode is that if ...",
+     "url": "https://news.ycombinator.com/item?id=40688987",
+     "snippet": "In fact, a single open read transaction already can trigger checkpoint starvation. Also, it's not only about HTTP requests, my application is event-driven so a ...",
+     "published": null
+    },
+    {
+     "title": "mediaanalysisd, photoanalysisd and photolibraryd | Page 2",
+     "url": "https://forums.macrumors.com/threads/mediaanalysisd-photoanalysisd-and-photolibraryd.2445597/page-2",
+     "snippet": "16 Dec 2024 ... Checkpoint starvation. A checkpoint is only able to run to completion, and reset the WAL file, if there are no other database connections using ...",
+     "published": null
+    },
+    {
+     "title": "How SQLite WAL Mode Actually Works: The 3 Files, Shared Memory ...",
+     "url": "https://dev.to/syed_anzar/how-sqlite-wal-mode-actually-works-the-3-files-shared-memory-and-lock-free-reads-1j2l",
+     "snippet": "19 hours ago ... Under the legacy rollback journal mode, writing a single row acquires an exclusive lock on the database file, blocking every concurrent reader ...",
+     "published": null
+    },
+    {
+     "title": "How to Open WAL Files (SQLite Write-Ahead Log) - YouTube",
+     "url": "https://www.youtube.com/watch?v=hcHxpsftiko",
+     "snippet": "5 Jul 2026 ... This design avoids writer starvation and enhances performance in applications with many concurrent readers and writers. ▷ Action Plan ...",
+     "published": null
+    },
+    {
+     "title": "WAL files for SQLite DBs are not shrinking automatically #6114",
+     "url": "https://github.com/matrix-org/matrix-rust-sdk/issues/6114",
+     "snippet": "4 Feb 2026 ... The checkpoint will do as much work as it can without upsetting the reader, but it cannot run to completion. The checkpoint will start up again ...",
+     "published": null
+    },
+    {
+     "title": "ekv - Hex.pm",
+     "url": "https://hex.pm/packages/ekv",
+     "snippet": "24 Sept 2026 ... ... checkpoint starvation when a reader prevents progress beyond the limit. ... Each shard has a single SQLite database (WAL mode) as its sole ...",
+     "published": null
+    },
+    {
+     "title": "Native Python modules using SQLite - apple1417.dev",
+     "url": "https://apple1417.dev/posts/2024-02-24-native-python-sqlite",
+     "snippet": "Another problem with my setup was Checkpoint starvation. Checkpoints cannot run while a reader is open, and I always have a connection open in the native ...",
+     "published": null
+    },
+    {
+     "title": "Prevent SSD Wear with Codex Log Management - LinkedIn",
+     "url": "https://www.linkedin.com/posts/shanhuangusa_codex-was-silently-writing-detailed-trace-activity-7475932919669346304-qOwc",
+     "snippet": "25 Jun 2026 ... ... checkpoint/truncate, - sample again to confirm the row ID and WAL ... The SQLite/WAL angle is the kind of quiet local issue that gets ...",
+     "published": null
+    },
+    {
+     "title": "Lobste.rs is now running on SQLite - Hacker News",
+     "url": "https://news.ycombinator.com/item?id=48899847",
+     "snippet": "19 Jul 2026 ... SQLite waits for a time window without any active reads/writes before starting a WAL checkpoint. If there isn't one, the WAL will grow ...",
+     "published": null
+    },
+    {
+     "title": "Environment Variable Configuration - Open WebUI Docs",
+     "url": "https://docs.openwebui.com/reference/env-configuration/",
+     "snippet": "When enabled, SQLite transactions can be managed more efficiently, allowing multiple readers ... Caps the WAL file size after checkpoint. Without this, the WAL ...",
+     "published": null
+    },
+    {
+     "title": "SQLite Interview Questions and Answers - GoodSpace AI",
+     "url": "https://goodspace.ai/interview-questions/sqlite",
+     "snippet": "... SQLite incidents. Second, the WAL only shrinks at a checkpoint, and a checkpoint cannot pass any reader still holding an older snapshot, so a single long ...",
+     "published": null
+    }
+   ]
+  }
+ ],
+ "labels": {
+  "https://www.sqlite.org/wal.html": 2,
+  "https://sqlite.org/forum/info/7da967e0141c7a1466755f8659f7cb5e38ddbdb9aec8c78df5cb0fea22f75cf6": 2,
+  "https://github.com/WiseLibs/better-sqlite3/blob/master/docs/performance.md": 2,
+  "https://news.ycombinator.com/item?id=48954157": 1,
+  "https://www.reddit.com/r/Database/comments/1j3gbyp/abusing_sqlite_to_handle_concurrency/": 1,
+  "https://gauravsarma1992.medium.com/how-databases-checkpoint-to-disk-without-stopping-the-world-22723b4438f4": 1,
+  "https://tenthousandmeters.com/blog/sqlite-concurrent-writes-and-database-is-locked-errors/": 2,
+  "https://forum.syncthing.net/t/syncthing-on-sqlite-help-test/23981?page=8": 1,
+  "https://stackoverflow.com/questions/58655597/sqlite3-unknown-database-schema-when-using-a-checkpoint": 1,
+  "https://news.ycombinator.com/item?id=40688987": 2,
+  "https://forums.macrumors.com/threads/mediaanalysisd-photoanalysisd-and-photolibraryd.2445597/page-2": 0,
+  "https://dev.to/syed_anzar/how-sqlite-wal-mode-actually-works-the-3-files-shared-memory-and-lock-free-reads-1j2l": 1,
+  "https://www.youtube.com/watch?v=hcHxpsftiko": 0,
+  "https://github.com/matrix-org/matrix-rust-sdk/issues/6114": 1,
+  "https://hex.pm/packages/ekv": 1,
+  "https://apple1417.dev/posts/2024-02-24-native-python-sqlite": 1,
+  "https://www.linkedin.com/posts/shanhuangusa_codex-was-silently-writing-detailed-trace-activity-7475932919669346304-qOwc": 0,
+  "https://news.ycombinator.com/item?id=48899847": 1,
+  "https://docs.openwebui.com/reference/env-configuration/": 0,
+  "https://goodspace.ai/interview-questions/sqlite": 0
+ }
+}

@@ -80,13 +80,14 @@ pub fn create_default_registry(
     tools.extend(agent_comm::create_agent_comm_tools(vault_path.clone()));
     tools.extend(ask::create_ask_tools(db.clone(), None));
 
-    // web_search tries SearxNG first (no API key) and falls back to Brave.
-    let (searxng_url, brave_api_key) = config
-        .map(|c| (c.searxng_url.clone(), c.brave_api_key.clone()))
-        .unwrap_or((None, None));
+    // web_search: SearxNG when configured, then the built-in keyless engines, then Brave.
+    let (searxng_url, brave_api_key, native) = config
+        .map(|c| (c.searxng_url.clone(), c.brave_api_key.clone(), c.web_search_native))
+        .unwrap_or((None, None, true));
     tools.push(Box::new(web::WebSearchHqTool::new(
         searxng_url,
         brave_api_key,
+        native,
     )));
     tools.push(Box::new(web::WebFetchHqTool));
 

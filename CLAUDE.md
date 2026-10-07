@@ -127,7 +127,7 @@ cargo fmt
 hq mcp doctor                     # verify MCP connection health
 hq skills validate                # reject skills that can never fire (also in hq doctor)
 ./scripts/cargo-gc.sh             # clean debug artifacts if over 20 GB
-./scripts/setup-searxng.sh        # optional: local SearxNG container that web_search uses as its free primary backend
+./scripts/setup-searxng.sh        # optional: local SearxNG container, tried before the built-in engine pool (set searxng_url)
 ```
 
 ### Installing a new build

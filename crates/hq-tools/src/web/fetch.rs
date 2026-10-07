@@ -10,6 +10,8 @@ pub(super) const SPA_TEXT_TO_HTML_RATIO: f64 = 0.03;
 pub(super) const SPA_MIN_HTML_BYTES_FOR_RATIO_CHECK: usize = 500;
 
 pub(super) const METHOD_HTML: &str = "html-to-text";
+pub(super) const METHOD_ARTICLE: &str = "article-extract";
+pub(super) const METHOD_EMBEDDED: &str = "embedded-data";
 pub(super) const METHOD_TEXT: &str = "plain-text";
 pub(super) const METHOD_PDF_TEXT: &str = "pdf-text-layer";
 pub(super) const METHOD_PDF_OCR: &str = "pdf-ocr";
@@ -24,7 +26,8 @@ pub struct FetchedPage {
     /// Where the content actually came from after redirects.
     pub final_url: String,
     pub content_type: String,
-    /// `html-to-text`, `plain-text`, `pdf-text-layer`, `pdf-ocr` or `jina-reader`.
+    /// `article-extract`, `html-to-text`, `embedded-data`, `plain-text`, `pdf-text-layer`,
+    /// `pdf-ocr` or `jina-reader`.
     pub method: &'static str,
     pub content: String,
     pub total_chars: usize,
@@ -92,6 +95,30 @@ pub(super) fn looks_like_empty_spa_shell(extracted_text: &str, raw_html_len: usi
         }
     }
     false
+}
+
+/// Parsing hostile markup (tens of thousands of nested elements) is slow, so
+/// extraction runs off the async workers and is abandoned past this.
+const EXTRACT_TIMEOUT: Duration = Duration::from_secs(3);
+
+async fn off_thread<T: Send + 'static>(
+    work: impl FnOnce() -> Option<T> + Send + 'static,
+) -> Option<T> {
+    tokio::time::timeout(EXTRACT_TIMEOUT, tokio::task::spawn_blocking(work))
+        .await
+        .ok()?
+        .ok()?
+}
+
+/// Environment switch for the third-party Jina Reader fallback: `0` turns it off.
+pub(super) const JINA_ENV: &str = "HQ_WEB_FETCH_JINA";
+
+/// A privacy opt-out, so any plausible "off" spelling disables it.
+pub(super) fn jina_base_from_env() -> &'static str {
+    let off = std::env::var(JINA_ENV).is_ok_and(|v| {
+        matches!(v.trim().to_lowercase().as_str(), "" | "0" | "false" | "off" | "no")
+    });
+    if off { "" } else { JINA_READER_BASE }
 }
 
 /// Render a URL through Jina Reader, which executes JS server-side and
@@ -209,7 +236,7 @@ pub async fn web_fetch(url: &str, max_chars: usize) -> Result<FetchedPage> {
     let fetcher = Fetcher {
         client: &FETCH_CLIENT,
         timeout: FETCH_TIMEOUT,
-        jina_base: JINA_READER_BASE,
+        jina_base: jina_base_from_env(),
     };
     let page = fetcher.fetch(&url).await?;
     cache_put(&url, &page);
@@ -221,6 +248,7 @@ pub(super) struct Fetcher<'a> {
     pub(super) client: &'a Client,
     /// Must match the timeout `client` was built with; only used in error text.
     pub(super) timeout: Duration,
+    /// Empty disables the Jina fallback.
     pub(super) jina_base: &'a str,
 }
 
@@ -272,6 +300,9 @@ impl Fetcher<'_> {
         let (text, method) = self
             .extract(url, &final_url, &content_type, &bytes, &mut notes)
             .await?;
+        // Hidden characters in page text are a known way to smuggle instructions
+        // past a human reader; the visible text is unchanged.
+        let text = strip_invisible(&text);
         if text.trim().is_empty() {
             notes.push("extraction produced no text".into());
         }
@@ -316,10 +347,10 @@ impl Fetcher<'_> {
         }
     }
 
-    /// JS-heavy SPAs often render a near-empty shell server-side, since this
-    /// is a plain GET with no JS execution. Retry through Jina Reader when the
-    /// text looks like that shell; keep the original extraction if Jina also
-    /// comes up empty.
+    /// Main-content extraction first. A page that comes back as an empty
+    /// client-rendered shell is recovered from its embedded JSON-LD or
+    /// framework data, then through Jina Reader if enabled; the original
+    /// extraction is kept if neither has anything.
     async fn extract_html(
         &self,
         url: &str,
@@ -327,8 +358,23 @@ impl Fetcher<'_> {
         bytes: &[u8],
         notes: &mut Vec<String>,
     ) -> (String, &'static str) {
-        let text = html_to_text(&String::from_utf8_lossy(bytes), HTML_TEXT_WIDTH);
+        let html: std::sync::Arc<str> = String::from_utf8_lossy(bytes).into_owned().into();
+        let text = html_to_text(&html, HTML_TEXT_WIDTH);
         if !looks_like_empty_spa_shell(&text, bytes.len()) {
+            let (page, base, plain_len) = (html.clone(), final_url.to_string(), text.len());
+            let article = off_thread(move || extract_article(&page, &base, plain_len)).await;
+            return match article {
+                Some(article) => (article.render(), METHOD_ARTICLE),
+                None => (text, METHOD_HTML),
+            };
+        }
+        let page = html.clone();
+        if let Some(embedded) = off_thread(move || embedded_text(&page)).await {
+            notes.push("page is client-rendered; text recovered from the data embedded in its HTML, so it may be a summary rather than the full page".into());
+            return (embedded, METHOD_EMBEDDED);
+        }
+        if self.jina_base.is_empty() {
+            notes.push("page looks client-rendered and the Jina Reader fallback is disabled; text may be incomplete".into());
             return (text, METHOD_HTML);
         }
         debug!(url = %url, "web_fetch looks like an empty SPA shell, trying Jina Reader");

@@ -321,3 +321,84 @@ async fn a_configured_proxy_is_not_used_unless_opted_in() {
     let proxied = build(true).get(&url).send().await.unwrap().text().await.unwrap();
     assert_eq!(proxied, "via proxy", "the opt-in does route through the proxy");
 }
+
+const ARTICLE_HTML: &str = r#"<html><head><title>Post</title></head><body>
+<nav><a href="/x">Navigation link text</a></nav>
+<article><h1>A real post</h1>
+<p>This post has enough ordinary prose in it to pass the minimum size that makes the extractor trust the article it found on the page.</p>
+<p>A second paragraph keeps going so the content is clearly the point of the page and not the surrounding chrome of the site.</p>
+</article><footer>Footer legal text</footer></body></html>"#;
+
+const LD_JSON_SHELL: &str = r#"<html><head><script type="application/ld+json">{"@type":"Article","headline":"Hidden headline","articleBody":"The full text of this article is only present in the structured data of the page, which is how many client rendered sites still serve search engines, and it is long enough to count. A second sentence adds more detail about the topic so that the whole text is comfortably above the trust threshold."}</script></head><body><div id="root"></div></body></html>"#;
+
+#[tokio::test]
+async fn an_article_page_is_extracted_without_its_chrome() {
+    let server = MockServer::start().await;
+    mount(&server, "/post", ResponseTemplate::new(200).set_body_raw(ARTICLE_HTML, HTML)).await;
+
+    let page = fetch(&server, "/post").await.unwrap();
+
+    assert_eq!(page.method, METHOD_ARTICLE);
+    assert!(page.content.contains("ordinary prose"), "{}", page.content);
+    assert!(!page.content.contains("Navigation link text"), "{}", page.content);
+    assert!(!page.content.contains("Footer legal text"), "{}", page.content);
+}
+
+#[tokio::test]
+async fn a_shell_with_embedded_data_is_recovered_without_calling_jina() {
+    let server = MockServer::start().await;
+    mount(&server, "/app", ResponseTemplate::new(200).set_body_raw(LD_JSON_SHELL, HTML)).await;
+    Mock::given(method("GET"))
+        .and(path_regex("^/jina/"))
+        .respond_with(ResponseTemplate::new(200).set_body_string("should not be used"))
+        .expect(0)
+        .mount(&server)
+        .await;
+
+    let page = fetch(&server, "/app").await.unwrap();
+
+    assert_eq!(page.method, METHOD_EMBEDDED);
+    assert!(page.content.contains("only present in the structured data"), "{}", page.content);
+    assert!(page.notes.iter().any(|n| n.contains("embedded in its HTML")), "{:?}", page.notes);
+}
+
+#[tokio::test]
+async fn a_shell_stays_unrendered_and_says_so_when_jina_is_disabled() {
+    let server = MockServer::start().await;
+    mount(&server, "/app", ResponseTemplate::new(200).set_body_raw(SPA_SHELL, HTML)).await;
+    let client = test_client(&server);
+    let fetcher = Fetcher { client: &client, timeout: TEST_TIMEOUT, jina_base: "" };
+
+    let page = fetcher.fetch(&format!("{}/app", server.uri())).await.unwrap();
+
+    assert_eq!(page.method, METHOD_HTML);
+    assert!(page.notes.iter().any(|n| n.contains("fallback is disabled")), "{:?}", page.notes);
+    assert_eq!(server.received_requests().await.unwrap().len(), 1, "nothing but the page was requested");
+}
+
+#[tokio::test]
+async fn a_large_bundle_page_with_a_little_server_copy_still_goes_to_recovery() {
+    let server = MockServer::start().await;
+    let filler = "<script>var a=1;</script>".repeat(4_000);
+    let html = format!(
+        "<html><head><script type=\"application/ld+json\">{{\"articleBody\":\"{}\"}}</script></head><body><p>A short intro line that is real copy but not the article itself, plus a cookie notice.</p>{filler}</body></html>",
+        "The full article only exists in the embedded data, written long enough to be trusted as content. ".repeat(3)
+    );
+    mount(&server, "/big", ResponseTemplate::new(200).set_body_raw(html, HTML)).await;
+
+    let page = fetch(&server, "/big").await.unwrap();
+
+    assert_eq!(page.method, METHOD_EMBEDDED, "{:?}", page.notes);
+}
+
+#[tokio::test]
+async fn invisible_characters_in_a_page_are_removed_from_the_fetched_text() {
+    let server = MockServer::start().await;
+    let html = "<html><body><p>Visible text \u{200B}here\u{202E}.\u{E0049}\u{E0047}</p></body></html>";
+    mount(&server, "/p", ResponseTemplate::new(200).set_body_raw(html, HTML)).await;
+
+    let page = fetch(&server, "/p").await.unwrap();
+
+    assert!(page.content.contains("Visible text here."), "{:?}", page.content);
+    assert!(!page.content.chars().any(|c| matches!(c, '\u{200B}' | '\u{202E}' | '\u{E0049}')), "{:?}", page.content);
+}

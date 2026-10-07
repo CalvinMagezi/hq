@@ -79,6 +79,47 @@ pub fn redact_secrets(text: &str) -> String {
         .into_owned()
 }
 
+/// Whether `text` contains something shaped like a real credential: a key with a
+/// known prefix, a private key block, a bot token, or an assignment whose value
+/// is long and mixes letters with digits. Narrower than [`redact_secrets`], which
+/// also rewrites `token: expired`-style prose; this one is for deciding whether
+/// to refuse sending text out, where a false positive blocks legitimate work.
+pub fn looks_like_credential(text: &str) -> bool {
+    const CREDENTIAL_MIN_LEN: usize = 16;
+    let credential_like = |value: &str| {
+        value.len() >= CREDENTIAL_MIN_LEN
+            && value.bytes().any(|b| b.is_ascii_digit())
+            && value.bytes().any(|b| b.is_ascii_alphabetic())
+    };
+    let prefixed = SECRET_PATTERNS
+        .iter()
+        .enumerate()
+        // Index 4 is the Bearer pattern, which also matches ordinary words after "bearer".
+        .filter(|(i, _)| *i != 4)
+        .any(|(_, p)| p.is_match(text));
+    if prefixed {
+        return true;
+    }
+    let bot_token = BOT_TOKEN_PATTERN.captures_iter(text).any(|c| {
+        let tokenish = |s: &str| {
+            s.bytes().any(|b| b.is_ascii_digit()) && s.bytes().any(|b| b.is_ascii_uppercase())
+        };
+        tokenish(&c[1]) && tokenish(&c[3])
+    });
+    bot_token
+        || SECRET_ASSIGNMENT
+            .captures_iter(text)
+            .any(|c| credential_like(&c[4]))
+        || BEARER_VALUE
+            .captures_iter(text)
+            .any(|c| credential_like(&c[1]))
+}
+
+/// The value after `Bearer`, for [`looks_like_credential`].
+static BEARER_VALUE: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(r"(?i)\bbearer\s+([A-Za-z0-9][A-Za-z0-9._~+/-]{19,}=*)").expect("static pattern must compile")
+});
+
 const PLACEHOLDER: &str = "[REDACTED]";
 const SECRET_KEY_SUFFIXES: [&str; 5] = ["api_key", "token", "secret", "password", "passphrase"];
 
@@ -253,6 +294,32 @@ mod tests {
         }
         for k in ["api_key_env", "credential_env", "secret_ref", "max_tokens", "model"] {
             assert!(!is_secret_key(k), "{k}");
+        }
+    }
+
+    #[test]
+    fn credential_shapes_are_detected_but_error_message_prose_is_not() {
+        for text in [
+            "sk-or-v1-0123456789abcdef0123456789abcdef", // gitleaks:allow
+            concat!("ghp_", "abcdefghijklmnopqrstuvwxyz0123456789"),
+            concat!("key AKIA", "ABCDEFGHIJKLMNOP leaked"),
+            "OPENAI_API_KEY=abcd1234efgh5678ijkl", // gitleaks:allow
+            "Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9", // gitleaks:allow
+            "-----BEGIN RSA PRIVATE KEY-----\nMIIB\n-----END RSA PRIVATE KEY-----", // gitleaks:allow
+        ] {
+            assert!(looks_like_credential(text), "{text}");
+        }
+        for text in [
+            "invalid token: signature has expired",
+            "password: incorrect",
+            "bearer authentication scheme explained",
+            "bearer /api/v1/users/me returns 401",
+            "AWS AKIA key rotation best practice",
+            "max_tokens: 4096 openai",
+            "sk-learn pipeline",
+            "API_KEY=changeme_placeholder", // gitleaks:allow
+        ] {
+            assert!(!looks_like_credential(text), "{text}");
         }
     }
 }

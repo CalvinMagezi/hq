@@ -101,6 +101,7 @@ pub(crate) fn settings_view(config: &HqConfig) -> Value {
         "integrations": {
             "remote_mcp": remote_mcp,
             "searxng_host": config.searxng_url.as_deref().map(host_of),
+            "web_search_native": config.web_search_native,
             "disk_watchdog_enabled": config.disk_watchdog.enabled,
         },
     })

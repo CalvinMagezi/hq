@@ -1,0 +1,154 @@
+{
+ "query": "telegram bot api long polling vs webhook",
+ "category": null,
+ "engines": [
+  {
+   "engine": "google cse",
+   "weight": 1.0,
+   "results": [
+    {
+     "title": "Long Polling vs. Webhooks - grammY",
+     "url": "https://grammy.dev/guide/deployment-types",
+     "snippet": "5 Jul 2026 ... The main advantage of webhooks over long polling is that they are cheaper. You save a ton of superfluous requests. You don't need to keep a ...",
+     "published": null
+    },
+    {
+     "title": "Long Polling vs Webhook — How Telegram Bots Receive Updates",
+     "url": "https://gramio.dev/updates/webhook",
+     "snippet": "9 Sept 2026 ... Telegram Bot API provides two ways for your bot to receive updates: long polling and webhook. Each approach has distinct trade-offs for ...",
+     "published": null
+    },
+    {
+     "title": "project-nashenas-telegram-bot/Long Polling vs. Webhook.md at main",
+     "url": "https://github.com/pytopia/project-nashenas-telegram-bot/blob/main/Long%20Polling%20vs.%20Webhook.md",
+     "snippet": "The main advantage of webhooks over long polling is that they are cheaper. You save a ton of superfluous requests. You don't need to keep a network connection ...",
+     "published": null
+    },
+    {
+     "title": "Long Polling vs. Webhooks: A Comparison - grasp.study",
+     "url": "https://paths.grasp.study/modules/2989b86f-e56c-4677-b75d-5042f0666827/lessons/f57f0bb3-7e68-4f23-8a4f-1b4366bb4dd0",
+     "snippet": "The alternative to polling is the webhook model. This approach inverts the responsibility for initiating communication. Instead of your bot asking for updates, ...",
+     "published": null
+    },
+    {
+     "title": "Choosing between polling and webhook methods for Telegram bot ...",
+     "url": "https://community.latenode.com/t/choosing-between-polling-and-webhook-methods-for-telegram-bot-development/23989",
+     "snippet": "20 Jun 2025 ... Webhooks are definitely a better choice over polling for a production environment. They offer a more efficient way of handling messages since ...",
+     "published": null
+    },
+    {
+     "title": "Difference Between Polling and Webhook in Telegram Bots - Hostman",
+     "url": "https://hostman.com/tutorials/difference-between-polling-and-webhook-in-telegram-bots/",
+     "snippet": "30 Jan 2025 ... Polling is a simple and quick way to develop, especially in the early stages, while Webhook offers more efficient message processing for ...",
+     "published": null
+    },
+    {
+     "title": "Webhooks vs Long Polling | Svix Resources",
+     "url": "https://www.svix.com/resources/faq/webhooks-vs-long-polling/",
+     "snippet": "19 Aug 2026 ... Webhooks and long polling are two different approaches for enabling real-time data transfer and communication between servers and clients or ...",
+     "published": null
+    },
+    {
+     "title": "Bots FAQ - Telegram APIs",
+     "url": "https://core.telegram.org/bots/faq",
+     "snippet": "There are currently two ways of getting updates. You can either use long polling or Webhooks. Please note that it's not possible to get updates via long polling ...",
+     "published": null
+    },
+    {
+     "title": "Polling or Webhooks? Don't Get This Wrong - YouTube",
+     "url": "https://www.youtube.com/watch?v=c1CqChgIuCY",
+     "snippet": "1 Apr 2026 ... Polling or Webhooks? Don't Get This Wrong Confused about the difference between Webhooks and Long Polling? In this video, we break down the ...",
+     "published": null
+    },
+    {
+     "title": "Telegram Bot API",
+     "url": "https://core.telegram.org/bots/api",
+     "snippet": "A user asked the bot to stop the generation of a message. getUpdates. Use this method to receive incoming updates using long polling (wiki). Returns an Array ...",
+     "published": null
+    },
+    {
+     "title": "Building a Scalable Telegram Bot with Node.js, BullMQ, and ...",
+     "url": "https://medium.com/@pushpesh0/building-a-scalable-telegram-bot-with-node-js-bullmq-and-webhooks-6b0070fcbdfc",
+     "snippet": "25 Jul 2025 ... ... telegram bot can be setup in two main approaches: long polling and webhooks. ... API abuse, and the bot could easily get blacklisted or throttled.",
+     "published": null
+    },
+    {
+     "title": "Choosing Between Polling and Webhook Methods - Telegram bot",
+     "url": "https://community.latenode.com/t/c-winforms-telegram-bot-choosing-between-polling-and-webhook-methods/27204",
+     "snippet": "9 Jul 2025 ... Here's what works: use long polling instead of hammering the API with constant requests. Set the timeout parameter in getUpdates to 30-60 ...",
+     "published": null
+    },
+    {
+     "title": "How to Set Up and Test Telegram Bot Webhook | Pinggy Blog",
+     "url": "https://pinggy.io/blog/how_to_set_up_and_test_telegram_bot_webhook/",
+     "snippet": "22 May 2025 ... Understanding Telegram Bot Webhooks · Long Polling – Your bot repeatedly asks Telegram's servers for new updates. · Webhooks – Telegram sends ...",
+     "published": null
+    },
+    {
+     "title": "Self-hosted Telegram bot polling: how v2026.5.12 stops dropped ...",
+     "url": "https://openclawai.io/blog/self-hosted-telegram-bot-polling-resilience-openclaw-2026-5-12",
+     "snippet": "16 May 2026 ... The Telegram Bot API offers two delivery modes: webhooks (Telegram pushes to your URL) and long polling (your bot calls getUpdates and the ...",
+     "published": null
+    },
+    {
+     "title": "Create a Telegram bot with webhooks - Mercur",
+     "url": "https://mercur.sh/blog/telegram-webhooks",
+     "snippet": "19 Aug 2026 ... Polling vs webhooks ... Telegram supports two ways to receive updates. Polling means your process keeps calling getUpdates . Webhooks mean ...",
+     "published": null
+    },
+    {
+     "title": "Running Your First Bot - grasp.study",
+     "url": "https://paths.grasp.study/modules/1646b22b-7fc0-4c25-9659-e18cc49fbc03/lessons/da3dee5a-e95d-450f-a788-8a3e081f7411",
+     "snippet": "Step 2: Understanding and Implementing Long Polling ... There are two primary ways a bot can receive updates from Telegram: long polling and webhooks. For ...",
+     "published": null
+    },
+    {
+     "title": "Implementing Telegram Bot in Python and Javascript with ...",
+     "url": "https://www.glukhov.org/app-architecture/integration-patterns/implementing-telegram-bot-python-javascript/",
+     "snippet": "Telegram supports two mutually exclusive ways to receive updates: getUpdates (polling) or webhooks; updates are kept for up to 24 hours. Option A: Python (with ...",
+     "published": null
+    },
+    {
+     "title": "API Polling vs Webhook for ML model serving : r/Backend - Reddit",
+     "url": "https://www.reddit.com/r/Backend/comments/1hins9t/api_polling_vs_webhook_for_ml_model_serving/",
+     "snippet": "20 Dec 2024 ... It's limiting for a client. Dealing with webhooks is a hassle - they'll need to set up a server that would receive incoming calls, worry about ...",
+     "published": null
+    },
+    {
+     "title": "Deploy a Telegram Bot Webhook with Node.js, TypeScript, grammY ...",
+     "url": "https://pas7.com.ua/blog/en/telegram-bot-webhook-nodejs-typescript-grammy",
+     "snippet": "8 Apr 2026 ... Check systemctl status telegram-bot-webhook before blaming Nginx or Telegram. ... grammY: Long polling vs. webhooks · grammY: Hosting on a VPS.",
+     "published": null
+    },
+    {
+     "title": "Telegram Webhook: A Developer's Guide to Local Testing - SES",
+     "url": "https://softwareengineeringstandard.com/2025/08/26/telegram-webhook/",
+     "snippet": "26 Aug 2025 ... While long polling is simpler to start with (your application repeatedly asks Telegram for updates), it's often inefficient. It can lead to ...",
+     "published": null
+    }
+   ]
+  }
+ ],
+ "labels": {
+  "https://grammy.dev/guide/deployment-types": 2,
+  "https://gramio.dev/updates/webhook": 2,
+  "https://github.com/pytopia/project-nashenas-telegram-bot/blob/main/Long%20Polling%20vs.%20Webhook.md": 2,
+  "https://paths.grasp.study/modules/2989b86f-e56c-4677-b75d-5042f0666827/lessons/f57f0bb3-7e68-4f23-8a4f-1b4366bb4dd0": 2,
+  "https://community.latenode.com/t/choosing-between-polling-and-webhook-methods-for-telegram-bot-development/23989": 2,
+  "https://hostman.com/tutorials/difference-between-polling-and-webhook-in-telegram-bots/": 2,
+  "https://www.svix.com/resources/faq/webhooks-vs-long-polling/": 1,
+  "https://core.telegram.org/bots/faq": 2,
+  "https://www.youtube.com/watch?v=c1CqChgIuCY": 1,
+  "https://core.telegram.org/bots/api": 1,
+  "https://medium.com/@pushpesh0/building-a-scalable-telegram-bot-with-node-js-bullmq-and-webhooks-6b0070fcbdfc": 1,
+  "https://community.latenode.com/t/c-winforms-telegram-bot-choosing-between-polling-and-webhook-methods/27204": 2,
+  "https://pinggy.io/blog/how_to_set_up_and_test_telegram_bot_webhook/": 1,
+  "https://openclawai.io/blog/self-hosted-telegram-bot-polling-resilience-openclaw-2026-5-12": 1,
+  "https://mercur.sh/blog/telegram-webhooks": 1,
+  "https://paths.grasp.study/modules/1646b22b-7fc0-4c25-9659-e18cc49fbc03/lessons/da3dee5a-e95d-450f-a788-8a3e081f7411": 1,
+  "https://www.glukhov.org/app-architecture/integration-patterns/implementing-telegram-bot-python-javascript/": 1,
+  "https://www.reddit.com/r/Backend/comments/1hins9t/api_polling_vs_webhook_for_ml_model_serving/": 0,
+  "https://pas7.com.ua/blog/en/telegram-bot-webhook-nodejs-typescript-grammy": 1,
+  "https://softwareengineeringstandard.com/2025/08/26/telegram-webhook/": 1
+ }
+}

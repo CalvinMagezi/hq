@@ -54,6 +54,9 @@ platform() {
                 die "Intel Macs have no prebuilt binary yet. Build from source: https://github.com/$REPO#install-from-source"
             fi
             ;;
+        MINGW*/* | MSYS*/* | CYGWIN*/*)
+            die "HQ has no native Windows build. Open an Ubuntu (WSL2) terminal and run this command there. Guide: https://agent-hq.online/install/#windows"
+            ;;
         *) die "no prebuilt binary for $os $arch. Build from source: https://github.com/$REPO#install-from-source" ;;
     esac
 }
