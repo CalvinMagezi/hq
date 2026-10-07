@@ -2113,9 +2113,9 @@ fn ranking_replay_holds_the_recorded_baseline() {
     }
     let mean = rows.iter().map(|r| r.1).sum::<f64>() / rows.len() as f64;
     eprintln!("mean ndcg@10 {mean:.3} over {} queries", rows.len());
-    assert!(rows.len() >= 8, "labelled fixtures went missing");
-    // 0.756 before the lexical relevance factor, 0.837 after.
-    assert!(mean >= 0.82, "ranking regressed: mean nDCG@10 {mean:.3}");
+    assert!(rows.len() >= 11, "labelled fixtures went missing");
+    // Over the 11 graded queries: 0.762 with term coverage alone, 0.856 with title and phrase boosts.
+    assert!(mean >= 0.84, "ranking regressed: mean nDCG@10 {mean:.3}");
 }
 
 #[test]
@@ -2300,4 +2300,18 @@ async fn crossref_identifies_itself_and_asks_only_for_the_fields_it_reads() {
     let reqs = server.received_requests().await.unwrap();
     let ua = reqs[0].headers.get("user-agent").unwrap().to_str().unwrap().to_string();
     assert!(ua.starts_with("HQ-Agent/"), "{ua}");
+}
+
+#[test]
+fn an_exact_title_match_outranks_a_loosely_related_hit_from_an_earlier_list() {
+    let loose = hit("https://arxiv.example/1", "does attention need you", "arxiv");
+    let exact = SearchResult {
+        title: "Attention Is All You Need".into(),
+        ..hit("https://openalex.example/2", "", "openalex")
+    };
+    let merged = merge(
+        vec![(1.0, vec![loose]), (1.0, vec![exact])],
+        "attention is all you need",
+    );
+    assert_eq!(merged[0].url, "https://openalex.example/2");
 }

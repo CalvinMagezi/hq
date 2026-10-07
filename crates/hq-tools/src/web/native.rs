@@ -524,9 +524,10 @@ fn merge(lists: Vec<(f32, Vec<SearchResult>)>, query: &str) -> Vec<SearchResult>
         }
     }
     let terms = query_terms(query);
+    let phrase = squash(query);
     let score = |s: &Slot| {
         let sum: f32 = s.positions.iter().map(|p| 1.0 / *p as f32).sum();
-        s.weight * s.positions.len() as f32 * sum * relevance(&terms, &s.result)
+        s.weight * s.positions.len() as f32 * sum * relevance(&terms, &phrase, &s.result)
     };
     let mut ranked: Vec<Slot> = slots.into_values().collect();
     ranked.sort_by(|a, b| score(b).total_cmp(&score(a)).then(a.seq.cmp(&b.seq)));
@@ -558,19 +559,38 @@ fn query_terms(query: &str) -> Vec<String> {
     terms
 }
 
+/// A title that holds every query term counts up to this much more.
+const TITLE_BOOST: f32 = 1.0;
+/// A title that holds the whole query as a phrase counts this much more again.
+const PHRASE_BOOST: f32 = 1.0;
+
 /// Share of the query's terms found in the result's title, snippet or URL,
-/// scaled into `MIN_RELEVANCE..=1`. Narrow engines return their closest hit
-/// even when it has nothing to do with the query, which this demotes.
-fn relevance(terms: &[String], r: &SearchResult) -> f32 {
+/// scaled into `MIN_RELEVANCE..=1`, then raised for terms found in the title
+/// and for the whole query appearing there as a phrase. Narrow engines return
+/// their closest hit even when it has nothing to do with the query, which this
+/// demotes; an exact title match is what a person searching a name wants first.
+fn relevance(terms: &[String], phrase: &str, r: &SearchResult) -> f32 {
     if terms.is_empty() {
         return 1.0;
     }
-    let haystack = format!("{} {} {}", r.title, r.snippet, r.url).to_lowercase();
-    let hits = terms
-        .iter()
-        .filter(|t| haystack.contains(t.as_str()))
-        .count();
-    MIN_RELEVANCE + (1.0 - MIN_RELEVANCE) * hits as f32 / terms.len() as f32
+    let share = |text: &str| {
+        let text = text.to_lowercase();
+        terms.iter().filter(|t| text.contains(t.as_str())).count() as f32 / terms.len() as f32
+    };
+    let all = share(&format!("{} {} {}", r.title, r.snippet, r.url));
+    let in_title = share(&r.title);
+    let base = MIN_RELEVANCE + (1.0 - MIN_RELEVANCE) * all;
+    let phrase_hit = phrase.contains(' ') && squash(&r.title).contains(phrase);
+    base * (1.0 + TITLE_BOOST * in_title * in_title) * if phrase_hit { 1.0 + PHRASE_BOOST } else { 1.0 }
+}
+
+/// Lowercase words joined by single spaces, so phrases compare across punctuation.
+fn squash(text: &str) -> String {
+    text.to_lowercase()
+        .split(|c: char| !c.is_alphanumeric())
+        .filter(|w| !w.is_empty())
+        .collect::<Vec<_>>()
+        .join(" ")
 }
 
 /// Fold a duplicate hit into the kept one as SearxNG does: the longer title
