@@ -164,6 +164,12 @@ pub struct SandboxConfig {
     /// and the temporary directories.
     #[serde(default)]
     pub writable: Vec<String>,
+
+    /// Paths under your home directory agents may read besides the built-in
+    /// tool and shell configuration locations (a directory such as `~/.nvm`).
+    /// Everything else under home is unreadable to them.
+    #[serde(default)]
+    pub readable: Vec<String>,
 }
 
 /// A launcher built on a built-in harness. It inherits that harness's resume,

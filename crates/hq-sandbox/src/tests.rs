@@ -15,6 +15,7 @@ fn sandbox(project: &Path) -> AgentSandbox {
         denied_services: vec![],
         masked_files: vec![],
         hidden_dirs: vec![],
+        read_restriction: None,
         hide_other_processes: false,
         network: Network::Full,
     }
@@ -351,4 +352,31 @@ fn readonly_subpaths_and_denied_programs_are_enforced() {
         let out = inside(backend, &s, "/usr/bin/open -h && echo STARTED");
         assert!(!out.contains("STARTED"), "{out}");
     }
+}
+
+#[test]
+fn reads_under_a_restricted_root_are_limited_to_the_allowed_paths() {
+    let backend = need_backend!();
+    let dir = tempfile::tempdir().unwrap();
+    let root = dir.path().canonicalize().unwrap();
+    for sub in ["tools", "private", "tools/secret"] {
+        std::fs::create_dir_all(root.join(sub)).unwrap();
+    }
+    std::fs::write(root.join("tools/bin"), "TOOL-OK").unwrap();
+    std::fs::write(root.join("private/diary"), "PRIVATE-DATA").unwrap();
+    std::fs::write(root.join("tools/secret/key"), "KEY-DATA").unwrap();
+    let project = root.join("tools/proj");
+    std::fs::create_dir_all(&project).unwrap();
+    std::fs::write(project.join("src"), "SRC-OK").unwrap();
+    let mut s = sandbox(&project);
+    s.read_restriction = Some(ReadRestriction { root: root.clone(), allow: vec![root.join("tools"), project.clone()] });
+    s.hidden_dirs = vec![HiddenDir { dir: root.join("tools/secret"), allow: vec![] }];
+    let out = inside(
+        backend,
+        &s,
+        &format!("cat {r}/tools/bin; cat {r}/tools/proj/src; cat {r}/private/diary; cat {r}/tools/secret/key", r = root.display()),
+    );
+    assert!(out.contains("TOOL-OK") && out.contains("SRC-OK"), "{out}");
+    assert!(!out.contains("PRIVATE-DATA"), "{out}");
+    assert!(!out.contains("KEY-DATA"), "a hidden dir inside an allowed path stays hidden: {out}");
 }

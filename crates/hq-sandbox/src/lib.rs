@@ -27,6 +27,15 @@ pub struct HiddenDir {
     pub allow: Vec<PathBuf>,
 }
 
+/// A tree the agent may read only where listed: everything under `root` is
+/// unreadable except the `allow` paths. Hidden directories and masked files are
+/// applied after it, so they win inside an allowed path.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ReadRestriction {
+    pub root: PathBuf,
+    pub allow: Vec<PathBuf>,
+}
+
 /// What the agent may reach over the network.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Network {
@@ -60,6 +69,8 @@ pub struct AgentSandbox {
     /// Files the agent can neither read nor write.
     pub masked_files: Vec<PathBuf>,
     pub hidden_dirs: Vec<HiddenDir>,
+    /// Reads under one root limited to listed paths (the user's home).
+    pub read_restriction: Option<ReadRestriction>,
     /// Hide other processes: their environments and their details.
     pub hide_other_processes: bool,
     pub network: Network,
@@ -145,6 +156,17 @@ pub fn seatbelt_profile(s: &AgentSandbox) -> String {
     for dir in &s.readonly_subpaths {
         p.push_str(&format!("(deny file-write* (subpath {}))", sbpl_string(dir)));
     }
+    if let Some(r) = &s.read_restriction {
+        p.push_str(&format!("(deny file-read-data (subpath {}))", sbpl_string(&r.root)));
+        let allowed: Vec<String> = r
+            .allow
+            .iter()
+            .map(|a| format!("(subpath {})", sbpl_string(a)))
+            .collect();
+        if !allowed.is_empty() {
+            p.push_str(&format!("(allow file-read-data {})", allowed.join(" ")));
+        }
+    }
     // Every denial first, then every allowance: a later deny of an enclosing
     // directory would otherwise cancel an earlier allow for a file inside it.
     for hidden in &s.hidden_dirs {
@@ -217,6 +239,12 @@ pub fn bwrap_args(s: &AgentSandbox, argv: &[String]) -> Result<Vec<OsString>, Un
     .iter()
     .map(OsString::from)
     .collect();
+    if let Some(r) = &s.read_restriction {
+        args.extend(["--tmpfs".into(), (&r.root).into()]);
+        for path in &r.allow {
+            args.extend(["--ro-bind".into(), path.into(), path.into()]);
+        }
+    }
     for dir in std::iter::once(&s.project).chain(&s.writable) {
         args.extend(["--bind".into(), dir.into(), dir.into()]);
     }

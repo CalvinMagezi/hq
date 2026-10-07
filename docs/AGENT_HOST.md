@@ -150,10 +150,17 @@ when that is not possible. The agent:
 - can write only its project, `~/.claude`, caches and the temporary directories
   (plus `herdr.sandbox.writable`);
 - cannot see other processes' environments;
-- can connect only to its own egress proxy and the host socket. The proxy allows
+- can read under your home directory only what the policy lists (its own state,
+  tool installs, shell and git configuration, caches, and `herdr.sandbox.readable`),
+  and cannot write `~/.claude.json`: the host records trust for the project
+  itself, so the agent cannot plant an MCP server command there;
+- can connect only to its own egress proxy and the agent socket (`agent.sock`,
+  pane tokens only, with its own connection limits, so an agent cannot crowd the
+  operator off `host.sock`). The proxy allows
   `api.anthropic.com`, the HQ MCP endpoint and `herdr.sandbox.allow_domains`,
   resolves names itself, and refuses private, loopback and link-local addresses
-  unless the endpoint is the MCP one. Every decision is logged
+  unless the endpoint is the MCP one. A tunnel must open with a TLS hello naming
+  the host it asked for. Every decision is logged
   (`agent.egress`); a denied host shows up there so you can add it.
 
 The sandbox policy is kept in `session.json` and applied again on restore.
@@ -167,7 +174,7 @@ where it could plant code you run later outside the sandbox, and it cannot start
 directory that contains your home, the host directory or a secret directory.
 
 What it does not stop: the agent still reads and writes your project and
-`~/.claude`, and can edit `~/.claude.json` (which holds MCP server commands); on macOS the Keychain stays reachable because Claude Code keeps its
+`~/.claude` (outside the read-only files above); on macOS the Keychain stays reachable because Claude Code keeps its
 login there; your own MCP servers, plugins and connectors are refused until you
 allow their hosts; a kernel flaw or an allowed domain is out of scope. On Linux
 `bwrap` cannot yet enforce the proxy-only network, so process mode fails closed

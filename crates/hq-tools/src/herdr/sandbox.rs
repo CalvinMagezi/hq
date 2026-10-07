@@ -41,7 +41,7 @@ pub(super) fn plan(cfg: &HerdrConfig) -> Value {
             None => tracing::warn!(entry = %entry, "ignoring a malformed herdr.sandbox.allow_domains entry"),
         }
     }
-    json!({ "mode": "process", "allow": allow, "writable": sandbox.writable })
+    json!({ "mode": "process", "allow": allow, "writable": sandbox.writable, "readable": sandbox.readable })
 }
 
 #[cfg(test)]

@@ -86,7 +86,7 @@ fn report(dir: Option<PathBuf>) -> Result<()> {
     let Some(params) = hq_host::report_params(&input) else {
         return Ok(());
     };
-    let sent = Client::connect_with_token(&dir, &token).and_then(|mut c| {
+    let sent = Client::connect_pane(&dir, &token).and_then(|mut c| {
         c.set_timeout(Some(REPORT_TIMEOUT));
         c.call("agent.report", params)
     });

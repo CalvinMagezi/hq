@@ -17,9 +17,12 @@ use std::os::unix::net::{UnixListener, UnixStream};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 const SOCKET_FILE: &str = "host.sock";
+/// The socket sandboxed agents get: pane tokens only, with its own connection
+/// limits, so nothing an agent does can crowd out the operator on `host.sock`.
+const AGENT_SOCKET_FILE: &str = "agent.sock";
 const LOCK_FILE: &str = "host.lock";
 const SOCKET_MODE: u32 = 0o600;
 const DEFAULT_WAIT_TIMEOUT_MS: u64 = 30_000;
@@ -75,6 +78,10 @@ pub fn socket_path(dir: &Path) -> PathBuf {
     dir.join(SOCKET_FILE)
 }
 
+pub fn agent_socket_path(dir: &Path) -> PathBuf {
+    dir.join(AGENT_SOCKET_FILE)
+}
+
 /// Bounds on what a client can tie up.
 #[derive(Debug, Clone)]
 pub struct Limits {
@@ -82,6 +89,15 @@ pub struct Limits {
     pub max_connections: usize,
     /// How long a connection may stay silent before `hello`.
     pub auth_timeout: Duration,
+    /// Connections that have not said hello yet, at most. Agents can reach the
+    /// socket, so they must not be able to fill every slot before the operator.
+    pub max_unauthenticated: usize,
+    /// Connections authenticated with a pane token, at most, and how long one
+    /// may sit idle (a hook reports and leaves).
+    pub max_pane_connections: usize,
+    /// Connections the agent socket serves at once.
+    pub max_agent_connections: usize,
+    pub pane_idle_timeout: Duration,
     /// How long a reply may take to write before the connection is dropped.
     pub write_timeout: Duration,
 }
@@ -91,6 +107,10 @@ impl Default for Limits {
         Self {
             max_connections: 64,
             auth_timeout: Duration::from_secs(5),
+            max_unauthenticated: 16,
+            max_pane_connections: 16,
+            max_agent_connections: 32,
+            pane_idle_timeout: Duration::from_secs(60),
             write_timeout: Duration::from_secs(10),
         }
     }
@@ -99,6 +119,8 @@ impl Default for Limits {
 pub struct Server {
     listener: UnixListener,
     path: PathBuf,
+    agent_listener: UnixListener,
+    agent_path: PathBuf,
     host: Arc<Host>,
     token: String,
     stop: Arc<AtomicBool>,
@@ -157,9 +179,16 @@ impl Server {
         let listener = UnixListener::bind(&path)?;
         std::fs::set_permissions(&path, std::fs::Permissions::from_mode(SOCKET_MODE))?;
         listener.set_nonblocking(true)?;
+        let agent_path = agent_socket_path(dir);
+        let _ = std::fs::remove_file(&agent_path);
+        let agent_listener = UnixListener::bind(&agent_path)?;
+        std::fs::set_permissions(&agent_path, std::fs::Permissions::from_mode(SOCKET_MODE))?;
+        agent_listener.set_nonblocking(true)?;
         Ok(Self {
             listener,
             path,
+            agent_listener,
+            agent_path,
             host,
             token,
             stop: Arc::new(AtomicBool::new(false)),
@@ -178,32 +207,42 @@ impl Server {
     /// Accepts connections until stopped.
     pub fn serve(self) {
         self.host.watch_states(self.stop.clone());
-        let open = Arc::new(AtomicUsize::new(0));
+        let operator = Door::new(self.limits.max_connections, false);
+        let agents = Door::new(self.limits.max_agent_connections, true);
         while !self.stop.load(Ordering::SeqCst) {
-            match self.listener.accept() {
-                Ok((stream, _)) => self.admit(stream, &open),
-                Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => {
-                    std::thread::sleep(ACCEPT_POLL);
+            let mut idle = true;
+            for (listener, door) in [(&self.listener, &operator), (&self.agent_listener, &agents)] {
+                match listener.accept() {
+                    Ok((stream, _)) => {
+                        idle = false;
+                        self.admit(stream, door);
+                    }
+                    Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => {}
+                    Err(e)
+                        if matches!(
+                            e.kind(),
+                            std::io::ErrorKind::Interrupted | std::io::ErrorKind::ConnectionAborted
+                        ) => {}
+                    Err(_) => std::thread::sleep(ACCEPT_ERROR_BACKOFF),
                 }
-                Err(e)
-                    if matches!(
-                        e.kind(),
-                        std::io::ErrorKind::Interrupted | std::io::ErrorKind::ConnectionAborted
-                    ) => {}
-                Err(_) => std::thread::sleep(ACCEPT_ERROR_BACKOFF),
+            }
+            if idle {
+                std::thread::sleep(ACCEPT_POLL);
             }
         }
         // Stop the agents but leave them listed for the next start.
         self.host.shutdown();
         let _ = std::fs::remove_file(&self.path);
+        let _ = std::fs::remove_file(&self.agent_path);
     }
 
-    fn admit(&self, stream: UnixStream, open: &Arc<AtomicUsize>) {
+    fn admit(&self, stream: UnixStream, door: &Door) {
+        let (open, counters) = (&door.open, &door.counters);
         // Some systems hand out sockets that inherit the listener's non-blocking mode.
         if stream.set_nonblocking(false).is_err() {
             return;
         }
-        if open.fetch_add(1, Ordering::SeqCst) >= self.limits.max_connections {
+        if open.fetch_add(1, Ordering::SeqCst) >= door.max_open {
             open.fetch_sub(1, Ordering::SeqCst);
             let mut stream = stream;
             let _ = stream.set_write_timeout(Some(self.limits.write_timeout));
@@ -217,7 +256,13 @@ impl Server {
             );
             return;
         }
+        let Some(pending) = take(&counters.pending, self.limits.max_unauthenticated) else {
+            open.fetch_sub(1, Ordering::SeqCst);
+            return;
+        };
         let conn = Conn {
+            pane_only: door.pane_only,
+            panes: counters.panes.clone(),
             host: self.host.clone(),
             token: self.token.clone(),
             stop: self.stop_handle(),
@@ -230,9 +275,45 @@ impl Server {
         // stays right and the accept loop keeps running.
         let _ = std::thread::Builder::new().spawn(move || {
             let _slot = slot;
-            conn.run(stream);
+            conn.run(stream, pending);
         });
     }
+}
+
+/// One listener's connection accounting.
+struct Door {
+    open: Arc<AtomicUsize>,
+    counters: Counters,
+    max_open: usize,
+    /// Only pane tokens are accepted here.
+    pane_only: bool,
+}
+
+impl Door {
+    fn new(max_open: usize, pane_only: bool) -> Self {
+        Self {
+            open: Arc::new(AtomicUsize::new(0)),
+            counters: Counters::default(),
+            max_open,
+            pane_only,
+        }
+    }
+}
+
+/// Connections in each phase, shared by the accept loop and every connection.
+#[derive(Default)]
+struct Counters {
+    pending: Arc<AtomicUsize>,
+    panes: Arc<AtomicUsize>,
+}
+
+/// A slot in `counter` if fewer than `max` are taken.
+fn take(counter: &Arc<AtomicUsize>, max: usize) -> Option<Slot> {
+    if counter.fetch_add(1, Ordering::SeqCst) >= max {
+        counter.fetch_sub(1, Ordering::SeqCst);
+        return None;
+    }
+    Some(Slot(counter.clone()))
 }
 
 /// One of the host's connection slots, given back when this is dropped: when a
@@ -254,6 +335,8 @@ enum Scope {
 }
 
 struct Conn {
+    pane_only: bool,
+    panes: Arc<AtomicUsize>,
     host: Arc<Host>,
     token: String,
     stop: StopHandle,
@@ -263,16 +346,27 @@ struct Conn {
 }
 
 impl Conn {
-    fn run(self, stream: UnixStream) {
+    fn run(self, stream: UnixStream, pending: Slot) {
         let Ok(write_half) = stream.try_clone() else {
             return;
         };
         let mut writer = write_half;
         let _ = writer.set_write_timeout(Some(self.limits.write_timeout));
-        let _ = stream.set_read_timeout(Some(self.limits.auth_timeout));
         let mut reader = BufReader::new(stream);
         let mut scope: Option<Scope> = None;
+        let mut pending = Some(pending);
+        let mut pane_slot: Option<Slot>;
+        let started = Instant::now();
         loop {
+            if scope.is_none() {
+                // The whole wait for hello has one deadline, so a line every few
+                // seconds cannot keep a connection open without authenticating.
+                let left = self.limits.auth_timeout.saturating_sub(started.elapsed());
+                if left.is_zero() {
+                    return;
+                }
+                let _ = reader.get_ref().set_read_timeout(Some(left));
+            }
             let mut line = Vec::new();
             let read = reader
                 .by_ref()
@@ -300,9 +394,20 @@ impl Conn {
                 self.stop.stop();
                 return;
             }
-            if scope.is_some() {
-                // Idle authenticated connections are normal; only the wait for hello is bounded.
-                let _ = reader.get_ref().set_read_timeout(None);
+            if let (Some(granted), true) = (scope.as_ref(), pending.is_some()) {
+                pending = None;
+                // Idle operator connections are normal; a pane's hooks report and leave.
+                let idle = match granted {
+                    Scope::Operator => None,
+                    Scope::Pane(_) => {
+                        pane_slot = take(&self.panes, self.limits.max_pane_connections);
+                        if pane_slot.is_none() {
+                            return;
+                        }
+                        Some(self.limits.pane_idle_timeout)
+                    }
+                };
+                let _ = reader.get_ref().set_read_timeout(idle);
             }
         }
     }
@@ -345,12 +450,12 @@ impl Conn {
             token: String,
         }
         let hello: Hello = parse(params)?;
-        let scope = if token::matches(&self.token, &hello.token) {
+        let scope = if !self.pane_only && token::matches(&self.token, &hello.token) {
             Scope::Operator
         } else if let Some(name) = self.host.agent_for_token(&hello.token) {
             Scope::Pane(name)
         } else {
-            return Err(body("unauthorized", "wrong operator token"));
+            return Err(body("unauthorized", "wrong token for this socket"));
         };
         if hello.protocol_version != PROTOCOL_VERSION {
             return Err(body(

@@ -19,6 +19,7 @@ fn spec(allow: Vec<Allow>) -> SandboxSpec {
         mode: SandboxMode::Process,
         allow,
         writable: Vec::new(),
+        readable: Vec::new(),
     }
 }
 
@@ -75,11 +76,14 @@ fn the_agent_cannot_read_the_hosts_secrets_but_keeps_its_own_files() {
          t token 'cat {d}/operator.token'; t other_mcp 'cat {d}/mcp/b.json'; t own_mcp 'cat {d}/mcp/a.json'; \
          t own_hooks 'cat {d}/hooks/a.json'; t listing 'ls {d}/mcp'; t socket 'test -S {d}/host.sock || test -e {d}/host.sock'; \
          t write_project 'echo x > ./ok'; t write_home 'echo x > \"$HOME/hq-host-sandbox-probe\"'; \
-         t ssh 'ls \"$HOME/.ssh\"'; echo DONE"
+         t ssh 'ls \"$HOME/.ssh\"'; t home_other 'cat \"$HOME/hq-host-readprobe\"'; echo DONE"
     );
+    let home = std::env::var("HOME").unwrap();
+    std::fs::write(format!("{home}/hq-host-readprobe"), "x").unwrap();
     let host = host_for(dir.path());
     let out = run(&host, "a", project.path(), spec(vec![]), &script);
-    let _ = std::fs::remove_file(std::env::var("HOME").unwrap() + "/hq-host-sandbox-probe");
+    let _ = std::fs::remove_file(format!("{home}/hq-host-sandbox-probe"));
+    let _ = std::fs::remove_file(format!("{home}/hq-host-readprobe"));
     assert!(!out.contains(SECRET));
     for (probe, allowed) in [
         ("token", false),
@@ -90,6 +94,7 @@ fn the_agent_cannot_read_the_hosts_secrets_but_keeps_its_own_files() {
         ("socket", true),
         ("write_project", true),
         ("write_home", false),
+        ("home_other", false),
     ] {
         let want = format!("{probe}={}", if allowed { "yes" } else { "no" });
         assert!(out.contains(&want), "expected {want}; got:\n{out}");

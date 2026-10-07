@@ -26,6 +26,7 @@ fn claude_answers_a_prompt_under_the_sandbox() {
         mode: SandboxMode::Process,
         allow: vec![Allow { host: "api.anthropic.com".into(), ports: vec![443], private: false }],
         writable: Vec::new(),
+        readable: Vec::new(),
     });
     host.spawn(spec).unwrap();
     let deadline = Instant::now() + WAIT;
@@ -33,7 +34,7 @@ fn claude_answers_a_prompt_under_the_sandbox() {
     loop {
         let text = screen(&host);
         assert!(host.info("live").unwrap().status == hq_host::PaneStatus::Running, "claude exited; screen:\n{}", host.read("live", ReadSource::Recent, 0).unwrap_or_default());
-        if text.contains("PONG") && asked {
+        if asked && text.contains("node v") && text.contains("· done") {
             break;
         }
         if text.contains("trust") && text.contains("Enter") && !asked {
@@ -41,7 +42,7 @@ fn claude_answers_a_prompt_under_the_sandbox() {
             std::thread::sleep(Duration::from_millis(300));
             host.send_keys("live", &["enter".into()]).unwrap();
         } else if text.contains("Claude Max") && text.contains("❯") && !asked {
-            host.prompt("live", "Print the string made by joining PO and NG, nothing else.").unwrap();
+            host.prompt("live", "Run the shell command `git --version` and `node --version`, then print the string made by joining PO and NG on its own line.").unwrap();
             asked = true;
         }
         assert!(Instant::now() < deadline, "no answer; screen:\n{text}");

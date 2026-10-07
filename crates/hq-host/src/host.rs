@@ -291,6 +291,7 @@ impl Host {
                     &spec.cwd,
                     run_dir.as_deref(),
                     &spec.argv,
+                    spec.agent.as_deref(),
                 )?)
             }
             None => None,

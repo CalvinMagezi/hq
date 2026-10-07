@@ -31,6 +31,8 @@ const ACCEPT_POLL: Duration = Duration::from_millis(50);
 /// Decisions kept per agent for `decisions`.
 const LOG_CAPACITY: usize = 200;
 const DEFAULT_PORT: u16 = 443;
+/// Longest TLS ClientHello record accepted before the tunnel is judged.
+const MAX_HELLO_BYTES: usize = 16 * 1024;
 
 /// One thing an agent may reach.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -42,6 +44,10 @@ pub struct Rule {
     /// The host may resolve to a private, loopback or link-local address. Set only
     /// for an endpoint the operator named, such as the HQ MCP address on a tailnet.
     pub allow_private: bool,
+    /// A CONNECT tunnel must open with a TLS ClientHello whose server name is the
+    /// host the request named, so a tunnel to an allowed address cannot reach a
+    /// different site by naming it inside TLS. On by default.
+    pub check_sni: bool,
 }
 
 impl Rule {
@@ -50,11 +56,18 @@ impl Rule {
             host: host.to_ascii_lowercase(),
             ports: Vec::new(),
             allow_private: false,
+            check_sni: true,
         }
     }
 
     pub fn port(mut self, port: u16) -> Self {
         self.ports.push(port);
+        self
+    }
+
+    /// Lets a tunnel carry any protocol (plain TCP to an operator-named endpoint).
+    pub fn any_protocol(mut self) -> Self {
+        self.check_sni = false;
         self
     }
 
@@ -465,34 +478,59 @@ fn serve(
         refuse(&mut client, "403 Forbidden");
         return Ok(());
     };
+    if connect {
+        client.write_all(b"HTTP/1.1 200 Connection Established\r\n\r\n")?;
+        let wants_sni = host.parse::<IpAddr>().is_err()
+            && rules
+                .iter()
+                .find(|r| r.matches(&host.to_ascii_lowercase(), port))
+                .is_none_or(|r| r.check_sni);
+        let first = if wants_sni {
+            match first_tls_record(&mut client, leftover) {
+                Some(bytes) if sni_of(&bytes).is_some_and(|n| n.eq_ignore_ascii_case(&host)) => {
+                    bytes
+                }
+                _ => {
+                    // Overwrites the allow just logged for this tunnel.
+                    let why = Verdict::Deny(format!(
+                        "{host}: the tunnel does not open with a TLS hello naming it"
+                    ));
+                    record(log, &host, port, &why);
+                    return Ok(());
+                }
+            }
+        } else {
+            leftover
+        };
+        // Only a tunnel that passed the check reaches the upstream.
+        let mut upstream = TcpStream::connect_timeout(&addr, CONNECT_TIMEOUT)?;
+        upstream.write_all(&first)?;
+        tunnel(client, upstream, stop);
+        return Ok(());
+    }
     let Ok(mut upstream) = TcpStream::connect_timeout(&addr, CONNECT_TIMEOUT) else {
         refuse(&mut client, "502 Bad Gateway");
         return Ok(());
     };
-    if connect {
-        client.write_all(b"HTTP/1.1 200 Connection Established\r\n\r\n")?;
-        upstream.write_all(&leftover)?;
-    } else {
-        // One request per connection: the headers say so, and the connection ends
-        // when the upstream's reply does, so a second request cannot name another host.
-        let mut req = format!(
-            "{} {} HTTP/1.1\r\nHost: {}\r\nConnection: close\r\n",
-            head.method, path, authority
-        );
-        for line in &head.headers {
-            let name = line.split(':').next().unwrap_or("").to_ascii_lowercase();
-            if !matches!(
-                name.as_str(),
-                "host" | "connection" | "proxy-connection" | "proxy-authorization"
-            ) {
-                req.push_str(line);
-                req.push_str("\r\n");
-            }
+    // One request per connection: the headers say so, and the connection ends
+    // when the upstream's reply does, so a second request cannot name another host.
+    let mut req = format!(
+        "{} {} HTTP/1.1\r\nHost: {}\r\nConnection: close\r\n",
+        head.method, path, authority
+    );
+    for line in &head.headers {
+        let name = line.split(':').next().unwrap_or("").to_ascii_lowercase();
+        if !matches!(
+            name.as_str(),
+            "host" | "connection" | "proxy-connection" | "proxy-authorization"
+        ) {
+            req.push_str(line);
+            req.push_str("\r\n");
         }
-        req.push_str("\r\n");
-        upstream.write_all(req.as_bytes())?;
-        upstream.write_all(&leftover)?;
     }
+    req.push_str("\r\n");
+    upstream.write_all(req.as_bytes())?;
+    upstream.write_all(&leftover)?;
     tunnel(client, upstream, stop);
     Ok(())
 }
@@ -546,6 +584,82 @@ fn tunnel(client: TcpStream, upstream: TcpStream, stop: &AtomicBool) {
         }
     }
     let _ = c_write.shutdown(Shutdown::Both);
+}
+
+/// The first TLS record the client sends, complete, or None if it is not a
+/// handshake record or does not arrive in time.
+fn first_tls_record(client: &mut TcpStream, mut bytes: Vec<u8>) -> Option<Vec<u8>> {
+    const HANDSHAKE: u8 = 0x16;
+    const RECORD_HEADER: usize = 5;
+    let started = Instant::now();
+    let mut buf = [0u8; 2048];
+    loop {
+        if bytes.len() >= RECORD_HEADER {
+            if bytes[0] != HANDSHAKE {
+                return None;
+            }
+            let need = RECORD_HEADER + u16::from_be_bytes([bytes[3], bytes[4]]) as usize;
+            if need > MAX_HELLO_BYTES {
+                return None;
+            }
+            if bytes.len() >= need {
+                return Some(bytes);
+            }
+        }
+        let left = HEAD_TIMEOUT.saturating_sub(started.elapsed());
+        if left.is_zero() {
+            return None;
+        }
+        client.set_read_timeout(Some(left)).ok()?;
+        match client.read(&mut buf) {
+            Ok(0) | Err(_) => return None,
+            Ok(n) => bytes.extend_from_slice(&buf[..n]),
+        }
+    }
+}
+
+/// The server name a TLS ClientHello asks for, if it is one and names a host.
+fn sni_of(record: &[u8]) -> Option<String> {
+    fn take<'a>(data: &mut &'a [u8], n: usize) -> Option<&'a [u8]> {
+        let (head, rest) = data.split_at_checked(n)?;
+        *data = rest;
+        Some(head)
+    }
+    fn take_u16(data: &mut &[u8]) -> Option<usize> {
+        let b = take(data, 2)?;
+        Some(u16::from_be_bytes([b[0], b[1]]) as usize)
+    }
+    const CLIENT_HELLO: u8 = 1;
+    const SERVER_NAME: usize = 0;
+    const HOST_NAME: u8 = 0;
+    let mut data = record.get(5..)?;
+    if take(&mut data, 1)? != [CLIENT_HELLO] {
+        return None;
+    }
+    take(&mut data, 3 + 2 + 32)?; // length, version, random
+    let session = *take(&mut data, 1)?.first()? as usize;
+    take(&mut data, session)?;
+    let suites = take_u16(&mut data)?;
+    take(&mut data, suites)?;
+    let compression = *take(&mut data, 1)?.first()? as usize;
+    take(&mut data, compression)?;
+    let total = take_u16(&mut data)?;
+    let mut extensions = take(&mut data, total)?;
+    while !extensions.is_empty() {
+        let kind = take_u16(&mut extensions)?;
+        let len = take_u16(&mut extensions)?;
+        let mut body = take(&mut extensions, len)?;
+        if kind != SERVER_NAME {
+            continue;
+        }
+        take_u16(&mut body)?;
+        if take(&mut body, 1)?.first() != Some(&HOST_NAME) {
+            return None;
+        }
+        let name_len = take_u16(&mut body)?;
+        return String::from_utf8(take(&mut body, name_len)?.to_vec()).ok();
+    }
+    None
 }
 
 fn is_timeout(e: &std::io::Error) -> bool {

@@ -202,7 +202,10 @@ fn connect_to_allowed_host_tunnels_and_logs() {
     let (up, handle) = upstream(b"HELLO");
     let egress = Egress::new();
     let port = egress
-        .open("a", vec![Rule::new("localhost").port(up).private()])
+        .open(
+            "a",
+            vec![Rule::new("localhost").port(up).private().any_protocol()],
+        )
         .unwrap();
     let out = ask(
         port,
@@ -325,7 +328,11 @@ fn each_agent_has_its_own_rules_and_close_stops_the_listener() {
         Duration::from_millis(500)
     )
     .is_err());
-    assert_eq!(egress.decisions("a").len(), 1, "the log outlives the listener");
+    assert_eq!(
+        egress.decisions("a").len(),
+        1,
+        "the log outlives the listener"
+    );
     egress.forget("a");
     assert!(egress.decisions("a").is_empty());
 }
@@ -375,4 +382,73 @@ fn connection_budget_is_enforced() {
     let out = ask(port, "CONNECT a.test:443 HTTP/1.1\r\n\r\n");
     assert!(out.starts_with("HTTP/1.1 503"), "{out}");
     drop(held);
+}
+
+/// A minimal TLS ClientHello record naming `sni`.
+fn client_hello(sni: &str) -> Vec<u8> {
+    let name = sni.as_bytes();
+    let mut ext = vec![0, 0];
+    let list_len = (name.len() + 3) as u16;
+    ext.extend((list_len + 2).to_be_bytes());
+    ext.extend(list_len.to_be_bytes());
+    ext.push(0);
+    ext.extend((name.len() as u16).to_be_bytes());
+    ext.extend(name);
+    let mut body = vec![3, 3];
+    body.extend([0u8; 32]);
+    body.push(0);
+    body.extend([0, 2, 0x13, 0x01]);
+    body.extend([1, 0]);
+    body.extend((ext.len() as u16).to_be_bytes());
+    body.extend(ext);
+    let mut hs = vec![1, 0];
+    hs.extend((body.len() as u16).to_be_bytes());
+    hs.extend(body);
+    let mut rec = vec![0x16, 3, 1];
+    rec.extend((hs.len() as u16).to_be_bytes());
+    rec.extend(hs);
+    rec
+}
+
+#[test]
+fn sni_is_read_from_a_client_hello_and_garbage_gives_none() {
+    assert_eq!(
+        sni_of(&client_hello("api.anthropic.com")).as_deref(),
+        Some("api.anthropic.com")
+    );
+    assert_eq!(sni_of(b"GET / HTTP/1.1\r\n\r\n"), None);
+    assert_eq!(sni_of(&client_hello("a.test")[..20]), None);
+    assert_eq!(sni_of(&[]), None);
+}
+
+fn tunnel(proxy: u16, target: &str, hello: &[u8]) -> String {
+    let mut c = TcpStream::connect((Ipv4Addr::LOCALHOST, proxy)).unwrap();
+    c.set_read_timeout(Some(Duration::from_secs(10))).unwrap();
+    c.write_all(format!("CONNECT {target} HTTP/1.1\r\n\r\n").as_bytes())
+        .unwrap();
+    let mut got = [0u8; 64];
+    let n = c.read(&mut got).unwrap();
+    assert!(String::from_utf8_lossy(&got[..n]).starts_with("HTTP/1.1 200"));
+    c.write_all(hello).unwrap();
+    let mut out = Vec::new();
+    let _ = c.read_to_end(&mut out);
+    String::from_utf8_lossy(&out).into_owned()
+}
+
+#[test]
+fn a_tunnel_must_name_the_host_it_asked_for() {
+    let (up, handle) = upstream(b"SERVED");
+    let egress = Egress::new();
+    let port = egress
+        .open("a", vec![Rule::new("localhost").port(up).private()])
+        .unwrap();
+    let wrong = tunnel(port, &format!("localhost:{up}"), &client_hello("evil.test"));
+    assert!(!wrong.contains("SERVED"), "{wrong}");
+    let plain = tunnel(port, &format!("localhost:{up}"), b"GET / HTTP/1.1\r\n\r\n");
+    assert!(!plain.contains("SERVED"), "{plain}");
+    let right = tunnel(port, &format!("localhost:{up}"), &client_hello("LocalHost"));
+    assert!(right.contains("SERVED"), "{right}");
+    handle.join().unwrap();
+    let log = egress.decisions("a");
+    assert!(log.iter().filter(|d| !d.allowed).count() >= 2, "{log:?}");
 }

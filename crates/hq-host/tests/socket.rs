@@ -1,6 +1,6 @@
 //! The control socket, exercised through real sockets and real processes.
 
-use hq_host::{Client, ClientError, Host, Limits, Server, socket_path};
+use hq_host::{Client, ClientError, Host, Limits, Server, agent_socket_path, socket_path};
 use serde_json::{Value, json};
 use std::io::{Read, Write};
 use std::os::unix::fs::PermissionsExt;
@@ -728,4 +728,82 @@ fn oversized_mcp_settings_and_too_many_agents_are_refused() {
         .unwrap_err();
     assert_eq!(err.code(), Some("too_large"));
     assert!(!host.run_dir().join("mcp/cap.json").exists());
+}
+
+#[test]
+fn the_agent_socket_takes_pane_tokens_only() {
+    let host = Running::start();
+    let mut op = host.client();
+    let (token, dir) = spawn_reporter(&mut op, "rep");
+    let dir = std::path::Path::new(&dir);
+    let operator_token = std::fs::read_to_string(dir.join("operator.token")).unwrap();
+    let mut pane = Client::connect_pane(dir, &token).unwrap();
+    pane.call("agent.report", json!({ "event": "UserPromptSubmit", "session_id": "conv-9" }))
+        .unwrap();
+    assert!(
+        Client::connect_pane(dir, operator_token.trim()).is_err(),
+        "the operator token must not work on the socket agents can reach"
+    );
+    assert!(agent_socket_path(dir).exists());
+}
+
+#[test]
+fn a_line_every_few_seconds_does_not_keep_an_unauthenticated_connection_open() {
+    let limits = Limits {
+        auth_timeout: Duration::from_millis(600),
+        ..Limits::default()
+    };
+    let host = start_with(limits);
+    let mut s = UnixStream::connect(socket_path(&host.run_dir())).unwrap();
+    s.set_read_timeout(Some(Duration::from_millis(50))).unwrap();
+    let started = Instant::now();
+    let mut buf = [0u8; 4096];
+    let closed = loop {
+        let _ = s.write_all(b"x\n");
+        match s.read(&mut buf) {
+            Ok(0) => break true,
+            Err(e) if !matches!(e.kind(), std::io::ErrorKind::WouldBlock | std::io::ErrorKind::TimedOut) => break true,
+            _ => {}
+        }
+        if started.elapsed() > Duration::from_secs(3) {
+            break false;
+        }
+        std::thread::sleep(Duration::from_millis(150));
+    };
+    assert!(closed, "still open after {:?}", started.elapsed());
+    assert!(started.elapsed() < Duration::from_millis(1800), "{:?}", started.elapsed());
+}
+
+#[test]
+fn agents_cannot_crowd_the_operator_out() {
+    let limits = Limits {
+        max_unauthenticated: 2,
+        max_pane_connections: 2,
+        max_agent_connections: 8,
+        ..Limits::default()
+    };
+    let host = start_with(limits);
+    let mut op = host.client();
+    let (token, dir) = spawn_reporter(&mut op, "rep");
+    let dir = std::path::Path::new(&dir);
+    // Fill the agent socket with silent connections and authenticated idle ones.
+    let silent: Vec<UnixStream> = (0..8)
+        .map(|_| UnixStream::connect(agent_socket_path(dir)).unwrap())
+        .collect();
+    std::thread::sleep(Duration::from_millis(200));
+    // The operator still gets in on its own socket, new connections included.
+    for _ in 0..5 {
+        host.client().call("host.status", json!({})).unwrap();
+    }
+    drop(silent);
+    // Authenticated pane connections beyond the cap are refused.
+    std::thread::sleep(Duration::from_millis(200));
+    let first = Client::connect_pane(dir, &token).unwrap();
+    let second = Client::connect_pane(dir, &token).unwrap();
+    let third = Client::connect_pane(dir, &token);
+    let mut third = third.expect("hello itself succeeds");
+    let refused = third.call("agent.report", json!({ "event": "Stop" })).is_err();
+    assert!(refused, "a third pane connection should be dropped");
+    drop((first, second));
+    host.client().call("host.status", json!({})).unwrap();
 }
