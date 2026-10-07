@@ -930,10 +930,16 @@ async fn a_github_quota_403_and_a_stack_exchange_throttle_400_are_rate_limits() 
         category: Some(Category::Code),
         ..SearchOptions::default()
     };
-    let err = run(&server, "rate limited engines", &opts).await.unwrap_err().to_string();
+    let err = run(&server, "rate limited engines", &opts)
+        .await
+        .unwrap_err()
+        .to_string();
     assert!(err.contains("github: rate limited"), "{err}");
     assert!(err.contains("stack overflow: rate limited"), "{err}");
-    assert!(err.contains("crates.io: invalid credentials or access denied"), "a plain 403 stays an access error: {err}");
+    assert!(
+        err.contains("crates.io: invalid credentials or access denied"),
+        "a plain 403 stays an access error: {err}"
+    );
 }
 
 #[test]
@@ -951,20 +957,29 @@ fn the_new_categories_parse_and_brave_reports_them_unsupported() {
 /// Quality benchmark against a SearxNG baseline. `HQ_SEARCH_BASELINE` points at
 /// a JSON object of `{query: {results: [{url, ...}]}}` captured from a SearxNG
 /// `format=json` instance, best-first. It prints per-query and mean overlap
-/// with that baseline's top results: `HQ_SEARCH_BASELINE=baseline.json cargo
-/// test -p hq-tools benchmark_against_searxng -- --ignored --nocapture`.
+/// with that baseline's top results, and the share of queries that failed or
+/// came back empty. `HQ_SEARCH_BENCH_PAUSE_MS` sets the gap between queries
+/// (default 1500) and `HQ_SEARCH_BENCH_ALL=1` also runs queries the baseline
+/// has no results for, so the failure rate covers every query:
+/// `HQ_SEARCH_BASELINE=baseline.json cargo test -p hq-tools benchmark_against_searxng -- --ignored --nocapture`.
 #[tokio::test]
 #[ignore = "needs the network and HQ_SEARCH_BASELINE"]
 async fn benchmark_against_searxng() {
     const TOP: usize = 10;
     const MIN_BASELINE_RESULTS: usize = 8;
-    const PAUSE: Duration = Duration::from_millis(1500);
     let Ok(file) = std::env::var("HQ_SEARCH_BASELINE") else {
         panic!("set HQ_SEARCH_BASELINE to a SearxNG JSON baseline");
     };
+    let pause = Duration::from_millis(
+        std::env::var("HQ_SEARCH_BENCH_PAUSE_MS")
+            .ok()
+            .and_then(|v| v.parse().ok())
+            .unwrap_or(1500),
+    );
+    let run_all = std::env::var("HQ_SEARCH_BENCH_ALL").is_ok_and(|v| v == "1");
     let baseline: Value = serde_json::from_str(&std::fs::read_to_string(file).unwrap()).unwrap();
-    let (mut sum_overlap, mut sum_top3, mut sum_rr, mut scored, mut empty) =
-        (0.0, 0.0, 0.0, 0usize, 0usize);
+    let (mut sum_overlap, mut sum_top3, mut sum_rr, mut scored) = (0.0, 0.0, 0.0, 0usize);
+    let (mut asked, mut errored, mut empty) = (0usize, 0usize, 0usize);
     for (query, entry) in baseline.as_object().unwrap() {
         let wanted: Vec<String> = entry["results"]
             .as_array()
@@ -972,7 +987,8 @@ async fn benchmark_against_searxng() {
             .flatten()
             .filter_map(|r| r["url"].as_str().map(normalize_url))
             .collect();
-        if wanted.len() < MIN_BASELINE_RESULTS {
+        let comparable = wanted.len() >= MIN_BASELINE_RESULTS;
+        if !comparable && !run_all {
             println!("skip  {query:<48} baseline has {} results", wanted.len());
             continue;
         }
@@ -983,38 +999,57 @@ async fn benchmark_against_searxng() {
         let started = Instant::now();
         let got = web_search(query, &opts, None, None, true).await;
         let took = started.elapsed();
-        let Ok(got) = got else {
-            empty += 1;
-            println!("FAIL  {query:<48} {}", got.unwrap_err());
-            continue;
+        asked += 1;
+        let got = match got {
+            Ok(got) => got,
+            Err(e) => {
+                errored += 1;
+                println!("FAIL  {query:<48} {e}");
+                tokio::time::sleep(pause).await;
+                continue;
+            }
         };
         let have: Vec<String> = got.results.iter().map(|r| normalize_url(&r.url)).collect();
-        let top: Vec<&String> = wanted.iter().take(TOP).collect();
-        let overlap = top.iter().filter(|u| have.contains(u)).count() as f64 / top.len() as f64;
-        let top3 = wanted.iter().take(3).filter(|u| have.contains(u)).count() as f64 / 3.0;
-        let rr = have
-            .iter()
-            .position(|u| *u == wanted[0])
-            .map_or(0.0, |p| 1.0 / (p as f64 + 1.0));
+        if have.is_empty() {
+            empty += 1;
+        }
         let engines: std::collections::BTreeSet<&str> = got
             .results
             .iter()
             .flat_map(|r| r.engines.iter().map(String::as_str))
             .collect();
-        println!(
-            "{overlap:>4.2} {top3:>4.2} {rr:>4.2}  {query:<48} {:>2} results {:>4}ms {engines:?}",
-            have.len(),
-            took.as_millis()
-        );
-        sum_overlap += overlap;
-        sum_top3 += top3;
-        sum_rr += rr;
-        scored += 1;
-        tokio::time::sleep(PAUSE).await;
+        if comparable {
+            let top: Vec<&String> = wanted.iter().take(TOP).collect();
+            let overlap = top.iter().filter(|u| have.contains(u)).count() as f64 / top.len() as f64;
+            let top3 = wanted.iter().take(3).filter(|u| have.contains(u)).count() as f64 / 3.0;
+            let rr = have
+                .iter()
+                .position(|u| *u == wanted[0])
+                .map_or(0.0, |p| 1.0 / (p as f64 + 1.0));
+            println!(
+                "{overlap:>4.2} {top3:>4.2} {rr:>4.2}  {query:<48} {:>2} results {:>4}ms {engines:?}",
+                have.len(),
+                took.as_millis()
+            );
+            sum_overlap += overlap;
+            sum_top3 += top3;
+            sum_rr += rr;
+            scored += 1;
+        } else {
+            println!(
+                "----------  {query:<48} {:>2} results {:>4}ms {engines:?}",
+                have.len(),
+                took.as_millis()
+            );
+        }
+        tokio::time::sleep(pause).await;
     }
     let n = scored.max(1) as f64;
+    let failed = errored + empty;
     println!(
-        "\nqueries scored {scored}, failed {empty}\nmean overlap@{TOP} {:.3}\nmean top3 recall {:.3}\nmean reciprocal rank of baseline #1 {:.3}",
+        "\nqueries asked {asked}: answered {} , errored {errored}, empty {empty}, failure rate {:.1}%\nscored against baseline {scored}: mean overlap@{TOP} {:.3}, top3 recall {:.3}, reciprocal rank of baseline #1 {:.3}",
+        asked - failed,
+        100.0 * failed as f64 / asked.max(1) as f64,
         sum_overlap / n,
         sum_top3 / n,
         sum_rr / n
@@ -1486,4 +1521,25 @@ fn package_and_paper_urls_must_be_web_urls() {
     );
     let work = json!({"results": [{"display_name": "Paper", "doi": "javascript:alert(1)"}]});
     assert!(Engine::OpenAlex.parse(&work).unwrap().is_empty());
+}
+
+#[test]
+fn single_topic_engines_rank_below_the_general_ones_for_a_query_they_do_not_fit() {
+    use super::engines::Engine::*;
+    for narrow in [Mdn, EuropePmc, AskUbuntu, SuperUser, Crates, Npm, Wikipedia, HackerNews] {
+        assert!(narrow.weight() < GitHub.weight(), "{narrow:?}");
+    }
+    // A repository ranked first beats a page of MDN or Europe PMC that is only a name match.
+    let code = merge(vec![
+        (GitHub.weight(), vec![hit("https://github.com/o/r", "repo", "github")]),
+        (Mdn.weight(), vec![hit("https://developer.mozilla.org/x", "mdn", "mdn"), hit("https://developer.mozilla.org/y", "mdn", "mdn")]),
+    ]);
+    assert_eq!(code[0].url, "https://github.com/o/r");
+    // Agreement still wins: a page found by Stack Overflow and MDN (1.0 x 0.4 x 2 x 1.5) beats
+    // an unconfirmed first hit (1.0).
+    let agreed = merge(vec![
+        (StackOverflow.weight(), vec![hit("https://a.example/", "a", "so"), hit("https://shared.example/", "s", "so")]),
+        (Mdn.weight(), vec![hit("https://shared.example/", "s", "mdn")]),
+    ]);
+    assert_eq!(agreed[0].url, "https://shared.example/");
 }
