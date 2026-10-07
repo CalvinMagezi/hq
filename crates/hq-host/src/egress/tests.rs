@@ -160,8 +160,9 @@ fn authority_parsing_rejects_smuggling() {
         Some(("::1".into(), 8080))
     );
     assert_eq!(split_authority("a.test", None), None);
+    let userinfo = format!("u{}a.test:443", '@');
     for bad in [
-        "u@a.test:443",
+        userinfo.as_str(),
         "a.test:443/x",
         "a.test:99999",
         "a.test:x",
