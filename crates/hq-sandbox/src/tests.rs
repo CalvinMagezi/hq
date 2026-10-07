@@ -15,6 +15,7 @@ fn sandbox(project: &Path) -> AgentSandbox {
         denied_services: vec![],
         masked_files: vec![],
         hidden_dirs: vec![],
+        private_tmp: vec![],
         read_restrictions: vec![],
         hide_other_processes: false,
         network: Network::Full,
@@ -154,7 +155,11 @@ fn other_processes_and_their_environments_are_hidden() {
     std::thread::sleep(std::time::Duration::from_millis(400));
     let mut s = sandbox(&h.project);
     s.hide_other_processes = true;
-    let script = "ps eww -ax | grep -c victim-secret-xyz; true";
+    let script = if cfg!(target_os = "macos") {
+        "ps eww -ax | grep -c victim-secret-xyz; true"
+    } else {
+        "cat /proc/[0-9]*/environ 2>/dev/null | tr '\\0' '\\n' | grep -c victim-secret-xyz; true"
+    };
     // Positive control: without the sandbox the same command does see it.
     let outside = Command::new("/bin/sh").args(["-c", script]).output().unwrap();
     let outside = String::from_utf8_lossy(&outside.stdout).trim().to_string();
@@ -203,7 +208,7 @@ fn the_proxy_network_reaches_only_the_proxy_port() {
     });
     std::thread::spawn(move || while other.accept().is_ok() {});
     let mut s = sandbox(&h.project);
-    s.network = Network::Proxy { port: proxy_port, unix_sockets: vec![] };
+    s.network = Network::Proxy { port: proxy_port, unix_sockets: vec![], relay: None };
     let connect = |port: u16| {
         inside(
             backend,
@@ -242,7 +247,7 @@ fn a_file_can_be_replaced_atomically_when_it_and_its_temp_siblings_are_writable(
 #[test]
 fn bubblewrap_refuses_a_proxy_network_instead_of_pretending() {
     let mut s = sandbox(Path::new("/p"));
-    s.network = Network::Proxy { port: 1, unix_sockets: vec![] };
+    s.network = Network::Proxy { port: 1, unix_sockets: vec![], relay: None };
     let err = bwrap_args(&s, &argv("true")).unwrap_err();
     assert!(err.0.contains("relay"), "{err}");
 }
@@ -256,7 +261,7 @@ fn the_profile_denies_before_it_allows_and_lists_every_rule() {
     s.masked_files = vec!["/m/secret".into()];
     s.hidden_dirs = vec![HiddenDir { dir: "/run".into(), allow: vec!["/run/sock".into()] }];
     s.hide_other_processes = true;
-    s.network = Network::Proxy { port: 18080, unix_sockets: vec!["/run/sock".into()] };
+    s.network = Network::Proxy { port: 18080, unix_sockets: vec!["/run/sock".into()], relay: None };
     let p = seatbelt_profile(&s);
     let at = |needle: &str| p.find(needle).unwrap_or_else(|| panic!("{needle} missing in {p}"));
     assert!(at("(deny file-write*)") < at("(allow file-write*"));
@@ -379,4 +384,22 @@ fn reads_under_a_restricted_root_are_limited_to_the_allowed_paths() {
     assert!(out.contains("TOOL-OK") && out.contains("SRC-OK"), "{out}");
     assert!(!out.contains("PRIVATE-DATA"), "{out}");
     assert!(!out.contains("KEY-DATA"), "a hidden dir inside an allowed path stays hidden: {out}");
+}
+
+#[test]
+fn bubblewrap_with_a_relay_unshares_the_network_and_starts_the_relay_first() {
+    let mut s = sandbox(Path::new("/p"));
+    s.network = Network::Proxy {
+        port: 18080,
+        unix_sockets: vec![],
+        relay: Some(Relay { program: "/bin/hq".into(), unix_socket: "/run/eg.sock".into() }),
+    };
+    s.private_tmp = vec!["/tmp".into()];
+    let args: Vec<String> = bwrap_args(&s, &argv("true")).unwrap().iter().map(|a| a.to_string_lossy().into_owned()).collect();
+    assert!(args.contains(&"--unshare-net".to_string()));
+    let at = |w: &str| args.iter().position(|a| a == w).unwrap_or_else(|| panic!("{w} missing in {args:?}"));
+    assert!(at("--tmpfs") < at("--chdir"));
+    let tail = &args[at("--") + 1..];
+    assert_eq!(&tail[..8], ["/bin/hq", "host", "sandbox-init", "--port", "18080", "--unix", "/run/eg.sock", "--"]);
+    assert_eq!(&tail[8..], ["/bin/sh", "-c", "true"]);
 }

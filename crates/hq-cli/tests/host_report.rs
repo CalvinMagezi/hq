@@ -58,11 +58,11 @@ fn a_hook_event_in_a_pane_reaches_the_host_through_hq_host_report() {
 }
 
 /// Inside the sandbox the user's config and env files are unreadable, which
-/// once made every hook fail before it reached the host. Runs only where the
-/// macOS sandbox program exists.
+/// once made every hook fail before it reached the host. Runs only where a
+/// sandbox program works.
 #[test]
 fn a_hook_event_reaches_the_host_from_inside_the_sandbox() {
-    if !cfg!(target_os = "macos") || !std::path::Path::new("/usr/bin/sandbox-exec").exists() {
+    if hq_sandbox::backend().is_none() {
         return;
     }
     // Not under the temporary directory: that is writable to the agent, and the
@@ -73,7 +73,7 @@ fn a_hook_event_reaches_the_host_from_inside_the_sandbox() {
     // The test binary lives under the user's home, which the sandbox hides.
     let copy = project.path().join("hq");
     std::fs::copy(hq(), &copy).unwrap();
-    let server = Server::bind(&dir, Arc::new(Host::new())).unwrap();
+    let server = Server::bind(&dir, Arc::new(Host::new().with_helper_binary(hq()))).unwrap();
     let stop = server.stop_handle();
     let thread = std::thread::spawn(move || server.serve());
 
@@ -83,6 +83,8 @@ fn a_hook_event_reaches_the_host_from_inside_the_sandbox() {
         .as_str()
         .unwrap()
         .to_string();
+    // Show the hook's own output on the screen, so a failure explains itself.
+    let command = command.replace(">/dev/null 2>&1 || true", "2>&1; echo rc=$?");
     let script = format!("printf '%s' '{payload}' | {command}; sleep 60");
     let mut client = Client::connect(&dir).unwrap();
     client
@@ -102,7 +104,11 @@ fn a_hook_event_reaches_the_host_from_inside_the_sandbox() {
     };
     stop.stop();
     thread.join().unwrap();
-    assert_eq!(info["agent_session_id"], "conv-sandboxed", "{info}");
+    let screen = client
+        .call("agent.read", json!({ "name": "boxed", "source": "recent" }))
+        .map(|v| v["text"].to_string())
+        .unwrap_or_default();
+    assert_eq!(info["agent_session_id"], "conv-sandboxed", "{info}\nscreen: {screen}");
     assert_eq!(info["sandbox"], "process");
 }
 

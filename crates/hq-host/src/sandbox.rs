@@ -5,7 +5,7 @@
 use crate::egress::{Egress, Rule};
 use crate::error::HostError;
 use crate::server;
-use hq_sandbox::{AgentSandbox, HiddenDir, Network, ReadRestriction, backend, canonical, wrap};
+use hq_sandbox::{AgentSandbox, Backend, HiddenDir, Network, ReadRestriction, Relay, backend, canonical, wrap};
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
 
@@ -51,7 +51,11 @@ const DENIED_SERVICES: &[&str] = &["com.apple.coreservices.launchservicesd", "co
 /// `~/.claude.json` is deliberately not writable: it holds MCP server commands the
 /// operator's own Claude runs later. The host records trust for the project itself.
 const HOME_WRITABLE: &[&str] = &[".cache", "Library/Caches"];
+/// Temporary directories every agent shares on macOS (Seatbelt lists them writable).
 const TMP_ROOTS: &[&str] = &["/tmp", "/var/tmp", "/var/folders", "/dev"];
+/// What bubblewrap gives each agent a private empty copy of instead: the shared
+/// temporary directories, and /run, where the system's own sockets live.
+const PRIVATE_TMP_ROOTS: &[&str] = &["/tmp", "/var/tmp", "/run"];
 const PROXY_ENV_NAMES: &[&str] = &["HTTPS_PROXY", "HTTP_PROXY", "https_proxy", "http_proxy"];
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -105,6 +109,13 @@ impl SandboxSpec {
             readable: Vec::new(),
         }
     }
+}
+
+/// The unix socket a bubblewrap sandbox reaches the egress proxy through, and the
+/// binary that relays it onto loopback inside.
+pub(crate) struct Bridge {
+    pub program: PathBuf,
+    pub socket: PathBuf,
 }
 
 /// The command to run and the variables to add for a sandboxed agent, plus the
@@ -166,23 +177,37 @@ fn policy(
     cwd: &Path,
     run_dir: &Path,
     port: u16,
-    claude_dir: &Path,
-    default_claude: bool,
+    claude: &ClaudeConfig,
+    bridge: Option<&Bridge>,
 ) -> Result<AgentSandbox, HostError> {
+    let claude_dir: &Path = &claude.dir;
+    let default_claude = claude.is_default;
     let home = home().ok_or_else(|| HostError::Io("HOME is not set".into()))?;
     let home = home.canonicalize().unwrap_or(home);
     let under = |names: &[&str]| names.iter().map(|n| home.join(n)).collect::<Vec<_>>();
+    let bwrap = bridge.is_some();
+    let private_tmp = if bwrap {
+        canonical(PRIVATE_TMP_ROOTS.iter().map(PathBuf::from))
+    } else {
+        Vec::new()
+    };
+    let shared_tmp: Vec<PathBuf> = if bwrap {
+        Vec::new()
+    } else {
+        TMP_ROOTS.iter().map(PathBuf::from).collect()
+    };
     let tmp = std::env::temp_dir();
+    let own_tmp = canonical([tmp]).into_iter().filter(|t| !private_tmp.iter().any(|p| t.starts_with(p)));
     let writable = canonical(
         under(HOME_WRITABLE)
             .into_iter()
             .chain([claude_dir.to_path_buf()])
-            .chain(TMP_ROOTS.iter().map(PathBuf::from))
-            .chain([tmp])
+            .chain(shared_tmp)
+            .chain(own_tmp)
             .chain(spec.writable.iter().cloned()),
     );
-    let run_dir = run_dir.canonicalize().map_err(|e| HostError::Io(e.to_string()))?;
-    let project = cwd.canonicalize().map_err(|e| HostError::Io(e.to_string()))?;
+    let run_dir = run_dir.canonicalize().map_err(|e| HostError::Io(format!("the host directory: {e}")))?;
+    let project = cwd.canonicalize().map_err(|e| HostError::Io(format!("the working directory: {e}")))?;
     let other_profiles = std::fs::read_dir(&home)
         .into_iter()
         .flatten()
@@ -210,6 +235,13 @@ fn policy(
             )));
         }
     }
+    if let Some(inside) = private_tmp.iter().find(|p| run_dir.starts_with(p)) {
+        return Err(HostError::Sandbox(format!(
+            "the host directory {} is under {}, which every agent gets a private copy of; use a directory under your home",
+            run_dir.display(),
+            inside.display()
+        )));
+    }
     let own_files = [
         run_dir.join("hooks").join(format!("{name}.json")),
         run_dir.join("mcp").join(format!("{name}.json")),
@@ -217,6 +249,9 @@ fn policy(
     let socket = server::agent_socket_path(&run_dir);
     let mut allow = canonical(own_files);
     allow.push(socket.clone());
+    allow.extend(bridge.map(|b| b.socket.clone()));
+    // A bubblewrap bind needs the file to exist.
+    allow.retain(|p| !bwrap || p.exists());
     let mut hidden = vec![HiddenDir { dir: run_dir, allow }];
     hidden.extend(secret_dirs.into_iter().map(|dir| HiddenDir { dir, allow: Vec::new() }));
     let under_project = |names: &[&str]| names.iter().map(|n| project.join(n)).collect::<Vec<_>>();
@@ -225,6 +260,11 @@ fn policy(
     let (project_files, project_dirs): (Vec<_>, Vec<_>) = under_project(PROJECT_READONLY)
         .into_iter()
         .partition(|p| p.extension().is_some() || p.ends_with("config"));
+    // Seatbelt denies writes to a path whether or not it exists; a bubblewrap
+    // mount needs something to mount over, so only existing paths are protected.
+    let keep = |paths: Vec<PathBuf>| -> Vec<PathBuf> {
+        paths.into_iter().filter(|p| !bwrap || p.exists()).collect()
+    };
     let macos = cfg!(target_os = "macos");
     let read_allow = canonical(
         under(HOME_READABLE)
@@ -232,6 +272,7 @@ fn policy(
             .chain([claude_dir.to_path_buf()])
             .chain(default_claude.then(|| home.join(".claude.json")))
             .chain(spec.readable.iter().cloned())
+            .chain(std::env::current_exe())
             .chain(std::iter::once(project.clone()))
             .chain(writable.iter().cloned()),
     );
@@ -239,12 +280,13 @@ fn policy(
         project,
         writable,
         writable_files: Vec::new(),
-        readonly_files: home_files.into_iter().chain(project_files).collect(),
-        readonly_subpaths: home_dirs.into_iter().chain(project_dirs).collect(),
+        readonly_files: keep(home_files.into_iter().chain(project_files).collect()),
+        readonly_subpaths: keep(home_dirs.into_iter().chain(project_dirs).collect()),
         denied_programs: if macos { DENIED_PROGRAMS.iter().map(PathBuf::from).collect() } else { Vec::new() },
         denied_services: if macos { DENIED_SERVICES.iter().map(|s| s.to_string()).collect() } else { Vec::new() },
-        masked_files: under(SECRET_HOME_FILES),
+        masked_files: keep(under(SECRET_HOME_FILES)),
         hidden_dirs: hidden,
+        private_tmp,
         read_restrictions: outer_restrictions(&read_allow)
             .into_iter()
             .chain([ReadRestriction { root: home.clone(), allow: read_allow }])
@@ -253,6 +295,7 @@ fn policy(
         network: Network::Proxy {
             port,
             unix_sockets: vec![socket],
+            relay: bridge.map(|b| Relay { program: b.program.clone(), unix_socket: b.socket.clone() }),
         },
     })
 }
@@ -289,6 +332,7 @@ pub(crate) struct Launch<'a> {
     pub argv: &'a [String],
     pub agent: Option<&'a str>,
     pub env: &'a [(String, String)],
+    pub helper: Option<&'a Path>,
 }
 
 /// Opens the agent's egress listener and wraps `argv` in the platform sandbox.
@@ -299,7 +343,7 @@ pub(crate) fn confine(
     spec: &SandboxSpec,
     launch: &Launch,
 ) -> Result<Confined, HostError> {
-    let Launch { name, cwd, run_dir, argv, agent, env } = *launch;
+    let Launch { name, cwd, run_dir, argv, agent, env, helper } = *launch;
     let refuse = |why: &str| HostError::Sandbox(why.to_string());
     let run_dir = run_dir.ok_or_else(|| refuse("the host has no run directory to protect"))?;
     let backend = backend().ok_or_else(|| refuse("no sandbox program (sandbox-exec or bwrap) on this machine"))?;
@@ -310,12 +354,27 @@ pub(crate) fn confine(
     {
         eprintln!("hq host: could not record trust for {}: {e}", cwd.display());
     }
+    // A bubblewrap sandbox has no network, so it reaches the proxy through a unix
+    // socket in the host directory that a relay inside turns back into loopback.
+    let bridge = match backend {
+        Backend::Bwrap(_) => Some(Bridge {
+            program: match helper {
+                Some(path) => path.to_path_buf(),
+                None => std::env::current_exe().map_err(|e| HostError::Io(format!("this binary: {e}")))?,
+            },
+            socket: run_dir
+                .canonicalize()
+                .map_err(|e| HostError::Io(format!("the host directory: {e}")))?
+                .join(format!("eg-{name}.sock")),
+        }),
+        Backend::SandboxExec(_) => None,
+    };
     let port = egress
-        .open(name, rules(&spec.allow))
-        .map_err(|e| HostError::Io(e.to_string()))?;
+        .open_with_bridge(name, rules(&spec.allow), bridge.as_ref().map(|b| b.socket.as_path()))
+        .map_err(|e| HostError::Io(format!("the egress listener: {e}")))?;
     let wrapped = claude
         .ok_or_else(|| HostError::Io("HOME is not set".into()))
-        .and_then(|c| policy(spec, name, cwd, run_dir, port, &c.dir, c.is_default))
+        .and_then(|c| policy(spec, name, cwd, run_dir, port, &c, bridge.as_ref()))
         .and_then(|policy| wrap(backend, &policy, argv).map_err(|e| refuse(&e.to_string())));
     let wrapped = match wrapped {
         Ok(w) => w,

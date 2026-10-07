@@ -189,8 +189,10 @@ What it does not stop: the agent still reads and writes your project and
 `~/.claude` (outside the read-only files above); on macOS the Keychain stays reachable because Claude Code keeps its
 login there; your own MCP servers, plugins and connectors are refused until you
 allow their hosts; a kernel flaw or an allowed domain is out of scope. On Linux
-`bwrap` cannot yet enforce the proxy-only network, so process mode fails closed
-there; set `herdr.sandbox.mode: none` knowingly or wait for the bridge.
+(including WSL2) `bwrap` has no network of its own, so the agent reaches the proxy
+through a unix socket and a relay inside the sandbox; a path that does not exist
+(a `.mcp.json` the project lacks) cannot be protected there, and each agent gets a
+private empty `/tmp`, `/var/tmp` and `/run`.
 
 The host bounds what a client can make it hold: 128 agents, 64 KiB of command
 line each, window titles cut to 256 bytes, conversation ids limited to short

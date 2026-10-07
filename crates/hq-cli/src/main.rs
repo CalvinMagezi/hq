@@ -98,6 +98,15 @@ enum Commands {
         /// authorize only: the address the key may connect from (ssh `from=`)
         #[arg(long)]
         from: Option<String>,
+        /// relay and sandbox-init (run inside a Linux sandbox): the loopback port to serve
+        #[arg(long)]
+        port: Option<u16>,
+        /// relay and sandbox-init: the unix socket the relay forwards to
+        #[arg(long)]
+        unix: Option<std::path::PathBuf>,
+        /// sandbox-init: the agent command to run after `--`
+        #[arg(last = true)]
+        rest: Vec<String>,
     },
 
     /// Internal: detached applier spawned by self_update_install
@@ -506,8 +515,8 @@ async fn async_main() -> Result<()> {
 
     // The host's hook reporter and ssh gate need no config, and the reporter
     // runs where the config is unreadable.
-    if let Some(Commands::Host { sub, dir, allow_unsandboxed, key, from }) = &cli.command
-        && (sub == "report" || sub == "gate")
+    if let Some(Commands::Host { sub, dir, allow_unsandboxed, key, from, port, unix, rest }) = &cli.command
+        && matches!(sub.as_str(), "report" | "gate" | "relay" | "sandbox-init")
     {
         return commands::host::run(commands::host::HostArgs {
             sub: sub.clone(),
@@ -515,6 +524,9 @@ async fn async_main() -> Result<()> {
             allow_unsandboxed: *allow_unsandboxed,
             key: key.clone(),
             from: from.clone(),
+            port: *port,
+            unix: unix.clone(),
+            rest: rest.clone(),
         })
         .await;
     }
@@ -657,7 +669,7 @@ async fn dispatch(command: Commands, config: &HqConfig) -> Result<()> {
             host,
             lines,
         } => commands::sessions::run(config, &sub, arg, prompt, cwd, label, host, lines).await,
-        Commands::Host { sub, dir, allow_unsandboxed, key, from } => commands::host::run(commands::host::HostArgs { sub, dir, allow_unsandboxed, key, from }).await,
+        Commands::Host { sub, dir, allow_unsandboxed, key, from, port, unix, rest } => commands::host::run(commands::host::HostArgs { sub, dir, allow_unsandboxed, key, from, port, unix, rest }).await,
         Commands::SelfApply { run_id } => commands::self_apply::run(config, run_id).await,
         Commands::NotifyRestart { phase, reason, sha } => {
             commands::notify_restart::run(config, &phase, &reason, sha.as_deref()).await

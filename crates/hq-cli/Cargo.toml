@@ -57,4 +57,5 @@ mimalloc = { version = "0.1", default-features = false }
 openssl-sys = { version = "*", features = ["vendored"] }
 
 [dev-dependencies]
+hq-sandbox = { path = "../hq-sandbox" }
 tempfile = { workspace = true }

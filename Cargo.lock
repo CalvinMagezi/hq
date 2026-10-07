@@ -2306,6 +2306,7 @@ dependencies = [
  "hq-mcp",
  "hq-memory",
  "hq-relay",
+ "hq-sandbox",
  "hq-tools",
  "hq-update",
  "hq-vault",

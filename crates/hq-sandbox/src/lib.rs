@@ -44,8 +44,24 @@ pub enum Network {
     /// No outbound connections at all.
     Off,
     /// Outbound only to `localhost:<port>` (an egress proxy that applies a
-    /// domain allowlist) and to the listed unix sockets.
-    Proxy { port: u16, unix_sockets: Vec<PathBuf> },
+    /// domain allowlist) and to the listed unix sockets. Seatbelt can allow one
+    /// loopback port; bubblewrap has no network at all in its new namespace, so
+    /// it needs a `relay` that listens on that port inside the sandbox and
+    /// forwards to a unix socket the host serves.
+    Proxy {
+        port: u16,
+        unix_sockets: Vec<PathBuf>,
+        relay: Option<Relay>,
+    },
+}
+
+/// The in-sandbox half of the bridge to the egress proxy: `program host
+/// sandbox-init` starts a relay on the proxy port that forwards to
+/// `unix_socket`, then runs the agent.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Relay {
+    pub program: PathBuf,
+    pub unix_socket: PathBuf,
 }
 
 /// Everything one sandboxed agent is allowed, as resolved paths.
@@ -69,6 +85,9 @@ pub struct AgentSandbox {
     /// Files the agent can neither read nor write.
     pub masked_files: Vec<PathBuf>,
     pub hidden_dirs: Vec<HiddenDir>,
+    /// Directories given a private empty tmpfs (bubblewrap only; Seatbelt lists
+    /// the shared temporary directories as writable instead).
+    pub private_tmp: Vec<PathBuf>,
     /// Reads under each root limited to listed paths, outermost root first (a
     /// restriction inside an earlier one narrows it).
     pub read_restrictions: Vec<ReadRestriction>,
@@ -197,7 +216,7 @@ pub fn seatbelt_profile(s: &AgentSandbox) -> String {
     match &s.network {
         Network::Full => {}
         Network::Off => p.push_str("(deny network-outbound (remote ip))"),
-        Network::Proxy { port, unix_sockets } => {
+        Network::Proxy { port, unix_sockets, .. } => {
             let mut allowed = vec![format!("(remote ip \"localhost:{port}\")")];
             allowed.extend(
                 unix_sockets
@@ -218,13 +237,17 @@ pub fn seatbelt_profile(s: &AgentSandbox) -> String {
 /// roots bound back in, hidden directories replaced by an empty tmpfs with only
 /// the allowed files bound back.
 pub fn bwrap_args(s: &AgentSandbox, argv: &[String]) -> Result<Vec<OsString>, Unsupported> {
-    if matches!(s.network, Network::Proxy { .. }) {
-        return Err(Unsupported(
-            "a domain-allowlisted network needs a relay inside the sandbox, which the bubblewrap \
-             backend does not have yet; use network `off` or `full` on this host"
-                .into(),
-        ));
-    }
+    let relay = match &s.network {
+        Network::Proxy { relay: None, .. } => {
+            return Err(Unsupported(
+                "a domain-allowlisted network needs a relay inside the bubblewrap sandbox, and \
+                 none was given"
+                    .into(),
+            ));
+        }
+        Network::Proxy { port, relay: Some(relay), .. } => Some((*port, relay)),
+        _ => None,
+    };
     let mut args: Vec<OsString> = [
         "--ro-bind",
         "/",
@@ -240,6 +263,9 @@ pub fn bwrap_args(s: &AgentSandbox, argv: &[String]) -> Result<Vec<OsString>, Un
     .iter()
     .map(OsString::from)
     .collect();
+    for dir in &s.private_tmp {
+        args.extend(["--tmpfs".into(), dir.into()]);
+    }
     for r in &s.read_restrictions {
         args.extend(["--tmpfs".into(), (&r.root).into()]);
         for path in &r.allow {
@@ -252,11 +278,16 @@ pub fn bwrap_args(s: &AgentSandbox, argv: &[String]) -> Result<Vec<OsString>, Un
     for path in s.readonly_files.iter().chain(&s.readonly_subpaths) {
         args.extend(["--ro-bind".into(), path.into(), path.into()]);
     }
-    if s.network == Network::Off {
+    if s.network == Network::Off || relay.is_some() {
         args.push("--unshare-net".into());
     }
-    for hidden in &s.hidden_dirs {
-        args.extend(["--tmpfs".into(), (&hidden.dir).into()]);
+    // Outermost first: a later mount shadows an earlier one, so an inner hidden
+    // directory has to be mounted after the one that contains it.
+    let mut hidden: Vec<&HiddenDir> = s.hidden_dirs.iter().collect();
+    hidden.sort_by_key(|h| h.dir.components().count());
+    for hidden in hidden {
+        // Private, like the real directory: programs inside check that before trusting it.
+        args.extend(["--perms".into(), "0700".into(), "--tmpfs".into(), (&hidden.dir).into()]);
         for file in &hidden.allow {
             args.extend(["--bind".into(), file.into(), file.into()]);
         }
@@ -265,6 +296,18 @@ pub fn bwrap_args(s: &AgentSandbox, argv: &[String]) -> Result<Vec<OsString>, Un
         args.extend(["--ro-bind".into(), "/dev/null".into(), file.into()]);
     }
     args.extend(["--chdir".into(), (&s.project).into(), "--".into()]);
+    if let Some((port, relay)) = relay {
+        args.extend([
+            relay.program.clone().into_os_string(),
+            "host".into(),
+            "sandbox-init".into(),
+            "--port".into(),
+            port.to_string().into(),
+            "--unix".into(),
+            relay.unix_socket.clone().into_os_string(),
+            "--".into(),
+        ]);
+    }
     args.extend(argv.iter().map(OsString::from));
     Ok(args)
 }

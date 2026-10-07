@@ -16,6 +16,7 @@ mod hooks;
 mod keys;
 mod pane;
 mod proto;
+mod relay;
 mod report;
 mod sandbox;
 mod server;
@@ -35,6 +36,7 @@ pub use host::{
 pub use gate::{Denied, GATE_DENIED_EXIT, MAX_GATE_INPUT, forward as gate_forward, parse_request as gate_parse_request};
 pub use hooks::{claude_mcp_config, claude_settings, write_claude_mcp_config, report_params, write_claude_settings};
 pub use keys::encode_key;
+pub use relay::{run_relay, sandbox_init};
 pub use report::{STALE_WORKING_AFTER, combine as combine_state, state_for};
 pub use proto::{MAX_LINE_BYTES, PROTOCOL_VERSION, Request, Response};
 pub use sandbox::{Allow, Mode as SandboxMode, SandboxSpec};
