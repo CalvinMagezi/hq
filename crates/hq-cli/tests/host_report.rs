@@ -57,6 +57,55 @@ fn a_hook_event_in_a_pane_reaches_the_host_through_hq_host_report() {
     assert_eq!(info["rule"], "hook:UserPromptSubmit");
 }
 
+/// Inside the sandbox the user's config and env files are unreadable, which
+/// once made every hook fail before it reached the host. Runs only where the
+/// macOS sandbox program exists.
+#[test]
+fn a_hook_event_reaches_the_host_from_inside_the_sandbox() {
+    if !cfg!(target_os = "macos") || !std::path::Path::new("/usr/bin/sandbox-exec").exists() {
+        return;
+    }
+    // Not under the temporary directory: that is writable to the agent, and the
+    // host refuses a run directory an agent could rename.
+    let tmp = tempfile::tempdir_in(env!("CARGO_MANIFEST_DIR")).unwrap();
+    let dir = tmp.path().join("run");
+    let project = tempfile::tempdir().unwrap();
+    // The test binary lives under the user's home, which the sandbox hides.
+    let copy = project.path().join("hq");
+    std::fs::copy(hq(), &copy).unwrap();
+    let server = Server::bind(&dir, Arc::new(Host::new())).unwrap();
+    let stop = server.stop_handle();
+    let thread = std::thread::spawn(move || server.serve());
+
+    let payload = r#"{"hook_event_name":"UserPromptSubmit","session_id":"conv-sandboxed"}"#;
+    let command = claude_settings(&format!("'{}' host report", copy.display()))["hooks"]["UserPromptSubmit"][0]
+        ["hooks"][0]["command"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    let script = format!("printf '%s' '{payload}' | {command}; sleep 60");
+    let mut client = Client::connect(&dir).unwrap();
+    client
+        .call(
+            "agent.spawn",
+            json!({ "name": "boxed", "argv": ["sh", "-c", script], "cwd": project.path(),
+                    "agent": "claude", "sandbox": { "mode": "process", "allow": [] } }),
+        )
+        .unwrap();
+    let deadline = Instant::now() + WAIT;
+    let info = loop {
+        let info = client.call("agent.get", json!({ "name": "boxed" })).unwrap();
+        if info["agent_session_id"] == "conv-sandboxed" || Instant::now() > deadline {
+            break info;
+        }
+        std::thread::sleep(Duration::from_millis(100));
+    };
+    stop.stop();
+    thread.join().unwrap();
+    assert_eq!(info["agent_session_id"], "conv-sandboxed", "{info}");
+    assert_eq!(info["sandbox"], "process");
+}
+
 #[test]
 fn the_report_command_is_silent_and_succeeds_without_a_host() {
     let out = std::process::Command::new(hq())
