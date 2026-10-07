@@ -18,10 +18,10 @@ const SECRET_HOME_DIRS: &[&str] = &[
 /// sent to an allowed host. Tool installs, shell and git configuration, and the
 /// agent's own state are listed; `herdr.sandbox.readable` adds more.
 const HOME_READABLE: &[&str] = &[
-    ".claude", ".claude.json", ".local", ".cache", ".config", ".cargo", ".rustup", ".nvm", ".npm", ".bun",
+    ".local", ".cache", ".config", ".cargo", ".rustup", ".nvm", ".npm", ".bun",
     ".volta", ".pyenv", ".asdf", ".deno", ".gitconfig", ".gitignore_global", ".terminfo", ".zshenv",
     ".zprofile", ".zshrc", ".zlogin", ".bashrc", ".bash_profile", ".profile", ".inputrc", ".oh-my-zsh",
-    "Library/Caches", "Library/Preferences", "Library/Keychains", ".claude.json.lock",
+    "Library/Caches", "Library/Preferences", "Library/Keychains",
 ];
 /// Where other people's files live, which an agent has no reason to read: other
 /// users' home directories and external volumes. What the agent is allowed
@@ -38,7 +38,11 @@ const OTHER_PROFILE_PREFIX: &str = ".claude-";
 const SECRET_HOME_FILES: &[&str] = &[".netrc", ".npmrc", ".git-credentials"];
 /// Files and directories the operator's own tools run code from later, outside
 /// the sandbox. Writable roots must not let an agent plant anything in them.
-const HOME_READONLY: &[&str] = &[".claude/settings.json", ".claude/settings.local.json", ".claude/hooks"];
+/// Inside the Claude config directory (`~/.claude`, or the profile's `CLAUDE_CONFIG_DIR`).
+const CLAUDE_DIR_READONLY_FILES: &[&str] = &["settings.json", "settings.local.json", ".claude.json"];
+const CLAUDE_DIR_READONLY_DIRS: &[&str] = &["hooks"];
+const CLAUDE_CONFIG_DIR_ENV: &str = "CLAUDE_CONFIG_DIR";
+const DEFAULT_CLAUDE_DIR: &str = ".claude";
 const PROJECT_READONLY: &[&str] = &[".git/hooks", ".git/config", ".mcp.json", ".claude/settings.json", ".claude/settings.local.json", ".claude/hooks"];
 /// Ways out of Seatbelt: starting an app outside it, or scheduling one.
 const DENIED_PROGRAMS: &[&str] = &["/usr/bin/open", "/usr/bin/osascript", "/bin/launchctl", "/usr/bin/launchctl"];
@@ -46,7 +50,7 @@ const DENIED_SERVICES: &[&str] = &["com.apple.coreservices.launchservicesd", "co
 /// What Claude Code needs to write under HOME, besides the project.
 /// `~/.claude.json` is deliberately not writable: it holds MCP server commands the
 /// operator's own Claude runs later. The host records trust for the project itself.
-const HOME_WRITABLE: &[&str] = &[".claude", ".cache", "Library/Caches"];
+const HOME_WRITABLE: &[&str] = &[".cache", "Library/Caches"];
 const TMP_ROOTS: &[&str] = &["/tmp", "/var/tmp", "/var/folders", "/dev"];
 const PROXY_ENV_NAMES: &[&str] = &["HTTPS_PROXY", "HTTP_PROXY", "https_proxy", "http_proxy"];
 
@@ -123,6 +127,35 @@ fn rules(allow: &[Allow]) -> Vec<Rule> {
         .collect()
 }
 
+/// Where one Claude Code account keeps its state: the default `~/.claude` (with
+/// `~/.claude.json` beside it), or the directory a launch profile names with
+/// `CLAUDE_CONFIG_DIR` (with `.claude.json` inside it).
+struct ClaudeConfig {
+    dir: PathBuf,
+    /// The directory holding `.claude.json`.
+    json_dir: PathBuf,
+    is_default: bool,
+}
+
+fn claude_config(env: &[(String, String)]) -> Option<ClaudeConfig> {
+    let custom = env
+        .iter()
+        .find(|(k, _)| k == CLAUDE_CONFIG_DIR_ENV)
+        .map(|(_, v)| PathBuf::from(v))
+        .filter(|p| p.is_absolute() && p.is_dir());
+    if let Some(dir) = custom {
+        let dir = dir.canonicalize().unwrap_or(dir);
+        return Some(ClaudeConfig { json_dir: dir.clone(), dir, is_default: false });
+    }
+    let home = home()?;
+    let home = home.canonicalize().unwrap_or(home);
+    Some(ClaudeConfig {
+        dir: home.join(DEFAULT_CLAUDE_DIR),
+        json_dir: home,
+        is_default: true,
+    })
+}
+
 fn home() -> Option<PathBuf> {
     std::env::var_os("HOME").map(PathBuf::from).filter(|h| h.is_absolute())
 }
@@ -133,6 +166,8 @@ fn policy(
     cwd: &Path,
     run_dir: &Path,
     port: u16,
+    claude_dir: &Path,
+    default_claude: bool,
 ) -> Result<AgentSandbox, HostError> {
     let home = home().ok_or_else(|| HostError::Io("HOME is not set".into()))?;
     let home = home.canonicalize().unwrap_or(home);
@@ -141,6 +176,7 @@ fn policy(
     let writable = canonical(
         under(HOME_WRITABLE)
             .into_iter()
+            .chain([claude_dir.to_path_buf()])
             .chain(TMP_ROOTS.iter().map(PathBuf::from))
             .chain([tmp])
             .chain(spec.writable.iter().cloned()),
@@ -152,8 +188,16 @@ fn policy(
         .flatten()
         .flatten()
         .filter(|e| e.file_name().to_string_lossy().starts_with(OTHER_PROFILE_PREFIX))
-        .map(|e| e.path());
-    let secret_dirs = canonical(under(SECRET_HOME_DIRS).into_iter().chain(other_profiles));
+        .map(|e| e.path())
+        .filter(|p| p.canonicalize().ok().as_deref() != Some(claude_dir));
+    // With a profile's own config directory, the default ~/.claude is another account.
+    let default_dir = (!default_claude).then(|| home.join(DEFAULT_CLAUDE_DIR));
+    let secret_dirs = canonical(
+        under(SECRET_HOME_DIRS)
+            .into_iter()
+            .chain(other_profiles)
+            .chain(default_dir),
+    );
     // A writable root that contains HOME, the run directory or a secret directory
     // would let the agent rename or rewrite them, which no read rule survives.
     let guarded = [home.clone(), run_dir.clone()].into_iter().chain(secret_dirs.iter().cloned());
@@ -176,8 +220,8 @@ fn policy(
     let mut hidden = vec![HiddenDir { dir: run_dir, allow }];
     hidden.extend(secret_dirs.into_iter().map(|dir| HiddenDir { dir, allow: Vec::new() }));
     let under_project = |names: &[&str]| names.iter().map(|n| project.join(n)).collect::<Vec<_>>();
-    let (home_files, home_dirs): (Vec<_>, Vec<_>) =
-        under(HOME_READONLY).into_iter().partition(|p| p.extension().is_some());
+    let home_files: Vec<PathBuf> = CLAUDE_DIR_READONLY_FILES.iter().map(|f| claude_dir.join(f)).collect();
+    let home_dirs: Vec<PathBuf> = CLAUDE_DIR_READONLY_DIRS.iter().map(|d| claude_dir.join(d)).collect();
     let (project_files, project_dirs): (Vec<_>, Vec<_>) = under_project(PROJECT_READONLY)
         .into_iter()
         .partition(|p| p.extension().is_some() || p.ends_with("config"));
@@ -185,6 +229,8 @@ fn policy(
     let read_allow = canonical(
         under(HOME_READABLE)
             .into_iter()
+            .chain([claude_dir.to_path_buf()])
+            .chain(default_claude.then(|| home.join(".claude.json")))
             .chain(spec.readable.iter().cloned())
             .chain(std::iter::once(project.clone()))
             .chain(writable.iter().cloned()),
@@ -234,31 +280,42 @@ fn outer_restrictions(_allow: &[PathBuf]) -> Vec<ReadRestriction> {
     Vec::new()
 }
 
+/// What is being started: the agent's name, command, kind and environment.
+#[derive(Clone, Copy)]
+pub(crate) struct Launch<'a> {
+    pub name: &'a str,
+    pub cwd: &'a Path,
+    pub run_dir: Option<&'a Path>,
+    pub argv: &'a [String],
+    pub agent: Option<&'a str>,
+    pub env: &'a [(String, String)],
+}
+
 /// Opens the agent's egress listener and wraps `argv` in the platform sandbox.
 /// Fails closed: no sandbox program, or a policy the platform cannot enforce,
 /// is an error, never an unsandboxed start.
 pub(crate) fn confine(
     egress: &Egress,
     spec: &SandboxSpec,
-    name: &str,
-    cwd: &Path,
-    run_dir: Option<&Path>,
-    argv: &[String],
-    agent: Option<&str>,
+    launch: &Launch,
 ) -> Result<Confined, HostError> {
+    let Launch { name, cwd, run_dir, argv, agent, env } = *launch;
     let refuse = |why: &str| HostError::Sandbox(why.to_string());
     let run_dir = run_dir.ok_or_else(|| refuse("the host has no run directory to protect"))?;
     let backend = backend().ok_or_else(|| refuse("no sandbox program (sandbox-exec or bwrap) on this machine"))?;
+    let claude = claude_config(env);
     if agent == Some("claude")
-        && let Some(home) = home()
-        && let Err(e) = trust_claude_project(&home, cwd)
+        && let Some(claude) = &claude
+        && let Err(e) = trust_claude_project(&claude.json_dir, cwd)
     {
         eprintln!("hq host: could not record trust for {}: {e}", cwd.display());
     }
     let port = egress
         .open(name, rules(&spec.allow))
         .map_err(|e| HostError::Io(e.to_string()))?;
-    let wrapped = policy(spec, name, cwd, run_dir, port)
+    let wrapped = claude
+        .ok_or_else(|| HostError::Io("HOME is not set".into()))
+        .and_then(|c| policy(spec, name, cwd, run_dir, port, &c.dir, c.is_default))
         .and_then(|policy| wrap(backend, &policy, argv).map_err(|e| refuse(&e.to_string())));
     let wrapped = match wrapped {
         Ok(w) => w,

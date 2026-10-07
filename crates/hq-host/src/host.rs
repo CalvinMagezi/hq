@@ -307,11 +307,14 @@ impl Host {
                 Some(sandbox::confine(
                     &self.egress,
                     sb,
-                    &spec.name,
-                    &spec.cwd,
-                    run_dir.as_deref(),
-                    &spec.argv,
-                    spec.agent.as_deref(),
+                    &sandbox::Launch {
+                        name: &spec.name,
+                        cwd: &spec.cwd,
+                        run_dir: run_dir.as_deref(),
+                        argv: &spec.argv,
+                        agent: spec.agent.as_deref(),
+                        env: &spec.env,
+                    },
                 )?)
             }
             None => None,

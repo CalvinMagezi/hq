@@ -22,6 +22,10 @@ fn claude_answers_a_prompt_under_the_sandbox() {
     spec.argv = vec!["claude".into()];
     spec.agent = Some("claude".into());
     spec.env = vec![("PATH".into(), std::env::var("PATH").unwrap())];
+    // Set to run under a named account instead of the default one.
+    if let Ok(dir) = std::env::var("HQ_LIVE_CLAUDE_CONFIG_DIR") {
+        spec.env.push(("CLAUDE_CONFIG_DIR".into(), dir));
+    }
     spec.sandbox = Some(SandboxSpec {
         mode: SandboxMode::Process,
         allow: vec![Allow { host: "api.anthropic.com".into(), ports: vec![443], private: false }],
