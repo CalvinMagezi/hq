@@ -402,3 +402,60 @@ async fn invisible_characters_in_a_page_are_removed_from_the_fetched_text() {
     assert!(page.content.contains("Visible text here."), "{:?}", page.content);
     assert!(!page.content.chars().any(|c| matches!(c, '\u{200B}' | '\u{202E}' | '\u{E0049}')), "{:?}", page.content);
 }
+
+/// Browser Stage 0 (`docs/plans/agent-browser.md`): how often does the native
+/// `web_fetch` path come back empty where a rendering reader would not?
+/// `cargo test -p hq-tools bench_web_fetch_vs_jina -- --ignored --nocapture`
+/// Output file: `HQ_FETCH_BENCH_OUT` (JSON). Uses the network and r.jina.ai.
+#[tokio::test]
+#[ignore = "needs the network and r.jina.ai"]
+async fn bench_web_fetch_vs_jina() {
+    const MIN_USEFUL_CHARS: usize = 500;
+    const PEEK_CHARS: usize = 110;
+    let corpus = include_str!("fixtures/browser-corpus.txt");
+    let fetcher = Fetcher {
+        client: &FETCH_CLIENT,
+        timeout: FETCH_TIMEOUT,
+        jina_base: "",
+    };
+    let (mut rows, mut render_gap, mut both_fail, mut native_ok) = (Vec::new(), 0, 0, 0);
+    for url in corpus.lines().filter(|l| l.starts_with("http")) {
+        let native = fetcher.fetch(url).await;
+        let (n_chars, n_method, n_peek) = match &native {
+            Ok(p) => (
+                p.total_chars,
+                p.method,
+                p.content.chars().take(PEEK_CHARS).collect::<String>().replace('\n', " "),
+            ),
+            Err(e) => (0, "error", format!("{e}").chars().take(PEEK_CHARS).collect()),
+        };
+        let jina = fetch_via_jina(JINA_READER_BASE, url).await;
+        let j_chars = jina.as_ref().map_or(0, |t| t.chars().count());
+        let verdict = match (n_chars >= MIN_USEFUL_CHARS, j_chars >= MIN_USEFUL_CHARS) {
+            (true, _) => {
+                native_ok += 1;
+                "native-ok"
+            }
+            (false, true) => {
+                render_gap += 1;
+                "needs-render"
+            }
+            (false, false) => {
+                both_fail += 1;
+                "both-fail"
+            }
+        };
+        println!("{verdict:<12} native {n_chars:>6} {n_method:<14} jina {j_chars:>6}  {url}  | {n_peek}");
+        rows.push(json!({"url": url, "verdict": verdict, "native_chars": n_chars,
+            "native_method": n_method, "jina_chars": j_chars, "native_peek": n_peek}));
+        tokio::time::sleep(Duration::from_millis(400)).await;
+    }
+    let total = rows.len();
+    println!(
+        "\n{total} pages: native ok {native_ok}, needs render {render_gap} ({:.0}%), both fail {both_fail}",
+        100.0 * render_gap as f64 / total as f64
+    );
+    if let Ok(out) = std::env::var("HQ_FETCH_BENCH_OUT") {
+        std::fs::write(out, serde_json::to_string_pretty(&rows).unwrap()).unwrap();
+    }
+}
