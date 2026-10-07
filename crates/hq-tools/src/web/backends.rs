@@ -301,6 +301,7 @@ pub(super) fn parse_searxng_results(json: &Value, page: u32) -> Result<Page, Str
                 domain: domain_of(&url),
                 published: non_empty_str(&r["publishedDate"]),
                 engines,
+                flagged: false,
                 url,
             }
         })
@@ -398,6 +399,7 @@ pub(super) fn parse_brave_results(json: &Value, opts: &SearchOptions) -> Result<
                 domain: domain_of(&url),
                 published: non_empty_str(&r["page_age"]).or_else(|| non_empty_str(&r["age"])),
                 engines: Vec::new(),
+                flagged: false,
                 url,
             }
         })
@@ -449,7 +451,7 @@ where
     let mut note = |outcome: String| {
         attempts.push(ProviderAttempt {
             provider: backend.label.into(),
-            outcome,
+            outcome: sanitize_note(&outcome),
         })
     };
     if with_health(backend.key, |h| h.is_cooling_down()).unwrap_or(false) {

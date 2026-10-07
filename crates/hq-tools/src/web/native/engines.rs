@@ -456,6 +456,7 @@ pub(super) fn result(title: String, url: String, snippet: String) -> SearchResul
         provider: String::new(),
         published: None,
         engines: Vec::new(),
+        flagged: false,
     }
 }
 

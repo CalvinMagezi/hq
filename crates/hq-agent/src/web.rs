@@ -100,7 +100,8 @@ impl AgentTool for WebSearchTool {
             Err(e) => return Ok(text_result(format!("Error: {e}"))),
         };
 
-        debug!(query = %query, ?opts, "agent web_search");
+        // The query may carry a credential that `web_search` refuses; log it redacted.
+        debug!(query = %hq_core::redact::redact_secrets(query), ?opts, "agent web_search");
 
         match web::web_search(
             query,

@@ -390,3 +390,15 @@ async fn a_large_bundle_page_with_a_little_server_copy_still_goes_to_recovery() 
 
     assert_eq!(page.method, METHOD_EMBEDDED, "{:?}", page.notes);
 }
+
+#[tokio::test]
+async fn invisible_characters_in_a_page_are_removed_from_the_fetched_text() {
+    let server = MockServer::start().await;
+    let html = "<html><body><p>Visible text \u{200B}here\u{202E}.\u{E0049}\u{E0047}</p></body></html>";
+    mount(&server, "/p", ResponseTemplate::new(200).set_body_raw(html, HTML)).await;
+
+    let page = fetch(&server, "/p").await.unwrap();
+
+    assert!(page.content.contains("Visible text here."), "{:?}", page.content);
+    assert!(!page.content.chars().any(|c| matches!(c, '\u{200B}' | '\u{202E}' | '\u{E0049}')), "{:?}", page.content);
+}

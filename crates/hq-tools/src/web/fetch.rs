@@ -300,6 +300,9 @@ impl Fetcher<'_> {
         let (text, method) = self
             .extract(url, &final_url, &content_type, &bytes, &mut notes)
             .await?;
+        // Hidden characters in page text are a known way to smuggle instructions
+        // past a human reader; the visible text is unchanged.
+        let text = strip_invisible(&text);
         if text.trim().is_empty() {
             notes.push("extraction produced no text".into());
         }
