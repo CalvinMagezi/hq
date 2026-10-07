@@ -265,7 +265,7 @@ fn env(base: &str) -> NativeEnv<'_> {
     NativeEnv {
         client: get_client(),
         base_override: Some(base),
-        wait_for_all: false,
+        straggler_grace: None,
     }
 }
 
@@ -2110,6 +2110,11 @@ fn off_topic_hits_from_narrow_engines_rank_below_on_topic_ones() {
 async fn the_pool_stops_waiting_for_slow_engines_once_google_has_answered() {
     let server = native_server().await;
     let slow = Duration::from_millis(1500);
+    let base = server.uri();
+    let patient = NativeEnv {
+        straggler_grace: Some(Duration::from_millis(200)),
+        ..env(&base)
+    };
     Mock::given(method("POST"))
         .and(path("/html/"))
         .respond_with(ResponseTemplate::new(200).set_body_string(DDG_HTML).set_delay(slow))
@@ -2124,7 +2129,13 @@ async fn the_pool_stops_waiting_for_slow_engines_once_google_has_answered() {
     mount_wikipedia_missing(&server).await;
     mount_google(&server, GOOGLE_RESULTS).await;
     let started = Instant::now();
-    let r = run(&server, "straggler grace query", &SearchOptions::default())
+    let budgets = Budgets {
+        total: Duration::from_secs(5),
+        searxng: Duration::from_millis(400),
+        native_engine: Duration::from_secs(2),
+        brave: Duration::from_millis(400),
+    };
+    let r = search_chain("straggler grace query", &SearchOptions::default(), None, None, Some(&patient), &budgets)
         .await
         .unwrap();
     assert!(started.elapsed() < Duration::from_millis(1000), "{:?}", started.elapsed());
