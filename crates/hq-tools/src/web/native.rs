@@ -15,11 +15,21 @@ mod tests;
 
 pub(super) use engines::Engine;
 
+/// Once a primary engine has answered, slower engines get this long before the
+/// pool returns without them (and caches the answer as partial).
+const STRAGGLER_GRACE: Duration = Duration::from_millis(1500);
 const NATIVE_REQUEST_TIMEOUT: Duration = Duration::from_secs(10);
 const RESULT_CACHE_TTL: Duration = Duration::from_secs(10 * 60);
 /// A pool with some engines down is cached briefly, so a retry soon after picks them up again.
 const PARTIAL_RESULT_CACHE_TTL: Duration = Duration::from_secs(60);
+/// An answer of "nothing found" from a healthy pool, kept briefly so a rare
+/// query asked again does not hit every engine again.
+const NEGATIVE_RESULT_CACHE_TTL: Duration = Duration::from_secs(30);
 const CACHE_MAX_ENTRIES: usize = 200;
+/// Distinct searches that may run at once. Each runs in its own task and holds
+/// connections to every engine for up to the pool deadline, so a burst of
+/// parallel sub-agents queues here instead of opening hundreds of requests.
+const MAX_CONCURRENT_POOL_RUNS: usize = 12;
 /// Engines at or above this weight are the real web indexes.
 const PRIMARY_WEIGHT: f32 = 1.0;
 /// Query parameters that only track clicks; they never change which page a URL is.
@@ -33,6 +43,8 @@ pub(super) static NATIVE_CLIENT: std::sync::LazyLock<Client> =
 pub(super) struct NativeEnv<'a> {
     pub(super) client: &'a Client,
     pub(super) base_override: Option<&'a str>,
+    /// How long slower engines get once a primary one has answered; `None` waits for every engine.
+    pub(super) straggler_grace: Option<Duration>,
 }
 
 impl NativeEnv<'static> {
@@ -40,6 +52,15 @@ impl NativeEnv<'static> {
         Self {
             client: &NATIVE_CLIENT,
             base_override: None,
+            straggler_grace: Some(STRAGGLER_GRACE),
+        }
+    }
+
+    /// For `hq doctor`, which must hear from every engine.
+    pub(super) fn diagnostic() -> Self {
+        Self {
+            straggler_grace: None,
+            ..Self::production()
         }
     }
 }
@@ -54,10 +75,30 @@ struct CacheEntry {
 static RESULT_CACHE: std::sync::LazyLock<Mutex<HashMap<String, CacheEntry>>> =
     std::sync::LazyLock::new(|| Mutex::new(HashMap::new()));
 
+/// Queries that differ only in case or spacing are the same search, and the
+/// options that change what the engines are asked are spelled out so a new
+/// field cannot silently change or fragment the key.
 fn cache_key(query: &str, opts: &SearchOptions, base_override: Option<&str>) -> String {
+    let query = query
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ")
+        .to_lowercase();
+    let sorted = |domains: &[String]| {
+        let mut d = domains.to_vec();
+        d.sort();
+        d.join(",")
+    };
     format!(
-        "{}\u{1}{opts:?}\u{1}{}",
-        query.trim().to_lowercase(),
+        "{query}\u{1}p{}|n{}|f{:?}|l{}|c{}|k{:?}|i{}|x{}\u{1}{}",
+        opts.page,
+        opts.max_results,
+        opts.freshness,
+        opts.language.as_deref().unwrap_or_default(),
+        opts.country.as_deref().unwrap_or_default(),
+        opts.category,
+        sorted(&opts.include_domains),
+        sorted(&opts.exclude_domains),
         base_override.unwrap_or_default()
     )
 }
@@ -106,6 +147,7 @@ struct EngineRun {
 }
 
 /// What the pool produced for one search.
+#[derive(Clone)]
 pub(super) struct PoolAnswer {
     /// `None` when no engine answered (the attempts say why); `Some` with no
     /// results means engines answered and found nothing.
@@ -116,8 +158,54 @@ pub(super) struct PoolAnswer {
     pub(super) attempts: Vec<ProviderAttempt>,
 }
 
-/// Cached front for [`search_pool`]. A complete answer is kept for 10 minutes,
-/// one from a pool with engines down for a minute, a degraded one not at all.
+type SharedOutcome = Option<std::sync::Arc<(PoolAnswer, bool)>>;
+
+/// Searches in progress, by cache key. A second identical search waits for the
+/// first instead of asking every engine again; twenty parallel sub-agents that
+/// ask the same thing cost one pool run.
+static INFLIGHT: std::sync::LazyLock<
+    Mutex<HashMap<String, tokio::sync::watch::Receiver<SharedOutcome>>>,
+> = std::sync::LazyLock::new(|| Mutex::new(HashMap::new()));
+
+static POOL_RUNS: std::sync::LazyLock<std::sync::Arc<tokio::sync::Semaphore>> =
+    std::sync::LazyLock::new(|| {
+        std::sync::Arc::new(tokio::sync::Semaphore::new(MAX_CONCURRENT_POOL_RUNS))
+    });
+
+/// Removes the in-flight entry however the search task ends, panics included.
+struct InflightGuard(String);
+
+impl Drop for InflightGuard {
+    fn drop(&mut self) {
+        if let Ok(mut map) = INFLIGHT.lock() {
+            map.remove(&self.0);
+        }
+    }
+}
+
+fn store_outcome(key: String, answer: &PoolAnswer, complete: bool) {
+    let Some(page) = answer.page.as_ref() else {
+        return;
+    };
+    let ttl = if !page.results.is_empty() {
+        if complete {
+            Some(RESULT_CACHE_TTL)
+        } else {
+            (!answer.degraded).then_some(PARTIAL_RESULT_CACHE_TTL)
+        }
+    } else {
+        (!answer.degraded).then_some(NEGATIVE_RESULT_CACHE_TTL)
+    };
+    if let Some(ttl) = ttl {
+        store_page(key, page, ttl);
+    }
+}
+
+/// Cached, single-flight front for [`search_pool`]. A complete answer is kept
+/// for 10 minutes, one from a pool with engines down for a minute, an empty
+/// one from a healthy pool for 30 seconds, a degraded one not at all. The
+/// search runs in its own task, so a caller that gives up (a tool timeout, a
+/// cancelled turn) still leaves the cache warm for the retry.
 pub(super) async fn native_search(
     query: &str,
     opts: &SearchOptions,
@@ -137,18 +225,77 @@ pub(super) async fn native_search(
             attempts: vec![note],
         };
     }
-    let (answer, complete) = search_pool(query, opts, env, deadline, budget).await;
-    if let Some(page) = answer.page.as_ref().filter(|p| !p.results.is_empty()) {
-        let ttl = if complete {
-            Some(RESULT_CACHE_TTL)
-        } else {
-            (!answer.degraded).then_some(PARTIAL_RESULT_CACHE_TTL)
-        };
-        if let Some(ttl) = ttl {
-            store_page(key, page, ttl);
-        }
+    let Some(mut rx) = join_or_start(&key, query, opts, env, deadline, budget) else {
+        // Sharing is unavailable (a poisoned lock): run this search on its own.
+        return search_pool(query, opts, env, deadline, budget).await.0;
+    };
+    let wait = deadline.saturating_duration_since(Instant::now());
+    let failure = |outcome: &str| PoolAnswer {
+        page: None,
+        degraded: true,
+        attempts: vec![ProviderAttempt {
+            provider: "native".into(),
+            outcome: outcome.into(),
+        }],
+    };
+    match tokio::time::timeout(wait, rx.wait_for(Option::is_some)).await {
+        Ok(Ok(outcome)) => outcome.as_ref().map_or_else(
+            || failure("the shared search produced nothing"),
+            |o| o.0.clone(),
+        ),
+        Ok(Err(_)) => failure("the shared search for this query failed"),
+        Err(_) => failure("timed out waiting for the search already running for this query"),
     }
-    answer
+}
+
+fn join_or_start(
+    key: &str,
+    query: &str,
+    opts: &SearchOptions,
+    env: &NativeEnv<'_>,
+    deadline: Instant,
+    budget: Duration,
+) -> Option<tokio::sync::watch::Receiver<SharedOutcome>> {
+    let mut map = INFLIGHT.lock().ok()?;
+    if let Some(rx) = map.get(key) {
+        return Some(rx.clone());
+    }
+    let (tx, rx) = tokio::sync::watch::channel(None);
+    map.insert(key.to_string(), rx.clone());
+    drop(map);
+    let (key, query, opts) = (key.to_string(), query.to_string(), opts.clone());
+    let client = env.client.clone();
+    let base = env.base_override.map(str::to_string);
+    let straggler_grace = env.straggler_grace;
+    tokio::spawn(async move {
+        let _guard = InflightGuard(key.clone());
+        let queue = tokio::time::timeout_at(
+            tokio::time::Instant::now() + deadline.saturating_duration_since(Instant::now()),
+            POOL_RUNS.clone().acquire_owned(),
+        )
+        .await;
+        let Ok(Ok(_permit)) = queue else {
+            let busy = PoolAnswer {
+                page: None,
+                degraded: true,
+                attempts: vec![ProviderAttempt {
+                    provider: "native".into(),
+                    outcome: "skipped: too many searches already running".into(),
+                }],
+            };
+            let _ = tx.send(Some(std::sync::Arc::new((busy, false))));
+            return;
+        };
+        let env = NativeEnv {
+            client: &client,
+            base_override: base.as_deref(),
+            straggler_grace,
+        };
+        let (answer, complete) = search_pool(&query, &opts, &env, deadline, budget).await;
+        store_outcome(key, &answer, complete);
+        let _ = tx.send(Some(std::sync::Arc::new((answer, complete))));
+    });
+    Some(rx)
 }
 
 /// Query every engine for the category in parallel and merge the answers. The
@@ -184,9 +331,32 @@ pub(super) async fn search_pool(
     }
     let mut runs = Vec::new();
     let mut attempts = Vec::new();
-    while let Some(joined) = set.join_next().await {
+    let mut cut_short = false;
+    let mut grace_ends: Option<Instant> = None;
+    loop {
+        let next = match grace_ends {
+            Some(end) => {
+                match tokio::time::timeout_at(end.into(), set.join_next()).await {
+                    Ok(next) => next,
+                    Err(_) => {
+                        cut_short = true;
+                        set.abort_all();
+                        break;
+                    }
+                }
+            }
+            None => set.join_next().await,
+        };
+        let Some(joined) = next else { break };
         match joined {
-            Ok(run) => runs.push(run),
+            Ok(run) => {
+                let answered_well = run.weight >= PRIMARY_WEIGHT
+                    && run.results.as_ref().is_some_and(|r| !r.is_empty());
+                if let (true, None, Some(grace)) = (answered_well, grace_ends, env.straggler_grace) {
+                    grace_ends = Some(Instant::now() + grace);
+                }
+                runs.push(run);
+            }
             Err(e) => attempts.push(ProviderAttempt {
                 provider: "native".into(),
                 outcome: format!("engine task failed: {e}"),
@@ -195,7 +365,7 @@ pub(super) async fn search_pool(
     }
     runs.sort_by_key(|r| r.order);
     attempts.extend(runs.iter().flat_map(|r| r.attempts.clone()));
-    let complete = !runs.is_empty() && runs.iter().all(|r| r.results.is_some());
+    let complete = !cut_short && !runs.is_empty() && runs.iter().all(|r| r.results.is_some());
     let degraded = !runs
         .iter()
         .any(|r| r.results.is_some() && r.weight >= PRIMARY_WEIGHT);
@@ -211,7 +381,7 @@ pub(super) async fn search_pool(
         };
         return (answer, false);
     }
-    let results = merge(lists);
+    let results = merge(lists, query);
     let next_page = (!results.is_empty()).then(|| opts.page.saturating_add(1));
     let answer = PoolAnswer {
         page: Some(Page { results, next_page }),
@@ -305,7 +475,7 @@ async fn run_engine(
 /// each engine's own list). Agreement between engines therefore counts
 /// heavily, and a top-ranked hit counts far more than a tenth-ranked one. Ties
 /// keep the order engines were queried in.
-fn merge(lists: Vec<(f32, Vec<SearchResult>)>) -> Vec<SearchResult> {
+fn merge(lists: Vec<(f32, Vec<SearchResult>)>, query: &str) -> Vec<SearchResult> {
     struct Slot {
         weight: f32,
         positions: Vec<usize>,
@@ -341,9 +511,10 @@ fn merge(lists: Vec<(f32, Vec<SearchResult>)>) -> Vec<SearchResult> {
             }
         }
     }
+    let terms = query_terms(query);
     let score = |s: &Slot| {
         let sum: f32 = s.positions.iter().map(|p| 1.0 / *p as f32).sum();
-        s.weight * s.positions.len() as f32 * sum
+        s.weight * s.positions.len() as f32 * sum * relevance(&terms, &s.result)
     };
     let mut ranked: Vec<Slot> = slots.into_values().collect();
     ranked.sort_by(|a, b| score(b).total_cmp(&score(a)).then(a.seq.cmp(&b.seq)));
@@ -355,6 +526,39 @@ fn merge(lists: Vec<(f32, Vec<SearchResult>)>) -> Vec<SearchResult> {
             s.result
         })
         .collect()
+}
+
+const STOPWORDS: &[&str] = &[
+    "a", "an", "and", "are", "as", "at", "be", "by", "for", "how", "in", "is", "it", "of", "on",
+    "or", "the", "to", "vs", "what", "with",
+];
+/// Weight a result keeps when none of the query's terms appear in it.
+const MIN_RELEVANCE: f32 = 0.2;
+
+fn query_terms(query: &str) -> Vec<String> {
+    let mut terms: Vec<String> = query
+        .to_lowercase()
+        .split(|c: char| !c.is_alphanumeric())
+        .filter(|t| !t.is_empty() && !STOPWORDS.contains(t))
+        .map(str::to_string)
+        .collect();
+    terms.dedup();
+    terms
+}
+
+/// Share of the query's terms found in the result's title, snippet or URL,
+/// scaled into `MIN_RELEVANCE..=1`. Narrow engines return their closest hit
+/// even when it has nothing to do with the query, which this demotes.
+fn relevance(terms: &[String], r: &SearchResult) -> f32 {
+    if terms.is_empty() {
+        return 1.0;
+    }
+    let haystack = format!("{} {} {}", r.title, r.snippet, r.url).to_lowercase();
+    let hits = terms
+        .iter()
+        .filter(|t| haystack.contains(t.as_str()))
+        .count();
+    MIN_RELEVANCE + (1.0 - MIN_RELEVANCE) * hits as f32 / terms.len() as f32
 }
 
 /// Fold a duplicate hit into the kept one as SearxNG does: the longer title

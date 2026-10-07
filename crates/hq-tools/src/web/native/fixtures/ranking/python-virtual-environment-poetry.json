@@ -1,0 +1,686 @@
+{
+ "category": "code",
+ "engines": [
+  {
+   "engine": "github",
+   "results": [
+    {
+     "published": "2023-07-13T12:56:03Z",
+     "snippet": "Vim Meets Poetry and Pipenv Virtual Environments (Vim Script, 90 stars)",
+     "title": "petobens/poet-v",
+     "url": "https://github.com/petobens/poet-v"
+    },
+    {
+     "published": "2024-04-21T11:20:16Z",
+     "snippet": "Docker image with Gunicorn using Uvicorn workers for running Python web applications. Uses Poetry for managing dependencies and setting up a virtual environment. Supports AMD64 and ARM64 CPU architectures. (Python, 126 stars)",
+     "title": "max-pfeiffer/uvicorn-gunicorn-poetry",
+     "url": "https://github.com/max-pfeiffer/uvicorn-gunicorn-poetry"
+    },
+    {
+     "published": "2025-10-01T22:04:11Z",
+     "snippet": "Docker image with Uvicorn ASGI server for running Python web applications on Kubernetes. Uses Poetry for managing dependencies and setting up a virtual environment. Supports AMD64 and ARM64 CPU architectures. (Python, 135 stars)",
+     "title": "max-pfeiffer/uvicorn-poetry",
+     "url": "https://github.com/max-pfeiffer/uvicorn-poetry"
+    },
+    {
+     "published": "2026-09-27T12:35:51Z",
+     "snippet": "🐍 CLI tool to find and delete unused Python virtual environments (.venv, poetry, conda, pipenv, uv). Reclaim disk space effortlessly — supports bulk delete, size reporting, and pycache cleanup. (Python, 132 stars)",
+     "title": "Tlaloc-Es/killpy",
+     "url": "https://github.com/Tlaloc-Es/killpy"
+    },
+    {
+     "published": "2026-03-29T05:01:52Z",
+     "snippet": "In Maven, Habushu allows virtual environment-based Python projects to be included as part a Maven build. This brings some order and consistency to what can otherwise be haphazardly structured projects. (Java, 7 stars)",
+     "title": "TechnologyBrewery/habushu",
+     "url": "https://github.com/TechnologyBrewery/habushu"
+    },
+    {
+     "published": "2024-12-15T03:52:10Z",
+     "snippet": "Manage Python virtual environments and dependencies the right way (Python, 9 stars)",
+     "title": "jgujerry/python-virtual-environments",
+     "url": "https://github.com/jgujerry/python-virtual-environments"
+    },
+    {
+     "published": "2026-09-01T22:56:33Z",
+     "snippet": "Better Python virtual environments support for Vim (Vim Script, 5 stars)",
+     "title": "Coacher/vim-virtualenv",
+     "url": "https://github.com/Coacher/vim-virtualenv"
+    },
+    {
+     "published": "2026-04-25T09:31:04Z",
+     "snippet": "A Fish Shell plugin that automatically activates a Python virtual environment (venv, UV or Poetry) when entering a project directory. Deactivates the previous one if needed. Works with pyproject.toml or .venv – no manual switching required. (Shell, 17 stars)",
+     "title": "SpaceShaman/autopy.fish",
+     "url": "https://github.com/SpaceShaman/autopy.fish"
+    },
+    {
+     "published": "2026-09-28T18:27:37Z",
+     "snippet": "Poetry Python virtual environment (Batchfile, 0 stars)",
+     "title": "liuyal/jerry-poetry-env",
+     "url": "https://github.com/liuyal/jerry-poetry-env"
+    },
+    {
+     "published": "2025-03-23T12:17:57Z",
+     "snippet": "Python virtual environment examples (0 stars)",
+     "title": "RomanTuras/python-env",
+     "url": "https://github.com/RomanTuras/python-env"
+    },
+    {
+     "published": "2025-02-11T20:40:53Z",
+     "snippet": "Pipper makes working with pip and virtual environments easier. (Shell, 4 stars)",
+     "title": "jzombie/pipper",
+     "url": "https://github.com/jzombie/pipper"
+    },
+    {
+     "published": "2021-07-19T19:37:54Z",
+     "snippet": "Cookiecutter python template to get you started without wasting any time setting up virtual environments, vscode python paths, writing settings management code, setting up git pre-commit hooks and much more. (Python, 3 stars)",
+     "title": "s-raza/cookiecutter-poetry-config-management",
+     "url": "https://github.com/s-raza/cookiecutter-poetry-config-management"
+    },
+    {
+     "published": "2026-07-06T08:45:28Z",
+     "snippet": "Creation of virtual environments, package management (pip/Poetry), and environment variables. (Python, 0 stars)",
+     "title": "LuisPM24/python_module08",
+     "url": "https://github.com/LuisPM24/python_module08"
+    },
+    {
+     "published": "2026-05-24T21:50:27Z",
+     "snippet": "Python dependency and virtual environment managers. I have tried most of them and ranked them based on my use cases, from uv, Poetry, and pipx to classics like virtualenv, venv, and conda. (Python, 0 stars)",
+     "title": "aatansen/Python-Dependency-Virtual-Environment-Managers",
+     "url": "https://github.com/aatansen/Python-Dependency-Virtual-Environment-Managers"
+    },
+    {
+     "published": "2025-01-21T15:41:05Z",
+     "snippet": "How to Create and Use Virtual Environments in Python With Poetry (0 stars)",
+     "title": "muzammil-git/Poetry-Commands",
+     "url": "https://github.com/muzammil-git/Poetry-Commands"
+    },
+    {
+     "published": "2022-03-15T16:31:47Z",
+     "snippet": "Poetry virtual environment to run jupyter notebooks (Makefile, 1 stars)",
+     "title": "aspfohl/foo",
+     "url": "https://github.com/aspfohl/foo"
+    },
+    {
+     "published": "2025-04-21T06:37:51Z",
+     "snippet": "Retrieve the software license list of Python packages installed in a poetry virtual environment. (0 stars)",
+     "title": "d-chris/poetry-licenses-lib",
+     "url": "https://github.com/d-chris/poetry-licenses-lib"
+    },
+    {
+     "published": "2024-06-05T04:30:00Z",
+     "snippet": "Python project setup and dev iteration documentation using poetry for virtual environment management (Makefile, 0 stars)",
+     "title": "fre171csiro/python-projects",
+     "url": "https://github.com/fre171csiro/python-projects"
+    },
+    {
+     "published": "2024-11-26T08:32:07Z",
+     "snippet": "infrastructure_for_data_engineer_virtual_environments (Python, 0 stars)",
+     "title": "k0rsakov/infrastructure_for_data_engineer_virtual_environments",
+     "url": "https://github.com/k0rsakov/infrastructure_for_data_engineer_virtual_environments"
+    },
+    {
+     "published": "2025-08-04T16:59:44Z",
+     "snippet": "CLI tool to automatically create a new Poetry-based Python project and Poetry environment — even if you're not inside a virtual environment (Python, 0 stars)",
+     "title": "alessandro-maccario/poetry-cli-app",
+     "url": "https://github.com/alessandro-maccario/poetry-cli-app"
+    }
+   ],
+   "weight": 1.0
+  },
+  {
+   "engine": "stack overflow",
+   "results": [
+    {
+     "published": "2020-01-23T16:16:28+00:00",
+     "snippet": "207 votes, 8 answers (answered); tags: python, vs-code, python-poetry",
+     "title": "VSCode doesn't show poetry virtualenvs in select interpreter option",
+     "url": "https://stackoverflow.com/questions/59882884/vscode-doesnt-show-poetry-virtualenvs-in-select-interpreter-option"
+    },
+    {
+     "published": "2024-02-08T08:29:19+00:00",
+     "snippet": "2 votes, 2 answers (answered); tags: python, vs-code, interpreter",
+     "title": "Git Bash does not recognize Python virtual environment created by Poetry",
+     "url": "https://stackoverflow.com/questions/77960213/git-bash-does-not-recognize-python-virtual-environment-created-by-poetry"
+    },
+    {
+     "published": "2020-12-20T01:05:52+00:00",
+     "snippet": "19 votes, 2 answers (answered); tags: python-poetry",
+     "title": "How does the Python tool Poetry know the path of a project's virtual environment?",
+     "url": "https://stackoverflow.com/questions/65376059/how-does-the-python-tool-poetry-know-the-path-of-a-projects-virtual-environment"
+    },
+    {
+     "published": "2020-04-21T19:30:07+00:00",
+     "snippet": "17 votes, 7 answers (answered); tags: rasa, python-poetry",
+     "title": "The virtual environment found seems to be broken | python poetry",
+     "url": "https://stackoverflow.com/questions/61351659/the-virtual-environment-found-seems-to-be-broken-python-poetry"
+    },
+    {
+     "published": "2023-06-23T21:37:33+00:00",
+     "snippet": "0 votes, 2 answers (answered); tags: python-poetry",
+     "title": "Run Python script from any directory using a Poetry virtual environment",
+     "url": "https://stackoverflow.com/questions/76543599/run-python-script-from-any-directory-using-a-poetry-virtual-environment"
+    },
+    {
+     "published": "2023-05-19T05:44:23+00:00",
+     "snippet": "2 votes, 0 answers (unanswered); tags: python, virtualenv, python-poetry",
+     "title": "Poetry using wrong Python version and wrong virtual environment",
+     "url": "https://stackoverflow.com/questions/76286283/poetry-using-wrong-python-version-and-wrong-virtual-environment"
+    },
+    {
+     "published": "2021-07-08T06:48:43+00:00",
+     "snippet": "0 votes, 0 answers (unanswered); tags: python, sqlite, pyenv, python-poetry",
+     "title": "No module named _sqlite3 on python 3.9.2 virtual environment created with pyenv and poetry",
+     "url": "https://stackoverflow.com/questions/68296821/no-module-named-sqlite3-on-python-3-9-2-virtual-environment-created-with-pyenv"
+    },
+    {
+     "published": "2023-11-02T08:19:35+00:00",
+     "snippet": "0 votes, 0 answers (unanswered); tags: python, python-venv, python-poetry",
+     "title": "How to use Python Poetry as a \"lightweight\" virtual environment like `python -m venv <venv>`?",
+     "url": "https://stackoverflow.com/questions/77407930/how-to-use-python-poetry-as-a-lightweight-virtual-environment-like-python-m"
+    },
+    {
+     "published": "2020-02-24T21:05:12+00:00",
+     "snippet": "0 votes, 2 answers (answered); tags: python, python-poetry",
+     "title": "Python Poetry - How to Install 64-bit Virtual Environment?",
+     "url": "https://stackoverflow.com/questions/60383899/python-poetry-how-to-install-64-bit-virtual-environment"
+    },
+    {
+     "published": "2022-01-17T10:28:52+00:00",
+     "snippet": "28 votes, 2 answers (answered); tags: python, virtualenv, python-poetry",
+     "title": "How to create a brand new virtual environment or duplicate an existing one in poetry? (Multiple environment in a project)",
+     "url": "https://stackoverflow.com/questions/70739858/how-to-create-a-brand-new-virtual-environment-or-duplicate-an-existing-one-in-po"
+    },
+    {
+     "published": "2021-02-22T01:36:47+00:00",
+     "snippet": "2 votes, 0 answers (unanswered); tags: python, python-venv, python-packaging, python-poetry",
+     "title": "Python Poetry - Having Trouble with Working in the Virtual Environment",
+     "url": "https://stackoverflow.com/questions/66308993/python-poetry-having-trouble-with-working-in-the-virtual-environment"
+    },
+    {
+     "published": "2023-12-17T00:11:25+00:00",
+     "snippet": "1 votes, 0 answers (unanswered); tags: python, python-3.x, pip, python-3.12",
+     "title": "pip unusable in Python 3.12 virtual environment",
+     "url": "https://stackoverflow.com/questions/77672938/pip-unusable-in-python-3-12-virtual-environment"
+    },
+    {
+     "published": "2022-02-03T01:36:46+00:00",
+     "snippet": "1 votes, 1 answers (answered); tags: python, environment-variables, python-poetry",
+     "title": "automatically run script after poetry environment activation",
+     "url": "https://stackoverflow.com/questions/70964978/automatically-run-script-after-poetry-environment-activation"
+    },
+    {
+     "published": "2023-05-12T08:10:34+00:00",
+     "snippet": "3 votes, 1 answers (answered); tags: python, python-poetry",
+     "title": "How does Poetry associate a project to its virtual environment?",
+     "url": "https://stackoverflow.com/questions/76234354/how-does-poetry-associate-a-project-to-its-virtual-environment"
+    },
+    {
+     "published": "2023-06-09T17:00:54+00:00",
+     "snippet": "1 votes, 0 answers (unanswered); tags: python, gitlab, continuous-integration, python-poetry, continuous-delivery",
+     "title": "How to cache Poetry virtual environments in GitLab CI/CD?",
+     "url": "https://stackoverflow.com/questions/76442345/how-to-cache-poetry-virtual-environments-in-gitlab-ci-cd"
+    },
+    {
+     "published": "2024-10-16T05:13:51+00:00",
+     "snippet": "1 votes, 1 answers (unanswered); tags: python, subprocess, python-poetry",
+     "title": "How to call one poetry environment from a different poetry environment",
+     "url": "https://stackoverflow.com/questions/79092547/how-to-call-one-poetry-environment-from-a-different-poetry-environment"
+    },
+    {
+     "published": "2020-05-13T20:10:02+00:00",
+     "snippet": "43 votes, 3 answers (answered); tags: python, pytest, python-poetry",
+     "title": "running a package pytest with poetry",
+     "url": "https://stackoverflow.com/questions/61783925/running-a-package-pytest-with-poetry"
+    },
+    {
+     "published": "2022-01-22T21:03:18+00:00",
+     "snippet": "8 votes, 5 answers (answered); tags: python, python-poetry",
+     "title": "Poetry: How to keep using the old virtual environment when changing the name of the project root folder?",
+     "url": "https://stackoverflow.com/questions/70817125/poetry-how-to-keep-using-the-old-virtual-environment-when-changing-the-name-of"
+    },
+    {
+     "published": "2021-05-23T09:56:50+00:00",
+     "snippet": "3 votes, 2 answers (answered); tags: python, opencv, virtualenv, python-poetry",
+     "title": "How to add OpenCV as precompiled library in Poetry?",
+     "url": "https://stackoverflow.com/questions/67658426/how-to-add-opencv-as-precompiled-library-in-poetry"
+    },
+    {
+     "published": "2021-08-06T17:52:12+00:00",
+     "snippet": "0 votes, 1 answers (answered); tags: python, testing, tox, python-poetry",
+     "title": "How does tox install my poetry project on its virtual environment?",
+     "url": "https://stackoverflow.com/questions/68685723/how-does-tox-install-my-poetry-project-on-its-virtual-environment"
+    }
+   ],
+   "weight": 1.0
+  },
+  {
+   "engine": "askubuntu",
+   "results": [
+    {
+     "published": "2021-03-15T10:39:55+00:00",
+     "snippet": "0 votes, 1 answers (unanswered); tags: bash, bashrc, anaconda",
+     "title": "How to switch back and forth between Conda and Pyenv without restarting terminal?",
+     "url": "https://askubuntu.com/questions/1323671/how-to-switch-back-and-forth-between-conda-and-pyenv-without-restarting-terminal"
+    }
+   ],
+   "weight": 0.4000000059604645
+  },
+  {
+   "engine": "superuser",
+   "results": [],
+   "weight": 0.4000000059604645
+  },
+  {
+   "engine": "mdn",
+   "results": [
+    {
+     "published": null,
+     "snippet": "Now that you know what Django is for, we'll show you how to set up and test a Django development environment on Windows, Linux (Ubuntu), and macOS — whatever common operating system you are using, this article should give you what you need to be able to start developing Django apps.",
+     "title": "Setting up a Django development environment",
+     "url": "https://developer.mozilla.org/en-US/docs/Learn_web_development/Extensions/Server-side/Django/development_environment"
+    },
+    {
+     "published": null,
+     "snippet": "Python is a high-level general-purpose programming language. It uses a multi-paradigm approach, meaning it supports procedural, object-oriented, and some functional programming constructs.",
+     "title": "Python",
+     "url": "https://developer.mozilla.org/en-US/docs/Glossary/Python"
+    },
+    {
+     "published": null,
+     "snippet": "The CSS environment variables module introduces the concept of environment variables in CSS and defines the env() function to enable using environment variables. In this guide, we look at what environment variables are, the environment variables defined by the browser, and how to use environment variables with the env() function.",
+     "title": "Using environment variables",
+     "url": "https://developer.mozilla.org/en-US/docs/Web/CSS/Guides/Environment_variables/Using"
+    },
+    {
+     "published": null,
+     "snippet": "The CSS environment variables module defines the concept of environment variables and the env() function. Environment variables work similarly to custom properties and the var() function, except that they are globally defined; they are global variables scoped to the entire document. They are user agent values, provided by the browser or operating system, you can access using the env() function enabling you to adapt your styles to the user's device or context.",
+     "title": "CSS environment variables",
+     "url": "https://developer.mozilla.org/en-US/docs/Web/CSS/Guides/Environment_variables"
+    },
+    {
+     "published": null,
+     "snippet": "The VirtualKeyboard API provides developers control over the layout of their applications when the on-screen virtual keyboard appears and disappears on devices such as tablets, mobile phones, or other devices where a hardware keyboard may not be available.",
+     "title": "VirtualKeyboard API",
+     "url": "https://developer.mozilla.org/en-US/docs/Web/API/VirtualKeyboard_API"
+    },
+    {
+     "published": null,
+     "snippet": "When the JavaScript global environment is a window or an iframe, it is called a document environment. A global environment is an environment that doesn't have an outer environment.",
+     "title": "Document environment",
+     "url": "https://developer.mozilla.org/en-US/docs/Glossary/Document_environment"
+    },
+    {
+     "published": null,
+     "snippet": "In the Environment setup module, we show you what tools you need to do simple web development and how to install them properly and help you understand important aspects of your environment such as file systems and the command line.",
+     "title": "Environment Setup",
+     "url": "https://developer.mozilla.org/en-US/docs/Learn_web_development/Getting_started/Environment_setup"
+    },
+    {
+     "published": null,
+     "snippet": "Django is an extremely popular and fully featured server-side web framework, written in Python. This module shows you why Django is one of the most popular web server frameworks, how to set up a development environment, and how to start using it to create your own web applications.",
+     "title": "Django Web Framework (Python)",
+     "url": "https://developer.mozilla.org/en-US/docs/Learn_web_development/Extensions/Server-side/Django"
+    },
+    {
+     "published": null,
+     "snippet": "The XRSession interface's read-only environmentBlendMode property identifies if, and to what degree, the computer-generated imagery is overlaid atop the real world.",
+     "title": "XRSession: environmentBlendMode property",
+     "url": "https://developer.mozilla.org/en-US/docs/Web/API/XRSession/environmentBlendMode"
+    },
+    {
+     "published": null,
+     "snippet": "The VirtualKeyboard interface of the VirtualKeyboard API is useful on devices that have on-screen virtual keyboards, such as tablets, mobile phones, or other devices where a hardware keyboard may not be available.",
+     "title": "VirtualKeyboard",
+     "url": "https://developer.mozilla.org/en-US/docs/Web/API/VirtualKeyboard"
+    }
+   ],
+   "weight": 0.4000000059604645
+  },
+  {
+   "engine": "crates.io",
+   "results": [
+    {
+     "published": "2022-11-13T19:13:17.894782Z",
+     "snippet": "Puff - Deep Stack Python Runtime and GraphQL library. (v0.1.8, 11083 downloads)",
+     "title": "puff-rs (crates.io)",
+     "url": "https://crates.io/crates/puff-rs"
+    },
+    {
+     "published": "2025-12-28T09:33:53.133971Z",
+     "snippet": "TJA file parser written in Rust, working in Rust, Python, and WebAssembly. (v0.5.0, 8168 downloads)",
+     "title": "tja (crates.io)",
+     "url": "https://crates.io/crates/tja"
+    },
+    {
+     "published": "2026-05-25T16:49:49.533470Z",
+     "snippet": "Python virtual environment metadata primitives for RustUse (v0.0.1, 154 downloads)",
+     "title": "use-venv (crates.io)",
+     "url": "https://crates.io/crates/use-venv"
+    },
+    {
+     "published": "2026-07-28T16:04:34.250032Z",
+     "snippet": "System-wide Python package discovery, validation, vulnerability scanning, and allow-listing. (v4.0.1, 35713 downloads)",
+     "title": "fetter (crates.io)",
+     "url": "https://crates.io/crates/fetter"
+    },
+    {
+     "published": "2026-08-16T14:55:28.479495Z",
+     "snippet": "A Python binding for Lindera. (v5.3.0, 2027 downloads)",
+     "title": "lindera-python (crates.io)",
+     "url": "https://crates.io/crates/lindera-python"
+    },
+    {
+     "published": "2025-08-02T14:19:33.684116Z",
+     "snippet": "Python binding for Lindera. (v0.45.0, 7054 downloads)",
+     "title": "lindera-py (crates.io)",
+     "url": "https://crates.io/crates/lindera-py"
+    },
+    {
+     "published": "2023-04-26T08:07:40.269893Z",
+     "snippet": "Generate .gitignore files from the command-line (v23.4.0, 1590 downloads)",
+     "title": "gitig-rs (crates.io)",
+     "url": "https://crates.io/crates/gitig-rs"
+    },
+    {
+     "published": "2025-10-22T12:42:27.480742Z",
+     "snippet": "Zero-config development environment with isolated runtimes, process management, and intelligent HTTP proxy (v1.0.0, 544 downloads)",
+     "title": "realmenv (crates.io)",
+     "url": "https://crates.io/crates/realmenv"
+    },
+    {
+     "published": "2019-09-09T11:28:54.846224Z",
+     "snippet": "A modern Python dependency manager (v0.0.3, 4497 downloads)",
+     "title": "pypackage (crates.io)",
+     "url": "https://crates.io/crates/pypackage"
+    },
+    {
+     "published": "2026-01-31T06:39:13.860578Z",
+     "snippet": "Multi-Language Documentation & Code MCP Server - Fast documentation access for Rust, Python, and Node.js (v1.0.0, 461 downloads)",
+     "title": "dociium (crates.io)",
+     "url": "https://crates.io/crates/dociium"
+    },
+    {
+     "published": "2021-07-02T13:13:29.439963Z",
+     "snippet": "A modern Python installation and dependency manager (v0.3.1, 29994 downloads)",
+     "title": "pyflow (crates.io)",
+     "url": "https://crates.io/crates/pyflow"
+    },
+    {
+     "published": "2026-10-07T06:56:23.508619Z",
+     "snippet": "Configuration-driven scientific tasks, typed state, and durable recordings (v0.16.0, 1370 downloads)",
+     "title": "scientific-workflow (crates.io)",
+     "url": "https://crates.io/crates/scientific-workflow"
+    },
+    {
+     "published": "2026-09-20T09:33:34.079911Z",
+     "snippet": "Universal, lockfile-safe workspace pruner and background dependency cleaner (v1.22.0, 439 downloads)",
+     "title": "dev-prune (crates.io)",
+     "url": "https://crates.io/crates/dev-prune"
+    },
+    {
+     "published": "2026-10-02T14:00:01.588064Z",
+     "snippet": "Find unused dependencies in pyproject.toml (v0.3.10, 212 downloads)",
+     "title": "pyproject-udeps (crates.io)",
+     "url": "https://crates.io/crates/pyproject-udeps"
+    },
+    {
+     "published": "2025-02-25T08:45:03.072400Z",
+     "snippet": "A static code analyzer & language server for Python (v0.1.0-beta.0, 121704 downloads)",
+     "title": "pylyzer (crates.io)",
+     "url": "https://crates.io/crates/pylyzer"
+    },
+    {
+     "published": "2026-06-29T03:02:14.438775Z",
+     "snippet": "Windows-first cleanup CLI for caches, app leftovers, and project artifacts. (v0.1.0, 23 downloads)",
+     "title": "rebecca-cli (crates.io)",
+     "url": "https://crates.io/crates/rebecca-cli"
+    },
+    {
+     "published": "2026-10-07T05:04:54.610353Z",
+     "snippet": "Task keeper to manage tasks from different task runners (v0.35.6, 56243 downloads)",
+     "title": "task-keeper (crates.io)",
+     "url": "https://crates.io/crates/task-keeper"
+    },
+    {
+     "published": "2026-05-27T08:28:01.169314Z",
+     "snippet": "A rust implementation of relay belief propagation for qLDPC codes (v0.2.2, 26713 downloads)",
+     "title": "relay-bp (crates.io)",
+     "url": "https://crates.io/crates/relay-bp"
+    },
+    {
+     "published": "2026-03-23T23:32:42.490690Z",
+     "snippet": "Secure AI agent sandbox using rootless containers (v1.6.0, 220 downloads)",
+     "title": "mino (crates.io)",
+     "url": "https://crates.io/crates/mino"
+    },
+    {
+     "published": "2026-09-24T07:47:52.680213Z",
+     "snippet": "A workspace orchestrator for Helix + Zellij + Yazi + Lazygit/GitUI + git-delta (v0.3.0, 58 downloads)",
+     "title": "sat-helix-ide (crates.io)",
+     "url": "https://crates.io/crates/sat-helix-ide"
+    }
+   ],
+   "weight": 0.4000000059604645
+  },
+  {
+   "engine": "npm",
+   "results": [
+    {
+     "published": "2026-09-28T18:09:53.901Z",
+     "snippet": "Custom NX Plugin to support the Python language (v23.2.1)",
+     "title": "@nxlv/python (npm)",
+     "url": "https://www.npmjs.com/package/@nxlv/python"
+    },
+    {
+     "published": "2024-10-21T18:51:22.636Z",
+     "snippet": "Tensorflow model converter for javascript (v4.22.0)",
+     "title": "@tensorflow/tfjs-converter (npm)",
+     "url": "https://www.npmjs.com/package/@tensorflow/tfjs-converter"
+    },
+    {
+     "published": "2024-06-04T15:49:39.434Z",
+     "snippet": "Webpack Virtual Modules (v0.6.2)",
+     "title": "webpack-virtual-modules (npm)",
+     "url": "https://www.npmjs.com/package/webpack-virtual-modules"
+    },
+    {
+     "published": "2026-08-24T08:21:10.528Z",
+     "snippet": "Snyk CLI Python plugin (v3.3.2)",
+     "title": "snyk-python-plugin (npm)",
+     "url": "https://www.npmjs.com/package/snyk-python-plugin"
+    },
+    {
+     "published": "2026-10-06T11:32:09.671Z",
+     "snippet": "Python runtime and build extension for Trigger.dev (v4.7.3)",
+     "title": "@trigger.dev/python (npm)",
+     "url": "https://www.npmjs.com/package/@trigger.dev/python"
+    },
+    {
+     "published": "2026-04-26T14:43:01.193Z",
+     "snippet": "semantic-release plugin to publish a python package to PyPI (v5.3.0)",
+     "title": "semantic-release-pypi (npm)",
+     "url": "https://www.npmjs.com/package/semantic-release-pypi"
+    },
+    {
+     "published": "2025-09-10T07:06:49.388Z",
+     "snippet": "React Virtual List Component (v3.19.2)",
+     "title": "rc-virtual-list (npm)",
+     "url": "https://www.npmjs.com/package/rc-virtual-list"
+    },
+    {
+     "published": "2026-09-09T10:40:45.707Z",
+     "snippet": "E2B Desktop Sandbox - isolated cloud environment with a desktop-like interface powered by E2B. Ready for AI Computer Use (v2.4.0)",
+     "title": "@e2b/desktop (npm)",
+     "url": "https://www.npmjs.com/package/@e2b/desktop"
+    },
+    {
+     "published": "2026-09-22T19:55:43.967Z",
+     "snippet": "A Map based TypeScript Virtual File System. (v1.6.5)",
+     "title": "@typescript/vfs (npm)",
+     "url": "https://www.npmjs.com/package/@typescript/vfs"
+    },
+    {
+     "published": "2025-09-05T12:40:43.845Z",
+     "snippet": "SCIP indexer for Python (v0.6.6)",
+     "title": "@sourcegraph/scip-python (npm)",
+     "url": "https://www.npmjs.com/package/@sourcegraph/scip-python"
+    },
+    {
+     "published": "2026-09-17T07:53:32.175Z",
+     "snippet": "Virtual scrolling list component for React. (v1.5.2)",
+     "title": "@rc-component/virtual-list (npm)",
+     "url": "https://www.npmjs.com/package/@rc-component/virtual-list"
+    },
+    {
+     "published": "2023-10-05T12:50:16.732Z",
+     "snippet": "Load virtual modules from memory (v3.0.2)",
+     "title": "@rollup/plugin-virtual (npm)",
+     "url": "https://www.npmjs.com/package/@rollup/plugin-virtual"
+    },
+    {
+     "published": "2026-09-21T14:05:28.597Z",
+     "snippet": "TestDriver Runner - Ably-based remote automation agent with Node.js automation (v7.11.171)",
+     "title": "@testdriverai/runner (npm)",
+     "url": "https://www.npmjs.com/package/@testdriverai/runner"
+    },
+    {
+     "published": "2026-09-09T20:42:01.701Z",
+     "snippet": "Type checker for the Python language (v1.1.414)",
+     "title": "pyright (npm)",
+     "url": "https://www.npmjs.com/package/pyright"
+    },
+    {
+     "published": "2026-04-07T13:24:27.798Z",
+     "snippet": "最全中华古诗词数据库，唐宋两朝近一万四千古诗人，接近 5.5 万首唐诗加 26 万宋诗. 两宋时期1564位词人，21050首词。 (v2.0.1)",
+     "title": "chinese-poetry (npm)",
+     "url": "https://www.npmjs.com/package/chinese-poetry"
+    },
+    {
+     "published": "2026-07-13T11:19:52.122Z",
+     "snippet": "PyScript (v0.7.31)",
+     "title": "@pyscript/core (npm)",
+     "url": "https://www.npmjs.com/package/@pyscript/core"
+    },
+    {
+     "published": "2026-09-12T07:15:22.265Z",
+     "snippet": "Python dictionary for cspell. (v4.5.2)",
+     "title": "@cspell/dict-python (npm)",
+     "url": "https://www.npmjs.com/package/@cspell/dict-python"
+    },
+    {
+     "published": "2026-09-29T20:30:41.913Z",
+     "snippet": "Core filesystem primitives: Node, Link, File, Superblock (v4.80.0)",
+     "title": "@jsonjoy.com/fs-core (npm)",
+     "url": "https://www.npmjs.com/package/@jsonjoy.com/fs-core"
+    },
+    {
+     "published": "2026-08-05T12:32:19.318Z",
+     "snippet": "Generate a dep graph given poetry.lock and pyproject.toml files (v1.10.1)",
+     "title": "snyk-poetry-lockfile-parser (npm)",
+     "url": "https://www.npmjs.com/package/snyk-poetry-lockfile-parser"
+    },
+    {
+     "published": "2026-09-03T16:15:05.618Z",
+     "snippet": "A Unified Virtual Filesystem For AI Agents (v0.0.6)",
+     "title": "@struktoai/mirage-core (npm)",
+     "url": "https://www.npmjs.com/package/@struktoai/mirage-core"
+    }
+   ],
+   "weight": 0.4000000059604645
+  }
+ ],
+ "labels": {
+  "https://github.com/petobens/poet-v": 1,
+  "https://github.com/max-pfeiffer/uvicorn-gunicorn-poetry": 0,
+  "https://github.com/max-pfeiffer/uvicorn-poetry": 0,
+  "https://github.com/Tlaloc-Es/killpy": 0,
+  "https://github.com/TechnologyBrewery/habushu": 0,
+  "https://github.com/jgujerry/python-virtual-environments": 1,
+  "https://github.com/Coacher/vim-virtualenv": 0,
+  "https://github.com/SpaceShaman/autopy.fish": 0,
+  "https://github.com/liuyal/jerry-poetry-env": 0,
+  "https://github.com/RomanTuras/python-env": 0,
+  "https://github.com/jzombie/pipper": 0,
+  "https://github.com/s-raza/cookiecutter-poetry-config-management": 0,
+  "https://github.com/LuisPM24/python_module08": 0,
+  "https://github.com/aatansen/Python-Dependency-Virtual-Environment-Managers": 0,
+  "https://github.com/muzammil-git/Poetry-Commands": 0,
+  "https://github.com/aspfohl/foo": 0,
+  "https://github.com/d-chris/poetry-licenses-lib": 0,
+  "https://github.com/fre171csiro/python-projects": 0,
+  "https://github.com/k0rsakov/infrastructure_for_data_engineer_virtual_environments": 0,
+  "https://github.com/alessandro-maccario/poetry-cli-app": 0,
+  "https://stackoverflow.com/questions/59882884/vscode-doesnt-show-poetry-virtualenvs-in-select-interpreter-option": 2,
+  "https://stackoverflow.com/questions/77960213/git-bash-does-not-recognize-python-virtual-environment-created-by-poetry": 0,
+  "https://stackoverflow.com/questions/65376059/how-does-the-python-tool-poetry-know-the-path-of-a-projects-virtual-environment": 2,
+  "https://stackoverflow.com/questions/61351659/the-virtual-environment-found-seems-to-be-broken-python-poetry": 1,
+  "https://stackoverflow.com/questions/76543599/run-python-script-from-any-directory-using-a-poetry-virtual-environment": 2,
+  "https://stackoverflow.com/questions/76286283/poetry-using-wrong-python-version-and-wrong-virtual-environment": 2,
+  "https://stackoverflow.com/questions/68296821/no-module-named-sqlite3-on-python-3-9-2-virtual-environment-created-with-pyenv": 0,
+  "https://stackoverflow.com/questions/77407930/how-to-use-python-poetry-as-a-lightweight-virtual-environment-like-python-m": 0,
+  "https://stackoverflow.com/questions/60383899/python-poetry-how-to-install-64-bit-virtual-environment": 0,
+  "https://stackoverflow.com/questions/70739858/how-to-create-a-brand-new-virtual-environment-or-duplicate-an-existing-one-in-po": 0,
+  "https://stackoverflow.com/questions/66308993/python-poetry-having-trouble-with-working-in-the-virtual-environment": 0,
+  "https://stackoverflow.com/questions/77672938/pip-unusable-in-python-3-12-virtual-environment": 0,
+  "https://stackoverflow.com/questions/70964978/automatically-run-script-after-poetry-environment-activation": 0,
+  "https://stackoverflow.com/questions/76234354/how-does-poetry-associate-a-project-to-its-virtual-environment": 0,
+  "https://stackoverflow.com/questions/76442345/how-to-cache-poetry-virtual-environments-in-gitlab-ci-cd": 0,
+  "https://stackoverflow.com/questions/79092547/how-to-call-one-poetry-environment-from-a-different-poetry-environment": 0,
+  "https://stackoverflow.com/questions/61783925/running-a-package-pytest-with-poetry": 0,
+  "https://stackoverflow.com/questions/70817125/poetry-how-to-keep-using-the-old-virtual-environment-when-changing-the-name-of": 0,
+  "https://stackoverflow.com/questions/67658426/how-to-add-opencv-as-precompiled-library-in-poetry": 0,
+  "https://stackoverflow.com/questions/68685723/how-does-tox-install-my-poetry-project-on-its-virtual-environment": 0,
+  "https://askubuntu.com/questions/1323671/how-to-switch-back-and-forth-between-conda-and-pyenv-without-restarting-terminal": 0,
+  "https://developer.mozilla.org/en-US/docs/Learn_web_development/Extensions/Server-side/Django/development_environment": 0,
+  "https://developer.mozilla.org/en-US/docs/Glossary/Python": 0,
+  "https://developer.mozilla.org/en-US/docs/Web/CSS/Guides/Environment_variables/Using": 0,
+  "https://developer.mozilla.org/en-US/docs/Web/CSS/Guides/Environment_variables": 0,
+  "https://developer.mozilla.org/en-US/docs/Web/API/VirtualKeyboard_API": 0,
+  "https://developer.mozilla.org/en-US/docs/Glossary/Document_environment": 0,
+  "https://developer.mozilla.org/en-US/docs/Learn_web_development/Getting_started/Environment_setup": 0,
+  "https://developer.mozilla.org/en-US/docs/Learn_web_development/Extensions/Server-side/Django": 0,
+  "https://developer.mozilla.org/en-US/docs/Web/API/XRSession/environmentBlendMode": 0,
+  "https://developer.mozilla.org/en-US/docs/Web/API/VirtualKeyboard": 0,
+  "https://crates.io/crates/puff-rs": 0,
+  "https://crates.io/crates/tja": 0,
+  "https://crates.io/crates/use-venv": 0,
+  "https://crates.io/crates/fetter": 0,
+  "https://crates.io/crates/lindera-python": 0,
+  "https://crates.io/crates/lindera-py": 0,
+  "https://crates.io/crates/gitig-rs": 0,
+  "https://crates.io/crates/realmenv": 0,
+  "https://crates.io/crates/pypackage": 0,
+  "https://crates.io/crates/dociium": 0,
+  "https://crates.io/crates/pyflow": 0,
+  "https://crates.io/crates/scientific-workflow": 0,
+  "https://crates.io/crates/dev-prune": 0,
+  "https://crates.io/crates/pyproject-udeps": 0,
+  "https://crates.io/crates/pylyzer": 0,
+  "https://crates.io/crates/rebecca-cli": 0,
+  "https://crates.io/crates/task-keeper": 0,
+  "https://crates.io/crates/relay-bp": 0,
+  "https://crates.io/crates/mino": 0,
+  "https://crates.io/crates/sat-helix-ide": 0,
+  "https://www.npmjs.com/package/@nxlv/python": 0,
+  "https://www.npmjs.com/package/@tensorflow/tfjs-converter": 0,
+  "https://www.npmjs.com/package/webpack-virtual-modules": 0,
+  "https://www.npmjs.com/package/snyk-python-plugin": 0,
+  "https://www.npmjs.com/package/@trigger.dev/python": 0,
+  "https://www.npmjs.com/package/semantic-release-pypi": 0,
+  "https://www.npmjs.com/package/rc-virtual-list": 0,
+  "https://www.npmjs.com/package/@e2b/desktop": 0,
+  "https://www.npmjs.com/package/@typescript/vfs": 0,
+  "https://www.npmjs.com/package/@sourcegraph/scip-python": 0,
+  "https://www.npmjs.com/package/@rc-component/virtual-list": 0,
+  "https://www.npmjs.com/package/@rollup/plugin-virtual": 0,
+  "https://www.npmjs.com/package/@testdriverai/runner": 0,
+  "https://www.npmjs.com/package/pyright": 0,
+  "https://www.npmjs.com/package/chinese-poetry": 0,
+  "https://www.npmjs.com/package/@pyscript/core": 0,
+  "https://www.npmjs.com/package/@cspell/dict-python": 0,
+  "https://www.npmjs.com/package/@jsonjoy.com/fs-core": 0,
+  "https://www.npmjs.com/package/snyk-poetry-lockfile-parser": 0,
+  "https://www.npmjs.com/package/@struktoai/mirage-core": 0
+ },
+ "query": "python virtual environment poetry"
+}

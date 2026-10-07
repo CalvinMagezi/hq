@@ -1,0 +1,154 @@
+{
+ "query": "tailscale serve funnel https",
+ "category": null,
+ "engines": [
+  {
+   "engine": "google cse",
+   "weight": 1.0,
+   "results": [
+    {
+     "title": "Tailscale Funnel",
+     "url": "https://tailscale.com/docs/features/tailscale-funnel",
+     "snippet": "20 Jan 2026 ... After you approve it, Tailscale will create valid HTTPS certificates for your tailnet and add a funnel node attribute to your tailnet policy ...",
+     "published": null
+    },
+    {
+     "title": "Tailscale Serve · Tailscale Docs",
+     "url": "https://tailscale.com/docs/features/tailscale-serve",
+     "snippet": "20 Jan 2026 ... Tailscale Serve requires that you enable HTTPS in your tailnet to automatically provision TLS certificates for your unique tailnet DNS name. If ...",
+     "published": null
+    },
+    {
+     "title": "tailscale serve command",
+     "url": "https://tailscale.com/docs/reference/tailscale-cli/serve",
+     "snippet": "26 Jan 2026 ... The serve offers an HTTPS and HTTP server that has a few modes: a reverse proxy, a file server, and a static text server. HTTPS traffic uses an ...",
+     "published": null
+    },
+    {
+     "title": "tailscale funnel command",
+     "url": "https://tailscale.com/docs/reference/tailscale-cli/funnel",
+     "snippet": "26 Jan 2026 ... The funnel offers an HTTPS server that has a few modes: a reverse proxy, a file server, and a static text server. HTTPS traffic is secured using ...",
+     "published": null
+    },
+    {
+     "title": "Tailscale Funnel examples",
+     "url": "https://tailscale.com/docs/reference/examples/funnel",
+     "snippet": "14 Oct 2025 ... With Tailscale Funnel, you can expose local services, folders, or text to the public internet over HTTPS. We've collected these examples ...",
+     "published": null
+    },
+    {
+     "title": "Serve consent button still says “Enable HTTPS and Funnel” after ...",
+     "url": "https://github.com/tailscale/tailscale/issues/20462",
+     "snippet": "14 Jul 2026 ... Run tailscale serve when HTTPS certificates are not yet enabled. · Open the generated consent page. · Uncheck Tailscale Funnel (optional).",
+     "published": null
+    },
+    {
+     "title": "Tailscale serve vs funnel: which to use - SSD Nodes",
+     "url": "https://www.ssdnodes.com/learn/tailscale-serve-vs-funnel",
+     "snippet": "16 Aug 2026 ... Tailscale serve puts HTTPS on a tailnet-only URL. Funnel opens that same port to the public internet. Which to use, and the policy gate that ...",
+     "published": null
+    },
+    {
+     "title": "Tailscale Funnel, Serve, and a tiny website for my fridge",
+     "url": "https://tailscale.com/blog/funnel-fridge",
+     "snippet": "2 Jun 2026 ... Tailscale Funnel made it easy to share a small public web app with both humans and weird devices. Here's when to use Funnel, and when to use ...",
+     "published": null
+    },
+    {
+     "title": "HTTPS on Tailscale server. - Reddit",
+     "url": "https://www.reddit.com/r/Tailscale/comments/1lyzhh2/https_on_tailscale_server/",
+     "snippet": "13 Jul 2025 ... tailscale cert just generates the certificate. If you want to use that certificate, you'll need to get it in a file and deploy that file to the ...",
+     "published": null
+    },
+    {
+     "title": "Tailscale Funnel: Share Your Web Server with the Public Internet",
+     "url": "https://tailscale.com/blog/tailscale-funnel-beta",
+     "snippet": "30 Mar 2023 ... Tailscale Funnel, a tool that lets you share a web server on your private tailnet with the public internet, is now available as a beta feature ...",
+     "published": null
+    },
+    {
+     "title": "Serve and Funnel | Tailscale Explained - YouTube",
+     "url": "https://www.youtube.com/watch?v=MpxmfpCl20c",
+     "snippet": "9 Nov 2023 ... ... https://tailscale.com/yt.",
+     "published": null
+    },
+    {
+     "title": "How to set up Tailscale Funnel to securely access Home Assistant ...",
+     "url": "https://community.home-assistant.io/t/how-to-set-up-tailscale-funnel-to-securely-access-home-assistant-from-anywhere-for-free/950072",
+     "snippet": "11 Nov 2025 ... Tailscale funnel accepts encrypted HTTPS traffic from the internet at your Tailscale domain, and decrypts it. It forwards the traffic to the ...",
+     "published": null
+    },
+    {
+     "title": "Tailscale Feature Highlight: SSH, Serve, and Funnel - runtimeterror",
+     "url": "https://www.runtimeterror.dev/tailscale-ssh-serve-funnel/",
+     "snippet": "20 Dec 2023 ... A Funnel configuration is applied to the port that Tailscale Serve uses to make a resource available, not the resource itself. In the example ...",
+     "published": null
+    },
+    {
+     "title": "How to Use Tailscale Funnel for Service Publishing - OneUptime",
+     "url": "https://oneuptime.com/blog/post/2026-01-28-tailscale-funnel-service-publishing/view",
+     "snippet": "28 Jan 2026 ... Tailscale Funnel lets you publish services running on your private network to the public internet without opening firewall ports or ...",
+     "published": null
+    },
+    {
+     "title": "Tailscale Serve examples",
+     "url": "https://tailscale.com/docs/reference/examples/serve",
+     "snippet": "14 Jan 2026 ... In addition to running an HTTPS server, you can use the command tailscale serve to bind local TCP-based services to your Tailscale IP and make ...",
+     "published": null
+    },
+    {
+     "title": "Tailscale - OpenClaw Docs",
+     "url": "https://docs.openclaw.ai/gateway/tailscale",
+     "snippet": "OpenClaw can auto-configure Tailscale Serve (tailnet) or Funnel (public) for the Gateway dashboard and WebSocket port. This keeps the gateway bound to loopback ...",
+     "published": null
+    },
+    {
+     "title": "So... what exactly IS Tailscale serve? - Reddit",
+     "url": "https://www.reddit.com/r/Tailscale/comments/1bbkvel/so_what_exactly_is_tailscale_serve/",
+     "snippet": "10 Mar 2024 ... For funnel, all traffic is routed through one of tailscale's servers. I can't think why this would be the case for serve, but I can't say for ...",
+     "published": null
+    },
+    {
+     "title": "5 reasons I love Tailscale Funnels for accessing my self-hosted ...",
+     "url": "https://www.xda-developers.com/tailscale-funnel-access-self-hosted-services/",
+     "snippet": "9 Jun 2025 ... Tailscale Funnels technically do open a port, but only to your tailnet, and not the publicly scannable internet. With an HTTPS-secured URL to ...",
+     "published": null
+    },
+    {
+     "title": "Tailscale Funnel - Stathers.net",
+     "url": "https://stathers.net/2023/06/13/tailscale-funnel.html",
+     "snippet": "13 Jun 2023 ... Tailscale Funnel · Setup Tailscale · Enable DNS For Nodes · Enable HTTPS On Nodes · Grant Nodes Permission To Use Funnel · Serve and Expose · Finished.",
+     "published": null
+    },
+    {
+     "title": "Tailscale SERVE and FUNNEL - YouTube",
+     "url": "https://www.youtube.com/watch?v=qAuPoAQImo0",
+     "snippet": "9 Oct 2023 ... Tailscale Server and Funnel. Serve - allows you to share files / folders / services to all Your tailnet devices.",
+     "published": null
+    }
+   ]
+  }
+ ],
+ "labels": {
+  "https://tailscale.com/docs/features/tailscale-funnel": 2,
+  "https://tailscale.com/docs/features/tailscale-serve": 2,
+  "https://tailscale.com/docs/reference/tailscale-cli/serve": 2,
+  "https://tailscale.com/docs/reference/tailscale-cli/funnel": 2,
+  "https://tailscale.com/docs/reference/examples/funnel": 2,
+  "https://github.com/tailscale/tailscale/issues/20462": 1,
+  "https://www.ssdnodes.com/learn/tailscale-serve-vs-funnel": 2,
+  "https://tailscale.com/blog/funnel-fridge": 1,
+  "https://www.reddit.com/r/Tailscale/comments/1lyzhh2/https_on_tailscale_server/": 1,
+  "https://tailscale.com/blog/tailscale-funnel-beta": 1,
+  "https://www.youtube.com/watch?v=MpxmfpCl20c": 1,
+  "https://community.home-assistant.io/t/how-to-set-up-tailscale-funnel-to-securely-access-home-assistant-from-anywhere-for-free/950072": 1,
+  "https://www.runtimeterror.dev/tailscale-ssh-serve-funnel/": 1,
+  "https://oneuptime.com/blog/post/2026-01-28-tailscale-funnel-service-publishing/view": 1,
+  "https://tailscale.com/docs/reference/examples/serve": 2,
+  "https://docs.openclaw.ai/gateway/tailscale": 1,
+  "https://www.reddit.com/r/Tailscale/comments/1bbkvel/so_what_exactly_is_tailscale_serve/": 1,
+  "https://www.xda-developers.com/tailscale-funnel-access-self-hosted-services/": 1,
+  "https://stathers.net/2023/06/13/tailscale-funnel.html": 1,
+  "https://www.youtube.com/watch?v=qAuPoAQImo0": 1
+ }
+}

@@ -1,0 +1,133 @@
+{
+  "query": "tailwind css dark mode setup",
+  "category": null,
+  "engines": [
+    {
+      "engine": "google cse",
+      "weight": 1.0,
+      "results": [
+        {
+          "title": "Dark mode - Core concepts - Tailwind CSS",
+          "url": "https://tailwindcss.com/docs/dark-mode",
+          "snippet": "Toggling dark mode manually ... How you add the dark class to the html element is up to you, but a common approach is to use a bit of JavaScript that updates the ...",
+          "published": null
+        },
+        {
+          "title": "Dark Mode - Tailwind CSS",
+          "url": "https://v2.tailwindcss.com/docs/dark-mode",
+          "snippet": "To enable it, set the darkMode option in your tailwind.config.js file to media : // tailwind.config.js module.exports = ...",
+          "published": null
+        },
+        {
+          "title": "Tailwind Dark Mode Easy Tutorial (Tailwind V3) - YouTube",
+          "url": "https://www.youtube.com/watch?v=NGwipjJimjk",
+          "snippet": "6 Jan 2025 ... ... setup. In this tutorial, I'll show you the simplest way to add ... 19- Dark mode in Tailwind CSS [Arabic] | Tailwind CSS \u0627\u0644\u0648\u0636\u0639 \u0627\u0644\u062f\u0627\u0643\u0646 \u0641\u064a.",
+          "published": null
+        },
+        {
+          "title": "Dark mode using Tailwindcss v4.0 - DEV Community",
+          "url": "https://dev.to/tene/dark-mode-using-tailwindcss-v40-2lc6",
+          "snippet": "25 Feb 2025 ... The following styles help integrate Tailwind CSS and define a custom variant for dark mode: @import 'tailwindcss'; /* Define a custom variant ...",
+          "published": null
+        },
+        {
+          "title": "Tailwind CSS Dark Mode - Flowbite",
+          "url": "https://flowbite.com/docs/customize/dark-mode/",
+          "snippet": "css */ @custom-variant dark (&:where(.dark, .dark *));. If you install the Flowbite Plugin inside your Tailwind project then dark mode via the class method ...",
+          "published": null
+        },
+        {
+          "title": "Build a Flawless Tailwind Dark Mode | Magic UI",
+          "url": "https://magicui.design/blog/tailwind-dark-mode",
+          "snippet": "19 Nov 2025 ... Media Strategy (Default) Tailwind leans on the prefers-color-scheme CSS media query. If a user's OS is in dark mode, any dark: variants fire ...",
+          "published": null
+        },
+        {
+          "title": "Dark Mode using TailwindCSS/React Hooks - Medium",
+          "url": "https://dr-lucasleibs.medium.com/dark-mode-using-tailwindcss-react-hooks-1f0306cf149f",
+          "snippet": "4 Feb 2021 ... After proper set up of Tailwind, you are going to want to change the darkMode attribute to 'class' from the default value of \u201cfalse\u201d. You can ...",
+          "published": null
+        },
+        {
+          "title": "The Art of Dark Mode Implementation with Tailwind CSS - Hoverify",
+          "url": "https://tryhoverify.com/blog/the-art-of-dark-mode-implementation-with-tailwind-css/",
+          "snippet": "5 Mar 2025 ... js and set darkMode: 'class' . If you're on Tailwind v4, that file probably doesn't exist \u2014 configuration moved into CSS, and dark mode setup ...",
+          "published": null
+        },
+        {
+          "title": "How to Enable Dark Mode in Tailwind CSS ? - GeeksforGeeks",
+          "url": "https://www.geeksforgeeks.org/css/how-to-enable-dark-mode-in-tailwind-css/",
+          "snippet": "24 Jul 2025 ... The Dark Class Configuration approach in Tailwind CSS enables dark mode by adding the darkMode: 'class' setting in the configuration file.",
+          "published": null
+        },
+        {
+          "title": "TailwindCSS v4 Tutorial 2026 #010 - Dark Mode - YouTube",
+          "url": "https://www.youtube.com/watch?v=EnnrqkL0CKI",
+          "snippet": "2 Mar 2026 ... ... Mode & Theme Customization in Tailwind CSS ... sleek, professional dark theme using the `dark:` variant and how to configure your tailwindcss ...",
+          "published": null
+        },
+        {
+          "title": "Dark Mode | Tailwind - Steve Kinney",
+          "url": "https://stevekinney.com/courses/tailwind/dark-mode",
+          "snippet": "14 Sept 2026 ... It allows you to apply styles conditionally when dark mode is active. By default, dark: uses the prefers-color-scheme: dark CSS media query, ...",
+          "published": null
+        },
+        {
+          "title": "Integrate and Customize Tailwind CSS Dark Mode in a Next.js Project",
+          "url": "https://prismic.io/blog/tailwind-css-darkmode-tutorial",
+          "snippet": "12 Jul 2024 ... The selector strategy replaced the old class strategy in Tailwind CSS v3.4.1. This strategy provides more control over when and how dark mode is ...",
+          "published": null
+        },
+        {
+          "title": "How to make dark mode easier in Tailwind v4, without spamming dark",
+          "url": "https://www.reddit.com/r/tailwindcss/comments/1jvi5ip/how_to_make_dark_mode_easier_in_tailwind_v4/",
+          "snippet": "9 Apr 2025 ... 33 votes, 21 comments. // src/app.css @import 'tailwindcss'; @custom-variant dark (&:where(.dark, .dark *)); @theme { --color-primary: ...",
+          "published": null
+        },
+        {
+          "title": "Style Dark Text with Tailwind CSS v4 and v4.2 - Tailkits",
+          "url": "https://tailkits.com/blog/styling-dark-text-tailwind-v4/",
+          "snippet": "22 Feb 2026 ... The text-gray-900 applies in light mode. When the OS is in dark mode, dark:text-gray-100 takes over. No JavaScript, no class toggling, no setup ...",
+          "published": null
+        },
+        {
+          "title": "Implementing Dark Mode and Theme Switching using Tailwind v4 ...",
+          "url": "https://www.thingsaboutweb.dev/en/posts/dark-mode-with-tailwind-v4-nextjs",
+          "snippet": "1 Dec 2024 ... @import \"tailwindcss\"; @variant dark (&:where([data-theme=\"dark\"], [data-theme=\"dark\"] *));. Instead of relying heavily on the JavaScript ...",
+          "published": null
+        },
+        {
+          "title": "How To Add Light And Dark Theme In TailwindCSS V4 - YouTube",
+          "url": "https://www.youtube.com/watch?v=J0PCSEWLzqI",
+          "snippet": "28 Apr 2025 ... to configure Tailwind's new CSS-first dark mode strategy for manual switching between light and dark themes. We'll use localStorage to ...",
+          "published": null
+        },
+        {
+          "title": "Implementing Dark Mode in Storybook with Tailwind CSS",
+          "url": "https://blog.devgenius.io/implementing-dark-mode-in-storybook-with-tailwind-css-2c7e466658ec",
+          "snippet": "1 Sept 2024 ... In the Tailwind config file, define darkMode ; you can change it if you want. import type { Config } from 'tailwindcss'; export default ...",
+          "published": null
+        },
+        {
+          "title": "Setting custom dark mode theme in Tailwind CSS config?",
+          "url": "https://stackoverflow.com/questions/71191532/setting-custom-dark-mode-theme-in-tailwind-css-config",
+          "snippet": "20 Feb 2022 ... Comments \u00b7 Define colors in your tailwind config use css vars \u00b7 in root/body have 2 sets of css vars. One default, and other for dark class.",
+          "published": null
+        },
+        {
+          "title": "Dark Mode in Tailwind CSS: A Simple Two-Step Process - Medium",
+          "url": "https://medium.com/@s.chandrakethan9/dark-mode-in-tailwind-css-a-simple-two-step-process-32e4377695e8",
+          "snippet": "15 Feb 2024 ... Dark Mode in Tailwind CSS: A Simple Two-Step Process Almost every website you encounter nowadays offers both dark mode and light mode ...",
+          "published": null
+        },
+        {
+          "title": "Tailwind CSS and Dark Mode - DEV Community",
+          "url": "https://dev.to/ridoy_hasan/tailwind-css-and-dark-mode-l51",
+          "snippet": "7 Oct 2024 ... This allows you to toggle dark mode by adding or removing the dark class on the <html> or <body> element. Example with JavaScript: <html class=\" ...",
+          "published": null
+        }
+      ]
+    }
+  ],
+  "labels": {}
+}

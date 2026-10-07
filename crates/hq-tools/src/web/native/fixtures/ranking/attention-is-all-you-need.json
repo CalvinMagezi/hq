@@ -1,0 +1,385 @@
+{
+  "category": "science",
+  "engines": [
+    {
+      "engine": "arxiv",
+      "results": [
+        {
+          "published": "2021-05-06T14:42:39Z",
+          "snippet": "The strong performance of vision transformers on image classification and other vision tasks is often attributed to the design of their multi-head attention layers. However, the extent to which attention is responsible for this strong performance remains unclear. In this short report, we ask: is the attention layer even necessary? Specifically, we replace the attention layer in a vision transformer with a feed-forward layer applied over the patch dimension. The resulting architecture is simply a series of feed-forward layers applied over the patch and feature dimensions in an alternating fashion. In experiments on ImageNet, this architecture performs surprisingly well: a ViT/DeiT-base-sized model obtains 74.9\\% top-1 accuracy, compared to 77.9\\% and 79.9\\% for ViT and DeiT respectively. These results indicate that aspects of vision transformers other than attention, such as the patch embedding, may be more responsible for their strong performance than previously thought. We hope these results prompt the community to spend more time trying to understand why our current models are as effective as they are.",
+          "title": "Do You Even Need Attention? A Stack of Feed-Forward Layers Does Surprisingly Well on ImageNet",
+          "url": "https://arxiv.org/abs/2105.02723v1"
+        },
+        {
+          "published": "2023-07-25T09:34:42Z",
+          "snippet": "Although large language models (LLMs) have achieved significant success in natural language processing, they still struggle with long-context comprehension. Traditional approaches to mitigating this issue typically rely on fine-tuning or retraining, which is both resource-intensive and challenging to deploy in lightweight industrial settings. In this paper, we investigate the potential to accomplish this without any additional resources. Through an in-depth study of the attention mechanism in LLMs, we propose a method called Scaled ReAttention (SRA) to strengthen LLMs' ability to interpret and retrieve information by strategically manipulating their attention scores during inference. Through extensive experiments, we demonstrate that integrating SRA significantly boosts LLMs' performance on a variety of downstream tasks, highlighting its practical potential for enhancing language understanding without incurring the overhead of traditional training.",
+          "title": "Pay Attention to What You Need",
+          "url": "https://arxiv.org/abs/2307.13365v3"
+        },
+        {
+          "published": "2021-12-11T14:22:05Z",
+          "snippet": "This paper aims to tackle the challenging task of one-shot object counting. Given an image containing novel, previously unseen category objects, the goal of the task is to count all instances in the desired category with only one supporting bounding box example. To this end, we propose a counting model by which you only need to Look At One instance (LaoNet). First, a feature correlation module combines the Self-Attention and Correlative-Attention modules to learn both inner-relations and inter-relations. It enables the network to be robust to the inconsistency of rotations and sizes among different instances. Second, a Scale Aggregation mechanism is designed to help extract features with different scale information. Compared with existing few-shot counting methods, LaoNet achieves state-of-the-art results while learning with a high convergence speed. The code will be available soon.",
+          "title": "Object Counting: You Only Need to Look at One",
+          "url": "https://arxiv.org/abs/2112.05993v1"
+        },
+        {
+          "published": "2025-12-03T17:36:45Z",
+          "snippet": "The 2017 paper ''Attention Is All You Need'' introduced the Transformer architecture-and inadvertently spawned one of machine learning's most persistent naming conventions. We analyze 717 arXiv preprints containing ''All You Need'' in their titles (2009-2025), finding exponential growth ($R^2$ > 0.994) following the original paper, with 200 titles in 2025 alone. Among papers following the canonical ''X [Is] All You Need'' structure, ''Attention'' remains the most frequently claimed necessity (28 occurrences). Situating this phenomenon within memetic theory, we argue the pattern's success reflects competitive pressures in scientific communication that increasingly favor memorability over precision. Whether this trend represents harmless academic whimsy or symptomatic sensationalism, we leave-with appropriate self-awareness-to the reader.",
+          "title": "\"All You Need\" is Not All You Need for a Paper Title: On the Origins of a Scientific Meme",
+          "url": "https://arxiv.org/abs/2512.19700v1"
+        },
+        {
+          "published": "2024-10-08T07:48:34Z",
+          "snippet": "In the realm of video dialog response generation, the understanding of video content and the temporal nuances of conversation history are paramount. While a segment of current research leans heavily on large-scale pretrained visual-language models and often overlooks temporal dynamics, another delves deep into spatial-temporal relationships within videos but demands intricate object trajectory pre-extractions and sidelines dialog temporal dynamics. This paper introduces the Dual Temporal Grounding-enhanced Video Dialog model (DTGVD), strategically designed to merge the strengths of both dominant approaches. It emphasizes dual temporal relationships by predicting dialog turn-specific temporal regions, filtering video content accordingly, and grounding responses in both video and dialog contexts. One standout feature of DTGVD is its heightened attention to chronological interplay. By recognizing and acting upon the dependencies between different dialog turns, it captures more nuanced conversational dynamics. To further bolster the alignment between video and dialog temporal dynamics, we've implemented a list-wise contrastive learning strategy. Within this framework, accurately …",
+          "title": "Grounding is All You Need? Dual Temporal Grounding for Video Dialog",
+          "url": "https://arxiv.org/abs/2410.05767v2"
+        },
+        {
+          "published": "2019-08-05T21:48:05Z",
+          "snippet": "This paper considers the problem of image set-based face verification and identification. Unlike traditional single sample (an image or a video) setting, this situation assumes the availability of a set of heterogeneous collection of orderless images and videos. The samples can be taken at different check points, different identity documents $etc$. The importance of each image is usually considered either equal or based on a quality assessment of that image independent of other images and/or videos in that image set. How to model the relationship of orderless images within a set remains a challenge. We address this problem by formulating it as a Markov Decision Process (MDP) in a latent space. Specifically, we first propose a dependency-aware attention control (DAC) network, which uses actor-critic reinforcement learning for attention decision of each image to exploit the correlations among the unordered images. An off-policy experience replay is introduced to speed up the learning process. Moreover, the DAC is combined with a temporal model for videos using divide and conquer strategies. We also introduce a pose-guided representation (PGR) scheme that can further boost the …",
+          "title": "Attention Control with Metric Learning Alignment for Image Set-based Recognition",
+          "url": "https://arxiv.org/abs/1908.01872v1"
+        },
+        {
+          "published": "2024-06-05T17:24:07Z",
+          "snippet": "Spiking neural network (SNN) has attracted great attention due to its characteristic of high efficiency and accuracy. Currently, the ANN-to-SNN conversion methods can obtain ANN on-par accuracy SNN with ultra-low latency (8 time-steps) in CNN structure on computer vision (CV) tasks. However, as Transformer-based networks have achieved prevailing precision on both CV and natural language processing (NLP), the Transformer-based SNNs are still encounting the lower accuracy w.r.t the ANN counterparts. In this work, we introduce a novel ANN-to-SNN conversion method called SpikeZIP-TF, where ANN and SNN are exactly equivalent, thus incurring no accuracy degradation. SpikeZIP-TF achieves 83.82% accuracy on CV dataset (ImageNet) and 93.79% accuracy on NLP dataset (SST-2), which are higher than SOTA Transformer-based SNNs. The code is available in GitHub: https://github.com/Intelligent-Computing-Research-Group/SpikeZIP_transformer",
+          "title": "SpikeZIP-TF: Conversion is All You Need for Transformer-based SNN",
+          "url": "https://arxiv.org/abs/2406.03470v1"
+        },
+        {
+          "published": "2026-04-23T16:10:00Z",
+          "snippet": "The Model Context Protocol (MCP) has become a common interface for connecting large language model (LLM) agents to external tools, but its reliance on stateless, eager schema injection imposes a hidden per-turn overhead the MCP Tax or Tools Tax that practitioner reports place between roughly 10k and 60k tokens in typical multi-server deployments. This payload inflates the key-value cache, is associated with reasoning degradation as context utilization approaches published fracture points around 70%, and turns token budgets into a recurring operational cost. We introduce Tool Attention, a middleware-layer mechanism that generalizes the \"Attention Is All You Need\" paradigm from self-attention over tokens to gated attention over tools. Tool Attention combines (i) an Intent Schema Overlap (ISO) score from sentence embeddings, (ii) a state-aware gating function enforcing preconditions and access scopes, and (iii) a two-phase lazy schema loader that keeps a compact summary pool in context and promotes full JSON schemas only for top-k gated tools. We evaluate on a simulated 120-tool, six-server benchmark whose per-server token counts are calibrated to public audits of real MCP …",
+          "title": "Tool Attention Is All You Need: Dynamic Tool Gating and Lazy Schema Loading for Eliminating the MCP/Tools Tax in Scalable Agentic Workflows",
+          "url": "https://arxiv.org/abs/2604.21816v1"
+        },
+        {
+          "published": "2023-06-02T21:45:13Z",
+          "snippet": "Timeseries analytics is of great importance in many real-world applications. Recently, the Transformer model, popular in natural language processing, has been leveraged to learn high quality feature embeddings from timeseries, core to the performance of various timeseries analytics tasks. However, the quadratic time and space complexities limit Transformers' scalability, especially for long timeseries. To address these issues, we develop a timeseries analytics tool, RITA, which uses a novel attention mechanism, named group attention, to address this scalability issue. Group attention dynamically clusters the objects based on their similarity into a small number of groups and approximately computes the attention at the coarse group granularity. It thus significantly reduces the time and space complexity, yet provides a theoretical guarantee on the quality of the computed attention. The dynamic scheduler of RITA continuously adapts the number of groups and the batch size in the training process, ensuring group attention always uses the fewest groups needed to meet the approximation quality requirement. Extensive experiments on various timeseries datasets and analytics tasks …",
+          "title": "RITA: Group Attention is All You Need for Timeseries Analytics",
+          "url": "https://arxiv.org/abs/2306.01926v1"
+        },
+        {
+          "published": "2019-10-31T15:32:19Z",
+          "snippet": "Taking greedy decoding algorithm as it should be, this work focuses on further strengthening the model itself for Chinese word segmentation (CWS), which results in an even more fast and more accurate CWS model. Our model consists of an attention only stacked encoder and a light enough decoder for the greedy segmentation plus two highway connections for smoother training, in which the encoder is composed of a newly proposed Transformer variant, Gaussian-masked Directional (GD) Transformer, and a biaffine attention scorer. With the effective encoder design, our model only needs to take unigram features for scoring. Our model is evaluated on SIGHAN Bakeoff benchmark datasets. The experimental results show that with the highest segmentation speed, the proposed model achieves new state-of-the-art or comparable performance against strong baselines in terms of strict closed test setting.",
+          "title": "Attention Is All You Need for Chinese Word Segmentation",
+          "url": "https://arxiv.org/abs/1910.14537v3"
+        },
+        {
+          "published": "2026-01-11T07:26:02Z",
+          "snippet": "Modern computer vision architectures, from CNNs to Transformers, predominantly rely on the stacking of heuristic modules: spatial mixers (Attention/Conv) followed by channel mixers (FFNs). In this work, we challenge this paradigm by returning to mathematical first principles. We propose the Clifford Algebra Network (CAN), also referred to as CliffordNet, a vision backbone grounded purely in Geometric Algebra. Instead of engineering separate modules for mixing and memory, we derive a unified interaction mechanism based on the Clifford Geometric Product ($uv = u \\cdot v + u \\wedge v$). This operation ensures algebraic completeness regarding the Geometric Product by simultaneously capturing feature coherence (via the generalized inner product) and structural variation (via the exterior wedge product). Implemented via an efficient sparse rolling mechanism with strict linear complexity $O(N)$, our model reveals a surprising emergent property: the geometric interaction is so representationally dense that standard Feed-Forward Networks (FFNs) become redundant. Empirically, CliffordNet establishes a new Pareto frontier: our Nano variant achieves 77.82\\% accuracy on CIFAR-100 with only …",
+          "title": "CliffordNet: All You Need is Geometric Algebra",
+          "url": "https://arxiv.org/abs/2601.06793v2"
+        },
+        {
+          "published": "2023-04-13T12:27:17Z",
+          "snippet": "Vision transformers have been applied successfully for image recognition tasks. There have been either multi-headed self-attention based (ViT \\cite{dosovitskiy2020image}, DeIT, \\cite{touvron2021training}) similar to the original work in textual models or more recently based on spectral layers (Fnet\\cite{lee2021fnet}, GFNet\\cite{rao2021global}, AFNO\\cite{guibas2021efficient}). We hypothesize that both spectral and multi-headed attention plays a major role. We investigate this hypothesis through this work and observe that indeed combining spectral and multi-headed attention layers provides a better transformer architecture. We thus propose the novel Spectformer architecture for transformers that combines spectral and multi-headed attention layers. We believe that the resulting representation allows the transformer to capture the feature representation appropriately and it yields improved performance over other transformer representations. For instance, it improves the top-1 accuracy by 2\\% on ImageNet compared to both GFNet-H and LiT. SpectFormer-S reaches 84.25\\% top-1 accuracy on ImageNet-1K (state of the art for small version). Further, Spectformer-L achieves 85.7\\% that is the …",
+          "title": "SpectFormer: Frequency and Attention is what you need in a Vision Transformer",
+          "url": "https://arxiv.org/abs/2304.06446v2"
+        },
+        {
+          "published": "2023-02-28T13:54:31Z",
+          "snippet": "Person re-identification plays a key role in applications where a mobile robot needs to track its users over a long period of time, even if they are partially unobserved for some time, in order to follow them or be available on demand. In this context, deep-learning based real-time feature extraction on a mobile robot is often performed on special-purpose devices whose computational resources are shared for multiple tasks. Therefore, the inference speed has to be taken into account. In contrast, person re-identification is often improved by architectural changes that come at the cost of significantly slowing down inference. Attention blocks are one such example. We will show that some well-performing attention blocks used in the state of the art are subject to inference costs that are far too high to justify their use for mobile robotic applications. As a consequence, we propose an attention block that only slightly affects the inference speed while keeping up with much deeper networks or more complex attention blocks in terms of re-identification accuracy. We perform extensive neural architecture search to derive rules at which locations this attention block should be integrated …",
+          "title": "A Little Bit Attention Is All You Need for Person Re-Identification",
+          "url": "https://arxiv.org/abs/2302.14574v1"
+        },
+        {
+          "published": "2023-07-24T13:24:56Z",
+          "snippet": "Medical imaging is a key component in clinical diagnosis, treatment planning and clinical trial design, accounting for almost 90% of all healthcare data. CNNs achieved performance gains in medical image analysis (MIA) over the last years. CNNs can efficiently model local pixel interactions and be trained on small-scale MI data. The main disadvantage of typical CNN models is that they ignore global pixel relationships within images, which limits their generalisation ability to understand out-of-distribution data with different 'global' information. The recent progress of Artificial Intelligence gave rise to Transformers, which can learn global relationships from data. However, full Transformer models need to be trained on large-scale data and involve tremendous computational complexity. Attention and Transformer compartments (Transf/Attention) which can well maintain properties for modelling global relationships, have been proposed as lighter alternatives of full Transformers. Recently, there is an increasing trend to co-pollinate complementary local-global properties from CNN and Transf/Attention architectures, which led to a new era of hybrid models. The past years have witnessed …",
+          "title": "Is attention all you need in medical image analysis? A review",
+          "url": "https://arxiv.org/abs/2307.12775v1"
+        },
+        {
+          "published": "2025-01-13T16:08:47Z",
+          "snippet": "Being attentive to task-relevant features can improve task performance, but paying attention comes with its own metabolic cost. Therefore, strategic allocation of attention is crucial in performing the task efficiently. This work aims to understand this strategy. Recently, de Gee et al. conducted experiments involving mice performing an auditory sustained attention-value task. This task required the mice to exert attention to identify whether a high-order acoustic feature was present amid the noise. By varying the trial duration and reward magnitude, the task allows us to investigate how an agent should strategically deploy their attention to maximize their benefits and minimize their costs. In our work, we develop a reinforcement learning-based normative model of the mice to understand how it balances attention cost against its benefits. The model is such that at each moment the mice can choose between two levels of attention and decide when to take costly actions that could obtain rewards. Our model suggests that efficient use of attentional resources involves alternating blocks of high attention with blocks of low attention. In the extreme case where the agent disregards …",
+          "title": "Attention when you need",
+          "url": "https://arxiv.org/abs/2501.07440v2"
+        },
+        {
+          "published": "2018-10-31T17:09:37Z",
+          "snippet": "In NMT, how far can we get without attention and without separate encoding and decoding? To answer that question, we introduce a recurrent neural translation model that does not use attention and does not have a separate encoder and decoder. Our eager translation model is low-latency, writing target tokens as soon as it reads the first source token, and uses constant memory during decoding. It performs on par with the standard attention-based model of Bahdanau et al. (2014), and better on long sentences.",
+          "title": "You May Not Need Attention",
+          "url": "https://arxiv.org/abs/1810.13409v1"
+        },
+        {
+          "published": "2021-02-24T09:07:52Z",
+          "snippet": "One challenge of motion generation using robot learning from demonstration techniques is that human demonstrations follow a distribution with multiple modes for one task query. Previous approaches fail to capture all modes or tend to average modes of the demonstrations and thus generate invalid trajectories. The other difficulty is the small number of demonstrations that cannot cover the entire working space. To overcome this problem, a motion generation model with extrapolation ability is needed. Previous works restrict task queries as local frames and learn representations in local frames. We propose a model to solve both problems. For multiple modes, we suggest to learn local latent representations of motion trajectories with a density estimation method based on real-valued non-volume preserving (RealNVP) transformations that provides a set of powerful, stably invertible, and learnable transformations. To improve the extrapolation ability, we propose to shift the attention of the robot from one local frame to another during the task execution. In experiments, we consider the docking problem used also in previous works where a trajectory has to be generated to connect two …",
+          "title": "Learning to Shift Attention for Motion Generation",
+          "url": "https://arxiv.org/abs/2102.12141v1"
+        },
+        {
+          "published": "2024-10-24T02:20:17Z",
+          "snippet": "Design Space Exploration (DSE) is essential to modern CPU design, yet current frameworks struggle to scale and generalize in high-dimensional architectural spaces. As the dimensionality of design spaces continues to grow, existing DSE frameworks face three fundamental challenges: (1) reduced accuracy and poor scalability of surrogate models in large design spaces; (2) inefficient acquisition guided by hand-crafted heuristics or exhaustive search; (3) limited interpretability, making it hard to pinpoint architectural bottlenecks. In this work, we present \\textbf{AttentionDSE}, the first end-to-end DSE framework that \\emph{natively integrates} performance prediction and design guidance through an attention-based neural architecture. Unlike traditional DSE workflows that separate surrogate modeling from acquisition and rely heavily on hand-crafted heuristics, AttentionDSE establishes a unified, learning-driven optimization loop, in which attention weights serve a dual role: enabling accurate performance estimation and simultaneously exposing the performance bottleneck. This paradigm shift elevates attention from a passive representation mechanism to an active, interpretable driver of …",
+          "title": "Multi-objective Optimization in CPU Design Space Exploration: Attention is All You Need",
+          "url": "https://arxiv.org/abs/2410.18368v2"
+        },
+        {
+          "published": "2022-05-27T14:36:55Z",
+          "snippet": "Transformers have made progress in miscellaneous tasks, but suffer from quadratic computational and memory complexities. Recent works propose sparse Transformers with attention on sparse graphs to reduce complexity and remain strong performance. While effective, the crucial parts of how dense a graph needs to be to perform well are not fully explored. In this paper, we propose Normalized Information Payload (NIP), a graph scoring function measuring information transfer on graph, which provides an analysis tool for trade-offs between performance and complexity. Guided by this theoretical analysis, we present Hypercube Transformer, a sparse Transformer that models token interactions in a hypercube and shows comparable or even better results with vanilla Transformer while yielding $O(N\\log N)$ complexity with sequence length $N$. Experiments on tasks requiring various sequence lengths lay validation for our graph function well.",
+          "title": "What Dense Graph Do You Need for Self-Attention?",
+          "url": "https://arxiv.org/abs/2205.14014v5"
+        },
+        {
+          "published": "2026-01-21T19:00:08Z",
+          "snippet": "We generalize the attention mechanism by viewing it through the lens of Entropic Optimal Transport, revealing that standard attention corresponds to a transport problem regularized by an implicit uniform prior. We introduce Generalized Optimal transport Attention with Trainable priors (GOAT), a new attention mechanism that replaces this naive assumption with a learnable, continuous prior. This prior maintains full compatibility with optimized kernels such as FlashAttention. GOAT also provides an EOT-based explanation of attention sinks and materializes a solution for them, avoiding the representational trade-offs of standard attention. Finally, by absorbing spatial information into the core attention computation, GOAT learns an extrapolatable prior that combines the flexibility of learned positional embeddings with the length generalization of fixed encodings.",
+          "title": "You Need Better Attention Priors",
+          "url": "https://arxiv.org/abs/2601.15380v2"
+        }
+      ],
+      "weight": 1.0
+    },
+    {
+      "engine": "openalex",
+      "results": [
+        {
+          "published": "2025-08-23",
+          "snippet": "The dominant sequence transduction models are based on complex recurrent or convolutional neural networks in an encoder-decoder configuration. The best performing models also connect the encoder and decoder through an attention mechanism. We propose a new simple network architecture, the Transformer, based solely on attention mechanisms, dispensing with recurrence and convolutions entirely. Experiments on two machine translation tasks show these models to be superior in quality while being more parallelizable and requiring significantly less time to train. Our model achieves 28.4 BLEU on the WMT 2014 English-to-German translation task, improving over the existing best results, including ensembles by over 2 BLEU. On the WMT 2014 English-to-French translation task, our model establishes a new single-model state-of-the-art BLEU score of 41.8 after training for 3.5 days on eight GPUs, a small fraction of the training costs of the best models from the literature. We show that the Transformer generalizes well to other tasks by applying it successfully to English constituency parsing both with large and limited training data.",
+          "title": "Attention Is All You Need",
+          "url": "https://doi.org/10.65215/2q58a426"
+        },
+        {
+          "published": "2021-05-13",
+          "snippet": "Recurrent Neural Networks (RNNs) have long been the dominant architecture in sequence-to-sequence learning. RNNs, however, are inherently sequential models that do not allow parallelization of their computations. Transformers are emerging as a natural alternative to standard RNNs, replacing recurrent computations with a multi-head attention mechanism.In this paper, we propose the SepFormer, a novel RNN-free Transformer-based neural network for speech separation. The Sep-Former learns short and long-term dependencies with a multi-scale approach that employs transformers. The proposed model achieves state-of-the-art (SOTA) performance on the standard WSJ0-2/3mix datasets. It reaches an SI-SNRi of 22.3 dB on WSJ0-2mix and an SI-SNRi of 19.5 dB on WSJ0-3mix. The SepFormer inherits the parallelization advantages of Transformers and achieves a competitive performance even when downsampling the encoded representation by a factor of 8. It is thus significantly faster and it is less memory-demanding than the latest speech separation systems with comparable performance.",
+          "title": "Attention Is All You Need In Speech Separation",
+          "url": "https://doi.org/10.1109/icassp39728.2021.9413901"
+        },
+        {
+          "published": "2020-04-03",
+          "snippet": "Prevailing video frame interpolation techniques rely heavily on optical flow estimation and require additional model complexity and computational cost; it is also susceptible to error propagation in challenging scenarios with large motion and heavy occlusion. To alleviate the limitation, we propose a simple but effective deep neural network for video frame interpolation, which is end-to-end trainable and is free from a motion estimation network component. Our algorithm employs a special feature reshaping operation, referred to as PixelShuffle, with a channel attention, which replaces the optical flow computation module. The main idea behind the design is to distribute the information in a feature map into multiple channels and extract motion information by attending the channels for pixel-level frame synthesis. The model given by this principle turns out to be effective in the presence of challenging motion and occlusion. We construct a comprehensive evaluation benchmark and demonstrate that the proposed approach achieves outstanding performance compared to the existing models with a component for optical flow computation.",
+          "title": "Channel Attention Is All You Need for Video Frame Interpolation",
+          "url": "https://doi.org/10.1609/aaai.v34i07.6693"
+        },
+        {
+          "published": "2023-11-22",
+          "snippet": "Recently, attention mechanism and derived models have gained significant traction in drug development due to their outstanding performance and interpretability in handling complex data structures. This review offers an in-depth exploration of the principles underlying attention-based models and their advantages in drug discovery. We further elaborate on their applications in various aspects of drug development, from molecular screening and target binding to property prediction and molecule generation. Finally, we discuss the current challenges faced in the application of attention mechanisms and Artificial Intelligence technologies, including data quality, model interpretability and computational resource constraints, along with future directions for research. Given the accelerating pace of technological advancement, we believe that attention-based models will have an increasingly prominent role in future drug discovery. We anticipate that these models will usher in revolutionary breakthroughs in the pharmaceutical domain, significantly accelerating the pace of drug development.",
+          "title": "Attention is all you need: utilizing attention in AI-enabled drug discovery",
+          "url": "https://doi.org/10.1093/bib/bbad467"
+        },
+        {
+          "published": "2026-01-17",
+          "snippet": "«Attention is all you need» («Aufmerksamkeit ist alles, was man braucht») lautet der Titel eines wissenschaftlichen Artikels, der zu den meistzitierten gehört, obwohl er noch keine zehn Jahre alt ist. Er beschreibt, wie Machine-Learning-Systeme wie ChatGPT in einem Text wichtige von unwichtigen Wörtern unterscheiden können. Das im Artikel beschriebene mathematische Verfahren ist mitverantwortlich für die massive Leistungssteigerung solcher Systeme in den letzten Jahren. «Attention» ist aber nicht nur ein aktuelles Konzept in der Informatik, sondern lässt sich auch nutzen, um die heutige Zeit zu verstehen.",
+          "title": "Attention is all you need",
+          "url": "https://doi.org/10.5281/zenodo.18289746"
+        },
+        {
+          "published": "2026-01-17",
+          "snippet": "«Attention is all you need» («Aufmerksamkeit ist alles, was man braucht») lautet der Titel eines wissenschaftlichen Artikels, der zu den meistzitierten gehört, obwohl er noch keine zehn Jahre alt ist. Er beschreibt, wie Machine-Learning-Systeme wie ChatGPT in einem Text wichtige von unwichtigen Wörtern unterscheiden können. Das im Artikel beschriebene mathematische Verfahren ist mitverantwortlich für die massive Leistungssteigerung solcher Systeme in den letzten Jahren. «Attention» ist aber nicht nur ein aktuelles Konzept in der Informatik, sondern lässt sich auch nutzen, um die heutige Zeit zu verstehen.",
+          "title": "Attention is all you need",
+          "url": "https://doi.org/10.5281/zenodo.18289747"
+        },
+        {
+          "published": "2025-10-31",
+          "snippet": "In their groundbreaking and highly influential paper— over 148,500 citations at the time of writing —the transformer architecture was introduced by Ashish Vaswani et al. at NIPS 2017 as a new deep learning alternative to traditional recurrent neural networks for sequence-to-sequence learning tasks such as language translation, speech recognition, and text generation. 1",
+          "title": "Attention Is All You Need",
+          "url": "https://doi.org/10.1201/9781003561460-19"
+        },
+        {
+          "published": "2021-04-10",
+          "snippet": "Beyond the success story of pre-trained language models (PrLMs) in recent natural language processing, they are susceptible to over-fitting due to unusual large model size. To this end, dropout serves as a therapy. However, existing methods like random-based, knowledge-based and search-based dropout are more general but less effective onto self-attention based models, which are broadly chosen as the fundamental architecture of PrLMs. In this paper, we propose a novel dropout method named AttendOut to let self-attention empowered PrLMs capable of more robust task-specific tuning. We demonstrate that state-of-the-art models with elaborate training design may achieve much stronger results. We verify the universality of our approach on extensive natural language processing tasks.",
+          "title": "Not All Attention Is All You Need",
+          "url": "http://arxiv.org/abs/2104.04692"
+        },
+        {
+          "published": "2025-03-17",
+          "snippet": "What do artificial intelligence (AI) developers need from moral theology? Moral theology situates human response to revelation within a broad social, religious, and cultural context. Although curre...",
+          "title": "Moral Attention Is All You Need",
+          "url": "https://doi.org/10.1080/14746700.2025.2472118"
+        },
+        {
+          "published": "2021-01-01",
+          "snippet": "We study the power of cross-attention in the Transformer architecture within the context of transfer learning for machine translation, and extend the findings of studies into crossattention when training from scratch.We conduct a series of experiments through finetuning a translation model on data where either the source or target language has changed.These experiments reveal that fine-tuning only the cross-attention parameters is nearly as effective as fine-tuning all parameters (i.e., the entire translation model).We provide insights into why this is the case and observe that limiting fine-tuning in this manner yields crosslingually aligned embeddings.The implications of this finding for researchers and practitioners include a mitigation of catastrophic forgetting, the potential for zero-shot translation, and the ability to extend machine translation models to several new language pairs with reduced parameter storage overhead.1 1 Our code is available at https://github.com/ MGheini/xattn-transfer-for-mt.",
+          "title": "Cross-Attention is All You Need: Adapting Pretrained Transformers for Machine Translation",
+          "url": "https://doi.org/10.18653/v1/2021.emnlp-main.132"
+        },
+        {
+          "published": "2020-01-01",
+          "snippet": "Taking greedy decoding algorithm as it should be, this work focuses on further strengthening the model itself for Chinese word segmentation (CWS), which results in an even more fast and more accurate CWS model.Our model consists of an attention only stacked encoder and a light enough decoder for the greedy segmentation plus two highway connections for smoother training, in which the encoder is composed of a newly proposed Transformer variant, Gaussian-masked Directional (GD) Transformer, and a biaffine attention scorer.With the effective encoder design, our model only needs to take unigram features for scoring.Our model is evaluated on SIGHAN Bakeoff benchmark datasets.The experimental results show that with the highest segmentation speed, the proposed model achieves new state-of-the-art or comparable performance against strong baselines in terms of strict closed test setting.",
+          "title": "Attention Is All You Need for Chinese Word Segmentation",
+          "url": "https://doi.org/10.18653/v1/2020.emnlp-main.317"
+        },
+        {
+          "published": "2025-11-22",
+          "snippet": "Transformers and large language models (LLMs) have transformed artificial intelligence, yet their quadratic computational cost and reliance on retraining reveal an unsustainable scaling law. This paper introduces Constant Attention, a formulation derived from Holonomic Unified Field Dynamics (HUFD), where coherence-not recomputation, governs information flow. Constant Attention replaces discrete self-attention with a conserved holonomic connection, such that retrieval, inference, and learning become one continuous geometric process. The resulting dynamics unifies cognition and field theory, achieving constant time contextual updating with drastically reduced energy and memory demands.",
+          "title": "Constant Attention is all you need.",
+          "url": "https://doi.org/10.5281/zenodo.17677146"
+        },
+        {
+          "published": "2025-11-22",
+          "snippet": "Transformers and large language models (LLMs) have transformed artificial intelligence, yet their quadratic computational cost and reliance on retraining reveal an unsustainable scaling law. This paper introduces Constant Attention, a formulation derived from Holonomic Unified Field Dynamics (HUFD), where coherence-not recomputation, governs information flow. Constant Attention replaces discrete self-attention with a conserved holonomic connection, such that retrieval, inference, and learning become one continuous geometric process. The resulting dynamics unifies cognition and field theory, achieving constant time contextual updating with drastically reduced energy and memory demands.",
+          "title": "Constant Attention is all you need.",
+          "url": "https://doi.org/10.5281/zenodo.17677147"
+        },
+        {
+          "published": "2026-03-25",
+          "snippet": "Episode summary: Before 2017, artificial intelligence struggled with a \"memory\" problem, processing information one slow step at a time through a narrow straw. This episode explores the monumental shift triggered by the \"Attention Is All You Need\" paper, which introduced the Transformer architecture and retired an entire generation of models overnight. We break down the mechanics of self-attention, the transition from Recurrent Neural Networks to parallel processing, and why this specific technology became the universal engine for everything from ChatGPT to protein folding. Whether you are a casual listener or a technical expert, this is a deep dive into the foundational technology that defines the modern era of AI. Show Notes ### The End of the Sequential Bottleneck For decades, artificial intelligence operated under a significant constraint: it processed information linearly. To understand a sentence, models had to look at the first word, then the second, then the third, carrying a \"hidden state\" forward like a heavy backpack. This architecture, known as Recurrent Neural Networks (RNNs), suffered from the \"vanishing gradient\" problem. By the time a model reached the end of a …",
+          "title": "Attention Is All You Need: The Rise of the Transformer",
+          "url": "https://doi.org/10.5281/zenodo.19225200"
+        },
+        {
+          "published": "2026-03-25",
+          "snippet": "Episode summary: Before 2017, artificial intelligence struggled with a \"memory\" problem, processing information one slow step at a time through a narrow straw. This episode explores the monumental shift triggered by the \"Attention Is All You Need\" paper, which introduced the Transformer architecture and retired an entire generation of models overnight. We break down the mechanics of self-attention, the transition from Recurrent Neural Networks to parallel processing, and why this specific technology became the universal engine for everything from ChatGPT to protein folding. Whether you are a casual listener or a technical expert, this is a deep dive into the foundational technology that defines the modern era of AI. Show Notes ### The End of the Sequential Bottleneck For decades, artificial intelligence operated under a significant constraint: it processed information linearly. To understand a sentence, models had to look at the first word, then the second, then the third, carrying a \"hidden state\" forward like a heavy backpack. This architecture, known as Recurrent Neural Networks (RNNs), suffered from the \"vanishing gradient\" problem. By the time a model reached the end of a …",
+          "title": "Attention Is All You Need: The Rise of the Transformer",
+          "url": "https://doi.org/10.5281/zenodo.19225201"
+        },
+        {
+          "published": "2020-10-25",
+          "snippet": "Recurrent Neural Networks (RNNs) have long been the dominant architecture in sequence-to-sequence learning. RNNs, however, are inherently sequential models that do not allow parallelization of their computations. Transformers are emerging as a natural alternative to standard RNNs, replacing recurrent computations with a multi-head attention mechanism. In this paper, we propose the SepFormer, a novel RNN-free Transformer-based neural network for speech separation. The SepFormer learns short and long-term dependencies with a multi-scale approach that employs transformers. The proposed model achieves state-of-the-art (SOTA) performance on the standard WSJ0-2/3mix datasets. It reaches an SI-SNRi of 22.3 dB on WSJ0-2mix and an SI-SNRi of 19.5 dB on WSJ0-3mix. The SepFormer inherits the parallelization advantages of Transformers and achieves a competitive performance even when downsampling the encoded representation by a factor of 8. It is thus significantly faster and it is less memory-demanding than the latest speech separation systems with comparable performance.",
+          "title": "Attention is All You Need in Speech Separation",
+          "url": "http://arxiv.org/abs/2010.13154"
+        },
+        {
+          "published": "2026-01-14",
+          "snippet": "This record presents “From Attention Is All You Need to Structure Is All You Need”, a conceptual and systems-oriented paper arguing that structure—not any single model mechanism—is the first-order organizing principle that enables AI to scale, deploy, and remain trustworthy over time. The work develops a structural continuity thesis across three layers: Model layer (Transformers): self-attention is treated as a structural operator that makes relational structure explicit and computable at scale. Physical layer (EDA and AI hardware): electronic design automation is framed as a structural adjudication layer that determines whether structures can survive under manufacturability, power, timing, thermal, and reliability constraints. Collaboration layer (Human–AI interaction): the paper identifies a discontinuity: while structure is explicit inside models and hardware, it remains largely inexpressible at the human–AI interface under prompt-centric interaction. To address this gap, the paper introduces Structured Expression Resonance (SER) as a collaboration-oriented structural language system. SER is positioned not as a control language or a replacement for natural language, but as a …",
+          "title": "From \"Attention Is All You Need\" to \"Structure Is All You Need\"",
+          "url": "https://research.manchester.ac.uk/en/publications/b24d0f7c-e8a7-42cb-8334-f9e9830e5110"
+        },
+        {
+          "published": "2026-01-14",
+          "snippet": "This record presents “From Attention Is All You Need to Structure Is All You Need”, a conceptual and systems-oriented paper arguing that structure—not any single model mechanism—is the first-order organizing principle that enables AI to scale, deploy, and remain trustworthy over time. The work develops a structural continuity thesis across three layers: Model layer (Transformers): self-attention is treated as a structural operator that makes relational structure explicit and computable at scale. Physical layer (EDA and AI hardware): electronic design automation is framed as a structural adjudication layer that determines whether structures can survive under manufacturability, power, timing, thermal, and reliability constraints. Collaboration layer (Human–AI interaction): the paper identifies a discontinuity: while structure is explicit inside models and hardware, it remains largely inexpressible at the human–AI interface under prompt-centric interaction. To address this gap, the paper introduces Structured Expression Resonance (SER) as a collaboration-oriented structural language system. SER is positioned not as a control language or a replacement for natural language, but as a …",
+          "title": "From \"Attention Is All You Need\" to \"Structure Is All You Need\"",
+          "url": "https://doi.org/10.5281/zenodo.18244864"
+        },
+        {
+          "published": "2022-09-14",
+          "snippet": "Summary Predictions of stock returns are greatly improved relative to low‐dimensional forecasting regressions when the forecasts are based on the estimated factor of large data sets, also known as the diffusion index (DI) model. However, when applied to text data, DI models do not perform well. This paper shows that by simply using text data in a DI model does not improve equity‐premium forecasts over the naive historical‐average model, but substantial gains are obtained when one selects the most predictive words before computing the factors and allows the dictionary to be updated over time.",
+          "title": "Equity‐premium prediction: Attention is all you need",
+          "url": "https://doi.org/10.1002/jae.2939"
+        },
+        {
+          "published": "2021-08-20",
+          "snippet": "Transformer is a powerful model for text understanding. However, it is inefficient due to its quadratic complexity to input sequence length. Although there are many methods on Transformer acceleration, they are still either inefficient on long sequences or not effective enough. In this paper, we propose Fastformer, which is an efficient Transformer model based on additive attention. In Fastformer, instead of modeling the pair-wise interactions between tokens, we first use additive attention mechanism to model global contexts, and then further transform each token representation based on its interaction with global context representations. In this way, Fastformer can achieve effective context modeling with linear complexity. Extensive experiments on five datasets show that Fastformer is much more efficient than many existing Transformer models and can meanwhile achieve comparable or even better long text modeling performance.",
+          "title": "Fastformer: Additive Attention is All You Need",
+          "url": "https://arxiv.org/pdf/2108.09084"
+        }
+      ],
+      "weight": 1.0
+    },
+    {
+      "engine": "europe pmc",
+      "results": [
+        {
+          "published": "2026-09-25",
+          "snippet": "Zhao D, Qiu Y, Guo Y, Luo X, Liu Y, Li X, Chen H, Cai X, Tian T. | 2026. Hard-tissue surgery requires precise spatial control, while conventional computer-assisted navigation presents guidance separately from the operative field. Augmented reality can bring navigation information closer to the surgeon, but how best to translate this information into intuitive intraoperative guidance remains underexplored. We therefore developed an augmented reality navigation system (ANS) that translates real-time deviations from the planned trajectory into co-located holographic action cues. Evaluation comprised typodont and ex vivo porcine experiments, a randomized crossover study in 40 dental trainees, and eight clinical cases. In porcine mandibles, ANS showed lower angular deviation than static and dynamic navigation (1.78° vs 6.42° and 4.02°). Among trainees, accuracy was comparable with dynamic navigation, while workload was lower (29.18 vs 33.15), usability higher (73.13 vs 68.88), and visual-focus ratings improved (3.55 vs 2.28). Clinical cases supported feasibility. These findings support co-located action guidance as an alternative interface paradigm for surgical navigation.",
+          "title": "Attention Is All You Need: A Universal Augmented Reality Surgical Navigation Framework",
+          "url": "https://europepmc.org/article/PPR/PPR1328024"
+        },
+        {
+          "published": "2026-03-01",
+          "snippet": "2026",
+          "title": "Correction to: Attention is all you need: utilizing attention in AI-enabled drug discovery.",
+          "url": "https://europepmc.org/article/MED/42059664"
+        },
+        {
+          "published": "2023-11-01",
+          "snippet": "Zhang Y, Liu C, Liu M, Liu T, Lin H, Huang CB, Ning L. | 2023. Recently, attention mechanism and derived models have gained significant traction in drug development due to their outstanding performance and interpretability in handling complex data structures. This review offers an in-depth exploration of the principles underlying attention-based models and their advantages in drug discovery. We further elaborate on their applications in various aspects of drug development, from molecular screening and target binding to property prediction and molecule generation. Finally, we discuss the current challenges faced in the application of attention mechanisms and Artificial Intelligence technologies, including data quality, model interpretability and computational resource constraints, along with future directions for research. Given the accelerating pace of technological advancement, we believe that attention-based models will have an increasingly prominent role in future drug discovery. We anticipate that these models will usher in revolutionary breakthroughs in the pharmaceutical domain, significantly accelerating the pace of drug development.",
+          "title": "Attention is all you need: utilizing attention in AI-enabled drug discovery.",
+          "url": "https://europepmc.org/article/MED/38189543"
+        },
+        {
+          "published": "2026-09-09",
+          "snippet": "Budel G, Kooij RE, Tjepkema M. | 2026. The Beatles' cultural influence reaches well beyond music into television, fashion, and global media. As we show, it reaches into scientific publishing too. This study documents how often Beatles song titles and lyrics appear in academic article titles, identifying 2,237 exact references and 963 instances of creative wordplay in data from Scopus. Working from a curated list of Beatles songs and lyrics, we combine automated title queries with large-language-model screening, followed by manual verification, to detect both exact references and wordplay. To our knowledge, this is the first study to systematically identify wordplay on Beatles song titles and lyrics in scientific article titles. We report which titles and lyrics are referenced most often, trace how their use has grown over the decades, and show that this growth has outpaced the expansion of the scientific literature as a whole while varying systematically across disciplines. The result is the first large-scale, cross-disciplinary account of how the Beatles have left their mark on scientific writing.",
+          "title": "How science gets by with a little help from the Beatles: Detecting cultural wordplay in scientific literature using large language models.",
+          "url": "https://europepmc.org/article/MED/42715167"
+        },
+        {
+          "published": "2026-09-01",
+          "snippet": "Leboeuf-Yde C, Gudex C. | 2026. This is the first of three articles that provide step-by-step guides on how to structure the content of a scientific article to ensure a coherent and relevant text. This article deals with the Background section, with extra focus on the research objectives. We introduce the four typical elements of a Background section: (i) justification of the study topic, (ii) sufficient information for the reader to understand the research project, (iii) presentation of the research gaps that justify the research objectives, and (iv) well-constructed research objectives that indicate the study design and may include a purpose statement. Because the whole text is driven by the research objectives, we first suggest some tips for making these as informative as possible. We then provide a step-by-step approach for planning the structure and contents of the Background section as preparation for writing the full text later. We illustrate our explanations with text examples selected from this journal to show how authors have approached crucial aspects of the Background section. Finally, we discuss some pros and cons of using artificial intelligence during the writing …",
+          "title": "Practical guide to structuring the Background section in clinical and epidemiological studies.",
+          "url": "https://europepmc.org/article/MED/42681664"
+        },
+        {
+          "published": "2026-09-04",
+          "snippet": "YU S. | 2026. Abstract The O(N²) cost of self-attention is structural: N tokens require O(N²) computation and an O(N) cache that grows with context. This work eliminates the cost: attention is computed between the current token and a single persistent vector—the ocean state, the previous hidden state—so each step costs O(1) in computation and memory. Only two repositionings to a standard Transformer: the ocean state, and BPTT for the backward pass. The ocean state outperforms the standard Transformer, with a stable training gain without exception, and at 10 million steps of context it shows no sign of forgetting.",
+          "title": "One Vector Is All You Need for O(1) Self-Attention: The Ocean State",
+          "url": "https://europepmc.org/article/PPR/PPR1312444"
+        },
+        {
+          "published": "2026-09-15",
+          "snippet": "Zhang J, Liu J, Xu Z. | 2026. This study focuses on the problem of insufficient accuracy in sentiment classification in complex texts and multimodal scenarios. A sentiment classification optimization method is proposed, which integrates a bidirectional encoder representation Transformer model for sentiment analysis (Senti-BERT)and a bidirectional Long Short-Term Memory with Attention (BiLSTM-Attention). Firstly, the Senti-BERT layer is introduced to optimize the generation of word vectors by introducing an emotion dictionary leading mechanism, and a dynamic weighting strategy is adopted to fuse multi-modal features such as text, emoticons, and images. Subsequently, the hierarchical attention mechanism of BiLSTM-Attention structure is used to enhance contextual modeling. Finally, the stacking method is adopted to integrate the advantages of multiple models. The experimental results show that this method performs well in multiple dimensions. This optimization method achieved an F1 score of 84.6% in verb sentiment word recognition and 90.1% in adjective recognition, which is 4.8% higher than the bidirectional encoder representation Transformer. The full modal fusion results in a …",
+          "title": "Sentiment classification optimization based on improved Senti-BERT and BiLSTM-Attention.",
+          "url": "https://europepmc.org/article/MED/42743247"
+        },
+        {
+          "published": "2026-09-17",
+          "snippet": "Zhu L, Tang L, Mao H. | 2026. Handwriting recognition comparison is a critical yet challenging task in financial, commercial, and exam cheating prevention applications. However, the drawbacks of existing methods are that they compare the whole sentence or the entire signature with multiple characters susceptible to data noise. Their accuracy fluctuates widely. Unlike signature verification which treats the entire signature as a single biometric pattern, or general handwriting comparison which analyzes text at the word or paragraph level, our approach operates at the character level, enabling finer-grained analysis with reduced sensitivity to spacing and alignment variations. In this paper, we propose a character-level attention siamese network for handwriting comparison. The proposed model is a 2-channel CNNs model with multiple spatial-attention convolutional layers. Each channel receives an image of a single Chinese handwriting character. The model outputs the similarity between the two characters. Extensive experiments show that our model's attention mechanisms and the additional information of characters can effectively reinforce valid information about signature comparisons. …",
+          "title": "Character level attention siamese networks for Chinese handwriting comparison.",
+          "url": "https://europepmc.org/article/MED/42752669"
+        },
+        {
+          "published": "2026-10-06",
+          "snippet": "Koppel K.",
+          "title": "Attending to Ecological Temporalities Through Phenology",
+          "url": "https://europepmc.org/article/PMC/PMC13637712"
+        },
+        {
+          "published": "2026-09-16",
+          "snippet": "Hjelmgren H, Jungner JG, Bartholdson C, Kalholm K, Stålberg A. | 2026. Parents play a crucial role in supporting their children during pediatric hospital visits, where needle-related procedures are commonly performed. Both children and parents may experience distress related to needles, which can make these procedures more challenging. Adequate distraction, such as extended reality, may help to mitigate these potential difficulties. The aim of this study was to explore parents' perspectives on their child's use of extended reality as a distraction during a needle-related procedure. In this exploratory and prospective mixed-methods study, a total of 30 parents completed a study-specific survey and 26 were interviewed. Quantitative data were analyzed using descriptive statistics, and qualitative data were analyzed using reflexive thematic analysis informed by Braun and Clarke. Parents generally reported positive experiences with XR distraction, with high mean scores for recommending the XR device to other children undergoing a similar procedure (VR 5.00; AR 4.86, scale 1-5). Parent-reported child pain was low in both groups (mean 0.93 for VR and 1.38 for AR, NRS 0-10). Some …",
+          "title": "Parents' Perspectives on XR Distraction During Pediatric Needle Procedures.",
+          "url": "https://europepmc.org/article/MED/42756661"
+        },
+        {
+          "published": "2026-08-29",
+          "snippet": "Martin GP, Akdur G, O'Hara J, Dixon-Woods M. | 2026. ObjectivesAvoidable harm and variations in quality have remained persistent features of health systems, but the track record of financial incentives in driving improvement is mixed. Based on an evaluation of NHS Resolution's Maternity Incentive Scheme (MIS), which focuses on safety of maternity care in English NHS trusts, we identify generalisable principles to inform design of financial incentive schemes in healthcare.DesignQualitative process evaluation based on interviews with those involved in the design and delivery of MIS.SettingOrganisations involved in running MIS and organisations participating in the scheme.ParticipantsThirty-five individuals were interviewed, including 17 involved in the national-level administration of MIS and 18 with experience of MIS at local level.Main outcome measuresNot applicable.ResultsWe identified strengths, weaknesses and unintended consequences of the Scheme from the perspective of participants. MIS was seen by national-level stakeholders as having succeeded in elevating maternity safety in organisations' priorities and consolidating disparate safety requirements into a unified framework. …",
+          "title": "Seven lessons for financial incentivisation schemes in healthcare: a qualitative study of NHS Resolution's Maternity Incentive Scheme.",
+          "url": "https://europepmc.org/article/MED/42668399"
+        },
+        {
+          "published": "2026-09-01",
+          "snippet": "Evon DM, Merkler K, Mkumba L, Lucas N, Wright L, Hatchett J, Gomel R, Smith PJ, Deutsch-Link S, Bowlus CL, Swain MG, Reeve BB. | 2026. Background and aimsTo understand the experience of fatigue and cognitive impairment in adults with symptomatic primary sclerosing cholangitis (PSC) as an essential first step towards developing PSC-specific symptom measures.MethodsPurposeful sampling was used to identify 17 symptomatic adults from the PSC Symptom Assessment Project who met general trial eligibility criteria for in-depth concept elicitation interviews focused on key PSC symptoms. Of these, twelve were interviewed in-depth about fatigue and eleven about cognitive impairment. Interviews were conducted virtually, audio-recorded, transcribed and analysed. The Theory of Unpleasant Symptoms guided the development of a PSC symptom conceptual framework.ResultsParticipants were on average 42 years old, 57% male, 71% White and 57% had inflammatory bowel disease. Half experienced fatigue and cognitive impairment daily, while others described varying frequencies of these symptoms. Most participants described fatigue getting progressively worse throughout the day, often requiring naps. Fatigue …",
+          "title": "Fatigue and Cognitive Impairment in Adults With Primary Sclerosing Cholangitis: Results From Concept Elicitation Interviews.",
+          "url": "https://europepmc.org/article/MED/42548005"
+        },
+        {
+          "published": "2026-09-18",
+          "snippet": "Lythell C, Schaller AS, Jaarsma T, Friedrichsen M. | 2026. BackgroundThirst is a potentially distressing yet under-researched symptom experienced by patients receiving specialist palliative care. Despite its clinical relevance, little is known about how patients experience thirst, or how it is assessed and managed in practice. This may affect patient comfort. This study aimed to describe how patients in specialist palliative home care experience thirst and investigate its impact on their daily lives.DesignA qualitative inductive design.MethodsData were collected through semi-structured interviews with 24 patients. The interviews were analysed following the approach of Braun and Clarke's reflexive thematic analysis. This study adheres to the EQUATOR guidelines by using Standards for Reporting Qualitative Research (SRQR).ResultsFour main themes were identified describing patients' experiences of thirst in palliative care: (1) the challenge of distinguishing thirst from dry mouth, where patients frequently conflated the two; (2) a persistent symptom in the shadow of others, where thirst was perceived as less significant compared to more distressing symptoms; (3) when thirst is not a …",
+          "title": "Are patients receiving specialist palliative care thirsty? A qualitative interview study.",
+          "url": "https://europepmc.org/article/MED/42760558"
+        },
+        {
+          "published": "2026-09-01",
+          "snippet": "Alyahya K, Alshabani SM, Alageel LA, Alasmari RS, Shaheen TE, AlKanhal AA, Albabtain A. | 2026. Background Attention-deficit/hyperactivity disorder (ADHD) is a common neurodevelopmental disorder, and adequate parental knowledge is important for recognizing symptoms and supporting appropriate management. This study assessed parental knowledge, awareness, and beliefs regarding ADHD in Riyadh, Saudi Arabia. Methods A cross-sectional study was conducted among parents of children and adolescents with ADHD residing in the Riyadh Region between September 2023 and May 2024. Data were collected anonymously using a 32-item self-administered online questionnaire. Descriptive statistics and chi-square tests were used to assess associations between parental characteristics and knowledge and belief categories. Results A total of 388 parents participated, of whom 84.3% were mothers. Most participants demonstrated good recognition of common ADHD symptoms; 95.6% recognized difficulties with maintaining attention, and 92.8% recognized difficulties remaining focused. However, misconceptions remained common, with 68.3% believing that individuals with ADHD are always hyperactive and only 41.5% …",
+          "title": "Assessment of ADHD Knowledge, Awareness, and Beliefs Among Parents of Children and Adolescents With ADHD in the Riyadh Region, Saudi Arabia.",
+          "url": "https://europepmc.org/article/MED/42683465"
+        },
+        {
+          "published": "2026-09-29",
+          "snippet": "McIlvride S, Rao N, Singh S, Nelson SM, Pell JP, Fleming M. | 2026. BackgroundThe long-term effects of antidepressant use in pregnancy on child neurodevelopment are unclear; meanwhile antidepressant use in pregnancy is increasing. We aimed to clarify associations between prenatal maternal depression and/or antidepressant exposure and neurodevelopmental outcomes in school-age children.Methods and findingsThis population-wide cohort study included 167,447 children born in Wales, UK between 2009 and 2016, followed until 2022 (mean age 5.68 years) using linked primary care, maternity and education records. Exposures were one or more antidepressant prescriptions during pregnancy or up to one month before conception, and/or maternal depression diagnosis recorded in the two years before delivery. Outcomes were all-cause and cause-specific special educational need (SEN), including autism spectrum disorder (ASD), sensory impairment, communication difficulties, learning difficulties, physical and medical difficulties, and behavioral-emotional-social difficulties, as well as attention deficit hyperactivity disorder (ADHD). Generalized estimating equation models with an interaction term …",
+          "title": "Prenatal exposure to maternal depression and antidepressants and neurodevelopmental outcomes: A population cohort study.",
+          "url": "https://europepmc.org/article/MED/42809515"
+        },
+        {
+          "published": "2026-09-25",
+          "snippet": "Chapman JR. | 2026",
+          "title": "Answers From the World of Transplantation?",
+          "url": "https://europepmc.org/article/MED/42813164"
+        },
+        {
+          "published": "2026-09-08",
+          "snippet": "Treloar C, Lenton E, Kirwan A, Douglass C, Nourse G, Farrugia A, Seear K, Watts C, Stoove M, Cama E. | 2026. The impacts of stigma on health are well-known. Most interventions to reduce stigma focus on education or skills building of health workers and less on organisational or structural approaches. Responding to ongoing efforts to increase the quality of health care, we explore data from semi-structured interviews with 20 key stakeholders to identify and examine stigma reduction opportunities that align with existing practices, policies and structures for strengthening quality in the Australian healthcare system. Analysis focused on the \"outer setting\" constructs of the Consolidated Framework for Implementation Research to identify and categorise mechanisms that linked to or were determined by governing processes of the (\"outer setting\"). The necessity to be accredited against national standards was positioned as an over-arching driver of what health systems do and what gets the attention of leaders and executives, and can subsequently impact allocation of resources, including for stigma reduction. Participants' accounts also raise the possibility of using other more general …",
+          "title": "Stigma reduction as quality health care: A qualitative study of structural level mechanisms to address stigma.",
+          "url": "https://europepmc.org/article/MED/42709689"
+        },
+        {
+          "published": "2026-08-17",
+          "snippet": "Johnson-Pradeep R, Raveendranathan D, Chandra M, Patra S, Goud BR, Nataraj A, Babu I, Padmanabha NK, Selvam S, Prasad K, Brar JS, Deshpande SN. | 2026. Depression is highly prevalent among individuals with type 2 diabetes mellitus (T2DM), contributing to increased morbidity, mortality, and healthcare costs. Given the shortage of mental health professionals, task-sharing with primary care personnel (PCP) are essential for early identification and management of depression in primary care settings. To evaluate the effectiveness of a brief depression training program (BDTP) in enhancing PCPs' knowledge of depression management in T2DM. A 3-hour module-based BDTP was conducted at primary care centers in Bengaluru, New Delhi, and Bhubaneswar. Knowledge was assessed pre- and post-training (immediately) using multiple-choice questions (MCQs) and case vignettes. Forty-nine PCPs participated. Post-training scores significantly improved across all sites, irrespective of prior mental health training. BDTP is effective in improving PCPs' short-term knowledge. Ongoing training supervision and virtual skill-based training are recommended to sustain and translate knowledge into clinical practice.",
+          "title": "Effectiveness of a brief depression training program to primary care personnel for people with type 2 diabetes mellitus and depression in India.",
+          "url": "https://europepmc.org/article/MED/42713620"
+        },
+        {
+          "published": "2026-12-01",
+          "snippet": "Jones N, Khan Z, Watson K. | 2026. BackgroundClinical teaching occurs where patient care and education coexist. Within the United Kingdom's National Health Service, workforce pressures constrain teaching and supervision. Clinical Teaching Fellow (CTF) roles have expanded in response but are often viewed as discrete posts rather than practices situated within complex clinical-educational systems. This study examined how tensions within and across these systems shaped CTF practice.MethodsThis theory-informed exploratory qualitative case study used third-generation Activity Theory. All 10 members of a hospital medical education team were invited to a semistructured group interview; eight participated. An Activity Theory-informed thematic approach was used to map the focal undergraduate clinical education activity system and examine tensions within it and at its intersections with adjacent systems.FindingsParticipants included three CTFs, two education facilitators and three administrators. CTF practice involved teaching, programme coordination and administrative work within a multiprofessional team. Differing understandings of the activity's purpose and outcomes shaped practice. …",
+          "title": "Clinical Teaching Fellow Practice Within Complex Clinical-Educational Systems: An Activity Theory-Informed Case Study.",
+          "url": "https://europepmc.org/article/MED/42788642"
+        },
+        {
+          "published": "2026-09-01",
+          "snippet": "Clarke N, Hayden L, Smith A, Sharp L, von Wagner C, Mooney T, Gallagher P. | 2026. BackgroundOrganized colorectal (CRC) screening programmes offer an opportunity to reduce the burden of the disease on populations. CRC screening participation among women is substantially lower than breast or cervical cancer screening. Uptake is also lower in areas of greater deprivation which could exacerbate inequalities in CRC; however, few studies have been conducted with women resident in lower socio-economic areas who were invited for screening but did not participate. The aim of this study was to explore women's decisions not to take part in Ireland's population-based BowelScreen programme.MethodsSemi-structured interviews were conducted with women resident in lower socio-economic areas, who had not participated in BowelScreen. Deductive thematic analysis, guided by the Theoretical Domains Framework (TDF: 14 domain version), using the framework approach was conducted.ResultsFifteen women from lower socio-economic areas in Ireland who had not participated in BowelScreen were interviewed. Six TDF domains were identified as influencing non-participation; (1) Environmental Context and Resources; …",
+          "title": "A Qualitative Exploration of the Decision Not to Take Part in Colorectal Cancer Screening Among Women Living in Lower Socio-Economic Areas.",
+          "url": "https://europepmc.org/article/MED/42770501"
+        }
+      ],
+      "weight": 0.4000000059604645
+    }
+  ],
+  "labels": {},
+  "query": "attention is all you need"
+}

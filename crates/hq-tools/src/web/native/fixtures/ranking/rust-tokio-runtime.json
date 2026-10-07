@@ -1,0 +1,154 @@
+{
+ "query": "rust tokio runtime",
+ "category": null,
+ "engines": [
+  {
+   "engine": "google cse",
+   "weight": 1.0,
+   "results": [
+    {
+     "title": "tokio::runtime - Rust - Docs.rs",
+     "url": "https://docs.rs/tokio/latest/tokio/runtime/index.html",
+     "snippet": "A Tokio runtime can only execute tasks if the runtime is running. Normally this is not an issue as the default configuration of a runtime is always running, but ...",
+     "published": null
+    },
+    {
+     "title": "Tokio - An asynchronous Rust runtime",
+     "url": "https://tokio.rs/",
+     "snippet": "Reliable. Tokio's APIs are memory-safe, thread-safe, and misuse-resistant. · Fast. Building on top of Rust, Tokio provides a multi-threaded, work-stealing ...",
+     "published": null
+    },
+    {
+     "title": "Tutorial | Tokio - An asynchronous Rust runtime",
+     "url": "https://tokio.rs/tokio/tutorial",
+     "snippet": "Tutorial. Tokio is an asynchronous runtime for the Rust programming language. It provides the building blocks needed for writing networking applications. It ...",
+     "published": null
+    },
+    {
+     "title": "Tokio - GitHub",
+     "url": "https://github.com/tokio-rs/tokio",
+     "snippet": "Tokio will keep a rolling MSRV (minimum supported rust version) policy of at least 6 months. When increasing the MSRV, the new Rust version must have been ...",
+     "published": null
+    },
+    {
+     "title": "Do Most People Agree That the Multithreaded Runtime Should Be ...",
+     "url": "https://www.reddit.com/r/rust/comments/1jwp8jo/do_most_people_agree_that_the_multithreaded/",
+     "snippet": "11 Apr 2025 ... As someone relatively new to Rust, I was initially surprised to find that Tokio opts for a multithreaded runtime by default.",
+     "published": null
+    },
+    {
+     "title": "Tokio (software) - Wikipedia",
+     "url": "https://en.wikipedia.org/wiki/Tokio_(software)",
+     "snippet": "Tokio is a software library for the Rust programming language. It provides a runtime and functions that enable the use of asynchronous I/O, allowing for ...",
+     "published": null
+    },
+    {
+     "title": "Hello Tokio - An asynchronous Rust runtime",
+     "url": "https://tokio.rs/tokio/tutorial/hello-tokio",
+     "snippet": "The #[tokio::main] function is a macro. It transforms the async fn main() into a synchronous fn main() that initializes a runtime instance and executes the ...",
+     "published": null
+    },
+    {
+     "title": "tokio - Rust - Docs.rs",
+     "url": "https://docs.rs/tokio",
+     "snippet": "A runtime for writing reliable network applications without compromising speed. Tokio is an event-driven, non-blocking I/O platform for writing asynchronous ...",
+     "published": null
+    },
+    {
+     "title": "Don't fully understand tokio multithreaded runtime benefits",
+     "url": "https://users.rust-lang.org/t/dont-fully-understand-tokio-multithreaded-runtime-benefits/113393",
+     "snippet": "24 Jun 2024 ... In Tokio, the event loop can have multiple threads for running async tasks. When you start an async task via tokio::spawn , it goes into the ...",
+     "published": null
+    },
+    {
+     "title": "Practical Guide to Async Rust and Tokio | by Oleg Kubrakov - Medium",
+     "url": "https://medium.com/@OlegKubrakov/practical-guide-to-async-rust-and-tokio-99e818c11965",
+     "snippet": "1 Dec 2024 ... Tokio implements a cooperative event loop, which means Tokio tasks should voluntarily yield control; otherwise, the entire runtime can be ...",
+     "published": null
+    },
+    {
+     "title": "Glossary - An asynchronous Rust runtime - Tokio.rs",
+     "url": "https://tokio.rs/tokio/glossary",
+     "snippet": "In the context of Rust, asynchronous code refers to code that uses the async/await language feature, which allows many tasks to run concurrently on a few ...",
+     "published": null
+    },
+    {
+     "title": "The State of Async Rust: Runtimes | corrode Rust Consulting",
+     "url": "https://corrode.dev/blog/async/",
+     "snippet": "30 Jul 2026 ... Tokio stands as Rust's canonical async runtime. But to label Tokio merely as a runtime would be an understatement. It has extra modules for fs, ...",
+     "published": null
+    },
+    {
+     "title": "Using Rustlang's Async Tokio Runtime for CPU-Bound Tasks",
+     "url": "https://www.influxdata.com/blog/using-rustlangs-async-tokio-runtime-for-cpu-bound-tasks/",
+     "snippet": "20 Oct 2023 ... Many people read it to mean that a Tokio Runtime should never be used for CPU-bound tasks. The key point is actually that the same Runtime ...",
+     "published": null
+    },
+    {
+     "title": "Unit Testing | Tokio - An asynchronous Rust runtime",
+     "url": "https://tokio.rs/tokio/topics/testing",
+     "snippet": "Pausing and resuming time in tests ... This code prints 0ms on a reasonable machine. ... Keep in mind that the start_paused attribute requires the tokio feature ...",
+     "published": null
+    },
+    {
+     "title": "Async Rust: What is a runtime? how Tokio works under the hood",
+     "url": "https://news.ycombinator.com/item?id=32119002",
+     "snippet": "16 Jul 2022 ... Each runtime would provide a set of FDs that they want to monitor, and a function to execute a single iteration of their event loop. The while(1) ...",
+     "published": null
+    },
+    {
+     "title": "Spawning | Tokio - An asynchronous Rust runtime",
+     "url": "https://tokio.rs/tokio/tutorial/spawning",
+     "snippet": "A Tokio task is an asynchronous green thread. They are created by passing an async block to tokio::spawn . The tokio::spawn function returns a JoinHandle , ...",
+     "published": null
+    },
+    {
+     "title": "How to Use Tokio for Async Runtime in Rust - OneUptime",
+     "url": "https://oneuptime.com/blog/post/2026-02-01-rust-tokio-async-runtime/view",
+     "snippet": "1 Feb 2026 ... Setting Up Tokio. First, add Tokio to your project. The \"full\" feature flag enables all components - you can be more selective in production.",
+     "published": null
+    },
+    {
+     "title": "Bridging with sync code | Tokio - An asynchronous Rust runtime",
+     "url": "https://tokio.rs/tokio/topics/bridging",
+     "snippet": "Bridging with sync code. In most examples of using Tokio, we mark the main function with #[tokio::main] and make the entire project asynchronous. In some cases, ...",
+     "published": null
+    },
+    {
+     "title": "RuntimeMetrics in tokio::runtime - Rust - Docs.rs",
+     "url": "https://docs.rs/tokio/latest/tokio/runtime/struct.RuntimeMetrics.html",
+     "snippet": "Tasks that are spawned or notified from within a runtime thread are scheduled using that worker's local queue. This metric returns the current number of tasks ...",
+     "published": null
+    },
+    {
+     "title": "Announcing the Tokio runtime",
+     "url": "https://tokio.rs/blog/2018-03-tokio-runtime",
+     "snippet": "8 Mar 2018 ... Tokio is a runtime for writing reliable asynchronous applications with Rust. It provides async I/O, networking, scheduling, timers, ...",
+     "published": null
+    }
+   ]
+  }
+ ],
+ "labels": {
+  "https://docs.rs/tokio/latest/tokio/runtime/index.html": 2,
+  "https://tokio.rs/": 2,
+  "https://tokio.rs/tokio/tutorial": 2,
+  "https://github.com/tokio-rs/tokio": 2,
+  "https://www.reddit.com/r/rust/comments/1jwp8jo/do_most_people_agree_that_the_multithreaded/": 1,
+  "https://en.wikipedia.org/wiki/Tokio_(software)": 1,
+  "https://tokio.rs/tokio/tutorial/hello-tokio": 1,
+  "https://docs.rs/tokio": 2,
+  "https://users.rust-lang.org/t/dont-fully-understand-tokio-multithreaded-runtime-benefits/113393": 1,
+  "https://medium.com/@OlegKubrakov/practical-guide-to-async-rust-and-tokio-99e818c11965": 1,
+  "https://tokio.rs/tokio/glossary": 1,
+  "https://corrode.dev/blog/async/": 2,
+  "https://www.influxdata.com/blog/using-rustlangs-async-tokio-runtime-for-cpu-bound-tasks/": 1,
+  "https://tokio.rs/tokio/topics/testing": 1,
+  "https://news.ycombinator.com/item?id=32119002": 1,
+  "https://tokio.rs/tokio/tutorial/spawning": 1,
+  "https://oneuptime.com/blog/post/2026-02-01-rust-tokio-async-runtime/view": 1,
+  "https://tokio.rs/tokio/topics/bridging": 1,
+  "https://docs.rs/tokio/latest/tokio/runtime/struct.RuntimeMetrics.html": 1,
+  "https://tokio.rs/blog/2018-03-tokio-runtime": 1
+ }
+}

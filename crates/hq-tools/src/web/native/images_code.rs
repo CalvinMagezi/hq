@@ -9,6 +9,16 @@ use super::markup::{collapse_ws, html_text};
 
 /// A longer image URL would be cut mid-way by the snippet cap, so such a hit is dropped.
 const MAX_IMAGE_URL_CHARS: usize = 300;
+/// Most requests one Stack Exchange search may spend finding a form of the query that matches.
+const MAX_RELAXED_QUERIES: usize = 3;
+/// Term counts the relaxed forms shrink to, longest terms kept.
+const RELAXED_TERM_COUNTS: [usize; 2] = [3, 2];
+/// Words that add no constraint a question site would miss.
+const FILLER_WORDS: &[&str] = &[
+    "a", "an", "the", "is", "are", "was", "were", "of", "in", "on", "to", "for", "and", "or",
+    "with", "by", "at", "as", "it", "be", "how", "do", "does", "did", "what", "why", "when", "can",
+    "i", "my", "me", "using", "use", "from", "vs",
+];
 
 /// Third-party URLs reach an agent that may fetch them, so only http(s) ones pass.
 fn web_url(url: &str) -> Option<String> {
@@ -75,23 +85,46 @@ pub(super) async fn fetch(
                 Engine::SuperUser => "superuser",
                 _ => "stackoverflow",
             };
-            let mut params = vec![
-                ("order", "desc".to_string()),
-                ("sort", "relevance".into()),
-                ("q", q),
-                ("site", site.into()),
-                ("pagesize", per_page.to_string()),
-                ("page", page.to_string()),
-            ];
-            if let Some(d) = since {
-                params.push(("fromdate", d.timestamp().to_string()));
+            // The endpoint needs every term to match, so a long natural-language
+            // query finds nothing. Stack Overflow, whose hit rate justifies the
+            // quota, retries shorter forms on the first page (later pages index a
+            // different result set); the Linux sites ask once.
+            let forms = if engine == Engine::StackOverflow && page == 1 {
+                relaxations(&q)
+            } else {
+                vec![q.clone()]
+            };
+            let mut last: Option<Value> = None;
+            for candidate in forms {
+                let mut params = vec![
+                    ("order", "desc".to_string()),
+                    ("sort", "relevance".into()),
+                    ("q", candidate),
+                    ("site", site.into()),
+                    ("pagesize", per_page.to_string()),
+                    ("page", page.to_string()),
+                ];
+                if let Some(d) = since {
+                    params.push(("fromdate", d.timestamp().to_string()));
+                }
+                let json = match get_json(
+                    client
+                        .get(format!("{base}/2.3/search/advanced"))
+                        .query(&params),
+                )
+                .await
+                {
+                    Ok(json) => json,
+                    // A later form failing must not discard an earlier "nothing found" answer.
+                    Err(_) if last.is_some() => break,
+                    Err(e) => return Err(e),
+                };
+                if json["items"].as_array().is_some_and(|i| !i.is_empty()) {
+                    return Ok(json);
+                }
+                last = Some(json);
             }
-            get_json(
-                client
-                    .get(format!("{base}/2.3/search/advanced"))
-                    .query(&params),
-            )
-            .await
+            Ok(last.unwrap_or(Value::Null))
         }
         Engine::Crates => {
             let params = [
@@ -408,4 +441,52 @@ fn parse_europe_pmc(body: &Value) -> Result<Vec<SearchResult>, String> {
             Some(hit)
         })
         .collect())
+}
+
+/// Forms of a query to try, strictest first. Stack Exchange needs every term to
+/// match and answered nothing for three-term forms of a real five-term query
+/// while two terms found it, so the ladder ends at the two longest terms (rarer
+/// words are longer, and they carry the topic). Filler words are dropped from the
+/// start, since a form with "how do I" in it matches almost nothing. At most
+/// [`MAX_RELAXED_QUERIES`] forms, without repeats.
+pub(super) fn relaxations(query: &str) -> Vec<String> {
+    let all: Vec<&str> = query.split_whitespace().collect();
+    let content: Vec<&str> = all
+        .iter()
+        .copied()
+        .filter(|t| !FILLER_WORDS.contains(&t.to_lowercase().as_str()))
+        .collect();
+    if content.is_empty() {
+        return vec![all.join(" ")];
+    }
+    let base = content;
+    let mut forms = vec![base.join(" ")];
+    let mut push = |terms: Vec<&str>| {
+        let form = terms.join(" ");
+        if !terms.is_empty() && !forms.contains(&form) {
+            forms.push(form);
+        }
+    };
+    for count in RELAXED_TERM_COUNTS {
+        if base.len() > count {
+            push(longest_terms(&base, count));
+        }
+    }
+    forms.truncate(MAX_RELAXED_QUERIES);
+    forms
+}
+
+/// The `count` longest terms, ties going to the earlier one, in their original order.
+fn longest_terms<'a>(terms: &[&'a str], count: usize) -> Vec<&'a str> {
+    let mut ranked: Vec<usize> = (0..terms.len()).collect();
+    ranked.sort_by(|a, b| {
+        terms[*b]
+            .chars()
+            .count()
+            .cmp(&terms[*a].chars().count())
+            .then(a.cmp(b))
+    });
+    ranked.truncate(count);
+    ranked.sort_unstable();
+    ranked.into_iter().map(|i| terms[i]).collect()
 }
