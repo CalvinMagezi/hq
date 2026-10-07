@@ -142,14 +142,14 @@ function SettingsBody({ s }: { s: HqSettings }) {
         <Row label="Allowed web origins">{s.safety.web_allowed_origins.length ? s.safety.web_allowed_origins.join(', ') : 'none'}</Row>
       </Section>
       <Section title="Coding agents">
-        <Row label="Default host">{s.herdr.default_host}</Row>
-        <Row label="Hosts">{s.herdr.hosts.length ? s.herdr.hosts.join(', ') : 'this machine only'}</Row>
-        <Row label="Agent sandbox">{s.herdr.sandbox_mode === 'process' ? 'on' : 'off'}{s.herdr.sandbox_extra_domains ? ` · ${s.herdr.sandbox_extra_domains} extra allowed sites` : ''}</Row>
-        <Row label="Stop idle sessions after">{s.herdr.idle_reap_hours ? `${s.herdr.idle_reap_hours} h` : 'never'}</Row>
-        <Row label="New watches drive">{yesNo(s.herdr.drive_new_watches)}</Row>
-        <Row label="Driver check-in">{s.herdr.driver_checkin_minutes} min</Row>
-        <Row label="Driver instruction budget">{s.herdr.driver_nudge_budget} per session</Row>
-        <Row label="Stop after idle turns">{s.herdr.driver_no_progress_limit} with no tool activity</Row>
+        <Row label="Default host">{s.agent_host.default_host}</Row>
+        <Row label="Hosts">{s.agent_host.hosts.length ? s.agent_host.hosts.join(', ') : 'this machine only'}</Row>
+        <Row label="Agent sandbox">{s.agent_host.sandbox_mode === 'process' ? 'on' : 'off'}{s.agent_host.sandbox_extra_domains ? ` · ${s.agent_host.sandbox_extra_domains} extra allowed sites` : ''}</Row>
+        <Row label="Stop idle sessions after">{s.agent_host.idle_reap_hours ? `${s.agent_host.idle_reap_hours} h` : 'never'}</Row>
+        <Row label="New watches drive">{yesNo(s.agent_host.drive_new_watches)}</Row>
+        <Row label="Driver check-in">{s.agent_host.driver_checkin_minutes} min</Row>
+        <Row label="Driver instruction budget">{s.agent_host.driver_nudge_budget} per session</Row>
+        <Row label="Stop after idle turns">{s.agent_host.driver_no_progress_limit} with no tool activity</Row>
       </Section>
       <Section title="Integrations">
         {s.integrations.remote_mcp.length === 0 && <Row label="Remote MCP servers">none</Row>}

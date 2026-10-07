@@ -9,7 +9,7 @@ use axum::{
 };
 use hq_db::harness_sessions_registry::{self as registry, HarnessSessionRow};
 use hq_tools::harness_session::{self as harness, ListFilter, Liveness, NewWatch};
-use hq_tools::herdr::{HerdrError, INVALID_KEYS_CODE, validate_keys};
+use hq_tools::agent_host::{AgentHostError, INVALID_KEYS_CODE, validate_keys};
 use rusqlite::{Connection, TransactionBehavior};
 use serde::Deserialize;
 use serde_json::{Value, json};
@@ -201,13 +201,13 @@ const HOST_UNREACHABLE: &str = "the session's host is unreachable right now";
 /// Turn a harness_session error into the status a client can act on. The 404
 /// and 409 cases match messages HQ itself writes (there is no typed error for
 /// them yet); anything else is logged and answered generically, because the
-/// text can carry ssh or herdr stderr.
+/// text can carry ssh or host stderr.
 fn session_error(e: anyhow::Error) -> ApiError {
     if let Some(api) = e.downcast_ref::<ApiError>() {
         return api.clone();
     }
-    match e.downcast_ref::<HerdrError>() {
-        Some(HerdrError::Api { code, message }) if code == INVALID_KEYS_CODE => {
+    match e.downcast_ref::<AgentHostError>() {
+        Some(AgentHostError::Api { code, message }) if code == INVALID_KEYS_CODE => {
             return ApiError::bad_request(message.clone());
         }
         Some(err) if err.is_unreachable() => {
@@ -668,7 +668,7 @@ mod tests {
             assert_eq!(
                 send(None, Some(vec![bad])).await.status(),
                 StatusCode::BAD_REQUEST,
-                "{bad:?} must not reach herdr"
+                "{bad:?} must not reach the host"
             );
         }
         let long = "x".repeat(MAX_SEND_CHARS + 1);
@@ -708,12 +708,12 @@ mod tests {
 
     #[test]
     fn unrecognised_errors_do_not_leak_stderr_to_the_client() {
-        let leaked = "herdr api_error: ssh: connect to host 10.0.0.9 port 22: Connection refused (key /home/hq/.ssh/id)";
+        let leaked = "host api_error: ssh: connect to host 10.0.0.9 port 22: Connection refused (key /home/hq/.ssh/id)";
         let err = session_error(anyhow::anyhow!(leaked.to_string()));
         assert_eq!(err.status(), StatusCode::INTERNAL_SERVER_ERROR);
         assert!(!err.to_string().contains("10.0.0.9"), "{err}");
 
-        let typed = session_error(anyhow::Error::new(HerdrError::Unreachable {
+        let typed = session_error(anyhow::Error::new(AgentHostError::Unreachable {
             host: "laptop".into(),
             detail: "ssh: Permission denied (publickey) for hq@100.64.0.2".into(),
         }));

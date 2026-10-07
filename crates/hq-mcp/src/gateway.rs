@@ -51,14 +51,14 @@ pub const SPARK_READONLY_ALLOWLIST: &[&str] = &[
 /// the read tools plus filing and updating tasks and starting coding-agent
 /// sessions. Starting a claude-code session runs it with permissions skipped,
 /// so this key is code-execution equivalent on every configured host; bound it
-/// with `herdr.handoff_cwd_allow`. It cannot send to or read the output of a
+/// with `agent_host.handoff_cwd_allow`. It cannot send to or read the output of a
 /// session (`harness_session_send`, `harness_session_logs`): the registry does
 /// not record who created a session, so those would reach sessions this key
 /// never started. No deletes, no vault writes, no session
 /// stop/resume/link/goal changes, no config, no tools that reach other
 /// services. It can ask HQ's chat agent a question (`hq_ask`) but only in
 /// read-only mode, read back only the asks it made, and continue only threads those asks
-/// started. The reply it gets is built without the session-log, Herdr and file-reading tools (see
+/// started. The reply it gets is built without the session-log, the host and file-reading tools (see
 /// `hq_tools::ask::HANDOFF_ASK_DENIED_PREFIXES`). An exact list, so a tool added to the registry later is denied
 /// until someone adds it here.
 pub const HANDOFF_ALLOWLIST: &[&str] = &[
@@ -523,7 +523,7 @@ mod tests {
             "harness_session_goal",
             "harness_session_mode",
             "harness_session_attach",
-            "herdr_send",
+            "host_send",
             "config_manage",
             "vault_write_note",
             "bash",

@@ -118,8 +118,8 @@ implementation does cheaply and a Python service cannot.
   itself and the pinned resolver does not run: the redirect policy must reject any
   hop outside the engine host allowlist.
 - **Recipes, not code:** `ssh -D` with a dedicated key restricted by
-  `permitopen` to the engine hosts (do not reuse the Herdr key, whose gate only
-  allows Herdr subcommands) and a userspace `tailscaled --socks5-server` with an
+  `permitopen` to the engine hosts (do not reuse the host key, whose gate only
+  allows the host subcommands) and a userspace `tailscaled --socks5-server` with an
   exit node. Tor and WARP are not worth advertising.
 
 ### Request path and state

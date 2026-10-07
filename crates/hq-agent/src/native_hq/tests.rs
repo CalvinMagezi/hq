@@ -433,8 +433,8 @@ async fn a_handoff_ask_turn_has_none_of_the_tools_the_handoff_key_is_kept_off() 
     )
     .await;
     for denied in [
-        "herdr_read",
-        "herdr_agents",
+        "host_read",
+        "host_agents",
         "harness_session_logs",
         "harness_session_list",
         "harness_session_status",
@@ -460,7 +460,7 @@ async fn a_handoff_ask_turn_has_none_of_the_tools_the_handoff_key_is_kept_off() 
         );
     }
     let full = names(Vec::new()).await;
-    for present in ["read_file", "grep", "harness_session_list", "herdr_agents"] {
+    for present in ["read_file", "grep", "harness_session_list", "host_agents"] {
         assert!(
             full.iter().any(|n| n == present),
             "an unrestricted turn keeps {present}: {full:?}"

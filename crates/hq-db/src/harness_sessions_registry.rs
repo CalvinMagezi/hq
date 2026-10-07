@@ -1,4 +1,4 @@
-//! Registry of long-lived external harness sessions. One row per Herdr agent:
+//! Registry of long-lived external harness sessions. One row per host agent:
 //! which host runs it, liveness fields for the supervisor, a resume token, and
 //! an optional owning mission, which is an HQ task.
 
@@ -16,9 +16,9 @@ pub struct HarnessSessionRow {
     pub id: String,
     pub harness: String,
     pub label: String,
-    /// Herdr host the session runs on (`local` or a configured remote).
+    /// host the session runs on (`local` or a configured remote).
     pub host: String,
-    /// Herdr agent name; unique among live agents on that host.
+    /// host agent name; unique among live agents on that host.
     pub agent_name: String,
     pub workspace_id: Option<String>,
     pub pane_id: Option<String>,
@@ -38,7 +38,7 @@ pub struct HarnessSessionRow {
     /// Why the owning thread owes the session a look, until the web driver takes it.
     pub pm_wake: Option<String>,
     pub last_driven_at: Option<String>,
-    /// Herdr agent status at the supervisor's last sweep.
+    /// host agent status at the supervisor's last sweep.
     pub last_agent_status: Option<String>,
     pub last_seen_at: Option<String>,
     /// What the session is for. HQ drives it only while this and `done_criteria`
@@ -153,7 +153,7 @@ pub struct NewSession<'a> {
 }
 
 pub fn insert(conn: &Connection, s: &NewSession) -> Result<()> {
-    // `logfile` predates Herdr and is NOT NULL; nothing writes a log any more.
+    // `logfile` predates the host and is NOT NULL; nothing writes a log any more.
     conn.execute(
         "INSERT INTO harness_sessions
              (id, harness, label, host, agent_name, workspace_id, pane_id, cwd, logfile, mission_id)
@@ -512,7 +512,7 @@ pub fn request_drive_capped(conn: &Connection, id: &str, on: bool, actor: &str, 
         && actor != ACTOR_USER
         && count_driven_running(conn)? >= cap
     {
-        blockers.push(format!("HQ already drives {cap} running sessions (herdr.max_driven_sessions); only the user can add another"));
+        blockers.push(format!("HQ already drives {cap} running sessions (agent_host.max_driven_sessions); only the user can add another"));
     }
     if !blockers.is_empty() {
         record_event(conn, id, EVENT_DRIVE_REFUSED, actor, Some(&blockers.join("; ")))?;

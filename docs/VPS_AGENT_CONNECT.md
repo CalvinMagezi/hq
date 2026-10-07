@@ -21,7 +21,7 @@ hq start all (serves /mcp, /health, the web UI)
    `AGENTHQ_SPARK_API_KEY` is optional and limited to a read-only tool set.
    `AGENTHQ_HANDOFF_API_KEY` is optional and adds task writes and session
    spawn/handoff (for a client that hands work to coding agents). It is
-   equivalent to code execution on the Herdr hosts: set `herdr.handoff_cwd_allow`.
+   equivalent to code execution on the hosts: set `agent_host.handoff_cwd_allow`.
    Without either, `/mcp` refuses every request (see
    `docs/security/WEB_AUTH.md`).
    ```bash

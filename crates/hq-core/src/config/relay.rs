@@ -31,7 +31,7 @@ pub struct TelegramUserEntry {
 /// (`discord_family_channel_id`) rather than the bot-wide
 /// `discord_allowed_user_ids`. Full HQ tool access, but identity-tagged so
 /// the model knows who it's talking to and the guest-specific gates
-/// (remote-MCP confirm, agy-only Herdr) can key off it.
+/// (remote-MCP confirm, agy-only the host) can key off it.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct DiscordFamilyUser {
     pub user_id: u64,
@@ -143,11 +143,11 @@ pub struct RelayConfig {
     /// `discord_allowed_user_ids`, these users get full HQ tool access (not
     /// gated by allowlist elsewhere) but are identity-tagged (see
     /// `hq_core::identity::FamilyGuestInfo`) so the model addresses them by
-    /// name and the remote-MCP-confirm / agy-only-Herdr gates apply to them.
+    /// name and the remote-MCP-confirm / agy-only-the host gates apply to them.
     #[serde(default)]
     pub discord_family_users: Vec<DiscordFamilyUser>,
 
-    /// Herdr harnesses a family guest may start. Defaults to `["agy"]`;
+    /// host harnesses a family guest may start. Defaults to `["agy"]`;
     /// set `[]` to let guests use any harness.
     #[serde(default = "default_discord_family_allowed_harnesses")]
     pub discord_family_allowed_harnesses: Vec<String>,

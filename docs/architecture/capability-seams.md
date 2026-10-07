@@ -14,7 +14,7 @@
 > `harness_router.rs`, `tmux.rs`, `missions.rs`, `aidc.rs`, `benchmark.rs`,
 > `webmail.rs`, `financial.rs`, `tts.rs`, `drawit.rs`, `canvas.rs`,
 > `stitch.rs`, `schedule.rs`, `meeting_notes.rs`, `shortcuts/{fleet,codegraph,dev}.rs`
-> and `herdr/singleton.rs`. So the `MemoryStore`, `ConceptTraceProvider`,
+> and the former host singleton module. So the `MemoryStore`, `ConceptTraceProvider`,
 > `ObsidianBridgeProvider`, `AdapterExecutor` and `UrlFetcher` seams no
 > longer exist in code. Rows for removed modules are kept as the record of
 > what was decided; check `ls crates/hq-tools/src` before trusting a path.
@@ -242,17 +242,15 @@ were left untouched — genuinely singular system-resource control, not a
 provider seam, and the NDJSON parsing beneath them already has
 golden-fixture tests.
 
-**Update 2026-09-18, tmux replaced by Herdr**: the "no second backend"
-premise above no longer holds, and `crate::tmux` is deleted. Sessions now
-run in Herdr (herdr.dev), and there is a real second backend: the same
-calls reach a Herdr on this machine or on a remote host over ssh. That
-split is `herdr/transport.rs`'s `Transport` enum, not a trait, because
-both variants run the identical `herdr` CLI and differ only in how the
-process is launched; the typed calls (`launch`, `prompt`, `wait`, `read`)
-live once in `herdr/mod.rs`. Tests fake the boundary with a stub `herdr`
-executable instead of a trait double, which exercises the real argument
-building and JSON parsing. The Claude Code and Cursor singletons share
-`herdr/singleton.rs`.
+**Update 2026-09-18, tmux replaced by a host, then by the built-in host (2026-10)**:
+the "no second backend" premise above no longer holds, and `crate::tmux` is deleted.
+Sessions run in a host, and there is a real second backend: the same calls reach the
+host on this machine over its unix socket, or one on a paired machine over ssh through
+`hq host gate`. Both are `NativeBackend` (`agent_host/native.rs`) behind the
+`HostBackend` trait; the ssh half lives in `agent_host/transport.rs`. Tests fake the
+boundary with `ScriptedHost` (`agent_host/scripted.rs`, behind the `test-support`
+feature) for the session logic, and with a real in-process `hq_host::Server` for the
+backend itself.
 
 `coding_agents.rs` (multiplexes codex/qwen/cursor/claude), now examined:
 same "declined for a trait, real fix was elsewhere" shape as the
@@ -288,7 +286,7 @@ for Codex/Qwen/Cursor/Claude).
 | Seam | Files | Class | Reasoning |
 |---|---|:-:|---|
 | Harness dispatch/status | `harness_tools.rs`, `harness_router.rs`, `harness_chunk.rs` | **b → declined** | Grouped three files that don't share this problem; see below. |
-| Harness session manager | `harness_session/{mod,spec,tools}.rs`, `herdr/` | **b → done (2026-09-18)** | Now runs on Herdr with a local/ssh host split (`Transport` enum, no trait); see the update under the cursor/claude runners above. |
+| Harness session manager | `harness_session/{mod,spec,tools}.rs`, `agent_host/` | **b → done (2026-09-18)** | Now runs on the host with a local/ssh host split (`NativeBackend`); see the update under the cursor/claude runners above. |
 | Agents catalog | `agents.rs` | **b → declined** | Same shape as `skills.rs`: filesystem reads, tempdir-testable directly. Found and fixed a real bug along the way; see below. |
 | Agent mailbox comms | `agent_comm.rs` | c | Canonical vault mailbox is intentionally singular. |
 | Missions | `missions.rs` | c | Mission state is a specific DB schema + executor semantics. |

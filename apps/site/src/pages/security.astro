@@ -20,8 +20,8 @@ const gaps = [
   ['The model itself.', 'A refusal is a mitigation, not a boundary. The boundaries are the sandbox, the environment allowlist and the governance rules. A prompt injection that gets past those is in scope for a report. A model that merely behaves badly is not.'],
   ['The bash text checks.', 'They catch honest mistakes and cheap tricks. Variables, string building, two-step commands and interpreter code can still get through, and the docs list the shapes. Without a working sandbox, you are relying on them plus the environment allowlist.'],
   ['The sandbox itself.', 'HOME stays writable, so shell rc files can be changed and will run later outside the sandbox. The sandbox shares the host network unless you set network to false, and that cuts off gh and git from bash. On macOS, a bash child can still see the daemon\'s environment with ps.'],
-  ['Coding agents HQ starts.', 'A harness session is a separate program with its own shell. Herdr panes inherit whatever provider keys the Herdr service loads, and a prompt-injected session could read them. Load only what your agents need.'],
-  ['The handoff key.', 'It is equivalent to code execution on every Herdr host you configured. Bound it with herdr.handoff_cwd_allow, and give it only to callers you would give a shell.'],
+  ['Coding agents HQ starts.', 'A harness session is a separate program with its own shell. The host starts each agent from a clean environment and runs it in a process sandbox, but whatever you hand an agent (profile env values, wrapper scripts) is readable by a prompt-injected session. Keep secrets out of profile env.'],
+  ['The handoff key.', 'It is equivalent to code execution on every host you paired. Bound it with agent_host.handoff_cwd_allow, and give it only to callers you would give a shell.'],
   ['An attacker who is already you.', 'Anyone who controls the host user, the vault directory or the config file is out of scope. On loopback with no token set, any process on the machine can call the API without an Origin header, so set a token on shared machines.'],
   ['A stolen signing key, or a stale pointer.', 'Both are listed as not mitigated by the updater. A compromised service user can also fake a healthy /health answer to defeat the automatic rollback. Locally built self-update binaries are not signed.'],
   ['Content already in the prompt.', 'Vault text the context engine injects, and earlier turns in a thread, are not tracked as taint. Only tool results in the current session are.'],
@@ -199,7 +199,7 @@ const dry = 'hq update --apply --dry-run';
           <li><a href={links.sec.promptInjection}>Prompt-injection containment</a></li>
           <li><a href={links.sec.webFetch}>Outbound fetches</a></li>
           <li><a href={links.sec.selfUpdate}>Self-update tools</a></li>
-          <li><a href={links.sec.herdrEnv}>Credentials Herdr panes inherit</a></li>
+          <li><a href={links.sec.agentEnv}>What a coding agent can see of your environment</a></li>
           <li><a href={links.sec.identity}>Identity-scoped disclosure</a></li>
           <li><a href={links.sec.releaseChecklist}>Release checklist</a></li>
         </ul>

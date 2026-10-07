@@ -4,6 +4,10 @@ All notable changes to Agent-HQ will be documented in this file.
 
 ## [Unreleased]
 
+### Changed
+
+- **The `herdr` names are gone from the repo and the product.** The config section is `agent_host:` (a config that still says `herdr:` keeps loading, and `hq host add` renames the heading when it edits the file), the MCP tools are `host_list`, `host_agents`, `host_read` and `host_send` (the old `herdr_*` names no longer exist, so clients that called them must switch), the web settings API key is `agent_host`, `docs/HERDR_HARNESS.md` is `docs/AGENT_SESSIONS.md`, and CI fails if the retired name reappears outside NOTICE, provenance records and migrations.
+
 ### Removed
 
 - **Herdr is retired.** Coding-agent sessions run only on HQ's built-in host (`hq host`); the herdr backend, `deploy/herdr.service` and `scripts/hq-herdr-gate` are gone. A host named `local` now means the built-in host on this machine. Config keys from the old setup (`herdr.binary`, `herdr.session`, a host's `kind` and `session`) are ignored; a configured remote host must be paired again with `hq host join` and `hq host add`.

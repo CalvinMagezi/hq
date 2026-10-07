@@ -1,5 +1,5 @@
 use super::*;
-use crate::herdr::McpAccess;
+use crate::agent_host::McpAccess;
 
 pub(super) fn build_args(
     harness: &Harness,
@@ -207,7 +207,7 @@ impl OwnedLaunch {
 /// recorded" would leave a pane nothing tracks. On its own task the launch
 /// always finishes, either recorded or cleaned up, whether or not anyone is
 /// still waiting for the answer. The wait for the agent to come up is also
-/// bounded (`HerdrHost::launch_bound`), so the caller is answered before its
+/// bounded (`ScriptedHost::launch_bound`), so the caller is answered before its
 /// transport times out.
 pub(super) async fn launch_session(
     vault_path: &Path,
@@ -233,7 +233,7 @@ pub(super) async fn launch_session(
 /// A secret for this session and the endpoint to use it on, when HQ is set up
 /// to let launched agents call back and the host can deliver it.
 fn mcp_access(db: &Arc<Database>, host: &Host, harness: &Harness, session_id: &str) -> Option<McpAccess> {
-    let Some(url) = herdr_config().agent_mcp_url else {
+    let Some(url) = agent_host_config().agent_mcp_url else {
         // No endpoint now: an older secret of a resumed session must not revive.
         let id = session_id.to_string();
         let _ = db.with_conn(move |c| hq_db::session_tokens::revoke(c, &id));
@@ -421,7 +421,7 @@ pub(super) fn settle_startup(
     name: &str,
     trust_pattern: Option<&str>,
     launched: &Launched,
-) -> Result<Settled, HerdrError> {
+) -> Result<Settled, AgentHostError> {
     let status = launched.agent.as_ref().map(|a| a.status);
     if launched.ready {
         return Ok(Settled {
@@ -459,14 +459,14 @@ pub(crate) fn prompt_note(outcome: PromptOutcome) -> Option<String> {
     match outcome {
         PromptOutcome::Resubmitted => Some(RESUBMITTED_NOTE.into()),
         PromptOutcome::Stalled(_) => Some(
-            "Herdr saw no activity after the prompt; a fast agent can finish first. Read the output before resending.".into(),
+            "The host saw no activity after the prompt; a fast agent can finish first. Read the output before resending.".into(),
         ),
         PromptOutcome::TimedOut(msg) => Some(format!("prompt wait timed out: {msg}")),
         PromptOutcome::Submitted | PromptOutcome::Settled(_) => None,
     }
 }
 
-pub(super) const RESUBMITTED_NOTE: &str = "Herdr saw no activity after the prompt, so Enter was pressed once more. Read the output to confirm the agent started.";
+pub(super) const RESUBMITTED_NOTE: &str = "The host saw no activity after the prompt, so Enter was pressed once more. Read the output to confirm the agent started.";
 
 pub(super) fn launch_report(
     harness: &Harness,
@@ -501,7 +501,7 @@ pub(super) fn launch_report(
 
 /// Where and how a new session should start.
 pub struct SpawnRequest<'a> {
-    /// Herdr host name; `None` uses the configured default.
+    /// host name; `None` uses the configured default.
     pub host: Option<&'a str>,
     pub harness: &'a str,
     pub prompt: Option<&'a str>,
@@ -551,7 +551,7 @@ pub async fn spawn_with(
     req: SpawnRequest<'_>,
 ) -> Result<Value> {
     require_allowed_cwd(Some(&req.cwd.to_string_lossy()))?;
-    let host = herdr::host(req.host)?;
+    let host = agent_host::host(req.host)?;
     spawn_on(vault_path, db, host, req).await
 }
 

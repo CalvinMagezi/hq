@@ -1,11 +1,11 @@
 use super::{
-    AgentInfo, AgentStatus, HerdrError, LaunchRequest, Launched, PromptOutcome,
+    AgentInfo, AgentStatus, AgentHostError, LaunchRequest, Launched, PromptOutcome,
 };
 use std::sync::Arc;
 use std::time::Duration;
 
-/// What HQ needs from whatever hosts coding agents: the herdr CLI today, a
-/// built-in host later. Calls block, like the herdr CLI they wrap, so async
+/// What HQ needs from whatever hosts coding agents: the host protocol today, a
+/// built-in host later. Calls block, like the host protocol they wrap, so async
 /// callers use [`super::blocking`].
 pub trait HostBackend: Send + Sync + std::fmt::Debug {
     fn name(&self) -> &str;
@@ -14,37 +14,37 @@ pub trait HostBackend: Send + Sync + std::fmt::Debug {
     /// Longest a launch waits for the agent to come up.
     fn launch_bound(&self) -> Duration;
 
-    fn version(&self) -> Result<String, HerdrError>;
-    fn agents(&self) -> Result<Vec<AgentInfo>, HerdrError>;
-    fn agent(&self, target: &str) -> Result<Option<AgentInfo>, HerdrError>;
-    fn launch(&self, req: &LaunchRequest) -> Result<Launched, HerdrError>;
-    fn await_started(&self, name: &str, within: Duration) -> Result<Option<AgentInfo>, HerdrError>;
+    fn version(&self) -> Result<String, AgentHostError>;
+    fn agents(&self) -> Result<Vec<AgentInfo>, AgentHostError>;
+    fn agent(&self, target: &str) -> Result<Option<AgentInfo>, AgentHostError>;
+    fn launch(&self, req: &LaunchRequest) -> Result<Launched, AgentHostError>;
+    fn await_started(&self, name: &str, within: Duration) -> Result<Option<AgentInfo>, AgentHostError>;
     fn prompt(
         &self,
         target: &str,
         text: &str,
         wait: Option<Duration>,
-    ) -> Result<PromptOutcome, HerdrError>;
-    fn submit(&self, target: &str, text: &str) -> Result<PromptOutcome, HerdrError>;
-    fn send_keys(&self, target: &str, keys: &[String]) -> Result<(), HerdrError>;
-    fn send_text(&self, pane_id: &str, text: &str) -> Result<(), HerdrError>;
-    fn read(&self, target: &str, lines: usize) -> Result<String, HerdrError>;
+    ) -> Result<PromptOutcome, AgentHostError>;
+    fn submit(&self, target: &str, text: &str) -> Result<PromptOutcome, AgentHostError>;
+    fn send_keys(&self, target: &str, keys: &[String]) -> Result<(), AgentHostError>;
+    fn send_text(&self, pane_id: &str, text: &str) -> Result<(), AgentHostError>;
+    fn read(&self, target: &str, lines: usize) -> Result<String, AgentHostError>;
     fn read_sourced(
         &self,
         target: &str,
         lines: usize,
-    ) -> Result<(String, &'static str), HerdrError>;
+    ) -> Result<(String, &'static str), AgentHostError>;
     fn wait(
         &self,
         target: &str,
         until: &[AgentStatus],
         timeout: Duration,
-    ) -> Result<AgentInfo, HerdrError>;
-    fn close_workspace(&self, workspace_id: &str) -> Result<(), HerdrError>;
+    ) -> Result<AgentInfo, AgentHostError>;
+    fn close_workspace(&self, workspace_id: &str) -> Result<(), AgentHostError>;
     fn shell_pid(&self, pane_id: &str) -> Option<u32>;
 
     /// Whether this host can hand an agent a private config pointing back at
-    /// HQ (the built-in host can; herdr cannot).
+    /// HQ (the built-in host can; an external host cannot).
     fn accepts_mcp(&self) -> bool {
         false
     }
@@ -52,8 +52,8 @@ pub trait HostBackend: Send + Sync + std::fmt::Debug {
     /// Waits up to `wait` for events after `after` (`None` just reads the
     /// current position). Only the built-in host can push events; others are
     /// swept by polling.
-    fn poll_events(&self, _after: Option<u64>, _wait: Duration) -> Result<HostEvents, HerdrError> {
-        Err(HerdrError::Api {
+    fn poll_events(&self, _after: Option<u64>, _wait: Duration) -> Result<HostEvents, AgentHostError> {
+        Err(AgentHostError::Api {
             code: "unsupported".into(),
             message: format!("host '{}' has no event stream", self.name()),
         })
@@ -61,16 +61,16 @@ pub trait HostBackend: Send + Sync + std::fmt::Debug {
 
     /// Agents the host restored but is holding until their env is supplied.
     /// Only the built-in host has any.
-    fn awaiting(&self) -> Result<Vec<AwaitingAgent>, HerdrError> {
+    fn awaiting(&self) -> Result<Vec<AwaitingAgent>, AgentHostError> {
         Ok(Vec::new())
     }
     /// Tells the host the command that brings `name` back after the host
     /// restarts. Only the built-in host restarts agents, so others ignore it.
-    fn update_resume(&self, _name: &str, _kind: &str, _args: Vec<String>) -> Result<(), HerdrError> {
+    fn update_resume(&self, _name: &str, _kind: &str, _args: Vec<String>) -> Result<(), AgentHostError> {
         Ok(())
     }
-    fn resume_awaiting(&self, name: &str, _env: Vec<(String, String)>) -> Result<(), HerdrError> {
-        Err(HerdrError::Api {
+    fn resume_awaiting(&self, name: &str, _env: Vec<(String, String)>) -> Result<(), AgentHostError> {
+        Err(AgentHostError::Api {
             code: "unsupported".into(),
             message: format!("host '{}' does not hold agents for resume ({name})", self.name()),
         })
@@ -123,19 +123,19 @@ impl<T: HostBackend + ?Sized> HostBackend for Arc<T> {
     fn launch_bound(&self) -> Duration {
         (**self).launch_bound()
     }
-    fn version(&self) -> Result<String, HerdrError> {
+    fn version(&self) -> Result<String, AgentHostError> {
         (**self).version()
     }
-    fn agents(&self) -> Result<Vec<AgentInfo>, HerdrError> {
+    fn agents(&self) -> Result<Vec<AgentInfo>, AgentHostError> {
         (**self).agents()
     }
-    fn agent(&self, target: &str) -> Result<Option<AgentInfo>, HerdrError> {
+    fn agent(&self, target: &str) -> Result<Option<AgentInfo>, AgentHostError> {
         (**self).agent(target)
     }
-    fn launch(&self, req: &LaunchRequest) -> Result<Launched, HerdrError> {
+    fn launch(&self, req: &LaunchRequest) -> Result<Launched, AgentHostError> {
         (**self).launch(req)
     }
-    fn await_started(&self, name: &str, within: Duration) -> Result<Option<AgentInfo>, HerdrError> {
+    fn await_started(&self, name: &str, within: Duration) -> Result<Option<AgentInfo>, AgentHostError> {
         (**self).await_started(name, within)
     }
     fn prompt(
@@ -143,26 +143,26 @@ impl<T: HostBackend + ?Sized> HostBackend for Arc<T> {
         target: &str,
         text: &str,
         wait: Option<Duration>,
-    ) -> Result<PromptOutcome, HerdrError> {
+    ) -> Result<PromptOutcome, AgentHostError> {
         (**self).prompt(target, text, wait)
     }
-    fn submit(&self, target: &str, text: &str) -> Result<PromptOutcome, HerdrError> {
+    fn submit(&self, target: &str, text: &str) -> Result<PromptOutcome, AgentHostError> {
         (**self).submit(target, text)
     }
-    fn send_keys(&self, target: &str, keys: &[String]) -> Result<(), HerdrError> {
+    fn send_keys(&self, target: &str, keys: &[String]) -> Result<(), AgentHostError> {
         (**self).send_keys(target, keys)
     }
-    fn send_text(&self, pane_id: &str, text: &str) -> Result<(), HerdrError> {
+    fn send_text(&self, pane_id: &str, text: &str) -> Result<(), AgentHostError> {
         (**self).send_text(pane_id, text)
     }
-    fn read(&self, target: &str, lines: usize) -> Result<String, HerdrError> {
+    fn read(&self, target: &str, lines: usize) -> Result<String, AgentHostError> {
         (**self).read(target, lines)
     }
     fn read_sourced(
         &self,
         target: &str,
         lines: usize,
-    ) -> Result<(String, &'static str), HerdrError> {
+    ) -> Result<(String, &'static str), AgentHostError> {
         (**self).read_sourced(target, lines)
     }
     fn wait(
@@ -170,10 +170,10 @@ impl<T: HostBackend + ?Sized> HostBackend for Arc<T> {
         target: &str,
         until: &[AgentStatus],
         timeout: Duration,
-    ) -> Result<AgentInfo, HerdrError> {
+    ) -> Result<AgentInfo, AgentHostError> {
         (**self).wait(target, until, timeout)
     }
-    fn close_workspace(&self, workspace_id: &str) -> Result<(), HerdrError> {
+    fn close_workspace(&self, workspace_id: &str) -> Result<(), AgentHostError> {
         (**self).close_workspace(workspace_id)
     }
     fn shell_pid(&self, pane_id: &str) -> Option<u32> {
@@ -182,16 +182,16 @@ impl<T: HostBackend + ?Sized> HostBackend for Arc<T> {
     fn accepts_mcp(&self) -> bool {
         (**self).accepts_mcp()
     }
-    fn poll_events(&self, after: Option<u64>, wait: Duration) -> Result<HostEvents, HerdrError> {
+    fn poll_events(&self, after: Option<u64>, wait: Duration) -> Result<HostEvents, AgentHostError> {
         (**self).poll_events(after, wait)
     }
-    fn update_resume(&self, name: &str, kind: &str, args: Vec<String>) -> Result<(), HerdrError> {
+    fn update_resume(&self, name: &str, kind: &str, args: Vec<String>) -> Result<(), AgentHostError> {
         (**self).update_resume(name, kind, args)
     }
-    fn awaiting(&self) -> Result<Vec<AwaitingAgent>, HerdrError> {
+    fn awaiting(&self) -> Result<Vec<AwaitingAgent>, AgentHostError> {
         (**self).awaiting()
     }
-    fn resume_awaiting(&self, name: &str, env: Vec<(String, String)>) -> Result<(), HerdrError> {
+    fn resume_awaiting(&self, name: &str, env: Vec<(String, String)>) -> Result<(), AgentHostError> {
         (**self).resume_awaiting(name, env)
     }
     fn with_launch_bound_dyn(&self, bound: Duration) -> Host {

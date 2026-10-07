@@ -24,7 +24,7 @@ pub mod file_edit;
 pub mod gws;
 pub mod harness_chunk;
 pub mod harness_session;
-pub mod herdr;
+pub mod agent_host;
 pub mod imagegen;
 pub mod model_control;
 pub mod prose_lint;

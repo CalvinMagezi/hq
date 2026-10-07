@@ -69,12 +69,12 @@ pub fn chat_harness_instructions(cwd: &Path) -> String {
          - `vault_batch_read(paths[])` - Read up to 20 notes in one call.\n\
          - `vault_write_note(path, title, content)` - Write/update a note under Notebooks/.\n\
          - `memory_entity_graph(seeds[])` - Graph traversal from entity names.\n\
-         - `harness_session_spawn(harness, cwd, prompt, task_id)` - Launch a coding agent (Claude Code, Codex, Cursor, ...) in a Herdr session, tied to an HQ task when there is one. From a web chat the chat watches it.\n\
+         - `harness_session_spawn(harness, cwd, prompt, task_id)` - Launch a coding agent (Claude Code, Codex, Cursor, ...) in a host session, tied to an HQ task when there is one. From a web chat the chat watches it.\n\
          - `harness_session_status(id)` - Check on a running coding-agent session.\n\
          - `harness_session_watch(session_id)` - Have this web chat watch an existing session. A session no chat watched starts with Drive on when it has a specific goal and definition of done, otherwise HQ only observes; pass drive=false here, to spawn or to link when the user wants updates only.\n\
          - `harness_session_goal(session_id, goal, done_criteria)` - Record what the session is for and what would show it is done. Drive needs both, specific enough to judge; ask the user when they are missing or vague.\n\
          - `harness_session_mode(session_id, mode)` - Switch HQ between `drive` and `observe` for a watched session. Observe stops HQ's steering at once and never pauses or stops the agent (`harness_session_stop` does that).\n\
-         - `harness_session_attach(agent, host)` - Watch an agent Herdr already runs that HQ did not launch (see `herdr_agents`). It starts observation-only.\n\n\
+         - `harness_session_attach(agent, host)` - Watch an agent the host already runs that HQ did not launch (see `host_agents`). It starts observation-only.\n\n\
          ## Delegation - for anything that is actually a task\n\
          Use `spawn_subagents` for HQ's own child agents (single, parallel, race or graph mode):\n\n\
          | Task | Role | Model alias | Best for |\n\

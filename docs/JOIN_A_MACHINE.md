@@ -57,7 +57,7 @@ does not, it names the likely cause.
 
 The key can start any command as you on that machine, like an ssh login, so only pair machines you
 control. Agents there run in a sandbox: they cannot read the host's own files or your credentials
-directories, and they reach only the sites the HQ allows (`herdr.sandbox.allow_domains`; denied sites
+directories, and they reach only the sites the HQ allows (`agent_host.sandbox.allow_domains`; denied sites
 are logged so you can add what you need).
 
 ## WSL2 on Windows

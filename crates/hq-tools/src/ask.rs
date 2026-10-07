@@ -139,7 +139,7 @@ pub fn install_runner(runner: Arc<dyn AskRunner>) -> bool {
 /// one of them, and they read host files, terminals, session output or the owner's machine state.
 /// `call_` removes the specialist sub-agents, whose children carry file readers of their own.
 pub const HANDOFF_ASK_DENIED_PREFIXES: &[&str] = &[
-    "herdr_",
+    "host_",
     "harness_session_",
     "subagent_run_",
     "read_file",
@@ -453,9 +453,9 @@ impl HqTool for HqAskTool {
         };
         // Full-mode replies hold every tool, so few may run at once whatever the client says about itself.
         if known.is_none() && req.mode == AskMode::Full {
-            let cap = hq_core::config::HqConfig::load().map(|c| c.herdr).unwrap_or_default().full_ask_cap();
+            let cap = hq_core::config::HqConfig::load().map(|c| c.agent_host).unwrap_or_default().full_ask_cap();
             if self.db.with_conn(|c| asks::count_pending_mode(c, scope, AskMode::Full.as_str()))? >= cap {
-                bail!("{cap} full-mode questions are already waiting for answers (herdr.max_full_asks); collect one with hq_ask_result first");
+                bail!("{cap} full-mode questions are already waiting for answers (agent_host.max_full_asks); collect one with hq_ask_result first");
             }
         }
         // Resending a question already asked costs nothing, so only new ones count.

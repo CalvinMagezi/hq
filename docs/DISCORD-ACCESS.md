@@ -73,4 +73,4 @@ confirm identity on your behalf.
 
 ## Family guest harness limit
 
-`relay.discord_family_allowed_harnesses` lists the Herdr harnesses a family guest may start. It defaults to `["agy"]`. Set it to `[]` to allow any harness. Approval prompts address the Telegram owner by the name in `relay.telegram_users`.
+`relay.discord_family_allowed_harnesses` lists the host harnesses a family guest may start. It defaults to `["agy"]`. Set it to `[]` to allow any harness. Approval prompts address the Telegram owner by the name in `relay.telegram_users`.

@@ -2,9 +2,8 @@
 
 `hq host` is HQ's built-in host for long-lived coding agents. It runs each agent
 in a pseudo-terminal, keeps an emulated screen and scrollback you can read back,
-and accepts typed input. It is the replacement for the external herdr binary and
-is being introduced in steps: today it runs and can be driven over a socket, but
-HQ's sessions still use herdr until the native backend is switched on.
+and accepts typed input. It is where every coding-agent session HQ starts runs,
+on this machine or on a machine you paired (see [JOIN_A_MACHINE.md](JOIN_A_MACHINE.md)).
 
 ## Run it
 
@@ -88,7 +87,7 @@ means idle). A kind with no rule file has no `state`. `agent.wait` with
 `until: "state"` returns once the state is one of `states` and has held for
 `stable_ms`, so a one-frame flicker is not taken for a change.
 
-Rule files are TOML in the format herdr documents: each rule names a screen
+Rule files are TOML (the format and its provenance are in `docs/provenance/herdr.md`): each rule names a screen
 region and a gate of phrases or patterns, and the matching rule with the highest
 priority decides. They are built into the binary (`crates/hq-host/src/detect/manifests/`);
 there is no fetching from anywhere at run time. Screens captured from real
@@ -98,7 +97,7 @@ in, are in `crates/hq-host/tests/fixtures/` and are checked on every test run.
 ### Done, the change counter and events
 
 Agent info also carries `done` (a turn finished and the agent has not worked
-since, herdr's `done`) and `state_seq`, a number that goes up each time the
+since) and `state_seq`, a number that goes up each time the
 state changes. HQ alerts once per `state_seq` value, which is how a finished
 turn or a blocked dialog is reported once and not once a minute. The host sends
 an `events.poll` event for every change, whether an agent reported it or its
@@ -141,23 +140,23 @@ token and the scope check only keep an honest agent in its lane.
 ### The process sandbox
 
 `agent.spawn` takes a `sandbox`; HQ sends one for every launch on a built-in
-host (`herdr.sandbox`, default mode `process`). In process mode the host wraps
+host (`agent_host.sandbox`, default mode `process`). In process mode the host wraps
 the agent in `sandbox-exec` (macOS) or `bwrap` (Linux) and refuses to start it
 when that is not possible. The agent:
 
 - cannot read the run directory except `host.sock` and its own hook and MCP
   files, nor `~/.ssh`, `~/.gnupg`, `~/.aws`, `~/.kube` or `~/.hq`;
 - can write only its project, `~/.claude`, caches and the temporary directories
-  (plus `herdr.sandbox.writable`);
+  (plus `agent_host.sandbox.writable`);
 - cannot see other processes' environments;
 - can read under your home directory only what the policy lists (its own state,
-  tool installs, shell and git configuration, caches, and `herdr.sandbox.readable`),
+  tool installs, shell and git configuration, caches, and `agent_host.sandbox.readable`),
   and cannot write `~/.claude.json`: the host records trust for the project
   itself, so the agent cannot plant an MCP server command there;
 - can connect only to its own egress proxy and the agent socket (`agent.sock`,
   pane tokens only, with its own connection limits, so an agent cannot crowd the
   operator off `host.sock`). The proxy allows
-  `api.anthropic.com`, the HQ MCP endpoint and `herdr.sandbox.allow_domains`,
+  `api.anthropic.com`, the HQ MCP endpoint and `agent_host.sandbox.allow_domains`,
   resolves names itself, and refuses private, loopback and link-local addresses
   unless the endpoint is the MCP one. A tunnel must open with a TLS hello naming
   the host it asked for. Every decision is logged
@@ -166,10 +165,10 @@ when that is not possible. The agent:
 The host itself decides whether the sandbox is optional. `hq host serve` refuses
 to start any agent that is not under the process sandbox, whoever asks over the
 socket or through the gate; start it with `--allow-unsandboxed` to lift that, and
-`herdr.sandbox.mode: none` in HQ only matters then.
+`agent_host.sandbox.mode: none` in HQ only matters then.
 
 Agents nobody is watching are stopped: a session silent and not working for
-`herdr.idle_reap_hours` (default 24, 0 turns it off) is stopped by the host, even
+`agent_host.idle_reap_hours` (default 24, 0 turns it off) is stopped by the host, even
 if HQ is down, and is not restored at the next start. HQ marks it exited and
 tells you, and the conversation can be resumed. `hq host status` lists every
 agent with its state, sandbox mode, idle time and age. A busy agent is never
@@ -289,33 +288,34 @@ the conversation id, HQ stores it as the session's resume token and gives the ho
 a restart command that uses `--resume <id>`. Until the id is known, resume falls
 back to `-c` (the most recent conversation in the directory).
 
-Set `herdr.default_host: native` in `~/.hq/config.yaml` and new coding-agent
-sessions start on the built-in host (run `hq host serve` first). `native` is a
-reserved host name next to `local`. A session keeps the host it was started on,
-so flipping the default never moves a running session, and sessions on `local`
-or a remote keep using herdr. After a host restart the supervisor starts any
-held agent again with the env HQ built for it at launch (profile variables and
-the session id), once per sweep.
+New coding-agent sessions start on `agent_host.default_host` in `~/.hq/config.yaml`
+(`native`, the host on the machine HQ runs on, unless you name a paired machine).
+`native` and `local` both mean that host. A session keeps the host it was started
+on, so changing the default never moves a running session. After a host restart the
+supervisor starts any held agent again with the env HQ built for it at launch
+(profile variables and the session id), once per sweep.
 
 ## A host on another machine
 
-HQ on a server reaches a host on your laptop (or any machine) over ssh. On that
-machine run `hq host serve` (see the service files above), then pin a key to the
-gate in `~/.ssh/authorized_keys` on one line:
+HQ on a server reaches a host on your laptop (or any machine) over ssh. Pair it with
+`hq host join` on the machine and `hq host add` (or the `host_add` tool) on the HQ,
+which creates the key and the config entry and prints the one `hq host authorize`
+command the machine runs; the steps, including WSL2, are in
+[JOIN_A_MACHINE.md](JOIN_A_MACHINE.md). The result is a pinned line in the machine's
+`authorized_keys`:
 
 ```
-restrict,from="<hq-server-address>",command="/usr/local/bin/hq host gate" ssh-ed25519 AAAA... hq-gate
+restrict,from="<hq-server-address>",command="/home/you/.local/bin/hq host gate" ssh-ed25519 AAAA... hq-gate-laptop
 ```
 
-and add the machine to HQ's config:
+and a config entry:
 
 ```yaml
-herdr:
+agent_host:
   hosts:
     laptop:
-      kind: native
       ssh: "you@laptop.example.ts.net"
-      identity_file: "~/.ssh/hq_gate"
+      identity_file: "/opt/hq/.ssh/hq_gate_laptop"
       # port: 2222   # when ssh does not listen on 22
 ```
 
@@ -325,13 +325,25 @@ shell parses either), refuses any method outside an allowlist (`host.stop` and
 `agent.report` are left out), forwards it to the local socket and prints the
 reply. The key cannot run anything else: a command passed to ssh is ignored.
 `agent.spawn` still starts whatever command it is given, so treat the key as
-shell access as you, the same as the herdr gate. A missing agent binary on the
-remote machine comes back as the host's own `spawn_failed` error naming the
-command. The hook settings file is written on the remote machine by the host
-(`agent.hook_flags`), so hooks, conversation ids and resume work the same as
-locally.
+shell access as you. A missing agent binary on the remote machine comes back as
+the host's own `spawn_failed` error naming the command. The hook settings file is
+written on the remote machine by the host (`agent.hook_flags`), so hooks,
+conversation ids and resume work the same as locally.
+
+## Day to day
+
+- A call costs one ssh round trip plus about 40 ms for the gate on the laptop;
+  `agent_host.ssh_multiplex` keeps the ssh connection open between calls. State
+  changes arrive as events instead of one poll a minute.
+- A laptop that is asleep or off the tailnet is skipped, not marked dead; its
+  sessions are picked up again when it answers.
+- No terminal UI: `hq host status` on the machine and `harness_session_list` in HQ
+  show every session. A session silent and not working for
+  `agent_host.idle_reap_hours` (24 by default) is stopped by the host itself and can
+  be resumed; HQ tells you it ended. Set it to 0 to keep sessions until stopped.
+- Your own MCP servers, plugins and connectors are refused inside the sandbox
+  until their hosts are allowed; the host's egress log names each denied host.
 
 ## Not built yet
 
-Rule files for agents other than Claude Code and Codex, and hooks, MCP config and sandbox-aware launching for agents other than Claude Code. Provenance of anything adapted from herdr is recorded
-in `docs/provenance/herdr.md`.
+Rule files for agents other than Claude Code and Codex, hooks, MCP config and sandbox-aware launching for agents other than Claude Code, Host-header fronting inside TLS, and reads outside your home directory. Provenance of anything adapted from the project this host replaced is recorded in `docs/provenance/herdr.md`.

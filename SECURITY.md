@@ -36,7 +36,7 @@ In scope:
 Out of scope:
 
 - Vulnerabilities in third-party services or tools HQ talks to (LLM providers,
-  Discord, Telegram, Herdr, the coding agents it supervises). Report those
+  Discord, Telegram, the host, the coding agents it supervises). Report those
   upstream.
 - Attacks that need a deployment the docs tell you not to run, such as exposing
   `/ws` or `/api` to the public internet, or running with
@@ -73,5 +73,5 @@ governance policy (see `docs/security/`).
 - `docs/security/PROMPT_INJECTION.md`: policy for untrusted content.
 - `docs/security/SELF_UPDATE.md`: the self-update tools, off by default, owner approval for install.
 - `docs/security/SQL_AUDIT.md`: every string-built SQL statement and why it is safe.
-- `docs/security/HERDR_ENV_EXPOSURE.md`: provider credentials that Herdr panes inherit, and how to narrow them.
+- `docs/security/AGENT_ENV_EXPOSURE.md`: provider credentials that host panes inherit, and how to narrow them.
 - `docs/security/RELEASE_CHECKLIST.md`: what must pass before a public release.

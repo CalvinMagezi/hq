@@ -18,7 +18,7 @@ The agent loads your vault context (SOUL, MEMORY, PREFERENCES, pinned notes) and
 
 ## Sub-Agent Execution
 
-For complex tasks, HQ spawns sub-agents in-process with the `spawn_subagents` tool (single, parallel, race or graph runs); they report back to the session that spawned them. Long-lived coding agents (Claude Code, Codex and others) run as harness sessions over Herdr: `hq sessions`.
+For complex tasks, HQ spawns sub-agents in-process with the `spawn_subagents` tool (single, parallel, race or graph runs); they report back to the session that spawned them. Long-lived coding agents (Claude Code, Codex and others) run as harness sessions over the host: `hq sessions`.
 
 ## Vault Operations
 

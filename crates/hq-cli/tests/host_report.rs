@@ -144,7 +144,7 @@ fn fake_ssh(dir: &std::path::Path, run_dir: &std::path::Path) -> std::path::Path
 
 #[test]
 fn a_remote_native_host_works_through_the_gate() {
-    use hq_tools::herdr::{HostBackend, LaunchRequest, NativeBackend};
+    use hq_tools::agent_host::{HostBackend, LaunchRequest, NativeBackend};
     let tmp = tempfile::tempdir().unwrap();
     let run = tmp.path().join("run");
     let server = Server::bind(&run, Arc::new(Host::new())).unwrap();
@@ -234,7 +234,7 @@ fn the_gate_refuses_what_a_remote_key_must_not_do() {
 #[test]
 #[ignore = "needs a real ssh server with the key pinned to `hq host gate`; see the doc comment"]
 fn a_real_ssh_connection_reaches_the_gate() {
-    use hq_tools::herdr::{HostBackend, NativeBackend};
+    use hq_tools::agent_host::{HostBackend, NativeBackend};
     use std::os::unix::fs::PermissionsExt;
     let target = std::env::var("HQ_E2E_SSH").expect("HQ_E2E_SSH");
     let key = std::env::var("HQ_E2E_SSH_KEY").expect("HQ_E2E_SSH_KEY");

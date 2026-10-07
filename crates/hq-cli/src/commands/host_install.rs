@@ -242,7 +242,7 @@ pub(crate) fn default_host_name(hostname: &str) -> String {
         name.insert_str(0, "host-");
     }
     name.truncate(32);
-    if hq_tools::herdr::pairing::valid_host_name(&name) {
+    if hq_tools::agent_host::pairing::valid_host_name(&name) {
         name
     } else {
         "machine".to_string()
@@ -252,7 +252,7 @@ pub(crate) fn default_host_name(hostname: &str) -> String {
 /// Runs on the machine that will host agents: installs the service and prints
 /// the join code to give to the HQ.
 pub fn join(name: Option<&str>, addr: Option<&str>) -> Result<()> {
-    use hq_tools::herdr::pairing::{Join, encode_join, valid_host_name};
+    use hq_tools::agent_host::pairing::{Join, encode_join, valid_host_name};
     let name = match name {
         Some(n) if valid_host_name(n) => n.to_string(),
         Some(n) => bail!("{n:?} is not a usable host name: lowercase letters, digits, - and _, starting with a letter"),
@@ -263,7 +263,7 @@ pub fn join(name: Option<&str>, addr: Option<&str>) -> Result<()> {
     };
     let addr = match addr {
         Some(a) => a.to_string(),
-        None => hq_tools::herdr::pairing::tailscale_ip()
+        None => hq_tools::agent_host::pairing::tailscale_ip()
             .context("could not ask tailscale for this machine's address; is it installed and up? Pass --addr <tailnet address> otherwise")?,
     };
     let user = std::env::var("USER").or_else(|_| std::env::var("LOGNAME")).context("USER is not set")?;
@@ -278,7 +278,7 @@ pub fn join(name: Option<&str>, addr: Option<&str>) -> Result<()> {
 /// Runs on the HQ side: pairs the machine the join code names.
 pub fn add(code: Option<&str>, gateway: Option<&str>) -> Result<()> {
     let code = code.context("usage: hq host add <join code from `hq host join`>")?;
-    let added = hq_tools::herdr::pairing::add_host(code, gateway)?;
+    let added = hq_tools::agent_host::pairing::add_host(code, gateway)?;
     println!("Host '{}' ({}) {} in the config.", added.name, added.ssh, if added.config_changed { "added" } else { "was already" });
     println!("\nRun this on that machine, so it accepts this HQ:\n\n  {}\n", added.authorize_command);
     println!("Then check it with `hq host check {}`.", added.name);
@@ -288,7 +288,7 @@ pub fn add(code: Option<&str>, gateway: Option<&str>) -> Result<()> {
 /// Runs on the HQ side: says whether a host answers.
 pub fn check(name: Option<&str>) -> Result<()> {
     let name = name.context("usage: hq host check <host name>")?;
-    let result = hq_tools::herdr::pairing::check_host(name);
+    let result = hq_tools::agent_host::pairing::check_host(name);
     println!("{}", serde_json::to_string_pretty(&result)?);
     if result["reachable"] != true {
         std::process::exit(1);

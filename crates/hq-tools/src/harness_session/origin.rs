@@ -10,7 +10,7 @@ pub const UNTRUSTED_TURN_ARG: &str = "untrusted_turn";
 pub struct WatchingChat {
     pub thread: String,
     /// Whether a session this chat newly watches starts with Drive on: the
-    /// `herdr.drive_new_watches` default, never for a turn the driver started
+    /// `agent_host.drive_new_watches` default, never for a turn the driver started
     /// or one answering an `hq_ask`.
     pub drive_new: bool,
     /// The session driver started this turn, so its sends are budgeted and it
@@ -58,9 +58,9 @@ pub fn refuse_if_spawned(args: &Value) -> Result<()> {
     }
 }
 
-pub(super) fn herdr_config() -> hq_core::config::HerdrConfig {
+pub(super) fn agent_host_config() -> hq_core::config::AgentHostConfig {
     hq_core::config::HqConfig::load()
-        .map(|c| c.herdr)
+        .map(|c| c.agent_host)
         .unwrap_or_default()
 }
 
@@ -85,10 +85,10 @@ pub fn start_origin(chat: Option<&WatchingChat>) -> &'static str {
 
 /// Refuse a start that would pass the cap on sessions of its origin. The owner's own chats are not capped.
 pub fn check_origin_cap(db: &Arc<Database>, origin: &str) -> Result<()> {
-    let cfg = herdr_config();
+    let cfg = agent_host_config();
     let (cap, setting) = match origin {
-        registry::ORIGIN_ASK => (cfg.ask_spawned_session_cap(), "herdr.max_ask_spawned_sessions"),
-        registry::ORIGIN_MCP => (cfg.mcp_started_session_cap(), "herdr.max_mcp_started_sessions"),
+        registry::ORIGIN_ASK => (cfg.ask_spawned_session_cap(), "agent_host.max_ask_spawned_sessions"),
+        registry::ORIGIN_MCP => (cfg.mcp_started_session_cap(), "agent_host.max_mcp_started_sessions"),
         _ => return Ok(()),
     };
     if db.with_conn(|c| registry::count_running_with_origin(c, origin))? >= cap {
@@ -126,7 +126,7 @@ pub enum SendKind {
 /// not a driver turn. A driver turn may steer only the session its chat drives, within its allowance.
 pub fn reserve_send(db: &Arc<Database>, session_id: &str, chat: Option<&WatchingChat>, kind: SendKind) -> Result<bool> {
     let Some(chat) = chat.filter(|c| c.driver_turn) else { return Ok(false) };
-    let cfg = herdr_config();
+    let cfg = agent_host_config();
     let (limit, noun) = match kind {
         SendKind::Text => (cfg.nudge_budget(), "instructions"),
         SendKind::Keys => (cfg.key_allowance(), "key presses"),
@@ -187,7 +187,7 @@ pub struct NewWatch<'a> {
 /// Have the chat watch a session. See `registry::watch_from_chat` for when
 /// `drive` applies. Returns whether the session exists.
 pub fn start_watch(c: &rusqlite::Connection, session_id: &str, w: NewWatch<'_>) -> Result<bool> {
-    start_watch_capped(c, session_id, w, herdr_config().driven_session_cap())
+    start_watch_capped(c, session_id, w, agent_host_config().driven_session_cap())
 }
 
 /// `start_watch` with the limit on running driven sessions passed in. A default-on
@@ -213,7 +213,7 @@ pub fn start_watch_capped(
                 session_id,
                 registry::ACTOR_GUARD,
                 &format!(
-                    "HQ already drives {cap} running sessions (herdr.max_driven_sessions), so this one starts observation-only."
+                    "HQ already drives {cap} running sessions (agent_host.max_driven_sessions), so this one starts observation-only."
                 ),
             )?;
         }

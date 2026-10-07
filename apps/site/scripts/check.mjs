@@ -14,7 +14,6 @@ const OUTBOUND_ALLOW = [
   'https://github.com/NousResearch/hermes-agent',
   'https://docs.openclaw.ai',
   'https://hermes-agent.nousresearch.com/docs',
-  'https://herdr.dev',
   'https://bun.sh',
   'https://rustup.rs',
   'https://jedisct1.github.io/minisign/',

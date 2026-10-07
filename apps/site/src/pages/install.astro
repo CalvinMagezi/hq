@@ -252,8 +252,8 @@ const docker = installChannels.docker;
       </ol>
       <div class="prose">
         <p>
-          <code>deploy/install.sh</code> does not install Herdr. If you want coding-agent sessions on
-          the server, follow the local setup in <a href={links.herdrHarness}>the Herdr docs</a>. Pick one
+          <code>deploy/install.sh</code> installs HQ only. Coding agents run on a machine that has them
+          installed, paired with <code>hq host join</code>; see <a href={links.agentSessions}>the sessions docs</a>. Pick one
           deploy path per host: the updater owns the binary and web files, so do not also build on the
           server. Full walkthrough: <a href={links.deployReadme}>deploy/README.md</a>. To check a
           release by hand, see <a href="/security/#verify">verifying a release</a>.
@@ -317,7 +317,7 @@ const docker = installChannels.docker;
           <li><strong>Docker.</strong> <code>docker pull ghcr.io/calvinmagezi/hq</code>, then recreate the container.
             Uninstall: <code>docker rm -f hq</code>; <code>docker volume rm hq-data</code> also deletes your data.</li>
           <li><strong>Server.</strong> It updates itself from signed releases every ten minutes. To remove it, back up
-            <code>/opt/hq/.vault</code> first, then <code>systemctl disable --now hq herdr hq-update.timer</code> and delete
+            <code>/opt/hq/.vault</code> first, then <code>systemctl disable --now hq hq-update.timer</code> and delete
             the unit files, <code>/usr/local/bin/hq</code>, <code>/etc/hq</code> and <code>/opt/hq</code>.</li>
         </ul>
         <p>

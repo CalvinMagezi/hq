@@ -398,7 +398,7 @@ fn snapshot_roundtrips_without_touching_updated_at() {
 }
 
 #[test]
-fn the_herdr_migration_orphans_tmux_era_running_rows() {
+fn the_session_registry_migration_orphans_tmux_era_running_rows() {
     let conn = Connection::open_in_memory().unwrap();
     conn.execute_batch(include_str!("../../sql/031_harness_sessions.sql"))
         .unwrap();

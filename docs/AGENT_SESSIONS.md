@@ -1,20 +1,16 @@
-# Herdr harness (retired)
-
-> Herdr was replaced by HQ's built-in host (`hq host`). This page still describes the
-> harness-session tools and workflow, which are unchanged, but anything about the
-> `herdr` CLI, `hq-herdr-gate` or `herdr.service` is historical. Current setup:
-> [AGENT_HOST.md](AGENT_HOST.md) and [NATIVE_HOST_CUTOVER.md](NATIVE_HOST_CUTOVER.md).
+# Coding-agent sessions
 
 Agent HQ runs and monitors coding agents (Claude Code, Codex, Cursor, Pi, OpenCode,
-Copilot CLI, Kimi, Qwen, Antigravity) in [Herdr](https://herdr.dev). Herdr owns the
-terminals, recognises which agent sits in a pane, and reports its state: `idle`,
-`working`, `blocked` (waiting on a dialog or approval), or `done`. HQ drives it through the
-`herdr` CLI. It replaced the earlier tmux-based runner, which could only guess state from
-screen text.
+Copilot CLI, Kimi, Qwen, Antigravity) in its built-in host (`hq host`, see
+[AGENT_HOST.md](AGENT_HOST.md)). The host owns the terminals, recognises which agent
+sits in a pane, and reports its state: `idle`, `working`, `blocked` (waiting on a dialog
+or approval), or `done`. It replaced the earlier tmux-based runner, which could only
+guess state from screen text.
 
-A **host** is a machine running Herdr. `local` is the machine HQ runs on. Any other host is
-reached over ssh, which is how HQ on a VPS can run and watch agents on a laptop whenever the
-laptop is on and reachable over Tailscale.
+A **host** is a machine running `hq host`. `native` (also written `local`) is the machine
+HQ runs on. Any other host is a machine you paired (see [JOIN_A_MACHINE.md](JOIN_A_MACHINE.md))
+and is reached over ssh, which is how HQ on a VPS can run and watch agents on a laptop
+whenever the laptop is on and reachable over Tailscale.
 
 ## What HQ can do
 
@@ -25,20 +21,20 @@ laptop is on and reachable over Tailscale.
 | `harness_session_wait` | Block until the session goes `idle`, `done` or `blocked`. |
 | `harness_session_logs` / `_status` / `_list` | Read output and live state. |
 | `harness_session_stop` / `_resume` | Close the workspace, or continue a stopped session. |
-| `herdr_hosts` | Which hosts exist and whether each answers right now. |
-| `herdr_agents` / `herdr_read` | Read-only view of every agent on a host, including ones you started by hand. |
-| `herdr_send` | Prompt (`text`) or press `keys` in an existing pane by pane id or agent name, including one you started by hand. `host` is required. |
+| `host_list` | Which hosts exist and whether each answers right now. |
+| `host_agents` / `host_read` | Read-only view of every agent on a host, including ones you started by hand. |
+| `host_send` | Prompt (`text`) or press `keys` in an existing pane by pane id or agent name, including one you started by hand. `host` is required. |
 
 The `harness_session_*` tools only change sessions HQ launched. An agent you started yourself
-is visible and readable, and `herdr_send` is the one way to steer it: it checks the target
+is visible and readable, and `host_send` is the one way to steer it: it checks the target
 first, sends nothing to an unreachable host or a stale pane id, and refuses text while the
 agent is blocked at a dialog (it returns the screen so the dialog can be answered with
 `keys`). `hq sessions list|spawn|status|logs|send|stop|resume`
 mirrors the tools, and `hq sessions spawn <harness> --host laptop --cwd <path on laptop>`
 starts one on a remote host (`--cwd` is required there).
 
-Each session gets its own Herdr workspace labelled `hq <label>`, opened without taking focus,
-so it appears in your sidebar when you open `herdr` on that machine.
+There is no terminal UI to attach to: read a session with `harness_session_logs` or the web
+app, and list every agent on a machine with `hq host status`.
 
 ## Behavior worth knowing
 
@@ -48,7 +44,7 @@ so it appears in your sidebar when you open `herdr` on that machine.
   Antigravity, whose default is verified to be "trust", is accepted automatically.
 - **A blocked agent alerts once.** The supervisor (every minute) raises an action-needed
   item when a session blocks, and again only if it blocks in a new state.
-- **A finished agent alerts once.** When Herdr reports `done` (the agent finished a turn and
+- **A finished agent alerts once.** When the host reports `done` (the agent finished a turn and
   is waiting), the supervisor posts the last screen to the relay, so the operator hears about
   completion without the session having to exit. `idle` (nothing new happened) does not alert.
 - **An unreachable host is not an exit.** If the laptop sleeps or leaves the tailnet, its
@@ -57,7 +53,7 @@ so it appears in your sidebar when you open `herdr` on that machine.
 - **Prompts are confirmed, not just sent.** `agent prompt` writes the text and Enter
   together, but a TUI that is not listening yet can swallow the Enter and leave the text in
   its input box. `harness_session_send` and the initial prompt wait for the agent to start
-  working, and if Herdr reports `agent_prompt_stalled` HQ presses Enter once more and says so
+  working, and if the host reports `agent_prompt_stalled` HQ presses Enter once more and says so
   in the result. Enter on an empty input does nothing, so this is safe when the agent had
   simply finished first. Read the output before resending anything by hand.
 - Exit summaries use the last screen the supervisor captured while the agent was alive.
@@ -122,7 +118,7 @@ in one call. `harness_session_handoff` takes `title`, `description`, `acceptance
    acceptance.
 3. Creates a web chat thread that owns the session (`owner_thread`), so ready-for-review,
    blocked and exited notices post there and Drive follows the usual gate and
-   `herdr.drive_new_watches` (pass `drive: false` to opt out).
+   `agent_host.drive_new_watches` (pass `drive: false` to opt out).
 
 The result carries the task id and display id, session id, thread id and
 `links.chat` (`/chat?thread=<id>`) and `links.task` (`/tasks?task=<id>`), and `handoff` says
@@ -160,10 +156,10 @@ second transport limit, with an orphan pane behind it. Now:
   with `harness 'claude-code' is not installed on host 'local' (binary 'claude' not found on
   PATH; searched ...)`, listing the roots. Remote hosts are not preflighted: the gate does not
   expose their filesystem.
-- **Bounded start.** The wait for the agent to leave `launch_pending` is `herdr.launch_bound_secs`
+- **Bounded start.** The wait for the agent to leave `launch_pending` is `agent_host.launch_bound_secs`
   (default 25, clamped to 5..=50 so it stays under the transport limit). If the last poll still
   shows `launch_pending` with an `unknown` status, or no agent, HQ reads the pane's last lines,
-  closes the Herdr workspace and fails with the host, the harness, what Herdr reported and those
+  closes the host workspace and fails with the host, the harness, what the host reported and those
   lines. An agent whose last poll shows `launch_pending: false` is never closed. No row is
   written, so no session claims to be running. Any other failure between the workspace being
   created and the row being recorded (the agent lookup, the database write) also closes the
@@ -182,16 +178,16 @@ returns the existing task with `deduplicated: true`. The REST `POST /api/tasks` 
 ### Refusing working directories
 
 Every `cwd` must be an absolute path with no `..` component and none of `~`, `$`, a backtick
-or NUL, so the string that was checked is the string Herdr receives.
+or NUL, so the string that was checked is the string the host receives.
 
 A `cwd` shaped like a home directory is refused whichever host the session runs on, because
 the agent stops at its folder-trust dialog there and nobody is watching: `/`, `/Users/<name>`,
 `/home/<name>`, `/root`, `/var/root`, `/opt/hq`, the bare `/Users` and `/home`, and HQ's own
 `$HOME`. Trailing and doubled slashes and letter case do not get past it. There is no
 per-host home setting yet, so a home that is not shaped like one of these (say `/data/me`) is
-only caught through `herdr.spawn_cwd_deny`.
+only caught through `agent_host.spawn_cwd_deny`.
 
-`herdr.spawn_cwd_deny` is a list of path fragments. A `cwd` that contains any entry
+`agent_host.spawn_cwd_deny` is a list of path fragments. A `cwd` that contains any entry
 (case-insensitive, trailing and doubled slashes ignored on both sides) is refused by
 `harness_session_spawn`, `harness_session_handoff`, `harness_session_resume` and
 `hq sessions spawn`, with an error naming the entry. It is empty by default. The match is on
@@ -199,7 +195,7 @@ the path as written, so a symlink into a denied directory is not caught, and a r
 paths are matched as text.
 
 ```yaml
-herdr:
+agent_host:
   spawn_cwd_deny:
     - /clients/acme
     - /private
@@ -216,19 +212,19 @@ read tools (except `harness_session_logs`) plus `task_create`, `task_update`,
 output of sessions, delete tasks or write the vault. Send and logs are withheld because the
 registry does not record which key started a session. It can also ask HQ's own chat agent a
 read-only question with `hq_ask` (see `docs/MCP_ASK.md`), which is not a harness session. That
-reply's session has the session-log, Herdr and file-reading tools removed, so the key cannot read
+reply's session has the session-log, the host and file-reading tools removed, so the key cannot read
 through HQ what it cannot call.
 
 **This key is code-execution equivalent.** A spawned `claude-code` session runs with
 permissions skipped, on any host and `cwd` the deny list allows. Set
-`herdr.handoff_cwd_allow` to the directories the client may use: a call that arrived on the
+`agent_host.handoff_cwd_allow` to the directories the client may use: a call that arrived on the
 handoff key must then have a `cwd` in or under one of them (the gateway marks those calls, a
 client cannot set the marker). Left empty, treat the key as shell access to those hosts as
 described under "Security model".
 
-Keys sent to a session (`keys` on `harness_session_send`, `herdr_send` and the REST
+Keys sent to a session (`keys` on `harness_session_send`, `host_send` and the REST
 endpoint) must be logical names matching `^[A-Za-z0-9][A-Za-z0-9+_-]*$`, at most 32
-characters, so a key can never be read as a Herdr flag.
+characters, so a key can never be read as a host flag.
 
 ## Watching and driving from a web chat
 
@@ -239,7 +235,7 @@ A session launched or linked from a web chat is watched by that chat (`owner_thr
 phone the same panel shows under the chat header with 44px controls, and the button counts
 the sessions waiting on an answer.
 
-A session no chat watched starts with Drive on (`herdr.drive_new_watches`, default true)
+A session no chat watched starts with Drive on (`agent_host.drive_new_watches`, default true)
 when it passes the goal gate below; without a usable goal it starts observation-only. Spawn, link and watch take `drive=false` to start with updates only, and on a session the
 chat already drives it stops driving. Every other case starts or stays off, so a tool can
 never turn Drive back on once the user switched it off:
@@ -269,7 +265,7 @@ server's session driver (`crates/hq-web/src/session_driver.rs`) answers it in th
   the chat instead of acting when the step is outside the task, destructive, touches
   credentials, deploys to production unless the task says so, or spends money. It never
   marks the task complete. A driven session also gets a check-in every
-  `herdr.driver_checkin_minutes` (default 30) while it runs and its host answers, to catch
+  `agent_host.driver_checkin_minutes` (default 30) while it runs and its host answers, to catch
   an agent that is stuck. After 48 driver turns in a day a session drops back to updates.
   A chat that is archived or deleted lets go of its sessions, whose events return to the
   relay. The limits in "Limits on driving" below stop a session that keeps being nudged.
@@ -285,7 +281,7 @@ turn it on only for sessions whose work you would approve yourself.
 ### Limits on driving
 
 What wakes a driven turn: a finished turn, a block or an exit that the supervisor turns into a
-wake (`pm_wake`), and a check-in every `herdr.driver_checkin_minutes` while the session runs.
+wake (`pm_wake`), and a check-in every `agent_host.driver_checkin_minutes` while the session runs.
 What used to stop it: the model deciding the goal was met, and 48 driver turns a day. A model
 that judges an unreachable definition of done (a physical-device test, say) as unmet kept
 sending another wrap-up instruction, each answered by a finished turn that woke it again.
@@ -296,15 +292,15 @@ row (`drive_off_reason`, in the sessions payload and shown under the Drive switc
 
 | Limit | Default | Setting |
 |-------|---------|---------|
-| Instructions (text prompts and resume prompts) the driver sends one session, counted since the user last switched Drive on. Claimed in one conditional write before the send, so parallel calls cannot overshoot, and handed back if the send fails. `harness_session_send` and `harness_session_resume` in a driver turn refuse past it, and `herdr_send` is removed from driver turns so it cannot go around it | 8 (1 to 100) | `herdr.driver_nudge_budget` |
-| Key presses (permission dialogs, menus) the driver sends one session, on the same terms but a separate, larger allowance so a task with many dialogs is not cut off | 40 (1 to 500) | `herdr.driver_key_allowance` |
-| Finished turns in a row that show no new tool activity on the screen the supervisor stored (`Bash(...)`, `Update(...)`, `Ran ...` lines). A tool line the last turn did not show, or one shown more times, counts as work, so re-running a test is not a stall. A finished turn that follows something other than a driver instruction (you typing in the chat) is not judged. A harness that prints none is never judged stalled; the budget covers it | 3 (2 to 20) | `herdr.driver_no_progress_limit` |
+| Instructions (text prompts and resume prompts) the driver sends one session, counted since the user last switched Drive on. Claimed in one conditional write before the send, so parallel calls cannot overshoot, and handed back if the send fails. `harness_session_send` and `harness_session_resume` in a driver turn refuse past it, and `host_send` is removed from driver turns so it cannot go around it | 8 (1 to 100) | `agent_host.driver_nudge_budget` |
+| Key presses (permission dialogs, menus) the driver sends one session, on the same terms but a separate, larger allowance so a task with many dialogs is not cut off | 40 (1 to 500) | `agent_host.driver_key_allowance` |
+| Finished turns in a row that show no new tool activity on the screen the supervisor stored (`Bash(...)`, `Update(...)`, `Ran ...` lines). A tool line the last turn did not show, or one shown more times, counts as work, so re-running a test is not a stall. A finished turn that follows something other than a driver instruction (you typing in the chat) is not judged. A harness that prints none is never judged stalled; the budget covers it | 3 (2 to 20) | `agent_host.driver_no_progress_limit` |
 | The linked task is complete, or is not in progress at a check-in while the agent is not working (a working agent means someone is typing in the pane). A finished turn itself moves the task to ready for review, so that is not a stop | none | none |
 | The session exited or was stopped (Drive goes off in the registry write, and the exit is reported as an update) | none | none |
-| Running sessions HQ drives at once. A default-on watch past it starts observing and says so, and `harness_session_mode` from HQ cannot go past it (the user can); a session the user already switched on is never switched off by it | 3 (1 to 50) | `herdr.max_driven_sessions` |
-| Running sessions started by an MCP client with no chat (`harness_session_spawn`, `harness_session_handoff`), recorded in `harness_sessions.origin` | 3 (1 to 50) | `herdr.max_mcp_started_sessions` |
-| Running sessions started from a chat an `hq_ask` created, including by handoff | 2 (0 to 20) | `herdr.max_ask_spawned_sessions` |
-| Full-mode `hq_ask` questions waiting at once | 2 (1 to 10) | `herdr.max_full_asks` |
+| Running sessions HQ drives at once. A default-on watch past it starts observing and says so, and `harness_session_mode` from HQ cannot go past it (the user can); a session the user already switched on is never switched off by it | 3 (1 to 50) | `agent_host.max_driven_sessions` |
+| Running sessions started by an MCP client with no chat (`harness_session_spawn`, `harness_session_handoff`), recorded in `harness_sessions.origin` | 3 (1 to 50) | `agent_host.max_mcp_started_sessions` |
+| Running sessions started from a chat an `hq_ask` created, including by handoff | 2 (0 to 20) | `agent_host.max_ask_spawned_sessions` |
+| Full-mode `hq_ask` questions waiting at once | 2 (1 to 10) | `agent_host.max_full_asks` |
 
 Known harmless prompts are not left to the model. Claude Code's optional feedback survey
 (`How is Claude doing this session? (optional)` with `0: Dismiss`) used to stall a driven loop
@@ -321,7 +317,7 @@ until a person pressed `0`. The supervisor (`harness_session::dismiss`, called f
   alone does not, because Claude's bypass-mode footer (`bypass permissions on`) always sits in
   the tail. A prompt without a recognised dismiss option is never answered, and trust dialogs
   still default to "No, exit" and are reported.
-- Nothing is typed while Herdr reports the agent `working` (the text would be the agent's own
+- Nothing is typed while the host reports the agent `working` (the text would be the agent's own
   output), and nothing is typed when the input line below the survey holds any text. The input
   line is recognised by its glyph: Claude Code's `❯` (U+276F), `>`, or either inside a `│ … │`
   box. A ghost suggestion looks like a draft and cannot be told apart from screen text, so it
@@ -333,11 +329,11 @@ until a person pressed `0`. The supervisor (`harness_session::dismiss`, called f
   can cost at most one stray `0`. Switching Drive on clears the hash.
 - Host calls are bounded: at most one screen re-read and one key send per session per sweep, each
   with a 3 second timeout. The screen is read again just before the key goes out, so a survey
-  that already closed gets no stray `0`. A send Herdr refused is handed back; a timeout or lost
+  that already closed gets no stray `0`. A send the host refused is handed back; a timeout or lost
   connection keeps the claim spent (the key may have landed, and a second `0` could reach the
   input box).
 - A finished turn is never silenced by a dismissal: its alert and driver wake fire as usual,
-  even if Herdr changes the session's state after the keypress. Only the blocked alert the
+  even if the host changes the session's state after the keypress. Only the blocked alert the
   survey itself caused is skipped.
 - Only sessions with Drive on and a watching chat. An observe-only session is never typed into.
 - Dismissals have their own counter (`harness_sessions.dismissals`, refilled when the user
@@ -360,7 +356,7 @@ link sessions, and cannot type into a pane except through the metered tools. Att
 also refused in `hq_ask` replies. Sessions started over the handoff key never start driven. After a guard stops Drive, the
 session keeps running untouched and later events arrive as ordinary updates.
 
-`herdr.drive_new_watches` stays `true`: a handoff or spawn whose goal and definition of done pass
+`agent_host.drive_new_watches` stays `true`: a handoff or spawn whose goal and definition of done pass
 the gate starts driven, bounded by the limits above. Set it to `false` for every new watch to
 start observing.
 
@@ -383,46 +379,46 @@ cannot start further sessions or full-mode asks; ask the owner".
 - **stdio `hq mcp`**: reads `HQ_SESSION_ID` from its own environment when the client passes it on.
 
 A marked call also cannot use `harness_session_resume` or `config_manage`, and can type
-(`harness_session_send`, `herdr_send`) only into its own session.
+(`harness_session_send`, `host_send`) only into its own session.
 
 **This depends on that client config, which HQ does not write, so containment fails open
 without it** (see `TECHDEBT.md`). HQ does not pass a per-pane `--mcp-config`. Without the marker
 these caps still hold, whatever the client says about itself: a watch past
-`herdr.max_driven_sessions` does not drive; a session started from a chat that `hq_ask` created
-never starts driven, and is capped at `herdr.max_ask_spawned_sessions`; sessions an MCP client
-starts with no chat are capped at `herdr.max_mcp_started_sessions`; full-mode asks wait at most
-`herdr.max_full_asks` at a time; an `hq_ask` reply loses `config_manage`.
+`agent_host.max_driven_sessions` does not drive; a session started from a chat that `hq_ask` created
+never starts driven, and is capped at `agent_host.max_ask_spawned_sessions`; sessions an MCP client
+starts with no chat are capped at `agent_host.max_mcp_started_sessions`; full-mode asks wait at most
+`agent_host.max_full_asks` at a time; an `hq_ask` reply loses `config_manage`.
 
 ### The Sessions page
 
 `/sessions` in the web app lists every registry row with its task, host, goal, live agent
 status and whether its host answers (an unreachable host shows "host unreachable", never
 "exited"). Picking one shows the pane text (refreshed every 3s), a prompt box, the keys that
-answer a dialog, an Adopt button, and the command that opens Herdr on that machine
-(`herdr`, or `ssh <host> -t herdr` for a remote host; the page notes that this assumes the host
-name is an ssh alias on your machine). `ctrl+c` sits apart from the other keys and needs a
+answer a dialog, an Adopt button, and the command that lists the agents on that machine
+(`hq host status`, or `ssh <host> hq host status` for a remote host; the page notes that this
+assumes the host name is an ssh alias on your machine). `ctrl+c` sits apart from the other keys and needs a
 second tap. A task's drawer lists its sessions and links here. All of it sits behind the same
 web auth as the rest of `/api`, and `send` and `adopt` under `/api/harness-sessions/` must
 also carry `X-HQ-Client` (the web app sends it; scripts must add it, or get a 403). `drive`, `goal` and
 `unwatch` predate the header and stay open to cached PWAs that do not send it yet. Errors the
-endpoints do not recognise are logged and answered generically, never with ssh or Herdr stderr.
+endpoints do not recognise are logged and answered generically, never with ssh or the host stderr.
 
 - `GET /api/harness-sessions?task_id=&status=&host=` is `harness_session_list` plus the task
   and goal. `GET /api/harness-sessions/{id}` is one row, live.
 - `GET /api/harness-sessions/{id}/screen?lines=N` (default 80, at most 500) reads the pane
   while the agent runs and returns the last stored snapshot after it ends (`source`). A live
-  read is one Herdr call (one ssh round trip on a remote host). Concurrent reads of one
+  read is one host call (one ssh round trip on a remote host). Concurrent reads of one
   session share a single in-flight call, and a live result is reused for about a second;
   a failed read or a stored-snapshot answer is never reused, and a send, stop or resume
   drops what is held. A session the registry no longer lists as running is answered from its
-  snapshot without calling Herdr. A live answer also carries `herdr_source` (`recent-unwrapped`
-  or `visible`; null for a snapshot). While an agent is working, Herdr refuses a `recent` read
-  of more than about 25 lines with `agent_not_idle`; `HerdrHost::read` then retries that one
+  snapshot without calling the host. A live answer also carries `host_source` (`recent-unwrapped`
+  or `visible`; null for a snapshot). While an agent is working, the host refuses a `recent` read
+  of more than about 25 lines with `agent_not_idle`; `ScriptedHost::read` then retries that one
   error once as `--source visible` with the same line count, so the page and the supervisor
   stay live instead of falling back to a stale snapshot. Other errors (`agent_not_found`, an
   unreachable host) are not retried, writes never take this path, and idle agents keep the
   deep `recent-unwrapped` read. The supervisor was left on the same read rather than moved to
-  `--source detection`: `detection` is Herdr's own classifier input with no documented wrapping
+  `--source detection`: `detection` is the host's own classifier input with no documented wrapping
   or depth contract, and the stored snapshots and progress hashing assume unwrapped text. The page waits for each response before polling
   again and backs off (up to 30s) while requests fail.
 - `POST /api/harness-sessions/{id}/send` takes exactly one of `text` or `keys`, with the same
@@ -460,7 +456,7 @@ the goal and criteria in force at the time (`registry::list_events`).
 
 ### Attaching and switching mode mid-chat
 
-- `herdr_agents` lists what Herdr runs, including agents started by hand.
+- `host_agents` lists what the host runs, including agents started by hand.
   `harness_session_attach(agent, host)` starts tracking one and makes the chat watch it,
   observation-only. An agent already tracked is reused, and another chat can take it over
   (Drive off). An unreachable host or a missing agent is an error and records nothing. Family
@@ -477,38 +473,32 @@ the goal and criteria in force at the time (`registry::list_events`).
 
 ## Custom harness profiles
 
-`herdr agent start` runs the agent CLI Herdr knows by name, so a wrapper script (one that
-selects an account, sets a config directory, or adds flags) cannot be launched that way. A
-profile in `config.yaml` names such a launcher and borrows everything else from a built-in
-harness:
+A profile in `config.yaml` names a launcher that is not one of the built-in harnesses (a
+wrapper script that selects an account, sets a config directory, or adds flags) and borrows
+everything else from a built-in harness:
 
 ```yaml
-herdr:
+agent_host:
   harness_profiles:
     my-claude:                 # the name callers pass as `harness`
       base: claude-code        # resume, trust and token behavior come from this harness
-      command: my-claude-wrapper   # typed into the pane's shell; must end up running claude
+      command: my-claude-wrapper   # run through a shell; must end up running claude
       args: ["--dangerously-skip-permissions"]   # optional; replaces the base args on a fresh spawn
-      env:                     # optional; set for the pane's shell, so for the CLI too
+      env:                     # optional; set for the agent, so for the CLI too
         CLAUDE_CONFIG_DIR: /home/you/.claude-work
 ```
 
 `harness_session_spawn`, `hq sessions spawn` and session-mode dispatch all accept the profile
-name, and `harness_session_resume` finds it again from the stored session. For a profile with
-a `command`, HQ opens the workspace with `env`, types the command and its quoted arguments into
-the pane (`pane run` submits with Enter in the same write), waits for Herdr to recognize the
-agent, then names it so status, send, wait and the supervisor address it like any other
-session. If no agent appears within two minutes the spawn fails with the pane's screen and
-the workspace is closed; the usual cause is a command that is not on the `PATH` of a
-non-interactive shell on that host, or a wrapper that does not end up running the base CLI.
-`command` is typed as written (a leading `~` expands) and its arguments are quoted for a
-POSIX shell. A profile without `command` launches the base CLI through Herdr with the profile's
-`args` and `env`. A resume uses the base harness's resume arguments. A profile may reuse a
-built-in name to change how that harness starts.
+name, and `harness_session_resume` finds it again from the stored session. A profile without
+`command` launches the base CLI with the profile's `args` and `env`; a resume uses the base
+harness's resume arguments. A profile may reuse a built-in name to change how that harness
+starts. If no agent appears within the launch bound the spawn fails with the screen; the usual
+cause is a command that is not on the `PATH` of the host service.
 
 A separate Claude Code account needs no wrapper: point `CLAUDE_CONFIG_DIR` at that account's
-config directory and Herdr starts `claude` in it. Write the path out in full, since `env`
-values are passed through as written and `~` is not expanded:
+config directory and the host starts `claude` in it (inside the sandbox that directory is the
+agent's own, and the default `~/.claude` and other profiles are hidden from it). Write the path
+out in full, since `env` values are passed through as written and `~` is not expanded:
 
 ```yaml
     claude-work:
@@ -517,35 +507,20 @@ values are passed through as written and `~` is not expanded:
 ```
 
 The spawn result's `harness` field names the profile the session was started with. An unknown
-name fails before any workspace is created, listing the known harnesses and profiles.
+name fails before anything is started, listing the known harnesses and profiles. Profiles run
+shell commands on the host, so they belong to whoever can edit `config.yaml`.
 
-Profiles run shell commands on the host, so they belong to whoever can edit `config.yaml`.
-The gate on a remote host needs no change: it already allows `pane` and `agent`, which cover
-`pane run` and `agent rename`.
+## Setup
 
-## Local setup (the machine HQ runs on)
-
-Install Herdr and make sure its server is running. On a Linux server, run it as its own
-service so restarting HQ does not stop running agents:
-
-```bash
-curl -fsSL https://herdr.dev/install.sh | HERDR_INSTALL_DIR=/usr/local/bin sh
-sudo cp deploy/herdr.service /etc/systemd/system/ && sudo systemctl enable --now herdr
-```
-
-`deploy/herdr.service` runs `herdr server` as the `hq` user with the same hardening as
-`hq.service`. Every pane inherits that unit's environment, so agents there see the LLM provider
-keys (`openrouter.env`) and the GitHub token (`gh.env`); the Google Workspace credentials
-(`gws.env`) are deliberately not loaded into it. On a workstation, opening `herdr` once starts the server.
-
-Optional config in `config.yaml` (all defaults shown):
+On the machine HQ runs on, `hq host serve` (or `hq host install`, which runs it as a login
+service) provides the `native` host. To use another machine, pair it:
+[JOIN_A_MACHINE.md](JOIN_A_MACHINE.md). Settings live under `agent_host:` in `config.yaml`
+(all defaults shown, sandbox and idle settings are in [AGENT_HOST.md](AGENT_HOST.md)):
 
 ```yaml
-herdr:
-  binary: herdr            # binary on this machine
-  session: null            # named Herdr session; null is the default session
-  default_host: local
-  launch_bound_secs: 25    # how long a launch waits for the agent (5-50)
+agent_host:
+  default_host: native          # where new sessions start: native, or a paired host's name
+  launch_bound_secs: 25         # how long a launch waits for the agent (5-50)
   command_timeout_secs: 30
   driver_nudge_budget: 8        # instructions the driver may send one session (1-100)
   driver_no_progress_limit: 3   # finished turns without new tool activity before Drive stops (2-20)
@@ -556,70 +531,13 @@ herdr:
   max_full_asks: 2              # full-mode hq_ask questions waiting at once (1-10)
 ```
 
-## Adding a remote host (for example a laptop)
+To revoke a paired machine's access, delete its line from that machine's `authorized_keys`
+(the one `hq host authorize` added) and remove the host from `agent_host.hosts`.
 
-Run these steps once. `hq-host` is the machine running HQ, `laptop` runs Herdr.
+### Connection reuse (`agent_host.ssh_multiplex`)
 
-1. **Install Herdr on the laptop** and open it once so its server runs.
-2. **Install the gate on the laptop.** It is a forced command that runs only the `herdr`
-   CLI, taking its arguments as a JSON array on stdin so no shell parses prompt text:
-
-   ```bash
-   install -m 755 scripts/hq-herdr-gate ~/.local/bin/hq-herdr-gate
-   ```
-
-   It allows `agent`, `pane`, `workspace`, `tab` and `status`, and refuses `server`,
-   `session`, `machine` and the `--machine`/`--remote` flags.
-3. **Create a dedicated key on `hq-host`**, as the user HQ runs as:
-
-   ```bash
-   sudo -u hq ssh-keygen -t ed25519 -N '' -C 'hq herdr-laptop' -f /opt/hq/.ssh/herdr_laptop
-   ```
-4. **Authorize it on the laptop**, one line in `~/.ssh/authorized_keys`, pinned to
-   `hq-host`'s Tailscale address and to the gate:
-
-   ```
-   restrict,from="<hq-host-tailscale-ip>",command="/home/you/.local/bin/hq-herdr-gate" ssh-ed25519 AAAA... hq herdr-laptop
-   ```
-
-   `restrict` turns off ptys, port forwarding and agent forwarding. The laptop needs SSH
-   Remote Login enabled (macOS: System Settings, General, Sharing).
-5. **Trust the laptop's host key** from `hq-host` so ssh never prompts:
-
-   ```bash
-   sudo -u hq sh -c 'ssh-keyscan -H <laptop-tailscale-ip> >> /opt/hq/.ssh/known_hosts'
-   ```
-6. **Tell HQ about it** in `config.yaml`:
-
-   ```yaml
-   herdr:
-     hosts:
-       laptop:
-         ssh: you@<laptop-tailscale-ip>
-         identity_file: /opt/hq/.ssh/herdr_laptop
-   ```
-7. **Check it** from `hq-host`:
-
-   ```bash
-   printf '%s' '["agent","list"]' | sudo -u hq ssh -i /opt/hq/.ssh/herdr_laptop \
-     -o IdentitiesOnly=yes you@<laptop-tailscale-ip> hq-herdr-gate
-   ```
-
-   then `herdr_hosts` from any HQ session should show `laptop` as reachable. To exercise HQ's
-   own ssh path (not just ssh by hand) run the opt-in diagnostic, which also proves prompt text
-   reaches Herdr as a plain argument:
-
-   ```bash
-   HQ_TEST_HERDR_SSH=you@<laptop-tailscale-ip> HQ_TEST_HERDR_KEY=/path/to/key \
-     cargo test -p hq-tools herdr::tests::real_ssh -- --ignored --nocapture
-   ```
-
-To revoke access, delete that one line from `authorized_keys`.
-
-### Connection reuse (`herdr.ssh_multiplex`)
-
-Every Herdr call on a remote host is one ssh command, and a fresh Tailscale ssh handshake
-costs seconds, so HQ keeps one connection per host open between calls (`ControlMaster=auto`,
+Every call to a remote host is one ssh command, and a fresh Tailscale ssh handshake costs
+seconds, so HQ keeps one connection per host open between calls (`ControlMaster=auto`,
 `ControlPersist=120`, sockets in `~/.hq/run/ssh`, mode 0700, one per host). It also sets
 `ServerAliveInterval=15` and `ServerAliveCountMax=2`, so a master whose laptop went to sleep
 exits within about 30s instead of holding later calls until their deadline. The key,
@@ -627,12 +545,12 @@ exits within about 30s instead of holding later calls until their deadline. The 
 your `authorized_keys` command for every session on the shared connection.
 
 ```yaml
-herdr:
+agent_host:
   ssh_multiplex: true   # default; false opens a fresh connection per call
 ```
 
 The control socket is a bearer credential for the gated key: anything that can open it can
-run gated Herdr calls as that key without the key file, so it sits inside the same boundary
+make gated host calls as that key without the key file, so it sits inside the same boundary
 as the key. The directory is 0700 and holds nothing else; keep `identity_file` mode 0600 and
 owned by the HQ user.
 
@@ -640,30 +558,35 @@ If the socket directory cannot be made private or its path would be too long for
 socket, HQ logs a warning and uses plain connections. If ssh itself reports a control socket
 problem before a session opens, a read-only call (`status`, `agent get`, `agent list`,
 `agent read`) is retried once on a fresh connection. A write (send, prompt, launch) is never
-retried, since the gate may already have run it. A master that hangs
-rather than failing is bounded by the normal command timeout. Run HQ with
-`RUST_LOG=hq_tools::herdr=debug` to log the elapsed milliseconds of every Herdr invocation.
+retried, since the gate may already have run it. A master that hangs rather than failing is
+bounded by the normal command timeout. Run HQ with `RUST_LOG=hq_tools::agent_host=debug` to
+log the elapsed milliseconds of every host call.
 
 ## Security model
 
-The gate limits what the key can ask for, but Herdr can run arbitrary commands inside panes
-by design (`pane run`, and any agent it starts can run code). Treat the key as shell access
-to the laptop as you, scoped to Herdr's own surface and to one source address. Consequences:
+The gate limits what the key can ask for, but the host starts arbitrary commands by design
+(`agent.spawn`, and any agent it starts can run code). Treat the key as shell access to the
+machine as you, scoped to the host's own API and to one source address. Consequences:
 
 - Keep the private key readable only by the HQ user and out of backups you do not control.
-- Anyone who can call HQ's `harness_session_*` tools can start an agent on the laptop, and
-  anyone who can call `herdr_send` can type into any agent pane there, including ones you
+- Anyone who can call HQ's `harness_session_*` tools can start an agent on a paired machine,
+  and anyone who can call `host_send` can type into any agent pane there, including ones you
   started by hand. Do not expose those tools to callers you would not give a shell.
-- Herdr's API is a local unix socket and its documentation describes no separate
-  authentication, so access control is the socket's file permissions plus the ssh key above.
+- Agents run in a process sandbox (see [AGENT_HOST.md](AGENT_HOST.md)): they cannot read the
+  host's own files or your credentials directories, and reach only the sites you allow.
+- The host's control socket is a local unix socket, so access control is its file permissions
+  plus the ssh key above; agents get a separate socket that accepts only their own token.
 
 ## Troubleshooting
 
 | Symptom | Likely cause |
 |---------|--------------|
-| `herdr_hosts` shows `unreachable` with `Permission denied` | Key not in `authorized_keys`, wrong `from=` address, or `identity_file` unreadable by the HQ user. |
-| `unreachable` with `Host key verification failed` | Run step 5. |
-| `unreachable` with `timed out` | Laptop asleep, off the tailnet, or Remote Login disabled. |
-| `gate_denied` | The call used a subcommand the gate does not allow. |
+| `host_check` or `host_list` shows `unreachable` with `Permission denied` | The pinned key is missing from `authorized_keys` (run the `hq host authorize` command again), the `from=` address is wrong, or `identity_file` is unreadable by the HQ user. |
+| `unreachable` with `Host key verification failed` | Trust the machine's host key from the HQ's user: `ssh-keyscan -H <address> >> ~/.ssh/known_hosts`. |
+| `unreachable` with `timed out` | Machine asleep, off the tailnet, its host service stopped, or sshd disabled. |
+| `unreachable` with `No such file or directory` | The host is not running on that machine: `hq host install`. |
+| `gate_denied` | The call used a method the gate does not allow. |
 | `agent_not_ready` at spawn | Agent is at a dialog. Read the screen from the spawn result and answer with `keys`. |
+| Spawn fails with `cannot sandbox the agent` | No sandbox program works on that machine (install `bubblewrap` on Linux, allow user namespaces on Ubuntu 24.04), or the project directory contains your home. |
+| An agent's MCP server or plugin is missing | The sandbox refused its host; see the egress log and add it to `agent_host.sandbox.allow_domains`. |
 | Spawned Claude replies `Login expired` | The user account on that host is not logged in to that CLI. |

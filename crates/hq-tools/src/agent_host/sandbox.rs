@@ -1,6 +1,6 @@
 //! The sandbox request HQ sends with every launch on a built-in host.
 
-use hq_core::config::{HerdrConfig, SandboxMode};
+use hq_core::config::{AgentHostConfig, SandboxMode};
 use serde_json::{Value, json};
 
 /// The API host Claude Code needs to work at all.
@@ -29,11 +29,11 @@ fn mcp_target(url: &str) -> Option<(String, u16)> {
 const SECS_PER_HOUR: u64 = 3600;
 
 /// Seconds of idleness after which the host stops a session; None when off.
-pub(super) fn idle_ttl_secs(cfg: &HerdrConfig) -> Option<u64> {
+pub(super) fn idle_ttl_secs(cfg: &AgentHostConfig) -> Option<u64> {
     (cfg.idle_reap_hours > 0).then(|| cfg.idle_reap_hours.saturating_mul(SECS_PER_HOUR))
 }
 
-pub(super) fn plan(cfg: &HerdrConfig) -> Value {
+pub(super) fn plan(cfg: &AgentHostConfig) -> Value {
     let sandbox = &cfg.sandbox;
     if sandbox.mode == SandboxMode::None {
         return json!({ "mode": "none" });
@@ -44,11 +44,11 @@ pub(super) fn plan(cfg: &HerdrConfig) -> Value {
     }
     for entry in &sandbox.allow_domains {
         if entry.trim_start().starts_with("*.") {
-            tracing::warn!(entry = %entry, "a wildcard in herdr.sandbox.allow_domains also allows other sites that share the CDN address; prefer exact hostnames");
+            tracing::warn!(entry = %entry, "a wildcard in agent_host.sandbox.allow_domains also allows other sites that share the CDN address; prefer exact hostnames");
         }
         match split_entry(entry) {
             Some((host, port)) => allow.push(json!({ "host": host, "ports": [port] })),
-            None => tracing::warn!(entry = %entry, "ignoring a malformed herdr.sandbox.allow_domains entry"),
+            None => tracing::warn!(entry = %entry, "ignoring a malformed agent_host.sandbox.allow_domains entry"),
         }
     }
     json!({ "mode": "process", "allow": allow, "writable": sandbox.writable, "readable": sandbox.readable })
@@ -58,8 +58,8 @@ pub(super) fn plan(cfg: &HerdrConfig) -> Value {
 mod tests {
     use super::*;
 
-    fn cfg() -> HerdrConfig {
-        HerdrConfig::default()
+    fn cfg() -> AgentHostConfig {
+        AgentHostConfig::default()
     }
 
     #[test]

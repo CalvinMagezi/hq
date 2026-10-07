@@ -84,7 +84,7 @@ pub fn render_markdown(p: &MachineProfile) -> String {
     }
 
     let utils: Vec<&str> = [
-        "gws", "rg", "jq", "fd", "herdr", "sqlite3", "ffmpeg", "curl", "ollama", "npm", "pnpm",
+        "gws", "rg", "jq", "fd", "sqlite3", "ffmpeg", "curl", "ollama", "npm", "pnpm",
         "gcloud", "aws", "vercel", "psql",
     ]
     .into_iter()

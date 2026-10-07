@@ -198,6 +198,8 @@ jobs:
           persist-credentials: false
       - name: Scan tracked files against the in-repo baseline
         run: bash scripts/personal-data-scan.sh
+      - name: Retired names stay retired
+        run: bash scripts/retired-names-check.sh
 
   # The private denylist is a repository secret, which fork pull requests never
   # receive, so it only runs on pushes to main. Pull requests get the baseline above.

@@ -24,7 +24,7 @@ use std::path::PathBuf;
 /// [`VERSIONED_BINARIES`] additionally get a `--version` call.
 pub const PROBED_BINARIES: &[&str] = &[
     "gh", "git", "docker", "gws", "cargo", "rustc", "node", "npm", "pnpm", "bun", "python3", "uv",
-    "rg", "jq", "fd", "herdr", "ollama", "sqlite3", "ffmpeg", "curl", "gcloud", "aws", "vercel",
+    "rg", "jq", "fd", "ollama", "sqlite3", "ffmpeg", "curl", "gcloud", "aws", "vercel",
     "psql",
 ];
 

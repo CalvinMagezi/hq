@@ -3,8 +3,8 @@
 `hq_ask` lets an MCP client (a Claude Code session on a laptop, another agent) put a question to
 HQ's own chat agent and read the answer back. The exchange is an ordinary web chat thread, so the
 owner can open it from `links.chat` and carry on in the same conversation. It is not a harness
-session and writes nothing to the Herdr session registry. For work that should end in a coding
-agent running somewhere, use `harness_session_handoff` instead (see `docs/HERDR_HARNESS.md`).
+session and writes nothing to the host session registry. For work that should end in a coding
+agent running somewhere, use `harness_session_handoff` instead (see `docs/AGENT_SESSIONS.md`).
 
 ## The two tools
 
@@ -60,7 +60,7 @@ An ask turn is not the owner typing, so it is kept out of HQ's learning loops: n
 ingestion, no skill self-review, and a 30 minute cap on the reply.
 
 A **handoff-key** ask turn is narrower still. The tools the handoff key is deliberately kept off
-are removed from the reply's session, not just denied: `herdr_*`, `harness_session_*`,
+are removed from the reply's session, not just denied: `host_*`, `harness_session_*`,
 `subagent_run_*`, `read_file`, `grep`, `find_files`, `list_dir`, `git_*`, `system_info`,
 `convert_*`, `ocr_*`, `copilot_*`, `model_*`, the `call_*` specialist sub-agents, the watch and
 background-turn lookups and the code-intelligence tools
@@ -81,14 +81,14 @@ Claude). Three rules cut it:
 
 - A call the gateway marks as coming from an HQ-spawned session (header `x-hq-session-id` from the
   pane's `HQ_SESSION_ID`, see "Sessions HQ spawned cannot start more sessions" in
-  `docs/HERDR_HARNESS.md`) is refused in `mode: full`; `read_only` works.
+  `docs/AGENT_SESSIONS.md`) is refused in `mode: full`; `read_only` works.
 - A session started from a chat an ask created (not one the owner opened and asked into) never
   starts with Drive on, whether by spawn or handoff, and is capped at
-  `herdr.max_ask_spawned_sessions` running sessions. An ask reply cannot turn Drive on, attach or
-  link sessions, or use `config_manage`. At most `herdr.max_full_asks` full-mode questions (default
+  `agent_host.max_ask_spawned_sessions` running sessions. An ask reply cannot turn Drive on, attach or
+  link sessions, or use `config_manage`. At most `agent_host.max_full_asks` full-mode questions (default
   2) wait at once.
 - Where the marker is not configured (the client must send header `x-hq-session-id` from
-  `HQ_SESSION_ID`; verified with Claude Code, see `docs/HERDR_HARNESS.md`), the first rule cannot fire and
+  `HQ_SESSION_ID`; verified with Claude Code, see `docs/AGENT_SESSIONS.md`), the first rule cannot fire and
   containment rests on these caps alone.
 
 ## Scopes, limits and persistence

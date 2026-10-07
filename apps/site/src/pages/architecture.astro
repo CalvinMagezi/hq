@@ -9,7 +9,7 @@ import {
   daemon,
   channels,
   mcpGateway,
-  herdr,
+  agentHost,
   governance,
   releasePipeline,
   topologies,
@@ -23,7 +23,7 @@ const toc = [
   ['relays', 'Chat relays'],
   ['web', 'Web PWA'],
   ['mcp', 'MCP server'],
-  ['herdr', 'Herdr sessions'],
+  ['host', 'Built-in host sessions'],
   ['tasks', 'Tasks'],
   ['governance', 'Governance and sandbox'],
   ['updates', 'Signed updates'],
@@ -37,7 +37,7 @@ const sourceMap = [
   ['Context engine', 'crates/hq-agent/src/context/engine.rs'],
   ['Daemon scheduler', 'crates/hq-cli/src/commands/start/daemon/mod.rs'],
   ['MCP server', 'crates/hq-mcp/src/server.rs'],
-  ['Herdr driver', 'crates/hq-tools/src/herdr/'],
+  ['The host driver', 'crates/hq-tools/src/agent_host/'],
   ['Harness sessions', 'crates/hq-tools/src/harness_session/'],
   ['Bash sandbox', 'crates/hq-agent/src/bash_sandbox.rs'],
   ['Governance rules', 'crates/hq-agent/src/governance/'],
@@ -270,7 +270,7 @@ const sourceMap = [
           read-only set, minus session logs, plus filing tasks, starting sessions and asking questions
           in read-only mode, and nothing else. The gateway sets
           the scope itself, so a client cannot claim a wider one. Treat the handoff key as the power to
-          start a coding agent anywhere you allow it, and set <code>herdr.handoff_cwd_allow</code> to
+          start a coding agent anywhere you allow it, and set <code>agent_host.handoff_cwd_allow</code> to
           bound where.
         </p>
         <h3>Both directions</h3>
@@ -285,23 +285,23 @@ const sourceMap = [
       <Diagram d={mcpGateway} />
     </section>
 
-    <section class="doc-section" id="herdr" aria-labelledby="herdr-h">
-      <h2 id="herdr-h">Herdr and supervised coding-agent sessions</h2>
+    <section class="doc-section" id="host" aria-labelledby="host-h">
+      <h2 id="host-h">The built-in host and supervised coding-agent sessions</h2>
       <div class="prose">
         <p>
-          <a href={links.herdr}>Herdr</a> owns the terminals. It recognises which coding agent sits in
-          a pane and reports its state: idle, working, blocked on a dialog, or done. HQ drives it
-          through the <code>herdr</code> CLI. Claude Code, Codex, Cursor, Pi, OpenCode, Copilot CLI,
+          HQ's built-in host (<code>hq host</code>) owns the terminals. It recognises which coding agent
+          sits in a pane and reports its state: idle, working, blocked on a dialog, or done. HQ drives
+          it over a local socket. Claude Code, Codex, Cursor, Pi, OpenCode, Copilot CLI,
           Kimi, Qwen and Antigravity are supported harnesses, and you can define your own profiles.
           This replaced an earlier tmux runner that could only guess state from screen text.
         </p>
         <h3>Hosts</h3>
         <p>
-          A host is a machine running Herdr. <code>local</code> is the machine HQ runs on. Any other
-          host is reached over ssh with a dedicated key that is pinned to one source address and to a
-          forced command, a small gate script that accepts the <code>herdr</code> CLI's arguments as
-          JSON on stdin and refuses <code>server</code>, <code>session</code>, <code>machine</code>
-          and remote flags. That is how HQ on a VPS can run and watch agents on a laptop, whenever the
+          A host is a machine running <code>hq host</code>. <code>native</code> is the machine HQ runs
+          on. Any other host is a machine you paired with <code>hq host join</code> and is reached over
+          ssh with a dedicated key that is pinned to one source address and to a forced command,
+          <code>hq host gate</code>, which accepts one request as JSON on stdin and refuses every method
+          outside an allowlist. Agents run in a process sandbox with an egress allowlist. That is how HQ on a VPS can run and watch agents on a laptop, whenever the
           laptop is on and reachable. Connections are reused between calls, and a write is never
           retried because the gate may already have run it.
         </p>
@@ -348,10 +348,10 @@ const sourceMap = [
           says why. The Sessions page shows every session with its task, host, goal and live state.
         </p>
       </div>
-      <Diagram d={herdr} />
+      <Diagram d={agentHost} />
       <p class="prose muted">
         Full reference, including setup and troubleshooting:
-        <a href={links.herdrHarness}>docs/HERDR_HARNESS.md</a>.
+        <a href={links.agentSessions}>docs/AGENT_SESSIONS.md</a>.
       </p>
     </section>
 
@@ -495,7 +495,7 @@ const sourceMap = [
           <code>deploy/install.sh</code>, and keep HQ on loopback. Caddy bridges to
           <code>tailscale serve</code>, which terminates HTTPS on your tailnet only, so the UI never
           touches the public internet. List every origin you serve the UI from in
-          <code>web_allowed_origins</code>. HQ on the VPS can then drive Herdr on a laptop over the
+          <code>web_allowed_origins</code>. HQ on the VPS can then drive the host on a laptop over the
           gated ssh key.
         </p>
         <p>

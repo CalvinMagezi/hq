@@ -4,7 +4,7 @@ use hq_core::config::HqConfig;
 use hq_db::Database;
 use hq_tools::registry::{HqTool, ToolRegistry};
 use hq_tools::{
-    a2a, agent_comm, agents, ask, background_turns, brand, coding, convert, harness_session, herdr,
+    a2a, agent_comm, agents, ask, background_turns, brand, coding, convert, harness_session, agent_host,
     imagegen, prose_lint, remote_mcp, self_update, session_search, shortcuts, skill_manage_tool,
     skills, slash_commands, subagent_runs, system_info, tasks, vault, web,
 };
@@ -41,7 +41,7 @@ pub fn create_default_registry(
         None,
         None,
     ));
-    tools.extend(herdr::tools::create_herdr_tools(db.clone()));
+    tools.extend(agent_host::tools::create_host_tools(db.clone()));
     tools.extend(background_turns::create_background_turn_tools(db.clone()));
     tools.extend(subagent_runs::create_subagent_run_tools(db.clone(), None));
     tools.extend(tasks::create_task_tools(

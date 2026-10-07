@@ -271,7 +271,7 @@ fn run_startup_hooks(config: &HqConfig, vault_path: &Path, db: &Database) {
 
     // Wakes the session supervisor on built-in host events; the minute timer
     // stays as the safety net and as the only path for other hosts.
-    for host_name in hq_tools::herdr::native_host_names() {
+    for host_name in hq_tools::agent_host::native_host_names() {
         tokio::spawn(tasks_periodic::session_events::run_session_event_loop(
             host_name,
             vault_path.to_path_buf(),

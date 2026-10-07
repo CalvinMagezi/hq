@@ -16,7 +16,7 @@ const SECRET_HOME_DIRS: &[&str] = &[
 /// What an agent may read under HOME. Everything else there is unreadable, so a
 /// token or note the operator keeps in some other directory cannot be read and
 /// sent to an allowed host. Tool installs, shell and git configuration, and the
-/// agent's own state are listed; `herdr.sandbox.readable` adds more.
+/// agent's own state are listed; `agent_host.sandbox.readable` adds more.
 const HOME_READABLE: &[&str] = &[
     ".local", ".cache", ".config", ".cargo", ".rustup", ".nvm", ".npm", ".bun",
     ".volta", ".pyenv", ".asdf", ".deno", ".gitconfig", ".gitignore_global", ".terminfo", ".zshenv",

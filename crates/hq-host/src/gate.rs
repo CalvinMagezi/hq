@@ -12,7 +12,7 @@ use std::path::Path;
 
 /// Largest request read from stdin.
 pub const MAX_GATE_INPUT: usize = 1_000_000;
-/// Exit status for a refused request, as the herdr gate uses.
+/// Exit status for a refused request, as the host gate uses.
 pub const GATE_DENIED_EXIT: i32 = 64;
 
 /// Methods a remote caller may use. `host.stop` is left out (a remote key must

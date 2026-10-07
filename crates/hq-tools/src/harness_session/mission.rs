@@ -33,7 +33,7 @@ pub enum Event {
     /// A launch ended at a startup dialog, so the prompt was never typed and
     /// nothing is working on the task until someone answers it.
     BlockedAtLaunch,
-    /// Herdr's `done`: the agent finished a turn, not necessarily the task.
+    /// The host's `done`: the agent finished a turn, not necessarily the task.
     Finished,
     Exited,
     Stopped,
