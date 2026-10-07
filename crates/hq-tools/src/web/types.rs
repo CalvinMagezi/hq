@@ -67,6 +67,8 @@ pub enum Category {
     General,
     News,
     Science,
+    Images,
+    Code,
 }
 
 /// Optional search controls. `Default` reproduces the unfiltered behaviour.
@@ -150,9 +152,11 @@ impl SearchOptions {
                 "general" => Category::General,
                 "news" => Category::News,
                 "science" => Category::Science,
+                "images" => Category::Images,
+                "code" => Category::Code,
                 _ => {
                     return Err(format!(
-                        "category must be one of general, news, science (got {s:?})"
+                        "category must be one of general, news, science, images, code (got {s:?})"
                     ));
                 }
             });

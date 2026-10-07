@@ -99,11 +99,28 @@ async fn get_body(request: RequestBuilder) -> Result<String, ProviderError> {
 /// Classify a backend response that did arrive: status first, then the body.
 pub(super) async fn read_body(resp: reqwest::Response) -> Result<String, ProviderError> {
     let status = resp.status();
-    if status.as_u16() == 429 {
+    // GitHub answers an exhausted quota with 403 and these headers.
+    let quota_exhausted = resp.headers().contains_key("retry-after")
+        || resp
+            .headers()
+            .get("x-ratelimit-remaining")
+            .is_some_and(|v| v == "0");
+    if status.as_u16() == 429 || (status.as_u16() == 403 && quota_exhausted) {
         return Err(ProviderError {
-            reason: "rate limited (HTTP 429)".into(),
+            reason: format!("rate limited (HTTP {})", status.as_u16()),
             rate_limited: true,
         });
+    }
+    // Stack Exchange reports throttling as a 400 with an error name in the body.
+    if status.as_u16() == 400 {
+        let body = resp.text().await.unwrap_or_default();
+        if body.contains("throttle_violation") || body.contains("too_many_requests") {
+            return Err(ProviderError {
+                reason: "rate limited (throttled)".into(),
+                rate_limited: true,
+            });
+        }
+        return Err(ProviderError::new("HTTP 400 Bad Request"));
     }
     if status.as_u16() == 401 || status.as_u16() == 403 {
         return Err(ProviderError::new(format!(
@@ -148,6 +165,8 @@ pub(super) fn searxng_params(query: &str, opts: &SearchOptions) -> Vec<(&'static
             Category::General => "general",
             Category::News => "news",
             Category::Science => "science",
+            Category::Images => "images",
+            Category::Code => "it",
         };
         params.push(("categories", name.to_string()));
     }
@@ -254,10 +273,13 @@ pub(super) fn brave_params(query: &str, opts: &SearchOptions) -> Vec<(&'static s
 }
 
 pub(super) fn brave_unsupported(opts: &SearchOptions) -> Vec<String> {
-    if opts.category == Some(Category::Science) {
-        return vec!["category=science (Brave supports general and news)".into()];
-    }
-    Vec::new()
+    let name = match opts.category {
+        Some(Category::Science) => "science",
+        Some(Category::Images) => "images",
+        Some(Category::Code) => "code",
+        _ => return Vec::new(),
+    };
+    vec![format!("category={name} (Brave supports general and news)")]
 }
 
 pub(super) async fn brave_request(

@@ -1,4 +1,5 @@
 use super::super::*;
+use super::images_code;
 use super::markup::{attr_value, blocks, collapse_ws, html_text, sel, tag_text};
 
 /// Browsers get scraped HTML; API engines get the descriptive agent string.
@@ -25,11 +26,24 @@ pub(in crate::web) enum Engine {
     HackerNews,
     Arxiv,
     OpenAlex,
+    CommonsImages,
+    Openverse,
+    GitHub,
+    StackOverflow,
+    Crates,
+    Npm,
 }
 
 const GENERAL: &[Engine] = &[Engine::DuckDuckGo, Engine::Brave, Engine::Wikipedia];
 const NEWS: &[Engine] = &[Engine::BingNews, Engine::HackerNews];
 const SCIENCE: &[Engine] = &[Engine::Arxiv, Engine::OpenAlex];
+const IMAGES: &[Engine] = &[Engine::CommonsImages, Engine::Openverse];
+const CODE: &[Engine] = &[
+    Engine::GitHub,
+    Engine::StackOverflow,
+    Engine::Crates,
+    Engine::Npm,
+];
 
 impl Engine {
     pub(in crate::web) fn for_category(category: Option<Category>) -> &'static [Engine] {
@@ -37,6 +51,8 @@ impl Engine {
             None | Some(Category::General) => GENERAL,
             Some(Category::News) => NEWS,
             Some(Category::Science) => SCIENCE,
+            Some(Category::Images) => IMAGES,
+            Some(Category::Code) => CODE,
         }
     }
 
@@ -49,16 +65,23 @@ impl Engine {
             Engine::HackerNews => "hacker news",
             Engine::Arxiv => "arxiv",
             Engine::OpenAlex => "openalex",
+            Engine::CommonsImages => "wikimedia commons",
+            Engine::Openverse => "openverse",
+            Engine::GitHub => "github",
+            Engine::StackOverflow => "stack overflow",
+            Engine::Crates => "crates.io",
+            Engine::Npm => "npm",
         }
     }
 
     /// How much a hit from this engine counts in the merged ranking. Wikipedia
-    /// answers every query with encyclopedia articles and Hacker News with
-    /// discussions, so they supplement the web engines rather than lead.
+    /// answers every query with encyclopedia articles, Hacker News with
+    /// discussions, and the package registries with name matches, so they
+    /// supplement the main engines rather than lead.
     pub(in crate::web) fn weight(self) -> f32 {
         match self {
             Engine::Wikipedia => WEIGHT_SUPPLEMENTARY,
-            Engine::HackerNews => WEIGHT_SUPPLEMENTARY,
+            Engine::HackerNews | Engine::Crates | Engine::Npm => WEIGHT_SUPPLEMENTARY,
             _ => 1.0,
         }
     }
@@ -81,6 +104,12 @@ impl Engine {
             Engine::HackerNews => "https://hn.algolia.com".into(),
             Engine::Arxiv => "https://export.arxiv.org".into(),
             Engine::OpenAlex => "https://api.openalex.org".into(),
+            Engine::CommonsImages => "https://commons.wikimedia.org".into(),
+            Engine::Openverse => "https://api.openverse.org".into(),
+            Engine::GitHub => "https://api.github.com".into(),
+            Engine::StackOverflow => "https://api.stackexchange.com".into(),
+            Engine::Crates => "https://crates.io".into(),
+            Engine::Npm => "https://registry.npmjs.org".into(),
         }
     }
 
@@ -100,6 +129,12 @@ impl Engine {
                 .header("Accept-Language", ACCEPT_LANGUAGE)
         };
         match self {
+            Engine::CommonsImages
+            | Engine::Openverse
+            | Engine::GitHub
+            | Engine::StackOverflow
+            | Engine::Crates
+            | Engine::Npm => images_code::fetch(self, client, base, query, opts).await,
             Engine::DuckDuckGo => {
                 let mut form = vec![("q", q), ("b", String::new())];
                 if let (Some(l), Some(c)) = (&opts.language, &opts.country) {
@@ -197,6 +232,12 @@ impl Engine {
             Engine::Wikipedia => parse_wikipedia(body, base)?,
             Engine::HackerNews => parse_hacker_news(body)?,
             Engine::OpenAlex => parse_openalex(body)?,
+            Engine::CommonsImages
+            | Engine::Openverse
+            | Engine::GitHub
+            | Engine::StackOverflow
+            | Engine::Crates
+            | Engine::Npm => images_code::parse(self, body)?,
         };
         if results.is_empty() && is_html_engine(self) && looks_like_challenge(text_of(body)?) {
             return Err("bot challenge page instead of results".into());
@@ -260,7 +301,7 @@ fn freshness_letter(f: Freshness) -> &'static str {
     }
 }
 
-fn freshness_secs(f: Freshness) -> i64 {
+pub(super) fn freshness_secs(f: Freshness) -> i64 {
     const DAY: i64 = 86_400;
     match f {
         Freshness::Day => DAY,
@@ -270,7 +311,7 @@ fn freshness_secs(f: Freshness) -> i64 {
     }
 }
 
-fn result(title: String, url: String, snippet: String) -> SearchResult {
+pub(super) fn result(title: String, url: String, snippet: String) -> SearchResult {
     SearchResult {
         domain: domain_of(&url),
         title,
@@ -283,7 +324,7 @@ fn result(title: String, url: String, snippet: String) -> SearchResult {
     }
 }
 
-fn truncate_chars(s: &str, max: usize) -> String {
+pub(super) fn truncate_chars(s: &str, max: usize) -> String {
     if s.chars().count() <= max {
         return s.to_string();
     }
@@ -443,7 +484,9 @@ fn parse_hacker_news(body: &Value) -> Result<Vec<SearchResult>, String> {
             let title = h["title"].as_str().filter(|t| !t.is_empty())?;
             let id = h["objectID"].as_str()?;
             let discussion = format!("https://news.ycombinator.com/item?id={id}");
-            let url = non_empty_str(&h["url"]).unwrap_or_else(|| discussion.clone());
+            let url = non_empty_str(&h["url"])
+                .filter(|u| u.starts_with("https://") || u.starts_with("http://"))
+                .unwrap_or_else(|| discussion.clone());
             let snippet = format!(
                 "{} points, {} comments on Hacker News ({discussion})",
                 h["points"].as_u64().unwrap_or(0),

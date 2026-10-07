@@ -7,6 +7,7 @@ use super::*;
 use tokio::task::JoinSet;
 
 mod engines;
+mod images_code;
 mod markup;
 #[cfg(test)]
 mod tests;
