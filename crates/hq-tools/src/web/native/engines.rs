@@ -8,8 +8,11 @@ pub(super) const BROWSER_USER_AGENT: &str =
 const DEFAULT_ACCEPT_LANGUAGE: &str = "en-US,en;q=0.9";
 const DDG_REFERER: &str = "https://html.duckduckgo.com/";
 /// Wikimedia throttles browser-like generic agents and asks API clients to say what they are.
-const WIKIMEDIA_USER_AGENT: &str =
-    concat!("HQ-Agent/", env!("CARGO_PKG_VERSION"), " (open-source agent hub; web_search)");
+const WIKIMEDIA_USER_AGENT: &str = concat!(
+    "HQ-Agent/",
+    env!("CARGO_PKG_VERSION"),
+    " (open-source agent hub; web_search)"
+);
 /// Same limits SearxNG applies to every result before merging.
 const TITLE_MAX_CHARS: usize = 200;
 const SNIPPET_MAX_CHARS: usize = 1200;
