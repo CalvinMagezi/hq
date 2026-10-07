@@ -239,7 +239,7 @@ working after its binary is replaced; restart it when `agents_working` and
 and starting it again, normally through the service manager, for example
 `systemctl restart hq-host`.
 
-Example service files (not installed by HQ yet):
+Example service files (not installed by HQ yet). On macOS use a LaunchAgent (a login-session job), not a LaunchDaemon: Claude Code's login lives in your Keychain, which a system daemon cannot reach. Keep the `hq` binary outside `~/Documents`, `~/Desktop` and `~/Downloads`, which launchd jobs may not read:
 
 ```
 # /etc/systemd/system/hq-host.service
@@ -331,5 +331,5 @@ locally.
 
 ## Not built yet
 
-Rule files for agents other than Claude Code and Codex, hooks for agents other than Claude Code, and agent-to-agent messaging. Provenance of anything adapted from herdr is recorded
+Rule files for agents other than Claude Code and Codex, and hooks, MCP config and sandbox-aware launching for agents other than Claude Code. Provenance of anything adapted from herdr is recorded
 in `docs/provenance/herdr.md`.
