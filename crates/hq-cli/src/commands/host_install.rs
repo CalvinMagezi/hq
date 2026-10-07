@@ -107,6 +107,35 @@ fn run(program: &str, args: &[&str]) -> Result<()> {
     Ok(())
 }
 
+/// Replaces a loaded LaunchAgent with the one at `plist`. launchd finishes
+/// unloading after `bootout` returns, and a `bootstrap` in that window fails
+/// with an I/O error, so wait for the old job to go and retry the load.
+fn reload_launch_agent(domain: &str, plist: &Path) -> Result<()> {
+    const POLL: std::time::Duration = std::time::Duration::from_millis(200);
+    const UNLOAD_WAIT: usize = 25;
+    const LOAD_TRIES: usize = 5;
+    let target = format!("{domain}/{LAUNCHD_LABEL}");
+    let loaded = || Command::new("launchctl").args(["print", &target]).output().is_ok_and(|o| o.status.success());
+    if loaded() {
+        let _ = run("launchctl", &["bootout", &target]);
+        for _ in 0..UNLOAD_WAIT {
+            if !loaded() {
+                break;
+            }
+            std::thread::sleep(POLL);
+        }
+    }
+    let mut last = None;
+    for _ in 0..LOAD_TRIES {
+        match run("launchctl", &["bootstrap", domain, &plist.to_string_lossy()]) {
+            Ok(()) => return Ok(()),
+            Err(e) => last = Some(e),
+        }
+        std::thread::sleep(POLL * 5);
+    }
+    Err(last.unwrap_or_else(|| anyhow::anyhow!("launchctl bootstrap failed")))
+}
+
 pub fn install() -> Result<()> {
     let home = home()?;
     let exe = service_binary(&home)?;
@@ -116,8 +145,7 @@ pub fn install() -> Result<()> {
         // SAFETY of the id: `id -u` is the current user's.
         let uid = String::from_utf8(Command::new("id").arg("-u").output()?.stdout)?.trim().to_string();
         let domain = format!("gui/{uid}");
-        let _ = run("launchctl", &["bootout", &format!("{domain}/{LAUNCHD_LABEL}")]);
-        run("launchctl", &["bootstrap", &domain, &path.to_string_lossy()])?;
+        reload_launch_agent(&domain, &path)?;
         println!("hq host installed as a LaunchAgent ({}); logs in ~/Library/Logs/hq-host.log", path.display());
     } else {
         let path = home.join(".config/systemd/user").join(SYSTEMD_UNIT);
