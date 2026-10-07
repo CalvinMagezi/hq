@@ -23,7 +23,7 @@ native capability. The only axis of fallback that remains is LLM
 concern (which LLM backend answers) from "harness" (which execution engine
 answers).
 
-Herdr (`docs/HERDR_HARNESS.md`) is unrelated and unaffected: it runs actual
+The host (`docs/AGENT_SESSIONS.md`) is unrelated and unaffected: it runs actual
 coding-agent CLIs (Claude Code, Codex, Cursor, …) as long-lived panes by
 deliberate, explicit user request, not as an automatic routing layer HQ's
 own responses moved through.

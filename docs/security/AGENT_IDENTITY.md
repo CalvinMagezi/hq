@@ -6,7 +6,7 @@ work) is attributed to a session HQ launched, not to a name the agent typed.
 
 ## How it works
 
-1. Set `herdr.agent_mcp_url` to the HQ MCP endpoint the agent's machine can
+1. Set `agent_host.agent_mcp_url` to the HQ MCP endpoint the agent's machine can
    reach (for example `https://hq.example.ts.net:8444/mcp`). Without it nothing
    below happens.
 2. When HQ launches a Claude Code session on the built-in host it mints a secret
@@ -32,7 +32,7 @@ work) is attributed to a session HQ launched, not to a name the agent typed.
 - It does not stop one session from reading another's token unless the sessions
   run under the host's process sandbox (the default on a built-in host, see
   `AGENT_HOST.md`), which hides the other sessions' MCP configs and the operator
-  token. With `herdr.sandbox.mode: none`, or on a host that cannot sandbox, every
+  token. With `agent_host.sandbox.mode: none`, or on a host that cannot sandbox, every
   config sits in one directory owned by the same user and a session that runs
   `cat` on its siblings' files can act as them.
 

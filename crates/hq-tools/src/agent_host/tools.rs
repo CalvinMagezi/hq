@@ -1,5 +1,5 @@
-//! MCP tools over Herdr hosts. They see every agent on a host, including ones
-//! a person started by hand. All are read-only except `herdr_send`, the one
+//! MCP tools over hosts. They see every agent on a host, including ones
+//! a person started by hand. All are read-only except `host_send`, the one
 //! way to prompt such an agent; sessions HQ launched go through
 //! `harness_session_*`.
 
@@ -14,18 +14,18 @@ use std::sync::Arc;
 
 const DEFAULT_READ_LINES: usize = 60;
 const MAX_READ_LINES: usize = 1000;
-/// Screen lines returned when `herdr_send` refuses text for a blocked agent.
+/// Screen lines returned when `host_send` refuses text for a blocked agent.
 const BLOCKED_SCREEN_LINES: usize = 40;
 
-pub struct HerdrHostsTool;
+pub struct HostListTool;
 
 #[async_trait]
-impl HqTool for HerdrHostsTool {
+impl HqTool for HostListTool {
     fn name(&self) -> &str {
-        "herdr_hosts"
+        "host_list"
     }
     fn description(&self) -> &str {
-        "List the machines HQ can run coding agents on through Herdr (this machine plus any configured remote such as a laptop) and whether each is reachable right now."
+        "List the machines HQ can run coding agents on through the host (this machine plus any configured remote such as a laptop) and whether each is reachable right now."
     }
     fn parameters(&self) -> Value {
         json!({ "type": "object", "properties": {} })
@@ -45,28 +45,28 @@ impl HqTool for HerdrHostsTool {
 
 fn host_status(h: &dyn HostBackend) -> Value {
     match h.version() {
-        Ok(version) => json!({ "host": h.name(), "reachable": true, "herdr_version": version }),
+        Ok(version) => json!({ "host": h.name(), "reachable": true, "host_version": version }),
         Err(e) => json!({ "host": h.name(), "reachable": false, "error": e.to_string() }),
     }
 }
 
-pub struct HerdrAgentsTool {
+pub struct HostAgentsTool {
     db: Arc<Database>,
 }
 
 #[async_trait]
-impl HqTool for HerdrAgentsTool {
+impl HqTool for HostAgentsTool {
     fn name(&self) -> &str {
-        "herdr_agents"
+        "host_agents"
     }
     fn description(&self) -> &str {
-        "List coding agents Herdr sees on a host (default: every host), with live status (idle, working, blocked, done), working directory and pane title. Includes agents a person started by hand; `hq_session_id` is set only for sessions HQ launched. Use herdr_read to look at one."
+        "List coding agents the host sees on a host (default: every host), with live status (idle, working, blocked, done), working directory and pane title. Includes agents a person started by hand; `hq_session_id` is set only for sessions HQ launched. Use host_read to look at one."
     }
     fn parameters(&self) -> Value {
         json!({
             "type": "object",
             "properties": {
-                "host": { "type": "string", "description": "Host name from herdr_hosts. Omit for all hosts." }
+                "host": { "type": "string", "description": "Host name from host_list. Omit for all hosts." }
             }
         })
     }
@@ -122,15 +122,15 @@ fn agents_on(h: &dyn HostBackend, managed: &[(String, String, String)]) -> Value
     json!({ "host": h.name(), "reachable": true, "agents": rows })
 }
 
-pub struct HerdrReadTool;
+pub struct HostReadTool;
 
 #[async_trait]
-impl HqTool for HerdrReadTool {
+impl HqTool for HostReadTool {
     fn name(&self) -> &str {
-        "herdr_read"
+        "host_read"
     }
     fn description(&self) -> &str {
-        "Read recent terminal output of any agent Herdr shows on a host, by agent name or pane id from herdr_agents. Read-only; does not disturb the agent."
+        "Read recent terminal output of any agent the host shows on a host, by agent name or pane id from host_agents. Read-only; does not disturb the agent."
     }
     fn parameters(&self) -> Value {
         json!({
@@ -165,21 +165,21 @@ impl HqTool for HerdrReadTool {
     }
 }
 
-pub struct HerdrSendTool;
+pub struct HostSendTool;
 
 #[async_trait]
-impl HqTool for HerdrSendTool {
+impl HqTool for HostSendTool {
     fn name(&self) -> &str {
-        "herdr_send"
+        "host_send"
     }
     fn description(&self) -> &str {
-        "Prompt or steer an existing agent on a Herdr host, including one a person started by hand (pane id or agent name from herdr_agents). Pass `text` to submit a prompt or `keys` to press logical keys (enter, esc, down, ctrl+c); exactly one. Text is refused while the agent is blocked at a dialog; the screen comes back so you can answer it with keys. For sessions HQ launched, prefer harness_session_send."
+        "Prompt or steer an existing agent on a host, including one a person started by hand (pane id or agent name from host_agents). Pass `text` to submit a prompt or `keys` to press logical keys (enter, esc, down, ctrl+c); exactly one. Text is refused while the agent is blocked at a dialog; the screen comes back so you can answer it with keys. For sessions HQ launched, prefer harness_session_send."
     }
     fn parameters(&self) -> Value {
         json!({
             "type": "object",
             "properties": {
-                "host": { "type": "string", "description": "Host name from herdr_hosts" },
+                "host": { "type": "string", "description": "Host name from host_list" },
                 "target": { "type": "string", "description": "Pane id (e.g. 'w37:p4') or agent name" },
                 "text": { "type": "string", "description": "Prompt to submit" },
                 "keys": { "type": "array", "items": { "type": "string" }, "description": "Logical keys to press instead of text, e.g. [\"down\", \"enter\"]" }
@@ -202,7 +202,7 @@ impl HqTool for HerdrSendTool {
         let keys = arg_str_list(&args, "keys");
         crate::harness_session::spawned_may_target(&args, &target)?;
         if host_arg.is_empty() || target.is_empty() {
-            bail!("`host` and `target` are required; herdr_hosts and herdr_agents list them");
+            bail!("`host` and `target` are required; host_list and host_agents list them");
         }
         if text.is_empty() == keys.is_empty() {
             bail!("pass exactly one of `text` (a prompt) or `keys` (logical keys)");
@@ -299,7 +299,7 @@ impl HqTool for HostCheckTool {
     fn parameters(&self) -> Value {
         json!({
             "type": "object",
-            "properties": { "host": { "type": "string", "description": "The host name from host_add or herdr_hosts" } },
+            "properties": { "host": { "type": "string", "description": "The host name from host_add or host_list" } },
             "required": ["host"]
         })
     }
@@ -318,13 +318,13 @@ impl HqTool for HostCheckTool {
     }
 }
 
-pub fn create_herdr_tools(db: Arc<Database>) -> Vec<Box<dyn HqTool>> {
+pub fn create_host_tools(db: Arc<Database>) -> Vec<Box<dyn HqTool>> {
     vec![
         Box::new(HostAddTool),
         Box::new(HostCheckTool),
-        Box::new(HerdrHostsTool),
-        Box::new(HerdrAgentsTool { db }),
-        Box::new(HerdrReadTool),
-        Box::new(HerdrSendTool),
+        Box::new(HostListTool),
+        Box::new(HostAgentsTool { db }),
+        Box::new(HostReadTool),
+        Box::new(HostSendTool),
     ]
 }

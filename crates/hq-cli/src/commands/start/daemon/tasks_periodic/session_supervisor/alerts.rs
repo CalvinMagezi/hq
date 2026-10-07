@@ -19,7 +19,7 @@ pub(super) fn notify_dismiss_cap(db: &Database, row: &registry::HarnessSessionRo
 
 /// An agent that finished its turn and sits waiting for the next instruction
 /// never exits, so without this the operator would only hear about it when the
-/// session is eventually stopped. Herdr reports `done` for a finished turn no
+/// session is eventually stopped. The host reports `done` for a finished turn no
 /// one has looked at yet.
 pub(super) fn alert_finished(
     db: &Database,

@@ -74,20 +74,20 @@ pub(crate) fn broadcast_sync(state: &WsState, thread_id: &str) {
     state.broadcast(&json!({"type": "sessions:sync", "thread_id": thread_id}).to_string());
 }
 
-fn herdr_config(state: &WsState) -> hq_core::config::HerdrConfig {
+fn agent_host_config(state: &WsState) -> hq_core::config::AgentHostConfig {
     hq_core::config::HqConfig::load()
         .ok()
-        .map(|c| c.herdr)
-        .or_else(|| state.hq_config.as_ref().map(|c| c.herdr.clone()))
+        .map(|c| c.agent_host)
+        .or_else(|| state.hq_config.as_ref().map(|c| c.agent_host.clone()))
         .unwrap_or_default()
 }
 
-fn checkin_minutes(cfg: &hq_core::config::HerdrConfig) -> u64 {
+fn checkin_minutes(cfg: &hq_core::config::AgentHostConfig) -> u64 {
     cfg.driver_checkin_minutes.max(1)
 }
 
 async fn drive_due(state: &Arc<WsState>) {
-    let cfg = herdr_config(state);
+    let cfg = agent_host_config(state);
     let every = checkin_minutes(&cfg);
     let due = match state
         .db
@@ -108,7 +108,7 @@ async fn handle_due(
     state: &Arc<WsState>,
     mut row: HarnessSessionRow,
     every: u64,
-    cfg: &hq_core::config::HerdrConfig,
+    cfg: &hq_core::config::AgentHostConfig,
 ) {
     let Some(thread) = row.owner_thread.clone() else {
         return;
@@ -305,7 +305,7 @@ fn driver_guard(
     row: &HarnessSessionRow,
     task: Option<&Task>,
     reason: &str,
-    cfg: &hq_core::config::HerdrConfig,
+    cfg: &hq_core::config::AgentHostConfig,
 ) -> Option<String> {
     if row.status != registry::STATUS_RUNNING {
         return Some(registry::SESSION_ENDED.to_string());

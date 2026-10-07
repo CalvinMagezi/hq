@@ -2,7 +2,7 @@
 //! cleanly instead of leaving a pane that waits for an agent forever.
 
 use super::Harness;
-use crate::herdr::{AgentInfo, HostBackend, Launched};
+use crate::agent_host::{AgentInfo, HostBackend, Launched};
 use anyhow::{Result, bail};
 use std::ffi::OsString;
 use std::path::{Path, PathBuf};
@@ -137,7 +137,7 @@ fn binary_found(wanted: &str, roots: &[PathBuf]) -> bool {
     which::which_in(wanted, Some(path), Path::new("/")).is_ok()
 }
 
-/// The agent Herdr reports for a launch, once it is past `launch_pending`.
+/// The agent the host reports for a launch, once it is past `launch_pending`.
 /// When it never gets there within the host's launch bound the workspace is
 /// closed and the call fails, so nothing is left running and nothing is
 /// recorded. `began` is when the launch started: the time its own start wait
@@ -216,15 +216,15 @@ fn quoted_screen(screen: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::herdr::scripted::ScriptedHost as HerdrHost;
-    use hq_core::config::HerdrConfig;
+    use crate::agent_host::scripted::ScriptedHost;
+    use hq_core::config::AgentHostConfig;
     use std::os::unix::fs::PermissionsExt;
 
     fn with_command(command: &str, env: &str) -> Harness {
         let yaml = format!(
             "harness_profiles:\n  p:\n    base: claude-code\n    command: {command}\n    env:\n      {env}\n"
         );
-        let cfg: HerdrConfig = serde_yaml::from_str(&yaml).unwrap();
+        let cfg: AgentHostConfig = serde_yaml::from_str(&yaml).unwrap();
         super::super::resolve_in(&cfg, "p").unwrap()
     }
 
@@ -272,14 +272,14 @@ mod tests {
 
     #[test]
     fn the_built_in_binary_is_checked_when_the_profile_has_no_command() {
-        let cfg = HerdrConfig::default();
+        let cfg = AgentHostConfig::default();
         let h = super::super::resolve_in(&cfg, "agy").unwrap();
         assert_eq!(plain_binary(&h).as_deref(), Some("agy"));
     }
 
     #[test]
     fn shell_syntax_in_a_command_is_never_a_hard_failure() {
-        let host = HerdrHost::new("/nonexistent/herdr");
+        let host = ScriptedHost::new("/nonexistent/host");
         assert!(host.checks_binaries());
         for command in [
             "CLAUDE_CONFIG_DIR=/nowhere definitely-missing-xyz",

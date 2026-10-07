@@ -13,7 +13,7 @@ use std::path::Path;
 use std::sync::Arc;
 
 use super::{GoalText, Liveness, NewWatch, SpawnRequest};
-use crate::herdr::{Host, HostBackend};
+use crate::agent_host::{Host, HostBackend};
 use crate::tasks::{Placement, create_task_in};
 use crate::util::generate_id;
 
@@ -44,7 +44,7 @@ pub struct HandoffRequest {
     pub space_id: String,
     pub initiative: String,
     /// Whether a session this handoff starts is driven by HQ when its goal
-    /// allows it (`herdr.drive_new_watches`, unless the caller opts out).
+    /// allows it (`agent_host.drive_new_watches`, unless the caller opts out).
     pub drive_new: bool,
     pub drive_opted_out: bool,
 }
@@ -161,7 +161,7 @@ fn live_session_for(
         if name == host.name() {
             Ok(host.clone())
         } else {
-            crate::herdr::host(Some(name))
+            crate::agent_host::host(Some(name))
         }
     });
     Ok(rows
@@ -228,7 +228,7 @@ fn existing_report(
 /// The whole handoff runs on its own task: an MCP client that disconnects
 /// mid-launch drops this future, and the thread, task and process-wide lock
 /// must still be settled. The launch itself is bounded below the client's
-/// transport limit (`HerdrHost::launch_bound`), so a caller normally gets the
+/// transport limit (`ScriptedHost::launch_bound`), so a caller normally gets the
 /// real error rather than a timeout.
 pub async fn handoff(
     vault_path: &Path,
@@ -261,7 +261,7 @@ async fn run_handoff(
 
     let tid = task.id.clone();
     let (db2, host2) = (db.clone(), host.clone());
-    let found = crate::herdr::blocking(move || live_session_for(&db2, &host2, &tid)).await??;
+    let found = crate::agent_host::blocking(move || live_session_for(&db2, &host2, &tid)).await??;
     if let Some(live) = found {
         return Ok(existing_report(&task, created, live));
     }

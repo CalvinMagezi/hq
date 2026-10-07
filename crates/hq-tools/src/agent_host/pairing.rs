@@ -19,6 +19,9 @@ const MAX_NAME_LEN: usize = 32;
 const MAX_ADDR_LEN: usize = 255;
 const MAX_USER_LEN: usize = 64;
 const DIR_MODE: u32 = 0o700;
+/// The config section that lists hosts, and the name configs used before it was renamed.
+const SECTION: &str = "agent_host:";
+const LEGACY_SECTION: &str = "herdr:";
 
 /// Who a machine is and how to reach it.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -196,7 +199,7 @@ fn is_blank_or_comment(line: &str) -> bool {
     t.is_empty() || t.starts_with('#')
 }
 
-/// `text` with host `name` added under `herdr.hosts`, everything else left as
+/// `text` with host `name` added under `agent_host.hosts`, everything else left as
 /// written (comments, order, unrelated keys, defaults not pinned). None when the
 /// config already holds exactly this entry. An entry for the same name with a
 /// different address or key is replaced.
@@ -207,20 +210,29 @@ pub(crate) fn insert_host(text: &str, name: &str, ssh: &str, identity: &str) -> 
         let inner = " ".repeat(child + 2);
         vec![format!("{pad}{name}:"), format!("{inner}ssh: \"{ssh}\""), format!("{inner}identity_file: \"{identity}\"")]
     };
-    let top = lines.iter().position(|l| l.starts_with("herdr:"));
+    // A config written before the section was renamed gets its heading migrated.
+    let top = lines
+        .iter()
+        .position(|l| l.starts_with(SECTION) || l.starts_with(LEGACY_SECTION));
     let mut out: Vec<String> = lines.iter().map(|l| l.to_string()).collect();
+    if let Some(h) = top
+        && lines[h].starts_with(LEGACY_SECTION)
+    {
+        out[h] = lines[h].replacen(LEGACY_SECTION, SECTION, 1);
+    }
     match top {
         None => {
             if !out.is_empty() && !out.last().is_some_and(|l| l.is_empty()) {
                 out.push(String::new());
             }
-            out.push("herdr:".into());
+            out.push(SECTION.into());
             out.push("  hosts:".into());
             out.extend(entry(4));
         }
         Some(h) => {
-            if lines[h].trim_start_matches("herdr:").trim().chars().next().is_some_and(|c| c != '#') {
-                bail!("`herdr:` in the config is written inline; add the host by hand");
+            let rest = out[h].trim_start_matches(SECTION).trim();
+            if rest.chars().next().is_some_and(|c| c != '#') {
+                bail!("`{SECTION}` in the config is written inline; add the host by hand");
             }
             let end = (h + 1..lines.len()).find(|&i| !lines[i].trim().is_empty() && indent_of(lines[i]) == 0).unwrap_or(lines.len());
             let hosts = (h + 1..end).find(|&i| lines[i].trim_start().starts_with("hosts:") && !lines[i].trim_start().starts_with('#'));
@@ -261,7 +273,7 @@ pub(crate) fn insert_host(text: &str, name: &str, ssh: &str, identity: &str) -> 
     let mut updated = out.join("\n");
     updated.push('\n');
     let parsed: serde_yaml::Value = serde_yaml::from_str(&updated).context("the edited config is not valid YAML")?;
-    let got = parsed["herdr"]["hosts"][name]["ssh"].as_str();
+    let got = parsed["agent_host"]["hosts"][name]["ssh"].as_str();
     if got != Some(ssh) {
         bail!("could not add the host to the config cleanly; add it by hand");
     }

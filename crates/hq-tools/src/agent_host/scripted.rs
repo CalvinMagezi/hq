@@ -1,4 +1,4 @@
-//! A host driven by a script that answers the way the retired herdr CLI did
+//! A host driven by a script that answers the way the retired host protocol did
 //! (JSON replies per command). It exists only as a test double: the harness
 //! session and supervisor tests script a host's replies with it, and the real
 //! backend is `NativeBackend`.
@@ -6,7 +6,7 @@
 use super::backend::HostBackend;
 use super::transport::{RawOutput, run_with_deadline};
 use super::{
-    AgentInfo, AgentStatus, HerdrError, Host, INVALID_KEYS_CODE, LaunchRequest, Launched, PromptOutcome,
+    AgentInfo, AgentStatus, AgentHostError, Host, INVALID_KEYS_CODE, LaunchRequest, Launched, PromptOutcome,
     validate_keys,
 };
 use serde_json::Value;
@@ -18,25 +18,25 @@ use std::time::{Duration, Instant};
 const MIN_WAIT_MS: u64 = 3_000;
 const MAX_WAIT_MS: u64 = 300_000;
 
-/// Extra time granted to the process beyond a Herdr-side wait, so Herdr's own
+/// Extra time granted to the process beyond a host-side wait, so the host's own
 /// timeout error arrives instead of ours.
 const WAIT_MARGIN: Duration = Duration::from_secs(15);
 
 const READ_SOURCE: &str = "recent-unwrapped";
 
-/// Herdr refuses a `recent` read of more than ~25 lines while an agent runs on
+/// The host refuses a `recent` read of more than ~25 lines while an agent runs on
 /// the alternate screen; `visible` has no such limit and is the live screen.
 const VISIBLE_SOURCE: &str = "visible";
 const AGENT_NOT_IDLE_CODE: &str = "agent_not_idle";
 
-/// Herdr's own stall detector fires after five seconds without activity, so a
+/// The host's own stall detector fires after five seconds without activity, so a
 /// confirmation wait has to outlast it.
 const SUBMIT_CONFIRM: Duration = Duration::from_secs(10);
 
 /// Pane lines quoted when a wrapper never turns into a recognizable agent.
 const UNDETECTED_SCREEN_LINES: usize = 20;
 
-/// How often a wrapper launch asks whether Herdr has recognized an agent yet.
+/// How often a wrapper launch asks whether the host has recognized an agent yet.
 const DETECT_POLL: Duration = Duration::from_millis(500);
 
 
@@ -81,7 +81,7 @@ impl ScriptedHost {
         self
     }
 
-    /// For tests that drive a fake herdr whose harness binaries do not exist.
+    /// For tests that drive a fake host whose harness binaries do not exist.
     pub fn without_binary_preflight(mut self) -> Self {
         self.binary_preflight = false;
         self
@@ -94,31 +94,31 @@ impl ScriptedHost {
         self
     }
 
-    fn run(&self, args: &[&str], timeout: Duration) -> Result<RawOutput, HerdrError> {
+    fn run(&self, args: &[&str], timeout: Duration) -> Result<RawOutput, AgentHostError> {
         let mut command = Command::new(&self.binary);
         command.args(args);
-        run_with_deadline(&mut command, None, timeout).map_err(|detail| HerdrError::Unreachable {
+        run_with_deadline(&mut command, None, timeout).map_err(|detail| AgentHostError::Unreachable {
             host: self.name.clone(),
             detail,
         })
     }
 
-    /// Herdr prints `{"id":..,"result":{..}}` on success and
+    /// The host prints `{"id":..,"result":{..}}` on success and
     /// `{"error":{"code":..,"message":..}}` on failure.
-    fn json(&self, args: &[&str], timeout: Duration) -> Result<Value, HerdrError> {
+    fn json(&self, args: &[&str], timeout: Duration) -> Result<Value, AgentHostError> {
         let out = self.run(args, timeout)?;
         if out.exit_code != 0 {
             return Err(api_error(&out));
         }
         let value: Value =
-            serde_json::from_str(out.stdout.trim()).map_err(|e| HerdrError::Api {
+            serde_json::from_str(out.stdout.trim()).map_err(|e| AgentHostError::Api {
                 code: "bad_response".into(),
                 message: format!("not JSON ({e}): {}", truncate(&out.stdout, 200)),
             })?;
         Ok(value.get("result").cloned().unwrap_or(value))
     }
 
-    fn text(&self, args: &[&str], timeout: Duration) -> Result<String, HerdrError> {
+    fn text(&self, args: &[&str], timeout: Duration) -> Result<String, AgentHostError> {
         let out = self.run(args, timeout)?;
         if out.exit_code != 0 {
             return Err(api_error(&out));
@@ -126,7 +126,7 @@ impl ScriptedHost {
         Ok(out.stdout)
     }
 
-    pub fn version(&self) -> Result<String, HerdrError> {
+    pub fn version(&self) -> Result<String, AgentHostError> {
         let out = self.text(&["status"], self.command_timeout)?;
         Ok(out
             .lines()
@@ -136,7 +136,7 @@ impl ScriptedHost {
             .to_string())
     }
 
-    pub fn agents(&self) -> Result<Vec<AgentInfo>, HerdrError> {
+    pub fn agents(&self) -> Result<Vec<AgentInfo>, AgentHostError> {
         let result = self.json(&["agent", "list"], self.command_timeout)?;
         Ok(result
             .get("agents")
@@ -146,7 +146,7 @@ impl ScriptedHost {
     }
 
     /// `Ok(None)` means the host answered and no such agent exists.
-    pub fn agent(&self, target: &str) -> Result<Option<AgentInfo>, HerdrError> {
+    pub fn agent(&self, target: &str) -> Result<Option<AgentInfo>, AgentHostError> {
         match self.json(&["agent", "get", target], self.command_timeout) {
             Ok(result) => Ok(result.get("agent").and_then(agent_from_json)),
             Err(e) if e.code() == Some("agent_not_found") => Ok(None),
@@ -156,7 +156,7 @@ impl ScriptedHost {
 
     /// Opens a workspace and starts the agent in its root pane. A workspace
     /// per session keeps each one closable without touching anyone else's.
-    pub fn launch(&self, req: &LaunchRequest) -> Result<Launched, HerdrError> {
+    pub fn launch(&self, req: &LaunchRequest) -> Result<Launched, AgentHostError> {
         let mut create = vec![
             "workspace",
             "create",
@@ -186,27 +186,27 @@ impl ScriptedHost {
 
     /// Closes a workspace whose launch failed and returns the error to report,
     /// saying so if the close failed too, so nothing is left behind silently.
-    fn abandon(&self, workspace_id: &str, error: HerdrError) -> HerdrError {
+    fn abandon(&self, workspace_id: &str, error: AgentHostError) -> AgentHostError {
         let Err(close) = self.close_workspace(workspace_id) else {
             return error;
         };
         let note =
             format!("; workspace {workspace_id} could not be closed ({close}), close it by hand");
         match error {
-            HerdrError::Api { code, message } => HerdrError::Api {
+            AgentHostError::Api { code, message } => AgentHostError::Api {
                 code,
                 message: message + &note,
             },
-            HerdrError::Unreachable { host, detail } => HerdrError::Unreachable {
+            AgentHostError::Unreachable { host, detail } => AgentHostError::Unreachable {
                 host,
                 detail: detail + &note,
             },
         }
     }
 
-    /// `herdr agent start`; `Ok(false)` when the agent is up but blocked on a
+    /// `agent start`; `Ok(false)` when the agent is up but blocked on a
     /// dialog before its prompt.
-    fn start_native(&self, req: &LaunchRequest, pane_id: &str) -> Result<bool, HerdrError> {
+    fn start_native(&self, req: &LaunchRequest, pane_id: &str) -> Result<bool, AgentHostError> {
         let start_ms = clamp_ms(req.start_timeout).to_string();
         let mut start = vec![
             "agent",
@@ -231,14 +231,14 @@ impl ScriptedHost {
     }
 
     /// Types `command` and its arguments into the pane's shell (`pane run`
-    /// presses Enter in the same write), waits for Herdr to recognize the agent
+    /// presses Enter in the same write), waits for the host to recognize the agent
     /// that appears, and names it so every later call can address it.
     fn start_wrapped(
         &self,
         req: &LaunchRequest,
         pane_id: &str,
         command: &str,
-    ) -> Result<bool, HerdrError> {
+    ) -> Result<bool, AgentHostError> {
         let deadline = Instant::now() + req.start_timeout;
         let line = shell_line(command, &req.args);
         // `pane run` prints nothing on success, so there is no JSON to parse.
@@ -247,10 +247,10 @@ impl ScriptedHost {
             let screen = self
                 .read(pane_id, UNDETECTED_SCREEN_LINES)
                 .unwrap_or_default();
-            return Err(HerdrError::Api {
+            return Err(AgentHostError::Api {
                 code: "agent_not_detected".into(),
                 message: format!(
-                    "Herdr found no {} agent after running `{line}`; the command must end up running that CLI. Screen:\n{}",
+                    "The host found no {} agent after running `{line}`; the command must end up running that CLI. Screen:\n{}",
                     req.kind,
                     screen.trim_end()
                 ),
@@ -272,10 +272,10 @@ impl ScriptedHost {
         }
     }
 
-    /// True once Herdr reports any agent in the pane, false if `deadline`
+    /// True once the host reports any agent in the pane, false if `deadline`
     /// passes first. A status of `unknown` still counts: the agent is there,
-    /// Herdr just has not classified it yet.
-    fn await_agent(&self, pane_id: &str, deadline: Instant) -> Result<bool, HerdrError> {
+    /// The host just has not classified it yet.
+    fn await_agent(&self, pane_id: &str, deadline: Instant) -> Result<bool, AgentHostError> {
         loop {
             if self.agent(pane_id)?.is_some() {
                 return Ok(true);
@@ -287,14 +287,14 @@ impl ScriptedHost {
         }
     }
 
-    /// Polls until Herdr reports the agent past its launch (see
+    /// Polls until the host reports the agent past its launch (see
     /// `AgentInfo::is_started`) or `within` runs out, and returns the last
     /// observation either way. At least one poll is made.
     pub fn await_started(
         &self,
         name: &str,
         within: Duration,
-    ) -> Result<Option<AgentInfo>, HerdrError> {
+    ) -> Result<Option<AgentInfo>, AgentHostError> {
         let deadline = Instant::now() + within;
         loop {
             let seen = self.agent(name)?;
@@ -311,7 +311,7 @@ impl ScriptedHost {
         pane_id: String,
         name: &str,
         ready: bool,
-    ) -> Result<Launched, HerdrError> {
+    ) -> Result<Launched, AgentHostError> {
         let agent = self.agent(name)?;
         Ok(Launched {
             workspace_id,
@@ -328,7 +328,7 @@ impl ScriptedHost {
         target: &str,
         text: &str,
         wait: Option<Duration>,
-    ) -> Result<PromptOutcome, HerdrError> {
+    ) -> Result<PromptOutcome, AgentHostError> {
         let safe = option_safe(text);
         let mut args = vec!["agent", "prompt", target, &safe];
         let ms = wait.map(|d| clamp_ms(d).to_string());
@@ -341,10 +341,10 @@ impl ScriptedHost {
                 .get("agent")
                 .and_then(agent_from_json)
                 .map_or(PromptOutcome::Submitted, PromptOutcome::Settled)),
-            Err(HerdrError::Api { code, message }) if code == "agent_prompt_stalled" => {
+            Err(AgentHostError::Api { code, message }) if code == "agent_prompt_stalled" => {
                 Ok(PromptOutcome::Stalled(message))
             }
-            Err(HerdrError::Api { code, message }) if code == "timeout" => {
+            Err(AgentHostError::Api { code, message }) if code == "timeout" => {
                 Ok(PromptOutcome::TimedOut(message))
             }
             Err(e) => Err(e),
@@ -353,10 +353,10 @@ impl ScriptedHost {
 
     /// Submits a prompt and confirms the agent reacted. `agent prompt` sends the
     /// text and Enter together, but a TUI that is not listening yet can swallow
-    /// the Enter and leave the text sitting in its input box. Herdr reports that
+    /// the Enter and leave the text sitting in its input box. The host reports that
     /// as a stall, so press Enter once more. On an empty input Enter does
     /// nothing, which makes the retry safe when the agent had simply finished.
-    pub fn submit(&self, target: &str, text: &str) -> Result<PromptOutcome, HerdrError> {
+    pub fn submit(&self, target: &str, text: &str) -> Result<PromptOutcome, AgentHostError> {
         let safe = option_safe(text);
         let ms = clamp_ms(SUBMIT_CONFIRM).to_string();
         let args = [
@@ -376,11 +376,11 @@ impl ScriptedHost {
         ];
         match self.json(&args, SUBMIT_CONFIRM + WAIT_MARGIN) {
             Ok(_) => Ok(PromptOutcome::Submitted),
-            Err(HerdrError::Api { code, .. }) if code == "agent_prompt_stalled" => {
+            Err(AgentHostError::Api { code, .. }) if code == "agent_prompt_stalled" => {
                 self.send_keys(target, &["enter".to_string()])?;
                 Ok(PromptOutcome::Resubmitted)
             }
-            Err(HerdrError::Api { code, message }) if code == "timeout" => {
+            Err(AgentHostError::Api { code, message }) if code == "timeout" => {
                 Ok(PromptOutcome::TimedOut(message))
             }
             Err(e) => Err(e),
@@ -388,8 +388,8 @@ impl ScriptedHost {
     }
 
     /// Logical keys (`enter`, `esc`, `down`, `ctrl+c`) for answering a dialog.
-    pub fn send_keys(&self, target: &str, keys: &[String]) -> Result<(), HerdrError> {
-        validate_keys(keys).map_err(|message| HerdrError::Api {
+    pub fn send_keys(&self, target: &str, keys: &[String]) -> Result<(), AgentHostError> {
+        validate_keys(keys).map_err(|message| AgentHostError::Api {
             code: INVALID_KEYS_CODE.to_string(),
             message,
         })?;
@@ -399,18 +399,18 @@ impl ScriptedHost {
     }
 
     /// Types text into a pane without pressing Enter.
-    pub fn send_text(&self, pane_id: &str, text: &str) -> Result<(), HerdrError> {
+    pub fn send_text(&self, pane_id: &str, text: &str) -> Result<(), AgentHostError> {
         self.json(&["pane", "send-text", pane_id, text], self.command_timeout)
             .map(|_| ())
     }
 
     /// Recent output with soft wraps joined. Works for any pane id, so it also
     /// reads agents a person started.
-    pub fn read(&self, target: &str, lines: usize) -> Result<String, HerdrError> {
+    pub fn read(&self, target: &str, lines: usize) -> Result<String, AgentHostError> {
         self.read_sourced(target, lines).map(|(text, _)| text)
     }
 
-    /// `read` plus the herdr `--source` that produced the text. A working
+    /// `read` plus the `--source` that produced the text. A working
     /// agent refuses a deep `recent` read (`agent_not_idle`), so that one
     /// error, and only it, is retried once as a `visible` read. Reads are
     /// idempotent, and the retry is a separate logical call from the
@@ -419,17 +419,17 @@ impl ScriptedHost {
         &self,
         target: &str,
         lines: usize,
-    ) -> Result<(String, &'static str), HerdrError> {
+    ) -> Result<(String, &'static str), AgentHostError> {
         match self.read_from(target, lines, READ_SOURCE) {
             Ok(text) => Ok((text, READ_SOURCE)),
-            Err(HerdrError::Api { code, .. }) if code == AGENT_NOT_IDLE_CODE => self
+            Err(AgentHostError::Api { code, .. }) if code == AGENT_NOT_IDLE_CODE => self
                 .read_from(target, lines, VISIBLE_SOURCE)
                 .map(|text| (text, VISIBLE_SOURCE)),
             Err(e) => Err(e),
         }
     }
 
-    fn read_from(&self, target: &str, lines: usize, source: &str) -> Result<String, HerdrError> {
+    fn read_from(&self, target: &str, lines: usize, source: &str) -> Result<String, AgentHostError> {
         let n = lines.to_string();
         self.text(
             &["agent", "read", target, "--source", source, "--lines", &n],
@@ -442,7 +442,7 @@ impl ScriptedHost {
         target: &str,
         until: &[AgentStatus],
         timeout: Duration,
-    ) -> Result<AgentInfo, HerdrError> {
+    ) -> Result<AgentInfo, AgentHostError> {
         let ms = clamp_ms(timeout).to_string();
         let mut args = vec!["agent", "wait", target];
         for status in until {
@@ -453,13 +453,13 @@ impl ScriptedHost {
         result
             .get("agent")
             .and_then(agent_from_json)
-            .ok_or_else(|| HerdrError::Api {
+            .ok_or_else(|| AgentHostError::Api {
                 code: "bad_response".into(),
                 message: "wait returned no agent".into(),
             })
     }
 
-    pub fn close_workspace(&self, workspace_id: &str) -> Result<(), HerdrError> {
+    pub fn close_workspace(&self, workspace_id: &str) -> Result<(), AgentHostError> {
         self.json(&["workspace", "close", workspace_id], self.command_timeout)
             .map(|_| ())
     }
@@ -477,7 +477,7 @@ impl ScriptedHost {
     }
 }
 
-/// Text starting with `-` would be read as an option by Herdr's parser, so it
+/// Text starting with `-` would be read as an option by the host's parser, so it
 /// gets a leading space.
 fn option_safe(text: &str) -> String {
     if text.starts_with('-') {
@@ -518,26 +518,26 @@ fn truncate(s: &str, max: usize) -> String {
     s.chars().take(max).collect()
 }
 
-fn str_at(v: &Value, path: &[&str]) -> Result<String, HerdrError> {
+fn str_at(v: &Value, path: &[&str]) -> Result<String, AgentHostError> {
     let mut cur = v;
     for key in path {
         cur = cur.get(*key).unwrap_or(&Value::Null);
     }
     cur.as_str()
         .map(str::to_string)
-        .ok_or_else(|| HerdrError::Api {
+        .ok_or_else(|| AgentHostError::Api {
             code: "bad_response".into(),
             message: format!("missing {}", path.join(".")),
         })
 }
 
-fn api_error(out: &RawOutput) -> HerdrError {
+fn api_error(out: &RawOutput) -> AgentHostError {
     for stream in [&out.stderr, &out.stdout] {
         let parsed: Option<Value> = serde_json::from_str(stream.trim()).ok();
         let Some(err) = parsed.as_ref().and_then(|v| v.get("error")) else {
             continue;
         };
-        return HerdrError::Api {
+        return AgentHostError::Api {
             code: err
                 .get("code")
                 .and_then(Value::as_str)
@@ -550,7 +550,7 @@ fn api_error(out: &RawOutput) -> HerdrError {
                 .to_string(),
         };
     }
-    HerdrError::Api {
+    AgentHostError::Api {
         code: format!("exit_{}", out.exit_code),
         message: truncate(&format!("{} {}", out.stderr.trim(), out.stdout.trim()), 300),
     }
@@ -567,19 +567,19 @@ impl HostBackend for ScriptedHost {
     fn launch_bound(&self) -> Duration {
         ScriptedHost::launch_bound(self)
     }
-    fn version(&self) -> Result<String, HerdrError> {
+    fn version(&self) -> Result<String, AgentHostError> {
         ScriptedHost::version(self)
     }
-    fn agents(&self) -> Result<Vec<AgentInfo>, HerdrError> {
+    fn agents(&self) -> Result<Vec<AgentInfo>, AgentHostError> {
         ScriptedHost::agents(self)
     }
-    fn agent(&self, target: &str) -> Result<Option<AgentInfo>, HerdrError> {
+    fn agent(&self, target: &str) -> Result<Option<AgentInfo>, AgentHostError> {
         ScriptedHost::agent(self, target)
     }
-    fn launch(&self, req: &LaunchRequest) -> Result<Launched, HerdrError> {
+    fn launch(&self, req: &LaunchRequest) -> Result<Launched, AgentHostError> {
         ScriptedHost::launch(self, req)
     }
-    fn await_started(&self, name: &str, within: Duration) -> Result<Option<AgentInfo>, HerdrError> {
+    fn await_started(&self, name: &str, within: Duration) -> Result<Option<AgentInfo>, AgentHostError> {
         ScriptedHost::await_started(self, name, within)
     }
     fn prompt(
@@ -587,26 +587,26 @@ impl HostBackend for ScriptedHost {
         target: &str,
         text: &str,
         wait: Option<Duration>,
-    ) -> Result<PromptOutcome, HerdrError> {
+    ) -> Result<PromptOutcome, AgentHostError> {
         ScriptedHost::prompt(self, target, text, wait)
     }
-    fn submit(&self, target: &str, text: &str) -> Result<PromptOutcome, HerdrError> {
+    fn submit(&self, target: &str, text: &str) -> Result<PromptOutcome, AgentHostError> {
         ScriptedHost::submit(self, target, text)
     }
-    fn send_keys(&self, target: &str, keys: &[String]) -> Result<(), HerdrError> {
+    fn send_keys(&self, target: &str, keys: &[String]) -> Result<(), AgentHostError> {
         ScriptedHost::send_keys(self, target, keys)
     }
-    fn send_text(&self, pane_id: &str, text: &str) -> Result<(), HerdrError> {
+    fn send_text(&self, pane_id: &str, text: &str) -> Result<(), AgentHostError> {
         ScriptedHost::send_text(self, pane_id, text)
     }
-    fn read(&self, target: &str, lines: usize) -> Result<String, HerdrError> {
+    fn read(&self, target: &str, lines: usize) -> Result<String, AgentHostError> {
         ScriptedHost::read(self, target, lines)
     }
     fn read_sourced(
         &self,
         target: &str,
         lines: usize,
-    ) -> Result<(String, &'static str), HerdrError> {
+    ) -> Result<(String, &'static str), AgentHostError> {
         ScriptedHost::read_sourced(self, target, lines)
     }
     fn wait(
@@ -614,10 +614,10 @@ impl HostBackend for ScriptedHost {
         target: &str,
         until: &[AgentStatus],
         timeout: Duration,
-    ) -> Result<AgentInfo, HerdrError> {
+    ) -> Result<AgentInfo, AgentHostError> {
         ScriptedHost::wait(self, target, until, timeout)
     }
-    fn close_workspace(&self, workspace_id: &str) -> Result<(), HerdrError> {
+    fn close_workspace(&self, workspace_id: &str) -> Result<(), AgentHostError> {
         ScriptedHost::close_workspace(self, workspace_id)
     }
     fn shell_pid(&self, pane_id: &str) -> Option<u32> {

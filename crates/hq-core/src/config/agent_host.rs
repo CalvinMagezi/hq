@@ -22,10 +22,10 @@ pub fn native_host_dir() -> std::path::PathBuf {
 
 /// Where coding-agent sessions run and how HQ reaches each machine's built-in
 /// host. With no `hosts` configured every session runs on this machine. (Keys
-/// from the retired herdr setup, `binary`, `session` and a host's `kind`, are
+/// from the retired setup, `binary`, `session` and a host's `kind`, are
 /// ignored if a config still has them.)
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct HerdrConfig {
+pub struct AgentHostConfig {
     /// The HQ MCP endpoint a launched agent connects to with its own session
     /// token (for example `https://hq.example.ts.net:8444/mcp`), reachable from
     /// the machine the agent runs on. Unset leaves agents without it.
@@ -39,9 +39,9 @@ pub struct HerdrConfig {
 
     /// Remote machines reachable over SSH, keyed by host name.
     #[serde(default)]
-    pub hosts: BTreeMap<String, HerdrHostConfig>,
+    pub hosts: BTreeMap<String, RemoteHostConfig>,
 
-    /// Reuse one ssh connection per remote host (ControlMaster) so each Herdr
+    /// Reuse one ssh connection per remote host (ControlMaster) so each the host
     /// call skips the handshake. If the control socket cannot be set up, HQ
     /// falls back to a fresh connection per call. Set false to always do that.
     #[serde(default = "default_ssh_multiplex")]
@@ -53,7 +53,7 @@ pub struct HerdrConfig {
     #[serde(default = "default_launch_bound_secs")]
     pub launch_bound_secs: u64,
 
-    /// Ceiling for any single Herdr call that is not an explicit wait.
+    /// Ceiling for any single the host call that is not an explicit wait.
     #[serde(default = "default_command_timeout_secs")]
     pub command_timeout_secs: u64,
 
@@ -179,8 +179,8 @@ pub struct HarnessProfileConfig {
     pub base: String,
 
     /// Executable typed into the pane's shell instead of the base CLI, such as a
-    /// wrapper script. It has to end up running the base CLI so Herdr can
-    /// recognize the agent. Unset launches the base CLI through Herdr directly.
+    /// wrapper script. It has to end up running the base CLI so the host can
+    /// recognize the agent. Unset launches the base CLI through the host directly.
     #[serde(default)]
     pub command: Option<String>,
 
@@ -196,7 +196,7 @@ pub struct HarnessProfileConfig {
 
 /// One remote machine running HQ's built-in host, reached with `ssh`.
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct HerdrHostConfig {
+pub struct RemoteHostConfig {
     /// `user@address` for ssh, usually a Tailscale address or MagicDNS name.
     pub ssh: String,
 
@@ -230,7 +230,7 @@ fn default_gate_command() -> String {
     "hq host gate".to_string()
 }
 
-/// Bounds for `HerdrConfig::launch_bound_secs`.
+/// Bounds for `AgentHostConfig::launch_bound_secs`.
 pub const MIN_LAUNCH_BOUND_SECS: u64 = 5;
 pub const MAX_LAUNCH_BOUND_SECS: u64 = 50;
 
@@ -286,7 +286,7 @@ fn default_max_ask_spawned_sessions() -> u32 {
     DEFAULT_MAX_ASK_SPAWNED_SESSIONS
 }
 
-impl HerdrConfig {
+impl AgentHostConfig {
     pub fn nudge_budget(&self) -> i64 {
         i64::from(self.driver_nudge_budget.clamp(1, 100))
     }
@@ -316,7 +316,7 @@ impl HerdrConfig {
     }
 }
 
-impl Default for HerdrConfig {
+impl Default for AgentHostConfig {
     fn default() -> Self {
         Self {
             agent_mcp_url: None,
@@ -349,34 +349,34 @@ mod tests {
 
     #[test]
     fn empty_config_runs_everything_on_this_machines_built_in_host() {
-        let cfg: HerdrConfig = serde_yaml::from_str("{}").unwrap();
+        let cfg: AgentHostConfig = serde_yaml::from_str("{}").unwrap();
         assert_eq!(cfg.default_host, NATIVE_HOST);
         assert!(cfg.hosts.is_empty());
         assert!(
             cfg.drive_new_watches,
             "new watches drive unless the config opts out"
         );
-        let off: HerdrConfig = serde_yaml::from_str("drive_new_watches: false").unwrap();
+        let off: AgentHostConfig = serde_yaml::from_str("drive_new_watches: false").unwrap();
         assert!(!off.drive_new_watches);
         assert!(
             cfg.spawn_cwd_deny.is_empty(),
             "nothing is denied unless configured"
         );
-        let deny: HerdrConfig = serde_yaml::from_str("spawn_cwd_deny: [/secret]").unwrap();
+        let deny: AgentHostConfig = serde_yaml::from_str("spawn_cwd_deny: [/secret]").unwrap();
         assert_eq!(deny.spawn_cwd_deny, ["/secret"]);
     }
 
     #[test]
     fn ssh_multiplex_defaults_on_and_can_be_disabled() {
-        let cfg: HerdrConfig = serde_yaml::from_str("{}").unwrap();
+        let cfg: AgentHostConfig = serde_yaml::from_str("{}").unwrap();
         assert!(cfg.ssh_multiplex);
-        let off: HerdrConfig = serde_yaml::from_str("ssh_multiplex: false").unwrap();
+        let off: AgentHostConfig = serde_yaml::from_str("ssh_multiplex: false").unwrap();
         assert!(!off.ssh_multiplex);
     }
 
     #[test]
     fn drive_limits_have_defaults_and_clamp() {
-        let cfg: HerdrConfig = serde_yaml::from_str("{}").unwrap();
+        let cfg: AgentHostConfig = serde_yaml::from_str("{}").unwrap();
         assert_eq!(
             (
                 cfg.nudge_budget(),
@@ -386,7 +386,7 @@ mod tests {
             ),
             (8, 3, 3, 2)
         );
-        let wild: HerdrConfig = serde_yaml::from_str(
+        let wild: AgentHostConfig = serde_yaml::from_str(
             "driver_nudge_budget: 0\ndriver_no_progress_limit: 1\nmax_driven_sessions: 0\nmax_ask_spawned_sessions: 999",
         )
         .unwrap();
@@ -400,16 +400,16 @@ mod tests {
             (1, 2, 1, 20)
         );
         assert_eq!((cfg.key_allowance(), cfg.mcp_started_session_cap(), cfg.full_ask_cap()), (40, 3, 2));
-        let wild2: HerdrConfig =
+        let wild2: AgentHostConfig =
             serde_yaml::from_str("driver_key_allowance: 0\nmax_mcp_started_sessions: 0\nmax_full_asks: 99").unwrap();
         assert_eq!((wild2.key_allowance(), wild2.mcp_started_session_cap(), wild2.full_ask_cap()), (1, 1, 10));
-        let huge: HerdrConfig = serde_yaml::from_str("driver_nudge_budget: 5000").unwrap();
+        let huge: AgentHostConfig = serde_yaml::from_str("driver_nudge_budget: 5000").unwrap();
         assert_eq!(huge.nudge_budget(), 100);
     }
 
     #[test]
     fn remote_host_takes_gate_default() {
-        let cfg: HerdrConfig =
+        let cfg: AgentHostConfig =
             serde_yaml::from_str("hosts:\n  laptop:\n    ssh: me@100.64.0.1\n").unwrap();
         let laptop = &cfg.hosts["laptop"];
         assert_eq!(laptop.ssh, "me@100.64.0.1");
@@ -418,9 +418,9 @@ mod tests {
     }
 
     #[test]
-    fn keys_from_the_retired_herdr_setup_are_ignored() {
-        let cfg: HerdrConfig = serde_yaml::from_str(
-            "binary: herdr\nsession: hq\nhosts:\n  laptop:\n    kind: herdr\n    ssh: me@100.64.0.1\n    session: x\n",
+    fn keys_from_the_retired_setup_are_ignored() {
+        let cfg: AgentHostConfig = serde_yaml::from_str(
+            "binary: old\nsession: hq\nhosts:\n  laptop:\n    kind: old\n    ssh: me@100.64.0.1\n    session: x\n",
         )
         .unwrap();
         assert_eq!(cfg.hosts["laptop"].ssh, "me@100.64.0.1");
@@ -429,7 +429,7 @@ mod tests {
 
     #[test]
     fn a_profile_needs_only_its_base() {
-        let cfg: HerdrConfig = serde_yaml::from_str(
+        let cfg: AgentHostConfig = serde_yaml::from_str(
             "harness_profiles:\n  wrapped:\n    base: claude-code\n    command: my-wrapper\n    env:\n      A: b\n",
         )
         .unwrap();

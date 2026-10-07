@@ -17,7 +17,7 @@ pub(super) fn get_row(db:&Arc<Database>, session_id: &str) -> Result<HarnessSess
 
 /// The row's host and its agent, or an error naming why they are unavailable.
 pub(super) fn locate(row: &HarnessSessionRow) -> Result<(Host, Option<AgentInfo>)> {
-    let host = herdr::host(Some(&row.host))?;
+    let host = agent_host::host(Some(&row.host))?;
     let agent = host.agent(&row.agent_name)?;
     Ok((host, agent))
 }
@@ -48,7 +48,7 @@ pub async fn resume(
     require_allowed_cwd(Some(&row.cwd))?;
     let harness = resolve(&row.harness)?;
     let spec = harness.spec;
-    let host = herdr::host(Some(&row.host))?;
+    let host = agent_host::host(Some(&row.host))?;
     let probe_host = host.clone();
     let name = row.agent_name.clone();
     if blocking(move || probe_host.agent(&name)).await??.is_some() {
@@ -99,7 +99,7 @@ pub async fn resume(
     Ok(value)
 }
 
-/// Live status for one session: registry row plus what Herdr says now.
+/// Live status for one session: registry row plus what the host says now.
 pub fn status(db: &Arc<Database>, session_id: &str) -> Result<Value> {
     let row = get_row(db, session_id)?;
     let polled = poll_hosts(std::slice::from_ref(&row));
@@ -225,7 +225,7 @@ pub(super) fn set_mode_with(db: &Arc<Database>, row: &HarnessSessionRow, live: &
     if req.drive {
         require_drivable(row, live, req)?;
     }
-    let cap = Some(herdr_config().driven_session_cap());
+    let cap = Some(agent_host_config().driven_session_cap());
     let change = db.with_conn(|c| registry::request_drive_capped(c, &row.id, req.drive, req.actor, cap))?;
     let mut report = json!({
         "session_id": row.id,
@@ -273,19 +273,19 @@ pub(super) fn agent_state(live: &Liveness) -> Value {
     }
 }
 
-/// Bring an agent Herdr already runs, one HQ did not launch in this chat (or
+/// Bring an agent the host already runs, one HQ did not launch in this chat (or
 /// at all), under this chat's watch. It starts observation-only: Drive comes
 /// later, through the goal and drive gate.
 pub fn attach(db: &Arc<Database>, host: &dyn HostBackend, target: &str, thread: &str) -> Result<Value> {
     let agent = host
         .agent(target)
         .map_err(|e| anyhow::anyhow!("cannot reach host '{}' to attach: {e}", host.name()))?
-        .ok_or_else(|| anyhow::anyhow!("no agent '{target}' on host '{}'; herdr_agents lists what is there", host.name()))?;
+        .ok_or_else(|| anyhow::anyhow!("no agent '{target}' on host '{}'; host_agents lists what is there", host.name()))?;
     let Some(name) = agent.name.clone() else {
-        bail!("that agent has no name in Herdr, so HQ cannot track it; name it there first");
+        bail!("that agent has no name in the host, so HQ cannot track it; name it there first");
     };
     let Some(spec) = SPECS.iter().find(|s| s.kind == agent.kind) else {
-        bail!("no supported harness runs Herdr agent kind '{}'", agent.kind);
+        bail!("no supported harness runs host agent kind '{}'", agent.kind);
     };
     let host_name = host.name().to_string();
     let known = db.with_conn(|c| registry::list(c, Some(registry::STATUS_RUNNING), 200))?;
@@ -392,7 +392,7 @@ pub(super) fn session_views(rows: &[HarnessSessionRow]) -> Vec<Value> {
 /// supervisor stored.
 pub fn tail_log(db: &Arc<Database>, session_id: &str, lines: usize) -> Result<Value> {
     tail_log_with(db, session_id, lines, |row| {
-        herdr::host(Some(&row.host))
+        agent_host::host(Some(&row.host))
             .ok()
             .and_then(|host| host.read_sourced(&row.agent_name, lines).ok())
     })
@@ -400,7 +400,7 @@ pub fn tail_log(db: &Arc<Database>, session_id: &str, lines: usize) -> Result<Va
 
 /// `read` is called only for a row the registry says is running, so a name
 /// that no longer belongs to an agent is never read as live output. It is one
-/// herdr call, not a lookup then a read: on a remote host each call is a full
+/// host call, not a lookup then a read: on a remote host each call is a full
 /// ssh round trip, and a read of a gone agent fails the same way.
 pub(super) fn tail_log_with(
     db: &Arc<Database>,
@@ -412,8 +412,8 @@ pub(super) fn tail_log_with(
     let live = (row.status == registry::STATUS_RUNNING)
         .then(|| read(&row))
         .flatten();
-    let (source, herdr_source, text) = match live {
-        Some((text, herdr_source)) => ("live", Some(herdr_source), text),
+    let (source, host_source, text) = match live {
+        Some((text, host_source)) => ("live", Some(host_source), text),
         None => {
             let id = session_id.to_string();
             let snap = db.with_conn(move |c| registry::last_snapshot(c, &id))?;
@@ -422,7 +422,7 @@ pub(super) fn tail_log_with(
     };
     let all: Vec<&str> = text.lines().collect();
     let tail = &all[all.len().saturating_sub(lines)..];
-    Ok(json!({ "session_id": session_id, "source": source, "herdr_source": herdr_source, "lines": tail }))
+    Ok(json!({ "session_id": session_id, "source": source, "host_source": host_source, "lines": tail }))
 }
 
 pub(super) static SCREEN_READS: std::sync::LazyLock<coalesce::Coalescer> =
@@ -462,7 +462,7 @@ pub(super) fn send_text(db: &Arc<Database>, session_id: &str, text: &str) -> Res
     let host = require_alive(&row)?;
     let outcome = host.submit(&row.agent_name, text);
     match outcome {
-        Err(HerdrError::Api { code, message }) if code == "agent_blocked" => bail!(
+        Err(AgentHostError::Api { code, message }) if code == "agent_blocked" => bail!(
             "session {session_id} is waiting at a dialog and the text was not sent ({message}). Read its output, then answer with keys."
         ),
         Err(e) => Err(e.into()),
@@ -515,7 +515,7 @@ pub fn wait(
         Ok(agent) => {
             Ok(json!({ "session_id": session_id, "settled": true, "agent_status": agent.status }))
         }
-        Err(HerdrError::Api { code, .. }) if code == "timeout" => Ok(
+        Err(AgentHostError::Api { code, .. }) if code == "timeout" => Ok(
             json!({ "session_id": session_id, "settled": false, "note": "still working; call again or read the output" }),
         ),
         Err(e) => Err(e.into()),

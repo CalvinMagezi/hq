@@ -1,8 +1,8 @@
 //! `NativeBackend` against a real in-process host and real processes.
 
 use hq_host::{Host, Server, StopHandle};
-use hq_tools::herdr::{
-    AgentStatus, HerdrError, HostBackend, LaunchRequest, NativeBackend, PromptOutcome,
+use hq_tools::agent_host::{
+    AgentStatus, AgentHostError, HostBackend, LaunchRequest, NativeBackend, PromptOutcome,
 };
 use std::sync::Arc;
 use std::time::{Duration, Instant};
@@ -73,7 +73,7 @@ fn read_until(b: &NativeBackend, name: &str, needle: &str) -> String {
 #[test]
 fn an_unreachable_host_is_reported_as_unreachable() {
     let b = NativeBackend::new("/nonexistent/hq-host-run");
-    assert!(matches!(b.version(), Err(HerdrError::Unreachable { .. })));
+    assert!(matches!(b.version(), Err(AgentHostError::Unreachable { .. })));
 }
 
 #[test]
@@ -107,7 +107,7 @@ fn a_taken_name_is_an_api_error() {
     let b = host.backend();
     b.launch(&cat("hs-dup", "pi")).unwrap();
     match b.launch(&cat("hs-dup", "pi")) {
-        Err(HerdrError::Api { code, .. }) => assert_eq!(code, "name_taken"),
+        Err(AgentHostError::Api { code, .. }) => assert_eq!(code, "name_taken"),
         other => panic!("expected name_taken, got {other:?}"),
     }
 }
@@ -118,7 +118,7 @@ fn invalid_keys_are_refused_before_they_reach_the_host() {
     let b = host.backend();
     b.launch(&cat("hs-keys", "pi")).unwrap();
     let err = b.send_keys("hs-keys", &["--help".to_string()]).unwrap_err();
-    assert!(matches!(err, HerdrError::Api { ref code, .. } if code == "invalid_keys"));
+    assert!(matches!(err, AgentHostError::Api { ref code, .. } if code == "invalid_keys"));
     b.send_keys("hs-keys", &["ctrl+c".to_string()]).unwrap();
 }
 
@@ -155,7 +155,7 @@ fn waiting_for_a_state_that_never_comes_times_out() {
             Duration::from_millis(900),
         )
         .unwrap_err();
-    assert!(matches!(err, HerdrError::Api { ref code, .. } if code == "timeout"));
+    assert!(matches!(err, AgentHostError::Api { ref code, .. } if code == "timeout"));
 }
 
 #[test]
@@ -250,7 +250,7 @@ fn a_wrapper_command_receives_the_hook_flag_not_just_the_shell() {
 
 #[test]
 fn a_launch_with_hq_access_gets_a_private_mcp_config_and_flag() {
-    use hq_tools::herdr::McpAccess;
+    use hq_tools::agent_host::McpAccess;
     use std::os::unix::fs::PermissionsExt;
     let host = Running::start();
     let b = host.backend();

@@ -4,7 +4,7 @@ This file provides context for AI assistants working on this project.
 
 ## What This Is
 
-Agent-HQ: a local-first AI agent hub written in Rust. Single binary (about 58 MB release). Data lives in `.vault/` (a markdown vault, gitignored). Puts one agent on Discord, Telegram, a web UI (PWA) and the terminal, all backed by a shared markdown knowledge base. Coding agents run as harness sessions in Herdr.
+Agent-HQ: a local-first AI agent hub written in Rust. Single binary (about 58 MB release). Data lives in `.vault/` (a markdown vault, gitignored). Puts one agent on Discord, Telegram, a web UI (PWA) and the terminal, all backed by a shared markdown knowledge base. Coding agents run as harness sessions in the host.
 
 ## Project Type: Rust
 

@@ -73,7 +73,7 @@ enum Commands {
         /// Short label (spawn)
         #[arg(long)]
         label: Option<String>,
-        /// Herdr host to run on, e.g. a laptop from `herdr.hosts` (spawn; default: this machine)
+        /// host to run on, e.g. a laptop from `agent_host.hosts` (spawn; default: this machine)
         #[arg(long)]
         host: Option<String>,
         /// Log lines to tail (logs)

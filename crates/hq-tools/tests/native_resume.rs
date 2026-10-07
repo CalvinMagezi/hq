@@ -4,7 +4,7 @@ use hq_db::Database;
 use hq_db::harness_sessions_registry::{self as registry, NewSession, Placement};
 use hq_host::{Host, ReadSource, Server, SpawnSpec};
 use hq_tools::harness_session::resume_awaiting;
-use hq_tools::herdr::{Host as HostHandle, NativeBackend};
+use hq_tools::agent_host::{Host as HostHandle, NativeBackend};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
@@ -111,7 +111,7 @@ fn a_restarted_host_gets_each_agents_env_back_from_hq() {
 fn a_reported_conversation_id_becomes_the_hosts_restart_command() {
     use hq_host::Client;
     use hq_tools::harness_session::refresh_restart_command;
-    use hq_tools::herdr::{HostBackend, LaunchRequest};
+    use hq_tools::agent_host::{HostBackend, LaunchRequest};
 
     let tmp = tempfile::tempdir().unwrap();
     let dir = tmp.path().join("run");

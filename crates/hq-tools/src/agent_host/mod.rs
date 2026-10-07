@@ -1,12 +1,12 @@
-//! Herdr (herdr.dev) as HQ's coding-agent runtime.
+//! HQ's coding-agent runtime: the built-in host (`hq host`).
 //!
-//! Herdr owns the terminals, recognises which agent is running in a pane, and
+//! The host owns the terminals, recognises which agent is running in a pane, and
 //! reports its lifecycle (`idle`, `working`, `blocked`, `done`). HQ drives it
-//! through the `herdr` CLI. A host is either this machine or a remote machine
-//! reached over ssh (see `scripts/hq-herdr-gate`), so the same calls work on
-//! the VPS and on a laptop that is only sometimes online.
+//! over its control socket. A host is either this machine or a remote machine
+//! reached over ssh through `hq host gate`, so the same calls work on the VPS
+//! and on a laptop that is only sometimes online.
 //!
-//! Every call is blocking and bounded by a deadline. `HerdrError::Unreachable`
+//! Every call is blocking and bounded by a deadline. `AgentHostError::Unreachable`
 //! means "could not ask"; callers must not read it as "the agent is gone".
 
 mod backend;
@@ -20,7 +20,7 @@ mod transport;
 
 use anyhow::Context;
 use hq_core::config::{
-    HerdrConfig, HerdrHostConfig, HqConfig, LOCAL_HOST, NATIVE_HOST, native_host_dir, MAX_LAUNCH_BOUND_SECS, MIN_LAUNCH_BOUND_SECS,
+    AgentHostConfig, RemoteHostConfig, HqConfig, LOCAL_HOST, NATIVE_HOST, native_host_dir, MAX_LAUNCH_BOUND_SECS, MIN_LAUNCH_BOUND_SECS,
 };
 use serde::Serialize;
 use std::sync::Arc;
@@ -30,21 +30,21 @@ pub use backend::{AwaitingAgent, Host, HostBackend, HostEvent, HostEvents};
 pub use native::{NATIVE_GATE_COMMAND, NativeBackend};
 
 #[derive(Debug, thiserror::Error)]
-pub enum HerdrError {
-    #[error("herdr host '{host}' unreachable: {detail}")]
+pub enum AgentHostError {
+    #[error("host '{host}' unreachable: {detail}")]
     Unreachable { host: String, detail: String },
-    #[error("herdr {code}: {message}")]
+    #[error("host {code}: {message}")]
     Api { code: String, message: String },
 }
 
-/// `HerdrError::Api` code for a key name that failed `validate_keys`.
+/// `AgentHostError::Api` code for a key name that failed `validate_keys`.
 pub const INVALID_KEYS_CODE: &str = "invalid_keys";
 
-/// Longest logical key name herdr has (`ctrl+shift+pagedown` is 19).
+/// Longest logical key name the host accepts (`ctrl+shift+pagedown` is 19).
 const MAX_KEY_LEN: usize = 32;
 
 /// Logical key names only (`enter`, `ctrl+c`, `f5`): the first character is
-/// alphanumeric so a key can never be read as a herdr flag.
+/// alphanumeric so a key can never be read as a host flag.
 pub fn validate_keys(keys: &[String]) -> Result<(), String> {
     for key in keys {
         let mut chars = key.chars();
@@ -59,16 +59,16 @@ pub fn validate_keys(keys: &[String]) -> Result<(), String> {
     Ok(())
 }
 
-impl HerdrError {
+impl AgentHostError {
     pub fn code(&self) -> Option<&str> {
         match self {
-            HerdrError::Api { code, .. } => Some(code),
-            HerdrError::Unreachable { .. } => None,
+            AgentHostError::Api { code, .. } => Some(code),
+            AgentHostError::Unreachable { .. } => None,
         }
     }
 
     pub fn is_unreachable(&self) -> bool {
-        matches!(self, HerdrError::Unreachable { .. })
+        matches!(self, AgentHostError::Unreachable { .. })
     }
 }
 
@@ -104,7 +104,7 @@ impl AgentStatus {
     }
 }
 
-/// One coding agent as Herdr reports it. Agents a person started by hand have
+/// One coding agent as the host reports it. Agents a person started by hand have
 /// no `name`; those HQ launches always do.
 #[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct AgentInfo {
@@ -117,17 +117,17 @@ pub struct AgentInfo {
     pub title: Option<String>,
     /// Bumps on every lifecycle change; lets a caller notify once per change.
     pub state_change_seq: u64,
-    /// True while Herdr is still waiting for the agent to reach its prompt.
+    /// True while the host is still waiting for the agent to reach its prompt.
     pub launch_pending: bool,
     /// The agent's own id for its conversation, when the host knows it (the
-    /// built-in host learns it from the agent's hooks). Herdr never does.
+    /// built-in host learns it from the agent's hooks). The host never does.
     pub agent_session_id: Option<String>,
 }
 
 impl AgentInfo {
-    /// False while Herdr is still waiting for a launch and cannot classify the
+    /// False while the host is still waiting for a launch and cannot classify the
     /// agent: a missing binary leaves a pane in exactly this state forever. An
-    /// `unknown` status without `launch_pending` is an agent Herdr just does
+    /// `unknown` status without `launch_pending` is an agent the host just does
     /// not classify, which is running.
     pub fn is_started(&self) -> bool {
         !(self.launch_pending && self.status == AgentStatus::Unknown)
@@ -136,18 +136,18 @@ impl AgentInfo {
 
 #[derive(Debug, Clone)]
 pub struct LaunchRequest {
-    /// Herdr agent name: `[a-z][a-z0-9_-]{0,31}`, unique among live agents.
+    /// host agent name: `[a-z][a-z0-9_-]{0,31}`, unique among live agents.
     pub name: String,
-    /// Herdr agent kind (`claude`, `codex`, `cursor`, ...).
+    /// host agent kind (`claude`, `codex`, `cursor`, ...).
     pub kind: String,
     pub cwd: String,
     pub label: String,
     pub env: Vec<(String, String)>,
     /// Native arguments for the agent CLI.
     pub args: Vec<String>,
-    /// Wrapper typed into the pane's shell in place of `herdr agent start`,
-    /// for a launcher Herdr does not know by name. It must end up running a CLI
-    /// Herdr recognizes as `kind`.
+    /// Wrapper typed into the pane's shell in place of `agent start`,
+    /// for a launcher the host does not know by name. It must end up running a CLI
+    /// The host recognizes as `kind`.
     pub command: Option<String>,
     /// Arguments that bring this agent back after the host itself restarts.
     /// Only the built-in host uses them; None means a restart leaves it gone.
@@ -187,12 +187,12 @@ pub struct Launched {
 pub enum PromptOutcome {
     /// Sent; the caller did not ask to wait.
     Submitted,
-    /// Herdr saw no activity, so Enter was pressed once more. Read the screen
+    /// The host saw no activity, so Enter was pressed once more. Read the screen
     /// to confirm the turn began.
     Resubmitted,
     /// Waited until the agent settled (`idle`, `done` or `blocked`).
     Settled(AgentInfo),
-    /// Herdr saw no `working`/`blocked` activity after submission. The prompt
+    /// The host saw no `working`/`blocked` activity after submission. The prompt
     /// is very likely delivered (a fast agent can finish between polls), so
     /// read the screen before resending.
     Stalled(String),
@@ -200,7 +200,7 @@ pub enum PromptOutcome {
 }
 
 
-/// Herdr calls block on a subprocess or ssh, so async callers hand them to the
+/// The host calls block on a subprocess or ssh, so async callers hand them to the
 /// blocking pool instead of stalling a runtime thread.
 pub(crate) async fn blocking<T: Send + 'static>(
     f: impl FnOnce() -> T + Send + 'static,
@@ -211,13 +211,13 @@ pub(crate) async fn blocking<T: Send + 'static>(
 /// The host a caller named, or the configured default.
 pub fn host(name: Option<&str>) -> anyhow::Result<Host> {
     let cfg = HqConfig::load()
-        .context("loading config for herdr hosts")?
-        .herdr;
+        .context("loading config for hosts")?
+        .agent_host;
     build(&cfg, name.unwrap_or(&cfg.default_host))
 }
 
-fn build(cfg: &HerdrConfig, name: &str) -> anyhow::Result<Host> {
-    // `local` was the herdr host on this machine; it now names the built-in one.
+fn build(cfg: &AgentHostConfig, name: &str) -> anyhow::Result<Host> {
+    // `local` was the host on this machine; it now names the built-in one.
     if name == NATIVE_HOST || name == LOCAL_HOST {
         let launch = cfg
             .launch_bound_secs
@@ -238,7 +238,7 @@ fn build(cfg: &HerdrConfig, name: &str) -> anyhow::Result<Host> {
 
 /// A built-in host on another machine. Its gate command defaults to
 /// `hq host gate` unless the config names one.
-fn remote_native(cfg: &HerdrConfig, name: &str, remote: &HerdrHostConfig) -> NativeBackend {
+fn remote_native(cfg: &AgentHostConfig, name: &str, remote: &RemoteHostConfig) -> NativeBackend {
     let gate = remote.gate_command.as_str();
     let mux_dir = cfg
         .ssh_multiplex
@@ -262,7 +262,7 @@ pub fn local() -> anyhow::Result<Host> {
 /// Names of the hosts HQ may talk to: this machine's built-in host and every
 /// configured remote.
 pub fn native_host_names() -> Vec<String> {
-    let remotes = HqConfig::load().map(|c| c.herdr.hosts).unwrap_or_default();
+    let remotes = HqConfig::load().map(|c| c.agent_host.hosts).unwrap_or_default();
     std::iter::once(NATIVE_HOST.to_string()).chain(remotes.into_keys()).collect()
 }
 
@@ -270,7 +270,7 @@ pub fn native_host_names() -> Vec<String> {
 pub fn all_hosts() -> anyhow::Result<Vec<Host>> {
     let cfg = HqConfig::load()
         .context("loading config for hosts")?
-        .herdr;
+        .agent_host;
     let mut names = vec![NATIVE_HOST.to_string()];
     names.extend(cfg.hosts.keys().cloned());
     names.iter().map(|n| build(&cfg, n)).collect()
@@ -306,10 +306,10 @@ mod tests {
     #[test]
     fn the_launch_bound_comes_from_config_and_stays_under_the_transport_limit() {
         let bound = |secs: u64| {
-            let cfg = HerdrConfig { launch_bound_secs: secs, ..HerdrConfig::default() };
+            let cfg = AgentHostConfig { launch_bound_secs: secs, ..AgentHostConfig::default() };
             build(&cfg, NATIVE_HOST).unwrap().launch_bound()
         };
-        assert_eq!(HerdrConfig::default().launch_bound_secs, 25);
+        assert_eq!(AgentHostConfig::default().launch_bound_secs, 25);
         assert_eq!(bound(25), Duration::from_secs(25));
         assert_eq!(bound(1), Duration::from_secs(5));
         assert_eq!(bound(600), Duration::from_secs(50));
@@ -317,7 +317,7 @@ mod tests {
 
     #[test]
     fn local_names_the_built_in_host_and_an_unknown_name_lists_the_known_ones() {
-        let mut cfg = HerdrConfig::default();
+        let mut cfg = AgentHostConfig::default();
         cfg.hosts.insert(
             "laptop".into(),
             serde_yaml::from_str("ssh: \"me@100.64.0.1\"").unwrap(),

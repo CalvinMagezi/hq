@@ -1,7 +1,7 @@
 //! Runs one call to a remote host through ssh, under a hard deadline so a dead
 //! host can never wedge a daemon sweep.
 
-use super::HerdrError;
+use super::AgentHostError;
 use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
@@ -53,8 +53,8 @@ impl Transport {
         host: &str,
         args: &[String],
         timeout: Duration,
-    ) -> Result<RawOutput, HerdrError> {
-        let unreachable = |detail: String| HerdrError::Unreachable {
+    ) -> Result<RawOutput, AgentHostError> {
+        let unreachable = |detail: String| AgentHostError::Unreachable {
             host: host.to_string(),
             detail,
         };
@@ -73,7 +73,7 @@ impl Transport {
             }
             _ => out,
         };
-        tracing::debug!(host, subcommand = ?loggable(args), elapsed_ms = started.elapsed().as_millis() as u64, exit = out.exit_code, "herdr invocation");
+        tracing::debug!(host, subcommand = ?loggable(args), elapsed_ms = started.elapsed().as_millis() as u64, exit = out.exit_code, "host call");
         if matches!(self, Transport::Ssh { .. }) && out.exit_code == SSH_FAILURE_EXIT {
             return Err(unreachable(first_line(&out.stderr)));
         }
@@ -180,7 +180,7 @@ fn mux_options(dir: &Path) -> Vec<String> {
     .collect()
 }
 
-/// The part of a request that is safe to log. A herdr request is words (`agent
+/// The part of a request that is safe to log. A host request is words (`agent
 /// get`); a native host's is a method and its params as JSON text, and the params
 /// can hold a secret (an agent's session token), so only the method is kept.
 fn loggable(args: &[String]) -> Vec<&str> {
@@ -191,7 +191,7 @@ fn loggable(args: &[String]) -> Vec<&str> {
     args.iter().take(take).map(String::as_str).collect()
 }
 
-/// Herdr arguments that only look at state. Only these may be re-run, because
+/// The host arguments that only look at state. Only these may be re-run, because
 /// a retry of a write (send-text, a prompt, a launch) could apply it twice.
 fn is_read_only(args: &[String]) -> bool {
     let mut words = args.iter().map(String::as_str);
@@ -320,19 +320,19 @@ mod tests {
 
     #[test]
     fn ssh_args_pin_the_key_and_never_prompt() {
-        let args = ssh_args("me@100.64.0.1", None, Some("/k/id"), "hq-herdr-gate", None);
+        let args = ssh_args("me@100.64.0.1", None, Some("/k/id"), "hq host gate", None);
         assert!(args.contains(&"BatchMode=yes".to_string()));
         assert!(args.contains(&"IdentitiesOnly=yes".to_string()));
         assert_eq!(args[args.len() - 2], "me@100.64.0.1");
-        assert_eq!(args.last().unwrap(), "hq-herdr-gate");
+        assert_eq!(args.last().unwrap(), "hq host gate");
     }
 
     #[test]
     fn a_native_requests_params_never_reach_the_log() {
         let native = vec!["agent.mcp_config".to_string(), r#"{"token":"hqs_secret"}"#.to_string()];
         assert_eq!(loggable(&native), ["agent.mcp_config"]);
-        let herdr = vec!["agent".to_string(), "get".to_string(), "x".to_string()];
-        assert_eq!(loggable(&herdr), ["agent", "get"]);
+        let host_cfg = vec!["agent".to_string(), "get".to_string(), "x".to_string()];
+        assert_eq!(loggable(&host_cfg), ["agent", "get"]);
     }
 
     #[test]

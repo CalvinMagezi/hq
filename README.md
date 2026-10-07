@@ -24,7 +24,7 @@
 
 ---
 
-Agent-HQ (HQ for short) puts one AI agent on every channel you use (Discord, Telegram, a web UI that installs as a PWA, the terminal) and keeps all your data in a markdown vault on your filesystem. Coding agents such as Claude Code, Codex CLI or OpenCode run as supervised harness sessions inside [Herdr](https://herdr.dev).
+Agent-HQ (HQ for short) puts one AI agent on every channel you use (Discord, Telegram, a web UI that installs as a PWA, the terminal) and keeps all your data in a markdown vault on your filesystem. Coding agents such as Claude Code, Codex CLI or OpenCode run as supervised harness sessions inside its built-in host (`hq host`).
 
 No cloud backend. No vendor lock-in. One binary of about 58 MB.
 
@@ -141,7 +141,7 @@ Linux on x86_64 and aarch64 (Ubuntu 22.04 or newer); `deploy/install.sh` picks t
 binary for the host CPU and refuses macOS. The updater verifies a minisign signature, swaps the binary and web files,
 restarts, checks `/health` and rolls back on failure. See
 [`deploy/README.md`](deploy/README.md) for the full walkthrough (Caddy, Tailscale,
-Herdr, GitHub access) and [`docs/UPDATE_SYSTEM.md`](docs/UPDATE_SYSTEM.md) for the
+the host, GitHub access) and [`docs/UPDATE_SYSTEM.md`](docs/UPDATE_SYSTEM.md) for the
 release format and trust model.
 
 ### Configuration
@@ -441,7 +441,7 @@ To write it by hand, add this to your project `.mcp.json`:
 |----------|---------|
 | Vault | vault_search, vault_read, vault_list, vault_write_note, vault_context |
 | Tasks | task_list, task_create, task_update, task_comment_add |
-| Harness sessions | harness_session_spawn, harness_session_send, harness_session_status, herdr_read |
+| Harness sessions | harness_session_spawn, harness_session_send, harness_session_status, host_read |
 | Sub-agents | spawn_subagents |
 | Web | web_search, web_fetch |
 | Image | generate_image |

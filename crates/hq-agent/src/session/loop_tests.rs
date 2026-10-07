@@ -310,7 +310,7 @@ fn last_content(agent: &AgentSession) -> String {
 #[test]
 fn an_unloaded_matching_skill_is_suggested_once_after_the_tool_results() {
     let dir = tempfile::tempdir().unwrap();
-    for (name, hint) in [("deploy-pwa", "caddy"), ("loaded-one", "herdr")] {
+    for (name, hint) in [("deploy-pwa", "caddy"), ("loaded-one", "hq-host")] {
         let skill = dir.path().join(name);
         std::fs::create_dir_all(&skill).unwrap();
         std::fs::write(
@@ -331,7 +331,7 @@ fn an_unloaded_matching_skill_is_suggested_once_after_the_tool_results() {
             "shell",
             serde_json::json!({"command": "sudo systemctl reload Caddy"}),
         ),
-        tool_call("herdr_read", serde_json::json!({})),
+        tool_call("host_read", serde_json::json!({})),
     ];
     let results = calls.iter().map(|_| ("ok".to_string(), None)).collect();
     agent.process_tool_results(&calls, results);

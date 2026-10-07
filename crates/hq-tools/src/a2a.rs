@@ -14,7 +14,7 @@ use serde_json::{Value, json};
 use std::sync::Arc;
 
 use crate::harness_session::caller_session;
-use crate::herdr::AgentStatus;
+use crate::agent_host::AgentStatus;
 use crate::registry::HqTool;
 use crate::util::arg_str;
 

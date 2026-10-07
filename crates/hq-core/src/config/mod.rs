@@ -7,7 +7,7 @@ mod copilot_usage;
 mod disk_watchdog;
 mod governance;
 mod harness;
-mod herdr;
+mod agent_host;
 mod instance;
 mod llm;
 mod memory;
@@ -29,8 +29,8 @@ pub use copilot_usage::{CopilotUsageConfig, copilot_active};
 pub use disk_watchdog::DiskWatchdogConfig;
 pub use governance::*;
 pub use harness::*;
-pub use herdr::{
-    HarnessProfileConfig, HerdrConfig, HerdrHostConfig, SandboxConfig, SandboxMode, LOCAL_HOST, NATIVE_HOST, native_host_dir, MAX_LAUNCH_BOUND_SECS,
+pub use agent_host::{
+    HarnessProfileConfig, AgentHostConfig, RemoteHostConfig, SandboxConfig, SandboxMode, LOCAL_HOST, NATIVE_HOST, native_host_dir, MAX_LAUNCH_BOUND_SECS,
     MIN_LAUNCH_BOUND_SECS,
 };
 pub use instance::*;
@@ -229,9 +229,10 @@ pub struct HqConfig {
     #[serde(default)]
     pub budget: BudgetConfig,
 
-    /// Where coding-agent sessions run (Herdr, on this machine or over SSH).
-    #[serde(default)]
-    pub herdr: HerdrConfig,
+    /// Where coding-agent sessions run: the built-in host on this machine or on
+    /// a paired one. Configs written before the rename call this section `herdr`.
+    #[serde(default, alias = "herdr")]
+    pub agent_host: AgentHostConfig,
 
     /// GitHub Copilot CLI (`gh copilot`) headless harness settings.
     #[serde(default)]
@@ -297,8 +298,8 @@ fn default_web_bind() -> String {
     "127.0.0.1".to_string()
 }
 
-/// Where `deploy/hq.service` keeps the VPS config and vault. A Herdr pane
-/// inherits `herdr.service`'s environment, not the daemon's, so without this
+/// Where `deploy/hq.service` keeps the VPS config and vault. A host pane
+/// inherits the host service's environment, not the daemon's, so without this
 /// fallback `hq chat` in a pane silently loads defaults with no backends.
 const SERVER_CONFIG_PATH: &str = "/opt/hq/config.yaml";
 const SERVER_VAULT_PATH: &str = "/opt/hq/.vault";
@@ -373,7 +374,7 @@ impl Default for HqConfig {
             self_update: SelfUpdateConfig::default(),
             disk_watchdog: DiskWatchdogConfig::default(),
             copilot_usage: CopilotUsageConfig::default(),
-            herdr: HerdrConfig::default(),
+            agent_host: AgentHostConfig::default(),
             budget: BudgetConfig::default(),
             github_copilot: GitHubCopilotConfig::default(),
             governance: GovernanceConfig::default(),
@@ -593,7 +594,7 @@ impl HqConfig {
 
     /// Path `load()` reads: as `config_file_path`, except that with no explicit
     /// path and no per-user file the VPS deploy path `/opt/hq/config.yaml` is
-    /// used when it exists (a Herdr pane inherits no `HQ_CONFIG_PATH`).
+    /// used when it exists (a host pane inherits no `HQ_CONFIG_PATH`).
     /// Readers that must see the file in force (doctor, the secret-file
     /// guard) use this; writers must not.
     pub fn config_read_path() -> PathBuf {

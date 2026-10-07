@@ -1,7 +1,7 @@
 use super::*;
 
 /// Set by the MCP gateway (never by a caller) on calls that arrive on the
-/// handoff-scoped key, so `herdr.handoff_cwd_allow` can bind them.
+/// handoff-scoped key, so `agent_host.handoff_cwd_allow` can bind them.
 pub const HANDOFF_SCOPE_ARG: &str = "_hq_handoff_scope";
 
 /// Characters a shell would expand inside the path the agent is started in.
@@ -10,7 +10,7 @@ pub(super) const CWD_FORBIDDEN: [char; 4] = ['~', '$', '`', '\0'];
 /// A launch needs an absolute project directory. `/` and anything shaped like a user's home are
 /// refused, whichever host the session runs on, because the agent stops at its folder-trust
 /// dialog there and nobody is watching the pane. `..` components and shell-expanding characters
-/// are refused so the string that was checked is the string herdr receives.
+/// are refused so the string that was checked is the string the host receives.
 pub fn require_cwd(cwd: Option<&str>) -> Result<PathBuf> {
     let cwd = cwd.map(str::trim).unwrap_or_default();
     if cwd.is_empty() {
@@ -81,7 +81,7 @@ pub fn check_cwd_allowed(cwd: &str, deny: &[String]) -> Result<()> {
         .find(|(_, n)| normalized.contains(n.as_str()));
     if let Some((entry, _)) = hit {
         bail!(
-            "cwd '{cwd}' is refused by herdr.spawn_cwd_deny (matches '{entry}'); no session was started"
+            "cwd '{cwd}' is refused by agent_host.spawn_cwd_deny (matches '{entry}'); no session was started"
         );
     }
     Ok(())
@@ -94,7 +94,7 @@ pub fn check_handoff_cwd(cwd: &Path, allow: &[String]) -> Result<()> {
         return Ok(());
     }
     bail!(
-        "cwd '{}' is outside herdr.handoff_cwd_allow, which limits the handoff key; no session was started",
+        "cwd '{}' is outside agent_host.handoff_cwd_allow, which limits the handoff key; no session was started",
         cwd.display()
     )
 }
@@ -103,13 +103,13 @@ pub fn check_handoff_cwd(cwd: &Path, allow: &[String]) -> Result<()> {
 /// of an already loaded config.
 pub fn require_cwd_in(
     cwd: Option<&str>,
-    herdr: &hq_core::config::HerdrConfig,
+    agent_host: &hq_core::config::AgentHostConfig,
     handoff_scope: bool,
 ) -> Result<PathBuf> {
     let path = require_cwd(cwd)?;
-    check_cwd_allowed(&path.to_string_lossy(), &herdr.spawn_cwd_deny)?;
+    check_cwd_allowed(&path.to_string_lossy(), &agent_host.spawn_cwd_deny)?;
     if handoff_scope {
-        check_handoff_cwd(&path, &herdr.handoff_cwd_allow)?;
+        check_handoff_cwd(&path, &agent_host.handoff_cwd_allow)?;
     }
     Ok(path)
 }
@@ -118,8 +118,8 @@ pub fn require_cwd_in(
 /// read fails the check rather than skipping it.
 pub fn require_allowed_cwd(cwd: Option<&str>) -> Result<PathBuf> {
     let cfg = hq_core::config::HqConfig::load()
-        .map_err(|e| anyhow::anyhow!("cannot read the config to check herdr.spawn_cwd_deny: {e}"))?;
-    require_cwd_in(cwd, &cfg.herdr, false)
+        .map_err(|e| anyhow::anyhow!("cannot read the config to check agent_host.spawn_cwd_deny: {e}"))?;
+    require_cwd_in(cwd, &cfg.agent_host, false)
 }
 
 /// Whether a tool call arrived on the handoff-scoped key.

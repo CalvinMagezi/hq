@@ -1,5 +1,5 @@
 //! Session supervisor: reconciles the harness_sessions registry against what
-//! Herdr reports every minute. It asks each host once, snapshots the screen of
+//! The host reports every minute. It asks each host once, snapshots the screen of
 //! every live session, alerts when one blocks on a dialog, marks sessions whose
 //! agent is gone as exited, and surfaces transitions on the value bus so the
 //! operator hears about them on Telegram/Discord.
@@ -12,7 +12,7 @@
 //! operator to ask what the session actually said. On the same transition the
 //! supervisor also posts the session's final output to the `relay` mailbox, so
 //! the platform bridges deliver the result without being asked. That output is
-//! the last screen snapshot taken while the agent was alive: Herdr cannot read
+//! the last screen snapshot taken while the agent was alive: the host cannot read
 //! a pane that no longer has an agent, so a session that dies before its first
 //! sweep has none.
 //!
@@ -31,7 +31,7 @@ use hq_db::Database;
 use hq_db::harness_sessions_registry as registry;
 use hq_tools::harness_session::mission::{self, Event};
 use hq_tools::harness_session::{Liveness, liveness, poll_hosts_with};
-use hq_tools::herdr::{AgentInfo, AgentStatus, Host, HostBackend};
+use hq_tools::agent_host::{AgentInfo, AgentStatus, Host, HostBackend};
 use std::collections::HashMap;
 use std::future::Future;
 use std::path::Path;
@@ -68,7 +68,7 @@ const SUMMARY_SWEEP_BUDGET: Duration = Duration::from_secs(20);
 const HOST_SWEEP_BUDGET: Duration = Duration::from_secs(6);
 
 /// A host call always gets at least this, so an almost spent budget still lets
-/// a healthy local Herdr answer.
+/// a healthy local the host answer.
 const MIN_HOST_CALL: Duration = Duration::from_secs(1);
 
 /// Below this there is no point starting another summary: deliver the raw
@@ -87,7 +87,7 @@ const DISMISS_HOST_TIMEOUT: Duration = Duration::from_secs(3);
 /// Screen lines quoted in a blocked-agent alert.
 const BLOCKED_EXCERPT_LINES: usize = 15;
 
-/// Resolves a registry host name to a Herdr host. Tests supply fakes.
+/// Resolves a registry host name to a host. Tests supply fakes.
 type HostResolver = Arc<dyn Fn(&str) -> Result<Host> + Send + Sync>;
 
 /// What the hosts said this sweep: who is alive, and each live session's screen.
@@ -194,7 +194,7 @@ pub async fn run_session_supervisor(
     config: &HqConfig,
 ) -> Result<()> {
     let summarizer = summarizer_for(config);
-    let resolve: HostResolver = Arc::new(|name| hq_tools::herdr::host(Some(name)));
+    let resolve: HostResolver = Arc::new(|name| hq_tools::agent_host::host(Some(name)));
     supervise(
         vault_path,
         db,
@@ -278,7 +278,7 @@ async fn dismiss_survey(
             move |keys| {
                 let host = press_host.ok_or(PressError::NotSent)?;
                 host.send_keys(&target, keys).map_err(|e| {
-                    // An answer from Herdr means it refused the keys; silence or a lost
+                    // An answer from the host means it refused the keys; silence or a lost
                     // connection may still have delivered them.
                     if e.is_unreachable() { PressError::MaybeSent } else { PressError::NotSent }
                 })

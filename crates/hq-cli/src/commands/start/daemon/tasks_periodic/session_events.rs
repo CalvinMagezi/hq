@@ -6,7 +6,7 @@
 use super::session_supervisor::run_session_supervisor;
 use hq_core::config::HqConfig;
 use hq_db::Database;
-use hq_tools::herdr::{self, HostEvents};
+use hq_tools::agent_host::{self, HostEvents};
 use std::path::PathBuf;
 use std::time::Duration;
 use tracing::{debug, warn};
@@ -38,7 +38,7 @@ pub async fn run_session_event_loop(
 ) {
     let mut cursor: Option<u64> = None;
     loop {
-        let Ok(host) = herdr::host(Some(&host_name)) else {
+        let Ok(host) = agent_host::host(Some(&host_name)) else {
             tokio::time::sleep(RETRY_PAUSE).await;
             continue;
         };
@@ -74,7 +74,7 @@ pub async fn run_session_event_loop(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use hq_tools::herdr::HostEvent;
+    use hq_tools::agent_host::HostEvent;
 
     fn events(list: &[(&str, Option<&str>)], lost: bool) -> HostEvents {
         HostEvents {

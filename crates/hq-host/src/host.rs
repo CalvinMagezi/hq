@@ -105,7 +105,7 @@ pub struct PaneInfo {
     pub agent_session_id: Option<String>,
     /// Goes up each time the agent's state changes; 0 before the first look.
     pub state_seq: u64,
-    /// A turn finished and the agent has not worked since (herdr's `done`).
+    /// A turn finished and the agent has not worked since (`done`).
     pub done: bool,
     /// The terminal title the program set, or empty.
     pub title: String,

@@ -30,7 +30,7 @@ When a task is better suited to a coding agent (Claude Code, Codex, Cursor, Pi, 
 1. Start it with `harness_session_spawn`, giving clear instructions, context, and the expected output.
 2. Steer it with `harness_session_send` and check on it with `harness_session_status`.
 3. The daemon's session supervisor reports when it finishes or blocks.
-4. For an agent a person started by hand, find it with `herdr_agents` and prompt it with `herdr_send`.
+4. For an agent a person started by hand, find it with `host_agents` and prompt it with `host_send`.
 
 ## Safety
 

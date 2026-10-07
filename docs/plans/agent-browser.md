@@ -180,7 +180,7 @@ one of them.
 
 Claude in Chrome is a real, logged-in, visible browser on the user's machine and
 stays the right tool for authenticated and human-in-the-loop work; it is not
-available on a VPS or to unattended sessions. Herdr drives terminals, not pages.
+available on a VPS or to unattended sessions. The host drives terminals, not pages.
 An HQ browser adds headless operation on any host, deterministic token-budgeted
 output, governance and taint, and an audit trail.
 

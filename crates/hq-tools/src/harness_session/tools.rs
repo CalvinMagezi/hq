@@ -25,15 +25,15 @@ impl HqTool for HarnessSessionSpawnTool {
         "harness_session_spawn"
     }
     fn description(&self) -> &str {
-        "Spawn a long-lived interactive session for a coding-agent harness (claude-code, cursor, opencode, pi, kimi, codex, qwen, antigravity, github-copilot) in Herdr, on this machine or a remote host such as the user's laptop (see herdr_hosts). Returns a session_id for status/logs/wait/send/stop/resume. If the agent stops at a dialog the result carries the screen and no prompt is typed. A configured profile name (herdr.harness_profiles, such as a named Claude account) is accepted as the harness and reported back as `harness`. Pass task_id to make an HQ task the durable record of the work: the supervisor then comments on it and moves its status as the session starts, finishes a turn, blocks or exits (never to complete; a person verifies that). Aliases: agy = antigravity."
+        "Spawn a long-lived interactive session for a coding-agent harness (claude-code, cursor, opencode, pi, kimi, codex, qwen, antigravity, github-copilot) in the host, on this machine or a remote host such as the user's laptop (see host_list). Returns a session_id for status/logs/wait/send/stop/resume. If the agent stops at a dialog the result carries the screen and no prompt is typed. A configured profile name (agent_host.harness_profiles, such as a named Claude account) is accepted as the harness and reported back as `harness`. Pass task_id to make an HQ task the durable record of the work: the supervisor then comments on it and moves its status as the session starts, finishes a turn, blocks or exits (never to complete; a person verifies that). Aliases: agy = antigravity."
     }
     fn parameters(&self) -> Value {
         json!({
             "type": "object",
             "properties": {
-                "harness": { "type": "string", "description": format!("One of: {} (built-in harnesses plus any herdr.harness_profiles)", super::spec::known_harnesses().join(", ")) },
+                "harness": { "type": "string", "description": format!("One of: {} (built-in harnesses plus any agent_host.harness_profiles)", super::spec::known_harnesses().join(", ")) },
                 "prompt": { "type": "string", "description": "Initial prompt typed into the session after it starts" },
-                "host": { "type": "string", "description": "Herdr host to run on, from herdr_hosts (default: the configured default host)" },
+                "host": { "type": "string", "description": "host to run on, from host_list (default: the configured default host)" },
                 "cwd": { "type": "string", "description": "Project directory on that host. Required; a home or root directory is refused." },
                 "label": { "type": "string", "description": "Short human label, e.g. 'auth-refactor'", "default": "" },
                 "task_id": { "type": "string", "description": "HQ task (id or display id such as FR-053) this session works on. Must exist and not be complete. Its title and description become the goal when `goal` is omitted." },
@@ -75,10 +75,10 @@ impl HqTool for HarnessSessionSpawnTool {
         super::check_origin_cap(&self.db, origin)?;
         let cwd = super::require_cwd_in(
             args.get("cwd").and_then(|v| v.as_str()),
-            &cfg.herdr,
+            &cfg.agent_host,
             super::is_handoff_scope(&args),
         )?;
-        let host_handle = crate::herdr::host(Some(host.as_str()).filter(|h| !h.is_empty()))?;
+        let host_handle = crate::agent_host::host(Some(host.as_str()).filter(|h| !h.is_empty()))?;
         let report = super::spawn_on(
             &self.vault_path,
             &self.db,
@@ -114,7 +114,7 @@ impl HqTool for HarnessSessionListTool {
         "harness_session_list"
     }
     fn description(&self) -> &str {
-        "List harness sessions (running and recent) with live Herdr status (idle, working, blocked, done) and the host each runs on. A session on an unreachable host reports reachable=false instead of a guess. Pass task_id to list every session launched for one HQ task."
+        "List harness sessions (running and recent) with live the host status (idle, working, blocked, done) and the host each runs on. A session on an unreachable host reports reachable=false instead of a guess. Pass task_id to list every session launched for one HQ task."
     }
     fn parameters(&self) -> Value {
         json!({
@@ -159,7 +159,7 @@ impl HqTool for HarnessSessionStatusTool {
         "harness_session_status"
     }
     fn description(&self) -> &str {
-        "Status of one harness session: registry row plus the live Herdr agent status and whether its host is reachable."
+        "Status of one harness session: registry row plus the live host agent status and whether its host is reachable."
     }
     fn parameters(&self) -> Value {
         json!({
@@ -283,7 +283,7 @@ impl HqTool for HarnessSessionStopTool {
         "harness_session_stop"
     }
     fn description(&self) -> &str {
-        "Stop a harness session (closes its Herdr workspace on its host; resume token is kept). Fails if the host is unreachable."
+        "Stop a harness session (closes its the host workspace on its host; resume token is kept). Fails if the host is unreachable."
     }
     fn parameters(&self) -> Value {
         json!({
@@ -382,13 +382,13 @@ impl HqTool for HarnessSessionWaitTool {
             .get("timeout_secs")
             .and_then(Value::as_u64)
             .unwrap_or(120);
-        let until: Vec<crate::herdr::AgentStatus> = args
+        let until: Vec<crate::agent_host::AgentStatus> = args
             .get("until")
             .and_then(Value::as_array)
             .map(|a| {
                 a.iter()
                     .filter_map(Value::as_str)
-                    .map(crate::herdr::AgentStatus::parse)
+                    .map(crate::agent_host::AgentStatus::parse)
                     .collect()
             })
             .unwrap_or_default();
@@ -595,14 +595,14 @@ impl HqTool for HarnessSessionAttachTool {
         "harness_session_attach"
     }
     fn description(&self) -> &str {
-        "Attach this web chat to a coding agent Herdr already runs that HQ did not launch here, such as one the user started by hand (find it with herdr_agents). It becomes a tracked session this chat watches, observation-only: give it a goal and definition of done with harness_session_goal, then harness_session_mode to drive. A host that is unreachable or an agent that is gone is reported as such, never pretended attached. Only available in a web chat."
+        "Attach this web chat to a coding agent the host already runs that HQ did not launch here, such as one the user started by hand (find it with host_agents). It becomes a tracked session this chat watches, observation-only: give it a goal and definition of done with harness_session_goal, then harness_session_mode to drive. A host that is unreachable or an agent that is gone is reported as such, never pretended attached. Only available in a web chat."
     }
     fn parameters(&self) -> Value {
         json!({
             "type": "object",
             "properties": {
-                "agent": { "type": "string", "description": "Agent name from herdr_agents" },
-                "host": { "type": "string", "description": "Herdr host from herdr_hosts (default: the configured default host)" }
+                "agent": { "type": "string", "description": "Agent name from host_agents" },
+                "host": { "type": "string", "description": "host from host_list (default: the configured default host)" }
             },
             "required": ["agent"]
         })
@@ -620,12 +620,12 @@ impl HqTool for HarnessSessionAttachTool {
         };
         let target = arg_str(&args, "agent");
         if target.is_empty() {
-            anyhow::bail!("`agent` is required; herdr_agents lists the names");
+            anyhow::bail!("`agent` is required; host_agents lists the names");
         }
         let host_name = arg_str(&args, "host");
-        let host = crate::herdr::host(Some(host_name.as_str()).filter(|h| !h.is_empty()))?;
+        let host = crate::agent_host::host(Some(host_name.as_str()).filter(|h| !h.is_empty()))?;
         let db = self.db.clone();
-        crate::herdr::blocking(move || super::attach(&db, &host, &target, &chat.thread)).await?
+        crate::agent_host::blocking(move || super::attach(&db, &host, &target, &chat.thread)).await?
     }
 }
 
@@ -653,14 +653,14 @@ impl HqTool for HarnessSessionHandoffTool {
                 "acceptance": { "type": "string", "description": "Observable conditions that show the work is done (also accepted as done_criteria). HQ drives the session only when these are specific." },
                 "done_criteria": { "type": "string", "description": "Alias of acceptance" },
                 "harness": { "type": "string", "description": format!("One of: {}", super::spec::known_harnesses().join(", ")) },
-                "cwd": { "type": "string", "description": "Project directory on that host. Required; a home or root directory is refused, as is anything matching herdr.spawn_cwd_deny." },
-                "host": { "type": "string", "description": "Herdr host from herdr_hosts (default: the configured default host, normally local)" },
+                "cwd": { "type": "string", "description": "Project directory on that host. Required; a home or root directory is refused, as is anything matching agent_host.spawn_cwd_deny." },
+                "host": { "type": "string", "description": "host from host_list (default: the configured default host, normally local)" },
                 "external_id": { "type": "string", "description": "Idempotency key for the task, unique per space. Not combinable with task_id." },
                 "task_id": { "type": "string", "description": "Work on this existing HQ task (id or display id) instead of filing one. Must not be complete." },
                 "prompt": { "type": "string", "description": "First prompt typed into the session. Default: the task title, description and acceptance criteria." },
                 "space_id": { "type": "string", "description": "Space slug to file a new task in (default personal)" },
                 "initiative": { "type": "string", "description": "Initiative name to file a new task under (default Inbox)" },
-                "drive": { "type": "boolean", "description": "false starts the thread watching without HQ driving the session. Omit to follow herdr.drive_new_watches." }
+                "drive": { "type": "boolean", "description": "false starts the thread watching without HQ driving the session. Omit to follow agent_host.drive_new_watches." }
             },
             "required": ["harness", "cwd"]
         })
@@ -681,11 +681,11 @@ impl HqTool for HarnessSessionHandoffTool {
         let cfg = hq_core::config::HqConfig::load()?;
         super::require_cwd_in(
             args.get("cwd").and_then(Value::as_str),
-            &cfg.herdr,
+            &cfg.agent_host,
             super::is_handoff_scope(&args),
         )?;
         let host_name = arg_str(&args, "host");
-        let host = crate::herdr::host(Some(host_name.as_str()).filter(|h| !h.is_empty()))?;
+        let host = crate::agent_host::host(Some(host_name.as_str()).filter(|h| !h.is_empty()))?;
         let owned = |key: &str| arg_str(&args, key);
         let acceptance = [owned("acceptance"), owned("done_criteria")]
             .into_iter()
@@ -708,7 +708,7 @@ impl HqTool for HarnessSessionHandoffTool {
                 initiative: owned("initiative"),
                 // A handoff from an hq_ask reply or over the handoff key never starts out driving,
                 // so a handoff-key holder cannot fill the driven-session cap and starve the owner.
-                drive_new: handoff_drives_new(cfg.herdr.drive_new_watches, &args, self.chat.as_ref()),
+                drive_new: handoff_drives_new(cfg.agent_host.drive_new_watches, &args, self.chat.as_ref()),
                 drive_opted_out: args.get("drive").and_then(Value::as_bool) == Some(false),
             },
         )

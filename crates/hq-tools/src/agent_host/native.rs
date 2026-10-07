@@ -1,6 +1,6 @@
 use super::transport::Transport;
 use super::{
-    AgentInfo, AgentStatus, AwaitingAgent, HerdrError, Host, HostBackend, HostEvent, HostEvents,
+    AgentInfo, AgentStatus, AwaitingAgent, AgentHostError, Host, HostBackend, HostEvent, HostEvents,
     INVALID_KEYS_CODE, LaunchRequest, Launched, PromptOutcome, shell_line, validate_keys,
 };
 use hq_host::{Client, ClientError};
@@ -23,7 +23,7 @@ const SETTLED: [AgentStatus; 2] = [AgentStatus::Idle, AgentStatus::Blocked];
 const REACTED: [AgentStatus; 2] = [AgentStatus::Working, AgentStatus::Blocked];
 
 /// The built-in agent host, reached over its control socket. A pane's name is
-/// its workspace id and its pane id, so every herdr-shaped call maps onto it.
+/// its workspace id and its pane id, so every host-shaped call maps onto it.
 #[derive(Debug, Clone)]
 pub struct NativeBackend {
     link: Link,
@@ -138,7 +138,7 @@ impl NativeBackend {
         }
     }
 
-    fn call(&self, method: &str, params: Value) -> Result<Value, HerdrError> {
+    fn call(&self, method: &str, params: Value) -> Result<Value, AgentHostError> {
         self.call_within(method, params, self.command_timeout)
     }
 
@@ -147,7 +147,7 @@ impl NativeBackend {
         method: &str,
         params: Value,
         timeout: Duration,
-    ) -> Result<Value, HerdrError> {
+    ) -> Result<Value, AgentHostError> {
         match &self.link {
             Link::Local(dir) => {
                 let mut client = Client::connect(dir).map_err(|e| self.error(e))?;
@@ -173,15 +173,15 @@ impl NativeBackend {
         method: &str,
         params: Value,
         timeout: Duration,
-    ) -> Result<Value, HerdrError> {
+    ) -> Result<Value, AgentHostError> {
         let args = vec![method.to_string(), params.to_string()];
         let out = transport.run_with_program(ssh_program, name, &args, timeout)?;
-        let unreachable = |detail: String| HerdrError::Unreachable {
+        let unreachable = |detail: String| AgentHostError::Unreachable {
             host: name.to_string(),
             detail,
         };
         if out.exit_code == hq_host::GATE_DENIED_EXIT {
-            return Err(HerdrError::Api {
+            return Err(AgentHostError::Api {
                 code: "gate_denied".into(),
                 message: out.stderr.trim().to_string(),
             });
@@ -199,7 +199,7 @@ impl NativeBackend {
             let text = |k: &str| error.get(k).and_then(Value::as_str).unwrap_or_default();
             return match text("code") {
                 "unreachable" => Err(unreachable(text("message").to_string())),
-                code => Err(HerdrError::Api {
+                code => Err(AgentHostError::Api {
                     code: code.to_string(),
                     message: text("message").to_string(),
                 }),
@@ -211,10 +211,10 @@ impl NativeBackend {
             .ok_or_else(|| unreachable("gate reply had no result".into()))
     }
 
-    fn error(&self, e: ClientError) -> HerdrError {
+    fn error(&self, e: ClientError) -> AgentHostError {
         match e {
-            ClientError::Remote { code, message } => HerdrError::Api { code, message },
-            other => HerdrError::Unreachable {
+            ClientError::Remote { code, message } => AgentHostError::Api { code, message },
+            other => AgentHostError::Unreachable {
                 host: self.host_name().into(),
                 detail: other.to_string(),
             },
@@ -258,7 +258,7 @@ impl NativeBackend {
     /// Whether the agent has drawn something and stopped for a moment. An empty
     /// screen reads as idle, so state alone cannot tell a CLI that is still
     /// starting from one that is ready (or waiting on a dialog).
-    fn drawn(&self, name: &str, within: Duration) -> Result<bool, HerdrError> {
+    fn drawn(&self, name: &str, within: Duration) -> Result<bool, AgentHostError> {
         let deadline = Instant::now() + within;
         loop {
             let info = self.call("agent.get", json!({ "name": name }))?;
@@ -280,7 +280,7 @@ impl NativeBackend {
         target: &str,
         until: &[AgentStatus],
         timeout: Duration,
-    ) -> Result<Option<AgentInfo>, HerdrError> {
+    ) -> Result<Option<AgentInfo>, AgentHostError> {
         let states: Vec<&str> = until.iter().map(status_name).collect();
         let params = json!({
             "name": target, "until": "state", "states": states,
@@ -288,7 +288,7 @@ impl NativeBackend {
         });
         match self.call_within("agent.wait", params, timeout + self.command_timeout) {
             Ok(v) => Ok(parse_info(&v)),
-            Err(HerdrError::Api { code, .. }) if code == "timeout" => Ok(None),
+            Err(AgentHostError::Api { code, .. }) if code == "timeout" => Ok(None),
             Err(e) => Err(e),
         }
     }
@@ -297,7 +297,7 @@ impl NativeBackend {
 const CLAUDE_KIND: &str = "claude";
 
 /// The program and arguments to start. A wrapper command runs through a shell,
-/// the same way herdr types it into a pane.
+/// the same way a person types it into a pane.
 fn argv_for(req: &LaunchRequest) -> Vec<String> {
     match &req.command {
         Some(command) => vec!["sh".into(), "-c".into(), shell_line(command, &req.args)],
@@ -381,7 +381,7 @@ impl HostBackend for NativeBackend {
         self.launch_bound
     }
 
-    fn version(&self) -> Result<String, HerdrError> {
+    fn version(&self) -> Result<String, AgentHostError> {
         let status = self.call("host.status", json!({}))?;
         Ok(status
             .get("host_version")
@@ -390,7 +390,7 @@ impl HostBackend for NativeBackend {
             .to_string())
     }
 
-    fn agents(&self) -> Result<Vec<AgentInfo>, HerdrError> {
+    fn agents(&self) -> Result<Vec<AgentInfo>, AgentHostError> {
         let list = self.call("agent.list", json!({}))?;
         let agents = list.get("agents").and_then(Value::as_array);
         Ok(agents
@@ -398,15 +398,15 @@ impl HostBackend for NativeBackend {
             .unwrap_or_default())
     }
 
-    fn agent(&self, target: &str) -> Result<Option<AgentInfo>, HerdrError> {
+    fn agent(&self, target: &str) -> Result<Option<AgentInfo>, AgentHostError> {
         match self.call("agent.get", json!({ "name": target })) {
             Ok(v) => Ok(parse_info(&v)),
-            Err(HerdrError::Api { code, .. }) if code == "agent_not_found" => Ok(None),
+            Err(AgentHostError::Api { code, .. }) if code == "agent_not_found" => Ok(None),
             Err(e) => Err(e),
         }
     }
 
-    fn launch(&self, req: &LaunchRequest) -> Result<Launched, HerdrError> {
+    fn launch(&self, req: &LaunchRequest) -> Result<Launched, AgentHostError> {
         let env: serde_json::Map<String, Value> = req
             .env
             .iter()
@@ -452,7 +452,7 @@ impl HostBackend for NativeBackend {
         })
     }
 
-    fn await_started(&self, name: &str, within: Duration) -> Result<Option<AgentInfo>, HerdrError> {
+    fn await_started(&self, name: &str, within: Duration) -> Result<Option<AgentInfo>, AgentHostError> {
         match self.wait_for(name, &SETTLED, within)? {
             Some(info) => Ok(Some(info)),
             None => self.agent(name),
@@ -464,7 +464,7 @@ impl HostBackend for NativeBackend {
         target: &str,
         text: &str,
         wait: Option<Duration>,
-    ) -> Result<PromptOutcome, HerdrError> {
+    ) -> Result<PromptOutcome, AgentHostError> {
         self.call("agent.prompt", json!({ "name": target, "text": text }))?;
         let Some(limit) = wait else {
             return Ok(PromptOutcome::Submitted);
@@ -478,7 +478,7 @@ impl HostBackend for NativeBackend {
         }
     }
 
-    fn submit(&self, target: &str, text: &str) -> Result<PromptOutcome, HerdrError> {
+    fn submit(&self, target: &str, text: &str) -> Result<PromptOutcome, AgentHostError> {
         self.call("agent.prompt", json!({ "name": target, "text": text }))?;
         if self.wait_for(target, &REACTED, SUBMIT_CONFIRM)?.is_some() {
             return Ok(PromptOutcome::Submitted);
@@ -489,8 +489,8 @@ impl HostBackend for NativeBackend {
         Ok(PromptOutcome::Resubmitted)
     }
 
-    fn send_keys(&self, target: &str, keys: &[String]) -> Result<(), HerdrError> {
-        validate_keys(keys).map_err(|message| HerdrError::Api {
+    fn send_keys(&self, target: &str, keys: &[String]) -> Result<(), AgentHostError> {
+        validate_keys(keys).map_err(|message| AgentHostError::Api {
             code: INVALID_KEYS_CODE.to_string(),
             message,
         })?;
@@ -498,12 +498,12 @@ impl HostBackend for NativeBackend {
             .map(|_| ())
     }
 
-    fn send_text(&self, pane_id: &str, text: &str) -> Result<(), HerdrError> {
+    fn send_text(&self, pane_id: &str, text: &str) -> Result<(), AgentHostError> {
         self.call("agent.send_text", json!({ "name": pane_id, "text": text }))
             .map(|_| ())
     }
 
-    fn read(&self, target: &str, lines: usize) -> Result<String, HerdrError> {
+    fn read(&self, target: &str, lines: usize) -> Result<String, AgentHostError> {
         self.read_sourced(target, lines).map(|(text, _)| text)
     }
 
@@ -511,7 +511,7 @@ impl HostBackend for NativeBackend {
         &self,
         target: &str,
         lines: usize,
-    ) -> Result<(String, &'static str), HerdrError> {
+    ) -> Result<(String, &'static str), AgentHostError> {
         let v = self.call(
             "agent.read",
             json!({ "name": target, "source": "recent_unwrapped", "lines": lines }),
@@ -525,9 +525,9 @@ impl HostBackend for NativeBackend {
         target: &str,
         until: &[AgentStatus],
         timeout: Duration,
-    ) -> Result<AgentInfo, HerdrError> {
+    ) -> Result<AgentInfo, AgentHostError> {
         self.wait_for(target, until, timeout)?
-            .ok_or_else(|| HerdrError::Api {
+            .ok_or_else(|| AgentHostError::Api {
                 code: "timeout".into(),
                 message: format!(
                     "{target} did not reach the state within {}s",
@@ -536,9 +536,9 @@ impl HostBackend for NativeBackend {
             })
     }
 
-    fn close_workspace(&self, workspace_id: &str) -> Result<(), HerdrError> {
+    fn close_workspace(&self, workspace_id: &str) -> Result<(), AgentHostError> {
         match self.call("agent.remove", json!({ "name": workspace_id })) {
-            Err(HerdrError::Api { code, .. }) if code == "agent_not_found" => Ok(()),
+            Err(AgentHostError::Api { code, .. }) if code == "agent_not_found" => Ok(()),
             other => other.map(|_| ()),
         }
     }
@@ -552,7 +552,7 @@ impl HostBackend for NativeBackend {
         true
     }
 
-    fn poll_events(&self, after: Option<u64>, wait: Duration) -> Result<HostEvents, HerdrError> {
+    fn poll_events(&self, after: Option<u64>, wait: Duration) -> Result<HostEvents, AgentHostError> {
         let params = json!({ "after": after, "timeout_ms": wait.as_millis() as u64 });
         let v = self.call_within("events.poll", params, wait + self.command_timeout)?;
         let text = |e: &Value, k: &str| e.get(k).and_then(Value::as_str).map(str::to_string);
@@ -577,7 +577,7 @@ impl HostBackend for NativeBackend {
         })
     }
 
-    fn update_resume(&self, name: &str, kind: &str, args: Vec<String>) -> Result<(), HerdrError> {
+    fn update_resume(&self, name: &str, kind: &str, args: Vec<String>) -> Result<(), AgentHostError> {
         let mut argv = vec![binary_for(kind)];
         argv.extend(args);
         argv.extend(self.hook_flags(name, kind));
@@ -585,7 +585,7 @@ impl HostBackend for NativeBackend {
             .map(|_| ())
     }
 
-    fn awaiting(&self) -> Result<Vec<AwaitingAgent>, HerdrError> {
+    fn awaiting(&self) -> Result<Vec<AwaitingAgent>, AgentHostError> {
         let v = self.call("agent.awaiting", json!({}))?;
         let list = v.get("agents").and_then(Value::as_array);
         Ok(list
@@ -593,7 +593,7 @@ impl HostBackend for NativeBackend {
             .unwrap_or_default())
     }
 
-    fn resume_awaiting(&self, name: &str, env: Vec<(String, String)>) -> Result<(), HerdrError> {
+    fn resume_awaiting(&self, name: &str, env: Vec<(String, String)>) -> Result<(), AgentHostError> {
         let env: serde_json::Map<String, Value> = env
             .into_iter()
             .map(|(k, v)| (k, Value::String(v)))

@@ -53,7 +53,7 @@ async fn dispatch_hq_native(
             String::new()
         } else {
             format!(
-                " If {name} asks for development/coding work through Herdr, you may only \
+                " If {name} asks for development/coding work through the host, you may only \
 launch these harnesses: {}. Tell {name} plainly if that limits what you can do.",
                 allowed.join(", ")
             )
