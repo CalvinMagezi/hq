@@ -4,18 +4,18 @@ const KEY: &str = "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIEXAMPLEKEYBLOB hq-gate";
 
 #[test]
 fn the_plist_names_the_binary_and_escapes_it() {
-    let plist = launchd_plist(Path::new("/Users/a&b/.local/bin/hq"), Path::new("/Users/a&b"));
-    assert!(plist.contains("<string>/Users/a&amp;b/.local/bin/hq</string><string>host</string><string>serve</string>"));
+    let plist = launchd_plist(Path::new("/opt/a&b/.local/bin/hq"), Path::new("/opt/a&b"));
+    assert!(plist.contains("<string>/opt/a&amp;b/.local/bin/hq</string><string>host</string><string>serve</string>"));
     assert!(plist.contains("<key>KeepAlive</key><true/>"));
-    assert!(plist.contains("/Users/a&amp;b/Library/Logs/hq-host.log"));
+    assert!(plist.contains("/opt/a&amp;b/Library/Logs/hq-host.log"));
 }
 
 #[test]
 fn the_unit_runs_the_host_and_restarts_it() {
-    let unit = systemd_unit(Path::new("/home/a/.local/bin/hq"), Path::new("/home/a"));
-    assert!(unit.contains("ExecStart=/home/a/.local/bin/hq host serve"));
+    let unit = systemd_unit(Path::new("/srv/example/.local/bin/hq"), Path::new("/srv/example"));
+    assert!(unit.contains("ExecStart=/srv/example/.local/bin/hq host serve"));
     assert!(unit.contains("Restart=on-failure"));
-    assert!(unit.contains("/home/a/.local/bin:"));
+    assert!(unit.contains("/srv/example/.local/bin:"));
 }
 
 #[test]
