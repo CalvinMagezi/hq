@@ -53,7 +53,22 @@ pub(super) async fn search_chain(
     native: Option<&NativeEnv<'_>>,
     budgets: &Budgets,
 ) -> Result<WebSearchResults> {
-    if searxng_url.is_none() && brave.is_none() && native.is_none() {
+    let peer = peer::configured();
+    search_chain_via(query, opts, searxng_url, brave, native, peer.as_ref(), budgets).await
+}
+
+/// `search_chain` with the peer given explicitly, so tests need no global.
+pub(super) async fn search_chain_via(
+    query: &str,
+    opts: &SearchOptions,
+    searxng_url: Option<&str>,
+    brave: Option<(&str, &str)>,
+    native: Option<&NativeEnv<'_>>,
+    peer: Option<&hq_core::config::RemoteMcpServer>,
+    budgets: &Budgets,
+) -> Result<WebSearchResults> {
+    let peer = peer.filter(|_| !opts.peer_hop);
+    if searxng_url.is_none() && brave.is_none() && native.is_none() && peer.is_none() {
         return Err(no_backend_error());
     }
     let deadline = Instant::now() + budgets.total;
@@ -116,7 +131,32 @@ pub(super) async fn search_chain(
         }
     }
 
-    if let Some((endpoint, api_key)) = brave {
+    if let Some(server) = peer {
+        let key = format!("peer:{}", server.name);
+        let backend = Backend {
+            key: &key,
+            label: "peer",
+            budget: peer::PEER_TIMEOUT,
+            backoff: searxng_backoff,
+        };
+        debug!(query = %query, peer = %server.name, "searching through a peer HQ");
+        let page = try_backend(
+            &backend,
+            deadline,
+            &mut attempts,
+            || peer::request(server, query, opts),
+            |json| peer::parse(json).map_err(ProviderError::from),
+        )
+        .await;
+        if let Some(page) = page.filter(|p| !p.results.is_empty()) {
+            answered = Some(("peer", page, Vec::new()));
+        }
+    }
+
+    // A peer's answer is a full one, so a paid Brave call is kept for when it fails.
+    if !matches!(answered, Some(("peer", ..)))
+        && let Some((endpoint, api_key)) = brave
+    {
         if opts.page > BRAVE_MAX_PAGE {
             attempts.push(ProviderAttempt {
                 provider: "brave".into(),

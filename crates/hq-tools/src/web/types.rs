@@ -89,6 +89,8 @@ pub struct SearchOptions {
     pub category: Option<Category>,
     pub include_domains: Vec<String>,
     pub exclude_domains: Vec<String>,
+    /// This call came from another HQ's peer search, so it must not be forwarded again.
+    pub peer_hop: bool,
 }
 
 impl Default for SearchOptions {
@@ -102,6 +104,7 @@ impl Default for SearchOptions {
             category: None,
             include_domains: Vec::new(),
             exclude_domains: Vec::new(),
+            peer_hop: false,
         }
     }
 }
@@ -110,7 +113,13 @@ impl SearchOptions {
     /// Parse the tool arguments shared by the MCP and agent `web_search` tools.
     /// Bad values are rejected with a message naming the field, never ignored.
     pub fn from_args(args: &Value) -> Result<Self, String> {
-        let mut opts = Self::default();
+        let mut opts = Self {
+            peer_hop: args
+                .get(super::peer::PEER_HOP_ARG)
+                .and_then(Value::as_bool)
+                .unwrap_or(false),
+            ..Self::default()
+        };
         if let Some(v) = args.get("max_results").filter(|v| !v.is_null()) {
             let n = v.as_u64().ok_or("max_results must be a positive integer")?;
             opts.max_results = (n as usize).clamp(1, MAX_RESULTS_CAP);

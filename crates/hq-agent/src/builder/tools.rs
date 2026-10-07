@@ -105,11 +105,14 @@ impl SessionBuilder {
                     hq_tools::coding::TodoStore::new(),
                 )),
             }),
-            Box::new(crate::web::WebSearchTool::new(
+            Box::new({
+                hq_tools::web::set_search_peer(self.config.web_search_peer_server().cloned());
+                crate::web::WebSearchTool::new(
                 self.config.searxng_url.clone(),
                 self.config.brave_api_key.clone(),
                 self.config.web_search_native,
-            )),
+            )
+            }),
             Box::new(crate::web::WebFetchTool),
         ]
     }

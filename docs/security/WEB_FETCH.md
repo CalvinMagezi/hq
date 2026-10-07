@@ -52,3 +52,14 @@ through (`web::guarded_client()` for other tools):
   embedded data. Set `HQ_WEB_FETCH_JINA=0` to never send a URL to it.
 - A hostname is refused if any of its addresses is non-public, even if others
   are public. That is stricter than filtering and avoids split-horizon surprises.
+- `web_search_peer` names a `remote_mcp` entry (another HQ). When this machine's
+  engines are blocked, the query is sent to that peer's `web_search` over MCP,
+  with the entry's bearer token, so the query reaches whoever runs the peer: only
+  name an HQ you control. The peer applies its own guards. Its results are
+  untrusted: they pass the same sanitiser as any engine's, and instruction-like
+  text is flagged. Each forwarded call carries `peer_hop: true`, which a peer
+  honours by not forwarding it again, so two HQs naming each other do not loop.
+  Like `remote_mcp`, the URL is operator configuration and is not checked by the
+  SSRF guard. A sleeping peer costs one failed call, then a short cooldown.
+  Example: `web_search_peer: home` with a `remote_mcp` entry named `home` that
+  points at the home machine's `/mcp` over a private network.
