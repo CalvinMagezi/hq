@@ -109,6 +109,8 @@ pub fn is_private(ip: IpAddr) -> bool {
                 || v4.is_multicast()
                 || v4.is_broadcast()
                 || (o[0] == 100 && (64..128).contains(&o[1]))
+                || (o[0] == 198 && (o[1] & 0xfe) == 18)
+                || (o[0] == 192 && o[1] == 0 && o[2] == 0)
                 || o[0] == 0
         }
         IpAddr::V6(v6) => {
@@ -116,7 +118,13 @@ pub fn is_private(ip: IpAddr) -> bool {
                 return is_private(IpAddr::V4(v4));
             }
             let seg = v6.segments();
-            v6.is_loopback()
+            // Names for an IPv4 address inside IPv6: NAT64, 6to4, v4-compatible.
+            let embeds_v4 = (seg[0] == 0x64 && seg[1] == 0xff9b && seg[2..6] == [0; 4])
+                || seg[0] == 0x2002
+                || seg[..6] == [0; 6];
+            embeds_v4
+                || (seg[0] & 0xffc0) == 0xfec0
+                || v6.is_loopback()
                 || v6.is_unspecified()
                 || v6.is_multicast()
                 || (seg[0] & 0xfe00) == 0xfc00
@@ -312,10 +320,16 @@ struct Head {
 }
 
 fn read_head(client: &mut TcpStream) -> std::io::Result<Option<(Head, Vec<u8>)>> {
-    client.set_read_timeout(Some(HEAD_TIMEOUT))?;
+    let started = Instant::now();
     let mut raw = Vec::new();
     let mut buf = [0u8; 2048];
     let end = loop {
+        // The whole head has HEAD_TIMEOUT, not each read, so a trickle cannot hold a slot.
+        let left = HEAD_TIMEOUT.saturating_sub(started.elapsed());
+        if left.is_zero() {
+            return Ok(None);
+        }
+        client.set_read_timeout(Some(left))?;
         if let Some(at) = raw.windows(4).position(|w| w == b"\r\n\r\n") {
             break at + 4;
         }

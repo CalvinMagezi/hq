@@ -10,6 +10,9 @@ fn sandbox(project: &Path) -> AgentSandbox {
         writable: vec![],
         writable_files: vec![],
         readonly_files: vec![],
+        readonly_subpaths: vec![],
+        denied_programs: vec![],
+        denied_services: vec![],
         masked_files: vec![],
         hidden_dirs: vec![],
         hide_other_processes: false,
@@ -307,4 +310,45 @@ fn a_sandboxed_process_that_reads_nothing_still_exits_cleanly() {
     let h = host();
     let out = inside(backend, &sandbox(&h.project), "echo fine");
     assert!(out.contains("fine"), "{out}");
+}
+
+#[test]
+fn an_allowance_inside_a_hidden_dir_survives_a_hidden_parent_listed_later() {
+    let backend = need_backend!();
+    let dir = tempfile::tempdir().unwrap();
+    let root = dir.path().canonicalize().unwrap();
+    let inner = root.join("run");
+    std::fs::create_dir(&inner).unwrap();
+    std::fs::write(inner.join("mine.json"), "MINE-OK").unwrap();
+    std::fs::write(inner.join("theirs.json"), "THEIRS-SECRET").unwrap();
+    let mut s = sandbox(&root);
+    s.hidden_dirs = vec![
+        HiddenDir { dir: inner.clone(), allow: vec![inner.join("mine.json")] },
+        HiddenDir { dir: root.clone(), allow: vec![] },
+    ];
+    let out = inside(backend, &s, &format!("cat {i}/mine.json; cat {i}/theirs.json", i = inner.display()));
+    assert!(out.contains("MINE-OK"), "{out}");
+    assert!(!out.contains("THEIRS-SECRET"), "{out}");
+}
+
+#[test]
+fn readonly_subpaths_and_denied_programs_are_enforced() {
+    let backend = need_backend!();
+    let dir = tempfile::tempdir().unwrap();
+    let root = dir.path().canonicalize().unwrap();
+    std::fs::create_dir(root.join("hooks")).unwrap();
+    let mut s = sandbox(&root);
+    s.readonly_subpaths = vec![root.join("hooks")];
+    let out = inside(
+        backend,
+        &s,
+        &format!("echo x > {r}/hooks/pre-commit; echo y > {r}/ok && echo WROTE", r = root.display()),
+    );
+    assert!(!root.join("hooks/pre-commit").exists(), "{out}");
+    assert!(out.contains("WROTE"), "{out}");
+    if matches!(backend, Backend::SandboxExec(_)) {
+        s.denied_programs = vec!["/usr/bin/open".into()];
+        let out = inside(backend, &s, "/usr/bin/open -h && echo STARTED");
+        assert!(!out.contains("STARTED"), "{out}");
+    }
 }

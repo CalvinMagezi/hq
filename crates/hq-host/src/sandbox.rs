@@ -10,7 +10,20 @@ use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
 
 /// Directories under HOME that hold credentials and have no place in an agent.
-const SECRET_HOME_DIRS: &[&str] = &[".ssh", ".gnupg", ".aws", ".kube", ".hq"];
+const SECRET_HOME_DIRS: &[&str] = &[
+    ".ssh", ".gnupg", ".aws", ".kube", ".hq", ".docker", ".config/gh",
+];
+/// Other Claude profiles (`~/.claude-<name>`) hold their own logins.
+const OTHER_PROFILE_PREFIX: &str = ".claude-";
+/// Credential files directly under HOME.
+const SECRET_HOME_FILES: &[&str] = &[".netrc", ".npmrc", ".git-credentials"];
+/// Files and directories the operator's own tools run code from later, outside
+/// the sandbox. Writable roots must not let an agent plant anything in them.
+const HOME_READONLY: &[&str] = &[".claude/settings.json", ".claude/settings.local.json", ".claude/hooks"];
+const PROJECT_READONLY: &[&str] = &[".git/hooks", ".git/config", ".mcp.json", ".claude/settings.json", ".claude/settings.local.json", ".claude/hooks"];
+/// Ways out of Seatbelt: starting an app outside it, or scheduling one.
+const DENIED_PROGRAMS: &[&str] = &["/usr/bin/open", "/usr/bin/osascript", "/bin/launchctl", "/usr/bin/launchctl"];
+const DENIED_SERVICES: &[&str] = &["com.apple.coreservices.launchservicesd", "com.apple.dnssd.service"];
 /// What Claude Code needs to write under HOME, besides the project.
 const HOME_WRITABLE: &[&str] = &[".claude", ".cache", "Library/Caches"];
 const HOME_WRITABLE_FILES: &[&str] = &[".claude.json"];
@@ -98,6 +111,7 @@ fn policy(
     port: u16,
 ) -> Result<AgentSandbox, HostError> {
     let home = home().ok_or_else(|| HostError::Io("HOME is not set".into()))?;
+    let home = home.canonicalize().unwrap_or(home);
     let under = |names: &[&str]| names.iter().map(|n| home.join(n)).collect::<Vec<_>>();
     let tmp = std::env::temp_dir();
     let writable = canonical(
@@ -108,6 +122,26 @@ fn policy(
             .chain(spec.writable.iter().cloned()),
     );
     let run_dir = run_dir.canonicalize().map_err(|e| HostError::Io(e.to_string()))?;
+    let project = cwd.canonicalize().map_err(|e| HostError::Io(e.to_string()))?;
+    let other_profiles = std::fs::read_dir(&home)
+        .into_iter()
+        .flatten()
+        .flatten()
+        .filter(|e| e.file_name().to_string_lossy().starts_with(OTHER_PROFILE_PREFIX))
+        .map(|e| e.path());
+    let secret_dirs = canonical(under(SECRET_HOME_DIRS).into_iter().chain(other_profiles));
+    // A writable root that contains HOME, the run directory or a secret directory
+    // would let the agent rename or rewrite them, which no read rule survives.
+    let guarded = [home.clone(), run_dir.clone()].into_iter().chain(secret_dirs.iter().cloned());
+    for root in std::iter::once(&project).chain(&writable) {
+        if let Some(inside) = guarded.clone().find(|g| g.starts_with(root)) {
+            return Err(HostError::Sandbox(format!(
+                "{} is writable but contains {}; start the agent in a project directory",
+                root.display(),
+                inside.display()
+            )));
+        }
+    }
     let own_files = [
         run_dir.join("hooks").join(format!("{name}.json")),
         run_dir.join("mcp").join(format!("{name}.json")),
@@ -116,17 +150,23 @@ fn policy(
     let mut allow = canonical(own_files);
     allow.push(socket.clone());
     let mut hidden = vec![HiddenDir { dir: run_dir, allow }];
-    hidden.extend(
-        canonical(under(SECRET_HOME_DIRS))
-            .into_iter()
-            .map(|dir| HiddenDir { dir, allow: Vec::new() }),
-    );
+    hidden.extend(secret_dirs.into_iter().map(|dir| HiddenDir { dir, allow: Vec::new() }));
+    let under_project = |names: &[&str]| names.iter().map(|n| project.join(n)).collect::<Vec<_>>();
+    let (home_files, home_dirs): (Vec<_>, Vec<_>) =
+        under(HOME_READONLY).into_iter().partition(|p| p.extension().is_some());
+    let (project_files, project_dirs): (Vec<_>, Vec<_>) = under_project(PROJECT_READONLY)
+        .into_iter()
+        .partition(|p| p.extension().is_some() || p.ends_with("config"));
+    let macos = cfg!(target_os = "macos");
     Ok(AgentSandbox {
-        project: cwd.canonicalize().map_err(|e| HostError::Io(e.to_string()))?,
+        project,
         writable,
         writable_files: under(HOME_WRITABLE_FILES),
-        readonly_files: Vec::new(),
-        masked_files: Vec::new(),
+        readonly_files: home_files.into_iter().chain(project_files).collect(),
+        readonly_subpaths: home_dirs.into_iter().chain(project_dirs).collect(),
+        denied_programs: if macos { DENIED_PROGRAMS.iter().map(PathBuf::from).collect() } else { Vec::new() },
+        denied_services: if macos { DENIED_SERVICES.iter().map(|s| s.to_string()).collect() } else { Vec::new() },
+        masked_files: under(SECRET_HOME_FILES),
         hidden_dirs: hidden,
         hide_other_processes: true,
         network: Network::Proxy {

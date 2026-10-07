@@ -25,7 +25,9 @@ fn spec(allow: Vec<Allow>) -> SandboxSpec {
 /// A run directory shaped like the real one: an operator token, two agents'
 /// MCP configs and hook files.
 fn run_dir() -> tempfile::TempDir {
-    let dir = tempfile::tempdir().unwrap();
+    // Not under the temporary directory: that is writable to the agent, and the
+    // host refuses a run directory an agent could rename.
+    let dir = tempfile::tempdir_in(env!("CARGO_MANIFEST_DIR")).unwrap();
     let p = dir.path();
     for sub in ["mcp", "hooks"] {
         std::fs::create_dir(p.join(sub)).unwrap();
@@ -196,4 +198,41 @@ fn mode_none_runs_unsandboxed_and_says_so() {
         .unwrap();
     assert_eq!(plain.sandbox, "none");
     host.kill("b").unwrap();
+}
+
+#[test]
+fn a_writable_root_that_contains_the_host_directory_or_home_is_refused() {
+    if !sandbox_available() {
+        return;
+    }
+    let dir = run_dir();
+    let host = host_for(dir.path());
+    let home = std::path::PathBuf::from(std::env::var("HOME").unwrap());
+    for cwd in [home, dir.path().parent().unwrap().to_path_buf()] {
+        let mut s = SpawnSpec::new("a", vec!["sleep".into(), "1".into()], &cwd);
+        s.sandbox = Some(spec(vec![]));
+        let err = host.spawn(s).err().map(|e| e.to_string()).unwrap_or_default();
+        assert!(err.contains("contains"), "{}: {err}", cwd.display());
+    }
+    assert!(host.list().is_empty());
+}
+
+#[test]
+fn the_agent_cannot_plant_code_the_operator_runs_later() {
+    if !sandbox_available() {
+        return;
+    }
+    let dir = run_dir();
+    let project = tempfile::tempdir().unwrap();
+    std::fs::create_dir_all(project.path().join(".git/hooks")).unwrap();
+    let host = host_for(dir.path());
+    let script = "t() { if eval \"$2\" >/dev/null 2>&1; then echo \"$1=yes\"; else echo \"$1=no\"; fi; }; \
+        t hook 'echo x > .git/hooks/pre-commit'; t mcp 'echo {} > .mcp.json'; t cfg 'echo x >> .git/config'; \
+        t src 'echo y > src.txt'; t open '/usr/bin/open -h'; echo DONE";
+    let out = run(&host, "a", project.path(), spec(vec![]), script);
+    for (probe, allowed) in [("hook", false), ("mcp", false), ("cfg", false), ("src", true), ("open", false)] {
+        let want = format!("{probe}={}", if allowed { "yes" } else { "no" });
+        assert!(out.contains(&want), "expected {want}; got:\n{out}");
+    }
+    host.kill("a").unwrap();
 }

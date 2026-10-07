@@ -15,7 +15,7 @@ fn screen(host: &Host) -> String {
 #[ignore = "needs a logged-in Claude Code and network access"]
 fn claude_answers_a_prompt_under_the_sandbox() {
     let project = tempfile::tempdir().unwrap();
-    let run = tempfile::tempdir().unwrap();
+    let run = tempfile::tempdir_in(env!("CARGO_MANIFEST_DIR")).unwrap();
     let host = Host::new();
     host.set_run_dir(run.path());
     let mut spec = SpawnSpec::new("live", vec!["claude".into(), "--version".into()], project.path());

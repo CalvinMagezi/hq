@@ -160,8 +160,14 @@ The sandbox policy is kept in `session.json` and applied again on restore.
 `agent.list` shows each agent's mode and `host.status` counts agents running
 with `none`.
 
+The agent cannot write `~/.claude/settings*.json`, `~/.claude/hooks`, or in its
+project `.git/hooks`, `.git/config`, `.mcp.json` and `.claude/settings*.json`,
+where it could plant code you run later outside the sandbox, and it cannot start
+`open`, `osascript` or `launchctl`. The host refuses to start an agent in a
+directory that contains your home, the host directory or a secret directory.
+
 What it does not stop: the agent still reads and writes your project and
-`~/.claude`; on macOS the Keychain stays reachable because Claude Code keeps its
+`~/.claude`, and can edit `~/.claude.json` (which holds MCP server commands); on macOS the Keychain stays reachable because Claude Code keeps its
 login there; your own MCP servers, plugins and connectors are refused until you
 allow their hosts; a kernel flaw or an allowed domain is out of scope. On Linux
 `bwrap` cannot yet enforce the proxy-only network, so process mode fails closed

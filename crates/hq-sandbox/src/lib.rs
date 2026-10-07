@@ -51,6 +51,12 @@ pub struct AgentSandbox {
     pub writable_files: Vec<PathBuf>,
     /// Files inside a writable root that must stay read-only.
     pub readonly_files: Vec<PathBuf>,
+    /// Directories inside a writable root that must stay read-only.
+    pub readonly_subpaths: Vec<PathBuf>,
+    /// Programs the agent may not start (macOS: a way out of the sandbox).
+    pub denied_programs: Vec<PathBuf>,
+    /// Mach services the agent may not look up (macOS).
+    pub denied_services: Vec<String>,
     /// Files the agent can neither read nor write.
     pub masked_files: Vec<PathBuf>,
     pub hidden_dirs: Vec<HiddenDir>,
@@ -136,14 +142,25 @@ pub fn seatbelt_profile(s: &AgentSandbox) -> String {
     if !s.readonly_files.is_empty() {
         p.push_str(&format!("(deny file-write* {})", literals(&s.readonly_files)));
     }
+    for dir in &s.readonly_subpaths {
+        p.push_str(&format!("(deny file-write* (subpath {}))", sbpl_string(dir)));
+    }
+    // Every denial first, then every allowance: a later deny of an enclosing
+    // directory would otherwise cancel an earlier allow for a file inside it.
     for hidden in &s.hidden_dirs {
         p.push_str(&format!(
             "(deny file-read-data (subpath {}))",
             sbpl_string(&hidden.dir)
         ));
-        if !hidden.allow.is_empty() {
-            p.push_str(&format!("(allow file-read-data {})", literals(&hidden.allow)));
-        }
+    }
+    for hidden in s.hidden_dirs.iter().filter(|h| !h.allow.is_empty()) {
+        p.push_str(&format!("(allow file-read-data {})", literals(&hidden.allow)));
+    }
+    for program in &s.denied_programs {
+        p.push_str(&format!("(deny process-exec (literal {}))", sbpl_string(program)));
+    }
+    for service in &s.denied_services {
+        p.push_str(&format!("(deny mach-lookup (global-name {}))", sbpl_string(Path::new(service))));
     }
     if !s.masked_files.is_empty() {
         p.push_str(&format!(
@@ -203,8 +220,8 @@ pub fn bwrap_args(s: &AgentSandbox, argv: &[String]) -> Result<Vec<OsString>, Un
     for dir in std::iter::once(&s.project).chain(&s.writable) {
         args.extend(["--bind".into(), dir.into(), dir.into()]);
     }
-    for file in &s.readonly_files {
-        args.extend(["--ro-bind".into(), file.into(), file.into()]);
+    for path in s.readonly_files.iter().chain(&s.readonly_subpaths) {
+        args.extend(["--ro-bind".into(), path.into(), path.into()]);
     }
     if s.network == Network::Off {
         args.push("--unshare-net".into());
