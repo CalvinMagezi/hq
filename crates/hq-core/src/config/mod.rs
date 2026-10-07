@@ -567,7 +567,7 @@ impl HqConfig {
 
     /// The guts of `save_patch()`, parameterized on the config file path so
     /// it's testable without touching `HQ_CONFIG_PATH`/`~/.hq/config.yaml`.
-    pub fn save_patch_to_path(
+    fn save_patch_to_path(
         config_path: &std::path::Path,
         patch: impl FnOnce(&mut HqConfig),
     ) -> anyhow::Result<HqConfig> {

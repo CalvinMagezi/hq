@@ -7,7 +7,7 @@
 use anyhow::{Context, Result, bail};
 use base64::Engine;
 use base64::engine::general_purpose::URL_SAFE_NO_PAD;
-use hq_core::config::{HerdrHostConfig, HqConfig, LOCAL_HOST, NATIVE_HOST};
+use hq_core::config::{HqConfig, LOCAL_HOST, NATIVE_HOST};
 use serde::{Deserialize, Serialize};
 use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
@@ -137,20 +137,15 @@ pub fn add_host_at(config_path: &Path, join_code: &str, gateway_addr: &str, ssh_
     let identity = ssh_dir.join(format!("hq_gate_{}", join.name));
     let public_key = ensure_key(&identity, &join.name)?;
     let ssh = format!("{}@{}", join.user, join.addr);
-    let entry: HerdrHostConfig = serde_yaml::from_str(&format!(
-        "ssh: \"{ssh}\"\nidentity_file: \"{}\"\n",
-        identity.display()
-    ))?;
-    let mut changed = false;
-    HqConfig::save_patch_to_path(config_path, |c| {
-        let same = c.herdr.hosts.get(&join.name).is_some_and(|h| {
-            h.ssh == entry.ssh && h.identity_file == entry.identity_file
-        });
-        if !same {
-            c.herdr.hosts.insert(join.name.clone(), entry.clone());
-            changed = true;
+    let existing = std::fs::read_to_string(config_path).unwrap_or_default();
+    let identity_text = identity.display().to_string();
+    let changed = match insert_host(&existing, &join.name, &ssh, &identity_text)? {
+        Some(updated) => {
+            write_config(config_path, &existing, &updated)?;
+            true
         }
-    })?;
+        None => false,
+    };
     Ok(Added {
         authorize_command: format!("hq host authorize --key '{public_key}' --from {gateway_addr}"),
         name: join.name,
@@ -189,6 +184,110 @@ pub fn check_host(name: &str) -> serde_json::Value {
             "hint": "check that `hq host install` ran on the machine, that its `hq host authorize` command was run, that the machine is on the same tailnet, and that its sshd is running",
         }),
     }
+}
+
+/// The leading spaces of `line`.
+fn indent_of(line: &str) -> usize {
+    line.len() - line.trim_start_matches(' ').len()
+}
+
+fn is_blank_or_comment(line: &str) -> bool {
+    let t = line.trim();
+    t.is_empty() || t.starts_with('#')
+}
+
+/// `text` with host `name` added under `herdr.hosts`, everything else left as
+/// written (comments, order, unrelated keys, defaults not pinned). None when the
+/// config already holds exactly this entry. An entry for the same name with a
+/// different address or key is replaced.
+pub(crate) fn insert_host(text: &str, name: &str, ssh: &str, identity: &str) -> Result<Option<String>> {
+    let lines: Vec<&str> = text.lines().collect();
+    let entry = |child: usize| -> Vec<String> {
+        let pad = " ".repeat(child);
+        let inner = " ".repeat(child + 2);
+        vec![format!("{pad}{name}:"), format!("{inner}ssh: \"{ssh}\""), format!("{inner}identity_file: \"{identity}\"")]
+    };
+    let top = lines.iter().position(|l| l.starts_with("herdr:"));
+    let mut out: Vec<String> = lines.iter().map(|l| l.to_string()).collect();
+    match top {
+        None => {
+            if !out.is_empty() && !out.last().is_some_and(|l| l.is_empty()) {
+                out.push(String::new());
+            }
+            out.push("herdr:".into());
+            out.push("  hosts:".into());
+            out.extend(entry(4));
+        }
+        Some(h) => {
+            if lines[h].trim_start_matches("herdr:").trim().chars().next().is_some_and(|c| c != '#') {
+                bail!("`herdr:` in the config is written inline; add the host by hand");
+            }
+            let end = (h + 1..lines.len()).find(|&i| !lines[i].trim().is_empty() && indent_of(lines[i]) == 0).unwrap_or(lines.len());
+            let hosts = (h + 1..end).find(|&i| lines[i].trim_start().starts_with("hosts:") && !lines[i].trim_start().starts_with('#'));
+            match hosts {
+                None => {
+                    let mut block = vec!["  hosts:".to_string()];
+                    block.extend(entry(4));
+                    out.splice(h + 1..h + 1, block);
+                }
+                Some(hi) => {
+                    let value = lines[hi].trim_start().trim_start_matches("hosts:").trim();
+                    if value == "{}" {
+                        out[hi] = format!("{}hosts:", " ".repeat(indent_of(lines[hi])));
+                    } else if !value.is_empty() && !value.starts_with('#') {
+                        bail!("`hosts:` in the config is written inline; add the host by hand");
+                    }
+                    let base = indent_of(lines[hi]);
+                    let block_end = (hi + 1..end).find(|&i| !is_blank_or_comment(lines[i]) && indent_of(lines[i]) <= base).unwrap_or(end);
+                    let child = (hi + 1..block_end)
+                        .find(|&i| !is_blank_or_comment(lines[i]))
+                        .map_or(base + 2, |i| indent_of(lines[i]));
+                    let own = (hi + 1..block_end).find(|&i| indent_of(lines[i]) == child && lines[i].trim() == format!("{name}:"));
+                    if let Some(oi) = own {
+                        let own_end = (oi + 1..block_end).find(|&i| !is_blank_or_comment(lines[i]) && indent_of(lines[i]) <= child).unwrap_or(block_end);
+                        let body = lines[oi + 1..own_end].join("\n");
+                        if body.contains(&format!("ssh: \"{ssh}\"")) && body.contains(&format!("identity_file: \"{identity}\"")) {
+                            return Ok(None);
+                        }
+                        out.splice(oi..own_end, entry(child));
+                    } else {
+                        let last = (hi + 1..block_end).rev().find(|&i| !lines[i].trim().is_empty()).unwrap_or(hi);
+                        out.splice(last + 1..last + 1, entry(child));
+                    }
+                }
+            }
+        }
+    }
+    let mut updated = out.join("\n");
+    updated.push('\n');
+    let parsed: serde_yaml::Value = serde_yaml::from_str(&updated).context("the edited config is not valid YAML")?;
+    let got = parsed["herdr"]["hosts"][name]["ssh"].as_str();
+    if got != Some(ssh) {
+        bail!("could not add the host to the config cleanly; add it by hand");
+    }
+    Ok(Some(updated))
+}
+
+/// Keeps a copy of the config as it was, then replaces it, keeping it private.
+fn write_config(path: &Path, before: &str, after: &str) -> Result<()> {
+    use std::io::Write;
+    use std::os::unix::fs::OpenOptionsExt;
+    if let Some(dir) = path.parent() {
+        std::fs::create_dir_all(dir)?;
+    }
+    if !before.is_empty() {
+        let stamp = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_secs());
+        let backup = path.with_file_name(format!("{}.bak-{stamp}", path.file_name().map_or("config".into(), |n| n.to_string_lossy())));
+        std::fs::write(&backup, before)?;
+        std::fs::set_permissions(&backup, std::fs::Permissions::from_mode(0o600))?;
+    }
+    let tmp = path.with_extension("hq-tmp");
+    let _ = std::fs::remove_file(&tmp);
+    let mut file = std::fs::OpenOptions::new().write(true).create_new(true).mode(0o600).open(&tmp)?;
+    file.write_all(after.as_bytes())?;
+    file.sync_all()?;
+    std::fs::rename(&tmp, path)?;
+    Ok(())
 }
 
 #[cfg(test)]
