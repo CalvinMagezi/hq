@@ -20,7 +20,7 @@ mod launch;
 mod origin;
 
 use crate::herdr::{
-    self, AgentInfo, AgentStatus, HerdrError, HerdrHost, LaunchRequest, Launched, PromptOutcome,
+    self, AgentInfo, AgentStatus, HerdrError, Host, HostBackend, LaunchRequest, Launched, PromptOutcome,
 };
 use anyhow::{Result, bail};
 use hq_db::Database;
@@ -32,6 +32,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use spec::SPECS;
+pub use launch::resume_awaiting;
 pub use spec::{Harness, HarnessSessionSpec, ResumeStrategy, resolve, resolve_in, spec_for};
 
 const SESSION_DIR_ROOT: &str = "_data/session-dirs";
@@ -69,7 +70,7 @@ pub fn poll_hosts(rows: &[HarnessSessionRow]) -> HostPoll {
 
 pub fn poll_hosts_with(
     rows: &[HarnessSessionRow],
-    resolve: impl Fn(&str) -> anyhow::Result<HerdrHost>,
+    resolve: impl Fn(&str) -> anyhow::Result<Host>,
 ) -> HostPoll {
     let mut polled = HostPoll::new();
     for row in rows {

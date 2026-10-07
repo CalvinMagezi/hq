@@ -8,6 +8,7 @@ pub mod disk_watchdog;
 pub mod email_ingest;
 pub mod embeddings;
 pub mod health;
+pub mod session_events;
 pub mod session_supervisor;
 pub mod subagent_supervisor;
 pub mod turn_reconcile;

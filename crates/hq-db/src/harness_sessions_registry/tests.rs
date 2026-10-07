@@ -421,6 +421,8 @@ fn the_herdr_migration_orphans_tmux_era_running_rows() {
         .unwrap();
     conn.execute_batch(include_str!("../../sql/072_harness_session_dismiss_tail.sql"))
         .unwrap();
+    conn.execute_batch(include_str!("../../sql/076_session_parent.sql"))
+        .unwrap();
     let s = get(&conn, "old").unwrap().unwrap();
     assert_eq!(s.status, STATUS_ORPHANED);
     assert_eq!(s.agent_name, "hq-old");
@@ -572,6 +574,46 @@ fn the_caps_count_running_driven_sessions_and_sessions_by_origin() {
         set_status(c, "hs-1", STATUS_STOPPED)?;
         assert_eq!(count_driven_running(c)?, 0);
         assert_eq!(count_running_with_origin(c, ORIGIN_MCP)?, 0);
+        Ok(())
+    })
+    .unwrap();
+}
+
+fn insert_session(c: &rusqlite::Connection, id: &str) {
+    insert(
+        c,
+        &NewSession {
+            id,
+            harness: "claude-code",
+            label: "t",
+            cwd: "/t",
+            mission_id: None,
+            placement: Placement { host: "native", agent_name: id, workspace_id: id, pane_id: id },
+        },
+    )
+    .unwrap();
+}
+
+#[test]
+fn a_child_remembers_its_parent_and_depth_and_only_running_children_are_listed() {
+    let db = crate::Database::open_memory().unwrap();
+    db.with_conn(|c| {
+        for id in ["hs-p", "hs-c1", "hs-c2", "hs-x"] {
+            insert_session(c, id);
+        }
+        set_parent(c, "hs-c1", "hs-p", 1)?;
+        set_parent(c, "hs-c2", "hs-p", 1)?;
+        let row = get(c, "hs-c1")?.unwrap();
+        assert_eq!((row.parent_session_id.as_deref(), row.spawn_depth), (Some("hs-p"), 1));
+        assert_eq!(get(c, "hs-x")?.unwrap().parent_session_id, None);
+
+        assert_eq!(running_children(c, "hs-p")?.len(), 2);
+        set_status(c, "hs-c2", STATUS_STOPPED)?;
+        let running = running_children(c, "hs-p")?;
+        assert_eq!(running.len(), 1);
+        assert_eq!(running[0].id, "hs-c1");
+        assert_eq!(children_started_since(c, "hs-p", 60)?, 2, "stopped ones still count toward the rate");
+        assert_eq!(children_started_since(c, "hs-x", 60)?, 0);
         Ok(())
     })
     .unwrap();

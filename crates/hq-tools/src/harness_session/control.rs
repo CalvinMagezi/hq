@@ -16,13 +16,13 @@ pub(super) fn get_row(db:&Arc<Database>, session_id: &str) -> Result<HarnessSess
 }
 
 /// The row's host and its agent, or an error naming why they are unavailable.
-pub(super) fn locate(row: &HarnessSessionRow) -> Result<(HerdrHost, Option<AgentInfo>)> {
+pub(super) fn locate(row: &HarnessSessionRow) -> Result<(Host, Option<AgentInfo>)> {
     let host = herdr::host(Some(&row.host))?;
     let agent = host.agent(&row.agent_name)?;
     Ok((host, agent))
 }
 
-pub(super) fn require_alive(row: &HarnessSessionRow) -> Result<HerdrHost> {
+pub(super) fn require_alive(row: &HarnessSessionRow) -> Result<Host> {
     let (host, agent) = locate(row)?;
     if agent.is_none() {
         bail!(
@@ -61,7 +61,7 @@ pub async fn resume(
         ResumeStrategy::Args(args) => {
             !args.iter().any(|a| a.contains("{token}")) || row.resume_token.is_some()
         }
-        ResumeStrategy::SessionDir => true,
+        ResumeStrategy::TokenOrArgs { .. } | ResumeStrategy::SessionDir => true,
         ResumeStrategy::None => false,
     };
     let mut value = launch_session(
@@ -69,6 +69,7 @@ pub async fn resume(
         db,
         &harness,
         Launch {
+            parent: None,
             host,
             session_id,
             cwd: &row.cwd,
@@ -275,7 +276,7 @@ pub(super) fn agent_state(live: &Liveness) -> Value {
 /// Bring an agent Herdr already runs, one HQ did not launch in this chat (or
 /// at all), under this chat's watch. It starts observation-only: Drive comes
 /// later, through the goal and drive gate.
-pub fn attach(db: &Arc<Database>, host: &HerdrHost, target: &str, thread: &str) -> Result<Value> {
+pub fn attach(db: &Arc<Database>, host: &dyn HostBackend, target: &str, thread: &str) -> Result<Value> {
     let agent = host
         .agent(target)
         .map_err(|e| anyhow::anyhow!("cannot reach host '{}' to attach: {e}", host.name()))?
@@ -537,11 +538,37 @@ pub fn stop(db: &Arc<Database>, session_id: &str) -> Result<Value> {
     let id = session_id.to_string();
     db.with_conn(move |c| registry::set_status(c, &id, registry::STATUS_STOPPED))?;
     screen_changed(session_id);
+    // Sessions started for this one stop with it.
+    let stopped_children = stop_children(db, session_id);
     let mut report = json!({ "session_id": session_id, "status": "stopped" });
+    if !stopped_children.is_empty() {
+        report["stopped_children"] = json!(stopped_children);
+    }
     if let Some(task) = record_on_task(db, session_id, mission::Event::Stopped) {
         report["task"] = task;
     }
     Ok(report)
+}
+
+/// Stops the sessions still running that were started for `parent`, and theirs.
+/// Best effort: one that cannot be stopped is left for the supervisor and named
+/// in the log, and the parent's stop still succeeds. The chain is only as deep as
+/// delegation allows, so the recursion is bounded.
+pub fn stop_children(db: &Arc<Database>, parent: &str) -> Vec<String> {
+    let id = parent.to_string();
+    let children = db
+        .with_conn(move |c| registry::running_children(c, &id))
+        .unwrap_or_default();
+    let mut stopped = Vec::new();
+    for child in children {
+        match stop(db, &child.id) {
+            Ok(_) => stopped.push(child.id),
+            Err(e) => {
+                tracing::warn!(session = %child.id, parent, error = %e, "could not stop a child with its parent");
+            }
+        }
+    }
+    stopped
 }
 
 /// Extract a harness's resume token from session output: the capture group of
@@ -554,6 +581,41 @@ pub(super) fn extract_resume_token(pattern: &str, content: &str) -> Result<Optio
         .last()
         .and_then(|c| c.get(1))
         .map(|m| m.as_str().to_string()))
+}
+
+/// Stores the conversation id the agent's hooks reported as the session's
+/// resume token when it changed. Returns whether it did.
+pub fn record_agent_session_id(
+    db: &Arc<Database>,
+    row: &HarnessSessionRow,
+    agent: &AgentInfo,
+) -> Result<bool> {
+    let Some(id) = agent.agent_session_id.as_deref().filter(|id| !id.is_empty()) else {
+        return Ok(false);
+    };
+    if row.resume_token.as_deref() == Some(id) {
+        return Ok(false);
+    }
+    let (session, token) = (row.id.clone(), id.to_string());
+    db.with_conn(move |c| registry::set_resume_token(c, &session, &token))?;
+    Ok(true)
+}
+
+/// Once the agent has reported its conversation id, has the host restart it
+/// into exactly that conversation instead of the most recent one.
+pub fn refresh_restart_command(
+    vault_path: &Path,
+    host: &Host,
+    row: &HarnessSessionRow,
+    agent: &AgentInfo,
+) -> Result<()> {
+    let Some(token) = agent.agent_session_id.as_deref() else {
+        return Ok(());
+    };
+    let harness = resolve(&row.harness)?;
+    let args = build_args(&harness, vault_path, &row.id, Some(token), true);
+    host.update_resume(&row.agent_name, &agent.kind, args)?;
+    Ok(())
 }
 
 /// Look for the harness's resume token in `screen` (what the supervisor just

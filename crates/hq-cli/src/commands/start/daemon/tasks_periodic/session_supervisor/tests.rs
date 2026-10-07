@@ -1,4 +1,5 @@
 use super::*;
+use hq_tools::herdr::HerdrHost;
 use hq_core::config::{HerdrConfig, LOCAL_HOST};
 use std::os::unix::fs::PermissionsExt;
 use std::path::PathBuf;
@@ -157,7 +158,7 @@ const TEST_HOST_BUDGET: Duration = Duration::from_secs(60);
 
 async fn sweep(vault: &Path, db: &Database, host: &HerdrHost, s: Option<&Summarizer>) {
     let host = host.clone();
-    let resolve: HostResolver = Arc::new(move |_| Ok(host.clone()));
+    let resolve: HostResolver = Arc::new(move |_| Ok(Arc::new(host.clone()) as Host));
     supervise(vault, db, s, resolve, TEST_HOST_BUDGET)
         .await
         .unwrap();
@@ -293,7 +294,7 @@ async fn a_host_that_never_answers_is_cut_off_at_the_host_budget() {
         ..HerdrConfig::default()
     };
     let hung = HerdrHost::from_config(&cfg, LOCAL_HOST).unwrap();
-    let resolve: HostResolver = Arc::new(move |_| Ok(hung.clone()));
+    let resolve: HostResolver = Arc::new(move |_| Ok(Arc::new(hung.clone()) as Host));
 
     let started = Instant::now();
     supervise(tmp.path(), &db, None, resolve, Duration::from_millis(500))

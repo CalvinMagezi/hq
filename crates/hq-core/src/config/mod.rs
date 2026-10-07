@@ -30,7 +30,7 @@ pub use disk_watchdog::DiskWatchdogConfig;
 pub use governance::*;
 pub use harness::*;
 pub use herdr::{
-    HarnessProfileConfig, HerdrConfig, HerdrHostConfig, LOCAL_HOST, MAX_LAUNCH_BOUND_SECS,
+    HarnessProfileConfig, HerdrConfig, HerdrHostConfig, HostKind, SandboxConfig, SandboxMode, LOCAL_HOST, NATIVE_HOST, native_host_dir, MAX_LAUNCH_BOUND_SECS,
     MIN_LAUNCH_BOUND_SECS,
 };
 pub use instance::*;

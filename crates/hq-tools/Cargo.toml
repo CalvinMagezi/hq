@@ -4,6 +4,7 @@ version.workspace = true
 edition.workspace = true
 
 [dependencies]
+hq-host = { workspace = true }
 hq-core = { workspace = true }
 hq-vault = { workspace = true }
 hq-db = { workspace = true }

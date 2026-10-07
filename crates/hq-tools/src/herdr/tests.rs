@@ -68,6 +68,8 @@ fn request() -> LaunchRequest {
         env: vec![("K".into(), "V".into())],
         args: vec!["--dangerously-skip-permissions".into()],
         command: None,
+        resume_args: None,
+        mcp: None,
         start_timeout: Duration::from_secs(30),
     }
 }
@@ -187,6 +189,8 @@ fn unknown_host_names_the_known_ones() {
     cfg.hosts.insert(
         "laptop".into(),
         HerdrHostConfig {
+            kind: Default::default(),
+            port: None,
             ssh: "me@100.64.0.1".into(),
             identity_file: None,
             gate_command: "hq-herdr-gate".into(),
@@ -205,6 +209,42 @@ fn unknown_host_names_the_known_ones() {
 ///
 /// `HQ_TEST_HERDR_SSH=user@host HQ_TEST_HERDR_KEY=/path/key \
 ///   cargo test -p hq-tools herdr::tests::real_ssh -- --ignored`
+/// A builder on a shared host returns an independent host: the original keeps
+/// its own ceilings and the derived one gets the new ones.
+#[test]
+fn derived_hosts_do_not_change_the_original() {
+    let dir = tempfile::tempdir().unwrap();
+    let binary = dir.path().join("herdr");
+    std::fs::write(&binary, "#!/bin/sh\nsleep 1\nprintf '{\"result\":{\"agents\":[]}}'\n").unwrap();
+    std::fs::set_permissions(&binary, std::fs::Permissions::from_mode(0o755)).unwrap();
+    let cfg = HerdrConfig { binary: binary.to_string_lossy().to_string(), ..HerdrConfig::default() };
+    let original: Host = Arc::new(HerdrHost::from_config(&cfg, LOCAL_HOST).unwrap());
+    let bound = original.launch_bound();
+
+    let impatient = original.with_command_timeout_dyn(Duration::from_millis(200));
+    assert!(impatient.agents().unwrap_err().is_unreachable());
+    assert!(original.agents().unwrap().is_empty(), "the original must keep its own timeout");
+
+    let shorter = original.with_launch_bound_dyn(Duration::from_secs(7));
+    assert_eq!(shorter.launch_bound(), Duration::from_secs(7));
+    assert_eq!(original.launch_bound(), bound);
+}
+
+/// Read-only check of the real herdr CLI through the `HostBackend` trait object.
+///
+///   cargo test -p hq-tools herdr::tests::real_local -- --ignored
+#[test]
+#[ignore = "needs a local herdr server"]
+fn real_local_herdr_answers_through_the_trait_object() {
+    let host: Host = Arc::new(
+        HerdrHost::from_config(&HerdrConfig::default(), LOCAL_HOST).expect("local host"),
+    );
+    let version = host.version().expect("herdr version");
+    let agents = host.agents().expect("agent list");
+    eprintln!("herdr {version} answered with {} agents", agents.len());
+    assert!(host.agent("no-such-agent-hq-test").expect("lookup").is_none());
+}
+
 #[test]
 #[ignore = "needs an ssh host running Herdr behind hq-herdr-gate"]
 fn real_ssh_host_answers_through_the_gate() {
@@ -213,6 +253,8 @@ fn real_ssh_host_answers_through_the_gate() {
     cfg.hosts.insert(
         "remote".into(),
         HerdrHostConfig {
+            kind: Default::default(),
+            port: None,
             ssh: target,
             identity_file: std::env::var("HQ_TEST_HERDR_KEY").ok(),
             gate_command: "hq-herdr-gate".into(),
@@ -245,6 +287,8 @@ fn a_wrapper_that_never_becomes_an_agent_is_an_error_and_closes_the_workspace() 
     ]);
     let req = LaunchRequest {
         command: Some("my-wrapper".into()),
+        resume_args: None,
+        mcp: None,
         start_timeout: Duration::from_millis(600),
         ..request()
     };
@@ -488,4 +532,12 @@ fn writes_never_take_the_read_fallback() {
     assert!(fake.host(None).send_keys("hs-a", &keys).is_err());
     assert_eq!(fake.calls().lines().count(), 1, "{}", fake.calls());
     assert!(!fake.calls().contains("visible"));
+}
+
+#[test]
+fn the_native_host_name_selects_the_built_in_host() {
+    let cfg = HerdrConfig::default();
+    assert_eq!(build(&cfg, NATIVE_HOST).unwrap().name(), "native");
+    assert_eq!(build(&cfg, LOCAL_HOST).unwrap().name(), LOCAL_HOST);
+    assert!(build(&cfg, "nowhere").is_err());
 }

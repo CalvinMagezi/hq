@@ -34,6 +34,7 @@ pub(super) enum Transport {
     },
     Ssh {
         target: String,
+        port: Option<u16>,
         identity_file: Option<String>,
         gate_command: String,
         /// Private directory holding the shared control sockets; `None` means
@@ -59,7 +60,7 @@ impl Transport {
         self.run_with_program(SSH_PROGRAM, host, args, timeout)
     }
 
-    fn run_with_program(
+    pub(super) fn run_with_program(
         &self,
         ssh_program: &str,
         host: &str,
@@ -85,7 +86,7 @@ impl Transport {
             }
             _ => out,
         };
-        tracing::debug!(host, subcommand = ?args.iter().take(2).collect::<Vec<_>>(), elapsed_ms = started.elapsed().as_millis() as u64, exit = out.exit_code, "herdr invocation");
+        tracing::debug!(host, subcommand = ?loggable(args), elapsed_ms = started.elapsed().as_millis() as u64, exit = out.exit_code, "herdr invocation");
         if matches!(self, Transport::Ssh { .. }) && out.exit_code == SSH_FAILURE_EXIT {
             return Err(unreachable(first_line(&out.stderr)));
         }
@@ -106,11 +107,13 @@ impl Transport {
         match self.clone() {
             Transport::Ssh {
                 target,
+                port,
                 identity_file,
                 gate_command,
                 ..
             } => Transport::Ssh {
                 target,
+                port,
                 identity_file,
                 gate_command,
                 mux_dir: None,
@@ -132,6 +135,7 @@ impl Transport {
             }
             Transport::Ssh {
                 target,
+                port,
                 identity_file,
                 gate_command,
                 mux_dir,
@@ -142,6 +146,7 @@ impl Transport {
                 let mut c = Command::new(ssh_program);
                 c.args(ssh_args(
                     target,
+                    *port,
                     identity_file.as_deref(),
                     gate_command,
                     mux_dir.as_deref(),
@@ -154,6 +159,7 @@ impl Transport {
 
 pub(super) fn ssh_args(
     target: &str,
+    port: Option<u16>,
     identity_file: Option<&str>,
     gate: &str,
     mux_dir: Option<&Path>,
@@ -165,6 +171,9 @@ pub(super) fn ssh_args(
         format!("ConnectTimeout={SSH_CONNECT_TIMEOUT_SECS}"),
         "-T".to_string(),
     ];
+    if let Some(port) = port {
+        args.extend(["-p".to_string(), port.to_string()]);
+    }
     if let Some(key) = identity_file {
         args.extend(["-i".to_string(), key.to_string(), "-o".to_string()]);
         args.push("IdentitiesOnly=yes".to_string());
@@ -190,6 +199,17 @@ fn mux_options(dir: &Path) -> Vec<String> {
     .collect()
 }
 
+/// The part of a request that is safe to log. A herdr request is words (`agent
+/// get`); a native host's is a method and its params as JSON text, and the params
+/// can hold a secret (an agent's session token), so only the method is kept.
+fn loggable(args: &[String]) -> Vec<&str> {
+    let take = match args.first() {
+        Some(first) if first.contains('.') => 1,
+        _ => 2,
+    };
+    args.iter().take(take).map(String::as_str).collect()
+}
+
 /// Herdr arguments that only look at state. Only these may be re-run, because
 /// a retry of a write (send-text, a prompt, a launch) could apply it twice.
 fn is_read_only(args: &[String]) -> bool {
@@ -201,7 +221,9 @@ fn is_read_only(args: &[String]) -> bool {
     }
     matches!(
         (first, words.next()),
-        (Some("status"), _) | (Some("agent"), Some("get" | "list" | "read"))
+        (Some("status"), _)
+            | (Some("agent"), Some("get" | "list" | "read"))
+            | (Some("host.status" | "events.poll" | "agent.get" | "agent.list" | "agent.read"), _)
     )
 }
 
@@ -317,7 +339,7 @@ mod tests {
 
     #[test]
     fn ssh_args_pin_the_key_and_never_prompt() {
-        let args = ssh_args("me@100.64.0.1", Some("/k/id"), "hq-herdr-gate", None);
+        let args = ssh_args("me@100.64.0.1", None, Some("/k/id"), "hq-herdr-gate", None);
         assert!(args.contains(&"BatchMode=yes".to_string()));
         assert!(args.contains(&"IdentitiesOnly=yes".to_string()));
         assert_eq!(args[args.len() - 2], "me@100.64.0.1");
@@ -325,14 +347,30 @@ mod tests {
     }
 
     #[test]
+    fn a_native_requests_params_never_reach_the_log() {
+        let native = vec!["agent.mcp_config".to_string(), r#"{"token":"hqs_secret"}"#.to_string()];
+        assert_eq!(loggable(&native), ["agent.mcp_config"]);
+        let herdr = vec!["agent".to_string(), "get".to_string(), "x".to_string()];
+        assert_eq!(loggable(&herdr), ["agent", "get"]);
+    }
+
+    #[test]
+    fn a_non_default_port_is_passed_to_ssh() {
+        let args = ssh_args("me@h", Some(2222), None, "gate", None);
+        let at = args.iter().position(|a| a == "-p").expect("-p missing");
+        assert_eq!(args[at + 1], "2222");
+        assert!(!ssh_args("me@h", None, None, "gate", None).contains(&"-p".to_string()));
+    }
+
+    #[test]
     fn ssh_args_without_a_key_leave_identity_to_ssh() {
-        let args = ssh_args("me@host", None, "gate", None);
+        let args = ssh_args("me@host", None, None, "gate", None);
         assert!(!args.contains(&"-i".to_string()));
     }
 
     #[test]
     fn plain_ssh_argv_is_exact() {
-        let args = ssh_args("me@h", Some("/k/id"), "gate", None);
+        let args = ssh_args("me@h", None, Some("/k/id"), "gate", None);
         assert_eq!(
             args,
             [
@@ -354,8 +392,8 @@ mod tests {
     #[test]
     fn multiplexed_argv_adds_only_connection_options_before_the_target() {
         let dir = Path::new("/run/hq");
-        let args = ssh_args("me@h", Some("/k/id"), "gate", Some(dir));
-        let plain = ssh_args("me@h", Some("/k/id"), "gate", None);
+        let args = ssh_args("me@h", None, Some("/k/id"), "gate", Some(dir));
+        let plain = ssh_args("me@h", None, Some("/k/id"), "gate", None);
         let target_at = plain.len() - 2;
         let mut expected = plain[..target_at].to_vec();
         expected.extend(
@@ -484,6 +522,7 @@ mod tests {
         std::fs::set_permissions(&ssh, std::fs::Permissions::from_mode(0o755)).unwrap();
         let ssh_path = ssh.to_string_lossy().to_string();
         let t = Transport::Ssh {
+            port: None,
             target: "me@h".into(),
             identity_file: None,
             gate_command: "gate".into(),

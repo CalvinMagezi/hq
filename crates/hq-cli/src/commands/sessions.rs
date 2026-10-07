@@ -78,6 +78,7 @@ pub async fn run(
                     label: label.as_deref().unwrap_or(""),
                     mission_id: None,
                     watch: None,
+                    parent: None,
                     goal: Default::default(),
                 },
             )

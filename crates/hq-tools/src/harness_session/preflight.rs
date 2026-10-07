@@ -2,7 +2,7 @@
 //! cleanly instead of leaving a pane that waits for an agent forever.
 
 use super::Harness;
-use crate::herdr::{AgentInfo, HerdrHost, Launched};
+use crate::herdr::{AgentInfo, HostBackend, Launched};
 use anyhow::{Result, bail};
 use std::ffi::OsString;
 use std::path::{Path, PathBuf};
@@ -100,7 +100,7 @@ fn nvm_bins(home: &Path) -> Vec<PathBuf> {
 /// bounded wait in `ensure_started`), and only when the binary to look for is
 /// known (see `plain_binary`); otherwise the launch goes ahead and the bounded
 /// wait is the safety net.
-pub fn require_binary(host: &HerdrHost, harness: &Harness) -> Result<()> {
+pub fn require_binary(host: &dyn HostBackend, harness: &Harness) -> Result<()> {
     if !host.checks_binaries() {
         return Ok(());
     }
@@ -143,7 +143,7 @@ fn binary_found(wanted: &str, roots: &[PathBuf]) -> bool {
 /// recorded. `began` is when the launch started: the time its own start wait
 /// already used counts against the bound.
 pub fn ensure_started(
-    host: &HerdrHost,
+    host: &dyn HostBackend,
     harness: &Harness,
     name: &str,
     launched: Launched,
@@ -185,7 +185,7 @@ pub fn ensure_started(
 
 /// Closes a workspace a failed launch left behind and says what happened, for
 /// the error the caller sees. No session was recorded either way.
-pub fn close_note(host: &HerdrHost, workspace_id: &str) -> String {
+pub fn close_note(host: &dyn HostBackend, workspace_id: &str) -> String {
     match host.close_workspace(workspace_id) {
         Ok(()) => "The workspace was closed and no session was recorded.".to_string(),
         Err(e) => format!(
@@ -216,6 +216,7 @@ fn quoted_screen(screen: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::herdr::HerdrHost;
     use hq_core::config::{HerdrConfig, LOCAL_HOST};
     use std::os::unix::fs::PermissionsExt;
 

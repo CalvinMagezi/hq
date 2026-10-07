@@ -13,7 +13,7 @@ use std::path::Path;
 use std::sync::Arc;
 
 use super::{GoalText, Liveness, NewWatch, SpawnRequest};
-use crate::herdr::HerdrHost;
+use crate::herdr::{Host, HostBackend};
 use crate::tasks::{Placement, create_task_in};
 use crate::util::generate_id;
 
@@ -149,7 +149,7 @@ fn resolve_or_file_task(db: &Arc<Database>, req: &HandoffRequest) -> Result<(t::
 /// stale and does not count.
 fn live_session_for(
     db: &Arc<Database>,
-    host: &HerdrHost,
+    host: &Host,
     task_id: &str,
 ) -> Result<Option<(HarnessSessionRow, Liveness)>> {
     let rows: Vec<HarnessSessionRow> = db
@@ -233,7 +233,7 @@ fn existing_report(
 pub async fn handoff(
     vault_path: &Path,
     db: &Arc<Database>,
-    host: HerdrHost,
+    host: Host,
     req: HandoffRequest,
 ) -> Result<Value> {
     let (vault_path, db) = (vault_path.to_path_buf(), db.clone());
@@ -245,7 +245,7 @@ pub async fn handoff(
 async fn run_handoff(
     vault_path: &Path,
     db: &Arc<Database>,
-    host: HerdrHost,
+    host: Host,
     req: HandoffRequest,
 ) -> Result<Value> {
     super::require_cwd(Some(&req.cwd))?;
@@ -288,6 +288,7 @@ async fn run_handoff(
                 drive: req.drive_new && !req.drive_opted_out,
                 opted_out: req.drive_opted_out,
             }),
+            parent: None,
             goal: GoalText {
                 goal: None,
                 done_criteria: non_blank(&req.acceptance),

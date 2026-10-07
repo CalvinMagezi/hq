@@ -134,6 +134,12 @@ pub struct TaskComment {
     pub author: String,
     pub body: String,
     pub created_at: String,
+    /// `comment`, or `message` for one agent session writing to another.
+    pub kind: String,
+    pub sender_session_id: Option<String>,
+    pub to_session_id: Option<String>,
+    pub reply_to: Option<i64>,
+    pub delivered_at: Option<String>,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -179,6 +185,7 @@ pub struct TaskPatch {
 
 mod crud;
 mod links;
+mod messages;
 mod org;
 mod rows;
 #[cfg(test)]
@@ -186,6 +193,7 @@ mod tests;
 
 pub use crud::*;
 pub use links::*;
+pub use messages::*;
 pub use org::*;
 pub use rows::{list_task_events, validate_date};
 use rows::*;

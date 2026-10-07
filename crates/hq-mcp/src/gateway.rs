@@ -90,6 +90,19 @@ pub const HANDOFF_ALLOWLIST: &[&str] = &[
     "hq_ask_result",
 ];
 
+/// What a launched agent may call with its own session token: the task thread
+/// it works on, and nothing that reads the wider vault or changes settings.
+/// An exact list, so a tool added later is denied until someone adds it here.
+pub const SESSION_ALLOWLIST: &[&str] = &[
+    "task_get",
+    "task_list",
+    "task_comment_list",
+    "task_comment_add",
+    "harness_session_status",
+    "agent_message_send",
+    "agent_delegate",
+];
+
 /// Build the two MCP `Tool` definitions for the gateway.
 ///
 /// Accepts the registry so the discover tool description includes the real category list.
@@ -219,9 +232,22 @@ pub async fn dispatch(
     db: &hq_db::Database,
     allowed: Option<&[&str]>,
 ) -> Result<CallToolResult, ErrorData> {
+    dispatch_as(registry, name, arguments, db, allowed, None).await
+}
+
+/// Like `dispatch`, for a caller that proved it is the launched session
+/// `caller_session`. Tools see that id and nothing a caller wrote in its place.
+pub async fn dispatch_as(
+    registry: &ToolRegistry,
+    name: &str,
+    arguments: Option<&serde_json::Map<String, Value>>,
+    db: &hq_db::Database,
+    allowed: Option<&[&str]>,
+    caller_session: Option<&str>,
+) -> Result<CallToolResult, ErrorData> {
     let result = match name {
         "hq_discover" => handle_discover(registry, arguments, allowed),
-        "hq_call" => handle_call(registry, arguments, db, allowed).await,
+        "hq_call" => handle_call_as(registry, arguments, db, allowed, caller_session).await,
         other => Err(ErrorData::invalid_params(
             format!("unknown tool: {other}. Use hq_discover or hq_call."),
             None,
@@ -236,12 +262,23 @@ fn without_result_type(mut result: CallToolResult) -> CallToolResult {
     result
 }
 
-/// Handle the `hq_call` tool call.
+/// Handle the `hq_call` tool call for a caller with no attested session.
+#[cfg(test)]
 pub(crate) async fn handle_call(
     registry: &ToolRegistry,
     arguments: Option<&serde_json::Map<String, Value>>,
     db: &hq_db::Database,
     allowed: Option<&[&str]>,
+) -> Result<CallToolResult, ErrorData> {
+    handle_call_as(registry, arguments, db, allowed, None).await
+}
+
+async fn handle_call_as(
+    registry: &ToolRegistry,
+    arguments: Option<&serde_json::Map<String, Value>>,
+    db: &hq_db::Database,
+    allowed: Option<&[&str]>,
+    caller_session: Option<&str>,
 ) -> Result<CallToolResult, ErrorData> {
     let session_id = format!("mcp-{}", std::process::id());
 
@@ -276,6 +313,7 @@ pub(crate) async fn handle_call(
         ));
     }
     mark_scope(&mut call_args, allowed);
+    attest_caller(&mut call_args, caller_session);
     let call_result = hq_tools::registry::validate_and_execute(tool, call_args).await;
 
     // Telemetry is best-effort and must not fail the call. This layer never sees
@@ -347,6 +385,22 @@ pub fn mark_spawned_session(
         );
     }
     Some(marked)
+}
+
+/// The caller's session is whatever the gateway attested: a value in the call
+/// arguments is dropped, and the verified id is set only for a connection that
+/// proved its session.
+fn attest_caller(args: &mut Value, caller_session: Option<&str>) {
+    let Some(obj) = args.as_object_mut() else {
+        return;
+    };
+    obj.remove(hq_tools::harness_session::CALLER_SESSION_ARG);
+    if let Some(id) = caller_session {
+        obj.insert(
+            hq_tools::harness_session::CALLER_SESSION_ARG.into(),
+            json!(id),
+        );
+    }
 }
 
 /// Tools learn which key a call came in on only from this argument: any value
@@ -661,5 +715,65 @@ mod tests {
         let tools = serde_json::to_value(create_gateway_tools(&registry)).unwrap();
         assert_eq!(tools[1]["name"], "hq_call");
         assert_eq!(tools[1].as_object().unwrap().len(), 3);
+    }
+
+    struct EchoArgs;
+
+    #[async_trait::async_trait]
+    impl HqTool for EchoArgs {
+        fn name(&self) -> &str {
+            "echo_args"
+        }
+        fn description(&self) -> &str {
+            "returns its arguments"
+        }
+        fn parameters(&self) -> serde_json::Value {
+            serde_json::json!({})
+        }
+        async fn execute(&self, args: serde_json::Value) -> anyhow::Result<serde_json::Value> {
+            Ok(args)
+        }
+    }
+
+    async fn caller_seen(supplied: Option<&str>, attested: Option<&str>) -> Option<String> {
+        let mut registry = ToolRegistry::new();
+        registry.register(Box::new(EchoArgs));
+        let db = hq_db::Database::open_memory().unwrap();
+        let mut inner = serde_json::json!({});
+        if let Some(id) = supplied {
+            inner[hq_tools::harness_session::CALLER_SESSION_ARG] = id.into();
+        }
+        let call = serde_json::json!({"tool": "echo_args", "args": inner});
+        let result = handle_call_as(&registry, call.as_object(), &db, None, attested)
+            .await
+            .unwrap();
+        let text = serde_json::to_value(&result).unwrap()["content"][0]["text"]
+            .as_str()
+            .unwrap()
+            .to_string();
+        let args: serde_json::Value = serde_json::from_str(&text).unwrap();
+        hq_tools::harness_session::caller_session(&args).map(str::to_string)
+    }
+
+    #[tokio::test]
+    async fn a_caller_cannot_name_its_own_session() {
+        assert_eq!(caller_seen(Some("hs-victim"), None).await, None);
+    }
+
+    #[tokio::test]
+    async fn the_attested_session_replaces_anything_the_caller_wrote() {
+        assert_eq!(caller_seen(None, Some("hs-real")).await.as_deref(), Some("hs-real"));
+        assert_eq!(
+            caller_seen(Some("hs-victim"), Some("hs-real")).await.as_deref(),
+            Some("hs-real")
+        );
+    }
+
+    #[test]
+    fn a_session_token_reaches_task_threads_and_nothing_wider() {
+        for denied in ["config_manage", "vault_read", "vault_write_note", "harness_session_spawn", "hq_ask"] {
+            assert!(!SESSION_ALLOWLIST.contains(&denied), "{denied}");
+        }
+        assert!(SESSION_ALLOWLIST.contains(&"task_comment_add"));
     }
 }

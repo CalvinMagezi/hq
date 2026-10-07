@@ -4,6 +4,22 @@ use std::collections::BTreeMap;
 /// Reserved host name for the machine HQ itself runs on.
 pub const LOCAL_HOST: &str = "local";
 
+/// Reserved host name for the built-in agent host (`hq host serve`). Set it as
+/// `default_host` to start new sessions there; sessions already running keep
+/// the host they were started on.
+pub const NATIVE_HOST: &str = "native";
+
+/// Where the built-in host keeps its socket, token and `session.json`:
+/// `HQ_HOST_DIR` when set (the same variable panes get, so hooks and HQ agree),
+/// else `~/.hq/run/host`. A unix socket path is limited to about 100 bytes, so a
+/// long override can fail to bind.
+pub fn native_host_dir() -> std::path::PathBuf {
+    match std::env::var_os("HQ_HOST_DIR") {
+        Some(dir) if !dir.is_empty() => dir.into(),
+        _ => super::HqConfig::hq_dir().join("run").join("host"),
+    }
+}
+
 /// Where coding-agent sessions run and how HQ reaches each machine's Herdr
 /// (herdr.dev). With no `hosts` configured every session runs on this machine.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -17,7 +33,14 @@ pub struct HerdrConfig {
     #[serde(default)]
     pub session: Option<String>,
 
-    /// Host that new sessions start on when the caller names none.
+    /// The HQ MCP endpoint a launched agent connects to with its own session
+    /// token (for example `https://hq.example.ts.net:8444/mcp`), reachable from
+    /// the machine the agent runs on. Unset leaves agents without it.
+    #[serde(default)]
+    pub agent_mcp_url: Option<String>,
+
+    /// Host that new sessions start on when the caller names none: `local`, a
+    /// configured remote, or `native` for the built-in host.
     #[serde(default = "default_host")]
     pub default_host: String,
 
@@ -107,6 +130,52 @@ pub struct HerdrConfig {
     /// makes it equivalent to shell access on every configured host.
     #[serde(default)]
     pub handoff_cwd_allow: Vec<String>,
+
+    /// How agents on the built-in host are confined.
+    #[serde(default)]
+    pub sandbox: SandboxConfig,
+
+    /// Hours a session on the built-in host may sit silent and not working before
+    /// the host stops it (it stays resumable, and HQ tells you it ended). 0 keeps
+    /// sessions until someone stops them. Applies to sessions started afterwards.
+    #[serde(default = "default_idle_reap_hours")]
+    pub idle_reap_hours: u64,
+}
+
+/// How agents on the built-in host are confined.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum SandboxMode {
+    /// The platform sandbox with a proxy-only network. The default: a launch
+    /// fails when it cannot be applied, it never falls back to unsandboxed.
+    #[default]
+    Process,
+    /// No confinement. The agent can read the host's token and reach any network.
+    None,
+}
+
+/// Sandbox settings for sessions on the built-in host (local or remote).
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct SandboxConfig {
+    #[serde(default)]
+    pub mode: SandboxMode,
+
+    /// Hosts an agent may reach besides `api.anthropic.com` and the HQ MCP
+    /// endpoint, as `name` or `name:port` (`*.example.com` allows subdomains).
+    /// Denied requests are logged with the host, so add what you see there.
+    #[serde(default)]
+    pub allow_domains: Vec<String>,
+
+    /// Directories agents may write under besides their project, `~/.claude`
+    /// and the temporary directories.
+    #[serde(default)]
+    pub writable: Vec<String>,
+
+    /// Paths under your home directory agents may read besides the built-in
+    /// tool and shell configuration locations (a directory such as `~/.nvm`).
+    /// Everything else under home is unreadable to them.
+    #[serde(default)]
+    pub readable: Vec<String>,
 }
 
 /// A launcher built on a built-in harness. It inherits that harness's resume,
@@ -132,18 +201,38 @@ pub struct HarnessProfileConfig {
     pub env: BTreeMap<String, String>,
 }
 
-/// One remote machine running Herdr, reached with `ssh`.
+/// What runs agents on a remote machine.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum HostKind {
+    /// Herdr, driven through its CLI.
+    #[default]
+    Herdr,
+    /// HQ's built-in host (`hq host serve`), driven through `hq host gate`.
+    Native,
+}
+
+/// One remote machine running Herdr or HQ's built-in host, reached with `ssh`.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct HerdrHostConfig {
+    /// Which kind of host runs there. Defaults to herdr.
+    #[serde(default)]
+    pub kind: HostKind,
+
     /// `user@address` for ssh, usually a Tailscale address or MagicDNS name.
     pub ssh: String,
+
+    /// ssh port when the server does not listen on 22.
+    #[serde(default)]
+    pub port: Option<u16>,
 
     /// Private key HQ presents. Unset lets ssh choose its defaults.
     #[serde(default)]
     pub identity_file: Option<String>,
 
-    /// Command run after login. It receives the herdr arguments as a JSON
-    /// array on stdin (see `scripts/hq-herdr-gate`); a forced-command
+    /// Command run after login. For herdr it receives the herdr arguments as a
+    /// JSON array on stdin (see `scripts/hq-herdr-gate`); for a native host it
+    /// is `hq host gate` and gets a method and its params. A forced-command
     /// `authorized_keys` entry ignores this value.
     #[serde(default = "default_gate_command")]
     pub gate_command: String,
@@ -155,6 +244,10 @@ pub struct HerdrHostConfig {
 
 fn default_binary() -> String {
     "herdr".to_string()
+}
+
+fn default_idle_reap_hours() -> u64 {
+    24
 }
 
 fn default_host() -> String {
@@ -260,6 +353,7 @@ impl Default for HerdrConfig {
         Self {
             binary: default_binary(),
             session: None,
+            agent_mcp_url: None,
             default_host: default_host(),
             hosts: BTreeMap::new(),
             ssh_multiplex: default_ssh_multiplex(),
@@ -277,6 +371,8 @@ impl Default for HerdrConfig {
             max_ask_spawned_sessions: default_max_ask_spawned_sessions(),
             spawn_cwd_deny: Vec::new(),
             handoff_cwd_allow: Vec::new(),
+            sandbox: SandboxConfig::default(),
+            idle_reap_hours: default_idle_reap_hours(),
         }
     }
 }

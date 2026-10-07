@@ -1,4 +1,5 @@
 use super::*;
+use crate::herdr::HerdrHost;
 use crate::registry::HqTool;
 use hq_core::config::{HerdrConfig, LOCAL_HOST};
 use std::os::unix::fs::PermissionsExt;
@@ -50,7 +51,7 @@ fn fake_host_checking_binaries(
 
 fn launch<'a>(host: HerdrHost, id: &'a str, prompt: Option<&'a str>) -> Launch<'a> {
     Launch {
-        host,
+        host: std::sync::Arc::new(host),
         session_id: id,
         cwd: "/t",
         label: "demo",
@@ -59,6 +60,7 @@ fn launch<'a>(host: HerdrHost, id: &'a str, prompt: Option<&'a str>) -> Launch<'
         resuming: false,
         mission_id: None,
         watch: None,
+        parent: None,
         goal: GoalText::default(),
     }
 }
@@ -99,6 +101,52 @@ fn build_args_falls_back_fresh_without_token() {
     let args = build_args(&spec, tmp.path(), "hs-x", None, true);
     assert!(!args.iter().any(|a| a.contains("{token}")));
     assert!(!args.contains(&"--resume".to_string()));
+}
+
+#[test]
+fn claude_resumes_its_own_conversation_when_the_id_is_known() {
+    let h = harness("claude-code");
+    let tmp = tempfile::tempdir().unwrap();
+    let with = build_args(&h, tmp.path(), "hs-x", Some("conv-1"), true);
+    assert_eq!(with[with.len() - 2..], ["--resume", "conv-1"]);
+    let without = build_args(&h, tmp.path(), "hs-x", None, true);
+    assert_eq!(without.last().map(String::as_str), Some("-c"));
+    let fresh = build_args(&h, tmp.path(), "hs-x", Some("conv-1"), false);
+    assert!(!fresh.contains(&"--resume".to_string()));
+}
+
+#[test]
+fn a_reported_conversation_id_becomes_the_resume_token_once() {
+    let db = Arc::new(Database::open_memory().unwrap());
+    db.with_conn(|c| {
+        registry::insert(
+            c,
+            &registry::NewSession {
+                id: "hs-id",
+                harness: "claude-code",
+                label: "t",
+                cwd: "/t",
+                mission_id: None,
+                placement: registry::Placement {
+                    host: "native",
+                    agent_name: "hs-id",
+                    workspace_id: "hs-id",
+                    pane_id: "hs-id",
+                },
+            },
+        )
+    })
+    .unwrap();
+    let Liveness::Alive(mut agent) = alive("hs-id") else { unreachable!() };
+
+    let row = get_row(&db, "hs-id").unwrap();
+    assert!(!record_agent_session_id(&db, &row, &agent).unwrap(), "no id reported yet");
+
+    agent.agent_session_id = Some("conv-9".into());
+    assert!(record_agent_session_id(&db, &row, &agent).unwrap());
+    let row = get_row(&db, "hs-id").unwrap();
+    assert_eq!(row.resume_token.as_deref(), Some("conv-9"));
+    assert!(!record_agent_session_id(&db, &row, &agent).unwrap(), "unchanged");
 }
 
 #[test]
@@ -286,6 +334,28 @@ async fn launch_records_the_session_and_types_the_prompt() {
 }
 
 #[tokio::test]
+async fn a_delegated_session_has_its_parent_from_the_moment_it_exists() {
+    let (_dir, host) = fake_host(&[
+        ("workspace create", CREATED.into(), None),
+        ("agent start", OK.into(), None),
+        ("agent get", agent_json("hs-kid", "idle"), None),
+        ("agent prompt", OK.into(), None),
+    ]);
+    let db = Arc::new(Database::open_memory().unwrap());
+    let vault = tempfile::tempdir().unwrap();
+    let mut l = launch(host, "hs-kid", Some("work"));
+    l.parent = Some(("hs-parent", 1));
+    launch_session(vault.path(), &db, &harness("claude-code"), l).await.unwrap();
+
+    // Read straight after the launch call: there is no later write that sets it.
+    let row = get_row(&db, "hs-kid").unwrap();
+    assert_eq!(row.parent_session_id.as_deref(), Some("hs-parent"));
+    assert_eq!(row.spawn_depth, 1);
+    let children = db.with_conn(|c| registry::running_children(c, "hs-parent")).unwrap();
+    assert_eq!(children.len(), 1, "the limits count it at once");
+}
+
+#[tokio::test]
 async fn a_launch_for_a_task_links_the_session_and_starts_the_task() {
     let (_dir, host) = fake_host(&[
         ("workspace create", CREATED.into(), None),
@@ -434,6 +504,8 @@ fn row(host: &str, name: &str) -> HarnessSessionRow {
         no_progress_streak: 0,
         progress_mark: None,
         drive_off_reason: None,
+        parent_session_id: None,
+        spawn_depth: 0,
     }
 }
 
@@ -448,7 +520,7 @@ fn liveness_distinguishes_gone_from_unreachable() {
     ];
 
     let polled = poll_hosts_with(&rows, |name| match name {
-        "local" => Ok(host.clone()),
+        "local" => Ok(Arc::new(host.clone())),
         other => Err(anyhow::anyhow!("host '{other}' unreachable: no route")),
     });
 
@@ -572,6 +644,7 @@ fn alive(name: &str) -> Liveness {
         title: None,
         state_change_seq: 1,
         launch_pending: false,
+        agent_session_id: None,
     }))
 }
 
@@ -961,7 +1034,7 @@ async fn a_handoff_files_a_task_starts_a_session_and_gives_a_thread_that_owns_it
     let db = Arc::new(Database::open_memory().unwrap());
     let vault = tempfile::tempdir().unwrap();
 
-    let report = handoff::handoff(vault.path(), &db, host, handoff_req("ext-42")).await.unwrap();
+    let report = handoff::handoff(vault.path(), &db, Arc::new(host), handoff_req("ext-42")).await.unwrap();
 
     assert_eq!(report["handoff"], "started");
     assert_eq!(report["task"]["created"], true);
@@ -990,11 +1063,11 @@ async fn repeating_a_handoff_returns_the_same_task_and_session_without_a_second_
     let (_dir, host) = startable_host();
     let db = Arc::new(Database::open_memory().unwrap());
     let vault = tempfile::tempdir().unwrap();
-    let first = handoff::handoff(vault.path(), &db, host, handoff_req("ext-7")).await.unwrap();
+    let first = handoff::handoff(vault.path(), &db, Arc::new(host), handoff_req("ext-7")).await.unwrap();
     let session_id = first["session_id"].as_str().unwrap().to_string();
 
     let (dir, host) = fake_host(&[("agent list", live_list(&session_id), None)]);
-    let again = handoff::handoff(vault.path(), &db, host, handoff_req("ext-7")).await.unwrap();
+    let again = handoff::handoff(vault.path(), &db, Arc::new(host), handoff_req("ext-7")).await.unwrap();
 
     assert_eq!(again["handoff"], "existing_session");
     assert_eq!(again["task"]["id"], first["task"]["id"]);
@@ -1012,7 +1085,7 @@ async fn a_session_marked_running_that_its_host_no_longer_has_does_not_block_a_n
     let (_dir, host) = startable_host();
     let db = Arc::new(Database::open_memory().unwrap());
     let vault = tempfile::tempdir().unwrap();
-    handoff::handoff(vault.path(), &db, host, handoff_req("ext-8")).await.unwrap();
+    handoff::handoff(vault.path(), &db, Arc::new(host), handoff_req("ext-8")).await.unwrap();
 
     let empty = r#"{"id":"x","result":{"agents":[]}}"#.to_string();
     let (_dir, host) = fake_host(&[
@@ -1022,7 +1095,7 @@ async fn a_session_marked_running_that_its_host_no_longer_has_does_not_block_a_n
         ("agent get", agent_json("hs-h", "idle"), None),
         ("agent prompt", OK.into(), None),
     ]);
-    let again = handoff::handoff(vault.path(), &db, host, handoff_req("ext-8")).await.unwrap();
+    let again = handoff::handoff(vault.path(), &db, Arc::new(host), handoff_req("ext-8")).await.unwrap();
 
     assert_eq!(again["handoff"], "started");
     assert_eq!(again["task"]["deduplicated"], true, "same task, new session");
@@ -1035,7 +1108,7 @@ async fn an_unreachable_host_is_reported_and_leaves_no_session_or_dangling_threa
     let db = Arc::new(Database::open_memory().unwrap());
     let vault = tempfile::tempdir().unwrap();
 
-    let err = handoff::handoff(vault.path(), &db, host, handoff_req("ext-9")).await.unwrap_err().to_string();
+    let err = handoff::handoff(vault.path(), &db, Arc::new(host), handoff_req("ext-9")).await.unwrap_err().to_string();
 
     assert!(err.contains("no session was started") && err.contains("timed out"), "{err}");
     assert_eq!(count(&db, "SELECT COUNT(*) FROM harness_sessions"), 0);
@@ -1056,7 +1129,7 @@ async fn an_agent_stuck_at_a_dialog_is_reported_as_blocked_with_no_prompt_typed(
     let db = Arc::new(Database::open_memory().unwrap());
     let vault = tempfile::tempdir().unwrap();
 
-    let report = handoff::handoff(vault.path(), &db, host, handoff_req("ext-10")).await.unwrap();
+    let report = handoff::handoff(vault.path(), &db, Arc::new(host), handoff_req("ext-10")).await.unwrap();
 
     assert_eq!(report["handoff"], "blocked_at_dialog");
     assert!(report["warning"].as_str().unwrap().contains("NOT typed"));
@@ -1093,14 +1166,14 @@ async fn a_handoff_can_work_an_existing_task_and_refuses_ambiguous_or_empty_requ
         .unwrap();
 
     let both = handoff::HandoffRequest { task_id: task.clone(), ..handoff_req("ext-11") };
-    let err = handoff::handoff(vault.path(), &db, host.clone(), both).await.unwrap_err();
+    let err = handoff::handoff(vault.path(), &db, Arc::new(host.clone()), both).await.unwrap_err();
     assert!(err.to_string().contains("not both"), "{err}");
     let untitled = handoff::HandoffRequest { title: " ".into(), ..handoff_req("") };
-    assert!(handoff::handoff(vault.path(), &db, host.clone(), untitled).await.is_err());
+    assert!(handoff::handoff(vault.path(), &db, Arc::new(host.clone()), untitled).await.is_err());
     assert_eq!(count(&db, "SELECT COUNT(*) FROM chat_threads"), 0, "refused before anything is created");
 
     let existing = handoff::HandoffRequest { task_id: "FR-001".into(), title: String::new(), ..handoff_req("") };
-    let report = handoff::handoff(vault.path(), &db, host, existing).await.unwrap();
+    let report = handoff::handoff(vault.path(), &db, Arc::new(host), existing).await.unwrap();
     assert_eq!(report["task"]["id"], task);
     assert_eq!(report["task"]["created"], false);
     assert_eq!(count(&db, "SELECT COUNT(*) FROM tasks"), 1);
@@ -1291,7 +1364,7 @@ async fn a_caller_that_disconnects_mid_launch_still_gets_the_session_recorded() 
 
     let cancelled = tokio::time::timeout(
         Duration::from_millis(200),
-        handoff::handoff(vault.path(), &db, host, handoff_req("ext-cancel")),
+        handoff::handoff(vault.path(), &db, Arc::new(host), handoff_req("ext-cancel")),
     )
     .await;
     assert!(cancelled.is_err());
@@ -1312,7 +1385,7 @@ async fn a_cancelled_handoff_for_a_stuck_harness_still_settles_the_thread_and_ta
 
     let cancelled = tokio::time::timeout(
         Duration::from_millis(200),
-        handoff::handoff(vault.path(), &db, host, handoff_req("ext-cancel-stuck")),
+        handoff::handoff(vault.path(), &db, Arc::new(host), handoff_req("ext-cancel-stuck")),
     )
     .await;
     assert!(cancelled.is_err());
@@ -1331,7 +1404,7 @@ async fn a_handoff_to_a_host_whose_harness_never_starts_leaves_nothing_behind() 
     let db = Arc::new(Database::open_memory().unwrap());
     let vault = tempfile::tempdir().unwrap();
 
-    let err = handoff::handoff(vault.path(), &db, host, handoff_req("ext-stuck"))
+    let err = handoff::handoff(vault.path(), &db, Arc::new(host), handoff_req("ext-stuck"))
         .await
         .unwrap_err()
         .to_string();
@@ -1344,7 +1417,7 @@ async fn a_handoff_to_a_host_whose_harness_never_starts_leaves_nothing_behind() 
     assert_eq!(status, "to_do", "the task is not left looking started");
 
     let (_dir, host) = startable_host();
-    let again = handoff::handoff(vault.path(), &db, host, handoff_req("ext-stuck")).await.unwrap();
+    let again = handoff::handoff(vault.path(), &db, Arc::new(host), handoff_req("ext-stuck")).await.unwrap();
     assert_eq!(again["task"]["deduplicated"], true, "a retry reuses the task");
     assert_eq!(again["handoff"], "started");
 }
@@ -1361,7 +1434,7 @@ async fn a_failure_after_the_session_was_recorded_says_so_and_keeps_the_thread()
     let db = Arc::new(Database::open_memory().unwrap());
     let vault = tempfile::tempdir().unwrap();
 
-    let err = handoff::handoff(vault.path(), &db, host, handoff_req("ext-late")).await.unwrap_err().to_string();
+    let err = handoff::handoff(vault.path(), &db, Arc::new(host), handoff_req("ext-late")).await.unwrap_err().to_string();
 
     assert!(err.contains("was started for task") && err.contains("is tracked"), "{err}");
     assert!(!err.contains("nothing has run"), "{err}");
