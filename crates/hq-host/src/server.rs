@@ -394,6 +394,10 @@ impl Conn {
             "agent.list" => {
                 Ok(json!({ "agents": host.list().iter().map(info_json).collect::<Vec<_>>() }))
             }
+            "agent.set_resume" => {
+                let p: SetResumeParams = parse(params)?;
+                done(host.set_resume(&p.name, p.argv))
+            }
             "agent.report" => {
                 let p: ReportParams = parse(params)?;
                 let name = p
@@ -539,6 +543,13 @@ struct SpawnParams {
     rows: Option<u16>,
     cols: Option<u16>,
     scrollback_rows: Option<usize>,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct SetResumeParams {
+    name: String,
+    argv: Vec<String>,
 }
 
 #[derive(Deserialize)]

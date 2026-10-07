@@ -81,21 +81,28 @@ impl NativeBackend {
     /// decides the state.
     fn with_hooks(&self, req: &LaunchRequest) -> LaunchRequest {
         let mut req = req.clone();
-        if req.kind != CLAUDE_KIND {
-            return req;
-        }
-        let command = format!("{} host report", shell_quote(&hq_binary()));
-        match hq_host::write_claude_settings(&self.dir, &req.name, &command) {
-            Ok(path) => {
-                let flags = ["--settings".to_string(), path.to_string_lossy().into_owned()];
-                req.args.extend(flags.clone());
-                if let Some(resume) = req.resume_args.as_mut() {
-                    resume.extend(flags);
-                }
-            }
-            Err(e) => tracing::warn!(agent = %req.name, error = %e, "could not write hook settings"),
+        let flags = self.hook_flags(&req.name, &req.kind);
+        req.args.extend(flags.clone());
+        if let Some(resume) = req.resume_args.as_mut() {
+            resume.extend(flags);
         }
         req
+    }
+
+    /// The flags that point an agent at its hook file, written first. Empty
+    /// for kinds without hooks or when the file cannot be written.
+    fn hook_flags(&self, name: &str, kind: &str) -> Vec<String> {
+        if kind != CLAUDE_KIND {
+            return Vec::new();
+        }
+        let command = format!("{} host report", shell_quote(&hq_binary()));
+        match hq_host::write_claude_settings(&self.dir, name, &command) {
+            Ok(path) => vec!["--settings".to_string(), path.to_string_lossy().into_owned()],
+            Err(e) => {
+                tracing::warn!(agent = %name, error = %e, "could not write hook settings");
+                Vec::new()
+            }
+        }
     }
 
     /// Waits for one of `until`; a wait that times out is an `Ok(None)`.
@@ -193,6 +200,7 @@ fn parse_info(v: &Value) -> Option<AgentInfo> {
         // callers that notify per change must key on status instead.
         state_change_seq: 0,
         launch_pending: false,
+        agent_session_id: text("agent_session_id"),
         name: Some(name),
     })
 }
@@ -365,6 +373,14 @@ impl HostBackend for NativeBackend {
     fn shell_pid(&self, pane_id: &str) -> Option<u32> {
         let v = self.call("agent.get", json!({ "name": pane_id })).ok()?;
         v.get("pid")?.as_u64().map(|p| p as u32)
+    }
+
+    fn update_resume(&self, name: &str, kind: &str, args: Vec<String>) -> Result<(), HerdrError> {
+        let mut argv = vec![binary_for(kind)];
+        argv.extend(args);
+        argv.extend(self.hook_flags(name, kind));
+        self.call("agent.set_resume", json!({ "name": name, "argv": argv }))
+            .map(|_| ())
     }
 
     fn awaiting(&self) -> Result<Vec<AwaitingAgent>, HerdrError> {

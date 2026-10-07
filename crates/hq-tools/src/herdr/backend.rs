@@ -48,6 +48,11 @@ pub trait HostBackend: Send + Sync + std::fmt::Debug {
     fn awaiting(&self) -> Result<Vec<AwaitingAgent>, HerdrError> {
         Ok(Vec::new())
     }
+    /// Tells the host the command that brings `name` back after the host
+    /// restarts. Only the built-in host restarts agents, so others ignore it.
+    fn update_resume(&self, _name: &str, _kind: &str, _args: Vec<String>) -> Result<(), HerdrError> {
+        Ok(())
+    }
     fn resume_awaiting(&self, name: &str, _env: Vec<(String, String)>) -> Result<(), HerdrError> {
         Err(HerdrError::Api {
             code: "unsupported".into(),
@@ -210,6 +215,9 @@ impl<T: HostBackend + ?Sized> HostBackend for Arc<T> {
     }
     fn shell_pid(&self, pane_id: &str) -> Option<u32> {
         (**self).shell_pid(pane_id)
+    }
+    fn update_resume(&self, name: &str, kind: &str, args: Vec<String>) -> Result<(), HerdrError> {
+        (**self).update_resume(name, kind, args)
     }
     fn awaiting(&self) -> Result<Vec<AwaitingAgent>, HerdrError> {
         (**self).awaiting()

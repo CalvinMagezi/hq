@@ -106,3 +106,94 @@ fn a_restarted_host_gets_each_agents_env_back_from_hq() {
     stop.stop();
     thread.join().unwrap();
 }
+
+#[test]
+fn a_reported_conversation_id_becomes_the_hosts_restart_command() {
+    use hq_host::Client;
+    use hq_tools::harness_session::refresh_restart_command;
+    use hq_tools::herdr::{HostBackend, LaunchRequest};
+
+    let tmp = tempfile::tempdir().unwrap();
+    let dir = tmp.path().join("run");
+    let host = Arc::new(Host::new().with_state_dir(&dir));
+    let server = Server::bind(&dir, host).unwrap();
+    let stop = server.stop_handle();
+    let thread = std::thread::spawn(move || server.serve());
+
+    let backend: HostHandle = Arc::new(NativeBackend::new(&dir));
+    backend
+        .launch(&LaunchRequest {
+            name: SESSION.into(),
+            kind: "claude".into(),
+            cwd: std::env::temp_dir().to_string_lossy().into(),
+            label: "t".into(),
+            env: vec![],
+            args: vec![],
+            command: Some("f() { cat; }; f".into()),
+            resume_args: Some(vec!["-c".into()]),
+            start_timeout: WAIT,
+        })
+        .unwrap();
+    let mut client = Client::connect(&dir).unwrap();
+    client
+        .call(
+            "agent.report",
+            serde_json::json!({ "name": SESSION, "event": "SessionStart", "session_id": "conv-x" }),
+        )
+        .unwrap();
+
+    let db = Database::open_memory().unwrap();
+    db.with_conn(|c| {
+        registry::insert(
+            c,
+            &NewSession {
+                id: SESSION,
+                harness: "claude-code",
+                label: "t",
+                cwd: "/tmp",
+                mission_id: None,
+                placement: Placement {
+                    host: "native",
+                    agent_name: SESSION,
+                    workspace_id: SESSION,
+                    pane_id: SESSION,
+                },
+            },
+        )
+    })
+    .unwrap();
+    let row = db
+        .with_conn(|c| registry::get(c, SESSION))
+        .unwrap()
+        .unwrap();
+    let agent = backend.agent(SESSION).unwrap().unwrap();
+    assert_eq!(agent.agent_session_id.as_deref(), Some("conv-x"));
+
+    refresh_restart_command(tmp.path(), &backend, &row, &agent).unwrap();
+
+    let saved: serde_json::Value =
+        serde_json::from_str(&std::fs::read_to_string(dir.join("session.json")).unwrap()).unwrap();
+    let argv: Vec<&str> = saved["panes"][0]["resume_argv"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter_map(|v| v.as_str())
+        .collect();
+    assert_eq!(argv[0], "claude");
+    let at = argv
+        .iter()
+        .position(|a| *a == "--resume")
+        .expect("--resume missing");
+    assert_eq!(argv[at + 1], "conv-x");
+    assert!(
+        argv.contains(&"--settings"),
+        "hooks stay on after a restart: {argv:?}"
+    );
+    assert!(
+        !argv.contains(&"-c"),
+        "the id replaces continue-latest: {argv:?}"
+    );
+
+    stop.stop();
+    thread.join().unwrap();
+}

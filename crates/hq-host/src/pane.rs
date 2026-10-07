@@ -91,6 +91,8 @@ pub(crate) struct Pane {
     shared: Arc<Shared>,
     /// Someone asked this process to stop; it may take a moment to exit.
     stopping: AtomicBool,
+    /// A later command to resume with, replacing `resume.argv`.
+    resume_argv: Mutex<Option<Vec<String>>>,
     /// What the agent last said about itself through a hook.
     reported: Mutex<Option<Reported>>,
     /// The agent's own id for its conversation, as its hooks reported it.
@@ -186,6 +188,7 @@ impl Pane {
             started: Instant::now(),
             shared,
             stopping: AtomicBool::new(false),
+            resume_argv: Mutex::new(None),
             reported: Mutex::new(None),
             session_id: Mutex::new(None),
             writer: Mutex::new(writer),
@@ -266,6 +269,16 @@ impl Pane {
         if let Some(id) = session_id.filter(|id| !id.is_empty()) {
             *lock(&self.session_id) = Some(id);
         }
+    }
+
+    pub(crate) fn set_resume_argv(&self, argv: Vec<String>) {
+        *lock(&self.resume_argv) = Some(argv);
+    }
+
+    /// The command that brings this agent back, if it can be brought back.
+    pub(crate) fn resume_argv(&self) -> Option<Vec<String>> {
+        let own = self.resume.as_ref()?;
+        Some(lock(&self.resume_argv).clone().unwrap_or_else(|| own.argv.clone()))
     }
 
     pub(crate) fn reported(&self) -> Option<Reported> {
