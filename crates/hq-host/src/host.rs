@@ -219,6 +219,7 @@ impl Host {
             return Err(HostError::InvalidName(spec.name));
         }
         check_size(spec.rows, spec.cols)?;
+
         if lock(&self.panes).contains_key(&spec.name)
             || lock(&self.awaiting).contains_key(&spec.name)
         {
@@ -267,6 +268,30 @@ impl Host {
         self.events.push(&spec.name, EventKind::Spawned, None, None);
         self.save();
         Ok(info_of(&spec.name, pane.as_ref(), &self.detector))
+    }
+
+    /// The flags that point a Claude Code agent at a hook file for `name`,
+    /// writing the file first. The caller puts them in the agent's command
+    /// line, wherever that command ends up. Empty for other kinds, when the
+    /// host does not know its socket directory, or when the file cannot be
+    /// written (the screen still decides the state then).
+    pub fn hook_flags(&self, name: &str, agent: &str) -> Vec<String> {
+        let dir = lock(&self.run_dir).clone();
+        let (true, Some(dir)) = (agent == "claude" && valid_name(name), dir) else {
+            return Vec::new();
+        };
+        let exe = std::env::current_exe().map_or_else(
+            |_| "hq".to_string(),
+            |p| p.to_string_lossy().into_owned(),
+        );
+        let command = format!("{} host report", shell_quote(&exe));
+        match crate::hooks::write_claude_settings(&dir, name, &command) {
+            Ok(path) => vec!["--settings".to_string(), path.to_string_lossy().into_owned()],
+            Err(e) => {
+                eprintln!("hq host: no hook settings for '{name}': {e}");
+                Vec::new()
+            }
+        }
     }
 
     /// Rewrites the state file with the agents that are running and can be
@@ -648,6 +673,17 @@ fn save_state(panes: &Registry, awaiting: &Awaiting, state: Option<&StateFile>) 
         .collect();
     if let Err(e) = state.write(&records) {
         eprintln!("hq host: could not save session.json: {e}");
+    }
+}
+
+/// `arg` as one shell word.
+fn shell_quote(arg: &str) -> String {
+    let plain = !arg.is_empty()
+        && arg.chars().all(|c| c.is_ascii_alphanumeric() || "/._-+=:@%".contains(c));
+    if plain {
+        arg.to_string()
+    } else {
+        format!("'{}'", arg.replace('\'', "'\\''"))
     }
 }
 

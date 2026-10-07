@@ -57,12 +57,13 @@ pub(super) fn launch_env(harness: &Harness, session_id: &str) -> Vec<(String, St
         .collect()
 }
 
-/// Starts the agents a restarted built-in host is holding for their env.
+/// Starts the agents a restarted built-in host (local or remote) is holding for
+/// their env, matching them to the sessions placed on that host.
 /// Best effort: one that cannot be resumed stays held and is tried next sweep.
 pub fn resume_awaiting(rows: &[HarnessSessionRow], host: &Host) {
     let Ok(waiting) = host.awaiting() else { return };
     for agent in waiting {
-        let on_host = |r: &&HarnessSessionRow| r.host == NATIVE_HOST && r.agent_name == agent.name;
+        let on_host = |r: &&HarnessSessionRow| r.host == host.name() && r.agent_name == agent.name;
         let Some(row) = rows.iter().find(on_host) else {
             continue;
         };

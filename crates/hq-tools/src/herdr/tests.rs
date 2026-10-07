@@ -188,6 +188,8 @@ fn unknown_host_names_the_known_ones() {
     cfg.hosts.insert(
         "laptop".into(),
         HerdrHostConfig {
+            kind: Default::default(),
+            port: None,
             ssh: "me@100.64.0.1".into(),
             identity_file: None,
             gate_command: "hq-herdr-gate".into(),
@@ -250,6 +252,8 @@ fn real_ssh_host_answers_through_the_gate() {
     cfg.hosts.insert(
         "remote".into(),
         HerdrHostConfig {
+            kind: Default::default(),
+            port: None,
             ssh: target,
             identity_file: std::env::var("HQ_TEST_HERDR_KEY").ok(),
             gate_command: "hq-herdr-gate".into(),

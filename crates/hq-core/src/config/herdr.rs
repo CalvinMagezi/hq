@@ -149,18 +149,38 @@ pub struct HarnessProfileConfig {
     pub env: BTreeMap<String, String>,
 }
 
-/// One remote machine running Herdr, reached with `ssh`.
+/// What runs agents on a remote machine.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum HostKind {
+    /// Herdr, driven through its CLI.
+    #[default]
+    Herdr,
+    /// HQ's built-in host (`hq host serve`), driven through `hq host gate`.
+    Native,
+}
+
+/// One remote machine running Herdr or HQ's built-in host, reached with `ssh`.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct HerdrHostConfig {
+    /// Which kind of host runs there. Defaults to herdr.
+    #[serde(default)]
+    pub kind: HostKind,
+
     /// `user@address` for ssh, usually a Tailscale address or MagicDNS name.
     pub ssh: String,
+
+    /// ssh port when the server does not listen on 22.
+    #[serde(default)]
+    pub port: Option<u16>,
 
     /// Private key HQ presents. Unset lets ssh choose its defaults.
     #[serde(default)]
     pub identity_file: Option<String>,
 
-    /// Command run after login. It receives the herdr arguments as a JSON
-    /// array on stdin (see `scripts/hq-herdr-gate`); a forced-command
+    /// Command run after login. For herdr it receives the herdr arguments as a
+    /// JSON array on stdin (see `scripts/hq-herdr-gate`); for a native host it
+    /// is `hq host gate` and gets a method and its params. A forced-command
     /// `authorized_keys` entry ignores this value.
     #[serde(default = "default_gate_command")]
     pub gate_command: String,

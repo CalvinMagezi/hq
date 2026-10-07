@@ -1,7 +1,7 @@
+use super::transport::Transport;
 use super::{
     AgentInfo, AgentStatus, AwaitingAgent, HerdrError, Host, HostBackend, HostEvent, HostEvents,
-    INVALID_KEYS_CODE, LaunchRequest, Launched, PromptOutcome, shell_line, shell_quote,
-    validate_keys,
+    INVALID_KEYS_CODE, LaunchRequest, Launched, PromptOutcome, shell_line, validate_keys,
 };
 use hq_host::{Client, ClientError};
 use serde_json::{Value, json};
@@ -26,15 +26,71 @@ const REACTED: [AgentStatus; 2] = [AgentStatus::Working, AgentStatus::Blocked];
 /// its workspace id and its pane id, so every herdr-shaped call maps onto it.
 #[derive(Debug, Clone)]
 pub struct NativeBackend {
-    dir: PathBuf,
+    link: Link,
     launch_bound: Duration,
     command_timeout: Duration,
 }
 
+/// How HQ reaches the host.
+#[derive(Debug, Clone)]
+enum Link {
+    /// The host's socket on this machine.
+    Local(PathBuf),
+    /// A host on another machine, through its `hq host gate` over ssh.
+    Remote {
+        name: String,
+        transport: Transport,
+        ssh_program: String,
+    },
+}
+
+/// What a remote host runs for each request: the gate command pinned to the key.
+pub const NATIVE_GATE_COMMAND: &str = "hq host gate";
+
 impl NativeBackend {
     pub fn new(dir: impl Into<PathBuf>) -> Self {
+        Self::with_link(Link::Local(dir.into()))
+    }
+
+    /// A host on another machine named `name`, reached with `ssh`. The remote
+    /// side runs `gate_command` (normally pinned in `authorized_keys`).
+    pub fn remote(
+        name: &str,
+        target: &str,
+        port: Option<u16>,
+        identity_file: Option<String>,
+        gate_command: &str,
+        mux_dir: Option<PathBuf>,
+    ) -> Self {
+        Self::remote_with_program(name, target, port, identity_file, gate_command, mux_dir, "ssh")
+    }
+
+    /// Like `remote`, with the program that stands in for `ssh` (tests).
+    pub fn remote_with_program(
+        name: &str,
+        target: &str,
+        port: Option<u16>,
+        identity_file: Option<String>,
+        gate_command: &str,
+        mux_dir: Option<PathBuf>,
+        ssh_program: &str,
+    ) -> Self {
+        Self::with_link(Link::Remote {
+            name: name.to_string(),
+            transport: Transport::Ssh {
+                target: target.to_string(),
+                port,
+                identity_file,
+                gate_command: gate_command.to_string(),
+                mux_dir,
+            },
+            ssh_program: ssh_program.to_string(),
+        })
+    }
+
+    fn with_link(link: Link) -> Self {
         Self {
-            dir: dir.into(),
+            link,
             launch_bound: DEFAULT_LAUNCH_BOUND,
             command_timeout: DEFAULT_COMMAND_TIMEOUT,
         }
@@ -50,8 +106,19 @@ impl NativeBackend {
         self
     }
 
-    pub fn dir(&self) -> &Path {
-        &self.dir
+    /// The local socket directory; None for a remote host.
+    pub fn dir(&self) -> Option<&Path> {
+        match &self.link {
+            Link::Local(dir) => Some(dir),
+            Link::Remote { .. } => None,
+        }
+    }
+
+    fn host_name(&self) -> &str {
+        match &self.link {
+            Link::Local(_) => HOST_NAME,
+            Link::Remote { name, .. } => name,
+        }
     }
 
     fn call(&self, method: &str, params: Value) -> Result<Value, HerdrError> {
@@ -64,25 +131,82 @@ impl NativeBackend {
         params: Value,
         timeout: Duration,
     ) -> Result<Value, HerdrError> {
-        let mut client = Client::connect(&self.dir).map_err(|e| self.error(e))?;
-        client.set_timeout(Some(timeout));
-        client.call(method, params).map_err(|e| self.error(e))
+        match &self.link {
+            Link::Local(dir) => {
+                let mut client = Client::connect(dir).map_err(|e| self.error(e))?;
+                client.set_timeout(Some(timeout));
+                client.call(method, params).map_err(|e| self.error(e))
+            }
+            Link::Remote {
+                name,
+                transport,
+                ssh_program,
+            } => self.call_remote(transport, ssh_program, name, method, params, timeout),
+        }
+    }
+
+    /// One request through the remote gate: it prints `{"result": ...}` or
+    /// `{"error": {...}}` on stdout, and exits 64 with a message on stderr when
+    /// it refuses the request.
+    fn call_remote(
+        &self,
+        transport: &Transport,
+        ssh_program: &str,
+        name: &str,
+        method: &str,
+        params: Value,
+        timeout: Duration,
+    ) -> Result<Value, HerdrError> {
+        let args = vec![method.to_string(), params.to_string()];
+        let out = transport.run_with_program(ssh_program, name, &args, timeout)?;
+        let unreachable = |detail: String| HerdrError::Unreachable {
+            host: name.to_string(),
+            detail,
+        };
+        if out.exit_code == hq_host::GATE_DENIED_EXIT {
+            return Err(HerdrError::Api {
+                code: "gate_denied".into(),
+                message: out.stderr.trim().to_string(),
+            });
+        }
+        if out.exit_code != 0 {
+            return Err(unreachable(format!(
+                "gate exited {}: {}",
+                out.exit_code,
+                out.stderr.lines().next().unwrap_or_default()
+            )));
+        }
+        let reply: Value = serde_json::from_str(out.stdout.trim())
+            .map_err(|e| unreachable(format!("unreadable gate reply: {e}")))?;
+        if let Some(error) = reply.get("error") {
+            let text = |k: &str| error.get(k).and_then(Value::as_str).unwrap_or_default();
+            return match text("code") {
+                "unreachable" => Err(unreachable(text("message").to_string())),
+                code => Err(HerdrError::Api {
+                    code: code.to_string(),
+                    message: text("message").to_string(),
+                }),
+            };
+        }
+        reply
+            .get("result")
+            .cloned()
+            .ok_or_else(|| unreachable("gate reply had no result".into()))
     }
 
     fn error(&self, e: ClientError) -> HerdrError {
         match e {
             ClientError::Remote { code, message } => HerdrError::Api { code, message },
             other => HerdrError::Unreachable {
-                host: HOST_NAME.into(),
+                host: self.host_name().into(),
                 detail: other.to_string(),
             },
         }
     }
 
-    /// The request with Claude Code's reporting hooks added, so the host hears
-    /// state changes and the conversation id straight from the agent. Without
-    /// them (another kind, or a file that cannot be written) the screen still
-    /// decides the state.
+    /// The request with the agent's reporting hooks added, so the host hears
+    /// its state and conversation id from the agent itself. The host writes the
+    /// settings file on the machine the agent runs on.
     fn with_hooks(&self, req: &LaunchRequest) -> LaunchRequest {
         let mut req = req.clone();
         let flags = self.hook_flags(&req.name, &req.kind);
@@ -93,23 +217,16 @@ impl NativeBackend {
         req
     }
 
-    /// The flags that point an agent at its hook file, written first. Empty
-    /// for kinds without hooks or when the file cannot be written.
+    /// Empty for other kinds, or when the host cannot write the file.
     fn hook_flags(&self, name: &str, kind: &str) -> Vec<String> {
         if kind != CLAUDE_KIND {
             return Vec::new();
         }
-        let command = format!("{} host report", shell_quote(&hq_binary()));
-        match hq_host::write_claude_settings(&self.dir, name, &command) {
-            Ok(path) => vec![
-                "--settings".to_string(),
-                path.to_string_lossy().into_owned(),
-            ],
-            Err(e) => {
-                tracing::warn!(agent = %name, error = %e, "could not write hook settings");
-                Vec::new()
-            }
-        }
+        let reply = self.call("agent.hook_flags", json!({ "name": name, "agent": kind }));
+        let flags = reply.ok().and_then(|v| v.get("flags").cloned());
+        flags
+            .and_then(|f| serde_json::from_value(f).ok())
+            .unwrap_or_default()
     }
 
     /// Whether the agent has drawn something and stopped for a moment. An empty
@@ -152,15 +269,6 @@ impl NativeBackend {
 }
 
 const CLAUDE_KIND: &str = "claude";
-
-/// The `hq` that runs `host report` for a hook: this very binary when HQ is
-/// the one launching, else whatever `hq` is on the PATH.
-fn hq_binary() -> String {
-    std::env::current_exe()
-        .ok()
-        .filter(|p| p.file_name().is_some_and(|n| n == "hq"))
-        .map_or_else(|| "hq".to_string(), |p| p.to_string_lossy().into_owned())
-}
 
 /// The program and arguments to start. A wrapper command runs through a shell,
 /// the same way herdr types it into a pane.
@@ -236,10 +344,12 @@ fn parse_info(v: &Value) -> Option<AgentInfo> {
 
 impl HostBackend for NativeBackend {
     fn name(&self) -> &str {
-        HOST_NAME
+        self.host_name()
     }
     fn checks_binaries(&self) -> bool {
-        true
+        // HQ can only look at its own PATH. On a remote host a missing agent
+        // binary shows up as the host's own `spawn_failed` error.
+        matches!(self.link, Link::Local(_))
     }
     fn launch_bound(&self) -> Duration {
         self.launch_bound
@@ -271,7 +381,6 @@ impl HostBackend for NativeBackend {
     }
 
     fn launch(&self, req: &LaunchRequest) -> Result<Launched, HerdrError> {
-        let req = &self.with_hooks(req);
         let env: serde_json::Map<String, Value> = req
             .env
             .iter()
@@ -282,9 +391,11 @@ impl HostBackend for NativeBackend {
                 .chain(args.clone())
                 .collect::<Vec<_>>()
         });
+        let req = &self.with_hooks(req);
         let params = json!({
             "name": req.name, "argv": argv_for(req), "cwd": req.cwd,
             "agent": req.kind, "resume_argv": resume, "env": env,
+
         });
         let spawned = self.call("agent.spawn", params)?;
         // A kind without a rule file has no state to wait for.

@@ -415,6 +415,10 @@ impl Conn {
             "agent.list" => {
                 Ok(json!({ "agents": host.list().iter().map(info_json).collect::<Vec<_>>() }))
             }
+            "agent.hook_flags" => {
+                let p: HookFlagsParams = parse(params)?;
+                Ok(json!({ "flags": host.hook_flags(&p.name, &p.agent) }))
+            }
             "agent.set_resume" => {
                 let p: SetResumeParams = parse(params)?;
                 done(host.set_resume(&p.name, p.argv))
@@ -577,6 +581,13 @@ struct PollParams {
 /// most it may be asked to wait.
 const DEFAULT_POLL_MS: u64 = 25_000;
 const MAX_POLL_MS: u64 = 60_000;
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct HookFlagsParams {
+    name: String,
+    agent: String,
+}
 
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]

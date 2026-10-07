@@ -271,11 +271,14 @@ fn run_startup_hooks(config: &HqConfig, vault_path: &Path, db: &Database) {
 
     // Wakes the session supervisor on built-in host events; the minute timer
     // stays as the safety net and as the only path for other hosts.
-    tokio::spawn(tasks_periodic::session_events::run_session_event_loop(
-        vault_path.to_path_buf(),
-        db.clone(),
-        config.clone(),
-    ));
+    for host_name in hq_tools::herdr::native_host_names() {
+        tokio::spawn(tasks_periodic::session_events::run_session_event_loop(
+            host_name,
+            vault_path.to_path_buf(),
+            db.clone(),
+            config.clone(),
+        ));
+    }
 
     // Keeps _system/MACHINE.md current so every system prompt can state which
     // CLIs this host actually has, instead of the agent guessing.

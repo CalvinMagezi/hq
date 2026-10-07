@@ -31,7 +31,6 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::Duration;
 
-use hq_core::config::NATIVE_HOST;
 use spec::SPECS;
 pub use launch::resume_awaiting;
 pub use spec::{Harness, HarnessSessionSpec, ResumeStrategy, resolve, resolve_in, spec_for};
