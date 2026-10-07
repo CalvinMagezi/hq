@@ -1,0 +1,792 @@
+{
+ "category": "code",
+ "engines": [
+  {
+   "engine": "github",
+   "results": [
+    {
+     "published": "2021-07-26T00:33:26Z",
+     "snippet": "nginx WebSocket Proxy (348 stars)",
+     "title": "nicokaiser/nginx-websocket-proxy",
+     "url": "https://github.com/nicokaiser/nginx-websocket-proxy"
+    },
+    {
+     "published": "2026-09-11T15:28:36Z",
+     "snippet": "Fast, horizontally scalable, multiprocess pub/sub queuing server and proxy for HTTP, long-polling, Websockets and EventSource (SSE), powered by Nginx. (C, 3066 stars)",
+     "title": "slact/nchan",
+     "url": "https://github.com/slact/nchan"
+    },
+    {
+     "published": "2023-02-12T09:11:38Z",
+     "snippet": "SSH over websocket through Nginx reverse proxy (Shell, 23 stars)",
+     "title": "ozipoetra/sshws-nginx",
+     "url": "https://github.com/ozipoetra/sshws-nginx"
+    },
+    {
+     "published": "2019-10-06T14:17:40Z",
+     "snippet": "🌎The ULTIMATE V2Ray proxy configuration powered by Project V. (Shell, 36 stars)",
+     "title": "chenjie/v2ray-tls-websocket-nginx",
+     "url": "https://github.com/chenjie/v2ray-tls-websocket-nginx"
+    },
+    {
+     "published": "2016-01-15T09:48:51Z",
+     "snippet": "use strophe to connect nginx or haproxy websocket proxy (openfire) (JavaScript, 20 stars)",
+     "title": "gunblues/strophe-openfire-websocket",
+     "url": "https://github.com/gunblues/strophe-openfire-websocket"
+    },
+    {
+     "published": "2017-01-25T06:25:15Z",
+     "snippet": "Java Remote Debug through Websocket Proxy. (Go, 67 stars)",
+     "title": "leonlee/jrdwp",
+     "url": "https://github.com/leonlee/jrdwp"
+    },
+    {
+     "published": "2015-09-19T13:23:44Z",
+     "snippet": "NGinx proxy pass configuration designed for Websockets load balanced through ELB, running on ECS (Shell, 18 stars)",
+     "title": "Stockflare/docker-nginx-elb-websocket",
+     "url": "https://github.com/Stockflare/docker-nginx-elb-websocket"
+    },
+    {
+     "published": "2024-11-22T08:59:24Z",
+     "snippet": "用Rust实现仿nginx，力争实现一个可替代方案，http/https代理, socks5代理, 负载均衡, 反向代理, 静态文件服务器，四层TCP/UDP转发，websocket转发, 内网穿透nat (Rust, 531 stars)",
+     "title": "tickbh/wmproxy",
+     "url": "https://github.com/tickbh/wmproxy"
+    },
+    {
+     "published": "2025-11-11T19:13:15Z",
+     "snippet": "A simple HTTPS forward proxy for bypassing browser warning of Ngrok. Full support of SSL (free certificates included!), WebSocket, SSE and CORS. (Shell, 40 stars)",
+     "title": "igops/ngrok-skip-browser-warning",
+     "url": "https://github.com/igops/ngrok-skip-browser-warning"
+    },
+    {
+     "published": "2025-07-14T11:19:16Z",
+     "snippet": "a complete Bash script to install Xray-core on server with user management (Shell, 70 stars)",
+     "title": "thehxdev/xray-install",
+     "url": "https://github.com/thehxdev/xray-install"
+    },
+    {
+     "published": "2024-02-24T18:40:20Z",
+     "snippet": "V2ray protocal configured with Nginx, Websocket, TLS and CDN to improve proxy speed and security (Shell, 8 stars)",
+     "title": "hc-sun/V2ray-Nginx-Websocket-TLS-CDN-Clean-Configuration",
+     "url": "https://github.com/hc-sun/V2ray-Nginx-Websocket-TLS-CDN-Clean-Configuration"
+    },
+    {
+     "published": "2019-05-08T16:04:45Z",
+     "snippet": "Reverse proxy from dns using nginx with websocket support for apache guacamole project with docker swarm (Dockerfile, 3 stars)",
+     "title": "michaelbarkdoll/guacamole-reverse-proxy-nginx",
+     "url": "https://github.com/michaelbarkdoll/guacamole-reverse-proxy-nginx"
+    },
+    {
+     "published": "2023-01-11T15:09:44Z",
+     "snippet": "Reverse-proxy NGinx doing Basic Authentication, passing Auth user through Websocket headers and Streamlit extracting auth login from websocket headers to customize page per user logging in. (Dockerfile, 16 stars)",
+     "title": "andfanilo/streamlit-nginx-basicauth",
+     "url": "https://github.com/andfanilo/streamlit-nginx-basicauth"
+    },
+    {
+     "published": "2017-08-23T12:07:20Z",
+     "snippet": "Docker image of Websocket server, Nginx as reverse proxy over TLS (5 stars)",
+     "title": "afshinm/websocket_tls_docker",
+     "url": "https://github.com/afshinm/websocket_tls_docker"
+    },
+    {
+     "published": "2026-08-06T02:03:20Z",
+     "snippet": "A automated deployment script for a VLESS-over-WebSocket proxy behind a (optional) CDN-fronted fake website. Includes site generation and Xray fallback configuration to blend covert traffic into normal HTTPS. (Shell, 18 stars)",
+     "title": "braydos-h/xray-vless-ws-cdn-installer",
+     "url": "https://github.com/braydos-h/xray-vless-ws-cdn-installer"
+    },
+    {
+     "published": "2025-12-03T20:19:36Z",
+     "snippet": "Настройка связки VLESS + WebSocket + TLS (Reverse Proxy via Nginx) (4 stars)",
+     "title": "DestrMZ/VLESS-WS-TLS-Nginx-Reverse-Proxy-with-self-domain",
+     "url": "https://github.com/DestrMZ/VLESS-WS-TLS-Nginx-Reverse-Proxy-with-self-domain"
+    },
+    {
+     "published": "2025-06-29T21:43:04Z",
+     "snippet": "Repo Name: FlexProxy Description: Auto-configure TCP, UDP, and WebSocket proxy with NGINX, GOST, and SSL support (Shell, 1 stars)",
+     "title": "Aytola7/FlexProxy",
+     "url": "https://github.com/Aytola7/FlexProxy"
+    },
+    {
+     "published": "2020-10-14T03:58:29Z",
+     "snippet": "docker-network-with-nginx-reverse-proxy-and-websockets (JavaScript, 2 stars)",
+     "title": "ff6347/docker-network-with-nginx-reverse-proxy-and-websockets",
+     "url": "https://github.com/ff6347/docker-network-with-nginx-reverse-proxy-and-websockets"
+    },
+    {
+     "published": "2019-03-20T01:49:26Z",
+     "snippet": "nginx proxy websocket (JavaScript, 0 stars)",
+     "title": "zhuima/nginx-ws",
+     "url": "https://github.com/zhuima/nginx-ws"
+    },
+    {
+     "published": "2022-12-11T10:18:20Z",
+     "snippet": "nginx-websocket-proxy (0 stars)",
+     "title": "songonha/nginx-ws-proxy",
+     "url": "https://github.com/songonha/nginx-ws-proxy"
+    }
+   ],
+   "weight": 1.0
+  },
+  {
+   "engine": "stack overflow",
+   "results": [
+    {
+     "published": "2014-04-24T16:01:22+00:00",
+     "snippet": "2 votes, 2 answers (answered); tags: nginx, proxy, websocket",
+     "title": "Nginx Websocket proxy dropping frames",
+     "url": "https://stackoverflow.com/questions/23274052/nginx-websocket-proxy-dropping-frames"
+    },
+    {
+     "published": "2012-08-24T01:23:38+00:00",
+     "snippet": "245 votes, 9 answers (answered); tags: ssl, tcp, proxy, nginx, mod-proxy",
+     "title": "NGINX to reverse proxy websockets AND enable SSL (wss://)?",
+     "url": "https://stackoverflow.com/questions/12102110/nginx-to-reverse-proxy-websockets-and-enable-ssl-wss"
+    },
+    {
+     "published": "2017-08-07T06:48:10+00:00",
+     "snippet": "0 votes, 0 answers (unanswered); tags: regex, nginx, websocket, proxy, server-configuration",
+     "title": "Nginx websocket proxy",
+     "url": "https://stackoverflow.com/questions/45540865/nginx-websocket-proxy"
+    },
+    {
+     "published": "2015-08-10T15:33:55+00:00",
+     "snippet": "6 votes, 3 answers (answered); tags: python, curl, nginx, proxy, websocket",
+     "title": "Nginx WebSocket proxying keep getting HTTP 301 redirects",
+     "url": "https://stackoverflow.com/questions/31923626/nginx-websocket-proxying-keep-getting-http-301-redirects"
+    },
+    {
+     "published": "2020-10-13T02:15:11+00:00",
+     "snippet": "7 votes, 1 answers (answered); tags: python, nginx, websocket, docker-compose, reverse-proxy",
+     "title": "Unable to connect to Websocket Server with Nginx reverse proxy",
+     "url": "https://stackoverflow.com/questions/64327534/unable-to-connect-to-websocket-server-with-nginx-reverse-proxy"
+    },
+    {
+     "published": "2016-02-11T18:31:03+00:00",
+     "snippet": "9 votes, 1 answers (answered); tags: nginx, proxy, websocket",
+     "title": "Nginx websocket proxy disconnects after 2 minutes",
+     "url": "https://stackoverflow.com/questions/35347284/nginx-websocket-proxy-disconnects-after-2-minutes"
+    },
+    {
+     "published": "2020-12-11T10:33:06+00:00",
+     "snippet": "0 votes, 1 answers (unanswered); tags: nginx, websocket, ratchet, bad-gateway",
+     "title": "nginx + websocket proxy + Ratchet in docker",
+     "url": "https://stackoverflow.com/questions/65249642/nginx-websocket-proxy-ratchet-in-docker"
+    },
+    {
+     "published": "2021-04-14T20:09:18+00:00",
+     "snippet": "1 votes, 1 answers (answered); tags: node.js, nginx, websocket, nginx-reverse-proxy",
+     "title": "Nginx websocket proxy for Node.js",
+     "url": "https://stackoverflow.com/questions/67098447/nginx-websocket-proxy-for-node-js"
+    },
+    {
+     "published": "2019-01-17T15:18:39+00:00",
+     "snippet": "0 votes, 1 answers (unanswered); tags: nginx, nginx-reverse-proxy, nginx-config",
+     "title": "nginx websocket proxy: using defined location",
+     "url": "https://stackoverflow.com/questions/54238981/nginx-websocket-proxy-using-defined-location"
+    },
+    {
+     "published": "2017-10-07T09:18:15+00:00",
+     "snippet": "3 votes, 0 answers (unanswered); tags: nginx-reverse-proxy",
+     "title": "Nginx as a WebSocket Proxy giving Invalid URL Prefix error",
+     "url": "https://stackoverflow.com/questions/46618598/nginx-as-a-websocket-proxy-giving-invalid-url-prefix-error"
+    },
+    {
+     "published": "2013-11-20T17:07:42+00:00",
+     "snippet": "4 votes, 1 answers (answered); tags: nginx, proxy, websocket, jmeter, benchmarking",
+     "title": "Nginx WebSocket Reverse Proxy Limitations",
+     "url": "https://stackoverflow.com/questions/20102327/nginx-websocket-reverse-proxy-limitations"
+    },
+    {
+     "published": "2017-11-23T12:06:09+00:00",
+     "snippet": "5 votes, 0 answers (unanswered); tags: docker, nginx, websocket",
+     "title": "NGINX as a WebSocket Proxy with Docker",
+     "url": "https://stackoverflow.com/questions/47455204/nginx-as-a-websocket-proxy-with-docker"
+    },
+    {
+     "published": "2016-07-27T18:50:59+00:00",
+     "snippet": "7 votes, 2 answers (answered); tags: javascript, node.js, nginx",
+     "title": "Why use nginx as websocket proxy?",
+     "url": "https://stackoverflow.com/questions/38620980/why-use-nginx-as-websocket-proxy"
+    },
+    {
+     "published": "2012-04-26T07:51:38+00:00",
+     "snippet": "25 votes, 2 answers (answered); tags: proxy, nginx, websocket, socket.io, reverse-proxy",
+     "title": "nginx 1.2.0 - socket.io - HTTP/1.1 - Proxy websocket connections",
+     "url": "https://stackoverflow.com/questions/10329281/nginx-1-2-0-socket-io-http-1-1-proxy-websocket-connections"
+    },
+    {
+     "published": "2013-03-05T23:18:14+00:00",
+     "snippet": "3 votes, 1 answers (answered); tags: nginx, websocket, config",
+     "title": "nginx config, websocket proxy, location, if",
+     "url": "https://stackoverflow.com/questions/15236021/nginx-config-websocket-proxy-location-if"
+    },
+    {
+     "published": "2013-07-02T13:46:31+00:00",
+     "snippet": "4 votes, 1 answers (answered); tags: nginx, websocket",
+     "title": "nginx websocket reverse proxy configuration",
+     "url": "https://stackoverflow.com/questions/17427303/nginx-websocket-reverse-proxy-configuration"
+    },
+    {
+     "published": "2020-03-04T01:37:26+00:00",
+     "snippet": "1 votes, 1 answers (unanswered); tags: docker, ssl, nginx, websocket",
+     "title": "WebApp crashing when connecting through a nginx websocket proxy",
+     "url": "https://stackoverflow.com/questions/60517914/webapp-crashing-when-connecting-through-a-nginx-websocket-proxy"
+    },
+    {
+     "published": "2021-01-14T17:30:55+00:00",
+     "snippet": "1 votes, 0 answers (unanswered); tags: php, nginx, websocket, ubuntu-18.04",
+     "title": "Unable to use NGINX as a WebSocket proxy for WebSocket server setup with php React and Rachet",
+     "url": "https://stackoverflow.com/questions/65723973/unable-to-use-nginx-as-a-websocket-proxy-for-websocket-server-setup-with-php-rea"
+    },
+    {
+     "published": "2019-09-25T04:18:13+00:00",
+     "snippet": "2 votes, 1 answers (answered); tags: nginx, websocket",
+     "title": "Nginx Websocket Configuration for Dual Proxies",
+     "url": "https://stackoverflow.com/questions/58091083/nginx-websocket-configuration-for-dual-proxies"
+    },
+    {
+     "published": "2018-02-10T19:59:55+00:00",
+     "snippet": "1 votes, 2 answers (answered); tags: docker, nginx, websocket",
+     "title": "Docker nginx websocket proxy== client closed connection while waiting for request",
+     "url": "https://stackoverflow.com/questions/48725012/docker-nginx-websocket-proxy-client-closed-connection-while-waiting-for-reques"
+    }
+   ],
+   "weight": 1.0
+  },
+  {
+   "engine": "askubuntu",
+   "results": [
+    {
+     "published": "2016-11-21T21:10:53+00:00",
+     "snippet": "0 votes, 0 answers (unanswered); tags: software-installation",
+     "title": "working with upsource 3.5 on ubuntu server",
+     "url": "https://askubuntu.com/questions/852082/working-with-upsource-3-5-on-ubuntu-server"
+    },
+    {
+     "published": "2016-02-03T07:58:39+00:00",
+     "snippet": "0 votes, 2 answers (unanswered); tags: apache2, proxy, nginx",
+     "title": "NGinx reverse proxy and subdomains on apache2",
+     "url": "https://askubuntu.com/questions/729100/nginx-reverse-proxy-and-subdomains-on-apache2"
+    },
+    {
+     "published": "2020-02-17T11:04:37+00:00",
+     "snippet": "0 votes, 1 answers (unanswered); tags: networking, 18.04, grub2, nginx, websites",
+     "title": "Site unreachable + URL check: timeout",
+     "url": "https://askubuntu.com/questions/1211069/site-unreachable-url-check-timeout"
+    }
+   ],
+   "weight": 0.4000000059604645
+  },
+  {
+   "engine": "superuser",
+   "results": [
+    {
+     "published": "2020-12-01T16:08:14+00:00",
+     "snippet": "1 votes, 1 answers (answered); tags: nginx, reverse-proxy, websocket",
+     "title": "Proxy a websocket through nginx",
+     "url": "https://superuser.com/questions/1606493/proxy-a-websocket-through-nginx"
+    },
+    {
+     "published": "2023-06-22T18:52:59+00:00",
+     "snippet": "0 votes, 2 answers (answered); tags: nginx, reverse-proxy, websocket",
+     "title": "Automatically proxy WebSockets endpoints with nginx",
+     "url": "https://superuser.com/questions/1790658/automatically-proxy-websockets-endpoints-with-nginx"
+    },
+    {
+     "published": "2017-03-02T05:48:51+00:00",
+     "snippet": "2 votes, 1 answers (answered); tags: linux, router, nginx, reverse-proxy",
+     "title": "How to use nginx as a reverse proxy on a Ubiquiti router",
+     "url": "https://superuser.com/questions/1184320/how-to-use-nginx-as-a-reverse-proxy-on-a-ubiquiti-router"
+    },
+    {
+     "published": "2016-10-06T23:04:28+00:00",
+     "snippet": "1 votes, 0 answers (unanswered); tags: networking, proxy, nginx, guacamole",
+     "title": "NextCloud and Guacamole behind the same reverse proxy",
+     "url": "https://superuser.com/questions/1132316/nextcloud-and-guacamole-behind-the-same-reverse-proxy"
+    },
+    {
+     "published": "2020-06-08T20:33:24+00:00",
+     "snippet": "0 votes, 1 answers (answered); tags: webserver, nginx, reverse-proxy, web-hosting",
+     "title": "Correct way of specifying similar locations for nginx",
+     "url": "https://superuser.com/questions/1559030/correct-way-of-specifying-similar-locations-for-nginx"
+    },
+    {
+     "published": "2020-01-22T09:28:09+00:00",
+     "snippet": "2 votes, 2 answers (answered); tags: nginx, https, redirection, kubernetes",
+     "title": "Helm chart nginx-ingress controller TCP redirect http to https",
+     "url": "https://superuser.com/questions/1519194/helm-chart-nginx-ingress-controller-tcp-redirect-http-to-https"
+    },
+    {
+     "published": "2018-03-20T14:05:21+00:00",
+     "snippet": "3 votes, 4 answers (answered); tags: docker, docker-for-windows",
+     "title": "Why is Docker-compose failing to copy local files to the container",
+     "url": "https://superuser.com/questions/1306127/why-is-docker-compose-failing-to-copy-local-files-to-the-container"
+    },
+    {
+     "published": "2025-10-15T19:05:13+00:00",
+     "snippet": "0 votes, 0 answers (unanswered); tags: nginx",
+     "title": "Nginx missing some requests in error logs",
+     "url": "https://superuser.com/questions/1926735/nginx-missing-some-requests-in-error-logs"
+    },
+    {
+     "published": "2020-06-11T13:46:47+00:00",
+     "snippet": "0 votes, 1 answers (answered); tags: linux, php, nginx, self-hosting, jitsi",
+     "title": "self-hosting two webapps on subdomains, unable to configure / access the 2nd one (nginx)",
+     "url": "https://superuser.com/questions/1559856/self-hosting-two-webapps-on-subdomains-unable-to-configure-access-the-2nd-one"
+    },
+    {
+     "published": "2020-02-11T19:47:28+00:00",
+     "snippet": "1 votes, 1 answers (unanswered); tags: ssl, nginx, ubuntu-18.04, protocol",
+     "title": "SSL PROTOCOL ERROR when connecting to my website through its name",
+     "url": "https://superuser.com/questions/1524599/ssl-protocol-error-when-connecting-to-my-website-through-its-name"
+    },
+    {
+     "published": "2025-03-23T20:02:57+00:00",
+     "snippet": "1 votes, 1 answers (answered); tags: npm, truenas, tailscale",
+     "title": "NPM locations do not work on TrueNAS SCALE with Tailscale VPN",
+     "url": "https://superuser.com/questions/1888098/npm-locations-do-not-work-on-truenas-scale-with-tailscale-vpn"
+    },
+    {
+     "published": "2020-02-17T12:00:34+00:00",
+     "snippet": "0 votes, 1 answers (unanswered); tags: networking, grub, nginx, website, ubuntu-18.04",
+     "title": "This site can’t be reached + URL check: timeout",
+     "url": "https://superuser.com/questions/1526080/this-site-can-t-be-reached-url-check-timeout"
+    },
+    {
+     "published": "2024-01-12T10:47:36+00:00",
+     "snippet": "0 votes, 0 answers (unanswered); tags: ip, kali-linux",
+     "title": "Can you please help me running beef-xss with public IP?",
+     "url": "https://superuser.com/questions/1825474/can-you-please-help-me-running-beef-xss-with-public-ip"
+    }
+   ],
+   "weight": 0.4000000059604645
+  },
+  {
+   "engine": "mdn",
+   "results": [
+    {
+     "published": null,
+     "snippet": "Contains information about a proxy. This object, or an array of these objects, is returned from the listener to proxy.onRequest. It instructs the browser whether to proxy the request, and if so, which proxy to use.",
+     "title": "proxy.ProxyInfo",
+     "url": "https://developer.mozilla.org/en-US/docs/Mozilla/Add-ons/WebExtensions/API/proxy/ProxyInfo"
+    },
+    {
+     "published": null,
+     "snippet": "The Proxy object enables you to create a proxy for another object, which can intercept and redefine fundamental operations for that object.",
+     "title": "Proxy",
+     "url": "https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Proxy"
+    },
+    {
+     "published": null,
+     "snippet": "Use the proxy API to proxy web requests. You can use the proxy.onRequest event listener to intercept web requests, and return an object that describes whether and how to proxy them.",
+     "title": "proxy",
+     "url": "https://developer.mozilla.org/en-US/docs/Mozilla/Add-ons/WebExtensions/API/proxy"
+    },
+    {
+     "published": null,
+     "snippet": "A BrowserSetting object used to change the browser's proxy settings.",
+     "title": "proxy.settings",
+     "url": "https://developer.mozilla.org/en-US/docs/Mozilla/Add-ons/WebExtensions/API/proxy/settings"
+    },
+    {
+     "published": null,
+     "snippet": "The Proxy.revocable() static method creates a revocable Proxy object.",
+     "title": "Proxy.revocable()",
+     "url": "https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Proxy/revocable"
+    },
+    {
+     "published": null,
+     "snippet": "Fired when a web request is about to be made, to give the extension an opportunity to proxy it.",
+     "title": "proxy.onRequest",
+     "url": "https://developer.mozilla.org/en-US/docs/Mozilla/Add-ons/WebExtensions/API/proxy/onRequest"
+    },
+    {
+     "published": null,
+     "snippet": "The Proxy() constructor creates Proxy objects.",
+     "title": "Proxy() constructor",
+     "url": "https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Proxy/Proxy"
+    },
+    {
+     "published": null,
+     "snippet": "A proxy server is an intermediate program or computer used when navigating through different networks of the Internet. They facilitate access to content on the World Wide Web. A proxy intercepts requests and serves back responses; it may forward the requests, or not (for example in the case of a cache), and it may modify it (for example changing its headers, at the boundary between two networks).",
+     "title": "Proxy server",
+     "url": "https://developer.mozilla.org/en-US/docs/Glossary/Proxy_server"
+    },
+    {
+     "published": null,
+     "snippet": "A WindowProxy object is a wrapper for a Window object. A WindowProxy object exists in every browsing context. All operations performed on a WindowProxy object will also be applied to the underlying Window object it currently wraps. Therefore, interacting with a WindowProxy object is almost identical to directly interacting with a Window object. When a browsing context is navigated, the Window object its WindowProxy wraps is changed.",
+     "title": "WindowProxy",
+     "url": "https://developer.mozilla.org/en-US/docs/Glossary/WindowProxy"
+    },
+    {
+     "published": null,
+     "snippet": "The WebSocket() constructor returns a new WebSocket object and immediately attempts to establish a connection to the specified WebSocket URL.",
+     "title": "WebSocket: WebSocket() constructor",
+     "url": "https://developer.mozilla.org/en-US/docs/Web/API/WebSocket/WebSocket"
+    }
+   ],
+   "weight": 0.4000000059604645
+  },
+  {
+   "engine": "crates.io",
+   "results": [
+    {
+     "published": "2024-02-27T06:56:18.329593Z",
+     "snippet": "http https proxy by rust (v0.2.7, 12674 downloads)",
+     "title": "wmproxy (crates.io)",
+     "url": "https://crates.io/crates/wmproxy"
+    },
+    {
+     "published": "2026-03-21T23:30:55.966801Z",
+     "snippet": "Voice interface for AI entities via Twilio (v0.8.0, 156 downloads)",
+     "title": "voice-echo (crates.io)",
+     "url": "https://crates.io/crates/voice-echo"
+    },
+    {
+     "published": "2026-07-08T18:54:31.877946Z",
+     "snippet": "A single-binary Docker host monitor with an embedded web UI (v0.12.1, 153 downloads)",
+     "title": "dockdoe (crates.io)",
+     "url": "https://crates.io/crates/dockdoe"
+    },
+    {
+     "published": "2025-07-13T22:09:29.142428Z",
+     "snippet": "A WebSocket-to-TCP relay server with TLS support and domain-based routing (v0.1.3, 1197 downloads)",
+     "title": "websocket-relay (crates.io)",
+     "url": "https://crates.io/crates/websocket-relay"
+    },
+    {
+     "published": "2026-10-04T09:30:10.017247Z",
+     "snippet": "Talk to your game's own backend from Bevy: HTTPS JSON requests, uploads and downloads to a file, (feature `ws`) named WebSocket connections, (feature `oauth`) OpenID Connect desktop sign-in and (feature `ssh`, admin tools) SSH commands and SFTP, typed answers as Bevy messages, exactly one answer per request, game-supplied credentials with redacted secrets, proxy and certificate settings, no tokio unless you enable `ssh`, and fake transports for tests. (v0.2.0, 86 downloads)",
+     "title": "bevy_net_backend (crates.io)",
+     "url": "https://crates.io/crates/bevy_net_backend"
+    },
+    {
+     "published": "2026-07-26T16:45:15.897156Z",
+     "snippet": "Minimal synchronous HTTP/1.1 server with SSE support (v0.11.1, 348 downloads)",
+     "title": "tinyweb (crates.io)",
+     "url": "https://crates.io/crates/tinyweb"
+    },
+    {
+     "published": "2026-08-18T04:10:18.976576Z",
+     "snippet": "A TUI to deploy full-stack apps (systemd, nginx, certbot, ufw, backups) on a VPS (v0.1.3, 77 downloads)",
+     "title": "vps-deployer (crates.io)",
+     "url": "https://crates.io/crates/vps-deployer"
+    },
+    {
+     "published": "2025-07-14T07:33:57.155963Z",
+     "snippet": "Rumi2 simplifies the process of deploying your web applications and servers. With seamless SSH2 integration, it effortlessly manages the publishing process to your existing server infrastructure, ensuring secure and efficient transfers every time. (v1.0.0, 1616 downloads)",
+     "title": "rumi2 (crates.io)",
+     "url": "https://crates.io/crates/rumi2"
+    },
+    {
+     "published": "2025-06-14T16:21:11.237015Z",
+     "snippet": "A mdbook preprocessor enables multiple programming languages playground. (v0.1.2, 1435 downloads)",
+     "title": "mdbook-lang (crates.io)",
+     "url": "https://crates.io/crates/mdbook-lang"
+    },
+    {
+     "published": "2026-04-01T07:50:16.684591Z",
+     "snippet": "expose your local web server to the internet with a public url (v1.0.8, 215 downloads)",
+     "title": "neutun_lib (crates.io)",
+     "url": "https://crates.io/crates/neutun_lib"
+    },
+    {
+     "published": "2026-04-01T07:51:48.555Z",
+     "snippet": "expose your local web server to the internet with a public url (v1.0.8, 75 downloads)",
+     "title": "neutun (crates.io)",
+     "url": "https://crates.io/crates/neutun"
+    },
+    {
+     "published": "2026-07-29T07:32:20.532842Z",
+     "snippet": "Embeddable HTTP / WebSocket / SSE reverse proxy and static file server for desktop apps (Tauri-friendly, framework-neutral) (v0.2.0, 36 downloads)",
+     "title": "omni-prism (crates.io)",
+     "url": "https://crates.io/crates/omni-prism"
+    },
+    {
+     "published": "2026-08-04T02:12:56.086025Z",
+     "snippet": "免安装、纯浏览器的 P2P 直连协作应用（单二进制，前端嵌入） (v0.1.2, 49 downloads)",
+     "title": "pphub (crates.io)",
+     "url": "https://crates.io/crates/pphub"
+    },
+    {
+     "published": "2026-04-20T21:19:43.280520Z",
+     "snippet": "Motorcortex Rust: a Rust client for the Motorcortex Core real-time control system (async + blocking). (v0.5.0, 3070 downloads)",
+     "title": "motorcortex-rust (crates.io)",
+     "url": "https://crates.io/crates/motorcortex-rust"
+    },
+    {
+     "published": "2026-10-03T00:33:35.568426Z",
+     "snippet": "Rust SDK for writing NGINX UI plugins (v0.2.0, 176 downloads)",
+     "title": "nginxui-plugin-sdk (crates.io)",
+     "url": "https://crates.io/crates/nginxui-plugin-sdk"
+    },
+    {
+     "published": "2026-07-30T07:08:30.445528Z",
+     "snippet": "Modbus gateway runtime — bridges upstream TCP/serial masters to downstream slave buses with PDU-level framing translation (v0.16.0, 383 downloads)",
+     "title": "mbus-gateway (crates.io)",
+     "url": "https://crates.io/crates/mbus-gateway"
+    },
+    {
+     "published": "2026-03-09T19:55:39.793527Z",
+     "snippet": "Secure, ephemeral secret sharing for developers (v0.17.1, 345 downloads)",
+     "title": "enseal (crates.io)",
+     "url": "https://crates.io/crates/enseal"
+    },
+    {
+     "published": "2026-01-08T11:00:02.669872Z",
+     "snippet": "A transparent deduplication proxy for Mastodon and the Fediverse (v0.4.0, 92 downloads)",
+     "title": "ivoryvalley (crates.io)",
+     "url": "https://crates.io/crates/ivoryvalley"
+    },
+    {
+     "published": "2026-05-20T11:29:42.897161Z",
+     "snippet": "High-performance, Pusher-compatible WebSocket server written in Rust with support for public, private, and presence channels (v1.3.1, 232 downloads)",
+     "title": "soketi-rs (crates.io)",
+     "url": "https://crates.io/crates/soketi-rs"
+    },
+    {
+     "published": "2026-04-02T19:39:43.030237Z",
+     "snippet": "Lightweight async HTTP/1.1 and HTTP/2 framework built on tokio with TLS (rustls), routing, middleware, streaming, compression, CORS and rate limiting (v0.4.3, 247 downloads)",
+     "title": "rpress (crates.io)",
+     "url": "https://crates.io/crates/rpress"
+    }
+   ],
+   "weight": 0.4000000059604645
+  },
+  {
+   "engine": "npm",
+   "results": [
+    {
+     "published": "2026-06-08T16:47:28.029Z",
+     "snippet": "An HTTP(s) proxy `http.Agent` implementation for HTTPS (v9.1.0)",
+     "title": "https-proxy-agent (npm)",
+     "url": "https://www.npmjs.com/package/https-proxy-agent"
+    },
+    {
+     "published": "2026-06-08T16:47:31.711Z",
+     "snippet": "A SOCKS proxy `http.Agent` implementation for HTTP and HTTPS (v10.1.0)",
+     "title": "socks-proxy-agent (npm)",
+     "url": "https://www.npmjs.com/package/socks-proxy-agent"
+    },
+    {
+     "published": "2026-09-26T15:00:57.748Z",
+     "snippet": "Simple to use, blazing fast and thoroughly tested websocket client and server for Node.js (v8.22.0)",
+     "title": "ws (npm)",
+     "url": "https://www.npmjs.com/package/ws"
+    },
+    {
+     "published": "2026-08-27T18:14:13.262Z",
+     "snippet": "Modern rewrite of http-proxy (v2.0.1)",
+     "title": "http-proxy-3 (npm)",
+     "url": "https://www.npmjs.com/package/http-proxy-3"
+    },
+    {
+     "published": "2026-03-14T18:32:47.942Z",
+     "snippet": "Offers getProxyForUrl to get the proxy URL for a URL, respecting the *_PROXY (e.g. HTTP_PROXY) and NO_PROXY environment variables. (v2.1.0)",
+     "title": "proxy-from-env (npm)",
+     "url": "https://www.npmjs.com/package/proxy-from-env"
+    },
+    {
+     "published": "2026-06-08T16:47:24.200Z",
+     "snippet": "An HTTP(s) proxy `http.Agent` implementation for HTTP (v9.1.0)",
+     "title": "http-proxy-agent (npm)",
+     "url": "https://www.npmjs.com/package/http-proxy-agent"
+    },
+    {
+     "published": "2026-06-04T16:42:29.597Z",
+     "snippet": "WebSocket protocol handler with pluggable I/O (v0.7.5)",
+     "title": "websocket-driver (npm)",
+     "url": "https://www.npmjs.com/package/websocket-driver"
+    },
+    {
+     "published": "2026-09-15T06:12:45.377Z",
+     "snippet": "Determine address of proxied request (v2.0.8)",
+     "title": "proxy-addr (npm)",
+     "url": "https://www.npmjs.com/package/proxy-addr"
+    },
+    {
+     "published": "2026-06-08T16:47:38.809Z",
+     "snippet": "Maps proxy protocols to `http.Agent` implementations (v8.0.2)",
+     "title": "proxy-agent (npm)",
+     "url": "https://www.npmjs.com/package/proxy-agent"
+    },
+    {
+     "published": "2026-07-04T21:49:09.221Z",
+     "snippet": "The one-liner node.js proxy middleware for connect, express, next.js and more (v4.2.0)",
+     "title": "http-proxy-middleware (npm)",
+     "url": "https://www.npmjs.com/package/http-proxy-middleware"
+    },
+    {
+     "published": "2026-07-09T11:09:07.029Z",
+     "snippet": "A full-featured HTTP proxy for Node.js. (v0.5.5)",
+     "title": "httpxy (npm)",
+     "url": "https://www.npmjs.com/package/httpxy"
+    },
+    {
+     "published": "2025-06-12T04:38:26.704Z",
+     "snippet": "mixi2 client for Node.js and browsers (v0.2.2)",
+     "title": "mixi2 (npm)",
+     "url": "https://www.npmjs.com/package/mixi2"
+    },
+    {
+     "published": "2025-03-20T18:17:32.262Z",
+     "snippet": "This repo contains the Pulumi NGINX Ingress Controller component for Kubernetes. This ingress controller uses NGINX as a reverse proxy and load balancer. (v0.1.3)",
+     "title": "@pulumi/kubernetes-ingress-nginx (npm)",
+     "url": "https://www.npmjs.com/package/@pulumi/kubernetes-ingress-nginx"
+    },
+    {
+     "published": "2020-06-02T13:00:09.535Z",
+     "snippet": "Generic extension manager for WebSocket connections (v0.1.4)",
+     "title": "websocket-extensions (npm)",
+     "url": "https://www.npmjs.com/package/websocket-extensions"
+    },
+    {
+     "published": "2021-06-14T18:16:09.073Z",
+     "snippet": "Plugin for ember-cli that injects live-reload script into HTML content. (v2.1.0)",
+     "title": "ember-cli-inject-live-reload (npm)",
+     "url": "https://www.npmjs.com/package/ember-cli-inject-live-reload"
+    },
+    {
+     "published": "2021-05-24T22:11:37.500Z",
+     "snippet": "Standards-compliant WebSocket server and client (v0.11.4)",
+     "title": "faye-websocket (npm)",
+     "url": "https://www.npmjs.com/package/faye-websocket"
+    },
+    {
+     "published": "2026-06-08T16:47:35.283Z",
+     "snippet": "A PAC file proxy `http.Agent` implementation for HTTP (v9.1.0)",
+     "title": "pac-proxy-agent (npm)",
+     "url": "https://www.npmjs.com/package/pac-proxy-agent"
+    },
+    {
+     "published": "2026-06-10T20:53:42.766Z",
+     "snippet": "GUI for DynamoDB. Useful for local development. (v5.3.3)",
+     "title": "dynamodb-admin (npm)",
+     "url": "https://www.npmjs.com/package/dynamodb-admin"
+    },
+    {
+     "published": "2023-12-06T13:57:39.934Z",
+     "snippet": "This module is deprecated. All constructs are now available under aws-cdk-lib/aws-apigatewayv2 (v2.114.1-alpha.0)",
+     "title": "@aws-cdk/aws-apigatewayv2-alpha (npm)",
+     "url": "https://www.npmjs.com/package/@aws-cdk/aws-apigatewayv2-alpha"
+    },
+    {
+     "published": "2026-03-11T16:29:05.224Z",
+     "snippet": "Global HTTP/HTTPS proxy configurable using environment variables. (v4.1.3)",
+     "title": "global-agent (npm)",
+     "url": "https://www.npmjs.com/package/global-agent"
+    }
+   ],
+   "weight": 0.4000000059604645
+  }
+ ],
+ "labels": {
+  "https://github.com/nicokaiser/nginx-websocket-proxy": 2,
+  "https://github.com/slact/nchan": 0,
+  "https://github.com/ozipoetra/sshws-nginx": 0,
+  "https://github.com/chenjie/v2ray-tls-websocket-nginx": 0,
+  "https://github.com/gunblues/strophe-openfire-websocket": 0,
+  "https://github.com/leonlee/jrdwp": 0,
+  "https://github.com/Stockflare/docker-nginx-elb-websocket": 0,
+  "https://github.com/tickbh/wmproxy": 0,
+  "https://github.com/igops/ngrok-skip-browser-warning": 0,
+  "https://github.com/thehxdev/xray-install": 0,
+  "https://github.com/hc-sun/V2ray-Nginx-Websocket-TLS-CDN-Clean-Configuration": 0,
+  "https://github.com/michaelbarkdoll/guacamole-reverse-proxy-nginx": 0,
+  "https://github.com/andfanilo/streamlit-nginx-basicauth": 0,
+  "https://github.com/afshinm/websocket_tls_docker": 0,
+  "https://github.com/braydos-h/xray-vless-ws-cdn-installer": 0,
+  "https://github.com/DestrMZ/VLESS-WS-TLS-Nginx-Reverse-Proxy-with-self-domain": 0,
+  "https://github.com/Aytola7/FlexProxy": 0,
+  "https://github.com/ff6347/docker-network-with-nginx-reverse-proxy-and-websockets": 0,
+  "https://github.com/zhuima/nginx-ws": 0,
+  "https://github.com/songonha/nginx-ws-proxy": 0,
+  "https://stackoverflow.com/questions/23274052/nginx-websocket-proxy-dropping-frames": 2,
+  "https://stackoverflow.com/questions/12102110/nginx-to-reverse-proxy-websockets-and-enable-ssl-wss": 2,
+  "https://stackoverflow.com/questions/45540865/nginx-websocket-proxy": 1,
+  "https://stackoverflow.com/questions/31923626/nginx-websocket-proxying-keep-getting-http-301-redirects": 2,
+  "https://stackoverflow.com/questions/64327534/unable-to-connect-to-websocket-server-with-nginx-reverse-proxy": 2,
+  "https://stackoverflow.com/questions/35347284/nginx-websocket-proxy-disconnects-after-2-minutes": 2,
+  "https://stackoverflow.com/questions/65249642/nginx-websocket-proxy-ratchet-in-docker": 0,
+  "https://stackoverflow.com/questions/67098447/nginx-websocket-proxy-for-node-js": 0,
+  "https://stackoverflow.com/questions/54238981/nginx-websocket-proxy-using-defined-location": 0,
+  "https://stackoverflow.com/questions/46618598/nginx-as-a-websocket-proxy-giving-invalid-url-prefix-error": 0,
+  "https://stackoverflow.com/questions/20102327/nginx-websocket-reverse-proxy-limitations": 0,
+  "https://stackoverflow.com/questions/47455204/nginx-as-a-websocket-proxy-with-docker": 0,
+  "https://stackoverflow.com/questions/38620980/why-use-nginx-as-websocket-proxy": 0,
+  "https://stackoverflow.com/questions/10329281/nginx-1-2-0-socket-io-http-1-1-proxy-websocket-connections": 0,
+  "https://stackoverflow.com/questions/15236021/nginx-config-websocket-proxy-location-if": 0,
+  "https://stackoverflow.com/questions/17427303/nginx-websocket-reverse-proxy-configuration": 0,
+  "https://stackoverflow.com/questions/60517914/webapp-crashing-when-connecting-through-a-nginx-websocket-proxy": 0,
+  "https://stackoverflow.com/questions/65723973/unable-to-use-nginx-as-a-websocket-proxy-for-websocket-server-setup-with-php-rea": 0,
+  "https://stackoverflow.com/questions/58091083/nginx-websocket-configuration-for-dual-proxies": 0,
+  "https://stackoverflow.com/questions/48725012/docker-nginx-websocket-proxy-client-closed-connection-while-waiting-for-reques": 0,
+  "https://askubuntu.com/questions/852082/working-with-upsource-3-5-on-ubuntu-server": 0,
+  "https://askubuntu.com/questions/729100/nginx-reverse-proxy-and-subdomains-on-apache2": 0,
+  "https://askubuntu.com/questions/1211069/site-unreachable-url-check-timeout": 0,
+  "https://superuser.com/questions/1606493/proxy-a-websocket-through-nginx": 2,
+  "https://superuser.com/questions/1790658/automatically-proxy-websockets-endpoints-with-nginx": 2,
+  "https://superuser.com/questions/1184320/how-to-use-nginx-as-a-reverse-proxy-on-a-ubiquiti-router": 0,
+  "https://superuser.com/questions/1132316/nextcloud-and-guacamole-behind-the-same-reverse-proxy": 0,
+  "https://superuser.com/questions/1559030/correct-way-of-specifying-similar-locations-for-nginx": 0,
+  "https://superuser.com/questions/1519194/helm-chart-nginx-ingress-controller-tcp-redirect-http-to-https": 0,
+  "https://superuser.com/questions/1306127/why-is-docker-compose-failing-to-copy-local-files-to-the-container": 0,
+  "https://superuser.com/questions/1926735/nginx-missing-some-requests-in-error-logs": 0,
+  "https://superuser.com/questions/1559856/self-hosting-two-webapps-on-subdomains-unable-to-configure-access-the-2nd-one": 0,
+  "https://superuser.com/questions/1524599/ssl-protocol-error-when-connecting-to-my-website-through-its-name": 0,
+  "https://superuser.com/questions/1888098/npm-locations-do-not-work-on-truenas-scale-with-tailscale-vpn": 0,
+  "https://superuser.com/questions/1526080/this-site-can-t-be-reached-url-check-timeout": 0,
+  "https://superuser.com/questions/1825474/can-you-please-help-me-running-beef-xss-with-public-ip": 0,
+  "https://developer.mozilla.org/en-US/docs/Mozilla/Add-ons/WebExtensions/API/proxy/ProxyInfo": 0,
+  "https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Proxy": 0,
+  "https://developer.mozilla.org/en-US/docs/Mozilla/Add-ons/WebExtensions/API/proxy": 0,
+  "https://developer.mozilla.org/en-US/docs/Mozilla/Add-ons/WebExtensions/API/proxy/settings": 0,
+  "https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Proxy/revocable": 0,
+  "https://developer.mozilla.org/en-US/docs/Mozilla/Add-ons/WebExtensions/API/proxy/onRequest": 0,
+  "https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Proxy/Proxy": 0,
+  "https://developer.mozilla.org/en-US/docs/Glossary/Proxy_server": 0,
+  "https://developer.mozilla.org/en-US/docs/Glossary/WindowProxy": 0,
+  "https://developer.mozilla.org/en-US/docs/Web/API/WebSocket/WebSocket": 0,
+  "https://crates.io/crates/wmproxy": 0,
+  "https://crates.io/crates/voice-echo": 0,
+  "https://crates.io/crates/dockdoe": 0,
+  "https://crates.io/crates/websocket-relay": 0,
+  "https://crates.io/crates/bevy_net_backend": 0,
+  "https://crates.io/crates/tinyweb": 0,
+  "https://crates.io/crates/vps-deployer": 0,
+  "https://crates.io/crates/rumi2": 0,
+  "https://crates.io/crates/mdbook-lang": 0,
+  "https://crates.io/crates/neutun_lib": 0,
+  "https://crates.io/crates/neutun": 0,
+  "https://crates.io/crates/omni-prism": 0,
+  "https://crates.io/crates/pphub": 0,
+  "https://crates.io/crates/motorcortex-rust": 0,
+  "https://crates.io/crates/nginxui-plugin-sdk": 0,
+  "https://crates.io/crates/mbus-gateway": 0,
+  "https://crates.io/crates/enseal": 0,
+  "https://crates.io/crates/ivoryvalley": 0,
+  "https://crates.io/crates/soketi-rs": 0,
+  "https://crates.io/crates/rpress": 0,
+  "https://www.npmjs.com/package/https-proxy-agent": 0,
+  "https://www.npmjs.com/package/socks-proxy-agent": 0,
+  "https://www.npmjs.com/package/ws": 0,
+  "https://www.npmjs.com/package/http-proxy-3": 0,
+  "https://www.npmjs.com/package/proxy-from-env": 0,
+  "https://www.npmjs.com/package/http-proxy-agent": 0,
+  "https://www.npmjs.com/package/websocket-driver": 0,
+  "https://www.npmjs.com/package/proxy-addr": 0,
+  "https://www.npmjs.com/package/proxy-agent": 0,
+  "https://www.npmjs.com/package/http-proxy-middleware": 0,
+  "https://www.npmjs.com/package/httpxy": 0,
+  "https://www.npmjs.com/package/mixi2": 0,
+  "https://www.npmjs.com/package/@pulumi/kubernetes-ingress-nginx": 0,
+  "https://www.npmjs.com/package/websocket-extensions": 0,
+  "https://www.npmjs.com/package/ember-cli-inject-live-reload": 0,
+  "https://www.npmjs.com/package/faye-websocket": 0,
+  "https://www.npmjs.com/package/pac-proxy-agent": 0,
+  "https://www.npmjs.com/package/dynamodb-admin": 0,
+  "https://www.npmjs.com/package/@aws-cdk/aws-apigatewayv2-alpha": 0,
+  "https://www.npmjs.com/package/global-agent": 0
+ },
+ "query": "nginx websocket proxy"
+}
