@@ -17,6 +17,7 @@ members = [
     "crates/hq-convert",
     "crates/hq-update",
     "crates/hq-host",
+    "crates/hq-sandbox",
 
 ]
 
