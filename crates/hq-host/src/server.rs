@@ -422,7 +422,17 @@ impl Conn {
                 spec.rows = p.rows.unwrap_or(spec.rows);
                 spec.cols = p.cols.unwrap_or(spec.cols);
                 spec.scrollback_rows = p.scrollback_rows.unwrap_or(spec.scrollback_rows);
+                spec.sandbox = p.sandbox;
                 Ok(info_json(&host.spawn(spec).map_err(host_err)?))
+            }
+            "agent.egress" => {
+                let p: Named = parse(params)?;
+                let decisions: Vec<Value> = host
+                    .egress_decisions(&p.name)
+                    .iter()
+                    .map(|d| json!({ "host": d.host, "port": d.port, "allowed": d.allowed, "reason": d.reason }))
+                    .collect();
+                Ok(json!({ "decisions": decisions }))
             }
             "agent.list" => {
                 Ok(json!({ "agents": host.list().iter().map(info_json).collect::<Vec<_>>() }))
@@ -584,6 +594,7 @@ struct SpawnParams {
     rows: Option<u16>,
     cols: Option<u16>,
     scrollback_rows: Option<usize>,
+    sandbox: Option<crate::sandbox::SandboxSpec>,
 }
 
 #[derive(Deserialize)]
@@ -785,6 +796,7 @@ fn info_json(i: &PaneInfo) -> Value {
         "state": i.state.map(AgentState::as_str),
         "rule": i.rule,
         "cwd": i.cwd.to_string_lossy(),
+        "sandbox": i.sandbox,
         "pid": i.pid,
         "status": status,
         "exit_code": exit_code,

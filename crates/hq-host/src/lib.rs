@@ -17,6 +17,7 @@ mod keys;
 mod pane;
 mod proto;
 mod report;
+mod sandbox;
 mod server;
 mod state;
 mod token;
@@ -36,5 +37,6 @@ pub use hooks::{claude_mcp_config, claude_settings, write_claude_mcp_config, rep
 pub use keys::encode_key;
 pub use report::{STALE_WORKING_AFTER, combine as combine_state, state_for};
 pub use proto::{MAX_LINE_BYTES, PROTOCOL_VERSION, Request, Response};
+pub use sandbox::{Allow, Mode as SandboxMode, SandboxSpec};
 pub use server::{Limits, Server, StopHandle, socket_path};
 pub use token::{load_or_create as load_or_create_token, token_path};

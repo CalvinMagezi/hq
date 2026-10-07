@@ -318,6 +318,8 @@ fn each_agent_has_its_own_rules_and_close_stops_the_listener() {
         Duration::from_millis(500)
     )
     .is_err());
+    assert_eq!(egress.decisions("a").len(), 1, "the log outlives the listener");
+    egress.forget("a");
     assert!(egress.decisions("a").is_empty());
 }
 

@@ -183,14 +183,19 @@ fn lock<T>(m: &Mutex<T>) -> MutexGuard<'_, T> {
 }
 
 struct AgentProxy {
+    port: u16,
     stop: Arc<AtomicBool>,
-    log: Arc<Mutex<VecDeque<Decision>>>,
 }
+
+type Log = Arc<Mutex<VecDeque<Decision>>>;
 
 /// The agents' listeners.
 #[derive(Default)]
 pub struct Egress {
     agents: Mutex<HashMap<String, AgentProxy>>,
+    /// Kept after a listener closes so the operator can see why an agent that
+    /// has exited was refused; dropped by `forget` or replaced by the next `open`.
+    logs: Mutex<HashMap<String, Log>>,
 }
 
 impl Egress {
@@ -206,9 +211,10 @@ impl Egress {
         listener.set_nonblocking(true)?;
         let port = listener.local_addr()?.port();
         let stop = Arc::new(AtomicBool::new(false));
-        let log = Arc::new(Mutex::new(VecDeque::new()));
+        let log: Log = Arc::new(Mutex::new(VecDeque::new()));
+        lock(&self.logs).insert(agent.to_string(), log.clone());
         let (rules, open) = (Arc::new(rules), Arc::new(AtomicUsize::new(0)));
-        let (accept_stop, accept_log) = (stop.clone(), log.clone());
+        let (accept_stop, accept_log) = (stop.clone(), log);
         std::thread::Builder::new()
             .name(format!("egress-{agent}"))
             .spawn(move || {
@@ -224,7 +230,7 @@ impl Egress {
                     }
                 }
             })?;
-        lock(&self.agents).insert(agent.to_string(), AgentProxy { stop, log });
+        lock(&self.agents).insert(agent.to_string(), AgentProxy { port, stop });
         Ok(port)
     }
 
@@ -235,12 +241,28 @@ impl Egress {
         }
     }
 
+    /// Stops `agent`'s listener only if it is still the one on `port`, so a late
+    /// exit of an old process cannot close its replacement's listener.
+    pub fn close_port(&self, agent: &str, port: u16) {
+        let mut agents = lock(&self.agents);
+        let current = agents.get(agent).is_some_and(|p| p.port == port);
+        if let (true, Some(proxy)) = (current, agents.remove(agent)) {
+            proxy.stop.store(true, Ordering::SeqCst);
+        }
+    }
+
     /// The most recent decisions for `agent`, oldest first.
     pub fn decisions(&self, agent: &str) -> Vec<Decision> {
-        lock(&self.agents)
+        lock(&self.logs)
             .get(agent)
-            .map(|p| lock(&p.log).iter().cloned().collect())
+            .map(|log| lock(log).iter().cloned().collect())
             .unwrap_or_default()
+    }
+
+    /// Stops `agent`'s listener and drops its log.
+    pub fn forget(&self, agent: &str) {
+        self.close(agent);
+        lock(&self.logs).remove(agent);
     }
 }
 

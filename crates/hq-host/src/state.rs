@@ -34,6 +34,10 @@ pub struct PaneRecord {
     pub rows: u16,
     pub cols: u16,
     pub scrollback_rows: usize,
+    /// The sandbox the agent ran under, applied again on restore. Absent in
+    /// files written before sandboxing, which read as unsandboxed.
+    #[serde(default)]
+    pub sandbox: Option<crate::sandbox::SandboxSpec>,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -138,6 +142,7 @@ mod tests {
             rows: 40,
             cols: 120,
             scrollback_rows: 1000,
+            sandbox: None,
         }
     }
 
