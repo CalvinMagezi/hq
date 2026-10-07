@@ -8,6 +8,19 @@ You need: the machine and the HQ on the same Tailscale tailnet, an `hq` binary o
 (`~/.local/bin/hq`, from a [release](https://github.com/CalvinMagezi/hq/releases)), and the coding
 agent you want (for example Claude Code) installed and signed in on the machine.
 
+## Get `hq` on the machine
+
+Pick the newest tag on the [releases page](https://github.com/CalvinMagezi/hq/releases), then
+(`linux-x86_64`, `linux-aarch64` or `darwin-aarch64` for the platform):
+
+```
+V=0.9.1-main.81
+curl -fsSL -o hq.tgz "https://github.com/CalvinMagezi/hq/releases/download/v$V/hq-$V-linux-x86_64.tar.gz"
+tar xzf hq.tgz && mkdir -p ~/.local/bin && install -m 755 hq ~/.local/bin/hq
+```
+
+Releases ship a `SHA256SUMS` file next to the archives; check the archive against it.
+
 ## 1. On the machine
 
 ```
