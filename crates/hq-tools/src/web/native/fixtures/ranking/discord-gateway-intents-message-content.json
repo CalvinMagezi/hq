@@ -1,0 +1,133 @@
+{
+  "query": "discord gateway intents message content",
+  "category": null,
+  "engines": [
+    {
+      "engine": "google cse",
+      "weight": 1.0,
+      "results": [
+        {
+          "title": "Gateway - Documentation - Discord Developer Portal",
+          "url": "https://docs.discord.com/developers/events/gateway",
+          "snippet": "Intents are bitwise values passed in the intents parameter when Identifying which correlate to a set of related events. For example, the event sent when a guild ...",
+          "published": null
+        },
+        {
+          "title": "Gateway Intents - discord.js Guide",
+          "url": "https://discordjs.guide/legacy/popular-topics/intents",
+          "snippet": "At the time of writing this article, privileged intents are GuildPresences , MessageContent and GuildMembers . If your bot is not verified and in less than 100 ...",
+          "published": null
+        },
+        {
+          "title": "A Primer to Gateway Intents - discord.py - Read the Docs",
+          "url": "https://discordpy.readthedocs.io/en/latest/intents.html",
+          "snippet": "In version 1.5 comes the introduction of Intents . This is a radical change in how bots are written. An intent basically allows a bot to subscribe to specific ...",
+          "published": null
+        },
+        {
+          "title": "Gateway Intents - Bot Designer For Discord - Wiki",
+          "url": "https://wiki.botdesignerdiscord.com/guides/introduction/gatewayIntents.html",
+          "snippet": "Unlike the two intents above, Message Content Intent doesn't allow for any new events. Instead, it allows the bot to receive message content data, which ...",
+          "published": null
+        },
+        {
+          "title": "Discord Gateway Intents Explainer - GitHub Gist",
+          "url": "https://gist.github.com/advaith1/e69bcc1cdd6d0087322734451f15aa2f",
+          "snippet": "Discord has made 3 intents privileged intents: GUILD_MEMBERS (Server Members), GUILD_PRESENCES (Presence), and Message Content. These intents are now disabled ...",
+          "published": null
+        },
+        {
+          "title": "Gateway Intents in Discord - DiSky Wiki",
+          "url": "https://docs.disky.me/latest/bot/intents/",
+          "snippet": "Enabling privileged intents is crucial for certain bot functionalities. For example, without the Message Content intent, your bot won't be able to read message ...",
+          "published": null
+        },
+        {
+          "title": "Getting Started with Privileged Intent Review - Documentation",
+          "url": "https://docs.discord.com/developers/gateway/getting-started-with-privileged-intent-review",
+          "snippet": "Enabling the intent in the portal tells Discord your app is technically allowed to receive the data. You also need to request it when your bot connects to the ...",
+          "published": null
+        },
+        {
+          "title": "Gateway Intents - Javacord",
+          "url": "https://javacord.org/wiki/basic-tutorials/gateway-intents.html",
+          "snippet": "This intent is a bit different to the other as it does not act as a toggle to receive any events. It's sole purpose is to receive the message content, ...",
+          "published": null
+        },
+        {
+          "title": "Gateway Events - Documentation - Discord Developer Portal",
+          "url": "https://docs.discord.com/developers/events/gateway-events",
+          "snippet": "message_id? snowflake, ID of any user message which content belongs to * ... gateway intent is required to receive the content and matched_content fields. \u200b.",
+          "published": null
+        },
+        {
+          "title": "Enum GatewayIntents | Discord.Net Documentation",
+          "url": "https://docs.discordnet.dev/api/Discord.GatewayIntents.html",
+          "snippet": "This intent defines if the content within messages received by MESSAGE_CREATE is available or not. This is a privileged intent and needs to be enabled in the ...",
+          "published": null
+        },
+        {
+          "title": "Using Gateway - Discord Userdoccers",
+          "url": "https://docs.discord.food/gateway/using-gateway",
+          "snippet": "MESSAGE_CONTENT does not represent individual events, but rather affects what data is present for events that could contain message content fields. More ...",
+          "published": null
+        },
+        {
+          "title": "Bot cannot read message contents even with proper intents - Reddit",
+          "url": "https://www.reddit.com/r/Discord_Bots/comments/10p85dd/bot_cannot_read_message_contents_even_with_proper/",
+          "snippet": "30 Jan 2023 ... yea that overrides all other intents, where as the code I supplied basically enables all \"standard\" intents that require no permissions, and ...",
+          "published": null
+        },
+        {
+          "title": "What are Privileged Intents? - Developers - Discord",
+          "url": "https://support-dev.discord.com/hc/en-us/articles/6207308062871-What-are-Privileged-Intents",
+          "snippet": "10 Jun 2026 ... Privileged Intent TypesPrivileged Intents are gateway intents that ... Message Content. Unlike other intents, this doesn't correspond to ...",
+          "published": null
+        },
+        {
+          "title": "Discord Message Content Intent",
+          "url": "https://www.pythondiscord.com/pages/tags/message-content-intent/",
+          "snippet": "5 May 2023 ... The message content intent is what determines if an app will receive the actual content of newly created messages. Without this intent, discord.",
+          "published": null
+        },
+        {
+          "title": "Discord.Net Message content intent not working - Stack Overflow",
+          "url": "https://stackoverflow.com/questions/74412611/discord-net-message-content-intent-not-working",
+          "snippet": "12 Nov 2022 ... ... Gateway Intents\" in the discord developer portal, I should have access to message content; however, the message content comes up empty. The ...",
+          "published": null
+        },
+        {
+          "title": "You Might Not Need a Privileged Intent - Documentation - Discord",
+          "url": "https://docs.discord.com/developers/gateway/you-might-not-need-a-privileged-intent",
+          "snippet": "The Message Content intent controls access to several fields within message objects across both Gateway events and REST API responses: ... Without this intent, ...",
+          "published": null
+        },
+        {
+          "title": "Intents - Build Discord Bots in .NET - NetCord",
+          "url": "https://netcord.dev/guides/events/intents.html",
+          "snippet": "MessageContent is a special, privileged intent that allows you to receive Content, Embeds, Attachments, Components and Poll of messages in events. Otherwise ...",
+          "published": null
+        },
+        {
+          "title": "JDA 5: Discord Bot Tutorial - Gateway Intents (#4) - YouTube",
+          "url": "https://www.youtube.com/watch?v=GKxQ8uM8lhI",
+          "snippet": "20 Jun 2022 ... In this episode we cover gateway intents, which allow you to request permission from Discord ... This content isn't available. Learn to code your ...",
+          "published": null
+        },
+        {
+          "title": "Discord channels unresolved & \"Message Content Intent is limited ...",
+          "url": "https://github.com/openclaw/openclaw/issues/3265",
+          "snippet": "28 Jan 2026 ... When you enable Privileged Gateway Intents in the Discord Developer Portal, you must re-invite the bot to your server for the changes to take ...",
+          "published": null
+        },
+        {
+          "title": "Gateway Intents and Member Cache Policy - JDA Wiki",
+          "url": "https://jda.wiki/using-jda/gateway-intents-and-member-cache-policy/",
+          "snippet": "Together with intents, Discord now wants to further restrict data access for bots by limiting how many members they can cache. To properly maintain a cache of ...",
+          "published": null
+        }
+      ]
+    }
+  ],
+  "labels": {}
+}

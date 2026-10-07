@@ -342,7 +342,7 @@ pub(super) async fn search_pool(
         };
         return (answer, false);
     }
-    let results = merge(lists);
+    let results = merge(lists, query);
     let next_page = (!results.is_empty()).then(|| opts.page.saturating_add(1));
     let answer = PoolAnswer {
         page: Some(Page { results, next_page }),
@@ -436,7 +436,7 @@ async fn run_engine(
 /// each engine's own list). Agreement between engines therefore counts
 /// heavily, and a top-ranked hit counts far more than a tenth-ranked one. Ties
 /// keep the order engines were queried in.
-fn merge(lists: Vec<(f32, Vec<SearchResult>)>) -> Vec<SearchResult> {
+fn merge(lists: Vec<(f32, Vec<SearchResult>)>, query: &str) -> Vec<SearchResult> {
     struct Slot {
         weight: f32,
         positions: Vec<usize>,
@@ -472,9 +472,10 @@ fn merge(lists: Vec<(f32, Vec<SearchResult>)>) -> Vec<SearchResult> {
             }
         }
     }
+    let terms = query_terms(query);
     let score = |s: &Slot| {
         let sum: f32 = s.positions.iter().map(|p| 1.0 / *p as f32).sum();
-        s.weight * s.positions.len() as f32 * sum
+        s.weight * s.positions.len() as f32 * sum * relevance(&terms, &s.result)
     };
     let mut ranked: Vec<Slot> = slots.into_values().collect();
     ranked.sort_by(|a, b| score(b).total_cmp(&score(a)).then(a.seq.cmp(&b.seq)));
@@ -486,6 +487,39 @@ fn merge(lists: Vec<(f32, Vec<SearchResult>)>) -> Vec<SearchResult> {
             s.result
         })
         .collect()
+}
+
+const STOPWORDS: &[&str] = &[
+    "a", "an", "and", "are", "as", "at", "be", "by", "for", "how", "in", "is", "it", "of", "on",
+    "or", "the", "to", "vs", "what", "with",
+];
+/// Weight a result keeps when none of the query's terms appear in it.
+const MIN_RELEVANCE: f32 = 0.2;
+
+fn query_terms(query: &str) -> Vec<String> {
+    let mut terms: Vec<String> = query
+        .to_lowercase()
+        .split(|c: char| !c.is_alphanumeric())
+        .filter(|t| !t.is_empty() && !STOPWORDS.contains(t))
+        .map(str::to_string)
+        .collect();
+    terms.dedup();
+    terms
+}
+
+/// Share of the query's terms found in the result's title, snippet or URL,
+/// scaled into `MIN_RELEVANCE..=1`. Narrow engines return their closest hit
+/// even when it has nothing to do with the query, which this demotes.
+fn relevance(terms: &[String], r: &SearchResult) -> f32 {
+    if terms.is_empty() {
+        return 1.0;
+    }
+    let haystack = format!("{} {} {}", r.title, r.snippet, r.url).to_lowercase();
+    let hits = terms
+        .iter()
+        .filter(|t| haystack.contains(t.as_str()))
+        .count();
+    MIN_RELEVANCE + (1.0 - MIN_RELEVANCE) * hits as f32 / terms.len() as f32
 }
 
 /// Fold a duplicate hit into the kept one as SearxNG does: the longer title

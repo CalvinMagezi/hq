@@ -1,0 +1,307 @@
+{
+  "category": "science",
+  "engines": [
+    {
+      "engine": "arxiv",
+      "results": [
+        {
+          "published": "2025-05-29T08:21:11Z",
+          "snippet": "The mRNA optimization is essential for mRNA vaccines, therapies, and industrial protein production. Based on current explorations, an ideal optimization approach should simultaneously (i) prevent unintended amino-acid changes, (ii) optimize multiple, biologically relevant objectives, and (iii) retain computational efficiency. However, existing methods are forced to trade off between these perspectives, forming an \"impossible triangle.\" We present RNop, a knowledge-infused Transformer that integrates mechanism-aligned losses to address this problem. By encoding biological prior knowledge in losses, RNop makes knowledge infusion explicit and controllable across optimization focus. Trained on over 6 million sequences, in silico analyses show RNop resolves the \"impossible triangle\" of mRNA optimization with absolute sequence fidelity, significantly improved biological metrics, and high throughput. In in vitro validation, it can deliver up to 2.28-fold expression gain. Ablation studies reveal how each prior contributes to targeted improvements, yielding mechanism-level interpretability. RNop represents a shift in mRNA optimization methodology: by infusing explicit and interpretable …",
+          "title": "mRNA Design and Optimization with Deep Knowledge-Infused Approach",
+          "url": "https://arxiv.org/abs/2505.23862v2"
+        },
+        {
+          "published": "2021-08-31T21:50:34Z",
+          "snippet": "The novel coronavirus SARS-CoV-2 has resulted in a global pandemic with worldwide 6-digital infection rates and thousands death tolls daily. Enormeous effords are undertaken to achieve high coverage of immunization in order to reach herd immunity to stop spreading of SARS-CoV-2 infection. Several SARS-CoV-2 vaccines, based either on mRNA, viral vectors, or inactivated SARS-CoV-2 virus have been approved and are being applied worldwide. However, recently increased numbers of normally very rare types of thromboses associated with thrombocytopenia have been reported in particular in the context of the adenoviral vector vaccine ChAdOx1 nCoV-19 from Astra Zeneca. While statistical prevalence of these side effects seem to correlate with this particular vaccine type, i.e. adenonoviral vector based vaccines, the exact molecular mechanisms are still not clear. The present review summarizes current data and hypotheses for molecular and cellular mechanisms into one integrated hypothesis indicating that coagulopathies, including thromboses, thrombocytopenia and other related side effects are correlated to an interplay of the two components in the vaccine, i.e. the spike antigen and the …",
+          "title": "Coagulapathies after vaccination against SARS-CoV-2 may be derived from a combination effect of SARS-CoV-2 spike protein and adenovirus vector-triggered signaling pathways",
+          "url": "https://arxiv.org/abs/2109.00089v1"
+        },
+        {
+          "published": "2024-06-02T16:07:49Z",
+          "snippet": "SARS-CoV-2, the highly contagious pathogen responsible for the COVID-19 pandemic, has persistent effects that begin four weeks after initial infection and last for an undetermined duration. These chronic effects are more harmful than acute ones. This review explores the long-term impact of the virus on various human organs, including the pulmonary, cardiovascular, neurological, reproductive, gastrointestinal, musculoskeletal, endocrine, and lymphoid systems, particularly in older adults. Regarding diagnosis, RT-PCR is the gold standard for detecting COVID-19, though it requires specialized equipment, skilled personnel, and considerable time to produce results. To address these limitations, artificial intelligence in imaging and microfluidics technologies offers promising alternatives for diagnosing COVID-19 efficiently. Pharmacological and non-pharmacological strategies are effective in mitigating the persistent impacts of COVID-19. These strategies enhance immunity in post-COVID-19 patients by reducing cytokine release syndrome, improving T cell response, and increasing the circulation of activated natural killer and CD8 T cells in blood and tissues. This, in turn, alleviates …",
+          "title": "COVID-19: post infection implications in different age groups, mechanism, diagnosis, effective prevention, treatment, and recommendations",
+          "url": "https://arxiv.org/abs/2406.01636v1"
+        },
+        {
+          "published": "2026-08-31T00:11:15Z",
+          "snippet": "Studies with staggered entry, in which individuals enroll at different calendar times, are ubiquitous in medicine and related disciplines. Because these studies usually have a fixed administrative end of follow-up, identification of the estimand of interest relies on assumptions about the right-censoring mechanism. The assumptions are often considered plausible only conditional on covariates, including the time an individual entered the study (E). Yet, censoring assumptions formulated conditional on E are ill-posed due to positivity violations. Here, we study the consequences of this issue for common procedures in causal survival analysis, such as those based on marginal structural models. We further give conditions for valid identification and introduce sensitivity analyses to assess practical implications. We illustrate our methodology through two case studies. The first builds on the seminal article by Hernán et al. (2000) on the effect of zidovudine treatment. The second reanalyzes a recent study on the effect of the mRNA vaccine in patients receiving immune checkpoint inhibitors.",
+          "title": "Causal inference with staggered entries and effects that change over calendar time",
+          "url": "https://arxiv.org/abs/2608.30099v1"
+        },
+        {
+          "published": "2026-02-06T23:15:28Z",
+          "snippet": "In vitro transcription (IVT) plays a critical role in the manufacture of mRNA vaccines and therapeutics. Optimizing mRNA yield and ensuring product quality, such as capping efficiency and integrity, are essential but mechanistically complex. This study presents a modular mechanistic model of the IVT process to advance scientific understanding and improve predictive capability. The IVT reaction network is decomposed into interconnected modules describing (1) initiation and capping, (2) elongation and truncation, (3) termination and read-through, (4) mRNA degradation, (5) magnesium pyrophosphate precipitation, and (6) enzymatic degradation of pyrophosphate. Guided by biochemical principles and experimental data, kinetic models were developed for each module, accounting for mass balances, molecular complexation, and enzyme activity, and were subsequently assembled to capture coupled IVT dynamics. Multivariate residual analysis and Shapley value-based sensitivity analysis, guided by domain knowledge, were applied to iteratively improve model fidelity. These machine learning-driven analytics enabled identification of key mechanisms, supported in silico experimentation, and facilitated …",
+          "title": "A Modular Mechanistic In Silico Model for In Vitro Transcription Process Yield and Product Quality Prediction",
+          "url": "https://arxiv.org/abs/2602.07257v1"
+        },
+        {
+          "published": "2026-03-04T08:08:52Z",
+          "snippet": "Truth can mislead not because it is false but because delivering it through the wrong channel or authority to an audience with a different epistemic frame can harden misbelief rather than reduce it. Conventional fact checking assumes a shared epistemology that corrections from credible institutional sources will be received constructively across audiences. Evidence suggests instead that effectiveness declines and can reverse into backfire as the distance between source positioning and recipient epistemic orientation grows. We introduce Phase Aware Coherence Detection PACD which operationalises epistemic orientation from pre intervention assessments across institutional trust scientific epistemology conspiracy or anti elite openness and experiential or alternative epistemology. In a study of 45 participants we stratified individuals into three epistemic clusters and randomly assigned them to traditional fact checking phase aware coherence analysis or control before evaluating three claims 5G health effects urban trees and air quality and mRNA vaccine mechanism. Traditional fact checking shifted beliefs toward truth on average but produced substantial backfire and sharply reduced …",
+          "title": "When Truth Misleads -- Phase-Aware Coherence Detection for Misinformation Correction Across Epistemic Communities",
+          "url": "https://arxiv.org/abs/2603.20221v1"
+        },
+        {
+          "published": "2021-05-21T00:45:16Z",
+          "snippet": "Replication of SARS-CoV2 virions is an error-prone process which may eventually generate a percentage of impaired protein copies with complete lack of functionality. For instance, after RNA mis-replication, a very premature stop codon (UAG, UAA, UGA) coding for a prematurely truncated (nonsense-mutated) spike protein may occur. In the natural virus replication process via cell infection, the nonsense genomes are corrected by the proofreading enzymes of the virus, strongly penalized by natural selection and condemned to a very short life by the host cell's mRNA watching mechanisms. However, for the very long spike genome of 1273 codons, a truncated non-functional spike protein may potentially still occur with a high frequency, even in presence of a low mutation rate per single nucleotide. With this paper, a hi-fidelity post-processing of SARS-CoV2 spike sequences is provided: in ex-vivo samples from patients, an impressively high rate of 26\\% of prematurely-stopped (nonsense-mutated) spike genomes sequences due to insertions/deletions is found, compared with a 9.7\\% obtained from in-vitro cell culture. A general warning on the possible high rate of prematurely-stopped spike protein …",
+          "title": "High rate of SARS-CoV2 nonsense spike genomes coding for prematurely truncated proteins",
+          "url": "https://arxiv.org/abs/2105.10074v2"
+        }
+      ],
+      "weight": 1.0
+    },
+    {
+      "engine": "openalex",
+      "results": [
+        {
+          "published": "2022-11-04",
+          "snippet": "Abstract Replication‐incompetent adenovirus (Ad) vector and mRNA‐lipid nanoparticle (LNP) constructs represent two modular vaccine platforms that have attracted substantial interest over the past two decades. Due to the COVID‐19 pandemic and the rapid development of multiple successful vaccines based on these technologies, there is now clear real‐world evidence of the utility and efficacy of these platforms. Considerable optimization and refinement efforts underpin the successful application of these technologies. Despite this, our understanding of the specific pathways and processes engaged by these vaccines to stimulate the immune response remains incomplete. This review will synthesize our current knowledge of the specific mechanisms by which CD8 + T cell and antibody responses are induced by each of these vaccine platforms, and how this can be impacted by specific vaccine construction techniques. Key gaps in our knowledge are also highlighted, which can hopefully focus future studies.",
+          "title": "Adenovirus vector and mRNA vaccines: Mechanisms regulating their immunogenicity",
+          "url": "https://doi.org/10.1002/eji.202250022"
+        },
+        {
+          "published": "2024-01-01",
+          "snippet": "Over the past few years, messenger RNA (mRNA) vaccines have evolved from an idea that generated doubt to a practical reality in clinical practice.The Coronavirus Disease-19 (COVID-19) pandemic in 2020 resulted in the most rapid development of vaccinations ever recorded, with mRNA vaccines taking the lead in these efforts.When it comes to overcoming the fundamental limitations of unprotected mRNA molecules, nanoparticles have proven to be an efficient technique for delivering mRNA vaccinations.The nanoscale carriers offer protective and delivery functions, enabling effective absorption by cells, safeguarding against enzymatic breakdown, and allowing controlled release of mRNA payloads.Although mRNA vaccines have demonstrated their efficacy and safety in protecting patients from infectious diseases, additional research is required to improve the design of mRNA and its intracellular distribution, and its potential applications beyond preventing SARS-CoV-2 (severe acute respiratory syndrome-coronavirus 2).The COVID-19 pandemic has led to an increased support and interest in mRNA vaccinations.It is essential to acknowledge that mRNA vaccines represent a relatively novel technology, and …",
+          "title": "mRNA Vaccine Mechanisms: Unraveling the Biological Wonders",
+          "url": "http://doi.org/10.47278/book.cam/2024.064"
+        },
+        {
+          "published": "2022-06-14",
+          "snippet": "",
+          "title": "Review for \"Adenovirus vector and mRNA vaccines: mechanisms regulating their immunogenicity\"",
+          "url": "https://doi.org/10.1002/eji.202250022/v1/review2"
+        },
+        {
+          "published": "2022-09-20",
+          "snippet": "",
+          "title": "Review for \"Adenovirus vector and mRNA vaccines: mechanisms regulating their immunogenicity\"",
+          "url": "https://doi.org/10.1002/eji.202250022/v2/review2"
+        },
+        {
+          "published": "2022-09-15",
+          "snippet": "",
+          "title": "Review for \"Adenovirus vector and mRNA vaccines: mechanisms regulating their immunogenicity\"",
+          "url": "https://doi.org/10.1002/eji.202250022/v2/review1"
+        },
+        {
+          "published": "2022-06-14",
+          "snippet": "",
+          "title": "Review for \"Adenovirus vector and mRNA vaccines: mechanisms regulating their immunogenicity\"",
+          "url": "https://doi.org/10.1002/eji.202250022/v1/review1"
+        },
+        {
+          "published": "2022-11-01",
+          "snippet": "",
+          "title": "Innate immune mechanisms of mRNA vaccines",
+          "url": "https://doi.org/10.1016/j.immuni.2022.10.014"
+        },
+        {
+          "published": "2022-06-15",
+          "snippet": "",
+          "title": "Decision letter for \"Adenovirus vector and mRNA vaccines: mechanisms regulating their immunogenicity\"",
+          "url": "https://doi.org/10.1002/eji.202250022/v1/decision1"
+        },
+        {
+          "published": "2022-11-02",
+          "snippet": "",
+          "title": "Author response for \"Adenovirus vector and mRNA vaccines: mechanisms regulating their immunogenicity\"",
+          "url": "https://doi.org/10.1002/eji.202250022/v3/response1"
+        },
+        {
+          "published": "2022-10-20",
+          "snippet": "",
+          "title": "Decision letter for \"Adenovirus vector and mRNA vaccines: mechanisms regulating their immunogenicity\"",
+          "url": "https://doi.org/10.1002/eji.202250022/v2/decision1"
+        },
+        {
+          "published": "2022-11-02",
+          "snippet": "",
+          "title": "Decision letter for \"Adenovirus vector and mRNA vaccines: mechanisms regulating their immunogenicity\"",
+          "url": "https://doi.org/10.1002/eji.202250022/v3/decision1"
+        },
+        {
+          "published": "2017-07-13",
+          "snippet": "INTRODUCTION: The present review summarizes the growing body of work defining the mechanisms of action of this exciting new vaccine technology that should allow rational approaches in the design of next generation mRNA vaccines. Areas covered: Bio-distribution of mRNA, localization of antigen production, role of the innate immunity, priming of the adaptive immune response, route of administration and effects of mRNA delivery systems. Expert commentary: In the last few years, the development of RNA vaccines had a fast growth, the rising number of proof will enable rational approaches to improving the effectiveness and safety of this modern class of medicine.",
+          "title": "Mechanism of action of mRNA-based vaccines",
+          "url": "https://doi.org/10.1080/14760584.2017.1355245"
+        },
+        {
+          "published": "2020-09-09",
+          "snippet": "Messenger ribonucleic acid (mRNA)-based drugs, notably mRNA vaccines, have been widely proven as a promising treatment strategy in immune therapeutics. The extraordinary advantages associated with mRNA vaccines, including their high efficacy, a relatively low severity of side effects, and low attainment costs, have enabled them to become prevalent in pre-clinical and clinical trials against various infectious diseases and cancers. Recent technological advancements have alleviated some issues that hinder mRNA vaccine development, such as low efficiency that exist in both gene translation and in vivo deliveries. mRNA immunogenicity can also be greatly adjusted as a result of upgraded technologies. In this review, we have summarized details regarding the optimization of mRNA vaccines, and the underlying biological mechanisms of this form of vaccines. Applications of mRNA vaccines in some infectious diseases and cancers are introduced. It also includes our prospections for mRNA vaccine applications in diseases caused by bacterial pathogens, such as tuberculosis. At the same time, some suggestions for future mRNA vaccine development about storage methods, safety concerns, and …",
+          "title": "mRNA Vaccine Era—Mechanisms, Drug Platform and Clinical Prospection",
+          "url": "https://doi.org/10.3390/ijms21186582"
+        },
+        {
+          "published": "2021-02-12",
+          "snippet": "To successfully protect against pathogen infection, a vaccine must elicit efficient adaptive immunity, including B and T cell responses. While B cell responses are key, as they can mediate antibody-dependent protection, T cells can modulate B cell activity and directly contribute to the elimination of pathogen-infected cells. In the unprecedented race to develop an effective vaccine for severe acute respiratory syndrome coronavirus 2 (SARS-CoV-2), the causative agent of the respiratory disease coronavirus disease 2019 (COVID-19), messenger RNA (mRNA) vaccines have emerged as front runners thanks to their capacity for rapid development and ability to drive potent adaptive immune responses. In this review article, we provide an overview of the results from pre-clinical studies in animal models as well as clinical studies in humans that assessed the efficacy of SARS-CoV-2 mRNA vaccines, with a primary focus on adaptive immune responses post vaccination.",
+          "title": "SARS-CoV-2 mRNA Vaccines: Immunological Mechanism and Beyond",
+          "url": "https://doi.org/10.3390/vaccines9020147"
+        },
+        {
+          "published": "2023-12-29",
+          "snippet": "In recent years, infectious diseases such as novel coronavirus pneumonia, influenza, and tuberculosis have brought great social and economic burdens to the world. Vaccination is the most effective and economical intervention to control the spread of infectious diseases, save lives and protect people's health. mRNA vaccine is expected to be a new type of infectious disease vaccine. Compared with traditional vaccines, mRNA vaccines have many advantages, such as high efficiency, safety, short production cycle, low cost, etc. However, the stability of mRNA vaccines is poor. However, mRNA vaccines have poor stability and low delivery efficiency, and their clinical applications are greatly restricted. Therefore, current and future research focuses on the design of advanced and tolerable delivery systems to improve the efficiency of antigen expression and presentation, as well as the optimization of mRNA structure to prolong and control the duration of expression, under the premise of ensuring the safety of vaccines. This review summarizes the history, classification, principles and mechanisms of mRNA vaccines, and briefly discusses the current challenges and future directions for …",
+          "title": "Mechanism, applications and of mRNA vaccines",
+          "url": "http://dx.doi.org/10.54097/6apbkw71"
+        },
+        {
+          "published": "2021-04-20",
+          "snippet": "",
+          "title": "Potential mechanisms of anaphylaxis to COVID-19 mRNA vaccines",
+          "url": "https://doi.org/10.1016/j.jaci.2021.04.002"
+        },
+        {
+          "published": "2025-02-21",
+          "snippet": "The present paper focuses on mRNA vaccines. Firstly, it is pointed out that the excellent results of the new mRNA vaccine have led to the active exploration of its application in therapeutic protein expression, and many clinical trials for different diseases have been carried out accordingly. The subsequent discussion delves into the intricacies of mRNA structure and function, meticulously analysing the pivotal roles of its components (5' end cap, UTR, open reading frame, 3' end polyadenylate tail structure) in protein synthesis and immune response. The study further delves into the multifaceted mechanisms through which mRNA vaccines exert their effects on viruses and cancers, offering a comprehensive exploration of this fascinating field. The text goes on to highlight the significant advantages of mRNA vaccines, including safety, ease of mass production, and ease of antigen sequence optimisation. Furthermore, the applications of mRNA vaccines in antiviral, anticancer, autoimmune, allergy, tissue regeneration, anti-aging and other fields are described. In conclusion, mRNA vaccines have a broad application prospect, although some applications are still in the exploratory stage. …",
+          "title": "mRNA Vaccines: Structure, Mechanism and Applications",
+          "url": "https://doi.org/10.54254/2753-8818/2025.gu20965"
+        },
+        {
+          "published": "2026-06-24",
+          "snippet": "",
+          "title": "Immunological mechanisms of mRNA vaccines for infectious diseases",
+          "url": "https://doi.org/10.1038/s41586-026-10599-0"
+        },
+        {
+          "published": "2024-11-13",
+          "snippet": "Lipid nanoparticles (LNPs) used for nonviral gene delivery have achieved significant success, particularly in COVID-19 mRNA vaccines. LNPs are routinely characterized by their particle size, polydispersity, and mRNA loading efficiency. However, the internal structure of these particles has not been specified, despite evidence showing that LNPs can be highly heterogeneous, with variations in lipid composition and preparation methods. How these structural features contributed to mRNA LNP vaccine activities is also unclear. In this study, we prepared LNPs with distinctly different internal structures. They were named the emulsion-like LNPs (eLNPs) and membrane-rich LNPs (mLNPs) respectively and compared with the classic \"bleb\" structure LNPs (cLNPs). The eLNPs contained higher molar percent of the ionizable lipid and lower molar percent of DSPC and cholesterol. The different lipid organization structures lead to varying mRNA delivery activities in vitro and in vivo. After intramuscular injection, eLNPs remained at the injection site and expressed antigens locally. The resulted immune responses had a very fast onset (higher titer at week 2) and lasted longer and stronger (higher …",
+          "title": "Characterization of mRNA-LNP structural features and mechanisms for enhanced mRNA vaccine immunogenicity",
+          "url": "https://doi.org/10.1016/j.jconrel.2024.11.007"
+        },
+        {
+          "published": "2024-08-14",
+          "snippet": "Following the COVID-19 outbreak, two mRNA vaccines were marketed in late 2020 after receiving FDA-approved emergency access, pioneering the use of mRNA vaccines in humans. Since then, more and more companies have joined the development and clinical trials of mRNA vaccines. At this stage, the development of mRNA vaccines is not only limited to COVID-19, but also covers infectious diseases, influenza, and cancer. Up to now, the regulation of immunogenicity of mRNA vaccines is a problem to be solved, and the controversy is mainly about typeⅠIFN. This paper mainly introduces the classification, mechanism and characteristics of mRNA vaccines to show the basic principle of mRNA vaccines, and lists the applications of mRNA vaccines and the types of vaccines that are undergoing clinical trials, which reflects their huge application potential. The potential of mRNA vaccines is shown. With this paper, the author summarizes the current status of mRNA vaccines in order to show readers the basic principles and potentials of mRNA vaccines.",
+          "title": "Mechanism of mRNA vaccine, current study and direction of development",
+          "url": "http://dx.doi.org/10.54254/2753-8818/48/2024pj0122"
+        }
+      ],
+      "weight": 1.0
+    },
+    {
+      "engine": "europe pmc",
+      "results": [
+        {
+          "published": "2026-08-31",
+          "snippet": "Karadakic R, Keating NL, Barnett ML. | 2026. Recent studies proposed that SARS-CoV-2 mRNA vaccination may sensitize tumors to immune checkpoint inhibitor (ICI) therapy through immune modulation. Using 100% national Medicare fee-for-service claims data, we evaluated whether survival differences among vaccinated patients receiving ICIs were specific to mRNA vaccines. Among 121,676 beneficiaries initiating systemic anticancer therapy, including 10,824 initiating ICIs, vaccination near treatment initiation was associated with lower mortality across mRNA COVID-19, adenoviral COVID-19, and influenza vaccines. We found that survival associations and formal vaccine-ICI interaction effects were similar across vaccine platforms. These findings suggest that currently available population-level survival data do not isolate an mRNA-specific tumor-sensitization mechanism.",
+          "title": "Interpreting vaccine-associated survival differences in immune checkpoint inhibitor therapy.",
+          "url": "https://europepmc.org/article/MED/42673464"
+        },
+        {
+          "published": "2026-09-28",
+          "snippet": "Wu Z, Lou J, Cheng Y, Li M, Wang Z, Liu N, Gao X, Zheng A, Zhang H. | 2026. mRNA vaccines have become a clinically validated vaccine platform, as demonstrated by the success of COVID-19 vaccines such as Comirnaty and Spikevax, owing to their rapid design, manufacturing scalability, and capacity to induce in situ antigen expression. A key factor underlying this success is the lipid nanoparticle (LNP) delivery system, which protects mRNA from degradation and promotes efficient cellular uptake and cytoplasmic delivery, thereby enabling the full potential of mRNA technology. The continued advancement of mRNA-LNP vaccines requires integrated optimization of mRNA design, LNP composition, and delivery strategies to achieve improved stability, efficient intracellular delivery, and balanced immune responses. Despite remarkable progress, challenges related to formulation stability, long-term storage stability, safety and reactogenicity concerns, and durability of immune protection continue to hinder the broader application of mRNA-LNP vaccine platforms. This review provides an integrated overview of recent advances in mRNA-LNP vaccines, covering mRNA molecular engineering, LNP composition …",
+          "title": "mRNA lipid nanoparticle vaccines: current status, challenges and future prospects.",
+          "url": "https://europepmc.org/article/MED/42804114"
+        },
+        {
+          "published": "2026-09-17",
+          "snippet": "Aladag E, Karakulak UN, Haznedaroglu IC. | 2026. The severe acute respiratory syndrome coronavirus 2 (SARS-CoV-2) spike (S) protein is central to viral infectivity, host-pathogen interactions, and immune recognition. Beyond its indispensable role in viral entry, accumulating experimental and clinical evidence indicates that spike protein may exert pleiotropic biological effects involving endothelial, cardiovascular, hematological, neurological, and immunological pathways. During natural infection, these effects occur in the context of active viral replication, additional viral antigens, and systemic inflammation, whereas vaccination induces a fundamentally different, transient exposure to a prefusion-stabilized spike antigen without viral propagation. In this review, we critically examine the molecular and clinicopathological properties of the SARS-CoV-2 spike protein and the biological differences between infection-derived and vaccine-derived spike exposure. Particular emphasis is placed on endothelial dysfunction, platelet and complement activation, immune-thrombosis, persistent viral antigens and tissue reservoirs in Long-COVID, and the distinct anti-PF4-mediated …",
+          "title": "Spike Protein at the Crossroads of Long-COVID and Vaccine-Induced Immune Thrombotic Thrombocytopenia Syndromes: A Cardio-Hematological Perspective.",
+          "url": "https://europepmc.org/article/MED/42792830"
+        },
+        {
+          "published": "2026-09-15",
+          "snippet": "Minoretti P, Emanuele E. | 2026. Since 2020, billions of doses of COVID-19 messenger RNA (mRNA) lipid nanoparticle vaccines have been administered worldwide, generating one of the largest pharmacovigilance databases for a modern therapeutic class. Intriguingly, their immunopharmacologic profile-including the engagement of innate nucleic acid sensors, systemic type I interferon signaling, dendritic cell-mediated cross-priming of CD8+ T cells, and upregulation of programmed cell death ligand 1 (PD-L1)-may extend beyond COVID-19 prophylaxis. Retrospective evidence from six independent cohorts, one of which is a multinational health-data network, indicated that vaccination within 100 days of immune checkpoint inhibitor (ICI) initiation may improve survival of patients with malignancies, including in immunologically cold tumors, although a substantial fraction of the original effect may be attributed to pandemic-era selection bias. Here, we examine the mechanistic basis and available evidence for the repurposing of licensed COVID-19 mRNA vaccines as antigen-agnostic immunomodulators. We identified five candidate contexts for prospective evaluation-namely, (1) PD-L1-negative non-small …",
+          "title": "COVID-19 mRNA Vaccines as Antigen-Agnostic Immunomodulators: A Repurposing Perspective.",
+          "url": "https://europepmc.org/article/MED/42783445"
+        },
+        {
+          "published": "2026-08-25",
+          "snippet": "Wu H, Weng R, Gu S, Wang J, Ma X, Li J, Tie X, Huang C, Chen K. | 2026. Traditional treatments for lung cancer include surgery, radiotherapy, chemotherapy, and targeted therapies (such as Erlotinib, Gefitinib, and Crizotinib), as well as immunotherapy (such as Nivolumab and Pembrolizumab). However, these approaches face challenges such as drug resistance, limited efficacy, and significant side effects, making it difficult to improve long-term prognosis. Therefore, tumor vaccines, as a novel immunotherapy strategy, have become a focus of research, aiming to precisely activate anti-tumor immune responses and address the shortcomings of existing treatments. In recent years, mRNA vaccine technology has developed rapidly, especially following the successful application of COVID-19 vaccines, demonstrating its immense potential for rapid development and large-scale production. mRNA cancer vaccines induce durable anti-tumor immune responses and reshape the tumor microenvironment by delivering mRNA encoding tumor-specific antigens, enabling targeted therapy. Through the dual synergistic pathways of direct local modulation by the vector/encoded factors and secondary effects mediated by …",
+          "title": "Therapeutic mRNA vaccines for lung cancer: reshaping the tumor microenvironment to enhance anti-tumor immunity.",
+          "url": "https://europepmc.org/article/MED/42713225"
+        },
+        {
+          "published": "2026-09-18",
+          "snippet": "Hong S, Yan W. | 2026. Abstract COVID‑19 mRNA vaccines activate the type I interferon (IFN‑I) pathway and exert anti‑tumor immunomodulatory effects, yet the mechanisms underlying tumor microenvironment (TME) remodeling and immune checkpoint inhibitor (ICI) sensitization remain poorly defined. Public single‑cell, bulk and multi‑omics datasets were integrated with Seurat, CellChat and WGCNA to characterize post‑vaccination IFN‑I activation kinetics, immune‑cell dynamics, and the association between IFN‑I signaling and tumor PD‑L1 expression. An ICI‑response predictive signature was built, and mechanistic conservation was verified using transcriptomic profiles from tumor‑bearing mice. IFN‑I activity peaks at day 3 post‑vaccination and returns to baseline by day 14, accompanied by expanded anti‑tumor immune populations and reduced M2‑like macrophages that mitigate TME immunosuppression. A dual‑regulatory model is proposed: mRNA vaccines drive cold‑to‑hot tumor conversion through IFN‑I‑mediated immune recruitment, while elevating tumor‑intrinsic PD‑L1 to amplify ICI therapeutic potency. The derived signature discriminates ICI clinical responders with favorable performance, and …",
+          "title": "Single-cell sequencing-based elucidation of the molecular mechanisms by which the COVID-19 mRNA vaccine remodels the tumor microenvironment and sensitizes immune checkpoint inhibitors via the IFN-I …",
+          "url": "https://europepmc.org/article/PPR/PPR1322199"
+        },
+        {
+          "published": "2026-09-28",
+          "snippet": "Poulis P, Robecchi G, Kurochkina AO, Felletti M, Rodnina MV. | 2026. N1-methylpseudouridine (m1Ψ) is a key modification used in SARS-CoV-2 mRNA vaccines that reduces immunogenicity and increases mRNA stability. Recent studies suggested that m1Ψ can promote ribosomal frameshifting, a translational error generating aberrant peptides that elicit immune responses, raising concerns about unintended antigenicity. Here, we systematically examined the efficiency of frameshifting induced by m1Ψ and the underlying mechanism, aiming to inform future mRNA vaccine design. Using mRNA-based dual-fluorescence reporters in cells, fully in vitro reconstituted translation system, and single-molecule FRET microscopy, we show that m1Ψ increases +1 frameshifting on UUUC motifs in therapeutic mRNAs. Frameshifting occurs when the peptidyl-tRNA pauses in the ribosomal P site, where m1Ψ both weakens codon-anticodon interactions and promotes a frameshifting-prone tRNA conformation. Replacing slippery UUUC motifs with UUCC or UUUU eliminates this effect. Our results reveal how a clinically relevant mRNA modification promotes recoding and show that codon optimization mitigates this risk in therapeutic mRNA …",
+          "title": "Recoding by N<sup>1</sup>-methylpseudouridine guides rational mRNA vaccine design.",
+          "url": "https://europepmc.org/article/MED/42805987"
+        },
+        {
+          "published": "2026-09-07",
+          "snippet": "Cai D, Li X, Wang R, Lin C, Wen J, Tian B. | 2026. RNA vaccines-comprising linear mRNA, self-amplifying RNA, and circular RNA (circRNA)-constitute a core next-generation platform for the prevention and control of viral diseases; among these, circRNA vaccines possess notable structural stability, yet their technical bottlenecks and application prospects in veterinary medicine have not been systematically reviewed. This review synthesizes current research on circRNA vaccine design, circularization strategies, translation mechanisms, delivery systems, and immunological outcomes, and compares their antiviral performance with that of linear mRNA vaccines. Owing to their covalently closed circular conformation, circRNA vaccines exhibit enhanced resistance to nucleases and superior thermal stability, enabling sustained transfection activity at ambient temperatures without reliance on strict cold chains; through cap-independent translation driven by internal ribosome entry sites or N6-methyladenosine modifications, and in conjunction with optimized circularization protocols and lipid nanoparticle carriers, circRNA vaccines elicit substantially higher antiviral IgG titers and durable …",
+          "title": "Research Progress, Application, and Industrialization Prospects of Circular RNA Vaccines in Viral Diseases.",
+          "url": "https://europepmc.org/article/MED/42797601"
+        },
+        {
+          "published": "2026-09-27",
+          "snippet": "Ha M, Kim J, Kim S, Naidu GS, Cho S, Yong SB. | 2026. mRNA-encapsulated lipid nanoparticles (LNPs) have been used to develop vaccines and therapeutics since the COVID-19 pandemic, and clinical studies have demonstrated therapeutic benefits of mRNA vaccines for various cancers. However, current LNP formulations still require functional modifications to tailor them for therapeutic and vaccine applications. Recently, fifth component-incorporated LNPs were developed to finely tune their functionality, including immunogenicity and organ-targeting ability. Here, biphenyl-structured amphiphilic PDL1 inhibitors are employed as a fifth component to modify LNPs. Amphiphilic PDL1 inhibitor-incorporated, ALC0315-based LNPs show higher lymph node targeting, with a 6.94-fold increase in mRNA expression in the inguinal lymph node, thereby improving lymph node expansion and immune cell infiltration and, consequently, inducing greater mRNA vaccine efficacy. Furthermore, a consistent lymph node-targeting effect of the fifth component-containing LNP was observed across studies using the SM102-based LNP formulation, suggesting its universality. In conclusion, this study demonstrates that PDL1 …",
+          "title": "Immune Checkpoint Inhibitor as a Fifth Component of Lipid Nanoparticles Enables Lymph Node-Targeting and Augments mRNA Vaccine Efficacy.",
+          "url": "https://europepmc.org/article/MED/42801710"
+        },
+        {
+          "published": "2026-10-01",
+          "snippet": "Siebner AS, Rubio-Casillas A, Raszek M, Cowley D, Fabrowski M, Piscopo M, Brogna C, Uversky VN, Redwan EM, Genova SN. | 2026. The COVID-19 pandemic exposed science's adaptive strengths and epistemic limits. In fact, in the pandemic, mRNA vaccines are attributed to have saved millions of lives. The maxim \"correlation does not imply causation\" is an essential safeguard against premature causal inference. However, its use may become epistemically restrictive when the absence of established causality is treated as sufficient reason not to investigate (severe) vaccine adverse events. This article examines the conditions under which a valid cautionary principle may have contributed to premature epistemic closure. Thomas Kuhn's theory of scientific paradigms is used as one interpretative lens rather than as an empirical explanation of institutional behaviour. We argue that the correlation-causation distinction can shift from a heuristic of caution to an instrument of epistemic conservatism, reinforcing prevailing frameworks and discouraging exploration of anomalies. A published autopsy case report involving multifocal necrotizing encephalitis and myocarditis after BNT162b2 vaccination is …",
+          "title": "Beyond correlation and causation: epistemic caution, anomalous findings, and COVID-19 vaccine safety.",
+          "url": "https://europepmc.org/article/MED/42823741"
+        },
+        {
+          "published": "2026-08-21",
+          "snippet": "Lin G, Chen Z, Zhong Q, Sun C, Zeng MS. | 2026",
+          "title": "Targeting Epstein-Barr Virus for Cancer Vaccines: Recent Advances and Future Directions.",
+          "url": "https://europepmc.org/article/MED/42662910"
+        },
+        {
+          "published": "2026-09-14",
+          "snippet": "Demircan T, Yıldırım B, Ünsal Hİ, Bilir A. | 2026. Personalized mRNA neoantigen vaccines represent an emerging form of precision cancer immunotherapy designed to generate de novo T-cell responses against patient-specific tumor mutations. Their therapeutic activity, however, depends not only on neoantigen selection and vaccine-induced immune priming but also on whether these responses can remain functional within an immunosuppressive tumor microenvironment. Immune checkpoint blockade provides a mechanistically complementary strategy by relieving inhibitory signaling that constrains vaccine-expanded tumor-reactive lymphocytes. This review examines this therapeutic interface across three interconnected levels: molecular neoantigen selection and mRNA vaccine design, vaccine-driven remodeling of antitumor T-cell immunity, and clinical integration with PD-1/PD-L1 blockade. Particular emphasis is placed on how neoantigen clonality, antigen presentation, tumor heterogeneity, and immune escape influence the translation of vaccine immunogenicity into clinical benefit. Current evidence is evaluated across melanoma, non-small cell lung cancer, and pancreatic ductal adenocarcinoma, including …",
+          "title": "Personalized mRNA Neoantigen Vaccines in Cancer: Linking Precision Antigen Selection, Immune Remodeling, and Checkpoint Blockade.",
+          "url": "https://europepmc.org/article/MED/42794593"
+        },
+        {
+          "published": "2026-08-12",
+          "snippet": "Li X, Niu Z, Mou T, Gao Y, Wang L, Zhang Y, Chen H, Tan S, Liu J, Li J, Li Q. | 2026. Rabies virus (RABV) is a zoonotic pathogen with an almost 100% case-fatality rate and limited post-exposure prophylaxis options. mRNA-based antigen delivery represents a promising approach but requires further optimization. We prepared a cationic lipid nanoparticle (LNP) delivery system using the thin-film hydration method and characterized its physicochemical properties and delivery efficiency. An mRNA encoding a fusion antigen comprising rabies virus glycoprotein (G) and herpes simplex virus type 2 infected cell polypeptide 35 (ICP35), lacking canonical 5' and 3' untranslated region sequences, was constructed. In vitro protein expression of the G-ICP35 mRNA was confirmed. Immunogenicity was evaluated in BALB/c mice following three intramuscular immunizations with G-ICP35 mRNA, RABV G/N proteins, or their combination. Tail vein blood samples were collected on days 7, 21, and 39 after the final immunization, and rabies virus-specific antibody titers and T-cell responses were assessed. The cationic LNP formulation efficiently mediated intracellular delivery and expression of the G-ICP35 mRNA. In …",
+          "title": "Expression and immunogenicity of a rabies virus glycoprotein-HSV-2 ICP35 fusion antigen delivered by an mRNA-LNP formulation.",
+          "url": "https://europepmc.org/article/MED/42586214"
+        },
+        {
+          "published": "2026-09-16",
+          "snippet": "Ghidini M, Novazzi F, Denaro N, Petrillo A, Ratti M, Salati M, Malvaso R, Di Marco L, Parisi A, Hahne JC. | 2026. Messenger RNA vaccines have moved rapidly from the infectious-disease area into oncology. They now represent an attractive therapeutic option for gastrointestinal (GI) cancers. Personalised constructs, designed to elicit tumour-specific T-cell immunity, have shown acceptable safety and clear immunogenicity in early-phase trials of colorectal and pancreatic cancers. These early signals are encouraging, but several obstacles still exist for routine clinical use: tumour heterogeneity, immune evasion, the difficulty of selecting the right target antigens, and the stability of the delivery platform itself. The possibility of a combination with immune checkpoint inhibitors is currently being explored to deepen and prolong responses, although the durability of benefit remains to be established. In this review, we outline the current landscape of mRNA vaccine development for GI malignancies, with particular attention to delivery strategies and multimodal immunotherapy. Finally, we discuss the directions most likely to help move these agents from the laboratory into everyday …",
+          "title": "mRNA Vaccines as Novel Immunotherapeutic Approaches in Gastrointestinal Cancers.",
+          "url": "https://europepmc.org/article/MED/42782773"
+        },
+        {
+          "published": "2026-09-22",
+          "snippet": "Provine NM, Murray S, Rolt J, Meacham G, Rao V, Dimitriadis S, Dooley K, Heslington A, Goodyear C, Siebert S, McInnes I, Willicombe M, Prendecki M, Thomas D, de Silva T, Shields A, Richter A, Billingham L, Kirkham A, Kearns P, Kronsteiner B, Klenerman P, dunachie s, Barnes E. | 2026. Abstract Vaccine failure in patients with secondary immunodeficiencies (SIs) is associated with severe infections and mortality. To define a mechanistic basis for this, we applied an integrated multi-omic and functional approach to dissect vaccine responses pre- and post- booster (third dose) COVID-19 mRNA/LNP vaccination from 217 individuals comprising ten clinically distinct SI groups with variable antibody and T cell response rates after vaccination and healthy controls. The mechanisms of antibody impairment differed across SI groups and included reduced B cell frequency, antigen-specific B cell-intrinsic defects, and aberrant functionality of circulating antigen-specific TFH cells. In contrast, defects in effector differentiation, metabolic signalling and functionality of antigen-specific CD8+ and CD4+ T cells were observed in all individuals with impaired T cell immunity. Together, these data …",
+          "title": "Immune determinants of cellular and humoral non-responsiveness to mRNA/LNP vaccination in immunocompromised individuals",
+          "url": "https://europepmc.org/article/PPR/PPR1324554"
+        },
+        {
+          "published": "2026-07-30",
+          "snippet": "Finch-Cruz CN, Fazal SI, Fuentes Morales V. | 2026. We report the first documented case of extreme, intact parathyroid hormone (PTH)-independent hypercalcemia mediated by a rare non-osteoclastic bone remodeling mechanism in a 65-year-old Puerto Rican woman, detected within 24 h of the second dose of the Moderna mRNA-1273 COVID-19 vaccine and leading to the diagnosis of high-risk biclonal IgA plasma cell myeloma (R-ISS Stage III). Peak serum calcium reached 17.4 mg/dL with concurrent hyperphosphatemia, normal lactate dehydrogenase (LDH), and without marrow osteoclasts or osteolytic lesions, findings inconsistent with classical cancer-associated hypercalcemia. Hypercalcemia resolved within eight days with supportive treatment alone, remaining durably normal nine months later. The temporal proximity to vaccination, together with the biochemical-histopathological profile, generates the hypothesis, without implying causation, that a vaccine-induced innate immune response triggered a rare inflammatory osteocytic perilacunar/canalicular remodeling. The biclonal gammopathy, Clone-1 (normal karyotype, CD33+, OCT-2+, MYC-, CD19+, PAX5-) and Clone-2 (complex high-risk karyotype, OCT-2-, …",
+          "title": "Extreme PTH-Independent Hypercalcemia Mediated by a Rare Non-Osteoclastic Osteolysis Mechanism in Newly Diagnosed High-Risk Biclonal IgA Multiple Myeloma: Temporal Association with the Second Dose of …",
+          "url": "https://europepmc.org/article/MED/42589488"
+        },
+        {
+          "published": "2026-07-11",
+          "snippet": "Niazi SK. | 2026. A single vaccine cannot prevent or treat all cancers; however, recurrent tumor-specific epitopes may facilitate the development of pre-manufactured, HLA-matched mRNA vaccines tailored for specific molecular subgroups. We define the shared tumor-specific epitope as a recurring peptide derived from a viral oncoprotein, a driver mutation, a frameshift, an altered protein C-terminus, or a fusion junction, and we employ a rigorous cancer-cell-only criterion: a target must be recurrent within a defined subgroup, absent from essential normal tissues at the peptide-HLA level, naturally presented on tumor cells, and sufficiently clonal to minimize immune escape. Under this criterion, we present fifteen sequence-anchored reference designs alongside one conceptual placeholder across thirteen candidates divided into four superclasses: viral oncoproteins (such as HPV16/18 E6 and E7 as attenuated antigenic reference designs; Merkel cell polyomavirus serving as a design-specific placeholder), recurrent driver neoepitopes (including KRAS G12/G13, IDH1 R132H, and H3 K27M), hematologic neoantigens (such as NPM1 Type A C-terminus; and a single CALR exon 9 construct encoding the …",
+          "title": "Sequence-Anchored Shared Tumor-Specific Epitopes for Pre-Manufactured HLA-Matched mRNA Cancer Vaccine Libraries: A Pan-Cancer Framework.",
+          "url": "https://europepmc.org/article/MED/42509808"
+        },
+        {
+          "published": "2026-09-16",
+          "snippet": "Huang F, Jiao J, Wang Z, Jie H, He J, Zuo X, Zhao Y, Lu Y, Gu J, Lyu F. | 2026. Vacuum freeze-drying, commonly referred to as lyophilization, is one of the primary processes in vaccine industrial manufacturing. It offers significant advantages, including a marked extension of the shelf-life of dried products, effective preservation of biological activity, and user convenience. However, in the production of animal freeze-dried vaccines, the diverse nature of antigens, the complexity of heat-stable protectant formulations, and variations in manufacturing equipment pose substantial challenges to process design for animal freeze-dried vaccines. Commercially available animal freeze-dried vaccines commonly suffer from antigen potency loss, insufficient product stability, low production efficiency and high manufacturing costs. Freeze-drying process optimization can markedly improve the quality of freeze-dried vaccines, with key evaluation indicators including vaccine stability, shelf-life, sample morphology, and residual moisture content. Focusing on multiple types of animal vaccines, this review summarizes research advances in improving the quality of animal freeze-dried vaccines from …",
+          "title": "Improving the Quality of Lyophilized Animal Vaccines: A Review of Optimization Strategies for Freeze-Drying Processes.",
+          "url": "https://europepmc.org/article/MED/42798006"
+        },
+        {
+          "published": "2026-09-09",
+          "snippet": "Mhanna D, Salman B, El Hakim R, Aridi L, Abou Ali W, Al Halabi B, Faour V, Harb F, Azar S, Ghadieh HE. | 2026. Melanoma has emerged as a major focus of cancer immunotherapy research because of its highly immunogenic nature and responsiveness to immune-based treatments. Therapeutic melanoma vaccines are designed to stimulate tumor-specific immune responses through the delivery of Tumor-Associated Antigens (TAAs), Tumor-Specific Antigens (TSAs), and personalized neoantigens. This narrative review provides an overview of current melanoma vaccine strategies, including peptide-based vaccines, dendritic cell vaccines, nucleic acid-based platforms such as mRNA, DNA, and viral vector vaccines. Recent advances in vaccine engineering and tumor genomics have accelerated the development of personalized neoantigen vaccines capable of targeting mutations unique to individual tumors. In parallel, Artificial Intelligence (AI) and Machine Learning (ML) are increasingly being incorporated into neoantigen identification pipelines to improve epitope prediction and optimize vaccine design. Combination strategies involving Immune Checkpoint Inhibitors (ICIs), particularly anti-PD-1 and anti-CTLA-4 …",
+          "title": "Therapeutic melanoma vaccines: Platforms, neoantigen strategies, and emerging combination immunotherapies.",
+          "url": "https://europepmc.org/article/MED/42724148"
+        },
+        {
+          "published": "2026-08-27",
+          "snippet": "Gold MJ, Millar DG, Liu J, Menon H, Karpov Y, Olsen K, Oliveira LT, Dubé C, Tran CW, Elford AR, Schwartz JA, Gopalakrishna Panicker RK, Marcusson EG, Ohashi PS, Martin Orozco N. | 2026. mRNA based vaccines utilizing lipid-based delivery systems have been used for cancer therapy with some success targeting tumor-associated antigens (TAAs) or neoantigens. However, in many patients, T cell exhaustion or tumor suppression impedes the induction of a protective anti-tumor T cell response, which suggests that additional activation signals are required to reduce antagonistic tumor effects and reinvigorate the T cells. Here we sought to evaluate novel ionizable lipids for lipid nanoparticle (LNP)-formulations containing a tumor antigen mRNA as a therapeutic treatment for solid tumors and identify key immunogenic features of successful ionizable lipid candidates. Focusing on the induction of a tissue-destructive immune response became the ideal in vivo screening to compare two novel ionizable lipids, INTENT-1 and INTENT-2. Both LNPs carrying the same mRNA- encoded antigen induced similar CD8+ T cell responses, but only INTENT-2.1 LNPs could cause tissue destruction. Mechanism-of-action …",
+          "title": "Novel lipid nanoparticle in a mRNA cancer vaccine drives tumor control via type I IFNs and effector CD8<sup>+</sup> T cells.",
+          "url": "https://europepmc.org/article/MED/42774904"
+        }
+      ],
+      "weight": 0.4000000059604645
+    }
+  ],
+  "labels": {},
+  "query": "mRNA vaccine mechanism"
+}

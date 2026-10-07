@@ -1,0 +1,133 @@
+{
+  "query": "git rebase vs merge",
+  "category": null,
+  "engines": [
+    {
+      "engine": "google cse",
+      "weight": 1.0,
+      "results": [
+        {
+          "title": "Merging vs. Rebasing | Atlassian Git Tutorial",
+          "url": "https://www.atlassian.com/git/tutorials/merging-vs-rebasing",
+          "snippet": "In the Conceptual Overview section, we saw how a feature branch can incorporate upstream changes from main using either git merge or git rebase . Merging is a ...",
+          "published": null
+        },
+        {
+          "title": "I still don't understand the difference between merge and rebase...?",
+          "url": "https://www.reddit.com/r/git/comments/1qakug2/i_still_dont_understand_the_difference_between/",
+          "snippet": "12 Jan 2026 ... Rebasing takes all of the commits from the source branch and replays them, one by one, on the target branch. There's no merge commit, it looks ...",
+          "published": null
+        },
+        {
+          "title": "When do you use Git rebase instead of Git merge? - Stack Overflow",
+          "url": "https://stackoverflow.com/questions/804115/when-do-you-use-git-rebase-instead-of-git-merge",
+          "snippet": "29 Apr 2009 ... Short Version. Merge takes all the changes in one branch and merges them into another branch in one commit. Rebase says I want the point at ...",
+          "published": null
+        },
+        {
+          "title": "Git: rebase vs merge - Research Software Engineering Sheffield",
+          "url": "https://rse.shef.ac.uk/blog/2020-06-23-git-rebase-vs-merge/",
+          "snippet": "23 Jun 2020 ... A fast-forward merge will be performed if the code is update to master (or has already been rebased). However, if the feature branch is behind, ...",
+          "published": null
+        },
+        {
+          "title": "Git MERGE vs REBASE: Everything You Need to Know - YouTube",
+          "url": "https://www.youtube.com/watch?v=0chZFIZLR_0",
+          "snippet": "10 Aug 2023 ... Get a Free System Design PDF with 158 pages by subscribing to our weekly newsletter: https://bytebytego.ck.page/subscribe Animation tools: ...",
+          "published": null
+        },
+        {
+          "title": "Git Merge vs. Rebase: The Great Debate (And Which One YOU ...",
+          "url": "https://shiftasia.com/community/git-merge-vs-rebase-the-great-debate-and-which-one-you-should-use-2/",
+          "snippet": "5 Jun 2025 ... Both git merge and git rebase are powerful tools. Understanding when and why to use each one is key to becoming a more effective Git user. Merge ...",
+          "published": null
+        },
+        {
+          "title": "Git Rebase vs Merge: Differences, Use Cases and Best Practices",
+          "url": "https://www.simplilearn.com/git-rebase-vs-merge-article",
+          "snippet": "27 Jul 2026 ... The main difference between git merge and git rebase is that git merge combines changes from one branch (source branch) into another branch ( ...",
+          "published": null
+        },
+        {
+          "title": "Git Merge vs Git Rebase: Pros, Cons, and Best Practices | DataCamp",
+          "url": "https://www.datacamp.com/blog/git-merge-vs-git-rebase",
+          "snippet": "18 Jun 2025 ... Git merge creates a new commit that combines changes from two branches while preserving the original commit history of both branches. Git rebase ...",
+          "published": null
+        },
+        {
+          "title": "Git Merge vs Rebase Explained Visually | Which One Should You ...",
+          "url": "https://www.youtube.com/watch?v=cjSjlHUmaBU&vl=en",
+          "snippet": "14 Jul 2025 ... Comments. 64. I don't understand why people complain that git log --online --graph is messy when you use merge. If you want to show clean ...",
+          "published": null
+        },
+        {
+          "title": "Git Merge VS (Scary) Git Rebase - Medium",
+          "url": "https://medium.com/@xiaominghu19922/git-merge-vs-scary-git-rebase-5eceead4badc",
+          "snippet": "15 Jan 2024 ... Git Rebase. This approach on the other hand is less intuitive than git merge as rebasing rewrites the history of your branch and this can be ...",
+          "published": null
+        },
+        {
+          "title": "There Is No \"Right\" Way: Git Rebase vs Merge - DEV Community",
+          "url": "https://dev.to/molly/there-is-no-right-way-git-rebase-vs-merge-2hc5",
+          "snippet": "18 Sept 2019 ... That single merge commit encompasses all of the changes from the master branch. One downside to merging is that if your master branch is very ...",
+          "published": null
+        },
+        {
+          "title": "When to Git rebase vs merge? | Solutions to Git Problems - GitKraken",
+          "url": "https://gitkraken.com/learn/git/problems/git-rebase-vs-merge",
+          "snippet": "Git Merge vs Rebase in GitKraken. No matter which action you choose to perform, using a visual Git client to manage the process of combining file changes gives ...",
+          "published": null
+        },
+        {
+          "title": "Rebasing - Git",
+          "url": "https://git-scm.com/book/en/v2/Git-Branching-Rebasing",
+          "snippet": "Rebasing replays changes from one line of work onto another in the order they were introduced, whereas merging takes the endpoints and merges them together.",
+          "published": null
+        },
+        {
+          "title": "What is the difference between git merge and git rebase in a typical ...",
+          "url": "https://github.com/orgs/community/discussions/188722",
+          "snippet": "5 Mar 2026 ... Use merge when collaborating on shared branches and preserving history is important. Use rebase locally to keep your feature branch clean and up ...",
+          "published": null
+        },
+        {
+          "title": "Git Merge vs Git Rebase vs Git Squash (explained in 2 mins or less ...",
+          "url": "https://www.linkedin.com/posts/nk-systemdesign-one_git-merge-vs-git-rebase-vs-git-squash-explained-activity-7426614058709053441-Y7mV",
+          "snippet": "9 Feb 2026 ... Neo Kim's Post ... Git Merge vs Git Rebase vs Git Squash (explained in 2 mins or less): \u2022 Git Merge \u2192 Combines branches with a new merge commit.",
+          "published": null
+        },
+        {
+          "title": "When rebasing is better than merging - Jonathan Hall",
+          "url": "https://jhall.io/archive/2024/01/10/when-rebasing-is-better-than-merging/",
+          "snippet": "10 Jan 2024 ... With rebase, you resolve each conflict as it occurs. Each conflict is typically smaller, but there are more of them. And sometimes you resolve ...",
+          "published": null
+        },
+        {
+          "title": "Git Rebase vs Merge - Intellipaat",
+          "url": "https://intellipaat.com/blog/git-rebase-vs-merge/",
+          "snippet": "18 May 2026 ... Git rebase is a command in Git that allows developers to modify the commit history of a branch. Unlike traditional merging, which creates ...",
+          "published": null
+        },
+        {
+          "title": "Git - Difference Between Merging and Rebasing - GeeksforGeeks",
+          "url": "https://www.geeksforgeeks.org/git/git-difference-between-merging-and-rebasing/",
+          "snippet": "26 Jun 2026 ... When working with Git, two common strategies for integrating changes from different branches are merging and rebasing. \u00b7 Merging is a way to ...",
+          "published": null
+        },
+        {
+          "title": "Git Merge vs Rebase: When to Use Each - YouTube",
+          "url": "https://www.youtube.com/watch?v=zOnwgxiC0OA&vl=en",
+          "snippet": "29 Aug 2023 ... Build a full mental model of Git (free btw) \u2192 https://app.learngit.io/home/?v=mergevrebase If this visual learning style clicks for you, ...",
+          "published": null
+        },
+        {
+          "title": "I Thought I Understood Git. Then I Actually Learned the Difference ...",
+          "url": "https://levelup.gitconnected.com/i-thought-i-understood-git-then-i-actually-learned-the-difference-between-rebase-and-merge-c7c236e04bed",
+          "snippet": "23 Mar 2026 ... Merge preserves history. Rebase rewrites it. Both are useful \u2014 but rewriting shared history is always a mistake. I learned that the hard way.",
+          "published": null
+        }
+      ]
+    }
+  ],
+  "labels": {}
+}

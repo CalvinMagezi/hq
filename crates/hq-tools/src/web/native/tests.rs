@@ -164,7 +164,7 @@ fn merge_ranks_agreement_first_and_dedupes_tracking_variants() {
         hit("https://www.b.com/two/", "b with a longer snippet", "bing"),
         hit("https://c.com/three", "c", "bing"),
     ];
-    let merged = merge(vec![(1.0, a), (1.0, b)]);
+    let merged = merge(vec![(1.0, a), (1.0, b)], "");
     let urls: Vec<&str> = merged.iter().map(|r| r.url.as_str()).collect();
     assert_eq!(
         urls,
@@ -1073,7 +1073,7 @@ fn searxng_scoring_weights_agreement_and_top_positions() {
         hit("https://y.com/", "", "b"),
         hit("https://w.com/", "", "b"),
     ];
-    let merged = merge(vec![(1.0, a), (1.0, b)]);
+    let merged = merge(vec![(1.0, a), (1.0, b)], "");
     // y: 1.0 * 2 positions * (1/2 + 1/1) = 3.0; x: 1.0; w: 0.5; z: 1/3.
     let urls: Vec<&str> = merged.iter().map(|r| r.url.as_str()).collect();
     assert_eq!(
@@ -1094,7 +1094,7 @@ fn engine_weights_multiply_and_count_once_per_engine() {
         hit("https://same.com/", "", "b"),
         hit("https://only-b.com/", "", "b"),
     ];
-    let merged = merge(vec![(0.5, a), (0.5, b)]);
+    let merged = merge(vec![(0.5, a), (0.5, b)], "");
     // same: 0.5 * 0.5 * 2 * (1 + 1) = 1.0; only-b: 0.5 * 1 * (1/2) = 0.25.
     assert_eq!(merged[0].url, "https://same.com/");
     assert_eq!(merged[1].url, "https://only-b.com/");
@@ -1106,7 +1106,7 @@ fn a_duplicate_upgrades_http_and_keeps_the_longer_title() {
     first.title = "Short".into();
     let mut second = hit("https://a.com/p", "s", "b");
     second.title = "A much longer title".into();
-    let merged = merge(vec![(1.0, vec![first]), (1.0, vec![second])]);
+    let merged = merge(vec![(1.0, vec![first]), (1.0, vec![second])], "");
     assert_eq!(
         (merged[0].url.as_str(), merged[0].title.as_str()),
         ("https://a.com/p", "A much longer title")
@@ -1537,50 +1537,78 @@ fn single_topic_engines_rank_below_the_general_ones_for_a_query_they_do_not_fit(
         assert!(narrow.weight() < GitHub.weight(), "{narrow:?}");
     }
     // A repository ranked first beats a page of MDN or Europe PMC that is only a name match.
-    let code = merge(vec![
-        (
-            GitHub.weight(),
-            vec![hit("https://github.com/o/r", "repo", "github")],
-        ),
-        (
-            Mdn.weight(),
-            vec![
-                hit("https://developer.mozilla.org/x", "mdn", "mdn"),
-                hit("https://developer.mozilla.org/y", "mdn", "mdn"),
-            ],
-        ),
-    ]);
+    let code = merge(
+        vec![
+            (
+                GitHub.weight(),
+                vec![hit("https://github.com/o/r", "repo", "github")],
+            ),
+            (
+                Mdn.weight(),
+                vec![
+                    hit("https://developer.mozilla.org/x", "mdn", "mdn"),
+                    hit("https://developer.mozilla.org/y", "mdn", "mdn"),
+                ],
+            ),
+        ],
+        "",
+    );
     assert_eq!(code[0].url, "https://github.com/o/r");
     // Agreement still wins: a page found by Stack Overflow and MDN (1.0 x 0.4 x 2 x 1.5) beats
     // an unconfirmed first hit (1.0).
-    let agreed = merge(vec![
-        (
-            StackOverflow.weight(),
-            vec![
-                hit("https://a.example/", "a", "so"),
-                hit("https://shared.example/", "s", "so"),
-            ],
-        ),
-        (
-            Mdn.weight(),
-            vec![hit("https://shared.example/", "s", "mdn")],
-        ),
-    ]);
+    let agreed = merge(
+        vec![
+            (
+                StackOverflow.weight(),
+                vec![
+                    hit("https://a.example/", "a", "so"),
+                    hit("https://shared.example/", "s", "so"),
+                ],
+            ),
+            (
+                Mdn.weight(),
+                vec![hit("https://shared.example/", "s", "mdn")],
+            ),
+        ],
+        "",
+    );
     assert_eq!(agreed[0].url, "https://shared.example/");
 }
 
 #[test]
 fn stack_exchange_queries_relax_in_steps_without_repeats() {
     use super::images_code::relaxations;
-    assert_eq!(relaxations("tokio channel"), ["tokio channel"], "short queries stay as typed");
+    assert_eq!(
+        relaxations("tokio channel"),
+        ["tokio channel"],
+        "short queries stay as typed"
+    );
     assert_eq!(
         relaxations("how do I use rust tokio mpsc channel backpressure"),
-        ["rust tokio mpsc channel backpressure", "tokio channel backpressure", "channel backpressure"],
+        [
+            "rust tokio mpsc channel backpressure",
+            "tokio channel backpressure",
+            "channel backpressure"
+        ],
         "filler words go first, then the three and two longest terms"
     );
-    assert_eq!(relaxations("rust tokio mpsc channel backpressure"), ["rust tokio mpsc channel backpressure", "tokio channel backpressure", "channel backpressure"]);
-    assert_eq!(relaxations("a the of"), ["a the of"], "a query of only filler words stays as typed");
-    assert_eq!(relaxations("rust tokio async"), ["rust tokio async", "tokio async"]);
+    assert_eq!(
+        relaxations("rust tokio mpsc channel backpressure"),
+        [
+            "rust tokio mpsc channel backpressure",
+            "tokio channel backpressure",
+            "channel backpressure"
+        ]
+    );
+    assert_eq!(
+        relaxations("a the of"),
+        ["a the of"],
+        "a query of only filler words stays as typed"
+    );
+    assert_eq!(
+        relaxations("rust tokio async"),
+        ["rust tokio async", "tokio async"]
+    );
 }
 
 #[tokio::test]
@@ -1904,4 +1932,175 @@ async fn a_failing_later_form_keeps_the_earlier_empty_answer_instead_of_failing_
             .any(|a| a.provider == "stack overflow" && a.outcome.starts_with("ok")),
         "{attempts:?}"
     );
+}
+
+/// Records what each engine returns for a query set into
+/// `fixtures/ranking/<slug>.json`, for the offline ranking replay. Live and
+/// slow (engines are asked one at a time), run it from a network the engines
+/// do not block: `HQ_RECORD_RANKING=1 cargo test -p hq-tools record_ranking_fixtures -- --ignored --nocapture`.
+/// Existing files are kept unless `HQ_RECORD_RANKING_OVERWRITE=1`.
+#[tokio::test]
+#[ignore = "needs the network and HQ_RECORD_RANKING=1"]
+async fn record_ranking_fixtures() {
+    if std::env::var("HQ_RECORD_RANKING").is_err() {
+        panic!("set HQ_RECORD_RANKING=1 to record");
+    }
+    let overwrite = std::env::var("HQ_RECORD_RANKING_OVERWRITE").is_ok_and(|v| v == "1");
+    let dir =
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src/web/native/fixtures/ranking");
+    std::fs::create_dir_all(&dir).unwrap();
+    let queries: &[(&str, Option<Category>)] = &[
+        ("rust tokio runtime", None),
+        ("sqlite wal checkpoint starvation readers", None),
+        ("telegram bot api long polling vs webhook", None),
+        ("tailscale serve funnel https", None),
+        ("openrouter api pricing", None),
+        ("discord gateway intents message content", None),
+        ("mcp streamable http server rust sdk", None),
+        ("how to center a div css", None),
+        ("kubernetes pod crashloopbackoff fix", None),
+        ("python asyncio gather vs wait", None),
+        ("git rebase vs merge", None),
+        ("tailwind css dark mode setup", None),
+        ("rust tokio mpsc channel backpressure", Some(Category::Code)),
+        ("nginx websocket proxy", Some(Category::Code)),
+        ("python virtual environment poetry", Some(Category::Code)),
+        ("regex lookbehind javascript", Some(Category::Code)),
+        (
+            "memory consolidation for LLM agents",
+            Some(Category::Science),
+        ),
+        ("mRNA vaccine mechanism", Some(Category::Science)),
+        ("attention is all you need", Some(Category::Science)),
+        ("AI coding agents", Some(Category::News)),
+        ("rust language release", Some(Category::News)),
+    ];
+    let client = &*NATIVE_CLIENT;
+    for (query, category) in queries {
+        let slug: String = query
+            .chars()
+            .map(|c| if c.is_ascii_alphanumeric() { c } else { '-' })
+            .collect();
+        let file = dir.join(format!("{slug}.json"));
+        if file.exists() && !overwrite {
+            println!("keep   {query}");
+            continue;
+        }
+        let opts = SearchOptions {
+            category: *category,
+            max_results: 20,
+            ..SearchOptions::default()
+        };
+        let mut engines = Vec::new();
+        for engine in Engine::for_category(opts.category) {
+            if engine.paced() {
+                super::google::pace().await;
+            }
+            let base = engine.default_base(&opts);
+            let fetched = engine.fetch(client, &base, query, &opts).await;
+            let parsed = fetched.and_then(|body| engine.parse(&body));
+            match parsed {
+                Ok(results) => {
+                    println!(
+                        "{:<8}{:<18}{:>3} results  {query}",
+                        "ok",
+                        engine.name(),
+                        results.len()
+                    );
+                    let list: Vec<Value> = results.iter().map(|r| json!({"title": r.title, "url": r.url, "snippet": r.snippet, "published": r.published})).collect();
+                    engines.push(json!({"engine": engine.name(), "weight": engine.weight(), "results": list}));
+                }
+                Err(e) => println!("{:<8}{:<18}{}  {query}", "failed", engine.name(), e.reason),
+            }
+        }
+        let category_name = category.map(|c| format!("{c:?}").to_lowercase());
+        let doc =
+            json!({"query": query, "category": category_name, "engines": engines, "labels": {}});
+        std::fs::write(&file, serde_json::to_string_pretty(&doc).unwrap() + "\n").unwrap();
+    }
+}
+
+/// Offline ranking quality over recorded engine responses with hand-graded
+/// relevance (0 to 2 per URL). Unlabelled fixtures are skipped.
+fn ndcg_at(grades: &[u8], ideal: &mut [u8], k: usize) -> f64 {
+    let dcg = |g: &[u8]| -> f64 {
+        g.iter()
+            .take(k)
+            .enumerate()
+            .map(|(i, &v)| (2f64.powi(i32::from(v)) - 1.0) / ((i + 2) as f64).log2())
+            .sum()
+    };
+    ideal.sort_unstable_by(|a, b| b.cmp(a));
+    let best = dcg(ideal);
+    if best == 0.0 { 1.0 } else { dcg(grades) / best }
+}
+
+fn replay_fixture(path: &std::path::Path) -> Option<(String, f64, f64)> {
+    let fixture: Value = serde_json::from_str(&std::fs::read_to_string(path).unwrap()).unwrap();
+    let labels = fixture["labels"].as_object().filter(|l| !l.is_empty())?;
+    let lists = fixture["engines"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|e| {
+            let results = e["results"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .map(|r| SearchResult {
+                    title: r["title"].as_str().unwrap_or_default().into(),
+                    ..hit(
+                        r["url"].as_str().unwrap(),
+                        r["snippet"].as_str().unwrap_or_default(),
+                        e["engine"].as_str().unwrap(),
+                    )
+                })
+                .collect::<Vec<_>>();
+            (e["weight"].as_f64().unwrap() as f32, results)
+        })
+        .collect::<Vec<_>>();
+    let query = fixture["query"].as_str().unwrap().to_string();
+    let merged = merge(lists, &query);
+    let grade = |url: &str| labels.get(url).and_then(Value::as_u64).unwrap_or(0) as u8;
+    let grades: Vec<u8> = merged.iter().map(|r| grade(&r.url)).collect();
+    let mut ideal = grades.clone();
+    let precision = grades.iter().take(5).filter(|&&g| g >= 1).count() as f64 / 5.0;
+    Some((query, ndcg_at(&grades, &mut ideal, 10), precision))
+}
+
+#[test]
+fn ranking_replay_holds_the_recorded_baseline() {
+    let dir =
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src/web/native/fixtures/ranking");
+    let mut rows: Vec<_> = std::fs::read_dir(dir)
+        .unwrap()
+        .filter_map(|e| replay_fixture(&e.unwrap().path()))
+        .collect();
+    rows.sort_by(|a, b| a.0.cmp(&b.0));
+    for (q, n, p) in &rows {
+        eprintln!("{n:.3} ndcg@10  {p:.2} p@5  {q}");
+    }
+    let mean = rows.iter().map(|r| r.1).sum::<f64>() / rows.len() as f64;
+    eprintln!("mean ndcg@10 {mean:.3} over {} queries", rows.len());
+    assert!(rows.len() >= 8, "labelled fixtures went missing");
+    // 0.756 before the lexical relevance factor, 0.837 after.
+    assert!(mean >= 0.82, "ranking regressed: mean nDCG@10 {mean:.3}");
+}
+
+#[test]
+fn off_topic_hits_from_narrow_engines_rank_below_on_topic_ones() {
+    let on = hit(
+        "https://so.example/tokio-mpsc",
+        "tokio mpsc channel backpressure",
+        "so",
+    );
+    let off = hit("https://mdn.example/rtc", "RTCDataChannel interface", "mdn");
+    let merged = merge(
+        vec![
+            (0.4, vec![off]),
+            (0.4, vec![hit("https://x.example/", "x", "mdn"), on]),
+        ],
+        "tokio mpsc channel",
+    );
+    assert_eq!(merged[0].url, "https://so.example/tokio-mpsc");
 }
