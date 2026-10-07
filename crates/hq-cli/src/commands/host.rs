@@ -11,12 +11,14 @@ fn default_dir() -> PathBuf {
 }
 
 pub async fn run(sub: &str, dir: Option<PathBuf>) -> Result<()> {
+    let dir_arg = dir.clone();
     let dir = dir.unwrap_or_else(default_dir);
     match sub {
         "serve" => serve(dir).await,
         "status" => status(&dir),
         "stop" => stop(&dir),
-        other => bail!("unknown subcommand '{other}': use serve, status or stop"),
+        "report" => report(dir_arg),
+        other => bail!("unknown subcommand '{other}': use serve, status, stop or report"),
     }
 }
 
@@ -60,5 +62,33 @@ fn stop(dir: &std::path::Path) -> Result<()> {
         .map_err(|e| anyhow::anyhow!("host not running in {}: {e}", dir.display()))?;
     client.call("host.stop", json!({}))?;
     println!("hq host stopping");
+    Ok(())
+}
+
+/// Longest hook payload read from stdin.
+const MAX_HOOK_INPUT: u64 = 64 * 1024;
+/// A hook must not hold up the agent, so the host gets this long to answer.
+const REPORT_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(2);
+
+/// `hq host report`: forwards a Claude Code hook event to the host. It runs
+/// inside an agent's pane with the pane's own token, and it never fails or
+/// prints, so a missing host cannot disturb the agent.
+fn report(dir: Option<PathBuf>) -> Result<()> {
+    use std::io::Read;
+    let token = std::env::var(hq_host::PANE_TOKEN_ENV).ok();
+    let dir = dir.or_else(|| std::env::var_os(hq_host::RUN_DIR_ENV).map(PathBuf::from));
+    let (Some(token), Some(dir)) = (token, dir) else {
+        return Ok(());
+    };
+    let mut input = String::new();
+    let _ = std::io::stdin().take(MAX_HOOK_INPUT).read_to_string(&mut input);
+    let Some(params) = hq_host::report_params(&input) else {
+        return Ok(());
+    };
+    let sent = Client::connect_with_token(&dir, &token).and_then(|mut c| {
+        c.set_timeout(Some(REPORT_TIMEOUT));
+        c.call("agent.report", params)
+    });
+    drop(sent);
     Ok(())
 }

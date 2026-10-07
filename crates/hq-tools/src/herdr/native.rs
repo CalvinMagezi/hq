@@ -1,6 +1,6 @@
 use super::{
     AgentInfo, AgentStatus, AwaitingAgent, HerdrError, Host, HostBackend, INVALID_KEYS_CODE, LaunchRequest,
-    Launched, PromptOutcome, shell_line, validate_keys,
+    Launched, PromptOutcome, shell_line, shell_quote, validate_keys,
 };
 use hq_host::{Client, ClientError};
 use serde_json::{Value, json};
@@ -75,6 +75,29 @@ impl NativeBackend {
         }
     }
 
+    /// The request with Claude Code's reporting hooks added, so the host hears
+    /// state changes and the conversation id straight from the agent. Without
+    /// them (another kind, or a file that cannot be written) the screen still
+    /// decides the state.
+    fn with_hooks(&self, req: &LaunchRequest) -> LaunchRequest {
+        let mut req = req.clone();
+        if req.kind != CLAUDE_KIND {
+            return req;
+        }
+        let command = format!("{} host report", shell_quote(&hq_binary()));
+        match hq_host::write_claude_settings(&self.dir, &req.name, &command) {
+            Ok(path) => {
+                let flags = ["--settings".to_string(), path.to_string_lossy().into_owned()];
+                req.args.extend(flags.clone());
+                if let Some(resume) = req.resume_args.as_mut() {
+                    resume.extend(flags);
+                }
+            }
+            Err(e) => tracing::warn!(agent = %req.name, error = %e, "could not write hook settings"),
+        }
+        req
+    }
+
     /// Waits for one of `until`; a wait that times out is an `Ok(None)`.
     fn wait_for(
         &self,
@@ -93,6 +116,17 @@ impl NativeBackend {
             Err(e) => Err(e),
         }
     }
+}
+
+const CLAUDE_KIND: &str = "claude";
+
+/// The `hq` that runs `host report` for a hook: this very binary when HQ is
+/// the one launching, else whatever `hq` is on the PATH.
+fn hq_binary() -> String {
+    std::env::current_exe()
+        .ok()
+        .filter(|p| p.file_name().is_some_and(|n| n == "hq"))
+        .map_or_else(|| "hq".to_string(), |p| p.to_string_lossy().into_owned())
 }
 
 /// The program and arguments to start. A wrapper command runs through a shell,
@@ -200,6 +234,7 @@ impl HostBackend for NativeBackend {
     }
 
     fn launch(&self, req: &LaunchRequest) -> Result<Launched, HerdrError> {
+        let req = &self.with_hooks(req);
         let env: serde_json::Map<String, Value> = req
             .env
             .iter()

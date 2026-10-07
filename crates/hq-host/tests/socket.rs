@@ -418,3 +418,122 @@ fn state_is_reported_and_waited_for_over_the_socket() {
     assert_eq!(err.code(), Some("invalid_params"));
     c.call("agent.kill", json!({ "name": "claude1" })).unwrap();
 }
+
+fn screen_of(c: &mut Client, name: &str) -> String {
+    let r = c.call("agent.read", json!({ "name": name })).unwrap();
+    r["text"].as_str().unwrap_or_default().to_string()
+}
+
+/// Spawns a claude-kind agent that prints its hook token and run directory.
+fn spawn_reporter(c: &mut Client, name: &str) -> (String, String) {
+    let mut params = spawn_params(name, "echo T=$HQ_HOST_TOKEN D=$HQ_HOST_DIR; sleep 60");
+    params["agent"] = json!("claude");
+    c.call("agent.spawn", params).unwrap();
+    let deadline = Instant::now() + WAIT;
+    loop {
+        let text = screen_of(c, name);
+        let field = |key: &str| {
+            text.split_whitespace()
+                .find_map(|w| w.strip_prefix(key))
+                .map(str::to_string)
+        };
+        if let (Some(t), Some(d)) = (field("T="), field("D=")) {
+            if !t.is_empty() && !d.is_empty() {
+                return (t, d);
+            }
+        }
+        assert!(Instant::now() < deadline, "no token on screen: {text:?}");
+        std::thread::sleep(Duration::from_millis(50));
+    }
+}
+
+#[test]
+fn a_pane_reports_on_itself_with_the_token_it_was_given() {
+    let host = Running::start();
+    let mut op = host.client();
+    let (token, dir) = spawn_reporter(&mut op, "rep");
+    assert_eq!(std::path::Path::new(&dir), host.run_dir().as_path());
+
+    let mut pane = Client::connect_with_token(std::path::Path::new(&dir), &token).unwrap();
+    pane.call(
+        "agent.report",
+        json!({ "event": "UserPromptSubmit", "session_id": "conv-123" }),
+    )
+    .unwrap();
+
+    let info = op.call("agent.get", json!({ "name": "rep" })).unwrap();
+    assert_eq!(info["state"], "working");
+    assert_eq!(info["rule"], "hook:UserPromptSubmit");
+    assert_eq!(info["agent_session_id"], "conv-123");
+
+    pane.call("agent.report", json!({ "event": "Stop" }))
+        .unwrap();
+    let info = op.call("agent.get", json!({ "name": "rep" })).unwrap();
+    assert_eq!(info["state"], "idle");
+    assert_eq!(info["agent_session_id"], "conv-123", "the id is kept");
+}
+
+#[test]
+fn a_pane_token_reaches_nothing_but_its_own_report() {
+    let host = Running::start();
+    let mut op = host.client();
+    let (token, dir) = spawn_reporter(&mut op, "mine");
+    let (_other_token, _) = spawn_reporter(&mut op, "theirs");
+    let mut pane = Client::connect_with_token(std::path::Path::new(&dir), &token).unwrap();
+
+    for (method, params) in [
+        ("agent.list", json!({})),
+        ("agent.kill", json!({ "name": "mine" })),
+        ("agent.read", json!({ "name": "mine" })),
+        ("host.stop", json!({})),
+    ] {
+        let err = pane.call(method, params).unwrap_err();
+        assert_eq!(err.code(), Some("forbidden"), "{method}");
+    }
+    let err = pane
+        .call("agent.report", json!({ "name": "theirs", "event": "Stop" }))
+        .unwrap_err();
+    assert_eq!(err.code(), Some("forbidden"));
+    let theirs = op.call("agent.get", json!({ "name": "theirs" })).unwrap();
+    assert_ne!(theirs["rule"], "hook:Stop");
+    assert!(
+        op.call("agent.get", json!({ "name": "mine" })).is_ok(),
+        "still running"
+    );
+}
+
+#[test]
+fn a_removed_agents_token_stops_working() {
+    let host = Running::start();
+    let mut op = host.client();
+    let (token, dir) = spawn_reporter(&mut op, "gone");
+    op.call("agent.remove", json!({ "name": "gone" })).unwrap();
+    let Err(err) = Client::connect_with_token(std::path::Path::new(&dir), &token) else {
+        panic!("a removed agent's token was accepted");
+    };
+    assert!(
+        matches!(err, ClientError::Remote { ref code, .. } if code == "unauthorized"),
+        "{err}"
+    );
+}
+
+#[test]
+fn an_unknown_token_is_unauthorized_and_the_operator_can_report_for_any_agent() {
+    let host = Running::start();
+    let mut op = host.client();
+    spawn_reporter(&mut op, "any");
+    assert!(Client::connect_with_token(&host.run_dir(), "not-a-token").is_err());
+    op.call(
+        "agent.report",
+        json!({ "name": "any", "event": "UserPromptSubmit" }),
+    )
+    .unwrap();
+    assert_eq!(
+        op.call("agent.get", json!({ "name": "any" })).unwrap()["state"],
+        "working"
+    );
+    let err = op
+        .call("agent.report", json!({ "event": "Stop" }))
+        .unwrap_err();
+    assert_eq!(err.code(), Some("invalid_params"));
+}

@@ -5,6 +5,8 @@ use crate::emu::{Row, VtEmulator};
 use crate::env::pane_env;
 use crate::error::HostError;
 use crate::keys::encode_key;
+use crate::report;
+use crate::token;
 pub use crate::pane::PaneStatus;
 use crate::pane::{ExitHook, LaunchArgs, Pane, Resume};
 use crate::state::{PaneRecord, StateFile};
@@ -88,6 +90,9 @@ pub struct PaneInfo {
     pub agent: Option<String>,
     /// Will be started again after a host restart.
     pub resumable: bool,
+    /// The agent's own id for its conversation, once its hooks have reported
+    /// it. This is what `--resume` takes for agents that have one.
+    pub agent_session_id: Option<String>,
     /// The terminal title the program set, or empty.
     pub title: String,
     /// Detected state; None when the agent kind has no rule file.
@@ -103,6 +108,10 @@ pub struct PaneInfo {
     pub quiet_for: Duration,
     pub age: Duration,
 }
+
+/// Environment variables a pane gets so its hooks can reach the host.
+pub const PANE_TOKEN_ENV: &str = "HQ_HOST_TOKEN";
+pub const RUN_DIR_ENV: &str = "HQ_HOST_DIR";
 
 type Registry = Arc<Mutex<BTreeMap<String, Arc<Pane>>>>;
 /// Agents restored from the state file that cannot start until their
@@ -122,6 +131,11 @@ pub struct AwaitingInfo {
 pub struct Host {
     panes: Registry,
     awaiting: Awaiting,
+    /// Per-agent secret each pane gets so its hooks can report on itself and
+    /// nothing else. Kept in memory only.
+    pane_tokens: Mutex<BTreeMap<String, String>>,
+    /// Where the control socket lives, passed to panes so hooks can find it.
+    run_dir: Mutex<Option<PathBuf>>,
     detector: Detector,
     state: Option<Arc<StateFile>>,
 }
@@ -170,6 +184,8 @@ impl Host {
         Self {
             panes: Arc::new(Mutex::new(BTreeMap::new())),
             awaiting: Arc::new(Mutex::new(BTreeMap::new())),
+            pane_tokens: Mutex::new(BTreeMap::new()),
+            run_dir: Mutex::new(None),
             detector,
             state: None,
         }
@@ -210,6 +226,12 @@ impl Host {
             }),
             None => None,
         };
+        let token = token::random_hex().map_err(|e| HostError::Io(e.to_string()))?;
+        let mut env = pane_env(&spec.env);
+        env.push((PANE_TOKEN_ENV.to_string(), token.clone()));
+        if let Some(dir) = lock(&self.run_dir).as_ref() {
+            env.push((RUN_DIR_ENV.to_string(), dir.to_string_lossy().into_owned()));
+        }
         let pane = Pane::spawn(
             LaunchArgs {
                 argv: spec.argv,
@@ -217,7 +239,7 @@ impl Host {
                 on_exit: self.exit_hook(),
                 agent: spec.agent,
                 cwd: spec.cwd,
-                env: pane_env(&spec.env),
+                env,
                 rows: spec.rows,
                 cols: spec.cols,
             },
@@ -231,6 +253,7 @@ impl Host {
         }
         panes.insert(spec.name.clone(), pane.clone());
         drop(panes);
+        lock(&self.pane_tokens).insert(spec.name.clone(), token);
         self.save();
         Ok(info_of(&spec.name, pane.as_ref(), &self.detector))
     }
@@ -337,6 +360,37 @@ impl Host {
         for pane in panes {
             pane.kill();
         }
+    }
+
+    /// Tells the host where its control socket is, so panes can be given the
+    /// way to reach it. Called by the server when it binds.
+    pub fn set_run_dir(&self, dir: &Path) {
+        *lock(&self.run_dir) = Some(dir.to_path_buf());
+    }
+
+    /// The agent a pane token belongs to, if that agent still exists.
+    pub fn agent_for_token(&self, given: &str) -> Option<String> {
+        let tokens = lock(&self.pane_tokens);
+        let name = tokens
+            .iter()
+            .find(|(_, t)| token::matches(t, given))
+            .map(|(n, _)| n.clone())?;
+        drop(tokens);
+        lock(&self.panes).contains_key(&name).then_some(name)
+    }
+
+    /// Records what an agent's hook said: the state it implies, and the id of
+    /// the agent's own conversation. An event that says nothing is ignored.
+    pub fn report(
+        &self,
+        name: &str,
+        event: &str,
+        notification_type: Option<&str>,
+        session_id: Option<String>,
+    ) -> Result<(), HostError> {
+        let pane = self.pane(name)?;
+        pane.record_report(report::state_for(event, notification_type), event, session_id);
+        Ok(())
     }
 
     pub fn info(&self, name: &str) -> Result<PaneInfo, HostError> {
@@ -558,14 +612,26 @@ fn info_of(name: &str, pane: &Pane, detector: &Detector) -> PaneInfo {
             },
         )
     });
+    let screen = detection.as_ref().map(|d| d.state);
+    let reported = pane.reported();
+    let (state, from_hook) = report::combine(
+        reported.as_ref().map(|r| r.state),
+        screen,
+        pane.quiet_for(),
+    );
+    let rule = match (&reported, from_hook) {
+        (Some(r), true) => Some(format!("hook:{}", r.event)),
+        _ => detection.and_then(|d| d.rule),
+    };
     PaneInfo {
         name: name.to_string(),
         argv: pane.argv.clone(),
         agent: pane.agent.clone(),
         resumable: pane.resume.is_some(),
+        agent_session_id: pane.agent_session_id(),
         title: pane.with_emu(|e| e.title()),
-        state: detection.as_ref().map(|d| d.state),
-        rule: detection.and_then(|d| d.rule),
+        state,
+        rule,
         cwd: pane.cwd.clone(),
         pid: pane.pid,
         status: pane.status(),

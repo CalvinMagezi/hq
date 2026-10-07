@@ -51,7 +51,8 @@ fn cat(name: &str, kind: &str) -> LaunchRequest {
         label: "t".into(),
         env: vec![("HQ_TEST".into(), "1".into())],
         args: vec![],
-        command: Some("cat".into()),
+        // A function ignores the extra flags (such as --settings) a launch adds.
+        command: Some("f() { cat; }; f".into()),
         resume_args: None,
         start_timeout: WAIT,
     }
@@ -154,4 +155,24 @@ fn waiting_for_a_state_that_never_comes_times_out() {
         )
         .unwrap_err();
     assert!(matches!(err, HerdrError::Api { ref code, .. } if code == "timeout"));
+}
+
+#[test]
+fn a_claude_launch_gets_private_hook_settings_and_other_kinds_do_not() {
+    use std::os::unix::fs::PermissionsExt;
+    let host = Running::start();
+    let b = host.backend();
+    b.launch(&cat("hs-hooked", "claude")).unwrap();
+    b.launch(&cat("hs-plain", "pi")).unwrap();
+
+    let hooks = host.dir.path().join("run/hooks");
+    let file = hooks.join("hs-hooked.json");
+    let mode = std::fs::metadata(&file).unwrap().permissions().mode() & 0o777;
+    assert_eq!(mode, 0o600);
+    let text = std::fs::read_to_string(&file).unwrap();
+    assert!(
+        text.contains("host report") && text.contains("UserPromptSubmit"),
+        "{text}"
+    );
+    assert!(!hooks.join("hs-plain.json").exists());
 }

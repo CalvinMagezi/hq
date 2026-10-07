@@ -153,6 +153,7 @@ impl Server {
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
             Err(e) => return Err(e),
         }
+        host.set_run_dir(&std::path::absolute(dir)?);
         let listener = UnixListener::bind(&path)?;
         std::fs::set_permissions(&path, std::fs::Permissions::from_mode(SOCKET_MODE))?;
         listener.set_nonblocking(true)?;
@@ -231,6 +232,14 @@ impl Server {
     }
 }
 
+/// What a connection may do, decided by the token it said hello with.
+#[derive(Clone)]
+enum Scope {
+    Operator,
+    /// A pane's own hooks: report on that one agent, nothing else.
+    Pane(String),
+}
+
 struct Conn {
     host: Arc<Host>,
     token: String,
@@ -249,7 +258,7 @@ impl Conn {
         let _ = writer.set_write_timeout(Some(self.limits.write_timeout));
         let _ = stream.set_read_timeout(Some(self.limits.auth_timeout));
         let mut reader = BufReader::new(stream);
-        let mut authed = false;
+        let mut scope: Option<Scope> = None;
         loop {
             let mut line = Vec::new();
             let read = reader
@@ -268,7 +277,7 @@ impl Conn {
                 return;
             }
             let response = match serde_json::from_slice::<Request>(&line) {
-                Ok(req) => self.dispatch(req, &mut authed),
+                Ok(req) => self.dispatch(req, &mut scope),
                 Err(e) => Response::err(Value::Null, "bad_request", e.to_string()),
             };
             if send(&mut writer, &response).is_err() {
@@ -278,38 +287,44 @@ impl Conn {
                 self.stop.stop();
                 return;
             }
-            if authed {
+            if scope.is_some() {
                 // Idle authenticated connections are normal; only the wait for hello is bounded.
                 let _ = reader.get_ref().set_read_timeout(None);
             }
         }
     }
 
-    fn dispatch(&self, req: Request, authed: &mut bool) -> Response {
+    fn dispatch(&self, req: Request, scope: &mut Option<Scope>) -> Response {
         let id = req.id.clone();
         if req.method == "hello" {
             return match self.hello(&req.params) {
-                Ok(v) => {
-                    *authed = true;
+                Ok((granted, v)) => {
+                    *scope = Some(granted);
                     Response::ok(id, v)
                 }
                 Err(e) => Response::err(id, &e.code, e.message),
             };
         }
-        if !*authed {
+        let Some(scope) = scope.as_ref() else {
             return Response::err(
                 id,
                 "unauthenticated",
                 "say hello with the operator token first",
             );
+        };
+        let mut params = req.params;
+        if let Scope::Pane(name) = scope
+            && let Err(e) = confine_to_pane(name, &req.method, &mut params)
+        {
+            return Response::err(id, &e.code, e.message);
         }
-        match self.call(&req.method, req.params) {
+        match self.call(&req.method, params) {
             Ok(v) => Response::ok(id, v),
             Err(e) => Response::err(id, &e.code, e.message),
         }
     }
 
-    fn hello(&self, params: &Value) -> Result<Value, ErrorBody> {
+    fn hello(&self, params: &Value) -> Result<(Scope, Value), ErrorBody> {
         #[derive(Deserialize)]
         #[serde(deny_unknown_fields)]
         struct Hello {
@@ -317,9 +332,13 @@ impl Conn {
             token: String,
         }
         let hello: Hello = parse(params)?;
-        if !token::matches(&self.token, &hello.token) {
+        let scope = if token::matches(&self.token, &hello.token) {
+            Scope::Operator
+        } else if let Some(name) = self.host.agent_for_token(&hello.token) {
+            Scope::Pane(name)
+        } else {
             return Err(body("unauthorized", "wrong operator token"));
-        }
+        };
         if hello.protocol_version != PROTOCOL_VERSION {
             return Err(body(
                 "protocol_mismatch",
@@ -329,7 +348,8 @@ impl Conn {
                 ),
             ));
         }
-        Ok(json!({ "protocol_version": PROTOCOL_VERSION, "host_version": HOST_VERSION }))
+        let reply = json!({ "protocol_version": PROTOCOL_VERSION, "host_version": HOST_VERSION });
+        Ok((scope, reply))
     }
 
     fn call(&self, method: &str, params: Value) -> Result<Value, ErrorBody> {
@@ -373,6 +393,18 @@ impl Conn {
             }
             "agent.list" => {
                 Ok(json!({ "agents": host.list().iter().map(info_json).collect::<Vec<_>>() }))
+            }
+            "agent.report" => {
+                let p: ReportParams = parse(params)?;
+                let name = p
+                    .name
+                    .ok_or_else(|| body("invalid_params", "agent.report needs a name"))?;
+                done(host.report(
+                    &name,
+                    &p.event,
+                    p.notification_type.as_deref(),
+                    p.session_id,
+                ))
             }
             "agent.awaiting" => {
                 let list: Vec<Value> = host
@@ -511,6 +543,39 @@ struct SpawnParams {
 
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
+struct ReportParams {
+    name: Option<String>,
+    event: String,
+    notification_type: Option<String>,
+    session_id: Option<String>,
+}
+
+/// A pane's token reaches `agent.report` for its own agent and nothing else:
+/// the name is filled in from the token, and naming another agent is refused.
+fn confine_to_pane(own: &str, method: &str, params: &mut Value) -> Result<(), ErrorBody> {
+    if method != "agent.report" {
+        return Err(body(
+            "forbidden",
+            "a pane token may only call agent.report for its own agent",
+        ));
+    }
+    let Some(obj) = params.as_object_mut() else {
+        return Err(body("invalid_params", "params must be an object"));
+    };
+    match obj.get("name").and_then(Value::as_str) {
+        Some(other) if other != own => Err(body(
+            "forbidden",
+            "a pane token may only report on its own agent",
+        )),
+        _ => {
+            obj.insert("name".into(), Value::String(own.to_string()));
+            Ok(())
+        }
+    }
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
 struct ResumeParams {
     name: String,
     #[serde(default)]
@@ -616,6 +681,7 @@ fn info_json(i: &PaneInfo) -> Value {
         "argv": i.argv,
         "agent": i.agent,
         "resumable": i.resumable,
+        "agent_session_id": i.agent_session_id,
         "title": i.title,
         "state": i.state.map(AgentState::as_str),
         "rule": i.rule,

@@ -49,6 +49,7 @@ version gets `protocol_mismatch`.
 | `agent.send_keys` | `name`, `keys` (`enter`, `esc`, `tab`, arrows, `pageup`, `ctrl+c`, ...) | `{}` |
 | `agent.resize` | `name`, `rows`, `cols` | `{}` |
 | `agent.wait` | `name`, `until` (`exit`, `quiet` or `state`), optional `timeout_ms`; for `quiet` `quiet_ms`; for `state` `states` (list, required) and `stable_ms` (default 300) | `exit_code`, or agent info |
+| `agent.report` | `event` (a hook event name), optional `session_id`, `notification_type`; `name` for the operator (a pane token implies its own) | `{}` |
 | `agent.awaiting` | none | `{"agents": [{name, agent, cwd, env_keys}]}`: restored agents waiting for their environment |
 | `agent.resume` | `name`, `env` (object, must cover every name in `env_keys`) | agent info; `missing_env` leaves it waiting |
 | `agent.kill` | `name` | `{}` |
@@ -91,6 +92,31 @@ priority decides. They are built into the binary (`crates/hq-host/src/detect/man
 there is no fetching from anywhere at run time. Screens captured from real
 Claude Code and Codex sessions, each labelled with the state the agent was really
 in, are in `crates/hq-host/tests/fixtures/` and are checked on every test run.
+
+### Agent-reported state
+
+Claude Code can tell the host what it is doing. HQ launches it with
+`--settings <run dir>/hooks/<name>.json`, a per-launch file (mode 0600), so
+nothing is written to your own Claude configuration. The file runs
+`hq host report` on `SessionStart`, `UserPromptSubmit`, `Stop` and
+`Notification`; the command prints nothing and always succeeds, so a missing
+host never disturbs the agent. The host then knows the agent's state as the agent
+reports it, and the agent's own conversation id (`agent_session_id`, the id
+`claude --resume` takes). Agent info shows `rule: "hook:<event>"` when a report
+decided the state.
+
+The screen still has the last word where it is more reliable: a dialog on screen
+is `blocked`, a reported `blocked` ends when the dialog is gone (approving one
+fires no hook), and a reported `working` that has printed nothing for 15 seconds
+while the screen reads idle gives way to idle (an interrupted turn fires no
+`Stop`).
+
+Each pane gets its own token (`HQ_HOST_TOKEN`) and the socket directory
+(`HQ_HOST_DIR`). That token can call `agent.report` for its own agent and
+nothing else: any other method, or another agent's name, is `forbidden`. It
+lives in memory only and stops working when the agent is removed. Anything the
+agent runs can read it, so it can also misreport its own state, which the
+agent could do by printing to its screen anyway.
 
 ## Restarts
 
@@ -179,6 +205,6 @@ the session id), once per sweep.
 
 ## Not built yet
 
-Rule files for agents other than Claude Code and Codex, the "done" state (finished a turn you have not looked at yet), agent-reported state through hooks, remote hosts, the backend that makes HQ sessions use this host, and
+Rule files for agents other than Claude Code and Codex, the "done" state (finished a turn you have not looked at yet), hooks for agents other than Claude Code, a pushed event stream (state is still polled), remote hosts, the backend that makes HQ sessions use this host, and
 agent-to-agent messaging. Provenance of anything adapted from herdr is recorded
 in `docs/provenance/herdr.md`.

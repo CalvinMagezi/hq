@@ -74,6 +74,13 @@ pub(crate) struct Resume {
     pub scrollback_rows: usize,
 }
 
+/// A state an agent reported through a hook, and the event that said so.
+#[derive(Debug, Clone)]
+pub(crate) struct Reported {
+    pub state: crate::detect::AgentState,
+    pub event: String,
+}
+
 pub(crate) struct Pane {
     pub(crate) argv: Vec<String>,
     pub(crate) resume: Option<Resume>,
@@ -84,6 +91,10 @@ pub(crate) struct Pane {
     shared: Arc<Shared>,
     /// Someone asked this process to stop; it may take a moment to exit.
     stopping: AtomicBool,
+    /// What the agent last said about itself through a hook.
+    reported: Mutex<Option<Reported>>,
+    /// The agent's own id for its conversation, as its hooks reported it.
+    session_id: Mutex<Option<String>>,
     writer: Mutex<Box<dyn Write + Send>>,
     master: Mutex<Box<dyn MasterPty + Send>>,
     killer: Mutex<Box<dyn ChildKiller + Send + Sync>>,
@@ -175,6 +186,8 @@ impl Pane {
             started: Instant::now(),
             shared,
             stopping: AtomicBool::new(false),
+            reported: Mutex::new(None),
+            session_id: Mutex::new(None),
             writer: Mutex::new(writer),
             master: Mutex::new(pair.master),
             killer: Mutex::new(killer),
@@ -238,6 +251,31 @@ impl Pane {
     /// group (the agent is its own session leader), then SIGKILL to the group
     /// if the leader is still alive after a grace period. Does nothing once
     /// the process has exited, so a recycled pid is never signalled.
+    pub(crate) fn record_report(
+        &self,
+        state: Option<crate::detect::AgentState>,
+        event: &str,
+        session_id: Option<String>,
+    ) {
+        if let Some(state) = state {
+            *lock(&self.reported) = Some(Reported {
+                state,
+                event: event.to_string(),
+            });
+        }
+        if let Some(id) = session_id.filter(|id| !id.is_empty()) {
+            *lock(&self.session_id) = Some(id);
+        }
+    }
+
+    pub(crate) fn reported(&self) -> Option<Reported> {
+        lock(&self.reported).clone()
+    }
+
+    pub(crate) fn agent_session_id(&self) -> Option<String> {
+        lock(&self.session_id).clone()
+    }
+
     pub(crate) fn is_stopping(&self) -> bool {
         self.stopping.load(Ordering::SeqCst)
     }

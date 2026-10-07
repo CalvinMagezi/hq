@@ -48,7 +48,7 @@ pub fn ensure_dir(dir: &Path) -> std::io::Result<()> {
     fs::set_permissions(dir, fs::Permissions::from_mode(DIR_MODE))
 }
 
-fn random_hex() -> std::io::Result<String> {
+pub(crate) fn random_hex() -> std::io::Result<String> {
     let mut bytes = [0u8; TOKEN_BYTES];
     fs::File::open("/dev/urandom")?.read_exact(&mut bytes)?;
     Ok(bytes.iter().map(|b| format!("{b:02x}")).collect())
