@@ -89,6 +89,9 @@ enum Commands {
         /// Directory holding host.sock and operator.token (default: ~/.hq/run/host)
         #[arg(long)]
         dir: Option<std::path::PathBuf>,
+        /// serve only: also start agents that are not under the process sandbox. Without it the host refuses them, whoever asks.
+        #[arg(long)]
+        allow_unsandboxed: bool,
     },
 
     /// Internal: detached applier spawned by self_update_install
@@ -629,7 +632,7 @@ async fn dispatch(command: Commands, config: &HqConfig) -> Result<()> {
             host,
             lines,
         } => commands::sessions::run(config, &sub, arg, prompt, cwd, label, host, lines).await,
-        Commands::Host { sub, dir } => commands::host::run(&sub, dir).await,
+        Commands::Host { sub, dir, allow_unsandboxed } => commands::host::run(&sub, dir, allow_unsandboxed).await,
         Commands::SelfApply { run_id } => commands::self_apply::run(config, run_id).await,
         Commands::NotifyRestart { phase, reason, sha } => {
             commands::notify_restart::run(config, &phase, &reason, sha.as_deref()).await

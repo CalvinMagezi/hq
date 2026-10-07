@@ -2411,6 +2411,7 @@ dependencies = [
 name = "hq-host"
 version = "0.9.1"
 dependencies = [
+ "hq-sandbox",
  "nix",
  "portable-pty",
  "regex",
@@ -2512,6 +2513,14 @@ dependencies = [
  "tokio",
  "tracing",
  "uuid",
+]
+
+[[package]]
+name = "hq-sandbox"
+version = "0.9.1"
+dependencies = [
+ "tempfile",
+ "which",
 ]
 
 [[package]]

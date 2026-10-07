@@ -7,6 +7,8 @@ use crate::error::HostError;
 use crate::events::{EventKind, EventLog};
 use crate::keys::encode_key;
 use crate::report;
+use crate::sandbox::{self, Mode, SandboxSpec};
+use crate::egress::{Decision, Egress};
 use crate::token;
 pub use crate::pane::PaneStatus;
 use crate::pane::{ExitHook, LaunchArgs, Pane, Resume};
@@ -56,6 +58,11 @@ pub struct SpawnSpec {
     pub rows: u16,
     pub cols: u16,
     pub scrollback_rows: usize,
+    /// Confinement for the process; None starts it unsandboxed.
+    pub sandbox: Option<SandboxSpec>,
+    /// Stop the agent once it has been silent and not working for this long, so
+    /// agents nobody is watching do not pile up. It stays resumable.
+    pub idle_ttl: Option<Duration>,
 }
 
 impl SpawnSpec {
@@ -70,6 +77,8 @@ impl SpawnSpec {
             rows: DEFAULT_ROWS,
             cols: DEFAULT_COLS,
             scrollback_rows: DEFAULT_SCROLLBACK_ROWS,
+            sandbox: None,
+            idle_ttl: None,
         }
     }
 }
@@ -105,6 +114,8 @@ pub struct PaneInfo {
     /// The rule that decided the state; None when the default applied.
     pub rule: Option<String>,
     pub cwd: PathBuf,
+    /// `process` or `none`; what the agent is confined by.
+    pub sandbox: &'static str,
     pub pid: Option<u32>,
     pub status: PaneStatus,
     pub rows: u16,
@@ -160,6 +171,9 @@ pub struct Host {
     run_dir: Mutex<Option<PathBuf>>,
     detector: Detector,
     state: Option<Arc<StateFile>>,
+    egress: Arc<Egress>,
+    /// Refuse to start an agent that is not under the process sandbox.
+    require_sandbox: bool,
 }
 
 /// What `Host::restore` did.
@@ -212,7 +226,17 @@ impl Host {
             run_dir: Mutex::new(None),
             detector,
             state: None,
+            egress: Arc::new(Egress::new()),
+            require_sandbox: false,
         }
+    }
+
+    /// A host that starts only agents under the process sandbox. A caller that
+    /// asks for none, or says nothing, gets an error: the machine's owner decides
+    /// this, not whoever drives the host.
+    pub fn with_require_sandbox(mut self, require: bool) -> Self {
+        self.require_sandbox = require;
+        self
     }
 
     /// A host that runs at most `max` agents at once (default 128).
@@ -239,6 +263,11 @@ impl Host {
             return Err(HostError::InvalidName(spec.name));
         }
         check_size(spec.rows, spec.cols)?;
+        if self.require_sandbox && spec.sandbox.as_ref().is_none_or(|s| s.mode != Mode::Process) {
+            return Err(HostError::Sandbox(
+                "this host only starts sandboxed agents; the machine's owner can start it with --allow-unsandboxed".into(),
+            ));
+        }
         let argv_bytes = |v: &[String]| v.iter().map(String::len).sum::<usize>();
         if argv_bytes(&spec.argv) > MAX_ARGV_BYTES
             || spec.resume_argv.as_deref().is_some_and(|a| argv_bytes(a) > MAX_ARGV_BYTES)
@@ -272,19 +301,53 @@ impl Host {
         if let Some(dir) = lock(&self.run_dir).as_ref() {
             env.push((RUN_DIR_ENV.to_string(), dir.to_string_lossy().into_owned()));
         }
+        let confined = match spec.sandbox.as_ref().filter(|s| s.mode == Mode::Process) {
+            Some(sb) => {
+                let run_dir = lock(&self.run_dir).clone();
+                Some(sandbox::confine(
+                    &self.egress,
+                    sb,
+                    &spec.name,
+                    &spec.cwd,
+                    run_dir.as_deref(),
+                    &spec.argv,
+                    spec.agent.as_deref(),
+                )?)
+            }
+            None => None,
+        };
+        let (exec, egress_port) = match confined {
+            Some(c) => {
+                env.extend(c.env);
+                (Some(c.argv), Some(c.egress_port))
+            }
+            None => (None, None),
+        };
         let pane = Pane::spawn(
             LaunchArgs {
                 argv: spec.argv,
+                exec,
+                sandbox: spec.sandbox,
                 resume,
-                on_exit: Some(self.exit_hook(&spec.name)),
+                on_exit: Some(self.exit_hook(&spec.name, egress_port)),
                 agent: spec.agent,
+                idle_ttl: spec.idle_ttl,
                 cwd: spec.cwd,
                 env,
                 rows: spec.rows,
                 cols: spec.cols,
             },
             Box::new(VtEmulator::new(spec.rows, spec.cols, scrollback_rows)),
-        )?;
+        );
+        let pane = match pane {
+            Ok(p) => p,
+            Err(e) => {
+                if let Some(port) = egress_port {
+                    self.egress.close_port(&spec.name, port);
+                }
+                return Err(e);
+            }
+        };
         let pane = Arc::new(pane);
         let mut panes = lock(&self.panes);
         if panes.contains_key(&spec.name) {
@@ -337,6 +400,7 @@ impl Host {
     /// Deletes the hook and MCP config files written for `name`. The MCP file
     /// holds the agent's HQ token, so it must not outlive the agent.
     fn forget_files(&self, name: &str) {
+        self.egress.forget(name);
         if let Some(dir) = lock(&self.run_dir).clone() {
             crate::hooks::remove_agent_files(&dir, name);
         }
@@ -383,7 +447,7 @@ impl Host {
         save_state(&self.panes, &self.awaiting, self.state.as_deref());
     }
 
-    fn exit_hook(&self, name: &str) -> ExitHook {
+    fn exit_hook(&self, name: &str, egress_port: Option<u16>) -> ExitHook {
         // The registry is captured only to rewrite the state file. A host with
         // none must not be kept alive by its own panes, or dropping it would
         // leave the processes running.
@@ -392,7 +456,11 @@ impl Host {
             .clone()
             .map(|state| (state, self.panes.clone(), self.awaiting.clone()));
         let (events, name) = (self.events.clone(), name.to_string());
+        let egress = self.egress.clone();
         Arc::new(move || {
+            if let Some(port) = egress_port {
+                egress.close_port(&name, port);
+            }
             if let Some((state, panes, awaiting)) = &saver {
                 save_state(panes, awaiting, Some(state));
             }
@@ -489,6 +557,11 @@ impl Host {
         }
     }
 
+    /// The recent allow and deny decisions of `name`'s egress proxy.
+    pub fn egress_decisions(&self, name: &str) -> Vec<Decision> {
+        self.egress.decisions(name)
+    }
+
     pub fn events(&self) -> &EventLog {
         &self.events
     }
@@ -502,9 +575,10 @@ impl Host {
             while !stop.load(std::sync::atomic::Ordering::SeqCst) {
                 let Some(host) = host.upgrade() else { return };
                 let names: Vec<String> = lock(&host.panes).keys().cloned().collect();
-                for name in names {
-                    host.announce(&name);
+                for name in &names {
+                    host.announce(name);
                 }
+                host.reap_idle(&names);
                 drop(host);
                 std::thread::sleep(STATE_WATCH_INTERVAL);
             }
@@ -534,6 +608,25 @@ impl Host {
         pane.set_state_seq(seq);
         if state == AgentState::Idle && before == Some(AgentState::Working) {
             pane.set_done(true);
+        }
+    }
+
+    /// Stops agents that outlived their idle limit: silent that long, and not
+    /// working. The pane is removed, so it is not restored at the next start; its
+    /// owner finds it gone and can resume the conversation.
+    fn reap_idle(&self, names: &[String]) {
+        for name in names {
+            let Ok(pane) = self.pane(name) else { continue };
+            let Some(ttl) = pane.idle_ttl else { continue };
+            if pane.quiet_for() < ttl || pane.status() != PaneStatus::Running {
+                continue;
+            }
+            let state = info_of(name, pane.as_ref(), &self.detector).state;
+            if state == Some(AgentState::Working) {
+                continue;
+            }
+            eprintln!("hq host: stopping '{name}', idle for over {}s", ttl.as_secs());
+            let _ = self.remove(name);
         }
     }
 
@@ -758,6 +851,8 @@ fn save_state(panes: &Registry, awaiting: &Awaiting, state: Option<&StateFile>) 
                 rows,
                 cols,
                 scrollback_rows: resume.scrollback_rows,
+                sandbox: pane.sandbox.clone(),
+                idle_ttl_secs: pane.idle_ttl.map(|t| t.as_secs()),
             })
         })
         .chain(waiting)
@@ -810,6 +905,8 @@ fn spec_of(rec: PaneRecord, env: Vec<(String, String)>) -> SpawnSpec {
     spec.rows = rec.rows;
     spec.cols = rec.cols;
     spec.scrollback_rows = rec.scrollback_rows;
+    spec.sandbox = rec.sandbox;
+    spec.idle_ttl = rec.idle_ttl_secs.map(Duration::from_secs);
     spec
 }
 
@@ -869,6 +966,7 @@ fn info_of(name: &str, pane: &Pane, detector: &Detector) -> PaneInfo {
         state,
         rule,
         cwd: pane.cwd.clone(),
+        sandbox: pane.sandbox.as_ref().map_or(Mode::None, |s| s.mode).as_str(),
         pid: pane.pid,
         status: pane.status(),
         rows,

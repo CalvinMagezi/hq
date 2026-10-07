@@ -10,11 +10,11 @@ fn default_dir() -> PathBuf {
     hq_core::config::native_host_dir()
 }
 
-pub async fn run(sub: &str, dir: Option<PathBuf>) -> Result<()> {
+pub async fn run(sub: &str, dir: Option<PathBuf>, allow_unsandboxed: bool) -> Result<()> {
     let dir_arg = dir.clone();
     let dir = dir.unwrap_or_else(default_dir);
     match sub {
-        "serve" => serve(dir).await,
+        "serve" => serve(dir, allow_unsandboxed).await,
         "status" => status(&dir),
         "stop" => stop(&dir),
         "report" => report(dir_arg),
@@ -23,8 +23,12 @@ pub async fn run(sub: &str, dir: Option<PathBuf>) -> Result<()> {
     }
 }
 
-async fn serve(dir: PathBuf) -> Result<()> {
-    let host = Arc::new(Host::new().with_state_dir(&dir));
+async fn serve(dir: PathBuf, allow_unsandboxed: bool) -> Result<()> {
+    let host = Arc::new(
+        Host::new()
+            .with_state_dir(&dir)
+            .with_require_sandbox(!allow_unsandboxed),
+    );
     let server = Server::bind(&dir, host.clone())
         .with_context(|| format!("starting the host in {}", dir.display()))?;
     let report = host.restore();
@@ -49,13 +53,24 @@ async fn serve(dir: PathBuf) -> Result<()> {
 }
 
 fn status(dir: &std::path::Path) -> Result<()> {
-    match Client::connect(dir).and_then(|mut c| c.call("host.status", json!({}))) {
-        Ok(v) => {
-            println!("{}", serde_json::to_string_pretty(&v)?);
-            Ok(())
-        }
-        Err(e) => bail!("host not running in {}: {e}", dir.display()),
+    let mut client = Client::connect(dir)
+        .map_err(|e| anyhow::anyhow!("host not running in {}: {e}", dir.display()))?;
+    let status = client.call("host.status", json!({}))?;
+    println!("{}", serde_json::to_string_pretty(&status)?);
+    let agents = client.call("agent.list", json!({}))?;
+    for a in agents["agents"].as_array().into_iter().flatten() {
+        let text = |k: &str| a[k].as_str().unwrap_or("-").to_string();
+        println!(
+            "{:<28} {:<8} {:<9} sandbox={:<8} idle {}s, up {}s",
+            text("name"),
+            text("agent"),
+            text("state"),
+            text("sandbox"),
+            a["quiet_ms"].as_u64().unwrap_or(0) / 1000,
+            a["age_ms"].as_u64().unwrap_or(0) / 1000,
+        );
     }
+    Ok(())
 }
 
 fn stop(dir: &std::path::Path) -> Result<()> {
@@ -86,7 +101,7 @@ fn report(dir: Option<PathBuf>) -> Result<()> {
     let Some(params) = hq_host::report_params(&input) else {
         return Ok(());
     };
-    let sent = Client::connect_with_token(&dir, &token).and_then(|mut c| {
+    let sent = Client::connect_pane(&dir, &token).and_then(|mut c| {
         c.set_timeout(Some(REPORT_TIMEOUT));
         c.call("agent.report", params)
     });

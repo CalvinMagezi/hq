@@ -1,7 +1,7 @@
 //! Client for the control socket, used by HQ's native backend and `hq host`.
 
 use crate::proto::{MAX_LINE_BYTES, PROTOCOL_VERSION, Request, Response};
-use crate::server::socket_path;
+use crate::server::{agent_socket_path, socket_path};
 use crate::token;
 use serde_json::{Value, json};
 use std::io::{BufRead, BufReader, Read, Write};
@@ -48,9 +48,18 @@ impl Client {
     }
 
     pub fn connect_with_token(dir: &Path, token: &str) -> Result<Self, ClientError> {
+        Self::connect_at(dir, socket_path(dir), token)
+    }
+
+    /// Connects an agent's hooks to `<dir>/agent.sock` with the pane token.
+    pub fn connect_pane(dir: &Path, token: &str) -> Result<Self, ClientError> {
+        Self::connect_at(dir, agent_socket_path(dir), token)
+    }
+
+    fn connect_at(dir: &Path, socket: std::path::PathBuf, token: &str) -> Result<Self, ClientError> {
         token::check_trusted_dir(dir)
             .map_err(|e| ClientError::Unreachable(format!("host directory: {e}")))?;
-        let stream = UnixStream::connect(socket_path(dir))
+        let stream = UnixStream::connect(socket)
             .map_err(|e| ClientError::Unreachable(e.to_string()))?;
         let writer = stream
             .try_clone()

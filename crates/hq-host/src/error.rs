@@ -2,6 +2,8 @@ use std::time::Duration;
 
 #[derive(Debug, thiserror::Error)]
 pub enum HostError {
+    #[error("cannot sandbox the agent: {0}")]
+    Sandbox(String),
     #[error("no agent named '{0}'")]
     NotFound(String),
     #[error("an agent named '{0}' already exists")]
@@ -34,6 +36,7 @@ impl HostError {
     /// Stable machine-readable code, shared with the control API later.
     pub fn code(&self) -> &'static str {
         match self {
+            HostError::Sandbox(_) => "sandbox_unavailable",
             HostError::NotFound(_) => "agent_not_found",
             HostError::NameTaken(_) => "name_taken",
             HostError::InvalidName(_) => "invalid_name",
