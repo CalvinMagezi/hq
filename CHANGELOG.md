@@ -4,6 +4,10 @@ All notable changes to Agent-HQ will be documented in this file.
 
 ## [Unreleased]
 
+### Changed
+
+- **New coding-agent sessions start on the built-in host by default** (`herdr.default_host` is now `native`; set `local` to keep using herdr for now). The web app's session page shows `hq host status` (on the session's host) in place of the herdr attach command, and Settings lists the agent sandbox, extra allowed sites and the idle limit.
+
 ### Added
 
 - **Process sandbox for built-in host agents**: each agent runs under `sandbox-exec` (macOS) or `bwrap` with the host's tokens and its siblings' configs unreadable, other processes' environments hidden, writes limited to its project and tool directories, and a network limited to a per-agent egress proxy with a domain allowlist (`herdr.sandbox`: `mode`, `allow_domains`, `writable`). A launch fails when the sandbox cannot be applied. Denied hosts are logged (`agent.egress`). See `docs/AGENT_HOST.md`. `hq host serve` refuses unsandboxed agents unless started with `--allow-unsandboxed`, and stops sessions that sit idle past `herdr.idle_reap_hours` (default 24; they stay resumable).

@@ -4,7 +4,7 @@ import type { TaskStatus } from './tasksApi'
 export type SessionStatus = 'running' | 'exited' | 'stopped' | 'orphaned'
 export type AgentStatus = 'idle' | 'working' | 'blocked' | 'done'
 
-/** A Herdr coding-agent session a chat is watching. Timestamps are SQLite UTC strings. */
+/** A coding-agent session a chat is watching. Timestamps are SQLite UTC strings. */
 export interface WatchedSession {
   id: string
   harness: string
@@ -101,13 +101,13 @@ export interface AdoptResult {
   already_watched: boolean
 }
 
-/** Keys the send box offers for answering a dialog; Herdr's logical key names. */
+/** Keys the send box offers for answering a dialog; the host's logical key names. */
 export const QUICK_KEYS = ['enter', 'esc', 'up', 'down', 'y', 'n'] as const
 
 /** Kills what the agent is doing, so the send box asks for a second tap before sending it. */
 export const INTERRUPT_KEY = 'ctrl+c'
 
-/** The server accepts only logical key names like these (see herdr::validate_keys). */
+/** The server accepts only logical key names like these (see validate_keys in hq-tools). */
 export const KEY_NAME_PATTERN = /^[A-Za-z0-9][A-Za-z0-9+_-]{0,31}$/
 
 const queryString = (filters: SessionFilters) => {
@@ -117,14 +117,15 @@ const queryString = (filters: SessionFilters) => {
   return s ? `?${s}` : ''
 }
 
-/** The command that opens the session's Herdr on its machine. A remote host's name is used as the ssh target. */
+/** The command that lists the agents on the session's machine. A remote host's name is used as the ssh target. */
 export function attachCommand(s: Pick<HarnessSession, 'host'>): string {
-  return s.host === 'local' ? 'herdr' : `ssh ${s.host} -t herdr`
+  const own = s.host === 'local' || s.host === 'native'
+  return own ? 'hq host status' : `ssh ${s.host} hq host status`
 }
 
 /** Caveat shown beside the attach command: HQ names hosts, ssh knows addresses, so the name must resolve as an ssh alias. */
 export function attachCaveat(s: Pick<HarnessSession, 'host'>): string | null {
-  return s.host === 'local' ? null : `assumes "${s.host}" is an ssh alias on this machine`
+  return s.host === 'local' || s.host === 'native' ? null : `assumes "${s.host}" is an ssh alias on this machine`
 }
 
 /** The session is blocked at a dialog, so text is refused and keys must answer it. */

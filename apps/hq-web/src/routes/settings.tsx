@@ -141,9 +141,11 @@ function SettingsBody({ s }: { s: HqSettings }) {
         <Row label="Skill writes need approval">{yesNo(s.safety.skills_write_approval)}</Row>
         <Row label="Allowed web origins">{s.safety.web_allowed_origins.length ? s.safety.web_allowed_origins.join(', ') : 'none'}</Row>
       </Section>
-      <Section title="Coding agents (Herdr)">
+      <Section title="Coding agents">
         <Row label="Default host">{s.herdr.default_host}</Row>
-        <Row label="Hosts">{s.herdr.hosts.length ? s.herdr.hosts.join(', ') : 'local only'}</Row>
+        <Row label="Hosts">{s.herdr.hosts.length ? s.herdr.hosts.join(', ') : 'this machine only'}</Row>
+        <Row label="Agent sandbox">{s.herdr.sandbox_mode === 'process' ? 'on' : 'off'}{s.herdr.sandbox_extra_domains ? ` · ${s.herdr.sandbox_extra_domains} extra allowed sites` : ''}</Row>
+        <Row label="Stop idle sessions after">{s.herdr.idle_reap_hours ? `${s.herdr.idle_reap_hours} h` : 'never'}</Row>
         <Row label="New watches drive">{yesNo(s.herdr.drive_new_watches)}</Row>
         <Row label="Driver check-in">{s.herdr.driver_checkin_minutes} min</Row>
         <Row label="Driver instruction budget">{s.herdr.driver_nudge_budget} per session</Row>

@@ -93,6 +93,12 @@ pub(crate) fn settings_view(config: &HqConfig) -> Value {
         "herdr": {
             "default_host": config.herdr.default_host,
             "hosts": hosts,
+            "sandbox_mode": match config.herdr.sandbox.mode {
+                hq_core::config::SandboxMode::Process => "process",
+                hq_core::config::SandboxMode::None => "none",
+            },
+            "sandbox_extra_domains": config.herdr.sandbox.allow_domains.len(),
+            "idle_reap_hours": config.herdr.idle_reap_hours,
             "drive_new_watches": config.herdr.drive_new_watches,
             "driver_checkin_minutes": config.herdr.driver_checkin_minutes,
             "driver_nudge_budget": config.herdr.nudge_budget(),
