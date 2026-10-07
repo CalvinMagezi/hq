@@ -226,8 +226,41 @@ or a remote keep using herdr. After a host restart the supervisor starts any
 held agent again with the env HQ built for it at launch (profile variables and
 the session id), once per sweep.
 
+## A host on another machine
+
+HQ on a server reaches a host on your laptop (or any machine) over ssh. On that
+machine run `hq host serve` (see the service files above), then pin a key to the
+gate in `~/.ssh/authorized_keys` on one line:
+
+```
+restrict,from="<hq-server-address>",command="/usr/local/bin/hq host gate" ssh-ed25519 AAAA... hq-gate
+```
+
+and add the machine to HQ's config:
+
+```yaml
+herdr:
+  hosts:
+    laptop:
+      kind: native
+      ssh: "you@laptop.example.ts.net"
+      identity_file: "~/.ssh/hq_gate"
+      # port: 2222   # when ssh does not listen on 22
+```
+
+Sessions started with `host: laptop` run there. `hq host gate` reads one request
+from stdin (a JSON array of a method name and its params as JSON text, so no
+shell parses either), refuses any method outside an allowlist (`host.stop` and
+`agent.report` are left out), forwards it to the local socket and prints the
+reply. The key cannot run anything else: a command passed to ssh is ignored.
+`agent.spawn` still starts whatever command it is given, so treat the key as
+shell access as you, the same as the herdr gate. A missing agent binary on the
+remote machine comes back as the host's own `spawn_failed` error naming the
+command. The hook settings file is written on the remote machine by the host
+(`agent.hook_flags`), so hooks, conversation ids and resume work the same as
+locally.
+
 ## Not built yet
 
-Rule files for agents other than Claude Code and Codex, hooks for agents other than Claude Code, remote hosts, the backend that makes HQ sessions use this host, and
-agent-to-agent messaging. Provenance of anything adapted from herdr is recorded
+Rule files for agents other than Claude Code and Codex, hooks for agents other than Claude Code, and agent-to-agent messaging. Provenance of anything adapted from herdr is recorded
 in `docs/provenance/herdr.md`.

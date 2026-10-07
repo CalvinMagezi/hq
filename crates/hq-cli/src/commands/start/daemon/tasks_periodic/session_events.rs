@@ -4,7 +4,7 @@
 //! on its timer as the safety net.
 
 use super::session_supervisor::run_session_supervisor;
-use hq_core::config::{HqConfig, NATIVE_HOST};
+use hq_core::config::HqConfig;
 use hq_db::Database;
 use hq_tools::herdr::{self, HostEvents};
 use std::path::PathBuf;
@@ -30,10 +30,15 @@ fn wants_sweep(events: &HostEvents) -> bool {
         })
 }
 
-pub async fn run_session_event_loop(vault_path: PathBuf, db: Database, config: HqConfig) {
+pub async fn run_session_event_loop(
+    host_name: String,
+    vault_path: PathBuf,
+    db: Database,
+    config: HqConfig,
+) {
     let mut cursor: Option<u64> = None;
     loop {
-        let Ok(host) = herdr::host(Some(NATIVE_HOST)) else {
+        let Ok(host) = herdr::host(Some(&host_name)) else {
             tokio::time::sleep(RETRY_PAUSE).await;
             continue;
         };
@@ -43,7 +48,7 @@ pub async fn run_session_event_loop(vault_path: PathBuf, db: Database, config: H
             Ok(Ok(events)) => events,
             Ok(Err(e)) => {
                 // No host running is normal when nothing uses the native host.
-                debug!(error = %e, "session-events: native host not reachable");
+                debug!(host = %host_name, error = %e, "session-events: host not reachable");
                 cursor = None;
                 tokio::time::sleep(RETRY_PAUSE).await;
                 continue;

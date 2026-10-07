@@ -83,7 +83,7 @@ enum Commands {
 
     /// Run or inspect the built-in agent host (long-lived coding agents in pseudo-terminals)
     Host {
-        /// serve (run the host in this terminal), status, stop, or report (used by agent hooks)
+        /// serve (run the host in this terminal), status, stop, report (used by agent hooks), or gate (the ssh forced command for remote access)
         #[arg(default_value = "status")]
         sub: String,
         /// Directory holding host.sock and operator.token (default: ~/.hq/run/host)

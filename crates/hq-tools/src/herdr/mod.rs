@@ -16,7 +16,7 @@ mod transport;
 
 use anyhow::Context;
 use hq_core::config::{
-    HerdrConfig, HqConfig, LOCAL_HOST, NATIVE_HOST, native_host_dir, MAX_LAUNCH_BOUND_SECS, MIN_LAUNCH_BOUND_SECS,
+    HerdrConfig, HerdrHostConfig, HostKind, HqConfig, LOCAL_HOST, NATIVE_HOST, native_host_dir, MAX_LAUNCH_BOUND_SECS, MIN_LAUNCH_BOUND_SECS,
 };
 use serde::Serialize;
 use serde_json::Value;
@@ -25,7 +25,7 @@ use std::time::{Duration, Instant};
 use transport::{RawOutput, Transport};
 
 pub use backend::{AwaitingAgent, Host, HostBackend, HostEvent, HostEvents};
-pub use native::NativeBackend;
+pub use native::{NATIVE_GATE_COMMAND, NativeBackend};
 
 /// Herdr rejects explicit timeouts outside this window.
 const MIN_WAIT_MS: u64 = 3_000;
@@ -261,12 +261,50 @@ fn build(cfg: &HerdrConfig, name: &str) -> anyhow::Result<Host> {
             .with_command_timeout(Duration::from_secs(cfg.command_timeout_secs));
         return Ok(Arc::new(host));
     }
+    if let Some(remote) = cfg.hosts.get(name)
+        && remote.kind == HostKind::Native
+    {
+        return Ok(Arc::new(remote_native(cfg, name, remote)));
+    }
     Ok(Arc::new(HerdrHost::from_config(cfg, name)?))
+}
+
+/// A built-in host on another machine. Its gate command defaults to
+/// `hq host gate` unless the config names one.
+fn remote_native(cfg: &HerdrConfig, name: &str, remote: &HerdrHostConfig) -> NativeBackend {
+    let gate = match remote.gate_command.as_str() {
+        "hq-herdr-gate" => NATIVE_GATE_COMMAND,
+        other => other,
+    };
+    let mux_dir = cfg
+        .ssh_multiplex
+        .then(|| transport::prepare_mux_dir(&HqConfig::hq_dir().join("run").join("ssh")))
+        .flatten();
+    NativeBackend::remote(name, &remote.ssh, remote.port, remote.identity_file.clone(), gate, mux_dir)
+        .with_launch_bound(Duration::from_secs(
+            cfg.launch_bound_secs
+                .clamp(MIN_LAUNCH_BOUND_SECS, MAX_LAUNCH_BOUND_SECS),
+        ))
+        .with_command_timeout(Duration::from_secs(cfg.command_timeout_secs))
 }
 
 /// The machine HQ itself runs on.
 pub fn local() -> anyhow::Result<Host> {
     host(Some(LOCAL_HOST))
+}
+
+/// Names of the built-in hosts HQ may talk to: this machine's, and any
+/// configured remote with `kind: native`.
+pub fn native_host_names() -> Vec<String> {
+    let remotes = HqConfig::load().map(|c| c.herdr.hosts).unwrap_or_default();
+    std::iter::once(NATIVE_HOST.to_string())
+        .chain(
+            remotes
+                .into_iter()
+                .filter(|(_, h)| h.kind == HostKind::Native)
+                .map(|(name, _)| name),
+        )
+        .collect()
 }
 
 /// This machine plus every configured remote.
@@ -313,6 +351,7 @@ impl HerdrHost {
             name: name.to_string(),
             transport: Transport::Ssh {
                 target: remote.ssh.clone(),
+                port: remote.port,
                 identity_file: remote.identity_file.clone(),
                 gate_command: remote.gate_command.clone(),
                 mux_dir: if cfg.ssh_multiplex {

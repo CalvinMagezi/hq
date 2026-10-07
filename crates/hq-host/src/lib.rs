@@ -9,6 +9,7 @@ mod emu;
 mod env;
 mod error;
 mod events;
+mod gate;
 mod host;
 mod hooks;
 mod keys;
@@ -28,6 +29,7 @@ pub use events::{Event, EventKind, EventLog, Poll};
 pub use host::{
     AwaitingInfo, Host, PANE_TOKEN_ENV, RUN_DIR_ENV, PaneInfo, PaneStatus, ReadSource, RestoreReport, SpawnSpec, valid_name,
 };
+pub use gate::{Denied, GATE_DENIED_EXIT, MAX_GATE_INPUT, forward as gate_forward, parse_request as gate_parse_request};
 pub use hooks::{claude_settings, report_params, write_claude_settings};
 pub use keys::encode_key;
 pub use report::{STALE_WORKING_AFTER, combine as combine_state, state_for};

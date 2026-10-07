@@ -18,6 +18,7 @@ pub async fn run(sub: &str, dir: Option<PathBuf>) -> Result<()> {
         "status" => status(&dir),
         "stop" => stop(&dir),
         "report" => report(dir_arg),
+        "gate" => gate(&dir),
         other => bail!("unknown subcommand '{other}': use serve, status, stop or report"),
     }
 }
@@ -91,4 +92,26 @@ fn report(dir: Option<PathBuf>) -> Result<()> {
     });
     drop(sent);
     Ok(())
+}
+
+/// `hq host gate`: the command a remote machine's `authorized_keys` pins an ssh
+/// key to. It reads one request from stdin, refuses anything outside the
+/// allowlist, and prints the host's reply as one JSON line.
+fn gate(dir: &std::path::Path) -> Result<()> {
+    use std::io::Read;
+    let mut input = String::new();
+    std::io::stdin()
+        .take(hq_host::MAX_GATE_INPUT as u64 + 1)
+        .read_to_string(&mut input)
+        .context("reading the request from stdin")?;
+    match hq_host::gate_parse_request(&input) {
+        Ok((method, params)) => {
+            println!("{}", hq_host::gate_forward(dir, &method, params));
+            Ok(())
+        }
+        Err(hq_host::Denied(message)) => {
+            eprintln!("{}", json!({ "error": { "code": "gate_denied", "message": message } }));
+            std::process::exit(hq_host::GATE_DENIED_EXIT);
+        }
+    }
 }

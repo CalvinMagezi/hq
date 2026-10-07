@@ -232,3 +232,17 @@ fn a_finished_turn_reads_as_done_with_a_rising_counter_and_an_event() {
     );
     assert!(!heard.lost);
 }
+
+#[test]
+fn a_wrapper_command_receives_the_hook_flag_not_just_the_shell() {
+    let host = Running::start();
+    let b = host.backend();
+    let mut req = cat("hs-wrap", "claude");
+    req.command = Some("f() { echo \"flags: $*\"; cat; }; f".into());
+    b.launch(&req).unwrap();
+    let text = read_until(&b, "hs-wrap", "flags:");
+    assert!(
+        text.contains("--settings") && text.contains("hs-wrap.json"),
+        "the wrapper's own arguments were: {text}"
+    );
+}
