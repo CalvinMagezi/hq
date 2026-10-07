@@ -17,7 +17,7 @@ pub(super) use engines::Engine;
 
 /// Once a primary engine has answered, slower engines get this long before the
 /// pool returns without them (and caches the answer as partial).
-const STRAGGLER_GRACE: Duration = Duration::from_millis(1500);
+const STRAGGLER_GRACE: Duration = Duration::from_millis(if cfg!(test) { 200 } else { 1500 });
 const NATIVE_REQUEST_TIMEOUT: Duration = Duration::from_secs(10);
 const RESULT_CACHE_TTL: Duration = Duration::from_secs(10 * 60);
 /// A pool with some engines down is cached briefly, so a retry soon after picks them up again.

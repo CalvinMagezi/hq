@@ -2109,7 +2109,7 @@ fn off_topic_hits_from_narrow_engines_rank_below_on_topic_ones() {
 #[tokio::test]
 async fn the_pool_stops_waiting_for_slow_engines_once_google_has_answered() {
     let server = native_server().await;
-    let slow = Duration::from_millis(1900);
+    let slow = Duration::from_millis(1500);
     Mock::given(method("POST"))
         .and(path("/html/"))
         .respond_with(ResponseTemplate::new(200).set_body_string(DDG_HTML).set_delay(slow))
@@ -2127,6 +2127,6 @@ async fn the_pool_stops_waiting_for_slow_engines_once_google_has_answered() {
     let r = run(&server, "straggler grace query", &SearchOptions::default())
         .await
         .unwrap();
-    assert!(started.elapsed() < Duration::from_millis(1800), "{:?}", started.elapsed());
+    assert!(started.elapsed() < Duration::from_millis(1000), "{:?}", started.elapsed());
     assert_eq!(r.results[0].engines, ["google cse"]);
 }
