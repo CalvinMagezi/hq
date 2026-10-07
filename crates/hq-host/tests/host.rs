@@ -513,3 +513,129 @@ fn event_numbers_keep_rising_across_a_host_restart() {
         "a restarted host's numbers must not fall below ones clients already saw"
     );
 }
+
+fn argv_sh(script: &str) -> Vec<String> {
+    vec!["sh".into(), "-c".into(), script.into()]
+}
+
+fn wait_until(what: &str, mut ok: impl FnMut() -> bool) {
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+    while !ok() {
+        assert!(std::time::Instant::now() < deadline, "never: {what}");
+        std::thread::sleep(std::time::Duration::from_millis(50));
+    }
+}
+
+#[test]
+fn pasted_text_cannot_end_the_bracketed_paste_early() {
+    let host = Host::new();
+    // The program turns bracketed paste on, then echoes what it receives with
+    // control characters made visible.
+    host.spawn(SpawnSpec::new(
+        "paste",
+        argv_sh("printf '\\033[?2004h'; cat -v"),
+        std::env::temp_dir(),
+    ))
+    .unwrap();
+    std::thread::sleep(std::time::Duration::from_millis(600));
+    host.paste("paste", "a\x1b[201~b\x1b[200~c").unwrap();
+    wait_until("the paste to echo", || {
+        host.read("paste", ReadSource::RecentUnwrapped, 0)
+            .unwrap_or_default()
+            .contains("c^[[201~")
+    });
+    let screen = host.read("paste", ReadSource::RecentUnwrapped, 0).unwrap();
+    assert_eq!(screen.matches("^[[201~").count(), 1, "only the real end marker: {screen}");
+    assert_eq!(screen.matches("^[[200~").count(), 1, "only the real start marker: {screen}");
+}
+
+#[test]
+fn a_huge_title_does_not_reach_the_agent_info() {
+    let host = Host::new();
+    host.spawn(SpawnSpec::new(
+        "title",
+        argv_sh("head -c 200000 /dev/zero | tr '\\0' x | (printf '\\033]0;'; cat; printf '\\007'); sleep 30"),
+        std::env::temp_dir(),
+    ))
+    .unwrap();
+    wait_until("a title", || !host.info("title").unwrap().title.is_empty());
+    assert!(host.info("title").unwrap().title.len() <= 256);
+}
+
+#[test]
+fn a_reported_conversation_id_must_be_a_plain_token() {
+    let host = Host::new();
+    let mut spec = SpawnSpec::new("rep", argv_sh("sleep 30"), std::env::temp_dir());
+    spec.agent = Some("claude".into());
+    host.spawn(spec).unwrap();
+    for bad in ["--settings=/x.json", "a b", "a;b", "", &"x".repeat(129), "-flag"] {
+        host.report("rep", "SessionStart", None, Some(bad.to_string())).unwrap();
+        assert_eq!(host.info("rep").unwrap().agent_session_id, None, "{bad:?}");
+    }
+    host.report("rep", "SessionStart", None, Some("5f34dd2c-7e78-434d.v2_x".into())).unwrap();
+    assert_eq!(
+        host.info("rep").unwrap().agent_session_id.as_deref(),
+        Some("5f34dd2c-7e78-434d.v2_x")
+    );
+}
+
+#[test]
+fn an_oversized_command_line_is_refused() {
+    let host = Host::new();
+    let big = "x".repeat(70 * 1024);
+    let err = host
+        .spawn(SpawnSpec::new("big", vec!["sh".into(), "-c".into(), big], std::env::temp_dir()))
+        .unwrap_err();
+    assert_eq!(err.code(), "too_large");
+    let mut spec = SpawnSpec::new("bigr", argv_sh("sleep 1"), std::env::temp_dir());
+    spec.resume_argv = Some(vec!["x".repeat(70 * 1024)]);
+    assert_eq!(host.spawn(spec).unwrap_err().code(), "too_large");
+}
+
+#[test]
+fn a_pane_that_stops_reading_times_out_instead_of_blocking_the_host() {
+    let host = Host::new();
+    // In raw mode with nothing reading, the pty buffer fills and a write blocks.
+    host.spawn(SpawnSpec::new("stuck", argv_sh("stty raw -echo; sleep 60"), std::env::temp_dir())).unwrap();
+    std::thread::sleep(std::time::Duration::from_millis(500));
+    let began = std::time::Instant::now();
+    let err = host.send_text("stuck", &"y".repeat(2 * 1024 * 1024)).unwrap_err();
+    assert!(began.elapsed() < std::time::Duration::from_secs(15), "{:?}", began.elapsed());
+    assert!(matches!(err.code(), "timeout" | "io"), "{err}");
+    // The host still answers for other agents and for the same one.
+    host.spawn(SpawnSpec::new("fine", argv_sh("sleep 5"), std::env::temp_dir())).unwrap();
+    assert!(host.info("stuck").is_ok());
+}
+
+#[test]
+fn simultaneous_writes_to_a_healthy_pane_all_get_through() {
+    let host = std::sync::Arc::new(Host::new());
+    host.spawn(SpawnSpec::new("busy", argv_sh("cat"), std::env::temp_dir())).unwrap();
+    let writers: Vec<_> = (0..8)
+        .map(|i| {
+            let host = host.clone();
+            std::thread::spawn(move || host.send_text("busy", &format!("line-{i}\n")))
+        })
+        .collect();
+    for w in writers {
+        w.join().unwrap().expect("a healthy pane must not refuse a concurrent write");
+    }
+    wait_until("all lines echoed", || {
+        let screen = host.read("busy", ReadSource::RecentUnwrapped, 0).unwrap_or_default();
+        (0..8).all(|i| screen.contains(&format!("line-{i}")))
+    });
+}
+
+#[test]
+fn the_host_refuses_more_agents_than_its_limit() {
+    let host = Host::new().with_max_agents(2);
+    for name in ["one", "two"] {
+        host.spawn(SpawnSpec::new(name, argv_sh("sleep 30"), std::env::temp_dir())).unwrap();
+    }
+    let err = host
+        .spawn(SpawnSpec::new("three", argv_sh("sleep 30"), std::env::temp_dir()))
+        .unwrap_err();
+    assert_eq!(err.code(), "too_many_agents");
+    host.remove("one").unwrap();
+    host.spawn(SpawnSpec::new("three", argv_sh("sleep 30"), std::env::temp_dir())).unwrap();
+}

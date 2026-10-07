@@ -673,3 +673,59 @@ fn a_finished_turn_is_done_until_the_agent_works_again() {
     let working = wait_for(&mut c, false);
     assert!(working["state_seq"].as_u64() > finished["state_seq"].as_u64());
 }
+
+#[test]
+fn a_client_refuses_a_host_directory_others_can_write_or_read() {
+    use std::os::unix::fs::PermissionsExt;
+    let host = Running::start();
+    let dir = host.run_dir();
+    assert!(Client::connect(&dir).is_ok());
+
+    std::fs::set_permissions(&dir, std::fs::Permissions::from_mode(0o755)).unwrap();
+    let Err(err) = Client::connect(&dir) else { panic!("a world-readable directory was trusted") };
+    assert!(err.to_string().contains("0700"), "{err}");
+    assert!(Client::connect_with_token(&dir, "x").is_err(), "the token path checks it too");
+    std::fs::set_permissions(&dir, std::fs::Permissions::from_mode(0o700)).unwrap();
+
+    let token = dir.join("operator.token");
+    std::fs::set_permissions(&token, std::fs::Permissions::from_mode(0o644)).unwrap();
+    assert!(Client::connect(&dir).is_err(), "a readable token file is not trusted");
+    std::fs::set_permissions(&token, std::fs::Permissions::from_mode(0o600)).unwrap();
+    assert!(Client::connect(&dir).is_ok());
+}
+
+#[test]
+fn a_removed_agents_files_go_with_it_and_an_old_token_never_works_for_the_next_one() {
+    let host = Running::start();
+    let mut op = host.client();
+    let dir = host.run_dir();
+
+    let (old_token, _) = spawn_reporter(&mut op, "reuse");
+    op.call("agent.mcp_config", json!({"name": "reuse", "agent": "claude", "url": "http://h/mcp", "token": "hqs_x"})).unwrap();
+    op.call("agent.hook_flags", json!({"name": "reuse", "agent": "claude"})).unwrap();
+    assert!(dir.join("mcp/reuse.json").exists() && dir.join("hooks/reuse.json").exists());
+
+    op.call("agent.remove", json!({"name": "reuse"})).unwrap();
+    assert!(!dir.join("mcp/reuse.json").exists(), "the file holding the agent's HQ token must not outlive it");
+    assert!(!dir.join("hooks/reuse.json").exists());
+
+    let (new_token, _) = spawn_reporter(&mut op, "reuse");
+    assert_ne!(old_token, new_token);
+    assert!(Client::connect_with_token(&dir, &old_token).is_err(), "a leftover process cannot pose as the new agent");
+    assert!(Client::connect_with_token(&dir, &new_token).is_ok());
+}
+
+#[test]
+fn oversized_mcp_settings_and_too_many_agents_are_refused() {
+    let host = Running::start();
+    let mut op = host.client();
+    let err = op
+        .call("agent.mcp_config", json!({"name": "cap", "agent": "claude", "url": "u".repeat(3000), "token": "t"}))
+        .unwrap_err();
+    assert_eq!(err.code(), Some("too_large"));
+    let err = op
+        .call("agent.mcp_config", json!({"name": "cap", "agent": "claude", "url": "http://h", "token": "t".repeat(300)}))
+        .unwrap_err();
+    assert_eq!(err.code(), Some("too_large"));
+    assert!(!host.run_dir().join("mcp/cap.json").exists());
+}

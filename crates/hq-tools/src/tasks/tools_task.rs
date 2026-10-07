@@ -226,7 +226,18 @@ impl HqTool for TaskListTool {
             .get("include_description")
             .and_then(|v| v.as_bool())
             .unwrap_or(false);
-        let tasks = self.db.with_conn(move |c| t::list_tasks(c, &filter))?;
+        let caller = crate::harness_session::caller_session(&args).map(str::to_string);
+        let tasks = self.db.with_conn(move |c| {
+            let tasks = t::list_tasks(c, &filter)?;
+            // A launched agent sees only the tasks it may use.
+            match caller {
+                Some(session) => {
+                    let scope = crate::a2a::task_scope(c, &session)?;
+                    Ok(tasks.into_iter().filter(|task| scope.contains(&task.id)).collect())
+                }
+                None => Ok(tasks),
+            }
+        })?;
         // Full descriptions push a list past the MCP gateway's size cap, which cuts
         // the middle out of the JSON and silently drops tasks.
         let rows = tasks.iter().map(|task| {
@@ -278,9 +289,11 @@ impl HqTool for TaskGetTool {
         if id.is_empty() {
             bail!("id is required");
         }
+        let caller = crate::harness_session::caller_session(&args).map(str::to_string);
         let (task, subtasks, dependents, events) = self.db.with_conn(move |c| {
             let task =
                 t::get_task(c, &id)?.ok_or_else(|| anyhow::anyhow!("no task found for that id"))?;
+            crate::a2a::check_task_access(c, caller.as_deref(), &task.id)?;
             let subtasks = t::list_subtasks(c, &task.id)?;
             let dependents = t::list_dependents(c, &task.id)?;
             let events = t::list_task_events(c, &task.id)?;
@@ -489,9 +502,11 @@ impl HqTool for TaskCommentAddTool {
                 v => v,
             },
         };
+        let caller = crate::harness_session::caller_session(&args).map(str::to_string);
         let comment = self.db.with_conn(move |c| {
             let task = t::get_task(c, &task_id)?
                 .ok_or_else(|| anyhow::anyhow!("no task found for that id"))?;
+            crate::a2a::check_task_access(c, caller.as_deref(), &task.id)?;
             t::add_comment(c, &task.id, &author, &body, None)
         })?;
         Ok(json!({
@@ -536,9 +551,11 @@ impl HqTool for TaskCommentListTool {
         if task_id.is_empty() {
             bail!("task_id is required");
         }
+        let caller = crate::harness_session::caller_session(&args).map(str::to_string);
         let comments = self.db.with_conn(move |c| {
             let task = t::get_task(c, &task_id)?
                 .ok_or_else(|| anyhow::anyhow!("no task found for that id"))?;
+            crate::a2a::check_task_access(c, caller.as_deref(), &task.id)?;
             t::list_comments(c, &task.id)
         })?;
         Ok(json!({

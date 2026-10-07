@@ -42,12 +42,14 @@ pub struct Client {
 impl Client {
     /// Connects to `<dir>/host.sock` with the token from `<dir>/operator.token`.
     pub fn connect(dir: &Path) -> Result<Self, ClientError> {
-        let token = std::fs::read_to_string(token::token_path(dir))
+        let token = token::load_trusted(dir)
             .map_err(|e| ClientError::Unreachable(format!("operator token: {e}")))?;
-        Self::connect_with_token(dir, token.trim())
+        Self::connect_with_token(dir, &token)
     }
 
     pub fn connect_with_token(dir: &Path, token: &str) -> Result<Self, ClientError> {
+        token::check_trusted_dir(dir)
+            .map_err(|e| ClientError::Unreachable(format!("host directory: {e}")))?;
         let stream = UnixStream::connect(socket_path(dir))
             .map_err(|e| ClientError::Unreachable(e.to_string()))?;
         let writer = stream

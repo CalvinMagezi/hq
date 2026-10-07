@@ -29,6 +29,13 @@ work) is attributed to a session HQ launched, not to a name the agent typed.
 
 ## What it does not do
 
+- It does not stop one session from reading another's token. Every session's
+  MCP config sits in one directory owned by the same user, so a session that runs
+  `cat` on its siblings' files can act as them (send as them, comment as them,
+  use their limits). Sender identity holds against an honest agent and against
+  mistakes; against a hostile one it needs separate accounts or a sandbox per
+  session. The same goes for the host's operator token (see `AGENT_HOST.md`).
+
 - The secret is readable by the agent and by anything it runs, because the agent
   needs it. A leaked secret can act as that session until the session ends.
 - Only Claude Code is wired. Other agents have no MCP config path yet.

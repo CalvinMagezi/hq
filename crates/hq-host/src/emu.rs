@@ -30,10 +30,19 @@ pub trait Emulator: Send {
 #[derive(Clone, Default)]
 struct TitleCapture(Arc<Mutex<String>>);
 
+/// Longest title kept, in bytes. A program sets it freely and every agent reply
+/// carries it, so an unbounded one could make replies too big to read.
+pub const MAX_TITLE_BYTES: usize = 256;
+
 impl vt100::Callbacks for TitleCapture {
     fn set_window_title(&mut self, _: &mut vt100::Screen, title: &[u8]) {
+        let mut text = String::from_utf8_lossy(&title[..title.len().min(MAX_TITLE_BYTES)]).into_owned();
+        // A cut in the middle of a character leaves a replacement mark at the end.
+        while text.ends_with('\u{fffd}') && text.len() > 1 {
+            text.pop();
+        }
         let mut slot = self.0.lock().unwrap_or_else(|p| p.into_inner());
-        *slot = String::from_utf8_lossy(title).into_owned();
+        *slot = text;
     }
 }
 
@@ -189,5 +198,26 @@ mod tests {
         assert!(e.alt_screen());
         e.process(b"\x1b[?2004l\x1b[?1049l");
         assert!(!e.bracketed_paste() && !e.alt_screen());
+    }
+
+    #[test]
+    fn a_huge_title_is_cut_to_a_small_one() {
+        let mut emu = VtEmulator::new(24, 80, 100);
+        let mut bytes = b"\x1b]0;".to_vec();
+        bytes.extend(std::iter::repeat_n(b'x', 100_000));
+        bytes.push(0x07);
+        emu.process(&bytes);
+        assert!(emu.title().len() <= MAX_TITLE_BYTES, "{}", emu.title().len());
+        assert!(emu.title().starts_with("xxxx"));
+    }
+
+    #[test]
+    fn a_title_cut_inside_a_character_does_not_end_in_a_replacement_mark() {
+        let mut emu = VtEmulator::new(24, 80, 100);
+        let mut bytes = b"\x1b]0;".to_vec();
+        bytes.extend("é".repeat(300).as_bytes());
+        bytes.push(0x07);
+        emu.process(&bytes);
+        assert!(!emu.title().contains('\u{fffd}'));
     }
 }

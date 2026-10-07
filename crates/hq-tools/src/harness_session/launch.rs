@@ -101,6 +101,7 @@ pub(super) struct Launch<'a> {
     pub(super) mission_id: Option<&'a str>,
     /// Web chat that launched the session and will watch it.
     pub(super) watch: Option<NewWatch<'a>>,
+    pub(super) parent: Option<(&'a str, i64)>,
     pub(super) goal: GoalText<'a>,
 }
 
@@ -152,6 +153,7 @@ pub(super) struct OwnedLaunch {
     resuming: bool,
     mission_id: Option<String>,
     watch: Option<(String, bool, bool)>,
+    parent: Option<(String, i64)>,
     goal: (Option<String>, Option<String>),
 }
 
@@ -168,6 +170,7 @@ impl OwnedLaunch {
             resuming: l.resuming,
             mission_id: own(l.mission_id),
             watch: l.watch.map(|w| (w.thread.to_string(), w.drive, w.opted_out)),
+            parent: l.parent.map(|(id, depth)| (id.to_string(), depth)),
             goal: (own(l.goal.goal), own(l.goal.done_criteria)),
         }
     }
@@ -187,6 +190,7 @@ impl OwnedLaunch {
                 drive: *drive,
                 opted_out: *opted_out,
             }),
+            parent: self.parent.as_ref().map(|(id, depth)| (id.as_str(), *depth)),
             goal: GoalText {
                 goal: self.goal.0.as_deref(),
                 done_criteria: self.goal.1.as_deref(),
@@ -229,7 +233,12 @@ pub(super) async fn launch_session(
 /// A secret for this session and the endpoint to use it on, when HQ is set up
 /// to let launched agents call back and the host can deliver it.
 fn mcp_access(db: &Arc<Database>, host: &Host, harness: &Harness, session_id: &str) -> Option<McpAccess> {
-    let url = herdr_config().agent_mcp_url?;
+    let Some(url) = herdr_config().agent_mcp_url else {
+        // No endpoint now: an older secret of a resumed session must not revive.
+        let id = session_id.to_string();
+        let _ = db.with_conn(move |c| hq_db::session_tokens::revoke(c, &id));
+        return None;
+    };
     if !host.accepts_mcp() || harness.spec.kind != "claude" {
         return None;
     }
@@ -255,7 +264,7 @@ pub(super) async fn run_launch(
     let session_id = l.session_id.to_string();
     let launched = launch_with(vault_path, db, harness, l, mcp).await;
     if launched.is_err() && minted {
-        let _ = db.with_conn(move |c| hq_db::session_tokens::revoke(c, &session_id));
+        let _ = db.with_conn(move |c| hq_db::session_tokens::revoke_if_unregistered(c, &session_id));
     }
     launched
 }
@@ -364,6 +373,7 @@ pub(super) fn record_placement(
     let (resuming, mission) = (l.resuming, l.mission_id.map(str::to_string));
     let watch = l.watch.map(|w| (w.thread.to_string(), w.drive, w.opted_out));
     let goal = (l.goal.goal.map(str::to_string), l.goal.done_criteria.map(str::to_string));
+    let parent = l.parent.map(|(id, depth)| (id.to_string(), depth));
     db.with_conn(move |c| {
         let (host, name, ws, pane) = &placement_owned;
         let placement = Placement {
@@ -386,6 +396,9 @@ pub(super) fn record_placement(
                 placement,
             },
         )?;
+        if let Some((parent, depth)) = &parent {
+            registry::set_parent(c, name, parent, *depth)?;
+        }
         if goal.0.is_some() || goal.1.is_some() {
             registry::set_goal(c, name, goal.0.as_deref(), goal.1.as_deref(), registry::ACTOR_HQ)?;
         }
@@ -498,6 +511,9 @@ pub struct SpawnRequest<'a> {
     pub mission_id: Option<&'a str>,
     /// Web chat that will watch the session.
     pub watch: Option<NewWatch<'a>>,
+    /// The session this one is started for, and its depth: recorded in the same
+    /// write as the session itself, so no limit can be dodged by a half-made child.
+    pub parent: Option<(&'a str, i64)>,
     pub goal: GoalText<'a>,
 }
 
@@ -522,6 +538,7 @@ pub async fn spawn(
             label,
             mission_id,
             watch: None,
+            parent: None,
             goal: GoalText::default(),
         },
     )
@@ -573,6 +590,7 @@ pub(crate) async fn spawn_on(
             resuming: false,
             mission_id: mission_id.as_deref(),
             watch: req.watch,
+            parent: req.parent,
             goal,
         },
     )

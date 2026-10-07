@@ -288,6 +288,7 @@ async fn run_handoff(
                 drive: req.drive_new && !req.drive_opted_out,
                 opted_out: req.drive_opted_out,
             }),
+            parent: None,
             goal: GoalText {
                 goal: None,
                 done_criteria: non_blank(&req.acceptance),

@@ -34,6 +34,7 @@ pub fn write_claude_settings(
     name: &str,
     report_command: &str,
 ) -> std::io::Result<PathBuf> {
+    check_name(name)?;
     let hooks = dir.join(HOOKS_DIR);
     token::ensure_dir(&hooks)?;
     let path = hooks.join(format!("{name}.json"));
@@ -64,6 +65,7 @@ pub fn write_claude_mcp_config(
     url: &str,
     token: &str,
 ) -> std::io::Result<PathBuf> {
+    check_name(name)?;
     let folder = dir.join(MCP_DIR);
     token::ensure_dir(&folder)?;
     let path = folder.join(format!("{name}.json"));
@@ -75,6 +77,45 @@ pub fn write_claude_mcp_config(
 pub fn claude_mcp_config_path(dir: &Path, name: &str) -> Option<PathBuf> {
     let path = dir.join(MCP_DIR).join(format!("{name}.json"));
     path.is_file().then_some(path)
+}
+
+/// File names come from agent names, so they must be plain agent names.
+fn check_name(name: &str) -> std::io::Result<()> {
+    if crate::host::valid_name(name) {
+        Ok(())
+    } else {
+        Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidInput,
+            format!("{name:?} is not an agent name"),
+        ))
+    }
+}
+
+/// Deletes the hook settings and MCP config of `name`.
+pub fn remove_agent_files(dir: &Path, name: &str) {
+    if check_name(name).is_err() {
+        return;
+    }
+    for folder in [HOOKS_DIR, MCP_DIR] {
+        let _ = fs::remove_file(dir.join(folder).join(format!("{name}.json")));
+    }
+}
+
+/// Deletes every hook and MCP config file whose agent is not in `keep`.
+pub fn sweep_agent_files(dir: &Path, keep: &[String]) {
+    for folder in [HOOKS_DIR, MCP_DIR] {
+        let Ok(entries) = fs::read_dir(dir.join(folder)) else {
+            continue;
+        };
+        for entry in entries.flatten() {
+            let path = entry.path();
+            let stem = path.file_stem().and_then(|s| s.to_str()).unwrap_or_default();
+            let ours = path.extension().is_some_and(|e| e == "json" || e == "tmp");
+            if ours && !keep.iter().any(|k| k == stem.trim_end_matches(".json")) {
+                let _ = fs::remove_file(&path);
+            }
+        }
+    }
 }
 
 fn write_private(path: &Path, value: &Value) -> std::io::Result<()> {
@@ -155,5 +196,31 @@ mod tests {
         assert_eq!(p["notification_type"], "permission_prompt");
         assert!(report_params("not json").is_none());
         assert!(report_params(r#"{"session_id":"s"}"#).is_none());
+    }
+
+    #[test]
+    fn file_names_must_be_agent_names() {
+        let tmp = tempfile::tempdir().unwrap();
+        for bad in ["../x", "a/b", "", "A", "a.b", "-a"] {
+            assert!(write_claude_settings(tmp.path(), bad, "c").is_err(), "{bad}");
+            assert!(write_claude_mcp_config(tmp.path(), bad, "u", "t").is_err(), "{bad}");
+        }
+        assert!(!tmp.path().join("x.json").exists());
+    }
+
+    #[test]
+    fn an_agents_files_are_removed_and_strays_are_swept() {
+        let tmp = tempfile::tempdir().unwrap();
+        let dir = tmp.path();
+        for name in ["gone", "keep", "stray"] {
+            write_claude_settings(dir, name, "c").unwrap();
+            write_claude_mcp_config(dir, name, "u", "t").unwrap();
+        }
+        remove_agent_files(dir, "gone");
+        assert!(!dir.join("hooks/gone.json").exists() && !dir.join("mcp/gone.json").exists());
+
+        sweep_agent_files(dir, &["keep".to_string()]);
+        assert!(dir.join("hooks/keep.json").exists() && dir.join("mcp/keep.json").exists());
+        assert!(!dir.join("hooks/stray.json").exists() && !dir.join("mcp/stray.json").exists());
     }
 }

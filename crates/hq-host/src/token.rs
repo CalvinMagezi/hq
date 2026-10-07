@@ -48,6 +48,36 @@ pub fn ensure_dir(dir: &Path) -> std::io::Result<()> {
     fs::set_permissions(dir, fs::Permissions::from_mode(DIR_MODE))
 }
 
+/// Refuses a host directory another user could have set up or can change: it
+/// must be a real directory (not a symlink) owned by this user that nobody else
+/// can write to. A client sends the operator token and agent secrets there, so a
+/// directory someone else controls could hold a socket that is not the host.
+pub fn check_trusted_dir(dir: &Path) -> std::io::Result<()> {
+    let meta = fs::symlink_metadata(dir)?;
+    if meta.file_type().is_symlink() || !meta.is_dir() {
+        return Err(Error::new(
+            ErrorKind::InvalidInput,
+            format!("{} is not a plain directory", dir.display()),
+        ));
+    }
+    if meta.uid() != geteuid().as_raw() || meta.mode() & GROUP_OTHER_BITS != 0 {
+        return Err(Error::new(
+            ErrorKind::PermissionDenied,
+            format!(
+                "{} must be owned by you with no access for others (mode 0700): a socket there could be an impostor's",
+                dir.display()
+            ),
+        ));
+    }
+    Ok(())
+}
+
+/// The operator token in `dir`, after checking the directory and the file.
+pub(crate) fn load_trusted(dir: &Path) -> std::io::Result<String> {
+    check_trusted_dir(dir)?;
+    read_token(&token_path(dir))?.ok_or_else(|| Error::new(ErrorKind::NotFound, "no operator token"))
+}
+
 pub(crate) fn random_hex() -> std::io::Result<String> {
     let mut bytes = [0u8; TOKEN_BYTES];
     fs::File::open("/dev/urandom")?.read_exact(&mut bytes)?;

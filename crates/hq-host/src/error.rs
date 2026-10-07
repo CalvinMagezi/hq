@@ -22,6 +22,10 @@ pub enum HostError {
     Timeout(Duration),
     #[error("'{0}' has exited")]
     Exited(String),
+    #[error("{0} is too large")]
+    TooLarge(&'static str),
+    #[error("the host is running as many agents as it allows ({0})")]
+    TooManyAgents(usize),
     #[error("'{name}' needs these variables to resume: {missing}")]
     MissingEnv { name: String, missing: String },
 }
@@ -40,6 +44,8 @@ impl HostError {
             HostError::Io(_) => "io",
             HostError::Timeout(_) => "timeout",
             HostError::Exited(_) => "agent_exited",
+            HostError::TooLarge(_) => "too_large",
+            HostError::TooManyAgents(_) => "too_many_agents",
             HostError::MissingEnv { .. } => "missing_env",
         }
     }

@@ -81,6 +81,10 @@ pub(crate) struct Reported {
     pub event: String,
 }
 
+/// How long typing into a pane may take before the host gives up on it.
+const WRITE_TIMEOUT: Duration = Duration::from_secs(5);
+/// How often a write waits to see whether the one ahead of it finished.
+const WRITE_RETRY: Duration = Duration::from_millis(5);
 pub(crate) struct Pane {
     pub(crate) argv: Vec<String>,
     pub(crate) resume: Option<Resume>,
@@ -106,7 +110,9 @@ pub(crate) struct Pane {
     reported: Mutex<Option<Reported>>,
     /// The agent's own id for its conversation, as its hooks reported it.
     session_id: Mutex<Option<String>>,
-    writer: Mutex<Box<dyn Write + Send>>,
+    writer: Arc<Mutex<Box<dyn Write + Send>>>,
+    /// A write is in flight and has not finished: the program is not reading.
+    writing: Arc<AtomicBool>,
     master: Mutex<Box<dyn MasterPty + Send>>,
     killer: Mutex<Box<dyn ChildKiller + Send + Sync>>,
 }
@@ -203,7 +209,8 @@ impl Pane {
             resume_argv: Mutex::new(None),
             reported: Mutex::new(None),
             session_id: Mutex::new(None),
-            writer: Mutex::new(writer),
+            writer: Arc::new(Mutex::new(writer)),
+            writing: Arc::new(AtomicBool::new(false)),
             master: Mutex::new(pair.master),
             killer: Mutex::new(killer),
         })
@@ -242,11 +249,39 @@ impl Pane {
         })
     }
 
+    /// Types `bytes` into the pane. The write runs on its own thread and this
+    /// gives up after `WRITE_TIMEOUT`, so a program that stopped reading its
+    /// terminal cannot hold a connection forever. While one write is stuck, the
+    /// next ones fail at once instead of piling up behind it.
     pub(crate) fn write(&self, bytes: &[u8]) -> Result<(), HostError> {
-        let mut w = lock(&self.writer);
-        w.write_all(bytes)
-            .and_then(|()| w.flush())
-            .map_err(|e| HostError::Io(e.to_string()))
+        let deadline = Instant::now() + WRITE_TIMEOUT;
+        // Another write may be mid-flight. A healthy one finishes at once; a
+        // stuck one outlasts the deadline and this one gives up too.
+        while self.writing.swap(true, Ordering::SeqCst) {
+            if Instant::now() >= deadline {
+                return Err(HostError::Timeout(WRITE_TIMEOUT));
+            }
+            std::thread::sleep(WRITE_RETRY);
+        }
+        let (writer, writing) = (self.writer.clone(), self.writing.clone());
+        let data = bytes.to_vec();
+        let (done_tx, done_rx) = std::sync::mpsc::channel();
+        let spawned = std::thread::Builder::new().spawn(move || {
+            let result = {
+                let mut w = lock(&writer);
+                w.write_all(&data).and_then(|()| w.flush())
+            };
+            writing.store(false, Ordering::SeqCst);
+            let _ = done_tx.send(result);
+        });
+        if let Err(e) = spawned {
+            self.writing.store(false, Ordering::SeqCst);
+            return Err(HostError::Io(e.to_string()));
+        }
+        match done_rx.recv_timeout(deadline.saturating_duration_since(Instant::now())) {
+            Ok(result) => result.map_err(|e| HostError::Io(e.to_string())),
+            Err(_) => Err(HostError::Timeout(WRITE_TIMEOUT)),
+        }
     }
 
     pub(crate) fn resize(&self, rows: u16, cols: u16) -> Result<(), HostError> {

@@ -114,6 +114,18 @@ pub struct PaneInfo {
     pub age: Duration,
 }
 
+/// Most agents the host runs at once, and the most bytes of command line one
+/// may be started with. Both bound what a caller of the socket can make the host
+/// hold.
+const MAX_AGENTS: usize = 128;
+const MAX_ARGV_BYTES: usize = 64 * 1024;
+/// Longest MCP address and token the host will write into a config file.
+const MAX_MCP_URL_BYTES: usize = 2048;
+const MAX_MCP_TOKEN_BYTES: usize = 256;
+/// Longest conversation id an agent may report. They are short tokens; anything
+/// else would end up in a restart command line.
+const MAX_SESSION_ID_CHARS: usize = 128;
+
 /// How often the state watcher looks at every agent.
 const STATE_WATCH_INTERVAL: Duration = Duration::from_millis(250);
 
@@ -139,6 +151,7 @@ pub struct AwaitingInfo {
 pub struct Host {
     panes: Registry,
     awaiting: Awaiting,
+    max_agents: usize,
     events: Arc<EventLog>,
     /// Per-agent secret each pane gets so its hooks can report on itself and
     /// nothing else. Kept in memory only.
@@ -193,12 +206,19 @@ impl Host {
         Self {
             panes: Arc::new(Mutex::new(BTreeMap::new())),
             awaiting: Arc::new(Mutex::new(BTreeMap::new())),
+            max_agents: MAX_AGENTS,
             events: Arc::new(EventLog::from_clock()),
             pane_tokens: Mutex::new(BTreeMap::new()),
             run_dir: Mutex::new(None),
             detector,
             state: None,
         }
+    }
+
+    /// A host that runs at most `max` agents at once (default 128).
+    pub fn with_max_agents(mut self, max: usize) -> Self {
+        self.max_agents = max;
+        self
     }
 
     /// A host that remembers its resumable agents in `<dir>/session.json`.
@@ -219,6 +239,15 @@ impl Host {
             return Err(HostError::InvalidName(spec.name));
         }
         check_size(spec.rows, spec.cols)?;
+        let argv_bytes = |v: &[String]| v.iter().map(String::len).sum::<usize>();
+        if argv_bytes(&spec.argv) > MAX_ARGV_BYTES
+            || spec.resume_argv.as_deref().is_some_and(|a| argv_bytes(a) > MAX_ARGV_BYTES)
+        {
+            return Err(HostError::TooLarge("the command line"));
+        }
+        if lock(&self.panes).len() + lock(&self.awaiting).len() >= self.max_agents {
+            return Err(HostError::TooManyAgents(self.max_agents));
+        }
 
         if lock(&self.panes).contains_key(&spec.name)
             || lock(&self.awaiting).contains_key(&spec.name)
@@ -262,9 +291,11 @@ impl Host {
             pane.kill();
             return Err(HostError::NameTaken(spec.name));
         }
+        // The token goes in before the pane is findable, so a leftover process
+        // holding an earlier agent's token for this name never authenticates.
+        lock(&self.pane_tokens).insert(spec.name.clone(), token);
         panes.insert(spec.name.clone(), pane.clone());
         drop(panes);
-        lock(&self.pane_tokens).insert(spec.name.clone(), token);
         self.events.push(&spec.name, EventKind::Spawned, None, None);
         self.save();
         Ok(info_of(&spec.name, pane.as_ref(), &self.detector))
@@ -303,6 +334,25 @@ impl Host {
         }
     }
 
+    /// Deletes the hook and MCP config files written for `name`. The MCP file
+    /// holds the agent's HQ token, so it must not outlive the agent.
+    fn forget_files(&self, name: &str) {
+        if let Some(dir) = lock(&self.run_dir).clone() {
+            crate::hooks::remove_agent_files(&dir, name);
+        }
+    }
+
+    /// Deletes hook and MCP config files that belong to no agent the host
+    /// knows, such as those a crash or an abandoned launch left behind.
+    fn sweep_agent_files(&self) {
+        let Some(dir) = lock(&self.run_dir).clone() else {
+            return;
+        };
+        let mut known: Vec<String> = lock(&self.panes).keys().cloned().collect();
+        known.extend(lock(&self.awaiting).keys().cloned());
+        crate::hooks::sweep_agent_files(&dir, &known);
+    }
+
     /// Writes the MCP config that connects a Claude Code agent to HQ as the
     /// launched session `name`, holding that session's token. `hook_flags`
     /// returns the flag that points at it. Does nothing for other kinds or a
@@ -318,6 +368,9 @@ impl Host {
         let (true, Some(dir)) = (agent == "claude" && valid_name(name), dir) else {
             return Ok(());
         };
+        if url.len() > MAX_MCP_URL_BYTES || token.len() > MAX_MCP_TOKEN_BYTES {
+            return Err(HostError::TooLarge("the MCP address or token"));
+        }
         crate::hooks::write_claude_mcp_config(&dir, name, url, token)
             .map(|_| ())
             .map_err(|e| HostError::Io(e.to_string()))
@@ -374,6 +427,7 @@ impl Host {
                 Err(e) => report.skipped.push((name, e.to_string())),
             }
         }
+        self.sweep_agent_files();
         report
     }
 
@@ -522,6 +576,9 @@ impl Host {
         session_id: Option<String>,
     ) -> Result<(), HostError> {
         let pane = self.pane(name)?;
+        // An id that is not a plain token is dropped, not stored: it ends up in
+        // the agent's restart command line.
+        let session_id = session_id.filter(|id| valid_session_id(id));
         pane.record_report(report::state_for(event, notification_type), event, session_id);
         self.announce(name);
         Ok(())
@@ -542,16 +599,19 @@ impl Host {
     pub fn remove(&self, name: &str) -> Result<(), HostError> {
         let Some(pane) = lock(&self.panes).remove(name) else {
             if lock(&self.awaiting).remove(name).is_some() {
+                self.forget_files(name);
                 self.save();
                 self.events.push(name, EventKind::Removed, None, None);
                 return Ok(());
             }
             return Err(HostError::NotFound(name.to_string()));
         };
+        lock(&self.pane_tokens).remove(name);
         self.save();
         // Other threads may still hold the pane (a caller waiting on it), so
         // stopping it cannot be left to the last reference being dropped.
         pane.kill();
+        self.forget_files(name);
         self.events.push(name, EventKind::Removed, None, None);
         Ok(())
     }
@@ -588,8 +648,10 @@ impl Host {
     pub fn paste(&self, name: &str, text: &str) -> Result<(), HostError> {
         let pane = self.live_pane(name)?;
         if pane.with_emu(|e| e.bracketed_paste()) {
+            // The text cannot end the paste early: whatever followed a forged
+            // end marker would be typed as keystrokes.
             let mut bytes = BRACKETED_PASTE_START.to_vec();
-            bytes.extend_from_slice(text.as_bytes());
+            bytes.extend_from_slice(without_paste_markers(text).as_bytes());
             bytes.extend_from_slice(BRACKETED_PASTE_END);
             pane.write(&bytes)
         } else {
@@ -703,6 +765,30 @@ fn save_state(panes: &Registry, awaiting: &Awaiting, state: Option<&StateFile>) 
     if let Err(e) = state.write(&records) {
         eprintln!("hq host: could not save session.json: {e}");
     }
+}
+
+/// Whether `id` looks like an agent's conversation id: letters, digits, `-`, `_`
+/// and `.`, at most `MAX_SESSION_ID_CHARS`, and not starting with `-` (which a
+/// command line would read as a flag).
+fn valid_session_id(id: &str) -> bool {
+    !id.is_empty()
+        && id.len() <= MAX_SESSION_ID_CHARS
+        && !id.starts_with('-')
+        && id.chars().all(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '_' | '.'))
+}
+
+/// `text` without the bracketed-paste start and end sequences.
+fn without_paste_markers(text: &str) -> String {
+    let (start, end) = (
+        String::from_utf8_lossy(BRACKETED_PASTE_START),
+        String::from_utf8_lossy(BRACKETED_PASTE_END),
+    );
+    let mut clean = text.to_string();
+    // Removing one can join the pieces around it into another, so repeat.
+    while clean.contains(start.as_ref()) || clean.contains(end.as_ref()) {
+        clean = clean.replace(start.as_ref(), "").replace(end.as_ref(), "");
+    }
+    clean
 }
 
 /// `arg` as one shell word.

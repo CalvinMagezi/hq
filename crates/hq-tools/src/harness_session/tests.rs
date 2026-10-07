@@ -60,6 +60,7 @@ fn launch<'a>(host: HerdrHost, id: &'a str, prompt: Option<&'a str>) -> Launch<'
         resuming: false,
         mission_id: None,
         watch: None,
+        parent: None,
         goal: GoalText::default(),
     }
 }
@@ -330,6 +331,28 @@ async fn launch_records_the_session_and_types_the_prompt() {
     let log = calls(&dir);
     assert!(log.contains("--kind claude"), "{log}");
     assert!(log.contains("agent prompt hs-t1 fix the bug"), "{log}");
+}
+
+#[tokio::test]
+async fn a_delegated_session_has_its_parent_from_the_moment_it_exists() {
+    let (_dir, host) = fake_host(&[
+        ("workspace create", CREATED.into(), None),
+        ("agent start", OK.into(), None),
+        ("agent get", agent_json("hs-kid", "idle"), None),
+        ("agent prompt", OK.into(), None),
+    ]);
+    let db = Arc::new(Database::open_memory().unwrap());
+    let vault = tempfile::tempdir().unwrap();
+    let mut l = launch(host, "hs-kid", Some("work"));
+    l.parent = Some(("hs-parent", 1));
+    launch_session(vault.path(), &db, &harness("claude-code"), l).await.unwrap();
+
+    // Read straight after the launch call: there is no later write that sets it.
+    let row = get_row(&db, "hs-kid").unwrap();
+    assert_eq!(row.parent_session_id.as_deref(), Some("hs-parent"));
+    assert_eq!(row.spawn_depth, 1);
+    let children = db.with_conn(|c| registry::running_children(c, "hs-parent")).unwrap();
+    assert_eq!(children.len(), 1, "the limits count it at once");
 }
 
 #[tokio::test]

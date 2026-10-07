@@ -864,6 +864,21 @@ async fn comment_as(attested: Option<&str>, supplied_author: Option<&str>) -> St
         args["author"] = author.into();
     }
     if let Some(id) = attested {
+        use hq_db::harness_sessions_registry::{self as registry, NewSession, Placement};
+        db.with_conn(|c| {
+            registry::insert(
+                c,
+                &NewSession {
+                    id,
+                    harness: "claude-code",
+                    label: "t",
+                    cwd: "/t",
+                    mission_id: made["id"].as_str(),
+                    placement: Placement { host: "native", agent_name: id, workspace_id: "w", pane_id: "p" },
+                },
+            )
+        })
+        .unwrap();
         args[hq_tools_arg()] = id.into();
     }
     tool("task_comment_add").execute(args).await.unwrap();
@@ -891,4 +906,55 @@ async fn a_comment_from_a_launched_agent_is_authored_by_its_attested_session() {
 async fn other_callers_keep_the_author_they_name() {
     assert_eq!(comment_as(None, Some("calvin")).await, "calvin");
     assert_eq!(comment_as(None, None).await, "unknown");
+}
+
+#[tokio::test]
+async fn a_launched_agent_reaches_only_its_own_task_through_the_task_tools() {
+    use hq_db::harness_sessions_registry::{self as registry, NewSession, Placement};
+    let vault_path = PathBuf::from("/tmp/test-vault");
+    let vault = Arc::new(VaultClient::new(vault_path.clone()).unwrap());
+    let db = Arc::new(Database::open_memory().unwrap());
+    let all = create_task_tools(vault_path, vault, db.clone());
+    let tool = |name: &str| all.iter().find(|t| t.name() == name).unwrap();
+    let make = |title: &str| {
+        let t = tool("task_create");
+        let title = title.to_string();
+        async move { t.execute(json!({"title": title, "created_by": "calvin"})).await.unwrap() }
+    };
+    let (mine, theirs) = (make("mine").await, make("theirs").await);
+    db.with_conn(|c| {
+        registry::insert(
+            c,
+            &NewSession {
+                id: "hs-me",
+                harness: "claude-code",
+                label: "t",
+                cwd: "/t",
+                mission_id: mine["id"].as_str(),
+                placement: Placement { host: "native", agent_name: "hs-me", workspace_id: "w", pane_id: "p" },
+            },
+        )
+    })
+    .unwrap();
+    let as_me = |mut args: serde_json::Value| {
+        args[crate::harness_session::CALLER_SESSION_ARG] = "hs-me".into();
+        args
+    };
+
+    for name in ["task_get"] {
+        assert!(tool(name).execute(as_me(json!({"id": mine["id"]}))).await.is_ok());
+        assert!(tool(name).execute(as_me(json!({"id": theirs["id"]}))).await.is_err());
+    }
+    for name in ["task_comment_list"] {
+        assert!(tool(name).execute(as_me(json!({"task_id": mine["id"]}))).await.is_ok());
+        assert!(tool(name).execute(as_me(json!({"task_id": theirs["id"]}))).await.is_err());
+    }
+    let add = |task: &serde_json::Value| as_me(json!({"task_id": task["id"], "body": "note"}));
+    assert!(tool("task_comment_add").execute(add(&mine)).await.is_ok());
+    assert!(tool("task_comment_add").execute(add(&theirs)).await.is_err(), "no planting text on other tasks");
+
+    let listed = tool("task_list").execute(as_me(json!({}))).await.unwrap();
+    assert_eq!(listed["count"], 1, "{listed}");
+    let unscoped = tool("task_list").execute(json!({})).await.unwrap();
+    assert_eq!(unscoped["count"], 2, "callers without a session are not scoped");
 }

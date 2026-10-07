@@ -69,6 +69,7 @@ pub async fn resume(
         db,
         &harness,
         Launch {
+            parent: None,
             host,
             session_id,
             cwd: &row.cwd,
@@ -553,7 +554,7 @@ pub fn stop(db: &Arc<Database>, session_id: &str) -> Result<Value> {
 /// Best effort: one that cannot be stopped is left for the supervisor and named
 /// in the log, and the parent's stop still succeeds. The chain is only as deep as
 /// delegation allows, so the recursion is bounded.
-fn stop_children(db: &Arc<Database>, parent: &str) -> Vec<String> {
+pub fn stop_children(db: &Arc<Database>, parent: &str) -> Vec<String> {
     let id = parent.to_string();
     let children = db
         .with_conn(move |c| registry::running_children(c, &id))
