@@ -1,4 +1,5 @@
 use super::*;
+use crate::herdr::McpAccess;
 
 pub(super) fn build_args(
     harness: &Harness,
@@ -225,6 +226,23 @@ pub(super) async fn launch_session(
 /// recorded, any failure closes the workspace (and says so if it could not), so
 /// nothing is left untracked. Once the row is written the session is real and
 /// later failures leave it tracked.
+/// A secret for this session and the endpoint to use it on, when HQ is set up
+/// to let launched agents call back and the host can deliver it.
+fn mcp_access(db: &Arc<Database>, host: &Host, harness: &Harness, session_id: &str) -> Option<McpAccess> {
+    let url = herdr_config().agent_mcp_url?;
+    if !host.accepts_mcp() || harness.spec.kind != "claude" {
+        return None;
+    }
+    let id = session_id.to_string();
+    match db.with_conn(move |c| hq_db::session_tokens::mint(c, &id)) {
+        Ok(token) => Some(McpAccess { url, token }),
+        Err(e) => {
+            tracing::warn!(session = %session_id, error = %e, "could not mint a session token");
+            None
+        }
+    }
+}
+
 pub(super) async fn run_launch(
     vault_path: &Path,
     db: &Arc<Database>,
@@ -232,6 +250,23 @@ pub(super) async fn run_launch(
     l: Launch<'_>,
 ) -> Result<Value> {
     preflight::require_binary(&l.host, harness)?;
+    let mcp = mcp_access(db, &l.host, harness, l.session_id);
+    let minted = mcp.is_some();
+    let session_id = l.session_id.to_string();
+    let launched = launch_with(vault_path, db, harness, l, mcp).await;
+    if launched.is_err() && minted {
+        let _ = db.with_conn(move |c| hq_db::session_tokens::revoke(c, &session_id));
+    }
+    launched
+}
+
+async fn launch_with(
+    vault_path: &Path,
+    db: &Arc<Database>,
+    harness: &Harness,
+    l: Launch<'_>,
+    mcp: Option<McpAccess>,
+) -> Result<Value> {
     let profile = harness.profile.as_ref();
     let request = LaunchRequest {
         name: l.session_id.to_string(),
@@ -248,6 +283,7 @@ pub(super) async fn run_launch(
         ),
         command: profile.and_then(|p| p.command.clone()),
         resume_args: restart_args(harness, vault_path, l.session_id),
+        mcp,
         start_timeout: l.host.launch_bound(),
     };
     let began = std::time::Instant::now();

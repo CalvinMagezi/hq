@@ -480,13 +480,14 @@ impl HqTool for TaskCommentAddTool {
         if task_id.is_empty() || body.is_empty() {
             bail!("task_id and body are required");
         }
-        let author = {
-            let v = arg_str(&args, "author");
-            if v.is_empty() {
-                "unknown".to_string()
-            } else {
-                v
-            }
+        // A launched agent that proved its session is that session, whatever
+        // name it supplies.
+        let author = match crate::harness_session::caller_session(&args) {
+            Some(session) => session.to_string(),
+            None => match arg_str(&args, "author") {
+                v if v.is_empty() => "unknown".to_string(),
+                v => v,
+            },
         };
         let comment = self.db.with_conn(move |c| {
             let task = t::get_task(c, &task_id)?

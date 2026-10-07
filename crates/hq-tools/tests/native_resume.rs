@@ -131,6 +131,7 @@ fn a_reported_conversation_id_becomes_the_hosts_restart_command() {
             args: vec![],
             command: Some("f() { echo started; cat; }; f".into()),
             resume_args: Some(vec!["-c".into()]),
+            mcp: None,
             start_timeout: WAIT,
         })
         .unwrap();

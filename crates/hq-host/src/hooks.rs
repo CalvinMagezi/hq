@@ -37,9 +37,49 @@ pub fn write_claude_settings(
     let hooks = dir.join(HOOKS_DIR);
     token::ensure_dir(&hooks)?;
     let path = hooks.join(format!("{name}.json"));
-    let bytes = serde_json::to_vec_pretty(&claude_settings(report_command))
-        .map_err(std::io::Error::other)?;
-    let tmp = hooks.join(format!("{name}.json.tmp"));
+    write_private(&path, &claude_settings(report_command))?;
+    Ok(path)
+}
+
+const MCP_DIR: &str = "mcp";
+/// The name the agent sees for HQ's MCP server. Distinct from a user's own
+/// `agent-hq` entry, so both can be configured at once.
+const MCP_SERVER_NAME: &str = "hq-session";
+
+/// Claude Code MCP config that connects to HQ at `url` as one launched
+/// session, with the session's own token as its credential.
+pub fn claude_mcp_config(url: &str, token: &str) -> Value {
+    json!({ "mcpServers": { MCP_SERVER_NAME: {
+        "type": "http",
+        "url": url,
+        "headers": { "Authorization": format!("Bearer {token}") },
+    } } })
+}
+
+/// Writes `<dir>/mcp/<name>.json` (0600, in a 0700 directory) and returns its
+/// path, ready for `claude --mcp-config`. The file holds the session's token.
+pub fn write_claude_mcp_config(
+    dir: &Path,
+    name: &str,
+    url: &str,
+    token: &str,
+) -> std::io::Result<PathBuf> {
+    let folder = dir.join(MCP_DIR);
+    token::ensure_dir(&folder)?;
+    let path = folder.join(format!("{name}.json"));
+    write_private(&path, &claude_mcp_config(url, token))?;
+    Ok(path)
+}
+
+/// Where the MCP config for `name` is, if one was written.
+pub fn claude_mcp_config_path(dir: &Path, name: &str) -> Option<PathBuf> {
+    let path = dir.join(MCP_DIR).join(format!("{name}.json"));
+    path.is_file().then_some(path)
+}
+
+fn write_private(path: &Path, value: &Value) -> std::io::Result<()> {
+    let bytes = serde_json::to_vec_pretty(value).map_err(std::io::Error::other)?;
+    let tmp = path.with_extension("json.tmp");
     let _ = fs::remove_file(&tmp);
     let mut file = fs::OpenOptions::new()
         .write(true)
@@ -48,8 +88,7 @@ pub fn write_claude_settings(
         .open(&tmp)?;
     file.write_all(&bytes)?;
     file.sync_all()?;
-    fs::rename(&tmp, &path)?;
-    Ok(path)
+    fs::rename(&tmp, path)
 }
 
 /// The `agent.report` params for the JSON a Claude Code hook receives on
@@ -90,6 +129,21 @@ mod tests {
         assert_eq!(mode, 0o600);
         let back: Value = serde_json::from_str(&fs::read_to_string(path).unwrap()).unwrap();
         assert!(back["hooks"]["Stop"].is_array());
+    }
+
+    #[test]
+    fn the_mcp_config_carries_the_session_token_in_a_private_file() {
+        let tmp = tempfile::tempdir().unwrap();
+        let dir = tmp.path().join("run");
+        let path = write_claude_mcp_config(&dir, "a", "https://hq.example/mcp", "hqs_abc").unwrap();
+        let mode = fs::metadata(&path).unwrap().permissions().mode() & 0o777;
+        assert_eq!(mode, 0o600);
+        let cfg: Value = serde_json::from_str(&fs::read_to_string(&path).unwrap()).unwrap();
+        let server = &cfg["mcpServers"]["hq-session"];
+        assert_eq!(server["url"], "https://hq.example/mcp");
+        assert_eq!(server["headers"]["Authorization"], "Bearer hqs_abc");
+        assert_eq!(claude_mcp_config_path(&dir, "a"), Some(path));
+        assert_eq!(claude_mcp_config_path(&dir, "other"), None);
     }
 
     #[test]

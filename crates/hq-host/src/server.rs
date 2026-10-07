@@ -415,6 +415,10 @@ impl Conn {
             "agent.list" => {
                 Ok(json!({ "agents": host.list().iter().map(info_json).collect::<Vec<_>>() }))
             }
+            "agent.mcp_config" => {
+                let p: McpConfigParams = parse(params)?;
+                done(host.write_mcp_config(&p.name, &p.agent, &p.url, &p.token))
+            }
             "agent.hook_flags" => {
                 let p: HookFlagsParams = parse(params)?;
                 Ok(json!({ "flags": host.hook_flags(&p.name, &p.agent) }))
@@ -581,6 +585,15 @@ struct PollParams {
 /// most it may be asked to wait.
 const DEFAULT_POLL_MS: u64 = 25_000;
 const MAX_POLL_MS: u64 = 60_000;
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct McpConfigParams {
+    name: String,
+    agent: String,
+    url: String,
+    token: String,
+}
 
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
