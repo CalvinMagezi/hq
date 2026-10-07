@@ -83,7 +83,7 @@ enum Commands {
 
     /// Run or inspect the built-in agent host (long-lived coding agents in pseudo-terminals)
     Host {
-        /// serve (run the host in this terminal), status, stop, report (used by agent hooks), or gate (the ssh forced command for remote access)
+        /// serve (run the host in this terminal), status, stop, install (run it as a login service), authorize (pin a remote key to the gate), report (used by agent hooks), or gate (the ssh forced command for remote access)
         #[arg(default_value = "status")]
         sub: String,
         /// Directory holding host.sock and operator.token (default: ~/.hq/run/host)
@@ -92,6 +92,12 @@ enum Commands {
         /// serve only: also start agents that are not under the process sandbox. Without it the host refuses them, whoever asks.
         #[arg(long)]
         allow_unsandboxed: bool,
+        /// authorize only: the ssh public key to pin to `hq host gate`
+        #[arg(long)]
+        key: Option<String>,
+        /// authorize only: the address the key may connect from (ssh `from=`)
+        #[arg(long)]
+        from: Option<String>,
     },
 
     /// Internal: detached applier spawned by self_update_install
@@ -500,10 +506,17 @@ async fn async_main() -> Result<()> {
 
     // The host's hook reporter and ssh gate need no config, and the reporter
     // runs where the config is unreadable.
-    if let Some(Commands::Host { sub, dir, allow_unsandboxed }) = &cli.command
+    if let Some(Commands::Host { sub, dir, allow_unsandboxed, key, from }) = &cli.command
         && (sub == "report" || sub == "gate")
     {
-        return commands::host::run(sub, dir.clone(), *allow_unsandboxed).await;
+        return commands::host::run(commands::host::HostArgs {
+            sub: sub.clone(),
+            dir: dir.clone(),
+            allow_unsandboxed: *allow_unsandboxed,
+            key: key.clone(),
+            from: from.clone(),
+        })
+        .await;
     }
 
     // `--config` was exported as HQ_CONFIG_PATH in main(), so this and every
@@ -644,7 +657,7 @@ async fn dispatch(command: Commands, config: &HqConfig) -> Result<()> {
             host,
             lines,
         } => commands::sessions::run(config, &sub, arg, prompt, cwd, label, host, lines).await,
-        Commands::Host { sub, dir, allow_unsandboxed } => commands::host::run(&sub, dir, allow_unsandboxed).await,
+        Commands::Host { sub, dir, allow_unsandboxed, key, from } => commands::host::run(commands::host::HostArgs { sub, dir, allow_unsandboxed, key, from }).await,
         Commands::SelfApply { run_id } => commands::self_apply::run(config, run_id).await,
         Commands::NotifyRestart { phase, reason, sha } => {
             commands::notify_restart::run(config, &phase, &reason, sha.as_deref()).await
