@@ -69,8 +69,9 @@ pub struct AgentSandbox {
     /// Files the agent can neither read nor write.
     pub masked_files: Vec<PathBuf>,
     pub hidden_dirs: Vec<HiddenDir>,
-    /// Reads under one root limited to listed paths (the user's home).
-    pub read_restriction: Option<ReadRestriction>,
+    /// Reads under each root limited to listed paths, outermost root first (a
+    /// restriction inside an earlier one narrows it).
+    pub read_restrictions: Vec<ReadRestriction>,
     /// Hide other processes: their environments and their details.
     pub hide_other_processes: bool,
     pub network: Network,
@@ -156,7 +157,7 @@ pub fn seatbelt_profile(s: &AgentSandbox) -> String {
     for dir in &s.readonly_subpaths {
         p.push_str(&format!("(deny file-write* (subpath {}))", sbpl_string(dir)));
     }
-    if let Some(r) = &s.read_restriction {
+    for r in &s.read_restrictions {
         p.push_str(&format!("(deny file-read-data (subpath {}))", sbpl_string(&r.root)));
         let allowed: Vec<String> = r
             .allow
@@ -239,7 +240,7 @@ pub fn bwrap_args(s: &AgentSandbox, argv: &[String]) -> Result<Vec<OsString>, Un
     .iter()
     .map(OsString::from)
     .collect();
-    if let Some(r) = &s.read_restriction {
+    for r in &s.read_restrictions {
         args.extend(["--tmpfs".into(), (&r.root).into()]);
         for path in &r.allow {
             args.extend(["--ro-bind".into(), path.into(), path.into()]);

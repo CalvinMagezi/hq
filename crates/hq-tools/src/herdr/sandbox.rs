@@ -26,6 +26,13 @@ fn mcp_target(url: &str) -> Option<(String, u16)> {
     Some((parsed.host_str()?.to_string(), parsed.port_or_known_default()?))
 }
 
+const SECS_PER_HOUR: u64 = 3600;
+
+/// Seconds of idleness after which the host stops a session; None when off.
+pub(super) fn idle_ttl_secs(cfg: &HerdrConfig) -> Option<u64> {
+    (cfg.idle_reap_hours > 0).then(|| cfg.idle_reap_hours.saturating_mul(SECS_PER_HOUR))
+}
+
 pub(super) fn plan(cfg: &HerdrConfig) -> Value {
     let sandbox = &cfg.sandbox;
     if sandbox.mode == SandboxMode::None {
@@ -36,6 +43,9 @@ pub(super) fn plan(cfg: &HerdrConfig) -> Value {
         allow.push(json!({ "host": host, "ports": [port], "private": true }));
     }
     for entry in &sandbox.allow_domains {
+        if entry.trim_start().starts_with("*.") {
+            tracing::warn!(entry = %entry, "a wildcard in herdr.sandbox.allow_domains also allows other sites that share the CDN address; prefer exact hostnames");
+        }
         match split_entry(entry) {
             Some((host, port)) => allow.push(json!({ "host": host, "ports": [port] })),
             None => tracing::warn!(entry = %entry, "ignoring a malformed herdr.sandbox.allow_domains entry"),
@@ -76,6 +86,14 @@ mod tests {
         assert_eq!(hosts, ["api.anthropic.com", "github.com", "*.npmjs.org", "dev.test"]);
         assert_eq!(p["allow"][3]["ports"], json!([8080]));
         assert!(p["allow"][1].get("private").is_none(), "extra domains never get a private address");
+    }
+
+    #[test]
+    fn idle_reaping_defaults_to_a_day_and_zero_turns_it_off() {
+        let mut c = cfg();
+        assert_eq!(idle_ttl_secs(&c), Some(24 * 3600));
+        c.idle_reap_hours = 0;
+        assert_eq!(idle_ttl_secs(&c), None);
     }
 
     #[test]

@@ -60,6 +60,9 @@ pub struct SpawnSpec {
     pub scrollback_rows: usize,
     /// Confinement for the process; None starts it unsandboxed.
     pub sandbox: Option<SandboxSpec>,
+    /// Stop the agent once it has been silent and not working for this long, so
+    /// agents nobody is watching do not pile up. It stays resumable.
+    pub idle_ttl: Option<Duration>,
 }
 
 impl SpawnSpec {
@@ -75,6 +78,7 @@ impl SpawnSpec {
             cols: DEFAULT_COLS,
             scrollback_rows: DEFAULT_SCROLLBACK_ROWS,
             sandbox: None,
+            idle_ttl: None,
         }
     }
 }
@@ -168,6 +172,8 @@ pub struct Host {
     detector: Detector,
     state: Option<Arc<StateFile>>,
     egress: Arc<Egress>,
+    /// Refuse to start an agent that is not under the process sandbox.
+    require_sandbox: bool,
 }
 
 /// What `Host::restore` did.
@@ -221,7 +227,16 @@ impl Host {
             detector,
             state: None,
             egress: Arc::new(Egress::new()),
+            require_sandbox: false,
         }
+    }
+
+    /// A host that starts only agents under the process sandbox. A caller that
+    /// asks for none, or says nothing, gets an error: the machine's owner decides
+    /// this, not whoever drives the host.
+    pub fn with_require_sandbox(mut self, require: bool) -> Self {
+        self.require_sandbox = require;
+        self
     }
 
     /// A host that runs at most `max` agents at once (default 128).
@@ -248,6 +263,11 @@ impl Host {
             return Err(HostError::InvalidName(spec.name));
         }
         check_size(spec.rows, spec.cols)?;
+        if self.require_sandbox && spec.sandbox.as_ref().is_none_or(|s| s.mode != Mode::Process) {
+            return Err(HostError::Sandbox(
+                "this host only starts sandboxed agents; the machine's owner can start it with --allow-unsandboxed".into(),
+            ));
+        }
         let argv_bytes = |v: &[String]| v.iter().map(String::len).sum::<usize>();
         if argv_bytes(&spec.argv) > MAX_ARGV_BYTES
             || spec.resume_argv.as_deref().is_some_and(|a| argv_bytes(a) > MAX_ARGV_BYTES)
@@ -311,6 +331,7 @@ impl Host {
                 resume,
                 on_exit: Some(self.exit_hook(&spec.name, egress_port)),
                 agent: spec.agent,
+                idle_ttl: spec.idle_ttl,
                 cwd: spec.cwd,
                 env,
                 rows: spec.rows,
@@ -554,9 +575,10 @@ impl Host {
             while !stop.load(std::sync::atomic::Ordering::SeqCst) {
                 let Some(host) = host.upgrade() else { return };
                 let names: Vec<String> = lock(&host.panes).keys().cloned().collect();
-                for name in names {
-                    host.announce(&name);
+                for name in &names {
+                    host.announce(name);
                 }
+                host.reap_idle(&names);
                 drop(host);
                 std::thread::sleep(STATE_WATCH_INTERVAL);
             }
@@ -586,6 +608,25 @@ impl Host {
         pane.set_state_seq(seq);
         if state == AgentState::Idle && before == Some(AgentState::Working) {
             pane.set_done(true);
+        }
+    }
+
+    /// Stops agents that outlived their idle limit: silent that long, and not
+    /// working. The pane is removed, so it is not restored at the next start; its
+    /// owner finds it gone and can resume the conversation.
+    fn reap_idle(&self, names: &[String]) {
+        for name in names {
+            let Ok(pane) = self.pane(name) else { continue };
+            let Some(ttl) = pane.idle_ttl else { continue };
+            if pane.quiet_for() < ttl || pane.status() != PaneStatus::Running {
+                continue;
+            }
+            let state = info_of(name, pane.as_ref(), &self.detector).state;
+            if state == Some(AgentState::Working) {
+                continue;
+            }
+            eprintln!("hq host: stopping '{name}', idle for over {}s", ttl.as_secs());
+            let _ = self.remove(name);
         }
     }
 
@@ -811,6 +852,7 @@ fn save_state(panes: &Registry, awaiting: &Awaiting, state: Option<&StateFile>) 
                 cols,
                 scrollback_rows: resume.scrollback_rows,
                 sandbox: pane.sandbox.clone(),
+                idle_ttl_secs: pane.idle_ttl.map(|t| t.as_secs()),
             })
         })
         .chain(waiting)
@@ -864,6 +906,7 @@ fn spec_of(rec: PaneRecord, env: Vec<(String, String)>) -> SpawnSpec {
     spec.cols = rec.cols;
     spec.scrollback_rows = rec.scrollback_rows;
     spec.sandbox = rec.sandbox;
+    spec.idle_ttl = rec.idle_ttl_secs.map(Duration::from_secs);
     spec
 }
 

@@ -134,6 +134,12 @@ pub struct HerdrConfig {
     /// How agents on the built-in host are confined.
     #[serde(default)]
     pub sandbox: SandboxConfig,
+
+    /// Hours a session on the built-in host may sit silent and not working before
+    /// the host stops it (it stays resumable, and HQ tells you it ended). 0 keeps
+    /// sessions until someone stops them. Applies to sessions started afterwards.
+    #[serde(default = "default_idle_reap_hours")]
+    pub idle_reap_hours: u64,
 }
 
 /// How agents on the built-in host are confined.
@@ -238,6 +244,10 @@ pub struct HerdrHostConfig {
 
 fn default_binary() -> String {
     "herdr".to_string()
+}
+
+fn default_idle_reap_hours() -> u64 {
+    24
 }
 
 fn default_host() -> String {
@@ -362,6 +372,7 @@ impl Default for HerdrConfig {
             spawn_cwd_deny: Vec::new(),
             handoff_cwd_allow: Vec::new(),
             sandbox: SandboxConfig::default(),
+            idle_reap_hours: default_idle_reap_hours(),
         }
     }
 }

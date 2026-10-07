@@ -23,6 +23,15 @@ const HOME_READABLE: &[&str] = &[
     ".zprofile", ".zshrc", ".zlogin", ".bashrc", ".bash_profile", ".profile", ".inputrc", ".oh-my-zsh",
     "Library/Caches", "Library/Preferences", "Library/Keychains", ".claude.json.lock",
 ];
+/// Where other people's files live, which an agent has no reason to read: other
+/// users' home directories and external volumes. What the agent is allowed
+/// under HOME or in its project stays readable.
+#[cfg(target_os = "macos")]
+const OUTER_READ_ROOTS: &[&str] = &["/Users", "/Volumes"];
+/// Shared files other users deliberately leave for everyone.
+#[cfg(target_os = "macos")]
+const OUTER_READ_SHARED: &[&str] = &["/Users/Shared"];
+
 /// Other Claude profiles (`~/.claude-<name>`) hold their own logins.
 const OTHER_PROFILE_PREFIX: &str = ".claude-";
 /// Credential files directly under HOME.
@@ -190,16 +199,39 @@ fn policy(
         denied_services: if macos { DENIED_SERVICES.iter().map(|s| s.to_string()).collect() } else { Vec::new() },
         masked_files: under(SECRET_HOME_FILES),
         hidden_dirs: hidden,
-        read_restriction: Some(ReadRestriction {
-            root: home.clone(),
-            allow: read_allow,
-        }),
+        read_restrictions: outer_restrictions(&read_allow)
+            .into_iter()
+            .chain([ReadRestriction { root: home.clone(), allow: read_allow }])
+            .collect(),
         hide_other_processes: true,
         network: Network::Proxy {
             port,
             unix_sockets: vec![socket],
         },
     })
+}
+
+#[cfg(target_os = "macos")]
+fn outer_restrictions(allow: &[PathBuf]) -> Vec<ReadRestriction> {
+    OUTER_READ_ROOTS
+        .iter()
+        .filter_map(|root| Path::new(root).canonicalize().ok())
+        .map(|root| ReadRestriction {
+            allow: allow
+                .iter()
+                .cloned()
+                .chain(OUTER_READ_SHARED.iter().map(PathBuf::from))
+                .filter(|a| a.starts_with(&root))
+                .collect(),
+            root,
+        })
+        .collect()
+}
+
+/// The bubblewrap backend cannot nest restrictions; it limits HOME only.
+#[cfg(not(target_os = "macos"))]
+fn outer_restrictions(_allow: &[PathBuf]) -> Vec<ReadRestriction> {
+    Vec::new()
 }
 
 /// Opens the agent's egress listener and wraps `argv` in the platform sandbox.

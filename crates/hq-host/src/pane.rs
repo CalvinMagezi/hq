@@ -90,6 +90,7 @@ pub(crate) struct Pane {
     pub(crate) resume: Option<Resume>,
     pub(crate) agent: Option<String>,
     pub(crate) sandbox: Option<crate::sandbox::SandboxSpec>,
+    pub(crate) idle_ttl: Option<std::time::Duration>,
     pub(crate) cwd: PathBuf,
     pub(crate) pid: Option<u32>,
     pub(crate) started: Instant,
@@ -123,6 +124,7 @@ pub(crate) struct LaunchArgs {
     /// What actually runs when it differs from `argv` (the command inside a sandbox).
     pub exec: Option<Vec<String>>,
     pub sandbox: Option<crate::sandbox::SandboxSpec>,
+    pub idle_ttl: Option<std::time::Duration>,
     pub resume: Option<Resume>,
     pub on_exit: Option<ExitHook>,
     pub agent: Option<String>,
@@ -205,6 +207,7 @@ impl Pane {
             resume: args.resume,
             agent: args.agent,
             sandbox: args.sandbox,
+            idle_ttl: args.idle_ttl,
             cwd: args.cwd,
             pid,
             started: Instant::now(),

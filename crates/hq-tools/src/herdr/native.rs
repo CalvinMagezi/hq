@@ -31,6 +31,8 @@ pub struct NativeBackend {
     command_timeout: Duration,
     /// Sent with every `agent.spawn`; None leaves the host's own default (none).
     sandbox: Option<Value>,
+    /// Sent with every `agent.spawn`: the host stops an agent idle this long.
+    idle_ttl_secs: Option<u64>,
 }
 
 /// How HQ reaches the host.
@@ -96,7 +98,13 @@ impl NativeBackend {
             launch_bound: DEFAULT_LAUNCH_BOUND,
             command_timeout: DEFAULT_COMMAND_TIMEOUT,
             sandbox: None,
+            idle_ttl_secs: None,
         }
+    }
+
+    pub fn with_idle_ttl(mut self, secs: Option<u64>) -> Self {
+        self.idle_ttl_secs = secs;
+        self
     }
 
     /// The sandbox request sent with every launch (see `sandbox::plan`).
@@ -414,6 +422,7 @@ impl HostBackend for NativeBackend {
             "name": req.name, "argv": argv_for(req), "cwd": req.cwd,
             "agent": req.kind, "resume_argv": resume, "env": env,
             "sandbox": self.sandbox,
+            "idle_ttl_secs": self.idle_ttl_secs,
         });
         let spawned = self.call("agent.spawn", params)?;
         // A kind without a rule file has no state to wait for.

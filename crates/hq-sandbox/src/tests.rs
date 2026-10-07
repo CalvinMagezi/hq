@@ -15,7 +15,7 @@ fn sandbox(project: &Path) -> AgentSandbox {
         denied_services: vec![],
         masked_files: vec![],
         hidden_dirs: vec![],
-        read_restriction: None,
+        read_restrictions: vec![],
         hide_other_processes: false,
         network: Network::Full,
     }
@@ -369,7 +369,7 @@ fn reads_under_a_restricted_root_are_limited_to_the_allowed_paths() {
     std::fs::create_dir_all(&project).unwrap();
     std::fs::write(project.join("src"), "SRC-OK").unwrap();
     let mut s = sandbox(&project);
-    s.read_restriction = Some(ReadRestriction { root: root.clone(), allow: vec![root.join("tools"), project.clone()] });
+    s.read_restrictions = vec![ReadRestriction { root: root.clone(), allow: vec![root.join("tools"), project.clone()] }];
     s.hidden_dirs = vec![HiddenDir { dir: root.join("tools/secret"), allow: vec![] }];
     let out = inside(
         backend,

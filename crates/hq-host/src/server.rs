@@ -529,6 +529,7 @@ impl Conn {
                 spec.cols = p.cols.unwrap_or(spec.cols);
                 spec.scrollback_rows = p.scrollback_rows.unwrap_or(spec.scrollback_rows);
                 spec.sandbox = p.sandbox;
+                spec.idle_ttl = p.idle_ttl_secs.map(Duration::from_secs);
                 Ok(info_json(&host.spawn(spec).map_err(host_err)?))
             }
             "agent.egress" => {
@@ -701,6 +702,7 @@ struct SpawnParams {
     cols: Option<u16>,
     scrollback_rows: Option<usize>,
     sandbox: Option<crate::sandbox::SandboxSpec>,
+    idle_ttl_secs: Option<u64>,
 }
 
 #[derive(Deserialize)]

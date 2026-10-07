@@ -76,7 +76,7 @@ fn the_agent_cannot_read_the_hosts_secrets_but_keeps_its_own_files() {
          t token 'cat {d}/operator.token'; t other_mcp 'cat {d}/mcp/b.json'; t own_mcp 'cat {d}/mcp/a.json'; \
          t own_hooks 'cat {d}/hooks/a.json'; t listing 'ls {d}/mcp'; t socket 'test -S {d}/host.sock || test -e {d}/host.sock'; \
          t write_project 'echo x > ./ok'; t write_home 'echo x > \"$HOME/hq-host-sandbox-probe\"'; \
-         t ssh 'ls \"$HOME/.ssh\"'; t home_other 'cat \"$HOME/hq-host-readprobe\"'; echo DONE"
+         t ssh 'ls \"$HOME/.ssh\"'; t home_other 'cat \"$HOME/hq-host-readprobe\"'; t users_list 'ls /Users'; t volumes_list 'ls /Volumes'; t shared 'ls /Users/Shared'; echo DONE"
     );
     let home = std::env::var("HOME").unwrap();
     std::fs::write(format!("{home}/hq-host-readprobe"), "x").unwrap();
@@ -95,6 +95,9 @@ fn the_agent_cannot_read_the_hosts_secrets_but_keeps_its_own_files() {
         ("write_project", true),
         ("write_home", false),
         ("home_other", false),
+        ("users_list", false),
+        ("volumes_list", false),
+        ("shared", true),
     ] {
         let want = format!("{probe}={}", if allowed { "yes" } else { "no" });
         assert!(out.contains(&want), "expected {want}; got:\n{out}");

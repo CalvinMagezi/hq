@@ -38,6 +38,9 @@ pub struct PaneRecord {
     /// files written before sandboxing, which read as unsandboxed.
     #[serde(default)]
     pub sandbox: Option<crate::sandbox::SandboxSpec>,
+    /// Seconds of idleness after which the host stops the agent.
+    #[serde(default)]
+    pub idle_ttl_secs: Option<u64>,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -143,6 +146,7 @@ mod tests {
             cols: 120,
             scrollback_rows: 1000,
             sandbox: None,
+            idle_ttl_secs: None,
         }
     }
 

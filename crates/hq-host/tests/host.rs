@@ -639,3 +639,37 @@ fn the_host_refuses_more_agents_than_its_limit() {
     host.remove("one").unwrap();
     host.spawn(SpawnSpec::new("three", argv_sh("sleep 30"), std::env::temp_dir())).unwrap();
 }
+
+#[test]
+fn an_agent_that_stays_idle_past_its_limit_is_stopped_and_forgotten() {
+    let host = std::sync::Arc::new(Host::new());
+    host.watch_states(std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)));
+    let mut idle = sh("idle", "sleep 60");
+    idle.idle_ttl = Some(Duration::from_secs(1));
+    host.spawn(idle).unwrap();
+    let mut chatty = sh("chatty", "while true; do echo tick; sleep 0.2; done");
+    chatty.idle_ttl = Some(Duration::from_secs(1));
+    host.spawn(chatty).unwrap();
+    host.spawn(sh("no-limit", "sleep 60")).unwrap();
+    let deadline = Instant::now() + WAIT;
+    while host.info("idle").is_ok() {
+        assert!(Instant::now() < deadline, "the idle agent was never stopped");
+        std::thread::sleep(Duration::from_millis(100));
+    }
+    std::thread::sleep(Duration::from_millis(1500));
+    assert!(host.info("chatty").is_ok(), "an agent that keeps printing is not idle");
+    assert!(host.info("no-limit").is_ok(), "an agent without a limit is never reaped");
+    host.kill("chatty").unwrap();
+    host.kill("no-limit").unwrap();
+}
+
+#[test]
+fn a_host_that_requires_a_sandbox_refuses_unsandboxed_agents() {
+    let host = Host::new().with_require_sandbox(true);
+    let plain = host.spawn(sh("a", "sleep 1")).err().map(|e| e.to_string()).unwrap_or_default();
+    assert!(plain.contains("only starts sandboxed agents"), "{plain}");
+    let mut none = sh("b", "sleep 1");
+    none.sandbox = Some(hq_host::SandboxSpec::none());
+    assert!(matches!(host.spawn(none), Err(HostError::Sandbox(_))));
+    assert!(host.list().is_empty());
+}

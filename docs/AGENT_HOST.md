@@ -163,6 +163,18 @@ when that is not possible. The agent:
   the host it asked for. Every decision is logged
   (`agent.egress`); a denied host shows up there so you can add it.
 
+The host itself decides whether the sandbox is optional. `hq host serve` refuses
+to start any agent that is not under the process sandbox, whoever asks over the
+socket or through the gate; start it with `--allow-unsandboxed` to lift that, and
+`herdr.sandbox.mode: none` in HQ only matters then.
+
+Agents nobody is watching are stopped: a session silent and not working for
+`herdr.idle_reap_hours` (default 24, 0 turns it off) is stopped by the host, even
+if HQ is down, and is not restored at the next start. HQ marks it exited and
+tells you, and the conversation can be resumed. `hq host status` lists every
+agent with its state, sandbox mode, idle time and age. A busy agent is never
+reaped.
+
 The sandbox policy is kept in `session.json` and applied again on restore.
 `agent.list` shows each agent's mode and `host.status` counts agents running
 with `none`.
