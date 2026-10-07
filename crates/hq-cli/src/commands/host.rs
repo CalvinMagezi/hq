@@ -10,7 +10,17 @@ fn default_dir() -> PathBuf {
     hq_core::config::native_host_dir()
 }
 
-pub async fn run(sub: &str, dir: Option<PathBuf>, allow_unsandboxed: bool) -> Result<()> {
+pub struct HostArgs {
+    pub sub: String,
+    pub dir: Option<PathBuf>,
+    pub allow_unsandboxed: bool,
+    pub key: Option<String>,
+    pub from: Option<String>,
+}
+
+pub async fn run(args: HostArgs) -> Result<()> {
+    let HostArgs { sub, dir, allow_unsandboxed, key, from } = args;
+    let sub = sub.as_str();
     let dir_arg = dir.clone();
     let dir = dir.unwrap_or_else(default_dir);
     match sub {
@@ -19,7 +29,9 @@ pub async fn run(sub: &str, dir: Option<PathBuf>, allow_unsandboxed: bool) -> Re
         "stop" => stop(&dir),
         "report" => report(dir_arg),
         "gate" => gate(&dir),
-        other => bail!("unknown subcommand '{other}': use serve, status, stop or report"),
+        "install" => super::host_install::install(),
+        "authorize" => super::host_install::authorize(key.as_deref(), from.as_deref()),
+        other => bail!("unknown subcommand '{other}': use serve, status, stop, install, authorize, report or gate"),
     }
 }
 
