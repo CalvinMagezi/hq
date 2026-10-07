@@ -9,9 +9,15 @@ pub const LOCAL_HOST: &str = "local";
 /// the host they were started on.
 pub const NATIVE_HOST: &str = "native";
 
-/// Where the built-in host keeps its socket, token and `session.json`.
+/// Where the built-in host keeps its socket, token and `session.json`:
+/// `HQ_HOST_DIR` when set (the same variable panes get, so hooks and HQ agree),
+/// else `~/.hq/run/host`. A unix socket path is limited to about 100 bytes, so a
+/// long override can fail to bind.
 pub fn native_host_dir() -> std::path::PathBuf {
-    super::HqConfig::hq_dir().join("run").join("host")
+    match std::env::var_os("HQ_HOST_DIR") {
+        Some(dir) if !dir.is_empty() => dir.into(),
+        _ => super::HqConfig::hq_dir().join("run").join("host"),
+    }
 }
 
 /// Where coding-agent sessions run and how HQ reaches each machine's Herdr
