@@ -1,0 +1,585 @@
+use super::engines::{Engine, arxiv_terms};
+use super::*;
+use wiremock::matchers::{method, path, query_param};
+use wiremock::{Mock, MockServer, ResponseTemplate};
+
+const DDG_HTML: &str = r#"<html><body>
+<div class="result results_links result--ad"><h2 class="result__title"><a class="result__a" href="https://ads.example.com/x">Sponsored</a></h2></div>
+<div class="result results_links web-result"><div class="result__body">
+  <h2 class="result__title"><a class="result__a" href="https://docs.rs/tokio/latest/tokio/runtime/">tokio::runtime - Rust</a></h2>
+  <a class="result__snippet" href="https://docs.rs/tokio/latest/tokio/runtime/">The <b>Tokio</b> runtime. Unlike other <b>Rust</b> programs.</a>
+</div></div>
+<div class="result results_links web-result"><div class="result__body">
+  <h2 class="result__title"><a class="result__a" href="//duckduckgo.com/l/?uddg=https%3A%2F%2Ftokio.rs%2F&amp;rut=abc">Tokio</a></h2>
+  <a class="result__snippet" href="x">An asynchronous Rust runtime.</a>
+</div></div></body></html>"#;
+
+const BRAVE_HTML: &str = r#"<html><body>
+<div class="snippet svelte-x" data-pos="0" data-type="web"><div class="result-content"><a href="https://docs.rs/tokio/latest/tokio/runtime" class="l1"><cite class="snippet-url">docs.rs</cite><div class="title" title="tokio::runtime">tokio::runtime - Rust</div></a><div class="generic-snippet"><div class="content">The Tokio runtime.</div></div></div></div>
+<div class="snippet svelte-x" id="discussions"><a href="https://reddit.com/r/rust">not a web result</a></div>
+</body></html>"#;
+
+const BING_NEWS_RSS: &str = r#"<?xml version="1.0"?><rss><channel><title>x - BingNews</title>
+<item><title>Rust 2026 edition lands</title><link>http://www.bing.com/news/apiclick.aspx?ref=FexRss&amp;aid=&amp;url=https%3a%2f%2fexample.com%2fnews%2frust&amp;c=1</link><description>The edition &amp; its changes.</description><pubDate>Fri, 25 Sep 2026 15:20:00 GMT</pubDate></item>
+</channel></rss>"#;
+
+const ARXIV_ATOM: &str = r#"<?xml version='1.0'?><feed xmlns="http://www.w3.org/2005/Atom"><title>arXiv Query</title>
+<entry><id>http://arxiv.org/abs/2201.00978v1</id><title>PyramidTNT:
+  Improved Transformer</title><link href="https://arxiv.org/abs/2201.00978v1" rel="alternate" type="text/html"/><link href="https://arxiv.org/pdf/2201.00978v1" rel="related" type="application/pdf" title="pdf"/><summary>Transformer networks have achieved great progress.</summary><published>2022-01-04T04:56:57Z</published></entry></feed>"#;
+
+fn hit(url: &str, snippet: &str, engine: &str) -> SearchResult {
+    SearchResult {
+        title: url.into(),
+        url: url.into(),
+        snippet: snippet.into(),
+        position: 0,
+        provider: "native".into(),
+        domain: None,
+        published: None,
+        engines: vec![engine.into()],
+    }
+}
+
+fn parsed(engine: Engine, body: &str, base: &str) -> Vec<SearchResult> {
+    engine.parse(&Value::String(body.into()), base).unwrap()
+}
+
+#[test]
+fn duckduckgo_skips_ads_and_unwraps_redirect_links() {
+    let r = parsed(Engine::DuckDuckGo, DDG_HTML, "");
+    let urls: Vec<&str> = r.iter().map(|h| h.url.as_str()).collect();
+    assert_eq!(
+        urls,
+        [
+            "https://docs.rs/tokio/latest/tokio/runtime/",
+            "https://tokio.rs/"
+        ]
+    );
+    assert_eq!(
+        r[0].snippet,
+        "The Tokio runtime. Unlike other Rust programs."
+    );
+    assert_eq!(r[0].engines, ["duckduckgo"]);
+    assert_eq!(r[0].provider, "native");
+}
+
+#[test]
+fn brave_html_keeps_only_web_results() {
+    let r = parsed(Engine::Brave, BRAVE_HTML, "");
+    assert_eq!(r.len(), 1);
+    assert_eq!(r[0].title, "tokio::runtime - Rust");
+    assert_eq!(r[0].snippet, "The Tokio runtime.");
+}
+
+#[test]
+fn bing_news_extracts_target_url_and_date() {
+    let r = parsed(Engine::BingNews, BING_NEWS_RSS, "");
+    assert_eq!(r[0].url, "https://example.com/news/rust");
+    assert_eq!(r[0].snippet, "The edition & its changes.");
+    assert_eq!(
+        r[0].published.as_deref(),
+        Some("Fri, 25 Sep 2026 15:20:00 GMT")
+    );
+}
+
+#[test]
+fn arxiv_prefers_the_alternate_link_and_flattens_titles() {
+    let r = parsed(Engine::Arxiv, ARXIV_ATOM, "");
+    assert_eq!(r[0].url, "https://arxiv.org/abs/2201.00978v1");
+    assert_eq!(r[0].title, "PyramidTNT: Improved Transformer");
+    assert_eq!(r[0].published.as_deref(), Some("2022-01-04T04:56:57Z"));
+}
+
+#[test]
+fn wikipedia_builds_article_urls_and_strips_markup() {
+    let body = json!({"query": {"search": [
+        {"title": "Tokio (software)", "snippet": "a <span class=\"searchmatch\">Rust</span> library", "timestamp": "2026-01-01T00:00:00Z"}
+    ]}});
+    let r = Engine::Wikipedia
+        .parse(&body, "https://en.wikipedia.org")
+        .unwrap();
+    assert_eq!(r[0].url, "https://en.wikipedia.org/wiki/Tokio_(software)");
+    assert_eq!(r[0].snippet, "a Rust library");
+}
+
+#[test]
+fn hacker_news_falls_back_to_the_discussion_link() {
+    let body = json!({"hits": [
+        {"title": "Ask HN: Rust?", "objectID": "42", "points": 7, "num_comments": 3, "created_at": "2026-01-01T00:00:00Z"},
+        {"title": "Linked story", "objectID": "43", "url": "https://example.com/a"}
+    ]});
+    let r = Engine::HackerNews.parse(&body, "").unwrap();
+    assert_eq!(r[0].url, "https://news.ycombinator.com/item?id=42");
+    assert_eq!(r[1].url, "https://example.com/a");
+}
+
+#[test]
+fn openalex_rebuilds_the_abstract_in_word_order() {
+    let body = json!({"results": [{
+        "display_name": "Attention", "publication_date": "2017-06-12",
+        "primary_location": {"landing_page_url": "https://arxiv.org/abs/1706.03762"},
+        "abstract_inverted_index": {"is": [1], "Attention": [0], "all": [3], "you": [4], "need": [5], "what": [2]}
+    }]});
+    let r = Engine::OpenAlex.parse(&body, "").unwrap();
+    assert_eq!(r[0].snippet, "Attention is what all you need");
+    assert_eq!(r[0].url, "https://arxiv.org/abs/1706.03762");
+}
+
+#[test]
+fn a_challenge_page_is_a_failure_but_an_empty_result_page_is_not() {
+    let challenge = Engine::Brave.parse(
+        &Value::String("<html>Please solve this CAPTCHA</html>".into()),
+        "",
+    );
+    assert!(challenge.unwrap_err().contains("challenge"));
+    let empty = Engine::Brave.parse(
+        &Value::String("<html><p>No results found for zzzz</p></html>".into()),
+        "",
+    );
+    assert!(empty.unwrap().is_empty());
+}
+
+#[test]
+fn merge_ranks_agreement_first_and_dedupes_tracking_variants() {
+    let a = vec![
+        hit("https://a.com/one?utm_source=x", "short", "duckduckgo"),
+        hit("https://b.com/two", "b", "duckduckgo"),
+    ];
+    let b = vec![
+        hit("https://www.b.com/two/", "b with a longer snippet", "bing"),
+        hit("https://c.com/three", "c", "bing"),
+    ];
+    let merged = merge(vec![(1.0, a), (1.0, b)]);
+    let urls: Vec<&str> = merged.iter().map(|r| r.url.as_str()).collect();
+    assert_eq!(
+        urls,
+        [
+            "https://b.com/two",
+            "https://a.com/one?utm_source=x",
+            "https://c.com/three"
+        ]
+    );
+    assert_eq!(merged[0].engines, ["duckduckgo", "bing"]);
+    assert_eq!(merged[0].snippet, "b with a longer snippet");
+    assert_eq!(
+        merged.iter().map(|r| r.position).collect::<Vec<_>>(),
+        [1, 2, 3]
+    );
+}
+
+#[test]
+fn urls_that_differ_in_real_parameters_stay_distinct() {
+    assert_ne!(
+        normalize_url("https://a.com/p?id=1"),
+        normalize_url("https://a.com/p?id=2")
+    );
+    assert_eq!(
+        normalize_url("http://www.a.com/p/#top"),
+        normalize_url("https://a.com/p")
+    );
+}
+
+async fn native_server() -> MockServer {
+    let server = MockServer::start().await;
+    let uri = server.uri();
+    HEALTH
+        .lock()
+        .unwrap()
+        .retain(|key, _| !key.starts_with(&uri));
+    RESULT_CACHE
+        .lock()
+        .unwrap()
+        .retain(|key, _| !key.ends_with(&uri));
+    server
+}
+
+async fn mount_general(server: &MockServer, ddg_status: u16) {
+    Mock::given(method("POST"))
+        .and(path("/html/"))
+        .respond_with(ResponseTemplate::new(ddg_status).set_body_string(DDG_HTML))
+        .mount(server)
+        .await;
+    Mock::given(method("GET"))
+        .and(path("/search"))
+        .and(query_param("source", "web"))
+        .respond_with(ResponseTemplate::new(200).set_body_string(BRAVE_HTML))
+        .mount(server)
+        .await;
+    Mock::given(method("GET"))
+        .and(path("/w/api.php"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({"query": {"search": []}})))
+        .mount(server)
+        .await;
+}
+
+fn env(base: &str) -> NativeEnv<'_> {
+    NativeEnv {
+        client: get_client(),
+        base_override: Some(base),
+    }
+}
+
+async fn run(server: &MockServer, query: &str, opts: &SearchOptions) -> Result<WebSearchResults> {
+    let base = server.uri();
+    let budgets = Budgets {
+        total: Duration::from_secs(5),
+        searxng: Duration::from_millis(400),
+        native_engine: Duration::from_secs(2),
+        brave: Duration::from_millis(400),
+    };
+    search_chain(query, opts, None, None, Some(&env(&base)), &budgets).await
+}
+
+#[tokio::test]
+async fn pool_merges_engines_and_reports_each_attempt() {
+    let server = native_server().await;
+    mount_general(&server, 200).await;
+    let r = run(&server, "tokio runtime", &SearchOptions::default())
+        .await
+        .unwrap();
+    assert_eq!(r.backend.as_deref(), Some("native"));
+    assert_eq!(
+        r.results[0].url,
+        "https://docs.rs/tokio/latest/tokio/runtime/"
+    );
+    assert_eq!(r.results[0].engines, ["duckduckgo", "brave"]);
+    let ok: Vec<&str> = r
+        .attempts
+        .iter()
+        .filter(|a| a.outcome.starts_with("ok"))
+        .map(|a| a.provider.as_str())
+        .collect();
+    assert_eq!(ok, ["duckduckgo", "brave", "wikipedia"], "{:?}", r.attempts);
+}
+
+#[tokio::test]
+async fn one_failing_engine_does_not_stop_the_others() {
+    let server = native_server().await;
+    mount_general(&server, 500).await;
+    let r = run(&server, "failing engine query", &SearchOptions::default())
+        .await
+        .unwrap();
+    assert_eq!(r.backend.as_deref(), Some("native"));
+    assert!(
+        r.attempts
+            .iter()
+            .any(|a| a.provider == "duckduckgo" && a.outcome.contains("500")),
+        "{:?}",
+        r.attempts
+    );
+    assert!(!r.results.is_empty());
+}
+
+#[tokio::test]
+async fn second_identical_search_is_served_from_cache() {
+    let server = native_server().await;
+    mount_general(&server, 200).await;
+    run(&server, "cached query", &SearchOptions::default())
+        .await
+        .unwrap();
+    let before = server.received_requests().await.unwrap().len();
+    let again = run(&server, "cached query", &SearchOptions::default())
+        .await
+        .unwrap();
+    assert_eq!(server.received_requests().await.unwrap().len(), before);
+    assert!(
+        again.attempts[0].outcome.contains("cached"),
+        "{:?}",
+        again.attempts
+    );
+}
+
+#[tokio::test]
+async fn all_engines_failing_reports_every_reason() {
+    let server = native_server().await;
+    Mock::given(wiremock::matchers::any())
+        .respond_with(ResponseTemplate::new(503))
+        .mount(&server)
+        .await;
+    let err = run(&server, "everything down", &SearchOptions::default())
+        .await
+        .unwrap_err()
+        .to_string();
+    assert!(err.contains("All web search backends failed"), "{err}");
+    assert!(
+        err.contains("duckduckgo") && err.contains("wikipedia"),
+        "{err}"
+    );
+}
+
+#[tokio::test]
+async fn science_category_queries_arxiv_and_openalex() {
+    let server = native_server().await;
+    Mock::given(method("GET"))
+        .and(path("/api/query"))
+        .and(query_param(
+            "search_query",
+            "all:attention AND all:you AND all:need",
+        ))
+        .respond_with(ResponseTemplate::new(200).set_body_string(ARXIV_ATOM))
+        .mount(&server)
+        .await;
+    Mock::given(method("GET"))
+        .and(path("/works"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({"results": []})))
+        .mount(&server)
+        .await;
+    let opts = SearchOptions {
+        category: Some(Category::Science),
+        ..SearchOptions::default()
+    };
+    let r = run(&server, "attention is all you need", &opts)
+        .await
+        .unwrap();
+    assert_eq!(r.results[0].url, "https://arxiv.org/abs/2201.00978v1");
+}
+
+#[tokio::test]
+async fn later_pages_skip_engines_that_cannot_page() {
+    let server = native_server().await;
+    mount_general(&server, 200).await;
+    let opts = SearchOptions {
+        page: 2,
+        ..SearchOptions::default()
+    };
+    let r = run(&server, "paged query", &opts).await.unwrap();
+    assert!(
+        r.attempts
+            .iter()
+            .any(|a| a.provider == "duckduckgo" && a.outcome.contains("page 1 only")),
+        "{:?}",
+        r.attempts
+    );
+    assert_eq!(r.page, 2);
+}
+
+#[tokio::test]
+async fn empty_pool_falls_through_to_brave() {
+    let server = native_server().await;
+    Mock::given(wiremock::matchers::any())
+        .respond_with(ResponseTemplate::new(503))
+        .mount(&server)
+        .await;
+    let brave = fresh_server_for_brave().await;
+    let endpoint = format!("{}/res/v1/web/search", brave.uri());
+    let base = server.uri();
+    let budgets = Budgets {
+        total: Duration::from_secs(5),
+        searxng: Duration::from_millis(400),
+        native_engine: Duration::from_secs(2),
+        brave: Duration::from_secs(2),
+    };
+    let r = search_chain(
+        "brave fallback",
+        &SearchOptions::default(),
+        None,
+        Some((&endpoint, "k")),
+        Some(&env(&base)),
+        &budgets,
+    )
+    .await
+    .unwrap();
+    assert_eq!(r.backend.as_deref(), Some("brave"));
+}
+
+async fn fresh_server_for_brave() -> MockServer {
+    let brave = MockServer::start().await;
+    HEALTH
+        .lock()
+        .unwrap()
+        .retain(|key, _| !key.starts_with(&brave.uri()));
+    Mock::given(method("GET"))
+        .and(path("/res/v1/web/search"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+            "type": "search",
+            "web": {"results": [{"title": "t", "url": "https://example.com/", "description": "d"}]},
+            "query": {"more_results_available": false}
+        })))
+        .mount(&brave)
+        .await;
+    brave
+}
+
+/// Diagnostic against the real engines: `cargo test -p hq-tools live_native -- --ignored --nocapture`.
+#[tokio::test]
+#[ignore = "needs the network and live engines"]
+async fn live_native_pool_answers_each_category() {
+    for (query, category) in [
+        ("tokio runtime", None),
+        ("rust language", Some(Category::News)),
+        ("attention is all you need", Some(Category::Science)),
+    ] {
+        let opts = SearchOptions {
+            category,
+            max_results: 8,
+            ..SearchOptions::default()
+        };
+        let r = web_search(query, &opts, None, None, true).await.unwrap();
+        println!("{query} [{category:?}] via {:?}", r.backend);
+        for a in &r.attempts {
+            println!("  {}: {}", a.provider, a.outcome);
+        }
+        for h in &r.results {
+            println!("  {}. {} <{}> {:?}", h.position, h.title, h.url, h.engines);
+        }
+        assert!(!r.results.is_empty(), "{query} returned nothing");
+    }
+}
+
+#[test]
+fn supplementary_engines_rank_below_web_engines_at_equal_depth() {
+    let web = vec![hit("https://web.example/a", "a", "brave")];
+    let wiki = vec![hit("https://en.wikipedia.org/wiki/A", "a", "wikipedia")];
+    let merged = merge(vec![
+        (Engine::Wikipedia.weight(), wiki),
+        (Engine::Brave.weight(), web),
+    ]);
+    assert_eq!(merged[0].url, "https://web.example/a");
+}
+
+#[test]
+fn arxiv_terms_drop_stop_words_and_query_syntax() {
+    assert_eq!(
+        arxiv_terms("attention is all you need"),
+        ["attention", "you", "need"]
+    );
+    assert_eq!(
+        arxiv_terms("cat:cs.LG (graph) \"nets\""),
+        ["catcsLG", "graph", "nets"]
+    );
+    assert_eq!(
+        arxiv_terms("the of"),
+        ["the", "of"],
+        "all stop words keeps the query"
+    );
+}
+
+#[test]
+fn arxiv_error_feed_is_not_a_result() {
+    let feed = r#"<feed><entry><id>http://arxiv.org/api/errors#incorrect_id_format</id><title>Error</title><summary>bad</summary></entry></feed>"#;
+    assert!(parsed(Engine::Arxiv, feed, "").is_empty());
+}
+
+#[test]
+fn news_freshness_is_reported_as_partly_unsupported_and_general_is_not() {
+    let news = SearchOptions {
+        category: Some(Category::News),
+        freshness: Some(Freshness::Week),
+        ..SearchOptions::default()
+    };
+    assert!(native_unsupported(&news)[0].contains("Bing News ignores it"));
+    let general = SearchOptions {
+        freshness: Some(Freshness::Year),
+        ..SearchOptions::default()
+    };
+    assert!(native_unsupported(&general).is_empty());
+}
+
+async fn mount_only_wikipedia(server: &MockServer) {
+    Mock::given(method("GET"))
+        .and(path("/w/api.php"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(
+            json!({"query": {"search": [{"title": "Rust", "snippet": "a language"}]}}),
+        ))
+        .mount(server)
+        .await;
+    Mock::given(method("POST"))
+        .and(path("/html/"))
+        .respond_with(ResponseTemplate::new(503))
+        .mount(server)
+        .await;
+    Mock::given(method("GET"))
+        .and(path("/search"))
+        .respond_with(ResponseTemplate::new(503))
+        .mount(server)
+        .await;
+}
+
+#[tokio::test]
+async fn a_pool_with_only_wikipedia_answering_yields_to_the_brave_api() {
+    let server = native_server().await;
+    mount_only_wikipedia(&server).await;
+    let brave = fresh_server_for_brave().await;
+    let endpoint = format!("{}/res/v1/web/search", brave.uri());
+    let base = server.uri();
+    let budgets = Budgets {
+        total: Duration::from_secs(5),
+        searxng: Duration::from_millis(400),
+        native_engine: Duration::from_secs(2),
+        brave: Duration::from_secs(2),
+    };
+    let r = search_chain(
+        "degraded pool",
+        &SearchOptions::default(),
+        None,
+        Some((&endpoint, "k")),
+        Some(&env(&base)),
+        &budgets,
+    )
+    .await
+    .unwrap();
+    assert_eq!(r.backend.as_deref(), Some("brave"));
+}
+
+#[tokio::test]
+async fn a_degraded_pool_is_still_returned_when_nothing_else_is_configured_and_is_not_cached() {
+    let server = native_server().await;
+    mount_only_wikipedia(&server).await;
+    let r = run(&server, "wikipedia only", &SearchOptions::default())
+        .await
+        .unwrap();
+    assert_eq!(r.backend.as_deref(), Some("native"));
+    assert_eq!(r.results[0].engines, ["wikipedia"]);
+    let key = cache_key(
+        "wikipedia only",
+        &SearchOptions::default(),
+        Some(&server.uri()),
+    );
+    assert!(
+        cached_page(&key).is_none(),
+        "a degraded answer must not be cached"
+    );
+}
+
+#[tokio::test]
+async fn an_empty_searxng_answer_falls_through_to_the_pool() {
+    let server = native_server().await;
+    mount_general(&server, 200).await;
+    let sx = native_server().await;
+    Mock::given(method("GET"))
+        .and(path("/search"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({"results": []})))
+        .mount(&sx)
+        .await;
+    let budgets = Budgets {
+        total: Duration::from_secs(5),
+        searxng: Duration::from_secs(2),
+        native_engine: Duration::from_secs(2),
+        brave: Duration::from_millis(400),
+    };
+    let base = server.uri();
+    let r = search_chain(
+        "searxng empty",
+        &SearchOptions::default(),
+        Some(&sx.uri()),
+        None,
+        Some(&env(&base)),
+        &budgets,
+    )
+    .await
+    .unwrap();
+    assert_eq!(r.backend.as_deref(), Some("native"));
+    assert_eq!(r.attempts[0].provider, "searxng");
+}
+
+#[test]
+fn the_result_cache_never_exceeds_its_cap() {
+    let page = Page {
+        results: vec![hit("https://a.com/", "s", "brave")],
+        next_page: None,
+    };
+    for i in 0..(CACHE_MAX_ENTRIES + 50) {
+        store_page(format!("cap-test-{i}"), &page, Duration::from_secs(600));
+    }
+    assert!(RESULT_CACHE.lock().unwrap().len() <= CACHE_MAX_ENTRIES);
+}

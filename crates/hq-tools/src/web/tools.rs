@@ -64,17 +64,19 @@ pub fn format_search_results(results: &WebSearchResults) -> String {
 pub const SEARCH_TOOL_TIMEOUT_MS: u64 = 30_000;
 pub const FETCH_TOOL_TIMEOUT_MS: u64 = 95_000;
 
-/// Web search tool exposed via MCP gateway. SearxNG primary, Brave fallback.
+/// Web search tool exposed via MCP gateway. SearxNG when configured, then the built-in engines, then Brave.
 pub struct WebSearchHqTool {
     searxng_url: Option<String>,
     brave_api_key: Option<String>,
+    native: bool,
 }
 
 impl WebSearchHqTool {
-    pub fn new(searxng_url: Option<String>, brave_api_key: Option<String>) -> Self {
+    pub fn new(searxng_url: Option<String>, brave_api_key: Option<String>, native: bool) -> Self {
         Self {
             searxng_url,
             brave_api_key,
+            native,
         }
     }
 }
@@ -86,7 +88,7 @@ impl HqTool for WebSearchHqTool {
     }
 
     fn description(&self) -> &str {
-        "Search the web for current information. Uses a self-hosted SearxNG instance when one is configured and reachable, falling back to Brave Search — check this host's MACHINE.md/session context for which backend is actually provisioned. Optional filters: freshness (day/week/month/year), language, country, category (general/news/science), include_domains/exclude_domains, and page for later results. Returns titles, URLs, snippets, source metadata, the answering backend, next_page, and any filter that backend could not apply. Example: {\"query\": \"tokio release notes\", \"freshness\": \"month\", \"include_domains\": [\"github.com\"]}."
+        "Search the web for current information. Works out of the box through a built-in keyless engine pool (DuckDuckGo, Brave, Wikipedia; Bing News and Hacker News for news; arXiv and OpenAlex for science), merged and de-duplicated. A configured SearxNG instance is tried first and the paid Brave Search API last. Optional filters: freshness (day/week/month/year), language, country, category (general/news/science), include_domains/exclude_domains, and page for later results. Returns titles, URLs, snippets, source metadata, the answering backend, next_page, and any filter that backend could not apply. Example: {\"query\": \"tokio release notes\", \"freshness\": \"month\", \"include_domains\": [\"github.com\"]}."
     }
 
     fn parameters(&self) -> Value {
@@ -102,7 +104,7 @@ impl HqTool for WebSearchHqTool {
     }
 
     /// Outer safety net above `web_search`'s own 20s deadline for the whole
-    /// SearxNG and Brave chain.
+    /// SearxNG, built-in engine and Brave chain.
     fn timeout_ms(&self) -> Option<u64> {
         Some(SEARCH_TOOL_TIMEOUT_MS)
     }
@@ -141,6 +143,7 @@ impl HqTool for WebSearchHqTool {
             &opts,
             self.searxng_url.as_deref(),
             self.brave_api_key.as_deref(),
+            self.native,
         )
         .await?;
 
@@ -168,7 +171,7 @@ impl HqTool for WebFetchHqTool {
     }
 
     fn description(&self) -> &str {
-        "Fetch a URL and extract clean text content. HTML is converted to text, PDFs are read from their text layer (OCR for scanned PDFs where the host has it), and pages that render client-side fall back to the third-party Jina Reader, which receives only the URL. Returns the content with final_url, content_type, method, truncation and notes on partial extraction. Images, audio, video and archives are rejected. No API key required."
+        "Fetch a URL and extract clean text content. HTML pages are reduced to their main content (title, byline, date, body, links) without navigation and footers, falling back to a plain text conversion. Pages that render client-side are recovered from their embedded JSON-LD or framework data, then from the third-party Jina Reader (receives only the URL; `HQ_WEB_FETCH_JINA=0` disables it). PDFs are read from their text layer, with OCR for scanned PDFs where the host has pdftoppm and tesseract. Returns the content with final_url, content_type, method, truncation and notes on partial extraction. Images, audio, video and archives are rejected. No API key required."
     }
 
     fn parameters(&self) -> Value {

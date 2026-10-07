@@ -10,7 +10,36 @@ pub async fn run(config: &HqConfig) -> Result<()> {
     report_bash_sandbox(config);
     report_machine_profile(config);
     report_web_search(config).await;
+    report_pdf_ocr();
     Ok(())
+}
+
+/// Scanned PDFs (no text layer) are read with `pdftoppm` and `tesseract` off
+/// macOS; without them `web_fetch` fails on those files only.
+fn report_pdf_ocr() {
+    // macOS reads scans with Vision, and other platforms are not supported hosts.
+    if !cfg!(all(unix, not(target_os = "macos"))) {
+        return;
+    }
+    println!("\nPDF OCR (scanned PDFs in web_fetch)");
+    let missing: Vec<&str> = ["pdftoppm", "tesseract"]
+        .into_iter()
+        .filter(|tool| !on_path(tool))
+        .collect();
+    if missing.is_empty() {
+        println!("  ok  pdftoppm and tesseract found");
+    } else {
+        println!(
+            "  warn  {} not found, so scanned PDFs cannot be read. PDFs with a text layer still work. \
+             Install with `apt install poppler-utils tesseract-ocr`.",
+            missing.join(" and ")
+        );
+    }
+}
+
+fn on_path(tool: &str) -> bool {
+    std::env::var_os("PATH")
+        .is_some_and(|paths| std::env::split_paths(&paths).any(|dir| dir.join(tool).is_file()))
 }
 
 /// The machine profile only sees configured and reachable; this sends one
@@ -20,6 +49,7 @@ async fn report_web_search(config: &HqConfig) {
     let statuses = hq_tools::web::probe_search_backends(
         config.searxng_url.as_deref(),
         config.brave_api_key.as_deref(),
+        config.web_search_native,
     )
     .await;
     for status in &statuses {
@@ -33,8 +63,9 @@ async fn report_web_search(config: &HqConfig) {
     }
     if !statuses.iter().any(|s| s.answered == Some(true)) {
         println!(
-            "  warn  no backend answered, so web_search will fail. Run \
-             `scripts/setup-searxng.sh` or set `brave_api_key` (or HQ_BRAVE_API_KEY)."
+            "  warn  no backend answered, so web_search will fail. Check the network, set \
+             `web_search_native: true`, point `searxng_url` at a SearxNG instance, or set \
+             `brave_api_key` (or HQ_BRAVE_API_KEY)."
         );
     }
 }

@@ -154,6 +154,7 @@ function SettingsBody({ s }: { s: HqSettings }) {
         {s.integrations.remote_mcp.map((m) => (
           <Row key={m.name} label={`MCP: ${m.name}`}>{m.host}{m.live_user_turn_only ? ' · live turns only' : ''}</Row>
         ))}
+        <Row label="Built-in web search">{s.integrations.web_search_native ? 'on' : 'off'}</Row>
         <Row label="SearxNG">{orNone(s.integrations.searxng_host)}</Row>
         <Row label="Disk watchdog">{yesNo(s.integrations.disk_watchdog_enabled)}</Row>
       </Section>

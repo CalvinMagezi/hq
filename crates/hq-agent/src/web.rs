@@ -1,10 +1,10 @@
 //! Web tools — search and fetch for agent sessions.
 //!
-//! Search tries a self-hosted SearxNG instance (no API key) when one is
-//! configured and reachable, falling back to Brave Search (paid) otherwise —
-//! neither is guaranteed to exist on every host. Fetching uses reqwest +
-//! html2text for page content, with an automatic Jina Reader fallback for
-//! JS-rendered pages; no API key required for either.
+//! Search works with no setup through a built-in engine pool; a configured
+//! SearxNG instance is tried first and the paid Brave Search API last (see
+//! `hq_tools::web`). Fetching reduces a page to its main content, recovers
+//! client-rendered pages from their embedded data and, last, a Jina Reader
+//! fallback; no API key required for either tool.
 
 use anyhow::Result;
 use async_trait::async_trait;
@@ -18,17 +18,19 @@ use crate::tools::AgentTool;
 
 // ─── WebSearchTool ──────────────────────────────────────────────
 
-/// Search the web. SearxNG primary when configured/reachable, Brave Search fallback.
+/// Search the web. SearxNG when configured, then the built-in engines, then Brave Search.
 pub struct WebSearchTool {
     searxng_url: Option<String>,
     brave_api_key: Option<String>,
+    native: bool,
 }
 
 impl WebSearchTool {
-    pub fn new(searxng_url: Option<String>, brave_api_key: Option<String>) -> Self {
+    pub fn new(searxng_url: Option<String>, brave_api_key: Option<String>, native: bool) -> Self {
         Self {
             searxng_url,
             brave_api_key,
+            native,
         }
     }
 }
@@ -47,10 +49,11 @@ impl AgentTool for WebSearchTool {
 
     fn description(&self) -> &str {
         concat!(
-            "Search the web for current information. Uses a self-hosted SearxNG instance ",
-            "when one is configured and reachable, falling back to Brave Search — check ",
-            "this host's MACHINE.md/session context for which backend is actually ",
-            "provisioned, since neither is guaranteed.\n\n",
+            "Search the web for current information. Works out of the box through a ",
+            "built-in keyless engine pool (DuckDuckGo, Brave, Wikipedia; Bing News ",
+            "and Hacker News for news; arXiv and OpenAlex for science), merged and ",
+            "de-duplicated. A configured SearxNG instance is tried first and the paid ",
+            "Brave Search API last.\n\n",
             "Use this tool when you need:\n",
             "- Current documentation or API references\n",
             "- Error message lookups and troubleshooting\n",
@@ -104,6 +107,7 @@ impl AgentTool for WebSearchTool {
             &opts,
             self.searxng_url.as_deref(),
             self.brave_api_key.as_deref(),
+            self.native,
         )
         .await
         {
@@ -143,8 +147,10 @@ impl AgentTool for WebFetchTool {
             "- url (required): The URL to fetch (http/https only)\n",
             "- max_chars (optional): Max characters to return (default 50000)\n\n",
             "Output starts with a provenance line: final URL, content type and extraction ",
-            "method. Client-rendered pages fall back to the third-party Jina Reader, which ",
-            "receives only the URL; that is noted in the output.\n\n",
+            "method. HTML is reduced to the article or main content with its links. ",
+            "Client-rendered pages are recovered from data embedded in the HTML, then from ",
+            "the third-party Jina Reader, which receives only the URL; either is noted in ",
+            "the output.\n\n",
             "Security: Blocks file://, localhost, and private IP addresses, including via redirects.\n",
             "Images, audio, video and archives are rejected. Use bash + curl for those.",
         )

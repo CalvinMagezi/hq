@@ -33,5 +33,4 @@ jobs:
         working-directory: packages/agent-hq
         # Trusted publishing: npm exchanges the workflow's OIDC token, so no npm token is stored.
         run: |
-          npm install --global npm@11.6.2 # zizmor: ignore[adhoc-packages] trusted publishing needs npm 11.5.1 or newer, pinned exactly
-          npm publish --provenance --access public
+          npx --yes npm@11.6.2 publish --provenance --access public # zizmor: ignore[adhoc-packages] trusted publishing needs npm 11.5.1 or newer, pinned exactly

@@ -113,21 +113,19 @@ fn render_markdown_reports_gh_auth_state() {
 }
 
 #[test]
-fn web_search_unavailable_message_does_not_claim_an_unreachable_script_on_a_checkout_less_host() {
-    // Regression: the message must not point at scripts/setup-searxng.sh
-    // on a host with no source checkout (e.g. a VPS) — that was
-    // exactly FR-005's original complaint about the error being
-    // unactionable there.
-    let mut p = fixture();
-    p.can_build_self = false;
-    p.web_search_backend = None;
-    let md = render_markdown(&p);
-    assert!(!md.contains("scripts/setup-searxng.sh"), "{md}");
-    assert!(md.contains("UNAVAILABLE"), "{md}");
-
-    p.can_build_self = true;
-    let md = render_markdown(&p);
-    assert!(md.contains("scripts/setup-searxng.sh"), "{md}");
+fn web_search_unavailable_message_names_every_way_to_enable_a_backend() {
+    // The message must work on a checkout-less VPS too, so it never points at
+    // scripts/setup-searxng.sh (FR-005) and names config keys instead.
+    for can_build_self in [false, true] {
+        let mut p = fixture();
+        p.can_build_self = can_build_self;
+        p.web_search_backend = None;
+        p.web_search = Vec::new();
+        let md = render_markdown(&p);
+        assert!(md.contains("UNAVAILABLE"), "{md}");
+        assert!(!md.contains("scripts/setup-searxng.sh"), "{md}");
+        assert!(md.contains("web_search_native"), "{md}");
+    }
 }
 
 #[test]
@@ -179,7 +177,7 @@ const UNCONNECTABLE_PORT: u16 = 0;
 fn web_search_probe_reports_each_backend_separately() {
     let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
     let url = format!("http://127.0.0.1:{}", listener.local_addr().unwrap().port());
-    let statuses = probe_web_search(Some(&url), Some("secret-brave-key"));
+    let statuses = probe_web_search(Some(&url), Some("secret-brave-key"), false);
 
     let searxng = &statuses[0];
     assert_eq!(searxng.provider, "searxng");
@@ -187,8 +185,12 @@ fn web_search_probe_reports_each_backend_separately() {
     assert_eq!(searxng.reachable, Some(true));
     assert_eq!(searxng.answered, None, "the passive probe sends no query");
 
+    let native = &statuses[1];
+    assert_eq!(native.provider, "native");
+    assert!(!native.configured, "disabled when the flag is off");
+
     // Regression: SearxNG being up used to hide Brave entirely, and a bare key read as healthy.
-    let brave = &statuses[1];
+    let brave = &statuses[2];
     assert_eq!(brave.provider, "brave");
     assert!(brave.configured);
     assert_eq!(brave.reachable, None);
@@ -204,10 +206,11 @@ fn web_search_probe_reports_each_backend_separately() {
 #[test]
 fn web_search_probe_marks_an_unreachable_searxng_unusable() {
     let url = format!("http://127.0.0.1:{}", UNCONNECTABLE_PORT);
-    let statuses = probe_web_search(Some(&url), None);
+    let statuses = probe_web_search(Some(&url), None, false);
     assert_eq!(statuses[0].reachable, Some(false));
     assert!(!statuses[0].usable());
     assert!(!statuses[1].configured);
+    assert!(!statuses[2].configured);
 
     let mut p = fixture();
     p.web_search_backend = None;
@@ -218,7 +221,7 @@ fn web_search_probe_marks_an_unreachable_searxng_unusable() {
 #[test]
 fn web_search_render_never_calls_a_bare_brave_key_available() {
     let mut p = fixture();
-    p.web_search = probe_web_search(None, Some("k"));
+    p.web_search = probe_web_search(None, Some("k"), false);
     let md = render_markdown(&p);
     assert!(
         md.contains("brave API key configured, not verified"),
@@ -226,4 +229,19 @@ fn web_search_render_never_calls_a_bare_brave_key_available() {
     );
     assert!(!md.contains("available via"), "{md}");
     assert!(md.contains("backend that answered"), "{md}");
+}
+
+#[test]
+fn the_built_in_engines_count_as_a_usable_backend_when_enabled() {
+    let statuses = probe_web_search(None, None, true);
+    let native = &statuses[1];
+    assert!(native.configured && native.usable());
+    assert_eq!(native.reachable, None);
+
+    let mut p = fixture();
+    p.web_search_backend = None;
+    p.web_search = statuses;
+    let md = render_markdown(&p);
+    assert!(md.contains("built-in engines enabled"), "{md}");
+    assert!(!md.contains("UNAVAILABLE"), "{md}");
 }

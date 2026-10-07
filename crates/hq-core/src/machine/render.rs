@@ -127,13 +127,8 @@ fn render_web_search(p: &MachineProfile) -> String {
     {
         return format!("- **Web search**: available via {backend}\n");
     }
-    if p.can_build_self {
-        return "- **Web search**: UNAVAILABLE: no backend reachable. Run \
-             `scripts/setup-searxng.sh` or set `brave_api_key` (or `HQ_BRAVE_API_KEY`).\n"
-            .into();
-    }
-    "- **Web search**: UNAVAILABLE: no backend reachable. Ask the operator to \
-     provision one (a SearxNG instance or a Brave Search API key), since this host has \
-     no source checkout to run the setup script from.\n"
+    "- **Web search**: UNAVAILABLE: no backend enabled. Set `web_search_native: true` \
+     (the default), point `searxng_url` at a SearxNG instance, or set `brave_api_key` \
+     (or `HQ_BRAVE_API_KEY`).\n"
         .into()
 }
