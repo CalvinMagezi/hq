@@ -66,13 +66,17 @@ pub struct HarnessSessionRow {
     pub dismissals: i64,
     /// Hash of the screen tail at the last dismissal; see `harness_session::dismiss`.
     pub last_dismiss_tail: Option<String>,
+    /// The session this one was started for (see `agent_delegate`).
+    pub parent_session_id: Option<String>,
+    /// 0 for a session a person or HQ started, one more than its parent's otherwise.
+    pub spawn_depth: i64,
 }
 
 pub const ORIGIN_USER: &str = "user";
 pub const ORIGIN_MCP: &str = "mcp";
 pub const ORIGIN_ASK: &str = "ask";
 
-const COLS: &str = "id, harness, label, host, agent_name, workspace_id, pane_id, cwd, status, resume_token, mission_id, created_at, updated_at, owner_thread, drive, pm_wake, last_driven_at, last_agent_status, last_seen_at, goal, done_criteria, nudges_sent, last_wake_nudges, no_progress_streak, progress_mark, drive_off_reason, keys_sent, origin, dismissals, last_dismiss_tail";
+const COLS: &str = "id, harness, label, host, agent_name, workspace_id, pane_id, cwd, status, resume_token, mission_id, created_at, updated_at, owner_thread, drive, pm_wake, last_driven_at, last_agent_status, last_seen_at, goal, done_criteria, nudges_sent, last_wake_nudges, no_progress_streak, progress_mark, drive_off_reason, keys_sent, origin, dismissals, last_dismiss_tail, parent_session_id, spawn_depth";
 
 type ChangeHook = Box<dyn Fn(&str) + Send + Sync>;
 
@@ -125,6 +129,8 @@ fn row_to_session(row: &rusqlite::Row) -> rusqlite::Result<HarnessSessionRow> {
         origin: row.get(27)?,
         dismissals: row.get(28)?,
         last_dismiss_tail: row.get(29)?,
+        parent_session_id: row.get(30)?,
+        spawn_depth: row.get(31)?,
     })
 }
 
@@ -766,6 +772,37 @@ pub fn set_status_exited_if_running(conn: &Connection, id: &str) -> Result<bool>
         self::changed(id);
     }
     Ok(changed == 1)
+}
+
+/// Records that `id` was started for `parent`, `depth` levels down.
+pub fn set_parent(conn: &Connection, id: &str, parent: &str, depth: i64) -> Result<()> {
+    conn.execute(
+        "UPDATE harness_sessions SET parent_session_id = ?2, spawn_depth = ?3 WHERE id = ?1",
+        params![id, parent, depth],
+    )?;
+    Ok(())
+}
+
+/// The sessions started for `parent` that are still running.
+pub fn running_children(conn: &Connection, parent: &str) -> Result<Vec<HarnessSessionRow>> {
+    let mut stmt = conn.prepare(&format!(
+        "SELECT {COLS} FROM harness_sessions \
+         WHERE parent_session_id = ?1 AND status = 'running' ORDER BY created_at"
+    ))?;
+    let rows = stmt
+        .query_map(params![parent], row_to_session)?
+        .collect::<rusqlite::Result<Vec<_>>>()?;
+    Ok(rows)
+}
+
+/// How many sessions `parent` started in the last `minutes`, running or not.
+pub fn children_started_since(conn: &Connection, parent: &str, minutes: i64) -> Result<i64> {
+    Ok(conn.query_row(
+        "SELECT COUNT(*) FROM harness_sessions \
+         WHERE parent_session_id = ?1 AND created_at >= datetime('now', ?2)",
+        params![parent, format!("-{minutes} minutes")],
+        |r| r.get(0),
+    )?)
 }
 
 /// Claim the alert for an agent's `state_change_seq`, returning whether this

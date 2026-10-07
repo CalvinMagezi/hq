@@ -34,11 +34,15 @@ pub(super) fn alert_finished(
         _ => return,
     }
     let link = record_on_task(db, row, Event::Finished);
+    let excerpt = tail_excerpt(screen, MAX_TAIL_BYTES);
+    // A delegated session tells whoever delegated it, whatever else happens here.
+    if let Err(e) = hq_tools::a2a::report_to_parent(db, row, "finished", &excerpt) {
+        tracing::warn!(session = %row.id, error = %e, "session-supervisor: could not report to the parent");
+    }
     if hand_to_chat(db, row, WAKE_FINISHED) {
         return;
     }
     let label = session_label(row);
-    let excerpt = tail_excerpt(screen, MAX_TAIL_BYTES);
     let task_line = task_line(link.as_ref());
     let body = format!(
         "Session {} on {} finished its task and is waiting for the next instruction.\n{OUTPUT_OPEN}\n{excerpt}\n{OUTPUT_CLOSE}\nGive it more work with `harness_session_send`, or end it with `harness_session_stop`.{task_line}",
