@@ -86,7 +86,7 @@ impl Transport {
             }
             _ => out,
         };
-        tracing::debug!(host, subcommand = ?args.iter().take(2).collect::<Vec<_>>(), elapsed_ms = started.elapsed().as_millis() as u64, exit = out.exit_code, "herdr invocation");
+        tracing::debug!(host, subcommand = ?loggable(args), elapsed_ms = started.elapsed().as_millis() as u64, exit = out.exit_code, "herdr invocation");
         if matches!(self, Transport::Ssh { .. }) && out.exit_code == SSH_FAILURE_EXIT {
             return Err(unreachable(first_line(&out.stderr)));
         }
@@ -197,6 +197,17 @@ fn mux_options(dir: &Path) -> Vec<String> {
     .into_iter()
     .flat_map(|opt| ["-o".to_string(), opt])
     .collect()
+}
+
+/// The part of a request that is safe to log. A herdr request is words (`agent
+/// get`); a native host's is a method and its params as JSON text, and the params
+/// can hold a secret (an agent's session token), so only the method is kept.
+fn loggable(args: &[String]) -> Vec<&str> {
+    let take = match args.first() {
+        Some(first) if first.contains('.') => 1,
+        _ => 2,
+    };
+    args.iter().take(take).map(String::as_str).collect()
 }
 
 /// Herdr arguments that only look at state. Only these may be re-run, because
@@ -333,6 +344,14 @@ mod tests {
         assert!(args.contains(&"IdentitiesOnly=yes".to_string()));
         assert_eq!(args[args.len() - 2], "me@100.64.0.1");
         assert_eq!(args.last().unwrap(), "hq-herdr-gate");
+    }
+
+    #[test]
+    fn a_native_requests_params_never_reach_the_log() {
+        let native = vec!["agent.mcp_config".to_string(), r#"{"token":"hqs_secret"}"#.to_string()];
+        assert_eq!(loggable(&native), ["agent.mcp_config"]);
+        let herdr = vec!["agent".to_string(), "get".to_string(), "x".to_string()];
+        assert_eq!(loggable(&herdr), ["agent", "get"]);
     }
 
     #[test]
