@@ -26,7 +26,7 @@
 
 Agent-HQ (HQ for short) puts one AI agent on every channel you use (Discord, Telegram, a web UI that installs as a PWA, the terminal) and keeps all your data in a markdown vault on your filesystem. Coding agents such as Claude Code, Codex CLI or OpenCode run as supervised harness sessions inside [Herdr](https://herdr.dev).
 
-No cloud backend. No vendor lock-in. One binary of about 40 MB.
+No cloud backend. No vendor lock-in. One binary of about 58 MB.
 
 ---
 
@@ -41,7 +41,7 @@ No cloud backend. No vendor lock-in. One binary of about 40 MB.
 - **MCP server.** A 2-tool gateway (`hq_discover`, `hq_call`) exposes the full tool registry to Claude Code, Cursor, VS Code, Copilot and other MCP clients.
 - **Safety by default.** Bash runs in a sandbox with an environment allowlist, untrusted content is tainted, and `/mcp` refuses requests without a key.
 - **Signed self-updates.** Servers pull minisign-verified releases and roll back on a failed health check.
-- **Web search out of the box.** `web_search` queries several free engines in-process (no key, no Docker) and merges the results; a SearxNG instance or a Brave API key are optional upgrades.
+- **Web search out of the box.** `web_search` queries Google, DuckDuckGo, Brave, Mojeek and category engines (news, science, images, code) in-process, with no key and no Docker, then merges and ranks the results. Blocked engines are suspended and remembered across restarts, a server can borrow a better network from a peer HQ, and a SearxNG instance or a Brave API key are optional upgrades. See [docs/WEB_SEARCH.md](docs/WEB_SEARCH.md).
 - **Optional integrations.** Google Workspace through the `gws` CLI, remote MCP servers, local models through Ollama. None are required.
 
 ---
@@ -310,7 +310,7 @@ Tasks have no CLI command: they are MCP tools (`task_list`, `task_create` and fr
 
 ### Crate Structure
 
-Agent-HQ is a Cargo workspace of 14 crates:
+Agent-HQ is a Cargo workspace of 16 crates and about 143,000 lines of Rust (556 files, counted on 2026-10-07 without blank lines or comments):
 
 | Crate | Purpose |
 |-------|---------|
@@ -327,6 +327,8 @@ Agent-HQ is a Cargo workspace of 14 crates:
 | `hq-web` | Axum WebSocket server, REST API, embedded static web UI |
 | `hq-convert` | Document format conversion utilities |
 | `hq-update` | Signed pull-based updater behind `hq update` |
+| `hq-host` | Built-in host for long-lived coding agents: pseudo-terminal panes with a readable screen, a control socket, state detection |
+| `hq-sandbox` | Process sandbox policy for one coding agent (`sandbox-exec` on macOS, `bwrap` on Linux) |
 | `hq-cli` | The `hq` binary: clap-derived commands |
 
 ### Key Dependencies
@@ -536,7 +538,7 @@ Sending `!cancel` via Discord or Telegram triggers a graceful `Cancelled` exit a
 cargo check                        # type-check all crates
 cargo test -p hq-tools             # test a specific crate (faster)
 cargo test --workspace             # run all tests
-cargo build --release -p hq-cli    # release build (about 40 MB)
+cargo build --release -p hq-cli    # release build (about 58 MB)
 ./scripts/install-hq.sh            # build + install to ~/bin (after a one-time `sudo ./scripts/install-hq.sh --link`)
 cargo clippy --workspace --all-targets -- -D warnings   # lint (CI gate)
 hq mcp doctor                      # verify MCP connection health

@@ -31,6 +31,11 @@ const capabilities = [
     icon: 'M4 7l2 2 3-3 M12 7h8 M4 16l2 2 3-3 M12 16h8',
   },
   {
+    title: 'Web search with nothing to set up',
+    body: 'web_search queries Google, DuckDuckGo, Brave, Mojeek and engines for news, science, images and code, all inside the hq process. No key, no Docker. Blocked engines are suspended and remembered, and a server on a blocked address can ask a peer HQ.',
+    icon: 'M11 4a7 7 0 1 0 0 14 7 7 0 0 0 0-14z M16 16l4 4',
+  },
+  {
     title: 'An MCP server for your tools',
     body: 'Two tools, hq_discover and hq_call, open the whole registry to Claude Code, Cursor, VS Code, Copilot and other MCP clients. Remote MCP servers can be bridged in the other direction.',
     icon: 'M6 9.5a2.5 2.5 0 1 0 0 5 2.5 2.5 0 0 0 0-5z M18 3.5a2.5 2.5 0 1 0 0 5 2.5 2.5 0 0 0 0-5z M18 15.5a2.5 2.5 0 1 0 0 5 2.5 2.5 0 0 0 0-5z M8.3 10.8l7.4-4.1 M8.3 13.2l7.4 4.1',
@@ -69,7 +74,7 @@ const capabilities = [
       <p class="lede">
         Agent HQ (HQ for short) puts one AI agent on Discord, Telegram, a web app and your terminal.
         It keeps your data in a markdown vault on your own disk and supervises the coding agents you
-        already use. One Rust binary of about 40 MB. No cloud backend.
+        already use. One Rust binary of about 58 MB. No cloud backend.
       </p>
       <div class="prose">
         <CodeBlock id="hero-install" label="Install" code={installCmd} />

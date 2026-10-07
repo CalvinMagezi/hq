@@ -75,7 +75,7 @@ const sourceMap = [
       <div class="prose">
         <p>
           The <code>hq</code> binary is built from the <code>hq-cli</code> crate. A release build is
-          about 40 MB with LTO and symbol stripping. The same file runs the terminal chat, the
+          about 58 MB with LTO and symbol stripping. The same file runs the terminal chat, the
           daemon, the Discord and Telegram relays, the web server and the MCP server. You pick the
           role with a subcommand.
         </p>
@@ -98,9 +98,9 @@ const sourceMap = [
       <h2 id="crates-h">Crate map</h2>
       <div class="prose">
         <p>
-          The workspace is Rust edition 2024 with 14 crates. Foundations hold types, storage and the
+          The workspace is Rust edition 2024 with 16 crates and about 143,000 lines of Rust. Foundations hold types, storage and the
           LLM clients. The agent crate holds the session loop, sub-agents, governance and the context engine.
-          Services wrap those for a transport. <code>hq-cli</code> ties them into the binary.
+          Services wrap those for a transport. <code>hq-host</code> and <code>hq-sandbox</code> run and confine coding agents. <code>hq-cli</code> ties them into the binary.
         </p>
         <p>
           The stack, in short: Tokio for async, Axum and tower-http for the web server, rusqlite

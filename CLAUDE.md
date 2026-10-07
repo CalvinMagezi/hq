@@ -37,7 +37,7 @@ placeholders (`example.com`, `hq.example.ts.net`, `<owner>/<repo>`).
 
 ## Architecture
 
-- **Language**: Rust (edition 2024, Cargo workspace of 14 crates)
+- **Language**: Rust (edition 2024, Cargo workspace of 16 crates)
 - **Binary**: `hq`, built from `crates/hq-cli`. `scripts/install-hq.sh` installs it
   to `~/bin/hq`; servers use `/usr/local/bin/hq`.
 - **Config**: `~/.hq/config.yaml` (override with `HQ_CONFIG_PATH`); any key can
@@ -127,7 +127,7 @@ cargo fmt
 hq mcp doctor                     # verify MCP connection health
 hq skills validate                # reject skills that can never fire (also in hq doctor)
 ./scripts/cargo-gc.sh             # clean debug artifacts if over 20 GB
-./scripts/setup-searxng.sh        # optional: local SearxNG container, tried before the built-in engine pool (set searxng_url)
+./scripts/setup-searxng.sh        # optional: local SearxNG container, tried before the built-in engine pool (set searxng_url). Web search is documented in docs/WEB_SEARCH.md
 ```
 
 ### Installing a new build
@@ -273,6 +273,8 @@ a document.
 | `hq-web` | WebSocket server, REST API, embedded web UI |
 | `hq-convert` | Document conversion both ways, OCR, brand kits |
 | `hq-update` | Signed pull-based updater (library behind `hq update`) |
+| `hq-host` | Built-in coding-agent host: pty panes, emulated screen, control socket, state detection |
+| `hq-sandbox` | Process sandbox policy for one coding agent (`sandbox-exec` or `bwrap`) |
 | `hq-cli` | The `hq` binary and its CLI commands |
 
 ## Writing style

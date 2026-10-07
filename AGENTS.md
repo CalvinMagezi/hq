@@ -4,7 +4,7 @@ This file provides context for AI assistants working on this project.
 
 ## What This Is
 
-Agent-HQ: a local-first AI agent hub written in Rust. Single binary (about 40 MB release). Data lives in `.vault/` (a markdown vault, gitignored). Puts one agent on Discord, Telegram, a web UI (PWA) and the terminal, all backed by a shared markdown knowledge base. Coding agents run as harness sessions in Herdr.
+Agent-HQ: a local-first AI agent hub written in Rust. Single binary (about 58 MB release). Data lives in `.vault/` (a markdown vault, gitignored). Puts one agent on Discord, Telegram, a web UI (PWA) and the terminal, all backed by a shared markdown knowledge base. Coding agents run as harness sessions in Herdr.
 
 ## Project Type: Rust
 
@@ -14,14 +14,14 @@ Agent-HQ: a local-first AI agent hub written in Rust. Single binary (about 40 MB
 cargo check                        # type-check all crates
 cargo test -p hq-tools             # test a specific crate (prefer this for speed)
 cargo test                         # run ALL tests (slow, 30+ test binaries; run before a PR)
-cargo build --release -p hq-cli    # release build (about 40 MB)
+cargo build --release -p hq-cli    # release build (about 58 MB)
 cargo clippy --workspace --all-targets -- -D warnings   # lint (CI gate)
 cargo fmt                          # format
 ```
 
 ### Build Artifact Hygiene
 
-The debug profile accumulates stale binaries Cargo never cleans. With 14 crates and heavy deps, `target/debug/` can reach 100 GB+ in weeks.
+The debug profile accumulates stale binaries Cargo never cleans. With 16 crates and heavy deps, `target/debug/` can reach 100 GB+ in weeks.
 
 - On macOS, an optional weekly launchd job (`com.agent-hq.cargo-gc`) runs `scripts/cargo-gc.sh` at 4am Sunday.
 - Prefer `cargo test -p <crate>` over bare `cargo test` (avoids compiling all test binaries).
