@@ -33,12 +33,16 @@
 //! always enforced by a post-filter on the result host, so a page can come
 //! back with fewer than `max_results` hits.
 //!
-//! Fetching uses reqwest plus html2text for HTML, `hq-convert` for PDFs (text
-//! layer first, OCR for scanned files), and an automatic Jina Reader
-//! (`r.jina.ai`, a third-party service that receives only the URL) fallback
-//! for JS-rendered pages that come back as an empty shell. Every redirect hop
-//! is re-checked against the private-network rules. Pages that need a logged-in
-//! browser, interaction, or anything Jina can't render stay unsupported.
+//! Fetching uses reqwest. HTML goes through `readable` (main-content extraction
+//! with title, byline, date and links), falling back to html2text when no
+//! confident container is found. A page that comes back as an empty
+//! client-rendered shell is recovered from its embedded JSON-LD or framework
+//! data, then from Jina Reader (`r.jina.ai`, a third-party service that
+//! receives only the URL; `HQ_WEB_FETCH_JINA=0` turns it off). PDFs use
+//! `hq-convert` (text layer first, OCR for scanned files, which needs
+//! `pdftoppm` and `tesseract` off macOS). Every redirect hop is re-checked
+//! against the private-network rules. Pages that need a logged-in browser,
+//! interaction, or anything none of those can recover stay unsupported.
 
 use anyhow::{Result, bail};
 use async_trait::async_trait;
@@ -63,6 +67,7 @@ mod fetch;
 mod fetch_tests;
 mod health;
 mod native;
+mod readable;
 mod ssrf;
 #[cfg(test)]
 mod tests;
@@ -113,4 +118,5 @@ use chain::*;
 use client::*;
 use fetch::*;
 use native::*;
+use readable::{embedded_text, extract_article};
 use types::*;

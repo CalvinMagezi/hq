@@ -10,7 +10,36 @@ pub async fn run(config: &HqConfig) -> Result<()> {
     report_bash_sandbox(config);
     report_machine_profile(config);
     report_web_search(config).await;
+    report_pdf_ocr();
     Ok(())
+}
+
+/// Scanned PDFs (no text layer) are read with `pdftoppm` and `tesseract` off
+/// macOS; without them `web_fetch` fails on those files only.
+fn report_pdf_ocr() {
+    // macOS reads scans with Vision, and other platforms are not supported hosts.
+    if !cfg!(all(unix, not(target_os = "macos"))) {
+        return;
+    }
+    println!("\nPDF OCR (scanned PDFs in web_fetch)");
+    let missing: Vec<&str> = ["pdftoppm", "tesseract"]
+        .into_iter()
+        .filter(|tool| !on_path(tool))
+        .collect();
+    if missing.is_empty() {
+        println!("  ok  pdftoppm and tesseract found");
+    } else {
+        println!(
+            "  warn  {} not found, so scanned PDFs cannot be read. PDFs with a text layer still work. \
+             Install with `apt install poppler-utils tesseract-ocr`.",
+            missing.join(" and ")
+        );
+    }
+}
+
+fn on_path(tool: &str) -> bool {
+    std::env::var_os("PATH")
+        .is_some_and(|paths| std::env::split_paths(&paths).any(|dir| dir.join(tool).is_file()))
 }
 
 /// The machine profile only sees configured and reachable; this sends one

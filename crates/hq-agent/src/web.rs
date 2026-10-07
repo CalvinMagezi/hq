@@ -2,9 +2,9 @@
 //!
 //! Search works with no setup through a built-in engine pool; a configured
 //! SearxNG instance is tried first and the paid Brave Search API last (see
-//! `hq_tools::web`). Fetching uses reqwest +
-//! html2text for page content, with an automatic Jina Reader fallback for
-//! JS-rendered pages; no API key required for either.
+//! `hq_tools::web`). Fetching reduces a page to its main content, recovers
+//! client-rendered pages from their embedded data and, last, a Jina Reader
+//! fallback; no API key required for either tool.
 
 use anyhow::Result;
 use async_trait::async_trait;
@@ -147,8 +147,10 @@ impl AgentTool for WebFetchTool {
             "- url (required): The URL to fetch (http/https only)\n",
             "- max_chars (optional): Max characters to return (default 50000)\n\n",
             "Output starts with a provenance line: final URL, content type and extraction ",
-            "method. Client-rendered pages fall back to the third-party Jina Reader, which ",
-            "receives only the URL; that is noted in the output.\n\n",
+            "method. HTML is reduced to the article or main content with its links. ",
+            "Client-rendered pages are recovered from data embedded in the HTML, then from ",
+            "the third-party Jina Reader, which receives only the URL; either is noted in ",
+            "the output.\n\n",
             "Security: Blocks file://, localhost, and private IP addresses, including via redirects.\n",
             "Images, audio, video and archives are rejected. Use bash + curl for those.",
         )

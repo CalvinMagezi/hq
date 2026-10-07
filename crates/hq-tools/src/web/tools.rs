@@ -171,7 +171,7 @@ impl HqTool for WebFetchHqTool {
     }
 
     fn description(&self) -> &str {
-        "Fetch a URL and extract clean text content. HTML is converted to text, PDFs are read from their text layer (OCR for scanned PDFs where the host has it), and pages that render client-side fall back to the third-party Jina Reader, which receives only the URL. Returns the content with final_url, content_type, method, truncation and notes on partial extraction. Images, audio, video and archives are rejected. No API key required."
+        "Fetch a URL and extract clean text content. HTML pages are reduced to their main content (title, byline, date, body, links) without navigation and footers, falling back to a plain text conversion. Pages that render client-side are recovered from their embedded JSON-LD or framework data, then from the third-party Jina Reader (receives only the URL; `HQ_WEB_FETCH_JINA=0` disables it). PDFs are read from their text layer, with OCR for scanned PDFs where the host has pdftoppm and tesseract. Returns the content with final_url, content_type, method, truncation and notes on partial extraction. Images, audio, video and archives are rejected. No API key required."
     }
 
     fn parameters(&self) -> Value {
