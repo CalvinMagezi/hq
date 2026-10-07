@@ -174,6 +174,9 @@ pub struct Host {
     egress: Arc<Egress>,
     /// Refuse to start an agent that is not under the process sandbox.
     require_sandbox: bool,
+    /// The `hq` binary a Linux sandbox runs its egress relay with; this process's
+    /// own binary when unset (right for `hq host serve`).
+    helper: Option<PathBuf>,
 }
 
 /// What `Host::restore` did.
@@ -228,6 +231,7 @@ impl Host {
             state: None,
             egress: Arc::new(Egress::new()),
             require_sandbox: false,
+            helper: None,
         }
     }
 
@@ -236,6 +240,13 @@ impl Host {
     /// this, not whoever drives the host.
     pub fn with_require_sandbox(mut self, require: bool) -> Self {
         self.require_sandbox = require;
+        self
+    }
+
+    /// The binary a Linux sandbox starts as its egress relay. Needed only where this
+    /// process is not itself `hq` (a test binary, an embedding).
+    pub fn with_helper_binary(mut self, path: impl Into<PathBuf>) -> Self {
+        self.helper = Some(path.into());
         self
     }
 
@@ -314,6 +325,7 @@ impl Host {
                         argv: &spec.argv,
                         agent: spec.agent.as_deref(),
                         env: &spec.env,
+                        helper: self.helper.as_deref(),
                     },
                 )?)
             }

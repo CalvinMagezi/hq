@@ -16,10 +16,13 @@ pub struct HostArgs {
     pub allow_unsandboxed: bool,
     pub key: Option<String>,
     pub from: Option<String>,
+    pub port: Option<u16>,
+    pub unix: Option<PathBuf>,
+    pub rest: Vec<String>,
 }
 
 pub async fn run(args: HostArgs) -> Result<()> {
-    let HostArgs { sub, dir, allow_unsandboxed, key, from } = args;
+    let HostArgs { sub, dir, allow_unsandboxed, key, from, port, unix, rest } = args;
     let sub = sub.as_str();
     let dir_arg = dir.clone();
     let dir = dir.unwrap_or_else(default_dir);
@@ -29,6 +32,8 @@ pub async fn run(args: HostArgs) -> Result<()> {
         "stop" => stop(&dir),
         "report" => report(dir_arg),
         "gate" => gate(&dir),
+        "relay" => relay(port, unix),
+        "sandbox-init" => sandbox_init(port, unix, &rest),
         "install" => super::host_install::install(),
         "authorize" => super::host_install::authorize(key.as_deref(), from.as_deref()),
         other => bail!("unknown subcommand '{other}': use serve, status, stop, install, authorize, report or gate"),
@@ -141,4 +146,20 @@ fn gate(dir: &std::path::Path) -> Result<()> {
             std::process::exit(hq_host::GATE_DENIED_EXIT);
         }
     }
+}
+
+/// Runs inside a Linux sandbox: forwards loopback `--port` to the unix socket.
+fn relay(port: Option<u16>, unix: Option<PathBuf>) -> Result<()> {
+    let (Some(port), Some(unix)) = (port, unix) else {
+        bail!("usage: hq host relay --port <port> --unix <socket>");
+    };
+    hq_host::run_relay(port, &unix).context("running the egress relay")
+}
+
+/// Runs inside a Linux sandbox: starts the relay, then replaces itself with the agent.
+fn sandbox_init(port: Option<u16>, unix: Option<PathBuf>, rest: &[String]) -> Result<()> {
+    let (Some(port), Some(unix)) = (port, unix) else {
+        bail!("usage: hq host sandbox-init --port <port> --unix <socket> -- <command>");
+    };
+    Err(hq_host::sandbox_init(port, &unix, rest)).context("starting the agent")
 }

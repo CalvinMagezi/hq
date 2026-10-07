@@ -11,7 +11,7 @@ const WAIT: Duration = Duration::from_secs(20);
 const SECRET: &str = "OPERATOR-TOKEN-VALUE";
 
 fn sandbox_available() -> bool {
-    cfg!(target_os = "macos") && hq_sandbox::backend().is_some()
+    hq_sandbox::backend().is_some()
 }
 
 fn spec(allow: Vec<Allow>) -> SandboxSpec {
@@ -38,12 +38,14 @@ fn run_dir() -> tempfile::TempDir {
         std::fs::write(p.join("mcp").join(format!("{name}.json")), format!("mcp-of-{name}")).unwrap();
         std::fs::write(p.join("hooks").join(format!("{name}.json")), "{}").unwrap();
     }
-    std::fs::write(p.join("host.sock"), "").unwrap();
+    for sock in ["host.sock", "agent.sock"] {
+        std::fs::write(p.join(sock), "").unwrap();
+    }
     dir
 }
 
 fn host_for(dir: &Path) -> Host {
-    let host = Host::new();
+    let host = Host::new().with_helper_binary(env!("CARGO_BIN_EXE_hq"));
     host.set_run_dir(dir);
     host
 }
@@ -74,7 +76,7 @@ fn the_agent_cannot_read_the_hosts_secrets_but_keeps_its_own_files() {
     let script = format!(
         "t() {{ if eval \"$2\" >/dev/null 2>&1; then echo \"$1=yes\"; else echo \"$1=no\"; fi; }}; \
          t token 'cat {d}/operator.token'; t other_mcp 'cat {d}/mcp/b.json'; t own_mcp 'cat {d}/mcp/a.json'; \
-         t own_hooks 'cat {d}/hooks/a.json'; t listing 'ls {d}/mcp'; t socket 'test -S {d}/host.sock || test -e {d}/host.sock'; \
+         t own_hooks 'cat {d}/hooks/a.json'; t listing 'ls {d}/mcp'; t sibling_listed 'ls {d}/mcp | grep -q b.json'; t socket 'test -e {d}/agent.sock'; \
          t write_project 'echo x > ./ok'; t write_home 'echo x > \"$HOME/hq-host-sandbox-probe\"'; \
          t ssh 'ls \"$HOME/.ssh\"'; t home_other 'cat \"$HOME/hq-host-readprobe\"'; t users_list 'ls /Users'; t volumes_list 'ls /Volumes'; t shared 'ls /Users/Shared'; echo DONE"
     );
@@ -82,6 +84,10 @@ fn the_agent_cannot_read_the_hosts_secrets_but_keeps_its_own_files() {
     std::fs::write(format!("{home}/hq-host-readprobe"), "x").unwrap();
     let host = host_for(dir.path());
     let out = run(&host, "a", project.path(), spec(vec![]), &script);
+    assert!(
+        !Path::new(&format!("{home}/hq-host-sandbox-probe")).exists(),
+        "a write under home reached the real home directory"
+    );
     let _ = std::fs::remove_file(format!("{home}/hq-host-sandbox-probe"));
     let _ = std::fs::remove_file(format!("{home}/hq-host-readprobe"));
     assert!(!out.contains(SECRET));
@@ -90,14 +96,18 @@ fn the_agent_cannot_read_the_hosts_secrets_but_keeps_its_own_files() {
         ("other_mcp", false),
         ("own_mcp", true),
         ("own_hooks", true),
-        ("listing", false),
+        // Seatbelt refuses the listing; bubblewrap shows a directory holding only
+        // the agent's own file. Either way a sibling's file is not in it.
+        ("listing", cfg!(target_os = "linux")),
+        ("sibling_listed", false),
         ("socket", true),
         ("write_project", true),
-        ("write_home", false),
+        // Seatbelt denies the write; bubblewrap lets it land in a throwaway tmpfs.
+        ("write_home", cfg!(target_os = "linux")),
         ("home_other", false),
         ("users_list", false),
         ("volumes_list", false),
-        ("shared", true),
+        ("shared", cfg!(target_os = "macos")),
     ] {
         let want = format!("{probe}={}", if allowed { "yes" } else { "no" });
         assert!(out.contains(&want), "expected {want}; got:\n{out}");
@@ -233,6 +243,9 @@ fn the_agent_cannot_plant_code_the_operator_runs_later() {
     let dir = run_dir();
     let project = tempfile::tempdir().unwrap();
     std::fs::create_dir_all(project.path().join(".git/hooks")).unwrap();
+    // bubblewrap can only protect what exists, as real projects have it.
+    std::fs::write(project.path().join(".git/config"), "[core]\n").unwrap();
+    std::fs::write(project.path().join(".mcp.json"), "{}").unwrap();
     let host = host_for(dir.path());
     let script = "t() { if eval \"$2\" >/dev/null 2>&1; then echo \"$1=yes\"; else echo \"$1=no\"; fi; }; \
         t hook 'echo x > .git/hooks/pre-commit'; t mcp 'echo {} > .mcp.json'; t cfg 'echo x >> .git/config'; \
@@ -258,6 +271,10 @@ fn a_launch_profile_keeps_its_own_claude_config_and_loses_the_default_one() {
         std::fs::create_dir_all(d).unwrap();
     }
     std::fs::write(mine.join("credentials"), "MINE").unwrap();
+    // bubblewrap can only protect what exists, as a real profile has it.
+    std::fs::write(mine.join("settings.json"), "{}").unwrap();
+    std::fs::write(mine.join(".claude.json"), "{}").unwrap();
+    std::fs::create_dir(mine.join("hooks")).unwrap();
     std::fs::write(other.join("credentials"), "OTHER").unwrap();
     let dir = run_dir();
     let project = tempfile::tempdir().unwrap();
@@ -265,7 +282,7 @@ fn a_launch_profile_keeps_its_own_claude_config_and_loses_the_default_one() {
     let script = "t() { if eval \"$2\" >/dev/null 2>&1; then echo \"$1=yes\"; else echo \"$1=no\"; fi; }; \
         t read_own 'cat \"$CLAUDE_CONFIG_DIR/credentials\"'; t write_own 'echo x > \"$CLAUDE_CONFIG_DIR/state\"'; \
         t write_settings 'echo {} > \"$CLAUDE_CONFIG_DIR/settings.json\"'; t write_json 'echo {} > \"$CLAUDE_CONFIG_DIR/.claude.json\"'; \
-        t write_hooks 'mkdir \"$CLAUDE_CONFIG_DIR/hooks\"'; \
+        t write_hooks 'echo x > \"$CLAUDE_CONFIG_DIR/hooks/pre.sh\"'; \
         t read_default 'ls \"$HOME/.claude\"'; t read_other 'cat \"$HOME/.claude-hqtest-other-PID/credentials\"'; echo DONE"
         .replace("PID", &pid.to_string());
     let mut s = SpawnSpec::new("a", vec!["sh".into(), "-c".into(), script], project.path());

@@ -65,7 +65,6 @@ running and stay manageable; new ones use herdr again.
 
 ## Not covered yet
 
-Linux hosts (the sandbox cannot enforce its network allowlist there yet, so a
-Linux host needs `--allow-unsandboxed`), Host-header fronting inside TLS, reads
+Host-header fronting inside TLS, reads
 outside your home directory, and agents other than Claude Code (no hooks, MCP
 config or sandbox-aware launch).

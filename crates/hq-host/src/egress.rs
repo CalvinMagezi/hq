@@ -227,6 +227,17 @@ impl Egress {
     /// Opens a loopback listener for `agent` applying `rules` and returns its port.
     /// Opening again for the same agent replaces the earlier listener.
     pub fn open(&self, agent: &str, rules: Vec<Rule>) -> std::io::Result<u16> {
+        self.open_with_bridge(agent, rules, None)
+    }
+
+    /// Like `open`, and also serves `bridge` (a unix socket) that forwards to the
+    /// listener, for sandboxes with no network of their own.
+    pub fn open_with_bridge(
+        &self,
+        agent: &str,
+        rules: Vec<Rule>,
+        bridge: Option<&std::path::Path>,
+    ) -> std::io::Result<u16> {
         self.close(agent);
         let listener = TcpListener::bind((Ipv4Addr::LOCALHOST, 0))?;
         listener.set_nonblocking(true)?;
@@ -235,6 +246,9 @@ impl Egress {
         let log: Log = Arc::new(Mutex::new(VecDeque::new()));
         lock(&self.logs).insert(agent.to_string(), log.clone());
         let (rules, open) = (Arc::new(rules), Arc::new(AtomicUsize::new(0)));
+        if let Some(path) = bridge {
+            crate::relay::serve_bridge(path, port, stop.clone())?;
+        }
         let (accept_stop, accept_log) = (stop.clone(), log);
         std::thread::Builder::new()
             .name(format!("egress-{agent}"))
