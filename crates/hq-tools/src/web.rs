@@ -1,11 +1,13 @@
 //! Web tools — search the web and fetch page content.
 //!
 //! Search works with no setup. The chain is a self-hosted SearxNG instance when
-//! `searxng_url` is set, then the built-in engine pool (`native`: Brave,
-//! DuckDuckGo and Wikipedia for general queries, Bing News and Hacker News for
-//! news, arXiv and OpenAlex for science, Wikimedia Commons and Openverse for
-//! images, GitHub, Stack Overflow, crates.io and npm for code, queried in parallel, merged by
-//! reciprocal-rank fusion and cached for 10 minutes), then the paid Brave Search
+//! `searxng_url` is set, then the built-in engine pool (`native`: Google (the
+//! keyless Programmable Search element endpoint SearxNG uses), DuckDuckGo,
+//! Brave and a Wikipedia summary for general queries, Bing News and Hacker News for
+//! news, arXiv, OpenAlex and Europe PMC for science, Google Images, Wikimedia Commons and Openverse for
+//! images, GitHub, Stack Overflow, Ask Ubuntu, Super User, MDN, crates.io and npm for code, queried in
+//! parallel, merged with SearxNG's ranking (engine weights times positions times
+//! the sum of 1 over position) and cached for 10 minutes), then the paid Brave Search
 //! API when `brave_api_key` is set. A later backend runs when an earlier one
 //! fails, cools down after recent failures, or returns nothing. The machine
 //! profile reports each backend as configured or reachable without querying it;

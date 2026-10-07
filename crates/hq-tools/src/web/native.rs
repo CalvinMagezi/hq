@@ -7,6 +7,7 @@ use super::*;
 use tokio::task::JoinSet;
 
 mod engines;
+mod google;
 mod images_code;
 mod markup;
 #[cfg(test)]
@@ -19,14 +20,8 @@ const RESULT_CACHE_TTL: Duration = Duration::from_secs(10 * 60);
 /// A pool with some engines down is cached briefly, so a retry soon after picks them up again.
 const PARTIAL_RESULT_CACHE_TTL: Duration = Duration::from_secs(60);
 const CACHE_MAX_ENTRIES: usize = 200;
-/// Damping constant from the reciprocal-rank-fusion paper.
-const RRF_K: f32 = 60.0;
 /// Engines at or above this weight are the real web indexes.
 const PRIMARY_WEIGHT: f32 = 1.0;
-const ENGINE_BACKOFF_BASE: Duration = Duration::from_secs(20);
-const ENGINE_BACKOFF_CAP: Duration = Duration::from_secs(10 * 60);
-const ENGINE_RATE_LIMIT_BACKOFF_BASE: Duration = Duration::from_secs(60);
-const ENGINE_RATE_LIMIT_BACKOFF_CAP: Duration = Duration::from_secs(30 * 60);
 /// Query parameters that only track clicks; they never change which page a URL is.
 const TRACKING_PARAMS: &[&str] = &["fbclid", "gclid", "msclkid"];
 
@@ -103,17 +98,6 @@ fn store_page(key: String, page: &Page, ttl: Duration) {
     );
 }
 
-fn engine_backoff(rate_limited: bool) -> (Duration, Duration) {
-    if rate_limited {
-        (
-            ENGINE_RATE_LIMIT_BACKOFF_BASE,
-            ENGINE_RATE_LIMIT_BACKOFF_CAP,
-        )
-    } else {
-        (ENGINE_BACKOFF_BASE, ENGINE_BACKOFF_CAP)
-    }
-}
-
 struct EngineRun {
     order: usize,
     weight: f32,
@@ -170,8 +154,8 @@ pub(super) async fn native_search(
 /// Query every engine for the category in parallel and merge the answers. The
 /// flag says every engine that was asked answered. No caching here, so
 /// `hq doctor` can use it to test the engines for real.
-// ponytail: engines are asked once per query with no per-engine pacing; the
-// result cache and cooldowns cap the request rate. Add jitter if one starts blocking.
+// ponytail: only Google is paced (see `google::pace`); the other engines rely on
+// the result cache and cooldowns to cap their request rate. Add jitter if one starts blocking.
 pub(super) async fn search_pool(
     query: &str,
     opts: &SearchOptions,
@@ -249,10 +233,16 @@ async fn run_engine(
     budget: Duration,
 ) -> EngineRun {
     let mut attempts = Vec::new();
-    if opts.page > 1 && !engine.supports_paging() {
+    let beyond_pages = opts.page > engine.max_page();
+    if opts.page > 1 && (!engine.supports_paging() || beyond_pages) {
+        let outcome = if beyond_pages {
+            format!("skipped: serves pages up to {} only", engine.max_page())
+        } else {
+            "skipped: serves page 1 only".to_string()
+        };
         attempts.push(ProviderAttempt {
             provider: engine.name().into(),
-            outcome: "skipped: serves page 1 only".into(),
+            outcome,
         });
         return EngineRun {
             order,
@@ -262,11 +252,31 @@ async fn run_engine(
         };
     }
     let key = format!("{base}#native:{}", engine.name());
+    if engine.paced() && !with_health(&key, |h| h.is_cooling_down()).unwrap_or(false) {
+        // Queueing behind other searches happens before the engine's own budget
+        // starts, so a long queue is not mistaken for a failing engine.
+        let remaining = deadline.saturating_duration_since(Instant::now());
+        if tokio::time::timeout(remaining, google::pace())
+            .await
+            .is_err()
+        {
+            attempts.push(ProviderAttempt {
+                provider: engine.name().into(),
+                outcome: "skipped: queued behind other searches past the deadline".into(),
+            });
+            return EngineRun {
+                order,
+                weight: engine.weight(),
+                attempts,
+                results: None,
+            };
+        }
+    }
     let backend = Backend {
         key: &key,
         label: engine.name(),
         budget,
-        backoff: engine_backoff,
+        backoff: FailureClass::suspension,
     };
     let page = try_backend(
         &backend,
@@ -274,7 +284,7 @@ async fn run_engine(
         &mut attempts,
         || engine.fetch(client, base, query, opts),
         |body| {
-            engine.parse(body, base).map(|results| Page {
+            engine.parse(body).map(|results| Page {
                 results,
                 next_page: None,
             })
@@ -289,11 +299,16 @@ async fn run_engine(
     }
 }
 
-/// Reciprocal-rank fusion: a result several engines agree on outranks one that
-/// a single engine put first. Ties keep the order engines were queried in.
+/// SearxNG's ranking. A result's score is the product of the weights of the
+/// engines that found it, times the number of positions it was found at, times
+/// the sum of `1 / position` over those positions (position is 1-based within
+/// each engine's own list). Agreement between engines therefore counts
+/// heavily, and a top-ranked hit counts far more than a tenth-ranked one. Ties
+/// keep the order engines were queried in.
 fn merge(lists: Vec<(f32, Vec<SearchResult>)>) -> Vec<SearchResult> {
     struct Slot {
-        score: f32,
+        weight: f32,
+        positions: Vec<usize>,
         seq: usize,
         result: SearchResult,
     }
@@ -301,17 +316,22 @@ fn merge(lists: Vec<(f32, Vec<SearchResult>)>) -> Vec<SearchResult> {
     let mut seq = 0;
     for (weight, list) in lists {
         for (rank, r) in list.into_iter().enumerate() {
-            let score = weight / (RRF_K + rank as f32 + 1.0);
+            let position = rank + 1;
             match slots.get_mut(&normalize_url(&r.url)) {
                 Some(slot) => {
-                    slot.score += score;
+                    // An engine's weight counts once per result, however often it lists it.
+                    if r.engines.iter().any(|e| !slot.result.engines.contains(e)) {
+                        slot.weight *= weight;
+                    }
+                    slot.positions.push(position);
                     absorb(&mut slot.result, r);
                 }
                 None => {
                     slots.insert(
                         normalize_url(&r.url),
                         Slot {
-                            score,
+                            weight,
+                            positions: vec![position],
                             seq,
                             result: r,
                         },
@@ -321,8 +341,12 @@ fn merge(lists: Vec<(f32, Vec<SearchResult>)>) -> Vec<SearchResult> {
             }
         }
     }
+    let score = |s: &Slot| {
+        let sum: f32 = s.positions.iter().map(|p| 1.0 / *p as f32).sum();
+        s.weight * s.positions.len() as f32 * sum
+    };
     let mut ranked: Vec<Slot> = slots.into_values().collect();
-    ranked.sort_by(|a, b| b.score.total_cmp(&a.score).then(a.seq.cmp(&b.seq)));
+    ranked.sort_by(|a, b| score(b).total_cmp(&score(a)).then(a.seq.cmp(&b.seq)));
     ranked
         .into_iter()
         .enumerate()
@@ -333,13 +357,21 @@ fn merge(lists: Vec<(f32, Vec<SearchResult>)>) -> Vec<SearchResult> {
         .collect()
 }
 
-/// Fold a duplicate hit into the kept one: richer snippet, date if missing, every engine.
+/// Fold a duplicate hit into the kept one as SearxNG does: the longer title
+/// and content win, a missing date is filled, an `https` link replaces an
+/// `http` one, and every engine is kept.
 fn absorb(kept: &mut SearchResult, dup: SearchResult) {
+    if dup.title.len() > kept.title.len() {
+        kept.title = dup.title;
+    }
     if dup.snippet.len() > kept.snippet.len() {
         kept.snippet = dup.snippet;
     }
     if kept.published.is_none() {
         kept.published = dup.published;
+    }
+    if kept.url.starts_with("http://") && dup.url.starts_with("https://") {
+        kept.url = dup.url;
     }
     for e in dup.engines {
         if !kept.engines.contains(&e) {

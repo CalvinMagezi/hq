@@ -4,10 +4,9 @@
 //! post-filter still applies.
 
 use super::super::*;
-use super::engines::{Engine, freshness_secs, result, truncate_chars};
+use super::engines::{Engine, freshness_secs, result};
 use super::markup::{collapse_ws, html_text};
 
-const SNIPPET_MAX_CHARS: usize = 400;
 /// A longer image URL would be cut mid-way by the snippet cap, so such a hit is dropped.
 const MAX_IMAGE_URL_CHARS: usize = 300;
 
@@ -70,12 +69,17 @@ pub(super) async fn fetch(
                 .query(&params);
             get_json(req).await
         }
-        Engine::StackOverflow => {
+        Engine::StackOverflow | Engine::AskUbuntu | Engine::SuperUser => {
+            let site = match engine {
+                Engine::AskUbuntu => "askubuntu",
+                Engine::SuperUser => "superuser",
+                _ => "stackoverflow",
+            };
             let mut params = vec![
                 ("order", "desc".to_string()),
                 ("sort", "relevance".into()),
                 ("q", q),
-                ("site", "stackoverflow".into()),
+                ("site", site.into()),
                 ("pagesize", per_page.to_string()),
                 ("page", page.to_string()),
             ];
@@ -105,10 +109,26 @@ pub(super) async fn fetch(
             ];
             get_json(client.get(format!("{base}/-/v1/search")).query(&params)).await
         }
-        _ => Err(ProviderError {
-            reason: "not an images or code engine".into(),
-            rate_limited: false,
-        }),
+        Engine::Mdn => {
+            let params = [("q", q), ("page", page.to_string())];
+            get_json(client.get(format!("{base}/api/v1/search")).query(&params)).await
+        }
+        Engine::EuropePmc => {
+            let params = [
+                ("query", q),
+                ("format", "json".to_string()),
+                ("resultType", "core".into()),
+                ("pageSize", per_page.to_string()),
+                ("page", page.to_string()),
+            ];
+            get_json(
+                client
+                    .get(format!("{base}/europepmc/webservices/rest/search"))
+                    .query(&params),
+            )
+            .await
+        }
+        _ => Err(ProviderError::new("not an images or code engine")),
     }
 }
 
@@ -117,16 +137,18 @@ pub(super) fn parse(engine: Engine, body: &Value) -> Result<Vec<SearchResult>, S
         Engine::CommonsImages => parse_commons(body),
         Engine::Openverse => parse_openverse(body),
         Engine::GitHub => parse_github(body),
-        Engine::StackOverflow => parse_stack_overflow(body),
+        Engine::StackOverflow | Engine::AskUbuntu | Engine::SuperUser => parse_stack_overflow(body),
         Engine::Crates => parse_crates(body),
         Engine::Npm => parse_npm(body),
+        Engine::Mdn => parse_mdn(body),
+        Engine::EuropePmc => parse_europe_pmc(body),
         _ => Err("not an images or code engine".into()),
     }
 }
 
 /// `Image: <direct url> | 1024x685 | CC BY | Artist` then any description. The
 /// direct image URL leads so it survives the snippet length cap.
-fn image_snippet(
+pub(super) fn image_snippet(
     image_url: &str,
     dims: Option<(u64, u64)>,
     license: &str,
@@ -323,18 +345,66 @@ fn parse_npm(body: &Value) -> Result<Vec<SearchResult>, String> {
             let p = &o["package"];
             let name = p["name"].as_str()?;
             let url = non_empty_str(&p["links"]["npm"])
+                .and_then(|u| web_url(&u))
                 .unwrap_or_else(|| format!("https://www.npmjs.com/package/{name}"));
             let snippet = format!(
                 "{} (v{})",
                 collapse_ws(p["description"].as_str().unwrap_or_default()),
                 p["version"].as_str().unwrap_or("?")
             );
-            let mut hit = result(
-                format!("{name} (npm)"),
-                url,
-                truncate_chars(&snippet, SNIPPET_MAX_CHARS),
-            );
+            let mut hit = result(format!("{name} (npm)"), url, snippet);
             hit.published = non_empty_str(&p["date"]);
+            Some(hit)
+        })
+        .collect())
+}
+
+fn parse_mdn(body: &Value) -> Result<Vec<SearchResult>, String> {
+    let docs = body["documents"]
+        .as_array()
+        .ok_or("response has no `documents` array")?;
+    Ok(docs
+        .iter()
+        .filter_map(|d| {
+            let path = d["mdn_url"].as_str().filter(|p| p.starts_with('/'))?;
+            let title = d["title"].as_str()?;
+            let url = format!("https://developer.mozilla.org{path}");
+            Some(result(
+                title.to_string(),
+                url,
+                d["summary"].as_str().unwrap_or_default().to_string(),
+            ))
+        })
+        .collect())
+}
+
+fn parse_europe_pmc(body: &Value) -> Result<Vec<SearchResult>, String> {
+    let items = body["resultList"]["result"]
+        .as_array()
+        .ok_or("response has no `resultList.result` array")?;
+    Ok(items
+        .iter()
+        .filter_map(|r| {
+            let (id, source) = (r["id"].as_str()?, r["source"].as_str()?);
+            let title = html_text(r["title"].as_str()?);
+            let url = format!("https://europepmc.org/article/{source}/{id}");
+            let journal = r["journalTitle"].as_str().unwrap_or_default();
+            let year = r["pubYear"].as_str().unwrap_or_default();
+            let authors = r["authorString"].as_str().unwrap_or_default();
+            let about = html_text(r["abstractText"].as_str().unwrap_or_default());
+            let head = [authors, journal, year]
+                .into_iter()
+                .filter(|s| !s.is_empty())
+                .collect::<Vec<_>>()
+                .join(" | ");
+            let snippet = if about.is_empty() {
+                head
+            } else {
+                format!("{head}. {about}")
+            };
+            let mut hit = result(title, url, snippet);
+            hit.published = non_empty_str(&r["firstPublicationDate"])
+                .or_else(|| (!year.is_empty()).then(|| year.to_string()));
             Some(hit)
         })
         .collect())

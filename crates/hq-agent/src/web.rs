@@ -50,8 +50,8 @@ impl AgentTool for WebSearchTool {
     fn description(&self) -> &str {
         concat!(
             "Search the web for current information. Works out of the box through a ",
-            "built-in keyless engine pool (DuckDuckGo, Brave, Wikipedia; Bing News ",
-            "and Hacker News for news; arXiv and OpenAlex for science; Wikimedia Commons and Openverse for images; GitHub, Stack Overflow, crates.io and npm for code), merged and ",
+            "built-in keyless engine pool (Google, DuckDuckGo, Brave, Wikipedia; Bing News ",
+            "and Hacker News for news; arXiv, OpenAlex and Europe PMC for science; Google Images, Wikimedia Commons and Openverse for images; GitHub, Stack Overflow, Ask Ubuntu, Super User, MDN, crates.io and npm for code), merged and ",
             "de-duplicated. A configured SearxNG instance is tried first and the paid ",
             "Brave Search API last.\n\n",
             "Use this tool when you need:\n",
