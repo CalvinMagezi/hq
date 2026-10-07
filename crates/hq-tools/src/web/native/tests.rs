@@ -202,6 +202,7 @@ async fn native_server() -> MockServer {
         .unwrap()
         .retain(|key, _| !key.starts_with(&uri));
     super::google::forget_token(&uri);
+    super::mojeek::forget_cookie(&uri);
     INFLIGHT
         .lock()
         .unwrap()
@@ -223,6 +224,13 @@ async fn mount_general(server: &MockServer, ddg_status: u16) {
         .and(path("/search"))
         .and(query_param("source", "web"))
         .respond_with(ResponseTemplate::new(200).set_body_string(BRAVE_HTML))
+        .mount(server)
+        .await;
+    Mock::given(method("GET"))
+        .and(path("/search"))
+        .respond_with(
+            ResponseTemplate::new(200).set_body_string(include_str!("fixtures/mojeek-results.html")),
+        )
         .mount(server)
         .await;
     mount_wikipedia_missing(server).await;
@@ -261,9 +269,22 @@ async fn mount_google(server: &MockServer, body: &str) {
         .await;
 }
 
+/// Mock servers are given recycled ports, so a pooled connection to a server a
+/// previous test dropped would fail the next test's first request.
+fn test_client() -> &'static Client {
+    static CLIENT: std::sync::LazyLock<Client> = std::sync::LazyLock::new(|| {
+        Client::builder()
+            .pool_max_idle_per_host(0)
+            .timeout(Duration::from_secs(10))
+            .build()
+            .unwrap()
+    });
+    &CLIENT
+}
+
 fn env(base: &str) -> NativeEnv<'_> {
     NativeEnv {
-        client: get_client(),
+        client: test_client(),
         base_override: Some(base),
         straggler_grace: None,
     }
@@ -301,7 +322,7 @@ async fn pool_merges_engines_and_reports_each_attempt() {
         .collect();
     assert_eq!(
         ok,
-        ["google cse", "duckduckgo", "brave", "wikipedia"],
+        ["google cse", "duckduckgo", "brave", "mojeek", "wikipedia"],
         "{:?}",
         r.attempts
     );
@@ -477,7 +498,7 @@ async fn live_native_pool_answers_each_category() {
             "tokio runtime",
             None,
             &[],
-            &["google cse", "brave", "duckduckgo"],
+            &["google cse", "brave", "duckduckgo", "mojeek"],
         ),
         (
             "rust language",
@@ -2140,4 +2161,97 @@ async fn the_pool_stops_waiting_for_slow_engines_once_google_has_answered() {
         .unwrap();
     assert!(started.elapsed() < Duration::from_millis(1000), "{:?}", started.elapsed());
     assert_eq!(r.results[0].engines, ["google cse"]);
+}
+
+#[tokio::test]
+async fn mojeek_solves_its_challenge_once_and_reuses_the_cookie() {
+    let server = native_server().await;
+    let captcha = r#"<html><body><div class="captcha-wrap"></div><script type="module" src="/js/page_specific/altcha.js"></script></body></html>"#;
+    let results = include_str!("fixtures/mojeek-results.html");
+    Mock::given(method("GET"))
+        .and(path("/search"))
+        .and(wiremock::matchers::header("cookie", "chllg=tok"))
+        .respond_with(ResponseTemplate::new(200).set_body_string(results))
+        .with_priority(1)
+        .mount(&server)
+        .await;
+    Mock::given(method("GET"))
+        .and(path("/search"))
+        .respond_with(ResponseTemplate::new(200).set_body_string(captcha))
+        .with_priority(2)
+        .mount(&server)
+        .await;
+    Mock::given(method("GET"))
+        .and(path("/captcha/challenge"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(super::mojeek::test_puzzle(50)))
+        .mount(&server)
+        .await;
+    Mock::given(method("POST"))
+        .and(path("/captcha/verify"))
+        .respond_with(
+            ResponseTemplate::new(200)
+                .insert_header("set-cookie", "chllg=tok; Path=/")
+                .set_body_json(json!({"ok": true, "verified": true})),
+        )
+        .mount(&server)
+        .await;
+    let opts = SearchOptions::default();
+    for _ in 0..2 {
+        let body = Engine::Mojeek
+            .fetch(test_client(), &server.uri(), "tokio runtime", &opts)
+            .await
+            .unwrap();
+        assert_eq!(Engine::Mojeek.parse(&body).unwrap().len(), 3);
+    }
+    let reqs = server.received_requests().await.unwrap();
+    let count = |p: &str| reqs.iter().filter(|r| r.url.path() == p).count();
+    assert_eq!((count("/captcha/verify"), count("/captcha/challenge")), (1, 1));
+    let verify = reqs.iter().find(|r| r.url.path() == "/captcha/verify").unwrap();
+    let body = String::from_utf8_lossy(&verify.body);
+    assert!(body.contains("name=\"altcha\""), "{body}");
+}
+
+#[tokio::test]
+async fn mojeek_that_keeps_challenging_is_a_captcha_failure_not_empty_results() {
+    let server = native_server().await;
+    let captcha = r#"<script src="/js/page_specific/altcha.js"></script>"#;
+    Mock::given(method("GET"))
+        .and(path("/search"))
+        .respond_with(ResponseTemplate::new(200).set_body_string(captcha))
+        .mount(&server)
+        .await;
+    Mock::given(method("GET"))
+        .and(path("/captcha/challenge"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(super::mojeek::test_puzzle(50)))
+        .mount(&server)
+        .await;
+    Mock::given(method("POST"))
+        .and(path("/captcha/verify"))
+        .respond_with(
+            ResponseTemplate::new(200).insert_header("set-cookie", "chllg=tok; Path=/"),
+        )
+        .mount(&server)
+        .await;
+    let err = Engine::Mojeek
+        .fetch(test_client(), &server.uri(), "q", &SearchOptions::default())
+        .await
+        .unwrap_err();
+    assert_eq!(err.class, FailureClass::Captcha, "{}", err.reason);
+}
+
+/// `cargo test -p hq-tools live_mojeek -- --ignored --nocapture`: the proof of work against the real site.
+#[tokio::test]
+#[ignore = "needs the network and mojeek.com"]
+async fn live_mojeek_solves_its_challenge_and_returns_results() {
+    let client = &*NATIVE_CLIENT;
+    let opts = SearchOptions::default();
+    let started = Instant::now();
+    let body = Engine::Mojeek
+        .fetch(client, "https://www.mojeek.com", "tokio runtime", &opts)
+        .await
+        .unwrap();
+    let results = Engine::Mojeek.parse(&body).unwrap();
+    println!("{} results in {:?}", results.len(), started.elapsed());
+    assert!(results.len() >= 5);
+    assert!(results.iter().any(|r| r.url.contains("tokio.rs")));
 }
