@@ -403,9 +403,10 @@ async fn fresh_server_for_brave() -> MockServer {
 /// Diagnostic and weekly canary against the real engines:
 /// `cargo test -p hq-tools live_native -- --ignored --nocapture`. Every engine
 /// in `required` must have answered, so one broken parser cannot hide behind
-/// the others. For general queries the scraped web engines are rotated out by
-/// IP reputation (a cloud runner gets a DuckDuckGo challenge or a Brave 429, a
-/// home connection often does not), so one of them answering is enough.
+/// the others. The scraped web engines (Brave, DuckDuckGo) are rotated out by
+/// IP reputation: both were blocked from a GitHub runner on two runs, so a
+/// runner cannot validate them. They are only reported (`warn`) when neither
+/// answers, and their parsers rest on fixtures saved from real responses.
 #[tokio::test]
 #[ignore = "needs the network and live engines"]
 async fn live_native_pool_answers_each_category() {
@@ -476,7 +477,7 @@ async fn live_native_pool_answers_each_category() {
                 .map(|e| format!("{e} ({query})")),
         );
         if !any_of.is_empty() && !any_of.iter().any(|e| answered(e)) {
-            broken.push(format!("none of {any_of:?} ({query})"));
+            println!("warn: none of {any_of:?} answered for {query:?} from this network");
         }
     }
     assert!(broken.is_empty(), "engines that did not answer: {broken:?}");
