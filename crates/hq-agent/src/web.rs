@@ -50,8 +50,8 @@ impl AgentTool for WebSearchTool {
     fn description(&self) -> &str {
         concat!(
             "Search the web for current information. Works out of the box through a ",
-            "built-in keyless engine pool (DuckDuckGo, Brave, Wikipedia; Bing News ",
-            "and Hacker News for news; arXiv and OpenAlex for science), merged and ",
+            "built-in keyless engine pool (Google, DuckDuckGo, Brave, Wikipedia; Bing News ",
+            "and Hacker News for news; arXiv, OpenAlex and Europe PMC for science; Google Images, Wikimedia Commons and Openverse for images; GitHub, Stack Overflow, Ask Ubuntu, Super User, MDN, crates.io and npm for code), merged and ",
             "de-duplicated. A configured SearxNG instance is tried first and the paid ",
             "Brave Search API last.\n\n",
             "Use this tool when you need:\n",
@@ -65,7 +65,7 @@ impl AgentTool for WebSearchTool {
             "- page (optional): 1-based page, use next_page from a previous search\n",
             "- freshness (optional): day, week, month or year\n",
             "- language / country (optional): 2-letter codes, e.g. en / US\n",
-            "- category (optional): general, news or science\n",
+            "- category (optional): general, news, science, images (freely licensed images with their direct URL) or code (GitHub, Stack Overflow, crates.io, npm)\n",
             "- include_domains / exclude_domains (optional): up to 10 domains each\n\n",
             "Filters and paging depend on the backend; any filter it could not apply is ",
             "listed in the output, as is the backend that answered.\n\n",

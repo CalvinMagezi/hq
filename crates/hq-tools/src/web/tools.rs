@@ -88,7 +88,7 @@ impl HqTool for WebSearchHqTool {
     }
 
     fn description(&self) -> &str {
-        "Search the web for current information. Works out of the box through a built-in keyless engine pool (DuckDuckGo, Brave, Wikipedia; Bing News and Hacker News for news; arXiv and OpenAlex for science), merged and de-duplicated. A configured SearxNG instance is tried first and the paid Brave Search API last. Optional filters: freshness (day/week/month/year), language, country, category (general/news/science), include_domains/exclude_domains, and page for later results. Returns titles, URLs, snippets, source metadata, the answering backend, next_page, and any filter that backend could not apply. Example: {\"query\": \"tokio release notes\", \"freshness\": \"month\", \"include_domains\": [\"github.com\"]}."
+        "Search the web for current information. Works out of the box through a built-in keyless engine pool (Google, DuckDuckGo, Brave, Wikipedia; Bing News and Hacker News for news; arXiv, OpenAlex and Europe PMC for science; Google Images, Wikimedia Commons and Openverse for images; GitHub, Stack Overflow, Ask Ubuntu, Super User, MDN, crates.io and npm for code), merged and de-duplicated. A configured SearxNG instance is tried first and the paid Brave Search API last. Optional filters: freshness (day/week/month/year), language, country, category (general/news/science/images/code), include_domains/exclude_domains, and page for later results. Returns titles, URLs, snippets, source metadata, the answering backend, next_page, and any filter that backend could not apply. Example: {\"query\": \"tokio release notes\", \"freshness\": \"month\", \"include_domains\": [\"github.com\"]}."
     }
 
     fn parameters(&self) -> Value {

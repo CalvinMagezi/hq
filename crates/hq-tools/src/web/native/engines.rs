@@ -1,11 +1,18 @@
 use super::super::*;
 use super::markup::{attr_value, blocks, collapse_ws, html_text, sel, tag_text};
+use super::{google, images_code};
 
 /// Browsers get scraped HTML; API engines get the descriptive agent string.
-const BROWSER_USER_AGENT: &str =
+pub(super) const BROWSER_USER_AGENT: &str =
     "Mozilla/5.0 (X11; Linux x86_64; rv:128.0) Gecko/20100101 Firefox/128.0";
-const ACCEPT_LANGUAGE: &str = "en-US,en;q=0.9";
-const SNIPPET_MAX_CHARS: usize = 400;
+const DEFAULT_ACCEPT_LANGUAGE: &str = "en-US,en;q=0.9";
+const DDG_REFERER: &str = "https://html.duckduckgo.com/";
+/// Wikimedia throttles browser-like generic agents and asks API clients to say what they are.
+const WIKIMEDIA_USER_AGENT: &str =
+    concat!("HQ-Agent/", env!("CARGO_PKG_VERSION"), " (open-source agent hub; web_search)");
+/// Same limits SearxNG applies to every result before merging.
+const TITLE_MAX_CHARS: usize = 200;
+const SNIPPET_MAX_CHARS: usize = 1200;
 const WEIGHT_SUPPLEMENTARY: f32 = 0.4;
 const CHALLENGE_MARKERS: &[&str] = &[
     "captcha",
@@ -18,6 +25,8 @@ const CHALLENGE_MARKERS: &[&str] = &[
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub(in crate::web) enum Engine {
+    GoogleCse,
+    GoogleCseImages,
     DuckDuckGo,
     Brave,
     Wikipedia,
@@ -25,11 +34,40 @@ pub(in crate::web) enum Engine {
     HackerNews,
     Arxiv,
     OpenAlex,
+    CommonsImages,
+    Openverse,
+    GitHub,
+    StackOverflow,
+    Crates,
+    Npm,
+    Mdn,
+    AskUbuntu,
+    SuperUser,
+    EuropePmc,
 }
 
-const GENERAL: &[Engine] = &[Engine::DuckDuckGo, Engine::Brave, Engine::Wikipedia];
+const GENERAL: &[Engine] = &[
+    Engine::GoogleCse,
+    Engine::DuckDuckGo,
+    Engine::Brave,
+    Engine::Wikipedia,
+];
 const NEWS: &[Engine] = &[Engine::BingNews, Engine::HackerNews];
-const SCIENCE: &[Engine] = &[Engine::Arxiv, Engine::OpenAlex];
+const SCIENCE: &[Engine] = &[Engine::Arxiv, Engine::OpenAlex, Engine::EuropePmc];
+const IMAGES: &[Engine] = &[
+    Engine::GoogleCseImages,
+    Engine::CommonsImages,
+    Engine::Openverse,
+];
+const CODE: &[Engine] = &[
+    Engine::GitHub,
+    Engine::StackOverflow,
+    Engine::AskUbuntu,
+    Engine::SuperUser,
+    Engine::Mdn,
+    Engine::Crates,
+    Engine::Npm,
+];
 
 impl Engine {
     pub(in crate::web) fn for_category(category: Option<Category>) -> &'static [Engine] {
@@ -37,11 +75,15 @@ impl Engine {
             None | Some(Category::General) => GENERAL,
             Some(Category::News) => NEWS,
             Some(Category::Science) => SCIENCE,
+            Some(Category::Images) => IMAGES,
+            Some(Category::Code) => CODE,
         }
     }
 
     pub(in crate::web) fn name(self) -> &'static str {
         match self {
+            Engine::GoogleCse => "google cse",
+            Engine::GoogleCseImages => "google cse images",
             Engine::DuckDuckGo => "duckduckgo",
             Engine::Brave => "brave",
             Engine::Wikipedia => "wikipedia",
@@ -49,17 +91,41 @@ impl Engine {
             Engine::HackerNews => "hacker news",
             Engine::Arxiv => "arxiv",
             Engine::OpenAlex => "openalex",
+            Engine::CommonsImages => "wikimedia commons",
+            Engine::Openverse => "openverse",
+            Engine::GitHub => "github",
+            Engine::StackOverflow => "stack overflow",
+            Engine::Crates => "crates.io",
+            Engine::Npm => "npm",
+            Engine::Mdn => "mdn",
+            Engine::AskUbuntu => "askubuntu",
+            Engine::SuperUser => "superuser",
+            Engine::EuropePmc => "europe pmc",
         }
     }
 
     /// How much a hit from this engine counts in the merged ranking. Wikipedia
-    /// answers every query with encyclopedia articles and Hacker News with
-    /// discussions, so they supplement the web engines rather than lead.
+    /// answers every query with encyclopedia articles, Hacker News with
+    /// discussions, and the package registries with name matches, so they
+    /// supplement the main engines rather than lead.
     pub(in crate::web) fn weight(self) -> f32 {
         match self {
             Engine::Wikipedia => WEIGHT_SUPPLEMENTARY,
-            Engine::HackerNews => WEIGHT_SUPPLEMENTARY,
+            Engine::HackerNews | Engine::Crates | Engine::Npm => WEIGHT_SUPPLEMENTARY,
             _ => 1.0,
+        }
+    }
+
+    /// Whether searches to this engine are spaced out (Google throttles bursts).
+    pub(in crate::web) fn paced(self) -> bool {
+        matches!(self, Engine::GoogleCse | Engine::GoogleCseImages)
+    }
+
+    /// Highest results page the engine serves; Google's element endpoint stops at 5.
+    pub(in crate::web) fn max_page(self) -> u32 {
+        match self {
+            Engine::GoogleCse | Engine::GoogleCseImages => google::MAX_PAGE,
+            _ => u32::MAX,
         }
     }
 
@@ -71,6 +137,7 @@ impl Engine {
 
     pub(in crate::web) fn default_base(self, opts: &SearchOptions) -> String {
         match self {
+            Engine::GoogleCse | Engine::GoogleCseImages => "https://cse.google.com".into(),
             Engine::DuckDuckGo => "https://html.duckduckgo.com".into(),
             Engine::Brave => "https://search.brave.com".into(),
             Engine::BingNews => "https://www.bing.com".into(),
@@ -81,6 +148,15 @@ impl Engine {
             Engine::HackerNews => "https://hn.algolia.com".into(),
             Engine::Arxiv => "https://export.arxiv.org".into(),
             Engine::OpenAlex => "https://api.openalex.org".into(),
+            Engine::CommonsImages => "https://commons.wikimedia.org".into(),
+            Engine::Openverse => "https://api.openverse.org".into(),
+            Engine::GitHub => "https://api.github.com".into(),
+            Engine::StackOverflow => "https://api.stackexchange.com".into(),
+            Engine::Crates => "https://crates.io".into(),
+            Engine::Npm => "https://registry.npmjs.org".into(),
+            Engine::Mdn => "https://developer.mozilla.org".into(),
+            Engine::AskUbuntu | Engine::SuperUser => "https://api.stackexchange.com".into(),
+            Engine::EuropePmc => "https://www.ebi.ac.uk".into(),
         }
     }
 
@@ -95,11 +171,24 @@ impl Engine {
         let q = effective_query(query, opts);
         let page_index = opts.page.saturating_sub(1);
         let per_page = opts.max_results.clamp(1, MAX_RESULTS_CAP);
+        let lang = accept_language(opts);
         let scraped = |req: RequestBuilder| {
             req.header("User-Agent", BROWSER_USER_AGENT)
-                .header("Accept-Language", ACCEPT_LANGUAGE)
+                .header("Accept-Language", &lang)
         };
         match self {
+            Engine::GoogleCse => google::fetch(client, base, &q, opts, false).await,
+            Engine::GoogleCseImages => google::fetch(client, base, &q, opts, true).await,
+            Engine::CommonsImages
+            | Engine::Openverse
+            | Engine::GitHub
+            | Engine::StackOverflow
+            | Engine::Crates
+            | Engine::Npm
+            | Engine::Mdn
+            | Engine::AskUbuntu
+            | Engine::SuperUser
+            | Engine::EuropePmc => images_code::fetch(self, client, base, query, opts).await,
             Engine::DuckDuckGo => {
                 let mut form = vec![("q", q), ("b", String::new())];
                 if let (Some(l), Some(c)) = (&opts.language, &opts.country) {
@@ -108,7 +197,15 @@ impl Engine {
                 if let Some(f) = opts.freshness {
                     form.push(("df", freshness_letter(f).into()));
                 }
-                let req = client.post(format!("{base}/html/")).form(&form);
+                // The headers a browser sends for a form submission from the page itself.
+                let req = client
+                    .post(format!("{base}/html/"))
+                    .header("Referer", DDG_REFERER)
+                    .header("Sec-Fetch-Dest", "document")
+                    .header("Sec-Fetch-Mode", "navigate")
+                    .header("Sec-Fetch-Site", "same-origin")
+                    .header("Sec-Fetch-User", "?1")
+                    .form(&form);
                 get_text(scraped(req)).await
             }
             Engine::Brave => {
@@ -120,7 +217,11 @@ impl Engine {
                 if let Some(f) = opts.freshness {
                     params.push(("tf", format!("p{}", freshness_letter(f))));
                 }
-                get_text(scraped(client.get(format!("{base}/search")).query(&params))).await
+                let request = client
+                    .get(format!("{base}/search"))
+                    .header("Cookie", brave_cookies(opts))
+                    .query(&params);
+                get_text(scraped(request)).await
             }
             Engine::BingNews => {
                 let params = [("q", q), ("format", "rss".to_string())];
@@ -130,16 +231,36 @@ impl Engine {
                 .await
             }
             Engine::Wikipedia => {
-                let params = [
-                    ("action", "query".to_string()),
-                    ("list", "search".into()),
-                    ("srsearch", query.trim().to_string()),
-                    ("srlimit", per_page.to_string()),
-                    ("sroffset", (page_index as usize * per_page).to_string()),
-                    ("format", "json".into()),
-                    ("utf8", "1".into()),
-                ];
-                get_json(client.get(format!("{base}/w/api.php")).query(&params)).await
+                // A title lookup, as SearxNG does: a full-text search answers every
+                // query with loosely related articles, which only adds noise.
+                let mut url = reqwest::Url::parse(&format!("{base}/api/rest_v1/page/summary/"))
+                    .map_err(|e| format!("bad Wikipedia base URL: {e}"))?;
+                url.path_segments_mut()
+                    .map_err(|_| "Wikipedia base URL cannot take a path")?
+                    .pop_if_empty()
+                    .push(&wikipedia_title(query));
+                let resp = client
+                    .get(url)
+                    .header("User-Agent", WIKIMEDIA_USER_AGENT)
+                    .header("Accept-Language", &lang)
+                    .send()
+                    .await
+                    .map_err(|e| {
+                        ProviderError::new(format!("request failed: {}", e.without_url()))
+                    })?;
+                let status = resp.status().as_u16();
+                if status == 404 {
+                    return Ok(Value::Null);
+                }
+                // A title with characters Wikipedia cannot hold (`#`, `[`, `|`) is not an outage.
+                if status == 400 {
+                    let body = resp.text().await.unwrap_or_default();
+                    if body.contains("title-invalid-characters") {
+                        return Ok(Value::Null);
+                    }
+                    return Err(ProviderError::new("HTTP 400 Bad Request"));
+                }
+                decode_json(resp).await
             }
             Engine::HackerNews => {
                 let mut params = vec![
@@ -184,22 +305,32 @@ impl Engine {
 
     /// Parse a body returned by [`Engine::fetch`]. An empty list is a valid
     /// answer unless the page looks like a bot challenge.
-    pub(in crate::web) fn parse(
-        self,
-        body: &Value,
-        base: &str,
-    ) -> Result<Vec<SearchResult>, String> {
+    pub(in crate::web) fn parse(self, body: &Value) -> Result<Vec<SearchResult>, ProviderError> {
         let results = match self {
+            Engine::GoogleCse | Engine::GoogleCseImages => google::parse(self, body)?,
             Engine::DuckDuckGo => parse_duckduckgo(text_of(body)?),
             Engine::Brave => parse_brave_html(text_of(body)?),
             Engine::BingNews => parse_bing_news(text_of(body)?),
             Engine::Arxiv => parse_arxiv(text_of(body)?),
-            Engine::Wikipedia => parse_wikipedia(body, base)?,
+            Engine::Wikipedia => parse_wikipedia(body)?,
             Engine::HackerNews => parse_hacker_news(body)?,
             Engine::OpenAlex => parse_openalex(body)?,
+            Engine::CommonsImages
+            | Engine::Openverse
+            | Engine::GitHub
+            | Engine::StackOverflow
+            | Engine::Crates
+            | Engine::Npm
+            | Engine::Mdn
+            | Engine::AskUbuntu
+            | Engine::SuperUser
+            | Engine::EuropePmc => images_code::parse(self, body)?,
         };
         if results.is_empty() && is_html_engine(self) && looks_like_challenge(text_of(body)?) {
-            return Err("bot challenge page instead of results".into());
+            return Err(ProviderError::of(
+                FailureClass::Captcha,
+                "bot challenge page instead of results",
+            ));
         }
         Ok(results
             .into_iter()
@@ -237,6 +368,30 @@ pub(super) fn arxiv_terms(query: &str) -> Vec<String> {
     if kept.is_empty() { all } else { kept }
 }
 
+/// `Accept-Language` the way SearxNG builds it: the language with its region,
+/// then English as a fallback, and a plain US English default.
+pub(super) fn accept_language(opts: &SearchOptions) -> String {
+    match (&opts.language, &opts.country) {
+        (Some(l), Some(c)) => format!("{l},{l}-{c};q=0.7,en;q=0.3"),
+        (Some(l), None) => format!("{l},{l}-{l};q=0.7,en;q=0.3"),
+        _ => DEFAULT_ACCEPT_LANGUAGE.to_string(),
+    }
+}
+
+/// The preference cookies Brave's own search page carries, as SearxNG sends them.
+fn brave_cookies(opts: &SearchOptions) -> String {
+    let country = opts
+        .country
+        .as_deref()
+        .map_or("all".to_string(), str::to_lowercase);
+    let ui_lang = match (&opts.language, &opts.country) {
+        (Some(l), Some(c)) => format!("{l}-{}", c.to_lowercase()),
+        (Some(l), None) => format!("{l}-{l}"),
+        _ => "en-us".to_string(),
+    };
+    format!("safesearch=off; useLocation=0; summarizer=0; country={country}; ui_lang={ui_lang}")
+}
+
 fn is_html_engine(engine: Engine) -> bool {
     matches!(engine, Engine::DuckDuckGo | Engine::Brave)
 }
@@ -260,7 +415,7 @@ fn freshness_letter(f: Freshness) -> &'static str {
     }
 }
 
-fn freshness_secs(f: Freshness) -> i64 {
+pub(super) fn freshness_secs(f: Freshness) -> i64 {
     const DAY: i64 = 86_400;
     match f {
         Freshness::Day => DAY,
@@ -270,12 +425,22 @@ fn freshness_secs(f: Freshness) -> i64 {
     }
 }
 
-fn result(title: String, url: String, snippet: String) -> SearchResult {
+/// A result as SearxNG stores it before merging: whitespace collapsed, the
+/// title cut at 200 characters and the content at 1200, each at a word
+/// boundary, and a content that only repeats the title dropped.
+pub(super) fn result(title: String, url: String, snippet: String) -> SearchResult {
+    let title = truncate_words(&collapse_ws(&title), TITLE_MAX_CHARS);
+    let snippet = truncate_words(&collapse_ws(&snippet), SNIPPET_MAX_CHARS);
+    let snippet = if snippet == title {
+        String::new()
+    } else {
+        snippet
+    };
     SearchResult {
         domain: domain_of(&url),
         title,
         url,
-        snippet: truncate_chars(&snippet, SNIPPET_MAX_CHARS),
+        snippet,
         position: 0,
         provider: String::new(),
         published: None,
@@ -283,12 +448,16 @@ fn result(title: String, url: String, snippet: String) -> SearchResult {
     }
 }
 
-fn truncate_chars(s: &str, max: usize) -> String {
+/// Cut to at most `max` characters at the last word boundary, marking the cut.
+fn truncate_words(s: &str, max: usize) -> String {
     if s.chars().count() <= max {
         return s.to_string();
     }
     let cut: String = s.chars().take(max).collect();
-    format!("{}…", cut.trim_end())
+    let at_word = cut
+        .rfind(char::is_whitespace)
+        .map_or(cut.as_str(), |i| &cut[..i]);
+    format!("{} …", at_word.trim_end())
 }
 
 fn element_text(el: scraper::ElementRef<'_>) -> String {
@@ -411,26 +580,51 @@ fn parse_arxiv(xml: &str) -> Vec<SearchResult> {
         .collect()
 }
 
-fn parse_wikipedia(body: &Value, base: &str) -> Result<Vec<SearchResult>, String> {
-    let hits = body["query"]["search"]
-        .as_array()
-        .ok_or("response has no `query.search` array")?;
-    let root = reqwest::Url::parse(base).map_err(|e| format!("bad Wikipedia base URL: {e}"))?;
-    Ok(hits
-        .iter()
-        .filter_map(|h| {
-            let title = h["title"].as_str()?;
-            let mut url = root.clone();
-            url.path_segments_mut()
-                .ok()?
-                .pop_if_empty()
-                .extend(["wiki", &title.replace(' ', "_")]);
-            let snippet = collapse_ws(&html_text(h["snippet"].as_str().unwrap_or_default()));
-            let mut r = result(title.to_string(), url.to_string(), snippet);
-            r.published = non_empty_str(&h["timestamp"]);
-            Some(r)
-        })
-        .collect())
+/// A lowercase query is title-cased the way SearxNG does before a title lookup.
+pub(super) fn wikipedia_title(query: &str) -> String {
+    let query = query.trim();
+    if query != query.to_lowercase() {
+        return query.to_string();
+    }
+    let mut out = String::with_capacity(query.len());
+    let mut at_word_start = true;
+    for c in query.chars() {
+        if c.is_alphabetic() {
+            out.extend(if at_word_start {
+                c.to_uppercase().collect::<Vec<_>>()
+            } else {
+                vec![c]
+            });
+            at_word_start = false;
+        } else {
+            out.push(c);
+            at_word_start = true;
+        }
+    }
+    out
+}
+
+/// Only an ordinary article answers. SearxNG shows it as an infobox beside the
+/// results; here it is a ranked hit, and disambiguation pages are left out.
+fn parse_wikipedia(body: &Value) -> Result<Vec<SearchResult>, String> {
+    if body["type"].as_str() != Some("standard") {
+        return Ok(Vec::new());
+    }
+    let url = non_empty_str(&body["content_urls"]["desktop"]["page"])
+        .filter(|u| u.starts_with("https://") || u.starts_with("http://"));
+    let title = non_empty_str(&body["titles"]["display"])
+        .map(|t| html_text(&t))
+        .or_else(|| non_empty_str(&body["title"]));
+    let (Some(url), Some(title)) = (url, title) else {
+        return Ok(Vec::new());
+    };
+    let mut r = result(
+        title,
+        url,
+        body["extract"].as_str().unwrap_or_default().to_string(),
+    );
+    r.published = non_empty_str(&body["timestamp"]);
+    Ok(vec![r])
 }
 
 fn parse_hacker_news(body: &Value) -> Result<Vec<SearchResult>, String> {
@@ -443,7 +637,9 @@ fn parse_hacker_news(body: &Value) -> Result<Vec<SearchResult>, String> {
             let title = h["title"].as_str().filter(|t| !t.is_empty())?;
             let id = h["objectID"].as_str()?;
             let discussion = format!("https://news.ycombinator.com/item?id={id}");
-            let url = non_empty_str(&h["url"]).unwrap_or_else(|| discussion.clone());
+            let url = non_empty_str(&h["url"])
+                .filter(|u| u.starts_with("https://") || u.starts_with("http://"))
+                .unwrap_or_else(|| discussion.clone());
             let snippet = format!(
                 "{} points, {} comments on Hacker News ({discussion})",
                 h["points"].as_u64().unwrap_or(0),
@@ -466,7 +662,8 @@ fn parse_openalex(body: &Value) -> Result<Vec<SearchResult>, String> {
             let title = w["display_name"].as_str().filter(|t| !t.is_empty())?;
             let url = non_empty_str(&w["primary_location"]["landing_page_url"])
                 .or_else(|| non_empty_str(&w["doi"]))
-                .or_else(|| non_empty_str(&w["id"]))?;
+                .or_else(|| non_empty_str(&w["id"]))
+                .filter(|u| u.starts_with("https://") || u.starts_with("http://"))?;
             let mut r = result(
                 title.to_string(),
                 url,

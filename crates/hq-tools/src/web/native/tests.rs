@@ -40,13 +40,13 @@ fn hit(url: &str, snippet: &str, engine: &str) -> SearchResult {
     }
 }
 
-fn parsed(engine: Engine, body: &str, base: &str) -> Vec<SearchResult> {
-    engine.parse(&Value::String(body.into()), base).unwrap()
+fn parsed(engine: Engine, body: &str) -> Vec<SearchResult> {
+    engine.parse(&Value::String(body.into())).unwrap()
 }
 
 #[test]
 fn duckduckgo_skips_ads_and_unwraps_redirect_links() {
-    let r = parsed(Engine::DuckDuckGo, DDG_HTML, "");
+    let r = parsed(Engine::DuckDuckGo, DDG_HTML);
     let urls: Vec<&str> = r.iter().map(|h| h.url.as_str()).collect();
     assert_eq!(
         urls,
@@ -65,7 +65,7 @@ fn duckduckgo_skips_ads_and_unwraps_redirect_links() {
 
 #[test]
 fn brave_html_keeps_only_web_results() {
-    let r = parsed(Engine::Brave, BRAVE_HTML, "");
+    let r = parsed(Engine::Brave, BRAVE_HTML);
     assert_eq!(r.len(), 1);
     assert_eq!(r[0].title, "tokio::runtime - Rust");
     assert_eq!(r[0].snippet, "The Tokio runtime.");
@@ -73,7 +73,7 @@ fn brave_html_keeps_only_web_results() {
 
 #[test]
 fn bing_news_extracts_target_url_and_date() {
-    let r = parsed(Engine::BingNews, BING_NEWS_RSS, "");
+    let r = parsed(Engine::BingNews, BING_NEWS_RSS);
     assert_eq!(r[0].url, "https://example.com/news/rust");
     assert_eq!(r[0].snippet, "The edition & its changes.");
     assert_eq!(
@@ -84,22 +84,36 @@ fn bing_news_extracts_target_url_and_date() {
 
 #[test]
 fn arxiv_prefers_the_alternate_link_and_flattens_titles() {
-    let r = parsed(Engine::Arxiv, ARXIV_ATOM, "");
+    let r = parsed(Engine::Arxiv, ARXIV_ATOM);
     assert_eq!(r[0].url, "https://arxiv.org/abs/2201.00978v1");
     assert_eq!(r[0].title, "PyramidTNT: Improved Transformer");
     assert_eq!(r[0].published.as_deref(), Some("2022-01-04T04:56:57Z"));
 }
 
 #[test]
-fn wikipedia_builds_article_urls_and_strips_markup() {
-    let body = json!({"query": {"search": [
-        {"title": "Tokio (software)", "snippet": "a <span class=\"searchmatch\">Rust</span> library", "timestamp": "2026-01-01T00:00:00Z"}
-    ]}});
-    let r = Engine::Wikipedia
-        .parse(&body, "https://en.wikipedia.org")
-        .unwrap();
-    assert_eq!(r[0].url, "https://en.wikipedia.org/wiki/Tokio_(software)");
-    assert_eq!(r[0].snippet, "a Rust library");
+fn wikipedia_answers_with_the_summary_of_a_standard_article_only() {
+    let article = json!({"type": "standard", "title": "Tokio (software)", "titles": {"display": "<span class=\"mw-page-title-main\">Tokio</span> (software)"},
+        "extract": "Tokio is a Rust runtime.", "content_urls": {"desktop": {"page": "https://en.wikipedia.org/wiki/Tokio_(software)"}}});
+    let r = Engine::Wikipedia.parse(&article).unwrap();
+    assert_eq!(r.len(), 1);
+    assert_eq!(
+        (r[0].title.as_str(), r[0].url.as_str()),
+        (
+            "Tokio (software)",
+            "https://en.wikipedia.org/wiki/Tokio_(software)"
+        )
+    );
+    assert_eq!(r[0].snippet, "Tokio is a Rust runtime.");
+    for other in [
+        json!({"type": "disambiguation", "title": "Tokio"}),
+        Value::Null,
+        json!({"type": "standard"}),
+    ] {
+        assert!(
+            Engine::Wikipedia.parse(&other).unwrap().is_empty(),
+            "{other}"
+        );
+    }
 }
 
 #[test]
@@ -108,7 +122,7 @@ fn hacker_news_falls_back_to_the_discussion_link() {
         {"title": "Ask HN: Rust?", "objectID": "42", "points": 7, "num_comments": 3, "created_at": "2026-01-01T00:00:00Z"},
         {"title": "Linked story", "objectID": "43", "url": "https://example.com/a"}
     ]});
-    let r = Engine::HackerNews.parse(&body, "").unwrap();
+    let r = Engine::HackerNews.parse(&body).unwrap();
     assert_eq!(r[0].url, "https://news.ycombinator.com/item?id=42");
     assert_eq!(r[1].url, "https://example.com/a");
 }
@@ -120,22 +134,22 @@ fn openalex_rebuilds_the_abstract_in_word_order() {
         "primary_location": {"landing_page_url": "https://arxiv.org/abs/1706.03762"},
         "abstract_inverted_index": {"is": [1], "Attention": [0], "all": [3], "you": [4], "need": [5], "what": [2]}
     }]});
-    let r = Engine::OpenAlex.parse(&body, "").unwrap();
+    let r = Engine::OpenAlex.parse(&body).unwrap();
     assert_eq!(r[0].snippet, "Attention is what all you need");
     assert_eq!(r[0].url, "https://arxiv.org/abs/1706.03762");
 }
 
 #[test]
 fn a_challenge_page_is_a_failure_but_an_empty_result_page_is_not() {
-    let challenge = Engine::Brave.parse(
-        &Value::String("<html>Please solve this CAPTCHA</html>".into()),
-        "",
-    );
-    assert!(challenge.unwrap_err().contains("challenge"));
-    let empty = Engine::Brave.parse(
-        &Value::String("<html><p>No results found for zzzz</p></html>".into()),
-        "",
-    );
+    let challenge = Engine::Brave.parse(&Value::String(
+        "<html>Please solve this CAPTCHA</html>".into(),
+    ));
+    let challenge = challenge.unwrap_err();
+    assert!(challenge.reason.contains("challenge"));
+    assert_eq!(challenge.class, FailureClass::Captcha);
+    let empty = Engine::Brave.parse(&Value::String(
+        "<html><p>No results found for zzzz</p></html>".into(),
+    ));
     assert!(empty.unwrap().is_empty());
 }
 
@@ -186,6 +200,7 @@ async fn native_server() -> MockServer {
         .lock()
         .unwrap()
         .retain(|key, _| !key.starts_with(&uri));
+    super::google::forget_token(&uri);
     RESULT_CACHE
         .lock()
         .unwrap()
@@ -205,9 +220,38 @@ async fn mount_general(server: &MockServer, ddg_status: u16) {
         .respond_with(ResponseTemplate::new(200).set_body_string(BRAVE_HTML))
         .mount(server)
         .await;
+    mount_wikipedia_missing(server).await;
+    mount_google(server, GOOGLE_RESULTS).await;
+}
+
+async fn mount_wikipedia_missing(server: &MockServer) {
     Mock::given(method("GET"))
-        .and(path("/w/api.php"))
-        .respond_with(ResponseTemplate::new(200).set_body_json(json!({"query": {"search": []}})))
+        .and(wiremock::matchers::path_regex(
+            "^/api/rest_v1/page/summary/",
+        ))
+        .respond_with(ResponseTemplate::new(404))
+        .mount(server)
+        .await;
+}
+
+const CSE_SCRIPT: &str = r#"(function(){google.search.cse.element.render({"cx":"x","cse_token":"tok-1:1","cselibVersion":"lib1","exp":["cc","sps"]});})({"cx":"x","cse_token":"tok-1:1","cselibVersion":"lib1","exp":["cc","sps"]});"#;
+
+const GOOGLE_RESULTS: &str = r#"/*O_o*/
+_({"results":[
+ {"unescapedUrl":"https://docs.rs/tokio/latest/tokio/runtime/","titleNoFormatting":"tokio::runtime - Rust","contentNoFormatting":"The Tokio runtime from Google."},
+ {"unescapedUrl":"https://tokio.rs/","titleNoFormatting":"Tokio","contentNoFormatting":"An asynchronous Rust runtime."},
+ {"unescapedUrl":"javascript:alert(1)","titleNoFormatting":"bad","contentNoFormatting":""}
+]});"#;
+
+async fn mount_google(server: &MockServer, body: &str) {
+    Mock::given(method("GET"))
+        .and(path("/cse/cse.js"))
+        .respond_with(ResponseTemplate::new(200).set_body_string(CSE_SCRIPT))
+        .mount(server)
+        .await;
+    Mock::given(method("GET"))
+        .and(path("/cse/element/v1"))
+        .respond_with(ResponseTemplate::new(200).set_body_string(body.to_string()))
         .mount(server)
         .await;
 }
@@ -242,14 +286,19 @@ async fn pool_merges_engines_and_reports_each_attempt() {
         r.results[0].url,
         "https://docs.rs/tokio/latest/tokio/runtime/"
     );
-    assert_eq!(r.results[0].engines, ["duckduckgo", "brave"]);
+    assert_eq!(r.results[0].engines, ["google cse", "duckduckgo", "brave"]);
     let ok: Vec<&str> = r
         .attempts
         .iter()
         .filter(|a| a.outcome.starts_with("ok"))
         .map(|a| a.provider.as_str())
         .collect();
-    assert_eq!(ok, ["duckduckgo", "brave", "wikipedia"], "{:?}", r.attempts);
+    assert_eq!(
+        ok,
+        ["google cse", "duckduckgo", "brave", "wikipedia"],
+        "{:?}",
+        r.attempts
+    );
 }
 
 #[tokio::test]
@@ -400,15 +449,65 @@ async fn fresh_server_for_brave() -> MockServer {
     brave
 }
 
-/// Diagnostic against the real engines: `cargo test -p hq-tools live_native -- --ignored --nocapture`.
+/// Diagnostic and weekly canary against the real engines:
+/// `cargo test -p hq-tools live_native -- --ignored --nocapture`. Every engine
+/// in `required` must have answered, so one broken parser cannot hide behind
+/// the others. The scraped web engines (Brave, DuckDuckGo) are rotated out by
+/// IP reputation: both were blocked from a GitHub runner on two runs, so a
+/// runner cannot validate them. They are only reported (`warn`) when neither
+/// answers, and their parsers rest on fixtures saved from real responses.
 #[tokio::test]
 #[ignore = "needs the network and live engines"]
 async fn live_native_pool_answers_each_category() {
-    for (query, category) in [
-        ("tokio runtime", None),
-        ("rust language", Some(Category::News)),
-        ("attention is all you need", Some(Category::Science)),
-    ] {
+    type Case = (
+        &'static str,
+        Option<Category>,
+        &'static [&'static str],
+        &'static [&'static str],
+    );
+    let cases: [Case; 5] = [
+        // Google, Brave and DuckDuckGo are rotated out by IP reputation; see above.
+        (
+            "tokio runtime",
+            None,
+            &[],
+            &["google cse", "brave", "duckduckgo"],
+        ),
+        (
+            "rust language",
+            Some(Category::News),
+            &["bing news", "hacker news"],
+            &[],
+        ),
+        (
+            "attention is all you need",
+            Some(Category::Science),
+            &["arxiv", "openalex", "europe pmc"],
+            &[],
+        ),
+        (
+            "red panda",
+            Some(Category::Images),
+            &["wikimedia commons", "openverse"],
+            &["google cse images"],
+        ),
+        (
+            "nginx websocket proxy",
+            Some(Category::Code),
+            &[
+                "github",
+                "stack overflow",
+                "askubuntu",
+                "superuser",
+                "mdn",
+                "crates.io",
+                "npm",
+            ],
+            &[],
+        ),
+    ];
+    let mut broken = Vec::new();
+    for (query, category, required, any_of) in cases {
         let opts = SearchOptions {
             category,
             max_results: 8,
@@ -422,19 +521,24 @@ async fn live_native_pool_answers_each_category() {
         for h in &r.results {
             println!("  {}. {} <{}> {:?}", h.position, h.title, h.url, h.engines);
         }
-        assert!(!r.results.is_empty(), "{query} returned nothing");
+        let answered = |engine: &str| {
+            r.attempts.iter().any(|a| {
+                a.provider == engine
+                    && a.outcome.starts_with("ok")
+                    && !a.outcome.starts_with("ok, 0 ")
+            })
+        };
+        broken.extend(
+            required
+                .iter()
+                .filter(|e| !answered(e))
+                .map(|e| format!("{e} ({query})")),
+        );
+        if !any_of.is_empty() && !any_of.iter().any(|e| answered(e)) {
+            println!("warn: none of {any_of:?} answered for {query:?} from this network");
+        }
     }
-}
-
-#[test]
-fn supplementary_engines_rank_below_web_engines_at_equal_depth() {
-    let web = vec![hit("https://web.example/a", "a", "brave")];
-    let wiki = vec![hit("https://en.wikipedia.org/wiki/A", "a", "wikipedia")];
-    let merged = merge(vec![
-        (Engine::Wikipedia.weight(), wiki),
-        (Engine::Brave.weight(), web),
-    ]);
-    assert_eq!(merged[0].url, "https://web.example/a");
+    assert!(broken.is_empty(), "engines that did not answer: {broken:?}");
 }
 
 #[test]
@@ -457,7 +561,7 @@ fn arxiv_terms_drop_stop_words_and_query_syntax() {
 #[test]
 fn arxiv_error_feed_is_not_a_result() {
     let feed = r#"<feed><entry><id>http://arxiv.org/api/errors#incorrect_id_format</id><title>Error</title><summary>bad</summary></entry></feed>"#;
-    assert!(parsed(Engine::Arxiv, feed, "").is_empty());
+    assert!(parsed(Engine::Arxiv, feed).is_empty());
 }
 
 #[test]
@@ -477,10 +581,13 @@ fn news_freshness_is_reported_as_partly_unsupported_and_general_is_not() {
 
 async fn mount_only_wikipedia(server: &MockServer) {
     Mock::given(method("GET"))
-        .and(path("/w/api.php"))
-        .respond_with(ResponseTemplate::new(200).set_body_json(
-            json!({"query": {"search": [{"title": "Rust", "snippet": "a language"}]}}),
+        .and(wiremock::matchers::path_regex(
+            "^/api/rest_v1/page/summary/",
         ))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+            "type": "standard", "title": "Rust", "extract": "a language",
+            "content_urls": {"desktop": {"page": "https://en.wikipedia.org/wiki/Rust"}}
+        })))
         .mount(server)
         .await;
     Mock::given(method("POST"))
@@ -582,4 +689,801 @@ fn the_result_cache_never_exceeds_its_cap() {
         store_page(format!("cap-test-{i}"), &page, Duration::from_secs(600));
     }
     assert!(RESULT_CACHE.lock().unwrap().len() <= CACHE_MAX_ENTRIES);
+}
+
+#[test]
+fn commons_results_lead_with_the_direct_image_url_and_carry_license_and_author() {
+    let body = json!({"query": {"pages": {
+        "2": {"index": 2, "title": "File:Second.jpg", "imageinfo": [{"mime": "image/jpeg", "url": "https://upload.example/2.jpg", "descriptionurl": "https://commons.example/File:Second.jpg", "width": 10, "height": 20, "extmetadata": {}}]},
+        "1": {"index": 1, "title": "File:Red Panda.jpg", "imageinfo": [{"mime": "image/jpeg", "url": "https://upload.example/1.jpg", "descriptionurl": "https://commons.example/File:Red_Panda.jpg", "width": 3900, "height": 2583,
+              "extmetadata": {"LicenseShortName": {"value": "CC0"}, "Artist": {"value": "<a href=\"x\">Jane Doe</a>"}, "ImageDescription": {"value": "A <b>red panda</b> in a tree"}}}]}
+    }}});
+    let r = Engine::CommonsImages.parse(&body).unwrap();
+    assert_eq!(r[0].title, "Red Panda.jpg");
+    assert_eq!(r[0].url, "https://commons.example/File:Red_Panda.jpg");
+    assert_eq!(
+        r[0].snippet,
+        "Image: https://upload.example/1.jpg | 3900x2583 | CC0 | Jane Doe. A red panda in a tree"
+    );
+    assert_eq!(
+        r[1].title, "Second.jpg",
+        "ordered by the API's search index"
+    );
+    assert!(
+        Engine::CommonsImages
+            .parse(&json!({"batchcomplete": ""}))
+            .unwrap()
+            .is_empty()
+    );
+}
+
+#[test]
+fn commons_skips_video_and_documents_and_non_web_urls() {
+    let page = |index: u64, title: &str, mime: &str, url: &str| json!({"index": index, "title": title, "imageinfo": [{"mime": mime, "url": url, "descriptionurl": "https://commons.example/x", "width": 1, "height": 1, "extmetadata": {}}]});
+    let body = json!({"query": {"pages": {
+        "1": page(1, "File:clip.webm", "video/webm", "https://upload.example/clip.webm"),
+        "2": page(2, "File:doc.pdf", "application/pdf", "https://upload.example/doc.pdf"),
+        "3": page(3, "File:evil.jpg", "image/jpeg", "javascript:alert(1)"),
+        "4": page(4, "File:ok.jpg", "image/jpeg", "https://upload.example/ok.jpg"),
+    }}});
+    let r = Engine::CommonsImages.parse(&body).unwrap();
+    assert_eq!(
+        r.iter().map(|h| h.title.as_str()).collect::<Vec<_>>(),
+        ["ok.jpg"]
+    );
+}
+
+#[test]
+fn openverse_formats_licenses_and_falls_back_to_the_image_url() {
+    let body = json!({"results": [
+        {"title": "Red Panda", "url": "https://img.example/a.jpg", "foreign_landing_url": "https://flickr.example/a", "license": "by-nd", "license_version": "2.0", "creator": "Chester Zoo", "width": 1024, "height": 685},
+        {"url": "https://img.example/b.jpg"}
+    ]});
+    let r = Engine::Openverse.parse(&body).unwrap();
+    assert_eq!(
+        r[0].snippet,
+        "Image: https://img.example/a.jpg | 1024x685 | CC BY-ND 2.0 | Chester Zoo"
+    );
+    assert_eq!(r[1].url, "https://img.example/b.jpg");
+}
+
+#[test]
+fn openverse_labels_public_domain_licenses_without_a_cc_prefix_and_drops_non_web_urls() {
+    let body = json!({"results": [
+        {"title": "A", "url": "https://img.example/a.jpg", "license": "cc0", "license_version": "1.0"},
+        {"title": "B", "url": "data:image/png;base64,AAAA"},
+        {"title": "C", "url": "ftp://img.example/c.jpg"}
+    ]});
+    let r = Engine::Openverse.parse(&body).unwrap();
+    assert_eq!(r.len(), 1);
+    assert_eq!(r[0].snippet, "Image: https://img.example/a.jpg | CC0");
+}
+
+#[test]
+fn github_and_stack_overflow_results_summarise_stars_and_votes() {
+    let gh = json!({"items": [{"full_name": "tokio-rs/tokio", "html_url": "https://github.com/tokio-rs/tokio", "description": "A runtime", "language": "Rust", "stargazers_count": 33351, "pushed_at": "2026-10-04T14:24:49Z"}]});
+    let r = Engine::GitHub.parse(&gh).unwrap();
+    assert_eq!(r[0].snippet, "A runtime (Rust, 33351 stars)");
+    assert_eq!(r[0].published.as_deref(), Some("2026-10-04T14:24:49Z"));
+
+    let so = json!({"items": [{"title": "Can&#39;t nest runtimes", "link": "https://stackoverflow.com/q/1", "score": 32, "is_answered": true, "answer_count": 2, "tags": ["rust", "rust-tokio"], "creation_date": 1592920926}]});
+    let r = Engine::StackOverflow.parse(&so).unwrap();
+    assert_eq!(r[0].title, "Can't nest runtimes");
+    assert_eq!(
+        r[0].snippet,
+        "32 votes, 2 answers (answered); tags: rust, rust-tokio"
+    );
+    assert!(r[0].published.as_deref().unwrap().starts_with("2020-06-23"));
+}
+
+#[test]
+fn package_registries_name_the_registry_and_rank_below_the_main_code_engines() {
+    let crates = json!({"crates": [{"name": "tokio", "description": "An event-driven\n platform", "max_version": "1.53.2", "downloads": 1035898722u64, "updated_at": "2026-10-03T11:18:32Z"}]});
+    let r = Engine::Crates.parse(&crates).unwrap();
+    assert_eq!(
+        (r[0].title.as_str(), r[0].url.as_str()),
+        ("tokio (crates.io)", "https://crates.io/crates/tokio")
+    );
+    assert_eq!(
+        r[0].snippet,
+        "An event-driven platform (v1.53.2, 1035898722 downloads)"
+    );
+
+    let npm = json!({"objects": [{"package": {"name": "tokio", "description": "Scraping", "version": "0.1.2", "date": "2018-05-14T01:00:06Z", "links": {"npm": "https://www.npmjs.com/package/tokio"}}}]});
+    assert_eq!(Engine::Npm.parse(&npm).unwrap()[0].title, "tokio (npm)");
+    assert!(
+        Engine::Crates.weight() < Engine::GitHub.weight()
+            && Engine::Npm.weight() < Engine::StackOverflow.weight()
+    );
+}
+
+#[tokio::test]
+async fn code_category_queries_each_code_engine_without_site_operators() {
+    let server = native_server().await;
+    Mock::given(method("GET")).and(path("/search/repositories")).and(query_param("q", "tokio runtime"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({"items": [{"full_name": "tokio-rs/tokio", "html_url": "https://github.com/tokio-rs/tokio", "description": "rt", "stargazers_count": 1}]})))
+        .mount(&server).await;
+    Mock::given(method("GET"))
+        .and(path("/2.3/search/advanced"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({"items": []})))
+        .mount(&server)
+        .await;
+    Mock::given(method("GET"))
+        .and(path("/api/v1/crates"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({"crates": []})))
+        .mount(&server)
+        .await;
+    Mock::given(method("GET"))
+        .and(path("/-/v1/search"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({"objects": []})))
+        .mount(&server)
+        .await;
+    Mock::given(method("GET"))
+        .and(path("/api/v1/search"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({"documents": []})))
+        .mount(&server)
+        .await;
+    let opts = SearchOptions {
+        category: Some(Category::Code),
+        include_domains: vec!["github.com".into()],
+        ..SearchOptions::default()
+    };
+    let r = run(&server, "tokio runtime", &opts).await.unwrap();
+    assert_eq!(r.results[0].url, "https://github.com/tokio-rs/tokio");
+    assert_eq!(r.attempts.len(), 7, "{:?}", r.attempts);
+    assert!(
+        r.attempts.iter().all(|a| a.outcome.starts_with("ok")),
+        "{:?}",
+        r.attempts
+    );
+    let sites: std::collections::BTreeSet<String> = server
+        .received_requests()
+        .await
+        .unwrap()
+        .iter()
+        .filter(|r| r.url.path() == "/2.3/search/advanced")
+        .filter_map(|r| {
+            r.url
+                .query_pairs()
+                .find(|(k, _)| k == "site")
+                .map(|(_, v)| v.into_owned())
+        })
+        .collect();
+    assert_eq!(
+        sites.into_iter().collect::<Vec<_>>(),
+        ["askubuntu", "stackoverflow", "superuser"]
+    );
+}
+
+#[tokio::test]
+async fn code_engines_get_their_paging_and_freshness_parameters() {
+    let server = native_server().await;
+    Mock::given(wiremock::matchers::any())
+        .respond_with(
+            ResponseTemplate::new(200)
+                .set_body_json(json!({"items": [], "crates": [], "objects": []})),
+        )
+        .mount(&server)
+        .await;
+    let opts = SearchOptions {
+        category: Some(Category::Code),
+        page: 3,
+        max_results: 10,
+        freshness: Some(Freshness::Week),
+        ..SearchOptions::default()
+    };
+    run(&server, "paging params", &opts).await.unwrap();
+    let urls: Vec<String> = server
+        .received_requests()
+        .await
+        .unwrap()
+        .iter()
+        .map(|r| r.url.to_string())
+        .collect();
+    let find = |needle: &str| {
+        urls.iter()
+            .find(|u| u.contains(needle))
+            .unwrap_or_else(|| panic!("no {needle} request in {urls:?}"))
+            .clone()
+    };
+    let gh = find("/search/repositories");
+    assert!(
+        gh.contains("page=3") && gh.contains("per_page=10") && gh.contains("pushed%3A%3E"),
+        "{gh}"
+    );
+    let so = find("/2.3/search/advanced");
+    assert!(
+        so.contains("site=stackoverflow") && so.contains("page=3") && so.contains("fromdate="),
+        "{so}"
+    );
+    assert!(find("/-/v1/search").contains("from=20"));
+    assert!(find("/api/v1/crates").contains("page=3"));
+}
+
+#[tokio::test]
+async fn a_github_quota_403_and_a_stack_exchange_throttle_400_are_rate_limits() {
+    let server = native_server().await;
+    Mock::given(method("GET"))
+        .and(path("/search/repositories"))
+        .respond_with(ResponseTemplate::new(403).insert_header("x-ratelimit-remaining", "0"))
+        .mount(&server)
+        .await;
+    Mock::given(method("GET"))
+        .and(path("/2.3/search/advanced"))
+        .respond_with(
+            ResponseTemplate::new(400)
+                .set_body_json(json!({"error_id": 502, "error_name": "throttle_violation"})),
+        )
+        .mount(&server)
+        .await;
+    Mock::given(method("GET"))
+        .and(path("/api/v1/crates"))
+        .respond_with(ResponseTemplate::new(403))
+        .mount(&server)
+        .await;
+    Mock::given(method("GET"))
+        .and(path("/-/v1/search"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({"objects": []})))
+        .mount(&server)
+        .await;
+    let opts = SearchOptions {
+        category: Some(Category::Code),
+        ..SearchOptions::default()
+    };
+    let err = run(&server, "rate limited engines", &opts).await.unwrap_err().to_string();
+    assert!(err.contains("github: rate limited"), "{err}");
+    assert!(err.contains("stack overflow: rate limited"), "{err}");
+    assert!(err.contains("crates.io: invalid credentials or access denied"), "a plain 403 stays an access error: {err}");
+}
+
+#[test]
+fn the_new_categories_parse_and_brave_reports_them_unsupported() {
+    for (word, cat) in [("images", Category::Images), ("code", Category::Code)] {
+        let opts = SearchOptions::from_args(&json!({"category": word})).unwrap();
+        assert_eq!(opts.category, Some(cat));
+        assert_eq!(
+            brave_unsupported(&opts),
+            [format!("category={word} (Brave supports general and news)")]
+        );
+    }
+}
+
+/// Quality benchmark against a SearxNG baseline. `HQ_SEARCH_BASELINE` points at
+/// a JSON object of `{query: {results: [{url, ...}]}}` captured from a SearxNG
+/// `format=json` instance, best-first. It prints per-query and mean overlap
+/// with that baseline's top results: `HQ_SEARCH_BASELINE=baseline.json cargo
+/// test -p hq-tools benchmark_against_searxng -- --ignored --nocapture`.
+#[tokio::test]
+#[ignore = "needs the network and HQ_SEARCH_BASELINE"]
+async fn benchmark_against_searxng() {
+    const TOP: usize = 10;
+    const MIN_BASELINE_RESULTS: usize = 8;
+    const PAUSE: Duration = Duration::from_millis(1500);
+    let Ok(file) = std::env::var("HQ_SEARCH_BASELINE") else {
+        panic!("set HQ_SEARCH_BASELINE to a SearxNG JSON baseline");
+    };
+    let baseline: Value = serde_json::from_str(&std::fs::read_to_string(file).unwrap()).unwrap();
+    let (mut sum_overlap, mut sum_top3, mut sum_rr, mut scored, mut empty) =
+        (0.0, 0.0, 0.0, 0usize, 0usize);
+    for (query, entry) in baseline.as_object().unwrap() {
+        let wanted: Vec<String> = entry["results"]
+            .as_array()
+            .into_iter()
+            .flatten()
+            .filter_map(|r| r["url"].as_str().map(normalize_url))
+            .collect();
+        if wanted.len() < MIN_BASELINE_RESULTS {
+            println!("skip  {query:<48} baseline has {} results", wanted.len());
+            continue;
+        }
+        let opts = SearchOptions {
+            max_results: TOP,
+            ..SearchOptions::default()
+        };
+        let started = Instant::now();
+        let got = web_search(query, &opts, None, None, true).await;
+        let took = started.elapsed();
+        let Ok(got) = got else {
+            empty += 1;
+            println!("FAIL  {query:<48} {}", got.unwrap_err());
+            continue;
+        };
+        let have: Vec<String> = got.results.iter().map(|r| normalize_url(&r.url)).collect();
+        let top: Vec<&String> = wanted.iter().take(TOP).collect();
+        let overlap = top.iter().filter(|u| have.contains(u)).count() as f64 / top.len() as f64;
+        let top3 = wanted.iter().take(3).filter(|u| have.contains(u)).count() as f64 / 3.0;
+        let rr = have
+            .iter()
+            .position(|u| *u == wanted[0])
+            .map_or(0.0, |p| 1.0 / (p as f64 + 1.0));
+        let engines: std::collections::BTreeSet<&str> = got
+            .results
+            .iter()
+            .flat_map(|r| r.engines.iter().map(String::as_str))
+            .collect();
+        println!(
+            "{overlap:>4.2} {top3:>4.2} {rr:>4.2}  {query:<48} {:>2} results {:>4}ms {engines:?}",
+            have.len(),
+            took.as_millis()
+        );
+        sum_overlap += overlap;
+        sum_top3 += top3;
+        sum_rr += rr;
+        scored += 1;
+        tokio::time::sleep(PAUSE).await;
+    }
+    let n = scored.max(1) as f64;
+    println!(
+        "\nqueries scored {scored}, failed {empty}\nmean overlap@{TOP} {:.3}\nmean top3 recall {:.3}\nmean reciprocal rank of baseline #1 {:.3}",
+        sum_overlap / n,
+        sum_top3 / n,
+        sum_rr / n
+    );
+}
+
+#[test]
+fn searxng_scoring_weights_agreement_and_top_positions() {
+    // Positions are 1-based per engine. Engine A: x, y, z. Engine B: y, w.
+    let a = vec![
+        hit("https://x.com/", "", "a"),
+        hit("https://y.com/", "", "a"),
+        hit("https://z.com/", "", "a"),
+    ];
+    let b = vec![
+        hit("https://y.com/", "", "b"),
+        hit("https://w.com/", "", "b"),
+    ];
+    let merged = merge(vec![(1.0, a), (1.0, b)]);
+    // y: 1.0 * 2 positions * (1/2 + 1/1) = 3.0; x: 1.0; w: 0.5; z: 1/3.
+    let urls: Vec<&str> = merged.iter().map(|r| r.url.as_str()).collect();
+    assert_eq!(
+        urls,
+        [
+            "https://y.com/",
+            "https://x.com/",
+            "https://w.com/",
+            "https://z.com/"
+        ]
+    );
+}
+
+#[test]
+fn engine_weights_multiply_and_count_once_per_engine() {
+    let a = vec![hit("https://same.com/", "", "a")];
+    let b = vec![
+        hit("https://same.com/", "", "b"),
+        hit("https://only-b.com/", "", "b"),
+    ];
+    let merged = merge(vec![(0.5, a), (0.5, b)]);
+    // same: 0.5 * 0.5 * 2 * (1 + 1) = 1.0; only-b: 0.5 * 1 * (1/2) = 0.25.
+    assert_eq!(merged[0].url, "https://same.com/");
+    assert_eq!(merged[1].url, "https://only-b.com/");
+}
+
+#[test]
+fn a_duplicate_upgrades_http_and_keeps_the_longer_title() {
+    let mut first = hit("http://a.com/p", "s", "a");
+    first.title = "Short".into();
+    let mut second = hit("https://a.com/p", "s", "b");
+    second.title = "A much longer title".into();
+    let merged = merge(vec![(1.0, vec![first]), (1.0, vec![second])]);
+    assert_eq!(
+        (merged[0].url.as_str(), merged[0].title.as_str()),
+        ("https://a.com/p", "A much longer title")
+    );
+}
+
+#[test]
+fn results_are_cleaned_like_searxng_before_merging() {
+    use super::engines::result;
+    let long_title = "word ".repeat(80);
+    let r = result(
+        "  Spaced \n title  ".to_string(),
+        "https://a.com/".into(),
+        "  Spaced \t content ".into(),
+    );
+    assert_eq!(
+        (r.title.as_str(), r.snippet.as_str()),
+        ("Spaced title", "Spaced content")
+    );
+    let r = result(long_title, "https://a.com/".into(), "word ".repeat(400));
+    assert!(
+        r.title.ends_with(" …") && r.title.chars().count() <= 203,
+        "{}",
+        r.title
+    );
+    assert!(r.snippet.ends_with(" …") && r.snippet.chars().count() <= 1203);
+    assert_eq!(
+        result("Same".into(), "https://a.com/".into(), "Same".into()).snippet,
+        "",
+        "content that only repeats the title is dropped"
+    );
+}
+
+#[test]
+fn accept_language_follows_the_searxng_format() {
+    use super::engines::accept_language;
+    let opts = |l: Option<&str>, c: Option<&str>| SearchOptions {
+        language: l.map(Into::into),
+        country: c.map(Into::into),
+        ..SearchOptions::default()
+    };
+    assert_eq!(accept_language(&opts(None, None)), "en-US,en;q=0.9");
+    assert_eq!(
+        accept_language(&opts(Some("de"), Some("AT"))),
+        "de,de-AT;q=0.7,en;q=0.3"
+    );
+    assert_eq!(
+        accept_language(&opts(Some("fr"), None)),
+        "fr,fr-fr;q=0.7,en;q=0.3"
+    );
+}
+
+#[tokio::test]
+async fn google_cse_sends_the_token_cookie_referer_and_paging_it_needs() {
+    let server = native_server().await;
+    mount_general(&server, 200).await;
+    let opts = SearchOptions {
+        page: 2,
+        freshness: Some(Freshness::Week),
+        language: Some("en".into()),
+        country: Some("US".into()),
+        ..SearchOptions::default()
+    };
+    run(&server, "tokio runtime", &opts).await.unwrap();
+    let reqs = server.received_requests().await.unwrap();
+    let script = reqs
+        .iter()
+        .find(|r| r.url.path() == "/cse/cse.js")
+        .expect("token fetched");
+    assert!(
+        script
+            .url
+            .query()
+            .unwrap()
+            .contains("cx=partner-pub-8993703457585266")
+    );
+    let search = reqs
+        .iter()
+        .find(|r| r.url.path() == "/cse/element/v1")
+        .expect("search sent");
+    let q = search.url.query().unwrap();
+    for needed in [
+        "rsz=filtered_cse",
+        "num=20",
+        "cse_tok=tok-1%3A1",
+        "cselibv=lib1",
+        "exp=cc%2Csps",
+        "callback=_",
+        "searchtype=&",
+        "start=20",
+        "gl=US",
+        "sort=date%3Ar%3A",
+    ] {
+        assert!(q.contains(needed), "missing {needed} in {q}");
+    }
+    assert_eq!(
+        search.headers.get("referer").unwrap(),
+        "https://cse.google.com/"
+    );
+    assert_eq!(search.headers.get("cookie").unwrap(), "CONSENT=YES+");
+    assert_eq!(
+        search.headers.get("accept-language").unwrap(),
+        "en,en-US;q=0.7,en;q=0.3"
+    );
+}
+
+#[tokio::test]
+async fn the_cse_token_is_fetched_once_and_reused() {
+    let server = native_server().await;
+    mount_general(&server, 200).await;
+    run(&server, "first query", &SearchOptions::default())
+        .await
+        .unwrap();
+    run(&server, "second query", &SearchOptions::default())
+        .await
+        .unwrap();
+    let reqs = server.received_requests().await.unwrap();
+    assert_eq!(
+        reqs.iter()
+            .filter(|r| r.url.path() == "/cse/cse.js")
+            .count(),
+        1
+    );
+    assert_eq!(
+        reqs.iter()
+            .filter(|r| r.url.path() == "/cse/element/v1")
+            .count(),
+        2
+    );
+}
+
+#[tokio::test]
+async fn a_cse_429_in_the_body_is_a_rate_limit_and_drops_the_token() {
+    let server = native_server().await;
+    mount_general(&server, 200).await;
+    Mock::given(method("GET")).and(path("/cse/element/v1")).respond_with(ResponseTemplate::new(200).set_body_string(
+        r#"_({"error":{"code":429,"message":"Our systems have detected unusual traffic from your network."}});"#))
+        .with_priority(1).mount(&server).await;
+    let r = run(&server, "throttled query", &SearchOptions::default())
+        .await
+        .unwrap();
+    let google = r
+        .attempts
+        .iter()
+        .find(|a| a.provider == "google cse")
+        .unwrap();
+    assert!(google.outcome.contains("unusual traffic"), "{google:?}");
+    assert!(!r.results.is_empty(), "the other engines still answer");
+    let again = run(&server, "throttled query two", &SearchOptions::default())
+        .await
+        .unwrap();
+    assert!(
+        again
+            .attempts
+            .iter()
+            .find(|a| a.provider == "google cse")
+            .unwrap()
+            .outcome
+            .contains("cooling down")
+    );
+}
+
+#[test]
+fn google_cse_images_carry_the_direct_image_and_its_page() {
+    let body = json!({"results": [{"unescapedUrl": "https://img.example/a.jpg", "originalContextUrl": "https://site.example/page", "titleNoFormatting": "A panda", "contentNoFormatting": "red panda", "width": "800", "height": "600", "fileFormat": "image/jpeg"}]});
+    let r = Engine::GoogleCseImages.parse(&body).unwrap();
+    assert_eq!(r[0].url, "https://site.example/page");
+    assert_eq!(
+        r[0].snippet,
+        "Image: https://img.example/a.jpg | 800x600 | jpeg. red panda"
+    );
+}
+
+#[test]
+fn google_cse_results_skip_non_web_urls() {
+    let r = Engine::GoogleCse.parse(&serde_json::from_str(r#"{"results":[{"unescapedUrl":"javascript:x","titleNoFormatting":"x"},{"unescapedUrl":"https://a.com/","titleNoFormatting":"A","contentNoFormatting":"c"}]}"#).unwrap()).unwrap();
+    assert_eq!(r.len(), 1);
+}
+
+#[test]
+fn wikipedia_titles_follow_searxng_casing() {
+    use super::engines::wikipedia_title;
+    assert_eq!(wikipedia_title("alan turing"), "Alan Turing");
+    assert_eq!(
+        wikipedia_title("iPhone"),
+        "iPhone",
+        "a query with capitals is kept as typed"
+    );
+    assert_eq!(
+        wikipedia_title("rust (programming language)"),
+        "Rust (Programming Language)"
+    );
+}
+
+#[tokio::test]
+async fn duckduckgo_sends_the_browser_form_headers_and_brave_its_preference_cookies() {
+    let server = native_server().await;
+    mount_general(&server, 200).await;
+    run(&server, "header check", &SearchOptions::default())
+        .await
+        .unwrap();
+    let reqs = server.received_requests().await.unwrap();
+    let ddg = reqs.iter().find(|r| r.url.path() == "/html/").unwrap();
+    assert_eq!(ddg.headers.get("sec-fetch-mode").unwrap(), "navigate");
+    assert_eq!(ddg.headers.get("sec-fetch-site").unwrap(), "same-origin");
+    assert_eq!(
+        ddg.headers.get("referer").unwrap(),
+        "https://html.duckduckgo.com/"
+    );
+    let brave = reqs.iter().find(|r| r.url.path() == "/search").unwrap();
+    assert_eq!(
+        brave.headers.get("cookie").unwrap(),
+        "safesearch=off; useLocation=0; summarizer=0; country=all; ui_lang=en-us"
+    );
+}
+
+#[tokio::test]
+async fn google_cse_only_serves_five_pages() {
+    let server = native_server().await;
+    mount_general(&server, 200).await;
+    let opts = SearchOptions {
+        page: 6,
+        ..SearchOptions::default()
+    };
+    let r = run(&server, "deep page", &opts).await.unwrap();
+    let google = r
+        .attempts
+        .iter()
+        .find(|a| a.provider == "google cse")
+        .unwrap();
+    assert_eq!(google.outcome, "skipped: serves pages up to 5 only");
+}
+
+#[test]
+fn mdn_and_europe_pmc_results_are_absolute_and_summarised() {
+    let mdn = json!({"documents": [{"mdn_url": "/en-US/docs/Web/JavaScript/Reference/Global_Objects/Array/map", "title": "Array.prototype.map()", "summary": "The map() method\ncreates a new array."}, {"mdn_url": "https://evil.example/x", "title": "skip"}]});
+    let r = Engine::Mdn.parse(&mdn).unwrap();
+    assert_eq!(r.len(), 1);
+    assert_eq!(
+        r[0].url,
+        "https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Array/map"
+    );
+    assert_eq!(r[0].snippet, "The map() method creates a new array.");
+
+    let epmc = json!({"resultList": {"result": [{"id": "42673464", "source": "MED", "title": "A <i>vaccine</i> study", "journalTitle": "PNAS", "pubYear": "2026", "authorString": "Karadakic R.", "abstractText": "Recent <b>studies</b> proposed", "firstPublicationDate": "2026-05-01"}]}});
+    let r = Engine::EuropePmc.parse(&epmc).unwrap();
+    assert_eq!(
+        (r[0].title.as_str(), r[0].url.as_str()),
+        (
+            "A vaccine study",
+            "https://europepmc.org/article/MED/42673464"
+        )
+    );
+    assert_eq!(
+        r[0].snippet,
+        "Karadakic R. | PNAS | 2026. Recent studies proposed"
+    );
+    assert_eq!(r[0].published.as_deref(), Some("2026-05-01"));
+}
+
+#[test]
+fn a_malformed_search_script_or_response_is_an_error_not_a_panic() {
+    use super::google::{parse_token_for_test, unwrap_jsonp_for_test};
+    for script in [
+        "",
+        "});({",
+        "({})",
+        "({\"cse_token\":\"\"});",
+        "no options here",
+    ] {
+        assert!(parse_token_for_test(script).is_err(), "{script}");
+    }
+    for body in ["", "}{", "no json", "_({broken});"] {
+        assert!(unwrap_jsonp_for_test(body).is_err(), "{body}");
+    }
+    // `exp` is optional.
+    assert!(parse_token_for_test(r#"x({"cse_token":"t","cselibVersion":"v"});"#).is_ok());
+}
+
+#[test]
+fn a_google_answer_without_results_is_an_empty_list() {
+    assert!(Engine::GoogleCse.parse(&json!({})).unwrap().is_empty());
+}
+
+#[test]
+fn suspensions_are_flat_like_searxng() {
+    for class in [
+        FailureClass::Generic,
+        FailureClass::RateLimited,
+        FailureClass::AccessDenied,
+        FailureClass::Captcha,
+    ] {
+        let (base, cap) = class.suspension();
+        assert_eq!(base, cap, "{class:?} must not grow");
+    }
+    assert_eq!(
+        FailureClass::Captcha.suspension().0,
+        Duration::from_secs(3600)
+    );
+    assert_eq!(
+        FailureClass::RateLimited.suspension().0,
+        Duration::from_secs(180)
+    );
+    assert_eq!(FailureClass::Generic.suspension().0, Duration::from_secs(5));
+}
+
+#[tokio::test]
+async fn a_wikipedia_title_it_cannot_hold_is_empty_but_other_400s_fail() {
+    for (body, expect_failure) in [
+        (
+            r#"{"title":"Invalid title","type":"https://mediawiki.org/wiki/HyperSwitch/errors/title-invalid-characters"}"#,
+            false,
+        ),
+        (r#"{"title":"nope"}"#, true),
+    ] {
+        let server = native_server().await;
+        mount_general(&server, 200).await;
+        server.reset().await;
+        mount_general(&server, 200).await;
+        // A later, higher priority mock answers the summary lookup with a 400.
+        Mock::given(method("GET"))
+            .and(wiremock::matchers::path_regex(
+                "^/api/rest_v1/page/summary/",
+            ))
+            .respond_with(ResponseTemplate::new(400).set_body_string(body))
+            .with_priority(1)
+            .mount(&server)
+            .await;
+        let r = run(&server, "c# async await", &SearchOptions::default())
+            .await
+            .unwrap();
+        let wiki = r
+            .attempts
+            .iter()
+            .find(|a| a.provider == "wikipedia")
+            .unwrap();
+        assert_eq!(
+            wiki.outcome.contains("HTTP 400"),
+            expect_failure,
+            "{wiki:?}"
+        );
+    }
+}
+
+#[tokio::test]
+async fn a_pool_whose_web_engines_are_all_blocked_and_finds_nothing_is_a_failure() {
+    let server = native_server().await;
+    mount_wikipedia_missing(&server).await;
+    Mock::given(method("GET"))
+        .and(path("/cse/cse.js"))
+        .respond_with(ResponseTemplate::new(200).set_body_string(CSE_SCRIPT))
+        .mount(&server)
+        .await;
+    Mock::given(method("GET"))
+        .and(path("/cse/element/v1"))
+        .respond_with(ResponseTemplate::new(429))
+        .mount(&server)
+        .await;
+    Mock::given(method("POST"))
+        .and(path("/html/"))
+        .respond_with(ResponseTemplate::new(503))
+        .mount(&server)
+        .await;
+    Mock::given(method("GET"))
+        .and(path("/search"))
+        .respond_with(ResponseTemplate::new(429))
+        .mount(&server)
+        .await;
+    let err = run(&server, "everything blocked", &SearchOptions::default())
+        .await
+        .unwrap_err()
+        .to_string();
+    assert!(err.contains("All web search backends failed"), "{err}");
+    assert!(
+        err.contains("google cse") && err.contains("rate limited"),
+        "{err}"
+    );
+}
+
+#[tokio::test]
+async fn a_refused_google_search_drops_the_token_so_the_next_one_fetches_a_new_one() {
+    let server = native_server().await;
+    mount_general(&server, 200).await;
+    Mock::given(method("GET"))
+        .and(path("/cse/element/v1"))
+        .respond_with(ResponseTemplate::new(403))
+        .up_to_n_times(1)
+        .with_priority(1)
+        .mount(&server)
+        .await;
+    run(&server, "first refused", &SearchOptions::default())
+        .await
+        .unwrap();
+    // The refusal suspended Google; clear that so the second search reaches the engine.
+    HEALTH
+        .lock()
+        .unwrap()
+        .retain(|key, _| !key.starts_with(&server.uri()));
+    run(&server, "second works", &SearchOptions::default())
+        .await
+        .unwrap();
+    let reqs = server.received_requests().await.unwrap();
+    assert_eq!(
+        reqs.iter()
+            .filter(|r| r.url.path() == "/cse/cse.js")
+            .count(),
+        2
+    );
+}
+
+#[test]
+fn package_and_paper_urls_must_be_web_urls() {
+    let npm = json!({"objects": [{"package": {"name": "x", "version": "1", "links": {"npm": "javascript:alert(1)"}}}]});
+    assert_eq!(
+        Engine::Npm.parse(&npm).unwrap()[0].url,
+        "https://www.npmjs.com/package/x"
+    );
+    let work = json!({"results": [{"display_name": "Paper", "doi": "javascript:alert(1)"}]});
+    assert!(Engine::OpenAlex.parse(&work).unwrap().is_empty());
 }

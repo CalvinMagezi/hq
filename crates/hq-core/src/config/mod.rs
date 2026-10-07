@@ -103,7 +103,7 @@ pub struct HqConfig {
     /// without it.
     pub searxng_url: Option<String>,
 
-    /// Built-in keyless meta-search (DuckDuckGo, Brave, Wikipedia, Bing News,
+    /// Built-in keyless meta-search (Google, DuckDuckGo, Brave, Wikipedia, Bing News,
     /// arXiv and others, queried in-process). On by default; set `false` to use only
     /// SearxNG and Brave.
     #[serde(default = "default_true")]

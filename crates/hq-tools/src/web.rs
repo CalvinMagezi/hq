@@ -1,10 +1,13 @@
 //! Web tools — search the web and fetch page content.
 //!
 //! Search works with no setup. The chain is a self-hosted SearxNG instance when
-//! `searxng_url` is set, then the built-in engine pool (`native`: Brave,
-//! DuckDuckGo and Wikipedia for general queries, Bing News and Hacker News for
-//! news, arXiv and OpenAlex for science, queried in parallel, merged by
-//! reciprocal-rank fusion and cached for 10 minutes), then the paid Brave Search
+//! `searxng_url` is set, then the built-in engine pool (`native`: Google (the
+//! keyless Programmable Search element endpoint SearxNG uses), DuckDuckGo,
+//! Brave and a Wikipedia summary for general queries, Bing News and Hacker News for
+//! news, arXiv, OpenAlex and Europe PMC for science, Google Images, Wikimedia Commons and Openverse for
+//! images, GitHub, Stack Overflow, Ask Ubuntu, Super User, MDN, crates.io and npm for code, queried in
+//! parallel, merged with SearxNG's ranking (engine weights times positions times
+//! the sum of 1 over position) and cached for 10 minutes), then the paid Brave Search
 //! API when `brave_api_key` is set. A later backend runs when an earlier one
 //! fails, cools down after recent failures, or returns nothing. The machine
 //! profile reports each backend as configured or reachable without querying it;
@@ -24,7 +27,7 @@
 //! | freshness  | `time_range` (engine-dependent)   | `freshness` pd/pw/pm/py       | per engine, see `unsupported_filters`  |
 //! | language   | `language`                        | `search_lang`                 | Wikipedia host, DuckDuckGo with country |
 //! | country    | only with language (`en-US`)      | `country`                     | DuckDuckGo with language               |
-//! | category   | general, news, science            | general, news                 | general, news, science                 |
+//! | category   | general, news, science, images, it | general, news                | general, news, science, images, code   |
 //! | domains    | `site:` operators + post-filter   | `site:` operators + post-filter | `site:` operators + post-filter      |
 //! | page       | `pageno`, unbounded               | `offset`, pages 1..=10        | page 1 only on DuckDuckGo and Bing News |
 //!
