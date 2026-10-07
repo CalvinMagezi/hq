@@ -16,6 +16,8 @@ export const links = {
   deployReadme: `${REPO_BLOB}/deploy/README.md`,
   updateSystem: `${REPO_BLOB}/docs/UPDATE_SYSTEM.md`,
   agentSessions: `${REPO_BLOB}/docs/AGENT_SESSIONS.md`,
+  windows: `${REPO_BLOB}/docs/WINDOWS.md`,
+  joinMachine: `${REPO_BLOB}/docs/JOIN_A_MACHINE.md`,
   mcpAsk: `${REPO_BLOB}/docs/MCP_ASK.md`,
   nativeTasks: `${REPO_BLOB}/docs/plans/native-tasks.md`,
   officialKey: `${REPO_BLOB}/release/minisign.pub`,

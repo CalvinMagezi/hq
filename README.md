@@ -34,7 +34,7 @@ No cloud backend. No vendor lock-in. One binary of about 58 MB.
 
 - **One agent, every channel.** Discord, Telegram, the web UI and `hq chat` share one conversation history and one memory, so you can switch platforms mid-thread.
 - **Markdown vault.** Notes, memory, skills and threads are plain files plus a single SQLite database (FTS5 search and embeddings). Nothing is locked inside a service.
-- **Coding-agent sessions.** Start, watch, steer and resume Claude Code, Codex, OpenCode and others in the built-in host, on this machine or a paired one.
+- **Coding-agent sessions.** Start, watch, steer and resume Claude Code, Codex, OpenCode and others in the built-in host, on this machine or a paired one (macOS, Linux, and Windows through WSL2).
 - **Sub-agents.** Single, parallel, race and graph execution modes over an in-process agent service.
 - **Native tasks.** Spaces, initiatives, tasks and comments, as MCP tools and a list, board and timeline UI.
 - **Long-running work.** Turns that outlive the chat ack window detach and report back; `/watch` schedules durable recurring turns.
@@ -97,7 +97,6 @@ launchd service; it is macOS only and not needed on Linux.
 ### Install a prebuilt binary
 
 With Homebrew: `brew install CalvinMagezi/tap/agent-hq` (binary only).
-On Windows, use the install script inside WSL2 (an Ubuntu terminal).
 
 
 `curl -fsSL https://agent-hq.online/install.sh | bash` (or `npx agent-hq-cli`, which needs Node 18.17+) downloads the latest stable release, verifies its minisign
@@ -109,6 +108,12 @@ platforms, including Intel Macs, build from source with `cargo`.
 **Docker:** `docker run -d -p 127.0.0.1:5678:5678 -v hq-data:/data ghcr.io/calvinmagezi/hq` runs HQ with its web UI and prints a web token on first start. A Compose example and the details are in [docs/DOCKER.md](docs/DOCKER.md).
 
 The web UI is built separately (see [PWA Dashboard](#pwa-dashboard)) and needs [bun](https://bun.sh).
+
+### Windows
+
+There is no native Windows build: HQ and its coding agents run inside WSL2 (Ubuntu), and you use the
+web app from your Windows browser. Setup, including running coding agents on a Windows PC for an HQ
+elsewhere, is in [docs/WINDOWS.md](docs/WINDOWS.md).
 
 ### First Run
 
@@ -598,7 +603,9 @@ Read [`SECURITY.md`](SECURITY.md) for the policy and how to report a vulnerabili
 |-------|-----|
 | Deploying to a server | [`deploy/README.md`](deploy/README.md) |
 | Signed updates | [`docs/UPDATE_SYSTEM.md`](docs/UPDATE_SYSTEM.md) |
-| Coding-agent sessions | [`docs/AGENT_HOST.md`](docs/AGENT_HOST.md) |
+| Coding-agent sessions | [`docs/AGENT_HOST.md`](docs/AGENT_HOST.md), [`docs/AGENT_SESSIONS.md`](docs/AGENT_SESSIONS.md) |
+| Windows (WSL2) | [`docs/WINDOWS.md`](docs/WINDOWS.md) |
+| Adding a machine that runs coding agents | [`docs/JOIN_A_MACHINE.md`](docs/JOIN_A_MACHINE.md) |
 | Asking HQ from MCP clients | [`docs/MCP_ASK.md`](docs/MCP_ASK.md) |
 | Connecting an agent to a VPS instance | [`docs/VPS_AGENT_CONNECT.md`](docs/VPS_AGENT_CONNECT.md) |
 | Native tasks | [`docs/plans/native-tasks.md`](docs/plans/native-tasks.md) |

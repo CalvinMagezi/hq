@@ -4,6 +4,8 @@
 
 - [Install guide](https://agent-hq.online/install/): curl script, Homebrew, npx, Docker and server setup
 - [Architecture](https://agent-hq.online/architecture/): how the daemon, vault, relays and MCP gateway fit together
+- [Windows](https://github.com/CalvinMagezi/hq/blob/main/docs/WINDOWS.md): no native build; HQ and its coding agents run inside WSL2 (Ubuntu) and are used from the Windows browser
+- [Add a machine that runs coding agents](https://github.com/CalvinMagezi/hq/blob/main/docs/JOIN_A_MACHINE.md): `hq host join`, `hq host add`, `hq host check`, for macOS, Linux and WSL2
 - [Compare](https://agent-hq.online/compare/): Agent HQ next to OpenClaw and Hermes Agent
 - [Security](https://agent-hq.online/security/): sandbox, signed releases, reporting a vulnerability
 - [Source code](https://github.com/CalvinMagezi/hq): repository, issues and changelog
