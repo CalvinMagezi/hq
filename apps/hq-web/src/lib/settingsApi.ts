@@ -26,7 +26,7 @@ export interface HqSettings {
     skills_write_approval: boolean
     web_allowed_origins: string[]
   }
-  herdr: { default_host: string; hosts: string[]; drive_new_watches: boolean; driver_checkin_minutes: number; driver_nudge_budget: number; driver_no_progress_limit: number }
+  herdr: { default_host: string; hosts: string[]; sandbox_mode: string; sandbox_extra_domains: number; idle_reap_hours: number; drive_new_watches: boolean; driver_checkin_minutes: number; driver_nudge_budget: number; driver_no_progress_limit: number }
   integrations: {
     remote_mcp: { name: string; host: string; live_user_turn_only: boolean }[]
     searxng_host: string | null

@@ -1,13 +1,15 @@
 import { expect, test } from 'bun:test'
 import { INTERRUPT_KEY, KEY_NAME_PATTERN, QUICK_KEYS, attachCaveat, attachCommand, canSend, isBlocked, needsAttention, watchingLabel, type WatchedSession } from './sessionsApi'
 
-test('attachCommand reaches a remote host over ssh and a local one directly', () => {
-  expect(attachCommand({ host: 'local' })).toBe('herdr')
-  expect(attachCommand({ host: 'laptop' })).toBe('ssh laptop -t herdr')
+test('attachCommand lists a remote host\'s agents over ssh and a local one directly', () => {
+  expect(attachCommand({ host: 'local' })).toBe('hq host status')
+  expect(attachCommand({ host: 'native' })).toBe('hq host status')
+  expect(attachCommand({ host: 'laptop' })).toBe('ssh laptop hq host status')
 })
 
 test('attachCaveat warns only for remote hosts, where the name is assumed to be an ssh alias', () => {
   expect(attachCaveat({ host: 'local' })).toBeNull()
+  expect(attachCaveat({ host: 'native' })).toBeNull()
   expect(attachCaveat({ host: 'laptop' })).toContain('"laptop" is an ssh alias')
 })
 

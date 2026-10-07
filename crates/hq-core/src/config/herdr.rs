@@ -251,7 +251,7 @@ fn default_idle_reap_hours() -> u64 {
 }
 
 fn default_host() -> String {
-    LOCAL_HOST.to_string()
+    NATIVE_HOST.to_string()
 }
 
 fn default_ssh_multiplex() -> bool {
@@ -382,9 +382,9 @@ mod tests {
     use super::*;
 
     #[test]
-    fn empty_config_runs_everything_locally() {
+    fn empty_config_runs_everything_on_this_machines_built_in_host() {
         let cfg: HerdrConfig = serde_yaml::from_str("{}").unwrap();
-        assert_eq!(cfg.default_host, LOCAL_HOST);
+        assert_eq!(cfg.default_host, NATIVE_HOST);
         assert!(cfg.hosts.is_empty());
         assert_eq!(cfg.binary, "herdr");
         assert!(
