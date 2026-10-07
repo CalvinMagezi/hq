@@ -1522,3 +1522,24 @@ fn package_and_paper_urls_must_be_web_urls() {
     let work = json!({"results": [{"display_name": "Paper", "doi": "javascript:alert(1)"}]});
     assert!(Engine::OpenAlex.parse(&work).unwrap().is_empty());
 }
+
+#[test]
+fn single_topic_engines_rank_below_the_general_ones_for_a_query_they_do_not_fit() {
+    use super::engines::Engine::*;
+    for narrow in [Mdn, EuropePmc, AskUbuntu, SuperUser, Crates, Npm, Wikipedia, HackerNews] {
+        assert!(narrow.weight() < GitHub.weight(), "{narrow:?}");
+    }
+    // A repository ranked first beats a page of MDN or Europe PMC that is only a name match.
+    let code = merge(vec![
+        (GitHub.weight(), vec![hit("https://github.com/o/r", "repo", "github")]),
+        (Mdn.weight(), vec![hit("https://developer.mozilla.org/x", "mdn", "mdn"), hit("https://developer.mozilla.org/y", "mdn", "mdn")]),
+    ]);
+    assert_eq!(code[0].url, "https://github.com/o/r");
+    // Agreement still wins: a page found by Stack Overflow and MDN (1.0 x 0.4 x 2 x 1.5) beats
+    // an unconfirmed first hit (1.0).
+    let agreed = merge(vec![
+        (StackOverflow.weight(), vec![hit("https://a.example/", "a", "so"), hit("https://shared.example/", "s", "so")]),
+        (Mdn.weight(), vec![hit("https://shared.example/", "s", "mdn")]),
+    ]);
+    assert_eq!(agreed[0].url, "https://shared.example/");
+}

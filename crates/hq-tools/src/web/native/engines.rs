@@ -107,14 +107,22 @@ impl Engine {
         }
     }
 
-    /// How much a hit from this engine counts in the merged ranking. Wikipedia
-    /// answers every query with encyclopedia articles, Hacker News with
-    /// discussions, and the package registries with name matches, so they
-    /// supplement the main engines rather than lead.
+    /// How much a hit from this engine counts in the merged ranking. Engines
+    /// that only know one corner of the web (encyclopedia articles, Hacker News
+    /// discussions, package names, MDN's web platform docs, biomedical papers,
+    /// Linux Q&A) fill their list for any query, relevant or not, so they
+    /// supplement the main engines rather than lead. Where several agree on a
+    /// page, the product of weights in the ranking still lifts it.
     pub(in crate::web) fn weight(self) -> f32 {
         match self {
-            Engine::Wikipedia => WEIGHT_SUPPLEMENTARY,
-            Engine::HackerNews | Engine::Crates | Engine::Npm => WEIGHT_SUPPLEMENTARY,
+            Engine::Wikipedia
+            | Engine::HackerNews
+            | Engine::Crates
+            | Engine::Npm
+            | Engine::Mdn
+            | Engine::EuropePmc
+            | Engine::AskUbuntu
+            | Engine::SuperUser => WEIGHT_SUPPLEMENTARY,
             _ => 1.0,
         }
     }
