@@ -46,8 +46,13 @@ pub fn revoke(conn: &Connection, session_id: &str) -> Result<()> {
     Ok(())
 }
 
+/// How long a secret is honoured before its session row exists. The agent
+/// connects the moment it starts, while HQ is still finishing the launch.
+const LAUNCH_GRACE_SECONDS: i64 = 180;
+
 /// The running session a secret belongs to, or None for an unknown secret or
-/// one whose session has ended.
+/// one whose session has ended. During a launch, before the session is
+/// recorded, a fresh secret names its session too.
 pub fn session_for_token(conn: &Connection, token: &str) -> Result<Option<String>> {
     if !token.starts_with(TOKEN_PREFIX) {
         return Ok(None);
@@ -55,9 +60,11 @@ pub fn session_for_token(conn: &Connection, token: &str) -> Result<Option<String
     Ok(conn
         .query_row(
             "SELECT t.session_id FROM harness_session_tokens t
-             JOIN harness_sessions s ON s.id = t.session_id
-             WHERE t.token_hash = ?1 AND s.status = 'running'",
-            params![hash(token)],
+             LEFT JOIN harness_sessions s ON s.id = t.session_id
+             WHERE t.token_hash = ?1
+               AND (s.status = 'running'
+                    OR (s.id IS NULL AND t.created_at >= datetime('now', ?2)))",
+            params![hash(token), format!("-{LAUNCH_GRACE_SECONDS} seconds")],
             |row| row.get(0),
         )
         .optional()?)
@@ -147,6 +154,38 @@ mod tests {
             assert!(session_for_token(c, &token)?.is_some());
             registry::set_status_exited_if_running(c, "hs-a")?;
             assert_eq!(session_for_token(c, &token)?, None);
+            Ok(())
+        })
+        .unwrap();
+    }
+
+    #[test]
+    fn a_secret_works_while_its_launch_is_still_registering_then_expires() {
+        let db = Database::open_memory().unwrap();
+        db.with_conn(|c| {
+            // Claude connects the moment it starts, before HQ has recorded the session.
+            let token = mint(c, "hs-new")?;
+            assert_eq!(session_for_token(c, &token)?.as_deref(), Some("hs-new"));
+
+            // A launch that never registered stops being honoured.
+            c.execute(
+                "UPDATE harness_session_tokens SET created_at = datetime('now', '-10 minutes')",
+                [],
+            )?;
+            assert_eq!(session_for_token(c, &token)?, None);
+            Ok(())
+        })
+        .unwrap();
+    }
+
+    #[test]
+    fn a_registered_session_that_ended_does_not_get_the_launch_grace() {
+        let db = Database::open_memory().unwrap();
+        db.with_conn(|c| {
+            session(c, "hs-a");
+            let token = mint(c, "hs-a")?;
+            registry::set_status_exited_if_running(c, "hs-a")?;
+            assert_eq!(session_for_token(c, &token)?, None, "a fresh token is not a way back in");
             Ok(())
         })
         .unwrap();

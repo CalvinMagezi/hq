@@ -545,6 +545,7 @@ impl HqTool for TaskCommentListTool {
             "count": comments.len(),
             "comments": comments.iter().map(|c| json!({
                 "id": c.id, "author": c.author, "body": c.body, "created_at": c.created_at,
+                "kind": c.kind, "to_session": c.to_session_id, "reply_to": c.reply_to,
             })).collect::<Vec<_>>()
         }))
     }

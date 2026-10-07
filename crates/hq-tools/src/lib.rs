@@ -5,6 +5,7 @@
 //! image generation, TTS, DrawIt diagrams, benchmarking, webmail, planning,
 //! browser automation, and workflow orchestration.
 
+pub mod a2a;
 pub mod agent_comm;
 pub mod agents;
 pub mod ask;
