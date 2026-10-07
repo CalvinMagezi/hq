@@ -130,6 +130,40 @@ pub struct HerdrConfig {
     /// makes it equivalent to shell access on every configured host.
     #[serde(default)]
     pub handoff_cwd_allow: Vec<String>,
+
+    /// How agents on the built-in host are confined.
+    #[serde(default)]
+    pub sandbox: SandboxConfig,
+}
+
+/// How agents on the built-in host are confined.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum SandboxMode {
+    /// The platform sandbox with a proxy-only network. The default: a launch
+    /// fails when it cannot be applied, it never falls back to unsandboxed.
+    #[default]
+    Process,
+    /// No confinement. The agent can read the host's token and reach any network.
+    None,
+}
+
+/// Sandbox settings for sessions on the built-in host (local or remote).
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct SandboxConfig {
+    #[serde(default)]
+    pub mode: SandboxMode,
+
+    /// Hosts an agent may reach besides `api.anthropic.com` and the HQ MCP
+    /// endpoint, as `name` or `name:port` (`*.example.com` allows subdomains).
+    /// Denied requests are logged with the host, so add what you see there.
+    #[serde(default)]
+    pub allow_domains: Vec<String>,
+
+    /// Directories agents may write under besides their project, `~/.claude`
+    /// and the temporary directories.
+    #[serde(default)]
+    pub writable: Vec<String>,
 }
 
 /// A launcher built on a built-in harness. It inherits that harness's resume,
@@ -321,6 +355,7 @@ impl Default for HerdrConfig {
             max_ask_spawned_sessions: default_max_ask_spawned_sessions(),
             spawn_cwd_deny: Vec::new(),
             handoff_cwd_allow: Vec::new(),
+            sandbox: SandboxConfig::default(),
         }
     }
 }

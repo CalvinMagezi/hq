@@ -11,6 +11,7 @@
 
 mod backend;
 mod native;
+mod sandbox;
 pub mod tools;
 mod transport;
 
@@ -277,7 +278,8 @@ fn build(cfg: &HerdrConfig, name: &str) -> anyhow::Result<Host> {
             .clamp(MIN_LAUNCH_BOUND_SECS, MAX_LAUNCH_BOUND_SECS);
         let host = NativeBackend::new(native_host_dir())
             .with_launch_bound(Duration::from_secs(launch))
-            .with_command_timeout(Duration::from_secs(cfg.command_timeout_secs));
+            .with_command_timeout(Duration::from_secs(cfg.command_timeout_secs))
+            .with_sandbox(sandbox::plan(cfg));
         return Ok(Arc::new(host));
     }
     if let Some(remote) = cfg.hosts.get(name)
@@ -305,6 +307,7 @@ fn remote_native(cfg: &HerdrConfig, name: &str, remote: &HerdrHostConfig) -> Nat
                 .clamp(MIN_LAUNCH_BOUND_SECS, MAX_LAUNCH_BOUND_SECS),
         ))
         .with_command_timeout(Duration::from_secs(cfg.command_timeout_secs))
+        .with_sandbox(sandbox::plan(cfg))
 }
 
 /// The machine HQ itself runs on.
