@@ -377,6 +377,7 @@ impl Conn {
                     "agents": agents.len(),
                     "agents_working": count(AgentState::Working),
                     "agents_blocked": count(AgentState::Blocked),
+                    "agents_unsandboxed": agents.iter().filter(|a| a.sandbox == "none").count(),
                     "binary_stale": self.exe.as_ref().is_some_and(ExeStamp::is_stale),
                 }))
             }

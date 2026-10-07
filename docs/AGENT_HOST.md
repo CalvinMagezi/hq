@@ -132,17 +132,40 @@ agent could do by printing to its screen anyway.
 
 ### What the host does not protect against
 
-An agent runs as the same operating-system user as the host. It can read
-`operator.token` in the host directory (the directory is in its environment as
-`HQ_HOST_DIR`), and with it do everything the operator can: read and type into
-other agents, start processes, stop the host. It can also read the MCP config
-files under `mcp/`, which hold the HQ tokens of the other sessions on that host.
-The pane token and the scope check keep an honest agent and its hooks in their
-lane; they are not a boundary against an agent that has been turned hostile.
-That boundary needs a separate account or a sandbox for the agents, which the
-host does not provide. Until then, run agents you would trust with your own
-login, and keep sessions that read untrusted content away from sessions that
-hold secrets.
+Without a sandbox an agent runs as the same operating-system user as the host.
+It can read `operator.token` in the host directory (`HQ_HOST_DIR` is in its
+environment) and do everything the operator can, and it can read the MCP config
+files under `mcp/`, which hold the HQ tokens of the other sessions. The pane
+token and the scope check only keep an honest agent in its lane.
+
+### The process sandbox
+
+`agent.spawn` takes a `sandbox`; HQ sends one for every launch on a built-in
+host (`herdr.sandbox`, default mode `process`). In process mode the host wraps
+the agent in `sandbox-exec` (macOS) or `bwrap` (Linux) and refuses to start it
+when that is not possible. The agent:
+
+- cannot read the run directory except `host.sock` and its own hook and MCP
+  files, nor `~/.ssh`, `~/.gnupg`, `~/.aws`, `~/.kube` or `~/.hq`;
+- can write only its project, `~/.claude`, caches and the temporary directories
+  (plus `herdr.sandbox.writable`);
+- cannot see other processes' environments;
+- can connect only to its own egress proxy and the host socket. The proxy allows
+  `api.anthropic.com`, the HQ MCP endpoint and `herdr.sandbox.allow_domains`,
+  resolves names itself, and refuses private, loopback and link-local addresses
+  unless the endpoint is the MCP one. Every decision is logged
+  (`agent.egress`); a denied host shows up there so you can add it.
+
+The sandbox policy is kept in `session.json` and applied again on restore.
+`agent.list` shows each agent's mode and `host.status` counts agents running
+with `none`.
+
+What it does not stop: the agent still reads and writes your project and
+`~/.claude`; on macOS the Keychain stays reachable because Claude Code keeps its
+login there; your own MCP servers, plugins and connectors are refused until you
+allow their hosts; a kernel flaw or an allowed domain is out of scope. On Linux
+`bwrap` cannot yet enforce the proxy-only network, so process mode fails closed
+there; set `herdr.sandbox.mode: none` knowingly or wait for the bridge.
 
 The host bounds what a client can make it hold: 128 agents, 64 KiB of command
 line each, window titles cut to 256 bytes, conversation ids limited to short
