@@ -177,6 +177,7 @@ impl Server {
 
     /// Accepts connections until stopped.
     pub fn serve(self) {
+        self.host.watch_states(self.stop.clone());
         let open = Arc::new(AtomicUsize::new(0));
         while !self.stop.load(Ordering::SeqCst) {
             match self.listener.accept() {
@@ -372,9 +373,29 @@ impl Conn {
                 self.stop_after_reply.set(true);
                 Ok(json!({}))
             }
+            "events.poll" => self.poll_events(&params),
             m if m.starts_with("agent.") => self.agent_call(m, &params),
             other => Err(body("unknown_method", format!("no method {other:?}"))),
         }
+    }
+
+    fn poll_events(&self, params: &Value) -> Result<Value, ErrorBody> {
+        let p: PollParams = parse(params)?;
+        let log = self.host.events();
+        let Some(after) = p.after else {
+            return Ok(json!({ "events": [], "last_seq": log.last_seq(), "lost": false }));
+        };
+        let wait = Duration::from_millis(p.timeout_ms.unwrap_or(DEFAULT_POLL_MS).min(MAX_POLL_MS));
+        let poll = log.poll(after, wait);
+        let events: Vec<Value> = poll
+            .events
+            .iter()
+            .map(|e| {
+                json!({ "seq": e.seq, "name": e.name, "kind": e.kind.as_str(),
+                        "state": e.state.map(AgentState::as_str), "rule": e.rule })
+            })
+            .collect();
+        Ok(json!({ "events": events, "last_seq": poll.last_seq, "lost": poll.lost }))
     }
 
     fn agent_call(&self, method: &str, params: &Value) -> Result<Value, ErrorBody> {
@@ -547,6 +568,18 @@ struct SpawnParams {
 
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
+struct PollParams {
+    after: Option<u64>,
+    timeout_ms: Option<u64>,
+}
+
+/// How long an `events.poll` waits when the caller names no timeout, and the
+/// most it may be asked to wait.
+const DEFAULT_POLL_MS: u64 = 25_000;
+const MAX_POLL_MS: u64 = 60_000;
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
 struct SetResumeParams {
     name: String,
     argv: Vec<String>,
@@ -693,6 +726,8 @@ fn info_json(i: &PaneInfo) -> Value {
         "agent": i.agent,
         "resumable": i.resumable,
         "agent_session_id": i.agent_session_id,
+        "state_seq": i.state_seq,
+        "done": i.done,
         "title": i.title,
         "state": i.state.map(AgentState::as_str),
         "rule": i.rule,

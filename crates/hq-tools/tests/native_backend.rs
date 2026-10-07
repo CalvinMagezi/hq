@@ -194,3 +194,41 @@ fn launch_is_not_ready_before_the_agent_has_drawn_its_screen() {
         began.elapsed()
     );
 }
+
+#[test]
+fn a_finished_turn_reads_as_done_with_a_rising_counter_and_an_event() {
+    use hq_host::Client;
+    let host = Running::start();
+    let b = host.backend();
+    b.launch(&cat("hs-turn", "claude")).unwrap();
+    let mut op = Client::connect(&host.dir.path().join("run")).unwrap();
+    let report = |op: &mut Client, event: &str| {
+        op.call(
+            "agent.report",
+            serde_json::json!({ "name": "hs-turn", "event": event }),
+        )
+        .unwrap();
+    };
+
+    let cursor = b.poll_events(None, Duration::ZERO).unwrap().last_seq;
+    report(&mut op, "UserPromptSubmit");
+    let working = b.agent("hs-turn").unwrap().unwrap();
+    assert_eq!(working.status, AgentStatus::Working);
+
+    report(&mut op, "Stop");
+    let done = b.agent("hs-turn").unwrap().unwrap();
+    assert_eq!(done.status, AgentStatus::Done);
+    assert!(
+        done.state_change_seq > working.state_change_seq,
+        "the supervisor alerts once per counter value"
+    );
+
+    let heard = b.poll_events(Some(cursor), Duration::from_secs(2)).unwrap();
+    assert!(
+        heard.events.iter().any(|e| e.name == "hs-turn"
+            && e.kind == "state"
+            && e.state.as_deref() == Some("idle")),
+        "{heard:?}"
+    );
+    assert!(!heard.lost);
+}

@@ -7,7 +7,7 @@ use nix::unistd::Pid;
 use portable_pty::{ChildKiller, CommandBuilder, MasterPty, PtySize, native_pty_system};
 use std::io::{Read, Write};
 use std::path::PathBuf;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Condvar, Mutex, MutexGuard};
 use std::time::{Duration, Instant};
 
@@ -91,6 +91,15 @@ pub(crate) struct Pane {
     shared: Arc<Shared>,
     /// Someone asked this process to stop; it may take a moment to exit.
     stopping: AtomicBool,
+    /// Sequence number of the last state-change event for this agent: a counter
+    /// that only goes up, for clients that alert once per change.
+    state_seq: AtomicU64,
+    /// A turn finished and the agent has not worked since.
+    done: AtomicBool,
+    /// The last state an event was sent for; None before the first one. Held
+    /// while a change is announced, so the watcher and a hook report cannot
+    /// announce the same change twice.
+    announced: Mutex<Option<crate::detect::AgentState>>,
     /// A later command to resume with, replacing `resume.argv`.
     resume_argv: Mutex<Option<Vec<String>>>,
     /// What the agent last said about itself through a hook.
@@ -188,6 +197,9 @@ impl Pane {
             started: Instant::now(),
             shared,
             stopping: AtomicBool::new(false),
+            state_seq: AtomicU64::new(0),
+            done: AtomicBool::new(false),
+            announced: Mutex::new(None),
             resume_argv: Mutex::new(None),
             reported: Mutex::new(None),
             session_id: Mutex::new(None),
@@ -269,6 +281,26 @@ impl Pane {
         if let Some(id) = session_id.filter(|id| !id.is_empty()) {
             *lock(&self.session_id) = Some(id);
         }
+    }
+
+    pub(crate) fn set_state_seq(&self, seq: u64) {
+        self.state_seq.store(seq, Ordering::SeqCst);
+    }
+
+    pub(crate) fn announced(&self) -> MutexGuard<'_, Option<crate::detect::AgentState>> {
+        lock(&self.announced)
+    }
+
+    pub(crate) fn set_done(&self, done: bool) {
+        self.done.store(done, Ordering::SeqCst);
+    }
+
+    pub(crate) fn is_done(&self) -> bool {
+        self.done.load(Ordering::SeqCst)
+    }
+
+    pub(crate) fn state_seq(&self) -> u64 {
+        self.state_seq.load(Ordering::SeqCst)
     }
 
     pub(crate) fn set_resume_argv(&self, argv: Vec<String>) {
