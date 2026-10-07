@@ -10,6 +10,7 @@ mod engines;
 mod google;
 mod images_code;
 mod markup;
+mod mojeek;
 #[cfg(test)]
 mod tests;
 
@@ -361,6 +362,17 @@ pub(super) async fn search_pool(
                 provider: "native".into(),
                 outcome: format!("engine task failed: {e}"),
             }),
+        }
+    }
+    if cut_short {
+        let engines = Engine::for_category(opts.category);
+        for (order, engine) in engines.iter().enumerate() {
+            if !runs.iter().any(|r| r.order == order) {
+                attempts.push(ProviderAttempt {
+                    provider: engine.name().into(),
+                    outcome: "skipped: still running when a primary engine had answered".into(),
+                });
+            }
         }
     }
     runs.sort_by_key(|r| r.order);

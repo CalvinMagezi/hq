@@ -1,6 +1,6 @@
 use super::super::*;
 use super::markup::{attr_value, blocks, collapse_ws, html_text, sel, tag_text};
-use super::{google, images_code};
+use super::{google, images_code, mojeek};
 
 /// Browsers get scraped HTML; API engines get the descriptive agent string.
 pub(super) const BROWSER_USER_AGENT: &str =
@@ -32,6 +32,7 @@ pub(in crate::web) enum Engine {
     GoogleCseImages,
     DuckDuckGo,
     Brave,
+    Mojeek,
     Wikipedia,
     BingNews,
     HackerNews,
@@ -53,6 +54,7 @@ const GENERAL: &[Engine] = &[
     Engine::GoogleCse,
     Engine::DuckDuckGo,
     Engine::Brave,
+    Engine::Mojeek,
     Engine::Wikipedia,
 ];
 const NEWS: &[Engine] = &[Engine::BingNews, Engine::HackerNews];
@@ -89,6 +91,7 @@ impl Engine {
             Engine::GoogleCseImages => "google cse images",
             Engine::DuckDuckGo => "duckduckgo",
             Engine::Brave => "brave",
+            Engine::Mojeek => "mojeek",
             Engine::Wikipedia => "wikipedia",
             Engine::BingNews => "bing news",
             Engine::HackerNews => "hacker news",
@@ -151,6 +154,7 @@ impl Engine {
             Engine::GoogleCse | Engine::GoogleCseImages => "https://cse.google.com".into(),
             Engine::DuckDuckGo => "https://html.duckduckgo.com".into(),
             Engine::Brave => "https://search.brave.com".into(),
+            Engine::Mojeek => "https://www.mojeek.com".into(),
             Engine::BingNews => "https://www.bing.com".into(),
             Engine::Wikipedia => {
                 let lang = opts.language.as_deref().unwrap_or("en");
@@ -234,6 +238,7 @@ impl Engine {
                     .query(&params);
                 get_text(scraped(request)).await
             }
+            Engine::Mojeek => mojeek::fetch(client, base, &q, opts).await,
             Engine::BingNews => {
                 let params = [("q", q), ("format", "rss".to_string())];
                 get_text(scraped(
@@ -321,6 +326,7 @@ impl Engine {
             Engine::GoogleCse | Engine::GoogleCseImages => google::parse(self, body)?,
             Engine::DuckDuckGo => parse_duckduckgo(text_of(body)?),
             Engine::Brave => parse_brave_html(text_of(body)?),
+            Engine::Mojeek => mojeek::parse(text_of(body)?),
             Engine::BingNews => parse_bing_news(text_of(body)?),
             Engine::Arxiv => parse_arxiv(text_of(body)?),
             Engine::Wikipedia => parse_wikipedia(body)?,
@@ -404,7 +410,7 @@ fn brave_cookies(opts: &SearchOptions) -> String {
 }
 
 fn is_html_engine(engine: Engine) -> bool {
-    matches!(engine, Engine::DuckDuckGo | Engine::Brave)
+    matches!(engine, Engine::DuckDuckGo | Engine::Brave | Engine::Mojeek)
 }
 
 fn text_of(body: &Value) -> Result<&str, String> {
@@ -472,7 +478,7 @@ fn truncate_words(s: &str, max: usize) -> String {
     format!("{} …", at_word.trim_end())
 }
 
-fn element_text(el: scraper::ElementRef<'_>) -> String {
+pub(super) fn element_text(el: scraper::ElementRef<'_>) -> String {
     collapse_ws(&el.text().collect::<String>())
 }
 
