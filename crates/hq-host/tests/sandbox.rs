@@ -244,3 +244,60 @@ fn the_agent_cannot_plant_code_the_operator_runs_later() {
     }
     host.kill("a").unwrap();
 }
+
+#[test]
+fn a_launch_profile_keeps_its_own_claude_config_and_loses_the_default_one() {
+    if !sandbox_available() {
+        return;
+    }
+    let home = std::path::PathBuf::from(std::env::var("HOME").unwrap());
+    let pid = std::process::id();
+    let mine = home.join(format!(".claude-hqtest-mine-{pid}"));
+    let other = home.join(format!(".claude-hqtest-other-{pid}"));
+    for d in [&mine, &other] {
+        std::fs::create_dir_all(d).unwrap();
+    }
+    std::fs::write(mine.join("credentials"), "MINE").unwrap();
+    std::fs::write(other.join("credentials"), "OTHER").unwrap();
+    let dir = run_dir();
+    let project = tempfile::tempdir().unwrap();
+    let host = host_for(dir.path());
+    let script = "t() { if eval \"$2\" >/dev/null 2>&1; then echo \"$1=yes\"; else echo \"$1=no\"; fi; }; \
+        t read_own 'cat \"$CLAUDE_CONFIG_DIR/credentials\"'; t write_own 'echo x > \"$CLAUDE_CONFIG_DIR/state\"'; \
+        t write_settings 'echo {} > \"$CLAUDE_CONFIG_DIR/settings.json\"'; t write_json 'echo {} > \"$CLAUDE_CONFIG_DIR/.claude.json\"'; \
+        t write_hooks 'mkdir \"$CLAUDE_CONFIG_DIR/hooks\"'; \
+        t read_default 'ls \"$HOME/.claude\"'; t read_other 'cat \"$HOME/.claude-hqtest-other-PID/credentials\"'; echo DONE"
+        .replace("PID", &pid.to_string());
+    let mut s = SpawnSpec::new("a", vec!["sh".into(), "-c".into(), script], project.path());
+    s.env = vec![("CLAUDE_CONFIG_DIR".into(), mine.to_string_lossy().into_owned())];
+    s.sandbox = Some(spec(vec![]));
+    host.spawn(s).unwrap();
+    let deadline = Instant::now() + WAIT;
+    let out = loop {
+        let text = host.read("a", ReadSource::Recent, 0).unwrap();
+        if text.contains("DONE") {
+            break text;
+        }
+        assert!(Instant::now() < deadline, "never finished:\n{text}");
+        std::thread::sleep(Duration::from_millis(50));
+    };
+    for d in [&mine, &other] {
+        let _ = std::fs::remove_dir_all(d);
+    }
+    let default_exists = home.join(".claude").is_dir();
+    for (probe, allowed) in [
+        ("read_own", true),
+        ("write_own", true),
+        ("write_settings", false),
+        ("write_json", false),
+        ("write_hooks", false),
+        ("read_other", false),
+    ] {
+        let want = format!("{probe}={}", if allowed { "yes" } else { "no" });
+        assert!(out.contains(&want), "expected {want}; got:\n{out}");
+    }
+    if default_exists {
+        assert!(out.contains("read_default=no"), "{out}");
+    }
+    host.kill("a").unwrap();
+}
