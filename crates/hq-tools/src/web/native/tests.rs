@@ -265,6 +265,7 @@ fn env(base: &str) -> NativeEnv<'_> {
     NativeEnv {
         client: get_client(),
         base_override: Some(base),
+        straggler_grace: None,
     }
 }
 
@@ -2103,4 +2104,40 @@ fn off_topic_hits_from_narrow_engines_rank_below_on_topic_ones() {
         "tokio mpsc channel",
     );
     assert_eq!(merged[0].url, "https://so.example/tokio-mpsc");
+}
+
+#[tokio::test]
+async fn the_pool_stops_waiting_for_slow_engines_once_google_has_answered() {
+    let server = native_server().await;
+    let slow = Duration::from_millis(1500);
+    let base = server.uri();
+    let patient = NativeEnv {
+        straggler_grace: Some(Duration::from_millis(200)),
+        ..env(&base)
+    };
+    Mock::given(method("POST"))
+        .and(path("/html/"))
+        .respond_with(ResponseTemplate::new(200).set_body_string(DDG_HTML).set_delay(slow))
+        .mount(&server)
+        .await;
+    Mock::given(method("GET"))
+        .and(path("/search"))
+        .and(query_param("source", "web"))
+        .respond_with(ResponseTemplate::new(200).set_body_string(BRAVE_HTML).set_delay(slow))
+        .mount(&server)
+        .await;
+    mount_wikipedia_missing(&server).await;
+    mount_google(&server, GOOGLE_RESULTS).await;
+    let started = Instant::now();
+    let budgets = Budgets {
+        total: Duration::from_secs(5),
+        searxng: Duration::from_millis(400),
+        native_engine: Duration::from_secs(2),
+        brave: Duration::from_millis(400),
+    };
+    let r = search_chain("straggler grace query", &SearchOptions::default(), None, None, Some(&patient), &budgets)
+        .await
+        .unwrap();
+    assert!(started.elapsed() < Duration::from_millis(1000), "{:?}", started.elapsed());
+    assert_eq!(r.results[0].engines, ["google cse"]);
 }
