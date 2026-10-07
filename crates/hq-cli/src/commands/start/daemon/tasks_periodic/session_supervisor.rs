@@ -307,6 +307,31 @@ async fn dismiss_survey(
     }
 }
 
+/// Types the next message another agent left for this session into it, when it
+/// is idle. One per sweep: the agent finishes a turn, and the idle event that
+/// follows delivers the next.
+async fn deliver_messages(db: &Database, row: &registry::HarnessSessionRow, agent: &AgentInfo) {
+    if !hq_tools::a2a::can_receive(agent.status) {
+        return;
+    }
+    let (db_arc, id, status) = (Arc::new(db.clone()), row.id.clone(), agent.status);
+    let delivered =
+        tokio::task::spawn_blocking(move || hq_tools::a2a::deliver_if_idle(&db_arc, &id, status))
+            .await;
+    match delivered {
+        Ok(Ok(Some(message))) => {
+            tracing::info!(session = %row.id, message, "session-supervisor: delivered an agent message");
+        }
+        Ok(Ok(None)) => {}
+        Ok(Err(e)) => {
+            tracing::warn!(session = %row.id, error = %e, "session-supervisor: could not deliver a message");
+        }
+        Err(e) => {
+            tracing::warn!(session = %row.id, error = %e, "session-supervisor: delivery task failed");
+        }
+    }
+}
+
 /// Keeps a session resumable into its own conversation: stores the id the
 /// agent's hooks reported and, when it is new, gives the host the matching
 /// restart command. Best effort; the next sweep tries again.
@@ -378,6 +403,7 @@ async fn supervise(
                 .await;
                 sweep_alive(db, vault_path, &row, &agent, screen, dismissed);
                 keep_resume_current(db, vault_path, &row, &agent, &resolve).await;
+                deliver_messages(db, &row, &agent).await;
                 continue;
             }
             Liveness::Gone => {}

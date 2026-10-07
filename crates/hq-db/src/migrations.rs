@@ -272,6 +272,10 @@ const MIGRATIONS: &[(&str, &str)] = &[
         "074_harness_session_tokens",
         include_str!("../sql/074_harness_session_tokens.sql"),
     ),
+    (
+        "075_task_messages",
+        include_str!("../sql/075_task_messages.sql"),
+    ),
 ];
 
 const MEMORY_SCHEMA_MIGRATION: &str = "058_memory_schema";

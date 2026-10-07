@@ -99,6 +99,7 @@ pub const SESSION_ALLOWLIST: &[&str] = &[
     "task_comment_list",
     "task_comment_add",
     "harness_session_status",
+    "agent_message_send",
 ];
 
 /// Build the two MCP `Tool` definitions for the gateway.

@@ -4,7 +4,7 @@ use hq_core::config::HqConfig;
 use hq_db::Database;
 use hq_tools::registry::{HqTool, ToolRegistry};
 use hq_tools::{
-    agent_comm, agents, ask, background_turns, brand, coding, convert, harness_session, herdr,
+    a2a, agent_comm, agents, ask, background_turns, brand, coding, convert, harness_session, herdr,
     imagegen, prose_lint, remote_mcp, self_update, session_search, shortcuts, skill_manage_tool,
     skills, slash_commands, subagent_runs, system_info, tasks, vault, web,
 };
@@ -78,6 +78,7 @@ pub fn create_default_registry(
         openrouter_key,
     )));
     tools.extend(agent_comm::create_agent_comm_tools(vault_path.clone()));
+    tools.extend(a2a::create_a2a_tools(db.clone()));
     tools.extend(ask::create_ask_tools(db.clone(), None));
 
     // web_search tries SearxNG first (no API key) and falls back to Brave.
