@@ -20,6 +20,7 @@ async fn report_web_search(config: &HqConfig) {
     let statuses = hq_tools::web::probe_search_backends(
         config.searxng_url.as_deref(),
         config.brave_api_key.as_deref(),
+        config.web_search_native,
     )
     .await;
     for status in &statuses {
@@ -33,8 +34,9 @@ async fn report_web_search(config: &HqConfig) {
     }
     if !statuses.iter().any(|s| s.answered == Some(true)) {
         println!(
-            "  warn  no backend answered, so web_search will fail. Run \
-             `scripts/setup-searxng.sh` or set `brave_api_key` (or HQ_BRAVE_API_KEY)."
+            "  warn  no backend answered, so web_search will fail. Check the network, set \
+             `web_search_native: true`, point `searxng_url` at a SearxNG instance, or set \
+             `brave_api_key` (or HQ_BRAVE_API_KEY)."
         );
     }
 }

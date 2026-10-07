@@ -32,8 +32,12 @@ through (`web::guarded_client()` for other tools):
 ## Deliberate exceptions and limits
 
 - `searxng_url` is operator configuration, not model input, and is usually a
-  loopback or LAN address. Search backends use a separate client and are not
-  covered by this guard. Nothing a model supplies reaches that client.
+  loopback or LAN address. The SearxNG and Brave search clients are separate and
+  not covered by this guard. Nothing a model supplies reaches them. The built-in
+  engine pool is different: it reaches fixed public hosts, but their redirects are
+  not fixed, so it uses the same guarded client and resolver as `web_fetch`,
+  including the proxy rule below: behind a proxy-only network, set
+  `HQ_WEB_FETCH_USE_PROXY=1` or the engines will not connect.
 - Proxies are off. The fetch client ignores `HTTP_PROXY`, `HTTPS_PROXY`,
   `ALL_PROXY` and the system proxy, because a proxy resolves names itself and
   the pinned resolver would never run. Set `HQ_WEB_FETCH_USE_PROXY=1` to opt in;

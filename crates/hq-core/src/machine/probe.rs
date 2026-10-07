@@ -365,18 +365,34 @@ fn probe_web_search_from_config() -> (Option<String>, Vec<WebSearchBackendStatus
     let statuses = probe_web_search(
         cfg.as_ref().and_then(|c| c.searxng_url.as_deref()),
         cfg.as_ref().and_then(|c| c.brave_api_key.as_deref()),
+        cfg.as_ref().is_none_or(|c| c.web_search_native),
     );
     (legacy_backend_summary(&statuses), statuses)
 }
 
 /// Passive per-backend health: a bounded TCP connect for SearxNG, key
 /// presence only for Brave (a real query would spend paid quota on every
-/// refresh). No test query is sent here; `hq doctor` sends one.
+/// refresh), and whether the built-in engines are enabled. No test query is
+/// sent here; `hq doctor` sends one.
 pub(super) fn probe_web_search(
     searxng_url: Option<&str>,
     brave_api_key: Option<&str>,
+    native: bool,
 ) -> Vec<WebSearchBackendStatus> {
-    vec![probe_searxng(searxng_url), brave_key_status(brave_api_key)]
+    vec![
+        probe_searxng(searxng_url),
+        native_status(native),
+        brave_key_status(brave_api_key),
+    ]
+}
+
+fn native_status(enabled: bool) -> WebSearchBackendStatus {
+    let detail = if enabled {
+        "built-in engines enabled, not test-queried"
+    } else {
+        "native: disabled"
+    };
+    web_status("native", enabled, None, detail.into())
 }
 
 fn probe_searxng(searxng_url: Option<&str>) -> WebSearchBackendStatus {

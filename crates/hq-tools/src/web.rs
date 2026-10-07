@@ -1,29 +1,32 @@
 //! Web tools — search the web and fetch page content.
 //!
-//! Search tries a self-hosted SearxNG instance first when `searxng_url` is
-//! configured and reachable (free, no API key, see `scripts/setup-searxng.sh`),
-//! falling back to the paid Brave Search API when SearxNG is unset, failing,
-//! cooling down after recent failures, or returns nothing. Neither backend is
-//! guaranteed to exist on a given host. The machine profile reports each one
-//! as configured or reachable without querying it; [`probe_search_backends`]
-//! (used by `hq doctor`) sends one real query per backend. Every response
-//! here names the backend that actually answered and each fallback attempt.
+//! Search works with no setup. The chain is a self-hosted SearxNG instance when
+//! `searxng_url` is set, then the built-in engine pool (`native`: Brave,
+//! DuckDuckGo and Wikipedia for general queries, Bing News and Hacker News for
+//! news, arXiv and OpenAlex for science, queried in parallel, merged by
+//! reciprocal-rank fusion and cached for 10 minutes), then the paid Brave Search
+//! API when `brave_api_key` is set. A later backend runs when an earlier one
+//! fails, cools down after recent failures, or returns nothing. The machine
+//! profile reports each backend as configured or reachable without querying it;
+//! [`probe_search_backends`] (used by `hq doctor`) sends one real query per
+//! backend. Every response here names the backend that actually answered and
+//! each fallback attempt, including every engine in the built-in pool.
 //!
 //! The whole chain runs under one deadline (`SEARCH_DEADLINE`, 20s): SearxNG
-//! gets at most 5s, Brave at most 12s, each capped by whatever is left. Every
-//! transport, HTTP, JSON and shape failure puts that backend into exponential
-//! cooldown, keyed by its endpoint.
+//! gets at most 5s, each built-in engine 8s (in parallel), Brave 12s, each
+//! capped by whatever is left. Every transport, HTTP, parse and challenge-page
+//! failure puts that backend, or that single engine, into exponential cooldown.
 //!
 //! Filters are optional and provider-dependent. Backend differences:
 //!
-//! | option     | SearxNG                           | Brave                         |
-//! |------------|-----------------------------------|-------------------------------|
-//! | freshness  | `time_range` (engine-dependent)   | `freshness` pd/pw/pm/py       |
-//! | language   | `language`                        | `search_lang`                 |
-//! | country    | only with language (`en-US`)      | `country`                     |
-//! | category   | general, news, science            | general, news                 |
-//! | domains    | `site:` operators + post-filter   | `site:` operators + post-filter |
-//! | page       | `pageno`, unbounded               | `offset`, pages 1..=10        |
+//! | option     | SearxNG                           | Brave API                     | built-in pool                          |
+//! |------------|-----------------------------------|-------------------------------|----------------------------------------|
+//! | freshness  | `time_range` (engine-dependent)   | `freshness` pd/pw/pm/py       | per engine, see `unsupported_filters`  |
+//! | language   | `language`                        | `search_lang`                 | Wikipedia host, DuckDuckGo with country |
+//! | country    | only with language (`en-US`)      | `country`                     | DuckDuckGo with language               |
+//! | category   | general, news, science            | general, news                 | general, news, science                 |
+//! | domains    | `site:` operators + post-filter   | `site:` operators + post-filter | `site:` operators + post-filter      |
+//! | page       | `pageno`, unbounded               | `offset`, pages 1..=10        | page 1 only on DuckDuckGo and Bing News |
 //!
 //! An option the answering backend can't honor is listed in
 //! `unsupported_filters` rather than silently dropped. Domain filters are
@@ -59,6 +62,7 @@ mod fetch;
 #[cfg(test)]
 mod fetch_tests;
 mod health;
+mod native;
 mod ssrf;
 #[cfg(test)]
 mod tests;
@@ -86,6 +90,7 @@ const USER_AGENT: &str = "Mozilla/5.0 (compatible; HQ-Agent/0.7)";
 const CACHE_TTL: Duration = Duration::from_secs(15 * 60); // 15 min cache
 const SEARCH_DEADLINE: Duration = Duration::from_secs(20);
 const SEARXNG_TIMEOUT: Duration = Duration::from_secs(5);
+const NATIVE_ENGINE_TIMEOUT: Duration = Duration::from_secs(8);
 const BRAVE_TIMEOUT: Duration = Duration::from_secs(12);
 const BRAVE_ENDPOINT: &str = "https://api.search.brave.com/res/v1/web/search";
 /// Brave's `offset` tops out at 9, so page 10 is the last one it can serve.
@@ -107,4 +112,5 @@ use backends::*;
 use chain::*;
 use client::*;
 use fetch::*;
+use native::*;
 use types::*;
