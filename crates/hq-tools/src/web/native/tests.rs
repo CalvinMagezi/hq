@@ -509,7 +509,7 @@ async fn live_native_pool_answers_each_category() {
         (
             "attention is all you need",
             Some(Category::Science),
-            &["arxiv", "openalex", "europe pmc"],
+            &["arxiv", "openalex", "crossref", "europe pmc"],
             &[],
         ),
         (
@@ -540,12 +540,21 @@ async fn live_native_pool_answers_each_category() {
             max_results: 8,
             ..SearchOptions::default()
         };
-        let r = web_search(query, &opts, None, None, true).await.unwrap();
-        println!("{query} [{category:?}] via {:?}", r.backend);
+        // The diagnostic env waits for every engine, so a slow one is still checked.
+        let deadline = Instant::now() + Duration::from_secs(20);
+        let (r, _) = search_pool(
+            query,
+            &opts,
+            &NativeEnv::diagnostic(),
+            deadline,
+            NATIVE_ENGINE_TIMEOUT,
+        )
+        .await;
+        println!("{query} [{category:?}]");
         for a in &r.attempts {
             println!("  {}: {}", a.provider, a.outcome);
         }
-        for h in &r.results {
+        for h in r.page.iter().flat_map(|p| &p.results) {
             println!("  {}. {} <{}> {:?}", h.position, h.title, h.url, h.engines);
         }
         let answered = |engine: &str| {
@@ -2254,4 +2263,41 @@ async fn live_mojeek_solves_its_challenge_and_returns_results() {
     println!("{} results in {:?}", results.len(), started.elapsed());
     assert!(results.len() >= 5);
     assert!(results.iter().any(|r| r.url.contains("tokio.rs")));
+}
+
+#[test]
+fn crossref_works_become_results_with_plain_abstracts_and_partial_dates() {
+    let body = json!({"message": {"items": [
+        {"title": ["A paper"], "URL": "https://doi.org/10.1/x",
+         "abstract": "<jats:p>The <jats:italic>result</jats:italic>.</jats:p>",
+         "issued": {"date-parts": [[2025, 3]]}},
+        {"title": ["Year only"], "URL": "https://doi.org/10.1/y", "issued": {"date-parts": [[2019]]}},
+        {"title": [], "URL": "https://doi.org/10.1/z"},
+        {"title": ["No link"]},
+    ]}});
+    let hits = Engine::Crossref.parse(&body).unwrap();
+    assert_eq!(hits.len(), 2);
+    assert_eq!(hits[0].snippet, "The result.");
+    assert_eq!(hits[0].published.as_deref(), Some("2025-03"));
+    assert_eq!(hits[1].published.as_deref(), Some("2019"));
+    assert!(Engine::Crossref.parse(&json!({"message": {}})).is_err());
+}
+
+#[tokio::test]
+async fn crossref_identifies_itself_and_asks_only_for_the_fields_it_reads() {
+    let server = native_server().await;
+    Mock::given(method("GET"))
+        .and(path("/works"))
+        .and(query_param("select", "title,URL,abstract,issued"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({"message": {"items": []}})))
+        .mount(&server)
+        .await;
+    let body = Engine::Crossref
+        .fetch(test_client(), &server.uri(), "protein folding", &SearchOptions::default())
+        .await
+        .unwrap();
+    assert!(Engine::Crossref.parse(&body).unwrap().is_empty());
+    let reqs = server.received_requests().await.unwrap();
+    let ua = reqs[0].headers.get("user-agent").unwrap().to_str().unwrap().to_string();
+    assert!(ua.starts_with("HQ-Agent/"), "{ua}");
 }

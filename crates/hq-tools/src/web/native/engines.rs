@@ -38,6 +38,7 @@ pub(in crate::web) enum Engine {
     HackerNews,
     Arxiv,
     OpenAlex,
+    Crossref,
     CommonsImages,
     Openverse,
     GitHub,
@@ -58,7 +59,12 @@ const GENERAL: &[Engine] = &[
     Engine::Wikipedia,
 ];
 const NEWS: &[Engine] = &[Engine::BingNews, Engine::HackerNews];
-const SCIENCE: &[Engine] = &[Engine::Arxiv, Engine::OpenAlex, Engine::EuropePmc];
+const SCIENCE: &[Engine] = &[
+    Engine::Arxiv,
+    Engine::OpenAlex,
+    Engine::Crossref,
+    Engine::EuropePmc,
+];
 const IMAGES: &[Engine] = &[
     Engine::GoogleCseImages,
     Engine::CommonsImages,
@@ -97,6 +103,7 @@ impl Engine {
             Engine::HackerNews => "hacker news",
             Engine::Arxiv => "arxiv",
             Engine::OpenAlex => "openalex",
+            Engine::Crossref => "crossref",
             Engine::CommonsImages => "wikimedia commons",
             Engine::Openverse => "openverse",
             Engine::GitHub => "github",
@@ -124,6 +131,7 @@ impl Engine {
             | Engine::Npm
             | Engine::Mdn
             | Engine::EuropePmc
+            | Engine::Crossref
             | Engine::AskUbuntu
             | Engine::SuperUser => WEIGHT_SUPPLEMENTARY,
             _ => 1.0,
@@ -163,6 +171,7 @@ impl Engine {
             Engine::HackerNews => "https://hn.algolia.com".into(),
             Engine::Arxiv => "https://export.arxiv.org".into(),
             Engine::OpenAlex => "https://api.openalex.org".into(),
+            Engine::Crossref => "https://api.crossref.org".into(),
             Engine::CommonsImages => "https://commons.wikimedia.org".into(),
             Engine::Openverse => "https://api.openverse.org".into(),
             Engine::GitHub => "https://api.github.com".into(),
@@ -316,6 +325,24 @@ impl Engine {
                 }
                 get_json(client.get(format!("{base}/works")).query(&params)).await
             }
+            Engine::Crossref => {
+                let mut params = vec![
+                    ("query", query.trim().to_string()),
+                    ("rows", per_page.to_string()),
+                    ("offset", (page_index as usize * per_page).to_string()),
+                    ("select", "title,URL,abstract,issued".into()),
+                ];
+                if let Some(f) = opts.freshness {
+                    let since = chrono::Utc::now() - chrono::Duration::seconds(freshness_secs(f));
+                    params.push(("filter", format!("from-pub-date:{}", since.format("%Y-%m-%d"))));
+                }
+                // Crossref routes clients that identify themselves to its faster pool.
+                let request = client
+                    .get(format!("{base}/works"))
+                    .header("User-Agent", WIKIMEDIA_USER_AGENT)
+                    .query(&params);
+                get_json(request).await
+            }
         }
     }
 
@@ -332,6 +359,7 @@ impl Engine {
             Engine::Wikipedia => parse_wikipedia(body)?,
             Engine::HackerNews => parse_hacker_news(body)?,
             Engine::OpenAlex => parse_openalex(body)?,
+            Engine::Crossref => parse_crossref(body)?,
             Engine::CommonsImages
             | Engine::Openverse
             | Engine::GitHub
@@ -691,6 +719,33 @@ fn parse_openalex(body: &Value) -> Result<Vec<SearchResult>, String> {
             Some(r)
         })
         .collect())
+}
+
+fn parse_crossref(body: &Value) -> Result<Vec<SearchResult>, String> {
+    let items = body["message"]["items"]
+        .as_array()
+        .ok_or("response has no `message.items` array")?;
+    Ok(items
+        .iter()
+        .filter_map(|w| {
+            let title = w["title"][0].as_str().filter(|t| !t.is_empty())?;
+            let url = non_empty_str(&w["URL"]).filter(|u| u.starts_with("http"))?;
+            let abstract_text = w["abstract"].as_str().map(html_text).unwrap_or_default();
+            let mut r = result(title.to_string(), url, abstract_text);
+            r.published = crossref_date(&w["issued"]["date-parts"][0]);
+            Some(r)
+        })
+        .collect())
+}
+
+/// Crossref dates are `[year, month, day]` with the tail optional.
+fn crossref_date(parts: &Value) -> Option<String> {
+    let part = |i: usize| parts[i].as_u64();
+    Some(match (part(0)?, part(1), part(2)) {
+        (y, Some(m), Some(d)) => format!("{y:04}-{m:02}-{d:02}"),
+        (y, Some(m), None) => format!("{y:04}-{m:02}"),
+        (y, _, _) => format!("{y:04}"),
+    })
 }
 
 /// OpenAlex ships abstracts as `{word: [positions]}`; put the words back in order.
