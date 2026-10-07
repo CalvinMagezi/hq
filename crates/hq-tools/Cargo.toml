@@ -45,6 +45,8 @@ default = [
 # default-on today, matching every build that exists; a future non-default
 # build is what would actually exercise turning one off.
 gws = []
+# Test doubles other crates' tests use (a scripted host).
+test-support = []
 
 [dev-dependencies]
 tempfile = "3"

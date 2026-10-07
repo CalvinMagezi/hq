@@ -52,7 +52,6 @@ fn adding_a_host_writes_the_config_and_a_key_and_is_idempotent() {
     );
     let loaded = HqConfig::load_from_path(&config).unwrap();
     let host = &loaded.herdr.hosts["laptop"];
-    assert_eq!(host.kind, HostKind::Native);
     assert_eq!(host.ssh, "dev@100.64.0.9");
     assert_eq!(loaded.default_model, "relay", "other settings are kept");
     let mode = std::fs::metadata(&first.identity_file).unwrap().permissions().mode();

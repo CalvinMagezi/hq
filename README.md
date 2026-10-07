@@ -34,7 +34,7 @@ No cloud backend. No vendor lock-in. One binary of about 58 MB.
 
 - **One agent, every channel.** Discord, Telegram, the web UI and `hq chat` share one conversation history and one memory, so you can switch platforms mid-thread.
 - **Markdown vault.** Notes, memory, skills and threads are plain files plus a single SQLite database (FTS5 search and embeddings). Nothing is locked inside a service.
-- **Coding-agent sessions.** Start, watch, steer and resume Claude Code, Codex, OpenCode and others in Herdr panes, locally or on a remote host.
+- **Coding-agent sessions.** Start, watch, steer and resume Claude Code, Codex, OpenCode and others in the built-in host, on this machine or a paired one.
 - **Sub-agents.** Single, parallel, race and graph execution modes over an in-process agent service.
 - **Native tasks.** Spaces, initiatives, tasks and comments, as MCP tools and a list, board and timeline UI.
 - **Long-running work.** Turns that outlive the chat ack window detach and report back; `/watch` schedules durable recurring turns.
@@ -221,7 +221,7 @@ The `hq` binary ships the commands below. Run `hq help` for full usage.
 | Command | Description |
 |---------|-------------|
 | `hq chat` | Interactive terminal chat (default command) |
-| `hq sessions [sub]` | Harness sessions in Herdr: list, spawn <harness>, status, logs, send, stop, resume |
+| `hq sessions [sub]` | Harness sessions: list, spawn <harness>, status, logs, send, stop, resume |
 
 ### Services
 
@@ -598,7 +598,7 @@ Read [`SECURITY.md`](SECURITY.md) for the policy and how to report a vulnerabili
 |-------|-----|
 | Deploying to a server | [`deploy/README.md`](deploy/README.md) |
 | Signed updates | [`docs/UPDATE_SYSTEM.md`](docs/UPDATE_SYSTEM.md) |
-| Coding-agent sessions in Herdr | [`docs/HERDR_HARNESS.md`](docs/HERDR_HARNESS.md) |
+| Coding-agent sessions | [`docs/AGENT_HOST.md`](docs/AGENT_HOST.md) |
 | Asking HQ from MCP clients | [`docs/MCP_ASK.md`](docs/MCP_ASK.md) |
 | Connecting an agent to a VPS instance | [`docs/VPS_AGENT_CONNECT.md`](docs/VPS_AGENT_CONNECT.md) |
 | Native tasks | [`docs/plans/native-tasks.md`](docs/plans/native-tasks.md) |

@@ -4,6 +4,10 @@ All notable changes to Agent-HQ will be documented in this file.
 
 ## [Unreleased]
 
+### Removed
+
+- **Herdr is retired.** Coding-agent sessions run only on HQ's built-in host (`hq host`); the herdr backend, `deploy/herdr.service` and `scripts/hq-herdr-gate` are gone. A host named `local` now means the built-in host on this machine. Config keys from the old setup (`herdr.binary`, `herdr.session`, a host's `kind` and `session`) are ignored; a configured remote host must be paired again with `hq host join` and `hq host add`.
+
 ### Changed
 
 - **New coding-agent sessions start on the built-in host by default** (`herdr.default_host` is now `native`; set `local` to keep using herdr for now). The web app's session page shows `hq host status` (on the session's host) in place of the herdr attach command, and Settings lists the agent sandbox, extra allowed sites and the idle limit.

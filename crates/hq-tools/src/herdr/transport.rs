@@ -1,5 +1,5 @@
-//! Runs one herdr invocation, on this machine or through ssh, under a hard
-//! deadline so a dead host can never wedge a daemon sweep.
+//! Runs one call to a remote host through ssh, under a hard deadline so a dead
+//! host can never wedge a daemon sweep.
 
 use super::HerdrError;
 use std::io::{Read, Write};
@@ -7,7 +7,6 @@ use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
 use std::time::{Duration, Instant};
 
-const SSH_PROGRAM: &str = "ssh";
 const POLL_INTERVAL: Duration = Duration::from_millis(20);
 const SSH_CONNECT_TIMEOUT_SECS: u32 = 8;
 
@@ -29,9 +28,6 @@ const SSH_FAILURE_EXIT: i32 = 255;
 
 #[derive(Debug, Clone)]
 pub(super) enum Transport {
-    Local {
-        binary: String,
-    },
     Ssh {
         target: String,
         port: Option<u16>,
@@ -51,15 +47,6 @@ pub(super) struct RawOutput {
 }
 
 impl Transport {
-    pub(super) fn run(
-        &self,
-        host: &str,
-        args: &[String],
-        timeout: Duration,
-    ) -> Result<RawOutput, HerdrError> {
-        self.run_with_program(SSH_PROGRAM, host, args, timeout)
-    }
-
     pub(super) fn run_with_program(
         &self,
         ssh_program: &str,
@@ -118,7 +105,6 @@ impl Transport {
                 gate_command,
                 mux_dir: None,
             },
-            other => other,
         }
     }
 
@@ -128,11 +114,6 @@ impl Transport {
         args: &[String],
     ) -> Result<(Command, Option<Vec<u8>>), String> {
         match self {
-            Transport::Local { binary } => {
-                let mut c = Command::new(binary);
-                c.args(args);
-                Ok((c, None))
-            }
             Transport::Ssh {
                 target,
                 port,
@@ -277,7 +258,7 @@ fn first_line(text: &str) -> String {
     text.lines().next().unwrap_or("").trim().to_string()
 }
 
-fn run_with_deadline(
+pub(super) fn run_with_deadline(
     command: &mut Command,
     stdin_payload: Option<Vec<u8>>,
     timeout: Duration,
@@ -558,26 +539,18 @@ mod tests {
     }
 
     #[test]
-    fn missing_binary_is_unreachable_not_a_panic() {
-        let t = Transport::Local {
-            binary: "/nonexistent/herdr".into(),
-        };
-        let err = t
-            .run("local", &["status".to_string()], Duration::from_secs(2))
-            .unwrap_err();
-        assert!(matches!(err, HerdrError::Unreachable { .. }));
+    fn a_missing_binary_is_an_error_not_a_panic() {
+        let err = run_with_deadline(&mut Command::new("/nonexistent/ssh"), None, Duration::from_secs(2)).unwrap_err();
+        assert!(!err.is_empty());
     }
 
     #[test]
     fn a_hung_process_is_killed_at_the_deadline() {
-        let t = Transport::Local {
-            binary: "/bin/sleep".into(),
-        };
         let started = Instant::now();
-        let err = t
-            .run("local", &["30".to_string()], Duration::from_millis(300))
-            .unwrap_err();
+        let mut command = Command::new("/bin/sleep");
+        command.arg("30");
+        let err = run_with_deadline(&mut command, None, Duration::from_millis(300)).unwrap_err();
         assert!(started.elapsed() < Duration::from_secs(5));
-        assert!(err.to_string().contains("timed out"));
+        assert!(err.contains("timed out"), "{err}");
     }
 }

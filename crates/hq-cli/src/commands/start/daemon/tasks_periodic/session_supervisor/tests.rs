@@ -1,6 +1,5 @@
 use super::*;
-use hq_tools::herdr::HerdrHost;
-use hq_core::config::{HerdrConfig, LOCAL_HOST};
+use hq_tools::herdr::scripted::ScriptedHost as HerdrHost;
 use std::os::unix::fs::PermissionsExt;
 use std::path::PathBuf;
 
@@ -27,11 +26,7 @@ fn fake_host(dir: &Path, agents: &[(&str, &str, u64)], screen: &str) -> HerdrHos
     let path = dir.join("herdr");
     std::fs::write(&path, script).unwrap();
     std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o755)).unwrap();
-    let cfg = HerdrConfig {
-        binary: path.to_string_lossy().to_string(),
-        ..HerdrConfig::default()
-    };
-    HerdrHost::from_config(&cfg, LOCAL_HOST).unwrap()
+    HerdrHost::new(path)
 }
 
 fn gone_host(dir: &Path) -> HerdrHost {
@@ -288,12 +283,7 @@ async fn a_host_that_never_answers_is_cut_off_at_the_host_budget() {
     let path = tmp.path().join("herdr");
     std::fs::write(&path, "#!/bin/sh\nsleep 30\n").unwrap();
     std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o755)).unwrap();
-    let cfg = HerdrConfig {
-        binary: path.to_string_lossy().to_string(),
-        command_timeout_secs: 30,
-        ..HerdrConfig::default()
-    };
-    let hung = HerdrHost::from_config(&cfg, LOCAL_HOST).unwrap();
+    let hung = HerdrHost::new(path).with_command_timeout(Duration::from_secs(30));
     let resolve: HostResolver = Arc::new(move |_| Ok(Arc::new(hung.clone()) as Host));
 
     let started = Instant::now();
@@ -659,11 +649,7 @@ fn keylogging_host_with(
     let path = dir.join("herdr");
     std::fs::write(&path, script).unwrap();
     std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o755)).unwrap();
-    let cfg = HerdrConfig {
-        binary: path.to_string_lossy().to_string(),
-        ..HerdrConfig::default()
-    };
-    (HerdrHost::from_config(&cfg, LOCAL_HOST).unwrap(), log)
+    (HerdrHost::new(path), log)
 }
 
 fn drive_on(db: &Database, id: &str) {

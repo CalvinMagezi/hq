@@ -58,16 +58,18 @@ placeholders (`example.com`, `hq.example.ts.net`, `<owner>/<repo>`).
   `agent_send_message` and `agent_read_inbox` are plain vault-mailbox tools for
   handing text to `relay` or another local mailbox id.
 - **Coding-agent runtime**: long-lived coding agents (Claude Code, Codex, Cursor,
-  Pi, OpenCode, Copilot CLI, Kimi, Qwen, Antigravity) run in
-  [Herdr](https://herdr.dev), not tmux. `crates/hq-tools/src/herdr/` drives the
-  `herdr` CLI on a host: `local`, or a remote machine over SSH through a
-  restricted key and the `scripts/hq-herdr-gate` forced command.
+  Pi, OpenCode, Copilot CLI, Kimi, Qwen, Antigravity) run in HQ's built-in host
+  (`hq host`, crate `hq-host`; herdr is retired). `crates/hq-tools/src/herdr/`
+  (to be renamed) holds the client: `NativeBackend` talks to the host on this
+  machine, or to one on another machine over SSH through a key pinned to
+  `hq host gate`. Agents run in a process sandbox with an egress allowlist.
+  `hq host join` / `hq host add` / the `host_add` tool pair a machine.
   `harness_session_*`, the read-only `herdr_hosts`/`herdr_agents`/`herdr_read`
-  tools and `herdr_send` sit on top. The supervisor polls each host once a
-  minute, treats an unreachable host as "unknown" (never "exited"), and alerts
+  tools and `herdr_send` sit on top. The host sends state changes as events; the
+  supervisor treats an unreachable host as "unknown" (never "exited"), and alerts
   when an agent blocks. A coding agent's trust dialog defaults to "No, exit", so
   blocked launches are reported, never auto-answered. Setup, security model and
-  troubleshooting: `docs/HERDR_HARNESS.md`.
+  cutover: `docs/AGENT_HOST.md`, `docs/NATIVE_HOST_CUTOVER.md`.
 - **No job queue**: the filesystem job queue (`_jobs/`) is retired. All work
   dispatches through sub-agents or relay notifications.
 - **Long relay turns**: turns that outlive the ack window
@@ -95,7 +97,7 @@ placeholders (`example.com`, `hq.example.ts.net`, `<owner>/<repo>`).
 | CLI binary | `crates/hq-cli/src/main.rs` |
 | Agent session | `crates/hq-agent/src/session/mod.rs` |
 | Sub-agent dispatch | `crates/hq-agent/src/agents/service.rs`, `crates/hq-agent/src/agents/tool.rs` |
-| Coding-agent runtime (Herdr) | `crates/hq-tools/src/herdr/`, `crates/hq-tools/src/harness_session/`, `docs/HERDR_HARNESS.md` |
+| Coding-agent runtime (built-in host) | `crates/hq-host/`, `crates/hq-tools/src/herdr/`, `crates/hq-tools/src/harness_session/`, `docs/AGENT_HOST.md` |
 | Task-linked and chat-driven harness sessions | `crates/hq-tools/src/harness_session/mission.rs`, `crates/hq-web/src/session_driver.rs`, `crates/hq-web/src/sessions_api.rs`, "Sessions that work on a task" and "Watching and driving from a web chat" in `docs/HERDR_HARNESS.md` |
 | Pull-based updates | `crates/hq-update/`, `crates/hq-cli/src/commands/update.rs`, `deploy/install.sh`, `deploy/update/`, `docs/UPDATE_SYSTEM.md` |
 | Restart notices | `crates/hq-cli/src/commands/notify_restart.rs` (`hq notify-restart`) |

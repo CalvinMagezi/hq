@@ -1,4 +1,9 @@
-# Herdr harness
+# Herdr harness (retired)
+
+> Herdr was replaced by HQ's built-in host (`hq host`). This page still describes the
+> harness-session tools and workflow, which are unchanged, but anything about the
+> `herdr` CLI, `hq-herdr-gate` or `herdr.service` is historical. Current setup:
+> [AGENT_HOST.md](AGENT_HOST.md) and [NATIVE_HOST_CUTOVER.md](NATIVE_HOST_CUTOVER.md).
 
 Agent HQ runs and monitors coding agents (Claude Code, Codex, Cursor, Pi, OpenCode,
 Copilot CLI, Kimi, Qwen, Antigravity) in [Herdr](https://herdr.dev). Herdr owns the
