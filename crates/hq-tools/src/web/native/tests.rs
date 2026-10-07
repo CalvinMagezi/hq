@@ -400,15 +400,38 @@ async fn fresh_server_for_brave() -> MockServer {
     brave
 }
 
-/// Diagnostic against the real engines: `cargo test -p hq-tools live_native -- --ignored --nocapture`.
+/// Diagnostic and weekly canary against the real engines:
+/// `cargo test -p hq-tools live_native -- --ignored --nocapture`. Each engine
+/// listed must have answered, so one broken parser cannot hide behind the others.
 #[tokio::test]
 #[ignore = "needs the network and live engines"]
 async fn live_native_pool_answers_each_category() {
-    for (query, category) in [
-        ("tokio runtime", None),
-        ("rust language", Some(Category::News)),
-        ("attention is all you need", Some(Category::Science)),
-    ] {
+    let cases: [(&str, Option<Category>, &[&str]); 5] = [
+        // DuckDuckGo answers a bot challenge from many networks, so it is not required.
+        ("tokio runtime", None, &["brave", "wikipedia"]),
+        (
+            "rust language",
+            Some(Category::News),
+            &["bing news", "hacker news"],
+        ),
+        (
+            "attention is all you need",
+            Some(Category::Science),
+            &["arxiv", "openalex"],
+        ),
+        (
+            "red panda",
+            Some(Category::Images),
+            &["wikimedia commons", "openverse"],
+        ),
+        (
+            "tokio runtime",
+            Some(Category::Code),
+            &["github", "stack overflow", "crates.io", "npm"],
+        ),
+    ];
+    let mut broken = Vec::new();
+    for (query, category, required) in cases {
         let opts = SearchOptions {
             category,
             max_results: 8,
@@ -422,19 +445,18 @@ async fn live_native_pool_answers_each_category() {
         for h in &r.results {
             println!("  {}. {} <{}> {:?}", h.position, h.title, h.url, h.engines);
         }
-        assert!(!r.results.is_empty(), "{query} returned nothing");
+        for engine in required {
+            let ok = r.attempts.iter().any(|a| {
+                a.provider == *engine
+                    && a.outcome.starts_with("ok")
+                    && !a.outcome.starts_with("ok, 0 ")
+            });
+            if !ok {
+                broken.push(format!("{engine} ({query})"));
+            }
+        }
     }
-}
-
-#[test]
-fn supplementary_engines_rank_below_web_engines_at_equal_depth() {
-    let web = vec![hit("https://web.example/a", "a", "brave")];
-    let wiki = vec![hit("https://en.wikipedia.org/wiki/A", "a", "wikipedia")];
-    let merged = merge(vec![
-        (Engine::Wikipedia.weight(), wiki),
-        (Engine::Brave.weight(), web),
-    ]);
-    assert_eq!(merged[0].url, "https://web.example/a");
+    assert!(broken.is_empty(), "engines that did not answer: {broken:?}");
 }
 
 #[test]
@@ -582,4 +604,155 @@ fn the_result_cache_never_exceeds_its_cap() {
         store_page(format!("cap-test-{i}"), &page, Duration::from_secs(600));
     }
     assert!(RESULT_CACHE.lock().unwrap().len() <= CACHE_MAX_ENTRIES);
+}
+
+#[test]
+fn commons_results_lead_with_the_direct_image_url_and_carry_license_and_author() {
+    let body = json!({"query": {"pages": {
+        "2": {"index": 2, "title": "File:Second.jpg", "imageinfo": [{"mime": "image/jpeg", "url": "https://upload.example/2.jpg", "descriptionurl": "https://commons.example/File:Second.jpg", "width": 10, "height": 20, "extmetadata": {}}]},
+        "1": {"index": 1, "title": "File:Red Panda.jpg", "imageinfo": [{"mime": "image/jpeg", "url": "https://upload.example/1.jpg", "descriptionurl": "https://commons.example/File:Red_Panda.jpg", "width": 3900, "height": 2583,
+              "extmetadata": {"LicenseShortName": {"value": "CC0"}, "Artist": {"value": "<a href=\"x\">Jane Doe</a>"}, "ImageDescription": {"value": "A <b>red panda</b> in a tree"}}}]}
+    }}});
+    let r = Engine::CommonsImages.parse(&body, "").unwrap();
+    assert_eq!(r[0].title, "Red Panda.jpg");
+    assert_eq!(r[0].url, "https://commons.example/File:Red_Panda.jpg");
+    assert_eq!(r[0].snippet, "Image: https://upload.example/1.jpg | 3900x2583 | CC0 | Jane Doe. A red panda in a tree");
+    assert_eq!(r[1].title, "Second.jpg", "ordered by the API's search index");
+    assert!(Engine::CommonsImages.parse(&json!({"batchcomplete": ""}), "").unwrap().is_empty());
+}
+
+#[test]
+fn commons_skips_video_and_documents_and_non_web_urls() {
+    let page = |index: u64, title: &str, mime: &str, url: &str| {
+        json!({"index": index, "title": title, "imageinfo": [{"mime": mime, "url": url, "descriptionurl": "https://commons.example/x", "width": 1, "height": 1, "extmetadata": {}}]})
+    };
+    let body = json!({"query": {"pages": {
+        "1": page(1, "File:clip.webm", "video/webm", "https://upload.example/clip.webm"),
+        "2": page(2, "File:doc.pdf", "application/pdf", "https://upload.example/doc.pdf"),
+        "3": page(3, "File:evil.jpg", "image/jpeg", "javascript:alert(1)"),
+        "4": page(4, "File:ok.jpg", "image/jpeg", "https://upload.example/ok.jpg"),
+    }}});
+    let r = Engine::CommonsImages.parse(&body, "").unwrap();
+    assert_eq!(r.iter().map(|h| h.title.as_str()).collect::<Vec<_>>(), ["ok.jpg"]);
+}
+
+#[test]
+fn openverse_formats_licenses_and_falls_back_to_the_image_url() {
+    let body = json!({"results": [
+        {"title": "Red Panda", "url": "https://img.example/a.jpg", "foreign_landing_url": "https://flickr.example/a", "license": "by-nd", "license_version": "2.0", "creator": "Chester Zoo", "width": 1024, "height": 685},
+        {"url": "https://img.example/b.jpg"}
+    ]});
+    let r = Engine::Openverse.parse(&body, "").unwrap();
+    assert_eq!(r[0].snippet, "Image: https://img.example/a.jpg | 1024x685 | CC BY-ND 2.0 | Chester Zoo");
+    assert_eq!(r[1].url, "https://img.example/b.jpg");
+}
+
+#[test]
+fn openverse_labels_public_domain_licenses_without_a_cc_prefix_and_drops_non_web_urls() {
+    let body = json!({"results": [
+        {"title": "A", "url": "https://img.example/a.jpg", "license": "cc0", "license_version": "1.0"},
+        {"title": "B", "url": "data:image/png;base64,AAAA"},
+        {"title": "C", "url": "ftp://img.example/c.jpg"}
+    ]});
+    let r = Engine::Openverse.parse(&body, "").unwrap();
+    assert_eq!(r.len(), 1);
+    assert_eq!(r[0].snippet, "Image: https://img.example/a.jpg | CC0");
+}
+
+#[test]
+fn github_and_stack_overflow_results_summarise_stars_and_votes() {
+    let gh = json!({"items": [{"full_name": "tokio-rs/tokio", "html_url": "https://github.com/tokio-rs/tokio", "description": "A runtime", "language": "Rust", "stargazers_count": 33351, "pushed_at": "2026-10-04T14:24:49Z"}]});
+    let r = Engine::GitHub.parse(&gh, "").unwrap();
+    assert_eq!(r[0].snippet, "A runtime (Rust, 33351 stars)");
+    assert_eq!(r[0].published.as_deref(), Some("2026-10-04T14:24:49Z"));
+
+    let so = json!({"items": [{"title": "Can&#39;t nest runtimes", "link": "https://stackoverflow.com/q/1", "score": 32, "is_answered": true, "answer_count": 2, "tags": ["rust", "rust-tokio"], "creation_date": 1592920926}]});
+    let r = Engine::StackOverflow.parse(&so, "").unwrap();
+    assert_eq!(r[0].title, "Can't nest runtimes");
+    assert_eq!(r[0].snippet, "32 votes, 2 answers (answered); tags: rust, rust-tokio");
+    assert!(r[0].published.as_deref().unwrap().starts_with("2020-06-23"));
+}
+
+#[test]
+fn package_registries_name_the_registry_and_rank_below_the_main_code_engines() {
+    let crates = json!({"crates": [{"name": "tokio", "description": "An event-driven\n platform", "max_version": "1.53.2", "downloads": 1035898722u64, "updated_at": "2026-10-03T11:18:32Z"}]});
+    let r = Engine::Crates.parse(&crates, "").unwrap();
+    assert_eq!((r[0].title.as_str(), r[0].url.as_str()), ("tokio (crates.io)", "https://crates.io/crates/tokio"));
+    assert_eq!(r[0].snippet, "An event-driven platform (v1.53.2, 1035898722 downloads)");
+
+    let npm = json!({"objects": [{"package": {"name": "tokio", "description": "Scraping", "version": "0.1.2", "date": "2018-05-14T01:00:06Z", "links": {"npm": "https://www.npmjs.com/package/tokio"}}}]});
+    assert_eq!(Engine::Npm.parse(&npm, "").unwrap()[0].title, "tokio (npm)");
+    assert!(Engine::Crates.weight() < Engine::GitHub.weight() && Engine::Npm.weight() < Engine::StackOverflow.weight());
+}
+
+#[tokio::test]
+async fn code_category_queries_each_code_engine_without_site_operators() {
+    let server = native_server().await;
+    Mock::given(method("GET")).and(path("/search/repositories")).and(query_param("q", "tokio runtime"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({"items": [{"full_name": "tokio-rs/tokio", "html_url": "https://github.com/tokio-rs/tokio", "description": "rt", "stargazers_count": 1}]})))
+        .mount(&server).await;
+    Mock::given(method("GET")).and(path("/2.3/search/advanced")).and(query_param("site", "stackoverflow"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({"items": []})))
+        .mount(&server).await;
+    Mock::given(method("GET")).and(path("/api/v1/crates"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({"crates": []})))
+        .mount(&server).await;
+    Mock::given(method("GET")).and(path("/-/v1/search"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({"objects": []})))
+        .mount(&server).await;
+    let opts = SearchOptions { category: Some(Category::Code), include_domains: vec!["github.com".into()], ..SearchOptions::default() };
+    let r = run(&server, "tokio runtime", &opts).await.unwrap();
+    assert_eq!(r.results[0].url, "https://github.com/tokio-rs/tokio");
+    assert_eq!(r.attempts.len(), 4, "{:?}", r.attempts);
+    assert!(r.attempts.iter().all(|a| a.outcome.starts_with("ok")), "{:?}", r.attempts);
+}
+
+#[tokio::test]
+async fn code_engines_get_their_paging_and_freshness_parameters() {
+    let server = native_server().await;
+    Mock::given(wiremock::matchers::any())
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({"items": [], "crates": [], "objects": []})))
+        .mount(&server).await;
+    let opts = SearchOptions { category: Some(Category::Code), page: 3, max_results: 10, freshness: Some(Freshness::Week), ..SearchOptions::default() };
+    run(&server, "paging params", &opts).await.unwrap();
+    let urls: Vec<String> = server.received_requests().await.unwrap().iter().map(|r| r.url.to_string()).collect();
+    let find = |needle: &str| urls.iter().find(|u| u.contains(needle)).unwrap_or_else(|| panic!("no {needle} request in {urls:?}")).clone();
+    let gh = find("/search/repositories");
+    assert!(gh.contains("page=3") && gh.contains("per_page=10") && gh.contains("pushed%3A%3E"), "{gh}");
+    let so = find("/2.3/search/advanced");
+    assert!(so.contains("site=stackoverflow") && so.contains("page=3") && so.contains("fromdate="), "{so}");
+    assert!(find("/-/v1/search").contains("from=20"));
+    assert!(find("/api/v1/crates").contains("page=3"));
+}
+
+#[tokio::test]
+async fn a_github_quota_403_and_a_stack_exchange_throttle_400_are_rate_limits() {
+    let server = native_server().await;
+    Mock::given(method("GET")).and(path("/search/repositories"))
+        .respond_with(ResponseTemplate::new(403).insert_header("x-ratelimit-remaining", "0"))
+        .mount(&server).await;
+    Mock::given(method("GET")).and(path("/2.3/search/advanced"))
+        .respond_with(ResponseTemplate::new(400).set_body_json(json!({"error_id": 502, "error_name": "throttle_violation"})))
+        .mount(&server).await;
+    Mock::given(method("GET")).and(path("/api/v1/crates"))
+        .respond_with(ResponseTemplate::new(403))
+        .mount(&server).await;
+    Mock::given(method("GET")).and(path("/-/v1/search"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({"objects": []})))
+        .mount(&server).await;
+    let opts = SearchOptions { category: Some(Category::Code), ..SearchOptions::default() };
+    let r = run(&server, "rate limited engines", &opts).await.unwrap();
+    let outcome = |engine: &str| r.attempts.iter().find(|a| a.provider == engine).unwrap().outcome.clone();
+    assert!(outcome("github").contains("rate limited"), "{:?}", r.attempts);
+    assert!(outcome("stack overflow").contains("rate limited"), "{:?}", r.attempts);
+    assert!(outcome("crates.io").contains("access denied"), "a plain 403 stays an access error: {:?}", r.attempts);
+}
+
+#[test]
+fn the_new_categories_parse_and_brave_reports_them_unsupported() {
+    for (word, cat) in [("images", Category::Images), ("code", Category::Code)] {
+        let opts = SearchOptions::from_args(&json!({"category": word})).unwrap();
+        assert_eq!(opts.category, Some(cat));
+        assert_eq!(brave_unsupported(&opts), [format!("category={word} (Brave supports general and news)")]);
+    }
 }

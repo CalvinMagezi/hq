@@ -278,7 +278,7 @@ fn options_reject_bad_values() {
         json!({ "freshness": "hour" }),
         json!({ "language": "english" }),
         json!({ "country": "USA" }),
-        json!({ "category": "images" }),
+        json!({ "category": "videos" }),
         json!({ "page": 0 }),
         json!({ "include_domains": "docs.rs" }),
         json!({ "include_domains": ["not a domain"] }),

@@ -152,6 +152,12 @@ pub(super) fn native_unsupported(opts: &SearchOptions) -> Vec<String> {
     if opts.freshness.is_some() && opts.category == Some(Category::Science) {
         notes.push("freshness (arXiv ignores it; OpenAlex applies it)".to_string());
     }
+    if opts.freshness.is_some() && opts.category == Some(Category::Images) {
+        notes.push("freshness (image engines do not filter by date)".to_string());
+    }
+    if opts.freshness.is_some() && opts.category == Some(Category::Code) {
+        notes.push("freshness (GitHub and Stack Overflow apply it; crates.io and npm ignore it)".to_string());
+    }
     if opts.freshness.is_some() && opts.category == Some(Category::News) {
         notes.push("freshness (Bing News ignores it; Hacker News applies it)".to_string());
     }
@@ -224,8 +230,8 @@ pub fn web_search_parameters() -> Value {
             },
             "category": {
                 "type": "string",
-                "enum": ["general", "news", "science"],
-                "description": "Result category (Brave supports general and news)"
+                "enum": ["general", "news", "science", "images", "code"],
+                "description": "Result category. images lists freely licensed images with their direct URL; code searches GitHub, Stack Overflow and package registries. Brave supports general and news only."
             },
             "include_domains": {
                 "type": "array",
