@@ -15,7 +15,7 @@ file covers setup and the checks every pull request must pass. By participating 
 
 Requirements: Rust 1.89 or newer (edition 2024), a C toolchain and OpenSSL
 headers on Linux (`build-essential pkg-config libssl-dev`), and
-[bun](https://bun.sh) for the web UI. Ollama, SearxNG and Herdr are optional; web search works without them.
+[bun](https://bun.sh) for the web UI. Ollama, SearxNG and Herdr are optional; web search works without them (docs/WEB_SEARCH.md).
 
 ```bash
 git clone https://github.com/CalvinMagezi/hq.git

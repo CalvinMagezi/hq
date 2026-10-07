@@ -34,14 +34,14 @@ export const processModel: DiagramSpec = {
   caption:
     'Every role is a subcommand of the same binary. hq start runs the long-lived components, while an MCP client launches hq mcp-serve itself.',
   alt: [
-    'One binary, hq, about 40 MB, built from the hq-cli crate.',
+    'One binary, hq, about 58 MB, built from the hq-cli crate.',
     'Five roles come out of it: terminal chat (hq chat), the daemon, the chat relays for Discord and Telegram, the web server that carries REST, the chat socket, the MCP endpoint and the PWA, and the MCP stdio server (hq mcp-serve).',
     'All five read and write the same vault: markdown files plus one SQLite database.',
   ],
   width: 768,
   height: 330,
   nodes: [
-    { x: 254, y: 12, w: 260, h: 52, kind: 'accent', title: 'hq', sub: ['one Rust binary, about 40 MB'] },
+    { x: 254, y: 12, w: 260, h: 52, kind: 'accent', title: 'hq', sub: ['one Rust binary, about 58 MB'] },
     { x: 20, y: 110, w: 136, h: 76, title: 'Terminal chat', sub: ['hq chat'] },
     { x: 168, y: 110, w: 136, h: 76, title: 'Daemon', sub: ['hq start daemon'] },
     { x: 316, y: 110, w: 136, h: 76, title: 'Chat relays', sub: ['Discord, Telegram'] },
@@ -58,16 +58,17 @@ export const processModel: DiagramSpec = {
 export const crateMap: DiagramSpec = {
   id: 'dg-crates',
   title: 'Crate map',
-  summary: 'Fourteen crates in four bands: foundations, intelligence, services and the CLI.',
-  caption: 'The 14 crates of the Cargo workspace, grouped by role. This is a map of responsibilities, not a dependency graph.',
+  summary: 'Sixteen crates in five bands: foundations, intelligence, services, the agent runtime and the CLI.',
+  caption: 'The 16 crates of the Cargo workspace, grouped by role. This is a map of responsibilities, not a dependency graph.',
   alt: [
     'Foundations: hq-core (types, config, errors, token counters), hq-vault (notes, tasks, frontmatter), hq-db (SQLite, FTS5, embeddings) and hq-llm (providers and backend chains).',
     'Intelligence: hq-agent (session loop, sub-agents, governance, context engine), hq-memory (consolidator, forgetter), hq-tools (about 100 tools) and hq-convert (document conversion).',
     'Services: hq-mcp (the 2-tool gateway), hq-daemon, hq-relay (Discord and Telegram), hq-web (REST, WebSocket, PWA) and hq-update (the signed updater).',
+    'Agent runtime: hq-host (the built-in host for long-lived coding agents) and hq-sandbox (the process sandbox policy for one agent).',
     'Entry point: hq-cli, which builds the hq binary.',
   ],
   width: 768,
-  height: 410,
+  height: 510,
   nodes: [
     g(10, 10, 748, 90, 'Foundations'),
     { x: 30, y: 36, w: 168, h: 52, title: 'hq-core', sub: ['types, config, errors'] },
@@ -85,8 +86,11 @@ export const crateMap: DiagramSpec = {
     { x: 318, y: 236, w: 132, h: 52, title: 'hq-relay', sub: ['Discord, Telegram'] },
     { x: 462, y: 236, w: 132, h: 52, title: 'hq-web', sub: ['REST, WS, PWA'] },
     { x: 606, y: 236, w: 132, h: 52, title: 'hq-update', sub: ['signed updater'] },
-    g(10, 310, 748, 90, 'Entry point'),
-    { x: 30, y: 336, w: 708, h: 52, kind: 'accent', title: 'hq-cli', sub: ['builds the hq binary: clap commands, start, install, doctor, update'] },
+    g(10, 310, 748, 90, 'Agent runtime'),
+    { x: 30, y: 336, w: 348, h: 52, title: 'hq-host', sub: ['pty panes, control socket'] },
+    { x: 390, y: 336, w: 348, h: 52, title: 'hq-sandbox', sub: ['sandbox-exec and bwrap policy'] },
+    g(10, 410, 748, 90, 'Entry point'),
+    { x: 30, y: 436, w: 708, h: 52, kind: 'accent', title: 'hq-cli', sub: ['builds the hq binary: clap commands, start, install, doctor, update'] },
   ],
   edges: [],
 };
