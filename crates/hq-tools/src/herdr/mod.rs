@@ -11,6 +11,7 @@
 
 mod backend;
 mod native;
+pub mod pairing;
 mod sandbox;
 pub mod tools;
 mod transport;

@@ -247,8 +247,81 @@ pub(super) fn send_to(h: &dyn HostBackend, target: &str, text: &str, keys: &[Str
     }))
 }
 
+/// Pairs a machine with this HQ from the join code it printed.
+pub struct HostAddTool;
+
+#[async_trait]
+impl HqTool for HostAddTool {
+    fn name(&self) -> &str {
+        "host_add"
+    }
+    fn description(&self) -> &str {
+        "Add a machine as a host for coding agents. Give the join code that `hq host join` printed on that machine. This creates a key for it, records it in the config, and returns the one command (`hq host authorize ...`) to run on that machine so it accepts this HQ. Then call host_check."
+    }
+    fn parameters(&self) -> Value {
+        json!({
+            "type": "object",
+            "properties": {
+                "join": { "type": "string", "description": "The join code, starting with hqjoin1." },
+                "gateway_addr": { "type": "string", "description": "This HQ's tailnet address as the machine will see it. Found automatically when tailscale runs here." }
+            },
+            "required": ["join"]
+        })
+    }
+    fn category(&self) -> &str {
+        "harness"
+    }
+    async fn execute(&self, args: Value) -> Result<Value> {
+        let join = arg_str(&args, "join");
+        let gateway = Some(arg_str(&args, "gateway_addr")).filter(|g| !g.is_empty());
+        let added = blocking(move || super::pairing::add_host(&join, gateway.as_deref())).await??;
+        Ok(json!({
+            "host": added.name,
+            "ssh": added.ssh,
+            "config_changed": added.config_changed,
+            "run_on_the_machine": added.authorize_command,
+            "next": format!("Run that command on the machine, then call host_check with host '{}'.", added.name),
+        }))
+    }
+}
+
+/// Says whether a host answers, and what to do when it does not.
+pub struct HostCheckTool;
+
+#[async_trait]
+impl HqTool for HostCheckTool {
+    fn name(&self) -> &str {
+        "host_check"
+    }
+    fn description(&self) -> &str {
+        "Check that a host answers: reachable or not, its version, and the likely fix when it does not. Use after host_add and the authorize command."
+    }
+    fn parameters(&self) -> Value {
+        json!({
+            "type": "object",
+            "properties": { "host": { "type": "string", "description": "The host name from host_add or herdr_hosts" } },
+            "required": ["host"]
+        })
+    }
+    fn category(&self) -> &str {
+        "harness"
+    }
+    fn is_read_only(&self) -> bool {
+        true
+    }
+    async fn execute(&self, args: Value) -> Result<Value> {
+        let name = arg_str(&args, "host");
+        if name.is_empty() {
+            bail!("host is required");
+        }
+        blocking(move || super::pairing::check_host(&name)).await
+    }
+}
+
 pub fn create_herdr_tools(db: Arc<Database>) -> Vec<Box<dyn HqTool>> {
     vec![
+        Box::new(HostAddTool),
+        Box::new(HostCheckTool),
         Box::new(HerdrHostsTool),
         Box::new(HerdrAgentsTool { db }),
         Box::new(HerdrReadTool),

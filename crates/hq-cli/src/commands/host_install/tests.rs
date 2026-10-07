@@ -61,3 +61,14 @@ fn appending_is_idempotent_private_and_keeps_existing_lines() {
     let dir_mode = std::fs::metadata(file.parent().unwrap()).unwrap().permissions().mode();
     assert_eq!(dir_mode & 0o777, 0o700);
 }
+
+#[test]
+fn hostnames_become_valid_host_names() {
+    assert_eq!(default_host_name("immy-oac"), "immy-oac");
+    assert_eq!(default_host_name("Dev-MacBook-Pro.local"), "dev-macbook-pro-local");
+    assert_eq!(default_host_name("123box"), "host-123box");
+    assert_eq!(default_host_name("local"), "machine");
+    assert_eq!(default_host_name("native"), "machine");
+    assert_eq!(default_host_name("---"), "host-");
+    assert!(default_host_name(&"a".repeat(80)).len() <= 32);
+}
