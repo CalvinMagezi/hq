@@ -114,6 +114,7 @@ impl From<&str> for ProviderError {
 }
 
 /// One page as a backend returned it, before domain filtering.
+#[derive(Clone)]
 pub(super) struct Page {
     pub(super) results: Vec<SearchResult>,
     pub(super) next_page: Option<u32>,

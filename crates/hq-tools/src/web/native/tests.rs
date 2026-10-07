@@ -202,6 +202,10 @@ async fn native_server() -> MockServer {
         .unwrap()
         .retain(|key, _| !key.starts_with(&uri));
     super::google::forget_token(&uri);
+    INFLIGHT
+        .lock()
+        .unwrap()
+        .retain(|key, _| !key.ends_with(&uri));
     RESULT_CACHE
         .lock()
         .unwrap()
@@ -1527,20 +1531,391 @@ fn package_and_paper_urls_must_be_web_urls() {
 #[test]
 fn single_topic_engines_rank_below_the_general_ones_for_a_query_they_do_not_fit() {
     use super::engines::Engine::*;
-    for narrow in [Mdn, EuropePmc, AskUbuntu, SuperUser, Crates, Npm, Wikipedia, HackerNews] {
+    for narrow in [
+        Mdn, EuropePmc, AskUbuntu, SuperUser, Crates, Npm, Wikipedia, HackerNews,
+    ] {
         assert!(narrow.weight() < GitHub.weight(), "{narrow:?}");
     }
     // A repository ranked first beats a page of MDN or Europe PMC that is only a name match.
     let code = merge(vec![
-        (GitHub.weight(), vec![hit("https://github.com/o/r", "repo", "github")]),
-        (Mdn.weight(), vec![hit("https://developer.mozilla.org/x", "mdn", "mdn"), hit("https://developer.mozilla.org/y", "mdn", "mdn")]),
+        (
+            GitHub.weight(),
+            vec![hit("https://github.com/o/r", "repo", "github")],
+        ),
+        (
+            Mdn.weight(),
+            vec![
+                hit("https://developer.mozilla.org/x", "mdn", "mdn"),
+                hit("https://developer.mozilla.org/y", "mdn", "mdn"),
+            ],
+        ),
     ]);
     assert_eq!(code[0].url, "https://github.com/o/r");
     // Agreement still wins: a page found by Stack Overflow and MDN (1.0 x 0.4 x 2 x 1.5) beats
     // an unconfirmed first hit (1.0).
     let agreed = merge(vec![
-        (StackOverflow.weight(), vec![hit("https://a.example/", "a", "so"), hit("https://shared.example/", "s", "so")]),
-        (Mdn.weight(), vec![hit("https://shared.example/", "s", "mdn")]),
+        (
+            StackOverflow.weight(),
+            vec![
+                hit("https://a.example/", "a", "so"),
+                hit("https://shared.example/", "s", "so"),
+            ],
+        ),
+        (
+            Mdn.weight(),
+            vec![hit("https://shared.example/", "s", "mdn")],
+        ),
     ]);
     assert_eq!(agreed[0].url, "https://shared.example/");
+}
+
+#[test]
+fn stack_exchange_queries_relax_in_steps_without_repeats() {
+    use super::images_code::relaxations;
+    assert_eq!(
+        relaxations("tokio channel"),
+        ["tokio channel"],
+        "short queries stay as typed"
+    );
+    assert_eq!(
+        relaxations("how do I use rust tokio mpsc channel backpressure"),
+        [
+            "how do I use rust tokio mpsc channel backpressure",
+            "rust tokio mpsc channel backpressure",
+            "rust tokio channel backpressure"
+        ],
+        "stopwords, then the four longest terms; the three-term form is cut by the request cap"
+    );
+    let long = relaxations("rust tokio mpsc channel backpressure");
+    assert_eq!(
+        long,
+        [
+            "rust tokio mpsc channel backpressure",
+            "rust tokio channel backpressure",
+            "tokio channel backpressure"
+        ]
+    );
+}
+
+#[tokio::test]
+async fn a_stack_exchange_search_that_finds_nothing_retries_with_fewer_terms() {
+    let server = native_server().await;
+    Mock::given(method("GET"))
+        .and(path("/2.3/search/advanced"))
+        .and(query_param("site", "stackoverflow"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({"items": []})))
+        .mount(&server)
+        .await;
+    Mock::given(method("GET")).and(path("/2.3/search/advanced")).and(query_param("q", "rust tokio channel backpressure"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({"items": [{"title": "Bounded channels", "link": "https://stackoverflow.com/q/9", "score": 5, "is_answered": true, "answer_count": 1, "tags": ["rust"]}]})))
+        .with_priority(1).mount(&server).await;
+    for engine_path in [
+        "/search/repositories",
+        "/api/v1/crates",
+        "/-/v1/search",
+        "/api/v1/search",
+    ] {
+        Mock::given(method("GET"))
+            .and(path(engine_path))
+            .respond_with(
+                ResponseTemplate::new(200).set_body_json(
+                    json!({"items": [], "crates": [], "objects": [], "documents": []}),
+                ),
+            )
+            .mount(&server)
+            .await;
+    }
+    let opts = SearchOptions {
+        category: Some(Category::Code),
+        ..SearchOptions::default()
+    };
+    let r = run(&server, "rust tokio mpsc channel backpressure", &opts)
+        .await
+        .unwrap();
+    assert_eq!(r.results[0].url, "https://stackoverflow.com/q/9");
+    let so_queries: Vec<String> = server
+        .received_requests()
+        .await
+        .unwrap()
+        .iter()
+        .filter(|q| {
+            q.url.path() == "/2.3/search/advanced"
+                && q.url
+                    .query()
+                    .unwrap_or_default()
+                    .contains("site=stackoverflow")
+        })
+        .filter_map(|q| {
+            q.url
+                .query_pairs()
+                .find(|(k, _)| k == "q")
+                .map(|(_, v)| v.into_owned())
+        })
+        .collect();
+    assert_eq!(so_queries.len(), 2, "{so_queries:?}");
+    assert_eq!(so_queries[1], "rust tokio channel backpressure");
+}
+
+#[test]
+fn queries_that_differ_only_in_case_and_spacing_share_a_cache_entry_but_real_option_changes_do_not()
+{
+    let base = SearchOptions::default();
+    let key = |q: &str, o: &SearchOptions| cache_key(q, o, None);
+    assert_eq!(
+        key("  Tokio   RUNTIME ", &base),
+        key("tokio runtime", &base)
+    );
+    let news = SearchOptions {
+        category: Some(Category::News),
+        ..SearchOptions::default()
+    };
+    let page2 = SearchOptions {
+        page: 2,
+        ..SearchOptions::default()
+    };
+    assert_ne!(key("tokio", &base), key("tokio", &news));
+    assert_ne!(key("tokio", &base), key("tokio", &page2));
+    let a = SearchOptions {
+        include_domains: vec!["b.com".into(), "a.com".into()],
+        ..SearchOptions::default()
+    };
+    let b = SearchOptions {
+        include_domains: vec!["a.com".into(), "b.com".into()],
+        ..SearchOptions::default()
+    };
+    assert_eq!(
+        key("tokio", &a),
+        key("tokio", &b),
+        "domain order does not change the search"
+    );
+    assert_ne!(
+        cache_key("tokio", &base, Some("http://one")),
+        cache_key("tokio", &base, Some("http://two"))
+    );
+}
+
+async fn mount_everything_empty(server: &MockServer) {
+    mount_wikipedia_missing(server).await;
+    Mock::given(method("GET"))
+        .and(path("/cse/cse.js"))
+        .respond_with(ResponseTemplate::new(200).set_body_string(CSE_SCRIPT))
+        .mount(server)
+        .await;
+    Mock::given(method("GET"))
+        .and(path("/cse/element/v1"))
+        .respond_with(ResponseTemplate::new(200).set_body_string(r#"_({"results":[]});"#))
+        .mount(server)
+        .await;
+    Mock::given(method("POST"))
+        .and(path("/html/"))
+        .respond_with(
+            ResponseTemplate::new(200).set_body_string("<html><body>nothing</body></html>"),
+        )
+        .mount(server)
+        .await;
+    Mock::given(method("GET"))
+        .and(path("/search"))
+        .respond_with(
+            ResponseTemplate::new(200).set_body_string("<html><body>nothing</body></html>"),
+        )
+        .mount(server)
+        .await;
+}
+
+#[tokio::test]
+async fn a_healthy_pool_that_finds_nothing_is_remembered_briefly() {
+    let server = native_server().await;
+    mount_everything_empty(&server).await;
+    let first = run(&server, "zzqx nonexistent query", &SearchOptions::default())
+        .await
+        .unwrap();
+    assert!(first.results.is_empty());
+    let before = server.received_requests().await.unwrap().len();
+    let second = run(
+        &server,
+        "ZZQX   nonexistent query",
+        &SearchOptions::default(),
+    )
+    .await
+    .unwrap();
+    assert!(second.results.is_empty());
+    assert_eq!(
+        server.received_requests().await.unwrap().len(),
+        before,
+        "the repeat hit no engine"
+    );
+    assert!(
+        second.attempts[0].outcome.contains("cached"),
+        "{:?}",
+        second.attempts
+    );
+}
+
+#[tokio::test]
+async fn identical_concurrent_searches_share_one_run_of_the_pool() {
+    let server = native_server().await;
+    mount_general(&server, 200).await;
+    // A slow Google makes the three searches overlap.
+    Mock::given(method("GET"))
+        .and(path("/cse/element/v1"))
+        .respond_with(
+            ResponseTemplate::new(200)
+                .set_body_string(GOOGLE_RESULTS)
+                .set_delay(Duration::from_millis(300)),
+        )
+        .with_priority(1)
+        .mount(&server)
+        .await;
+    let opts = SearchOptions::default();
+    let (a, b, c) = tokio::join!(
+        run(&server, "shared query", &opts),
+        run(&server, "Shared   Query", &opts),
+        run(&server, "shared query", &opts),
+    );
+    let (a, b, c) = (a.unwrap(), b.unwrap(), c.unwrap());
+    let reqs = server.received_requests().await.unwrap();
+    assert_eq!(
+        reqs.iter()
+            .filter(|r| r.url.path() == "/cse/element/v1")
+            .count(),
+        1
+    );
+    assert_eq!(reqs.iter().filter(|r| r.url.path() == "/html/").count(), 1);
+    let urls = |r: &WebSearchResults| r.results.iter().map(|h| h.url.clone()).collect::<Vec<_>>();
+    assert!(!urls(&a).is_empty() && urls(&a) == urls(&b) && urls(&b) == urls(&c));
+}
+
+#[tokio::test]
+async fn a_search_whose_caller_gave_up_still_warms_the_cache() {
+    let server = native_server().await;
+    mount_general(&server, 200).await;
+    Mock::given(method("GET"))
+        .and(path("/cse/element/v1"))
+        .respond_with(
+            ResponseTemplate::new(200)
+                .set_body_string(GOOGLE_RESULTS)
+                .set_delay(Duration::from_millis(300)),
+        )
+        .with_priority(1)
+        .mount(&server)
+        .await;
+    let opts = SearchOptions::default();
+    let gave_up = tokio::time::timeout(
+        Duration::from_millis(50),
+        run(&server, "abandoned query", &opts),
+    )
+    .await;
+    assert!(
+        gave_up.is_err(),
+        "the caller was cancelled before the engines answered"
+    );
+    let key = cache_key("abandoned query", &opts, Some(&server.uri()));
+    for _ in 0..60 {
+        if cached_page(&key).is_some() {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    }
+    assert!(
+        cached_page(&key).is_some(),
+        "the abandoned search finished and cached its answer"
+    );
+    let before = server.received_requests().await.unwrap().len();
+    let retry = run(&server, "abandoned query", &opts).await.unwrap();
+    assert!(!retry.results.is_empty());
+    assert_eq!(
+        server.received_requests().await.unwrap().len(),
+        before,
+        "the retry was served from the cache"
+    );
+}
+
+async fn mount_code_engines_except_stack_exchange(server: &MockServer) {
+    for engine_path in [
+        "/search/repositories",
+        "/api/v1/crates",
+        "/-/v1/search",
+        "/api/v1/search",
+    ] {
+        Mock::given(method("GET"))
+            .and(path(engine_path))
+            .respond_with(
+                ResponseTemplate::new(200).set_body_json(
+                    json!({"items": [], "crates": [], "objects": [], "documents": []}),
+                ),
+            )
+            .mount(server)
+            .await;
+    }
+}
+
+fn stack_exchange_requests(reqs: &[wiremock::Request], site: &str) -> usize {
+    reqs.iter()
+        .filter(|r| r.url.path() == "/2.3/search/advanced")
+        .filter(|r| r.url.query_pairs().any(|(k, v)| k == "site" && v == site))
+        .count()
+}
+
+#[tokio::test]
+async fn only_stack_overflow_retries_with_fewer_terms_and_only_on_the_first_page() {
+    for (page, expected) in [(1u32, (3usize, 1usize, 1usize)), (2, (1, 1, 1))] {
+        let server = native_server().await;
+        mount_code_engines_except_stack_exchange(&server).await;
+        Mock::given(method("GET"))
+            .and(path("/2.3/search/advanced"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({"items": []})))
+            .mount(&server)
+            .await;
+        let opts = SearchOptions {
+            category: Some(Category::Code),
+            page,
+            ..SearchOptions::default()
+        };
+        let _ = run(&server, "rust tokio mpsc channel backpressure", &opts).await;
+        let reqs = server.received_requests().await.unwrap();
+        let got = (
+            stack_exchange_requests(&reqs, "stackoverflow"),
+            stack_exchange_requests(&reqs, "askubuntu"),
+            stack_exchange_requests(&reqs, "superuser"),
+        );
+        assert_eq!(got, expected, "page {page}");
+    }
+}
+
+#[tokio::test]
+async fn a_failing_later_form_keeps_the_earlier_empty_answer_instead_of_failing_the_engine() {
+    let server = native_server().await;
+    mount_code_engines_except_stack_exchange(&server).await;
+    Mock::given(method("GET"))
+        .and(path("/2.3/search/advanced"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({"items": []})))
+        .up_to_n_times(1)
+        .with_priority(1)
+        .mount(&server)
+        .await;
+    Mock::given(method("GET"))
+        .and(path("/2.3/search/advanced"))
+        .respond_with(
+            ResponseTemplate::new(400).set_body_json(json!({"error_name": "throttle_violation"})),
+        )
+        .with_priority(2)
+        .mount(&server)
+        .await;
+    let opts = SearchOptions {
+        category: Some(Category::Code),
+        ..SearchOptions::default()
+    };
+    let r = run(&server, "rust tokio mpsc channel backpressure", &opts).await;
+    let text = format!("{r:?}");
+    assert!(!text.contains("stack overflow: rate limited"), "{text}");
+    let attempts = match r {
+        Ok(r) => r.attempts,
+        Err(e) => panic!("{e}"),
+    };
+    assert!(
+        attempts
+            .iter()
+            .any(|a| a.provider == "stack overflow" && a.outcome.starts_with("ok")),
+        "{attempts:?}"
+    );
 }
