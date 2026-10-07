@@ -70,6 +70,7 @@ mod fetch;
 mod fetch_tests;
 mod health;
 mod native;
+mod peer;
 mod readable;
 mod sanitize;
 mod ssrf;
@@ -109,6 +110,7 @@ const BRAVE_MAX_PAGE: u32 = 10;
 const MIN_PDF_TEXT_CHARS: usize = 50;
 
 pub use chain::{web_search, web_search_parameters};
+pub use peer::set_search_peer;
 pub use client::{check_public_url, guarded_client};
 pub use fetch::{FetchedPage, html_to_text, web_fetch};
 pub use tools::{

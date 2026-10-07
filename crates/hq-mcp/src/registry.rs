@@ -85,6 +85,7 @@ pub fn create_default_registry(
     let (searxng_url, brave_api_key, native) = config
         .map(|c| (c.searxng_url.clone(), c.brave_api_key.clone(), c.web_search_native))
         .unwrap_or((None, None, true));
+    web::set_search_peer(config.and_then(|c| c.web_search_peer_server()).cloned());
     tools.push(Box::new(web::WebSearchHqTool::new(
         searxng_url,
         brave_api_key,

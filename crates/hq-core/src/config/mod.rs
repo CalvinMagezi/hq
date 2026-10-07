@@ -109,6 +109,12 @@ pub struct HqConfig {
     #[serde(default = "default_true")]
     pub web_search_native: bool,
 
+    /// Name of a `remote_mcp` entry (another HQ) whose `web_search` answers when
+    /// this machine's own engines are blocked, for example a server on a
+    /// datacenter address using a peer on a home connection. Unset by default.
+    #[serde(default)]
+    pub web_search_peer: Option<String>,
+
     /// Brave Search API key — paid `web_search` fallback used when SearxNG
     /// is unset or unreachable. https://api.search.brave.com
     pub brave_api_key: Option<String>,
@@ -345,6 +351,7 @@ impl Default for HqConfig {
             kimi_code_api_key: None,
             searxng_url: None,
             web_search_native: true,
+            web_search_peer: None,
             brave_api_key: None,
             default_model: default_model(),
             local_only: false,
@@ -602,6 +609,12 @@ impl HqConfig {
         dirs::home_dir()
             .unwrap_or_else(|| PathBuf::from("."))
             .join(".hq")
+    }
+
+    /// The `remote_mcp` entry `web_search_peer` names, if both exist.
+    pub fn web_search_peer_server(&self) -> Option<&RemoteMcpServer> {
+        let name = self.web_search_peer.as_deref()?;
+        self.remote_mcp.iter().find(|s| s.name == name)
     }
 
     /// Installed binary path. Checks `HQ_BIN_PATH` first, falls back to the
