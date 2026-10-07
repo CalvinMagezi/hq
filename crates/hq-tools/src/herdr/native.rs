@@ -1,12 +1,12 @@
 use super::{
-    AgentInfo, AgentStatus, AwaitingAgent, HerdrError, Host, HostBackend, INVALID_KEYS_CODE, LaunchRequest,
-    Launched, PromptOutcome, shell_line, shell_quote, validate_keys,
+    AgentInfo, AgentStatus, AwaitingAgent, HerdrError, Host, HostBackend, INVALID_KEYS_CODE,
+    LaunchRequest, Launched, PromptOutcome, shell_line, shell_quote, validate_keys,
 };
 use hq_host::{Client, ClientError};
 use serde_json::{Value, json};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 const HOST_NAME: &str = "native";
 /// How long a prompt may go without the agent reacting before Enter is retried.
@@ -15,6 +15,9 @@ const SUBMIT_CONFIRM: Duration = Duration::from_secs(10);
 const STABLE_MS: u64 = 700;
 const DEFAULT_COMMAND_TIMEOUT: Duration = Duration::from_secs(15);
 const DEFAULT_LAUNCH_BOUND: Duration = Duration::from_secs(60);
+/// Silence after the first output that counts as "finished drawing".
+const DRAWN_QUIET_MS: u64 = 600;
+const DRAWN_POLL: Duration = Duration::from_millis(100);
 const SETTLED: [AgentStatus; 2] = [AgentStatus::Idle, AgentStatus::Blocked];
 const REACTED: [AgentStatus; 2] = [AgentStatus::Working, AgentStatus::Blocked];
 
@@ -97,11 +100,33 @@ impl NativeBackend {
         }
         let command = format!("{} host report", shell_quote(&hq_binary()));
         match hq_host::write_claude_settings(&self.dir, name, &command) {
-            Ok(path) => vec!["--settings".to_string(), path.to_string_lossy().into_owned()],
+            Ok(path) => vec![
+                "--settings".to_string(),
+                path.to_string_lossy().into_owned(),
+            ],
             Err(e) => {
                 tracing::warn!(agent = %name, error = %e, "could not write hook settings");
                 Vec::new()
             }
+        }
+    }
+
+    /// Whether the agent has drawn something and stopped for a moment. An empty
+    /// screen reads as idle, so state alone cannot tell a CLI that is still
+    /// starting from one that is ready (or waiting on a dialog).
+    fn drawn(&self, name: &str, within: Duration) -> Result<bool, HerdrError> {
+        let deadline = Instant::now() + within;
+        loop {
+            let info = self.call("agent.get", json!({ "name": name }))?;
+            let seen = info.get("bytes_seen").and_then(Value::as_u64).unwrap_or(0);
+            let quiet = info.get("quiet_ms").and_then(Value::as_u64).unwrap_or(0);
+            if seen > 0 && quiet >= DRAWN_QUIET_MS {
+                return Ok(true);
+            }
+            if Instant::now() >= deadline {
+                return Ok(false);
+            }
+            std::thread::sleep(DRAWN_POLL);
         }
     }
 
@@ -176,7 +201,10 @@ fn parse_awaiting(v: &Value) -> Option<AwaitingAgent> {
     let keys = v.get("env_keys")?.as_array()?;
     Some(AwaitingAgent {
         name: v.get("name")?.as_str()?.to_string(),
-        env_keys: keys.iter().filter_map(|k| k.as_str().map(str::to_string)).collect(),
+        env_keys: keys
+            .iter()
+            .filter_map(|k| k.as_str().map(str::to_string))
+            .collect(),
     })
 }
 
@@ -260,9 +288,15 @@ impl HostBackend for NativeBackend {
         let spawned = self.call("agent.spawn", params)?;
         // A kind without a rule file has no state to wait for.
         let detected = spawned.get("state").is_some_and(|s| !s.is_null());
+        let began = Instant::now();
         let ready = match detected {
             false => true,
-            true => match self.wait_for(&req.name, &SETTLED, req.start_timeout) {
+            true if !self.drawn(&req.name, req.start_timeout)? => false,
+            true => match self.wait_for(
+                &req.name,
+                &SETTLED,
+                req.start_timeout.saturating_sub(began.elapsed()),
+            ) {
                 Ok(Some(info)) => info.status == AgentStatus::Idle,
                 Ok(None) => false,
                 Err(e) => {
@@ -392,8 +426,10 @@ impl HostBackend for NativeBackend {
     }
 
     fn resume_awaiting(&self, name: &str, env: Vec<(String, String)>) -> Result<(), HerdrError> {
-        let env: serde_json::Map<String, Value> =
-            env.into_iter().map(|(k, v)| (k, Value::String(v))).collect();
+        let env: serde_json::Map<String, Value> = env
+            .into_iter()
+            .map(|(k, v)| (k, Value::String(v)))
+            .collect();
         self.call("agent.resume", json!({ "name": name, "env": env }))
             .map(|_| ())
     }

@@ -196,6 +196,12 @@ variables, which switch transcript saving off) never reach an agent.
 
 ## Using it from HQ
 
+`HQ_HOST_DIR` overrides where HQ looks for the host (default `~/.hq/run/host`),
+which is also how a second, isolated host is run for testing. A launch is
+reported ready only after the agent has drawn its first screen and gone quiet;
+an agent that is still starting, or sits at a dialog such as Claude's folder
+trust prompt, is reported as `blocked` with its screen and no prompt is typed.
+
 A Claude Code session resumes into its own conversation: once its hooks report
 the conversation id, HQ stores it as the session's resume token and gives the host
 a restart command that uses `--resume <id>`. Until the id is known, resume falls

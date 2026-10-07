@@ -52,7 +52,7 @@ fn cat(name: &str, kind: &str) -> LaunchRequest {
         env: vec![("HQ_TEST".into(), "1".into())],
         args: vec![],
         // A function ignores the extra flags (such as --settings) a launch adds.
-        command: Some("f() { cat; }; f".into()),
+        command: Some("f() { echo started; cat; }; f".into()),
         resume_args: None,
         start_timeout: WAIT,
     }
@@ -175,4 +175,22 @@ fn a_claude_launch_gets_private_hook_settings_and_other_kinds_do_not() {
         "{text}"
     );
     assert!(!hooks.join("hs-plain.json").exists());
+}
+
+#[test]
+fn launch_is_not_ready_before_the_agent_has_drawn_its_screen() {
+    let host = Running::start();
+    let b = host.backend();
+    let mut req = cat("hs-slow", "claude");
+    // Draws nothing for a while, as a CLI does while it starts up.
+    req.command = Some("f() { sleep 2; echo drawn-screen; cat; }; f".into());
+    let began = Instant::now();
+    let launched = b.launch(&req).unwrap();
+    let text = b.read("hs-slow", 20).unwrap();
+    assert!(launched.ready);
+    assert!(
+        began.elapsed() >= Duration::from_millis(1900) && text.contains("drawn-screen"),
+        "returned after {:?} with screen {text:?}",
+        began.elapsed()
+    );
 }

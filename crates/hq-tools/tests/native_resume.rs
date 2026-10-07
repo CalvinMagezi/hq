@@ -129,7 +129,7 @@ fn a_reported_conversation_id_becomes_the_hosts_restart_command() {
             label: "t".into(),
             env: vec![],
             args: vec![],
-            command: Some("f() { cat; }; f".into()),
+            command: Some("f() { echo started; cat; }; f".into()),
             resume_args: Some(vec!["-c".into()]),
             start_timeout: WAIT,
         })
