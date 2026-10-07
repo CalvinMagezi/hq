@@ -24,8 +24,114 @@ pub const MAX_MESSAGE_CHARS: usize = 8000;
 pub const MAX_MESSAGES_PER_WINDOW: i64 = 60;
 pub const RATE_WINDOW_MINUTES: i64 = 60;
 
-pub fn create_a2a_tools(db: Arc<Database>) -> Vec<Box<dyn HqTool>> {
-    vec![Box::new(AgentMessageSendTool { db })]
+/// How deep a chain of delegated sessions may go (a person's session is 0).
+pub const MAX_SPAWN_DEPTH: i64 = 2;
+/// Children one session may have running at once.
+pub const MAX_LIVE_CHILDREN: usize = 3;
+/// Sessions one session may start inside the rate window.
+pub const MAX_CHILDREN_PER_WINDOW: i64 = 10;
+/// The coding agent a delegation uses when the delegator names none.
+const DEFAULT_DELEGATE_HARNESS: &str = "claude-code";
+/// The most output quoted to a parent when a child reports in.
+const REPORT_TAIL_CHARS: usize = 1500;
+
+pub fn create_a2a_tools(vault_path: std::path::PathBuf, db: Arc<Database>) -> Vec<Box<dyn HqTool>> {
+    vec![
+        Box::new(AgentMessageSendTool { db: db.clone() }),
+        Box::new(AgentDelegateTool { vault_path, db }),
+    ]
+}
+
+/// What a session needs to start a child: the parent row and the task it works on.
+#[derive(Debug)]
+pub struct DelegateSlot {
+    pub parent: HarnessSessionRow,
+    pub task_id: String,
+    /// The new child's depth.
+    pub depth: i64,
+}
+
+/// Checks that `caller` may start another session: it is running, it works on a
+/// task to attach the work to, the chain is not too deep, it does not already have
+/// too many children running, and it is inside its hourly limit.
+pub fn authorize_delegate(db: &Database, caller: &str) -> Result<DelegateSlot> {
+    let Some(parent) = running(db, caller)? else {
+        bail!("the delegating session is not running");
+    };
+    let Some(task_id) = parent.mission_id.clone() else {
+        bail!("delegate from a session that works on a task: the new work is filed under it");
+    };
+    let depth = parent.spawn_depth + 1;
+    if depth > MAX_SPAWN_DEPTH {
+        bail!("delegation is at most {MAX_SPAWN_DEPTH} levels deep, and this session is already at the limit");
+    }
+    let id = parent.id.clone();
+    let (live, recent) = db.with_conn(move |c| {
+        Ok((
+            registry::running_children(c, &id)?.len(),
+            registry::children_started_since(c, &id, RATE_WINDOW_MINUTES)?,
+        ))
+    })?;
+    if live >= MAX_LIVE_CHILDREN {
+        bail!("this session already has {live} running children (at most {MAX_LIVE_CHILDREN}); wait for one to finish");
+    }
+    if recent >= MAX_CHILDREN_PER_WINDOW {
+        bail!("rate limit: at most {MAX_CHILDREN_PER_WINDOW} delegated sessions per {RATE_WINDOW_MINUTES} minutes");
+    }
+    Ok(DelegateSlot { parent, task_id, depth })
+}
+
+fn tail_of(text: &str) -> String {
+    let chars: Vec<char> = text.trim().chars().collect();
+    chars[chars.len().saturating_sub(REPORT_TAIL_CHARS)..].iter().collect()
+}
+
+/// What an agent last said, taken from its screen: the text after its last reply
+/// marker (`⏺`), up to the status line or prompt box that follows. None for a
+/// screen without a marker, in which case the caller quotes the tail instead.
+pub fn last_reply(screen: &str) -> Option<String> {
+    let lines: Vec<&str> = screen.lines().collect();
+    let start = lines.iter().rposition(|l| l.trim_start().starts_with('⏺'))?;
+    let mut reply: Vec<String> = Vec::new();
+    for (i, line) in lines[start..].iter().enumerate() {
+        let text = line.trim();
+        let text = if i == 0 { text.trim_start_matches('⏺').trim() } else { text };
+        let chrome = ['✻', '─', '❯', '⏵'].iter().any(|c| text.starts_with(*c));
+        if chrome {
+            break;
+        }
+        if !text.is_empty() {
+            reply.push(text.to_string());
+        }
+    }
+    let joined = reply.join("\n");
+    (!joined.is_empty()).then_some(joined)
+}
+
+/// Tells a session's parent that it finished or exited, with the tail of its
+/// output, as a message on the child's task thread. Nothing for a session that
+/// has no parent. The supervisor delivers it when the parent is idle.
+pub fn report_to_parent(db: &Database, child: &HarnessSessionRow, event: &str, output: &str) -> Result<Option<i64>> {
+    let Some(parent) = child.parent_session_id.clone() else {
+        return Ok(None);
+    };
+    let Some(task) = child.mission_id.clone() else {
+        return Ok(None);
+    };
+    let body = match (last_reply(output), tail_of(output)) {
+        (Some(reply), _) => format!(
+            "Delegated session {} {event}. Its final reply:\n{}",
+            child.id,
+            tail_of(&reply)
+        ),
+        (None, tail) if !tail.is_empty() => {
+            format!("Delegated session {} {event}. Its last output:\n{tail}", child.id)
+        }
+        _ => format!("Delegated session {} {event}.", child.id),
+    };
+    let from = child.id.clone();
+    let message = db.with_conn(move |c| t::add_message(c, &task, &from, &parent, &body, None))?;
+    Ok(Some(message.id))
 }
 
 fn running(db: &Database, id: &str) -> Result<Option<HarnessSessionRow>> {
@@ -60,17 +166,12 @@ pub fn authorize(
     let Some(to_row) = running(db, to)? else {
         bail!("session {to} is not running, so it cannot receive a message");
     };
-    let (Some(a), Some(b)) = (&from_row.mission_id, &to_row.mission_id) else {
-        bail!("messages go between sessions working on the same task, and one of these has no task");
-    };
-    if a != b {
-        bail!("session {to} works on a different task, so you cannot message it");
-    }
+    let thread = thread_between(&from_row, &to_row)?;
     if let Some(hint) = task_hint.filter(|h| !h.is_empty()) {
         let hint = hint.to_string();
         let found = db.with_conn(move |c| t::get_task(c, &hint))?;
-        if found.map(|task| task.id).as_deref() != Some(a.as_str()) {
-            bail!("that is not the task these sessions share");
+        if found.map(|task| task.id).as_deref() != Some(thread.as_str()) {
+            bail!("that is not the task thread these sessions share");
         }
     }
     let sent = {
@@ -80,7 +181,34 @@ pub fn authorize(
     if sent >= MAX_MESSAGES_PER_WINDOW {
         bail!("rate limit: at most {MAX_MESSAGES_PER_WINDOW} messages per {RATE_WINDOW_MINUTES} minutes");
     }
-    Ok(a.clone())
+    Ok(thread)
+}
+
+/// The task thread a message between two sessions goes on: the task they both
+/// work on, or, for a parent and the session it started, the child's task.
+fn thread_between(from: &HarnessSessionRow, to: &HarnessSessionRow) -> Result<String> {
+    if let (Some(a), Some(b)) = (&from.mission_id, &to.mission_id)
+        && a == b
+    {
+        return Ok(a.clone());
+    }
+    let child = if to.parent_session_id.as_deref() == Some(from.id.as_str()) {
+        Some(to)
+    } else if from.parent_session_id.as_deref() == Some(to.id.as_str()) {
+        Some(from)
+    } else {
+        None
+    };
+    match child {
+        Some(child) => child
+            .mission_id
+            .clone()
+            .ok_or_else(|| anyhow::anyhow!("the child session has no task to hold the message")),
+        None if from.mission_id.is_none() || to.mission_id.is_none() => bail!(
+            "messages go between sessions working on the same task, or a parent and its child, and one of these has no task"
+        ),
+        None => bail!("session {} works on a different task, so you cannot message it", to.id),
+    }
 }
 
 pub struct AgentMessageSendTool {
@@ -146,6 +274,134 @@ impl HqTool for AgentMessageSendTool {
             },
         }))
     }
+}
+
+pub struct AgentDelegateTool {
+    vault_path: std::path::PathBuf,
+    db: Arc<Database>,
+}
+
+#[async_trait]
+impl HqTool for AgentDelegateTool {
+    fn name(&self) -> &str {
+        "agent_delegate"
+    }
+    fn description(&self) -> &str {
+        "Hand a piece of your task to a new agent session. HQ files a sub-task under your task, starts a session on it in your directory, and tells it who delegated. The result comes back to you as a message when it finishes; you can also message it with agent_message_send. Limited depth, running children and rate. Only a launched agent session can use this."
+    }
+    fn parameters(&self) -> Value {
+        json!({
+            "type": "object",
+            "properties": {
+                "title": { "type": "string", "description": "What the sub-task is, one line" },
+                "description": { "type": "string", "description": "Everything the worker needs: what to do and what done looks like" },
+                "harness": { "type": "string", "description": "Which coding agent (default: claude-code)" }
+            },
+            "required": ["title", "description"]
+        })
+    }
+    fn category(&self) -> &str {
+        "agent-comm"
+    }
+    async fn execute(&self, args: Value) -> Result<Value> {
+        let Some(caller) = caller_session(&args) else {
+            bail!("agent_delegate is for launched agent sessions: connect with the session's own token");
+        };
+        let (title, description) = (arg_str(&args, "title"), arg_str(&args, "description"));
+        if title.trim().is_empty() || description.trim().is_empty() {
+            bail!("a delegation needs a title and a description");
+        }
+        // One delegation at a time, so two calls cannot both pass the limits
+        // before either child exists.
+        let _one_at_a_time = DELEGATION_LOCK.lock().await;
+        let slot = authorize_delegate(&self.db, caller)?;
+        let harness = pick_harness(&arg_str(&args, "harness"), &slot.parent.harness)?;
+        crate::harness_session::resolve(&harness)?;
+        let sub = file_subtask(&self.db, &slot, caller, &title, &description)?;
+        let prompt = delegation_prompt(&slot.parent.id, &sub.display_id, &title, &description);
+        let spawned = crate::harness_session::spawn_with(
+            &self.vault_path,
+            &self.db,
+            crate::harness_session::SpawnRequest {
+                host: Some(&slot.parent.host),
+                harness: &harness,
+                prompt: Some(&prompt),
+                cwd: std::path::Path::new(&slot.parent.cwd),
+                label: &format!("delegate: {title}"),
+                mission_id: Some(&sub.id),
+                watch: None,
+                goal: crate::harness_session::GoalText::default(),
+            },
+        )
+        .await?;
+        let child = spawned
+            .get("session_id")
+            .and_then(Value::as_str)
+            .ok_or_else(|| anyhow::anyhow!("the new session reported no id"))?
+            .to_string();
+        let (id, parent, depth) = (child.clone(), slot.parent.id.clone(), slot.depth);
+        self.db.with_conn(move |c| registry::set_parent(c, &id, &parent, depth))?;
+        let (task, note) = (slot.task_id.clone(), format!("Delegated {} to session {child}: {title}", sub.display_id));
+        let author = caller.to_string();
+        self.db.with_conn(move |c| t::add_comment(c, &task, &author, &note, None))?;
+        Ok(json!({
+            "task_id": sub.display_id,
+            "session_id": child,
+            "note": "the worker was told who delegated; its result comes back to you as a message when it finishes",
+        }))
+    }
+}
+
+static DELEGATION_LOCK: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
+
+/// Which agent a delegated session runs as: the default, or the delegator's own
+/// kind. Never a configured account profile the delegator is not running as, which
+/// would spend another account's credit, and not another agent kind until those
+/// are wired for delegation.
+fn pick_harness(requested: &str, parent: &str) -> Result<String> {
+    let want = if requested.is_empty() { DEFAULT_DELEGATE_HARNESS } else { requested };
+    if want == DEFAULT_DELEGATE_HARNESS || want == parent {
+        return Ok(want.to_string());
+    }
+    bail!("a delegated session runs as {DEFAULT_DELEGATE_HARNESS} or as the delegator's own agent ({parent}), not {want}")
+}
+
+/// The sub-task that holds the delegated work, filed under the delegator's task
+/// (or under that task's own parent, since sub-tasks go one level deep).
+fn file_subtask(
+    db: &Database,
+    slot: &DelegateSlot,
+    caller: &str,
+    title: &str,
+    description: &str,
+) -> Result<t::Task> {
+    let (task_id, caller, title, description) =
+        (slot.task_id.clone(), caller.to_string(), title.to_string(), description.to_string());
+    db.with_conn(move |c| {
+        let Some(task) = t::get_task(c, &task_id)? else {
+            bail!("the delegator's task no longer exists");
+        };
+        let parent = task.parent_task_id.clone().unwrap_or_else(|| task.id.clone());
+        t::create_task(
+            c,
+            &crate::util::generate_id("tk"),
+            &task.initiative_id,
+            &t::NewTask {
+                title: &title,
+                description: &description,
+                parent_task_id: Some(&parent),
+                created_by: &caller,
+                ..Default::default()
+            },
+        )
+    })
+}
+
+/// The first prompt of a delegated session: who asked, what, and how to report.
+pub fn delegation_prompt(parent: &str, task: &str, title: &str, description: &str) -> String {
+    format!(
+        "You were delegated this work by agent session {parent}. It is HQ task {task}.\n\n{title}\n\n{description}\n\nDo the work. Record notes with the hq-session tool hq_call: tool task_comment_add on {task}. If you are blocked or need a decision, use agent_message_send with to_session \"{parent}\". When you finish, end your turn with a short summary of the result; HQ passes your final output to {parent} automatically."
+    )
 }
 
 /// Whether an agent in this state can take a new instruction now.
@@ -373,5 +629,143 @@ mod tests {
         let again = deliver_next(&w.db, "hs-b", |_| Ok(())).unwrap();
         assert!(again.is_some(), "the message that failed to type is delivered next time");
         assert!(deliver_next(&w.db, "hs-b", |_| Ok(())).unwrap().is_none());
+    }
+
+    fn child_of(db: &Database, parent: &str, id: &str, mission: &str, depth: i64) {
+        session(db, id, Some(mission));
+        db.with_conn(|c| registry::set_parent(c, id, parent, depth)).unwrap();
+    }
+
+    #[test]
+    fn a_parent_and_its_child_may_message_on_the_childs_task_even_on_different_tasks() {
+        let w = world();
+        // hs-a works on tk-1; its child works on the sub-task tk-2.
+        child_of(&w.db, "hs-a", "hs-kid", "tk-2", 1);
+        assert_eq!(authorize(&w.db, "hs-a", "hs-kid", None, "go").unwrap(), "tk-2");
+        assert_eq!(authorize(&w.db, "hs-kid", "hs-a", None, "done").unwrap(), "tk-2");
+        // A sibling of the parent still cannot reach the child.
+        assert!(authorize(&w.db, "hs-b", "hs-kid", None, "hi").is_err());
+        // A child with no task has no thread to hold the message.
+        session(&w.db, "hs-notask", None);
+        w.db.with_conn(|c| registry::set_parent(c, "hs-notask", "hs-a", 1)).unwrap();
+        assert!(authorize(&w.db, "hs-a", "hs-notask", None, "hi").is_err());
+    }
+
+    #[test]
+    fn delegation_needs_a_running_session_with_a_task() {
+        let w = world();
+        let slot = authorize_delegate(&w.db, "hs-a").unwrap();
+        assert_eq!((slot.task_id.as_str(), slot.depth), (w.task.as_str(), 1));
+        assert!(authorize_delegate(&w.db, "hs-loose").is_err(), "no task, nothing to file under");
+        assert!(authorize_delegate(&w.db, "hs-ghost").is_err());
+        w.db.with_conn(|c| registry::set_status_exited_if_running(c, "hs-a")).unwrap();
+        assert!(authorize_delegate(&w.db, "hs-a").is_err(), "an ended session cannot delegate");
+    }
+
+    #[test]
+    fn delegation_depth_children_and_rate_are_limited() {
+        let w = world();
+        // Depth: a grandchild's child would be level 3.
+        child_of(&w.db, "hs-a", "hs-l1", "tk-2", 1);
+        child_of(&w.db, "hs-l1", "hs-l2", "tk-2", 2);
+        let err = authorize_delegate(&w.db, "hs-l2").unwrap_err().to_string();
+        assert!(err.contains("levels deep"), "{err}");
+        assert!(authorize_delegate(&w.db, "hs-l1").is_ok(), "level 2 may still be started by level 1");
+
+        // Running children: hs-l1 already has one (hs-l2); two more fills it.
+        child_of(&w.db, "hs-l1", "hs-l3", "tk-2", 2);
+        child_of(&w.db, "hs-l1", "hs-l4", "tk-2", 2);
+        let err = authorize_delegate(&w.db, "hs-l1").unwrap_err().to_string();
+        assert!(err.contains("running children"), "{err}");
+        w.db.with_conn(|c| registry::set_status_exited_if_running(c, "hs-l4")).unwrap();
+        assert!(authorize_delegate(&w.db, "hs-l1").is_ok(), "a finished child frees a slot");
+
+        // Rate: the window counts children that already ended too.
+        for i in 0..MAX_CHILDREN_PER_WINDOW {
+            let id = format!("hs-old{i}");
+            child_of(&w.db, "hs-b", &id, "tk-2", 1);
+            w.db.with_conn(|c| registry::set_status_exited_if_running(c, &id)).unwrap();
+        }
+        let err = authorize_delegate(&w.db, "hs-b").unwrap_err().to_string();
+        assert!(err.contains("rate limit"), "{err}");
+    }
+
+    #[test]
+    fn a_finished_child_reports_to_its_parent_with_its_output() {
+        let w = world();
+        child_of(&w.db, "hs-a", "hs-kid", "tk-2", 1);
+        let kid = w.db.with_conn(|c| registry::get(c, "hs-kid")).unwrap().unwrap();
+        let sent = report_to_parent(&w.db, &kid, "finished", "the answer is 391").unwrap();
+        assert!(sent.is_some());
+        let mut typed = String::new();
+        deliver_next(&w.db, "hs-a", |text| {
+            typed = text.to_string();
+            Ok(())
+        })
+        .unwrap();
+        assert!(typed.contains("hs-kid") && typed.contains("the answer is 391"), "{typed}");
+
+        let loner = w.db.with_conn(|c| registry::get(c, "hs-b")).unwrap().unwrap();
+        assert!(report_to_parent(&w.db, &loner, "finished", "x").unwrap().is_none(), "no parent, nobody to tell");
+    }
+
+    #[test]
+    fn a_report_quotes_only_the_tail_of_a_long_output() {
+        let w = world();
+        child_of(&w.db, "hs-a", "hs-kid", "tk-2", 1);
+        let kid = w.db.with_conn(|c| registry::get(c, "hs-kid")).unwrap().unwrap();
+        let long = format!("{}END", "x".repeat(10_000));
+        report_to_parent(&w.db, &kid, "finished", &long).unwrap();
+        let thread = w.db.with_conn(|c| t::list_comments(c, "tk-2")).unwrap();
+        assert!(thread[0].body.ends_with("END") && thread[0].body.len() < 2000);
+    }
+
+    #[test]
+    fn the_worker_is_told_who_delegated_what_and_how_to_report() {
+        let text = delegation_prompt("hs-parent", "HQ-7", "multiply", "17 times 23");
+        for needle in ["hs-parent", "HQ-7", "17 times 23", "task_comment_add", "agent_message_send"] {
+            assert!(text.contains(needle), "{needle}: {text}");
+        }
+    }
+
+    const SCREEN: &str = "▐▛███▛█   Claude Code v2.1.292\n\n❯ You were delegated this work by agent session hs-p.\n\n  multiply\n\n  Called hq-session 2 times\n\n⏺ 391\n  Note logged on PERSONAL-INBOX-002 (comment id 5).\n✻ Cooked for 8s · done 8:22 AM\n\n────────────\n❯\n────────────\n  ⏵⏵ bypass permissions on";
+
+    #[test]
+    fn the_final_reply_is_quoted_without_the_prompt_or_the_screen_chrome() {
+        let reply = last_reply(SCREEN).unwrap();
+        assert_eq!(reply, "391\nNote logged on PERSONAL-INBOX-002 (comment id 5).");
+        assert!(!reply.contains("delegated") && !reply.contains("Cooked"));
+    }
+
+    #[test]
+    fn the_last_reply_wins_and_a_screen_without_one_has_none() {
+        let two = "⏺ first answer\n✻ done\n❯ next\n⏺ second answer\n✻ done";
+        assert_eq!(last_reply(two).as_deref(), Some("second answer"));
+        assert_eq!(last_reply("plain text with no marker"), None);
+        assert_eq!(last_reply(""), None);
+    }
+
+    #[test]
+    fn a_report_prefers_the_final_reply_and_falls_back_to_the_tail() {
+        let w = world();
+        child_of(&w.db, "hs-a", "hs-kid", "tk-2", 1);
+        let kid = w.db.with_conn(|c| registry::get(c, "hs-kid")).unwrap().unwrap();
+        report_to_parent(&w.db, &kid, "finished", SCREEN).unwrap();
+        report_to_parent(&w.db, &kid, "finished", "no marker here, just text").unwrap();
+        let thread = w.db.with_conn(|c| t::list_comments(c, "tk-2")).unwrap();
+        assert!(thread[0].body.contains("final reply") && thread[0].body.contains("391"), "{}", thread[0].body);
+        assert!(!thread[0].body.contains("delegated this work"));
+        assert!(thread[1].body.contains("last output") && thread[1].body.contains("just text"));
+    }
+
+    #[test]
+    fn a_worker_may_use_the_default_agent_or_the_delegators_own_and_no_other_profile() {
+        assert_eq!(pick_harness("", "claude-code").unwrap(), "claude-code");
+        assert_eq!(pick_harness("claude-code", "claude-code").unwrap(), "claude-code");
+        // A configured account profile is not something an agent may choose.
+        assert!(pick_harness("claude-kola", "claude-code").is_err());
+        // But a delegator running as that profile may hand work to its own kind.
+        assert_eq!(pick_harness("claude-kola", "claude-kola").unwrap(), "claude-kola");
+        assert!(pick_harness("codex", "claude-code").is_err(), "other agents are not enabled for delegation yet");
     }
 }

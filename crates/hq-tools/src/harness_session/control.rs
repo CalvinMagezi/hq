@@ -537,11 +537,37 @@ pub fn stop(db: &Arc<Database>, session_id: &str) -> Result<Value> {
     let id = session_id.to_string();
     db.with_conn(move |c| registry::set_status(c, &id, registry::STATUS_STOPPED))?;
     screen_changed(session_id);
+    // Sessions started for this one stop with it.
+    let stopped_children = stop_children(db, session_id);
     let mut report = json!({ "session_id": session_id, "status": "stopped" });
+    if !stopped_children.is_empty() {
+        report["stopped_children"] = json!(stopped_children);
+    }
     if let Some(task) = record_on_task(db, session_id, mission::Event::Stopped) {
         report["task"] = task;
     }
     Ok(report)
+}
+
+/// Stops the sessions still running that were started for `parent`, and theirs.
+/// Best effort: one that cannot be stopped is left for the supervisor and named
+/// in the log, and the parent's stop still succeeds. The chain is only as deep as
+/// delegation allows, so the recursion is bounded.
+fn stop_children(db: &Arc<Database>, parent: &str) -> Vec<String> {
+    let id = parent.to_string();
+    let children = db
+        .with_conn(move |c| registry::running_children(c, &id))
+        .unwrap_or_default();
+    let mut stopped = Vec::new();
+    for child in children {
+        match stop(db, &child.id) {
+            Ok(_) => stopped.push(child.id),
+            Err(e) => {
+                tracing::warn!(session = %child.id, parent, error = %e, "could not stop a child with its parent");
+            }
+        }
+    }
+    stopped
 }
 
 /// Extract a harness's resume token from session output: the capture group of

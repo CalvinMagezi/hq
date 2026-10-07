@@ -36,6 +36,30 @@ The recipient sees the text framed as coming from another agent:
 [End of message. Reply with the hq-session tool hq_call: tool agent_message_send ...]
 ```
 
+## Delegating
+
+A session working on a task can hand part of it to a new session with
+`agent_delegate` (`{title, description, harness?}`). HQ files a sub-task under the
+delegator's task (or under that task's own parent, since sub-tasks go one level
+deep), starts a session on it in the delegator's directory and host, tells the
+worker who asked and how to report, and records the delegation on the delegator's
+task. The worker's own `task_comment_add` notes carry its session as author.
+
+When the worker finishes a turn or exits, HQ queues a message from it to the
+delegator on the worker's task thread, quoting its final reply, and the
+delegator receives it the next time it is idle. A parent and a session it started
+may message each other even though they work on different tasks, on the child's
+task thread.
+
+The worker runs as `claude-code` or as the delegator's own agent kind, never as a
+configured account profile the delegator is not already using (that would spend
+another account's credit). Delegations are taken one at a time, so two calls
+cannot both pass the limits before either worker exists.
+
+Limits: the chain is at most 2 levels deep, a session may have 3 children running
+at once, and may start 10 in an hour. Stopping a session stops the sessions
+started for it, and theirs.
+
 ## Limits and risks
 
 - A message is untrusted text from another agent, and it reaches a model that may

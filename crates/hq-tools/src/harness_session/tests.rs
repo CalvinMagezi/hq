@@ -481,6 +481,8 @@ fn row(host: &str, name: &str) -> HarnessSessionRow {
         no_progress_streak: 0,
         progress_mark: None,
         drive_off_reason: None,
+        parent_session_id: None,
+        spawn_depth: 0,
     }
 }
 

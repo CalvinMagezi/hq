@@ -385,6 +385,9 @@ async fn supervise(
     // Started after the host phase so a slow host cannot spend the summaries' time.
     let summary_deadline = Instant::now() + SUMMARY_SWEEP_BUDGET;
 
+    // Sessions seen alive this sweep, for message delivery once every report
+    // (a child finishing, for instance) has been queued.
+    let mut alive: Vec<(registry::HarnessSessionRow, AgentInfo)> = Vec::new();
     for row in running {
         match liveness(&phase.polled, &row) {
             Liveness::HostUnreachable(detail) => {
@@ -403,7 +406,7 @@ async fn supervise(
                 .await;
                 sweep_alive(db, vault_path, &row, &agent, screen, dismissed);
                 keep_resume_current(db, vault_path, &row, &agent, &resolve).await;
-                deliver_messages(db, &row, &agent).await;
+                alive.push((row, *agent));
                 continue;
             }
             Liveness::Gone => {}
@@ -420,6 +423,11 @@ async fn supervise(
         // Before the summarizer: the daemon may kill this sweep at its timeout,
         // and the claim above means no later sweep would record the exit.
         let link = record_on_task(db, &row, Event::Exited);
+        // A delegated session tells whoever delegated it.
+        let last_output = final_output(&db_arc, &row.id).unwrap_or_default();
+        if let Err(e) = hq_tools::a2a::report_to_parent(db, &row, "exited", &last_output) {
+            tracing::warn!(session = %row.id, error = %e, "session-supervisor: could not report to the parent");
+        }
         if hand_to_chat(db, &row, WAKE_EXITED) {
             continue;
         }
@@ -489,6 +497,9 @@ async fn supervise(
         post_relay_nudge(vault_path, &row.id, &subject, &body, exit_interrupts(link.as_ref()));
     }
 
+    for (row, agent) in &alive {
+        deliver_messages(db, row, agent).await;
+    }
     Ok(())
 }
 
