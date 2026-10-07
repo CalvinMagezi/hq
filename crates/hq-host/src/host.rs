@@ -379,6 +379,18 @@ impl Host {
         lock(&self.panes).contains_key(&name).then_some(name)
     }
 
+    /// Replaces the command that brings a resumable agent back after a host
+    /// restart, for example once its conversation id is known.
+    pub fn set_resume(&self, name: &str, argv: Vec<String>) -> Result<(), HostError> {
+        let pane = self.pane(name)?;
+        if argv.is_empty() || pane.resume.is_none() {
+            return Err(HostError::InvalidResume);
+        }
+        pane.set_resume_argv(argv);
+        self.save();
+        Ok(())
+    }
+
     /// Records what an agent's hook said: the state it implies, and the id of
     /// the agent's own conversation. An event that says nothing is ignored.
     pub fn report(
@@ -549,10 +561,11 @@ fn save_state(panes: &Registry, awaiting: &Awaiting, state: Option<&StateFile>) 
         .filter(|(_, pane)| pane.status() == PaneStatus::Running && !pane.is_stopping())
         .filter_map(|(name, pane)| {
             let resume = pane.resume.as_ref()?;
+            let resume_argv = pane.resume_argv()?;
             let (rows, cols) = pane.size();
             Some(PaneRecord {
                 name: name.clone(),
-                resume_argv: resume.argv.clone(),
+                resume_argv,
                 agent: pane.agent.clone(),
                 cwd: pane.cwd.clone(),
                 env_keys: resume.env.iter().map(|(k, _)| k.clone()).collect(),

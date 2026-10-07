@@ -50,6 +50,7 @@ version gets `protocol_mismatch`.
 | `agent.resize` | `name`, `rows`, `cols` | `{}` |
 | `agent.wait` | `name`, `until` (`exit`, `quiet` or `state`), optional `timeout_ms`; for `quiet` `quiet_ms`; for `state` `states` (list, required) and `stable_ms` (default 300) | `exit_code`, or agent info |
 | `agent.report` | `event` (a hook event name), optional `session_id`, `notification_type`; `name` for the operator (a pane token implies its own) | `{}` |
+| `agent.set_resume` | `name`, `argv` | `{}`; replaces the command a restart runs (the agent must have been spawned with `resume_argv`) |
 | `agent.awaiting` | none | `{"agents": [{name, agent, cwd, env_keys}]}`: restored agents waiting for their environment |
 | `agent.resume` | `name`, `env` (object, must cover every name in `env_keys`) | agent info; `missing_env` leaves it waiting |
 | `agent.kill` | `name` | `{}` |
@@ -194,6 +195,11 @@ started the host (for example another agent session's `CLAUDE_CODE_*`
 variables, which switch transcript saving off) never reach an agent.
 
 ## Using it from HQ
+
+A Claude Code session resumes into its own conversation: once its hooks report
+the conversation id, HQ stores it as the session's resume token and gives the host
+a restart command that uses `--resume <id>`. Until the id is known, resume falls
+back to `-c` (the most recent conversation in the directory).
 
 Set `herdr.default_host: native` in `~/.hq/config.yaml` and new coding-agent
 sessions start on the built-in host (run `hq host serve` first). `native` is a

@@ -103,6 +103,52 @@ fn build_args_falls_back_fresh_without_token() {
 }
 
 #[test]
+fn claude_resumes_its_own_conversation_when_the_id_is_known() {
+    let h = harness("claude-code");
+    let tmp = tempfile::tempdir().unwrap();
+    let with = build_args(&h, tmp.path(), "hs-x", Some("conv-1"), true);
+    assert_eq!(with[with.len() - 2..], ["--resume", "conv-1"]);
+    let without = build_args(&h, tmp.path(), "hs-x", None, true);
+    assert_eq!(without.last().map(String::as_str), Some("-c"));
+    let fresh = build_args(&h, tmp.path(), "hs-x", Some("conv-1"), false);
+    assert!(!fresh.contains(&"--resume".to_string()));
+}
+
+#[test]
+fn a_reported_conversation_id_becomes_the_resume_token_once() {
+    let db = Arc::new(Database::open_memory().unwrap());
+    db.with_conn(|c| {
+        registry::insert(
+            c,
+            &registry::NewSession {
+                id: "hs-id",
+                harness: "claude-code",
+                label: "t",
+                cwd: "/t",
+                mission_id: None,
+                placement: registry::Placement {
+                    host: "native",
+                    agent_name: "hs-id",
+                    workspace_id: "hs-id",
+                    pane_id: "hs-id",
+                },
+            },
+        )
+    })
+    .unwrap();
+    let Liveness::Alive(mut agent) = alive("hs-id") else { unreachable!() };
+
+    let row = get_row(&db, "hs-id").unwrap();
+    assert!(!record_agent_session_id(&db, &row, &agent).unwrap(), "no id reported yet");
+
+    agent.agent_session_id = Some("conv-9".into());
+    assert!(record_agent_session_id(&db, &row, &agent).unwrap());
+    let row = get_row(&db, "hs-id").unwrap();
+    assert_eq!(row.resume_token.as_deref(), Some("conv-9"));
+    assert!(!record_agent_session_id(&db, &row, &agent).unwrap(), "unchanged");
+}
+
+#[test]
 fn session_dir_harness_gets_dir_arg() {
     let spec = harness("pi");
     let tmp = tempfile::tempdir().unwrap();
@@ -573,6 +619,7 @@ fn alive(name: &str) -> Liveness {
         title: None,
         state_change_seq: 1,
         launch_pending: false,
+        agent_session_id: None,
     }))
 }
 

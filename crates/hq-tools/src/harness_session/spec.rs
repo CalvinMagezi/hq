@@ -12,6 +12,13 @@ pub enum ResumeStrategy {
     /// Replace the spawn args with these; `{token}` is substituted with the
     /// harvested resume token (spawn fails over to fresh if none saved).
     Args(&'static [&'static str]),
+    /// Resume a specific conversation when its id is known, else continue the
+    /// most recent one in the directory. The id is exact; the fallback can pick
+    /// the wrong conversation when two sessions share a directory.
+    TokenOrArgs {
+        with_token: &'static [&'static str],
+        otherwise: &'static [&'static str],
+    },
     /// The harness keys sessions off a dedicated directory passed as
     /// `--session-dir <dir>`; re-spawning with the same dir resumes.
     SessionDir,
@@ -60,8 +67,12 @@ pub const SPECS: &[HarnessSessionSpec] = &[
         // Without the permission bypass every tool call in an unattended
         // session blocks on an approval dialog nobody is there to answer.
         args: &["--dangerously-skip-permissions"],
-        // `claude -c` continues the most recent session in the cwd.
-        resume: ResumeStrategy::Args(&["--dangerously-skip-permissions", "-c"]),
+        // `claude --resume <id>` is exact; `claude -c` continues the most recent
+        // session in the cwd, used until the id is known.
+        resume: ResumeStrategy::TokenOrArgs {
+            with_token: &["--dangerously-skip-permissions", "--resume", "{token}"],
+            otherwise: &["--dangerously-skip-permissions", "-c"],
+        },
         token_pattern: None,
         trust_pattern: None,
     },

@@ -61,7 +61,7 @@ pub async fn resume(
         ResumeStrategy::Args(args) => {
             !args.iter().any(|a| a.contains("{token}")) || row.resume_token.is_some()
         }
-        ResumeStrategy::SessionDir => true,
+        ResumeStrategy::TokenOrArgs { .. } | ResumeStrategy::SessionDir => true,
         ResumeStrategy::None => false,
     };
     let mut value = launch_session(
@@ -554,6 +554,41 @@ pub(super) fn extract_resume_token(pattern: &str, content: &str) -> Result<Optio
         .last()
         .and_then(|c| c.get(1))
         .map(|m| m.as_str().to_string()))
+}
+
+/// Stores the conversation id the agent's hooks reported as the session's
+/// resume token when it changed. Returns whether it did.
+pub fn record_agent_session_id(
+    db: &Arc<Database>,
+    row: &HarnessSessionRow,
+    agent: &AgentInfo,
+) -> Result<bool> {
+    let Some(id) = agent.agent_session_id.as_deref().filter(|id| !id.is_empty()) else {
+        return Ok(false);
+    };
+    if row.resume_token.as_deref() == Some(id) {
+        return Ok(false);
+    }
+    let (session, token) = (row.id.clone(), id.to_string());
+    db.with_conn(move |c| registry::set_resume_token(c, &session, &token))?;
+    Ok(true)
+}
+
+/// Once the agent has reported its conversation id, has the host restart it
+/// into exactly that conversation instead of the most recent one.
+pub fn refresh_restart_command(
+    vault_path: &Path,
+    host: &Host,
+    row: &HarnessSessionRow,
+    agent: &AgentInfo,
+) -> Result<()> {
+    let Some(token) = agent.agent_session_id.as_deref() else {
+        return Ok(());
+    };
+    let harness = resolve(&row.harness)?;
+    let args = build_args(&harness, vault_path, &row.id, Some(token), true);
+    host.update_resume(&row.agent_name, &agent.kind, args)?;
+    Ok(())
 }
 
 /// Look for the harness's resume token in `screen` (what the supervisor just

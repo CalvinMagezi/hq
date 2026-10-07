@@ -275,3 +275,34 @@ fn removing_a_waiting_agent_forgets_it() {
     let text = std::fs::read_to_string(dir2.join("session.json")).unwrap();
     assert!(!text.contains("keyed"));
 }
+
+#[test]
+fn a_changed_resume_command_is_what_a_restart_runs() {
+    let (_t1, dir1) = state_dir();
+    let first = Host::new().with_state_dir(&dir1);
+    first
+        .spawn(resumable("moving", "sleep 60", "echo old-resume; sleep 60"))
+        .unwrap();
+    let sh = |s: &str| vec!["sh".to_string(), "-c".to_string(), s.to_string()];
+    first
+        .set_resume("moving", sh("echo new-resume; sleep 60"))
+        .unwrap();
+
+    let (_t2, dir2) = state_dir();
+    copy_state(&dir1, &dir2);
+    let second = Host::new().with_state_dir(&dir2);
+    assert_eq!(second.restore().restored, ["moving"]);
+    wait_for(&second, "moving", "new-resume");
+}
+
+#[test]
+fn only_a_resumable_agent_can_have_its_resume_command_changed() {
+    let host = Host::new();
+    let sh = |s: &str| vec!["sh".to_string(), "-c".to_string(), s.to_string()];
+    host.spawn(SpawnSpec::new("plain", sh("sleep 60"), std::env::temp_dir()))
+        .unwrap();
+    assert_eq!(host.set_resume("plain", sh("true")).unwrap_err().code(), "invalid_resume");
+    host.spawn(resumable("some", "sleep 60", "sleep 60")).unwrap();
+    assert_eq!(host.set_resume("some", vec![]).unwrap_err().code(), "invalid_resume");
+    assert_eq!(host.set_resume("none", sh("true")).unwrap_err().code(), "agent_not_found");
+}

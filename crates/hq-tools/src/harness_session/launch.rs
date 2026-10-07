@@ -21,6 +21,16 @@ pub(super) fn build_args(
                         .collect()
                 }
             }
+            ResumeStrategy::TokenOrArgs {
+                with_token,
+                otherwise,
+            } => {
+                let chosen = if resume_token.is_some() { with_token } else { otherwise };
+                chosen
+                    .iter()
+                    .map(|a| a.replace("{token}", resume_token.unwrap_or_default()))
+                    .collect()
+            }
             ResumeStrategy::SessionDir | ResumeStrategy::None => harness.fresh_args(),
         }
     } else {
@@ -71,7 +81,7 @@ pub fn resume_awaiting(rows: &[HarnessSessionRow], host: &Host) {
 fn restart_args(harness: &Harness, vault_path: &Path, session_id: &str) -> Option<Vec<String>> {
     let tokenless = match harness.spec.resume {
         ResumeStrategy::Args(args) => !args.iter().any(|a| a.contains("{token}")),
-        ResumeStrategy::SessionDir => true,
+        ResumeStrategy::TokenOrArgs { .. } | ResumeStrategy::SessionDir => true,
         ResumeStrategy::None => false,
     };
     tokenless.then(|| build_args(harness, vault_path, session_id, None, true))

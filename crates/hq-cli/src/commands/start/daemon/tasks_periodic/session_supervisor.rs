@@ -304,6 +304,44 @@ async fn dismiss_survey(
     }
 }
 
+/// Keeps a session resumable into its own conversation: stores the id the
+/// agent's hooks reported and, when it is new, gives the host the matching
+/// restart command. Best effort; the next sweep tries again.
+async fn keep_resume_current(
+    db: &Database,
+    vault_path: &Path,
+    row: &registry::HarnessSessionRow,
+    agent: &AgentInfo,
+    resolve: &HostResolver,
+) {
+    let db_arc = Arc::new(db.clone());
+    match hq_tools::harness_session::record_agent_session_id(&db_arc, row, agent) {
+        Ok(true) => {}
+        Ok(false) => return,
+        Err(e) => {
+            tracing::warn!(session = %row.id, error = %e, "session-supervisor: conversation id store failed");
+            return;
+        }
+    }
+    let Ok(host) = (resolve.as_ref())(&row.host) else {
+        return;
+    };
+    let (vault, row_c, agent_c) = (vault_path.to_path_buf(), row.clone(), agent.clone());
+    let refreshed = tokio::task::spawn_blocking(move || {
+        hq_tools::harness_session::refresh_restart_command(&vault, &host, &row_c, &agent_c)
+    })
+    .await;
+    match refreshed {
+        Ok(Ok(())) => {}
+        Ok(Err(e)) => {
+            tracing::warn!(session = %row.id, error = %e, "session-supervisor: restart command not updated");
+        }
+        Err(e) => {
+            tracing::warn!(session = %row.id, error = %e, "session-supervisor: restart command task failed");
+        }
+    }
+}
+
 async fn supervise(
     vault_path: &Path,
     db: &Database,
@@ -336,6 +374,7 @@ async fn supervise(
                 )
                 .await;
                 sweep_alive(db, vault_path, &row, &agent, screen, dismissed);
+                keep_resume_current(db, vault_path, &row, &agent, &resolve).await;
                 continue;
             }
             Liveness::Gone => {}

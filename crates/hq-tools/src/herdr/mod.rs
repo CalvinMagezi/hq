@@ -142,6 +142,9 @@ pub struct AgentInfo {
     pub state_change_seq: u64,
     /// True while Herdr is still waiting for the agent to reach its prompt.
     pub launch_pending: bool,
+    /// The agent's own id for its conversation, when the host knows it (the
+    /// built-in host learns it from the agent's hooks). Herdr never does.
+    pub agent_session_id: Option<String>,
 }
 
 impl AgentInfo {
@@ -171,6 +174,7 @@ impl AgentInfo {
                 .get("launch_pending")
                 .and_then(Value::as_bool)
                 .unwrap_or(false),
+            agent_session_id: None,
         })
     }
 }
