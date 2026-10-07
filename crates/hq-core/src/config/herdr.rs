@@ -33,6 +33,12 @@ pub struct HerdrConfig {
     #[serde(default)]
     pub session: Option<String>,
 
+    /// The HQ MCP endpoint a launched agent connects to with its own session
+    /// token (for example `https://hq.example.ts.net:8444/mcp`), reachable from
+    /// the machine the agent runs on. Unset leaves agents without it.
+    #[serde(default)]
+    pub agent_mcp_url: Option<String>,
+
     /// Host that new sessions start on when the caller names none: `local`, a
     /// configured remote, or `native` for the built-in host.
     #[serde(default = "default_host")]
@@ -297,6 +303,7 @@ impl Default for HerdrConfig {
         Self {
             binary: default_binary(),
             session: None,
+            agent_mcp_url: None,
             default_host: default_host(),
             hosts: BTreeMap::new(),
             ssh_multiplex: default_ssh_multiplex(),

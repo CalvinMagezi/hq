@@ -268,6 +268,10 @@ const MIGRATIONS: &[(&str, &str)] = &[
         "073_approval_binding",
         include_str!("../sql/073_approval_binding.sql"),
     ),
+    (
+        "074_harness_session_tokens",
+        include_str!("../sql/074_harness_session_tokens.sql"),
+    ),
 ];
 
 const MEMORY_SCHEMA_MIGRATION: &str = "058_memory_schema";

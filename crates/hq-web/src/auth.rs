@@ -90,6 +90,20 @@ pub(crate) fn resolve_identity(
     matches(full_key).then_some(ApiIdentity::Full)
 }
 
+/// The secret a request presents, from `x-api-key` or a Bearer header.
+pub(crate) fn presented_secret(headers: &HeaderMap) -> &str {
+    let x_api_key = headers
+        .get("x-api-key")
+        .and_then(|v| v.to_str().ok())
+        .unwrap_or("");
+    let bearer = headers
+        .get(axum::http::header::AUTHORIZATION)
+        .and_then(|v| v.to_str().ok())
+        .and_then(|v| v.strip_prefix("Bearer "))
+        .unwrap_or("");
+    resolve_api_key_candidate(x_api_key, bearer)
+}
+
 /// Whether `path` needs the web token: the chat sockets and the REST API.
 /// `/health` (deploy checks), `/mcp` (own key) and static files stay open.
 pub(crate) fn web_path_is_guarded(path: &str) -> bool {

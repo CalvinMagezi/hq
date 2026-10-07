@@ -28,6 +28,19 @@ pub const SPAWNED_SESSION_ARG: &str = "_hq_spawned_session";
 /// The environment variable HQ sets in every pane it launches, naming the session.
 pub const SESSION_ENV: &str = "HQ_SESSION_ID";
 
+/// Argument the gateway sets, and only the gateway, to the session a call came
+/// from once that session proved itself with its token. Tools that act on behalf
+/// of an agent (messaging, claiming) read the caller from here, never from a
+/// field the caller supplies.
+pub const CALLER_SESSION_ARG: &str = "_hq_caller_session";
+
+/// The session the gateway attested for this call, if any.
+pub fn caller_session(args: &Value) -> Option<&str> {
+    args.get(CALLER_SESSION_ARG)
+        .and_then(Value::as_str)
+        .filter(|s| !s.is_empty())
+}
+
 pub const SPAWNED_REFUSAL: &str =
     "HQ-spawned sessions cannot start further sessions or full-mode asks; ask the owner";
 

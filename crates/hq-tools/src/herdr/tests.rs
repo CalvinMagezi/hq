@@ -69,6 +69,7 @@ fn request() -> LaunchRequest {
         args: vec!["--dangerously-skip-permissions".into()],
         command: None,
         resume_args: None,
+        mcp: None,
         start_timeout: Duration::from_secs(30),
     }
 }
@@ -287,6 +288,7 @@ fn a_wrapper_that_never_becomes_an_agent_is_an_error_and_closes_the_workspace() 
     let req = LaunchRequest {
         command: Some("my-wrapper".into()),
         resume_args: None,
+        mcp: None,
         start_timeout: Duration::from_millis(600),
         ..request()
     };

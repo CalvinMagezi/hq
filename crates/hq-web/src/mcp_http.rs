@@ -65,23 +65,30 @@ async fn handle_mcp(
     dev_open: bool,
 ) -> Json<Value> {
     let id = body.get("id").cloned().unwrap_or(Value::Null);
-    let Some(identity) = crate::auth::resolve_identity(
+    let identity = crate::auth::resolve_identity(
         headers,
         keys.full.as_deref(),
         keys.spark.as_deref(),
         keys.handoff.as_deref(),
         dev_open,
-    ) else {
+    );
+    // A launched agent's own token, when none of the configured keys matched.
+    let session = match identity {
+        Some(_) => None,
+        None => session_for_secret(state, crate::auth::presented_secret(headers)),
+    };
+    if identity.is_none() && session.is_none() {
         if keys.none_configured() {
             tracing::warn!("mcp_http: refused, no AGENTHQ_API_KEY configured");
             return rpc_err(id, -32001, "Unauthorized: this server has no AGENTHQ_API_KEY configured");
         }
         return rpc_err(id, -32001, "Unauthorized");
-    };
-    let allowed: Option<&[&str]> = match identity {
-        crate::auth::ApiIdentity::Full => None,
-        crate::auth::ApiIdentity::Spark => Some(hq_mcp::gateway::SPARK_READONLY_ALLOWLIST),
-        crate::auth::ApiIdentity::Handoff => Some(hq_mcp::gateway::HANDOFF_ALLOWLIST),
+    }
+    let allowed: Option<&[&str]> = match (identity, &session) {
+        (Some(crate::auth::ApiIdentity::Full), _) => None,
+        (Some(crate::auth::ApiIdentity::Spark), _) => Some(hq_mcp::gateway::SPARK_READONLY_ALLOWLIST),
+        (Some(crate::auth::ApiIdentity::Handoff), _) => Some(hq_mcp::gateway::HANDOFF_ALLOWLIST),
+        (None, _) => Some(hq_mcp::gateway::SESSION_ALLOWLIST),
     };
 
     let method = body.get("method").and_then(|v| v.as_str()).unwrap_or("");
@@ -98,9 +105,25 @@ async fn handle_mcp(
                 .unwrap_or(json!([]));
             rpc_ok(id, json!({"tools": tools}))
         }
-        "tools/call" => call_tool(state, id, &body, allowed, spawned_by(headers)).await,
+        "tools/call" => {
+            // A proven session is also marked as spawned, so it can never start more.
+            let spawned = session.as_deref().or_else(|| spawned_by(headers));
+            call_tool(state, id, &body, allowed, spawned, session.as_deref()).await
+        }
         _ => rpc_err(id, -32601, "Method not found"),
     }
+}
+
+/// The running session a presented secret belongs to, if it is a session token.
+fn session_for_secret(state: &WsState, secret: &str) -> Option<String> {
+    if secret.is_empty() {
+        return None;
+    }
+    state
+        .db
+        .with_conn(|c| hq_db::session_tokens::session_for_token(c, secret))
+        .ok()
+        .flatten()
 }
 
 /// Header an MCP client config fills from the `HQ_SESSION_ID` a pane launched by HQ carries.
@@ -120,6 +143,7 @@ async fn call_tool(
     body: &Value,
     allowed: Option<&[&str]>,
     spawned_by: Option<&str>,
+    caller_session: Option<&str>,
 ) -> Json<Value> {
     let params = body.get("params").and_then(|v| v.as_object());
     let tool_name = params.and_then(|p| p.get("name")).and_then(|v| v.as_str()).unwrap_or("");
@@ -132,8 +156,15 @@ async fn call_tool(
         return rpc_err(id, -32603, "MCP registry not initialized");
     };
     let result =
-        hq_mcp::gateway::dispatch(registry, tool_name, arguments.as_ref(), &state.db, allowed)
-            .await;
+        hq_mcp::gateway::dispatch_as(
+            registry,
+            tool_name,
+            arguments.as_ref(),
+            &state.db,
+            allowed,
+            caller_session,
+        )
+        .await;
     match result {
         Ok(call_result) => rpc_ok(id, serde_json::to_value(&call_result).unwrap_or(json!({"content": []}))),
         Err(e) => rpc_err(id, e.code.0.into(), e.message),
@@ -351,6 +382,116 @@ mod tests {
             } else {
                 assert!(res["error"]["message"].as_str().unwrap().contains("not permitted"), "{key} {tool}: {res}");
             }
+        }
+    }
+
+    /// Records the caller session each call arrives with.
+    struct WhoAmI;
+
+    #[async_trait::async_trait]
+    impl HqTool for WhoAmI {
+        fn name(&self) -> &str {
+            "task_get"
+        }
+        fn description(&self) -> &str {
+            "reports the attested caller"
+        }
+        fn parameters(&self) -> Value {
+            json!({})
+        }
+        async fn execute(&self, args: Value) -> anyhow::Result<Value> {
+            Ok(json!({"caller": hq_tools::harness_session::caller_session(&args)}))
+        }
+    }
+
+    /// An app whose database holds one running session and its token.
+    fn session_app() -> (axum::Router, String) {
+        let mut registry = ToolRegistry::new();
+        registry.register(Box::new(WhoAmI));
+        registry.register(Box::new(Fake("vault_search", "vault")));
+        registry.register(Box::new(Fake("config_manage", "config")));
+        let vault = tempfile::TempDir::new().unwrap();
+        let state = Arc::new(
+            WsState::new(vault.path().to_path_buf(), None).with_registry(Arc::new(registry)),
+        );
+        let token = state
+            .db
+            .with_conn(|c| {
+                hq_db::harness_sessions_registry::insert(
+                    c,
+                    &hq_db::harness_sessions_registry::NewSession {
+                        id: "hs-agent",
+                        harness: "claude-code",
+                        label: "t",
+                        cwd: "/t",
+                        mission_id: None,
+                        placement: hq_db::harness_sessions_registry::Placement {
+                            host: "native",
+                            agent_name: "hs-agent",
+                            workspace_id: "hs-agent",
+                            pane_id: "hs-agent",
+                        },
+                    },
+                )?;
+                hq_db::session_tokens::mint(c, "hs-agent")
+            })
+            .unwrap();
+        let keys = Arc::new(McpKeys {
+            full: Some(FULL.into()),
+            ..McpKeys::default()
+        });
+        let app = axum::Router::new().route(
+            "/mcp",
+            axum::routing::post(
+                move |headers: axum::http::HeaderMap, Json(body): Json<Value>| {
+                    let (state, keys) = (state.clone(), keys.clone());
+                    async move { handle_mcp(&state, &headers, body, &keys, false).await }
+                },
+            ),
+        );
+        (app, token)
+    }
+
+    fn call_with(tool: &str, args: Value) -> Value {
+        json!({"jsonrpc": "2.0", "id": 2, "method": "tools/call",
+               "params": {"name": "hq_call", "arguments": {"tool": tool, "args": args}}})
+    }
+
+    fn result_of(res: &Value) -> Value {
+        let text = res["result"]["content"][0]["text"].as_str().unwrap_or("null");
+        serde_json::from_str(text).unwrap_or(Value::Null)
+    }
+
+    #[tokio::test]
+    async fn a_session_token_is_attested_and_limited_to_the_session_allowlist() {
+        let (app, token) = session_app();
+        let ok = rpc(&app, Some(&token), call_with("task_get", json!({}))).await;
+        assert_eq!(result_of(&ok)["caller"], "hs-agent", "{ok}");
+
+        for tool in ["vault_search", "config_manage"] {
+            let denied = rpc(&app, Some(&token), call_with(tool, json!({}))).await;
+            assert!(denied.get("error").is_some(), "{tool}: {denied}");
+        }
+    }
+
+    #[tokio::test]
+    async fn a_session_cannot_pose_as_another_session() {
+        let (app, token) = session_app();
+        let spoof = call_with("task_get", json!({"_hq_caller_session": "hs-victim"}));
+        let res = rpc(&app, Some(&token), spoof).await;
+        assert_eq!(result_of(&res)["caller"], "hs-agent", "{res}");
+    }
+
+    #[tokio::test]
+    async fn keys_are_never_given_an_attested_session_and_bad_tokens_are_refused() {
+        let (app, _token) = session_app();
+        let spoof = call_with("task_get", json!({"_hq_caller_session": "hs-victim"}));
+        let res = rpc(&app, Some(FULL), spoof).await;
+        assert_eq!(result_of(&res)["caller"], Value::Null, "{res}");
+
+        for secret in ["hqs_forged", "not-a-token"] {
+            let res = rpc(&app, Some(secret), call_with("task_get", json!({}))).await;
+            assert_eq!(res["error"]["code"], -32001, "{secret}: {res}");
         }
     }
 }

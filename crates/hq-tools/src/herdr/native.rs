@@ -209,6 +209,15 @@ impl NativeBackend {
     /// settings file on the machine the agent runs on.
     fn with_hooks(&self, req: &LaunchRequest) -> LaunchRequest {
         let mut req = req.clone();
+        if let Some(mcp) = &req.mcp
+            && req.kind == CLAUDE_KIND
+            && let Err(e) = self.call(
+                "agent.mcp_config",
+                json!({ "name": req.name, "agent": req.kind, "url": mcp.url, "token": mcp.token }),
+            )
+        {
+            tracing::warn!(agent = %req.name, error = %e, "could not write the MCP config");
+        }
         let flags = self.hook_flags(&req.name, &req.kind);
         req.args.extend(flags.clone());
         if let Some(resume) = req.resume_args.as_mut() {
@@ -521,6 +530,10 @@ impl HostBackend for NativeBackend {
         v.get("pid")?.as_u64().map(|p| p as u32)
     }
 
+    fn accepts_mcp(&self) -> bool {
+        true
+    }
+
     fn poll_events(&self, after: Option<u64>, wait: Duration) -> Result<HostEvents, HerdrError> {
         let params = json!({ "after": after, "timeout_ms": wait.as_millis() as u64 });
         let v = self.call_within("events.poll", params, wait + self.command_timeout)?;
@@ -599,6 +612,7 @@ mod tests {
             args: vec!["--flag".into(), "two words".into()],
             command: command.map(str::to_string),
             resume_args: None,
+            mcp: None,
             start_timeout: Duration::from_secs(1),
         }
     }

@@ -43,6 +43,12 @@ pub trait HostBackend: Send + Sync + std::fmt::Debug {
     fn close_workspace(&self, workspace_id: &str) -> Result<(), HerdrError>;
     fn shell_pid(&self, pane_id: &str) -> Option<u32>;
 
+    /// Whether this host can hand an agent a private config pointing back at
+    /// HQ (the built-in host can; herdr cannot).
+    fn accepts_mcp(&self) -> bool {
+        false
+    }
+
     /// Waits up to `wait` for events after `after` (`None` just reads the
     /// current position). Only the built-in host can push events; others are
     /// swept by polling.
@@ -245,6 +251,9 @@ impl<T: HostBackend + ?Sized> HostBackend for Arc<T> {
     }
     fn shell_pid(&self, pane_id: &str) -> Option<u32> {
         (**self).shell_pid(pane_id)
+    }
+    fn accepts_mcp(&self) -> bool {
+        (**self).accepts_mcp()
     }
     fn poll_events(&self, after: Option<u64>, wait: Duration) -> Result<HostEvents, HerdrError> {
         (**self).poll_events(after, wait)

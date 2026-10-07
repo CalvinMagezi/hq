@@ -54,6 +54,7 @@ fn cat(name: &str, kind: &str) -> LaunchRequest {
         // A function ignores the extra flags (such as --settings) a launch adds.
         command: Some("f() { echo started; cat; }; f".into()),
         resume_args: None,
+        mcp: None,
         start_timeout: WAIT,
     }
 }
@@ -245,4 +246,49 @@ fn a_wrapper_command_receives_the_hook_flag_not_just_the_shell() {
         text.contains("--settings") && text.contains("hs-wrap.json"),
         "the wrapper's own arguments were: {text}"
     );
+}
+
+#[test]
+fn a_launch_with_hq_access_gets_a_private_mcp_config_and_flag() {
+    use hq_tools::herdr::McpAccess;
+    use std::os::unix::fs::PermissionsExt;
+    let host = Running::start();
+    let b = host.backend();
+    let mut req = cat("hs-mcp", "claude");
+    req.command = Some("f() { echo \"flags: $*\"; cat; }; f".into());
+    req.mcp = Some(McpAccess {
+        url: "https://hq.example/mcp".into(),
+        token: "hqs_secret123".into(),
+    });
+    assert!(
+        !format!("{req:?}").contains("hqs_secret123"),
+        "the token must not reach logs"
+    );
+    b.launch(&req).unwrap();
+
+    let text = read_until(&b, "hs-mcp", "flags:");
+    assert!(
+        text.contains("--mcp-config") && text.contains("--settings"),
+        "{text}"
+    );
+    assert!(
+        !text.contains("hqs_secret123"),
+        "the token is in the file, not the command line"
+    );
+    let file = host.dir.path().join("run/mcp/hs-mcp.json");
+    assert_eq!(
+        std::fs::metadata(&file).unwrap().permissions().mode() & 0o777,
+        0o600
+    );
+    let cfg = std::fs::read_to_string(&file).unwrap();
+    assert!(
+        cfg.contains("Bearer hqs_secret123") && cfg.contains("https://hq.example/mcp"),
+        "{cfg}"
+    );
+
+    // Another kind never gets one.
+    let mut other = cat("hs-nomcp", "pi");
+    other.mcp = req.mcp.clone();
+    b.launch(&other).unwrap();
+    assert!(!host.dir.path().join("run/mcp/hs-nomcp.json").exists());
 }

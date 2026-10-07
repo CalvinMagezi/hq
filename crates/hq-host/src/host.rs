@@ -280,18 +280,47 @@ impl Host {
         let (true, Some(dir)) = (agent == "claude" && valid_name(name), dir) else {
             return Vec::new();
         };
+        let mut flags = Vec::new();
+        // An MCP config written for this agent goes along, so a restart or a
+        // changed resume command keeps the agent connected to HQ.
+        if let Some(mcp) = crate::hooks::claude_mcp_config_path(&dir, name) {
+            flags.extend(["--mcp-config".to_string(), mcp.to_string_lossy().into_owned()]);
+        }
         let exe = std::env::current_exe().map_or_else(
             |_| "hq".to_string(),
             |p| p.to_string_lossy().into_owned(),
         );
         let command = format!("{} host report", shell_quote(&exe));
         match crate::hooks::write_claude_settings(&dir, name, &command) {
-            Ok(path) => vec!["--settings".to_string(), path.to_string_lossy().into_owned()],
+            Ok(path) => {
+                flags.extend(["--settings".to_string(), path.to_string_lossy().into_owned()]);
+                flags
+            }
             Err(e) => {
                 eprintln!("hq host: no hook settings for '{name}': {e}");
-                Vec::new()
+                flags
             }
         }
+    }
+
+    /// Writes the MCP config that connects a Claude Code agent to HQ as the
+    /// launched session `name`, holding that session's token. `hook_flags`
+    /// returns the flag that points at it. Does nothing for other kinds or a
+    /// host that does not know its socket directory.
+    pub fn write_mcp_config(
+        &self,
+        name: &str,
+        agent: &str,
+        url: &str,
+        token: &str,
+    ) -> Result<(), HostError> {
+        let dir = lock(&self.run_dir).clone();
+        let (true, Some(dir)) = (agent == "claude" && valid_name(name), dir) else {
+            return Ok(());
+        };
+        crate::hooks::write_claude_mcp_config(&dir, name, url, token)
+            .map(|_| ())
+            .map_err(|e| HostError::Io(e.to_string()))
     }
 
     /// Rewrites the state file with the agents that are running and can be

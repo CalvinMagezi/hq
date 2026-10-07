@@ -30,7 +30,7 @@ pub use host::{
     AwaitingInfo, Host, PANE_TOKEN_ENV, RUN_DIR_ENV, PaneInfo, PaneStatus, ReadSource, RestoreReport, SpawnSpec, valid_name,
 };
 pub use gate::{Denied, GATE_DENIED_EXIT, MAX_GATE_INPUT, forward as gate_forward, parse_request as gate_parse_request};
-pub use hooks::{claude_settings, report_params, write_claude_settings};
+pub use hooks::{claude_mcp_config, claude_settings, write_claude_mcp_config, report_params, write_claude_settings};
 pub use keys::encode_key;
 pub use report::{STALE_WORKING_AFTER, combine as combine_state, state_for};
 pub use proto::{MAX_LINE_BYTES, PROTOCOL_VERSION, Request, Response};

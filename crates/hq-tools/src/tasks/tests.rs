@@ -846,3 +846,49 @@ async fn task_related_separates_explicit_from_inferred_and_falls_back() {
     assert_eq!(lonely["fallback"]["kind"], "same_initiative_listing");
     assert!(tool.execute(json!({ "id": "nope" })).await.is_err());
 }
+
+/// A db shared by a create tool and a comment tool.
+async fn comment_as(attested: Option<&str>, supplied_author: Option<&str>) -> String {
+    let vault_path = PathBuf::from("/tmp/test-vault");
+    let vault = Arc::new(VaultClient::new(vault_path.clone()).unwrap());
+    let db = Arc::new(Database::open_memory().unwrap());
+    let all = create_task_tools(vault_path, vault, db.clone());
+    let tool = |name: &str| all.iter().find(|t| t.name() == name).unwrap();
+
+    let made = tool("task_create")
+        .execute(json!({"title": "thread", "created_by": "hq"}))
+        .await
+        .unwrap();
+    let mut args = json!({"task_id": made["id"], "body": "hello"});
+    if let Some(author) = supplied_author {
+        args["author"] = author.into();
+    }
+    if let Some(id) = attested {
+        args[hq_tools_arg()] = id.into();
+    }
+    tool("task_comment_add").execute(args).await.unwrap();
+    let listed = tool("task_comment_list")
+        .execute(json!({"task_id": made["id"]}))
+        .await
+        .unwrap();
+    listed["comments"][0]["author"].as_str().unwrap().to_string()
+}
+
+fn hq_tools_arg() -> &'static str {
+    crate::harness_session::CALLER_SESSION_ARG
+}
+
+#[tokio::test]
+async fn a_comment_from_a_launched_agent_is_authored_by_its_attested_session() {
+    assert_eq!(
+        comment_as(Some("hs-claude-code-1"), Some("someone-else")).await,
+        "hs-claude-code-1",
+        "a name the agent supplies must not replace the session it proved"
+    );
+}
+
+#[tokio::test]
+async fn other_callers_keep_the_author_they_name() {
+    assert_eq!(comment_as(None, Some("calvin")).await, "calvin");
+    assert_eq!(comment_as(None, None).await, "unknown");
+}

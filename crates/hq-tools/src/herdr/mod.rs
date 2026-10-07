@@ -197,7 +197,26 @@ pub struct LaunchRequest {
     /// Arguments that bring this agent back after the host itself restarts.
     /// Only the built-in host uses them; None means a restart leaves it gone.
     pub resume_args: Option<Vec<String>>,
+    /// How the agent connects back to HQ as this session. Only the built-in host
+    /// delivers it, as a private config file next to the agent.
+    pub mcp: Option<McpAccess>,
     pub start_timeout: Duration,
+}
+
+/// The HQ endpoint and the session's own token.
+#[derive(Clone)]
+pub struct McpAccess {
+    pub url: String,
+    pub token: String,
+}
+
+impl std::fmt::Debug for McpAccess {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("McpAccess")
+            .field("url", &self.url)
+            .field("token", &"<redacted>")
+            .finish()
+    }
 }
 
 #[derive(Debug, Clone)]

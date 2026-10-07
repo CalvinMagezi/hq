@@ -119,6 +119,7 @@ fn a_remote_native_host_works_through_the_gate() {
         args: vec![],
         command: Some("f() { echo started; cat; }; f".into()),
         resume_args: None,
+        mcp: None,
         start_timeout: Duration::from_secs(10),
     };
     assert!(b.launch(&req).unwrap().ready);
