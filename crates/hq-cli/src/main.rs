@@ -466,7 +466,11 @@ fn main() -> Result<()> {
         std::env::args().nth(1).as_deref(),
         Some("update" | "update-db")
     );
-    if !privileged_command {
+    // An agent's hook runs inside its sandbox, where the user's env files and
+    // config are unreadable on purpose; it needs neither.
+    let args: Vec<String> = std::env::args().skip(1).take(2).collect();
+    let hook_command = matches!(args.as_slice(), [host, sub] if host == "host" && (sub == "report" || sub == "gate"));
+    if !privileged_command && !hook_command {
         if let Ok(home) = std::env::var("HOME") {
             load_env_file(&std::path::PathBuf::from(home).join(".env.local"));
         }
@@ -492,6 +496,14 @@ async fn async_main() -> Result<()> {
         Some(Commands::Update(args)) => std::process::exit(commands::update::run(args).await),
         Some(Commands::UpdateDb { args }) => std::process::exit(commands::update::run_db(&args)),
         _ => {}
+    }
+
+    // The host's hook reporter and ssh gate need no config, and the reporter
+    // runs where the config is unreadable.
+    if let Some(Commands::Host { sub, dir, allow_unsandboxed }) = &cli.command
+        && (sub == "report" || sub == "gate")
+    {
+        return commands::host::run(sub, dir.clone(), *allow_unsandboxed).await;
     }
 
     // `--config` was exported as HQ_CONFIG_PATH in main(), so this and every
