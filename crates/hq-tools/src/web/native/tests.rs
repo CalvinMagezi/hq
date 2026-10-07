@@ -37,6 +37,7 @@ fn hit(url: &str, snippet: &str, engine: &str) -> SearchResult {
         domain: None,
         published: None,
         engines: vec![engine.into()],
+        flagged: false,
     }
 }
 

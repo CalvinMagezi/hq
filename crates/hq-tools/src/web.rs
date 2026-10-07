@@ -71,6 +71,7 @@ mod fetch_tests;
 mod health;
 mod native;
 mod readable;
+mod sanitize;
 mod ssrf;
 #[cfg(test)]
 mod tests;
@@ -122,4 +123,5 @@ use client::*;
 use fetch::*;
 use native::*;
 use readable::{embedded_text, extract_article};
+use sanitize::*;
 use types::*;

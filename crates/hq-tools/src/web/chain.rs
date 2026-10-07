@@ -27,6 +27,15 @@ pub async fn web_search(
     brave_api_key: Option<&str>,
     native: bool,
 ) -> Result<WebSearchResults> {
+    // A query is an outbound channel: a credential pasted into it would be sent
+    // to every engine, so it is refused before anything leaves the process.
+    let query = &strip_invisible(query);
+    if hq_core::redact::looks_like_credential(query) {
+        bail!(
+            "The search query looks like it contains a credential (API key, token or private key), \
+             so it was not sent. Remove the secret and search again."
+        );
+    }
     let searxng_url = searxng_url.map(str::trim).filter(|s| !s.is_empty());
     let brave = brave_api_key
         .map(str::trim)
@@ -183,6 +192,10 @@ pub(super) fn finish(
         .into_iter()
         .filter(|r| domain_allowed(&r.url, opts))
         .take(opts.max_results)
+        .map(|mut r| {
+            sanitize_result(&mut r);
+            r
+        })
         .collect();
     WebSearchResults {
         query: query.to_string(),
