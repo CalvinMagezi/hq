@@ -46,7 +46,7 @@ async fn probe_native(enabled: bool) -> WebSearchBackendStatus {
     let (pool, _) = search_pool(
         PROBE_QUERY,
         &opts,
-        &NativeEnv::production(),
+        &NativeEnv::diagnostic(),
         deadline,
         NATIVE_ENGINE_TIMEOUT,
     )

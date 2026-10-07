@@ -15,6 +15,9 @@ mod tests;
 
 pub(super) use engines::Engine;
 
+/// Once a primary engine has answered, slower engines get this long before the
+/// pool returns without them (and caches the answer as partial).
+const STRAGGLER_GRACE: Duration = Duration::from_millis(1500);
 const NATIVE_REQUEST_TIMEOUT: Duration = Duration::from_secs(10);
 const RESULT_CACHE_TTL: Duration = Duration::from_secs(10 * 60);
 /// A pool with some engines down is cached briefly, so a retry soon after picks them up again.
@@ -40,6 +43,8 @@ pub(super) static NATIVE_CLIENT: std::sync::LazyLock<Client> =
 pub(super) struct NativeEnv<'a> {
     pub(super) client: &'a Client,
     pub(super) base_override: Option<&'a str>,
+    /// Wait for every engine instead of returning once a primary one has answered.
+    pub(super) wait_for_all: bool,
 }
 
 impl NativeEnv<'static> {
@@ -47,6 +52,15 @@ impl NativeEnv<'static> {
         Self {
             client: &NATIVE_CLIENT,
             base_override: None,
+            wait_for_all: false,
+        }
+    }
+
+    /// For `hq doctor`, which must hear from every engine.
+    pub(super) fn diagnostic() -> Self {
+        Self {
+            wait_for_all: true,
+            ..Self::production()
         }
     }
 }
@@ -274,6 +288,7 @@ fn join_or_start(
         let env = NativeEnv {
             client: &client,
             base_override: base.as_deref(),
+            wait_for_all: false,
         };
         let (answer, complete) = search_pool(&query, &opts, &env, deadline, budget).await;
         store_outcome(key, &answer, complete);
@@ -315,9 +330,32 @@ pub(super) async fn search_pool(
     }
     let mut runs = Vec::new();
     let mut attempts = Vec::new();
-    while let Some(joined) = set.join_next().await {
+    let mut cut_short = false;
+    let mut grace_ends: Option<Instant> = None;
+    loop {
+        let next = match grace_ends {
+            Some(end) => {
+                match tokio::time::timeout_at(end.into(), set.join_next()).await {
+                    Ok(next) => next,
+                    Err(_) => {
+                        cut_short = true;
+                        set.abort_all();
+                        break;
+                    }
+                }
+            }
+            None => set.join_next().await,
+        };
+        let Some(joined) = next else { break };
         match joined {
-            Ok(run) => runs.push(run),
+            Ok(run) => {
+                let answered_well = run.weight >= PRIMARY_WEIGHT
+                    && run.results.as_ref().is_some_and(|r| !r.is_empty());
+                if answered_well && grace_ends.is_none() && !env.wait_for_all {
+                    grace_ends = Some(Instant::now() + STRAGGLER_GRACE);
+                }
+                runs.push(run);
+            }
             Err(e) => attempts.push(ProviderAttempt {
                 provider: "native".into(),
                 outcome: format!("engine task failed: {e}"),
@@ -326,7 +364,7 @@ pub(super) async fn search_pool(
     }
     runs.sort_by_key(|r| r.order);
     attempts.extend(runs.iter().flat_map(|r| r.attempts.clone()));
-    let complete = !runs.is_empty() && runs.iter().all(|r| r.results.is_some());
+    let complete = !cut_short && !runs.is_empty() && runs.iter().all(|r| r.results.is_some());
     let degraded = !runs
         .iter()
         .any(|r| r.results.is_some() && r.weight >= PRIMARY_WEIGHT);
