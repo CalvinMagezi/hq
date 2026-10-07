@@ -64,7 +64,7 @@ pub(super) async fn search_chain(
             deadline,
             &mut attempts,
             || searxng_request(base, query, opts),
-            |json| parse_searxng_results(json, opts.page),
+            |json| parse_searxng_results(json, opts.page).map_err(ProviderError::from),
         )
         .await;
         if let Some(page) = page {
@@ -86,7 +86,10 @@ pub(super) async fn search_chain(
         debug!(query = %query, "searching built-in engines");
         let pool = native_search(query, opts, env, deadline, budgets.native_engine).await;
         attempts.extend(pool.attempts);
-        if let Some(page) = pool.page {
+        // No hits from a pool whose real web engines are all out is a failure to
+        // report, not an empty answer: the attempts say which engines were blocked.
+        let blocked = |p: &Page| p.results.is_empty() && pool.degraded;
+        if let Some(page) = pool.page.filter(|p| !blocked(p)) {
             // A pool with only Wikipedia or Hacker News answering is a last resort,
             // so a configured Brave key still gets its turn.
             let good_enough = !page.results.is_empty() && !pool.degraded;
@@ -123,7 +126,7 @@ pub(super) async fn search_chain(
                 deadline,
                 &mut attempts,
                 || brave_request(endpoint, api_key, query, opts),
-                |json| parse_brave_results(json, opts),
+                |json| parse_brave_results(json, opts).map_err(ProviderError::from),
             )
             .await;
             if let Some(page) = page {
@@ -150,13 +153,16 @@ pub(super) async fn search_chain(
 pub(super) fn native_unsupported(opts: &SearchOptions) -> Vec<String> {
     let mut notes = Vec::new();
     if opts.freshness.is_some() && opts.category == Some(Category::Science) {
-        notes.push("freshness (arXiv ignores it; OpenAlex applies it)".to_string());
+        notes.push("freshness (arXiv and Europe PMC ignore it; OpenAlex applies it)".to_string());
     }
     if opts.freshness.is_some() && opts.category == Some(Category::Images) {
-        notes.push("freshness (image engines do not filter by date)".to_string());
+        notes.push("freshness (Google Images applies it; Wikimedia Commons and Openverse ignore it)".to_string());
     }
     if opts.freshness.is_some() && opts.category == Some(Category::Code) {
-        notes.push("freshness (GitHub and Stack Overflow apply it; crates.io and npm ignore it)".to_string());
+        notes.push(
+            "freshness (GitHub, Stack Overflow, Ask Ubuntu and Super User apply it; MDN, crates.io and npm ignore it)"
+                .to_string(),
+        );
     }
     if opts.freshness.is_some() && opts.category == Some(Category::News) {
         notes.push("freshness (Bing News ignores it; Hacker News applies it)".to_string());

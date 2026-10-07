@@ -29,10 +29,10 @@ impl BackendHealth {
         self.unreachable_until = None;
     }
 
-    /// Exponential backoff from `base`, doubling per consecutive failure, capped at `cap`.
+    /// Backoff of `base` for the first failure, doubling per consecutive one, capped at `cap`.
     fn record_failure(&mut self, base: Duration, cap: Duration) {
         self.consecutive_failures = self.consecutive_failures.saturating_add(1);
-        let shift = self.consecutive_failures.min(16);
+        let shift = self.consecutive_failures.saturating_sub(1).min(16);
         let secs = base.as_secs().saturating_mul(1u64 << shift);
         self.unreachable_until = Some(Instant::now() + Duration::from_secs(secs).min(cap));
     }
@@ -48,18 +48,68 @@ pub(super) fn with_health<T>(key: &str, f: impl FnOnce(&mut BackendHealth) -> T)
 }
 
 
-/// Why a backend call failed. `rate_limited` picks the longer backoff.
+/// What kind of failure a backend reported, which sets how long it is
+/// suspended. The classes and their flat durations are SearxNG's shipped
+/// `suspended_times`: a captcha an hour, a rate limit or an access denial three
+/// minutes, anything else five seconds. A success clears the suspension.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
+pub(super) enum FailureClass {
+    #[default]
+    Generic,
+    RateLimited,
+    AccessDenied,
+    Captcha,
+}
+
+pub(super) const CAPTCHA_SUSPENSION: Duration = Duration::from_secs(3600);
+pub(super) const REFUSAL_SUSPENSION: Duration = Duration::from_secs(180);
+pub(super) const REFUSAL_SUSPENSION_CAP: Duration = Duration::from_secs(180);
+pub(super) const GENERIC_SUSPENSION: Duration = Duration::from_secs(5);
+pub(super) const GENERIC_SUSPENSION_CAP: Duration = Duration::from_secs(5);
+
+impl FailureClass {
+    /// (base, cap) of the suspension. Base and cap are equal, so repeated failures
+    /// do not lengthen it, as in SearxNG.
+    pub(super) fn suspension(self) -> (Duration, Duration) {
+        match self {
+            FailureClass::Captcha => (CAPTCHA_SUSPENSION, CAPTCHA_SUSPENSION),
+            FailureClass::RateLimited | FailureClass::AccessDenied => {
+                (REFUSAL_SUSPENSION, REFUSAL_SUSPENSION_CAP)
+            }
+            FailureClass::Generic => (GENERIC_SUSPENSION, GENERIC_SUSPENSION_CAP),
+        }
+    }
+}
+
+/// Why a backend call failed, and how to suspend it.
+#[derive(Debug)]
 pub(super) struct ProviderError {
     pub(super) reason: String,
-    pub(super) rate_limited: bool,
+    pub(super) class: FailureClass,
 }
 
 impl ProviderError {
-    fn new(reason: impl Into<String>) -> Self {
+    pub(super) fn new(reason: impl Into<String>) -> Self {
+        Self::of(FailureClass::Generic, reason)
+    }
+
+    pub(super) fn of(class: FailureClass, reason: impl Into<String>) -> Self {
         Self {
             reason: reason.into(),
-            rate_limited: false,
+            class,
         }
+    }
+}
+
+impl From<String> for ProviderError {
+    fn from(reason: String) -> Self {
+        Self::new(reason)
+    }
+}
+
+impl From<&str> for ProviderError {
+    fn from(reason: &str) -> Self {
+        Self::new(reason)
     }
 }
 
@@ -82,7 +132,7 @@ pub(super) async fn get_text(request: RequestBuilder) -> Result<Value, ProviderE
     get_body(request).await.map(Value::String)
 }
 
-async fn get_body(request: RequestBuilder) -> Result<String, ProviderError> {
+pub(super) async fn get_body(request: RequestBuilder) -> Result<String, ProviderError> {
     let resp = request.send().await.map_err(|e| {
         let kind = if e.is_timeout() {
             "request timed out"
@@ -106,26 +156,44 @@ pub(super) async fn read_body(resp: reqwest::Response) -> Result<String, Provide
             .get("x-ratelimit-remaining")
             .is_some_and(|v| v == "0");
     if status.as_u16() == 429 || (status.as_u16() == 403 && quota_exhausted) {
-        return Err(ProviderError {
-            reason: format!("rate limited (HTTP {})", status.as_u16()),
-            rate_limited: true,
-        });
+        return Err(ProviderError::of(
+            FailureClass::RateLimited,
+            format!("rate limited (HTTP {})", status.as_u16()),
+        ));
     }
     // Stack Exchange reports throttling as a 400 with an error name in the body.
     if status.as_u16() == 400 {
         let body = resp.text().await.unwrap_or_default();
         if body.contains("throttle_violation") || body.contains("too_many_requests") {
-            return Err(ProviderError {
-                reason: "rate limited (throttled)".into(),
-                rate_limited: true,
-            });
+            return Err(ProviderError::of(
+                FailureClass::RateLimited,
+                "rate limited (throttled)",
+            ));
         }
         return Err(ProviderError::new("HTTP 400 Bad Request"));
     }
-    if status.as_u16() == 401 || status.as_u16() == 403 {
-        return Err(ProviderError::new(format!(
-            "invalid credentials or access denied (HTTP {status})"
-        )));
+    // Cloudflare and reCAPTCHA challenge pages arrive as 403 or 503.
+    if matches!(status.as_u16(), 403 | 503) {
+        let body = resp.text().await.unwrap_or_default();
+        if CHALLENGE_BODY_MARKERS.iter().any(|m| body.contains(m)) {
+            return Err(ProviderError::of(
+                FailureClass::Captcha,
+                format!("challenge page (HTTP {status})"),
+            ));
+        }
+        if status.as_u16() == 403 {
+            return Err(ProviderError::of(
+                FailureClass::AccessDenied,
+                format!("invalid credentials or access denied (HTTP {status})"),
+            ));
+        }
+        return Err(ProviderError::new(format!("HTTP {status}")));
+    }
+    if status.as_u16() == 401 {
+        return Err(ProviderError::of(
+            FailureClass::AccessDenied,
+            format!("invalid credentials or access denied (HTTP {status})"),
+        ));
     }
     if !status.is_success() {
         return Err(ProviderError::new(format!("HTTP {status}")));
@@ -134,6 +202,13 @@ pub(super) async fn read_body(resp: reqwest::Response) -> Result<String, Provide
         .await
         .map_err(|e| ProviderError::new(format!("failed reading body: {}", e.without_url())))
 }
+
+const CHALLENGE_BODY_MARKERS: &[&str] = &[
+    "__cf_chl_",
+    "/cdn-cgi/challenge-platform/",
+    "cf-error-code\">1020",
+    "https://www.google.com/recaptcha/",
+];
 
 pub(super) async fn decode_json(resp: reqwest::Response) -> Result<Value, ProviderError> {
     let body = read_body(resp).await?;
@@ -340,19 +415,22 @@ pub(super) struct Backend<'a> {
     pub(super) key: &'a str,
     pub(super) label: &'static str,
     pub(super) budget: Duration,
-    /// Backoff (base, cap) for a failure; the flag is "rate limited".
-    pub(super) backoff: fn(bool) -> (Duration, Duration),
+    /// Backoff (base, cap) for a failure of the given class.
+    pub(super) backoff: fn(FailureClass) -> (Duration, Duration),
 }
 
-pub(super) fn searxng_backoff(_rate_limited: bool) -> (Duration, Duration) {
-    (SEARXNG_BACKOFF_BASE, SEARXNG_BACKOFF_CAP)
+pub(super) fn searxng_backoff(class: FailureClass) -> (Duration, Duration) {
+    match class {
+        FailureClass::Generic => (SEARXNG_BACKOFF_BASE, SEARXNG_BACKOFF_CAP),
+        other => other.suspension(),
+    }
 }
 
-pub(super) fn brave_backoff(rate_limited: bool) -> (Duration, Duration) {
-    if rate_limited {
-        (BRAVE_RATE_LIMIT_BACKOFF_BASE, BRAVE_RATE_LIMIT_BACKOFF_CAP)
-    } else {
-        (BRAVE_ERROR_BACKOFF_BASE, BRAVE_ERROR_BACKOFF_CAP)
+pub(super) fn brave_backoff(class: FailureClass) -> (Duration, Duration) {
+    match class {
+        FailureClass::RateLimited => (BRAVE_RATE_LIMIT_BACKOFF_BASE, BRAVE_RATE_LIMIT_BACKOFF_CAP),
+        FailureClass::Generic => (BRAVE_ERROR_BACKOFF_BASE, BRAVE_ERROR_BACKOFF_CAP),
+        other => other.suspension(),
     }
 }
 
@@ -363,7 +441,7 @@ pub(super) async fn try_backend<Fut>(
     deadline: Instant,
     attempts: &mut Vec<ProviderAttempt>,
     request: impl FnOnce() -> Fut,
-    parse: impl FnOnce(&Value) -> Result<Page, String>,
+    parse: impl FnOnce(&Value) -> Result<Page, ProviderError>,
 ) -> Option<Page>
 where
     Fut: Future<Output = Result<Value, ProviderError>>,
@@ -393,10 +471,10 @@ where
                 note(format!("ok, {} results", page.results.len()));
                 return Some(page);
             }
-            Err(reason) => ProviderError::new(format!("invalid response: {reason}")),
+            Err(e) => ProviderError::of(e.class, format!("invalid response: {}", e.reason)),
         },
     };
-    let (base, cap) = (backend.backoff)(failure.rate_limited);
+    let (base, cap) = (backend.backoff)(failure.class);
     with_health(backend.key, |h| h.record_failure(base, cap));
     debug!(backend = backend.label, reason = %failure.reason, "web search backend failed");
     note(failure.reason);
