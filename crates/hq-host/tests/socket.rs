@@ -437,10 +437,11 @@ fn spawn_reporter(c: &mut Client, name: &str) -> (String, String) {
                 .find_map(|w| w.strip_prefix(key))
                 .map(str::to_string)
         };
-        if let (Some(t), Some(d)) = (field("T="), field("D=")) {
-            if !t.is_empty() && !d.is_empty() {
-                return (t, d);
-            }
+        if let (Some(t), Some(d)) = (field("T="), field("D="))
+            && !t.is_empty()
+            && !d.is_empty()
+        {
+            return (t, d);
         }
         assert!(Instant::now() < deadline, "no token on screen: {text:?}");
         std::thread::sleep(Duration::from_millis(50));
