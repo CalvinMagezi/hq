@@ -277,3 +277,22 @@ fn orchestrator_children_have_no_file_writers() {
         assert!(orchestrator.iter().any(|n| n == kept), "{kept} missing");
     }
 }
+
+/// An orchestrator's child cannot be sent to a harness that edits files, by name or by default.
+#[test]
+fn orchestrator_children_cannot_use_a_file_editing_external_backend() {
+    use crate::builder::SessionRole;
+
+    let service = service_with_fleet().with_role(SessionRole::Orchestrator);
+    let mut named = ChildRequest::new("t1", "fix the bug");
+    named.backend = Some("claude-code".to_string());
+    assert!(service.authorize_and_resolve(&named).is_err());
+
+    let mut leaf = ChildRequest::new("t2", "summarize this");
+    leaf.backend = Some("groq".to_string());
+    assert!(service.authorize_and_resolve(&leaf).is_ok(), "text-only backends stay available");
+
+    let auto = ChildRequest::new("t3", "think about this");
+    let resolved = service.authorize_and_resolve(&auto).expect("auto resolves");
+    assert_eq!(resolved.resolved_backend, INPROCESS_BACKEND, "auto policy stays in-process");
+}

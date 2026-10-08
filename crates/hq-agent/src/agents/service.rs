@@ -543,6 +543,14 @@ impl AgentService {
                         req.files_in_scope.join(", ")
                     ));
                 }
+                if self.role == crate::builder::SessionRole::Orchestrator
+                    && hq_tools::harness_chunk::is_agentic_harness(name)
+                {
+                    return Err(format!(
+                        "requested backend '{name}' can edit files, which an orchestrator's children may not do; \
+                         use the in-process executor, or start a coding session with harness_session_spawn"
+                    ));
+                }
                 // Explicit external request: honor it or reject. Never silently
                 // downgrade to in-process — the caller asked for this backend.
                 let backend = self
@@ -573,10 +581,11 @@ impl AgentService {
                         allowed_paths,
                         model: ModelPlan::default(),
                     })
-                } else if let Some((name, backend)) = self
-                    .backend_registry
-                    .as_ref()
-                    .and_then(|r| r.default_external())
+                } else if self.role != crate::builder::SessionRole::Orchestrator
+                    && let Some((name, backend)) = self
+                        .backend_registry
+                        .as_ref()
+                        .and_then(|r| r.default_external())
                 {
                     Ok(Resolution {
                         executor: ResolvedExecutor::External(backend),

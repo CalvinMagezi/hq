@@ -270,11 +270,13 @@ impl HqTool for GithubCloneTool {
 
     async fn execute(&self, args: Value) -> Result<Value> {
         let repo = repo(&args)?;
-        let dest = clone_root().join(repo.replace('/', "__"));
+        let dest = clone_root().join(&repo);
         if dest.exists() {
             return Ok(json!({ "path": dest.display().to_string(), "cached": true }));
         }
-        tokio::fs::create_dir_all(clone_root()).await?;
+        if let Some(parent) = dest.parent() {
+            tokio::fs::create_dir_all(parent).await?;
+        }
         let dest_arg = dest.display().to_string();
         let have_gh = which::which("gh").is_ok();
         if have_gh {

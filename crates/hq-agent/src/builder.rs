@@ -452,11 +452,7 @@ impl SessionBuilder {
         self
     }
 
-    /// Set the session profile controlling which tool tier is visible.
-    ///
-    /// Use `Weak` for relay sessions and sub-agents running on local/free models.
-    /// Leave out every tool whose name starts with one of `prefixes`, whatever
-    /// the profile or policy would otherwise allow.
+    /// Run this session as an implementor (the default) or an orchestrator.
     pub fn role(mut self, role: SessionRole) -> Self {
         self.role = role;
         self
@@ -466,6 +462,11 @@ impl SessionBuilder {
         self.role
     }
 
+    /// Set the session profile controlling which tool tier is visible.
+    ///
+    /// Use `Weak` for relay sessions and sub-agents running on local/free models.
+    /// Leave out every tool whose name starts with one of `prefixes`, whatever
+    /// the profile or policy would otherwise allow.
     pub fn deny_tool_prefixes(mut self, prefixes: Vec<String>) -> Self {
         self.tool_deny_prefixes = prefixes;
         self
@@ -554,6 +555,7 @@ impl SessionBuilder {
             session.set_role_denial(Arc::new(crate::session::role_denial::RoleDenial::new(
                 ORCHESTRATOR_REMOVED_TOOLS,
                 mailbox_denial_notifier(vault_path.clone()),
+                vec![vault_path.join("Notebooks"), std::env::temp_dir()],
             )));
         }
 

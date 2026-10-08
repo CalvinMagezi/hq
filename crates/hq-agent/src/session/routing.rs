@@ -93,6 +93,14 @@ impl AgentSession {
             }
         }
 
+        if let Some(msg) = self
+            .role_denial
+            .as_ref()
+            .and_then(|d| d.refuse_output(&tc.name, &tc.arguments))
+        {
+            return Ok(text_result(msg));
+        }
+
         let tool = {
             // Take a cloneable execution handle, then drop the registry lock
             // *before* awaiting `execute`. Holding the global mutex across the

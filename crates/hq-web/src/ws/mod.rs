@@ -441,7 +441,7 @@ impl ChatTurn {
             let record = self.record.lock().unwrap_or_else(|e| e.into_inner());
             (record.is_driver_turn(), record.is_session_driver_turn(), record.followup_turn_id())
         };
-        let hooks_role = if config.governance.orchestrator_role {
+        let hooks_role = if config.governance.orchestrator_role && self.ask.is_none() {
             hq_agent::builder::SessionRole::Orchestrator
         } else {
             hq_agent::builder::SessionRole::Implementor
