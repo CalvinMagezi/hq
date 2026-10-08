@@ -85,7 +85,7 @@ fn gh(parts: &[&str]) -> GhCall {
 pub(crate) fn build_call(args: &Value) -> Result<GhCall> {
     let action = text(args, "action").context("`action` is required")?;
     let call = match action {
-        "repo_view" => gh(&["repo", "view", &repo(args)?]),
+        "repo_view" => GhCall::ApiGet(format!("repos/{}", repo(args)?)),
         "pr_list" | "issue_list" | "release_list" | "run_list" => {
             let noun = action.trim_end_matches("_list");
             gh(&[noun, "list", "--repo", &repo(args)?, "--limit", &limit(args)])
@@ -231,7 +231,7 @@ impl HqTool for GithubReadTool {
             }
             (GhCall::ApiGet(path), false) => http_get(&path).await?,
             (GhCall::Gh(_), false) => bail!(
-                "the gh CLI is not installed here; use action file, api or repo_view-by-api (repos/owner/name) for public data"
+                "the gh CLI is not installed here; repo_view, file and api still work for public data"
             ),
         };
         Ok(json!({ "output": output }))
