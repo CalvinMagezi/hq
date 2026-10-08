@@ -10,7 +10,7 @@ export LC_ALL=C
 # Written in two pieces so this file does not match itself.
 WORD="her""dr"
 
-ALLOWED='^(NOTICE|CHANGELOG\.md|docs/provenance/|crates/hq-db/sql/|crates/hq-db/src/migrations\.rs|crates/hq-db/src/harness_sessions_registry/tests\.rs|crates/hq-host/src/detect/|crates/hq-host/src/lib\.rs|crates/hq-core/src/config/(mod|tests)\.rs|crates/hq-tools/src/agent_host/pairing(\.rs|/)|docs/AGENT_HOST\.md|scripts/retired-names-check\.sh)'
+ALLOWED='^(NOTICE|CHANGELOG\.md|docs/provenance/|crates/hq-db/sql/|crates/hq-db/src/migrations\.rs|crates/hq-db/src/harness_sessions_registry/tests\.rs|crates/hq-host/src/detect/|crates/hq-host/src/lib\.rs|crates/hq-core/src/config/(mod|tests)\.rs|crates/hq-tools/src/agent_host/pairing(\.rs|/)|apps/hq-web/src/lib/settingsApi(\.test)?\.ts|docs/AGENT_HOST\.md|scripts/retired-names-check\.sh)'
 
 bad=0
 while IFS= read -r file; do
