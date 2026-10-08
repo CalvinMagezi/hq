@@ -50,6 +50,44 @@ const DENIED_SERVICES: &[&str] = &["com.apple.coreservices.launchservicesd", "co
 /// What Claude Code needs to write under HOME, besides the project.
 /// `~/.claude.json` is deliberately not writable: it holds MCP server commands the
 /// operator's own Claude runs later. The host records trust for the project itself.
+/// Where each coding agent keeps its own login, history and logs under HOME. An
+/// agent may write only its own: the others stay unreadable to it. (Claude Code is
+/// handled separately because a launch profile can move its directory.)
+const AGENT_STATE_DIRS: &[(&str, &[&str])] = &[
+    ("agy", &[".gemini"]),
+    ("antigravity", &[".gemini"]),
+    ("codex", &[".codex"]),
+    ("cursor", &[".cursor", ".config/cursor"]),
+    ("opencode", &[".config/opencode", ".local/share/opencode", ".local/state/opencode"]),
+    ("copilot", &[".copilot", ".config/github-copilot"]),
+    ("kimi", &[".kimi"]),
+    ("qwen", &[".qwen"]),
+    ("pi", &[".pi"]),
+];
+/// Hosts an agent needs to sign in and reach its own models, over HTTPS. HQ sends
+/// the Anthropic API for every launch; these cover the others, so a launch does not
+/// fail on a login the user already has. Only the first row has been run against
+/// the real CLI. Agents that talk to whichever model provider the user configures
+/// (opencode, kimi, qwen) are left to `agent_host.sandbox.allow_domains`.
+const AGENT_DEFAULT_ALLOW: &[(&str, &[&str])] = &[
+    (
+        "agy",
+        &[
+            "oauth2.googleapis.com",
+            "www.googleapis.com",
+            "cloudcode-pa.googleapis.com",
+            "daily-cloudcode-pa.googleapis.com",
+            "generativelanguage.googleapis.com",
+            "play.googleapis.com",
+            "antigravity-unleash.goog",
+            "accounts.google.com",
+        ],
+    ),
+    ("codex", &["api.openai.com", "auth.openai.com", "chatgpt.com"]),
+    ("cursor", &["*.cursor.sh"]),
+    ("copilot", &["*.githubcopilot.com", "api.github.com", "github.com"]),
+    ("pi", &["pi.dev"]),
+];
 const HOME_WRITABLE: &[&str] = &[".cache", "Library/Caches"];
 /// Temporary directories every agent shares on macOS (Seatbelt lists them writable).
 const TMP_ROOTS: &[&str] = &["/tmp", "/var/tmp", "/var/folders", "/dev"];
@@ -348,6 +386,26 @@ pub(crate) fn confine(
     let run_dir = run_dir.ok_or_else(|| refuse("the host has no run directory to protect"))?;
     let backend = backend().ok_or_else(|| refuse("no sandbox program (sandbox-exec or bwrap) on this machine"))?;
     let claude = claude_config(env);
+    // The agent's own state directories are writable (created if its first run has
+    // not made them yet, so there is something to allow).
+    let mut own_spec = spec.clone();
+    if let Some(kind) = agent.map(|a| if a == "antigravity" { "agy" } else { a }) {
+        if let Some((_, dirs)) = AGENT_STATE_DIRS.iter().find(|(k, _)| *k == kind) {
+            let home = home().ok_or_else(|| refuse("HOME is not set"))?;
+            for dir in dirs.iter().map(|d| home.join(d)) {
+                let _ = std::fs::create_dir_all(&dir);
+                own_spec.writable.push(dir);
+            }
+        }
+        if let Some((_, hosts)) = AGENT_DEFAULT_ALLOW.iter().find(|(k, _)| *k == kind) {
+            for host in *hosts {
+                if !own_spec.allow.iter().any(|a| a.host == *host) {
+                    own_spec.allow.push(Allow { host: host.to_string(), ports: vec![443], private: false });
+                }
+            }
+        }
+    }
+    let spec = &own_spec;
     if agent == Some("claude")
         && let Some(claude) = &claude
         && let Err(e) = trust_claude_project(&claude.json_dir, cwd)

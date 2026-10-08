@@ -318,3 +318,40 @@ fn a_launch_profile_keeps_its_own_claude_config_and_loses_the_default_one() {
     }
     host.kill("a").unwrap();
 }
+
+#[test]
+fn an_agent_may_write_its_own_state_directory_and_no_other_agents() {
+    if !sandbox_available() {
+        return;
+    }
+    let home = std::path::PathBuf::from(std::env::var("HOME").unwrap());
+    let dir = run_dir();
+    let project = tempfile::tempdir().unwrap();
+    let host = host_for(dir.path());
+    let probe = format!("hq-state-probe-{}", std::process::id());
+    let script = format!(
+        "t() {{ if eval \"$2\" >/dev/null 2>&1; then echo \"$1=yes\"; else echo \"$1=no\"; fi; }}; \
+         t own 'echo x > \"$HOME/.gemini/{probe}\"'; t other 'echo x > \"$HOME/.codex/{probe}\"'; echo DONE"
+    );
+    let mut s = SpawnSpec::new("a", vec!["sh".into(), "-c".into(), script], project.path());
+    s.agent = Some("agy".into());
+    s.sandbox = Some(spec(vec![]));
+    host.spawn(s).unwrap();
+    let deadline = Instant::now() + WAIT;
+    let out = loop {
+        let text = host.read("a", ReadSource::Recent, 0).unwrap();
+        if text.contains("DONE") {
+            break text;
+        }
+        assert!(Instant::now() < deadline, "never finished:\n{text}");
+        std::thread::sleep(Duration::from_millis(50));
+    };
+    let own = home.join(".gemini").join(&probe);
+    let other = home.join(".codex").join(&probe);
+    let (own_written, other_written) = (own.exists(), other.exists());
+    let _ = std::fs::remove_file(&own);
+    let _ = std::fs::remove_file(&other);
+    assert!(out.contains("own=yes") && own_written, "{out}");
+    assert!(!out.contains("other=yes") && !other_written, "{out}");
+    host.kill("a").unwrap();
+}

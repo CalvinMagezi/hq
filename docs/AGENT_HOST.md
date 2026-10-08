@@ -174,6 +174,13 @@ tells you, and the conversation can be resumed. `hq host status` lists every
 agent with its state, sandbox mode, idle time and age. A busy agent is never
 reaped.
 
+Each agent also gets what it needs to be that agent: its own login and history directory
+(`~/.gemini` for Antigravity, `~/.codex`, `~/.cursor`, `~/.copilot`, `~/.pi` and so on, and
+never another agent's) and the HTTPS hosts it signs in and reaches its models through. Those
+defaults are verified for Claude Code and Antigravity; for agents that talk to whichever
+provider you configure (opencode, kimi, qwen) add the provider's host to
+`agent_host.sandbox.allow_domains`.
+
 The sandbox policy is kept in `session.json` and applied again on restore.
 `agent.list` shows each agent's mode and `host.status` counts agents running
 with `none`.
