@@ -555,6 +555,7 @@ impl SessionBuilder {
                 tool_notes: tool_notes.as_deref(),
                 weak_catalog: weak_catalog.as_deref(),
                 context_window: session_config.context_window,
+                identity: hq_core::config::runtime_identity_block(&self.config),
             },
         )
         .await;

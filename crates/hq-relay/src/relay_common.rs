@@ -525,7 +525,7 @@ pub(crate) fn load_system_prompt_with_env(vault: &VaultClient) -> String {
     // string: the agent asserted its stale `default_model` identity even
     // while actually streaming from the chain's real primary.
     let config = hq_core::config::HqConfig::load().unwrap_or_default();
-    let model = hq_core::config::resolve_session_model(&config);
+    let identity = hq_core::config::runtime_identity_block(&config);
 
     let vault_path_str = vault_path.display().to_string();
 
@@ -538,7 +538,7 @@ pub(crate) fn load_system_prompt_with_env(vault: &VaultClient) -> String {
     let runtime_block = format!(
         r#"## Live Context — {date_str}
 
-**You are HQ**, running as `{model}` on this machine's Agent-HQ relay. You are NOT a generic LLM. Do not say you cannot identify your model. Per-message caller identity (owner vs guest) is appended by the Telegram handler when applicable.
+**You are HQ**, on this machine's Agent-HQ relay. {identity} You are NOT a generic LLM. Per-message caller identity (owner vs guest) is appended by the Telegram handler when applicable.
 
 - **Vault**: `{vault_path_str}`
 

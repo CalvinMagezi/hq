@@ -424,3 +424,30 @@ fn a_config_with_the_old_agent_host_heading_still_loads_and_the_new_one_wins() {
     std::fs::write(&both, "agent_host:\n  default_host: pc\nherdr:\n  default_host: laptop\n").unwrap();
     assert_eq!(crate::HqConfig::load_from_path(&both).unwrap().agent_host.default_host, "pc");
 }
+
+#[test]
+fn runtime_identity_names_primary_provider_and_fallbacks() {
+    use crate::HqConfig;
+    use crate::config::{BackendEntry, BackendKind, runtime_identity_block};
+    let mut config = HqConfig { default_model: "deepseek-flash".into(), ..Default::default() };
+    let entry = |name: &str, endpoint: &str, model: &str| BackendEntry {
+        name: name.into(),
+        kind: BackendKind::OpenaiCompatible,
+        endpoint: Some(endpoint.into()),
+        credential_env: None,
+        model: Some(model.into()),
+        effort: None,
+        wire: Default::default(),
+        enabled: true,
+    };
+    config.backends.primary = "haiku".into();
+    config.backends.fallbacks = vec!["deepseek".into()];
+    config.backends.backends = vec![
+        entry("haiku", "https://openrouter.ai/api/v1", "anthropic/claude-haiku-5.5"),
+        entry("deepseek", "https://api.deepseek.com/v1", "deepseek-flash"),
+    ];
+    let block = runtime_identity_block(&config);
+    assert!(block.contains("`anthropic/claude-haiku-5.5` through OpenRouter"), "{block}");
+    assert!(block.contains("`deepseek-flash` through DeepSeek"), "{block}");
+    assert!(block.find("haiku").unwrap() < block.find("deepseek").unwrap());
+}
