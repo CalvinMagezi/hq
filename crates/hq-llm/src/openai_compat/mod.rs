@@ -12,6 +12,9 @@ pub(crate) use wire::parse_flexible_response;
 pub use wire::{build_request, classify_openai_error, parse_assistant_message};
 
 
+/// Google AI's OpenAI-compatible endpoint.
+pub const GEMINI_OPENAI_BASE_URL: &str = "https://generativelanguage.googleapis.com/v1beta/openai";
+
 /// The only temperature Kimi Code's coding endpoint accepts.
 const KIMI_CODING_TEMPERATURE: f32 = 1.0;
 

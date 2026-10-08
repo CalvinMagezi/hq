@@ -16,6 +16,7 @@ mod sessions_api;
 mod copilot_usage_api;
 mod openrouter_usage_api;
 mod settings_api;
+mod setup_api;
 mod subagent_followup;
 mod tasks_api;
 mod tasks_watch;
@@ -157,6 +158,9 @@ pub fn create_router(state: Arc<WsState>) -> Router {
         .route("/api/vault-signals", get(vault_api::signals_handler))
         .route("/api/tree", get(api::tree_handler))
         .route("/api/settings", get(settings_api::settings_handler))
+        .route("/api/setup/status", get(setup_api::status_handler))
+        .route("/api/setup/test", post(setup_api::test_handler))
+        .route("/api/setup/provider", post(setup_api::provider_handler))
         .route(
             "/api/copilot-usage",
             get(copilot_usage_api::copilot_usage_handler),

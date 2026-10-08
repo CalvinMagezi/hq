@@ -11,6 +11,7 @@
 import { Route as rootRouteImport } from './routes/__root'
 import { Route as VaultRouteImport } from './routes/vault'
 import { Route as TasksRouteImport } from './routes/tasks'
+import { Route as SetupRouteImport } from './routes/setup'
 import { Route as SettingsRouteImport } from './routes/settings'
 import { Route as SessionsRouteImport } from './routes/sessions'
 import { Route as NotificationsRouteImport } from './routes/notifications'
@@ -27,6 +28,11 @@ const VaultRoute = VaultRouteImport.update({
 const TasksRoute = TasksRouteImport.update({
   id: '/tasks',
   path: '/tasks',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const SetupRoute = SetupRouteImport.update({
+  id: '/setup',
+  path: '/setup',
   getParentRoute: () => rootRouteImport,
 } as any)
 const SettingsRoute = SettingsRouteImport.update({
@@ -71,6 +77,7 @@ export interface FileRoutesByFullPath {
   '/notifications': typeof NotificationsRoute
   '/sessions': typeof SessionsRoute
   '/settings': typeof SettingsRoute
+  '/setup': typeof SetupRoute
   '/tasks': typeof TasksRoute
   '/vault': typeof VaultRouteWithChildren
   '/vault/$': typeof VaultSplatRoute
@@ -82,6 +89,7 @@ export interface FileRoutesByTo {
   '/notifications': typeof NotificationsRoute
   '/sessions': typeof SessionsRoute
   '/settings': typeof SettingsRoute
+  '/setup': typeof SetupRoute
   '/tasks': typeof TasksRoute
   '/vault/$': typeof VaultSplatRoute
   '/vault': typeof VaultIndexRoute
@@ -93,6 +101,7 @@ export interface FileRoutesById {
   '/notifications': typeof NotificationsRoute
   '/sessions': typeof SessionsRoute
   '/settings': typeof SettingsRoute
+  '/setup': typeof SetupRoute
   '/tasks': typeof TasksRoute
   '/vault': typeof VaultRouteWithChildren
   '/vault/$': typeof VaultSplatRoute
@@ -106,6 +115,7 @@ export interface FileRouteTypes {
     | '/notifications'
     | '/sessions'
     | '/settings'
+    | '/setup'
     | '/tasks'
     | '/vault'
     | '/vault/$'
@@ -117,6 +127,7 @@ export interface FileRouteTypes {
     | '/notifications'
     | '/sessions'
     | '/settings'
+    | '/setup'
     | '/tasks'
     | '/vault/$'
     | '/vault'
@@ -127,6 +138,7 @@ export interface FileRouteTypes {
     | '/notifications'
     | '/sessions'
     | '/settings'
+    | '/setup'
     | '/tasks'
     | '/vault'
     | '/vault/$'
@@ -139,6 +151,7 @@ export interface RootRouteChildren {
   NotificationsRoute: typeof NotificationsRoute
   SessionsRoute: typeof SessionsRoute
   SettingsRoute: typeof SettingsRoute
+  SetupRoute: typeof SetupRoute
   TasksRoute: typeof TasksRoute
   VaultRoute: typeof VaultRouteWithChildren
 }
@@ -157,6 +170,13 @@ declare module '@tanstack/react-router' {
       path: '/tasks'
       fullPath: '/tasks'
       preLoaderRoute: typeof TasksRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/setup': {
+      id: '/setup'
+      path: '/setup'
+      fullPath: '/setup'
+      preLoaderRoute: typeof SetupRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/settings': {
@@ -229,6 +249,7 @@ const rootRouteChildren: RootRouteChildren = {
   NotificationsRoute: NotificationsRoute,
   SessionsRoute: SessionsRoute,
   SettingsRoute: SettingsRoute,
+  SetupRoute: SetupRoute,
   TasksRoute: TasksRoute,
   VaultRoute: VaultRouteWithChildren,
 }
