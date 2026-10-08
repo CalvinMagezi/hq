@@ -65,6 +65,9 @@ fn resolve_targets(target: &str) -> Vec<&str> {
 }
 
 fn log_path_for(target: &str, errors: bool) -> PathBuf {
+    if matches!(target, "web" | "pwa") {
+        return super::web::log_path();
+    }
     let log_dir = if cfg!(target_os = "macos") {
         dirs::home_dir().unwrap_or_default().join("Library/Logs")
     } else {
@@ -80,7 +83,6 @@ fn log_path_for(target: &str, errors: bool) -> PathBuf {
         "telegram" | "tg" => "agent-hq-telegram".to_string(),
         "relay-server" => "agent-hq-relay-server".to_string(),
         "vault-sync" => "agent-hq-vault-sync".to_string(),
-        "pwa" => "agent-hq-pwa".to_string(),
         other => format!("hq-{other}"),
     };
     let suffix = if errors { "error.log" } else { "log" };

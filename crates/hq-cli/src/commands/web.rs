@@ -160,9 +160,11 @@ async fn start(config: &HqConfig, mut args: StartArgs) -> Result<()> {
     let mut report = Report::new(&bind, port, token, Some(&static_dir));
 
     if args.detach {
-        let log = hq_dir().join("logs").join("web.log");
+        let log = log_path();
         report.log = Some(log.display().to_string());
-        report.pid = Some(spawn_detached(&bind, port, args.lan, &static_dir, &log).await?);
+        report.pid = Some(
+            spawn_detached(&bind, port, args.lan, &static_dir, &config.vault_path, &log).await?,
+        );
         return finish(report, &args);
     }
 
@@ -175,6 +177,7 @@ async fn start(config: &HqConfig, mut args: StartArgs) -> Result<()> {
         &db,
         Some(static_dir.clone()),
         report.token.clone(),
+        &bind,
     );
     let addr = listen_addr(&bind, port)?;
     let listener = tokio::net::TcpListener::bind(addr)
@@ -202,17 +205,27 @@ async fn start(config: &HqConfig, mut args: StartArgs) -> Result<()> {
 /// run's flags would have made it. Asking for a different address than the
 /// running one is refused rather than silently ignored.
 fn report_running(config: &HqConfig, args: &StartArgs, bind: &str, port: u16) -> Result<()> {
-    let running = read_state()
-        .filter(|s| s.port == port && super::stop::is_alive(s.pid))
-        .map(|s| s.bind)
-        .unwrap_or_else(|| config.web_bind.clone());
+    let ours = read_state().filter(|s| s.port == port && super::stop::is_alive(s.pid));
+    let running = ours
+        .as_ref()
+        .map_or_else(|| config.web_bind.clone(), |s| s.bind.clone());
     if args.names_bind() && !same_bind(&running, bind) {
         bail!(
             "HQ web is already running on {running}:{port}, not {bind}. Run `hq web stop` first \
              (or `hq stop` if it came from `hq start all`), then start it again."
         );
     }
-    let token = resolve_token(&running, config.web_auth_token.as_deref())?;
+    // A server `hq web` did not start (`hq start`, systemd) may hold a token we cannot see;
+    // minting a new one here would print a login link that never works.
+    let token = if ours.is_some() {
+        resolve_token(&running, config.web_auth_token.as_deref())?
+    } else {
+        config
+            .web_auth_token
+            .as_deref()
+            .map(|t| t.trim().to_string())
+            .filter(|t| !t.is_empty())
+    };
     let mut report = Report::new(&running, port, token, None);
     report.already_running = true;
     finish(report, args)
@@ -281,6 +294,11 @@ impl Report {
                 lan_ip().unwrap_or_else(|| bind.to_string())
             } else {
                 bind.to_string()
+            };
+            let host = if host.contains(':') {
+                format!("[{host}]")
+            } else {
+                host
             };
             format!("http://{host}:{port}")
         });
@@ -478,6 +496,7 @@ async fn spawn_detached(
     port: u16,
     lan: bool,
     static_dir: &Path,
+    vault: &Path,
     log: &Path,
 ) -> Result<u32> {
     let out = open_log(log)?;
@@ -493,6 +512,8 @@ async fn spawn_detached(
     ]);
     // The child serves the directory the parent settled on, wherever it started from.
     cmd.env("HQ_WEB_STATIC_DIR", static_dir);
+    // `--vault` is an in-memory override, so a fresh child would load the default vault.
+    cmd.env("HQ_VAULT_PATH", vault);
     if lan {
         cmd.arg("--lan");
     } else {
@@ -628,12 +649,16 @@ fn is_our_server(pid: u32) -> bool {
 
 /// `…/hq web …` (or its `pwa`/`dashboard` aliases) as a process command line.
 fn looks_like_hq_web(cmdline: &str) -> bool {
-    let mut words = cmdline.split_whitespace();
-    let is_hq = words
-        .next()
-        .and_then(|exe| Path::new(exe).file_name())
-        .is_some_and(|name| name == "hq");
-    is_hq && words.any(|w| matches!(w, "web" | "pwa" | "dashboard"))
+    // The executable path may contain spaces, so grow it word by word until it names `hq`.
+    let words: Vec<&str> = cmdline.split_whitespace().collect();
+    (1..=words.len()).any(|end| {
+        Path::new(&words[..end].join(" "))
+            .file_name()
+            .is_some_and(|n| n == "hq")
+            && words[end..]
+                .iter()
+                .any(|w| matches!(*w, "web" | "pwa" | "dashboard"))
+    })
 }
 
 /// The supervised child's log. It is created owner-only and tightened if an
@@ -699,6 +724,11 @@ fn lan_ip() -> Option<String> {
     Some(sock.local_addr().ok()?.ip().to_string())
 }
 
+/// Where a detached `hq web` writes its log; `hq logs web` reads it.
+pub(crate) fn log_path() -> PathBuf {
+    hq_dir().join("logs").join("web.log")
+}
+
 fn hq_dir() -> PathBuf {
     HqConfig::hq_dir()
 }
@@ -755,6 +785,12 @@ mod tests {
         assert_eq!(r.url, "http://localhost:5678");
         assert_eq!(r.login_url, r.url);
         assert!(r.network_url.is_none() && r.token.is_none());
+    }
+
+    #[test]
+    fn ipv6_network_url_is_bracketed() {
+        let r = Report::new("2001:db8::1", 9000, Some("t".into()), None);
+        assert_eq!(r.network_url.as_deref(), Some("http://[2001:db8::1]:9000"));
     }
 
     #[test]
@@ -879,6 +915,9 @@ mod tests {
         );
         assert!(!looks_like_hq_web("/usr/local/bin/hq start all"));
         assert!(!looks_like_hq_web(""));
+        assert!(looks_like_hq_web(
+            "/Users/Jane Doe/bin/hq web --no-open --supervised"
+        ));
     }
 
     #[test]

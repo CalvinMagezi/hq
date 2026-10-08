@@ -246,6 +246,7 @@ fn spawn_web_server(config: &HqConfig, vault: &Arc<VaultClient>, db: &Arc<Databa
         db,
         config.web_static_dir.clone(),
         web_auth_token,
+        &config.web_bind,
     );
     let (bind, port) = (config.web_bind.clone(), config.ws_port);
     tokio::spawn(async move {
@@ -263,6 +264,7 @@ pub(crate) fn build_web_state(
     db: &Arc<Database>,
     static_dir: Option<std::path::PathBuf>,
     web_auth_token: Option<String>,
+    bind: &str,
 ) -> Arc<hq_web::WsState> {
     let registry = Arc::new(hq_mcp::registry::create_default_registry(
         vault.clone(),
@@ -285,6 +287,8 @@ pub(crate) fn build_web_state(
     info!(path = %static_dir.display(), "ws: serving web UI");
     let mut state = hq_web::WsState::new(vault_path, Some(static_dir)).with_registry(registry);
     state.web_auth_token = web_auth_token;
+    // `hq web --lan` overrides the configured bind, and /mcp's dev switch must follow the real one.
+    state.web_bind_is_loopback = hq_web::auth::bind_is_loopback(bind);
     let state = Arc::new(state);
     hq_web::install_ask_runner(&state);
     state
