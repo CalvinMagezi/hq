@@ -218,6 +218,25 @@ protocol line replaced by an error, and a pane that stops reading its terminal
 fails a write after 5 seconds instead of holding the connection. A client also
 refuses a host directory that is not owned by you and private to you.
 
+### Agent compatibility
+
+What each agent needed to start under the sandbox, and whether it has been run signed in end to
+end. A launch that fails for a reason on this list is a known quirk, not a new bug. Login state is
+the user's: HQ cannot sign an agent in for you, and an agent with no login shows its own sign-in
+screen.
+
+| Agent | Run signed in | What HQ does for it |
+| --- | --- | --- |
+| Claude Code | yes | Writes only its config directory; `DISABLE_AUTOUPDATER=1`; project trust recorded by the host. Hooks named in its settings must live in a readable path (add the directory to `agent_host.sandbox.readable`, and any state directory to `writable`), or the prompt hook fails and every prompt is blocked. |
+| Antigravity (`agy`) | yes | Own state in `~/.gemini`; Google sign-in and model hosts allowed; trust dialog answered at launch. |
+| Codex | yes | Starts with `--no-daemon` (its daemon check reads other processes, which the sandbox forbids), also on resume. |
+| Cursor | yes | No `--trust` (headless only); the workspace trust dialog appears on first use in a folder and the first prompt can be lost to it, so send the prompt again. `*.cursor.sh` allowed. |
+| pi | yes, reaches its model | Session directory is `{home}/.pi/hq-sessions/<id>` on the host that runs it. Uses whichever provider you logged into, so add that provider's host to `agent_host.sandbox.allow_domains` (Google's Gemini API is built in). |
+| GitHub Copilot, opencode, kimi, qwen | no | Hosts for the first are built in from its documented domains; the others depend on the model provider you configure, so add it to `agent_host.sandbox.allow_domains`. |
+
+Every Node-based agent (Cursor, pi) needs `NODE_USE_ENV_PROXY=1` to send its requests through the
+egress proxy; the host sets it for all agents.
+
 ## Restarts
 
 The host keeps `session.json` in its directory (mode 0600). It lists every
