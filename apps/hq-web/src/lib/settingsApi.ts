@@ -10,6 +10,18 @@ interface SettingsBackend {
   fallback_position: number | null
 }
 
+export interface AgentHostSettings {
+  default_host: string
+  hosts: string[]
+  sandbox_mode: string
+  sandbox_extra_domains: number
+  idle_reap_hours: number
+  drive_new_watches: boolean
+  driver_checkin_minutes: number
+  driver_nudge_budget: number
+  driver_no_progress_limit: number
+}
+
 export interface HqSettings {
   model: { active: string; default_model: string; relay_override: string | null; local_only: boolean }
   backends: { configured: boolean; primary: string; fallbacks: string[]; entries: SettingsBackend[] }
@@ -26,7 +38,8 @@ export interface HqSettings {
     skills_write_approval: boolean
     web_allowed_origins: string[]
   }
-  agent_host: { default_host: string; hosts: string[]; sandbox_mode: string; sandbox_extra_domains: number; idle_reap_hours: number; drive_new_watches: boolean; driver_checkin_minutes: number; driver_nudge_budget: number; driver_no_progress_limit: number }
+  /** Null when the gateway predates the section (see `normalizeSettings`). */
+  agent_host: AgentHostSettings | null
   integrations: {
     remote_mcp: { name: string; host: string; live_user_turn_only: boolean }[]
     searxng_host: string | null
@@ -35,8 +48,17 @@ export interface HqSettings {
   }
 }
 
-export function fetchSettings(): Promise<HqSettings> {
-  return hqJson('/api/settings')
+/**
+ * The page and the gateway update separately, so a new page can meet a gateway that still names
+ * the coding-agent section `herdr` (or lacks it). Read either name and never leave it undefined.
+ */
+export function normalizeSettings(raw: Omit<HqSettings, 'agent_host'> & { agent_host?: AgentHostSettings | null; herdr?: AgentHostSettings | null }): HqSettings {
+  const { herdr, agent_host, ...rest } = raw
+  return { ...rest, agent_host: agent_host ?? herdr ?? null }
+}
+
+export async function fetchSettings(): Promise<HqSettings> {
+  return normalizeSettings(await hqJson('/api/settings'))
 }
 
 const SECS_PER_MINUTE = 60

@@ -14,6 +14,7 @@ mod security_headers;
 mod session_driver;
 mod sessions_api;
 mod copilot_usage_api;
+mod openrouter_usage_api;
 mod settings_api;
 mod subagent_followup;
 mod tasks_api;
@@ -159,6 +160,10 @@ pub fn create_router(state: Arc<WsState>) -> Router {
         .route(
             "/api/copilot-usage",
             get(copilot_usage_api::copilot_usage_handler),
+        )
+        .route(
+            "/api/openrouter-usage",
+            get(openrouter_usage_api::openrouter_usage_handler),
         )
         .route("/api/pinned", get(api::pinned_handler))
         .route("/api/pin", axum::routing::post(api::pin_toggle_handler))

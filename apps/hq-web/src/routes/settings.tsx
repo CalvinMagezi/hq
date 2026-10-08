@@ -4,6 +4,7 @@ import type { ReactNode } from 'react'
 import { AlertCircle, Loader2, RefreshCw } from 'lucide-react'
 import { fetchSettings, formatSeconds, type HqSettings } from '~/lib/settingsApi'
 import { relTime } from '~/lib/time'
+import { formatUsd, openrouterUsageQuery } from '~/lib/openrouterUsageApi'
 import {
   copilotUsageQuery,
   exhaustionText,
@@ -81,7 +82,8 @@ function CopilotCreditsSection() {
     <div className="md:col-span-2">
       <Section title="Copilot credits">
         {data.error && <Row label="Status">{data.error}</Row>}
-        {data.note && <Row label="Status">{data.note}</Row>}
+        {data.unavailable && <Row label="Status">Unavailable. {data.note}</Row>}
+        {!data.unavailable && data.note && <Row label="Status">{data.note}</Row>}
         {quota && burn && (
           <>
             <div className="flex flex-col gap-1" role="img" aria-label={`${formatCompact(quota.remaining)} of ${formatCompact(total)} credits left`}>
@@ -116,10 +118,66 @@ function CopilotCreditsSection() {
   )
 }
 
+function OpenRouterSpendSection() {
+  const { data, isFetching, refetch } = useQuery(openrouterUsageQuery)
+  if (!data?.active) return null
+  const u = data.usage
+  return (
+    <div className="md:col-span-2">
+      <Section title="OpenRouter spend">
+        {data.error && <Row label="Status">{data.error}</Row>}
+        {data.unavailable && <Row label="Status">Unavailable. {data.note}</Row>}
+        {u && (
+          <>
+            <Row label="Today">{formatUsd(u.usage_daily)}</Row>
+            <Row label="This week">{formatUsd(u.usage_weekly)}</Row>
+            <Row label="This month">{formatUsd(u.usage_monthly)}</Row>
+            <Row label="Lifetime, this key">{formatUsd(u.usage)}</Row>
+            <Row label="Key spend limit">{u.limit === null ? 'none set' : `${formatUsd(u.limit)} (${formatUsd(u.limit_remaining)} left)`}</Row>
+            <Row label="Account credits left">{data.credits_left === null || data.credits_left === undefined ? 'not reported for this key' : formatUsd(data.credits_left)}</Row>
+            {u.is_free_tier && <Row label="Plan">free tier</Row>}
+            <Row label="Burn rate">not reported by OpenRouter</Row>
+            {data.note && <Row label="Note">{data.note}</Row>}
+          </>
+        )}
+        <button
+          type="button"
+          onClick={() => refetch()}
+          className="self-start mt-1 flex items-center gap-1.5 text-xs text-neutral-400 hover:text-neutral-100"
+        >
+          <RefreshCw className={`w-3.5 h-3.5 ${isFetching ? 'animate-spin' : ''}`} /> Refresh spend
+        </button>
+      </Section>
+    </div>
+  )
+}
+
+function CodingAgentsSection({ host: h }: { host: HqSettings['agent_host'] }) {
+  return (
+    <Section title="Coding agents">
+      {!h ? (
+        <Row label="Settings">not reported by this gateway version, update it to see them</Row>
+      ) : (
+        <>
+          <Row label="Default host">{h.default_host}</Row>
+          <Row label="Hosts">{h.hosts.length ? h.hosts.join(', ') : 'this machine only'}</Row>
+          <Row label="Agent sandbox">{h.sandbox_mode === 'process' ? 'on' : 'off'}{h.sandbox_extra_domains ? ` · ${h.sandbox_extra_domains} extra allowed sites` : ''}</Row>
+          <Row label="Stop idle sessions after">{h.idle_reap_hours ? `${h.idle_reap_hours} h` : 'never'}</Row>
+          <Row label="New watches drive">{yesNo(h.drive_new_watches)}</Row>
+          <Row label="Driver check-in">{h.driver_checkin_minutes} min</Row>
+          <Row label="Driver instruction budget">{h.driver_nudge_budget} per session</Row>
+          <Row label="Stop after idle turns">{h.driver_no_progress_limit} with no tool activity</Row>
+        </>
+      )}
+    </Section>
+  )
+}
+
 function SettingsBody({ s }: { s: HqSettings }) {
   return (
     <div className="grid gap-4 md:grid-cols-2">
       <CopilotCreditsSection />
+      <OpenRouterSpendSection />
       <ModelSection s={s} />
       <BackendsSection s={s} />
       <Section title="Provider keys">
@@ -141,16 +199,7 @@ function SettingsBody({ s }: { s: HqSettings }) {
         <Row label="Skill writes need approval">{yesNo(s.safety.skills_write_approval)}</Row>
         <Row label="Allowed web origins">{s.safety.web_allowed_origins.length ? s.safety.web_allowed_origins.join(', ') : 'none'}</Row>
       </Section>
-      <Section title="Coding agents">
-        <Row label="Default host">{s.agent_host.default_host}</Row>
-        <Row label="Hosts">{s.agent_host.hosts.length ? s.agent_host.hosts.join(', ') : 'this machine only'}</Row>
-        <Row label="Agent sandbox">{s.agent_host.sandbox_mode === 'process' ? 'on' : 'off'}{s.agent_host.sandbox_extra_domains ? ` · ${s.agent_host.sandbox_extra_domains} extra allowed sites` : ''}</Row>
-        <Row label="Stop idle sessions after">{s.agent_host.idle_reap_hours ? `${s.agent_host.idle_reap_hours} h` : 'never'}</Row>
-        <Row label="New watches drive">{yesNo(s.agent_host.drive_new_watches)}</Row>
-        <Row label="Driver check-in">{s.agent_host.driver_checkin_minutes} min</Row>
-        <Row label="Driver instruction budget">{s.agent_host.driver_nudge_budget} per session</Row>
-        <Row label="Stop after idle turns">{s.agent_host.driver_no_progress_limit} with no tool activity</Row>
-      </Section>
+      <CodingAgentsSection host={s.agent_host} />
       <Section title="Integrations">
         {s.integrations.remote_mcp.length === 0 && <Row label="Remote MCP servers">none</Row>}
         {s.integrations.remote_mcp.map((m) => (
