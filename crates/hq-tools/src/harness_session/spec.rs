@@ -6,6 +6,30 @@
 use anyhow::{Result, bail};
 use hq_core::config::{HarnessProfileConfig, AgentHostConfig, HqConfig};
 
+const PERMISSION_MODE_FLAG: &str = "--permission-mode";
+const PERMISSION_MODE_MANUAL: &str = "manual";
+
+/// Flags that make an agent run commands without asking. HQ refuses to launch with any of them,
+/// in a built-in spec or a configured profile, so approval dialogs always reach a person or the
+/// Drive loop.
+const BYPASS_FLAGS: &[&str] = &[
+    "--dangerously-skip-permissions",
+    "--allow-dangerously-skip-permissions",
+    "--dangerously-bypass-approvals-and-sandbox",
+    "--dangerously-bypass-hook-trust",
+    "--yolo",
+    "--force",
+    "-f",
+    "--full-auto",
+    "--approve-mcps",
+];
+
+/// The first bypass flag in `text`, matched on whole words.
+pub fn find_bypass_flag(text: &str) -> Option<&'static str> {
+    text.split_whitespace()
+        .find_map(|word| BYPASS_FLAGS.iter().copied().find(|flag| *flag == word))
+}
+
 /// How a harness resumes a prior session.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum ResumeStrategy {
@@ -64,14 +88,14 @@ pub const SPECS: &[HarnessSessionSpec] = &[
     HarnessSessionSpec {
         harness: "claude-code",
         kind: "claude",
-        // Without the permission bypass every tool call in an unattended
-        // session blocks on an approval dialog nobody is there to answer.
-        args: &["--dangerously-skip-permissions"],
+        // Explicit so a bypass default in the user's own settings cannot apply. Approval dialogs
+        // are answered by the person or the Drive loop, never skipped.
+        args: &[PERMISSION_MODE_FLAG, PERMISSION_MODE_MANUAL],
         // `claude --resume <id>` is exact; `claude -c` continues the most recent
         // session in the cwd, used until the id is known.
         resume: ResumeStrategy::TokenOrArgs {
-            with_token: &["--dangerously-skip-permissions", "--resume", "{token}"],
-            otherwise: &["--dangerously-skip-permissions", "-c"],
+            with_token: &[PERMISSION_MODE_FLAG, PERMISSION_MODE_MANUAL, "--resume", "{token}"],
+            otherwise: &[PERMISSION_MODE_FLAG, PERMISSION_MODE_MANUAL, "-c"],
         },
         token_pattern: None,
         trust_pattern: None,
@@ -87,9 +111,10 @@ pub const SPECS: &[HarnessSessionSpec] = &[
     HarnessSessionSpec {
         harness: "cursor",
         kind: "cursor",
-        // `--trust` only works in headless mode; the interactive trust dialog is answered at launch.
-        args: &["--force"],
-        resume: ResumeStrategy::Args(&["--force", "--resume", "{token}"]),
+        // `--force` (run everything) is deliberately absent. `--trust` only works in headless mode;
+        // the interactive trust dialog is answered at launch.
+        args: &[],
+        resume: ResumeStrategy::Args(&["--resume", "{token}"]),
         token_pattern: Some(r"chat[_-]id[:=]\s*([A-Za-z0-9_-]+)"),
         trust_pattern: None,
     },
@@ -129,9 +154,9 @@ pub const SPECS: &[HarnessSessionSpec] = &[
     HarnessSessionSpec {
         harness: "antigravity",
         kind: "agy",
-        args: &["--dangerously-skip-permissions"],
+        args: &[],
         // `agy -c` continues the most recent conversation in the cwd.
-        resume: ResumeStrategy::Args(&["--dangerously-skip-permissions", "-c"]),
+        resume: ResumeStrategy::Args(&["-c"]),
         token_pattern: None,
         // agy asks "Do you trust the contents of this project?" on first use
         // of a cwd; default selection is "Yes, I trust this folder".
@@ -196,6 +221,10 @@ pub fn resolve_in(cfg: &AgentHostConfig, name: &str) -> Result<Harness> {
                 builtin_names().join(", ")
             );
         };
+        let offered = profile.args.iter().flatten().map(String::as_str).chain(profile.command.as_deref());
+        if let Some(flag) = offered.into_iter().find_map(find_bypass_flag) {
+            bail!("harness profile '{name}' uses '{flag}', which skips approval prompts; HQ does not launch agents in a bypass mode");
+        }
         return Ok(Harness {
             name: name.to_string(),
             spec,
@@ -286,10 +315,7 @@ mod tests {
         let h = resolve_in(&cfg, "wrapped").unwrap();
         assert_eq!(h.name, "wrapped");
         assert_eq!(h.spec.harness, "claude-code");
-        assert_eq!(
-            h.fresh_args(),
-            vec!["--dangerously-skip-permissions".to_string()]
-        );
+        assert_eq!(h.fresh_args(), vec!["--permission-mode".to_string(), "manual".to_string()]);
         assert!(known_in(&cfg).contains(&"wrapped".to_string()));
     }
 
@@ -299,6 +325,31 @@ mod tests {
             cfg_with_profile("  wrapped:\n    base: claude-code\n    args: [\"--model\", \"x\"]\n");
         let h = resolve_in(&cfg, "wrapped").unwrap();
         assert_eq!(h.fresh_args(), vec!["--model".to_string(), "x".to_string()]);
+    }
+
+    #[test]
+    fn no_builtin_spec_launches_in_a_bypass_mode() {
+        for s in SPECS {
+            let resume: Vec<&[&str]> = match s.resume {
+                ResumeStrategy::Args(a) => vec![a],
+                ResumeStrategy::TokenOrArgs { with_token, otherwise } => vec![with_token, otherwise],
+                _ => vec![],
+            };
+            for arg in s.args.iter().chain(resume.into_iter().flatten()) {
+                assert!(find_bypass_flag(arg).is_none(), "{} uses {arg}", s.harness);
+            }
+        }
+    }
+
+    #[test]
+    fn a_profile_cannot_reintroduce_a_bypass_flag() {
+        for yaml in [
+            "  p:\n    base: claude-code\n    args: [\"--dangerously-skip-permissions\"]\n",
+            "  p:\n    base: cursor\n    command: \"cursor-agent --force\"\n",
+        ] {
+            let err = resolve_in(&cfg_with_profile(yaml), "p").unwrap_err().to_string();
+            assert!(err.contains("bypass mode"), "{err}");
+        }
     }
 
     #[test]
