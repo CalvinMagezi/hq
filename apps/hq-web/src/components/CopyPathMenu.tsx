@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react'
-import { getVaultRoot } from '~/lib/vaultApi'
+import { getNote, getVaultRoot } from '~/lib/vaultApi'
 
 export interface CopyMenuState {
     relPath: string
@@ -27,11 +27,11 @@ async function copyText(text: string): Promise<boolean> {
 }
 
 /**
- * Floating "copy path" menu. Rendered when `menu` is set; anchors near the
+ * Floating "copy" menu (relative path, absolute path, note content). Rendered when `menu` is set; anchors near the
  * long-press point, clamped to the viewport so it stays usable on phones.
  */
 export function CopyPathMenu({ menu, onClose }: { menu: CopyMenuState | null; onClose: () => void }) {
-    const [copied, setCopied] = useState<'rel' | 'abs' | null>(null)
+    const [copied, setCopied] = useState<'rel' | 'abs' | 'content' | null>(null)
     const ref = useRef<HTMLDivElement | null>(null)
 
     useEffect(() => {
@@ -59,13 +59,21 @@ export function CopyPathMenu({ menu, onClose }: { menu: CopyMenuState | null; on
     if (!menu) return null
 
     const MENU_W = 220
-    const MENU_H = 96
+    const MENU_H = 144
     const left = Math.max(8, Math.min(menu.x, window.innerWidth - MENU_W - 8))
     const top = Math.max(8, Math.min(menu.y, window.innerHeight - MENU_H - 8))
 
-    const doCopy = async (kind: 'rel' | 'abs') => {
+    const doCopy = async (kind: 'rel' | 'abs' | 'content') => {
         let text = menu.relPath
-        if (kind === 'abs') {
+        if (kind === 'content') {
+            try {
+                const note = await getNote(menu.relPath)
+                if (note.isDir) return
+                text = note.content
+            } catch {
+                return
+            }
+        } else if (kind === 'abs') {
             try {
                 const res = await getVaultRoot()
                 text = `${res.path.replace(/\/$/, '')}/${menu.relPath}`
@@ -104,6 +112,10 @@ export function CopyPathMenu({ menu, onClose }: { menu: CopyMenuState | null; on
             <button role="menuitem" style={{ ...itemStyle, borderTop: '1px solid rgba(255,255,255,0.06)' }} onClick={() => doCopy('abs')}>
                 <span style={{ color: 'var(--accent-blue)' }}>{copied === 'abs' ? '✓' : '⧉'}</span>
                 {copied === 'abs' ? 'Copied!' : 'Copy absolute path'}
+            </button>
+            <button role="menuitem" style={{ ...itemStyle, borderTop: '1px solid rgba(255,255,255,0.06)' }} onClick={() => doCopy('content')}>
+                <span style={{ color: 'var(--accent-blue)' }}>{copied === 'content' ? '✓' : '⧉'}</span>
+                {copied === 'content' ? 'Copied!' : 'Copy note content'}
             </button>
         </div>
     )
