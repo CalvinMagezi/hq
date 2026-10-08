@@ -6,7 +6,9 @@ use std::sync::Arc;
 
 use hq_llm::provider::LlmProvider;
 
-use super::{CAPABILITY_FLOOR, HqToolAdapter, SessionBuilder, mailbox_denial_notifier};
+use super::{
+    CAPABILITY_FLOOR, HqToolAdapter, SessionBuilder, SessionRole, mailbox_denial_notifier,
+};
 use crate::governance::{GovernedRegistry, ToolGuardian};
 use crate::session::SessionConfig;
 use crate::tools::AgentTool;
@@ -52,10 +54,28 @@ impl SessionBuilder {
 
     /// `governance.bash` resolved against this session's writable roots.
     pub(super) fn bash_settings(&self, vault_path: &Path) -> crate::bash_sandbox::BashSettings {
+        if self.role == SessionRole::Orchestrator {
+            return crate::bash_sandbox::BashSettings::read_only(&self.config.governance.bash);
+        }
         crate::bash_sandbox::BashSettings::from_config(
             &self.config.governance.bash,
             self.allowed_paths(vault_path),
         )
+    }
+
+    /// Drops what the session's role may not use. An orchestrator keeps a
+    /// read-only shell only while a sandbox backend exists to enforce it.
+    fn apply_role(&self, tools: Vec<Box<dyn AgentTool>>) -> Vec<Box<dyn AgentTool>> {
+        if self.role != SessionRole::Orchestrator {
+            return tools;
+        }
+        let shell_is_safe =
+            crate::bash_sandbox::available_backend_for(false).is_some();
+        tools
+            .into_iter()
+            .filter(|t| !super::ORCHESTRATOR_REMOVED_TOOLS.contains(&t.name()))
+            .filter(|t| shell_is_safe || t.name() != "bash")
+            .collect()
     }
 
     /// File, shell, search, todo and web tools, sharing one file-state cache.
@@ -452,6 +472,7 @@ impl SessionBuilder {
                     .any(|p| t.name().starts_with(p.as_str()))
             })
             .collect::<Vec<_>>();
+        let tools = self.apply_role(tools);
         if tools.is_empty() {
             tracing::warn!(
                 profile = ?self.session_profile,

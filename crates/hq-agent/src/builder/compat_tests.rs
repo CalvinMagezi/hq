@@ -72,6 +72,10 @@ pub(super) const PLANNING_AND_READ_TOOLS: &[&str] = &[
 ];
 
 pub(super) async fn web_chat_tool_names() -> Vec<String> {
+    tool_names_for(SessionRole::Implementor).await
+}
+
+pub(super) async fn tool_names_for(role: SessionRole) -> Vec<String> {
     let vault = tempfile::TempDir::new().unwrap();
     let config = HqConfig {
         openrouter_api_key: Some("test-key-no-network".to_string()),
@@ -80,6 +84,7 @@ pub(super) async fn web_chat_tool_names() -> Vec<String> {
     };
     let cwd = vault.path().to_path_buf();
     let session = SessionBuilder::from_config(&config)
+        .role(role)
         .working_dir(cwd.clone())
         .session_config(SessionConfig {
             model: CLOUD_MODEL.to_string(),
@@ -148,4 +153,59 @@ fn implementor_prompt_block_is_pinned() {
     assert!(block.trim_end().ends_with("CALLER INSTRUCTIONS"));
     let building = implementor_block(true);
     assert!(building.contains("Development work on your own source"));
+}
+
+#[test]
+fn orchestrator_prompt_block_has_no_coding_framing() {
+    let derived = DerivedPromptBlocks {
+        can_build_self: true,
+        role: SessionRole::Orchestrator,
+        ..Default::default()
+    };
+    let block = build_harness_block(
+        Some("CALLER INSTRUCTIONS"),
+        crate::tool_policy::Preset::Cloud,
+        None,
+        100,
+        derived,
+    );
+    assert!(block.contains("You are the HQ orchestrator."));
+    for banned in ["primary coding agent", "Self-Management", "Development work on your own source"] {
+        assert!(!block.contains(banned), "{banned} leaked into: {block}");
+    }
+    assert!(block.contains("**Delegation:** `spawn_subagents`"));
+    assert!(block.trim_end().ends_with("CALLER INSTRUCTIONS"));
+}
+
+/// The role takes away exactly the named writers (and the shell only when no sandbox can contain it).
+#[tokio::test]
+async fn orchestrator_catalog_is_today_minus_the_removal_set() {
+    let today = web_chat_tool_names().await;
+    let orchestrator = tool_names_for(SessionRole::Orchestrator).await;
+    let mut expected_gone: Vec<&str> = ORCHESTRATOR_REMOVED_TOOLS
+        .iter()
+        .copied()
+        .filter(|t| today.iter().any(|n| n == t))
+        .collect();
+    if crate::bash_sandbox::available_backend_for(false).is_none() {
+        expected_gone.push("bash");
+    }
+    let mut gone: Vec<&str> = today
+        .iter()
+        .filter(|n| !orchestrator.contains(n))
+        .map(String::as_str)
+        .collect();
+    gone.sort_unstable();
+    expected_gone.sort_unstable();
+    assert_eq!(gone, expected_gone);
+    let added: Vec<&String> = orchestrator.iter().filter(|n| !today.contains(n)).collect();
+    assert!(added.is_empty(), "the role must not add tools: {added:?}");
+}
+
+#[tokio::test]
+async fn orchestrator_keeps_spawn_steer_and_planning_tools() {
+    let names = tool_names_for(SessionRole::Orchestrator).await;
+    for required in SPAWN_AND_STEER_TOOLS.iter().chain(PLANNING_AND_READ_TOOLS) {
+        assert!(names.iter().any(|n| n == required), "orchestrator lost {required}: {names:?}");
+    }
 }

@@ -51,6 +51,29 @@ impl SessionProfile {
     }
 }
 
+/// What a session is for. The Implementor does the work itself; the
+/// Orchestrator plans, delegates, monitors and reports, and is held to that by
+/// the tool catalog and sandbox rather than by its prompt.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum SessionRole {
+    #[default]
+    Implementor,
+    Orchestrator,
+}
+
+/// Tools an orchestrator session never gets. They change files, git history or
+/// HQ's own config; that work goes to a coding session or child agent instead.
+/// Chosen by effect: every tool that writes outside the vault and task stores.
+pub const ORCHESTRATOR_REMOVED_TOOLS: &[&str] = &[
+    "edit_file",
+    "write_file",
+    "file_edit_batch",
+    "rollback_file",
+    "git_commit",
+    "git_pr",
+    "config_manage",
+];
+
 /// Tools that survive the `SessionProfile` filter regardless of their
 /// `tool_policy()`.
 ///
@@ -232,6 +255,8 @@ pub struct SessionBuilder {
     session_profile: SessionProfile,
     /// Tools whose name starts with one of these are left out of the session.
     tool_deny_prefixes: Vec<String>,
+    /// Whether this session works or orchestrates; see [`SessionRole`].
+    role: SessionRole,
     /// Originating chat turn id (e.g. a `background_turns` row) copied into the
     /// `ChildExecContext` so non-blocking child completions can be routed back.
     child_parent_turn_id: Option<String>,
@@ -266,6 +291,7 @@ impl SessionBuilder {
             exclude_own_interface_thread: false,
             session_profile: SessionProfile::Standard,
             tool_deny_prefixes: Vec::new(),
+            role: SessionRole::default(),
             child_parent_turn_id: None,
             child_completion_sink: None,
             child_progress_sink: None,
@@ -431,6 +457,15 @@ impl SessionBuilder {
     /// Use `Weak` for relay sessions and sub-agents running on local/free models.
     /// Leave out every tool whose name starts with one of `prefixes`, whatever
     /// the profile or policy would otherwise allow.
+    pub fn role(mut self, role: SessionRole) -> Self {
+        self.role = role;
+        self
+    }
+
+    pub(crate) fn session_role(&self) -> SessionRole {
+        self.role
+    }
+
     pub fn deny_tool_prefixes(mut self, prefixes: Vec<String>) -> Self {
         self.tool_deny_prefixes = prefixes;
         self

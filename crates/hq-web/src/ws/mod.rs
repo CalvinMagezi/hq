@@ -441,6 +441,11 @@ impl ChatTurn {
             let record = self.record.lock().unwrap_or_else(|e| e.into_inner());
             (record.is_driver_turn(), record.is_session_driver_turn(), record.followup_turn_id())
         };
+        let hooks_role = if config.governance.orchestrator_role {
+            hq_agent::builder::SessionRole::Orchestrator
+        } else {
+            hq_agent::builder::SessionRole::Implementor
+        };
         let hooks = hq_agent::native_hq::NativeHqHooks {
             history,
             turn_id: followup_turn_id,
@@ -462,6 +467,7 @@ impl ChatTurn {
                 .chain(driver_turn.then(|| CONFIG_TOOL.to_string()))
                 .collect(),
             permission_preset: self.ask.as_ref().and_then(ask::AskTurn::permission_preset),
+            role: hooks_role,
             identity: Some(match self.tid.as_deref() {
                 Some(t) => hq_core::identity::RequestIdentity::from_web_thread(t, driver_turn, session_driver),
                 None => hq_core::identity::RequestIdentity::from_proxy_user("web", vec!["*".into()], None),
@@ -475,7 +481,7 @@ impl ChatTurn {
         let run = hq_agent::native_hq::run_native_hq(
             &config,
             &message,
-            hq_agent::session_presets::chat_harness_instructions(&cwd),
+            hq_agent::session_presets::chat_harness_instructions_for(&cwd, hooks_role),
             cwd.clone(),
             self.session_config(&config),
             hooks,
