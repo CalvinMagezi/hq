@@ -41,3 +41,6 @@ button.danger { border-color: var(--text); }
 button:disabled { opacity: 0.4; cursor: not-allowed; }
 :focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
 .error { margin: 0; font-weight: 600; }
+.command { display: flex; gap: 0.5rem; align-items: center; justify-content: space-between; background: var(--bg); border: 1px solid var(--line); border-radius: 0.5rem; padding: 0.4rem 0.4rem 0.4rem 0.7rem; margin: 0.4rem 0; }
+.command code { overflow-x: auto; white-space: nowrap; }
+.steps li { padding-left: 0.2rem; }

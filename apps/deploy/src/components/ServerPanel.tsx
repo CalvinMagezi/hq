@@ -2,9 +2,9 @@
 
 import { useEffect, useState } from 'react'
 import { call, hostRange, type ServerInfo } from '~/lib/client'
+import { CopyCommand } from './CopyCommand'
 
 const POLL_MS = 5_000
-const SSH_WINDOW_NOTE = 'Close it once the server shows up in your tailnet.'
 
 export function ServerPanel({ token, server, callerIp, onGone }: { token: string; server: ServerInfo; callerIp: string; onGone: () => void }) {
   const [info, setInfo] = useState(server)
@@ -44,14 +44,23 @@ export function ServerPanel({ token, server, callerIp, onGone }: { token: string
     <section className="card stack">
       <h2>{info.name}</h2>
       <p>Hetzner status: <strong>{info.status}</strong>{info.ip && <> at <code>{info.ip}</code></>}</p>
-      <p className="muted">HQ is private to your tailnet, so this page cannot see when it is ready. Give it a few minutes after the server shows running, then:</p>
       <ol className="steps">
-        <li>Connect: <code>ssh root@{info.ip ?? '<server-ip>'}</code></li>
-        <li>Run <code>sudo hq-join</code>, open the login link it prints, and sign in to your own tailnet.</li>
-        <li>Open the sign-in link it prints on a device that is on your tailnet. HQ asks for a model key on first run.</li>
-        <li>{SSH_WINDOW_NOTE}</li>
+        <li>
+          <strong>Wait about 3 to 5 minutes</strong> after the status shows <code>running</code>. The server installs HQ on its own at first boot. HQ is private to your tailnet, so this page cannot see when it is done.
+        </li>
+        <li>
+          <strong>Join your tailnet.</strong> Run this on your computer. It opens a Tailscale login link: open it and sign in. When it finishes it prints your HQ link.
+          <CopyCommand command={`ssh root@${info.ip ?? '<server-ip>'} hq-join`} />
+          <small className="muted">First time, answer yes to the host fingerprint. If your SSH key is not your default one, add <code>-i ~/.ssh/your-key</code> after <code>ssh</code>. Tailscale needs MagicDNS and HTTPS certificates turned on in its admin console (DNS).</small>
+        </li>
+        <li>
+          <strong>Open the HQ link</strong> on a device that is on your tailnet. Treat it like a password: it signs you in as admin.
+        </li>
+        <li>
+          <strong>Close public SSH</strong> once HQ opens, so only your tailnet can reach the server.
+        </li>
       </ol>
-      <p className="muted">If setup did not finish, read <code>/var/log/cloud-init-output.log</code> on the server and re-run <code>bash /root/bootstrap.sh</code> with the same arguments (see the docs below).</p>
+      <p className="muted">If it does not come up, read <code>/var/log/cloud-init-output.log</code> on the server and see the docs below.</p>
       <div className="row">
         <button type="button" disabled={busy} onClick={closeSsh}>Close public SSH</button>
         <button type="button" className="quiet" disabled={busy || !hostRange(callerIp)} onClick={openSsh}>Reopen SSH for my IP</button>

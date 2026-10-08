@@ -68,7 +68,7 @@ export function ServerForm({ options, busy, error, onSubmit }: { options: Option
         <label>
           Public key
           <textarea rows={3} spellCheck={false} value={publicKey} onChange={(e) => setPublicKey(e.target.value)} placeholder="ssh-ed25519 AAAA... you@laptop" />
-          <small className="muted">The contents of your .pub file. Never paste a private key.</small>
+          <small className="muted">The contents of your .pub file, for example <code>cat ~/.ssh/id_ed25519.pub</code>. No key yet? Run <code>ssh-keygen -t ed25519</code> first. Never paste a private key.</small>
         </label>
       )}
       <label>

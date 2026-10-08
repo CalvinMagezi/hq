@@ -11,10 +11,13 @@ export function TokenStep({ busy, error, onSubmit }: { busy: boolean; error: str
   return (
     <form onSubmit={submit} className="card stack">
       <h2>Connect your Hetzner project</h2>
+      <ol className="steps">
+        <li>Open the <a href="https://console.hetzner.com/projects" target="_blank" rel="noreferrer">Hetzner Cloud console</a> and create a project, or open an empty one you can delete later.</li>
+        <li>Go to Security, then API tokens, then Generate API token. Choose <strong>Read &amp; Write</strong>, and copy the token (Hetzner shows it once).</li>
+        <li>Paste it below.</li>
+      </ol>
       <p className="muted">
-        Create a project API token with read and write access in the Hetzner Cloud console (Security, API tokens). Each token belongs to one
-        project, so this wizard can only touch that project. The token is sent to this site over HTTPS to make the Hetzner calls for you. It
-        is not stored, logged or kept after you close the tab, and you can delete it in Hetzner when you are done.
+        A token belongs to one project, so this wizard can only touch that project. The token is sent to this site over HTTPS to make the Hetzner calls for you. It is not stored, logged or kept after you close the tab. Delete it in Hetzner when you are done.
       </p>
       <label>
         Hetzner API token
