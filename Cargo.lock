@@ -2885,9 +2885,13 @@ dependencies = [
 name = "hq-export"
 version = "0.9.1"
 dependencies = [
+ "base64 0.22.1",
+ "csv",
  "dirs",
  "hq-convert",
  "pulldown-cmark 0.12.2",
+ "rust_xlsxwriter",
+ "serde_json",
  "tempfile",
  "thiserror 2.0.18",
  "tracing",
@@ -2897,6 +2901,7 @@ dependencies = [
  "typst-render",
  "typst-svg",
  "typst-utils",
+ "zip",
 ]
 
 [[package]]
@@ -5904,6 +5909,15 @@ checksum = "7653272e75dcac41dc199fbea6f5797633994fafd339943c06c9af16bf29cd3a"
 dependencies = [
  "arrayvec",
  "num-traits",
+]
+
+[[package]]
+name = "rust_xlsxwriter"
+version = "0.99.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "34f2d2cda7223168a14fb86bc7411dbc3379bd7d49749ecc53b91ed98585b6b0"
+dependencies = [
+ "zip",
 ]
 
 [[package]]

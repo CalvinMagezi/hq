@@ -6,10 +6,11 @@
 //! in-memory files under generated names; the note never names a path the
 //! engine resolves itself.
 
-use std::collections::HashMap;
 use std::fmt::Write as _;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
+use crate::assets::AssetLoader;
+use crate::util::{callout_color, capitalise, safe_url};
 use crate::doc::{Align, Block, Document, Inline, ListItem, Table};
 use crate::theme::Theme;
 
@@ -22,8 +23,6 @@ pub enum PageMode {
     Single,
 }
 
-const IMAGE_EXTS: &[&str] = &["png", "jpg", "jpeg", "gif", "svg", "webp"];
-const MAX_IMAGE_BYTES: u64 = 25 * 1024 * 1024;
 /// Typst does not wrap code, so a long line would run off the page.
 const CODE_WRAP_COLUMNS: usize = 92;
 
@@ -35,9 +34,7 @@ pub struct Markup {
 
 pub fn build(doc: &Document, theme: &Theme, mode: PageMode, asset_root: Option<&Path>) -> Markup {
     let mut w = Writer {
-        asset_root: asset_root.and_then(|r| r.canonicalize().ok()),
-        assets: Vec::new(),
-        by_path: HashMap::new(),
+        assets: AssetLoader::new(asset_root),
     };
     let body = w.blocks(&doc.blocks);
     let mut source = preamble(doc, theme, mode);
@@ -49,7 +46,12 @@ pub fn build(doc: &Document, theme: &Theme, mode: PageMode, asset_root: Option<&
     source.push_str(&body);
     Markup {
         source,
-        assets: w.assets,
+        assets: w
+            .assets
+            .into_assets()
+            .into_iter()
+            .map(|a| (a.name, a.bytes))
+            .collect(),
     }
 }
 
@@ -109,9 +111,7 @@ fn preamble(doc: &Document, theme: &Theme, mode: PageMode) -> String {
 }
 
 struct Writer {
-    asset_root: Option<PathBuf>,
-    assets: Vec<(String, Vec<u8>)>,
-    by_path: HashMap<PathBuf, String>,
+    assets: AssetLoader,
 }
 
 impl Writer {
@@ -268,7 +268,7 @@ impl Writer {
                         out.push_str(&self.inlines(content));
                     }
                 }
-                Inline::Image { alt, src } => match self.image(src) {
+                Inline::Image { alt, src } => match self.assets.load(src).map(|a| a.name.clone()) {
                     Some(name) => {
                         let _ = write!(out, "#fit-image({}, {})", literal(&name), literal(alt));
                     }
@@ -282,42 +282,6 @@ impl Writer {
             }
         }
         out
-    }
-
-    /// Load an image the note refers to, or `None` when it must not be embedded.
-    ///
-    /// Only files inside the asset root qualify; with no root configured no
-    /// image is ever read.
-    fn image(&mut self, src: &str) -> Option<String> {
-        if src.contains("://") || src.starts_with("data:") {
-            return None;
-        }
-        let root = self.asset_root.as_ref()?;
-        let path = Path::new(src);
-        let path = if path.is_absolute() {
-            path.to_path_buf()
-        } else {
-            root.join(path)
-        };
-        let path = path.canonicalize().ok()?;
-        if !path.starts_with(root) {
-            return None;
-        }
-        let ext = path.extension()?.to_str()?.to_ascii_lowercase();
-        if !IMAGE_EXTS.contains(&ext.as_str()) {
-            return None;
-        }
-        if let Some(name) = self.by_path.get(&path) {
-            return Some(name.clone());
-        }
-        if std::fs::metadata(&path).ok()?.len() > MAX_IMAGE_BYTES {
-            return None;
-        }
-        let bytes = std::fs::read(&path).ok()?;
-        let name = format!("asset{}.{ext}", self.assets.len());
-        self.assets.push((name.clone(), bytes));
-        self.by_path.insert(path, name.clone());
-        Some(name)
     }
 }
 
@@ -357,36 +321,6 @@ pub fn literal(text: &str) -> String {
     }
     out.push('"');
     out
-}
-
-fn safe_url(url: &str) -> bool {
-    let url = url.trim();
-    match url.split_once(':') {
-        // Relative links and fragments carry no scheme.
-        None => true,
-        Some((scheme, _)) => matches!(
-            scheme.to_ascii_lowercase().as_str(),
-            "http" | "https" | "mailto" | "tel"
-        ),
-    }
-}
-
-fn callout_color(kind: &str) -> &'static str {
-    match kind {
-        "tip" | "hint" | "success" | "check" | "done" => "#2e7d32",
-        "warning" | "caution" | "attention" | "important" => "#e65100",
-        "danger" | "error" | "bug" | "failure" | "fail" | "missing" => "#c62828",
-        "quote" | "cite" | "example" | "abstract" | "summary" | "tldr" => "#6a1b9a",
-        _ => "#1565c0",
-    }
-}
-
-fn capitalise(s: &str) -> String {
-    let mut chars = s.chars();
-    match chars.next() {
-        Some(f) => f.to_uppercase().collect::<String>() + chars.as_str(),
-        None => String::new(),
-    }
 }
 
 /// Hard-wrap lines longer than `width` characters. Breaks on a space when one
@@ -446,16 +380,6 @@ mod tests {
         assert_eq!(literal("a\"b\\c"), "\"a\\\"b\\\\c\"");
         assert_eq!(literal("l1\nl2"), "\"l1\\nl2\"");
         assert_eq!(literal("\u{7}"), "\"\\u{7}\"");
-    }
-
-    #[test]
-    fn unsafe_link_schemes_are_dropped() {
-        assert!(safe_url("https://example.com"));
-        assert!(safe_url("mailto:a@example.com"));
-        assert!(safe_url("#section"));
-        assert!(safe_url("notes/other.md"));
-        assert!(!safe_url("javascript:alert(1)"));
-        assert!(!safe_url("file:///etc/passwd"));
     }
 
     #[test]
