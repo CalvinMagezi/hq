@@ -5,6 +5,8 @@ import { call, hostRange, type ServerInfo } from '~/lib/client'
 import { CopyCommand } from './CopyCommand'
 
 const POLL_MS = 5_000
+const DELETE_RETRIES = 8
+const DELETE_RETRY_MS = 4_000
 
 export function ServerPanel({ token, server, callerIp, onGone }: { token: string; server: ServerInfo; callerIp: string; onGone: () => void }) {
   const [info, setInfo] = useState(server)
@@ -34,10 +36,15 @@ export function ServerPanel({ token, server, callerIp, onGone }: { token: string
   const closeSsh = () => act(async () => { await call('ssh-rule', { token, serverId: info.id }); return 'Public SSH is closed.' })
   const openSsh = () => act(async () => { await call('ssh-rule', { token, serverId: info.id, openFrom: hostRange(callerIp) }); return 'SSH is open to your IP again.' })
   const remove = () => act(async () => {
-    const r = await call<{ deleted: boolean; firewallsRemoved: boolean }>('delete', { token, serverId: info.id, confirmName: confirm })
-    if (!r.deleted) return 'Hetzner has not finished deleting the server. Check the Hetzner console, then try again.'
-    onGone()
-    return r.firewallsRemoved ? 'Server, firewall and SSH key deleted.' : 'Server deleted. Remove its firewall and key in the Hetzner console.'
+    for (let attempt = 0; attempt < DELETE_RETRIES; attempt++) {
+      const r = await call<{ deleted: boolean; firewallsRemoved?: boolean }>('delete', { token, serverId: info.id, confirmName: confirm })
+      if (r.deleted) {
+        onGone()
+        return r.firewallsRemoved ? 'Server, firewall and SSH key deleted.' : 'Server deleted. Remove its firewall and key in the Hetzner console.'
+      }
+      await new Promise((resolve) => window.setTimeout(resolve, DELETE_RETRY_MS))
+    }
+    return 'Hetzner is still deleting the server. Check the Hetzner console, then press Delete again.'
   })
 
   return (

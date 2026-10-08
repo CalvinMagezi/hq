@@ -81,7 +81,7 @@ test('delete does not claim success or touch the firewall when the server action
     return { json: {} }
   }
   const res = await remove(post({ token: TOKEN, serverId: 5, confirmName: 'hq' }))
-  expect(await res.json()).toEqual({ deleted: false, firewallsRemoved: false })
+  expect(await res.json()).toEqual({ deleted: false, pending: true })
   expect(calls.filter((c) => c.method === 'DELETE' && c.path !== '/servers/5')).toHaveLength(0)
 })
 
@@ -113,4 +113,47 @@ test('a timeout creating the server leaves the firewall alone', async () => {
   expect(res.status).toBe(502)
   expect((await res.json()).error).toContain("check for an existing server")
   expect(calls.filter((c) => c.method === 'DELETE')).toHaveLength(0)
+})
+
+test('delete that outlives the wait reports pending and removes nothing else', async () => {
+  handler = (m, p) => {
+    if (p === '/servers/5' && m === 'GET') return { json: { server: { id: 5, name: 'hq', labels: OWNED } } }
+    if (p === '/servers/5') return { json: { action: { id: 77 } } }
+    if (p === '/actions/77') return { json: { action: { status: 'running' } } }
+    return { json: {} }
+  }
+  const real = globalThis.setTimeout
+  globalThis.setTimeout = ((fn: () => void) => real(fn, 0)) as unknown as typeof setTimeout
+  try {
+    const res = await remove(post({ token: TOKEN, serverId: 5, confirmName: 'hq' }))
+    expect(await res.json()).toEqual({ deleted: false, pending: true })
+  } finally {
+    globalThis.setTimeout = real
+  }
+  expect(calls.filter((c) => c.method === 'DELETE')).toHaveLength(1)
+})
+
+test('calling delete again once the server is gone finishes the cleanup', async () => {
+  handler = (m, p) => {
+    if (p === '/servers/5') return { status: 404, json: { error: { code: 'not_found', message: 'gone' } } }
+    if (p.startsWith('/servers?')) return { json: { servers: [] } }
+    if (p.startsWith('/firewalls?')) return { json: { firewalls: [{ id: 11 }] } }
+    if (p.startsWith('/ssh_keys?')) return { json: { ssh_keys: [{ id: 9 }] } }
+    return { json: {} }
+  }
+  const res = await remove(post({ token: TOKEN, serverId: 5, confirmName: 'hq' }))
+  expect(await res.json()).toEqual({ deleted: true, firewallsRemoved: true })
+  expect(calls.filter((c) => c.method === 'DELETE').map((c) => c.path)).toEqual(['/firewalls/11', '/ssh_keys/9'])
+  expect(decodeURIComponent(calls.find((c) => c.path.startsWith('/firewalls?'))!.path)).toContain('managed-by=agent-hq-deploy,hq-deploy=hq')
+})
+
+test('cleanup is skipped while a server with that name still exists', async () => {
+  handler = (m, p) => {
+    if (p === '/servers/5') return { status: 404, json: { error: { code: 'not_found', message: 'gone' } } }
+    if (p.startsWith('/servers?')) return { json: { servers: [{ id: 6 }] } }
+    return { json: {} }
+  }
+  const res = await remove(post({ token: TOKEN, serverId: 5, confirmName: 'hq' }))
+  expect(await res.json()).toEqual({ deleted: true, firewallsRemoved: false })
+  expect(calls.some((c) => c.method === 'DELETE')).toBe(false)
 })
