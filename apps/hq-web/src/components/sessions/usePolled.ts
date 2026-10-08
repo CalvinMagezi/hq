@@ -110,7 +110,13 @@ export function usePolled<T>(key: string, load: () => Promise<T>, everyMs: numbe
     })
     pollerRef.current = poller
     poller.start()
+    // Polls skip while the tab is hidden, so catch up the moment it is shown again.
+    const onVisible = () => {
+      if (document.visibilityState === 'visible') void poller.refresh()
+    }
+    document.addEventListener('visibilitychange', onVisible)
     return () => {
+      document.removeEventListener('visibilitychange', onVisible)
       poller.stop()
       if (pollerRef.current === poller) pollerRef.current = null
     }

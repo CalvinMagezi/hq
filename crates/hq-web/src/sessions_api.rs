@@ -202,7 +202,7 @@ const HOST_UNREACHABLE: &str = "the session's host is unreachable right now";
 /// and 409 cases match messages HQ itself writes (there is no typed error for
 /// them yet); anything else is logged and answered generically, because the
 /// text can carry ssh or host stderr.
-fn session_error(e: anyhow::Error) -> ApiError {
+pub(crate) fn session_error(e: anyhow::Error) -> ApiError {
     if let Some(api) = e.downcast_ref::<ApiError>() {
         return api.clone();
     }
@@ -244,6 +244,8 @@ pub(crate) struct ListQuery {
     task_id: Option<String>,
     status: Option<String>,
     host: Option<String>,
+    /// Include sessions the user archived; they are left out by default.
+    include_archived: Option<bool>,
 }
 
 fn non_empty(v: Option<String>) -> Option<String> {
@@ -260,13 +262,20 @@ pub(crate) async fn list_all_handler(
         task: non_empty(q.task_id),
         host: non_empty(q.host),
     };
+    let include_archived = q.include_archived.unwrap_or(false);
     let db = Arc::new(state.db.clone());
     let result = tokio::task::spawn_blocking(move || {
         let listed = harness::list_live(&db, &filter)?;
         db.with_conn(|c| {
+            let archived = registry::archived_ids(c)?;
             listed
                 .iter()
-                .map(|(row, live)| live_session_json(c, row, live.as_ref()))
+                .filter(|(row, _)| include_archived || !archived.contains(&row.id))
+                .map(|(row, live)| {
+                    let mut v = live_session_json(c, row, live.as_ref())?;
+                    v["archived"] = json!(archived.contains(&row.id));
+                    Ok(v)
+                })
                 .collect::<anyhow::Result<Vec<_>>>()
         })
     })
@@ -290,7 +299,11 @@ pub(crate) async fn get_session_handler(
     let result = tokio::task::spawn_blocking(move || {
         let live = (row.status == registry::STATUS_RUNNING)
             .then(|| harness::liveness(&harness::poll_hosts(std::slice::from_ref(&row)), &row));
-        db.with_conn(|c| live_session_json(c, &row, live.as_ref()))
+        db.with_conn(|c| {
+            let mut v = live_session_json(c, &row, live.as_ref())?;
+            v["archived"] = json!(registry::archived_ids(c)?.contains(&row.id));
+            Ok(v)
+        })
     })
     .await;
     match result {

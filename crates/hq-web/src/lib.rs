@@ -13,6 +13,7 @@ mod origin;
 mod security_headers;
 mod session_driver;
 mod sessions_api;
+mod workbench_api;
 mod copilot_usage_api;
 mod openrouter_usage_api;
 mod settings_api;
@@ -229,7 +230,16 @@ pub fn create_router(state: Arc<WsState>) -> Router {
             "/api/threads/{thread_id}/sessions",
             get(sessions_api::list_thread_sessions_handler),
         )
-        .route("/api/harness-sessions", get(sessions_api::list_all_handler))
+        .route("/api/harness-sessions", get(sessions_api::list_all_handler).post(workbench_api::spawn_handler))
+        .route("/api/workbench/hosts", get(workbench_api::hosts_handler))
+        .route(
+            "/api/workbench/hosts/{host}/dirs",
+            get(workbench_api::list_dirs_handler).post(workbench_api::make_dir_handler),
+        )
+        .route("/api/harness-sessions/{id}/stop", post(workbench_api::stop_handler))
+        .route("/api/harness-sessions/{id}/resume", post(workbench_api::resume_handler))
+        .route("/api/harness-sessions/{id}/rename", post(workbench_api::rename_handler))
+        .route("/api/harness-sessions/{id}/archive", post(workbench_api::archive_handler))
         .route("/api/harness-sessions/{id}", get(sessions_api::get_session_handler))
         .route("/api/harness-sessions/{id}/screen", get(sessions_api::screen_handler))
         .route("/api/harness-sessions/{id}/send", post(sessions_api::send_handler))
@@ -433,7 +443,7 @@ mod web_auth_router_tests {
             }
             b.body(Body::from("{}")).unwrap()
         };
-        for action in ["send", "adopt"] {
+        for action in ["send", "adopt", "stop", "resume", "rename", "archive"] {
             let path = format!("/api/harness-sessions/hs-none/{action}");
             assert_eq!(
                 status(&app, post(&path, false)).await,
@@ -453,6 +463,10 @@ mod web_auth_router_tests {
                 StatusCode::FORBIDDEN,
                 "{action} stays open to cached clients"
             );
+        }
+        for path in ["/api/harness-sessions", "/api/workbench/hosts/native/dirs"] {
+            assert_eq!(status(&app, post(path, false)).await, StatusCode::FORBIDDEN, "{path}");
+            assert_ne!(status(&app, post(path, true)).await, StatusCode::FORBIDDEN, "{path}");
         }
         let preflight = Request::options("/api/harness-sessions/hs-none/send")
             .header("origin", "http://localhost:9999")
