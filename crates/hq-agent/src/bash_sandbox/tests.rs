@@ -38,6 +38,7 @@ fn unsandboxed(passthrough: &[&str]) -> BashSettings {
         sandbox: BashSandboxMode::Off,
         network: true,
         writable_paths: Vec::new(),
+        read_only: false,
     }
 }
 
@@ -214,6 +215,7 @@ async fn required_sandbox_runs_real_commands_with_spaced_paths() {
         sandbox: BashSandboxMode::Required,
         network: true,
         writable_paths: vec![spaced.clone()],
+        read_only: false,
     };
     let target = spaced.join("note.txt");
     let command = format!("echo hi > '{0}' && cat '{0}'", target.display());
@@ -381,4 +383,41 @@ fn working_or_opted_out_sandbox_files_nothing() {
     assert!(!report_refusal(&settings_with(BashSandboxMode::BestEffort), None, &db, "b").unwrap());
     assert!(!report_refusal(&settings_with(BashSandboxMode::Off), None, &db, "b").unwrap());
     assert!(hq_db::value_items::list_filtered(&db, None, None, 5).unwrap().is_empty());
+}
+
+#[test]
+fn read_only_context_leaves_only_scratch_writable() {
+    let mut settings = BashSettings::read_only(&BashConfig::default());
+    settings.writable_paths = vec![PathBuf::from("/should/not/appear")];
+    let ctx = SandboxContext::for_process(&settings);
+    let home = dirs::home_dir().and_then(|h| h.canonicalize().ok());
+    let cwd = std::env::current_dir().unwrap().canonicalize().unwrap();
+    assert!(!ctx.writable.iter().any(|p| Some(p) == home.as_ref() || *p == cwd));
+    assert!(!ctx.network);
+}
+
+#[test]
+fn read_only_settings_refuse_without_a_backend() {
+    let settings = BashSettings::read_only(&BashConfig::default());
+    assert!(matches!(
+        plan_launch_with(&settings, "ls", None),
+        Launch::Refused(_)
+    ));
+}
+
+#[tokio::test]
+async fn read_only_bash_cannot_write_to_cwd_or_home() {
+    if available_backend().is_none() {
+        eprintln!("skipped: no sandbox backend on this host");
+        return;
+    }
+    let probe = format!("hq-ro-probe-{}", std::process::id());
+    let in_home = dirs::home_dir().unwrap().join(&probe);
+    let command = format!("touch ./{probe}; touch '{}'; ls", in_home.display());
+    let out = run_bash(BashSettings::read_only(&BashConfig::default()), &command).await;
+    let cwd_file = std::env::current_dir().unwrap().join(&probe);
+    let leaked = cwd_file.exists() || in_home.exists();
+    let _ = std::fs::remove_file(&cwd_file);
+    let _ = std::fs::remove_file(&in_home);
+    assert!(!leaked, "read-only bash wrote to disk: {out}");
 }
