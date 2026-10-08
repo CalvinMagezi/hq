@@ -117,6 +117,7 @@ placeholders (`example.com`, `hq.example.ts.net`, `<owner>/<repo>`).
 | LLM usage report | `crates/hq-cli/src/commands/usage.rs` (`hq usage`/`cost`/`summary` read hq-db `task_outcomes`) |
 | Web and MCP auth, origin guard | `crates/hq-web/src/auth.rs`, `crates/hq-web/src/origin.rs`, `docs/security/WEB_AUTH.md` |
 | Bash sandbox, prompt-injection policy | `crates/hq-agent/src/bash_sandbox.rs`, `crates/hq-agent/src/governance/` (`taint.rs`, `secrets.rs`, `egress.rs`), `docs/security/BASH_SANDBOX.md`, `docs/security/PROMPT_INJECTION.md` |
+| Orchestrator role (`governance.orchestrator_role`) | `crates/hq-agent/src/builder.rs` (`SessionRole`, `ORCHESTRATOR_REMOVED_TOOLS`), `crates/hq-agent/src/session/role_denial.rs`, `crates/hq-tools/src/github.rs`, `docs/security/ORCHESTRATOR_ROLE.md` |
 | Security policy, release gate | `SECURITY.md`, `docs/security/RELEASE_CHECKLIST.md` |
 | Retired components (historical records only) | `docs/HERMES_HARNESS.md` (peer agents and the `hq-bus` fabric), `docs/N8N_HARNESS.md` (n8n and `hq-workflow`), `docs/FLEET_HARNESS.md` (multi-harness dispatch) |
 
