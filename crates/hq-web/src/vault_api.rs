@@ -336,6 +336,93 @@ fn index_web_note(state: &WsState, abs: &Path, raw: &str) {
     }
 }
 
+/// At most this many PDF renders at once: each one starts a browser.
+static PDF_SLOTS: tokio::sync::Semaphore = tokio::sync::Semaphore::const_new(2);
+
+/// `GET /api/note/pdf?path=<note>[&brand=<slug>]`: the note rendered as a PDF download.
+pub(crate) async fn note_pdf_handler(
+    State(state): State<Arc<WsState>>,
+    axum::extract::Query(params): axum::extract::Query<std::collections::HashMap<String, String>>,
+) -> Response {
+    let path_param = params.get("path").cloned().unwrap_or_default();
+    if is_rejected_note_ref(&path_param) {
+        return ApiError::bad_request("invalid path").into_response();
+    }
+    let Some((abs, _rel)) = resolve_note_path(&state.vault_path, &path_param) else {
+        return ApiError::not_found().into_response();
+    };
+    let is_text_note = abs
+        .extension()
+        .and_then(|e| e.to_str())
+        .is_some_and(|e| matches!(e.to_ascii_lowercase().as_str(), "md" | "markdown" | "txt"));
+    if !is_text_note {
+        return ApiError::bad_request("only Markdown notes can be exported as PDF").into_response();
+    }
+    let brand = match params.get("brand").filter(|b| !b.is_empty()) {
+        Some(slug) => match hq_convert::brand::load_brand_kit(&state.vault_path, slug) {
+            Ok(kit) => Some(kit),
+            Err(e) => return ApiError::bad_request(e.to_string()).into_response(),
+        },
+        None => None,
+    };
+    let Ok(_slot) = PDF_SLOTS.acquire().await else {
+        return ApiError::internal("pdf export unavailable").into_response();
+    };
+    let (info, bytes) =
+        match hq_convert::note_pdf::export_note_pdf_bytes(&state.vault_path, &abs, brand.as_ref())
+            .await
+        {
+            Ok(done) => done,
+            Err(
+                e @ (hq_convert::types::ConvertError::NoPdfEngine
+                | hq_convert::types::ConvertError::PandocNotFound),
+            ) => return ApiError::Unavailable(e.to_string()).into_response(),
+            Err(e) => return ApiError::internal(e).into_response(),
+        };
+    let ascii: String = info
+        .title
+        .chars()
+        .map(|c| {
+            if c.is_ascii_alphanumeric() || c == '-' || c == '_' {
+                c
+            } else {
+                ' '
+            }
+        })
+        .collect::<String>()
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join("-");
+    let ascii = if ascii.is_empty() {
+        "note".to_string()
+    } else {
+        ascii
+    };
+    let encoded: String = info
+        .title
+        .bytes()
+        .map(|b| match b {
+            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' => (b as char).to_string(),
+            _ => format!("%{b:02X}"),
+        })
+        .collect();
+    let disposition =
+        format!("attachment; filename=\"{ascii}.pdf\"; filename*=UTF-8''{encoded}.pdf");
+    (
+        axum::http::StatusCode::OK,
+        [
+            (
+                axum::http::header::CONTENT_TYPE,
+                "application/pdf".to_string(),
+            ),
+            (axum::http::header::CONTENT_DISPOSITION, disposition),
+            (axum::http::header::CACHE_CONTROL, "no-store".to_string()),
+        ],
+        axum::body::Body::from(bytes),
+    )
+        .into_response()
+}
+
 /// `POST /api/note/create {folder?, title, content}`: never overwrites an existing note.
 pub(crate) async fn note_create_handler(
     State(state): State<Arc<WsState>>,

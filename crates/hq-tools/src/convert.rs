@@ -5,6 +5,7 @@
 //! Tools:
 //!   - `convert_to_markdown` — convert a file at a given path to Markdown
 //!   - `convert_from_markdown` — export Markdown to DOCX, PDF, HTML, etc. via pandoc
+//!   - `vault_export_pdf` — render a vault note as a shareable PDF (frontmatter and wikilinks cleaned up)
 //!   - `ocr_extract_text` — extract text from an image via macOS Vision (on-device, model-agnostic)
 
 use std::path::PathBuf;
@@ -17,6 +18,7 @@ use tracing::info;
 
 use hq_convert::brand::load_brand_kit;
 use hq_convert::inbound::InboundConverter;
+use hq_convert::note_pdf::{export_note_pdf, resolve_note};
 use hq_convert::ocr::OcrEngine;
 
 use crate::brand::brand_param_schema;
@@ -210,6 +212,104 @@ impl HqTool for ConvertFromMarkdownTool {
     }
 }
 
+// ─── VaultExportPdfTool ─────────────────────────────────────────────────────
+
+pub struct VaultExportPdfTool {
+    vault_path: PathBuf,
+}
+
+#[async_trait]
+impl HqTool for VaultExportPdfTool {
+    fn name(&self) -> &str {
+        "vault_export_pdf"
+    }
+
+    fn description(&self) -> &str {
+        "Export a vault note as a PDF that can be shared outside the vault. Frontmatter is dropped, \
+         [[wikilinks]] become plain text, and images embedded from the vault are included (anything \
+         outside the vault is left out). Saved to Exports/<note>.pdf in the vault unless `output` is \
+         given; the web UI serves it from the returned `web_path`. Needs pandoc plus a Chromium-family \
+         browser, WeasyPrint or xelatex. Pass `brand` to use that client's colour and font."
+    }
+
+    fn parameters(&self) -> Value {
+        let mut brand_schema = brand_param_schema(&self.vault_path);
+        if let Some(obj) = brand_schema.as_object_mut() {
+            obj.insert(
+                "description".into(),
+                json!("Brand slug: applies that brand's accent colour, font and logo."),
+            );
+        }
+        json!({
+            "type": "object",
+            "properties": {
+                "path": {
+                    "type": "string",
+                    "description": "The note: vault-relative path (Notebooks/Inbox/Plan.md), the same without .md, or a bare note name."
+                },
+                "output": {
+                    "type": "string",
+                    "description": "Optional absolute destination for the PDF. Defaults to Exports/<note name>.pdf inside the vault."
+                },
+                "brand": brand_schema
+            },
+            "required": ["path"]
+        })
+    }
+
+    fn category(&self) -> &str {
+        "convert"
+    }
+
+    async fn execute(&self, args: Value) -> Result<Value> {
+        let reference = args
+            .get("path")
+            .and_then(|v| v.as_str())
+            .ok_or_else(|| anyhow::anyhow!("missing required arg: path"))?;
+
+        let note = resolve_note(&self.vault_path, reference)
+            .ok_or_else(|| anyhow::anyhow!("note not found in the vault: {reference}"))?;
+
+        let (dest, in_vault) = match args.get("output").and_then(|v| v.as_str()) {
+            Some(out) => (PathBuf::from(out), false),
+            None => {
+                let stem = note
+                    .file_stem()
+                    .map(|s| s.to_string_lossy().into_owned())
+                    .unwrap_or_else(|| "note".into());
+                (self.vault_path.join("Exports").join(format!("{stem}.pdf")), true)
+            }
+        };
+
+        let brand_kit = match args.get("brand").and_then(|v| v.as_str()) {
+            Some(slug) => Some(
+                load_brand_kit(&self.vault_path, slug)
+                    .map_err(|e| anyhow::anyhow!("brand resolution failed: {e}"))?,
+            ),
+            None => None,
+        };
+
+        info!(note = %note.display(), dest = %dest.display(), "vault_export_pdf: exporting");
+
+        let pdf = export_note_pdf(&self.vault_path, &note, &dest, brand_kit.as_ref())
+            .await
+            .map_err(|e| anyhow::anyhow!("PDF export failed: {e}"))?;
+
+        let web_path = in_vault
+            .then(|| dest.strip_prefix(&self.vault_path).ok())
+            .flatten()
+            .map(|p| p.to_string_lossy().into_owned());
+
+        Ok(json!({
+            "output_path": pdf.path.to_string_lossy(),
+            "web_path": web_path,
+            "title": pdf.title,
+            "engine": pdf.engine,
+            "size_bytes": pdf.size_bytes,
+        }))
+    }
+}
+
 // ─── OcrExtractTextTool ─────────────────────────────────────────────────────
 
 pub struct OcrExtractTextTool;
@@ -278,7 +378,8 @@ impl HqTool for OcrExtractTextTool {
 pub fn create_convert_tools(vault_path: PathBuf) -> Vec<Box<dyn HqTool>> {
     vec![
         Box::new(ConvertToMarkdownTool),
-        Box::new(ConvertFromMarkdownTool { vault_path }),
+        Box::new(ConvertFromMarkdownTool { vault_path: vault_path.clone() }),
+        Box::new(VaultExportPdfTool { vault_path }),
         Box::new(OcrExtractTextTool),
     ]
 }

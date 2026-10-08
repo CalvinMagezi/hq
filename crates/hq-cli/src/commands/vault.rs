@@ -70,6 +70,54 @@ pub async fn run(config: &HqConfig, sub: &str, args: &[String]) -> Result<()> {
             vault.write_note(path, &note)?;
             println!("Wrote: {}", path);
         }
+        "export-pdf" | "pdf" => {
+            let usage = "Usage: hq vault export-pdf <note> [-o <file.pdf>] [--brand <slug>]";
+            let mut note_ref: Option<&str> = None;
+            let mut output: Option<&str> = None;
+            let mut brand: Option<&str> = None;
+            let mut it = args.iter();
+            while let Some(a) = it.next() {
+                match a.as_str() {
+                    "-o" | "--output" => {
+                        output = Some(it.next().ok_or_else(|| anyhow::anyhow!(usage))?)
+                    }
+                    "--brand" => brand = Some(it.next().ok_or_else(|| anyhow::anyhow!(usage))?),
+                    other if other.starts_with('-') => {
+                        anyhow::bail!("unknown option {other}\n{usage}")
+                    }
+                    other if note_ref.is_none() => note_ref = Some(other),
+                    _ => anyhow::bail!(usage),
+                }
+            }
+            let note_ref = note_ref.ok_or_else(|| anyhow::anyhow!(usage))?;
+            let note = hq_convert::note_pdf::resolve_note(&config.vault_path, note_ref)
+                .ok_or_else(|| anyhow::anyhow!("note not found in the vault: {note_ref}"))?;
+            let dest = match output {
+                Some(o) => std::path::PathBuf::from(o),
+                None => {
+                    let stem = note.file_stem().map(|s| s.to_string_lossy().into_owned());
+                    std::path::PathBuf::from(format!("{}.pdf", stem.as_deref().unwrap_or("note")))
+                }
+            };
+            let kit = brand
+                .map(|slug| hq_convert::brand::load_brand_kit(&config.vault_path, slug))
+                .transpose()
+                .map_err(|e| anyhow::anyhow!("brand resolution failed: {e}"))?;
+            let pdf = hq_convert::note_pdf::export_note_pdf(
+                &config.vault_path,
+                &note,
+                &dest,
+                kit.as_ref(),
+            )
+            .await
+            .map_err(|e| anyhow::anyhow!("{e}"))?;
+            println!(
+                "Wrote {} ({:.1} KB, {})",
+                pdf.path.display(),
+                pdf.size_bytes as f64 / 1024.0,
+                pdf.engine
+            );
+        }
         "stats" => {
             let (note_count, db_size) = vault.get_stats()?;
             println!("Vault Statistics");
@@ -117,6 +165,9 @@ pub async fn run(config: &HqConfig, sub: &str, args: &[String]) -> Result<()> {
             println!("  tree [dir]           List all notes recursively");
             println!("  read <path>          Read a note");
             println!("  write <path> <text>  Write a note");
+            println!(
+                "  export-pdf <note>    Export a note as a shareable PDF (-o file, --brand slug)"
+            );
             println!("  stats                Show vault statistics");
             println!("  context              Show system context");
         }

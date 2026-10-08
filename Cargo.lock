@@ -2332,6 +2332,7 @@ name = "hq-convert"
 version = "0.9.1"
 dependencies = [
  "dirs",
+ "regex",
  "serde",
  "serde_yaml",
  "tempfile",

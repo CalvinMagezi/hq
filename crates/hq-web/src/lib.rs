@@ -153,6 +153,7 @@ pub fn create_router(state: Arc<WsState>) -> Router {
             get(api::note_read_handler).put(vault_api::note_update_handler),
         )
         .route("/api/note/create", post(vault_api::note_create_handler))
+        .route("/api/note/pdf", get(vault_api::note_pdf_handler))
         .route("/api/vault/folders", get(vault_api::folders_handler))
         .route("/api/vault-signals", get(vault_api::signals_handler))
         .route("/api/tree", get(api::tree_handler))
@@ -559,6 +560,7 @@ mod web_auth_router_tests {
         for req in [
             get("/api/tree?recursive=true&path=../"),
             get("/api/note?path=../etc/passwd"),
+            get("/api/note/pdf?path=../etc/passwd"),
             json_req("POST", "/api/note/create", r#"{"folder":"../x","title":"t","content":""}"#),
             json_req("PUT", "/api/note", r#"{"path":"../x.md","content":""}"#),
             json_req("PUT", "/api/note", r#"{"path":"/etc/hosts","content":""}"#),
@@ -569,6 +571,42 @@ mod web_auth_router_tests {
         let created = json_req("POST", "/api/note/create", r#"{"title":"Hello","content":"hi"}"#);
         assert_eq!(status(&app, created).await, StatusCode::OK);
         assert!(vault.path().join("Notebooks/Inbox/Hello.md").exists());
+    }
+
+    #[tokio::test]
+    async fn note_pdf_endpoint_validates_its_input() {
+        let vault = tempfile::TempDir::new().unwrap();
+        std::fs::create_dir_all(vault.path().join("Notebooks")).unwrap();
+        std::fs::write(vault.path().join("Notebooks/pic.png"), b"x").unwrap();
+        let app = create_router(Arc::new(WsState::new(vault.path().to_path_buf(), None)));
+        let get = |uri: &str| Request::get(uri).body(Body::empty()).unwrap();
+        assert_eq!(status(&app, get("/api/note/pdf")).await, StatusCode::BAD_REQUEST);
+        assert_eq!(status(&app, get("/api/note/pdf?path=Missing")).await, StatusCode::NOT_FOUND);
+        assert_eq!(
+            status(&app, get("/api/note/pdf?path=Notebooks/pic.png")).await,
+            StatusCode::BAD_REQUEST
+        );
+    }
+
+    /// Needs pandoc and a PDF engine. Run with:
+    /// `cargo test -p hq-web -- --ignored note_pdf_endpoint_serves_a_pdf`
+    #[tokio::test]
+    #[ignore = "needs pandoc and a PDF engine on this machine"]
+    async fn note_pdf_endpoint_serves_a_pdf() {
+        let vault = tempfile::TempDir::new().unwrap();
+        std::fs::create_dir_all(vault.path().join("Notebooks")).unwrap();
+        std::fs::write(vault.path().join("Notebooks/Plan.md"), "---\ntitle: Plan\n---\nHello").unwrap();
+        let app = create_router(Arc::new(WsState::new(vault.path().to_path_buf(), None)));
+        let res = app
+            .clone()
+            .oneshot(Request::get("/api/note/pdf?path=Plan").body(Body::empty()).unwrap())
+            .await
+            .unwrap();
+        assert_eq!(res.status(), StatusCode::OK);
+        assert_eq!(res.headers()["content-type"], "application/pdf");
+        assert!(res.headers()["content-disposition"].to_str().unwrap().contains("Plan.pdf"));
+        let body = axum::body::to_bytes(res.into_body(), 16 * 1024 * 1024).await.unwrap();
+        assert!(body.starts_with(b"%PDF"));
     }
 }
 

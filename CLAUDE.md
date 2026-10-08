@@ -112,6 +112,7 @@ placeholders (`example.com`, `hq.example.ts.net`, `<owner>/<repo>`).
 | Discord bridge | `crates/hq-relay/src/discord/` |
 | Telegram bridge | `crates/hq-relay/src/telegram/`; commands and watch firing shared by both bridges in `chat_commands.rs` and `watch_scheduler.rs` |
 | Remote MCP servers (`remote_mcp:` config) | `crates/hq-tools/src/remote_mcp.rs` |
+| Note → PDF export (`hq vault export-pdf`, `vault_export_pdf`, `/api/note/pdf`) | `crates/hq-convert/src/note_pdf.rs` (preparation and rendering), `crates/hq-tools/src/convert.rs`, `crates/hq-web/src/vault_api.rs`, `docs/NOTE_PDF.md` |
 | Native task management | `crates/hq-db/src/tasks.rs` (shared write surface: spaces > initiatives > tasks > comments), `crates/hq-tools/src/tasks/` (MCP tools), `crates/hq-web/src/tasks_api.rs` (REST + WS broadcast), `apps/hq-web/src/routes/tasks.tsx` (UI). Tag-based agent routing pushes to `_mailboxes/<tag>/` synchronously via `hq_core::mailbox::notify_tagged_agents`. Sub-tasks, start dates, soft dependencies and List/Board/Timeline views: `docs/plans/native-tasks.md`. |
 | Memory system | `crates/hq-memory/src/lib.rs` |
 | LLM usage report | `crates/hq-cli/src/commands/usage.rs` (`hq usage`/`cost`/`summary` read hq-db `task_outcomes`) |
