@@ -25,8 +25,20 @@ const EMU_PER_PX: u32 = 9525;
 const MONO: &str = "Consolas";
 
 enum Child {
-    P(d::Paragraph),
-    T(d::Table),
+    // Both boxed: docx-rs paragraphs and tables are several hundred bytes
+    // each, and clippy rightly objects to a Vec of such large variants.
+    P(Box<d::Paragraph>),
+    T(Box<d::Table>),
+}
+
+impl Child {
+    fn p(paragraph: d::Paragraph) -> Self {
+        Child::P(Box::new(paragraph))
+    }
+
+    fn t(table: d::Table) -> Self {
+        Child::T(Box::new(table))
+    }
 }
 
 #[derive(Clone, Copy, Default)]
@@ -47,8 +59,14 @@ struct Fmt {
 }
 
 enum Piece {
-    Run(d::Run),
+    Run(Box<d::Run>),
     Link(d::Hyperlink),
+}
+
+impl Piece {
+    fn run(run: d::Run) -> Self {
+        Piece::Run(Box::new(run))
+    }
 }
 
 struct Writer {
@@ -82,7 +100,7 @@ pub fn to_docx(
         assets: AssetLoader::new(asset_root),
     };
 
-    let mut children = vec![Child::P(
+    let mut children = vec![Child::p(
         d::Paragraph::new()
             .style("Title")
             .add_run(d::Run::new().add_text(&doc.title)),
@@ -139,8 +157,8 @@ pub fn to_docx(
 
     for child in children {
         docx = match child {
-            Child::P(p) => docx.add_paragraph(p),
-            Child::T(t) => docx.add_table(t),
+            Child::P(p) => docx.add_paragraph(*p),
+            Child::T(t) => docx.add_table(*t),
         };
     }
     for a in w.abstracts {
@@ -173,29 +191,29 @@ impl Writer {
                     .style(&format!("Heading{}", (*level).clamp(1, 6)))
                     .keep_next(true);
                 p = self.fill(p, content, &Fmt::default());
-                out.push(Child::P(p));
+                out.push(Child::p(p));
             }
             Block::Paragraph(content) => {
                 let mut p = indented(d::Paragraph::new(), ctx.indent);
                 p = self.fill(p, content, &Fmt::default());
-                out.push(Child::P(p));
+                out.push(Child::p(p));
             }
             Block::Quote(body) => {
                 let inner = self.blocks(body, Ctx::default());
-                out.push(Child::T(boxed(&self.accent.clone(), "F7F7F7", None, inner)));
-                out.push(Child::P(d::Paragraph::new()));
+                out.push(Child::t(boxed(&self.accent.clone(), "F7F7F7", None, inner)));
+                out.push(Child::p(d::Paragraph::new()));
             }
             Block::Callout { kind, title, body } => {
                 let color = callout_color(kind).trim_start_matches('#').to_owned();
                 let label = title.clone().unwrap_or_else(|| capitalise(kind));
                 let inner = self.blocks(body, Ctx::default());
-                out.push(Child::T(boxed(
+                out.push(Child::t(boxed(
                     &color,
                     &tint(&color),
                     Some((label, color.clone())),
                     inner,
                 )));
-                out.push(Child::P(d::Paragraph::new()));
+                out.push(Child::p(d::Paragraph::new()));
             }
             Block::List {
                 ordered,
@@ -218,19 +236,19 @@ impl Writer {
                 for l in lines {
                     cell = cell.add_paragraph(l);
                 }
-                out.push(Child::T(
+                out.push(Child::t(
                     d::Table::new(vec![d::TableRow::new(vec![cell])])
                         .width(5000, d::WidthType::Pct),
                 ));
-                out.push(Child::P(d::Paragraph::new()));
+                out.push(Child::p(d::Paragraph::new()));
             }
             Block::Table(t) => {
                 if let Some(table) = self.table(t) {
-                    out.push(Child::T(table));
-                    out.push(Child::P(d::Paragraph::new()));
+                    out.push(Child::t(table));
+                    out.push(Child::p(d::Paragraph::new()));
                 }
             }
-            Block::Rule => out.push(Child::P(
+            Block::Rule => out.push(Child::p(
                 d::Paragraph::new()
                     .align(d::AlignmentType::Center)
                     .add_run(d::Run::new().add_text("\u{2500}".repeat(40)).color("BBBBBB")),
@@ -293,7 +311,7 @@ impl Writer {
                 _ => d::Paragraph::new().numbering(d::NumberingId::new(id), d::IndentLevel::new(0)),
             };
             lead = lead.keep_lines(false);
-            out.push(Child::P(lead));
+            out.push(Child::p(lead));
             for block in rest {
                 match block {
                     Block::List {
@@ -359,7 +377,7 @@ impl Writer {
         self.pieces(inlines, fmt, &mut pieces);
         for piece in pieces {
             paragraph = match piece {
-                Piece::Run(r) => paragraph.add_run(r),
+                Piece::Run(r) => paragraph.add_run(*r),
                 Piece::Link(h) => paragraph.add_hyperlink(h),
             };
         }
@@ -369,7 +387,7 @@ impl Writer {
     fn pieces(&mut self, inlines: &[Inline], fmt: &Fmt, out: &mut Vec<Piece>) {
         for inline in inlines {
             match inline {
-                Inline::Text(t) => out.push(Piece::Run(run(t, fmt))),
+                Inline::Text(t) => out.push(Piece::run(run(t, fmt))),
                 Inline::Emph(c) => self.pieces(
                     c,
                     &Fmt {
@@ -394,7 +412,7 @@ impl Writer {
                     },
                     out,
                 ),
-                Inline::Code(c) => out.push(Piece::Run(run(
+                Inline::Code(c) => out.push(Piece::run(run(
                     c,
                     &Fmt {
                         code: true,
@@ -413,7 +431,7 @@ impl Writer {
                         let mut link = d::Hyperlink::new(url.trim(), d::HyperlinkType::External);
                         for piece in inner {
                             if let Piece::Run(r) = piece {
-                                link = link.add_run(r);
+                                link = link.add_run(*r);
                             }
                         }
                         out.push(Piece::Link(link));
@@ -423,10 +441,10 @@ impl Writer {
                     }
                 }
                 Inline::Image { alt, src } => match self.picture(src) {
-                    Some(pic) => out.push(Piece::Run(d::Run::new().add_image(pic))),
+                    Some(pic) => out.push(Piece::run(d::Run::new().add_image(pic))),
                     None => {
                         let label = if alt.is_empty() { "image" } else { alt };
-                        out.push(Piece::Run(run(
+                        out.push(Piece::run(run(
                             &format!("[{label} unavailable]"),
                             &Fmt {
                                 italic: true,
@@ -435,8 +453,8 @@ impl Writer {
                         )));
                     }
                 },
-                Inline::SoftBreak => out.push(Piece::Run(run(" ", fmt))),
-                Inline::HardBreak => out.push(Piece::Run(
+                Inline::SoftBreak => out.push(Piece::run(run(" ", fmt))),
+                Inline::HardBreak => out.push(Piece::run(
                     d::Run::new().add_break(d::BreakType::TextWrapping),
                 )),
             }
@@ -535,12 +553,12 @@ fn boxed(edge: &str, fill: &str, label: Option<(String, String)>, children: Vec<
     for child in children {
         match child {
             Child::P(p) => {
-                cell = cell.add_paragraph(p);
+                cell = cell.add_paragraph(*p);
                 has_paragraph = true;
                 last_was_table = false;
             }
             Child::T(t) => {
-                cell = cell.add_table(t);
+                cell = cell.add_table(*t);
                 last_was_table = true;
             }
         }
