@@ -26,6 +26,9 @@ interface HQState {
   /** Coding agents waiting on the person; drives the Workbench nav badge. Not persisted. */
   needsYouCount: number
   setNeedsYouCount: (count: number) => void
+  /** True while the Workbench list (unfiltered) is open and feeds the count itself, so the nav need not poll. */
+  workbenchFeedsCount: boolean
+  setWorkbenchFeedsCount: (feeds: boolean) => void
   updateNotificationState: (id: string, state: import('~/lib/notificationsApi').NotificationState) => void
 
   systemNotice: string | null
@@ -68,6 +71,8 @@ export const useHQStore = create<HQState>()(
         set({ unreadNotificationsCount, pendingApprovalsCount }),
       needsYouCount: 0,
       setNeedsYouCount: (needsYouCount) => set({ needsYouCount }),
+      workbenchFeedsCount: false,
+      setWorkbenchFeedsCount: (workbenchFeedsCount) => set({ workbenchFeedsCount }),
       updateNotificationState: (id, state) =>
         set((s) => {
           const next = s.notifications.map((n) => (n.id === id ? { ...n, state } : n))

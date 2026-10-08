@@ -1,12 +1,14 @@
 import { createFileRoute } from '@tanstack/react-router'
 import { Archive, Loader2, Plus, RefreshCw, Terminal } from 'lucide-react'
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { NewAgentDialog } from '~/components/sessions/NewAgentDialog'
 import { SessionDetail } from '~/components/sessions/SessionDetail'
 import { SessionRow } from '~/components/sessions/SessionRow'
 import { usePolled } from '~/components/sessions/usePolled'
 import { globalSessionsApi, type HarnessSession } from '~/lib/sessionsApi'
-import { archivable, groupSessions } from '~/lib/workbench'
+import { useHQStore } from '~/store/hqStore'
+import { archivable, groupSessions, needsYouCount } from '~/lib/workbench'
+import { ErrorText } from '~/components/sessions/ErrorText'
 
 const LIST_POLL_MS = 8_000
 const DETAIL_POLL_MS = 5_000
@@ -34,12 +36,29 @@ function WorkbenchPage() {
   const navigate = Route.useNavigate()
   const [showArchived, setShowArchived] = useState(false)
   const [creating, setCreating] = useState(false)
-  const filters = useMemo(() => ({ ...(task ? { task_id: task } : {}), ...(showArchived ? { include_archived: true } : {}) }), [task, showArchived])
-  const list = usePolled(JSON.stringify(filters), () => globalSessionsApi.list(filters), LIST_POLL_MS)
-  const detail = usePolled(selectedId ?? '', () => globalSessionsApi.get(selectedId ?? ''), DETAIL_POLL_MS, Boolean(selectedId))
+  // Archived agents are always fetched and hidden here, so the toggle is instant and never blanks the list.
+  const filters = useMemo(() => ({ ...(task ? { task_id: task } : {}), include_archived: true }), [task])
+  const list = usePolled(JSON.stringify(filters), () => globalSessionsApi.list(filters), LIST_POLL_MS, true, true)
+  const detail = usePolled(selectedId ?? '', () => globalSessionsApi.get(selectedId ?? ''), DETAIL_POLL_MS, Boolean(selectedId), true)
+
+  // An unfiltered list is the nav badge's source, so the nav stops polling while this page is open.
+  const setCount = useHQStore((st) => st.setNeedsYouCount)
+  const setFeeds = useHQStore((st) => st.setWorkbenchFeedsCount)
+  const feeds = !task
+  useEffect(() => {
+    setFeeds(feeds)
+    return () => setFeeds(false)
+  }, [feeds, setFeeds])
+  useEffect(() => {
+    if (!feeds) return
+    if (list.error !== null) setCount(0)
+    else if (list.data) setCount(needsYouCount(list.data))
+  }, [feeds, list.data, list.error, setCount])
 
   const select = (id: string | undefined) => void navigate({ search: (prev) => ({ ...prev, id }), replace: true })
-  const refreshAll = () => void Promise.all([list.refresh(), detail.refresh()])
+  const refreshAll = async () => {
+    await Promise.all([list.refresh(), detail.refresh()])
+  }
   // The detail fetch is fresher than the list, and also covers an agent the list's filters hide.
   const selected: HarnessSession | null = detail.data ?? list.data?.find((s) => s.id === selectedId) ?? null
 
@@ -148,9 +167,7 @@ function AgentList({ list, selectedId, showArchived, onShowArchived, onSelect, o
   }
   if (!list.data) {
     return (
-      <p role="alert" className="p-4 text-xs font-mono text-rose-400">
-        {list.error ?? 'Could not load your agents.'}
-      </p>
+      <ErrorText className="p-4 text-xs">{list.error ?? 'Could not load your agents.'}</ErrorText>
     )
   }
 
@@ -163,14 +180,10 @@ function AgentList({ list, selectedId, showArchived, onShowArchived, onSelect, o
   return (
     <div className="flex-1 overflow-y-auto overscroll-contain min-h-0 pb-4">
       {list.error && (
-        <p role="alert" className="px-3 py-1.5 text-[11px] font-mono text-rose-400">
-          Could not refresh: {list.error}
-        </p>
+        <ErrorText className="px-3 py-1.5">Could not refresh: {list.error}</ErrorText>
       )}
       {archiveError && (
-        <p role="alert" className="px-3 py-1.5 text-[11px] font-mono text-rose-400">
-          {archiveError}
-        </p>
+        <ErrorText className="px-3 py-1.5">{archiveError}</ErrorText>
       )}
       {empty && (
         <div className="flex flex-col items-center gap-3 p-6 text-center">
@@ -223,7 +236,7 @@ function AgentList({ list, selectedId, showArchived, onShowArchived, onSelect, o
         </details>
       )}
       <label className="flex items-center gap-2 px-3 min-h-11 text-[11px] font-mono text-neutral-400 cursor-pointer">
-        <input type="checkbox" checked={showArchived} onChange={(e) => onShowArchived(e.target.checked)} className="h-4 w-4 accent-emerald-400" />
+        <input type="checkbox" checked={showArchived} onChange={(e) => onShowArchived(e.target.checked)} className="h-4 w-4" style={{ accentColor: 'var(--accent-green)' }} />
         Show archived
       </label>
     </div>
@@ -241,9 +254,7 @@ function DetailPlaceholder({ error, loading, onBack }: { error: string | null; l
   }
   return (
     <div className="m-auto flex flex-col items-center gap-2 p-6 text-center text-xs font-mono">
-      <p role="alert" className="text-rose-400">
-        {error ?? 'We could not find that agent.'}
-      </p>
+      <ErrorText className="text-xs">{error ?? 'We could not find that agent.'}</ErrorText>
       <button type="button" onClick={onBack} className="h-9 px-3 rounded border border-white/10 text-neutral-300 hover:bg-white/10">
         Back to the Workbench
       </button>

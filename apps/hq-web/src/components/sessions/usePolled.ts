@@ -21,7 +21,8 @@ interface PollerOptions<T> {
   load: () => Promise<T>
   onData: (data: T) => void
   onError: (message: string) => void
-  everyMs: number
+  /** A function lets the period change (fast to slow) without restarting the poller. */
+  everyMs: number | (() => number)
   isVisible?: () => boolean
 }
 
@@ -40,7 +41,7 @@ export function createPoller<T>({ load, onData, onError, everyMs, isVisible = ()
   const schedule = () => {
     clearTimeout(timer)
     if (stopped) return
-    timer = setTimeout(tick, backoffDelay(everyMs, failures))
+    timer = setTimeout(tick, backoffDelay(typeof everyMs === 'function' ? everyMs() : everyMs, failures))
   }
 
   const tick = () => {
@@ -80,6 +81,10 @@ export function createPoller<T>({ load, onData, onError, everyMs, isVisible = ()
   return {
     start: () => void run(),
     refresh: run,
+    // A tab returning to view skips the wait, but not while failures are backing off.
+    wake: () => {
+      if (failures === 0) void run()
+    },
     stop: () => {
       stopped = true
       clearTimeout(timer)
@@ -92,10 +97,12 @@ export function createPoller<T>({ load, onData, onError, everyMs, isVisible = ()
  * what is loaded: when it changes the old data is dropped and the old poller
  * stopped, so a slow response for the previous key never shows under the new one.
  */
-export function usePolled<T>(key: string, load: () => Promise<T>, everyMs: number, enabled = true): Polled<T> {
+export function usePolled<T>(key: string, load: () => Promise<T>, everyMs: number, enabled = true, refreshOnVisible = false): Polled<T> {
   const [state, setState] = useState<{ key: string; data: T | null; error: string | null } | null>(null)
   const loadRef = useRef(load)
   loadRef.current = load
+  const everyRef = useRef(everyMs)
+  everyRef.current = everyMs
   const pollerRef = useRef<ReturnType<typeof createPoller<T>> | null>(null)
 
   useEffect(() => {
@@ -105,22 +112,22 @@ export function usePolled<T>(key: string, load: () => Promise<T>, everyMs: numbe
       onData: (data) => setState({ key, data, error: null }),
       // Keep the last good data on screen; a failed refresh only adds the error.
       onError: (error) => setState((prev) => ({ key, data: prev?.key === key ? prev.data : null, error })),
-      everyMs,
+      everyMs: () => everyRef.current,
       isVisible: () => document.visibilityState === 'visible',
     })
     pollerRef.current = poller
     poller.start()
     // Polls skip while the tab is hidden, so catch up the moment it is shown again.
     const onVisible = () => {
-      if (document.visibilityState === 'visible') void poller.refresh()
+      if (document.visibilityState === 'visible') poller.wake()
     }
-    document.addEventListener('visibilitychange', onVisible)
+    if (refreshOnVisible) document.addEventListener('visibilitychange', onVisible)
     return () => {
       document.removeEventListener('visibilitychange', onVisible)
       poller.stop()
       if (pollerRef.current === poller) pollerRef.current = null
     }
-  }, [key, enabled, everyMs])
+  }, [key, enabled, refreshOnVisible])
 
   const refresh = useCallback(() => pollerRef.current?.refresh() ?? Promise.resolve(), [])
   const current = state?.key === key ? state : null

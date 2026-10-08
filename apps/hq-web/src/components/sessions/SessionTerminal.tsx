@@ -35,7 +35,7 @@ function TerminalSkeleton() {
 export function SessionTerminal({ sessionId, refreshKey, active, pollMs = READY_POLL_MS, onText }: Props) {
   const scrollRef = useRef<HTMLDivElement>(null)
   const contentRef = useRef<HTMLPreElement>(null)
-  const screen = usePolled(sessionId, () => globalSessionsApi.screen(sessionId, SCREEN_LINES), pollMs, active)
+  const screen = usePolled(sessionId, () => globalSessionsApi.screen(sessionId, SCREEN_LINES), pollMs, active, true)
   const { refresh } = screen
   useEffect(() => {
     if (refreshKey > 0) void refresh()
@@ -47,12 +47,12 @@ export function SessionTerminal({ sessionId, refreshKey, active, pollMs = READY_
   const { atBottom, scrollToBottom } = useStickToBottom(scrollRef, contentRef, sessionId, text)
 
   return (
-    <section aria-label="What the agent is doing" className="relative flex flex-col min-h-0 flex-1">
+    <section aria-label="What the agent is doing" className="relative flex flex-col flex-1 min-h-40">
       <div className="flex items-center gap-2 px-3 py-1.5 text-[10px] font-mono text-neutral-500 border-b border-white/5">
         <span>{screen.data?.source === 'snapshot' ? 'Last saved view' : 'Live'}</span>
         {screen.loading && <Loader2 className="w-3 h-3 animate-spin" aria-label="Loading" />}
         {screen.error && (
-          <span role="alert" className="text-rose-400 truncate min-w-0">
+          <span role="alert" className="truncate min-w-0" style={{ color: 'var(--accent-red)' }}>
             {screen.error}
           </span>
         )}
@@ -62,7 +62,7 @@ export function SessionTerminal({ sessionId, refreshKey, active, pollMs = READY_
         role="log"
         aria-label="Agent output"
         aria-live="off"
-        className="flex-1 min-h-48 overflow-auto overscroll-contain bg-black/40 px-3 py-2"
+        className="flex-1 min-h-32 sm:min-h-48 overflow-auto overscroll-contain bg-black/40 px-3 py-2"
         tabIndex={0}
       >
         {screen.loading && !text && <TerminalSkeleton />}

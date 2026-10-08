@@ -4,14 +4,18 @@ import { globalSessionsApi } from '~/lib/sessionsApi'
 import { needsYouCount } from '~/lib/workbench'
 import { usePolled } from './usePolled'
 
-const COUNT_POLL_MS = 15_000
+const COUNT_POLL_MS = 30_000
 
-/** Keeps the nav badge's count of agents waiting on the person fresh from anywhere in the app. */
+/** Keeps the nav badge fresh from anywhere in the app. Idle while the Workbench list is open, since that list feeds the count. */
 export function useNeedsYouCount() {
   const setCount = useHQStore((s) => s.setNeedsYouCount)
-  const list = usePolled('nav-count', () => globalSessionsApi.list(), COUNT_POLL_MS)
+  const fed = useHQStore((s) => s.workbenchFeedsCount)
+  const list = usePolled('nav-count', () => globalSessionsApi.list(), COUNT_POLL_MS, !fed)
   const count = list.data ? needsYouCount(list.data) : null
+  const failed = list.error !== null && !list.loading
   useEffect(() => {
-    if (count !== null) setCount(count)
-  }, [count, setCount])
+    if (fed) return
+    if (failed) setCount(0)
+    else if (count !== null) setCount(count)
+  }, [fed, failed, count, setCount])
 }

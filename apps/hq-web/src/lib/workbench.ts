@@ -134,3 +134,24 @@ export function explorerLine(ws: HostWorkspace | undefined, path: string): strin
   const inside = path.startsWith(ws.root) ? path.slice(ws.root.length).split('/').filter(Boolean) : []
   return `Open in Windows Explorer: ${[ws.explorer_path.replace(/\\+$/, ''), ...inside].join('\\')}`
 }
+
+export type BlockedKind = 'approval' | 'trust' | 'other'
+
+const CLASSIFY_LINES = 15
+const TRUST_PATTERN = /trust|no,\s*exit|yes,\s*proceed[\s\S]*exit/i
+const APPROVAL_PATTERN = /do you want to|would you like to|\ballow\b|\(y\/n\)|\[y\/n\]|\bproceed\b|\byes\b[\s\S]*\bno\b/i
+
+/** What a blocked agent is asking. Trust is checked first: its "Yes, proceed" also looks like an approval, but its default is often "No, exit". */
+export function classifyBlocked(screenText: string): BlockedKind {
+  const tail = tailLines(screenText, CLASSIFY_LINES)
+  if (TRUST_PATTERN.test(tail)) return 'trust'
+  return APPROVAL_PATTERN.test(tail) ? 'approval' : 'other'
+}
+
+/** Holds Approve and Decline after an answer until the screen changes, so a slow refresh cannot send it twice. */
+export const answerHeld = (answeredTail: string | null, currentTail: string) => answeredTail !== null && answeredTail === currentTail
+
+export const ANSWER_HOLD_MS = 2_000
+
+/** A Windows extended-length prefix means nothing to the person reading the path. */
+export const plainPath = (path: string) => path.replace(/^\\\\\?\\/, '')

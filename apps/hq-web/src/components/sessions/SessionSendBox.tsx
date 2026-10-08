@@ -1,18 +1,19 @@
 import { useEffect, useState } from 'react'
 import { Loader2, Send } from 'lucide-react'
+import { ErrorText } from './ErrorText'
 import { INTERRUPT_KEY, QUICK_KEYS, globalSessionsApi, type HarnessSession } from '~/lib/sessionsApi'
 
 const KEY_BUTTON_CLASS =
   'h-11 sm:h-9 min-w-11 sm:min-w-9 px-2.5 rounded border border-white/10 text-[11px] font-mono text-neutral-300 hover:text-white hover:bg-white/10 disabled:opacity-40 disabled:hover:bg-transparent'
 const INTERRUPT_BUTTON_CLASS =
-  'h-11 sm:h-9 px-2.5 rounded border border-rose-400/40 text-[11px] font-mono text-rose-300 hover:text-rose-200 hover:bg-rose-500/10 disabled:opacity-40 disabled:hover:bg-transparent'
+  'h-11 sm:h-9 px-2.5 rounded border border-white/10 text-[11px] font-mono hover:bg-white/10 disabled:opacity-40 disabled:hover:bg-transparent'
 /** How long the interrupt button stays armed before it falls back to unarmed. */
 const INTERRUPT_CONFIRM_MS = 4_000
 
 type SendPayload = Parameters<typeof globalSessionsApi.send>[1]
 
 /** Sends text or keys to one agent, tracking busy and error state for whoever shows the controls. */
-export function useSend(sessionId: string, onSent: () => void) {
+export function useSend(sessionId: string, onSent: () => void | Promise<void>) {
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const send = async (payload: SendPayload): Promise<boolean> => {
@@ -20,12 +21,13 @@ export function useSend(sessionId: string, onSent: () => void) {
     setError(null)
     try {
       await globalSessionsApi.send(sessionId, payload)
-      onSent()
+      // Stay busy until the refresh lands, so a second tap cannot answer a stale screen.
+      await onSent()
       return true
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Could not send that.')
       // A refused prompt usually means a dialog opened; show the screen it is waiting on.
-      onSent()
+      await onSent()
       return false
     } finally {
       setBusy(false)
@@ -35,21 +37,18 @@ export function useSend(sessionId: string, onSent: () => void) {
 }
 
 export function SendError({ error }: { error: string | null }) {
-  if (!error) return null
-  return (
-    <p role="alert" className="text-[11px] font-mono text-rose-400 whitespace-pre-wrap break-words max-h-24 overflow-auto">
-      {error}
-    </p>
-  )
+  return error ? <ErrorText className="whitespace-pre-wrap max-h-24 overflow-auto">{error}</ErrorText> : null
 }
 
 interface KeysProps {
   send: (payload: SendPayload) => Promise<boolean>
   disabled: boolean
+  /** Opened at once when the buttons are the only way to answer. */
+  defaultOpen?: boolean
 }
 
 /** The raw keys for the rare dialog that Approve and Decline do not answer, plus a two-tap interrupt. */
-export function MoreKeys({ send, disabled }: KeysProps) {
+export function MoreKeys({ send, disabled, defaultOpen }: KeysProps) {
   const [armed, setArmed] = useState(false)
   useEffect(() => {
     if (!armed) return
@@ -57,7 +56,7 @@ export function MoreKeys({ send, disabled }: KeysProps) {
     return () => clearTimeout(timer)
   }, [armed])
   return (
-    <details className="group">
+    <details open={defaultOpen}>
       <summary className="flex items-center min-h-11 cursor-pointer text-[11px] font-mono text-neutral-400 hover:text-white select-none">More keys</summary>
       <div className="flex flex-wrap items-center gap-1.5 pb-1" role="group" aria-label="Press a key">
         {QUICK_KEYS.map((key) => (
@@ -77,6 +76,7 @@ export function MoreKeys({ send, disabled }: KeysProps) {
           }}
           onBlur={() => setArmed(false)}
           className={INTERRUPT_BUTTON_CLASS}
+          style={{ color: 'var(--accent-red)' }}
         >
           {armed ? 'tap again to interrupt' : INTERRUPT_KEY}
         </button>
@@ -87,7 +87,7 @@ export function MoreKeys({ send, disabled }: KeysProps) {
 
 interface Props {
   session: HarnessSession
-  onSent: () => void
+  onSent: () => void | Promise<void>
 }
 
 /** A message box for an agent that is ready, with the raw keys tucked away. */

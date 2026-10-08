@@ -1,10 +1,11 @@
 import { expect, test } from 'bun:test'
 import type { HarnessSession } from './sessionsApi'
 import {
-  BUSY_POLL_MS,
-  READY_POLL_MS,
+  ANSWER_HOLD_MS,
   agentName,
+  answerHeld,
   archivable,
+  classifyBlocked,
   computerName,
   computerUnavailableReason,
   crumbs,
@@ -12,6 +13,7 @@ import {
   folderName,
   groupSessions,
   needsYouCount,
+  plainPath,
   screenPollMs,
   sessionTitle,
   statusInfo,
@@ -114,13 +116,14 @@ test('past agents hide archived ones unless asked, and archive-all skips archive
   expect(archivable([stopped, old, session({})]).map((s) => s.id)).toEqual(['stopped'])
 })
 
-test('the terminal is polled fast while working or blocked and slower when ready or ended', () => {
-  expect(screenPollMs({ status: 'running', agent_status: 'working' })).toBe(BUSY_POLL_MS)
-  expect(screenPollMs({ status: 'running', agent_status: 'blocked' })).toBe(BUSY_POLL_MS)
-  expect(screenPollMs({ status: 'running', agent_status: 'idle' })).toBe(READY_POLL_MS)
-  expect(screenPollMs({ status: 'stopped', agent_status: 'working' })).toBe(READY_POLL_MS)
-  expect(BUSY_POLL_MS).toBe(1500)
-  expect(READY_POLL_MS).toBe(4000)
+test('the poll interval is short while working or blocked and longer in every other state', () => {
+  const ms = (status: HarnessSession['status'], agent: HarnessSession['agent_status']) => screenPollMs({ status, agent_status: agent })
+  const fast = ms('running', 'working')
+  expect(ms('running', 'blocked')).toBe(fast)
+  for (const slow of [ms('running', 'idle'), ms('running', 'done'), ms('running', null), ms('stopped', 'working'), ms('exited', 'blocked')]) {
+    expect(slow).toBeGreaterThan(fast)
+  }
+  expect(ms('running', 'idle')).toBe(ms('exited', null))
 })
 
 test('tailLines keeps the newest lines', () => {
@@ -149,4 +152,61 @@ test('the Explorer line appears only under WSL and follows the chosen subfolder'
   expect(explorerLine({ ...wsl, wsl: false }, '')).toBeNull()
   expect(explorerLine(wsl, '')).toBe('Open in Windows Explorer: \\\\wsl$\\Ubuntu\\home\\me\\HQ')
   expect(explorerLine(wsl, '/home/me/HQ/site')).toBe('Open in Windows Explorer: \\\\wsl$\\Ubuntu\\home\\me\\HQ\\site')
+})
+
+const CLAUDE_PERMISSION = `Bash command
+
+  npm test
+
+Do you want to proceed?
+ ❯ 1. Yes
+   2. Yes, and don't ask again for npm test commands
+   3. No, and tell Claude what to do differently (esc)`
+
+const CLAUDE_EDIT = `Do you want to make this edit to src/app.ts?
+ ❯ 1. Yes
+   2. Yes, allow all edits during this session (shift+tab)
+   3. No, and tell Claude what to do differently (esc)`
+
+const CLAUDE_TRUST = `Do you trust the files in this folder?
+
+/Users/me/HQ/site
+
+Claude Code may read files in this folder. Only use it with files you trust.
+
+ ❯ 1. Yes, proceed
+   2. No, exit`
+
+test('a yes or no permission prompt is an approval', () => {
+  expect(classifyBlocked(CLAUDE_PERMISSION)).toBe('approval')
+  expect(classifyBlocked(CLAUDE_EDIT)).toBe('approval')
+  expect(classifyBlocked('Run this command? (y/n)')).toBe('approval')
+  expect(classifyBlocked('Would you like to install the plugin?')).toBe('approval')
+})
+
+test('a folder trust dialog is never an approval, even though it says proceed', () => {
+  expect(classifyBlocked(CLAUDE_TRUST)).toBe('trust')
+  expect(classifyBlocked('Allow this folder?\n 1. Yes, proceed\n 2. No, exit')).toBe('trust')
+})
+
+test('anything else is left to the person', () => {
+  expect(classifyBlocked('Pick a theme:\n 1. Dark\n 2. Light')).toBe('other')
+  expect(classifyBlocked('')).toBe('other')
+})
+
+test('only the newest lines decide the kind', () => {
+  const old = Array.from({ length: 40 }, () => 'Do you want to proceed?').join('\n')
+  expect(classifyBlocked(`${old}\n${Array.from({ length: 15 }, () => 'compiling').join('\n')}`)).toBe('other')
+})
+
+test('an answered prompt stays held while the screen is unchanged and frees once it moves on', () => {
+  expect(answerHeld(null, 'Do you want to proceed?')).toBe(false)
+  expect(answerHeld('Do you want to proceed?', 'Do you want to proceed?')).toBe(true)
+  expect(answerHeld('Do you want to proceed?', 'Running tests')).toBe(false)
+  expect(ANSWER_HOLD_MS).toBeGreaterThan(0)
+})
+
+test('a Windows extended-length prefix is hidden from paths', () => {
+  expect(plainPath('\\\\?\\C:\\Users\\me\\HQ')).toBe('C:\\Users\\me\\HQ')
+  expect(plainPath('/home/me/HQ')).toBe('/home/me/HQ')
 })

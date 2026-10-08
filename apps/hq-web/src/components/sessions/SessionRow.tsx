@@ -15,7 +15,7 @@ export function SessionBadges({ session: s }: { session: HarnessSession }) {
   const status = statusInfo(s)
   return (
     <div className="flex flex-wrap items-center gap-x-3 gap-y-0.5 text-[11px] font-mono text-neutral-500">
-      <span className={status.agent ? AGENT_STATUS_CLASS[status.agent] : undefined} style={status.warn ? { color: 'var(--accent-amber)' } : undefined} title={s.detail}>
+      <span className={status.agent ? AGENT_STATUS_CLASS[status.agent] : undefined} style={status.warn ? { color: 'var(--accent-amber)' } : undefined}>
         {status.word}
       </span>
       <span>{computerName(s.host)}</span>

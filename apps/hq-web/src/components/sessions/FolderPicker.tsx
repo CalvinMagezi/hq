@@ -1,7 +1,8 @@
 import { useEffect, useState } from 'react'
 import { ArrowUp, ChevronRight, FolderPlus, Folder, Loader2 } from 'lucide-react'
 import { workbenchApi, type DirListing, type HostWorkspace } from '~/lib/sessionsApi'
-import { crumbs, explorerLine } from '~/lib/workbench'
+import { crumbs, explorerLine, plainPath } from '~/lib/workbench'
+import { ErrorText } from './ErrorText'
 
 const INPUT_CLASS =
   'min-w-0 h-11 sm:h-9 px-3 rounded-lg text-xs font-mono text-neutral-200 bg-black/30 border border-white/10 focus:outline-none focus:ring-1 focus:ring-emerald-400'
@@ -68,7 +69,7 @@ export function FolderPicker({ host, workspace, value, onChange }: Props) {
           </span>
         ))}
       </nav>
-      <p className="text-[11px] font-mono text-neutral-300 break-all">{shown || workspace.root}</p>
+      <p className="text-[11px] font-mono text-neutral-300 break-all">{plainPath(shown || workspace.root)}</p>
       {explorer && <p className="text-[11px] font-mono text-neutral-500 break-all">{explorer}</p>}
       <div className="rounded-lg border border-white/10 bg-black/20 max-h-44 overflow-y-auto overscroll-contain">
         {listing?.parent != null && (
@@ -126,11 +127,8 @@ export function FolderPicker({ host, workspace, value, onChange }: Props) {
           Make folder
         </button>
       </div>
-      {error && (
-        <p role="alert" className="text-[11px] font-mono text-rose-400 break-words">
-          {error}
-        </p>
-      )}
+      {error && <ErrorText>{error}</ErrorText>}
+      <p className="text-[11px] font-mono text-neutral-500">Agents started in the HQ folder itself get their own new folder, so projects stay separate.</p>
     </div>
   )
 }
