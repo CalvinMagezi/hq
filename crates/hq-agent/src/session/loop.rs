@@ -359,13 +359,20 @@ impl AgentSession {
         self.total_output_tokens += output_tokens as u64;
         self.total_cache_read_tokens += out.cache_read_tokens as u64;
         self.total_cache_write_tokens += out.cache_write_tokens as u64;
-        self.total_cost += hq_llm::models::calculate_cost_with_cache(
+        let usage = hq_llm::cost::Usage {
+            input: input_tokens,
+            output: output_tokens,
+            cache_read: out.cache_read_tokens,
+            cache_write: out.cache_write_tokens,
+            reasoning: 0,
+        };
+        self.total_cost += hq_llm::cost::price_call(
+            hq_llm::cost::ProviderClass::of_name(&out.active_backend).for_session_budget(),
             &resolved_model,
-            input_tokens,
-            output_tokens,
-            out.cache_read_tokens,
-            out.cache_write_tokens,
-        );
+            &usage,
+            None,
+        )
+        .usd;
         // Accounting is session-generated bookkeeping, not backend output.
         self.emit(SessionEvent::CostUpdate {
             total_usd: self.total_cost,

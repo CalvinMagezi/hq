@@ -103,7 +103,7 @@ pub async fn run_inbox_triage(vault_path: &Path, config: &HqConfig) -> Result<()
                 ..Default::default()
             };
 
-            match provider.chat(&request).await {
+            match hq_llm::with_origin(hq_llm::origin::EMBEDDINGS, provider.chat(&request)).await {
                 Ok(resp) => {
                     if let Ok(data) =
                         serde_json::from_str::<serde_json::Value>(&resp.message.content)

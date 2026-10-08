@@ -5,12 +5,24 @@
 //! SQLite contention never stalls the Tokio runtime.
 
 use std::sync::Arc;
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::time::Duration;
 
 use async_trait::async_trait;
 use hq_db::Database;
 use hq_db::task_outcomes::{self, TaskOutcome};
 use hq_llm::{OutcomeEvent, TaskOutcomeSink};
 use tracing::warn;
+
+/// One more attempt after a short pause covers a writer that held the lock a moment too long.
+const RETRY_DELAY: Duration = Duration::from_millis(250);
+
+static DROPPED: AtomicU64 = AtomicU64::new(0);
+
+/// Outcomes that could not be written even after a retry since the process started.
+pub fn dropped_outcomes() -> u64 {
+    DROPPED.load(Ordering::Relaxed)
+}
 
 /// Sink backed by the shared SQLite pool.
 pub struct DbOutcomeSink {
@@ -36,7 +48,12 @@ impl TaskOutcomeSink for DbOutcomeSink {
             latency_ms: event.latency_ms,
             input_tokens: event.input_tokens,
             output_tokens: event.output_tokens,
+            cache_read_tokens: event.cache_read_tokens,
+            cache_write_tokens: event.cache_write_tokens,
+            reasoning_tokens: event.reasoning_tokens,
             cost_usd: event.cost_usd,
+            cost_source: event.cost_source.to_string(),
+            origin: event.origin.to_string(),
             success: event.success,
             error_class: event.error_class,
             quality_score: None,
@@ -45,22 +62,26 @@ impl TaskOutcomeSink for DbOutcomeSink {
             recorded_at: current_epoch(),
         };
 
-        // Thread-safety note: r2d2 hands out one connection per thread, and
-        // `spawn_blocking` runs the closure on its own blocking thread. SQLite
-        // WAL mode serializes writers at the filesystem level, so our use of
-        // `unchecked_transaction` inside `task_outcomes::insert` is safe: the
-        // conn is single-owned for the duration of the closure.
-        let res = tokio::task::spawn_blocking(move || {
-            db.with_conn(|conn| task_outcomes::insert(conn, &outcome).map(|_| ()))
-        })
-        .await;
-
-        match res {
-            Ok(Ok(())) => {}
-            Ok(Err(e)) => warn!(error = %e, "failed to persist task outcome"),
-            Err(e) => warn!(error = %e, "task outcome sink join error"),
+        if write_blocking(&db, &outcome).await.is_ok() {
+            return;
+        }
+        tokio::time::sleep(RETRY_DELAY).await;
+        if let Err(e) = write_blocking(&db, &outcome).await {
+            DROPPED.fetch_add(1, Ordering::Relaxed);
+            warn!(error = %e, model = %outcome.model, "LLM outcome lost: could not be written to the ledger");
         }
     }
+}
+
+/// Runs on the blocking pool so SQLite contention never stalls the Tokio runtime. WAL mode
+/// serializes writers, so the single-owned connection inside the closure is safe.
+async fn write_blocking(db: &Arc<Database>, outcome: &TaskOutcome) -> anyhow::Result<()> {
+    let db = db.clone();
+    let outcome = outcome.clone();
+    tokio::task::spawn_blocking(move || {
+        db.with_conn(|conn| task_outcomes::insert(conn, &outcome).map(|_| ()))
+    })
+    .await?
 }
 
 fn current_epoch() -> i64 {

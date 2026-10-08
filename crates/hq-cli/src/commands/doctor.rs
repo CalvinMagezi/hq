@@ -11,7 +11,54 @@ pub async fn run(config: &HqConfig) -> Result<()> {
     report_machine_profile(config);
     report_web_search(config).await;
     report_pdf_ocr();
+    report_spend_ledger(config);
     Ok(())
+}
+
+/// Whether the spend ledger can be trusted: priced models and attributed calls.
+fn report_spend_ledger(config: &HqConfig) {
+    use hq_db::usage_ledger::{GroupBy, grouped_usage, sum_rows, unpriced_models};
+    const WINDOW_DAYS: i64 = 7;
+    const UNATTRIBUTED_WARN_PCT: f64 = 5.0;
+    println!("\nSpend ledger (last {WINDOW_DAYS} days)");
+    let Ok(db) = hq_db::Database::open(&config.db_path()) else {
+        println!("  --  no database yet");
+        return;
+    };
+    let since = chrono::Utc::now().timestamp() - WINDOW_DAYS * 86_400;
+    let Ok(origins) = db.with_conn(|c| grouped_usage(c, since, GroupBy::Origin)) else {
+        println!("  warn  the ledger could not be read");
+        return;
+    };
+    let total = sum_rows(&origins);
+    if total.calls == 0 {
+        println!("  --  no calls recorded");
+        return;
+    }
+    let unknown = origins
+        .iter()
+        .find(|r| r.key == "unknown")
+        .map_or(0, |r| r.calls);
+    let unknown_pct = unknown as f64 / total.calls as f64 * 100.0;
+    if unknown_pct > UNATTRIBUTED_WARN_PCT {
+        println!(
+            "  warn  {unknown} of {} calls have no origin, so spend cannot be attributed",
+            total.calls
+        );
+    } else {
+        println!("  ok  {} calls, {unknown} without an origin", total.calls);
+    }
+    let unpriced = db
+        .with_conn(|c| unpriced_models(c, since))
+        .unwrap_or_default();
+    if unpriced.is_empty() {
+        println!("  ok  every model that ran has a known price");
+    }
+    for (model, calls) in unpriced {
+        println!(
+            "  warn  {model} ran {calls} times with no known price, so its cost is not counted"
+        );
+    }
 }
 
 /// Scanned PDFs (no text layer) are read with `pdftoppm` and `tesseract` off

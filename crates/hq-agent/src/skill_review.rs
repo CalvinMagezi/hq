@@ -235,7 +235,9 @@ impl Review<'_> {
         llm: &hq_memory::MemoryLlm,
     ) -> Result<Vec<Applied>> {
         let prompt = build_prompt(&self.skills_dir(), messages, loaded, db);
-        let reply = parse_reply(&llm.chat(SYSTEM, &prompt).await?)?;
+        let reply =
+            hq_llm::with_origin(hq_llm::origin::SKILL_REVIEW, llm.chat(SYSTEM, &prompt)).await?;
+        let reply = parse_reply(&reply)?;
         if let Some(action) = reply.action.as_deref().filter(|a| *a != "none") {
             tracing::warn!(
                 action,

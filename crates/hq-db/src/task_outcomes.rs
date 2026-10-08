@@ -18,7 +18,14 @@ pub struct TaskOutcome {
     pub latency_ms: i64,
     pub input_tokens: Option<i64>,
     pub output_tokens: Option<i64>,
+    pub cache_read_tokens: i64,
+    pub cache_write_tokens: i64,
+    pub reasoning_tokens: i64,
     pub cost_usd: f64,
+    /// `provider`, `table`, `unpriced`, `free`, `flat` or `none`. `unpriced` means the cost is unknown.
+    pub cost_source: String,
+    /// What kind of work the call served (chat, memory, subagent...).
+    pub origin: String,
     pub success: bool,
     pub error_class: Option<String>,
     pub quality_score: Option<f64>,
@@ -45,7 +52,12 @@ impl TaskOutcome {
             latency_ms: 0,
             input_tokens: None,
             output_tokens: None,
+            cache_read_tokens: 0,
+            cache_write_tokens: 0,
+            reasoning_tokens: 0,
             cost_usd: 0.0,
+            cost_source: "table".into(),
+            origin: "unknown".into(),
             success: true,
             error_class: None,
             quality_score: None,
@@ -70,8 +82,10 @@ pub fn insert(conn: &Connection, outcome: &TaskOutcome) -> Result<i64> {
             session_id, turn_idx, model, provider, task_hint,
             latency_ms, input_tokens, output_tokens, cost_usd,
             success, error_class, quality_score,
-            tool_calls_issued, tool_calls_succeeded, recorded_at
-        ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15)",
+            tool_calls_issued, tool_calls_succeeded, recorded_at,
+            cache_read_tokens, cache_write_tokens, reasoning_tokens, cost_source, origin
+        ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15,
+                  ?16, ?17, ?18, ?19, ?20)",
         params![
             outcome.session_id,
             outcome.turn_idx,
@@ -88,6 +102,11 @@ pub fn insert(conn: &Connection, outcome: &TaskOutcome) -> Result<i64> {
             outcome.tool_calls_issued,
             outcome.tool_calls_succeeded,
             outcome.recorded_at,
+            outcome.cache_read_tokens,
+            outcome.cache_write_tokens,
+            outcome.reasoning_tokens,
+            outcome.cost_source,
+            outcome.origin,
         ],
     )?;
     Ok(conn.last_insert_rowid())
@@ -177,7 +196,7 @@ pub fn recent_seed_rows(conn: &Connection, window_secs: i64) -> Result<Vec<Outco
     let mut stmt = conn.prepare(
         "SELECT provider, task_hint, success, latency_ms
          FROM task_outcomes
-         WHERE recorded_at >= ?1
+         WHERE recorded_at >= ?1 AND COALESCE(error_class, '') != 'cancelled'
          ORDER BY recorded_at ASC",
     )?;
     let rows = stmt
@@ -216,7 +235,12 @@ mod tests {
             latency_ms: 1200,
             input_tokens: Some(100),
             output_tokens: Some(200),
+            cache_read_tokens: 0,
+            cache_write_tokens: 0,
+            reasoning_tokens: 0,
             cost_usd: 0.0,
+            cost_source: "free".into(),
+            origin: "chat".into(),
             success: true,
             error_class: None,
             quality_score: Some(0.7),
@@ -232,6 +256,16 @@ mod tests {
         assert_eq!(board.len(), 1);
         assert_eq!(board[0].samples_24h, 1);
         assert!((board[0].success_rate_24h - 1.0).abs() < 0.001);
+    }
+
+    #[test]
+    fn a_cancelled_stream_does_not_seed_provider_health() {
+        let conn = setup();
+        let mut cancelled = TaskOutcome::now("s", 0, "m", "p", "coding");
+        cancelled.error_class = Some("cancelled".into());
+        insert(&conn, &cancelled).unwrap();
+        insert(&conn, &TaskOutcome::now("s", 1, "m", "p", "coding")).unwrap();
+        assert_eq!(recent_seed_rows(&conn, 3600).unwrap().len(), 1);
     }
 
     #[test]

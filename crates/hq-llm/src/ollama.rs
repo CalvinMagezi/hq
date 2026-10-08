@@ -212,6 +212,12 @@ impl LlmProvider for OllamaProvider {
                 arguments_delta: args_str,
             }));
         }
+        chunks.push(Ok(StreamChunk::Usage {
+            input_tokens: resp.input_tokens,
+            output_tokens: resp.output_tokens,
+            cache_read_tokens: 0,
+            cache_write_tokens: 0,
+        }));
         if !model.is_empty() {
             chunks.push(Ok(StreamChunk::ModelInfo(model)));
         }

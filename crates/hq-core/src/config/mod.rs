@@ -5,6 +5,7 @@ pub mod company;
 mod decisions;
 mod copilot_usage;
 mod disk_watchdog;
+mod usage_ledger;
 mod governance;
 mod harness;
 mod agent_host;
@@ -27,6 +28,7 @@ pub use decisions::{
 };
 pub use copilot_usage::{CopilotUsageConfig, copilot_active, openrouter_key, openrouter_primary};
 pub use disk_watchdog::DiskWatchdogConfig;
+pub use usage_ledger::UsageLedgerConfig;
 pub use governance::*;
 pub use harness::*;
 pub use agent_host::{
@@ -221,6 +223,10 @@ pub struct HqConfig {
     #[serde(default)]
     pub disk_watchdog: DiskWatchdogConfig,
 
+    /// Retention for the LLM spend ledger.
+    #[serde(default)]
+    pub usage_ledger: UsageLedgerConfig,
+
     /// Copilot credit sampling for the burn-rate meter.
     #[serde(default)]
     pub copilot_usage: CopilotUsageConfig,
@@ -374,6 +380,7 @@ impl Default for HqConfig {
             backends: BackendsConfig::default(),
             self_update: SelfUpdateConfig::default(),
             disk_watchdog: DiskWatchdogConfig::default(),
+            usage_ledger: UsageLedgerConfig::default(),
             copilot_usage: CopilotUsageConfig::default(),
             agent_host: AgentHostConfig::default(),
             budget: BudgetConfig::default(),

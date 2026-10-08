@@ -280,6 +280,10 @@ const MIGRATIONS: &[(&str, &str)] = &[
         "076_session_parent",
         include_str!("../sql/076_session_parent.sql"),
     ),
+    (
+        "077_ledger_cost_attribution",
+        include_str!("../sql/077_ledger_cost_attribution.sql"),
+    ),
 ];
 
 const MEMORY_SCHEMA_MIGRATION: &str = "058_memory_schema";

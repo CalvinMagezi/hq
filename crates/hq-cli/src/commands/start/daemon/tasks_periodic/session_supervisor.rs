@@ -176,7 +176,10 @@ fn llm_summarizer(timeout_secs: u64) -> Summarizer {
                 ..Default::default()
             };
             let response =
-                tokio::time::timeout(Duration::from_secs(timeout_secs), router.chat(&request))
+                tokio::time::timeout(
+                    Duration::from_secs(timeout_secs),
+                    hq_llm::with_origin(hq_llm::origin::SUPERVISOR, router.chat(&request)),
+                )
                     .await
                     .map_err(|_| anyhow!("summary timed out after {timeout_secs}s"))??;
             let summary = response.message.content.trim().to_string();

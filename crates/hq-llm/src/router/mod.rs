@@ -2,8 +2,11 @@ mod builder;
 mod health;
 mod selection;
 mod strategy;
+mod tap;
 mod types;
 
+#[cfg(test)]
+mod ledger_tests;
 #[cfg(test)]
 mod tests;
 

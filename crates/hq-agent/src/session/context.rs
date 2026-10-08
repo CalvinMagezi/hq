@@ -267,12 +267,14 @@ impl AgentSession {
         let precomputed = self.precomputed.clone();
         let sid = self.session_id.clone();
         let turn = self.tool_call_count as i64;
+        let origin = self.ledger_origin();
 
         self.preemptive_handle = Some(tokio::spawn(async move {
             let request = build_summary_request(&model, &snapshot);
             let ctx = hq_llm::SessionContext {
                 session_id: sid,
                 turn_idx: turn,
+                origin,
             };
             match hq_llm::SESSION_CONTEXT
                 .scope(ctx, provider.chat(&request))

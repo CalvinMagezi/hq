@@ -335,6 +335,18 @@ impl AgentSession {
         hq_llm::SessionContext {
             session_id: self.session_id.clone(),
             turn_idx: self.tool_call_count as i64,
+            origin: self.ledger_origin(),
+        }
+    }
+
+    /// Which kind of work this session's LLM calls are filed under in the spend ledger.
+    pub(super) fn ledger_origin(&self) -> &'static str {
+        if self.parent_run_id.is_some() {
+            hq_llm::origin::SUBAGENT
+        } else if self.config.is_live_user_turn {
+            hq_llm::origin::CHAT
+        } else {
+            hq_llm::origin::BACKGROUND
         }
     }
 
