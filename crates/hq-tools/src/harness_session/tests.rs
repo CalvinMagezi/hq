@@ -83,8 +83,7 @@ fn calls(dir: &tempfile::TempDir) -> String {
 #[test]
 fn build_args_substitutes_token_on_resume() {
     let spec = harness("cursor");
-    let tmp = tempfile::tempdir().unwrap();
-    let args = build_args(&spec, tmp.path(), "hs-x", Some("abc123"), true);
+    let args = build_args(&spec, "hs-x", Some("abc123"), true);
     assert!(args.contains(&"--resume".to_string()));
     assert!(args.contains(&"abc123".to_string()));
 }
@@ -92,8 +91,7 @@ fn build_args_substitutes_token_on_resume() {
 #[test]
 fn build_args_falls_back_fresh_without_token() {
     let spec = harness("cursor");
-    let tmp = tempfile::tempdir().unwrap();
-    let args = build_args(&spec, tmp.path(), "hs-x", None, true);
+    let args = build_args(&spec, "hs-x", None, true);
     assert!(!args.iter().any(|a| a.contains("{token}")));
     assert!(!args.contains(&"--resume".to_string()));
 }
@@ -101,12 +99,11 @@ fn build_args_falls_back_fresh_without_token() {
 #[test]
 fn claude_resumes_its_own_conversation_when_the_id_is_known() {
     let h = harness("claude-code");
-    let tmp = tempfile::tempdir().unwrap();
-    let with = build_args(&h, tmp.path(), "hs-x", Some("conv-1"), true);
+    let with = build_args(&h, "hs-x", Some("conv-1"), true);
     assert_eq!(with[with.len() - 2..], ["--resume", "conv-1"]);
-    let without = build_args(&h, tmp.path(), "hs-x", None, true);
+    let without = build_args(&h, "hs-x", None, true);
     assert_eq!(without.last().map(String::as_str), Some("-c"));
-    let fresh = build_args(&h, tmp.path(), "hs-x", Some("conv-1"), false);
+    let fresh = build_args(&h, "hs-x", Some("conv-1"), false);
     assert!(!fresh.contains(&"--resume".to_string()));
 }
 
@@ -147,18 +144,16 @@ fn a_reported_conversation_id_becomes_the_resume_token_once() {
 #[test]
 fn session_dir_harness_gets_dir_arg() {
     let spec = harness("pi");
-    let tmp = tempfile::tempdir().unwrap();
-    let args = build_args(&spec, tmp.path(), "hs-pi-1", None, false);
+    let args = build_args(&spec, "hs-pi-1", None, false);
     assert!(args.contains(&"--session-dir".to_string()));
     assert!(args.iter().any(|a| a.contains("hs-pi-1")));
-    assert!(tmp.path().join("_data/session-dirs/hs-pi-1").is_dir());
+    assert!(args.iter().any(|a| a.starts_with("{home}/")));
 }
 
 #[test]
 fn antigravity_resume_uses_continue_flag() {
     let spec = harness("antigravity");
-    let tmp = tempfile::tempdir().unwrap();
-    let resumed = build_args(&spec, tmp.path(), "hs-x", None, true);
+    let resumed = build_args(&spec, "hs-x", None, true);
     assert_eq!(
         resumed,
         vec![
@@ -166,7 +161,7 @@ fn antigravity_resume_uses_continue_flag() {
             "-c".to_string()
         ]
     );
-    let fresh = build_args(&spec, tmp.path(), "hs-x", None, false);
+    let fresh = build_args(&spec, "hs-x", None, false);
     assert_eq!(fresh, vec!["--dangerously-skip-permissions".to_string()]);
 }
 
@@ -194,10 +189,9 @@ fn a_profile_resumes_with_the_base_arguments() {
         "  wrapped:\n    base: claude-code\n    args: [\"--model\", \"x\"]\n",
         "wrapped",
     );
-    let tmp = tempfile::tempdir().unwrap();
-    let fresh = build_args(&h, tmp.path(), "hs-x", None, false);
+    let fresh = build_args(&h, "hs-x", None, false);
     assert_eq!(fresh, vec!["--model".to_string(), "x".to_string()]);
-    let resumed = build_args(&h, tmp.path(), "hs-x", None, true);
+    let resumed = build_args(&h, "hs-x", None, true);
     assert_eq!(
         resumed,
         vec![

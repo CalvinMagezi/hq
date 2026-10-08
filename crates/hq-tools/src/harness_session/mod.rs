@@ -35,7 +35,8 @@ use spec::SPECS;
 pub use launch::resume_awaiting;
 pub use spec::{Harness, HarnessSessionSpec, ResumeStrategy, resolve, resolve_in, spec_for};
 
-const SESSION_DIR_ROOT: &str = "_data/session-dirs";
+/// Under the home of the host that runs pi, inside the state directory its sandbox may write.
+const PI_SESSION_DIR: &str = ".pi/hq-sessions";
 
 /// How long to wait for an agent to reach its prompt after a trust dialog was
 /// accepted for it.

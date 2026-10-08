@@ -604,7 +604,7 @@ pub fn record_agent_session_id(
 /// Once the agent has reported its conversation id, has the host restart it
 /// into exactly that conversation instead of the most recent one.
 pub fn refresh_restart_command(
-    vault_path: &Path,
+    _vault_path: &Path,
     host: &Host,
     row: &HarnessSessionRow,
     agent: &AgentInfo,
@@ -613,7 +613,7 @@ pub fn refresh_restart_command(
         return Ok(());
     };
     let harness = resolve(&row.harness)?;
-    let args = build_args(&harness, vault_path, &row.id, Some(token), true);
+    let args = build_args(&harness, &row.id, Some(token), true);
     host.update_resume(&row.agent_name, &agent.kind, args)?;
     Ok(())
 }
