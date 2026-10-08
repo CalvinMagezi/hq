@@ -550,6 +550,12 @@ impl SessionBuilder {
             session_config.clone(),
         );
         session.session_id = session_id;
+        if self.role == SessionRole::Orchestrator {
+            session.set_role_denial(Arc::new(crate::session::role_denial::RoleDenial::new(
+                ORCHESTRATOR_REMOVED_TOOLS,
+                mailbox_denial_notifier(vault_path.clone()),
+            )));
+        }
 
         // Explicit root backend: when the versioned `backends` chain is
         // configured (see `provider::resolve_backends`) *and no `.provider(...)` override was

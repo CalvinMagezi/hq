@@ -209,3 +209,64 @@ async fn orchestrator_keeps_spawn_steer_and_planning_tools() {
         assert!(names.iter().any(|n| n == required), "orchestrator lost {required}: {names:?}");
     }
 }
+
+async fn orchestrator_session(vault: &std::path::Path) -> crate::session::AgentSession {
+    let config = HqConfig {
+        openrouter_api_key: Some("test-key-no-network".to_string()),
+        vault_path: vault.to_path_buf(),
+        ..HqConfig::default()
+    };
+    SessionBuilder::from_config(&config)
+        .role(SessionRole::Orchestrator)
+        .working_dir(vault.to_path_buf())
+        .session_config(SessionConfig {
+            model: CLOUD_MODEL.to_string(),
+            ..SessionConfig::default()
+        })
+        .build()
+        .await
+        .unwrap()
+}
+
+fn result_text(result: &hq_core::types::ToolResult) -> String {
+    result.content.iter().map(|c| c.text.as_str()).collect()
+}
+
+#[tokio::test]
+async fn an_orchestrator_calling_a_removed_tool_is_routed_to_delegation() {
+    let vault = tempfile::TempDir::new().unwrap();
+    let session = orchestrator_session(vault.path()).await;
+    let reply = session
+        .call_tool_for_test("edit_file", serde_json::json!({"file_path": "x", "old_string": "a", "new_string": "b"}))
+        .await
+        .unwrap();
+    let text = result_text(&reply);
+    assert!(text.contains("not available in the orchestrator role"), "{text}");
+    assert!(text.contains("harness_session_spawn"), "{text}");
+    let unknown = session.call_tool_for_test("no_such_tool", serde_json::json!({})).await;
+    assert!(unknown.is_err(), "other unknown tools still fail as before");
+}
+
+/// Needs a sandbox backend; skipped where none exists (the shell is absent there anyway).
+#[tokio::test]
+async fn an_orchestrators_shell_cannot_write_and_says_where_to_go() {
+    if crate::bash_sandbox::available_backend_for(false).is_none() {
+        eprintln!("skipped: no sandbox backend on this host");
+        return;
+    }
+    let vault = tempfile::TempDir::new().unwrap();
+    let session = orchestrator_session(vault.path()).await;
+    let probe = format!("hq-orch-probe-{}", std::process::id());
+    let home_probe = dirs::home_dir().unwrap().join(&probe);
+    let command = format!("touch ./{probe} '{}'", home_probe.display());
+    let reply = session
+        .call_tool_for_test("bash", serde_json::json!({"command": command}))
+        .await
+        .unwrap();
+    let leaked = std::env::current_dir().unwrap().join(&probe).exists() || home_probe.exists();
+    let _ = std::fs::remove_file(std::env::current_dir().unwrap().join(&probe));
+    let _ = std::fs::remove_file(&home_probe);
+    assert!(!leaked, "orchestrator bash wrote to disk");
+    let text = result_text(&reply);
+    assert!(text.contains("harness_session_spawn"), "no routing hint: {text}");
+}
