@@ -152,6 +152,19 @@ pub fn prepare_note(
     note_dir: &Path,
     vault: &Path,
 ) -> PreparedNote {
+    prepare_note_with(raw, fallback_title, note_dir, vault, false)
+}
+
+/// Like [`prepare_note`], with `keep_callouts` left on the `> [!kind] Title`
+/// syntax for renderers that draw real callout boxes. `prepare_note` flattens
+/// them into a bold label, which is what a pandoc-based renderer needs.
+pub fn prepare_note_with(
+    raw: &str,
+    fallback_title: &str,
+    note_dir: &Path,
+    vault: &Path,
+    keep_callouts: bool,
+) -> PreparedNote {
     let (frontmatter, body) = split_frontmatter(raw);
     let fm_title = frontmatter
         .as_deref()
@@ -177,7 +190,7 @@ pub fn prepare_note(
             lines.push(line.to_owned());
             continue;
         }
-        lines.push(rewrite_line(line, note_dir, vault));
+        lines.push(rewrite_line(line, note_dir, vault, keep_callouts));
     }
 
     // The title block already prints the title, so a leading H1 that says the
@@ -235,7 +248,7 @@ fn fence_marker(trimmed: &str) -> Option<String> {
     None
 }
 
-fn rewrite_line(line: &str, note_dir: &Path, vault: &Path) -> String {
+fn rewrite_line(line: &str, note_dir: &Path, vault: &Path, keep_callouts: bool) -> String {
     let line = COMMENT_RE.replace_all(line, "");
     // Standard images first: the embed rule emits absolute paths that the
     // standard-image rule would otherwise reject on a second pass.
@@ -266,6 +279,9 @@ fn rewrite_line(line: &str, note_dir: &Path, vault: &Path) -> String {
             .filter(|a| !a.is_empty())
             .unwrap_or_else(|| display_name(c[1].trim()))
     });
+    if keep_callouts {
+        return line.into_owned();
+    }
     match CALLOUT_RE.captures(&line) {
         Some(c) => {
             let kind = capitalise(&c[2]);
@@ -842,6 +858,19 @@ mod tests {
             prep("> [!warning] Careful\n> body", &v).markdown,
             "> **Warning: Careful**\n> body"
         );
+    }
+
+    #[test]
+    fn callouts_stay_intact_when_asked_to_keep_them() {
+        let v = vault();
+        let p = prepare_note_with(
+            "> [!warning] Careful\n> body",
+            "Fallback",
+            &v.path().join("Notebooks/Inbox"),
+            v.path(),
+            true,
+        );
+        assert_eq!(p.markdown, "> [!warning] Careful\n> body");
     }
 
     #[test]
