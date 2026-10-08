@@ -147,6 +147,7 @@ pub const HANDOFF_ASK_DENIED_PREFIXES: &[&str] = &[
     "find_files",
     "list_dir",
     "git_",
+    "github_",
     "system_info",
     "convert_",
     "ocr_",
