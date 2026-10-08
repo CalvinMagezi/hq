@@ -95,6 +95,7 @@ const TMP_ROOTS: &[&str] = &["/tmp", "/var/tmp", "/var/folders", "/dev"];
 /// What bubblewrap gives each agent a private empty copy of instead: the shared
 /// temporary directories, and /run, where the system's own sockets live.
 const PRIVATE_TMP_ROOTS: &[&str] = &["/tmp", "/var/tmp", "/run"];
+const NODE_PROXY_SWITCH: &str = "NODE_USE_ENV_PROXY";
 const PROXY_ENV_NAMES: &[&str] = &["HTTPS_PROXY", "HTTP_PROXY", "https_proxy", "http_proxy"];
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -465,6 +466,8 @@ pub(crate) fn confine(
     let url = format!("http://127.0.0.1:{port}");
     let mut env: Vec<(String, String)> = PROXY_ENV_NAMES.iter().map(|n| (n.to_string(), url.clone())).collect();
     env.push(("DISABLE_AUTOUPDATER".into(), "1".into()));
+    // Node's fetch ignores HTTPS_PROXY unless told to read it; without this cursor and pi go direct, are denied, and report "fetch failed".
+    env.push((NODE_PROXY_SWITCH.into(), "1".into()));
     Ok(Confined { argv, env, egress_port: port })
 }
 
