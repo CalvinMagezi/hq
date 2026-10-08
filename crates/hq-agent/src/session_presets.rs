@@ -52,8 +52,8 @@ pub fn chat_session_config(config: &hq_core::config::HqConfig) -> SessionConfig 
 
 const CODER_ROW: &str = "| Document creation / drafting | coder | code | Writing/editing files |";
 const ORCHESTRATOR_CODER_ROW: &str =
-    "| Drafting notes and documents in the vault | coder | code | Writing under Notebooks/ |";
-const ORCHESTRATOR_CODE_WORK_RULE: &str = "- Code and repository changes are never yours or a child's: start a coding session with \
+    "| Drafting text for notes and documents | coder | code | Returns the draft; you save it with `vault_write_note` |";
+const ORCHESTRATOR_CODE_WORK_RULE: &str = "- Children read and report; they cannot write files. Code and repository changes are never yours or a child's: start a coding session with \
      `harness_session_spawn` (task_id, goal, done criteria), then watch and steer it.\n";
 
 /// `chat_harness_instructions` for a session role. The Implementor text is unchanged.

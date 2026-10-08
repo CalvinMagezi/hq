@@ -68,6 +68,8 @@ pub struct AgentService {
     bash_settings: crate::bash_sandbox::BashSettings,
     /// The parent session's taint, shared so delegation cannot launder it.
     taint: crate::governance::TaintTracker,
+    /// The parent's role: an orchestrator's children read and report but never write.
+    role: crate::builder::SessionRole,
 }
 
 /// How a child's backend resolved after governance + policy.
@@ -146,12 +148,19 @@ impl AgentService {
             db: None,
             bash_settings: crate::bash_sandbox::BashSettings::default(),
             taint: crate::governance::TaintTracker::new(),
+            role: crate::builder::SessionRole::default(),
         }
     }
 
     /// Give children's bash tool the operator's `governance.bash` settings.
     pub fn with_bash_settings(mut self, settings: crate::bash_sandbox::BashSettings) -> Self {
         self.bash_settings = settings;
+        self
+    }
+
+    /// Hold every child to the parent's role.
+    pub fn with_role(mut self, role: crate::builder::SessionRole) -> Self {
+        self.role = role;
         self
     }
 
@@ -769,6 +778,9 @@ impl AgentService {
             ))));
         }
 
+        if self.role == crate::builder::SessionRole::Orchestrator {
+            tools.retain(|t| !crate::builder::ORCHESTRATOR_REMOVED_TOOLS.contains(&t.name()));
+        }
         tools
     }
 

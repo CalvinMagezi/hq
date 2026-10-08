@@ -252,3 +252,28 @@ fn children_run_under_the_parents_permission_mode_and_nested_ones_too() {
         PermissionMode::DontAsk
     ));
 }
+
+/// An orchestrator's children read, search and report, but have no file or git writers.
+#[test]
+fn orchestrator_children_have_no_file_writers() {
+    use crate::builder::{ORCHESTRATOR_REMOVED_TOOLS, SessionRole};
+
+    let provider: Arc<dyn LlmProvider> = Arc::new(DummyProvider);
+    let config = SessionConfig::default();
+    let names = |service: AgentService| -> Vec<String> {
+        service
+            .build_inprocess_tools(&config, &provider)
+            .iter()
+            .map(|t| t.name().to_string())
+            .collect()
+    };
+    let implementor = names(service_with_fleet());
+    let orchestrator = names(service_with_fleet().with_role(SessionRole::Orchestrator));
+    assert!(implementor.iter().any(|n| n == "write_file"), "premise: today's child can write");
+    for removed in ORCHESTRATOR_REMOVED_TOOLS {
+        assert!(!orchestrator.iter().any(|n| n == removed), "{removed} reached an orchestrator child");
+    }
+    for kept in ["read_file", "grep", "find_files", "bash"] {
+        assert!(orchestrator.iter().any(|n| n == kept), "{kept} missing");
+    }
+}

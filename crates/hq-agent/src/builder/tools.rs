@@ -384,6 +384,7 @@ impl SessionBuilder {
                 .with_db(shared_db.clone())
                 .with_bash_settings(self.bash_settings(vault_path))
                 .with_permission_mode(self.permission_mode.clone())
+                .with_role(self.role)
                 .with_taint(taint.clone()),
             );
 
