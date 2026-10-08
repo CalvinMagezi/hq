@@ -74,4 +74,4 @@ You pay Hetzner for the server. Choose a size with at least 4 GB of memory for c
 
 ## Checks
 
-`bash deploy/hetzner/test-bootstrap.sh` runs shellcheck, a dry run (`bootstrap.sh --plan`) and a check that user-data carries no secrets. A real run on a throwaway Hetzner project is still required before relying on this: `tailscale up` and `tailscale serve` behaviour, the firewall flow and the SSH hardening order have not been run on a live server yet.
+`bash deploy/hetzner/test-bootstrap.sh` runs shellcheck, a dry run (`bootstrap.sh --plan`) and a check that user-data carries no secrets. Verified by hand on a real Hetzner project on 2026-10-09: creating the firewall and server through the form, bootstrap reaching `ready` on a fresh Ubuntu 24.04 server, `hq-join` on a real tailnet, the first-run model key, a chat turn, closing public SSH (the connection then times out while SSH over the tailnet still works), and delete leaving no server, firewall or SSH key behind. Not yet exercised: `hq update --rollback` on such a server and a node-key expiry recovery.
