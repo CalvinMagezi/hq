@@ -126,3 +126,60 @@ pub fn require_allowed_cwd(cwd: Option<&str>) -> Result<PathBuf> {
 pub fn is_handoff_scope(args: &Value) -> bool {
     args.get(HANDOFF_SCOPE_ARG).and_then(Value::as_bool) == Some(true)
 }
+
+/// Vault folders that hold the owner's identity, threads and databases.
+const VAULT_PRIVATE_DIRS: [&str; 3] = ["_system", "_threads", "_data"];
+
+/// A session on the machine that holds the vault may not start in the vault root, a folder above
+/// it, or one of its private folders: the agent could rewrite identity files there. Sessions on
+/// other hosts are unaffected, since the vault path means nothing on another machine.
+pub fn check_cwd_outside_vault(
+    cwd: &Path,
+    host: &str,
+    default_host: &str,
+    vault: &Path,
+) -> Result<()> {
+    let host = if host.is_empty() { default_host } else { host };
+    if host != hq_core::config::NATIVE_HOST && host != hq_core::config::LOCAL_HOST {
+        return Ok(());
+    }
+    let cwd = crate::util::lexically_normalize(cwd);
+    let vault = crate::util::lexically_normalize(vault);
+    let holds_vault = vault.starts_with(&cwd);
+    let in_private = VAULT_PRIVATE_DIRS.iter().any(|d| cwd.starts_with(vault.join(d)));
+    if holds_vault || in_private {
+        bail!(
+            "cwd '{}' is the HQ vault, a folder above it, or one of its private folders; name the project directory instead. No session was started.",
+            cwd.display()
+        );
+    }
+    Ok(())
+}
+
+#[cfg(test)]
+mod vault_guard_tests {
+    use super::*;
+
+    const VAULT: &str = "/srv/hq/.vault";
+
+    fn check(cwd: &str, host: &str) -> Result<()> {
+        check_cwd_outside_vault(Path::new(cwd), host, "native", Path::new(VAULT))
+    }
+
+    #[test]
+    fn the_vault_its_ancestors_and_its_private_folders_are_refused_on_the_vault_host() {
+        for cwd in [VAULT, "/srv/hq", "/srv", "/srv/hq/.vault/_system", "/srv/hq/.vault/_threads/x", "/srv/hq/.vault/../.vault"] {
+            assert!(check(cwd, "").is_err(), "{cwd}");
+            assert!(check(cwd, "local").is_err(), "{cwd}");
+        }
+    }
+
+    #[test]
+    fn project_directories_and_other_hosts_are_unaffected() {
+        assert!(check("/srv/hq/.vault/Notebooks/Projects/site", "").is_ok());
+        assert!(check("/srv/projects/app", "").is_ok());
+        assert!(check("/srv/hq-oss", "native").is_ok());
+        assert!(check(VAULT, "laptop").is_ok(), "a remote host's paths are its own");
+        assert!(check("/Users/someone/Documents/GitHub", "laptop").is_ok());
+    }
+}
