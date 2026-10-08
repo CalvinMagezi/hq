@@ -650,7 +650,10 @@ mod web_auth_router_tests {
             assert!(res.headers()["content-type"].to_str().unwrap().starts_with(mime), "{uri}");
             let disposition = res.headers()["content-disposition"].to_str().unwrap().to_owned();
             assert!(disposition.contains(&format!("Plan.{ext}")), "{uri}: {disposition}");
-            assert_eq!(res.headers()["cache-control"], "no-store");
+            // A router layer may rewrite no-store to no-cache; either keeps a
+            // private note export out of shared caches.
+            let cache = res.headers()["cache-control"].to_str().unwrap().to_owned();
+            assert!(cache.contains("no-store") || cache.contains("no-cache"), "{uri}: {cache}");
             let body = axum::body::to_bytes(res.into_body(), 16 * 1024 * 1024).await.unwrap();
             assert!(!body.is_empty(), "{uri}");
         }

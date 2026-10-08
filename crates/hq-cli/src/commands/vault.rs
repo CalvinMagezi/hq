@@ -194,7 +194,7 @@ pub async fn run(config: &HqConfig, sub: &str, args: &[String]) -> Result<()> {
             println!("  read <path>          Read a note");
             println!("  write <path> <text>  Write a note");
             println!(
-                "  export <note>        Export a note: --format pdf|png|svg|html|md|xlsx|csv|json|jsonl|xml|latex|ipynb|jira|code (-o file, --brand slug)"
+                "  export <note>        Export a note: --format pdf|docx|png|svg|html|md|xlsx|csv|json|jsonl|xml|latex|ipynb|jira|code (-o file, --brand slug)"
             );
             println!(
                 "  export-pdf <note>    Export a note as a shareable PDF (-o file, --brand slug)"

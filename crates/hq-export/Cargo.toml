@@ -10,6 +10,8 @@ pulldown-cmark = { workspace = true }
 base64 = { workspace = true }
 csv = "1"
 dirs = { workspace = true }
+docx-rs = "0.4.22"
+image = { version = "0.25", default-features = false, features = ["png", "jpeg", "gif", "webp"] }
 rust_xlsxwriter = "0.99"
 serde_json = { workspace = true }
 thiserror = { workspace = true }

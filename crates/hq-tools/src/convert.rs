@@ -337,15 +337,15 @@ impl HqTool for VaultExportTool {
 
     fn description(&self) -> &str {
         "Export a vault note as a file that can be shared outside the vault, with no external tools. \
-         Formats: pdf, png and svg (a styled page or one tall image), html (one self-contained file), \
+         Formats: pdf, docx, png and svg (a styled page or one tall image), html (one self-contained file), \
          md (cleaned Markdown); xlsx, csv, json, jsonl, xml and latex export \
          the note's tables (several tables become sheets, a zip, or keyed groups); ipynb (a notebook \
          with Python blocks as code cells); jira (wiki markup); code (the note's fenced code blocks as \
          a file or zip). Frontmatter is dropped, [[wikilinks]] become plain text, callouts become boxes, \
          and images are embedded only when they live inside the vault. Saved to \
          Exports/<note>.<ext> in the vault unless `output` is given; the web UI serves it from the \
-         returned `web_path`. Pass `brand` for a client's accent colour and font. For docx or pptx use \
-         convert_from_markdown."
+         returned `web_path`. Pass `brand` for a client's accent colour and font. For pptx, or a docx built on a\
+         brand's Word template, use convert_from_markdown."
     }
 
     fn parameters(&self) -> Value {

@@ -85,7 +85,7 @@ The debug profile accumulates stale binaries Cargo never cleans. With 17 crates 
 | `hq-relay` | Platform bridge, unified bot, Discord/Telegram (feature-gated) |
 | `hq-web` | WebSocket server, REST API, embedded web UI |
 | `hq-convert` | Document conversion both ways (PDF, DOCX, XLSX and more to markdown; markdown to docx/pptx), OCR, brand kits |
-| `hq-export` | Native note export (PDF, PNG, SVG through embedded Typst; HTML, XLSX, CSV, JSON, XML, LaTeX, notebooks, Jira markup), no external tools |
+| `hq-export` | Native note export (PDF, PNG, SVG through embedded Typst; DOCX, HTML, XLSX, CSV, JSON, XML, LaTeX, notebooks, Jira markup), no external tools |
 | `hq-update` | Signed pull-based updater (library behind `hq update`) |
 | `hq-cli` | The `hq` binary and its CLI commands |
 

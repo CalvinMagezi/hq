@@ -2,6 +2,7 @@
 
 use crate::code;
 use crate::doc::Document;
+use crate::docx;
 use crate::error::ExportError;
 use crate::html;
 use crate::jira;
@@ -17,6 +18,7 @@ pub enum Format {
     /// The whole note as one tall image.
     Png,
     Svg,
+    Docx,
     Html,
     Md,
     Csv,
@@ -36,6 +38,7 @@ impl Format {
         Format::Pdf,
         Format::Png,
         Format::Svg,
+        Format::Docx,
         Format::Html,
         Format::Md,
         Format::Csv,
@@ -55,6 +58,7 @@ impl Format {
             Format::Pdf => "pdf",
             Format::Png => "png",
             Format::Svg => "svg",
+            Format::Docx => "docx",
             Format::Html => "html",
             Format::Md => "md",
             Format::Csv => "csv",
@@ -74,6 +78,7 @@ impl Format {
             "pdf" => Format::Pdf,
             "png" => Format::Png,
             "svg" => Format::Svg,
+            "docx" | "word" => Format::Docx,
             "html" | "htm" => Format::Html,
             "md" | "markdown" => Format::Md,
             "csv" => Format::Csv,
@@ -153,6 +158,11 @@ pub fn export(doc: &Document, format: Format, opts: &ExportOptions) -> Result<Ou
         Format::Pdf => Ok(Output::new(render::pdf(doc, &opts.render)?, "application/pdf", "pdf")),
         Format::Png => Ok(Output::new(render::png(doc, &opts.render)?, "image/png", "png")),
         Format::Svg => text(render::svg(doc, &opts.render)?, "image/svg+xml", "svg"),
+        Format::Docx => Ok(Output::new(
+            docx::to_docx(doc, &opts.render.theme, asset_root)?,
+            "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+            "docx",
+        )),
         Format::Html => text(
             html::to_html(doc, &opts.render.theme, asset_root),
             "text/html; charset=utf-8",
@@ -199,7 +209,8 @@ mod tests {
         assert_eq!(Format::parse("tex"), Some(Format::Latex));
         assert_eq!(Format::parse("Markdown"), Some(Format::Md));
         assert_eq!(Format::parse("ndjson"), Some(Format::Jsonl));
-        assert_eq!(Format::parse("docx"), None, "not implemented yet");
+        assert_eq!(Format::parse("Word"), Some(Format::Docx));
+        assert_eq!(Format::parse("pptx"), None, "not implemented yet");
     }
 
     #[test]

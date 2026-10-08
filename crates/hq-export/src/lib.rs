@@ -9,6 +9,7 @@
 
 mod assets;
 mod code;
+mod docx;
 pub mod doc;
 pub mod error;
 mod formats;

@@ -18,6 +18,7 @@ renderer sits behind every entry point, and none of it needs an external tool.
 | Format | You get | Notes |
 |--------|---------|-------|
 | `pdf` | A4 pages with a footer and page numbers | Built-in Typst engine |
+| `docx` | A Word document with real heading styles, lists and tables | Opens in Word, LibreOffice and Google Docs; no template |
 | `png` | The whole note as one tall image | Scaled down if it would exceed 16,000 px |
 | `svg` | The whole note as one tall vector image | |
 | `html` | One self-contained page, styles inline | Images are embedded in the file |
@@ -32,8 +33,8 @@ renderer sits behind every entry point, and none of it needs an external tool.
 | `jira` | Jira and Confluence wiki markup | |
 | `code` | The note's fenced code blocks | One block is a plain file, several are a zip named after their headings. `--lang` filters |
 
-`docx` and `pptx` are not written by this exporter yet. The `convert_from_markdown`
-tool still produces them through pandoc.
+`pptx` is not written by this exporter yet. For a `pptx`, or a `docx` built on a
+brand's Word template, use the `convert_from_markdown` tool, which still runs pandoc.
 
 The table formats need a table: a note without one is an error, not an empty file.
 In spreadsheets, numbers are stored as numbers, but values with leading zeros
