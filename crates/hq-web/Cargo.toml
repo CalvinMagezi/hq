@@ -15,6 +15,7 @@ anyhow = { workspace = true }
 async-trait = { workspace = true }
 hq-agent = { workspace = true }
 hq-convert = { workspace = true }
+hq-export = { workspace = true }
 hq-core = { workspace = true }
 hq-llm = { workspace = true }
 hq-mcp = { workspace = true }

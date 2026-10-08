@@ -255,12 +255,13 @@ enum Commands {
     Ps,
 
     // ─── Vault Operations ────────────────────────────────────────────
-    /// Vault operations (list, read, write, stats, context)
+    /// Vault operations (list, read, write, export, export-pdf, stats, context)
     Vault {
-        /// Subcommand: list, tree, read, write, stats, context
+        /// Subcommand: list, tree, read, write, export, export-pdf, stats, context
         #[arg(default_value = "stats")]
         sub: String,
-        /// Additional arguments
+        /// Additional arguments (options such as `-o` pass through to the subcommand)
+        #[arg(trailing_var_arg = true, allow_hyphen_values = true)]
         args: Vec<String>,
     },
 

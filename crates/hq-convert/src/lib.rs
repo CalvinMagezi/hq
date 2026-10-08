@@ -9,12 +9,16 @@
 //! **OCR**: images go through the `ocr` module (macOS Vision, or `tesseract`
 //! on Linux), not transmutation, so extraction stays on-device with no LLM.
 //!
+//! **Shareable PDFs** (vault note → PDF): see `note_pdf`. Renders through a headless
+//! Chromium-family browser or WeasyPrint when present, falling back to `xelatex`.
+//!
 //! **Outbound** (Markdown → any format): shells to `pandoc`. Returns a clear
 //! error with install instructions if pandoc is not found.
 
 pub mod attachments;
 pub mod brand;
 pub mod inbound;
+pub mod note_pdf;
 pub mod ocr;
 pub mod outbound;
 pub mod types;

@@ -3,6 +3,7 @@
 //! accepts typed input. See docs/provenance/herdr.md for how work adapted from
 //! herdr is recorded.
 
+mod bypass;
 mod client;
 mod detect;
 mod egress;
@@ -23,6 +24,7 @@ mod server;
 mod state;
 mod token;
 
+pub use bypass::{find_bypass, strip_bypass};
 pub use client::{Client, ClientError};
 pub use detect::{AgentState, Detection, Detector, ENGINE_VERSION, Input as DetectInput};
 pub use egress::{Decision, Egress, Rule, Verdict, decide as decide_egress, is_private};

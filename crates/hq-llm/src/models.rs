@@ -208,6 +208,23 @@ static KNOWN_MODELS: &[ModelInfo] = &[
         cache_read_cost_per_million: 1.50,
         cache_write_cost_per_million: 18.75,
     },
+    // Fresh-install defaults. Prices and context from OpenRouter's catalog, 2026-10-09.
+    ModelInfo {
+        id: "anthropic/claude-haiku-5.5",
+        context_window: 1_000_000,
+        input_cost_per_million: 0.10,
+        output_cost_per_million: 0.50,
+        cache_read_cost_per_million: 0.01,
+        cache_write_cost_per_million: 0.125,
+    },
+    ModelInfo {
+        id: "openai/gpt-6-luna",
+        context_window: 1_050_000,
+        input_cost_per_million: 0.10,
+        output_cost_per_million: 0.50,
+        cache_read_cost_per_million: 0.01,
+        cache_write_cost_per_million: 0.125,
+    },
     ModelInfo {
         id: "anthropic/claude-haiku-4",
         context_window: 200_000,
@@ -679,6 +696,14 @@ mod tests {
         );
         // Non-Anthropic bare ids pass through.
         assert_eq!(normalize_model_id("gpt-4.1-nano"), "gpt-4.1-nano");
+    }
+
+    #[test]
+    fn fresh_install_defaults_are_priced() {
+        for id in ["anthropic/claude-haiku-5.5", "openai/gpt-6-luna"] {
+            let info = get_model_info(id).unwrap_or_else(|| panic!("{id} is not in the registry"));
+            assert!(info.input_cost_per_million > 0.0, "{id}");
+        }
     }
 
     #[test]

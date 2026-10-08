@@ -290,3 +290,21 @@ async fn an_orchestrator_cannot_export_a_document_outside_notebooks() {
     let _ = std::fs::remove_dir_all(&outside);
     assert!(!written, "the refused export still created {}", outside.display());
 }
+
+#[tokio::test]
+async fn an_orchestrator_cannot_point_a_note_export_outside_notebooks() {
+    let vault = tempfile::TempDir::new().unwrap();
+    let session = orchestrator_session(vault.path()).await;
+    let outside = dirs::home_dir().unwrap().join(format!("hq-orch-export-{}", std::process::id()));
+    for tool in ["vault_export", "vault_export_pdf"] {
+        let reply = session
+            .call_tool_for_test(
+                tool,
+                serde_json::json!({"path": "Notebooks/a.md", "format": "md", "output": outside.join("x.md").display().to_string()}),
+            )
+            .await
+            .unwrap();
+        assert!(result_text(&reply).contains("may only write under"), "{tool}: {}", result_text(&reply));
+    }
+    assert!(!outside.exists());
+}

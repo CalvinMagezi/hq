@@ -24,6 +24,14 @@ pub enum ConvertError {
     )]
     PandocNotFound,
 
+    #[error(
+        "no PDF engine found. Install one of:\n  \
+         a Chromium-family browser (Chrome, Chromium, Edge; set HQ_PDF_BROWSER to its path if it is not on PATH)\n  \
+         weasyprint (pip install weasyprint)\n  \
+         a LaTeX install with xelatex (macOS: brew install --cask mactex-no-gui)"
+    )]
+    NoPdfEngine,
+
     #[error("IO error: {0}")]
     Io(#[from] std::io::Error),
 

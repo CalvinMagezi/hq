@@ -30,7 +30,7 @@ coding sessions (`harness_session_*`, `host_*`, `spawn_subagents`).
   session with `harness_session_spawn` (task id, goal, done criteria), and records one denial through
   the usual denial notifier. A shell write that the sandbox blocks gets the same hint.
 
-- **Exports.** `convert_from_markdown` may write only under the vault's `Notebooks/` folder or the
+- **Exports.** `convert_from_markdown`, `vault_export` and `vault_export_pdf` may write only under the vault's `Notebooks/` folder or the
   temp directory (symlinks and `..` resolved).
 - **Untrusted content.** `github_read` and `github_clone` results count as untrusted input, like
   `web_fetch`.
@@ -49,4 +49,4 @@ stay available. `host_add` and `model_switch` write the config file. See `TECHDE
   a git checkout, on the host that holds the vault. A repo with its vault in `.vault/` can still be a
   session directory. Other hosts keep their own paths. Paths are compared as written, so a symlink into
   the vault is not caught.
-- `convert_from_markdown` refuses an output path inside `~/.hq` or the vault's private folders.
+- `convert_from_markdown`, `vault_export` and `vault_export_pdf` refuse an output path inside `~/.hq` or the vault's private folders.

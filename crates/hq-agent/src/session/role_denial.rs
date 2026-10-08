@@ -17,7 +17,11 @@ const ROUTING_HINT: &str = "Delegate it: start a coding session with harness_ses
 const WRITE_BLOCKED_MARKERS: &[&str] = &["Read-only file system", "Operation not permitted"];
 
 /// Tools that write to a path the caller names, and the argument that holds it.
-const OUTPUT_PATH_ARGS: &[(&str, &str)] = &[("convert_from_markdown", "output")];
+const OUTPUT_PATH_ARGS: &[(&str, &str)] = &[
+    ("convert_from_markdown", "output"),
+    ("vault_export", "output"),
+    ("vault_export_pdf", "output"),
+];
 
 pub(crate) struct RoleDenial {
     removed: &'static [&'static str],
