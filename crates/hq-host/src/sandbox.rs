@@ -81,6 +81,7 @@ const AGENT_DEFAULT_ALLOW: &[(&str, &[&str])] = &[
             "play.googleapis.com",
             "antigravity-unleash.goog",
             "accounts.google.com",
+            "lh3.googleusercontent.com",
         ],
     ),
     ("codex", &["api.openai.com", "auth.openai.com", "chatgpt.com"]),

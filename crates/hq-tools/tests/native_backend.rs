@@ -197,6 +197,22 @@ fn launch_is_not_ready_before_the_agent_has_drawn_its_screen() {
 }
 
 #[test]
+fn a_kind_without_rules_is_also_not_ready_before_its_screen_is_drawn() {
+    let host = Running::start();
+    let b = host.backend();
+    let mut req = cat("hs-slow-plain", "pi");
+    req.command = Some("f() { sleep 2; echo drawn-screen; cat; }; f".into());
+    let began = Instant::now();
+    let launched = b.launch(&req).unwrap();
+    assert!(launched.ready);
+    assert!(
+        began.elapsed() >= Duration::from_millis(1900),
+        "returned after {:?}, before the screen was drawn",
+        began.elapsed()
+    );
+}
+
+#[test]
 fn a_finished_turn_reads_as_done_with_a_rising_counter_and_an_event() {
     use hq_host::Client;
     let host = Running::start();
