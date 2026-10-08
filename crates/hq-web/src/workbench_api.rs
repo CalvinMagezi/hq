@@ -65,7 +65,18 @@ fn host_row(h: &Host) -> Value {
 
 /// The computers HQ can start agents on, each with its HQ folder when it has one.
 pub(crate) async fn hosts_handler() -> Response {
-    let result = tokio::task::spawn_blocking(|| agent_host::all_hosts().map(|hosts| hosts.iter().map(host_row).collect::<Vec<_>>())).await;
+    let result = tokio::task::spawn_blocking(|| {
+        agent_host::all_hosts().map(|hosts| {
+            // One thread per computer, so offline ones do not add up their timeouts.
+            std::thread::scope(|scope| {
+                let rows: Vec<_> = hosts.iter().map(|h| scope.spawn(|| host_row(h))).collect();
+                rows.into_iter()
+                    .map(|r| r.join().unwrap_or_else(|_| json!({ "reachable": false })))
+                    .collect::<Vec<_>>()
+            })
+        })
+    })
+    .await;
     match result {
         Ok(Ok(rows)) => Json(json!({ "hosts": rows, "harnesses": harness::known_harnesses() })).into_response(),
         Ok(Err(e)) => ApiError::internal(e).into_response(),
@@ -122,23 +133,48 @@ pub(crate) struct SpawnBody {
     label: Option<String>,
 }
 
+/// Free text that lands in lists and relays: no control characters, so no escape sequences or line breaks.
+fn plain_text(value: &str, what: &str) -> Result<(), ApiError> {
+    if value.chars().any(char::is_control) {
+        return Err(ApiError::bad_request(format!("{what} cannot contain line breaks or control characters")));
+    }
+    Ok(())
+}
+
 fn trimmed(v: Option<String>) -> Option<String> {
     v.map(|s| s.trim().to_string()).filter(|s| !s.is_empty())
 }
 
-/// Where the agent will run, resolved and confined to the computer's HQ folder by the computer.
-fn resolve_folder(host: &Host, folder: Option<&str>, new_folder: Option<&str>) -> Result<PathBuf, ApiError> {
-    let resolved = match new_folder {
-        Some(name) => host.make_dir(folder, name).map_err(host_error)?,
-        None => {
-            let listing = host.list_dirs(folder).map_err(host_error)?;
-            json!({ "path": listing["path"] })
-        }
-    };
-    resolved["path"]
+/// A folder name for an agent started in the HQ folder itself, so projects stay apart and two agents
+/// never share one write scope: the name it was given, else the agent and the time.
+fn own_folder_name(label: &str, harness: &str) -> String {
+    let base = if label.is_empty() { harness } else { label };
+    let safe: String = base
+        .chars()
+        .map(|c| if c.is_alphanumeric() || matches!(c, ' ' | '-' | '_') { c } else { '-' })
+        .collect();
+    format!("{} {}", safe.trim(), chrono::Local::now().format("%Y-%m-%d %H%M"))
+}
+
+fn path_of(value: &Value) -> Result<PathBuf, ApiError> {
+    value["path"]
         .as_str()
         .map(PathBuf::from)
         .ok_or_else(|| ApiError::Internal("the computer did not say which folder it used".into()))
+}
+
+/// Where the agent will run, resolved and confined to the computer's HQ folder by the computer.
+/// With no folder chosen, or the HQ folder itself, the agent gets a new folder of its own inside it.
+fn resolve_folder(host: &Host, folder: Option<&str>, new_folder: Option<&str>, own: &str) -> Result<PathBuf, ApiError> {
+    if let Some(name) = new_folder {
+        return path_of(&host.make_dir(folder, name).map_err(host_error)?);
+    }
+    let listing = host.list_dirs(folder).map_err(host_error)?;
+    let at_root = listing["parent"].is_null();
+    if at_root {
+        return path_of(&host.make_dir(Some(listing["path"].as_str().unwrap_or_default()), own).map_err(host_error)?);
+    }
+    path_of(&listing)
 }
 
 /// Start an agent in a folder on a computer. The agent asks before it acts: HQ never
@@ -160,16 +196,18 @@ async fn spawn(state: &Arc<WsState>, body: SpawnBody) -> Result<Value, ApiError>
     if label.chars().count() > MAX_LABEL_CHARS {
         return Err(ApiError::bad_request(format!("the name is longer than {MAX_LABEL_CHARS} characters")));
     }
+    plain_text(&label, "a name")?;
     let host_name = trimmed(body.host);
     let (folder, new_folder) = (trimmed(body.folder), trimmed(body.new_folder));
 
+    let own = own_folder_name(&label, &harness_name);
     let lookup = host_name.clone();
     let cwd = tokio::task::spawn_blocking(move || {
         let host = match lookup.as_deref() {
             Some(name) => host_by_name(name)?,
             None => agent_host::host(None).map_err(ApiError::internal)?,
         };
-        let cwd = resolve_folder(&host, folder.as_deref(), new_folder.as_deref())?;
+        let cwd = resolve_folder(&host, folder.as_deref(), new_folder.as_deref(), &own)?;
         Ok::<_, ApiError>(cwd)
     })
     .await
@@ -206,6 +244,35 @@ pub(crate) async fn stop_handler(State(state): State<Arc<WsState>>, AxumPath(id)
     }
 }
 
+/// A session that ran inside a computer's HQ folder is only resumed while that folder, resolved again
+/// on the computer, is still inside it. An agent that swapped the folder for a link elsewhere cannot
+/// widen what the next run may write. Sessions started outside the HQ folder (from chat or an MCP
+/// client) resume as before.
+async fn confine_resume(state: &Arc<WsState>, id: &str) -> Result<(), ApiError> {
+    let row = state
+        .db
+        .with_conn(|c| registry::get(c, id))
+        .map_err(ApiError::from)?
+        .ok_or_else(|| ApiError::NotFound(format!("no harness session '{id}'")))?;
+    tokio::task::spawn_blocking(move || {
+        let host = host_by_name(&row.host)?;
+        let Ok(workspace) = host.workspace() else { return Ok(()) };
+        let root = workspace["root"].as_str().unwrap_or_default();
+        if root.is_empty() || !std::path::Path::new(&row.cwd).starts_with(root) {
+            return Ok(());
+        }
+        match host.list_dirs(Some(&row.cwd)) {
+            Ok(_) => Ok(()),
+            Err(AgentHostError::Api { code, .. }) if code == "invalid" => Err(ApiError::Conflict(
+                "that agent's folder is gone or no longer inside the HQ folder, so it cannot be resumed here".into(),
+            )),
+            Err(e) => Err(host_error(e)),
+        }
+    })
+    .await
+    .map_err(join_error)?
+}
+
 #[derive(Deserialize, Default)]
 pub(crate) struct ResumeBody {
     prompt: Option<String>,
@@ -218,6 +285,12 @@ pub(crate) async fn resume_handler(
 ) -> Response {
     let prompt = trimmed(body.and_then(|Json(b)| b.prompt));
     let db = Arc::new(state.db.clone());
+    if let Err(e) = confine_resume(&state, &id).await {
+        return e.into_response();
+    }
+    if let Err(e) = state.db.with_conn(|c| registry::set_archived(c, &id, false)) {
+        tracing::warn!(session = %id, error = %e, "workbench api: could not clear the archive mark on resume");
+    }
     match harness::resume(&state.vault_path, &db, &id, prompt.as_deref()).await {
         Ok(report) => Json(report).into_response(),
         Err(e) => crate::sessions_api::session_error(e).into_response(),
@@ -237,6 +310,9 @@ pub(crate) async fn rename_handler(
     let label = body.label.trim().to_string();
     if label.is_empty() || label.chars().count() > MAX_LABEL_CHARS {
         return ApiError::bad_request(format!("a name is 1 to {MAX_LABEL_CHARS} characters")).into_response();
+    }
+    if let Err(e) = plain_text(&label, "a name") {
+        return e.into_response();
     }
     match state.db.with_conn(|c| registry::set_label(c, &id, &label)) {
         Ok(true) => Json(json!({ "ok": true, "label": label })).into_response(),
@@ -344,6 +420,21 @@ mod tests {
         ] {
             assert_eq!(spawn_handler(State(state.clone()), Json(bad)).await.status(), StatusCode::BAD_REQUEST);
         }
+    }
+
+    #[test]
+    fn an_agent_started_in_the_hq_folder_gets_a_folder_named_for_it() {
+        let named = own_folder_name("Budget: Q3/2026", "claude-code");
+        assert!(named.starts_with("Budget- Q3-2026 "), "{named}");
+        assert!(own_folder_name("", "claude-code").starts_with("claude-code "));
+        assert!(!named.contains('/'));
+    }
+
+    #[test]
+    fn free_text_with_control_characters_is_refused() {
+        assert!(plain_text("fine name", "a name").is_ok());
+        assert!(plain_text("two\nlines", "a name").is_err());
+        assert!(plain_text("esc\u{1b}[31m", "a name").is_err());
     }
 
     #[tokio::test]

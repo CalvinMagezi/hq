@@ -13,6 +13,12 @@ use std::path::{Component, Path, PathBuf};
 const WORKSPACE_PARTS: [&str; 2] = ["Documents", "HQ"];
 const MAX_LISTED_DIRS: usize = 500;
 const MAX_NAME_CHARS: usize = 100;
+/// Most file systems cap a name at 255 bytes, and a name of 100 wide characters can pass that.
+const MAX_NAME_BYTES: usize = 200;
+/// Entries read from one folder before listing stops, so a huge folder cannot tie the host up.
+const MAX_SCANNED_ENTRIES: usize = MAX_LISTED_DIRS * 10;
+/// What a spawn's folder check refuses in a path, so a home containing one could never be used.
+const UNUSABLE_PATH_CHARS: [char; 4] = ['~', '$', '`', '\0'];
 
 fn invalid(message: impl Into<String>) -> Error {
     Error::new(ErrorKind::InvalidInput, message.into())
@@ -40,7 +46,14 @@ fn ensure_at(root: &Path) -> std::io::Result<PathBuf> {
 
 /// Creates the workspace folder if it is missing and returns it, resolved.
 pub fn ensure_workspace() -> std::io::Result<PathBuf> {
-    ensure_at(&workspace_root()?)
+    let root = workspace_root()?;
+    if root.to_string_lossy().contains(UNUSABLE_PATH_CHARS) {
+        return Err(invalid(format!(
+            "{} has a '~', '$' or backtick in it, which agents cannot be started in",
+            root.display()
+        )));
+    }
+    ensure_at(&root)
 }
 
 /// Running inside WSL2, where the user reaches Linux files from Windows through `\\wsl$`.
@@ -56,7 +69,7 @@ pub fn describe(root: &Path) -> Value {
         format!("\\\\wsl$\\{distro}{tail}")
     });
     json!({
-        "root": root,
+        "root": root.to_string_lossy(),
         "os": std::env::consts::OS,
         "wsl": explorer.is_some(),
         "explorer_path": explorer,
@@ -76,9 +89,16 @@ pub fn resolve_inside(root: &Path, path: Option<&str>) -> std::io::Result<PathBu
     if wanted.components().any(|c| matches!(c, Component::ParentDir)) {
         return Err(invalid("a folder path cannot contain '..'"));
     }
+    // Before the disk is touched, so a path elsewhere cannot be probed for existence.
+    if !wanted.starts_with(&root) {
+        return Err(invalid("that folder is outside the HQ folder"));
+    }
     let real = wanted.canonicalize()?;
     if !real.starts_with(&root) {
         return Err(invalid("that folder is outside the HQ folder"));
+    }
+    if real.to_str().is_none() {
+        return Err(invalid("that folder's name is not plain text"));
     }
     if !real.is_dir() {
         return Err(invalid("that path is not a folder"));
@@ -91,13 +111,14 @@ pub fn list_dirs(root: &Path, path: Option<&str>) -> std::io::Result<Value> {
     let root = root.canonicalize()?;
     let dir = resolve_inside(&root, path)?;
     let mut names: Vec<String> = fs::read_dir(&dir)?
+        .take(MAX_SCANNED_ENTRIES + 1)
         .filter_map(Result::ok)
         .filter(|e| e.file_type().is_ok_and(|t| t.is_dir()))
         .filter_map(|e| e.file_name().into_string().ok())
         .filter(|n| !n.starts_with('.'))
         .collect();
     names.sort_by_key(|n| n.to_lowercase());
-    let truncated = names.len() > MAX_LISTED_DIRS;
+    let truncated = names.len() > MAX_LISTED_DIRS || names.len() > MAX_SCANNED_ENTRIES;
     names.truncate(MAX_LISTED_DIRS);
     let parent = (dir != root).then(|| dir.parent().map(Path::to_path_buf)).flatten();
     let dirs: Vec<Value> = names
@@ -114,6 +135,7 @@ pub fn check_folder_name(name: &str) -> std::io::Result<&str> {
         || name == "."
         || name == ".."
         || name.chars().count() > MAX_NAME_CHARS
+        || name.len() > MAX_NAME_BYTES
         || name.chars().any(|c| c.is_control() || matches!(c, '/' | '\\' | ':' | '~' | '$' | '`'));
     if bad {
         return Err(invalid(
@@ -134,7 +156,8 @@ pub fn make_dir(root: &Path, parent: Option<&str>, name: &str) -> std::io::Resul
         Err(e) if e.kind() == ErrorKind::AlreadyExists && target.is_dir() => {}
         Err(e) => return Err(e),
     }
-    resolve_inside(root, target.to_str())
+    let target = target.to_str().ok_or_else(|| invalid("that folder's name is not plain text"))?;
+    resolve_inside(root, Some(target))
 }
 
 #[cfg(test)]
@@ -191,6 +214,19 @@ mod tests {
         }
         let nested = make_dir(&root, first.to_str(), "inner").unwrap();
         assert!(nested.starts_with(&first));
+    }
+
+    #[test]
+    fn a_path_elsewhere_is_refused_without_touching_the_disk() {
+        let (_d, root) = root();
+        let missing = resolve_inside(&root, Some("/definitely/not/here")).unwrap_err();
+        let present = resolve_inside(&root, Some("/etc")).unwrap_err();
+        assert_eq!(missing.to_string(), present.to_string());
+    }
+
+    #[test]
+    fn a_name_too_long_in_bytes_is_refused() {
+        assert!(check_folder_name(&"\u{4e2d}".repeat(80)).is_err());
     }
 
     #[test]

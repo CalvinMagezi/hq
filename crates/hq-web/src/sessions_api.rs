@@ -219,7 +219,7 @@ pub(crate) fn session_error(e: anyhow::Error) -> ApiError {
     let msg = e.to_string();
     if msg.contains("no harness session") || msg.starts_with("no task") {
         ApiError::NotFound(msg)
-    } else if msg.contains("waiting at a dialog") || msg.contains("is not running") {
+    } else if msg.contains("waiting at a dialog") || msg.contains("is not running") || msg.contains("is still running on") {
         ApiError::Conflict(msg)
     } else {
         tracing::warn!(error = %e, "sessions api: request failed");
@@ -614,6 +614,7 @@ mod tests {
                 task_id: task.map(Into::into),
                 status: status.map(Into::into),
                 host: host.map(Into::into),
+                include_archived: None,
             })
         };
 

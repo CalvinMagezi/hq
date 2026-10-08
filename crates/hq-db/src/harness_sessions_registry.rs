@@ -751,9 +751,10 @@ pub fn set_archived(conn: &Connection, id: &str, archived: bool) -> Result<bool>
     Ok(conn.execute(sql, [id])? == 1)
 }
 
-/// Ids of the sessions the user archived.
+/// Ids of the sessions the user archived that are not running again, so a resumed one is listed.
 pub fn archived_ids(conn: &Connection) -> Result<std::collections::HashSet<String>> {
-    let mut stmt = conn.prepare("SELECT id FROM harness_sessions WHERE archived_at IS NOT NULL")?;
+    let mut stmt =
+        conn.prepare("SELECT id FROM harness_sessions WHERE archived_at IS NOT NULL AND status != 'running'")?;
     let ids = stmt.query_map([], |r| r.get::<_, String>(0))?.collect::<rusqlite::Result<_>>()?;
     Ok(ids)
 }
