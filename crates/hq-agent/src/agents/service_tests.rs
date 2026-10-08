@@ -292,7 +292,8 @@ fn orchestrator_children_cannot_use_a_file_editing_external_backend() {
     leaf.backend = Some("groq".to_string());
     assert!(service.authorize_and_resolve(&leaf).is_ok(), "text-only backends stay available");
 
-    let auto = ChildRequest::new("t3", "think about this");
+    let mut auto = ChildRequest::new("t3", "think about this");
+    auto.agent_type = hq_core::types::SubagentType::Planner;
     let resolved = service.authorize_and_resolve(&auto).expect("auto resolves");
     assert_eq!(resolved.resolved_backend, INPROCESS_BACKEND, "auto policy stays in-process");
 }

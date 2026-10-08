@@ -270,3 +270,23 @@ async fn an_orchestrators_shell_cannot_write_and_says_where_to_go() {
     let text = result_text(&reply);
     assert!(text.contains("harness_session_spawn"), "no routing hint: {text}");
 }
+
+#[tokio::test]
+async fn an_orchestrator_cannot_export_a_document_outside_notebooks() {
+    let vault = tempfile::TempDir::new().unwrap();
+    // The temp directory is an allowed root, so the refused target lives in the home directory.
+    let outside = dirs::home_dir().unwrap().join(format!("hq-orch-probe-{}", std::process::id()));
+    let session = orchestrator_session(vault.path()).await;
+    let target = outside.join("x.html");
+    let reply = session
+        .call_tool_for_test(
+            "convert_from_markdown",
+            serde_json::json!({"content": "hi", "format": "html", "output": target.display().to_string()}),
+        )
+        .await
+        .unwrap();
+    assert!(result_text(&reply).contains("may only write under"), "{}", result_text(&reply));
+    let written = outside.exists();
+    let _ = std::fs::remove_dir_all(&outside);
+    assert!(!written, "the refused export still created {}", outside.display());
+}

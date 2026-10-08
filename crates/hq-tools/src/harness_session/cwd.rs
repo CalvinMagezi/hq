@@ -175,7 +175,7 @@ pub fn check_cwd_outside_vault(
     let hq_dir = absolute_normalized(&hq_core::config::HqConfig::hq_dir());
     let private = VAULT_PRIVATE_DIRS.iter().any(|d| is_inside(&cwd, &vault.join(d)));
     let is_vault = lowercase_parts(&cwd) == lowercase_parts(&vault);
-    let holds_vault = is_inside(&vault, &cwd) && !cwd.join(".git").exists();
+    let holds_vault = is_inside(&vault, &cwd) && !cwd.join(".git").is_dir();
     if private || is_vault || holds_vault || is_inside(&cwd, &hq_dir) {
         bail!(
             "cwd '{}' is the HQ vault, HQ's config directory, a folder that holds the vault, or one of its private folders; name the project directory instead. No session was started.",

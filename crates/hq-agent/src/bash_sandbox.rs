@@ -531,6 +531,14 @@ pub fn seatbelt_profile(ctx: &SandboxContext) -> String {
             .map(|p| format!("(literal \"{p}\")"))
             .collect();
         profile.push_str(&format!("(deny process-exec {})", programs.join(" ")));
+        // A copied launcher in scratch space would dodge the list above, so nothing writable may be run.
+        let scratch: Vec<String> = ctx
+            .writable
+            .iter()
+            .map(|p| format!("(subpath {})", sbpl_string(p)))
+            .chain(MACOS_SCRATCH_ROOTS.iter().map(|p| format!("(subpath \"{p}\")")))
+            .collect();
+        profile.push_str(&format!("(deny process-exec {})", scratch.join(" ")));
     }
     profile
 }
@@ -542,6 +550,11 @@ const READ_ONLY_DENIED_PROGRAMS: &[&str] = &[
     "/usr/bin/open",
     "/usr/bin/osascript",
     "/usr/bin/defaults",
+    "/usr/bin/security",
+    "/usr/bin/screencapture",
+    "/usr/bin/say",
+    "/usr/bin/shortcuts",
+    "/usr/bin/automator",
 ];
 
 fn sbpl_string(path: &Path) -> String {

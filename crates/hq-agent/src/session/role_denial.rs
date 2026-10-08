@@ -28,7 +28,8 @@ pub(crate) struct RoleDenial {
 }
 
 /// Absolute, `.`/`..`-free, with symlinks resolved on the part that exists.
-fn resolve(path: &Path) -> PathBuf {
+/// `None` when a link on the way cannot be resolved (a dangling link could point anywhere).
+fn resolve(path: &Path) -> Option<PathBuf> {
     let absolute = if path.is_absolute() {
         path.to_path_buf()
     } else {
@@ -46,16 +47,16 @@ fn resolve(path: &Path) -> PathBuf {
     }
     let mut tail = Vec::new();
     let mut head = clean.clone();
-    while !head.exists() {
+    while head.symlink_metadata().is_err() {
         match head.file_name().map(|n| n.to_os_string()) {
             Some(name) => tail.push(name),
             None => break,
         }
         head.pop();
     }
-    let mut resolved = head.canonicalize().unwrap_or(head);
+    let mut resolved = head.canonicalize().ok()?;
     resolved.extend(tail.into_iter().rev());
-    resolved
+    Some(resolved)
 }
 
 impl RoleDenial {
@@ -68,7 +69,7 @@ impl RoleDenial {
             removed,
             notifier,
             seen: Mutex::new(HashSet::new()),
-            output_roots: output_roots.iter().map(|r| resolve(r)).collect(),
+            output_roots: output_roots.iter().filter_map(|r| resolve(r)).collect(),
         }
     }
 
@@ -76,7 +77,7 @@ impl RoleDenial {
     pub(crate) fn refuse_output(&self, tool: &str, args: &Value) -> Option<String> {
         let (_, key) = OUTPUT_PATH_ARGS.iter().find(|(t, _)| *t == tool)?;
         let dest = resolve(Path::new(args.get(*key)?.as_str()?));
-        if self.output_roots.iter().any(|root| dest.starts_with(root)) {
+        if dest.as_ref().is_some_and(|d| self.output_roots.iter().any(|root| d.starts_with(root))) {
             return None;
         }
         self.notify(tool, "output outside the orchestrator's write roots");
@@ -170,6 +171,11 @@ mod tests {
         assert!(denial.refuse_output("convert_from_markdown", &args(&sneaky)).is_some());
         std::os::unix::fs::symlink(outside.path(), root.path().join("link")).unwrap();
         assert!(denial.refuse_output("convert_from_markdown", &args(&root.path().join("link/x.html"))).is_some());
+        std::os::unix::fs::symlink(outside.path().join("missing/target"), root.path().join("dangling")).unwrap();
+        assert!(
+            denial.refuse_output("convert_from_markdown", &args(&root.path().join("dangling"))).is_some(),
+            "a dangling link can point anywhere"
+        );
         assert!(denial.refuse_output("other_tool", &args(&outside.path().join("x"))).is_none());
     }
 }

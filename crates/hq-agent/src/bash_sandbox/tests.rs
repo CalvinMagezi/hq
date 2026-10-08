@@ -448,6 +448,10 @@ async fn read_only_bash_still_investigates_but_cannot_launch_apps() {
     assert!(out.contains("listed") && out.contains("git version"), "{out}");
     assert!(out.contains("after"), "{out}");
     assert!(!out.to_lowercase().contains("calculator.app"), "{out}");
-    let launched = run_bash(BashSettings::read_only(&BashConfig::default()), "/usr/bin/open -a Calculator").await;
-    assert!(launched.contains("exit code") || launched.contains("not permitted"), "open ran: {launched}");
+    let launched = run_bash(
+        BashSettings::read_only(&BashConfig::default()),
+        "/usr/bin/open -a Calculator; echo rc=$?; cp /usr/bin/true /tmp/hq-ro-exec && /tmp/hq-ro-exec; echo copied_rc=$?; rm -f /tmp/hq-ro-exec",
+    )
+    .await;
+    assert!(!launched.contains("rc=0"), "open or a copied binary ran: {launched}");
 }
