@@ -2,6 +2,7 @@ use std::sync::Arc;
 
 use tracing::info;
 
+use crate::openai_compat::GEMINI_OPENAI_BASE_URL;
 use crate::provider::LlmProvider;
 
 use super::LlmRouter;
@@ -12,7 +13,6 @@ const GROQ_BASE_URL: &str = "https://api.groq.com/openai/v1";
 const DEEPSEEK_BASE_URL: &str = "https://api.deepseek.com/v1";
 const SILICONFLOW_BASE_URL: &str = "https://api.siliconflow.cn/v1";
 const NOVITA_BASE_URL: &str = "https://api.novita.ai/v3/openai";
-const GEMINI_BASE_URL: &str = "https://generativelanguage.googleapis.com/v1beta/openai";
 const MOONSHOT_BASE_URL: &str = "https://api.moonshot.ai/v1";
 const KIMI_CODE_BASE_URL: &str = "https://api.kimi.com/coding/v1";
 const OPENAI_BASE_URL: &str = "https://api.openai.com/v1";
@@ -201,7 +201,7 @@ const PROVIDERS: &[ProviderSpec] = &[
     ProviderSpec {
         name: "gemini",
         key: KeyRule::NonEmpty("GEMINI_API_KEY"),
-        client: Client::Base(GEMINI_BASE_URL),
+        client: Client::Base(GEMINI_OPENAI_BASE_URL),
         daily_token_limit: 0,
         routes: &[
             ("gemini/*", "", Budget),

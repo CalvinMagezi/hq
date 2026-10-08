@@ -2,6 +2,7 @@ import {
   HeadContent,
   Link,
   Outlet,
+  useNavigate,
   Scripts,
   createRootRoute,
 } from '@tanstack/react-router'
@@ -23,6 +24,7 @@ import { inboxBadge } from '~/lib/inboxBadge'
 import { openrouterChipLabel, openrouterChipTitle, OPENROUTER_USAGE_POLL_MS, type OpenRouterUsageResponse } from '~/lib/openrouterUsageApi'
 import { chipLabel, chipTitle, COPILOT_USAGE_POLL_MS, type CopilotUsage } from '~/lib/copilotUsageApi'
 import { hqJson } from '~/lib/hqAuth'
+import { fetchSetupStatus, shouldRedirectToSetup } from '~/lib/setupApi'
 
 const SYSTEM_NOTICE_DISMISS_MS = 6_000
 
@@ -51,6 +53,7 @@ function RootComponent() {
   return (
     <RootDocument>
       <WebSocketProvider>
+        <SetupRedirect />
         <VaultShell />
         <SearchOverlay />
         <QuickNoteOverlay />
@@ -58,6 +61,20 @@ function RootComponent() {
       </WebSocketProvider>
     </RootDocument>
   )
+}
+
+function SetupRedirect() {
+  // An effect, not useQuery, for the same prerender reason as CopilotChip. Checked once per load.
+  const navigate = useNavigate()
+  useEffect(() => {
+    if (window.location.pathname === '/setup') return
+    fetchSetupStatus()
+      .then((status) => {
+        if (shouldRedirectToSetup(status)) void navigate({ to: '/setup' })
+      })
+      .catch(() => undefined)
+  }, [navigate])
+  return null
 }
 
 function CopilotChip() {

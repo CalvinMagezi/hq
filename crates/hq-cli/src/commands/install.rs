@@ -206,20 +206,14 @@ fn key_status(key: &Option<String>) -> &'static str {
     }
 }
 
-const CHEAP_OPENROUTER_MODEL: &str = "openai/gpt-6-luna";
-const CHEAP_ANTHROPIC_MODEL: &str = "anthropic/claude-haiku-4";
-const CHEAP_GOOGLE_MODEL: &str = "google/gemini-2.5-flash";
-
-/// A fresh install starts on a low-cost model because every turn carries a large
-/// system prompt and tool schema; users opt in to premium models with `hq env`.
+/// Fresh installs start on a low-cost model; users opt in to premium models with `hq env`.
 fn default_model_for(keys: &ApiKeys) -> &'static str {
-    if non_empty(&keys.openrouter).is_none() && non_empty(&keys.anthropic).is_some() {
-        CHEAP_ANTHROPIC_MODEL
-    } else if non_empty(&keys.openrouter).is_none() && non_empty(&keys.google).is_some() {
-        CHEAP_GOOGLE_MODEL
-    } else {
-        CHEAP_OPENROUTER_MODEL
-    }
+    hq_core::setup_provider::default_provider(
+        non_empty(&keys.openrouter).is_some(),
+        non_empty(&keys.anthropic).is_some(),
+        non_empty(&keys.google).is_some(),
+    )
+    .cheap_model()
 }
 
 /// Step 5: write `~/.hq/config.yaml` when missing (or always with
@@ -418,6 +412,7 @@ fn detect_mcp_status() -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use hq_core::setup_provider::{CHEAP_ANTHROPIC_MODEL, CHEAP_GOOGLE_MODEL, CHEAP_OPENROUTER_MODEL};
 
     fn keys(or: &str, an: &str, go: &str) -> ApiKeys {
         let opt = |v: &str| Some(v.to_string()).filter(|v| !v.is_empty());

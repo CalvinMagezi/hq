@@ -4,6 +4,10 @@ All notable changes to Agent-HQ will be documented in this file.
 
 ## [Unreleased]
 
+### Added
+
+- **A fresh server can take its first model key from the web UI.** With no key configured, the web app opens a setup screen that tests an OpenRouter key and saves it, so a server nobody has a shell on yet needs no `hq env`. It works only on an instance with a web token, and only until a key exists. Anthropic and Google keys are not offered there yet because the chat router does not read them from config.
+
 ### Changed
 
 - **The vault copy menu in the web UI can copy a note's content**, next to the relative and absolute path options.
