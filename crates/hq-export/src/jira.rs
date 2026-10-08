@@ -33,13 +33,14 @@ fn block(b: &Block, marks: &str) -> String {
                 blocks(body, marks)
             )
         }
-        Block::List {
-            ordered, items, ..
-        } => list(*ordered, items, marks),
+        Block::List { ordered, items, .. } => list(*ordered, items, marks),
         Block::Code { lang, text } => {
             let lang = lang
                 .as_deref()
-                .filter(|l| l.chars().all(|c| c.is_ascii_alphanumeric() || "+-#_".contains(c)))
+                .filter(|l| {
+                    l.chars()
+                        .all(|c| c.is_ascii_alphanumeric() || "+-#_".contains(c))
+                })
                 .map(|l| format!(":{l}"))
                 .unwrap_or_default();
             format!("{{code{lang}}}\n{text}\n{{code}}")
@@ -63,9 +64,10 @@ fn list(ordered: bool, items: &[ListItem], marks: &str) -> String {
         for b in &item.blocks {
             match b {
                 Block::List { ordered, items, .. } => out.push(list(*ordered, items, &here)),
-                other if first => {
-                    out.push(format!("{here} {task}{}", block(other, &here).replace('\n', " ")))
-                }
+                other if first => out.push(format!(
+                    "{here} {task}{}",
+                    block(other, &here).replace('\n', " ")
+                )),
                 other => out.push(format!("{here} {}", block(other, &here).replace('\n', " "))),
             }
             first = false;
@@ -81,7 +83,11 @@ fn table(t: &Table) -> String {
     }
     let cell = |c: Option<&Vec<Inline>>| {
         let s = c.map(|c| inlines(c)).unwrap_or_default();
-        let s = s.split_whitespace().collect::<Vec<_>>().join(" ").replace('|', "\\|");
+        let s = s
+            .split_whitespace()
+            .collect::<Vec<_>>()
+            .join(" ")
+            .replace('|', "\\|");
         if s.is_empty() { " ".to_owned() } else { s }
     };
     let head: Vec<String> = (0..n).map(|i| cell(t.header.get(i))).collect();
@@ -111,7 +117,9 @@ fn inlines(content: &[Inline]) -> String {
                 }
             }
             // Jira cannot reach a file on this machine, so only the caption goes.
-            Inline::Image { alt, .. } => out.push_str(&escape(if alt.is_empty() { "image" } else { alt })),
+            Inline::Image { alt, .. } => {
+                out.push_str(&escape(if alt.is_empty() { "image" } else { alt }))
+            }
             Inline::SoftBreak => out.push(' '),
             Inline::HardBreak => out.push_str("\\\\ "),
         }
@@ -144,7 +152,8 @@ mod tests {
 
     #[test]
     fn headings_emphasis_links_and_code() {
-        let j = jira("## Sec\n\nSome **bold**, *it*, ~~gone~~, `code` and [a](https://example.com).\n");
+        let j =
+            jira("## Sec\n\nSome **bold**, *it*, ~~gone~~, `code` and [a](https://example.com).\n");
         assert!(j.starts_with("h1. Title\n\nh2. Sec\n"));
         assert!(j.contains("*bold*") && j.contains("_it_") && j.contains("-gone-"));
         assert!(j.contains("{{code}}") && j.contains("[a|https://example.com]"));

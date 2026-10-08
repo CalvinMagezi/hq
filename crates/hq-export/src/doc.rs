@@ -15,7 +15,10 @@ pub struct Document {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Block {
-    Heading { level: u8, content: Vec<Inline> },
+    Heading {
+        level: u8,
+        content: Vec<Inline>,
+    },
     Paragraph(Vec<Inline>),
     Quote(Vec<Block>),
     /// An Obsidian-style `> [!kind] Title` block. `kind` is lowercased.
@@ -29,7 +32,10 @@ pub enum Block {
         start: u64,
         items: Vec<ListItem>,
     },
-    Code { lang: Option<String>, text: String },
+    Code {
+        lang: Option<String>,
+        text: String,
+    },
     Table(Table),
     Rule,
 }
@@ -86,9 +92,7 @@ pub fn plain_text(inlines: &[Inline]) -> String {
     for inline in inlines {
         match inline {
             Inline::Text(t) | Inline::Code(t) => out.push_str(t),
-            Inline::Emph(c) | Inline::Strong(c) | Inline::Strike(c) => {
-                out.push_str(&plain_text(c))
-            }
+            Inline::Emph(c) | Inline::Strong(c) | Inline::Strike(c) => out.push_str(&plain_text(c)),
             Inline::Link { content, .. } => out.push_str(&plain_text(content)),
             Inline::Image { alt, .. } => out.push_str(alt),
             Inline::SoftBreak => out.push(' '),
@@ -596,9 +600,10 @@ mod tests {
             alt: "alt text".into(),
             src: "pic.png".into()
         }));
-        assert!(p.iter().any(
-            |i| matches!(i, Inline::Link { url, .. } if url == "https://example.com")
-        ));
+        assert!(
+            p.iter()
+                .any(|i| matches!(i, Inline::Link { url, .. } if url == "https://example.com"))
+        );
     }
 
     #[test]

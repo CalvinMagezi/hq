@@ -96,10 +96,18 @@ mod tests {
     fn python_blocks_become_code_cells_between_markdown_cells() {
         let v = nb("Intro text.\n\n```python\nx = 1\nprint(x)\n```\n\nOutro.\n");
         let cells = v["cells"].as_array().unwrap();
-        let kinds: Vec<&str> = cells.iter().map(|c| c["cell_type"].as_str().unwrap()).collect();
+        let kinds: Vec<&str> = cells
+            .iter()
+            .map(|c| c["cell_type"].as_str().unwrap())
+            .collect();
         assert_eq!(kinds, ["markdown", "code", "markdown"]);
         assert_eq!(cells[1]["source"], json!(["x = 1\n", "print(x)"]));
-        assert!(cells[0]["source"][0].as_str().unwrap().starts_with("# My Note"));
+        assert!(
+            cells[0]["source"][0]
+                .as_str()
+                .unwrap()
+                .starts_with("# My Note")
+        );
         assert_eq!(v["metadata"]["kernelspec"]["name"], "python3");
     }
 

@@ -224,12 +224,8 @@ impl Writer {
                 let lines: Vec<d::Paragraph> = text
                     .split('\n')
                     .map(|line| {
-                        d::Paragraph::new().add_run(
-                            d::Run::new()
-                                .add_text(line)
-                                .fonts(mono_fonts())
-                                .size(18),
-                        )
+                        d::Paragraph::new()
+                            .add_run(d::Run::new().add_text(line).fonts(mono_fonts()).size(18))
                     })
                     .collect();
                 let mut cell = d::TableCell::new().shading(d::Shading::new().fill("F5F5F5"));
@@ -249,9 +245,11 @@ impl Writer {
                 }
             }
             Block::Rule => out.push(Child::p(
-                d::Paragraph::new()
-                    .align(d::AlignmentType::Center)
-                    .add_run(d::Run::new().add_text("\u{2500}".repeat(40)).color("BBBBBB")),
+                d::Paragraph::new().align(d::AlignmentType::Center).add_run(
+                    d::Run::new()
+                        .add_text("\u{2500}".repeat(40))
+                        .color("BBBBBB"),
+                ),
             )),
         }
     }
@@ -281,7 +279,12 @@ impl Writer {
                     d::LevelText::new(text),
                     d::LevelJc::new("left"),
                 )
-                .indent(Some(left), Some(d::SpecialIndentType::Hanging(360)), None, None),
+                .indent(
+                    Some(left),
+                    Some(d::SpecialIndentType::Hanging(360)),
+                    None,
+                    None,
+                ),
             ),
         );
         self.numberings.push(d::Numbering::new(id, id));
@@ -362,7 +365,11 @@ impl Writer {
             let cells: Vec<d::TableCell> = (0..n)
                 .map(|i| {
                     let content = row.get(i).map(Vec::as_slice).unwrap_or(&[]);
-                    let p = self.fill(d::Paragraph::new().align(align(i)), content, &Fmt::default());
+                    let p = self.fill(
+                        d::Paragraph::new().align(align(i)),
+                        content,
+                        &Fmt::default(),
+                    );
                     d::TableCell::new().add_paragraph(p)
                 })
                 .collect();
@@ -532,7 +539,12 @@ fn indented(p: d::Paragraph, left: i32) -> d::Paragraph {
 
 /// A single-cell table with a coloured left edge: how quotes and callouts are
 /// drawn. `label` is `(text, colour)`.
-fn boxed(edge: &str, fill: &str, label: Option<(String, String)>, children: Vec<Child>) -> d::Table {
+fn boxed(
+    edge: &str,
+    fill: &str,
+    label: Option<(String, String)>,
+    children: Vec<Child>,
+) -> d::Table {
     let mut cell = d::TableCell::new()
         .shading(d::Shading::new().fill(fill))
         .set_borders(
@@ -572,9 +584,15 @@ fn boxed(edge: &str, fill: &str, label: Option<(String, String)>, children: Vec<
 
 /// A light version of `hex` for a callout background.
 fn tint(hex: &str) -> String {
-    let channel = |i: usize| u8::from_str_radix(hex.get(i..i + 2).unwrap_or("ff"), 16).unwrap_or(255);
+    let channel =
+        |i: usize| u8::from_str_radix(hex.get(i..i + 2).unwrap_or("ff"), 16).unwrap_or(255);
     let mix = |c: u8| ((u32::from(c) * 12 + 255 * 88) / 100) as u8;
-    format!("{:02X}{:02X}{:02X}", mix(channel(0)), mix(channel(2)), mix(channel(4)))
+    format!(
+        "{:02X}{:02X}{:02X}",
+        mix(channel(0)),
+        mix(channel(2)),
+        mix(channel(4))
+    )
 }
 
 fn is_external(url: &str) -> bool {
@@ -589,7 +607,12 @@ mod tests {
     use std::io::Read;
 
     fn docx(md: &str) -> Vec<u8> {
-        to_docx(&Document::from_markdown("Title", md), &Theme::default(), None).unwrap()
+        to_docx(
+            &Document::from_markdown("Title", md),
+            &Theme::default(),
+            None,
+        )
+        .unwrap()
     }
 
     fn part(bytes: &[u8], name: &str) -> String {
@@ -603,13 +626,21 @@ mod tests {
     }
 
     fn has_part(bytes: &[u8], name: &str) -> bool {
-        zip::ZipArchive::new(Cursor::new(bytes)).unwrap().by_name(name).is_ok()
+        zip::ZipArchive::new(Cursor::new(bytes))
+            .unwrap()
+            .by_name(name)
+            .is_ok()
     }
 
     #[test]
     fn the_package_has_the_parts_word_needs() {
         let b = docx("hello\n");
-        for name in ["[Content_Types].xml", "word/document.xml", "word/styles.xml", "_rels/.rels"] {
+        for name in [
+            "[Content_Types].xml",
+            "word/document.xml",
+            "word/styles.xml",
+            "_rels/.rels",
+        ] {
             assert!(has_part(&b, name), "{name}");
         }
     }
@@ -627,13 +658,19 @@ mod tests {
     fn markup_in_notes_is_escaped_not_interpreted() {
         let b = docx("a <w:p>x</w:p> & \"q\" `<w:t>`\n");
         let xml = part(&b, "word/document.xml");
-        assert!(!xml.contains("<w:p>x"), "raw html is dropped, text is escaped: {xml}");
+        assert!(
+            !xml.contains("<w:p>x"),
+            "raw html is dropped, text is escaped: {xml}"
+        );
         assert!(xml.contains("&amp;") || xml.contains('&'));
     }
 
     #[test]
     fn tables_have_a_shaded_bold_header_and_all_cells() {
-        let xml = part(&docx("| a | b |\n|:--|--:|\n| 1 | 2 |\n"), "word/document.xml");
+        let xml = part(
+            &docx("| a | b |\n|:--|--:|\n| 1 | 2 |\n"),
+            "word/document.xml",
+        );
         assert!(xml.contains("<w:tbl>"));
         assert!(xml.contains("EEF0F2"), "header shading");
         assert!(xml.contains("w:jc w:val=\"right\""), "right alignment");
@@ -660,8 +697,12 @@ mod tests {
         };
         let abstracts = ids("<w:abstractNum w:abstractNumId=\"");
         let nums = ids("<w:num w:numId=\"");
-        let unique = |v: &[String]| v.iter().collect::<std::collections::HashSet<_>>().len() == v.len();
-        assert!(unique(&abstracts), "duplicate abstractNumId in {abstracts:?}");
+        let unique =
+            |v: &[String]| v.iter().collect::<std::collections::HashSet<_>>().len() == v.len();
+        assert!(
+            unique(&abstracts),
+            "duplicate abstractNumId in {abstracts:?}"
+        );
         assert!(unique(&nums), "duplicate numId in {nums:?}");
         // docx-rs's default definition plus our three lists
         assert_eq!(abstracts.len(), 4, "{abstracts:?}");
@@ -704,7 +745,12 @@ mod tests {
     }
 
     fn docx_with_root(md: &str, root: &Path) -> Vec<u8> {
-        to_docx(&Document::from_markdown("T", md), &Theme::default(), Some(root)).unwrap()
+        to_docx(
+            &Document::from_markdown("T", md),
+            &Theme::default(),
+            Some(root),
+        )
+        .unwrap()
     }
 
     #[test]
@@ -713,11 +759,22 @@ mod tests {
         let img = root.path().join("big.png");
         std::fs::write(&img, png(1200, 600)).unwrap();
         let b = docx_with_root(&format!("![big]({})\n", img.display()), root.path());
-        assert!(zip::ZipArchive::new(Cursor::new(&b[..])).unwrap().file_names().any(|n| n.starts_with("word/media/")));
+        assert!(
+            zip::ZipArchive::new(Cursor::new(&b[..]))
+                .unwrap()
+                .file_names()
+                .any(|n| n.starts_with("word/media/"))
+        );
         let xml = part(&b, "word/document.xml");
         // 600 px wide at 9525 EMU per pixel
-        assert!(xml.contains(&format!("cx=\"{}\"", 600 * EMU_PER_PX)), "{xml}");
-        assert!(xml.contains(&format!("cy=\"{}\"", 300 * EMU_PER_PX)), "{xml}");
+        assert!(
+            xml.contains(&format!("cx=\"{}\"", 600 * EMU_PER_PX)),
+            "{xml}"
+        );
+        assert!(
+            xml.contains(&format!("cy=\"{}\"", 300 * EMU_PER_PX)),
+            "{xml}"
+        );
     }
 
     #[test]
@@ -729,7 +786,12 @@ mod tests {
         std::fs::write(&truncated, &png(50, 50)[..40]).unwrap();
         let svg = root.path().join("v.svg");
         std::fs::write(&svg, b"<svg xmlns='http://www.w3.org/2000/svg'/>").unwrap();
-        let md = format!("![a]({}) ![b]({}) ![c]({})\n", bad.display(), truncated.display(), svg.display());
+        let md = format!(
+            "![a]({}) ![b]({}) ![c]({})\n",
+            bad.display(),
+            truncated.display(),
+            svg.display()
+        );
         let b = docx_with_root(&md, root.path());
         let xml = part(&b, "word/document.xml");
         assert_eq!(xml.matches("unavailable]").count(), 3, "{xml}");
@@ -741,9 +803,17 @@ mod tests {
         let outside = tempfile::tempdir().unwrap();
         let secret = outside.path().join("s.png");
         std::fs::write(&secret, png(10, 10)).unwrap();
-        let md = format!("![x]({}) ![y](https://example.com/a.png)\n", secret.display());
+        let md = format!(
+            "![x]({}) ![y](https://example.com/a.png)\n",
+            secret.display()
+        );
         let b = docx_with_root(&md, root.path());
-        assert!(!zip::ZipArchive::new(Cursor::new(&b[..])).unwrap().file_names().any(|n| n.starts_with("word/media/")));
+        assert!(
+            !zip::ZipArchive::new(Cursor::new(&b[..]))
+                .unwrap()
+                .file_names()
+                .any(|n| n.starts_with("word/media/"))
+        );
     }
 
     #[test]
@@ -762,7 +832,10 @@ mod tests {
         };
         let b = to_docx(&Document::from_markdown("T", "## h\n"), &theme, None).unwrap();
         let styles = part(&b, "word/styles.xml");
-        assert!(styles.contains("C62828") || styles.contains("c62828"), "{styles}");
+        assert!(
+            styles.contains("C62828") || styles.contains("c62828"),
+            "{styles}"
+        );
         assert!(styles.contains("Poppins"), "default font");
         assert!(has_part(&b, "word/footer1.xml"));
     }

@@ -142,7 +142,9 @@ mod tests {
         .unwrap();
         assert_eq!(p.extension, "zip");
         let mut z = zip::ZipArchive::new(std::io::Cursor::new(p.bytes)).unwrap();
-        let names: Vec<String> = (0..z.len()).map(|i| z.by_index(i).unwrap().name().to_owned()).collect();
+        let names: Vec<String> = (0..z.len())
+            .map(|i| z.by_index(i).unwrap().name().to_owned())
+            .collect();
         assert_eq!(names, ["01-setup.sh", "02-run-it.py"]);
     }
 

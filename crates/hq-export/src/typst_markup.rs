@@ -10,9 +10,9 @@ use std::fmt::Write as _;
 use std::path::Path;
 
 use crate::assets::AssetLoader;
-use crate::util::{callout_color, capitalise, safe_url};
 use crate::doc::{Align, Block, Document, Inline, ListItem, Table};
 use crate::theme::Theme;
+use crate::util::{callout_color, capitalise, safe_url};
 
 /// One page per sheet, or a single tall page (the natural shape for a PNG or
 /// SVG of a whole note).
@@ -157,7 +157,10 @@ impl Writer {
             Block::Code { lang, text } => {
                 let lang = lang
                     .as_deref()
-                    .filter(|l| l.chars().all(|c| c.is_ascii_alphanumeric() || "+-#_.".contains(c)))
+                    .filter(|l| {
+                        l.chars()
+                            .all(|c| c.is_ascii_alphanumeric() || "+-#_.".contains(c))
+                    })
                     .map(|l| format!(", lang: {}", literal(l)))
                     .unwrap_or_default();
                 format!(
@@ -203,7 +206,10 @@ impl Writer {
             .collect();
         let tight = format!("tight: {tight}");
         if ordered {
-            format!("#enum(start: {start}, {tight}, {})\n\n", rendered.join(", "))
+            format!(
+                "#enum(start: {start}, {tight}, {})\n\n",
+                rendered.join(", ")
+            )
         } else {
             format!("#list({tight}, {})\n\n", rendered.join(", "))
         }
@@ -402,10 +408,7 @@ mod tests {
         let outside = tempfile::tempdir().unwrap();
         let secret = outside.path().join("secret.png");
         std::fs::write(&secret, b"not really a png").unwrap();
-        let doc = Document::from_markdown(
-            "t",
-            &format!("![x]({})\n", secret.display()),
-        );
+        let doc = Document::from_markdown("t", &format!("![x]({})\n", secret.display()));
         let m = build(&doc, &Theme::default(), PageMode::Paged, Some(root.path()));
         assert!(m.assets.is_empty());
         assert!(m.source.contains("unavailable"));

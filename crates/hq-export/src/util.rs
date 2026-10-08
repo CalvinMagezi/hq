@@ -140,7 +140,11 @@ mod tests {
         assert_eq!(parse_number("0"), Some(0.0));
         assert_eq!(parse_number("0.5"), Some(0.5));
         assert_eq!(parse_number("007"), None, "leading zeros are identifiers");
-        assert_eq!(parse_number("256700123456789012"), None, "long ids stay text");
+        assert_eq!(
+            parse_number("256700123456789012"),
+            None,
+            "long ids stay text"
+        );
         assert_eq!(parse_number("1,200"), None);
         assert_eq!(parse_number("12%"), None);
         assert_eq!(parse_number("1."), None);

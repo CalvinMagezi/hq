@@ -131,8 +131,15 @@ mod tests {
         assert!(!html.contains("tags:"), "frontmatter must be dropped");
         assert!(!html.contains("[["), "wikilinks become plain text");
         assert!(html.contains("the other one"));
-        assert!(html.contains("class=\"callout\""), "callout must survive: {html}");
-        assert_eq!(html.matches("Quarterly plan").count(), 2, "title once in <title>, once as h1");
+        assert!(
+            html.contains("class=\"callout\""),
+            "callout must survive: {html}"
+        );
+        assert_eq!(
+            html.matches("Quarterly plan").count(),
+            2,
+            "title once in <title>, once as h1"
+        );
     }
 
     #[test]
@@ -157,8 +164,14 @@ mod tests {
     #[tokio::test]
     async fn async_export_matches_the_blocking_one() {
         let (v, note) = vault_with_note(NOTE);
-        let out = export_note(v.path(), &note, Format::Md, None, &[]).await.unwrap();
-        assert!(String::from_utf8(out.output.bytes).unwrap().starts_with("# Quarterly plan"));
+        let out = export_note(v.path(), &note, Format::Md, None, &[])
+            .await
+            .unwrap();
+        assert!(
+            String::from_utf8(out.output.bytes)
+                .unwrap()
+                .starts_with("# Quarterly plan")
+        );
     }
 
     #[tokio::test]
@@ -168,7 +181,9 @@ mod tests {
         if legacy_pdf_engine_requested() {
             return;
         }
-        let out = export_note(v.path(), &note, Format::Pdf, None, &[]).await.unwrap();
+        let out = export_note(v.path(), &note, Format::Pdf, None, &[])
+            .await
+            .unwrap();
         assert!(out.output.bytes.starts_with(b"%PDF-"));
         assert_eq!(out.output.mime, "application/pdf");
     }

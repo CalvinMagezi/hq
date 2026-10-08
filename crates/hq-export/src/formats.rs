@@ -74,24 +74,31 @@ impl Format {
     }
 
     pub fn parse(s: &str) -> Option<Format> {
-        Some(match s.trim().trim_start_matches('.').to_ascii_lowercase().as_str() {
-            "pdf" => Format::Pdf,
-            "png" => Format::Png,
-            "svg" => Format::Svg,
-            "docx" | "word" => Format::Docx,
-            "html" | "htm" => Format::Html,
-            "md" | "markdown" => Format::Md,
-            "csv" => Format::Csv,
-            "json" => Format::Json,
-            "jsonl" | "ndjson" => Format::Jsonl,
-            "xml" => Format::Xml,
-            "latex" | "tex" => Format::Latex,
-            "xlsx" | "excel" => Format::Xlsx,
-            "ipynb" | "notebook" | "jupyter" => Format::Ipynb,
-            "jira" => Format::Jira,
-            "code" | "codeblocks" => Format::Code,
-            _ => return None,
-        })
+        Some(
+            match s
+                .trim()
+                .trim_start_matches('.')
+                .to_ascii_lowercase()
+                .as_str()
+            {
+                "pdf" => Format::Pdf,
+                "png" => Format::Png,
+                "svg" => Format::Svg,
+                "docx" | "word" => Format::Docx,
+                "html" | "htm" => Format::Html,
+                "md" | "markdown" => Format::Md,
+                "csv" => Format::Csv,
+                "json" => Format::Json,
+                "jsonl" | "ndjson" => Format::Jsonl,
+                "xml" => Format::Xml,
+                "latex" | "tex" => Format::Latex,
+                "xlsx" | "excel" => Format::Xlsx,
+                "ipynb" | "notebook" | "jupyter" => Format::Ipynb,
+                "jira" => Format::Jira,
+                "code" | "codeblocks" => Format::Code,
+                _ => return None,
+            },
+        )
     }
 
     /// Whether the format needs the note to contain tables.
@@ -155,8 +162,16 @@ pub fn export(doc: &Document, format: Format, opts: &ExportOptions) -> Result<Ou
     let table = |p: tables::Packed| Ok(Output::new(p.bytes, p.mime, p.extension));
     let asset_root = opts.render.asset_root.as_deref();
     match format {
-        Format::Pdf => Ok(Output::new(render::pdf(doc, &opts.render)?, "application/pdf", "pdf")),
-        Format::Png => Ok(Output::new(render::png(doc, &opts.render)?, "image/png", "png")),
+        Format::Pdf => Ok(Output::new(
+            render::pdf(doc, &opts.render)?,
+            "application/pdf",
+            "pdf",
+        )),
+        Format::Png => Ok(Output::new(
+            render::png(doc, &opts.render)?,
+            "image/png",
+            "png",
+        )),
         Format::Svg => text(render::svg(doc, &opts.render)?, "image/svg+xml", "svg"),
         Format::Docx => Ok(Output::new(
             docx::to_docx(doc, &opts.render.theme, asset_root)?,
@@ -168,7 +183,11 @@ pub fn export(doc: &Document, format: Format, opts: &ExportOptions) -> Result<Ou
             "text/html; charset=utf-8",
             "html",
         ),
-        Format::Md => text(markdown::to_markdown(doc), "text/markdown; charset=utf-8", "md"),
+        Format::Md => text(
+            markdown::to_markdown(doc),
+            "text/markdown; charset=utf-8",
+            "md",
+        ),
         Format::Jira => text(jira::to_jira(doc), "text/plain; charset=utf-8", "txt"),
         Format::Ipynb => text(
             notebook::to_notebook(doc),
@@ -216,7 +235,10 @@ mod tests {
     #[test]
     fn unknown_format_error_lists_the_choices() {
         let err = "wat".parse::<Format>().unwrap_err().to_string();
-        assert!(err.contains("pdf") && err.contains("xlsx") && err.contains("wat"), "{err}");
+        assert!(
+            err.contains("pdf") && err.contains("xlsx") && err.contains("wat"),
+            "{err}"
+        );
     }
 
     #[test]

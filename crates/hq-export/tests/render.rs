@@ -174,7 +174,10 @@ fn a_broken_image_file_degrades_instead_of_failing_the_export() {
     let root = tempfile::tempdir().unwrap();
     let img = root.path().join("bad.png");
     std::fs::write(&img, b"this is not a png").unwrap();
-    let d = doc(&format!("before\n\n![broken]({})\n\nafter\n", img.display()));
+    let d = doc(&format!(
+        "before\n\n![broken]({})\n\nafter\n",
+        img.display()
+    ));
     let o = RenderOptions {
         asset_root: Some(root.path().to_path_buf()),
         ..Default::default()

@@ -25,7 +25,16 @@ async fn read_back(format: Format, ext: &str) -> String {
 #[tokio::test]
 async fn docx_reads_back_with_its_text_and_table() {
     let md = read_back(Format::Docx, "docx").await;
-    for expected in ["Weekly planning", "Field visits", "Mukono", "Wakiso", "42", "pending", "first item", "step two"] {
+    for expected in [
+        "Weekly planning",
+        "Field visits",
+        "Mukono",
+        "Wakiso",
+        "42",
+        "pending",
+        "first item",
+        "step two",
+    ] {
         assert!(md.contains(expected), "docx lost {expected:?}:\n{md}");
     }
 }
@@ -49,7 +58,10 @@ async fn pdf_text_can_be_extracted() {
 #[tokio::test]
 async fn html_and_csv_read_back_too() {
     let html = read_back(Format::Html, "html").await;
-    assert!(html.contains("Mukono") && html.contains("first item"), "{html}");
+    assert!(
+        html.contains("Mukono") && html.contains("first item"),
+        "{html}"
+    );
     let csv = read_back(Format::Csv, "csv").await;
     assert!(csv.contains("Mukono") && csv.contains("42"), "{csv}");
 }

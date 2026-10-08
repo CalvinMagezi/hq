@@ -107,7 +107,8 @@ fn file_name(index: usize, grid: &Grid, ext: &str) -> String {
 
 fn csv_bytes(g: &Grid) -> Result<Vec<u8>, ExportError> {
     let mut w = csv::WriterBuilder::new().from_writer(Vec::new());
-    let safe = |cells: &[String]| -> Vec<String> { cells.iter().map(|c| defuse_formula(c)).collect() };
+    let safe =
+        |cells: &[String]| -> Vec<String> { cells.iter().map(|c| defuse_formula(c)).collect() };
     w.write_record(safe(&g.columns))
         .map_err(|e| ExportError::Render(e.to_string()))?;
     for row in &g.rows {
@@ -296,12 +297,11 @@ fn latex_table(g: &Grid) -> String {
     let row = |cells: Vec<String>| format!("{} \\\\\n", cells.join(" & "));
     let mut out = format!("% {}\n", g.name.replace('\n', " "));
     out.push_str(&format!("\\begin{{tabular}}{{{spec}}}\n\\hline\n"));
-    out.push_str(&row(
-        g.columns
-            .iter()
-            .map(|c| format!("\\textbf{{{}}}", latex_escape(c)))
-            .collect(),
-    ));
+    out.push_str(&row(g
+        .columns
+        .iter()
+        .map(|c| format!("\\textbf{{{}}}", latex_escape(c)))
+        .collect()));
     out.push_str("\\hline\n");
     for r in &g.rows {
         out.push_str(&row(r.iter().map(|c| latex_escape(c)).collect()));
@@ -356,7 +356,9 @@ pub(crate) fn xlsx(doc: &Document) -> Result<Packed, ExportError> {
 
     for (i, g) in grids.iter().enumerate() {
         let sheet = workbook.add_worksheet();
-        sheet.set_name(sheet_name(&g.name, i, &mut used)).map_err(fail)?;
+        sheet
+            .set_name(sheet_name(&g.name, i, &mut used))
+            .map_err(fail)?;
         for (c, name) in g.columns.iter().enumerate() {
             sheet
                 .write_string_with_format(0, c as u16, name, &header)
@@ -394,7 +396,8 @@ mod tests {
     }
 
     const ONE: &str = "## Sites\n\n| Site | Farmers | Note |\n|:--|--:|---|\n| Mukono | 42 | =HYPERLINK(\"x\") |\n| Wakiso | 007 | has, comma and \"quote\" |\n";
-    const TWO: &str = "## Sites\n\n| a | b |\n|---|---|\n| 1 | x |\n\n## Sites\n\n| c |\n|---|\n| 2 |\n";
+    const TWO: &str =
+        "## Sites\n\n| a | b |\n|---|---|\n| 1 | x |\n\n## Sites\n\n| c |\n|---|\n| 2 |\n";
 
     fn text(p: Packed) -> String {
         String::from_utf8(p.bytes).unwrap()
@@ -412,7 +415,10 @@ mod tests {
         assert_eq!(p.extension, "csv");
         let t = text(p);
         assert!(t.starts_with("Site,Farmers,Note\n"));
-        assert!(t.contains("'=HYPERLINK(\"\"x\"\")"), "formula must be defused: {t}");
+        assert!(
+            t.contains("'=HYPERLINK(\"\"x\"\")"),
+            "formula must be defused: {t}"
+        );
         assert!(t.contains("\"has, comma and \"\"quote\"\"\""), "{t}");
         assert!(t.contains("Wakiso,007,"), "leading zeros must survive: {t}");
     }
@@ -426,7 +432,10 @@ mod tests {
             .map(|i| z.by_index(i).unwrap().name().to_owned())
             .collect();
         assert_eq!(names.len(), 2);
-        assert!(names[0].starts_with("01-") && names[1].starts_with("02-"), "{names:?}");
+        assert!(
+            names[0].starts_with("01-") && names[1].starts_with("02-"),
+            "{names:?}"
+        );
         assert_ne!(names[0], names[1]);
     }
 
@@ -438,7 +447,10 @@ mod tests {
             first_line,
             "{\"Site\":\"Mukono\",\"Farmers\":42,\"Note\":\"=HYPERLINK(\\\"x\\\")\"}"
         );
-        assert!(t.contains("\"Farmers\":\"007\""), "leading zeros stay text: {t}");
+        assert!(
+            t.contains("\"Farmers\":\"007\""),
+            "leading zeros stay text: {t}"
+        );
         serde_json::from_str::<serde_json::Value>(&t).expect("valid json");
     }
 
@@ -485,11 +497,18 @@ mod tests {
         let long = "x".repeat(50);
         assert_eq!(sheet_name(&long, 0, &mut used).chars().count(), 31);
         assert_eq!(sheet_name("A/B:C?", 1, &mut used), "ABC");
-        assert_eq!(sheet_name("abc", 2, &mut used), "abc 2", "case-insensitive duplicate");
+        assert_eq!(
+            sheet_name("abc", 2, &mut used),
+            "abc 2",
+            "case-insensitive duplicate"
+        );
         assert_eq!(sheet_name("   ", 3, &mut used), "Sheet 4");
         // a 31-char name that collides must still fit
         let again = sheet_name(&long, 4, &mut used);
-        assert!(again.chars().count() <= 31 && again != long[..31], "{again}");
+        assert!(
+            again.chars().count() <= 31 && again != long[..31],
+            "{again}"
+        );
     }
 
     #[test]
@@ -508,10 +527,22 @@ mod tests {
         let p = xlsx(&doc(ONE)).unwrap();
         let mut z = zip::ZipArchive::new(std::io::Cursor::new(p.bytes)).unwrap();
         let mut sheet = String::new();
-        z.by_name("xl/worksheets/sheet1.xml").unwrap().read_to_string(&mut sheet).unwrap();
-        assert!(!sheet.contains("<f>"), "no formula element may be written: {sheet}");
+        z.by_name("xl/worksheets/sheet1.xml")
+            .unwrap()
+            .read_to_string(&mut sheet)
+            .unwrap();
+        assert!(
+            !sheet.contains("<f>"),
+            "no formula element may be written: {sheet}"
+        );
         let mut shared = String::new();
-        z.by_name("xl/sharedStrings.xml").unwrap().read_to_string(&mut shared).unwrap();
-        assert!(shared.contains("HYPERLINK"), "the text must be present as a string");
+        z.by_name("xl/sharedStrings.xml")
+            .unwrap()
+            .read_to_string(&mut shared)
+            .unwrap();
+        assert!(
+            shared.contains("HYPERLINK"),
+            "the text must be present as a string"
+        );
     }
 }

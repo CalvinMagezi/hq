@@ -97,7 +97,10 @@ impl Writer {
             Block::Code { lang, text } => {
                 let class = lang
                     .as_deref()
-                    .filter(|l| l.chars().all(|c| c.is_ascii_alphanumeric() || "+-#_.".contains(c)))
+                    .filter(|l| {
+                        l.chars()
+                            .all(|c| c.is_ascii_alphanumeric() || "+-#_.".contains(c))
+                    })
                     .map(|l| format!(" class=\"language-{l}\""))
                     .unwrap_or_default();
                 format!("<pre><code{class}>{}</code></pre>\n", escape(text))
@@ -229,7 +232,11 @@ mod tests {
     use super::*;
 
     fn html(md: &str) -> String {
-        to_html(&Document::from_markdown("T <&> \"t\"", md), &Theme::default(), None)
+        to_html(
+            &Document::from_markdown("T <&> \"t\"", md),
+            &Theme::default(),
+            None,
+        )
     }
 
     #[test]
@@ -242,7 +249,9 @@ mod tests {
 
     #[test]
     fn note_text_cannot_inject_markup() {
-        let h = html("text <script>alert(1)</script> and `<b>` and [x](javascript:alert(1)) and \"quo\\\"te\"\n\n<img src=x onerror=alert(1)>\n");
+        let h = html(
+            "text <script>alert(1)</script> and `<b>` and [x](javascript:alert(1)) and \"quo\\\"te\"\n\n<img src=x onerror=alert(1)>\n",
+        );
         assert!(!h.contains("<script>"), "{h}");
         assert!(!h.contains("onerror"), "raw html is dropped: {h}");
         assert!(!h.contains("javascript:"), "{h}");
@@ -251,8 +260,13 @@ mod tests {
 
     #[test]
     fn structure_maps_to_elements() {
-        let h = html("## Sec\n\n> [!tip] Hi\n> body\n\n| a | b |\n|:-|-:|\n| 1 | 2 |\n\n3. x\n4. y\n\n- [x] done\n\n```rust\nlet a = 1 < 2;\n```\n");
-        assert!(h.contains("<h3>Sec</h3>"), "note headings sit below the title: {h}");
+        let h = html(
+            "## Sec\n\n> [!tip] Hi\n> body\n\n| a | b |\n|:-|-:|\n| 1 | 2 |\n\n3. x\n4. y\n\n- [x] done\n\n```rust\nlet a = 1 < 2;\n```\n",
+        );
+        assert!(
+            h.contains("<h3>Sec</h3>"),
+            "note headings sit below the title: {h}"
+        );
         assert!(h.contains("class=\"callout\""));
         assert!(h.contains("<th style=\"text-align:right\">b</th>"));
         assert!(h.contains("<ol start=\"3\">"));
@@ -269,7 +283,11 @@ mod tests {
         let secret = outside.path().join("s.png");
         std::fs::write(&secret, b"secret").unwrap();
         let md = format!("![in]({}) ![out]({})\n", inside.display(), secret.display());
-        let h = to_html(&Document::from_markdown("t", &md), &Theme::default(), Some(root.path()));
+        let h = to_html(
+            &Document::from_markdown("t", &md),
+            &Theme::default(),
+            Some(root.path()),
+        );
         assert_eq!(h.matches("data:image/png;base64,").count(), 1, "{h}");
         assert!(h.contains("[out unavailable]"));
     }

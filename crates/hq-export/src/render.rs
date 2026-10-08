@@ -130,10 +130,7 @@ pub fn svg_pages(doc: &Document, opts: &RenderOptions) -> Result<Vec<String>, Ex
         .collect())
 }
 
-fn png_of(
-    page: &typst_layout::Page,
-    pixels_per_pt: f64,
-) -> Result<Vec<u8>, ExportError> {
+fn png_of(page: &typst_layout::Page, pixels_per_pt: f64) -> Result<Vec<u8>, ExportError> {
     let size = page.frame.size();
     let longest = size.x.to_pt().max(size.y.to_pt()).max(1.0);
     let scale = pixels_per_pt.min(MAX_PNG_SIDE / longest);

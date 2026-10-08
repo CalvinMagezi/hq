@@ -9,8 +9,8 @@
 
 mod assets;
 mod code;
-mod docx;
 pub mod doc;
+mod docx;
 pub mod error;
 mod formats;
 mod html;
@@ -19,8 +19,8 @@ pub mod markdown;
 mod note;
 mod notebook;
 pub mod render;
-pub mod theme;
 mod tables;
+pub mod theme;
 mod typst_markup;
 mod util;
 

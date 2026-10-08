@@ -23,7 +23,11 @@ pub fn blocks_to_markdown(blocks: &[Block]) -> String {
 fn block(b: &Block) -> String {
     match b {
         Block::Heading { level, content } => {
-            format!("{} {}", "#".repeat((*level).clamp(1, 6) as usize), inlines(content))
+            format!(
+                "{} {}",
+                "#".repeat((*level).clamp(1, 6) as usize),
+                inlines(content)
+            )
         }
         Block::Paragraph(content) => inlines(content),
         Block::Quote(body) => quote(&blocks_to_markdown(body)),
@@ -62,7 +66,13 @@ fn block(b: &Block) -> String {
 fn quote(text: &str) -> String {
     text.trim_end()
         .lines()
-        .map(|l| if l.is_empty() { ">".to_owned() } else { format!("> {l}") })
+        .map(|l| {
+            if l.is_empty() {
+                ">".to_owned()
+            } else {
+                format!("> {l}")
+            }
+        })
         .collect::<Vec<_>>()
         .join("\n")
 }
@@ -83,7 +93,11 @@ fn list(ordered: bool, start: u64, items: &[ListItem]) -> String {
         let mut body = String::new();
         for (j, b) in item.blocks.iter().enumerate() {
             if j > 0 {
-                body.push_str(if matches!(b, Block::List { .. }) { "\n" } else { "\n\n" });
+                body.push_str(if matches!(b, Block::List { .. }) {
+                    "\n"
+                } else {
+                    "\n\n"
+                });
             }
             body.push_str(&block(b));
         }
@@ -138,9 +152,11 @@ fn inlines(content: &[Inline]) -> String {
             Inline::Strong(c) => out.push_str(&format!("**{}**", inlines(c))),
             Inline::Strike(c) => out.push_str(&format!("~~{}~~", inlines(c))),
             Inline::Code(c) => out.push_str(&code_span(c)),
-            Inline::Link { url, content } => {
-                out.push_str(&format!("[{}](<{}>)", inlines(content), url.replace('>', "%3E")))
-            }
+            Inline::Link { url, content } => out.push_str(&format!(
+                "[{}](<{}>)",
+                inlines(content),
+                url.replace('>', "%3E")
+            )),
             Inline::Image { alt, src } => out.push_str(&format!(
                 "![{}](<{}>)",
                 escape(alt),
@@ -165,7 +181,11 @@ fn code_span(code: &str) -> String {
         }
     }
     let fence = "`".repeat(longest + 1);
-    let pad = if code.starts_with('`') || code.ends_with('`') { " " } else { "" };
+    let pad = if code.starts_with('`') || code.ends_with('`') {
+        " "
+    } else {
+        ""
+    };
     format!("{fence}{pad}{code}{pad}{fence}")
 }
 
@@ -198,7 +218,12 @@ mod tests {
     fn roundtrip(md: &str) -> Vec<Block> {
         let first = Document::from_markdown("t", md);
         let again = Document::from_markdown("t", &blocks_to_markdown(&first.blocks));
-        assert_eq!(first.blocks, again.blocks, "markdown was:\n{}", blocks_to_markdown(&first.blocks));
+        assert_eq!(
+            first.blocks,
+            again.blocks,
+            "markdown was:\n{}",
+            blocks_to_markdown(&first.blocks)
+        );
         again.blocks
     }
 
@@ -215,7 +240,9 @@ mod tests {
 
     #[test]
     fn special_characters_in_text_do_not_become_markup() {
-        roundtrip("a \\* star and \\_ under and \\[brackets\\] and \\<angle\\> and 1\\. not a list\n");
+        roundtrip(
+            "a \\* star and \\_ under and \\[brackets\\] and \\<angle\\> and 1\\. not a list\n",
+        );
     }
 
     #[test]
