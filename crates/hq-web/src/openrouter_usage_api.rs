@@ -5,6 +5,8 @@ use hq_core::config::{HqConfig, openrouter_key, openrouter_primary};
 use hq_llm::openrouter_usage::{OpenRouterUsage, fetch_usage};
 use hq_llm::provider::LlmError;
 use serde_json::{Value, json};
+use std::collections::hash_map::DefaultHasher;
+use std::hash::{Hash, Hasher};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 use tokio::sync::Mutex;
@@ -24,19 +26,41 @@ const REFUSED_NOTE: &str =
 
 type Live = Result<OpenRouterUsage, (bool, String)>;
 
-static LIVE_CACHE: Mutex<Option<(Instant, Live)>> = Mutex::const_new(None);
+/// A cached reading and the inputs it answers: the endpoint and an in-process fingerprint of the
+/// key (never stored or sent anywhere), so changing either drops the entry at once.
+struct Cached {
+    at: Instant,
+    source: (String, u64),
+    live: Live,
+}
+
+static LIVE_CACHE: Mutex<Option<Cached>> = Mutex::const_new(None);
+
+fn fingerprint(base: &str, key: &str) -> (String, u64) {
+    let mut h = DefaultHasher::new();
+    key.hash(&mut h);
+    (base.to_string(), h.finish())
+}
 
 async fn cached_live(base: &str, key: &str) -> Live {
+    let source = fingerprint(base, key);
     let mut guard = LIVE_CACHE.lock().await;
-    if let Some((at, live)) = guard.as_ref()
-        && at.elapsed() < LIVE_CACHE_TTL
+    if let Some(c) = guard.as_ref()
+        && c.source == source
+        && c.at.elapsed() < LIVE_CACHE_TTL
     {
-        return live.clone();
+        return c.live.clone();
     }
+    // The lock is held across the read so a burst shares one call; each request is bounded by
+    // the 15 s timeout in `fetch_usage`.
     let live = fetch_usage(base, key)
         .await
         .map_err(|e| (matches!(e, LlmError::Auth { .. }), e.to_string()));
-    *guard = Some((Instant::now(), live.clone()));
+    *guard = Some(Cached {
+        at: Instant::now(),
+        source,
+        live: live.clone(),
+    });
     live
 }
 
@@ -79,6 +103,14 @@ pub(crate) async fn openrouter_usage_handler(
 mod tests {
     use super::*;
     use hq_llm::openrouter_usage::parse_usage;
+
+    #[test]
+    fn the_cache_source_changes_with_the_endpoint_or_the_key() {
+        let a = fingerprint("https://a.example/v1", "k1");
+        assert_eq!(a, fingerprint("https://a.example/v1", "k1"));
+        assert_ne!(a, fingerprint("https://b.example/v1", "k1"));
+        assert_ne!(a, fingerprint("https://a.example/v1", "k2"));
+    }
 
     #[test]
     fn shapes_a_reading_a_refusal_and_a_failure() {

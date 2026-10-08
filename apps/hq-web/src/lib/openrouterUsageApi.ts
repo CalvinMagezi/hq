@@ -2,7 +2,6 @@ import { queryOptions } from '@tanstack/react-query'
 import { hqJson } from './hqAuth'
 
 export interface OpenRouterUsage {
-  label: string | null
   usage: number
   usage_daily: number | null
   usage_weekly: number | null

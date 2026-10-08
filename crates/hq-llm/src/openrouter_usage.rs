@@ -9,10 +9,13 @@
 use crate::provider::LlmError;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
+use std::time::Duration;
+
+/// Per request, so a hung OpenRouter cannot hold the caller for the shared client's 300 s.
+const REQUEST_TIMEOUT: Duration = Duration::from_secs(15);
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct OpenRouterUsage {
-    pub label: Option<String>,
     /// Lifetime spend of this key, USD.
     pub usage: f64,
     pub usage_daily: Option<f64>,
@@ -45,7 +48,6 @@ pub fn parse_usage(key_body: &Value, credits_body: Option<&Value>) -> Option<Ope
     let k = key_body.get("data")?;
     let credits = credits_body.and_then(|b| b.get("data"));
     Some(OpenRouterUsage {
-        label: k.get("label").and_then(Value::as_str).map(str::to_string),
         usage: num(k, "usage")?,
         usage_daily: num(k, "usage_daily"),
         usage_weekly: num(k, "usage_weekly"),
@@ -69,6 +71,7 @@ async fn get_json(base: &str, path: &str, key: &str) -> Result<Value, LlmError> 
     let resp = crate::http::SHARED_HTTP_CLIENT
         .get(format!("{}/{path}", base.trim_end_matches('/')))
         .bearer_auth(key)
+        .timeout(REQUEST_TIMEOUT)
         .header("Accept", "application/json")
         .send()
         .await
@@ -133,8 +136,91 @@ mod tests {
     }
 
     #[test]
+    fn an_uncapped_key_and_the_real_credits_shape_parse() {
+        let key = json!({"data": {"usage": 100.96, "usage_daily": 1.5, "usage_weekly": 9.0, "usage_monthly": 40.0,
+            "limit": null, "limit_remaining": null, "is_free_tier": false}});
+        let credits = json!({"data": {"total_credits": 110, "total_usage": 100.96}});
+        let u = parse_usage(&key, Some(&credits)).unwrap();
+        assert!(u.limit.is_none() && u.limit_remaining.is_none());
+        assert!((u.credits_left().unwrap() - 9.04).abs() < 1e-9);
+    }
+
+    #[test]
+    fn the_serialized_reading_carries_no_key_label() {
+        let body = json!({"data": {"label": "sk-or-v1-abc...xyz", "usage": 1.0}});
+        let out = serde_json::to_string(&parse_usage(&body, None).unwrap()).unwrap();
+        assert!(!out.contains("sk-or"));
+    }
+
+    #[test]
     fn a_body_without_usage_is_not_a_reading() {
         assert!(parse_usage(&json!({"data": {"label": "x"}}), None).is_none());
         assert!(parse_usage(&json!({}), None).is_none());
+    }
+
+    use wiremock::matchers::{header, method, path};
+    use wiremock::{Mock, MockServer, ResponseTemplate};
+
+    async fn fetch_with(
+        key_resp: ResponseTemplate,
+        credits_resp: ResponseTemplate,
+    ) -> Result<OpenRouterUsage, LlmError> {
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/key"))
+            .and(header("authorization", "Bearer k"))
+            .respond_with(key_resp)
+            .mount(&server)
+            .await;
+        Mock::given(method("GET"))
+            .and(path("/credits"))
+            .respond_with(credits_resp)
+            .mount(&server)
+            .await;
+        fetch_usage(&server.uri(), "k").await
+    }
+
+    #[tokio::test]
+    async fn a_good_read_sends_the_bearer_and_folds_in_credits() {
+        let u = fetch_with(
+            ResponseTemplate::new(200).set_body_json(json!({"data": {"usage": 100.96}})),
+            ResponseTemplate::new(200)
+                .set_body_json(json!({"data": {"total_credits": 110, "total_usage": 100.96}})),
+        )
+        .await
+        .unwrap();
+        assert!((u.credits_left().unwrap() - 9.04).abs() < 1e-9);
+    }
+
+    #[tokio::test]
+    async fn a_refused_credits_call_keeps_the_key_numbers() {
+        let u = fetch_with(
+            ResponseTemplate::new(200).set_body_json(json!({"data": {"usage": 2.0}})),
+            ResponseTemplate::new(403),
+        )
+        .await
+        .unwrap();
+        assert!(u.total_credits.is_none() && u.usage == 2.0);
+    }
+
+    #[tokio::test]
+    async fn statuses_and_bad_bodies_map_to_distinct_errors() {
+        for status in [401, 403] {
+            let e = fetch_with(ResponseTemplate::new(status), ResponseTemplate::new(200))
+                .await
+                .unwrap_err();
+            assert!(matches!(e, LlmError::Auth { status: s, .. } if s == status));
+        }
+        let e = fetch_with(ResponseTemplate::new(500), ResponseTemplate::new(200))
+            .await
+            .unwrap_err();
+        assert!(matches!(e, LlmError::ServerError { status: 500, .. }));
+        let e = fetch_with(
+            ResponseTemplate::new(200).set_body_string("<html>"),
+            ResponseTemplate::new(200),
+        )
+        .await
+        .unwrap_err();
+        assert!(matches!(e, LlmError::Other(_)));
     }
 }
