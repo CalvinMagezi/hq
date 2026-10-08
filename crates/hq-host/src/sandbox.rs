@@ -87,7 +87,7 @@ const AGENT_DEFAULT_ALLOW: &[(&str, &[&str])] = &[
     ("codex", &["api.openai.com", "auth.openai.com", "chatgpt.com"]),
     ("cursor", &["*.cursor.sh"]),
     ("copilot", &["*.githubcopilot.com", "api.github.com", "github.com"]),
-    ("pi", &["pi.dev"]),
+    ("pi", &["pi.dev", "generativelanguage.googleapis.com"]),
 ];
 const HOME_WRITABLE: &[&str] = &[".cache", "Library/Caches"];
 /// Temporary directories every agent shares on macOS (Seatbelt lists them writable).
