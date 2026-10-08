@@ -195,6 +195,8 @@ fn live_session_json(
     Ok(v)
 }
 
+/// The host's code for a sandbox it cannot build; its message names the folder and what to change.
+const SANDBOX_UNAVAILABLE_CODE: &str = "sandbox_unavailable";
 const GENERIC_FAILURE: &str = "the session request failed; the server log has the details";
 const HOST_UNREACHABLE: &str = "the session's host is unreachable right now";
 
@@ -209,6 +211,11 @@ pub(crate) fn session_error(e: anyhow::Error) -> ApiError {
     match e.downcast_ref::<AgentHostError>() {
         Some(AgentHostError::Api { code, message }) if code == INVALID_KEYS_CODE => {
             return ApiError::bad_request(message.clone());
+        }
+        Some(AgentHostError::Api { code, message }) if code == SANDBOX_UNAVAILABLE_CODE => {
+            return ApiError::Conflict(format!(
+                "This computer cannot keep the agent contained in that folder, so it was not started. {message}"
+            ));
         }
         Some(err) if err.is_unreachable() => {
             tracing::warn!(error = %e, "sessions api: host unreachable");
@@ -817,6 +824,17 @@ mod tests {
                 .count(),
             1
         );
+    }
+
+    #[test]
+    fn a_sandbox_the_computer_cannot_build_is_explained_not_a_generic_failure() {
+        let err = anyhow::Error::new(AgentHostError::Api {
+            code: SANDBOX_UNAVAILABLE_CODE.into(),
+            message: "start the agent in a project directory".into(),
+        });
+        let mapped = session_error(err);
+        assert_eq!(mapped.status(), StatusCode::CONFLICT);
+        assert!(mapped.to_string().contains("project directory"), "{mapped}");
     }
 
     #[tokio::test]
