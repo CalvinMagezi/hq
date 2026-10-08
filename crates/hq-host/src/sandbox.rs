@@ -362,6 +362,9 @@ fn outer_restrictions(_allow: &[PathBuf]) -> Vec<ReadRestriction> {
     Vec::new()
 }
 
+/// Stands for the target machine's home directory in launch arguments.
+pub(crate) const HOME_PLACEHOLDER: &str = "{home}";
+
 /// What is being started: the agent's name, command, kind and environment.
 #[derive(Clone, Copy)]
 pub(crate) struct Launch<'a> {
@@ -384,6 +387,10 @@ pub(crate) fn confine(
 ) -> Result<Confined, HostError> {
     let Launch { name, cwd, run_dir, argv, agent, env, helper } = *launch;
     let refuse = |why: &str| HostError::Sandbox(why.to_string());
+    // The caller cannot know this machine's home, so `{home}` in a launch argument is filled in here.
+    let home_dir = home().map(|h| h.to_string_lossy().into_owned()).unwrap_or_default();
+    let expanded: Vec<String> = argv.iter().map(|a| a.replace(HOME_PLACEHOLDER, &home_dir)).collect();
+    let argv = expanded.as_slice();
     let run_dir = run_dir.ok_or_else(|| refuse("the host has no run directory to protect"))?;
     let backend = backend().ok_or_else(|| refuse("no sandbox program (sandbox-exec or bwrap) on this machine"))?;
     let claude = claude_config(env);

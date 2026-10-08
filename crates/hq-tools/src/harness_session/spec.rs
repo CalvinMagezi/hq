@@ -87,8 +87,9 @@ pub const SPECS: &[HarnessSessionSpec] = &[
     HarnessSessionSpec {
         harness: "cursor",
         kind: "cursor",
-        args: &["--force", "--trust"],
-        resume: ResumeStrategy::Args(&["--force", "--trust", "--resume", "{token}"]),
+        // `--trust` only works in headless mode; the interactive trust dialog is answered at launch.
+        args: &["--force"],
+        resume: ResumeStrategy::Args(&["--force", "--resume", "{token}"]),
         token_pattern: Some(r"chat[_-]id[:=]\s*([A-Za-z0-9_-]+)"),
         trust_pattern: None,
     },
@@ -103,8 +104,9 @@ pub const SPECS: &[HarnessSessionSpec] = &[
     HarnessSessionSpec {
         harness: "codex",
         kind: "codex",
-        args: &[],
-        resume: ResumeStrategy::Args(&["resume", "--last"]),
+        // The background daemon check reads other processes, which the sandbox forbids.
+        args: &["--no-daemon"],
+        resume: ResumeStrategy::Args(&["--no-daemon", "resume", "--last"]),
         token_pattern: None,
         trust_pattern: None,
     },

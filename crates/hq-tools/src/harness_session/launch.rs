@@ -3,7 +3,6 @@ use crate::agent_host::McpAccess;
 
 pub(super) fn build_args(
     harness: &Harness,
-    vault_path: &Path,
     session_id: &str,
     resume_token: Option<&str>,
     resuming: bool,
@@ -39,10 +38,9 @@ pub(super) fn build_args(
     };
     let mut args = base;
     if spec.resume == ResumeStrategy::SessionDir {
-        let dir = vault_path.join(SESSION_DIR_ROOT).join(session_id);
-        let _ = std::fs::create_dir_all(&dir);
+        // Created by the agent on the host that runs it; the vault is on the HQ machine, which may be another one.
         args.push("--session-dir".into());
-        args.push(dir.to_string_lossy().to_string());
+        args.push(format!("{{home}}/{PI_SESSION_DIR}/{session_id}"));
     }
     args
 }
@@ -80,13 +78,13 @@ pub fn resume_awaiting(rows: &[HarnessSessionRow], host: &Host) {
 
 /// How the built-in host restarts this agent after the host itself restarts:
 /// only for harnesses that resume without a saved token.
-fn restart_args(harness: &Harness, vault_path: &Path, session_id: &str) -> Option<Vec<String>> {
+fn restart_args(harness: &Harness, session_id: &str) -> Option<Vec<String>> {
     let tokenless = match harness.spec.resume {
         ResumeStrategy::Args(args) => !args.iter().any(|a| a.contains("{token}")),
         ResumeStrategy::TokenOrArgs { .. } | ResumeStrategy::SessionDir => true,
         ResumeStrategy::None => false,
     };
-    tokenless.then(|| build_args(harness, vault_path, session_id, None, true))
+    tokenless.then(|| build_args(harness, session_id, None, true))
 }
 
 /// Everything `launch_session` needs beyond the harness spec.
@@ -270,7 +268,7 @@ pub(super) async fn run_launch(
 }
 
 async fn launch_with(
-    vault_path: &Path,
+    _vault_path: &Path,
     db: &Arc<Database>,
     harness: &Harness,
     l: Launch<'_>,
@@ -285,13 +283,12 @@ async fn launch_with(
         env: launch_env(harness, l.session_id),
         args: build_args(
             harness,
-            vault_path,
             l.session_id,
             l.resume_token,
             l.resuming,
         ),
         command: profile.and_then(|p| p.command.clone()),
-        resume_args: restart_args(harness, vault_path, l.session_id),
+        resume_args: restart_args(harness, l.session_id),
         mcp,
         start_timeout: l.host.launch_bound(),
     };
