@@ -53,6 +53,7 @@ const docker = installChannels.docker;
           <li><a href="#windows">Windows (WSL2)</a></li>
           <li><a href="#source">Build from source</a></li>
           <li><a href="#server">Server with signed releases</a></li>
+          <li><a href="#hetzner">One form on Hetzner</a></li>
           <li><a href="#tailscale">Remote access over Tailscale</a></li>
           <li><a href="#maintain">Updating and uninstalling</a></li>
           <li><a href="#soon">Not available yet</a></li>
@@ -264,6 +265,20 @@ const docker = installChannels.docker;
           deploy path per host: the updater owns the binary and web files, so do not also build on the
           server. Full walkthrough: <a href={links.deployReadme}>deploy/README.md</a>. To check a
           release by hand, see <a href="/security/#verify">verifying a release</a>.
+        </p>
+      </div>
+    </section>
+
+    <section class="doc-section" id="hetzner" aria-labelledby="hetzner-h">
+      <h2 id="hetzner-h">{installChannels.hetzner.title}</h2>
+      <div class="prose">
+        <p>
+          If you have a Hetzner Cloud account, the <a href="https://deploy.agent-hq.online">deploy form</a> creates the
+          server for you: a private Ubuntu 24.04 machine that installs signed releases, updates itself and is reachable
+          only from your tailnet. You give it a project API token, pick a size and an SSH key, and it does the rest.
+          The server&apos;s setup data holds no secret, and the admin token is generated on the server, so the form never sees it.
+          After the server is up you SSH in once, run <code>sudo hq-join</code> and open the sign-in link it prints.
+          Details, the security model and how to delete everything: <a href={links.hetznerDocs}>docs/HETZNER.md</a>.
         </p>
       </div>
     </section>
