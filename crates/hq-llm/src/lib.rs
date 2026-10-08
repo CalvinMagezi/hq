@@ -13,6 +13,7 @@ pub mod http;
 pub mod models;
 pub mod ollama;
 pub mod openai_compat;
+pub mod openrouter_usage;
 pub mod outcome_sink;
 pub mod prompted_tools;
 /// Backward-compatible alias for the renamed module.

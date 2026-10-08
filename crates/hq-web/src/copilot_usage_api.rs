@@ -4,6 +4,7 @@ use axum::{Json, extract::State, response::IntoResponse};
 use chrono::Utc;
 use hq_core::config::{HqConfig, copilot_active};
 use hq_llm::copilot_usage::{CopilotQuota, fetch_quota};
+use hq_llm::provider::LlmError;
 use hq_tools::copilot_credits::{NOT_METERED_NOTE, burn_view};
 use serde_json::{Value, json};
 use std::sync::Arc;
@@ -16,8 +17,17 @@ use crate::error::ApiError;
 /// A request burst shares one GitHub read.
 const LIVE_CACHE_TTL: Duration = Duration::from_secs(60);
 const CHART_POINTS: usize = 48;
+/// Shown when GitHub's usage endpoint refuses the token. Chat itself is unaffected.
+pub(crate) const REFUSED_NOTE: &str = "GitHub does not expose a credit balance for this token, so no usage is shown. Chat is not affected.";
 
-type Live = Result<CopilotQuota, String>;
+/// A failed read: whether GitHub refused the credential (401/403), and the reason.
+#[derive(Clone)]
+struct ReadFailure {
+    refused: bool,
+    reason: String,
+}
+
+type Live = Result<CopilotQuota, ReadFailure>;
 
 static LIVE_CACHE: Mutex<Option<(Instant, Live)>> = Mutex::const_new(None);
 
@@ -28,7 +38,10 @@ async fn cached_live_quota() -> Live {
     {
         return live.clone();
     }
-    let live = fetch_quota().await.map_err(|e| e.to_string());
+    let live = fetch_quota().await.map_err(|e| ReadFailure {
+        refused: matches!(e, LlmError::Auth { .. }),
+        reason: e.to_string(),
+    });
     *guard = Some((Instant::now(), live.clone()));
     live
 }
@@ -36,10 +49,14 @@ async fn cached_live_quota() -> Live {
 fn usage_json(db: &hq_db::Database, live: Live) -> anyhow::Result<Value> {
     let quota = match live {
         Ok(q) => q,
+        Err(e) if e.refused => {
+            return Ok(json!({ "active": true, "unavailable": true, "note": REFUSED_NOTE }));
+        }
         Err(e) => {
-            return Ok(
-                json!({ "active": true, "error": format!("Could not read the Copilot balance: {e}") }),
-            );
+            return Ok(json!({
+                "active": true,
+                "error": format!("Could not read the Copilot balance: {}", e.reason),
+            }));
         }
     };
     if !quota.is_metered() {
@@ -100,8 +117,22 @@ mod tests {
         assert_eq!(ok["quota"]["entitlement"], 50000.0);
         let free = usage_json(&db, Ok(quota(false))).unwrap();
         assert!(free["note"].is_string() && free.get("burn").is_none());
-        let bad = usage_json(&db, Err("boom".into())).unwrap();
+        let bad = usage_json(
+            &db,
+            Err(ReadFailure {
+                refused: false,
+                reason: "boom".into(),
+            }),
+        )
+        .unwrap();
         assert!(bad["error"].as_str().unwrap().contains("boom"));
         assert!(bad.get("quota").is_none());
+        let refused = ReadFailure {
+            refused: true,
+            reason: "auth error (403)".into(),
+        };
+        let denied = usage_json(&db, Err(refused)).unwrap();
+        assert_eq!(denied["unavailable"], true);
+        assert!(denied.get("error").is_none() && denied["note"].is_string());
     }
 }

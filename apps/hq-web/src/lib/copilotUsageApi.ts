@@ -36,6 +36,8 @@ export interface CopilotUsage {
   quota?: CopilotQuota
   burn?: CopilotBurn
   samples?: { ts: string; credits_used: number }[]
+  /** GitHub refused the usage read: a plain state, not an error. */
+  unavailable?: boolean
   note?: string
   error?: string
 }

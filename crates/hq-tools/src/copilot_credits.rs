@@ -36,7 +36,7 @@ pub fn store_sample(db: &Database, q: &CopilotQuota) -> Result<bool> {
 
 /// Fetch the balance now and store it. Shared by the periodic sampler and the tool.
 pub async fn sample_now(db: &Database) -> Result<CopilotQuota> {
-    let quota = fetch_quota().await.map_err(|e| anyhow::anyhow!("{e}"))?;
+    let quota = fetch_quota().await?;
     store_sample(db, &quota)?;
     Ok(quota)
 }

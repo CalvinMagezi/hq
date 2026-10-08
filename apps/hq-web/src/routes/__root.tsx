@@ -20,6 +20,7 @@ import { BottomNav } from '~/components/BottomNav'
 import appCss from '../../app.css?url'
 import { relTime } from '~/lib/time'
 import { inboxBadge } from '~/lib/inboxBadge'
+import { openrouterChipLabel, openrouterChipTitle, OPENROUTER_USAGE_POLL_MS, type OpenRouterUsageResponse } from '~/lib/openrouterUsageApi'
 import { chipLabel, chipTitle, COPILOT_USAGE_POLL_MS, type CopilotUsage } from '~/lib/copilotUsageApi'
 import { hqJson } from '~/lib/hqAuth'
 
@@ -63,25 +64,32 @@ function CopilotChip() {
   // A plain effect, not useQuery: a query hook in the root shell kept the build's prerender from
   // exiting, and effects never run there.
   const [data, setData] = useState<CopilotUsage | undefined>(undefined)
+  const [openrouter, setOpenrouter] = useState<OpenRouterUsageResponse | undefined>(undefined)
   useEffect(() => {
     let alive = true
-    const load = () =>
+    const load = () => {
       hqJson<CopilotUsage>('/api/copilot-usage')
         .then((d) => alive && setData(d))
         .catch(() => undefined)
+      hqJson<OpenRouterUsageResponse>('/api/openrouter-usage')
+        .then((d) => alive && setOpenrouter(d))
+        .catch(() => undefined)
+    }
     load()
-    const timer = window.setInterval(load, COPILOT_USAGE_POLL_MS)
+    const timer = window.setInterval(load, Math.min(COPILOT_USAGE_POLL_MS, OPENROUTER_USAGE_POLL_MS))
     return () => {
       alive = false
       window.clearInterval(timer)
     }
   }, [])
-  const label = chipLabel(data)
+  const copilotLabel = chipLabel(data)
+  const label = copilotLabel ?? openrouterChipLabel(openrouter)
+  const title = copilotLabel ? chipTitle(data) : openrouterChipTitle(openrouter)
   if (!label) return null
   return (
     <Link
       to="/settings"
-      title={chipTitle(data)}
+      title={title}
       className="hidden min-[400px]:inline px-2 py-0.5 rounded-md border border-white/10 text-[10px] font-mono text-neutral-400 hover:text-neutral-100 hover:bg-white/5 whitespace-nowrap"
     >
       {label}

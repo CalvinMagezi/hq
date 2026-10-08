@@ -25,7 +25,7 @@ pub use decisions::{
     DecisionMode, DecisionRoute, DecisionSite, DecisionsConfig, SITE_EMAIL_FYI, SITE_MEMORY_TURN,
     SITE_NOTIFY_GATE, SITE_TASK_PLACEMENT,
 };
-pub use copilot_usage::{CopilotUsageConfig, copilot_active};
+pub use copilot_usage::{CopilotUsageConfig, copilot_active, openrouter_key, openrouter_primary};
 pub use disk_watchdog::DiskWatchdogConfig;
 pub use governance::*;
 pub use harness::*;
