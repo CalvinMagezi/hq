@@ -13,8 +13,14 @@ pub enum ExportError {
     #[error("render failed: {0}")]
     Render(String),
 
+    /// The request cannot be met for this note or format, for example a table
+    /// export of a note with no tables. The message is meant for the user.
     #[error("{0}")]
     Unsupported(String),
+
+    /// An external tool the chosen path depends on is missing.
+    #[error("{0}")]
+    Unavailable(String),
 
     #[error("IO error: {0}")]
     Io(#[from] std::io::Error),

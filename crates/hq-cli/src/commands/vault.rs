@@ -70,11 +70,18 @@ pub async fn run(config: &HqConfig, sub: &str, args: &[String]) -> Result<()> {
             vault.write_note(path, &note)?;
             println!("Wrote: {}", path);
         }
-        "export-pdf" | "pdf" => {
-            let usage = "Usage: hq vault export-pdf <note> [-o <file.pdf>] [--brand <slug>]";
+        "export" | "export-pdf" | "pdf" => {
+            let pdf_only = sub != "export";
+            let usage = if pdf_only {
+                "Usage: hq vault export-pdf <note> [-o <file.pdf>] [--brand <slug>]"
+            } else {
+                "Usage: hq vault export <note> --format <fmt> [-o <file>] [--brand <slug>] [--lang <language>]..."
+            };
             let mut note_ref: Option<&str> = None;
             let mut output: Option<&str> = None;
             let mut brand: Option<&str> = None;
+            let mut format: Option<&str> = None;
+            let mut languages: Vec<String> = Vec::new();
             let mut it = args.iter();
             while let Some(a) = it.next() {
                 match a.as_str() {
@@ -82,6 +89,11 @@ pub async fn run(config: &HqConfig, sub: &str, args: &[String]) -> Result<()> {
                         output = Some(it.next().ok_or_else(|| anyhow::anyhow!(usage))?)
                     }
                     "--brand" => brand = Some(it.next().ok_or_else(|| anyhow::anyhow!(usage))?),
+                    "-f" | "--format" if !pdf_only => {
+                        format = Some(it.next().ok_or_else(|| anyhow::anyhow!(usage))?)
+                    }
+                    "--lang" | "--language" if !pdf_only => languages
+                        .push(it.next().ok_or_else(|| anyhow::anyhow!(usage))?.clone()),
                     other if other.starts_with('-') => {
                         anyhow::bail!("unknown option {other}\n{usage}")
                     }
@@ -90,32 +102,48 @@ pub async fn run(config: &HqConfig, sub: &str, args: &[String]) -> Result<()> {
                 }
             }
             let note_ref = note_ref.ok_or_else(|| anyhow::anyhow!(usage))?;
+            let format = if pdf_only {
+                hq_export::Format::Pdf
+            } else {
+                let raw = format.ok_or_else(|| anyhow::anyhow!("--format is required\n{usage}"))?;
+                raw.parse::<hq_export::Format>().map_err(|e| anyhow::anyhow!("{e}"))?
+            };
             let note = hq_convert::note_pdf::resolve_note(&config.vault_path, note_ref)
                 .ok_or_else(|| anyhow::anyhow!("note not found in the vault: {note_ref}"))?;
-            let dest = match output {
-                Some(o) => std::path::PathBuf::from(o),
-                None => {
-                    let stem = note.file_stem().map(|s| s.to_string_lossy().into_owned());
-                    std::path::PathBuf::from(format!("{}.pdf", stem.as_deref().unwrap_or("note")))
-                }
-            };
             let kit = brand
                 .map(|slug| hq_convert::brand::load_brand_kit(&config.vault_path, slug))
                 .transpose()
                 .map_err(|e| anyhow::anyhow!("brand resolution failed: {e}"))?;
-            let pdf = hq_convert::note_pdf::export_note_pdf(
+            let done = hq_export::export_note(
                 &config.vault_path,
                 &note,
-                &dest,
+                format,
                 kit.as_ref(),
+                &languages,
             )
             .await
             .map_err(|e| anyhow::anyhow!("{e}"))?;
+            // The extension comes from the result: several tables export as a zip.
+            let dest = match output {
+                Some(o) => std::path::PathBuf::from(o),
+                None => {
+                    let stem = note.file_stem().map(|s| s.to_string_lossy().into_owned());
+                    std::path::PathBuf::from(format!(
+                        "{}.{}",
+                        stem.as_deref().unwrap_or("note"),
+                        done.output.extension
+                    ))
+                }
+            };
+            if let Some(parent) = dest.parent().filter(|p| !p.as_os_str().is_empty()) {
+                std::fs::create_dir_all(parent)?;
+            }
+            std::fs::write(&dest, &done.output.bytes)?;
             println!(
                 "Wrote {} ({:.1} KB, {})",
-                pdf.path.display(),
-                pdf.size_bytes as f64 / 1024.0,
-                pdf.engine
+                dest.display(),
+                done.output.bytes.len() as f64 / 1024.0,
+                format
             );
         }
         "stats" => {
@@ -165,6 +193,9 @@ pub async fn run(config: &HqConfig, sub: &str, args: &[String]) -> Result<()> {
             println!("  tree [dir]           List all notes recursively");
             println!("  read <path>          Read a note");
             println!("  write <path> <text>  Write a note");
+            println!(
+                "  export <note>        Export a note: --format pdf|png|svg|html|md|xlsx|csv|json|jsonl|xml|latex|ipynb|jira|code (-o file, --brand slug)"
+            );
             println!(
                 "  export-pdf <note>    Export a note as a shareable PDF (-o file, --brand slug)"
             );

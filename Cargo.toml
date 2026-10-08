@@ -89,6 +89,7 @@ reqwest = { version = "0.12", features = ["json", "stream", "multipart", "gzip"]
 
 # Document conversion (inbound: transmutation, outbound: pandoc)
 hq-convert = { path = "crates/hq-convert" }
+hq-export = { path = "crates/hq-export" }
 
 # HTML processing
 html2text = "0.14"

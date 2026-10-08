@@ -255,9 +255,9 @@ enum Commands {
     Ps,
 
     // ─── Vault Operations ────────────────────────────────────────────
-    /// Vault operations (list, read, write, export-pdf, stats, context)
+    /// Vault operations (list, read, write, export, export-pdf, stats, context)
     Vault {
-        /// Subcommand: list, tree, read, write, export-pdf, stats, context
+        /// Subcommand: list, tree, read, write, export, export-pdf, stats, context
         #[arg(default_value = "stats")]
         sub: String,
         /// Additional arguments (options such as `-o` pass through to the subcommand)

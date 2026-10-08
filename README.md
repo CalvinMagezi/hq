@@ -315,7 +315,7 @@ Tasks have no CLI command: they are MCP tools (`task_list`, `task_create` and fr
 
 ### Crate Structure
 
-Agent-HQ is a Cargo workspace of 16 crates and about 143,000 lines of Rust (556 files, counted on 2026-10-07 without blank lines or comments):
+Agent-HQ is a Cargo workspace of 17 crates and about 143,000 lines of Rust (556 files, counted on 2026-10-07 without blank lines or comments):
 
 | Crate | Purpose |
 |-------|---------|
@@ -331,6 +331,7 @@ Agent-HQ is a Cargo workspace of 16 crates and about 143,000 lines of Rust (556 
 | `hq-relay` | Platform bridge trait, unified bot, cancel/interrupt, background turns, watches |
 | `hq-web` | Axum WebSocket server, REST API, embedded static web UI |
 | `hq-convert` | Document format conversion utilities |
+| `hq-export` | Native note export to PDF, PNG, SVG, HTML, spreadsheets, JSON and more |
 | `hq-update` | Signed pull-based updater behind `hq update` |
 | `hq-host` | Built-in host for long-lived coding agents: pseudo-terminal panes with a readable screen, a control socket, state detection |
 | `hq-sandbox` | Process sandbox policy for one coding agent (`sandbox-exec` on macOS, `bwrap` on Linux) |

@@ -37,7 +37,7 @@ placeholders (`example.com`, `hq.example.ts.net`, `<owner>/<repo>`).
 
 ## Architecture
 
-- **Language**: Rust (edition 2024, Cargo workspace of 16 crates)
+- **Language**: Rust (edition 2024, Cargo workspace of 17 crates)
 - **Binary**: `hq`, built from `crates/hq-cli`. `scripts/install-hq.sh` installs it
   to `~/bin/hq`; servers use `/usr/local/bin/hq`.
 - **Config**: `~/.hq/config.yaml` (override with `HQ_CONFIG_PATH`); any key can
@@ -112,7 +112,7 @@ placeholders (`example.com`, `hq.example.ts.net`, `<owner>/<repo>`).
 | Discord bridge | `crates/hq-relay/src/discord/` |
 | Telegram bridge | `crates/hq-relay/src/telegram/`; commands and watch firing shared by both bridges in `chat_commands.rs` and `watch_scheduler.rs` |
 | Remote MCP servers (`remote_mcp:` config) | `crates/hq-tools/src/remote_mcp.rs` |
-| Note → PDF export (`hq vault export-pdf`, `vault_export_pdf`, `/api/note/pdf`) | `crates/hq-convert/src/note_pdf.rs` (preparation and rendering), `crates/hq-tools/src/convert.rs`, `crates/hq-web/src/vault_api.rs`, `docs/NOTE_PDF.md` |
+| Note export (pdf, png, svg, html, md, xlsx, csv, json, jsonl, xml, latex, ipynb, jira, code): `hq vault export --format`, `hq vault export-pdf`, `vault_export`, `vault_export_pdf`, `/api/note/export`, `/api/note/pdf` | `crates/hq-export/` (document model `doc.rs`, writers, Typst layout `typst_markup.rs` and `render.rs`, vault glue `note.rs`), `crates/hq-convert/src/note_pdf.rs` (note preparation, legacy PDF engines behind `HQ_PDF_ENGINE`), `crates/hq-tools/src/convert.rs`, `crates/hq-web/src/vault_api.rs`, `docs/NOTE_EXPORT.md` |
 | Native task management | `crates/hq-db/src/tasks.rs` (shared write surface: spaces > initiatives > tasks > comments), `crates/hq-tools/src/tasks/` (MCP tools), `crates/hq-web/src/tasks_api.rs` (REST + WS broadcast), `apps/hq-web/src/routes/tasks.tsx` (UI). Tag-based agent routing pushes to `_mailboxes/<tag>/` synchronously via `hq_core::mailbox::notify_tagged_agents`. Sub-tasks, start dates, soft dependencies and List/Board/Timeline views: `docs/plans/native-tasks.md`. |
 | Memory system | `crates/hq-memory/src/lib.rs` |
 | LLM usage report | `crates/hq-cli/src/commands/usage.rs` (`hq usage`/`cost`/`summary` read hq-db `task_outcomes`) |
@@ -277,6 +277,7 @@ a document.
 | `hq-relay` | Platform bridge, unified bot, Discord and Telegram (feature-gated) |
 | `hq-web` | WebSocket server, REST API, embedded web UI |
 | `hq-convert` | Document conversion both ways, OCR, brand kits |
+| `hq-export` | Native note export (PDF, PNG, SVG through embedded Typst; HTML, spreadsheets, JSON, XML, LaTeX, notebooks, Jira markup) with no external tools |
 | `hq-update` | Signed pull-based updater (library behind `hq update`) |
 | `hq-host` | Built-in coding-agent host: pty panes, emulated screen, control socket, state detection |
 | `hq-sandbox` | Process sandbox policy for one coding agent (`sandbox-exec` or `bwrap`) |
