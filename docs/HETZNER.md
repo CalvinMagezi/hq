@@ -11,7 +11,7 @@ This sets up a private, self-updating HQ on a Hetzner Cloud server. It never sto
    ```
    Pick values with `hcloud server-type list` and `hcloud location list`. The commit you deploy must already be pushed.
 2. Wait a few minutes. cloud-init downloads `bootstrap.sh` at a pinned commit, checks its sha256, and runs it. It installs HQ from signed releases, generates the web token and MCP key on the server, installs Tailscale without joining it, enables `ufw`, and restricts SSH to keys. Progress is in `/var/lib/hq-bootstrap/status.json`.
-3. SSH in as root and run `sudo hq-join`. It runs `tailscale up`, which prints a login link: open it and sign in to your own tailnet. It then publishes HQ with `tailscale serve` on port 8443, allows SSH over the tailnet, and prints the sign-in link `https://hq.example.ts.net:8443/#token=...`.
+3. SSH in as root and run `sudo hq-join`. It runs `tailscale up`, which prints a login link: open it and sign in to your own tailnet. It then publishes HQ with `tailscale serve` on port 8443, allows SSH over the tailnet, and prints the sign-in link `https://hq.example.ts.net:8443/vault#token=...`.
 4. Open that link from a device on your tailnet. HQ asks for a model API key on first run.
 
 The tailnet needs MagicDNS and HTTPS certificates enabled, otherwise `tailscale serve` will ask you to turn them on.
