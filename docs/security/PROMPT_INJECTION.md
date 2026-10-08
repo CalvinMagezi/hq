@@ -31,7 +31,7 @@ normal and the `BypassPermissions` paths.
 2. **Taint** (`taint.rs`). The session is tainted once one of these returns:
    - `web_fetch`, `web_search`, `google_workspace`, `convert_to_markdown`,
      `ocr_extract_text`;
-   - `agent_read_inbox`, `harness_session_logs`, `herdr_read`,
+   - `agent_read_inbox`, `harness_session_logs`, `host_read`,
      `session_search`;
    - the note-reading vault tools (`vault_read`, `vault_batch_read`,
      `vault_read_section`, `vault_search`, `vault_find`,

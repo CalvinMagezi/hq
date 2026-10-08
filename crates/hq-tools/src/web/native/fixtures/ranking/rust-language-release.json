@@ -1,0 +1,138 @@
+{
+  "category": "news",
+  "engines": [
+    {
+      "engine": "bing news",
+      "results": [],
+      "weight": 1.0
+    },
+    {
+      "engine": "hacker news",
+      "results": [
+        {
+          "published": "2017-01-17T22:48:07Z",
+          "snippet": "266 points, 33 comments on Hacker News (https://news.ycombinator.com/item?id=13422228)",
+          "title": "Announcing Rust Language Server Alpha Release",
+          "url": "http://www.jonathanturner.org/2017/01/rls-alpha-release.html"
+        },
+        {
+          "published": "2016-10-18T21:46:05Z",
+          "snippet": "406 points, 104 comments on Hacker News (https://news.ycombinator.com/item?id=12739015)",
+          "title": "Introducing Rust Language Server",
+          "url": "https://internals.rust-lang.org/t/introducing-rust-language-server-source-release/4209"
+        },
+        {
+          "published": "2017-03-01T22:10:37Z",
+          "snippet": "5 points, 0 comments on Hacker News (https://news.ycombinator.com/item?id=13768994)",
+          "title": "Rust language server alpha 2 release",
+          "url": "http://www.jonathanturner.org/2017/03/rls-alpha-2.html"
+        },
+        {
+          "published": "2017-03-01T23:31:07Z",
+          "snippet": "4 points, 0 comments on Hacker News (https://news.ycombinator.com/item?id=13769725)",
+          "title": "Rust Language Server Alpha 2 Release",
+          "url": "http://www.jonathanturner.org/2017/03/rls-alpha-2.html#resubmit"
+        },
+        {
+          "published": "2012-07-13T16:49:38Z",
+          "snippet": "1 points, 0 comments on Hacker News (https://news.ycombinator.com/item?id=4240561)",
+          "title": "Mozilla's Rust language version 0.3 released",
+          "url": "http://www.h-online.com/developer/news/item/Mozilla-s-Rust-language-version-0-3-released-1640146.html"
+        },
+        {
+          "published": "2012-01-21T16:50:28Z",
+          "snippet": "3 points, 0 comments on Hacker News (https://news.ycombinator.com/item?id=3493912)",
+          "title": "Rust 0.1: First alpha release of the Rust programming language",
+          "url": "http://blog.mozilla.com/graydon/2012/01/20/rust-0-1-release/"
+        },
+        {
+          "published": "2017-03-05T11:50:18Z",
+          "snippet": "2 points, 0 comments on Hacker News (https://news.ycombinator.com/item?id=13795603)",
+          "title": "Xmake v2.1.1 released, support golang, dlang and rust languages",
+          "url": "http://tboox.org/2017/03/04/update-v2.1.1/"
+        },
+        {
+          "published": "2025-03-16T11:00:51Z",
+          "snippet": "1 points, 0 comments on Hacker News (https://news.ycombinator.com/item?id=43378099)",
+          "title": "Git 2.49 Released with Faster Packing, Rust Foreign Language Interface",
+          "url": "https://www.phoronix.com/news/Git-2.49-Released"
+        },
+        {
+          "published": "2012-01-23T20:26:22Z",
+          "snippet": "236 points, 82 comments on Hacker News (https://news.ycombinator.com/item?id=3501980)",
+          "title": "Mozilla releases version 0.1 of the Rust programming language",
+          "url": "http://mail.mozilla.org/pipermail/rust-dev/2012-January/001256.html"
+        },
+        {
+          "published": "2021-07-17T23:49:21Z",
+          "snippet": "28 points, 2 comments on Hacker News (https://news.ycombinator.com/item?id=27869717)",
+          "title": "RustBelt: Computer Scientist proves safety claims of Rust programming language",
+          "url": "https://www.eurekalert.org/pub_releases/2021-07/su-cs071521.php"
+        },
+        {
+          "published": "2015-02-25T15:58:29Z",
+          "snippet": "4 points, 0 comments on Hacker News (https://news.ycombinator.com/item?id=9107334)",
+          "title": "Show HN: RustDT, an Eclipse Based IDE for the Rust Language:",
+          "url": "http://users.rust-lang.org/t/rustdt-0-1-0-released-a-new-eclipse-rust-ide/460"
+        },
+        {
+          "published": "2025-05-16T04:49:00Z",
+          "snippet": "4 points, 0 comments on Hacker News (https://news.ycombinator.com/item?id=44001926)",
+          "title": "Rust Language Celebrates Ten Years by Releasing Rust 1.87",
+          "url": "https://www.phoronix.com/news/Rust-1.87-Released"
+        },
+        {
+          "published": "2012-01-26T09:34:40Z",
+          "snippet": "1 points, 0 comments on Hacker News (https://news.ycombinator.com/item?id=3513456)",
+          "title": "Mozilla releases version 0.1 of the Rust language and compiler",
+          "url": "http://www.h-online.com/open/news/item/Mozilla-releases-version-0-1-of-the-Rust-language-and-compiler-1420658.html"
+        },
+        {
+          "published": "2025-10-04T18:34:13Z",
+          "snippet": "96 points, 39 comments on Hacker News (https://news.ycombinator.com/item?id=45475528)",
+          "title": "Show HN: Run – a CLI universal code runner I built while learning Rust",
+          "url": "https://github.com/Esubaalew/run"
+        },
+        {
+          "published": "2025-04-11T23:54:38Z",
+          "snippet": "25 points, 6 comments on Hacker News (https://news.ycombinator.com/item?id=43659999)",
+          "title": "Show HN: HelixDB – Native graph and vector types for RAG and retrieval",
+          "url": "https://github.com/HelixDB/helix-db"
+        },
+        {
+          "published": "2012-01-25T04:36:36Z",
+          "snippet": "3 points, 1 comments on Hacker News (https://news.ycombinator.com/item?id=3508413)",
+          "title": "Firefox's new version of C++",
+          "url": "http://www.extremetech.com/computing/115207-mozilla-releases-rust-0-1-the-language-that-will-eventually-usurp-firefoxs-c"
+        },
+        {
+          "published": "2012-01-21T04:19:09Z",
+          "snippet": "19 points, 0 comments on Hacker News (https://news.ycombinator.com/item?id=3492585)",
+          "title": "Mozilla's new systems programming language hits first release",
+          "url": "http://www.rust-lang.org/"
+        },
+        {
+          "published": "2026-08-19T11:25:17Z",
+          "snippet": "1 points, 0 comments on Hacker News (https://news.ycombinator.com/item?id=49360047)",
+          "title": "NoWreck v0.9.0 – Rust and Go Language Support",
+          "url": "https://github.com/AstralXVoid/NoWreck/releases/tag/v0.9.0"
+        },
+        {
+          "published": "2023-01-19T16:59:52Z",
+          "snippet": "162 points, 52 comments on Hacker News (https://news.ycombinator.com/item?id=34442603)",
+          "title": "Launch HN: Odigos (YC W23) – Instant distributed tracing for Kubernetes clusters",
+          "url": "https://news.ycombinator.com/item?id=34442603"
+        },
+        {
+          "published": "2018-08-15T12:16:54Z",
+          "snippet": "102 points, 65 comments on Hacker News (https://news.ycombinator.com/item?id=17765426)",
+          "title": "Show HN: Eno – A lightning fast, user-friendly YAML/TOML alternative",
+          "url": "https://news.ycombinator.com/item?id=17765426"
+        }
+      ],
+      "weight": 0.4000000059604645
+    }
+  ],
+  "labels": {},
+  "query": "rust language release"
+}

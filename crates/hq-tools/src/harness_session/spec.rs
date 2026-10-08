@@ -1,10 +1,10 @@
 //! Per-harness session descriptors: how to spawn each CLI interactively, how
 //! to resume a prior session, and how to harvest a resume token from output.
-//! Configured profiles (`herdr.harness_profiles`) resolve here too, so every
+//! Configured profiles (`agent_host.harness_profiles`) resolve here too, so every
 //! caller that accepts a harness name accepts a profile name.
 
 use anyhow::{Result, bail};
-use hq_core::config::{HarnessProfileConfig, HerdrConfig, HqConfig};
+use hq_core::config::{HarnessProfileConfig, AgentHostConfig, HqConfig};
 
 /// How a harness resumes a prior session.
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -12,6 +12,13 @@ pub enum ResumeStrategy {
     /// Replace the spawn args with these; `{token}` is substituted with the
     /// harvested resume token (spawn fails over to fresh if none saved).
     Args(&'static [&'static str]),
+    /// Resume a specific conversation when its id is known, else continue the
+    /// most recent one in the directory. The id is exact; the fallback can pick
+    /// the wrong conversation when two sessions share a directory.
+    TokenOrArgs {
+        with_token: &'static [&'static str],
+        otherwise: &'static [&'static str],
+    },
     /// The harness keys sessions off a dedicated directory passed as
     /// `--session-dir <dir>`; re-spawning with the same dir resumes.
     SessionDir,
@@ -22,7 +29,7 @@ pub enum ResumeStrategy {
 #[derive(Debug, Clone)]
 pub struct HarnessSessionSpec {
     pub harness: &'static str,
-    /// Herdr agent kind (`herdr agent start --kind`). Herdr resolves the CLI on
+    /// host agent kind (`agent start --kind`). The host resolves the CLI on
     /// the target host, so HQ never needs the binary on its own machine.
     pub kind: &'static str,
     /// Args for a fresh interactive spawn.
@@ -39,7 +46,7 @@ pub struct HarnessSessionSpec {
 }
 
 impl HarnessSessionSpec {
-    /// The executable Herdr starts for this kind, as it is found on PATH.
+    /// The executable the host starts for this kind, as it is found on PATH.
     pub fn binary(&self) -> &'static str {
         match self.kind {
             "cursor" => "cursor-agent",
@@ -60,8 +67,12 @@ pub const SPECS: &[HarnessSessionSpec] = &[
         // Without the permission bypass every tool call in an unattended
         // session blocks on an approval dialog nobody is there to answer.
         args: &["--dangerously-skip-permissions"],
-        // `claude -c` continues the most recent session in the cwd.
-        resume: ResumeStrategy::Args(&["--dangerously-skip-permissions", "-c"]),
+        // `claude --resume <id>` is exact; `claude -c` continues the most recent
+        // session in the cwd, used until the id is known.
+        resume: ResumeStrategy::TokenOrArgs {
+            with_token: &["--dangerously-skip-permissions", "--resume", "{token}"],
+            otherwise: &["--dangerously-skip-permissions", "-c"],
+        },
         token_pattern: None,
         trust_pattern: None,
     },
@@ -76,8 +87,9 @@ pub const SPECS: &[HarnessSessionSpec] = &[
     HarnessSessionSpec {
         harness: "cursor",
         kind: "cursor",
-        args: &["--force", "--trust"],
-        resume: ResumeStrategy::Args(&["--force", "--trust", "--resume", "{token}"]),
+        // `--trust` only works in headless mode; the interactive trust dialog is answered at launch.
+        args: &["--force"],
+        resume: ResumeStrategy::Args(&["--force", "--resume", "{token}"]),
         token_pattern: Some(r"chat[_-]id[:=]\s*([A-Za-z0-9_-]+)"),
         trust_pattern: None,
     },
@@ -92,8 +104,9 @@ pub const SPECS: &[HarnessSessionSpec] = &[
     HarnessSessionSpec {
         harness: "codex",
         kind: "codex",
-        args: &[],
-        resume: ResumeStrategy::Args(&["resume", "--last"]),
+        // The background daemon check reads other processes, which the sandbox forbids.
+        args: &["--no-daemon"],
+        resume: ResumeStrategy::Args(&["--no-daemon", "resume", "--last"]),
         token_pattern: None,
         trust_pattern: None,
     },
@@ -174,7 +187,7 @@ impl Harness {
 
 /// Resolve `name` against the profiles in `cfg`, then the built-in harnesses.
 /// A profile may share a built-in's name to replace how it launches.
-pub fn resolve_in(cfg: &HerdrConfig, name: &str) -> Result<Harness> {
+pub fn resolve_in(cfg: &AgentHostConfig, name: &str) -> Result<Harness> {
     if let Some(profile) = cfg.harness_profiles.get(name) {
         let Some(spec) = spec_for(&profile.base) else {
             bail!(
@@ -205,10 +218,10 @@ pub fn resolve_in(cfg: &HerdrConfig, name: &str) -> Result<Harness> {
 /// `resolve_in` against the loaded config; without a readable config only the
 /// built-in harnesses resolve.
 pub fn resolve(name: &str) -> Result<Harness> {
-    resolve_in(&herdr_config(), name)
+    resolve_in(&agent_host_config(), name)
 }
 
-pub fn known_in(cfg: &HerdrConfig) -> Vec<String> {
+pub fn known_in(cfg: &AgentHostConfig) -> Vec<String> {
     let mut names = builtin_names();
     for profile in cfg.harness_profiles.keys() {
         if !names.contains(profile) {
@@ -219,15 +232,15 @@ pub fn known_in(cfg: &HerdrConfig) -> Vec<String> {
 }
 
 pub fn known_harnesses() -> Vec<String> {
-    known_in(&herdr_config())
+    known_in(&agent_host_config())
 }
 
 fn builtin_names() -> Vec<String> {
     SPECS.iter().map(|s| s.harness.to_string()).collect()
 }
 
-fn herdr_config() -> HerdrConfig {
-    HqConfig::load().map(|c| c.herdr).unwrap_or_default()
+fn agent_host_config() -> AgentHostConfig {
+    HqConfig::load().map(|c| c.agent_host).unwrap_or_default()
 }
 
 #[cfg(test)]
@@ -263,7 +276,7 @@ mod tests {
         assert_eq!(canonical_name("claude-code"), "claude-code");
     }
 
-    fn cfg_with_profile(yaml: &str) -> HerdrConfig {
+    fn cfg_with_profile(yaml: &str) -> AgentHostConfig {
         serde_yaml::from_str(&format!("harness_profiles:\n{yaml}")).unwrap()
     }
 
@@ -297,14 +310,14 @@ mod tests {
 
     #[test]
     fn builtin_names_resolve_without_profiles_and_unknown_ones_list_the_known() {
-        let cfg = HerdrConfig::default();
+        let cfg = AgentHostConfig::default();
         assert_eq!(resolve_in(&cfg, "agy").unwrap().name, "antigravity");
         let err = resolve_in(&cfg, "ghost").unwrap_err().to_string();
         assert!(err.contains("claude-code"), "{err}");
     }
 
     #[test]
-    fn binaries_are_the_executables_herdr_starts() {
+    fn binaries_are_the_executables_the_host_starts() {
         assert_eq!(spec_for("claude-code").unwrap().binary(), "claude");
         assert_eq!(spec_for("agy").unwrap().binary(), "agy");
         assert_eq!(spec_for("cursor").unwrap().binary(), "cursor-agent");

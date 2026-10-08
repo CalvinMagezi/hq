@@ -1,0 +1,545 @@
+{
+ "category": "code",
+ "engines": [
+  {
+   "engine": "github",
+   "results": [
+    {
+     "published": "2026-09-02T12:25:53Z",
+     "snippet": "Weight based tokio mpsc channel. (Rust, 0 stars)",
+     "title": "rolandjitsu/weighted-mpsc",
+     "url": "https://github.com/rolandjitsu/weighted-mpsc"
+    }
+   ],
+   "weight": 1.0
+  },
+  {
+   "engine": "stack overflow",
+   "results": [
+    {
+     "published": "2023-10-05T10:21:28+00:00",
+     "snippet": "0 votes, 0 answers (unanswered); tags: android, kotlin, logging, thread-safety, kotlin-coroutines",
+     "title": "Backpressure/thread safe/memory efficient in kotlin Channel?",
+     "url": "https://stackoverflow.com/questions/77236250/backpressure-thread-safe-memory-efficient-in-kotlin-channel"
+    },
+    {
+     "published": "2022-01-07T20:42:42+00:00",
+     "snippet": "1 votes, 1 answers (unanswered); tags: tcl",
+     "title": "How to apply backpressure to Tcl output channel?",
+     "url": "https://stackoverflow.com/questions/70626957/how-to-apply-backpressure-to-tcl-output-channel"
+    },
+    {
+     "published": "2016-04-11T20:11:00+00:00",
+     "snippet": "1 votes, 1 answers (answered); tags: clojure, core.async, backpressure",
+     "title": "core.async toggle channel mix",
+     "url": "https://stackoverflow.com/questions/36558355/core-async-toggle-channel-mix"
+    },
+    {
+     "published": "2020-06-18T18:57:53+00:00",
+     "snippet": "0 votes, 1 answers (answered); tags: node.js, webrtc, file-sharing, nodejs-stream, backpressure",
+     "title": "How to download incoming file and prevent Backpressure while sending files through WebRTC data channels using streams?",
+     "url": "https://stackoverflow.com/questions/62457449/how-to-download-incoming-file-and-prevent-backpressure-while-sending-files-throu"
+    },
+    {
+     "published": "2023-11-03T14:18:47+00:00",
+     "snippet": "1 votes, 1 answers (answered); tags: rust, async-await",
+     "title": "Waiting for a condition in an async fn",
+     "url": "https://stackoverflow.com/questions/77417386/waiting-for-a-condition-in-an-async-fn"
+    },
+    {
+     "published": "2018-11-12T14:11:11+00:00",
+     "snippet": "5 votes, 1 answers (answered); tags: rust, future, rust-tokio",
+     "title": "How can I implement a blocking queue mechanism with futures::sync::mpsc::channel?",
+     "url": "https://stackoverflow.com/questions/53263942/how-can-i-implement-a-blocking-queue-mechanism-with-futuressyncmpscchannel"
+    },
+    {
+     "published": "2015-10-22T22:26:40+00:00",
+     "snippet": "2 votes, 0 answers (unanswered); tags: java, spring, spring-integration, enterprise-integration",
+     "title": "Protecting messages following outbound adapter failure",
+     "url": "https://stackoverflow.com/questions/33291820/protecting-messages-following-outbound-adapter-failure"
+    },
+    {
+     "published": "2024-02-02T05:28:30+00:00",
+     "snippet": "-1 votes, 2 answers (answered); tags: rust",
+     "title": "Is dropping the clone of mpsc::channel::Sender explicitely necessary?",
+     "url": "https://stackoverflow.com/questions/77924852/is-dropping-the-clone-of-mpscchannelsender-explicitely-necessary"
+    },
+    {
+     "published": "2016-09-01T22:47:15+00:00",
+     "snippet": "2 votes, 2 answers (answered); tags: buffer, rx-java, reactive-programming, throttling, backpressure",
+     "title": "RxJava: How to implement a slow consumer with buffer and a fast consumer to the same source?",
+     "url": "https://stackoverflow.com/questions/39281954/rxjava-how-to-implement-a-slow-consumer-with-buffer-and-a-fast-consumer-to-the"
+    },
+    {
+     "published": "2020-09-08T19:41:15+00:00",
+     "snippet": "0 votes, 1 answers (answered); tags: asynchronous, tcp, python-trio",
+     "title": "In Trio, how do you write data to a socket without waiting?",
+     "url": "https://stackoverflow.com/questions/63800577/in-trio-how-do-you-write-data-to-a-socket-without-waiting"
+    },
+    {
+     "published": "2019-06-05T18:55:42+00:00",
+     "snippet": "1 votes, 0 answers (unanswered); tags: java, spring-cloud-stream, spring-integration-dsl, spring-cloud-function",
+     "title": "Composed Function Support with spring cloud stream throw exception : \"Queue is full: Reactive Streams source doesn't respect backpressure\"",
+     "url": "https://stackoverflow.com/questions/56466455/composed-function-support-with-spring-cloud-stream-throw-exception-queue-is-f"
+    },
+    {
+     "published": "2021-06-11T22:19:19+00:00",
+     "snippet": "0 votes, 0 answers (unanswered); tags: android, kotlin, concurrency, kotlin-coroutines, kotlin-flow",
+     "title": "Kotlin coroutines channel mapLatest confusion",
+     "url": "https://stackoverflow.com/questions/67944022/kotlin-coroutines-channel-maplatest-confusion"
+    },
+    {
+     "published": "2020-10-28T16:53:50+00:00",
+     "snippet": "0 votes, 0 answers (unanswered); tags: rabbitmq, amqp",
+     "title": "Rabbitmq Back pressure and flowcontrol",
+     "url": "https://stackoverflow.com/questions/64577664/rabbitmq-back-pressure-and-flowcontrol"
+    },
+    {
+     "published": "2020-04-13T14:36:40+00:00",
+     "snippet": "0 votes, 1 answers (answered); tags: scala, akka, akka-stream, akka-http",
+     "title": "Detecting that back pressure is happening",
+     "url": "https://stackoverflow.com/questions/61190218/detecting-that-back-pressure-is-happening"
+    },
+    {
+     "published": "2019-09-05T19:48:30+00:00",
+     "snippet": "0 votes, 1 answers (answered); tags: javascript, stream",
+     "title": "What is the best way to define logic for web-streams sources/sinks?",
+     "url": "https://stackoverflow.com/questions/57812128/what-is-the-best-way-to-define-logic-for-web-streams-sources-sinks"
+    },
+    {
+     "published": "2020-07-27T01:37:30+00:00",
+     "snippet": "3 votes, 1 answers (answered); tags: java, reactive-programming, nio, nonblocking",
+     "title": "How to deal with a slow consumer in traditional Java NIO?",
+     "url": "https://stackoverflow.com/questions/63107553/how-to-deal-with-a-slow-consumer-in-traditional-java-nio"
+    },
+    {
+     "published": "2022-10-10T09:28:16+00:00",
+     "snippet": "1 votes, 0 answers (unanswered); tags: java, linux, cassandra, dse",
+     "title": "Why does `sstableloader` hangs while running it in parallel for multiple keyspaces?",
+     "url": "https://stackoverflow.com/questions/74012753/why-does-sstableloader-hangs-while-running-it-in-parallel-for-multiple-keyspac"
+    },
+    {
+     "published": "2018-12-14T10:38:53+00:00",
+     "snippet": "6 votes, 1 answers (answered); tags: kotlin, kotlinx.coroutines",
+     "title": "How to implement natural (aka. smart) batching with Kotlin channels?",
+     "url": "https://stackoverflow.com/questions/53778062/how-to-implement-natural-aka-smart-batching-with-kotlin-channels"
+    },
+    {
+     "published": "2021-09-12T02:05:15+00:00",
+     "snippet": "5 votes, 1 answers (answered); tags: c#, asynchronous, concurrency, solace, taskcompletionsource",
+     "title": "Avoiding allocations and maintaining concurrency when wrapping a callback-based API with an async API on a hot path",
+     "url": "https://stackoverflow.com/questions/69147931/avoiding-allocations-and-maintaining-concurrency-when-wrapping-a-callback-based"
+    },
+    {
+     "published": "2022-11-10T20:56:07+00:00",
+     "snippet": "0 votes, 1 answers (answered); tags: flink-streaming",
+     "title": "Best approach to reduce checkpoint size for broadcast state",
+     "url": "https://stackoverflow.com/questions/74395204/best-approach-to-reduce-checkpoint-size-for-broadcast-state"
+    }
+   ],
+   "weight": 1.0
+  },
+  {
+   "engine": "askubuntu",
+   "results": [],
+   "weight": 0.4000000059604645
+  },
+  {
+   "engine": "superuser",
+   "results": [],
+   "weight": 0.4000000059604645
+  },
+  {
+   "engine": "mdn",
+   "results": [
+    {
+     "published": null,
+     "snippet": "This tutorial shows you how to compile a Rust project into WebAssembly and use it in an existing web app.",
+     "title": "Compiling from Rust to WebAssembly",
+     "url": "https://developer.mozilla.org/en-US/docs/WebAssembly/Guides/Rust_to_Wasm"
+    },
+    {
+     "published": null,
+     "snippet": "The read-only property RTCDataChannelEvent.channel returns the RTCDataChannel associated with the event.",
+     "title": "RTCDataChannelEvent: channel property",
+     "url": "https://developer.mozilla.org/en-US/docs/Web/API/RTCDataChannelEvent/channel"
+    },
+    {
+     "published": null,
+     "snippet": "The MessageChannel() constructor of the MessageChannel interface returns a new MessageChannel object with two new MessagePort objects.",
+     "title": "MessageChannel: MessageChannel() constructor",
+     "url": "https://developer.mozilla.org/en-US/docs/Web/API/MessageChannel/MessageChannel"
+    },
+    {
+     "published": null,
+     "snippet": "The BroadcastChannel() constructor creates a new BroadcastChannel and connects it to the underlying channel.",
+     "title": "BroadcastChannel: BroadcastChannel() constructor",
+     "url": "https://developer.mozilla.org/en-US/docs/Web/API/BroadcastChannel/BroadcastChannel"
+    },
+    {
+     "published": null,
+     "snippet": "The RTCDataChannel interface represents a network channel which can be used for bidirectional peer-to-peer transfers of arbitrary data. Every data channel is associated with an RTCPeerConnection, and each peer connection can have up to a theoretical maximum of 65,534 data channels (the actual limit may vary from browser to browser).",
+     "title": "RTCDataChannel",
+     "url": "https://developer.mozilla.org/en-US/docs/Web/API/RTCDataChannel"
+    },
+    {
+     "published": null,
+     "snippet": "The BroadcastChannel interface represents a named channel that any browsing context of a given origin can subscribe to. It allows communication between different documents (in different windows, tabs, frames or iframes) of the same origin. Messages are broadcasted via a message event fired at all BroadcastChannel objects listening to the channel, except the object that sent the message.",
+     "title": "BroadcastChannel",
+     "url": "https://developer.mozilla.org/en-US/docs/Web/API/BroadcastChannel"
+    },
+    {
+     "published": null,
+     "snippet": "The MessageChannel interface of the Channel Messaging API allows us to create a new message channel and send data through it via its two MessagePort properties.",
+     "title": "MessageChannel",
+     "url": "https://developer.mozilla.org/en-US/docs/Web/API/MessageChannel"
+    },
+    {
+     "published": null,
+     "snippet": "The ChannelMergerNode() constructor creates a new ChannelMergerNode object instance.",
+     "title": "ChannelMergerNode: ChannelMergerNode() constructor",
+     "url": "https://developer.mozilla.org/en-US/docs/Web/API/ChannelMergerNode/ChannelMergerNode"
+    },
+    {
+     "published": null,
+     "snippet": "The ChannelSplitterNode() constructor of the Web Audio API creates a new ChannelSplitterNode object instance, representing a node that splits the input into a separate output for each of the source node's audio channels.",
+     "title": "ChannelSplitterNode: ChannelSplitterNode() constructor",
+     "url": "https://developer.mozilla.org/en-US/docs/Web/API/ChannelSplitterNode/ChannelSplitterNode"
+    },
+    {
+     "published": null,
+     "snippet": "The RTCDataChannelEvent() constructor creates a new RTCDataChannelEvent object.",
+     "title": "RTCDataChannelEvent: RTCDataChannelEvent() constructor",
+     "url": "https://developer.mozilla.org/en-US/docs/Web/API/RTCDataChannelEvent/RTCDataChannelEvent"
+    }
+   ],
+   "weight": 0.4000000059604645
+  },
+  {
+   "engine": "crates.io",
+   "results": [
+    {
+     "published": "2026-06-25T11:52:36.191384Z",
+     "snippet": "Async Rust implementation of the Lumberjack v2 protocol (Elastic Beats / Logstash). (v0.1.2, 60 downloads)",
+     "title": "lumberjack-protocol (crates.io)",
+     "url": "https://crates.io/crates/lumberjack-protocol"
+    },
+    {
+     "published": "2026-09-25T17:33:48.100815Z",
+     "snippet": "Application source plugin for Drasi (v0.2.11, 1620 downloads)",
+     "title": "drasi-source-application (crates.io)",
+     "url": "https://crates.io/crates/drasi-source-application"
+    },
+    {
+     "published": "2026-01-24T13:29:03.104535Z",
+     "snippet": "Eager streams for Rust (v0.1.1, 9211 downloads)",
+     "title": "pumps (crates.io)",
+     "url": "https://crates.io/crates/pumps"
+    },
+    {
+     "published": "2026-04-27T16:11:05.430852Z",
+     "snippet": "Core type-level primitives for the typeway web framework (v0.1.0, 337 downloads)",
+     "title": "typeway-core (crates.io)",
+     "url": "https://crates.io/crates/typeway-core"
+    },
+    {
+     "published": "2026-04-27T16:11:15.437383Z",
+     "snippet": "Protobuf wire format codec for the typeway web framework (v0.1.0, 214 downloads)",
+     "title": "typeway-protobuf (crates.io)",
+     "url": "https://crates.io/crates/typeway-protobuf"
+    },
+    {
+     "published": "2026-04-27T16:11:24.721291Z",
+     "snippet": "OpenAPI spec generation for the typeway web framework (v0.1.0, 158 downloads)",
+     "title": "typeway-openapi (crates.io)",
+     "url": "https://crates.io/crates/typeway-openapi"
+    },
+    {
+     "published": "2026-04-27T16:24:16.226901Z",
+     "snippet": "gRPC integration for the typeway type-level web framework (v0.1.0, 153 downloads)",
+     "title": "typeway-grpc (crates.io)",
+     "url": "https://crates.io/crates/typeway-grpc"
+    },
+    {
+     "published": "2026-04-27T16:12:23.776853Z",
+     "snippet": "Type-safe HTTP client for the typeway web framework (v0.1.0, 146 downloads)",
+     "title": "typeway-client (crates.io)",
+     "url": "https://crates.io/crates/typeway-client"
+    },
+    {
+     "published": "2026-04-27T16:32:21.843655Z",
+     "snippet": "Server runtime for the typeway type-level web framework (v0.1.0, 102 downloads)",
+     "title": "typeway-server (crates.io)",
+     "url": "https://crates.io/crates/typeway-server"
+    },
+    {
+     "published": "2026-04-27T16:11:13.475716Z",
+     "snippet": "Procedural macros for the typeway web framework (v0.1.0, 100 downloads)",
+     "title": "typeway-macros (crates.io)",
+     "url": "https://crates.io/crates/typeway-macros"
+    },
+    {
+     "published": "2026-04-27T16:51:52.522477Z",
+     "snippet": "Type-level web framework for Rust: your API is a type (v0.1.0, 36 downloads)",
+     "title": "typeway (crates.io)",
+     "url": "https://crates.io/crates/typeway"
+    },
+    {
+     "published": "2026-04-27T16:11:29.616114Z",
+     "snippet": "Code migration tool for porting axum services to typeway (v0.1.0, 20 downloads)",
+     "title": "typeway-migrate (crates.io)",
+     "url": "https://crates.io/crates/typeway-migrate"
+    },
+    {
+     "published": "2025-03-19T02:33:13.083822Z",
+     "snippet": "A command line tool to invoke and work with Large Language models on AWS, using Amazon Bedrock (v0.8.8, 15256 downloads)",
+     "title": "bedrust (crates.io)",
+     "url": "https://crates.io/crates/bedrust"
+    },
+    {
+     "published": "2026-06-18T09:36:50.017269Z",
+     "snippet": "Tokio runtime sampling and primitive helper integration for tailtriage run artifacts (v0.3.0, 281 downloads)",
+     "title": "tailtriage-tokio (crates.io)",
+     "url": "https://crates.io/crates/tailtriage-tokio"
+    },
+    {
+     "published": "2026-05-05T20:53:22.632999Z",
+     "snippet": "Async Rust framework for composable data pipelines (v0.1.0-beta.4, 77 downloads)",
+     "title": "data-courier (crates.io)",
+     "url": "https://crates.io/crates/data-courier"
+    },
+    {
+     "published": "2026-02-02T18:03:44.944500Z",
+     "snippet": "A typed, heterogeneous event relay with observable delivery, completion tracking, and lossless message routing (v0.2.0, 673 downloads)",
+     "title": "pipedream-rs (crates.io)",
+     "url": "https://crates.io/crates/pipedream-rs"
+    },
+    {
+     "published": "2026-08-17T01:43:48.611665Z",
+     "snippet": "A minimal, lossless data-pipeline framework: Source -> Processor -> Sink (v0.3.0, 80 downloads)",
+     "title": "data-core-rs (crates.io)",
+     "url": "https://crates.io/crates/data-core-rs"
+    },
+    {
+     "published": "2026-01-13T17:44:55.530709Z",
+     "snippet": "Async stream subscribers and execution utilities for fluxion (v0.8.0, 575 downloads)",
+     "title": "fluxion-exec (crates.io)",
+     "url": "https://crates.io/crates/fluxion-exec"
+    },
+    {
+     "published": "2026-01-13T17:44:21.488876Z",
+     "snippet": "Core traits and types for ordered stream processing (v0.8.0, 1510 downloads)",
+     "title": "fluxion-core (crates.io)",
+     "url": "https://crates.io/crates/fluxion-core"
+    },
+    {
+     "published": "2026-09-30T04:30:27.797772Z",
+     "snippet": "Video frame processing and bitmap conversion for Wayland screen capture, by Lamco Development LLC (v0.4.0, 1224 downloads)",
+     "title": "lamco-video (crates.io)",
+     "url": "https://crates.io/crates/lamco-video"
+    }
+   ],
+   "weight": 0.4000000059604645
+  },
+  {
+   "engine": "npm",
+   "results": [
+    {
+     "published": "2026-08-27T17:36:36.711Z",
+     "snippet": "A modern runtime for JavaScript and TypeScript. (v2.9.6)",
+     "title": "deno (npm)",
+     "url": "https://www.npmjs.com/package/deno"
+    },
+    {
+     "published": "2026-03-27T12:27:20.910Z",
+     "snippet": "Rust- and Tokio-like async primitives for TypeScript. (v0.1.4)",
+     "title": "antiox (npm)",
+     "url": "https://www.npmjs.com/package/antiox"
+    },
+    {
+     "published": "2026-10-02T19:47:11.855Z",
+     "snippet": "Streaming protobuf RPC service protocol over any two-way channel. (v0.52.2)",
+     "title": "starpc (npm)",
+     "url": "https://www.npmjs.com/package/starpc"
+    },
+    {
+     "published": "2024-12-11T05:39:11.495Z",
+     "snippet": "Store information about any JS value in a side channel. Uses WeakMap if available. (v1.0.2)",
+     "title": "side-channel-weakmap (npm)",
+     "url": "https://www.npmjs.com/package/side-channel-weakmap"
+    },
+    {
+     "published": "2026-06-08T20:34:47.001Z",
+     "snippet": "Store information about any JS value in a side channel. Uses WeakMap if available. (v1.1.1)",
+     "title": "side-channel (npm)",
+     "url": "https://www.npmjs.com/package/side-channel"
+    },
+    {
+     "published": "2026-10-07T04:31:14.629Z",
+     "snippet": "A browser host for WebAssembly Linux Interface programs (v0.1.298)",
+     "title": "@volter/browser-wali (npm)",
+     "url": "https://www.npmjs.com/package/@volter/browser-wali"
+    },
+    {
+     "published": "2026-09-30T14:08:09.382Z",
+     "snippet": "Generates and consumes source maps (v1.2.2)",
+     "title": "source-map-js (npm)",
+     "url": "https://www.npmjs.com/package/source-map-js"
+    },
+    {
+     "published": "2024-04-11T18:17:40.964Z",
+     "snippet": "A node.js version of unix's `tail -f` command (v4.0.2)",
+     "title": "@logdna/tail-file (npm)",
+     "url": "https://www.npmjs.com/package/@logdna/tail-file"
+    },
+    {
+     "published": "2026-08-06T23:36:52.512Z",
+     "snippet": "High-performance vector database with HNSW indexing - 50k+ inserts/sec, built in Rust for AI/ML similarity search and semantic search applications (v0.1.32)",
+     "title": "@ruvector/core (npm)",
+     "url": "https://www.npmjs.com/package/@ruvector/core"
+    },
+    {
+     "published": "2026-04-08T16:55:13.603Z",
+     "snippet": "Store information about any JS value in a side channel, using a linked list (v1.0.1)",
+     "title": "side-channel-list (npm)",
+     "url": "https://www.npmjs.com/package/side-channel-list"
+    },
+    {
+     "published": "2026-10-06T10:12:35.922Z",
+     "snippet": "argon2-rust binding for Node.js (v2.2.2)",
+     "title": "@node-rs/argon2 (npm)",
+     "url": "https://www.npmjs.com/package/@node-rs/argon2"
+    },
+    {
+     "published": "2024-12-11T04:53:18.943Z",
+     "snippet": "Store information about any JS value in a side channel, using a Map (v1.0.1)",
+     "title": "side-channel-map (npm)",
+     "url": "https://www.npmjs.com/package/side-channel-map"
+    },
+    {
+     "published": "2026-09-30T09:51:31.904Z",
+     "snippet": "Super-fast alternative for babel (v1.16.13)",
+     "title": "@swc/core (npm)",
+     "url": "https://www.npmjs.com/package/@swc/core"
+    },
+    {
+     "published": "2026-02-01T14:16:59.098Z",
+     "snippet": "Rust dictionary for cspell. (v4.1.2)",
+     "title": "@cspell/dict-rust (npm)",
+     "url": "https://www.npmjs.com/package/@cspell/dict-rust"
+    },
+    {
+     "published": "2025-01-26T08:10:05.345Z",
+     "snippet": "Rust WebSocket client template for AsyncAPI Generator (v0.3.2)",
+     "title": "asyncapi-rust-ws-template (npm)",
+     "url": "https://www.npmjs.com/package/asyncapi-rust-ws-template"
+    },
+    {
+     "published": "2026-08-06T23:36:32.217Z",
+     "snippet": "Linux x64 GNU native binding for ruvector-core - High-performance vector database with HNSW indexing built in Rust (v0.1.30)",
+     "title": "ruvector-core-linux-x64-gnu (npm)",
+     "url": "https://www.npmjs.com/package/ruvector-core-linux-x64-gnu"
+    },
+    {
+     "published": "2026-08-03T14:24:21.366Z",
+     "snippet": "A BroadcastChannel that works in New Browsers, Old Browsers, WebWorkers, NodeJs, Deno and iframes (v7.4.0)",
+     "title": "broadcast-channel (npm)",
+     "url": "https://www.npmjs.com/package/broadcast-channel"
+    },
+    {
+     "published": "2026-09-29T01:14:42.072Z",
+     "snippet": "This library provides a high-performance Node.js client for Baseten.co endpoints including embeddings, reranking, and classification. It was built for massive concurrent POST requests to any URL, also outside of baseten.co. The PerformanceClient is built (v0.1.15)",
+     "title": "@basetenlabs/performance-client (npm)",
+     "url": "https://www.npmjs.com/package/@basetenlabs/performance-client"
+    },
+    {
+     "published": "2026-10-05T17:11:46.147Z",
+     "snippet": "Hand-written ICU MessageFormat parser with compatible output as [`intl-messageformat-parser`](https://www.npmjs.com/package/intl-messageformat-parser) but 6 - 10 times as fast. (v3.5.21)",
+     "title": "@formatjs/icu-messageformat-parser (npm)",
+     "url": "https://www.npmjs.com/package/@formatjs/icu-messageformat-parser"
+    },
+    {
+     "published": "2026-06-08T01:24:13.098Z",
+     "snippet": "Node's event emitter for all engines. (v2.4.2)",
+     "title": "events-channel (npm)",
+     "url": "https://www.npmjs.com/package/events-channel"
+    }
+   ],
+   "weight": 0.4000000059604645
+  }
+ ],
+ "labels": {
+  "https://github.com/rolandjitsu/weighted-mpsc": 1,
+  "https://stackoverflow.com/questions/77236250/backpressure-thread-safe-memory-efficient-in-kotlin-channel": 0,
+  "https://stackoverflow.com/questions/70626957/how-to-apply-backpressure-to-tcl-output-channel": 0,
+  "https://stackoverflow.com/questions/36558355/core-async-toggle-channel-mix": 0,
+  "https://stackoverflow.com/questions/62457449/how-to-download-incoming-file-and-prevent-backpressure-while-sending-files-throu": 0,
+  "https://stackoverflow.com/questions/77417386/waiting-for-a-condition-in-an-async-fn": 1,
+  "https://stackoverflow.com/questions/53263942/how-can-i-implement-a-blocking-queue-mechanism-with-futuressyncmpscchannel": 1,
+  "https://stackoverflow.com/questions/33291820/protecting-messages-following-outbound-adapter-failure": 0,
+  "https://stackoverflow.com/questions/77924852/is-dropping-the-clone-of-mpscchannelsender-explicitely-necessary": 0,
+  "https://stackoverflow.com/questions/39281954/rxjava-how-to-implement-a-slow-consumer-with-buffer-and-a-fast-consumer-to-the": 0,
+  "https://stackoverflow.com/questions/63800577/in-trio-how-do-you-write-data-to-a-socket-without-waiting": 0,
+  "https://stackoverflow.com/questions/56466455/composed-function-support-with-spring-cloud-stream-throw-exception-queue-is-f": 0,
+  "https://stackoverflow.com/questions/67944022/kotlin-coroutines-channel-maplatest-confusion": 0,
+  "https://stackoverflow.com/questions/64577664/rabbitmq-back-pressure-and-flowcontrol": 0,
+  "https://stackoverflow.com/questions/61190218/detecting-that-back-pressure-is-happening": 0,
+  "https://stackoverflow.com/questions/57812128/what-is-the-best-way-to-define-logic-for-web-streams-sources-sinks": 0,
+  "https://stackoverflow.com/questions/63107553/how-to-deal-with-a-slow-consumer-in-traditional-java-nio": 0,
+  "https://stackoverflow.com/questions/74012753/why-does-sstableloader-hangs-while-running-it-in-parallel-for-multiple-keyspac": 0,
+  "https://stackoverflow.com/questions/53778062/how-to-implement-natural-aka-smart-batching-with-kotlin-channels": 0,
+  "https://stackoverflow.com/questions/69147931/avoiding-allocations-and-maintaining-concurrency-when-wrapping-a-callback-based": 0,
+  "https://stackoverflow.com/questions/74395204/best-approach-to-reduce-checkpoint-size-for-broadcast-state": 0,
+  "https://developer.mozilla.org/en-US/docs/WebAssembly/Guides/Rust_to_Wasm": 0,
+  "https://developer.mozilla.org/en-US/docs/Web/API/RTCDataChannelEvent/channel": 0,
+  "https://developer.mozilla.org/en-US/docs/Web/API/MessageChannel/MessageChannel": 0,
+  "https://developer.mozilla.org/en-US/docs/Web/API/BroadcastChannel/BroadcastChannel": 0,
+  "https://developer.mozilla.org/en-US/docs/Web/API/RTCDataChannel": 0,
+  "https://developer.mozilla.org/en-US/docs/Web/API/BroadcastChannel": 0,
+  "https://developer.mozilla.org/en-US/docs/Web/API/MessageChannel": 0,
+  "https://developer.mozilla.org/en-US/docs/Web/API/ChannelMergerNode/ChannelMergerNode": 0,
+  "https://developer.mozilla.org/en-US/docs/Web/API/ChannelSplitterNode/ChannelSplitterNode": 0,
+  "https://developer.mozilla.org/en-US/docs/Web/API/RTCDataChannelEvent/RTCDataChannelEvent": 0,
+  "https://crates.io/crates/lumberjack-protocol": 0,
+  "https://crates.io/crates/drasi-source-application": 0,
+  "https://crates.io/crates/pumps": 0,
+  "https://crates.io/crates/typeway-core": 0,
+  "https://crates.io/crates/typeway-protobuf": 0,
+  "https://crates.io/crates/typeway-openapi": 0,
+  "https://crates.io/crates/typeway-grpc": 0,
+  "https://crates.io/crates/typeway-client": 0,
+  "https://crates.io/crates/typeway-server": 0,
+  "https://crates.io/crates/typeway-macros": 0,
+  "https://crates.io/crates/typeway": 0,
+  "https://crates.io/crates/typeway-migrate": 0,
+  "https://crates.io/crates/bedrust": 0,
+  "https://crates.io/crates/tailtriage-tokio": 0,
+  "https://crates.io/crates/data-courier": 0,
+  "https://crates.io/crates/pipedream-rs": 0,
+  "https://crates.io/crates/data-core-rs": 0,
+  "https://crates.io/crates/fluxion-exec": 0,
+  "https://crates.io/crates/fluxion-core": 0,
+  "https://crates.io/crates/lamco-video": 0,
+  "https://www.npmjs.com/package/deno": 0,
+  "https://www.npmjs.com/package/antiox": 0,
+  "https://www.npmjs.com/package/starpc": 0,
+  "https://www.npmjs.com/package/side-channel-weakmap": 0,
+  "https://www.npmjs.com/package/side-channel": 0,
+  "https://www.npmjs.com/package/@volter/browser-wali": 0,
+  "https://www.npmjs.com/package/source-map-js": 0,
+  "https://www.npmjs.com/package/@logdna/tail-file": 0,
+  "https://www.npmjs.com/package/@ruvector/core": 0,
+  "https://www.npmjs.com/package/side-channel-list": 0,
+  "https://www.npmjs.com/package/@node-rs/argon2": 0,
+  "https://www.npmjs.com/package/side-channel-map": 0,
+  "https://www.npmjs.com/package/@swc/core": 0,
+  "https://www.npmjs.com/package/@cspell/dict-rust": 0,
+  "https://www.npmjs.com/package/asyncapi-rust-ws-template": 0,
+  "https://www.npmjs.com/package/ruvector-core-linux-x64-gnu": 0,
+  "https://www.npmjs.com/package/broadcast-channel": 0,
+  "https://www.npmjs.com/package/@basetenlabs/performance-client": 0,
+  "https://www.npmjs.com/package/@formatjs/icu-messageformat-parser": 0,
+  "https://www.npmjs.com/package/events-channel": 0
+ },
+ "query": "rust tokio mpsc channel backpressure"
+}

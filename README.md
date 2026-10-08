@@ -24,9 +24,9 @@
 
 ---
 
-Agent-HQ (HQ for short) puts one AI agent on every channel you use (Discord, Telegram, a web UI that installs as a PWA, the terminal) and keeps all your data in a markdown vault on your filesystem. Coding agents such as Claude Code, Codex CLI or OpenCode run as supervised harness sessions inside [Herdr](https://herdr.dev).
+Agent-HQ (HQ for short) puts one AI agent on every channel you use (Discord, Telegram, a web UI that installs as a PWA, the terminal) and keeps all your data in a markdown vault on your filesystem. Coding agents such as Claude Code, Codex CLI or OpenCode run as supervised harness sessions inside its built-in host (`hq host`).
 
-No cloud backend. No vendor lock-in. One binary of about 40 MB.
+No cloud backend. No vendor lock-in. One binary of about 58 MB.
 
 ---
 
@@ -34,14 +34,15 @@ No cloud backend. No vendor lock-in. One binary of about 40 MB.
 
 - **One agent, every channel.** Discord, Telegram, the web UI and `hq chat` share one conversation history and one memory, so you can switch platforms mid-thread.
 - **Markdown vault.** Notes, memory, skills and threads are plain files plus a single SQLite database (FTS5 search and embeddings). Nothing is locked inside a service.
-- **Coding-agent sessions.** Start, watch, steer and resume Claude Code, Codex, OpenCode and others in Herdr panes, locally or on a remote host.
+- **Coding-agent sessions.** Start, watch, steer and resume Claude Code, Codex, OpenCode and others in the built-in host, on this machine or a paired one (macOS, Linux, and Windows through WSL2).
 - **Sub-agents.** Single, parallel, race and graph execution modes over an in-process agent service.
 - **Native tasks.** Spaces, initiatives, tasks and comments, as MCP tools and a list, board and timeline UI.
 - **Long-running work.** Turns that outlive the chat ack window detach and report back; `/watch` schedules durable recurring turns.
 - **MCP server.** A 2-tool gateway (`hq_discover`, `hq_call`) exposes the full tool registry to Claude Code, Cursor, VS Code, Copilot and other MCP clients.
 - **Safety by default.** Bash runs in a sandbox with an environment allowlist, untrusted content is tainted, and `/mcp` refuses requests without a key.
 - **Signed self-updates.** Servers pull minisign-verified releases and roll back on a failed health check.
-- **Optional integrations.** Google Workspace through the `gws` CLI, remote MCP servers, local models through Ollama, SearxNG for web search. None are required.
+- **Web search out of the box.** `web_search` queries Google, DuckDuckGo, Brave, Mojeek and category engines (news, science, images, code) in-process, with no key and no Docker, then merges and ranks the results. Blocked engines are suspended and remembered across restarts, a server can borrow a better network from a peer HQ, and a SearxNG instance or a Brave API key are optional upgrades. See [docs/WEB_SEARCH.md](docs/WEB_SEARCH.md).
+- **Optional integrations.** Google Workspace through the `gws` CLI, remote MCP servers, local models through Ollama. None are required.
 
 ---
 
@@ -96,7 +97,6 @@ launchd service; it is macOS only and not needed on Linux.
 ### Install a prebuilt binary
 
 With Homebrew: `brew install CalvinMagezi/tap/agent-hq` (binary only).
-On Windows, use the install script inside WSL2 (an Ubuntu terminal).
 
 
 `curl -fsSL https://agent-hq.online/install.sh | bash` (or `npx agent-hq-cli`, which needs Node 18.17+) downloads the latest stable release, verifies its minisign
@@ -108,6 +108,12 @@ platforms, including Intel Macs, build from source with `cargo`.
 **Docker:** `docker run -d -p 127.0.0.1:5678:5678 -v hq-data:/data ghcr.io/calvinmagezi/hq` runs HQ with its web UI and prints a web token on first start. A Compose example and the details are in [docs/DOCKER.md](docs/DOCKER.md).
 
 The web UI is built separately (see [PWA Dashboard](#pwa-dashboard)) and needs [bun](https://bun.sh).
+
+### Windows
+
+There is no native Windows build: HQ and its coding agents run inside WSL2 (Ubuntu), and you use the
+web app from your Windows browser. Setup, including running coding agents on a Windows PC for an HQ
+elsewhere, is in [docs/WINDOWS.md](docs/WINDOWS.md).
 
 ### First Run
 
@@ -140,7 +146,7 @@ Linux on x86_64 and aarch64 (Ubuntu 22.04 or newer); `deploy/install.sh` picks t
 binary for the host CPU and refuses macOS. The updater verifies a minisign signature, swaps the binary and web files,
 restarts, checks `/health` and rolls back on failure. See
 [`deploy/README.md`](deploy/README.md) for the full walkthrough (Caddy, Tailscale,
-Herdr, GitHub access) and [`docs/UPDATE_SYSTEM.md`](docs/UPDATE_SYSTEM.md) for the
+the host, GitHub access) and [`docs/UPDATE_SYSTEM.md`](docs/UPDATE_SYSTEM.md) for the
 release format and trust model.
 
 ### Configuration
@@ -220,7 +226,7 @@ The `hq` binary ships the commands below. Run `hq help` for full usage.
 | Command | Description |
 |---------|-------------|
 | `hq chat` | Interactive terminal chat (default command) |
-| `hq sessions [sub]` | Harness sessions in Herdr: list, spawn <harness>, status, logs, send, stop, resume |
+| `hq sessions [sub]` | Harness sessions: list, spawn <harness>, status, logs, send, stop, resume |
 
 ### Services
 
@@ -309,7 +315,7 @@ Tasks have no CLI command: they are MCP tools (`task_list`, `task_create` and fr
 
 ### Crate Structure
 
-Agent-HQ is a Cargo workspace of 14 crates:
+Agent-HQ is a Cargo workspace of 16 crates and about 143,000 lines of Rust (556 files, counted on 2026-10-07 without blank lines or comments):
 
 | Crate | Purpose |
 |-------|---------|
@@ -326,6 +332,8 @@ Agent-HQ is a Cargo workspace of 14 crates:
 | `hq-web` | Axum WebSocket server, REST API, embedded static web UI |
 | `hq-convert` | Document format conversion utilities |
 | `hq-update` | Signed pull-based updater behind `hq update` |
+| `hq-host` | Built-in host for long-lived coding agents: pseudo-terminal panes with a readable screen, a control socket, state detection |
+| `hq-sandbox` | Process sandbox policy for one coding agent (`sandbox-exec` on macOS, `bwrap` on Linux) |
 | `hq-cli` | The `hq` binary: clap-derived commands |
 
 ### Key Dependencies
@@ -438,7 +446,7 @@ To write it by hand, add this to your project `.mcp.json`:
 |----------|---------|
 | Vault | vault_search, vault_read, vault_list, vault_write_note, vault_context |
 | Tasks | task_list, task_create, task_update, task_comment_add |
-| Harness sessions | harness_session_spawn, harness_session_send, harness_session_status, herdr_read |
+| Harness sessions | harness_session_spawn, harness_session_send, harness_session_status, host_read |
 | Sub-agents | spawn_subagents |
 | Web | web_search, web_fetch |
 | Image | generate_image |
@@ -545,7 +553,7 @@ Sending `!cancel` via Discord or Telegram triggers a graceful `Cancelled` exit a
 cargo check                        # type-check all crates
 cargo test -p hq-tools             # test a specific crate (faster)
 cargo test --workspace             # run all tests
-cargo build --release -p hq-cli    # release build (about 40 MB)
+cargo build --release -p hq-cli    # release build (about 58 MB)
 ./scripts/install-hq.sh            # build + install to ~/bin (after a one-time `sudo ./scripts/install-hq.sh --link`)
 cargo clippy --workspace --all-targets -- -D warnings   # lint (CI gate)
 hq mcp doctor                      # verify MCP connection health
@@ -605,7 +613,9 @@ Read [`SECURITY.md`](SECURITY.md) for the policy and how to report a vulnerabili
 |-------|-----|
 | Deploying to a server | [`deploy/README.md`](deploy/README.md) |
 | Signed updates | [`docs/UPDATE_SYSTEM.md`](docs/UPDATE_SYSTEM.md) |
-| Coding-agent sessions in Herdr | [`docs/HERDR_HARNESS.md`](docs/HERDR_HARNESS.md) |
+| Coding-agent sessions | [`docs/AGENT_HOST.md`](docs/AGENT_HOST.md), [`docs/AGENT_SESSIONS.md`](docs/AGENT_SESSIONS.md) |
+| Windows (WSL2) | [`docs/WINDOWS.md`](docs/WINDOWS.md) |
+| Adding a machine that runs coding agents | [`docs/JOIN_A_MACHINE.md`](docs/JOIN_A_MACHINE.md) |
 | Asking HQ from MCP clients | [`docs/MCP_ASK.md`](docs/MCP_ASK.md) |
 | Connecting an agent to a VPS instance | [`docs/VPS_AGENT_CONNECT.md`](docs/VPS_AGENT_CONNECT.md) |
 | Native tasks | [`docs/plans/native-tasks.md`](docs/plans/native-tasks.md) |

@@ -1,8 +1,8 @@
 use super::*;
+use crate::agent_host::McpAccess;
 
 pub(super) fn build_args(
     harness: &Harness,
-    vault_path: &Path,
     session_id: &str,
     resume_token: Option<&str>,
     resuming: bool,
@@ -21,6 +21,16 @@ pub(super) fn build_args(
                         .collect()
                 }
             }
+            ResumeStrategy::TokenOrArgs {
+                with_token,
+                otherwise,
+            } => {
+                let chosen = if resume_token.is_some() { with_token } else { otherwise };
+                chosen
+                    .iter()
+                    .map(|a| a.replace("{token}", resume_token.unwrap_or_default()))
+                    .collect()
+            }
             ResumeStrategy::SessionDir | ResumeStrategy::None => harness.fresh_args(),
         }
     } else {
@@ -28,17 +38,58 @@ pub(super) fn build_args(
     };
     let mut args = base;
     if spec.resume == ResumeStrategy::SessionDir {
-        let dir = vault_path.join(SESSION_DIR_ROOT).join(session_id);
-        let _ = std::fs::create_dir_all(&dir);
+        // Created by the agent on the host that runs it; the vault is on the HQ machine, which may be another one.
         args.push("--session-dir".into());
-        args.push(dir.to_string_lossy().to_string());
+        args.push(format!("{{home}}/{PI_SESSION_DIR}/{session_id}"));
     }
     args
 }
 
+/// The extra environment a session's agent starts with: its profile's
+/// variables plus the session id. Launch and restart both build it here, so a
+/// restarted agent gets exactly what the original had.
+pub(super) fn launch_env(harness: &Harness, session_id: &str) -> Vec<(String, String)> {
+    let profile_env = harness.profile.iter().flat_map(|p| p.env.iter());
+    profile_env
+        .map(|(k, v)| (k.clone(), v.clone()))
+        .chain([(SESSION_ENV.to_string(), session_id.to_string())])
+        .collect()
+}
+
+/// Starts the agents a restarted built-in host (local or remote) is holding for
+/// their env, matching them to the sessions placed on that host.
+/// Best effort: one that cannot be resumed stays held and is tried next sweep.
+pub fn resume_awaiting(rows: &[HarnessSessionRow], host: &Host) {
+    let Ok(waiting) = host.awaiting() else { return };
+    for agent in waiting {
+        let on_host = |r: &&HarnessSessionRow| r.host == host.name() && r.agent_name == agent.name;
+        let Some(row) = rows.iter().find(on_host) else {
+            continue;
+        };
+        let Ok(harness) = resolve(&row.harness) else {
+            continue;
+        };
+        let env = launch_env(&harness, &row.id);
+        if let Err(e) = host.resume_awaiting(&agent.name, env) {
+            tracing::warn!(session = %row.id, error = %e, "could not resume a held agent");
+        }
+    }
+}
+
+/// How the built-in host restarts this agent after the host itself restarts:
+/// only for harnesses that resume without a saved token.
+fn restart_args(harness: &Harness, session_id: &str) -> Option<Vec<String>> {
+    let tokenless = match harness.spec.resume {
+        ResumeStrategy::Args(args) => !args.iter().any(|a| a.contains("{token}")),
+        ResumeStrategy::TokenOrArgs { .. } | ResumeStrategy::SessionDir => true,
+        ResumeStrategy::None => false,
+    };
+    tokenless.then(|| build_args(harness, session_id, None, true))
+}
+
 /// Everything `launch_session` needs beyond the harness spec.
 pub(super) struct Launch<'a> {
-    pub(super) host: HerdrHost,
+    pub(super) host: Host,
     pub(super) session_id: &'a str,
     pub(super) cwd: &'a str,
     pub(super) label: &'a str,
@@ -48,6 +99,7 @@ pub(super) struct Launch<'a> {
     pub(super) mission_id: Option<&'a str>,
     /// Web chat that launched the session and will watch it.
     pub(super) watch: Option<NewWatch<'a>>,
+    pub(super) parent: Option<(&'a str, i64)>,
     pub(super) goal: GoalText<'a>,
 }
 
@@ -90,7 +142,7 @@ impl Drop for InFlight {
 /// `Launch` without borrows, so a launch can run on a task the caller's future
 /// does not own.
 pub(super) struct OwnedLaunch {
-    host: HerdrHost,
+    host: Host,
     session_id: String,
     cwd: String,
     label: String,
@@ -99,6 +151,7 @@ pub(super) struct OwnedLaunch {
     resuming: bool,
     mission_id: Option<String>,
     watch: Option<(String, bool, bool)>,
+    parent: Option<(String, i64)>,
     goal: (Option<String>, Option<String>),
 }
 
@@ -115,6 +168,7 @@ impl OwnedLaunch {
             resuming: l.resuming,
             mission_id: own(l.mission_id),
             watch: l.watch.map(|w| (w.thread.to_string(), w.drive, w.opted_out)),
+            parent: l.parent.map(|(id, depth)| (id.to_string(), depth)),
             goal: (own(l.goal.goal), own(l.goal.done_criteria)),
         }
     }
@@ -134,6 +188,7 @@ impl OwnedLaunch {
                 drive: *drive,
                 opted_out: *opted_out,
             }),
+            parent: self.parent.as_ref().map(|(id, depth)| (id.as_str(), *depth)),
             goal: GoalText {
                 goal: self.goal.0.as_deref(),
                 done_criteria: self.goal.1.as_deref(),
@@ -150,7 +205,7 @@ impl OwnedLaunch {
 /// recorded" would leave a pane nothing tracks. On its own task the launch
 /// always finishes, either recorded or cleaned up, whether or not anyone is
 /// still waiting for the answer. The wait for the agent to come up is also
-/// bounded (`HerdrHost::launch_bound`), so the caller is answered before its
+/// bounded (`ScriptedHost::launch_bound`), so the caller is answered before its
 /// transport times out.
 pub(super) async fn launch_session(
     vault_path: &Path,
@@ -173,6 +228,28 @@ pub(super) async fn launch_session(
 /// recorded, any failure closes the workspace (and says so if it could not), so
 /// nothing is left untracked. Once the row is written the session is real and
 /// later failures leave it tracked.
+/// A secret for this session and the endpoint to use it on, when HQ is set up
+/// to let launched agents call back and the host can deliver it.
+fn mcp_access(db: &Arc<Database>, host: &Host, harness: &Harness, session_id: &str) -> Option<McpAccess> {
+    let Some(url) = agent_host_config().agent_mcp_url else {
+        // No endpoint now: an older secret of a resumed session must not revive.
+        let id = session_id.to_string();
+        let _ = db.with_conn(move |c| hq_db::session_tokens::revoke(c, &id));
+        return None;
+    };
+    if !host.accepts_mcp() || harness.spec.kind != "claude" {
+        return None;
+    }
+    let id = session_id.to_string();
+    match db.with_conn(move |c| hq_db::session_tokens::mint(c, &id)) {
+        Ok(token) => Some(McpAccess { url, token }),
+        Err(e) => {
+            tracing::warn!(session = %session_id, error = %e, "could not mint a session token");
+            None
+        }
+    }
+}
+
 pub(super) async fn run_launch(
     vault_path: &Path,
     db: &Arc<Database>,
@@ -180,31 +257,39 @@ pub(super) async fn run_launch(
     l: Launch<'_>,
 ) -> Result<Value> {
     preflight::require_binary(&l.host, harness)?;
+    let mcp = mcp_access(db, &l.host, harness, l.session_id);
+    let minted = mcp.is_some();
+    let session_id = l.session_id.to_string();
+    let launched = launch_with(vault_path, db, harness, l, mcp).await;
+    if launched.is_err() && minted {
+        let _ = db.with_conn(move |c| hq_db::session_tokens::revoke_if_unregistered(c, &session_id));
+    }
+    launched
+}
+
+async fn launch_with(
+    _vault_path: &Path,
+    db: &Arc<Database>,
+    harness: &Harness,
+    l: Launch<'_>,
+    mcp: Option<McpAccess>,
+) -> Result<Value> {
     let profile = harness.profile.as_ref();
     let request = LaunchRequest {
         name: l.session_id.to_string(),
         kind: harness.spec.kind.to_string(),
         cwd: l.cwd.to_string(),
         label: workspace_label(&harness.name, l.label),
-        env: profile
-            .map(|p| {
-                p.env
-                    .iter()
-                    .map(|(k, v)| (k.clone(), v.clone()))
-                    .collect::<Vec<_>>()
-            })
-            .unwrap_or_default()
-            .into_iter()
-            .chain([(SESSION_ENV.to_string(), l.session_id.to_string())])
-            .collect(),
+        env: launch_env(harness, l.session_id),
         args: build_args(
             harness,
-            vault_path,
             l.session_id,
             l.resume_token,
             l.resuming,
         ),
         command: profile.and_then(|p| p.command.clone()),
+        resume_args: restart_args(harness, l.session_id),
+        mcp,
         start_timeout: l.host.launch_bound(),
     };
     let began = std::time::Instant::now();
@@ -285,6 +370,7 @@ pub(super) fn record_placement(
     let (resuming, mission) = (l.resuming, l.mission_id.map(str::to_string));
     let watch = l.watch.map(|w| (w.thread.to_string(), w.drive, w.opted_out));
     let goal = (l.goal.goal.map(str::to_string), l.goal.done_criteria.map(str::to_string));
+    let parent = l.parent.map(|(id, depth)| (id.to_string(), depth));
     db.with_conn(move |c| {
         let (host, name, ws, pane) = &placement_owned;
         let placement = Placement {
@@ -307,6 +393,9 @@ pub(super) fn record_placement(
                 placement,
             },
         )?;
+        if let Some((parent, depth)) = &parent {
+            registry::set_parent(c, name, parent, *depth)?;
+        }
         if goal.0.is_some() || goal.1.is_some() {
             registry::set_goal(c, name, goal.0.as_deref(), goal.1.as_deref(), registry::ACTOR_HQ)?;
         }
@@ -325,11 +414,11 @@ pub(super) struct Settled {
 }
 
 pub(super) fn settle_startup(
-    host: &HerdrHost,
+    host: &dyn HostBackend,
     name: &str,
     trust_pattern: Option<&str>,
     launched: &Launched,
-) -> Result<Settled, HerdrError> {
+) -> Result<Settled, AgentHostError> {
     let status = launched.agent.as_ref().map(|a| a.status);
     if launched.ready {
         return Ok(Settled {
@@ -367,14 +456,14 @@ pub(crate) fn prompt_note(outcome: PromptOutcome) -> Option<String> {
     match outcome {
         PromptOutcome::Resubmitted => Some(RESUBMITTED_NOTE.into()),
         PromptOutcome::Stalled(_) => Some(
-            "Herdr saw no activity after the prompt; a fast agent can finish first. Read the output before resending.".into(),
+            "The host saw no activity after the prompt; a fast agent can finish first. Read the output before resending.".into(),
         ),
         PromptOutcome::TimedOut(msg) => Some(format!("prompt wait timed out: {msg}")),
         PromptOutcome::Submitted | PromptOutcome::Settled(_) => None,
     }
 }
 
-pub(super) const RESUBMITTED_NOTE: &str = "Herdr saw no activity after the prompt, so Enter was pressed once more. Read the output to confirm the agent started.";
+pub(super) const RESUBMITTED_NOTE: &str = "The host saw no activity after the prompt, so Enter was pressed once more. Read the output to confirm the agent started.";
 
 pub(super) fn launch_report(
     harness: &Harness,
@@ -409,7 +498,7 @@ pub(super) fn launch_report(
 
 /// Where and how a new session should start.
 pub struct SpawnRequest<'a> {
-    /// Herdr host name; `None` uses the configured default.
+    /// host name; `None` uses the configured default.
     pub host: Option<&'a str>,
     pub harness: &'a str,
     pub prompt: Option<&'a str>,
@@ -419,6 +508,9 @@ pub struct SpawnRequest<'a> {
     pub mission_id: Option<&'a str>,
     /// Web chat that will watch the session.
     pub watch: Option<NewWatch<'a>>,
+    /// The session this one is started for, and its depth: recorded in the same
+    /// write as the session itself, so no limit can be dodged by a half-made child.
+    pub parent: Option<(&'a str, i64)>,
     pub goal: GoalText<'a>,
 }
 
@@ -443,6 +535,7 @@ pub async fn spawn(
             label,
             mission_id,
             watch: None,
+            parent: None,
             goal: GoalText::default(),
         },
     )
@@ -455,7 +548,7 @@ pub async fn spawn_with(
     req: SpawnRequest<'_>,
 ) -> Result<Value> {
     require_allowed_cwd(Some(&req.cwd.to_string_lossy()))?;
-    let host = herdr::host(req.host)?;
+    let host = agent_host::host(req.host)?;
     spawn_on(vault_path, db, host, req).await
 }
 
@@ -465,7 +558,7 @@ pub async fn spawn_with(
 pub(crate) async fn spawn_on(
     vault_path: &Path,
     db: &Arc<Database>,
-    host: HerdrHost,
+    host: Host,
     req: SpawnRequest<'_>,
 ) -> Result<Value> {
     let harness = resolve(req.harness)?;
@@ -494,6 +587,7 @@ pub(crate) async fn spawn_on(
             resuming: false,
             mission_id: mission_id.as_deref(),
             watch: req.watch,
+            parent: req.parent,
             goal,
         },
     )

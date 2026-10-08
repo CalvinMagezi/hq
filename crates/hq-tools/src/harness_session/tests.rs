@@ -1,6 +1,7 @@
 use super::*;
+use crate::agent_host::scripted::ScriptedHost;
 use crate::registry::HqTool;
-use hq_core::config::{HerdrConfig, LOCAL_HOST};
+use hq_core::config::AgentHostConfig;
 use std::os::unix::fs::PermissionsExt;
 
 const CREATED: &str = r#"{"id":"x","result":{"type":"workspace_created","workspace":{"workspace_id":"w9"},"root_pane":{"pane_id":"w9:p1"}}}"#;
@@ -15,9 +16,9 @@ fn agent_json(name: &str, status: &str) -> String {
     )
 }
 
-/// Fake herdr: each `(needle, stdout, fail_stderr)` answers commands containing
+/// Fake host: each `(needle, stdout, fail_stderr)` answers commands containing
 /// the needle, first match wins; every call is appended to `calls.log`.
-fn fake_host(replies: &[(&str, String, Option<&str>)]) -> (tempfile::TempDir, HerdrHost) {
+fn fake_host(replies: &[(&str, String, Option<&str>)]) -> (tempfile::TempDir, ScriptedHost) {
     let (dir, host) = fake_host_checking_binaries(replies);
     (dir, host.without_binary_preflight())
 }
@@ -25,7 +26,7 @@ fn fake_host(replies: &[(&str, String, Option<&str>)]) -> (tempfile::TempDir, He
 /// Like `fake_host`, but the host still checks that the harness binary exists.
 fn fake_host_checking_binaries(
     replies: &[(&str, String, Option<&str>)],
-) -> (tempfile::TempDir, HerdrHost) {
+) -> (tempfile::TempDir, ScriptedHost) {
     let dir = tempfile::tempdir().unwrap();
     let mut script =
         String::from("#!/bin/sh\necho \"$@\" >> \"$(dirname \"$0\")/calls.log\"\ncase \"$*\" in\n");
@@ -37,20 +38,15 @@ fn fake_host_checking_binaries(
         script.push_str(&format!("  *\"{needle}\"*) {body}; exit {code} ;;\n"));
     }
     script.push_str("  *) echo unexpected >&2; exit 2 ;;\nesac\n");
-    let path = dir.path().join("herdr");
+    let path = dir.path().join("scripted-host");
     std::fs::write(&path, script).unwrap();
     std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o755)).unwrap();
-    let cfg = HerdrConfig {
-        binary: path.to_string_lossy().to_string(),
-        ..HerdrConfig::default()
-    };
-    let host = HerdrHost::from_config(&cfg, LOCAL_HOST).unwrap();
-    (dir, host)
+    (dir, ScriptedHost::new(path))
 }
 
-fn launch<'a>(host: HerdrHost, id: &'a str, prompt: Option<&'a str>) -> Launch<'a> {
+fn launch<'a>(host: ScriptedHost, id: &'a str, prompt: Option<&'a str>) -> Launch<'a> {
     Launch {
-        host,
+        host: std::sync::Arc::new(host),
         session_id: id,
         cwd: "/t",
         label: "demo",
@@ -59,6 +55,7 @@ fn launch<'a>(host: HerdrHost, id: &'a str, prompt: Option<&'a str>) -> Launch<'
         resuming: false,
         mission_id: None,
         watch: None,
+        parent: None,
         goal: GoalText::default(),
     }
 }
@@ -71,11 +68,11 @@ fn goal_text() -> GoalText<'static> {
 }
 
 fn harness(name: &str) -> Harness {
-    resolve_in(&HerdrConfig::default(), name).unwrap()
+    resolve_in(&AgentHostConfig::default(), name).unwrap()
 }
 
 fn profile_harness(yaml: &str, name: &str) -> Harness {
-    let cfg: HerdrConfig = serde_yaml::from_str(&format!("harness_profiles:\n{yaml}")).unwrap();
+    let cfg: AgentHostConfig = serde_yaml::from_str(&format!("harness_profiles:\n{yaml}")).unwrap();
     resolve_in(&cfg, name).unwrap()
 }
 
@@ -86,8 +83,7 @@ fn calls(dir: &tempfile::TempDir) -> String {
 #[test]
 fn build_args_substitutes_token_on_resume() {
     let spec = harness("cursor");
-    let tmp = tempfile::tempdir().unwrap();
-    let args = build_args(&spec, tmp.path(), "hs-x", Some("abc123"), true);
+    let args = build_args(&spec, "hs-x", Some("abc123"), true);
     assert!(args.contains(&"--resume".to_string()));
     assert!(args.contains(&"abc123".to_string()));
 }
@@ -95,27 +91,69 @@ fn build_args_substitutes_token_on_resume() {
 #[test]
 fn build_args_falls_back_fresh_without_token() {
     let spec = harness("cursor");
-    let tmp = tempfile::tempdir().unwrap();
-    let args = build_args(&spec, tmp.path(), "hs-x", None, true);
+    let args = build_args(&spec, "hs-x", None, true);
     assert!(!args.iter().any(|a| a.contains("{token}")));
     assert!(!args.contains(&"--resume".to_string()));
 }
 
 #[test]
+fn claude_resumes_its_own_conversation_when_the_id_is_known() {
+    let h = harness("claude-code");
+    let with = build_args(&h, "hs-x", Some("conv-1"), true);
+    assert_eq!(with[with.len() - 2..], ["--resume", "conv-1"]);
+    let without = build_args(&h, "hs-x", None, true);
+    assert_eq!(without.last().map(String::as_str), Some("-c"));
+    let fresh = build_args(&h, "hs-x", Some("conv-1"), false);
+    assert!(!fresh.contains(&"--resume".to_string()));
+}
+
+#[test]
+fn a_reported_conversation_id_becomes_the_resume_token_once() {
+    let db = Arc::new(Database::open_memory().unwrap());
+    db.with_conn(|c| {
+        registry::insert(
+            c,
+            &registry::NewSession {
+                id: "hs-id",
+                harness: "claude-code",
+                label: "t",
+                cwd: "/t",
+                mission_id: None,
+                placement: registry::Placement {
+                    host: "native",
+                    agent_name: "hs-id",
+                    workspace_id: "hs-id",
+                    pane_id: "hs-id",
+                },
+            },
+        )
+    })
+    .unwrap();
+    let Liveness::Alive(mut agent) = alive("hs-id") else { unreachable!() };
+
+    let row = get_row(&db, "hs-id").unwrap();
+    assert!(!record_agent_session_id(&db, &row, &agent).unwrap(), "no id reported yet");
+
+    agent.agent_session_id = Some("conv-9".into());
+    assert!(record_agent_session_id(&db, &row, &agent).unwrap());
+    let row = get_row(&db, "hs-id").unwrap();
+    assert_eq!(row.resume_token.as_deref(), Some("conv-9"));
+    assert!(!record_agent_session_id(&db, &row, &agent).unwrap(), "unchanged");
+}
+
+#[test]
 fn session_dir_harness_gets_dir_arg() {
     let spec = harness("pi");
-    let tmp = tempfile::tempdir().unwrap();
-    let args = build_args(&spec, tmp.path(), "hs-pi-1", None, false);
+    let args = build_args(&spec, "hs-pi-1", None, false);
     assert!(args.contains(&"--session-dir".to_string()));
     assert!(args.iter().any(|a| a.contains("hs-pi-1")));
-    assert!(tmp.path().join("_data/session-dirs/hs-pi-1").is_dir());
+    assert!(args.iter().any(|a| a.starts_with("{home}/")));
 }
 
 #[test]
 fn antigravity_resume_uses_continue_flag() {
     let spec = harness("antigravity");
-    let tmp = tempfile::tempdir().unwrap();
-    let resumed = build_args(&spec, tmp.path(), "hs-x", None, true);
+    let resumed = build_args(&spec, "hs-x", None, true);
     assert_eq!(
         resumed,
         vec![
@@ -123,12 +161,12 @@ fn antigravity_resume_uses_continue_flag() {
             "-c".to_string()
         ]
     );
-    let fresh = build_args(&spec, tmp.path(), "hs-x", None, false);
+    let fresh = build_args(&spec, "hs-x", None, false);
     assert_eq!(fresh, vec!["--dangerously-skip-permissions".to_string()]);
 }
 
 #[test]
-fn session_ids_are_unique_and_valid_herdr_names() {
+fn session_ids_are_unique_and_valid_host_names() {
     let a = new_session_id("github-copilot");
     std::thread::sleep(Duration::from_millis(2));
     let b = new_session_id("github-copilot");
@@ -151,10 +189,9 @@ fn a_profile_resumes_with_the_base_arguments() {
         "  wrapped:\n    base: claude-code\n    args: [\"--model\", \"x\"]\n",
         "wrapped",
     );
-    let tmp = tempfile::tempdir().unwrap();
-    let fresh = build_args(&h, tmp.path(), "hs-x", None, false);
+    let fresh = build_args(&h, "hs-x", None, false);
     assert_eq!(fresh, vec!["--model".to_string(), "x".to_string()]);
-    let resumed = build_args(&h, tmp.path(), "hs-x", None, true);
+    let resumed = build_args(&h, "hs-x", None, true);
     assert_eq!(
         resumed,
         vec![
@@ -200,8 +237,8 @@ async fn a_wrapper_profile_launches_through_the_shell_and_types_the_prompt() {
 }
 
 #[test]
-fn every_spec_names_a_kind_herdr_supports() {
-    const HERDR_KINDS: &[&str] = &[
+fn every_spec_names_a_kind_the_host_supports() {
+    const HOST_KINDS: &[&str] = &[
         "pi",
         "claude",
         "codex",
@@ -228,7 +265,7 @@ fn every_spec_names_a_kind_herdr_supports() {
     ];
     for spec in spec::SPECS {
         assert!(
-            HERDR_KINDS.contains(&spec.kind),
+            HOST_KINDS.contains(&spec.kind),
             "{} -> {}",
             spec.harness,
             spec.kind
@@ -283,6 +320,28 @@ async fn launch_records_the_session_and_types_the_prompt() {
     let log = calls(&dir);
     assert!(log.contains("--kind claude"), "{log}");
     assert!(log.contains("agent prompt hs-t1 fix the bug"), "{log}");
+}
+
+#[tokio::test]
+async fn a_delegated_session_has_its_parent_from_the_moment_it_exists() {
+    let (_dir, host) = fake_host(&[
+        ("workspace create", CREATED.into(), None),
+        ("agent start", OK.into(), None),
+        ("agent get", agent_json("hs-kid", "idle"), None),
+        ("agent prompt", OK.into(), None),
+    ]);
+    let db = Arc::new(Database::open_memory().unwrap());
+    let vault = tempfile::tempdir().unwrap();
+    let mut l = launch(host, "hs-kid", Some("work"));
+    l.parent = Some(("hs-parent", 1));
+    launch_session(vault.path(), &db, &harness("claude-code"), l).await.unwrap();
+
+    // Read straight after the launch call: there is no later write that sets it.
+    let row = get_row(&db, "hs-kid").unwrap();
+    assert_eq!(row.parent_session_id.as_deref(), Some("hs-parent"));
+    assert_eq!(row.spawn_depth, 1);
+    let children = db.with_conn(|c| registry::running_children(c, "hs-parent")).unwrap();
+    assert_eq!(children.len(), 1, "the limits count it at once");
 }
 
 #[tokio::test]
@@ -434,6 +493,8 @@ fn row(host: &str, name: &str) -> HarnessSessionRow {
         no_progress_streak: 0,
         progress_mark: None,
         drive_off_reason: None,
+        parent_session_id: None,
+        spawn_depth: 0,
     }
 }
 
@@ -448,7 +509,7 @@ fn liveness_distinguishes_gone_from_unreachable() {
     ];
 
     let polled = poll_hosts_with(&rows, |name| match name {
-        "local" => Ok(host.clone()),
+        "local" => Ok(Arc::new(host.clone())),
         other => Err(anyhow::anyhow!("host '{other}' unreachable: no route")),
     });
 
@@ -572,6 +633,7 @@ fn alive(name: &str) -> Liveness {
         title: None,
         state_change_seq: 1,
         launch_pending: false,
+        agent_session_id: None,
     }))
 }
 
@@ -863,7 +925,7 @@ fn an_empty_deny_list_refuses_nothing() {
 fn a_denied_substring_is_refused_with_a_clear_error() {
     let list = deny(&["/clients/acme"]);
     let err = check_cwd_allowed("/home/me/clients/acme/app", &list).unwrap_err().to_string();
-    assert!(err.contains("herdr.spawn_cwd_deny") && err.contains("/clients/acme"), "{err}");
+    assert!(err.contains("agent_host.spawn_cwd_deny") && err.contains("/clients/acme"), "{err}");
     assert!(err.contains("no session was started"), "{err}");
     assert!(check_cwd_allowed("/home/me/clients/other", &list).is_ok());
 }
@@ -898,25 +960,25 @@ fn the_deny_list_ignores_trailing_and_doubled_slashes_in_entries_and_paths() {
 
 #[test]
 fn the_handoff_allow_list_binds_only_the_handoff_scope() {
-    let mut herdr = hq_core::config::HerdrConfig {
+    let mut host_cfg = hq_core::config::AgentHostConfig {
         handoff_cwd_allow: deny(&["/srv/work"]),
         ..Default::default()
     };
     let inside = Some("/srv/work/app");
-    assert!(require_cwd_in(inside, &herdr, true).is_ok());
-    assert!(require_cwd_in(Some("/srv/work"), &herdr, true).is_ok());
-    assert!(require_cwd_in(Some("/srv/worker"), &herdr, true).is_err(), "a sibling that shares a prefix is outside");
-    assert!(require_cwd_in(Some("/etc"), &herdr, true).is_err());
-    assert!(require_cwd_in(Some("/etc"), &herdr, false).is_ok(), "other keys are not bound by it");
-    herdr.handoff_cwd_allow.clear();
-    assert!(require_cwd_in(Some("/etc"), &herdr, true).is_ok(), "empty means unrestricted");
-    herdr.spawn_cwd_deny = deny(&["/etc"]);
-    assert!(require_cwd_in(Some("/etc"), &herdr, true).is_err(), "the deny list still applies");
+    assert!(require_cwd_in(inside, &host_cfg, true).is_ok());
+    assert!(require_cwd_in(Some("/srv/work"), &host_cfg, true).is_ok());
+    assert!(require_cwd_in(Some("/srv/worker"), &host_cfg, true).is_err(), "a sibling that shares a prefix is outside");
+    assert!(require_cwd_in(Some("/etc"), &host_cfg, true).is_err());
+    assert!(require_cwd_in(Some("/etc"), &host_cfg, false).is_ok(), "other keys are not bound by it");
+    host_cfg.handoff_cwd_allow.clear();
+    assert!(require_cwd_in(Some("/etc"), &host_cfg, true).is_ok(), "empty means unrestricted");
+    host_cfg.spawn_cwd_deny = deny(&["/etc"]);
+    assert!(require_cwd_in(Some("/etc"), &host_cfg, true).is_err(), "the deny list still applies");
 }
 
 #[test]
-fn only_logical_key_names_reach_herdr() {
-    let ok = |k: &[&str]| crate::herdr::validate_keys(&k.iter().map(|s| s.to_string()).collect::<Vec<_>>());
+fn only_logical_key_names_reach_the_host() {
+    let ok = |k: &[&str]| crate::agent_host::validate_keys(&k.iter().map(|s| s.to_string()).collect::<Vec<_>>());
     assert!(ok(&["enter", "ctrl+c", "down", "f5", "shift+tab", "y"]).is_ok());
     for bad in ["-rf", "--help", "", " enter", "a b", "ctrl+c;ls", "$(id)", &"k".repeat(33)] {
         assert!(ok(&[bad]).is_err(), "{bad:?} should be refused");
@@ -936,7 +998,7 @@ fn handoff_req(external_id: &str) -> handoff::HandoffRequest {
     }
 }
 
-fn startable_host() -> (tempfile::TempDir, HerdrHost) {
+fn startable_host() -> (tempfile::TempDir, ScriptedHost) {
     fake_host(&[
         ("workspace create", CREATED.into(), None),
         ("agent start", OK.into(), None),
@@ -961,7 +1023,7 @@ async fn a_handoff_files_a_task_starts_a_session_and_gives_a_thread_that_owns_it
     let db = Arc::new(Database::open_memory().unwrap());
     let vault = tempfile::tempdir().unwrap();
 
-    let report = handoff::handoff(vault.path(), &db, host, handoff_req("ext-42")).await.unwrap();
+    let report = handoff::handoff(vault.path(), &db, Arc::new(host), handoff_req("ext-42")).await.unwrap();
 
     assert_eq!(report["handoff"], "started");
     assert_eq!(report["task"]["created"], true);
@@ -990,11 +1052,11 @@ async fn repeating_a_handoff_returns_the_same_task_and_session_without_a_second_
     let (_dir, host) = startable_host();
     let db = Arc::new(Database::open_memory().unwrap());
     let vault = tempfile::tempdir().unwrap();
-    let first = handoff::handoff(vault.path(), &db, host, handoff_req("ext-7")).await.unwrap();
+    let first = handoff::handoff(vault.path(), &db, Arc::new(host), handoff_req("ext-7")).await.unwrap();
     let session_id = first["session_id"].as_str().unwrap().to_string();
 
     let (dir, host) = fake_host(&[("agent list", live_list(&session_id), None)]);
-    let again = handoff::handoff(vault.path(), &db, host, handoff_req("ext-7")).await.unwrap();
+    let again = handoff::handoff(vault.path(), &db, Arc::new(host), handoff_req("ext-7")).await.unwrap();
 
     assert_eq!(again["handoff"], "existing_session");
     assert_eq!(again["task"]["id"], first["task"]["id"]);
@@ -1012,7 +1074,7 @@ async fn a_session_marked_running_that_its_host_no_longer_has_does_not_block_a_n
     let (_dir, host) = startable_host();
     let db = Arc::new(Database::open_memory().unwrap());
     let vault = tempfile::tempdir().unwrap();
-    handoff::handoff(vault.path(), &db, host, handoff_req("ext-8")).await.unwrap();
+    handoff::handoff(vault.path(), &db, Arc::new(host), handoff_req("ext-8")).await.unwrap();
 
     let empty = r#"{"id":"x","result":{"agents":[]}}"#.to_string();
     let (_dir, host) = fake_host(&[
@@ -1022,7 +1084,7 @@ async fn a_session_marked_running_that_its_host_no_longer_has_does_not_block_a_n
         ("agent get", agent_json("hs-h", "idle"), None),
         ("agent prompt", OK.into(), None),
     ]);
-    let again = handoff::handoff(vault.path(), &db, host, handoff_req("ext-8")).await.unwrap();
+    let again = handoff::handoff(vault.path(), &db, Arc::new(host), handoff_req("ext-8")).await.unwrap();
 
     assert_eq!(again["handoff"], "started");
     assert_eq!(again["task"]["deduplicated"], true, "same task, new session");
@@ -1035,7 +1097,7 @@ async fn an_unreachable_host_is_reported_and_leaves_no_session_or_dangling_threa
     let db = Arc::new(Database::open_memory().unwrap());
     let vault = tempfile::tempdir().unwrap();
 
-    let err = handoff::handoff(vault.path(), &db, host, handoff_req("ext-9")).await.unwrap_err().to_string();
+    let err = handoff::handoff(vault.path(), &db, Arc::new(host), handoff_req("ext-9")).await.unwrap_err().to_string();
 
     assert!(err.contains("no session was started") && err.contains("timed out"), "{err}");
     assert_eq!(count(&db, "SELECT COUNT(*) FROM harness_sessions"), 0);
@@ -1056,7 +1118,7 @@ async fn an_agent_stuck_at_a_dialog_is_reported_as_blocked_with_no_prompt_typed(
     let db = Arc::new(Database::open_memory().unwrap());
     let vault = tempfile::tempdir().unwrap();
 
-    let report = handoff::handoff(vault.path(), &db, host, handoff_req("ext-10")).await.unwrap();
+    let report = handoff::handoff(vault.path(), &db, Arc::new(host), handoff_req("ext-10")).await.unwrap();
 
     assert_eq!(report["handoff"], "blocked_at_dialog");
     assert!(report["warning"].as_str().unwrap().contains("NOT typed"));
@@ -1093,14 +1155,14 @@ async fn a_handoff_can_work_an_existing_task_and_refuses_ambiguous_or_empty_requ
         .unwrap();
 
     let both = handoff::HandoffRequest { task_id: task.clone(), ..handoff_req("ext-11") };
-    let err = handoff::handoff(vault.path(), &db, host.clone(), both).await.unwrap_err();
+    let err = handoff::handoff(vault.path(), &db, Arc::new(host.clone()), both).await.unwrap_err();
     assert!(err.to_string().contains("not both"), "{err}");
     let untitled = handoff::HandoffRequest { title: " ".into(), ..handoff_req("") };
-    assert!(handoff::handoff(vault.path(), &db, host.clone(), untitled).await.is_err());
+    assert!(handoff::handoff(vault.path(), &db, Arc::new(host.clone()), untitled).await.is_err());
     assert_eq!(count(&db, "SELECT COUNT(*) FROM chat_threads"), 0, "refused before anything is created");
 
     let existing = handoff::HandoffRequest { task_id: "FR-001".into(), title: String::new(), ..handoff_req("") };
-    let report = handoff::handoff(vault.path(), &db, host, existing).await.unwrap();
+    let report = handoff::handoff(vault.path(), &db, Arc::new(host), existing).await.unwrap();
     assert_eq!(report["task"]["id"], task);
     assert_eq!(report["task"]["created"], false);
     assert_eq!(count(&db, "SELECT COUNT(*) FROM tasks"), 1);
@@ -1109,8 +1171,8 @@ async fn a_handoff_can_work_an_existing_task_and_refuses_ambiguous_or_empty_requ
 const SHORT_BOUND: Duration = Duration::from_millis(1200);
 
 /// A fake whose agent never leaves `launch_pending`, as when the harness binary
-/// is missing on the machine herdr runs on.
-fn stuck_host() -> (tempfile::TempDir, HerdrHost) {
+/// is missing on the machine the host runs on.
+fn stuck_host() -> (tempfile::TempDir, ScriptedHost) {
     let (dir, host) = fake_host(&[
         ("workspace create", CREATED.into(), None),
         ("agent start", String::new(), Some(NOT_READY)),
@@ -1152,7 +1214,7 @@ fn a_missing_binary_on_a_local_host_is_named_before_anything_launches() {
         "{err}"
     );
     assert!(err.contains("/usr/local/bin"), "the search roots are named: {err}");
-    assert!(calls(&dir).is_empty(), "herdr was never asked");
+    assert!(calls(&dir).is_empty(), "the host was never asked");
 
     let found = profile_harness("  sh-alias:\n    base: claude-code\n    command: /bin/sh\n", "sh-alias");
     assert!(preflight::require_binary(&host, &found).is_ok());
@@ -1177,7 +1239,7 @@ fn a_profile_path_decides_where_the_binary_is_looked_for() {
 }
 
 #[tokio::test]
-async fn a_launch_for_a_missing_binary_fails_fast_without_touching_herdr() {
+async fn a_launch_for_a_missing_binary_fails_fast_without_touching_the_host() {
     let (dir, host) = fake_host_checking_binaries(&[("workspace create", CREATED.into(), None)]);
     let db = Arc::new(Database::open_memory().unwrap());
     let vault = tempfile::tempdir().unwrap();
@@ -1208,7 +1270,7 @@ async fn an_agent_that_never_leaves_launch_pending_is_cleaned_up_and_reported() 
         .unwrap_err()
         .to_string();
 
-    assert!(started.elapsed() < Duration::from_secs(10), "bounded, not the 120s herdr start wait");
+    assert!(started.elapsed() < Duration::from_secs(10), "bounded, not the 120s host start wait");
     assert!(err.contains("harness 'claude-code' did not start on host 'local'"), "{err}");
     assert!(err.contains("launch still pending"), "{err}");
     assert!(err.contains("workspace was closed"), "{err}");
@@ -1245,9 +1307,9 @@ async fn a_failed_cleanup_is_reported_instead_of_claimed() {
     assert!(err.contains("Closing workspace w9 failed") && err.contains("close it by hand"), "{err}");
 }
 
-/// Rewrites the fake herdr so the matching subcommand takes a second to answer.
+/// Rewrites the fake host so the matching subcommand takes a second to answer.
 fn slow_down(dir: &tempfile::TempDir, needle: &str) {
-    let path = dir.path().join("herdr");
+    let path = dir.path().join("scripted-host");
     let script = std::fs::read_to_string(&path).unwrap();
     let marker = format!("*\"{needle}\"*) ");
     assert!(script.contains(&marker));
@@ -1291,7 +1353,7 @@ async fn a_caller_that_disconnects_mid_launch_still_gets_the_session_recorded() 
 
     let cancelled = tokio::time::timeout(
         Duration::from_millis(200),
-        handoff::handoff(vault.path(), &db, host, handoff_req("ext-cancel")),
+        handoff::handoff(vault.path(), &db, Arc::new(host), handoff_req("ext-cancel")),
     )
     .await;
     assert!(cancelled.is_err());
@@ -1312,7 +1374,7 @@ async fn a_cancelled_handoff_for_a_stuck_harness_still_settles_the_thread_and_ta
 
     let cancelled = tokio::time::timeout(
         Duration::from_millis(200),
-        handoff::handoff(vault.path(), &db, host, handoff_req("ext-cancel-stuck")),
+        handoff::handoff(vault.path(), &db, Arc::new(host), handoff_req("ext-cancel-stuck")),
     )
     .await;
     assert!(cancelled.is_err());
@@ -1331,7 +1393,7 @@ async fn a_handoff_to_a_host_whose_harness_never_starts_leaves_nothing_behind() 
     let db = Arc::new(Database::open_memory().unwrap());
     let vault = tempfile::tempdir().unwrap();
 
-    let err = handoff::handoff(vault.path(), &db, host, handoff_req("ext-stuck"))
+    let err = handoff::handoff(vault.path(), &db, Arc::new(host), handoff_req("ext-stuck"))
         .await
         .unwrap_err()
         .to_string();
@@ -1344,14 +1406,14 @@ async fn a_handoff_to_a_host_whose_harness_never_starts_leaves_nothing_behind() 
     assert_eq!(status, "to_do", "the task is not left looking started");
 
     let (_dir, host) = startable_host();
-    let again = handoff::handoff(vault.path(), &db, host, handoff_req("ext-stuck")).await.unwrap();
+    let again = handoff::handoff(vault.path(), &db, Arc::new(host), handoff_req("ext-stuck")).await.unwrap();
     assert_eq!(again["task"]["deduplicated"], true, "a retry reuses the task");
     assert_eq!(again["handoff"], "started");
 }
 
 #[tokio::test]
 async fn a_failure_after_the_session_was_recorded_says_so_and_keeps_the_thread() {
-    let boom = r#"{"error":{"code":"boom","message":"herdr fell over"},"id":"x"}"#;
+    let boom = r#"{"error":{"code":"boom","message":"host fell over"},"id":"x"}"#;
     let (_dir, host) = fake_host(&[
         ("workspace create", CREATED.into(), None),
         ("agent start", OK.into(), None),
@@ -1361,7 +1423,7 @@ async fn a_failure_after_the_session_was_recorded_says_so_and_keeps_the_thread()
     let db = Arc::new(Database::open_memory().unwrap());
     let vault = tempfile::tempdir().unwrap();
 
-    let err = handoff::handoff(vault.path(), &db, host, handoff_req("ext-late")).await.unwrap_err().to_string();
+    let err = handoff::handoff(vault.path(), &db, Arc::new(host), handoff_req("ext-late")).await.unwrap_err().to_string();
 
     assert!(err.contains("was started for task") && err.contains("is tracked"), "{err}");
     assert!(!err.contains("nothing has run"), "{err}");
@@ -1493,18 +1555,6 @@ async fn a_second_launch_of_the_same_agent_is_refused_while_the_first_is_still_r
     eventually("the claim to be released", || InFlight::claim(&db, "local", "hs-t10").is_ok()).await;
 }
 
-#[test]
-fn the_launch_bound_comes_from_config_and_stays_under_the_transport_limit() {
-    let bound = |secs: u64| {
-        let cfg = HerdrConfig { launch_bound_secs: secs, ..HerdrConfig::default() };
-        HerdrHost::from_config(&cfg, LOCAL_HOST).unwrap().launch_bound()
-    };
-    assert_eq!(HerdrConfig::default().launch_bound_secs, 25);
-    assert_eq!(bound(25), Duration::from_secs(25));
-    assert_eq!(bound(1), Duration::from_secs(5));
-    assert_eq!(bound(600), Duration::from_secs(50));
-}
-
 fn tool(
     db: &Arc<Database>,
     chat: Option<WatchingChat>,
@@ -1564,7 +1614,7 @@ fn a_driver_turn_sends_only_to_the_session_its_chat_drives_and_within_its_budget
     let db = Arc::new(Database::open_memory().unwrap());
     drive_on(&db, "hs-b");
     let driver = driver_chat();
-    let budget = herdr_config().nudge_budget();
+    let budget = agent_host_config().nudge_budget();
     for _ in 0..budget {
         sent(&db, "hs-b", Some(&driver), SendKind::Text).unwrap();
     }
@@ -1587,12 +1637,12 @@ fn key_presses_have_their_own_larger_allowance() {
     let db = Arc::new(Database::open_memory().unwrap());
     drive_on(&db, "hs-k");
     let driver = driver_chat();
-    let budget = herdr_config().nudge_budget();
+    let budget = agent_host_config().nudge_budget();
     for _ in 0..budget {
         sent(&db, "hs-k", Some(&driver), SendKind::Text).unwrap();
     }
     sent(&db, "hs-k", Some(&driver), SendKind::Keys).unwrap();
-    let allowance = herdr_config().key_allowance();
+    let allowance = agent_host_config().key_allowance();
     assert!(allowance > budget);
     for _ in 1..allowance {
         sent(&db, "hs-k", Some(&driver), SendKind::Keys).unwrap();
@@ -1610,7 +1660,7 @@ fn a_failed_send_gives_its_slot_back_and_parallel_sends_cannot_overshoot() {
     assert!(failed.is_err());
     assert_eq!(get_row(&db, "hs-p").unwrap().nudges_sent, 0);
 
-    let budget = herdr_config().nudge_budget() as usize;
+    let budget = agent_host_config().nudge_budget() as usize;
     let handles: Vec<_> = (0..budget * 3)
         .map(|_| {
             let (db, driver) = (db.clone(), driver.clone());
@@ -1697,7 +1747,7 @@ fn a_default_on_watch_past_the_driven_session_cap_starts_observing_and_says_why(
         second
             .drive_off_reason
             .unwrap()
-            .contains("herdr.max_driven_sessions")
+            .contains("agent_host.max_driven_sessions")
     );
     assert_eq!(with_watch_state(&db, "hs-c2", json!({}))["mode"], "observe");
 }
@@ -1731,7 +1781,7 @@ async fn a_session_hq_spawned_cannot_spawn_or_hand_off() {
 #[tokio::test]
 async fn chats_an_ask_started_may_own_only_so_many_running_sessions() {
     let db = Arc::new(Database::open_memory().unwrap());
-    let cap = herdr_config().ask_spawned_session_cap();
+    let cap = agent_host_config().ask_spawned_session_cap();
     for n in 0..cap {
         let id = format!("hs-ask{n}");
         seed_watched(&db, &id, None);
@@ -1746,7 +1796,7 @@ async fn chats_an_ask_started_may_own_only_so_many_running_sessions() {
         .await
         .unwrap_err();
     assert!(
-        err.to_string().contains("herdr.max_ask_spawned_sessions"),
+        err.to_string().contains("agent_host.max_ask_spawned_sessions"),
         "{err}"
     );
 }
@@ -1786,7 +1836,7 @@ async fn an_ask_reply_cannot_turn_drive_on() {
 #[test]
 fn hq_driving_past_the_cap_through_the_mode_tool_is_refused_while_the_user_is_not() {
     let db = Arc::new(Database::open_memory().unwrap());
-    let cap = herdr_config().driven_session_cap();
+    let cap = agent_host_config().driven_session_cap();
     for n in 0..=cap {
         seed_watched(&db, &format!("hs-cap{n}"), Some(goal_text()));
     }
@@ -1820,14 +1870,14 @@ fn sessions_started_without_a_chat_or_from_an_ask_are_capped_by_origin() {
     assert_eq!(start_origin(Some(&chat(true))), registry::ORIGIN_USER);
     assert_eq!(start_origin(Some(&WatchingChat { from_ask: true, ..chat(false) })), registry::ORIGIN_ASK);
     check_origin_cap(&db, registry::ORIGIN_USER).unwrap();
-    let cap = herdr_config().mcp_started_session_cap();
+    let cap = agent_host_config().mcp_started_session_cap();
     for n in 0..cap {
         let id = format!("hs-mcp{n}");
         seed_watched(&db, &id, None);
         tag_origin(&db, &json!({"session_id": id}), registry::ORIGIN_MCP);
     }
     let err = check_origin_cap(&db, registry::ORIGIN_MCP).unwrap_err().to_string();
-    assert!(err.contains("herdr.max_mcp_started_sessions"), "{err}");
+    assert!(err.contains("agent_host.max_mcp_started_sessions"), "{err}");
     check_origin_cap(&db, registry::ORIGIN_ASK).unwrap();
 }
 
@@ -1869,9 +1919,9 @@ async fn goal_changes_over_mcp_are_audited_as_mcp_not_as_the_user() {
 }
 
 #[tokio::test]
-async fn a_marked_caller_cannot_herdr_send_to_another_pane() {
+async fn a_marked_caller_cannot_host_send_to_another_pane() {
     let args = json!({"host": "local", "target": "hs-other", "text": "x", SPAWNED_SESSION_ARG: "hs-own"});
-    let err = crate::herdr::tools::HerdrSendTool.execute(args).await.unwrap_err();
+    let err = crate::agent_host::tools::HostSendTool.execute(args).await.unwrap_err();
     assert_eq!(err.to_string(), SPAWNED_REFUSAL);
 }
 
@@ -1923,8 +1973,8 @@ fn a_running_session_is_read_live_once_and_falls_back_when_the_read_fails() {
     })
     .unwrap();
     assert_eq!((reads.get(), live["source"].as_str()), (1, Some("live")));
-    assert_eq!(live["herdr_source"], "visible");
+    assert_eq!(live["host_source"], "visible");
     let down = tail_log_with(&db, "hs-tl", 10, |_| None).unwrap();
     assert_eq!(down["source"], "snapshot");
-    assert!(down["herdr_source"].is_null());
+    assert!(down["host_source"].is_null());
 }

@@ -105,10 +105,14 @@ impl SessionBuilder {
                     hq_tools::coding::TodoStore::new(),
                 )),
             }),
-            Box::new(crate::web::WebSearchTool::new(
+            Box::new({
+                hq_tools::web::set_search_peer(self.config.web_search_peer_server().cloned());
+                crate::web::WebSearchTool::new(
                 self.config.searxng_url.clone(),
                 self.config.brave_api_key.clone(),
-            )),
+                self.config.web_search_native,
+            )
+            }),
             Box::new(crate::web::WebFetchTool),
         ]
     }
@@ -204,7 +208,7 @@ impl SessionBuilder {
         tools
     }
 
-    /// Self-update, Herdr harness sessions, background turns and native
+    /// Self-update, host harness sessions, background turns and native
     /// tasks, which all need the shared database.
     fn db_backed_tools(
         &self,
@@ -221,20 +225,20 @@ impl SessionBuilder {
             ));
         }
 
-        // Harness session manager — spawn/monitor/steer/resume fleet CLIs in Herdr
+        // Harness session manager — spawn/monitor/steer/resume fleet CLIs in the host
         tools.extend(
             hq_tools::harness_session::tools::create_harness_session_tools(
                 vault_path.to_path_buf(),
                 db.clone(),
                 self.identity
                     .as_ref()
-                    .and_then(|i| watching_chat(i, &self.config.herdr, db)),
+                    .and_then(|i| watching_chat(i, &self.config.agent_host, db)),
                 self.identity
                     .as_ref()
                     .and_then(hq_tools::family_guest::FamilyGuestContext::from_identity),
             ),
         );
-        tools.extend(hq_tools::herdr::tools::create_herdr_tools(db.clone()));
+        tools.extend(hq_tools::agent_host::tools::create_host_tools(db.clone()));
         tools.extend(hq_tools::background_turns::create_background_turn_tools(
             db.clone(),
         ));
@@ -491,7 +495,7 @@ impl SessionBuilder {
 /// ask thread, the safe side for Drive.
 fn watching_chat(
     identity: &hq_core::identity::RequestIdentity,
-    herdr: &hq_core::config::HerdrConfig,
+    agent_host: &hq_core::config::AgentHostConfig,
     db: &Arc<hq_db::Database>,
 ) -> Option<hq_tools::harness_session::WatchingChat> {
     let thread = identity.web_thread()?.to_string();
@@ -501,7 +505,7 @@ fn watching_chat(
     // Sub-agent follow-ups start no driving watch either, but only the session driver is budgeted.
     Some(hq_tools::harness_session::WatchingChat {
         thread,
-        drive_new: herdr.drive_new_watches && !identity.is_web_driver_turn() && !from_ask,
+        drive_new: agent_host.drive_new_watches && !identity.is_web_driver_turn() && !from_ask,
         driver_turn: identity.is_session_driver_turn(),
         from_ask,
     })
@@ -534,18 +538,18 @@ mod watching_chat_tests {
     #[test]
     fn sessions_started_from_a_driver_turn_or_an_ask_thread_never_drive_by_default() {
         let db = Arc::new(hq_db::Database::open_memory().unwrap());
-        let herdr = hq_core::config::HerdrConfig::default();
-        assert!(herdr.drive_new_watches);
+        let host_cfg = hq_core::config::AgentHostConfig::default();
+        assert!(host_cfg.drive_new_watches);
         let typed = watching_chat(
             &RequestIdentity::from_web_thread("th-typed", false, false),
-            &herdr,
+            &host_cfg,
             &db,
         )
         .unwrap();
         assert!((typed.drive_new, typed.driver_turn, typed.from_ask) == (true, false, false));
         let driver = watching_chat(
             &RequestIdentity::from_web_thread("th-typed", true, true),
-            &herdr,
+            &host_cfg,
             &db,
         )
         .unwrap();
@@ -553,13 +557,13 @@ mod watching_chat_tests {
         let thread = ask_thread(&db);
         let asked = watching_chat(
             &RequestIdentity::from_web_thread(&thread, false, false),
-            &herdr,
+            &host_cfg,
             &db,
         )
         .unwrap();
         assert!((asked.drive_new, asked.from_ask) == (false, true));
         assert!(
-            watching_chat(&RequestIdentity::local(), &herdr, &db).is_none(),
+            watching_chat(&RequestIdentity::local(), &host_cfg, &db).is_none(),
             "no chat, no watch"
         );
     }

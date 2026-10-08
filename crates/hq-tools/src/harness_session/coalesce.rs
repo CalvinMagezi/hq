@@ -1,6 +1,6 @@
 //! Shares one in-flight read between concurrent callers and keeps a successful
 //! result for a very short time, so overlapping browser polls of one session
-//! cost a single herdr (ssh) invocation.
+//! cost a single host (ssh) invocation.
 
 use anyhow::{Result, anyhow};
 use serde_json::Value;

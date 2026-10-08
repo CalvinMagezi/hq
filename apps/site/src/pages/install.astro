@@ -138,10 +138,17 @@ const docker = installChannels.docker;
       <h2 id="windows-h">Windows</h2>
       <div class="prose">
         <p>
-          There is no native Windows build yet. HQ runs well inside WSL2, which is a normal Ubuntu: open
-          an Ubuntu terminal and use the install script above, exactly as on Linux. Open the web UI from
-          your Windows browser at <code>http://localhost:5678</code>. Install bubblewrap
-          (<code>sudo apt install bubblewrap</code>) so the agent's shell tool has its sandbox.
+          There is no native Windows build. HQ and its coding agents run inside WSL2, which is a normal
+          Ubuntu: in PowerShell run <code>wsl --install -d Ubuntu</code>, open the Ubuntu terminal and use the
+          install script above exactly as on Linux. Open the web UI from your Windows browser at
+          <code>http://localhost:5678</code>. Install bubblewrap (<code>sudo apt install bubblewrap</code>)
+          so agents run in their sandbox; Ubuntu 24.04 also needs user namespaces allowed.
+        </p>
+        <p>
+          A Windows PC can instead run the coding agents for an HQ on a server: install <code>hq</code> in
+          WSL2, run <code>hq host join</code> and pair it from the HQ with <code>hq host add</code>. The full
+          steps are in <a href={links.windows}>the Windows guide</a> and
+          <a href={links.joinMachine}>the guide for adding a machine</a>.
         </p>
       </div>
     </section>
@@ -168,7 +175,7 @@ const docker = installChannels.docker;
           <CodeBlock id="src-deps" label="Linux build dependencies" code={linuxDeps} />
         </li>
         <li>
-          <p>Build the release binary. It is about 40 MB.</p>
+          <p>Build the release binary. It is about 58 MB.</p>
           <CodeBlock id="src-build" label="Build" code={buildCmd} />
         </li>
         <li>
@@ -252,8 +259,8 @@ const docker = installChannels.docker;
       </ol>
       <div class="prose">
         <p>
-          <code>deploy/install.sh</code> does not install Herdr. If you want coding-agent sessions on
-          the server, follow the local setup in <a href={links.herdrHarness}>the Herdr docs</a>. Pick one
+          <code>deploy/install.sh</code> installs HQ only. Coding agents run on a machine that has them
+          installed, paired with <code>hq host join</code>; see <a href={links.agentSessions}>the sessions docs</a>. Pick one
           deploy path per host: the updater owns the binary and web files, so do not also build on the
           server. Full walkthrough: <a href={links.deployReadme}>deploy/README.md</a>. To check a
           release by hand, see <a href="/security/#verify">verifying a release</a>.
@@ -317,7 +324,7 @@ const docker = installChannels.docker;
           <li><strong>Docker.</strong> <code>docker pull ghcr.io/calvinmagezi/hq</code>, then recreate the container.
             Uninstall: <code>docker rm -f hq</code>; <code>docker volume rm hq-data</code> also deletes your data.</li>
           <li><strong>Server.</strong> It updates itself from signed releases every ten minutes. To remove it, back up
-            <code>/opt/hq/.vault</code> first, then <code>systemctl disable --now hq herdr hq-update.timer</code> and delete
+            <code>/opt/hq/.vault</code> first, then <code>systemctl disable --now hq hq-update.timer</code> and delete
             the unit files, <code>/usr/local/bin/hq</code>, <code>/etc/hq</code> and <code>/opt/hq</code>.</li>
         </ul>
         <p>

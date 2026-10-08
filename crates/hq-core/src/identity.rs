@@ -2,7 +2,7 @@ use crate::privacy::DisclosureScope;
 
 /// Present on `RequestIdentity` when the caller is a Discord family guest
 /// (see `RelayConfig::discord_family_users`), not the owner. Read by the
-/// remote-MCP confirm gate and the agy-only Herdr gate.
+/// remote-MCP confirm gate and the agy-only the host gate.
 #[derive(Debug, Clone)]
 pub struct FamilyGuestInfo {
     pub name: String,
@@ -11,7 +11,7 @@ pub struct FamilyGuestInfo {
     pub origin_channel_id: u64,
     /// Display name of the bot owner who approves the guest's risky actions.
     pub owner_name: String,
-    /// Herdr harnesses the guest may start; empty means unrestricted.
+    /// host harnesses the guest may start; empty means unrestricted.
     pub allowed_harnesses: Vec<String>,
 }
 

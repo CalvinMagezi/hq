@@ -4,31 +4,45 @@ use super::*;
 pub(super) struct Budgets {
     pub(super) total: Duration,
     pub(super) searxng: Duration,
+    pub(super) native_engine: Duration,
     pub(super) brave: Duration,
 }
 
 pub(super) const DEFAULT_BUDGETS: Budgets = Budgets {
     total: SEARCH_DEADLINE,
     searxng: SEARXNG_TIMEOUT,
+    native_engine: NATIVE_ENGINE_TIMEOUT,
     brave: BRAVE_TIMEOUT,
 };
 
-/// Search the web: tries a self-hosted SearxNG instance first (free, no API
-/// key), falling back to the Brave Search API on failure or empty results if
-/// `brave_api_key` is set. Errors with remediation guidance if neither
-/// backend is configured, and with every attempt's reason if all fail.
+/// Search the web: a configured SearxNG instance first, then the built-in
+/// keyless engine pool (`native`), then the Brave Search API if
+/// `brave_api_key` is set. Each later backend is tried on failure or empty
+/// results. Errors with remediation guidance if none is enabled, and with
+/// every attempt's reason if all fail.
 pub async fn web_search(
     query: &str,
     opts: &SearchOptions,
     searxng_url: Option<&str>,
     brave_api_key: Option<&str>,
+    native: bool,
 ) -> Result<WebSearchResults> {
+    // A query is an outbound channel: a credential pasted into it would be sent
+    // to every engine, so it is refused before anything leaves the process.
+    let query = &strip_invisible(query);
+    if hq_core::redact::looks_like_credential(query) {
+        bail!(
+            "The search query looks like it contains a credential (API key, token or private key), \
+             so it was not sent. Remove the secret and search again."
+        );
+    }
     let searxng_url = searxng_url.map(str::trim).filter(|s| !s.is_empty());
     let brave = brave_api_key
         .map(str::trim)
         .filter(|s| !s.is_empty())
         .map(|key| (BRAVE_ENDPOINT, key));
-    search_chain(query, opts, searxng_url, brave, &DEFAULT_BUDGETS).await
+    let env = native.then(NativeEnv::production);
+    search_chain(query, opts, searxng_url, brave, env.as_ref(), &DEFAULT_BUDGETS).await
 }
 
 pub(super) async fn search_chain(
@@ -36,9 +50,25 @@ pub(super) async fn search_chain(
     opts: &SearchOptions,
     searxng_url: Option<&str>,
     brave: Option<(&str, &str)>,
+    native: Option<&NativeEnv<'_>>,
     budgets: &Budgets,
 ) -> Result<WebSearchResults> {
-    if searxng_url.is_none() && brave.is_none() {
+    let peer = peer::configured();
+    search_chain_via(query, opts, searxng_url, brave, native, peer.as_ref(), budgets).await
+}
+
+/// `search_chain` with the peer given explicitly, so tests need no global.
+pub(super) async fn search_chain_via(
+    query: &str,
+    opts: &SearchOptions,
+    searxng_url: Option<&str>,
+    brave: Option<(&str, &str)>,
+    native: Option<&NativeEnv<'_>>,
+    peer: Option<&hq_core::config::RemoteMcpServer>,
+    budgets: &Budgets,
+) -> Result<WebSearchResults> {
+    let peer = peer.filter(|_| !opts.peer_hop);
+    if searxng_url.is_none() && brave.is_none() && native.is_none() && peer.is_none() {
         return Err(no_backend_error());
     }
     let deadline = Instant::now() + budgets.total;
@@ -58,11 +88,11 @@ pub(super) async fn search_chain(
             deadline,
             &mut attempts,
             || searxng_request(base, query, opts),
-            |json| parse_searxng_results(json, opts.page),
+            |json| parse_searxng_results(json, opts.page).map_err(ProviderError::from),
         )
         .await;
         if let Some(page) = page {
-            if !page.results.is_empty() || brave.is_none() {
+            if !page.results.is_empty() || (brave.is_none() && native.is_none()) {
                 return Ok(finish(
                     query,
                     opts,
@@ -76,7 +106,57 @@ pub(super) async fn search_chain(
         }
     }
 
-    if let Some((endpoint, api_key)) = brave {
+    if let Some(env) = native {
+        debug!(query = %query, "searching built-in engines");
+        let pool = native_search(query, opts, env, deadline, budgets.native_engine).await;
+        attempts.extend(pool.attempts);
+        // No hits from a pool whose real web engines are all out is a failure to
+        // report, not an empty answer: the attempts say which engines were blocked.
+        let blocked = |p: &Page| p.results.is_empty() && pool.degraded;
+        if let Some(page) = pool.page.filter(|p| !blocked(p)) {
+            // A pool with only Wikipedia or Hacker News answering is a last resort,
+            // so a configured Brave key still gets its turn.
+            let good_enough = !page.results.is_empty() && !pool.degraded;
+            if good_enough || brave.is_none() {
+                return Ok(finish(
+                    query,
+                    opts,
+                    "native",
+                    page,
+                    native_unsupported(opts),
+                    attempts,
+                ));
+            }
+            answered = Some(("native", page, native_unsupported(opts)));
+        }
+    }
+
+    if let Some(server) = peer {
+        let key = format!("peer:{}", server.name);
+        let backend = Backend {
+            key: &key,
+            label: "peer",
+            budget: peer::PEER_TIMEOUT,
+            backoff: searxng_backoff,
+        };
+        debug!(query = %query, peer = %server.name, "searching through a peer HQ");
+        let page = try_backend(
+            &backend,
+            deadline,
+            &mut attempts,
+            || peer::request(server, query, opts),
+            |json| peer::parse(json).map_err(ProviderError::from),
+        )
+        .await;
+        if let Some(page) = page.filter(|p| !p.results.is_empty()) {
+            answered = Some(("peer", page, Vec::new()));
+        }
+    }
+
+    // A peer's answer is a full one, so a paid Brave call is kept for when it fails.
+    if !matches!(answered, Some(("peer", ..)))
+        && let Some((endpoint, api_key)) = brave
+    {
         if opts.page > BRAVE_MAX_PAGE {
             attempts.push(ProviderAttempt {
                 provider: "brave".into(),
@@ -95,7 +175,7 @@ pub(super) async fn search_chain(
                 deadline,
                 &mut attempts,
                 || brave_request(endpoint, api_key, query, opts),
-                |json| parse_brave_results(json, opts),
+                |json| parse_brave_results(json, opts).map_err(ProviderError::from),
             )
             .await;
             if let Some(page) = page {
@@ -118,6 +198,27 @@ pub(super) async fn search_chain(
     }
 }
 
+/// Filters the built-in pool cannot apply on every engine it queries.
+pub(super) fn native_unsupported(opts: &SearchOptions) -> Vec<String> {
+    let mut notes = Vec::new();
+    if opts.freshness.is_some() && opts.category == Some(Category::Science) {
+        notes.push("freshness (arXiv and Europe PMC ignore it; OpenAlex applies it)".to_string());
+    }
+    if opts.freshness.is_some() && opts.category == Some(Category::Images) {
+        notes.push("freshness (Google Images applies it; Wikimedia Commons and Openverse ignore it)".to_string());
+    }
+    if opts.freshness.is_some() && opts.category == Some(Category::Code) {
+        notes.push(
+            "freshness (GitHub, Stack Overflow, Ask Ubuntu and Super User apply it; MDN, crates.io and npm ignore it)"
+                .to_string(),
+        );
+    }
+    if opts.freshness.is_some() && opts.category == Some(Category::News) {
+        notes.push("freshness (Bing News ignores it; Hacker News applies it)".to_string());
+    }
+    notes
+}
+
 pub(super) fn finish(
     query: &str,
     opts: &SearchOptions,
@@ -131,6 +232,10 @@ pub(super) fn finish(
         .into_iter()
         .filter(|r| domain_allowed(&r.url, opts))
         .take(opts.max_results)
+        .map(|mut r| {
+            sanitize_result(&mut r);
+            r
+        })
         .collect();
     WebSearchResults {
         query: query.to_string(),
@@ -144,21 +249,10 @@ pub(super) fn finish(
 }
 
 pub(super) fn no_backend_error() -> anyhow::Error {
-    // Only name the setup script if this host actually has a checkout to run
-    // it from — naming a path that doesn't exist here is exactly FR-005's
-    // complaint (the message was unactionable on a checkout-less VPS).
-    if hq_core::machine::agent_hq_checkout_path().is_some() {
-        return anyhow::anyhow!(
-            "No web search backend available. Run `scripts/setup-searxng.sh` for a free \
-             self-hosted search backend, or set `brave_api_key` in ~/.hq/config.yaml \
-             (or HQ_BRAVE_API_KEY) for the paid Brave Search fallback."
-        );
-    }
     anyhow::anyhow!(
-        "No web search backend available, and this host has no source checkout to run a \
-         setup script from. Ask the operator to provision a backend directly: point \
-         `searxng_url` at a reachable SearxNG instance, or set `brave_api_key` \
-         (or HQ_BRAVE_API_KEY) for the paid Brave Search fallback."
+        "No web search backend is enabled. Set `web_search_native: true` (the default) in \
+         ~/.hq/config.yaml for the built-in engine, point `searxng_url` at a SearxNG \
+         instance, or set `brave_api_key` (or HQ_BRAVE_API_KEY) for the paid Brave Search API."
     )
 }
 
@@ -178,7 +272,7 @@ pub fn web_search_parameters() -> Value {
             },
             "page": {
                 "type": "integer",
-                "description": "1-based results page (default 1). Use next_page from a previous response. Brave serves pages 1-10."
+                "description": "1-based results page (default 1). Use next_page from a previous response. Some engines serve only page 1, and Brave serves pages 1-10."
             },
             "freshness": {
                 "type": "string",
@@ -191,12 +285,12 @@ pub fn web_search_parameters() -> Value {
             },
             "country": {
                 "type": "string",
-                "description": "2-letter country code, e.g. \"US\". SearxNG needs language as well."
+                "description": "2-letter country code, e.g. \"US\". SearxNG and DuckDuckGo need language as well."
             },
             "category": {
                 "type": "string",
-                "enum": ["general", "news", "science"],
-                "description": "Result category (Brave supports general and news)"
+                "enum": ["general", "news", "science", "images", "code"],
+                "description": "Result category. images lists freely licensed images with their direct URL; code searches GitHub, Stack Overflow and package registries. Brave supports general and news only."
             },
             "include_domains": {
                 "type": "array",

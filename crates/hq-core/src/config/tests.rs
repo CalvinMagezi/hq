@@ -92,7 +92,7 @@ mod load_from_path_tests {
     #[test]
     fn missing_config_file_yields_generic_zero_config_defaults() {
         let missing = std::env::temp_dir().join("hq-config-does-not-exist.yaml");
-        let config = HqConfig::load_from_path(&missing).unwrap();
+        let config = crate::HqConfig::load_from_path(&missing).unwrap();
         assert!(!config.local_only);
         assert_eq!(config.default_model, "relay");
         assert_eq!(config.instance.instance_type, InstanceType::Local);
@@ -105,7 +105,7 @@ mod load_from_path_tests {
     #[test]
     fn http_referer_comes_from_config_yaml() {
         let path = write_config("http_referer: https://hq.example.com\n");
-        let config = HqConfig::load_from_path(&path).unwrap();
+        let config = crate::HqConfig::load_from_path(&path).unwrap();
         assert_eq!(config.http_referer.as_deref(), Some("https://hq.example.com"));
     }
 
@@ -117,7 +117,7 @@ mod load_from_path_tests {
     #[test]
     fn cloud_instance_type_with_no_features_block_gets_cloud_feature_defaults() {
         let path = write_config("instance:\n  instance_type: cloud\n");
-        let config = HqConfig::load_from_path(&path).unwrap();
+        let config = crate::HqConfig::load_from_path(&path).unwrap();
         assert_eq!(config.instance.instance_type, InstanceType::Cloud);
         assert!(!config.instance.features.local_ollama);
     }
@@ -127,7 +127,7 @@ mod load_from_path_tests {
     #[test]
     fn explicit_local_instance_type_keeps_local_defaults() {
         let path = write_config("instance:\n  instance_type: local\n");
-        let config = HqConfig::load_from_path(&path).unwrap();
+        let config = crate::HqConfig::load_from_path(&path).unwrap();
         assert_eq!(config.instance.instance_type, InstanceType::Local);
         assert!(config.instance.features.local_ollama);
     }
@@ -144,7 +144,7 @@ mod load_from_path_tests {
             std::env::set_var("HQ_RELAY__DISCORD_TOKEN", "from-env-token");
         }
         let missing = std::env::temp_dir().join("hq-config-does-not-exist-2.yaml");
-        let config = HqConfig::load_from_path(&missing).unwrap();
+        let config = crate::HqConfig::load_from_path(&missing).unwrap();
         unsafe {
             std::env::remove_var("HQ_RELAY__DISCORD_TOKEN");
         }
@@ -404,4 +404,50 @@ fn has_llm_key_counts_config_keys_and_conventional_env_vars() {
 
     config.anthropic_api_key = Some("sk-ant-test".into());
     assert!(config.has_llm_key_with(none));
+}
+
+#[test]
+fn a_config_with_the_old_agent_host_heading_still_loads_and_the_new_one_wins() {
+    let dir = tempfile::tempdir().unwrap();
+    let old = dir.path().join("old.yaml");
+    std::fs::write(&old, "herdr:\n  default_host: laptop\n  hosts:\n    laptop:\n      ssh: me@h\n").unwrap();
+    let cfg = crate::HqConfig::load_from_path(&old).unwrap();
+    assert_eq!(cfg.agent_host.default_host, "laptop");
+    assert_eq!(cfg.agent_host.hosts["laptop"].ssh, "me@h");
+    assert!(std::fs::read_to_string(&old).unwrap().starts_with("herdr:"), "the file on disk is left alone");
+
+    let new = dir.path().join("new.yaml");
+    std::fs::write(&new, "agent_host:\n  default_host: pc\n").unwrap();
+    assert_eq!(crate::HqConfig::load_from_path(&new).unwrap().agent_host.default_host, "pc");
+
+    let both = dir.path().join("both.yaml");
+    std::fs::write(&both, "agent_host:\n  default_host: pc\nherdr:\n  default_host: laptop\n").unwrap();
+    assert_eq!(crate::HqConfig::load_from_path(&both).unwrap().agent_host.default_host, "pc");
+}
+
+#[test]
+fn runtime_identity_names_primary_provider_and_fallbacks() {
+    use crate::HqConfig;
+    use crate::config::{BackendEntry, BackendKind, runtime_identity_block};
+    let mut config = HqConfig { default_model: "deepseek-flash".into(), ..Default::default() };
+    let entry = |name: &str, endpoint: &str, model: &str| BackendEntry {
+        name: name.into(),
+        kind: BackendKind::OpenaiCompatible,
+        endpoint: Some(endpoint.into()),
+        credential_env: None,
+        model: Some(model.into()),
+        effort: None,
+        wire: Default::default(),
+        enabled: true,
+    };
+    config.backends.primary = "haiku".into();
+    config.backends.fallbacks = vec!["deepseek".into()];
+    config.backends.backends = vec![
+        entry("haiku", "https://openrouter.ai/api/v1", "anthropic/claude-haiku-5.5"),
+        entry("deepseek", "https://api.deepseek.com/v1", "deepseek-flash"),
+    ];
+    let block = runtime_identity_block(&config);
+    assert!(block.contains("`anthropic/claude-haiku-5.5` through OpenRouter"), "{block}");
+    assert!(block.contains("`deepseek-flash` through DeepSeek"), "{block}");
+    assert!(block.find("haiku").unwrap() < block.find("deepseek").unwrap());
 }

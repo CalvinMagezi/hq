@@ -4,9 +4,30 @@ All notable changes to Agent-HQ will be documented in this file.
 
 ## [Unreleased]
 
+### Changed
+
+- **`hq host install` gives `hq` a stable signature on macOS**, so the folder-access approval macOS asks for (Documents, Desktop, Downloads) survives updates instead of being asked again, and a session started with nobody at the screen no longer hangs on it. Re-run `hq host install` after replacing the binary.
+- **Each coding agent gets its own state directory and network hosts in the sandbox** (Antigravity could not start because `~/.gemini` was read-only). An agent writes only its own login and history directory, never another agent's, and reaches the HTTPS hosts it signs in through; other hosts go in `agent_host.sandbox.allow_domains`.
+- **Windows is documented end to end**: `docs/WINDOWS.md` covers WSL2 setup (systemd, sandbox settings, Tailscale inside WSL2), running HQ on a Windows PC, and pairing a Windows PC as a coding-agent machine for an HQ elsewhere. The README, the install page, `llms.txt` and `AGENTS-SETUP.md` point to it, and `AGENTS-SETUP.md` now tells an agent how to detect WSL2 and set up a host.
+- **The `herdr` names are gone from the repo and the product.** The config section is `agent_host:` (a config that still says `herdr:` keeps loading, and `hq host add` renames the heading when it edits the file), the MCP tools are `host_list`, `host_agents`, `host_read` and `host_send` (the old `herdr_*` names no longer exist, so clients that called them must switch), the web settings API key is `agent_host`, `docs/HERDR_HARNESS.md` is `docs/AGENT_SESSIONS.md`, and CI fails if the retired name reappears outside NOTICE, provenance records and migrations.
+
+### Removed
+
+- **Herdr is retired.** Coding-agent sessions run only on HQ's built-in host (`hq host`); the herdr backend, `deploy/herdr.service` and `scripts/hq-herdr-gate` are gone. A host named `local` now means the built-in host on this machine. Config keys from the old setup (`herdr.binary`, `herdr.session`, a host's `kind` and `session`) are ignored; a configured remote host must be paired again with `hq host join` and `hq host add`.
+
+### Changed
+
+- **New coding-agent sessions start on the built-in host by default** (`herdr.default_host` is now `native`; set `local` to keep using herdr for now). The web app's session page shows `hq host status` (on the session's host) in place of the herdr attach command, and Settings lists the agent sandbox, extra allowed sites and the idle limit.
+
 ### Added
 
 - **`hq web` hosts the web UI with one command.** It starts only the web server (no daemon or relays), finds or builds the UI, and opens the browser. `--detach` runs it in the background, `hq web status` and `hq web stop` manage it, `--lan` makes it reachable from a phone or another machine with a generated token, and `--json` prints one object (`url`, `login_url`, `token`, `pid`) for agents that set HQ up for someone. Running it twice reuses the server already listening. `hq pwa` and `hq dashboard` are now aliases for it, and `hq pwa --port` still works.
+- **Built-in web search**: `web_search` runs in-process with no key and no Docker. General (Google, DuckDuckGo, Brave, Mojeek, Wikipedia), news, science (arXiv, OpenAlex, Crossref, Europe PMC), images and code categories; SearxNG-style merging plus a relevance factor with title and phrase boosts; a 10-minute cache with single-flight; early return once a main engine answers; per-engine suspensions and the Mojeek cookie kept in `~/.hq/search_state.db`; `web_search_peer` to ask another HQ when local engines are blocked. SearxNG is optional and no longer the default. Guide: `docs/WEB_SEARCH.md`.
+- **Safer search results**: queries that look like credentials are refused before they leave the process, and results are sanitised (invisible characters stripped, instruction-like text flagged).
+- **Better page reading**: `web_fetch` extracts main content, recovers embedded page data, and uses the Jina Reader only as a last resort (`HQ_WEB_FETCH_JINA=0` never sends a URL to it).
+
+- **Process sandbox for built-in host agents**: each agent runs under `sandbox-exec` (macOS) or `bwrap` with the host's tokens and its siblings' configs unreadable, other processes' environments hidden, writes limited to its project and tool directories, and a network limited to a per-agent egress proxy with a domain allowlist (`herdr.sandbox`: `mode`, `allow_domains`, `writable`). A launch fails when the sandbox cannot be applied. Denied hosts are logged (`agent.egress`). See `docs/AGENT_HOST.md`. `hq host serve` refuses unsandboxed agents unless started with `--allow-unsandboxed`, and stops sessions that sit idle past `herdr.idle_reap_hours` (default 24; they stay resumable).
+- **`hq host`**: a built-in host for long-lived coding agents (pseudo-terminals with a readable screen, a JSON control socket with an operator token). `hq host serve|status|stop`; it also detects whether Claude Code and Codex are idle, working or blocked from the screen. It brings agents spawned with a resume command back after a restart or crash (`session.json`, mode 0600) and reports when its binary has been replaced on disk. See `docs/AGENT_HOST.md`. With `herdr.agent_mcp_url` set, a Claude Code session launched on the built-in host connects back to HQ with its own session token, so what it does is attributed to a session HQ launched (task comments carry the session as author); see `docs/security/AGENT_IDENTITY.md`. A session can delegate part of its task to a new session (`agent_delegate`) and is told when the worker finishes; stopping a session stops its children. Agent sessions working on the same task can message each other (`agent_message_send`, stored on the task thread and typed into the recipient when it is idle); see `docs/AGENT_MESSAGING.md`. A built-in host on another machine is reachable over ssh through `hq host gate` (`herdr.hosts.<name>.kind: native`, optional `port`). The host sends state changes as events and tracks `done`, so HQ's supervisor reacts within seconds instead of the next minute sweep. Claude Code launched on it reports its own state and conversation id through per-launch hooks (`hq host report`). New sessions can run on it with `herdr.default_host: native`; the default is still herdr.
 
 ### Upgrading from 0.9.0 or earlier
 
@@ -204,6 +225,9 @@ All notable changes to Agent-HQ will be documented in this file.
 
 #### Fixed
 
+- **pi can reach Google's Gemini API under the agent sandbox**, and `docs/AGENT_HOST.md` now lists what each agent needs to start there.
+- **Cursor and pi can reach the network under the agent sandbox.** Node's fetch ignored the egress proxy, so they went direct, were denied and asked to sign in again; the host now tells Node to use the proxy.
+- **HQ now states the model and provider it is running on** in every chat surface (web, MCP, Discord, Telegram), taken from the backend chain, including fallbacks. The web chat and `hq_ask` gave it no identity, so it quoted a stale config value such as `deepseek-flash` or said it could not tell.
 - **PDF print popup null-window crash** (`hq-web`): Added guard against
   `window.open` returning `null` (browser popup blocker) plus `try/catch` around
   `marked.parse`.

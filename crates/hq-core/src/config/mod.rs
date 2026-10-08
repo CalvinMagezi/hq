@@ -7,7 +7,7 @@ mod copilot_usage;
 mod disk_watchdog;
 mod governance;
 mod harness;
-mod herdr;
+mod agent_host;
 mod instance;
 mod llm;
 mod memory;
@@ -25,12 +25,12 @@ pub use decisions::{
     DecisionMode, DecisionRoute, DecisionSite, DecisionsConfig, SITE_EMAIL_FYI, SITE_MEMORY_TURN,
     SITE_NOTIFY_GATE, SITE_TASK_PLACEMENT,
 };
-pub use copilot_usage::{CopilotUsageConfig, copilot_active};
+pub use copilot_usage::{CopilotUsageConfig, copilot_active, openrouter_key, openrouter_primary};
 pub use disk_watchdog::DiskWatchdogConfig;
 pub use governance::*;
 pub use harness::*;
-pub use herdr::{
-    HarnessProfileConfig, HerdrConfig, HerdrHostConfig, LOCAL_HOST, MAX_LAUNCH_BOUND_SECS,
+pub use agent_host::{
+    HarnessProfileConfig, AgentHostConfig, RemoteHostConfig, SandboxConfig, SandboxMode, LOCAL_HOST, NATIVE_HOST, native_host_dir, MAX_LAUNCH_BOUND_SECS,
     MIN_LAUNCH_BOUND_SECS,
 };
 pub use instance::*;
@@ -98,11 +98,22 @@ pub struct HqConfig {
     pub kimi_code_api_key: Option<String>,
 
     /// Base URL of a self-hosted SearxNG instance (see
-    /// `scripts/setup-searxng.sh`) — the primary `web_search` backend: free,
-    /// no API key, no per-query token cost. Defaults to the local Docker
-    /// instance the setup script creates; set `null` in config.yaml to
-    /// disable and go straight to the Brave fallback.
+    /// `scripts/setup-searxng.sh`). Optional: when set it is tried before the
+    /// built-in search engine. Unset by default, since `web_search` works
+    /// without it.
     pub searxng_url: Option<String>,
+
+    /// Built-in keyless meta-search (Google, DuckDuckGo, Brave, Wikipedia, Bing News,
+    /// arXiv and others, queried in-process). On by default; set `false` to use only
+    /// SearxNG and Brave.
+    #[serde(default = "default_true")]
+    pub web_search_native: bool,
+
+    /// Name of a `remote_mcp` entry (another HQ) whose `web_search` answers when
+    /// this machine's own engines are blocked, for example a server on a
+    /// datacenter address using a peer on a home connection. Unset by default.
+    #[serde(default)]
+    pub web_search_peer: Option<String>,
 
     /// Brave Search API key — paid `web_search` fallback used when SearxNG
     /// is unset or unreachable. https://api.search.brave.com
@@ -218,9 +229,11 @@ pub struct HqConfig {
     #[serde(default)]
     pub budget: BudgetConfig,
 
-    /// Where coding-agent sessions run (Herdr, on this machine or over SSH).
+    /// Where coding-agent sessions run: the built-in host on this machine or on
+    /// a paired one. (Configs written before the rename call this section by its
+    /// old name; `config_yaml` upgrades that heading as the file is read.)
     #[serde(default)]
-    pub herdr: HerdrConfig,
+    pub agent_host: AgentHostConfig,
 
     /// GitHub Copilot CLI (`gh copilot`) headless harness settings.
     #[serde(default)]
@@ -286,8 +299,8 @@ fn default_web_bind() -> String {
     "127.0.0.1".to_string()
 }
 
-/// Where `deploy/hq.service` keeps the VPS config and vault. A Herdr pane
-/// inherits `herdr.service`'s environment, not the daemon's, so without this
+/// Where `deploy/hq.service` keeps the VPS config and vault. A host pane
+/// inherits the host service's environment, not the daemon's, so without this
 /// fallback `hq chat` in a pane silently loads defaults with no backends.
 const SERVER_CONFIG_PATH: &str = "/opt/hq/config.yaml";
 const SERVER_VAULT_PATH: &str = "/opt/hq/.vault";
@@ -338,7 +351,9 @@ impl Default for HqConfig {
             deepseek_api_key: None,
             openai_api_key: None,
             kimi_code_api_key: None,
-            searxng_url: Some("http://localhost:8080".to_string()),
+            searxng_url: None,
+            web_search_native: true,
+            web_search_peer: None,
             brave_api_key: None,
             default_model: default_model(),
             local_only: false,
@@ -360,7 +375,7 @@ impl Default for HqConfig {
             self_update: SelfUpdateConfig::default(),
             disk_watchdog: DiskWatchdogConfig::default(),
             copilot_usage: CopilotUsageConfig::default(),
-            herdr: HerdrConfig::default(),
+            agent_host: AgentHostConfig::default(),
             budget: BudgetConfig::default(),
             github_copilot: GitHubCopilotConfig::default(),
             governance: GovernanceConfig::default(),
@@ -409,6 +424,28 @@ pub fn http_referer() -> Option<String> {
     HTTP_REFERER.read().ok().and_then(|slot| slot.clone())
 }
 
+/// How configs written before the rename headed the agent-host section.
+const OLD_AGENT_HOST_HEADING: &str = "herdr:";
+
+/// The config file as a figment layer, with the agent-host section's old heading
+/// renamed when the file still uses it (figment's alias handling cannot cope with
+/// a defaults layer that already holds the new name). The file on disk is not
+/// touched. None when there is no readable file.
+fn config_yaml(path: &std::path::Path) -> Option<figment::providers::Data<Yaml>> {
+    const OLD: &str = OLD_AGENT_HOST_HEADING;
+    const NEW: &str = "agent_host:";
+    let text = std::fs::read_to_string(path).ok()?;
+    let has = |key: &str| text.lines().any(|l| l.starts_with(key));
+    if has(OLD) && !has(NEW) {
+        let upgraded: String = text
+            .split_inclusive('\n')
+            .map(|l| if l.starts_with(OLD) { l.replacen(OLD, NEW, 1) } else { l.to_string() })
+            .collect();
+        return Some(Yaml::string(&upgraded));
+    }
+    Some(Yaml::string(&text))
+}
+
 impl HqConfig {
     /// Load config from: defaults → config file → env vars. A machine with no
     /// per-user vault but the server's falls back to the server vault, as it
@@ -431,8 +468,8 @@ impl HqConfig {
     /// written back into the committed-shaped YAML file.
     fn file_layer_figment(config_path: &std::path::Path) -> Figment {
         let mut probe = Figment::new();
-        if config_path.exists() {
-            probe = probe.merge(Yaml::file(config_path));
+        if let Some(layer) = config_yaml(config_path) {
+            probe = probe.merge(layer);
         }
         probe = probe.merge(Env::prefixed("HQ_").split("__"));
         let instance_type = probe
@@ -448,8 +485,8 @@ impl HqConfig {
         };
 
         let mut figment = Figment::from(Serialized::defaults(base));
-        if config_path.exists() {
-            figment = figment.merge(Yaml::file(config_path));
+        if let Some(layer) = config_yaml(config_path) {
+            figment = figment.merge(layer);
         }
         figment
     }
@@ -509,7 +546,8 @@ impl HqConfig {
             return;
         };
         for key in user_keys.keys() {
-            if !known_keys.contains_key(key) {
+            let old_heading = key.as_str() == Some(OLD_AGENT_HOST_HEADING.trim_end_matches(':'));
+            if !known_keys.contains_key(key) && !old_heading {
                 tracing::warn!(
                     key = key.as_str().unwrap_or("?"),
                     path = %config_path.display(),
@@ -580,7 +618,7 @@ impl HqConfig {
 
     /// Path `load()` reads: as `config_file_path`, except that with no explicit
     /// path and no per-user file the VPS deploy path `/opt/hq/config.yaml` is
-    /// used when it exists (a Herdr pane inherits no `HQ_CONFIG_PATH`).
+    /// used when it exists (a host pane inherits no `HQ_CONFIG_PATH`).
     /// Readers that must see the file in force (doctor, the secret-file
     /// guard) use this; writers must not.
     pub fn config_read_path() -> PathBuf {
@@ -596,6 +634,12 @@ impl HqConfig {
         dirs::home_dir()
             .unwrap_or_else(|| PathBuf::from("."))
             .join(".hq")
+    }
+
+    /// The `remote_mcp` entry `web_search_peer` names, if both exist.
+    pub fn web_search_peer_server(&self) -> Option<&RemoteMcpServer> {
+        let name = self.web_search_peer.as_deref()?;
+        self.remote_mcp.iter().find(|s| s.name == name)
     }
 
     /// Installed binary path. Checks `HQ_BIN_PATH` first, falls back to the
@@ -688,6 +732,61 @@ pub fn resolve_session_model(config: &HqConfig) -> String {
         .clone()
         .filter(|m| !m.trim().is_empty() && m.trim() != "relay")
         .unwrap_or_else(|| config.default_model.clone())
+}
+
+/// Provider names for the endpoint hosts HQ knows; anything else shows its host.
+const PROVIDER_HOSTS: &[(&str, &str)] = &[
+    ("openrouter.ai", "OpenRouter"),
+    ("githubcopilot.com", "GitHub Copilot"),
+    ("deepseek.com", "DeepSeek"),
+    ("anthropic.com", "Anthropic"),
+    ("kimi.com", "Kimi"),
+];
+
+fn provider_label(entry: &BackendEntry) -> String {
+    let endpoint = entry
+        .endpoint
+        .clone()
+        .or_else(|| entry.kind.default_endpoint().map(str::to_string))
+        .unwrap_or_default();
+    let host = endpoint.split("://").last().unwrap_or_default().split('/').next().unwrap_or_default();
+    PROVIDER_HOSTS
+        .iter()
+        .find(|(h, _)| host == *h || host.ends_with(&format!(".{h}")))
+        .map(|(_, name)| (*name).to_string())
+        .unwrap_or_else(|| if host.is_empty() { entry.name.clone() } else { host.to_string() })
+}
+
+/// What an agent is told about its own model, so it never has to guess or quote
+/// a config default. Shared by the relay and the session builder.
+pub fn runtime_identity_block(config: &HqConfig) -> String {
+    format!(
+        "You are running on {}. State this plainly when asked which model or provider you are; \
+         never say you cannot tell, and never name a model from a config file or memory note instead.",
+        runtime_identity(config)
+    )
+}
+
+/// One sentence telling an agent which model and provider it is running on,
+/// from the same chain `resolve_session_model` reads, so the two never differ.
+pub fn runtime_identity(config: &HqConfig) -> String {
+    let model = resolve_session_model(config);
+    let primary = config.backends.is_configured().then(|| config.backends.backend(&config.backends.primary)).flatten();
+    let Some(primary) = primary else {
+        return format!("`{model}`");
+    };
+    let mut line = format!("`{model}` through {} (backend `{}`)", provider_label(primary), primary.name);
+    let fallbacks: Vec<String> = config
+        .backends
+        .fallbacks
+        .iter()
+        .filter_map(|n| config.backends.backend(n))
+        .map(|b| format!("`{}` through {}", b.model.as_deref().unwrap_or(&b.name), provider_label(b)))
+        .collect();
+    if !fallbacks.is_empty() {
+        line.push_str(&format!("; if that backend fails, a turn is answered by {}", fallbacks.join(", then ")));
+    }
+    line
 }
 
 #[cfg(test)]

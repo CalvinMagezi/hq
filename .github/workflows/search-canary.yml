@@ -1,0 +1,45 @@
+name: Search canary
+
+# Weekly check that the built-in web search engines still answer. It reaches
+# the live internet, so it never gates a pull request: a failure here means an
+# engine changed its layout or started blocking, and the parser needs a look.
+on:
+  schedule:
+    - cron: "17 6 * * 1"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+  CARGO_INCREMENTAL: "0"
+  # Keep in step with ci.yml.
+  RUST_TOOLCHAIN: "1.98.1"
+  APT_DEPS: "build-essential pkg-config perl libssl-dev"
+
+jobs:
+  live-engines:
+    name: Live engines (general, news, science, images, code)
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update
+          read -ra pkgs <<< "$APT_DEPS"
+          sudo apt-get install -y --no-install-recommends "${pkgs[@]}"
+
+      - name: Install Rust toolchain
+        run: |
+          rustup toolchain install "$RUST_TOOLCHAIN" --profile minimal
+          rustup default "$RUST_TOOLCHAIN"
+
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+
+      - name: Query the live engines
+        run: cargo test -p hq-tools --locked live_native -- --ignored --nocapture

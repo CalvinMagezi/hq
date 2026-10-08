@@ -123,17 +123,17 @@ function AttachHint({ session: s }: { session: HarnessSession }) {
   return (
     <div className="space-y-0.5">
       <div className="flex items-center gap-2 min-w-0 text-[11px] font-mono text-neutral-500">
-        <span className="shrink-0">Attach</span>
+        <span className="shrink-0">Host</span>
         <code className="px-1.5 py-0.5 rounded bg-black/40 text-neutral-300 truncate min-w-0 select-all">{command}</code>
         <button
           type="button"
           onClick={() => void copy()}
           className="flex items-center justify-center h-11 w-11 sm:h-8 sm:w-8 rounded text-neutral-400 hover:text-white hover:bg-white/10 shrink-0"
-          aria-label="Copy attach command"
+          aria-label="Copy host status command"
         >
           {copied ? <Check className="w-3.5 h-3.5" /> : <Copy className="w-3.5 h-3.5" />}
         </button>
-        <span className="hidden sm:inline truncate min-w-0">then open the "hq {s.label || s.harness}" workspace</span>
+        <span className="hidden sm:inline truncate min-w-0">lists every agent on that host with its state and idle time</span>
       </div>
       {caveat && <p className="text-[10px] font-mono text-neutral-500">{caveat}</p>}
     </div>

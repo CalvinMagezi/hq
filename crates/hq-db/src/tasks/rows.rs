@@ -73,6 +73,11 @@ pub(super) fn row_to_comment(row: &rusqlite::Row) -> rusqlite::Result<TaskCommen
         author: row.get(2)?,
         body: row.get(3)?,
         created_at: row.get(4)?,
+        kind: row.get(5)?,
+        sender_session_id: row.get(6)?,
+        to_session_id: row.get(7)?,
+        reply_to: row.get(8)?,
+        delivered_at: row.get(9)?,
     })
 }
 

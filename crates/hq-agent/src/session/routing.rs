@@ -330,7 +330,7 @@ pub(crate) fn tool_arg_preview(name: &str, args: &serde_json::Value) -> Option<S
         get("query")
             .or_else(|| get("pattern"))
             .or_else(|| get("q"))
-            .map(|q| format!("\u{201C}{q}\u{201D}"))
+            .map(|q| format!("\u{201C}{}\u{201D}", hq_core::redact::redact_secrets(q)))
     } else if n.contains("subagent") || n.contains("spawn") || n == "coordinator" {
         get("agent_type")
             .or_else(|| get("agent"))
@@ -410,5 +410,16 @@ mod arg_preview_tests {
     #[test]
     fn empty_args_is_none() {
         assert!(tool_arg_preview("noop", &json!({})).is_none());
+    }
+
+    #[test]
+    fn a_credential_in_a_search_query_is_not_shown_in_the_live_preview() {
+        let p = tool_arg_preview(
+            "web_search",
+            &json!({"query": "why does sk-or-v1-0123456789abcdef0123456789abcdef fail"}), // gitleaks:allow
+        )
+        .unwrap();
+        assert!(!p.contains("0123456789abcdef"), "{p}");
+        assert!(p.contains("[REDACTED]"), "{p}");
     }
 }

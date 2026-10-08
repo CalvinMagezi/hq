@@ -693,7 +693,7 @@ async fn only_a_few_questions_can_wait_at_once() {
 #[tokio::test]
 async fn only_a_couple_of_full_mode_questions_can_wait_at_once() {
     let r = rig(Plan::Hold);
-    let cap = hq_core::config::HerdrConfig::default().full_ask_cap();
+    let cap = hq_core::config::AgentHostConfig::default().full_ask_cap();
     for i in 0..cap {
         r.ask
             .execute(json!({"question": format!("f{i}"), "mode": "full", "wait_secs": 0}))
@@ -705,7 +705,7 @@ async fn only_a_couple_of_full_mode_questions_can_wait_at_once() {
         .execute(json!({"question": "one more", "mode": "full", "wait_secs": 0}))
         .await
         .unwrap_err();
-    assert!(err.to_string().contains("herdr.max_full_asks"), "{err}");
+    assert!(err.to_string().contains("agent_host.max_full_asks"), "{err}");
     assert!(
         r.ask
             .execute(json!({"question": "read only is not held to it", "wait_secs": 0}))

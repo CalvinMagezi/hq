@@ -55,6 +55,30 @@ pub fn copilot_active(config: &HqConfig) -> bool {
         .any(|b| b.enabled && is_copilot_backend(b))
 }
 
+const OPENROUTER_HOST: &str = "openrouter.ai";
+
+/// The primary backend when it talks to OpenRouter, so the usage panel follows the provider
+/// that actually answers turns. A fallback-only OpenRouter backend is not reported.
+pub fn openrouter_primary(config: &HqConfig) -> Option<&BackendEntry> {
+    let primary = config.backends.backend(&config.backends.primary)?;
+    let on_openrouter = primary.kind == BackendKind::Openrouter
+        || primary
+            .resolved_endpoint()
+            .is_some_and(|e| e.contains(OPENROUTER_HOST));
+    (primary.enabled && on_openrouter).then_some(primary)
+}
+
+/// API key for the OpenRouter primary backend: its `credential_env`, else the flat config key.
+pub fn openrouter_key(config: &HqConfig, backend: &BackendEntry) -> Option<String> {
+    backend
+        .credential_env
+        .as_deref()
+        .and_then(|name| std::env::var(name).ok())
+        .or_else(|| config.openrouter_api_key.clone())
+        .map(|k| k.trim().to_string())
+        .filter(|k| !k.is_empty())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -83,5 +107,17 @@ mod tests {
     fn defaults_to_ten_minutes() {
         let c: CopilotUsageConfig = serde_yaml::from_str("{}").unwrap();
         assert!(c.enabled && c.interval_minutes == 10);
+    }
+
+    #[test]
+    fn openrouter_is_reported_only_when_it_is_the_primary() {
+        let primary = "primary: a\nbackends:\n  - name: a\n    kind: openrouter\n    model: m\n";
+        let fallback = "primary: b\nfallbacks: [a]\nbackends:\n  - name: a\n    kind: openrouter\n  - name: b\n    kind: github-copilot-api\n";
+        assert_eq!(
+            openrouter_primary(&cfg(primary)).map(|b| b.name.as_str()),
+            Some("a")
+        );
+        assert!(openrouter_primary(&cfg(fallback)).is_none());
+        assert!(openrouter_primary(&HqConfig::default()).is_none());
     }
 }

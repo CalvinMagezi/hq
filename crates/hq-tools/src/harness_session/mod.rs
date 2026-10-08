@@ -1,11 +1,11 @@
 //! Harness-agnostic session manager: spawn, monitor, steer, stop, and resume
 //! long-lived external agent CLIs (claude-code, cursor, opencode, pi, kimi,
-//! codex, qwen, antigravity, github-copilot) inside Herdr, on this machine or
+//! codex, qwen, antigravity, github-copilot) inside the host, on this machine or
 //! on a remote host, tracked in the `harness_sessions` table.
 //!
 //! These tools only mutate sessions HQ launched. Agents a person started by
-//! hand are visible through `herdr_agents`/`herdr_read` and steerable only
-//! through `herdr_send`.
+//! hand are visible through `host_agents`/`host_read` and steerable only
+//! through `host_send`.
 
 pub mod dismiss;
 mod coalesce;
@@ -19,8 +19,8 @@ mod cwd;
 mod launch;
 mod origin;
 
-use crate::herdr::{
-    self, AgentInfo, AgentStatus, HerdrError, HerdrHost, LaunchRequest, Launched, PromptOutcome,
+use crate::agent_host::{
+    self, AgentInfo, AgentStatus, AgentHostError, Host, HostBackend, LaunchRequest, Launched, PromptOutcome,
 };
 use anyhow::{Result, bail};
 use hq_db::Database;
@@ -32,9 +32,11 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use spec::SPECS;
+pub use launch::resume_awaiting;
 pub use spec::{Harness, HarnessSessionSpec, ResumeStrategy, resolve, resolve_in, spec_for};
 
-const SESSION_DIR_ROOT: &str = "_data/session-dirs";
+/// Under the home of the host that runs pi, inside the state directory its sandbox may write.
+const PI_SESSION_DIR: &str = ".pi/hq-sessions";
 
 /// How long to wait for an agent to reach its prompt after a trust dialog was
 /// accepted for it.
@@ -60,16 +62,16 @@ pub enum Liveness {
     HostUnreachable(String),
 }
 
-use herdr::blocking;
+use agent_host::blocking;
 
 /// Ask each host named by `rows` for its agents, once per host.
 pub fn poll_hosts(rows: &[HarnessSessionRow]) -> HostPoll {
-    poll_hosts_with(rows, |name| herdr::host(Some(name)))
+    poll_hosts_with(rows, |name| agent_host::host(Some(name)))
 }
 
 pub fn poll_hosts_with(
     rows: &[HarnessSessionRow],
-    resolve: impl Fn(&str) -> anyhow::Result<HerdrHost>,
+    resolve: impl Fn(&str) -> anyhow::Result<Host>,
 ) -> HostPoll {
     let mut polled = HostPoll::new();
     for row in rows {
@@ -93,7 +95,7 @@ pub fn liveness(polled: &HostPoll, row: &HarnessSessionRow) -> Liveness {
     }
 }
 
-/// Herdr agent names are `[a-z][a-z0-9_-]{0,31}`; the prefix and the ten-digit
+/// host agent names are `[a-z][a-z0-9_-]{0,31}`; the prefix and the ten-digit
 /// suffix leave this much room for the harness name.
 const MAX_HARNESS_IN_ID: usize = 18;
 

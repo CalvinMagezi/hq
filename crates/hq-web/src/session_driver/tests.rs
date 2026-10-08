@@ -32,6 +32,8 @@ fn row(drive: bool) -> HarnessSessionRow {
         no_progress_streak: 0,
         progress_mark: None,
         drive_off_reason: None,
+        parent_session_id: None,
+        spawn_depth: 0,
     }
 }
 
@@ -271,7 +273,7 @@ async fn assert_switched_off(state: &Arc<WsState>, thread: &str, why: &str) {
 async fn a_session_that_used_its_nudge_budget_is_switched_off_with_one_notice() {
     let state = test_state();
     let (thread, _) = driven(&state, "finished", None);
-    let budget = herdr_config(&state).nudge_budget();
+    let budget = agent_host_config(&state).nudge_budget();
     state
         .db
         .with_conn(|c| {
@@ -291,7 +293,7 @@ async fn a_session_that_used_its_nudge_budget_is_switched_off_with_one_notice() 
 async fn finished_turns_with_no_new_tool_activity_switch_drive_off() {
     let state = test_state();
     let (thread, _) = driven(&state, "finished", None);
-    let limit = herdr_config(&state).no_progress_limit();
+    let limit = agent_host_config(&state).no_progress_limit();
     let screen = "⏺ Bash(cargo test)\n  ⎿ 12 passed\n⏺ All done, ready for your review.";
     let mark = tool_activity(screen).join("\n");
     state
@@ -458,15 +460,15 @@ async fn a_finished_turn_after_a_user_typed_send_is_not_counted_as_a_stall() {
         .db
         .with_conn(|c| {
             registry::set_last_snapshot(c, "hs-w", screen)?;
-            registry::set_progress(c, "hs-w", herdr_config(&state).no_progress_limit() - 1, Some(&tool_activity(screen).join("\n")))
+            registry::set_progress(c, "hs-w", agent_host_config(&state).no_progress_limit() - 1, Some(&tool_activity(screen).join("\n")))
         })
         .unwrap();
     assert!(row_of(&state).last_wake_nudges.is_none());
 
-    let stop = driver_guard(&state, &row_of(&state), None, WAKE_FINISHED, &herdr_config(&state));
+    let stop = driver_guard(&state, &row_of(&state), None, WAKE_FINISHED, &agent_host_config(&state));
 
     assert!(stop.is_none(), "{stop:?}");
-    assert_eq!(row_of(&state).no_progress_streak, herdr_config(&state).no_progress_limit() - 1, "left alone");
+    assert_eq!(row_of(&state).no_progress_streak, agent_host_config(&state).no_progress_limit() - 1, "left alone");
     assert!(messages(&state, &thread).is_empty());
 }
 
@@ -474,7 +476,7 @@ async fn a_finished_turn_after_a_user_typed_send_is_not_counted_as_a_stall() {
 async fn the_key_allowance_stops_drive_separately_from_the_instruction_budget() {
     let state = test_state();
     let (thread, _) = driven(&state, "blocked", None);
-    let keys = herdr_config(&state).key_allowance();
+    let keys = agent_host_config(&state).key_allowance();
     state.db.with_conn(|c| Ok(c.execute("UPDATE harness_sessions SET keys_sent = ?1 WHERE id = 'hs-w'", [keys])?)).unwrap();
 
     drive_due(&state).await;
@@ -486,7 +488,7 @@ async fn the_key_allowance_stops_drive_separately_from_the_instruction_budget() 
 async fn a_check_in_does_not_stop_drive_on_the_task_rule_while_the_agent_is_working() {
     let state = test_state();
     driven(&state, "blocked", Some("ready_for_review"));
-    let cfg = herdr_config(&state);
+    let cfg = agent_host_config(&state);
     let task = state.db.with_conn(|c| t::get_task(c, "tk-1")).unwrap();
 
     let mut row = row_of(&state);

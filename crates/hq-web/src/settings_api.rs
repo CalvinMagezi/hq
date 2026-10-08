@@ -57,7 +57,7 @@ fn backends_view(config: &HqConfig) -> Value {
 
 pub(crate) fn settings_view(config: &HqConfig) -> Value {
     let sandbox = serde_json::to_value(config.governance.bash.sandbox).unwrap_or(Value::Null);
-    let hosts: Vec<&String> = config.herdr.hosts.keys().collect();
+    let hosts: Vec<&String> = config.agent_host.hosts.keys().collect();
     let remote_mcp: Vec<Value> = config
         .remote_mcp
         .iter()
@@ -90,17 +90,24 @@ pub(crate) fn settings_view(config: &HqConfig) -> Value {
             "skills_write_approval": config.governance.skills_write_approval,
             "web_allowed_origins": config.web_allowed_origins,
         },
-        "herdr": {
-            "default_host": config.herdr.default_host,
+        "agent_host": {
+            "default_host": config.agent_host.default_host,
             "hosts": hosts,
-            "drive_new_watches": config.herdr.drive_new_watches,
-            "driver_checkin_minutes": config.herdr.driver_checkin_minutes,
-            "driver_nudge_budget": config.herdr.nudge_budget(),
-            "driver_no_progress_limit": config.herdr.no_progress_limit(),
+            "sandbox_mode": match config.agent_host.sandbox.mode {
+                hq_core::config::SandboxMode::Process => "process",
+                hq_core::config::SandboxMode::None => "none",
+            },
+            "sandbox_extra_domains": config.agent_host.sandbox.allow_domains.len(),
+            "idle_reap_hours": config.agent_host.idle_reap_hours,
+            "drive_new_watches": config.agent_host.drive_new_watches,
+            "driver_checkin_minutes": config.agent_host.driver_checkin_minutes,
+            "driver_nudge_budget": config.agent_host.nudge_budget(),
+            "driver_no_progress_limit": config.agent_host.no_progress_limit(),
         },
         "integrations": {
             "remote_mcp": remote_mcp,
             "searxng_host": config.searxng_url.as_deref().map(host_of),
+            "web_search_native": config.web_search_native,
             "disk_watchdog_enabled": config.disk_watchdog.enabled,
         },
     })

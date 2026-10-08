@@ -30,7 +30,7 @@ fn event_for_status_rejects_unknown_and_hostile_statuses() {
 use super::*;
 use crate::pool::Database;
 
-fn setup() -> (Database, String) {
+pub(super) fn setup() -> (Database, String) {
     let db = Database::open_memory().unwrap();
     let initiative_id = db
         .with_conn(|c| {
@@ -52,7 +52,7 @@ fn new_task<'a>(title: &'a str, tags: &'a [String]) -> NewTask<'a> {
     }
 }
 
-fn make(db: &Database, id: &str, initiative_id: &str, parent: Option<&str>) -> Result<Task> {
+pub(super) fn make(db: &Database, id: &str, initiative_id: &str, parent: Option<&str>) -> Result<Task> {
     db.with_conn(|c| {
         create_task(
             c,

@@ -73,12 +73,45 @@ enum Commands {
         /// Short label (spawn)
         #[arg(long)]
         label: Option<String>,
-        /// Herdr host to run on, e.g. a laptop from `herdr.hosts` (spawn; default: this machine)
+        /// host to run on, e.g. a laptop from `agent_host.hosts` (spawn; default: this machine)
         #[arg(long)]
         host: Option<String>,
         /// Log lines to tail (logs)
         #[arg(long, default_value_t = 40)]
         lines: usize,
+    },
+
+    /// Run or inspect the built-in agent host (long-lived coding agents in pseudo-terminals)
+    Host {
+        /// serve (run the host in this terminal), status, stop, install (run it as a login service), join (print this machine's join code), add <code> (pair a machine, on the HQ side), check <host>, authorize (pin a remote key to the gate), report (used by agent hooks), or gate (the ssh forced command for remote access)
+        #[arg(default_value = "status")]
+        sub: String,
+        /// add: the join code; check: the host name; join: the name for this machine
+        arg: Option<String>,
+        /// Directory holding host.sock and operator.token (default: ~/.hq/run/host)
+        #[arg(long)]
+        dir: Option<std::path::PathBuf>,
+        /// serve only: also start agents that are not under the process sandbox. Without it the host refuses them, whoever asks.
+        #[arg(long)]
+        allow_unsandboxed: bool,
+        /// authorize only: the ssh public key to pin to `hq host gate`
+        #[arg(long)]
+        key: Option<String>,
+        /// authorize only: the address the key may connect from (ssh `from=`)
+        #[arg(long)]
+        from: Option<String>,
+        /// relay and sandbox-init (run inside a Linux sandbox): the loopback port to serve
+        #[arg(long)]
+        port: Option<u16>,
+        /// relay and sandbox-init: the unix socket the relay forwards to
+        #[arg(long)]
+        unix: Option<std::path::PathBuf>,
+        /// sandbox-init: the agent command to run after `--`
+        #[arg(last = true)]
+        rest: Vec<String>,
+        /// join: this machine's tailnet address when tailscale cannot be asked
+        #[arg(long)]
+        addr: Option<String>,
     },
 
     /// Internal: detached applier spawned by self_update_install
@@ -449,7 +482,11 @@ fn main() -> Result<()> {
         std::env::args().nth(1).as_deref(),
         Some("update" | "update-db")
     );
-    if !privileged_command {
+    // An agent's hook runs inside its sandbox, where the user's env files and
+    // config are unreadable on purpose; it needs neither.
+    let args: Vec<String> = std::env::args().skip(1).take(2).collect();
+    let hook_command = matches!(args.as_slice(), [host, sub] if host == "host" && (sub == "report" || sub == "gate"));
+    if !privileged_command && !hook_command {
         if let Ok(home) = std::env::var("HOME") {
             load_env_file(&std::path::PathBuf::from(home).join(".env.local"));
         }
@@ -475,6 +512,26 @@ async fn async_main() -> Result<()> {
         Some(Commands::Update(args)) => std::process::exit(commands::update::run(args).await),
         Some(Commands::UpdateDb { args }) => std::process::exit(commands::update::run_db(&args)),
         _ => {}
+    }
+
+    // The host's hook reporter and ssh gate need no config, and the reporter
+    // runs where the config is unreadable.
+    if let Some(Commands::Host { sub, arg, dir, allow_unsandboxed, key, from, port, unix, rest, addr }) = &cli.command
+        && matches!(sub.as_str(), "report" | "gate" | "relay" | "sandbox-init")
+    {
+        return commands::host::run(commands::host::HostArgs {
+            sub: sub.clone(),
+            arg: arg.clone(),
+            addr: addr.clone(),
+            dir: dir.clone(),
+            allow_unsandboxed: *allow_unsandboxed,
+            key: key.clone(),
+            from: from.clone(),
+            port: *port,
+            unix: unix.clone(),
+            rest: rest.clone(),
+        })
+        .await;
     }
 
     // `--config` was exported as HQ_CONFIG_PATH in main(), so this and every
@@ -615,6 +672,7 @@ async fn dispatch(command: Commands, config: &HqConfig) -> Result<()> {
             host,
             lines,
         } => commands::sessions::run(config, &sub, arg, prompt, cwd, label, host, lines).await,
+        Commands::Host { sub, arg, dir, allow_unsandboxed, key, from, port, unix, rest, addr } => commands::host::run(commands::host::HostArgs { sub, arg, dir, allow_unsandboxed, key, from, port, unix, rest, addr }).await,
         Commands::SelfApply { run_id } => commands::self_apply::run(config, run_id).await,
         Commands::NotifyRestart { phase, reason, sha } => {
             commands::notify_restart::run(config, &phase, &reason, sha.as_deref()).await

@@ -78,6 +78,7 @@ pub async fn run(
                     label: label.as_deref().unwrap_or(""),
                     mission_id: None,
                     watch: None,
+                    parent: None,
                     goal: Default::default(),
                 },
             )
@@ -126,7 +127,7 @@ pub async fn run(
     Ok(())
 }
 
-/// Live Herdr status, or why there is none (`away` for an unreachable host).
+/// Live the host status, or why there is none (`away` for an unreachable host).
 fn agent_column(view: &serde_json::Value) -> &str {
     if view["reachable"] == false {
         return "away";

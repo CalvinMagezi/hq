@@ -342,7 +342,7 @@ pub(crate) async fn start_driver_turn(state: &Arc<WsState>, thread_id: &str, pro
 
 /// Tool only a session-driver turn lacks: `harness_session_send` is the metered path for typing
 /// into a pane. Every driver-started turn also loses `config_manage`.
-const DRIVER_DENIED_TOOL: &str = "herdr_send";
+const DRIVER_DENIED_TOOL: &str = "host_send";
 const CONFIG_TOOL: &str = "config_manage";
 
 /// What `start_driver_turn` did.

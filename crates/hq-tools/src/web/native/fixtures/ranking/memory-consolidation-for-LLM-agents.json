@@ -1,0 +1,446 @@
+{
+ "category": "science",
+ "engines": [
+  {
+   "engine": "arxiv",
+   "results": [
+    {
+     "published": "2026-05-15T15:17:36Z",
+     "snippet": "Memory systems often organize user-agent interactions as retrievable external memory and are crucial for long-running agents by overcoming the limited context windows of LLMs. However, existing memory systems invoke LLMs to process every incoming interaction for memory extraction, and such an eager memory consolidation scheme leads to substantial token consumption. To tackle this problem, we propose RecMem by rethinking when memory consolidation should be conducted. RecMem stores incoming interactions in a subconscious memory layer and encode them using lightweight embedding models for retrieval. LLMs are only invoked to extract episodic and semantic memory when sustained recurrence are observed for semantically similar interactions. Such recurrence-based consolidation works because these interactions correspond to a semantic cluster with rich information and thus are worth extraction and summarization. To improve accuracy, RecMem also incorporates a semantic refinement mechanism that recovers the fine-grained facts omitted by memory extraction. Experiments show that RecMem reduces the memory construction token cost of three SOTA memory systems by up to 87% while exceeding their …",
+     "title": "RecMem: Recurrence-based Memory Consolidation for Efficient and Effective Long-Running LLM Agents",
+     "url": "https://arxiv.org/abs/2605.16045v1"
+    },
+    {
+     "published": "2026-08-13T09:13:15Z",
+     "snippet": "Long-horizon LLM agents must preserve information from past interactions to support future tasks. Existing memory systems typically rely on eager consolidation, invoking LLMs after each interaction to extract, summarize, or update memories. This design makes memory construction increasingly costly as conversations grow. Coarse summarization can reduce construction cost but risks discarding fine-grained contextual evidence, whereas larger retrieval contexts or multi-hop LLM reasoning shift the overhead to query time. We present LycheeMemory V2, an efficient long-term memory framework that replaces turn-level consolidation with semantic segment-level consolidation. Instead of consolidating every interaction, LycheeMemory batches multiple exchanges into segments and encodes each finalized segment into context-independent typed memory records. Segment-level batching lowers LLM encoding frequency, while semantic boundary detection helps preserve coherent event-level and temporal evidence compared with fixed-window batching. The resulting records are organized with lightweight structured indexes for query-planned evidence retrieval. Experiments using GPT-4.1-Mini show that LycheeMemory …",
+     "title": "LycheeMemory V2: Efficient Long-Term Memory for LLM Agents via Semantic Segment-Level Consolidation",
+     "url": "https://arxiv.org/abs/2608.12990v1"
+    },
+    {
+     "published": "2026-06-23T20:49:28Z",
+     "snippet": "Large language model (LLM) agents rely on long-term memory to support extended interactions and personalized assistance beyond finite context windows. Existing memory agents actively update external memory through generated write, revise, and delete operations, but these updates may omit important information, corrupt existing memory, or introduce unsupported hallucinated content. Once stored, such errors become persistent system-state failures that can affect future reasoning and generation. In this paper, we propose TrustMem, a framework designed to improve the trustworthiness of memory consolidation. TrustMem relies on a Memory Transition Verifier to evaluate the transition process of memory updates in terms of coverage, preservation, and faithfulness. It further constructs preference pairs among candidate updates under the same memory state, enabling preference-guided reinforcement learning to directly optimize memory updating behaviors. Extensive experiments demonstrate that TrustMem improves both memory utility and reliability: it achieves state-of-the-art results across MemoryAgentBench, HaluMem, and the Mem-alpha validation set, improves HaluMem memory extraction by 12.14 …",
+     "title": "TRUSTMEM: Learning Trustworthy Memory Consolidation for LLM Agents with Long-Term Memory",
+     "url": "https://arxiv.org/abs/2606.25161v1"
+    },
+    {
+     "published": "2024-03-31T06:18:30Z",
+     "snippet": "In this study, we propose a novel human-like memory architecture designed for enhancing the cognitive abilities of large language model based dialogue agents. Our proposed architecture enables agents to autonomously recall memories necessary for response generation, effectively addressing a limitation in the temporal cognition of LLMs. We adopt the human memory cue recall as a trigger for accurate and efficient memory recall. Moreover, we developed a mathematical model that dynamically quantifies memory consolidation, considering factors such as contextual relevance, elapsed time, and recall frequency. The agent stores memories retrieved from the user's interaction history in a database that encapsulates each memory's content and temporal context. Thus, this strategic storage allows agents to recall specific memories and understand their significance to the user in a temporal context, similar to how humans recognize and recall past experiences.",
+     "title": "\"My agent understands me better\": Integrating Dynamic Human-like Memory Recall and Consolidation in LLM-Based Agents",
+     "url": "https://arxiv.org/abs/2404.00573v1"
+    },
+    {
+     "published": "2026-03-03T14:00:58Z",
+     "snippet": "Large language model (LLM) agents are increasingly deployed in long running workflows, where they must preserve user and task state across many turns. Many existing agent memory systems behave like external databases with ad hoc read/write rules, which can yield unstable retention, limited consolidation, and vulnerability to distractor content. We present CraniMem, a neurocognitively motivated, gated and bounded multi-stage memory design for agentic systems. CraniMem couples goal conditioned gating and utility tagging with a bounded episodic buffer for near term continuity and a structured long-term knowledge graph for durable semantic recall. A scheduled consolidation loop replays high utility traces into the graph while pruning low utility items, keeping memory growth in check and reducing interference. On long horizon benchmarks evaluated under both clean inputs and injected noise, CraniMem is more robust than a Vanilla RAG and Mem0 baseline and exhibits smaller performance drops under distraction. Our code is available at https://github.com/PearlMody05/Cranimem and the accompanying PyPI package at https://pypi.org/project/cranimem.",
+     "title": "CraniMem: Cranial Inspired Gated and Bounded Memory for Agentic Systems",
+     "url": "https://arxiv.org/abs/2603.15642v1"
+    },
+    {
+     "published": "2026-09-26T23:10:45Z",
+     "snippet": "Long-horizon LLM agents must convert accumulated experience into durable memory, deciding what to keep, compress, abstract into reusable skills and rules, or forget. We report a four-phase research program on this consolidation problem whose central finding is a shift in what is measured: from how much an agent remembers, to whether its consolidation decisions are any good, to whether those decisions can be trusted. Phase 1 learns episodic boundaries from agent traces by downstream utility; an honest near-miss (oracle correlation 0.691 vs a 0.70 bar) whose lasting output is a three-gate anti-leakage protocol. Phase 2 learns when to promote experience and to which abstraction level under a token budget, achieving a verified +22.7% task-success improvement with 7x compression, but exposing a degenerate-forgetting failure and a distribution-shift failure mode we name lambda-prevalence coupling. Phase 3 introduces ConsolidationBench, an oracle-by-construction benchmark that scores consolidation decisions against a known optimum on three non-circular axes; production retrieval systems retain information yet score zero on cross-level transfer. Phase 4 introduces governed consolidation: …",
+     "title": "The Epistemics of Agent Memory: Measuring, and Governing, the Consolidation Decision in Long-Horizon LLM Agents",
+     "url": "https://arxiv.org/abs/2609.33013v1"
+    },
+    {
+     "published": "2026-08-23T04:40:13Z",
+     "snippet": "Large language model (LLM) agents operate in dynamic environments where knowledge continuously evolves. Existing memory systems typically treat external memory as a monotonically growing repository, inevitably leading to retrieval degradation and increasing computational costs over time. We argue that the core challenge is not retrieval alone, but managing the knowledge lifecycle: deciding what to externalize, update, or ultimately internalize. Inspired by Complementary Learning Systems (CLS) theory in neuroscience, we propose Dual-Layer Agentic Memory, a framework that shifts memory management to the write phase through cost-aware epistemic routing and periodic parametric consolidation. Incoming information is categorized as non-write, write-new, or write-update, and routed through a small-to-large model cascade that minimizes routing overhead while filtering redundant memories. A subsequent write-back phase selectively consolidates high-value external memories into model parameters via supervised fine-tuning. Experiments demonstrate the dual efficiency of our approach: a 1.7B/8B cascade prunes up to 68% of redundant external memory while escalating fewer than 50% of inputs, yet …",
+     "title": "Dual-Layer Agentic Memory with Fast Write Routing and Slow Consolidation",
+     "url": "https://arxiv.org/abs/2608.22215v2"
+    },
+    {
+     "published": "2026-01-06T09:24:19Z",
+     "snippet": "Long-horizon conversational agents have to manage ever-growing interaction histories that quickly exceed the finite context windows of large language models (LLMs). Existing memory frameworks provide limited support for temporally structured information across hierarchical levels, often leading to fragmented memories and unstable long-horizon personalization. We present TiMem, a temporal--hierarchical memory framework that organizes conversations through a Temporal Memory Tree (TMT), enabling systematic memory consolidation from raw conversational observations to progressively abstracted persona representations. TiMem is characterized by three core properties: (1) temporal--hierarchical organization through TMT; (2) semantic-guided consolidation that enables memory integration across hierarchical levels without fine-tuning; and (3) complexity-aware memory recall that balances precision and efficiency across queries of varying complexity. Under a consistent evaluation setup, TiMem achieves state-of-the-art accuracy on both benchmarks, reaching 75.30% on LoCoMo and 76.88% on LongMemEval-S. It outperforms all evaluated baselines while reducing the recalled memory length by 52.20% on …",
+     "title": "TiMem: Temporal-Hierarchical Memory Consolidation for Long-Horizon Conversational Agents",
+     "url": "https://arxiv.org/abs/2601.02845v2"
+    },
+    {
+     "published": "2026-06-23T16:34:55Z",
+     "snippet": "Memory for large language model (LLM) agents has rapidly evolved from simple retrieval-augmented mechanisms into a data management system that supports persistent information storage, retrieval, update, consolidation, and dynamic lifecycle governance throughout agent execution. Despite this evolution, existing evaluations still benchmark agent memory mainly through end-to-end task success metrics (e.g., F1, BLEU), while treating the underlying system as a monolithic black box. As a result, critical system-level concerns, including operational costs, architectural trade-offs across memory modules, and robustness under dynamic knowledge updates, remain insufficiently explored. In this paper, we present a systematic experimental study of agent memory from a data management perspective. We propose an analytical framework that decomposes agent memory into four core modules: memory representation and storage, extraction, retrieval and routing, and maintenance. Under this framework, we evaluate 12 representative memory systems and two reference baselines across five benchmark workloads spanning 11 datasets. Our extensive end-to-end evaluation shows that no single architecture dominates …",
+     "title": "Are We Ready For An Agent-Native Memory System?",
+     "url": "https://arxiv.org/abs/2606.24775v1"
+    },
+    {
+     "published": "2026-07-20T04:43:47Z",
+     "snippet": "Language agents depend on memory across interactions. However, the limited context windows of large language models (LLMs) and their inference costs constrain how much memory can be used at once. Existing systems mainly follow two strategies: memory retention and memory consolidation. Retention keeps raw records and preserves exact details, but relevant evidence may not fit under a tight budget; consolidation compresses and combines records, improving coverage per token but risking the loss of query-critical details. Neither strategy is universally preferable. This raises two central questions: when should consolidation replace retention, and which operator -- Merge, Abstract, or Rewrite -- should be selected? We formalize this decision by decomposing each operator's utility into a coverage effect on evidence omitted by retention and a signed replacement effect on raw evidence that already fits. Their balance explains why the preferred action changes with relative budget pressure. We implement this mechanism with Offline Abstraction-Safety (OAS), a lightweight learner that estimates action utilities from pre-generation features with held-out harm calibration. The public …",
+     "title": "Retain or Consolidate? Budget-Dependent Operator Selection for Language Agent Memory",
+     "url": "https://arxiv.org/abs/2607.17545v2"
+    },
+    {
+     "published": "2026-01-14T07:38:38Z",
+     "snippet": "Research in artificial intelligence is shifting from model innovations and benchmark scores towards problem definition and rigorous real-world evaluation. As the field enters the \"second half,\" the central challenge becomes real utility in long-horizon, dynamic, and user-dependent settings such as agentic coding, deep research, and computer use, where LLM-based agents face context explosion beyond fixed context windows and must continuously accumulate, manage, and selectively reuse information across extended interactions. Memory, with hundreds of papers released in 2025, therefore emerges as the critical solution to fill this utility gap. Beyond passive storage, memory is increasingly the substrate through which agents self-evolve: short-term memory gates which experiences are perceived and abstracted during execution, while long-term memory consolidates them into reusable knowledge and skills, forming the loop through which agents improve from their own experience. In this survey, we provide a unified view of foundation agent memory along three dimensions: memory substrate (internal parametric state and external retrieval-augmented stores), cognitive mechanism (sensory, working, …",
+     "title": "A Survey of Agent Memory in the Second Half: Towards Self-Evolving and Long-Horizon Agents",
+     "url": "https://arxiv.org/abs/2602.06052v4"
+    },
+    {
+     "published": "2026-08-03T04:15:40Z",
+     "snippet": "Persistent memory allows (self-evolving) LLM agents to adapt across tasks by consolidating heterogeneous interaction histories into reusable facts, preferences, observations, and rules. Yet consolidation also imposes an implicit authorization boundary: it determines whether stored information may later be consumed as a user fact, an attested observation, or a standing instruction. We identify authority collapse, in which consolidation preserves a claim while erasing the source constraints governing its authorized use, causing the stored memory to imply greater authority than its source permits. We introduce AuthMem-Bench, a controlled paired benchmark that holds the focal claim and downstream task fixed while varying only source authority. It evaluates write-time collapse, downstream authorization errors, and automatic authority preservation. Across seven consolidators based on widely used agent-memory systems and seven LLM backbones, we observe authority collapse in 48 of 49 evaluated configurations. In a controlled action-grounded evaluation, collapsed memories without authority metadata yield a mean unauthorized-action rate of 50.3%. In an end-to-end evaluation, automatically …",
+     "title": "When Memory Becomes Authority: Benchmarking Authority Collapse at the Memory Consolidation Boundary",
+     "url": "https://arxiv.org/abs/2608.01679v2"
+    },
+    {
+     "published": "2026-07-15T08:32:40Z",
+     "snippet": "Large Language Model (LLM) agents increasingly rely on external memory systems to accumulate experience across tasks. Yet nearly all existing approaches, from graph-structured memories to reflective insight stores, access memory through fixed, hand-designed heuristics. We argue that this static view of memory is a core bottleneck for agentic learning because optimal memory behavior is fundamentally context-dependent. The early stages of the tasks, benefit from minimal retrieval because memory is sparse; recurring goal types benefit from plan reuse rather than generic nearest-neighbor lookup; stuck agents benefit from re-retrieval with alternative queries; and across long task streams, the memory store itself must be consolidated and pruned to remain useful. We present Memory as a Controlled Process (MemCon), a framework that models memory operations as a Markov Decision Process and learns an online policy that adaptively decides when, what, and how much to retrieve, when to inject a distilled plan, and when to consolidate or forget. MemCon is backend-agnostic: it wraps any existing memory implementation, learns from task-by-task binary feedback with no pretraining and no …",
+     "title": "Memory as a Controlled Process: Learned Adaptive Memory Management for LLM Agents",
+     "url": "https://arxiv.org/abs/2607.13591v2"
+    },
+    {
+     "published": "2026-07-31T08:46:27Z",
+     "snippet": "Long-term memory lets large language model(LLM) agents reuse prior preferences and work flows, but it also turns untrusted observations into persistent action context. We identify memory provenance laundering: during LLM-based memory consolidation, an external observation may be rewritten as apparent user history or workflow support, preserving an action trigger while erasing the low-trust source that should limit its authority. Existing prompt filters, content sanitizers, and tool guards do not enforce source-authority non-amplification after lossy memory consolidation. We formalize this boundary and instantiate it as Provenance-Preserving Memory Fire wall (PPMF), a lightweight memory middleware that preserves platform-maintained provenance and authorizes tool calls by matching action risk to the authority of action-relevant memories. In our schema-grounded evaluation with fixed risk policies, vulnerable consolidated memories reach up to 1.000 attack success rate(ASR); with intact platform-maintained provenance, confirmation, and risk labels, no evaluated unauthorized high-risk action passes the PPMF gate while confirmed benign actions and targeted low-risk memory use remain …",
+     "title": "Memory Provenance Laundering in LLM Agents: A Non-Amplification Firewall for Persistent Memory",
+     "url": "https://arxiv.org/abs/2607.29167v1"
+    },
+    {
+     "published": "2025-05-01T17:31:33Z",
+     "snippet": "Memory is fundamental to large language model (LLM)-based agents, but existing surveys emphasize application-level use (e.g., personalized dialogue), while overlooking the atomic operations governing memory dynamics. This work categorizes memory into parametric (implicit in model weights) and contextual (explicit external data, structured/unstructured) forms, and defines six core operations: Consolidation, Updating, Indexing, Forgetting, Retrieval, and Condensation. Mapping these dimensions reveals four key research topics: long-term, long-context, parametric modification, and multi-source memory. The taxonomy provides a structured view of memory-related research, benchmarks, and tools, clarifying functional interactions in LLM-based agents and guiding future advancements. The datasets, papers, and tools are publicly available at https://github.com/Elvin-Yiming-Du/Survey_Memory_in_AI.",
+     "title": "Rethinking Memory in LLM based Agents: Representations, Operations, and Emerging Topics",
+     "url": "https://arxiv.org/abs/2505.00675v3"
+    },
+    {
+     "published": "2026-06-09T10:31:51Z",
+     "snippet": "Long-term LLM agents need persistent memory that can track changing facts and provide relevant evidence across sessions. Existing memory systems often store observations as isolated records, summaries, or indexed fragments, which makes evidence aggregation, fact revision, and memory maintenance difficult. We propose Infini Memory, a maintainable text-based persistent memory architecture that treats agent memory as topic-structured documents. Each topic document serves as a semantic unit for collecting related evidence, preserving metadata, and revising facts over time. New observations are first staged in a buffer and periodically consolidated into coherent textual contexts. At inference time, an agentic retrieval procedure lets the LLM read memory through iterative tool calls rather than a single retrieval step. On MemoryAgentBench, Infini Memory achieves 64.7% overall score. Ablations show that topic-structured maintenance and iterative evidence inspection improve complementary aspects of long-term memory use.",
+     "title": "Infini Memory: Maintainable Topic Documents for Long-Term LLM Agent Memory",
+     "url": "https://arxiv.org/abs/2606.10677v1"
+    },
+    {
+     "published": "2026-04-14T04:53:00Z",
+     "snippet": "To sustain coherent long-term interactions, Large Language Model (LLM) agents must navigate the tension between acquiring new information and retaining prior knowledge. Current unified stream-based memory systems facilitate context updates but remain vulnerable to interference from transient noise. Conversely, discrete structured memory architectures provide robust knowledge retention but often struggle to adapt to evolving narratives. To address this, we propose GAM, a hierarchical Graph-based Agentic Memory framework that explicitly decouples memory encoding from consolidation to effectively resolve the conflict between rapid context perception and stable knowledge retention. By isolating ongoing dialogue in an event progression graph and integrating it into a topic associative network only upon semantic shifts, our approach minimizes interference while preserving long-term consistency. Additionally, we introduce a graph-guided, multi-factor retrieval strategy to enhance context precision. Experiments on LoCoMo and LongDialQA indicate that our method consistently outperforms state-of-the-art baselines in both reasoning accuracy and efficiency.",
+     "title": "GAM: Hierarchical Graph-based Agentic Memory for LLM Agents",
+     "url": "https://arxiv.org/abs/2604.12285v1"
+    },
+    {
+     "published": "2026-01-14T22:40:35Z",
+     "snippet": "Retrieval-augmented generation (RAG) has become the default strategy for providing large language model (LLM) agents with contextual knowledge. Yet RAG treats memory as a stateless lookup table: information persists indefinitely, retrieval is read-only, and temporal continuity is absent. We define the \\textit{Continuum Memory Architecture} (CMA), a class of systems that maintain and update internal state across interactions through persistent storage, selective retention, associative routing, temporal chaining, and consolidation into higher-order abstractions. Rather than disclosing implementation specifics, we specify the architectural requirements CMA imposes and show consistent behavioral advantages on tasks that expose RAG's structural inability to accumulate, mutate, or disambiguate memory. The empirical probes (knowledge updates, temporal association, associative recall, contextual disambiguation) demonstrate that CMA is a necessary architectural primitive for long-horizon agents while highlighting open challenges around latency, drift, and interpretability.",
+     "title": "Continuum Memory Architectures for Long-Horizon LLM Agents",
+     "url": "https://arxiv.org/abs/2601.09913v1"
+    },
+    {
+     "published": "2026-04-09T04:51:07Z",
+     "snippet": "Although LLM agents can leverage tools for complex tasks, they still need memory to maintain cross-turn consistency and accumulate reusable information in long-horizon interactions. However, retrieval-based external memory systems incur low online overhead but suffer from unstable accuracy due to limited query construction and candidate filtering. In contrast, many systems use repeated large-model calls for online memory operations, improving accuracy but accumulating latency over long interactions. We propose LightMem, a lightweight memory system for better agent memory driven by Small Language Models (SLMs). LightMem modularizes memory retrieval, writing, and long-term consolidation, and separates online processing from offline consolidation to enable efficient memory invocation under bounded compute. We organize memory into short-term memory (STM) for immediate conversational context, mid-term memory (MTM) for reusable interaction summaries, and long-term memory (LTM) for consolidated knowledge, and uses user identifiers to support independent retrieval and incremental maintenance in multi-user settings. Online, LightMem operates under a fixed retrieval budget and selects …",
+     "title": "Lightweight LLM Agent Memory with Small Language Models",
+     "url": "https://arxiv.org/abs/2604.07798v3"
+    },
+    {
+     "published": "2026-06-03T12:02:19Z",
+     "snippet": "Persistent LLM agents require memory representations that make the formation of person understanding explicit across long term interaction. Existing agent memory methods emphasize information retention and retrieval, yet give limited account of how accumulated interaction evidence is abstracted into person understanding. We view this process as schema formation, where situated evidence is abstracted into reusable patterns and stable person level claims. We introduce PersonaTree, a structured lifecycle memory framework that realizes this view as a three level persona tree with explicit support paths from evidence to claims. PersonaTree maintains the tree through conservative writing, confidence guided consolidation, and query conditioned path retrieval, returning only the evidence depth required by each query. Across six person understanding and persistent memory benchmarks with three answer backbones, PersonaTree ranks first in 12 of 18 compact scores and reaches the top two in 16 settings. Ablations show that hierarchy improves abstract person understanding on KnowMe, while support path retrieval improves RealPref alignment under a comparable context budget.",
+     "title": "PersonaTree: Structured Lifecycle Memory for Person Understanding in LLM Agents",
+     "url": "https://arxiv.org/abs/2606.04780v1"
+    }
+   ],
+   "weight": 1.0
+  },
+  {
+   "engine": "openalex",
+   "results": [
+    {
+     "published": "2026-06-23",
+     "snippet": "Large language model (LLM) agents rely on long-term memory to support extended interactions and personalized assistance beyond finite context windows. Existing memory agents actively update external memory through generated write, revise, and delete operations, but these updates may omit important information, corrupt existing memory, or introduce unsupported hallucinated content. Once stored, such errors become persistent system-state failures that can affect future reasoning and generation. In this paper, we propose TrustMem, a framework designed to improve the trustworthiness of memory consolidation. TrustMem relies on a Memory Transition Verifier to evaluate the transition process of memory updates in terms of coverage, preservation, and faithfulness. It further constructs preference pairs among candidate updates under the same memory state, enabling preference-guided reinforcement learning to directly optimize memory updating behaviors. Extensive experiments demonstrate that TrustMem improves both memory utility and reliability: it achieves state-of-the-art results across MemoryAgentBench, HaluMem, and the Mem-alpha validation set, improves HaluMem memory extraction by 12.14 …",
+     "title": "TRUSTMEM: Learning Trustworthy Memory Consolidation for LLM Agents with Long-Term Memory",
+     "url": "https://arxiv.org/abs/2606.25161"
+    },
+    {
+     "published": "2026-09-26",
+     "snippet": "Long-horizon LLM agents must convert accumulated experience into durable memory, deciding what to keep, compress, abstract into reusable skills and rules, or forget. We report a four-phase research program on this consolidation problem whose central finding is a shift in what is measured: from how much an agent remembers, to whether its consolidation decisions are any good, to whether those decisions can be trusted. Phase 1 learns episodic boundaries from agent traces by downstream utility; an honest near-miss (oracle correlation 0.691 vs a 0.70 bar) whose lasting output is a three-gate anti-leakage protocol. Phase 2 learns when to promote experience and to which abstraction level under a token budget, achieving a verified +22.7% task-success improvement with 7x compression, but exposing a degenerate-forgetting failure and a distribution-shift failure mode we name lambda-prevalence coupling. Phase 3 introduces ConsolidationBench, an oracle-by-construction benchmark that scores consolidation decisions against a known optimum on three non-circular axes; production retrieval systems retain information yet score zero on cross-level transfer. Phase 4 introduces governed consolidation: …",
+     "title": "The Epistemics of Agent Memory: Measuring, and Governing, the Consolidation Decision in Long-Horizon LLM Agents",
+     "url": "https://arxiv.org/abs/2609.33013"
+    },
+    {
+     "published": "2026-05-15",
+     "snippet": "Memory systems often organize user-agent interactions as retrievable external memory and are crucial for long-running agents by overcoming the limited context windows of LLMs. However, existing memory systems invoke LLMs to process every incoming interaction for memory extraction, and such an eager memory consolidation scheme leads to substantial token consumption. To tackle this problem, we propose RecMem by rethinking when memory consolidation should be conducted. RecMem stores incoming interactions in a subconscious memory layer and encode them using lightweight embedding models for retrieval. LLMs are only invoked to extract episodic and semantic memory when sustained recurrence are observed for semantically similar interactions. Such recurrence-based consolidation works because these interactions correspond to a semantic cluster with rich information and thus are worth extraction and summarization. To improve accuracy, RecMem also incorporates a semantic refinement mechanism that recovers the fine-grained facts omitted by memory extraction. Experiments show that RecMem reduces the memory construction token cost of three SOTA memory systems by up to 87% while exceeding their …",
+     "title": "RecMem: Recurrence-based Memory Consolidation for Efficient and Effective Long-Running LLM Agents",
+     "url": "https://arxiv.org/abs/2605.16045"
+    },
+    {
+     "published": "2024-05-11",
+     "snippet": "In this study, we propose a novel human-like memory architecture designed for enhancing the cognitive abilities of large language model (LLM)-based dialogue agents. Our proposed architecture enables agents to autonomously recall memories necessary for response generation, effectively addressing a limitation in the temporal cognition of LLMs. We adopt the human memory cue recall as a trigger for accurate and efficient memory recall. Moreover, we developed a mathematical model that dynamically quantifies memory consolidation, considering factors such as contextual relevance, elapsed time, and recall frequency. The agent stores memories retrieved from the user’s interaction history in a database that encapsulates each memory’s content and temporal context. Thus, this strategic storage allows agents to recall specific memories and understand their significance to the user in a temporal context, similar to how humans recognize and recall past experiences.",
+     "title": "\"My agent understands me better\": Integrating Dynamic Human-like Memory Recall and Consolidation in LLM-Based Agents",
+     "url": "https://doi.org/10.1145/3613905.3650839"
+    },
+    {
+     "published": "2026-01-01",
+     "snippet": "Memory systems often organize user-agent interactions as retrievable external memory and are crucial for long-running agents by overcoming the limited context windows of LLMs.However, existing memory systems invoke LLMs to process every incoming interaction for memory extraction, and such an eager memory consolidation scheme leads to substantial token consumption.To tackle this problem, we propose RecMem by rethinking when memory consolidation should be conducted.RecMem stores incoming interactions in a subconscious memory layer and encode them using lightweight embedding models for retrieval.LLMs are only invoked to extract episodic and semantic memory when sustained recurrence are observed for semantically similar interactions.Such recurrence-based consolidation works because these interactions correspond to a semantic cluster with rich information and thus are worth extraction and summarization.To improve accuracy, RecMem also incorporates a semantic refinement mechanism that recovers the fine-grained facts omitted by memory extraction.Experiments show that RecMem reduces the memory construction token cost of three SOTA memory systems by up to 87% while exceeding their accuracy.",
+     "title": "RecMem: Recurrence-based Memory Consolidation for Efficient and Effective Long-Running LLM Agents",
+     "url": "https://doi.org/10.18653/v1/2026.findings-acl.1619"
+    },
+    {
+     "published": "2026-06-03",
+     "snippet": "Memory systems often organize user-agent interactions as retrievable external memory and are crucial for long-running agents by overcoming the limited context windows of LLMs. However, existing memory systems invoke LLMs to process every incoming interaction for memory extraction, and such an eager memory consolidation scheme leads to substantial token consumption. To tackle this problem, we propose RecMem by rethinking when memory consolidation should be conducted. RecMem stores incoming interactions in a subconscious memory layer and encode them using lightweight embedding models for retrieval. LLMs are only invoked to extract episodic and semantic memory when sustained recurrence are observed for semantically similar interactions. Such recurrence-based consolidation works because these interactions correspond to a semantic cluster with rich information and thus are worth extraction and summarization. To improve accuracy, RecMem also incorporates a semantic refinement mechanism that recovers the fine-grained facts omitted by memory extraction. Experiments show that RecMem reduces the memory construction token cost of three SOTA memory systems by up to 87% while exceeding their …",
+     "title": "RecMem: Recurrence-based Memory Consolidation for Efficient and Effective Long-Running LLM Agents",
+     "url": "https://doi.org/10.48448/gce2-rc10"
+    },
+    {
+     "published": "2026-05-15",
+     "snippet": "Memory systems often organize user-agent interactions as retrievable external memory and are crucial for long-running agents by overcoming the limited context windows of LLMs. However, existing memory systems invoke LLMs to process every incoming interaction for memory extraction, and such an eager memory consolidation scheme leads to substantial token consumption. To tackle this problem, we propose RecMem by rethinking when memory consolidation should be conducted. RecMem stores incoming interactions in a subconscious memory layer and encode them using lightweight embedding models for retrieval. LLMs are only invoked to extract episodic and semantic memory when sustained recurrence are observed for semantically similar interactions. Such recurrence-based consolidation works because these interactions correspond to a semantic cluster with rich information and thus are worth extraction and summarization. To improve accuracy, RecMem also incorporates a semantic refinement mechanism that recovers the fine-grained facts omitted by memory extraction. Experiments show that RecMem reduces the memory construction token cost of three SOTA memory systems by up to 87% while exceeding their …",
+     "title": "RecMem: Recurrence-based Memory Consolidation for Efficient and Effective Long-Running LLM Agents",
+     "url": "https://doi.org/10.48550/arxiv.2605.16045"
+    },
+    {
+     "published": "2026-08-13",
+     "snippet": "Long-horizon LLM agents must preserve information from past interactions to support future tasks. Existing memory systems typically rely on eager consolidation, invoking LLMs after each interaction to extract, summarize, or update memories. This design makes memory construction increasingly costly as conversations grow. Coarse summarization can reduce construction cost but risks discarding fine-grained contextual evidence, whereas larger retrieval contexts or multi-hop LLM reasoning shift the overhead to query time. We present LycheeMemory V2, an efficient long-term memory framework that replaces turn-level consolidation with semantic segment-level consolidation. Instead of consolidating every interaction, LycheeMemory batches multiple exchanges into segments and encodes each finalized segment into context-independent typed memory records. Segment-level batching lowers LLM encoding frequency, while semantic boundary detection helps preserve coherent event-level and temporal evidence compared with fixed-window batching. The resulting records are organized with lightweight structured indexes for query-planned evidence retrieval. Experiments using GPT-4.1-Mini show that LycheeMemory …",
+     "title": "LycheeMemory V2: Efficient Long-Term Memory for LLM Agents via Semantic Segment-Level Consolidation",
+     "url": "https://arxiv.org/abs/2608.12990"
+    },
+    {
+     "published": "2026-06-29",
+     "snippet": "Multi-agent validation is a natural defence against the unreliability of a single LLM judge: asecond, independent agent scores the same item, and disagreement routes the case to a human.But this design breaks down exactly when the system starts to learn. If the primary scoreradapts to human corrections through retrieval-augmented exemplars while the auditor stays acold skeptic, every freshly learned lesson re-creates the disagreement it was meant to resolve,and the system escalates precisely the cases it just learned to handle. We present Mizaan, aproduction-grade multi-agent scoring system, and three mechanisms that address this tension,evaluated across two contrasting domains (software-engineering work items and real-estatelistings) over three independent runs with no fine-tuning anywhere in the loop. Our central result is human-governed memory consolidation. Human corrections act first asinstance-level retrieved exemplars seen only by the primary; when corrections teaching the samelesson cluster in embedding space, an LLM drafts the lesson as a rubric amendment, a humanapproves it, both agents then inherit it, and the promoted exemplars are retired. We find thatinstance-level …",
+     "title": "When Disagreement Means Learning (or Bias): Human-Governed Memory Consolidation and Counterfactual Diagnosis in Multi-Agent LLM Scoring",
+     "url": "https://doi.org/10.5281/zenodo.21025602"
+    },
+    {
+     "published": "2026-06-29",
+     "snippet": "Multi-agent validation is a natural defence against the unreliability of a single LLM judge: asecond, independent agent scores the same item, and disagreement routes the case to a human.But this design breaks down exactly when the system starts to learn. If the primary scoreradapts to human corrections through retrieval-augmented exemplars while the auditor stays acold skeptic, every freshly learned lesson re-creates the disagreement it was meant to resolve,and the system escalates precisely the cases it just learned to handle. We present Mizaan, aproduction-grade multi-agent scoring system, and three mechanisms that address this tension,evaluated across two contrasting domains (software-engineering work items and real-estatelistings) over three independent runs with no fine-tuning anywhere in the loop. Our central result is human-governed memory consolidation. Human corrections act first asinstance-level retrieved exemplars seen only by the primary; when corrections teaching the samelesson cluster in embedding space, an LLM drafts the lesson as a rubric amendment, a humanapproves it, both agents then inherit it, and the promoted exemplars are retired. We find thatinstance-level …",
+     "title": "When Disagreement Means Learning (or Bias): Human-Governed Memory Consolidation and Counterfactual Diagnosis in Multi-Agent LLM Scoring",
+     "url": "https://doi.org/10.5281/zenodo.21025601"
+    },
+    {
+     "published": "2026-09-11",
+     "snippet": "(c) 2026 Pranay Mahendrakar. Licensed under CC BY 4.0. Memory systems for language-model agents almost all contain a step called consolidation, and almost all of them cite, or gesture at, the complementary learning systems account of hippocampus and neocortex when they name it. In that account consolidation is a specific operation: repeated replay from a fast, sparsely coded store into a slow learner whose shared parameters change, which is what produces generalisation to material never stored and which is also where interference lives. This paper separates what that theory commits its borrower to from what agent memory systems actually do. Four commitments are stated and used as an audit instrument. Against them, deployed agent memory divides into two families and neither instantiates the mechanism, for opposite reasons. The larger, textual family changes no parameters at all: its consolidation is iterated LLM-authored rewriting of an external store, and a 2026 controlled study reports that iterating it drives utility up and then down, in their setting below the no-memory baseline, while no replay result located here reports falling below its own no-replay control. A smaller …",
+     "title": "Consolidation Without Weights: What the Complementary Learning Systems Analogy Licenses in LLM Agent Memory, and Why the Systems That Borrow Its Name Do Not Inherit Its Guarantee",
+     "url": "https://doi.org/10.5281/zenodo.22699101"
+    },
+    {
+     "published": "2026-09-11",
+     "snippet": "(c) 2026 Pranay Mahendrakar. Licensed under CC BY 4.0. Memory systems for language-model agents almost all contain a step called consolidation, and almost all of them cite, or gesture at, the complementary learning systems account of hippocampus and neocortex when they name it. In that account consolidation is a specific operation: repeated replay from a fast, sparsely coded store into a slow learner whose shared parameters change, which is what produces generalisation to material never stored and which is also where interference lives. This paper separates what that theory commits its borrower to from what agent memory systems actually do. Four commitments are stated and used as an audit instrument. Against them, deployed agent memory divides into two families and neither instantiates the mechanism, for opposite reasons. The larger, textual family changes no parameters at all: its consolidation is iterated LLM-authored rewriting of an external store, and a 2026 controlled study reports that iterating it drives utility up and then down, in their setting below the no-memory baseline, while no replay result located here reports falling below its own no-replay control. A smaller …",
+     "title": "Consolidation Without Weights: What the Complementary Learning Systems Analogy Licenses in LLM Agent Memory, and Why the Systems That Borrow Its Name Do Not Inherit Its Guarantee",
+     "url": "https://doi.org/10.5281/zenodo.22699102"
+    },
+    {
+     "published": "2026-07-15",
+     "snippet": "Large Language Model (LLM) agents increasingly rely on external memory systems to accumulate experience across tasks. Yet nearly all existing approaches, from graph-structured memories to reflective insight stores, access memory through fixed, hand-designed heuristics. We argue that this static view of memory is a core bottleneck for agentic learning because optimal memory behavior is fundamentally context-dependent. The early stages of the tasks, benefit from minimal retrieval because memory is sparse; recurring goal types benefit from plan reuse rather than generic nearest-neighbor lookup; stuck agents benefit from re-retrieval with alternative queries; and across long task streams, the memory store itself must be consolidated and pruned to remain useful. We present Memory as a Controlled Process (MemCon), a framework that models memory operations as a Markov Decision Process and learns an online policy that adaptively decides when, what, and how much to retrieve, when to inject a distilled plan, and when to consolidate or forget. MemCon is backend-agnostic: it wraps any existing memory implementation, learns from task-by-task binary feedback with no pretraining and no …",
+     "title": "Memory as a Controlled Process: Learned Adaptive Memory Management for LLM Agents",
+     "url": "https://arxiv.org/abs/2607.13591"
+    },
+    {
+     "published": "2026-07-31",
+     "snippet": "Long-term memory lets large language model(LLM) agents reuse prior preferences and work flows, but it also turns untrusted observations into persistent action context. We identify memory provenance laundering: during LLM-based memory consolidation, an external observation may be rewritten as apparent user history or workflow support, preserving an action trigger while erasing the low-trust source that should limit its authority. Existing prompt filters, content sanitizers, and tool guards do not enforce source-authority non-amplification after lossy memory consolidation. We formalize this boundary and instantiate it as Provenance-Preserving Memory Fire wall (PPMF), a lightweight memory middleware that preserves platform-maintained provenance and authorizes tool calls by matching action risk to the authority of action-relevant memories. In our schema-grounded evaluation with fixed risk policies, vulnerable consolidated memories reach up to 1.000 attack success rate(ASR); with intact platform-maintained provenance, confirmation, and risk labels, no evaluated unauthorized high-risk action passes the PPMF gate while confirmed benign actions and targeted low-risk memory use remain …",
+     "title": "Memory Provenance Laundering in LLM Agents: A Non-Amplification Firewall for Persistent Memory",
+     "url": "https://arxiv.org/abs/2607.29167"
+    },
+    {
+     "published": "2026-09-02",
+     "snippet": "Source code release of ZenBrain, an open-source agent memory library for LLM agents: seven neuroscience-inspired memory layers (working, short-term, episodic, semantic, procedural, core, cross-context) with FSRS spaced repetition and memory consolidation. Zero-dependency TypeScript, Apache-2.0. The package ships 20 algorithm modules (10 core algorithms + 10 advanced research modules) and 528 automated tests (429 algorithms + 99 core, CI on Node 22, 24 and 26). This record pins the exact released version: Git tag v0.4.4 (commit 871c451e) Source archive in this record: zenbrain-v0.4.4.tar.gz, SHA-256 c0bc60cb4c4b99087b7a5f226ce045ef3cb4cfc6c1f439227f8d901618335631 npm: @zensation/algorithms@0.4.4 — dist SHA-1 079711efd44418aeed1254e35ed88990b6e7dbe0, 153 files Relation to the paper (arXiv:2604.23878): the architecture described there comprises 15 neuroscience-inspired mechanisms — 9 foundational algorithms plus 6 Predictive Memory Architecture (PMA) components. The 6 PMA components are proprietary and run in the production system; this open-source package ships the algorithm library (20 modules). The two counts describe different things and are both stated in the paper and the …",
+     "title": "ZenBrain: Neuroscience-Inspired Agent Memory Library for LLM Agents",
+     "url": "https://doi.org/10.5281/zenodo.22260018"
+    },
+    {
+     "published": "2026-09-02",
+     "snippet": "Source code release of ZenBrain, an open-source agent memory library for LLM agents: seven neuroscience-inspired memory layers (working, short-term, episodic, semantic, procedural, core, cross-context) with FSRS spaced repetition and memory consolidation. Zero-dependency TypeScript, Apache-2.0. The package ships 20 algorithm modules (10 core algorithms + 10 advanced research modules) and 528 automated tests (429 algorithms + 99 core, CI on Node 22, 24 and 26). This record pins the exact released version: Git tag v0.4.4 (commit 871c451e) Source archive in this record: zenbrain-v0.4.4.tar.gz, SHA-256 c0bc60cb4c4b99087b7a5f226ce045ef3cb4cfc6c1f439227f8d901618335631 npm: @zensation/algorithms@0.4.4 — dist SHA-1 079711efd44418aeed1254e35ed88990b6e7dbe0, 153 files Relation to the paper (arXiv:2604.23878): the architecture described there comprises 15 neuroscience-inspired mechanisms — 9 foundational algorithms plus 6 Predictive Memory Architecture (PMA) components. The 6 PMA components are proprietary and run in the production system; this open-source package ships the algorithm library (20 modules). The two counts describe different things and are both stated in the paper and the …",
+     "title": "ZenBrain: Neuroscience-Inspired Agent Memory Library for LLM Agents",
+     "url": "https://doi.org/10.5281/zenodo.22260019"
+    },
+    {
+     "published": "2026-05-08",
+     "snippet": "Current LLM agents lack principled mechanisms for managing persistent memory across long interaction horizons. We present a biologically-grounded memory architecture comprising six cognitive mechanisms: (1) sleep-phase consolidation, (2) interference-based forgetting, (3) engram maturation, (4) reconsolidation upon retrieval, (5) entity knowledge graphs, and (6) hybrid multi-cue retrieval. Each mechanism addresses a specific failure mode of naive memory accumulation. We introduce a synthetic calibration methodology that derives all pipeline thresholds without benchmark data exposure, eliminating a common source of evaluation leakage. We evaluate on two benchmarks. First, a VSCode issue-tracking dataset (13K issues, 120K events) where deduplication-based consolidation achieves 97.2% retention precision with 58% store reduction (+21.8 pp over baseline). Second, the LongMemEval personal-chat benchmark where we conduct the first streaming M-tier evaluation (475 sessions, ~540K unique turns). At a 200K-token context budget, our pipeline matches raw retrieval accuracy (70.1% vs. 71.2%, overlapping 95% CI) while exposing a tunable accuracy/store-size operating curve. At S-tier scale (50 …",
+     "title": "Human-Inspired Memory Architecture for LLM Agents",
+     "url": "https://arxiv.org/abs/2605.08538"
+    },
+    {
+     "published": "2026-09-26",
+     "snippet": "Persistent memory enables LLM agents to reuse prior experience, but creates a new security boundary: what an agent may remember is not what it should act on. We expose an unauthorized control path where edited low-trust evidence is consolidated into persistent memory, retrieved on a clean task, and used to drive a protected action. Crucially, the adversary neither writes memory nor alters the task. We introduce Backchain Memory Attack (BMA), a grey-box, LLM-driven inverse-planning attack that reasons backward from the target action to the memory that would trigger it, then to the evidence edit that would form it. BMA has two phases: preparation uses resettable trials to localize the first failed link and build experience; execution uses the frozen experience to rank and commit candidate edits without feedback. We introduce the Pathway-Certified Attack Success Rate (Path-CASR) to separate memory-mediated from coincidental hits: registered memory must form, be retrieved, drive the target behavior, and pass matched-intervention checks. Across four substrates and three decision backbones, BMA achieves 18.8% Macro Path-CASR, compared with 13.4% for the strongest access-matched …",
+     "title": "BMA: Backchain Memory Attacks Create Unauthorized Control Paths in LLM Agents",
+     "url": "https://arxiv.org/abs/2609.32186"
+    },
+    {
+     "published": "2026-03-12",
+     "snippet": "Long-term memory has emerged as a foundational component of autonomous Large Language Model (LLM) agents, enabling continuous adaptation, lifelong multimodal learning, and sophisticated reasoning. However, as memory systems transition from static retrieval databases to dynamic, agentic mechanisms, critical concerns regarding memory governance, semantic drift, and privacy vulnerabilities have surfaced. While recent surveys have focused extensively on memory retrieval efficiency, they largely overlook the emergent risks of memory corruption in highly dynamic environments. To address these emerging challenges, we propose the Stability and Safety-Governed Memory (SSGM) framework, a conceptual governance architecture. SSGM decouples memory evolution from execution by enforcing consistency verification, temporal decay modeling, and dynamic access control prior to any memory consolidation. Through formal analysis and architectural decomposition, we show how SSGM can mitigate topology-induced knowledge leakage where sensitive contexts are solidified into long-term storage, and help prevent semantic drift where knowledge degrades through iterative summarization. Ultimately, this work …",
+     "title": "Governing Evolving Memory in LLM Agents: Risks, Mechanisms, and the Stability and Safety Governed Memory (SSGM) Framework",
+     "url": "https://arxiv.org/abs/2603.11768"
+    },
+    {
+     "published": "2026-05-03",
+     "snippet": "Between invocations, contemporary LLM agents do not persist as processes: they persist as markdown files. Widely deployed frameworks (OpenClaw, LangChain, and the CLAUDE.md stack) construct the Agent abstraction around the LLM invocation; persistent state lives in side-files that the model is re-prompted with each cycle but seldom writes to, so within-cycle edits are bookkeeping, not learning, and between cycles nothing changes at all. We call this the file-based identity pattern: it leaves multi-session competence, knowledge accumulation, and goal maintenance with no architectural home. We invert this construction: the agent is the persistent memory system; the LLM is a service it invokes to think. We present MNEMA (Memory-Native Episodic-semantic Architecture for Agents), a three-tier cognitive architecture grounded in cognitive psychology and computational neuroscience: a generic reasoning substrate (a pretrained LLM, replaceable) and two identity-bearing personal tiers, a time-indexed episodic memory and a typed semantic knowledge graph, connected by two substrate-driven, inter-session dynamics: consolidation (episodic-to-semantic distillation) and self-inspection (intra-graph …",
+     "title": "MNEMA: A Memory-Native Episodic-Semantic Architecture for Persistent LLM Agents",
+     "url": "https://doi.org/10.5281/zenodo.20010220"
+    }
+   ],
+   "weight": 1.0
+  },
+  {
+   "engine": "europe pmc",
+   "results": [
+    {
+     "published": "2026-07-15",
+     "snippet": "Matthew Maniscalco A, Kyun Park Y, Domal SJ, Lin MH, Harabagiu S, Jiang SB, Nguyen D. | 2026. Purpose. Radiation therapy (RT) treatment planning requires iterative, multi-day optimization workflows in which subjective planning strategies produce inter-planner variability in plan quality. Existing computational approaches automate isolated aspects of this workflow, yet none orchestrates an end-to-end pipeline from physician directive to deliverable plan. We developed a compound artificial intelligence (AI) platform for fully autonomous RT treatment planning that combines multi-agent large language model (LLM) orchestration with directive-conditioned three-dimensional (3D) dose prediction, natively integrated with a commercial treatment planning system (TPS). Methods. Seven specialized agents navigated the multi-objective optimization landscape through structured clinical reasoning, iteratively analyzing dose-volume histogram (DVH) metrics and spatial dose patterns, formulating trade-off strategies, and executing validated modifications through the TPS across five fully autonomous iterations per case. A directive-conditioned 3D dose prediction model supplied patient-specific DVH …",
+     "title": "Autonomous radiotherapy planning via agentic orchestration using a multimodal TPS-integrated compound AI platform.",
+     "url": "https://europepmc.org/article/MED/42466075"
+    },
+    {
+     "published": "2026-09-17",
+     "snippet": "Pasquali D, Rea F, Morasso P, Sandini G, Sciutti A. | 2026. Current cognitive architectures for social robots, even when conceived as autonomous and adaptable, remain largely grounded in fully digital, von Neumann-style paradigms, where acquired knowledge is detached from individual experience. This contrasts with biological cognition, in which learning emerges from continuous, embodied interaction which leads to personal, non-copyable competencies. In this perspective, we argue that achieving truly adaptive and socially situated robotic agents requires a paradigm shift toward hybrid, bio-inspired, always-on architectures, where dynamic, and digitally implementable components coexist. Such architecture supports continuous activity, structural plasticity, and experience-dependent learning, enabling knowledge to emerge and strengthen from distributed interactions rather than from copiable parameters. We outline a roadmap in which embodiment, dynamical systems, endogenous values, and socially grounded learning mechanisms are central design principles of such cognitive architecture, and we discuss how these ideas can scale beyond sensorimotor skills toward what we believe being …",
+     "title": "ISEED: an always-on cognitive architecture for experience-driven interaction-oriented humanoid robots.",
+     "url": "https://europepmc.org/article/MED/42824395"
+    },
+    {
+     "published": "2026-05-19",
+     "snippet": "Shi N, Li Z, Li Q, Zhang J, Li L, Sun Q, Liu S, Wang Z. | 2026. The structural integrity and risk management of long-distance oil and gas pipelines are critically challenged by multi-source data heterogeneity, complex multi-physics degradation mechanisms, and the dynamic nature of operational environments. Traditional monolithic artificial intelligence models struggle with cross-domain knowledge fusion and often suffer from historical context forgetting over decades-long infrastructure lifecycles. To address these bottlenecks, this paper proposes an evolutionary digital twin framework driven by a collaborative architecture between small specialized models and a large general model. Specifically, the framework encapsulates physics-informed models (e.g., corrosion prediction and geohazard evaluation) as domain expert agents to guarantee rigorous numerical computation at the edge, keeping sensitive operational data strictly localized. To synthesize conflicting localized risks, a locally deployed, privacy-preserving large language model acts as a central cognitive hub. This hub utilizes external knowledge retrieval and structured reasoning to formulate transparent, multi-objective …",
+     "title": "Evolutionary Digital Twin for Oil and Gas Pipelines: A Cognitive Multi-Agent Framework with Continuous Feedback Learning.",
+     "url": "https://europepmc.org/article/MED/42198027"
+    },
+    {
+     "published": "2026-07-02",
+     "snippet": "Khan S, Lor MA, Sperry ML, Liu Y, Lindsey CC, Chen SC, Shyu ML. | 2026",
+     "title": "Clinical drug report generation using multi-phase prompt large language models.",
+     "url": "https://europepmc.org/article/MED/42386790"
+    },
+    {
+     "published": "2026-09-09",
+     "snippet": "Butler JM, Jones M, Balbin C, Taber P, Del Fiol G, Dalrymple R, Kawamoto K. | 2026. ObjectiveThis methodological validation study evaluated a large language model (LLM), multi-step framework for thematic analysis (TA) of healthcare interviews, compared to a human-only coded reference standard.Materials and methodsThe unit of analysis was deidentified transcripts of interviews with geriatrics patients describing their experiences contributing contextual patient generated health data. An experienced 4-person coding team completed a primarily inductive TA in which 50 codes were synthesized into 3 themes through iterative discussion. LLM-assisted TA was performed using ChatGPT (GPT-4o and GPT-4.5 models). In a 3-step process of code generation, code refinement, and theme generation, 54 initial codes were produced, refined to 25 codes, and consolidated into 3 final themes. Quantitative evaluation of the LLM model performance comparing human-generated and LLM generated codes and themes was performed with sentence-t5-xxl embeddings and a + 0.7 cosine similarity threshold.ResultsThe cosine-similarity analysis showed a precision of 100% and a recall of 88%. Code-level similarity scores …",
+     "title": "Sociotechnical analysis of qualitative data using a large language model-assisted framework with performance compared to a human-only coded reference standard.",
+     "url": "https://europepmc.org/article/MED/42723947"
+    },
+    {
+     "published": "2026-04-30",
+     "snippet": "Yuh WT, Ryu SJ, Kim TS, Choi I. | 2026. Large language models (LLMs) are rapidly transforming healthcare, yet their implications for pediatric neurosurgery remain underexplored. This narrative review interprets LLM evolution through a neuroscientific lens familiar to pediatric neurosurgeons. We trace the parallel development of LLMs and the human brain : architecture evolving from sequential processing to attention mechanisms mirrors prefrontal cortex maturation; training stages parallel synaptic exuberance, adolescent pruning, and socialization; reasoning capabilities emerge through chain-of-thought prompting and reinforcement learning, analogous to deliberate cognitive processing. We then examine capabilities current LLMs lack but would require for artificial general intelligence (AGI)-continual learning, multimodal perception, selfawareness, world models, and physical embodiment-mapping each to corresponding neural functions. Using a representative case of pediatric medulloblastoma, we illustrate how these technologies will reshape clinical practice, surgery, research, and education. Current frontier models deliver excellent medical performance with multimodal reasoning at low …",
+     "title": "Large Language Model and Pediatric Neurosurgery - A Neurosurgeon's Perspective on the Artificial Nervous System.",
+     "url": "https://europepmc.org/article/MED/42059090"
+    },
+    {
+     "published": "2025-09-12",
+     "snippet": "Calderón C, Martí P, Jordán J, Palanca J, Julian V. | 2025. Urban mobility systems face escalating challenges associated with sustainability, equity, and resilience, further compounded by environmental pressures. Traditional agent-based models (ABMs) often fail to capture cognitively rich, adaptive behaviors, limiting their ability to simulate realistic user responses to disruptions. In this work, we propose a cognitive agent architecture based on Large Language Models (LLMs), featuring multi-horizon memory-driven planning, reflection, and adaptation. Integrated into the SimFleet agent-based simulator with realistic sociodemographic profiles, the agents dynamically generate, adjust, and reflect upon travel plans across a 20-day simulation involving over 320 individuals. Experimental results reveal emergent adaptation patterns under both stable and disrupted transport conditions, and an ablation study under severe service disruption quantifies the contributions of short-term and long-term memory modules to memory-driven reasoning, demonstrating the potential of LLM-driven agents to enhance the realism, flexibility, and interpretability of urban mobility simulations.",
+     "title": "Cognitive Agents in Urban Mobility: Integrating LLM Reasoning into Multi-Agent Simulations.",
+     "url": "https://europepmc.org/article/MED/41012927"
+    },
+    {
+     "published": "2026-09-19",
+     "snippet": "Han S, Long Y, Cai M, Ma Q, Sun B, Waterhouse GIN. | 2026. Extrusion-based additive manufacturing has emerged as a transformative route for 3D-printed continuous-fiber-reinforced polymer composites (3DP-CFRPCs), offering unprecedented opportunities to engineer lightweight structures with programmable mechanical and multifunctional properties. However, existing studies largely treat constituent materials, printing processes, structural design, and functional integration as isolated research topics, limiting the development of robust design principles for intelligent composite systems. This review proposes an architecture-centric smart architecture framework that extends conventional material-process-structure-property relationships by explicitly incorporating reinforcement-path architecture, interface/defect evolution, multifunctional states, and cyber-physical feedback as coupled design and state variables. Within this framework, we critically synthesize the coupled roles of matrix rheology, fiber impregnation, interfacial bonding, and fiber trajectory engineering in determining printability, defect evolution, and mechanical performance. Recent advances in co-extrusion …",
+     "title": "3D Printing of Continuous-Fiber-Reinforced Composites: Advances in Multifunctional Integration and Intelligent Manufacturing.",
+     "url": "https://europepmc.org/article/MED/42797194"
+    },
+    {
+     "published": "2026-07-08",
+     "snippet": "Adhikari TN, Sayers W, Zhang S. | 2026. BackgroundDigital marketing increasingly functions as a complex adaptive system characterised by non-stationary environments, strategic interaction, and multi-agent competition. Programmatic advertising exemplifies this complexity, where decisions must be made in real time under uncertainty. Under such conditions, traditional static optimisation methods often fail to deliver robust performance. This review synthesises bio-inspired computational approaches, reinforcement learning (RL), multi-agent reinforcement learning (MARL), and agentic artificial intelligence (AI) to develop an integrated theoretical perspective on adaptive optimisation in digital marketing.MethodsFollowing PRISMA 2020 guidelines, we conducted a systematic search of peer-reviewed research across six databases: Scopus, IEEE Xplore, ACM Digital Library, SpringerLink, ScienceDirect, and arXiv, supplemented by manual reference checking. Each computational paradigm is explicitly grounded in foundational biological literature, including work on evolution, foraging, swarm intelligence, and immune cognition. Reinforcement learning supports adaptive decision-making through …",
+     "title": "Adaptive Digital Marketing: A Systematic Review of Bio-Inspired Reinforcement Learning, Multi-Agent Systems, and Agentic AI for Intelligent Optimisation.",
+     "url": "https://europepmc.org/article/MED/42505509"
+    },
+    {
+     "published": "2026-06-15",
+     "snippet": "Asad U, Khalid A, Lughmani WA, Rasheed S, Khan MM. | 2026. Proactive robotic assistance in human-robot collaboration (HRC) requires systems that can perceive evolving task contexts, anticipate user needs, and intervene appropriately without disrupting human workflow. We present the Agentic Unified Robotic Assistance (AURA) Framework, which couples Large Language Model (LLM) reasoning grounded by Standard Operating Procedures (SOPs) with a modular layer of specialized Intent, Motion, Perception, Sound, Affordance, and Performance Monitors that supply structured context to a central decision-making module, making the framework reconfigurable and auditable without retraining or re-prompting. We introduce a human-in-the-loop teleoperation data collection methodology and an offline evaluation scheme with an Appropriateness Score (A-Score) tailored to proactive intervention timing, and release a benchmark dataset of annotated multimodal HRC episodes containing workspace and robot wrist camera videos, robot joint states, and labeled intervention events. Across three tasks of varying complexity, we observe progressive gains in intent prediction and decision-making as the modules are …",
+     "title": "Modular Framework for Responsive and Explainable Robotic Assistance with Intention Prediction Using Human-Centric Digital Twins.",
+     "url": "https://europepmc.org/article/MED/42356783"
+    },
+    {
+     "published": "2026-06-04",
+     "snippet": "Qu Y, Xu X, Long Y, Wang Y, Li J, Lu X. | 2026. BackgroundEffective clinical communication is essential for medical practice, with standardized patients (SPs) being a reliable standard training method despite resource limitations. While large language models (LLMs) show strong role-playing abilities, current virtual patients (VPs) based on single LLMs face fidelity and interaction challenges. Recent advances in multiagent frameworks, which have demonstrated considerable potential in handling complex tasks, offer a new perspective for creating VPs in medical education.ObjectiveThis study aimed to develop and evaluate a novel multiagent VP framework that simulates SPs through a collaborative agent design, thereby enhancing human-like fidelity and interaction performance in clinical communication training-oriented VP simulation.MethodsOur multiagent framework constructed 5 specialized subagents by simulating the functional partitioning of brain regions, collaboratively simulating the entire process, from case reception to interactive consultation scenarios, designed for medical students. To enhance the interaction performance of VPs, we incorporated retrieval-augmented technology, …",
+     "title": "A Large Language Model-Powered Multiagent Framework Emulating Standardized Patients in Clinical Communication Skills Training: Development and Evaluation Study.",
+     "url": "https://europepmc.org/article/MED/42241338"
+    },
+    {
+     "published": "2026-05-29",
+     "snippet": "Hossain E, Shoeibi M, Garibay I, Yousefi N. | 2026. IntroductionInterpreting gene clusters derived from RNA sequencing (RNA-seq) remains difficult in functional genomics, particularly in antimicrobial resistance studies where mechanistic context is needed for downstream hypothesis generation.MethodsWe present BIOGEN, an evidence-grounded multi-agent framework for post hoc interpretation of RNA-seq transcriptional modules that integrates biomedical retrieval, structured interpretation, and multi-critic verification. BIOGEN organizes knowledge from PubMed and UniProt into traceable cluster-level explanations with explicit evidence reporting and confidence tiering.ResultsOn the primary Salmonella enterica dataset, BIOGEN achieved strong grounding and biological coherence, with BERTScore 0.689, Semantic Alignment Score 0.715, KEGG Functional Similarity 0.342, and a non-verifiable identifier rate of 0.000, compared with 0.100 for the LLM-only baseline. Across four additional bacterial RNA-seq datasets, BIOGEN preserved zero ungrounded outputs under the identifier-based criterion. In a controlled multi-dataset comparison against representative open-source agentic AI baselines, BIOGEN …",
+     "title": "BIOGEN: evidence-grounded multi-agent reasoning framework for transcriptomic interpretation in antimicrobial resistance.",
+     "url": "https://europepmc.org/article/MED/42292667"
+    },
+    {
+     "published": "2025-12-24",
+     "snippet": "Mohamed Ibrahim Adam A. | 2025. Current evaluation paradigms for agentic AI focus predominantly on task success rates under nominal conditions, creating a critical blind spot: agents may succeed under ideal circumstances while exhibiting catastrophic failure modes under stress. We propose HB-Eval, a rigorous methodology for measuring behavioral reliability through three complementary metrics: Failure Resilience Rate (FRR) quantifying recovery from systematic fault injection, Planning Efficiency Index (PEI) measuring trajectory optimality against oracle-verified paths, and Traceability Index (TI) evaluating reasoning transparency via calibrated LLM-as-a-Judge (κ = 0.82 with human consensus). Through systematic evaluation across 500 episodes spanning three strategically selected domains (logistics, healthcare, coding), we demonstrate a 42.9 percentage point reliability gap between nominal success rates and stressed performance for baseline architectures. We introduce an integrated resilience architecture combining Eval-Driven Memory (EDM) for selective experience consolidation, Adaptive Planning for PEI-guided recovery, and Human-Centered Explainability (HCI-EDM) for trust …",
+     "title": "HB-Eval: A System-Level Reliability Evaluation and Certification Framework for Agentic AI",
+     "url": "https://europepmc.org/article/PPR/PPR1137314"
+    },
+    {
+     "published": "2025-11-12",
+     "snippet": "Pantiukhin D, Shapkin B, Kuznetsov I, Jost AA, Koldunov N. | 2025. This Perspective explores the transformative potential of multi-agent systems (MAS) powered by Large Language Models (LLMs) in the geosciences. Users of geoscientific data repositories face challenges due to the complexity and diversity of data formats, inconsistent metadata practices, and a considerable number of unprocessed datasets. MAS possesses transformative potential for improving scientists' interaction with geoscientific data by enabling intelligent data processing, natural language interfaces, and collaborative problem-solving capabilities. We illustrate this approach with \"PANGAEA GPT,\" a specialized MAS pipeline integrated with the diverse PANGAEA database for Earth & Environmental Science, demonstrating how MAS-driven workflows can effectively manage complex datasets and accelerate scientific discovery. We discuss how MAS can address current data challenges in geosciences, highlight advancements in other scientific fields, and propose future directions for integrating MAS into geoscientific data processing pipelines. In this Perspective, we show how MAS can fundamentally improve data accessibility, …",
+     "title": "Accelerating earth science discovery via multi-agent LLM systems.",
+     "url": "https://europepmc.org/article/MED/41312024"
+    },
+    {
+     "published": "2026-07-08",
+     "snippet": "Zhang F, Chai B, Wu Y, Siok WT, Wang N. | 2026. Elucidating the language-brain relationship requires bridging the methodological gap between linguistics' abstract theoretical frameworks and neuroscience's empirical neural data. As an interdisciplinary cornerstone, computational neuroscience formalizes language's hierarchical and dynamic structures into testable neural representation models through modeling, simulation, and data analysis, enabling computational dialogue between linguistic hypotheses and neural mechanisms. Recent advances in deep learning, particularly large language models (LLMs), have further advanced this inquiry: their high-dimensional representational spaces provide a new scale for probing the neural basis of linguistic processing, the model-brain alignment framework offers a principled approach to evaluating the biological plausibility of language-related theories, provided that representational correspondence is interpreted together with behavioral, temporal, causal, and biological constraints. This review synthesizes interdisciplinary progress from a computational neuroscience perspective. First, it outlines the core connotations of major linguistic …",
+     "title": "Linguistics and human brain: a perspective of computational neuroscience.",
+     "url": "https://europepmc.org/article/MED/42428047"
+    },
+    {
+     "published": "2026-06-03",
+     "snippet": "Dodampegama H, Sridharan M. | 2026. This paper focuses on ad hoc teamwork, the problem of enabling an AI agent to collaborate with other agents without prior coordination. Methods considered state of the art for ad hoc teamwork formulate it primarily as a learning problem, using a large labeled dataset of different situations to model the action choices of other agents (or agent types) and determine the actions of the ad hoc agent. Such datasets are not readily available in practical domains, and these methods lack transparency and make it difficult to rapidly revise existing knowledge (or models) in response to changes in the domain, team composition, or agents' capabilities. Our architecture for ad hoc teamwork embeds the principles of refinement, ecological rationality, interactive learning, and explainable agency, leveraging the complementary strengths of knowledge-based and data-driven methods for reasoning and learning. Specifically, for any given goal, our architecture enables an ad hoc AI agent to determine its actions through non-monotonic logical reasoning with: (a) prior domain-specific commonsense knowledge; (b) models learned and revised rapidly to predict the …",
+     "title": "Collaborate and explain on-the-fly: knowledge-based reasoning and learning in <i>ad hoc</i> teamwork.",
+     "url": "https://europepmc.org/article/MED/42318582"
+    },
+    {
+     "published": "2026-07-01",
+     "snippet": "Lin Y, Ding Y, Wu Y, Peng Y. | 2026. Automated 3D radiology report generation often suffers from clinical hallucinations and a lack of the iterative verification found in human practice. While recent Vision-Language Models (VLMs) have advanced the field, they typically operate as monolithic \"black-box\" systems without the collaborative oversight characteristic of clinical workflows. To address these challenges, we propose MARCH (Multi-Agent Radiology Clinical Hierarchy), a multi-agent framework that emulates the professional hierarchy of radiology departments and assigns specialized roles to distinct agents. MARCH utilizes a Resident Agent for initial drafting with multi-scale CT feature extraction, multiple Fellow Agents for retrieval-augmented revision, and an Attending Agent that orchestrates an iterative, stance-based consensus discourse to resolve diagnostic discrepancies. On the RadGenome-ChestCT dataset, MARCH significantly outperforms state-of-the-art baselines in both clinical fidelity and linguistic accuracy. Our work demonstrates that modeling human-like organizational structures enhances the reliability of AI in high-stakes medical domains.",
+     "title": "MARCH: Multi-Agent Radiology Clinical Hierarchy for CT Report Generation.",
+     "url": "https://europepmc.org/article/MED/42434711"
+    },
+    {
+     "published": "2026-07-29",
+     "snippet": "Cao J, Xu M, Zhu X, Long Q. | 2026. Exercise Physiology is a core course in the physical education major at higher education institutions. In the context of the modern era, leveraging generative artificial intelligence (AI) to reform its teaching framework is crucial for cultivating specialized professionals and advancing quality-oriented education. Addressing three major challenges in first-year university exercise physiology instruction-complex and interconnected teaching mechanisms that hinder systematic understanding, insufficient intuitive connections between microscopic mechanisms and macroscopic manifestations, and inadequate development of creativity-driven problem-solving skills grounded in physiological principles-the study employed AI agents and related technologies to innovate teaching philosophies, content delivery, instructional processes, and assessment methods. An innovative \"three-phase, six-cycle\" blended learning model was implemented. After one semester of practical implementation(16 weeks), evaluation through questionnaires and exam scores demonstrated that empowerment of Artificial Intelligence into blended teaching in Exercise Physiology significantly …",
+     "title": "Innovative practice research of empowerment of artificial intelligence into blended teaching in exercise physiology.",
+     "url": "https://europepmc.org/article/MED/42591087"
+    },
+    {
+     "published": "2026-08-17",
+     "snippet": "Mok JH, Jo H, Lee S. | 2026. Large language model-based agentic AI systems can independently interpret user goals, develop plans, and interact with external tools. These capabilities introduce security concerns that extend beyond traditional access control. However, existing Zero Trust Maturity Models, such as the CISA ZTMM, mainly focus on how resources are accessed and provide limited guidance on how to evaluate actions taken after access has been granted. This paper proposes AI-ZTMM, which extends CISA's five-pillar structure to action-level trust evaluation. The model defines forty-one security Functions based on ten threat categories and thirty-one security requirements and introduces Action Space and seven Action Risk Factors for organizational self-assessment. Its scope includes software agents and the software action layer of agents in IoT, robotic, and OT/ICS environments. The model was refined through reviews by eleven domain experts and evaluated using thirty-eight MITRE ATLAS case studies. The CISA ZTMM lacked directly relevant controls for 59.7% of the analyzed attack stages, whereas AI-ZTMM addressed 75.4% of this gap, achieving a combined direct coverage of 84.4%. …",
+     "title": "An Action-Centric Zero Trust Maturity Model for Agentic AI Environments.",
+     "url": "https://europepmc.org/article/MED/42655513"
+    },
+    {
+     "published": "2026-09-01",
+     "snippet": "Ponce JLA, Vélez WAZ, Zavala GS, Mejillones JMP, Ruiz JCR. | 2026. With the advance of large language models, companion AI agents have evolved to simulate complex relational dynamics, responding to the need for affection and emotional support. This systematic review aimed to analyze the available empirical evidence on the manifestations of emotional dependency and parasocial grief experienced by users in response to the algorithmic alteration or loss of these companion AI agents. Following the guidelines of the PRISMA 2020 statement and with a protocol registered on OSF, an exhaustive search was conducted across the Web of Science, Scopus, PubMed, and APA PsycINFO databases. After applying inclusion criteria via the PICOS framework and evaluating methodological quality using the MMAT tool, 14 empirical studies were selected and included. The synthesized results suggest that technical disruptions (updates, content filters, or server shutdowns) are associated with disruptions in the agent's identity continuity, which users frequently described as coinciding with separation distress, depressive symptoms, perceived isolation, and parasocial grief expressed through anthropomorphic …",
+     "title": "Emotional Dependency and Parasocial Grief Following the Alteration or Loss of Companion Artificial Intelligences: A Systematic Review.",
+     "url": "https://europepmc.org/article/MED/42792348"
+    }
+   ],
+   "weight": 0.4000000059604645
+  }
+ ],
+ "labels": {
+  "https://arxiv.org/abs/2605.16045v1": 2,
+  "https://arxiv.org/abs/2608.12990v1": 2,
+  "https://arxiv.org/abs/2606.25161v1": 2,
+  "https://arxiv.org/abs/2404.00573v1": 2,
+  "https://arxiv.org/abs/2603.15642v1": 1,
+  "https://arxiv.org/abs/2609.33013v1": 2,
+  "https://arxiv.org/abs/2608.22215v2": 2,
+  "https://arxiv.org/abs/2601.02845v2": 2,
+  "https://arxiv.org/abs/2606.24775v1": 1,
+  "https://arxiv.org/abs/2607.17545v2": 1,
+  "https://arxiv.org/abs/2602.06052v4": 1,
+  "https://arxiv.org/abs/2608.01679v2": 0,
+  "https://arxiv.org/abs/2607.13591v2": 1,
+  "https://arxiv.org/abs/2607.29167v1": 1,
+  "https://arxiv.org/abs/2505.00675v3": 1,
+  "https://arxiv.org/abs/2606.10677v1": 1,
+  "https://arxiv.org/abs/2604.12285v1": 1,
+  "https://arxiv.org/abs/2601.09913v1": 1,
+  "https://arxiv.org/abs/2604.07798v3": 1,
+  "https://arxiv.org/abs/2606.04780v1": 1,
+  "https://arxiv.org/abs/2606.25161": 2,
+  "https://arxiv.org/abs/2609.33013": 2,
+  "https://arxiv.org/abs/2605.16045": 2,
+  "https://doi.org/10.1145/3613905.3650839": 2,
+  "https://doi.org/10.18653/v1/2026.findings-acl.1619": 2,
+  "https://doi.org/10.48448/gce2-rc10": 2,
+  "https://doi.org/10.48550/arxiv.2605.16045": 2,
+  "https://arxiv.org/abs/2608.12990": 2,
+  "https://doi.org/10.5281/zenodo.21025602": 2,
+  "https://doi.org/10.5281/zenodo.21025601": 2,
+  "https://doi.org/10.5281/zenodo.22699101": 2,
+  "https://doi.org/10.5281/zenodo.22699102": 2,
+  "https://arxiv.org/abs/2607.13591": 1,
+  "https://arxiv.org/abs/2607.29167": 1,
+  "https://doi.org/10.5281/zenodo.22260018": 1,
+  "https://doi.org/10.5281/zenodo.22260019": 1,
+  "https://arxiv.org/abs/2605.08538": 1,
+  "https://arxiv.org/abs/2609.32186": 1,
+  "https://arxiv.org/abs/2603.11768": 1,
+  "https://doi.org/10.5281/zenodo.20010220": 1,
+  "https://europepmc.org/article/MED/42466075": 0,
+  "https://europepmc.org/article/MED/42824395": 0,
+  "https://europepmc.org/article/MED/42198027": 0,
+  "https://europepmc.org/article/MED/42386790": 0,
+  "https://europepmc.org/article/MED/42723947": 0,
+  "https://europepmc.org/article/MED/42059090": 0,
+  "https://europepmc.org/article/MED/41012927": 0,
+  "https://europepmc.org/article/MED/42797194": 0,
+  "https://europepmc.org/article/MED/42505509": 0,
+  "https://europepmc.org/article/MED/42356783": 0,
+  "https://europepmc.org/article/MED/42241338": 0,
+  "https://europepmc.org/article/MED/42292667": 0,
+  "https://europepmc.org/article/PPR/PPR1137314": 0,
+  "https://europepmc.org/article/MED/41312024": 0,
+  "https://europepmc.org/article/MED/42428047": 0,
+  "https://europepmc.org/article/MED/42318582": 0,
+  "https://europepmc.org/article/MED/42434711": 0,
+  "https://europepmc.org/article/MED/42591087": 0,
+  "https://europepmc.org/article/MED/42655513": 0,
+  "https://europepmc.org/article/MED/42792348": 0
+ },
+ "query": "memory consolidation for LLM agents"
+}

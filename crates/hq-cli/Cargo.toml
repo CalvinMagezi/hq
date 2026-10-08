@@ -20,6 +20,7 @@ hq-llm = { workspace = true }
 hq-tools = { workspace = true }
 hq-convert = { workspace = true }
 hq-update = { workspace = true }
+hq-host = { workspace = true }
 tokio = { workspace = true }
 clap = { workspace = true }
 tracing = { workspace = true }
@@ -56,4 +57,6 @@ mimalloc = { version = "0.1", default-features = false }
 openssl-sys = { version = "*", features = ["vendored"] }
 
 [dev-dependencies]
+hq-tools = { workspace = true, features = ["test-support"] }
+hq-sandbox = { path = "../hq-sandbox" }
 tempfile = { workspace = true }

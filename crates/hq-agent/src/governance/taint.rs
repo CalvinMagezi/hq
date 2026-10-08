@@ -15,7 +15,7 @@ const UNTRUSTED_SOURCE_TOOLS: &[&str] = &[
     "ocr_extract_text",
     "agent_read_inbox",
     "harness_session_logs",
-    "herdr_read",
+    "host_read",
     "session_search",
     "vault_read",
     "vault_batch_read",

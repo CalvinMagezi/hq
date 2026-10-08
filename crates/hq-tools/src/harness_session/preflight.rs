@@ -2,7 +2,7 @@
 //! cleanly instead of leaving a pane that waits for an agent forever.
 
 use super::Harness;
-use crate::herdr::{AgentInfo, HerdrHost, Launched};
+use crate::agent_host::{AgentInfo, HostBackend, Launched};
 use anyhow::{Result, bail};
 use std::ffi::OsString;
 use std::path::{Path, PathBuf};
@@ -100,7 +100,7 @@ fn nvm_bins(home: &Path) -> Vec<PathBuf> {
 /// bounded wait in `ensure_started`), and only when the binary to look for is
 /// known (see `plain_binary`); otherwise the launch goes ahead and the bounded
 /// wait is the safety net.
-pub fn require_binary(host: &HerdrHost, harness: &Harness) -> Result<()> {
+pub fn require_binary(host: &dyn HostBackend, harness: &Harness) -> Result<()> {
     if !host.checks_binaries() {
         return Ok(());
     }
@@ -137,13 +137,13 @@ fn binary_found(wanted: &str, roots: &[PathBuf]) -> bool {
     which::which_in(wanted, Some(path), Path::new("/")).is_ok()
 }
 
-/// The agent Herdr reports for a launch, once it is past `launch_pending`.
+/// The agent the host reports for a launch, once it is past `launch_pending`.
 /// When it never gets there within the host's launch bound the workspace is
 /// closed and the call fails, so nothing is left running and nothing is
 /// recorded. `began` is when the launch started: the time its own start wait
 /// already used counts against the bound.
 pub fn ensure_started(
-    host: &HerdrHost,
+    host: &dyn HostBackend,
     harness: &Harness,
     name: &str,
     launched: Launched,
@@ -185,7 +185,7 @@ pub fn ensure_started(
 
 /// Closes a workspace a failed launch left behind and says what happened, for
 /// the error the caller sees. No session was recorded either way.
-pub fn close_note(host: &HerdrHost, workspace_id: &str) -> String {
+pub fn close_note(host: &dyn HostBackend, workspace_id: &str) -> String {
     match host.close_workspace(workspace_id) {
         Ok(()) => "The workspace was closed and no session was recorded.".to_string(),
         Err(e) => format!(
@@ -216,14 +216,15 @@ fn quoted_screen(screen: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use hq_core::config::{HerdrConfig, LOCAL_HOST};
+    use crate::agent_host::scripted::ScriptedHost;
+    use hq_core::config::AgentHostConfig;
     use std::os::unix::fs::PermissionsExt;
 
     fn with_command(command: &str, env: &str) -> Harness {
         let yaml = format!(
             "harness_profiles:\n  p:\n    base: claude-code\n    command: {command}\n    env:\n      {env}\n"
         );
-        let cfg: HerdrConfig = serde_yaml::from_str(&yaml).unwrap();
+        let cfg: AgentHostConfig = serde_yaml::from_str(&yaml).unwrap();
         super::super::resolve_in(&cfg, "p").unwrap()
     }
 
@@ -271,14 +272,14 @@ mod tests {
 
     #[test]
     fn the_built_in_binary_is_checked_when_the_profile_has_no_command() {
-        let cfg = HerdrConfig::default();
+        let cfg = AgentHostConfig::default();
         let h = super::super::resolve_in(&cfg, "agy").unwrap();
         assert_eq!(plain_binary(&h).as_deref(), Some("agy"));
     }
 
     #[test]
     fn shell_syntax_in_a_command_is_never_a_hard_failure() {
-        let host = HerdrHost::from_config(&HerdrConfig::default(), LOCAL_HOST).unwrap();
+        let host = ScriptedHost::new("/nonexistent/host");
         assert!(host.checks_binaries());
         for command in [
             "CLAUDE_CONFIG_DIR=/nowhere definitely-missing-xyz",

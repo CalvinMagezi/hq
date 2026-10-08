@@ -29,10 +29,10 @@ impl BackendHealth {
         self.unreachable_until = None;
     }
 
-    /// Exponential backoff from `base`, doubling per consecutive failure, capped at `cap`.
+    /// Backoff of `base` for the first failure, doubling per consecutive one, capped at `cap`.
     fn record_failure(&mut self, base: Duration, cap: Duration) {
         self.consecutive_failures = self.consecutive_failures.saturating_add(1);
-        let shift = self.consecutive_failures.min(16);
+        let shift = self.consecutive_failures.saturating_sub(1).min(16);
         let secs = base.as_secs().saturating_mul(1u64 << shift);
         self.unreachable_until = Some(Instant::now() + Duration::from_secs(secs).min(cap));
     }
@@ -40,7 +40,20 @@ impl BackendHealth {
 
 /// Keyed by endpoint, so two SearxNG instances (or a test server) never share a cooldown.
 pub(super) static HEALTH: std::sync::LazyLock<Mutex<HashMap<String, BackendHealth>>> =
-    std::sync::LazyLock::new(|| Mutex::new(HashMap::new()));
+    std::sync::LazyLock::new(|| {
+        // A restart right after a block must not walk straight back into it.
+        let resumed = super::state::load_health()
+            .into_iter()
+            .map(|(key, failures, left)| {
+                let health = BackendHealth {
+                    unreachable_until: Some(Instant::now() + left),
+                    consecutive_failures: failures,
+                };
+                (key, health)
+            })
+            .collect();
+        Mutex::new(resumed)
+    });
 
 pub(super) fn with_health<T>(key: &str, f: impl FnOnce(&mut BackendHealth) -> T) -> Option<T> {
     let mut map = HEALTH.lock().ok()?;
@@ -48,22 +61,73 @@ pub(super) fn with_health<T>(key: &str, f: impl FnOnce(&mut BackendHealth) -> T)
 }
 
 
-/// Why a backend call failed. `rate_limited` picks the longer backoff.
-pub(super) struct ProviderError {
-    pub(super) reason: String,
-    pub(super) rate_limited: bool,
+/// What kind of failure a backend reported, which sets how long it is
+/// suspended. The classes and their flat durations are SearxNG's shipped
+/// `suspended_times`: a captcha an hour, a rate limit or an access denial three
+/// minutes, anything else five seconds. A success clears the suspension.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
+pub(super) enum FailureClass {
+    #[default]
+    Generic,
+    RateLimited,
+    AccessDenied,
+    Captcha,
 }
 
-impl ProviderError {
-    fn new(reason: impl Into<String>) -> Self {
-        Self {
-            reason: reason.into(),
-            rate_limited: false,
+pub(super) const CAPTCHA_SUSPENSION: Duration = Duration::from_secs(3600);
+pub(super) const REFUSAL_SUSPENSION: Duration = Duration::from_secs(180);
+pub(super) const REFUSAL_SUSPENSION_CAP: Duration = Duration::from_secs(180);
+pub(super) const GENERIC_SUSPENSION: Duration = Duration::from_secs(5);
+pub(super) const GENERIC_SUSPENSION_CAP: Duration = Duration::from_secs(5);
+
+impl FailureClass {
+    /// (base, cap) of the suspension. Base and cap are equal, so repeated failures
+    /// do not lengthen it, as in SearxNG.
+    pub(super) fn suspension(self) -> (Duration, Duration) {
+        match self {
+            FailureClass::Captcha => (CAPTCHA_SUSPENSION, CAPTCHA_SUSPENSION),
+            FailureClass::RateLimited | FailureClass::AccessDenied => {
+                (REFUSAL_SUSPENSION, REFUSAL_SUSPENSION_CAP)
+            }
+            FailureClass::Generic => (GENERIC_SUSPENSION, GENERIC_SUSPENSION_CAP),
         }
     }
 }
 
+/// Why a backend call failed, and how to suspend it.
+#[derive(Debug)]
+pub(super) struct ProviderError {
+    pub(super) reason: String,
+    pub(super) class: FailureClass,
+}
+
+impl ProviderError {
+    pub(super) fn new(reason: impl Into<String>) -> Self {
+        Self::of(FailureClass::Generic, reason)
+    }
+
+    pub(super) fn of(class: FailureClass, reason: impl Into<String>) -> Self {
+        Self {
+            reason: reason.into(),
+            class,
+        }
+    }
+}
+
+impl From<String> for ProviderError {
+    fn from(reason: String) -> Self {
+        Self::new(reason)
+    }
+}
+
+impl From<&str> for ProviderError {
+    fn from(reason: &str) -> Self {
+        Self::new(reason)
+    }
+}
+
 /// One page as a backend returned it, before domain filtering.
+#[derive(Clone)]
 pub(super) struct Page {
     pub(super) results: Vec<SearchResult>,
     pub(super) next_page: Option<u32>,
@@ -72,6 +136,17 @@ pub(super) struct Page {
 /// Send a backend request and decode JSON, classifying every failure.
 /// Credentials live in headers, never in the reason text.
 pub(super) async fn get_json(request: RequestBuilder) -> Result<Value, ProviderError> {
+    let body = get_body(request).await?;
+    serde_json::from_str(&body).map_err(|e| ProviderError::new(format!("malformed JSON: {e}")))
+}
+
+/// Like [`get_json`] for HTML and XML engines: the body travels as a string
+/// value so it can run through the same `try_backend` runner.
+pub(super) async fn get_text(request: RequestBuilder) -> Result<Value, ProviderError> {
+    get_body(request).await.map(Value::String)
+}
+
+pub(super) async fn get_body(request: RequestBuilder) -> Result<String, ProviderError> {
     let resp = request.send().await.map_err(|e| {
         let kind = if e.is_timeout() {
             "request timed out"
@@ -82,30 +157,75 @@ pub(super) async fn get_json(request: RequestBuilder) -> Result<Value, ProviderE
         };
         ProviderError::new(format!("{kind}: {}", e.without_url()))
     })?;
-    decode_json(resp).await
+    read_body(resp).await
 }
 
-/// Classify a backend response that did arrive: status first, then JSON.
-pub(super) async fn decode_json(resp: reqwest::Response) -> Result<Value, ProviderError> {
+/// Classify a backend response that did arrive: status first, then the body.
+pub(super) async fn read_body(resp: reqwest::Response) -> Result<String, ProviderError> {
     let status = resp.status();
-    if status.as_u16() == 429 {
-        return Err(ProviderError {
-            reason: "rate limited (HTTP 429)".into(),
-            rate_limited: true,
-        });
+    // GitHub answers an exhausted quota with 403 and these headers.
+    let quota_exhausted = resp.headers().contains_key("retry-after")
+        || resp
+            .headers()
+            .get("x-ratelimit-remaining")
+            .is_some_and(|v| v == "0");
+    if status.as_u16() == 429 || (status.as_u16() == 403 && quota_exhausted) {
+        return Err(ProviderError::of(
+            FailureClass::RateLimited,
+            format!("rate limited (HTTP {})", status.as_u16()),
+        ));
     }
-    if status.as_u16() == 401 || status.as_u16() == 403 {
-        return Err(ProviderError::new(format!(
-            "invalid credentials or access denied (HTTP {status})"
-        )));
+    // Stack Exchange reports throttling as a 400 with an error name in the body.
+    if status.as_u16() == 400 {
+        let body = resp.text().await.unwrap_or_default();
+        if body.contains("throttle_violation") || body.contains("too_many_requests") {
+            return Err(ProviderError::of(
+                FailureClass::RateLimited,
+                "rate limited (throttled)",
+            ));
+        }
+        return Err(ProviderError::new("HTTP 400 Bad Request"));
+    }
+    // Cloudflare and reCAPTCHA challenge pages arrive as 403 or 503.
+    if matches!(status.as_u16(), 403 | 503) {
+        let body = resp.text().await.unwrap_or_default();
+        if CHALLENGE_BODY_MARKERS.iter().any(|m| body.contains(m)) {
+            return Err(ProviderError::of(
+                FailureClass::Captcha,
+                format!("challenge page (HTTP {status})"),
+            ));
+        }
+        if status.as_u16() == 403 {
+            return Err(ProviderError::of(
+                FailureClass::AccessDenied,
+                format!("invalid credentials or access denied (HTTP {status})"),
+            ));
+        }
+        return Err(ProviderError::new(format!("HTTP {status}")));
+    }
+    if status.as_u16() == 401 {
+        return Err(ProviderError::of(
+            FailureClass::AccessDenied,
+            format!("invalid credentials or access denied (HTTP {status})"),
+        ));
     }
     if !status.is_success() {
         return Err(ProviderError::new(format!("HTTP {status}")));
     }
-    let body = resp
-        .text()
+    resp.text()
         .await
-        .map_err(|e| ProviderError::new(format!("failed reading body: {}", e.without_url())))?;
+        .map_err(|e| ProviderError::new(format!("failed reading body: {}", e.without_url())))
+}
+
+const CHALLENGE_BODY_MARKERS: &[&str] = &[
+    "__cf_chl_",
+    "/cdn-cgi/challenge-platform/",
+    "cf-error-code\">1020",
+    "https://www.google.com/recaptcha/",
+];
+
+pub(super) async fn decode_json(resp: reqwest::Response) -> Result<Value, ProviderError> {
+    let body = read_body(resp).await?;
     serde_json::from_str(&body).map_err(|e| ProviderError::new(format!("malformed JSON: {e}")))
 }
 
@@ -134,6 +254,8 @@ pub(super) fn searxng_params(query: &str, opts: &SearchOptions) -> Vec<(&'static
             Category::General => "general",
             Category::News => "news",
             Category::Science => "science",
+            Category::Images => "images",
+            Category::Code => "it",
         };
         params.push(("categories", name.to_string()));
     }
@@ -193,6 +315,7 @@ pub(super) fn parse_searxng_results(json: &Value, page: u32) -> Result<Page, Str
                 domain: domain_of(&url),
                 published: non_empty_str(&r["publishedDate"]),
                 engines,
+                flagged: false,
                 url,
             }
         })
@@ -240,10 +363,13 @@ pub(super) fn brave_params(query: &str, opts: &SearchOptions) -> Vec<(&'static s
 }
 
 pub(super) fn brave_unsupported(opts: &SearchOptions) -> Vec<String> {
-    if opts.category == Some(Category::Science) {
-        return vec!["category=science (Brave supports general and news)".into()];
-    }
-    Vec::new()
+    let name = match opts.category {
+        Some(Category::Science) => "science",
+        Some(Category::Images) => "images",
+        Some(Category::Code) => "code",
+        _ => return Vec::new(),
+    };
+    vec![format!("category={name} (Brave supports general and news)")]
 }
 
 pub(super) async fn brave_request(
@@ -287,6 +413,7 @@ pub(super) fn parse_brave_results(json: &Value, opts: &SearchOptions) -> Result<
                 domain: domain_of(&url),
                 published: non_empty_str(&r["page_age"]).or_else(|| non_empty_str(&r["age"])),
                 engines: Vec::new(),
+                flagged: false,
                 url,
             }
         })
@@ -304,19 +431,22 @@ pub(super) struct Backend<'a> {
     pub(super) key: &'a str,
     pub(super) label: &'static str,
     pub(super) budget: Duration,
-    /// Backoff (base, cap) for a failure; the flag is "rate limited".
-    pub(super) backoff: fn(bool) -> (Duration, Duration),
+    /// Backoff (base, cap) for a failure of the given class.
+    pub(super) backoff: fn(FailureClass) -> (Duration, Duration),
 }
 
-pub(super) fn searxng_backoff(_rate_limited: bool) -> (Duration, Duration) {
-    (SEARXNG_BACKOFF_BASE, SEARXNG_BACKOFF_CAP)
+pub(super) fn searxng_backoff(class: FailureClass) -> (Duration, Duration) {
+    match class {
+        FailureClass::Generic => (SEARXNG_BACKOFF_BASE, SEARXNG_BACKOFF_CAP),
+        other => other.suspension(),
+    }
 }
 
-pub(super) fn brave_backoff(rate_limited: bool) -> (Duration, Duration) {
-    if rate_limited {
-        (BRAVE_RATE_LIMIT_BACKOFF_BASE, BRAVE_RATE_LIMIT_BACKOFF_CAP)
-    } else {
-        (BRAVE_ERROR_BACKOFF_BASE, BRAVE_ERROR_BACKOFF_CAP)
+pub(super) fn brave_backoff(class: FailureClass) -> (Duration, Duration) {
+    match class {
+        FailureClass::RateLimited => (BRAVE_RATE_LIMIT_BACKOFF_BASE, BRAVE_RATE_LIMIT_BACKOFF_CAP),
+        FailureClass::Generic => (BRAVE_ERROR_BACKOFF_BASE, BRAVE_ERROR_BACKOFF_CAP),
+        other => other.suspension(),
     }
 }
 
@@ -327,7 +457,7 @@ pub(super) async fn try_backend<Fut>(
     deadline: Instant,
     attempts: &mut Vec<ProviderAttempt>,
     request: impl FnOnce() -> Fut,
-    parse: impl FnOnce(&Value) -> Result<Page, String>,
+    parse: impl FnOnce(&Value) -> Result<Page, ProviderError>,
 ) -> Option<Page>
 where
     Fut: Future<Output = Result<Value, ProviderError>>,
@@ -335,7 +465,7 @@ where
     let mut note = |outcome: String| {
         attempts.push(ProviderAttempt {
             provider: backend.label.into(),
-            outcome,
+            outcome: sanitize_note(&outcome),
         })
     };
     if with_health(backend.key, |h| h.is_cooling_down()).unwrap_or(false) {
@@ -354,14 +484,22 @@ where
         Ok(Ok(json)) => match parse(&json) {
             Ok(page) => {
                 with_health(backend.key, BackendHealth::record_success);
+                super::state::save_health(backend.key, 0, None);
                 note(format!("ok, {} results", page.results.len()));
                 return Some(page);
             }
-            Err(reason) => ProviderError::new(format!("invalid response: {reason}")),
+            Err(e) => ProviderError::of(e.class, format!("invalid response: {}", e.reason)),
         },
     };
-    let (base, cap) = (backend.backoff)(failure.rate_limited);
-    with_health(backend.key, |h| h.record_failure(base, cap));
+    let (base, cap) = (backend.backoff)(failure.class);
+    let suspension = with_health(backend.key, |h| {
+        h.record_failure(base, cap);
+        let left = h.unreachable_until.map(|t| t.saturating_duration_since(Instant::now()));
+        (h.consecutive_failures, left)
+    });
+    if let Some((failures, left)) = suspension {
+        super::state::save_health(backend.key, failures, left);
+    }
     debug!(backend = backend.label, reason = %failure.reason, "web search backend failed");
     note(failure.reason);
     None

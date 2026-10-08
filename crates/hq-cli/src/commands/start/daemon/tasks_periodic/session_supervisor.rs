@@ -1,5 +1,5 @@
 //! Session supervisor: reconciles the harness_sessions registry against what
-//! Herdr reports every minute. It asks each host once, snapshots the screen of
+//! The host reports every minute. It asks each host once, snapshots the screen of
 //! every live session, alerts when one blocks on a dialog, marks sessions whose
 //! agent is gone as exited, and surfaces transitions on the value bus so the
 //! operator hears about them on Telegram/Discord.
@@ -12,7 +12,7 @@
 //! operator to ask what the session actually said. On the same transition the
 //! supervisor also posts the session's final output to the `relay` mailbox, so
 //! the platform bridges deliver the result without being asked. That output is
-//! the last screen snapshot taken while the agent was alive: Herdr cannot read
+//! the last screen snapshot taken while the agent was alive: the host cannot read
 //! a pane that no longer has an agent, so a session that dies before its first
 //! sweep has none.
 //!
@@ -31,7 +31,7 @@ use hq_db::Database;
 use hq_db::harness_sessions_registry as registry;
 use hq_tools::harness_session::mission::{self, Event};
 use hq_tools::harness_session::{Liveness, liveness, poll_hosts_with};
-use hq_tools::herdr::{AgentInfo, AgentStatus, HerdrHost};
+use hq_tools::agent_host::{AgentInfo, AgentStatus, Host, HostBackend};
 use std::collections::HashMap;
 use std::future::Future;
 use std::path::Path;
@@ -68,7 +68,7 @@ const SUMMARY_SWEEP_BUDGET: Duration = Duration::from_secs(20);
 const HOST_SWEEP_BUDGET: Duration = Duration::from_secs(6);
 
 /// A host call always gets at least this, so an almost spent budget still lets
-/// a healthy local Herdr answer.
+/// a healthy local the host answer.
 const MIN_HOST_CALL: Duration = Duration::from_secs(1);
 
 /// Below this there is no point starting another summary: deliver the raw
@@ -87,8 +87,8 @@ const DISMISS_HOST_TIMEOUT: Duration = Duration::from_secs(3);
 /// Screen lines quoted in a blocked-agent alert.
 const BLOCKED_EXCERPT_LINES: usize = 15;
 
-/// Resolves a registry host name to a Herdr host. Tests supply fakes.
-type HostResolver = Arc<dyn Fn(&str) -> Result<HerdrHost> + Send + Sync>;
+/// Resolves a registry host name to a host. Tests supply fakes.
+type HostResolver = Arc<dyn Fn(&str) -> Result<Host> + Send + Sync>;
 
 /// What the hosts said this sweep: who is alive, and each live session's screen.
 struct HostPhase {
@@ -105,8 +105,18 @@ fn gather_hosts(
     budget: Duration,
 ) -> HostPhase {
     let deadline = Instant::now() + budget;
-    let within_budget = move |host: HerdrHost| {
-        host.with_command_timeout(
+    // A restarted built-in host holds agents until HQ supplies their env, and
+    // an agent it does not list yet would be taken for gone below.
+    let mut hosts: Vec<&str> = rows.iter().map(|r| r.host.as_str()).collect();
+    hosts.sort_unstable();
+    hosts.dedup();
+    for name in hosts {
+        if let Ok(host) = (resolve.as_ref())(name) {
+            hq_tools::harness_session::resume_awaiting(rows, &host);
+        }
+    }
+    let within_budget = move |host: Host| {
+        host.with_command_timeout_dyn(
             deadline
                 .saturating_duration_since(Instant::now())
                 .max(MIN_HOST_CALL),
@@ -184,7 +194,7 @@ pub async fn run_session_supervisor(
     config: &HqConfig,
 ) -> Result<()> {
     let summarizer = summarizer_for(config);
-    let resolve: HostResolver = Arc::new(|name| hq_tools::herdr::host(Some(name)));
+    let resolve: HostResolver = Arc::new(|name| hq_tools::agent_host::host(Some(name)));
     supervise(
         vault_path,
         db,
@@ -252,7 +262,7 @@ async fn dismiss_survey(
         (db.clone(), row.clone(), screen.to_string(), resolve.clone());
     let outcome = tokio::task::spawn_blocking(move || {
         let host =
-            (resolve2.as_ref())(&row2.host).map(|h| h.with_command_timeout(DISMISS_HOST_TIMEOUT));
+            (resolve2.as_ref())(&row2.host).map(|h| h.with_command_timeout_dyn(DISMISS_HOST_TIMEOUT));
         let (reread_host, press_host) = (host.as_ref().ok().cloned(), host.as_ref().ok().cloned());
         let target = row2.agent_name.clone();
         let reread_target = target.clone();
@@ -268,7 +278,7 @@ async fn dismiss_survey(
             move |keys| {
                 let host = press_host.ok_or(PressError::NotSent)?;
                 host.send_keys(&target, keys).map_err(|e| {
-                    // An answer from Herdr means it refused the keys; silence or a lost
+                    // An answer from the host means it refused the keys; silence or a lost
                     // connection may still have delivered them.
                     if e.is_unreachable() { PressError::MaybeSent } else { PressError::NotSent }
                 })
@@ -297,6 +307,69 @@ async fn dismiss_survey(
     }
 }
 
+/// Types the next message another agent left for this session into it, when it
+/// is idle. One per sweep: the agent finishes a turn, and the idle event that
+/// follows delivers the next.
+async fn deliver_messages(db: &Database, row: &registry::HarnessSessionRow, agent: &AgentInfo) {
+    if !hq_tools::a2a::can_receive(agent.status) {
+        return;
+    }
+    let (db_arc, id, status) = (Arc::new(db.clone()), row.id.clone(), agent.status);
+    let delivered =
+        tokio::task::spawn_blocking(move || hq_tools::a2a::deliver_if_idle(&db_arc, &id, status))
+            .await;
+    match delivered {
+        Ok(Ok(Some(message))) => {
+            tracing::info!(session = %row.id, message, "session-supervisor: delivered an agent message");
+        }
+        Ok(Ok(None)) => {}
+        Ok(Err(e)) => {
+            tracing::warn!(session = %row.id, error = %e, "session-supervisor: could not deliver a message");
+        }
+        Err(e) => {
+            tracing::warn!(session = %row.id, error = %e, "session-supervisor: delivery task failed");
+        }
+    }
+}
+
+/// Keeps a session resumable into its own conversation: stores the id the
+/// agent's hooks reported and, when it is new, gives the host the matching
+/// restart command. Best effort; the next sweep tries again.
+async fn keep_resume_current(
+    db: &Database,
+    vault_path: &Path,
+    row: &registry::HarnessSessionRow,
+    agent: &AgentInfo,
+    resolve: &HostResolver,
+) {
+    let db_arc = Arc::new(db.clone());
+    match hq_tools::harness_session::record_agent_session_id(&db_arc, row, agent) {
+        Ok(true) => {}
+        Ok(false) => return,
+        Err(e) => {
+            tracing::warn!(session = %row.id, error = %e, "session-supervisor: conversation id store failed");
+            return;
+        }
+    }
+    let Ok(host) = (resolve.as_ref())(&row.host) else {
+        return;
+    };
+    let (vault, row_c, agent_c) = (vault_path.to_path_buf(), row.clone(), agent.clone());
+    let refreshed = tokio::task::spawn_blocking(move || {
+        hq_tools::harness_session::refresh_restart_command(&vault, &host, &row_c, &agent_c)
+    })
+    .await;
+    match refreshed {
+        Ok(Ok(())) => {}
+        Ok(Err(e)) => {
+            tracing::warn!(session = %row.id, error = %e, "session-supervisor: restart command not updated");
+        }
+        Err(e) => {
+            tracing::warn!(session = %row.id, error = %e, "session-supervisor: restart command task failed");
+        }
+    }
+}
+
 async fn supervise(
     vault_path: &Path,
     db: &Database,
@@ -312,6 +385,9 @@ async fn supervise(
     // Started after the host phase so a slow host cannot spend the summaries' time.
     let summary_deadline = Instant::now() + SUMMARY_SWEEP_BUDGET;
 
+    // Sessions seen alive this sweep, for message delivery once every report
+    // (a child finishing, for instance) has been queued.
+    let mut alive: Vec<(registry::HarnessSessionRow, AgentInfo)> = Vec::new();
     for row in running {
         match liveness(&phase.polled, &row) {
             Liveness::HostUnreachable(detail) => {
@@ -329,6 +405,8 @@ async fn supervise(
                 )
                 .await;
                 sweep_alive(db, vault_path, &row, &agent, screen, dismissed);
+                keep_resume_current(db, vault_path, &row, &agent, &resolve).await;
+                alive.push((row, *agent));
                 continue;
             }
             Liveness::Gone => {}
@@ -345,6 +423,16 @@ async fn supervise(
         // Before the summarizer: the daemon may kill this sweep at its timeout,
         // and the claim above means no later sweep would record the exit.
         let link = record_on_task(db, &row, Event::Exited);
+        // Sessions started for one that ended on its own stop with it too.
+        let stopped = hq_tools::harness_session::stop_children(&db_arc, &row.id);
+        if !stopped.is_empty() {
+            tracing::info!(session = %row.id, ?stopped, "session-supervisor: stopped the children of an exited session");
+        }
+        // A delegated session tells whoever delegated it.
+        let last_output = final_output(&db_arc, &row.id).unwrap_or_default();
+        if let Err(e) = hq_tools::a2a::report_to_parent(db, &row, "exited", &last_output) {
+            tracing::warn!(session = %row.id, error = %e, "session-supervisor: could not report to the parent");
+        }
         if hand_to_chat(db, &row, WAKE_EXITED) {
             continue;
         }
@@ -414,6 +502,9 @@ async fn supervise(
         post_relay_nudge(vault_path, &row.id, &subject, &body, exit_interrupts(link.as_ref()));
     }
 
+    for (row, agent) in &alive {
+        deliver_messages(db, row, agent).await;
+    }
     Ok(())
 }
 

@@ -37,7 +37,7 @@ placeholders (`example.com`, `hq.example.ts.net`, `<owner>/<repo>`).
 
 ## Architecture
 
-- **Language**: Rust (edition 2024, Cargo workspace of 14 crates)
+- **Language**: Rust (edition 2024, Cargo workspace of 16 crates)
 - **Binary**: `hq`, built from `crates/hq-cli`. `scripts/install-hq.sh` installs it
   to `~/bin/hq`; servers use `/usr/local/bin/hq`.
 - **Config**: `~/.hq/config.yaml` (override with `HQ_CONFIG_PATH`); any key can
@@ -58,16 +58,18 @@ placeholders (`example.com`, `hq.example.ts.net`, `<owner>/<repo>`).
   `agent_send_message` and `agent_read_inbox` are plain vault-mailbox tools for
   handing text to `relay` or another local mailbox id.
 - **Coding-agent runtime**: long-lived coding agents (Claude Code, Codex, Cursor,
-  Pi, OpenCode, Copilot CLI, Kimi, Qwen, Antigravity) run in
-  [Herdr](https://herdr.dev), not tmux. `crates/hq-tools/src/herdr/` drives the
-  `herdr` CLI on a host: `local`, or a remote machine over SSH through a
-  restricted key and the `scripts/hq-herdr-gate` forced command.
-  `harness_session_*`, the read-only `herdr_hosts`/`herdr_agents`/`herdr_read`
-  tools and `herdr_send` sit on top. The supervisor polls each host once a
-  minute, treats an unreachable host as "unknown" (never "exited"), and alerts
+  Pi, OpenCode, Copilot CLI, Kimi, Qwen, Antigravity) run in HQ's built-in host
+  (`hq host`, crate `hq-host`). `crates/hq-tools/src/agent_host/`
+  (to be renamed) holds the client: `NativeBackend` talks to the host on this
+  machine, or to one on another machine over SSH through a key pinned to
+  `hq host gate`. Agents run in a process sandbox with an egress allowlist.
+  `hq host join` / `hq host add` / the `host_add` tool pair a machine.
+  `harness_session_*`, the read-only `host_list`/`host_agents`/`host_read`
+  tools and `host_send` sit on top. The host sends state changes as events; the
+  supervisor treats an unreachable host as "unknown" (never "exited"), and alerts
   when an agent blocks. A coding agent's trust dialog defaults to "No, exit", so
   blocked launches are reported, never auto-answered. Setup, security model and
-  troubleshooting: `docs/HERDR_HARNESS.md`.
+  pairing a machine: `docs/AGENT_HOST.md`, `docs/JOIN_A_MACHINE.md`.
 - **No job queue**: the filesystem job queue (`_jobs/`) is retired. All work
   dispatches through sub-agents or relay notifications.
 - **Long relay turns**: turns that outlive the ack window
@@ -95,8 +97,9 @@ placeholders (`example.com`, `hq.example.ts.net`, `<owner>/<repo>`).
 | CLI binary | `crates/hq-cli/src/main.rs` |
 | Agent session | `crates/hq-agent/src/session/mod.rs` |
 | Sub-agent dispatch | `crates/hq-agent/src/agents/service.rs`, `crates/hq-agent/src/agents/tool.rs` |
-| Coding-agent runtime (Herdr) | `crates/hq-tools/src/herdr/`, `crates/hq-tools/src/harness_session/`, `docs/HERDR_HARNESS.md` |
-| Task-linked and chat-driven harness sessions | `crates/hq-tools/src/harness_session/mission.rs`, `crates/hq-web/src/session_driver.rs`, `crates/hq-web/src/sessions_api.rs`, "Sessions that work on a task" and "Watching and driving from a web chat" in `docs/HERDR_HARNESS.md` |
+| Coding-agent runtime (built-in host) | `crates/hq-host/`, `crates/hq-tools/src/agent_host/`, `crates/hq-tools/src/harness_session/`, `docs/AGENT_HOST.md` |
+| Windows users (WSL2), adding a machine | `docs/WINDOWS.md`, `docs/JOIN_A_MACHINE.md` |
+| Task-linked and chat-driven harness sessions | `crates/hq-tools/src/harness_session/mission.rs`, `crates/hq-web/src/session_driver.rs`, `crates/hq-web/src/sessions_api.rs`, "Sessions that work on a task" and "Watching and driving from a web chat" in `docs/AGENT_SESSIONS.md` |
 | Pull-based updates | `crates/hq-update/`, `crates/hq-cli/src/commands/update.rs`, `deploy/install.sh`, `deploy/update/`, `docs/UPDATE_SYSTEM.md` |
 | Restart notices | `crates/hq-cli/src/commands/notify_restart.rs` (`hq notify-restart`) |
 | MCP server | `crates/hq-mcp/src/server.rs` |
@@ -128,7 +131,7 @@ cargo fmt
 hq mcp doctor                     # verify MCP connection health
 hq skills validate                # reject skills that can never fire (also in hq doctor)
 ./scripts/cargo-gc.sh             # clean debug artifacts if over 20 GB
-./scripts/setup-searxng.sh        # optional: local SearxNG container that web_search uses as its free primary backend
+./scripts/setup-searxng.sh        # optional: local SearxNG container, tried before the built-in engine pool (set searxng_url). Web search is documented in docs/WEB_SEARCH.md
 ```
 
 ### Installing a new build
@@ -230,7 +233,7 @@ AI-sounding prose (`hq_core::prose_quality::SlopDetector`).
 
 ## Retired components
 
-HQ is a reactive single harness: relays, web, CLI, harness sessions over Herdr,
+HQ is a reactive single harness: relays, web, CLI, harness sessions over the host,
 memory, native tasks, and a small maintenance tier. Several subsystems that no
 longer fit that shape were removed. Do not reintroduce them, and treat any
 reference to them in old notes or skills as stale:
@@ -274,6 +277,8 @@ a document.
 | `hq-web` | WebSocket server, REST API, embedded web UI |
 | `hq-convert` | Document conversion both ways, OCR, brand kits |
 | `hq-update` | Signed pull-based updater (library behind `hq update`) |
+| `hq-host` | Built-in coding-agent host: pty panes, emulated screen, control socket, state detection |
+| `hq-sandbox` | Process sandbox policy for one coding agent (`sandbox-exec` or `bwrap`) |
 | `hq-cli` | The `hq` binary and its CLI commands |
 
 ## Writing style

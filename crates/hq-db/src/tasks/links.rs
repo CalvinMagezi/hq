@@ -131,7 +131,7 @@ pub fn add_comment(
     let id = conn.last_insert_rowid();
     changed();
     Ok(conn.query_row(
-        "SELECT id, task_id, author, body, created_at FROM task_comments WHERE id = ?1",
+        "SELECT id, task_id, author, body, created_at, kind, sender_session_id, to_session_id, reply_to, delivered_at FROM task_comments WHERE id = ?1",
         params![id],
         row_to_comment,
     )?)
@@ -139,8 +139,8 @@ pub fn add_comment(
 
 pub fn list_comments(conn: &Connection, task_id: &str) -> Result<Vec<TaskComment>> {
     let mut stmt = conn.prepare(
-        "SELECT id, task_id, author, body, created_at FROM task_comments \
-         WHERE task_id = ?1 ORDER BY created_at",
+        "SELECT id, task_id, author, body, created_at, kind, sender_session_id, to_session_id, reply_to, delivered_at FROM task_comments \
+         WHERE task_id = ?1 ORDER BY created_at, id",
     )?;
     let rows = stmt
         .query_map(params![task_id], row_to_comment)?

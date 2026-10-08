@@ -5,6 +5,7 @@
 //! image generation, TTS, DrawIt diagrams, benchmarking, webmail, planning,
 //! browser automation, and workflow orchestration.
 
+pub mod a2a;
 pub mod agent_comm;
 pub mod agents;
 pub mod ask;
@@ -23,7 +24,7 @@ pub mod file_edit;
 pub mod gws;
 pub mod harness_chunk;
 pub mod harness_session;
-pub mod herdr;
+pub mod agent_host;
 pub mod imagegen;
 pub mod model_control;
 pub mod prose_lint;

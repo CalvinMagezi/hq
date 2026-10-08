@@ -1,5 +1,5 @@
 use super::*;
-use hq_core::config::{HerdrConfig, LOCAL_HOST};
+use hq_tools::agent_host::scripted::ScriptedHost;
 use std::os::unix::fs::PermissionsExt;
 use std::path::PathBuf;
 
@@ -7,9 +7,9 @@ use std::path::PathBuf;
 /// erase, an OSC title, colour runs, and carriage returns between rows.
 const ANSI_SAMPLE: &str = "\x1b[?25l\x1b[2J\x1b[H\x1b]0;osc-window-title\x07\r\x1b[38;5;242m> working\x1b[0m\r\n\x1b[1mFINAL ANSWER: 42\x1b[0m\r\n\x1b[?25h";
 
-/// A Herdr host whose `agent list` reports `agents` and whose `agent read`
+/// A host whose `agent list` reports `agents` and whose `agent read`
 /// prints `screen`.
-fn fake_host(dir: &Path, agents: &[(&str, &str, u64)], screen: &str) -> HerdrHost {
+fn fake_host(dir: &Path, agents: &[(&str, &str, u64)], screen: &str) -> ScriptedHost {
     let list: Vec<String> = agents
         .iter()
         .map(|(name, status, seq)| {
@@ -23,17 +23,13 @@ fn fake_host(dir: &Path, agents: &[(&str, &str, u64)], screen: &str) -> HerdrHos
         list.join(","),
         screen.replace('\'', "")
     );
-    let path = dir.join("herdr");
+    let path = dir.join("scripted-host");
     std::fs::write(&path, script).unwrap();
     std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o755)).unwrap();
-    let cfg = HerdrConfig {
-        binary: path.to_string_lossy().to_string(),
-        ..HerdrConfig::default()
-    };
-    HerdrHost::from_config(&cfg, LOCAL_HOST).unwrap()
+    ScriptedHost::new(path)
 }
 
-fn gone_host(dir: &Path) -> HerdrHost {
+fn gone_host(dir: &Path) -> ScriptedHost {
     fake_host(dir, &[], "")
 }
 
@@ -155,9 +151,9 @@ fn stub_summarizer(outcome: std::result::Result<&'static str, &'static str>) -> 
 /// an unreachable host and posts nothing, so behaviour tests get room.
 const TEST_HOST_BUDGET: Duration = Duration::from_secs(60);
 
-async fn sweep(vault: &Path, db: &Database, host: &HerdrHost, s: Option<&Summarizer>) {
+async fn sweep(vault: &Path, db: &Database, host: &ScriptedHost, s: Option<&Summarizer>) {
     let host = host.clone();
-    let resolve: HostResolver = Arc::new(move |_| Ok(host.clone()));
+    let resolve: HostResolver = Arc::new(move |_| Ok(Arc::new(host.clone()) as Host));
     supervise(vault, db, s, resolve, TEST_HOST_BUDGET)
         .await
         .unwrap();
@@ -284,16 +280,11 @@ async fn a_host_that_never_answers_is_cut_off_at_the_host_budget() {
     let tmp = tempfile::tempdir().unwrap();
     let db = Database::open_memory().unwrap();
     seed(&db, "hs-hung");
-    let path = tmp.path().join("herdr");
+    let path = tmp.path().join("scripted-host");
     std::fs::write(&path, "#!/bin/sh\nsleep 30\n").unwrap();
     std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o755)).unwrap();
-    let cfg = HerdrConfig {
-        binary: path.to_string_lossy().to_string(),
-        command_timeout_secs: 30,
-        ..HerdrConfig::default()
-    };
-    let hung = HerdrHost::from_config(&cfg, LOCAL_HOST).unwrap();
-    let resolve: HostResolver = Arc::new(move |_| Ok(hung.clone()));
+    let hung = ScriptedHost::new(path).with_command_timeout(Duration::from_secs(30));
+    let resolve: HostResolver = Arc::new(move |_| Ok(Arc::new(hung.clone()) as Host));
 
     let started = Instant::now();
     supervise(tmp.path(), &db, None, resolve, Duration::from_millis(500))
@@ -637,7 +628,7 @@ const SURVEY_SCREEN: &str = "6\n\n● How is Claude doing this session? (optiona
 
 /// Like `fake_host`, but `agent send-keys` appends its arguments to a log file. The screen
 /// gains a `tick N` line per key received, as a pane that reacted to the key would.
-fn keylogging_host(dir: &Path, name: &str, status: &str, screen: &str) -> (HerdrHost, PathBuf) {
+fn keylogging_host(dir: &Path, name: &str, status: &str, screen: &str) -> (ScriptedHost, PathBuf) {
     keylogging_host_with(dir, name, status, screen, true)
 }
 
@@ -647,7 +638,7 @@ fn keylogging_host_with(
     status: &str,
     screen: &str,
     reacts: bool,
-) -> (HerdrHost, PathBuf) {
+) -> (ScriptedHost, PathBuf) {
     let log = dir.join("keys.log");
     let tick = u8::from(reacts);
     let script = format!(
@@ -655,14 +646,10 @@ fn keylogging_host_with(
         screen = screen.replace('\'', ""),
         log = log.display()
     );
-    let path = dir.join("herdr");
+    let path = dir.join("scripted-host");
     std::fs::write(&path, script).unwrap();
     std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o755)).unwrap();
-    let cfg = HerdrConfig {
-        binary: path.to_string_lossy().to_string(),
-        ..HerdrConfig::default()
-    };
-    (HerdrHost::from_config(&cfg, LOCAL_HOST).unwrap(), log)
+    (ScriptedHost::new(path), log)
 }
 
 fn drive_on(db: &Database, id: &str) {
@@ -775,7 +762,7 @@ async fn a_finished_alert_and_wake_survive_a_state_change_after_the_keypress() {
     assert_eq!(keys_logged(&log).len(), 1);
     assert_eq!(wake(&db).as_deref(), Some(WAKE_FINISHED), "wake despite dismissal");
 
-    // Herdr bumped state_change_seq after the key; the next finished turn must wake again.
+    // The host bumped state_change_seq after the key; the next finished turn must wake again.
     db.with_conn(|c| {
         c.execute("UPDATE harness_sessions SET pm_wake = NULL WHERE id = 'hs-f'", [])?;
         Ok(())

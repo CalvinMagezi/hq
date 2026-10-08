@@ -1,0 +1,12 @@
+[package]
+name = "hq-sandbox"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Process sandbox for coding agents: Seatbelt on macOS, bubblewrap on Linux"
+
+[dependencies]
+which = { workspace = true }
+
+[dev-dependencies]
+tempfile = { workspace = true }

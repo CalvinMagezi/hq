@@ -4,6 +4,7 @@ version.workspace = true
 edition.workspace = true
 
 [dependencies]
+hq-host = { workspace = true }
 hq-core = { workspace = true }
 hq-vault = { workspace = true }
 hq-db = { workspace = true }
@@ -24,11 +25,14 @@ async-trait = { workspace = true }
 reqwest = { workspace = true }
 url = { workspace = true }
 sha2 = { workspace = true }
+# Hand-tuned SHA-256 for the Mojeek proof of work; already in the tree through rustls.
+ring = "0.17"
 hex = { workspace = true }
 dirs = { workspace = true }
 base64 = "0.22"
 which = { workspace = true }
 html2text = { workspace = true }
+scraper = { workspace = true }
 regex = { workspace = true }
 rusqlite = { workspace = true }
 
@@ -41,6 +45,8 @@ default = [
 # default-on today, matching every build that exists; a future non-default
 # build is what would actually exercise turning one off.
 gws = []
+# Test doubles other crates' tests use (a scripted host).
+test-support = []
 
 [dev-dependencies]
 tempfile = "3"

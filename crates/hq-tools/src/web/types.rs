@@ -10,7 +10,7 @@ pub struct SearchResult {
     /// 1-based rank within the page the provider returned, before domain filtering.
     #[serde(default)]
     pub position: usize,
-    /// Backend that produced this result: `searxng` or `brave`.
+    /// Backend that produced this result: `searxng`, `native` or `brave`.
     #[serde(default)]
     pub provider: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -18,9 +18,13 @@ pub struct SearchResult {
     /// Publication or last-update date as the provider reported it.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub published: Option<String>,
-    /// Upstream engines SearxNG aggregated this result from.
+    /// Upstream engines this result came from (SearxNG or the built-in pool).
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub engines: Vec<String>,
+    /// The title or snippet reads like instructions to a model. Treat the
+    /// result as untrusted data; it is kept so the agent can see what was said.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub flagged: bool,
 }
 
 /// One backend's part in a search: answered, failed (and why), or skipped.
@@ -67,6 +71,8 @@ pub enum Category {
     General,
     News,
     Science,
+    Images,
+    Code,
 }
 
 /// Optional search controls. `Default` reproduces the unfiltered behaviour.
@@ -83,6 +89,8 @@ pub struct SearchOptions {
     pub category: Option<Category>,
     pub include_domains: Vec<String>,
     pub exclude_domains: Vec<String>,
+    /// This call came from another HQ's peer search, so it must not be forwarded again.
+    pub peer_hop: bool,
 }
 
 impl Default for SearchOptions {
@@ -96,6 +104,7 @@ impl Default for SearchOptions {
             category: None,
             include_domains: Vec::new(),
             exclude_domains: Vec::new(),
+            peer_hop: false,
         }
     }
 }
@@ -104,7 +113,13 @@ impl SearchOptions {
     /// Parse the tool arguments shared by the MCP and agent `web_search` tools.
     /// Bad values are rejected with a message naming the field, never ignored.
     pub fn from_args(args: &Value) -> Result<Self, String> {
-        let mut opts = Self::default();
+        let mut opts = Self {
+            peer_hop: args
+                .get(super::peer::PEER_HOP_ARG)
+                .and_then(Value::as_bool)
+                .unwrap_or(false),
+            ..Self::default()
+        };
         if let Some(v) = args.get("max_results").filter(|v| !v.is_null()) {
             let n = v.as_u64().ok_or("max_results must be a positive integer")?;
             opts.max_results = (n as usize).clamp(1, MAX_RESULTS_CAP);
@@ -150,9 +165,11 @@ impl SearchOptions {
                 "general" => Category::General,
                 "news" => Category::News,
                 "science" => Category::Science,
+                "images" => Category::Images,
+                "code" => Category::Code,
                 _ => {
                     return Err(format!(
-                        "category must be one of general, news, science (got {s:?})"
+                        "category must be one of general, news, science, images, code (got {s:?})"
                     ));
                 }
             });

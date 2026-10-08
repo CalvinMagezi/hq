@@ -4,7 +4,7 @@ use hq_core::config::HqConfig;
 use hq_db::Database;
 use hq_tools::registry::{HqTool, ToolRegistry};
 use hq_tools::{
-    agent_comm, agents, ask, background_turns, brand, coding, convert, harness_session, herdr,
+    a2a, agent_comm, agents, ask, background_turns, brand, coding, convert, harness_session, agent_host,
     imagegen, prose_lint, remote_mcp, self_update, session_search, shortcuts, skill_manage_tool,
     skills, slash_commands, subagent_runs, system_info, tasks, vault, web,
 };
@@ -41,7 +41,7 @@ pub fn create_default_registry(
         None,
         None,
     ));
-    tools.extend(herdr::tools::create_herdr_tools(db.clone()));
+    tools.extend(agent_host::tools::create_host_tools(db.clone()));
     tools.extend(background_turns::create_background_turn_tools(db.clone()));
     tools.extend(subagent_runs::create_subagent_run_tools(db.clone(), None));
     tools.extend(tasks::create_task_tools(
@@ -78,15 +78,18 @@ pub fn create_default_registry(
         openrouter_key,
     )));
     tools.extend(agent_comm::create_agent_comm_tools(vault_path.clone()));
+    tools.extend(a2a::create_a2a_tools(vault_path.clone(), db.clone()));
     tools.extend(ask::create_ask_tools(db.clone(), None));
 
-    // web_search tries SearxNG first (no API key) and falls back to Brave.
-    let (searxng_url, brave_api_key) = config
-        .map(|c| (c.searxng_url.clone(), c.brave_api_key.clone()))
-        .unwrap_or((None, None));
+    // web_search: SearxNG when configured, then the built-in keyless engines, then Brave.
+    let (searxng_url, brave_api_key, native) = config
+        .map(|c| (c.searxng_url.clone(), c.brave_api_key.clone(), c.web_search_native))
+        .unwrap_or((None, None, true));
+    web::set_search_peer(config.and_then(|c| c.web_search_peer_server()).cloned());
     tools.push(Box::new(web::WebSearchHqTool::new(
         searxng_url,
         brave_api_key,
+        native,
     )));
     tools.push(Box::new(web::WebFetchHqTool));
 

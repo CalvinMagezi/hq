@@ -12,11 +12,11 @@ read-only tool allowlist) or `AGENTHQ_HANDOFF_API_KEY` (the read-only set minus
 `harness_session_spawn`, `harness_session_handoff`, `hq_ask` and `hq_ask_result`, as listed in
 `hq_mcp::gateway::HANDOFF_ALLOWLIST`; no deletes, no session stop, resume,
 send or goal changes, no vault writes). **The handoff key is equivalent to
-code execution on every configured Herdr host**: a spawned `claude-code`
+code execution on every configured host**: a spawned `claude-code`
 session runs with permissions skipped. It cannot send to or read the output of
 sessions (the registry does not record who started a session, so those tools
 would reach sessions the key never started), but it can start an agent anywhere
-`herdr.spawn_cwd_deny` allows. Set `herdr.handoff_cwd_allow` to the project
+`agent_host.spawn_cwd_deny` allows. Set `agent_host.handoff_cwd_allow` to the project
 roots it may use; leave it empty only for a key you would hand a shell. The
 gateway tells the tool the call came in on this key, so a client cannot claim
 or drop the scope. Send the key as `Authorization: Bearer <key>` or
@@ -37,7 +37,7 @@ wins over the switch.
 same scoping. The full key may use `mode: full`, which gives the reply every tool a web chat turn
 has. The handoff key may only ask in `read_only` mode, which runs the reply under the read-only
 permission preset, and can read back only the asks it made. The Spark key has neither tool.
-A handoff-key ask turn also loses the tools the handoff key is kept off (session logs and lists, Herdr panes, file and git readers, specialist sub-agents; see `docs/MCP_ASK.md`), and the key may continue only threads its own asks started in which the owner has typed nothing. Questions are capped at 20,000 characters, with 3 asks waiting at once, 6 new asks per minute and 200 per day per key. The gateway sets the
+A handoff-key ask turn also loses the tools the handoff key is kept off (session logs and lists, host panes, file and git readers, specialist sub-agents; see `docs/MCP_ASK.md`), and the key may continue only threads its own asks started in which the owner has typed nothing. Questions are capped at 20,000 characters, with 3 asks waiting at once, 6 new asks per minute and 200 per day per key. The gateway sets the
 scope marker, so a client cannot claim `full` for a handoff call. The answer is model output and
 must be treated as untrusted by the caller.
 
