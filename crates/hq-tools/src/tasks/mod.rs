@@ -21,8 +21,8 @@ mod tools_task;
 
 use from_note::TaskCreateFromNoteTool;
 pub use json::{
-    apply_dependency_changes, notify_ready_for_review, notify_unblocked, task_json,
-    task_json_with_warnings, unblocked_by_transition,
+    added_tags, apply_dependency_changes, notify_ready_for_review, notify_tags, notify_unblocked,
+    task_json, task_json_with_warnings, unblocked_by_transition,
 };
 pub use placement::{
     Placement, create_task_in, derive_id_prefix, find_or_create_folder, find_or_create_initiative,

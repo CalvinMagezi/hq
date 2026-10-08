@@ -40,6 +40,8 @@ export interface TaskItem {
   work_started_at: string | null
   /** UTC timestamp of the first move into ready_for_review; null = unknown. */
   first_ready_for_review_at: string | null
+  /** UTC timestamp of the latest move into complete; null = not complete or not recorded. */
+  completed_at: string | null
   /** Set on sub-tasks; nesting is one level deep. */
   parent_task_id: string | null
   tags: string[]
@@ -74,14 +76,48 @@ interface ListTasksFilter {
 
 export const HTTP_CONFLICT = 409
 
-export async function fetchTasksClient(filter?: ListTasksFilter): Promise<{ count: number; tasks: TaskItem[] }> {
+/** Rows per request. The server caps a page at 500, so a longer list takes several. */
+export const TASK_PAGE_SIZE = 500
+
+interface TaskPage {
+  tasks: TaskItem[]
+  total: number
+  has_more: boolean
+}
+
+/** Follows `has_more` so a list longer than one page is never cut. An empty page ends the loop. */
+export async function collectTaskPages(
+  fetchPage: (offset: number) => Promise<TaskPage>
+): Promise<{ count: number; total: number; tasks: TaskItem[] }> {
+  // A task edited between two requests moves to the front of the list and shifts
+  // the later pages by one, so a row can arrive twice: the id keeps it once.
+  const byId = new Map<string, TaskItem>()
+  let total = 0
+  let read = 0
+  for (;;) {
+    const page = await fetchPage(read)
+    read += page.tasks.length
+    for (const task of page.tasks) byId.set(task.id, task)
+    total = page.total
+    if (!page.has_more || page.tasks.length === 0) break
+  }
+  return { count: byId.size, total, tasks: [...byId.values()] }
+}
+
+export async function fetchTasksClient(
+  filter?: ListTasksFilter
+): Promise<{ count: number; total: number; tasks: TaskItem[] }> {
   const qs = new URLSearchParams()
   if (filter?.space_id) qs.set('space_id', filter.space_id)
   if (filter?.initiative_id) qs.set('initiative_id', filter.initiative_id)
   if (filter?.status) qs.set('status', filter.status)
   if (filter?.tag) qs.set('tag', filter.tag)
   if (filter?.priority) qs.set('priority', filter.priority)
-  return readJson(await hqFetch(`/api/tasks?${qs.toString()}`))
+  qs.set('limit', String(TASK_PAGE_SIZE))
+  return collectTaskPages(async (offset) => {
+    qs.set('offset', String(offset))
+    return readJson(await hqFetch(`/api/tasks?${qs.toString()}`))
+  })
 }
 
 export async function fetchSpacesClient(): Promise<{ spaces: Space[] }> {

@@ -21,6 +21,7 @@ const makeTask = (overrides: Partial<TaskItem> = {}): TaskItem => ({
   subtask_done: 3,
   work_started_at: null,
   first_ready_for_review_at: null,
+  completed_at: null,
   created_by: 'alice',
   created_at: '2026-09-28 10:00:00',
   updated_at: '2026-09-28 20:30:00',

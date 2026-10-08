@@ -37,7 +37,8 @@ pub(super) fn row_to_initiative(row: &rusqlite::Row) -> rusqlite::Result<Initiat
 
 pub(super) const TASK_COLS: &str = "t.id, t.initiative_id, t.display_id, t.title, t.description, t.status, \
      t.priority, t.due_date, t.clickup_task_id, t.created_by, t.created_at, t.updated_at, \
-     t.parent_task_id, t.start_date, t.work_started_at, t.first_ready_for_review_at, t.external_id";
+     t.parent_task_id, t.start_date, t.work_started_at, t.first_ready_for_review_at, t.external_id, \
+     t.completed_at";
 
 pub(super) fn row_to_task(row: &rusqlite::Row) -> rusqlite::Result<Task> {
     Ok(Task {
@@ -58,6 +59,7 @@ pub(super) fn row_to_task(row: &rusqlite::Row) -> rusqlite::Result<Task> {
         work_started_at: row.get(14)?,
         first_ready_for_review_at: row.get(15)?,
         external_id: row.get(16)?,
+        completed_at: row.get(17)?,
         tags: Vec::new(),
         depends_on: Vec::new(),
         blocked_by: Vec::new(),
@@ -81,31 +83,51 @@ pub(super) fn row_to_comment(row: &rusqlite::Row) -> rusqlite::Result<TaskCommen
     })
 }
 
-pub(super) fn event_for_status(status: &str) -> Option<(&'static str, &'static str)> {
+/// The event a move into `status` records, and the summary column it stamps
+/// once. `None` for a string that is not a status.
+pub(super) fn event_for_status(status: &str) -> Option<(&'static str, Option<&'static str>)> {
     match status {
-        STATUS_IN_PROGRESS => Some((EVENT_ENTERED_IN_PROGRESS, "work_started_at")),
-        STATUS_READY_FOR_REVIEW => {
-            Some((EVENT_ENTERED_READY_FOR_REVIEW, "first_ready_for_review_at"))
-        }
+        STATUS_TO_DO => Some((EVENT_ENTERED_TO_DO, None)),
+        STATUS_IN_PROGRESS => Some((EVENT_ENTERED_IN_PROGRESS, Some("work_started_at"))),
+        STATUS_BLOCKED => Some((EVENT_ENTERED_BLOCKED, None)),
+        STATUS_READY_FOR_REVIEW => Some((
+            EVENT_ENTERED_READY_FOR_REVIEW,
+            Some("first_ready_for_review_at"),
+        )),
+        STATUS_COMPLETE => Some((EVENT_ENTERED_COMPLETE, None)),
         _ => None,
     }
 }
 
-/// Appends a lifecycle event and stamps the task's first-time summary column.
-/// Runs inside `update_task`'s write transaction so a status and its event
-/// commit together.
-pub(super) fn record_transition(conn: &Connection, task_id: &str, status: &str) -> Result<()> {
-    let Some((event_type, summary_col)) = event_for_status(status) else {
+/// Appends a lifecycle event and keeps the task's time columns in step: the
+/// first-time summaries are stamped once, `completed_at` follows the latest
+/// completion and clears on reopen. Runs inside `update_task`'s write
+/// transaction so a status and its event commit together.
+pub(super) fn record_transition(
+    conn: &Connection,
+    task_id: &str,
+    from: &str,
+    to: &str,
+) -> Result<()> {
+    let Some((event_type, summary_col)) = event_for_status(to) else {
         return Ok(());
     };
     let now: String = conn.query_row("SELECT datetime('now')", [], |r| r.get(0))?;
     conn.execute(
-        "INSERT INTO task_events (task_id, event_type, occurred_at) VALUES (?1, ?2, ?3)",
-        params![task_id, event_type, now],
+        "INSERT INTO task_events (task_id, event_type, occurred_at, from_status, to_status) \
+         VALUES (?1, ?2, ?3, ?4, ?5)",
+        params![task_id, event_type, now, from, to],
     )?;
+    if let Some(col) = summary_col {
+        conn.execute(
+            &format!("UPDATE tasks SET {col} = COALESCE({col}, ?1) WHERE id = ?2"),
+            params![now, task_id],
+        )?;
+    }
+    let completed_at = (to == STATUS_COMPLETE).then_some(now);
     conn.execute(
-        &format!("UPDATE tasks SET {summary_col} = COALESCE({summary_col}, ?1) WHERE id = ?2"),
-        params![now, task_id],
+        "UPDATE tasks SET completed_at = ?1 WHERE id = ?2",
+        params![completed_at, task_id],
     )?;
     Ok(())
 }
@@ -113,7 +135,8 @@ pub(super) fn record_transition(conn: &Connection, task_id: &str, status: &str) 
 /// Lifecycle transitions of a task (id or display id), oldest first.
 pub fn list_task_events(conn: &Connection, id_or_display_id: &str) -> Result<Vec<TaskEvent>> {
     let mut stmt = conn.prepare(
-        "SELECT e.id, e.task_id, e.event_type, e.occurred_at FROM task_events e \
+        "SELECT e.id, e.task_id, e.event_type, e.occurred_at, e.from_status, e.to_status \
+         FROM task_events e \
          JOIN tasks t ON t.id = e.task_id \
          WHERE t.id = ?1 OR t.display_id = ?1 ORDER BY e.id",
     )?;
@@ -124,6 +147,8 @@ pub fn list_task_events(conn: &Connection, id_or_display_id: &str) -> Result<Vec
                 task_id: r.get(1)?,
                 event_type: r.get(2)?,
                 occurred_at: r.get(3)?,
+                from_status: r.get(4)?,
+                to_status: r.get(5)?,
             })
         })?
         .collect::<rusqlite::Result<Vec<_>>>()?;
@@ -154,7 +179,8 @@ pub(super) fn hydrate(conn: &Connection, tasks: &mut [Task]) -> Result<()> {
     let rows = stmt.query_map(rusqlite::params_from_iter(&ids), |r| {
         Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?))
     })?;
-    for (task_id, tag) in rows.filter_map(|r| r.ok()) {
+    for row in rows {
+        let (task_id, tag) = row?;
         tasks[index[&task_id]].tags.push(tag);
     }
 
@@ -171,7 +197,8 @@ pub(super) fn hydrate(conn: &Connection, tasks: &mut [Task]) -> Result<()> {
             r.get::<_, String>(3)?,
         ))
     })?;
-    for (task_id, blocker_id, blocker_display, blocker_status) in rows.filter_map(|r| r.ok()) {
+    for row in rows {
+        let (task_id, blocker_id, blocker_display, blocker_status) = row?;
         let task = &mut tasks[index[&task_id]];
         task.depends_on.push(blocker_id);
         if blocker_status != STATUS_COMPLETE {
@@ -190,7 +217,8 @@ pub(super) fn hydrate(conn: &Connection, tasks: &mut [Task]) -> Result<()> {
             r.get::<_, i64>(2)?,
         ))
     })?;
-    for (parent_id, count, done) in rows.filter_map(|r| r.ok()) {
+    for row in rows {
+        let (parent_id, count, done) = row?;
         let task = &mut tasks[index[&parent_id]];
         task.subtask_count = count;
         task.subtask_done = done;
@@ -255,8 +283,7 @@ pub(super) fn subtask_ids(conn: &Connection, task_id: &str) -> Result<Vec<String
     let mut stmt = conn.prepare("SELECT id FROM tasks WHERE parent_task_id = ?1")?;
     let ids = stmt
         .query_map(params![task_id], |r| r.get::<_, String>(0))?
-        .filter_map(|r| r.ok())
-        .collect();
+        .collect::<rusqlite::Result<Vec<_>>>()?;
     Ok(ids)
 }
 

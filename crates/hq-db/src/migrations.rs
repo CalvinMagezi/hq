@@ -292,6 +292,10 @@ const MIGRATIONS: &[(&str, &str)] = &[
         "079_harness_usage",
         include_str!("../sql/079_harness_usage.sql"),
     ),
+    (
+        "080_task_event_log",
+        include_str!("../sql/080_task_event_log.sql"),
+    ),
 ];
 
 const MEMORY_SCHEMA_MIGRATION: &str = "058_memory_schema";
@@ -594,6 +598,83 @@ mod tests {
             .query_row("SELECT title FROM tasks WHERE id = 't1'", [], |r| r.get(0))
             .unwrap();
         assert_eq!(title, "old");
+    }
+
+    #[test]
+    fn task_event_log_migration_keeps_old_events_and_widens_the_types() {
+        let conn = rusqlite::Connection::open_in_memory().unwrap();
+        let idx = super::MIGRATIONS
+            .iter()
+            .position(|(v, _)| *v == "080_task_event_log")
+            .unwrap();
+        super::apply(&conn, &super::MIGRATIONS[..idx]).unwrap();
+        conn.execute_batch(
+            "INSERT INTO spaces (id, name, slug) VALUES ('s', 'S', 's');
+             INSERT INTO initiatives (id, space_id, name, slug, id_prefix) VALUES ('i', 's', 'I', 'i', 'I');
+             INSERT INTO tasks (id, initiative_id, display_id, title, status)
+                 VALUES ('t1', 'i', 'I-001', 'old', 'in_progress');
+             INSERT INTO task_events (task_id, event_type, occurred_at)
+                 VALUES ('t1', 'entered_in_progress', '2020-01-01 00:00:00');",
+        )
+        .unwrap();
+
+        super::run(&conn).unwrap();
+        let (event, at, from): (String, String, Option<String>) = conn
+            .query_row(
+                "SELECT event_type, occurred_at, from_status FROM task_events WHERE task_id = 't1'",
+                [],
+                |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
+            )
+            .unwrap();
+        assert_eq!((event.as_str(), at.as_str()), ("entered_in_progress", "2020-01-01 00:00:00"));
+        assert!(from.is_none(), "old events stay unknown, not guessed");
+        conn.execute(
+            "INSERT INTO task_events (task_id, event_type, from_status, to_status) \
+             VALUES ('t1', 'entered_complete', 'in_progress', 'complete')",
+            [],
+        )
+        .unwrap();
+        assert!(
+            conn.execute("INSERT INTO task_events (task_id, event_type) VALUES ('t1', 'bogus')", [])
+                .is_err()
+        );
+        let next: i64 = conn
+            .query_row("SELECT MAX(id) FROM task_events", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(next, 2, "ids continue after the copied rows");
+
+        // The rollback documented in docs/plans/native-tasks.md.
+        conn.execute_batch("ALTER TABLE tasks DROP COLUMN completed_at;").unwrap();
+    }
+
+    #[test]
+    fn task_event_log_migration_does_not_reuse_the_id_of_a_deleted_event() {
+        let conn = rusqlite::Connection::open_in_memory().unwrap();
+        let idx = super::MIGRATIONS
+            .iter()
+            .position(|(v, _)| *v == "080_task_event_log")
+            .unwrap();
+        super::apply(&conn, &super::MIGRATIONS[..idx]).unwrap();
+        conn.execute_batch(
+            "INSERT INTO spaces (id, name, slug) VALUES ('s', 'S', 's');
+             INSERT INTO initiatives (id, space_id, name, slug, id_prefix) VALUES ('i', 's', 'I', 'i', 'I');
+             INSERT INTO tasks (id, initiative_id, display_id, title) VALUES ('t1', 'i', 'I-001', 'a');
+             INSERT INTO task_events (task_id, event_type) VALUES ('t1', 'entered_in_progress');
+             INSERT INTO task_events (task_id, event_type) VALUES ('t1', 'entered_ready_for_review');
+             DELETE FROM task_events WHERE id = 2;",
+        )
+        .unwrap();
+
+        super::run(&conn).unwrap();
+        conn.execute(
+            "INSERT INTO task_events (task_id, event_type) VALUES ('t1', 'entered_complete')",
+            [],
+        )
+        .unwrap();
+        let id: i64 = conn
+            .query_row("SELECT MAX(id) FROM task_events", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(id, 3, "id 2 belonged to a deleted event and is not handed out again");
     }
 
     #[test]

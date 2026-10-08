@@ -5,7 +5,7 @@ pub fn create_space(conn: &Connection, id: &str, name: &str, slug: &str) -> Resu
         "INSERT INTO spaces (id, name, slug) VALUES (?1, ?2, ?3)",
         params![id, name, slug],
     )?;
-    notify_on_ok(
+    notify_on_ok(conn, 
         get_space(conn, id)?
             .ok_or_else(|| anyhow::anyhow!("space {id} vanished immediately after creation")),
     )
@@ -38,7 +38,7 @@ pub fn update_space(conn: &Connection, id: &str, name: &str) -> Result<Space> {
     if affected == 0 {
         anyhow::bail!("space {id} not found");
     }
-    notify_on_ok(
+    notify_on_ok(conn, 
         get_space(conn, id)?.ok_or_else(|| anyhow::anyhow!("space {id} vanished after update")),
     )
 }
@@ -55,7 +55,7 @@ pub fn create_folder(
         "INSERT INTO folders (id, space_id, name, slug) VALUES (?1, ?2, ?3, ?4)",
         params![id, space_id, name, slug],
     )?;
-    notify_on_ok(
+    notify_on_ok(conn, 
         get_folder(conn, id)?
             .ok_or_else(|| anyhow::anyhow!("folder {id} vanished immediately after creation")),
     )
@@ -111,7 +111,7 @@ pub fn create_initiative(
          VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
         params![id, space_id, folder_id, name, slug, id_prefix],
     )?;
-    notify_on_ok(
+    notify_on_ok(conn, 
         get_initiative(conn, id)?
             .ok_or_else(|| anyhow::anyhow!("initiative {id} vanished immediately after creation")),
     )

@@ -14,13 +14,35 @@ pub const STATUS_BLOCKED: &str = "blocked";
 pub const STATUS_READY_FOR_REVIEW: &str = "ready_for_review";
 pub const STATUS_COMPLETE: &str = "complete";
 
+/// Every status a task may hold. Validation names these in its error.
+pub const STATUSES: [&str; 5] = [
+    STATUS_TO_DO,
+    STATUS_IN_PROGRESS,
+    STATUS_BLOCKED,
+    STATUS_READY_FOR_REVIEW,
+    STATUS_COMPLETE,
+];
+
+pub const EVENT_ENTERED_TO_DO: &str = "entered_to_do";
 pub const EVENT_ENTERED_IN_PROGRESS: &str = "entered_in_progress";
+pub const EVENT_ENTERED_BLOCKED: &str = "entered_blocked";
 pub const EVENT_ENTERED_READY_FOR_REVIEW: &str = "entered_ready_for_review";
+pub const EVENT_ENTERED_COMPLETE: &str = "entered_complete";
 
 pub const PRIORITY_URGENT: &str = "urgent";
 pub const PRIORITY_HIGH: &str = "high";
 pub const PRIORITY_NORMAL: &str = "normal";
 pub const PRIORITY_LOW: &str = "low";
+
+pub const PRIORITIES: [&str; 4] = [
+    PRIORITY_URGENT,
+    PRIORITY_HIGH,
+    PRIORITY_NORMAL,
+    PRIORITY_LOW,
+];
+
+/// Largest page `list_tasks` returns. Larger lists are read with `offset`.
+pub const MAX_LIST_LIMIT: usize = 500;
 
 type ChangeHook = Box<dyn Fn() + Send + Sync>;
 
@@ -45,11 +67,49 @@ fn changed() {
     }
 }
 
-fn notify_on_ok<T>(result: Result<T>) -> Result<T> {
+/// Runs `f` in one write transaction that takes the write lock up front, so a
+/// read-then-write sequence decides on the state it then changes. Joins a
+/// transaction the caller already holds, which then owns the commit.
+pub fn in_write_tx<T>(conn: &Connection, f: impl FnOnce(&Connection) -> Result<T>) -> Result<T> {
+    if !conn.is_autocommit() {
+        return f(conn);
+    }
+    let tx = rusqlite::Transaction::new_unchecked(conn, rusqlite::TransactionBehavior::Immediate)?;
+    let out = f(&tx)?;
+    tx.commit()?;
+    changed();
+    Ok(out)
+}
+
+/// Refuses a status the board and every status query would not recognise.
+pub fn validate_status(status: &str) -> Result<()> {
+    if STATUSES.contains(&status) {
+        return Ok(());
+    }
+    anyhow::bail!("unknown status '{status}', expected one of {}", STATUSES.join(", "))
+}
+
+pub fn validate_priority(priority: &str) -> Result<()> {
+    if PRIORITIES.contains(&priority) {
+        return Ok(());
+    }
+    anyhow::bail!("unknown priority '{priority}', expected one of {}", PRIORITIES.join(", "))
+}
+
+/// Fires the change hooks after a successful write, unless the connection is
+/// inside a transaction: the transaction's owner fires them once it commits, so
+/// a watcher never reads state that is about to roll back.
+fn notify_on_ok<T>(conn: &Connection, result: Result<T>) -> Result<T> {
     if result.is_ok() {
-        changed();
+        changed_outside_tx(conn);
     }
     result
+}
+
+fn changed_outside_tx(conn: &Connection) {
+    if conn.is_autocommit() {
+        changed();
+    }
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -113,6 +173,9 @@ pub struct Task {
     pub work_started_at: Option<String>,
     /// UTC timestamp of the first move into ready_for_review, `None` as above.
     pub first_ready_for_review_at: Option<String>,
+    /// UTC timestamp of the latest move into complete, cleared when the task
+    /// reopens. `None` = not complete, or completed before it was recorded.
+    pub completed_at: Option<String>,
     /// Caller-supplied idempotency key, unique within the task's space.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub external_id: Option<String>,
@@ -125,6 +188,9 @@ pub struct TaskEvent {
     pub task_id: String,
     pub event_type: String,
     pub occurred_at: String,
+    /// `None` on events recorded before the full log existed.
+    pub from_status: Option<String>,
+    pub to_status: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -151,6 +217,9 @@ pub struct TaskFilter {
     pub priority: Option<String>,
     /// `Some(None)` = top-level tasks only; `Some(Some(id))` = that task's sub-tasks.
     pub parent_task_id: Option<Option<String>>,
+    /// Page size, at most `MAX_LIST_LIMIT`. `None` = the maximum.
+    pub limit: Option<usize>,
+    pub offset: usize,
 }
 
 /// Everything a new task needs besides its id and initiative.

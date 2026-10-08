@@ -184,12 +184,9 @@ impl ScopedTaskTool {
         self.inner.execute(args).await
     }
 
-    async fn filtered_list(&self, args: Value, key: &str, space_of: SpaceOf) -> Result<Value> {
-        let mut result = self.inner.execute(args).await?;
+    /// Drops the rows whose space this audience may not see.
+    fn retain_visible(&self, rows: &mut Vec<Value>, space_of: SpaceOf) {
         let mut cache: HashMap<String, bool> = HashMap::new();
-        let Some(rows) = result.get_mut(key).and_then(Value::as_array_mut) else {
-            bail!(DENIED_MESSAGE);
-        };
         let db = &self.db;
         rows.retain(|row| {
             let Some(anchor) = space_of.anchor(row) else {
@@ -202,13 +199,60 @@ impl ScopedTaskTool {
                 self.scope.allows(&label)
             })
         });
+    }
+
+    async fn filtered_list(&self, args: Value, key: &str, space_of: SpaceOf) -> Result<Value> {
+        let mut result = self.inner.execute(args).await?;
+        let Some(rows) = result.get_mut(key).and_then(Value::as_array_mut) else {
+            bail!(DENIED_MESSAGE);
+        };
+        self.retain_visible(rows, space_of);
         let n = rows.len();
         if result.get("count").is_some() {
             result["count"] = n.into();
         }
         Ok(result)
     }
+
+    /// `task_list` is paged, so the audience filter runs over every page first and the
+    /// caller's `limit` and `offset` apply to what it may see. Otherwise `total` and
+    /// `has_more` would describe tasks in spaces it cannot read.
+    async fn scoped_task_list(&self, args: Value) -> Result<Value> {
+        let page_size = args.get("limit").and_then(Value::as_u64).unwrap_or(DEFAULT_SCOPED_PAGE) as usize;
+        let offset = args.get("offset").and_then(Value::as_u64).unwrap_or(0) as usize;
+        let mut visible: Vec<Value> = Vec::new();
+        let mut inner_args = args;
+        inner_args["limit"] = json!(t::MAX_LIST_LIMIT);
+        let mut read = 0;
+        loop {
+            inner_args["offset"] = json!(read);
+            let mut page = self.inner.execute(inner_args.clone()).await?;
+            let more = page["has_more"].as_bool().unwrap_or(false);
+            let Some(rows) = page.get_mut("tasks").and_then(Value::as_array_mut) else {
+                bail!(DENIED_MESSAGE);
+            };
+            read += rows.len();
+            let fetched = rows.len();
+            self.retain_visible(rows, SpaceOf::Initiative);
+            visible.append(rows);
+            if !more || fetched == 0 {
+                break;
+            }
+        }
+        let total = visible.len();
+        let rows: Vec<Value> = visible.into_iter().skip(offset).take(page_size.max(1)).collect();
+        Ok(json!({
+            "count": rows.len(),
+            "total": total,
+            "offset": offset,
+            "has_more": offset + rows.len() < total,
+            "tasks": rows,
+        }))
+    }
 }
+
+/// Page size when a restricted audience names none; matches `task_list`'s own default.
+const DEFAULT_SCOPED_PAGE: u64 = 100;
 
 /// Which field of a listed row ties it to a space, and how to label it.
 #[derive(Clone, Copy)]
@@ -292,7 +336,7 @@ impl HqTool for ScopedTaskTool {
         match name {
             "task_create" => self.create_task(args).await,
             "folder_create" | "initiative_create" => self.create_in_space(args).await,
-            "task_list" => self.filtered_list(args, "tasks", SpaceOf::Initiative).await,
+            "task_list" => self.scoped_task_list(args).await,
             "initiative_list" | "folder_list" => {
                 let key = if name == "folder_list" {
                     "folders"
@@ -465,6 +509,34 @@ mod tests {
         assert_eq!(inits["initiatives"].as_array().unwrap().len(), 1);
         let all = call(&owner, "task_list", json!({})).await.unwrap();
         assert_eq!(all["count"], 2);
+    }
+
+    #[tokio::test]
+    async fn a_scoped_list_pages_and_totals_only_what_the_audience_may_see() {
+        let f = fixture();
+        let carol = tools_for(&f, &scope_for("3"));
+        for n in 0..4 {
+            add(&carol, &format!("carol {n}")).await;
+        }
+        let bob = tools_for(&f, &scope_for("2"));
+        for n in 0..3 {
+            add(&bob, &format!("bob {n}")).await;
+        }
+
+        let first = call(&bob, "task_list", json!({ "limit": 2 })).await.unwrap();
+        assert_eq!((first["count"].as_i64(), first["total"].as_i64()), (Some(2), Some(3)));
+        assert_eq!(first["has_more"], json!(true));
+        let rest = call(&bob, "task_list", json!({ "limit": 2, "offset": 2 })).await.unwrap();
+        assert_eq!((rest["count"].as_i64(), rest["has_more"].clone()), (Some(1), json!(false)));
+        let titles: Vec<&str> = first["tasks"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .chain(rest["tasks"].as_array().unwrap())
+            .filter_map(|t| t["title"].as_str())
+            .collect();
+        assert_eq!(titles.len(), 3);
+        assert!(titles.iter().all(|t| t.starts_with("bob")), "{titles:?}");
     }
 
     #[tokio::test]

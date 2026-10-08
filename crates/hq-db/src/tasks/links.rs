@@ -54,7 +54,7 @@ pub fn add_dependency(
          VALUES (?1, ?2, ?3)",
         params![dependent.id, blocker.id, created_by],
     )?;
-    notify_on_ok(touch(conn, &dependent.id))
+    notify_on_ok(conn, touch(conn, &dependent.id))
 }
 
 pub fn remove_dependency(conn: &Connection, task: &str, depends_on: &str) -> Result<()> {
@@ -63,7 +63,7 @@ pub fn remove_dependency(conn: &Connection, task: &str, depends_on: &str) -> Res
         "DELETE FROM task_dependencies WHERE task_id = ?1 AND depends_on_task_id = ?2",
         params![dependent.id, blocker.id],
     )?;
-    notify_on_ok(touch(conn, &dependent.id))
+    notify_on_ok(conn, touch(conn, &dependent.id))
 }
 
 pub(super) fn tasks_by_ids(conn: &Connection, sql: &str, id: &str) -> Result<Vec<Task>> {
@@ -129,7 +129,7 @@ pub fn add_comment(
         params![task_id, author, body, created_at],
     )?;
     let id = conn.last_insert_rowid();
-    changed();
+    changed_outside_tx(conn);
     Ok(conn.query_row(
         "SELECT id, task_id, author, body, created_at, kind, sender_session_id, to_session_id, reply_to, delivered_at FROM task_comments WHERE id = ?1",
         params![id],
