@@ -283,6 +283,7 @@ pub(crate) struct CreateTaskBody {
     pub(crate) created_by: String,
     /// Idempotency key, unique per space; a repeat returns the existing task.
     pub(crate) external_id: Option<String>,
+    pub(crate) estimate_minutes: Option<i64>,
 }
 
 fn default_space() -> String {
@@ -329,6 +330,7 @@ pub(crate) async fn create_task_handler(
                 tags: &body.tags,
                 created_by: &body.created_by,
                 external_id: body.external_id.as_deref(),
+                estimate_minutes: body.estimate_minutes,
             },
         )?;
         if body.depends_on.is_empty() || !created {
@@ -371,15 +373,18 @@ pub(crate) struct UpdateTaskBody {
     #[serde(default)]
     pub(crate) remove_depends_on: Vec<String>,
     pub(crate) tags: Option<Vec<String>>,
+    #[serde(default, deserialize_with = "deserialize_double_option")]
+    pub(crate) estimate_minutes: Option<Option<i64>>,
     pub(crate) expected_status: Option<String>,
 }
 
 /// Distinguishes an absent JSON key (`None`, don't touch) from an explicit
 /// `null` (`Some(None)`, clear the field) — the same "field present at all"
 /// semantics `hq-tools::tasks` gets for free from raw `serde_json::Value`.
-fn deserialize_double_option<'de, D>(deserializer: D) -> Result<Option<Option<String>>, D::Error>
+fn deserialize_double_option<'de, D, T>(deserializer: D) -> Result<Option<Option<T>>, D::Error>
 where
     D: serde::Deserializer<'de>,
+    T: Deserialize<'de>,
 {
     Ok(Some(Option::deserialize(deserializer)?))
 }
@@ -398,6 +403,7 @@ pub(crate) async fn update_task_handler(
         start_date: body.start_date,
         parent_task_id: body.parent_task_id,
         tags: body.tags,
+        estimate_minutes: body.estimate_minutes,
     };
     let expected_status = body.expected_status;
     let (add_deps, remove_deps) = (body.add_depends_on, body.remove_depends_on);
@@ -456,6 +462,72 @@ pub(crate) async fn list_task_events_handler(
     });
     match result {
         Ok(events) => Json(json!({ "events": events })).into_response(),
+        Err(e) => ApiError::from(e).into_response(),
+    }
+}
+
+/// Time on one task: leased time, status durations, cycle time, estimate variance.
+pub(crate) async fn task_time_handler(
+    State(state): State<Arc<WsState>>,
+    AxumPath(id): AxumPath<String>,
+) -> Response {
+    let ttl = hq_tools::tasks::lease_ttl_secs();
+    let result = state.db.with_conn(move |c| {
+        let task = t::get_task(c, &id)?.ok_or_else(|| not_found("no task found for that id"))?;
+        t::time_summary(c, &task.id, ttl)
+    });
+    match result {
+        Ok(summary) => Json(json!(summary)).into_response(),
+        Err(e) => ApiError::from(e).into_response(),
+    }
+}
+
+#[derive(Debug, Deserialize)]
+pub(crate) struct DaysParams {
+    days: Option<i64>,
+}
+
+/// Window used when a request names none, and the longest allowed.
+const DEFAULT_WINDOW_DAYS: i64 = 30;
+const MAX_WINDOW_DAYS: i64 = 365;
+/// Most leases the timeline asks for at once.
+const TIMELINE_SESSIONS_CAP: usize = 2000;
+
+fn window_days(params: &DaysParams) -> i64 {
+    params.days.unwrap_or(DEFAULT_WINDOW_DAYS).clamp(1, MAX_WINDOW_DAYS)
+}
+
+/// Leased time by initiative and by agent over a window.
+pub(crate) async fn time_report_handler(
+    State(state): State<Arc<WsState>>,
+    Query(params): Query<DaysParams>,
+) -> Response {
+    let days = window_days(&params);
+    let ttl = hq_tools::tasks::lease_ttl_secs();
+    match state.db.with_conn(move |c| t::time_report(c, days, ttl)) {
+        Ok(report) => Json(json!({ "days": days, "report": report })).into_response(),
+        Err(e) => ApiError::from(e).into_response(),
+    }
+}
+
+/// Recent leases across tasks, for drawing actual work beside the plan.
+pub(crate) async fn recent_work_sessions_handler(
+    State(state): State<Arc<WsState>>,
+    Query(params): Query<DaysParams>,
+) -> Response {
+    let days = window_days(&params);
+    let ttl = hq_tools::tasks::lease_ttl_secs();
+    let result = state.db.with_conn(move |c| {
+        t::expire_stale_leases(c, ttl)?;
+        // One more than the cap, so a cut list can say it was cut.
+        t::list_recent_work_sessions(c, days, TIMELINE_SESSIONS_CAP + 1)
+    });
+    match result {
+        Ok(mut sessions) => {
+            let truncated = sessions.len() > TIMELINE_SESSIONS_CAP;
+            sessions.truncate(TIMELINE_SESSIONS_CAP);
+            Json(json!({ "work_sessions": sessions, "truncated": truncated })).into_response()
+        }
         Err(e) => ApiError::from(e).into_response(),
     }
 }
@@ -613,6 +685,7 @@ mod tests {
                 tags: vec![],
                 created_by: "test".into(),
                 external_id: Some("req-1".into()),
+                estimate_minutes: None,
             };
             create_task_handler(State(state.clone()), Json(body))
         };
@@ -653,6 +726,7 @@ mod tests {
                 tags: vec!["hq".into()],
                 created_by: "test".into(),
                 external_id: None,
+                estimate_minutes: None,
             }),
         )
         .await;
@@ -699,6 +773,33 @@ mod tests {
         assert!(listed["work_sessions"][0].get("token_hash").is_none(), "a token never leaves the server");
         let missing = list_work_sessions_handler(State(state), AxumPath("NOPE-1".into())).await;
         assert_eq!(missing.status(), StatusCode::NOT_FOUND);
+    }
+
+    #[tokio::test]
+    async fn estimate_time_and_report_endpoints_round_trip() {
+        let state = test_state();
+        let body = serde_json::from_value(json!({ "title": "Sized", "estimate_minutes": 45 })).unwrap();
+        let created = body_json(create_task_handler(State(state.clone()), Json(body)).await).await;
+        let id: String = created["id"].as_str().unwrap().into();
+        assert_eq!(created["estimate_minutes"], 45);
+
+        let patch = |value: serde_json::Value| Json(serde_json::from_value::<UpdateTaskBody>(value).unwrap());
+        let bad = update_task_handler(State(state.clone()), AxumPath(id.clone()), patch(json!({ "estimate_minutes": 0 }))).await;
+        assert_eq!(bad.status(), StatusCode::BAD_REQUEST);
+        let cleared = update_task_handler(State(state.clone()), AxumPath(id.clone()), patch(json!({ "estimate_minutes": null }))).await;
+        assert!(body_json(cleared).await["estimate_minutes"].is_null());
+        let untouched = update_task_handler(State(state.clone()), AxumPath(id.clone()), patch(json!({ "title": "Renamed" }))).await;
+        assert!(body_json(untouched).await["estimate_minutes"].is_null(), "absent key leaves the field alone");
+
+        let time = body_json(task_time_handler(State(state.clone()), AxumPath(id.clone())).await).await;
+        assert_eq!(time["leased_seconds"], 0);
+        let missing = task_time_handler(State(state.clone()), AxumPath("NOPE-1".into())).await;
+        assert_eq!(missing.status(), StatusCode::NOT_FOUND);
+
+        let report = body_json(time_report_handler(State(state.clone()), Query(DaysParams { days: Some(7) })).await).await;
+        assert_eq!(report["days"], 7);
+        let recent = body_json(recent_work_sessions_handler(State(state), Query(DaysParams { days: None })).await).await;
+        assert_eq!(recent["work_sessions"], json!([]));
     }
 
     #[tokio::test]

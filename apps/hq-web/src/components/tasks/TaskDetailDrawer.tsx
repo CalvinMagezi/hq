@@ -6,7 +6,9 @@ import { STATUS_LABELS, STATUS_ORDER } from '~/lib/tasksApi'
 import { TaskRelations } from './TaskRelations'
 import { TaskComments } from './TaskComments'
 import { TaskSessions } from './TaskSessions'
-import { DateRangeInputs, PRIORITIES, SectionLabel } from './taskFields'
+import { TaskTime } from './TaskTime'
+import { DateRangeInputs, EstimateInput, PRIORITIES, SectionLabel, isInvalidEstimate, parseEstimate } from './taskFields'
+import { formatLocalTime } from './timeFormat'
 import { MarkdownViewer } from '../MarkdownViewer'
 
 interface Props {
@@ -39,6 +41,7 @@ export function TaskDetailDrawer({
   const [draftTags, setDraftTags] = useState('')
   const [draftDueDate, setDraftDueDate] = useState('')
   const [draftStartDate, setDraftStartDate] = useState('')
+  const [draftEstimate, setDraftEstimate] = useState('')
   const [confirmingDelete, setConfirmingDelete] = useState(false)
 
   useEffect(() => {
@@ -49,12 +52,14 @@ export function TaskDetailDrawer({
     setDraftTags(task.tags.join(', '))
     setDraftDueDate(task.due_date ?? '')
     setDraftStartDate(task.start_date ?? '')
+    setDraftEstimate(task.estimate_minutes === null ? '' : String(task.estimate_minutes))
     setConfirmingDelete(false)
   }, [task])
 
   if (!task) return null
 
   const handleSaveEdit = async () => {
+    if (isInvalidEstimate(draftEstimate)) return
     const tags = draftTags
       .split(',')
       .map((t) => t.trim())
@@ -65,6 +70,7 @@ export function TaskDetailDrawer({
       tags,
       due_date: draftDueDate || null,
       start_date: draftStartDate || null,
+      estimate_minutes: parseEstimate(draftEstimate),
     })
     setEditing(false)
   }
@@ -113,7 +119,7 @@ export function TaskDetailDrawer({
                 <button
                   type="button"
                   onClick={handleSaveEdit}
-                  disabled={busy}
+                  disabled={busy || isInvalidEstimate(draftEstimate)}
                   className="p-1.5 rounded-lg text-emerald-400 hover:bg-white/10 transition-colors disabled:opacity-50"
                   title="Save"
                 >
@@ -266,6 +272,12 @@ export function TaskDetailDrawer({
                   inputClass={DATE_INPUT_CLASS}
                   label={(text) => <SectionLabel>{text}</SectionLabel>}
                 />
+                <EstimateInput
+                  value={draftEstimate}
+                  onChange={setDraftEstimate}
+                  inputClass={DATE_INPUT_CLASS}
+                  label={(text) => <SectionLabel>{text}</SectionLabel>}
+                />
               </div>
               <div>
                 <SectionLabel>Tags (comma-separated; a routing tag like "hq" notifies that agent)</SectionLabel>
@@ -294,17 +306,17 @@ export function TaskDetailDrawer({
               )}
               {task.work_started_at && (
                 <span className="px-2.5 py-1 rounded-full bg-white/5 text-neutral-400 border border-white/10">
-                  Work started {task.work_started_at} UTC
+                  Work started {formatLocalTime(task.work_started_at)}
                 </span>
               )}
               {task.first_ready_for_review_at && (
                 <span className="px-2.5 py-1 rounded-full bg-white/5 text-neutral-400 border border-white/10">
-                  First ready for review {task.first_ready_for_review_at} UTC
+                  First ready for review {formatLocalTime(task.first_ready_for_review_at)}
                 </span>
               )}
               {task.completed_at && (
                 <span className="px-2.5 py-1 rounded-full bg-white/5 text-neutral-400 border border-white/10">
-                  Completed {task.completed_at} UTC
+                  Completed {formatLocalTime(task.completed_at)}
                 </span>
               )}
               {task.due_date && (
@@ -324,6 +336,7 @@ export function TaskDetailDrawer({
             onCreateSubtask={onCreateSubtask}
           />
 
+          <TaskTime key={`time-${task.id}`} task={task} />
           <TaskSessions key={task.id} taskId={task.id} />
 
           <TaskComments key={task.id} taskId={task.id} />

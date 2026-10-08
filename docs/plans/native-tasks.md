@@ -254,6 +254,51 @@ ALTER TABLE task_events DROP COLUMN actor;
 ALTER TABLE task_events DROP COLUMN work_session_id;
 ```
 
+## Time on a task (TSV2 WS3)
+
+Three sources, kept apart because they answer different questions. Anything unknown is `null`,
+never a guess.
+
+- **Leased time** is the union of the task's work lease intervals, so two sessions working at
+  once count once. An external lease counts up to its last heartbeat; a spawned session's open
+  lease counts up to now.
+- **Status time** is read from the event log: seconds in each of to_do, in_progress, blocked and
+  ready_for_review since creation (time in complete is not time spent). It is `null` for a task
+  with any event from before the full log (migration 080), because the gaps cannot be filled
+  honestly. `time_to_start` is creation to the first in_progress. `cycle_seconds` is that first
+  start to `completed_at`, only for a complete task that recorded both.
+- **Estimate** is `estimate_minutes` (1 to `MAX_ESTIMATE_MINUTES`, one year), settable on create
+  and update over MCP, REST and the web forms. `variance_minutes` is leased minutes minus the
+  estimate. A parent also reports a `subtasks` rollup: leased seconds, summed estimates and how
+  many sub-tasks have one.
+
+Read it with `task_get` (`time`), `GET /api/tasks/{id}/time`, `task_time_report` (MCP),
+`GET /api/task-time-report?days=` and `hq task time [days]`: leased hours, completed tasks, mean
+cycle time and actual over estimate per initiative, and leased hours per agent. A completed task
+with no recorded start is counted in `unknown_tasks`. Only the part of each lease inside the
+window counts, per initiative and per agent (two sessions of one agent at once are one agent's
+time). Reading time closes leases that went silent first, so `live` and the totals never include a
+session that is gone. A malformed `estimate_minutes` (a string, 30.5) is an error over MCP, never
+a silent clear or drop.
+
+The first claim of a task with no start date stamps today as its start date, so the timeline can
+place it; an existing date is kept, and a task already past due is left unscheduled because a
+start after the due date is invalid. The timeline draws a thin bar under each planned bar for the
+days work leases covered (`GET /api/work-sessions?days=`).
+
+**Timestamps stay UTC `YYYY-MM-DD HH:MM:SS` on the wire.** Every client already reads them as UTC
+(`parseSqliteUtc` in the web app), and changing the format would break them for no gain. The web
+shows times in the viewer's timezone with its abbreviation. Dates (`start_date`, `due_date`) are
+whole UTC calendar days; "today" is the viewer's local date. `parseDay` now rejects a date that
+does not read back the same (`2026-02-30`), which used to roll over to March 2.
+
+Migration `082_task_estimate` adds one nullable column. Rollback (SQLite 3.35+), then delete the
+`082_task_estimate` row from `schema_version`:
+
+```sql
+ALTER TABLE tasks DROP COLUMN estimate_minutes;
+```
+
 ## Task relationship graph (FR-069)
 
 `task_related` (crates/hq-tools/src/tasks/tools_graph.rs) answers "what else is connected to this task". The

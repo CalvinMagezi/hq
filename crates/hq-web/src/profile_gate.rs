@@ -20,6 +20,9 @@ const LITE_API: &[&str] = &[
     "/api/spaces",
     "/api/folders",
     "/api/initiatives",
+    // Work-lease time for the task board's timeline and Working now panel.
+    "/api/work-sessions",
+    "/api/task-time-report",
     "/api/note",
     "/api/search",
     "/api/tree",
@@ -87,6 +90,8 @@ mod tests {
             (Method::GET, "/api/tasks/abc/comments"),
             (Method::POST, "/api/tasks/abc/comments"),
             (Method::GET, "/api/spaces"),
+            (Method::GET, "/api/work-sessions"),
+            (Method::GET, "/api/task-time-report"),
             (Method::GET, "/api/note"),
             (Method::PUT, "/api/note"),
             (Method::POST, "/api/note/create"),

@@ -20,6 +20,7 @@ mod tools_graph;
 mod tools_lease;
 mod tools_org;
 mod tools_task;
+mod tools_time;
 
 use from_note::TaskCreateFromNoteTool;
 pub use json::{
@@ -36,6 +37,7 @@ use tools_graph::TaskRelatedTool;
 use tools_lease::*;
 use tools_org::*;
 use tools_task::*;
+use tools_time::TaskTimeReportTool;
 
 pub fn create_task_tools(
     vault_path: PathBuf,
@@ -72,7 +74,8 @@ pub fn create_task_tools_with(
         Box::new(TaskCommentListTool { db: db.clone() }),
         Box::new(TaskClaimTool { settings: settings.clone(), db: db.clone() }),
         Box::new(TaskHeartbeatTool { settings: settings.clone(), db: db.clone() }),
-        Box::new(TaskReleaseTool { settings, db: db.clone() }),
+        Box::new(TaskReleaseTool { settings: settings.clone(), db: db.clone() }),
+        Box::new(TaskTimeReportTool { settings, db: db.clone() }),
         Box::new(SpaceListTool { db: db.clone() }),
         Box::new(SpaceCreateTool { db: db.clone() }),
         Box::new(SpaceUpdateTool { db: db.clone() }),

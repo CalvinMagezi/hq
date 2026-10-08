@@ -8,7 +8,10 @@ const DATE_PATTERN = /^\d{4}-\d{2}-\d{2}$/
 export function parseDay(value: string | null | undefined): number | null {
   if (!value || !DATE_PATTERN.test(value)) return null
   const ms = Date.parse(`${value}T00:00:00Z`)
-  return Number.isNaN(ms) ? null : Math.round(ms / MS_PER_DAY)
+  if (Number.isNaN(ms)) return null
+  const day = Math.round(ms / MS_PER_DAY)
+  // The engine rolls 2026-02-30 over to March 2; only a date that reads back the same is real.
+  return formatDay(day) === value ? day : null
 }
 
 export function formatDay(day: number): string {

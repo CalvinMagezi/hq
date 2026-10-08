@@ -9,6 +9,7 @@ import {
   STATUS_LABELS,
   STATUS_ORDER,
   HTTP_CONFLICT,
+  fetchRecentWorkSessionsClient,
   type Initiative,
   type TaskItem,
   type TaskStatus,
@@ -22,6 +23,7 @@ import { TaskDetailDrawer } from '~/components/tasks/TaskDetailDrawer'
 import { TaskFormModal } from '~/components/tasks/TaskFormModal'
 import { ALL_SELECTION, TasksSidebar, type TaskSelection } from '~/components/tasks/TasksSidebar'
 import { useTasksData } from '~/components/tasks/useTasksData'
+import { usePolled } from '~/components/sessions/usePolled'
 import { VaultNoteDrawer } from '~/components/VaultNoteDrawer'
 
 type TasksView = 'list' | 'board' | 'timeline'
@@ -31,6 +33,10 @@ const VIEWS: { id: TasksView; label: string; icon: typeof List }[] = [
   { id: 'board', label: 'Board', icon: Columns3 },
   { id: 'timeline', label: 'Timeline', icon: GanttChart },
 ]
+
+/** How far back the timeline draws actual work, and how often it refreshes. */
+const TIMELINE_WORK_DAYS = 60
+const TIMELINE_WORK_POLL_MS = 60_000
 
 export const Route = createFileRoute('/tasks')({
   validateSearch: (search: Record<string, unknown>): { view?: TasksView; task?: string } => {
@@ -116,6 +122,14 @@ function TasksPage() {
     loadTaxonomy,
     loadTasks,
   } = useTasksData()
+
+  // Actual work, drawn under the plan; only fetched while the timeline is showing.
+  const recentWork = usePolled(
+    'timeline-work',
+    async () => (await fetchRecentWorkSessionsClient(TIMELINE_WORK_DAYS)).work_sessions,
+    TIMELINE_WORK_POLL_MS,
+    view === 'timeline'
+  )
 
   const { task: linkedTaskId } = Route.useSearch()
   useEffect(() => {
@@ -286,6 +300,7 @@ function TasksPage() {
             initiativeById={initiativeById}
             onSelect={(t) => setSelectedTaskId(t.id)}
             onReschedule={handleReschedule}
+            sessions={recentWork.data ?? undefined}
           />
         ) : (
           <TaskListView

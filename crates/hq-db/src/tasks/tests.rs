@@ -1157,3 +1157,370 @@ fn a_session_holds_at_most_one_open_lease() {
         .unwrap();
     assert_eq!(open, 1, "the index refuses a second open lease for one session");
 }
+
+const HOUR: i64 = 3600;
+
+fn near(actual: i64, expected: i64) {
+    assert!((actual - expected).abs() <= 5, "{actual} is not within 5 seconds of {expected}");
+}
+
+fn ago(db: &Database, sql: &str, hours: i64, id: &str) {
+    db.with_conn(|c| {
+        c.execute(&sql.replace("{ago}", &format!("datetime('now', '-{hours} hours')")), params![id])?;
+        Ok(())
+    })
+    .unwrap();
+}
+
+#[test]
+fn union_counts_overlapping_work_once() {
+    assert_eq!(union_seconds(&mut vec![(0, 100), (50, 150)]), 150);
+    assert_eq!(union_seconds(&mut vec![(0, 100), (200, 250)]), 150);
+    assert_eq!(union_seconds(&mut vec![(0, 100), (10, 20)]), 100, "a nested interval adds nothing");
+    assert_eq!(union_seconds(&mut vec![(0, 100), (100, 160)]), 160, "touching intervals join");
+    assert_eq!(union_seconds(&mut vec![(5, 5), (9, 3)]), 0, "empty and backwards intervals count for nothing");
+    assert_eq!(union_seconds(&mut vec![]), 0);
+}
+
+fn mv(at: i64, from: Option<&str>, to: Option<&str>) -> Move {
+    Move { at, from: from.map(String::from), to: to.map(String::from) }
+}
+
+#[test]
+fn status_durations_follow_the_moves_and_skip_time_in_complete() {
+    let moves = [
+        mv(100, Some("to_do"), Some("in_progress")),
+        mv(400, Some("in_progress"), Some("blocked")),
+        mv(500, Some("blocked"), Some("in_progress")),
+        mv(900, Some("in_progress"), Some("complete")),
+    ];
+    let seconds = status_durations(0, &moves, 5000, "complete").unwrap();
+    assert_eq!(seconds.get("to_do"), Some(&100));
+    assert_eq!(seconds.get("in_progress"), Some(&(300 + 400)));
+    assert_eq!(seconds.get("blocked"), Some(&100));
+    assert!(!seconds.contains_key("complete"));
+}
+
+#[test]
+fn a_task_never_moved_has_been_waiting_since_it_was_made() {
+    let seconds = status_durations(1000, &[], 1600, "to_do").unwrap();
+    assert_eq!(seconds.get("to_do"), Some(&600));
+}
+
+/// A legacy task can be in progress with no logged move at all (it moved before any log
+/// existed). Its time is unknown, not all spent waiting.
+#[test]
+fn moves_that_do_not_end_in_the_current_status_make_status_durations_unknown() {
+    assert!(status_durations(1000, &[], 1600, "in_progress").is_none());
+    let moves = [mv(100, Some("to_do"), Some("in_progress"))];
+    assert!(status_durations(0, &moves, 500, "complete").is_none());
+    assert!(status_durations(0, &moves, 500, "in_progress").is_some());
+}
+
+#[test]
+fn an_event_from_before_the_full_log_makes_status_durations_unknown() {
+    let moves = [mv(100, None, None), mv(200, Some("in_progress"), Some("complete"))];
+    assert!(status_durations(0, &moves, 500, "complete").is_none());
+}
+
+#[test]
+fn the_time_summary_reads_leases_events_and_the_estimate_together() {
+    let (db, initiative) = setup();
+    make(&db, "tk-1", &initiative, None).unwrap();
+    db.with_conn(|c| {
+        update_task(c, "tk-1", &TaskPatch { estimate_minutes: Some(Some(60)), ..Default::default() }, None).map(|_| ())
+    })
+    .unwrap();
+    let claimed = claim_as(&db, "tk-1", "alpha").unwrap();
+    // Created 10h ago, started 4h ago, worked 4h to 2h ago, then handed back for review.
+    ago(&db, "UPDATE tasks SET created_at = {ago} WHERE id = ?1", 10, "tk-1");
+    ago(&db, "UPDATE tasks SET work_started_at = {ago} WHERE id = ?1", 4, "tk-1");
+    ago(&db, "UPDATE task_events SET occurred_at = {ago} WHERE task_id = ?1", 4, "tk-1");
+    ago(&db, "UPDATE task_work_sessions SET started_at = {ago} WHERE task_id = ?1", 4, "tk-1");
+    db.with_conn(|c| {
+        c.execute(
+            "UPDATE task_work_sessions SET ended_at = datetime('now', '-2 hours'), end_reason = 'released' WHERE id = ?1",
+            params![claimed.session.id],
+        )?;
+        Ok(())
+    })
+    .unwrap();
+
+    let t = db.with_conn(|c| time_summary(c, "tk-1", TTL)).unwrap();
+    near(t.leased_seconds, 2 * HOUR);
+    assert_eq!(t.lease_count, 1);
+    assert!(!t.live);
+    near(t.time_to_start_seconds.unwrap(), 6 * HOUR);
+    assert!(t.cycle_seconds.is_none(), "not complete yet");
+    let status = t.status_seconds.unwrap();
+    near(status["to_do"], 6 * HOUR);
+    near(status["in_progress"], 4 * HOUR);
+    assert_eq!(t.estimate_minutes, Some(60));
+    assert_eq!(t.variance_minutes, Some(60), "two hours worked against a one hour estimate");
+}
+
+#[test]
+fn two_sessions_working_at_once_are_counted_once() {
+    let (db, initiative) = setup();
+    make(&db, "tk-1", &initiative, None).unwrap();
+    register_session(&db, "hs-1");
+    db.with_conn(|c| open_for_session(c, "tk-1", "hs-1", "hs-1", "claude-code", "", "")).unwrap();
+    let ext = claim_as(&db, "tk-1", "alpha");
+    assert!(ext.is_err(), "the spawned session holds it");
+    db.with_conn(|c| {
+        c.execute("UPDATE task_work_sessions SET started_at = datetime('now', '-2 hours')", [])?;
+        // A second, overlapping lease inserted directly: history can overlap even if claims cannot.
+        c.execute(
+            "INSERT INTO task_work_sessions (id, task_id, actor, token_hash, started_at, ended_at, end_reason) \
+             VALUES ('ws-x', 'tk-1', 'beta', 'x', datetime('now', '-90 minutes'), datetime('now', '-30 minutes'), 'released')",
+            [],
+        )?;
+        Ok(())
+    })
+    .unwrap();
+    let t = db.with_conn(|c| time_summary(c, "tk-1", TTL)).unwrap();
+    near(t.leased_seconds, 2 * HOUR);
+    assert_eq!(t.lease_count, 2);
+    assert!(t.live);
+}
+
+#[test]
+fn cycle_time_needs_both_a_start_and_a_completion() {
+    let (db, initiative) = setup();
+    make(&db, "tk-1", &initiative, None).unwrap();
+    move_to(&db, "tk-1", STATUS_IN_PROGRESS).unwrap();
+    move_to(&db, "tk-1", STATUS_COMPLETE).unwrap();
+    ago(&db, "UPDATE tasks SET work_started_at = {ago} WHERE id = ?1", 3, "tk-1");
+    let t = db.with_conn(|c| time_summary(c, "tk-1", TTL)).unwrap();
+    near(t.cycle_seconds.unwrap(), 3 * HOUR);
+    db.with_conn(|c| {
+        c.execute("UPDATE tasks SET completed_at = NULL WHERE id = 'tk-1'", [])?;
+        Ok(())
+    })
+    .unwrap();
+    assert!(db.with_conn(|c| time_summary(c, "tk-1", TTL)).unwrap().cycle_seconds.is_none());
+}
+
+#[test]
+fn a_task_from_before_the_full_log_has_unknown_status_time_not_a_guess() {
+    let (db, initiative) = setup();
+    make(&db, "tk-1", &initiative, None).unwrap();
+    db.with_conn(|c| {
+        c.execute("INSERT INTO task_events (task_id, event_type) VALUES ('tk-1', 'entered_in_progress')", [])?;
+        Ok(())
+    })
+    .unwrap();
+    let t = db.with_conn(|c| time_summary(c, "tk-1", TTL)).unwrap();
+    assert!(t.status_seconds.is_none());
+    assert_eq!(t.leased_seconds, 0);
+}
+
+#[test]
+fn a_parent_rolls_up_its_subtasks() {
+    let (db, initiative) = setup();
+    make(&db, "tk-p", &initiative, None).unwrap();
+    make(&db, "tk-a", &initiative, Some("tk-p")).unwrap();
+    make(&db, "tk-b", &initiative, Some("tk-p")).unwrap();
+    db.with_conn(|c| {
+        update_task(c, "tk-a", &TaskPatch { estimate_minutes: Some(Some(30)), ..Default::default() }, None)?;
+        Ok(())
+    })
+    .unwrap();
+    claim_as(&db, "tk-a", "alpha").unwrap();
+    ago(&db, "UPDATE task_work_sessions SET started_at = {ago} WHERE task_id = ?1", 1, "tk-a");
+    let roll = db.with_conn(|c| time_summary(c, "tk-p", TTL)).unwrap().subtasks.unwrap();
+    assert_eq!((roll.count, roll.with_estimate, roll.estimate_minutes), (2, 1, 30));
+    assert!(roll.leased_seconds <= HOUR, "an open external lease counts only to its last heartbeat");
+    assert!(db.with_conn(|c| time_summary(c, "tk-a", TTL)).unwrap().subtasks.is_none());
+}
+
+#[test]
+fn estimates_are_validated() {
+    let (db, initiative) = setup();
+    make(&db, "tk-1", &initiative, None).unwrap();
+    for bad in [0, -5, MAX_ESTIMATE_MINUTES + 1] {
+        let patch = TaskPatch { estimate_minutes: Some(Some(bad)), ..Default::default() };
+        assert!(db.with_conn(|c| update_task(c, "tk-1", &patch, None)).is_err(), "{bad}");
+    }
+    let created = db.with_conn(|c| {
+        create_task(c, "tk-2", &initiative, &NewTask { title: "t", estimate_minutes: Some(0), created_by: "t", ..Default::default() })
+    });
+    assert!(created.is_err());
+    let cleared = TaskPatch { estimate_minutes: Some(None), ..Default::default() };
+    assert!(db.with_conn(|c| update_task(c, "tk-1", &cleared, None)).unwrap().estimate_minutes.is_none());
+}
+
+#[test]
+fn the_report_groups_by_initiative_and_actor_and_counts_unknowns_separately() {
+    let (db, initiative) = setup();
+    make(&db, "tk-1", &initiative, None).unwrap();
+    make(&db, "tk-2", &initiative, None).unwrap();
+    db.with_conn(|c| {
+        update_task(c, "tk-1", &TaskPatch { estimate_minutes: Some(Some(60)), ..Default::default() }, None)?;
+        Ok(())
+    })
+    .unwrap();
+    let a = claim_as(&db, "tk-1", "alpha").unwrap();
+    db.with_conn(|c| release(c, &a.token, Some(STATUS_COMPLETE), "", TTL)).unwrap();
+    ago(&db, "UPDATE task_work_sessions SET started_at = {ago}, ended_at = datetime('now', '-30 minutes') WHERE task_id = ?1", 2, "tk-1");
+    ago(&db, "UPDATE tasks SET work_started_at = {ago} WHERE id = ?1", 2, "tk-1");
+    // A completed task with no recorded start is counted, not guessed.
+    move_to(&db, "tk-2", STATUS_COMPLETE).unwrap();
+
+    let report = db.with_conn(|c| time_report(c, 30, TTL)).unwrap();
+    let init = &report.initiatives[0];
+    assert_eq!(init.tasks_completed, 2);
+    assert_eq!(init.estimated_completed, 1);
+    assert_eq!(init.unknown_tasks, 1, "tk-2 never recorded a start");
+    near(init.leased_seconds, 90 * 60);
+    let ratio = init.mean_actual_over_estimate.unwrap();
+    assert!((ratio - 1.5).abs() < 0.01, "{ratio}");
+    assert_eq!(report.actors[0].actor, "alpha");
+    near(report.actors[0].leased_seconds, 90 * 60);
+}
+
+#[test]
+fn a_silent_external_lease_is_not_reported_as_live() {
+    let (db, initiative) = setup();
+    make(&db, "tk-1", &initiative, None).unwrap();
+    let claimed = claim_as(&db, "tk-1", "alpha").unwrap();
+    backdate(&db, &claimed.session.id, "last_heartbeat_at", 5 * HOUR);
+    backdate(&db, &claimed.session.id, "started_at", 6 * HOUR);
+    let t = db.with_conn(|c| time_summary(c, "tk-1", TTL)).unwrap();
+    assert!(!t.live, "nobody has been heard from for five hours");
+    near(t.leased_seconds, HOUR);
+}
+
+#[test]
+fn the_report_counts_only_the_part_of_a_lease_inside_the_window() {
+    let (db, initiative) = setup();
+    make(&db, "tk-1", &initiative, None).unwrap();
+    let a = claim_as(&db, "tk-1", "alpha").unwrap();
+    db.with_conn(|c| release(c, &a.token, None, "", TTL)).unwrap();
+    // One lease from 40 days ago for 10 hours, one inside the window for 1 hour.
+    db.with_conn(|c| {
+        c.execute(
+            "UPDATE task_work_sessions SET started_at = datetime('now', '-40 days'), \
+             ended_at = datetime('now', '-40 days', '+10 hours') WHERE id = ?1",
+            params![a.session.id],
+        )?;
+        c.execute(
+            "INSERT INTO task_work_sessions (id, task_id, actor, token_hash, started_at, ended_at, end_reason) \
+             VALUES ('ws-new', 'tk-1', 'alpha', 'n', datetime('now', '-3 hours'), datetime('now', '-2 hours'), 'released')",
+            [],
+        )?;
+        Ok(())
+    })
+    .unwrap();
+    let report = db.with_conn(|c| time_report(c, 30, TTL)).unwrap();
+    near(report.initiatives[0].leased_seconds, HOUR);
+    near(report.actors[0].leased_seconds, HOUR);
+    assert_eq!(report.actors[0].sessions, 1, "the old lease is outside the window");
+}
+
+#[test]
+fn a_lease_that_straddles_the_window_start_counts_only_its_inside_part() {
+    let (db, initiative) = setup();
+    make(&db, "tk-1", &initiative, None).unwrap();
+    db.with_conn(|c| {
+        c.execute(
+            "INSERT INTO task_work_sessions (id, task_id, actor, token_hash, started_at, ended_at, end_reason) \
+             VALUES ('ws-s', 'tk-1', 'alpha', 's', datetime('now', '-31 days'), datetime('now', '-30 days', '+2 hours'), 'released')",
+            [],
+        )?;
+        Ok(())
+    })
+    .unwrap();
+    let report = db.with_conn(|c| time_report(c, 30, TTL)).unwrap();
+    near(report.actors[0].leased_seconds, 2 * HOUR);
+}
+
+#[test]
+fn two_sessions_of_one_actor_at_once_are_one_actors_time() {
+    let (db, initiative) = setup();
+    make(&db, "tk-1", &initiative, None).unwrap();
+    make(&db, "tk-2", &initiative, None).unwrap();
+    db.with_conn(|c| {
+        for (id, task) in [("ws-a", "tk-1"), ("ws-b", "tk-2")] {
+            c.execute(
+                "INSERT INTO task_work_sessions (id, task_id, actor, token_hash, started_at, ended_at, end_reason) \
+                 VALUES (?1, ?2, 'alpha', ?1, datetime('now', '-2 hours'), datetime('now', '-1 hours'), 'released')",
+                params![id, task],
+            )?;
+        }
+        Ok(())
+    })
+    .unwrap();
+    let report = db.with_conn(|c| time_report(c, 7, TTL)).unwrap();
+    near(report.actors[0].leased_seconds, HOUR);
+    assert_eq!(report.actors[0].sessions, 2);
+}
+
+#[test]
+fn a_claim_stamps_the_start_date_even_when_the_task_was_already_in_progress() {
+    let (db, initiative) = setup();
+    make(&db, "tk-1", &initiative, None).unwrap();
+    move_to(&db, "tk-1", STATUS_IN_PROGRESS).unwrap();
+    assert!(get_one(&db, "tk-1").start_date.is_none());
+    db.with_conn(|c| {
+        c.execute("UPDATE tasks SET updated_at = datetime('now', '-1 day') WHERE id = 'tk-1'", [])?;
+        Ok(())
+    })
+    .unwrap();
+    let claimed = claim_as(&db, "tk-1", "alpha").unwrap();
+    assert!(!claimed.moved);
+    let task = get_one(&db, "tk-1");
+    assert!(task.start_date.is_some());
+    let fresh: bool = db
+        .with_conn(|c| {
+            Ok(c.query_row("SELECT updated_at >= datetime('now', '-1 minute') FROM tasks WHERE id = 'tk-1'", [], |r| r.get(0))?)
+        })
+        .unwrap();
+    assert!(fresh, "the stamp bumps updated_at so watchers see it");
+    let stamped = task.start_date.clone();
+    db.with_conn(|c| {
+        c.execute("UPDATE tasks SET start_date = '2031-05-05' WHERE id = 'tk-1'", [])?;
+        Ok(())
+    })
+    .unwrap();
+    claim_as(&db, "tk-1", "alpha").unwrap();
+    assert_eq!(get_one(&db, "tk-1").start_date.as_deref(), Some("2031-05-05"), "a date that is there is never replaced (was {stamped:?})");
+}
+
+#[test]
+fn an_overlapping_lease_that_ended_inside_the_window_is_listed_for_the_timeline() {
+    let (db, initiative) = setup();
+    make(&db, "tk-1", &initiative, None).unwrap();
+    db.with_conn(|c| {
+        c.execute(
+            "INSERT INTO task_work_sessions (id, task_id, actor, token_hash, started_at, ended_at, end_reason) \
+             VALUES ('ws-o', 'tk-1', 'alpha', 'o', datetime('now', '-61 days'), datetime('now', '-5 days'), 'released')",
+            [],
+        )?;
+        c.execute(
+            "INSERT INTO task_work_sessions (id, task_id, actor, token_hash, started_at, ended_at, end_reason) \
+             VALUES ('ws-old', 'tk-1', 'alpha', 'old', datetime('now', '-90 days'), datetime('now', '-80 days'), 'released')",
+            [],
+        )?;
+        Ok(())
+    })
+    .unwrap();
+    let listed: Vec<String> = db
+        .with_conn(|c| list_recent_work_sessions(c, 60, 10))
+        .unwrap()
+        .into_iter()
+        .map(|s| s.id)
+        .collect();
+    assert_eq!(listed, ["ws-o"], "the one that overlaps the window, not the one wholly before it");
+}
+
+#[test]
+fn status_durations_do_not_count_a_stretch_twice_when_a_clock_steps_back() {
+    let moves = [
+        mv(500, Some("to_do"), Some("in_progress")),
+        mv(400, Some("in_progress"), Some("blocked")),
+    ];
+    let seconds = status_durations(0, &moves, 1000, "blocked").unwrap();
+    let total: i64 = seconds.values().sum();
+    assert_eq!(total, 1000, "every second of the task's life lands in exactly one status");
+}

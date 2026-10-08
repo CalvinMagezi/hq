@@ -2,7 +2,7 @@ import { useState } from 'react'
 import { X, Loader2, Plus } from 'lucide-react'
 import type { Folder, Initiative, Space, TaskItem, TaskPriority } from '~/lib/tasksApi'
 import { createSpaceClient } from '~/lib/tasksApi'
-import { DateRangeInputs, FieldLabel, PRIORITIES } from './taskFields'
+import { DateRangeInputs, EstimateInput, FieldLabel, PRIORITIES, isInvalidEstimate, parseEstimate } from './taskFields'
 
 interface Props {
   open: boolean
@@ -22,6 +22,7 @@ interface Props {
     priority?: TaskPriority
     due_date?: string
     start_date?: string
+    estimate_minutes?: number
     parent_task_id?: string
     tags: string[]
   }) => Promise<void>
@@ -37,6 +38,7 @@ export function TaskFormModal({ open, onClose, spaces, folders, initiatives, tas
   const [priority, setPriority] = useState<TaskPriority | ''>('')
   const [dueDate, setDueDate] = useState('')
   const [startDate, setStartDate] = useState('')
+  const [estimate, setEstimate] = useState('')
   const [parentId, setParentId] = useState('')
   const [tags, setTags] = useState('')
   const [submitting, setSubmitting] = useState(false)
@@ -63,6 +65,7 @@ export function TaskFormModal({ open, onClose, spaces, folders, initiatives, tas
     setPriority('')
     setDueDate('')
     setStartDate('')
+    setEstimate('')
     setParentId('')
     setTags('')
   }
@@ -72,7 +75,7 @@ export function TaskFormModal({ open, onClose, spaces, folders, initiatives, tas
     .sort((a, b) => a.display_id.localeCompare(b.display_id))
 
   const handleSubmit = async () => {
-    if (!title.trim()) return
+    if (!title.trim() || isInvalidEstimate(estimate)) return
     setSubmitting(true)
     try {
       await onCreate({
@@ -84,6 +87,7 @@ export function TaskFormModal({ open, onClose, spaces, folders, initiatives, tas
         priority: priority || undefined,
         due_date: dueDate || undefined,
         start_date: startDate || undefined,
+        estimate_minutes: parseEstimate(estimate) ?? undefined,
         parent_task_id: parentId || undefined,
         tags: tags
           .split(',')
@@ -270,6 +274,12 @@ export function TaskFormModal({ open, onClose, spaces, folders, initiatives, tas
               inputClass="w-full px-2.5 py-1.5 rounded-lg text-xs text-neutral-200 hq-field"
               label={(text) => <FieldLabel>{text}</FieldLabel>}
             />
+            <EstimateInput
+              value={estimate}
+              onChange={setEstimate}
+              inputClass="w-full px-2.5 py-1.5 rounded-lg text-xs text-neutral-200 bg-black/30 border border-white/10"
+              label={(text) => <FieldLabel>{text}</FieldLabel>}
+            />
           </div>
 
           <div>
@@ -298,7 +308,7 @@ export function TaskFormModal({ open, onClose, spaces, folders, initiatives, tas
           <button
             type="button"
             onClick={handleSubmit}
-            disabled={submitting || !title.trim()}
+            disabled={submitting || !title.trim() || isInvalidEstimate(estimate)}
             className="px-5 py-2 rounded-xl text-xs font-bold flex items-center gap-1.5 transition-all disabled:opacity-50"
             style={{ background: 'var(--accent-green, #00ffa3)', color: '#000' }}
           >

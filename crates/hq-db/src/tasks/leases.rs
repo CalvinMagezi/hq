@@ -263,6 +263,21 @@ fn claimed_comment(who: &LeaseIdentity, actor: &str) -> String {
     text
 }
 
+/// The first time work starts, the task gets a start date so the timeline can place
+/// it. An existing date is never replaced, and a start after the due date would be
+/// invalid, so a task already past due is left unscheduled.
+fn stamp_start_date(conn: &Connection, task: &Task) -> Result<()> {
+    if task.start_date.is_some() {
+        return Ok(());
+    }
+    conn.execute(
+        "UPDATE tasks SET start_date = date('now'), updated_at = datetime('now') \
+         WHERE id = ?1 AND start_date IS NULL AND (due_date IS NULL OR due_date >= date('now'))",
+        params![task.id],
+    )?;
+    Ok(())
+}
+
 /// Starts a lease on `task_ref` for `who` and moves the task into in_progress
 /// when it is waiting. A task another session holds is refused unless
 /// `takeover`, which ends that lease as superseded. Claiming again as the same
@@ -328,6 +343,7 @@ pub fn claim(
             let patch = TaskPatch { status: Some(STATUS_IN_PROGRESS.to_string()), ..Default::default() };
             update_task_as(conn, &task.id, &patch, Some(&task.status), &ctx)?;
         }
+        stamp_start_date(conn, &task)?;
         add_comment(conn, &task.id, &actor, &claimed_comment(who, &actor), None)?;
         let session = conn.query_row(
             &format!("SELECT {LEASE_COLS} FROM task_work_sessions WHERE id = ?1"),
@@ -505,6 +521,20 @@ pub fn close_for_session(conn: &Connection, harness_session_id: &str, reason: &s
         changed_outside_tx(conn);
     }
     Ok(closed)
+}
+
+/// Leases that overlap the last `days` days or are still open, newest first,
+/// for drawing actual work on the timeline. Capped at `limit`.
+pub fn list_recent_work_sessions(conn: &Connection, days: i64, limit: usize) -> Result<Vec<WorkSession>> {
+    let mut stmt = conn.prepare(&format!(
+        "SELECT {LEASE_COLS} FROM task_work_sessions \
+         WHERE ended_at IS NULL OR ended_at >= datetime('now', ?1) \
+         ORDER BY started_at DESC, rowid DESC LIMIT {limit}"
+    ))?;
+    let rows = stmt
+        .query_map(params![format!("-{days} days")], row_to_lease)?
+        .collect::<rusqlite::Result<Vec<_>>>()?;
+    Ok(rows)
 }
 
 /// The open lease a spawned session holds, if any.

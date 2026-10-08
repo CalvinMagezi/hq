@@ -180,7 +180,8 @@ enum Commands {
     /// Set up API keys interactively
     Env,
 
-    /// Tasks from a terminal (the same scope as the tasks-only MCP key)
+    /// Tasks from a terminal (the same scope as the tasks-only MCP key), and task time reports
+    #[command(alias = "tasks")]
     Task {
         #[command(subcommand)]
         cmd: commands::task::TaskCmd,
