@@ -425,11 +425,12 @@ impl HostBackend for NativeBackend {
             "idle_ttl_secs": self.idle_ttl_secs,
         });
         let spawned = self.call("agent.spawn", params)?;
-        // A kind without a rule file has no state to wait for.
+        // A kind without a rule file has no state to wait for, but it still needs a
+        // drawn screen: a prompt typed before its interface is up is lost.
         let detected = spawned.get("state").is_some_and(|s| !s.is_null());
         let began = Instant::now();
         let ready = match detected {
-            false => true,
+            false => self.drawn(&req.name, req.start_timeout)?,
             true if !self.drawn(&req.name, req.start_timeout)? => false,
             true => match self.wait_for(
                 &req.name,
