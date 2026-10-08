@@ -255,9 +255,20 @@ pub fn update_task(
     patch: &TaskPatch,
     expected_status: Option<&str>,
 ) -> Result<Task> {
+    update_task_as(conn, id, patch, expected_status, &WriteCtx::default())
+}
+
+/// `update_task`, recording `ctx` as the actor of any status event it writes.
+pub fn update_task_as(
+    conn: &Connection,
+    id: &str,
+    patch: &TaskPatch,
+    expected_status: Option<&str>,
+    ctx: &WriteCtx,
+) -> Result<Task> {
     // The write lock is taken before the status read, so "did the status
     // change" is decided on the same state the UPDATE then modifies.
-    in_write_tx(conn, |conn| apply_update(conn, id, patch, expected_status))
+    in_write_tx(conn, |conn| apply_update(conn, id, patch, expected_status, ctx))
 }
 
 fn apply_update(
@@ -265,6 +276,7 @@ fn apply_update(
     id: &str,
     patch: &TaskPatch,
     expected_status: Option<&str>,
+    ctx: &WriteCtx,
 ) -> Result<Task> {
     let current = get_task(conn, id)?.ok_or_else(|| anyhow::anyhow!("task {id} not found"))?;
     validate_patch(conn, &current, patch)?;
@@ -326,7 +338,7 @@ fn apply_update(
         set_tags(conn, &current.id, tags)?;
     }
     if let Some(status) = patch.status.as_deref().filter(|s| *s != current.status) {
-        record_transition(conn, &current.id, &current.status, status)?;
+        record_transition(conn, &current.id, &current.status, status, ctx)?;
     }
 
     get_task(conn, &current.id)?.ok_or_else(|| anyhow::anyhow!("task {id} vanished after update"))
@@ -351,7 +363,7 @@ pub fn delete_task(conn: &Connection, id: &str, cascade: bool) -> Result<Vec<Str
         let mut deleted = children;
         deleted.push(task.id);
         for task_id in &deleted {
-            for table in ["task_comments", "task_tags", "task_events"] {
+            for table in ["task_comments", "task_tags", "task_events", "task_work_sessions"] {
                 conn.execute(&format!("DELETE FROM {table} WHERE task_id = ?1"), params![task_id])?;
             }
             conn.execute(

@@ -10,6 +10,8 @@ use std::sync::Arc;
 
 use super::json::*;
 use super::placement::*;
+use super::tools_lease::{ActorHints, add_warning, lease_policy};
+use hq_core::config::TasksConfig;
 use crate::registry::HqTool;
 use crate::util::{arg_str, generate_id};
 
@@ -35,6 +37,7 @@ fn check_scoped_text(args: &Value) -> Result<()> {
 }
 
 pub(super) struct TaskCreateTool {
+    pub(super) settings: TasksConfig,
     pub(super) vault_path: PathBuf,
     pub(super) db: Arc<Database>,
 }
@@ -71,7 +74,8 @@ impl HqTool for TaskCreateTool {
                 "parent_id": { "type": "string", "description": "Make this a sub-task of that task (id or display id). The parent must be top level." },
                 "depends_on": { "type": "array", "items": { "type": "string" }, "description": "Ids or display ids of tasks that must complete before this one" },
                 "tags": { "type": "array", "items": { "type": "string" }, "description": "Routing tags (e.g. 'hq', 'reviewer') plus any topical tags" },
-                "created_by": { "type": "string", "description": "Who is filing this (agent id or a name)", "default": "unknown" },
+                "created_by": { "type": "string", "description": "Who is filing this (agent id or a name). Ignored when a valid `lease` is given.", "default": "unknown" },
+                "lease": { "type": "string", "description": "Your lease token from task_claim, to attribute this to you" },
                 "external_id": { "type": "string", "description": "Idempotency key, unique per space (up to 200 characters). Calling again with the same external_id in the same space returns the existing task with deduplicated=true instead of creating a duplicate, so a retried or repeated request is safe." }
             },
             "required": ["title"]
@@ -104,16 +108,8 @@ impl HqTool for TaskCreateTool {
             check_scoped_text(&args)?;
         }
         let tags = if scoped { Vec::new() } else { tags_from_args(&args, "tags") };
-        let created_by = {
-            let v = arg_str(&args, "created_by");
-            if scoped {
-                crate::harness_session::TASKS_SCOPE_ACTOR.to_string()
-            } else if v.is_empty() {
-                "unknown".to_string()
-            } else {
-                v
-            }
-        };
+        let hints = ActorHints::from_args(&args, "created_by");
+        let settings = self.settings.clone();
         let initiative_id = args
             .get("initiative_id")
             .and_then(|v| v.as_str())
@@ -138,6 +134,8 @@ impl HqTool for TaskCreateTool {
         let external_id = opt_str(&args, "external_id");
         let id = generate_id("tk");
         let (task, created) = self.db.with_conn(move |c| {
+            // A live lease names the filer; otherwise the caller's own words.
+            let created_by = hints.resolve(c, &settings, None)?.name;
             let (task, created) = create_task_in(
                 c,
                 &id,
@@ -292,6 +290,9 @@ impl HqTool for TaskListTool {
     }
 }
 
+/// Most recent work leases `task_get` returns.
+const WORK_SESSIONS_SHOWN: usize = 20;
+
 /// Default page for `task_list`: small enough that a reply with the default
 /// fields stays well under the MCP gateway's size cap.
 const DEFAULT_LIST_PAGE: usize = 100;
@@ -324,6 +325,7 @@ fn visible_tasks(
 // ─── task_get ───────────────────────────────────────────────────────────
 
 pub(super) struct TaskGetTool {
+    pub(super) settings: TasksConfig,
     pub(super) db: Arc<Database>,
 }
 
@@ -357,26 +359,56 @@ impl HqTool for TaskGetTool {
             bail!("id is required");
         }
         let caller = crate::harness_session::caller_session(&args).map(str::to_string);
-        let (task, subtasks, dependents, events) = self.db.with_conn(move |c| {
+        let scoped = crate::harness_session::is_tasks_scope(&args);
+        let ttl = super::tools_lease::ttl_secs(&self.settings);
+        let (task, subtasks, dependents, events, sessions) = self.db.with_conn(move |c| {
             let task =
                 t::get_task(c, &id)?.ok_or_else(|| anyhow::anyhow!("no task found for that id"))?;
             crate::a2a::check_task_access(c, caller.as_deref(), &task.id)?;
             let subtasks = t::list_subtasks(c, &task.id)?;
             let dependents = t::list_dependents(c, &task.id)?;
             let events = t::list_task_events(c, &task.id)?;
-            Ok::<_, anyhow::Error>((task, subtasks, dependents, events))
+            // A lease that went silent is closed first, so a crashed session is
+            // never shown as still working.
+            t::expire_stale_leases(c, ttl)?;
+            let sessions = t::list_work_sessions(c, &task.id, WORK_SESSIONS_SHOWN)?;
+            Ok::<_, anyhow::Error>((task, subtasks, dependents, events, sessions))
         })?;
         let mut value = task_json(&task);
         value["subtasks"] = json!(subtasks.iter().map(task_summary).collect::<Vec<_>>());
         value["dependents"] = json!(dependents.iter().map(task_summary).collect::<Vec<_>>());
         value["lifecycle_events"] = json!(events);
+        value["held_by"] = json!(sessions.iter().find(|s| s.ended_at.is_none()));
+        value["work_sessions"] = json!(sessions);
+        if scoped {
+            hide_work_details_from_tasks_scope(&mut value);
+        }
         Ok(value)
+    }
+}
+
+/// A tasks-scope caller runs on a machine the owner may not control, so it learns who holds a
+/// task and since when, never which machine, folder or branch any session worked in.
+fn hide_work_details_from_tasks_scope(task: &mut Value) {
+    let Some(obj) = task.as_object_mut() else { return };
+    obj.remove("work_sessions");
+    if let Some(held) = obj.get("held_by").filter(|h| !h.is_null()).cloned() {
+        obj.insert(
+            "held_by".into(),
+            json!({
+                "actor": held["actor"],
+                "harness": held["harness"],
+                "started_at": held["started_at"],
+                "last_heartbeat_at": held["last_heartbeat_at"],
+            }),
+        );
     }
 }
 
 // ─── task_update ────────────────────────────────────────────────────────
 
 pub(super) struct TaskUpdateTool {
+    pub(super) settings: TasksConfig,
     pub(super) vault_path: PathBuf,
     pub(super) db: Arc<Database>,
 }
@@ -410,7 +442,9 @@ impl HqTool for TaskUpdateTool {
                 "add_depends_on": { "type": "array", "items": { "type": "string" }, "description": "Tasks this one should wait for" },
                 "remove_depends_on": { "type": "array", "items": { "type": "string" }, "description": "Dependencies to drop" },
                 "tags": { "type": "array", "items": { "type": "string" }, "description": "Replaces the full tag set" },
-                "expected_status": { "type": "string", "description": "Claim-safe: only apply if the task is currently in this status" }
+                "expected_status": { "type": "string", "description": "Claim-safe: only apply if the task is currently in this status" },
+                "lease": { "type": "string", "description": "Your lease token from task_claim. Attributes the change to you, and is required to start a task when the instance asks for leases." },
+                "actor": { "type": "string", "description": "Your name, used only when you have no lease" }
             },
             "required": ["id"]
         })
@@ -463,35 +497,46 @@ impl HqTool for TaskUpdateTool {
         let remove_deps = tags_from_args(&args, "remove_depends_on");
 
         let id_for_update = id.clone();
+        let hints = ActorHints::from_args(&args, "actor");
+        let settings = self.settings.clone();
+        let entering_in_progress = patch.status.as_deref() == Some(t::STATUS_IN_PROGRESS);
         // One transaction: the status and the dependency change commit together
         // or not at all, and "previous" is read under the same write lock.
-        let (task, previous, unblocked) = self.db.with_conn(move |c| {
+        let (task, previous, unblocked, lease_warning) = self.db.with_conn(move |c| {
             t::in_write_tx(c, |c| {
                 let previous = t::get_task(c, &id_for_update)?
                     .ok_or_else(|| anyhow::anyhow!("task {id_for_update} not found"))?;
                 if scoped
                     && edits_text
-                    && previous.created_by != crate::harness_session::TASKS_SCOPE_ACTOR
+                    && !crate::harness_session::is_tasks_scope_actor(&previous.created_by)
                 {
                     bail!(
                         "this connection may edit the title and description only of tasks it created; \
                          add a comment to that task instead"
                     );
                 }
-                let mut task =
-                    t::update_task(c, &id_for_update, &patch, expected_status.as_deref())?;
+                let actor = hints.resolve(c, &settings, Some(&previous.id))?;
+                let started = entering_in_progress && previous.status != t::STATUS_IN_PROGRESS;
+                let lease_warning = lease_policy(
+                    settings.require_lease,
+                    started,
+                    actor.holds(&previous.id),
+                    &previous.display_id,
+                )?;
+                let mut task = t::update_task_as(
+                    c,
+                    &id_for_update,
+                    &patch,
+                    expected_status.as_deref(),
+                    &actor.ctx(),
+                )?;
                 if !add_deps.is_empty() || !remove_deps.is_empty() {
-                    let actor = if scoped {
-                        crate::harness_session::TASKS_SCOPE_ACTOR
-                    } else {
-                        "agent"
-                    };
-                    apply_dependency_changes(c, &task.id, &add_deps, &remove_deps, actor)?;
+                    apply_dependency_changes(c, &task.id, &add_deps, &remove_deps, &actor.name)?;
                     task = t::get_task(c, &task.id)?
                         .ok_or_else(|| anyhow::anyhow!("task vanished after update"))?;
                 }
                 let unblocked = unblocked_by_transition(c, Some(&previous.status), &task)?;
-                Ok((task, previous, unblocked))
+                Ok((task, previous, unblocked, lease_warning))
             })
         })?;
         let became_ready_for_review = task.status == t::STATUS_READY_FOR_REVIEW
@@ -504,7 +549,11 @@ impl HqTool for TaskUpdateTool {
         if became_ready_for_review && !scoped {
             notify_ready_for_review(self.vault_path.clone(), task.clone()).await;
         }
-        Ok(task_json_with_warnings(&task))
+        let mut out = task_json_with_warnings(&task);
+        if let Some(warning) = lease_warning {
+            add_warning(&mut out, warning);
+        }
+        Ok(out)
     }
 }
 
@@ -556,6 +605,7 @@ impl HqTool for TaskDeleteTool {
 // ─── task_comment_add / task_comment_list ──────────────────────────────
 
 pub(super) struct TaskCommentAddTool {
+    pub(super) settings: TasksConfig,
     pub(super) db: Arc<Database>,
 }
 
@@ -573,7 +623,8 @@ impl HqTool for TaskCommentAddTool {
             "properties": {
                 "task_id": { "type": "string", "description": "Internal id or display id" },
                 "body": { "type": "string" },
-                "author": { "type": "string", "default": "unknown" }
+                "author": { "type": "string", "default": "unknown", "description": "Your name. Ignored when a valid `lease` is given." },
+                "lease": { "type": "string", "description": "Your lease token from task_claim, to attribute this comment to you" }
             },
             "required": ["task_id", "body"]
         })
@@ -591,22 +642,16 @@ impl HqTool for TaskCommentAddTool {
             check_scoped_text(&args)?;
         }
         // A launched agent that proved its session is that session, whatever
-        // name it supplies.
-        let author = match crate::harness_session::caller_session(&args) {
-            Some(session) => session.to_string(),
-            None if crate::harness_session::is_tasks_scope(&args) => {
-                crate::harness_session::TASKS_SCOPE_ACTOR.to_string()
-            }
-            None => match arg_str(&args, "author") {
-                v if v.is_empty() => "unknown".to_string(),
-                v => v,
-            },
-        };
+        // name it supplies; a live lease names its holder; otherwise the
+        // caller's own words.
+        let hints = ActorHints::from_args(&args, "author");
+        let settings = self.settings.clone();
         let caller = crate::harness_session::caller_session(&args).map(str::to_string);
         let comment = self.db.with_conn(move |c| {
             let task = t::get_task(c, &task_id)?
                 .ok_or_else(|| anyhow::anyhow!("no task found for that id"))?;
             crate::a2a::check_task_access(c, caller.as_deref(), &task.id)?;
+            let author = hints.resolve(c, &settings, Some(&task.id))?.name;
             t::add_comment(c, &task.id, &author, &body, None)
         })?;
         Ok(json!({

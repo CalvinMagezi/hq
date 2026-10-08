@@ -191,6 +191,17 @@ pub struct TaskEvent {
     /// `None` on events recorded before the full log existed.
     pub from_status: Option<String>,
     pub to_status: Option<String>,
+    /// Who made the move. `None` when the writer did not say, or before this was recorded.
+    pub actor: Option<String>,
+    /// The work lease the move was made under, if any.
+    pub work_session_id: Option<String>,
+}
+
+/// Who a write is made by, recorded on the events it produces.
+#[derive(Debug, Clone, Copy, Default)]
+pub struct WriteCtx<'a> {
+    pub actor: Option<&'a str>,
+    pub work_session_id: Option<&'a str>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -253,6 +264,7 @@ pub struct TaskPatch {
 }
 
 mod crud;
+mod leases;
 mod links;
 mod messages;
 mod org;
@@ -261,6 +273,7 @@ mod rows;
 mod tests;
 
 pub use crud::*;
+pub use leases::*;
 pub use links::*;
 pub use messages::*;
 pub use org::*;

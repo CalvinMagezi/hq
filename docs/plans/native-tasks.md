@@ -196,6 +196,64 @@ which older code ignores, so only the new column needs to go, then delete the
 ALTER TABLE tasks DROP COLUMN completed_at;
 ```
 
+## Work leases (TSV2 WS2)
+
+A work lease is one agent session holding a task for a stretch of time. It is the session lock,
+the source of time-on-task and the record of which session did the work, for any MCP client and
+for sessions HQ spawns. Migration `081_task_work_sessions` adds the table and `actor` and
+`work_session_id` columns on `task_events`; old events keep NULLs.
+
+- **Tools** (full-key callers; restricted audiences and launched sessions are refused):
+  `task_claim` (task, actor, optional harness, session_ref, host, cwd, branch, takeover) returns a
+  lease token once, moves a waiting task to in_progress and leaves a comment. `task_heartbeat`
+  keeps it alive. `task_release` ends it, with an optional status and summary.
+- **Attribution.** Pass the token as `lease` on `task_update`, `task_comment_add` and
+  `task_create`. The lease's actor then wins over any `author`, `created_by` or `actor` text, and
+  events carry the actor and lease id. A wrong or ended token is an error, never an anonymous
+  write. Launched sessions proven by their own token keep their existing identity.
+- **One holder.** A task another session holds is refused with who holds it and since when.
+  `takeover` ends that lease as `superseded`. Claiming again with the same actor and `session_ref`
+  replaces your own lease, so an agent that lost its token can carry on; without a `session_ref`
+  two agents sharing a name cannot replace each other and need `takeover`. Claims are limited per
+  actor (`CLAIMS_PER_WINDOW`). Labels are single-line, capped and stripped of zero-width and
+  bidirectional characters, and the names HQ writes under (`hs-...`, `harness-session`,
+  `unknown`) are refused, because the task thread is read back as trusted text. A release summary
+  is left as a quoted block (`> ...`) so it cannot pass for a line HQ wrote.
+- **Time.** An external lease that goes silent for `tasks.lease_ttl_secs` (default 900) ends at
+  its last heartbeat, so a crashed session adds no phantom time. A spawned session's lease has no
+  ttl: `mission::record` opens it on launch, resume, a new instruction or linking a running
+  session, and closes it when a turn finishes (`released`) or the session exits, is stopped or
+  stalls at launch (`session_ended`). Closing does not need a heartbeat, so a daemon restart
+  loses nothing, and any read that checks leases also closes one whose session is gone or no
+  longer running, so a missed exit cannot hold a task forever. A session holds at most one open
+  lease (a unique index), and `mission::record` runs in one transaction.
+  `tasks.lease_ttl_secs` is never taken below `MIN_LEASE_TTL_SECS` (60).
+- **A stale token cannot rewrite the task.** A lease that already expired can still report where
+  the work stands, and its summary is left on the thread, but its status change is applied only
+  while nobody else holds the task and nothing else has moved it since the lease ended
+  (`status_applied` in the reply says which).
+- **Attribution is per task.** A lease names who is acting on any task, but an event is recorded
+  under the lease (`work_session_id`) only on the lease's own task.
+- **`tasks.require_lease`** is `off` (default), `warn` or `enforce` and applies only to agents
+  calling `task_update` over MCP when they start a task. The web board never asks a person for a
+  lease. `warn` adds a warning to the reply, `enforce` refuses and says how to claim. Settings are
+  read when the tools are built, so a change applies on the next start.
+- **Reading.** `task_get` returns `held_by` and the 20 latest `work_sessions`;
+  `GET /api/tasks/{id}/work-sessions` returns up to 50 for the web UI. Neither ever returns a
+  token or its hash. A restricted audience's `task_get` has `work_sessions`, `held_by` and the
+  events' actor fields removed, since they carry host, directory and branch.
+- **Not here yet.** Reading the transport's `clientInfo` (see `TECHDEBT.md`), the resume packet
+  and staleness sweep (WS5), and time summaries (WS3).
+
+Rollback of 081 (SQLite 3.35+), then delete the `081_task_work_sessions` row from
+`schema_version`:
+
+```sql
+DROP TABLE task_work_sessions;
+ALTER TABLE task_events DROP COLUMN actor;
+ALTER TABLE task_events DROP COLUMN work_session_id;
+```
+
 ## Task relationship graph (FR-069)
 
 `task_related` (crates/hq-tools/src/tasks/tools_graph.rs) answers "what else is connected to this task". The

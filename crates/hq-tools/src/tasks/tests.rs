@@ -22,8 +22,8 @@ fn tools() -> Vec<Box<dyn HqTool>> {
 }
 
 #[test]
-fn factory_returns_sixteen_tools() {
-    assert_eq!(tools().len(), 16);
+fn factory_returns_nineteen_tools() {
+    assert_eq!(tools().len(), 19);
 }
 
 #[test]
@@ -1072,6 +1072,73 @@ async fn the_tasks_scope_cannot_retag_or_renotify_through_an_update() {
     assert!(mailbox_files(&fx.path, "claude-code") >= 1, "the control must deliver");
 }
 
+/// A lease token is proof of who is acting, so one taken with the full key must not let a
+/// tasks-scope caller write under that name.
+/// The scope edits text only on tasks filed as `mcp:tasks`, so no other caller may file or
+/// write under that name.
+#[tokio::test]
+async fn only_the_tasks_scope_writes_under_its_name() {
+    let fx = ScopeFixture::new(&[]);
+    for name in ["mcp:tasks", "mcp:tasks/laptop", "mcp:tasks\u{200b}/laptop"] {
+        let filed = fx.tool("task_create").execute(json!({"title": "x", "created_by": name})).await;
+        assert!(filed.is_err(), "{name} must be refused");
+    }
+    let made = fx.tool("task_create").execute(json!({"title": "x", "created_by": "owner"})).await.unwrap();
+    let posing = fx
+        .tool("task_comment_add")
+        .execute(json!({"task_id": made["id"], "body": "hi", "author": "mcp:tasks"}))
+        .await;
+    assert!(posing.is_err());
+}
+
+#[tokio::test]
+async fn the_tasks_scope_cannot_write_under_a_lease_it_did_not_take() {
+    let fx = ScopeFixture::new(&[]);
+    let made = fx.tool("task_create").execute(json!({"title": "owner task"})).await.unwrap();
+    let id = made["id"].as_str().unwrap().to_string();
+    let claim = fx
+        .tool("task_claim")
+        .execute(json!({"task_id": id, "actor": "owner-agent"}))
+        .await
+        .unwrap();
+    let lease = claim["lease"].as_str().unwrap().to_string();
+
+    let borrowed = fx
+        .tool("task_comment_add")
+        .execute(tasks_scope(json!({"task_id": id, "body": "hi", "lease": lease})))
+        .await;
+    assert!(borrowed.is_err(), "a full-key lease is refused on the tasks scope");
+
+    let own = fx
+        .tool("task_comment_add")
+        .execute(tasks_scope(json!({"task_id": id, "body": "hi", "author": "owner-agent"})))
+        .await
+        .unwrap();
+    assert_eq!(own["author"], "mcp:tasks");
+}
+
+#[tokio::test]
+async fn the_tasks_scope_sees_who_holds_a_task_but_not_where_they_work() {
+    let fx = ScopeFixture::new(&[]);
+    let made = fx.tool("task_create").execute(json!({"title": "owner task"})).await.unwrap();
+    let id = made["id"].as_str().unwrap().to_string();
+    fx.tool("task_claim")
+        .execute(json!({"task_id": id, "actor": "builder", "host": "box-1", "cwd": "/srv/app", "branch": "feat/x"}))
+        .await
+        .unwrap();
+
+    let owner = fx.tool("task_get").execute(json!({"id": id})).await.unwrap();
+    assert_eq!(owner["held_by"]["host"], "box-1", "the owner sees the details");
+
+    let seen = fx.tool("task_get").execute(tasks_scope(json!({"id": id}))).await.unwrap();
+    assert_eq!(seen["held_by"]["actor"], "builder");
+    assert!(seen.get("work_sessions").is_none());
+    let text = seen.to_string();
+    for detail in ["box-1", "/srv/app", "feat/x"] {
+        assert!(!text.contains(detail), "{detail} leaked: {text}");
+    }
+}
+
 #[tokio::test]
 async fn the_tasks_scope_comments_as_itself_and_completing_a_task_notifies_no_one() {
     let fx = ScopeFixture::new(&["relay"]);
@@ -1308,4 +1375,153 @@ async fn an_unknown_status_is_refused_and_a_failed_dependency_undoes_the_status(
     assert_eq!(after["status"], "to_do");
     assert!(after["work_started_at"].is_null());
     assert_eq!(after["lifecycle_events"], json!([]));
+}
+
+fn tools_with(mode: hq_core::config::LeaseMode) -> Vec<Box<dyn HqTool>> {
+    let vault_dir = tempfile::tempdir().unwrap();
+    let vault_path = vault_dir.keep();
+    let vault = Arc::new(VaultClient::new(vault_path.clone()).unwrap());
+    let settings = hq_core::config::TasksConfig { require_lease: mode, ..Default::default() };
+    create_task_tools_with(vault_path, vault, Arc::new(Database::open_memory().unwrap()), settings)
+}
+
+async fn call_tool(tools: &[Box<dyn HqTool>], name: &str, args: serde_json::Value) -> anyhow::Result<serde_json::Value> {
+    tools.iter().find(|t| t.name() == name).unwrap().execute(args).await
+}
+
+#[tokio::test]
+async fn claim_heartbeat_release_attributes_the_work_to_the_lease_holder() {
+    let tools = tools_with(hq_core::config::LeaseMode::Off);
+    let task = call_tool(&tools, "task_create", json!({ "title": "Ship" })).await.unwrap();
+    let id = task["display_id"].as_str().unwrap().to_string();
+
+    let claim = call_tool(&tools, "task_claim", json!({ "task_id": id, "actor": "builder", "harness": "claude-code", "branch": "feat/x" }))
+        .await
+        .unwrap();
+    let lease = claim["lease"].as_str().unwrap().to_string();
+    assert_eq!(claim["task"]["status"], "in_progress");
+    assert_eq!(claim["moved_to_in_progress"], true);
+
+    let beat = call_tool(&tools, "task_heartbeat", json!({ "lease": lease })).await.unwrap();
+    assert_eq!(beat["ok"], true);
+
+    let comment = call_tool(&tools, "task_comment_add", json!({ "task_id": id, "body": "halfway", "author": "someone else", "lease": lease }))
+        .await
+        .unwrap();
+    assert_eq!(comment["author"], "builder", "the lease names the author, whatever was typed");
+
+    let updated = call_tool(&tools, "task_update", json!({ "id": id, "priority": "high", "lease": lease })).await.unwrap();
+    assert_eq!(updated["priority"], "high");
+
+    let released = call_tool(&tools, "task_release", json!({ "lease": lease, "status": "ready_for_review", "summary": "done, please check" }))
+        .await
+        .unwrap();
+    assert_eq!(released["released"], true);
+    assert_eq!(released["task"]["status"], "ready_for_review");
+
+    let got = call_tool(&tools, "task_get", json!({ "id": id })).await.unwrap();
+    assert!(got["held_by"].is_null(), "released, so nobody holds it");
+    assert_eq!(got["work_sessions"].as_array().unwrap().len(), 1);
+    let actors: Vec<&str> = got["lifecycle_events"].as_array().unwrap().iter().filter_map(|e| e["actor"].as_str()).collect();
+    assert_eq!(actors, ["builder", "builder"], "start and handoff are both attributed");
+}
+
+#[tokio::test]
+async fn a_task_held_by_another_session_is_refused_and_shows_who_holds_it() {
+    let tools = tools_with(hq_core::config::LeaseMode::Off);
+    let task = call_tool(&tools, "task_create", json!({ "title": "Contested" })).await.unwrap();
+    let id = task["display_id"].as_str().unwrap().to_string();
+    call_tool(&tools, "task_claim", json!({ "task_id": id, "actor": "alpha" })).await.unwrap();
+
+    let err = call_tool(&tools, "task_claim", json!({ "task_id": id, "actor": "beta" })).await.unwrap_err().to_string();
+    assert!(err.contains("alpha"), "{err}");
+    let got = call_tool(&tools, "task_get", json!({ "id": id })).await.unwrap();
+    assert_eq!(got["held_by"]["actor"], "alpha");
+    assert!(call_tool(&tools, "task_claim", json!({ "task_id": id, "actor": "beta", "takeover": true })).await.is_ok());
+}
+
+#[tokio::test]
+async fn a_wrong_lease_is_an_error_not_an_anonymous_write() {
+    let tools = tools_with(hq_core::config::LeaseMode::Off);
+    let task = call_tool(&tools, "task_create", json!({ "title": "Quiet" })).await.unwrap();
+    let id = task["display_id"].as_str().unwrap().to_string();
+    for call in [
+        call_tool(&tools, "task_update", json!({ "id": id, "priority": "low", "lease": "hql_nope" })).await,
+        call_tool(&tools, "task_comment_add", json!({ "task_id": id, "body": "x", "lease": "garbage" })).await,
+        call_tool(&tools, "task_heartbeat", json!({ "lease": "hql_nope" })).await,
+        call_tool(&tools, "task_release", json!({ "lease": "hql_nope" })).await,
+    ] {
+        assert!(call.is_err());
+    }
+    let got = call_tool(&tools, "task_get", json!({ "id": id })).await.unwrap();
+    assert!(got["priority"].is_null(), "the refused update changed nothing");
+}
+
+#[test]
+fn the_lease_policy_costs_nothing_unless_a_task_is_being_started_without_one() {
+    use hq_core::config::LeaseMode::*;
+    let check = |mode, starting, holds| super::tools_lease::lease_policy(mode, starting, holds, "FR-001");
+    assert!(check(Off, true, false).unwrap().is_none());
+    assert!(check(Warn, true, true).unwrap().is_none(), "a holder is never warned");
+    assert!(check(Warn, false, false).unwrap().is_none(), "only starting a task is checked");
+    assert!(check(Warn, true, false).unwrap().unwrap().contains("task_claim"));
+    let refusal = check(Enforce, true, false).unwrap_err().to_string();
+    assert!(refusal.contains("task_claim") && refusal.contains("FR-001"), "{refusal}");
+    assert!(check(Enforce, true, true).unwrap().is_none());
+}
+
+#[tokio::test]
+async fn the_configured_mode_governs_starting_a_task_over_mcp() {
+    use hq_core::config::LeaseMode::*;
+    for (mode, expect) in [(Off, "ok"), (Warn, "warned"), (Enforce, "refused")] {
+        let tools = tools_with(mode);
+        let task = call_tool(&tools, "task_create", json!({ "title": "Policy" })).await.unwrap();
+        let id = task["display_id"].as_str().unwrap().to_string();
+        let started = call_tool(&tools, "task_update", json!({ "id": id, "status": "in_progress" })).await;
+        match (expect, started) {
+            ("ok", Ok(v)) => assert!(v.get("warnings").is_none(), "{v}"),
+            ("warned", Ok(v)) => assert!(v["warnings"][0].as_str().unwrap().contains("task_claim"), "{v}"),
+            ("refused", Err(e)) => assert!(e.to_string().contains("task_claim"), "{e}"),
+            (_, other) => panic!("{mode:?}: {other:?}"),
+        }
+        if mode == Enforce {
+            let got = call_tool(&tools, "task_get", json!({ "id": id })).await.unwrap();
+            assert_eq!(got["status"], "to_do", "a refused start changes nothing");
+            let claim = call_tool(&tools, "task_claim", json!({ "task_id": id, "actor": "ok" })).await.unwrap();
+            let lease = claim["lease"].as_str().unwrap();
+            assert!(call_tool(&tools, "task_update", json!({ "id": id, "status": "in_progress", "lease": lease })).await.is_ok());
+        }
+        let blocked = call_tool(&tools, "task_update", json!({ "id": id, "status": "blocked" })).await;
+        assert!(blocked.is_ok(), "{mode:?}: only starting needs a lease");
+    }
+}
+
+#[tokio::test]
+async fn a_lease_names_its_holder_on_other_tasks_but_is_recorded_as_work_only_on_its_own() {
+    let tools = tools_with(hq_core::config::LeaseMode::Off);
+    let a = call_tool(&tools, "task_create", json!({ "title": "Mine" })).await.unwrap();
+    let b = call_tool(&tools, "task_create", json!({ "title": "Not mine" })).await.unwrap();
+    let (a_id, b_id) = (a["display_id"].as_str().unwrap().to_string(), b["display_id"].as_str().unwrap().to_string());
+    let claim = call_tool(&tools, "task_claim", json!({ "task_id": a_id, "actor": "builder" })).await.unwrap();
+    let lease = claim["lease"].as_str().unwrap().to_string();
+
+    call_tool(&tools, "task_update", json!({ "id": b_id, "status": "blocked", "lease": lease })).await.unwrap();
+    let got = call_tool(&tools, "task_get", json!({ "id": b_id })).await.unwrap();
+    let event = &got["lifecycle_events"][0];
+    assert_eq!(event["actor"], "builder", "who acted is still known");
+    assert!(event["work_session_id"].is_null(), "but it is not work done under this task's lease");
+    assert!(got["work_sessions"].as_array().unwrap().is_empty());
+}
+
+#[tokio::test]
+async fn releasing_with_a_lease_that_still_holds_applies_the_status() {
+    let tools = tools_with(hq_core::config::LeaseMode::Off);
+    let task = call_tool(&tools, "task_create", json!({ "title": "Quick" })).await.unwrap();
+    let id = task["display_id"].as_str().unwrap().to_string();
+    let claim = call_tool(&tools, "task_claim", json!({ "task_id": id, "actor": "builder" })).await.unwrap();
+    let released = call_tool(&tools, "task_release", json!({ "lease": claim["lease"], "status": "blocked", "summary": "waiting on a key" }))
+        .await
+        .unwrap();
+    assert_eq!(released["status_applied"], true);
+    assert!(released.get("warnings").is_none(), "{released}");
 }

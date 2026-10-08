@@ -460,6 +460,27 @@ pub(crate) async fn list_task_events_handler(
     }
 }
 
+/// Most recent work leases the endpoint returns.
+const WORK_SESSIONS_SHOWN: usize = 50;
+
+/// Work leases on a task, newest first, live ones included. A lease that went
+/// silent is closed first, so the list never shows a dead session as working.
+pub(crate) async fn list_work_sessions_handler(
+    State(state): State<Arc<WsState>>,
+    AxumPath(id): AxumPath<String>,
+) -> Response {
+    let ttl = hq_tools::tasks::lease_ttl_secs();
+    let result = state.db.with_conn(move |c| {
+        let task = t::get_task(c, &id)?.ok_or_else(|| not_found("no task found for that id"))?;
+        t::expire_stale_leases(c, ttl)?;
+        t::list_work_sessions(c, &task.id, WORK_SESSIONS_SHOWN)
+    });
+    match result {
+        Ok(sessions) => Json(json!({ "work_sessions": sessions })).into_response(),
+        Err(e) => ApiError::from(e).into_response(),
+    }
+}
+
 #[derive(Debug, Deserialize)]
 pub(crate) struct DeleteTaskParams {
     #[serde(default)]
@@ -658,6 +679,26 @@ mod tests {
     async fn create_titled(state: &Arc<WsState>, title: &str) -> serde_json::Value {
         let body = serde_json::from_value(json!({ "title": title })).unwrap();
         body_json(create_task_handler(State(state.clone()), Json(body)).await).await
+    }
+
+    #[tokio::test]
+    async fn work_sessions_lists_leases_and_404s_a_missing_task() {
+        let state = test_state();
+        let id: String = create_titled(&state, "Held").await["id"].as_str().unwrap().into();
+        let task_id = id.clone();
+        state
+            .db
+            .with_conn(move |c| {
+                let who = t::LeaseIdentity { actor: "builder", ..Default::default() };
+                t::claim(c, &task_id, &who, 900, false).map(|_| ())
+            })
+            .unwrap();
+        let listed = body_json(list_work_sessions_handler(State(state.clone()), AxumPath(id)).await).await;
+        assert_eq!(listed["work_sessions"][0]["actor"], "builder");
+        assert!(listed["work_sessions"][0]["ended_at"].is_null());
+        assert!(listed["work_sessions"][0].get("token_hash").is_none(), "a token never leaves the server");
+        let missing = list_work_sessions_handler(State(state), AxumPath("NOPE-1".into())).await;
+        assert_eq!(missing.status(), StatusCode::NOT_FOUND);
     }
 
     #[tokio::test]

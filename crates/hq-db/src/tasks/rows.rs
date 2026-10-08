@@ -108,15 +108,17 @@ pub(super) fn record_transition(
     task_id: &str,
     from: &str,
     to: &str,
+    ctx: &WriteCtx,
 ) -> Result<()> {
     let Some((event_type, summary_col)) = event_for_status(to) else {
         return Ok(());
     };
     let now: String = conn.query_row("SELECT datetime('now')", [], |r| r.get(0))?;
     conn.execute(
-        "INSERT INTO task_events (task_id, event_type, occurred_at, from_status, to_status) \
-         VALUES (?1, ?2, ?3, ?4, ?5)",
-        params![task_id, event_type, now, from, to],
+        "INSERT INTO task_events \
+         (task_id, event_type, occurred_at, from_status, to_status, actor, work_session_id) \
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+        params![task_id, event_type, now, from, to, ctx.actor, ctx.work_session_id],
     )?;
     if let Some(col) = summary_col {
         conn.execute(
@@ -135,7 +137,8 @@ pub(super) fn record_transition(
 /// Lifecycle transitions of a task (id or display id), oldest first.
 pub fn list_task_events(conn: &Connection, id_or_display_id: &str) -> Result<Vec<TaskEvent>> {
     let mut stmt = conn.prepare(
-        "SELECT e.id, e.task_id, e.event_type, e.occurred_at, e.from_status, e.to_status \
+        "SELECT e.id, e.task_id, e.event_type, e.occurred_at, e.from_status, e.to_status, \
+                e.actor, e.work_session_id \
          FROM task_events e \
          JOIN tasks t ON t.id = e.task_id \
          WHERE t.id = ?1 OR t.display_id = ?1 ORDER BY e.id",
@@ -149,6 +152,8 @@ pub fn list_task_events(conn: &Connection, id_or_display_id: &str) -> Result<Vec
                 occurred_at: r.get(3)?,
                 from_status: r.get(4)?,
                 to_status: r.get(5)?,
+                actor: r.get(6)?,
+                work_session_id: r.get(7)?,
             })
         })?
         .collect::<rusqlite::Result<Vec<_>>>()?;

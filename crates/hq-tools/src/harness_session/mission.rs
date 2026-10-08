@@ -72,6 +72,16 @@ pub fn record(
     session: &HarnessSessionRow,
     event: Event,
 ) -> Result<Option<TaskLink>> {
+    // One transaction, so two events for a session that arrive together cannot
+    // interleave their lease changes.
+    t::in_write_tx(conn, |conn| record_in(conn, session, event))
+}
+
+fn record_in(
+    conn: &Connection,
+    session: &HarnessSessionRow,
+    event: Event,
+) -> Result<Option<TaskLink>> {
     let Some(task) = linked_task(conn, session)? else {
         return Ok(None);
     };
@@ -82,10 +92,13 @@ pub fn record(
         _ => false,
     };
     let session_running = session.status == registry::STATUS_RUNNING;
+    let lease = open_lease(conn, &task, session, event, session_running)?;
+    let ctx = t::WriteCtx { actor: Some(&session.id), work_session_id: lease.as_deref() };
     let moved = match target(event, siblings_running, session_running) {
-        Some((from, to)) => advance(conn, &task, from, to)?,
+        Some((from, to)) => advance(conn, &task, from, to, &ctx)?,
         None => None,
     };
+    close_lease(conn, session, event)?;
     if let Some(body) = comment(session, event, moved.as_ref()) {
         t::add_comment(conn, &task.id, COMMENT_AUTHOR, &body, None)?;
     }
@@ -153,9 +166,62 @@ fn target(
     }
 }
 
+/// The work lease the session holds on its task after `event`: opened when the
+/// session starts or resumes work or is given a new instruction, kept when it
+/// already has one on this task, and otherwise whatever it holds now. The
+/// session registry decides when a spawned session's lease ends, not a timeout.
+fn open_lease(
+    conn: &Connection,
+    task: &Task,
+    session: &HarnessSessionRow,
+    event: Event,
+    session_running: bool,
+) -> Result<Option<String>> {
+    let held = t::lease_for_session(conn, &session.id)?;
+    let starts_work = match event {
+        Event::Launched | Event::Resumed | Event::Steered => true,
+        Event::Linked => session_running,
+        _ => false,
+    };
+    if !starts_work {
+        return Ok(held.map(|lease| lease.id));
+    }
+    if let Some(lease) = held.filter(|lease| lease.task_id == task.id) {
+        return Ok(Some(lease.id));
+    }
+    let id = t::open_for_session(
+        conn,
+        &task.id,
+        &session.id,
+        &session.id,
+        &session.harness,
+        &session.host,
+        &session.cwd,
+    )?;
+    Ok(Some(id))
+}
+
+/// Ends the session's lease when its turn finishes or the session goes away, so
+/// time on the task counts work and not the wait for the next instruction.
+fn close_lease(conn: &Connection, session: &HarnessSessionRow, event: Event) -> Result<()> {
+    let reason = match event {
+        Event::Finished => t::END_RELEASED,
+        Event::Exited | Event::Stopped | Event::BlockedAtLaunch => t::END_SESSION_ENDED,
+        _ => return Ok(()),
+    };
+    t::close_for_session(conn, &session.id, reason)?;
+    Ok(())
+}
+
 /// Move `task` to `to` if it is in one of `from`. Claim-safe on its status, so
 /// a concurrent edit by a person wins rather than being overwritten.
-fn advance(conn: &Connection, task: &Task, from: &[&str], to: &str) -> Result<Option<Task>> {
+fn advance(
+    conn: &Connection,
+    task: &Task,
+    from: &[&str],
+    to: &str,
+    ctx: &t::WriteCtx,
+) -> Result<Option<Task>> {
     if !from.contains(&task.status.as_str()) {
         return Ok(None);
     }
@@ -163,21 +229,17 @@ fn advance(conn: &Connection, task: &Task, from: &[&str], to: &str) -> Result<Op
         status: Some(to.to_string()),
         ..Default::default()
     };
-    t::update_task(conn, &task.id, &patch, Some(&task.status)).map(Some)
+    t::update_task_as(conn, &task.id, &patch, Some(&task.status), ctx).map(Some)
 }
 
+/// The thread names the session, never its machine or folder: every reader of the thread, the
+/// tasks-scoped key included, sees it. `harness_session_status` has the rest for the owner.
 fn comment(session: &HarnessSessionRow, event: Event, moved: Option<&Task>) -> Option<String> {
-    let who = format!(
-        "Session `{}` ({}) on {}",
-        session.id, session.harness, session.host
-    );
+    let who = format!("Session `{}` ({})", session.id, session.harness);
     let body = match event {
-        Event::Launched => format!("{who} launched in `{}`.", session.cwd),
-        Event::Linked => format!(
-            "{who}, working in `{}`, was linked to this task.",
-            session.cwd
-        ),
-        Event::Resumed => format!("{who} resumed in `{}`.", session.cwd),
+        Event::Launched => format!("{who} launched."),
+        Event::Linked => format!("{who} was linked to this task."),
+        Event::Resumed => format!("{who} resumed."),
         Event::Steered if moved.is_some() => {
             format!("{who} was given a new instruction, so the task is back in progress.")
         }
@@ -282,6 +344,69 @@ mod tests {
         };
         db.with_conn(|c| t::update_task(c, task, &patch, None))
             .unwrap();
+    }
+
+    fn leases(db: &Database, task: &str) -> Vec<t::WorkSession> {
+        db.with_conn(|c| t::list_work_sessions(c, task, 10)).unwrap()
+    }
+
+    #[test]
+    fn a_launch_opens_a_lease_and_attributes_the_move_to_the_session() {
+        let (db, task) = setup();
+        let s = session(&db, "hs-1", Some(&task));
+        apply(&db, &s, Event::Launched);
+        let held = leases(&db, &task);
+        assert_eq!(held.len(), 1);
+        assert_eq!((held[0].actor.as_str(), held[0].harness.as_str()), ("hs-1", "claude-code"));
+        assert!(held[0].ended_at.is_none());
+        let event = db.with_conn(|c| t::list_task_events(c, &task)).unwrap().remove(0);
+        assert_eq!(event.actor.as_deref(), Some("hs-1"));
+        assert_eq!(event.work_session_id.as_deref(), Some(held[0].id.as_str()));
+    }
+
+    #[test]
+    fn a_finished_turn_ends_the_lease_and_a_new_instruction_opens_another() {
+        let (db, task) = setup();
+        let s = session(&db, "hs-1", Some(&task));
+        apply(&db, &s, Event::Launched);
+        apply(&db, &s, Event::Finished);
+        assert_eq!(leases(&db, &task)[0].end_reason.as_deref(), Some(t::END_RELEASED));
+        apply(&db, &s, Event::Steered);
+        let held = leases(&db, &task);
+        assert_eq!(held.len(), 2);
+        assert!(held[0].ended_at.is_none(), "the newest lease is the open one");
+    }
+
+    #[test]
+    fn steering_a_session_that_already_holds_the_task_keeps_its_lease() {
+        let (db, task) = setup();
+        let s = session(&db, "hs-1", Some(&task));
+        apply(&db, &s, Event::Launched);
+        apply(&db, &s, Event::Steered);
+        assert_eq!(leases(&db, &task).len(), 1);
+    }
+
+    #[test]
+    fn an_exit_or_stop_ends_the_lease_even_when_a_sibling_still_runs() {
+        let (db, task) = setup();
+        let a = session(&db, "hs-1", Some(&task));
+        let b = session(&db, "hs-2", Some(&task));
+        apply(&db, &a, Event::Launched);
+        apply(&db, &b, Event::Launched);
+        apply(&db, &a, Event::Exited);
+        let held = leases(&db, &task);
+        let open: Vec<&str> = held.iter().filter(|l| l.ended_at.is_none()).map(|l| l.actor.as_str()).collect();
+        assert_eq!(open, ["hs-2"]);
+        apply(&db, &b, Event::Stopped);
+        assert!(leases(&db, &task).iter().all(|l| l.ended_at.is_some()));
+    }
+
+    #[test]
+    fn a_session_without_a_task_holds_no_lease() {
+        let (db, task) = setup();
+        let s = session(&db, "hs-1", None);
+        assert!(apply(&db, &s, Event::Launched).is_none());
+        assert!(leases(&db, &task).is_empty());
     }
 
     #[test]
