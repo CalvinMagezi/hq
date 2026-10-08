@@ -307,7 +307,7 @@ Tasks have no CLI command: they are MCP tools (`task_list`, `task_create` and fr
 | `hq usage [sub]` | LLM cost and tokens from `task_outcomes` (summary, daily) |
 | `hq cost` | Cost and tokens by model, last 30 days (same as `hq usage summary`) |
 | `hq summary` | Cost and tokens by day and model, last 7 days (same as `hq usage daily`) |
-| `hq pwa` | Open HQ Control Center in browser (served by `hq start all` on :5678) |
+| `hq web` | Host the web UI and open it (`--detach`, `--lan`, `--json`; `hq web status`, `hq web stop`). `hq pwa` and `hq dashboard` are aliases |
 
 ---
 
@@ -470,12 +470,22 @@ The HQ Control Center is a React PWA (TanStack Start + Vite) that connects to th
 
 The PWA lives in `apps/hq-web/` and builds to a static single-page app that `hq start all` serves on `:5678` (from `web/dist` next to the vault, or `web_static_dir` in `config.yaml`). For phone access over Tailscale, put `deploy/Caddyfile.pwa` in front and expose it with `tailscale serve`.
 
+The quickest way to see it is `hq web`. It starts only the web server (no daemon, no relays), finds the UI build, and opens your browser. Run twice, it reuses the server already listening instead of failing.
+
 ```bash
-cd apps/hq-web && bun install && bun run build   # emits dist/client
-mkdir -p ~/web && cp -r dist/client ~/web/dist       # or set web_static_dir (or HQ_WEB_STATIC_DIR) to <repo>/apps/hq-web/dist/client
-hq start all                                      # API, WebSocket and the PWA on :5678
-hq pwa                                            # open http://localhost:5678
-bun run dev                                       # dev server on :4747, proxies /api and /ws to :5678
+hq web                      # foreground on http://localhost:5678, opens the browser; Ctrl+C stops it
+hq web --detach             # background; returns once it answers, then `hq web status` / `hq web stop`
+hq web --lan                # reachable from a phone or another machine; generates a token (see below)
+hq web --port 8080 --build  # another port; build the UI from this checkout first (needs bun)
+hq web --json               # implies --detach; prints one JSON object: url, login_url, token, pid, log, static_dir
+```
+
+`hq web` looks for the UI in `web_static_dir`, then `web/dist` next to the vault, then `apps/hq-web/dist/client` in a checkout, then the install locations. If none exists it builds the UI once with bun (`bun install --frozen-lockfile`, then `bun run build`), but only in the checkout your vault lives in. In any other checkout, such as the current directory, it asks you to pass `--build` first, because a build runs that project's package scripts. A non-loopback bind (`--lan`) requires a token: `hq web` uses `web_auth_token` if set, otherwise it generates one and keeps it in `~/.hq/web.token` (mode 0600) so the link survives restarts. Open the printed sign-in link once; the token travels in the `#token=` fragment, never the query string. `hq web` is for personal use; `hq start all` runs the full instance (daemon and relays) and serves the same UI.
+
+Setting HQ up for someone else? `hq web --json` is the one call to run, and `hq web status --json` (exit code 1 when down) confirms it afterwards.
+
+```bash
+bun run dev                 # in apps/hq-web: dev server on :4747, proxies /api and /ws to :5678
 ```
 
 ---

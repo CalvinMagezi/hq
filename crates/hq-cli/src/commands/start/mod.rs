@@ -234,6 +234,38 @@ fn spawn_telegram(config: &HqConfig, _vault: &Arc<VaultClient>, _db: &Arc<Databa
 /// The WebSocket and web UI server. An open non-loopback bind skips only this
 /// server; the relays and the daemon still start.
 fn spawn_web_server(config: &HqConfig, vault: &Arc<VaultClient>, db: &Arc<Database>) {
+    let web_auth_token = config.web_auth_token.clone();
+    if let Err(e) = hq_web::auth::check_web_bind(&config.web_bind, web_auth_token.as_deref()) {
+        tracing::error!("ws: not starting the web server: {e}");
+        eprintln!("Web server not started: {e}");
+        return;
+    }
+    let state = build_web_state(
+        config,
+        vault,
+        db,
+        config.web_static_dir.clone(),
+        web_auth_token,
+        &config.web_bind,
+    );
+    let (bind, port) = (config.web_bind.clone(), config.ws_port);
+    tokio::spawn(async move {
+        info!(port, "ws: starting server");
+        serve_web(state, &bind, port).await;
+    });
+}
+
+/// Shared state for the web server: tool registry, UI directory and token.
+/// `static_dir` unset falls back to [`default_static_dir`]. Used by `hq start`
+/// and `hq web`, so both serve the same thing.
+pub(crate) fn build_web_state(
+    config: &HqConfig,
+    vault: &Arc<VaultClient>,
+    db: &Arc<Database>,
+    static_dir: Option<std::path::PathBuf>,
+    web_auth_token: Option<String>,
+    bind: &str,
+) -> Arc<hq_web::WsState> {
     let registry = Arc::new(hq_mcp::registry::create_default_registry(
         vault.clone(),
         db.clone(),
@@ -241,34 +273,25 @@ fn spawn_web_server(config: &HqConfig, vault: &Arc<VaultClient>, db: &Arc<Databa
         config.vault_path.join("Agents"),
         Some(config),
     ));
-    let web_auth_token = config.web_auth_token.clone();
-    if let Err(e) = hq_web::auth::check_web_bind(&config.web_bind, web_auth_token.as_deref()) {
-        tracing::error!("ws: not starting the web server: {e}");
-        eprintln!("Web server not started: {e}");
-        return;
-    }
+    // Before any TLS client is built: the dep tree enables both aws-lc-rs
+    // and ring, so rustls cannot auto-pick and would panic.
+    hq_web::install_default_crypto_provider();
     let vault_path = config.vault_path.clone();
-    let static_dir = config.web_static_dir.clone();
-    let (bind, port) = (config.web_bind.clone(), config.ws_port);
-    tokio::spawn(async move {
-        info!(port, "ws: starting server");
-        // Before any TLS client is built: the dep tree enables both aws-lc-rs
-        // and ring, so rustls cannot auto-pick and would panic.
-        hq_web::install_default_crypto_provider();
-        let repo_root = vault_path.parent().unwrap_or(&vault_path);
-        let static_dir = static_dir.unwrap_or_else(|| default_static_dir(repo_root));
-        // Files are read per request, so a later web deploy is picked up
-        // without restarting hq; a missing build is only a warning.
-        if !static_dir.join("index.html").exists() {
-            tracing::warn!(path = %static_dir.display(), "ws: no web UI build yet (index.html missing)");
-        }
-        info!(path = %static_dir.display(), "ws: serving web UI");
-        let mut state = hq_web::WsState::new(vault_path, Some(static_dir)).with_registry(registry);
-        state.web_auth_token = web_auth_token;
-        let state = Arc::new(state);
-        hq_web::install_ask_runner(&state);
-        serve_web(state, &bind, port).await;
-    });
+    let repo_root = vault_path.parent().unwrap_or(&vault_path);
+    let static_dir = static_dir.unwrap_or_else(|| default_static_dir(repo_root));
+    // Files are read per request, so a later web deploy is picked up
+    // without restarting hq; a missing build is only a warning.
+    if !static_dir.join("index.html").exists() {
+        tracing::warn!(path = %static_dir.display(), "ws: no web UI build yet (index.html missing)");
+    }
+    info!(path = %static_dir.display(), "ws: serving web UI");
+    let mut state = hq_web::WsState::new(vault_path, Some(static_dir)).with_registry(registry);
+    state.web_auth_token = web_auth_token;
+    // `hq web --lan` overrides the configured bind, and /mcp's dev switch must follow the real one.
+    state.web_bind_is_loopback = hq_web::auth::bind_is_loopback(bind);
+    let state = Arc::new(state);
+    hq_web::install_ask_runner(&state);
+    state
 }
 
 async fn serve_web(state: Arc<hq_web::WsState>, bind: &str, port: u16) {
@@ -352,8 +375,12 @@ async fn start_telegram(
 
 /// Where the web UI is looked for when `web_static_dir` is unset. The first candidate with an
 /// `index.html` wins; with none, the first is returned so the "no web UI build" warning names it.
-fn default_static_dir(repo_root: &std::path::Path) -> std::path::PathBuf {
-    let mut candidates = vec![repo_root.join("web").join("dist")];
+pub(crate) fn default_static_dir(repo_root: &std::path::Path) -> std::path::PathBuf {
+    let mut candidates = vec![
+        repo_root.join("web").join("dist"),
+        // A source checkout after `bun run build` (what `hq web --build` runs).
+        repo_root.join("apps").join("hq-web").join("dist").join("client"),
+    ];
     let data_home = std::env::var_os("XDG_DATA_HOME")
         .map(std::path::PathBuf::from)
         .or_else(|| std::env::var_os("HOME").map(|h| std::path::PathBuf::from(h).join(".local/share")));

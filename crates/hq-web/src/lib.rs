@@ -61,7 +61,7 @@ pub struct WsState {
     pub(crate) allowed_origins: Vec<String>,
     /// Whether the server listens on loopback only, which is the one place the
     /// `/mcp` development switch may apply.
-    pub(crate) web_bind_is_loopback: bool,
+    pub web_bind_is_loopback: bool,
     /// Single-use tickets for opening `/ws` when a web token is set.
     pub(crate) ws_tickets: Arc<auth::WsTickets>,
     /// Abort handles for in-flight chat turns, keyed by thread id. A "stop"

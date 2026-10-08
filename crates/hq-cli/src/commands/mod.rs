@@ -23,7 +23,7 @@ pub mod onboard;
 pub mod pair;
 pub mod profile;
 pub mod ps;
-pub mod pwa;
+pub mod web;
 pub mod restart;
 pub mod search;
 pub mod notify_restart;

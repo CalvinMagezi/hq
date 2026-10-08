@@ -173,7 +173,7 @@ fn query_param<'a>(query: Option<&'a str>, name: &str) -> Option<&'a str> {
     })
 }
 
-pub(crate) fn bind_is_loopback(bind: &str) -> bool {
+pub fn bind_is_loopback(bind: &str) -> bool {
     bind == "localhost"
         || bind
             .parse::<std::net::IpAddr>()
