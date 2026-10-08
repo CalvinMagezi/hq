@@ -1,6 +1,6 @@
 # Deploying HQ on Hetzner
 
-This sets up a private, self-updating HQ on a Hetzner Cloud server. It never stores a secret in the server's user-data, and the web UI is reachable only from your tailnet. The hosted wizard and `deploy/hetzner/hcloud.sh` both use the same `cloud-init.yaml`.
+This sets up a private, self-updating HQ on a Hetzner Cloud server. It never stores a secret in the server's user-data, and the web UI is reachable only from your tailnet. The hosted wizard (`apps/deploy`, served at <https://deploy.agent-hq.online>) and `deploy/hetzner/hcloud.sh` both use the same `cloud-init.yaml`, and a test keeps the wizard's copy identical to the file.
 
 ## Flow
 
@@ -15,6 +15,20 @@ This sets up a private, self-updating HQ on a Hetzner Cloud server. It never sto
 4. Open that link from a device on your tailnet. HQ asks for a model API key on first run.
 
 The tailnet needs MagicDNS and HTTPS certificates enabled, otherwise `tailscale serve` will ask you to turn them on.
+
+## The hosted wizard
+
+`apps/deploy` is a small Next.js app on Vercel. You paste a Hetzner project API token, choose a location, size and SSH key, and it creates the firewall (SSH only from your IP) and the server, then shows the commands for the SSH step. Servers it creates carry the label `managed-by=agent-hq-deploy`, and it will only show, change or delete servers with that label. Deleting needs the server's name typed back.
+
+- The token goes in the request body of each call and is used to call `api.hetzner.cloud`. It is never stored, logged, put in a URL or sent to analytics, and it is gone when the tab closes. Use a token for a project you can delete it from, and delete it in Hetzner when you are done.
+- It can only reach your own project, since that is all the token allows. The Vercel app has no rate limiting of its own beyond Hetzner's API limits and Vercel's edge protection.
+- It cannot see whether HQ is ready (HQ is tailnet-only), only Hetzner's server status. The page lists the SSH steps and how to read the bootstrap log.
+- The site runs with a closed content security policy and loads no third-party scripts.
+- The deployment pins the bootstrap with `HQ_BOOTSTRAP_REF` (a 40-character commit) and `HQ_BOOTSTRAP_SHA256` (that file's sha256), optionally `HQ_BOOTSTRAP_REPO`. Bump both together:
+
+  ```
+  git show <commit>:deploy/hetzner/bootstrap.sh | shasum -a 256
+  ```
 
 ## Security model
 

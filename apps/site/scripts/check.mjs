@@ -18,6 +18,8 @@ const OUTBOUND_ALLOW = [
   'https://rustup.rs',
   'https://jedisct1.github.io/minisign/',
   'https://tailscale.com/kb/',
+  // The hosted Hetzner deploy wizard, a separate app (apps/deploy).
+  'https://deploy.agent-hq.online',
 ];
 
 const BANNED_WORDS = /\b(delve\w*|landscape\w*|tapestry|leverag\w*|robust\w*|seamless\w*|cutting-edge|innovative)\b/i;
