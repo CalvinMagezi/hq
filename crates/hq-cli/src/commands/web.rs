@@ -916,7 +916,7 @@ mod tests {
         assert!(!looks_like_hq_web("/usr/local/bin/hq start all"));
         assert!(!looks_like_hq_web(""));
         assert!(looks_like_hq_web(
-            "/Users/Jane Doe/bin/hq web --no-open --supervised"
+            "/opt/my tools/bin/hq web --no-open --supervised"
         ));
     }
 
