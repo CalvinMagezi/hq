@@ -184,7 +184,7 @@ fn a_profile_resumes_with_the_base_arguments() {
         "wrapped",
     );
     let fresh = build_args(&h, "hs-x", None, false);
-    assert_eq!(fresh, vec!["--model".to_string(), "x".to_string()]);
+    assert_eq!(fresh, ["--model", "x", "--permission-mode", "manual"].map(String::from).to_vec());
     let resumed = build_args(&h, "hs-x", None, true);
     assert_eq!(
         resumed,

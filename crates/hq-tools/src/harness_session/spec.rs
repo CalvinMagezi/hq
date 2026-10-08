@@ -9,24 +9,11 @@ use hq_core::config::{HarnessProfileConfig, AgentHostConfig, HqConfig};
 const PERMISSION_MODE_FLAG: &str = "--permission-mode";
 const PERMISSION_MODE_MANUAL: &str = "manual";
 
-/// Flags that make an agent run commands without asking. HQ refuses to launch with any of them,
-/// in a built-in spec or a configured profile, so approval dialogs always reach a person or the
-/// Drive loop.
-const BYPASS_FLAGS: &[&str] = &[
-    "--dangerously-skip-permissions",
-    "--allow-dangerously-skip-permissions",
-    "--dangerously-bypass-approvals-and-sandbox",
-    "--dangerously-bypass-hook-trust",
-    "--yolo",
-    "--force",
-    "--full-auto",
-    "--approve-mcps",
-];
-
-/// The first bypass flag in `text`, matched on whole words.
-pub fn find_bypass_flag(text: &str) -> Option<&'static str> {
-    text.split_whitespace()
-        .find_map(|word| BYPASS_FLAGS.iter().copied().find(|flag| *flag == word))
+/// The first flag in `text` that makes an agent run without asking. HQ refuses to launch with one, in
+/// a built-in spec or a configured profile, so approval dialogs always reach a person or the Drive loop.
+pub fn find_bypass_flag(text: &str, agent: &str) -> Option<String> {
+    let words: Vec<&str> = text.split_whitespace().collect();
+    hq_host::find_bypass(&words, Some(agent))
 }
 
 /// How a harness resumes a prior session.
@@ -203,9 +190,19 @@ impl Harness {
     /// Arguments for a fresh spawn: the profile's when it sets any.
     pub fn fresh_args(&self) -> Vec<String> {
         match self.profile.as_ref().and_then(|p| p.args.as_ref()) {
-            Some(args) => args.clone(),
+            Some(args) => self.with_manual_permissions(args.clone()),
             None => self.spec.args.iter().map(|a| a.to_string()).collect(),
         }
+    }
+
+    /// A claude profile's own args replace the spec's, so the explicit permission mode is put back:
+    /// without it a bypass default in the user's claude settings would apply.
+    fn with_manual_permissions(&self, mut args: Vec<String>) -> Vec<String> {
+        let claude = self.spec.kind == "claude";
+        if claude && !args.iter().any(|a| a.starts_with(PERMISSION_MODE_FLAG)) {
+            args.extend([PERMISSION_MODE_FLAG.to_string(), PERMISSION_MODE_MANUAL.to_string()]);
+        }
+        args
     }
 }
 
@@ -220,8 +217,8 @@ pub fn resolve_in(cfg: &AgentHostConfig, name: &str) -> Result<Harness> {
                 builtin_names().join(", ")
             );
         };
-        let offered = profile.args.iter().flatten().map(String::as_str).chain(profile.command.as_deref());
-        if let Some(flag) = offered.into_iter().find_map(find_bypass_flag) {
+        let offered = profile.args.iter().flatten().map(String::as_str).chain(profile.command.iter().flat_map(|c| c.split_whitespace()));
+        if let Some(flag) = hq_host::find_bypass(&offered.collect::<Vec<_>>(), Some(spec.kind)) {
             bail!("harness profile '{name}' uses '{flag}', which skips approval prompts; HQ does not launch agents in a bypass mode");
         }
         return Ok(Harness {
@@ -323,7 +320,15 @@ mod tests {
         let cfg =
             cfg_with_profile("  wrapped:\n    base: claude-code\n    args: [\"--model\", \"x\"]\n");
         let h = resolve_in(&cfg, "wrapped").unwrap();
-        assert_eq!(h.fresh_args(), vec!["--model".to_string(), "x".to_string()]);
+        let manual = ["--model", "x", "--permission-mode", "manual"].map(String::from).to_vec();
+        assert_eq!(h.fresh_args(), manual);
+    }
+
+    #[test]
+    fn a_claude_profile_keeps_its_own_permission_mode_when_it_sets_one() {
+        let cfg = cfg_with_profile("  w:\n    base: claude-code\n    args: [\"--permission-mode\", \"plan\"]\n");
+        let h = resolve_in(&cfg, "w").unwrap();
+        assert_eq!(h.fresh_args(), ["--permission-mode", "plan"].map(String::from).to_vec());
     }
 
     #[test]
@@ -335,7 +340,7 @@ mod tests {
                 _ => vec![],
             };
             for arg in s.args.iter().chain(resume.into_iter().flatten()) {
-                assert!(find_bypass_flag(arg).is_none(), "{} uses {arg}", s.harness);
+                assert!(find_bypass_flag(arg, s.kind).is_none(), "{} uses {arg}", s.harness);
             }
         }
     }
@@ -345,10 +350,18 @@ mod tests {
         for yaml in [
             "  p:\n    base: claude-code\n    args: [\"--dangerously-skip-permissions\"]\n",
             "  p:\n    base: cursor\n    command: \"cursor-agent --force\"\n",
+            "  p:\n    base: claude-code\n    args: [\"--permission-mode\", \"bypassPermissions\"]\n",
+            "  p:\n    base: claude-code\n    command: \"sh -c 'claude --dangerously-skip-permissions=true'\"\n",
         ] {
             let err = resolve_in(&cfg_with_profile(yaml), "p").unwrap_err().to_string();
             assert!(err.contains("bypass mode"), "{err}");
         }
+    }
+
+    #[test]
+    fn a_force_flag_is_fine_for_a_tool_that_does_not_use_it_to_skip_approvals() {
+        let cfg = cfg_with_profile("  p:\n    base: claude-code\n    command: \"my-wrapper --force\"\n");
+        assert!(resolve_in(&cfg, "p").is_ok());
     }
 
     #[test]
