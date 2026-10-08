@@ -30,11 +30,11 @@ fn flag_name(word: &str) -> &str {
 }
 
 fn listed(name: &str, agent: Option<&str>) -> Option<&'static str> {
-    ALWAYS
-        .iter()
-        .copied()
-        .find(|f| *f == name)
-        .or_else(|| (agent == Some("cursor")).then(|| CURSOR_ONLY.iter().copied().find(|f| *f == name)).flatten())
+    ALWAYS.iter().copied().find(|f| *f == name).or_else(|| {
+        (agent == Some("cursor"))
+            .then(|| CURSOR_ONLY.iter().copied().find(|f| *f == name))
+            .flatten()
+    })
 }
 
 fn self_approving_mode(value: &str) -> bool {
@@ -56,7 +56,10 @@ pub fn find_bypass(words: &[&str], agent: Option<&str>) -> Option<String> {
         let inline = bare(word).split_once('=').map(|(_, v)| v);
         let value = inline.or_else(|| words.get(i + 1).copied());
         if value.is_some_and(self_approving_mode) {
-            return Some(format!("{PERMISSION_MODE} {}", value.map(bare).unwrap_or_default()));
+            return Some(format!(
+                "{PERMISSION_MODE} {}",
+                value.map(bare).unwrap_or_default()
+            ));
         }
     }
     None
@@ -73,7 +76,9 @@ pub fn strip_bypass(argv: &[String], agent: Option<&str>) -> Vec<String> {
         }
         if name == PERMISSION_MODE {
             let inline = word.split_once('=').map(|(_, v)| v.to_string());
-            let value = inline.clone().or_else(|| words.peek().map(|v| (*v).clone()));
+            let value = inline
+                .clone()
+                .or_else(|| words.peek().map(|v| (*v).clone()));
             if value.as_deref().is_some_and(self_approving_mode) {
                 if inline.is_none() {
                     words.next();
@@ -115,18 +120,32 @@ mod tests {
     fn force_is_a_bypass_only_for_cursor() {
         let words = ["wrapper", "--force"];
         assert!(find_bypass(&words, Some("claude")).is_none());
-        assert_eq!(find_bypass(&words, Some("cursor")).as_deref(), Some("--force"));
+        assert_eq!(
+            find_bypass(&words, Some("cursor")).as_deref(),
+            Some("--force")
+        );
     }
 
     #[test]
     fn manual_and_unrelated_flags_pass() {
-        let words = ["claude", "--permission-mode", "manual", "--model", "x", "--allowedTools", "Read"];
+        let words = [
+            "claude",
+            "--permission-mode",
+            "manual",
+            "--model",
+            "x",
+            "--allowedTools",
+            "Read",
+        ];
         assert!(find_bypass(&words, Some("claude")).is_none());
     }
 
     #[test]
     fn stripping_removes_flags_and_rewrites_a_self_approving_mode() {
-        assert_eq!(strip_bypass(&argv("--dangerously-skip-permissions -c"), None), argv("-c"));
+        assert_eq!(
+            strip_bypass(&argv("--dangerously-skip-permissions -c"), None),
+            argv("-c")
+        );
         assert_eq!(
             strip_bypass(&argv("--permission-mode bypassPermissions -c"), None),
             argv("--permission-mode manual -c")
@@ -135,7 +154,13 @@ mod tests {
             strip_bypass(&argv("--permission-mode=auto"), None),
             argv("--permission-mode manual")
         );
-        assert_eq!(strip_bypass(&argv("--force --resume x"), Some("cursor")), argv("--resume x"));
-        assert_eq!(strip_bypass(&argv("--force --resume x"), Some("claude")), argv("--force --resume x"));
+        assert_eq!(
+            strip_bypass(&argv("--force --resume x"), Some("cursor")),
+            argv("--resume x")
+        );
+        assert_eq!(
+            strip_bypass(&argv("--force --resume x"), Some("claude")),
+            argv("--force --resume x")
+        );
     }
 }
