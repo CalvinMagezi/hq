@@ -734,5 +734,60 @@ pub fn resolve_session_model(config: &HqConfig) -> String {
         .unwrap_or_else(|| config.default_model.clone())
 }
 
+/// Provider names for the endpoint hosts HQ knows; anything else shows its host.
+const PROVIDER_HOSTS: &[(&str, &str)] = &[
+    ("openrouter.ai", "OpenRouter"),
+    ("githubcopilot.com", "GitHub Copilot"),
+    ("deepseek.com", "DeepSeek"),
+    ("anthropic.com", "Anthropic"),
+    ("kimi.com", "Kimi"),
+];
+
+fn provider_label(entry: &BackendEntry) -> String {
+    let endpoint = entry
+        .endpoint
+        .clone()
+        .or_else(|| entry.kind.default_endpoint().map(str::to_string))
+        .unwrap_or_default();
+    let host = endpoint.split("://").last().unwrap_or_default().split('/').next().unwrap_or_default();
+    PROVIDER_HOSTS
+        .iter()
+        .find(|(h, _)| host == *h || host.ends_with(&format!(".{h}")))
+        .map(|(_, name)| (*name).to_string())
+        .unwrap_or_else(|| if host.is_empty() { entry.name.clone() } else { host.to_string() })
+}
+
+/// What an agent is told about its own model, so it never has to guess or quote
+/// a config default. Shared by the relay and the session builder.
+pub fn runtime_identity_block(config: &HqConfig) -> String {
+    format!(
+        "You are running on {}. State this plainly when asked which model or provider you are; \
+         never say you cannot tell, and never name a model from a config file or memory note instead.",
+        runtime_identity(config)
+    )
+}
+
+/// One sentence telling an agent which model and provider it is running on,
+/// from the same chain `resolve_session_model` reads, so the two never differ.
+pub fn runtime_identity(config: &HqConfig) -> String {
+    let model = resolve_session_model(config);
+    let primary = config.backends.is_configured().then(|| config.backends.backend(&config.backends.primary)).flatten();
+    let Some(primary) = primary else {
+        return format!("`{model}`");
+    };
+    let mut line = format!("`{model}` through {} (backend `{}`)", provider_label(primary), primary.name);
+    let fallbacks: Vec<String> = config
+        .backends
+        .fallbacks
+        .iter()
+        .filter_map(|n| config.backends.backend(n))
+        .map(|b| format!("`{}` through {}", b.model.as_deref().unwrap_or(&b.name), provider_label(b)))
+        .collect();
+    if !fallbacks.is_empty() {
+        line.push_str(&format!("; if that backend fails, a turn is answered by {}", fallbacks.join(", then ")));
+    }
+    line
+}
+
 #[cfg(test)]
 mod tests;

@@ -17,6 +17,7 @@ pub(super) struct PromptInputs<'a> {
     pub(super) tool_notes: Option<&'a str>,
     pub(super) weak_catalog: Option<&'a str>,
     pub(super) context_window: usize,
+    pub(super) identity: String,
 }
 
 impl SessionBuilder {
@@ -47,6 +48,7 @@ impl SessionBuilder {
             } else {
                 format!("{soul}\n\n---\n{user_model}")
             };
+            soul_with_user.push_str(&format!("\n\n{}", inputs.identity));
             if let Some(ref identity) = self.identity
                 && self.enable_thread_continuity
             {

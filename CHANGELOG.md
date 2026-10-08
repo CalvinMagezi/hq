@@ -224,6 +224,7 @@ All notable changes to Agent-HQ will be documented in this file.
 
 #### Fixed
 
+- **HQ now states the model and provider it is running on** in every chat surface (web, MCP, Discord, Telegram), taken from the backend chain, including fallbacks. The web chat and `hq_ask` gave it no identity, so it quoted a stale config value such as `deepseek-flash` or said it could not tell.
 - **PDF print popup null-window crash** (`hq-web`): Added guard against
   `window.open` returning `null` (browser popup blocker) plus `try/catch` around
   `marked.parse`.
