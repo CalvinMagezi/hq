@@ -5,6 +5,17 @@ in a pseudo-terminal, keeps an emulated screen and scrollback you can read back,
 and accepts typed input. It is where every coding-agent session HQ starts runs,
 on this machine or on a machine you paired (see [JOIN_A_MACHINE.md](JOIN_A_MACHINE.md); on Windows the host runs inside WSL2, see [WINDOWS.md](WINDOWS.md)).
 
+## macOS: a stable signature
+
+macOS ties its folder-access approvals (Documents, Desktop, Downloads) to a program's code
+signature, and an ad-hoc signature changes with every build, so every update would ask again,
+and an agent started with no one at the screen hangs waiting. `hq host install` therefore
+signs `hq` once with a certificate it makes for itself (`HQ Local Code Signing`, in
+`~/.hq/hq-signing.keychain-db`, an empty-password keychain holding nothing else) and signs
+again with the same one after each update. Approve the prompt macOS shows the first time; it
+stays approved. If signing fails the host still runs, with a warning, and macOS will ask
+again after updates. Run `hq host install` again after replacing the binary.
+
 ## Run it
 
 ```

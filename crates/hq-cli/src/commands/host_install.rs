@@ -136,10 +136,26 @@ fn reload_launch_agent(domain: &str, plist: &Path) -> Result<()> {
     Err(last.unwrap_or_else(|| anyhow::anyhow!("launchctl bootstrap failed")))
 }
 
+/// Gives `exe` a signature that stays the same across updates, so macOS keeps its
+/// folder-access approval. A failure is a warning: the host still runs, it just
+/// asks for access again after each update.
+#[cfg(target_os = "macos")]
+fn sign_for_macos(home: &Path, exe: &Path) {
+    match signing::sign(home, exe) {
+        Ok(true) => println!("signed {} with a stable local identity; approve the folder-access prompt macOS shows once, and it stays approved across updates", exe.display()),
+        Ok(false) => {}
+        Err(e) => eprintln!("warning: could not give {} a stable signature ({e:#}); macOS will ask for folder access again after each update", exe.display()),
+    }
+}
+
+#[cfg(not(target_os = "macos"))]
+fn sign_for_macos(_home: &Path, _exe: &Path) {}
+
 pub fn install() -> Result<()> {
     let home = home()?;
     let exe = service_binary(&home)?;
     if cfg!(target_os = "macos") {
+        sign_for_macos(&home, &exe);
         let path = home.join("Library/LaunchAgents").join(format!("{LAUNCHD_LABEL}.plist"));
         write_private(&path, &launchd_plist(&exe, &home))?;
         // SAFETY of the id: `id -u` is the current user's.
@@ -295,6 +311,9 @@ pub fn check(name: Option<&str>) -> Result<()> {
     }
     Ok(())
 }
+
+#[cfg(target_os = "macos")]
+mod signing;
 
 #[cfg(test)]
 mod tests;
