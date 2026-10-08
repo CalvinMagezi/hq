@@ -6,6 +6,7 @@ All notable changes to Agent-HQ will be documented in this file.
 
 ### Changed
 
+- **The vault copy menu in the web UI can copy a note's content**, next to the relative and absolute path options.
 - **`hq host install` gives `hq` a stable signature on macOS**, so the folder-access approval macOS asks for (Documents, Desktop, Downloads) survives updates instead of being asked again, and a session started with nobody at the screen no longer hangs on it. Re-run `hq host install` after replacing the binary.
 - **Each coding agent gets its own state directory and network hosts in the sandbox** (Antigravity could not start because `~/.gemini` was read-only). An agent writes only its own login and history directory, never another agent's, and reaches the HTTPS hosts it signs in through; other hosts go in `agent_host.sandbox.allow_domains`.
 - **Windows is documented end to end**: `docs/WINDOWS.md` covers WSL2 setup (systemd, sandbox settings, Tailscale inside WSL2), running HQ on a Windows PC, and pairing a Windows PC as a coding-agent machine for an HQ elsewhere. The README, the install page, `llms.txt` and `AGENTS-SETUP.md` point to it, and `AGENTS-SETUP.md` now tells an agent how to detect WSL2 and set up a host.
