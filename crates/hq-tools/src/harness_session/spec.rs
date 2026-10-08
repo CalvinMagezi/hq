@@ -19,7 +19,6 @@ const BYPASS_FLAGS: &[&str] = &[
     "--dangerously-bypass-hook-trust",
     "--yolo",
     "--force",
-    "-f",
     "--full-auto",
     "--approve-mcps",
 ];
