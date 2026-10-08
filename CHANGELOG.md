@@ -14,6 +14,7 @@ All notable changes to Agent-HQ will be documented in this file.
 
 ### Changed
 
+- **The low-cost default for an Anthropic key is Claude Haiku 5.5** (was Haiku 4), and the `haiku` chat alias points at it. An OpenRouter or OpenAI-routed install still starts on `gpt-6-luna`. Both defaults now have prices in the model registry, so their cost shows up in usage.
 - **The vault copy menu in the web UI can copy a note's content**, next to the relative and absolute path options.
 - **`hq host install` gives `hq` a stable signature on macOS**, so the folder-access approval macOS asks for (Documents, Desktop, Downloads) survives updates instead of being asked again, and a session started with nobody at the screen no longer hangs on it. Re-run `hq host install` after replacing the binary.
 - **Each coding agent gets its own state directory and network hosts in the sandbox** (Antigravity could not start because `~/.gemini` was read-only). An agent writes only its own login and history directory, never another agent's, and reaches the HTTPS hosts it signs in through; other hosts go in `agent_host.sandbox.allow_domains`.
