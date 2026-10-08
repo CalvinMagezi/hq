@@ -40,6 +40,14 @@ function hqToken(): string | null {
   return browserToken()
 }
 
+/**
+ * Store the token from a `#token=` link right away. The index route redirects before any request
+ * runs, and the redirect drops the fragment, so waiting for the first fetch to read it loses it.
+ */
+export function adoptLinkToken(): void {
+  hqToken()
+}
+
 /** Whether requests need the token, which means plain URLs will not load. */
 export function hasWebToken(): boolean {
   return hqToken() !== null

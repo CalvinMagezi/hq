@@ -63,4 +63,4 @@ fi
 token="$(sed -n 's/^HQ_WEB_AUTH_TOKEN=//p' "$MCP_ENV")"
 printf '{"state":"joined","step":"hq-join","detail":"%s","at":"%s"}\n' "$origin" "$(date -u +%FT%TZ)" > "$STATE_DIR/status.json"
 : > /etc/motd
-printf '\nOpen HQ (tailnet devices only):\n\n  %s/#token=%s\n\n' "$origin" "$token"
+printf '\nOpen HQ (tailnet devices only):\n\n  %s/vault#token=%s\n\n' "$origin" "$token"
