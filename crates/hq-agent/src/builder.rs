@@ -580,4 +580,6 @@ impl SessionBuilder {
 }
 
 #[cfg(test)]
+mod compat_tests;
+#[cfg(test)]
 mod tests;
