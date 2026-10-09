@@ -6,9 +6,10 @@ pub const CHEAP_OPENROUTER_MODEL: &str = "openai/gpt-6-luna";
 pub const CHEAP_ANTHROPIC_MODEL: &str = "anthropic/claude-haiku-5.5";
 pub const CHEAP_GOOGLE_MODEL: &str = "google/gemini-2.5-flash";
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Deserialize)]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, serde::Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum SetupProvider {
+    #[default]
     OpenRouter,
     Anthropic,
     Google,

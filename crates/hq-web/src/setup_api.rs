@@ -6,9 +6,8 @@
 //! reverse proxy every request arrives from 127.0.0.1. They also refuse once a key exists,
 //! so setup cannot be used to swap keys later (that is Settings and `hq env`).
 //!
-//! OpenRouter only: the chat router consumes `openrouter_api_key` from config, but an
-//! Anthropic or Google key written by setup would not reach it (those are read only by
-//! explicit `backends:` chains), so offering them would strand a fresh server.
+//! The key lands in the config field the chat router reads for that provider, so whichever of
+//! OpenRouter, Anthropic or Google is chosen is the one that answers the next turn.
 
 use std::sync::Arc;
 use std::time::Duration;
@@ -19,8 +18,8 @@ use axum::response::IntoResponse;
 use hq_core::config::HqConfig;
 use hq_core::setup_provider::SetupProvider;
 use hq_core::types::{ChatMessage, MessageRole};
-use hq_llm::OpenRouterProvider;
 use hq_llm::provider::{ChatRequest, LlmProvider};
+use hq_llm::{AnthropicProvider, OpenRouterProvider};
 use serde::Deserialize;
 use serde_json::json;
 
@@ -34,13 +33,14 @@ const MAX_KEY_CHARS: usize = 512;
 /// The router alias a config carries until someone picks a model; anything else is deliberate.
 const STOCK_DEFAULT_MODEL: &str = "relay";
 
-const PROVIDER: SetupProvider = SetupProvider::OpenRouter;
-
 /// Serializes the "no key yet" check with the config write, so two setups cannot both pass it.
 static SAVE_LOCK: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
 
 #[derive(Deserialize)]
 pub(crate) struct KeyBody {
+    /// Absent from older clients, which only ever offered OpenRouter.
+    #[serde(default)]
+    provider: SetupProvider,
     api_key: String,
 }
 
@@ -79,10 +79,33 @@ fn clean_key(raw: &str) -> Result<String, ApiError> {
     Ok(key.to_string())
 }
 
+/// The model id the provider's own API expects: the router's `vendor/` prefix is dropped for the
+/// direct Anthropic and Google endpoints, and kept for OpenRouter.
+fn wire_model(provider: SetupProvider) -> &'static str {
+    let model = provider.cheap_model();
+    match provider {
+        SetupProvider::OpenRouter => model,
+        SetupProvider::Anthropic | SetupProvider::Google => {
+            model.split_once('/').map_or(model, |(_, m)| m)
+        }
+    }
+}
+
+fn client_for(provider: SetupProvider, key: &str) -> Box<dyn LlmProvider> {
+    match provider {
+        SetupProvider::OpenRouter => Box::new(OpenRouterProvider::new(key)),
+        SetupProvider::Anthropic => Box::new(AnthropicProvider::new(key)),
+        SetupProvider::Google => Box::new(OpenRouterProvider::new_with_base(
+            key,
+            hq_llm::openai_compat::GEMINI_OPENAI_BASE_URL,
+        )),
+    }
+}
+
 /// One-token completion. The error text is the provider's, with the key scrubbed.
-async fn try_key(key: &str) -> Result<(), String> {
+async fn try_key(provider: SetupProvider, key: &str) -> Result<(), String> {
     let request = ChatRequest {
-        model: PROVIDER.cheap_model().to_string(),
+        model: wire_model(provider).to_string(),
         messages: vec![ChatMessage {
             role: MessageRole::User,
             content: TEST_PROMPT.to_string(),
@@ -95,7 +118,7 @@ async fn try_key(key: &str) -> Result<(), String> {
         temperature: None,
         max_tokens: Some(TEST_MAX_TOKENS),
     };
-    let llm = OpenRouterProvider::new(key);
+    let llm = client_for(provider, key);
     match tokio::time::timeout(TEST_TIMEOUT, llm.chat(&request)).await {
         Ok(Ok(_)) => Ok(()),
         Ok(Err(e)) => Err(e.to_string().replace(key, "[key]")),
@@ -119,7 +142,7 @@ pub(crate) async fn test_handler(
 ) -> Result<impl IntoResponse, ApiError> {
     require_token(&state)?;
     let key = clean_key(&body.api_key)?;
-    Ok(Json(match try_key(&key).await {
+    Ok(Json(match try_key(body.provider, &key).await {
         Ok(()) => json!({"ok": true}),
         Err(error) => json!({"ok": false, "error": error}),
     }))
@@ -137,11 +160,12 @@ pub(crate) async fn provider_handler(
             "a model key is already configured".into(),
         ));
     }
+    let provider = body.provider;
     tokio::task::spawn_blocking(move || {
         HqConfig::save_patch(|c| {
-            PROVIDER.set_key(c, key);
+            provider.set_key(c, key);
             if c.default_model == STOCK_DEFAULT_MODEL || c.default_model.starts_with("ollama/") {
-                c.default_model = PROVIDER.cheap_model().to_string();
+                c.default_model = provider.cheap_model().to_string();
             }
             c.apply_cloud_key_flip(true);
         })
@@ -183,6 +207,13 @@ mod tests {
 
     async fn status_of(app: &axum::Router, req: Request<Body>) -> StatusCode {
         app.clone().oneshot(req).await.unwrap().status()
+    }
+
+    #[test]
+    fn direct_providers_drop_the_router_vendor_prefix() {
+        assert_eq!(wire_model(SetupProvider::Anthropic), "claude-haiku-5.5");
+        assert_eq!(wire_model(SetupProvider::Google), "gemini-2.5-flash");
+        assert_eq!(wire_model(SetupProvider::OpenRouter), SetupProvider::OpenRouter.cheap_model());
     }
 
     #[test]
@@ -236,7 +267,7 @@ mod tests {
 
         let saved = HqConfig::load_from_path(&config_path).unwrap();
         assert_eq!(saved.openrouter_api_key.as_deref(), Some("sk-test-123"));
-        assert_eq!(saved.default_model, PROVIDER.cheap_model());
+        assert_eq!(saved.default_model, SetupProvider::OpenRouter.cheap_model());
         assert!(!saved.local_only);
 
         assert_eq!(
@@ -268,6 +299,24 @@ mod tests {
         );
         let kept = HqConfig::load_from_path(&config_path).unwrap();
         assert_eq!(kept.default_model, "my/custom-model");
+
+        // Each provider's key lands in the field the router reads for it, with its own cheap model.
+        for (provider, field, model) in [
+            ("anthropic", "anthropic_api_key", "anthropic/claude-haiku-5.5"),
+            ("google", "google_ai_api_key", "google/gemini-2.5-flash"),
+        ] {
+            std::fs::remove_file(&config_path).unwrap();
+            let body = format!(r#"{{"provider":"{provider}","api_key":"sk-test-456"}}"#);
+            assert_eq!(status_of(&app, post("/api/setup/provider", &body)).await, StatusCode::OK);
+            let saved = HqConfig::load_from_path(&config_path).unwrap();
+            let stored = match field {
+                "anthropic_api_key" => saved.anthropic_api_key.as_deref(),
+                _ => saved.google_ai_api_key.as_deref(),
+            };
+            assert_eq!(stored, Some("sk-test-456"), "{provider}");
+            assert_eq!(saved.default_model, model, "{provider}");
+            assert!(saved.openrouter_api_key.is_none(), "{provider}");
+        }
 
         unsafe { std::env::remove_var("HQ_CONFIG_PATH") };
     }

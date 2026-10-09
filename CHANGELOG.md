@@ -15,6 +15,7 @@ All notable changes to Agent-HQ will be documented in this file.
 
 ### Fixed
 
+- **An Anthropic or Google key in `config.yaml` now reaches the chat router.** Only OpenRouter and a few other keys did, so a server configured with just an Anthropic or Google key (through `hq onboard`, `hq env` or the first-run screen) answered "No LLM providers available". The router now builds a direct Anthropic provider from `anthropic_api_key` (serving `anthropic/claude-haiku-5.5`, `anthropic/claude-sonnet-5.5` and `anthropic/claude-opus-5.5`) and routes `google/gemini-2.5-flash` and `google/gemini-2.5-pro` to Gemini from `google_ai_api_key`. Other ids are not pinned to those providers, so an OpenRouter-style slug still reaches OpenRouter as before. Claude ids written with a dot are sent to Anthropic's own host in its form (`claude-haiku-5-5`). `GOOGLE_AI_API_KEY` is accepted for Gemini as well as `GEMINI_API_KEY`. The first-run screen offers all three providers again.
 - **A `#token=` sign-in link on the web app's root no longer loses the token.** The root route redirected to the vault before the token was read, so a fresh server's link left the browser signed out with 401 errors. The app now stores the token before it routes, and `hq-join` prints a link to `/vault`.
 
 ### Changed
