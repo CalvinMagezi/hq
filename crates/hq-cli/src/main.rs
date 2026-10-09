@@ -165,6 +165,19 @@ enum Commands {
     /// Set up API keys interactively
     Env,
 
+    /// Link the GitHub Copilot seat this machine is signed in to
+    Copilot {
+        /// Subcommand: link
+        #[arg(default_value = "link")]
+        sub: String,
+        /// Use this model instead of the preference list
+        #[arg(long)]
+        model: Option<String>,
+        /// Write the backend into the config file instead of printing it
+        #[arg(long)]
+        write: bool,
+    },
+
     // ─── Chat & Agents ───────────────────────────────────────────────
     /// Interactive terminal chat with an LLM (default command)
     Chat {
@@ -689,7 +702,7 @@ fn lite_rule(command: &Commands) -> LiteRule {
         Commands::Chat { .. } | Commands::Sessions { .. } | Commands::Host { .. } | Commands::SelfApply { .. }
         | Commands::Agents { .. } | Commands::Models { .. } => LiteRule::NotInLite,
         Commands::Install { .. } | Commands::Update(_) | Commands::UpdateDb { .. } | Commands::Health
-        | Commands::Doctor { egress: true, .. } | Commands::Env | Commands::Status | Commands::Stop { .. }
+        | Commands::Doctor { egress: true, .. } | Commands::Env | Commands::Copilot { .. } | Commands::Status | Commands::Stop { .. }
         | Commands::Restart { .. } | Commands::Logs { .. } | Commands::Errors { .. } | Commands::Follow { .. }
         | Commands::Ps | Commands::Vault { .. } | Commands::Search { .. } | Commands::Config { .. }
         | Commands::Mcp { .. } | Commands::Link { .. } | Commands::Cursor { .. } | Commands::Kill
@@ -746,6 +759,9 @@ async fn dispatch(command: Commands, config: &HqConfig) -> Result<()> {
         Commands::Doctor { egress: false } => commands::doctor::run(config).await,
         Commands::Pair { platform } => commands::pair::run(config, &platform),
         Commands::Env => commands::env::run(config).await,
+        Commands::Copilot { sub, model, write } => {
+            commands::copilot::run(config, &sub, model.as_deref(), write).await
+        }
 
         // Chat
         Commands::Chat {
@@ -954,6 +970,7 @@ mod lite_rule_tests {
             &["doctor", "--egress"][..],
             &["config"],
             &["env"],
+            &["copilot", "link"],
             &["mcp", "install"],
             &["mcp", "status"],
             &["status"],

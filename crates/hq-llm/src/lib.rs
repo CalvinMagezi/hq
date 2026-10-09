@@ -7,6 +7,7 @@ pub mod cerebras;
 pub mod copilot;
 pub mod copilot_burn;
 pub mod copilot_catalog;
+pub mod copilot_pick;
 pub mod copilot_usage;
 pub mod cost;
 pub mod decision;
