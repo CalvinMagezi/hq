@@ -79,8 +79,9 @@ that is AppLocker, Windows Defender Application Control or Smart App Control wor
 The installer removes the file and stops. Your options:
 
 - Use route 1 above; it needs no program here.
-- Ask IT to allow the file. Give them the exact name and SHA-256 from the release
-  (`hq-lite-<version>-windows-x86_64.zip.sha256`), and say it is unsigned for now. Code signing is
+- Ask IT to allow the program. The installer prints the SHA-256 of `hq.exe` itself when it is
+  refused (AppLocker and WDAC hash rules match the program, not the zip), plus the release it came
+  from; say it is unsigned for now. Code signing is
   the planned fix and will make this a publisher rule instead of a per-file one.
 - Ask whether WSL2 is permitted, and use Full HQ.
 
