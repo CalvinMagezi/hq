@@ -16,6 +16,7 @@ pub(crate) mod lsp_tools;
 pub(crate) mod middleware_runtime;
 pub mod native_hq;
 pub mod budget_gate;
+pub mod usage_forecast;
 pub(crate) mod outcome_sink;
 pub use outcome_sink::dropped_outcomes;
 pub mod session;

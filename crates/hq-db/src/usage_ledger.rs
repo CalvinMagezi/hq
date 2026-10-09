@@ -164,16 +164,20 @@ pub fn period_bounds(period: BudgetPeriod, now: i64) -> (i64, i64) {
     }
 }
 
-/// Dollars recorded for the calls a budget scope covers in `[since, until)`. Unpriced calls add
-/// nothing here: their cost is unknown, which the gate handles separately.
-pub fn scope_spend(conn: &Connection, scope: &BudgetScope, since: i64, until: i64) -> Result<f64> {
-    let (clause, value): (&str, Option<&str>) = match scope {
+fn scope_clause(scope: &BudgetScope) -> (&'static str, Option<&str>) {
+    match scope {
         BudgetScope::Global => ("", None),
         BudgetScope::Provider(v) => ("AND provider = ?3", Some(v)),
         // The provider may report a dated snapshot of the model that was asked for.
         BudgetScope::Model(v) => ("AND (model = ?3 OR model LIKE ?3 || '-%')", Some(v)),
         BudgetScope::Origin(v) => ("AND origin = ?3", Some(v)),
-    };
+    }
+}
+
+/// Dollars recorded for the calls a budget scope covers in `[since, until)`. Unpriced calls add
+/// nothing here: their cost is unknown, which the gate handles separately.
+pub fn scope_spend(conn: &Connection, scope: &BudgetScope, since: i64, until: i64) -> Result<f64> {
+    let (clause, value) = scope_clause(scope);
     let sql = format!(
         "SELECT COALESCE(SUM(cost_usd), 0.0) FROM task_outcomes
          WHERE recorded_at >= ?1 AND recorded_at < ?2 {clause}"
@@ -182,6 +186,31 @@ pub fn scope_spend(conn: &Connection, scope: &BudgetScope, since: i64, until: i6
         Some(v) => conn.query_row(&sql, params![since, until, v], |r| r.get(0))?,
         None => conn.query_row(&sql, params![since, until], |r| r.get(0))?,
     })
+}
+
+/// Spend per hour for the calls a scope covers, as `(hour start, dollars)`, oldest first.
+pub fn spend_by_hour(conn: &Connection, scope: &BudgetScope, since: i64, until: i64) -> Result<Vec<(i64, f64)>> {
+    let (clause, value) = scope_clause(scope);
+    let sql = format!(
+        "SELECT recorded_at / 3600 * 3600 AS hour, SUM(cost_usd) FROM task_outcomes
+         WHERE recorded_at >= ?1 AND recorded_at < ?2 {clause}
+         GROUP BY hour ORDER BY hour"
+    );
+    let map = |r: &rusqlite::Row| Ok((r.get::<_, i64>(0)?, r.get::<_, f64>(1)?));
+    let mut stmt = conn.prepare(&sql)?;
+    let rows = match value {
+        Some(v) => stmt.query_map(params![since, until, v], map)?.collect::<rusqlite::Result<Vec<_>>>()?,
+        None => stmt.query_map(params![since, until], map)?.collect::<rusqlite::Result<Vec<_>>>()?,
+    };
+    Ok(rows)
+}
+
+/// The groups that cost the most since `since`, biggest first.
+pub fn top_drivers(conn: &Connection, group: GroupBy, since: i64, limit: usize) -> Result<Vec<UsageRow>> {
+    let mut rows = grouped_usage(conn, since, group)?;
+    rows.sort_by(|a, b| b.cost_usd.total_cmp(&a.cost_usd));
+    rows.truncate(limit);
+    Ok(rows)
 }
 
 #[derive(Debug, Clone, Copy, Serialize, PartialEq, Eq)]

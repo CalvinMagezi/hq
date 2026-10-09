@@ -124,3 +124,21 @@ How the gate decides, per attempt against one provider:
 
 `GET /api/budgets` shows each budget against the ledger; `PUT /api/budgets` replaces them after
 validation. `hq usage budgets` prints the same view.
+
+## Forecasting (phase 4)
+
+`hq_llm::forecast` is pure (events and a clock in, a forecast out), like `copilot_burn` but fed by the
+ledger's incremental spend instead of a provider's running counter, so it works for every provider.
+
+- Rate: dollars per hour over the last 24 hours, averaged over the history that exists when there is
+  less than a day. Windows of 1, 6, 24 and 168 hours are reported too.
+- Projection: spend so far plus the rate times the hours left in the period. With 14 or more days of
+  history it uses each weekday's own average instead, so a Monday-heavy pattern is not flattened;
+  before that the forecast says why it is flat.
+- Exhaustion: when a budget limit is given, the hour it is used up and whether that is before the
+  period resets.
+- Confidence is low with fewer than 3 spend events or 6 hours of history, medium below 72 hours.
+
+`GET /api/usage/forecast` returns the month forecast (against the tightest global monthly budget),
+one forecast per budget, and the biggest drivers by model and origin over the last 7 days.
+`hq usage forecast` prints the same.
