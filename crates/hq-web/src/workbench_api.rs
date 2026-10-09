@@ -38,6 +38,8 @@ fn host_error(e: AgentHostError) -> ApiError {
         AgentHostError::Api { code, .. } if code == "unsupported" => {
             ApiError::Conflict("that computer cannot start agents from the web yet; update HQ on it".into())
         }
+        // The host's own words (it names the folder and the system's reason), safe to show: no ssh text.
+        AgentHostError::Api { code, message } if code == "workspace_unavailable" => ApiError::Conflict(message.clone()),
         err if err.is_unreachable() => ApiError::Unavailable("that computer is unreachable right now".into()),
         _ => {
             tracing::warn!(error = %e, "workbench api: host call failed");
