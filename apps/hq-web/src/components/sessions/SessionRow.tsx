@@ -57,21 +57,21 @@ interface Props {
 export function SessionRow({ session: s, selected, onSelect, onArchive, busy }: Props) {
   const folder = folderName(s.cwd)
   return (
-    <li className={`border-t border-white/5 first:border-t-0 ${selected ? 'bg-white/5' : ''} ${s.status === 'running' ? '' : 'opacity-70'}`}>
+    <li className={`hq-row mb-1.5 ${selected ? 'is-selected' : ''} ${s.status === 'running' ? '' : 'opacity-70'}`}>
       <div className="flex items-stretch">
         <button
           type="button"
           onClick={onSelect}
           aria-current={selected ? 'true' : undefined}
-          className="flex-1 min-w-0 text-left px-3 py-2.5 space-y-1 hover:bg-white/5 min-h-11"
+          className="flex-1 min-w-0 text-left px-3.5 py-3 space-y-1 rounded-xl min-h-11"
         >
-          <div className="flex items-center gap-2 min-w-0 text-xs font-mono">
+          <div className="flex items-center gap-2 min-w-0 text-sm font-semibold">
             <Terminal className="w-3.5 h-3.5 text-neutral-500 shrink-0" />
-            <span className="text-neutral-200 truncate min-w-0">{sessionTitle(s)}</span>
+            <span className="text-neutral-100 truncate min-w-0">{sessionTitle(s)}</span>
           </div>
-          {folder && <p className="text-[11px] font-mono text-neutral-500 truncate">{folder}</p>}
+          {folder && <p className="text-xs text-neutral-400 truncate">{folder}</p>}
           <SessionBadges session={s} />
-          {s.goal && <p className="text-[11px] font-mono text-neutral-400 line-clamp-2">{s.goal}</p>}
+          {s.goal && <p className="text-xs text-neutral-400 line-clamp-2">{s.goal}</p>}
         </button>
         {onArchive && (
           <button
@@ -87,7 +87,7 @@ export function SessionRow({ session: s, selected, onSelect, onArchive, busy }: 
         )}
       </div>
       {s.task && (
-        <div className="px-3 pb-2">
+        <div className="px-3.5 pb-2.5">
           <SessionTaskLink session={s} />
         </div>
       )}

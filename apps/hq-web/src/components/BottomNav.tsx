@@ -12,15 +12,7 @@ export function BottomNav() {
   const hasPending = useHQStore((s) => s.pendingApprovalsCount > 0)
   return (
     <nav
-      className="md:hidden fixed bottom-0 left-0 right-0 z-40 flex items-stretch"
-      style={{
-        background: 'var(--glass-bg-heavy)',
-        backdropFilter: 'blur(var(--glass-blur-heavy))',
-        WebkitBackdropFilter: 'blur(var(--glass-blur-heavy))',
-        borderTop: '1px solid var(--glass-border)',
-        paddingBottom: 'env(safe-area-inset-bottom)',
-        height: 'calc(60px + env(safe-area-inset-bottom))',
-      }}
+      className="hq-bottom-nav"
     >
       <Link
         to="/vault"
