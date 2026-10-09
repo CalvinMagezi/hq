@@ -141,9 +141,12 @@ jobs:
           if ($tasks -notmatch 'From the Windows smoke test') { throw "task list did not show the task: $tasks" }
           & $hq host status
           if ($LASTEXITCODE -eq 0) { throw 'hq host should be refused on Windows' }
-          $out = & $hq web --detach --json --no-open --port 5699 | Out-String
-          Write-Host $out
-          if ($LASTEXITCODE -ne 0) { throw 'hq web --detach failed' }
+          # To a file, not a pipe: the background server would otherwise inherit the pipe and
+          # keep this step waiting for it to close.
+          & $hq web --detach --json --no-open --port 5699 > "$root\web.out" 2>&1
+          $code = $LASTEXITCODE
+          Get-Content "$root\web.out" | Write-Host
+          if ($code -ne 0) { throw 'hq web --detach failed' }
           $health = Invoke-WebRequest -UseBasicParsing http://127.0.0.1:5699/health
           if ($health.StatusCode -ne 200) { throw 'web /health did not answer' }
           & $hq web stop
