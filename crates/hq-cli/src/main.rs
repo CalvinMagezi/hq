@@ -160,6 +160,21 @@ enum Commands {
         /// exit non-zero if any is not allowed
         #[arg(long)]
         egress: bool,
+        /// Read-only checks for a managed Windows computer (notes in a synced folder, tools, port)
+        #[arg(long)]
+        windows: bool,
+    },
+
+    /// Start the web app when you sign in (Windows, per user): on, off, status
+    Autostart {
+        #[arg(default_value = "status")]
+        sub: String,
+    },
+
+    /// Move notes between HQ Lite and Full HQ: export <folder> | import <folder>
+    Lite {
+        sub: String,
+        folder: Option<std::path::PathBuf>,
     },
 
     /// Set up API keys interactively
@@ -415,7 +430,7 @@ enum Commands {
         /// Subcommand: install, uninstall, status
         #[arg(default_value = "status")]
         sub: String,
-        /// Target: all, agent, relay, daemon
+        /// Target: all, agent, relay, daemon, or lite (HQ Lite: stop the server, remove autostart)
         #[arg(default_value = "all")]
         target: String,
     },
@@ -724,7 +739,7 @@ fn lite_rule(command: &Commands) -> LiteRule {
         Commands::Chat { .. } | Commands::Sessions { .. } | Commands::Host { .. } | Commands::SelfApply { .. }
         | Commands::Agents { .. } | Commands::Models { .. } => LiteRule::NotInLite,
         Commands::Install { .. } | Commands::Update(_) | Commands::UpdateDb { .. } | Commands::Health
-        | Commands::Doctor { egress: true, .. } | Commands::Env | Commands::Task { .. } | Commands::Copilot { .. } | Commands::Status | Commands::Stop { .. }
+        | Commands::Doctor { egress: true, .. } | Commands::Doctor { windows: true, .. } | Commands::Autostart { .. } | Commands::Lite { .. } | Commands::Env | Commands::Task { .. } | Commands::Copilot { .. } | Commands::Status | Commands::Stop { .. }
         | Commands::Restart { .. } | Commands::Logs { .. } | Commands::Errors { .. } | Commands::Follow { .. }
         | Commands::Ps | Commands::Vault { .. } | Commands::Search { .. } | Commands::Config { .. }
         | Commands::Mcp { .. } | Commands::Link { .. } | Commands::Cursor { .. } | Commands::Kill
@@ -779,8 +794,11 @@ async fn dispatch(command: Commands, config: &HqConfig) -> Result<()> {
             unreachable!("handled before config load")
         }
         Commands::Health => commands::health::run(config).await,
-        Commands::Doctor { egress: true } => commands::doctor::run_egress(config),
-        Commands::Doctor { egress: false } => commands::doctor::run(config).await,
+        Commands::Doctor { windows: true, .. } => commands::lite::doctor_windows(config),
+        Commands::Doctor { egress: true, .. } => commands::doctor::run_egress(config),
+        Commands::Doctor { egress: false, .. } => commands::doctor::run(config).await,
+        Commands::Autostart { sub } => commands::lite::autostart(&sub),
+        Commands::Lite { sub, folder } => commands::lite::lite(config, &sub, folder.as_deref()),
         Commands::Pair { platform } => commands::pair::run(config, &platform),
         Commands::Env => commands::env::run(config).await,
         Commands::Task { cmd } => commands::task::run(config, cmd).await,
@@ -862,6 +880,7 @@ async fn dispatch(command: Commands, config: &HqConfig) -> Result<()> {
         Commands::Kill => commands::kill::run(config).await,
         Commands::Clean => commands::clean::run(config).await,
         Commands::Service { sub, target } => commands::service::run(config, &sub, &target).await,
+        Commands::Uninstall { target } if target == "lite" => commands::lite::uninstall_lite(config),
         Commands::Uninstall { target } => {
             commands::service::run(config, "uninstall", &target).await
         }
@@ -996,6 +1015,10 @@ mod lite_rule_tests {
             &["config"],
             &["env"],
             &["copilot", "link"],
+            &["autostart", "status"],
+            &["lite", "export", "x"],
+            &["doctor", "--windows"],
+            &["uninstall", "lite"],
             &["task", "list"],
             &["search", "x", "--json"],
             &["mcp", "install"],

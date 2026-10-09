@@ -42,6 +42,7 @@ pub mod host {
 }
 pub mod install;
 pub mod kill;
+pub mod lite;
 pub mod logs;
 pub mod mailbox;
 pub mod mcp;

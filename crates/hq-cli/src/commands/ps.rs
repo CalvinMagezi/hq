@@ -1,5 +1,6 @@
 use anyhow::Result;
 use hq_core::config::HqConfig;
+#[cfg(unix)]
 use std::process::Command;
 
 /// Show all managed processes.
@@ -77,7 +78,7 @@ fn is_alive(pid: u32) -> bool {
     }
     #[cfg(not(unix))]
     {
-        false
+        hq_core::heartbeat::is_pid_alive(pid)
     }
 }
 

@@ -64,12 +64,126 @@ pub fn register_build_info() {
 }
 
 #[cfg(not(unix))]
-pub async fn run(_args: UpdateArgs) -> i32 {
-    eprintln!(
-        "`hq update` is not available on Windows yet. To update HQ Lite, download the newer zip and unzip it over the old \
-         files; your notes and tasks are kept."
-    );
-    1
+pub async fn run(args: UpdateArgs) -> i32 {
+    windows::run(args.apply, args.json).await
+}
+
+/// HQ Lite on Windows: look for a newer Lite zip among the GitHub releases, and with `--apply`
+/// run the installer, which does the checksum check and the swap. No background updater, no
+/// service: you ask, it looks.
+#[cfg(not(unix))]
+mod windows {
+    use super::GIT_SHA;
+    use serde_json::Value;
+
+    const REPO: &str = "CalvinMagezi/hq";
+
+    /// The newest Lite zip in a GitHub releases listing: (tag, zip name, short commit).
+    pub(super) fn newest_lite(releases: &Value) -> Option<(String, String, String)> {
+        for r in releases.as_array()? {
+            if r["draft"].as_bool().unwrap_or(false) {
+                continue;
+            }
+            for a in r["assets"].as_array().into_iter().flatten() {
+                let name = a["name"].as_str().unwrap_or_default();
+                // hq-lite-<version>-<short sha>-windows-x86_64.zip
+                if let Some(rest) = name.strip_prefix("hq-lite-").and_then(|n| n.strip_suffix("-windows-x86_64.zip")) {
+                    let short = rest.rsplit('-').next().unwrap_or_default();
+                    let has_sum = r["assets"].as_array().into_iter().flatten().any(|b| b["name"].as_str() == Some(&format!("{name}.sha256")));
+                    if has_sum && !short.is_empty() {
+                        return Some((r["tag_name"].as_str().unwrap_or_default().to_string(), name.to_string(), short.to_string()));
+                    }
+                }
+            }
+        }
+        None
+    }
+
+    pub(super) fn is_current(short: &str, git_sha: &str) -> bool {
+        !short.is_empty() && git_sha.starts_with(short)
+    }
+
+    pub(super) async fn run(apply: bool, json: bool) -> i32 {
+        let client = match reqwest::Client::builder().user_agent("hq-update").timeout(std::time::Duration::from_secs(30)).build() {
+            Ok(c) => c,
+            Err(e) => {
+                eprintln!("could not set up a connection: {e}");
+                return 1;
+            }
+        };
+        let listing: Value = match client.get(format!("https://api.github.com/repos/{REPO}/releases?per_page=30")).send().await {
+            Ok(r) if r.status().is_success() => r.json().await.unwrap_or(Value::Null),
+            Ok(r) => {
+                eprintln!("GitHub answered {} (anonymous requests are limited per address; try again later)", r.status());
+                return 1;
+            }
+            Err(e) => {
+                eprintln!("could not reach GitHub: {e}");
+                return 1;
+            }
+        };
+        let Some((tag, name, short)) = newest_lite(&listing) else {
+            eprintln!("No published HQ Lite build was found.");
+            return 1;
+        };
+        let current = is_current(&short, GIT_SHA);
+        if json {
+            println!("{}", serde_json::json!({ "current": GIT_SHA, "newest": name, "tag": tag, "up_to_date": current }));
+        } else if current {
+            println!("HQ Lite is up to date ({name}).");
+        } else {
+            println!("A different HQ Lite build is published: {name} ({tag}). You have commit {}.", &GIT_SHA[..GIT_SHA.len().min(7)]);
+        }
+        if current {
+            return 0;
+        }
+        if !apply {
+            if !json {
+                println!("Run `hq update --apply` to install it. Your notes and tasks are kept.");
+            }
+            return 10;
+        }
+        let Ok(exe) = std::env::current_exe() else { return 1 };
+        let dir = exe.parent().map(|p| p.display().to_string()).unwrap_or_default();
+        println!("Running the installer from https://agent-hq.online/install.ps1 into {dir} (it checks the download's SHA-256 first; the check shows integrity, not authorship) ...");
+        let script = format!(
+            "& ([scriptblock]::Create((irm https://agent-hq.online/install.ps1))) -Edition lite -Yes -InstallDir '{}'",
+            dir.replace('\'', "''")
+        );
+        match std::process::Command::new(std::env::var_os("SystemRoot").map(std::path::PathBuf::from).unwrap_or_else(|| "C:\\Windows".into()).join(r"System32\WindowsPowerShell\v1.0\powershell.exe")).args(["-NoProfile", "-Command", &script]).status() {
+            Ok(s) if s.success() => 0,
+            Ok(s) => s.code().unwrap_or(1),
+            Err(e) => {
+                eprintln!("could not start PowerShell: {e}");
+                1
+            }
+        }
+    }
+
+    #[cfg(test)]
+    mod tests {
+        use super::*;
+        use serde_json::json;
+
+        #[test]
+        fn the_newest_lite_zip_needs_a_checksum_and_skips_drafts() {
+            let zip = "hq-lite-0.9.1-abc1234-windows-x86_64.zip";
+            let rels = json!([
+                { "tag_name": "v3", "draft": true, "assets": [ {"name": zip}, {"name": format!("{zip}.sha256")} ] },
+                { "tag_name": "v2", "draft": false, "assets": [ {"name": zip} ] },
+                { "tag_name": "v1", "draft": false, "assets": [ {"name": zip}, {"name": format!("{zip}.sha256")} ] },
+            ]);
+            assert_eq!(newest_lite(&rels), Some(("v1".into(), zip.into(), "abc1234".into())));
+            assert_eq!(newest_lite(&json!([])), None);
+        }
+
+        #[test]
+        fn current_means_the_build_commit_starts_with_the_zip_s_short_sha() {
+            assert!(is_current("abc1234", "abc1234def5678900000000000000000000000000"));
+            assert!(!is_current("abc1234", "fff1234def5678900000000000000000000000000"));
+            assert!(!is_current("", "abc"));
+        }
+    }
 }
 
 #[cfg(unix)]

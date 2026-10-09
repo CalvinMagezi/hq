@@ -987,6 +987,7 @@ mod tests {
     /// `find_note_by_stem` followed `path.is_dir()` through the symlink and
     /// returned the outside file directly, bypassing `resolve_in_vault`'s
     /// canonicalize-and-check entirely.
+    #[cfg(unix)]
     #[test]
     fn resolve_note_path_bare_name_does_not_follow_symlink_out_of_vault() {
         let v = vault();

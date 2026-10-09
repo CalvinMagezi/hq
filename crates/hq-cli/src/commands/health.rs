@@ -3,6 +3,7 @@ use hq_core::config::HqConfig;
 use crate::render as ansi;
 use crate::render::Theme;
 use hq_vault::VaultClient;
+#[cfg(unix)]
 use std::process::Command;
 
 /// System health check — diagnose common issues.
@@ -153,7 +154,8 @@ fn is_port_in_use(port: u16) -> bool {
     }
     #[cfg(not(unix))]
     {
-        false
+        // A port nobody can bind is in use.
+        std::net::TcpListener::bind(("127.0.0.1", port)).is_err()
     }
 }
 

@@ -389,7 +389,7 @@ impl Default for HqConfig {
             brave_api_key: None,
             default_model: default_model(),
             local_only: false,
-            profile: effective_profile(Profile::default(), cfg!(windows)),
+            profile: Profile::default(),
             lite: LiteConfig::default(),
             ws_port: default_ws_port(),
             chat_turn_timeout_secs: default_chat_turn_timeout_secs(),

@@ -59,9 +59,25 @@ example `%LOCALAPPDATA%\hq-lite`, then:
   programs (AppLocker, WDAC, Smart App Control) may refuse to run it; that is the policy working,
   and HQ does not try to get around it. Connecting VS Code to an HQ that runs elsewhere needs no
   program here at all (`docs/VPS_AGENT_CONNECT.md`).
-- `hq update` is not available yet; update by downloading the newer zip. Your notes and tasks live
+- `hq update` looks for a newer Lite zip on GitHub (`--apply` downloads and runs `https://agent-hq.online/install.ps1` with PowerShell, which checks the SHA-256, an integrity check only, and swaps the program; like the installer itself it does not go through your script-execution policy, so skip `--apply` and run the installer by hand if your policy matters here). It is a command you run, not a background updater. Your notes and tasks live
   in your user profile (`.hq`), not in the folder you unzipped to.
 - `hq host`, `hq sessions` and pairing a machine answer that they need Full HQ.
+- `hq autostart on|off|status` adds or removes one value under your user's startup key, so the web app
+  starts when you sign in. It is off unless you turn it on, and security software sometimes flags
+  startup entries.
+- `hq uninstall lite` stops the server and removes that value; the program folder and your notes are
+  yours to delete (a running program cannot delete itself). `hq lite export <folder>` first if you want
+  your notes: the vault is plain markdown, so moving between Lite and Full HQ is a folder copy
+  (`hq lite import <folder>` on the other side). Only files move, HQ's own top-level folders (`_…` and `.…`) stay behind, nothing is overwritten, and links are never followed.
+- `hq doctor --windows` reads, and changes nothing: notes or database in a synced folder (OneDrive
+  can corrupt a live SQLite database), path length, whether `gh`, `code` and `git` are on PATH, proxy
+  settings and whether the port is free.
+- A small, documented slice of the local REST API is described in `docs/api/lite-local-api.yaml`
+  (OpenAPI). `packaging/` holds Scoop and winget templates for after a Lite zip is released.
+- The installer checks the zip against a SHA-256 published beside it. A signature the installer can
+  verify (minisign, like the Linux releases) is not done: Windows PowerShell 5.1 has no Ed25519, the
+  check would have to run inside the freshly unpacked program, and the signing key lives only in the
+  protected release job. Authenticode signing is the planned fix.
 
 ## Nothing leaves unless you listed it
 

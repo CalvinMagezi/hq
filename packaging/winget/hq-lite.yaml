@@ -1,0 +1,20 @@
+# winget manifest template (singleton). Filled in by scripts/windows/render-packaging.ps1.
+PackageIdentifier: HQ.Lite
+PackageVersion: "@VERSION@"
+PackageLocale: en-US
+Publisher: HQ
+PackageName: HQ Lite
+License: MIT
+ShortDescription: Web app, tasks, notes and MCP for locked-down computers (unsigned build)
+Installers:
+  - Architecture: x64
+    InstallerType: zip
+    NestedInstallerType: portable
+    NestedInstallerFiles:
+      - RelativeFilePath: hq.exe
+        PortableCommandAlias: hq
+    InstallerUrl: "@URL@"
+    InstallerSha256: "@SHA256@"
+    Scope: user
+ManifestType: singleton
+ManifestVersion: 1.6.0
