@@ -233,7 +233,7 @@ mod tests {
         let root = Path::new("/home/user/Documents/HQ");
         let wsl = describe_for(root, Some("Ubuntu".into()));
         assert_eq!(wsl["wsl"], true);
-        assert_eq!(wsl["explorer_path"], "\\\\wsl$\\Ubuntu\\home\\ana\\Documents\\HQ");
+        assert_eq!(wsl["explorer_path"], "\\\\wsl$\\Ubuntu\\home\\user\\Documents\\HQ");
         let plain = describe_for(root, None);
         assert_eq!(plain["wsl"], false);
         assert!(plain["explorer_path"].is_null());
