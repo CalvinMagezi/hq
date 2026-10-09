@@ -39,7 +39,8 @@ pub enum SessionEvent {
         turn: u32,
         credits_used_before: Option<f64>,
         credits_used_after: Option<f64>,
-        /// After minus before, floored at 0. None when either reading failed.
+        /// After minus before, floored at 0. None when either reading failed, or when another Copilot
+        /// session ran during the step, since the counter is shared.
         delta: Option<f64>,
         input_tokens: u32,
         output_tokens: u32,

@@ -562,6 +562,7 @@ impl AgentSession {
             Ok(r) => r.outcome_label().to_string(),
             Err(_) => "error".to_string(),
         };
+        credits::COPILOT_RUNS.ended(&self.session_id);
         self.emit_lifecycle(EventSource::Session, EnvelopeKind::RunFinished { outcome });
     }
 
