@@ -6,6 +6,7 @@ All notable changes to Agent-HQ will be documented in this file.
 
 ### Added
 
+- **A guide to the first-run model key screen**, `docs/FIRST_RUN.md`: when it appears, what the button does, what protects the key, and fixes for each error. The screen's hint now shows `hq env` as code instead of with literal backticks.
 - **A recorded walkthrough and a step-by-step quick start for the Hetzner deploy.** The README, the install page and `docs/HETZNER.md` now show the form in a short animation and list the six steps, what you need beforehand and what it costs.
 - **The Workbench terminal is live and in color.** The page now opens a server-sent stream of the agent's screen instead of polling plain text, shows the colors the agent printed, and falls back to polling if the stream cannot open.
 - **The Sessions page is now Workbench, and you can start agents from it.** Pick a computer, a folder and an agent, and HQ starts it there. Every computer that joins gets a `Documents/HQ` folder (on macOS, Linux, Ubuntu servers and inside WSL2 on Windows) that agents start in by default, and folders can be browsed and created inside it from the page. Agents that are waiting for you are listed first with Approve and Decline buttons, and past agents can be stopped, resumed, renamed and archived. The page is served at the same `/sessions` address.
