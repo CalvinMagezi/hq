@@ -1,0 +1,95 @@
+openapi: 3.0.3
+info:
+  title: HQ local API (the subset HQ Lite documents)
+  version: "1"
+  description: |
+    The REST routes that `hq web` serves on this computer and that HQ Lite keeps. Everything else
+    answers 404 under `profile: lite`. Only these paths are described here; others exist in the
+    web app and may change without notice.
+
+    Send the web token (if one is set) as `Authorization: Bearer <token>`. By default the server
+    listens on 127.0.0.1 only. Routes under HQ's own folders (`_system`, `_data`, dot folders)
+    answer 404.
+servers:
+  - url: http://127.0.0.1:5678
+paths:
+  /health:
+    get:
+      summary: Is HQ up
+      responses: { "200": { description: "JSON with `service: agent-hq`" } }
+  /api/spaces:
+    get: { summary: List spaces, responses: { "200": { description: Spaces } } }
+    post:
+      summary: Create a space
+      requestBody:
+        required: true
+        content: { application/json: { schema: { type: object, required: [name], properties: { name: { type: string } } } } }
+      responses: { "200": { description: The space }, "400": { description: name is required } }
+  /api/initiatives:
+    get: { summary: List initiatives (task lists), responses: { "200": { description: Initiatives } } }
+  /api/tasks:
+    get:
+      summary: List tasks
+      parameters:
+        - { name: space_id, in: query, schema: { type: string } }
+        - { name: initiative_id, in: query, schema: { type: string } }
+        - { name: status, in: query, schema: { type: string, enum: [to_do, in_progress, blocked, ready_for_review, complete] } }
+        - { name: priority, in: query, schema: { type: string, enum: [urgent, high, normal, low] } }
+        - { name: parent_task_id, in: query, schema: { type: string } }
+        - { name: top_level_only, in: query, schema: { type: boolean } }
+      responses: { "200": { description: Tasks } }
+    post:
+      summary: Create a task
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [title]
+              properties:
+                title: { type: string }
+                description: { type: string }
+                initiative_id: { type: string }
+                space_id: { type: string, default: personal }
+                initiative: { type: string, default: Inbox }
+                priority: { type: string, enum: [urgent, high, normal, low] }
+                due_date: { type: string, description: YYYY-MM-DD }
+                start_date: { type: string, description: YYYY-MM-DD }
+      responses: { "200": { description: The task }, "400": { description: Invalid input } }
+  /api/tasks/{id}:
+    patch:
+      summary: Change a task (id or display id such as PERSONAL-INBOX-001)
+      parameters: [ { name: id, in: path, required: true, schema: { type: string } } ]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                title: { type: string }
+                description: { type: string }
+                status: { type: string, enum: [to_do, in_progress, blocked, ready_for_review, complete] }
+                priority: { type: string, nullable: true }
+                due_date: { type: string, nullable: true }
+      responses: { "200": { description: The task }, "404": { description: No such task } }
+  /api/tasks/{id}/comments:
+    get:
+      summary: List a task's comments
+      parameters: [ { name: id, in: path, required: true, schema: { type: string } } ]
+      responses: { "200": { description: Comments } }
+    post:
+      summary: Add a comment
+      parameters: [ { name: id, in: path, required: true, schema: { type: string } } ]
+      requestBody:
+        required: true
+        content: { application/json: { schema: { type: object, required: [body], properties: { body: { type: string }, author: { type: string } } } } }
+      responses: { "200": { description: The comment }, "400": { description: body is required } }
+  /api/search:
+    get:
+      summary: Keyword search over notes
+      parameters:
+        - { name: q, in: query, required: true, schema: { type: string } }
+        - { name: limit, in: query, schema: { type: integer, default: 20 } }
+      responses: { "200": { description: "`{ results: [...] }`" } }

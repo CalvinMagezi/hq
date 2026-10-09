@@ -120,6 +120,12 @@ jobs:
           $text = [Text.Encoding]::ASCII.GetString([IO.File]::ReadAllBytes("target\debug\hq.exe"))
           if ($text -match '(VCRUNTIME140|MSVCP140|CONCRT140)') { throw 'hq.exe imports the Visual C++ runtime DLLs: the static CRT setting did not apply' }
 
+      # The Lite rules are mostly path logic; run their tests where backslashes and drive letters exist.
+      - name: Lite tests on Windows
+        run: |
+          cargo test --locked -p hq-web --lib -- lite
+          cargo test --locked -p hq-cli --bin hq -- lite autostart synced_folders export_and_import
+
       - name: Smoke test as a standard user would run it
         shell: pwsh
         run: |
@@ -149,6 +155,17 @@ jobs:
           if ($code -ne 0) { throw 'hq web --detach failed' }
           $health = Invoke-WebRequest -UseBasicParsing http://127.0.0.1:5699/health
           if ($health.StatusCode -ne 200) { throw 'web /health did not answer' }
+          # The Lite gate: routes that must not exist here answer 404.
+          foreach ($p in '/api/harness-sessions', '/api/settings', '/api/threads', '/api/note?path=_system/SOUL.md', '/api/note?path=.git/config') {
+            $code = (Invoke-WebRequest -UseBasicParsing -SkipHttpErrorCheck "http://127.0.0.1:5699$p").StatusCode
+            if ($code -ne 404) { throw "$p answered $code, expected 404 under Lite" }
+          }
+          & $hq doctor --windows
+          if ($LASTEXITCODE -ne 0) { throw 'hq doctor --windows failed' }
+          & $hq autostart status
+          if ($LASTEXITCODE -ne 0) { throw 'hq autostart status failed' }
+          & $hq lite export "$root\export"
+          if ($LASTEXITCODE -ne 0) { throw 'hq lite export failed' }
           & $hq web stop
           Start-Sleep -Seconds 2
           try { Invoke-WebRequest -UseBasicParsing http://127.0.0.1:5699/health -TimeoutSec 3 | Out-Null; throw 'web server still answering after stop' } catch { if ($_.Exception.Message -like '*still answering*') { throw } }

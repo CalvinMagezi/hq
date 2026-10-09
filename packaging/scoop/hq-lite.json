@@ -1,0 +1,15 @@
+{
+    "version": "@VERSION@",
+    "description": "HQ Lite: web app, tasks, notes and MCP for locked-down computers (unsigned build)",
+    "homepage": "https://agent-hq.online",
+    "license": "MIT",
+    "architecture": {
+        "64bit": {
+            "url": "@URL@",
+            "hash": "@SHA256@"
+        }
+    },
+    "bin": "hq.exe",
+    "checkver": { "github": "https://github.com/CalvinMagezi/hq" },
+    "notes": "This build is not code-signed. A computer that only allows approved programs may refuse to run it."
+}
