@@ -88,6 +88,26 @@ What this does not cover: `hq update` (the signed updater and its timer, which c
 `agent-hq.online`), `hq web --build` (which runs `bun install`), and a loopback endpoint that is
 itself a proxy to a remote service. Switch those off where you need to.
 
+## Linking a company Copilot seat
+
+```
+hq copilot link            # try the preferred models and print what to add to the config
+hq copilot link --write    # add it to the config (the old file is kept as config.yaml.bak)
+hq copilot link --model <id>
+```
+
+HQ uses GitHub's own CLI (`gh copilot`) as the model route, so it signs in the way the CLI does
+and HQ never holds your GitHub token. Which models a seat offers depends on the plan and on what
+your organization enabled, and the only official way to find out from outside GitHub's clients is
+to use the model. So `link` sends one short test request ("reply with the single word: ok") per
+model, in the order of `github_copilot.model_preference` (default `gpt-6-luna`, then
+`claude-haiku-5.5`), and the first that answers wins. If neither does, it says so and stops; HQ
+does not choose a bigger model for you. Pass `--model` to name one yourself. No vault text is sent.
+
+Lite itself does not run chat turns, so this is not what powers the web app. It sets up the Copilot
+backend for a Full HQ on the same seat, and for the day Lite grows a tool-less chat. Whether
+`claude-haiku-5.5` is offered in Copilot at all is unconfirmed; the live check is the answer.
+
 ## Semantic search
 
 Semantic search embeds each note's title and first 512 characters. Lite does no semantic indexing:

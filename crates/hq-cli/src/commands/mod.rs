@@ -3,6 +3,7 @@ pub mod chat;
 pub mod clean;
 pub mod config;
 pub mod content;
+pub mod copilot;
 pub mod cursor_mcp_config;
 pub mod daemon;
 pub mod decisions;
