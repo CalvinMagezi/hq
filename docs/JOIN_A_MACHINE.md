@@ -32,6 +32,11 @@ WSL2) and prints a join code that starts with `hqjoin1.`. The code holds the mac
 tailnet address, nothing secret. Give `--addr <tailnet address>` when tailscale cannot be asked, or a
 name as the first argument to choose the host name (`hq host join dev-wsl`).
 
+It also creates the machine's HQ folder, `Documents/HQ` under the home directory (on every
+operating system, including a headless Ubuntu server that has no `Documents` yet). Agents started
+from the Workbench page in the web app run there, or in a folder inside it. The host creates the
+folder again each time it starts, so deleting it is harmless.
+
 ## 2. On the HQ
 
 ```

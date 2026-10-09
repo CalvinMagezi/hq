@@ -48,6 +48,9 @@ version gets `protocol_mismatch`.
 | Method | Params | Result |
 |---|---|---|
 | `host.status` | none | `protocol_version`, `host_version`, `pid`, `agents`, `agents_working`, `agents_blocked`, `binary_stale` |
+| `host.workspace` | none | `root` (the HQ folder, `~/Documents/HQ`, created if missing), `os`, `wsl`, `explorer_path` (the `\\wsl$\...` path on WSL2, else null) |
+| `host.dirs` | optional `path` (the HQ folder when absent) | `path`, `parent`, `dirs` (`name`, `path`), `truncated`; only folders inside the HQ folder, symlinks out of it refused |
+| `host.mkdir` | `name`, optional `parent` | `{"path"}`; one folder name (no slashes, colons, `~`, `$` or backticks), idempotent |
 | `host.stop` | none | `{}` |
 | `agent.spawn` | `name`, `argv`, `cwd`, optional `agent` (kind, for state detection), `resume_argv` (see Restarts), `env` (object), `rows`, `cols`, `scrollback_rows` | agent info |
 | `agent.list` | none | `{"agents": [...]}` |
