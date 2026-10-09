@@ -186,6 +186,8 @@ pub struct Task {
     pub start_date: Option<String>,
     /// Populated by a `task_tags` join, not a raw column.
     pub tags: Vec<String>,
+    /// Who the task is for (agents or people), from `task_assignees`. Tags say what it is about.
+    pub assignees: Vec<String>,
     /// Internal ids of every task this one depends on (finish-to-start).
     pub depends_on: Vec<String>,
     /// Display ids of the dependencies that are not yet complete.
@@ -269,6 +271,55 @@ pub struct TaskFilter {
     pub offset: usize,
     /// `false` = active tasks only (the default); `true` = only archived ones.
     pub archived: bool,
+    /// Tasks assigned to this name.
+    pub assignee: Option<String>,
+    /// Every word must appear in the title, description or display id (case-insensitive).
+    pub search: Option<String>,
+    /// Only tasks changed after this UTC `YYYY-MM-DD HH:MM:SS` (see `normalize_since`).
+    pub updated_since: Option<String>,
+    pub sort: TaskSort,
+}
+
+/// How a task list is ordered.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum TaskSort {
+    /// Latest activity first.
+    #[default]
+    Updated,
+    /// Newest first.
+    Created,
+    /// Most urgent first, then soonest due, then oldest.
+    Priority,
+}
+
+impl TaskSort {
+    pub fn parse(name: &str) -> Result<Self> {
+        match name {
+            "updated" | "" => Ok(Self::Updated),
+            "created" => Ok(Self::Created),
+            "priority" => Ok(Self::Priority),
+            other => anyhow::bail!("unknown sort '{other}', expected updated, created or priority"),
+        }
+    }
+}
+
+/// Most assignees one task keeps.
+pub const MAX_ASSIGNEES: usize = 20;
+
+/// A time given as `YYYY-MM-DD HH:MM:SS`, ISO 8601 (`...T...Z`) or a bare date, as the UTC
+/// `YYYY-MM-DD HH:MM:SS` the database compares against.
+pub fn normalize_since(text: &str) -> Result<String> {
+    let text = text.trim();
+    let parsed = chrono::DateTime::parse_from_rfc3339(text)
+        .map(|d| d.naive_utc())
+        .or_else(|_| chrono::NaiveDateTime::parse_from_str(text, "%Y-%m-%d %H:%M:%S"))
+        .or_else(|_| chrono::NaiveDateTime::parse_from_str(text, "%Y-%m-%dT%H:%M:%S"))
+        .or_else(|_| {
+            chrono::NaiveDate::parse_from_str(text, "%Y-%m-%d")
+                .map(|d| d.and_hms_opt(0, 0, 0).unwrap_or_default())
+        })
+        .map_err(|_| anyhow::anyhow!("updated_since must be a UTC time such as 2026-10-09 12:00:00 or 2026-10-09T12:00:00Z, got '{text}'"))?;
+    Ok(parsed.format("%Y-%m-%d %H:%M:%S").to_string())
 }
 
 /// Everything a new task needs besides its id and initiative.
@@ -282,6 +333,7 @@ pub struct NewTask<'a> {
     /// Id or display id of the parent; the sub-task must share its initiative.
     pub parent_task_id: Option<&'a str>,
     pub tags: &'a [String],
+    pub assignees: &'a [String],
     pub created_by: &'a str,
     /// Idempotency key, unique per space. See `create_task_dedup`.
     pub external_id: Option<&'a str>,
@@ -305,6 +357,8 @@ pub struct TaskPatch {
     pub blocked_reason: Option<Option<String>>,
     pub waiting_on: Option<Option<String>>,
     pub long_horizon: Option<bool>,
+    /// Replaces the whole assignee list.
+    pub assignees: Option<Vec<String>>,
 }
 
 mod crud;
@@ -312,6 +366,7 @@ mod archive;
 mod checkpoints;
 mod leases;
 mod links;
+mod queue;
 mod stale;
 mod time;
 mod messages;
@@ -326,6 +381,7 @@ pub use archive::*;
 pub use checkpoints::*;
 pub use leases::*;
 pub use links::*;
+pub use queue::*;
 pub use stale::*;
 pub use time::*;
 pub use messages::*;

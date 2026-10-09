@@ -123,7 +123,7 @@ pub fn purge_task(conn: &Connection, id: &str, actor: &str) -> Result<Vec<String
             if let Some(member) = get_task(conn, task_id)? {
                 audit(conn, &member, "purged", actor, "")?;
             }
-            for table in ["task_comments", "task_tags", "task_events", "task_work_sessions", "task_checkpoints"] {
+            for table in ["task_comments", "task_tags", "task_assignees", "task_events", "task_work_sessions", "task_checkpoints"] {
                 conn.execute(&format!("DELETE FROM {table} WHERE task_id = ?1"), params![task_id])?;
             }
             conn.execute(

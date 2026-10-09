@@ -126,7 +126,7 @@ impl HqTool for FolderListTool {
         "folder_list"
     }
     fn description(&self) -> &str {
-        "List folders (matches ClickUp's Space > Folder > List), optionally filtered to one Space."
+        "List folders (Space > Folder > Initiative), optionally filtered to one Space."
     }
     fn parameters(&self) -> Value {
         json!({

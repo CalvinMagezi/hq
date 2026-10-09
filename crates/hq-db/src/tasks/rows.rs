@@ -68,6 +68,7 @@ pub(super) fn row_to_task(row: &rusqlite::Row) -> rusqlite::Result<Task> {
         long_horizon: row.get::<_, i64>(22)? != 0,
         archived_at: row.get(23)?,
         tags: Vec::new(),
+        assignees: Vec::new(),
         depends_on: Vec::new(),
         blocked_by: Vec::new(),
         subtask_count: 0,
@@ -197,6 +198,17 @@ pub(super) fn hydrate(conn: &Connection, tasks: &mut [Task]) -> Result<()> {
     }
 
     let mut stmt = conn.prepare(&format!(
+        "SELECT task_id, assignee FROM task_assignees WHERE task_id IN ({marks}) ORDER BY rowid"
+    ))?;
+    let rows = stmt.query_map(rusqlite::params_from_iter(&ids), |r| {
+        Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?))
+    })?;
+    for row in rows {
+        let (task_id, assignee) = row?;
+        tasks[index[&task_id]].assignees.push(assignee);
+    }
+
+    let mut stmt = conn.prepare(&format!(
         "SELECT d.task_id, b.id, b.display_id, b.status FROM task_dependencies d \
          JOIN tasks b ON b.id = d.depends_on_task_id AND b.archived_at IS NULL \
          WHERE d.task_id IN ({marks}) ORDER BY b.display_id"
@@ -300,6 +312,29 @@ pub(super) fn subtask_ids(conn: &Connection, task_id: &str) -> Result<Vec<String
         .query_map(params![task_id], |r| r.get::<_, String>(0))?
         .collect::<rusqlite::Result<Vec<_>>>()?;
     Ok(ids)
+}
+
+/// Replaces a task's assignees. Names are cleaned like lease labels, deduplicated, and at
+/// most `MAX_ASSIGNEES` are kept (more is an error, not a silent cut).
+pub(super) fn set_assignees(conn: &Connection, task_id: &str, assignees: &[String]) -> Result<()> {
+    let mut clean: Vec<String> = Vec::new();
+    for name in assignees {
+        let name = super::leases::clean_label(name);
+        if !name.is_empty() && !clean.contains(&name) {
+            clean.push(name);
+        }
+    }
+    if clean.len() > MAX_ASSIGNEES {
+        anyhow::bail!("a task has at most {MAX_ASSIGNEES} assignees");
+    }
+    conn.execute("DELETE FROM task_assignees WHERE task_id = ?1", params![task_id])?;
+    for name in clean {
+        conn.execute(
+            "INSERT INTO task_assignees (task_id, assignee) VALUES (?1, ?2)",
+            params![task_id, name],
+        )?;
+    }
+    Ok(())
 }
 
 pub(super) fn set_tags(conn: &Connection, task_id: &str, tags: &[String]) -> Result<()> {

@@ -39,6 +39,12 @@ pub struct TasksConfig {
     /// holds is reported as stale. Reporting only: nothing is ever changed for staleness.
     #[serde(default = "default_stale_after_hours")]
     pub stale_after_hours: u64,
+
+    /// Whether a task's tags also route it to the agent mailbox of the same name, as they
+    /// did before tasks had assignees. On by default so existing routing keeps working;
+    /// turn it off once routing tags have been replaced by assignees, so tags stay topical.
+    #[serde(default = "default_route_tags")]
+    pub route_tags: bool,
 }
 
 impl TasksConfig {
@@ -51,6 +57,10 @@ impl TasksConfig {
     pub fn stale_hours(&self) -> u64 {
         self.stale_after_hours.max(1)
     }
+}
+
+fn default_route_tags() -> bool {
+    true
 }
 
 fn default_stale_after_hours() -> u64 {
@@ -67,6 +77,7 @@ impl Default for TasksConfig {
             require_lease: LeaseMode::default(),
             lease_ttl_secs: default_lease_ttl_secs(),
             stale_after_hours: default_stale_after_hours(),
+            route_tags: default_route_tags(),
         }
     }
 }
@@ -81,6 +92,7 @@ mod tests {
         assert_eq!(cfg.require_lease, LeaseMode::Off);
         assert_eq!(cfg.lease_ttl_secs, DEFAULT_LEASE_TTL_SECS);
         assert_eq!(cfg.stale_hours(), DEFAULT_STALE_AFTER_HOURS);
+        assert!(cfg.route_tags, "tags keep routing until someone turns it off");
     }
 
     #[test]

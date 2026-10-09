@@ -45,6 +45,7 @@ export function TaskDetailDrawer({
   const [draftTitle, setDraftTitle] = useState('')
   const [draftDescription, setDraftDescription] = useState('')
   const [draftTags, setDraftTags] = useState('')
+  const [draftAssignees, setDraftAssignees] = useState('')
   const [draftDueDate, setDraftDueDate] = useState('')
   const [draftStartDate, setDraftStartDate] = useState('')
   const [draftEstimate, setDraftEstimate] = useState('')
@@ -59,6 +60,7 @@ export function TaskDetailDrawer({
     setDraftTitle(task.title)
     setDraftDescription(task.description)
     setDraftTags(task.tags.join(', '))
+    setDraftAssignees(task.assignees.join(', '))
     setDraftDueDate(task.due_date ?? '')
     setDraftStartDate(task.start_date ?? '')
     setDraftEstimate(task.estimate_minutes === null ? '' : String(task.estimate_minutes))
@@ -83,6 +85,10 @@ export function TaskDetailDrawer({
       title: draftTitle,
       description: draftDescription,
       tags,
+      assignees: draftAssignees
+        .split(',')
+        .map((a) => a.trim())
+        .filter(Boolean),
       due_date: draftDueDate || null,
       start_date: draftStartDate || null,
       estimate_minutes: parseEstimate(draftEstimate),
@@ -349,7 +355,17 @@ export function TaskDetailDrawer({
                 Long running: a session finishing a turn or exiting does not move this task
               </label>
               <div>
-                <SectionLabel>Tags (comma-separated; a routing tag like "hq" notifies that agent)</SectionLabel>
+                <SectionLabel>Assigned to (comma-separated; an agent named here is notified)</SectionLabel>
+                <input
+                  value={draftAssignees}
+                  onChange={(e) => setDraftAssignees(e.target.value)}
+                  placeholder="hq, reviewer"
+                  className="w-full px-3 py-2 rounded-xl text-xs font-mono text-neutral-200 bg-black/30 border focus:outline-none focus:ring-1 focus:ring-emerald-400"
+                  style={{ borderColor: 'rgba(255,255,255,0.1)' }}
+                />
+              </div>
+              <div>
+                <SectionLabel>Tags (comma-separated; what the task is about)</SectionLabel>
                 <input
                   value={draftTags}
                   onChange={(e) => setDraftTags(e.target.value)}

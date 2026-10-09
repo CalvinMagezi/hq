@@ -49,7 +49,14 @@ export function TaskCard({ task, onSelect, parentLabel, compact = false }: Props
   const schedule = scheduleLabel(task)
   const stale = useIsStale(task.id)
   const hasChips =
-    task.tags.length > 0 || schedule || task.subtask_count > 0 || task.blocked_by.length > 0 || stale || task.long_horizon || Boolean(task.blocked_reason)
+    task.tags.length > 0 ||
+    task.assignees.length > 0 ||
+    schedule ||
+    task.subtask_count > 0 ||
+    task.blocked_by.length > 0 ||
+    stale ||
+    task.long_horizon ||
+    Boolean(task.blocked_reason)
 
   return (
     <div
@@ -103,6 +110,11 @@ export function TaskCard({ task, onSelect, parentLabel, compact = false }: Props
           {task.status === 'blocked' && task.blocked_reason && (
             <span className={`${CHIP_CLASS} ${BLOCKED_CHIP_CLASS}`} title={task.waiting_on ? `Waiting on ${task.waiting_on}` : undefined}>
               <span className="truncate">{task.blocked_reason}</span>
+            </span>
+          )}
+          {task.assignees.length > 0 && (
+            <span className={`${CHIP_CLASS} bg-white/5 text-neutral-200 border-white/10 max-w-[240px]`} title="Assigned to">
+              <span className="truncate">for {task.assignees.join(', ')}</span>
             </span>
           )}
           {stale && (

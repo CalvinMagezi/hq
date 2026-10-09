@@ -2044,3 +2044,185 @@ fn a_checkpoint_of_nothing_visible_is_empty_and_hidden_characters_are_stripped()
     assert_eq!(clean_block_text("r", "no\u{200B}pe").unwrap().as_deref(), Some("nope"));
     assert!(clean_block_text("r", "\u{200B}\u{0007}").unwrap().is_none(), "a reason of nothing visible is no reason");
 }
+
+fn assign(db: &Database, id: &str, names: &[&str]) -> Task {
+    let patch = TaskPatch { assignees: Some(names.iter().map(|n| n.to_string()).collect()), ..Default::default() };
+    db.with_conn(|c| update_task(c, id, &patch, None)).unwrap()
+}
+
+fn titled(db: &Database, id: &str, initiative: &str, title: &str, description: &str) {
+    db.with_conn(|c| {
+        create_task(c, id, initiative, &NewTask { title, description, created_by: "t", ..Default::default() }).map(|_| ())
+    })
+    .unwrap();
+}
+
+#[test]
+fn assignees_are_set_replaced_cleaned_and_bounded() {
+    let (db, initiative) = setup();
+    let made = db
+        .with_conn(|c| {
+            create_task(c, "tk-1", &initiative, &NewTask { title: "t", assignees: &["hq".to_string(), "hq".to_string(), "  ".to_string()], created_by: "t", ..Default::default() })
+        })
+        .unwrap();
+    assert_eq!(made.assignees, ["hq"], "duplicates and blanks are dropped");
+    assert_eq!(assign(&db, "tk-1", &["reviewer", "hq\n\u{200B}"]).assignees, ["reviewer", "hq"]);
+    assert!(assign(&db, "tk-1", &[]).assignees.is_empty());
+    let too_many: Vec<String> = (0..=MAX_ASSIGNEES).map(|n| format!("agent-{n}")).collect();
+    let patch = TaskPatch { assignees: Some(too_many), ..Default::default() };
+    assert!(db.with_conn(|c| update_task(c, "tk-1", &patch, None)).is_err());
+    assert!(get_one(&db, "tk-1").assignees.is_empty(), "a refused write changes nothing");
+}
+
+#[test]
+fn a_queue_is_found_by_assignee_while_tags_stay_topical() {
+    let (db, initiative) = setup();
+    for id in ["a", "b", "c"] {
+        make(&db, id, &initiative, None).unwrap();
+    }
+    assign(&db, "a", &["hq"]);
+    assign(&db, "b", &["reviewer"]);
+    db.with_conn(|c| update_task(c, "c", &TaskPatch { tags: Some(vec!["hq".into()]), ..Default::default() }, None)).unwrap();
+    let mine = TaskFilter { assignee: Some("hq".into()), ..Default::default() };
+    let ids: Vec<String> = db.with_conn(|c| list_tasks(c, &mine)).unwrap().into_iter().map(|t| t.id).collect();
+    assert_eq!(ids, ["a"], "a topical tag called hq is not an assignment to hq");
+    assert_eq!(db.with_conn(|c| count_tasks(c, &mine)).unwrap(), 1);
+}
+
+#[test]
+fn search_needs_every_word_ignores_case_and_treats_wildcards_as_text() {
+    let (db, initiative) = setup();
+    titled(&db, "t1", &initiative, "Fix the Login redirect", "settings page");
+    titled(&db, "t2", &initiative, "Fix the logout bug", "profile page");
+    titled(&db, "t3", &initiative, "Budget 50% review", "quarterly");
+    titled(&db, "t4", &initiative, "snake_case rename", "naming");
+    let find = |q: &str| -> Vec<String> {
+        let filter = TaskFilter { search: Some(q.into()), ..Default::default() };
+        let mut ids: Vec<String> = db.with_conn(|c| list_tasks(c, &filter)).unwrap().into_iter().map(|t| t.id).collect();
+        ids.sort();
+        ids
+    };
+    assert_eq!(find("login"), ["t1"]);
+    assert_eq!(find("fix page"), ["t1", "t2"], "every word, in any field");
+    assert_eq!(find("fix login settings"), ["t1"]);
+    assert_eq!(find("50%"), ["t3"], "a percent sign is just a character");
+    assert_eq!(find("%"), ["t3"]);
+    assert_eq!(find("_"), ["t4"], "so is an underscore");
+    assert_eq!(find("AGENT-HQ-001"), ["t1"], "the display id is searchable");
+    assert!(find("x' OR 1=1 --").is_empty(), "text is never SQL");
+    assert_eq!(db.with_conn(|c| count_tasks(c, &TaskFilter { search: Some("fix".into()), ..Default::default() })).unwrap(), 2);
+}
+
+#[test]
+fn updated_since_returns_only_what_changed_after_and_accepts_the_common_time_forms() {
+    let (db, initiative) = setup();
+    make(&db, "old", &initiative, None).unwrap();
+    make(&db, "new", &initiative, None).unwrap();
+    db.with_conn(|c| {
+        c.execute("UPDATE tasks SET updated_at = '2026-01-01 00:00:00' WHERE id = 'old'", [])?;
+        c.execute("UPDATE tasks SET updated_at = '2026-06-01 12:00:00' WHERE id = 'new'", [])?;
+        Ok(())
+    })
+    .unwrap();
+    for text in ["2026-03-01", "2026-03-01 00:00:00", "2026-03-01T00:00:00Z", "2026-03-01T03:00:00+03:00"] {
+        let since = normalize_since(text).unwrap();
+        let filter = TaskFilter { updated_since: Some(since), ..Default::default() };
+        let ids: Vec<String> = db.with_conn(|c| list_tasks(c, &filter)).unwrap().into_iter().map(|t| t.id).collect();
+        assert_eq!(ids, ["new"], "{text}");
+    }
+    let exact = TaskFilter { updated_since: Some("2026-06-01 12:00:00".into()), ..Default::default() };
+    assert!(db.with_conn(|c| list_tasks(c, &exact)).unwrap().is_empty(), "strictly after, so a poll never sees the same change twice");
+    for bad in ["", "yesterday", "2026-13-40", "1; DROP TABLE tasks"] {
+        assert!(normalize_since(bad).is_err(), "{bad}");
+    }
+}
+
+#[test]
+fn a_list_can_be_ordered_by_activity_age_or_urgency() {
+    let (db, initiative) = setup();
+    for (id, priority, due) in [("low", "low", None), ("urgent-late", "urgent", Some("2026-12-01")), ("urgent-soon", "urgent", Some("2026-11-01")), ("plain", "normal", None)] {
+        db.with_conn(|c| {
+            create_task(c, id, &initiative, &NewTask { title: id, priority: Some(priority), due_date: due, created_by: "t", ..Default::default() }).map(|_| ())
+        })
+        .unwrap();
+    }
+    db.with_conn(|c| {
+        c.execute("UPDATE tasks SET created_at = '2026-01-0' || (CASE id WHEN 'low' THEN '1' WHEN 'urgent-late' THEN '2' WHEN 'urgent-soon' THEN '3' ELSE '4' END) || ' 00:00:00'", [])?;
+        Ok(())
+    })
+    .unwrap();
+    let order = |sort: TaskSort| -> Vec<String> {
+        db.with_conn(|c| list_tasks(c, &TaskFilter { sort, ..Default::default() })).unwrap().into_iter().map(|t| t.id).collect()
+    };
+    assert_eq!(order(TaskSort::Priority), ["urgent-soon", "urgent-late", "plain", "low"]);
+    assert_eq!(order(TaskSort::Created), ["plain", "urgent-soon", "urgent-late", "low"]);
+    assert!(TaskSort::parse("nonsense").is_err());
+    assert_eq!(TaskSort::parse("priority").unwrap(), TaskSort::Priority);
+}
+
+fn want<'a>(assignee: &'a str, unassigned: bool) -> NextTaskQuery<'a> {
+    NextTaskQuery { assignee, include_unassigned: unassigned, initiative_id: None, tag: None }
+}
+
+#[test]
+fn the_next_task_is_the_most_urgent_one_that_can_be_started_now() {
+    let (db, initiative) = setup();
+    for (id, priority) in [("a", "normal"), ("b", "urgent"), ("c", "urgent"), ("d", "high")] {
+        db.with_conn(|c| {
+            create_task(c, id, &initiative, &NewTask { title: id, priority: Some(priority), created_by: "t", ..Default::default() }).map(|_| ())
+        })
+        .unwrap();
+        assign(&db, id, &["hq"]);
+    }
+    db.with_conn(|c| add_dependency(c, "b", "a", "t")).unwrap();
+    let picked = db.with_conn(|c| next_task(c, &want("hq", false))).unwrap().unwrap();
+    assert_eq!(picked.id, "c", "b is urgent too but waits on a, so the next urgent one goes first");
+    move_to(&db, "a", STATUS_COMPLETE).unwrap();
+    assert_eq!(db.with_conn(|c| next_task(c, &want("hq", false))).unwrap().unwrap().id, "b", "its blocker is done, oldest urgent first");
+    claim_as(&db, "b", "alpha").unwrap();
+    assert_eq!(db.with_conn(|c| next_task(c, &want("hq", false))).unwrap().unwrap().id, "c", "a task someone holds is not offered");
+    assert!(db.with_conn(|c| next_task(c, &want("reviewer", false))).unwrap().is_none(), "other people's tasks are not mine");
+}
+
+#[test]
+fn unassigned_tasks_are_offered_only_when_asked_for_and_filters_narrow_the_pick() {
+    let (db, initiative) = setup();
+    make(&db, "open", &initiative, None).unwrap();
+    make(&db, "mine", &initiative, None).unwrap();
+    assign(&db, "mine", &["hq"]);
+    db.with_conn(|c| update_task(c, "open", &TaskPatch { tags: Some(vec!["infra".into()]), ..Default::default() }, None)).unwrap();
+    assert_eq!(db.with_conn(|c| next_task(c, &want("hq", false))).unwrap().unwrap().id, "mine");
+    move_to(&db, "mine", STATUS_IN_PROGRESS).unwrap();
+    assert!(db.with_conn(|c| next_task(c, &want("hq", false))).unwrap().is_none(), "only to_do tasks are offered");
+    assert_eq!(db.with_conn(|c| next_task(c, &want("hq", true))).unwrap().unwrap().id, "open");
+    let tagged = NextTaskQuery { tag: Some("other"), ..want("hq", true) };
+    assert!(db.with_conn(|c| next_task(c, &tagged)).unwrap().is_none());
+    let right_tag = NextTaskQuery { tag: Some("infra"), ..want("hq", true) };
+    assert_eq!(db.with_conn(|c| next_task(c, &right_tag)).unwrap().unwrap().id, "open");
+}
+
+#[test]
+fn two_agents_asking_for_work_at_once_never_get_the_same_task() {
+    let (db, initiative) = setup();
+    for id in ["a", "b"] {
+        make(&db, id, &initiative, None).unwrap();
+        assign(&db, id, &["hq"]);
+    }
+    let who = |name: &'static str| LeaseIdentity { actor: name, ..Default::default() };
+    let first = db.with_conn(|c| claim_next(c, &want("hq", false), &who("alpha"), TTL)).unwrap().unwrap();
+    let second = db.with_conn(|c| claim_next(c, &want("hq", false), &who("beta"), TTL)).unwrap().unwrap();
+    assert_ne!(first.task.id, second.task.id);
+    assert_eq!(first.task.status, STATUS_IN_PROGRESS);
+    assert!(db.with_conn(|c| claim_next(c, &want("hq", false), &who("gamma"), TTL)).unwrap().is_none(), "the queue is empty");
+}
+
+#[test]
+fn purging_a_task_removes_its_assignees() {
+    let (db, initiative) = setup();
+    make(&db, "tk-1", &initiative, None).unwrap();
+    assign(&db, "tk-1", &["hq"]);
+    db.with_conn(|c| archive_task(c, "tk-1", false, "t")).unwrap();
+    db.with_conn(|c| purge_task(c, "tk-1", "t")).unwrap();
+    let left: i64 = db.with_conn(|c| Ok(c.query_row("SELECT COUNT(*) FROM task_assignees", [], |r| r.get(0))?)).unwrap();
+    assert_eq!(left, 0);
+}

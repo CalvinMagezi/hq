@@ -416,6 +416,56 @@ ALTER TABLE background_turns DROP COLUMN watch_task_id;
 
 Archived tasks must be restored or purged before rolling back: the old code would show them.
 
+## The agent protocol (TSV2 WS6)
+
+Any agent, whatever harness it runs in, can use tasks as its headquarters. Migration
+`085_task_assignees` and the tools below make the loop short and self-explaining.
+
+- **Assignees, apart from tags.** A task has `assignees` (agents or people; at most 20) and
+  `tags`. An assignee says who the task is for, and is mailed when added; a tag says what it is
+  about. While `tasks.route_tags` is true (the default) a tag that names an agent mailbox still
+  routes to it, so nothing existing breaks. `task_routing_audit` lists each mailbox with its open
+  tagged tasks, assigned tasks and `tagged_but_not_assigned`, changing nothing. Assign those, then
+  set `tasks.route_tags: false` and tags are purely topical. A name that is both is mailed once,
+  and an edit mails only who it newly added. Claiming a task assigned to someone else works, with
+  a warning.
+- **Finding work.** `task_list` takes `assignee` (your queue), `search` (every word, in the title,
+  description or display id), `updated_since` and `sort` (`updated`, `created`, `priority`), and
+  replies with `as_of`, a time a second before the read, to pass as the next `updated_since`: a
+  change may be seen twice, never missed. `task_next {actor}` picks the most urgent `to_do` task
+  assigned to you (or nobody, with `include_unassigned`) whose dependencies are done and that
+  nobody holds, then soonest due, then oldest, and claims it in the same write, so two agents asking
+  at once never get the same task. It answers like `task_claim`, or `task: null` and why.
+- **Bulk.** `task_create_many` (up to 100) takes `tasks`, `defaults` and `external_prefix`; a later
+  item refers to an earlier one as `@key` in `parent_id`, `depends_on` or a task link, and the
+  prefix makes the call safe to repeat. `task_update_many` takes `updates` and `defaults`. Each item
+  runs through the single tool, so every rule and notification is identical; a bad item fails alone
+  and is reported.
+- **Telling an agent how.** Three channels, none needing setup:
+  1. the MCP server `instructions` every client receives on connect carry a short "Working on
+     tasks" block (present exactly when the task tools are);
+  2. the first task read or write from a name that holds no lease gets one `hq_task_protocol`
+     note in the reply, once per name per process, never to a launched session or a lease holder;
+  3. `hq task install-skill [claude|codex|cursor|all] [--dry-run] [--force]` writes the generic
+     `hq-tasks` skill (the source is `crates/hq-cli/assets/skills/hq-tasks/SKILL.md`) into each
+     agent's skills directory (`~/.claude/skills`, `~/.codex/skills`, or a Cursor rule), updating
+     HQ's own copy in place and leaving one a person edited unless `--force`. With no name it
+     installs only for agents found on the machine.
+- **Tool text.** Every task tool description is at most 800 bytes and says what to call next. A
+  malformed argument is an error that says what to pass, never a silent no-op.
+- **Acceptance.** `crates/hq-mcp/tests/fresh_agent_task_loop.rs` drives the real gateway as a
+  client that knows nothing: connect, find work, claim, comment, heartbeat with a checkpoint,
+  link, be refused a blocked update without a reason, release blocked, then a second agent resumes
+  from the checkpoint. It also checks that a wrong move is answered with what to do. A release with
+  only a summary becomes the new resume point but keeps the last checkpoint's next step, open
+  questions and files.
+
+Rollback of 085, then delete the `085_task_assignees` row from `schema_version`:
+
+```sql
+DROP TABLE task_assignees;
+```
+
 ## Task relationship graph (FR-069)
 
 `task_related` (crates/hq-tools/src/tasks/tools_graph.rs) answers "what else is connected to this task". The

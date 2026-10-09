@@ -10,7 +10,7 @@ use std::sync::Arc;
 
 use super::json::*;
 use super::placement::*;
-use super::tools_lease::{ActorHints, add_warning, lease_policy};
+use super::tools_lease::{ActorHints, add_warning, lease_policy, with_onboarding};
 use super::tools_links::{advice_for_new_task, check_links, link_requests};
 use hq_core::config::TasksConfig;
 use crate::registry::HqTool;
@@ -51,15 +51,11 @@ impl HqTool for TaskCreateTool {
         "task_create"
     }
     fn description(&self) -> &str {
-        "Create a task. Route it to an agent by tagging it (e.g. \"hq\", \"reviewer\") — agents don't \
-         have real accounts, tags are how work gets assigned, same convention ClickUp used. A tagged \
-         agent is notified immediately via its mailbox. Resolves the initiative by id if given, else \
-         finds-or-creates one by (space, initiative name). For actionable work only — knowledge or \
-         reference material belongs in a vault note (vault_write_note) instead. To promote an existing \
-         vault note into a task, use task_create_from_note rather than copying its content by hand. \
-         Pass parent_id to make a sub-task (one level deep, filed in the parent's initiative), \
-         start_date/due_date to schedule it on the timeline, and depends_on for tasks that must \
-         finish first."
+        "Create a task: something to do and track to completion. Knowledge and notes belong in the vault, \
+         not here (task_create_from_note promotes a note). Say who it is for in `assignees` and what it is \
+         about in `tags`. Optional: parent_id for a sub-task, depends_on, start_date and due_date, \
+         estimate_minutes, `links` to what it came from, external_id so a retry is safe. The reply lists \
+         similar open tasks if there are any. Several at once: task_create_many."
     }
     fn parameters(&self) -> Value {
         json!({
@@ -69,7 +65,7 @@ impl HqTool for TaskCreateTool {
                 "description": { "type": "string", "description": "Longer description (optional)" },
                 "initiative_id": { "type": "string", "description": "Initiative to file this under, if known" },
                 "space_id": { "type": "string", "description": "Space slug (e.g. 'personal', 'professional') when resolving by name instead of initiative_id", "default": "personal" },
-                "folder": { "type": "string", "description": "Optional folder name to find-or-create the initiative under (matches ClickUp's Space > Folder > List). Omit for a folderless initiative directly under the space." },
+                "folder": { "type": "string", "description": "Optional folder name to find-or-create the initiative under (Space > Folder > Initiative). Omit for a folderless initiative directly under the space." },
                 "initiative": { "type": "string", "description": "Initiative name to find-or-create, when initiative_id is not given", "default": "Inbox" },
                 "priority": { "type": "string", "enum": ["urgent", "high", "normal", "low"], "description": "Optional priority" },
                 "due_date": { "type": "string", "description": "Optional due date, YYYY-MM-DD" },
@@ -79,7 +75,8 @@ impl HqTool for TaskCreateTool {
                 "links": { "type": "array", "description": "Links to record with the task, each {kind, ref, label?, direction?}: kind is vault_note, chat_thread, session, commit, pr, url or task. Link the note or conversation the task came from.", "items": { "type": "object", "properties": { "kind": { "type": "string" }, "ref": { "type": "string" }, "label": { "type": "string" }, "direction": { "type": "string", "enum": ["origin", "related", "produced"] } }, "required": ["kind", "ref"] } },
                 "parent_id": { "type": "string", "description": "Make this a sub-task of that task (id or display id). The parent must be top level." },
                 "depends_on": { "type": "array", "items": { "type": "string" }, "description": "Ids or display ids of tasks that must complete before this one" },
-                "tags": { "type": "array", "items": { "type": "string" }, "description": "Routing tags (e.g. 'hq', 'reviewer') plus any topical tags" },
+                "assignees": { "type": "array", "items": { "type": "string" }, "description": "Who the task is for: agent ids or people (e.g. 'hq', 'reviewer'). An assignee is mailed when added and finds it with task_list assignee or task_next." },
+                "tags": { "type": "array", "items": { "type": "string" }, "description": "What the task is about (topical). Tags that match an agent mailbox still route to it unless tasks.route_tags is off, but use assignees to hand work to an agent." },
                 "created_by": { "type": "string", "description": "Who is filing this (agent id or a name). Ignored when a valid `lease` is given.", "default": "unknown" },
                 "lease": { "type": "string", "description": "Your lease token from task_claim, to attribute this to you" },
                 "external_id": { "type": "string", "description": "Idempotency key, unique per space (up to 200 characters). Calling again with the same external_id in the same space returns the existing task with deduplicated=true instead of creating a duplicate, so a retried or repeated request is safe." }
@@ -107,13 +104,14 @@ impl HqTool for TaskCreateTool {
         let start_date = opt_str(&args, "start_date");
         let parent_id = opt_str(&args, "parent_id");
         let depends_on = tags_from_args(&args, "depends_on");
-        // The tasks scope sets no routing tags (a tag names a mailbox that an agent or the
-        // owner's chat drains) and cannot choose who a write is attributed to.
+        // The tasks scope sets no routing tags or assignees (each names a mailbox that an agent
+        // or the owner's chat drains) and cannot choose who a write is attributed to.
         let scoped = crate::harness_session::is_tasks_scope(&args);
         if scoped {
             check_scoped_text(&args)?;
         }
         let tags = if scoped { Vec::new() } else { tags_from_args(&args, "tags") };
+        let assignees = if scoped { Vec::new() } else { tags_from_args(&args, "assignees") };
         let hints = ActorHints::from_args(&args, "created_by");
         let settings = self.settings.clone();
         let initiative_id = args
@@ -170,6 +168,7 @@ impl HqTool for TaskCreateTool {
                         start_date: start_date.as_deref(),
                         parent_task_id: parent_id.as_deref(),
                         tags: &tags,
+                        assignees: &assignees,
                         created_by: &created_by,
                         external_id: external_id.as_deref(),
                         estimate_minutes,
@@ -198,7 +197,7 @@ impl HqTool for TaskCreateTool {
             return Ok(out);
         }
         if !scoped {
-            notify_tags(&self.vault_path, &task, &task.tags);
+            notify_recipients(&self.vault_path, &task, None, self.settings.route_tags);
         }
         let (links, advice) = self
             .db
@@ -211,7 +210,7 @@ impl HqTool for TaskCreateTool {
         if let (Some(extra), Some(obj)) = (advice.as_object(), out.as_object_mut()) {
             obj.extend(extra.clone());
         }
-        Ok(out)
+        Ok(with_onboarding(&args, out))
     }
 }
 
@@ -260,6 +259,10 @@ impl HqTool for TaskListTool {
                 "parent_id": { "type": "string", "description": "Only the sub-tasks of this task (id or display id)" },
                 "top_level_only": { "type": "boolean", "description": "Exclude sub-tasks" },
                 "include_description": { "type": "boolean", "description": "Include each task's full description (large lists may then be cut by the MCP gateway)" },
+                "assignee": { "type": "string", "description": "Only tasks assigned to this agent or person. This is your queue." },
+                "search": { "type": "string", "description": "Words that must all appear in the title, description or display id" },
+                "updated_since": { "type": "string", "description": "Only tasks changed after this UTC time (2026-10-09T12:00:00Z, 2026-10-09 12:00:00 or a date). Pass the previous reply's `as_of` to poll for changes." },
+                "sort": { "type": "string", "enum": ["updated", "created", "priority"], "description": "Order: latest activity (default), newest, or most urgent first" },
                 "archived": { "type": "boolean", "description": "List archived tasks instead of active ones" },
                 "stale": { "type": "boolean", "description": "Only in-progress tasks nobody holds that look abandoned (see task_stale for why and what to do)" },
                 "limit": { "type": "integer", "minimum": 1, "maximum": 500, "description": "Page size (default 100). The reply has `total` and `has_more`; read the next page with `offset`." },
@@ -297,8 +300,17 @@ impl HqTool for TaskListTool {
                 .map(String::from),
             parent_task_id: parent_filter(&args),
             archived: args.get("archived").and_then(Value::as_bool).unwrap_or(false),
+            assignee: opt_str(&args, "assignee"),
+            search: opt_str(&args, "search"),
+            updated_since: opt_str(&args, "updated_since").map(|s| t::normalize_since(&s)).transpose()?,
+            sort: t::TaskSort::parse(&arg_str(&args, "sort"))?,
             ..Default::default()
         };
+        // The server's clock a second before the read: the next `updated_since` for a poll. A change
+        // may be seen twice, never missed, since updates are stamped to the second.
+        let as_of = self.db.with_conn(|c| {
+            Ok(c.query_row("SELECT datetime('now', '-1 second')", [], |r| r.get::<_, String>(0))?)
+        })?;
         let with_description = args
             .get("include_description")
             .and_then(|v| v.as_bool())
@@ -346,13 +358,17 @@ impl HqTool for TaskListTool {
             row
         });
         let next_offset = offset + tasks.len();
-        Ok(json!({
-            "count": tasks.len(),
-            "total": total,
-            "offset": offset,
-            "has_more": (next_offset as i64) < total,
-            "tasks": rows.collect::<Vec<_>>()
-        }))
+        Ok(with_onboarding(
+            &args,
+            json!({
+                "count": tasks.len(),
+                "total": total,
+                "offset": offset,
+                "has_more": (next_offset as i64) < total,
+                "as_of": as_of,
+                "tasks": rows.collect::<Vec<_>>()
+            }),
+        ))
     }
 }
 
@@ -517,7 +533,7 @@ impl HqTool for TaskGetTool {
         if scoped {
             hide_work_details_from_tasks_scope(&mut value);
         }
-        Ok(value)
+        Ok(with_onboarding(&args, value))
     }
 }
 
@@ -587,6 +603,7 @@ impl HqTool for TaskUpdateTool {
                 "add_depends_on": { "type": "array", "items": { "type": "string" }, "description": "Tasks this one should wait for" },
                 "remove_depends_on": { "type": "array", "items": { "type": "string" }, "description": "Dependencies to drop" },
                 "tags": { "type": "array", "items": { "type": "string" }, "description": "Replaces the full tag set" },
+                "assignees": { "type": "array", "items": { "type": "string" }, "description": "Replaces the full assignee list. Newly added assignees are mailed." },
                 "expected_status": { "type": "string", "description": "Claim-safe: only apply if the task is currently in this status" },
                 "lease": { "type": "string", "description": "Your lease token from task_claim. Attributes the change to you, and is required to start a task when the instance asks for leases." },
                 "actor": { "type": "string", "description": "Your name, used only when you have no lease" }
@@ -627,11 +644,17 @@ impl HqTool for TaskUpdateTool {
             due_date: args.get("due_date").map(|v| v.as_str().map(String::from)),
             start_date: args.get("start_date").map(|v| v.as_str().map(String::from)),
             parent_task_id: args.get("parent_id").map(|v| v.as_str().map(String::from)),
-            // The tasks scope cannot set routing tags: they name mailboxes other parties drain.
+            // The tasks scope cannot set routing tags or assignees: they name mailboxes other
+            // parties drain.
             tags: if scoped {
                 None
             } else {
                 args.get("tags").map(|_| tags_from_args(&args, "tags"))
+            },
+            assignees: if scoped {
+                None
+            } else {
+                args.get("assignees").map(|_| tags_from_args(&args, "assignees"))
             },
             estimate_minutes: estimate_arg(&args)?,
             blocked_reason: text_arg(&args, "blocked_reason")?,
@@ -692,8 +715,8 @@ impl HqTool for TaskUpdateTool {
         let became_ready_for_review = task.status == t::STATUS_READY_FOR_REVIEW
             && previous.status != t::STATUS_READY_FOR_REVIEW;
         if !scoped {
-            notify_unblocked(&self.vault_path, &task, &unblocked);
-            notify_tags(&self.vault_path, &task, &added_tags(&previous.tags, &task.tags));
+            notify_unblocked(&self.vault_path, &task, &unblocked, self.settings.route_tags);
+            notify_recipients(&self.vault_path, &task, Some(&previous), self.settings.route_tags);
         }
         // A web-UI approval item with text the caller chose, one per task: not for the tasks scope.
         if became_ready_for_review && !scoped {
@@ -703,7 +726,7 @@ impl HqTool for TaskUpdateTool {
         if let Some(warning) = lease_warning {
             add_warning(&mut out, warning);
         }
-        Ok(out)
+        Ok(with_onboarding(&args, out))
     }
 }
 

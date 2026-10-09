@@ -16,6 +16,7 @@ const makeTask = (overrides: Partial<TaskItem> = {}): TaskItem => ({
   due_date: '2026-10-01',
   start_date: '2026-09-20',
   parent_task_id: null,
+  assignees: [],
   tags: ['frontend', 'mobile-responsive-super-long-tag-name-that-tests-truncation'],
   depends_on: [],
   blocked_by: ['SHADOW-002', 'SHADOW-003', 'SHADOW-004'],

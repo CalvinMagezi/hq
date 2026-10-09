@@ -231,6 +231,17 @@ pub const SCOPED_INSTRUCTIONS: &str = "Agent-HQ (restricted access). \
 
 /// Server instructions sent on `initialize`: how to use the two gateway tools
 /// plus the tool catalog, so a client knows the tools without calling hq_discover.
+/// How any agent works a task, in the text every MCP client receives on connect. Short on
+/// purpose; the installable `hq-tasks` skill has the long version.
+const TASK_PROTOCOL: &str = "## Working on tasks\n\
+     HQ tracks your work as tasks. Your own queue: `task_next` picks the most urgent task assigned to you and starts it (or `task_list` with `assignee`, then `task_claim`).\n\
+     1. Claim before you work. `task_claim` and `task_next` return a `lease` token: keep it for the session.\n\
+     2. Pass `lease` on `task_update`, `task_comment_add` and `task_create` so the work is recorded as yours.\n\
+     3. Call `task_heartbeat` every few minutes, with a `checkpoint` (summary, next_step) at good stopping points, so another session can pick up where you stopped.\n\
+     4. Stop with `task_release` and a status: `ready_for_review` when done and it needs checking, `blocked` (the summary is the reason) when stuck, `to_do` to hand it back. Never `complete` unless the work is verified.\n\
+     5. Link what a task came from with `task_link_add`. File a big piece of work as its own initiative with one task per workstream.\n\
+     Knowledge and notes belong in the vault, not in tasks.\n\n";
+
 pub fn server_instructions(registry: &ToolRegistry) -> String {
     let categories = registry.categories();
     let mut instructions = String::with_capacity(8192);
@@ -245,6 +256,9 @@ pub fn server_instructions(registry: &ToolRegistry) -> String {
          - `hq_discover(category?, query?)` browses tools with filtering\n\n\
          Prefer `hq_call` when you know which tool to use. Use `hq_discover` to explore.\n\n",
     );
+    if registry.get("task_claim").is_some() {
+        instructions.push_str(TASK_PROTOCOL);
+    }
     // The full catalog lives only here: hq_call reaches every tool and no tool
     // schemas ship over MCP. Hints cost about a third of full descriptions.
     instructions.push_str(&registry.catalog_block());

@@ -3,7 +3,6 @@
 use anyhow::{Result, bail};
 use async_trait::async_trait;
 use hq_core::config::{DecisionMode, SITE_TASK_PLACEMENT};
-use hq_core::mailbox;
 use hq_core::redact::redact_secrets;
 use hq_db::Database;
 use hq_db::tasks as t;
@@ -242,6 +241,7 @@ pub(super) async fn choose_placement_via_jev(
 }
 
 pub(super) struct TaskCreateFromNoteTool {
+    pub(super) route_tags: bool,
     pub(super) vault: Arc<VaultClient>,
     pub(super) db: Arc<Database>,
 }
@@ -396,15 +396,7 @@ impl HqTool for TaskCreateFromNoteTool {
             })
         })?;
 
-        if !task.tags.is_empty() {
-            let _ = mailbox::notify_tagged_agents(
-                self.vault.vault_path(),
-                &task.id,
-                &task.display_id,
-                &task.title,
-                &task.tags,
-            );
-        }
+        notify_recipients(self.vault.vault_path(), &task, None, self.route_tags);
 
         let mut out = json!({
             "task": task_json(&task),

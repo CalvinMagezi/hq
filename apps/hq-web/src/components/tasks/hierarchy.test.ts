@@ -13,6 +13,7 @@ const makeTask = (id: string, display_id: string, initiative_id: string, updated
   due_date: null,
   start_date: null,
   parent_task_id: null,
+  assignees: [],
   tags: [],
   depends_on: [],
   blocked_by: [],

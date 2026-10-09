@@ -22,8 +22,8 @@ fn tools() -> Vec<Box<dyn HqTool>> {
 }
 
 #[test]
-fn factory_returns_twenty_six_tools() {
-    assert_eq!(tools().len(), 26);
+fn factory_returns_thirty_tools() {
+    assert_eq!(tools().len(), 30);
 }
 
 #[test]
@@ -1074,6 +1074,32 @@ async fn the_tasks_scope_cannot_retag_or_renotify_through_an_update() {
 
 /// A lease token is proof of who is acting, so one taken with the full key must not let a
 /// tasks-scope caller write under that name.
+/// An assignee is mailed like a routing tag, so the tasks scope can set neither.
+#[tokio::test]
+async fn the_tasks_scope_assigns_no_one() {
+    let fx = ScopeFixture::new(&["reviewer"]);
+    let made = fx
+        .tool("task_create")
+        .execute(tasks_scope(json!({"title": "x", "assignees": ["reviewer"]})))
+        .await
+        .unwrap();
+    assert_eq!(made["assignees"], json!([]), "{made}");
+    let updated = fx
+        .tool("task_update")
+        .execute(tasks_scope(json!({"id": made["id"], "assignees": ["reviewer"]})))
+        .await
+        .unwrap();
+    assert_eq!(updated["assignees"], json!([]), "{updated}");
+    assert_eq!(mailbox_files(&fx.path, "reviewer"), 0);
+
+    // Control: the owner's assignment is mailed.
+    fx.tool("task_update")
+        .execute(json!({"id": made["id"], "assignees": ["reviewer"]}))
+        .await
+        .unwrap();
+    assert!(mailbox_files(&fx.path, "reviewer") >= 1, "the control must deliver");
+}
+
 /// The scope edits text only on tasks filed as `mcp:tasks`, so no other caller may file or
 /// write under that name.
 #[tokio::test]
@@ -1978,4 +2004,287 @@ async fn the_blocked_reason_rule_cannot_be_met_with_nothing_or_dropped_later() {
     assert_eq!(replaced["blocked_reason"], "still no key, asked ops");
     let freed = call_tool(&tools, "task_update", json!({ "id": id, "status": "to_do", "blocked_reason": null })).await;
     assert!(freed.is_ok(), "leaving blocked may clear the reason");
+}
+
+fn tools_in(vault_dir: &std::path::Path, settings: hq_core::config::TasksConfig) -> Vec<Box<dyn HqTool>> {
+    let vault = Arc::new(VaultClient::new(vault_dir.to_path_buf()).unwrap());
+    create_task_tools_with(vault_dir.to_path_buf(), vault, Arc::new(Database::open_memory().unwrap()), settings)
+}
+
+fn mailbox_count(vault_dir: &std::path::Path, name: &str) -> usize {
+    walk_files(&vault_dir.join(mailbox::MAILBOX_DIR).join(name))
+}
+
+#[tokio::test]
+async fn an_assignee_is_mailed_when_added_and_a_tag_only_while_tag_routing_is_on() {
+    for route_tags in [true, false] {
+        let dir = tempfile::tempdir().unwrap();
+        for name in ["worker", "reviewer"] {
+            std::fs::create_dir_all(dir.path().join(mailbox::MAILBOX_DIR).join(name)).unwrap();
+        }
+        let settings = hq_core::config::TasksConfig { route_tags, ..Default::default() };
+        let tools = tools_in(dir.path(), settings);
+        let made = call_tool(&tools, "task_create", json!({ "title": "Routed", "assignees": ["worker"], "tags": ["reviewer"] })).await.unwrap();
+        assert_eq!(made["assignees"], json!(["worker"]));
+        assert_eq!(mailbox_count(dir.path(), "worker"), 1, "an assignee is always mailed");
+        assert_eq!(mailbox_count(dir.path(), "reviewer"), usize::from(route_tags), "route_tags={route_tags}");
+
+        let id = made["display_id"].as_str().unwrap().to_string();
+        call_tool(&tools, "task_update", json!({ "id": id, "title": "Renamed" })).await.unwrap();
+        assert_eq!(mailbox_count(dir.path(), "worker"), 1, "an edit that adds nobody mails nobody");
+        call_tool(&tools, "task_update", json!({ "id": id, "assignees": ["worker", "reviewer"] })).await.unwrap();
+        assert_eq!(mailbox_count(dir.path(), "reviewer"), usize::from(route_tags) + 1, "the newly assigned is mailed");
+        assert_eq!(mailbox_count(dir.path(), "worker"), 1, "the one who was already assigned is not mailed again");
+    }
+}
+
+#[tokio::test]
+async fn a_name_that_is_both_tag_and_assignee_is_mailed_once() {
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::create_dir_all(dir.path().join(mailbox::MAILBOX_DIR).join("hq")).unwrap();
+    let tools = tools_in(dir.path(), Default::default());
+    call_tool(&tools, "task_create", json!({ "title": "Both", "assignees": ["hq"], "tags": ["hq"] })).await.unwrap();
+    assert_eq!(mailbox_count(dir.path(), "hq"), 1);
+}
+
+#[tokio::test]
+async fn the_list_finds_a_queue_searches_polls_and_sorts() {
+    let tools = tools_with(hq_core::config::LeaseMode::Off);
+    for (title, priority, assignee) in [("Fix login redirect", "low", "hq"), ("Fix logout bug", "urgent", "hq"), ("Write docs", "normal", "other")] {
+        call_tool(&tools, "task_create", json!({ "title": title, "priority": priority, "assignees": [assignee] })).await.unwrap();
+    }
+    let titles = |v: &serde_json::Value| -> Vec<String> {
+        v["tasks"].as_array().unwrap().iter().map(|t| t["title"].as_str().unwrap().to_string()).collect()
+    };
+    let mine = call_tool(&tools, "task_list", json!({ "assignee": "hq", "sort": "priority" })).await.unwrap();
+    assert_eq!(titles(&mine), ["Fix logout bug", "Fix login redirect"], "urgent first");
+    assert_eq!(mine["total"], 2);
+    let found = call_tool(&tools, "task_list", json!({ "search": "fix login" })).await.unwrap();
+    assert_eq!(titles(&found), ["Fix login redirect"]);
+    assert!(call_tool(&tools, "task_list", json!({ "sort": "random" })).await.is_err());
+    assert!(call_tool(&tools, "task_list", json!({ "updated_since": "yesterday" })).await.is_err());
+
+    let all = call_tool(&tools, "task_list", json!({})).await.unwrap();
+    let as_of = all["as_of"].as_str().unwrap().to_string();
+    assert_eq!(as_of.len(), 19, "a UTC time to the second: {as_of}");
+    let none = call_tool(&tools, "task_list", json!({ "updated_since": "2999-01-01" })).await.unwrap();
+    assert_eq!(none["total"], 0);
+    let everything = call_tool(&tools, "task_list", json!({ "updated_since": "2000-01-01T00:00:00Z" })).await.unwrap();
+    assert_eq!(everything["total"], 3);
+}
+
+#[tokio::test]
+async fn task_next_starts_the_most_urgent_task_assigned_to_you_and_nobody_else_gets_it() {
+    let tools = tools_with(hq_core::config::LeaseMode::Enforce);
+    for (title, priority) in [("Later", "low"), ("Now", "urgent")] {
+        call_tool(&tools, "task_create", json!({ "title": title, "priority": priority, "assignees": ["builder"], "actor": "x" })).await.unwrap();
+    }
+    call_tool(&tools, "task_create", json!({ "title": "Someone else's", "assignees": ["other"] })).await.unwrap();
+
+    assert!(call_tool(&tools, "task_next", json!({})).await.is_err(), "it needs to know who is asking");
+    let first = call_tool(&tools, "task_next", json!({ "actor": "builder", "harness": "claude-code" })).await.unwrap();
+    assert_eq!(first["task"]["title"], "Now");
+    assert_eq!(first["task"]["status"], "in_progress");
+    assert!(first["lease"].as_str().unwrap().starts_with("hql_"));
+    assert!(first["next"].as_str().unwrap().contains("task_release"));
+
+    let second = call_tool(&tools, "task_next", json!({ "actor": "builder" })).await.unwrap();
+    assert_eq!(second["task"]["title"], "Later", "the first is held, so the next one");
+    let none = call_tool(&tools, "task_next", json!({ "actor": "builder" })).await.unwrap();
+    assert!(none["task"].is_null());
+    assert!(none["reason"].as_str().unwrap().contains("include_unassigned"));
+    assert_eq!(call_tool(&tools, "task_next", json!({ "actor": "builder", "assignee": "other" })).await.unwrap()["task"]["title"], "Someone else's");
+}
+
+#[tokio::test]
+async fn claiming_a_task_assigned_to_someone_else_goes_through_with_a_warning() {
+    let tools = tools_with(hq_core::config::LeaseMode::Off);
+    let task = call_tool(&tools, "task_create", json!({ "title": "Not yours", "assignees": ["alice"] })).await.unwrap();
+    let claim = call_tool(&tools, "task_claim", json!({ "task_id": task["display_id"], "actor": "bob" })).await.unwrap();
+    assert!(claim["warnings"][0].as_str().unwrap().contains("assigned to alice, not to bob"), "{claim}");
+    let mine = call_tool(&tools, "task_create", json!({ "title": "Yours", "assignees": ["bob"] })).await.unwrap();
+    let claim = call_tool(&tools, "task_claim", json!({ "task_id": mine["display_id"], "actor": "bob" })).await.unwrap();
+    assert!(claim.get("warnings").is_none() || claim["warnings"].as_array().unwrap().is_empty());
+}
+
+#[tokio::test]
+async fn the_routing_audit_shows_what_tags_still_route_before_anyone_switches_them_off() {
+    let dir = tempfile::tempdir().unwrap();
+    for name in ["hq", "reviewer"] {
+        std::fs::create_dir_all(dir.path().join(mailbox::MAILBOX_DIR).join(name)).unwrap();
+    }
+    let tools = tools_in(dir.path(), Default::default());
+    call_tool(&tools, "task_create", json!({ "title": "A", "tags": ["hq"] })).await.unwrap();
+    call_tool(&tools, "task_create", json!({ "title": "B", "tags": ["hq"], "assignees": ["hq"] })).await.unwrap();
+    call_tool(&tools, "task_create", json!({ "title": "C", "assignees": ["reviewer"] })).await.unwrap();
+    let audit = call_tool(&tools, "task_routing_audit", json!({})).await.unwrap();
+    assert_eq!(audit["route_tags"], true);
+    let row = |name: &str| audit["mailboxes"].as_array().unwrap().iter().find(|m| m["mailbox"] == name).unwrap().clone();
+    assert_eq!((row("hq")["open_tasks_tagged"].as_i64(), row("hq")["open_tasks_assigned"].as_i64(), row("hq")["tagged_but_not_assigned"].as_i64()), (Some(2), Some(1), Some(1)));
+    assert_eq!((row("reviewer")["open_tasks_tagged"].as_i64(), row("reviewer")["tagged_but_not_assigned"].as_i64()), (Some(0), Some(0)));
+    let before = call_tool(&tools, "task_list", json!({})).await.unwrap()["total"].clone();
+    assert_eq!(before, 3, "the audit changed nothing");
+}
+
+#[tokio::test]
+async fn bulk_create_links_items_by_key_inherits_defaults_and_is_safe_to_repeat() {
+    let tools = tools_with(hq_core::config::LeaseMode::Off);
+    let call = json!({
+        "defaults": { "initiative": "Big epic", "tags": ["epic"] },
+        "external_prefix": "run-1",
+        "tasks": [
+            { "key": "ws1", "title": "Workstream one" },
+            { "key": "a", "title": "Item a", "parent_id": "@ws1" },
+            { "key": "b", "title": "Item b", "parent_id": "@ws1", "depends_on": ["@a"], "assignees": ["worker"] },
+            { "title": "Broken", "parent_id": "@nobody" },
+            { "key": "c", "title": "Linked", "links": [{ "kind": "task", "ref": "@ws1" }] }
+        ]
+    });
+    let first = call_tool(&tools, "task_create_many", call.clone()).await.unwrap();
+    assert_eq!((first["created"].as_i64(), first["failed"].as_i64()), (Some(4), Some(1)));
+    let r = |i: usize| first["results"][i].clone();
+    assert_eq!(r(3)["ok"], false);
+    assert!(r(3)["error"].as_str().unwrap().contains("@nobody"));
+    let ws1 = r(0)["display_id"].as_str().unwrap().to_string();
+    let b = call_tool(&tools, "task_get", json!({ "id": r(2)["display_id"] })).await.unwrap();
+    assert_eq!(b["parent_task_id"], r(0)["id"], "@ws1 became the real parent");
+    assert_eq!(b["blocked_by"], json!([r(1)["display_id"]]), "@a became a dependency");
+    assert_eq!(b["tags"], json!(["epic"]), "defaults applied");
+    assert_eq!(b["assignees"], json!(["worker"]));
+    let c = call_tool(&tools, "task_get", json!({ "id": r(4)["display_id"] })).await.unwrap();
+    assert_eq!(c["links"][0]["kind"], "task");
+    assert_eq!(call_tool(&tools, "task_get", json!({ "id": ws1 })).await.unwrap()["subtask_count"], 2);
+
+    let again = call_tool(&tools, "task_create_many", call).await.unwrap();
+    assert_eq!(again["results"][0]["deduplicated"], true, "a repeat creates nothing twice");
+    assert_eq!(call_tool(&tools, "task_list", json!({})).await.unwrap()["total"], 4);
+}
+
+#[tokio::test]
+async fn bulk_calls_are_bounded_and_bulk_update_reports_each_item() {
+    let tools = tools_with(hq_core::config::LeaseMode::Off);
+    assert!(call_tool(&tools, "task_create_many", json!({ "tasks": [] })).await.is_err());
+    assert!(call_tool(&tools, "task_create_many", json!({})).await.is_err());
+    let too_many: Vec<_> = (0..101).map(|n| json!({ "title": format!("t{n}") })).collect();
+    assert!(call_tool(&tools, "task_create_many", json!({ "tasks": too_many })).await.is_err());
+
+    let a = call_tool(&tools, "task_create", json!({ "title": "A" })).await.unwrap();
+    let b = call_tool(&tools, "task_create", json!({ "title": "B" })).await.unwrap();
+    let out = call_tool(
+        &tools,
+        "task_update_many",
+        json!({ "defaults": { "priority": "high" }, "updates": [{ "id": a["display_id"], "status": "in_progress" }, { "id": b["display_id"], "status": "doing" }, { "id": "NOPE-1" }, "not an object"] }),
+    )
+    .await
+    .unwrap();
+    assert_eq!((out["updated"].as_i64(), out["failed"].as_i64()), (Some(1), Some(3)));
+    assert!(out["results"][1]["error"].as_str().unwrap().contains("doing"));
+    let got = call_tool(&tools, "task_get", json!({ "id": a["display_id"] })).await.unwrap();
+    assert_eq!((got["status"].as_str(), got["priority"].as_str()), (Some("in_progress"), Some("high")));
+    assert_eq!(call_tool(&tools, "task_get", json!({ "id": b["display_id"] })).await.unwrap()["status"], "to_do", "a refused item changed nothing");
+}
+
+#[tokio::test]
+async fn the_working_protocol_is_shown_once_per_name_and_never_to_a_lease_holder() {
+    let tools = tools_with(hq_core::config::LeaseMode::Off);
+    let first = call_tool(&tools, "task_list", json!({ "actor": "onboard-new-agent" })).await.unwrap();
+    assert!(first["hq_task_protocol"].as_str().unwrap().contains("task_claim"));
+    let second = call_tool(&tools, "task_list", json!({ "actor": "onboard-new-agent" })).await.unwrap();
+    assert!(second.get("hq_task_protocol").is_none(), "once per name");
+    let other = call_tool(&tools, "task_create", json!({ "title": "t", "created_by": "onboard-another" })).await.unwrap();
+    assert!(other.get("hq_task_protocol").is_some(), "a different name has not been shown it");
+
+    let task = call_tool(&tools, "task_create", json!({ "title": "t2", "actor": "onboard-holder" })).await.unwrap();
+    let claim = call_tool(&tools, "task_claim", json!({ "task_id": task["display_id"], "actor": "onboard-holder" })).await.unwrap();
+    let held = call_tool(&tools, "task_get", json!({ "id": task["display_id"], "lease": claim["lease"] })).await.unwrap();
+    assert!(held.get("hq_task_protocol").is_none(), "someone who holds a lease already knows");
+}
+
+#[test]
+fn every_task_tool_description_is_short_enough_to_read_and_names_no_retired_system() {
+    for tool in tools() {
+        let description = tool.description();
+        assert!(description.len() <= 800, "{} is {} bytes, too long to be read", tool.name(), description.len());
+        assert!(!description.to_lowercase().contains("clickup"), "{} still mentions a retired system", tool.name());
+        assert!(!description.contains('\u{2014}'), "{} uses an em dash", tool.name());
+    }
+}
+
+#[tokio::test]
+async fn a_release_with_only_a_summary_keeps_the_next_step_the_last_checkpoint_gave() {
+    let tools = tools_with(hq_core::config::LeaseMode::Off);
+    let task = call_tool(&tools, "task_create", json!({ "title": "t" })).await.unwrap();
+    let id = task["display_id"].as_str().unwrap().to_string();
+    let claim = call_tool(&tools, "task_claim", json!({ "task_id": id, "actor": "alpha" })).await.unwrap();
+    call_tool(
+        &tools,
+        "task_heartbeat",
+        json!({ "lease": claim["lease"], "checkpoint": { "summary": "half way", "next_step": "port orders", "open_questions": "which db?", "files": ["a.rs"] } }),
+    )
+    .await
+    .unwrap();
+    call_tool(&tools, "task_release", json!({ "lease": claim["lease"], "status": "to_do", "summary": "stopping, out of time" })).await.unwrap();
+    let got = call_tool(&tools, "task_get", json!({ "id": id })).await.unwrap();
+    assert_eq!(got["checkpoint"]["summary"], "stopping, out of time");
+    assert_eq!(got["checkpoint"]["next_step"], "port orders");
+    assert_eq!(got["checkpoint"]["open_questions"], "which db?");
+    assert_eq!(got["checkpoint"]["files"], json!(["a.rs"]));
+}
+
+#[tokio::test]
+async fn a_bulk_call_cannot_name_another_session_and_a_reused_prefix_is_an_error_not_a_parent() {
+    let tools = tools_with(hq_core::config::LeaseMode::Off);
+    let spoof = call_tool(
+        &tools,
+        "task_create_many",
+        json!({ "defaults": { "_hq_caller_session": "hs-victim" }, "tasks": [{ "title": "x", "_hq_caller_session": "hs-victim2" }] }),
+    )
+    .await
+    .unwrap();
+    let id = spoof["results"][0]["display_id"].as_str().unwrap().to_string();
+    let got = call_tool(&tools, "task_get", json!({ "id": id })).await.unwrap();
+    assert!(!got.to_string().contains("hs-victim"), "an item cannot choose the session: {got}");
+
+    let first = call_tool(&tools, "task_create_many", json!({ "external_prefix": "p", "tasks": [{ "key": "a", "title": "Original" }] })).await.unwrap();
+    assert_eq!(first["created"], 1);
+    let reused = call_tool(
+        &tools,
+        "task_create_many",
+        json!({ "external_prefix": "p", "tasks": [{ "key": "a", "title": "Different" }, { "title": "Child", "parent_id": "@a" }] }),
+    )
+    .await
+    .unwrap();
+    assert_eq!(reused["results"][0]["ok"], false, "{reused}");
+    assert_eq!(reused["results"][1]["ok"], false, "the child must not attach to someone else's task");
+
+    let dup = call_tool(&tools, "task_create_many", json!({ "tasks": [{ "key": "k", "title": "One" }, { "key": "k", "title": "Two" }] })).await.unwrap();
+    assert_eq!((dup["created"].as_i64(), dup["failed"].as_i64()), (Some(1), Some(1)));
+}
+
+#[tokio::test]
+async fn unblocking_mails_assignees_and_honors_route_tags() {
+    for route_tags in [true, false] {
+        let dir = tempfile::tempdir().unwrap();
+        for name in ["worker", "tagged"] {
+            std::fs::create_dir_all(dir.path().join(mailbox::MAILBOX_DIR).join(name)).unwrap();
+        }
+        let settings = hq_core::config::TasksConfig { route_tags, ..Default::default() };
+        let tools = tools_in(dir.path(), settings);
+        let blocker = call_tool(&tools, "task_create", json!({ "title": "Blocker" })).await.unwrap();
+        let waiting = call_tool(&tools, "task_create", json!({ "title": "Waiting", "assignees": ["worker"], "tags": ["tagged"], "depends_on": [blocker["display_id"]] })).await.unwrap();
+        let (w, t) = (mailbox_count(dir.path(), "worker"), mailbox_count(dir.path(), "tagged"));
+        call_tool(&tools, "task_update", json!({ "id": blocker["display_id"], "status": "complete" })).await.unwrap();
+        assert_eq!(mailbox_count(dir.path(), "worker"), w + 1, "the assignee hears it ({})", waiting["display_id"]);
+        assert_eq!(mailbox_count(dir.path(), "tagged"), t + usize::from(route_tags), "route_tags={route_tags}");
+    }
+}
+
+#[tokio::test]
+async fn task_next_ignores_a_task_that_has_not_started_and_cleans_the_name_it_is_given() {
+    let tools = tools_with(hq_core::config::LeaseMode::Off);
+    call_tool(&tools, "task_create", json!({ "title": "Future", "assignees": ["zed"], "start_date": "2999-01-01" })).await.unwrap();
+    assert!(call_tool(&tools, "task_next", json!({ "actor": "zed" })).await.unwrap()["task"].is_null());
+    call_tool(&tools, "task_create", json!({ "title": "Today", "assignees": ["zed"] })).await.unwrap();
+    let got = call_tool(&tools, "task_next", json!({ "actor": " zed\u{200b} " })).await.unwrap();
+    assert_eq!(got["task"]["title"], "Today");
 }

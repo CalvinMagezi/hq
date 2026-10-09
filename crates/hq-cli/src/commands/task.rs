@@ -2,8 +2,9 @@
 //!
 //! Every verb goes through the same gateway the tasks-scoped MCP key uses, so a terminal agent
 //! gets exactly that scope: task and space tools only, writes attributed to `mcp:tasks`, no
-//! routing tags, no notifications, no vault, no sessions. Output is the tool's JSON. The one
-//! exception is `time`, a text report read from this machine's database (`commands::tasks`).
+//! routing tags, no notifications, no vault, no sessions. Output is the tool's JSON. The
+//! exceptions run locally: `time`, a text report read from this machine's database
+//! (`commands::tasks`), and `install-skill` (`commands::agent_skill`).
 
 use std::sync::Arc;
 
@@ -74,6 +75,17 @@ pub enum TaskCmd {
         /// Window in days (default 30)
         days: Option<i64>,
     },
+    /// Install the hq-tasks skill into your coding agents (claude, codex, cursor or all;
+    /// default: the agents found on this machine)
+    InstallSkill {
+        agents: Vec<String>,
+        /// Show what would be written and write nothing
+        #[arg(long)]
+        dry_run: bool,
+        /// Replace a copy that is not HQ's
+        #[arg(long)]
+        force: bool,
+    },
 }
 
 /// The gateway call a verb makes: tool name and its arguments.
@@ -127,13 +139,19 @@ fn call_for(cmd: &TaskCmd, stdin: &mut dyn FnMut() -> Result<String>) -> Result<
         }
         TaskCmd::Comments { id } => ("task_comment_list", json!({ "task_id": id })),
         TaskCmd::Spaces => ("space_list", json!({})),
-        TaskCmd::Time { .. } => bail!("`time` is a local report, not a gateway call"),
+        TaskCmd::Time { .. } | TaskCmd::InstallSkill { .. } => {
+            bail!("`time` and `install-skill` run locally, not through the gateway")
+        }
     })
 }
 
 pub async fn run(config: &HqConfig, cmd: TaskCmd) -> Result<()> {
-    if let TaskCmd::Time { days } = cmd {
-        return super::tasks::run(config, "time", days).await;
+    match cmd {
+        TaskCmd::Time { days } => return super::tasks::run(config, "time", days).await,
+        TaskCmd::InstallSkill { agents, dry_run, force } => {
+            return super::agent_skill::run(&agents, dry_run, force, &mut std::io::stdout());
+        }
+        _ => {}
     }
     let mut read_stdin = || -> Result<String> {
         use std::io::Read;
