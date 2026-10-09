@@ -291,8 +291,8 @@ mod tests {
 
     #[test]
     fn the_startup_value_quotes_the_program_and_starts_quietly() {
-        let cmd = autostart_command(Path::new(r"C:\Users\Some One\AppData\Local\hq-lite\hq.exe"));
-        assert_eq!(cmd, "\"C:\\Users\\Some One\\AppData\\Local\\hq-lite\\hq.exe\" web --detach --no-open");
+        let cmd = autostart_command(Path::new(r"D:\apps\Some One\hq-lite\hq.exe"));
+        assert_eq!(cmd, "\"D:\\apps\\Some One\\hq-lite\\hq.exe\" web --detach --no-open");
         let args = reg_add_args(Path::new("hq.exe"));
         assert_eq!(&args[..4], ["add", RUN_KEY, "/v", RUN_VALUE]);
         assert!(args.contains(&"/f".to_string()));
@@ -300,10 +300,10 @@ mod tests {
 
     #[test]
     fn synced_folders_are_recognised() {
-        assert!(in_synced_folder(Path::new("C:/Users/a/OneDrive/Documents/vault")));
-        assert!(in_synced_folder(Path::new("C:/Users/a/OneDrive - Contoso/vault")));
-        assert!(in_synced_folder(Path::new("/home/a/Dropbox/vault")));
-        assert!(!in_synced_folder(Path::new("C:/Users/a/.hq/vault")));
+        assert!(in_synced_folder(Path::new("D:/data/OneDrive/Documents/vault")));
+        assert!(in_synced_folder(Path::new("D:/data/OneDrive - Example/vault")));
+        assert!(in_synced_folder(Path::new("D:/data/Dropbox/vault")));
+        assert!(!in_synced_folder(Path::new("D:/data/.hq/vault")));
     }
 
     #[test]
