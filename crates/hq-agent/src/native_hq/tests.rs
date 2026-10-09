@@ -467,3 +467,32 @@ async fn a_handoff_ask_turn_has_none_of_the_tools_the_handoff_key_is_kept_off() 
         );
     }
 }
+
+/// A vault-shaped prompt downgrades an implementor to the Weak tier, which has no
+/// spawn or steer tools. An orchestrator must keep them.
+#[tokio::test]
+async fn orchestrator_is_not_downgraded_to_the_weak_catalog() {
+    use crate::builder::{SessionBuilder, SessionRole};
+
+    let vault = tempfile::TempDir::new().unwrap();
+    let config = HqConfig {
+        openrouter_api_key: Some("test-key-no-network".to_string()),
+        vault_path: vault.path().to_path_buf(),
+        ..HqConfig::default()
+    };
+    let names = |role: SessionRole| {
+        let builder = SessionBuilder::from_config(&config)
+            .working_dir(vault.path().to_path_buf())
+            .session_config(SessionConfig {
+                model: "claude-sonnet-5-5".to_string(),
+                ..SessionConfig::default()
+            })
+            .role(role);
+        let builder = configure_native_hq_builder(builder, &config, "remember this note", String::new());
+        async move { builder.build().await.unwrap().tool_names().await }
+    };
+    let implementor = names(SessionRole::Implementor).await;
+    let orchestrator = names(SessionRole::Orchestrator).await;
+    assert!(!implementor.iter().any(|n| n == "harness_session_spawn"), "premise: Weak drops it");
+    assert!(orchestrator.iter().any(|n| n == "harness_session_spawn"));
+}

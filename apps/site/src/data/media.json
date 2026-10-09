@@ -54,5 +54,15 @@
     "caption": "From nothing to a working install: the install script, hq install and hq doctor (about 25 seconds, waiting time cut).",
     "width": 1280,
     "height": 720
+  },
+  {
+    "id": "hetzner-deploy",
+    "kind": "gif",
+    "src": "/media/hetzner-deploy-wizard.gif",
+    "poster": "/media/hetzner-deploy-wizard-poster.jpg",
+    "alt": "A recording of the Hetzner deploy form: paste a project token, fill in a name, location, size, SSH key and your IP, create the server, then read the next steps and close public SSH.",
+    "caption": "The deploy form from token to a running server and closing public SSH, about 17 seconds. Sample data: a placeholder address and no real account.",
+    "width": 960,
+    "height": 525
   }
 ]

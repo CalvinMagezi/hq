@@ -3,6 +3,7 @@
 //! accepts typed input. See docs/provenance/herdr.md for how work adapted from
 //! herdr is recorded.
 
+mod bypass;
 mod client;
 mod detect;
 mod egress;
@@ -22,7 +23,9 @@ mod sandbox;
 mod server;
 mod state;
 mod token;
+mod workspace;
 
+pub use bypass::{find_bypass, strip_bypass};
 pub use client::{Client, ClientError};
 pub use detect::{AgentState, Detection, Detector, ENGINE_VERSION, Input as DetectInput};
 pub use egress::{Decision, Egress, Rule, Verdict, decide as decide_egress, is_private};
@@ -42,3 +45,4 @@ pub use proto::{MAX_LINE_BYTES, PROTOCOL_VERSION, Request, Response};
 pub use sandbox::{Allow, Mode as SandboxMode, SandboxSpec};
 pub use server::{Limits, Server, StopHandle, agent_socket_path, socket_path};
 pub use token::{load_or_create as load_or_create_token, token_path};
+pub use workspace::{check_folder_name, describe as describe_workspace, ensure_workspace, list_dirs, make_dir, resolve_inside, workspace_root};
