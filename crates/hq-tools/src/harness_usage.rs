@@ -51,7 +51,7 @@ pub fn parse_claude_line(line: &str) -> Option<HarnessUsageEvent> {
     let fresh = u32_at(&v, "/message/usage/input_tokens");
     let cache_read = u32_at(&v, "/message/usage/cache_read_input_tokens");
     Some(HarnessUsageEvent {
-        harness: "claude_code",
+        harness: "claude-code",
         source_id: id,
         session_ref: str_at(&v, "/sessionId")?.to_string(),
         cwd: str_at(&v, "/cwd").map(str::to_string),
@@ -270,7 +270,7 @@ pub fn read_copilot(conn: &Connection, after_id: i64) -> rusqlite::Result<Vec<Ha
         let (input, cache_read, cache_write) = (n(5)?, n(7)?, n(8)?);
         let created: String = r.get(3)?;
         Ok(HarnessUsageEvent {
-            harness: "copilot_cli",
+            harness: "github-copilot",
             source_id: r.get::<_, i64>(0)?.to_string(),
             session_ref: r.get(1)?,
             cwd: r.get(2)?,

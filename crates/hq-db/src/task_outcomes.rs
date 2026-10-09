@@ -30,6 +30,9 @@ pub struct TaskOutcome {
     pub origin: String,
     pub success: bool,
     pub error_class: Option<String>,
+    /// Stable id from the source of a call HQ did not make itself (a coding agent's own record),
+    /// so recording the same call twice is a no-op.
+    pub external_id: Option<String>,
     pub quality_score: Option<f64>,
     pub tool_calls_issued: i64,
     pub tool_calls_succeeded: i64,
@@ -63,6 +66,7 @@ impl TaskOutcome {
             origin: "unknown".into(),
             success: true,
             error_class: None,
+            external_id: None,
             quality_score: None,
             tool_calls_issued: 0,
             tool_calls_succeeded: 0,
@@ -80,16 +84,27 @@ fn current_epoch() -> i64 {
 
 /// Insert a task_outcomes row. Returns its id.
 pub fn insert(conn: &Connection, outcome: &TaskOutcome) -> Result<i64> {
-    conn.execute(
-        "INSERT INTO task_outcomes (
+    execute_insert(conn, outcome)?;
+    Ok(conn.last_insert_rowid())
+}
+
+/// Insert a row that carries an `external_id`, doing nothing if that id is already recorded.
+/// Returns whether a row was written.
+pub fn insert_if_new(conn: &Connection, outcome: &TaskOutcome) -> Result<bool> {
+    Ok(execute_insert(conn, outcome)? > 0)
+}
+
+fn execute_insert(conn: &Connection, outcome: &TaskOutcome) -> Result<usize> {
+    Ok(conn.execute(
+        "INSERT OR IGNORE INTO task_outcomes (
             session_id, turn_idx, model, provider, task_hint,
             latency_ms, input_tokens, output_tokens, cost_usd,
             success, error_class, quality_score,
             tool_calls_issued, tool_calls_succeeded, recorded_at,
             cache_read_tokens, cache_write_tokens, reasoning_tokens, cost_source, origin,
-            provider_cost_usd
+            provider_cost_usd, external_id
         ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15,
-                  ?16, ?17, ?18, ?19, ?20, ?21)",
+                  ?16, ?17, ?18, ?19, ?20, ?21, ?22)",
         params![
             outcome.session_id,
             outcome.turn_idx,
@@ -112,9 +127,9 @@ pub fn insert(conn: &Connection, outcome: &TaskOutcome) -> Result<i64> {
             outcome.cost_source,
             outcome.origin,
             outcome.provider_cost_usd,
+            outcome.external_id,
         ],
-    )?;
-    Ok(conn.last_insert_rowid())
+    )?)
 }
 
 /// Summary for `hq models leaderboard`: one row per (model, task_hint) with
@@ -249,6 +264,7 @@ mod tests {
             origin: "chat".into(),
             success: true,
             error_class: None,
+            external_id: None,
             quality_score: Some(0.7),
             tool_calls_issued: 2,
             tool_calls_succeeded: 2,
@@ -272,6 +288,20 @@ mod tests {
         insert(&conn, &cancelled).unwrap();
         insert(&conn, &TaskOutcome::now("s", 1, "m", "p", "coding")).unwrap();
         assert_eq!(recent_seed_rows(&conn, 3600).unwrap().len(), 1);
+    }
+
+    #[test]
+    fn a_call_with_an_external_id_is_recorded_once() {
+        let conn = setup();
+        let mut o = TaskOutcome::now("s", 0, "m", "claude-code", "harness");
+        o.external_id = Some("claude-code:msg_1".into());
+        assert!(insert_if_new(&conn, &o).unwrap());
+        assert!(!insert_if_new(&conn, &o).unwrap());
+        o.external_id = Some("claude-code:msg_2".into());
+        assert!(insert_if_new(&conn, &o).unwrap());
+        // Rows without an id never collide with each other.
+        let plain = TaskOutcome::now("s", 1, "m", "p", "chat");
+        assert!(insert_if_new(&conn, &plain).unwrap() && insert_if_new(&conn, &plain).unwrap());
     }
 
     #[test]

@@ -166,7 +166,9 @@ pub fn period_bounds(period: BudgetPeriod, now: i64) -> (i64, i64) {
 
 fn scope_clause(scope: &BudgetScope) -> (&'static str, Option<&str>) {
     match scope {
-        BudgetScope::Global => ("", None),
+        // Coding agents' own usage is list-price equivalent and often a flat subscription, so it never
+        // counts against a budget that covers everything; `origin:harness` budgets it on purpose.
+        BudgetScope::Global => ("AND origin != 'harness'", None),
         BudgetScope::Provider(v) => ("AND provider = ?3", Some(v)),
         // The provider may report a dated snapshot of the model that was asked for.
         BudgetScope::Model(v) => ("AND (model = ?3 OR model LIKE ?3 || '-%')", Some(v)),
