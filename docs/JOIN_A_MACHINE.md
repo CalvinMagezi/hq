@@ -35,7 +35,10 @@ name as the first argument to choose the host name (`hq host join dev-wsl`).
 It also creates the machine's HQ folder, `Documents/HQ` under the home directory (on every
 operating system, including a headless Ubuntu server that has no `Documents` yet). Agents started
 from the Workbench page in the web app run there, or in a folder inside it. The host creates the
-folder again each time it starts, so deleting it is harmless.
+folder again each time it starts, so deleting it is harmless. On macOS the system may ask whether
+`hq` can use your Documents folder the first time; choose Allow (or turn it on later under Privacy and
+Security, Files and Folders). Until then the Workbench page shows that computer as unable to start
+agents here and says why.
 
 ## 2. On the HQ
 
