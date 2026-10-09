@@ -288,6 +288,10 @@ const MIGRATIONS: &[(&str, &str)] = &[
         "078_ledger_cost_attribution",
         include_str!("../sql/078_ledger_cost_attribution.sql"),
     ),
+    (
+        "079_harness_usage",
+        include_str!("../sql/079_harness_usage.sql"),
+    ),
 ];
 
 const MEMORY_SCHEMA_MIGRATION: &str = "058_memory_schema";
