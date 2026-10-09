@@ -114,8 +114,13 @@ How the gate decides, per attempt against one provider:
   provider failure and writes no ledger row.
 - A model with no known price cannot be counted, so a blocking budget refuses it unless it is listed
   in `allow_unpriced_models`.
-- Concurrent calls can overshoot a limit by what is in flight; limits are re-read every 30 s and spend
-  every 5 s.
+- Limits are re-read every 30 s and spend every 5 s, and ledger rows are written asynchronously, so a
+  burst of parallel calls can overshoot a limit by the last few seconds of spend plus what is in flight.
+- A model-scoped budget matches the model id the provider reports, or a dated snapshot of it
+  (`id-2026...`); a provider that answers under a different slug is not counted against it.
+- A budget that is malformed (non-positive limit, repeated name, downgrade with no target) is left out
+  of enforcement and logged; an unreadable `config.yaml` keeps the last good budgets in force.
+- A call that was downgraded is asked about again on its new model.
 
 `GET /api/budgets` shows each budget against the ledger; `PUT /api/budgets` replaces them after
 validation. `hq usage budgets` prints the same view.

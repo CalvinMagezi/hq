@@ -113,8 +113,8 @@ fn default_soft_pct() -> Vec<u8> {
 pub struct BudgetsConfig {
     #[serde(default)]
     pub budgets: Vec<Budget>,
-    /// Ceiling in USD for one background, watch or sub-agent run that sets no cap of its own, so a
-    /// runaway loop cannot drain a month. Unset means no per-run ceiling.
+    /// Ceiling in USD for one background or watch run, and so for the sub-agents it starts, lowering
+    /// any higher cap the run has, so a runaway loop cannot drain a month. Unset means no ceiling.
     #[serde(default)]
     pub background_run_usd: Option<f64>,
     /// Models allowed to run under a blocking budget although HQ has no price for them.
@@ -123,6 +123,24 @@ pub struct BudgetsConfig {
 }
 
 impl BudgetsConfig {
+    /// The budgets that are safe to enforce: a malformed one (non-positive or non-finite limit,
+    /// empty or repeated name, downgrade without a target) is left out rather than enforced wrongly.
+    pub fn enforceable(&self) -> Vec<&Budget> {
+        let mut seen = HashSet::new();
+        self.budgets
+            .iter()
+            .filter(|b| {
+                let has_model = b.downgrade_model.as_deref().is_some_and(|m| !m.trim().is_empty());
+                !b.name.trim().is_empty()
+                    && seen.insert(b.name.clone())
+                    && b.limit_usd.is_finite()
+                    && b.limit_usd > 0.0
+                    && b.soft_pct.iter().all(|p| (1..=MAX_PCT).contains(p))
+                    && (b.action != BudgetAction::Downgrade || has_model)
+            })
+            .collect()
+    }
+
     /// Every problem with the configuration, so the owner sees all of them at once.
     pub fn problems(&self) -> Vec<String> {
         let mut out = Vec::new();
@@ -186,6 +204,17 @@ mod tests {
         assert_eq!(c.budgets[0].action, BudgetAction::Block);
         assert_eq!(c.budgets[0].soft_pct, vec![80]);
         assert!(c.problems().is_empty());
+    }
+
+    #[test]
+    fn a_malformed_budget_is_left_out_of_enforcement() {
+        let c = parse(
+            "budgets:\n  - {name: bad, scope: global, period: day, limit_usd: 0}\n  \
+             - {name: ok, scope: global, period: day, limit_usd: 5}\n  \
+             - {name: ok, scope: global, period: day, limit_usd: 9}\n",
+        );
+        let names: Vec<&str> = c.enforceable().iter().map(|b| b.name.as_str()).collect();
+        assert_eq!(names, ["ok"]);
     }
 
     #[test]

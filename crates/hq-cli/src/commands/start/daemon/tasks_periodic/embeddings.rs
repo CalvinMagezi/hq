@@ -3,7 +3,7 @@ use hq_core::config::HqConfig;
 use hq_core::frontmatter_utils::{split_frontmatter, strip_frontmatter};
 use hq_core::types::{ChatMessage, MessageRole};
 use hq_db::Database;
-use hq_llm::{ChatRequest, LlmProvider, OpenRouterProvider};
+use hq_llm::{ChatRequest, OpenRouterProvider};
 use std::path::{Path, PathBuf};
 use tracing::{debug, info, warn};
 
@@ -67,7 +67,12 @@ pub async fn run_inbox_triage(vault_path: &Path, config: &HqConfig) -> Result<()
         return Ok(());
     }
 
-    let provider = OpenRouterProvider::new(api_key);
+    let provider = hq_llm::InstrumentedProvider::wrap(
+        std::sync::Arc::new(OpenRouterProvider::new(api_key)),
+        "openrouter",
+        hq_llm::cost::ProviderClass::Metered,
+        hq_llm::Instruments::global(),
+    );
     let mut triaged = 0u32;
 
     for path in &untagged {

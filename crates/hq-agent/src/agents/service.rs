@@ -604,7 +604,10 @@ impl AgentService {
 
         // Budget: explicit per-child cap, else a fraction of the parent's.
         if let Some(cap) = req.max_budget_usd {
-            child_config.max_budget_usd = Some(cap);
+            // A model-chosen cap may lower the parent's but never raise it, so the owner's
+            // per-run ceiling on a background parent holds for every child.
+            child_config.max_budget_usd =
+                Some(child_config.max_budget_usd.map_or(cap, |parent| cap.min(parent)));
         } else if let Some(parent_cap) = child_config.max_budget_usd {
             child_config.max_budget_usd = Some(parent_cap * budget_fraction(role));
         }

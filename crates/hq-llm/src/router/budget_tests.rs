@@ -199,3 +199,35 @@ async fn with_no_gate_nothing_changes() {
 
     assert_eq!(router.chat(&request()).await.unwrap().message.content, MODEL);
 }
+
+/// Blocks the original model, downgrades it, then blocks the cheaper one too.
+struct DowngradeIntoABlock;
+
+#[async_trait]
+impl BudgetGate for DowngradeIntoABlock {
+    async fn admit(&self, req: &GateRequest<'_>) -> Admission {
+        if req.model == "cheap/model" {
+            return Admission::Deny(BudgetBlocked {
+                budget: "cheap".into(),
+                spent_usd: 0.0,
+                limit_usd: 0.0,
+                message: "the cheaper model is over a budget too".into(),
+            });
+        }
+        Admission::Downgrade {
+            model: "cheap/model".into(),
+        }
+    }
+}
+
+#[tokio::test]
+async fn a_downgraded_call_is_judged_again_on_the_model_that_will_run() {
+    let mut router = LlmRouter::new();
+    router.add_provider("solo", Arc::new(Answers));
+    router.add_route("*", "solo", MODEL, CostTier::Budget);
+    router.set_budget_gate(Arc::new(DowngradeIntoABlock));
+
+    let err = router.chat(&request()).await.unwrap_err();
+
+    assert!(err.to_string().contains("cheaper model"), "{err}");
+}

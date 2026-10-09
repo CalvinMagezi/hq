@@ -19,10 +19,13 @@ const CONFIG_TTL: Duration = Duration::from_secs(30);
 const SPEND_TTL: Duration = Duration::from_secs(5);
 const FULL_PCT: u8 = 100;
 
-type ConfigLoader = Arc<dyn Fn() -> BudgetsConfig + Send + Sync>;
+/// `None` when the configuration could not be read, so the last good one stays in force.
+type ConfigLoader = Arc<dyn Fn() -> Option<BudgetsConfig> + Send + Sync>;
 
 struct Cache {
     config: Option<(Instant, BudgetsConfig)>,
+    /// The last configuration that was read successfully, kept when a later read fails.
+    last_good: Option<BudgetsConfig>,
     status: HashMap<String, (Instant, BudgetStatus)>,
     alerted: HashSet<(String, i64, u8)>,
 }
@@ -40,46 +43,61 @@ impl LedgerBudgetGate {
             load,
             cache: Mutex::new(Cache {
                 config: None,
+                last_good: None,
                 status: HashMap::new(),
                 alerted: HashSet::new(),
             }),
         })
     }
 
+    fn cache(&self) -> std::sync::MutexGuard<'_, Cache> {
+        // A panic elsewhere must not turn every later LLM call into a panic.
+        self.cache.lock().unwrap_or_else(std::sync::PoisonError::into_inner)
+    }
+
     fn budgets(&self) -> BudgetsConfig {
-        let mut cache = self.cache.lock().unwrap();
-        if let Some((at, cfg)) = &cache.config
+        if let Some((at, cfg)) = &self.cache().config
             && at.elapsed() < CONFIG_TTL
         {
             return cfg.clone();
         }
-        let cfg = (self.load)();
-        for problem in cfg.problems() {
-            warn!(%problem, "budget configuration problem; the budget is not enforced as written");
-        }
+        // Read outside the lock: it is file I/O.
+        let loaded = (self.load)();
+        let mut cache = self.cache();
+        let cfg = match loaded {
+            Some(cfg) => {
+                for problem in cfg.problems() {
+                    warn!(%problem, "budget configuration problem; that budget is not enforced");
+                }
+                cache.last_good = Some(cfg.clone());
+                cfg
+            }
+            None => cache.last_good.clone().unwrap_or_default(),
+        };
         cache.config = Some((Instant::now(), cfg.clone()));
         cfg
     }
 
-    fn status(&self, budget: &Budget, now: i64) -> Option<BudgetStatus> {
-        let key = format!("{}|{}", budget.name, budget.scope);
-        if let Some((at, s)) = self.cache.lock().unwrap().status.get(&key)
+    async fn status(&self, budget: &Budget, now: i64) -> Option<BudgetStatus> {
+        let key = format!(
+            "{}|{}|{:?}|{}",
+            budget.name, budget.scope, budget.period, budget.limit_usd
+        );
+        if let Some((at, s)) = self.cache().status.get(&key)
             && at.elapsed() < SPEND_TTL
             && s.period_start <= now
             && now < s.resets_at
         {
             return Some(s.clone());
         }
-        let status = self
-            .db
-            .with_conn(|conn| budget_status(conn, budget, now))
+        let (db, b) = (self.db.clone(), budget.clone());
+        let status = tokio::task::spawn_blocking(move || db.with_conn(|c| budget_status(c, &b, now)))
+            .await
+            .map_err(|e| warn!(error = %e, "budget spend read was cancelled"))
+            .ok()?
             .map_err(|e| warn!(error = %e, budget = %budget.name, "budget spend could not be read"))
             .ok()?;
-        self.cache
-            .lock()
-            .unwrap()
-            .status
-            .insert(key, (Instant::now(), status.clone()));
+        self.cache().status.insert(key, (Instant::now(), status.clone()));
         Some(status)
     }
 
@@ -106,9 +124,12 @@ impl LedgerBudgetGate {
                 ),
             )
             .with_dedup_key(format!("budget:{}:{}:{t}", budget.name, status.period_start));
-            if let Err(e) = hq_db::value_items::emit(&self.db, &item) {
-                warn!(error = %e, "budget alert could not be recorded");
-            }
+            let db = self.db.clone();
+            tokio::task::spawn_blocking(move || {
+                if let Err(e) = hq_db::value_items::emit(&db, &item) {
+                    warn!(error = %e, "budget alert could not be recorded");
+                }
+            });
         }
     }
 }
@@ -145,8 +166,8 @@ impl BudgetGate for LedgerBudgetGate {
         let cfg = self.budgets();
         let now = chrono::Utc::now().timestamp();
         let mut verdict = Admission::Allow;
-        for budget in cfg.budgets.iter().filter(|b| covers(&b.scope, req)) {
-            let Some(status) = self.status(budget, now) else {
+        for budget in cfg.enforceable().into_iter().filter(|b| covers(&b.scope, req)) {
+            let Some(status) = self.status(budget, now).await else {
                 continue;
             };
             self.alert(budget, &status);
@@ -216,7 +237,7 @@ mod tests {
 
     fn gate(db: Arc<Database>, yaml: &str) -> Arc<LedgerBudgetGate> {
         let cfg: BudgetsConfig = serde_yaml::from_str(yaml).unwrap();
-        LedgerBudgetGate::new(db, Arc::new(move || cfg.clone()))
+        LedgerBudgetGate::new(db, Arc::new(move || Some(cfg.clone())))
     }
 
     fn req<'a>(provider: &'a str, class: ProviderClass, est: Option<f64>) -> GateRequest<'a> {
@@ -290,9 +311,30 @@ mod tests {
         for _ in 0..3 {
             g.admit(&req("haiku", ProviderClass::Metered, Some(0.01))).await;
         }
+        // The alert is written on the blocking pool; give it a moment to land.
+        tokio::time::sleep(Duration::from_millis(150)).await;
         let items = hq_db::value_items::list_by_state(&db, hq_core::types::ValueState::Pending).unwrap();
         let titles: Vec<&str> = items.iter().map(|i| i.title.as_str()).collect();
         assert_eq!(titles.len(), 1, "{titles:?}");
         assert!(titles[0].contains("80%"));
+    }
+
+    #[tokio::test]
+    async fn an_unreadable_config_keeps_the_last_good_budgets_in_force() {
+        let reads = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let counter = reads.clone();
+        let cfg: BudgetsConfig = serde_yaml::from_str(MONTH_BLOCK).unwrap();
+        let g = LedgerBudgetGate::new(
+            db_with_spend("chat", 50.0),
+            Arc::new(move || {
+                // The first read works; every later one fails.
+                (counter.fetch_add(1, std::sync::atomic::Ordering::SeqCst) == 0).then(|| cfg.clone())
+            }),
+        );
+        assert!(matches!(g.admit(&req("haiku", ProviderClass::Metered, Some(0.01))).await, Admission::Deny(_)));
+        // Force the next call to reload.
+        g.cache().config = None;
+        assert!(matches!(g.admit(&req("haiku", ProviderClass::Metered, Some(0.01))).await, Admission::Deny(_)));
+        assert_eq!(reads.load(std::sync::atomic::Ordering::SeqCst), 2);
     }
 }

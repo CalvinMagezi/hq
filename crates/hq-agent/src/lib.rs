@@ -36,9 +36,7 @@ pub fn install_ledger(db: std::sync::Arc<hq_db::Database>) {
     instruments.set_gate(budget_gate::LedgerBudgetGate::new(
         db,
         std::sync::Arc::new(|| {
-            hq_core::config::HqConfig::load()
-                .map(|c| c.budgets)
-                .unwrap_or_default()
+            hq_core::config::HqConfig::load().ok().map(|c| c.budgets)
         }),
     ));
 }

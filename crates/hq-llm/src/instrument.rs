@@ -126,6 +126,11 @@ pub(crate) fn usage_of(resp: &ChatResponse) -> Usage {
     }
 }
 
+fn refuse(blocked: crate::budget::BudgetBlocked) -> anyhow::Error {
+    note_blocked(&blocked);
+    blocked.into()
+}
+
 /// A provider that asks the budget gate before each attempt and records each attempt's outcome.
 pub struct InstrumentedProvider {
     inner: Arc<dyn LlmProvider>,
@@ -153,29 +158,36 @@ impl InstrumentedProvider {
         })
     }
 
-    /// The request to send, possibly on a cheaper model, or the refusal.
+    /// Ask the gate about `request`, once.
+    async fn ask(&self, gate: &SharedGate, request: &ChatRequest) -> Admission {
+        gate.admit(&GateRequest {
+            provider: &self.name,
+            class: self.class,
+            model: &request.model,
+            origin: current_context().origin,
+            estimate_usd: estimate_cost(self.class, request),
+        })
+        .await
+    }
+
+    /// The request to send, possibly on a cheaper model, or the refusal. A downgraded call is
+    /// asked about again on its new model, so a blocking budget still judges what will really run.
     async fn admit(&self, request: &ChatRequest) -> Result<Option<ChatRequest>> {
         let Some(gate) = self.instruments.gate() else {
             return Ok(None);
         };
-        let verdict = gate
-            .admit(&GateRequest {
-                provider: &self.name,
-                class: self.class,
-                model: &request.model,
-                origin: current_context().origin,
-                estimate_usd: estimate_cost(self.class, request),
-            })
-            .await;
-        match verdict {
+        match self.ask(&gate, request).await {
             Admission::Allow => Ok(None),
-            Admission::Downgrade { model } => Ok(Some(ChatRequest {
-                model,
-                ..request.clone()
-            })),
-            Admission::Deny(blocked) => {
-                note_blocked(&blocked);
-                Err(blocked.into())
+            Admission::Deny(blocked) => Err(refuse(blocked)),
+            Admission::Downgrade { model } => {
+                let downgraded = ChatRequest {
+                    model,
+                    ..request.clone()
+                };
+                match self.ask(&gate, &downgraded).await {
+                    Admission::Deny(blocked) => Err(refuse(blocked)),
+                    _ => Ok(Some(downgraded)),
+                }
             }
         }
     }

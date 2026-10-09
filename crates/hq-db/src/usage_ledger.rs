@@ -170,7 +170,8 @@ pub fn scope_spend(conn: &Connection, scope: &BudgetScope, since: i64, until: i6
     let (clause, value): (&str, Option<&str>) = match scope {
         BudgetScope::Global => ("", None),
         BudgetScope::Provider(v) => ("AND provider = ?3", Some(v)),
-        BudgetScope::Model(v) => ("AND model = ?3", Some(v)),
+        // The provider may report a dated snapshot of the model that was asked for.
+        BudgetScope::Model(v) => ("AND (model = ?3 OR model LIKE ?3 || '-%')", Some(v)),
         BudgetScope::Origin(v) => ("AND origin = ?3", Some(v)),
     };
     let sql = format!(

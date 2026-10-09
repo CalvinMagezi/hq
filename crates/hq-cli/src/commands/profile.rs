@@ -3,7 +3,7 @@ use clap::{Args, Subcommand};
 use hq_core::config::HqConfig;
 use hq_core::types::{ChatMessage, MessageRole};
 use hq_llm::openrouter::OpenRouterProvider;
-use hq_llm::provider::{ChatRequest, LlmProvider};
+use hq_llm::provider::ChatRequest;
 use std::io::{self, Write};
 
 #[derive(Args, Debug)]
@@ -41,7 +41,12 @@ async fn generate(config: &HqConfig, domain: &str, samples_count: usize) -> Resu
         .as_ref()
         .context("OpenRouter API key not set. Run `hq setup` or set HQ_OPENROUTER_API_KEY")?;
 
-    let provider = OpenRouterProvider::new(api_key);
+    let provider = hq_llm::InstrumentedProvider::wrap(
+        std::sync::Arc::new(OpenRouterProvider::new(api_key)),
+        "openrouter",
+        hq_llm::cost::ProviderClass::Metered,
+        hq_llm::Instruments::global(),
+    );
     let model = config.default_model.clone();
 
     println!("Generating quality profile for domain: {}", domain);
