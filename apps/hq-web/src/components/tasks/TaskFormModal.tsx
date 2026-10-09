@@ -113,10 +113,9 @@ export function TaskFormModal({ open, onClose, spaces, folders, initiatives, tas
   }
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4">
+    <div className="fixed inset-0 z-50 flex items-center justify-center hq-scrim p-4">
       <div
-        className="w-full max-w-lg rounded-2xl border shadow-2xl overflow-hidden"
-        style={{ background: 'var(--bg-card, #111418)', borderColor: 'rgba(255,255,255,0.1)' }}
+        className="w-full max-w-lg rounded-2xl hq-modal overflow-hidden"
       >
         <div
           className="flex items-center justify-between px-5 py-4 border-b"

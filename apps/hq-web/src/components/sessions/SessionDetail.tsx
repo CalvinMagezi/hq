@@ -31,7 +31,7 @@ export function SessionDetail({ session: s, onBack, onChanged }: Props) {
 
   const extras = (
     <>
-      {s.goal && <p className="text-[11px] font-mono text-neutral-400 line-clamp-3">Goal: {s.goal}</p>}
+      {s.goal && <p className="text-[11px] text-neutral-400 line-clamp-3">Goal: {s.goal}</p>}
       <Advanced session={s} />
     </>
   )
@@ -49,7 +49,7 @@ export function SessionDetail({ session: s, onBack, onChanged }: Props) {
           </button>
           <RenameTitle session={s} action={action} />
         </div>
-        {folder && <p className="text-[11px] font-mono text-neutral-500 truncate">Folder: {folder}</p>}
+        {folder && <p className="text-[11px] text-neutral-500 truncate">Folder: {folder}</p>}
         <SessionBadges session={s} />
         <SessionTaskLink session={s} />
         <div className="flex flex-wrap items-start gap-1.5">
@@ -60,7 +60,7 @@ export function SessionDetail({ session: s, onBack, onChanged }: Props) {
         <ActionError error={action.error} />
         {blocked ? (
           <details>
-            <summary className="flex items-center min-h-11 cursor-pointer text-[11px] font-mono text-neutral-500 hover:text-neutral-300 select-none">Details</summary>
+            <summary className="flex items-center min-h-11 cursor-pointer text-[11px] text-neutral-500 hover:text-neutral-300 select-none">Details</summary>
             {extras}
           </details>
         ) : (
@@ -85,7 +85,7 @@ function Footer({ session: s, screenText, onSent, onChanged }: FooterProps) {
   if (s.status !== 'running') {
     return (
       <section aria-label="Resume" className="shrink-0 border-t border-white/10 px-3 py-3 space-y-2">
-        <p className="text-xs font-mono text-neutral-300">This agent has stopped. Resume it to pick up where it left off.</p>
+        <p className="text-xs text-neutral-300">This agent has stopped. Resume it to pick up where it left off.</p>
         <ResumeButton session={s} action={resume} />
         <ActionError error={resume.error} />
       </section>
@@ -93,7 +93,7 @@ function Footer({ session: s, screenText, onSent, onChanged }: FooterProps) {
   }
   if (!canSend(s)) {
     return (
-      <p className="shrink-0 border-t border-white/10 px-3 py-3 text-xs font-mono" style={{ color: 'var(--accent-amber)' }}>
+      <p className="shrink-0 border-t border-white/10 px-3 py-3 text-xs " style={{ color: 'var(--accent-amber)' }}>
         HQ cannot reach this agent right now. It will show up again when the computer is back.
       </p>
     )
@@ -106,10 +106,10 @@ function Footer({ session: s, screenText, onSent, onChanged }: FooterProps) {
 function Advanced({ session: s }: { session: HarnessSession }) {
   return (
     <details>
-      <summary className="flex items-center min-h-11 cursor-pointer text-[11px] font-mono text-neutral-500 hover:text-neutral-300 select-none">Advanced</summary>
+      <summary className="flex items-center min-h-11 cursor-pointer text-[11px] text-neutral-500 hover:text-neutral-300 select-none">Advanced</summary>
       <div className="space-y-1 pb-1">
-        <p className="text-[11px] font-mono text-neutral-500">Check this computer from a terminal</p>
-        <code className="block px-1.5 py-1 rounded bg-black/40 text-[11px] font-mono text-neutral-300 break-all select-all">{attachCommand(s)}</code>
+        <p className="text-[11px] text-neutral-500">Check this computer from a terminal</p>
+        <code className="block px-1.5 py-1 rounded bg-black/40 text-[11px] text-neutral-300 break-all select-all">{attachCommand(s)}</code>
       </div>
     </details>
   )

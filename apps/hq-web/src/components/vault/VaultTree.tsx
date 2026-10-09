@@ -53,7 +53,7 @@ export function TreeNode({
             <div>
                 <button
                     onClick={() => onToggle(node.path, !isOpen)}
-                    className="w-full text-left py-1.5 px-2 text-xs font-mono font-medium flex items-center gap-1.5 rounded-lg transition-all mx-0.5 group"
+                    className="w-full text-left py-1.5 px-2 text-xs font-medium flex items-center gap-1.5 rounded-lg transition-all mx-0.5 group"
                     style={{
                         paddingLeft: `${8 + depth * 14}px`,
                         color: 'var(--text-dim)',
@@ -78,7 +78,7 @@ export function TreeNode({
                     </span>
                     <span className="truncate">{node.name}</span>
                     {node.children && node.children.length > 0 && (
-                        <span className="text-[9px] px-1 py-0.2 rounded bg-white/[0.04] text-text-dim/60 ml-auto mr-1 font-mono">
+                        <span className="text-[9px] px-1 py-0.2 rounded bg-white/[0.04] text-text-dim/60 ml-auto mr-1 ">
                             {node.children.length}
                         </span>
                     )}
@@ -116,7 +116,7 @@ export function TreeNode({
             to="/vault/$"
             params={{ _splat: node.path }}
             onClick={onFileClick}
-            className="w-full text-left py-1.5 px-2 text-xs font-mono flex items-center gap-1.5 rounded-lg transition-all mx-0.5 group tree-node-transition"
+            className="w-full text-left py-1.5 px-2 text-xs flex items-center gap-1.5 rounded-lg transition-all mx-0.5 group tree-node-transition"
             style={{
                 paddingLeft: `${14 + depth * 14}px`,
                 background: isSelected ? 'rgba(0, 173, 238, 0.08)' : 'transparent',

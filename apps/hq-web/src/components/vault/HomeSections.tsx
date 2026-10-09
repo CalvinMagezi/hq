@@ -23,13 +23,13 @@ function TaskRow({ task }: { task: TaskItem }) {
       search={{ task: task.id }}
       className="glass-card rounded-xl px-3.5 py-3 flex items-center gap-3 min-w-0"
     >
-      <span className="text-[10px] font-mono font-bold shrink-0" style={{ color: 'var(--accent-green)' }}>
+      <span className="text-[11px] font-bold shrink-0" style={{ color: 'var(--accent-green)' }}>
         {task.display_id}
       </span>
-      <span className="text-[12px] font-mono truncate flex-1 min-w-0" style={{ color: 'var(--text-primary)' }}>
+      <span className="text-[12px] truncate flex-1 min-w-0" style={{ color: 'var(--text-primary)' }}>
         {task.title}
       </span>
-      <span className="text-[9px] font-mono shrink-0" style={{ color: 'var(--text-dim)' }}>
+      <span className="text-[9px] shrink-0" style={{ color: 'var(--text-dim)' }}>
         {STATUS_LABELS[task.status]} · {relTime(task.updated_at)}
       </span>
     </Link>

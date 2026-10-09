@@ -20,8 +20,8 @@ export const Route = createFileRoute('/settings')({
 
 function Section({ title, children }: { title: string; children: ReactNode }) {
   return (
-    <section className="glass-card rounded-2xl p-4 border border-white/10">
-      <h2 className="text-[11px] font-mono uppercase tracking-wider text-neutral-400 mb-3">{title}</h2>
+    <section className="hq-card rounded-2xl p-5">
+      <h2 className="text-[11px] font-semibold uppercase tracking-[0.08em] text-neutral-400 mb-3">{title}</h2>
       <dl className="flex flex-col gap-2">{children}</dl>
     </section>
   )
@@ -31,7 +31,7 @@ function Row({ label, children }: { label: string; children: ReactNode }) {
   return (
     <div className="flex flex-col sm:flex-row sm:items-baseline sm:justify-between gap-0.5 sm:gap-4 text-xs">
       <dt className="text-neutral-400 flex-shrink-0">{label}</dt>
-      <dd className="font-mono text-neutral-100 sm:text-right break-all min-w-0">{children}</dd>
+      <dd className="text-neutral-100 sm:text-right break-all min-w-0">{children}</dd>
     </div>
   )
 }
@@ -87,7 +87,7 @@ function CopilotCreditsSection() {
         {quota && burn && (
           <>
             <div className="flex flex-col gap-1" role="img" aria-label={`${formatCompact(quota.remaining)} of ${formatCompact(total)} credits left`}>
-              <div className="flex justify-between text-xs font-mono text-neutral-100">
+              <div className="flex justify-between text-xs text-neutral-100">
                 <span>{formatCompact(quota.remaining)} left of {formatCompact(total)}</span>
                 <span>{Math.round(leftPct)}%</span>
               </div>
@@ -219,7 +219,7 @@ function SettingsPage() {
     <div className="h-full min-h-0 overflow-y-auto overflow-x-hidden p-4 sm:p-6 max-w-5xl w-full mx-auto">
       <div className="flex items-center justify-between mb-4">
         <div>
-          <h1 className="text-lg font-semibold text-neutral-100">Settings</h1>
+          <h1 className="text-2xl font-semibold tracking-tight text-neutral-50" style={{ fontFamily: 'var(--font-heading)' }}>Settings</h1>
           <p className="text-xs text-neutral-400">Read-only view of the running HQ configuration. Secrets are never shown.</p>
         </div>
         <button

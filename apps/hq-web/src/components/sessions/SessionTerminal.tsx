@@ -63,7 +63,7 @@ export function SessionTerminal({ sessionId, refreshKey, active, pollMs = READY_
 
   return (
     <section aria-label="What the agent is doing" className="relative flex flex-col flex-1 min-h-40">
-      <div className="flex items-center gap-2 px-3 py-1.5 text-[10px] font-mono text-neutral-500 border-b border-white/5">
+      <div className="flex items-center gap-2 px-3 py-1.5 text-[11px] text-neutral-500 border-b border-white/5">
         <span>{screenStatusText(mode, stream.phase, data?.source)}</span>
         {screen.loading && <Loader2 className="w-3 h-3 animate-spin" aria-label="Loading" />}
         {screen.error && (
@@ -81,7 +81,7 @@ export function SessionTerminal({ sessionId, refreshKey, active, pollMs = READY_
         tabIndex={0}
       >
         {screen.loading && !text && <TerminalSkeleton />}
-        <pre ref={contentRef} className="text-[11px] leading-snug font-mono text-neutral-200 whitespace-pre-wrap break-words">
+        <pre ref={contentRef} className="text-[11px] leading-snug text-neutral-200 whitespace-pre-wrap break-words">
           {rawText
             ? rows.map((spans, i) => (
                 <Fragment key={i}>
@@ -100,7 +100,7 @@ export function SessionTerminal({ sessionId, refreshKey, active, pollMs = READY_
         <button
           type="button"
           onClick={() => scrollToBottom(true)}
-          className="absolute right-3 bottom-3 flex items-center gap-1 h-11 sm:h-9 px-3 rounded-full bg-neutral-800 border border-white/10 text-[11px] font-mono text-neutral-200 hover:bg-neutral-700"
+          className="absolute right-3 bottom-3 flex items-center gap-1 h-11 sm:h-9 px-3 rounded-full hq-field text-[11px] text-neutral-200 hover:bg-white/10"
         >
           <ArrowDown className="w-3.5 h-3.5" />
           Latest

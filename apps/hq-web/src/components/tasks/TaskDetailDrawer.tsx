@@ -77,12 +77,11 @@ export function TaskDetailDrawer({
   }
 
   const content = (
-    <div className="fixed inset-0 z-50 flex justify-end bg-black/60 backdrop-blur-sm transition-all duration-300">
+    <div className="fixed inset-0 z-50 flex justify-end hq-scrim transition-all duration-300">
       <div className="flex-1" onClick={onClose} />
 
       <div
-        className="w-full max-w-2xl h-full flex flex-col glass-heavy border-l shadow-2xl overflow-hidden animate-in slide-in-from-right pad-safe-top pb-[var(--safe-bottom)]"
-        style={{ background: 'var(--bg-card, #111418)', borderColor: 'rgba(255,255,255,0.1)' }}
+        className="w-full max-w-2xl h-full flex flex-col hq-modal border-l shadow-2xl overflow-hidden animate-in slide-in-from-right pad-safe-top pb-[var(--safe-bottom)]"
       >
         {/* Header */}
         <div

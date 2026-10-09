@@ -32,7 +32,7 @@ export function NotificationDetailDrawer({
   }
 
   return (
-    <div className="fixed inset-0 z-50 flex justify-end bg-black/60 backdrop-blur-sm transition-all duration-300">
+    <div className="fixed inset-0 z-50 flex justify-end hq-scrim transition-all duration-300">
       {/* Backdrop click */}
       <div className="flex-1" onClick={onClose} />
 

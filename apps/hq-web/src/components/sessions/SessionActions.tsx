@@ -8,7 +8,7 @@ import { sessionTitle } from '~/lib/workbench'
 import { ErrorText } from './ErrorText'
 
 export const ACTION_BUTTON_CLASS =
-  'flex items-center justify-center gap-1.5 h-11 sm:h-9 px-3 rounded border border-white/10 text-[11px] font-mono text-neutral-200 hover:text-white hover:bg-white/10 disabled:opacity-50 disabled:hover:bg-transparent shrink-0'
+  'flex items-center justify-center gap-1.5 h-11 sm:h-9 px-3 rounded border border-white/10 text-[11px] text-neutral-200 hover:text-white hover:bg-white/10 disabled:opacity-50 disabled:hover:bg-transparent shrink-0'
 
 export interface ActionState {
   busy: boolean
@@ -55,7 +55,7 @@ export function RenameTitle({ session: s, action }: ActionProps) {
   if (!editing) {
     return (
       <div className="flex items-center gap-1 min-w-0">
-        <h2 className="text-sm font-mono text-neutral-100 truncate min-w-0">{title}</h2>
+        <h2 className="text-sm text-neutral-100 truncate min-w-0">{title}</h2>
         <button
           type="button"
           onClick={() => {
@@ -88,7 +88,7 @@ export function RenameTitle({ session: s, action }: ActionProps) {
         }}
         aria-label="Agent name"
         maxLength={80}
-        className="flex-1 min-w-0 h-11 sm:h-9 px-3 rounded-lg text-xs font-mono text-neutral-200 bg-black/30 border border-white/10 focus:outline-none focus:ring-1 focus:ring-emerald-400"
+        className="flex-1 min-w-0 h-11 sm:h-9 px-3 rounded-lg text-xs text-neutral-200 hq-field focus:outline-none focus:ring-1 focus:ring-emerald-400"
       />
       <button type="button" onClick={() => void save()} disabled={action.busy} aria-label="Save name" className={ACTION_BUTTON_CLASS}>
         {action.busy ? Spinner : <Check className="w-3.5 h-3.5" />}

@@ -6,7 +6,7 @@ import { MoreKeys, SendError, useSend } from './SessionSendBox'
 
 const CALLOUT_LINES = 12
 const BIG_BUTTON_CLASS =
-  'flex-1 flex items-center justify-center gap-2 h-12 rounded-xl border border-white/10 bg-white/5 text-sm font-mono font-semibold hover:bg-white/10 disabled:opacity-50 disabled:hover:bg-white/5'
+  'flex-1 flex items-center justify-center gap-2 h-12 rounded-xl border border-white/10 bg-white/5 text-sm font-semibold hover:bg-white/10 disabled:opacity-50 disabled:hover:bg-white/5'
 
 const EXPLAIN = {
   approval: 'It stopped to ask before going on. Here is what it says.',
@@ -44,15 +44,15 @@ export function BlockedCallout({ session, screenText, onSent }: Props) {
   return (
     <section
       aria-label="This agent is waiting for you"
-      className="sticky bottom-0 shrink-0 bg-neutral-950 border-t px-3 py-3 space-y-2"
+      className="sticky bottom-0 shrink-0 hq-composer border-t px-3 py-3 space-y-2"
       style={{ borderColor: 'var(--accent-amber)' }}
     >
-      <h3 className="text-sm font-mono font-semibold" style={{ color: 'var(--accent-amber)' }}>
+      <h3 className="text-sm font-semibold" style={{ color: 'var(--accent-amber)' }}>
         This agent is waiting for you
       </h3>
-      <p className="text-[11px] font-mono text-neutral-400">{EXPLAIN[kind]}</p>
+      <p className="text-[11px] text-neutral-400">{EXPLAIN[kind]}</p>
       {tail && (
-        <pre className="max-h-40 overflow-auto overscroll-contain rounded-lg bg-black/40 px-3 py-2 text-[11px] leading-snug font-mono text-neutral-200 whitespace-pre-wrap break-words">
+        <pre className="max-h-40 overflow-auto overscroll-contain rounded-lg bg-black/40 px-3 py-2 text-[11px] leading-snug text-neutral-200 whitespace-pre-wrap break-words">
           {tail}
         </pre>
       )}

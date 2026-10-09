@@ -20,7 +20,7 @@ export function PinnedCard({ note, isSelected, onClick, onUnpin }: { note: Pinne
                 {/* Title row */}
                 <div className="flex items-start justify-between gap-2">
                     <span
-                        className="text-[12px] font-mono font-bold leading-snug flex-1"
+                        className="text-[12px] font-bold leading-snug flex-1"
                         style={{
                             color: isSelected ? 'var(--accent-blue)' : 'var(--text-primary)',
                             display: '-webkit-box',
@@ -31,7 +31,7 @@ export function PinnedCard({ note, isSelected, onClick, onUnpin }: { note: Pinne
                     >
                         {note.title}
                     </span>
-                    <span className="text-[9px] font-mono shrink-0 mt-0.5" style={{ color: 'var(--text-dim)' }}>
+                    <span className="text-[9px] shrink-0 mt-0.5" style={{ color: 'var(--text-dim)' }}>
                         {relTime(note.updatedAt)}
                     </span>
                 </div>
@@ -39,7 +39,7 @@ export function PinnedCard({ note, isSelected, onClick, onUnpin }: { note: Pinne
                 {/* Preview text */}
                 {note.preview && (
                     <p
-                        className="text-[10px] leading-relaxed"
+                        className="text-[11px] leading-relaxed"
                         style={{
                             color: 'var(--text-dim)',
                             display: '-webkit-box',
@@ -56,7 +56,7 @@ export function PinnedCard({ note, isSelected, onClick, onUnpin }: { note: Pinne
                 <div className="flex items-center gap-1.5 flex-wrap">
                     {folder && (
                         <span
-                            className="text-[9px] font-mono px-1.5 py-0.5 rounded-md"
+                            className="text-[9px] px-1.5 py-0.5 rounded-md"
                             style={{ background: 'rgba(255,255,255,0.04)', color: 'var(--text-dim)' }}
                         >
                             {folder}
@@ -65,7 +65,7 @@ export function PinnedCard({ note, isSelected, onClick, onUnpin }: { note: Pinne
                     {note.tags?.slice(0, 3).map(tag => (
                         <span
                             key={tag}
-                            className="text-[9px] font-mono px-1.5 py-0.5 rounded-md glass-tag"
+                            className="text-[9px] px-1.5 py-0.5 rounded-md glass-tag"
                             style={{ color: 'var(--accent-blue)' }}
                         >
                             #{tag}

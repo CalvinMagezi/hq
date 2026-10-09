@@ -43,13 +43,13 @@ function InlineSearch() {
                     onChange={(e) => setQuery(e.target.value)}
                     onKeyDown={onKeyDown}
                     placeholder="Search vault..."
-                    className="flex-1 bg-transparent outline-none text-base sm:text-sm font-mono"
+                    className="flex-1 bg-transparent outline-none text-base sm:text-sm "
                     style={{ color: 'var(--text-primary)' }}
                 />
                 {isLoading && (
                     <div className="w-4 h-4 rounded-full border-2 border-t-transparent animate-spin flex-shrink-0" style={{ borderColor: 'var(--accent-green)', borderTopColor: 'transparent' }} />
                 )}
-                <kbd className="hidden sm:inline text-[10px] px-1.5 py-0.5 rounded-md font-mono flex-shrink-0" style={{ background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.08)', color: 'var(--text-dim)' }}>
+                <kbd className="hidden sm:inline text-[11px] px-1.5 py-0.5 rounded-md flex-shrink-0" style={{ background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.08)', color: 'var(--text-dim)' }}>
                     ⌘/
                 </kbd>
             </div>
@@ -74,22 +74,22 @@ function InlineSearch() {
                             }}
                         >
                             <div className="flex items-center justify-between gap-3">
-                                <span className="text-sm font-mono font-bold truncate" style={{ color: 'var(--text-primary)' }}>
+                                <span className="text-sm font-bold truncate" style={{ color: 'var(--text-primary)' }}>
                                     {hit.title}
                                 </span>
-                                <span className="text-[10px] font-mono flex-shrink-0" style={{ color: 'var(--text-dim)' }}>
+                                <span className="text-[11px] flex-shrink-0" style={{ color: 'var(--text-dim)' }}>
                                     {hit.notebook}
                                 </span>
                             </div>
                             {hit.snippet && (
-                                <p className="text-xs font-mono line-clamp-2 leading-relaxed" style={{ color: 'var(--text-dim)' }}>
+                                <p className="text-xs line-clamp-2 leading-relaxed" style={{ color: 'var(--text-dim)' }}>
                                     {hit.snippet}
                                 </p>
                             )}
                             {hit.tags.length > 0 && (
                                 <div className="flex gap-1">
                                     {hit.tags.slice(0, 4).map((t) => (
-                                        <span key={t} className="text-[9px] px-1.5 py-0.5 rounded-md font-mono glass-tag" style={{ color: 'var(--text-dim)' }}>
+                                        <span key={t} className="text-[9px] px-1.5 py-0.5 rounded-md glass-tag" style={{ color: 'var(--text-dim)' }}>
                                             #{t}
                                         </span>
                                     ))}
@@ -97,7 +97,7 @@ function InlineSearch() {
                             )}
                         </button>
                     ))}
-                    <div className="px-4 py-2 flex items-center justify-between text-[10px] font-mono" style={{ color: 'var(--text-dim)', borderTop: '1px solid rgba(255,255,255,0.04)' }}>
+                    <div className="px-4 py-2 flex items-center justify-between text-[11px] " style={{ color: 'var(--text-dim)', borderTop: '1px solid rgba(255,255,255,0.04)' }}>
                         <span>{results.length} results</span>
                         <div className="flex items-center gap-3">
                             <span><kbd className="px-1 rounded" style={{ background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.08)' }}>↑↓</kbd> navigate</span>
@@ -112,7 +112,7 @@ function InlineSearch() {
                     className="absolute z-40 top-full left-0 right-0 mt-2 rounded-2xl overflow-hidden glass-heavy"
                     style={{ boxShadow: '0 16px 48px rgba(0, 0, 0, 0.5)' }}
                 >
-                    <div className="px-6 py-8 text-center text-sm font-mono" style={{ color: 'var(--text-dim)' }}>
+                    <div className="px-6 py-8 text-center text-sm " style={{ color: 'var(--text-dim)' }}>
                         No results for "{query}"
                     </div>
                 </div>
@@ -145,7 +145,7 @@ function VaultHome() {
                     <button
                         type="button"
                         onClick={() => window.dispatchEvent(new Event('hq:open-quick-note'))}
-                        className="flex items-center gap-2 px-4 rounded-2xl glass-card font-mono text-xs flex-shrink-0"
+                        className="flex items-center gap-2 px-4 rounded-2xl glass-card text-xs flex-shrink-0"
                         style={{ color: 'var(--text-dim)' }}
                         title="New note"
                         aria-label="New note"
@@ -165,14 +165,14 @@ function VaultHome() {
                 />
 
                 <details className="mb-10 glass-card rounded-xl overflow-hidden">
-                    <summary className="cursor-pointer px-4 py-3 text-[10px] font-mono tracking-widest uppercase font-bold" style={{ color: 'var(--text-dim)' }}>
+                    <summary className="cursor-pointer px-4 py-3 text-[11px] tracking-widest uppercase font-bold" style={{ color: 'var(--text-dim)' }}>
                         System Activity
                     </summary>
                     <div className="px-4 pb-4 grid grid-cols-1 gap-3">
                         {signals.activity.length > 0 ? signals.activity.map((note) => (
                             <SignalCard key={note.path} note={note} lane="activity" />
                         )) : (
-                            <div className="text-[11px] font-mono" style={{ color: 'var(--text-dim)' }}>
+                            <div className="text-[11px] " style={{ color: 'var(--text-dim)' }}>
                                 No system activity found.
                             </div>
                         )}
@@ -180,7 +180,7 @@ function VaultHome() {
                 </details>
 
                 <div className="text-center pt-4 pb-8">
-                    <p className="text-[10px] font-mono" style={{ color: 'var(--text-dim)', opacity: 0.4 }}>
+                    <p className="text-[11px] " style={{ color: 'var(--text-dim)', opacity: 0.4 }}>
                         Press <kbd className="px-1.5 py-0.5 rounded-md mx-0.5" style={{ background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.08)' }}>⌘/</kbd> for global search anywhere
                     </p>
                 </div>

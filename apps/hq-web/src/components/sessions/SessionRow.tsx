@@ -14,7 +14,7 @@ export function SessionBadges({ session: s }: { session: HarnessSession }) {
   const seen = ago(s.last_seen_at)
   const status = statusInfo(s)
   return (
-    <div className="flex flex-wrap items-center gap-x-3 gap-y-0.5 text-[11px] font-mono text-neutral-500">
+    <div className="flex flex-wrap items-center gap-x-3 gap-y-0.5 text-[11px] text-neutral-500">
       <span className={status.agent ? AGENT_STATUS_CLASS[status.agent] : undefined} style={status.warn ? { color: 'var(--accent-amber)' } : undefined}>
         {status.word}
       </span>
@@ -32,12 +32,12 @@ export function SessionTaskLink({ session: s }: { session: HarnessSession }) {
     <Link
       to="/tasks"
       search={{ task: task.id }}
-      className="flex items-center gap-2 min-w-0 text-[11px] font-mono text-neutral-300 hover:text-white"
+      className="flex items-center gap-2 min-w-0 text-[11px] text-neutral-300 hover:text-white"
       title="Open the task"
     >
       <span className="text-neutral-500 shrink-0">{task.display_id}</span>
       <span className="min-w-0 truncate">{task.title}</span>
-      <span className={`shrink-0 text-[10px] px-2 py-0.5 rounded-full border ${STATUS_BADGE_CLASS[task.status]}`}>
+      <span className={`shrink-0 text-[11px] px-2 py-0.5 rounded-full border ${STATUS_BADGE_CLASS[task.status]}`}>
         {STATUS_LABELS[task.status]}
       </span>
     </Link>
