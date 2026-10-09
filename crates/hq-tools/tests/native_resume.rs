@@ -1,4 +1,5 @@
 //! A restarted built-in host holds agents that had env until HQ supplies it.
+#![cfg(unix)]
 
 use hq_db::Database;
 use hq_db::harness_sessions_registry::{self as registry, NewSession, Placement};

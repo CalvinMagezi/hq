@@ -4,6 +4,7 @@
 //! models that fit the hardware. Used by the LLM router and CLI.
 
 use serde::{Deserialize, Serialize};
+#[cfg_attr(windows, allow(unused_imports))]
 use std::process::Command;
 
 /// GPU type detected on the system.

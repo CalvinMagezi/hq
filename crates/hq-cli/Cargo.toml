@@ -58,6 +58,9 @@ mimalloc = { version = "0.1", default-features = false }
 [target.'cfg(target_os = "linux")'.dependencies]
 openssl-sys = { version = "*", features = ["vendored"] }
 
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_System_Console"] }
+
 [dev-dependencies]
 hq-tools = { workspace = true, features = ["test-support"] }
 hq-sandbox = { path = "../hq-sandbox" }

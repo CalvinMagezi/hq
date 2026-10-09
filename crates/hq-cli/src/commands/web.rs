@@ -488,10 +488,13 @@ fn checkout_from(start: &Path) -> Option<PathBuf> {
 }
 
 fn which(program: &str) -> Option<PathBuf> {
-    std::env::var_os("PATH")?
-        .to_str()?
-        .split(':')
-        .map(|d| Path::new(d).join(program))
+    let names: Vec<String> = if cfg!(windows) {
+        vec![format!("{program}.exe"), format!("{program}.cmd"), program.to_string()]
+    } else {
+        vec![program.to_string()]
+    };
+    std::env::split_paths(&std::env::var_os("PATH")?)
+        .flat_map(|d| names.iter().map(move |n| d.join(n)))
         .find(|p| p.is_file())
 }
 
@@ -532,6 +535,11 @@ async fn spawn_detached(
         .stderr(out);
     #[cfg(unix)]
     std::os::unix::process::CommandExt::process_group(&mut cmd, 0);
+    // No console window, and the server outlives the terminal that started it.
+    #[cfg(windows)]
+    std::os::windows::process::CommandExt::creation_flags(&mut cmd, 0x0800_0000 | 0x0000_0200);
+    #[cfg(windows)]
+    stop_inheriting_std_handles();
     let mut child = cmd
         .spawn()
         .context("failed to start the background server")?;
@@ -554,6 +562,28 @@ async fn spawn_detached(
         "the background server did not answer within 20s. See {}",
         log.display()
     )
+}
+
+/// Windows hands every inheritable handle to a new process, not only the ones named for it, so
+/// the background server would hold the pipes this command's own output goes to. A caller that
+/// reads those pipes (a script, an agent's shell tool) would then wait until the server exits.
+/// The log file given to the child is passed explicitly and is unaffected.
+#[cfg(windows)]
+fn stop_inheriting_std_handles() {
+    use windows_sys::Win32::Foundation::{HANDLE_FLAG_INHERIT, SetHandleInformation};
+    use windows_sys::Win32::System::Console::{
+        GetStdHandle, STD_ERROR_HANDLE, STD_INPUT_HANDLE, STD_OUTPUT_HANDLE,
+    };
+    for which in [STD_INPUT_HANDLE, STD_OUTPUT_HANDLE, STD_ERROR_HANDLE] {
+        // SAFETY: plain Win32 calls on this process's own standard handles; a null or invalid
+        // handle makes the call fail harmlessly.
+        unsafe {
+            let handle = GetStdHandle(which);
+            if !handle.is_null() {
+                SetHandleInformation(handle, HANDLE_FLAG_INHERIT, 0);
+            }
+        }
+    }
 }
 
 // ─── Small helpers ──────────────────────────────────────────────────────
@@ -584,8 +614,12 @@ async fn probe(addr: SocketAddr) -> Probe {
                 .is_some_and(|v| v["service"] == "agent-hq");
             if is_hq { Probe::Hq } else { Probe::Other }
         }
-        // Refused is the normal "free" case; a timeout means something is there.
-        Err(e) if e.is_timeout() => Probe::Other,
+        // Refused is the normal "free" case; a timeout means something is there, unless the port
+        // can be taken: Windows does not refuse a closed local port at once but retries for
+        // longer than the timeout.
+        Err(e) if e.is_timeout() => {
+            if std::net::TcpListener::bind(addr).is_ok() { Probe::Free } else { Probe::Other }
+        }
         Err(_) => Probe::Free,
     }
 }
@@ -647,12 +681,32 @@ fn is_our_server(pid: u32) -> bool {
     if !super::stop::is_alive(pid) {
         return false;
     }
-    std::process::Command::new("ps")
-        .args(["-o", "command=", "-p", &pid.to_string()])
-        .output()
-        .ok()
-        .and_then(|o| String::from_utf8(o.stdout).ok())
-        .is_some_and(|cmd| looks_like_hq_web(&cmd))
+    #[cfg(unix)]
+    {
+        std::process::Command::new("ps")
+            .args(["-o", "command=", "-p", &pid.to_string()])
+            .output()
+            .ok()
+            .and_then(|o| String::from_utf8(o.stdout).ok())
+            .is_some_and(|cmd| looks_like_hq_web(&cmd))
+    }
+    // Windows has no command-line query that needs no extra tools, so the image name has to do:
+    // a reused pid would have to be another process with this program's own file name.
+    #[cfg(not(unix))]
+    {
+        std::process::Command::new("tasklist")
+            .args(["/FI", &format!("PID eq {pid}"), "/FO", "CSV", "/NH"])
+            .output()
+            .ok()
+            .and_then(|o| String::from_utf8(o.stdout).ok())
+            .is_some_and(|out| {
+                let me = std::env::current_exe()
+                    .ok()
+                    .and_then(|e| e.file_name().map(|n| n.to_string_lossy().to_ascii_lowercase()))
+                    .unwrap_or_else(|| "hq.exe".into());
+                out.to_ascii_lowercase().starts_with(&format!("\"{me}\""))
+            })
+    }
 }
 
 /// `…/hq web …` (or its `pwa`/`dashboard` aliases) as a process command line.
@@ -762,6 +816,7 @@ fn can_open_browser() -> bool {
         return false;
     }
     cfg!(target_os = "macos")
+        || cfg!(windows)
         || std::env::var_os("DISPLAY").is_some()
         || std::env::var_os("WAYLAND_DISPLAY").is_some()
 }
@@ -769,9 +824,16 @@ fn can_open_browser() -> bool {
 fn open_browser(url: &str) {
     #[cfg(target_os = "macos")]
     let opener = "open";
-    #[cfg(not(target_os = "macos"))]
+    #[cfg(all(not(target_os = "macos"), not(windows)))]
     let opener = "xdg-open";
-    let _ = std::process::Command::new(opener)
+    #[cfg(windows)]
+    let opener = "rundll32";
+    let mut cmd = std::process::Command::new(opener);
+    // `rundll32 url.dll,FileProtocolHandler <url>` opens the default browser without a shell, so
+    // nothing in the address is read as a command.
+    #[cfg(windows)]
+    cmd.arg("url.dll,FileProtocolHandler");
+    let _ = cmd
         .arg(url)
         .stdin(std::process::Stdio::null())
         .stdout(std::process::Stdio::null())

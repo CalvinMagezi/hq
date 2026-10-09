@@ -1,4 +1,5 @@
 //! Restart behavior: what the host brings back, and what it must not.
+#![cfg(unix)]
 
 use hq_host::{Host, ReadSource, SpawnSpec};
 use std::path::Path;

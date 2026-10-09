@@ -6,6 +6,7 @@
 //! Claude Code's own `SessionStart`, `UserPromptSubmit`, `Stop` and
 //! `Notification` hooks. Codex has no such hook, so its labels come from what
 //! was on screen (a dialog waiting for a choice, "esc to interrupt" mid-turn).
+#![cfg(unix)]
 
 use hq_host::{AgentState, DetectInput, Detector};
 use std::path::Path;

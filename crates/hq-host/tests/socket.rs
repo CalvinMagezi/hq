@@ -1,4 +1,5 @@
 //! The control socket, exercised through real sockets and real processes.
+#![cfg(unix)]
 
 use hq_host::{Client, ClientError, Host, Limits, Server, agent_socket_path, socket_path};
 use serde_json::{Value, json};

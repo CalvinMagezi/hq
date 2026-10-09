@@ -1,2 +1,9 @@
 [build]
 jobs = 4
+
+# Windows (HQ Lite): link the C runtime statically so hq.exe does not need the Visual C++
+# redistributable, whose installer needs administrator rights.
+[target.'cfg(all(windows, target_env = "msvc"))']
+# The main thread gets 1 MB on Windows against 8 MB on Linux, which the CLI's large futures
+# overflow, so ask for 8 MB.
+rustflags = ["-C", "target-feature=+crt-static", "-C", "link-arg=/STACK:8388608"]

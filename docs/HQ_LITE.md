@@ -36,6 +36,33 @@ The scheduler in Lite keeps six housekeeping tasks (`expire-approvals`, `vault-h
 loops. It does not poll mail, embed notes, supervise agent sessions, ask a provider for usage or post
 to a relay.
 
+## Native Windows
+
+HQ Lite also builds for Windows without WSL2, virtualization or administrator rights. The build
+is always Lite: a Windows `hq.exe` ignores `profile: full`, because the coding-agent host, the
+sandbox and the chat relays are not part of it. For those, use Full HQ in WSL2
+(`docs/WINDOWS.md`).
+
+The `Windows Lite` workflow (manual) produces `hq-lite-<version>-windows-x86_64.zip` holding
+`hq.exe`, a `web` folder with the app, and a SHA-256 file. Unzip it anywhere you can write, for
+example `%LOCALAPPDATA%\hq-lite`, then:
+
+```
+.\hq.exe web             # the web app on this computer, opened in your browser
+.\hq.exe task list       # the same tasks, from a terminal
+.\hq.exe mcp install     # register HQ with VS Code
+```
+
+- The C runtime is linked in, so no Visual C++ redistributable (which needs an administrator) is
+  needed. Nothing is installed as a service, and HQ's own files stay in your user profile (a project-scope `hq mcp install` writes into that project). On Windows those files rely on the profile's normal folder permissions.
+- Not code-signed yet. Verify the zip against its SHA-256. A computer that only allows approved
+  programs (AppLocker, WDAC, Smart App Control) may refuse to run it; that is the policy working,
+  and HQ does not try to get around it. Connecting VS Code to an HQ that runs elsewhere needs no
+  program here at all (`docs/VPS_AGENT_CONNECT.md`).
+- `hq update` is not available yet; update by downloading the newer zip. Your notes and tasks live
+  in your user profile (`.hq`), not in the folder you unzipped to.
+- `hq host`, `hq sessions` and pairing a machine answer that they need Full HQ.
+
 ## Nothing leaves unless you listed it
 
 Commands that serve, run the daemon or could call another service (`hq web`, `hq start`, `hq

@@ -271,6 +271,11 @@ impl HqTool for HostAddTool {
     fn category(&self) -> &str {
         "harness"
     }
+    #[cfg(not(unix))]
+    async fn execute(&self, _args: Value) -> Result<Value> {
+        bail!("pairing a coding-agent host is not available on this platform; use Full HQ in WSL2")
+    }
+    #[cfg(unix)]
     async fn execute(&self, args: Value) -> Result<Value> {
         let join = arg_str(&args, "join");
         let gateway = Some(arg_str(&args, "gateway_addr")).filter(|g| !g.is_empty());
@@ -309,6 +314,11 @@ impl HqTool for HostCheckTool {
     fn is_read_only(&self) -> bool {
         true
     }
+    #[cfg(not(unix))]
+    async fn execute(&self, _args: Value) -> Result<Value> {
+        bail!("coding-agent hosts are not available on this platform; use Full HQ in WSL2")
+    }
+    #[cfg(unix)]
     async fn execute(&self, args: Value) -> Result<Value> {
         let name = arg_str(&args, "host");
         if name.is_empty() {

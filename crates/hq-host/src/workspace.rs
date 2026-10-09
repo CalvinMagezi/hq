@@ -3,6 +3,7 @@
 //! the agents, so the HQ server never judges a path by its own operating system.
 
 use nix::unistd::{User, geteuid};
+use crate::names::check_folder_name;
 use serde_json::{Value, json};
 use std::fs;
 use std::io::{Error, ErrorKind};
@@ -12,9 +13,7 @@ use std::path::{Component, Path, PathBuf};
 /// server has no `Documents` until something creates it.
 const WORKSPACE_PARTS: [&str; 2] = ["Documents", "HQ"];
 const MAX_LISTED_DIRS: usize = 500;
-const MAX_NAME_CHARS: usize = 100;
 /// Most file systems cap a name at 255 bytes, and a name of 100 wide characters can pass that.
-const MAX_NAME_BYTES: usize = 200;
 /// Entries read from one folder before listing stops, so a huge folder cannot tie the host up.
 const MAX_SCANNED_ENTRIES: usize = MAX_LISTED_DIRS * 10;
 /// What a spawn's folder check refuses in a path, so a home containing one could never be used.
@@ -163,23 +162,6 @@ pub fn list_dirs(root: &Path, path: Option<&str>) -> std::io::Result<Value> {
         .map(|n| json!({ "name": n, "path": dir.join(n) }))
         .collect();
     Ok(json!({ "path": dir, "parent": parent, "dirs": dirs, "truncated": truncated }))
-}
-
-/// A single folder name: no separators, not `.` or `..`, no control characters.
-pub fn check_folder_name(name: &str) -> std::io::Result<&str> {
-    let name = name.trim();
-    let bad = name.is_empty()
-        || name == "."
-        || name == ".."
-        || name.chars().count() > MAX_NAME_CHARS
-        || name.len() > MAX_NAME_BYTES
-        || name.chars().any(|c| c.is_control() || matches!(c, '/' | '\\' | ':' | '~' | '$' | '`'));
-    if bad {
-        return Err(invalid(
-            "a folder name is 1 to 100 characters with no slashes, colons, '~', '$' or backticks",
-        ));
-    }
-    Ok(name)
 }
 
 /// Creates `name` inside `parent` (inside the workspace). An existing folder is

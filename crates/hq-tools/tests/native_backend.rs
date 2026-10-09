@@ -1,4 +1,5 @@
 //! `NativeBackend` against a real in-process host and real processes.
+#![cfg(unix)]
 
 use hq_host::{Host, Server, StopHandle};
 use hq_tools::agent_host::{

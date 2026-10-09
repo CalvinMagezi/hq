@@ -131,8 +131,7 @@ pub(crate) fn is_alive(pid: u32) -> bool {
     }
     #[cfg(not(unix))]
     {
-        let _ = pid;
-        false
+        hq_core::heartbeat::is_pid_alive(pid)
     }
 }
 
@@ -158,7 +157,10 @@ pub(crate) fn kill_tree(pid: u32) {
     }
     #[cfg(not(unix))]
     {
-        let _ = pid;
+        // `/T` takes the child processes too, `/F` ends them without asking.
+        let _ = Command::new("taskkill")
+            .args(["/PID", &pid.to_string(), "/T", "/F"])
+            .output();
     }
 }
 

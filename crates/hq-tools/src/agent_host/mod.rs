@@ -9,24 +9,34 @@
 //! Every call is blocking and bounded by a deadline. `AgentHostError::Unreachable`
 //! means "could not ask"; callers must not read it as "the agent is gone".
 
+// Off Unix the host backend is not built, which leaves its helpers unused.
+#![cfg_attr(not(unix), allow(dead_code, unused_imports))]
+
 mod backend;
+#[cfg(unix)]
 mod native;
+#[cfg(unix)]
 pub mod pairing;
 #[cfg(any(test, feature = "test-support"))]
 pub mod scripted;
 mod sandbox;
 pub mod tools;
+#[cfg(unix)]
 mod transport;
 
 use anyhow::Context;
+use hq_core::config::{AgentHostConfig, HqConfig, LOCAL_HOST, NATIVE_HOST};
+#[cfg(unix)]
 use hq_core::config::{
-    AgentHostConfig, RemoteHostConfig, HqConfig, LOCAL_HOST, NATIVE_HOST, native_host_dir, MAX_LAUNCH_BOUND_SECS, MIN_LAUNCH_BOUND_SECS,
+    MAX_LAUNCH_BOUND_SECS, MIN_LAUNCH_BOUND_SECS, RemoteHostConfig, native_host_dir,
 };
 use serde::Serialize;
+#[cfg(unix)]
 use std::sync::Arc;
 use std::time::Duration;
 
 pub use backend::{AwaitingAgent, Host, HostBackend, HostEvent, HostEvents};
+#[cfg(unix)]
 pub use native::{NATIVE_GATE_COMMAND, NativeBackend};
 
 #[derive(Debug, thiserror::Error)]
@@ -216,6 +226,15 @@ pub fn host(name: Option<&str>) -> anyhow::Result<Host> {
     build(&cfg, name.unwrap_or(&cfg.default_host))
 }
 
+#[cfg(not(unix))]
+fn build(_cfg: &AgentHostConfig, name: &str) -> anyhow::Result<Host> {
+    anyhow::bail!(
+        "coding-agent host '{name}' is not available on this platform: the host runs on Linux, \
+         macOS and WSL2. HQ Lite on Windows has no coding agents; use Full HQ in WSL2."
+    )
+}
+
+#[cfg(unix)]
 fn build(cfg: &AgentHostConfig, name: &str) -> anyhow::Result<Host> {
     // `local` was the host on this machine; it now names the built-in one.
     if name == NATIVE_HOST || name == LOCAL_HOST {
@@ -238,6 +257,7 @@ fn build(cfg: &AgentHostConfig, name: &str) -> anyhow::Result<Host> {
 
 /// A built-in host on another machine. Its gate command defaults to
 /// `hq host gate` unless the config names one.
+#[cfg(unix)]
 fn remote_native(cfg: &AgentHostConfig, name: &str, remote: &RemoteHostConfig) -> NativeBackend {
     let gate = remote.gate_command.as_str();
     let mux_dir = cfg
