@@ -14,6 +14,27 @@ use super::placement::*;
 use crate::registry::HqTool;
 use crate::util::{arg_str, generate_id};
 
+/// Longest title and longest free text (description, comment) the tasks scope may write.
+/// The scope has no rate limit, so these bound what one call can add to the owner's database.
+const SCOPED_TITLE_MAX: usize = 500;
+const SCOPED_TEXT_MAX: usize = 20_000;
+
+/// Refuses a tasks-scope write whose `field` is longer than `max` characters.
+fn scoped_len(args: &Value, field: &str, max: usize) -> Result<()> {
+    let len = args.get(field).and_then(Value::as_str).map_or(0, |s| s.chars().count());
+    if len > max {
+        bail!("{field} is {len} characters; this connection may write at most {max}");
+    }
+    Ok(())
+}
+
+/// Checks every text field a tasks-scope write carries.
+fn check_scoped_text(args: &Value) -> Result<()> {
+    scoped_len(args, "title", SCOPED_TITLE_MAX)?;
+    scoped_len(args, "description", SCOPED_TEXT_MAX)?;
+    scoped_len(args, "body", SCOPED_TEXT_MAX)
+}
+
 pub(super) struct TaskCreateTool {
     pub(super) vault_path: PathBuf,
     pub(super) db: Arc<Database>,
@@ -80,6 +101,9 @@ impl HqTool for TaskCreateTool {
         // The tasks scope sets no routing tags (a tag names a mailbox that an agent or the
         // owner's chat drains) and cannot choose who a write is attributed to.
         let scoped = crate::harness_session::is_tasks_scope(&args);
+        if scoped {
+            check_scoped_text(&args)?;
+        }
         let tags = if scoped { Vec::new() } else { tags_from_args(&args, "tags") };
         let created_by = {
             let v = arg_str(&args, "created_by");
@@ -365,6 +389,13 @@ impl HqTool for TaskUpdateTool {
             bail!("id is required");
         }
         let scoped = crate::harness_session::is_tasks_scope(&args);
+        if scoped {
+            check_scoped_text(&args)?;
+        }
+        // The goal of a linked session and the prompt of a launched one are built from a
+        // task's title and description, so the tasks scope may rewrite them only on tasks it
+        // filed itself. Status, priority, dates and comments stay open to it.
+        let edits_text = args.get("title").is_some() || args.get("description").is_some();
         let patch = t::TaskPatch {
             title: args.get("title").and_then(|v| v.as_str()).map(String::from),
             description: args
@@ -395,7 +426,19 @@ impl HqTool for TaskUpdateTool {
 
         let id_for_update = id.clone();
         let (task, became_ready_for_review, unblocked) = self.db.with_conn(move |c| {
-            let previous_status = t::get_task(c, &id_for_update)?.map(|t| t.status);
+            let existing = t::get_task(c, &id_for_update)?;
+            if scoped
+                && edits_text
+                && existing
+                    .as_ref()
+                    .is_some_and(|t| t.created_by != crate::harness_session::TASKS_SCOPE_ACTOR)
+            {
+                bail!(
+                    "this connection may edit the title and description only of tasks it created; \
+                     add a comment to that task instead"
+                );
+            }
+            let previous_status = existing.map(|t| t.status);
             let mut task = t::update_task(c, &id_for_update, &patch, expected_status.as_deref())?;
             if !add_deps.is_empty() || !remove_deps.is_empty() {
                 let actor = if scoped {
@@ -425,7 +468,8 @@ impl HqTool for TaskUpdateTool {
                 &task.tags,
             );
         }
-        if became_ready_for_review {
+        // A web-UI approval item with text the caller chose, one per task: not for the tasks scope.
+        if became_ready_for_review && !scoped {
             notify_ready_for_review(self.vault_path.clone(), task.clone()).await;
         }
         Ok(task_json_with_warnings(&task))
@@ -510,6 +554,9 @@ impl HqTool for TaskCommentAddTool {
         let body = arg_str(&args, "body");
         if task_id.is_empty() || body.is_empty() {
             bail!("task_id and body are required");
+        }
+        if crate::harness_session::is_tasks_scope(&args) {
+            check_scoped_text(&args)?;
         }
         // A launched agent that proved its session is that session, whatever
         // name it supplies.

@@ -259,6 +259,37 @@ mod tests {
             assert!(denied.is_err(), "{tool} must be refused on the tasks scope");
         }
 
+        // task_update and task_comment_add go through the same gateway marker.
+        // The created task's id, read out of the tool result (Debug-escaped JSON text).
+        let id = text
+            .split("\\\"id\\\": \\\"")
+            .nth(1)
+            .and_then(|rest| rest.split('\\').next())
+            .unwrap_or("")
+            .to_string();
+        assert!(id.len() > 5, "found the filed task's id in {text}");
+        let moved = crate::gateway::handle_call(
+            &registry,
+            Some(&call("task_update", serde_json::json!({"id": id, "status": "in_progress", "tags": ["relay"]}))),
+            &db,
+            tasks,
+        )
+        .await
+        .unwrap();
+        assert!(!format!("{moved:?}").contains("isError: Some(true)"), "{moved:?}");
+        let commented = crate::gateway::handle_call(
+            &registry,
+            Some(&call("task_comment_add", serde_json::json!({"task_id": id, "body": "hello", "author": "the owner"}))),
+            &db,
+            tasks,
+        )
+        .await
+        .unwrap();
+        assert!(format!("{commented:?}").contains("mcp:tasks"), "{commented:?}");
+        for tag in ["relay", "agent-worker", "claude-code"] {
+            assert_eq!(mailbox_entries(tag), 0, "{tag} received something after update and comment");
+        }
+
         // Control: the unscoped call with the same tags does deliver, so the assertion above
         // is not passing because nothing could ever be delivered.
         crate::gateway::handle_call(

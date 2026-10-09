@@ -44,17 +44,31 @@ scope marker, so a client cannot claim `full` for a handoff call. The answer is 
 must be treated as untrusted by the caller.
 
 The **tasks key** is the one to give an editor agent on a machine you do not control. It has no
-vault tools, so your notes never reach that client, and no session, `hq_ask`, delete or config
-tools, so it is not code execution anywhere. The task tools also know a call came in on it (the
-gateway sets a private marker and strips any the caller sends) and then: set no routing tags
-(a tag names a mailbox that the relay, the agent worker and harnesses drain, so a tag would put
-text in front of your chat or an agent), ignore a `tags` change on update, send no mailbox
-notification on create, update or unblock, and write `mcp:tasks` as the author instead of a name
-the caller picks. It can still edit any task's title, description and status, so treat task text
-as untrusted input wherever an agent acts on it. A key shared with another scope gets the narrower
-one. Its stdio form (`hq mcp-serve --scope tasks`) applies the same list, but it is a flag in a
-file the user can edit and anyone who can run `hq` on that machine can start a full server, so only
-the remote key is enforced on the server.
+vault tools, so your notes never reach that client (except text already copied into a task, for
+example by promoting a note to a task), and no session, `hq_ask`, delete or config tools, so it is
+not code execution anywhere. The task tools also know a call came in on it (the gateway sets a
+private marker and strips any the caller sends) and then:
+
+- set no routing tags and ignore a `tags` change on update (a tag names a mailbox that the relay,
+  the agent worker and harnesses drain, so a tag would put text in front of your chat or an agent);
+- send no mailbox notification on create, update or unblock, and raise no `ready_for_review`
+  approval item in the web inbox;
+- write `mcp:tasks` as the author instead of a name the caller picks;
+- edit a task's title and description only on tasks the scope filed itself, because a linked
+  session's goal and a launched session's prompt are built from them; status, priority, dates and
+  comments are open on any task;
+- cap a title at 500 characters and a description or comment at 20,000, and cannot force a
+  rebuild of the related-tasks index. There is **no rate limit**, so a holder can still create many
+  tasks and comments.
+
+What remains: it reads every task space, including `personal`, and it can still change the status
+and add comments to your tasks, so treat task text as untrusted input wherever an agent acts on
+it, and especially text in tasks it created: if you link a session to one of those, the
+description becomes that session's goal. A key shared with another scope gets the narrower one.
+Its stdio form (`hq mcp-serve --scope tasks`) applies the same list, but it is a flag in a file
+the user can edit and anyone who can run `hq` on that machine can start a full server, so only the
+remote key is enforced on the server. The stdio entry also carries `HQ_VAULT_PATH`, your vault's
+path on that machine.
 
 Generate a key with `openssl rand -hex 32` and keep it in a root-readable env
 file loaded by the service (the sample unit layout uses `/opt/hq/mcp.env`, loaded by the

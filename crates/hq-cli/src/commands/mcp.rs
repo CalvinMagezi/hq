@@ -107,6 +107,10 @@ fn install(config: &HqConfig, scope: &Scope) -> Result<()> {
             legacy.push(t);
             continue;
         }
+        if let Some(why) = cursor_mcp_config::keep_reason(&t, &opts) {
+            println!("  Kept {} ({why})", t.path.display());
+            continue;
+        }
         let shown_scope = if opts.remote_url.is_some() {
             "remote".to_string()
         } else {
@@ -134,7 +138,7 @@ fn install(config: &HqConfig, scope: &Scope) -> Result<()> {
             .is_some_and(|dir| written.iter().any(|w| w.parent() == Some(dir)));
         if replaced && cursor_mcp_config::has_entry(&t) {
             println!(
-                "  Note: {} still has an older agent-hq entry. VS Code now reads mcp.json, so remove it with `hq mcp remove --target vscode`.",
+                "  Note: {} still has an older agent-hq entry (the \"mcp.servers\" setting). VS Code now reads mcp.json, so delete that entry from settings.json yourself; HQ leaves the file alone because it is usually JSONC with your own settings.",
                 t.path.display()
             );
         }
@@ -160,12 +164,7 @@ fn status(config: &HqConfig, scope: &Scope) -> Result<()> {
     println!("MCP Server Status");
     println!("=================\n");
     for t in selected_targets(scope)? {
-        let state = match std::fs::read_to_string(&t.path) {
-            Ok(content) if content.contains("agent-hq") => "installed",
-            Ok(_) => "present, agent-hq not configured",
-            Err(_) => "not found",
-        };
-        println!("  {}: {state}", t.path.display());
+        println!("  {}: {}", t.path.display(), cursor_mcp_config::describe(&t));
     }
     println!("  Vault: {}", config.vault_path.display());
     Ok(())

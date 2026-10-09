@@ -309,11 +309,76 @@ fn servers_key(root: &Value, key: &'static str) -> &'static str {
     }
 }
 
-/// The scope an existing stdio entry was written with, from its `--scope` argument.
-fn existing_scope(entry: &Value) -> Option<ServeScope> {
-    let args = entry.get("args")?.as_array()?;
-    let pos = args.iter().position(|a| a == "--scope")?;
-    ServeScope::from_arg(args.get(pos + 1)?.as_str()?)
+/// What an agent-hq entry already in a config says about its reach.
+#[derive(Debug, PartialEq, Eq)]
+enum Existing {
+    /// A local server with this scope (full when it has no `--scope`).
+    Local(ServeScope),
+    /// A remote HQ: its reach is set by the key, not by anything in this file.
+    Remote,
+    /// It carries a `--scope` this build cannot read. Treated as narrowed, never as full.
+    Unrecognized,
+}
+
+fn classify(entry: &Value) -> Existing {
+    if entry.get("url").is_some() {
+        return Existing::Remote;
+    }
+    let Some(args) = entry.get("args").and_then(Value::as_array) else {
+        return Existing::Local(ServeScope::Full);
+    };
+    let args: Vec<&str> = args.iter().filter_map(Value::as_str).collect();
+    for (i, arg) in args.iter().enumerate() {
+        let value = if *arg == "--scope" {
+            args.get(i + 1).copied()
+        } else if let Some(v) = arg.strip_prefix("--scope=") {
+            Some(v)
+        } else {
+            continue;
+        };
+        return match value.and_then(ServeScope::from_arg) {
+            Some(scope) => Existing::Local(scope),
+            None => Existing::Unrecognized,
+        };
+    }
+    Existing::Local(ServeScope::Full)
+}
+
+/// The agent-hq entry in `root`, wherever `key` puts it.
+fn entry_in<'a>(root: &'a Value, key: &'static str) -> Option<&'a Value> {
+    root.get(servers_key(root, key))?.get("agent-hq")
+}
+
+/// The entry already at `t`, if any. A file that does not parse is an error unless the caller
+/// is replacing the entry on purpose (an explicit scope or URL), so a plain install can never
+/// overwrite a narrowed entry it failed to read.
+fn existing_entry(t: &Target, replacing_on_purpose: bool) -> Result<Option<Value>> {
+    if !t.path.exists() {
+        return Ok(None);
+    }
+    let root = match read_json(&t.path) {
+        Ok(root) => root,
+        Err(_) if replacing_on_purpose && t.key.is_none() => return Ok(None),
+        Err(e) => return Err(e),
+    };
+    Ok(match t.key {
+        Some(key) => entry_in(&root, key).cloned(),
+        None => Some(root),
+    })
+}
+
+/// Why a plain install leaves `t` alone, if it does: an entry someone pointed at a remote HQ,
+/// or narrowed with a scope this build cannot read, is not replaced by a local full-access
+/// one. Passing `--scope` or `--url` replaces it on purpose.
+pub fn keep_reason(t: &Target, opts: &EntryOptions) -> Option<&'static str> {
+    if opts.scope.is_some() || opts.remote_url.is_some() {
+        return None;
+    }
+    match existing_entry(t, false).ok().flatten().as_ref().map(classify) {
+        Some(Existing::Remote) => Some("a remote entry (use --url to change it)"),
+        Some(Existing::Unrecognized) => Some("an entry with a --scope this version does not recognize"),
+        _ => None,
+    }
 }
 
 /// The scope a stdio entry written to `t` gets: the one asked for, else the one an entry
@@ -322,14 +387,35 @@ pub fn effective_scope(t: &Target, opts: &EntryOptions) -> ServeScope {
     if let Some(scope) = opts.scope {
         return scope;
     }
-    let Ok(root) = read_json(&t.path) else {
-        return ServeScope::Full;
+    match existing_entry(t, false).ok().flatten().as_ref().map(classify) {
+        Some(Existing::Local(scope)) => scope,
+        _ => ServeScope::Full,
+    }
+}
+
+/// One line for `hq mcp status`: whether `t` has an entry and how far it reaches.
+pub fn describe(t: &Target) -> String {
+    let Ok(text) = std::fs::read_to_string(&t.path) else {
+        return "not found".into();
+    };
+    let Ok(root) = serde_json::from_str::<Value>(&text) else {
+        return if text.contains("agent-hq") {
+            "installed (file is not plain JSON, so its scope is not shown)".into()
+        } else {
+            "present, agent-hq not configured".into()
+        };
     };
     let entry = match t.key {
-        Some(key) => root.get(servers_key(&root, key)).and_then(|s| s.get("agent-hq")),
+        Some(key) => entry_in(&root, key),
         None => Some(&root),
     };
-    entry.and_then(existing_scope).unwrap_or_default()
+    match entry.map(classify) {
+        None => "present, agent-hq not configured".into(),
+        Some(Existing::Local(ServeScope::Full)) => "installed (full access)".into(),
+        Some(Existing::Local(ServeScope::Tasks)) => "installed (tasks only)".into(),
+        Some(Existing::Remote) => "installed (remote HQ)".into(),
+        Some(Existing::Unrecognized) => "installed (unrecognized scope, treated as narrowed)".into(),
+    }
 }
 
 /// Merge the agent-hq entry into `t`, keeping every other server. Returns
@@ -344,6 +430,11 @@ pub fn write_target<'a>(
     if t.legacy || (t.needs_parent && !t.path.parent().is_some_and(Path::exists)) {
         return Ok(None);
     }
+    if keep_reason(t, opts).is_some() {
+        return Ok(None);
+    }
+    // Refuse to replace a file we cannot read, unless the caller is replacing on purpose.
+    existing_entry(t, opts.scope.is_some() || opts.remote_url.is_some())?;
     let server = match &opts.remote_url {
         Some(_) if !t.vscode => return Ok(None),
         Some(url) => build_remote_entry(url),
@@ -380,14 +471,21 @@ pub fn write_target<'a>(
     Ok(Some(&t.path))
 }
 
-/// Whether `t` (a legacy location) still holds an agent-hq entry.
+/// Whether `t` (a legacy location) still holds an agent-hq entry, in either spelling of
+/// VS Code's setting: the flat key `"mcp.servers"` or the nested `"mcp": { "servers": ... }`.
 pub fn has_entry(t: &Target) -> bool {
     let Some(key) = t.key else {
         return t.path.exists();
     };
-    read_json(&t.path)
-        .ok()
-        .is_some_and(|root| root.get(servers_key(&root, key)).and_then(|s| s.get("agent-hq")).is_some())
+    read_json(&t.path).ok().is_some_and(|root| {
+        entry_in(&root, key).is_some()
+            || (key == "mcp.servers"
+                && root
+                    .get("mcp")
+                    .and_then(|m| m.get("servers"))
+                    .and_then(|s| s.get("agent-hq"))
+                    .is_some())
+    })
 }
 
 /// Make sure the root `inputs` array has the prompt for the remote key.
@@ -786,5 +884,95 @@ mod tests {
         )
         .unwrap();
         assert!(check_mcp_file(&local, "local").is_empty());
+    }
+    fn entry_args(t: &Target) -> Value {
+        read_json(&t.path).unwrap()["servers"]["agent-hq"]["args"].clone()
+    }
+
+    #[test]
+    fn a_plain_install_keeps_a_remote_entry_and_an_explicit_choice_replaces_it() {
+        let dir = tempfile::tempdir().unwrap();
+        let t = vscode_target(dir.path().join("mcp.json"));
+        let remote = EntryOptions { remote_url: Some("https://hq.example.com/mcp".into()), ..EntryOptions::default() };
+        write_target(&t, Path::new("/vault"), &remote).unwrap();
+
+        let plain = EntryOptions::default();
+        assert!(keep_reason(&t, &plain).is_some());
+        assert!(write_target(&t, Path::new("/vault"), &plain).unwrap().is_none());
+        let kept = read_json(&t.path).unwrap();
+        assert_eq!(kept["servers"]["agent-hq"]["url"], "https://hq.example.com/mcp");
+        assert!(kept["servers"]["agent-hq"].get("command").is_none(), "no local full-access server appeared");
+
+        let full = EntryOptions { scope: Some(ServeScope::Full), ..EntryOptions::default() };
+        assert!(write_target(&t, Path::new("/vault"), &full).unwrap().is_some());
+        assert!(read_json(&t.path).unwrap()["servers"]["agent-hq"].get("command").is_some());
+    }
+
+    #[test]
+    fn every_spelling_of_scope_counts_as_narrowed_and_unknown_ones_are_never_widened() {
+        let cases = [
+            (json!(["mcp-serve", "--scope", "tasks"]), Existing::Local(ServeScope::Tasks)),
+            (json!(["mcp-serve", "--scope=tasks"]), Existing::Local(ServeScope::Tasks)),
+            (json!(["mcp-serve", "--scope", "full"]), Existing::Local(ServeScope::Full)),
+            (json!(["mcp-serve"]), Existing::Local(ServeScope::Full)),
+            (json!(["mcp-serve", "--scope", "vault-only"]), Existing::Unrecognized),
+            (json!(["mcp-serve", "--scope=Tasks"]), Existing::Unrecognized),
+            (json!(["mcp-serve", "--scope"]), Existing::Unrecognized),
+        ];
+        for (args, expected) in cases {
+            assert_eq!(classify(&json!({ "command": "hq", "args": args.clone() })), expected, "{args}");
+        }
+
+        let dir = tempfile::tempdir().unwrap();
+        let t = vscode_target(dir.path().join("mcp.json"));
+        write_json(
+            &t.path,
+            &json!({ "servers": { "agent-hq": { "command": "hq", "args": ["mcp-serve", "--scope=restricted-future"] } } }),
+        )
+        .unwrap();
+        assert!(write_target(&t, Path::new("/vault"), &EntryOptions::default()).unwrap().is_none());
+        assert_eq!(entry_args(&t), json!(["mcp-serve", "--scope=restricted-future"]));
+    }
+
+    #[test]
+    fn an_unreadable_antigravity_style_file_is_not_overwritten_by_a_plain_install() {
+        let dir = tempfile::tempdir().unwrap();
+        let t = Target { key: None, ..target(dir.path().join("agent-hq.json"), "unused", "antigravity") };
+        std::fs::write(&t.path, "{ \"command\": // hand edited\n }").unwrap();
+        assert!(write_target(&t, Path::new("/vault"), &EntryOptions::default()).is_err());
+        assert!(std::fs::read_to_string(&t.path).unwrap().contains("hand edited"));
+
+        // Asking for a scope on purpose replaces it.
+        let on_purpose = EntryOptions { scope: Some(ServeScope::Tasks), ..EntryOptions::default() };
+        assert!(write_target(&t, Path::new("/vault"), &on_purpose).unwrap().is_some());
+        assert_eq!(read_json(&t.path).unwrap()["args"], json!(["mcp-serve", "--scope", "tasks"]));
+    }
+
+    #[test]
+    fn status_says_how_far_an_entry_reaches() {
+        let dir = tempfile::tempdir().unwrap();
+        let t = vscode_target(dir.path().join("mcp.json"));
+        assert_eq!(describe(&t), "not found");
+        write_target(&t, Path::new("/vault"), &EntryOptions::default()).unwrap();
+        assert_eq!(describe(&t), "installed (full access)");
+        let tasks = EntryOptions { scope: Some(ServeScope::Tasks), ..EntryOptions::default() };
+        write_target(&t, Path::new("/vault"), &tasks).unwrap();
+        assert_eq!(describe(&t), "installed (tasks only)");
+        let remote = EntryOptions { remote_url: Some("https://hq.example.com/mcp".into()), ..EntryOptions::default() };
+        write_target(&t, Path::new("/vault"), &remote).unwrap();
+        assert_eq!(describe(&t), "installed (remote HQ)");
+    }
+
+    #[test]
+    fn the_legacy_check_finds_both_spellings_of_the_old_setting() {
+        let dir = tempfile::tempdir().unwrap();
+        let legacy = |name: &str, body: Value| {
+            let t = Target { legacy: true, ..target(dir.path().join(name), "mcp.servers", "claude-code") };
+            write_json(&t.path, &body).unwrap();
+            t
+        };
+        assert!(has_entry(&legacy("flat.json", json!({ "mcp.servers": { "agent-hq": {} } }))));
+        assert!(has_entry(&legacy("nested.json", json!({ "mcp": { "servers": { "agent-hq": {} } } }))));
+        assert!(!has_entry(&legacy("none.json", json!({ "editor.fontSize": 14 }))));
     }
 }

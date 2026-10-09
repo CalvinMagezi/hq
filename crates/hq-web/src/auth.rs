@@ -45,9 +45,8 @@ pub(crate) enum ApiIdentity {
     Full,
     /// The Spark-scoped key. Callers must apply their own tool allowlist.
     Spark,
-    /// The tasks-scoped key: Spark's reads plus filing and updating tasks, and
-    /// nothing that starts a session or runs code. Callers must apply
-    /// `TASKS_ALLOWLIST`.
+    /// The tasks-scoped key: the task tools and nothing else (no vault, no session
+    /// tools, no code execution). Callers must apply `TASKS_ALLOWLIST`.
     Tasks,
     /// The handoff-scoped key: Spark's reads plus task writes and session
     /// spawn/send. Callers must apply `HANDOFF_ALLOWLIST`.

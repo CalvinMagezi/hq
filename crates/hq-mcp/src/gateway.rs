@@ -648,6 +648,23 @@ mod tests {
         assert!(!text.contains("harness_session_spawn") && !text.contains("task_delete"));
     }
 
+    /// `mark_scope` tells the scopes apart by the content of their lists, so two scopes that
+    /// ever had the same list would both be marked.
+    #[test]
+    fn the_scope_allowlists_are_all_different() {
+        let lists: [(&str, &[&str]); 4] = [
+            ("spark", SPARK_READONLY_ALLOWLIST),
+            ("handoff", HANDOFF_ALLOWLIST),
+            ("tasks", TASKS_ALLOWLIST),
+            ("session", SESSION_ALLOWLIST),
+        ];
+        for (i, (a, la)) in lists.iter().enumerate() {
+            for (b, lb) in lists.iter().skip(i + 1) {
+                assert_ne!(la, lb, "{a} and {b} have the same allowlist");
+            }
+        }
+    }
+
     #[test]
     fn each_scope_gets_only_its_own_marker_and_a_caller_cannot_forge_either() {
         let handoff = hq_tools::harness_session::HANDOFF_SCOPE_ARG;
