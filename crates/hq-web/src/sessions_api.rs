@@ -369,26 +369,41 @@ const STREAM_MAX: std::time::Duration = std::time::Duration::from_secs(15 * 60);
 /// Reads without a live screen, for a session still marked running, before the view gives up.
 const MAX_STALE_READS: u32 = 5;
 
-static OPEN_STREAMS: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+/// Counts the open views against a limit.
+struct SlotPool {
+    open: std::sync::atomic::AtomicUsize,
+    max: usize,
+}
 
-/// Holds one of the `MAX_STREAMS` places until the stream is dropped, whichever way it ends.
-struct StreamSlot;
+impl SlotPool {
+    const fn new(max: usize) -> Self {
+        Self { open: std::sync::atomic::AtomicUsize::new(0), max }
+    }
+
+    fn take(&'static self) -> Option<StreamSlot> {
+        use std::sync::atomic::Ordering::SeqCst;
+        if self.open.fetch_add(1, SeqCst) >= self.max {
+            self.open.fetch_sub(1, SeqCst);
+            return None;
+        }
+        Some(StreamSlot(self))
+    }
+}
+
+static STREAMS: SlotPool = SlotPool::new(MAX_STREAMS);
+
+/// Holds one place in its pool until the stream is dropped, whichever way it ends.
+struct StreamSlot(&'static SlotPool);
 
 impl StreamSlot {
     fn take() -> Option<Self> {
-        use std::sync::atomic::Ordering::SeqCst;
-        let taken = OPEN_STREAMS.fetch_add(1, SeqCst);
-        if taken >= MAX_STREAMS {
-            OPEN_STREAMS.fetch_sub(1, SeqCst);
-            return None;
-        }
-        Some(Self)
+        STREAMS.take()
     }
 }
 
 impl Drop for StreamSlot {
     fn drop(&mut self) {
-        OPEN_STREAMS.fetch_sub(1, std::sync::atomic::Ordering::SeqCst);
+        self.0.open.fetch_sub(1, std::sync::atomic::Ordering::SeqCst);
     }
 }
 
@@ -993,11 +1008,13 @@ mod tests {
 
     #[test]
     fn live_views_are_capped_and_a_place_is_given_back_when_one_closes() {
-        let held: Vec<StreamSlot> = (0..MAX_STREAMS).filter_map(|_| StreamSlot::take()).collect();
-        assert_eq!(held.len(), MAX_STREAMS);
-        assert!(StreamSlot::take().is_none(), "one more than the cap is refused");
+        // Its own pool, so streams other tests open at the same time cannot change the count.
+        let pool: &'static SlotPool = Box::leak(Box::new(SlotPool::new(3)));
+        let held: Vec<StreamSlot> = (0..3).filter_map(|_| pool.take()).collect();
+        assert_eq!(held.len(), 3);
+        assert!(pool.take().is_none(), "one more than the cap is refused");
         drop(held);
-        assert!(StreamSlot::take().is_some(), "places are returned on drop");
+        assert!(pool.take().is_some(), "places are returned on drop");
     }
 
     fn stream_state(state: &WsState, id: &str) -> StreamState {
