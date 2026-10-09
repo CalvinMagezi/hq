@@ -76,6 +76,96 @@ impl Instruments {
     }
 }
 
+/// Dollars assumed for a call whose cost is unknown in advance (an image, an embedding), so a budget
+/// that is already used up refuses it but an unpriced model is not treated as unknown.
+const UNKNOWN_EXTERNAL_ESTIMATE_USD: f64 = 0.0001;
+
+/// A call made outside `LlmProvider` (image generation, embeddings) that still belongs in the ledger.
+pub struct ExternalCall<'a> {
+    pub provider: &'a str,
+    pub class: ProviderClass,
+    pub model: &'a str,
+    pub origin: &'static str,
+    pub task_hint: &'static str,
+}
+
+impl Instruments {
+    /// Ask the budget gate about an external call. A refusal says which budget stopped it.
+    pub async fn admit_external(&self, call: &ExternalCall<'_>) -> Result<(), crate::budget::BudgetBlocked> {
+        let Some(gate) = self.gate() else {
+            return Ok(());
+        };
+        let verdict = gate
+            .admit(&GateRequest {
+                provider: call.provider,
+                class: call.class,
+                model: call.model,
+                origin: call.origin,
+                estimate_usd: Some(UNKNOWN_EXTERNAL_ESTIMATE_USD),
+            })
+            .await;
+        match verdict {
+            Admission::Deny(blocked) => Err(blocked),
+            Admission::Allow | Admission::Downgrade { .. } => Ok(()),
+        }
+    }
+
+    /// Record a finished external call. `usage` carries the provider's own billed figure when the
+    /// response had one; `error` is the failure class for a call that failed.
+    pub fn record_external(
+        &self,
+        call: &ExternalCall<'_>,
+        usage: Option<Usage>,
+        latency: Duration,
+        error: Option<&str>,
+    ) {
+        let Some(sink) = self.sink() else {
+            return;
+        };
+        let mut ctx = context_for_record();
+        ctx.origin = call.origin;
+        let priced = price_outcome(call.class, call.model, usage.as_ref(), error.is_some());
+        let u = usage.unwrap_or_default();
+        let event = OutcomeEvent {
+            session_id: ctx.session_id,
+            turn_idx: ctx.turn_idx,
+            model: call.model.to_string(),
+            provider: call.provider.to_string(),
+            task_hint: call.task_hint,
+            latency_ms: latency.as_millis().min(i64::MAX as u128) as i64,
+            input_tokens: usage.map(|u| u.input as i64),
+            output_tokens: usage.map(|u| u.output as i64),
+            cache_read_tokens: u.cache_read as i64,
+            cache_write_tokens: u.cache_write as i64,
+            reasoning_tokens: u.reasoning as i64,
+            cost_usd: priced.usd,
+            provider_cost_usd: u.billed_usd,
+            cost_source: priced.source.as_str(),
+            origin: call.origin,
+            success: error.is_none(),
+            error_class: error.map(str::to_string),
+        };
+        if let Ok(handle) = tokio::runtime::Handle::try_current() {
+            handle.spawn(async move {
+                sink.record(event).await;
+            });
+        }
+    }
+}
+
+/// OpenRouter's `usage` object as a [`Usage`]: tokens plus the billed `cost`.
+pub fn usage_from_openrouter(usage: &serde_json::Value) -> Usage {
+    let n = |p: &str| usage.pointer(p).and_then(|v| v.as_u64()).map_or(0, |v| v.min(u64::from(u32::MAX)) as u32);
+    Usage {
+        input: n("/prompt_tokens"),
+        output: n("/completion_tokens"),
+        cache_read: n("/prompt_tokens_details/cached_tokens"),
+        reasoning: n("/completion_tokens_details/reasoning_tokens"),
+        billed_usd: usage.get("cost").and_then(|c| c.as_f64()),
+        ..Usage::default()
+    }
+}
+
 /// What the ledger needs to know about one finished call.
 pub(crate) struct OutcomeInput<'a> {
     pub provider: &'a str,
@@ -296,5 +386,83 @@ impl LlmProvider for InstrumentedProvider {
                 Err(e)
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::budget::{BudgetBlocked, BudgetGate};
+    use crate::outcome_sink::TaskOutcomeSink;
+    use std::sync::Mutex;
+
+    #[derive(Default)]
+    struct Rows(Mutex<Vec<OutcomeEvent>>);
+
+    #[async_trait]
+    impl TaskOutcomeSink for Rows {
+        async fn record(&self, event: OutcomeEvent) {
+            self.0.lock().unwrap().push(event);
+        }
+    }
+
+    struct Refuse;
+
+    #[async_trait]
+    impl BudgetGate for Refuse {
+        async fn admit(&self, req: &GateRequest<'_>) -> Admission {
+            assert_eq!(req.origin, "imagegen");
+            assert!(req.estimate_usd.is_some_and(|e| e > 0.0), "unknown cost must not read as free or unpriced");
+            Admission::Deny(BudgetBlocked {
+                budget: "img".into(),
+                spent_usd: 1.0,
+                limit_usd: 1.0,
+                message: "used up".into(),
+            })
+        }
+    }
+
+    fn call() -> ExternalCall<'static> {
+        ExternalCall {
+            provider: "openrouter",
+            class: ProviderClass::Metered,
+            model: "some/image-model",
+            origin: crate::outcome_sink::origin::IMAGEGEN,
+            task_hint: "image",
+        }
+    }
+
+    #[test]
+    fn an_openrouter_usage_object_gives_tokens_and_the_billed_cost() {
+        let u = usage_from_openrouter(&serde_json::json!({
+            "prompt_tokens": 12, "completion_tokens": 3, "cost": 0.04,
+            "prompt_tokens_details": {"cached_tokens": 2}, "completion_tokens_details": {"reasoning_tokens": 1}
+        }));
+        assert_eq!((u.input, u.output, u.cache_read, u.reasoning, u.billed_usd), (12, 3, 2, 1, Some(0.04)));
+        assert_eq!(usage_from_openrouter(&serde_json::json!({})), Usage::default());
+    }
+
+    #[tokio::test]
+    async fn an_external_call_is_recorded_with_its_origin_and_billed_cost() {
+        let rows = Arc::new(Rows::default());
+        let instruments = Instruments::new();
+        instruments.set_sink(rows.clone());
+        let usage = Usage { billed_usd: Some(0.04), ..Usage::default() };
+        instruments.record_external(&call(), Some(usage), Duration::from_millis(5), None);
+        tokio::task::yield_now().await;
+        let rows = rows.0.lock().unwrap();
+        assert_eq!(
+            (rows[0].origin, rows[0].cost_source, rows[0].cost_usd, rows[0].task_hint),
+            ("imagegen", "provider", 0.04, "image")
+        );
+    }
+
+    #[tokio::test]
+    async fn an_origin_budget_that_is_used_up_refuses_an_external_call() {
+        let instruments = Instruments::new();
+        assert!(instruments.admit_external(&call()).await.is_ok(), "no gate, no limit");
+        instruments.set_gate(Arc::new(Refuse));
+        let err = instruments.admit_external(&call()).await.unwrap_err();
+        assert_eq!(err.budget, "img");
     }
 }
