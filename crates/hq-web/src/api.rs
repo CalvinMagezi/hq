@@ -58,6 +58,12 @@ pub(crate) async fn search_handler(
         .with_conn(|c| hq_db::search::keyword_search(c, &query, limit))
         && !hits.is_empty()
     {
+        // The index covers Notebooks, but Lite filters what it returns the same way as the
+        // note endpoints do, so a hit in a hidden folder never reaches the client.
+        let hits: Vec<_> = hits
+            .into_iter()
+            .filter(|h| state.path_allowed(&h.note_path))
+            .collect();
         return axum::Json(serde_json::json!({ "results": hits })).into_response();
     }
     // The FTS index lags notes written outside the web UI until its 30m sync,
@@ -65,6 +71,7 @@ pub(crate) async fn search_handler(
     // It runs off the async runtime so a large vault cannot stall other requests.
     let vault = state.vault_path.clone();
     let needle = query.to_lowercase();
+    let lite = state.profile().is_lite();
     let results = tokio::task::spawn_blocking(move || {
         let mut results = Vec::new();
         walk_for_substring(
@@ -73,6 +80,7 @@ pub(crate) async fn search_handler(
             &needle,
             &mut results,
             limit,
+            lite,
         );
         results
     })
@@ -88,6 +96,7 @@ fn walk_for_substring(
     needle: &str,
     results: &mut Vec<serde_json::Value>,
     limit: usize,
+    lite: bool,
 ) {
     let Ok(entries) = std::fs::read_dir(dir) else {
         return;
@@ -96,11 +105,15 @@ fn walk_for_substring(
         if results.len() >= limit {
             return;
         }
+        // Lite does not follow links out of the notes.
+        if lite && entry.file_type().is_ok_and(|t| t.is_symlink()) {
+            continue;
+        }
         let path = entry.path();
         if path.is_dir() {
             let name = path.file_name().unwrap_or_default().to_string_lossy();
             if !name.starts_with('.') && !name.starts_with('_') {
-                walk_for_substring(&path, root, needle, results, limit);
+                walk_for_substring(&path, root, needle, results, limit, lite);
             }
         } else if let Some(hit) = substring_hit(&path, root, needle) {
             results.push(hit);
@@ -157,9 +170,15 @@ pub(crate) async fn vault_asset_handler(
         return ApiError::bad_request("path is required").into_response();
     }
 
+    if !state.path_allowed(&path_param) {
+        return ApiError::not_found().into_response();
+    }
     let Some(abs) = resolve_in_vault(&state.vault_path, &path_param) else {
         return ApiError::Forbidden("path is outside the vault".to_string()).into_response();
     };
+    if !state.resolved_allowed(&abs) {
+        return ApiError::not_found().into_response();
+    }
 
     match std::fs::read(&abs) {
         Ok(data) => {
@@ -217,12 +236,18 @@ pub(crate) async fn note_read_handler(
     if crate::vault_api::is_rejected_note_ref(&path_param) {
         return ApiError::bad_request("invalid path").into_response();
     }
+    if !state.path_allowed(&path_param) {
+        return ApiError::not_found().into_response();
+    }
     let Some((abs, effective_path)) =
         crate::vault_api::resolve_note_path(&state.vault_path, &path_param)
     else {
         return ApiError::not_found().into_response();
     };
-    crate::vault_api::read_note(&state.vault_path, &effective_path, &abs)
+    if !state.path_allowed(&effective_path) || !state.resolved_allowed(&abs) {
+        return ApiError::not_found().into_response();
+    }
+    crate::vault_api::read_note(&state.vault_path, &effective_path, &abs, state.profile().is_lite())
 }
 
 /// The web UI always asks for the recursive tree; it filters client-side.
@@ -231,12 +256,16 @@ pub(crate) async fn tree_handler(
     axum::extract::Query(params): axum::extract::Query<std::collections::HashMap<String, String>>,
 ) -> axum::response::Response {
     let path_param = params.get("path").cloned().unwrap_or_default();
-    crate::vault_api::recursive_tree(&state.vault_path, &path_param)
+    if !state.path_allowed(&path_param) {
+        return ApiError::not_found().into_response();
+    }
+    crate::vault_api::recursive_tree(&state.vault_path, &path_param, state.profile().is_lite())
 }
 
 pub(crate) async fn pinned_handler(State(state): State<Arc<WsState>>) -> axum::response::Response {
     let vault = state.vault_path.clone();
-    match tokio::task::spawn_blocking(move || crate::vault_api::pinned_notes(&vault)).await {
+    let lite = state.profile().is_lite();
+    match tokio::task::spawn_blocking(move || crate::vault_api::pinned_notes(&vault, lite)).await {
         Ok(notes) => axum::Json(serde_json::json!({"notes": notes})).into_response(),
         Err(e) => ApiError::internal(e).into_response(),
     }
@@ -252,12 +281,18 @@ pub(crate) async fn pin_toggle_handler(
         .unwrap_or("")
         .to_string();
     let pin = body.get("pin").and_then(|p| p.as_bool()).unwrap_or(false);
+    if !state.path_allowed(&path_param) {
+        return ApiError::not_found().into_response();
+    }
 
     let Some(abs) =
         resolve_in_vault(&state.vault_path, &path_param).filter(|_| !path_param.is_empty())
     else {
         return ApiError::bad_request("invalid path").into_response();
     };
+    if !state.resolved_allowed(&abs) {
+        return ApiError::not_found().into_response();
+    }
 
     let content = match std::fs::read_to_string(&abs) {
         Ok(c) => c,

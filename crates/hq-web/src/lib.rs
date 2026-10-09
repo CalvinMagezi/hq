@@ -10,6 +10,7 @@ mod mcp_http;
 mod notifications_api;
 mod notifications_watch;
 mod origin;
+mod profile_gate;
 mod security_headers;
 mod session_driver;
 mod sessions_api;
@@ -103,6 +104,32 @@ impl WsState {
         }
     }
 
+    /// The edition this server runs as. Lite is decided by the config the server was started
+    /// with; a server with no readable config is the full profile.
+    pub fn profile(&self) -> hq_core::config::Profile {
+        self.hq_config.as_ref().map(|c| c.profile).unwrap_or_default()
+    }
+
+    /// Whether a client-supplied vault path may be read or written. Everything outside the
+    /// vault is refused elsewhere; under Lite, HQ's own and hidden folders are refused too.
+    pub(crate) fn path_allowed(&self, rel: &str) -> bool {
+        !self.profile().is_lite() || !vault_api::lite_hides(rel)
+    }
+
+    /// Like [`Self::path_allowed`], for a path already resolved inside the vault: under Lite it
+    /// follows symlinks, so a link in a normal folder cannot lead into a hidden one.
+    pub(crate) fn resolved_allowed(&self, abs: &std::path::Path) -> bool {
+        !self.profile().is_lite() || !vault_api::lite_hides_resolved(&self.vault_path, abs)
+    }
+
+    /// Run as `profile`, whatever the config file loaded at construction says.
+    pub fn with_profile(mut self, profile: hq_core::config::Profile) -> Self {
+        let mut cfg = self.hq_config.as_deref().cloned().unwrap_or_default();
+        cfg.profile = profile;
+        self.hq_config = Some(Arc::new(cfg));
+        self
+    }
+
     pub fn with_registry(mut self, registry: Arc<ToolRegistry>) -> Self {
         self.registry = Some(registry);
         self
@@ -140,8 +167,11 @@ pub fn create_router(state: Arc<WsState>) -> Router {
 
     notifications_watch::spawn_notifications_watcher(state.clone());
     tasks_watch::spawn_tasks_watcher(state.clone());
-    session_driver::spawn_session_driver(state.clone());
-    subagent_followup::spawn_subagent_followup(state.clone());
+    // Both act on coding-agent sessions and sub-agent runs, which Lite does not have.
+    if !state.profile().is_lite() {
+        session_driver::spawn_session_driver(state.clone());
+        subagent_followup::spawn_subagent_followup(state.clone());
+    }
 
     let router = Router::new()
         .route("/ws", get(ws::ws_handler))
@@ -292,6 +322,12 @@ pub fn create_router(state: Arc<WsState>) -> Router {
         .layer(axum::middleware::from_fn(no_cache_shell))
         // Slow mobile links: gzip/brotli the PWA's JS and CSS and every JSON response.
         .layer(tower_http::compression::CompressionLayer::new())
+        // Inside auth: a request that is not allowed in at all is refused first, and one that is
+        // reaches a route Lite serves only if the profile lists it.
+        .layer(axum::middleware::from_fn_with_state(
+            state.clone(),
+            profile_gate::lite_gate,
+        ))
         // Inside CORS, so preflight requests are answered before auth runs.
         .layer(axum::middleware::from_fn_with_state(
             state.clone(),

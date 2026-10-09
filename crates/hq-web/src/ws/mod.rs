@@ -31,6 +31,8 @@ pub(crate) struct ChatTurnSlot {
 pub(crate) type ChatTurnMap = Arc<tokio::sync::RwLock<std::collections::HashMap<String, ChatTurnSlot>>>;
 
 const BUSY_REASON: &str = "A reply is still running in this chat. Stop it or wait for it to finish.";
+const LITE_CHAT_REASON: &str =
+    "Chat is not part of HQ Lite. Use tasks and notes here, or run the full HQ for chat.";
 const GONE_REASON: &str = "That message is no longer in this chat, so it could not be edited.";
 
 /// What a browser may send over the socket. Unknown types are logged and ignored.
@@ -113,6 +115,10 @@ async fn dispatch(state: &Arc<WsState>, text: &str) {
         return;
     };
     match msg {
+        ClientMsg::Chat { thread_id, client_id, .. } if state.profile().is_lite() => {
+            // Chat turns run tools, which Lite's server does not offer a browser.
+            reject(state, thread_id.as_deref().unwrap_or(""), client_id.as_deref(), LITE_CHAT_REASON, false);
+        }
         ClientMsg::Chat { content, thread_id, attachments, client_id, replace_from } => {
             let text = chat_uploads::strip_marker(&content);
             let files = chat_uploads::resolve(&state.vault_path, attachments).await;
@@ -824,5 +830,24 @@ mod tests {
         let long = "é".repeat(80);
         assert_eq!(thread_title(&long), format!("{}...", "é".repeat(60)));
         assert_eq!(thread_title("   "), "");
+    }
+    /// Lite's server never starts a chat turn: the message is refused over the socket before
+    /// anything is saved or any reply is registered, and the full profile still takes it.
+    #[tokio::test]
+    async fn lite_refuses_a_chat_message_and_saves_nothing() {
+        let vault = std::env::temp_dir().join(format!("hq-ws-lite-{}", uuid::Uuid::new_v4()));
+        let lite = Arc::new(WsState::new(vault, None).with_profile(hq_core::config::Profile::Lite));
+        let mut rx = lite.tx.subscribe();
+
+        dispatch(&lite, r#"{"type":"chat","content":"run the deploy","thread_id":"t1","client_id":"local-1"}"#).await;
+
+        let ev: serde_json::Value = serde_json::from_str(&rx.try_recv().unwrap()).unwrap();
+        assert_eq!(ev["type"], "chat_rejected");
+        assert_eq!(ev["client_id"], "local-1");
+        assert_eq!(ev["reason"], LITE_CHAT_REASON);
+        assert!(rx.try_recv().is_err(), "no turn_start or reply followed");
+        assert!(lite.active_chat_turns.read().await.is_empty());
+        let threads = lite.db.with_conn(|c| hq_db::chat::list_threads(c, 50, 0, None)).unwrap_or_default();
+        assert!(threads.is_empty(), "nothing was saved: {threads:?}");
     }
 }

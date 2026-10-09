@@ -36,6 +36,11 @@ pub async fn run_embeddings(vault_path: &Path, db: &Database, config: &HqConfig)
         Err(e) => warn!(error = %e, "embeddings: FTS5 sync failed"),
     }
 
+    // Lite keeps the keyword index current and sends no note text anywhere for vectors.
+    if config.profile.is_lite() {
+        return Ok(());
+    }
+
     // Generate vector embeddings for up to 5 notes per cycle (rate-limited).
     // OpenRouter when configured (e.g. the VPS, no local Ollama); Ollama otherwise.
     let vault = hq_vault::VaultClient::new(vault_path.to_path_buf())?;

@@ -43,7 +43,7 @@ pub async fn run(config: &HqConfig, component: &str) -> Result<()> {
     hq_agent::install_ledger(db.clone());
 
     info!(vault = %config.vault_path.display(), "HQ starting");
-    if matches!(component, "all" | "daemon") {
+    if matches!(component, "all" | "daemon") && !config.profile.is_lite() {
         notify_if_bash_refused(config, &db);
     }
 
@@ -61,6 +61,9 @@ pub async fn run(config: &HqConfig, component: &str) -> Result<()> {
                 shutdown_trigger.trigger();
             });
             daemon::run_daemon(config, vault, db, shutdown).await
+        }
+        "relay" | "discord" | "telegram" if config.profile.is_lite() => {
+            anyhow::bail!("the chat relays are not part of HQ Lite (profile: lite)")
         }
         "relay" | "discord" => {
             println!("Starting Discord relay...");
@@ -104,8 +107,11 @@ async fn start_all(config: &HqConfig, vault: Arc<VaultClient>, db: Arc<Database>
     let shutdown = ShutdownSignal::new();
     let cleanup = CleanupRegistry::new();
     spawn_daemon(config, vault.clone(), db.clone(), shutdown.clone());
-    spawn_discord(config, &vault, &db);
-    spawn_telegram(config, &vault, &db);
+    // Lite has no chat relay, whatever tokens are configured.
+    if !config.profile.is_lite() {
+        spawn_discord(config, &vault, &db);
+        spawn_telegram(config, &vault, &db);
+    }
     spawn_web_server(config, &vault, &db);
 
     println!("All components running. Press Ctrl+C to stop.");
@@ -286,7 +292,9 @@ pub(crate) fn build_web_state(
         tracing::warn!(path = %static_dir.display(), "ws: no web UI build yet (index.html missing)");
     }
     info!(path = %static_dir.display(), "ws: serving web UI");
-    let mut state = hq_web::WsState::new(vault_path, Some(static_dir)).with_registry(registry);
+    let mut state = hq_web::WsState::new(vault_path, Some(static_dir))
+        .with_profile(config.profile)
+        .with_registry(registry);
     state.web_auth_token = web_auth_token;
     // `hq web --lan` overrides the configured bind, and /mcp's dev switch must follow the real one.
     state.web_bind_is_loopback = hq_web::auth::bind_is_loopback(bind);

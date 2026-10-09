@@ -365,6 +365,11 @@ impl ToolRegistry {
         cats
     }
 
+    /// Drop every tool `keep` rejects.
+    pub fn retain(&mut self, keep: impl Fn(&dyn HqTool) -> bool) {
+        self.tools.retain(|_, t| keep(t.as_ref()));
+    }
+
     /// Return the total number of registered tools.
     pub fn len(&self) -> usize {
         self.tools.len()
