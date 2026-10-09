@@ -19,7 +19,7 @@ The recording uses sample data: a placeholder address and no real account.
 2. **Open <https://deploy.agent-hq.online>** and paste the token. Pick a name, a location, a size with at least 4 GB of memory, your SSH key (paste the public key if it is new) and your own IP address as `x.x.x.x/32`. Only that address can reach SSH. Click **Create server**.
 3. **Wait about 3 to 5 minutes** after Hetzner shows the server as `running`. The server installs HQ from signed releases by itself, and the page cannot see its progress because HQ is private to your tailnet.
 4. **Join your tailnet.** On your computer run the command the page shows, `ssh root@<server-ip> hq-join`. It prints a Tailscale login link: open it and sign in. When it finishes it prints your HQ link, `https://hq.example.ts.net:8443/vault#token=...`. Treat that link like a password, because it signs you in as admin.
-5. **Open the HQ link** on a device on your tailnet. HQ asks for a model key on first run.
+5. **Open the HQ link** on a device on your tailnet. HQ asks for a model key on first run; [what that screen does and how to fix problems](FIRST_RUN.md).
 6. **Close public SSH** with the button on the form page, once HQ opens. From then on only your tailnet reaches the server. If you ever lose the tailnet path, **Reopen SSH for my IP** brings it back.
 
 When you are finished, type the server name into **Delete server** on the same page. It removes the server, its firewall and the SSH key it added. Then delete the Hetzner token (or the whole project) and remove the machine from your Tailscale admin page.

@@ -38,6 +38,18 @@ fn output_shows_up_on_screen() {
 }
 
 #[test]
+fn a_styled_read_carries_the_colors_the_program_printed() {
+    let host = Host::new();
+    host.spawn(sh("colors", "printf '\\033[31mred words\\033[0m plain\\n'; sleep 30"))
+        .unwrap();
+    let styled = wait_until_read(&host, "colors", ReadSource::Styled, "red words");
+    assert!(styled.contains("\x1b["), "{styled:?}");
+    let plain = host.read("colors", ReadSource::Visible, 0).unwrap();
+    assert!(plain.contains("red words plain") && !plain.contains('\x1b'), "{plain:?}");
+    host.kill("colors").unwrap();
+}
+
+#[test]
 fn exit_code_is_reported() {
     let host = Host::new();
     host.spawn(sh("quits", "exit 3")).unwrap();

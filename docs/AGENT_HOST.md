@@ -55,7 +55,7 @@ version gets `protocol_mismatch`.
 | `agent.spawn` | `name`, `argv`, `cwd`, optional `agent` (kind, for state detection), `resume_argv` (see Restarts), `env` (object), `rows`, `cols`, `scrollback_rows` | agent info |
 | `agent.list` | none | `{"agents": [...]}` |
 | `agent.get` | `name` | agent info |
-| `agent.read` | `name`, optional `source` (`visible`, `recent`, `recent_unwrapped`; default `recent_unwrapped`), optional `lines` (last N, 0 or absent for all) | `{"text", "truncated"}`; text is cut to its last 400 KiB, at a line start, when longer |
+| `agent.read` | `name`, optional `source` (`visible`, `recent`, `recent_unwrapped`, `styled`; default `recent_unwrapped`; `styled` is `recent` with color and style as ANSI escape sequences), optional `lines` (last N, 0 or absent for all) | `{"text", "truncated"}`; text is cut to its last 400 KiB, at a line start, when longer |
 | `agent.send_text` | `name`, `text` | `{}` (raw bytes, as given) |
 | `agent.paste` | `name`, `text` | `{}` (bracketed paste when the program enabled it) |
 | `agent.prompt` | `name`, `text` | `{}` (paste, short pause, Enter) |
