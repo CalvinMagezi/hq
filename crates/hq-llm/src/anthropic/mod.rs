@@ -109,6 +109,7 @@ impl LlmProvider for AnthropicProvider {
             .await
             .map_err(|e| LlmError::from_request_error(&e))?;
 
+        crate::ratelimit::observe(&self.api_base, resp.headers());
         let status = resp.status().as_u16();
         let bytes = resp
             .bytes()
@@ -163,6 +164,7 @@ impl LlmProvider for AnthropicProvider {
             .await
             .map_err(|e| LlmError::from_request_error(&e))?;
 
+        crate::ratelimit::observe(&self.api_base, resp.headers());
         let status = resp.status().as_u16();
         if !(200..300).contains(&status) {
             let bytes = resp.bytes().await.unwrap_or_default();

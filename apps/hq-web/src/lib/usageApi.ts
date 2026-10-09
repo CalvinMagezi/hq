@@ -86,6 +86,16 @@ export interface ProviderReading {
   limit_remaining: number | null
 }
 
+export interface RateLimitReading {
+  requests_limit: number | null
+  requests_remaining: number | null
+  requests_reset: string | null
+  tokens_limit: number | null
+  tokens_remaining: number | null
+  tokens_reset: string | null
+  captured_at: number
+}
+
 export interface ProviderRow {
   backend: string
   adapter: string
@@ -93,6 +103,7 @@ export interface ProviderRow {
   status: 'ok' | 'refused' | 'error' | 'no_key' | 'local' | 'subscription' | 'ledger_only'
   provider: ProviderReading | null
   ledger: LedgerWindows
+  rate_limit: RateLimitReading | null
   note: string | null
 }
 

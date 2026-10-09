@@ -80,6 +80,7 @@ impl LlmProvider for OpenRouterProvider {
                         LlmError::Network(format!("connection error: {e}"))
                     }
                 })?;
+            crate::ratelimit::observe(&self.api_base, resp.headers());
 
             let status = resp.status().as_u16();
             if status == 429 {
@@ -419,6 +420,7 @@ impl OpenRouterProvider {
                 .send()
                 .await
                 .map_err(|e| LlmError::Network(format!("connection error: {e}")))?;
+            crate::ratelimit::observe(&self.api_base, resp.headers());
 
             let status = resp.status().as_u16();
             if status == 429 {
