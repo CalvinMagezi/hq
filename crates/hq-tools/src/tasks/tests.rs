@@ -1607,7 +1607,11 @@ async fn an_estimate_is_set_validated_cleared_and_compared_with_leased_time() {
     let got = call_tool(&tools, "task_get", json!({ "id": id })).await.unwrap();
     assert_eq!(got["time"]["estimate_minutes"], 90);
     assert_eq!(got["time"]["leased_seconds"], 0);
-    assert_eq!(got["time"]["variance_minutes"], -90);
+    assert!(got["time"]["variance_minutes"].is_null(), "nothing worked yet, so nothing to compare");
+    let claim = call_tool(&tools, "task_claim", json!({ "task_id": id, "actor": "alpha" })).await.unwrap();
+    call_tool(&tools, "task_release", json!({ "lease": claim["lease"], "status": "to_do" })).await.unwrap();
+    let worked = call_tool(&tools, "task_get", json!({ "id": id })).await.unwrap();
+    assert!(worked["time"]["variance_minutes"].as_i64().is_some_and(|v| v <= 0), "{worked}");
 
     let cleared = call_tool(&tools, "task_update", json!({ "id": id, "estimate_minutes": null })).await.unwrap();
     assert!(cleared["estimate_minutes"].is_null());
