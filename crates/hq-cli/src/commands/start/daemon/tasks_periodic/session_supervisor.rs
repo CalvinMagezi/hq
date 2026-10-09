@@ -514,6 +514,7 @@ async fn supervise(
 mod alerts;
 mod text;
 #[cfg(test)]
+#[cfg(unix)]
 mod tests;
 
 use alerts::*;

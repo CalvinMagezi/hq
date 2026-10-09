@@ -17,7 +17,8 @@ mod backend;
 mod native;
 #[cfg(unix)]
 pub mod pairing;
-#[cfg(any(test, feature = "test-support"))]
+// Builds on the SSH transport, which is Unix-only.
+#[cfg(all(unix, any(test, feature = "test-support")))]
 pub mod scripted;
 mod sandbox;
 pub mod tools;
