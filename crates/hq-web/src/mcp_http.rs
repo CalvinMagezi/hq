@@ -8,6 +8,8 @@ use std::sync::Arc;
 
 /// Env var holding the handoff-scoped key.
 const HANDOFF_KEY_ENV: &str = "AGENTHQ_HANDOFF_API_KEY";
+/// Env var holding the tasks-scoped key.
+const TASKS_KEY_ENV: &str = "AGENTHQ_TASKS_API_KEY";
 
 fn rpc_ok(id: Value, result: Value) -> Json<Value> {
     Json(json!({"jsonrpc": "2.0", "id": id, "result": result}))
@@ -20,7 +22,8 @@ fn rpc_err(id: Value, code: i64, message: impl Into<String>) -> Json<Value> {
 /// MCP over HTTP handler.
 /// Handles initialize, tools/list, and tools/call.
 /// Auth: set AGENTHQ_API_KEY (full access) and/or AGENTHQ_SPARK_API_KEY
-/// (read-only allowlist) and/or AGENTHQ_HANDOFF_API_KEY (reads plus task writes
+/// (read-only allowlist) and/or AGENTHQ_TASKS_API_KEY (reads plus task writes,
+/// no session tools) and/or AGENTHQ_HANDOFF_API_KEY (reads plus task writes
 /// and session spawn/send) env vars; clients send x-api-key or
 /// Authorization: Bearer <key>. With no key set every call is refused, except
 /// under the loopback-only dev switch. See `crate::auth::resolve_identity`.
@@ -41,6 +44,7 @@ struct McpKeys {
     full: Option<String>,
     spark: Option<String>,
     handoff: Option<String>,
+    tasks: Option<String>,
 }
 
 impl McpKeys {
@@ -49,11 +53,15 @@ impl McpKeys {
             full: std::env::var("AGENTHQ_API_KEY").ok(),
             spark: std::env::var("AGENTHQ_SPARK_API_KEY").ok(),
             handoff: std::env::var(HANDOFF_KEY_ENV).ok().filter(|k| !k.trim().is_empty()),
+            tasks: std::env::var(TASKS_KEY_ENV).ok().filter(|k| !k.trim().is_empty()),
         }
     }
 
     fn none_configured(&self) -> bool {
-        self.full.is_none() && self.spark.is_none() && self.handoff.is_none()
+        self.full.is_none()
+            && self.spark.is_none()
+            && self.handoff.is_none()
+            && self.tasks.is_none()
     }
 }
 
@@ -70,6 +78,7 @@ async fn handle_mcp(
         keys.full.as_deref(),
         keys.spark.as_deref(),
         keys.handoff.as_deref(),
+        keys.tasks.as_deref(),
         dev_open,
     );
     // A launched agent's own token, when none of the configured keys matched.
@@ -87,6 +96,7 @@ async fn handle_mcp(
     let allowed: Option<&[&str]> = match (identity, &session) {
         (Some(crate::auth::ApiIdentity::Full), _) => None,
         (Some(crate::auth::ApiIdentity::Spark), _) => Some(hq_mcp::gateway::SPARK_READONLY_ALLOWLIST),
+        (Some(crate::auth::ApiIdentity::Tasks), _) => Some(hq_mcp::gateway::TASKS_ALLOWLIST),
         (Some(crate::auth::ApiIdentity::Handoff), _) => Some(hq_mcp::gateway::HANDOFF_ALLOWLIST),
         (None, _) => Some(hq_mcp::gateway::SESSION_ALLOWLIST),
     };
@@ -224,6 +234,7 @@ mod tests {
     const FULL: &str = "full-key-1111";
     const SPARK: &str = "spark-key-2222";
     const HANDOFF: &str = "handoff-key-3333";
+    const TASKS: &str = "tasks-key-4444";
 
     struct Fake(&'static str, &'static str);
 
@@ -255,6 +266,7 @@ mod tests {
             ("harness_session_logs", "sessions"),
             ("task_create", "tasks"),
             ("config_manage", "config"),
+            ("harness_session_spawn", "sessions"),
         ] {
             registry.register(Box::new(Fake(name, category)));
         }
@@ -266,6 +278,7 @@ mod tests {
             full: Some(FULL.into()),
             spark: Some(SPARK.into()),
             handoff: Some(HANDOFF.into()),
+            tasks: Some(TASKS.into()),
         });
         axum::Router::new().route(
             "/mcp",
@@ -328,7 +341,7 @@ mod tests {
     async fn tools_list_is_the_two_gateway_tools_and_names_only_reachable_categories() {
         let app = app();
         let description = |res: &Value| res["result"]["tools"].to_string();
-        for key in [FULL, SPARK, HANDOFF] {
+        for key in [FULL, SPARK, HANDOFF, TASKS] {
             let res = rpc(&app, Some(key), list()).await;
             let tools = res["result"]["tools"].as_array().unwrap();
             let listed: Vec<_> = tools.iter().map(|t| t["name"].as_str().unwrap()).collect();
@@ -341,18 +354,26 @@ mod tests {
         assert!(!spark.contains("config") && !spark.contains("tasks"), "{spark}");
         let handoff = description(&rpc(&app, Some(HANDOFF), list()).await);
         assert!(handoff.contains("tasks") && !handoff.contains("config"), "{handoff}");
-        assert!(!handoff.contains("sessions"), "{handoff}");
+        assert!(handoff.contains("sessions"), "handoff can spawn sessions: {handoff}");
+        let tasks = description(&rpc(&app, Some(TASKS), list()).await);
+        assert!(tasks.contains("tasks"), "{tasks}");
+        assert!(
+            !tasks.contains("vault") && !tasks.contains("config") && !tasks.contains("sessions"),
+            "{tasks}"
+        );
     }
 
     #[tokio::test]
     async fn discovery_is_filtered_to_the_key_scope() {
         let app = app();
         let full = names(&rpc(&app, Some(FULL), discover()).await);
-        assert_eq!(full.len(), 4, "{full:?}");
+        assert_eq!(full.len(), 5, "{full:?}");
         let spark = names(&rpc(&app, Some(SPARK), discover()).await);
         assert_eq!(spark, ["harness_session_logs", "vault_search"]);
         let handoff = names(&rpc(&app, Some(HANDOFF), discover()).await);
-        assert_eq!(handoff, ["task_create", "vault_search"]);
+        assert_eq!(handoff, ["harness_session_spawn", "task_create", "vault_search"]);
+        let tasks = names(&rpc(&app, Some(TASKS), discover()).await);
+        assert_eq!(tasks, ["task_create"], "no vault and no session tools on the tasks key");
     }
 
     fn call_failed(res: &Value) -> bool {
@@ -373,6 +394,11 @@ mod tests {
             (HANDOFF, "vault_search", true),
             (HANDOFF, "harness_session_logs", false),
             (HANDOFF, "config_manage", false),
+            (TASKS, "task_create", true),
+            (TASKS, "vault_search", false),
+            (TASKS, "harness_session_spawn", false),
+            (TASKS, "harness_session_logs", false),
+            (TASKS, "config_manage", false),
         ];
         for (key, tool, runs) in cases {
             let res = rpc(&app, Some(key), call(tool)).await;

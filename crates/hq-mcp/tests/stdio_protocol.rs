@@ -236,3 +236,116 @@ async fn ping_answers_with_an_empty_result() {
     assert!(reply.get("error").is_none(), "ping failed: {reply}");
     assert_eq!(reply["result"], json!({}));
 }
+
+struct NamedTool(&'static str);
+
+#[async_trait::async_trait]
+impl HqTool for NamedTool {
+    fn name(&self) -> &str {
+        self.0
+    }
+    fn description(&self) -> &str {
+        "named tool"
+    }
+    fn category(&self) -> &str {
+        "testing"
+    }
+    fn parameters(&self) -> Value {
+        json!({"type": "object"})
+    }
+    async fn execute(&self, _args: Value) -> anyhow::Result<Value> {
+        Ok(json!({"ran": self.0}))
+    }
+}
+
+/// A server limited to the tasks scope, the way `hq mcp-serve --scope tasks` builds it.
+async fn tasks_scoped_client() -> Client {
+    let mut registry = ToolRegistry::new();
+    for name in ["task_create", "task_delete", "harness_session_spawn", "bash"] {
+        registry.register(Box::new(NamedTool(name)));
+    }
+    let db = hq_db::Database::open_memory().unwrap();
+    let server = HqMcpServer::new(Arc::new(registry), db)
+        .with_allowlist(hq_mcp::gateway::TASKS_ALLOWLIST);
+    let (client_io, server_io) = tokio::io::duplex(PIPE_BUFFER_BYTES);
+    tokio::spawn(async move {
+        let running = rmcp::serve_server(server, server_io).await.unwrap();
+        let _ = running.waiting().await;
+    });
+    let (reader, writer) = tokio::io::split(client_io);
+    let mut client = Client { writer, lines: BufReader::new(reader).lines() };
+    client
+        .request(
+            1,
+            "initialize",
+            json!({
+                "protocolVersion": PINNED_PROTOCOL_VERSION,
+                "capabilities": {},
+                "clientInfo": {"name": "scoped-test", "version": "0"}
+            }),
+        )
+        .await;
+    client
+        .send(json!({"jsonrpc": "2.0", "method": "notifications/initialized"}))
+        .await;
+    client
+}
+
+#[tokio::test]
+async fn a_tasks_scoped_server_runs_task_tools_and_refuses_the_rest() {
+    let mut client = tasks_scoped_client().await;
+
+    let ok = client
+        .request(2, "tools/call", json!({"name": "hq_call", "arguments": {"tool": "task_create", "args": {}}}))
+        .await;
+    assert_eq!(ok["result"]["isError"], false, "{ok}");
+
+    for (id, tool) in [(3, "task_delete"), (4, "harness_session_spawn"), (5, "bash")] {
+        let denied = client
+            .request(id, "tools/call", json!({"name": "hq_call", "arguments": {"tool": tool, "args": {}}}))
+            .await;
+        assert!(
+            denied.get("error").is_some() || denied["result"]["isError"] == true,
+            "the tasks scope must refuse {tool}: {denied}"
+        );
+    }
+
+    let found = client
+        .request(6, "tools/call", json!({"name": "hq_discover", "arguments": {}}))
+        .await;
+    let text = found["result"]["content"][0]["text"].as_str().unwrap();
+    assert!(text.contains("task_create"), "{text}");
+    for hidden in ["task_delete", "harness_session_spawn", "bash"] {
+        assert!(!text.contains(hidden), "discovery must not list {hidden}: {text}");
+    }
+}
+
+#[tokio::test]
+async fn a_scoped_server_sends_instructions_without_the_catalog() {
+    let mut registry = ToolRegistry::new();
+    registry.register(Box::new(NamedTool("bash")));
+    let db = hq_db::Database::open_memory().unwrap();
+    let server = HqMcpServer::new(Arc::new(registry), db)
+        .with_allowlist(hq_mcp::gateway::TASKS_ALLOWLIST);
+    let (client_io, server_io) = tokio::io::duplex(PIPE_BUFFER_BYTES);
+    tokio::spawn(async move {
+        let running = rmcp::serve_server(server, server_io).await.unwrap();
+        let _ = running.waiting().await;
+    });
+    let (reader, writer) = tokio::io::split(client_io);
+    let mut client = Client { writer, lines: BufReader::new(reader).lines() };
+    let init = client
+        .request(
+            1,
+            "initialize",
+            json!({
+                "protocolVersion": PINNED_PROTOCOL_VERSION,
+                "capabilities": {},
+                "clientInfo": {"name": "scoped-test", "version": "0"}
+            }),
+        )
+        .await;
+    let instructions = init["result"]["instructions"].as_str().unwrap();
+    assert_eq!(instructions, hq_mcp::gateway::SCOPED_INSTRUCTIONS);
+    assert!(!instructions.contains("bash"));
+}

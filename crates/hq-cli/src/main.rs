@@ -332,6 +332,13 @@ enum Commands {
         /// Only the per-user configs, skip the project files
         #[arg(long)]
         global: bool,
+        /// What the installed stdio server may reach: full or tasks. Needs --target. Unset keeps
+        /// the scope an existing entry has (full for a new one)
+        #[arg(long, value_enum)]
+        scope: Option<commands::cursor_mcp_config::ServeScope>,
+        /// Point VS Code at a remote HQ's /mcp URL instead (the key is asked for, never written)
+        #[arg(long)]
+        url: Option<String>,
     },
 
     /// Deprecated: `hq mcp install --target project [path]`
@@ -347,7 +354,11 @@ enum Commands {
 
     /// Start the MCP stdio server (used by Claude Desktop / editors)
     #[command(name = "mcp-serve", hide = true)]
-    McpServe,
+    McpServe {
+        /// Limit the server to a scope's tools: full (default) or tasks
+        #[arg(long, value_enum, default_value = "full")]
+        scope: commands::cursor_mcp_config::ServeScope,
+    },
 
     // ─── Background Daemon ───────────────────────────────────────────
     /// Daemon management (stop/status/logs)
@@ -740,12 +751,14 @@ async fn dispatch(command: Commands, config: &HqConfig) -> Result<()> {
             path,
             target,
             global,
+            scope: access,
+            url,
         } => {
             let path = path.map(PathBuf::from);
-            let scope = commands::mcp::Scope { target, global, path };
+            let scope = commands::mcp::Scope { target, global, path, access, url };
             commands::mcp::run(config, &sub, scope).await
         }
-        Commands::McpServe => commands::mcp_serve::run(config).await,
+        Commands::McpServe { scope } => commands::mcp_serve::run(config, scope).await,
         Commands::Link { path } => {
             commands::mcp::run_deprecated(config, "link", "install", project_scope(path)).await
         }

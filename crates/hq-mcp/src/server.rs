@@ -20,6 +20,10 @@ pub struct HqMcpServer {
     /// Opened once at construction and reused for gateway telemetry on every
     /// `hq_call` invocation. `Database` wraps an r2d2 pool and is cheap to clone.
     db: hq_db::Database,
+    /// `Some` narrows the connection to these tools (a scoped key's allowlist).
+    /// A scoped server also sends no catalog in `instructions`, like the HTTP
+    /// transport, so it does not advertise tools the client cannot call.
+    allowed: Option<&'static [&'static str]>,
 }
 
 /// Clients negotiate down to this, so the wire format stays what existing clients were built against.
@@ -27,7 +31,13 @@ const PROTOCOL_VERSIONS: &[ProtocolVersion] = &[ProtocolVersion::V_2024_11_05];
 
 impl HqMcpServer {
     pub fn new(registry: Arc<ToolRegistry>, db: hq_db::Database) -> Self {
-        Self { registry, db }
+        Self { registry, db, allowed: None }
+    }
+
+    /// Limit this server to `allowed` (for example [`gateway::TASKS_ALLOWLIST`]).
+    pub fn with_allowlist(mut self, allowed: &'static [&'static str]) -> Self {
+        self.allowed = Some(allowed);
+        self
     }
 
     /// Start serving over stdin/stdout using the rmcp transport.
@@ -44,7 +54,10 @@ impl ServerHandler for HqMcpServer {
         ServerConfig::new(ServerCapabilities::builder().enable_tools().build())
             .with_protocol_version(ProtocolVersion::V_2024_11_05)
             .with_server_info(Implementation::new("agent-hq", env!("CARGO_PKG_VERSION")))
-            .with_instructions(gateway::server_instructions(&self.registry))
+            .with_instructions(match self.allowed {
+                None => gateway::server_instructions(&self.registry),
+                Some(_) => gateway::SCOPED_INSTRUCTIONS.to_string(),
+            })
     }
 
     fn supported_protocol_versions(&self) -> Cow<'static, [ProtocolVersion]> {
@@ -56,7 +69,7 @@ impl ServerHandler for HqMcpServer {
         _request: Option<PaginatedRequestParams>,
         _context: RequestContext<RoleServer>,
     ) -> Result<ListToolsResult, ErrorData> {
-        Ok(ListToolsResult::with_all_items(gateway::create_gateway_tools(&self.registry)))
+        Ok(ListToolsResult::with_all_items(gateway::create_gateway_tools_scoped(&self.registry, self.allowed)))
     }
 
     async fn call_tool(
@@ -74,7 +87,7 @@ impl ServerHandler for HqMcpServer {
             request.name.as_ref(),
             marked.as_ref().or(request.arguments.as_ref()),
             &self.db,
-            None,
+            self.allowed,
         )
         .await
         .map(CallToolResponse::from)
@@ -127,6 +140,20 @@ mod tests {
         // free of filesystem setup.
         let db = hq_db::Database::open_memory().unwrap();
         HqMcpServer::new(Arc::new(registry), db)
+    }
+
+    /// A scoped stdio server must not advertise the catalog: the client cannot call
+    /// most of it, and the names alone tell it what a wider key would reach.
+    #[test]
+    fn a_scoped_server_sends_no_catalog() {
+        let server = server_with_stub_registry().with_allowlist(gateway::TASKS_ALLOWLIST);
+        let info = server.get_info();
+        let text = info.instructions.clone().unwrap_or_default();
+        assert_eq!(text, gateway::SCOPED_INSTRUCTIONS);
+        assert!(!text.contains("tool_number_"));
+
+        let open = server_with_stub_registry().get_info().instructions.unwrap_or_default();
+        assert!(open.contains("tool_number_000"), "the unscoped server keeps the catalog");
     }
 
     /// Instructions ship on every MCP handshake. Swapping the full

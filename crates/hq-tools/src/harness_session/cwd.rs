@@ -3,6 +3,10 @@ use super::*;
 /// Set by the MCP gateway (never by a caller) on calls that arrive on the
 /// handoff-scoped key, so `agent_host.handoff_cwd_allow` can bind them.
 pub const HANDOFF_SCOPE_ARG: &str = "_hq_handoff_scope";
+/// Set by the gateway, never by a caller, on a call that arrived on the tasks scope.
+pub const TASKS_SCOPE_ARG: &str = "_hq_tasks_scope";
+/// Who a tasks-scope write is attributed to, whatever name the caller supplies.
+pub const TASKS_SCOPE_ACTOR: &str = "mcp:tasks";
 
 /// Characters a shell would expand inside the path the agent is started in.
 pub(super) const CWD_FORBIDDEN: [char; 4] = ['~', '$', '`', '\0'];
@@ -194,6 +198,13 @@ pub fn workspace_start_dir(
 /// Whether a launch error says the folder was missing.
 pub fn is_missing_dir_error(e: &anyhow::Error) -> bool {
     format!("{e:#}").contains(MISSING_DIR_MARKER)
+}
+
+/// Whether a tool call arrived on the tasks scope. That scope may file and edit tasks but
+/// must not reach anything else, so task tools that would otherwise write to an agent's
+/// mailbox, attribute a write to a name the caller picked, or set routing tags skip it.
+pub fn is_tasks_scope(args: &Value) -> bool {
+    args.get(TASKS_SCOPE_ARG).and_then(Value::as_bool) == Some(true)
 }
 
 /// Whether a tool call arrived on the handoff-scoped key.
