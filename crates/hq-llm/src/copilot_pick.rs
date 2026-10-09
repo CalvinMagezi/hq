@@ -19,19 +19,39 @@ pub enum ProbeFailure {
     Other,
 }
 
-/// Classify the failure text a Copilot CLI run produced.
+/// Classify the failure text a Copilot CLI run produced. Sign-in problems are checked first,
+/// with specific phrases, so "invalid or expired token" is never read as a missing model.
 pub fn classify_failure(text: &str) -> ProbeFailure {
     let t = text.to_ascii_lowercase();
-    let mentions_model = t.contains("model");
-    let unavailable = ["not available", "not found", "invalid", "not supported", "not enabled", "unknown", "disabled", "access"]
-        .iter()
-        .any(|w| t.contains(w));
-    if mentions_model && unavailable {
-        return ProbeFailure::ModelUnavailable;
-    }
-    let auth = ["not logged in", "not signed in", "sign in", "log in", "login", "authenticat", "unauthorized", "401", "gh auth"];
+    let auth = [
+        "not logged in",
+        "not signed in",
+        "gh auth login",
+        "authentication",
+        "unauthorized",
+        "http 401",
+        "expired",
+        "bad credentials",
+        "sign in",
+        "log in to",
+    ];
     if auth.iter().any(|w| t.contains(w)) {
         return ProbeFailure::NotSignedIn;
+    }
+    let model_gone = [
+        "not available",
+        "not found",
+        "not supported",
+        "not enabled",
+        "disabled",
+        "invalid model",
+        "unknown model",
+        "does not exist",
+        "no access to",
+        "model_not_found",
+    ];
+    if t.contains("model") && model_gone.iter().any(|w| t.contains(w)) {
+        return ProbeFailure::ModelUnavailable;
     }
     ProbeFailure::Other
 }
@@ -44,7 +64,10 @@ pub enum Pick {
         model: String,
         skipped: Vec<(String, ProbeFailure)>,
     },
-    /// No listed model answered.
+    /// A try failed for a reason that says nothing about the model (timeout, network, an
+    /// unrecognised message). Nothing further was tried, so a blip cannot link a lesser model.
+    Inconclusive { model: String, detail: String },
+    /// Every listed model was reported unavailable.
     NoneUsable { tried: Vec<(String, ProbeFailure)> },
     /// The CLI is not signed in, so nothing was tried past the first model.
     NotSignedIn { model: String },
@@ -75,6 +98,12 @@ where
                 ProbeFailure::NotSignedIn => {
                     return Pick::NotSignedIn {
                         model: model.to_string(),
+                    };
+                }
+                ProbeFailure::Other => {
+                    return Pick::Inconclusive {
+                        model: model.to_string(),
+                        detail: text,
                     };
                 }
                 other => tried.push((model.to_string(), other)),
@@ -148,10 +177,19 @@ mod tests {
         let mut seen = Vec::new();
         let _ = pick_first_usable(&list, |m| {
             seen.push(m);
-            std::future::ready(Err("timed out".to_string()))
+            std::future::ready(Err("model not available".to_string()))
         })
         .await;
         assert_eq!(seen, ["a", "b"]);
+    }
+
+    #[tokio::test]
+    async fn a_timeout_ends_the_walk_instead_of_linking_a_lesser_model() {
+        let got = pick_first_usable(&prefs(), |m| {
+            std::future::ready(if m == "gpt-6-luna" { Err("timed out".to_string()) } else { Ok(()) })
+        })
+        .await;
+        assert!(matches!(got, Pick::Inconclusive { ref model, .. } if model == "gpt-6-luna"), "{got:?}");
     }
 
     #[test]
@@ -159,9 +197,10 @@ mod tests {
         use ProbeFailure::*;
         assert_eq!(classify_failure("Model 'x' is not available"), ModelUnavailable);
         assert_eq!(classify_failure("error: invalid model: x"), ModelUnavailable);
+        assert_eq!(classify_failure("Invalid or expired token, cannot access models"), NotSignedIn);
+        assert_eq!(classify_failure("Usage: copilot [options]  unknown option --model"), Other);
         assert_eq!(classify_failure("Authentication required. Run gh auth login"), NotSignedIn);
         assert_eq!(classify_failure("connection reset by peer"), Other);
-        // A model complaint beats a generic word that also appears in sign-in text.
         assert_eq!(classify_failure("your organization has disabled model gpt-6-luna"), ModelUnavailable);
     }
 }

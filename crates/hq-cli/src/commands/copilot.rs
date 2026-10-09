@@ -39,9 +39,13 @@ async fn link(config: &HqConfig, model: Option<&str>, write: bool) -> Result<()>
     }
     println!("Checking your Copilot seat through `gh copilot` (this sends one short test request per model).");
 
-    let timeout = config.github_copilot.timeout_secs.min(60);
+    let timeout = config.github_copilot.timeout_secs.clamp(10, 60);
+    // An empty directory, so the CLI has no project files, instructions or git state to send.
+    let probe_dir = std::env::temp_dir().join(format!("hq-copilot-probe-{}", std::process::id()));
+    std::fs::create_dir_all(&probe_dir).context("creating the probe directory")?;
     let pick = pick_first_usable(&preference, |m| {
         let binary = binary.clone();
+        let probe_dir = probe_dir.clone();
         async move {
             let args = probe_args(&m);
             let arg_refs: Vec<&str> = args.iter().map(String::as_str).collect();
@@ -49,15 +53,22 @@ async fn link(config: &HqConfig, model: Option<&str>, write: bool) -> Result<()>
                 &binary,
                 &arg_refs,
                 "Reply with the single word: ok",
-                None,
+                Some(probe_dir.as_path()),
                 timeout,
             )
             .await
-            .map(|_| ())
             .map_err(|e| format!("{e:#}"))
+            .and_then(|out| {
+                if out.to_ascii_lowercase().contains("ok") {
+                    Ok(())
+                } else {
+                    Err(format!("unexpected reply: {}", out.trim().chars().take(200).collect::<String>()))
+                }
+            })
         }
     })
     .await;
+    let _ = std::fs::remove_dir(&probe_dir);
 
     match pick {
         Pick::Chosen { model, skipped } => {
@@ -66,16 +77,21 @@ async fn link(config: &HqConfig, model: Option<&str>, write: bool) -> Result<()>
             }
             println!("  {model}: answered");
             println!("\nLinked model: {model}");
-            let path = HqConfig::config_file_path();
+            let path = target_path();
             if write {
                 apply(&path, &model)?;
-                println!("Wrote {} (the previous file is kept as config.yaml.bak).", path.display());
+                println!("Wrote {} (the first version is kept as config.yaml.bak; comments are not preserved).", path.display());
             } else {
                 println!("\nAdd this to {} (or rerun with --write):\n", path.display());
                 println!("{}", snippet(&model));
             }
             Ok(())
         }
+        Pick::Inconclusive { model, detail } => bail!(
+            "could not tell whether {model} is available: {}. Nothing was changed; run it again, or \
+             name a model with --model.",
+            detail.trim().chars().take(300).collect::<String>()
+        ),
         Pick::NotSignedIn { model } => bail!(
             "`gh copilot` is not signed in (while trying {model}). Run `gh auth login` with the \
              account that has the Copilot seat, then run this again."
@@ -101,6 +117,13 @@ fn probe_args(model: &str) -> Vec<String> {
         .collect()
 }
 
+/// Where `--write` goes: the file `load()` reads when there is one, so a deployed config is not
+/// shadowed by a new per-user file; otherwise the per-user path.
+fn target_path() -> std::path::PathBuf {
+    let read = HqConfig::config_read_path();
+    if read.exists() { read } else { HqConfig::config_file_path() }
+}
+
 fn describe(why: ProbeFailure) -> &'static str {
     match why {
         ProbeFailure::ModelUnavailable => "not available on this seat",
@@ -110,40 +133,49 @@ fn describe(why: ProbeFailure) -> &'static str {
 }
 
 fn snippet(model: &str) -> String {
-    let doc = merged(Value::Mapping(Mapping::new()), model);
+    let doc = merged(Value::Mapping(Mapping::new()), model).unwrap_or(Value::Null);
     serde_yaml::to_string(&doc).unwrap_or_default()
 }
 
 /// `doc` with the Copilot backend added and `github_copilot.model` set. An existing `primary`
 /// is left alone; only an empty one becomes the new backend.
-fn merged(doc: Value, model: &str) -> Value {
-    fn map(v: &mut Value) -> &mut Mapping {
-        if !v.is_mapping() {
+fn merged(doc: Value, model: &str) -> Result<Value> {
+    /// The mapping at `v`, creating it when absent (null); anything else is the user's to fix.
+    fn map<'a>(v: &'a mut Value, what: &str) -> Result<&'a mut Mapping> {
+        if v.is_null() {
             *v = Value::Mapping(Mapping::new());
         }
-        v.as_mapping_mut().expect("just made a mapping")
+        v.as_mapping_mut()
+            .ok_or_else(|| anyhow::anyhow!("`{what}` in the config is not a mapping; fix it first"))
     }
     let key = |s: &str| Value::String(s.to_string());
     let mut doc = doc;
-    let root = map(&mut doc);
+    let root = map(&mut doc, "the config root")?;
 
     let gh = root.entry(key("github_copilot")).or_insert(Value::Null);
-    map(gh).insert(key("model"), key(model));
+    map(gh, "github_copilot")?.insert(key("model"), key(model));
 
     let backends = root.entry(key("backends")).or_insert(Value::Null);
-    let backends = map(backends);
-    let list = backends.entry(key("backends")).or_insert(Value::Sequence(vec![]));
-    if !list.is_sequence() {
+    let backends = map(backends, "backends")?;
+    let list = backends.entry(key("backends")).or_insert(Value::Null);
+    if list.is_null() {
         *list = Value::Sequence(vec![]);
     }
-    let list = list.as_sequence_mut().expect("just made a sequence");
+    let list = list
+        .as_sequence_mut()
+        .ok_or_else(|| anyhow::anyhow!("`backends.backends` in the config is not a list; fix it first"))?;
     let existing = list
         .iter_mut()
         .find(|e| e.get("name").and_then(Value::as_str) == Some(BACKEND_NAME));
     match existing {
         Some(entry) => {
-            let m = map(entry);
-            m.insert(key("kind"), key("github-copilot-cli"));
+            let m = map(entry, "the `copilot` backend")?;
+            if m.get("kind").and_then(Value::as_str) != Some("github-copilot-cli") {
+                bail!(
+                    "the config already has a backend named `{BACKEND_NAME}` of another kind; \
+                     rename or remove it first"
+                );
+            }
             m.insert(key("model"), key(model));
             m.insert(key("enabled"), Value::Bool(true));
         }
@@ -163,7 +195,7 @@ fn merged(doc: Value, model: &str) -> Value {
     if primary_empty {
         backends.insert(key("primary"), key(BACKEND_NAME));
     }
-    doc
+    Ok(doc)
 }
 
 fn apply(path: &Path, model: &str) -> Result<()> {
@@ -177,12 +209,14 @@ fn apply(path: &Path, model: &str) -> Result<()> {
     } else {
         serde_yaml::from_str(&current).with_context(|| format!("{} is not valid YAML", path.display()))?
     };
-    let out = serde_yaml::to_string(&merged(doc, model))?;
+    let doc = merged(doc, model)?;
+    let out = serde_yaml::to_string(&doc)?;
     if let Some(parent) = path.parent() {
         hq_core::fs_private::create_private_dir_all(parent)?;
     }
-    if !current.is_empty() {
-        hq_core::fs_private::write_private(&path.with_extension("yaml.bak"), &current)?;
+    let backup = path.with_extension("yaml.bak");
+    if !current.is_empty() && !backup.exists() {
+        hq_core::fs_private::write_private(&backup, &current)?;
     }
     hq_core::fs_private::write_private(path, out)?;
     Ok(())
@@ -199,7 +233,7 @@ mod tests {
 
     #[test]
     fn an_empty_config_gets_a_working_copilot_backend() {
-        let v = merged(Value::Mapping(Mapping::new()), "gpt-6-luna");
+        let v = merged(Value::Mapping(Mapping::new()), "gpt-6-luna").unwrap();
         let entries = backends_of(&v);
         assert_eq!(entries.len(), 1);
         assert_eq!(entries[0].kind, BackendKind::GithubCopilotCli);
@@ -214,7 +248,7 @@ mod tests {
             "backends:\n  primary: work\n  backends:\n    - {name: work, kind: openrouter}\n    - {name: copilot, kind: github-copilot-cli, model: old, enabled: false}\nvault_path: /v\n",
         )
         .unwrap();
-        let v = merged(existing, "claude-haiku-5.5");
+        let v = merged(existing, "claude-haiku-5.5").unwrap();
         let entries = backends_of(&v);
         assert_eq!(entries.len(), 2);
         assert_eq!(entries[1].model.as_deref(), Some("claude-haiku-5.5"));
@@ -224,16 +258,26 @@ mod tests {
     }
 
     #[test]
+    fn another_kind_under_the_same_name_or_a_malformed_config_is_refused() {
+        let other: Value = serde_yaml::from_str("backends:\n  backends:\n    - {name: copilot, kind: openrouter}\n").unwrap();
+        assert!(merged(other, "m").is_err());
+        let bad: Value = serde_yaml::from_str("backends: [1]\n").unwrap();
+        assert!(merged(bad, "m").is_err());
+        assert!(merged(Value::String("x".into()), "m").is_err());
+    }
+
+    #[test]
     fn writing_keeps_a_backup_and_the_result_loads_as_a_config() {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("config.yaml");
         std::fs::write(&path, "default_model: x\n").unwrap();
         apply(&path, "gpt-6-luna").unwrap();
-        assert_eq!(std::fs::read_to_string(dir.path().join("config.yaml.bak")).unwrap(), "default_model: x\n");
+        apply(&path, "claude-haiku-5.5").unwrap();
+        assert_eq!(std::fs::read_to_string(dir.path().join("config.yaml.bak")).unwrap(), "default_model: x\n", "the first backup survives a second write");
         let doc: Value = serde_yaml::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
         let backends: hq_core::config::BackendsConfig = serde_yaml::from_value(doc["backends"].clone()).unwrap();
         assert!(backends.is_configured());
         assert_eq!(doc["default_model"].as_str(), Some("x"));
-        assert_eq!(doc["github_copilot"]["model"].as_str(), Some("gpt-6-luna"));
+        assert_eq!(doc["github_copilot"]["model"].as_str(), Some("claude-haiku-5.5"));
     }
 }

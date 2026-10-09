@@ -98,11 +98,13 @@ hq copilot link --model <id>
 
 HQ uses GitHub's own CLI (`gh copilot`) as the model route, so it signs in the way the CLI does
 and HQ never holds your GitHub token. Which models a seat offers depends on the plan and on what
-your organization enabled, and the only official way to find out from outside GitHub's clients is
-to use the model. So `link` sends one short test request ("reply with the single word: ok") per
+your organization enabled, and HQ relies on no documented non-interactive model listing in `gh copilot`, so it uses
+the model. So `link` sends one short test request ("reply with the single word: ok") per
 model, in the order of `github_copilot.model_preference` (default `gpt-6-luna`, then
 `claude-haiku-5.5`), and the first that answers wins. If neither does, it says so and stops; HQ
-does not choose a bigger model for you. Pass `--model` to name one yourself. No vault text is sent.
+does not choose a bigger model for you, and a timeout or unrecognised error ends the check without
+linking anything. Pass `--model` to name one yourself. The test runs in an empty temporary folder, so
+no vault text or project file goes with it; only the one-word prompt does.
 
 Lite itself does not run chat turns, so this is not what powers the web app. It sets up the Copilot
 backend for a Full HQ on the same seat, and for the day Lite grows a tool-less chat. Whether

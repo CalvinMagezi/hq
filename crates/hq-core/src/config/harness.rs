@@ -19,7 +19,7 @@ pub struct GitHubCopilotConfig {
     #[serde(default = "default_github_copilot_timeout_secs")]
     pub timeout_secs: u64,
 
-    /// Models `hq copilot link` tries, in order, when no `model` is set. The first one your
+    /// Models `hq copilot link` tries, in order (`--model` replaces the list). The first one your
     /// Copilot seat answers on wins. Which models exist differs by plan and by what the
     /// organization enabled, so this is a preference, not a promise.
     #[serde(default = "default_copilot_model_preference")]
