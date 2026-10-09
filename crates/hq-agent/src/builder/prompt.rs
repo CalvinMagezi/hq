@@ -66,6 +66,17 @@ impl SessionBuilder {
                 soul_with_user.push_str(WEB_CHART_GUIDANCE);
             }
 
+            // Opt-in: tell the model when a budget is nearly used up.
+            if let Some(db) = &inputs.shared_db
+                && let Some(note) = hq_tools::usage_forecast::budget_note(
+                    db,
+                    &self.config.budgets,
+                    chrono::Utc::now().timestamp(),
+                )
+            {
+                soul_with_user.push_str(&note);
+            }
+
             // Dynamic memory from MemoryQuerier (merged with static MEMORY.md)
             let memory_text = build_memory_context(&inputs.shared_db, &sys_ctx.memory);
 

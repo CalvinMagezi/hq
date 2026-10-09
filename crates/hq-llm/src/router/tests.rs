@@ -1693,3 +1693,19 @@ async fn streaming_fallback_skips_a_provider_whose_stream_fails_on_the_first_chu
     let first = stream.next().await.unwrap().unwrap();
     assert!(format!("{first:?}").contains("anthropic/claude-sonnet-4"));
 }
+
+#[test]
+fn budget_pressure_widens_the_gap_between_a_cheap_and_a_dear_provider() {
+    use super::selection::compute_score_pressured;
+    let gap = |pressure: f64| {
+        let cheap = compute_score_pressured(CostTier::Free, false, None, TaskHint::ToolUse, pressure);
+        let dear = compute_score_pressured(CostTier::Premium, false, None, TaskHint::ToolUse, pressure);
+        cheap - dear
+    };
+    assert!(gap(1.0) > gap(0.5) && gap(0.5) > gap(0.0));
+    // No pressure is exactly the old score.
+    assert_eq!(
+        compute_score_pressured(CostTier::Standard, false, None, TaskHint::Simple, 0.0),
+        LlmRouter::compute_score(CostTier::Standard, false, None, TaskHint::Simple)
+    );
+}

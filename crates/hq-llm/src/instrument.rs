@@ -24,7 +24,13 @@ use crate::tap::OutcomeTap;
 pub struct Instruments {
     sink: RwLock<Option<SharedSink>>,
     gate: RwLock<Option<SharedGate>>,
+    /// How close each provider's budgets are to running out, `0.0` to `1.0`, keyed by provider
+    /// name; [`GLOBAL_PRESSURE_KEY`] covers every provider.
+    pressure: RwLock<std::collections::HashMap<String, f64>>,
 }
+
+/// Pressure from a budget that covers all providers.
+pub const GLOBAL_PRESSURE_KEY: &str = "*";
 
 impl Instruments {
     /// A handle of its own, for a router or a test that must not share the process-wide one.
@@ -44,6 +50,21 @@ impl Instruments {
 
     pub fn set_gate(&self, gate: SharedGate) {
         *self.gate.write().unwrap() = Some(gate);
+    }
+
+    /// Record how close a budget is to running out. The router weighs cost more for a provider
+    /// under pressure, so calls drift to cheaper ones before a limit blocks them.
+    pub fn set_pressure(&self, key: &str, pressure: f64) {
+        self.pressure
+            .write()
+            .unwrap()
+            .insert(key.to_string(), pressure.clamp(0.0, 1.0));
+    }
+
+    pub fn pressure_for(&self, provider: &str) -> f64 {
+        let map = self.pressure.read().unwrap();
+        let get = |k: &str| map.get(k).copied().unwrap_or(0.0);
+        get(GLOBAL_PRESSURE_KEY).max(get(provider))
     }
 
     fn sink(&self) -> Option<SharedSink> {
