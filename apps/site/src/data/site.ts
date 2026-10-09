@@ -14,6 +14,7 @@ export const links = {
   contributing: `${REPO_BLOB}/CONTRIBUTING.md`,
   readme: `${REPO_BLOB}/README.md`,
   deployReadme: `${REPO_BLOB}/deploy/README.md`,
+  hetznerDocs: `${REPO_BLOB}/docs/HETZNER.md`,
   updateSystem: `${REPO_BLOB}/docs/UPDATE_SYSTEM.md`,
   agentSessions: `${REPO_BLOB}/docs/AGENT_SESSIONS.md`,
   windows: `${REPO_BLOB}/docs/WINDOWS.md`,

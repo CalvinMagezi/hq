@@ -195,6 +195,8 @@ fn live_session_json(
     Ok(v)
 }
 
+/// The host's code for a sandbox it cannot build; its message names the folder and what to change.
+const SANDBOX_UNAVAILABLE_CODE: &str = "sandbox_unavailable";
 const GENERIC_FAILURE: &str = "the session request failed; the server log has the details";
 const HOST_UNREACHABLE: &str = "the session's host is unreachable right now";
 
@@ -202,13 +204,18 @@ const HOST_UNREACHABLE: &str = "the session's host is unreachable right now";
 /// and 409 cases match messages HQ itself writes (there is no typed error for
 /// them yet); anything else is logged and answered generically, because the
 /// text can carry ssh or host stderr.
-fn session_error(e: anyhow::Error) -> ApiError {
+pub(crate) fn session_error(e: anyhow::Error) -> ApiError {
     if let Some(api) = e.downcast_ref::<ApiError>() {
         return api.clone();
     }
     match e.downcast_ref::<AgentHostError>() {
         Some(AgentHostError::Api { code, message }) if code == INVALID_KEYS_CODE => {
             return ApiError::bad_request(message.clone());
+        }
+        Some(AgentHostError::Api { code, message }) if code == SANDBOX_UNAVAILABLE_CODE => {
+            return ApiError::Conflict(format!(
+                "This computer cannot keep the agent contained in that folder, so it was not started. {message}"
+            ));
         }
         Some(err) if err.is_unreachable() => {
             tracing::warn!(error = %e, "sessions api: host unreachable");
@@ -219,7 +226,7 @@ fn session_error(e: anyhow::Error) -> ApiError {
     let msg = e.to_string();
     if msg.contains("no harness session") || msg.starts_with("no task") {
         ApiError::NotFound(msg)
-    } else if msg.contains("waiting at a dialog") || msg.contains("is not running") {
+    } else if msg.contains("waiting at a dialog") || msg.contains("is not running") || msg.contains("is still running on") {
         ApiError::Conflict(msg)
     } else {
         tracing::warn!(error = %e, "sessions api: request failed");
@@ -244,6 +251,8 @@ pub(crate) struct ListQuery {
     task_id: Option<String>,
     status: Option<String>,
     host: Option<String>,
+    /// Include sessions the user archived; they are left out by default.
+    include_archived: Option<bool>,
 }
 
 fn non_empty(v: Option<String>) -> Option<String> {
@@ -260,13 +269,20 @@ pub(crate) async fn list_all_handler(
         task: non_empty(q.task_id),
         host: non_empty(q.host),
     };
+    let include_archived = q.include_archived.unwrap_or(false);
     let db = Arc::new(state.db.clone());
     let result = tokio::task::spawn_blocking(move || {
         let listed = harness::list_live(&db, &filter)?;
         db.with_conn(|c| {
+            let archived = registry::archived_ids(c)?;
             listed
                 .iter()
-                .map(|(row, live)| live_session_json(c, row, live.as_ref()))
+                .filter(|(row, _)| include_archived || !archived.contains(&row.id))
+                .map(|(row, live)| {
+                    let mut v = live_session_json(c, row, live.as_ref())?;
+                    v["archived"] = json!(archived.contains(&row.id));
+                    Ok(v)
+                })
                 .collect::<anyhow::Result<Vec<_>>>()
         })
     })
@@ -290,7 +306,11 @@ pub(crate) async fn get_session_handler(
     let result = tokio::task::spawn_blocking(move || {
         let live = (row.status == registry::STATUS_RUNNING)
             .then(|| harness::liveness(&harness::poll_hosts(std::slice::from_ref(&row)), &row));
-        db.with_conn(|c| live_session_json(c, &row, live.as_ref()))
+        db.with_conn(|c| {
+            let mut v = live_session_json(c, &row, live.as_ref())?;
+            v["archived"] = json!(registry::archived_ids(c)?.contains(&row.id));
+            Ok(v)
+        })
     })
     .await;
     match result {
@@ -601,6 +621,7 @@ mod tests {
                 task_id: task.map(Into::into),
                 status: status.map(Into::into),
                 host: host.map(Into::into),
+                include_archived: None,
             })
         };
 
@@ -803,6 +824,17 @@ mod tests {
                 .count(),
             1
         );
+    }
+
+    #[test]
+    fn a_sandbox_the_computer_cannot_build_is_explained_not_a_generic_failure() {
+        let err = anyhow::Error::new(AgentHostError::Api {
+            code: SANDBOX_UNAVAILABLE_CODE.into(),
+            message: "start the agent in a project directory".into(),
+        });
+        let mapped = session_error(err);
+        assert_eq!(mapped.status(), StatusCode::CONFLICT);
+        assert!(mapped.to_string().contains("project directory"), "{mapped}");
     }
 
     #[tokio::test]

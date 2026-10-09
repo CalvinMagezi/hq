@@ -104,7 +104,11 @@ const SETUP_API_PREFIX: &str = "/api/setup/";
 
 /// Endpoints that type into or take over a session. `drive`, `goal` and `unwatch` predate the
 /// header and must keep working for a cached PWA that does not send it yet.
-const HEADER_GUARDED_ACTIONS: [&str; 2] = ["send", "adopt"];
+const HEADER_GUARDED_ACTIONS: [&str; 6] = ["send", "adopt", "stop", "resume", "rename", "archive"];
+
+/// Starting an agent and creating its folders are new endpoints, so they are guarded from the start.
+const SPAWN_API_PATH: &str = "/api/harness-sessions";
+const WORKBENCH_API_PREFIX: &str = "/api/workbench/";
 
 /// Whether the request types into or adopts a harness session without the client header.
 pub(crate) fn missing_client_header(method: &Method, path: &str, has_header: bool) -> bool {
@@ -113,7 +117,10 @@ pub(crate) fn missing_client_header(method: &Method, path: &str, has_header: boo
             .next()
             .is_some_and(|action| HEADER_GUARDED_ACTIONS.contains(&action))
     });
-    let guarded = guarded || path.starts_with(SETUP_API_PREFIX);
+    let guarded = guarded
+        || path == SPAWN_API_PATH
+        || path.starts_with(WORKBENCH_API_PREFIX)
+        || path.starts_with(SETUP_API_PREFIX);
     guarded && !matches!(*method, Method::GET | Method::HEAD | Method::OPTIONS) && !has_header
 }
 

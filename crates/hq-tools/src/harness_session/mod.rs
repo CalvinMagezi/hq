@@ -33,7 +33,7 @@ use std::time::Duration;
 
 use spec::SPECS;
 pub use launch::resume_awaiting;
-pub use spec::{Harness, HarnessSessionSpec, ResumeStrategy, resolve, resolve_in, spec_for};
+pub use spec::{Harness, HarnessSessionSpec, ResumeStrategy, known_harnesses, resolve, resolve_in, spec_for};
 
 /// Under the home of the host that runs pi, inside the state directory its sandbox may write.
 const PI_SESSION_DIR: &str = ".pi/hq-sessions";
