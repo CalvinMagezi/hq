@@ -95,6 +95,12 @@ pub(super) fn response_to_stream(
         cache_read_tokens: resp.cache_read_tokens,
         cache_write_tokens: resp.cache_write_tokens,
     }));
+    if resp.provider_cost_usd.is_some() || resp.reasoning_tokens > 0 {
+        chunks.push(Ok(StreamChunk::Billing {
+            cost_usd: resp.provider_cost_usd,
+            reasoning_tokens: resp.reasoning_tokens,
+        }));
+    }
 
     chunks.push(Ok(StreamChunk::Done));
 

@@ -122,6 +122,13 @@ fn is_output_chunk(chunk: &StreamChunk) -> bool {
     )
 }
 
+fn is_transient_open_failure(e: &anyhow::Error) -> bool {
+    matches!(
+        e.downcast_ref::<LlmError>(),
+        Some(LlmError::Network(_) | LlmError::ServerError { .. })
+    )
+}
+
 /// Re-issue a streaming request once if it truncates (ends without a
 /// `finish_reason`, via [`finalize_openai_stream`]) before producing any
 /// output. DeepSeek's V4 endpoints have been observed dropping the SSE
@@ -142,7 +149,17 @@ where
         >,
 {
     let mut retried = false;
-    let mut stream = make_stream().await?;
+    let mut stream = match make_stream().await {
+        Ok(stream) => stream,
+        // The typed client reported a failed connect or a 5xx as the first stream item, which
+        // was retried once; the raw reader reports it before any stream exists, so do the same.
+        Err(e) if is_transient_open_failure(&e) => {
+            tracing::warn!(error = %e, "stream failed to open, retrying once");
+            retried = true;
+            make_stream().await?
+        }
+        Err(e) => return Err(e),
+    };
     loop {
         let mut prelude: Vec<Result<StreamChunk>> = Vec::new();
         loop {

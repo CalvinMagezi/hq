@@ -695,7 +695,7 @@ async fn a_buffered_response_carries_the_billed_cost_and_reasoning_tokens() {
 
     let server = MockServer::start().await;
     Mock::given(method("POST"))
-        .and(path("/chat/completions"))
+        .and(path("/proxy/openrouter.ai/api/v1/chat/completions"))
         .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
             "id": "x", "model": "anthropic/claude-haiku-5.5",
             "choices": [{"index": 0, "message": {"role": "assistant", "content": "pong"}}],
@@ -706,7 +706,8 @@ async fn a_buffered_response_carries_the_billed_cost_and_reasoning_tokens() {
         })))
         .mount(&server)
         .await;
-    let provider = OpenRouterProvider::new_with_base("k", &server.uri());
+    let provider =
+        OpenRouterProvider::new_with_base("k", &format!("{}/proxy/openrouter.ai/api/v1", server.uri()));
     let request = ChatRequest {
         model: "anthropic/claude-haiku-5.5".into(),
         ..Default::default()
@@ -716,4 +717,70 @@ async fn a_buffered_response_carries_the_billed_cost_and_reasoning_tokens() {
 
     assert_eq!(resp.provider_cost_usd, Some(BILLED_USD));
     assert_eq!(resp.reasoning_tokens, REASONING_TOKENS);
+}
+
+/// A transient failure to open the stream is retried once, as the typed client's first-item error
+/// used to be.
+#[tokio::test]
+async fn an_openrouter_stream_that_fails_to_open_is_retried_once() {
+    use wiremock::matchers::{method, path};
+    use wiremock::{Mock, MockServer, ResponseTemplate};
+
+    let server = MockServer::start().await;
+    let route = "/proxy/openrouter.ai/api/v1/chat/completions";
+    Mock::given(method("POST"))
+        .and(path(route))
+        .respond_with(ResponseTemplate::new(503))
+        .up_to_n_times(1)
+        .mount(&server)
+        .await;
+    Mock::given(method("POST"))
+        .and(path(route))
+        .respond_with(
+            ResponseTemplate::new(200)
+                .insert_header("content-type", "text/event-stream")
+                .set_body_string(billed_stream_body()),
+        )
+        .mount(&server)
+        .await;
+    let base = format!("{}/proxy/openrouter.ai/api/v1", server.uri());
+    let provider = OpenRouterProvider::new_with_base("k", &base);
+    let request = ChatRequest {
+        model: "anthropic/claude-haiku-5.5".into(),
+        ..Default::default()
+    };
+
+    let chunks: Vec<Result<StreamChunk>> = provider
+        .chat_stream(&request)
+        .await
+        .unwrap()
+        .collect()
+        .await;
+
+    assert!(chunks.iter().any(|c| matches!(c, Ok(StreamChunk::Done))));
+}
+
+/// Another provider's `usage.cost` may not be dollars, so only OpenRouter's is trusted.
+#[tokio::test]
+async fn a_non_openrouter_cost_field_is_ignored() {
+    use wiremock::matchers::{method, path};
+    use wiremock::{Mock, MockServer, ResponseTemplate};
+
+    let server = MockServer::start().await;
+    Mock::given(method("POST"))
+        .and(path("/chat/completions"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "id": "x", "model": "m",
+            "choices": [{"index": 0, "message": {"role": "assistant", "content": "pong"}}],
+            "usage": {"prompt_tokens": 1, "completion_tokens": 1, "cost": 99}
+        })))
+        .mount(&server)
+        .await;
+    let provider = OpenRouterProvider::new_with_base("k", &server.uri());
+    let request = ChatRequest {
+        model: "m".into(),
+        ..Default::default()
+    };
+
+    assert_eq!(provider.chat(&request).await.unwrap().provider_cost_usd, None);
 }

@@ -356,3 +356,23 @@ async fn a_provider_billed_figure_is_recorded_and_beats_the_table() {
         ("provider", BILLED_USD, Some(BILLED_USD), 12)
     );
 }
+
+#[tokio::test]
+async fn a_buffered_fallback_keeps_the_billed_cost_for_the_caller() {
+    use super::strategy::response_to_stream;
+    let resp = ChatResponse {
+        message: assistant("hi"),
+        input_tokens: 10,
+        output_tokens: 5,
+        cache_read_tokens: 0,
+        cache_write_tokens: 0,
+        reasoning_tokens: 3,
+        provider_cost_usd: Some(BILLED_USD),
+        model: PRICED_MODEL.into(),
+    };
+    let chunks: Vec<_> = response_to_stream(resp).collect().await;
+    assert!(chunks.iter().any(|c| matches!(
+        c,
+        Ok(StreamChunk::Billing { cost_usd: Some(c), reasoning_tokens: 3 }) if *c == BILLED_USD
+    )));
+}

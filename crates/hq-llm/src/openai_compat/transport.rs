@@ -17,6 +17,10 @@ use super::{
 };
 use crate::provider::{ChatRequest, ChatResponse, LlmError, LlmProvider, StreamChunk};
 
+/// The shared client's 300 s total timeout would cut a long reasoning stream mid-body, so a stream
+/// gets its own bound, the same as the chat turn timeout.
+const STREAM_TOTAL_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(6 * 60 * 60);
+
 fn with_referer(
     builder: reqwest::RequestBuilder,
     referer: Option<&str>,
@@ -179,7 +183,10 @@ impl LlmProvider for OpenRouterProvider {
             .and_then(|t| t.as_u64())
             .unwrap_or(0) as u32;
         // OpenRouter reports what it charged on every response; other providers omit it.
-        let provider_cost_usd = usage.and_then(|u| u.get("cost")).and_then(|c| c.as_f64());
+        let provider_cost_usd = self
+            .is_openrouter_endpoint()
+            .then(|| usage.and_then(|u| u.get("cost")).and_then(|c| c.as_f64()))
+            .flatten();
         if cache_read_tokens > 0 || cache_miss_tokens > 0 {
             tracing::debug!(
                 "[LLM] cache: {} hit / {} miss tokens",
@@ -404,7 +411,8 @@ impl OpenRouterProvider {
                 .post(&url)
                 .header("Authorization", format!("Bearer {auth_token}"))
                 .header("Content-Type", "application/json")
-                .header("Accept", "text/event-stream");
+                .header("Accept", "text/event-stream")
+                .timeout(STREAM_TOTAL_TIMEOUT);
             let resp = self
                 .attach_copilot_headers(builder)
                 .json(&body)
