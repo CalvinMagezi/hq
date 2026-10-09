@@ -425,6 +425,35 @@ pub(super) fn tail_log_with(
     Ok(json!({ "session_id": session_id, "source": source, "host_source": host_source, "lines": tail }))
 }
 
+/// `tail_log` with color: the host's styled rows when it can give them, else plain text. `styled`
+/// in the result says which; a stored snapshot is always plain.
+pub fn tail_log_styled(db: &Arc<Database>, session_id: &str, lines: usize) -> Result<Value> {
+    let mut screen = tail_log_with(db, session_id, lines, |row| {
+        let host = agent_host::host(Some(&row.host)).ok()?;
+        match host.read_styled(&row.agent_name, lines) {
+            Ok(text) => Some((text, STYLED_SOURCE)),
+            Err(_) => host.read_sourced(&row.agent_name, lines).ok(),
+        }
+    })?;
+    screen["styled"] = json!(screen["host_source"] == STYLED_SOURCE);
+    Ok(screen)
+}
+
+const STYLED_SOURCE: &str = "styled";
+
+pub(super) static SCREEN_READS_STYLED: std::sync::LazyLock<coalesce::Coalescer> =
+    std::sync::LazyLock::new(coalesce::Coalescer::new);
+
+/// `tail_log_styled` for pollers and streams, sharing reads like `tail_log_shared`.
+pub fn tail_log_styled_shared(db: &Arc<Database>, session_id: &str, lines: usize) -> Result<Value> {
+    SCREEN_READS_STYLED.get(
+        session_id,
+        lines,
+        || tail_log_styled(db, session_id, lines),
+        |screen| screen["source"] == "live",
+    )
+}
+
 pub(super) static SCREEN_READS: std::sync::LazyLock<coalesce::Coalescer> =
     std::sync::LazyLock::new(coalesce::Coalescer::new);
 
@@ -443,6 +472,7 @@ pub fn tail_log_shared(db: &Arc<Database>, session_id: &str, lines: usize) -> Re
 /// The session's screen just changed (send, stop, resume): drop any cached read.
 pub(super) fn screen_changed(session_id: &str) {
     SCREEN_READS.forget(session_id);
+    SCREEN_READS_STYLED.forget(session_id);
 }
 
 /// Steer a running session: submit `text` as a prompt.

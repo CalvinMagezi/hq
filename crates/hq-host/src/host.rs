@@ -91,6 +91,8 @@ pub enum ReadSource {
     Recent,
     /// Scrollback and screen, wrapped rows joined back into logical lines.
     RecentUnwrapped,
+    /// Scrollback and screen as displayed, with color and style as ANSI escape sequences.
+    Styled,
 }
 
 #[derive(Debug, Clone)]
@@ -731,6 +733,7 @@ impl Host {
             ReadSource::Visible => pane.rows(false).into_iter().map(|r| r.text).collect(),
             ReadSource::Recent => pane.rows(true).into_iter().map(|r| r.text).collect(),
             ReadSource::RecentUnwrapped => unwrap_rows(pane.rows(true)),
+            ReadSource::Styled => pane.with_emu(|e| e.styled_history()),
         };
         if lines > 0 && out.len() > lines {
             out.drain(..out.len() - lines);

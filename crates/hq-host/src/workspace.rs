@@ -64,7 +64,11 @@ fn wsl_distro() -> Option<String> {
 /// What the web needs to offer the folder: where it is, which OS, and how a
 /// Windows user would open it in Explorer.
 pub fn describe(root: &Path) -> Value {
-    let explorer = wsl_distro().map(|distro| {
+    describe_for(root, wsl_distro())
+}
+
+fn describe_for(root: &Path, distro: Option<String>) -> Value {
+    let explorer = distro.map(|distro| {
         let tail = root.to_string_lossy().replace('/', "\\");
         format!("\\\\wsl$\\{distro}{tail}")
     });
@@ -222,6 +226,17 @@ mod tests {
         let missing = resolve_inside(&root, Some("/definitely/not/here")).unwrap_err();
         let present = resolve_inside(&root, Some("/etc")).unwrap_err();
         assert_eq!(missing.to_string(), present.to_string());
+    }
+
+    #[test]
+    fn on_wsl_the_explorer_path_points_into_the_distro_and_elsewhere_there_is_none() {
+        let root = Path::new("/home/ana/Documents/HQ");
+        let wsl = describe_for(root, Some("Ubuntu".into()));
+        assert_eq!(wsl["wsl"], true);
+        assert_eq!(wsl["explorer_path"], "\\\\wsl$\\Ubuntu\\home\\ana\\Documents\\HQ");
+        let plain = describe_for(root, None);
+        assert_eq!(plain["wsl"], false);
+        assert!(plain["explorer_path"].is_null());
     }
 
     #[test]
