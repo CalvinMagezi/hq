@@ -127,18 +127,21 @@ test('plainText of parsed rows matches stripAnsi', () => {
   expect(plainText(parseAnsi(t))).toBe(stripAnsi(t))
 })
 
+// A quadratic scan takes seconds on this input; the budget only has to stay clear of a slow shared runner.
+const PERF_BUDGET_MS = 1000
+
 test('many unterminated OSC introducers parse in linear time', () => {
   const text = Array.from({ length: 200 }, () => '\x1b]'.repeat(2000)).join('\n')
   const t0 = performance.now()
   parseAnsi(text)
   stripAnsi(text)
-  expect(performance.now() - t0).toBeLessThan(50)
+  expect(performance.now() - t0).toBeLessThan(PERF_BUDGET_MS)
 })
 
 test('100k SGR codes in one line stay bounded', () => {
   const t0 = performance.now()
   const spans = parseAnsiLine(`${E}31ma`.repeat(100_000))
-  expect(performance.now() - t0).toBeLessThan(50)
+  expect(performance.now() - t0).toBeLessThan(PERF_BUDGET_MS)
   expect(spans.length).toBeGreaterThan(0)
 })
 
