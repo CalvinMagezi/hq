@@ -1,6 +1,7 @@
 //! Runs real processes under the host's sandbox and checks what they can and
 //! cannot reach. They need the macOS sandbox program; elsewhere only the
 //! fail-closed behaviour is checked.
+#![cfg(unix)]
 
 use hq_host::{Allow, Host, HostError, ReadSource, SandboxMode, SandboxSpec, SpawnSpec};
 use std::net::TcpListener;

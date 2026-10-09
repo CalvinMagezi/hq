@@ -93,6 +93,63 @@ jobs:
       - name: Compile the CLI
         run: cargo check -p hq-cli --all-targets --locked
 
+  rust-windows:
+    name: Rust (Windows build, smoke)
+    runs-on: windows-2022
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Install Rust toolchain
+        shell: pwsh
+        run: |
+          rustup toolchain install $env:RUST_TOOLCHAIN --profile minimal
+          rustup default $env:RUST_TOOLCHAIN
+
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+
+      # HQ Lite is the native Windows edition: no coding-agent host, sandbox or relays.
+      - name: Build hq.exe
+        run: cargo build -p hq-cli --locked
+
+      - name: No Visual C++ runtime dependency
+        shell: pwsh
+        run: |
+          $text = [Text.Encoding]::ASCII.GetString([IO.File]::ReadAllBytes("target\debug\hq.exe"))
+          if ($text -match '(VCRUNTIME140|MSVCP140|CONCRT140)') { throw 'hq.exe imports the Visual C++ runtime DLLs: the static CRT setting did not apply' }
+
+      - name: Smoke test as a standard user would run it
+        shell: pwsh
+        run: |
+          $root = Join-Path $env:RUNNER_TEMP 'hq-smoke'
+          New-Item -ItemType Directory -Force "$root\vault" | Out-Null
+          # A stand-in web app: this job builds the program, not the web UI.
+          New-Item -ItemType Directory -Force "$root\web" | Out-Null
+          Set-Content -Path "$root\web\index.html" -Value '<html></html>'
+          Set-Content -Path "$root\config.yaml" -Value "vault_path: '$root\vault'`nweb_static_dir: '$root\web'"
+          $env:HQ_CONFIG_PATH = "$root\config.yaml"
+          $hq = "$PWD\target\debug\hq.exe"
+          & $hq --version
+          if ($LASTEXITCODE -ne 0) { throw 'hq --version failed' }
+          & $hq doctor --egress
+          if ($LASTEXITCODE -ne 0) { throw 'hq doctor --egress failed' }
+          & $hq task create 'From the Windows smoke test' | Out-Null
+          if ($LASTEXITCODE -ne 0) { throw 'hq task create failed' }
+          $tasks = & $hq task list 2>$null | Out-String
+          if ($tasks -notmatch 'From the Windows smoke test') { throw "task list did not show the task: $tasks" }
+          & $hq host status
+          if ($LASTEXITCODE -eq 0) { throw 'hq host should be refused on Windows' }
+          $out = & $hq web --detach --json --no-open --port 5699 | Out-String
+          Write-Host $out
+          if ($LASTEXITCODE -ne 0) { throw 'hq web --detach failed' }
+          $health = Invoke-WebRequest -UseBasicParsing http://127.0.0.1:5699/health
+          if ($health.StatusCode -ne 200) { throw 'web /health did not answer' }
+          & $hq web stop
+          Start-Sleep -Seconds 2
+          try { Invoke-WebRequest -UseBasicParsing http://127.0.0.1:5699/health -TimeoutSec 3 | Out-Null; throw 'web server still answering after stop' } catch { if ($_.Exception.Message -like '*still answering*') { throw } }
+
   rustfmt:
     name: Rust (fmt, non-blocking)
     runs-on: ubuntu-latest

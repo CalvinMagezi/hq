@@ -1,5 +1,6 @@
 //! The hook path end to end: a pane runs the hook command Claude Code would
 //! run, with a hook payload on stdin, and the host learns the agent's state.
+#![cfg(unix)]
 
 use hq_host::{Client, Host, Server, claude_settings};
 use serde_json::json;

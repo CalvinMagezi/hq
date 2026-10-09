@@ -1,4 +1,5 @@
 //! Runs real processes through the host. They use only `sh` and `cat`.
+#![cfg(unix)]
 
 use hq_host::{AgentState, Host, HostError, PaneStatus, ReadSource, SpawnSpec};
 use std::time::{Duration, Instant};

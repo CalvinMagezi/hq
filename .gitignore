@@ -72,3 +72,4 @@ dump.rdb
 # subagent-driven-development scratch (ledger, briefs, review packages)
 .superpowers/
 autoresearch-results.tsv
+*.whl

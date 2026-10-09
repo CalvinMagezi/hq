@@ -1,2 +1,7 @@
 [build]
 jobs = 4
+
+# Windows (HQ Lite): link the C runtime statically so hq.exe does not need the Visual C++
+# redistributable, whose installer needs administrator rights.
+[target.'cfg(all(windows, target_env = "msvc"))']
+rustflags = ["-C", "target-feature=+crt-static"]

@@ -742,10 +742,12 @@ async fn dispatch(command: Commands, config: &HqConfig) -> Result<()> {
     match lite_rule(&command) {
         LiteRule::Open => {}
         LiteRule::NotInLite if config.profile.is_lite() => {
-            anyhow::bail!(
-                "this command is not part of HQ Lite (profile: lite). Use the full profile for \
-                 chat, coding-agent sessions and hosts."
-            );
+            let advice = if cfg!(windows) {
+                "Use Full HQ in WSL2 (docs/WINDOWS.md) for chat, coding-agent sessions and hosts."
+            } else {
+                "Use the full profile for chat, coding-agent sessions and hosts."
+            };
+            anyhow::bail!("this command is not part of HQ Lite (profile: lite). {advice}");
         }
         LiteRule::NotInLite => {}
         LiteRule::Checked => hq_core::config::enforce_lite(config, &hq_core::config::process_env)?,

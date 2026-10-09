@@ -66,6 +66,31 @@ pub fn read_all_heartbeats(vault_path: &Path) -> Result<Vec<HarnessHeartbeat>> {
 }
 
 /// Check if a process is alive by PID.
+#[cfg(windows)]
+pub fn is_pid_alive(pid: u32) -> bool {
+    use windows_sys::Win32::Foundation::{CloseHandle, STILL_ACTIVE};
+    use windows_sys::Win32::System::Threading::{
+        GetExitCodeProcess, OpenProcess, PROCESS_QUERY_LIMITED_INFORMATION,
+    };
+    if pid == 0 {
+        return false;
+    }
+    // SAFETY: plain Win32 calls; the handle is closed on every path that opened it.
+    unsafe {
+        let handle = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, 0, pid);
+        if handle.is_null() {
+            // Access denied still means the process exists; anything else means it does not.
+            return std::io::Error::last_os_error().raw_os_error() == Some(5);
+        }
+        let mut code = 0u32;
+        let ok = GetExitCodeProcess(handle, &mut code) != 0;
+        CloseHandle(handle);
+        ok && code == STILL_ACTIVE as u32
+    }
+}
+
+/// Check if a process is alive by PID.
+#[cfg(not(windows))]
 pub fn is_pid_alive(pid: u32) -> bool {
     // On Unix, kill(pid, 0) checks if process exists without sending a signal
     // pid 0 and values above i32::MAX would address a process group, not a process.

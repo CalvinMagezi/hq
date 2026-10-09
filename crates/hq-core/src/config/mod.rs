@@ -331,6 +331,12 @@ fn default_web_bind() -> String {
 const SERVER_CONFIG_PATH: &str = "/opt/hq/config.yaml";
 const SERVER_VAULT_PATH: &str = "/opt/hq/.vault";
 
+/// The profile a config runs as. Native Windows builds have no coding-agent host, sandbox or
+/// chat relay, so they are HQ Lite whatever the file says; Full HQ on Windows is WSL2.
+fn effective_profile(configured: Profile, native_windows: bool) -> Profile {
+    if native_windows { Profile::Lite } else { configured }
+}
+
 fn home_vault_path() -> PathBuf {
     dirs::home_dir()
         .unwrap_or_else(|| PathBuf::from("."))
@@ -383,7 +389,7 @@ impl Default for HqConfig {
             brave_api_key: None,
             default_model: default_model(),
             local_only: false,
-            profile: Profile::default(),
+            profile: effective_profile(Profile::default(), cfg!(windows)),
             lite: LiteConfig::default(),
             ws_port: default_ws_port(),
             chat_turn_timeout_secs: default_chat_turn_timeout_secs(),
@@ -552,7 +558,8 @@ impl HqConfig {
             // set via env instead of committed-shaped plaintext YAML.
             .merge(Env::prefixed("HQ_").split("__"));
 
-        let config: HqConfig = figment.extract()?;
+        let mut config: HqConfig = figment.extract()?;
+        config.profile = effective_profile(config.profile, cfg!(windows));
         set_http_referer(config.http_referer.clone());
         Self::warn_unrecognized_top_level_keys(config_path);
         Ok(config)
@@ -821,3 +828,16 @@ pub fn runtime_identity(config: &HqConfig) -> String {
 
 #[cfg(test)]
 mod tests;
+
+#[cfg(test)]
+mod effective_profile_tests {
+    use super::*;
+
+    #[test]
+    fn native_windows_is_always_lite_and_other_platforms_keep_their_setting() {
+        assert_eq!(effective_profile(Profile::Full, true), Profile::Lite);
+        assert_eq!(effective_profile(Profile::Lite, true), Profile::Lite);
+        assert_eq!(effective_profile(Profile::Full, false), Profile::Full);
+        assert_eq!(effective_profile(Profile::Lite, false), Profile::Lite);
+    }
+}

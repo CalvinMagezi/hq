@@ -1,6 +1,7 @@
 //! `hq update`: thin wrapper over the `hq-update` crate.
 
 use clap::Args;
+#[cfg(unix)]
 use hq_update::cli::{BuildIdentity, CliArgs, Mode};
 
 pub const GIT_SHA: &str = env!("HQ_GIT_SHA");
@@ -16,6 +17,7 @@ pub const LONG_VERSION: &str = concat!(
 );
 /// Public key for verifying releases; set `HQ_UPDATE_PUBKEY` at build time
 /// (forks) or ship `/etc/hq/update.pub`.
+#[cfg(unix)]
 const EMBEDDED_PUBKEY: Option<&str> = option_env!("HQ_UPDATE_PUBKEY");
 
 #[derive(Args, Debug)]
@@ -61,6 +63,16 @@ pub fn register_build_info() {
     });
 }
 
+#[cfg(not(unix))]
+pub async fn run(_args: UpdateArgs) -> i32 {
+    eprintln!(
+        "`hq update` is not available on Windows yet. To update HQ Lite, download the newer zip and unzip it over the old \
+         files; your notes and tasks are kept."
+    );
+    1
+}
+
+#[cfg(unix)]
 pub async fn run(args: UpdateArgs) -> i32 {
     let mode = if args.apply {
         Mode::Apply
@@ -88,6 +100,13 @@ pub async fn run(args: UpdateArgs) -> i32 {
 }
 
 /// `hq update-db ...`: prints the result on stdout, errors on stderr.
+#[cfg(not(unix))]
+pub fn run_db(_args: &[String]) -> i32 {
+    eprintln!("`hq update-db` is not available on Windows");
+    1
+}
+
+#[cfg(unix)]
 pub fn run_db(args: &[String]) -> i32 {
     match hq_update::dbops::run_command(args) {
         Ok(out) => {

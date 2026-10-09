@@ -1,6 +1,7 @@
 //! Runs the real Claude Code CLI under the sandbox. Needs `claude` on PATH and a
 //! logged-in account, so it is ignored by default:
 //! `cargo test -p hq-host --test sandbox_live -- --ignored --nocapture`.
+#![cfg(unix)]
 
 use hq_host::{Allow, Host, ReadSource, SandboxMode, SandboxSpec, SpawnSpec};
 use std::time::{Duration, Instant};
