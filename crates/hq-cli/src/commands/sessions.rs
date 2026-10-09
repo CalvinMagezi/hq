@@ -66,7 +66,36 @@ pub async fn run(
                     "usage: hq sessions spawn <harness> [--prompt ...] [--cwd ...] [--label ...]"
                 )
             })?;
-            let cwd = hq_tools::harness_session::require_cwd(cwd.as_deref())?;
+            // No --cwd, or one the host does not have: a folder in that machine's HQ folder.
+            let cwd = match cwd.as_deref().map(str::trim).filter(|c| !c.is_empty()) {
+                Some(c) => {
+                    let wanted = hq_tools::harness_session::require_cwd(Some(c))?;
+                    let host_handle = hq_tools::agent_host::host(host.as_deref())?;
+                    if host_handle.dir_exists(&wanted) == Some(false) {
+                        let start = hq_tools::harness_session::workspace_start_dir(
+                            &*host_handle,
+                            Some(&wanted),
+                            label.as_deref().unwrap_or(""),
+                            &harness,
+                        )?;
+                        eprintln!("{}", start.note.unwrap_or_default());
+                        start.path
+                    } else {
+                        wanted
+                    }
+                }
+                None => {
+                    let host_handle = hq_tools::agent_host::host(host.as_deref())?;
+                    let start = hq_tools::harness_session::workspace_start_dir(
+                        &*host_handle,
+                        None,
+                        label.as_deref().unwrap_or(""),
+                        &harness,
+                    )?;
+                    eprintln!("{}", start.note.unwrap_or_default());
+                    start.path
+                }
+            };
             let result = hq_tools::harness_session::spawn_with(
                 vault,
                 &db,

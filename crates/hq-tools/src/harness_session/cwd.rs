@@ -122,6 +122,80 @@ pub fn require_allowed_cwd(cwd: Option<&str>) -> Result<PathBuf> {
     require_cwd_in(cwd, &cfg.agent_host, false)
 }
 
+/// What the host says when a session's folder is not there. A remote host cannot be asked
+/// beforehand, so the launch error is how a missing folder shows.
+pub const MISSING_DIR_MARKER: &str = "is not an existing absolute directory";
+
+/// Where a session starts, and why if that is not the folder that was asked for.
+pub struct StartDir {
+    pub path: PathBuf,
+    pub note: Option<String>,
+}
+
+/// A folder name for an agent given no folder: the label or harness and the time, so two agents
+/// never share one write scope.
+fn own_folder_name(label: &str, harness: &str) -> String {
+    let base = if label.trim().is_empty() { harness } else { label };
+    let safe: String = base
+        .chars()
+        .map(|c| if c.is_alphanumeric() || matches!(c, ' ' | '-' | '_') { c } else { '-' })
+        .collect();
+    format!("{} {}", safe.trim(), chrono::Local::now().format("%Y-%m-%d %H%M"))
+}
+
+/// The name of the folder that was asked for, when it is fit to recreate inside the HQ folder.
+fn requested_name(wanted: &Path) -> Option<String> {
+    let name = wanted.file_name()?.to_str()?;
+    hq_host::check_folder_name(name).ok().map(str::to_string)
+}
+
+/// The name the fallback folder gets: the missing folder's own name, else one unique to the agent.
+fn fallback_folder_name(wanted: Option<&Path>, label: &str, harness: &str) -> String {
+    wanted.and_then(requested_name).unwrap_or_else(|| own_folder_name(label, harness))
+}
+
+/// A folder inside the machine's own HQ folder (`Documents/HQ`), made on that machine if it is
+/// missing. The host resolves and creates it, so a path is never judged by this machine's OS.
+/// `wanted` is the folder the caller asked for and could not have; its name is kept so one
+/// project keeps one folder. With no `wanted`, the agent gets a new folder of its own.
+pub fn workspace_start_dir(
+    host: &dyn crate::agent_host::HostBackend,
+    wanted: Option<&Path>,
+    label: &str,
+    harness: &str,
+) -> Result<StartDir> {
+    let name = fallback_folder_name(wanted, label, harness);
+    let made = host.make_dir(None, &name).map_err(|e| {
+        anyhow::anyhow!(
+            "no usable folder was given and host '{}' could not prepare its HQ folder ({e}); pass cwd",
+            host.name()
+        )
+    })?;
+    let path = made["path"]
+        .as_str()
+        .map(PathBuf::from)
+        .ok_or_else(|| anyhow::anyhow!("host '{}' did not say which folder it made", host.name()))?;
+    let note = match wanted {
+        Some(w) => format!(
+            "{} does not exist on host '{}', so the session started in {} instead.",
+            w.display(),
+            host.name(),
+            path.display()
+        ),
+        None => format!(
+            "No cwd was given, so the session started in {} on host '{}'.",
+            path.display(),
+            host.name()
+        ),
+    };
+    Ok(StartDir { path, note: Some(note) })
+}
+
+/// Whether a launch error says the folder was missing.
+pub fn is_missing_dir_error(e: &anyhow::Error) -> bool {
+    format!("{e:#}").contains(MISSING_DIR_MARKER)
+}
+
 /// Whether a tool call arrived on the handoff-scoped key.
 pub fn is_handoff_scope(args: &Value) -> bool {
     args.get(HANDOFF_SCOPE_ARG).and_then(Value::as_bool) == Some(true)
@@ -234,5 +308,38 @@ mod vault_guard_tests {
         let plain = tempfile::TempDir::new().unwrap();
         let inner = plain.path().join("vault");
         assert!(check_cwd_outside_vault(plain.path(), "", "native", &inner).is_err());
+    }
+}
+
+#[cfg(test)]
+mod fallback_tests {
+    use super::*;
+
+    #[test]
+    fn a_missing_folder_keeps_its_name_so_one_project_keeps_one_folder() {
+        let name = fallback_folder_name(Some(Path::new("/srv/clients/Agent-HQ")), "", "claude-code");
+        assert_eq!(name, "Agent-HQ");
+    }
+
+    #[test]
+    fn no_folder_gives_each_agent_a_folder_of_its_own_named_for_its_label_or_harness() {
+        let labelled = fallback_folder_name(None, "auth/refactor", "claude-code");
+        assert!(labelled.starts_with("auth-refactor "), "{labelled}");
+        let bare = fallback_folder_name(None, "  ", "codex");
+        assert!(bare.starts_with("codex "), "{bare}");
+        assert!(hq_host::check_folder_name(&labelled).is_ok() && hq_host::check_folder_name(&bare).is_ok());
+    }
+
+    #[test]
+    fn an_unfit_missing_name_falls_back_to_the_agent_folder() {
+        let name = fallback_folder_name(Some(Path::new("/srv/we$ird")), "job", "pi");
+        assert!(name.starts_with("job "), "{name}");
+    }
+
+    #[test]
+    fn the_host_launch_error_for_a_missing_folder_is_recognised() {
+        let e = anyhow::anyhow!("working directory /nope is not an existing absolute directory");
+        assert!(is_missing_dir_error(&e));
+        assert!(!is_missing_dir_error(&anyhow::anyhow!("harness binary not found")));
     }
 }

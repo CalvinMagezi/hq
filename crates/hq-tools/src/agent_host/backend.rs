@@ -96,6 +96,11 @@ pub trait HostBackend: Send + Sync + std::fmt::Debug {
     fn make_dir(&self, _parent: Option<&str>, _name: &str) -> Result<serde_json::Value, AgentHostError> {
         Err(self.no_workspace())
     }
+    /// Whether `path` is an existing folder on this host: `None` when it cannot be told from
+    /// here (a remote host), so the caller must let the launch decide.
+    fn dir_exists(&self, _path: &std::path::Path) -> Option<bool> {
+        None
+    }
     fn no_workspace(&self) -> AgentHostError {
         AgentHostError::Api {
             code: "unsupported".into(),
@@ -232,6 +237,9 @@ impl<T: HostBackend + ?Sized> HostBackend for Arc<T> {
     }
     fn make_dir(&self, parent: Option<&str>, name: &str) -> Result<serde_json::Value, AgentHostError> {
         (**self).make_dir(parent, name)
+    }
+    fn dir_exists(&self, path: &std::path::Path) -> Option<bool> {
+        (**self).dir_exists(path)
     }
     fn with_launch_bound_dyn(&self, bound: Duration) -> Host {
         (**self).with_launch_bound_dyn(bound)

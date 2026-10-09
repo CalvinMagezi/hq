@@ -12,6 +12,27 @@ use hq_db::harness_sessions_registry as registry;
 use crate::registry::HqTool;
 use crate::util::{arg_str, arg_str_list};
 
+/// Where a tool-started session runs. An explicit folder that exists is used as given. A blank one,
+/// or one the host does not have, falls back to a folder in that machine's HQ folder, which the
+/// host creates; the deny and allow lists then judge the folder actually used.
+async fn choose_start_dir(
+    host: &crate::agent_host::Host,
+    requested: Option<&str>,
+    agent_host: &hq_core::config::AgentHostConfig,
+    handoff_scope: bool,
+    label: &str,
+    harness: &str,
+) -> Result<super::StartDir> {
+    let wanted = requested.map(|r| super::require_cwd_in(Some(r), agent_host, handoff_scope)).transpose()?;
+    if let Some(path) = wanted.as_ref().filter(|p| host.dir_exists(p) != Some(false)) {
+        return Ok(super::StartDir { path: path.clone(), note: None });
+    }
+    let (h, w, l, k) = (host.clone(), wanted, label.to_string(), harness.to_string());
+    let fallback = tokio::task::spawn_blocking(move || super::workspace_start_dir(&*h, w.as_deref(), &l, &k)).await??;
+    super::require_cwd_in(Some(&fallback.path.to_string_lossy()), agent_host, handoff_scope)?;
+    Ok(fallback)
+}
+
 pub struct HarnessSessionSpawnTool {
     vault_path: PathBuf,
     db: Arc<Database>,
@@ -34,7 +55,7 @@ impl HqTool for HarnessSessionSpawnTool {
                 "harness": { "type": "string", "description": format!("One of: {} (built-in harnesses plus any agent_host.harness_profiles)", super::spec::known_harnesses().join(", ")) },
                 "prompt": { "type": "string", "description": "Initial prompt typed into the session after it starts" },
                 "host": { "type": "string", "description": "host to run on, from host_list (default: the configured default host)" },
-                "cwd": { "type": "string", "description": "Project directory on that host. Required; a home or root directory is refused." },
+                "cwd": { "type": "string", "description": "Project directory on that host. Optional: when omitted, or when the folder does not exist there, the session starts in a folder inside that machine's own HQ folder (Documents/HQ), created if needed. A home or root directory is refused." },
                 "label": { "type": "string", "description": "Short human label, e.g. 'auth-refactor'", "default": "" },
                 "task_id": { "type": "string", "description": "HQ task (id or display id such as FR-053) this session works on. Must exist and not be complete. Its title and description become the goal when `goal` is omitted." },
                 "goal": { "type": "string", "description": "What the session should accomplish. HQ drives only a session with a specific goal and definition of done; without them it observes." },
@@ -73,33 +94,49 @@ impl HqTool for HarnessSessionSpawnTool {
         }
         let origin = super::start_origin(self.chat.as_ref());
         super::check_origin_cap(&self.db, origin)?;
-        let cwd = super::require_cwd_in(
-            args.get("cwd").and_then(|v| v.as_str()),
-            &cfg.agent_host,
-            super::is_handoff_scope(&args),
-        )?;
-        super::check_cwd_outside_vault(&cwd, &host, &cfg.agent_host.default_host, &cfg.vault_path)?;
         let host_handle = crate::agent_host::host(Some(host.as_str()).filter(|h| !h.is_empty()))?;
-        let report = super::spawn_on(
-            &self.vault_path,
-            &self.db,
-            host_handle,
-            super::SpawnRequest {
-                host: Some(host.as_str()).filter(|h| !h.is_empty()),
-                harness: &harness,
-                prompt: Some(prompt.as_str()).filter(|p| !p.is_empty()),
-                cwd: &cwd,
-                label: &label,
-                mission_id: Some(task_id.as_str()).filter(|t| !t.is_empty()),
-                watch: self.chat.as_ref().map(|c| c.new_watch(&args)),
-                parent: None,
-                goal: super::GoalText {
-                    goal: Some(goal.as_str()).filter(|g| !g.is_empty()),
-                    done_criteria: Some(done.as_str()).filter(|d| !d.is_empty()),
-                },
-            },
-        )
-        .await?;
+        let requested = args.get("cwd").and_then(|v| v.as_str()).map(str::trim).filter(|c| !c.is_empty());
+        let scope = super::is_handoff_scope(&args);
+        let start = choose_start_dir(&host_handle, requested, &cfg.agent_host, scope, &label, &harness).await?;
+        super::check_cwd_outside_vault(&start.path, &host, &cfg.agent_host.default_host, &cfg.vault_path)?;
+        macro_rules! launch {
+            ($cwd:expr) => {
+                super::SpawnRequest {
+                    host: Some(host.as_str()).filter(|h| !h.is_empty()),
+                    harness: &harness,
+                    prompt: Some(prompt.as_str()).filter(|p| !p.is_empty()),
+                    cwd: $cwd,
+                    label: &label,
+                    mission_id: Some(task_id.as_str()).filter(|t| !t.is_empty()),
+                    watch: self.chat.as_ref().map(|c| c.new_watch(&args)),
+                    parent: None,
+                    goal: super::GoalText {
+                        goal: Some(goal.as_str()).filter(|g| !g.is_empty()),
+                        done_criteria: Some(done.as_str()).filter(|d| !d.is_empty()),
+                    },
+                }
+            };
+        }
+        let mut note = start.note;
+        let mut report = super::spawn_on(&self.vault_path, &self.db, host_handle.clone(), launch!(&start.path)).await;
+        // A remote host cannot be asked whether a folder exists; its launch error says so, and
+        // nothing was started, so the one retry is in the machine's own HQ folder.
+        if let (Err(e), Some(asked), None) = (&report, requested, &note)
+            && super::is_missing_dir_error(e)
+        {
+            let fallback = choose_start_dir(&host_handle, None, &cfg.agent_host, scope, &label, &harness).await?;
+            super::check_cwd_outside_vault(&fallback.path, &host, &cfg.agent_host.default_host, &cfg.vault_path)?;
+            note = Some(format!(
+                "{asked} does not exist on host '{}', so the session started in {} instead.",
+                host_handle.name(),
+                fallback.path.display()
+            ));
+            report = super::spawn_on(&self.vault_path, &self.db, host_handle.clone(), launch!(&fallback.path)).await;
+        }
+        let mut report = report?;
+        if let Some(note) = note {
+            report["cwd_note"] = json!(note);
+        }
         super::tag_origin(&self.db, &report, origin);
         Ok(report)
     }
@@ -654,7 +691,7 @@ impl HqTool for HarnessSessionHandoffTool {
                 "acceptance": { "type": "string", "description": "Observable conditions that show the work is done (also accepted as done_criteria). HQ drives the session only when these are specific." },
                 "done_criteria": { "type": "string", "description": "Alias of acceptance" },
                 "harness": { "type": "string", "description": format!("One of: {}", super::spec::known_harnesses().join(", ")) },
-                "cwd": { "type": "string", "description": "Project directory on that host. Required; a home or root directory is refused, as is anything matching agent_host.spawn_cwd_deny." },
+                "cwd": { "type": "string", "description": "Project directory on that host. Optional: when omitted, or when the folder does not exist there, the session starts in a folder inside that machine's own HQ folder (Documents/HQ), created if needed. A home or root directory is refused, as is anything matching agent_host.spawn_cwd_deny." },
                 "host": { "type": "string", "description": "host from host_list (default: the configured default host, normally local)" },
                 "external_id": { "type": "string", "description": "Idempotency key for the task, unique per space. Not combinable with task_id." },
                 "task_id": { "type": "string", "description": "Work on this existing HQ task (id or display id) instead of filing one. Must not be complete." },
@@ -663,7 +700,7 @@ impl HqTool for HarnessSessionHandoffTool {
                 "initiative": { "type": "string", "description": "Initiative name to file a new task under (default Inbox)" },
                 "drive": { "type": "boolean", "description": "false starts the thread watching without HQ driving the session. Omit to follow agent_host.drive_new_watches." }
             },
-            "required": ["harness", "cwd"]
+            "required": ["harness"]
         })
     }
     fn category(&self) -> &str {
@@ -680,14 +717,13 @@ impl HqTool for HarnessSessionHandoffTool {
         let origin = super::start_origin(self.chat.as_ref());
         super::check_origin_cap(&self.db, origin)?;
         let cfg = hq_core::config::HqConfig::load()?;
-        let handoff_cwd = super::require_cwd_in(
-            args.get("cwd").and_then(Value::as_str),
-            &cfg.agent_host,
-            super::is_handoff_scope(&args),
-        )?;
         let host_name = arg_str(&args, "host");
-        super::check_cwd_outside_vault(&handoff_cwd, &host_name, &cfg.agent_host.default_host, &cfg.vault_path)?;
         let host = crate::agent_host::host(Some(host_name.as_str()).filter(|h| !h.is_empty()))?;
+        let requested = args.get("cwd").and_then(Value::as_str).map(str::trim).filter(|c| !c.is_empty());
+        let (label, harness) = (arg_str(&args, "title"), arg_str(&args, "harness"));
+        let scope = super::is_handoff_scope(&args);
+        let start = choose_start_dir(&host, requested, &cfg.agent_host, scope, &label, &harness).await?;
+        super::check_cwd_outside_vault(&start.path, &host_name, &cfg.agent_host.default_host, &cfg.vault_path)?;
         let owned = |key: &str| arg_str(&args, key);
         let acceptance = [owned("acceptance"), owned("done_criteria")]
             .into_iter()
@@ -702,7 +738,7 @@ impl HqTool for HarnessSessionHandoffTool {
                 description: owned("description"),
                 acceptance,
                 harness: owned("harness"),
-                cwd: owned("cwd"),
+                cwd: start.path.to_string_lossy().into_owned(),
                 external_id: owned("external_id"),
                 task_id: owned("task_id"),
                 prompt: owned("prompt"),
@@ -715,6 +751,10 @@ impl HqTool for HarnessSessionHandoffTool {
             },
         )
         .await?;
+        let mut report = report;
+        if let Some(note) = start.note {
+            report["cwd_note"] = json!(note);
+        }
         super::tag_origin(&self.db, &report, origin);
         Ok(report)
     }
