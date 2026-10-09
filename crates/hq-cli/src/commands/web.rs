@@ -590,8 +590,12 @@ async fn probe(addr: SocketAddr) -> Probe {
                 .is_some_and(|v| v["service"] == "agent-hq");
             if is_hq { Probe::Hq } else { Probe::Other }
         }
-        // Refused is the normal "free" case; a timeout means something is there.
-        Err(e) if e.is_timeout() => Probe::Other,
+        // Refused is the normal "free" case; a timeout means something is there, unless the port
+        // can be taken: Windows does not refuse a closed local port at once but retries for
+        // longer than the timeout.
+        Err(e) if e.is_timeout() => {
+            if std::net::TcpListener::bind(addr).is_ok() { Probe::Free } else { Probe::Other }
+        }
         Err(_) => Probe::Free,
     }
 }
