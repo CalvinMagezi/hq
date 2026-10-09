@@ -28,6 +28,7 @@ import { ALL_SELECTION, TasksSidebar, type TaskSelection } from '~/components/ta
 import { useTasksData } from '~/components/tasks/useTasksData'
 import { usePolled } from '~/components/sessions/usePolled'
 import { StaleIdsContext, stableSet } from '~/components/tasks/staleContext'
+import { WorkingNowContext, workingNow } from '~/components/tasks/workingContext'
 import { VaultNoteDrawer } from '~/components/VaultNoteDrawer'
 
 type TasksView = 'list' | 'board' | 'timeline'
@@ -44,7 +45,11 @@ const TIMELINE_WORK_POLL_MS = 60_000
 /** How often the archived list and the stale ids refresh while shown. */
 const ARCHIVED_POLL_MS = 60_000
 const STALE_POLL_MS = 120_000
+/** Who is working right now: a short window and a quick poll, since a lease can start or end any minute. */
+const LIVE_WORK_DAYS = 1
+const LIVE_WORK_POLL_MS = 30_000
 const NO_STALE: ReadonlySet<string> = new Set()
+const NO_WORKING: ReadonlyMap<string, string> = new Map()
 
 export const Route = createFileRoute('/tasks')({
   validateSearch: (search: Record<string, unknown>): { view?: TasksView; task?: string } => {
@@ -137,6 +142,12 @@ function TasksPage() {
     async () => (await fetchRecentWorkSessionsClient(TIMELINE_WORK_DAYS)).work_sessions,
     TIMELINE_WORK_POLL_MS,
     view === 'timeline'
+  )
+
+  const live = usePolled(
+    'live-work',
+    async () => workingNow((await fetchRecentWorkSessionsClient(LIVE_WORK_DAYS)).work_sessions),
+    LIVE_WORK_POLL_MS
   )
 
   const archived = usePolled(
@@ -269,6 +280,7 @@ function TasksPage() {
   const activeCount = tasks.filter((t) => t.status !== 'complete').length
 
   return (
+    <WorkingNowContext.Provider value={live.data ?? NO_WORKING}>
     <StaleIdsContext.Provider value={stale.data ?? NO_STALE}>
     <div className="flex h-full min-h-0 w-full max-w-full overflow-x-hidden">
       <TasksSidebar
@@ -376,6 +388,7 @@ function TasksPage() {
       </div>
     </div>
     </StaleIdsContext.Provider>
+    </WorkingNowContext.Provider>
   )
 }
 
