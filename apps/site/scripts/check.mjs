@@ -20,6 +20,8 @@ const OUTBOUND_ALLOW = [
   'https://tailscale.com/kb/',
   // The hosted Hetzner deploy wizard, a separate app (apps/deploy).
   'https://deploy.agent-hq.online',
+  // Where the deploy guide tells the reader to create a project and API token.
+  'https://console.hetzner.com/projects',
 ];
 
 const BANNED_WORDS = /\b(delve\w*|landscape\w*|tapestry|leverag\w*|robust\w*|seamless\w*|cutting-edge|innovative)\b/i;

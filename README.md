@@ -77,6 +77,36 @@ The vault is the center. Every agent reads from it and writes back to it. Switch
 
 Not a developer? Give [AGENTS-SETUP.md](AGENTS-SETUP.md) to your AI coding agent and ask it to set HQ up for you.
 
+### Quickest: deploy on Hetzner with one form
+
+A private, always-on HQ on your own Hetzner Cloud server, about ten minutes from start to chatting.
+It costs Hetzner's hourly price for the server, roughly 6.50 a month for a 4 GB machine, and it is
+reachable only from your own [Tailscale](https://tailscale.com) network.
+
+<p align="center">
+  <img src="docs/media/hetzner-deploy-wizard.gif" alt="A recording of the Hetzner deploy form: paste a project token, fill in a name, location, size, SSH key and your IP, create the server, then read the next steps and close public SSH." width="720" />
+</p>
+
+You need a Hetzner account with a payment method, a free Tailscale account with MagicDNS and HTTPS
+certificates turned on, an SSH key (`ssh-keygen -t ed25519` makes one) and a model API key such as OpenRouter.
+
+1. **Make a token.** In the [Hetzner Cloud console](https://console.hetzner.com/projects) create a
+   project, then Security, API tokens, Generate. Choose **Read & Write** and copy it once.
+2. **Fill in the form** at <https://deploy.agent-hq.online>: paste the token, then pick a name, a
+   location, a size with at least 4 GB of memory, your SSH public key and your own IP address.
+   Click **Create server**.
+3. **Wait 3 to 5 minutes** after Hetzner shows the server as running. It installs HQ by itself.
+4. **Join your tailnet.** Run `ssh root@<server-ip> hq-join`, open the Tailscale login link it prints
+   and sign in. It then prints your HQ link.
+5. **Open HQ.** Open that link on a device on your tailnet, paste your model key on the first
+   screen, and send a message. Treat the link like a password: it signs you in as admin.
+6. **Close public SSH** with the button on the form page once HQ opens. When you are done with the
+   server, the same page deletes it together with its firewall and key.
+
+The form never sees the admin token (the server generates it) and nothing secret goes into the
+server's setup data. Troubleshooting, the security model and the `hcloud` command-line route:
+[docs/HETZNER.md](docs/HETZNER.md).
+
 ### Prerequisites
 
 - **Rust** 1.89 or newer (2024 edition): `curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh`
