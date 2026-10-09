@@ -2,6 +2,7 @@
 import Layout from '../layouts/Layout.astro';
 import CodeBlock from '../components/CodeBlock.astro';
 import { installChannels } from '../data/install-channels';
+import Media from '../components/Media.astro';
 import { links, REPO } from '../data/site';
 
 const cloneCmd = `git clone ${REPO}.git\ncd hq`;
@@ -53,6 +54,7 @@ const docker = installChannels.docker;
           <li><a href="#windows">Windows (WSL2)</a></li>
           <li><a href="#source">Build from source</a></li>
           <li><a href="#server">Server with signed releases</a></li>
+          <li><a href="#hetzner">One form on Hetzner</a></li>
           <li><a href="#tailscale">Remote access over Tailscale</a></li>
           <li><a href="#maintain">Updating and uninstalling</a></li>
           <li><a href="#soon">Not available yet</a></li>
@@ -264,6 +266,63 @@ const docker = installChannels.docker;
           deploy path per host: the updater owns the binary and web files, so do not also build on the
           server. Full walkthrough: <a href={links.deployReadme}>deploy/README.md</a>. To check a
           release by hand, see <a href="/security/#verify">verifying a release</a>.
+        </p>
+      </div>
+    </section>
+
+    <section class="doc-section" id="hetzner" aria-labelledby="hetzner-h">
+      <h2 id="hetzner-h">{installChannels.hetzner.title}</h2>
+      <div class="prose">
+        <p>
+          The quickest way to a private, always-on HQ. A form creates a server in your own Hetzner Cloud project that
+          installs signed releases, updates itself and is reachable only from your tailnet. It takes about ten minutes,
+          most of it waiting, and costs Hetzner&apos;s hourly price for the server: about 6.50 a month for a 4 GB machine.
+        </p>
+        <p>
+          You need a Hetzner account with a payment method, a free Tailscale account with MagicDNS and HTTPS certificates turned on,
+          an SSH key (<code>ssh-keygen -t ed25519</code> makes one), and a model API key such as OpenRouter.
+        </p>
+      </div>
+      <Media id="hetzner-deploy" />
+      <ol class="steps">
+        <li>
+          <p>
+            <strong>Make a token.</strong> In the <a href="https://console.hetzner.com/projects">Hetzner Cloud console</a> create a project,
+            then Security, API tokens, Generate. Choose <em>Read &amp; Write</em> and copy it once.
+          </p>
+        </li>
+        <li>
+          <p>
+            <strong>Fill in the form.</strong> Open the <a href="https://deploy.agent-hq.online">deploy form</a>, paste the token, and
+            pick a name, a location, a size with at least 4 GB of memory, your SSH public key and your own IP address. Click Create server.
+          </p>
+        </li>
+        <li>
+          <p><strong>Wait 3 to 5 minutes</strong> after Hetzner shows the server as running. It installs HQ by itself.</p>
+        </li>
+        <li>
+          <p>
+            <strong>Join your tailnet.</strong> Run <code>ssh root@&lt;server-ip&gt; hq-join</code>, open the Tailscale login link it prints and
+            sign in. It then prints your HQ link.
+          </p>
+        </li>
+        <li>
+          <p>
+            <strong>Open HQ.</strong> Open that link on a device on your tailnet, paste your model key on the first screen, and send a message.
+            Treat the link like a password.
+          </p>
+        </li>
+        <li>
+          <p>
+            <strong>Close public SSH</strong> with the button on the form page once HQ opens. When you are done with the server,
+            the same page deletes it with its firewall and key.
+          </p>
+        </li>
+      </ol>
+      <div class="prose">
+        <p>
+          The server&apos;s setup data holds no secret and the admin token is generated on the server, so the form never sees it.
+          More detail, troubleshooting and the security model: <a href={links.hetznerDocs}>docs/HETZNER.md</a>.
         </p>
       </div>
     </section>

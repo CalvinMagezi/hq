@@ -126,3 +126,113 @@ pub fn require_allowed_cwd(cwd: Option<&str>) -> Result<PathBuf> {
 pub fn is_handoff_scope(args: &Value) -> bool {
     args.get(HANDOFF_SCOPE_ARG).and_then(Value::as_bool) == Some(true)
 }
+
+/// Vault folders that hold the owner's identity, threads and databases.
+const VAULT_PRIVATE_DIRS: [&str; 3] = ["_system", "_threads", "_data"];
+
+fn absolute_normalized(path: &Path) -> PathBuf {
+    let absolute = if path.is_absolute() {
+        path.to_path_buf()
+    } else {
+        std::env::current_dir().unwrap_or_default().join(path)
+    };
+    crate::util::lexically_normalize(&absolute)
+}
+
+fn lowercase_parts(path: &Path) -> Vec<String> {
+    path.components()
+        .filter_map(|c| match c {
+            std::path::Component::Normal(p) => Some(p.to_string_lossy().to_ascii_lowercase()),
+            _ => None,
+        })
+        .collect()
+}
+
+/// Case-insensitive `starts_with`, because macOS volumes are.
+fn is_inside(path: &Path, root: &Path) -> bool {
+    let (path, root) = (lowercase_parts(path), lowercase_parts(root));
+    path.len() >= root.len() && path[..root.len()] == root[..]
+}
+
+/// A session on the machine that holds the vault may not start in the vault, in HQ's config
+/// directory, or in a private vault folder: the agent could rewrite identity files or the config.
+/// A folder that merely contains the vault is refused too, unless it is a git checkout (a repo
+/// with its vault in `.vault/` is the normal development layout). Sessions on other hosts are
+/// unaffected, since the vault path means nothing on another machine. Paths are compared as
+/// written, so a symlink into the vault is not caught.
+pub fn check_cwd_outside_vault(
+    cwd: &Path,
+    host: &str,
+    default_host: &str,
+    vault: &Path,
+) -> Result<()> {
+    let host = if host.is_empty() { default_host } else { host };
+    if host != hq_core::config::NATIVE_HOST && host != hq_core::config::LOCAL_HOST {
+        return Ok(());
+    }
+    let cwd = absolute_normalized(cwd);
+    let vault = absolute_normalized(vault);
+    let hq_dir = absolute_normalized(&hq_core::config::HqConfig::hq_dir());
+    let private = VAULT_PRIVATE_DIRS.iter().any(|d| is_inside(&cwd, &vault.join(d)));
+    let is_vault = lowercase_parts(&cwd) == lowercase_parts(&vault);
+    let holds_vault = is_inside(&vault, &cwd) && !cwd.join(".git").is_dir();
+    if private || is_vault || holds_vault || is_inside(&cwd, &hq_dir) {
+        bail!(
+            "cwd '{}' is the HQ vault, HQ's config directory, a folder that holds the vault, or one of its private folders; name the project directory instead. No session was started.",
+            cwd.display()
+        );
+    }
+    Ok(())
+}
+
+#[cfg(test)]
+mod vault_guard_tests {
+    use super::*;
+
+    const VAULT: &str = "/srv/hq/.vault";
+
+    fn check(cwd: &str, host: &str) -> Result<()> {
+        check_cwd_outside_vault(Path::new(cwd), host, "native", Path::new(VAULT))
+    }
+
+    #[test]
+    fn the_vault_its_ancestors_and_its_private_folders_are_refused_on_the_vault_host() {
+        for cwd in [
+            VAULT,
+            "/srv/hq",
+            "/srv",
+            "/srv/hq/.vault/_system",
+            "/srv/hq/.vault/_threads/x",
+            "/srv/hq/.vault/../.vault",
+            "/SRV/HQ/.Vault/_System",
+        ] {
+            assert!(check(cwd, "").is_err(), "{cwd}");
+            assert!(check(cwd, "local").is_err(), "{cwd}");
+        }
+        let hq_dir = hq_core::config::HqConfig::hq_dir();
+        assert!(check(&hq_dir.display().to_string(), "").is_err(), "HQ's config directory");
+    }
+
+    #[test]
+    fn project_directories_and_other_hosts_are_unaffected() {
+        assert!(check("/srv/hq/.vault/Notebooks/Projects/site", "").is_ok());
+        assert!(check("/srv/projects/app", "").is_ok());
+        assert!(check("/srv/hq-oss", "native").is_ok());
+        assert!(check(VAULT, "laptop").is_ok(), "a remote host's paths are its own");
+        assert!(check("/workspace/projects/app", "laptop").is_ok());
+    }
+
+    #[test]
+    fn a_git_checkout_that_contains_the_vault_is_allowed_but_its_vault_is_not() {
+        let repo = tempfile::TempDir::new().unwrap();
+        std::fs::create_dir(repo.path().join(".git")).unwrap();
+        let vault = repo.path().join(".vault");
+        std::fs::create_dir(&vault).unwrap();
+        assert!(check_cwd_outside_vault(repo.path(), "", "native", &vault).is_ok());
+        assert!(check_cwd_outside_vault(&vault, "", "native", &vault).is_err());
+        assert!(check_cwd_outside_vault(&vault.join("_system"), "", "native", &vault).is_err());
+        let plain = tempfile::TempDir::new().unwrap();
+        let inner = plain.path().join("vault");
+        assert!(check_cwd_outside_vault(plain.path(), "", "native", &inner).is_err());
+    }
+}

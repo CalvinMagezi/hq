@@ -204,7 +204,7 @@ fn is_read_only(args: &[String]) -> bool {
         (first, words.next()),
         (Some("status"), _)
             | (Some("agent"), Some("get" | "list" | "read"))
-            | (Some("host.status" | "events.poll" | "agent.get" | "agent.list" | "agent.read"), _)
+            | (Some("host.status" | "host.workspace" | "host.dirs" | "events.poll" | "agent.get" | "agent.list" | "agent.read"), _)
     )
 }
 

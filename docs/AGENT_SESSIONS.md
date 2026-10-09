@@ -215,8 +215,9 @@ read-only question with `hq_ask` (see `docs/MCP_ASK.md`), which is not a harness
 reply's session has the session-log, the host and file-reading tools removed, so the key cannot read
 through HQ what it cannot call.
 
-**This key is code-execution equivalent.** A spawned `claude-code` session runs with
-permissions skipped, on any host and `cwd` the deny list allows. Set
+**This key is code-execution equivalent.** A spawned `claude-code` session asks for
+approval on every tool call (`--permission-mode manual`; HQ never launches an agent in a bypass
+mode), but it can still run whatever you or the Drive loop approve, on any host and `cwd` the deny list allows. Set
 `agent_host.handoff_cwd_allow` to the directories the client may use: a call that arrived on the
 handoff key must then have a `cwd` in or under one of them (the gateway marks those calls, a
 client cannot set the marker). Left empty, treat the key as shell access to those hosts as
@@ -389,9 +390,9 @@ never starts driven, and is capped at `agent_host.max_ask_spawned_sessions`; ses
 starts with no chat are capped at `agent_host.max_mcp_started_sessions`; full-mode asks wait at most
 `agent_host.max_full_asks` at a time; an `hq_ask` reply loses `config_manage`.
 
-### The Sessions page
+### The Workbench page
 
-`/sessions` in the web app lists every registry row with its task, host, goal, live agent
+The Workbench page (`/sessions` in the web app, named Sessions before) lists every registry row with its task, host, goal, live agent
 status and whether its host answers (an unreachable host shows "host unreachable", never
 "exited"). Picking one shows the pane text (refreshed every 3s), a prompt box, the keys that
 answer a dialog, an Adopt button, and the command that lists the agents on that machine
@@ -403,7 +404,14 @@ also carry `X-HQ-Client` (the web app sends it; scripts must add it, or get a 40
 `unwatch` predate the header and stay open to cached PWAs that do not send it yet. Errors the
 endpoints do not recognise are logged and answered generically, never with ssh or the host stderr.
 
-- `GET /api/harness-sessions?task_id=&status=&host=` is `harness_session_list` plus the task
+- `POST /api/harness-sessions` starts an agent: `{harness, host?, folder?, new_folder?, prompt?, label?}`.
+  The folder is resolved on the computer that runs the agent and must be inside its HQ folder
+  (`~/Documents/HQ`; `GET /api/workbench/hosts` reports it, `GET` and `POST
+  /api/workbench/hosts/{host}/dirs` browse and create folders there). The agent always starts in
+  an approval mode. `POST .../{id}/stop`, `/resume`, `/rename` and `/archive` manage a session;
+  an archived session leaves the default list (`include_archived=true` brings it back) and only a
+  session that is not running can be archived. All of these need `X-HQ-Client`.
+- `GET /api/harness-sessions?task_id=&status=&host=&include_archived=` is `harness_session_list` plus the task
   and goal. `GET /api/harness-sessions/{id}` is one row, live.
 - `GET /api/harness-sessions/{id}/screen?lines=N` (default 80, at most 500) reads the pane
   while the agent runs and returns the last stored snapshot after it ends (`source`). A live
@@ -483,7 +491,7 @@ agent_host:
     my-claude:                 # the name callers pass as `harness`
       base: claude-code        # resume, trust and token behavior come from this harness
       command: my-claude-wrapper   # run through a shell; must end up running claude
-      args: ["--dangerously-skip-permissions"]   # optional; replaces the base args on a fresh spawn
+      args: ["--model", "opus"]   # optional; replaces the base args on a fresh spawn. Bypass flags are refused
       env:                     # optional; set for the agent, so for the CLI too
         CLAUDE_CONFIG_DIR: /home/you/.claude-work
 ```
