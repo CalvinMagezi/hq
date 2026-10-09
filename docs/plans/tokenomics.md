@@ -142,3 +142,27 @@ ledger's incremental spend instead of a provider's running counter, so it works 
 `GET /api/usage/forecast` returns the month forecast (against the tightest global monthly budget),
 one forecast per budget, and the biggest drivers by model and origin over the last 7 days.
 `hq usage forecast` prints the same.
+
+## Cost-aware routing and guidance (phase 5)
+
+**Routing under budget pressure.** The gate tells the router how close each budget is
+(`Instruments::set_pressure`): 0 below half the limit, rising to 1 at the limit, per provider for a
+`provider:` budget and for all providers for a `global` one. The router's provider score
+(`compute_score_pressured`) multiplies the cost weight by up to 7x at full pressure and shrinks the
+health, reliability and speed weights to keep the sum at one, so calls drift to cheaper providers as a
+budget drains instead of hitting a wall. With no pressure the score is identical to before. Pressure
+only reorders candidates the router already has; a single backend chain is ordered by its
+configuration and relies on the gate's failover instead.
+
+**Cheap by default for background work.** There is no separate switch: give `origin:memory`,
+`origin:skill_review`, `origin:embeddings` and similar a `downgrade` budget with a cheaper
+`downgrade_model` (see the example above), or a `block` budget to cap them.
+
+**Efficiency.** The forecast drivers (`GET /api/usage/forecast`, `hq usage forecast`) now carry average
+prompt size and cache hit rate per model and origin. A rising prompt size means context is growing; a
+low cache hit rate means the prompt prefix keeps changing.
+
+**Seeing its own budget.** The read-only `budget_status` tool returns the budgets, the burn rate, the
+projection and the drivers. `budgets.guidance: true` adds one line to the system prompt at session start
+once any budget is past 80%, naming the tightest one. It is off by default because whether it lowers
+cost without lowering quality has not been measured.

@@ -35,13 +35,14 @@ pub(super) fn resolve_scored(
     providers: &[(String, Arc<dyn LlmProvider>)],
     routes: &[RouteEntry],
     health: &[(String, ProviderHealth)],
+    pressure: &dyn Fn(&str) -> f64,
 ) -> Vec<ScoredCandidate> {
     let mut candidates = route_candidates(model, providers, routes, health);
     if candidates.is_empty() {
         candidates.extend(prefix_candidate(model, providers, routes));
     }
     if candidates.len() > 1 {
-        rank(&mut candidates, task, health);
+        rank(&mut candidates, task, health, pressure);
     }
     candidates
 }
@@ -115,14 +116,20 @@ fn health_of<'a>(health: &'a [(String, ProviderHealth)], name: &str) -> Option<&
 /// wildcards. For tool, coding and planning work, Free candidates go last
 /// whenever a paid one exists (free models give shallow multi-turn tool
 /// chains); that ordering replaces the wildcard rule, as it always has.
-fn rank(candidates: &mut [ScoredCandidate], task: TaskHint, health: &[(String, ProviderHealth)]) {
+fn rank(
+    candidates: &mut [ScoredCandidate],
+    task: TaskHint,
+    health: &[(String, ProviderHealth)],
+    pressure: &dyn Fn(&str) -> f64,
+) {
     let mut rng = rand::thread_rng();
     for c in candidates.iter_mut() {
-        let base = compute_score(
+        let base = compute_score_pressured(
             c.cost_tier,
             c.is_local,
             health_of(health, &c.provider_name),
             task,
+            pressure(&c.provider_name),
         );
         c.score = (base + rng.gen_range(-SCORE_JITTER..SCORE_JITTER)).max(0.0);
     }
@@ -166,6 +173,23 @@ pub(super) fn compute_score(
     is_local: bool,
     health: Option<&ProviderHealth>,
     task: TaskHint,
+) -> f64 {
+    compute_score_pressured(cost_tier, is_local, health, task, 0.0)
+}
+
+/// How much more the cost score counts when a budget is nearly used up, at full pressure: the
+/// cost weight is multiplied by one plus this, and the other weights shrink to keep the sum at one.
+const PRESSURE_COST_BOOST: f64 = 6.0;
+
+/// [`compute_score`] with budget pressure in `[0, 1]`: 0 leaves the weights alone, 1 makes the price
+/// of a provider matter far more, so spend drifts to cheaper providers as a budget drains instead
+/// of hitting a wall.
+pub(super) fn compute_score_pressured(
+    cost_tier: CostTier,
+    is_local: bool,
+    health: Option<&ProviderHealth>,
+    task: TaskHint,
+    pressure: f64,
 ) -> f64 {
     // Local free providers score lower than cloud free providers.
     let mut cost_score = if is_local {
@@ -242,17 +266,22 @@ pub(super) fn compute_score(
         TaskHint::Notification => (0.60, 0.20, 0.10, 0.10),
         _ => (0.30, 0.30, 0.20, 0.20),
     };
-    cost_score * w_cost
-        + health_score * w_health
-        + reliability_score * w_reliability
-        + speed_score * w_speed
+    let pressure = pressure.clamp(0.0, 1.0);
+    let boosted = (w_cost * (1.0 + PRESSURE_COST_BOOST * pressure)).min(1.0);
+    let rest = if w_cost < 1.0 { (1.0 - boosted) / (1.0 - w_cost) } else { 1.0 };
+    cost_score * boosted
+        + health_score * w_health * rest
+        + reliability_score * w_reliability * rest
+        + speed_score * w_speed * rest
 }
 
 impl LlmRouter {
     #[cfg(test)]
     pub(super) fn resolve_scored(&self, model: &str, task: TaskHint) -> Vec<ScoredCandidate> {
         let health = self.health.lock().unwrap();
-        resolve_scored(model, task, &self.providers, &self.routes, &health)
+        resolve_scored(model, task, &self.providers, &self.routes, &health, &|p| {
+            self.instruments.pressure_for(p)
+        })
     }
 
     pub fn compute_score(

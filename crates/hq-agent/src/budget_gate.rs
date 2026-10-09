@@ -18,6 +18,7 @@ const CONFIG_TTL: Duration = Duration::from_secs(30);
 /// A burst of calls shares one ledger read per budget.
 const SPEND_TTL: Duration = Duration::from_secs(5);
 const FULL_PCT: u8 = 100;
+const PRESSURE_STARTS_PCT: f64 = 50.0;
 
 /// `None` when the configuration could not be read, so the last good one stays in force.
 type ConfigLoader = Arc<dyn Fn() -> Option<BudgetsConfig> + Send + Sync>;
@@ -32,14 +33,24 @@ struct Cache {
 
 pub struct LedgerBudgetGate {
     db: Arc<Database>,
+    instruments: Arc<hq_llm::Instruments>,
     load: ConfigLoader,
     cache: Mutex<Cache>,
 }
 
 impl LedgerBudgetGate {
     pub fn new(db: Arc<Database>, load: ConfigLoader) -> Arc<Self> {
+        Self::with_instruments(db, load, hq_llm::Instruments::global())
+    }
+
+    pub fn with_instruments(
+        db: Arc<Database>,
+        load: ConfigLoader,
+        instruments: Arc<hq_llm::Instruments>,
+    ) -> Arc<Self> {
         Arc::new(Self {
             db,
+            instruments,
             load,
             cache: Mutex::new(Cache {
                 config: None,
@@ -99,6 +110,18 @@ impl LedgerBudgetGate {
             .ok()?;
         self.cache().status.insert(key, (Instant::now(), status.clone()));
         Some(status)
+    }
+
+    /// Tell the router how close this budget is, so it can prefer cheaper providers before the
+    /// limit blocks anything. Pressure starts at half the limit and reaches one at the limit.
+    fn report_pressure(&self, budget: &Budget, status: &BudgetStatus) {
+        let key = match &budget.scope {
+            BudgetScope::Global => hq_llm::instrument::GLOBAL_PRESSURE_KEY,
+            BudgetScope::Provider(p) => p.as_str(),
+            BudgetScope::Model(_) | BudgetScope::Origin(_) => return,
+        };
+        let pressure = ((status.pct - PRESSURE_STARTS_PCT) / (100.0 - PRESSURE_STARTS_PCT)).clamp(0.0, 1.0);
+        self.instruments.set_pressure(key, pressure);
     }
 
     /// Alert once per period for each threshold the spend has reached.
@@ -171,6 +194,7 @@ impl BudgetGate for LedgerBudgetGate {
                 continue;
             };
             self.alert(budget, &status);
+            self.report_pressure(budget, &status);
             // A call that costs nothing (local, subscription) never adds to spend.
             if req.estimate_usd == Some(0.0) {
                 continue;
@@ -302,6 +326,21 @@ mod tests {
             Admission::Downgrade { model } => assert_eq!(model, "cheap/model"),
             _ => panic!("expected a downgrade"),
         }
+    }
+
+    #[tokio::test]
+    async fn the_router_is_told_how_close_a_budget_is() {
+        let instruments = hq_llm::Instruments::new();
+        let cfg: BudgetsConfig = serde_yaml::from_str(MONTH_BLOCK).unwrap();
+        let g = LedgerBudgetGate::with_instruments(
+            db_with_spend("chat", 7.5),
+            Arc::new(move || Some(cfg.clone())),
+            instruments.clone(),
+        );
+        g.admit(&req("haiku", ProviderClass::Metered, Some(0.01))).await;
+        // $7.50 of $10 is 75%: halfway between the 50% start and the limit.
+        assert!((instruments.pressure_for("haiku") - 0.5).abs() < 1e-9);
+        assert_eq!(hq_llm::Instruments::new().pressure_for("haiku"), 0.0);
     }
 
     #[tokio::test]

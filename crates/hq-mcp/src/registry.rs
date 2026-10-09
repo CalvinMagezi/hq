@@ -6,7 +6,7 @@ use hq_tools::registry::{HqTool, ToolRegistry};
 use hq_tools::{
     a2a, agent_comm, agents, ask, background_turns, brand, coding, convert, harness_session, agent_host,
     imagegen, prose_lint, remote_mcp, self_update, session_search, shortcuts, skill_manage_tool,
-    skills, slash_commands, subagent_runs, system_info, tasks, vault, web,
+    skills, slash_commands, subagent_runs, system_info, budget_status, tasks, vault, web,
 };
 
 #[cfg(feature = "gws")]
@@ -95,6 +95,7 @@ pub fn create_default_registry(
 
     tools.extend(coding::create_coding_tools());
     tools.extend(system_info::create_system_info_tools(vault_path.clone()));
+    tools.extend(budget_status::create_budget_status_tools(db.clone()));
     tools.extend(convert::create_convert_tools(vault_path.clone()));
     tools.extend(prose_lint::create_prose_lint_tools());
     tools.extend(brand::create_brand_tools(vault_path.clone()));

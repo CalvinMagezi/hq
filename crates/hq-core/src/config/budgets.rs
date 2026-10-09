@@ -117,6 +117,10 @@ pub struct BudgetsConfig {
     /// any higher cap the run has, so a runaway loop cannot drain a month. Unset means no ceiling.
     #[serde(default)]
     pub background_run_usd: Option<f64>,
+    /// Add a one-line budget note to the system prompt once a budget is nearly used up, so the model
+    /// can spend less. Off by default: whether it lowers cost without hurting results is unmeasured.
+    #[serde(default)]
+    pub guidance: bool,
     /// Models allowed to run under a blocking budget although HQ has no price for them.
     #[serde(default)]
     pub allow_unpriced_models: Vec<String>,

@@ -157,7 +157,9 @@ impl LlmRouter {
         let task = TaskHint::from_request(request);
         let candidates = {
             let health = self.health.lock().unwrap();
-            resolve_scored(&request.model, task, &self.providers, &self.routes, &health)
+            resolve_scored(&request.model, task, &self.providers, &self.routes, &health, &|p| {
+                self.instruments.pressure_for(p)
+            })
         };
 
         for candidate in &candidates {
@@ -242,7 +244,9 @@ impl LlmRouter {
         let task = TaskHint::from_request(request);
         let candidates = {
             let health = self.health.lock().unwrap();
-            resolve_scored(&request.model, task, &self.providers, &self.routes, &health)
+            resolve_scored(&request.model, task, &self.providers, &self.routes, &health, &|p| {
+                self.instruments.pressure_for(p)
+            })
         };
 
         for candidate in &candidates {

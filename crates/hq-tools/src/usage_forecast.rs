@@ -50,6 +50,10 @@ pub struct Driver {
     pub name: String,
     pub usd: f64,
     pub calls: i64,
+    /// Average prompt size: a rising figure means context is growing.
+    pub avg_input_tokens: f64,
+    /// Share of prompt tokens served from the provider's cache; low means the prefix keeps changing.
+    pub cache_hit_rate: Option<f64>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -61,6 +65,8 @@ pub struct Drivers {
 fn drivers_of(rows: Vec<UsageRow>) -> Vec<Driver> {
     rows.into_iter()
         .map(|r| Driver {
+            avg_input_tokens: if r.calls > 0 { r.input_tokens as f64 / r.calls as f64 } else { 0.0 },
+            cache_hit_rate: r.cache_hit_rate(),
             name: r.key,
             usd: r.cost_usd,
             calls: r.calls,
@@ -118,6 +124,30 @@ pub fn forecast_report(db: &Database, budgets: &BudgetsConfig, now: i64) -> Resu
     })
 }
 
+/// Percent of a budget at which the prompt note starts.
+const GUIDANCE_PCT: f64 = 80.0;
+const SECS_PER_DAY_F: f64 = 86_400.0;
+
+/// One short sentence for the system prompt when a budget is nearly used up, or `None` when
+/// guidance is off, nothing is close, or the ledger cannot be read.
+pub fn budget_note(db: &Database, budgets: &BudgetsConfig, now: i64) -> Option<String> {
+    if !budgets.guidance {
+        return None;
+    }
+    let tightest = budgets
+        .enforceable()
+        .into_iter()
+        .filter_map(|b| db.with_conn(|c| hq_db::usage_ledger::budget_status(c, b, now)).ok())
+        .filter(|s| s.pct >= GUIDANCE_PCT)
+        .max_by(|a, b| a.pct.total_cmp(&b.pct))?;
+    let days = (tightest.resets_at - now) as f64 / SECS_PER_DAY_F;
+    Some(format!(
+        "\n\nBudget note: '{}' ({}) is at {:.0}% (${:.2} of ${:.2}) and resets in {:.0} days. Prefer cheaper \
+         models for delegated sub-tasks, do not re-read what is already in context, and stop once the goal is met.",
+        tightest.name, tightest.scope, tightest.pct, tightest.spent_usd, tightest.limit_usd, days.max(0.0)
+    ))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -161,6 +191,35 @@ mod tests {
         assert_eq!((d.models[0].name.as_str(), d.models[0].calls), ("pricey", 2));
         assert_eq!(d.origins[0].name, "chat");
         assert!((d.origins[0].usd - 8.0).abs() < 1e-9);
+    }
+
+    #[test]
+    fn efficiency_shows_prompt_size_and_cache_hits_per_driver() {
+        let db = Database::open_memory().unwrap();
+        let mut o = TaskOutcome::now("s", 0, "m", "haiku", "chat");
+        o.recorded_at = NOW - 60;
+        (o.input_tokens, o.cache_read_tokens, o.cost_usd) = (Some(1000), 800, 1.0);
+        db.with_conn(|c| insert(c, &o)).unwrap();
+        let d = drivers(&db, NOW).unwrap();
+        assert_eq!(d.models[0].avg_input_tokens, 1000.0);
+        assert_eq!(d.models[0].cache_hit_rate, Some(0.8));
+    }
+
+    #[test]
+    fn the_prompt_note_is_off_by_default_and_names_the_tightest_budget_when_on() {
+        let db = Database::open_memory().unwrap();
+        spend(&db, NOW - 60, "m", "chat", 9.0);
+        let yaml = |guidance: bool| -> BudgetsConfig {
+            serde_yaml::from_str(&format!(
+                "guidance: {guidance}\nbudgets:\n  - {{name: month, scope: global, period: month, limit_usd: 10}}\n"
+            ))
+            .unwrap()
+        };
+        assert!(budget_note(&db, &yaml(false), NOW).is_none());
+        let note = budget_note(&db, &yaml(true), NOW).unwrap();
+        assert!(note.contains("'month'") && note.contains("90%"), "{note}");
+        let roomy = Database::open_memory().unwrap();
+        assert!(budget_note(&roomy, &yaml(true), NOW).is_none());
     }
 
     #[test]
