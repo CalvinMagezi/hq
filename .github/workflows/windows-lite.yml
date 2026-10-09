@@ -30,7 +30,7 @@ env:
 jobs:
   build:
     name: Build HQ Lite (windows-x86_64)
-    if: github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success'
+    if: github.event_name == 'workflow_dispatch' || (github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.head_repository.full_name == github.repository)
     runs-on: windows-2022
     timeout-minutes: 90
     permissions:
@@ -130,7 +130,11 @@ jobs:
         run: |
           # After a Release run, the release is the one built from that commit.
           if [ -z "$TAG" ]; then
-            TAG=$(gh api "repos/$GH_REPO/releases?per_page=30" --jq ".[] | select(.body | contains(\"$WANT_SHA\")) | .tag_name" | head -n 1)
+            TAG=$(gh api "repos/$GH_REPO/releases?per_page=30" | jq -r --arg s "$WANT_SHA" '.[] | select(.body | contains($s)) | .tag_name' | head -n 1)
           fi
           [ -n "$TAG" ] || { echo "no release was built from $WANT_SHA" >&2; exit 1; }
-          gh release upload "$TAG" lite/*.zip lite/*.sha256
+          # Only the two expected file names go up, and a rerun replaces them.
+          for f in lite/*; do
+            [[ "$(basename "$f")" =~ ^hq-lite-[0-9A-Za-z.+-]+-windows-x86_64\.zip(\.sha256)?$ ]] || { echo "unexpected file $f" >&2; exit 1; }
+          done
+          gh release upload "$TAG" lite/*.zip lite/*.sha256 --clobber
