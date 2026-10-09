@@ -1,7 +1,7 @@
 import { Fragment, useEffect, useMemo, useRef } from 'react'
 import { ArrowDown, Loader2 } from 'lucide-react'
 import { globalSessionsApi } from '~/lib/sessionsApi'
-import { parseAnsi, spanCss, stripAnsi } from '~/lib/ansi'
+import { parseAnsi, plainText, spanCss } from '~/lib/ansi'
 import { chooseScreenMode, screenStatusText } from '~/lib/screenStream'
 import { READY_POLL_MS } from '~/lib/workbench'
 import { useStickToBottom } from '../chat/useStickToBottom'
@@ -52,8 +52,8 @@ export function SessionTerminal({ sessionId, refreshKey, active, pollMs = READY_
   const error = mode === 'poll' ? polled.error : null
   const rawText = useMemo(() => data?.lines.join('\n') ?? '', [data])
   // The callout and the quote button need plain text, whatever the view shows.
-  const text = useMemo(() => stripAnsi(rawText), [rawText])
   const rows = useMemo(() => parseAnsi(rawText), [rawText])
+  const text = useMemo(() => plainText(rows), [rows])
   useEffect(() => {
     onText?.(text)
   }, [text, onText])

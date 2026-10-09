@@ -67,3 +67,45 @@ export function screenStatusText(mode: 'stream' | 'poll', phase: StreamPhase, so
   if (mode === 'poll') return 'Updating every few seconds'
   return phase === 'live' ? 'Live' : 'Connecting'
 }
+
+export type EndReason = 'stopped' | 'time' | 'unavailable'
+
+/** Reads the reason from an `end` event; anything unreadable counts as unavailable so we retry rather than give up. */
+export function parseEndReason(data: string): EndReason {
+  try {
+    const reason = (JSON.parse(data) as { reason?: unknown }).reason
+    return reason === 'stopped' || reason === 'time' ? reason : 'unavailable'
+  } catch {
+    return 'unavailable'
+  }
+}
+
+export type EndDecision = { action: 'poll' } | { action: 'fail' } | { action: 'reconnect'; delay: number; failures: number }
+
+/** What to do when the server ends the stream: stopped goes to polling, time reopens at once, unavailable backs off. */
+export function decideOnEnd(reason: EndReason, failures: number): EndDecision {
+  if (reason === 'stopped') return { action: 'poll' }
+  if (reason === 'time') return { action: 'reconnect', delay: 0, failures: 0 }
+  const next = failures + 1
+  const delay = reconnectDelay(next)
+  return delay === null ? { action: 'fail' } : { action: 'reconnect', delay, failures: next }
+}
+
+export const HEALTHY_OPEN_MS = 5_000
+export const HEALTHY_EVENTS = 3
+export const FIRST_EVENT_TIMEOUT_MS = 10_000
+
+/** A connection that stayed open a while or delivered several events was working; one that flapped was not. */
+export function isHealthyConnection(openMs: number, events: number): boolean {
+  return openMs >= HEALTHY_OPEN_MS || events >= HEALTHY_EVENTS
+}
+
+/** Failure count after a connection dropped: reset only if it was healthy, then count this drop. */
+export function failuresAfterDrop(failures: number, openMs: number, events: number): number {
+  return (isHealthyConnection(openMs, events) ? 0 : failures) + 1
+}
+
+/** True when nothing has arrived within the first-event window. */
+export function firstEventTimedOut(elapsedMs: number, events: number): boolean {
+  return events === 0 && elapsedMs >= FIRST_EVENT_TIMEOUT_MS
+}

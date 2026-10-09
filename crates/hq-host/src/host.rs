@@ -733,7 +733,7 @@ impl Host {
             ReadSource::Visible => pane.rows(false).into_iter().map(|r| r.text).collect(),
             ReadSource::Recent => pane.rows(true).into_iter().map(|r| r.text).collect(),
             ReadSource::RecentUnwrapped => unwrap_rows(pane.rows(true)),
-            ReadSource::Styled => pane.with_emu(|e| e.styled_history()),
+            ReadSource::Styled => pane.with_emu(|e| e.styled_history(lines)),
         };
         if lines > 0 && out.len() > lines {
             out.drain(..out.len() - lines);

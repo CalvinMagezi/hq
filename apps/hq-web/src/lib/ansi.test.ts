@@ -1,5 +1,5 @@
 import { expect, test } from 'bun:test'
-import { MAX_LINE_CHARS, MIN_CONTRAST, contrastOnBlack, ensureContrast, paletteRgb, parseAnsi, parseAnsiLine, spanCss, stripAnsi } from './ansi'
+import { MAX_LINE_CHARS, MIN_CONTRAST, MIN_PAIR_CONTRAST, contrastRatio, plainText, contrastOnBlack, ensureContrast, paletteRgb, parseAnsi, parseAnsiLine, spanCss, stripAnsi } from './ansi'
 
 const E = '\x1b['
 
@@ -94,7 +94,55 @@ test('spanCss maps theme colors to variables and guards program colors', () => {
 })
 
 test('inverse swaps foreground and background', () => {
-  const css = spanCss({ inverse: true, fg: 1, bg: 4 })
-  expect(css.color).toBe('var(--ansi-4)')
-  expect(css.backgroundColor).toBe('var(--ansi-1)')
+  const css = spanCss({ inverse: true, fg: 7, bg: 0 })
+  expect(css.color).toBe('var(--ansi-0)')
+  expect(css.backgroundColor).toBe('var(--ansi-7)')
+})
+
+const rgbOfCss = (c: string) => (c.match(/\d+/g) ?? []).map(Number) as [number, number, number]
+
+test('text equal to its background is made readable', () => {
+  const css = spanCss({ fg: [10, 10, 10], bg: [10, 10, 10] })
+  expect(contrastRatio(rgbOfCss(css.color!), [10, 10, 10])).toBeGreaterThanOrEqual(MIN_PAIR_CONTRAST)
+  expect(spanCss({ fg: 4, bg: 4 }).color).not.toBe('var(--ansi-4)')
+})
+
+test('inverse with equal colors is also made readable', () => {
+  const css = spanCss({ inverse: true, fg: [200, 200, 200], bg: [205, 205, 205] })
+  expect(contrastRatio(rgbOfCss(css.color!), [200, 200, 200])).toBeGreaterThanOrEqual(MIN_PAIR_CONTRAST)
+})
+
+test('a light background gets dark text', () => {
+  const css = spanCss({ bg: [250, 250, 250] })
+  expect(contrastRatio(rgbOfCss(css.color!), [250, 250, 250])).toBeGreaterThanOrEqual(MIN_PAIR_CONTRAST)
+})
+
+test('readable pairs keep their theme variables', () => {
+  expect(spanCss({ fg: 0, bg: 7 }).color).toBe('var(--ansi-0)')
+  expect(spanCss({ fg: 2 }).color).toBe('var(--ansi-2)')
+})
+
+test('plainText of parsed rows matches stripAnsi', () => {
+  const t = `${E}31ma${E}0m\nb`
+  expect(plainText(parseAnsi(t))).toBe(stripAnsi(t))
+})
+
+test('many unterminated OSC introducers parse in linear time', () => {
+  const text = Array.from({ length: 200 }, () => '\x1b]'.repeat(2000)).join('\n')
+  const t0 = performance.now()
+  parseAnsi(text)
+  stripAnsi(text)
+  expect(performance.now() - t0).toBeLessThan(50)
+})
+
+test('100k SGR codes in one line stay bounded', () => {
+  const t0 = performance.now()
+  const spans = parseAnsiLine(`${E}31ma`.repeat(100_000))
+  expect(performance.now() - t0).toBeLessThan(50)
+  expect(spans.length).toBeGreaterThan(0)
+})
+
+test('OSC terminated by BEL or ST is dropped, an unterminated one only loses its introducer', () => {
+  expect(stripAnsi('a\x1b]0;t\x07b\x1b]8;;u\x1b\\c')).toBe('abc')
+  expect(stripAnsi('a\x1b]no end')).toBe('ano end')
 })

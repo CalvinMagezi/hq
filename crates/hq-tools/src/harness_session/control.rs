@@ -430,16 +430,51 @@ pub(super) fn tail_log_with(
 pub fn tail_log_styled(db: &Arc<Database>, session_id: &str, lines: usize) -> Result<Value> {
     let mut screen = tail_log_with(db, session_id, lines, |row| {
         let host = agent_host::host(Some(&row.host)).ok()?;
-        match host.read_styled(&row.agent_name, lines) {
-            Ok(text) => Some((text, STYLED_SOURCE)),
-            Err(_) => host.read_sourced(&row.agent_name, lines).ok(),
+        if !styled_unsupported(&row.host) {
+            match host.read_styled(&row.agent_name, lines) {
+                Ok(text) => return Some((text, STYLED_SOURCE)),
+                Err(e) if is_unknown_source(&e) => note_styled_unsupported(&row.host),
+                Err(_) => {}
+            }
         }
+        host.read_sourced(&row.agent_name, lines).ok()
     })?;
     screen["styled"] = json!(screen["host_source"] == STYLED_SOURCE);
     Ok(screen)
 }
 
 const STYLED_SOURCE: &str = "styled";
+
+/// How long a host that did not understand a styled read is left alone before it is asked again, so an
+/// older remote host costs one failed call, not one per second.
+const STYLED_RETRY_AFTER: Duration = Duration::from_secs(600);
+
+static STYLED_UNSUPPORTED: std::sync::LazyLock<std::sync::Mutex<HashMap<String, std::time::Instant>>> =
+    std::sync::LazyLock::new(Default::default);
+
+fn styled_unsupported(host: &str) -> bool {
+    let mut seen = STYLED_UNSUPPORTED.lock().unwrap_or_else(|e| e.into_inner());
+    match seen.get(host) {
+        Some(at) if at.elapsed() < STYLED_RETRY_AFTER => true,
+        Some(_) => {
+            seen.remove(host);
+            false
+        }
+        None => false,
+    }
+}
+
+fn note_styled_unsupported(host: &str) {
+    STYLED_UNSUPPORTED
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .insert(host.to_string(), std::time::Instant::now());
+}
+
+/// A host that predates styled reads refuses the `source` value; any other failure may be a blip.
+fn is_unknown_source(e: &AgentHostError) -> bool {
+    matches!(e, AgentHostError::Api { code, .. } if code == "unsupported" || code == "bad_request" || code == "invalid_params")
+}
 
 pub(super) static SCREEN_READS_STYLED: std::sync::LazyLock<coalesce::Coalescer> =
     std::sync::LazyLock::new(coalesce::Coalescer::new);

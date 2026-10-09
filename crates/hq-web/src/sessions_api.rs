@@ -366,6 +366,8 @@ const STREAM_TICK: std::time::Duration = std::time::Duration::from_secs(1);
 const STREAM_KEEPALIVE: std::time::Duration = std::time::Duration::from_secs(15);
 /// A view is closed after this long, and the page opens a new one.
 const STREAM_MAX: std::time::Duration = std::time::Duration::from_secs(15 * 60);
+/// Reads without a live screen, for a session still marked running, before the view gives up.
+const MAX_STALE_READS: u32 = 5;
 
 static OPEN_STREAMS: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
 
@@ -398,8 +400,19 @@ struct StreamState {
     last: Option<u64>,
     /// Set once the last event has been queued: the reason sent with `end`.
     ending: Option<&'static str>,
+    /// Reads in a row that gave no live screen although the session is still running.
+    stale_reads: u32,
+    /// Pause between reads; a field so a test need not wait seconds.
+    tick: std::time::Duration,
     finished: bool,
     _slot: StreamSlot,
+}
+
+fn session_is_running(db: &hq_db::Database, id: &str) -> bool {
+    db.with_conn(|c| registry::get(c, id))
+        .ok()
+        .flatten()
+        .is_some_and(|row| row.status == registry::STATUS_RUNNING)
 }
 
 fn screen_fingerprint(screen: &Value) -> u64 {
@@ -439,15 +452,29 @@ async fn next_stream_event(
                 continue;
             }
         };
+        if screen["source"] != "live" {
+            // A failed read of a running session is a blip, not the end: stale text is never sent as live.
+            if session_is_running(&st.db, &st.id) {
+                st.stale_reads += 1;
+                if st.stale_reads >= MAX_STALE_READS {
+                    st.ending = Some("unavailable");
+                    continue;
+                }
+                tokio::time::sleep(st.tick).await;
+                continue;
+            }
+            st.ending = Some("stopped");
+        }
+        st.stale_reads = 0;
         let fingerprint = screen_fingerprint(&screen);
         if st.last != Some(fingerprint) {
             st.last = Some(fingerprint);
-            if screen["source"] != "live" {
-                st.ending = Some("stopped");
-            }
             return Some((sse("screen", screen.to_string()), st));
         }
-        tokio::time::sleep(STREAM_TICK).await;
+        if st.ending.is_some() {
+            continue;
+        }
+        tokio::time::sleep(st.tick).await;
     }
 }
 
@@ -470,13 +497,18 @@ pub(crate) async fn screen_stream_handler(
         started: std::time::Instant::now(),
         last: None,
         ending: None,
+        stale_reads: 0,
+        tick: STREAM_TICK,
         finished: false,
         _slot: slot,
     };
     let events = futures::stream::unfold(state, next_stream_event);
-    axum::response::sse::Sse::new(events)
+    let mut response = axum::response::sse::Sse::new(events)
         .keep_alive(axum::response::sse::KeepAlive::new().interval(STREAM_KEEPALIVE).text("keepalive"))
-        .into_response()
+        .into_response();
+    // Tells nginx-style proxies not to hold the stream back.
+    response.headers_mut().insert("x-accel-buffering", axum::http::HeaderValue::from_static("no"));
+    response
 }
 
 #[derive(Deserialize)]
@@ -966,6 +998,44 @@ mod tests {
         assert!(StreamSlot::take().is_none(), "one more than the cap is refused");
         drop(held);
         assert!(StreamSlot::take().is_some(), "places are returned on drop");
+    }
+
+    fn stream_state(state: &WsState, id: &str) -> StreamState {
+        StreamState {
+            db: Arc::new(state.db.clone()),
+            id: id.into(),
+            lines: 10,
+            started: std::time::Instant::now(),
+            last: None,
+            ending: None,
+            stale_reads: 0,
+            tick: std::time::Duration::from_millis(1),
+            finished: false,
+            _slot: StreamSlot::take().expect("a free place"),
+        }
+    }
+
+    #[tokio::test]
+    async fn a_running_session_whose_screen_cannot_be_read_ends_unavailable_without_sending_stale_text() {
+        let state = test_state();
+        seed(&state, "hs-run", None);
+        let (_event, after) = next_stream_event(stream_state(&state, "hs-run")).await.expect("an end event");
+        assert!(after.last.is_none(), "no screen event was sent for a failed read");
+        assert_eq!(after.ending, Some("unavailable"));
+        assert!(after.finished);
+    }
+
+    #[tokio::test]
+    async fn a_stopped_session_sends_its_saved_screen_once_and_then_ends() {
+        let state = test_state();
+        seed(&state, "hs-done", None);
+        state.db.with_conn(|c| registry::set_status(c, "hs-done", registry::STATUS_STOPPED)).unwrap();
+        let (_screen, after) = next_stream_event(stream_state(&state, "hs-done")).await.expect("the saved screen");
+        assert!(after.last.is_some() && !after.finished);
+        assert_eq!(after.ending, Some("stopped"));
+        let (_end, after) = next_stream_event(after).await.expect("the end event");
+        assert!(after.finished);
+        assert!(next_stream_event(after).await.is_none());
     }
 
     #[test]

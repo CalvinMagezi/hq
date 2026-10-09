@@ -1,5 +1,19 @@
 import { expect, test } from 'bun:test'
-import { MAX_STREAM_RETRIES, chooseScreenMode, createSseParser, reconnectDelay, screenStatusText } from './screenStream'
+import {
+  FIRST_EVENT_TIMEOUT_MS,
+  HEALTHY_EVENTS,
+  HEALTHY_OPEN_MS,
+  MAX_STREAM_RETRIES,
+  chooseScreenMode,
+  createSseParser,
+  decideOnEnd,
+  failuresAfterDrop,
+  firstEventTimedOut,
+  isHealthyConnection,
+  parseEndReason,
+  reconnectDelay,
+  screenStatusText,
+} from './screenStream'
 
 test('a complete event parses', () => {
   const p = createSseParser()
@@ -48,4 +62,49 @@ test('status text in plain words', () => {
   expect(screenStatusText('stream', 'live', 'live')).toBe('Live')
   expect(screenStatusText('poll', 'failed', 'live')).toBe('Updating every few seconds')
   expect(screenStatusText('poll', 'ended', 'snapshot')).toBe('Last saved view')
+})
+
+test('end reasons parse, anything else is unavailable', () => {
+  expect(parseEndReason('{"reason":"stopped"}')).toBe('stopped')
+  expect(parseEndReason('{"reason":"time"}')).toBe('time')
+  expect(parseEndReason('{"reason":"unavailable"}')).toBe('unavailable')
+  expect(parseEndReason('{"reason":"weird"}')).toBe('unavailable')
+  expect(parseEndReason('not json')).toBe('unavailable')
+})
+
+test('stopped moves to polling', () => {
+  expect(decideOnEnd('stopped', 0)).toEqual({ action: 'poll' })
+})
+
+test('time reconnects at once and resets the counter', () => {
+  expect(decideOnEnd('time', 2)).toEqual({ action: 'reconnect', delay: 0, failures: 0 })
+})
+
+test('unavailable backs off and eventually fails', () => {
+  expect(decideOnEnd('unavailable', 0)).toEqual({ action: 'reconnect', delay: 1000, failures: 1 })
+  expect(decideOnEnd('unavailable', 2)).toEqual({ action: 'reconnect', delay: 4000, failures: 3 })
+  expect(decideOnEnd('unavailable', MAX_STREAM_RETRIES)).toEqual({ action: 'fail' })
+})
+
+test('one event does not reset the failure counter, a long or busy connection does', () => {
+  expect(failuresAfterDrop(2, 100, 1)).toBe(3)
+  expect(failuresAfterDrop(2, HEALTHY_OPEN_MS, 0)).toBe(1)
+  expect(failuresAfterDrop(2, 100, HEALTHY_EVENTS)).toBe(1)
+  expect(isHealthyConnection(HEALTHY_OPEN_MS - 1, HEALTHY_EVENTS - 1)).toBe(false)
+})
+
+test('a flapping connection reaches the polling fallback', () => {
+  let failures = 0
+  let delay: number | null = 0
+  for (let i = 0; i < MAX_STREAM_RETRIES + 1 && delay !== null; i++) {
+    failures = failuresAfterDrop(failures, 50, 1)
+    delay = reconnectDelay(failures)
+  }
+  expect(delay).toBeNull()
+})
+
+test('first event timeout', () => {
+  expect(firstEventTimedOut(FIRST_EVENT_TIMEOUT_MS - 1, 0)).toBe(false)
+  expect(firstEventTimedOut(FIRST_EVENT_TIMEOUT_MS, 0)).toBe(true)
+  expect(firstEventTimedOut(FIRST_EVENT_TIMEOUT_MS * 2, 1)).toBe(false)
 })

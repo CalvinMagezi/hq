@@ -120,15 +120,29 @@ function sameStyle(a: AnsiStyle, b: AnsiStyle): boolean {
   )
 }
 
-/** Index just past an OSC sequence starting at `from` (after ESC ]), ended by BEL or ESC \. */
-function skipOsc(line: string, from: number): number {
-  const limit = Math.min(line.length, from + MAX_SEQUENCE_CHARS * 16)
-  for (let i = from; i < limit; i++) {
-    const c = line.charCodeAt(i)
-    if (c === BEL) return i + 1
-    if (c === ESC && line[i + 1] === '\\') return i + 2
+const MAX_OSC_CHARS = 1_024
+const ST = '\x1b\\'
+
+/**
+ * Locates OSC terminators with indexOf, caching the last hit (and the "none left" answer) so a
+ * line full of unterminated introducers is scanned once, not once per introducer.
+ */
+function createOscScanner(line: string) {
+  let bel: number | undefined
+  let st: number | undefined
+  const next = (cached: number | undefined, needle: string, from: number) =>
+    cached === -1 || (cached !== undefined && cached >= from) ? cached : line.indexOf(needle, from)
+  return {
+    /** Index just past the sequence whose body starts at `from`, or -1 when it has no terminator in range. */
+    end(from: number): number {
+      bel = next(bel, '\x07', from)
+      st = next(st, ST, from)
+      const hits = [bel !== -1 ? bel + 1 : -1, st !== -1 ? st + 2 : -1].filter((h) => h !== -1)
+      if (hits.length === 0) return -1
+      const end = Math.min(...hits)
+      return end - from > MAX_OSC_CHARS ? -1 : end
+    },
   }
-  return from
 }
 
 /** Parses one line (no newlines) into spans. Style starts reset on every line. */
@@ -137,6 +151,7 @@ export function parseAnsiLine(input: string): AnsiSpan[] {
   const spans: AnsiSpan[] = []
   let style: AnsiStyle = {}
   let text = ''
+  const osc = createOscScanner(line)
   const flush = () => {
     if (!text) return
     const last = spans[spans.length - 1]
@@ -167,8 +182,8 @@ export function parseAnsiLine(input: string): AnsiSpan[] {
       }
       i = j + 1
     } else if (kind === ']') {
-      const next = skipOsc(line, i + 2)
-      i = next === i + 2 ? i + 1 : next
+      const end = osc.end(i + 2)
+      i = end === -1 ? i + 2 : end
     } else if (kind !== undefined && '()*+'.includes(kind)) i += 3
     else i += kind === undefined ? 1 : 2
   }
@@ -181,11 +196,14 @@ export function parseAnsi(text: string): AnsiSpan[][] {
   return text.split('\n').map(parseAnsiLine)
 }
 
+/** Plain text of already-parsed lines, so one parse can serve both the view and the plain copy. */
+export function plainText(rows: AnsiSpan[][]): string {
+  return rows.map((spans) => spans.map((s) => s.text).join('')).join('\n')
+}
+
 /** The text with every escape sequence removed. */
 export function stripAnsi(text: string): string {
-  return parseAnsi(text)
-    .map((spans) => spans.map((s) => s.text).join(''))
-    .join('\n')
+  return plainText(parseAnsi(text))
 }
 
 /** The 6x6x6 cube and grayscale ramp as rgb; null for the 16 theme-mapped colors. */
@@ -213,34 +231,57 @@ function luminance([r, g, b]: readonly [number, number, number]): number {
   return LUM_R * lin(r) + LUM_G * lin(g) + LUM_B * lin(b)
 }
 
+type Rgb = readonly [number, number, number]
+const BLACK: Rgb = [0, 0, 0]
+const WHITE: Rgb = [RGB_MAX, RGB_MAX, RGB_MAX]
+
+/** WCAG contrast ratio between two colors. */
+export function contrastRatio(a: Rgb, b: Rgb): number {
+  const [hi, lo] = [luminance(a), luminance(b)].sort((x, y) => y - x)
+  return (hi + 0.05) / (lo + 0.05)
+}
+
 /** WCAG contrast ratio of a color against black. */
-export function contrastOnBlack(rgb: readonly [number, number, number]): number {
-  return (luminance(rgb) + 0.05) / 0.05
+export function contrastOnBlack(rgb: Rgb): number {
+  return contrastRatio(rgb, BLACK)
 }
 
 /** Readable text on the dark terminal; AA for normal text. */
 export const MIN_CONTRAST = 4.5
+/** Floor for text on a background the program chose itself: only near-invisible pairs are changed. */
+export const MIN_PAIR_CONTRAST = 3
 const LIGHTEN_STEPS = 20
 
-/** Lightens a color toward white until it reaches the minimum contrast against black. */
-export function ensureContrast(rgb: readonly [number, number, number], min = MIN_CONTRAST): [number, number, number] {
-  const base: [number, number, number] = [rgb[0], rgb[1], rgb[2]]
-  for (let step = 0; step <= LIGHTEN_STEPS; step++) {
-    const t = step / LIGHTEN_STEPS
-    const mixed = base.map((v) => Math.round(v + (RGB_MAX - v) * t)) as [number, number, number]
-    if (contrastOnBlack(mixed) >= min) return mixed
-  }
-  return [RGB_MAX, RGB_MAX, RGB_MAX]
+function mixToward(rgb: Rgb, target: Rgb, t: number): [number, number, number] {
+  return rgb.map((v, i) => Math.round(v + (target[i] - v) * t)) as [number, number, number]
 }
 
-const DEFAULT_FG = 'var(--ansi-7)'
-const DEFAULT_BG_FOR_INVERSE = 'var(--bg-base)'
+/** Moves a color toward white, else toward black, until it reaches the minimum contrast against `against`. */
+export function ensureContrast(rgb: Rgb, min = MIN_CONTRAST, against: Rgb = BLACK): [number, number, number] {
+  for (const target of [WHITE, BLACK]) {
+    for (let step = 0; step <= LIGHTEN_STEPS; step++) {
+      const mixed = mixToward(rgb, target, step / LIGHTEN_STEPS)
+      if (contrastRatio(mixed, against) >= min) return mixed
+    }
+  }
+  return contrastRatio(WHITE, against) >= contrastRatio(BLACK, against) ? [...WHITE] : [...BLACK]
+}
+
+// Approximate resolved values of the --ansi-N theme variables (see app.css), for contrast math only.
+const THEME_RGB: Rgb[] = [
+  [36, 36, 36], [255, 68, 68], [34, 255, 55], [255, 179, 0], [0, 173, 238], [0, 173, 238], [0, 173, 238], [204, 204, 204],
+  [115, 115, 115], [255, 115, 115], [89, 255, 105], [255, 198, 64], [64, 194, 242], [64, 194, 242], [64, 194, 242], [242, 242, 242],
+]
+const DEFAULT_FG_INDEX = 7
 const DIM_OPACITY = 0.6
 
-function cssColor(color: AnsiColor, guard: boolean): string {
-  const rgb = typeof color === 'number' ? paletteRgb(color) : color
-  if (rgb === null) return `var(--ansi-${color})`
-  const [r, g, b] = guard ? ensureContrast(rgb) : rgb
+function rgbOf(color: AnsiColor): Rgb {
+  return typeof color === 'number' ? (paletteRgb(color) ?? THEME_RGB[color]) : color
+}
+
+function cssOf(color: AnsiColor): string {
+  if (typeof color === 'number' && color < ANSI_16) return `var(--ansi-${color})`
+  const [r, g, b] = rgbOf(color)
   return `rgb(${r}, ${g}, ${b})`
 }
 
@@ -253,15 +294,22 @@ export interface AnsiCss {
   opacity?: number
 }
 
-/** Inline style for a span. Foreground colors are contrast-guarded; backgrounds are as given. */
+/** Inline style for a span. Text that would be unreadable against its effective background is lightened or darkened. */
 export function spanCss(style: AnsiStyle): AnsiCss {
   const css: AnsiCss = {}
-  if (style.inverse) {
-    css.color = style.bg === undefined ? DEFAULT_BG_FOR_INVERSE : cssColor(style.bg, false)
-    css.backgroundColor = style.fg === undefined ? DEFAULT_FG : cssColor(style.fg, false)
-  } else {
-    if (style.fg !== undefined) css.color = cssColor(style.fg, true)
-    if (style.bg !== undefined) css.backgroundColor = cssColor(style.bg, false)
+  const textColor: AnsiColor | undefined = style.inverse ? (style.bg ?? BLACK) : style.fg
+  const backColor: AnsiColor | undefined = style.inverse ? (style.fg ?? DEFAULT_FG_INDEX) : style.bg
+  if (backColor !== undefined) css.backgroundColor = cssOf(backColor)
+  if (textColor !== undefined || backColor !== undefined) {
+    const back = backColor === undefined ? BLACK : rgbOf(backColor)
+    const text = rgbOf(textColor ?? DEFAULT_FG_INDEX)
+    const min = backColor === undefined ? MIN_CONTRAST : MIN_PAIR_CONTRAST
+    if (contrastRatio(text, back) >= min) {
+      if (textColor !== undefined) css.color = cssOf(textColor)
+    } else {
+      const [r, g, b] = ensureContrast(text, min, back)
+      css.color = `rgb(${r}, ${g}, ${b})`
+    }
   }
   if (style.bold) css.fontWeight = 700
   if (style.italic) css.fontStyle = 'italic'
