@@ -36,7 +36,7 @@ fn instructions_block() -> String {
 ## HQ (tasks and notes)\n\
 \n\
 This project uses HQ for tasks and notes. If MCP is not available, use the `hq` command in the\n\
-terminal. Every command prints JSON and runs only on this machine.\n\
+terminal. `hq task` commands, `--json` ones and `hq search --json` print JSON; all of it runs only on this machine.\n\
 \n\
 Read-only (safe to run freely):\n\
 - `hq task list [--status to_do|in_progress|blocked|ready_for_review|complete]`, `hq task get <id>`,\n\
@@ -55,19 +55,29 @@ folders starting with an underscore.\n\
     )
 }
 
-/// `existing` with the HQ block added, or replaced in place when it is already there.
-fn upsert_block(existing: &str, block: &str) -> String {
-    if let (Some(a), Some(b)) = (existing.find(BEGIN), existing.find(END))
-        && a < b
-    {
-        let end = b + END.len();
-        let end = if existing[end..].starts_with('\n') { end + 1 } else { end };
-        return format!("{}{}{}", &existing[..a], block, &existing[end..]);
+/// `existing` with the HQ block added, or replaced in place when it is already there. A file
+/// whose markers are not exactly one begin followed by one end is the user's to fix.
+fn upsert_block(existing: &str, block: &str) -> Result<String> {
+    let begins = existing.matches(BEGIN).count();
+    let ends = existing.matches(END).count();
+    match (begins, ends) {
+        (0, 0) => {}
+        (1, 1) if existing.find(BEGIN) < existing.find(END) => {
+            let a = existing.find(BEGIN).expect("counted");
+            let b = existing.find(END).expect("counted") + END.len();
+            let b = b + existing[b..].bytes().take_while(|c| *c == b'\r').count();
+            let b = if existing[b..].starts_with('\n') { b + 1 } else { b };
+            return Ok(format!("{}{}{}", &existing[..a], block, &existing[b..]));
+        }
+        _ => bail!(
+            "the file has {begins} `{BEGIN}` and {ends} `{END}` markers, not one of each in order; \
+             fix or remove them by hand and run this again"
+        ),
     }
     if existing.trim().is_empty() {
-        return block.to_string();
+        return Ok(block.to_string());
     }
-    format!("{}\n\n{}", existing.trim_end(), block)
+    Ok(format!("{}\n\n{}", existing.trim_end(), block))
 }
 
 /// Write the block into `.github/copilot-instructions.md` (or `AGENTS.md`) under `dir`.
@@ -80,8 +90,12 @@ fn init(dir: &Path, agents: bool) -> Result<()> {
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent)?;
     }
-    let existing = std::fs::read_to_string(&path).unwrap_or_default();
-    std::fs::write(&path, upsert_block(&existing, &instructions_block()))
+    let existing = match std::fs::read_to_string(&path) {
+        Ok(s) => s,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => String::new(),
+        Err(e) => return Err(e).with_context(|| format!("reading {}", path.display())),
+    };
+    std::fs::write(&path, upsert_block(&existing, &instructions_block())?)
         .with_context(|| format!("writing {}", path.display()))?;
     println!("Wrote the HQ section to {}", path.display());
     println!("Everything outside the <!-- hq:begin --> and <!-- hq:end --> markers is left as it was.");
@@ -325,14 +339,17 @@ mod tests {
     #[test]
     fn the_instructions_block_is_added_once_and_updated_in_place() {
         let block = instructions_block();
-        let first = upsert_block("# Mine\n\nkeep this\n", &block);
+        let first = upsert_block("# Mine\n\nkeep this\n", &block).unwrap();
         assert!(first.starts_with("# Mine\n\nkeep this\n"));
         assert_eq!(first.matches(BEGIN).count(), 1);
-        let again = upsert_block(&first, &block);
+        let again = upsert_block(&first, &block).unwrap();
         assert_eq!(again, first, "running it twice changes nothing");
-        let tail = upsert_block(&format!("{first}\n## After\n"), &block);
+        let tail = upsert_block(&format!("{first}\n## After\n"), &block).unwrap();
         assert!(tail.ends_with("## After\n") && tail.matches(BEGIN).count() == 1);
-        assert_eq!(upsert_block("", &block), block);
+        assert_eq!(upsert_block("", &block).unwrap(), block);
+        // Orphaned or reversed markers are refused, never guessed at.
+        assert!(upsert_block(&format!("{BEGIN}\nmine\n"), &block).is_err());
+        assert!(upsert_block(&format!("{END}\nx\n{BEGIN}\n"), &block).is_err());
     }
 
     #[test]

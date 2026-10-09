@@ -60,6 +60,7 @@ pub enum TaskCmd {
     Comment {
         id: String,
         /// The comment text; with none given it is read from standard input
+        #[arg(allow_hyphen_values = true)]
         body: Vec<String>,
     },
     /// List a task's comments (JSON)
@@ -126,7 +127,15 @@ pub async fn run(config: &HqConfig, cmd: TaskCmd) -> Result<()> {
     let mut read_stdin = || -> Result<String> {
         use std::io::Read;
         let mut s = String::new();
-        std::io::stdin().take(64 * 1024).read_to_string(&mut s)?;
+        use std::io::IsTerminal;
+        if std::io::stdin().is_terminal() {
+            bail!("nothing piped in: give the text as an argument, or pipe it in");
+        }
+        const MAX: u64 = 64 * 1024;
+        std::io::stdin().take(MAX + 1).read_to_string(&mut s).context("standard input is not valid text")?;
+        if s.len() as u64 > MAX {
+            bail!("the text on standard input is over 64 KiB");
+        }
         Ok(s)
     };
     let (tool, args) = call_for(&cmd, &mut read_stdin)?;
@@ -140,27 +149,15 @@ pub async fn run(config: &HqConfig, cmd: TaskCmd) -> Result<()> {
         config.vault_path.join("Agents"),
         Some(config),
     );
-    let call = json!({ "tool": tool, "args": args });
-    let result = hq_mcp::gateway::dispatch(
+    let value = hq_mcp::gateway::call_tool_whole(
         &registry,
-        "hq_call",
-        call.as_object(),
-        &db,
+        tool,
+        args,
         Some(hq_mcp::gateway::TASKS_ALLOWLIST),
     )
     .await
-    .map_err(|e| anyhow::anyhow!("{}", e.message))?;
-
-    let value = serde_json::to_value(&result)?;
-    let text: Vec<&str> = value["content"]
-        .as_array()
-        .map(|c| c.iter().filter_map(|b| b["text"].as_str()).collect())
-        .unwrap_or_default();
-    let text = text.join("\n");
-    if value["isError"].as_bool().unwrap_or(false) {
-        bail!("{text}");
-    }
-    println!("{text}");
+    .map_err(|e| anyhow::anyhow!("{e}"))?;
+    println!("{}", serde_json::to_string_pretty(&value)?);
     Ok(())
 }
 

@@ -23,10 +23,12 @@ pub async fn run(config: &HqConfig, query: &str, limit: usize, json: bool) -> Re
     }
 
     let db = Database::open(&db_path)?;
+    let lite = config.profile.is_lite();
     let mut results: Vec<hq_core::types::SearchResult> =
-        db.with_conn(|conn| hq_db::search::keyword_search(conn, query, limit))?;
+        db.with_conn(|conn| hq_db::search::keyword_search(conn, query, if lite { limit.saturating_mul(5) } else { limit }))?;
     if config.profile.is_lite() {
         results.retain(|r| !hq_web::lite_hides(&r.note_path));
+        results.truncate(limit);
     }
     if json {
         let hits: Vec<_> = results

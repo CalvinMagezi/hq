@@ -7,8 +7,14 @@ pub async fn run(config: &HqConfig, sub: &str, args: &[String]) -> Result<()> {
     let vault = VaultClient::new(config.vault_path.clone())?;
     let lite = config.profile.is_lite();
     // `--json` on list, tree and read prints one JSON value instead of text.
-    let json = args.iter().any(|a| a == "--json");
-    let args: Vec<String> = args.iter().filter(|a| *a != "--json").cloned().collect();
+    // Only for the read-only listings: in `write` and `export` the word is the user's own text.
+    let json_verb = matches!(sub, "list" | "ls" | "tree" | "read" | "cat");
+    let json = json_verb && args.iter().any(|a| a == "--json");
+    let args: Vec<String> = args
+        .iter()
+        .filter(|a| !(json_verb && *a == "--json"))
+        .cloned()
+        .collect();
     let args = &args[..];
 
     // Under Lite the terminal sees what the web app sees: HQ's own folders (`_system`, `_data`,
@@ -22,7 +28,13 @@ pub async fn run(config: &HqConfig, sub: &str, args: &[String]) -> Result<()> {
         }
         Ok(())
     };
-    let visible = |n: &String| !lite || !hq_web::lite_hides(n);
+    // A note listed by name may sit behind a symlink into a hidden folder, so Lite also checks
+    // where each one really is.
+    let visible = |n: &String| {
+        !lite
+            || !(hq_web::lite_hides(n)
+                || hq_web::lite_hides_resolved(&config.vault_path, &config.vault_path.join(n)))
+    };
 
     match sub {
         "list" | "ls" => {
@@ -98,7 +110,11 @@ pub async fn run(config: &HqConfig, sub: &str, args: &[String]) -> Result<()> {
             let content = if args.len() == 2 && args[1] == "-" {
                 use std::io::Read;
                 let mut s = String::new();
-                std::io::stdin().read_to_string(&mut s)?;
+                const MAX: u64 = 8 * 1024 * 1024;
+                std::io::stdin().take(MAX + 1).read_to_string(&mut s)?;
+                if s.len() as u64 > MAX {
+                    anyhow::bail!("the note text on standard input is over 8 MiB");
+                }
                 s
             } else {
                 args[1..].join(" ")
@@ -166,6 +182,9 @@ pub async fn run(config: &HqConfig, sub: &str, args: &[String]) -> Result<()> {
             };
             let note = hq_convert::note_pdf::resolve_note(&config.vault_path, note_ref)
                 .ok_or_else(|| anyhow::anyhow!("note not found in the vault: {note_ref}"))?;
+            if lite && hq_web::lite_hides_resolved(&config.vault_path, &note) {
+                anyhow::bail!("`{note_ref}` is not part of the notes in HQ Lite (profile: lite)");
+            }
             let kit = brand
                 .map(|slug| hq_convert::brand::load_brand_kit(&config.vault_path, slug))
                 .transpose()

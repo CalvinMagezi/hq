@@ -637,7 +637,9 @@ fn init_tracing() {
     let is_mcp = args.iter().any(|a| a == "mcp-serve");
     let is_chat = args.len() <= 1 || args.iter().any(|a| a == "chat");
     // `hq task` and `--json` print data for another program: logs go to stderr, quietly.
-    let is_data = args.get(1).is_some_and(|a| a == "task") || args.iter().any(|a| a == "--json");
+    let before_dashes = args.iter().skip(1).take_while(|a| *a != "--");
+    let is_data = before_dashes.clone().take(4).any(|a| a == "task")
+        || (args.get(1).is_some_and(|a| a == "search" || a == "vault") && before_dashes.clone().any(|a| a == "--json"));
     let default_level = if is_chat {
         "off"
     } else if is_data {
