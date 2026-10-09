@@ -230,7 +230,7 @@ mod tests {
 
     #[test]
     fn on_wsl_the_explorer_path_points_into_the_distro_and_elsewhere_there_is_none() {
-        let root = Path::new("/home/ana/Documents/HQ");
+        let root = Path::new("/home/user/Documents/HQ");
         let wsl = describe_for(root, Some("Ubuntu".into()));
         assert_eq!(wsl["wsl"], true);
         assert_eq!(wsl["explorer_path"], "\\\\wsl$\\Ubuntu\\home\\ana\\Documents\\HQ");
