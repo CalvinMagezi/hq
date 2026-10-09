@@ -211,4 +211,64 @@ mod tests {
             }
         }
     }
+    /// The end-to-end check for the tasks scope against the real tools: filing a task with
+    /// routing tags on that scope must not put anything in an agent's or the relay's mailbox,
+    /// and the vault tools are out of reach entirely.
+    #[tokio::test]
+    async fn the_tasks_scope_files_tasks_without_touching_mailboxes_or_the_vault() {
+        let vault = tempfile::TempDir::new().unwrap();
+        for tag in ["relay", "agent-worker", "claude-code"] {
+            std::fs::create_dir_all(vault.path().join("_mailboxes").join(tag)).unwrap();
+        }
+        std::fs::write(vault.path().join("secret.md"), "private note").unwrap();
+        let registry = real_registry(&vault);
+        let db = Database::open_memory().unwrap();
+        let tasks = Some(crate::gateway::TASKS_ALLOWLIST);
+
+        let call = |tool: &str, args: serde_json::Value| {
+            serde_json::json!({"tool": tool, "args": args}).as_object().unwrap().clone()
+        };
+
+        let filed = crate::gateway::handle_call(
+            &registry,
+            Some(&call(
+                "task_create",
+                serde_json::json!({"title": "from an editor agent", "tags": ["relay", "agent-worker", "claude-code"]}),
+            )),
+            &db,
+            tasks,
+        )
+        .await
+        .unwrap();
+        let text = format!("{filed:?}");
+        assert!(text.contains("mcp:tasks"), "attributed to the scope, not a name the caller chose: {text}");
+
+        let mailbox_entries = |tag: &str| {
+            std::fs::read_dir(vault.path().join("_mailboxes").join(tag)).unwrap().count()
+        };
+        for tag in ["relay", "agent-worker", "claude-code"] {
+            assert_eq!(mailbox_entries(tag), 0, "{tag} received something from the tasks scope");
+        }
+
+        for (tool, args) in [
+            ("vault_read", serde_json::json!({"path": "secret.md"})),
+            ("vault_search", serde_json::json!({"query": "private"})),
+            ("harness_session_spawn", serde_json::json!({"harness": "claude-code", "cwd": "/tmp"})),
+        ] {
+            let denied = crate::gateway::handle_call(&registry, Some(&call(tool, args)), &db, tasks).await;
+            assert!(denied.is_err(), "{tool} must be refused on the tasks scope");
+        }
+
+        // Control: the unscoped call with the same tags does deliver, so the assertion above
+        // is not passing because nothing could ever be delivered.
+        crate::gateway::handle_call(
+            &registry,
+            Some(&call("task_create", serde_json::json!({"title": "owner", "tags": ["relay"]}))),
+            &db,
+            None,
+        )
+        .await
+        .unwrap();
+        assert!(mailbox_entries("relay") >= 1, "an owner call delivers to a tagged mailbox");
+    }
 }

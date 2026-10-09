@@ -7,11 +7,9 @@ HQ-SEC-001, HQ-SEC-004 and HQ-SEC-005.
 ## `/mcp` fails closed
 
 `/mcp` needs `AGENTHQ_API_KEY` (full access), `AGENTHQ_SPARK_API_KEY` (a
-read-only tool allowlist), `AGENTHQ_TASKS_API_KEY` (the read-only tools plus
-`task_create`, `task_update`, `task_comment_add`, `folder_create` and
-`initiative_create`, listed in `hq_mcp::gateway::TASKS_ALLOWLIST`; it has no session
-tools, no `hq_ask`, no deletes and no vault writes, so unlike the handoff key it is not code
-execution anywhere) or `AGENTHQ_HANDOFF_API_KEY` (the read-only set minus
+read-only tool allowlist that includes the vault and session logs), `AGENTHQ_TASKS_API_KEY`
+(task tools only, listed in `hq_mcp::gateway::TASKS_ALLOWLIST`: list, get, create, update and
+comment on tasks, and list or create folders and initiatives) or `AGENTHQ_HANDOFF_API_KEY` (the read-only set minus
 `harness_session_logs`, plus `task_create`, `task_update`, `task_comment_add`,
 `harness_session_spawn`, `harness_session_handoff`, `hq_ask` and `hq_ask_result`, as listed in
 `hq_mcp::gateway::HANDOFF_ALLOWLIST`; no deletes, no session stop, resume,
@@ -26,7 +24,7 @@ gateway tells the tool the call came in on this key, so a client cannot claim
 or drop the scope. Send the key as `Authorization: Bearer <key>` or
 `x-api-key`. With none of the variables set, every call is refused with
 "Unauthorized: this server has no AGENTHQ_API_KEY configured". A value reused
-across scopes gets the narrowest one (Spark, then tasks, then handoff, then full), and a tool missing from a scope's list is
+across scopes gets the narrower one (Spark, then tasks, then handoff, then full), and a tool missing from a scope's list is
 denied, so a new tool stays out of the scoped keys until it is added by hand.
 
 For local development only, `HQ_MCP_DEV_NO_AUTH=1` opens `/mcp` when no key is
@@ -44,6 +42,19 @@ permission preset, and can read back only the asks it made. The Spark key has ne
 A handoff-key ask turn also loses the tools the handoff key is kept off (session logs and lists, host panes, file and git readers, specialist sub-agents; see `docs/MCP_ASK.md`), and the key may continue only threads its own asks started in which the owner has typed nothing. Questions are capped at 20,000 characters, with 3 asks waiting at once, 6 new asks per minute and 200 per day per key. The gateway sets the
 scope marker, so a client cannot claim `full` for a handoff call. The answer is model output and
 must be treated as untrusted by the caller.
+
+The **tasks key** is the one to give an editor agent on a machine you do not control. It has no
+vault tools, so your notes never reach that client, and no session, `hq_ask`, delete or config
+tools, so it is not code execution anywhere. The task tools also know a call came in on it (the
+gateway sets a private marker and strips any the caller sends) and then: set no routing tags
+(a tag names a mailbox that the relay, the agent worker and harnesses drain, so a tag would put
+text in front of your chat or an agent), ignore a `tags` change on update, send no mailbox
+notification on create, update or unblock, and write `mcp:tasks` as the author instead of a name
+the caller picks. It can still edit any task's title, description and status, so treat task text
+as untrusted input wherever an agent acts on it. A key shared with another scope gets the narrower
+one. Its stdio form (`hq mcp-serve --scope tasks`) applies the same list, but it is a flag in a
+file the user can edit and anyone who can run `hq` on that machine can start a full server, so only
+the remote key is enforced on the server.
 
 Generate a key with `openssl rand -hex 32` and keep it in a root-readable env
 file loaded by the service (the sample unit layout uses `/opt/hq/mcp.env`, loaded by the

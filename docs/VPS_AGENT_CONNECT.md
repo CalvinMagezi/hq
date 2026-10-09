@@ -19,10 +19,10 @@ hq start all (serves /mcp, /health, the web UI)
 
 1. Set the key HQ checks on `/mcp`. `AGENTHQ_API_KEY` grants full access;
    `AGENTHQ_SPARK_API_KEY` is optional and limited to a read-only tool set.
-   `AGENTHQ_TASKS_API_KEY` is optional and adds task reads and writes
-   (`task_create`, `task_update`, `task_comment_add`) to the read-only set, with no session
-   tools and no way to run code. It is the key to give an editor agent that should use HQ's tasks
-   and nothing else.
+   `AGENTHQ_TASKS_API_KEY` is optional and opens only the task tools (list, get, create,
+   update, comment, plus folders and initiatives): no vault, no session tools, no way to run
+   code, and no mailbox notifications. It is the key to give an editor agent that should use
+   HQ's tasks and nothing else.
    `AGENTHQ_HANDOFF_API_KEY` is optional and adds task writes and session
    spawn/handoff (for a client that hands work to coding agents). It is
    equivalent to code execution on the hosts: set `agent_host.handoff_cwd_allow`.
@@ -89,7 +89,7 @@ which produces
 }
 ```
 
-Give VS Code the tasks key (or the read-only key), not the full key. `--url` accepts `https://`
+Give VS Code the tasks key, not the full key. `--url` accepts `https://`
 URLs, and `http://` only for `localhost`; it refuses a URL that carries credentials, a query or a
 fragment. An organization can switch MCP off for Copilot ("MCP servers in Copilot" policy); if it
 has, this does not work and the answer is a conversation with your administrator.
@@ -101,5 +101,9 @@ hq mcp install --target vscode --scope tasks
 ```
 
 This writes `hq mcp-serve --scope tasks` into VS Code's user `mcp.json`. The scopes are `full`
-(the default), `tasks` and `readonly`, the same lists the HTTP keys use. A scoped server also
-sends no tool catalog in its instructions, so a client is not told about tools it cannot call.
+(the default) and `tasks`, the same list the HTTP key uses; `--scope` needs `--target`, so it never
+rewrites your own full-access entries in other clients, and a later plain `hq mcp install` keeps an
+entry's scope instead of widening it. A scoped server sends no tool catalog in its instructions,
+so a client is not told about tools it cannot call. The scope is a flag in a file you can edit, so
+it limits what an editor agent is handed, not what a person on that machine can do; only the
+remote key is enforced by the server.

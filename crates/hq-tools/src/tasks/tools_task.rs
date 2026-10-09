@@ -77,10 +77,15 @@ impl HqTool for TaskCreateTool {
         let start_date = opt_str(&args, "start_date");
         let parent_id = opt_str(&args, "parent_id");
         let depends_on = tags_from_args(&args, "depends_on");
-        let tags = tags_from_args(&args, "tags");
+        // The tasks scope sets no routing tags (a tag names a mailbox that an agent or the
+        // owner's chat drains) and cannot choose who a write is attributed to.
+        let scoped = crate::harness_session::is_tasks_scope(&args);
+        let tags = if scoped { Vec::new() } else { tags_from_args(&args, "tags") };
         let created_by = {
             let v = arg_str(&args, "created_by");
-            if v.is_empty() {
+            if scoped {
+                crate::harness_session::TASKS_SCOPE_ACTOR.to_string()
+            } else if v.is_empty() {
                 "unknown".to_string()
             } else {
                 v
@@ -145,7 +150,7 @@ impl HqTool for TaskCreateTool {
             out["deduplicated"] = json!(true);
             return Ok(out);
         }
-        if !task.tags.is_empty() {
+        if !scoped && !task.tags.is_empty() {
             let _ = mailbox::notify_tagged_agents(
                 &self.vault_path,
                 &task.id,
@@ -359,6 +364,7 @@ impl HqTool for TaskUpdateTool {
         if id.is_empty() {
             bail!("id is required");
         }
+        let scoped = crate::harness_session::is_tasks_scope(&args);
         let patch = t::TaskPatch {
             title: args.get("title").and_then(|v| v.as_str()).map(String::from),
             description: args
@@ -373,7 +379,12 @@ impl HqTool for TaskUpdateTool {
             due_date: args.get("due_date").map(|v| v.as_str().map(String::from)),
             start_date: args.get("start_date").map(|v| v.as_str().map(String::from)),
             parent_task_id: args.get("parent_id").map(|v| v.as_str().map(String::from)),
-            tags: args.get("tags").map(|_| tags_from_args(&args, "tags")),
+            // The tasks scope cannot set routing tags: they name mailboxes other parties drain.
+            tags: if scoped {
+                None
+            } else {
+                args.get("tags").map(|_| tags_from_args(&args, "tags"))
+            },
         };
         let expected_status = args
             .get("expected_status")
@@ -387,7 +398,12 @@ impl HqTool for TaskUpdateTool {
             let previous_status = t::get_task(c, &id_for_update)?.map(|t| t.status);
             let mut task = t::update_task(c, &id_for_update, &patch, expected_status.as_deref())?;
             if !add_deps.is_empty() || !remove_deps.is_empty() {
-                apply_dependency_changes(c, &task.id, &add_deps, &remove_deps, "agent")?;
+                let actor = if scoped {
+                    crate::harness_session::TASKS_SCOPE_ACTOR
+                } else {
+                    "agent"
+                };
+                apply_dependency_changes(c, &task.id, &add_deps, &remove_deps, actor)?;
                 task = t::get_task(c, &task.id)?
                     .ok_or_else(|| anyhow::anyhow!("task vanished after update"))?;
             }
@@ -396,9 +412,11 @@ impl HqTool for TaskUpdateTool {
             let unblocked = unblocked_by_transition(c, previous_status.as_deref(), &task)?;
             Ok::<_, anyhow::Error>((task, became_ready, unblocked))
         })?;
-        notify_unblocked(&self.vault_path, &task, &unblocked);
+        if !scoped {
+            notify_unblocked(&self.vault_path, &task, &unblocked);
+        }
 
-        if !task.tags.is_empty() {
+        if !scoped && !task.tags.is_empty() {
             let _ = mailbox::notify_tagged_agents(
                 &self.vault_path,
                 &task.id,
@@ -497,6 +515,9 @@ impl HqTool for TaskCommentAddTool {
         // name it supplies.
         let author = match crate::harness_session::caller_session(&args) {
             Some(session) => session.to_string(),
+            None if crate::harness_session::is_tasks_scope(&args) => {
+                crate::harness_session::TASKS_SCOPE_ACTOR.to_string()
+            }
             None => match arg_str(&args, "author") {
                 v if v.is_empty() => "unknown".to_string(),
                 v => v,

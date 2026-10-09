@@ -13,8 +13,9 @@ pub struct Scope {
     pub global: bool,
     /// Project directory for the project-level files (default: cwd).
     pub path: Option<PathBuf>,
-    /// What the written stdio entries may reach (`hq mcp-serve --scope`).
-    pub access: ServeScope,
+    /// What the written stdio entries may reach (`hq mcp-serve --scope`). Unset keeps what
+    /// an existing entry has.
+    pub access: Option<ServeScope>,
     /// Write a remote entry for this HQ `/mcp` URL instead (VS Code files only).
     pub url: Option<String>,
 }
@@ -75,44 +76,73 @@ fn remote_target_ok(target: Option<&str>) -> bool {
 }
 
 fn install(config: &HqConfig, scope: &Scope) -> Result<()> {
+    let mut remote_url = None;
     if let Some(url) = &scope.url {
-        cursor_mcp_config::validate_remote_url(url)?;
+        remote_url = Some(cursor_mcp_config::validate_remote_url(url)?);
         if !remote_target_ok(scope.target.as_deref()) {
             anyhow::bail!(
                 "--url writes VS Code's remote form, so it works with --target vscode or --target project"
             );
         }
-        if scope.access != ServeScope::Full {
+        if scope.access.is_some() {
             anyhow::bail!("--scope applies to a local server; the key you give a remote HQ sets its scope");
         }
     }
+    if scope.access.is_some_and(|a| a != ServeScope::Full) && scope.target.is_none() {
+        anyhow::bail!(
+            "--scope narrows the entries it writes, so name the client with --target (for example --target vscode) \
+             instead of rewriting every client's config, including your own full-access ones"
+        );
+    }
     let opts = EntryOptions {
         scope: scope.access,
-        remote_url: scope.url.clone(),
+        remote_url,
     };
     println!("Installing HQ MCP server configuration...\n");
     let mut installed = 0;
+    let mut written: Vec<PathBuf> = Vec::new();
+    let mut legacy: Vec<Target> = Vec::new();
     for t in selected_targets(scope)? {
         if t.legacy {
-            // An old location HQ no longer writes: move its entry rather than leave a duplicate.
-            if let Ok(true) = cursor_mcp_config::remove_target(&t) {
-                println!("  Moved the old entry out of: {}", t.path.display());
-            }
+            legacy.push(t);
             continue;
         }
+        let shown_scope = if opts.remote_url.is_some() {
+            "remote".to_string()
+        } else {
+            match cursor_mcp_config::effective_scope(&t, &opts) {
+                ServeScope::Full => "full access".to_string(),
+                ServeScope::Tasks => "tasks only".to_string(),
+            }
+        };
         match cursor_mcp_config::write_target(&t, &config.vault_path, &opts) {
             Ok(Some(path)) => {
-                println!("  Installed to: {}", path.display());
+                println!("  Installed to: {} ({shown_scope})", path.display());
+                written.push(path.to_path_buf());
                 installed += 1;
             }
             Ok(None) => {}
             Err(e) => eprintln!("  Warning: Could not update {}: {e}", t.path.display()),
         }
     }
+    // An old location HQ no longer writes. Its entry is left alone, since that file is
+    // usually JSONC with the user's own settings; say where it is so they can drop it.
+    for t in legacy {
+        let replaced = t
+            .path
+            .parent()
+            .is_some_and(|dir| written.iter().any(|w| w.parent() == Some(dir)));
+        if replaced && cursor_mcp_config::has_entry(&t) {
+            println!(
+                "  Note: {} still has an older agent-hq entry. VS Code now reads mcp.json, so remove it with `hq mcp remove --target vscode`.",
+                t.path.display()
+            );
+        }
+    }
 
     if installed == 0 {
         println!("No supported AI editor configs found.");
-        if let Some(url) = &scope.url {
+        if let Some(url) = &opts.remote_url {
             println!("Add this to a VS Code mcp.json (a workspace's .vscode/mcp.json, or --target project):\n");
             println!("{}", cursor_mcp_config::remote_snippet(url)?);
             return Ok(());

@@ -47,6 +47,7 @@ rpassword = "7"
 hq-agent = { workspace = true }
 crossterm = "0.28"
 rusqlite.workspace = true
+url = { workspace = true }
 mimalloc = { version = "0.1", default-features = false }
 
 # native-tls (pulled in transitively via reqwest/teloxide) links system

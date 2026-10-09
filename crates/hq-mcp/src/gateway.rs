@@ -91,25 +91,15 @@ pub const HANDOFF_ALLOWLIST: &[&str] = &[
 ];
 
 /// Tool names reachable by a tasks-scoped connection (`AGENTHQ_TASKS_API_KEY`, or
-/// `hq mcp-serve --scope tasks`): the read tools plus filing, updating and
-/// commenting on tasks and creating folders and initiatives to place them in.
-/// It cannot start, read or message a session, ask HQ's chat agent a question,
-/// delete anything, write to the vault or reach another service, so unlike the
-/// handoff scope it is not code execution on any host. An exact list, so a tool
+/// `hq mcp-serve --scope tasks`): reading, filing, updating and commenting on tasks, and
+/// creating the folders and initiatives to place them in. It has no vault tools, so a
+/// client on a machine HQ's owner does not control never sees their notes, and none that
+/// start, read or message a session, ask HQ's chat agent, delete anything or reach another
+/// service, so unlike the handoff scope it is not code execution on any host. The task tools
+/// also know the call came in on this scope (see `mark_scope`) and then set no routing tags,
+/// write to no agent's mailbox, and attribute writes to `mcp:tasks`. An exact list, so a tool
 /// added to the registry later is denied until someone adds it here.
 pub const TASKS_ALLOWLIST: &[&str] = &[
-    "vault_search",
-    "vault_find",
-    "vault_read",
-    "vault_read_section",
-    "vault_outline",
-    "vault_list",
-    "vault_backlinks",
-    "vault_links",
-    "vault_tags",
-    "vault_find_similar",
-    "vault_context",
-    "memory_entity_graph",
     "task_list",
     "task_get",
     "task_related",
@@ -443,16 +433,23 @@ fn attest_caller(args: &mut Value, caller_session: Option<&str>) {
     }
 }
 
-/// Tools learn which key a call came in on only from this argument: any value
-/// the caller sent is dropped, and it is set here for the handoff scope.
+/// Tools learn which key a call came in on only from these arguments: any value
+/// the caller sent is dropped, and they are set here for the handoff and tasks scopes.
 fn mark_scope(args: &mut Value, allowed: Option<&[&str]>) {
     let Some(obj) = args.as_object_mut() else {
         return;
     };
     obj.remove(hq_tools::harness_session::HANDOFF_SCOPE_ARG);
+    obj.remove(hq_tools::harness_session::TASKS_SCOPE_ARG);
     if allowed == Some(HANDOFF_ALLOWLIST) {
         obj.insert(
             hq_tools::harness_session::HANDOFF_SCOPE_ARG.into(),
+            json!(true),
+        );
+    }
+    if allowed == Some(TASKS_ALLOWLIST) {
+        obj.insert(
+            hq_tools::harness_session::TASKS_SCOPE_ARG.into(),
             json!(true),
         );
     }
@@ -576,10 +573,11 @@ mod tests {
     }
 
     /// The tasks scope exists so a client can file and update tasks without being
-    /// able to run code: nothing that spawns, reads or messages a session, asks
-    /// HQ's chat agent, deletes, writes the vault, or reaches another service.
+    /// able to run code or read the owner's notes: no vault tools, nothing that spawns,
+    /// reads or messages a session, asks HQ's chat agent, deletes, writes the vault or
+    /// reaches another service.
     #[test]
-    fn tasks_scope_is_task_work_and_reads_and_never_code_execution() {
+    fn tasks_scope_is_task_work_only() {
         for name in [
             "task_list",
             "task_get",
@@ -587,8 +585,6 @@ mod tests {
             "task_update",
             "task_comment_add",
             "task_comment_list",
-            "vault_search",
-            "vault_read",
         ] {
             assert!(TASKS_ALLOWLIST.contains(&name), "tasks must reach {name}");
         }
@@ -599,13 +595,18 @@ mod tests {
             "harness_session_logs",
             "harness_session_list",
             "harness_session_status",
+            "session_search",
             "hq_ask",
             "hq_ask_result",
             "task_delete",
             "task_create_from_note",
             "space_create",
             "space_update",
+            "vault_search",
+            "vault_read",
+            "vault_context",
             "vault_write_note",
+            "memory_entity_graph",
             "config_manage",
             "host_send",
             "bash",
@@ -616,8 +617,8 @@ mod tests {
         }
         for name in TASKS_ALLOWLIST {
             assert!(
-                !name.starts_with("harness_") && !name.starts_with("host_"),
-                "{name} is a session or host tool"
+                ["task_", "folder_", "initiative_", "space_"].iter().any(|p| name.starts_with(p)),
+                "{name} is not a task, folder, initiative or space tool"
             );
         }
     }
@@ -648,11 +649,28 @@ mod tests {
     }
 
     #[test]
-    fn the_tasks_scope_carries_no_handoff_marker() {
-        let key = hq_tools::harness_session::HANDOFF_SCOPE_ARG;
-        let mut args = serde_json::json!({ key: true });
+    fn each_scope_gets_only_its_own_marker_and_a_caller_cannot_forge_either() {
+        let handoff = hq_tools::harness_session::HANDOFF_SCOPE_ARG;
+        let tasks = hq_tools::harness_session::TASKS_SCOPE_ARG;
+        let forged = || serde_json::json!({ handoff: true, tasks: true, "x": 1 });
+
+        let mut args = forged();
+        mark_scope(&mut args, None);
+        assert!(args.get(handoff).is_none() && args.get(tasks).is_none(), "owner calls carry no marker");
+
+        let mut args = forged();
+        mark_scope(&mut args, Some(SPARK_READONLY_ALLOWLIST));
+        assert!(args.get(handoff).is_none() && args.get(tasks).is_none());
+
+        let mut args = forged();
         mark_scope(&mut args, Some(TASKS_ALLOWLIST));
-        assert!(args.get(key).is_none(), "a forged marker is stripped on the tasks scope");
+        assert_eq!(args[tasks], true);
+        assert!(args.get(handoff).is_none(), "a tasks call is never marked as handoff");
+
+        let mut args = forged();
+        mark_scope(&mut args, Some(HANDOFF_ALLOWLIST));
+        assert_eq!(args[handoff], true);
+        assert!(args.get(tasks).is_none(), "a handoff call is never marked as tasks");
     }
 
     #[tokio::test]

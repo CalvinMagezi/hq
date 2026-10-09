@@ -14,15 +14,17 @@ pub fn stable_binary_path() -> PathBuf {
 }
 
 /// How much of HQ a stdio MCP entry may reach. It becomes `hq mcp-serve --scope <x>`.
+///
+/// This is a flag in a file the user can edit, and anyone who can run `hq` on the machine
+/// can start a full server, so it limits what an editor agent is handed, not what a
+/// person at the keyboard can do. Only a remote HQ's per-scope key is enforced server-side.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, clap::ValueEnum)]
 pub enum ServeScope {
     /// Every tool: for the owner's own harnesses.
     #[default]
     Full,
-    /// Vault reads plus filing and updating tasks; no sessions, no code execution.
+    /// Task tools only: no vault, no sessions, no code execution.
     Tasks,
-    /// Vault reads only.
-    Readonly,
 }
 
 impl ServeScope {
@@ -31,7 +33,6 @@ impl ServeScope {
         match self {
             Self::Full => None,
             Self::Tasks => Some(hq_mcp::gateway::TASKS_ALLOWLIST),
-            Self::Readonly => Some(hq_mcp::gateway::SPARK_READONLY_ALLOWLIST),
         }
     }
 
@@ -39,7 +40,14 @@ impl ServeScope {
         match self {
             Self::Full => None,
             Self::Tasks => Some("tasks"),
-            Self::Readonly => Some("readonly"),
+        }
+    }
+
+    fn from_arg(arg: &str) -> Option<Self> {
+        match arg {
+            "tasks" => Some(Self::Tasks),
+            "full" => Some(Self::Full),
+            _ => None,
         }
     }
 }
@@ -47,8 +55,10 @@ impl ServeScope {
 /// What `hq mcp install` writes beyond the default full-access stdio entry.
 #[derive(Clone, Debug, Default)]
 pub struct EntryOptions {
-    /// Scope the stdio entry's `mcp-serve` runs with.
-    pub scope: ServeScope,
+    /// Scope the stdio entry's `mcp-serve` runs with. `None` keeps the scope an existing
+    /// entry already has (full when there is none), so re-running a plain `hq mcp install`
+    /// never widens an entry someone narrowed on purpose.
+    pub scope: Option<ServeScope>,
     /// Point at a remote HQ's `/mcp` instead of launching a local server. Only
     /// the VS Code configs take this form, and the key is asked for when VS Code
     /// starts the server, never written to the file.
@@ -110,36 +120,36 @@ pub fn remote_snippet(url: &str) -> Result<String> {
     Ok(serde_json::to_string_pretty(&Value::Object(root))?)
 }
 
-/// A remote HQ must be reached over TLS, except on this machine.
-pub fn validate_remote_url(url: &str) -> Result<()> {
-    if url.trim() != url || url.chars().any(char::is_whitespace) {
-        anyhow::bail!("the URL must not contain whitespace");
+/// A remote HQ must be reached over TLS, except on this machine. Returns the URL in the
+/// normalized form that gets written, so what is validated is what is stored.
+pub fn validate_remote_url(raw: &str) -> Result<String> {
+    // The parser silently drops tabs and newlines, which would let a validated string
+    // differ from the one written.
+    if raw.chars().any(|c| c.is_control() || c.is_whitespace()) {
+        anyhow::bail!("the URL must not contain whitespace or control characters");
     }
-    let (secure, rest) = match url.split_once("://") {
-        Some(("https", rest)) => (true, rest),
-        Some(("http", rest)) => (false, rest),
+    let url = url::Url::parse(raw).map_err(|e| anyhow::anyhow!("not a valid URL: {e}"))?;
+    let secure = match url.scheme() {
+        "https" => true,
+        "http" => false,
         _ => anyhow::bail!("the URL must start with https:// (or http:// for this machine)"),
     };
-    let authority = rest.split(['/', '?', '#']).next().unwrap_or("");
-    if authority.is_empty() {
-        anyhow::bail!("the URL has no host");
-    }
-    if authority.contains('@') {
+    if !url.username().is_empty() || url.password().is_some() {
         anyhow::bail!("the URL must not carry credentials; the key is asked for by VS Code");
     }
-    if url.contains('?') || url.contains('#') {
+    if url.query().is_some() || url.fragment().is_some() {
         anyhow::bail!("the URL must not carry a query or fragment");
     }
-    let host = if let Some(v6) = authority.strip_prefix('[') {
-        v6.split(']').next().unwrap_or("")
-    } else {
-        authority.split(':').next().unwrap_or("")
+    let loopback = match url.host() {
+        None => anyhow::bail!("the URL has no host"),
+        Some(url::Host::Domain(d)) => d.eq_ignore_ascii_case("localhost"),
+        Some(url::Host::Ipv4(ip)) => ip.is_loopback(),
+        Some(url::Host::Ipv6(ip)) => ip.is_loopback(),
     };
-    let loopback = matches!(host, "localhost" | "127.0.0.1" | "::1");
     if !secure && !loopback {
         anyhow::bail!("http:// is only allowed for localhost; use https:// for a remote HQ");
     }
-    Ok(())
+    Ok(url.to_string())
 }
 
 /// Identity used when HQ writes a config for a harness it cannot name — a
@@ -299,6 +309,29 @@ fn servers_key(root: &Value, key: &'static str) -> &'static str {
     }
 }
 
+/// The scope an existing stdio entry was written with, from its `--scope` argument.
+fn existing_scope(entry: &Value) -> Option<ServeScope> {
+    let args = entry.get("args")?.as_array()?;
+    let pos = args.iter().position(|a| a == "--scope")?;
+    ServeScope::from_arg(args.get(pos + 1)?.as_str()?)
+}
+
+/// The scope a stdio entry written to `t` gets: the one asked for, else the one an entry
+/// already there has, else full.
+pub fn effective_scope(t: &Target, opts: &EntryOptions) -> ServeScope {
+    if let Some(scope) = opts.scope {
+        return scope;
+    }
+    let Ok(root) = read_json(&t.path) else {
+        return ServeScope::Full;
+    };
+    let entry = match t.key {
+        Some(key) => root.get(servers_key(&root, key)).and_then(|s| s.get("agent-hq")),
+        None => Some(&root),
+    };
+    entry.and_then(existing_scope).unwrap_or_default()
+}
+
 /// Merge the agent-hq entry into `t`, keeping every other server. Returns
 /// `None` when the client is not installed, when `t` is a location HQ no longer
 /// writes, or when a remote form was asked for and `t` cannot take it. An
@@ -314,7 +347,7 @@ pub fn write_target<'a>(
     let server = match &opts.remote_url {
         Some(_) if !t.vscode => return Ok(None),
         Some(url) => build_remote_entry(url),
-        None => build_stdio_entry(vault_path, t.agent_id, opts.scope, t.vscode),
+        None => build_stdio_entry(vault_path, t.agent_id, effective_scope(t, opts), t.vscode),
     };
     let Some(key) = t.key else {
         write_json(&t.path, &server)?;
@@ -345,6 +378,16 @@ pub fn write_target<'a>(
         .insert("agent-hq".to_string(), server);
     write_json(&t.path, &root)?;
     Ok(Some(&t.path))
+}
+
+/// Whether `t` (a legacy location) still holds an agent-hq entry.
+pub fn has_entry(t: &Target) -> bool {
+    let Some(key) = t.key else {
+        return t.path.exists();
+    };
+    read_json(&t.path)
+        .ok()
+        .is_some_and(|root| root.get(servers_key(&root, key)).and_then(|s| s.get("agent-hq")).is_some())
 }
 
 /// Make sure the root `inputs` array has the prompt for the remote key.
@@ -548,8 +591,6 @@ mod tests {
         assert_eq!(full["args"], json!(["mcp-serve"]), "full access adds no flag");
         let tasks = build_stdio_entry(Path::new("/vault"), "x", ServeScope::Tasks, false);
         assert_eq!(tasks["args"], json!(["mcp-serve", "--scope", "tasks"]));
-        let ro = build_stdio_entry(Path::new("/vault"), "x", ServeScope::Readonly, false);
-        assert_eq!(ro["args"], json!(["mcp-serve", "--scope", "readonly"]));
         assert!(tasks.get("type").is_none());
         let vs = build_stdio_entry(Path::new("/vault"), "x", ServeScope::Tasks, true);
         assert_eq!(vs["type"], "stdio");
@@ -559,10 +600,6 @@ mod tests {
     fn serve_scopes_map_to_the_gateway_allowlists() {
         assert!(ServeScope::Full.allowlist().is_none());
         assert_eq!(ServeScope::Tasks.allowlist(), Some(hq_mcp::gateway::TASKS_ALLOWLIST));
-        assert_eq!(
-            ServeScope::Readonly.allowlist(),
-            Some(hq_mcp::gateway::SPARK_READONLY_ALLOWLIST)
-        );
     }
 
     /// VS Code's workspace file keys its servers under `servers`; `mcpServers` is ignored.
@@ -610,7 +647,9 @@ mod tests {
         assert_eq!(inputs.len(), 2, "the existing input stays and ours is added once");
         let ours = inputs.iter().find(|i| i["id"] == "agent-hq-key").unwrap();
         assert_eq!(ours["password"], true);
-        assert!(!std::fs::read_to_string(&t.path).unwrap().contains("Bearer h"));
+        let text = std::fs::read_to_string(&t.path).unwrap();
+        assert_eq!(text.matches("Bearer ").count(), 1, "one header, and only the placeholder");
+        assert!(text.contains("Bearer ${input:agent-hq-key}"));
     }
 
     #[test]
@@ -645,6 +684,35 @@ mod tests {
     }
 
     #[test]
+    fn re_running_a_plain_install_keeps_a_narrowed_entry_and_a_flag_changes_it() {
+        let dir = tempfile::tempdir().unwrap();
+        let t = vscode_target(dir.path().join("mcp.json"));
+        let scoped = EntryOptions { scope: Some(ServeScope::Tasks), ..EntryOptions::default() };
+        write_target(&t, Path::new("/vault"), &scoped).unwrap();
+        let args = |t: &Target| read_json(&t.path).unwrap()["servers"]["agent-hq"]["args"].clone();
+        assert_eq!(args(&t), json!(["mcp-serve", "--scope", "tasks"]));
+
+        write_target(&t, Path::new("/vault"), &EntryOptions::default()).unwrap();
+        assert_eq!(
+            args(&t),
+            json!(["mcp-serve", "--scope", "tasks"]),
+            "a plain re-install must not widen the entry"
+        );
+
+        let full = EntryOptions { scope: Some(ServeScope::Full), ..EntryOptions::default() };
+        write_target(&t, Path::new("/vault"), &full).unwrap();
+        assert_eq!(args(&t), json!(["mcp-serve"]), "asking for full is explicit");
+    }
+
+    #[test]
+    fn a_fresh_entry_without_a_flag_is_full() {
+        let dir = tempfile::tempdir().unwrap();
+        let t = vscode_target(dir.path().join("mcp.json"));
+        write_target(&t, Path::new("/vault"), &EntryOptions::default()).unwrap();
+        assert_eq!(read_json(&t.path).unwrap()["servers"]["agent-hq"]["args"], json!(["mcp-serve"]));
+    }
+
+    #[test]
     fn the_remote_snippet_is_a_complete_vscode_file() {
         let snippet: Value =
             serde_json::from_str(&remote_snippet("https://hq.example.com/mcp").unwrap()).unwrap();
@@ -657,26 +725,47 @@ mod tests {
         for ok in [
             "https://hq.example.com/mcp",
             "https://hq.example.com:8443/mcp",
+            "HTTPS://HQ.EXAMPLE.COM/mcp",
             "http://localhost:5678/mcp",
+            "http://LOCALHOST:5678/mcp",
             "http://127.0.0.1:5679/mcp",
+            "http://127.0.0.2:5679/mcp",
             "http://[::1]:5678/mcp",
+            "http://[0:0:0:0:0:0:0:1]:5678/mcp",
         ] {
             assert!(validate_remote_url(ok).is_ok(), "{ok}");
         }
         for bad in [
             "http://hq.example.com/mcp",
             "http://localhost.evil.example/mcp",
+            "http://[::1].evil.example/mcp",
+            "http://[::1]garbage/mcp",
             "https://user:pw@hq.example.com/mcp",
+            "https://hq.example.com@evil.example/mcp",
             "https://hq.example.com/mcp?key=abc",
             "https://hq.example.com/mcp#frag",
             "https://",
+            "https://:443/mcp",
             "ftp://hq.example.com/mcp",
             "hq.example.com/mcp",
             "https://hq.example.com/mcp ",
             "https://hq .example.com/mcp",
+            "https://hq.example.com/mcp\n",
+            "https://hq.exa\tmple.com/mcp",
+            "http://8.8.8.8/mcp",
+            "http://[2001:db8::1]/mcp",
         ] {
-            assert!(validate_remote_url(bad).is_err(), "{bad}");
+            assert!(validate_remote_url(bad).is_err(), "{bad:?}");
         }
+    }
+
+    #[test]
+    fn the_validated_url_is_the_one_that_is_stored() {
+        assert_eq!(
+            validate_remote_url("HTTPS://HQ.Example.com/mcp").unwrap(),
+            "https://hq.example.com/mcp"
+        );
+        assert_eq!(validate_remote_url("https://hq.example.com").unwrap(), "https://hq.example.com/");
     }
 
     #[test]

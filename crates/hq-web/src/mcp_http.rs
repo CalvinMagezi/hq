@@ -356,8 +356,11 @@ mod tests {
         assert!(handoff.contains("tasks") && !handoff.contains("config"), "{handoff}");
         assert!(handoff.contains("sessions"), "handoff can spawn sessions: {handoff}");
         let tasks = description(&rpc(&app, Some(TASKS), list()).await);
-        assert!(tasks.contains("tasks") && tasks.contains("vault"), "{tasks}");
-        assert!(!tasks.contains("config") && !tasks.contains("sessions"), "{tasks}");
+        assert!(tasks.contains("tasks"), "{tasks}");
+        assert!(
+            !tasks.contains("vault") && !tasks.contains("config") && !tasks.contains("sessions"),
+            "{tasks}"
+        );
     }
 
     #[tokio::test]
@@ -370,7 +373,7 @@ mod tests {
         let handoff = names(&rpc(&app, Some(HANDOFF), discover()).await);
         assert_eq!(handoff, ["harness_session_spawn", "task_create", "vault_search"]);
         let tasks = names(&rpc(&app, Some(TASKS), discover()).await);
-        assert_eq!(tasks, ["task_create", "vault_search"], "no session tools on the tasks key");
+        assert_eq!(tasks, ["task_create"], "no vault and no session tools on the tasks key");
     }
 
     fn call_failed(res: &Value) -> bool {
@@ -392,7 +395,7 @@ mod tests {
             (HANDOFF, "harness_session_logs", false),
             (HANDOFF, "config_manage", false),
             (TASKS, "task_create", true),
-            (TASKS, "vault_search", true),
+            (TASKS, "vault_search", false),
             (TASKS, "harness_session_spawn", false),
             (TASKS, "harness_session_logs", false),
             (TASKS, "config_manage", false),
