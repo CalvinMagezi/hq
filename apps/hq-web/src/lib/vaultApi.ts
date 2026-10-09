@@ -1,4 +1,5 @@
 import { HqHttpError, hqFetch, hqJson } from './hqAuth'
+import { defaultExtension, extensionFromDisposition, type NoteExportFormat } from './noteExport'
 
 export interface PinnedNote {
   title: string
@@ -144,16 +145,26 @@ export async function getNote(
 }
 
 /**
- * The note rendered as a PDF by the server (frontmatter and wikilinks cleaned up, vault images
- * included). Throws HqHttpError; status 503 means the server has no PDF engine installed.
+ * The note rendered by the server in one of the formats in `NOTE_EXPORT_OPTIONS` (frontmatter and
+ * wikilinks cleaned up, vault images included). `extension` is the one the server named, which is not
+ * always the one asked for: a note with several tables exports as a zip when CSV is requested.
+ * Throws HqHttpError; for PDF, status 503 means the server's older PDF engine is not installed.
  */
-export async function fetchNotePdf(notePath: string): Promise<Blob> {
-  const res = await hqFetch(`/api/note/pdf?path=${encodeURIComponent(notePath)}`)
+export async function fetchNoteExport(
+  notePath: string,
+  format: NoteExportFormat,
+): Promise<{ blob: Blob; extension: string }> {
+  const res = await hqFetch(
+    `/api/note/export?path=${encodeURIComponent(notePath)}&format=${encodeURIComponent(format)}`,
+  )
   if (!res.ok) {
     const data = await res.json().catch(() => ({}))
     throw new HqHttpError(data.error || `${res.status} ${res.statusText}`, res.status)
   }
-  return res.blob()
+  return {
+    blob: await res.blob(),
+    extension: extensionFromDisposition(res.headers.get('content-disposition'), defaultExtension(format)),
+  }
 }
 
 export function togglePinNote(path: string, pinned: boolean): Promise<{ success: boolean }> {

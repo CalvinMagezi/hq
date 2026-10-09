@@ -247,6 +247,7 @@ pub fn create_router(state: Arc<WsState>) -> Router {
         .route("/api/harness-sessions/{id}/archive", post(workbench_api::archive_handler))
         .route("/api/harness-sessions/{id}", get(sessions_api::get_session_handler))
         .route("/api/harness-sessions/{id}/screen", get(sessions_api::screen_handler))
+        .route("/api/harness-sessions/{id}/screen/stream", get(sessions_api::screen_stream_handler))
         .route("/api/harness-sessions/{id}/send", post(sessions_api::send_handler))
         .route("/api/harness-sessions/{id}/adopt", post(sessions_api::adopt_handler))
         .route(

@@ -99,7 +99,7 @@ certificates turned on, an SSH key (`ssh-keygen -t ed25519` makes one) and a mod
 4. **Join your tailnet.** Run `ssh root@<server-ip> hq-join`, open the Tailscale login link it prints
    and sign in. It then prints your HQ link.
 5. **Open HQ.** Open that link on a device on your tailnet, paste your model key on the first
-   screen, and send a message. Treat the link like a password: it signs you in as admin.
+   screen ([what it does](docs/FIRST_RUN.md)), and send a message. Treat the link like a password: it signs you in as admin.
 6. **Close public SSH** with the button on the form page once HQ opens. When you are done with the
    server, the same page deletes it together with its firewall and key.
 
@@ -146,6 +146,9 @@ web app from your Windows browser. Setup, including running coding agents on a W
 elsewhere, is in [docs/WINDOWS.md](docs/WINDOWS.md).
 
 ### First Run
+
+On a server you only reach through the browser, the web app asks for your first model key itself:
+see [docs/FIRST_RUN.md](docs/FIRST_RUN.md). From a terminal:
 
 ```bash
 hq install             # scaffold vault, seed soul, write config (~/.hq/config.yaml)

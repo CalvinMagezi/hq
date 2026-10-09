@@ -413,6 +413,12 @@ endpoints do not recognise are logged and answered generically, never with ssh o
   session that is not running can be archived. All of these need `X-HQ-Client`.
 - `GET /api/harness-sessions?task_id=&status=&host=&include_archived=` is `harness_session_list` plus the task
   and goal. `GET /api/harness-sessions/{id}` is one row, live.
+- `GET /api/harness-sessions/{id}/screen/stream?lines=N` is the same screen as server-sent events: a
+  `screen` event on connect and again only when it changes, an `end` event (`stopped`, `time` or
+  `unavailable`) when the session is not running any more or after 15 minutes, and a keepalive
+  comment every 15 seconds. At most 8 views are open at once (503 beyond that); the page falls back
+  to polling. `screen?styled=true` adds color as ANSI escape sequences when the host can give them
+  (`styled` in the reply says whether it did; a stored snapshot is always plain).
 - `GET /api/harness-sessions/{id}/screen?lines=N` (default 80, at most 500) reads the pane
   while the agent runs and returns the last stored snapshot after it ends (`source`). A live
   read is one host call (one ssh round trip on a remote host). Concurrent reads of one
