@@ -16,8 +16,10 @@ use tokio_stream::Stream;
 
 use crate::anthropic::AnthropicProvider;
 use crate::copilot::CopilotProvider;
+use crate::cost::ProviderClass;
 use crate::openai_compat::OpenRouterProvider;
 use crate::provider::{ChatRequest, ChatResponse, LlmError, LlmProvider, StreamChunk};
+use crate::served::note_served;
 
 /// API keys from `HqConfig`, used when an entry's `credential_env` is unset.
 #[derive(Debug, Clone, Default)]
@@ -130,6 +132,7 @@ pub fn api_provider(
 
 struct Link {
     name: String,
+    class: ProviderClass,
     provider: Arc<dyn LlmProvider>,
     /// `None` passes the caller's model through.
     model: Option<String>,
@@ -150,6 +153,15 @@ fn should_fail_over(err: &anyhow::Error) -> bool {
     }
 }
 
+fn backend_class(entry: &BackendEntry) -> ProviderClass {
+    match entry.kind {
+        BackendKind::GithubCopilotApi | BackendKind::GithubCopilotCli | BackendKind::KimiCode => {
+            ProviderClass::Flat
+        }
+        _ => ProviderClass::of_endpoint(entry.resolved_endpoint().as_deref()),
+    }
+}
+
 impl ChainProvider {
     /// The chain from `backends:`, primary first. `None` when no backend is
     /// usable. Entries without a model are skipped: an alias like "fast" is
@@ -167,6 +179,7 @@ impl ChainProvider {
             };
             match api_provider(entry, &creds) {
                 Ok(Some(provider)) => links.push(Link {
+                    class: backend_class(entry),
                     name,
                     provider,
                     model: Some(model),
@@ -183,6 +196,7 @@ impl ChainProvider {
         let links = providers
             .into_iter()
             .map(|(name, provider)| Link {
+                class: ProviderClass::of_name(&name),
                 name,
                 provider,
                 model: None,
@@ -192,12 +206,13 @@ impl ChainProvider {
     }
 
     #[cfg(test)]
-    fn from_links(links: Vec<(&str, Arc<dyn LlmProvider>, &str)>) -> Self {
+    pub(crate) fn from_links(links: Vec<(&str, Arc<dyn LlmProvider>, &str)>) -> Self {
         Self {
             links: links
                 .into_iter()
                 .map(|(name, provider, model)| Link {
                     name: name.to_string(),
+                    class: ProviderClass::Metered,
                     provider,
                     model: Some(model.to_string()),
                 })
@@ -224,7 +239,10 @@ impl LlmProvider for ChainProvider {
                 ..request.clone()
             };
             match link.provider.chat(&request).await {
-                Ok(response) => return Ok(response),
+                Ok(response) => {
+                    note_served(&link.name, link.class);
+                    return Ok(response);
+                }
                 Err(e) if should_fail_over(&e) => {
                     tracing::warn!(backend = %link.name, error = %e, "backend chain: trying next backend");
                     last_err = Some(e);
@@ -246,7 +264,10 @@ impl LlmProvider for ChainProvider {
                 ..request.clone()
             };
             match link.provider.chat_stream(&request).await {
-                Ok(stream) => return Ok(stream),
+                Ok(stream) => {
+                    note_served(&link.name, link.class);
+                    return Ok(stream);
+                }
                 Err(e) if should_fail_over(&e) => {
                     tracing::warn!(backend = %link.name, error = %e, "backend chain: trying next backend");
                     last_err = Some(e);

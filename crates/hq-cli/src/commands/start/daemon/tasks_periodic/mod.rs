@@ -12,6 +12,7 @@ pub mod session_events;
 pub mod session_supervisor;
 pub mod subagent_supervisor;
 pub mod turn_reconcile;
+pub mod usage_ledger;
 
 pub use copilot_usage::run_copilot_usage;
 pub use disk_watchdog::run_disk_watchdog;
@@ -20,3 +21,4 @@ pub use embeddings::{run_embeddings, run_inbox_triage};
 pub use health::{run_heartbeat, run_memory_consolidation};
 pub use subagent_supervisor::run_subagent_supervisor;
 pub use turn_reconcile::run_turn_reconcile;
+pub use usage_ledger::run_usage_ledger;

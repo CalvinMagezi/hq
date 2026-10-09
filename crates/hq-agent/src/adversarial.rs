@@ -175,7 +175,8 @@ async fn run_critic(
         ..Default::default()
     };
 
-    let response = provider.chat(&request).await?;
+    let response =
+        hq_llm::with_default_origin(hq_llm::origin::BACKGROUND, provider.chat(&request)).await?;
     debug!(
         tokens = response.input_tokens + response.output_tokens,
         "critic response received"

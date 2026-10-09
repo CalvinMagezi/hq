@@ -10,9 +10,9 @@
 //! This turns raw inbound events into agent-reasoned, vault-recorded, gated
 //! notifications instead of raw forwards.
 
-use hq_core::mailbox;
 use crate::notif_gate::{GateDecision, gate_decision, parse_event_header};
 use chrono::Utc;
+use hq_core::mailbox;
 use hq_core::types::{ChatMessage, MailboxMessage, MailboxMessageType, MessageRole};
 use hq_llm::{LlmProvider, provider::ChatRequest, router::LlmRouter};
 use std::path::{Path, PathBuf};
@@ -149,7 +149,7 @@ async fn complete(router: &LlmRouter, model: &str, prompt: String) -> Option<Str
     };
     match tokio::time::timeout(
         std::time::Duration::from_secs(REASON_TIMEOUT_SECS),
-        router.chat(&request),
+        hq_llm::with_origin(hq_llm::origin::BACKGROUND, router.chat(&request)),
     )
     .await
     {

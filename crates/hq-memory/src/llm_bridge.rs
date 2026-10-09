@@ -62,7 +62,8 @@ impl MemoryLlm {
             temperature: Some(0.3),
             max_tokens: Some(2048),
         };
-        let response = provider.chat(&request).await?;
+        let response =
+            hq_llm::with_default_origin(hq_llm::origin::MEMORY, provider.chat(&request)).await?;
         parse_llm_json::<T>(response.message.content.trim())
             .map_err(|e| anyhow::anyhow!("provider JSON parse failed: {e}"))
     }
@@ -93,7 +94,9 @@ impl MemoryLlm {
             temperature: Some(0.3),
             max_tokens: Some(2048),
         };
-        let resp = self.provider.chat(&request).await?;
+        let resp =
+            hq_llm::with_default_origin(hq_llm::origin::MEMORY, self.provider.chat(&request))
+                .await?;
         Ok(resp.message.content.trim().to_string())
     }
 }

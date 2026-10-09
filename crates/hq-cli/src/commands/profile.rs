@@ -26,6 +26,10 @@ pub enum ProfileSubcommand {
 }
 
 pub async fn run(config: &HqConfig, args: &ProfileArgs) -> Result<()> {
+    hq_llm::with_origin(hq_llm::origin::CLI, run_scoped(config, args)).await
+}
+
+async fn run_scoped(config: &HqConfig, args: &ProfileArgs) -> Result<()> {
     match &args.sub {
         ProfileSubcommand::Generate { domain, samples } => generate(config, domain, *samples).await,
     }

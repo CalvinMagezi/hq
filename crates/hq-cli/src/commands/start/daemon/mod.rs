@@ -320,6 +320,7 @@ fn default_tasks() -> Vec<DaemonTask> {
             Duration::from_secs(720),
         ),
         DaemonTask::with_default_timeout("disk-watchdog", Duration::from_secs(21600)),
+        DaemonTask::with_default_timeout("usage-ledger", Duration::from_secs(86400)),
         DaemonTask::with_default_timeout("vault-health", Duration::from_secs(21600)),
         DaemonTask::with_default_timeout("thread-log-rotation", Duration::from_secs(21600)),
         DaemonTask::with_default_timeout("memory-forgetting", Duration::from_secs(86400)),
@@ -456,6 +457,7 @@ async fn dispatch_task(
         }
         "disk-watchdog" => tasks_periodic::run_disk_watchdog(vault_path, config).await,
         "copilot-usage" => tasks_periodic::run_copilot_usage(db, config).await,
+        "usage-ledger" => tasks_periodic::run_usage_ledger(db, config).await,
 
 
         // Slow cycle (6h — daily)

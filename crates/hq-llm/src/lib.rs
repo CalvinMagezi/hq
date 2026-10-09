@@ -4,9 +4,10 @@ pub mod anthropic;
 pub mod backend_chain;
 pub mod cerebras;
 pub mod copilot;
-pub mod copilot_catalog;
 pub mod copilot_burn;
+pub mod copilot_catalog;
 pub mod copilot_usage;
+pub mod cost;
 pub mod decision;
 pub mod decision_report;
 pub mod http;
@@ -21,8 +22,10 @@ pub mod openrouter {
     pub use crate::openai_compat::*;
 }
 pub mod provider;
+pub mod reconcile;
 pub mod responses;
 pub mod router;
+pub mod served;
 #[cfg(feature = "turboquant")]
 pub mod turboquant;
 
@@ -32,7 +35,8 @@ pub use copilot::CopilotProvider;
 pub use ollama::OllamaProvider;
 pub use openai_compat::OpenRouterProvider;
 pub use outcome_sink::{
-    OutcomeEvent, SESSION_CONTEXT, SessionContext, SharedSink, TaskOutcomeSink,
+    OutcomeEvent, SESSION_CONTEXT, SessionContext, SharedSink, TaskOutcomeSink, origin,
+    unscoped_calls, with_default_origin, with_origin,
 };
 pub use provider::{ChatRequest, ChatResponse, LlmError, LlmProvider, StreamChunk};
 pub use router::{CostTier, LlmRouter, TaskHint};
