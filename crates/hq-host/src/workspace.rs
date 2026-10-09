@@ -56,26 +56,59 @@ pub fn ensure_workspace() -> std::io::Result<PathBuf> {
     ensure_at(&root)
 }
 
-/// Running inside WSL2, where the user reaches Linux files from Windows through `\\wsl$`.
+/// The kernel release of a WSL2 machine names Microsoft; a service started by systemd there may not
+/// carry `WSL_DISTRO_NAME`, so the kernel is the reliable sign.
+const WSL_KERNEL_MARK: &str = "microsoft";
+const KERNEL_RELEASE_FILE: &str = "/proc/sys/kernel/osrelease";
+
 fn wsl_distro() -> Option<String> {
     std::env::var("WSL_DISTRO_NAME").ok().filter(|d| !d.is_empty())
+}
+
+fn running_on_wsl_kernel() -> bool {
+    fs::read_to_string(KERNEL_RELEASE_FILE).is_ok_and(|k| k.to_lowercase().contains(WSL_KERNEL_MARK))
+}
+
+/// `wslpath -w` is what WSL itself uses to turn a Linux path into the Windows one.
+fn windows_path_from_wslpath(root: &Path) -> Option<String> {
+    let out = std::process::Command::new("wslpath").arg("-w").arg(root).output().ok()?;
+    let path = String::from_utf8_lossy(&out.stdout).trim().to_string();
+    (out.status.success() && !path.is_empty()).then_some(path)
+}
+
+fn explorer_from_distro(root: &Path, distro: &str) -> String {
+    format!("\\\\wsl$\\{distro}{}", root.to_string_lossy().replace('/', "\\"))
+}
+
+/// How a Windows user opens `root` in Explorer, when this is WSL2: from the distro name when the
+/// environment has it, else asked of `wslpath`. None on any other system.
+fn wsl_explorer_path(root: &Path) -> Option<String> {
+    pick_explorer(root, wsl_distro(), running_on_wsl_kernel(), windows_path_from_wslpath)
+}
+
+fn pick_explorer(
+    root: &Path,
+    distro: Option<String>,
+    wsl_kernel: bool,
+    wslpath: impl FnOnce(&Path) -> Option<String>,
+) -> Option<String> {
+    if let Some(distro) = distro {
+        return Some(explorer_from_distro(root, &distro));
+    }
+    if wsl_kernel { wslpath(root) } else { None }
 }
 
 /// What the web needs to offer the folder: where it is, which OS, and how a
 /// Windows user would open it in Explorer.
 pub fn describe(root: &Path) -> Value {
-    describe_for(root, wsl_distro())
+    describe_with(root, wsl_explorer_path(root), wsl_distro().is_some() || running_on_wsl_kernel())
 }
 
-fn describe_for(root: &Path, distro: Option<String>) -> Value {
-    let explorer = distro.map(|distro| {
-        let tail = root.to_string_lossy().replace('/', "\\");
-        format!("\\\\wsl$\\{distro}{tail}")
-    });
+fn describe_with(root: &Path, explorer: Option<String>, wsl: bool) -> Value {
     json!({
         "root": root.to_string_lossy(),
         "os": std::env::consts::OS,
-        "wsl": explorer.is_some(),
+        "wsl": wsl,
         "explorer_path": explorer,
     })
 }
@@ -229,14 +262,23 @@ mod tests {
     }
 
     #[test]
-    fn on_wsl_the_explorer_path_points_into_the_distro_and_elsewhere_there_is_none() {
+    fn the_explorer_path_comes_from_the_distro_name_else_from_wslpath_else_nothing() {
         let root = Path::new("/home/user/Documents/HQ");
-        let wsl = describe_for(root, Some("Ubuntu".into()));
-        assert_eq!(wsl["wsl"], true);
-        assert_eq!(wsl["explorer_path"], "\\\\wsl$\\Ubuntu\\home\\user\\Documents\\HQ");
-        let plain = describe_for(root, None);
-        assert_eq!(plain["wsl"], false);
-        assert!(plain["explorer_path"].is_null());
+        let from_distro = pick_explorer(root, Some("Ubuntu".into()), false, |_| panic!("not asked"));
+        assert_eq!(from_distro.as_deref(), Some("\\\\wsl$\\Ubuntu\\home\\user\\Documents\\HQ"));
+        let asked = pick_explorer(root, None, true, |p| Some(format!("W:{}", p.display())));
+        assert_eq!(asked.as_deref(), Some("W:/home/user/Documents/HQ"));
+        assert_eq!(pick_explorer(root, None, true, |_| None), None, "wslpath missing or failing");
+        assert_eq!(pick_explorer(root, None, false, |_| panic!("not asked")), None, "not WSL");
+    }
+
+    #[test]
+    fn describe_reports_wsl_only_with_a_path_to_show() {
+        let root = Path::new("/home/user/Documents/HQ");
+        let on = describe_with(root, Some("\\\\wsl$\\U".into()), true);
+        assert_eq!((on["wsl"].as_bool(), on["explorer_path"].is_string()), (Some(true), true));
+        let off = describe_with(root, None, false);
+        assert_eq!((off["wsl"].as_bool(), off["explorer_path"].is_null()), (Some(false), true));
     }
 
     #[test]
