@@ -38,7 +38,9 @@ mod stream;
 mod wire;
 
 pub(crate) use stream::{AnthropicStreamState, drain_sse};
-pub(crate) use wire::{build_messages_body, classify_anthropic_error, parse_messages_response, parse_usage};
+pub(crate) use wire::{
+    build_messages_body, classify_anthropic_error, parse_messages_response, parse_usage,
+};
 
 /// Canonical base URL for the public Anthropic Messages API.
 pub const ANTHROPIC_BASE_URL: &str = "https://api.anthropic.com/v1";
@@ -137,6 +139,8 @@ impl LlmProvider for AnthropicProvider {
             output_tokens,
             cache_read_tokens,
             cache_write_tokens,
+            reasoning_tokens: 0,
+            provider_cost_usd: None,
             model,
         })
     }

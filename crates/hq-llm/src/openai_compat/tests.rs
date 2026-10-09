@@ -248,6 +248,7 @@ fn kind(chunk: &Result<StreamChunk>) -> &'static str {
         Ok(StreamChunk::ToolCallDelta { .. }) => "tool",
         Ok(StreamChunk::ModelInfo(_)) => "model",
         Ok(StreamChunk::Usage { .. }) => "usage",
+        Ok(StreamChunk::Billing { .. }) => "billing",
         Ok(StreamChunk::Done) => "done",
         Err(_) => "error",
     }
@@ -573,4 +574,213 @@ async fn live_vision_request_against_real_deepseek() {
         Ok(resp) => eprintln!("SUCCESS: {}", resp.message.content),
         Err(e) => eprintln!("ERROR: {e:#}"),
     }
+}
+
+// ─── Provider-billed cost on streams ────────────────────────────────
+
+const BILLED_USD: f64 = 0.00123;
+const REASONING_TOKENS: u32 = 7;
+
+fn sse(payloads: &[serde_json::Value]) -> String {
+    let mut body: String = payloads.iter().map(|p| format!("data: {p}\n\n")).collect();
+    body.push_str("data: [DONE]\n\n");
+    body
+}
+
+fn billed_stream_body() -> String {
+    let chunk = |choices: serde_json::Value, extra: serde_json::Value| {
+        let mut v = serde_json::json!({
+            "id": "x", "created": 0, "model": "anthropic/claude-haiku-5.5",
+            "object": "chat.completion.chunk", "choices": choices,
+        });
+        if let (Some(o), Some(e)) = (v.as_object_mut(), extra.as_object()) {
+            o.extend(e.clone());
+        }
+        v
+    };
+    sse(&[
+        chunk(
+            serde_json::json!([{"index": 0, "delta": {"content": "hi"}, "finish_reason": null}]),
+            serde_json::json!({}),
+        ),
+        chunk(
+            serde_json::json!([{"index": 0, "delta": {}, "finish_reason": "stop"}]),
+            serde_json::json!({}),
+        ),
+        chunk(
+            serde_json::json!([]),
+            serde_json::json!({"usage": {
+                "prompt_tokens": 100, "completion_tokens": 20, "total_tokens": 120,
+                "cost": BILLED_USD,
+                "completion_tokens_details": {"reasoning_tokens": REASONING_TOKENS}
+            }}),
+        ),
+    ])
+}
+
+/// OpenRouter reports what it charged in the final chunk's `usage.cost`; the typed client drops
+/// it, so the raw stream hands it over as a `Billing` chunk right after `Usage`.
+#[tokio::test]
+async fn an_openrouter_stream_surfaces_the_billed_cost_and_reasoning_tokens() {
+    use wiremock::matchers::{method, path};
+    use wiremock::{Mock, MockServer, ResponseTemplate};
+
+    let server = MockServer::start().await;
+    Mock::given(method("POST"))
+        .and(path("/proxy/openrouter.ai/api/v1/chat/completions"))
+        .respond_with(
+            ResponseTemplate::new(200)
+                .insert_header("content-type", "text/event-stream")
+                .set_body_string(billed_stream_body()),
+        )
+        .mount(&server)
+        .await;
+    let base = format!("{}/proxy/openrouter.ai/api/v1", server.uri());
+    let provider = OpenRouterProvider::new_with_base("k", &base);
+    let request = ChatRequest {
+        model: "anthropic/claude-haiku-5.5".into(),
+        messages: vec![ChatMessage {
+            image_parts: Vec::new(),
+            role: hq_core::types::MessageRole::User,
+            content: "hi".into(),
+            tool_calls: vec![],
+            tool_call_id: None,
+            reasoning_content: None,
+        }],
+        ..Default::default()
+    };
+
+    let chunks: Vec<Result<StreamChunk>> = provider
+        .chat_stream(&request)
+        .await
+        .unwrap()
+        .collect()
+        .await;
+    let kinds: Vec<&str> = chunks.iter().map(kind).collect();
+    assert_eq!(kinds, vec!["text", "model", "usage", "billing", "done"]);
+    let billing = chunks.iter().find_map(|c| match c {
+        Ok(StreamChunk::Billing {
+            cost_usd,
+            reasoning_tokens,
+        }) => Some((*cost_usd, *reasoning_tokens)),
+        _ => None,
+    });
+    assert_eq!(billing, Some((Some(BILLED_USD), REASONING_TOKENS)));
+}
+
+/// A stream with no cost and no reasoning tokens sends no `Billing` chunk at all.
+#[tokio::test]
+async fn a_plain_usage_chunk_adds_no_billing_chunk() {
+    use async_openai::error::OpenAIError;
+
+    let usage = response(serde_json::json!({
+        "id": "x", "created": 0, "model": "gpt-x", "object": "chat.completion.chunk",
+        "choices": [{"index": 0, "delta": {}, "finish_reason": "stop"}],
+        "usage": {"prompt_tokens": 10, "completion_tokens": 5, "total_tokens": 15}
+    }));
+    let inner = tokio_stream::iter(vec![Ok::<_, OpenAIError>(usage)]);
+    let chunks: Vec<Result<StreamChunk>> =
+        finalize_openai_stream(inner, String::new()).collect().await;
+    assert!(
+        chunks
+            .iter()
+            .all(|c| !matches!(c, Ok(StreamChunk::Billing { .. })))
+    );
+}
+
+#[tokio::test]
+async fn a_buffered_response_carries_the_billed_cost_and_reasoning_tokens() {
+    use wiremock::matchers::{method, path};
+    use wiremock::{Mock, MockServer, ResponseTemplate};
+
+    let server = MockServer::start().await;
+    Mock::given(method("POST"))
+        .and(path("/proxy/openrouter.ai/api/v1/chat/completions"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "id": "x", "model": "anthropic/claude-haiku-5.5",
+            "choices": [{"index": 0, "message": {"role": "assistant", "content": "pong"}}],
+            "usage": {
+                "prompt_tokens": 100, "completion_tokens": 20, "cost": BILLED_USD,
+                "completion_tokens_details": {"reasoning_tokens": REASONING_TOKENS}
+            }
+        })))
+        .mount(&server)
+        .await;
+    let provider =
+        OpenRouterProvider::new_with_base("k", &format!("{}/proxy/openrouter.ai/api/v1", server.uri()));
+    let request = ChatRequest {
+        model: "anthropic/claude-haiku-5.5".into(),
+        ..Default::default()
+    };
+
+    let resp = provider.chat(&request).await.unwrap();
+
+    assert_eq!(resp.provider_cost_usd, Some(BILLED_USD));
+    assert_eq!(resp.reasoning_tokens, REASONING_TOKENS);
+}
+
+/// A transient failure to open the stream is retried once, as the typed client's first-item error
+/// used to be.
+#[tokio::test]
+async fn an_openrouter_stream_that_fails_to_open_is_retried_once() {
+    use wiremock::matchers::{method, path};
+    use wiremock::{Mock, MockServer, ResponseTemplate};
+
+    let server = MockServer::start().await;
+    let route = "/proxy/openrouter.ai/api/v1/chat/completions";
+    Mock::given(method("POST"))
+        .and(path(route))
+        .respond_with(ResponseTemplate::new(503))
+        .up_to_n_times(1)
+        .mount(&server)
+        .await;
+    Mock::given(method("POST"))
+        .and(path(route))
+        .respond_with(
+            ResponseTemplate::new(200)
+                .insert_header("content-type", "text/event-stream")
+                .set_body_string(billed_stream_body()),
+        )
+        .mount(&server)
+        .await;
+    let base = format!("{}/proxy/openrouter.ai/api/v1", server.uri());
+    let provider = OpenRouterProvider::new_with_base("k", &base);
+    let request = ChatRequest {
+        model: "anthropic/claude-haiku-5.5".into(),
+        ..Default::default()
+    };
+
+    let chunks: Vec<Result<StreamChunk>> = provider
+        .chat_stream(&request)
+        .await
+        .unwrap()
+        .collect()
+        .await;
+
+    assert!(chunks.iter().any(|c| matches!(c, Ok(StreamChunk::Done))));
+}
+
+/// Another provider's `usage.cost` may not be dollars, so only OpenRouter's is trusted.
+#[tokio::test]
+async fn a_non_openrouter_cost_field_is_ignored() {
+    use wiremock::matchers::{method, path};
+    use wiremock::{Mock, MockServer, ResponseTemplate};
+
+    let server = MockServer::start().await;
+    Mock::given(method("POST"))
+        .and(path("/chat/completions"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "id": "x", "model": "m",
+            "choices": [{"index": 0, "message": {"role": "assistant", "content": "pong"}}],
+            "usage": {"prompt_tokens": 1, "completion_tokens": 1, "cost": 99}
+        })))
+        .mount(&server)
+        .await;
+    let provider = OpenRouterProvider::new_with_base("k", &server.uri());
+    let request = ChatRequest {
+        model: "m".into(),
+        ..Default::default()
+    };
+
+    assert_eq!(provider.chat(&request).await.unwrap().provider_cost_usd, None);
 }

@@ -95,6 +95,12 @@ pub(super) fn response_to_stream(
         cache_read_tokens: resp.cache_read_tokens,
         cache_write_tokens: resp.cache_write_tokens,
     }));
+    if resp.provider_cost_usd.is_some() || resp.reasoning_tokens > 0 {
+        chunks.push(Ok(StreamChunk::Billing {
+            cost_usd: resp.provider_cost_usd,
+            reasoning_tokens: resp.reasoning_tokens,
+        }));
+    }
 
     chunks.push(Ok(StreamChunk::Done));
 
@@ -585,7 +591,8 @@ fn usage_of(resp: &ChatResponse) -> Usage {
         output: resp.output_tokens,
         cache_read: resp.cache_read_tokens,
         cache_write: resp.cache_write_tokens,
-        reasoning: 0,
+        reasoning: resp.reasoning_tokens,
+        billed_usd: resp.provider_cost_usd,
     }
 }
 
@@ -621,6 +628,7 @@ pub(super) fn emit_outcome(sink: &SharedSink, ctx: SessionContext, call: Outcome
         cache_write_tokens: u.cache_write as i64,
         reasoning_tokens: u.reasoning as i64,
         cost_usd: priced.usd,
+        provider_cost_usd: u.billed_usd,
         cost_source: priced.source.as_str(),
         origin: ctx.origin,
         success: call.error.is_none(),

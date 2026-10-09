@@ -40,10 +40,20 @@ impl ProviderClass {
 
     /// Classify a configured backend by its endpoint: a loopback host is local.
     pub fn of_endpoint(endpoint: Option<&str>) -> Self {
-        let rest = endpoint.and_then(|e| e.split("://").nth(1)).unwrap_or_default();
+        let rest = endpoint
+            .and_then(|e| e.split("://").nth(1))
+            .unwrap_or_default();
         let host = match rest.strip_prefix('[') {
-            Some(v6) => v6.split(']').next().map(|h| format!("[{h}]")).unwrap_or_default(),
-            None => rest.split(['/', ':']).next().unwrap_or_default().to_string(),
+            Some(v6) => v6
+                .split(']')
+                .next()
+                .map(|h| format!("[{h}]"))
+                .unwrap_or_default(),
+            None => rest
+                .split(['/', ':'])
+                .next()
+                .unwrap_or_default()
+                .to_string(),
         };
         let host = host.as_str();
         if LOCAL_HOSTS.contains(&host) {
@@ -55,13 +65,16 @@ impl ProviderClass {
 }
 
 /// Token counts of one completed call. `input` includes cached prompt tokens.
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, Default, PartialEq)]
 pub struct Usage {
     pub input: u32,
     pub output: u32,
     pub cache_read: u32,
     pub cache_write: u32,
+    /// Reasoning tokens, already counted inside `output`.
     pub reasoning: u32,
+    /// What the provider says it billed for the call, when it says.
+    pub billed_usd: Option<f64>,
 }
 
 /// Where a recorded cost came from. Stored as text in `task_outcomes.cost_source`.
@@ -100,14 +113,9 @@ pub struct PricedCall {
     pub source: CostSource,
 }
 
-/// Price one call. `provider_cost` is the provider-billed figure when the response carried one.
-pub fn price_call(
-    class: ProviderClass,
-    model: &str,
-    usage: &Usage,
-    provider_cost: Option<f64>,
-) -> PricedCall {
-    if let Some(usd) = provider_cost {
+/// Price one call. A provider-billed figure in `usage` wins over the price table.
+pub fn price_call(class: ProviderClass, model: &str, usage: &Usage) -> PricedCall {
+    if let Some(usd) = usage.billed_usd {
         return PricedCall {
             usd,
             source: CostSource::Provider,
@@ -155,7 +163,7 @@ pub fn price_outcome(
     failed: bool,
 ) -> PricedCall {
     if let Some(u) = usage {
-        return price_call(class, model, u, None);
+        return price_call(class, model, u);
     }
     let source = match class {
         ProviderClass::Local => CostSource::Free,
@@ -183,17 +191,11 @@ mod tests {
 
     #[test]
     fn cache_reads_are_billed_cheaper_than_fresh_input() {
-        let cold = price_call(
-            ProviderClass::Metered,
-            KNOWN,
-            &usage(100_000, 1_000, 0),
-            None,
-        );
+        let cold = price_call(ProviderClass::Metered, KNOWN, &usage(100_000, 1_000, 0));
         let warm = price_call(
             ProviderClass::Metered,
             KNOWN,
             &usage(100_000, 1_000, 90_000),
-            None,
         );
         assert_eq!(cold.source, CostSource::Table);
         assert!(warm.usd < cold.usd);
@@ -205,7 +207,6 @@ mod tests {
             ProviderClass::Metered,
             "nobody/never-heard-of-it",
             &usage(10, 10, 0),
-            None,
         );
         assert_eq!(p.source, CostSource::Unpriced);
     }
@@ -214,11 +215,11 @@ mod tests {
     fn local_and_subscription_providers_are_labelled_not_unpriced() {
         let u = usage(10, 10, 0);
         assert_eq!(
-            price_call(ProviderClass::of_name("ollama"), "gemma4:e4b", &u, None).source,
+            price_call(ProviderClass::of_name("ollama"), "gemma4:e4b", &u).source,
             CostSource::Free
         );
         assert_eq!(
-            price_call(ProviderClass::of_name("copilot"), "gpt-5.4", &u, None).source,
+            price_call(ProviderClass::of_name("copilot"), "gpt-5.4", &u).source,
             CostSource::Flat
         );
     }
@@ -227,8 +228,8 @@ mod tests {
     fn a_subscription_run_still_counts_at_list_price_for_a_session_cap() {
         let u = usage(1_000_000, 0, 0);
         let flat = ProviderClass::Flat;
-        assert_eq!(price_call(flat, KNOWN, &u, None).usd, 0.0);
-        assert!(price_call(flat.for_session_budget(), KNOWN, &u, None).usd > 0.0);
+        assert_eq!(price_call(flat, KNOWN, &u).usd, 0.0);
+        assert!(price_call(flat.for_session_budget(), KNOWN, &u).usd > 0.0);
     }
 
     #[test]
@@ -242,7 +243,12 @@ mod tests {
 
     #[test]
     fn tokens_counted_before_a_failure_are_still_billed() {
-        let p = price_outcome(ProviderClass::Metered, KNOWN, Some(&usage(1000, 10, 0)), true);
+        let p = price_outcome(
+            ProviderClass::Metered,
+            KNOWN,
+            Some(&usage(1000, 10, 0)),
+            true,
+        );
         assert_eq!(p.source, CostSource::Table);
         assert!(p.usd > 0.0);
     }
@@ -266,7 +272,11 @@ mod tests {
 
     #[test]
     fn a_provider_billed_figure_wins_over_the_table() {
-        let p = price_call(ProviderClass::Metered, KNOWN, &usage(10, 10, 0), Some(0.5));
+        let billed = Usage {
+            billed_usd: Some(0.5),
+            ..usage(10, 10, 0)
+        };
+        let p = price_call(ProviderClass::Metered, KNOWN, &billed);
         assert_eq!((p.usd, p.source), (0.5, CostSource::Provider));
     }
 }

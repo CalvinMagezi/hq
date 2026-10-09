@@ -197,6 +197,8 @@ pub fn parse_response(json: &Value, fallback_model: &str) -> Result<ChatResponse
         output_tokens,
         cache_read_tokens,
         cache_write_tokens,
+        reasoning_tokens: 0,
+        provider_cost_usd: None,
         model: json["model"].as_str().unwrap_or(fallback_model).to_string(),
     })
 }

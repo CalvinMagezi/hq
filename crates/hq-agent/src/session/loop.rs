@@ -364,13 +364,13 @@ impl AgentSession {
             output: output_tokens,
             cache_read: out.cache_read_tokens,
             cache_write: out.cache_write_tokens,
-            reasoning: 0,
+            reasoning: out.reasoning_tokens,
+            billed_usd: out.provider_cost_usd,
         };
         self.total_cost += hq_llm::cost::price_call(
             hq_llm::cost::ProviderClass::of_name(&out.active_backend).for_session_budget(),
             &resolved_model,
             &usage,
-            None,
         )
         .usd;
         // Accounting is session-generated bookkeeping, not backend output.

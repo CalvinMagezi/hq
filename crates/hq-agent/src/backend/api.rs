@@ -138,6 +138,12 @@ impl SessionBackend for ApiBackend {
                 cache_read_tokens: response.cache_read_tokens,
                 cache_write_tokens: response.cache_write_tokens,
             }));
+            if response.provider_cost_usd.is_some() || response.reasoning_tokens > 0 {
+                events.push(Ok(BackendEvent::Billing {
+                    cost_usd: response.provider_cost_usd,
+                    reasoning_tokens: response.reasoning_tokens,
+                }));
+            }
             events.push(Ok(BackendEvent::ModelInfo(response.model)));
             events.push(Ok(BackendEvent::Done));
 
@@ -306,6 +312,8 @@ mod tests {
             output_tokens: 3,
             cache_read_tokens: 0,
             cache_write_tokens: 0,
+            reasoning_tokens: 0,
+            provider_cost_usd: None,
             model: "scripted-model".to_string(),
         }
     }

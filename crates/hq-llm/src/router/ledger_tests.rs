@@ -39,6 +39,43 @@ impl CaptureSink {
 
 struct Cached;
 
+/// Streams a billed cost the way an OpenRouter stream does.
+struct Billed;
+
+#[async_trait]
+impl LlmProvider for Billed {
+    fn name(&self) -> &str {
+        "openrouter"
+    }
+
+    async fn chat(&self, _request: &ChatRequest) -> anyhow::Result<ChatResponse> {
+        anyhow::bail!("unused")
+    }
+
+    async fn chat_stream(
+        &self,
+        _request: &ChatRequest,
+    ) -> anyhow::Result<Pin<Box<dyn Stream<Item = anyhow::Result<StreamChunk>> + Send>>> {
+        let chunks = vec![
+            Ok(StreamChunk::Text("hi".into())),
+            Ok(StreamChunk::Usage {
+                input_tokens: 1000,
+                output_tokens: 50,
+                cache_read_tokens: 0,
+                cache_write_tokens: 0,
+            }),
+            Ok(StreamChunk::Billing {
+                cost_usd: Some(BILLED_USD),
+                reasoning_tokens: 12,
+            }),
+            Ok(StreamChunk::Done),
+        ];
+        Ok(Box::pin(tokio_stream::iter(chunks)))
+    }
+}
+
+const BILLED_USD: f64 = 0.0777;
+
 fn assistant(content: &str) -> ChatMessage {
     ChatMessage {
         image_parts: Vec::new(),
@@ -63,6 +100,8 @@ impl LlmProvider for Cached {
             output_tokens: 50,
             cache_read_tokens: 900,
             cache_write_tokens: 0,
+            reasoning_tokens: 0,
+            provider_cost_usd: None,
             model: request.model.clone(),
         })
     }
@@ -137,13 +176,8 @@ async fn the_ledger_and_the_session_price_a_cached_call_identically() {
         cache_read: 900,
         ..Default::default()
     };
-    let session = crate::cost::price_call(
-        crate::cost::ProviderClass::Metered,
-        PRICED_MODEL,
-        &usage,
-        None,
-    )
-    .usd;
+    let session =
+        crate::cost::price_call(crate::cost::ProviderClass::Metered, PRICED_MODEL, &usage).usd;
     assert_eq!(sink.settled(1).await[0].cost_usd, session);
 }
 
@@ -257,7 +291,11 @@ async fn a_stream_cancelled_after_usage_arrived_is_still_billed() {
 
     let rows = sink.settled(1).await;
     assert_eq!(
-        (rows[0].success, rows[0].cost_source, rows[0].cache_read_tokens),
+        (
+            rows[0].success,
+            rows[0].cost_source,
+            rows[0].cache_read_tokens
+        ),
         (true, "table", 900)
     );
     assert!(rows[0].cost_usd > 0.0);
@@ -295,4 +333,46 @@ async fn a_local_stream_with_no_usage_is_free_not_unpriced() {
     while stream.next().await.is_some() {}
 
     assert_eq!(sink.settled(1).await[0].cost_source, "free");
+}
+
+#[tokio::test]
+async fn a_provider_billed_figure_is_recorded_and_beats_the_table() {
+    let sink = Arc::new(CaptureSink::default());
+    let mut router = LlmRouter::new();
+    router.add_provider("openrouter", Arc::new(Billed));
+    router.set_outcome_sink(sink.clone());
+
+    let mut stream = router.chat_stream(&request(PRICED_MODEL)).await.unwrap();
+    while stream.next().await.is_some() {}
+
+    let rows = sink.settled(1).await;
+    assert_eq!(
+        (
+            rows[0].cost_source,
+            rows[0].cost_usd,
+            rows[0].provider_cost_usd,
+            rows[0].reasoning_tokens
+        ),
+        ("provider", BILLED_USD, Some(BILLED_USD), 12)
+    );
+}
+
+#[tokio::test]
+async fn a_buffered_fallback_keeps_the_billed_cost_for_the_caller() {
+    use super::strategy::response_to_stream;
+    let resp = ChatResponse {
+        message: assistant("hi"),
+        input_tokens: 10,
+        output_tokens: 5,
+        cache_read_tokens: 0,
+        cache_write_tokens: 0,
+        reasoning_tokens: 3,
+        provider_cost_usd: Some(BILLED_USD),
+        model: PRICED_MODEL.into(),
+    };
+    let chunks: Vec<_> = response_to_stream(resp).collect().await;
+    assert!(chunks.iter().any(|c| matches!(
+        c,
+        Ok(StreamChunk::Billing { cost_usd: Some(c), reasoning_tokens: 3 }) if *c == BILLED_USD
+    )));
 }

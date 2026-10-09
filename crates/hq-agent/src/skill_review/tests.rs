@@ -30,6 +30,8 @@ impl hq_llm::provider::LlmProvider for CannedProvider {
             output_tokens: 0,
             cache_read_tokens: 0,
             cache_write_tokens: 0,
+            reasoning_tokens: 0,
+            provider_cost_usd: None,
             model: "canned".to_string(),
         })
     }

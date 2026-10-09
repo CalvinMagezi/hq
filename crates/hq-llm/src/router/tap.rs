@@ -39,13 +39,22 @@ impl Pending {
                 cache_read_tokens,
                 cache_write_tokens,
             }) => {
+                let kept = self.usage.unwrap_or_default();
                 self.usage = Some(Usage {
                     input: *input_tokens,
                     output: *output_tokens,
                     cache_read: *cache_read_tokens,
                     cache_write: *cache_write_tokens,
-                    reasoning: 0,
+                    ..kept
                 });
+            }
+            Ok(StreamChunk::Billing {
+                cost_usd,
+                reasoning_tokens,
+            }) => {
+                let usage = self.usage.get_or_insert_with(Usage::default);
+                usage.billed_usd = *cost_usd;
+                usage.reasoning = *reasoning_tokens;
             }
             Ok(StreamChunk::ModelInfo(m)) if !m.is_empty() => {
                 self.resolved_model = Some(m.clone());
@@ -136,7 +145,11 @@ impl Stream for OutcomeTap {
                 if matches!(item, Ok(StreamChunk::Done) | Err(_))
                     && let Some(p) = self.pending.take()
                 {
-                    p.finish(if item.is_ok() { End::Done } else { End::Errored });
+                    p.finish(if item.is_ok() {
+                        End::Done
+                    } else {
+                        End::Errored
+                    });
                 }
             }
             Poll::Ready(None) => {

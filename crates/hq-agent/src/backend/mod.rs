@@ -215,6 +215,12 @@ pub enum BackendEvent {
         /// Prompt tokens written into the provider's cache this turn.
         cache_write_tokens: u32,
     },
+    /// What the provider says it billed for the turn and how many reasoning tokens it spent.
+    /// Sent after `Usage` by providers that report either.
+    Billing {
+        cost_usd: Option<f64>,
+        reasoning_tokens: u32,
+    },
     /// The concrete model identifier the backend actually used.
     ModelInfo(String),
     /// The identity of the backend that a [`ProviderChain`] committed to for this
@@ -243,6 +249,7 @@ impl BackendEvent {
             BackendEvent::ReasoningDelta(_) | BackendEvent::ToolCallDelta { .. } => true,
             BackendEvent::Progress(_)
             | BackendEvent::Usage { .. }
+            | BackendEvent::Billing { .. }
             | BackendEvent::ModelInfo(_)
             | BackendEvent::BackendSelected(_)
             | BackendEvent::Failover(_)
@@ -281,6 +288,13 @@ impl BackendEvent {
                 output_tokens,
                 cache_read_tokens,
                 cache_write_tokens,
+            },
+            StreamChunk::Billing {
+                cost_usd,
+                reasoning_tokens,
+            } => BackendEvent::Billing {
+                cost_usd,
+                reasoning_tokens,
             },
             StreamChunk::ModelInfo(m) => BackendEvent::ModelInfo(m),
             StreamChunk::Done => BackendEvent::Done,

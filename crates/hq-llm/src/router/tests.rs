@@ -69,6 +69,8 @@ impl LlmProvider for MockProvider {
             output_tokens: 20,
             cache_read_tokens: 0,
             cache_write_tokens: 0,
+            reasoning_tokens: 0,
+            provider_cost_usd: None,
             model: format!("{}-model", self.name),
         })
     }
@@ -1002,7 +1004,10 @@ fn test_daily_budget_resets_after_period() {
 #[test]
 fn a_single_candidate_is_never_scored() {
     let mut router = LlmRouter::new();
-    router.add_provider("backends", Arc::new(MockProvider::new("backends")) as Arc<dyn LlmProvider>);
+    router.add_provider(
+        "backends",
+        Arc::new(MockProvider::new("backends")) as Arc<dyn LlmProvider>,
+    );
     router.add_route("*", "backends", "", CostTier::Standard);
     for _ in 0..20 {
         let candidates = router.resolve_scored("anything", TaskHint::ToolUse);
@@ -1556,7 +1561,12 @@ fn configured_backends_take_every_alias() {
         ..Default::default()
     };
     let router = LlmRouter::from_backends(&config).expect("chain configured");
-    for alias in ["fast", "bulk", "verify", "meta-llama/llama-3.3-70b-instruct:free"] {
+    for alias in [
+        "fast",
+        "bulk",
+        "verify",
+        "meta-llama/llama-3.3-70b-instruct:free",
+    ] {
         let candidates = router.resolve_scored(alias, TaskHint::Bulk);
         assert_eq!(candidates.len(), 1, "{alias}");
         assert_eq!(candidates[0].provider_name, "backends");
@@ -1586,6 +1596,8 @@ impl LlmProvider for EchoModelProvider {
             output_tokens: 1,
             cache_read_tokens: 0,
             cache_write_tokens: 0,
+            reasoning_tokens: 0,
+            provider_cost_usd: None,
             model: request.model.clone(),
         })
     }
@@ -1629,7 +1641,12 @@ async fn streaming_with_no_providers_reports_that_none_is_configured() {
 async fn fallback_keeps_a_vendor_model_name_even_when_the_provider_has_an_alias_route() {
     let mut router = LlmRouter::new();
     router.add_provider("openrouter", Arc::new(EchoModelProvider));
-    router.add_route("relay", "openrouter", "some/alias-target", CostTier::Standard);
+    router.add_route(
+        "relay",
+        "openrouter",
+        "some/alias-target",
+        CostTier::Standard,
+    );
 
     let resp = router
         .chat(&make_request("anthropic/claude-sonnet-4"))
@@ -1656,7 +1673,9 @@ impl LlmProvider for FailsOnFirstChunk {
     ) -> anyhow::Result<Pin<Box<dyn tokio_stream::Stream<Item = anyhow::Result<StreamChunk>> + Send>>>
     {
         // Opens fine, then fails on the first chunk, as a 404 for an unknown model does.
-        Ok(Box::pin(tokio_stream::once(Err(anyhow::anyhow!("404 Not Found")))))
+        Ok(Box::pin(tokio_stream::once(Err(anyhow::anyhow!(
+            "404 Not Found"
+        )))))
     }
 }
 

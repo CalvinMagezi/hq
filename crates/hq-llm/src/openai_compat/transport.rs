@@ -7,12 +7,19 @@ use futures::StreamExt;
 use std::pin::Pin;
 use tokio_stream::Stream;
 
-use super::stream::{finalize_openai_stream, parse_stream_chunk, stream_with_truncation_retry};
+use super::stream::{
+    CostSidecar, finalize_openai_stream, finalize_openai_stream_with_cost, parse_stream_chunk,
+    stream_with_truncation_retry,
+};
 use super::wire::{build_request, classify_openai_error, parse_flexible_response};
 use super::{
     COPILOT_INTEGRATOR_FLAP_MAX_ATTEMPTS, COPILOT_INTEGRATOR_FLAP_RETRY_DELAY, OpenRouterProvider,
 };
 use crate::provider::{ChatRequest, ChatResponse, LlmError, LlmProvider, StreamChunk};
+
+/// The shared client's 300 s total timeout would cut a long reasoning stream mid-body, so a stream
+/// gets its own bound, the same as the chat turn timeout.
+const STREAM_TOTAL_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(6 * 60 * 60);
 
 fn with_referer(
     builder: reqwest::RequestBuilder,
@@ -171,6 +178,15 @@ impl LlmProvider for OpenRouterProvider {
             .and_then(|u| u.get("prompt_cache_miss_tokens"))
             .and_then(|t| t.as_u64())
             .unwrap_or(0) as u32;
+        let reasoning_tokens = usage
+            .and_then(|u| u.pointer("/completion_tokens_details/reasoning_tokens"))
+            .and_then(|t| t.as_u64())
+            .unwrap_or(0) as u32;
+        // OpenRouter reports what it charged on every response; other providers omit it.
+        let provider_cost_usd = self
+            .is_openrouter_endpoint()
+            .then(|| usage.and_then(|u| u.get("cost")).and_then(|c| c.as_f64()))
+            .flatten();
         if cache_read_tokens > 0 || cache_miss_tokens > 0 {
             tracing::debug!(
                 "[LLM] cache: {} hit / {} miss tokens",
@@ -185,6 +201,8 @@ impl LlmProvider for OpenRouterProvider {
             output_tokens,
             cache_read_tokens,
             cache_write_tokens: 0,
+            reasoning_tokens,
+            provider_cost_usd,
             model,
         })
     }
@@ -213,11 +231,33 @@ impl LlmProvider for OpenRouterProvider {
         if self.is_kimi_family() || self.is_copilot_endpoint() {
             let mut body = serde_json::to_value(&oai_request).context("serialize request")?;
             self.mutate_body_for_endpoint(&mut body, request);
-            let inner = self.raw_sse_stream(body).await?;
+            let inner = self.raw_sse_stream(body, None).await?;
             return Ok(Box::pin(finalize_openai_stream(
                 inner,
                 request.model.clone(),
             )));
+        }
+
+        // OpenRouter bills inline: the final chunk's `usage.cost` is what the call cost. The typed
+        // client drops it, so read the SSE ourselves and hand the cost over in a sidecar.
+        if self.is_openrouter_endpoint() {
+            let mut body = serde_json::to_value(&oai_request).context("serialize request")?;
+            self.mutate_body_for_endpoint(&mut body, request);
+            return stream_with_truncation_retry(|| {
+                let body = body.clone();
+                let model = request.model.clone();
+                async move {
+                    let sidecar = CostSidecar::default();
+                    let inner = self.raw_sse_stream(body, Some(sidecar.clone())).await?;
+                    Ok(Box::pin(finalize_openai_stream_with_cost(
+                        inner,
+                        model,
+                        Some(sidecar),
+                    ))
+                        as Pin<Box<dyn Stream<Item = Result<StreamChunk>> + Send>>)
+                }
+            })
+            .await;
         }
 
         // A terminal `Done` is emitted **only** after a real `finish_reason` is
@@ -350,6 +390,7 @@ impl OpenRouterProvider {
     async fn raw_sse_stream(
         &self,
         body: serde_json::Value,
+        sidecar: Option<CostSidecar>,
     ) -> Result<
         tokio_stream::wrappers::ReceiverStream<
             std::result::Result<
@@ -370,7 +411,8 @@ impl OpenRouterProvider {
                 .post(&url)
                 .header("Authorization", format!("Bearer {auth_token}"))
                 .header("Content-Type", "application/json")
-                .header("Accept", "text/event-stream");
+                .header("Accept", "text/event-stream")
+                .timeout(STREAM_TOTAL_TIMEOUT);
             let resp = self
                 .attach_copilot_headers(builder)
                 .json(&body)
@@ -445,6 +487,9 @@ impl OpenRouterProvider {
                             if payload == "[DONE]" {
                                 return;
                             }
+                            if let Some(cell) = sidecar.as_ref() {
+                                note_billed_cost(cell, payload);
+                            }
                             match parse_stream_chunk(payload) {
                                 Ok(chunk) => {
                                     if tx.send(Ok(chunk)).await.is_err() {
@@ -473,6 +518,19 @@ impl OpenRouterProvider {
             }
         });
         Ok(tokio_stream::wrappers::ReceiverStream::new(rx))
+    }
+}
+
+/// Remember the `usage.cost` a payload reports. Cheap check first: only the final chunk has it.
+fn note_billed_cost(cell: &CostSidecar, payload: &str) {
+    if !payload.contains("\"cost\"") {
+        return;
+    }
+    let cost = serde_json::from_str::<serde_json::Value>(payload)
+        .ok()
+        .and_then(|v| v.pointer("/usage/cost").and_then(|c| c.as_f64()));
+    if let (Some(cost), Ok(mut slot)) = (cost, cell.lock()) {
+        *slot = Some(cost);
     }
 }
 
