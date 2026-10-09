@@ -44,6 +44,14 @@ export interface TaskItem {
   completed_at: string | null
   /** Planned effort in minutes; null = no estimate. */
   estimate_minutes: number | null
+  /** Why a blocked task is stuck, and what it waits on. Both clear when it leaves blocked. */
+  blocked_reason: string | null
+  waiting_on: string | null
+  blocked_since: string | null
+  /** Work over many turns: a session finishing a turn or exiting does not move the task. */
+  long_horizon: boolean
+  /** UTC time it was archived; null for an active task. */
+  archived_at: string | null
   /** Set on sub-tasks; nesting is one level deep. */
   parent_task_id: string | null
   tags: string[]
@@ -74,6 +82,8 @@ interface ListTasksFilter {
   status?: TaskStatus
   tag?: string
   priority?: TaskPriority
+  /** List archived tasks instead of active ones. */
+  archived?: boolean
 }
 
 export const HTTP_CONFLICT = 409
@@ -115,6 +125,7 @@ export async function fetchTasksClient(
   if (filter?.status) qs.set('status', filter.status)
   if (filter?.tag) qs.set('tag', filter.tag)
   if (filter?.priority) qs.set('priority', filter.priority)
+  if (filter?.archived) qs.set('archived', 'true')
   qs.set('limit', String(TASK_PAGE_SIZE))
   return collectTaskPages(async (offset) => {
     qs.set('offset', String(offset))
@@ -181,6 +192,7 @@ interface CreateTaskInput {
   tags?: string[]
   created_by?: string
   estimate_minutes?: number
+  long_horizon?: boolean
 }
 
 export async function createTaskClient(input: CreateTaskInput): Promise<TaskItem> {
@@ -205,6 +217,9 @@ export interface UpdateTaskInput {
   remove_depends_on?: string[]
   tags?: string[]
   estimate_minutes?: number | null
+  blocked_reason?: string | null
+  waiting_on?: string | null
+  long_horizon?: boolean
   expected_status?: TaskStatus
 }
 
@@ -330,4 +345,37 @@ export async function fetchTaskLinksClient(taskId: string): Promise<{ links: Tas
 /** The tasks that link to a thing, for example every task started from a vault note. */
 export async function fetchTasksLinkedToClient(kind: LinkKind, ref: string): Promise<{ count: number; tasks: TaskItem[] }> {
   return readJson(await hqFetch(`/api/tasks/linked?kind=${encodeURIComponent(kind)}&ref=${encodeURIComponent(ref)}`))
+}
+
+/** Brings an archived task, and the sub-tasks archived with it, back. */
+export async function restoreTaskClient(id: string): Promise<TaskItem> {
+  return readJson(await hqFetch(`/api/tasks/${encodeURIComponent(id)}/restore`, { method: 'POST' }))
+}
+
+export interface StaleTaskItem {
+  task_id: string
+  display_id: string
+  title: string
+  idle_hours: number
+  last_activity_at: string
+}
+
+/** In-progress tasks nobody holds or has touched for the stale window. Reporting only. */
+export async function fetchStaleTasksClient(): Promise<{ stale_after_hours: number; tasks: StaleTaskItem[] }> {
+  return readJson(await hqFetch('/api/tasks/stale'))
+}
+
+/** What the last session on a task left for the next one. */
+export interface TaskCheckpointItem {
+  id: number
+  actor: string
+  summary: string
+  next_step: string
+  open_questions: string
+  files: string[]
+  created_at: string
+}
+
+export async function fetchTaskCheckpointClient(taskId: string): Promise<{ checkpoint: TaskCheckpointItem | null }> {
+  return readJson(await hqFetch(`/api/tasks/${encodeURIComponent(taskId)}/checkpoint`))
 }

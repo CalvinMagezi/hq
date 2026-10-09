@@ -338,7 +338,7 @@ pub fn record_on_task(
     let Some(task) = t::get_task(conn, task_ref)? else {
         return Ok(None);
     };
-    if task.status == t::STATUS_COMPLETE {
+    if task.status == t::STATUS_COMPLETE || task.archived_at.is_some() {
         return Ok(None);
     }
     let mut target = target_status(run, event);

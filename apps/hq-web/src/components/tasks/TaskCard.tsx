@@ -3,6 +3,7 @@ import type { TaskItem, TaskPriority, TaskStatus } from '~/lib/tasksApi'
 import { STATUS_LABELS, parseSqliteUtc } from '~/lib/tasksApi'
 import { relTime } from '~/lib/time'
 import { shortLabel } from './dates'
+import { useIsStale } from './staleContext'
 
 interface Props {
   task: TaskItem
@@ -46,7 +47,9 @@ function formatTime(iso: string) {
 export function TaskCard({ task, onSelect, parentLabel, compact = false }: Props) {
   const isDone = task.status === 'complete'
   const schedule = scheduleLabel(task)
-  const hasChips = task.tags.length > 0 || schedule || task.subtask_count > 0 || task.blocked_by.length > 0
+  const stale = useIsStale(task.id)
+  const hasChips =
+    task.tags.length > 0 || schedule || task.subtask_count > 0 || task.blocked_by.length > 0 || stale || task.long_horizon || Boolean(task.blocked_reason)
 
   return (
     <div
@@ -97,6 +100,22 @@ export function TaskCard({ task, onSelect, parentLabel, compact = false }: Props
 
       {hasChips && (
         <div className="flex items-center gap-2 flex-wrap mt-3 min-w-0">
+          {task.status === 'blocked' && task.blocked_reason && (
+            <span className={`${CHIP_CLASS} ${BLOCKED_CHIP_CLASS}`} title={task.waiting_on ? `Waiting on ${task.waiting_on}` : undefined}>
+              <span className="truncate">{task.blocked_reason}</span>
+            </span>
+          )}
+          {stale && (
+            <span className={`${CHIP_CLASS} bg-white/5 text-neutral-300 border-white/10 shrink-0`} title="In progress, but nobody holds it and nothing has changed for a while">
+              <Clock className="w-2.5 h-2.5 shrink-0" />
+              <span>stale</span>
+            </span>
+          )}
+          {task.long_horizon && (
+            <span className={`${CHIP_CLASS} bg-white/5 text-neutral-400 border-white/10 shrink-0`} title="Long running work: a session ending does not move it">
+              <span>long running</span>
+            </span>
+          )}
           {task.blocked_by.length > 0 && (
             <span className={`${CHIP_CLASS} ${BLOCKED_CHIP_CLASS}`} title={`Waiting on: ${task.blocked_by.join(', ')}`}>
               <Link2 className="w-2.5 h-2.5 shrink-0" />

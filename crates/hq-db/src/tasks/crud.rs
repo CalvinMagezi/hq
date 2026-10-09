@@ -21,8 +21,9 @@ pub fn create_task(
     let display_id = next_display_id(conn, initiative_id)?;
     conn.execute(
         "INSERT INTO tasks (id, initiative_id, display_id, title, description, priority, due_date, \
-         created_by, parent_task_id, start_date, external_id, external_space_id, estimate_minutes)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13)",
+         created_by, parent_task_id, start_date, external_id, external_space_id, estimate_minutes, \
+         long_horizon)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14)",
         params![
             id,
             initiative_id,
@@ -36,7 +37,8 @@ pub fn create_task(
             new.start_date,
             external.as_ref().map(|(_, ext)| ext),
             external.as_ref().map(|(space, _)| space),
-            new.estimate_minutes
+            new.estimate_minutes,
+            new.long_horizon as i64
         ],
     )?;
     set_tags(conn, id, new.tags)?;
@@ -130,7 +132,11 @@ type SqlParams = Vec<Box<dyn rusqlite::types::ToSql>>;
 /// page query and the count so the two can never disagree.
 fn filter_sql(filter: &TaskFilter) -> (String, SqlParams) {
     let mut sql = String::from("FROM tasks t JOIN initiatives i ON i.id = t.initiative_id");
-    let mut conditions: Vec<&'static str> = Vec::new();
+    let mut conditions: Vec<&'static str> = vec![if filter.archived {
+        "t.archived_at IS NOT NULL"
+    } else {
+        "t.archived_at IS NULL"
+    }];
     let mut vals: SqlParams = Vec::new();
 
     if let Some(tag) = &filter.tag {
@@ -215,6 +221,12 @@ pub(super) fn validate_patch(conn: &Connection, current: &Task, patch: &TaskPatc
     if let Some(Some(minutes)) = patch.estimate_minutes {
         validate_estimate(minutes)?;
     }
+    let sets_block_text = matches!(&patch.blocked_reason, Some(Some(t)) if !t.trim().is_empty())
+        || matches!(&patch.waiting_on, Some(Some(t)) if !t.trim().is_empty());
+    let ends_blocked = patch.status.as_deref().unwrap_or(&current.status) == STATUS_BLOCKED;
+    if sets_block_text && !ends_blocked {
+        anyhow::bail!("blocked_reason and waiting_on only apply to a blocked task");
+    }
     let start = match &patch.start_date {
         Some(v) => v.as_deref(),
         None => current.start_date.as_deref(),
@@ -286,6 +298,9 @@ fn apply_update(
     ctx: &WriteCtx,
 ) -> Result<Task> {
     let current = get_task(conn, id)?.ok_or_else(|| anyhow::anyhow!("task {id} not found"))?;
+    if current.archived_at.is_some() {
+        anyhow::bail!("{} is archived; restore it before changing it", current.display_id);
+    }
     validate_patch(conn, &current, patch)?;
 
     // 'static: only literals can become part of the statement text.
@@ -320,6 +335,18 @@ fn apply_update(
         sets.push("estimate_minutes = ?");
         vals.push(Box::new(*minutes));
     }
+    if let Some(reason) = &patch.blocked_reason {
+        sets.push("blocked_reason = ?");
+        vals.push(Box::new(reason.as_deref().map(|r| clean_block_text("blocked_reason", r)).transpose()?.flatten()));
+    }
+    if let Some(waiting) = &patch.waiting_on {
+        sets.push("waiting_on = ?");
+        vals.push(Box::new(waiting.as_deref().map(|w| clean_block_text("waiting_on", w)).transpose()?.flatten()));
+    }
+    if let Some(long) = patch.long_horizon {
+        sets.push("long_horizon = ?");
+        vals.push(Box::new(long as i64));
+    }
     if let Some(parent) = &patch.parent_task_id {
         sets.push("parent_task_id = (SELECT id FROM tasks WHERE id = ? OR display_id = ?)");
         vals.push(Box::new(parent.clone()));
@@ -350,43 +377,26 @@ fn apply_update(
     }
     if let Some(status) = patch.status.as_deref().filter(|s| *s != current.status) {
         record_transition(conn, &current.id, &current.status, status, ctx)?;
+        track_blocked(conn, &current.id, &current.status, status, patch)?;
     }
 
     get_task(conn, &current.id)?.ok_or_else(|| anyhow::anyhow!("task {id} vanished after update"))
 }
 
-/// `PRAGMA foreign_keys=ON` (see `pool.rs`) means child rows must go first —
-/// SQLite rejects the parent delete otherwise instead of silently orphaning.
-/// A task with sub-tasks is only deleted when `cascade` is set, taking its
-/// sub-tasks with it. Returns the internal ids of every deleted task.
-pub fn delete_task(conn: &Connection, id: &str, cascade: bool) -> Result<Vec<String>> {
-    in_write_tx(conn, |conn| {
-        let task = get_task(conn, id)?.ok_or_else(|| anyhow::anyhow!("task {id} not found"))?;
-        let children = subtask_ids(conn, &task.id)?;
-        if !children.is_empty() && !cascade {
-            anyhow::bail!(
-                "{} has {} sub-task(s); delete them first or pass cascade",
-                task.display_id,
-                children.len()
-            );
+/// Keeps the blocked bookkeeping in step with the status: `blocked_since` stamps the move
+/// in, and the reason and the waiting-on clear when the task leaves blocked, unless this
+/// same write sets them.
+fn track_blocked(conn: &Connection, id: &str, from: &str, to: &str, patch: &TaskPatch) -> Result<()> {
+    if to == STATUS_BLOCKED {
+        conn.execute("UPDATE tasks SET blocked_since = datetime('now') WHERE id = ?1", params![id])?;
+    } else if from == STATUS_BLOCKED {
+        conn.execute("UPDATE tasks SET blocked_since = NULL WHERE id = ?1", params![id])?;
+        if patch.blocked_reason.is_none() {
+            conn.execute("UPDATE tasks SET blocked_reason = NULL WHERE id = ?1", params![id])?;
         }
-
-        let mut deleted = children;
-        deleted.push(task.id);
-        for task_id in &deleted {
-            for table in ["task_comments", "task_tags", "task_events", "task_work_sessions"] {
-                conn.execute(&format!("DELETE FROM {table} WHERE task_id = ?1"), params![task_id])?;
-            }
-            conn.execute(
-                "DELETE FROM task_dependencies WHERE task_id = ?1 OR depends_on_task_id = ?1",
-                params![task_id],
-            )?;
-            conn.execute(
-                "DELETE FROM task_links WHERE task_id = ?1 OR (kind = 'task' AND ref = ?1)",
-                params![task_id],
-            )?;
-            conn.execute("DELETE FROM tasks WHERE id = ?1", params![task_id])?;
+        if patch.waiting_on.is_none() {
+            conn.execute("UPDATE tasks SET waiting_on = NULL WHERE id = ?1", params![id])?;
         }
-        Ok(deleted)
-    })
+    }
+    Ok(())
 }

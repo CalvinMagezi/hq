@@ -56,6 +56,9 @@ pub struct TaskLink {
 pub fn resolve_task(conn: &Connection, id_or_display_id: &str) -> Result<String> {
     let task = t::get_task(conn, id_or_display_id)?
         .ok_or_else(|| anyhow!("no task '{id_or_display_id}'"))?;
+    if task.archived_at.is_some() {
+        bail!("task {} is archived; restore it before launching work on it", task.display_id);
+    }
     if task.status == t::STATUS_COMPLETE {
         bail!(
             "task {} is complete; reopen it before launching work on it",
@@ -82,7 +85,8 @@ fn record_in(
     session: &HarnessSessionRow,
     event: Event,
 ) -> Result<Option<TaskLink>> {
-    let Some(task) = linked_task(conn, session)? else {
+    // A task archived under a running session is left alone: its events are not errors.
+    let Some(task) = linked_task(conn, session)?.filter(|task| task.archived_at.is_none()) else {
         return Ok(None);
     };
     let siblings_running = match event {
@@ -94,7 +98,7 @@ fn record_in(
     let session_running = session.status == registry::STATUS_RUNNING;
     let lease = open_lease(conn, &task, session, event, session_running)?;
     let ctx = t::WriteCtx { actor: Some(&session.id), work_session_id: lease.as_deref() };
-    let moved = match target(event, siblings_running, session_running) {
+    let moved = match target(event, siblings_running, session_running, task.long_horizon) {
         Some((from, to)) => advance(conn, &task, from, to, &ctx)?,
         None => None,
     };
@@ -146,7 +150,13 @@ fn target(
     event: Event,
     siblings_running: bool,
     session_running: bool,
+    long_horizon: bool,
 ) -> Option<(&'static [&'static str], &'static str)> {
+    // Work that spans many turns is not done, or stuck, because one turn ended or a
+    // session exited; the people and agents on it say when it is.
+    if long_horizon && matches!(event, Event::Finished | Event::Exited | Event::BlockedAtLaunch) {
+        return None;
+    }
     match event {
         Event::Launched | Event::Resumed | Event::Steered => {
             Some((RESTARTABLE, t::STATUS_IN_PROGRESS))
@@ -407,6 +417,54 @@ mod tests {
         let s = session(&db, "hs-1", None);
         assert!(apply(&db, &s, Event::Launched).is_none());
         assert!(leases(&db, &task).is_empty());
+    }
+
+    fn mark_long_horizon(db: &Database, task: &str) {
+        db.with_conn(|c| {
+            t::update_task(c, task, &t::TaskPatch { long_horizon: Some(true), ..Default::default() }, None).map(|_| ())
+        })
+        .unwrap();
+    }
+
+    #[test]
+    fn a_finished_turn_or_an_exit_does_not_move_a_long_horizon_task() {
+        let (db, task) = setup();
+        mark_long_horizon(&db, &task);
+        let s = session(&db, "hs-1", Some(&task));
+        apply(&db, &s, Event::Launched);
+        assert_eq!(status(&db, &task), t::STATUS_IN_PROGRESS, "starting work still starts the task");
+        let finished = apply(&db, &s, Event::Finished).unwrap();
+        assert!(!finished.moved);
+        assert_eq!(status(&db, &task), t::STATUS_IN_PROGRESS, "one turn ending is not the end of the work");
+        let exited = apply(&db, &s, Event::Exited).unwrap();
+        assert!(!exited.moved);
+        assert_eq!(status(&db, &task), t::STATUS_IN_PROGRESS, "and an exit is not a block");
+        let notes = comments(&db, &task);
+        assert!(notes.iter().any(|c| c.contains("finished a turn.")), "still commented: {notes:?}");
+        assert!(!notes.iter().any(|c| c.contains("ready for review") || c.contains("is blocked until")), "{notes:?}");
+        assert!(leases(&db, &task).iter().all(|l| l.ended_at.is_some()), "the lease still closes with the session");
+    }
+
+    #[test]
+    fn an_archived_task_is_not_launched_on_and_its_running_sessions_stop_reporting_to_it() {
+        let (db, task) = setup();
+        let s = session(&db, "hs-1", Some(&task));
+        apply(&db, &s, Event::Launched);
+        db.with_conn(|c| t::archive_task(c, &task, false, "t").map(|_| ())).unwrap();
+        let err = db.with_conn(|c| resolve_task(c, &task)).unwrap_err().to_string();
+        assert!(err.contains("archived"), "{err}");
+        // Events from the still-running session are no longer an error: there is just nothing to record.
+        assert!(apply(&db, &s, Event::Finished).is_none());
+        assert!(apply(&db, &s, Event::Exited).is_none());
+    }
+
+    #[test]
+    fn a_task_that_is_not_long_horizon_keeps_the_old_behaviour() {
+        let (db, task) = setup();
+        let s = session(&db, "hs-1", Some(&task));
+        apply(&db, &s, Event::Launched);
+        assert!(apply(&db, &s, Event::Finished).unwrap().moved);
+        assert_eq!(status(&db, &task), t::STATUS_READY_FOR_REVIEW);
     }
 
     #[test]

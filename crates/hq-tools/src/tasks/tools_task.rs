@@ -75,6 +75,7 @@ impl HqTool for TaskCreateTool {
                 "due_date": { "type": "string", "description": "Optional due date, YYYY-MM-DD" },
                 "start_date": { "type": "string", "description": "Optional start date, YYYY-MM-DD (not after due_date)" },
                 "estimate_minutes": { "type": "integer", "minimum": 1, "description": "Planned effort in minutes. Time you actually spend is recorded from your lease, so set an estimate when you can and it will be compared." },
+                "long_horizon": { "type": "boolean", "description": "Work that runs over many turns or days. A session finishing a turn or exiting then does not move the task to review or blocked; you do that yourself.", "default": false },
                 "links": { "type": "array", "description": "Links to record with the task, each {kind, ref, label?, direction?}: kind is vault_note, chat_thread, session, commit, pr, url or task. Link the note or conversation the task came from.", "items": { "type": "object", "properties": { "kind": { "type": "string" }, "ref": { "type": "string" }, "label": { "type": "string" }, "direction": { "type": "string", "enum": ["origin", "related", "produced"] } }, "required": ["kind", "ref"] } },
                 "parent_id": { "type": "string", "description": "Make this a sub-task of that task (id or display id). The parent must be top level." },
                 "depends_on": { "type": "array", "items": { "type": "string" }, "description": "Ids or display ids of tasks that must complete before this one" },
@@ -138,6 +139,7 @@ impl HqTool for TaskCreateTool {
 
         let external_id = opt_str(&args, "external_id");
         let estimate_minutes = estimate_arg(&args)?.flatten();
+        let long_horizon = bool_arg(&args, "long_horizon")?.unwrap_or(false);
         let id = generate_id("tk");
         let requests = link_requests(&args)?;
         if scoped && requests.iter().any(|r| r.kind == t::LINK_VAULT_NOTE) {
@@ -171,6 +173,7 @@ impl HqTool for TaskCreateTool {
                         created_by: &created_by,
                         external_id: external_id.as_deref(),
                         estimate_minutes,
+                        long_horizon,
                     },
                 )?;
                 if !created {
@@ -227,6 +230,7 @@ fn record_origin(conn: &rusqlite::Connection, task: &str, thread: Option<&str>, 
 // ─── task_list ──────────────────────────────────────────────────────────
 
 pub(super) struct TaskListTool {
+    pub(super) settings: TasksConfig,
     pub(super) db: Arc<Database>,
 }
 
@@ -256,6 +260,8 @@ impl HqTool for TaskListTool {
                 "parent_id": { "type": "string", "description": "Only the sub-tasks of this task (id or display id)" },
                 "top_level_only": { "type": "boolean", "description": "Exclude sub-tasks" },
                 "include_description": { "type": "boolean", "description": "Include each task's full description (large lists may then be cut by the MCP gateway)" },
+                "archived": { "type": "boolean", "description": "List archived tasks instead of active ones" },
+                "stale": { "type": "boolean", "description": "Only in-progress tasks nobody holds that look abandoned (see task_stale for why and what to do)" },
                 "limit": { "type": "integer", "minimum": 1, "maximum": 500, "description": "Page size (default 100). The reply has `total` and `has_more`; read the next page with `offset`." },
                 "offset": { "type": "integer", "minimum": 0, "description": "Rows to skip, for the next page" }
             }
@@ -290,6 +296,7 @@ impl HqTool for TaskListTool {
                 .and_then(|v| v.as_str())
                 .map(String::from),
             parent_task_id: parent_filter(&args),
+            archived: args.get("archived").and_then(Value::as_bool).unwrap_or(false),
             ..Default::default()
         };
         let with_description = args
@@ -301,20 +308,33 @@ impl HqTool for TaskListTool {
             .clamp(1, t::MAX_LIST_LIMIT);
         let offset = arg_usize(&args, "offset").unwrap_or(0);
         let caller = crate::harness_session::caller_session(&args).map(str::to_string);
-        let (tasks, total) = self.db.with_conn(move |c| match caller {
-            // A launched agent sees only the tasks it may use, so the scope is
-            // applied before paging and the total counts what it can see.
-            Some(session) => {
-                let scope = crate::a2a::task_scope(c, &session)?;
-                let visible = visible_tasks(c, &mut filter, &scope)?;
-                let total = visible.len() as i64;
-                Ok((visible.into_iter().skip(offset).take(limit).collect(), total))
-            }
-            None => {
+        let want_stale = args.get("stale").and_then(Value::as_bool).unwrap_or(false);
+        let stale_hours = i64::try_from(self.settings.stale_hours()).unwrap_or(i64::MAX);
+        let ttl = super::tools_lease::ttl_secs(&self.settings);
+        let (tasks, total) = self.db.with_conn(move |c| {
+            let scope = match &caller {
+                // A launched agent sees only the tasks it may use, so the scope is
+                // applied before paging and the total counts what it can see.
+                Some(session) => Some(crate::a2a::task_scope(c, session)?),
+                None => None,
+            };
+            let stale_ids: Option<std::collections::HashSet<String>> = if want_stale {
+                filter.status = Some(t::STATUS_IN_PROGRESS.to_string());
+                Some(t::stale_tasks(c, stale_hours, ttl, usize::MAX >> 1)?.into_iter().map(|s| s.task_id).collect())
+            } else {
+                None
+            };
+            if scope.is_none() && stale_ids.is_none() {
                 filter.limit = Some(limit);
                 filter.offset = offset;
-                Ok((t::list_tasks(c, &filter)?, t::count_tasks(c, &filter)?))
+                return Ok((t::list_tasks(c, &filter)?, t::count_tasks(c, &filter)?));
             }
+            let visible = matching_tasks(c, &mut filter, |task| {
+                scope.as_ref().is_none_or(|s| s.contains(&task.id))
+                    && stale_ids.as_ref().is_none_or(|s| s.contains(&task.id))
+            })?;
+            let total = visible.len() as i64;
+            Ok((visible.into_iter().skip(offset).take(limit).collect(), total))
         })?;
         // Full descriptions push a list past the MCP gateway's size cap, which cuts
         // the middle out of the JSON and silently drops tasks.
@@ -334,6 +354,50 @@ impl HqTool for TaskListTool {
             "tasks": rows.collect::<Vec<_>>()
         }))
     }
+}
+
+/// A string argument where absent is untouched, null clears and text sets. Any other type
+/// is an error, never a silent clear.
+fn text_arg(args: &Value, key: &str) -> Result<Option<Option<String>>> {
+    match args.get(key) {
+        None => Ok(None),
+        Some(Value::Null) => Ok(Some(None)),
+        Some(Value::String(s)) => Ok(Some(Some(s.clone()))),
+        Some(_) => bail!("{key} must be text, or null to clear it"),
+    }
+}
+
+/// A boolean argument, or an error for any other type.
+fn bool_arg(args: &Value, key: &str) -> Result<Option<bool>> {
+    match args.get(key) {
+        None => Ok(None),
+        Some(Value::Bool(b)) => Ok(Some(*b)),
+        Some(_) => bail!("{key} must be true or false"),
+    }
+}
+
+/// Moving a task to blocked over MCP says why, so a blocked task is never a mystery.
+fn require_block_reason(patch: &t::TaskPatch, previous: &t::Task) -> Result<()> {
+    let stays_blocked = patch.status.as_deref().unwrap_or(&previous.status) == t::STATUS_BLOCKED;
+    if !stays_blocked {
+        return Ok(());
+    }
+    // What would be stored, not what was typed: a lone control or zero-width character is no reason.
+    let stored = match &patch.blocked_reason {
+        Some(Some(r)) => t::clean_block_text("blocked_reason", r)?,
+        Some(None) => None,
+        None => previous.blocked_reason.clone(),
+    };
+    if previous.status != t::STATUS_BLOCKED && stored.is_none() {
+        bail!(
+            "{} is being blocked: say why with blocked_reason (and what it waits on with waiting_on)",
+            previous.display_id
+        );
+    }
+    if previous.status == t::STATUS_BLOCKED && stored.is_none() && previous.blocked_reason.is_some() {
+        bail!("{} is blocked for a reason; unblock it, or replace the reason instead of clearing it", previous.display_id);
+    }
+    Ok(())
 }
 
 /// The `estimate_minutes` argument: absent is untouched, null clears, a whole number
@@ -360,12 +424,12 @@ fn arg_usize(args: &Value, key: &str) -> Option<usize> {
     args.get(key).and_then(Value::as_u64).map(|n| n as usize)
 }
 
-/// Every task matching `filter` that is in `scope`, read a page at a time so a
-/// scoped session is never cut off by the page cap.
-fn visible_tasks(
+/// Every task matching `filter` and `keep`, read a page at a time so a scoped or
+/// stale-only list is never cut off by the page cap.
+fn matching_tasks(
     c: &rusqlite::Connection,
     filter: &mut t::TaskFilter,
-    scope: &std::collections::HashSet<String>,
+    keep: impl Fn(&t::Task) -> bool,
 ) -> Result<Vec<t::Task>> {
     let mut visible = Vec::new();
     filter.limit = Some(t::MAX_LIST_LIMIT);
@@ -373,7 +437,7 @@ fn visible_tasks(
     loop {
         let page = t::list_tasks(c, filter)?;
         let full = page.len() == t::MAX_LIST_LIMIT;
-        visible.extend(page.into_iter().filter(|task| scope.contains(&task.id)));
+        visible.extend(page.into_iter().filter(|task| keep(task)));
         if !full {
             return Ok(visible);
         }
@@ -420,7 +484,8 @@ impl HqTool for TaskGetTool {
         let caller = crate::harness_session::caller_session(&args).map(str::to_string);
         let scoped = crate::harness_session::is_tasks_scope(&args);
         let ttl = super::tools_lease::ttl_secs(&self.settings);
-        let (task, subtasks, dependents, events, sessions, time, links) = self.db.with_conn(move |c| {
+        let stale_hours = i64::try_from(self.settings.stale_hours()).unwrap_or(i64::MAX);
+        let (task, subtasks, dependents, events, sessions, time, links, checkpoint, stale) = self.db.with_conn(move |c| {
             let task =
                 t::get_task(c, &id)?.ok_or_else(|| anyhow::anyhow!("no task found for that id"))?;
             crate::a2a::check_task_access(c, caller.as_deref(), &task.id)?;
@@ -433,7 +498,9 @@ impl HqTool for TaskGetTool {
             let sessions = t::list_work_sessions(c, &task.id, WORK_SESSIONS_SHOWN)?;
             let time = t::time_summary(c, &task.id, ttl)?;
             let links = t::list_task_links(c, &task.id)?;
-            Ok::<_, anyhow::Error>((task, subtasks, dependents, events, sessions, time, links))
+            let checkpoint = t::latest_checkpoint(c, &task.id)?;
+            let stale = t::is_stale_now(c, &task.id, stale_hours)?;
+            Ok::<_, anyhow::Error>((task, subtasks, dependents, events, sessions, time, links, checkpoint, stale))
         })?;
         let mut value = task_json(&task);
         value["subtasks"] = json!(subtasks.iter().map(task_summary).collect::<Vec<_>>());
@@ -441,6 +508,10 @@ impl HqTool for TaskGetTool {
         value["lifecycle_events"] = json!(events);
         value["time"] = json!(time);
         value["links"] = json!(links);
+        value["stale"] = json!(stale);
+        if let Some(cp) = &checkpoint {
+            value["checkpoint"] = super::tools_lease::resume_json(cp);
+        }
         value["held_by"] = json!(sessions.iter().find(|s| s.ended_at.is_none()));
         value["work_sessions"] = json!(sessions);
         if scoped {
@@ -456,6 +527,9 @@ impl HqTool for TaskGetTool {
 fn hide_work_details_from_tasks_scope(task: &mut Value) {
     let Some(obj) = task.as_object_mut() else { return };
     obj.remove("work_sessions");
+    if let Some(checkpoint) = obj.get_mut("checkpoint") {
+        super::tools_lease::hide_machine_paths(checkpoint);
+    }
     if let Some(links) = obj.get_mut("links").and_then(Value::as_array_mut) {
         links.retain(|l| l["kind"] != t::LINK_VAULT_NOTE);
     }
@@ -506,6 +580,9 @@ impl HqTool for TaskUpdateTool {
                 "due_date": { "type": ["string", "null"], "description": "YYYY-MM-DD, null clears" },
                 "start_date": { "type": ["string", "null"], "description": "YYYY-MM-DD, null clears" },
                 "estimate_minutes": { "type": ["integer", "null"], "minimum": 1, "description": "Planned effort in minutes, null clears" },
+                "blocked_reason": { "type": ["string", "null"], "description": "Why the task is blocked. Required when you move a task to blocked; clears when it leaves blocked." },
+                "waiting_on": { "type": ["string", "null"], "description": "What it waits on: a person, a task id, an outside thing" },
+                "long_horizon": { "type": "boolean", "description": "See task_create. Set true for work that spans many turns or days." },
                 "parent_id": { "type": ["string", "null"], "description": "New parent (id or display id), null promotes to top level" },
                 "add_depends_on": { "type": "array", "items": { "type": "string" }, "description": "Tasks this one should wait for" },
                 "remove_depends_on": { "type": "array", "items": { "type": "string" }, "description": "Dependencies to drop" },
@@ -557,6 +634,9 @@ impl HqTool for TaskUpdateTool {
                 args.get("tags").map(|_| tags_from_args(&args, "tags"))
             },
             estimate_minutes: estimate_arg(&args)?,
+            blocked_reason: text_arg(&args, "blocked_reason")?,
+            waiting_on: text_arg(&args, "waiting_on")?,
+            long_horizon: bool_arg(&args, "long_horizon")?,
         };
         let expected_status = args
             .get("expected_status")
@@ -585,6 +665,7 @@ impl HqTool for TaskUpdateTool {
                     );
                 }
                 let actor = hints.resolve(c, &settings, Some(&previous.id))?;
+                require_block_reason(&patch, &previous)?;
                 let started = entering_in_progress && previous.status != t::STATUS_IN_PROGRESS;
                 let lease_warning = lease_policy(
                     settings.require_lease,
@@ -629,6 +710,7 @@ impl HqTool for TaskUpdateTool {
 // ─── task_delete ────────────────────────────────────────────────────────
 
 pub(super) struct TaskDeleteTool {
+    pub(super) settings: TasksConfig,
     pub(super) db: Arc<Database>,
 }
 
@@ -638,15 +720,71 @@ impl HqTool for TaskDeleteTool {
         "task_delete"
     }
     fn description(&self) -> &str {
-        "Permanently delete a task with its comments and dependency links. A task with sub-tasks \
-         is only deleted when cascade is true, which deletes the sub-tasks too."
+        "Remove a task. By default it is archived: hidden from lists but kept with its comments, \
+         time and links, and task_restore brings it back. A task with sub-tasks needs cascade, which \
+         archives them too. Pass purge only for a task that is already archived, to delete it and \
+         everything it holds for good; the removal stays in the audit log."
     }
     fn parameters(&self) -> Value {
         json!({
             "type": "object",
             "properties": {
                 "id": { "type": "string", "description": "Internal id or display id" },
-                "cascade": { "type": "boolean", "description": "Also delete the task's sub-tasks", "default": false }
+                "cascade": { "type": "boolean", "description": "Also archive the task's sub-tasks", "default": false },
+                "purge": { "type": "boolean", "description": "Permanently delete a task that is already archived", "default": false },
+                "lease": { "type": "string", "description": "Your lease token from task_claim, to attribute this to you" },
+                "actor": { "type": "string", "description": "Your name, used only when you have no lease" }
+            },
+            "required": ["id"]
+        })
+    }
+    fn category(&self) -> &str {
+        "tasks"
+    }
+    fn is_destructive(&self) -> bool {
+        true
+    }
+    async fn execute(&self, args: Value) -> Result<Value> {
+        let id = arg_str(&args, "id");
+        if id.is_empty() {
+            bail!("id is required");
+        }
+        let cascade = args.get("cascade").and_then(|v| v.as_bool()).unwrap_or(false);
+        let purge = args.get("purge").and_then(|v| v.as_bool()).unwrap_or(false);
+        let hints = ActorHints::from_args(&args, "actor");
+        let settings = self.settings.clone();
+        let target = id.clone();
+        let (ids, who) = self.db.with_conn(move |c| {
+            let who = hints.resolve(c, &settings, None)?.name;
+            let ids = if purge { t::purge_task(c, &target, &who)? } else { t::archive_task(c, &target, cascade, &who)? };
+            Ok((ids, who))
+        })?;
+        let key = if purge { "purged" } else { "archived" };
+        Ok(json!({ key: true, "deleted": true, "id": id, "deleted_ids": ids, "by": who }))
+    }
+}
+
+pub(super) struct TaskRestoreTool {
+    pub(super) settings: TasksConfig,
+    pub(super) db: Arc<Database>,
+}
+
+#[async_trait]
+impl HqTool for TaskRestoreTool {
+    fn name(&self) -> &str {
+        "task_restore"
+    }
+    fn description(&self) -> &str {
+        "Bring back an archived task, and the sub-tasks archived with it. List archived tasks with \
+         task_list archived=true. A sub-task cannot come back before its parent."
+    }
+    fn parameters(&self) -> Value {
+        json!({
+            "type": "object",
+            "properties": {
+                "id": { "type": "string", "description": "Internal id or display id of the archived task" },
+                "lease": { "type": "string", "description": "Your lease token from task_claim, to attribute this to you" },
+                "actor": { "type": "string", "description": "Your name, used only when you have no lease" }
             },
             "required": ["id"]
         })
@@ -659,15 +797,13 @@ impl HqTool for TaskDeleteTool {
         if id.is_empty() {
             bail!("id is required");
         }
-        let cascade = args
-            .get("cascade")
-            .and_then(|v| v.as_bool())
-            .unwrap_or(false);
-        let target = id.clone();
-        let deleted = self
-            .db
-            .with_conn(move |c| t::delete_task(c, &target, cascade))?;
-        Ok(json!({ "deleted": true, "id": id, "deleted_ids": deleted }))
+        let hints = ActorHints::from_args(&args, "actor");
+        let settings = self.settings.clone();
+        let task = self.db.with_conn(move |c| {
+            let who = hints.resolve(c, &settings, None)?.name;
+            t::restore_task(c, &id, &who)
+        })?;
+        Ok(task_json(&task))
     }
 }
 

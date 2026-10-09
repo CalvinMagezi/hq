@@ -127,7 +127,8 @@ fn load_docs(conn: &Connection) -> Result<Vec<Doc>> {
         tags.entry(task_id).or_default().insert(tag.to_lowercase());
     }
     let mut stmt = conn.prepare(
-        "SELECT id, initiative_id, title, COALESCE(description, '') FROM tasks ORDER BY id",
+        "SELECT id, initiative_id, title, COALESCE(description, '') FROM tasks \
+         WHERE archived_at IS NULL ORDER BY id",
     )?;
     let rows = stmt.query_map([], |r| {
         Ok((
@@ -369,10 +370,10 @@ fn ref_from_row(r: &rusqlite::Row, offset: usize) -> rusqlite::Result<TaskRef> {
 }
 
 const EXPLICIT_SQL: &str = "
-    SELECT 'parent', t.id, t.display_id, t.title, t.status FROM tasks c JOIN tasks t ON t.id = c.parent_task_id WHERE c.id = ?1
-    UNION ALL SELECT 'subtask', t.id, t.display_id, t.title, t.status FROM tasks t WHERE t.parent_task_id = ?1
-    UNION ALL SELECT 'depends_on', t.id, t.display_id, t.title, t.status FROM task_dependencies d JOIN tasks t ON t.id = d.depends_on_task_id WHERE d.task_id = ?1
-    UNION ALL SELECT 'dependent', t.id, t.display_id, t.title, t.status FROM task_dependencies d JOIN tasks t ON t.id = d.task_id WHERE d.depends_on_task_id = ?1
+    SELECT 'parent', t.id, t.display_id, t.title, t.status FROM tasks c JOIN tasks t ON t.id = c.parent_task_id WHERE c.id = ?1 AND t.archived_at IS NULL
+    UNION ALL SELECT 'subtask', t.id, t.display_id, t.title, t.status FROM tasks t WHERE t.parent_task_id = ?1 AND t.archived_at IS NULL
+    UNION ALL SELECT 'depends_on', t.id, t.display_id, t.title, t.status FROM task_dependencies d JOIN tasks t ON t.id = d.depends_on_task_id WHERE d.task_id = ?1 AND t.archived_at IS NULL
+    UNION ALL SELECT 'dependent', t.id, t.display_id, t.title, t.status FROM task_dependencies d JOIN tasks t ON t.id = d.task_id WHERE d.depends_on_task_id = ?1 AND t.archived_at IS NULL
     LIMIT ?2";
 
 /// Links the user or an agent declared. Read live, so never stale.

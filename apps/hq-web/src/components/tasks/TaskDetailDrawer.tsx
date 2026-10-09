@@ -8,6 +8,8 @@ import { TaskComments } from './TaskComments'
 import { TaskSessions } from './TaskSessions'
 import { TaskTime } from './TaskTime'
 import { TaskLinks } from './TaskLinks'
+import { TaskCheckpoint } from './TaskCheckpoint'
+import { useIsStale } from './staleContext'
 import { DateRangeInputs, EstimateInput, PRIORITIES, SectionLabel, isInvalidEstimate, parseEstimate } from './taskFields'
 import { formatLocalTime } from './timeFormat'
 import { MarkdownViewer } from '../MarkdownViewer'
@@ -17,6 +19,8 @@ interface Props {
   allTasks: TaskItem[]
   onClose: () => void
   onUpdate: (id: string, patch: Record<string, unknown>) => Promise<void>
+  /** Brings an archived task back. */
+  onRestore?: (id: string) => Promise<void>
   onDelete: (id: string, cascade: boolean) => Promise<void>
   onSelectTask: (id: string) => void
   onCreateSubtask: (parent: TaskItem, title: string) => Promise<void>
@@ -31,6 +35,7 @@ export function TaskDetailDrawer({
   allTasks,
   onClose,
   onUpdate,
+  onRestore,
   onDelete,
   onSelectTask,
   onCreateSubtask,
@@ -43,6 +48,9 @@ export function TaskDetailDrawer({
   const [draftDueDate, setDraftDueDate] = useState('')
   const [draftStartDate, setDraftStartDate] = useState('')
   const [draftEstimate, setDraftEstimate] = useState('')
+  const [draftReason, setDraftReason] = useState('')
+  const [draftWaiting, setDraftWaiting] = useState('')
+  const [draftLong, setDraftLong] = useState(false)
   const [confirmingDelete, setConfirmingDelete] = useState(false)
 
   useEffect(() => {
@@ -54,10 +62,16 @@ export function TaskDetailDrawer({
     setDraftDueDate(task.due_date ?? '')
     setDraftStartDate(task.start_date ?? '')
     setDraftEstimate(task.estimate_minutes === null ? '' : String(task.estimate_minutes))
+    setDraftReason(task.blocked_reason ?? '')
+    setDraftWaiting(task.waiting_on ?? '')
+    setDraftLong(task.long_horizon)
     setConfirmingDelete(false)
   }, [task])
 
+  const stale = useIsStale(task?.id ?? '')
+
   if (!task) return null
+  const archived = task.archived_at !== null
 
   const handleSaveEdit = async () => {
     if (isInvalidEstimate(draftEstimate)) return
@@ -72,6 +86,10 @@ export function TaskDetailDrawer({
       due_date: draftDueDate || null,
       start_date: draftStartDate || null,
       estimate_minutes: parseEstimate(draftEstimate),
+      long_horizon: draftLong,
+      ...(task.status === 'blocked'
+        ? { blocked_reason: draftReason.trim() || null, waiting_on: draftWaiting.trim() || null }
+        : {}),
     })
     setEditing(false)
   }
@@ -103,6 +121,8 @@ export function TaskDetailDrawer({
                   {task.priority}
                 </span>
               )}
+              {task.long_horizon && <span className="text-[10px] font-mono text-neutral-400">long running</span>}
+              {stale && <span className="text-[10px] font-mono text-neutral-400" title="Nobody holds it and nothing has changed for a while">stale</span>}
             </div>
             {editing ? (
               <input
@@ -135,7 +155,7 @@ export function TaskDetailDrawer({
                   <XIcon className="w-4 h-4" />
                 </button>
               </>
-            ) : (
+            ) : archived ? null : (
               <button
                 type="button"
                 onClick={() => setEditing(true)}
@@ -145,7 +165,7 @@ export function TaskDetailDrawer({
                 <Pencil className="w-4 h-4" />
               </button>
             )}
-            <button
+            {!archived && <button
               type="button"
               onClick={handleDeleteClick}
               disabled={busy}
@@ -153,7 +173,7 @@ export function TaskDetailDrawer({
               title="Delete"
             >
               <Trash2 className="w-4 h-4" />
-            </button>
+            </button>}
             <button
               type="button"
               onClick={onClose}
@@ -189,6 +209,24 @@ export function TaskDetailDrawer({
           </div>
         )}
 
+        {archived && (
+          <div className="flex items-center justify-between gap-3 px-6 py-3 border-b border-white/10 bg-white/[0.03]">
+            <span className="text-xs font-mono text-neutral-300">
+              Archived {formatLocalTime(task.archived_at ?? '')}. It keeps its comments, time and links.
+            </span>
+            {onRestore && (
+              <button
+                type="button"
+                onClick={() => onRestore(task.id)}
+                disabled={busy}
+                className="px-3 py-1 rounded-lg text-xs font-mono font-semibold text-neutral-200 border border-white/20 hover:bg-white/10 disabled:opacity-50 shrink-0"
+              >
+                Restore
+              </button>
+            )}
+          </div>
+        )}
+
         {parent && (
           <button
             type="button"
@@ -207,7 +245,7 @@ export function TaskDetailDrawer({
             <button
               key={status}
               type="button"
-              disabled={busy || status === task.status}
+              disabled={busy || archived || status === task.status}
               onClick={() => onUpdate(task.id, { status, expected_status: task.status })}
               className={`px-3 py-1.5 rounded-xl text-xs font-semibold transition-all disabled:cursor-default ${
                 status === task.status
@@ -280,6 +318,36 @@ export function TaskDetailDrawer({
                   label={(text) => <SectionLabel>{text}</SectionLabel>}
                 />
               </div>
+              {task.status === 'blocked' && (
+                <div className="grid gap-3 sm:grid-cols-2">
+                  <div>
+                    <SectionLabel>Why it is blocked</SectionLabel>
+                    <input
+                      value={draftReason}
+                      onChange={(e) => setDraftReason(e.target.value)}
+                      maxLength={500}
+                      placeholder="what is in the way"
+                      className="w-full px-3 py-2 rounded-xl text-xs font-mono text-neutral-200 bg-black/30 border focus:outline-none focus:ring-1 focus:ring-emerald-400"
+                      style={{ borderColor: 'rgba(255,255,255,0.1)' }}
+                    />
+                  </div>
+                  <div>
+                    <SectionLabel>Waiting on</SectionLabel>
+                    <input
+                      value={draftWaiting}
+                      onChange={(e) => setDraftWaiting(e.target.value)}
+                      maxLength={500}
+                      placeholder="a person, a task, an outside thing"
+                      className="w-full px-3 py-2 rounded-xl text-xs font-mono text-neutral-200 bg-black/30 border focus:outline-none focus:ring-1 focus:ring-emerald-400"
+                      style={{ borderColor: 'rgba(255,255,255,0.1)' }}
+                    />
+                  </div>
+                </div>
+              )}
+              <label className="flex items-center gap-2 text-xs font-mono text-neutral-300">
+                <input type="checkbox" checked={draftLong} onChange={(e) => setDraftLong(e.target.checked)} />
+                Long running: a session finishing a turn or exiting does not move this task
+              </label>
               <div>
                 <SectionLabel>Tags (comma-separated; a routing tag like "hq" notifies that agent)</SectionLabel>
                 <input
@@ -291,6 +359,14 @@ export function TaskDetailDrawer({
                 />
               </div>
             </>
+          )}
+
+          {!editing && task.status === 'blocked' && (task.blocked_reason || task.waiting_on) && (
+            <div className="px-3 py-2 rounded-xl border border-rose-500/20 bg-rose-500/5 text-xs font-mono text-neutral-200 space-y-0.5">
+              {task.blocked_reason && <p className="break-words">Blocked: {task.blocked_reason}</p>}
+              {task.waiting_on && <p className="break-words text-neutral-400">Waiting on {task.waiting_on}</p>}
+              {task.blocked_since && <p className="text-[10px] text-neutral-500">since {formatLocalTime(task.blocked_since)}</p>}
+            </div>
           )}
 
           {!editing && (task.tags.length > 0 || task.due_date || task.start_date || task.work_started_at || task.first_ready_for_review_at || task.completed_at) && (
@@ -337,6 +413,7 @@ export function TaskDetailDrawer({
             onCreateSubtask={onCreateSubtask}
           />
 
+          <TaskCheckpoint key={`checkpoint-${task.id}`} task={task} />
           <TaskLinks key={`links-${task.id}`} task={task} />
           <TaskTime key={`time-${task.id}`} task={task} />
           <TaskSessions key={task.id} taskId={task.id} />

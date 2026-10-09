@@ -23,7 +23,7 @@ use crate::util::generate_id;
 /// Tools whose only input is one task id under `id` or `task_id`, read-only.
 const TASK_READ_TOOLS: &[&str] = &["task_get", "task_comment_list"];
 /// Tools that change one task, so the task must be in the caller's own space.
-const TASK_WRITE_TOOLS: &[&str] = &["task_update", "task_delete", "task_comment_add"];
+const TASK_WRITE_TOOLS: &[&str] = &["task_update", "task_delete", "task_restore", "task_comment_add"];
 
 struct ScopedTaskTool {
     inner: Box<dyn HqTool>,
@@ -272,6 +272,7 @@ fn strip_work_details(task: &mut Value) {
         obj.remove("work_sessions");
         obj.remove("held_by");
         obj.remove("links");
+        obj.remove("checkpoint");
     }
     let events = task.get_mut("lifecycle_events").and_then(Value::as_array_mut);
     for event in events.into_iter().flatten().filter_map(Value::as_object_mut) {
@@ -589,6 +590,7 @@ mod tests {
         let seen = call(&bob, "task_get", json!({ "id": id })).await.unwrap();
         assert!(seen.get("work_sessions").is_none() && seen.get("held_by").is_none(), "{seen}");
         assert!(seen.get("links").is_none(), "links name chats, sessions and notes the audience may not see");
+        assert!(seen.get("checkpoint").is_none(), "a checkpoint names files and actors");
         let events = seen["lifecycle_events"].as_array().unwrap();
         assert!(!events.is_empty());
         assert!(events.iter().all(|e| e.get("actor").is_none() && e.get("work_session_id").is_none()));

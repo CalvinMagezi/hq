@@ -390,6 +390,8 @@ fn default_tasks() -> Vec<DaemonTask> {
         DaemonTask::with_default_timeout("vault-cap-enforcer", Duration::from_secs(21600)), // 6 hours
         // Enforce the background-turn age ceiling between restarts (idempotent)
         DaemonTask::with_default_timeout("turn-reconcile", Duration::from_secs(21600)), // every 6h
+        // In-progress tasks nobody holds or has touched; a once-a-day digest, never a status change.
+        DaemonTask::with_default_timeout("task-stale-digest", Duration::from_secs(21600)),
     ]
 }
 
@@ -530,6 +532,7 @@ async fn dispatch_task(
         "db-vacuum" => tasks_slow::run_db_vacuum(vault_path, db).await,
         "vault-cap-enforcer" => tasks_slow::run_vault_cap_enforcer(vault_path, db).await,
         "turn-reconcile" => tasks_periodic::run_turn_reconcile(vault_path, db, config).await,
+        "task-stale-digest" => tasks_periodic::run_task_stale_digest(db, config).await,
 
 
 

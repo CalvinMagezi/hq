@@ -29,6 +29,9 @@ pub fn add_dependency(
     if dependent.id == blocker.id {
         anyhow::bail!("a task cannot depend on itself");
     }
+    if let Some(archived) = [&dependent, &blocker].into_iter().find(|t| t.archived_at.is_some()) {
+        anyhow::bail!("{} is archived; restore it before linking it to other tasks", archived.display_id);
+    }
     let closes_cycle: bool = conn
         .query_row(
             "WITH RECURSIVE chain(id) AS (
@@ -93,7 +96,7 @@ pub fn list_dependents(conn: &Connection, task_id: &str) -> Result<Vec<Task>> {
 pub fn list_subtasks(conn: &Connection, parent_id: &str) -> Result<Vec<Task>> {
     tasks_by_ids(
         conn,
-        "SELECT id FROM tasks WHERE parent_task_id = ?1 ORDER BY display_id",
+        "SELECT id FROM tasks WHERE parent_task_id = ?1 AND archived_at IS NULL ORDER BY display_id",
         parent_id,
     )
 }
@@ -104,10 +107,10 @@ pub fn newly_unblocked(conn: &Connection, completed_task_id: &str) -> Result<Vec
     tasks_by_ids(
         conn,
         "SELECT d.task_id FROM task_dependencies d JOIN tasks dep ON dep.id = d.task_id
-         WHERE d.depends_on_task_id = ?1 AND dep.status <> 'complete'
+         WHERE d.depends_on_task_id = ?1 AND dep.status <> 'complete' AND dep.archived_at IS NULL
            AND NOT EXISTS (
                SELECT 1 FROM task_dependencies d2 JOIN tasks b ON b.id = d2.depends_on_task_id
-               WHERE d2.task_id = d.task_id AND b.status <> 'complete'
+               WHERE d2.task_id = d.task_id AND b.status <> 'complete' AND b.archived_at IS NULL
            )",
         completed_task_id,
     )

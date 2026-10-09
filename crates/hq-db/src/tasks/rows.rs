@@ -38,7 +38,8 @@ pub(super) fn row_to_initiative(row: &rusqlite::Row) -> rusqlite::Result<Initiat
 pub(super) const TASK_COLS: &str = "t.id, t.initiative_id, t.display_id, t.title, t.description, t.status, \
      t.priority, t.due_date, t.clickup_task_id, t.created_by, t.created_at, t.updated_at, \
      t.parent_task_id, t.start_date, t.work_started_at, t.first_ready_for_review_at, t.external_id, \
-     t.completed_at, t.estimate_minutes";
+     t.completed_at, t.estimate_minutes, t.blocked_reason, t.waiting_on, t.blocked_since, \
+     t.long_horizon, t.archived_at";
 
 pub(super) fn row_to_task(row: &rusqlite::Row) -> rusqlite::Result<Task> {
     Ok(Task {
@@ -61,6 +62,11 @@ pub(super) fn row_to_task(row: &rusqlite::Row) -> rusqlite::Result<Task> {
         external_id: row.get(16)?,
         completed_at: row.get(17)?,
         estimate_minutes: row.get(18)?,
+        blocked_reason: row.get(19)?,
+        waiting_on: row.get(20)?,
+        blocked_since: row.get(21)?,
+        long_horizon: row.get::<_, i64>(22)? != 0,
+        archived_at: row.get(23)?,
         tags: Vec::new(),
         depends_on: Vec::new(),
         blocked_by: Vec::new(),
@@ -192,7 +198,7 @@ pub(super) fn hydrate(conn: &Connection, tasks: &mut [Task]) -> Result<()> {
 
     let mut stmt = conn.prepare(&format!(
         "SELECT d.task_id, b.id, b.display_id, b.status FROM task_dependencies d \
-         JOIN tasks b ON b.id = d.depends_on_task_id \
+         JOIN tasks b ON b.id = d.depends_on_task_id AND b.archived_at IS NULL \
          WHERE d.task_id IN ({marks}) ORDER BY b.display_id"
     ))?;
     let rows = stmt.query_map(rusqlite::params_from_iter(&ids), |r| {
@@ -214,7 +220,7 @@ pub(super) fn hydrate(conn: &Connection, tasks: &mut [Task]) -> Result<()> {
 
     let mut stmt = conn.prepare(&format!(
         "SELECT parent_task_id, COUNT(*), SUM(status = '{STATUS_COMPLETE}') FROM tasks \
-         WHERE parent_task_id IN ({marks}) GROUP BY parent_task_id"
+         WHERE parent_task_id IN ({marks}) AND archived_at IS NULL GROUP BY parent_task_id"
     ))?;
     let rows = stmt.query_map(rusqlite::params_from_iter(&ids), |r| {
         Ok((
@@ -270,6 +276,9 @@ pub(super) fn validate_schedule(start_date: Option<&str>, due_date: Option<&str>
 pub(super) fn resolve_parent(conn: &Connection, parent: &str, child_initiative_id: &str) -> Result<Task> {
     let parent_task =
         get_task(conn, parent)?.ok_or_else(|| anyhow::anyhow!("parent task {parent} not found"))?;
+    if parent_task.archived_at.is_some() {
+        anyhow::bail!("{} is archived; restore it before adding sub-tasks to it", parent_task.display_id);
+    }
     if parent_task.parent_task_id.is_some() {
         anyhow::bail!(
             "{} is itself a sub-task; sub-tasks nest one level only",
@@ -286,7 +295,7 @@ pub(super) fn resolve_parent(conn: &Connection, parent: &str, child_initiative_i
 }
 
 pub(super) fn subtask_ids(conn: &Connection, task_id: &str) -> Result<Vec<String>> {
-    let mut stmt = conn.prepare("SELECT id FROM tasks WHERE parent_task_id = ?1")?;
+    let mut stmt = conn.prepare("SELECT id FROM tasks WHERE parent_task_id = ?1 AND archived_at IS NULL")?;
     let ids = stmt
         .query_map(params![task_id], |r| r.get::<_, String>(0))?
         .collect::<rusqlite::Result<Vec<_>>>()?;

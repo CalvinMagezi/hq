@@ -269,7 +269,7 @@ pub fn time_report(conn: &Connection, since_days: i64, ttl_secs: i64) -> Result<
                     {EPOCH}t.work_started_at) AS INTEGER), {EPOCH}t.completed_at) AS INTEGER), \
                     t.status = 'complete' \
              FROM tasks t JOIN initiatives i ON i.id = t.initiative_id \
-             WHERE t.id IN (SELECT task_id FROM task_work_sessions \
+             WHERE t.archived_at IS NULL AND t.id IN (SELECT task_id FROM task_work_sessions \
                             WHERE ended_at IS NULL OR ended_at >= ?1) \
                 OR (t.completed_at IS NOT NULL AND t.completed_at >= ?1)"
         ))?;

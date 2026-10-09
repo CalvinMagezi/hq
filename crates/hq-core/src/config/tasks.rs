@@ -3,6 +3,9 @@ use serde::{Deserialize, Serialize};
 /// Seconds an external work lease survives without a heartbeat.
 pub const DEFAULT_LEASE_TTL_SECS: u64 = 900;
 
+/// Hours of silence after which an in-progress task nobody holds is called stale.
+pub const DEFAULT_STALE_AFTER_HOURS: u64 = 72;
+
 /// The shortest ttl honoured, so a typo of 0 or 1 does not expire every lease at once.
 pub const MIN_LEASE_TTL_SECS: u64 = 60;
 
@@ -31,6 +34,11 @@ pub struct TasksConfig {
     /// as ended at its last heartbeat.
     #[serde(default = "default_lease_ttl_secs")]
     pub lease_ttl_secs: u64,
+
+    /// Hours without a write, comment or heartbeat after which an in-progress task nobody
+    /// holds is reported as stale. Reporting only: nothing is ever changed for staleness.
+    #[serde(default = "default_stale_after_hours")]
+    pub stale_after_hours: u64,
 }
 
 impl TasksConfig {
@@ -38,6 +46,15 @@ impl TasksConfig {
     pub fn lease_ttl(&self) -> u64 {
         self.lease_ttl_secs.max(MIN_LEASE_TTL_SECS)
     }
+
+    /// The staleness window in force, at least one hour.
+    pub fn stale_hours(&self) -> u64 {
+        self.stale_after_hours.max(1)
+    }
+}
+
+fn default_stale_after_hours() -> u64 {
+    DEFAULT_STALE_AFTER_HOURS
 }
 
 fn default_lease_ttl_secs() -> u64 {
@@ -49,6 +66,7 @@ impl Default for TasksConfig {
         Self {
             require_lease: LeaseMode::default(),
             lease_ttl_secs: default_lease_ttl_secs(),
+            stale_after_hours: default_stale_after_hours(),
         }
     }
 }
@@ -62,6 +80,13 @@ mod tests {
         let cfg: TasksConfig = serde_yaml::from_str("{}").unwrap();
         assert_eq!(cfg.require_lease, LeaseMode::Off);
         assert_eq!(cfg.lease_ttl_secs, DEFAULT_LEASE_TTL_SECS);
+        assert_eq!(cfg.stale_hours(), DEFAULT_STALE_AFTER_HOURS);
+    }
+
+    #[test]
+    fn the_stale_window_is_at_least_an_hour() {
+        let cfg: TasksConfig = serde_yaml::from_str("stale_after_hours: 0").unwrap();
+        assert_eq!(cfg.stale_hours(), 1);
     }
 
     #[test]

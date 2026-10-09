@@ -1,6 +1,6 @@
 import { HqHttpError } from '~/lib/hqAuth'
 import { createFileRoute } from '@tanstack/react-router'
-import { useState, useMemo, useEffect } from 'react'
+import { useState, useMemo, useEffect, useRef } from 'react'
 import { CheckSquare, Plus, RefreshCw, Search, Loader2, PanelLeftOpen, List, Columns3, GanttChart, X } from 'lucide-react'
 import {
   createTaskClient,
@@ -10,6 +10,9 @@ import {
   STATUS_ORDER,
   HTTP_CONFLICT,
   fetchRecentWorkSessionsClient,
+  fetchStaleTasksClient,
+  fetchTasksClient,
+  restoreTaskClient,
   type Initiative,
   type TaskItem,
   type TaskStatus,
@@ -24,6 +27,7 @@ import { TaskFormModal } from '~/components/tasks/TaskFormModal'
 import { ALL_SELECTION, TasksSidebar, type TaskSelection } from '~/components/tasks/TasksSidebar'
 import { useTasksData } from '~/components/tasks/useTasksData'
 import { usePolled } from '~/components/sessions/usePolled'
+import { StaleIdsContext, stableSet } from '~/components/tasks/staleContext'
 import { VaultNoteDrawer } from '~/components/VaultNoteDrawer'
 
 type TasksView = 'list' | 'board' | 'timeline'
@@ -37,6 +41,10 @@ const VIEWS: { id: TasksView; label: string; icon: typeof List }[] = [
 /** How far back the timeline draws actual work, and how often it refreshes. */
 const TIMELINE_WORK_DAYS = 60
 const TIMELINE_WORK_POLL_MS = 60_000
+/** How often the archived list and the stale ids refresh while shown. */
+const ARCHIVED_POLL_MS = 60_000
+const STALE_POLL_MS = 120_000
+const NO_STALE: ReadonlySet<string> = new Set()
 
 export const Route = createFileRoute('/tasks')({
   validateSearch: (search: Record<string, unknown>): { view?: TasksView; task?: string } => {
@@ -47,7 +55,7 @@ export const Route = createFileRoute('/tasks')({
   component: TasksPage,
 })
 
-type StatusTab = 'active' | 'all' | 'complete'
+type StatusTab = 'active' | 'all' | 'complete' | 'archived'
 
 const errorMessage = (e: unknown, fallback: string) => (e instanceof Error ? e.message : fallback)
 
@@ -131,14 +139,32 @@ function TasksPage() {
     view === 'timeline'
   )
 
+  const archived = usePolled(
+    'archived-tasks',
+    async () => (await fetchTasksClient({ archived: true })).tasks,
+    ARCHIVED_POLL_MS,
+    statusTab === 'archived'
+  )
+  const staleSeen = useRef<ReadonlySet<string>>(NO_STALE)
+  const stale = usePolled(
+    'stale-task-ids',
+    async () => {
+      const next = new Set((await fetchStaleTasksClient()).tasks.map((s) => s.task_id))
+      staleSeen.current = stableSet(next, staleSeen.current)
+      return staleSeen.current
+    },
+    STALE_POLL_MS
+  )
+  const archivedTasks = archived.data ?? []
+
   const { task: linkedTaskId } = Route.useSearch()
   useEffect(() => {
     if (linkedTaskId) setSelectedTaskId(linkedTaskId)
   }, [linkedTaskId, setSelectedTaskId])
 
   const selectedTask = useMemo(
-    () => tasks.find((t) => t.id === selectedTaskId) ?? null,
-    [tasks, selectedTaskId]
+    () => tasks.find((t) => t.id === selectedTaskId) ?? archivedTasks.find((t) => t.id === selectedTaskId) ?? null,
+    [tasks, archivedTasks, selectedTaskId]
   )
 
   const taskById = useMemo(() => new Map(tasks.map((t) => [t.id, t])), [tasks])
@@ -152,8 +178,13 @@ function TasksPage() {
   }, [tasks])
 
   const filtered = useMemo(
-    () => filterTasks(tasks, { statusTab, statusFilter, tagFilter, selection, searchQuery, view }, initiativeById),
-    [tasks, statusTab, statusFilter, tagFilter, selection, initiativeById, searchQuery, view]
+    () =>
+      filterTasks(
+        statusTab === 'archived' ? archivedTasks : tasks,
+        { statusTab, statusFilter, tagFilter, selection, searchQuery, view },
+        initiativeById
+      ),
+    [tasks, archivedTasks, statusTab, statusFilter, tagFilter, selection, initiativeById, searchQuery, view]
   )
 
   const setView = (next: TasksView) =>
@@ -229,9 +260,16 @@ function TasksPage() {
       setSelectedTaskId(null)
     }, 'Delete failed')
 
+  const handleRestore = (id: string) =>
+    withBusy(async () => {
+      upsertTask(await restoreTaskClient(id))
+      await archived.refresh()
+    }, 'Restore failed')
+
   const activeCount = tasks.filter((t) => t.status !== 'complete').length
 
   return (
+    <StaleIdsContext.Provider value={stale.data ?? NO_STALE}>
     <div className="flex h-full min-h-0 w-full max-w-full overflow-x-hidden">
       <TasksSidebar
         spaces={spaces}
@@ -317,6 +355,7 @@ function TasksPage() {
           onClose={() => setSelectedTaskId(null)}
           onUpdate={handleUpdate}
           onDelete={handleDelete}
+          onRestore={handleRestore}
           onSelectTask={setSelectedTaskId}
           onCreateSubtask={handleCreateSubtask}
           busy={busy}
@@ -336,6 +375,7 @@ function TasksPage() {
         <VaultNoteDrawer />
       </div>
     </div>
+    </StaleIdsContext.Provider>
   )
 }
 
@@ -429,7 +469,7 @@ function TasksFilterBar(p: TasksFilterBarProps) {
 
         {view !== 'board' && (
           <div className="flex items-center gap-1 p-1 rounded-xl hq-field self-start max-w-full overflow-x-auto no-scrollbar shrink-0">
-            {(['active', 'all', 'complete'] as StatusTab[]).map((tab) => (
+            {(['active', 'all', 'complete', 'archived'] as StatusTab[]).map((tab) => (
               <button
                 key={tab}
                 type="button"
