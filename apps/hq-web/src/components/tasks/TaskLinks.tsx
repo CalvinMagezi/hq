@@ -6,8 +6,9 @@ import { fetchTaskLinksClient, type LinkKind, type TaskItem, type TaskLinkItem }
 import { usePolled } from '../sessions/usePolled'
 import { SectionLabel } from './taskFields'
 import { linkTarget, linkText } from './linkTarget'
+import { useRefreshOn } from '~/lib/useRefreshOn'
 
-const LINKS_POLL_MS = 60_000
+const LINKS_POLL_MS = 300_000
 const ICON_CLASS = 'w-3.5 h-3.5 text-neutral-500 shrink-0'
 const ROW_CLASS =
   'flex items-start gap-2 px-2.5 py-1.5 rounded-lg bg-white/[0.02] border border-white/5 hover:bg-white/5 text-xs font-mono text-neutral-200 min-w-0'
@@ -57,6 +58,7 @@ function LinkRow({ link }: { link: TaskLinkItem }) {
 /** What a task came from and produced: notes, chats, sessions, commits, pull requests, links and tasks. */
 export function TaskLinks({ task }: { task: TaskItem }) {
   const links = usePolled(task.id, async () => (await fetchTaskLinksClient(task.id)).links, LINKS_POLL_MS)
+  useRefreshOn(['task:sync'], links.refresh)
   const { refresh } = links
   useEffect(() => {
     void refresh()

@@ -16,17 +16,23 @@ const OTHER_PROCESS_POLL: Duration = Duration::from_secs(30);
 struct TasksSnapshot {
     latest_updated_at: String,
     count: i64,
+    // Leases change without touching a task row, so what they look like is part of the fingerprint.
+    leases: String,
 }
 
 fn take_tasks_snapshot(db: &hq_db::Database) -> TasksSnapshot {
     db.with_conn(|conn| {
         conn.query_row(
-            "SELECT COALESCE(MAX(updated_at), ''), COUNT(*) FROM tasks",
+            "SELECT COALESCE(MAX(updated_at), ''), COUNT(*), \
+                    (SELECT COUNT(*) || '/' || COALESCE(MAX(started_at), '') || '/' || COALESCE(MAX(ended_at), '') \
+                       FROM task_work_sessions) \
+             FROM tasks",
             [],
             |row| {
                 Ok(TasksSnapshot {
                     latest_updated_at: row.get(0)?,
                     count: row.get(1)?,
+                    leases: row.get(2)?,
                 })
             },
         )
@@ -89,6 +95,33 @@ mod tests {
             .expect("task:sync should arrive well before the 30s fallback poll")
             .unwrap();
         assert!(event.contains("task:sync"), "{event}");
+    }
+
+    #[test]
+    fn snapshot_changes_when_a_lease_starts_or_ends_without_the_task_row_moving() {
+        let db = hq_db::Database::open_memory().unwrap();
+        db.with_conn(|c| {
+            hq_db::tasks::create_initiative(c, "in-l", "personal", None, "Leases", "leases", "LEASE")?;
+            hq_db::tasks::create_task(c, "tk-l", "in-l", &hq_db::tasks::NewTask { title: "T", created_by: "t", ..Default::default() })
+        })
+        .unwrap();
+        let before = take_tasks_snapshot(&db);
+        db.with_conn(|c| {
+            c.execute(
+                "INSERT INTO task_work_sessions (id, task_id, actor, token_hash) VALUES ('ws-l', 'tk-l', 'a', 'h')",
+                [],
+            )
+            .map_err(anyhow::Error::from)
+        })
+        .unwrap();
+        let started = take_tasks_snapshot(&db);
+        assert_ne!(before, started);
+        db.with_conn(|c| {
+            c.execute("UPDATE task_work_sessions SET ended_at = datetime('now', '+1 minute'), end_reason = 'released'", [])
+                .map_err(anyhow::Error::from)
+        })
+        .unwrap();
+        assert_ne!(started, take_tasks_snapshot(&db));
     }
 
     #[test]

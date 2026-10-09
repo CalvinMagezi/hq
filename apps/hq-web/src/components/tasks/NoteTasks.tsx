@@ -1,12 +1,14 @@
 import { Link } from '@tanstack/react-router'
 import { fetchTasksLinkedToClient, STATUS_LABELS } from '~/lib/tasksApi'
 import { usePolled } from '../sessions/usePolled'
+import { useRefreshOn } from '~/lib/useRefreshOn'
 
-const NOTE_TASKS_POLL_MS = 60_000
+const NOTE_TASKS_POLL_MS = 300_000
 
 /** The tasks that started from this note. Renders nothing for a note with none. */
 export function NoteTasks({ path }: { path: string }) {
   const found = usePolled(path, async () => (await fetchTasksLinkedToClient('vault_note', path)).tasks, NOTE_TASKS_POLL_MS)
+  useRefreshOn(['task:sync'], found.refresh)
   if (!found.data || found.data.length === 0) return null
   return (
     <section aria-label="Tasks from this note" className="mt-8 pt-4 border-t border-white/10">

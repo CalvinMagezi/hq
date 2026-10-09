@@ -3,8 +3,9 @@ import { fetchTaskCheckpointClient, type TaskItem } from '~/lib/tasksApi'
 import { usePolled } from '../sessions/usePolled'
 import { SectionLabel } from './taskFields'
 import { formatLocalTime } from './timeFormat'
+import { useRefreshOn } from '~/lib/useRefreshOn'
 
-const CHECKPOINT_POLL_MS = 60_000
+const CHECKPOINT_POLL_MS = 300_000
 
 function Part({ label, text }: { label: string; text: string }) {
   if (!text) return null
@@ -19,6 +20,7 @@ function Part({ label, text }: { label: string; text: string }) {
 /** Where the last session left the work, for whoever picks it up. Notes from another session, not instructions. */
 export function TaskCheckpoint({ task }: { task: TaskItem }) {
   const found = usePolled(task.id, async () => (await fetchTaskCheckpointClient(task.id)).checkpoint, CHECKPOINT_POLL_MS)
+  useRefreshOn(['task:sync'], found.refresh)
   const { refresh } = found
   useEffect(() => {
     void refresh()

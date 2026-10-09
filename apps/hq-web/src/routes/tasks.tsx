@@ -15,6 +15,7 @@ import {
   restoreTaskClient,
   type Initiative,
   type TaskItem,
+  type WorkSession,
   type TaskStatus,
   type TaskUpdateResult,
   type UpdateTaskInput,
@@ -29,7 +30,9 @@ import { useTasksData } from '~/components/tasks/useTasksData'
 import { usePolled } from '~/components/sessions/usePolled'
 import { StaleIdsContext, stableSet } from '~/components/tasks/staleContext'
 import { WorkingNowContext, workingNow } from '~/components/tasks/workingContext'
+import { WorkingNowPanel } from '~/components/tasks/WorkingNowPanel'
 import { VaultNoteDrawer } from '~/components/VaultNoteDrawer'
+import { useRefreshOn } from '~/lib/useRefreshOn'
 
 type TasksView = 'list' | 'board' | 'timeline'
 
@@ -47,9 +50,10 @@ const ARCHIVED_POLL_MS = 60_000
 const STALE_POLL_MS = 120_000
 /** Who is working right now: a short window and a quick poll, since a lease can start or end any minute. */
 const LIVE_WORK_DAYS = 1
-const LIVE_WORK_POLL_MS = 30_000
+const LIVE_WORK_POLL_MS = 120_000
 const NO_STALE: ReadonlySet<string> = new Set()
 const NO_WORKING: ReadonlyMap<string, string> = new Map()
+const NO_SESSIONS: readonly WorkSession[] = []
 
 export const Route = createFileRoute('/tasks')({
   validateSearch: (search: Record<string, unknown>): { view?: TasksView; task?: string } => {
@@ -146,9 +150,11 @@ function TasksPage() {
 
   const live = usePolled(
     'live-work',
-    async () => workingNow((await fetchRecentWorkSessionsClient(LIVE_WORK_DAYS)).work_sessions),
+    async () => (await fetchRecentWorkSessionsClient(LIVE_WORK_DAYS)).work_sessions.filter((s) => s.ended_at === null),
     LIVE_WORK_POLL_MS
   )
+
+  useRefreshOn(['task:sync'], live.refresh)
 
   const archived = usePolled(
     'archived-tasks',
@@ -166,6 +172,8 @@ function TasksPage() {
     },
     STALE_POLL_MS
   )
+  useRefreshOn(['task:sync'], stale.refresh)
+  useRefreshOn(['task:sync'], recentWork.refresh)
   const archivedTasks = archived.data ?? []
 
   const { task: linkedTaskId } = Route.useSearch()
@@ -178,6 +186,8 @@ function TasksPage() {
     [tasks, archivedTasks, selectedTaskId]
   )
 
+  const liveSessions = live.data ?? NO_SESSIONS
+  const workingMap = useMemo(() => (liveSessions.length ? workingNow(liveSessions) : NO_WORKING), [liveSessions])
   const taskById = useMemo(() => new Map(tasks.map((t) => [t.id, t])), [tasks])
 
   const initiativeById = useMemo(() => new Map(initiatives.map((i) => [i.id, i])), [initiatives])
@@ -280,7 +290,7 @@ function TasksPage() {
   const activeCount = tasks.filter((t) => t.status !== 'complete').length
 
   return (
-    <WorkingNowContext.Provider value={live.data ?? NO_WORKING}>
+    <WorkingNowContext.Provider value={workingMap}>
     <StaleIdsContext.Provider value={stale.data ?? NO_STALE}>
     <div className="flex h-full min-h-0 w-full max-w-full overflow-x-hidden">
       <TasksSidebar
@@ -317,6 +327,8 @@ function TasksPage() {
           searchQuery={searchQuery}
           setSearchQuery={setSearchQuery}
         />
+
+        <WorkingNowPanel sessions={liveSessions} taskById={taskById} onSelect={setSelectedTaskId} />
 
         {notice && (
           <div className="mb-4 flex items-start justify-between gap-3 px-3.5 py-2.5 rounded-xl border border-amber-500/20 bg-amber-500/10 text-xs text-amber-300">

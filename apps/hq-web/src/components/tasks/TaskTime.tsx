@@ -10,8 +10,9 @@ import {
 import { usePolled } from '../sessions/usePolled'
 import { SectionLabel } from './taskFields'
 import { formatDuration, formatLocalTime, formatSignedMinutes } from './timeFormat'
+import { useRefreshOn } from '~/lib/useRefreshOn'
 
-const TIME_POLL_MS = 30_000
+const TIME_POLL_MS = 120_000
 const SESSIONS_SHOWN = 5
 const STATUS_LABEL: Record<string, string> = {
   to_do: 'To do',
@@ -93,6 +94,8 @@ function SessionRow({ session }: { session: WorkSession }) {
 export function TaskTime({ task }: { task: TaskItem }) {
   const time = usePolled(task.id, () => fetchTaskTimeClient(task.id), TIME_POLL_MS)
   const sessions = usePolled(`${task.id}|sessions`, async () => (await fetchTaskWorkSessionsClient(task.id)).work_sessions, TIME_POLL_MS)
+  useRefreshOn(['task:sync'], time.refresh)
+  useRefreshOn(['task:sync'], sessions.refresh)
   const { refresh: refreshTime } = time
   const { refresh: refreshSessions } = sessions
   // updated_at changes with every write: ask again without dropping what is on screen.

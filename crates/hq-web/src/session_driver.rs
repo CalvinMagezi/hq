@@ -57,8 +57,16 @@ pub(crate) fn spawn_session_driver(state: Arc<WsState>) {
     });
 }
 
+/// Tell every open tab that a session changed, so task and Sessions panels refresh now instead of on a timer.
+fn announce_changed(state: &WsState, session_id: &str) {
+    state.broadcast(&serde_json::json!({ "type": SESSION_CHANGED_EVENT, "id": session_id }).to_string());
+}
+
+pub(crate) const SESSION_CHANGED_EVENT: &str = "session:changed";
+
 /// Tell the watching chat's tabs that one of its sessions changed.
 fn announce(state: &WsState, session_id: &str) {
+    announce_changed(state, session_id);
     let owner = state
         .db
         .with_conn(|c| registry::get(c, session_id))
