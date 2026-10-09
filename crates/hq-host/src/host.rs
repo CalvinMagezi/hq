@@ -915,13 +915,11 @@ fn shell_quote(arg: &str) -> String {
     }
 }
 
-/// An agent saved by an older build may carry a flag that skips approvals; it is brought back without it.
 fn spec_of(rec: PaneRecord, env: Vec<(String, String)>) -> SpawnSpec {
-    let argv = crate::bypass::strip_bypass(&rec.resume_argv, rec.agent.as_deref());
-    let mut spec = SpawnSpec::new(rec.name, argv.clone(), rec.cwd);
+    let mut spec = SpawnSpec::new(rec.name, rec.resume_argv.clone(), rec.cwd);
     spec.agent = rec.agent;
     spec.env = env;
-    spec.resume_argv = Some(argv);
+    spec.resume_argv = Some(rec.resume_argv);
     spec.rows = rec.rows;
     spec.cols = rec.cols;
     spec.scrollback_rows = rec.scrollback_rows;
@@ -1009,25 +1007,5 @@ mod tests {
         for bad in ["", "A", "1a", "-a", "a b", "a.b", &"a".repeat(33)] {
             assert!(!valid_name(bad), "{bad:?}");
         }
-    }
-
-    #[test]
-    fn an_agent_saved_with_a_bypass_flag_is_restored_without_it() {
-        let rec = PaneRecord {
-            name: "hs-a".into(),
-            resume_argv: ["claude", "--dangerously-skip-permissions", "-c"].map(String::from).to_vec(),
-            agent: Some("claude".into()),
-            cwd: "/work".into(),
-            env_keys: Vec::new(),
-            rows: 24,
-            cols: 80,
-            scrollback_rows: 100,
-            sandbox: None,
-            idle_ttl_secs: None,
-        };
-        let spec = spec_of(rec, Vec::new());
-        let want = ["claude", "-c"].map(String::from).to_vec();
-        assert_eq!(spec.argv, want);
-        assert_eq!(spec.resume_argv, Some(want));
     }
 }

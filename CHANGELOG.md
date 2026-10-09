@@ -27,7 +27,7 @@ All notable changes to Agent-HQ will be documented in this file.
 
 ### Changed
 
-- **HQ never starts a coding agent in a bypass-permissions mode.** Claude Code starts with `--permission-mode manual`, Cursor and Antigravity lose their run-everything flags, and a harness profile that carries one is refused. Agents saved by an older build come back without the flag. Unattended sessions now stop at approval dialogs until a person or the Drive loop answers.
+- **Coding agents start in their run-without-asking modes again.** Claude Code and Antigravity start with `--dangerously-skip-permissions` and Cursor with `--force`, as before, and a harness profile may set its own flags. Starting them in a manual mode left unattended sessions stuck at the first approval dialog with nobody to answer it. These sessions can run any command on their computer, so keep `agent_host.spawn_cwd_deny` and `agent_host.handoff_cwd_allow` tight; see `docs/AGENT_SESSIONS.md`.
 - **The low-cost default for an Anthropic key is Claude Haiku 5.5** (was Haiku 4), and the `haiku` chat alias points at it. An OpenRouter or OpenAI-routed install still starts on `gpt-6-luna`. Both defaults now have prices in the model registry, so their cost shows up in usage.
 - **The vault copy menu in the web UI can copy a note's content**, next to the relative and absolute path options.
 - **`hq host install` gives `hq` a stable signature on macOS**, so the folder-access approval macOS asks for (Documents, Desktop, Downloads) survives updates instead of being asked again, and a session started with nobody at the screen no longer hangs on it. Re-run `hq host install` after replacing the binary.
