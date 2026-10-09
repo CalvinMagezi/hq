@@ -12,6 +12,25 @@ ignore = [
     { id = "RUSTSEC-2024-0436", reason = "paste is an unmaintained proc-macro that runs at build time only. Transitive via rav1e/ravif/image." },
     { id = "RUSTSEC-2026-0173", reason = "proc-macro-error2 is an unmaintained build-time proc-macro. Transitive via aquamarine/teloxide." },
     { id = "RUSTSEC-2026-0192", reason = "ttf-parser is unmaintained (no vulnerability). Transitive via lopdf/pdf-extract and ab_glyph/imageproc." },
+    # Unmaintained notices (no vulnerability) that arrive only through Typst, the
+    # renderer behind hq-export. Same exit as the quick-xml ids below: drop them
+    # when typst moves off these crates.
+    { id = "RUSTSEC-2025-0141", reason = "bincode 1.x is unmaintained (no vulnerability). Transitive via syntect, Typst's code highlighting." },
+    { id = "RUSTSEC-2024-0320", reason = "yaml-rust is unmaintained (no vulnerability). Transitive via syntect, Typst's code highlighting." },
+    { id = "RUSTSEC-2026-0206", reason = "rustybuzz is unmaintained (no vulnerability). Text shaping in typst-layout and krilla (hq-export's PDF/PNG/SVG renderer)." },
+    # Two real vulnerabilities, accepted on purpose and only until upstream moves.
+    # quick-xml 0.38.4 comes from typst -> typst-library -> hayagriva -> citationberg
+    # (hq-export's PDF/PNG/SVG renderer). citationberg 0.7.0, hayagriva 0.10.1 and
+    # typst 0.15.1 are the latest releases, and hayagriva is a non-optional
+    # dependency of typst-library, so no upgrade or feature switch removes it.
+    # Not reachable from note content: citationberg parses CSL citation-style XML,
+    # which Typst reads only for `bibliography` and `cite`; hq-export never emits
+    # either, its file resolver serves only in-memory images under generated
+    # names, and note text is escaped so it cannot become Typst code.
+    # Drop both ids when citationberg depends on quick-xml >= 0.41. Keep in step
+    # with .cargo/audit.toml, which `cargo audit` reads.
+    { id = "RUSTSEC-2026-0194", reason = "quick-xml 0.38.4 quadratic duplicate-attribute check, via typst/citationberg. Parser is not reachable from note content; see the comment above." },
+    { id = "RUSTSEC-2026-0195", reason = "quick-xml 0.38.4 unbounded namespace-declaration allocation, via typst/citationberg. Parser is not reachable from note content; see the comment above." },
 ]
 
 [licenses]

@@ -16,6 +16,10 @@ pub struct GovernanceConfig {
     /// Environment and sandbox policy for the agent's `bash` tool.
     #[serde(default)]
     pub bash: BashConfig,
+    /// Run web chat as the orchestrator role: it plans and delegates instead of
+    /// editing files or running state-changing commands itself.
+    #[serde(default)]
+    pub orchestrator_role: bool,
 }
 
 impl Default for GovernanceConfig {
@@ -24,6 +28,7 @@ impl Default for GovernanceConfig {
             background_review: true,
             skills_write_approval: false,
             bash: BashConfig::default(),
+            orchestrator_role: false,
         }
     }
 }
@@ -77,4 +82,18 @@ pub enum BashSandboxMode {
     /// gets no model-generated bash until the operator decides otherwise.
     #[default]
     Required,
+}
+
+#[cfg(test)]
+mod orchestrator_flag_tests {
+    use super::GovernanceConfig;
+
+    #[test]
+    fn orchestrator_role_is_off_unless_configured() {
+        assert!(!GovernanceConfig::default().orchestrator_role);
+        let parsed: GovernanceConfig = serde_yaml::from_str("background_review: true\n").unwrap();
+        assert!(!parsed.orchestrator_role);
+        let on: GovernanceConfig = serde_yaml::from_str("orchestrator_role: true\n").unwrap();
+        assert!(on.orchestrator_role);
+    }
 }
