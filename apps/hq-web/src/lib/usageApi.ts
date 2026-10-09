@@ -143,6 +143,8 @@ export function pct(n: number | null | undefined): string {
 
 const HOURS_PER_DAY = 24
 
+export const PERIOD_ADVERB: Record<BudgetPeriod, string> = { day: 'daily', week: 'weekly', month: 'monthly' }
+
 /** A span of hours as the largest sensible unit: "6h", "3 days". */
 export function span(hours: number | null | undefined): string {
   if (hours === null || hours === undefined || !Number.isFinite(hours)) return '-'
@@ -172,6 +174,6 @@ export function budgetChipLabel(r: BudgetsResponse | undefined): string | null {
 export function budgetChipTitle(r: BudgetsResponse | undefined): string {
   const worst = [...(r?.budgets ?? [])].filter((b) => b.state !== 'ok').sort((a, b) => b.pct - a.pct)[0]
   return worst
-    ? `Budget ${worst.name}: ${usd(worst.spent_usd)} of ${usd(worst.limit_usd)} ${worst.period}ly on ${worst.scope}`
+    ? `Budget ${worst.name}: ${usd(worst.spent_usd)} of ${usd(worst.limit_usd)} ${PERIOD_ADVERB[worst.period]} on ${worst.scope}`
     : 'Budgets'
 }

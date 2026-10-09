@@ -6,6 +6,7 @@ import {
   budgetsQuery,
   exhaustionSentence,
   forecastQuery,
+  PERIOD_ADVERB,
   pct,
   providersQuery,
   saveBudgets,
@@ -64,7 +65,7 @@ function BudgetRow({ b, onDelete }: { b: BudgetStatus; onDelete: () => void }) {
     <div className="flex flex-col gap-1" data-testid="budget-row">
       <div className="flex items-baseline justify-between gap-2 text-xs">
         <span className="text-neutral-100">
-          {b.name} <span className="text-neutral-400 font-mono">{b.scope}, {b.period}ly, then {b.action}</span>
+          {b.name} <span className="text-neutral-400 font-mono">{b.scope}, {PERIOD_ADVERB[b.period]}, then {b.action}</span>
         </span>
         <span className="font-mono text-neutral-100 flex items-center gap-2">
           {usd(b.spent_usd)} of {usd(b.limit_usd)} ({pct(b.pct)})

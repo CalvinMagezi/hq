@@ -1,5 +1,5 @@
 import { expect, test } from 'bun:test'
-import { budgetChipLabel, exhaustionSentence, pct, span, usd, type BudgetsResponse, type Forecast } from './usageApi'
+import { PERIOD_ADVERB, budgetChipLabel, exhaustionSentence, pct, span, usd, type BudgetsResponse, type Forecast } from './usageApi'
 
 const budget = (name: string, p: number, state: 'ok' | 'warning' | 'exceeded') => ({
   name, scope: 'global', period: 'month' as const, action: 'block' as const, limit_usd: 20,
@@ -19,6 +19,11 @@ test('money keeps tiny spend visible and dashes the unknown', () => {
   expect(usd(37.5)).toBe('$37.50')
   expect(usd(null)).toBe('-')
   expect(pct(84.6)).toBe('85%')
+})
+
+test('periods read as adverbs', () => {
+  expect(PERIOD_ADVERB.day).toBe('daily')
+  expect(PERIOD_ADVERB.month).toBe('monthly')
 })
 
 test('spans pick a readable unit', () => {
