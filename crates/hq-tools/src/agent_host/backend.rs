@@ -34,6 +34,13 @@ pub trait HostBackend: Send + Sync + std::fmt::Debug {
         target: &str,
         lines: usize,
     ) -> Result<(String, &'static str), AgentHostError>;
+    /// Like `read`, with color and style as ANSI escape sequences. Only the built-in host can.
+    fn read_styled(&self, _target: &str, _lines: usize) -> Result<String, AgentHostError> {
+        Err(AgentHostError::Api {
+            code: "unsupported".into(),
+            message: format!("host '{}' cannot read styled output", self.name()),
+        })
+    }
     fn wait(
         &self,
         target: &str,
@@ -184,6 +191,9 @@ impl<T: HostBackend + ?Sized> HostBackend for Arc<T> {
         lines: usize,
     ) -> Result<(String, &'static str), AgentHostError> {
         (**self).read_sourced(target, lines)
+    }
+    fn read_styled(&self, target: &str, lines: usize) -> Result<String, AgentHostError> {
+        (**self).read_styled(target, lines)
     }
     fn wait(
         &self,
