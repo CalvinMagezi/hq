@@ -687,14 +687,14 @@ enum LiteRule {
 fn lite_rule(command: &Commands) -> LiteRule {
     match command {
         Commands::Chat { .. } | Commands::Sessions { .. } | Commands::Host { .. } | Commands::SelfApply { .. }
-        | Commands::Agents { .. } => LiteRule::NotInLite,
+        | Commands::Agents { .. } | Commands::Models { .. } => LiteRule::NotInLite,
         Commands::Install { .. } | Commands::Update(_) | Commands::UpdateDb { .. } | Commands::Health
-        | Commands::Doctor { .. } | Commands::Env | Commands::Status | Commands::Stop { .. }
+        | Commands::Doctor { egress: true, .. } | Commands::Env | Commands::Status | Commands::Stop { .. }
         | Commands::Restart { .. } | Commands::Logs { .. } | Commands::Errors { .. } | Commands::Follow { .. }
         | Commands::Ps | Commands::Vault { .. } | Commands::Search { .. } | Commands::Config { .. }
         | Commands::Mcp { .. } | Commands::Link { .. } | Commands::Cursor { .. } | Commands::Kill
         | Commands::Clean | Commands::Service { .. } | Commands::Uninstall { .. } | Commands::Tools
-        | Commands::Usage { .. } | Commands::Cost | Commands::Summary | Commands::Version => LiteRule::Open,
+        | Commands::Cost | Commands::Summary | Commands::Version => LiteRule::Open,
         // `hq web status` and `hq web stop` only manage the process.
         Commands::Web(args) if !args.serves() => LiteRule::Open,
         _ => LiteRule::Checked,
@@ -934,7 +934,8 @@ mod lite_rule_tests {
             &["reindex"],
             &["memory", "stats"],
             &["pair"],
-            &["models"],
+            &["doctor"],
+            &["usage"],
         ] {
             assert_eq!(rule(argv), "checked", "{argv:?}");
         }
@@ -942,7 +943,7 @@ mod lite_rule_tests {
 
     #[test]
     fn chat_sessions_and_hosts_are_not_in_lite() {
-        for argv in [&["chat"][..], &["sessions", "list"], &["host", "status"], &["agents", "list"]] {
+        for argv in [&["chat"][..], &["sessions", "list"], &["host", "status"], &["agents", "list"], &["models"]] {
             assert_eq!(rule(argv), "not-in-lite", "{argv:?}");
         }
     }
@@ -950,8 +951,7 @@ mod lite_rule_tests {
     #[test]
     fn diagnostics_configuration_and_process_control_always_run() {
         for argv in [
-            &["doctor"][..],
-            &["doctor", "--egress"],
+            &["doctor", "--egress"][..],
             &["config"],
             &["env"],
             &["mcp", "install"],

@@ -73,15 +73,47 @@ pub(crate) fn resolve_in_vault(vault: &Path, rel: &str) -> Option<PathBuf> {
 
 /// Whether `rel` points into a folder `profile: lite` keeps out of the notes surface: HQ's own
 /// (`_system`, `_data`, `_threads`, `_mailboxes` and any other name starting with `_`) and
-/// hidden ones (`.git`). The notes the owner wrote live elsewhere.
+/// hidden ones (`.git`). The notes the owner wrote live elsewhere. Surrounding whitespace is
+/// ignored, because the note resolvers trim the path they are given.
 pub(crate) fn lite_hides(rel: &str) -> bool {
-    Path::new(rel)
+    Path::new(rel.trim())
         .components()
         .find_map(|c| match c {
             Component::Normal(p) => Some(p.to_string_lossy().into_owned()),
             _ => None,
         })
         .is_some_and(|first| first.starts_with('_') || first.starts_with('.'))
+}
+
+/// Whether `abs` (inside `vault`, existing or not) lands in a folder Lite hides once symlinks
+/// are resolved, or is the vault root itself. The request string alone is not enough: a
+/// symlink in a normal folder can point into `_system`.
+pub(crate) fn lite_hides_resolved(vault: &Path, abs: &Path) -> bool {
+    let Ok(vault) = std::fs::canonicalize(vault) else {
+        return true;
+    };
+    // Resolve the longest existing prefix, then append what does not exist yet.
+    let mut existing = abs;
+    let mut tail = Vec::new();
+    while !existing.exists() {
+        match (existing.file_name(), existing.parent()) {
+            (Some(name), Some(parent)) => {
+                tail.push(name.to_os_string());
+                existing = parent;
+            }
+            _ => return true,
+        }
+    }
+    let Ok(mut resolved) = std::fs::canonicalize(existing) else {
+        return true;
+    };
+    resolved.extend(tail.iter().rev());
+    match resolved.strip_prefix(&vault) {
+        // The vault root itself holds HQ's folders, so it is not a notes location either.
+        Ok(rel) if rel.as_os_str().is_empty() => true,
+        Ok(rel) => lite_hides(&rel.to_string_lossy()),
+        Err(_) => true,
+    }
 }
 
 fn rel_to_vault(vault: &Path, path: &Path) -> String {
@@ -188,11 +220,18 @@ pub(crate) fn resolve_note_path(vault: &Path, rel: &str) -> Option<(PathBuf, Str
 
 pub(crate) use hq_core::frontmatter_utils::split_frontmatter;
 
-fn sorted_entries(dir: &Path) -> Vec<std::fs::DirEntry> {
+/// Lite follows no symlinks while walking the notes: one could lead out of them into HQ's own
+/// folders, which the request path alone would not show.
+fn is_skipped_link(entry: &std::fs::DirEntry, lite: bool) -> bool {
+    lite && entry.file_type().is_ok_and(|t| t.is_symlink())
+}
+
+fn sorted_entries(dir: &Path, lite: bool) -> Vec<std::fs::DirEntry> {
     let mut entries: Vec<_> = std::fs::read_dir(dir)
         .map(|it| {
             it.flatten()
                 .filter(|e| !e.file_name().to_string_lossy().starts_with('.'))
+                .filter(|e| !is_skipped_link(e, lite))
                 .collect()
         })
         .unwrap_or_default();
@@ -200,14 +239,14 @@ fn sorted_entries(dir: &Path) -> Vec<std::fs::DirEntry> {
     entries
 }
 
-fn build_tree(vault: &Path, dir: &Path, name: String) -> Value {
-    let children: Vec<Value> = sorted_entries(dir)
+fn build_tree(vault: &Path, dir: &Path, name: String, lite: bool) -> Value {
+    let children: Vec<Value> = sorted_entries(dir, lite)
         .into_iter()
         .map(|e| {
             let path = e.path();
             let child_name = e.file_name().to_string_lossy().to_string();
             if path.is_dir() {
-                build_tree(vault, &path, child_name)
+                build_tree(vault, &path, child_name, lite)
             } else {
                 json!({"name": child_name, "path": rel_to_vault(vault, &path), "type": "file"})
             }
@@ -217,7 +256,7 @@ fn build_tree(vault: &Path, dir: &Path, name: String) -> Value {
 }
 
 /// `GET /api/tree?recursive=true[&path=Notebooks]`: the nested tree under `path`.
-pub(crate) fn recursive_tree(vault: &Path, root: &str) -> Response {
+pub(crate) fn recursive_tree(vault: &Path, root: &str, lite: bool) -> Response {
     let root = if root.is_empty() {
         DEFAULT_TREE_ROOT
     } else {
@@ -226,9 +265,21 @@ pub(crate) fn recursive_tree(vault: &Path, root: &str) -> Response {
     let Some(dir) = resolve_in_vault(vault, root) else {
         return ApiError::bad_request("invalid path").into_response();
     };
-    let mut tree = build_tree(vault, &dir, root.to_string());
+    // Lite lists folders of notes, never the vault root (which holds HQ's own folders) or
+    // anything that resolves into one.
+    if lite && (lite_hides(root) || lite_hides_resolved(vault, &dir) || dir_is_root(vault, &dir)) {
+        return ApiError::not_found().into_response();
+    }
+    let mut tree = build_tree(vault, &dir, root.to_string(), lite);
     tree["path"] = json!(root);
     Json(json!({"tree": tree})).into_response()
+}
+
+fn dir_is_root(vault: &Path, dir: &Path) -> bool {
+    match (std::fs::canonicalize(vault), std::fs::canonicalize(dir)) {
+        (Ok(v), Ok(d)) => v == d,
+        _ => false,
+    }
 }
 
 fn read_capped(path: &Path, size: u64, cap: u64) -> std::io::Result<String> {
@@ -247,9 +298,9 @@ fn read_capped(path: &Path, size: u64, cap: u64) -> std::io::Result<String> {
 }
 
 /// Body of `GET /api/note` for a path that exists: directory listing or capped text.
-pub(crate) fn read_note(vault: &Path, rel: &str, abs: &Path) -> Response {
+pub(crate) fn read_note(vault: &Path, rel: &str, abs: &Path, lite: bool) -> Response {
     if abs.is_dir() {
-        let entries: Vec<Value> = sorted_entries(abs)
+        let entries: Vec<Value> = sorted_entries(abs, lite)
             .into_iter()
             .map(|e| {
                 let path = e.path();
@@ -490,6 +541,9 @@ pub(crate) async fn note_create_handler(
     let Some(dir) = resolve_in_vault(&state.vault_path, folder) else {
         return ApiError::bad_request("invalid folder").into_response();
     };
+    if !state.resolved_allowed(&dir) {
+        return ApiError::not_found().into_response();
+    }
     match create_unique(&dir, title, content) {
         Ok(path) => {
             index_web_note(&state, &path, content);
@@ -530,6 +584,9 @@ pub(crate) async fn note_update_handler(
     let Some(abs) = resolve_in_vault(&state.vault_path, rel).filter(|_| !rel.is_empty()) else {
         return ApiError::bad_request("invalid path").into_response();
     };
+    if !state.resolved_allowed(&abs) {
+        return ApiError::not_found().into_response();
+    }
     let existing = match std::fs::read_to_string(&abs) {
         Ok(c) => c,
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
@@ -563,12 +620,12 @@ pub(crate) fn set_pinned(content: &str, pin: bool) -> String {
     format!("---\n{}\n---\n{body}", lines.join("\n"))
 }
 
-fn collect_folders(vault: &Path, dir: &Path, out: &mut Vec<String>) {
-    for entry in sorted_entries(dir) {
+fn collect_folders(vault: &Path, dir: &Path, out: &mut Vec<String>, lite: bool) {
+    for entry in sorted_entries(dir, lite) {
         let path = entry.path();
         if path.is_dir() && entry.file_name() != "node_modules" {
             out.push(rel_to_vault(vault, &path));
-            collect_folders(vault, &path, out);
+            collect_folders(vault, &path, out, lite);
         }
     }
 }
@@ -580,6 +637,7 @@ pub(crate) async fn folders_handler(State(state): State<Arc<WsState>>) -> Respon
         &state.vault_path,
         &state.vault_path.join("Notebooks"),
         &mut folders,
+        state.profile().is_lite(),
     );
     folders.retain(|f| f != DEFAULT_NOTE_FOLDER);
     folders.sort();
@@ -709,9 +767,9 @@ fn note_meta(vault: &Path, path: &Path) -> Option<NoteMeta> {
     })
 }
 
-fn collect_notes(vault: &Path, roots: &[&str], cap: usize) -> Vec<NoteMeta> {
-    fn walk(vault: &Path, dir: &Path, cap: usize, out: &mut Vec<NoteMeta>) {
-        for entry in sorted_entries(dir) {
+fn collect_notes(vault: &Path, roots: &[&str], cap: usize, lite: bool) -> Vec<NoteMeta> {
+    fn walk(vault: &Path, dir: &Path, cap: usize, lite: bool, out: &mut Vec<NoteMeta>) {
+        for entry in sorted_entries(dir, lite) {
             if out.len() >= cap {
                 return;
             }
@@ -719,7 +777,7 @@ fn collect_notes(vault: &Path, roots: &[&str], cap: usize) -> Vec<NoteMeta> {
             let path = entry.path();
             if path.is_dir() {
                 if !SCAN_SKIP.contains(&name.as_str()) {
-                    walk(vault, &path, cap, out);
+                    walk(vault, &path, cap, lite, out);
                 }
             } else if name.ends_with(".md")
                 && let Some(note) = note_meta(vault, &path)
@@ -730,7 +788,7 @@ fn collect_notes(vault: &Path, roots: &[&str], cap: usize) -> Vec<NoteMeta> {
     }
     let mut notes = Vec::new();
     for root in roots {
-        walk(vault, &vault.join(root), cap, &mut notes);
+        walk(vault, &vault.join(root), cap, lite, &mut notes);
     }
     notes.sort_by_key(|a| std::cmp::Reverse(a.mtime));
     notes
@@ -760,9 +818,14 @@ fn is_work(n: &NoteMeta) -> bool {
 }
 
 /// The home page's recent, work, review and activity buckets.
-pub(crate) fn vault_signals(vault: &Path) -> Value {
-    let project = collect_notes(vault, PROJECT_ROOTS, PROJECT_SCAN_CAP);
-    let activity = collect_notes(vault, ACTIVITY_ROOTS, ACTIVITY_SCAN_CAP);
+pub(crate) fn vault_signals(vault: &Path, lite: bool) -> Value {
+    let project = collect_notes(vault, PROJECT_ROOTS, PROJECT_SCAN_CAP, lite);
+    // The activity bucket reads HQ's own `_system` and `_logs` folders, which Lite does not show.
+    let activity = if lite {
+        Vec::new()
+    } else {
+        collect_notes(vault, ACTIVITY_ROOTS, ACTIVITY_SCAN_CAP, lite)
+    };
     let pick = |filter: &dyn Fn(&NoteMeta) -> bool, n: usize| -> Vec<Value> {
         project
             .iter()
@@ -780,8 +843,8 @@ pub(crate) fn vault_signals(vault: &Path) -> Value {
 }
 
 /// `GET /api/pinned`: notes with `pinned: true` under Notebooks, newest first.
-pub(crate) fn pinned_notes(vault: &Path) -> Vec<Value> {
-    collect_notes(vault, PROJECT_ROOTS, usize::MAX)
+pub(crate) fn pinned_notes(vault: &Path, lite: bool) -> Vec<Value> {
+    collect_notes(vault, PROJECT_ROOTS, usize::MAX, lite)
         .into_iter()
         .filter(|n| n.pinned)
         .take(PINNED_LIMIT)
@@ -790,24 +853,26 @@ pub(crate) fn pinned_notes(vault: &Path) -> Vec<Value> {
 }
 
 // ponytail: one global cache slot keyed by vault path; per-vault map if one server ever serves several vaults.
-static SIGNALS_CACHE: Mutex<Option<(PathBuf, Instant, Value)>> = Mutex::new(None);
+static SIGNALS_CACHE: Mutex<Option<(PathBuf, bool, Instant, Value)>> = Mutex::new(None);
 
 /// `GET /api/vault-signals`, cached for a few seconds because it walks the whole vault.
 pub(crate) async fn signals_handler(State(state): State<Arc<WsState>>) -> Response {
     let vault = state.vault_path.clone();
+    let lite = state.profile().is_lite();
     if let Ok(guard) = SIGNALS_CACHE.lock()
-        && let Some((path, at, value)) = guard.as_ref()
+        && let Some((path, cached_lite, at, value)) = guard.as_ref()
         && *path == vault
+        && *cached_lite == lite
         && at.elapsed() < SIGNALS_TTL
     {
         return Json(value.clone()).into_response();
     }
-    let value = match tokio::task::spawn_blocking(move || vault_signals(&vault)).await {
+    let value = match tokio::task::spawn_blocking(move || vault_signals(&vault, lite)).await {
         Ok(v) => v,
         Err(e) => return ApiError::internal(e).into_response(),
     };
     if let Ok(mut guard) = SIGNALS_CACHE.lock() {
-        *guard = Some((state.vault_path.clone(), Instant::now(), value.clone()));
+        *guard = Some((state.vault_path.clone(), lite, Instant::now(), value.clone()));
     }
     Json(value).into_response()
 }
@@ -1015,7 +1080,7 @@ mod tests {
         std::fs::write(nb.join("dec.md"), "---\ndecision_needed: true\n---\nx").unwrap();
         std::fs::create_dir_all(v.path().join("_logs")).unwrap();
         std::fs::write(v.path().join("_logs/log.md"), "entry").unwrap();
-        let s = vault_signals(v.path());
+        let s = vault_signals(v.path(), false);
         let paths = |k: &str| -> Vec<String> {
             let mut p: Vec<String> = s[k]
                 .as_array()
@@ -1054,7 +1119,7 @@ mod tests {
             "---\ntitle: a---b\npinned: true\n---\nx",
         )
         .unwrap();
-        let pinned = pinned_notes(v.path());
+        let pinned = pinned_notes(v.path(), false);
         let mut titles: Vec<&str> = pinned
             .iter()
             .map(|n| n["title"].as_str().unwrap())
@@ -1072,7 +1137,7 @@ mod tests {
         std::fs::write(nb.join("a.md"), "").unwrap();
         std::fs::write(nb.join(".hidden.md"), "").unwrap();
         std::fs::write(nb.join("Inbox/b.md"), "").unwrap();
-        let tree = build_tree(v.path(), &nb, "Notebooks".into());
+        let tree = build_tree(v.path(), &nb, "Notebooks".into(), false);
         let kids = tree["children"].as_array().unwrap();
         assert_eq!(kids.len(), 2);
         assert_eq!(kids[0]["name"], "Inbox");

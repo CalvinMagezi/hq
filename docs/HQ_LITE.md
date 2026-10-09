@@ -39,9 +39,10 @@ to a relay.
 ## Nothing leaves unless you listed it
 
 Commands that serve, run the daemon or could call another service (`hq web`, `hq start`, `hq
-daemon`, `hq mcp-serve`, `hq reindex`, `hq memory`, `hq models` and others) check the config first.
-Diagnostics and configuration (`hq doctor`, `hq config`, `hq env`, `hq mcp install`, `hq status`,
-`hq stop`, `hq search`, `hq vault`) always run. If anything that can send your data elsewhere is
+daemon`, `hq mcp-serve`, `hq reindex`, `hq memory`, `hq usage`, a plain `hq doctor` and others)
+check the config first. `hq models` is not part of Lite. `hq doctor --egress`, `hq config`, `hq
+env`, `hq mcp install`, `hq status`, `hq stop`, `hq search` and `hq vault` always run. Host and
+update commands are handled before this check; see Limits below. If anything that can send your data elsewhere is
 set, a checked command stops and says what and how to clear it. The running daemon applies the same
 check when it reloads the config file, and keeps the old config if the new one would be refused.
 
@@ -62,7 +63,10 @@ and `OLLAMA_HOST` overrides), `providers:` and `backends:` entries, a Telegram o
 `agent_host.hosts` and `agent_host.agent_mcp_url`, self-update, and the Copilot credit meter.
 Destinations on this machine (`localhost`, `127.0.0.1`) are not listed.
 
-To allow one on purpose, name its id or its host:
+The Telegram and Discord relays are never enabled by listing: Lite has no chat relay, `hq start`
+does not start one, and a relay token in the config is a refusal that only removing it clears.
+
+To allow another one on purpose, name its id or its host:
 
 ```yaml
 lite:
@@ -88,7 +92,12 @@ itself a proxy to a remote service. Switch those off where you need to.
 
 Semantic search embeds each note's title and first 512 characters. Lite does no semantic indexing:
 the scheduler task that does it is not kept, so nothing is sent to OpenRouter or a remote Ollama
-for it, and keyword search (`hq search`, the search box) does not use vectors and works as before.
+for it, and keyword search (`hq search`, the search box) does not use vectors and works as before; the
+keyword index is still kept up to date.
+
+Note that the notes and tasks tools on `/mcp` are unaffected by Lite's chat refusal: an editor
+agent with the full key can still read and write notes through them, which is why the tasks key
+exists for employer-side clients.
 
 ## Connecting an editor
 

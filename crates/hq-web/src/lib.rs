@@ -116,6 +116,12 @@ impl WsState {
         !self.profile().is_lite() || !vault_api::lite_hides(rel)
     }
 
+    /// Like [`Self::path_allowed`], for a path already resolved inside the vault: under Lite it
+    /// follows symlinks, so a link in a normal folder cannot lead into a hidden one.
+    pub(crate) fn resolved_allowed(&self, abs: &std::path::Path) -> bool {
+        !self.profile().is_lite() || !vault_api::lite_hides_resolved(&self.vault_path, abs)
+    }
+
     /// Run as `profile`, whatever the config file loaded at construction says.
     pub fn with_profile(mut self, profile: hq_core::config::Profile) -> Self {
         let mut cfg = self.hq_config.as_deref().cloned().unwrap_or_default();

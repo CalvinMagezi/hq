@@ -121,14 +121,13 @@ pub async fn run_daemon(
         .context("failed to check daemon lock")?
         .context("another daemon is already running — only one instance allowed")?;
 
-    let mut tasks = default_tasks();
     if config.profile.is_lite() {
         // Local bookkeeping only; see LITE_DAEMON_TASKS.
         ensure_dir(&vault_path.join("_system"));
-        tasks.retain(|t| LITE_DAEMON_TASKS.contains(&t.name));
     } else {
         run_startup_hooks(&config, &vault_path, &db);
     }
+    let mut tasks = scheduled_tasks(config.profile);
     let (mut task_state, missed) = load_task_state(&vault_path, &tasks);
     let mut save_ticker = TickCounter::every_secs(STATE_SAVE_INTERVAL_SECS);
 
@@ -199,12 +198,14 @@ impl TickCounter {
     }
 }
 
-/// The scheduled tasks `profile: lite` keeps: housekeeping on the vault and its database. None
-/// calls a model, reads mail, supervises agent sessions, embeds note text, posts to a relay or
-/// asks a provider for usage. Lite also runs none of the startup hooks (the agent-worker loop,
-/// the session event loops over remote hosts, decision routes), and the embeddings task is not
-/// kept, so Lite does no semantic indexing; keyword search needs none.
+/// The scheduled tasks `profile: lite` keeps: housekeeping on the vault and its database, and the
+/// keyword index. None calls a model, reads mail, supervises agent sessions, embeds note text,
+/// posts to a relay or asks a provider for usage. Lite also runs none of the startup hooks (the
+/// agent-worker loop, the session event loops over remote hosts, decision routes).
 const LITE_DAEMON_TASKS: &[&str] = &[
+    // Keeps the keyword index in step with notes edited outside the web app; under Lite the
+    // task stops there and embeds nothing.
+    "embeddings",
     "expire-approvals",
     "vault-health",
     "thread-log-rotation",
@@ -212,6 +213,15 @@ const LITE_DAEMON_TASKS: &[&str] = &[
     "db-vacuum",
     "vault-cap-enforcer",
 ];
+
+/// The tasks the scheduler runs for `profile`.
+fn scheduled_tasks(profile: hq_core::config::Profile) -> Vec<DaemonTask> {
+    let mut tasks = default_tasks();
+    if profile.is_lite() {
+        tasks.retain(|t| LITE_DAEMON_TASKS.contains(&t.name));
+    }
+    tasks
+}
 
 /// The config to run with after the file changed: `new` if it may replace `old`, else why not.
 /// A running instance does not change edition (restart to do that), and a Lite instance does not
@@ -226,6 +236,24 @@ fn accept_reload(
     }
     hq_core::config::enforce_lite(&new, env).map_err(|e| e.to_string())?;
     Ok(new)
+}
+
+/// Swaps in a reloaded config if it may replace the running one, and says so either way.
+fn apply_reload(
+    config: &mut HqConfig,
+    loaded: anyhow::Result<HqConfig>,
+    env: hq_core::config::EnvLookup<'_>,
+) {
+    match loaded {
+        Err(e) => warn!("daemon: config reload failed: {e}"),
+        Ok(new_config) => match accept_reload(config, new_config, env) {
+            Ok(accepted) => {
+                *config = accepted;
+                info!("daemon: config reloaded from disk");
+            }
+            Err(why) => warn!("daemon: config change ignored, still running the old one: {why}"),
+        },
+    }
 }
 
 /// Hot-reload: reloads the config when its file's mtime changes.
@@ -254,19 +282,11 @@ impl ConfigReloader {
         if current == self.mtime {
             return;
         }
-        match HqConfig::load() {
-            Err(e) => warn!("daemon: config reload failed: {e}"),
-            Ok(new_config) => {
-                self.mtime = current;
-                match accept_reload(config, new_config, &hq_core::config::process_env) {
-                    Ok(accepted) => {
-                        *config = accepted;
-                        info!("daemon: config reloaded from disk");
-                    }
-                    Err(why) => warn!("daemon: config change ignored, still running the old one: {why}"),
-                }
-            }
+        let loaded = HqConfig::load();
+        if loaded.is_ok() {
+            self.mtime = current;
         }
+        apply_reload(config, loaded, &hq_core::config::process_env);
     }
 }
 
@@ -678,6 +698,49 @@ mod lite_tests {
     }
 
     #[test]
+    fn the_scheduler_runs_only_the_lite_tasks_under_lite_and_all_of_them_otherwise() {
+        let full: Vec<&str> = scheduled_tasks(Profile::Full).iter().map(|t| t.name).collect();
+        let lite: Vec<&str> = scheduled_tasks(Profile::Lite).iter().map(|t| t.name).collect();
+        assert!(full.len() > lite.len() && full.contains(&"email-poll") && full.contains(&"session-supervisor"));
+        assert_eq!(lite.len(), LITE_DAEMON_TASKS.len(), "{lite:?}");
+        for name in &lite {
+            assert!(LITE_DAEMON_TASKS.contains(name), "{name}");
+        }
+        for reaches_out in ["email-poll", "session-supervisor", "copilot-usage", "inbox-triage"] {
+            assert!(!lite.contains(&reaches_out), "{reaches_out}");
+        }
+    }
+
+    /// The reload path itself, not just the rule it calls: a refused config leaves the running one.
+    #[test]
+    fn apply_reload_keeps_the_running_config_when_the_new_one_is_refused() {
+        let mut running = lite();
+        let refused = HqConfig {
+            openrouter_api_key: Some("k".into()),
+            ..lite()
+        };
+        apply_reload(&mut running, Ok(refused), &no_env);
+        assert!(running.openrouter_api_key.is_none());
+
+        let flipped = HqConfig::default();
+        apply_reload(&mut running, Ok(flipped), &no_env);
+        assert!(running.profile.is_lite());
+
+        let fine = HqConfig {
+            lite: LiteConfig {
+                allow_egress: vec!["telegram".into()],
+                ..LiteConfig::default()
+            },
+            ..lite()
+        };
+        apply_reload(&mut running, Ok(fine), &no_env);
+        assert_eq!(running.lite.allow_egress, ["telegram"]);
+
+        apply_reload(&mut running, Err(anyhow::anyhow!("bad yaml")), &no_env);
+        assert_eq!(running.lite.allow_egress, ["telegram"], "an unreadable file changes nothing");
+    }
+
+    #[test]
     fn lite_keeps_only_tasks_that_exist_and_none_that_reach_out() {
         let all: Vec<&str> = default_tasks().iter().map(|t| t.name).collect();
         for kept in LITE_DAEMON_TASKS {
@@ -685,7 +748,6 @@ mod lite_tests {
         }
         for reaches_out in [
             "email-poll",
-            "embeddings",
             "inbox-triage",
             "memory-consolidation",
             "session-supervisor",

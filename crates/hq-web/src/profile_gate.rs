@@ -7,7 +7,6 @@
 //! enforcement does not depend on the web app hiding a button.
 
 use axum::extract::{Request, State};
-use axum::http::Method;
 use axum::middleware::Next;
 use axum::response::{IntoResponse, Response};
 use std::sync::Arc;
@@ -38,7 +37,7 @@ const LITE_API: &[&str] = &[
 /// Whether `profile: lite` serves this request. Everything outside `/api` and `/hooks` is the
 /// app's static files, `/health`, `/ws` (events; chat turns are refused in the handler) and
 /// `/mcp` (own key, narrowed registry), which are served as under the full profile.
-pub(crate) fn lite_allows(_method: &Method, path: &str) -> bool {
+pub(crate) fn lite_allows(path: &str) -> bool {
     if path.starts_with("/hooks") {
         return false;
     }
@@ -68,7 +67,7 @@ pub(crate) async fn lite_gate(
     request: Request,
     next: Next,
 ) -> Response {
-    if state.profile().is_lite() && !lite_allows(request.method(), request.uri().path()) {
+    if state.profile().is_lite() && !lite_allows(request.uri().path()) {
         return crate::error::ApiError::not_found().into_response();
     }
     next.run(request).await
@@ -77,6 +76,7 @@ pub(crate) async fn lite_gate(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use axum::http::Method;
 
     #[test]
     fn lite_serves_tasks_notes_search_and_the_app_shell() {
@@ -103,7 +103,7 @@ mod tests {
             (Method::GET, "/tasks"),
             (Method::GET, "/assets/app.js"),
         ] {
-            assert!(lite_allows(&method, path), "{method} {path}");
+            assert!(lite_allows(path), "{method} {path}");
         }
     }
 
@@ -136,14 +136,14 @@ mod tests {
             (Method::GET, "/hooks/anything"),
             (Method::GET, "/api"),
         ] {
-            assert!(!lite_allows(&method, path), "{method} {path}");
+            assert!(!lite_allows(path), "{method} {path}");
         }
     }
 
     #[test]
     fn a_prefix_does_not_match_a_longer_name() {
         for path in ["/api/tasksX", "/api/notes", "/api/searching", "/api/pinned-x", "/api/vaults"] {
-            assert!(!lite_allows(&Method::GET, path), "{path}");
+            assert!(!lite_allows(path), "{path}");
         }
     }
 
@@ -158,11 +158,11 @@ mod tests {
             "/api/tasks/..",
             "/api/note/../../hooks/gmail",
         ] {
-            assert!(!lite_allows(&Method::GET, path), "{path}");
+            assert!(!lite_allows(path), "{path}");
         }
         // Legitimate ids that merely contain dots are fine.
-        assert!(lite_allows(&Method::GET, "/api/tasks/PERS.1/comments"));
-        assert!(lite_allows(&Method::GET, "/api/note"));
+        assert!(lite_allows("/api/tasks/PERS.1/comments"));
+        assert!(lite_allows("/api/note"));
     }
 
     use axum::body::Body;
@@ -288,5 +288,85 @@ mod tests {
         for rel in ["Notebooks/_draft.md", "Notebooks/Inbox/x.md", "plan.md", "Projects/a_b/c.md", ""] {
             assert!(!crate::vault_api::lite_hides(rel), "{rel:?}");
         }
+    }
+
+    /// The review that found these: a padded path is trimmed by the note resolver after the
+    /// check, `path=.` lists the vault root, the home page's activity bucket previews `_system`,
+    /// and a symlink in a normal folder can point into a hidden one.
+    #[tokio::test]
+    async fn lite_hides_padded_root_signal_and_symlink_routes_into_hq_folders() {
+        let (lite, lv) = app(Profile::Lite);
+        let (full, fv) = app(Profile::Full);
+        for v in [&lv, &fv] {
+            std::fs::create_dir_all(v.path().join("_system")).unwrap();
+            std::fs::write(v.path().join("_system/SOUL.md"), "---\ntitle: Soul\n---\nprivate words").unwrap();
+            std::fs::create_dir_all(v.path().join("Notebooks")).unwrap();
+            std::fs::write(v.path().join("Notebooks/plan.md"), "a plan").unwrap();
+            #[cfg(unix)]
+            std::os::unix::fs::symlink(v.path().join("_system"), v.path().join("Notebooks/linked")).unwrap();
+        }
+
+        // A padded path is the same path once the resolver trims it.
+        for uri in ["/api/note?path=%20_system/SOUL.md", "/api/note?path=%09_system/SOUL.md", "/api/note?path=_system/SOUL.md%20"] {
+            assert_eq!(status(&lite, "GET", uri).await, StatusCode::NOT_FOUND, "lite {uri}");
+        }
+        assert_eq!(status(&full, "GET", "/api/note?path=%20_system/SOUL.md").await, StatusCode::OK, "control");
+
+        // The vault root and its dot spellings are not a notes folder.
+        for uri in ["/api/tree?path=.", "/api/tree?path=./", "/api/tree?path=Notebooks/..%2F"] {
+            let got = status(&lite, "GET", uri).await;
+            assert_ne!(got, StatusCode::OK, "lite {uri}");
+        }
+        assert_eq!(status(&full, "GET", "/api/tree?path=.").await, StatusCode::OK, "control");
+        assert_eq!(status(&lite, "GET", "/api/tree").await, StatusCode::OK, "the default folder still lists");
+
+        // The activity bucket would preview `_system` notes.
+        let signals = |app: axum::Router| async move {
+            let req = Request::builder()
+                .uri("/api/vault-signals")
+                .header("host", "127.0.0.1:5678")
+                .body(Body::empty())
+                .unwrap();
+            let res = app.oneshot(req).await.unwrap();
+            let bytes = axum::body::to_bytes(res.into_body(), usize::MAX).await.unwrap();
+            String::from_utf8_lossy(&bytes).into_owned()
+        };
+        let lite_signals = signals(lite.clone()).await;
+        assert!(!lite_signals.contains("private words") && !lite_signals.contains("Soul"), "{lite_signals}");
+        let full_signals = signals(full.clone()).await;
+        assert!(full_signals.contains("Soul"), "the full profile shows activity, so this proves something: {full_signals}");
+
+        // A symlink inside the notes that leads into a hidden folder.
+        #[cfg(unix)]
+        {
+            for uri in [
+                "/api/note?path=Notebooks/linked/SOUL.md",
+                "/api/vault-asset?path=Notebooks/linked/SOUL.md",
+            ] {
+                assert_eq!(status(&lite, "GET", uri).await, StatusCode::NOT_FOUND, "lite {uri}");
+                assert_eq!(status(&full, "GET", uri).await, StatusCode::OK, "full {uri}");
+            }
+            let put = r#"{"path":"Notebooks/linked/SOUL.md","content":"overwritten"}"#;
+            assert_eq!(body_status(&lite, "PUT", "/api/note", put).await, StatusCode::NOT_FOUND);
+            assert!(std::fs::read_to_string(lv.path().join("_system/SOUL.md")).unwrap().contains("private words"));
+            let create = r#"{"folder":"Notebooks/linked","title":"planted","content":"x"}"#;
+            assert_eq!(body_status(&lite, "POST", "/api/note/create", create).await, StatusCode::NOT_FOUND);
+            assert!(!lv.path().join("_system/planted.md").exists());
+        }
+    }
+
+    #[test]
+    fn padded_and_resolved_paths_are_judged_like_the_resolver_reads_them() {
+        for rel in [" _system/x", "\t_system/x", " ./_system/x", "  .git/config "] {
+            assert!(crate::vault_api::lite_hides(rel), "{rel:?}");
+        }
+        let vault = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(vault.path().join("_system")).unwrap();
+        std::fs::create_dir_all(vault.path().join("Notebooks")).unwrap();
+        let hides = |p: &str| crate::vault_api::lite_hides_resolved(vault.path(), &vault.path().join(p));
+        assert!(hides("_system/new-note.md"), "a note that does not exist yet");
+        assert!(hides(""), "the vault root");
+        assert!(!hides("Notebooks/new/deeper/x.md"));
+        assert!(hides("../elsewhere"), "outside the vault is hidden too");
     }
 }

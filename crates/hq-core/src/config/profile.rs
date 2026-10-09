@@ -186,7 +186,7 @@ pub fn egress_report(cfg: &HqConfig, env: EnvLookup<'_>) -> Vec<EgressItem> {
             "Kimi Code",
             &cfg.kimi_code_api_key,
             &["KIMI_CODE_API_KEY", "KIMI_API_KEY"][..],
-            &["api.kimi.com"][..],
+            &["api.kimi.com", "api.moonshot.ai"][..],
         ),
     ] {
         if present(value, env, vars) {
@@ -253,7 +253,7 @@ pub fn egress_report(cfg: &HqConfig, env: EnvLookup<'_>) -> Vec<EgressItem> {
                     BackendKind::AnthropicCompatible => "api.anthropic.com".into(),
                     _ => String::new(),
                 });
-                if !is_loopback(&host) {
+                if !host.is_empty() && !is_loopback(&host) {
                     items.push(item(
                         &format!("backend:{}", b.name),
                         &format!("LLM backend {}", b.name),
@@ -271,20 +271,24 @@ pub fn egress_report(cfg: &HqConfig, env: EnvLookup<'_>) -> Vec<EgressItem> {
     if present(&relay.telegram_token, env, &["TELEGRAM_BOT_TOKEN"])
         || present(&relay.notifications_token, env, &[])
     {
-        items.push(item(
+        let mut e = item(
             "telegram",
             "Telegram relay",
             &["api.telegram.org"],
             "chat messages and replies",
-        ));
+        );
+        e.refusal = Some("Lite has no chat relay; remove the token");
+        items.push(e);
     }
     if present(&relay.discord_token, env, &["DISCORD_BOT_TOKEN"]) {
-        items.push(item(
+        let mut e = item(
             "discord",
             "Discord relay",
             &["discord.com", "gateway.discord.gg"],
             "chat messages and replies",
-        ));
+        );
+        e.refusal = Some("Lite has no chat relay; remove the token");
+        items.push(e);
     }
 
     for m in &cfg.remote_mcp {
@@ -723,13 +727,22 @@ mod tests {
     #[test]
     fn an_item_with_two_hosts_needs_both_listed() {
         let mut cfg = lite();
-        cfg.relay.discord_token = Some("tok".into());
-        cfg.lite.allow_egress = vec!["discord.com".into()];
-        assert_eq!(ids(&lite_violations(&cfg, &no_env)), ["discord"], "gateway.discord.gg is still unlisted");
-        cfg.lite.allow_egress = vec!["discord.com".into(), "gateway.discord.gg".into()];
+        cfg.kimi_code_api_key = Some("sk-kimi-x".into());
+        cfg.lite.allow_egress = vec!["api.kimi.com".into()];
+        assert_eq!(ids(&lite_violations(&cfg, &no_env)), ["kimi"], "api.moonshot.ai is still unlisted");
+        cfg.lite.allow_egress = vec!["api.kimi.com".into(), "api.moonshot.ai".into()];
         assert!(lite_violations(&cfg, &no_env).is_empty());
-        cfg.lite.allow_egress = vec!["discord".into()];
+        cfg.lite.allow_egress = vec!["kimi".into()];
         assert!(lite_violations(&cfg, &no_env).is_empty(), "the id covers every host");
+    }
+
+    #[test]
+    fn a_relay_token_is_refused_whatever_is_listed() {
+        let mut cfg = lite();
+        cfg.relay.discord_token = Some("tok".into());
+        cfg.relay.telegram_token = Some("tok".into());
+        cfg.lite.allow_egress = vec!["discord".into(), "telegram".into(), "discord.com".into(), "gateway.discord.gg".into(), "api.telegram.org".into()];
+        assert_eq!(ids(&lite_violations(&cfg, &no_env)), ["telegram", "discord"]);
     }
 
     #[test]

@@ -43,7 +43,7 @@ pub async fn run(config: &HqConfig, component: &str) -> Result<()> {
     hq_agent::install_ledger(db.clone());
 
     info!(vault = %config.vault_path.display(), "HQ starting");
-    if matches!(component, "all" | "daemon") {
+    if matches!(component, "all" | "daemon") && !config.profile.is_lite() {
         notify_if_bash_refused(config, &db);
     }
 
@@ -61,6 +61,9 @@ pub async fn run(config: &HqConfig, component: &str) -> Result<()> {
                 shutdown_trigger.trigger();
             });
             daemon::run_daemon(config, vault, db, shutdown).await
+        }
+        "relay" | "discord" | "telegram" if config.profile.is_lite() => {
+            anyhow::bail!("the chat relays are not part of HQ Lite (profile: lite)")
         }
         "relay" | "discord" => {
             println!("Starting Discord relay...");
@@ -104,8 +107,11 @@ async fn start_all(config: &HqConfig, vault: Arc<VaultClient>, db: Arc<Database>
     let shutdown = ShutdownSignal::new();
     let cleanup = CleanupRegistry::new();
     spawn_daemon(config, vault.clone(), db.clone(), shutdown.clone());
-    spawn_discord(config, &vault, &db);
-    spawn_telegram(config, &vault, &db);
+    // Lite has no chat relay, whatever tokens are configured.
+    if !config.profile.is_lite() {
+        spawn_discord(config, &vault, &db);
+        spawn_telegram(config, &vault, &db);
+    }
     spawn_web_server(config, &vault, &db);
 
     println!("All components running. Press Ctrl+C to stop.");
