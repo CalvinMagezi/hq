@@ -83,6 +83,10 @@ or a session's own backend. Production code shares one process-wide `Instruments
 `hq_agent::install_ledger(db)` points it at the database and is called by `hq start`, `hq web` and the
 session builder. Tests build isolated handles.
 
+**Non-chat calls.** Image generation and embeddings go to OpenRouter over their own HTTP requests, so they
+report through `Instruments::admit_external` and `record_external` instead: origins `imagegen` and
+`embeddings`, the response's `usage.cost` as the price, and a budget that is already used up refuses them.
+
 **Budgets.** Nothing is enforced until `budgets:` is set in `config.yaml`:
 
 ```yaml

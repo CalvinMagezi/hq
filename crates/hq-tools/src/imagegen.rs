@@ -48,6 +48,30 @@ impl ImageGenTool {
     }
 
     async fn call_openrouter(&self, api_key: &str, model_id: &str, prompt: &str) -> Result<String> {
+        let instruments = hq_llm::Instruments::global();
+        let call = hq_llm::ExternalCall {
+            provider: "openrouter",
+            class: hq_llm::cost::ProviderClass::Metered,
+            model: model_id,
+            origin: hq_llm::origin::IMAGEGEN,
+            task_hint: "image",
+        };
+        instruments.admit_external(&call).await?;
+        let started = std::time::Instant::now();
+        let result = self.call_openrouter_inner(api_key, model_id, prompt).await;
+        match &result {
+            Ok((_, usage)) => instruments.record_external(&call, Some(*usage), started.elapsed(), None),
+            Err(_) => instruments.record_external(&call, None, started.elapsed(), Some("error")),
+        }
+        result.map(|(url, _)| url)
+    }
+
+    async fn call_openrouter_inner(
+        &self,
+        api_key: &str,
+        model_id: &str,
+        prompt: &str,
+    ) -> Result<(String, hq_llm::cost::Usage)> {
         let mut req = self
             .http
             .post(format!("{OR_BASE}/chat/completions"))
@@ -74,6 +98,10 @@ impl ImageGenTool {
         }
 
         let data: Value = resp.json().await?;
+        let usage = data
+            .get("usage")
+            .map(hq_llm::usage_from_openrouter)
+            .unwrap_or_default();
         let images = data
             .pointer("/choices/0/message/images")
             .and_then(|v| v.as_array());
@@ -92,7 +120,7 @@ impl ImageGenTool {
             .or_else(|| img.as_str());
 
         match url {
-            Some(u) => Ok(u.to_string()),
+            Some(u) => Ok((u.to_string(), usage)),
             None => bail!("Could not extract image URL from OpenRouter response"),
         }
     }

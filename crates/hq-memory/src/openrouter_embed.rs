@@ -29,6 +29,8 @@ struct OpenRouterEmbedRequest {
 #[derive(Deserialize)]
 struct OpenRouterEmbedResponse {
     data: Vec<OpenRouterEmbedData>,
+    #[serde(default)]
+    usage: Option<serde_json::Value>,
 }
 
 #[derive(Deserialize)]
@@ -41,6 +43,26 @@ struct OpenRouterEmbedData {
 /// `run_inbox_triage`/`model_intelligence` already read).
 pub async fn generate_embedding(text: &str, api_key: &str) -> Result<Vec<f32>> {
     let model = openrouter_embedding_model();
+    let instruments = hq_llm::Instruments::global();
+    let call = hq_llm::ExternalCall {
+        provider: "openrouter",
+        class: hq_llm::cost::ProviderClass::Metered,
+        model: &model,
+        origin: hq_llm::origin::EMBEDDINGS,
+        task_hint: "embed",
+    };
+    instruments.admit_external(&call).await?;
+    let started = std::time::Instant::now();
+    let result = embed_once(text, api_key, &model).await;
+    match &result {
+        Ok((_, usage)) => instruments.record_external(&call, Some(*usage), started.elapsed(), None),
+        Err(_) => instruments.record_external(&call, None, started.elapsed(), Some("error")),
+    }
+    result.map(|(embedding, _)| embedding)
+}
+
+async fn embed_once(text: &str, api_key: &str, model: &str) -> Result<(Vec<f32>, hq_llm::cost::Usage)> {
+    let model = model.to_string();
 
     let client = reqwest::Client::builder()
         .timeout(std::time::Duration::from_secs(30))
@@ -76,5 +98,10 @@ pub async fn generate_embedding(text: &str, api_key: &str) -> Result<Vec<f32>> {
         bail!("OpenRouter embedding response had no data entries");
     }
 
-    Ok(data.data.remove(0).embedding)
+    let usage = data
+        .usage
+        .as_ref()
+        .map(hq_llm::usage_from_openrouter)
+        .unwrap_or_default();
+    Ok((data.data.remove(0).embedding, usage))
 }
