@@ -289,8 +289,8 @@ const MIGRATIONS: &[(&str, &str)] = &[
         include_str!("../sql/078_ledger_cost_attribution.sql"),
     ),
     (
-        "078_harness_usage",
-        include_str!("../sql/078_harness_usage.sql"),
+        "079_harness_usage",
+        include_str!("../sql/079_harness_usage.sql"),
     ),
 ];
 
