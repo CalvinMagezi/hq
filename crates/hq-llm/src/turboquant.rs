@@ -24,9 +24,7 @@ impl TurboQuantProvider {
             .with_api_key("local")
             .with_api_base(base_url);
         let client = Client::with_config(config);
-        Self {
-            client,
-        }
+        Self { client }
     }
 
     /// Create from TURBOQUANT_BASE_URL env var.
@@ -67,6 +65,8 @@ impl LlmProvider for TurboQuantProvider {
             output_tokens,
             cache_read_tokens: 0,
             cache_write_tokens: 0,
+            reasoning_tokens: 0,
+            provider_cost_usd: None,
             model: response.model.clone(),
         })
     }

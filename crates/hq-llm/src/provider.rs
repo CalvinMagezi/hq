@@ -159,6 +159,12 @@ pub enum StreamChunk {
     },
     /// Actual model name from the provider response.
     ModelInfo(String),
+    /// What the provider says it billed for the call and how many reasoning tokens it spent.
+    /// Sent after `Usage` by providers that report either; absent otherwise.
+    Billing {
+        cost_usd: Option<f64>,
+        reasoning_tokens: u32,
+    },
 }
 
 /// Request to the LLM.
@@ -184,6 +190,10 @@ pub struct ChatResponse {
     /// Prompt tokens written into the KV cache this turn.
     /// Zero for providers that don't support prompt caching.
     pub cache_write_tokens: u32,
+    /// Reasoning tokens, already counted inside `output_tokens`. Zero when not reported.
+    pub reasoning_tokens: u32,
+    /// The provider's own billed figure for this call, when it reports one.
+    pub provider_cost_usd: Option<f64>,
     pub model: String,
 }
 

@@ -144,6 +144,8 @@ impl LlmProvider for CerebrasProvider {
             output_tokens,
             cache_read_tokens: 0,
             cache_write_tokens: 0,
+            reasoning_tokens: 0,
+            provider_cost_usd: None,
             model,
         })
     }

@@ -26,6 +26,12 @@ Rules for anything that reads the ledger:
 - Raw rows older than `usage_ledger.retain_raw_days` (default 90, never below 35) fold into
   `usage_daily` once a day.
 
+The provider's own billed figure wins when it reports one. OpenRouter returns `usage.cost` on
+every response; streams read it from the raw SSE (`StreamChunk::Billing`) and the row is stored with
+`cost_source='provider'` and `provider_cost_usd`. Both the ledger and the session budget then use that
+figure, so `hq usage reconcile` compares OpenRouter's number with itself plus any calls HQ never saw.
+Reasoning tokens are recorded when the provider reports them.
+
 Pricing lives in one function, `hq_llm::cost::price_call`. The router ledger and the session budget
 both call it, so a cached call costs the same in both.
 

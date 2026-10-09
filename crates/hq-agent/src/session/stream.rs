@@ -24,6 +24,10 @@ pub(super) struct TurnOutput {
     pub(super) cache_read_tokens: u32,
     /// Prompt tokens written into the provider cache this turn.
     pub(super) cache_write_tokens: u32,
+    /// Reasoning tokens the provider reported (already inside `output_tokens`).
+    pub(super) reasoning_tokens: u32,
+    /// What the provider says it billed for the turn, when it said.
+    pub(super) provider_cost_usd: Option<f64>,
     /// Concrete model the backend used (empty when unreported).
     pub(super) model: String,
     /// The backend the chain committed to (the primary's name, or a fallback's).
@@ -212,6 +216,8 @@ impl AgentSession {
         let mut output_tokens = 0u32;
         let mut cache_read_tokens = 0u32;
         let mut cache_write_tokens = 0u32;
+        let mut reasoning_tokens = 0u32;
+        let mut provider_cost_usd: Option<f64> = None;
         let mut model = String::new();
         // Default to the root backend's name; a ProviderChain overrides this with
         // the actually-selected backend via a `BackendSelected` event so fallback
@@ -319,6 +325,13 @@ impl AgentSession {
                     cache_read_tokens = cr;
                     cache_write_tokens = cw;
                 }
+                Ok(BackendEvent::Billing {
+                    cost_usd,
+                    reasoning_tokens: rt,
+                }) => {
+                    provider_cost_usd = cost_usd;
+                    reasoning_tokens = rt;
+                }
                 Ok(BackendEvent::ModelInfo(m)) => {
                     model = m;
                 }
@@ -366,6 +379,8 @@ impl AgentSession {
             output_tokens,
             cache_read_tokens,
             cache_write_tokens,
+            reasoning_tokens,
+            provider_cost_usd,
             model,
             active_backend,
             produced_output,

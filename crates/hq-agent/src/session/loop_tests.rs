@@ -107,6 +107,8 @@ impl LlmProvider for MockProvider {
                 output_tokens: 7,
                 cache_read_tokens: 0,
                 cache_write_tokens: 0,
+                reasoning_tokens: 0,
+                provider_cost_usd: None,
                 model: "mock-model".to_string(),
             }),
             BufferedReply::ToolCall {
@@ -130,6 +132,8 @@ impl LlmProvider for MockProvider {
                 output_tokens: 7,
                 cache_read_tokens: 0,
                 cache_write_tokens: 0,
+                reasoning_tokens: 0,
+                provider_cost_usd: None,
                 model: "mock-model".to_string(),
             }),
             BufferedReply::AuthFailure => Err(LlmError::Auth {
@@ -1774,4 +1778,32 @@ async fn a_failing_reader_gives_delta_none_and_the_step_still_completes() {
 async fn a_non_copilot_backend_emits_no_step_credits() {
     let events = run_with_credits("session-contract-mock", vec![Some(1.0), Some(2.0)]).await;
     assert!(step_credits(&events).is_empty());
+}
+
+#[tokio::test]
+async fn a_provider_billed_cost_is_what_the_session_budget_counts() {
+    const BILLED_USD: f64 = 0.4321;
+    let backend = Arc::new(ScriptedBackend::new(
+        BackendCapabilities::full_api(),
+        vec![vec![
+            Ok(BackendEvent::Message("answer".into())),
+            Ok(BackendEvent::Usage {
+                input_tokens: 100,
+                output_tokens: 20,
+                cache_read_tokens: 0,
+                cache_write_tokens: 0,
+            }),
+            Ok(BackendEvent::Billing {
+                cost_usd: Some(BILLED_USD),
+                reasoning_tokens: 4,
+            }),
+            Ok(BackendEvent::Done),
+        ]],
+    ));
+    let mut agent = session(idle_provider(), vec![]);
+    agent.set_backend(backend);
+
+    let _ = agent.prompt("go").await.unwrap();
+
+    assert_eq!(agent.total_cost(), BILLED_USD);
 }

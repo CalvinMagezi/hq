@@ -11,7 +11,6 @@ mod wire;
 pub(crate) use wire::parse_flexible_response;
 pub use wire::{build_request, classify_openai_error, parse_assistant_message};
 
-
 /// Google AI's OpenAI-compatible endpoint.
 pub const GEMINI_OPENAI_BASE_URL: &str = "https://generativelanguage.googleapis.com/v1beta/openai";
 
@@ -103,6 +102,10 @@ impl OpenRouterProvider {
     /// which async-openai's typed client treats as a hard deserialize error
     /// on every chunk. Routed through [`Self::raw_sse_stream`] instead, whose
     /// parser patches the field in (see its doc comment).
+    fn is_openrouter_endpoint(&self) -> bool {
+        self.api_base.contains("openrouter.ai")
+    }
+
     fn is_copilot_endpoint(&self) -> bool {
         self.api_base.contains("githubcopilot.com")
     }

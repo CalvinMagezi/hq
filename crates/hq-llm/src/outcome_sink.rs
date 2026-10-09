@@ -111,6 +111,8 @@ pub struct OutcomeEvent {
     pub cache_write_tokens: i64,
     pub reasoning_tokens: i64,
     pub cost_usd: f64,
+    /// The provider's own billed figure, when it reported one.
+    pub provider_cost_usd: Option<f64>,
     pub cost_source: &'static str,
     pub origin: &'static str,
     pub success: bool,

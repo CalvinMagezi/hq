@@ -5,6 +5,7 @@ use async_openai::types::{CompletionUsage, CreateChatCompletionStreamResponse};
 use futures::StreamExt;
 use std::collections::VecDeque;
 use std::pin::Pin;
+use std::sync::{Arc, Mutex};
 use tokio_stream::Stream;
 
 use super::wire::classify_openai_error;
@@ -26,6 +27,10 @@ pub(super) fn parse_stream_chunk(
     }
     serde_json::from_value(value)
 }
+
+/// Where the raw SSE reader leaves the provider-billed cost of the call, which the typed chunk
+/// cannot carry. Set before the chunk holding `usage` is sent, so the consumer sees it in time.
+pub(super) type CostSidecar = Arc<Mutex<Option<f64>>>;
 
 /// The pinned, `Send` upstream stream of raw OpenAI stream chunks.
 type OpenAiResponseStream = Pin<
@@ -51,6 +56,7 @@ enum OpenAiStreamPhase {
         buffer: VecDeque<Result<StreamChunk>>,
         finish_seen: bool,
         last_model: String,
+        sidecar: Option<CostSidecar>,
     },
     /// Upstream drained — emit exactly one terminal marker (`Done` on a real
     /// finish, otherwise a typed truncation error) and stop.
@@ -77,11 +83,30 @@ where
         > + Send
         + 'static,
 {
+    finalize_openai_stream_with_cost(inner, fallback_model, None)
+}
+
+/// [`finalize_openai_stream`] that also reports the provider-billed cost left in `sidecar`.
+pub(super) fn finalize_openai_stream_with_cost<S>(
+    inner: S,
+    fallback_model: String,
+    sidecar: Option<CostSidecar>,
+) -> impl Stream<Item = Result<StreamChunk>> + Send
+where
+    S: Stream<
+            Item = std::result::Result<
+                CreateChatCompletionStreamResponse,
+                async_openai::error::OpenAIError,
+            >,
+        > + Send
+        + 'static,
+{
     let phase = OpenAiStreamPhase::Active {
         inner: Box::pin(inner),
         buffer: VecDeque::new(),
         finish_seen: false,
         last_model: fallback_model,
+        sidecar,
     };
     futures::stream::unfold(phase, advance_openai_stream)
 }
@@ -168,6 +193,7 @@ async fn advance_openai_stream(
                 mut buffer,
                 mut finish_seen,
                 mut last_model,
+                sidecar,
             } => {
                 if let Some(chunk) = buffer.pop_front() {
                     return Some((
@@ -177,6 +203,7 @@ async fn advance_openai_stream(
                             buffer,
                             finish_seen,
                             last_model,
+                            sidecar,
                         },
                     ));
                 }
@@ -200,11 +227,19 @@ async fn advance_openai_stream(
                             finish_seen = true;
                         }
                         buffer.extend(stream_response_to_chunks(&response, &last_model));
+                        if let Some(billing) = response
+                            .usage
+                            .as_ref()
+                            .and_then(|u| billing_chunk(u, sidecar.as_ref()))
+                        {
+                            buffer.push_back(Ok(billing));
+                        }
                         phase = OpenAiStreamPhase::Active {
                             inner,
                             buffer,
                             finish_seen,
                             last_model,
+                            sidecar,
                         };
                         continue;
                     }
@@ -289,6 +324,20 @@ pub(super) fn usage_to_chunk(usage: &CompletionUsage) -> StreamChunk {
         cache_read_tokens,
         cache_write_tokens: 0,
     }
+}
+
+/// The billed cost and reasoning tokens that ride along with a `usage` payload, when it has any.
+fn billing_chunk(usage: &CompletionUsage, sidecar: Option<&CostSidecar>) -> Option<StreamChunk> {
+    let reasoning_tokens = usage
+        .completion_tokens_details
+        .as_ref()
+        .and_then(|d| d.reasoning_tokens)
+        .unwrap_or(0);
+    let cost_usd = sidecar.and_then(|cell| cell.lock().ok()?.take());
+    (reasoning_tokens > 0 || cost_usd.is_some()).then_some(StreamChunk::Billing {
+        cost_usd,
+        reasoning_tokens,
+    })
 }
 
 /// Flatten one streamed choice delta into normalized [`StreamChunk`]s.

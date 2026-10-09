@@ -662,18 +662,18 @@ impl CopilotProvider {
 
         let mut gh = tokio::process::Command::new("gh");
         gh.args(["auth", "token"]);
-        if let Some(user) = std::env::var(COPILOT_GH_USER_ENV).ok().filter(|u| !u.is_empty()) {
+        if let Some(user) = std::env::var(COPILOT_GH_USER_ENV)
+            .ok()
+            .filter(|u| !u.is_empty())
+        {
             gh.args(["--user", &user]);
         }
-        let output = gh
-            .output()
-            .await
-            .map_err(|e| LlmError::Auth {
-                status: 401,
-                message: format!(
-                    "no Copilot credential: env vars unset and `gh auth token` failed to spawn: {e}"
-                ),
-            })?;
+        let output = gh.output().await.map_err(|e| LlmError::Auth {
+            status: 401,
+            message: format!(
+                "no Copilot credential: env vars unset and `gh auth token` failed to spawn: {e}"
+            ),
+        })?;
 
         if !output.status.success() {
             let stderr = String::from_utf8_lossy(&output.stderr);
@@ -791,6 +791,8 @@ impl LlmProvider for CopilotProvider {
             output_tokens,
             cache_read_tokens,
             cache_write_tokens,
+            reasoning_tokens: 0,
+            provider_cost_usd: None,
             model,
         })
     }

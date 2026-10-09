@@ -52,6 +52,7 @@ impl TaskOutcomeSink for DbOutcomeSink {
             cache_write_tokens: event.cache_write_tokens,
             reasoning_tokens: event.reasoning_tokens,
             cost_usd: event.cost_usd,
+            provider_cost_usd: event.provider_cost_usd,
             cost_source: event.cost_source.to_string(),
             origin: event.origin.to_string(),
             success: event.success,

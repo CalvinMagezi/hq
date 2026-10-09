@@ -59,6 +59,8 @@ impl LlmProvider for BackendUtilityProvider {
         let mut output_tokens = 0u32;
         let mut cache_read_tokens = 0u32;
         let mut cache_write_tokens = 0u32;
+        let mut reasoning_tokens = 0u32;
+        let mut provider_cost_usd: Option<f64> = None;
         let mut model = request.model.clone();
 
         while let Some(item) = stream.next().await {
@@ -75,6 +77,13 @@ impl LlmProvider for BackendUtilityProvider {
                     output_tokens = ot;
                     cache_read_tokens = cr;
                     cache_write_tokens = cw;
+                }
+                BackendEvent::Billing {
+                    cost_usd,
+                    reasoning_tokens: rt,
+                } => {
+                    provider_cost_usd = cost_usd;
+                    reasoning_tokens = rt;
                 }
                 BackendEvent::ModelInfo(m) => model = m,
                 BackendEvent::Done => break,
@@ -97,6 +106,8 @@ impl LlmProvider for BackendUtilityProvider {
             output_tokens,
             cache_read_tokens,
             cache_write_tokens,
+            reasoning_tokens,
+            provider_cost_usd,
             model,
         })
     }
@@ -118,6 +129,12 @@ impl LlmProvider for BackendUtilityProvider {
             cache_read_tokens: response.cache_read_tokens,
             cache_write_tokens: response.cache_write_tokens,
         }));
+        if response.provider_cost_usd.is_some() || response.reasoning_tokens > 0 {
+            chunks.push(Ok(StreamChunk::Billing {
+                cost_usd: response.provider_cost_usd,
+                reasoning_tokens: response.reasoning_tokens,
+            }));
+        }
         if !response.model.is_empty() {
             chunks.push(Ok(StreamChunk::ModelInfo(response.model)));
         }

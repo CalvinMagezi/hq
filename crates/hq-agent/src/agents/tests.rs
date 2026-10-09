@@ -127,6 +127,8 @@ impl LlmProvider for MarkerProvider {
             output_tokens: 3,
             cache_read_tokens: 0,
             cache_write_tokens: 0,
+            reasoning_tokens: 0,
+            provider_cost_usd: None,
             model: "marker-model".to_string(),
         })
     }

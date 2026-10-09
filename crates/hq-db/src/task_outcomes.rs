@@ -22,6 +22,8 @@ pub struct TaskOutcome {
     pub cache_write_tokens: i64,
     pub reasoning_tokens: i64,
     pub cost_usd: f64,
+    /// What the provider says it billed, when it said.
+    pub provider_cost_usd: Option<f64>,
     /// `provider`, `table`, `unpriced`, `free`, `flat` or `none`. `unpriced` means the cost is unknown.
     pub cost_source: String,
     /// What kind of work the call served (chat, memory, subagent...).
@@ -56,6 +58,7 @@ impl TaskOutcome {
             cache_write_tokens: 0,
             reasoning_tokens: 0,
             cost_usd: 0.0,
+            provider_cost_usd: None,
             cost_source: "table".into(),
             origin: "unknown".into(),
             success: true,
@@ -83,9 +86,10 @@ pub fn insert(conn: &Connection, outcome: &TaskOutcome) -> Result<i64> {
             latency_ms, input_tokens, output_tokens, cost_usd,
             success, error_class, quality_score,
             tool_calls_issued, tool_calls_succeeded, recorded_at,
-            cache_read_tokens, cache_write_tokens, reasoning_tokens, cost_source, origin
+            cache_read_tokens, cache_write_tokens, reasoning_tokens, cost_source, origin,
+            provider_cost_usd
         ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15,
-                  ?16, ?17, ?18, ?19, ?20)",
+                  ?16, ?17, ?18, ?19, ?20, ?21)",
         params![
             outcome.session_id,
             outcome.turn_idx,
@@ -107,6 +111,7 @@ pub fn insert(conn: &Connection, outcome: &TaskOutcome) -> Result<i64> {
             outcome.reasoning_tokens,
             outcome.cost_source,
             outcome.origin,
+            outcome.provider_cost_usd,
         ],
     )?;
     Ok(conn.last_insert_rowid())
@@ -239,6 +244,7 @@ mod tests {
             cache_write_tokens: 0,
             reasoning_tokens: 0,
             cost_usd: 0.0,
+            provider_cost_usd: None,
             cost_source: "free".into(),
             origin: "chat".into(),
             success: true,
