@@ -37,6 +37,7 @@ pub mod skills;
 pub mod start;
 pub mod status;
 pub mod stop;
+pub mod task;
 pub mod tools;
 pub mod update;
 pub mod usage;

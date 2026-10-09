@@ -110,6 +110,31 @@ Lite itself does not run chat turns, so this is not what powers the web app. It 
 backend for a Full HQ on the same seat, and for the day Lite grows a tool-less chat. Whether
 `claude-haiku-5.5` is offered in Copilot at all is unconfirmed; the live check is the answer.
 
+## When MCP is blocked: the terminal
+
+If your organization turns MCP off in Copilot but lets agents run terminal commands, the same
+tasks and notes are reachable through the `hq` command. Nothing listens on a port, and nothing
+leaves the machine.
+
+```
+hq task list --status in_progress
+hq task create "Draft the Q4 plan" --priority high --due 2030-12-01
+hq task comment PERSONAL-INBOX-001 "blocked on the budget numbers"
+hq search budget --json
+hq vault read Notebooks/plan.md --json
+echo "text" | hq vault write Notebooks/new.md -
+hq copilot init            # writes .github/copilot-instructions.md so agents know all this
+hq copilot init --agents   # AGENTS.md instead
+```
+
+`hq task` goes through the same gateway as the tasks-only MCP key, so it has that key's limits: task
+and space tools only, writes attributed to `mcp:tasks`, no routing tags or notifications, no
+sessions. Under Lite, `hq vault` and `hq search` hide `_system`, `_data` and the other folders the
+web app hides, follow no symlink into them, and `hq vault context` is refused. Output is JSON on
+standard output; logs go to standard error. A terminal agent is still an agent running commands on
+your machine: Copilot's own approval prompts are the guardrail, and if your organization blocks MCP,
+extensions and terminals alike there is no supported route, and HQ does not suggest working around it.
+
 ## Semantic search
 
 Semantic search embeds each note's title and first 512 characters. Lite does no semantic indexing:

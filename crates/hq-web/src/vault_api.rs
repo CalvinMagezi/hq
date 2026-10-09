@@ -75,7 +75,7 @@ pub(crate) fn resolve_in_vault(vault: &Path, rel: &str) -> Option<PathBuf> {
 /// (`_system`, `_data`, `_threads`, `_mailboxes` and any other name starting with `_`) and
 /// hidden ones (`.git`). The notes the owner wrote live elsewhere. Surrounding whitespace is
 /// ignored, because the note resolvers trim the path they are given.
-pub(crate) fn lite_hides(rel: &str) -> bool {
+pub fn lite_hides(rel: &str) -> bool {
     Path::new(rel.trim())
         .components()
         .find_map(|c| match c {
@@ -88,7 +88,7 @@ pub(crate) fn lite_hides(rel: &str) -> bool {
 /// Whether `abs` (inside `vault`, existing or not) lands in a folder Lite hides once symlinks
 /// are resolved, or is the vault root itself. The request string alone is not enough: a
 /// symlink in a normal folder can point into `_system`.
-pub(crate) fn lite_hides_resolved(vault: &Path, abs: &Path) -> bool {
+pub fn lite_hides_resolved(vault: &Path, abs: &Path) -> bool {
     let Ok(vault) = std::fs::canonicalize(vault) else {
         return true;
     };
