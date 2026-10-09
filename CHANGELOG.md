@@ -6,7 +6,10 @@ All notable changes to Agent-HQ will be documented in this file.
 
 ### Added
 
+- **The note viewer has an Export menu.** The PDF button is now a labelled Export button that opens a menu: PDF, Word, web page, Markdown, PNG and SVG, plus Excel, CSV and JSON when the note contains a table (a note with no tables never offers them). Downloads work as before, with the share sheet on a phone, and a note with several tables saved as CSV arrives as a `.zip`. See `docs/NOTE_EXPORT.md`.
+- **A guide to the first-run model key screen**, `docs/FIRST_RUN.md`: when it appears, what the button does, what protects the key, and fixes for each error. The screen's hint now shows `hq env` as code instead of with literal backticks.
 - **A recorded walkthrough and a step-by-step quick start for the Hetzner deploy.** The README, the install page and `docs/HETZNER.md` now show the form in a short animation and list the six steps, what you need beforehand and what it costs.
+- **The Workbench terminal is live and in color.** The page now opens a server-sent stream of the agent's screen instead of polling plain text, shows the colors the agent printed, and falls back to polling if the stream cannot open.
 - **The Sessions page is now Workbench, and you can start agents from it.** Pick a computer, a folder and an agent, and HQ starts it there. Every computer that joins gets a `Documents/HQ` folder (on macOS, Linux, Ubuntu servers and inside WSL2 on Windows) that agents start in by default, and folders can be browsed and created inside it from the page. Agents that are waiting for you are listed first with Approve and Decline buttons, and past agents can be stopped, resumed, renamed and archived. The page is served at the same `/sessions` address.
 - **A fresh server can take its first model key from the web UI.** With no key configured, the web app opens a setup screen that tests an OpenRouter key and saves it, so a server nobody has a shell on yet needs no `hq env`. It works only on an instance with a web token, and only until a key exists. Anthropic and Google keys are not offered there yet because the chat router does not read them from config.
 

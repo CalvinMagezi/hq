@@ -6,7 +6,7 @@ renderer sits behind every entry point, and none of it needs an external tool.
 
 | Where | How |
 |-------|-----|
-| Web UI | Open a note and press the PDF button in the header. On a phone it opens the share sheet, on a desktop it downloads. |
+| Web UI | Open a note and press **Export** in the header, then pick a format: PDF, Word, web page, Markdown, PNG or SVG, plus Excel, CSV and JSON when the note has a table. On a phone it opens the share sheet, on a desktop it downloads. |
 | Terminal | `hq vault export <note> --format <fmt> [-o file] [--brand <slug>] [--lang <language>]` writes `<note>.<ext>` in the current folder by default. `hq vault export-pdf <note>` is the PDF-only form. |
 | Agents | the `vault_export` tool (saves to `Exports/<note>.<ext>` in the vault and returns a `web_path`). `vault_export_pdf` still works. |
 | HTTP | `GET /api/note/export?path=<note>&format=<fmt>[&brand=<slug>][&languages=py,sh]`. `GET /api/note/pdf?path=<note>` is the PDF-only form. |

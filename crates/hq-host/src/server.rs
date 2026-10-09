@@ -818,12 +818,14 @@ enum SourceParam {
     Recent,
     #[default]
     RecentUnwrapped,
+    Styled,
 }
 
 impl From<SourceParam> for ReadSource {
     fn from(p: SourceParam) -> Self {
         match p {
             SourceParam::Visible => ReadSource::Visible,
+            SourceParam::Styled => ReadSource::Styled,
             SourceParam::Recent => ReadSource::Recent,
             SourceParam::RecentUnwrapped => ReadSource::RecentUnwrapped,
         }
