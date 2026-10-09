@@ -43,7 +43,7 @@ is always Lite: a Windows `hq.exe` ignores `profile: full`, because the coding-a
 sandbox and the chat relays are not part of it. For those, use Full HQ in WSL2
 (`docs/WINDOWS.md`).
 
-`irm https://agent-hq.online/install.ps1 | iex` installs it for you (see `docs/WINDOWS.md`). By hand: the `Windows Lite` workflow (manual) produces `hq-lite-<version>-windows-x86_64.zip` holding
+`irm https://agent-hq.online/install.ps1 | iex` installs it for you (see `docs/WINDOWS.md`). By hand: the `Windows Lite` workflow (it runs after every successful main release, so each release gets its zip, and can be run by hand) produces `hq-lite-<version>-windows-x86_64.zip` holding
 `hq.exe`, a `web` folder with the app, and a SHA-256 file. Unzip it anywhere you can write, for
 example `%LOCALAPPDATA%\hq-lite`, then:
 
