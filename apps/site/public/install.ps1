@@ -13,7 +13,7 @@
 #
 # What it does first is read-only: it looks at whether WSL2 works, whether you are an
 # administrator and whether virtualization is on, then recommends an edition and tells you why.
-# It never elevates itself, never changes execution policy, security software or system settings,
+# It never elevates itself (only `wsl --install` asks Windows for approval, on its own), never changes execution policy, security software or system settings,
 # and never works around a policy that blocks a program: it says so and stops.
 # Works in Windows PowerShell 5.1 and PowerShell 7.
 
@@ -103,6 +103,9 @@ function Get-HqFacts {
     if (Get-Command wsl.exe -ErrorAction SilentlyContinue) {
         try {
             $names = ConvertFrom-HqWslList -Lines @(& wsl.exe -l -q 2>$null)
+            # Only distributions running as WSL 2 count (`wsl -l -v` lists the version).
+            $v2 = @(& wsl.exe -l -v 2>$null | ForEach-Object { ($_ -replace "`0", '').Trim() } | Where-Object { $_ -match '\s2\s*$' })
+            $names = @($names | Where-Object { $n = $_; $v2 | Where-Object { $_ -match [regex]::Escape($n) } })
             if ($names.Count -gt 0) {
                 $f.WslDistro = $names[0]
                 # A distribution that is listed but cannot start (WSL disabled by policy) fails here.
@@ -122,7 +125,8 @@ function Write-HqNote { param([string]$Text) Write-Host "    $Text" }
 function Confirm-Hq {
     param([string]$Question, [bool]$Default = $true)
     if ($script:HqYes) { return $true }
-    if (-not [Environment]::UserInteractive) { return $Default }
+    # Nobody to ask: do nothing rather than assume yes.
+    if (-not [Environment]::UserInteractive) { return $false }
     $hint = if ($Default) { 'Y/n' } else { 'y/N' }
     $a = Read-Host "$Question [$hint]"
     if (-not $a) { return $Default }
@@ -142,7 +146,10 @@ function Initialize-HqNetwork {
 
 function Get-HqFile {
     param([string]$Url, [string]$To)
-    Invoke-WebRequest -Uri $Url -OutFile $To -UseBasicParsing -Headers @{ 'User-Agent' = 'hq-install.ps1' }
+    $prev = $ProgressPreference
+    $ProgressPreference = 'SilentlyContinue'   # the progress bar makes Windows PowerShell 5.1 downloads very slow
+    try { Invoke-WebRequest -Uri $Url -OutFile $To -UseBasicParsing -Headers @{ 'User-Agent' = 'hq-install.ps1' } }
+    finally { $ProgressPreference = $prev }
 }
 
 # ─── HQ Lite ────────────────────────────────────────────────────────────────────────────────────
@@ -161,7 +168,9 @@ function Install-HqLite {
     try {
         $releases = Invoke-RestMethod -Uri "https://api.github.com/repos/$script:HqRepo/releases?per_page=30" -UseBasicParsing -Headers @{ 'User-Agent' = 'hq-install.ps1' }
     } catch {
-        Write-Warning "Could not reach GitHub to find the newest release: $($_.Exception.Message)"
+        $why = if ("$($_.Exception.Message)" -match '403|rate limit') { 'GitHub limits anonymous requests per address (many computers behind one office connection can hit it); try again later.' } else { 'If a company proxy or filter blocks github.com, ask your IT team to allow it.' }
+        Write-Warning "Could not get the release list from GitHub: $($_.Exception.Message)"
+        Write-HqNote $why
         Write-HqNote 'If a company proxy or filter blocks github.com, ask your IT team to allow it, or download the zip on another computer and unzip it here.'
         return $false
     }
@@ -187,41 +196,85 @@ function Install-HqLite {
         Write-HqNote 'Checksum matches. Note: this build is not code-signed yet, so the checksum shows the download is intact, not who made it.'
 
         $stage = Join-Path $work 'x'
+        # Refuse a zip whose entries climb out of the folder (older Expand-Archive does not
+        # normalise `..` or absolute names).
+        Add-Type -AssemblyName System.IO.Compression.FileSystem
+        $za = [IO.Compression.ZipFile]::OpenRead($zip)
+        try {
+            foreach ($e in $za.Entries) {
+                if ($e.FullName -match '(^|[\\/])\.\.([\\/]|$)' -or [IO.Path]::IsPathRooted($e.FullName)) { throw "the zip holds an unsafe path: $($e.FullName)" }
+            }
+        } finally { $za.Dispose() }
         Expand-Archive -Path $zip -DestinationPath $stage -Force
-        $root = Get-ChildItem $stage | Where-Object { $_.PSIsContainer } | Select-Object -First 1
-        if (-not $root -or -not (Test-Path (Join-Path $root.FullName 'hq.exe'))) { throw 'the zip does not contain hq.exe' }
+        # The zip holds the files at its top level; accept one wrapper folder as well.
+        $root = Get-Item $stage
+        if (-not (Test-Path (Join-Path $stage 'hq.exe'))) {
+            $inner = Get-ChildItem $stage | Where-Object { $_.PSIsContainer } | Select-Object -First 1
+            if ($inner) { $root = $inner }
+        }
+        if (-not (Test-Path (Join-Path $root.FullName 'hq.exe'))) { throw 'the zip does not contain hq.exe' }
 
         New-Item -ItemType Directory -Force $Dir | Out-Null
         $exe = Join-Path $Dir 'hq.exe'
+        $webDir = Join-Path $Dir 'web'
+        $webOld = Join-Path $Dir 'web.old'
+        $marker = Join-Path $Dir '.hq-lite'
         # A running hq.exe cannot be overwritten but can be renamed, which is how an update lands.
         $old = "$exe.old"
-        if (Test-Path $old) { Remove-Item $old -Force -ErrorAction SilentlyContinue }
         $hadExe = Test-Path $exe
-        if ($hadExe) { Move-Item $exe $old -Force }
-        $webDir = Join-Path $Dir 'web'
-        if (Test-Path $webDir) { Remove-Item $webDir -Recurse -Force -ErrorAction SilentlyContinue }
-        Copy-Item (Join-Path $root.FullName 'hq.exe') $exe -Force
-        if (Test-Path (Join-Path $root.FullName 'web')) { Copy-Item (Join-Path $root.FullName 'web') $webDir -Recurse -Force }
-        Copy-Item (Join-Path $root.FullName 'README.txt') (Join-Path $Dir 'README.txt') -Force -ErrorAction SilentlyContinue
+        $hadWeb = Test-Path $webDir
+        # Never delete a `web` folder that is not ours.
+        if ($hadWeb -and -not (Test-Path $marker)) { throw "$webDir exists and was not created by HQ Lite; choose another -InstallDir" }
+        if (Test-Path $old) { Remove-Item $old -Force -ErrorAction SilentlyContinue }
+        if (Test-Path $webOld) { Remove-Item $webOld -Recurse -Force -ErrorAction SilentlyContinue }
+        $swapped = $false
+        try {
+            if ($hadExe) { Move-Item $exe $old -Force }
+            if ($hadWeb) { Move-Item $webDir $webOld -Force }
+            $swapped = $true
+            Copy-Item (Join-Path $root.FullName 'hq.exe') $exe -Force
+            if (Test-Path (Join-Path $root.FullName 'web')) { Copy-Item (Join-Path $root.FullName 'web') $webDir -Recurse -Force }
+            Copy-Item (Join-Path $root.FullName 'README.txt') (Join-Path $Dir 'README.txt') -Force -ErrorAction SilentlyContinue
+            Set-Content -Path $marker -Value 'created by install.ps1' -ErrorAction SilentlyContinue
+        } catch {
+            # Put back what was there before, so a failed update never leaves no program at all.
+            if ($swapped -or $hadExe) {
+                Remove-Item $exe -Force -ErrorAction SilentlyContinue
+                if (Test-Path $webDir) { Remove-Item $webDir -Recurse -Force -ErrorAction SilentlyContinue }
+                if ($hadExe -and (Test-Path $old)) { Move-Item $old $exe -Force }
+                if ($hadWeb -and (Test-Path $webOld)) { Move-Item $webOld $webDir -Force }
+            }
+            throw
+        }
+        $exeHash = (Get-FileHash -Algorithm SHA256 -Path $exe).Hash.ToLowerInvariant()
 
         # Does this computer let the program run at all? AppLocker, WDAC and Smart App Control
         # decide that, and they only answer when it is started.
         $ran = $false
+        $ver = ''
+        $prev = $ErrorActionPreference
+        $ErrorActionPreference = 'Continue'
         try {
-            $ver = & $exe --version 2>&1
+            $ver = (& $exe --version) | Out-String
             $ran = ($LASTEXITCODE -eq 0)
         } catch { $ver = $_.Exception.Message }
+        $ErrorActionPreference = $prev
         if (-not $ran) {
             Remove-Item $exe -Force -ErrorAction SilentlyContinue
+            if (Test-Path $webDir) { Remove-Item $webDir -Recurse -Force -ErrorAction SilentlyContinue }
+            Remove-Item (Join-Path $Dir 'README.txt') -Force -ErrorAction SilentlyContinue
             if ($hadExe -and (Test-Path $old)) { Move-Item $old $exe -Force }
-            Write-Warning "hq.exe would not start here: $ver"
+            if ($hadWeb -and (Test-Path $webOld)) { Move-Item $webOld $webDir -Force }
+            elseif (-not $hadExe) { Remove-Item $marker -Force -ErrorAction SilentlyContinue }
+            Write-Warning "hq.exe would not start here: $($ver.Trim())"
             Write-HqNote 'This usually means a policy on this computer only allows approved programs (AppLocker, Windows Defender Application Control or Smart App Control).'
             Write-HqNote 'HQ does not try to get around that. Your options, lightest first:'
             Write-HqNote "  1. Use an HQ that runs somewhere else from VS Code (nothing to install here): $script:HqDocs"
-            Write-HqNote "  2. Ask IT to allow this file by its hash: $($asset.ZipName)  SHA-256 $want"
+            Write-HqNote "  2. Ask IT to allow the program by its hash. hq.exe SHA-256: $exeHash (from $($asset.ZipName), $($asset.Tag); unsigned)"
             Write-HqNote '  3. Use Full HQ in WSL2 if your IT team allows it (run this installer again with -Edition full).'
             return $false
         }
+        if (Test-Path $webOld) { Remove-Item $webOld -Recurse -Force -ErrorAction SilentlyContinue }
         if (Test-Path $old) { Remove-Item $old -Force -ErrorAction SilentlyContinue }
         Write-HqNote "Installed: $ver"
 
@@ -229,7 +282,7 @@ function Install-HqLite {
             $cur = [Environment]::GetEnvironmentVariable('Path', 'User')
             if (-not (($cur -split ';') -contains $Dir)) {
                 [Environment]::SetEnvironmentVariable('Path', ($(if ($cur) { "$cur;$Dir" } else { $Dir })), 'User')
-                Write-HqNote "Added $Dir to your user PATH (open a new terminal to use `hq`)."
+                Write-HqNote "Added $Dir to your user PATH (open a new terminal and run hq.exe)."
             }
         } else {
             Write-HqNote "PATH was not changed. Run it as: & '$exe'   (or re-run with -AddToPath)."
@@ -255,7 +308,7 @@ function Invoke-HqWsl {
     param([string]$Distro, [bool]$AsRoot, [string]$Script)
     $b64 = [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($Script))
     $run = "echo $b64 | base64 -d | bash -l"
-    if ($AsRoot) { & wsl.exe -d $Distro -u root -- bash -c $run } else { & wsl.exe -d $Distro -- bash -c $run }
+    if ($AsRoot) { & wsl.exe -d $Distro -u root -- bash -c $run | Out-Host } else { & wsl.exe -d $Distro -- bash -c $run | Out-Host }
 }
 
 # ─── Full HQ (WSL2) ─────────────────────────────────────────────────────────────────────────────
@@ -273,7 +326,7 @@ function Install-HqFull {
             Write-HqNote 'Run it yourself when ready, restart if asked, then run this installer again.'
             return $false
         }
-        & wsl.exe --install -d Ubuntu
+        & wsl.exe --install -d Ubuntu | Out-Host
         Write-Host ''
         Write-HqNote 'Restart Windows if it asks, open "Ubuntu" from the Start menu once to create your Linux user, then run this installer again.'
         return $true
@@ -285,7 +338,7 @@ function Install-HqFull {
         @{ Text = 'Install what HQ needs in Ubuntu (curl, openssh-server, bubblewrap)'; Root = $true
            Cmd = 'apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y curl openssh-server bubblewrap' },
         @{ Text = 'Turn on systemd (lets the HQ host run as a service) and allow the sandbox''s user namespaces'; Root = $true
-           Cmd = 'grep -q "systemd *= *true" /etc/wsl.conf 2>/dev/null || printf "[boot]\nsystemd=true\n" >> /etc/wsl.conf; echo "kernel.apparmor_restrict_unprivileged_userns = 0" > /etc/sysctl.d/60-hq.conf' },
+           Cmd = 'if ! grep -q "systemd *= *true" /etc/wsl.conf 2>/dev/null; then if grep -q "^\[boot\]" /etc/wsl.conf 2>/dev/null; then sed -i "/^\[boot\]/a systemd=true" /etc/wsl.conf; else printf "[boot]\nsystemd=true\n" >> /etc/wsl.conf; fi; fi; echo "kernel.apparmor_restrict_unprivileged_userns = 0" > /etc/sysctl.d/60-hq.conf' },
         @{ Text = 'Install HQ itself (the Linux installer, inside Ubuntu)'; Root = $false
            Cmd = "curl -fsSL $script:HqLinuxInstaller | bash" }
     )
@@ -359,9 +412,10 @@ function Install-Hq {
         }
     }
 
-    if ($edition -eq 'full') { $ok = Install-HqFull -Facts $facts -DryRun $dryRun }
-    else { $ok = Install-HqLite -Dir $dir -Tag $tag -DryRun $dryRun -AddToPath $addToPath }
-    if (-not $ok) { $global:LASTEXITCODE = 1 }
+    # Whatever a function prints is also in its output; its answer is the last item.
+    if ($edition -eq 'full') { $res = @(Install-HqFull -Facts $facts -DryRun $dryRun) }
+    else { $res = @(Install-HqLite -Dir $dir -Tag $tag -DryRun $dryRun -AddToPath $addToPath) }
+    if (-not ($res[-1] -eq $true)) { $global:LASTEXITCODE = 1 }
 }
 
 # Dot-sourcing for tests sets HQ_INSTALL_NO_RUN so the functions load without installing.
