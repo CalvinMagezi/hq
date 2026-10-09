@@ -431,7 +431,7 @@ impl LlmRouter {
     /// The model name to send a provider that no route claimed. A concrete `vendor/model` id goes
     /// through unchanged. An alias such as `relay` becomes the provider's own explicit route target
     /// when it has one, otherwise the alias unchanged.
-    fn fallback_model(&self, provider_name: &str, requested: &str) -> String {
+    pub(super) fn fallback_model(&self, provider_name: &str, requested: &str) -> String {
         if requested.contains('/') {
             return requested.to_string();
         }

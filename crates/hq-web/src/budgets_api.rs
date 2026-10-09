@@ -30,6 +30,7 @@ pub(crate) async fn budgets_handler(
         .collect::<anyhow::Result<Vec<_>>>()?;
     Ok(Json(json!({
         "budgets": statuses,
+        "definitions": config.budgets,
         "background_run_usd": config.background_run_usd,
         "allow_unpriced_models": config.allow_unpriced_models,
         "problems": config.problems(),

@@ -166,6 +166,45 @@ fn tools_and_stream_and_temperature_serialize() {
     );
 }
 
+fn request_for(model: &str) -> ChatRequest {
+    ChatRequest {
+        model: model.to_string(),
+        messages: vec![msg(MessageRole::User, "hi")],
+        tools: vec![],
+        temperature: None,
+        max_tokens: None,
+    }
+}
+
+#[test]
+fn the_wire_body_keeps_the_model_id_it_is_given() {
+    // Copilot's Messages endpoint shares this builder and publishes dotted ids.
+    let body = build_messages_body(&request_for("claude-haiku-4.5"), DEFAULT_MAX_TOKENS, false);
+    assert_eq!(body["model"], "claude-haiku-4.5");
+}
+
+#[test]
+fn only_the_first_party_host_gets_catalog_ids_rewritten() {
+    let first_party = AnthropicProvider::new("k");
+    let request = request_for("claude-haiku-5.5");
+    assert_eq!(first_party.for_api(&request).model, "claude-haiku-5-5");
+    // A catalog slug that reached the provider through the router's fallback.
+    assert_eq!(
+        first_party
+            .for_api(&request_for("anthropic/claude-opus-5.5"))
+            .model,
+        "claude-opus-5-5"
+    );
+    let plain = request_for("claude-sonnet-4-6");
+    assert!(matches!(
+        first_party.for_api(&plain),
+        std::borrow::Cow::Borrowed(_)
+    ));
+
+    let gateway = AnthropicProvider::new_with_base("k", "https://gateway.example/v1");
+    assert_eq!(gateway.for_api(&request).model, "claude-haiku-5.5");
+}
+
 // ─── Buffered response parsing ──────────────────────────────
 
 #[test]

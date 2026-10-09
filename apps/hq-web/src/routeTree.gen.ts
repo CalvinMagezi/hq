@@ -10,6 +10,7 @@
 
 import { Route as rootRouteImport } from './routes/__root'
 import { Route as VaultRouteImport } from './routes/vault'
+import { Route as UsageRouteImport } from './routes/usage'
 import { Route as TasksRouteImport } from './routes/tasks'
 import { Route as SetupRouteImport } from './routes/setup'
 import { Route as SettingsRouteImport } from './routes/settings'
@@ -23,6 +24,11 @@ import { Route as VaultSplatRouteImport } from './routes/vault/$'
 const VaultRoute = VaultRouteImport.update({
   id: '/vault',
   path: '/vault',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const UsageRoute = UsageRouteImport.update({
+  id: '/usage',
+  path: '/usage',
   getParentRoute: () => rootRouteImport,
 } as any)
 const TasksRoute = TasksRouteImport.update({
@@ -79,6 +85,7 @@ export interface FileRoutesByFullPath {
   '/settings': typeof SettingsRoute
   '/setup': typeof SetupRoute
   '/tasks': typeof TasksRoute
+  '/usage': typeof UsageRoute
   '/vault': typeof VaultRouteWithChildren
   '/vault/$': typeof VaultSplatRoute
   '/vault/': typeof VaultIndexRoute
@@ -91,6 +98,7 @@ export interface FileRoutesByTo {
   '/settings': typeof SettingsRoute
   '/setup': typeof SetupRoute
   '/tasks': typeof TasksRoute
+  '/usage': typeof UsageRoute
   '/vault/$': typeof VaultSplatRoute
   '/vault': typeof VaultIndexRoute
 }
@@ -103,6 +111,7 @@ export interface FileRoutesById {
   '/settings': typeof SettingsRoute
   '/setup': typeof SetupRoute
   '/tasks': typeof TasksRoute
+  '/usage': typeof UsageRoute
   '/vault': typeof VaultRouteWithChildren
   '/vault/$': typeof VaultSplatRoute
   '/vault/': typeof VaultIndexRoute
@@ -117,6 +126,7 @@ export interface FileRouteTypes {
     | '/settings'
     | '/setup'
     | '/tasks'
+    | '/usage'
     | '/vault'
     | '/vault/$'
     | '/vault/'
@@ -129,6 +139,7 @@ export interface FileRouteTypes {
     | '/settings'
     | '/setup'
     | '/tasks'
+    | '/usage'
     | '/vault/$'
     | '/vault'
   id:
@@ -140,6 +151,7 @@ export interface FileRouteTypes {
     | '/settings'
     | '/setup'
     | '/tasks'
+    | '/usage'
     | '/vault'
     | '/vault/$'
     | '/vault/'
@@ -153,6 +165,7 @@ export interface RootRouteChildren {
   SettingsRoute: typeof SettingsRoute
   SetupRoute: typeof SetupRoute
   TasksRoute: typeof TasksRoute
+  UsageRoute: typeof UsageRoute
   VaultRoute: typeof VaultRouteWithChildren
 }
 
@@ -163,6 +176,13 @@ declare module '@tanstack/react-router' {
       path: '/vault'
       fullPath: '/vault'
       preLoaderRoute: typeof VaultRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/usage': {
+      id: '/usage'
+      path: '/usage'
+      fullPath: '/usage'
+      preLoaderRoute: typeof UsageRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/tasks': {
@@ -251,6 +271,7 @@ const rootRouteChildren: RootRouteChildren = {
   SettingsRoute: SettingsRoute,
   SetupRoute: SetupRoute,
   TasksRoute: TasksRoute,
+  UsageRoute: UsageRoute,
   VaultRoute: VaultRouteWithChildren,
 }
 export const routeTree = rootRouteImport

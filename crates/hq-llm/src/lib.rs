@@ -26,6 +26,7 @@ pub mod openrouter {
 }
 pub mod provider;
 pub mod provider_usage;
+pub mod ratelimit;
 pub mod reconcile;
 mod tap;
 pub mod responses;
@@ -34,7 +35,7 @@ pub mod router;
 pub mod turboquant;
 
 pub use anthropic::AnthropicProvider;
-pub use instrument::{Instruments, InstrumentedProvider};
+pub use instrument::{ExternalCall, Instruments, InstrumentedProvider, usage_from_openrouter};
 pub use cerebras::CerebrasProvider;
 pub use copilot::CopilotProvider;
 pub use ollama::OllamaProvider;

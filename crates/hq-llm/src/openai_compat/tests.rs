@@ -784,3 +784,37 @@ async fn a_non_openrouter_cost_field_is_ignored() {
 
     assert_eq!(provider.chat(&request).await.unwrap().provider_cost_usd, None);
 }
+
+/// The quota a provider reports on an ordinary response is remembered, with no extra request.
+#[tokio::test]
+async fn a_completion_remembers_the_quota_headers_it_came_with() {
+    use wiremock::matchers::{method, path};
+    use wiremock::{Mock, MockServer, ResponseTemplate};
+
+    let server = MockServer::start().await;
+    Mock::given(method("POST"))
+        .and(path("/chat/completions"))
+        .respond_with(
+            ResponseTemplate::new(200)
+                .insert_header("x-ratelimit-remaining-requests", "41")
+                .insert_header("x-ratelimit-limit-requests", "50")
+                .insert_header("x-ratelimit-remaining-tokens", "9000")
+                .set_body_json(serde_json::json!({
+                    "id": "x", "model": "m",
+                    "choices": [{"index": 0, "message": {"role": "assistant", "content": "pong"}}],
+                    "usage": {"prompt_tokens": 1, "completion_tokens": 1}
+                })),
+        )
+        .mount(&server)
+        .await;
+    let provider = OpenRouterProvider::new_with_base("k", &server.uri());
+    let request = ChatRequest {
+        model: "m".into(),
+        ..Default::default()
+    };
+
+    provider.chat(&request).await.unwrap();
+
+    let seen = crate::ratelimit::latest_for(&server.uri()).expect("a reading");
+    assert_eq!((seen.requests_remaining, seen.requests_limit, seen.tokens_remaining), (Some(41), Some(50), Some(9000)));
+}

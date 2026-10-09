@@ -83,6 +83,10 @@ or a session's own backend. Production code shares one process-wide `Instruments
 `hq_agent::install_ledger(db)` points it at the database and is called by `hq start`, `hq web` and the
 session builder. Tests build isolated handles.
 
+**Non-chat calls.** Image generation and embeddings go to OpenRouter over their own HTTP requests, so they
+report through `Instruments::admit_external` and `record_external` instead: origins `imagegen` and
+`embeddings`, the response's `usage.cost` as the price, and a budget that is already used up refuses them.
+
 **Budgets.** Nothing is enforced until `budgets:` is set in `config.yaml`:
 
 ```yaml
@@ -166,3 +170,42 @@ low cache hit rate means the prompt prefix keeps changing.
 projection and the drivers. `budgets.guidance: true` adds one line to the system prompt at session start
 once any budget is past 80%, naming the tightest one. It is off by default because whether it lowers
 cost without lowering quality has not been measured.
+
+## Harness spend (phase 6)
+
+Coding agents the host runs (Claude Code, Codex, Pi, Kimi, OpenCode, Copilot CLI) spend tokens HQ never
+sees through its own providers, usually the most of any consumer. A daemon task (`harness-usage`, every
+5 minutes) reads what each agent already writes about itself and records one ledger row per call with
+origin `harness`. Only numbers, model names and ids are read; no prompt or reply text is parsed into a
+value or stored.
+
+| Harness | Source | Notes |
+|---|---|---|
+| Claude Code | `~/.claude*/projects/**/*.jsonl` | one record per content block, so a `message.id` counts once; subagent files included |
+| Codex | `~/.codex/sessions/**/rollout-*.jsonl` | per-call `last_token_usage`; the running total is ignored |
+| Pi | `~/.pi/agent/sessions`, `~/.pi/hq-sessions` | records its own dollar cost per call, used as given |
+| Kimi | `~/.kimi/sessions/*/*/wire.jsonl` | a subscription, so cost is `flat`; the record has no model name or working directory, so rows are not matched to an HQ session |
+| OpenCode | `~/.local/share/opencode/opencode.db` | assistant messages; a cost of 0 means free or unpriced, not a billed zero |
+| Copilot CLI | `~/.copilot/session-store.db` | AI units, not dollars: tokens recorded, cost `flat` |
+| Cursor, Antigravity, Qwen | none | Cursor keeps usage server side; Antigravity stores opaque protobuf; Qwen is dormant here. They are untracked, not zero |
+
+Input is normalised to the ledger's convention (cache reads included, cache writes excluded). Each call
+has a stable `external_id`, so reading a growing file again counts nothing twice; unchanged files are
+skipped by size and mtime, and SQLite sources resume from a cursor.
+
+A call is filed under the HQ session that was running that harness in that directory when it happened.
+Two candidates, or none, match nothing and the row is filed as `external:<harness>:<id>` rather than
+guessing. Cost is the recorded dollars where the agent has them, `flat` for subscriptions, and
+otherwise list price, which is what the call would have cost on the API and not necessarily what was
+billed. Harness rows never count toward a `global` budget (they would block HQ's own chat for work the
+owner did elsewhere); budget them with `origin:harness`.
+
+## Quota from response headers
+
+`hq_llm::ratelimit` keeps the latest `x-ratelimit-*` (OpenAI, Groq) or `anthropic-ratelimit-*` reading
+per provider host, taken from the headers of an ordinary completion at no extra cost and with no admin
+key. `/api/usage/providers` shows it as `rate_limit`, and the Usage page prints it as "Quota left (from
+response headers)". Covered: buffered OpenAI-compatible calls, raw SSE streams (OpenRouter, Kimi,
+Copilot) and Anthropic calls and streams. Not covered: streams from other OpenAI-compatible hosts
+(OpenAI, Groq, DeepSeek), which go through the typed client that does not expose response headers;
+their reading appears after the next buffered call.

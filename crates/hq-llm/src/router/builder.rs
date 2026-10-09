@@ -42,6 +42,8 @@ fn config_key(cfg: Option<&hq_core::config::HqConfig>, env: &str) -> Option<Stri
         "DEEPSEEK_API_KEY" => &cfg.deepseek_api_key,
         "OPENAI_API_KEY" => &cfg.openai_api_key,
         "KIMI_CODE_API_KEY" => &cfg.kimi_code_api_key,
+        "ANTHROPIC_API_KEY" => &cfg.anthropic_api_key,
+        "GEMINI_API_KEY" => &cfg.google_ai_api_key,
         _ => return None,
     };
     value.clone().filter(|k| !k.is_empty())
@@ -54,12 +56,15 @@ const CONFIG_BACKED_KEYS: &[&str] = &[
     "DEEPSEEK_API_KEY",
     "OPENAI_API_KEY",
     "KIMI_CODE_API_KEY",
+    "ANTHROPIC_API_KEY",
+    "GEMINI_API_KEY",
 ];
 
 /// Copy config-only keys into the process env, never overriding a set var.
 fn export_config_keys(cfg: Option<&hq_core::config::HqConfig>) {
     for &env in CONFIG_BACKED_KEYS {
-        if std::env::var(env).is_ok() {
+        // An empty variable counts as unset, matching how the key rules read it.
+        if std::env::var(env).is_ok_and(|v| !v.is_empty()) {
             continue;
         }
         if let Some(value) = config_key(cfg, env) {
@@ -74,6 +79,8 @@ enum KeyRule {
     /// Any value, even an empty one.
     Any(&'static str),
     NonEmpty(&'static str),
+    /// The first of several variable names that is set and non-empty.
+    FirstNonEmpty(&'static [&'static str]),
     /// Legacy Moonshot platform keys only: an `sk-kimi-` key belongs to Kimi
     /// Code and would silently mis-route to api.moonshot.ai.
     Moonshot,
@@ -86,6 +93,7 @@ impl KeyRule {
         match self {
             KeyRule::Any(env) => key(env),
             KeyRule::NonEmpty(env) => key(env).filter(|k| !k.is_empty()),
+            KeyRule::FirstNonEmpty(envs) => envs.iter().find_map(|env| key(env).filter(|k| !k.is_empty())),
             KeyRule::Moonshot => {
                 key("KIMI_API_KEY").filter(|k| !k.is_empty() && !k.starts_with("sk-kimi-"))
             }
@@ -100,6 +108,8 @@ impl KeyRule {
 enum Client {
     Cerebras,
     OpenRouter,
+    /// The native Messages API, for Claude models called directly.
+    Anthropic,
     Base(&'static str),
 }
 
@@ -201,13 +211,33 @@ const PROVIDERS: &[ProviderSpec] = &[
     },
     ProviderSpec {
         name: "gemini",
-        key: KeyRule::NonEmpty("GEMINI_API_KEY"),
+        key: KeyRule::FirstNonEmpty(&["GEMINI_API_KEY", "GOOGLE_AI_API_KEY"]),
         client: Client::Base(GEMINI_OPENAI_BASE_URL),
         daily_token_limit: 0,
         routes: &[
             ("gemini/*", "", Budget),
             ("gemini/gemini-2.5-flash", "gemini-2.5-flash", Budget),
             ("gemini/gemini-2.5-pro", "gemini-2.5-pro", Standard),
+            // The `google/` spellings are explicit: a `google/*` wildcard would also claim
+            // OpenRouter-only ids such as `google/gemma-3-27b-it:free` and fail on them.
+            ("google/gemini-2.5-flash", "gemini-2.5-flash", Budget),
+            ("google/gemini-2.5-pro", "gemini-2.5-pro", Standard),
+        ],
+    },
+    // Named `anthropic-api`, not `anthropic`: a provider named after a model prefix makes the router
+    // pin every `anthropic/...` id to it, and ids it cannot serve (OpenRouter-style slugs) would
+    // then fail with no fallback. Explicit routes only: a wildcard would forward invalid model
+    // names, and an unrouted id falls back to the other providers as it always has.
+    ProviderSpec {
+        name: "anthropic-api",
+        key: KeyRule::NonEmpty("ANTHROPIC_API_KEY"),
+        client: Client::Anthropic,
+        daily_token_limit: 0,
+        // The first row also gives every alias (`relay`, `critic`, ...) a real model id to send.
+        routes: &[
+            ("anthropic/claude-haiku-5.5", "claude-haiku-5-5", Budget),
+            ("anthropic/claude-sonnet-5.5", "claude-sonnet-5-5", Standard),
+            ("anthropic/claude-opus-5.5", "claude-opus-5-5", Premium),
         ],
     },
     // Moonshot's pay-per-token platform, not the Kimi Code subscription below.
@@ -582,6 +612,7 @@ impl LlmRouter {
                 Client::OpenRouter => {
                     Arc::new(crate::openai_compat::OpenRouterProvider::new(&api_key))
                 }
+                Client::Anthropic => Arc::new(crate::anthropic::AnthropicProvider::new(&api_key)),
                 Client::Base(url) => Arc::new(
                     crate::openai_compat::OpenRouterProvider::new_with_base(&api_key, url),
                 ),
@@ -750,5 +781,99 @@ mod kimi_code_key_tests {
             Some("sk-kimi-real".to_string())
         );
         assert_eq!(select_kimi_code_key(Some(""), Some("")), None);
+    }
+}
+
+#[cfg(test)]
+mod config_key_provider_tests {
+    use super::super::types::TaskHint;
+    use super::{LlmRouter, config_key};
+    use hq_core::config::HqConfig;
+
+    fn router_with_only(env: &'static str) -> LlmRouter {
+        LlmRouter::from_keys(&move |name| (name == env).then(|| "test-key".to_string()), false)
+    }
+
+    /// (provider, model id) per candidate. An empty id is a wildcard route, which sends the
+    /// requested model with its vendor prefix stripped.
+    fn route(router: &LlmRouter, model: &str) -> Vec<(String, String)> {
+        router
+            .resolve_scored(model, TaskHint::Simple)
+            .into_iter()
+            .map(|c| (c.provider_name, c.model_id))
+            .collect()
+    }
+
+    #[test]
+    fn config_keys_for_anthropic_and_google_back_their_env_vars() {
+        let cfg = HqConfig {
+            anthropic_api_key: Some("sk-ant-x".into()),
+            google_ai_api_key: Some("g-x".into()),
+            ..HqConfig::default()
+        };
+        assert_eq!(config_key(Some(&cfg), "ANTHROPIC_API_KEY").as_deref(), Some("sk-ant-x"));
+        assert_eq!(config_key(Some(&cfg), "GEMINI_API_KEY").as_deref(), Some("g-x"));
+        let empty = HqConfig { anthropic_api_key: Some(String::new()), ..HqConfig::default() };
+        assert_eq!(config_key(Some(&empty), "ANTHROPIC_API_KEY"), None);
+    }
+
+    #[test]
+    fn an_anthropic_key_alone_serves_the_known_claude_ids() {
+        let router = router_with_only("ANTHROPIC_API_KEY");
+        assert!(!router.is_empty());
+        for (id, direct) in [
+            ("anthropic/claude-haiku-5.5", "claude-haiku-5-5"),
+            ("anthropic/claude-sonnet-5.5", "claude-sonnet-5-5"),
+            ("anthropic/claude-opus-5.5", "claude-opus-5-5"),
+        ] {
+            assert_eq!(route(&router, id), vec![("anthropic-api".to_string(), direct.to_string())], "{id}");
+        }
+    }
+
+    #[test]
+    fn an_unrouted_anthropic_id_is_left_to_the_fallback_not_pinned() {
+        // With a provider named `anthropic` the router would pin this id to it and never try
+        // OpenRouter. It must stay unrouted so the fallback can find a provider that serves it.
+        let router = router_with_only("ANTHROPIC_API_KEY");
+        assert!(route(&router, "anthropic/claude-sonnet-4").is_empty());
+    }
+
+    #[test]
+    fn every_alias_has_a_real_model_with_only_an_anthropic_key() {
+        let router = router_with_only("ANTHROPIC_API_KEY");
+        for alias in [
+            "relay", "premium", "plan", "code", "mid", "fast", "bulk", "dream", "deep-sleep",
+            "verify", "critic", "notification", "nudge",
+        ] {
+            assert_eq!(router.fallback_model("anthropic-api", alias), "claude-haiku-5-5", "{alias}");
+        }
+    }
+
+    #[test]
+    fn the_google_ai_variable_name_is_accepted_too() {
+        let router = LlmRouter::from_keys(
+            &|name| (name == "GOOGLE_AI_API_KEY").then(|| "g-key".to_string()),
+            false,
+        );
+        assert_eq!(
+            route(&router, "google/gemini-2.5-flash"),
+            vec![("gemini".to_string(), "gemini-2.5-flash".to_string())]
+        );
+    }
+
+    #[test]
+    fn a_google_key_alone_serves_google_models() {
+        let router = router_with_only("GEMINI_API_KEY");
+        assert_eq!(
+            route(&router, "google/gemini-2.5-flash"),
+            vec![("gemini".to_string(), "gemini-2.5-flash".to_string())]
+        );
+    }
+
+    #[test]
+    fn without_those_keys_neither_provider_exists() {
+        let router = router_with_only("OPENROUTER_API_KEY");
+        assert!(route(&router, "anthropic/claude-haiku-5.5").is_empty());
+        assert!(route(&router, "google/gemma-3-27b-it:free").is_empty());
     }
 }

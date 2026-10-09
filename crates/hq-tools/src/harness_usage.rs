@@ -34,8 +34,23 @@ fn str_at<'a>(v: &'a Value, pointer: &str) -> Option<&'a str> {
     v.pointer(pointer).and_then(Value::as_str).filter(|s| !s.is_empty())
 }
 
+/// Ids and model names come from files HQ does not control, so none is stored longer than this.
+const MAX_FIELD_CHARS: usize = 128;
+
+fn capped(s: &str) -> String {
+    s.chars().take(MAX_FIELD_CHARS).collect()
+}
+
 fn parse_ts(s: &str) -> Option<i64> {
-    chrono::DateTime::parse_from_rfc3339(s).ok().map(|t| t.timestamp())
+    chrono::DateTime::parse_from_rfc3339(s)
+        .map(|t| t.timestamp())
+        .ok()
+        .or_else(|| {
+            // SQLite's own `datetime('now')` shape, with or without fractional seconds.
+            chrono::NaiveDateTime::parse_from_str(s, "%Y-%m-%d %H:%M:%S%.f")
+                .ok()
+                .map(|t| t.and_utc().timestamp())
+        })
 }
 
 // ─── Claude Code ────────────────────────────────────────────────────
@@ -51,12 +66,12 @@ pub fn parse_claude_line(line: &str) -> Option<HarnessUsageEvent> {
     let fresh = u32_at(&v, "/message/usage/input_tokens");
     let cache_read = u32_at(&v, "/message/usage/cache_read_input_tokens");
     Some(HarnessUsageEvent {
-        harness: "claude_code",
-        source_id: id,
-        session_ref: str_at(&v, "/sessionId")?.to_string(),
+        harness: "claude-code",
+        source_id: capped(&id),
+        session_ref: capped(str_at(&v, "/sessionId")?),
         cwd: str_at(&v, "/cwd").map(str::to_string),
         ts: str_at(&v, "/timestamp").and_then(parse_ts)?,
-        model: str_at(&v, "/message/model")?.to_string(),
+        model: capped(str_at(&v, "/message/model")?),
         usage: Usage {
             input: fresh.saturating_add(cache_read),
             output: u32_at(&v, "/message/usage/output_tokens"),
@@ -70,8 +85,8 @@ pub fn parse_claude_line(line: &str) -> Option<HarnessUsageEvent> {
 // ─── Codex ──────────────────────────────────────────────────────────
 
 /// Codex writes cumulative and per-call counters. Only `last_token_usage` of a `token_count` event
-/// is one call; the cumulative total is ignored so nothing is summed twice. `ordinal` is the line
-/// number, which keeps two identical calls apart.
+/// is one call; the cumulative total is ignored so nothing is summed twice. `ordinal` is the byte
+/// offset of the line, which stays the same when the file grows and keeps two identical calls apart.
 pub fn parse_codex_line(
     line: &str,
     ordinal: usize,
@@ -88,7 +103,7 @@ pub fn parse_codex_line(
         session_ref: session.id.clone(),
         cwd: session.cwd.clone(),
         ts: str_at(&v, "/timestamp").and_then(parse_ts)?,
-        model: session.model.clone(),
+        model: capped(&session.model),
         // Codex input already includes cached input tokens.
         usage: Usage {
             input: u32_at(last, "/input_tokens"),
@@ -117,13 +132,13 @@ impl CodexSession {
         match v.get("type").and_then(Value::as_str) {
             Some("session_meta") => {
                 if let Some(id) = str_at(&v, "/payload/id") {
-                    self.id = id.to_string();
+                    self.id = capped(id);
                 }
                 self.cwd = str_at(&v, "/payload/cwd").map(str::to_string);
             }
             Some("turn_context") => {
                 if let Some(m) = str_at(&v, "/payload/model") {
-                    self.model = m.to_string();
+                    self.model = capped(m);
                 }
             }
             _ => {}
@@ -141,14 +156,18 @@ pub fn parse_pi_line(line: &str, session: &PiSession) -> Option<(HarnessUsageEve
     }
     let usage = v.pointer("/message/usage")?;
     let cache_read = u32_at(usage, "/cacheRead");
-    let cost = usage.pointer("/cost/total").and_then(Value::as_f64);
+    // A zero is a free or subscription model, not a billed zero.
+    let cost = usage
+        .pointer("/cost/total")
+        .and_then(Value::as_f64)
+        .filter(|c| *c > 0.0);
     let event = HarnessUsageEvent {
         harness: "pi",
         source_id: format!("{}:{}", session.id, str_at(&v, "/id")?),
         session_ref: session.id.clone(),
         cwd: session.cwd.clone(),
         ts: str_at(&v, "/timestamp").and_then(parse_ts)?,
-        model: str_at(&v, "/message/model")?.to_string(),
+        model: capped(str_at(&v, "/message/model")?),
         // Pi reports input net of cache.
         usage: Usage {
             input: u32_at(usage, "/input").saturating_add(cache_read),
@@ -175,7 +194,7 @@ impl PiSession {
         };
         if v.get("type").and_then(Value::as_str) == Some("session") {
             if let Some(id) = str_at(&v, "/id") {
-                self.id = id.to_string();
+                self.id = capped(id);
             }
             self.cwd = str_at(&v, "/cwd").map(str::to_string);
         }
@@ -227,7 +246,9 @@ pub fn read_opencode(conn: &Connection, after_time_ms: i64) -> rusqlite::Result<
                 json_extract(m.data, '$.tokens.cache.read'), json_extract(m.data, '$.tokens.cache.write'),
                 json_extract(m.data, '$.cost')
          FROM message m JOIN session s ON s.id = m.session_id
-         WHERE json_extract(m.data, '$.role') = 'assistant' AND m.time_created > ?1",
+         WHERE json_extract(m.data, '$.role') = 'assistant' AND m.time_created > ?1
+           AND (json_extract(m.data, '$.time.completed') IS NOT NULL
+                OR json_extract(m.data, '$.tokens.output') > 0)",
     )?;
     let rows = stmt.query_map([after_time_ms], |r| {
         let n = |i: usize| r.get::<_, Option<i64>>(i).map(|v| v.unwrap_or(0).clamp(0, i64::from(u32::MAX)) as u32);
@@ -270,7 +291,7 @@ pub fn read_copilot(conn: &Connection, after_id: i64) -> rusqlite::Result<Vec<Ha
         let (input, cache_read, cache_write) = (n(5)?, n(7)?, n(8)?);
         let created: String = r.get(3)?;
         Ok(HarnessUsageEvent {
-            harness: "copilot_cli",
+            harness: "github-copilot",
             source_id: r.get::<_, i64>(0)?.to_string(),
             session_ref: r.get(1)?,
             cwd: r.get(2)?,
@@ -382,5 +403,35 @@ mod tests {
         let e = &read_copilot(&conn, 0).unwrap()[0];
         assert_eq!((e.usage.input, e.usage.cache_read, e.usage.cache_write), (36251, 36249, 150));
         assert!(read_copilot(&conn, 1).unwrap().is_empty());
+    }
+
+    #[test]
+    fn a_pi_cost_of_zero_is_not_a_billed_zero() {
+        let s = PiSession { id: "p1".into(), cwd: None };
+        let line = r#"{"type":"message","id":"e1","timestamp":"2026-08-02T09:59:30Z","message":{"role":"assistant","model":"m","usage":{"input":1,"output":1,"cost":{"total":0}}}}"#;
+        let (e, cost) = parse_pi_line(line, &s).unwrap();
+        assert_eq!((cost, e.usage.billed_usd), (None, None));
+    }
+
+    #[test]
+    fn opencode_skips_a_message_that_has_not_finished() {
+        let conn = Connection::open_in_memory().unwrap();
+        conn.execute_batch(
+            "CREATE TABLE session (id TEXT, directory TEXT);
+             CREATE TABLE message (id TEXT, session_id TEXT, time_created INTEGER, data TEXT);
+             INSERT INTO session VALUES ('s1', '/w');
+             INSERT INTO message VALUES ('m1','s1',1791500000000,'{\"role\":\"assistant\",\"modelID\":\"o\",\"tokens\":{\"input\":0,\"output\":0}}');
+             INSERT INTO message VALUES ('m2','s1',1791500001000,'{\"role\":\"assistant\",\"modelID\":\"o\",\"time\":{\"completed\":1791500002000},\"tokens\":{\"input\":5,\"output\":0}}');",
+        )
+        .unwrap();
+        let ids: Vec<String> = read_opencode(&conn, 0).unwrap().into_iter().map(|e| e.source_id).collect();
+        assert_eq!(ids, ["m2"]);
+    }
+
+    #[test]
+    fn a_sqlite_style_timestamp_is_understood() {
+        assert_eq!(parse_ts("2026-10-08 10:00:00"), parse_ts("2026-10-08T10:00:00Z"));
+        assert!(parse_ts("2026-10-08 10:00:00.250").is_some());
+        assert!(parse_ts("garbage").is_none());
     }
 }

@@ -1,11 +1,11 @@
 import { Link } from '@tanstack/react-router'
-import { Bell, BookOpen, CheckSquare, MessageSquare, SlidersHorizontal, Terminal } from 'lucide-react'
+import { Bell, BookOpen, CheckSquare, Gauge, MessageSquare, SlidersHorizontal, Terminal } from 'lucide-react'
 import { useHQStore } from '~/store/hqStore'
 import { inboxBadge } from '~/lib/inboxBadge'
 import { needsYouAria } from '~/lib/workbench'
 
 interface RailLinkProps {
-  to: '/vault' | '/chat' | '/tasks' | '/sessions' | '/notifications' | '/settings'
+  to: '/vault' | '/chat' | '/tasks' | '/sessions' | '/usage' | '/notifications' | '/settings'
   label: string
   exact?: boolean
   children: React.ReactNode
@@ -41,6 +41,9 @@ export function AppRail() {
       <RailLink to="/sessions" label={needsYou ? `Workbench, ${needsYouAria(needsYouCount)}` : 'Workbench'}>
         <Terminal className="w-5 h-5" />
         {needsYou && <span className="hq-rail-badge">{needsYou.label}</span>}
+      </RailLink>
+      <RailLink to="/usage" label="Usage">
+        <Gauge className="w-5 h-5" />
       </RailLink>
       <RailLink to="/notifications" label={unread ? `Inbox, ${unread.aria}` : 'Inbox'} exact>
         <Bell className="w-5 h-5" />

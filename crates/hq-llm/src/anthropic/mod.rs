@@ -87,6 +87,25 @@ impl AnthropicProvider {
     fn messages_url(&self) -> String {
         format!("{}/messages", self.api_base)
     }
+
+    /// The model id the first-party API expects. Catalogs such as OpenRouter write `vendor/model`
+    /// slugs with a dotted version (`anthropic/claude-haiku-5.5`), while Anthropic's own ids carry
+    /// neither (`claude-haiku-5-5`). Only that host gets the rewrite: gateways and Copilot's Messages
+    /// endpoint publish their own ids, dots included.
+    fn for_api<'a>(&self, request: &'a ChatRequest) -> std::borrow::Cow<'a, ChatRequest> {
+        let model = &request.model;
+        if self.api_base == ANTHROPIC_BASE_URL
+            && (model.contains('.') || model.starts_with("anthropic/"))
+        {
+            let mut rewritten = request.clone();
+            rewritten.model = model
+                .strip_prefix("anthropic/")
+                .unwrap_or(model)
+                .replace('.', "-");
+            return std::borrow::Cow::Owned(rewritten);
+        }
+        std::borrow::Cow::Borrowed(request)
+    }
 }
 
 #[async_trait]
@@ -96,7 +115,8 @@ impl LlmProvider for AnthropicProvider {
     }
 
     async fn chat(&self, request: &ChatRequest) -> Result<ChatResponse> {
-        let body = build_messages_body(request, self.default_max_tokens, false);
+        let request = self.for_api(request);
+        let body = build_messages_body(&request, self.default_max_tokens, false);
 
         let resp = self
             .http
@@ -109,6 +129,7 @@ impl LlmProvider for AnthropicProvider {
             .await
             .map_err(|e| LlmError::from_request_error(&e))?;
 
+        crate::ratelimit::observe(&self.api_base, resp.headers());
         let status = resp.status().as_u16();
         let bytes = resp
             .bytes()
@@ -149,7 +170,8 @@ impl LlmProvider for AnthropicProvider {
         &self,
         request: &ChatRequest,
     ) -> Result<Pin<Box<dyn Stream<Item = Result<StreamChunk>> + Send>>> {
-        let body = build_messages_body(request, self.default_max_tokens, true);
+        let request = self.for_api(request);
+        let body = build_messages_body(&request, self.default_max_tokens, true);
 
         let resp = self
             .http
@@ -163,6 +185,7 @@ impl LlmProvider for AnthropicProvider {
             .await
             .map_err(|e| LlmError::from_request_error(&e))?;
 
+        crate::ratelimit::observe(&self.api_base, resp.headers());
         let status = resp.status().as_u16();
         if !(200..300).contains(&status) {
             let bytes = resp.bytes().await.unwrap_or_default();

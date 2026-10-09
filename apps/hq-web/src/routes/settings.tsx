@@ -5,6 +5,7 @@ import { AlertCircle, Loader2, RefreshCw } from 'lucide-react'
 import { fetchSettings, formatSeconds, type HqSettings } from '~/lib/settingsApi'
 import { relTime } from '~/lib/time'
 import { formatUsd, openrouterUsageQuery } from '~/lib/openrouterUsageApi'
+import { forecastQuery } from '~/lib/usageApi'
 import {
   copilotUsageQuery,
   exhaustionText,
@@ -120,6 +121,7 @@ function CopilotCreditsSection() {
 
 function OpenRouterSpendSection() {
   const { data, isFetching, refetch } = useQuery(openrouterUsageQuery)
+  const forecast = useQuery(forecastQuery).data?.month
   if (!data?.active) return null
   const u = data.usage
   return (
@@ -136,7 +138,11 @@ function OpenRouterSpendSection() {
             <Row label="Key spend limit">{u.limit === null ? 'none set' : `${formatUsd(u.limit)} (${formatUsd(u.limit_remaining)} left)`}</Row>
             <Row label="Account credits left">{data.credits_left === null || data.credits_left === undefined ? 'not reported for this key' : formatUsd(data.credits_left)}</Row>
             {u.is_free_tier && <Row label="Plan">free tier</Row>}
-            <Row label="Burn rate">not reported by OpenRouter</Row>
+            <Row label="Burn rate">
+              {forecast?.rate_per_hour == null
+                ? 'not enough history yet'
+                : `${formatUsd(forecast.rate_per_hour)} per hour (HQ's estimate, ${forecast.confidence} confidence)`}
+            </Row>
             {data.note && <Row label="Note">{data.note}</Row>}
           </>
         )}

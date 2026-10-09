@@ -19,6 +19,7 @@ pub mod origin {
     pub const SKILL_REVIEW: &str = "skill_review";
     pub const COMPACTION: &str = "compaction";
     pub const EMBEDDINGS: &str = "embeddings";
+    pub const IMAGEGEN: &str = "imagegen";
     pub const SUPERVISOR: &str = "supervisor";
     pub const SETUP: &str = "setup";
     pub const CLI: &str = "cli";
