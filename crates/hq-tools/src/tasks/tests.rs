@@ -22,8 +22,8 @@ fn tools() -> Vec<Box<dyn HqTool>> {
 }
 
 #[test]
-fn factory_returns_twenty_tools() {
-    assert_eq!(tools().len(), 20);
+fn factory_returns_twenty_three_tools() {
+    assert_eq!(tools().len(), 23);
 }
 
 #[test]
@@ -1140,6 +1140,30 @@ async fn the_tasks_scope_sees_who_holds_a_task_but_not_where_they_work() {
 }
 
 #[tokio::test]
+async fn the_tasks_scope_neither_sees_nor_adds_note_links() {
+    let fx = ScopeFixture::new(&[]);
+    let made = fx
+        .tool("task_create")
+        .execute(json!({"title": "owner task", "links": [
+            {"kind": "vault_note", "ref": "Notebooks/Private/plan.md"},
+            {"kind": "url", "ref": "https://example.com/spec"}
+        ]}))
+        .await
+        .unwrap();
+    let seen = fx.tool("task_get").execute(tasks_scope(json!({"id": made["id"]}))).await.unwrap();
+    let links = seen["links"].as_array().unwrap();
+    assert_eq!(links.len(), 1, "{seen}");
+    assert_eq!(links[0]["kind"], "url");
+    assert!(!seen.to_string().contains("Private/plan.md"));
+
+    let refused = fx
+        .tool("task_create")
+        .execute(tasks_scope(json!({"title": "x", "links": [{"kind": "vault_note", "ref": "a.md"}]})))
+        .await;
+    assert!(refused.is_err(), "the scope cannot point a task at a note");
+}
+
+#[tokio::test]
 async fn the_tasks_scope_comments_as_itself_and_completing_a_task_notifies_no_one() {
     let fx = ScopeFixture::new(&["relay"]);
     let blocker = fx
@@ -1585,4 +1609,170 @@ async fn a_malformed_estimate_is_an_error_and_never_clears_or_drops_one() {
     }
     let still = call_tool(&tools, "task_get", json!({ "id": id })).await.unwrap();
     assert_eq!(still["estimate_minutes"], 60, "a rejected update leaves the estimate alone");
+}
+
+#[tokio::test]
+async fn links_are_added_listed_found_from_the_other_side_and_removed() {
+    let tools = tools_with(hq_core::config::LeaseMode::Off);
+    let a = call_tool(&tools, "task_create", json!({ "title": "From a note" })).await.unwrap();
+    let b = call_tool(&tools, "task_create", json!({ "title": "Also from it" })).await.unwrap();
+    let (a_id, b_id) = (a["display_id"].as_str().unwrap().to_string(), b["display_id"].as_str().unwrap().to_string());
+
+    let added = call_tool(&tools, "task_link_add", json!({ "task_id": a_id, "kind": "vault_note", "ref": "./Notebooks/plan.md", "direction": "origin", "actor": "builder" }))
+        .await
+        .unwrap();
+    assert_eq!(added["created"], true);
+    assert_eq!(added["link"]["ref"], "Notebooks/plan.md");
+    assert_eq!(added["link"]["created_by"], "builder");
+    call_tool(&tools, "task_link_add", json!({ "task_id": b_id, "kind": "vault_note", "ref": "Notebooks/plan.md" })).await.unwrap();
+    assert_eq!(
+        call_tool(&tools, "task_link_add", json!({ "task_id": a_id, "kind": "vault_note", "ref": "Notebooks/plan.md" })).await.unwrap()["created"],
+        false
+    );
+
+    let from_note = call_tool(&tools, "task_link_list", json!({ "kind": "vault_note", "ref": "Notebooks/plan.md" })).await.unwrap();
+    assert_eq!(from_note["count"], 2);
+    let got = call_tool(&tools, "task_get", json!({ "id": a_id })).await.unwrap();
+    assert_eq!(got["links"][0]["kind"], "vault_note");
+
+    let removed = call_tool(&tools, "task_link_remove", json!({ "task_id": a_id, "kind": "vault_note", "ref": "Notebooks/plan.md" })).await.unwrap();
+    assert_eq!(removed["removed"], true);
+    assert_eq!(call_tool(&tools, "task_link_list", json!({ "task_id": a_id })).await.unwrap()["count"], 0);
+    assert!(call_tool(&tools, "task_link_add", json!({ "task_id": a_id, "kind": "vault_note", "ref": "/etc/passwd" })).await.is_err());
+    assert!(call_tool(&tools, "task_link_list", json!({})).await.is_err(), "it needs a task or a kind and ref");
+}
+
+#[tokio::test]
+async fn a_task_is_created_with_its_links_or_not_at_all() {
+    let tools = tools_with(hq_core::config::LeaseMode::Off);
+    let ok = call_tool(
+        &tools,
+        "task_create",
+        json!({ "title": "Linked", "links": [{ "kind": "pr", "ref": "owner/repo#7" }, { "kind": "url", "ref": "https://example.com/x", "label": "spec" }] }),
+    )
+    .await
+    .unwrap();
+    assert_eq!(ok["links"].as_array().unwrap().len(), 2);
+
+    let before = call_tool(&tools, "task_list", json!({})).await.unwrap()["total"].clone();
+    let bad = call_tool(&tools, "task_create", json!({ "title": "Half done", "links": [{ "kind": "url", "ref": "https://example.com/y" }, { "kind": "pr", "ref": "nonsense" }] })).await;
+    assert!(bad.is_err());
+    let after = call_tool(&tools, "task_list", json!({})).await.unwrap()["total"].clone();
+    assert_eq!(before, after, "a malformed link means no task is created");
+    assert!(call_tool(&tools, "task_create", json!({ "title": "x", "links": "not a list" })).await.is_err());
+    assert!(call_tool(&tools, "task_create", json!({ "title": "x", "links": [{ "kind": "url" }] })).await.is_err());
+}
+
+#[tokio::test]
+async fn a_chat_toolset_records_its_thread_as_the_origin_of_what_it_creates() {
+    let vault_dir = tempfile::tempdir().unwrap();
+    let vault_path = vault_dir.keep();
+    let vault = Arc::new(VaultClient::new(vault_path.clone()).unwrap());
+    let tools = create_task_tools_for_chat(
+        vault_path,
+        vault,
+        Arc::new(Database::open_memory().unwrap()),
+        hq_core::config::TasksConfig::default(),
+        Some("thread-42".to_string()),
+    );
+    let made = call_tool(&tools, "task_create", json!({ "title": "Asked for in chat" })).await.unwrap();
+    assert_eq!(made["links"][0]["kind"], "chat_thread");
+    assert_eq!(made["links"][0]["ref"], "thread-42");
+    assert_eq!(made["links"][0]["direction"], "origin");
+    let found = call_tool(&tools, "task_link_list", json!({ "kind": "chat_thread", "ref": "thread-42" })).await.unwrap();
+    assert_eq!(found["count"], 1, "a thread finds the tasks it started");
+
+    let again = call_tool(&tools, "task_create", json!({ "title": "Asked for in chat", "external_id": "k" })).await.unwrap();
+    let dup = call_tool(&tools, "task_create", json!({ "title": "Asked for in chat", "external_id": "k" })).await.unwrap();
+    assert_eq!(dup["deduplicated"], true);
+    assert_eq!(dup["id"], again["id"]);
+}
+
+#[tokio::test]
+async fn a_new_task_that_reads_like_an_open_one_is_flagged_without_being_blocked() {
+    let tools = tools_with(hq_core::config::LeaseMode::Off);
+    let first = call_tool(
+        &tools,
+        "task_create",
+        json!({ "title": "Stabilize web app streaming so responses cannot crash", "description": "chat streaming render crash error boundary", "tags": ["streaming"] }),
+    )
+    .await
+    .unwrap();
+    assert!(first.get("similar_open_tasks").is_none(), "nothing to be similar to yet");
+    let second = call_tool(
+        &tools,
+        "task_create",
+        json!({ "title": "Stabilize the web app streaming so responses cannot crash", "description": "chat streaming render crash error boundary", "tags": ["streaming"] }),
+    )
+    .await
+    .unwrap();
+    assert_eq!(second["similar_open_tasks"][0]["display_id"], first["display_id"]);
+    assert!(second["similar_open_tasks"][0]["evidence"]["shared_terms"].is_array());
+    assert!(second["similar_note"].as_str().unwrap().contains("open tasks"));
+    let other = call_tool(&tools, "task_create", json!({ "title": "Order running shoes", "description": "size ten" })).await.unwrap();
+    assert!(other.get("similar_open_tasks").is_none());
+}
+
+#[tokio::test]
+async fn a_parent_or_a_sibling_is_not_reported_as_a_duplicate_of_its_own_subtask() {
+    let tools = tools_with(hq_core::config::LeaseMode::Off);
+    let parent = call_tool(
+        &tools,
+        "task_create",
+        json!({ "title": "Fix the login redirect bug on the settings page", "description": "login redirect bug settings page" }),
+    )
+    .await
+    .unwrap();
+    let pid = parent["display_id"].as_str().unwrap().to_string();
+    let first = call_tool(
+        &tools,
+        "task_create",
+        json!({ "title": "Fix the login redirect bug on the settings page tests", "description": "login redirect bug settings page tests", "parent_id": pid }),
+    )
+    .await
+    .unwrap();
+    assert!(first.get("similar_open_tasks").is_none(), "the parent is related by design: {first}");
+    let second = call_tool(
+        &tools,
+        "task_create",
+        json!({ "title": "Fix the login redirect bug on the settings page docs", "description": "login redirect bug settings page docs", "parent_id": pid }),
+    )
+    .await
+    .unwrap();
+    assert!(second.get("similar_open_tasks").is_none(), "a sibling is related by design: {second}");
+}
+
+#[tokio::test]
+async fn an_agent_cannot_mark_a_chat_or_session_it_names_as_where_a_task_came_from() {
+    let tools = tools_with(hq_core::config::LeaseMode::Off);
+    let made = call_tool(
+        &tools,
+        "task_create",
+        json!({ "title": "Claimed origin", "links": [{ "kind": "chat_thread", "ref": "someone-elses", "direction": "origin" }, { "kind": "vault_note", "ref": "n.md", "direction": "origin" }] }),
+    )
+    .await
+    .unwrap();
+    let by_kind = |kind: &str| made["links"].as_array().unwrap().iter().find(|l| l["kind"] == kind).unwrap().clone();
+    assert_eq!(by_kind("chat_thread")["direction"], "related", "only HQ records chat origins");
+    assert_eq!(by_kind("vault_note")["direction"], "origin", "a note the agent really worked from can be an origin");
+    let id = made["display_id"].as_str().unwrap();
+    let added = call_tool(&tools, "task_link_add", json!({ "task_id": id, "kind": "session", "ref": "hs-x", "direction": "origin" })).await.unwrap();
+    assert_eq!(added["link"]["direction"], "related");
+}
+
+#[tokio::test]
+async fn promoting_a_note_links_it_and_a_second_promotion_notices_the_first() {
+    let vault_dir = tempfile::tempdir().unwrap();
+    let vault_path = vault_dir.path().to_path_buf();
+    std::fs::create_dir_all(vault_path.join("Notebooks")).unwrap();
+    std::fs::write(vault_path.join("Notebooks/idea.md"), "---\ntitle: Big idea\n---\nBuild the thing properly.\n").unwrap();
+    let vault = Arc::new(VaultClient::new(vault_path.clone()).unwrap());
+    let tools = create_task_tools_with(vault_path, vault, Arc::new(Database::open_memory().unwrap()), hq_core::config::TasksConfig::default());
+
+    let first = call_tool(&tools, "task_create_from_note", json!({ "note_path": "Notebooks/idea.md", "space_id": "personal" })).await.unwrap();
+    assert!(first.get("already_linked").is_none());
+    let linked = call_tool(&tools, "task_link_list", json!({ "kind": "vault_note", "ref": "Notebooks/idea.md" })).await.unwrap();
+    assert_eq!(linked["count"], 1);
+    let second = call_tool(&tools, "task_create_from_note", json!({ "note_path": "Notebooks/idea.md", "space_id": "personal" })).await.unwrap();
+    assert_eq!(second["already_linked"].as_array().unwrap().len(), 1);
 }

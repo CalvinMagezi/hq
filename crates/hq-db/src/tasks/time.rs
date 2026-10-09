@@ -171,6 +171,12 @@ fn subtask_rollup(conn: &Connection, task: &Task) -> Result<Option<SubtaskRollup
     Ok(Some(rollup))
 }
 
+/// Seconds of leased work on a task, overlapping sessions counted once.
+pub fn leased_seconds(conn: &Connection, task_id: &str) -> Result<i64> {
+    let (mut intervals, _) = lease_intervals(conn, task_id)?;
+    Ok(union_seconds(&mut intervals))
+}
+
 /// Everything known about the time spent on `id_or_display_id`. Leases that went
 /// silent past `ttl_secs` are closed first, so `live` and the totals never include
 /// a session that is already gone.

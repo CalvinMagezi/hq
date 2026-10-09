@@ -357,24 +357,43 @@ impl HqTool for TaskCreateFromNoteTool {
             };
 
         let id = generate_id("tk");
-        let (task, _) = self.db.with_conn(move |c| {
-            create_task_in(
-                c,
-                &id,
-                initiative_id.as_deref(),
-                &Placement {
-                    space_id: &space_id,
-                    folder_name: folder_name.as_deref(),
-                    initiative_name: &initiative_name,
-                },
-                &t::NewTask {
-                    title: &title,
-                    description: &description,
-                    tags: &tags,
-                    created_by: &created_by,
-                    ..Default::default()
-                },
-            )
+        let note_for_link = note_path.clone();
+        let (task, earlier) = self.db.with_conn(move |c| {
+            t::in_write_tx(c, |c| {
+                // Tasks this note already started, so a second promotion is noticed.
+                let earlier = t::tasks_linked_to(c, t::LINK_VAULT_NOTE, &note_for_link).unwrap_or_default();
+                let (task, _) = create_task_in(
+                    c,
+                    &id,
+                    initiative_id.as_deref(),
+                    &Placement {
+                        space_id: &space_id,
+                        folder_name: folder_name.as_deref(),
+                        initiative_name: &initiative_name,
+                    },
+                    &t::NewTask {
+                        title: &title,
+                        description: &description,
+                        tags: &tags,
+                        created_by: &created_by,
+                        ..Default::default()
+                    },
+                )?;
+                // The structured link is what code reads; the Source line is for people.
+                // A path the vault read but a link would not accept must not undo the task.
+                if let Err(e) = t::add_task_link(
+                    c,
+                    &task.id,
+                    t::LINK_VAULT_NOTE,
+                    &note_for_link,
+                    "promoted from this note",
+                    Some(t::DIRECTION_ORIGIN),
+                    &created_by,
+                ) {
+                    tracing::warn!(error = %e, note = %note_for_link, "could not link the promoted note");
+                }
+                Ok((task, earlier))
+            })
         })?;
 
         if !task.tags.is_empty() {
@@ -387,10 +406,16 @@ impl HqTool for TaskCreateFromNoteTool {
             );
         }
 
-        Ok(json!({
+        let mut out = json!({
             "task": task_json(&task),
             "note_path": note_path,
             "created_new_destination": created_new_destination,
-        }))
+        });
+        if !earlier.is_empty() {
+            out["already_linked"] = json!(earlier.iter().map(task_summary).collect::<Vec<_>>());
+            out["already_linked_note"] =
+                json!("This note already started these tasks. If one is the same work, continue it and delete the new task.");
+        }
+        Ok(out)
     }
 }

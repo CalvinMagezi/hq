@@ -381,6 +381,10 @@ pub fn delete_task(conn: &Connection, id: &str, cascade: bool) -> Result<Vec<Str
                 "DELETE FROM task_dependencies WHERE task_id = ?1 OR depends_on_task_id = ?1",
                 params![task_id],
             )?;
+            conn.execute(
+                "DELETE FROM task_links WHERE task_id = ?1 OR (kind = 'task' AND ref = ?1)",
+                params![task_id],
+            )?;
             conn.execute("DELETE FROM tasks WHERE id = ?1", params![task_id])?;
         }
         Ok(deleted)

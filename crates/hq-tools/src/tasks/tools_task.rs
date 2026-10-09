@@ -11,6 +11,7 @@ use std::sync::Arc;
 use super::json::*;
 use super::placement::*;
 use super::tools_lease::{ActorHints, add_warning, lease_policy};
+use super::tools_links::{advice_for_new_task, check_links, link_requests};
 use hq_core::config::TasksConfig;
 use crate::registry::HqTool;
 use crate::util::{arg_str, generate_id};
@@ -38,6 +39,8 @@ fn check_scoped_text(args: &Value) -> Result<()> {
 
 pub(super) struct TaskCreateTool {
     pub(super) settings: TasksConfig,
+    /// The web chat thread this toolset serves, recorded as the origin of tasks it creates.
+    pub(super) origin_thread: Option<String>,
     pub(super) vault_path: PathBuf,
     pub(super) db: Arc<Database>,
 }
@@ -72,6 +75,7 @@ impl HqTool for TaskCreateTool {
                 "due_date": { "type": "string", "description": "Optional due date, YYYY-MM-DD" },
                 "start_date": { "type": "string", "description": "Optional start date, YYYY-MM-DD (not after due_date)" },
                 "estimate_minutes": { "type": "integer", "minimum": 1, "description": "Planned effort in minutes. Time you actually spend is recorded from your lease, so set an estimate when you can and it will be compared." },
+                "links": { "type": "array", "description": "Links to record with the task, each {kind, ref, label?, direction?}: kind is vault_note, chat_thread, session, commit, pr, url or task. Link the note or conversation the task came from.", "items": { "type": "object", "properties": { "kind": { "type": "string" }, "ref": { "type": "string" }, "label": { "type": "string" }, "direction": { "type": "string", "enum": ["origin", "related", "produced"] } }, "required": ["kind", "ref"] } },
                 "parent_id": { "type": "string", "description": "Make this a sub-task of that task (id or display id). The parent must be top level." },
                 "depends_on": { "type": "array", "items": { "type": "string" }, "description": "Ids or display ids of tasks that must complete before this one" },
                 "tags": { "type": "array", "items": { "type": "string" }, "description": "Routing tags (e.g. 'hq', 'reviewer') plus any topical tags" },
@@ -135,38 +139,54 @@ impl HqTool for TaskCreateTool {
         let external_id = opt_str(&args, "external_id");
         let estimate_minutes = estimate_arg(&args)?.flatten();
         let id = generate_id("tk");
+        let requests = link_requests(&args)?;
+        if scoped && requests.iter().any(|r| r.kind == t::LINK_VAULT_NOTE) {
+            bail!("this connection cannot link vault notes; link a url, pull request, commit or task instead");
+        }
+        let origin_thread = self.origin_thread.clone();
+        let caller_session = crate::harness_session::caller_session(&args).map(str::to_string);
         let (task, created) = self.db.with_conn(move |c| {
-            // A live lease names the filer; otherwise the caller's own words.
-            let created_by = hints.resolve(c, &settings, None)?.name;
-            let (task, created) = create_task_in(
-                c,
-                &id,
-                initiative_id.as_deref(),
-                &Placement {
-                    space_id: &space_id,
-                    folder_name: folder_name.as_deref(),
-                    initiative_name: &initiative_name,
-                },
-                &t::NewTask {
-                    title: &title,
-                    description: &description,
-                    priority: priority.as_deref(),
-                    due_date: due_date.as_deref(),
-                    start_date: start_date.as_deref(),
-                    parent_task_id: parent_id.as_deref(),
-                    tags: &tags,
-                    created_by: &created_by,
-                    external_id: external_id.as_deref(),
-                    estimate_minutes,
-                },
-            )?;
-            if depends_on.is_empty() || !created {
-                return Ok((task, created));
-            }
-            apply_dependency_changes(c, &task.id, &depends_on, &[], &created_by)?;
-            let task = t::get_task(c, &task.id)?
-                .ok_or_else(|| anyhow::anyhow!("task {} vanished after creation", task.id))?;
-            Ok((task, created))
+            t::in_write_tx(c, |c| {
+                // Bad links are refused before the task exists.
+                check_links(c, &requests)?;
+                // A live lease names the filer; otherwise the caller's own words.
+                let created_by = hints.resolve(c, &settings, None)?.name;
+                let (task, created) = create_task_in(
+                    c,
+                    &id,
+                    initiative_id.as_deref(),
+                    &Placement {
+                        space_id: &space_id,
+                        folder_name: folder_name.as_deref(),
+                        initiative_name: &initiative_name,
+                    },
+                    &t::NewTask {
+                        title: &title,
+                        description: &description,
+                        priority: priority.as_deref(),
+                        due_date: due_date.as_deref(),
+                        start_date: start_date.as_deref(),
+                        parent_task_id: parent_id.as_deref(),
+                        tags: &tags,
+                        created_by: &created_by,
+                        external_id: external_id.as_deref(),
+                        estimate_minutes,
+                    },
+                )?;
+                if !created {
+                    return Ok((task, false));
+                }
+                if !depends_on.is_empty() {
+                    apply_dependency_changes(c, &task.id, &depends_on, &[], &created_by)?;
+                }
+                for r in &requests {
+                    t::add_task_link(c, &task.id, &r.kind, &r.reference, &r.label, r.direction.as_deref(), &created_by)?;
+                }
+                record_origin(c, &task.id, origin_thread.as_deref(), caller_session.as_deref(), &created_by);
+                let task = t::get_task(c, &task.id)?
+                    .ok_or_else(|| anyhow::anyhow!("task {} vanished after creation", task.id))?;
+                Ok((task, true))
+            })
         })?;
 
         if !created {
@@ -177,7 +197,30 @@ impl HqTool for TaskCreateTool {
         if !scoped {
             notify_tags(&self.vault_path, &task, &task.tags);
         }
-        Ok(task_json(&task))
+        let (links, advice) = self
+            .db
+            .with_conn(|c| Ok((t::list_task_links(c, &task.id).unwrap_or_default(), advice_for_new_task(c, &task))))
+            .unwrap_or_default();
+        let mut out = task_json(&task);
+        if !links.is_empty() {
+            out["links"] = json!(links);
+        }
+        if let (Some(extra), Some(obj)) = (advice.as_object(), out.as_object_mut()) {
+            obj.extend(extra.clone());
+        }
+        Ok(out)
+    }
+}
+
+/// Where a task came from, recorded without the agent doing anything: the web
+/// chat that asked for it and the launched session that called. A failure here
+/// never fails the creation, since the link is a convenience.
+fn record_origin(conn: &rusqlite::Connection, task: &str, thread: Option<&str>, session: Option<&str>, who: &str) {
+    if let Some(thread) = thread {
+        let _ = t::add_task_link(conn, task, t::LINK_CHAT_THREAD, thread, "created in this chat", Some(t::DIRECTION_ORIGIN), who);
+    }
+    if let Some(session) = session {
+        let _ = t::add_task_link(conn, task, t::LINK_SESSION, session, "created by this session", Some(t::DIRECTION_ORIGIN), who);
     }
 }
 
@@ -377,7 +420,7 @@ impl HqTool for TaskGetTool {
         let caller = crate::harness_session::caller_session(&args).map(str::to_string);
         let scoped = crate::harness_session::is_tasks_scope(&args);
         let ttl = super::tools_lease::ttl_secs(&self.settings);
-        let (task, subtasks, dependents, events, sessions, time) = self.db.with_conn(move |c| {
+        let (task, subtasks, dependents, events, sessions, time, links) = self.db.with_conn(move |c| {
             let task =
                 t::get_task(c, &id)?.ok_or_else(|| anyhow::anyhow!("no task found for that id"))?;
             crate::a2a::check_task_access(c, caller.as_deref(), &task.id)?;
@@ -389,13 +432,15 @@ impl HqTool for TaskGetTool {
             t::expire_stale_leases(c, ttl)?;
             let sessions = t::list_work_sessions(c, &task.id, WORK_SESSIONS_SHOWN)?;
             let time = t::time_summary(c, &task.id, ttl)?;
-            Ok::<_, anyhow::Error>((task, subtasks, dependents, events, sessions, time))
+            let links = t::list_task_links(c, &task.id)?;
+            Ok::<_, anyhow::Error>((task, subtasks, dependents, events, sessions, time, links))
         })?;
         let mut value = task_json(&task);
         value["subtasks"] = json!(subtasks.iter().map(task_summary).collect::<Vec<_>>());
         value["dependents"] = json!(dependents.iter().map(task_summary).collect::<Vec<_>>());
         value["lifecycle_events"] = json!(events);
         value["time"] = json!(time);
+        value["links"] = json!(links);
         value["held_by"] = json!(sessions.iter().find(|s| s.ended_at.is_none()));
         value["work_sessions"] = json!(sessions);
         if scoped {
@@ -406,10 +451,14 @@ impl HqTool for TaskGetTool {
 }
 
 /// A tasks-scope caller runs on a machine the owner may not control, so it learns who holds a
-/// task and since when, never which machine, folder or branch any session worked in.
+/// task and since when, never which machine, folder or branch any session worked in, and never
+/// the path of a note in the owner's vault.
 fn hide_work_details_from_tasks_scope(task: &mut Value) {
     let Some(obj) = task.as_object_mut() else { return };
     obj.remove("work_sessions");
+    if let Some(links) = obj.get_mut("links").and_then(Value::as_array_mut) {
+        links.retain(|l| l["kind"] != t::LINK_VAULT_NOTE);
+    }
     if let Some(held) = obj.get("held_by").filter(|h| !h.is_null()).cloned() {
         obj.insert(
             "held_by".into(),

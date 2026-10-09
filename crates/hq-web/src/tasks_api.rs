@@ -532,6 +532,46 @@ pub(crate) async fn recent_work_sessions_handler(
     }
 }
 
+/// A task's links: notes, chat threads, sessions, commits, pull requests, URLs, tasks.
+pub(crate) async fn list_task_links_handler(
+    State(state): State<Arc<WsState>>,
+    AxumPath(id): AxumPath<String>,
+) -> Response {
+    let result = state.db.with_conn(move |c| {
+        let task = t::get_task(c, &id)?.ok_or_else(|| not_found("no task found for that id"))?;
+        t::list_task_links(c, &task.id)
+    });
+    match result {
+        Ok(links) => Json(json!({ "links": links })).into_response(),
+        Err(e) => ApiError::from(e).into_response(),
+    }
+}
+
+#[derive(Debug, Deserialize)]
+pub(crate) struct LinkedParams {
+    kind: String,
+    #[serde(rename = "ref")]
+    reference: String,
+}
+
+/// The tasks that link to a thing, such as every task started from a vault note.
+pub(crate) async fn tasks_linked_to_handler(
+    State(state): State<Arc<WsState>>,
+    Query(params): Query<LinkedParams>,
+) -> Response {
+    let result = state
+        .db
+        .with_conn(move |c| t::tasks_linked_to(c, &params.kind, &params.reference));
+    match result {
+        Ok(tasks) => Json(json!({
+            "count": tasks.len(),
+            "tasks": tasks.iter().map(task_json).collect::<Vec<_>>(),
+        }))
+        .into_response(),
+        Err(e) => ApiError::from(e).into_response(),
+    }
+}
+
 /// Most recent work leases the endpoint returns.
 const WORK_SESSIONS_SHOWN: usize = 50;
 
@@ -800,6 +840,39 @@ mod tests {
         assert_eq!(report["days"], 7);
         let recent = body_json(recent_work_sessions_handler(State(state), Query(DaysParams { days: None })).await).await;
         assert_eq!(recent["work_sessions"], json!([]));
+    }
+
+    #[tokio::test]
+    async fn links_are_read_per_task_and_found_from_the_other_side() {
+        let state = test_state();
+        let id: String = create_titled(&state, "From a note").await["id"].as_str().unwrap().into();
+        let task_id = id.clone();
+        state
+            .db
+            .with_conn(move |c| {
+                t::add_task_link(c, &task_id, t::LINK_VAULT_NOTE, "Notebooks/plan.md", "", Some(t::DIRECTION_ORIGIN), "test").map(|_| ())
+            })
+            .unwrap();
+        let links = body_json(list_task_links_handler(State(state.clone()), AxumPath(id.clone())).await).await;
+        assert_eq!(links["links"][0]["ref"], "Notebooks/plan.md");
+        let found = body_json(
+            tasks_linked_to_handler(
+                State(state.clone()),
+                Query(LinkedParams { kind: "vault_note".into(), reference: "./Notebooks/plan.md".into() }),
+            )
+            .await,
+        )
+        .await;
+        assert_eq!(found["count"], 1);
+        assert_eq!(found["tasks"][0]["id"], id);
+        let bad = tasks_linked_to_handler(
+            State(state.clone()),
+            Query(LinkedParams { kind: "vault_note".into(), reference: "/etc/passwd".into() }),
+        )
+        .await;
+        assert_eq!(bad.status(), StatusCode::BAD_REQUEST);
+        let missing = list_task_links_handler(State(state), AxumPath("NOPE-1".into())).await;
+        assert_eq!(missing.status(), StatusCode::NOT_FOUND);
     }
 
     #[tokio::test]

@@ -299,6 +299,55 @@ Migration `082_task_estimate` adds one nullable column. Rollback (SQLite 3.35+),
 ALTER TABLE tasks DROP COLUMN estimate_minutes;
 ```
 
+## Typed links (TSV2 WS4)
+
+Migration `083_task_links` adds `task_links`: a task's link to a vault note, chat thread, session,
+commit, pull request, URL or another task, with a direction (`origin` for what it came from,
+`produced`, or `related`), an optional label and who added it. The `Source:` line in a promoted
+note's description stays for people; the link is what code reads.
+
+- **One thing is one row.** A `ref` is checked and normalised per kind before it is stored: a note
+  is a vault-relative path collapsed to one spelling (`./a//b/` is `a/b`; no absolute path, drive
+  letter, `..` or backslash), thread and session refs are plain ids, a commit is a sha or
+  `owner/repo@sha`, a pull request is `owner/repo#123` (a github.com pull request URL is accepted
+  and normalised to it; `#007` is `#7`), repositories are lowercased and are exactly `owner/repo`
+  with no `.` or `..` part (a browser would resolve those to another repository), a URL is http or
+  https without spaces, and a task link stores the other task's internal id. Adding a link twice
+  returns the first. A task keeps at most 100.
+- **Both directions.** `task_link_add`, `task_link_remove` and `task_link_list` (by task, or by
+  `kind` and `ref` to find the tasks that link to a note or a thread). `task_get` returns `links`.
+  `task_create` takes a `links` array, and a malformed link means no task is created.
+  `GET /api/tasks/{id}/links` and `GET /api/tasks/linked?kind=&ref=` serve the web.
+- **Recorded without being asked.** A task created from HQ's own web chat gets that thread as an
+  `origin` link (the chat's toolset is built with its thread), a task created by a launched session
+  gets that session, and `task_create_from_note` links the note. Promoting a note that already
+  started tasks says so in `already_linked`.
+- **Only HQ records origins of chats and sessions.** A `chat_thread` or `session` link an agent
+  writes is stored as `related` even if it asks for `origin`, so an injected turn cannot claim a
+  conversation it was not in.
+- **Hidden from restricted audiences.** Their `task_get` has no `links`, their `task_create` takes
+  no `links` and its reply drops `links` and the advice block (which names other tasks), and the
+  link tools are denied to them.
+- **Web.** The drawer lists a task's links with icons and opens each (note, session and task inside
+  the app, the chat thread through `/chat?thread=`, pull requests and commits on GitHub, URLs only
+  when http or https). A note's page lists the tasks that started from it.
+
+**Deterministic advice on create.** `task_create` returns, never blocking and never writing:
+`similar_open_tasks` (open tasks that read like the new one: score at least 0.45 on the existing
+TF-IDF, tag and initiative score, with the shared terms as evidence; its parent, sub-tasks,
+siblings and dependencies are left out because they are related on purpose, and open and completed
+lookalikes are ranked apart so many finished ones cannot hide an open one) and, when no estimate was
+given, `suggested_estimate` (the median leased time of similar completed tasks, the middle of the
+two when there is an even number, rounded to five minutes, only when at least two have real leased time). `similar_to_text` scores text that is not
+yet a task against the live tasks the way the stored index would, so it needs no index write and
+no LLM call.
+
+Rollback of 083, then delete the `083_task_links` row from `schema_version`:
+
+```sql
+DROP TABLE task_links;
+```
+
 ## Task relationship graph (FR-069)
 
 `task_related` (crates/hq-tools/src/tasks/tools_graph.rs) answers "what else is connected to this task". The
