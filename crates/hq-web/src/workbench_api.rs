@@ -179,8 +179,7 @@ fn resolve_folder(host: &Host, folder: Option<&str>, new_folder: Option<&str>, o
     path_of(&listing)
 }
 
-/// Start an agent in a folder on a computer. The agent asks before it acts: HQ never
-/// launches one in a bypass mode.
+/// Start an agent in a folder on a computer, with the harness's default flags.
 pub(crate) async fn spawn_handler(State(state): State<Arc<WsState>>, Json(body): Json<SpawnBody>) -> Response {
     match spawn(&state, body).await {
         Ok(report) => Json(report).into_response(),

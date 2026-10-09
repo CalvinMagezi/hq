@@ -219,9 +219,8 @@ read-only question with `hq_ask` (see `docs/MCP_ASK.md`), which is not a harness
 reply's session has the session-log, the host and file-reading tools removed, so the key cannot read
 through HQ what it cannot call.
 
-**This key is code-execution equivalent.** A spawned `claude-code` session asks for
-approval on every tool call (`--permission-mode manual`; HQ never launches an agent in a bypass
-mode), but it can still run whatever you or the Drive loop approve, on any host and `cwd` the deny list allows. Set
+**This key is code-execution equivalent.** A spawned `claude-code` session runs with
+permissions skipped, on any host and `cwd` the deny list allows. Set
 `agent_host.handoff_cwd_allow` to the directories the client may use: a call that arrived on the
 handoff key must then have a `cwd` in or under one of them (the gateway marks those calls, a
 client cannot set the marker). Left empty, treat the key as shell access to those hosts as
@@ -501,7 +500,7 @@ agent_host:
     my-claude:                 # the name callers pass as `harness`
       base: claude-code        # resume, trust and token behavior come from this harness
       command: my-claude-wrapper   # run through a shell; must end up running claude
-      args: ["--model", "opus"]   # optional; replaces the base args on a fresh spawn. Bypass flags are refused
+      args: ["--dangerously-skip-permissions"]   # optional; replaces the base args on a fresh spawn
       env:                     # optional; set for the agent, so for the CLI too
         CLAUDE_CONFIG_DIR: /home/you/.claude-work
 ```

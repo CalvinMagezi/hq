@@ -154,9 +154,15 @@ fn session_dir_harness_gets_dir_arg() {
 fn antigravity_resume_uses_continue_flag() {
     let spec = harness("antigravity");
     let resumed = build_args(&spec, "hs-x", None, true);
-    assert_eq!(resumed, vec!["-c".to_string()]);
+    assert_eq!(
+        resumed,
+        vec![
+            "--dangerously-skip-permissions".to_string(),
+            "-c".to_string()
+        ]
+    );
     let fresh = build_args(&spec, "hs-x", None, false);
-    assert!(fresh.is_empty(), "{fresh:?}");
+    assert_eq!(fresh, vec!["--dangerously-skip-permissions".to_string()]);
 }
 
 #[test]
@@ -184,11 +190,14 @@ fn a_profile_resumes_with_the_base_arguments() {
         "wrapped",
     );
     let fresh = build_args(&h, "hs-x", None, false);
-    assert_eq!(fresh, ["--model", "x", "--permission-mode", "manual"].map(String::from).to_vec());
+    assert_eq!(fresh, vec!["--model".to_string(), "x".to_string()]);
     let resumed = build_args(&h, "hs-x", None, true);
     assert_eq!(
         resumed,
-        vec!["--permission-mode".to_string(), "manual".to_string(), "-c".to_string()]
+        vec![
+            "--dangerously-skip-permissions".to_string(),
+            "-c".to_string()
+        ]
     );
 }
 
@@ -218,7 +227,7 @@ async fn a_wrapper_profile_launches_through_the_shell_and_types_the_prompt() {
     let log = calls(&dir);
     assert!(log.contains("--env ACCOUNT=work"), "{log}");
     assert!(
-        log.contains("pane run w9:p1 alt-wrapper --permission-mode manual"),
+        log.contains("pane run w9:p1 alt-wrapper --dangerously-skip-permissions"),
         "{log}"
     );
     assert!(!log.contains("agent start"), "{log}");

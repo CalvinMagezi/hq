@@ -6,9 +6,7 @@
 // The host runs coding agents in terminals and talks over Unix sockets, so it exists on Unix
 // only. On other platforms (HQ Lite on Windows) the crate keeps just the small pure helpers other
 // crates call, and the rest is a plain "not available" at their call sites.
-mod bypass;
 mod names;
-pub use bypass::{find_bypass, strip_bypass};
 pub use names::check_folder_name;
 
 #[cfg(unix)]
