@@ -3,6 +3,7 @@ import { Archive, Loader2, PanelLeftClose, PanelLeftOpen, Plus, RefreshCw, Termi
 import { useEffect, useMemo, useState } from 'react'
 import { NewAgentDialog } from '~/components/sessions/NewAgentDialog'
 import { SessionDetail } from '~/components/sessions/SessionDetail'
+import { SessionInspector } from '~/components/sessions/SessionInspector'
 import { SessionRow } from '~/components/sessions/SessionRow'
 import { usePolled } from '~/components/sessions/usePolled'
 import { globalSessionsApi, type HarnessSession } from '~/lib/sessionsApi'
@@ -126,19 +127,26 @@ function WorkbenchPage() {
       />
       <main className={`${selectedId ? 'flex' : 'hidden md:flex'} flex-1 min-w-0 min-h-0 flex-col`}>
         <div className="flex flex-col flex-1 min-h-0 min-w-0 overflow-hidden">
-          <div className="mx-auto flex flex-col flex-1 min-h-0 min-w-0 w-full max-w-[1100px]">
-            {selectedId ? (
-              selected ? (
-                <SessionDetail key={selected.id} session={selected} onBack={() => select(undefined)} onChanged={refreshAll} />
+          <div className="mx-auto flex flex-1 min-h-0 min-w-0 w-full max-w-[1500px]">
+            <div className="flex flex-col flex-1 min-h-0 min-w-0 max-w-[1100px] mx-auto">
+              {selectedId ? (
+                selected ? (
+                  <SessionDetail key={selected.id} session={selected} onBack={() => select(undefined)} onChanged={refreshAll} />
+                ) : (
+                  <DetailPlaceholder error={detail.error} loading={detail.loading} onBack={() => select(undefined)} />
+                )
               ) : (
-                <DetailPlaceholder error={detail.error} loading={detail.loading} onBack={() => select(undefined)} />
-              )
-            ) : (
-              <div className="m-auto flex flex-col items-center gap-3 text-neutral-400 text-sm p-6 text-center">
-                <span className="flex items-center justify-center w-12 h-12 rounded-2xl hq-glass-card">
-                  <Terminal className="w-5 h-5" />
-                </span>
-                Pick an agent to see what it is doing.
+                <div className="m-auto flex flex-col items-center gap-3 text-neutral-400 text-sm p-6 text-center">
+                  <span className="flex items-center justify-center w-12 h-12 rounded-2xl hq-glass-card">
+                    <Terminal className="w-5 h-5" />
+                  </span>
+                  Pick an agent to see what it is doing.
+                </div>
+              )}
+            </div>
+            {selected && (
+              <div className="hidden 2xl:flex">
+                <SessionInspector session={selected} />
               </div>
             )}
           </div>
