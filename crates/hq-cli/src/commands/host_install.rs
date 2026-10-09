@@ -284,6 +284,8 @@ pub fn join(name: Option<&str>, addr: Option<&str>) -> Result<()> {
     };
     let user = std::env::var("USER").or_else(|_| std::env::var("LOGNAME")).context("USER is not set")?;
     install()?;
+    let workspace = hq_host::ensure_workspace().context("creating the HQ folder")?;
+    println!("Agents started from the web run in {} by default.", workspace.display());
     let code = encode_join(&Join { name: name.clone(), user, addr, os: std::env::consts::OS.to_string() });
     println!("\nThis machine is ready to host agents as '{name}'. Give your HQ this join code:\n\n  {code}\n");
     println!("On the HQ run `hq host add {code}` (or have its agent call the host_add tool with the code).");

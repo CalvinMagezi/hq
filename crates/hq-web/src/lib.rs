@@ -13,6 +13,7 @@ mod origin;
 mod security_headers;
 mod session_driver;
 mod sessions_api;
+mod workbench_api;
 mod copilot_usage_api;
 mod openrouter_usage_api;
 mod usage_providers_api;
@@ -155,6 +156,8 @@ pub fn create_router(state: Arc<WsState>) -> Router {
             get(api::note_read_handler).put(vault_api::note_update_handler),
         )
         .route("/api/note/create", post(vault_api::note_create_handler))
+        .route("/api/note/pdf", get(vault_api::note_pdf_handler))
+        .route("/api/note/export", get(vault_api::note_export_handler))
         .route("/api/vault/folders", get(vault_api::folders_handler))
         .route("/api/vault-signals", get(vault_api::signals_handler))
         .route("/api/tree", get(api::tree_handler))
@@ -232,7 +235,16 @@ pub fn create_router(state: Arc<WsState>) -> Router {
             "/api/threads/{thread_id}/sessions",
             get(sessions_api::list_thread_sessions_handler),
         )
-        .route("/api/harness-sessions", get(sessions_api::list_all_handler))
+        .route("/api/harness-sessions", get(sessions_api::list_all_handler).post(workbench_api::spawn_handler))
+        .route("/api/workbench/hosts", get(workbench_api::hosts_handler))
+        .route(
+            "/api/workbench/hosts/{host}/dirs",
+            get(workbench_api::list_dirs_handler).post(workbench_api::make_dir_handler),
+        )
+        .route("/api/harness-sessions/{id}/stop", post(workbench_api::stop_handler))
+        .route("/api/harness-sessions/{id}/resume", post(workbench_api::resume_handler))
+        .route("/api/harness-sessions/{id}/rename", post(workbench_api::rename_handler))
+        .route("/api/harness-sessions/{id}/archive", post(workbench_api::archive_handler))
         .route("/api/harness-sessions/{id}", get(sessions_api::get_session_handler))
         .route("/api/harness-sessions/{id}/screen", get(sessions_api::screen_handler))
         .route("/api/harness-sessions/{id}/send", post(sessions_api::send_handler))
@@ -436,7 +448,7 @@ mod web_auth_router_tests {
             }
             b.body(Body::from("{}")).unwrap()
         };
-        for action in ["send", "adopt"] {
+        for action in ["send", "adopt", "stop", "resume", "rename", "archive"] {
             let path = format!("/api/harness-sessions/hs-none/{action}");
             assert_eq!(
                 status(&app, post(&path, false)).await,
@@ -456,6 +468,10 @@ mod web_auth_router_tests {
                 StatusCode::FORBIDDEN,
                 "{action} stays open to cached clients"
             );
+        }
+        for path in ["/api/harness-sessions", "/api/workbench/hosts/native/dirs"] {
+            assert_eq!(status(&app, post(path, false)).await, StatusCode::FORBIDDEN, "{path}");
+            assert_ne!(status(&app, post(path, true)).await, StatusCode::FORBIDDEN, "{path}");
         }
         let preflight = Request::options("/api/harness-sessions/hs-none/send")
             .header("origin", "http://localhost:9999")
@@ -568,6 +584,8 @@ mod web_auth_router_tests {
         for req in [
             get("/api/tree?recursive=true&path=../"),
             get("/api/note?path=../etc/passwd"),
+            get("/api/note/pdf?path=../etc/passwd"),
+            get("/api/note/export?path=../etc/passwd&format=html"),
             json_req("POST", "/api/note/create", r#"{"folder":"../x","title":"t","content":""}"#),
             json_req("PUT", "/api/note", r#"{"path":"../x.md","content":""}"#),
             json_req("PUT", "/api/note", r#"{"path":"/etc/hosts","content":""}"#),
@@ -578,6 +596,112 @@ mod web_auth_router_tests {
         let created = json_req("POST", "/api/note/create", r#"{"title":"Hello","content":"hi"}"#);
         assert_eq!(status(&app, created).await, StatusCode::OK);
         assert!(vault.path().join("Notebooks/Inbox/Hello.md").exists());
+    }
+
+    #[tokio::test]
+    async fn note_pdf_endpoint_validates_its_input() {
+        let vault = tempfile::TempDir::new().unwrap();
+        std::fs::create_dir_all(vault.path().join("Notebooks")).unwrap();
+        std::fs::write(vault.path().join("Notebooks/pic.png"), b"x").unwrap();
+        let app = create_router(Arc::new(WsState::new(vault.path().to_path_buf(), None)));
+        let get = |uri: &str| Request::get(uri).body(Body::empty()).unwrap();
+        assert_eq!(status(&app, get("/api/note/pdf")).await, StatusCode::BAD_REQUEST);
+        assert_eq!(status(&app, get("/api/note/pdf?path=Missing")).await, StatusCode::NOT_FOUND);
+        assert_eq!(
+            status(&app, get("/api/note/pdf?path=Notebooks/pic.png")).await,
+            StatusCode::BAD_REQUEST
+        );
+    }
+
+    async fn export_vault() -> (tempfile::TempDir, Router) {
+        let vault = tempfile::TempDir::new().unwrap();
+        std::fs::create_dir_all(vault.path().join("Notebooks")).unwrap();
+        std::fs::write(
+            vault.path().join("Notebooks/Plan.md"),
+            "---\ntitle: Plan\n---\nHello\n\n## Sites\n\n| a | b |\n|---|---|\n| 1 | 2 |\n",
+        )
+        .unwrap();
+        std::fs::write(vault.path().join("Notebooks/Prose.md"), "Just words.\n").unwrap();
+        std::fs::write(vault.path().join("Notebooks/pic.png"), b"x").unwrap();
+        let app = create_router(Arc::new(WsState::new(vault.path().to_path_buf(), None)));
+        (vault, app)
+    }
+
+    #[tokio::test]
+    async fn note_export_endpoint_validates_its_input() {
+        let (_vault, app) = export_vault().await;
+        let get = |uri: &str| Request::get(uri).body(Body::empty()).unwrap();
+        assert_eq!(status(&app, get("/api/note/export")).await, StatusCode::BAD_REQUEST);
+        assert_eq!(
+            status(&app, get("/api/note/export?path=Missing&format=html")).await,
+            StatusCode::NOT_FOUND
+        );
+        assert_eq!(
+            status(&app, get("/api/note/export?path=Plan&format=docx-nope")).await,
+            StatusCode::BAD_REQUEST,
+            "an unknown format is the caller's mistake"
+        );
+        assert_eq!(
+            status(&app, get("/api/note/export?path=Notebooks/pic.png&format=html")).await,
+            StatusCode::BAD_REQUEST
+        );
+        // A note that has nothing of the requested kind is a 400, not a 500.
+        for format in ["csv", "xlsx", "json", "code"] {
+            let uri = format!("/api/note/export?path=Prose&format={format}");
+            assert_eq!(status(&app, get(&uri)).await, StatusCode::BAD_REQUEST, "{uri}");
+        }
+    }
+
+    #[tokio::test]
+    async fn note_export_endpoint_serves_each_format_with_matching_headers() {
+        let (_vault, app) = export_vault().await;
+        for (format, mime, ext) in [
+            ("html", "text/html", "html"),
+            ("md", "text/markdown", "md"),
+            ("csv", "text/csv", "csv"),
+            ("json", "application/json", "json"),
+            ("xlsx", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", "xlsx"),
+            ("ipynb", "application/x-ipynb+json", "ipynb"),
+        ] {
+            let uri = format!("/api/note/export?path=Plan&format={format}");
+            let res = app
+                .clone()
+                .oneshot(Request::get(&uri).body(Body::empty()).unwrap())
+                .await
+                .unwrap();
+            assert_eq!(res.status(), StatusCode::OK, "{uri}");
+            assert!(res.headers()["content-type"].to_str().unwrap().starts_with(mime), "{uri}");
+            let disposition = res.headers()["content-disposition"].to_str().unwrap().to_owned();
+            assert!(disposition.contains(&format!("Plan.{ext}")), "{uri}: {disposition}");
+            // A router layer may rewrite no-store to no-cache; either keeps a
+            // private note export out of shared caches.
+            let cache = res.headers()["cache-control"].to_str().unwrap().to_owned();
+            assert!(cache.contains("no-store") || cache.contains("no-cache"), "{uri}: {cache}");
+            let body = axum::body::to_bytes(res.into_body(), 16 * 1024 * 1024).await.unwrap();
+            assert!(!body.is_empty(), "{uri}");
+        }
+    }
+
+    /// The built-in renderer needs no external tool, so this is a normal test.
+    /// It steps aside when a developer has forced one of the older engines.
+    #[tokio::test]
+    async fn note_pdf_endpoint_serves_a_pdf() {
+        if std::env::var("HQ_PDF_ENGINE").is_ok_and(|v| !v.trim().is_empty()) {
+            return;
+        }
+        let (_vault, app) = export_vault().await;
+        for uri in ["/api/note/pdf?path=Plan", "/api/note/export?path=Plan&format=pdf", "/api/note/export?path=Plan"] {
+            let res = app
+                .clone()
+                .oneshot(Request::get(uri).body(Body::empty()).unwrap())
+                .await
+                .unwrap();
+            assert_eq!(res.status(), StatusCode::OK, "{uri}");
+            assert_eq!(res.headers()["content-type"], "application/pdf", "{uri}");
+            assert!(res.headers()["content-disposition"].to_str().unwrap().contains("Plan.pdf"));
+            let body = axum::body::to_bytes(res.into_body(), 16 * 1024 * 1024).await.unwrap();
+            assert!(body.starts_with(b"%PDF"), "{uri}");
+        }
     }
 }
 

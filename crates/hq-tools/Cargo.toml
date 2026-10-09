@@ -11,6 +11,7 @@ hq-db = { workspace = true }
 hq-llm = { workspace = true }
 hq-memory = { workspace = true }
 hq-convert = { workspace = true }
+hq-export = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 serde_yaml = { workspace = true }

@@ -50,6 +50,25 @@ pub fn chat_session_config(config: &hq_core::config::HqConfig) -> SessionConfig 
     }
 }
 
+const CODER_ROW: &str = "| Document creation / drafting | coder | code | Writing/editing files |";
+const ORCHESTRATOR_CODER_ROW: &str =
+    "| Drafting text for notes and documents | coder | code | Returns the draft; you save it with `vault_write_note` |";
+const ORCHESTRATOR_CODE_WORK_RULE: &str = "- Children read and report; they cannot write files. Code and repository changes are never yours or a child's: start a coding session with \
+     `harness_session_spawn` (task_id, goal, done criteria), then watch and steer it.\n";
+
+/// `chat_harness_instructions` for a session role. The Implementor text is unchanged.
+pub fn chat_harness_instructions_for(cwd: &Path, role: crate::builder::SessionRole) -> String {
+    let text = chat_harness_instructions(cwd);
+    if role != crate::builder::SessionRole::Orchestrator {
+        return text;
+    }
+    text.replace(CODER_ROW, ORCHESTRATOR_CODER_ROW)
+        .replace(
+            "## Orchestration rules\n",
+            &format!("## Orchestration rules\n{ORCHESTRATOR_CODE_WORK_RULE}"),
+        )
+}
+
 /// Harness instructions for the HQ chat orchestrator.
 ///
 /// Teaches the model which tasks to handle directly with vault tools vs
@@ -96,4 +115,24 @@ pub fn chat_harness_instructions(cwd: &Path) -> String {
            Use `vault_search` for vault content and `grep` for code.\n",
         cwd = cwd.display()
     )
+}
+
+#[cfg(test)]
+mod role_tests {
+    use super::*;
+    use crate::builder::SessionRole;
+
+    #[test]
+    fn implementor_text_is_unchanged_and_orchestrator_drops_file_writing_for_children() {
+        let cwd = Path::new("/work");
+        assert_eq!(
+            chat_harness_instructions_for(cwd, SessionRole::Implementor),
+            chat_harness_instructions(cwd)
+        );
+        let base = chat_harness_instructions(cwd);
+        assert!(base.contains(CODER_ROW), "the row to replace moved");
+        let orchestrated = chat_harness_instructions_for(cwd, SessionRole::Orchestrator);
+        assert!(!orchestrated.contains("Writing/editing files"));
+        assert!(orchestrated.contains("harness_session_spawn` (task_id, goal, done criteria)"));
+    }
 }
