@@ -40,6 +40,7 @@ pub async fn run(config: &HqConfig, component: &str) -> Result<()> {
 
     let db_path = config.db_path();
     let db = Arc::new(Database::open(&db_path).context("failed to open database")?);
+    hq_agent::install_ledger(db.clone());
 
     info!(vault = %config.vault_path.display(), "HQ starting");
     if matches!(component, "all" | "daemon") {

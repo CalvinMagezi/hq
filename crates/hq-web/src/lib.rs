@@ -15,6 +15,7 @@ mod session_driver;
 mod sessions_api;
 mod copilot_usage_api;
 mod openrouter_usage_api;
+mod budgets_api;
 mod usage_providers_api;
 mod settings_api;
 mod setup_api;
@@ -169,6 +170,10 @@ pub fn create_router(state: Arc<WsState>) -> Router {
         .route(
             "/api/openrouter-usage",
             get(openrouter_usage_api::openrouter_usage_handler),
+        )
+        .route(
+            "/api/budgets",
+            get(budgets_api::budgets_handler).put(budgets_api::put_budgets_handler),
         )
         .route(
             "/api/usage/providers",

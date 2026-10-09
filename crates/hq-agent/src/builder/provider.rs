@@ -24,6 +24,11 @@ pub(super) fn resolve_backends(
     provider_override: Option<Arc<dyn LlmProvider>>,
     shared_db: Option<&Arc<hq_db::Database>>,
 ) -> Result<Backends> {
+    // Every provider reports to the process-wide ledger and budget gate, so turns driven by a
+    // configured backend chain are recorded as well as router calls.
+    if let Some(db) = shared_db {
+        crate::install_ledger(db.clone());
+    }
     // Attached to the legacy router so every LLM call reports its outcome.
     let outcome_sink: Option<hq_llm::SharedSink> = shared_db
         .map(|db| crate::outcome_sink::DbOutcomeSink::new(db.clone()) as hq_llm::SharedSink);
@@ -150,6 +155,14 @@ pub(super) async fn resolve_session_config(
         }
     }
 
+    // A background, watch or sub-agent run with no cap of its own gets the owner's per-run
+    // ceiling, so a runaway loop cannot drain a month.
+    if !session_config.is_live_user_turn
+        && let Some(ceiling) = config.budgets.background_run_usd
+    {
+        session_config.max_budget_usd =
+            Some(session_config.max_budget_usd.map_or(ceiling, |own| own.min(ceiling)));
+    }
     session_config
 }
 

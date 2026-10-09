@@ -171,6 +171,7 @@ async fn start(config: &HqConfig, mut args: StartArgs) -> Result<()> {
     let vault =
         Arc::new(VaultClient::new(config.vault_path.clone()).context("failed to open vault")?);
     let db = Arc::new(Database::open(&config.db_path()).context("failed to open database")?);
+    hq_agent::install_ledger(db.clone());
     let state = super::start::build_web_state(
         config,
         &vault,

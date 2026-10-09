@@ -627,3 +627,21 @@ async fn skill_tools_survive_the_profile_filters() {
     assert!(standard.iter().any(|n| n == "skill_manage"), "{standard:?}");
     assert!(weak.iter().any(|n| n == "load_skill"), "{weak:?}");
 }
+
+#[tokio::test]
+async fn a_background_run_gets_the_owners_per_run_ceiling_unless_it_has_a_lower_cap() {
+    use hq_core::config::HqConfig;
+    const CEILING: f64 = 0.75;
+    let mut config = HqConfig::default();
+    config.budgets.background_run_usd = Some(CEILING);
+
+    let session = super::provider::resolve_session_config(&config, None).await;
+    assert_eq!(session.max_budget_usd.map(|c| c.min(CEILING)), Some(session.max_budget_usd.unwrap()));
+    assert!(session.max_budget_usd.unwrap() <= CEILING);
+
+    let mut live = crate::session::SessionConfig::default();
+    live.is_live_user_turn = true;
+    live.max_budget_usd = Some(5.0);
+    let kept = super::provider::resolve_session_config(&config, Some(live)).await;
+    assert_eq!(kept.max_budget_usd, Some(5.0));
+}

@@ -276,11 +276,12 @@ async fn a_chained_call_is_filed_under_the_backend_that_answered() {
         .await
         .unwrap();
 
-    let rows = sink.settled(1).await;
-    assert_eq!(
-        (rows[0].provider.as_str(), rows[0].cost_source),
-        ("fallback", "table")
-    );
+    // The backend that was down is recorded as a failed, unbilled attempt; the one that answered
+    // carries the cost.
+    let rows = sink.settled(2).await;
+    let by = |name: &str| rows.iter().find(|r| r.provider == name).unwrap();
+    assert_eq!((by("primary").success, by("primary").cost_source), (false, "none"));
+    assert_eq!((by("fallback").success, by("fallback").cost_source), (true, "table"));
 }
 
 #[tokio::test]

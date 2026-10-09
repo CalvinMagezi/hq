@@ -34,6 +34,7 @@ fn render(db: &Database, sub: &str, now: i64, out: &mut dyn Write) -> Result<()>
         "summary" | "cost" | "" => render_summary(db, now, out),
         "daily" | "day" => render_daily(db, now, out),
         "origin" | "origins" => render_origins(db, now, out),
+        "budgets" => render_budgets(db, now, out),
         _ => render_help(out),
     }
 }
@@ -52,6 +53,7 @@ fn render_help(out: &mut dyn Write) -> Result<()> {
         out,
         "  origin    Cost by kind of work (chat, memory, subagent...) over the same window"
     )?;
+    writeln!(out, "  budgets   Each configured budget against the ledger")?;
     writeln!(
         out,
         "  reconcile Compare the ledger with what OpenRouter says it billed"
@@ -89,6 +91,26 @@ fn render_summary(db: &Database, now: i64, out: &mut dyn Write) -> Result<()> {
     let by_day = db.with_conn(|conn| grouped_usage(conn, since, GroupBy::Day))?;
     writeln!(out, "\nBy day:")?;
     write_rows(out, &by_day)
+}
+
+fn render_budgets(db: &Database, now: i64, out: &mut dyn Write) -> Result<()> {
+    let budgets = HqConfig::load().map(|c| c.budgets).unwrap_or_default();
+    if budgets.budgets.is_empty() {
+        writeln!(out, "No budgets are configured, so nothing is enforced. Add a `budgets:` list to config.yaml.")?;
+        return Ok(());
+    }
+    for problem in budgets.problems() {
+        writeln!(out, "Problem: {problem}")?;
+    }
+    for b in &budgets.budgets {
+        let s = db.with_conn(|conn| hq_db::usage_ledger::budget_status(conn, b, now))?;
+        writeln!(
+            out,
+            "  {:<16} {:<22} ${:.2} of ${:.2} ({:.0}%)  {:?}, then {:?}",
+            s.name, s.scope, s.spent_usd, s.limit_usd, s.pct, s.state, s.action
+        )?;
+    }
+    Ok(())
 }
 
 fn render_origins(db: &Database, now: i64, out: &mut dyn Write) -> Result<()> {
