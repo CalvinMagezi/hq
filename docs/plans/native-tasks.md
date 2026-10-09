@@ -478,6 +478,10 @@ Real-harness acceptance (run against a throwaway vault over HTTP `/mcp`, no skil
 - With `AGENTHQ_API_KEY` set (unkeyed calls refused): Claude Code, with the `hq-tasks` skill placed in
   its project, and Codex (key via `bearer_token_env_var`) both finished the loop and ended at
   `ready_for_review`. Codex needs stdin closed (`< /dev/null`) when scripted.
+- Auth on, via each tool's own header setting: Cursor agent (`--model auto`; its default model needs a paid
+  plan) and OpenCode ended at `ready_for_review`. Copilot CLI finished the loop but again chose `complete`
+  even though the claim reply says to use it only for verified work; HQ states the rule and does not
+  enforce it.
 - Multi-session handoff on one three-step task, one step per session, lease TTL 60s: Claude Code did
   step 1 and left a checkpoint naming step 2; Codex, with no shared memory, read it and did step 2;
   an agent then claimed the task and vanished; a claim by another agent was refused with the holder's
