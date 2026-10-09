@@ -10,6 +10,8 @@ use std::sync::{Arc, Mutex};
 const UNTRUSTED_SOURCE_TOOLS: &[&str] = &[
     "web_fetch",
     "web_search",
+    "github_read",
+    "github_clone",
     "google_workspace",
     "convert_to_markdown",
     "ocr_extract_text",

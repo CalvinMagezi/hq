@@ -3,7 +3,8 @@ import { lazy, Suspense, useState, useCallback, useEffect } from 'react'
 import { marked } from 'marked'
 import DOMPurify from 'dompurify'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
-import { togglePinNote } from '~/lib/vaultApi'
+import { fetchNotePdf, togglePinNote } from '~/lib/vaultApi'
+import { HqHttpError } from '~/lib/hqAuth'
 import { noteQuery, vaultKeys } from '~/lib/queries'
 import type { DirEntry } from '~/lib/vaultApi'
 import { fileIcon } from '~/components/vault/fileIcon'
@@ -103,6 +104,7 @@ function VaultFileView({ filePath, content, isDir, dirEntries }: {
     const [isPinned, setIsPinned] = useState(initialPinned)
     const [pinning, setPinning] = useState(false)
     const [editing, setEditing] = useState(false)
+    const [exportingPdf, setExportingPdf] = useState(false)
     const [copyMenu, setCopyMenu] = useState<CopyMenuState | null>(null)
     const closeCopyMenu = useCallback(() => setCopyMenu(null), [])
 
@@ -163,7 +165,45 @@ function VaultFileView({ filePath, content, isDir, dirEntries }: {
         setGlobalChatOpen(true)
     }
 
-    const handleDownloadPDF = async () => {
+    // Server-rendered PDF. Touch devices get the share sheet (WhatsApp, email, Drive);
+    // desktops get a download.
+    const handleExportPdf = async () => {
+        if (exportingPdf) return
+        setExportingPdf(true)
+        try {
+            const blob = await fetchNotePdf(filePath)
+            const name = `${filePath.split('/').pop()?.replace(/\.md$/, '') || 'note'}.pdf`
+            const file = new File([blob], name, { type: 'application/pdf' })
+            const touch = window.matchMedia?.('(pointer: coarse)').matches
+            if (touch && navigator.canShare?.({ files: [file] })) {
+                try {
+                    await navigator.share({ files: [file], title: name })
+                } catch (err) {
+                    if (!(err instanceof DOMException && err.name === 'AbortError')) throw err
+                }
+                return
+            }
+            const url = URL.createObjectURL(blob)
+            const a = document.createElement('a')
+            a.href = url
+            a.download = name
+            document.body.appendChild(a)
+            a.click()
+            a.remove()
+            setTimeout(() => URL.revokeObjectURL(url), 10_000)
+        } catch (err) {
+            if (err instanceof HqHttpError && err.status === 503) {
+                await handlePrintPDF()
+            } else {
+                window.alert(err instanceof Error ? err.message : 'Could not export this note as PDF.')
+            }
+        } finally {
+            setExportingPdf(false)
+        }
+    }
+
+    // Browser print window: the fallback when the server has no PDF engine.
+    const handlePrintPDF = async () => {
         const filename = filePath.split('/').pop()?.replace(/\.md$/, '') ?? 'note'
 
         // Strip YAML frontmatter before rendering
@@ -357,10 +397,11 @@ ${safeHtml}
                     )}
                     {isMd && (
                         <button
-                            onClick={handleDownloadPDF}
-                            className="hidden sm:flex items-center justify-center w-7 h-7 rounded-lg transition-all"
+                            onClick={handleExportPdf}
+                            disabled={exportingPdf}
+                            className="flex items-center justify-center w-7 h-7 rounded-lg transition-all disabled:opacity-40"
                             style={{ color: 'var(--text-dim)', background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.06)' }}
-                            title="Export PDF"
+                            title={exportingPdf ? 'Exporting PDF…' : 'Export PDF'}
                         >
                             <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                                 <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="12" y1="18" x2="12" y2="12"/><line x1="9" y1="15" x2="15" y2="15"/>

@@ -1,0 +1,9 @@
+# Read by `cargo audit`. `cargo deny check` reads deny.toml instead, so keep the
+# two lists in step. The reason for each id lives in deny.toml.
+[advisories]
+ignore = [
+    # quick-xml 0.38.4 via typst -> hayagriva -> citationberg. Not reachable from
+    # note content. Drop when citationberg depends on quick-xml >= 0.41.
+    "RUSTSEC-2026-0194",
+    "RUSTSEC-2026-0195",
+]

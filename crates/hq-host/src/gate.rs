@@ -18,8 +18,11 @@ pub const GATE_DENIED_EXIT: i32 = 64;
 /// Methods a remote caller may use. `host.stop` is left out (a remote key must
 /// not end the host), and so is `agent.report`, which belongs to the agent's own
 /// hooks on the machine where it runs.
-const ALLOWED: [&str; 19] = [
+const ALLOWED: [&str; 22] = [
     "host.status",
+    "host.workspace",
+    "host.dirs",
+    "host.mkdir",
     "events.poll",
     "agent.spawn",
     "agent.list",

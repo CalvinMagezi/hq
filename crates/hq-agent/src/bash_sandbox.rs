@@ -44,6 +44,9 @@ pub struct BashSettings {
     pub network: bool,
     /// Extra writable roots (vault, working dir) on top of HOME, cwd and tmp.
     pub writable_paths: Vec<PathBuf>,
+    /// Leave only scratch space writable: no HOME, cwd or extra roots. Used by
+    /// sessions that may look at the machine but never change it.
+    pub read_only: bool,
 }
 
 impl Default for BashSettings {
@@ -59,6 +62,18 @@ impl BashSettings {
             sandbox: config.sandbox,
             network: config.network,
             writable_paths,
+            read_only: false,
+        }
+    }
+
+    /// Investigation-only shell: always sandboxed (a missing backend refuses
+    /// the command), no network, nothing durable writable.
+    pub fn read_only(config: &BashConfig) -> Self {
+        Self {
+            sandbox: BashSandboxMode::Required,
+            network: false,
+            read_only: true,
+            ..Self::from_config(config, Vec::new())
         }
     }
 }
@@ -66,6 +81,8 @@ impl BashSettings {
 /// Everything a sandbox backend needs, gathered once per command.
 #[derive(Debug, Clone)]
 pub struct SandboxContext {
+    /// Investigation-only: also closes local IPC and the programs that start other apps.
+    pub read_only: bool,
     pub cwd: PathBuf,
     pub writable: Vec<PathBuf>,
     pub masked_files: Vec<PathBuf>,
@@ -81,12 +98,16 @@ impl SandboxContext {
     pub fn for_process(settings: &BashSettings) -> Self {
         let home = dirs::home_dir();
         let cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("/"));
-        let mut writable: Vec<PathBuf> = home.iter().cloned().collect();
-        writable.push(cwd.clone());
+        let mut writable: Vec<PathBuf> = Vec::new();
+        if !settings.read_only {
+            writable.extend(home.iter().cloned());
+            writable.push(cwd.clone());
+            writable.extend(settings.writable_paths.iter().cloned());
+        }
         writable.push(std::env::temp_dir());
         writable.extend(SCRATCH_ROOTS.iter().map(PathBuf::from));
-        writable.extend(settings.writable_paths.iter().cloned());
         Self {
+            read_only: settings.read_only,
             cwd,
             writable: existing_canonical(writable),
             masked_files: existing_canonical(masked_files(home.as_deref())),
@@ -502,8 +523,39 @@ pub fn seatbelt_profile(ctx: &SandboxContext) -> String {
     if !ctx.network {
         profile.push_str("(deny network-outbound (remote ip))");
     }
+    if ctx.read_only {
+        // Unix sockets (launchd, ssh-agent, docker) stay open under the rule above.
+        profile.push_str("(deny network*)");
+        let programs: Vec<String> = READ_ONLY_DENIED_PROGRAMS
+            .iter()
+            .map(|p| format!("(literal \"{p}\")"))
+            .collect();
+        profile.push_str(&format!("(deny process-exec {})", programs.join(" ")));
+        // A copied launcher in scratch space would dodge the list above, so nothing writable may be run.
+        let scratch: Vec<String> = ctx
+            .writable
+            .iter()
+            .map(|p| format!("(subpath {})", sbpl_string(p)))
+            .chain(MACOS_SCRATCH_ROOTS.iter().map(|p| format!("(subpath \"{p}\")")))
+            .collect();
+        profile.push_str(&format!("(deny process-exec {})", scratch.join(" ")));
+    }
     profile
 }
+
+/// Programs that start other apps or change another process's settings, which a read-only shell has no use for.
+const READ_ONLY_DENIED_PROGRAMS: &[&str] = &[
+    "/bin/launchctl",
+    "/usr/bin/launchctl",
+    "/usr/bin/open",
+    "/usr/bin/osascript",
+    "/usr/bin/defaults",
+    "/usr/bin/security",
+    "/usr/bin/screencapture",
+    "/usr/bin/say",
+    "/usr/bin/shortcuts",
+    "/usr/bin/automator",
+];
 
 fn sbpl_string(path: &Path) -> String {
     let raw = path.to_string_lossy();

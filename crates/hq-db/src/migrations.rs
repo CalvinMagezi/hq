@@ -281,8 +281,12 @@ const MIGRATIONS: &[(&str, &str)] = &[
         include_str!("../sql/076_session_parent.sql"),
     ),
     (
-        "077_ledger_cost_attribution",
-        include_str!("../sql/077_ledger_cost_attribution.sql"),
+        "077_session_archive",
+        include_str!("../sql/077_session_archive.sql"),
+    ),
+    (
+        "078_ledger_cost_attribution",
+        include_str!("../sql/078_ledger_cost_attribution.sql"),
     ),
     (
         "078_harness_usage",

@@ -9,6 +9,10 @@ export const installChannels = {
     available: true,
     title: 'Server with signed releases',
   },
+  hetzner: {
+    available: true,
+    title: 'One form on Hetzner',
+  },
   tailscale: {
     available: true,
     title: 'Remote web access over Tailscale',
