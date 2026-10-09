@@ -72,6 +72,8 @@ export interface HarnessSession extends WatchedSession {
   agent_name: string
   /** The chat watching it; null means nobody does, so it can be adopted. */
   owner_thread: string | null
+  /** Hidden from the default list; only a session that is not running can be archived. */
+  archived: boolean
   /** Whether a running session's agent exists right now; null when its host could not be asked. */
   alive?: boolean | null
   /** False when the host is unreachable (the agent state is then unknown, not exited). */
@@ -83,12 +85,15 @@ export interface SessionFilters {
   task_id?: string
   status?: SessionStatus
   host?: string
+  include_archived?: boolean
 }
 
 export interface ScreenText {
   session_id: string
   /** `live` while the agent runs, `snapshot` for the last text stored after it ended. */
   source: 'live' | 'snapshot'
+  /** True when the lines carry ANSI color sequences. */
+  styled?: boolean
   lines: string[]
 }
 
@@ -112,7 +117,7 @@ export const KEY_NAME_PATTERN = /^[A-Za-z0-9][A-Za-z0-9+_-]{0,31}$/
 
 const queryString = (filters: SessionFilters) => {
   const q = new URLSearchParams()
-  for (const [k, v] of Object.entries(filters)) if (v) q.set(k, v)
+  for (const [k, v] of Object.entries(filters)) if (v) q.set(k, String(v))
   const s = q.toString()
   return s ? `?${s}` : ''
 }
@@ -136,6 +141,74 @@ export const isBlocked = (s: Pick<HarnessSession, 'status' | 'agent_status'>) =>
 export const canSend = (s: Pick<HarnessSession, 'status' | 'alive' | 'reachable'>) =>
   s.status === 'running' && s.alive !== false && s.reachable !== false
 
+export interface HostWorkspace {
+  root: string
+  os: string
+  wsl: boolean
+  explorer_path: string
+}
+
+export interface WorkbenchHost {
+  host: string
+  reachable: boolean
+  host_version?: string
+  workspace?: HostWorkspace
+  workspace_error?: string
+  error?: string
+}
+
+export interface WorkbenchHosts {
+  hosts: WorkbenchHost[]
+  harnesses: string[]
+}
+
+export interface DirEntry {
+  name: string
+  path: string
+}
+
+export interface DirListing {
+  path: string
+  parent: string | null
+  dirs: DirEntry[]
+  truncated: boolean
+}
+
+export interface SpawnInput {
+  harness: string
+  host?: string
+  folder?: string
+  new_folder?: string
+  prompt?: string
+  label?: string
+}
+
+/** What launching, stopping or resuming reports back. `blocked` means the agent is waiting at a dialog. */
+export interface LaunchReport {
+  session_id: string
+  harness: string
+  host: string
+  cwd: string
+  status: SessionStatus
+  agent_status: AgentStatus | null
+  blocked?: { screen: string; next: string }
+  note?: string
+}
+
+const hostPath = (host: string) => `/api/workbench/hosts/${encodeURIComponent(host)}`
+
+export const workbenchApi = {
+  hosts: (): Promise<WorkbenchHosts> => hqJson('/api/workbench/hosts'),
+
+  dirs: (host: string, path = ''): Promise<DirListing> =>
+    hqJson(`${hostPath(host)}/dirs${path ? `?path=${encodeURIComponent(path)}` : ''}`),
+
+  createDir: (host: string, body: { parent?: string; name: string }): Promise<{ path: string }> =>
+    hqJson(`${hostPath(host)}/dirs`, 'POST', body),
+
+  spawn: (input: SpawnInput): Promise<LaunchReport> => hqJson('/api/harness-sessions', 'POST', input),
+}
+
 export const globalSessionsApi = {
   list: async (filters: SessionFilters = {}): Promise<HarnessSession[]> => {
     const res = await hqJson<{ sessions?: HarnessSession[] }>(`/api/harness-sessions${queryString(filters)}`)
@@ -144,11 +217,23 @@ export const globalSessionsApi = {
 
   get: async (id: string): Promise<HarnessSession> => (await hqJson<{ session: HarnessSession }>(sessionPath(id))).session,
 
-  screen: (id: string, lines: number): Promise<ScreenText> => hqJson(`${sessionPath(id)}/screen?lines=${lines}`),
+  screen: (id: string, lines: number, styled = false): Promise<ScreenText> =>
+    hqJson(`${sessionPath(id)}/screen?lines=${lines}${styled ? '&styled=true' : ''}`),
+
+  screenStreamPath: (id: string, lines: number): string => `${sessionPath(id)}/screen/stream?lines=${lines}`,
 
   send: (id: string, payload: SendPayload): Promise<{ sent?: string; keys?: string[]; note?: string }> =>
     hqJson(`${sessionPath(id)}/send`, 'POST', payload),
 
   adopt: (id: string, threadId?: string): Promise<AdoptResult> =>
     hqJson(`${sessionPath(id)}/adopt`, 'POST', threadId ? { thread_id: threadId } : {}),
+
+  stop: (id: string): Promise<LaunchReport> => hqJson(`${sessionPath(id)}/stop`, 'POST'),
+
+  resume: (id: string, prompt?: string): Promise<LaunchReport> =>
+    hqJson(`${sessionPath(id)}/resume`, 'POST', prompt ? { prompt } : {}),
+
+  rename: (id: string, label: string): Promise<unknown> => hqJson(`${sessionPath(id)}/rename`, 'POST', { label }),
+
+  archive: (id: string, archived: boolean): Promise<unknown> => hqJson(`${sessionPath(id)}/archive`, 'POST', { archived }),
 }

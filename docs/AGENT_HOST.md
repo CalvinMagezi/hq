@@ -48,11 +48,14 @@ version gets `protocol_mismatch`.
 | Method | Params | Result |
 |---|---|---|
 | `host.status` | none | `protocol_version`, `host_version`, `pid`, `agents`, `agents_working`, `agents_blocked`, `binary_stale` |
+| `host.workspace` | none | `root` (the HQ folder, `~/Documents/HQ`, created if missing), `os`, `wsl`, `explorer_path` (the `\\wsl$\...` path on WSL2, else null) |
+| `host.dirs` | optional `path` (the HQ folder when absent) | `path`, `parent`, `dirs` (`name`, `path`), `truncated`; only folders inside the HQ folder, symlinks out of it refused |
+| `host.mkdir` | `name`, optional `parent` | `{"path"}`; one folder name (no slashes, colons, `~`, `$` or backticks), idempotent |
 | `host.stop` | none | `{}` |
 | `agent.spawn` | `name`, `argv`, `cwd`, optional `agent` (kind, for state detection), `resume_argv` (see Restarts), `env` (object), `rows`, `cols`, `scrollback_rows` | agent info |
 | `agent.list` | none | `{"agents": [...]}` |
 | `agent.get` | `name` | agent info |
-| `agent.read` | `name`, optional `source` (`visible`, `recent`, `recent_unwrapped`; default `recent_unwrapped`), optional `lines` (last N, 0 or absent for all) | `{"text", "truncated"}`; text is cut to its last 400 KiB, at a line start, when longer |
+| `agent.read` | `name`, optional `source` (`visible`, `recent`, `recent_unwrapped`, `styled`; default `recent_unwrapped`; `styled` is `recent` with color and style as ANSI escape sequences), optional `lines` (last N, 0 or absent for all) | `{"text", "truncated"}`; text is cut to its last 400 KiB, at a line start, when longer |
 | `agent.send_text` | `name`, `text` | `{}` (raw bytes, as given) |
 | `agent.paste` | `name`, `text` | `{}` (bracketed paste when the program enabled it) |
 | `agent.prompt` | `name`, `text` | `{}` (paste, short pause, Enter) |

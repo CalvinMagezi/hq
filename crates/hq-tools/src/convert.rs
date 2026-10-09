@@ -9,7 +9,7 @@
 //!   - `vault_export_pdf` — the PDF-only form of `vault_export`
 //!   - `ocr_extract_text` — extract text from an image via macOS Vision (on-device, model-agnostic)
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::str::FromStr;
 
 use anyhow::Result;
@@ -104,6 +104,30 @@ impl HqTool for ConvertToMarkdownTool {
     }
 }
 
+/// Vault folders that hold identity, threads and databases; documents never belong there.
+const PROTECTED_VAULT_DIRS: [&str; 4] = ["_system", "_threads", "_data", "_trash"];
+
+/// An export may not land in HQ's own config directory or the vault's private folders.
+fn refuse_protected_output(dest: &Path, vault: &Path) -> Result<()> {
+    let absolute = if dest.is_absolute() {
+        dest.to_path_buf()
+    } else {
+        std::env::current_dir()?.join(dest)
+    };
+    let dest = crate::util::lexically_normalize(&absolute);
+    let hq_dir = crate::util::lexically_normalize(&hq_core::config::HqConfig::hq_dir());
+    let in_vault_private = PROTECTED_VAULT_DIRS
+        .iter()
+        .any(|d| dest.starts_with(crate::util::lexically_normalize(&vault.join(d))));
+    if dest.starts_with(&hq_dir) || in_vault_private {
+        anyhow::bail!(
+            "output '{}' is inside HQ's config directory or the vault's private folders; pick another location",
+            dest.display()
+        );
+    }
+    Ok(())
+}
+
 // ─── ConvertFromMarkdownTool ────────────────────────────────────────────────
 
 pub struct ConvertFromMarkdownTool {
@@ -180,6 +204,7 @@ impl HqTool for ConvertFromMarkdownTool {
             .map_err(|e| anyhow::anyhow!("invalid format '{format_str}': {e}"))?;
 
         let dest = PathBuf::from(output_str);
+        refuse_protected_output(&dest, &self.vault_path)?;
 
         if let Some(parent) = dest.parent() {
             std::fs::create_dir_all(parent)?;
@@ -259,7 +284,11 @@ async fn run_note_export(
     // The extension comes from the result: a note with several tables exports
     // as a zip even when the format is csv.
     let (dest, in_vault) = match args.get("output").and_then(|v| v.as_str()) {
-        Some(out) => (PathBuf::from(out), false),
+        Some(out) => {
+            let out = PathBuf::from(out);
+            refuse_protected_output(&out, vault_path)?;
+            (out, false)
+        }
         None => {
             let stem = note
                 .file_stem()
@@ -468,6 +497,28 @@ pub fn create_convert_tools(vault_path: PathBuf) -> Vec<Box<dyn HqTool>> {
         Box::new(VaultExportPdfTool { vault_path }),
         Box::new(OcrExtractTextTool),
     ]
+}
+
+#[cfg(test)]
+mod protected_output_tests {
+    use super::*;
+
+    #[test]
+    fn exports_cannot_land_in_config_or_vault_private_folders() {
+        let vault = Path::new("/srv/hq/.vault");
+        let hq_dir = hq_core::config::HqConfig::hq_dir();
+        for bad in [
+            hq_dir.join("config.yaml"),
+            vault.join("_system/SOUL.md"),
+            vault.join("_threads/x.jsonl"),
+            vault.join("Notebooks/../_data/vault.db"),
+        ] {
+            assert!(refuse_protected_output(&bad, vault).is_err(), "{}", bad.display());
+        }
+        for ok in [vault.join("Notebooks/report.docx"), PathBuf::from("/tmp/out.pdf")] {
+            assert!(refuse_protected_output(&ok, vault).is_ok(), "{}", ok.display());
+        }
+    }
 }
 
 #[cfg(test)]

@@ -390,6 +390,18 @@ impl HostBackend for NativeBackend {
             .to_string())
     }
 
+    fn workspace(&self) -> Result<Value, AgentHostError> {
+        self.call("host.workspace", json!({}))
+    }
+
+    fn list_dirs(&self, path: Option<&str>) -> Result<Value, AgentHostError> {
+        self.call("host.dirs", json!({ "path": path }))
+    }
+
+    fn make_dir(&self, parent: Option<&str>, name: &str) -> Result<Value, AgentHostError> {
+        self.call("host.mkdir", json!({ "parent": parent, "name": name }))
+    }
+
     fn agents(&self) -> Result<Vec<AgentInfo>, AgentHostError> {
         let list = self.call("agent.list", json!({}))?;
         let agents = list.get("agents").and_then(Value::as_array);
@@ -519,6 +531,11 @@ impl HostBackend for NativeBackend {
         )?;
         let text = v.get("text").and_then(Value::as_str).unwrap_or_default();
         Ok((text.to_string(), "recent-unwrapped"))
+    }
+
+    fn read_styled(&self, target: &str, lines: usize) -> Result<String, AgentHostError> {
+        let v = self.call("agent.read", json!({ "name": target, "source": "styled", "lines": lines }))?;
+        Ok(v.get("text").and_then(Value::as_str).unwrap_or_default().to_string())
     }
 
     fn wait(

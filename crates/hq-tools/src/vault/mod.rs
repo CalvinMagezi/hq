@@ -47,11 +47,27 @@ fn validate_path_in_vault(vault_path: &Path, path: &str) -> Result<()> {
     Ok(())
 }
 
+/// Folders vault tools never write into: identity, threads and databases.
+const PRIVATE_VAULT_FOLDERS: [&str; 3] = ["_system", "_threads", "_data"];
+
+/// Whether the first real component of `path` is a private folder, however it is spelled
+/// (`./_system/x`, `_System/x` on a case-insensitive volume).
+fn names_private_folder(path: &str) -> bool {
+    Path::new(path)
+        .components()
+        .find_map(|c| match c {
+            std::path::Component::Normal(p) => Some(p.to_string_lossy().to_ascii_lowercase()),
+            _ => None,
+        })
+        .is_some_and(|first| PRIVATE_VAULT_FOLDERS.contains(&first.as_str()))
+}
+
 fn validate_write_path(vault_path: &Path, path: &str) -> Result<()> {
     validate_path_in_vault(vault_path, path)?;
-    if path.starts_with("_system/") || path == "_system" {
+    if names_private_folder(path) {
         bail!(
-            "direct note write rejected for _system/ directory: use specialized system tools instead."
+            "direct note write rejected for {}: use specialized system tools instead.",
+            PRIVATE_VAULT_FOLDERS.join(", ")
         );
     }
     Ok(())
@@ -339,5 +355,20 @@ mod vault_tools_tests {
         let tool = VaultSearchTool::new(db);
         let res = tool.execute(json!({ "mode": "recent" })).await.unwrap();
         assert_eq!(res["count"], 1);
+    }
+}
+
+#[cfg(test)]
+mod private_folder_tests {
+    use super::names_private_folder;
+
+    #[test]
+    fn private_folders_are_recognised_however_they_are_spelled() {
+        for p in ["_system/SOUL.md", "./_system/SOUL.md", "_System/x.md", "_threads/a.md", "_data/b.md", "./././_data/c.md"] {
+            assert!(names_private_folder(p), "{p}");
+        }
+        for p in ["Notebooks/_system/x.md", "Notebooks/Projects/a.md", "system/a.md"] {
+            assert!(!names_private_folder(p), "{p}");
+        }
     }
 }

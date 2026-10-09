@@ -11,6 +11,10 @@ This sets up a private, self-updating HQ on a Hetzner Cloud server. It never sto
 
 ## Quick start: the form
 
+![A recording of the deploy form from token to a running server and closing public SSH](media/hetzner-deploy-wizard.gif)
+
+The recording uses sample data: a placeholder address and no real account.
+
 1. **Create a Hetzner token.** In the [Hetzner Cloud console](https://console.hetzner.com/projects) create a project (or open an empty one you can delete later). Go to Security, then API tokens, then Generate API token. Choose **Read & Write** and copy the token; Hetzner shows it once.
 2. **Open <https://deploy.agent-hq.online>** and paste the token. Pick a name, a location, a size with at least 4 GB of memory, your SSH key (paste the public key if it is new) and your own IP address as `x.x.x.x/32`. Only that address can reach SSH. Click **Create server**.
 3. **Wait about 3 to 5 minutes** after Hetzner shows the server as `running`. The server installs HQ from signed releases by itself, and the page cannot see its progress because HQ is private to your tailnet.

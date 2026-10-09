@@ -195,6 +195,8 @@ fn live_session_json(
     Ok(v)
 }
 
+/// The host's code for a sandbox it cannot build; its message names the folder and what to change.
+const SANDBOX_UNAVAILABLE_CODE: &str = "sandbox_unavailable";
 const GENERIC_FAILURE: &str = "the session request failed; the server log has the details";
 const HOST_UNREACHABLE: &str = "the session's host is unreachable right now";
 
@@ -202,13 +204,18 @@ const HOST_UNREACHABLE: &str = "the session's host is unreachable right now";
 /// and 409 cases match messages HQ itself writes (there is no typed error for
 /// them yet); anything else is logged and answered generically, because the
 /// text can carry ssh or host stderr.
-fn session_error(e: anyhow::Error) -> ApiError {
+pub(crate) fn session_error(e: anyhow::Error) -> ApiError {
     if let Some(api) = e.downcast_ref::<ApiError>() {
         return api.clone();
     }
     match e.downcast_ref::<AgentHostError>() {
         Some(AgentHostError::Api { code, message }) if code == INVALID_KEYS_CODE => {
             return ApiError::bad_request(message.clone());
+        }
+        Some(AgentHostError::Api { code, message }) if code == SANDBOX_UNAVAILABLE_CODE => {
+            return ApiError::Conflict(format!(
+                "This computer cannot keep the agent contained in that folder, so it was not started. {message}"
+            ));
         }
         Some(err) if err.is_unreachable() => {
             tracing::warn!(error = %e, "sessions api: host unreachable");
@@ -219,7 +226,7 @@ fn session_error(e: anyhow::Error) -> ApiError {
     let msg = e.to_string();
     if msg.contains("no harness session") || msg.starts_with("no task") {
         ApiError::NotFound(msg)
-    } else if msg.contains("waiting at a dialog") || msg.contains("is not running") {
+    } else if msg.contains("waiting at a dialog") || msg.contains("is not running") || msg.contains("is still running on") {
         ApiError::Conflict(msg)
     } else {
         tracing::warn!(error = %e, "sessions api: request failed");
@@ -244,6 +251,8 @@ pub(crate) struct ListQuery {
     task_id: Option<String>,
     status: Option<String>,
     host: Option<String>,
+    /// Include sessions the user archived; they are left out by default.
+    include_archived: Option<bool>,
 }
 
 fn non_empty(v: Option<String>) -> Option<String> {
@@ -260,13 +269,20 @@ pub(crate) async fn list_all_handler(
         task: non_empty(q.task_id),
         host: non_empty(q.host),
     };
+    let include_archived = q.include_archived.unwrap_or(false);
     let db = Arc::new(state.db.clone());
     let result = tokio::task::spawn_blocking(move || {
         let listed = harness::list_live(&db, &filter)?;
         db.with_conn(|c| {
+            let archived = registry::archived_ids(c)?;
             listed
                 .iter()
-                .map(|(row, live)| live_session_json(c, row, live.as_ref()))
+                .filter(|(row, _)| include_archived || !archived.contains(&row.id))
+                .map(|(row, live)| {
+                    let mut v = live_session_json(c, row, live.as_ref())?;
+                    v["archived"] = json!(archived.contains(&row.id));
+                    Ok(v)
+                })
                 .collect::<anyhow::Result<Vec<_>>>()
         })
     })
@@ -290,7 +306,11 @@ pub(crate) async fn get_session_handler(
     let result = tokio::task::spawn_blocking(move || {
         let live = (row.status == registry::STATUS_RUNNING)
             .then(|| harness::liveness(&harness::poll_hosts(std::slice::from_ref(&row)), &row));
-        db.with_conn(|c| live_session_json(c, &row, live.as_ref()))
+        db.with_conn(|c| {
+            let mut v = live_session_json(c, &row, live.as_ref())?;
+            v["archived"] = json!(registry::archived_ids(c)?.contains(&row.id));
+            Ok(v)
+        })
     })
     .await;
     match result {
@@ -303,6 +323,8 @@ pub(crate) async fn get_session_handler(
 #[derive(Deserialize)]
 pub(crate) struct ScreenQuery {
     lines: Option<usize>,
+    /// Ask for color and style as ANSI escape sequences; plain text where the host cannot give them.
+    styled: Option<bool>,
 }
 
 /// Recent pane text: live while the agent runs, the supervisor's last snapshot after.
@@ -319,11 +341,189 @@ pub(crate) async fn screen_handler(
         .unwrap_or(DEFAULT_SCREEN_LINES)
         .clamp(1, MAX_SCREEN_LINES);
     let db = Arc::new(state.db.clone());
-    match tokio::task::spawn_blocking(move || harness::tail_log_shared(&db, &id, lines)).await {
+    let styled = q.styled.unwrap_or(false);
+    match tokio::task::spawn_blocking(move || read_screen(&db, &id, lines, styled)).await {
         Ok(Ok(screen)) => Json(screen).into_response(),
         Ok(Err(e)) => session_error(e).into_response(),
         Err(e) => ApiError::internal(e).into_response(),
     }
+}
+
+/// One shared screen read, with `styled: false` added when the plain read was used.
+fn read_screen(db: &Arc<hq_db::Database>, id: &str, lines: usize, styled: bool) -> anyhow::Result<Value> {
+    if styled {
+        return harness::tail_log_styled_shared(db, id, lines);
+    }
+    let mut screen = harness::tail_log_shared(db, id, lines)?;
+    screen["styled"] = json!(false);
+    Ok(screen)
+}
+
+/// Most live views open at once; each one reads a session about once a second, and on a remote host
+/// that is an ssh call.
+const MAX_STREAMS: usize = 8;
+const STREAM_TICK: std::time::Duration = std::time::Duration::from_secs(1);
+const STREAM_KEEPALIVE: std::time::Duration = std::time::Duration::from_secs(15);
+/// A view is closed after this long, and the page opens a new one.
+const STREAM_MAX: std::time::Duration = std::time::Duration::from_secs(15 * 60);
+/// Reads without a live screen, for a session still marked running, before the view gives up.
+const MAX_STALE_READS: u32 = 5;
+
+/// Counts the open views against a limit.
+struct SlotPool {
+    open: std::sync::atomic::AtomicUsize,
+    max: usize,
+}
+
+impl SlotPool {
+    const fn new(max: usize) -> Self {
+        Self { open: std::sync::atomic::AtomicUsize::new(0), max }
+    }
+
+    fn take(&'static self) -> Option<StreamSlot> {
+        use std::sync::atomic::Ordering::SeqCst;
+        if self.open.fetch_add(1, SeqCst) >= self.max {
+            self.open.fetch_sub(1, SeqCst);
+            return None;
+        }
+        Some(StreamSlot(self))
+    }
+}
+
+static STREAMS: SlotPool = SlotPool::new(MAX_STREAMS);
+
+/// Holds one place in its pool until the stream is dropped, whichever way it ends.
+struct StreamSlot(&'static SlotPool);
+
+impl StreamSlot {
+    fn take() -> Option<Self> {
+        STREAMS.take()
+    }
+}
+
+impl Drop for StreamSlot {
+    fn drop(&mut self) {
+        self.0.open.fetch_sub(1, std::sync::atomic::Ordering::SeqCst);
+    }
+}
+
+struct StreamState {
+    db: Arc<hq_db::Database>,
+    id: String,
+    lines: usize,
+    started: std::time::Instant,
+    last: Option<u64>,
+    /// Set once the last event has been queued: the reason sent with `end`.
+    ending: Option<&'static str>,
+    /// Reads in a row that gave no live screen although the session is still running.
+    stale_reads: u32,
+    /// Pause between reads; a field so a test need not wait seconds.
+    tick: std::time::Duration,
+    finished: bool,
+    _slot: StreamSlot,
+}
+
+fn session_is_running(db: &hq_db::Database, id: &str) -> bool {
+    db.with_conn(|c| registry::get(c, id))
+        .ok()
+        .flatten()
+        .is_some_and(|row| row.status == registry::STATUS_RUNNING)
+}
+
+fn screen_fingerprint(screen: &Value) -> u64 {
+    use std::hash::{Hash, Hasher};
+    let mut hasher = std::collections::hash_map::DefaultHasher::new();
+    screen.to_string().hash(&mut hasher);
+    hasher.finish()
+}
+
+fn sse(event: &str, data: String) -> Result<axum::response::sse::Event, std::convert::Infallible> {
+    Ok(axum::response::sse::Event::default().event(event).data(data))
+}
+
+/// The next event of a live view: `screen` when the content changed (and once on connect), then `end`
+/// when the session is not running any more or the time is up.
+async fn next_stream_event(
+    mut st: StreamState,
+) -> Option<(Result<axum::response::sse::Event, std::convert::Infallible>, StreamState)> {
+    loop {
+        if st.finished {
+            return None;
+        }
+        if let Some(reason) = st.ending {
+            st.finished = true;
+            return Some((sse("end", json!({ "reason": reason }).to_string()), st));
+        }
+        if st.started.elapsed() >= STREAM_MAX {
+            st.ending = Some("time");
+            continue;
+        }
+        let (db, id, lines) = (st.db.clone(), st.id.clone(), st.lines);
+        let read = tokio::task::spawn_blocking(move || read_screen(&db, &id, lines, true)).await;
+        let screen = match read {
+            Ok(Ok(screen)) => screen,
+            _ => {
+                st.ending = Some("unavailable");
+                continue;
+            }
+        };
+        if screen["source"] != "live" {
+            // A failed read of a running session is a blip, not the end: stale text is never sent as live.
+            if session_is_running(&st.db, &st.id) {
+                st.stale_reads += 1;
+                if st.stale_reads >= MAX_STALE_READS {
+                    st.ending = Some("unavailable");
+                    continue;
+                }
+                tokio::time::sleep(st.tick).await;
+                continue;
+            }
+            st.ending = Some("stopped");
+        }
+        st.stale_reads = 0;
+        let fingerprint = screen_fingerprint(&screen);
+        if st.last != Some(fingerprint) {
+            st.last = Some(fingerprint);
+            return Some((sse("screen", screen.to_string()), st));
+        }
+        if st.ending.is_some() {
+            continue;
+        }
+        tokio::time::sleep(st.tick).await;
+    }
+}
+
+/// The screen as a server-sent event stream: sent on connect and again only when it changes.
+pub(crate) async fn screen_stream_handler(
+    State(state): State<Arc<WsState>>,
+    AxumPath(id): AxumPath<String>,
+    Query(q): Query<ScreenQuery>,
+) -> Response {
+    if let Err(e) = require_row(&state, &id) {
+        return e.into_response();
+    }
+    let Some(slot) = StreamSlot::take() else {
+        return ApiError::Unavailable("too many live views are open; try again in a moment".into()).into_response();
+    };
+    let state = StreamState {
+        db: Arc::new(state.db.clone()),
+        id,
+        lines: q.lines.unwrap_or(DEFAULT_SCREEN_LINES).clamp(1, MAX_SCREEN_LINES),
+        started: std::time::Instant::now(),
+        last: None,
+        ending: None,
+        stale_reads: 0,
+        tick: STREAM_TICK,
+        finished: false,
+        _slot: slot,
+    };
+    let events = futures::stream::unfold(state, next_stream_event);
+    let mut response = axum::response::sse::Sse::new(events)
+        .keep_alive(axum::response::sse::KeepAlive::new().interval(STREAM_KEEPALIVE).text("keepalive"))
+        .into_response();
+    // Tells nginx-style proxies not to hold the stream back.
+    response.headers_mut().insert("x-accel-buffering", axum::http::HeaderValue::from_static("no"));
+    response
 }
 
 #[derive(Deserialize)]
@@ -601,6 +801,7 @@ mod tests {
                 task_id: task.map(Into::into),
                 status: status.map(Into::into),
                 host: host.map(Into::into),
+                include_archived: None,
             })
         };
 
@@ -626,14 +827,14 @@ mod tests {
         let missing = screen_handler(
             State(state.clone()),
             AxumPath("nope".into()),
-            Query(ScreenQuery { lines: None }),
+            Query(ScreenQuery { lines: None, styled: None }),
         )
         .await;
         assert_eq!(missing.status(), StatusCode::NOT_FOUND);
         let shown = screen_handler(
             State(state.clone()),
             AxumPath("hs-s".into()),
-            Query(ScreenQuery { lines: Some(5) }),
+            Query(ScreenQuery { lines: Some(5), styled: None }),
         )
         .await;
         assert_eq!(shown.status(), StatusCode::OK);
@@ -803,6 +1004,82 @@ mod tests {
                 .count(),
             1
         );
+    }
+
+    #[test]
+    fn live_views_are_capped_and_a_place_is_given_back_when_one_closes() {
+        // Its own pool, so streams other tests open at the same time cannot change the count.
+        let pool: &'static SlotPool = Box::leak(Box::new(SlotPool::new(3)));
+        let held: Vec<StreamSlot> = (0..3).filter_map(|_| pool.take()).collect();
+        assert_eq!(held.len(), 3);
+        assert!(pool.take().is_none(), "one more than the cap is refused");
+        drop(held);
+        assert!(pool.take().is_some(), "places are returned on drop");
+    }
+
+    fn stream_state(state: &WsState, id: &str) -> StreamState {
+        StreamState {
+            db: Arc::new(state.db.clone()),
+            id: id.into(),
+            lines: 10,
+            started: std::time::Instant::now(),
+            last: None,
+            ending: None,
+            stale_reads: 0,
+            tick: std::time::Duration::from_millis(1),
+            finished: false,
+            _slot: StreamSlot::take().expect("a free place"),
+        }
+    }
+
+    #[tokio::test]
+    async fn a_running_session_whose_screen_cannot_be_read_ends_unavailable_without_sending_stale_text() {
+        let state = test_state();
+        seed(&state, "hs-run", None);
+        let (_event, after) = next_stream_event(stream_state(&state, "hs-run")).await.expect("an end event");
+        assert!(after.last.is_none(), "no screen event was sent for a failed read");
+        assert_eq!(after.ending, Some("unavailable"));
+        assert!(after.finished);
+    }
+
+    #[tokio::test]
+    async fn a_stopped_session_sends_its_saved_screen_once_and_then_ends() {
+        let state = test_state();
+        seed(&state, "hs-done", None);
+        state.db.with_conn(|c| registry::set_status(c, "hs-done", registry::STATUS_STOPPED)).unwrap();
+        let (_screen, after) = next_stream_event(stream_state(&state, "hs-done")).await.expect("the saved screen");
+        assert!(after.last.is_some() && !after.finished);
+        assert_eq!(after.ending, Some("stopped"));
+        let (_end, after) = next_stream_event(after).await.expect("the end event");
+        assert!(after.finished);
+        assert!(next_stream_event(after).await.is_none());
+    }
+
+    #[test]
+    fn the_same_screen_has_the_same_fingerprint_and_a_changed_one_does_not() {
+        let a = json!({"lines": ["x"], "source": "live"});
+        assert_eq!(screen_fingerprint(&a), screen_fingerprint(&a.clone()));
+        assert_ne!(screen_fingerprint(&a), screen_fingerprint(&json!({"lines": ["y"], "source": "live"})));
+    }
+
+    #[tokio::test]
+    async fn the_stream_and_a_styled_read_404_an_unknown_session() {
+        let state = test_state();
+        let stream = screen_stream_handler(State(state.clone()), AxumPath("hs-none".into()), Query(ScreenQuery { lines: None, styled: None })).await;
+        assert_eq!(stream.status(), StatusCode::NOT_FOUND);
+        let read = screen_handler(State(state), AxumPath("hs-none".into()), Query(ScreenQuery { lines: None, styled: Some(true) })).await;
+        assert_eq!(read.status(), StatusCode::NOT_FOUND);
+    }
+
+    #[test]
+    fn a_sandbox_the_computer_cannot_build_is_explained_not_a_generic_failure() {
+        let err = anyhow::Error::new(AgentHostError::Api {
+            code: SANDBOX_UNAVAILABLE_CODE.into(),
+            message: "start the agent in a project directory".into(),
+        });
+        let mapped = session_error(err);
+        assert_eq!(mapped.status(), StatusCode::CONFLICT);
+        assert!(mapped.to_string().contains("project directory"), "{mapped}");
     }
 
     #[tokio::test]
