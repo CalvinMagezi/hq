@@ -199,3 +199,13 @@ guessing. Cost is the recorded dollars where the agent has them, `flat` for subs
 otherwise list price, which is what the call would have cost on the API and not necessarily what was
 billed. Harness rows never count toward a `global` budget (they would block HQ's own chat for work the
 owner did elsewhere); budget them with `origin:harness`.
+
+## Quota from response headers
+
+`hq_llm::ratelimit` keeps the latest `x-ratelimit-*` (OpenAI, Groq) or `anthropic-ratelimit-*` reading
+per provider host, taken from the headers of an ordinary completion at no extra cost and with no admin
+key. `/api/usage/providers` shows it as `rate_limit`, and the Usage page prints it as "Quota left (from
+response headers)". Covered: buffered OpenAI-compatible calls, raw SSE streams (OpenRouter, Kimi,
+Copilot) and Anthropic calls and streams. Not covered: streams from other OpenAI-compatible hosts
+(OpenAI, Groq, DeepSeek), which go through the typed client that does not expose response headers;
+their reading appears after the next buffered call.

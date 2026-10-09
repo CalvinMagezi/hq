@@ -225,6 +225,14 @@ function ProviderCard({ p }: { p: ProviderRow }) {
       )}
       {r?.limit_remaining !== null && r?.limit_remaining !== undefined && <Row label="Key limit left">{usd(r.limit_remaining)}</Row>}
       <Row label="HQ recorded">{usd(p.ledger.today)} today, {usd(p.ledger.week)} week, {usd(p.ledger.month)} month</Row>
+      {p.rate_limit && (
+        <Row label="Quota left (from response headers)">
+          {[
+            p.rate_limit.requests_remaining !== null && `${p.rate_limit.requests_remaining}${p.rate_limit.requests_limit !== null ? ` of ${p.rate_limit.requests_limit}` : ''} requests`,
+            p.rate_limit.tokens_remaining !== null && `${p.rate_limit.tokens_remaining}${p.rate_limit.tokens_limit !== null ? ` of ${p.rate_limit.tokens_limit}` : ''} tokens`,
+          ].filter(Boolean).join(', ')}
+        </Row>
+      )}
       {p.ledger.unpriced_calls > 0 && <Row label="Unpriced calls">{p.ledger.unpriced_calls} this month, so the figures are a lower bound</Row>}
       {p.note && <p className="text-[11px] text-neutral-400">{p.note}</p>}
     </Section>

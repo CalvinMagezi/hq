@@ -48,6 +48,8 @@ struct Row {
     status: &'static str,
     provider: Option<ProviderReading>,
     ledger: LedgerWindows,
+    /// What the latest ordinary response said about the remaining quota, with no extra request.
+    rate_limit: Option<hq_llm::ratelimit::RateLimitReading>,
     note: Option<String>,
 }
 
@@ -97,6 +99,9 @@ fn row(
         ),
     };
     Row {
+        rate_limit: entry
+            .resolved_endpoint()
+            .and_then(|e| hq_llm::ratelimit::latest_for(&e)),
         backend: entry.name.clone(),
         adapter,
         source: if provider.is_some() {

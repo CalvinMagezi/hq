@@ -26,6 +26,7 @@ pub mod openrouter {
 }
 pub mod provider;
 pub mod provider_usage;
+pub mod ratelimit;
 pub mod reconcile;
 mod tap;
 pub mod responses;
