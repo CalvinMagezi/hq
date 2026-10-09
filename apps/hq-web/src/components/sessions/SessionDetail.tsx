@@ -1,7 +1,7 @@
 import { useCallback, useState } from 'react'
 import { ArrowLeft } from 'lucide-react'
 import { attachCommand, canSend, isBlocked, type HarnessSession } from '~/lib/sessionsApi'
-import { computerName, folderName, screenPollMs } from '~/lib/workbench'
+import { folderName, screenPollMs } from '~/lib/workbench'
 import { SessionTerminal } from './SessionTerminal'
 import { SessionSendBox } from './SessionSendBox'
 import { SessionBadges, SessionTaskLink } from './SessionRow'
@@ -49,10 +49,7 @@ export function SessionDetail({ session: s, onBack, onChanged }: Props) {
           </button>
           <RenameTitle session={s} action={action} />
         </div>
-        <p className="text-[11px] font-mono text-neutral-500 truncate">
-          {computerName(s.host)}
-          {folder && ` · ${folder}`}
-        </p>
+        {folder && <p className="text-[11px] font-mono text-neutral-500 truncate">Folder: {folder}</p>}
         <SessionBadges session={s} />
         <SessionTaskLink session={s} />
         <div className="flex flex-wrap items-start gap-1.5">
