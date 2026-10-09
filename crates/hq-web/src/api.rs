@@ -62,7 +62,7 @@ pub(crate) async fn search_handler(
         // note endpoints do, so a hit in a hidden folder never reaches the client.
         let hits: Vec<_> = hits
             .into_iter()
-            .filter(|h| state.path_allowed(&h.note_path))
+            .filter(|h| state.path_allowed(&h.note_path) && state.resolved_allowed(&state.vault_path.join(h.note_path.trim())))
             .collect();
         return axum::Json(serde_json::json!({ "results": hits })).into_response();
     }

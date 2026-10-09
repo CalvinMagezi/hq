@@ -175,8 +175,7 @@ pub(crate) fn is_process_alive(pid: u32) -> bool {
     }
     #[cfg(not(unix))]
     {
-        let _ = pid;
-        false // Assume dead on non-Unix
+        hq_core::heartbeat::is_pid_alive(pid)
     }
 }
 

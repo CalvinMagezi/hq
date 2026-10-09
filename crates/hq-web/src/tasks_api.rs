@@ -37,7 +37,8 @@ fn vanished(id: &str) -> anyhow::Error {
 }
 
 fn notify_and_broadcast(state: &Arc<WsState>, task: &t::Task, event_type: &str) {
-    if !task.tags.is_empty() {
+    // Lite has no agents to route to, and the mailbox folders are hidden from it.
+    if !task.tags.is_empty() && !state.profile().is_lite() {
         let _ = hq_core::mailbox::notify_tagged_agents(
             &state.vault_path,
             &task.id,

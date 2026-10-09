@@ -18,7 +18,7 @@ edition is fixed for the life of a process: a running daemon ignores a config ch
 | | Full | Lite |
 |---|---|---|
 | Web app: tasks, notes, search | yes | yes |
-| `/mcp` (tools for editors and agents) | every tool | notes and tasks tools only |
+| `/mcp` (tools for editors and agents) | every tool | task tools only (no note tools, so no hidden folder can be read) |
 | Chat (a reply that can run tools) | yes | refused over the socket; `hq chat` and bare `hq` refuse |
 | Coding-agent sessions, Workbench, hosts (`hq sessions`, `hq host`, `hq agents`) | yes | not served; commands refuse; no tools registered |
 | Shell, file and git tools, web search and fetch, image generation, email | yes | no tools registered |
@@ -169,15 +169,20 @@ the scheduler task that does it is not kept, so nothing is sent to OpenRouter or
 for it, and keyword search (`hq search`, the search box) does not use vectors and works as before; the
 keyword index is still kept up to date.
 
-Note that the notes and tasks tools on `/mcp` are unaffected by Lite's chat refusal: an editor
-agent with the full key can still read and write notes through them, which is why the tasks key
-exists for employer-side clients.
+Under Lite the editor-facing tools (`/mcp` and `hq mcp-serve`) are the task and space tools only.
+The note tools are not registered, because they would hand `_system` (your agent's memory and
+settings) and the other hidden folders to whatever model the editor uses. Notes stay reachable
+through the web app and `hq vault`, both of which hide those folders. A plain `hq mcp install`
+under Lite writes the tasks scope.
 
 ## Connecting an editor
 
 The tasks key gives an editor agent the task tools and nothing else; see
-`docs/security/WEB_AUTH.md` and `docs/VPS_AGENT_CONNECT.md`. In Lite the full key is also limited
-to notes and tasks, because the other tools are not registered at all.
+`docs/security/WEB_AUTH.md` and `docs/VPS_AGENT_CONNECT.md`. In Lite the full key is limited to the
+same tools, because the others are not registered at all. For a local stdio entry the scope is a
+flag in a file you can edit, so it limits what an editor agent is handed, not what a person on the
+machine can do; only the server-side key is enforced, and under Lite even an edited entry reaches
+task tools only. `hq logs` and `hq health` use Unix tools and are not available on Windows.
 
 ## Limits
 
