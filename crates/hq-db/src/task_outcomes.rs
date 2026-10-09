@@ -96,7 +96,7 @@ pub fn insert_if_new(conn: &Connection, outcome: &TaskOutcome) -> Result<bool> {
 
 fn execute_insert(conn: &Connection, outcome: &TaskOutcome) -> Result<usize> {
     Ok(conn.execute(
-        "INSERT OR IGNORE INTO task_outcomes (
+        "INSERT INTO task_outcomes (
             session_id, turn_idx, model, provider, task_hint,
             latency_ms, input_tokens, output_tokens, cost_usd,
             success, error_class, quality_score,
@@ -104,7 +104,8 @@ fn execute_insert(conn: &Connection, outcome: &TaskOutcome) -> Result<usize> {
             cache_read_tokens, cache_write_tokens, reasoning_tokens, cost_source, origin,
             provider_cost_usd, external_id
         ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15,
-                  ?16, ?17, ?18, ?19, ?20, ?21, ?22)",
+                  ?16, ?17, ?18, ?19, ?20, ?21, ?22)
+         ON CONFLICT(external_id) WHERE external_id IS NOT NULL DO NOTHING",
         params![
             outcome.session_id,
             outcome.turn_idx,

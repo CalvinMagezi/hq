@@ -3,13 +3,13 @@
 //! only their numbers; see `harness_usage` for what is parsed.
 
 use std::fs::File;
-use std::io::{BufRead, BufReader};
+use std::io::{BufRead, BufReader, Seek, SeekFrom};
 use std::path::{Path, PathBuf};
 
 use anyhow::Result;
 use chrono::NaiveDateTime;
 use hq_db::Database;
-use hq_db::harness_sessions_registry::{HarnessSessionRow, list};
+use hq_db::harness_sessions_registry::{HarnessSessionRow, STATUS_RUNNING, list};
 use hq_db::task_outcomes::{TaskOutcome, insert_if_new};
 use hq_llm::cost::{ProviderClass, price_call};
 use rusqlite::{Connection, OpenFlags, params};
@@ -43,7 +43,10 @@ pub fn match_session(sessions: &[HarnessSessionRow], event: &HarnessUsageEvent) 
         s.harness == event.harness
             && s.cwd == cwd
             && parse_registry_ts(&s.created_at).is_some_and(|c| event.ts >= c - MATCH_SLACK_BEFORE_SECS)
-            && parse_registry_ts(&s.updated_at).is_some_and(|u| event.ts <= u + MATCH_SLACK_AFTER_SECS)
+            // `updated_at` is the last state change, not the last activity, so a session that is
+            // still running has no end yet.
+            && (s.status == STATUS_RUNNING
+                || parse_registry_ts(&s.updated_at).is_some_and(|u| event.ts <= u + MATCH_SLACK_AFTER_SECS))
     });
     match (hits.next(), hits.next()) {
         (Some(only), None) => Some(only.id.clone()),
@@ -134,19 +137,23 @@ fn file_signature(path: &Path) -> Option<(i64, i64)> {
     Some((meta.len() as i64, mtime))
 }
 
-/// Every file named `*.jsonl` (or exactly `name`) under `root`, to a bounded depth.
+/// Every file matching `want` under `root`, to a bounded depth. Symlinks are never followed, so a
+/// link planted in a session directory cannot pull in files from elsewhere.
 fn find_files(root: &Path, want: &dyn Fn(&Path) -> bool) -> Vec<PathBuf> {
     fn walk(dir: &Path, depth: usize, want: &dyn Fn(&Path) -> bool, out: &mut Vec<PathBuf>) {
         let Ok(entries) = std::fs::read_dir(dir) else {
             return;
         };
         for entry in entries.flatten() {
+            let Ok(kind) = entry.file_type() else {
+                continue;
+            };
             let path = entry.path();
-            if path.is_dir() {
+            if kind.is_dir() {
                 if depth < MAX_DEPTH {
                     walk(&path, depth + 1, want, out);
                 }
-            } else if want(&path) {
+            } else if kind.is_file() && want(&path) {
                 out.push(path);
             }
         }
@@ -156,37 +163,90 @@ fn find_files(root: &Path, want: &dyn Fn(&Path) -> bool) -> Vec<PathBuf> {
     out
 }
 
+/// Used as the session id until the file's own header says otherwise, so two files with no header
+/// can never produce the same call id.
+fn file_stem(path: &Path) -> String {
+    path.file_stem()
+        .map(|n| n.to_string_lossy().chars().take(128).collect())
+        .unwrap_or_default()
+}
+
 fn is_jsonl(p: &Path) -> bool {
     p.extension().is_some_and(|e| e == "jsonl")
 }
 
-/// Read each unchanged-since-last-time JSONL file once, line by line, handing every line to `parse`.
+/// Read the part of each JSONL file added since last time, line by line, handing every complete
+/// line and its byte offset to `parse`. The saved position is the end of the last complete line, so
+/// a line still being written is read whole next time, and a file that shrank is read from the top.
+/// A line that is not valid UTF-8 is read lossily rather than ending the file.
 fn scan_jsonl(
     db: &Database,
     files: Vec<PathBuf>,
     sessions: &[HarnessSessionRow],
     report: &mut ScanReport,
+    finish: &dyn Fn(Vec<HarnessUsageEvent>) -> Vec<HarnessUsageEvent>,
     mut parse: impl FnMut(&str, usize, &mut dyn FnMut(HarnessUsageEvent), &Path),
 ) -> Result<()> {
     for path in files {
         let Some((size, mtime)) = file_signature(&path) else {
             continue;
         };
-        if state(db, &path)? == Some((size, mtime)) {
+        let saved = state(db, &path)?;
+        if saved == Some((size, mtime)) {
             continue;
         }
-        let Ok(file) = File::open(&path) else {
+        let start = saved.map_or(0, |(offset, _)| offset).clamp(0, size);
+        let start = if saved.is_some_and(|(offset, _)| offset > size) { 0 } else { start };
+        let Ok(mut file) = File::open(&path) else {
             continue;
         };
-        let mut events = Vec::new();
-        for (i, line) in BufReader::new(file).lines().map_while(|l| l.ok()).enumerate() {
-            parse(&line, i, &mut |e| events.push(e), &path);
+        if file.seek(SeekFrom::Start(start as u64)).is_err() {
+            continue;
         }
-        report.calls_recorded += record(db, &events, sessions)?;
+        let mut reader = BufReader::new(file);
+        let mut events = Vec::new();
+        let mut offset = start as usize;
+        let mut buf = Vec::new();
+        loop {
+            buf.clear();
+            let Ok(n) = reader.read_until(b'\n', &mut buf) else {
+                break;
+            };
+            if n == 0 || buf.last() != Some(&b'\n') {
+                // End of file, or a line still being written: leave it for the next scan.
+                break;
+            }
+            let line = String::from_utf8_lossy(&buf);
+            parse(line.trim_end(), offset, &mut |e| events.push(e), &path);
+            offset += n;
+        }
+        report.calls_recorded += record(db, &finish(events), sessions)?;
         report.sources_read += 1;
-        save_state(db, &path, size, mtime)?;
+        save_state(db, &path, offset as i64, mtime)?;
     }
     Ok(())
+}
+
+/// A Claude transcript repeats a message's line once per content block. Keep one event per message,
+/// with the largest output seen, so a first line written before the answer was complete cannot win.
+fn keep_largest_per_message(events: Vec<HarnessUsageEvent>) -> Vec<HarnessUsageEvent> {
+    let mut by_id: std::collections::HashMap<String, HarnessUsageEvent> = std::collections::HashMap::new();
+    let mut order = Vec::new();
+    for e in events {
+        match by_id.get_mut(&e.source_id) {
+            Some(kept) if kept.usage.output >= e.usage.output => {}
+            Some(kept) => *kept = e,
+            None => {
+                order.push(e.source_id.clone());
+                by_id.insert(e.source_id.clone(), e);
+            }
+        }
+    }
+    order.into_iter().filter_map(|id| by_id.remove(&id)).collect()
+}
+
+fn keep_all(events: Vec<HarnessUsageEvent>) -> Vec<HarnessUsageEvent> {
+    events
 }
 
 fn open_readonly(path: &Path) -> Option<Connection> {
@@ -208,7 +268,7 @@ pub fn scan(db: &Database, home: &Path) -> Result<ScanReport> {
         .map(|p| p.join("projects"))
         .collect();
     for dir in claude_dirs {
-        scan_jsonl(db, find_files(&dir, &is_jsonl), &sessions, &mut report, |line, _, emit, _| {
+        scan_jsonl(db, find_files(&dir, &is_jsonl), &sessions, &mut report, &keep_largest_per_message, |line, _, emit, _| {
             if let Some(e) = parse_claude_line(line) {
                 emit(e);
             }
@@ -218,8 +278,11 @@ pub fn scan(db: &Database, home: &Path) -> Result<ScanReport> {
     // Codex: one rollout file per session, with the session's id and model near the top.
     let codex_files = find_files(&home.join(".codex/sessions"), &is_jsonl);
     for path in codex_files {
-        let mut session = CodexSession::default();
-        scan_jsonl(db, vec![path], &sessions, &mut report, |line, i, emit, _| {
+        let mut session = CodexSession {
+            id: file_stem(&path),
+            ..CodexSession::default()
+        };
+        scan_jsonl(db, vec![path], &sessions, &mut report, &keep_all, |line, i, emit, _| {
             session.observe(line);
             if let Some(e) = parse_codex_line(line, i, &session) {
                 emit(e);
@@ -230,8 +293,11 @@ pub fn scan(db: &Database, home: &Path) -> Result<ScanReport> {
     // Pi: interactive sessions and the ones HQ launches in its own directory.
     for root in [home.join(".pi/agent/sessions"), home.join(".pi/hq-sessions")] {
         for path in find_files(&root, &is_jsonl) {
-            let mut session = PiSession::default();
-            scan_jsonl(db, vec![path], &sessions, &mut report, |line, _, emit, _| {
+            let mut session = PiSession {
+                id: file_stem(&path),
+                ..PiSession::default()
+            };
+            scan_jsonl(db, vec![path], &sessions, &mut report, &keep_all, |line, _, emit, _| {
                 session.observe(line);
                 if let Some((e, _)) = parse_pi_line(line, &session) {
                     emit(e);
@@ -245,7 +311,7 @@ pub fn scan(db: &Database, home: &Path) -> Result<ScanReport> {
         p.file_name().is_some_and(|n| n == "wire.jsonl")
     });
     for path in kimi_files {
-        scan_jsonl(db, vec![path], &sessions, &mut report, |line, i, emit, p| {
+        scan_jsonl(db, vec![path], &sessions, &mut report, &keep_all, |line, i, emit, p| {
             let session = p
                 .parent()
                 .and_then(|d| d.file_name())
@@ -279,11 +345,16 @@ fn scan_sqlite(
         return Ok(());
     }
     let Some(conn) = open_readonly(path) else {
+        tracing::debug!("harness usage: a database could not be opened read-only");
         return Ok(());
     };
     let after = state(db, path)?.map_or(0, |(cursor, _)| cursor);
-    let Ok(events) = read(&conn, after) else {
-        return Ok(());
+    let events = match read(&conn, after) {
+        Ok(events) => events,
+        Err(e) => {
+            tracing::warn!(error = %e, "harness usage: a database could not be read, its layout may have changed");
+            return Ok(());
+        }
     };
     report.calls_recorded += record(db, &events, sessions)?;
     report.sources_read += 1;
@@ -454,5 +525,82 @@ mod tests {
         e.usage.billed_usd = Some(0.02);
         let o = outcome_for(&e, &[]);
         assert_eq!((o.cost_source.as_str(), o.cost_usd, o.session_id.as_str()), ("provider", 0.02, "external:pi:r"));
+    }
+
+    #[test]
+    fn a_line_still_being_written_is_read_whole_on_the_next_scan() {
+        let home = tempfile::tempdir().unwrap();
+        let file = home.path().join(".claude/projects/-w/s1.jsonl");
+        let full = claude_line("m1", "s1", "/w");
+        let (head, tail) = full.split_at(full.len() / 2);
+        write(&file, &[&claude_line("m0", "s1", "/w")]);
+        let mut f = std::fs::OpenOptions::new().append(true).open(&file).unwrap();
+        write!(f, "{head}").unwrap();
+        drop(f);
+        let db = Database::open_memory().unwrap();
+        assert_eq!(scan(&db, home.path()).unwrap().calls_recorded, 1);
+
+        let mut f = std::fs::OpenOptions::new().append(true).open(&file).unwrap();
+        writeln!(f, "{tail}").unwrap();
+        drop(f);
+        assert_eq!(scan(&db, home.path()).unwrap().calls_recorded, 1);
+        assert_eq!(scan(&db, home.path()).unwrap().calls_recorded, 0);
+    }
+
+    #[test]
+    fn a_line_that_is_not_utf8_does_not_end_the_file() {
+        let home = tempfile::tempdir().unwrap();
+        let file = home.path().join(".claude/projects/-w/s1.jsonl");
+        std::fs::create_dir_all(file.parent().unwrap()).unwrap();
+        let mut f = File::create(&file).unwrap();
+        f.write_all(b"\xff\xfe not json\n").unwrap();
+        writeln!(f, "{}", claude_line("m1", "s1", "/w")).unwrap();
+        drop(f);
+        let db = Database::open_memory().unwrap();
+        assert_eq!(scan(&db, home.path()).unwrap().calls_recorded, 1);
+    }
+
+    #[test]
+    fn a_symlink_in_a_session_directory_is_not_followed() {
+        let home = tempfile::tempdir().unwrap();
+        let outside = tempfile::tempdir().unwrap();
+        write(&outside.path().join("other.jsonl"), &[&claude_line("m9", "s9", "/x")]);
+        let projects = home.path().join(".claude/projects");
+        std::fs::create_dir_all(&projects).unwrap();
+        std::os::unix::fs::symlink(outside.path(), projects.join("link")).unwrap();
+        let db = Database::open_memory().unwrap();
+        assert_eq!(scan(&db, home.path()).unwrap().calls_recorded, 0);
+    }
+
+    #[test]
+    fn of_a_messages_repeated_lines_the_largest_output_wins() {
+        let mk = |out: u32| {
+            let mut e = parse_claude_line(&claude_line("m1", "s1", "/w")).unwrap();
+            e.usage.output = out;
+            e
+        };
+        let kept = keep_largest_per_message(vec![mk(5), mk(50), mk(20)]);
+        assert_eq!(kept.len(), 1);
+        assert_eq!(kept[0].usage.output, 50);
+    }
+
+    #[test]
+    fn a_session_that_is_still_running_keeps_matching_after_its_last_state_change() {
+        let db = Database::open_memory().unwrap();
+        register(&db, "hs-1", "claude-code", "/w");
+        db.with_conn(|c| {
+            c.execute("UPDATE harness_sessions SET updated_at = datetime('now', '-3 hours')", [])?;
+            Ok(())
+        })
+        .unwrap();
+        let (event, sessions) = event_at(&db, "claude-code", "/w");
+        assert_eq!(match_session(&sessions, &event).as_deref(), Some("hs-1"));
+        db.with_conn(|c| {
+            c.execute("UPDATE harness_sessions SET status = 'exited'", [])?;
+            Ok(())
+        })
+        .unwrap();
+        let (event, sessions) = event_at(&db, "claude-code", "/w");
+        assert_eq!(match_session(&sessions, &event), None, "an exited session has an end");
     }
 }

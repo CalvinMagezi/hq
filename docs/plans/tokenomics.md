@@ -180,7 +180,7 @@ value or stored.
 | Claude Code | `~/.claude*/projects/**/*.jsonl` | one record per content block, so a `message.id` counts once; subagent files included |
 | Codex | `~/.codex/sessions/**/rollout-*.jsonl` | per-call `last_token_usage`; the running total is ignored |
 | Pi | `~/.pi/agent/sessions`, `~/.pi/hq-sessions` | records its own dollar cost per call, used as given |
-| Kimi | `~/.kimi/sessions/*/*/wire.jsonl` | no model name in the record, so rows are unpriced |
+| Kimi | `~/.kimi/sessions/*/*/wire.jsonl` | a subscription, so cost is `flat`; the record has no model name or working directory, so rows are not matched to an HQ session |
 | OpenCode | `~/.local/share/opencode/opencode.db` | assistant messages; a cost of 0 means free or unpriced, not a billed zero |
 | Copilot CLI | `~/.copilot/session-store.db` | AI units, not dollars: tokens recorded, cost `flat` |
 | Cursor, Antigravity, Qwen | none | Cursor keeps usage server side; Antigravity stores opaque protobuf; Qwen is dormant here. They are untracked, not zero |
