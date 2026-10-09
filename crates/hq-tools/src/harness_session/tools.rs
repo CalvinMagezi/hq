@@ -18,18 +18,28 @@ use crate::util::{arg_str, arg_str_list};
 async fn choose_start_dir(
     host: &crate::agent_host::Host,
     requested: Option<&str>,
-    agent_host: &hq_core::config::AgentHostConfig,
+    cfg: &hq_core::config::HqConfig,
+    host_name: &str,
     handoff_scope: bool,
     label: &str,
     harness: &str,
 ) -> Result<super::StartDir> {
+    let agent_host = &cfg.agent_host;
+    let vault_guard = |p: &std::path::Path| {
+        super::check_cwd_outside_vault(p, host_name, &agent_host.default_host, &cfg.vault_path)
+    };
     let wanted = requested.map(|r| super::require_cwd_in(Some(r), agent_host, handoff_scope)).transpose()?;
+    // A folder that is not allowed is refused whether or not it exists, never quietly swapped.
+    if let Some(path) = &wanted {
+        vault_guard(path)?;
+    }
     if let Some(path) = wanted.as_ref().filter(|p| host.dir_exists(p) != Some(false)) {
         return Ok(super::StartDir { path: path.clone(), note: None });
     }
     let (h, w, l, k) = (host.clone(), wanted, label.to_string(), harness.to_string());
     let fallback = tokio::task::spawn_blocking(move || super::workspace_start_dir(&*h, w.as_deref(), &l, &k)).await??;
     super::require_cwd_in(Some(&fallback.path.to_string_lossy()), agent_host, handoff_scope)?;
+    vault_guard(&fallback.path)?;
     Ok(fallback)
 }
 
@@ -97,8 +107,7 @@ impl HqTool for HarnessSessionSpawnTool {
         let host_handle = crate::agent_host::host(Some(host.as_str()).filter(|h| !h.is_empty()))?;
         let requested = args.get("cwd").and_then(|v| v.as_str()).map(str::trim).filter(|c| !c.is_empty());
         let scope = super::is_handoff_scope(&args);
-        let start = choose_start_dir(&host_handle, requested, &cfg.agent_host, scope, &label, &harness).await?;
-        super::check_cwd_outside_vault(&start.path, &host, &cfg.agent_host.default_host, &cfg.vault_path)?;
+        let start = choose_start_dir(&host_handle, requested, &cfg, &host, scope, &label, &harness).await?;
         macro_rules! launch {
             ($cwd:expr) => {
                 super::SpawnRequest {
@@ -124,9 +133,8 @@ impl HqTool for HarnessSessionSpawnTool {
         if let (Err(e), Some(asked), None) = (&report, requested, &note)
             && super::is_missing_dir_error(e)
         {
-            let fallback = choose_start_dir(&host_handle, None, &cfg.agent_host, scope, &label, &harness).await?;
-            super::check_cwd_outside_vault(&fallback.path, &host, &cfg.agent_host.default_host, &cfg.vault_path)?;
-            note = Some(format!(
+            let fallback = choose_start_dir(&host_handle, None, &cfg, &host, scope, &label, &harness).await?;
+                note = Some(format!(
                 "{asked} does not exist on host '{}', so the session started in {} instead.",
                 host_handle.name(),
                 fallback.path.display()
@@ -722,8 +730,7 @@ impl HqTool for HarnessSessionHandoffTool {
         let requested = args.get("cwd").and_then(Value::as_str).map(str::trim).filter(|c| !c.is_empty());
         let (label, harness) = (arg_str(&args, "title"), arg_str(&args, "harness"));
         let scope = super::is_handoff_scope(&args);
-        let start = choose_start_dir(&host, requested, &cfg.agent_host, scope, &label, &harness).await?;
-        super::check_cwd_outside_vault(&start.path, &host_name, &cfg.agent_host.default_host, &cfg.vault_path)?;
+        let start = choose_start_dir(&host, requested, &cfg, &host_name, scope, &label, &harness).await?;
         let owned = |key: &str| arg_str(&args, key);
         let acceptance = [owned("acceptance"), owned("done_criteria")]
             .into_iter()
