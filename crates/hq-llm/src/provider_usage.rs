@@ -25,6 +25,7 @@ const ANTHROPIC_VERSION: &str = "2023-06-01";
 #[derive(Debug, Clone, Copy, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum Adapter {
+    #[serde(rename = "openrouter")]
     OpenRouter,
     Deepseek,
     Moonshot,

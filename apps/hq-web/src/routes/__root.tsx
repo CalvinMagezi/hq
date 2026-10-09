@@ -24,6 +24,7 @@ import appCss from '../../app.css?url'
 import { relTime } from '~/lib/time'
 import { inboxBadge } from '~/lib/inboxBadge'
 import { openrouterChipLabel, openrouterChipTitle, OPENROUTER_USAGE_POLL_MS, type OpenRouterUsageResponse } from '~/lib/openrouterUsageApi'
+import { budgetChipLabel, budgetChipTitle, USAGE_POLL_MS, type BudgetsResponse } from '~/lib/usageApi'
 import { chipLabel, chipTitle, COPILOT_USAGE_POLL_MS, type CopilotUsage } from '~/lib/copilotUsageApi'
 import { hqJson } from '~/lib/hqAuth'
 import { fetchSetupStatus, shouldRedirectToSetup } from '~/lib/setupApi'
@@ -84,6 +85,7 @@ function CopilotChip() {
   // exiting, and effects never run there.
   const [data, setData] = useState<CopilotUsage | undefined>(undefined)
   const [openrouter, setOpenrouter] = useState<OpenRouterUsageResponse | undefined>(undefined)
+  const [budgets, setBudgets] = useState<BudgetsResponse | undefined>(undefined)
   useEffect(() => {
     let alive = true
     const load = () => {
@@ -93,21 +95,26 @@ function CopilotChip() {
       hqJson<OpenRouterUsageResponse>('/api/openrouter-usage')
         .then((d) => alive && setOpenrouter(d))
         .catch(() => undefined)
+      hqJson<BudgetsResponse>('/api/budgets')
+        .then((d) => alive && setBudgets(d))
+        .catch(() => undefined)
     }
     load()
-    const timer = window.setInterval(load, Math.min(COPILOT_USAGE_POLL_MS, OPENROUTER_USAGE_POLL_MS))
+    const timer = window.setInterval(load, Math.min(COPILOT_USAGE_POLL_MS, OPENROUTER_USAGE_POLL_MS, USAGE_POLL_MS))
     return () => {
       alive = false
       window.clearInterval(timer)
     }
   }, [])
   const copilotLabel = chipLabel(data)
-  const label = copilotLabel ?? openrouterChipLabel(openrouter)
-  const title = copilotLabel ? chipTitle(data) : openrouterChipTitle(openrouter)
+  // A budget that needs attention outranks a balance: it is the thing about to block a call.
+  const budgetLabel = budgetChipLabel(budgets)
+  const label = budgetLabel ?? copilotLabel ?? openrouterChipLabel(openrouter)
+  const title = budgetLabel ? budgetChipTitle(budgets) : copilotLabel ? chipTitle(data) : openrouterChipTitle(openrouter)
   if (!label) return null
   return (
     <Link
-      to="/settings"
+      to={budgetLabel ? '/usage' : '/settings'}
       title={title}
       className="hidden min-[400px]:inline px-2 py-0.5 rounded-md border border-white/10 text-[10px] font-mono text-neutral-400 hover:text-neutral-100 hover:bg-white/5 whitespace-nowrap"
     >
@@ -300,6 +307,13 @@ function VaultShell() {
                 {needsYouBadge.label}
               </span>
             )}
+          </Link>
+          <Link
+            to="/usage"
+            activeProps={{ style: { color: 'var(--accent-green)', fontWeight: 'bold' } }}
+            inactiveProps={{ style: { color: 'var(--text-dim)' } }}
+          >
+            Usage
           </Link>
           <Link
             to="/notifications"
