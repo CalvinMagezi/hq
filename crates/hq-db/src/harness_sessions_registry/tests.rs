@@ -618,3 +618,32 @@ fn a_child_remembers_its_parent_and_depth_and_only_running_children_are_listed()
     })
     .unwrap();
 }
+
+#[test]
+fn only_a_session_that_is_not_running_can_be_archived_and_it_can_be_restored() {
+    let db = crate::Database::open_memory().unwrap();
+    db.with_conn(|c| {
+        insert_session(c, "hs-a");
+        assert!(!set_archived(c, "hs-a", true)?, "a running session stays listed");
+        set_status(c, "hs-a", STATUS_STOPPED)?;
+        assert!(set_archived(c, "hs-a", true)?);
+        assert!(archived_ids(c)?.contains("hs-a"));
+        assert!(set_archived(c, "hs-a", false)?);
+        assert!(archived_ids(c)?.is_empty());
+        Ok(())
+    })
+    .unwrap();
+}
+
+#[test]
+fn renaming_changes_the_label_and_reports_a_missing_session() {
+    let db = crate::Database::open_memory().unwrap();
+    db.with_conn(|c| {
+        insert_session(c, "hs-a");
+        assert!(set_label(c, "hs-a", "Budget review")?);
+        assert_eq!(get(c, "hs-a")?.unwrap().label, "Budget review");
+        assert!(!set_label(c, "hs-none", "x")?);
+        Ok(())
+    })
+    .unwrap();
+}

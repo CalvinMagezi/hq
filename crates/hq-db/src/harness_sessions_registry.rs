@@ -740,6 +740,34 @@ pub fn set_mission(conn: &Connection, id: &str, mission_id: &str) -> Result<bool
     Ok(changed == 1)
 }
 
+/// Hides a stopped or exited session from the default list, or brings it back. A running
+/// session is refused, so the list never loses something that is still working.
+pub fn set_archived(conn: &Connection, id: &str, archived: bool) -> Result<bool> {
+    let sql = if archived {
+        "UPDATE harness_sessions SET archived_at = datetime('now') WHERE id = ?1 AND status != 'running'"
+    } else {
+        "UPDATE harness_sessions SET archived_at = NULL WHERE id = ?1"
+    };
+    Ok(conn.execute(sql, [id])? == 1)
+}
+
+/// Ids of the sessions the user archived that are not running again, so a resumed one is listed.
+pub fn archived_ids(conn: &Connection) -> Result<std::collections::HashSet<String>> {
+    let mut stmt =
+        conn.prepare("SELECT id FROM harness_sessions WHERE archived_at IS NOT NULL AND status != 'running'")?;
+    let ids = stmt.query_map([], |r| r.get::<_, String>(0))?.collect::<rusqlite::Result<_>>()?;
+    Ok(ids)
+}
+
+/// Renames a session; the label is what lists show.
+pub fn set_label(conn: &Connection, id: &str, label: &str) -> Result<bool> {
+    let changed = conn.execute(
+        "UPDATE harness_sessions SET label = ?1, updated_at = datetime('now') WHERE id = ?2",
+        params![label, id],
+    )?;
+    Ok(changed == 1)
+}
+
 pub fn set_status(conn: &Connection, id: &str, status: &str) -> Result<()> {
     conn.execute(
         "UPDATE harness_sessions SET status = ?1, updated_at = datetime('now') WHERE id = ?2",

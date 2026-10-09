@@ -76,6 +76,11 @@ hq host install
 That starts the built-in host as a service. HQ on this PC uses it with no further setup: start a
 session from the web app or `hq sessions spawn claude-code --cwd ~/projects/my-app`.
 
+Agents started from the Workbench page run in `~/Documents/HQ` inside Ubuntu, which `hq host
+install` and `hq host join` create. Open it from Windows Explorer at
+`\\wsl$\Ubuntu\home\<you>\Documents\HQ` (the Workbench page shows the exact path). It stays in the
+Linux file system on purpose: agents work much faster there and permissions behave correctly.
+
 ## 4. Let an HQ on another machine use this PC
 
 Both machines need [Tailscale](https://tailscale.com). WSL2 has its own network, so install it

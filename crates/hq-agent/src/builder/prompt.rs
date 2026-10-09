@@ -5,7 +5,7 @@ use std::sync::Arc;
 
 use tracing::info;
 
-use super::SessionBuilder;
+use super::{SessionBuilder, SessionRole};
 use crate::session::AgentSession;
 
 /// What prompt assembly needs from the earlier build steps.
@@ -129,6 +129,7 @@ impl SessionBuilder {
                     tool_notes: inputs.tool_notes,
                     tool_catalog: inputs.weak_catalog,
                     can_build_self,
+                    role: self.role,
                 },
             );
 
@@ -379,7 +380,14 @@ pub(super) struct DerivedPromptBlocks<'a> {
     /// `MachineProfile::can_build_self`. Gates the Self-Management block's
     /// claim that the agent can build/modify its own source here.
     pub(super) can_build_self: bool,
+    pub(super) role: SessionRole,
 }
+
+/// Replaces the Self-Management and coding Tool Usage blocks for an orchestrator.
+const ORCHESTRATOR_ROLE_BLOCK: &str = "## Role\n\nYou are the HQ orchestrator. You plan, delegate, monitor and report. \
+    You do not edit repository files or run state-changing commands yourself. Code and file changes go to a child \
+    agent or a coding-agent session started with a task ID, a goal and done criteria. Before answering from files, \
+    search, read the relevant lines and cite them.\n";
 
 /// The single injection point for every surface. Thirteen call sites reach
 /// this through `.harness_instructions()` — the CLI, hq-web, Discord, and the
@@ -399,6 +407,7 @@ pub(super) fn build_harness_block(
         tool_notes,
         tool_catalog,
         can_build_self,
+        role,
     } = derived;
     let mut parts = Vec::new();
     parts.push(format!(
@@ -413,31 +422,35 @@ pub(super) fn build_harness_block(
     if let Some(machine) = machine_block {
         parts.push(machine.to_string());
     }
-    parts.push(if can_build_self {
-        "## Self-Management\n\nYou run on the Agent-HQ binary built from \
-         the agent-hq repository. Your vault is your working memory and you may \
-         reorganize it on your own judgment. Development work on your own source \
-         is yours to do: use your file and shell tools, keep changes on git \
-         branches, and verify with cargo before shipping.\n"
-            .to_string()
+    if role == SessionRole::Orchestrator {
+        parts.push(ORCHESTRATOR_ROLE_BLOCK.to_string());
     } else {
-        "## Self-Management\n\nYour vault is your working memory and you may \
-         reorganize it on your own judgment. This host cannot build or modify \
-         its own source: no reachable agent-hq checkout with cargo/git available. \
-         Source changes to Agent-HQ happen on the host that has the checkout — \
-         don't claim you can branch, edit, or `cargo build` this repo from here.\n"
-            .to_string()
-    });
-    parts.push(
-        "## Tool Usage\n\nYou are the primary coding agent. Use your tools proactively.\n\
-         Always verify by reading actual code before making claims.\n\
-         **MANDATORY: Search -> Read -> Answer.**\n\
-         1. Use `grep` to find relevant code.\n\
-         2. Use `read_file` with specific line ranges before editing.\n\
-         3. Answer ONLY with evidence: file paths, line numbers, quoted code.\n\
-         **Key tools:** `grep`, `read_file`, `edit_file`.\n"
-            .to_string(),
-    );
+        parts.push(if can_build_self {
+            "## Self-Management\n\nYou run on the Agent-HQ binary built from \
+             the agent-hq repository. Your vault is your working memory and you may \
+             reorganize it on your own judgment. Development work on your own source \
+             is yours to do: use your file and shell tools, keep changes on git \
+             branches, and verify with cargo before shipping.\n"
+                .to_string()
+        } else {
+            "## Self-Management\n\nYour vault is your working memory and you may \
+             reorganize it on your own judgment. This host cannot build or modify \
+             its own source: no reachable agent-hq checkout with cargo/git available. \
+             Source changes to Agent-HQ happen on the host that has the checkout — \
+             don't claim you can branch, edit, or `cargo build` this repo from here.\n"
+                .to_string()
+        });
+        parts.push(
+            "## Tool Usage\n\nYou are the primary coding agent. Use your tools proactively.\n\
+             Always verify by reading actual code before making claims.\n\
+             **MANDATORY: Search -> Read -> Answer.**\n\
+             1. Use `grep` to find relevant code.\n\
+             2. Use `read_file` with specific line ranges before editing.\n\
+             3. Answer ONLY with evidence: file paths, line numbers, quoted code.\n\
+             **Key tools:** `grep`, `read_file`, `edit_file`.\n"
+                .to_string(),
+        );
+    }
     let delegation = match preset {
         crate::tool_policy::Preset::LocalGemma => {
             "**Delegation:** Use `call_code_reasoner`, `call_planner_strong`, `call_verifier_cheap`, `call_web_researcher`.\n"

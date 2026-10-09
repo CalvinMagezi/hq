@@ -53,6 +53,10 @@ async fn serve(dir: PathBuf, allow_unsandboxed: bool) -> Result<()> {
     );
     let server = Server::bind(&dir, host.clone())
         .with_context(|| format!("starting the host in {}", dir.display()))?;
+    match hq_host::ensure_workspace() {
+        Ok(root) => println!("hq host workspace {}", root.display()),
+        Err(e) => eprintln!("hq host could not prepare the HQ folder: {e}"),
+    }
     let report = host.restore();
     for name in &report.restored {
         println!("hq host restored {name}");

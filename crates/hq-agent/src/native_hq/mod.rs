@@ -103,6 +103,8 @@ pub struct NativeHqHooks {
     pub skip_memory_ingestion: bool,
     /// Name prefixes of tools this turn must not see at all.
     pub deny_tool_prefixes: Vec<String>,
+    /// Orchestrator sessions plan and delegate; the default keeps today's behavior.
+    pub role: crate::builder::SessionRole,
 }
 
 /// Outcome of a native-hq run, carrying the explicit success + quality signal so
@@ -180,8 +182,10 @@ pub fn configure_native_hq_builder(
     // (out of scope to fix here); this is a local, cheap secondary check that
     // skips the downgrade when the prompt still carries an obvious code signal
     // despite the Vault classification.
-    if hq_tools::task_classifier::classify_task(prompt)
-        == hq_tools::task_classifier::TaskType::Vault
+    // An orchestrator needs the harness_session and host tools the Weak tier drops.
+    if builder.session_role() == crate::builder::SessionRole::Implementor
+        && hq_tools::task_classifier::classify_task(prompt)
+            == hq_tools::task_classifier::TaskType::Vault
         && !prompt_has_code_signal(prompt)
     {
         builder = builder.session_profile(crate::builder::SessionProfile::Weak);
@@ -214,6 +218,7 @@ fn native_builder(
     if !hooks.deny_tool_prefixes.is_empty() {
         base_builder = base_builder.deny_tool_prefixes(hooks.deny_tool_prefixes.clone());
     }
+    base_builder = base_builder.role(hooks.role);
     if let Some(preset) = hooks.permission_preset {
         base_builder = base_builder.permission_preset(preset);
     }
