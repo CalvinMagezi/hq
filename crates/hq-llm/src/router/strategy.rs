@@ -7,15 +7,14 @@ use futures::StreamExt;
 use tokio_stream::Stream;
 use tracing::warn;
 
-use crate::cost::{ProviderClass, Usage, price_outcome};
-use crate::outcome_sink::{SessionContext, SharedSink};
+use crate::budget::{is_budget_block, last_blocked, with_blocked_slot};
+use crate::cost::Usage;
+use crate::instrument::usage_of;
 use crate::provider::{ChatRequest, ChatResponse, LlmProvider, StreamChunk};
-use crate::served::{Served, served_now, with_served_slot};
 
 use super::LlmRouter;
-use super::health::{ProviderHealth, classify_anyhow_error, classify_error_for_telemetry};
+use super::health::{ProviderHealth, classify_anyhow_error};
 use super::selection::resolve_scored;
-use super::tap::OutcomeTap;
 use super::types::TaskHint;
 
 /// Seed provider health entries from an external slice. Used for bench-seeding
@@ -142,14 +141,14 @@ impl LlmProvider for LlmRouter {
     }
 
     async fn chat(&self, request: &ChatRequest) -> Result<ChatResponse> {
-        with_served_slot(self.chat_routed(request)).await
+        with_blocked_slot(self.chat_routed(request)).await
     }
 
     async fn chat_stream(
         &self,
         request: &ChatRequest,
     ) -> Result<Pin<Box<dyn Stream<Item = Result<StreamChunk>> + Send>>> {
-        with_served_slot(self.chat_stream_routed(request)).await
+        with_blocked_slot(self.chat_stream_routed(request)).await
     }
 }
 
@@ -172,11 +171,9 @@ impl LlmRouter {
                     let usage = Some(usage_of(&resp));
                     self.record_attempt_ok(
                         &candidate.provider_name,
-                        answered_model(&resp, &routed_req.model),
                         task,
                         call_start.elapsed(),
-                        usage,
-                    );
+                        usage);
                     return Ok(resp);
                 }
                 Err(e) => {
@@ -190,11 +187,9 @@ impl LlmRouter {
                     );
                     self.record_attempt_err(
                         &candidate.provider_name,
-                        &routed_req.model,
                         task,
                         latency,
-                        &e,
-                    );
+                        &e);
                     continue;
                 }
             }
@@ -220,22 +215,23 @@ impl LlmRouter {
                         let usage = Some(usage_of(&resp));
                         self.record_attempt_ok(
                             name,
-                            answered_model(&resp, &fallback_req.model),
                             task,
                             latency,
-                            usage,
-                        );
+                            usage);
                         return Ok(resp);
                     }
                     Err(e) => {
                         let latency = call_start.elapsed();
-                        self.record_attempt_err(name, &fallback_req.model, task, latency, &e);
+                        self.record_attempt_err(name, task, latency, &e);
                         continue;
                     }
                 }
             }
         }
 
+        if let Some(blocked) = last_blocked() {
+            return Err(blocked.into());
+        }
         bail!("All LLM providers failed for model '{}'", request.model)
     }
 
@@ -263,11 +259,9 @@ impl LlmRouter {
                         let usage = Some(usage_of(&resp));
                         self.record_attempt_ok(
                             &candidate.provider_name,
-                            answered_model(&resp, &routed_req.model),
                             task,
                             call_start.elapsed(),
-                            usage,
-                        );
+                            usage);
                         return Ok(response_to_stream(resp));
                     }
                     Err(e2) => {
@@ -280,11 +274,9 @@ impl LlmRouter {
                         );
                         self.record_attempt_err(
                             &candidate.provider_name,
-                            &routed_req.model,
                             task,
                             latency,
-                            &e2,
-                        );
+                            &e2);
                         continue;
                     }
                 },
@@ -296,11 +288,9 @@ impl LlmRouter {
                     let timeout_err = anyhow::anyhow!("stream timeout: no first chunk in 30s");
                     self.record_attempt_err(
                         &candidate.provider_name,
-                        &routed_req.model,
                         task,
                         latency,
-                        &timeout_err,
-                    );
+                        &timeout_err);
                     continue;
                 }
                 Ok(inner) => match inner {
@@ -312,13 +302,7 @@ impl LlmRouter {
                             call_start.elapsed(),
                         );
                         let prepended = futures::stream::once(async move { Ok(first_chunk) });
-                        return Ok(self.tap_stream(
-                            Box::pin(prepended.chain(stream)),
-                            &candidate.provider_name,
-                            &routed_req.model,
-                            task,
-                            call_start,
-                        ));
+                        return Ok(Box::pin(prepended.chain(stream)));
                     }
                     Some(Err(e)) => {
                         let is_rate_limit = e.to_string().contains("429")
@@ -332,11 +316,9 @@ impl LlmRouter {
                             );
                             self.record_attempt_err(
                                 &candidate.provider_name,
-                                &routed_req.model,
                                 task,
                                 latency,
-                                &e,
-                            );
+                                &e);
                             continue;
                         }
 
@@ -350,22 +332,18 @@ impl LlmRouter {
                                 let usage = Some(usage_of(&resp));
                                 self.record_attempt_ok(
                                     &candidate.provider_name,
-                                    answered_model(&resp, &routed_req.model),
                                     task,
                                     call_start.elapsed(),
-                                    usage,
-                                );
+                                    usage);
                                 return Ok(response_to_stream(resp));
                             }
                             Err(e2) => {
                                 let latency = call_start.elapsed();
                                 self.record_attempt_err(
                                     &candidate.provider_name,
-                                    &routed_req.model,
                                     task,
                                     latency,
-                                    &e2,
-                                );
+                                    &e2);
                                 continue;
                             }
                         }
@@ -375,11 +353,9 @@ impl LlmRouter {
                         let empty_err = anyhow::anyhow!("empty stream");
                         self.record_attempt_err(
                             &candidate.provider_name,
-                            &routed_req.model,
                             task,
                             latency,
-                            &empty_err,
-                        );
+                            &empty_err);
                         continue;
                     }
                 },
@@ -425,19 +401,20 @@ impl LlmRouter {
                         self.round_robin
                             .store(idx + 1, std::sync::atomic::Ordering::Relaxed);
                         self.record_success(name, task, 0, call_start.elapsed());
-                        return Ok(self.tap_stream(s, name, &fallback_req.model, task, call_start));
+                        return Ok(s);
                     }
                     Err(e) => {
                         self.record_attempt_err(
                             name,
-                            &fallback_req.model,
                             task,
                             call_start.elapsed(),
-                            &e,
-                        );
+                            &e);
                     }
                 }
             }
+        }
+        if let Some(blocked) = last_blocked() {
+            return Err(blocked.into());
         }
         bail!(
             "No provider could serve model '{}' (streaming); every registered provider failed or none is configured",
@@ -465,88 +442,32 @@ impl LlmRouter {
 }
 
 impl LlmRouter {
-    /// Record a successful attempt in health and in the outcome sink.
-    /// `usage` is `(input, output)` tokens when the provider reported them.
+    /// Record a successful attempt in provider health. `usage` is `(input, output)` tokens when the
+    /// provider reported them. The ledger row is written by the instrumented provider itself.
     fn record_attempt_ok(
         &self,
         provider_name: &str,
-        model: &str,
         task: TaskHint,
         latency: std::time::Duration,
         usage: Option<Usage>,
     ) {
         let tokens = usage.map_or(0, |u| u.input as u64 + u.output as u64);
         self.record_success(provider_name, task, tokens, latency);
-        self.record_outcome(provider_name, model, task, latency, usage, None);
     }
 
-    /// Record a failed attempt in health and in the outcome sink.
+    /// Record a failed attempt in provider health. A budget refusal says nothing about the
+    /// provider, and no call was made.
     fn record_attempt_err(
         &self,
         provider_name: &str,
-        model: &str,
         task: TaskHint,
-        latency: std::time::Duration,
+        _latency: std::time::Duration,
         error: &anyhow::Error,
     ) {
-        self.record_failure(provider_name, task, error);
-        self.record_outcome(provider_name, model, task, latency, None, Some(error));
-    }
-
-    /// Emit a task outcome for a call that has already finished.
-    pub(super) fn record_outcome(
-        &self,
-        provider_name: &str,
-        model: &str,
-        task: TaskHint,
-        latency: std::time::Duration,
-        usage: Option<Usage>,
-        error: Option<&anyhow::Error>,
-    ) {
-        let Some(sink) = self.outcome_sink.as_ref() else {
+        if is_budget_block(error) {
             return;
-        };
-        let error_class = error.map(classify_error_for_telemetry);
-        let (provider, class) = attribute(provider_name);
-        emit_outcome(
-            sink,
-            crate::outcome_sink::context_for_record(),
-            OutcomeInput {
-                provider: &provider,
-                class,
-                model,
-                task,
-                latency,
-                usage,
-                error: error_class.as_deref(),
-                cancelled: false,
-            },
-        );
-    }
-
-    /// Wrap a live stream so its outcome is recorded, with usage, when it ends.
-    fn tap_stream(
-        &self,
-        stream: super::tap::ChunkStream,
-        provider_name: &str,
-        model: &str,
-        task: TaskHint,
-        started: Instant,
-    ) -> super::tap::ChunkStream {
-        let Some(sink) = self.outcome_sink.clone() else {
-            return stream;
-        };
-        let (provider, class) = attribute(provider_name);
-        OutcomeTap::wrap(
-            stream,
-            sink,
-            crate::outcome_sink::context_for_record(),
-            &provider,
-            class,
-            model,
-            task,
-            started,
-        )
+        }
+        self.record_failure(provider_name, task, error);
     }
 
     pub(super) fn record_success(
@@ -573,88 +494,5 @@ impl LlmRouter {
         if let Some((_, h)) = health.iter_mut().find(|(n, _)| n == provider_name) {
             h.record_failure(task, &llm_error);
         }
-    }
-}
-
-/// The model the provider says it ran, falling back to the one requested.
-fn answered_model<'a>(resp: &'a ChatResponse, requested: &'a str) -> &'a str {
-    if resp.model.is_empty() {
-        requested
-    } else {
-        &resp.model
-    }
-}
-
-fn usage_of(resp: &ChatResponse) -> Usage {
-    Usage {
-        input: resp.input_tokens,
-        output: resp.output_tokens,
-        cache_read: resp.cache_read_tokens,
-        cache_write: resp.cache_write_tokens,
-        reasoning: resp.reasoning_tokens,
-        billed_usd: resp.provider_cost_usd,
-    }
-}
-
-/// What the ledger needs to know about one finished call.
-pub(super) struct OutcomeInput<'a> {
-    pub provider: &'a str,
-    pub class: ProviderClass,
-    pub model: &'a str,
-    pub task: TaskHint,
-    pub latency: std::time::Duration,
-    pub usage: Option<Usage>,
-    /// Error class for a failed call; `None` means it succeeded.
-    pub error: Option<&'a str>,
-    /// The caller stopped reading a stream that was working. Not a provider failure.
-    pub cancelled: bool,
-}
-
-/// Price a finished call and hand it to the sink without blocking the caller.
-pub(super) fn emit_outcome(sink: &SharedSink, ctx: SessionContext, call: OutcomeInput<'_>) {
-    let usage = call.usage;
-    let priced = price_outcome(call.class, call.model, usage.as_ref(), call.error.is_some());
-    let u = usage.unwrap_or_default();
-    let event = crate::outcome_sink::OutcomeEvent {
-        session_id: ctx.session_id,
-        turn_idx: ctx.turn_idx,
-        model: call.model.to_string(),
-        provider: call.provider.to_string(),
-        task_hint: call.task.as_str(),
-        latency_ms: call.latency.as_millis().min(i64::MAX as u128) as i64,
-        input_tokens: usage.map(|u| u.input as i64),
-        output_tokens: usage.map(|u| u.output as i64),
-        cache_read_tokens: u.cache_read as i64,
-        cache_write_tokens: u.cache_write as i64,
-        reasoning_tokens: u.reasoning as i64,
-        cost_usd: priced.usd,
-        provider_cost_usd: u.billed_usd,
-        cost_source: priced.source.as_str(),
-        origin: ctx.origin,
-        success: call.error.is_none(),
-        error_class: call
-            .error
-            .map(str::to_string)
-            .or(call.cancelled.then(|| "cancelled".to_string())),
-    };
-    let sink = sink.clone();
-    if let Ok(handle) = tokio::runtime::Handle::try_current() {
-        handle.spawn(async move {
-            sink.record(event).await;
-        });
-    } else {
-        tracing::warn!("LLM outcome dropped: no Tokio runtime active");
-    }
-}
-
-/// The backend a call was really served by, when a provider chose among several, else the
-/// router's own name for the provider.
-fn attribute(provider_name: &str) -> (String, ProviderClass) {
-    match served_now() {
-        Some(Served { backend, class }) => (backend, class),
-        None => (
-            provider_name.to_string(),
-            ProviderClass::of_name(provider_name),
-        ),
     }
 }

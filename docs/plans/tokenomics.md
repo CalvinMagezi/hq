@@ -73,3 +73,54 @@ falls back to `/key` figures when refused; check against a real key.
 Not built here: rate-limit response headers (`x-ratelimit-*` for OpenAI and Groq,
 `anthropic-ratelimit-*` for Anthropic) as a free quota signal. They need a hook in each provider's
 HTTP layer and are tracked as a follow-up.
+
+## Recording and budgets (phase 3)
+
+**Where calls are recorded.** Every concrete provider is wrapped once, at construction, in
+`hq_llm::InstrumentedProvider`. It asks the budget gate before each attempt and writes the ledger row
+when the attempt ends, so it does not matter whether a call comes from the router, the backend chain
+or a session's own backend. Production code shares one process-wide `Instruments` handle;
+`hq_agent::install_ledger(db)` points it at the database and is called by `hq start`, `hq web` and the
+session builder. Tests build isolated handles.
+
+**Budgets.** Nothing is enforced until `budgets:` is set in `config.yaml`:
+
+```yaml
+budgets:
+  - name: month
+    scope: global            # or provider:<backend>, model:<id>, origin:<name>
+    period: month            # day, week or month, in UTC
+    limit_usd: 20
+    soft_pct: [50, 80]       # alerts, once per period each; 100 always alerts
+    action: block            # block (default), downgrade, notify
+  - name: memory-daily
+    scope: origin:memory
+    period: day
+    limit_usd: 1
+    action: downgrade
+    downgrade_model: openrouter/some-cheap-model
+background_run_usd: 0.50     # ceiling for one background, watch or sub-agent run
+allow_unpriced_models: []    # models allowed under a blocking budget although they have no price
+```
+
+How the gate decides, per attempt against one provider:
+
+- A call estimated at zero dollars (local models, subscription backends) is always allowed, so a
+  used-up budget lets the backend chain fall through to a local model.
+- Otherwise the budget refuses when spend is already at the limit or the call's worst-case cost (the
+  prompt plus `max_tokens`, or 4096 when unset) would pass it.
+- A refused attempt on one backend moves the chain to the next backend; if every backend is refused
+  the caller gets the budget's own message, not "all providers failed". A refusal is not recorded as a
+  provider failure and writes no ledger row.
+- A model with no known price cannot be counted, so a blocking budget refuses it unless it is listed
+  in `allow_unpriced_models`.
+- Limits are re-read every 30 s and spend every 5 s, and ledger rows are written asynchronously, so a
+  burst of parallel calls can overshoot a limit by the last few seconds of spend plus what is in flight.
+- A model-scoped budget matches the model id the provider reports, or a dated snapshot of it
+  (`id-2026...`); a provider that answers under a different slug is not counted against it.
+- A budget that is malformed (non-positive limit, repeated name, downgrade with no target) is left out
+  of enforcement and logged; an unreadable `config.yaml` keeps the last good budgets in force.
+- A call that was downgraded is asked about again on its new model.
+
+`GET /api/budgets` shows each budget against the ledger; `PUT /api/budgets` replaces them after
+validation. `hq usage budgets` prints the same view.

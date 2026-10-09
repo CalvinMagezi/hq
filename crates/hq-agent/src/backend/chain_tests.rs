@@ -651,3 +651,17 @@ fn capabilities_are_the_union_of_members() {
     assert!(caps.streaming); // from api
     assert!(caps.tools); // from api
 }
+
+#[test]
+fn a_budget_refusal_fails_over_whatever_amounts_its_message_holds() {
+    // "$0.0401" and "$0.0429" must not be read as HTTP 401 or 429.
+    let blocked = hq_llm::budget::BudgetBlocked {
+        budget: "token limit".into(),
+        spent_usd: 0.0401,
+        limit_usd: 0.0429,
+        message: "Budget 'token limit' blocks this call: $0.0401 of $0.0429 is spent.".into(),
+    };
+    let err = BackendError::from_anyhow(blocked.into());
+    assert!(err.is_failoverable(), "{err}");
+    assert!(err.to_string().contains("$0.0401"));
+}

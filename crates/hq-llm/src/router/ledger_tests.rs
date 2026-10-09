@@ -257,12 +257,16 @@ impl LlmProvider for Down {
 #[tokio::test]
 async fn a_chained_call_is_filed_under_the_backend_that_answered() {
     use crate::backend_chain::ChainProvider;
-    let chain = ChainProvider::from_links(vec![
-        ("primary", Arc::new(Down), PRICED_MODEL),
-        ("fallback", Arc::new(Cached), PRICED_MODEL),
-    ]);
+    let instruments = crate::instrument::Instruments::new();
+    let chain = ChainProvider::from_links(
+        vec![
+            ("primary", Arc::new(Down), PRICED_MODEL),
+            ("fallback", Arc::new(Cached), PRICED_MODEL),
+        ],
+        instruments.clone(),
+    );
     let sink = Arc::new(CaptureSink::default());
-    let mut router = LlmRouter::new();
+    let mut router = LlmRouter::with_instruments(instruments);
     router.add_provider("backends", Arc::new(chain));
     router.add_route("*", "backends", "", crate::router::CostTier::Budget);
     router.set_outcome_sink(sink.clone());
@@ -272,11 +276,12 @@ async fn a_chained_call_is_filed_under_the_backend_that_answered() {
         .await
         .unwrap();
 
-    let rows = sink.settled(1).await;
-    assert_eq!(
-        (rows[0].provider.as_str(), rows[0].cost_source),
-        ("fallback", "table")
-    );
+    // The backend that was down is recorded as a failed, unbilled attempt; the one that answered
+    // carries the cost.
+    let rows = sink.settled(2).await;
+    let by = |name: &str| rows.iter().find(|r| r.provider == name).unwrap();
+    assert_eq!((by("primary").success, by("primary").cost_source), (false, "none"));
+    assert_eq!((by("fallback").success, by("fallback").cost_source), (true, "table"));
 }
 
 #[tokio::test]

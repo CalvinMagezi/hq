@@ -4,6 +4,7 @@
 
 use anyhow::Result;
 use chrono::{Datelike, TimeZone, Utc};
+use hq_core::config::{Budget, BudgetAction, BudgetPeriod, BudgetScope};
 use rusqlite::{Connection, params};
 use serde::Serialize;
 
@@ -148,6 +149,93 @@ pub fn ledger_windows(conn: &Connection, provider: &str, now: i64) -> Result<Led
     })
 }
 
+/// Start and end (exclusive) of the UTC period containing `now`.
+pub fn period_bounds(period: BudgetPeriod, now: i64) -> (i64, i64) {
+    let [(_, day), (_, week), (_, month)] = utc_period_starts(now);
+    match period {
+        BudgetPeriod::Day => (day, day + SECS_PER_DAY),
+        BudgetPeriod::Week => (week, week + 7 * SECS_PER_DAY),
+        BudgetPeriod::Month => {
+            let dt = Utc.timestamp_opt(month, 0).single().unwrap_or_default();
+            let (y, m) = if dt.month() == 12 { (dt.year() + 1, 1) } else { (dt.year(), dt.month() + 1) };
+            let next = Utc.with_ymd_and_hms(y, m, 1, 0, 0, 0).single().map_or(month, |t| t.timestamp());
+            (month, next)
+        }
+    }
+}
+
+/// Dollars recorded for the calls a budget scope covers in `[since, until)`. Unpriced calls add
+/// nothing here: their cost is unknown, which the gate handles separately.
+pub fn scope_spend(conn: &Connection, scope: &BudgetScope, since: i64, until: i64) -> Result<f64> {
+    let (clause, value): (&str, Option<&str>) = match scope {
+        BudgetScope::Global => ("", None),
+        BudgetScope::Provider(v) => ("AND provider = ?3", Some(v)),
+        // The provider may report a dated snapshot of the model that was asked for.
+        BudgetScope::Model(v) => ("AND (model = ?3 OR model LIKE ?3 || '-%')", Some(v)),
+        BudgetScope::Origin(v) => ("AND origin = ?3", Some(v)),
+    };
+    let sql = format!(
+        "SELECT COALESCE(SUM(cost_usd), 0.0) FROM task_outcomes
+         WHERE recorded_at >= ?1 AND recorded_at < ?2 {clause}"
+    );
+    Ok(match value {
+        Some(v) => conn.query_row(&sql, params![since, until, v], |r| r.get(0))?,
+        None => conn.query_row(&sql, params![since, until], |r| r.get(0))?,
+    })
+}
+
+#[derive(Debug, Clone, Copy, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum BudgetState {
+    Ok,
+    /// Past the lowest alert threshold.
+    Warning,
+    Exceeded,
+}
+
+pub fn classify(spent: f64, limit: f64, soft_pct: &[u8]) -> BudgetState {
+    let pct = spent / limit * 100.0;
+    if pct >= 100.0 {
+        BudgetState::Exceeded
+    } else if soft_pct.iter().any(|t| pct >= f64::from(*t)) {
+        BudgetState::Warning
+    } else {
+        BudgetState::Ok
+    }
+}
+
+/// One budget measured against the ledger right now.
+#[derive(Debug, Clone, Serialize, PartialEq)]
+pub struct BudgetStatus {
+    pub name: String,
+    pub scope: String,
+    pub period: BudgetPeriod,
+    pub action: BudgetAction,
+    pub limit_usd: f64,
+    pub spent_usd: f64,
+    pub pct: f64,
+    pub state: BudgetState,
+    pub period_start: i64,
+    pub resets_at: i64,
+}
+
+pub fn budget_status(conn: &Connection, budget: &Budget, now: i64) -> Result<BudgetStatus> {
+    let (start, end) = period_bounds(budget.period, now);
+    let spent = scope_spend(conn, &budget.scope, start, end)?;
+    Ok(BudgetStatus {
+        name: budget.name.clone(),
+        scope: budget.scope.to_string(),
+        period: budget.period,
+        action: budget.action,
+        limit_usd: budget.limit_usd,
+        spent_usd: spent,
+        pct: spent / budget.limit_usd * 100.0,
+        state: classify(spent, budget.limit_usd, &budget.soft_pct),
+        period_start: start,
+        resets_at: end,
+    })
+}
+
 /// Models that ran with no known price, newest first, so a doctor can name them.
 pub fn unpriced_models(conn: &Connection, since: i64) -> Result<Vec<(String, i64)>> {
     let mut stmt = conn.prepare(
@@ -269,6 +357,41 @@ mod tests {
         let w = ledger_windows(&conn, "openrouter", NOW).unwrap();
         assert_eq!((w.today, w.week, w.month, w.unpriced_calls), (1.0, 1.0, 5.0, 1));
         assert_eq!(ledger_windows(&conn, "nobody", NOW).unwrap(), LedgerWindows::default());
+    }
+
+    #[test]
+    fn a_budget_is_measured_over_its_own_scope_and_period() {
+        let conn = db();
+        put(&conn, NOW - 60, "table", "chat", 3.0, 0);
+        put(&conn, NOW - 120, "table", "memory", 2.0, 0);
+        put(&conn, NOW - 40 * SECS_PER_DAY, "table", "chat", 50.0, 0);
+        let mk = |scope: &str, limit: f64| Budget {
+            name: "b".into(),
+            scope: scope.parse().unwrap(),
+            period: BudgetPeriod::Month,
+            limit_usd: limit,
+            soft_pct: vec![50],
+            action: BudgetAction::Block,
+            downgrade_model: None,
+        };
+        let global = budget_status(&conn, &mk("global", 10.0), NOW).unwrap();
+        assert_eq!((global.spent_usd, global.state), (5.0, BudgetState::Warning));
+        let memory = budget_status(&conn, &mk("origin:memory", 2.0), NOW).unwrap();
+        assert_eq!((memory.spent_usd, memory.state), (2.0, BudgetState::Exceeded));
+        let none = budget_status(&conn, &mk("model:other", 1.0), NOW).unwrap();
+        assert_eq!((none.spent_usd, none.state), (0.0, BudgetState::Ok));
+    }
+
+    #[test]
+    fn periods_end_where_the_next_one_starts() {
+        let (start, end) = period_bounds(BudgetPeriod::Month, NOW);
+        assert_eq!(end - start, 30 * SECS_PER_DAY);
+        assert_eq!(period_bounds(BudgetPeriod::Week, NOW).1 - period_bounds(BudgetPeriod::Week, NOW).0, 7 * SECS_PER_DAY);
+        // December rolls into January of the next year.
+        let dec = 1_798_761_600 + 5 * SECS_PER_DAY; // 2027-01-01 + 5d is January; use a December ts below.
+        let dec_ts = dec - 20 * SECS_PER_DAY;
+        let (s, e) = period_bounds(BudgetPeriod::Month, dec_ts);
+        assert_eq!(e - s, 31 * SECS_PER_DAY);
     }
 
     #[test]

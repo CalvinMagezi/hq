@@ -49,7 +49,7 @@ pub(super) fn classify_anyhow_error(error: &anyhow::Error) -> LlmError {
 
 /// Short label for telemetry's `error_class` column. Mirrors the `LlmError`
 /// variants but flattened to a stable string the leaderboard queries can group.
-pub(super) fn classify_error_for_telemetry(error: &anyhow::Error) -> String {
+pub(crate) fn classify_error_for_telemetry(error: &anyhow::Error) -> String {
     match classify_anyhow_error(error) {
         LlmError::RateLimit { .. } => "rate_limit".into(),
         LlmError::Overloaded => "overloaded".into(),

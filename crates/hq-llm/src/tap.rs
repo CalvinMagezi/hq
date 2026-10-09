@@ -12,10 +12,10 @@ use crate::cost::{ProviderClass, Usage};
 use crate::outcome_sink::{SessionContext, SharedSink};
 use crate::provider::StreamChunk;
 
-use super::strategy::{OutcomeInput, emit_outcome};
-use super::types::TaskHint;
+use crate::instrument::{OutcomeInput, emit_outcome};
+use crate::router::TaskHint;
 
-pub(super) type ChunkStream = Pin<Box<dyn Stream<Item = Result<StreamChunk>> + Send>>;
+pub(crate) type ChunkStream = Pin<Box<dyn Stream<Item = Result<StreamChunk>> + Send>>;
 
 struct Pending {
     sink: SharedSink,
@@ -24,7 +24,8 @@ struct Pending {
     class: ProviderClass,
     model: String,
     task: TaskHint,
-    latency: Duration,
+    started: Instant,
+    latency: Option<Duration>,
     usage: Option<Usage>,
     resolved_model: Option<String>,
     failure: Option<String>,
@@ -78,7 +79,7 @@ impl Pending {
                 class: self.class,
                 model: self.resolved_model.as_deref().unwrap_or(&self.model),
                 task: self.task,
-                latency: self.latency,
+                latency: self.latency.unwrap_or_else(|| self.started.elapsed()),
                 usage: self.usage,
                 error,
                 cancelled: end == End::Dropped,
@@ -97,14 +98,14 @@ enum End {
     Dropped,
 }
 
-pub(super) struct OutcomeTap {
+pub(crate) struct OutcomeTap {
     inner: ChunkStream,
     pending: Option<Pending>,
 }
 
 impl OutcomeTap {
     #[allow(clippy::too_many_arguments)]
-    pub(super) fn wrap(
+    pub(crate) fn wrap(
         inner: ChunkStream,
         sink: SharedSink,
         ctx: SessionContext,
@@ -123,7 +124,8 @@ impl OutcomeTap {
                 class,
                 model: model.to_string(),
                 task,
-                latency: started.elapsed(),
+                started,
+                latency: None,
                 usage: None,
                 resolved_model: None,
                 failure: None,
@@ -140,6 +142,8 @@ impl Stream for OutcomeTap {
         match &polled {
             Poll::Ready(Some(item)) => {
                 if let Some(p) = self.pending.as_mut() {
+                    let started = p.started;
+                    p.latency.get_or_insert_with(|| started.elapsed());
                     p.observe(item);
                 }
                 if matches!(item, Ok(StreamChunk::Done) | Err(_))
