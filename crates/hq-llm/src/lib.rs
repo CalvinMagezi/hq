@@ -11,6 +11,7 @@ pub mod copilot_usage;
 pub mod cost;
 pub mod decision;
 pub mod decision_report;
+pub mod forecast;
 pub mod http;
 pub mod instrument;
 pub mod models;

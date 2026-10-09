@@ -19,7 +19,7 @@ const LIVE_CACHE_TTL: Duration = Duration::from_secs(60);
 const DEFAULT_BASE: &str = "https://openrouter.ai/api/v1";
 
 /// What OpenRouter does not tell us, said once so the panel never fills the gap with a guess.
-pub(crate) const NO_RATE_NOTE: &str = "OpenRouter reports spend for today, this week and this month. It publishes no per-hour burn rate or projection, so none is shown.";
+pub(crate) const NO_RATE_NOTE: &str = "OpenRouter reports spend for today, this week and this month and publishes no burn rate. HQ projects one from its own record of calls at /api/usage/forecast.";
 const NO_KEY_NOTE: &str = "The OpenRouter key is not set, so spend cannot be read.";
 const REFUSED_NOTE: &str =
     "OpenRouter refused the key when asked for usage, so no spend is shown. Chat is not affected.";
