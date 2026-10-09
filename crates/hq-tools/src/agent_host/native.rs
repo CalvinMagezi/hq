@@ -533,6 +533,11 @@ impl HostBackend for NativeBackend {
         Ok((text.to_string(), "recent-unwrapped"))
     }
 
+    fn read_styled(&self, target: &str, lines: usize) -> Result<String, AgentHostError> {
+        let v = self.call("agent.read", json!({ "name": target, "source": "styled", "lines": lines }))?;
+        Ok(v.get("text").and_then(Value::as_str).unwrap_or_default().to_string())
+    }
+
     fn wait(
         &self,
         target: &str,

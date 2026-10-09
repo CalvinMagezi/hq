@@ -1,9 +1,10 @@
 import { createFileRoute, Link } from '@tanstack/react-router'
-import { lazy, Suspense, useState, useCallback, useEffect } from 'react'
+import { lazy, Suspense, useState, useCallback, useEffect, useMemo } from 'react'
 import { marked } from 'marked'
 import DOMPurify from 'dompurify'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
-import { fetchNotePdf, togglePinNote } from '~/lib/vaultApi'
+import { fetchNoteExport, togglePinNote } from '~/lib/vaultApi'
+import { exportFileName, exportOptionsFor, NOTE_EXPORT_OPTIONS, type NoteExportFormat } from '~/lib/noteExport'
 import { HqHttpError } from '~/lib/hqAuth'
 import { noteQuery, vaultKeys } from '~/lib/queries'
 import type { DirEntry } from '~/lib/vaultApi'
@@ -13,6 +14,7 @@ import { ImageViewer } from '~/components/ImageViewer'
 import { NoteEditor } from '~/components/NoteEditor'
 import { useHQStore } from '~/store/hqStore'
 import { CopyPathMenu, type CopyMenuState } from '~/components/CopyPathMenu'
+import { ExportMenu, type ExportMenuState } from '~/components/ExportMenu'
 import { usePersistedState } from '~/lib/usePersistedState'
 
 const MD_ZOOM_MIN = 0.7
@@ -104,7 +106,11 @@ function VaultFileView({ filePath, content, isDir, dirEntries }: {
     const [isPinned, setIsPinned] = useState(initialPinned)
     const [pinning, setPinning] = useState(false)
     const [editing, setEditing] = useState(false)
-    const [exportingPdf, setExportingPdf] = useState(false)
+    const [exporting, setExporting] = useState<NoteExportFormat | null>(null)
+    const [exportMenu, setExportMenu] = useState<ExportMenuState | null>(null)
+    const closeExportMenu = useCallback(() => setExportMenu(null), [])
+    // Table formats are only offered for a note that has a table.
+    const exportOptions = useMemo(() => exportOptionsFor(content), [content])
     const [copyMenu, setCopyMenu] = useState<CopyMenuState | null>(null)
     const closeCopyMenu = useCallback(() => setCopyMenu(null), [])
 
@@ -165,15 +171,16 @@ function VaultFileView({ filePath, content, isDir, dirEntries }: {
         setGlobalChatOpen(true)
     }
 
-    // Server-rendered PDF. Touch devices get the share sheet (WhatsApp, email, Drive);
-    // desktops get a download.
-    const handleExportPdf = async () => {
-        if (exportingPdf) return
-        setExportingPdf(true)
+    // Server-rendered export in any of the offered formats. Touch devices get the share sheet
+    // (WhatsApp, email, Drive); desktops get a download.
+    const handleExport = async (format: NoteExportFormat) => {
+        if (exporting) return
+        setExportMenu(null)
+        setExporting(format)
         try {
-            const blob = await fetchNotePdf(filePath)
-            const name = `${filePath.split('/').pop()?.replace(/\.md$/, '') || 'note'}.pdf`
-            const file = new File([blob], name, { type: 'application/pdf' })
+            const { blob, extension } = await fetchNoteExport(filePath, format)
+            const name = exportFileName(filePath, extension)
+            const file = new File([blob], name, { type: blob.type || 'application/octet-stream' })
             const touch = window.matchMedia?.('(pointer: coarse)').matches
             if (touch && navigator.canShare?.({ files: [file] })) {
                 try {
@@ -192,13 +199,15 @@ function VaultFileView({ filePath, content, isDir, dirEntries }: {
             a.remove()
             setTimeout(() => URL.revokeObjectURL(url), 10_000)
         } catch (err) {
-            if (err instanceof HqHttpError && err.status === 503) {
+            if (format === 'pdf' && err instanceof HqHttpError && err.status === 503) {
+                // The server's older PDF engine is not installed: print from the browser instead.
                 await handlePrintPDF()
             } else {
-                window.alert(err instanceof Error ? err.message : 'Could not export this note as PDF.')
+                const label = NOTE_EXPORT_OPTIONS.find((o) => o.format === format)?.label ?? format
+                window.alert(err instanceof Error ? err.message : `Could not export this note as ${label}.`)
             }
         } finally {
-            setExportingPdf(false)
+            setExporting(null)
         }
     }
 
@@ -397,15 +406,21 @@ ${safeHtml}
                     )}
                     {isMd && (
                         <button
-                            onClick={handleExportPdf}
-                            disabled={exportingPdf}
-                            className="flex items-center justify-center w-7 h-7 rounded-lg transition-all disabled:opacity-40"
+                            onClick={(e) => {
+                                const rect = e.currentTarget.getBoundingClientRect()
+                                setExportMenu({ x: rect.right - 240, y: rect.bottom + 6 })
+                            }}
+                            disabled={exporting !== null}
+                            className="flex items-center justify-center gap-1 h-7 px-2 rounded-lg transition-all disabled:opacity-40"
                             style={{ color: 'var(--text-dim)', background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.06)' }}
-                            title={exportingPdf ? 'Exporting PDF…' : 'Export PDF'}
+                            title={exporting ? 'Exporting…' : 'Export as PDF, Word, HTML, Excel and more'}
+                            aria-haspopup="menu"
+                            aria-expanded={exportMenu !== null}
                         >
                             <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                                <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="12" y1="18" x2="12" y2="12"/><line x1="9" y1="15" x2="15" y2="15"/>
+                                <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/>
                             </svg>
+                            <span className="hidden sm:inline text-[10px] font-mono">{exporting ? 'Exporting…' : 'Export'}</span>
                         </button>
                     )}
                     {isMd && (
@@ -449,6 +464,7 @@ ${safeHtml}
                 </Suspense>
             </div>
             <CopyPathMenu menu={copyMenu} onClose={closeCopyMenu} />
+            <ExportMenu menu={exportMenu} options={exportOptions} busy={exporting} onPick={handleExport} onClose={closeExportMenu} />
         </div>
     )
 }

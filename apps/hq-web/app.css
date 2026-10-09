@@ -982,3 +982,23 @@ textarea:focus {
     padding-bottom: calc(60px + var(--safe-bottom));
   }
 }
+
+/* Terminal palette for ANSI output in the Workbench, derived from the brand accents and neutral grays. */
+:root {
+  --ansi-0: color-mix(in srgb, white 14%, var(--bg-base));
+  --ansi-1: var(--accent-red);
+  --ansi-2: var(--accent-green);
+  --ansi-3: var(--accent-amber);
+  --ansi-4: var(--accent-blue);
+  --ansi-5: var(--accent-blue);
+  --ansi-6: var(--accent-blue);
+  --ansi-7: color-mix(in srgb, white 80%, var(--bg-base));
+  --ansi-8: color-mix(in srgb, white 45%, var(--bg-base));
+  --ansi-9: color-mix(in srgb, var(--accent-red) 75%, white);
+  --ansi-10: color-mix(in srgb, var(--accent-green) 75%, white);
+  --ansi-11: color-mix(in srgb, var(--accent-amber) 75%, white);
+  --ansi-12: color-mix(in srgb, var(--accent-blue) 75%, white);
+  --ansi-13: color-mix(in srgb, var(--accent-blue) 75%, white);
+  --ansi-14: color-mix(in srgb, var(--accent-blue) 75%, white);
+  --ansi-15: color-mix(in srgb, white 95%, var(--bg-base));
+}
