@@ -390,6 +390,10 @@ impl HostBackend for NativeBackend {
             .to_string())
     }
 
+    fn dir_exists(&self, path: &Path) -> Option<bool> {
+        self.dir().map(|_| path.is_dir())
+    }
+
     fn workspace(&self) -> Result<Value, AgentHostError> {
         self.call("host.workspace", json!({}))
     }

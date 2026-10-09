@@ -31,7 +31,11 @@ first, sends nothing to an unreachable host or a stale pane id, and refuses text
 agent is blocked at a dialog (it returns the screen so the dialog can be answered with
 `keys`). `hq sessions list|spawn|status|logs|send|stop|resume`
 mirrors the tools, and `hq sessions spawn <harness> --host laptop --cwd <path on laptop>`
-starts one on a remote host (`--cwd` is required there).
+starts one on a remote host. The folder is optional: with none, or with one the machine does
+not have, the session starts in a folder inside that machine's own `Documents/HQ`, which the
+host creates (a missing folder keeps its name there; no folder gives the agent a folder of its
+own). The result says so in `cwd_note`. A folder that exists is used exactly as before, and a
+home or root directory is still refused.
 
 There is no terminal UI to attach to: read a session with `harness_session_logs` or the web
 app, and list every agent on a machine with `hq host status`.
