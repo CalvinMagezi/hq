@@ -6,6 +6,17 @@ use tracing::{debug, warn};
 
 use super::AgentSession;
 
+fn text_result(text: String) -> hq_core::types::ToolResult {
+    hq_core::types::ToolResult {
+        content: vec![ToolResultContent {
+            r#type: "text".to_string(),
+            text,
+        }],
+        details: None,
+        context_modifier: None,
+    }
+}
+
 impl AgentSession {
     /// Run one tool through the full dispatch path, for tests outside this module.
     #[cfg(test)]
@@ -82,6 +93,14 @@ impl AgentSession {
             }
         }
 
+        if let Some(msg) = self
+            .role_denial
+            .as_ref()
+            .and_then(|d| d.refuse_output(&tc.name, &tc.arguments))
+        {
+            return Ok(text_result(msg));
+        }
+
         let tool = {
             // Take a cloneable execution handle, then drop the registry lock
             // *before* awaiting `execute`. Holding the global mutex across the
@@ -89,16 +108,37 @@ impl AgentSession {
             // (call counters, denial tracking) is unaffected: the handle points at
             // the same governed instance and its state is internally shared.
             let tools = self.tools.lock().await;
-            tools
-                .get_shared(&tc.name)
-                .ok_or_else(|| anyhow::anyhow!("unknown tool: {}", tc.name))?
+            match tools.get_shared(&tc.name) {
+                Some(tool) => tool,
+                None => {
+                    let hint = self
+                        .role_denial
+                        .as_ref()
+                        .and_then(|d| d.for_removed_tool(&tc.name));
+                    return match hint {
+                        Some(text) => Ok(text_result(text)),
+                        None => Err(anyhow::anyhow!("unknown tool: {}", tc.name)),
+                    };
+                }
+            }
         };
 
-        let result = crate::middleware_runtime::tap_tool_elapsed(
+        let mut result = crate::middleware_runtime::tap_tool_elapsed(
             &tc.name,
             tool.execute(&tc.id, tc.arguments.clone()),
         )
         .await;
+        if tc.name == "bash"
+            && let (Some(denial), Ok(res)) = (&self.role_denial, &mut result)
+        {
+            let output: String = res.content.iter().map(|c| c.text.as_str()).collect();
+            if let Some(hint) = denial.for_blocked_write(&output) {
+                res.content.push(ToolResultContent {
+                    r#type: "text".to_string(),
+                    text: hint,
+                });
+            }
+        }
 
         // Record tool usage telemetry (non-fatal, fire-and-forget).
         if let Some(db) = self.telemetry_db.clone() {

@@ -1,5 +1,5 @@
-import { expect, test } from 'bun:test'
-import { INTERRUPT_KEY, KEY_NAME_PATTERN, QUICK_KEYS, attachCaveat, attachCommand, canSend, isBlocked, needsAttention, watchingLabel, type WatchedSession } from './sessionsApi'
+import { afterEach, expect, test } from 'bun:test'
+import { INTERRUPT_KEY, KEY_NAME_PATTERN, QUICK_KEYS, attachCaveat, attachCommand, canSend, globalSessionsApi, isBlocked, needsAttention, watchingLabel, workbenchApi, type WatchedSession } from './sessionsApi'
 
 test('attachCommand lists a remote host\'s agents over ssh and a local one directly', () => {
   expect(attachCommand({ host: 'local' })).toBe('hq host status')
@@ -65,4 +65,71 @@ test('every key the send box offers is one the server accepts, and interrupt is 
   for (const key of [...QUICK_KEYS, INTERRUPT_KEY]) expect(KEY_NAME_PATTERN.test(key)).toBe(true)
   expect((QUICK_KEYS as readonly string[]).includes(INTERRUPT_KEY)).toBe(false)
   for (const bad of ['-x', '--help', 'a b', '$(id)', 'k'.repeat(33)]) expect(KEY_NAME_PATTERN.test(bad)).toBe(false)
+})
+
+interface Call {
+  url: string
+  method: string
+  body: unknown
+}
+const realFetch = globalThis.fetch
+afterEach(() => {
+  globalThis.fetch = realFetch
+})
+
+/** Replaces fetch with a recorder that answers every request with an empty object. */
+function recordCalls(): Call[] {
+  const calls: Call[] = []
+  globalThis.fetch = (async (url: string, init: RequestInit = {}) => {
+    calls.push({ url, method: init.method ?? 'GET', body: init.body ? JSON.parse(String(init.body)) : undefined })
+    return new Response('{}', { status: 200, headers: { 'Content-Type': 'application/json' } })
+  }) as unknown as typeof fetch
+  return calls
+}
+
+test('the Workbench reads computers and folders with the right urls', async () => {
+  const calls = recordCalls()
+  await workbenchApi.hosts()
+  await workbenchApi.dirs('native')
+  await workbenchApi.dirs('my pc', '/r/HQ/a b')
+  expect(calls.map((c) => [c.method, c.url])).toEqual([
+    ['GET', '/api/workbench/hosts'],
+    ['GET', '/api/workbench/hosts/native/dirs'],
+    ['GET', '/api/workbench/hosts/my%20pc/dirs?path=%2Fr%2FHQ%2Fa%20b'],
+  ])
+})
+
+test('making a folder and starting an agent post the expected bodies', async () => {
+  const calls = recordCalls()
+  await workbenchApi.createDir('native', { parent: '/r/HQ', name: 'new' })
+  await workbenchApi.spawn({ harness: 'claude-code', host: 'native', folder: '/r/HQ/new', prompt: 'hi' })
+  expect(calls).toEqual([
+    { url: '/api/workbench/hosts/native/dirs', method: 'POST', body: { parent: '/r/HQ', name: 'new' } },
+    { url: '/api/harness-sessions', method: 'POST', body: { harness: 'claude-code', host: 'native', folder: '/r/HQ/new', prompt: 'hi' } },
+  ])
+})
+
+test('stop, resume, rename and archive hit their own endpoints', async () => {
+  const calls = recordCalls()
+  await globalSessionsApi.stop('hs-1')
+  await globalSessionsApi.resume('hs-1')
+  await globalSessionsApi.resume('hs-1', 'go on')
+  await globalSessionsApi.rename('hs-1', 'Fix login')
+  await globalSessionsApi.archive('hs-1', true)
+  await globalSessionsApi.archive('hs-1', false)
+  expect(calls).toEqual([
+    { url: '/api/harness-sessions/hs-1/stop', method: 'POST', body: undefined },
+    { url: '/api/harness-sessions/hs-1/resume', method: 'POST', body: {} },
+    { url: '/api/harness-sessions/hs-1/resume', method: 'POST', body: { prompt: 'go on' } },
+    { url: '/api/harness-sessions/hs-1/rename', method: 'POST', body: { label: 'Fix login' } },
+    { url: '/api/harness-sessions/hs-1/archive', method: 'POST', body: { archived: true } },
+    { url: '/api/harness-sessions/hs-1/archive', method: 'POST', body: { archived: false } },
+  ])
+})
+
+test('the list asks for archived agents only when told to', async () => {
+  const calls = recordCalls()
+  await globalSessionsApi.list()
+  await globalSessionsApi.list({ include_archived: true, task_id: 't1' })
+  expect(calls.map((c) => c.url)).toEqual(['/api/harness-sessions', '/api/harness-sessions?include_archived=true&task_id=t1'])
 })
