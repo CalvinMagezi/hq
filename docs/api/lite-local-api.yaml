@@ -4,12 +4,14 @@ info:
   version: "1"
   description: |
     The REST routes that `hq web` serves on this computer and that HQ Lite keeps. Everything else
-    answers 404 under `profile: lite`. Only these paths are described here; others exist in the
-    web app and may change without notice.
+    answers 404 under `profile: lite`. Only these paths are described, and for each only the commonly
+    used fields (a subset: task creation also accepts `tags`, `parent_task_id`, `depends_on` and
+    `external_id`, and task updates accept `expected_status`, which answers 409 when the status has
+    changed). Others exist in the web app and may change without notice.
 
     Send the web token (if one is set) as `Authorization: Bearer <token>`. By default the server
-    listens on 127.0.0.1 only. Routes under HQ's own folders (`_system`, `_data`, dot folders)
-    answer 404.
+    listens on 127.0.0.1 only. Note routes for HQ's own folders (`_system`, `_data`, dot
+    folders) answer 404, and search leaves their notes out.
 servers:
   - url: http://127.0.0.1:5678
 paths:
@@ -90,6 +92,6 @@ paths:
     get:
       summary: Keyword search over notes
       parameters:
-        - { name: q, in: query, required: true, schema: { type: string } }
+        - { name: q, in: query, schema: { type: string }, description: "An empty or missing q answers 200 with an empty list" }
         - { name: limit, in: query, schema: { type: integer, default: 20 } }
       responses: { "200": { description: "`{ results: [...] }`" } }

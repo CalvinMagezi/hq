@@ -124,7 +124,9 @@ jobs:
       - name: Lite tests on Windows
         run: |
           cargo test --locked -p hq-web --lib -- lite
-          cargo test --locked -p hq-cli --bin hq -- lite autostart synced_folders export_and_import
+          if ($LASTEXITCODE -ne 0) { throw 'hq-web Lite tests failed' }
+          cargo test --locked -p hq-cli --bin hq -- lite
+          if ($LASTEXITCODE -ne 0) { throw 'hq-cli Lite tests failed' }
 
       - name: Smoke test as a standard user would run it
         shell: pwsh
@@ -132,6 +134,9 @@ jobs:
           $root = Join-Path $env:RUNNER_TEMP 'hq-smoke'
           New-Item -ItemType Directory -Force "$root\vault" | Out-Null
           # A stand-in web app: this job builds the program, not the web UI.
+          New-Item -ItemType Directory -Force "$root\web", "$root\vault\_system", "$root\vault\Notebooks" | Out-Null
+          Set-Content -Path "$root\vault\_system\SOUL.md" -Value 'private'
+          Set-Content -Path "$root\vault\Notebooks\x.md" -Value 'hello'
           New-Item -ItemType Directory -Force "$root\web" | Out-Null
           Set-Content -Path "$root\web\index.html" -Value '<html></html>'
           Set-Content -Path "$root\config.yaml" -Value "vault_path: '$root\vault'`nweb_static_dir: '$root\web'"
@@ -160,6 +165,8 @@ jobs:
             $code = (Invoke-WebRequest -UseBasicParsing -SkipHttpErrorCheck "http://127.0.0.1:5699$p").StatusCode
             if ($code -ne 404) { throw "$p answered $code, expected 404 under Lite" }
           }
+          $ok = (Invoke-WebRequest -UseBasicParsing -SkipHttpErrorCheck 'http://127.0.0.1:5699/api/note?path=Notebooks/x.md').StatusCode
+          if ($ok -ne 200) { throw "a visible note answered $ok, expected 200 (so the 404s above mean something)" }
           & $hq doctor --windows
           if ($LASTEXITCODE -ne 0) { throw 'hq doctor --windows failed' }
           & $hq autostart status

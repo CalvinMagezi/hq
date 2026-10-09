@@ -677,7 +677,7 @@ fn same_bind(a: &str, b: &str) -> bool {
 
 /// Is `pid` still a server this command started? `kill -0` alone would accept
 /// any process that inherited a dead server's pid.
-fn is_our_server(pid: u32) -> bool {
+pub(crate) fn is_our_server(pid: u32) -> bool {
     if !super::stop::is_alive(pid) {
         return false;
     }

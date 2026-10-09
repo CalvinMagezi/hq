@@ -145,12 +145,12 @@ mod windows {
         }
         let Ok(exe) = std::env::current_exe() else { return 1 };
         let dir = exe.parent().map(|p| p.display().to_string()).unwrap_or_default();
-        println!("Running the installer (it checks the download's SHA-256 first) into {dir} ...");
+        println!("Running the installer from https://agent-hq.online/install.ps1 into {dir} (it checks the download's SHA-256 first; the check shows integrity, not authorship) ...");
         let script = format!(
             "& ([scriptblock]::Create((irm https://agent-hq.online/install.ps1))) -Edition lite -Yes -InstallDir '{}'",
             dir.replace('\'', "''")
         );
-        match std::process::Command::new("powershell.exe").args(["-NoProfile", "-Command", &script]).status() {
+        match std::process::Command::new(std::env::var_os("SystemRoot").map(std::path::PathBuf::from).unwrap_or_else(|| "C:\\Windows".into()).join(r"System32\WindowsPowerShell\v1.0\powershell.exe")).args(["-NoProfile", "-Command", &script]).status() {
             Ok(s) if s.success() => 0,
             Ok(s) => s.code().unwrap_or(1),
             Err(e) => {

@@ -26,8 +26,15 @@ fn reg_add_args(exe: &Path) -> Vec<String> {
         .collect()
 }
 
+/// A Windows system program by full path: a bare name is also looked up in the folder `hq.exe`
+/// itself sits in, which a user can write to.
+fn system_tool(rel: &str) -> PathBuf {
+    let root = std::env::var_os("SystemRoot").map(PathBuf::from).unwrap_or_else(|| PathBuf::from(r"C:\Windows"));
+    root.join("System32").join(rel)
+}
+
 fn reg(args: &[String]) -> Result<std::process::Output> {
-    std::process::Command::new("reg")
+    std::process::Command::new(system_tool("reg.exe"))
         .args(args)
         .output()
         .context("could not run reg.exe")
@@ -53,6 +60,9 @@ pub fn autostart(sub: &str) -> Result<()> {
         }
         "on" => {
             let exe = std::env::current_exe().context("cannot find the hq program")?;
+            if exe.to_string_lossy().contains('%') {
+                bail!("the program path contains a %, which Windows would expand at sign-in; move HQ to a folder without one");
+            }
             let out = reg(&reg_add_args(&exe))?;
             if !out.status.success() {
                 bail!("could not set the startup entry: {}", String::from_utf8_lossy(&out.stderr).trim());
@@ -82,9 +92,13 @@ pub fn uninstall_lite(config: &HqConfig) -> Result<()> {
     if let Ok(text) = std::fs::read_to_string(&state)
         && let Some(pid) = serde_json::from_str::<serde_json::Value>(&text).ok().and_then(|v| v["pid"].as_u64())
     {
-        super::stop::kill_tree(pid as u32);
+        // The pid file can outlive a crashed server, and Windows reuses pids: only stop it if it
+        // is still one of ours.
+        if super::web::is_our_server(pid as u32) {
+            super::stop::kill_tree(pid as u32);
+            println!("Stopped the background web server.");
+        }
         let _ = std::fs::remove_file(&state);
-        println!("Stopped the background web server.");
     }
     if cfg!(windows) && autostart_is_on() {
         autostart("off")?;
@@ -108,10 +122,38 @@ pub fn in_synced_folder(p: &Path) -> bool {
     })
 }
 
-/// Copy every note outside HQ's own folders (`_system`, `_data`, dot folders) from `src` to
-/// `dst`, never following links and never overwriting. Returns (copied, skipped existing).
+/// The path with symlinks, junctions, `..` and spelling differences resolved, even when the
+/// last parts do not exist yet.
+fn resolve(p: &Path) -> PathBuf {
+    let abs = if p.is_absolute() { p.to_path_buf() } else { std::env::current_dir().unwrap_or_default().join(p) };
+    let mut existing = abs.as_path();
+    let mut tail = Vec::new();
+    while !existing.exists() {
+        match (existing.file_name(), existing.parent()) {
+            (Some(n), Some(parent)) => {
+                tail.push(n.to_os_string());
+                existing = parent;
+            }
+            _ => break,
+        }
+    }
+    let mut out = std::fs::canonicalize(existing).unwrap_or_else(|_| existing.to_path_buf());
+    out.extend(tail.iter().rev());
+    out
+}
+
+/// Copy every note outside HQ's own folders (`_system`, `_data`, dot folders at the top) from
+/// `src` to `dst`: never following links (in either folder), never overwriting, never copying
+/// into `dst` itself. Returns (copied, skipped existing).
 fn copy_visible(src: &Path, dst: &Path) -> Result<(usize, usize)> {
-    fn walk(from: &Path, to: &Path, top: bool, counts: &mut (usize, usize)) -> Result<()> {
+    use std::io::Write;
+    fn is_link(p: &Path) -> bool {
+        std::fs::symlink_metadata(p).is_ok_and(|m| m.file_type().is_symlink())
+    }
+    fn walk(from: &Path, to: &Path, top: bool, skip: &Path, counts: &mut (usize, usize)) -> Result<()> {
+        if is_link(to) {
+            bail!("{} is a link; refusing to write through it", to.display());
+        }
         std::fs::create_dir_all(to)?;
         for entry in std::fs::read_dir(from)? {
             let entry = entry?;
@@ -121,7 +163,7 @@ fn copy_visible(src: &Path, dst: &Path) -> Result<(usize, usize)> {
                 continue;
             }
             let ft = entry.file_type()?;
-            if ft.is_symlink() {
+            if ft.is_symlink() || resolve(&entry.path()) == skip {
                 continue;
             }
             let target = to.join(&name);
@@ -129,20 +171,29 @@ fn copy_visible(src: &Path, dst: &Path) -> Result<(usize, usize)> {
                 if lossy.starts_with('.') {
                     continue;
                 }
-                walk(&entry.path(), &target, false, counts)?;
+                walk(&entry.path(), &target, false, skip, counts)?;
             } else if ft.is_file() {
-                if target.exists() {
+                if std::fs::symlink_metadata(&target).is_ok() {
                     counts.1 += 1;
-                } else {
-                    std::fs::copy(entry.path(), &target)?;
-                    counts.0 += 1;
+                    continue;
                 }
+                let mut out = match std::fs::OpenOptions::new().write(true).create_new(true).open(&target) {
+                    Ok(f) => f,
+                    Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => {
+                        counts.1 += 1;
+                        continue;
+                    }
+                    Err(e) => return Err(e.into()),
+                };
+                out.write_all(&std::fs::read(entry.path())?)?;
+                counts.0 += 1;
             }
         }
         Ok(())
     }
     let mut counts = (0, 0);
-    walk(src, dst, true, &mut counts)?;
+    let skip = resolve(dst);
+    walk(src, dst, true, &skip, &mut counts)?;
     Ok(counts)
 }
 
@@ -153,8 +204,9 @@ pub fn lite(config: &HqConfig, sub: &str, folder: Option<&Path>) -> Result<()> {
     let vault = &config.vault_path;
     match sub {
         "export" => {
-            if folder.starts_with(vault) {
-                bail!("choose a folder outside the vault");
+            let (v, f) = (resolve(vault), resolve(folder));
+            if f.starts_with(&v) || v.starts_with(&f) {
+                bail!("choose a folder that is neither inside the vault nor contains it");
             }
             if folder.exists() && std::fs::read_dir(folder)?.next().is_some() {
                 bail!("{} is not empty; choose a new or empty folder", folder.display());
@@ -168,8 +220,9 @@ pub fn lite(config: &HqConfig, sub: &str, folder: Option<&Path>) -> Result<()> {
             if !folder.is_dir() {
                 bail!("{} is not a folder", folder.display());
             }
-            if vault.starts_with(folder) {
-                bail!("choose a folder that does not contain the vault");
+            let (v, f) = (resolve(vault), resolve(folder));
+            if f.starts_with(&v) || v.starts_with(&f) {
+                bail!("choose a folder that is neither inside the vault nor contains it");
             }
             let (copied, skipped) = copy_visible(folder, vault)?;
             println!("Imported {copied} file(s) into {}; {skipped} already existed and were left as they were.", vault.display());
@@ -275,6 +328,10 @@ mod tests {
         std::fs::create_dir_all(back.path().join("Notebooks")).unwrap();
         std::fs::write(back.path().join("Notebooks/a.md"), "mine").unwrap();
         assert_eq!(copy_visible(&out, back.path()).unwrap(), (1, 1));
+        // Copying a folder into one of its own subfolders does not recurse into itself.
+        let inner = s.join("Notebooks/copy");
+        assert!(copy_visible(s, &inner).is_ok());
+        assert!(!inner.join("Notebooks/copy").exists());
         assert_eq!(std::fs::read_to_string(back.path().join("Notebooks/a.md")).unwrap(), "mine");
     }
 
