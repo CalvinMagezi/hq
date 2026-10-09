@@ -697,6 +697,75 @@ mod tests {
         assert_eq!(id, 3, "id 2 belonged to a deleted event and is not handed out again");
     }
 
+    /// A database shaped like a long-lived install: many tasks with tags, comments, dependencies and events,
+    /// moved through every task migration at once. Nothing may be lost or invented, and it must not crawl.
+    #[test]
+    fn a_large_legacy_task_database_survives_the_whole_task_v2_migration_intact() {
+        const TASKS: i64 = 4000;
+        const EVENTS_PER_TASK: i64 = 2;
+        const MAX_MIGRATION_SECS: u64 = 30;
+        let conn = rusqlite::Connection::open_in_memory().unwrap();
+        let idx = super::MIGRATIONS
+            .iter()
+            .position(|(v, _)| *v == "080_task_event_log")
+            .unwrap();
+        super::apply(&conn, &super::MIGRATIONS[..idx]).unwrap();
+        conn.execute_batch(
+            "INSERT INTO spaces (id, name, slug) VALUES ('s', 'S', 's');
+             INSERT INTO initiatives (id, space_id, name, slug, id_prefix) VALUES ('i', 's', 'I', 'i', 'I');",
+        )
+        .unwrap();
+        let tx = conn.unchecked_transaction().unwrap();
+        for n in 0..TASKS {
+            let status = ["to_do", "in_progress", "blocked", "ready_for_review", "complete"][(n % 5) as usize];
+            tx.execute(
+                "INSERT INTO tasks (id, initiative_id, display_id, title, status, priority) VALUES (?1, 'i', ?2, ?3, ?4, 'normal')",
+                rusqlite::params![format!("t{n}"), format!("I-{n:05}"), format!("Task {n}"), status],
+            )
+            .unwrap();
+            tx.execute("INSERT INTO task_tags (task_id, tag) VALUES (?1, 'legacy')", [format!("t{n}")]).unwrap();
+            if n > 0 {
+                tx.execute(
+                    "INSERT INTO task_dependencies (task_id, depends_on_task_id) VALUES (?1, ?2)",
+                    rusqlite::params![format!("t{n}"), format!("t{}", n - 1)],
+                )
+                .unwrap();
+            }
+            tx.execute(
+                "INSERT INTO task_comments (task_id, author, body) VALUES (?1, 'someone', 'a note')",
+                [format!("t{n}")],
+            )
+            .unwrap();
+            for event in ["entered_in_progress", "entered_ready_for_review"] {
+                tx.execute("INSERT INTO task_events (task_id, event_type) VALUES (?1, ?2)", rusqlite::params![format!("t{n}"), event]).unwrap();
+            }
+        }
+        tx.commit().unwrap();
+        let count = |sql: &str| -> i64 { conn.query_row(sql, [], |r| r.get(0)).unwrap() };
+        let deps = count("SELECT COUNT(*) FROM task_dependencies");
+        let before = (count("SELECT COUNT(*) FROM tasks"), count("SELECT COUNT(*) FROM task_tags"), count("SELECT COUNT(*) FROM task_comments"), count("SELECT COUNT(*) FROM task_events"));
+
+        let started = std::time::Instant::now();
+        super::run(&conn).unwrap();
+        assert!(started.elapsed().as_secs() < MAX_MIGRATION_SECS, "migration took {:?}", started.elapsed());
+
+        let after = (count("SELECT COUNT(*) FROM tasks"), count("SELECT COUNT(*) FROM task_tags"), count("SELECT COUNT(*) FROM task_comments"), count("SELECT COUNT(*) FROM task_events"));
+        assert_eq!(before, after);
+        assert_eq!(count("SELECT COUNT(*) FROM task_dependencies"), deps);
+        assert_eq!(after.3, TASKS * EVENTS_PER_TASK);
+        assert_eq!(count("SELECT COUNT(*) FROM task_assignees"), 0, "no assignee is invented");
+        assert_eq!(count("SELECT COUNT(*) FROM task_work_sessions"), 0, "no lease is invented");
+        assert_eq!(count("SELECT COUNT(*) FROM tasks WHERE archived_at IS NOT NULL"), 0, "nothing is archived by migrating");
+        assert_eq!(count("SELECT COUNT(*) FROM tasks WHERE title LIKE 'Task %'"), TASKS);
+        let integrity: String = conn.query_row("PRAGMA integrity_check", [], |r| r.get(0)).unwrap();
+        assert_eq!(integrity, "ok");
+        let fk_problems: i64 = conn.prepare("PRAGMA foreign_key_check").unwrap().query_map([], |_| Ok(())).unwrap().count() as i64;
+        assert_eq!(fk_problems, 0);
+        // A second run is a no-op.
+        super::run(&conn).unwrap();
+        assert_eq!(count("SELECT COUNT(*) FROM task_events"), TASKS * EVENTS_PER_TASK);
+    }
+
     #[test]
     fn work_session_migration_keeps_old_events_and_rolls_back() {
         let conn = rusqlite::Connection::open_in_memory().unwrap();
