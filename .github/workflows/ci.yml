@@ -153,6 +153,21 @@ jobs:
           Start-Sleep -Seconds 2
           try { Invoke-WebRequest -UseBasicParsing http://127.0.0.1:5699/health -TimeoutSec 3 | Out-Null; throw 'web server still answering after stop' } catch { if ($_.Exception.Message -like '*still answering*') { throw } }
 
+  windows-installer:
+    name: PowerShell installer (5.1 and 7)
+    runs-on: windows-2022
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Windows PowerShell 5.1
+        shell: powershell
+        run: powershell -NoProfile -File scripts/windows/install-selftest.ps1
+      - name: PowerShell 7
+        shell: pwsh
+        run: pwsh -NoProfile -File scripts/windows/install-selftest.ps1
+
   rustfmt:
     name: Rust (fmt, non-blocking)
     runs-on: ubuntu-latest

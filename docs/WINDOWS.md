@@ -1,8 +1,50 @@
-# HQ on Windows (WSL2)
+# HQ on Windows
 
-There is no native Windows build. HQ, its coding-agent host and the agents it runs (Claude Code,
-Codex and the rest) all run inside WSL2, which is a normal Ubuntu on your Windows machine. You use
-HQ from your Windows browser as usual. Everything below happens once.
+There are two ways to run HQ on Windows. Pick by what your computer allows.
+
+| | Full HQ (WSL2) | HQ Lite (native) |
+|---|---|---|
+| For | Your own PC, or any PC that can run WSL2 | Work computers that block WSL2, virtualization or installers |
+| You get | Everything: coding agents, chat bots, every tool | Web app, tasks, notes, search, VS Code agents over MCP |
+| Needs | WSL2 (an administrator turns it on once) | Nothing: one program in your user profile, no administrator |
+| Not available | | Coding agents, the sandbox, chat bots, anything that sends your notes to another service |
+| Guide | this page | [HQ_LITE.md](HQ_LITE.md) and [CORPORATE_WORKSTATION.md](CORPORATE_WORKSTATION.md) |
+
+**Full HQ is the default and the better choice wherever it works.** Lite exists for the computers
+where it cannot.
+
+## The installer picks with you
+
+In PowerShell (a normal user is fine; it asks before doing anything):
+
+```
+irm https://agent-hq.online/install.ps1 | iex
+```
+
+It first looks, without changing anything, at whether WSL2 works here, whether you are an
+administrator and whether virtualization is on. It recommends an edition and says why, and you can
+choose the other. `-Edition full` or `-Edition lite` skips the question, `-DryRun` shows what it
+would do, and `-Yes` accepts the defaults:
+
+```
+& ([scriptblock]::Create((irm https://agent-hq.online/install.ps1))) -Edition lite -DryRun
+```
+
+For Full HQ it runs the steps in sections 1 and 2 below for you, each shown first and each
+skippable, and stops after the one that needs a restart. For HQ Lite it downloads the zip, checks
+its SHA-256, unpacks it under `%LOCALAPPDATA%\hq-lite` and starts it once to see whether your
+computer lets it run. If a policy (AppLocker, Windows Defender Application Control, Smart App
+Control) refuses, it removes the file and lists what you can do instead. It does not try to get
+past the policy. It changes no system setting, never elevates itself, and Lite builds are not
+code-signed yet, so the checksum shows the download is intact, not who made it.
+
+The rest of this page is Full HQ by hand.
+
+# Full HQ in WSL2
+
+HQ, its coding-agent host and the agents it runs (Claude Code, Codex and the rest) all run inside
+WSL2, which is a normal Ubuntu on your Windows machine. You use HQ from your Windows browser as
+usual. Everything below happens once.
 
 Two ways to use a Windows machine:
 
