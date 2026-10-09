@@ -1,7 +1,8 @@
 //! Caller identity resolution for `/mcp`: `AGENTHQ_API_KEY` (full access),
 //! `AGENTHQ_SPARK_API_KEY` (restricted to `hq_mcp::gateway::SPARK_READONLY_ALLOWLIST`
-//! by the caller) and `AGENTHQ_HANDOFF_API_KEY` (`HANDOFF_ALLOWLIST`: task writes
-//! and session spawn/send on top of the reads). With neither set, `/mcp` refuses every request unless the
+//! by the caller), `AGENTHQ_TASKS_API_KEY` (`TASKS_ALLOWLIST`: task reads and writes
+//! and nothing that runs code) and `AGENTHQ_HANDOFF_API_KEY` (`HANDOFF_ALLOWLIST`: task
+//! writes and session spawn/send on top of the reads). With none set, `/mcp` refuses every request unless the
 //! loopback-only development switch `HQ_MCP_DEV_NO_AUTH=1` is on.
 //!
 //! The web token for `/ws` and `/api` travels only in the Authorization header.
@@ -44,6 +45,10 @@ pub(crate) enum ApiIdentity {
     Full,
     /// The Spark-scoped key. Callers must apply their own tool allowlist.
     Spark,
+    /// The tasks-scoped key: Spark's reads plus filing and updating tasks, and
+    /// nothing that starts a session or runs code. Callers must apply
+    /// `TASKS_ALLOWLIST`.
+    Tasks,
     /// The handoff-scoped key: Spark's reads plus task writes and session
     /// spawn/send. Callers must apply `HANDOFF_ALLOWLIST`.
     Handoff,
@@ -53,16 +58,17 @@ pub(crate) enum ApiIdentity {
 /// reading `std::env::var` directly, so this stays a pure function callers
 /// can unit test without mutating process-global state. `dev_open` comes from
 /// [`mcp_dev_open`] and only matters when no key is configured. When one value
-/// is configured for several scopes the narrowest wins, so a duplicated key
-/// never widens access.
+/// is configured for several scopes the narrowest wins (Spark, then Tasks, then
+/// Handoff, then Full), so a duplicated key never widens access.
 pub(crate) fn resolve_identity(
     headers: &HeaderMap,
     full_key: Option<&str>,
     spark_key: Option<&str>,
     handoff_key: Option<&str>,
+    tasks_key: Option<&str>,
     dev_open: bool,
 ) -> Option<ApiIdentity> {
-    if full_key.is_none() && spark_key.is_none() && handoff_key.is_none() {
+    if full_key.is_none() && spark_key.is_none() && handoff_key.is_none() && tasks_key.is_none() {
         return dev_open.then_some(ApiIdentity::Full);
     }
 
@@ -83,6 +89,9 @@ pub(crate) fn resolve_identity(
     let matches = |key: Option<&str>| key.is_some_and(|k| tokens_match(provided, k));
     if matches(spark_key) {
         return Some(ApiIdentity::Spark);
+    }
+    if matches(tasks_key) {
+        return Some(ApiIdentity::Tasks);
     }
     if matches(handoff_key) {
         return Some(ApiIdentity::Handoff);
@@ -314,16 +323,16 @@ mod tests {
     #[test]
     fn closed_when_no_keys_configured() {
         let headers = HeaderMap::new();
-        assert_eq!(resolve_identity(&headers, None, None, None, false), None);
+        assert_eq!(resolve_identity(&headers, None, None, None, None, false), None);
         let any_key = headers_with("x-api-key", "anything");
-        assert_eq!(resolve_identity(&any_key, None, None, None, false), None);
+        assert_eq!(resolve_identity(&any_key, None, None, None, None, false), None);
     }
 
     #[test]
     fn dev_switch_opens_only_without_keys() {
         let headers = HeaderMap::new();
-        assert_eq!(resolve_identity(&headers, None, None, None, true), Some(ApiIdentity::Full));
-        assert_eq!(resolve_identity(&headers, Some("full-secret"), None, None, true), None);
+        assert_eq!(resolve_identity(&headers, None, None, None, None, true), Some(ApiIdentity::Full));
+        assert_eq!(resolve_identity(&headers, Some("full-secret"), None, None, None, true), None);
     }
 
     #[test]
@@ -342,7 +351,7 @@ mod tests {
     fn matches_full_key_via_x_api_key() {
         let headers = headers_with("x-api-key", "full-secret");
         assert_eq!(
-            resolve_identity(&headers, Some("full-secret"), Some("spark-secret"), None, false),
+            resolve_identity(&headers, Some("full-secret"), Some("spark-secret"), None, None, false),
             Some(ApiIdentity::Full)
         );
     }
@@ -355,7 +364,7 @@ mod tests {
             "Bearer spark-secret".parse().unwrap(),
         );
         assert_eq!(
-            resolve_identity(&headers, Some("full-secret"), Some("spark-secret"), None, false),
+            resolve_identity(&headers, Some("full-secret"), Some("spark-secret"), None, None, false),
             Some(ApiIdentity::Spark)
         );
     }
@@ -364,7 +373,7 @@ mod tests {
     fn rejects_unknown_key() {
         let headers = headers_with("x-api-key", "not-a-real-key");
         assert_eq!(
-            resolve_identity(&headers, Some("full-secret"), Some("spark-secret"), None, false),
+            resolve_identity(&headers, Some("full-secret"), Some("spark-secret"), None, None, false),
             None
         );
     }
@@ -373,7 +382,7 @@ mod tests {
     fn rejects_missing_key_when_keys_configured() {
         let headers = HeaderMap::new();
         assert_eq!(
-            resolve_identity(&headers, Some("full-secret"), Some("spark-secret"), None, false),
+            resolve_identity(&headers, Some("full-secret"), Some("spark-secret"), None, None, false),
             None
         );
     }
@@ -382,12 +391,12 @@ mod tests {
     fn matches_handoff_key_and_never_full() {
         let headers = headers_with("x-api-key", "handoff-secret");
         assert_eq!(
-            resolve_identity(&headers, Some("full-secret"), Some("spark-secret"), Some("handoff-secret"), false),
+            resolve_identity(&headers, Some("full-secret"), Some("spark-secret"), Some("handoff-secret"), None, false),
             Some(ApiIdentity::Handoff)
         );
         let full = headers_with("x-api-key", "full-secret");
         assert_eq!(
-            resolve_identity(&full, Some("full-secret"), Some("spark-secret"), Some("handoff-secret"), false),
+            resolve_identity(&full, Some("full-secret"), Some("spark-secret"), Some("handoff-secret"), None, false),
             Some(ApiIdentity::Full),
             "the full key is unchanged"
         );
@@ -397,14 +406,14 @@ mod tests {
     fn a_handoff_key_alone_opens_only_the_handoff_scope() {
         let headers = headers_with("x-api-key", "handoff-secret");
         assert_eq!(
-            resolve_identity(&headers, None, None, Some("handoff-secret"), false),
+            resolve_identity(&headers, None, None, Some("handoff-secret"), None, false),
             Some(ApiIdentity::Handoff)
         );
         let wrong = headers_with("x-api-key", "nope");
-        assert_eq!(resolve_identity(&wrong, None, None, Some("handoff-secret"), false), None);
-        assert_eq!(resolve_identity(&HeaderMap::new(), None, None, Some("handoff-secret"), false), None);
+        assert_eq!(resolve_identity(&wrong, None, None, Some("handoff-secret"), None, false), None);
+        assert_eq!(resolve_identity(&HeaderMap::new(), None, None, Some("handoff-secret"), None, false), None);
         assert_eq!(
-            resolve_identity(&headers, None, None, Some("other"), true),
+            resolve_identity(&headers, None, None, Some("other"), None, true),
             None,
             "a configured key closes the dev switch"
         );
@@ -414,15 +423,15 @@ mod tests {
     fn a_key_reused_across_scopes_gets_the_narrowest() {
         let headers = headers_with("x-api-key", "same");
         assert_eq!(
-            resolve_identity(&headers, Some("same"), None, Some("same"), false),
+            resolve_identity(&headers, Some("same"), None, Some("same"), None, false),
             Some(ApiIdentity::Handoff)
         );
         assert_eq!(
-            resolve_identity(&headers, Some("same"), Some("same"), Some("same"), false),
+            resolve_identity(&headers, Some("same"), Some("same"), Some("same"), None, false),
             Some(ApiIdentity::Spark)
         );
         assert_eq!(
-            resolve_identity(&headers, Some("same"), None, None, false),
+            resolve_identity(&headers, Some("same"), None, None, None, false),
             Some(ApiIdentity::Full)
         );
     }
@@ -431,8 +440,47 @@ mod tests {
     fn spark_key_alone_resolves_spark() {
         let headers = headers_with("x-api-key", "spark-secret");
         assert_eq!(
-            resolve_identity(&headers, None, Some("spark-secret"), None, false),
+            resolve_identity(&headers, None, Some("spark-secret"), None, None, false),
             Some(ApiIdentity::Spark)
+        );
+    }
+    #[test]
+    fn tasks_key_resolves_tasks_and_never_wider() {
+        let headers = headers_with("x-api-key", "tasks-secret");
+        assert_eq!(
+            resolve_identity(&headers, Some("full"), Some("spark"), Some("handoff"), Some("tasks-secret"), false),
+            Some(ApiIdentity::Tasks)
+        );
+        assert_eq!(
+            resolve_identity(&headers, None, None, None, Some("tasks-secret"), false),
+            Some(ApiIdentity::Tasks),
+            "a tasks key alone opens the tasks scope"
+        );
+        let wrong = headers_with("x-api-key", "nope");
+        assert_eq!(resolve_identity(&wrong, None, None, None, Some("tasks-secret"), false), None);
+        assert_eq!(
+            resolve_identity(&headers, None, None, None, Some("other"), true),
+            None,
+            "a configured tasks key closes the dev switch"
+        );
+    }
+
+    #[test]
+    fn a_key_shared_with_tasks_gets_the_narrower_scope() {
+        let headers = headers_with("x-api-key", "same");
+        assert_eq!(
+            resolve_identity(&headers, Some("same"), None, None, Some("same"), false),
+            Some(ApiIdentity::Tasks)
+        );
+        assert_eq!(
+            resolve_identity(&headers, None, None, Some("same"), Some("same"), false),
+            Some(ApiIdentity::Tasks),
+            "tasks is narrower than handoff, which can run code"
+        );
+        assert_eq!(
+            resolve_identity(&headers, None, Some("same"), None, Some("same"), false),
+            Some(ApiIdentity::Spark),
+            "spark stays the narrowest"
         );
     }
 }

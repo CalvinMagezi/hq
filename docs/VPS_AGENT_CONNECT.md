@@ -19,6 +19,10 @@ hq start all (serves /mcp, /health, the web UI)
 
 1. Set the key HQ checks on `/mcp`. `AGENTHQ_API_KEY` grants full access;
    `AGENTHQ_SPARK_API_KEY` is optional and limited to a read-only tool set.
+   `AGENTHQ_TASKS_API_KEY` is optional and adds task reads and writes
+   (`task_create`, `task_update`, `task_comment_add`) to the read-only set, with no session
+   tools and no way to run code. It is the key to give an editor agent that should use HQ's tasks
+   and nothing else.
    `AGENTHQ_HANDOFF_API_KEY` is optional and adds task writes and session
    spawn/handoff (for a client that hands work to coding agents). It is
    equivalent to code execution on the hosts: set `agent_host.handoff_cwd_allow`.
@@ -57,3 +61,45 @@ hq start all (serves /mcp, /health, the web UI)
 
 It checks `/health`, the MCP `initialize` handshake, `tools/list`, and one
 `hq_discover` call.
+
+## VS Code
+
+VS Code reads remote servers from `.vscode/mcp.json` in a workspace (or `mcp.json` in your user
+profile). Its top-level key is `servers`, and a root `inputs` entry makes VS Code ask for the key
+instead of storing it in the file. Let HQ write it:
+
+```bash
+hq mcp install --target project --url https://mcp.your-domain.com/mcp
+```
+
+which produces
+
+```json
+{
+  "inputs": [
+    { "id": "agent-hq-key", "type": "promptString", "description": "Agent HQ MCP key", "password": true }
+  ],
+  "servers": {
+    "agent-hq": {
+      "type": "http",
+      "url": "https://mcp.your-domain.com/mcp",
+      "headers": { "Authorization": "Bearer ${input:agent-hq-key}" }
+    }
+  }
+}
+```
+
+Give VS Code the tasks key (or the read-only key), not the full key. `--url` accepts `https://`
+URLs, and `http://` only for `localhost`; it refuses a URL that carries credentials, a query or a
+fragment. An organization can switch MCP off for Copilot ("MCP servers in Copilot" policy); if it
+has, this does not work and the answer is a conversation with your administrator.
+
+To run HQ on the same machine instead, install a local server limited to the same tools:
+
+```bash
+hq mcp install --target vscode --scope tasks
+```
+
+This writes `hq mcp-serve --scope tasks` into VS Code's user `mcp.json`. The scopes are `full`
+(the default), `tasks` and `readonly`, the same lists the HTTP keys use. A scoped server also
+sends no tool catalog in its instructions, so a client is not told about tools it cannot call.

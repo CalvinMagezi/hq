@@ -2,7 +2,7 @@ use anyhow::Result;
 use hq_core::config::HqConfig;
 use std::path::PathBuf;
 
-use super::cursor_mcp_config::{self, Target};
+use super::cursor_mcp_config::{self, EntryOptions, ServeScope, Target};
 
 /// Which config files an `hq mcp` subcommand touches.
 #[derive(Default)]
@@ -13,6 +13,10 @@ pub struct Scope {
     pub global: bool,
     /// Project directory for the project-level files (default: cwd).
     pub path: Option<PathBuf>,
+    /// What the written stdio entries may reach (`hq mcp-serve --scope`).
+    pub access: ServeScope,
+    /// Write a remote entry for this HQ `/mcp` URL instead (VS Code files only).
+    pub url: Option<String>,
 }
 
 /// Install, check, or remove HQ MCP server configuration.
@@ -65,11 +69,38 @@ fn selected_targets(scope: &Scope) -> Result<Vec<Target>> {
     }
 }
 
+/// The VS Code targets are the only ones that take a remote entry.
+fn remote_target_ok(target: Option<&str>) -> bool {
+    matches!(target, None | Some("vscode") | Some("project"))
+}
+
 fn install(config: &HqConfig, scope: &Scope) -> Result<()> {
+    if let Some(url) = &scope.url {
+        cursor_mcp_config::validate_remote_url(url)?;
+        if !remote_target_ok(scope.target.as_deref()) {
+            anyhow::bail!(
+                "--url writes VS Code's remote form, so it works with --target vscode or --target project"
+            );
+        }
+        if scope.access != ServeScope::Full {
+            anyhow::bail!("--scope applies to a local server; the key you give a remote HQ sets its scope");
+        }
+    }
+    let opts = EntryOptions {
+        scope: scope.access,
+        remote_url: scope.url.clone(),
+    };
     println!("Installing HQ MCP server configuration...\n");
     let mut installed = 0;
     for t in selected_targets(scope)? {
-        match cursor_mcp_config::write_target(&t, &config.vault_path) {
+        if t.legacy {
+            // An old location HQ no longer writes: move its entry rather than leave a duplicate.
+            if let Ok(true) = cursor_mcp_config::remove_target(&t) {
+                println!("  Moved the old entry out of: {}", t.path.display());
+            }
+            continue;
+        }
+        match cursor_mcp_config::write_target(&t, &config.vault_path, &opts) {
             Ok(Some(path)) => {
                 println!("  Installed to: {}", path.display());
                 installed += 1;
@@ -80,8 +111,13 @@ fn install(config: &HqConfig, scope: &Scope) -> Result<()> {
     }
 
     if installed == 0 {
-        let entry = cursor_mcp_config::build_mcp_server_entry(&config.vault_path, "claude-code");
         println!("No supported AI editor configs found.");
+        if let Some(url) = &scope.url {
+            println!("Add this to a VS Code mcp.json (a workspace's .vscode/mcp.json, or --target project):\n");
+            println!("{}", cursor_mcp_config::remote_snippet(url)?);
+            return Ok(());
+        }
+        let entry = cursor_mcp_config::build_mcp_server_entry(&config.vault_path, "claude-code");
         println!("Manually add the MCP server to your editor config:\n");
         println!("{}", serde_json::to_string_pretty(&entry)?);
     } else {
@@ -124,6 +160,7 @@ fn remove(scope: &Scope) -> Result<()> {
         target: scope.target.clone(),
         global: scope.global || !touches_project,
         path: scope.path.clone(),
+        ..Scope::default()
     };
     println!("Removing HQ MCP server from configs...\n");
     if touches_project {

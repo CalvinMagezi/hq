@@ -201,6 +201,7 @@ mod tests {
         for (scope, list) in [
             ("spark", crate::gateway::SPARK_READONLY_ALLOWLIST),
             ("handoff", crate::gateway::HANDOFF_ALLOWLIST),
+            ("tasks", crate::gateway::TASKS_ALLOWLIST),
         ] {
             for name in list {
                 assert!(

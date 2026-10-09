@@ -7,7 +7,11 @@ HQ-SEC-001, HQ-SEC-004 and HQ-SEC-005.
 ## `/mcp` fails closed
 
 `/mcp` needs `AGENTHQ_API_KEY` (full access), `AGENTHQ_SPARK_API_KEY` (a
-read-only tool allowlist) or `AGENTHQ_HANDOFF_API_KEY` (the read-only set minus
+read-only tool allowlist), `AGENTHQ_TASKS_API_KEY` (the read-only tools plus
+`task_create`, `task_update`, `task_comment_add`, `folder_create` and
+`initiative_create`, listed in `hq_mcp::gateway::TASKS_ALLOWLIST`; it has no session
+tools, no `hq_ask`, no deletes and no vault writes, so unlike the handoff key it is not code
+execution anywhere) or `AGENTHQ_HANDOFF_API_KEY` (the read-only set minus
 `harness_session_logs`, plus `task_create`, `task_update`, `task_comment_add`,
 `harness_session_spawn`, `harness_session_handoff`, `hq_ask` and `hq_ask_result`, as listed in
 `hq_mcp::gateway::HANDOFF_ALLOWLIST`; no deletes, no session stop, resume,
@@ -22,7 +26,7 @@ gateway tells the tool the call came in on this key, so a client cannot claim
 or drop the scope. Send the key as `Authorization: Bearer <key>` or
 `x-api-key`. With none of the variables set, every call is refused with
 "Unauthorized: this server has no AGENTHQ_API_KEY configured". A value reused
-across scopes gets the narrowest one, and a tool missing from a scope's list is
+across scopes gets the narrowest one (Spark, then tasks, then handoff, then full), and a tool missing from a scope's list is
 denied, so a new tool stays out of the scoped keys until it is added by hand.
 
 For local development only, `HQ_MCP_DEV_NO_AUTH=1` opens `/mcp` when no key is
