@@ -51,8 +51,8 @@ export function TaskComments({ taskId }: { taskId: string }) {
         {comments.map((c) => (
           <div key={c.id} className="p-3 rounded-xl bg-white/[0.02] border border-white/5">
             <div className="flex items-center justify-between mb-1">
-              <span className="text-[11px] font-mono font-bold text-neutral-300">{c.author}</span>
-              <span className="text-[10px] font-mono text-neutral-500">
+              <span className="text-[11px] font-bold text-neutral-300">{c.author}</span>
+              <span className="text-[11px] text-neutral-500">
                 {parseSqliteUtc(c.created_at).toLocaleString()}
               </span>
             </div>
@@ -61,7 +61,7 @@ export function TaskComments({ taskId }: { taskId: string }) {
             </div>
           </div>
         ))}
-        {comments.length === 0 && <p className="text-xs font-mono text-neutral-600 italic">No comments yet</p>}
+        {comments.length === 0 && <p className="text-xs text-neutral-600 italic">No comments yet</p>}
       </div>
       <div className="flex items-center gap-2">
         <input
@@ -71,7 +71,7 @@ export function TaskComments({ taskId }: { taskId: string }) {
             if (e.key === 'Enter') handlePostComment()
           }}
           placeholder="Add a comment..."
-          className="flex-1 px-3.5 py-2 rounded-xl text-xs font-mono text-neutral-200 bg-black/30 border focus:outline-none focus:ring-1 focus:ring-emerald-400"
+          className="flex-1 px-3.5 py-2 rounded-xl text-xs text-neutral-200 hq-field focus:outline-none focus:ring-1 focus:ring-emerald-400"
           style={{ borderColor: 'rgba(255,255,255,0.1)' }}
         />
         <button

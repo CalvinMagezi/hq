@@ -255,7 +255,7 @@ function TasksPage() {
         />
 
         {notice && (
-          <div className="mb-4 flex items-start justify-between gap-3 px-3.5 py-2.5 rounded-xl border border-amber-500/20 bg-amber-500/10 text-xs font-mono text-amber-300">
+          <div className="mb-4 flex items-start justify-between gap-3 px-3.5 py-2.5 rounded-xl border border-amber-500/20 bg-amber-500/10 text-xs text-amber-300">
             <span>{notice}</span>
             <button type="button" onClick={() => setNotice(null)} className="shrink-0 text-amber-300/70 hover:text-amber-200">
               <X className="w-3.5 h-3.5" />
@@ -273,7 +273,7 @@ function TasksPage() {
               <CheckSquare className="w-8 h-8" />
             </div>
             <h3 className="text-sm font-bold text-neutral-300">No tasks found</h3>
-            <p className="text-xs font-mono text-neutral-500 max-w-sm mt-1">
+            <p className="text-xs text-neutral-500 max-w-sm mt-1">
               {statusTab === 'active' ? 'Nothing active right now.' : 'No tasks match the current filters.'}
             </p>
           </div>
@@ -343,12 +343,12 @@ function TasksHeader({ activeCount, isRefreshing, onRefresh, onNew, onOpenSideba
         >
           <PanelLeftOpen className="w-4 h-4" />
         </button>
-        <div className="p-2 rounded-xl bg-emerald-500/10 border border-emerald-500/20 text-emerald-400">
+        <div className="p-2.5 rounded-xl hq-glass-card text-emerald-400">
           <CheckSquare className="w-5 h-5" />
         </div>
         <div>
-          <h1 className="text-xl font-bold text-white tracking-tight">Tasks</h1>
-          <p className="text-xs font-mono text-neutral-400 mt-0.5">{activeCount} active</p>
+          <h1 className="text-2xl font-semibold text-white tracking-tight" style={{ fontFamily: 'var(--font-heading)' }}>Tasks</h1>
+          <p className="text-xs text-neutral-400 mt-0.5">{activeCount} active</p>
         </div>
       </div>
 
@@ -357,7 +357,7 @@ function TasksHeader({ activeCount, isRefreshing, onRefresh, onNew, onOpenSideba
           type="button"
           onClick={onRefresh}
           disabled={isRefreshing}
-          className="px-3 py-1.5 rounded-xl border border-white/10 text-xs font-mono text-neutral-300 hover:text-white hover:bg-white/5 transition-all flex items-center gap-1.5 disabled:opacity-50"
+          className="hq-btn-ghost disabled:opacity-50"
         >
           <RefreshCw className={`w-3.5 h-3.5 ${isRefreshing ? 'animate-spin' : ''}`} />
           <span className="hidden sm:inline">Refresh</span>
@@ -365,8 +365,7 @@ function TasksHeader({ activeCount, isRefreshing, onRefresh, onNew, onOpenSideba
         <button
           type="button"
           onClick={onNew}
-          className="px-3.5 py-1.5 rounded-xl text-xs font-mono font-bold flex items-center gap-1.5 transition-all"
-          style={{ background: 'var(--accent-green, #00ffa3)', color: '#000' }}
+          className="hq-btn-primary !h-9 !px-4"
         >
           <Plus className="w-3.5 h-3.5" />
           New Task
@@ -396,15 +395,15 @@ function TasksFilterBar(p: TasksFilterBarProps) {
   return (
     <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-5 w-full max-w-full">
       <div className="flex items-center gap-2 flex-wrap w-full sm:w-auto min-w-0">
-        <div className="flex items-center gap-1 p-1 rounded-xl bg-black/40 border border-white/10 self-start shrink-0">
+        <div className="flex items-center gap-1 p-1 rounded-xl hq-field self-start shrink-0">
           {VIEWS.map(({ id, label, icon: Icon }) => (
             <button
               key={id}
               type="button"
               onClick={() => setView(id)}
               title={label}
-              className={`px-2.5 py-1.5 rounded-lg text-xs font-mono font-semibold flex items-center gap-1.5 transition-all ${
-                view === id ? 'bg-white/10 text-emerald-400 shadow-sm' : 'text-neutral-400 hover:text-neutral-200'
+              className={`px-2.5 py-1.5 rounded-lg text-xs font-semibold flex items-center gap-1.5 transition-all ${
+                view === id ? 'hq-seg-on' : 'text-neutral-400 hover:text-neutral-200'
               }`}
             >
               <Icon className="w-3.5 h-3.5 shrink-0" />
@@ -414,14 +413,14 @@ function TasksFilterBar(p: TasksFilterBarProps) {
         </div>
 
         {view !== 'board' && (
-          <div className="flex items-center gap-1 p-1 rounded-xl bg-black/40 border border-white/10 self-start max-w-full overflow-x-auto no-scrollbar shrink-0">
+          <div className="flex items-center gap-1 p-1 rounded-xl hq-field self-start max-w-full overflow-x-auto no-scrollbar shrink-0">
             {(['active', 'all', 'complete'] as StatusTab[]).map((tab) => (
               <button
                 key={tab}
                 type="button"
                 onClick={() => setStatusTab(tab)}
-                className={`px-3 py-1.5 rounded-lg text-xs font-mono font-semibold capitalize transition-all shrink-0 ${
-                  statusTab === tab ? 'bg-white/10 text-emerald-400 shadow-sm' : 'text-neutral-400 hover:text-neutral-200'
+                className={`px-3 py-1.5 rounded-lg text-xs font-semibold capitalize transition-all shrink-0 ${
+                  statusTab === tab ? 'hq-seg-on' : 'text-neutral-400 hover:text-neutral-200'
                 }`}
               >
                 {tab}
@@ -434,7 +433,7 @@ function TasksFilterBar(p: TasksFilterBarProps) {
           value={statusFilter}
           onChange={(e) => setStatusFilter(e.target.value as TaskStatus | 'all')}
           title="Filter by status"
-          className="px-2.5 py-1.5 rounded-xl text-xs font-mono text-neutral-200 bg-black/40 border border-white/10 focus:outline-none focus:ring-1 focus:ring-emerald-400 max-w-full truncate"
+          className="px-2.5 py-1.5 rounded-xl text-xs text-neutral-200 hq-field focus:outline-none focus:ring-1 focus:ring-emerald-400 max-w-full truncate"
         >
           <option value="all">All statuses</option>
           {STATUS_ORDER.map((status) => (
@@ -446,7 +445,7 @@ function TasksFilterBar(p: TasksFilterBarProps) {
           value={tagFilter}
           onChange={(e) => setTagFilter(e.target.value)}
           title="Filter by tag"
-          className="px-2.5 py-1.5 rounded-xl text-xs font-mono text-neutral-200 bg-black/40 border border-white/10 focus:outline-none focus:ring-1 focus:ring-emerald-400 max-w-full truncate"
+          className="px-2.5 py-1.5 rounded-xl text-xs text-neutral-200 hq-field focus:outline-none focus:ring-1 focus:ring-emerald-400 max-w-full truncate"
         >
           <option value="all">All tags</option>
           {allTags.map((tag) => (
@@ -462,7 +461,7 @@ function TasksFilterBar(p: TasksFilterBarProps) {
           value={searchQuery}
           onChange={(e) => setSearchQuery(e.target.value)}
           placeholder="Search tasks..."
-          className="w-full box-border pl-8 pr-3 py-1.5 rounded-xl text-xs font-mono text-neutral-200 bg-black/40 border border-white/10 focus:outline-none focus:ring-1 focus:ring-emerald-400 placeholder:text-neutral-600 transition-all"
+          className="w-full box-border pl-8 pr-3 py-1.5 rounded-xl text-xs text-neutral-200 hq-field focus:outline-none focus:ring-1 focus:ring-emerald-400 placeholder:text-neutral-600 transition-all"
         />
       </div>
     </div>

@@ -57,10 +57,10 @@ export function TaskBoardView({ tasks, allById, onSelect, onMove }: Props) {
             key={status}
             data-board-status={status}
             className={`flex flex-col w-[260px] shrink-0 snap-start rounded-2xl border p-2.5 transition-colors ${
-              isTarget ? 'border-emerald-500/40 bg-emerald-500/5' : 'border-white/10 bg-black/20'
+              isTarget ? 'border-emerald-500/40 bg-emerald-500/5' : 'hq-glass-card'
             }`}
           >
-            <h2 className="text-[11px] font-mono font-bold uppercase tracking-wider text-neutral-500 px-1.5 mb-2.5">
+            <h2 className="text-[11px] font-bold uppercase tracking-wider text-neutral-500 px-1.5 mb-2.5">
               {STATUS_LABELS[status]}
               <span className="text-neutral-700 ml-1.5">({items.length})</span>
             </h2>

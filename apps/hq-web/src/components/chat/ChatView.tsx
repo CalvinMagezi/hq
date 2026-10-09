@@ -241,7 +241,7 @@ export function ChatView({ active, onClose }: Props) {
   const activeThread = threads.find((t) => t.threadId === activeThreadId)
 
   return (
-    <div className="flex h-full w-full font-mono text-white overflow-hidden relative">
+    <div className="flex h-full w-full text-white overflow-hidden relative">
       <ThreadSidebar
         open={sidebarOpen}
         collapsed={sidebarCollapsed}
@@ -252,7 +252,7 @@ export function ChatView({ active, onClose }: Props) {
         onArchive={(id) => void archiveThread(id)}
       />
 
-      <div className="flex-1 flex flex-col h-full min-w-0 bg-black/40 relative" {...drop.handlers}>
+      <div className="flex-1 flex flex-col h-full min-w-0 relative" {...drop.handlers}>
         {drop.dragging && (
           <div className="absolute inset-2 z-30 rounded-2xl border-2 border-dashed border-emerald-400/60 bg-neutral-950/80 flex flex-col items-center justify-center gap-2 text-sm text-neutral-200 pointer-events-none">
             <Paperclip className="w-6 h-6 text-emerald-400" />
@@ -285,13 +285,13 @@ export function ChatView({ active, onClose }: Props) {
         />
 
         {liveTurn && !connected && (
-          <div role="status" className="px-4 py-1.5 border-t border-amber-500/30 text-[11px] font-mono text-amber-400 bg-neutral-900/60">
+          <div role="status" className="px-4 py-1.5 border-t border-amber-500/30 text-[11px] text-amber-400 bg-neutral-900/60">
             Connection lost. The reply keeps running on the server and shows here once you are back online.
           </div>
         )}
 
         {editing && (
-          <div className="flex items-center gap-2 px-4 py-1.5 border-t border-white/10 text-[11px] font-mono text-neutral-400 bg-neutral-900/60">
+          <div className="flex items-center gap-2 px-4 py-1.5 border-t border-white/10 text-[11px] text-neutral-400 bg-neutral-900/60">
             <PencilLine className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
             <span className="flex-1 min-w-0 truncate" title="Sending replaces this message and every message after it">
               Editing. Later messages get replaced.

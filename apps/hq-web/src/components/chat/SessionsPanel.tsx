@@ -28,7 +28,7 @@ interface Props {
 export function SessionsPanel({ sessions, busy, onDrive, onUnwatch }: Props) {
   return (
     <div className="border-b border-white/10 bg-neutral-900/60 shrink-0 max-h-[50dvh] overflow-y-auto overscroll-contain">
-      <p className="sm:hidden px-3 pt-2 text-[11px] font-mono text-neutral-500">Drive: {DRIVE_HINT}.</p>
+      <p className="sm:hidden px-3 pt-2 text-[11px] text-neutral-500">Drive: {DRIVE_HINT}.</p>
       <ul className="max-w-4xl mx-auto" aria-label="Watched coding-agent sessions">
         {sessions.map((s) => (
           <SessionRow
@@ -54,7 +54,7 @@ interface RowProps {
 function SessionRow({ session: s, busy, onDrive, onUnwatch }: RowProps) {
   const running = s.status === 'running'
   return (
-    <li className={`px-3 sm:px-4 py-2.5 text-xs font-mono border-t border-white/5 first:border-t-0 ${running ? '' : 'opacity-50'}`}>
+    <li className={`px-3 sm:px-4 py-2.5 text-xs border-t border-white/5 first:border-t-0 ${running ? '' : 'opacity-50'}`}>
       <div className="flex items-center gap-2 min-w-0">
         <Terminal className="w-3.5 h-3.5 text-neutral-500 shrink-0" />
         <span className="text-neutral-200 truncate min-w-0" title={s.cwd}>
@@ -107,7 +107,7 @@ function TaskLine({ task }: { task: NonNullable<WatchedSession['task']> }) {
     >
       <span className="text-neutral-500 shrink-0">{task.display_id}</span>
       <span className="min-w-0 line-clamp-2 sm:line-clamp-1">{task.title}</span>
-      <span className={`shrink-0 text-[10px] px-2 py-0.5 rounded-full border ${STATUS_BADGE_CLASS[task.status]}`}>
+      <span className={`shrink-0 text-[11px] px-2 py-0.5 rounded-full border ${STATUS_BADGE_CLASS[task.status]}`}>
         {STATUS_LABELS[task.status]}
       </span>
     </Link>

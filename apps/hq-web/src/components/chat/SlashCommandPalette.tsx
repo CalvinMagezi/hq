@@ -43,7 +43,7 @@ export function SlashCommandPalette({ input, onSelect }: Props) {
 
   return (
     <div
-      className="absolute bottom-full left-0 right-0 mb-2 rounded-2xl overflow-hidden shadow-2xl z-50 font-mono text-xs backdrop-blur-xl"
+      className="absolute bottom-full left-0 right-0 mb-2 rounded-2xl overflow-hidden shadow-2xl z-50 text-xs backdrop-blur-xl"
       style={{
         background: 'rgba(15, 15, 15, 0.95)',
         border: '1px solid rgba(255, 255, 255, 0.1)',

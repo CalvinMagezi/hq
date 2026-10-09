@@ -1226,3 +1226,56 @@ textarea:focus {
 @media (min-width: 768px) {
   .hq-header { border-bottom-color: transparent; }
 }
+
+/* ─── Inner controls shared by Tasks, Chat and Inbox ──────────────────────── */
+
+.hq-field {
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid var(--glass-line);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+}
+.hq-field:focus,
+.hq-field:focus-within { border-color: rgba(0, 173, 238, 0.55); }
+.hq-field::placeholder { color: #8a8687; }
+
+.hq-seg-on {
+  background: #fff;
+  color: #000;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
+}
+
+.hq-card {
+  background: var(--glass-fill);
+  border: 1px solid var(--glass-line);
+  backdrop-filter: blur(20px) saturate(150%);
+  -webkit-backdrop-filter: blur(20px) saturate(150%);
+  box-shadow: var(--glass-hi), 0 8px 24px rgba(0, 0, 0, 0.22);
+}
+.hq-card-live:hover {
+  background: rgba(255, 255, 255, 0.085);
+  border-color: rgba(0, 173, 238, 0.4);
+}
+
+.hq-btn-ghost {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 36px;
+  padding: 0 14px;
+  border-radius: 9999px;
+  border: 1px solid var(--glass-line);
+  background: rgba(255, 255, 255, 0.04);
+  font-size: 13px;
+  font-weight: 600;
+  color: #e8e8f0;
+  transition: background 0.15s ease;
+}
+.hq-btn-ghost:hover { background: rgba(255, 255, 255, 0.09); }
+
+.hq-composer {
+  border-top: 1px solid var(--glass-line);
+  background: rgba(14, 16, 20, 0.5);
+  backdrop-filter: blur(24px) saturate(150%);
+  -webkit-backdrop-filter: blur(24px) saturate(150%);
+}

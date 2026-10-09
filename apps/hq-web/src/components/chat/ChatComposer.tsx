@@ -93,11 +93,11 @@ export const ChatComposer = forwardRef<HTMLTextAreaElement, Props>(function Chat
   const sendTitle = !connected ? 'Reconnecting, your message will wait' : uploading ? 'Waiting for uploads' : 'Send'
 
   return (
-    <div className="px-3 pt-2 pb-3 sm:px-4 sm:pb-4 border-t border-white/10 shrink-0 relative bg-neutral-950/80 backdrop-blur-md">
+    <div className="px-3 pt-2 pb-3 sm:px-4 sm:pb-4 hq-composer shrink-0 relative">
       {isSlashInput(value) && <SlashCommandPalette input={value} onSelect={pickCommand} />}
 
       {!connected && (
-        <div className="flex items-center justify-center gap-1.5 pb-2 text-[11px] font-mono" style={{ color: 'var(--accent-amber)' }}>
+        <div className="flex items-center justify-center gap-1.5 pb-2 text-[11px] " style={{ color: 'var(--accent-amber)' }}>
           <WifiOff className="w-3 h-3" /> Reconnecting. Your draft is kept and can be sent once HQ is back.
         </div>
       )}
@@ -135,7 +135,7 @@ export const ChatComposer = forwardRef<HTMLTextAreaElement, Props>(function Chat
           placeholder={placeholder}
           rows={1}
           enterKeyHint="enter"
-          className="flex-1 min-w-0 rounded-2xl px-4 py-2.5 text-base sm:text-sm leading-6 outline-none resize-none bg-white/5 border border-white/10 text-white caret-emerald-400 focus:border-emerald-500/40 overflow-y-auto"
+          className="flex-1 min-w-0 rounded-3xl px-5 py-3 text-base sm:text-sm leading-6 outline-none resize-none hq-field text-white caret-emerald-400 overflow-y-auto"
           style={{ maxHeight: MAX_INPUT_HEIGHT_PX }}
         />
 
@@ -153,7 +153,7 @@ export const ChatComposer = forwardRef<HTMLTextAreaElement, Props>(function Chat
             type="button"
             onClick={() => onSend()}
             disabled={!canSend}
-            className="w-10 h-10 rounded-full flex items-center justify-center bg-emerald-400 text-black font-bold disabled:opacity-30 hover:brightness-110 shrink-0"
+            className="w-11 h-11 rounded-full flex items-center justify-center bg-emerald-400 text-black font-bold disabled:opacity-30 hover:brightness-110 shrink-0 shadow-[0_6px_20px_rgba(34,255,55,0.2)]"
             title={sendTitle}
           >
             <Send className="w-4 h-4" />

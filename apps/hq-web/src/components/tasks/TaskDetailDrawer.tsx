@@ -21,7 +21,7 @@ interface Props {
 }
 
 const DATE_INPUT_CLASS =
-  'px-3 py-2 rounded-xl text-xs font-mono text-neutral-200 bg-black/30 border border-white/10 focus:outline-none focus:ring-1 focus:ring-emerald-400'
+  'px-3 py-2 rounded-xl text-xs text-neutral-200 hq-field focus:outline-none focus:ring-1 focus:ring-emerald-400'
 
 export function TaskDetailDrawer({
   task,
@@ -91,9 +91,9 @@ export function TaskDetailDrawer({
         >
           <div className="min-w-0">
             <div className="flex items-center gap-2">
-              <span className="text-[10px] font-mono font-bold text-neutral-500">{task.display_id}</span>
+              <span className="text-[11px] font-bold text-neutral-500">{task.display_id}</span>
               {task.priority && (
-                <span className="text-[10px] font-mono font-semibold uppercase text-amber-400">
+                <span className="text-[11px] font-semibold uppercase text-amber-400">
                   {task.priority}
                 </span>
               )}
@@ -160,7 +160,7 @@ export function TaskDetailDrawer({
 
         {confirmingDelete && (
           <div className="flex items-center justify-between gap-3 px-6 py-3 border-b border-rose-500/20 bg-rose-500/10">
-            <span className="text-xs font-mono text-rose-300">
+            <span className="text-xs text-rose-300">
               Delete {task.display_id} and its {task.subtask_count} sub-task{task.subtask_count === 1 ? '' : 's'}?
             </span>
             <div className="flex items-center gap-2 shrink-0">
@@ -168,14 +168,14 @@ export function TaskDetailDrawer({
                 type="button"
                 onClick={() => onDelete(task.id, true)}
                 disabled={busy}
-                className="px-3 py-1 rounded-lg text-xs font-mono font-semibold text-rose-300 border border-rose-500/40 hover:bg-rose-500/20 disabled:opacity-50"
+                className="px-3 py-1 rounded-lg text-xs font-semibold text-rose-300 border border-rose-500/40 hover:bg-rose-500/20 disabled:opacity-50"
               >
                 Delete all
               </button>
               <button
                 type="button"
                 onClick={() => setConfirmingDelete(false)}
-                className="px-3 py-1 rounded-lg text-xs font-mono text-neutral-400 hover:text-neutral-200"
+                className="px-3 py-1 rounded-lg text-xs text-neutral-400 hover:text-neutral-200"
               >
                 Cancel
               </button>
@@ -187,7 +187,7 @@ export function TaskDetailDrawer({
           <button
             type="button"
             onClick={() => onSelectTask(parent.id)}
-            className="flex items-center gap-1.5 px-6 py-2 border-b border-white/10 text-left text-[11px] font-mono text-neutral-400 hover:text-white"
+            className="flex items-center gap-1.5 px-6 py-2 border-b border-white/10 text-left text-[11px] text-neutral-400 hover:text-white"
           >
             <CornerLeftUp className="w-3 h-3 shrink-0" />
             Sub-task of <span className="text-neutral-500">{parent.display_id}</span>
@@ -203,7 +203,7 @@ export function TaskDetailDrawer({
               type="button"
               disabled={busy || status === task.status}
               onClick={() => onUpdate(task.id, { status, expected_status: task.status })}
-              className={`px-3 py-1.5 rounded-xl text-xs font-mono font-semibold transition-all disabled:cursor-default ${
+              className={`px-3 py-1.5 rounded-xl text-xs font-semibold transition-all disabled:cursor-default ${
                 status === task.status
                   ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/40'
                   : 'bg-white/5 text-neutral-400 border border-white/10 hover:text-white hover:border-white/20'
@@ -244,7 +244,7 @@ export function TaskDetailDrawer({
                   type="button"
                   disabled={busy}
                   onClick={() => onUpdate(task.id, { priority: p === task.priority ? null : p })}
-                  className={`px-3 py-1 rounded-lg text-[11px] font-mono font-semibold uppercase transition-all ${
+                  className={`px-3 py-1 rounded-lg text-[11px] font-semibold uppercase transition-all ${
                     p === task.priority
                       ? 'bg-amber-500/20 text-amber-400 border border-amber-500/40'
                       : 'bg-white/5 text-neutral-500 border border-white/10 hover:text-neutral-300'
@@ -274,7 +274,7 @@ export function TaskDetailDrawer({
                   value={draftTags}
                   onChange={(e) => setDraftTags(e.target.value)}
                   placeholder="hq, backend, infra"
-                  className="w-full px-3 py-2 rounded-xl text-xs font-mono text-neutral-200 bg-black/30 border focus:outline-none focus:ring-1 focus:ring-emerald-400"
+                  className="w-full px-3 py-2 rounded-xl text-xs text-neutral-200 hq-field focus:outline-none focus:ring-1 focus:ring-emerald-400"
                   style={{ borderColor: 'rgba(255,255,255,0.1)' }}
                 />
               </div>
@@ -282,7 +282,7 @@ export function TaskDetailDrawer({
           )}
 
           {!editing && (task.tags.length > 0 || task.due_date || task.start_date || task.work_started_at || task.first_ready_for_review_at) && (
-            <div className="flex items-center gap-2 flex-wrap text-xs font-mono">
+            <div className="flex items-center gap-2 flex-wrap text-xs ">
               {task.tags.map((tag) => (
                 <span key={tag} className="px-2.5 py-1 rounded-full bg-white/5 text-neutral-300 border border-white/10">
                   {tag}

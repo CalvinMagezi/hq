@@ -32,7 +32,7 @@ export class StreamErrorBoundary extends Component<Props, State> {
   render() {
     if (!this.state.failed) return this.props.children
     return (
-      <div role="alert" className="rounded-2xl border border-amber-500/30 bg-amber-500/[0.04] px-3.5 py-3 text-sm font-mono">
+      <div role="alert" className="rounded-2xl border border-amber-500/30 bg-amber-500/[0.04] px-3.5 py-3 text-sm ">
         <p className="text-neutral-200">This message could not be displayed. Nothing was lost.</p>
         {this.props.plainText && (
           <pre className="mt-2 max-h-64 overflow-y-auto whitespace-pre-wrap break-words text-[13px] text-neutral-300">

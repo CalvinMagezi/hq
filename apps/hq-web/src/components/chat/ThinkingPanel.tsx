@@ -18,7 +18,7 @@ export function ThinkingPanel({ content, live = false }: { content: string; live
   if (!content || !content.trim()) return null
 
   return (
-    <div className="mb-2.5 rounded-xl overflow-hidden text-xs font-mono border border-amber-500/20 bg-amber-500/[0.03]">
+    <div className="mb-2.5 rounded-xl overflow-hidden text-xs border border-amber-500/20 bg-amber-500/[0.03]">
       <button
         type="button"
         onClick={() => setOpen(!open)}
