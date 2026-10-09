@@ -215,7 +215,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn lite_still_serves_tasks_search_health_and_the_task_events_socket_route() {
+    async fn lite_still_serves_tasks_search_and_health() {
         let (lite, _v) = app(Profile::Lite);
         for (method, path) in [
             ("GET", "/api/spaces"),
@@ -228,11 +228,65 @@ mod tests {
         }
     }
 
-    /// A proxy that normalizes dot segments must not turn a listed prefix into a session route.
+    async fn body_status(app: &axum::Router, method: &str, uri: &str, body: &str) -> StatusCode {
+        let req = Request::builder()
+            .method(method)
+            .uri(uri)
+            .header("host", "127.0.0.1:5678")
+            .header("content-type", "application/json")
+            .body(Body::from(body.to_string()))
+            .unwrap();
+        app.clone().oneshot(req).await.unwrap().status()
+    }
+
+    /// Lite's notes surface is the owner's notes, not HQ's own folders: the SQLite database,
+    /// identity, threads and mailboxes sit in the vault, and the full profile serves them.
     #[tokio::test]
-    async fn lite_refuses_dot_segment_detours_to_sessions() {
-        let (lite, _v) = app(Profile::Lite);
-        let blocked = status(&lite, "GET", "/api/tasks/../harness-sessions").await;
-        assert_eq!(blocked, StatusCode::NOT_FOUND);
+    async fn lite_keeps_hq_folders_out_of_the_notes_surface() {
+        let (lite, lv) = app(Profile::Lite);
+        let (full, fv) = app(Profile::Full);
+        for v in [&lv, &fv] {
+            std::fs::create_dir_all(v.path().join("_system")).unwrap();
+            std::fs::write(v.path().join("_system/IDENTITY.md"), "who i am").unwrap();
+            std::fs::create_dir_all(v.path().join("Notebooks")).unwrap();
+            std::fs::write(v.path().join("Notebooks/plan.md"), "a plan").unwrap();
+        }
+        for uri in [
+            "/api/vault-asset?path=_system/IDENTITY.md",
+            "/api/vault-asset?path=_data/vault.db",
+            "/api/note?path=_system/IDENTITY.md",
+            "/api/tree?path=_system",
+        ] {
+            assert_eq!(status(&lite, "GET", uri).await, StatusCode::NOT_FOUND, "lite {uri}");
+        }
+        // Controls: the full profile serves the same requests, and Lite serves a real note.
+        assert_eq!(status(&full, "GET", "/api/vault-asset?path=_system/IDENTITY.md").await, StatusCode::OK);
+        assert_eq!(status(&full, "GET", "/api/tree?path=_system").await, StatusCode::OK);
+        assert_eq!(status(&lite, "GET", "/api/note?path=Notebooks/plan.md").await, StatusCode::OK);
+        assert_eq!(status(&lite, "GET", "/api/vault-asset?path=Notebooks/plan.md").await, StatusCode::OK);
+
+        // Writes into those folders are refused too, and nothing is created.
+        let put = r#"{"path":"_system/IDENTITY.md","content":"overwritten"}"#;
+        assert_eq!(body_status(&lite, "PUT", "/api/note", put).await, StatusCode::NOT_FOUND);
+        assert_eq!(std::fs::read_to_string(lv.path().join("_system/IDENTITY.md")).unwrap(), "who i am");
+        let create = r#"{"folder":"_system","title":"planted","content":"x"}"#;
+        assert_eq!(body_status(&lite, "POST", "/api/note/create", create).await, StatusCode::NOT_FOUND);
+        assert!(!lv.path().join("_system/planted.md").exists());
+        let hidden = r#"{"folder":".git","title":"planted","content":"x"}"#;
+        assert_eq!(body_status(&lite, "POST", "/api/note/create", hidden).await, StatusCode::NOT_FOUND);
+        // Control: a note in a normal folder is created.
+        let ok = r#"{"folder":"Notebooks/Inbox","title":"fresh","content":"x"}"#;
+        assert_eq!(body_status(&lite, "POST", "/api/note/create", ok).await, StatusCode::OK);
+        assert!(lv.path().join("Notebooks/Inbox/fresh.md").exists());
+    }
+
+    #[test]
+    fn hidden_and_underscore_folders_are_the_ones_lite_hides() {
+        for rel in ["_system/x.md", "_data/vault.db", "_threads/t.md", "_mailboxes/relay", "./_system/x", ".git/config", "_Odd/x"] {
+            assert!(crate::vault_api::lite_hides(rel), "{rel}");
+        }
+        for rel in ["Notebooks/_draft.md", "Notebooks/Inbox/x.md", "plan.md", "Projects/a_b/c.md", ""] {
+            assert!(!crate::vault_api::lite_hides(rel), "{rel:?}");
+        }
     }
 }

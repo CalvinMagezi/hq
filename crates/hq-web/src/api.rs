@@ -157,6 +157,9 @@ pub(crate) async fn vault_asset_handler(
         return ApiError::bad_request("path is required").into_response();
     }
 
+    if !state.path_allowed(&path_param) {
+        return ApiError::not_found().into_response();
+    }
     let Some(abs) = resolve_in_vault(&state.vault_path, &path_param) else {
         return ApiError::Forbidden("path is outside the vault".to_string()).into_response();
     };
@@ -217,6 +220,9 @@ pub(crate) async fn note_read_handler(
     if crate::vault_api::is_rejected_note_ref(&path_param) {
         return ApiError::bad_request("invalid path").into_response();
     }
+    if !state.path_allowed(&path_param) {
+        return ApiError::not_found().into_response();
+    }
     let Some((abs, effective_path)) =
         crate::vault_api::resolve_note_path(&state.vault_path, &path_param)
     else {
@@ -231,6 +237,9 @@ pub(crate) async fn tree_handler(
     axum::extract::Query(params): axum::extract::Query<std::collections::HashMap<String, String>>,
 ) -> axum::response::Response {
     let path_param = params.get("path").cloned().unwrap_or_default();
+    if !state.path_allowed(&path_param) {
+        return ApiError::not_found().into_response();
+    }
     crate::vault_api::recursive_tree(&state.vault_path, &path_param)
 }
 
@@ -252,6 +261,9 @@ pub(crate) async fn pin_toggle_handler(
         .unwrap_or("")
         .to_string();
     let pin = body.get("pin").and_then(|p| p.as_bool()).unwrap_or(false);
+    if !state.path_allowed(&path_param) {
+        return ApiError::not_found().into_response();
+    }
 
     let Some(abs) =
         resolve_in_vault(&state.vault_path, &path_param).filter(|_| !path_param.is_empty())

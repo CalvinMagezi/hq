@@ -110,6 +110,12 @@ impl WsState {
         self.hq_config.as_ref().map(|c| c.profile).unwrap_or_default()
     }
 
+    /// Whether a client-supplied vault path may be read or written. Everything outside the
+    /// vault is refused elsewhere; under Lite, HQ's own and hidden folders are refused too.
+    pub(crate) fn path_allowed(&self, rel: &str) -> bool {
+        !self.profile().is_lite() || !vault_api::lite_hides(rel)
+    }
+
     /// Run as `profile`, whatever the config file loaded at construction says.
     pub fn with_profile(mut self, profile: hq_core::config::Profile) -> Self {
         let mut cfg = self.hq_config.as_deref().cloned().unwrap_or_default();

@@ -71,6 +71,19 @@ pub(crate) fn resolve_in_vault(vault: &Path, rel: &str) -> Option<PathBuf> {
         .then_some(joined)
 }
 
+/// Whether `rel` points into a folder `profile: lite` keeps out of the notes surface: HQ's own
+/// (`_system`, `_data`, `_threads`, `_mailboxes` and any other name starting with `_`) and
+/// hidden ones (`.git`). The notes the owner wrote live elsewhere.
+pub(crate) fn lite_hides(rel: &str) -> bool {
+    Path::new(rel)
+        .components()
+        .find_map(|c| match c {
+            Component::Normal(p) => Some(p.to_string_lossy().into_owned()),
+            _ => None,
+        })
+        .is_some_and(|first| first.starts_with('_') || first.starts_with('.'))
+}
+
 fn rel_to_vault(vault: &Path, path: &Path) -> String {
     path.strip_prefix(vault)
         .map(|p| p.to_string_lossy().to_string())
@@ -471,6 +484,9 @@ pub(crate) async fn note_create_handler(
         .unwrap_or(DEFAULT_NOTE_FOLDER);
     let title = body.get("title").and_then(Value::as_str).unwrap_or("");
     let content = body.get("content").and_then(Value::as_str).unwrap_or("");
+    if !state.path_allowed(folder) {
+        return ApiError::not_found().into_response();
+    }
     let Some(dir) = resolve_in_vault(&state.vault_path, folder) else {
         return ApiError::bad_request("invalid folder").into_response();
     };
@@ -508,6 +524,9 @@ pub(crate) async fn note_update_handler(
 ) -> Response {
     let rel = body.get("path").and_then(Value::as_str).unwrap_or("");
     let content = body.get("content").and_then(Value::as_str).unwrap_or("");
+    if !state.path_allowed(rel) {
+        return ApiError::not_found().into_response();
+    }
     let Some(abs) = resolve_in_vault(&state.vault_path, rel).filter(|_| !rel.is_empty()) else {
         return ApiError::bad_request("invalid path").into_response();
     };

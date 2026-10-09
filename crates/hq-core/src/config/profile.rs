@@ -77,7 +77,8 @@ fn present(value: &Option<String>, env: EnvLookup<'_>, vars: &[&str]) -> bool {
 /// The host of a URL, lowercased, without credentials or port.
 fn host_of(url: &str) -> Option<String> {
     let rest = url.split_once("://").map_or(url, |(_, r)| r);
-    let authority = rest.split(['/', '?', '#']).next()?;
+    // WHATWG parsers (and so most HTTP clients) read a backslash as a slash in http(s) URLs.
+    let authority = rest.split(['/', '\\', '?', '#']).next()?;
     let authority = authority.rsplit('@').next()?;
     let host = if let Some(v6) = authority.strip_prefix('[') {
         v6.split(']').next()?
@@ -113,6 +114,8 @@ fn item(id: &str, label: &str, hosts: &[&str], carries: &'static str) -> EgressI
 /// full profile the report is informational.
 pub fn egress_report(cfg: &HqConfig, env: EnvLookup<'_>) -> Vec<EgressItem> {
     let mut items = Vec::new();
+    // Providers that are keyed only by an environment variable.
+    let cfg_none: Option<String> = None;
 
     for (id, label, value, vars, hosts) in [
         (
@@ -165,6 +168,20 @@ pub fn egress_report(cfg: &HqConfig, env: EnvLookup<'_>) -> Vec<EgressItem> {
             &["api.openai.com"][..],
         ),
         (
+            "siliconflow",
+            "SiliconFlow",
+            &cfg_none,
+            &["SILICONFLOW_API_KEY"][..],
+            &["api.siliconflow.cn"][..],
+        ),
+        (
+            "novita",
+            "Novita",
+            &cfg_none,
+            &["NOVITA_API_KEY"][..],
+            &["api.novita.ai"][..],
+        ),
+        (
             "kimi",
             "Kimi Code",
             &cfg.kimi_code_api_key,
@@ -178,7 +195,16 @@ pub fn egress_report(cfg: &HqConfig, env: EnvLookup<'_>) -> Vec<EgressItem> {
             } else {
                 "prompts"
             };
-            items.push(item(id, label, hosts, carries));
+            let mut e = item(id, label, hosts, carries);
+            // OPENROUTER_BASE_URL sends the same traffic somewhere else.
+            if id == "openrouter"
+                && let Some(host) = env("OPENROUTER_BASE_URL").as_deref().and_then(host_of)
+                && !is_loopback(&host)
+                && !e.hosts.contains(&host)
+            {
+                e.hosts.push(host);
+            }
+            items.push(e);
         }
     }
 
@@ -240,9 +266,10 @@ pub fn egress_report(cfg: &HqConfig, env: EnvLookup<'_>) -> Vec<EgressItem> {
     }
 
     let relay = &cfg.relay;
-    if relay.telegram_enabled
-        && (present(&relay.telegram_token, env, &["TELEGRAM_BOT_TOKEN"])
-            || present(&relay.notifications_token, env, &[]))
+    // A token is enough: the disk watchdog and restart notices post with it whether or not
+    // the relay itself is enabled.
+    if present(&relay.telegram_token, env, &["TELEGRAM_BOT_TOKEN"])
+        || present(&relay.notifications_token, env, &[])
     {
         items.push(item(
             "telegram",
@@ -251,7 +278,7 @@ pub fn egress_report(cfg: &HqConfig, env: EnvLookup<'_>) -> Vec<EgressItem> {
             "chat messages and replies",
         ));
     }
-    if relay.discord_enabled && present(&relay.discord_token, env, &["DISCORD_BOT_TOKEN"]) {
+    if present(&relay.discord_token, env, &["DISCORD_BOT_TOKEN"]) {
         items.push(item(
             "discord",
             "Discord relay",
@@ -269,6 +296,72 @@ pub fn egress_report(cfg: &HqConfig, env: EnvLookup<'_>) -> Vec<EgressItem> {
                 "tool calls and their arguments",
             ));
         }
+    }
+
+    if cfg.decisions.enabled {
+        for (i, route) in cfg.decisions.routes.iter().enumerate() {
+            if let Some(host) = host_of(&route.endpoint).filter(|h| !is_loopback(h)) {
+                items.push(item(
+                    &format!("decisions:{i}"),
+                    &format!("Decision route {i}"),
+                    &[host.as_str()],
+                    "note titles and excerpts, when a note is placed in a task list",
+                ));
+            }
+        }
+    }
+
+    let reads_gmail = cfg.companies.iter().any(|c| {
+        c.listeners.iter().any(|l| l.kind == "email") || c.connectors.iter().any(|b| b.kind == "gws")
+    });
+    if reads_gmail {
+        items.push(item(
+            "gmail",
+            "Gmail through the gws CLI",
+            &["gmail.googleapis.com"],
+            "email metadata and message text",
+        ));
+    }
+
+    for (name, host) in &cfg.agent_host.hosts {
+        let target = host.ssh.rsplit('@').next().unwrap_or(&host.ssh);
+        items.push(item(
+            &format!("agent-host:{name}"),
+            &format!("Remote coding-agent host {name}"),
+            &[target],
+            "agent commands, files and screens, over ssh",
+        ));
+    }
+    if let Some(host) = cfg.agent_host.agent_mcp_url.as_deref().and_then(host_of)
+        && !is_loopback(&host)
+    {
+        items.push(item(
+            "agent-mcp-url",
+            "Agent MCP endpoint",
+            &[host.as_str()],
+            "tool calls from launched agents",
+        ));
+    }
+
+    if let Some(host) = env("OLLAMA_HOST").as_deref().and_then(host_of)
+        && !is_loopback(&host)
+    {
+        items.push(item(
+            "ollama",
+            "Ollama on another machine (OLLAMA_HOST)",
+            &[host.as_str()],
+            "note titles and excerpts embedded for semantic search",
+        ));
+    }
+    if let Some(host) = env("TURBOQUANT_BASE_URL").as_deref().and_then(host_of)
+        && !is_loopback(&host)
+    {
+        items.push(item(
+            "turboquant",
+            "TurboQuant endpoint (TURBOQUANT_BASE_URL)",
+            &[host.as_str()],
+            "prompts",
+        ));
     }
 
     if cfg.self_update.enabled {
@@ -305,6 +398,17 @@ fn host_allowed(host: &str, listed: &str) -> bool {
     listed.contains('.') && (host == listed || host.ends_with(&format!(".{listed}")))
 }
 
+/// Whether the owner's `lite.allow_egress` lets `e` through: its id, or a listing for every one
+/// of its hosts (an item that reaches two hosts is not allowed by naming only one).
+fn listed_in_allow_egress(cfg: &HqConfig, e: &EgressItem) -> bool {
+    let by_id = cfg.lite.allow_egress.iter().any(|a| a.eq_ignore_ascii_case(&e.id));
+    let by_hosts = !e.hosts.is_empty()
+        && e.hosts
+            .iter()
+            .all(|h| cfg.lite.allow_egress.iter().any(|a| host_allowed(h, a)));
+    by_id || by_hosts
+}
+
 /// The items `profile: lite` does not allow, with `env` standing in for the environment. Empty
 /// under the full profile.
 pub fn lite_violations(cfg: &HqConfig, env: EnvLookup<'_>) -> Vec<EgressItem> {
@@ -317,13 +421,13 @@ pub fn lite_violations(cfg: &HqConfig, env: EnvLookup<'_>) -> Vec<EgressItem> {
             if e.lite_ok {
                 return false;
             }
-            let listed = cfg.lite.allow_egress.iter().any(|a| {
-                a.eq_ignore_ascii_case(&e.id) || e.hosts.iter().any(|h| host_allowed(h, a))
-            });
-            // The unofficial-Copilot switch lifts exactly the two items it names.
-            let opted_in = cfg.lite.allow_unofficial_copilot
-                && matches!(e.id.as_str(), "github-copilot-api" | "copilot-usage");
-            !(listed || opted_in)
+            // An item with a refusal answers to its own switch alone, so listing a parent
+            // domain (`github.com` for self-update) cannot lift it by the back door.
+            if e.refusal.is_some() {
+                return !(cfg.lite.allow_unofficial_copilot
+                    && matches!(e.id.as_str(), "github-copilot-api" | "copilot-usage"));
+            }
+            !listed_in_allow_egress(cfg, e)
         })
         .collect()
 }
@@ -531,5 +635,105 @@ mod tests {
         let plain = HqConfig::load_from_path(&path).unwrap();
         assert_eq!(plain.profile, Profile::Full, "an existing config stays on the full profile");
         assert!(plain.lite.allow_egress.is_empty());
+    }
+    #[test]
+    fn env_only_providers_and_remote_endpoints_are_listed() {
+        let env: HashMap<&str, &str> = HashMap::from([
+            ("SILICONFLOW_API_KEY", "k"),
+            ("NOVITA_API_KEY", "k"),
+            ("OLLAMA_HOST", "http://gpu.example.com:11434"),
+            ("TURBOQUANT_BASE_URL", "http://tq.example.com/v1"),
+            ("OPENROUTER_API_KEY", "k"),
+            ("OPENROUTER_BASE_URL", "https://gateway.example.com/api/v1"),
+        ]);
+        let lookup = |n: &str| env.get(n).map(|v| v.to_string());
+        let report = egress_report(&lite(), &lookup);
+        let got = ids(&report);
+        for id in ["siliconflow", "novita", "ollama", "turboquant", "openrouter"] {
+            assert!(got.contains(&id), "{id} missing from {got:?}");
+        }
+        let openrouter = report.iter().find(|e| e.id == "openrouter").unwrap();
+        assert!(openrouter.hosts.contains(&"gateway.example.com".to_string()), "{openrouter:?}");
+
+        let local: HashMap<&str, &str> = HashMap::from([("OLLAMA_HOST", "127.0.0.1:11434"), ("TURBOQUANT_BASE_URL", "http://localhost:9/v1")]);
+        let lookup = |n: &str| local.get(n).map(|v| v.to_string());
+        assert!(egress_report(&lite(), &lookup).is_empty(), "a local Ollama is not egress");
+    }
+
+    #[test]
+    fn a_relay_token_counts_even_when_the_relay_is_switched_off() {
+        let mut cfg = lite();
+        cfg.relay.telegram_enabled = false;
+        cfg.relay.telegram_token = Some("123:abc".into());
+        cfg.relay.discord_enabled = false;
+        cfg.relay.discord_token = Some("tok".into());
+        assert_eq!(ids(&egress_report(&cfg, &no_env)), ["telegram", "discord"]);
+    }
+
+    #[test]
+    fn decisions_gmail_and_agent_hosts_are_listed() {
+        let mut cfg = lite();
+        cfg.decisions.enabled = true;
+        cfg.companies = vec![crate::config::CompanyConfig {
+            id: "acme".into(),
+            name: "Acme".into(),
+            identity: crate::config::CompanyIdentity { contact_name: "A".into(), role: "owner".into() },
+            vault_prefix: "Notebooks/Companies/acme".into(),
+            listeners: vec![crate::config::ListenerDef {
+                id: "inbox".into(),
+                kind: "email".into(),
+                path: "/".into(),
+                secret_ref: None,
+            }],
+            connectors: Vec::new(),
+        }];
+        cfg.agent_host.hosts.insert(
+            "build".into(),
+            crate::config::RemoteHostConfig {
+                ssh: "ci@build.example.com".into(),
+                port: None,
+                identity_file: None,
+                gate_command: "hq host gate".into(),
+            },
+        );
+        cfg.agent_host.agent_mcp_url = Some("https://hq.example.com:8444/mcp".into());
+        let got = ids(&egress_report(&cfg, &no_env)).join(",");
+        for id in ["decisions:0", "gmail", "agent-host:build", "agent-mcp-url"] {
+            assert!(got.contains(id), "{id} missing from {got}");
+        }
+        let hosts: Vec<_> = egress_report(&cfg, &no_env)
+            .into_iter()
+            .find(|e| e.id == "agent-host:build")
+            .unwrap()
+            .hosts;
+        assert_eq!(hosts, ["build.example.com"], "the ssh user is not part of the host");
+    }
+
+    /// The dedicated switch is the only way past a refusal; a parent-domain listing is not.
+    #[test]
+    fn allow_egress_cannot_lift_a_refusal_by_the_back_door() {
+        let mut cfg = lite();
+        cfg.backends.backends = vec![backend("work", BackendKind::GithubCopilotApi, None)];
+        cfg.lite.allow_egress = vec!["github.com".into(), "githubcopilot.com".into(), "github-copilot-api".into(), "copilot-usage".into()];
+        assert_eq!(ids(&lite_violations(&cfg, &no_env)), ["github-copilot-api", "copilot-usage"]);
+        cfg.lite.allow_unofficial_copilot = true;
+        assert!(lite_violations(&cfg, &no_env).is_empty());
+    }
+
+    #[test]
+    fn an_item_with_two_hosts_needs_both_listed() {
+        let mut cfg = lite();
+        cfg.relay.discord_token = Some("tok".into());
+        cfg.lite.allow_egress = vec!["discord.com".into()];
+        assert_eq!(ids(&lite_violations(&cfg, &no_env)), ["discord"], "gateway.discord.gg is still unlisted");
+        cfg.lite.allow_egress = vec!["discord.com".into(), "gateway.discord.gg".into()];
+        assert!(lite_violations(&cfg, &no_env).is_empty());
+        cfg.lite.allow_egress = vec!["discord".into()];
+        assert!(lite_violations(&cfg, &no_env).is_empty(), "the id covers every host");
+    }
+
+    #[test]
+    fn a_backslash_ends_the_host_like_a_slash() {
+        assert_eq!(host_of("https://a.example.com\\@b.example.com").as_deref(), Some("a.example.com"));
     }
 }

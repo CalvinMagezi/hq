@@ -121,8 +121,14 @@ pub async fn run_daemon(
         .context("failed to check daemon lock")?
         .context("another daemon is already running — only one instance allowed")?;
 
-    run_startup_hooks(&config, &vault_path, &db);
     let mut tasks = default_tasks();
+    if config.profile.is_lite() {
+        // Local bookkeeping only; see LITE_DAEMON_TASKS.
+        ensure_dir(&vault_path.join("_system"));
+        tasks.retain(|t| LITE_DAEMON_TASKS.contains(&t.name));
+    } else {
+        run_startup_hooks(&config, &vault_path, &db);
+    }
     let (mut task_state, missed) = load_task_state(&vault_path, &tasks);
     let mut save_ticker = TickCounter::every_secs(STATE_SAVE_INTERVAL_SECS);
 
@@ -193,6 +199,35 @@ impl TickCounter {
     }
 }
 
+/// The scheduled tasks `profile: lite` keeps: housekeeping on the vault and its database. None
+/// calls a model, reads mail, supervises agent sessions, embeds note text, posts to a relay or
+/// asks a provider for usage. Lite also runs none of the startup hooks (the agent-worker loop,
+/// the session event loops over remote hosts, decision routes), and the embeddings task is not
+/// kept, so Lite does no semantic indexing; keyword search needs none.
+const LITE_DAEMON_TASKS: &[&str] = &[
+    "expire-approvals",
+    "vault-health",
+    "thread-log-rotation",
+    "vault-cleanup",
+    "db-vacuum",
+    "vault-cap-enforcer",
+];
+
+/// The config to run with after the file changed: `new` if it may replace `old`, else why not.
+/// A running instance does not change edition (restart to do that), and a Lite instance does not
+/// pick up a setting it would have refused to start with.
+fn accept_reload(
+    old: &HqConfig,
+    new: HqConfig,
+    env: hq_core::config::EnvLookup<'_>,
+) -> std::result::Result<HqConfig, String> {
+    if new.profile != old.profile {
+        return Err("profile changed; restart hq to switch edition".into());
+    }
+    hq_core::config::enforce_lite(&new, env).map_err(|e| e.to_string())?;
+    Ok(new)
+}
+
 /// Hot-reload: reloads the config when its file's mtime changes.
 struct ConfigReloader {
     path: std::path::PathBuf,
@@ -222,9 +257,14 @@ impl ConfigReloader {
         match HqConfig::load() {
             Err(e) => warn!("daemon: config reload failed: {e}"),
             Ok(new_config) => {
-                *config = new_config;
                 self.mtime = current;
-                info!("daemon: config reloaded from disk");
+                match accept_reload(config, new_config, &hq_core::config::process_env) {
+                    Ok(accepted) => {
+                        *config = accepted;
+                        info!("daemon: config reloaded from disk");
+                    }
+                    Err(why) => warn!("daemon: config change ignored, still running the old one: {why}"),
+                }
             }
         }
     }
@@ -619,4 +659,79 @@ fn write_daemon_status_stopped(vault_path: &Path, tasks: &[DaemonTask], started_
         tasks.len()
     );
     let _ = std::fs::write(vault_path.join("DAEMON-STATUS.md"), md);
+}
+
+#[cfg(test)]
+mod lite_tests {
+    use super::*;
+    use hq_core::config::{LiteConfig, Profile};
+
+    fn no_env(_: &str) -> Option<String> {
+        None
+    }
+
+    fn lite() -> HqConfig {
+        HqConfig {
+            profile: Profile::Lite,
+            ..HqConfig::default()
+        }
+    }
+
+    #[test]
+    fn lite_keeps_only_tasks_that_exist_and_none_that_reach_out() {
+        let all: Vec<&str> = default_tasks().iter().map(|t| t.name).collect();
+        for kept in LITE_DAEMON_TASKS {
+            assert!(all.contains(kept), "{kept} is not a daemon task");
+        }
+        for reaches_out in [
+            "email-poll",
+            "embeddings",
+            "inbox-triage",
+            "memory-consolidation",
+            "session-supervisor",
+            "subagent-supervisor",
+            "copilot-usage",
+            "harness-usage",
+            "usage-ledger",
+            "disk-watchdog",
+            "value-bus-deliver",
+            "turn-reconcile",
+        ] {
+            assert!(!LITE_DAEMON_TASKS.contains(&reaches_out), "{reaches_out} must not run in Lite");
+        }
+    }
+
+    /// A Lite daemon that picks up a key added to the config file after it started would
+    /// run its tasks with it; the reload must keep the old config instead.
+    #[test]
+    fn a_reload_cannot_add_egress_to_a_running_lite_daemon() {
+        let old = lite();
+        let clean = lite();
+        assert!(accept_reload(&old, clean, &no_env).is_ok());
+
+        let with_key = HqConfig {
+            openrouter_api_key: Some("k".into()),
+            ..lite()
+        };
+        let err = accept_reload(&old, with_key, &no_env).unwrap_err();
+        assert!(err.contains("OpenRouter"), "{err}");
+
+        let allowed = HqConfig {
+            openrouter_api_key: Some("k".into()),
+            lite: LiteConfig {
+                allow_egress: vec!["openrouter".into()],
+                ..LiteConfig::default()
+            },
+            ..lite()
+        };
+        assert!(accept_reload(&old, allowed, &no_env).is_ok(), "an explicit listing is accepted");
+    }
+
+    #[test]
+    fn a_reload_cannot_change_the_edition_in_either_direction() {
+        let full = HqConfig::default();
+        assert!(accept_reload(&lite(), full.clone(), &no_env).is_err());
+        assert!(accept_reload(&full, lite(), &no_env).is_err());
+        assert!(accept_reload(&full, full.clone(), &no_env).is_ok());
+    }
 }

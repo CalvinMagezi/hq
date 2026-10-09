@@ -18,14 +18,18 @@ pub async fn run(config: &HqConfig) -> Result<()> {
 /// `hq doctor --egress`: every outbound destination this config can reach. Under `profile:
 /// lite` it fails (non-zero exit) when any of them is not allowed.
 pub fn run_egress(config: &HqConfig) -> Result<()> {
-    use hq_core::config::{egress_report, lite_violations, process_env};
-    let report = egress_report(config, &process_env);
+    run_egress_with(config, &hq_core::config::process_env)
+}
+
+fn run_egress_with(config: &HqConfig, env: hq_core::config::EnvLookup<'_>) -> Result<()> {
+    use hq_core::config::{egress_report, lite_violations};
+    let report = egress_report(config, env);
     let lite = config.profile.is_lite();
     println!("Outbound destinations (profile: {})", if lite { "lite" } else { "full" });
     if report.is_empty() {
         println!("  none: nothing configured sends data to another service");
     }
-    let refused: Vec<String> = lite_violations(config, &process_env).into_iter().map(|v| v.id).collect();
+    let refused: Vec<String> = lite_violations(config, env).into_iter().map(|v| v.id).collect();
     for e in &report {
         let verdict = if !lite {
             ""
@@ -47,7 +51,7 @@ pub fn run_egress(config: &HqConfig) -> Result<()> {
         "\nNot listed: web search and fetch, image generation, email and the coding-agent host \
          have no tools in the lite profile; the full profile reaches them when asked."
     );
-    hq_core::config::enforce_lite(config, &process_env)
+    hq_core::config::enforce_lite(config, env)
 }
 
 /// Whether the spend ledger can be trusted: priced models and attributed calls.
@@ -400,26 +404,21 @@ mod tests {
     }
     #[test]
     fn egress_report_fails_only_for_a_lite_config_with_something_refused() {
-        // The process environment can carry real keys, so the checks use configs that name
-        // their own and compare against what `process_env` would add.
         let none = |_: &str| None;
         let mut cfg = HqConfig {
             openrouter_api_key: Some("k".into()),
             ..HqConfig::default()
         };
-        assert!(run_egress(&cfg).is_ok(), "the full profile only reports");
+        assert!(run_egress_with(&cfg, &none).is_ok(), "the full profile only reports");
 
         cfg.profile = hq_core::config::Profile::Lite;
-        assert!(run_egress(&cfg).is_err(), "lite refuses a configured OpenRouter key");
-        assert!(hq_core::config::enforce_lite(&cfg, &none).is_err());
+        assert!(run_egress_with(&cfg, &none).is_err(), "lite refuses a configured OpenRouter key");
 
         cfg.lite.allow_egress = vec!["openrouter".into()];
-        let others: Vec<_> = hq_core::config::lite_violations(&cfg, &hq_core::config::process_env)
-            .into_iter()
-            .map(|v| v.id)
-            .collect();
-        if others.is_empty() {
-            assert!(run_egress(&cfg).is_ok(), "listing the item allows it");
-        }
+        assert!(run_egress_with(&cfg, &none).is_ok(), "listing the item allows it");
+
+        // The environment counts too: a key exported in the shell is refused.
+        let env = |n: &str| (n == "ANTHROPIC_API_KEY").then(|| "k".to_string());
+        assert!(run_egress_with(&cfg, &env).is_err());
     }
 }

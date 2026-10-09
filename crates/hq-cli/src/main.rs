@@ -559,6 +559,10 @@ async fn async_main() -> Result<()> {
     }
 
     let Some(command) = cli.command else {
+        // Bare `hq` is chat, which Lite does not have.
+        if config.profile.is_lite() {
+            anyhow::bail!("chat is not part of HQ Lite (profile: lite). Try `hq doctor --egress` or `hq web`.");
+        }
         require_scaffolded_vault(&config);
         return run_chat(&config, None, false, None).await;
     };
@@ -670,16 +674,46 @@ async fn run_cursor(config: &HqConfig, action: CursorAction) -> Result<()> {
 
 /// One arm per subcommand, each a single call into `commands::*`: a routing
 /// table, so it stays one match rather than being split by topic.
+/// How `profile: lite` treats a command.
+enum LiteRule {
+    /// Local only: always runs (diagnostics, configuration, local reads and process control).
+    Open,
+    /// Not part of Lite: refused under it.
+    NotInLite,
+    /// Runs under Lite only when nothing configured sends data to another service.
+    Checked,
+}
+
+fn lite_rule(command: &Commands) -> LiteRule {
+    match command {
+        Commands::Chat { .. } | Commands::Sessions { .. } | Commands::Host { .. } | Commands::SelfApply { .. }
+        | Commands::Agents { .. } => LiteRule::NotInLite,
+        Commands::Install { .. } | Commands::Update(_) | Commands::UpdateDb { .. } | Commands::Health
+        | Commands::Doctor { .. } | Commands::Env | Commands::Status | Commands::Stop { .. }
+        | Commands::Restart { .. } | Commands::Logs { .. } | Commands::Errors { .. } | Commands::Follow { .. }
+        | Commands::Ps | Commands::Vault { .. } | Commands::Search { .. } | Commands::Config { .. }
+        | Commands::Mcp { .. } | Commands::Link { .. } | Commands::Cursor { .. } | Commands::Kill
+        | Commands::Clean | Commands::Service { .. } | Commands::Uninstall { .. } | Commands::Tools
+        | Commands::Usage { .. } | Commands::Cost | Commands::Summary | Commands::Version => LiteRule::Open,
+        // `hq web status` and `hq web stop` only manage the process.
+        Commands::Web(args) if !args.serves() => LiteRule::Open,
+        _ => LiteRule::Checked,
+    }
+}
+
 async fn dispatch(command: Commands, config: &HqConfig) -> Result<()> {
-    // HQ Lite will not serve, or start its daemon, while something that sends data to another
-    // service is configured; `hq doctor --egress` lists what and how to clear it.
-    let serves = match &command {
-        Commands::Start { .. } | Commands::McpServe { .. } | Commands::Daemon { .. } => true,
-        Commands::Web(args) => args.serves(),
-        _ => false,
-    };
-    if serves {
-        hq_core::config::enforce_lite(config, &hq_core::config::process_env)?;
+    // HQ Lite: some commands are not part of it, and any command that could send data to
+    // another service stops while something that would is configured.
+    match lite_rule(&command) {
+        LiteRule::Open => {}
+        LiteRule::NotInLite if config.profile.is_lite() => {
+            anyhow::bail!(
+                "this command is not part of HQ Lite (profile: lite). Use the full profile for \
+                 chat, coding-agent sessions and hosts."
+            );
+        }
+        LiteRule::NotInLite => {}
+        LiteRule::Checked => hq_core::config::enforce_lite(config, &hq_core::config::process_env)?,
     }
     match command {
         // Getting Started
@@ -871,5 +905,66 @@ mod config_flag_tests {
             None
         );
         assert_eq!(config_flag(&args(&["hq", "doctor"])), None);
+    }
+}
+
+#[cfg(test)]
+mod lite_rule_tests {
+    use super::{Cli, LiteRule, lite_rule};
+    use clap::Parser;
+
+    fn rule(argv: &[&str]) -> &'static str {
+        let cli = Cli::try_parse_from(std::iter::once("hq").chain(argv.iter().copied())).unwrap();
+        match lite_rule(&cli.command.expect("a subcommand")) {
+            LiteRule::Open => "open",
+            LiteRule::NotInLite => "not-in-lite",
+            LiteRule::Checked => "checked",
+        }
+    }
+
+    #[test]
+    fn commands_that_serve_run_a_daemon_or_call_out_are_checked() {
+        for argv in [
+            &["start"][..],
+            &["start", "all"],
+            &["daemon", "run"],
+            &["mcp-serve"],
+            &["web"],
+            &["web", "--detach"],
+            &["reindex"],
+            &["memory", "stats"],
+            &["pair"],
+            &["models"],
+        ] {
+            assert_eq!(rule(argv), "checked", "{argv:?}");
+        }
+    }
+
+    #[test]
+    fn chat_sessions_and_hosts_are_not_in_lite() {
+        for argv in [&["chat"][..], &["sessions", "list"], &["host", "status"], &["agents", "list"]] {
+            assert_eq!(rule(argv), "not-in-lite", "{argv:?}");
+        }
+    }
+
+    #[test]
+    fn diagnostics_configuration_and_process_control_always_run() {
+        for argv in [
+            &["doctor"][..],
+            &["doctor", "--egress"],
+            &["config"],
+            &["env"],
+            &["mcp", "install"],
+            &["mcp", "status"],
+            &["status"],
+            &["stop"],
+            &["web", "status"],
+            &["web", "stop"],
+            &["vault", "list"],
+            &["search", "tasks"],
+            &["version"],
+        ] {
+            assert_eq!(rule(argv), "open", "{argv:?}");
+        }
     }
 }
