@@ -10,6 +10,11 @@ pub struct UsageLedgerConfig {
     /// Days of per-call rows to keep before they are folded into the daily rollup.
     #[serde(default = "default_retain_raw_days")]
     pub retain_raw_days: i64,
+
+    /// Name of the environment variable holding an Anthropic admin key. Opt-in: Anthropic's spend
+    /// report needs an admin key, which a normal inference key cannot read. Never the key itself.
+    #[serde(default)]
+    pub anthropic_admin_key_env: Option<String>,
 }
 
 fn default_retain_raw_days() -> i64 {
@@ -26,6 +31,7 @@ impl Default for UsageLedgerConfig {
     fn default() -> Self {
         Self {
             retain_raw_days: default_retain_raw_days(),
+            anthropic_admin_key_env: None,
         }
     }
 }

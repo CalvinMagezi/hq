@@ -22,6 +22,7 @@ pub mod openrouter {
     pub use crate::openai_compat::*;
 }
 pub mod provider;
+pub mod provider_usage;
 pub mod reconcile;
 pub mod responses;
 pub mod router;
