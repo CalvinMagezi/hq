@@ -1,4 +1,4 @@
-import { hqFetch, hqJson } from './hqAuth'
+import { HqHttpError, hqFetch, hqJson } from './hqAuth'
 
 export interface PinnedNote {
   title: string
@@ -141,6 +141,19 @@ export async function getNote(
   if (!res.ok) throw new Error(`${res.status} ${res.statusText}`)
   const body = await res.json()
   return { content: body.content ?? '', isDir: !!body.isDir, dirEntries: body.entries }
+}
+
+/**
+ * The note rendered as a PDF by the server (frontmatter and wikilinks cleaned up, vault images
+ * included). Throws HqHttpError; status 503 means the server has no PDF engine installed.
+ */
+export async function fetchNotePdf(notePath: string): Promise<Blob> {
+  const res = await hqFetch(`/api/note/pdf?path=${encodeURIComponent(notePath)}`)
+  if (!res.ok) {
+    const data = await res.json().catch(() => ({}))
+    throw new HqHttpError(data.error || `${res.status} ${res.statusText}`, res.status)
+  }
+  return res.blob()
 }
 
 export function togglePinNote(path: string, pinned: boolean): Promise<{ success: boolean }> {

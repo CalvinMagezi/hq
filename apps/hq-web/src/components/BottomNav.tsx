@@ -1,11 +1,14 @@
 import { Link } from '@tanstack/react-router'
 import { useHQStore } from '~/store/hqStore'
 import { inboxBadge } from '~/lib/inboxBadge'
+import { needsYouAria } from '~/lib/workbench'
 
 const itemClass = 'flex-1 min-w-0 flex flex-col items-center justify-center gap-1 text-center transition-colors'
 
 export function BottomNav() {
   const badge = inboxBadge(useHQStore((s) => s.unreadNotificationsCount))
+  const needsYouCount = useHQStore((s) => s.needsYouCount)
+  const needsYouBadge = inboxBadge(needsYouCount)
   const hasPending = useHQStore((s) => s.pendingApprovalsCount > 0)
   return (
     <nav
@@ -67,11 +70,23 @@ export function BottomNav() {
         activeProps={{ style: { color: 'var(--accent-green)' } }}
         inactiveProps={{ style: { color: 'var(--text-dim)' } }}
       >
-        <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-          <polyline points="4 17 10 11 4 5" />
-          <line x1="12" y1="19" x2="20" y2="19" />
-        </svg>
-        <span className="text-[10px] font-mono font-bold tracking-wide">Sessions</span>
+        <div className="relative flex items-center justify-center">
+          <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            <polyline points="4 17 10 11 4 5" />
+            <line x1="12" y1="19" x2="20" y2="19" />
+          </svg>
+          {needsYouBadge && (
+            <span
+              role="status"
+              aria-label={needsYouAria(needsYouCount)}
+              className="absolute -top-1.5 left-2.5 min-w-[16px] h-4 px-1 rounded-full text-[9px] leading-4 text-center font-bold font-mono text-black pointer-events-none"
+              style={{ background: 'var(--accent-green)' }}
+            >
+              {needsYouBadge.label}
+            </span>
+          )}
+        </div>
+        <span className="text-[10px] font-mono font-bold tracking-wide">Workbench</span>
       </Link>
 
       <Link
