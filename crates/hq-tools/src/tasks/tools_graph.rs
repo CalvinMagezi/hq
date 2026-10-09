@@ -59,10 +59,12 @@ impl HqTool for TaskRelatedTool {
             .and_then(Value::as_u64)
             .map_or(DEFAULT_LIMIT, |n| n as usize)
             .clamp(1, g::MAX_RESULTS);
+        // A full rebuild drops and re-derives the index: not something the tasks scope may repeat.
         let rebuild = args
             .get("rebuild")
             .and_then(Value::as_bool)
-            .unwrap_or(false);
+            .unwrap_or(false)
+            && !crate::harness_session::is_tasks_scope(&args);
         self.db.with_conn(move |c| related(c, &id, limit, rebuild))
     }
 }

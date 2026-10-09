@@ -90,6 +90,30 @@ pub const HANDOFF_ALLOWLIST: &[&str] = &[
     "hq_ask_result",
 ];
 
+/// Tool names reachable by a tasks-scoped connection (`AGENTHQ_TASKS_API_KEY`, or
+/// `hq mcp-serve --scope tasks`): reading, filing, updating and commenting on tasks, and
+/// creating the folders and initiatives to place them in. It has no vault tools, so a
+/// client on a machine HQ's owner does not control never sees their notes, and none that
+/// start, read or message a session, ask HQ's chat agent, delete anything or reach another
+/// service, so unlike the handoff scope it is not code execution on any host. The task tools
+/// also know the call came in on this scope (see `mark_scope`) and then set no routing tags,
+/// write to no agent's mailbox, and attribute writes to `mcp:tasks`. An exact list, so a tool
+/// added to the registry later is denied until someone adds it here.
+pub const TASKS_ALLOWLIST: &[&str] = &[
+    "task_list",
+    "task_get",
+    "task_related",
+    "task_comment_list",
+    "task_create",
+    "task_update",
+    "task_comment_add",
+    "folder_list",
+    "folder_create",
+    "initiative_list",
+    "initiative_create",
+    "space_list",
+];
+
 /// What a launched agent may call with its own session token: the task thread
 /// it works on, and nothing that reads the wider vault or changes settings.
 /// An exact list, so a tool added later is denied until someone adds it here.
@@ -198,6 +222,12 @@ pub(crate) fn handle_discover(
 
     Ok(CallToolResult::success(vec![ContentBlock::text(json_str)]))
 }
+
+/// Instructions a scoped connection gets instead of the catalog: the catalog
+/// would list tools the key cannot call.
+pub const SCOPED_INSTRUCTIONS: &str = "Agent-HQ (restricted access). \
+`hq_discover(category?, query?)` lists the tools this connection may use and \
+`hq_call(tool, args)` runs one. Tools outside that list are refused.";
 
 /// Server instructions sent on `initialize`: how to use the two gateway tools
 /// plus the tool catalog, so a client knows the tools without calling hq_discover.
@@ -403,16 +433,23 @@ fn attest_caller(args: &mut Value, caller_session: Option<&str>) {
     }
 }
 
-/// Tools learn which key a call came in on only from this argument: any value
-/// the caller sent is dropped, and it is set here for the handoff scope.
+/// Tools learn which key a call came in on only from these arguments: any value
+/// the caller sent is dropped, and they are set here for the handoff and tasks scopes.
 fn mark_scope(args: &mut Value, allowed: Option<&[&str]>) {
     let Some(obj) = args.as_object_mut() else {
         return;
     };
     obj.remove(hq_tools::harness_session::HANDOFF_SCOPE_ARG);
+    obj.remove(hq_tools::harness_session::TASKS_SCOPE_ARG);
     if allowed == Some(HANDOFF_ALLOWLIST) {
         obj.insert(
             hq_tools::harness_session::HANDOFF_SCOPE_ARG.into(),
+            json!(true),
+        );
+    }
+    if allowed == Some(TASKS_ALLOWLIST) {
+        obj.insert(
+            hq_tools::harness_session::TASKS_SCOPE_ARG.into(),
             json!(true),
         );
     }
@@ -533,6 +570,124 @@ mod tests {
                 "handoff must not reach {name}"
             );
         }
+    }
+
+    /// The tasks scope exists so a client can file and update tasks without being
+    /// able to run code or read the owner's notes: no vault tools, nothing that spawns,
+    /// reads or messages a session, asks HQ's chat agent, deletes, writes the vault or
+    /// reaches another service.
+    #[test]
+    fn tasks_scope_is_task_work_only() {
+        for name in [
+            "task_list",
+            "task_get",
+            "task_create",
+            "task_update",
+            "task_comment_add",
+            "task_comment_list",
+        ] {
+            assert!(TASKS_ALLOWLIST.contains(&name), "tasks must reach {name}");
+        }
+        for name in [
+            "harness_session_spawn",
+            "harness_session_handoff",
+            "harness_session_send",
+            "harness_session_logs",
+            "harness_session_list",
+            "harness_session_status",
+            "session_search",
+            "hq_ask",
+            "hq_ask_result",
+            "task_delete",
+            "task_create_from_note",
+            "space_create",
+            "space_update",
+            "vault_search",
+            "vault_read",
+            "vault_context",
+            "vault_write_note",
+            "memory_entity_graph",
+            "config_manage",
+            "host_send",
+            "bash",
+            "agent_message_send",
+            "agent_delegate",
+        ] {
+            assert!(!TASKS_ALLOWLIST.contains(&name), "tasks must not reach {name}");
+        }
+        for name in TASKS_ALLOWLIST {
+            assert!(
+                ["task_", "folder_", "initiative_", "space_"].iter().any(|p| name.starts_with(p)),
+                "{name} is not a task, folder, initiative or space tool"
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn tasks_scope_calls_task_tools_and_refuses_spawn_and_delete() {
+        let mut registry = ToolRegistry::new();
+        for name in ["task_create", "task_delete", "harness_session_spawn", "hq_ask"] {
+            registry.register(Box::new(DummyTool { name }));
+        }
+        let db = hq_db::Database::open_memory().unwrap();
+        let call = |name: &str| serde_json::json!({"tool": name, "args": {}});
+        let ok = call("task_create");
+        assert!(handle_call(&registry, ok.as_object(), &db, Some(TASKS_ALLOWLIST)).await.is_ok());
+        for name in ["task_delete", "harness_session_spawn", "hq_ask"] {
+            let denied = call(name);
+            assert!(
+                handle_call(&registry, denied.as_object(), &db, Some(TASKS_ALLOWLIST))
+                    .await
+                    .is_err(),
+                "tasks must not call {name}"
+            );
+        }
+        let found = handle_discover(&registry, None, Some(TASKS_ALLOWLIST)).unwrap();
+        let text = format!("{found:?}");
+        assert!(text.contains("task_create"));
+        assert!(!text.contains("harness_session_spawn") && !text.contains("task_delete"));
+    }
+
+    /// `mark_scope` tells the scopes apart by the content of their lists, so two scopes that
+    /// ever had the same list would both be marked.
+    #[test]
+    fn the_scope_allowlists_are_all_different() {
+        let lists: [(&str, &[&str]); 4] = [
+            ("spark", SPARK_READONLY_ALLOWLIST),
+            ("handoff", HANDOFF_ALLOWLIST),
+            ("tasks", TASKS_ALLOWLIST),
+            ("session", SESSION_ALLOWLIST),
+        ];
+        for (i, (a, la)) in lists.iter().enumerate() {
+            for (b, lb) in lists.iter().skip(i + 1) {
+                assert_ne!(la, lb, "{a} and {b} have the same allowlist");
+            }
+        }
+    }
+
+    #[test]
+    fn each_scope_gets_only_its_own_marker_and_a_caller_cannot_forge_either() {
+        let handoff = hq_tools::harness_session::HANDOFF_SCOPE_ARG;
+        let tasks = hq_tools::harness_session::TASKS_SCOPE_ARG;
+        let forged = || serde_json::json!({ handoff: true, tasks: true, "x": 1 });
+
+        let mut args = forged();
+        mark_scope(&mut args, None);
+        assert!(args.get(handoff).is_none() && args.get(tasks).is_none(), "owner calls carry no marker");
+
+        let mut args = forged();
+        mark_scope(&mut args, Some(SPARK_READONLY_ALLOWLIST));
+        assert!(args.get(handoff).is_none() && args.get(tasks).is_none());
+
+        let mut args = forged();
+        mark_scope(&mut args, Some(TASKS_ALLOWLIST));
+        assert_eq!(args[tasks], true);
+        assert!(args.get(handoff).is_none(), "a tasks call is never marked as handoff");
+
+        let mut args = forged();
+        mark_scope(&mut args, Some(HANDOFF_ALLOWLIST));
+        assert_eq!(args[handoff], true);
+        assert!(args.get(tasks).is_none(), "a handoff call is never marked as tasks");
     }
 
     #[tokio::test]
