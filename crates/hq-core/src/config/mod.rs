@@ -4,6 +4,7 @@ mod collaboration;
 pub mod company;
 mod decisions;
 mod copilot_usage;
+mod budgets;
 mod disk_watchdog;
 mod usage_ledger;
 mod governance;
@@ -27,6 +28,7 @@ pub use decisions::{
     SITE_NOTIFY_GATE, SITE_TASK_PLACEMENT,
 };
 pub use copilot_usage::{CopilotUsageConfig, copilot_active, openrouter_key, openrouter_primary};
+pub use budgets::{Budget, BudgetAction, BudgetPeriod, BudgetScope, BudgetsConfig};
 pub use disk_watchdog::DiskWatchdogConfig;
 pub use usage_ledger::UsageLedgerConfig;
 pub use governance::*;
@@ -227,6 +229,10 @@ pub struct HqConfig {
     #[serde(default)]
     pub usage_ledger: UsageLedgerConfig,
 
+    /// Spending limits. Empty by default: nothing is enforced until the owner opts in.
+    #[serde(default)]
+    pub budgets: BudgetsConfig,
+
     /// Copilot credit sampling for the burn-rate meter.
     #[serde(default)]
     pub copilot_usage: CopilotUsageConfig,
@@ -381,6 +387,7 @@ impl Default for HqConfig {
             self_update: SelfUpdateConfig::default(),
             disk_watchdog: DiskWatchdogConfig::default(),
             usage_ledger: UsageLedgerConfig::default(),
+            budgets: BudgetsConfig::default(),
             copilot_usage: CopilotUsageConfig::default(),
             agent_host: AgentHostConfig::default(),
             budget: BudgetConfig::default(),

@@ -2,6 +2,7 @@ use std::sync::Arc;
 
 use tracing::info;
 
+use crate::cost::ProviderClass;
 use crate::openai_compat::GEMINI_OPENAI_BASE_URL;
 use crate::provider::LlmProvider;
 
@@ -410,8 +411,25 @@ impl LlmRouter {
         }
     }
 
+    /// Ask `gate` before every provider attempt; a refusal stops that attempt.
+    pub fn set_budget_gate(&mut self, gate: crate::budget::SharedGate) {
+        self.instruments.set_gate(gate);
+    }
+
     pub fn set_outcome_sink(&mut self, sink: crate::outcome_sink::SharedSink) {
-        self.outcome_sink = Some(sink);
+        self.instruments.set_sink(sink);
+    }
+
+    /// A router whose providers report to `instruments` instead of a handle of their own.
+    pub fn with_instruments(instruments: Arc<crate::instrument::Instruments>) -> Self {
+        Self {
+            instruments,
+            ..Self::new()
+        }
+    }
+
+    pub fn instruments(&self) -> Arc<crate::instrument::Instruments> {
+        self.instruments.clone()
     }
 
     pub fn is_empty(&self) -> bool {
@@ -436,6 +454,12 @@ impl LlmRouter {
         provider: Arc<dyn LlmProvider>,
         daily_token_limit: u64,
     ) {
+        let provider = crate::instrument::InstrumentedProvider::wrap(
+            provider,
+            name,
+            ProviderClass::of_name(name),
+            self.instruments.clone(),
+        );
         self.providers.push((name.to_string(), provider));
         let mut health = self.health.lock().unwrap();
         if !health.iter().any(|(n, _)| n == name) {
@@ -484,7 +508,7 @@ impl LlmRouter {
         }
         let chain = crate::backend_chain::ChainProvider::from_config(config)?;
         info!(backends = ?chain.backend_names(), "LLM Router: routing all aliases through the backend chain");
-        let mut router = Self::new();
+        let mut router = Self::with_instruments(crate::instrument::Instruments::global());
         router.add_provider("backends", Arc::new(chain) as Arc<dyn LlmProvider>);
         router.add_route("*", "backends", "", CostTier::Budget);
         Some(router)
@@ -514,7 +538,7 @@ impl LlmRouter {
     }
 
     fn from_keys(key: &dyn Fn(&str) -> Option<String>, local_ollama: bool) -> Self {
-        let mut router = Self::new();
+        let mut router = Self::with_instruments(crate::instrument::Instruments::global());
         router.add_cloud_providers(FREE_TIER_PROVIDERS, key);
         #[cfg(feature = "turboquant")]
         router.add_turboquant();
@@ -634,7 +658,7 @@ impl LlmRouter {
     /// Build a router with only local inference providers (Ollama + TurboQuant).
     /// Use this when `local_only = true` in HqConfig.
     pub fn from_env_local_only() -> Self {
-        let mut router = Self::new();
+        let mut router = Self::with_instruments(crate::instrument::Instruments::global());
 
         // TurboQuant optional local inference server
         #[cfg(feature = "turboquant")]

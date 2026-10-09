@@ -2,6 +2,7 @@
 
 pub mod anthropic;
 pub mod backend_chain;
+pub mod budget;
 pub mod cerebras;
 pub mod copilot;
 pub mod copilot_burn;
@@ -11,6 +12,7 @@ pub mod cost;
 pub mod decision;
 pub mod decision_report;
 pub mod http;
+pub mod instrument;
 pub mod models;
 pub mod ollama;
 pub mod openai_compat;
@@ -24,13 +26,14 @@ pub mod openrouter {
 pub mod provider;
 pub mod provider_usage;
 pub mod reconcile;
+mod tap;
 pub mod responses;
 pub mod router;
-pub mod served;
 #[cfg(feature = "turboquant")]
 pub mod turboquant;
 
 pub use anthropic::AnthropicProvider;
+pub use instrument::{Instruments, InstrumentedProvider};
 pub use cerebras::CerebrasProvider;
 pub use copilot::CopilotProvider;
 pub use ollama::OllamaProvider;

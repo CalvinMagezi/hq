@@ -211,6 +211,12 @@ pub trait LlmProvider: Send + Sync {
         &self,
         request: &ChatRequest,
     ) -> Result<Pin<Box<dyn Stream<Item = Result<StreamChunk>> + Send>>>;
+
+    /// Whether this provider already records its calls and asks the budget gate, so it must not be
+    /// wrapped a second time.
+    fn is_instrumented(&self) -> bool {
+        false
+    }
 }
 
 #[cfg(test)]

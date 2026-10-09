@@ -1,16 +1,18 @@
 mod builder;
-mod health;
+pub(crate) mod health;
 mod selection;
 mod strategy;
-mod tap;
 mod types;
 
+#[cfg(test)]
+mod budget_tests;
 #[cfg(test)]
 mod ledger_tests;
 #[cfg(test)]
 mod tests;
 
 pub use health::ProviderHealth;
+pub(crate) use health::classify_error_for_telemetry;
 pub use types::{CostTier, RouteEntry, TaskHint};
 
 use std::sync::atomic::AtomicUsize;
@@ -32,7 +34,7 @@ pub struct LlmRouter {
     pub(super) routes: Vec<RouteEntry>,
     pub(super) round_robin: AtomicUsize,
     pub(super) health: Arc<Mutex<Vec<(String, ProviderHealth)>>>,
-    pub(super) outcome_sink: Option<crate::outcome_sink::SharedSink>,
+    pub(super) instruments: Arc<crate::instrument::Instruments>,
 }
 
 impl Default for LlmRouter {
@@ -48,7 +50,7 @@ impl LlmRouter {
             routes: Vec::new(),
             round_robin: AtomicUsize::new(0),
             health: Arc::new(Mutex::new(Vec::new())),
-            outcome_sink: None,
+            instruments: crate::instrument::Instruments::new(),
         }
     }
 }
