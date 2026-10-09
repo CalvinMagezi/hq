@@ -538,6 +538,8 @@ async fn spawn_detached(
     // No console window, and the server outlives the terminal that started it.
     #[cfg(windows)]
     std::os::windows::process::CommandExt::creation_flags(&mut cmd, 0x0800_0000 | 0x0000_0200);
+    #[cfg(windows)]
+    stop_inheriting_std_handles();
     let mut child = cmd
         .spawn()
         .context("failed to start the background server")?;
@@ -560,6 +562,28 @@ async fn spawn_detached(
         "the background server did not answer within 20s. See {}",
         log.display()
     )
+}
+
+/// Windows hands every inheritable handle to a new process, not only the ones named for it, so
+/// the background server would hold the pipes this command's own output goes to. A caller that
+/// reads those pipes (a script, an agent's shell tool) would then wait until the server exits.
+/// The log file given to the child is passed explicitly and is unaffected.
+#[cfg(windows)]
+fn stop_inheriting_std_handles() {
+    use windows_sys::Win32::Foundation::{HANDLE_FLAG_INHERIT, SetHandleInformation};
+    use windows_sys::Win32::System::Console::{
+        GetStdHandle, STD_ERROR_HANDLE, STD_INPUT_HANDLE, STD_OUTPUT_HANDLE,
+    };
+    for which in [STD_INPUT_HANDLE, STD_OUTPUT_HANDLE, STD_ERROR_HANDLE] {
+        // SAFETY: plain Win32 calls on this process's own standard handles; a null or invalid
+        // handle makes the call fail harmlessly.
+        unsafe {
+            let handle = GetStdHandle(which);
+            if !handle.is_null() {
+                SetHandleInformation(handle, HANDLE_FLAG_INHERIT, 0);
+            }
+        }
+    }
 }
 
 // ─── Small helpers ──────────────────────────────────────────────────────
