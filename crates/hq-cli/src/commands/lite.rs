@@ -247,10 +247,10 @@ mod tests {
 
     #[test]
     fn synced_folders_are_recognised() {
-        assert!(in_synced_folder(Path::new(r"C:\Users\a\OneDrive\Documents\vault")));
-        assert!(in_synced_folder(Path::new(r"C:\Users\a\OneDrive - Contoso\vault")));
+        assert!(in_synced_folder(Path::new("C:/Users/a/OneDrive/Documents/vault")));
+        assert!(in_synced_folder(Path::new("C:/Users/a/OneDrive - Contoso/vault")));
         assert!(in_synced_folder(Path::new("/home/a/Dropbox/vault")));
-        assert!(!in_synced_folder(Path::new(r"C:\Users\a\.hq\vault")));
+        assert!(!in_synced_folder(Path::new("C:/Users/a/.hq/vault")));
     }
 
     #[test]
