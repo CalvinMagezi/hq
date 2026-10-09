@@ -12,6 +12,9 @@ use crate::governance::DenialNotifier;
 const ROUTING_HINT: &str = "Delegate it: start a coding session with harness_session_spawn \
     (task_id, goal, done criteria) and watch and steer it, or use spawn_subagents for read-only research.";
 
+/// Marks where the bash tool starts printing stderr.
+const STDERR_LABEL: &str = "STDERR:\n";
+
 /// Output fragments a read-only sandbox produces when a command tries to write.
 // ponytail: substring match on OS error text, misses a tool that words its own error; upgrade to a sandbox-reported flag if it matters.
 const WRITE_BLOCKED_MARKERS: &[&str] = &["Read-only file system", "Operation not permitted"];
@@ -107,8 +110,9 @@ impl RoleDenial {
 
     /// Extra text to append to a bash result that was stopped by the read-only sandbox.
     pub(crate) fn for_blocked_write(&self, output: &str) -> Option<String> {
-        let failed = output.contains("(exit code");
-        if !failed || !WRITE_BLOCKED_MARKERS.iter().any(|m| output.contains(m)) {
+        // Only stderr counts: a command can print these words from a file it reads.
+        let (_, stderr) = output.split_once(STDERR_LABEL)?;
+        if !WRITE_BLOCKED_MARKERS.iter().any(|m| stderr.contains(m)) {
             return None;
         }
         self.notify("bash", "write blocked by the read-only sandbox");
@@ -164,8 +168,19 @@ mod tests {
         let (denial, count) = denial();
         assert!(
             denial
-                .for_blocked_write("touch: x: Read-only file system\n(exit code 1)")
+                .for_blocked_write("STDERR:\ntouch: x: Read-only file system\n(exit code 1)")
                 .is_some()
+        );
+        assert!(
+            denial
+                .for_blocked_write("exit=1\n\nSTDERR:\ntouch: x: Read-only file system\n")
+                .is_some(),
+            "still caught when the command's own exit status hides the failure"
+        );
+        assert!(
+            denial
+                .for_blocked_write("Read-only file system in stdout\nSTDERR:\nwarning\n")
+                .is_none()
         );
         assert!(
             denial
