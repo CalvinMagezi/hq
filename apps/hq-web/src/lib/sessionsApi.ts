@@ -92,6 +92,8 @@ export interface ScreenText {
   session_id: string
   /** `live` while the agent runs, `snapshot` for the last text stored after it ended. */
   source: 'live' | 'snapshot'
+  /** True when the lines carry ANSI color sequences. */
+  styled?: boolean
   lines: string[]
 }
 
@@ -215,7 +217,10 @@ export const globalSessionsApi = {
 
   get: async (id: string): Promise<HarnessSession> => (await hqJson<{ session: HarnessSession }>(sessionPath(id))).session,
 
-  screen: (id: string, lines: number): Promise<ScreenText> => hqJson(`${sessionPath(id)}/screen?lines=${lines}`),
+  screen: (id: string, lines: number, styled = false): Promise<ScreenText> =>
+    hqJson(`${sessionPath(id)}/screen?lines=${lines}${styled ? '&styled=true' : ''}`),
+
+  screenStreamPath: (id: string, lines: number): string => `${sessionPath(id)}/screen/stream?lines=${lines}`,
 
   send: (id: string, payload: SendPayload): Promise<{ sent?: string; keys?: string[]; note?: string }> =>
     hqJson(`${sessionPath(id)}/send`, 'POST', payload),
