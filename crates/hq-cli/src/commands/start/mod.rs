@@ -286,7 +286,9 @@ pub(crate) fn build_web_state(
         tracing::warn!(path = %static_dir.display(), "ws: no web UI build yet (index.html missing)");
     }
     info!(path = %static_dir.display(), "ws: serving web UI");
-    let mut state = hq_web::WsState::new(vault_path, Some(static_dir)).with_registry(registry);
+    let mut state = hq_web::WsState::new(vault_path, Some(static_dir))
+        .with_profile(config.profile)
+        .with_registry(registry);
     state.web_auth_token = web_auth_token;
     // `hq web --lan` overrides the configured bind, and /mcp's dev switch must follow the real one.
     state.web_bind_is_loopback = hq_web::auth::bind_is_loopback(bind);

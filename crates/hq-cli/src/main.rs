@@ -155,7 +155,12 @@ enum Commands {
     },
 
     /// Diagnose common issues
-    Doctor,
+    Doctor {
+        /// List every outbound destination this config can reach, and (under `profile: lite`)
+        /// exit non-zero if any is not allowed
+        #[arg(long)]
+        egress: bool,
+    },
 
     /// Set up API keys interactively
     Env,
@@ -666,6 +671,16 @@ async fn run_cursor(config: &HqConfig, action: CursorAction) -> Result<()> {
 /// One arm per subcommand, each a single call into `commands::*`: a routing
 /// table, so it stays one match rather than being split by topic.
 async fn dispatch(command: Commands, config: &HqConfig) -> Result<()> {
+    // HQ Lite will not serve, or start its daemon, while something that sends data to another
+    // service is configured; `hq doctor --egress` lists what and how to clear it.
+    let serves = match &command {
+        Commands::Start { .. } | Commands::McpServe { .. } | Commands::Daemon { .. } => true,
+        Commands::Web(args) => args.serves(),
+        _ => false,
+    };
+    if serves {
+        hq_core::config::enforce_lite(config, &hq_core::config::process_env)?;
+    }
     match command {
         // Getting Started
         Commands::Install {
@@ -693,7 +708,8 @@ async fn dispatch(command: Commands, config: &HqConfig) -> Result<()> {
             unreachable!("handled before config load")
         }
         Commands::Health => commands::health::run(config).await,
-        Commands::Doctor => commands::doctor::run(config).await,
+        Commands::Doctor { egress: true } => commands::doctor::run_egress(config),
+        Commands::Doctor { egress: false } => commands::doctor::run(config).await,
         Commands::Pair { platform } => commands::pair::run(config, &platform),
         Commands::Env => commands::env::run(config).await,
 

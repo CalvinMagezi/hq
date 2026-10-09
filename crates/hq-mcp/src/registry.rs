@@ -112,8 +112,17 @@ pub fn create_default_registry(
     for tool in tools {
         registry.register(tool);
     }
+    if config.is_some_and(|c| c.profile.is_lite()) {
+        registry.retain(|t| LITE_CATEGORIES.contains(&t.category()));
+    }
     registry
 }
+
+/// The tool categories `profile: lite` keeps: the owner's notes and tasks. Everything else (the
+/// shell and file tools, coding-agent sessions, hosts, web search and fetch, image generation,
+/// email, GitHub, remote MCP servers, sub-agents and the chat agent's own tools) is not
+/// registered, so no transport can reach it.
+pub const LITE_CATEGORIES: &[&str] = &["tasks", "vault"];
 
 #[cfg(test)]
 mod tests {
@@ -301,5 +310,41 @@ mod tests {
         .await
         .unwrap();
         assert!(mailbox_entries("relay") >= 1, "an owner call delivers to a tagged mailbox");
+    }
+    #[test]
+    fn the_lite_profile_registers_only_notes_and_tasks() {
+        let vault = tempfile::TempDir::new().unwrap();
+        let vault_path = vault.path().to_path_buf();
+        let build = |lite: bool| {
+            let cfg = HqConfig {
+                profile: if lite {
+                    hq_core::config::Profile::Lite
+                } else {
+                    hq_core::config::Profile::Full
+                },
+                ..HqConfig::default()
+            };
+            create_default_registry(
+                Arc::new(VaultClient::new(vault_path.clone()).unwrap()),
+                Arc::new(Database::open_memory().unwrap()),
+                vault_path.join("skills"),
+                vault_path.join("agents"),
+                Some(&cfg),
+            )
+        };
+        let (full, lite) = (build(false), build(true));
+        assert!(full.len() > lite.len() && lite.len() >= 2);
+        assert_eq!(lite.categories(), ["tasks", "vault"]);
+        for must_exist in ["task_create", "vault_read", "vault_search"] {
+            assert!(lite.get(must_exist).is_some(), "{must_exist}");
+        }
+        for gone in [
+            "bash", "harness_session_spawn", "host_send", "web_fetch", "web_search", "imagegen",
+            "hq_ask", "agent_message_send", "config_manage", "gws",
+        ] {
+            assert!(lite.get(gone).is_none(), "{gone} must not be registered in Lite");
+        }
+        // The full profile still has them, so the assertion above is not an empty registry.
+        assert!(full.get("harness_session_spawn").is_some() && full.get("web_fetch").is_some());
     }
 }

@@ -14,6 +14,7 @@ mod instance;
 mod llm;
 mod memory;
 pub mod model_switch;
+mod profile;
 mod relay;
 mod self_update;
 
@@ -31,6 +32,10 @@ pub use copilot_usage::{CopilotUsageConfig, copilot_active, openrouter_key, open
 pub use budgets::{Budget, BudgetAction, BudgetPeriod, BudgetScope, BudgetsConfig};
 pub use disk_watchdog::DiskWatchdogConfig;
 pub use usage_ledger::UsageLedgerConfig;
+pub use profile::{
+    EgressItem, EnvLookup, LiteConfig, Profile, egress_report, enforce_lite, lite_violations,
+    process_env,
+};
 pub use governance::*;
 pub use harness::*;
 pub use agent_host::{
@@ -73,6 +78,15 @@ impl std::fmt::Debug for RemoteMcpServer {
 pub struct HqConfig {
     /// Path to the vault directory
     pub vault_path: PathBuf,
+
+    /// `full` (default) or `lite`: the web app, tasks and vault only, with no outbound traffic
+    /// you did not list. See `docs/HQ_LITE.md`. Env: `HQ_PROFILE`.
+    #[serde(default)]
+    pub profile: Profile,
+
+    /// Settings that apply only under `profile: lite`.
+    #[serde(default)]
+    pub lite: LiteConfig,
 
     /// OpenRouter API key
     pub openrouter_api_key: Option<String>,
@@ -369,6 +383,8 @@ impl Default for HqConfig {
             brave_api_key: None,
             default_model: default_model(),
             local_only: false,
+            profile: Profile::default(),
+            lite: LiteConfig::default(),
             ws_port: default_ws_port(),
             chat_turn_timeout_secs: default_chat_turn_timeout_secs(),
             web_bind: default_web_bind(),

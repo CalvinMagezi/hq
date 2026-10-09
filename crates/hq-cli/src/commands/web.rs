@@ -26,6 +26,13 @@ pub struct WebArgs {
     action: Option<WebAction>,
 }
 
+impl WebArgs {
+    /// Whether this invocation serves the web app (as opposed to `status` or `stop`).
+    pub fn serves(&self) -> bool {
+        self.action.is_none()
+    }
+}
+
 #[derive(Args, Debug, Default)]
 struct StartArgs {
     /// Port to listen on (default: `ws_port` from config, 5678)
