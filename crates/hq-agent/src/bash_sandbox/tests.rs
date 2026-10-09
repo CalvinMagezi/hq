@@ -10,6 +10,7 @@ fn ctx(network: bool) -> SandboxContext {
         masked_files: vec![PathBuf::from("/home/u/.ssh/id_ed25519")],
         readonly_files: vec![PathBuf::from("/home/u/.ssh/authorized_keys")],
         network,
+        read_only: false,
     }
 }
 
@@ -38,6 +39,7 @@ fn unsandboxed(passthrough: &[&str]) -> BashSettings {
         sandbox: BashSandboxMode::Off,
         network: true,
         writable_paths: Vec::new(),
+        read_only: false,
     }
 }
 
@@ -158,6 +160,7 @@ fn run_wrapped(backend: &Backend, dir: &Path, secret: &Path, command: &str) -> (
         masked_files: vec![secret.to_path_buf()],
         readonly_files: Vec::new(),
         network: false,
+        read_only: false,
     };
     let Launch::Wrapped { program, args } = wrap(backend, &ctx, command) else {
         panic!("expected a wrapped launch");
@@ -214,6 +217,7 @@ async fn required_sandbox_runs_real_commands_with_spaced_paths() {
         sandbox: BashSandboxMode::Required,
         network: true,
         writable_paths: vec![spaced.clone()],
+        read_only: false,
     };
     let target = spaced.join("note.txt");
     let command = format!("echo hi > '{0}' && cat '{0}'", target.display());
@@ -381,4 +385,73 @@ fn working_or_opted_out_sandbox_files_nothing() {
     assert!(!report_refusal(&settings_with(BashSandboxMode::BestEffort), None, &db, "b").unwrap());
     assert!(!report_refusal(&settings_with(BashSandboxMode::Off), None, &db, "b").unwrap());
     assert!(hq_db::value_items::list_filtered(&db, None, None, 5).unwrap().is_empty());
+}
+
+#[test]
+fn read_only_context_leaves_only_scratch_writable() {
+    let mut settings = BashSettings::read_only(&BashConfig::default());
+    settings.writable_paths = vec![PathBuf::from("/should/not/appear")];
+    let ctx = SandboxContext::for_process(&settings);
+    let home = dirs::home_dir().and_then(|h| h.canonicalize().ok());
+    let cwd = std::env::current_dir().unwrap().canonicalize().unwrap();
+    assert!(!ctx.writable.iter().any(|p| Some(p) == home.as_ref() || *p == cwd));
+    assert!(!ctx.network);
+}
+
+#[test]
+fn read_only_settings_refuse_without_a_backend() {
+    let settings = BashSettings::read_only(&BashConfig::default());
+    assert!(matches!(
+        plan_launch_with(&settings, "ls", None),
+        Launch::Refused(_)
+    ));
+}
+
+#[tokio::test]
+async fn read_only_bash_cannot_write_to_cwd_or_home() {
+    if available_backend().is_none() {
+        eprintln!("skipped: no sandbox backend on this host");
+        return;
+    }
+    let probe = format!("hq-ro-probe-{}", std::process::id());
+    let in_home = dirs::home_dir().unwrap().join(&probe);
+    let command = format!("touch ./{probe}; touch '{}'; ls", in_home.display());
+    let out = run_bash(BashSettings::read_only(&BashConfig::default()), &command).await;
+    let cwd_file = std::env::current_dir().unwrap().join(&probe);
+    let leaked = cwd_file.exists() || in_home.exists();
+    let _ = std::fs::remove_file(&cwd_file);
+    let _ = std::fs::remove_file(&in_home);
+    assert!(!leaked, "read-only bash wrote to disk: {out}");
+}
+
+#[test]
+fn read_only_seatbelt_profile_closes_local_ipc_and_app_launchers() {
+    let mut context = ctx(false);
+    context.read_only = true;
+    let profile = seatbelt_profile(&context);
+    assert!(profile.contains("(deny network*)"));
+    assert!(profile.contains("/usr/bin/open") && profile.contains("launchctl"));
+    assert!(!seatbelt_profile(&ctx(false)).contains("(deny network*)"), "normal bash keeps unix sockets");
+}
+
+#[cfg(target_os = "macos")]
+#[tokio::test]
+async fn read_only_bash_still_investigates_but_cannot_launch_apps() {
+    if available_backend().is_none() {
+        return;
+    }
+    let out = run_bash(
+        BashSettings::read_only(&BashConfig::default()),
+        "ls / >/dev/null && echo listed; git --version; /usr/bin/open -a Calculator; echo after",
+    )
+    .await;
+    assert!(out.contains("listed") && out.contains("git version"), "{out}");
+    assert!(out.contains("after"), "{out}");
+    assert!(!out.to_lowercase().contains("calculator.app"), "{out}");
+    let launched = run_bash(
+        BashSettings::read_only(&BashConfig::default()),
+        "/usr/bin/open -a Calculator; echo rc=$?; cp /usr/bin/true /tmp/hq-ro-exec && /tmp/hq-ro-exec; echo copied_rc=$?; rm -f /tmp/hq-ro-exec",
+    )
+    .await;
+    assert!(!launched.contains("rc=0"), "open or a copied binary ran: {launched}");
 }

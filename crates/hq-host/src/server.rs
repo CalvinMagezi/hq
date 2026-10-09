@@ -486,6 +486,18 @@ impl Conn {
                     "binary_stale": self.exe.as_ref().is_some_and(ExeStamp::is_stale),
                 }))
             }
+            "host.workspace" => self.workspace_call(|root| Ok(crate::workspace::describe(root))),
+            "host.dirs" => {
+                let path = params.get("path").and_then(Value::as_str);
+                self.workspace_call(|root| crate::workspace::list_dirs(root, path))
+            }
+            "host.mkdir" => {
+                let parent = params.get("parent").and_then(Value::as_str);
+                let name = params.get("name").and_then(Value::as_str).unwrap_or_default();
+                self.workspace_call(|root| {
+                    crate::workspace::make_dir(root, parent, name).map(|p| json!({ "path": p }))
+                })
+            }
             // The reply goes out first; the connection loop stops the host after it.
             "host.stop" => {
                 self.stop_after_reply.set(true);
@@ -495,6 +507,17 @@ impl Conn {
             m if m.starts_with("agent.") => self.agent_call(m, &params),
             other => Err(body("unknown_method", format!("no method {other:?}"))),
         }
+    }
+
+    /// Runs `f` against the workspace folder, creating it first. A bad path or name is the
+    /// caller's mistake (`invalid`); anything else is the machine's (`workspace_unavailable`).
+    fn workspace_call(&self, f: impl FnOnce(&std::path::Path) -> std::io::Result<Value>) -> Result<Value, ErrorBody> {
+        let root = crate::workspace::ensure_workspace()
+            .map_err(|e| body("workspace_unavailable", format!("cannot prepare the HQ folder: {e}")))?;
+        f(&root).map_err(|e| match e.kind() {
+            std::io::ErrorKind::InvalidInput | std::io::ErrorKind::NotFound => body("invalid", e.to_string()),
+            _ => body("workspace_unavailable", e.to_string()),
+        })
     }
 
     fn poll_events(&self, params: &Value) -> Result<Value, ErrorBody> {

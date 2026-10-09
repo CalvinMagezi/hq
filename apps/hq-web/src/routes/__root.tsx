@@ -18,6 +18,8 @@ import { QuickNoteOverlay } from '~/components/QuickNoteOverlay'
 import { GlobalChatOverlay } from '~/components/chat/GlobalChatOverlay'
 import { InstallPrompt } from '~/components/InstallPrompt'
 import { BottomNav } from '~/components/BottomNav'
+import { useNeedsYouCount } from '~/components/sessions/useNeedsYouCount'
+import { needsYouAria } from '~/lib/workbench'
 import appCss from '../../app.css?url'
 import { relTime } from '~/lib/time'
 import { inboxBadge } from '~/lib/inboxBadge'
@@ -127,6 +129,9 @@ function VaultShell() {
   const chatUnreadCount = useHQStore((s) => s.chatUnreadCount)
   const unreadNotificationsCount = useHQStore((s) => s.unreadNotificationsCount)
   const pendingApprovalsCount = useHQStore((s) => s.pendingApprovalsCount)
+  const needsYouCount = useHQStore((s) => s.needsYouCount)
+  const needsYouBadge = inboxBadge(needsYouCount)
+  useNeedsYouCount()
   const systemNotice = useHQStore((s) => s.systemNotice)
   const setSystemNotice = useHQStore((s) => s.setSystemNotice)
   const [isOnline, setIsOnline] = useState(typeof navigator !== 'undefined' ? navigator.onLine : true)
@@ -289,8 +294,19 @@ function VaultShell() {
             to="/sessions"
             activeProps={{ style: { color: 'var(--accent-green)', fontWeight: 'bold' } }}
             inactiveProps={{ style: { color: 'var(--text-dim)' } }}
+            className="relative flex items-center gap-1.5"
           >
-            Sessions
+            Workbench
+            {needsYouBadge && (
+              <span
+                role="status"
+                aria-label={needsYouAria(needsYouCount)}
+                className="px-1.5 py-0.5 rounded-full text-[9px] font-bold font-mono text-black"
+                style={{ background: 'var(--accent-green)' }}
+              >
+                {needsYouBadge.label}
+              </span>
+            )}
           </Link>
           <Link
             to="/usage"
