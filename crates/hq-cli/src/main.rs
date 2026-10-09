@@ -165,9 +165,15 @@ enum Commands {
     /// Set up API keys interactively
     Env,
 
+    /// Tasks from a terminal (the same scope as the tasks-only MCP key)
+    Task {
+        #[command(subcommand)]
+        cmd: commands::task::TaskCmd,
+    },
+
     /// Link the GitHub Copilot seat this machine is signed in to
     Copilot {
-        /// Subcommand: link
+        /// Subcommand: link, or init (write HQ's terminal instructions for coding agents)
         #[arg(default_value = "link")]
         sub: String,
         /// Use this model instead of the preference list
@@ -176,6 +182,9 @@ enum Commands {
         /// Write the backend into the config file instead of printing it
         #[arg(long)]
         write: bool,
+        /// With `init`: write AGENTS.md instead of .github/copilot-instructions.md
+        #[arg(long)]
+        agents: bool,
     },
 
     // ─── Chat & Agents ───────────────────────────────────────────────
@@ -290,6 +299,9 @@ enum Commands {
         /// Max results
         #[arg(short, long, default_value = "20")]
         limit: usize,
+        /// Print one JSON object instead of text
+        #[arg(long)]
+        json: bool,
     },
 
     /// Force a full rebuild of the vault's FTS search index
@@ -624,10 +636,20 @@ fn init_tracing() {
     let args: Vec<String> = std::env::args().collect();
     let is_mcp = args.iter().any(|a| a == "mcp-serve");
     let is_chat = args.len() <= 1 || args.iter().any(|a| a == "chat");
-    let default_level = if is_chat { "off" } else { "info" };
+    // `hq task` and `--json` print data for another program: logs go to stderr, quietly.
+    let before_dashes = args.iter().skip(1).take_while(|a| *a != "--");
+    let is_data = before_dashes.clone().take(4).any(|a| a == "task")
+        || (args.get(1).is_some_and(|a| a == "search" || a == "vault") && before_dashes.clone().any(|a| a == "--json"));
+    let default_level = if is_chat {
+        "off"
+    } else if is_data {
+        "warn"
+    } else {
+        "info"
+    };
     let filter =
         EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new(default_level));
-    if is_mcp {
+    if is_mcp || is_data {
         fmt()
             .with_env_filter(filter)
             .with_target(false)
@@ -702,7 +724,7 @@ fn lite_rule(command: &Commands) -> LiteRule {
         Commands::Chat { .. } | Commands::Sessions { .. } | Commands::Host { .. } | Commands::SelfApply { .. }
         | Commands::Agents { .. } | Commands::Models { .. } => LiteRule::NotInLite,
         Commands::Install { .. } | Commands::Update(_) | Commands::UpdateDb { .. } | Commands::Health
-        | Commands::Doctor { egress: true, .. } | Commands::Env | Commands::Copilot { .. } | Commands::Status | Commands::Stop { .. }
+        | Commands::Doctor { egress: true, .. } | Commands::Env | Commands::Task { .. } | Commands::Copilot { .. } | Commands::Status | Commands::Stop { .. }
         | Commands::Restart { .. } | Commands::Logs { .. } | Commands::Errors { .. } | Commands::Follow { .. }
         | Commands::Ps | Commands::Vault { .. } | Commands::Search { .. } | Commands::Config { .. }
         | Commands::Mcp { .. } | Commands::Link { .. } | Commands::Cursor { .. } | Commands::Kill
@@ -759,8 +781,9 @@ async fn dispatch(command: Commands, config: &HqConfig) -> Result<()> {
         Commands::Doctor { egress: false } => commands::doctor::run(config).await,
         Commands::Pair { platform } => commands::pair::run(config, &platform),
         Commands::Env => commands::env::run(config).await,
-        Commands::Copilot { sub, model, write } => {
-            commands::copilot::run(config, &sub, model.as_deref(), write).await
+        Commands::Task { cmd } => commands::task::run(config, cmd).await,
+        Commands::Copilot { sub, model, write, agents } => {
+            commands::copilot::run(config, &sub, model.as_deref(), write, agents).await
         }
 
         // Chat
@@ -797,8 +820,8 @@ async fn dispatch(command: Commands, config: &HqConfig) -> Result<()> {
 
         // Vault Operations
         Commands::Vault { sub, args } => commands::vault::run(config, &sub, &args).await,
-        Commands::Search { query, limit } => {
-            commands::search::run(config, &query.join(" "), limit).await
+        Commands::Search { query, limit, json } => {
+            commands::search::run(config, &query.join(" "), limit, json).await
         }
         Commands::Reindex => commands::search::reindex(config).await,
         Commands::Memory { sub, args } => commands::memory::run(config, &sub, &args).await,
@@ -971,6 +994,8 @@ mod lite_rule_tests {
             &["config"],
             &["env"],
             &["copilot", "link"],
+            &["task", "list"],
+            &["search", "x", "--json"],
             &["mcp", "install"],
             &["mcp", "status"],
             &["status"],

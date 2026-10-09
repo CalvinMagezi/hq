@@ -376,6 +376,26 @@ async fn handle_call_as(
     }
 }
 
+/// Run one tool the way `hq_call` does for `allowed` (allowlist check, scope marking), but hand
+/// back the tool's own JSON: no compaction, so a long list is not cut. For local callers such as
+/// `hq task`, which print the result for another program to parse.
+pub async fn call_tool_whole(
+    registry: &ToolRegistry,
+    tool: &str,
+    args: Value,
+    allowed: Option<&[&str]>,
+) -> Result<Value, String> {
+    if allowed.is_some_and(|a| !a.contains(&tool)) {
+        return Err(format!("tool not permitted for this connection: {tool}"));
+    }
+    let t = registry.get(tool).ok_or_else(|| format!("unknown tool: {tool}"))?;
+    let mut args = if args.is_null() { json!({}) } else { args };
+    mark_scope(&mut args, allowed);
+    hq_tools::registry::validate_and_execute(t, args)
+        .await
+        .map_err(|e| format!("tool error: {e}"))
+}
+
 /// Tools a caller inside an HQ-spawned session may not use: they rewrite HQ's own settings.
 const MARKED_DENIED_TOOLS: &[&str] = &["config_manage"];
 

@@ -2,6 +2,7 @@
 
 mod api;
 pub use api::HEALTH_SERVICE;
+pub use vault_api::{lite_hides, lite_hides_resolved};
 mod chat_uploads;
 mod error;
 pub mod auth;

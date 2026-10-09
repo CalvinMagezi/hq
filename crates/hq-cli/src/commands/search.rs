@@ -3,23 +3,41 @@ use hq_core::config::HqConfig;
 use hq_db::Database;
 
 /// Search vault notes by keyword or content.
-pub async fn run(config: &HqConfig, query: &str, limit: usize) -> Result<()> {
+pub async fn run(config: &HqConfig, query: &str, limit: usize, json: bool) -> Result<()> {
     if query.is_empty() {
         anyhow::bail!("Usage: hq search <query> [--limit N]");
     }
 
-    println!("Searching vault for: \"{}\"\n", query);
+    if !json {
+        println!("Searching vault for: \"{}\"\n", query);
+    }
 
     let db_path = config.db_path();
     if !db_path.exists() {
+        if json || config.profile.is_lite() {
+            anyhow::bail!("the search index is not built yet; start HQ once or run `hq reindex`");
+        }
         println!("Search index not built. Run `hq setup` first.");
         println!("Falling back to filesystem search...\n");
         return filesystem_search(config, query, limit);
     }
 
     let db = Database::open(&db_path)?;
-    let results: Vec<hq_core::types::SearchResult> =
-        db.with_conn(|conn| hq_db::search::keyword_search(conn, query, limit))?;
+    let lite = config.profile.is_lite();
+    let mut results: Vec<hq_core::types::SearchResult> =
+        db.with_conn(|conn| hq_db::search::keyword_search(conn, query, if lite { limit.saturating_mul(5) } else { limit }))?;
+    if config.profile.is_lite() {
+        results.retain(|r| !hq_web::lite_hides(&r.note_path));
+        results.truncate(limit);
+    }
+    if json {
+        let hits: Vec<_> = results
+            .iter()
+            .map(|r| serde_json::json!({ "path": r.note_path, "score": r.relevance, "snippet": r.snippet }))
+            .collect();
+        println!("{}", serde_json::json!({ "query": query, "results": hits }));
+        return Ok(());
+    }
 
     if results.is_empty() {
         println!("No results found.");

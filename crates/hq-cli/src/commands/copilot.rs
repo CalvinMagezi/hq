@@ -16,11 +16,90 @@ use serde_yaml::{Mapping, Value};
 /// Name of the backend entry `link` writes.
 const BACKEND_NAME: &str = "copilot";
 
-pub async fn run(config: &HqConfig, sub: &str, model: Option<&str>, write: bool) -> Result<()> {
+pub async fn run(config: &HqConfig, sub: &str, model: Option<&str>, write: bool, agents: bool) -> Result<()> {
     match sub {
         "link" => link(config, model, write).await,
-        other => bail!("unknown subcommand `{other}`; use `hq copilot link [--model M] [--write]`"),
+        "init" => init(&std::env::current_dir()?, agents),
+        other => bail!(
+            "unknown subcommand `{other}`; use `hq copilot link [--model M] [--write]` or `hq copilot init [--agents]`"
+        ),
     }
+}
+
+const BEGIN: &str = "<!-- hq:begin -->";
+const END: &str = "<!-- hq:end -->";
+
+/// The instructions block: how an agent with a terminal and no MCP reaches HQ.
+fn instructions_block() -> String {
+    format!(
+        "{BEGIN}\n\
+## HQ (tasks and notes)\n\
+\n\
+This project uses HQ for tasks and notes. If MCP is not available, use the `hq` command in the\n\
+terminal. `hq task` commands, `--json` ones and `hq search --json` print JSON; all of it runs only on this machine.\n\
+\n\
+Read-only (safe to run freely):\n\
+- `hq task list [--status to_do|in_progress|blocked|ready_for_review|complete]`, `hq task get <id>`,\n\
+  `hq task comments <id>`, `hq task spaces`\n\
+- `hq search <words> --json`, `hq vault list [dir] --json`, `hq vault read <path> --json`\n\
+\n\
+Changes (say what you are about to change first):\n\
+- `hq task create \"<title>\" [--description \"...\"] [--priority high] [--due YYYY-MM-DD]`\n\
+- `hq task update <id> --status in_progress` (also `--title`, `--priority`, `--due`)\n\
+- `hq task comment <id> <text>`\n\
+- `hq vault write <path> -` writes a note from standard input\n\
+\n\
+Task ids look like `PERSONAL-INBOX-001`. Do not edit files under `_system`, `_data` or other\n\
+folders starting with an underscore.\n\
+{END}\n"
+    )
+}
+
+/// `existing` with the HQ block added, or replaced in place when it is already there. A file
+/// whose markers are not exactly one begin followed by one end is the user's to fix.
+fn upsert_block(existing: &str, block: &str) -> Result<String> {
+    let begins = existing.matches(BEGIN).count();
+    let ends = existing.matches(END).count();
+    match (begins, ends) {
+        (0, 0) => {}
+        (1, 1) if existing.find(BEGIN) < existing.find(END) => {
+            let a = existing.find(BEGIN).expect("counted");
+            let b = existing.find(END).expect("counted") + END.len();
+            let b = b + existing[b..].bytes().take_while(|c| *c == b'\r').count();
+            let b = if existing[b..].starts_with('\n') { b + 1 } else { b };
+            return Ok(format!("{}{}{}", &existing[..a], block, &existing[b..]));
+        }
+        _ => bail!(
+            "the file has {begins} `{BEGIN}` and {ends} `{END}` markers, not one of each in order; \
+             fix or remove them by hand and run this again"
+        ),
+    }
+    if existing.trim().is_empty() {
+        return Ok(block.to_string());
+    }
+    Ok(format!("{}\n\n{}", existing.trim_end(), block))
+}
+
+/// Write the block into `.github/copilot-instructions.md` (or `AGENTS.md`) under `dir`.
+fn init(dir: &Path, agents: bool) -> Result<()> {
+    let path = if agents {
+        dir.join("AGENTS.md")
+    } else {
+        dir.join(".github").join("copilot-instructions.md")
+    };
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+    let existing = match std::fs::read_to_string(&path) {
+        Ok(s) => s,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => String::new(),
+        Err(e) => return Err(e).with_context(|| format!("reading {}", path.display())),
+    };
+    std::fs::write(&path, upsert_block(&existing, &instructions_block())?)
+        .with_context(|| format!("writing {}", path.display()))?;
+    println!("Wrote the HQ section to {}", path.display());
+    println!("Everything outside the <!-- hq:begin --> and <!-- hq:end --> markers is left as it was.");
+    Ok(())
 }
 
 async fn link(config: &HqConfig, model: Option<&str>, write: bool) -> Result<()> {
@@ -255,6 +334,40 @@ mod tests {
         assert!(entries[1].enabled);
         assert_eq!(v["backends"]["primary"].as_str(), Some("work"), "a chosen primary stays");
         assert_eq!(v["vault_path"].as_str(), Some("/v"));
+    }
+
+    #[test]
+    fn the_instructions_block_is_added_once_and_updated_in_place() {
+        let block = instructions_block();
+        let first = upsert_block("# Mine\n\nkeep this\n", &block).unwrap();
+        assert!(first.starts_with("# Mine\n\nkeep this\n"));
+        assert_eq!(first.matches(BEGIN).count(), 1);
+        let again = upsert_block(&first, &block).unwrap();
+        assert_eq!(again, first, "running it twice changes nothing");
+        let tail = upsert_block(&format!("{first}\n## After\n"), &block).unwrap();
+        assert!(tail.ends_with("## After\n") && tail.matches(BEGIN).count() == 1);
+        assert_eq!(upsert_block("", &block).unwrap(), block);
+        // Orphaned or reversed markers are refused, never guessed at.
+        assert!(upsert_block(&format!("{BEGIN}\nmine\n"), &block).is_err());
+        assert!(upsert_block(&format!("{END}\nx\n{BEGIN}\n"), &block).is_err());
+    }
+
+    #[test]
+    fn init_writes_where_copilot_and_other_agents_look() {
+        let dir = tempfile::tempdir().unwrap();
+        init(dir.path(), false).unwrap();
+        init(dir.path(), true).unwrap();
+        let g = std::fs::read_to_string(dir.path().join(".github/copilot-instructions.md")).unwrap();
+        assert!(g.contains("hq task list") && g.contains("hq task comment"));
+        assert!(dir.path().join("AGENTS.md").exists());
+    }
+
+    #[test]
+    fn the_commands_it_names_exist() {
+        // Every `hq ...` verb the block advertises must be a real task verb.
+        for verb in ["list", "get", "comments", "spaces", "create", "update", "comment"] {
+            assert!(instructions_block().contains(&format!("hq task {verb}")), "{verb}");
+        }
     }
 
     #[test]
