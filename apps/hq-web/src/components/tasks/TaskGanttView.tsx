@@ -266,7 +266,7 @@ function GanttLabel({ line, onSelect }: { line: Line; onSelect: (task: TaskItem)
       className={`w-full text-left px-3 flex items-center gap-1.5 hover:bg-white/5 ${depth === 1 ? 'pl-7' : ''}`}
       style={{ height: ROW_HEIGHT }}
     >
-      <span className="text-[11px] text-neutral-500 shrink-0">{task.display_id}</span>
+      <span className="hidden sm:inline text-[11px] text-neutral-500 shrink-0">{task.display_id}</span>
       <span className={`text-xs truncate ${task.status === 'complete' ? 'text-neutral-500 line-through' : 'text-neutral-200'}`}>
         {task.title}
       </span>

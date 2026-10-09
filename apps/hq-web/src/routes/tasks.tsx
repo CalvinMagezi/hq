@@ -389,8 +389,8 @@ interface TasksHeaderProps {
 
 function TasksHeader({ activeCount, isRefreshing, onRefresh, onNew, onOpenSidebar }: TasksHeaderProps) {
   return (
-    <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-6">
-      <div className="flex items-center gap-2.5">
+    <div className="flex flex-row items-center justify-between gap-3 mb-4 sm:mb-6">
+      <div className="flex items-center gap-2.5 min-w-0">
         <button
           type="button"
           onClick={onOpenSidebar}
@@ -398,7 +398,7 @@ function TasksHeader({ activeCount, isRefreshing, onRefresh, onNew, onOpenSideba
         >
           <PanelLeftOpen className="w-4 h-4" />
         </button>
-        <div className="p-2.5 rounded-xl hq-glass-card text-emerald-400">
+        <div className="hidden sm:block p-2.5 rounded-xl hq-glass-card text-emerald-400">
           <CheckSquare className="w-5 h-5" />
         </div>
         <div>
@@ -407,10 +407,11 @@ function TasksHeader({ activeCount, isRefreshing, onRefresh, onNew, onOpenSideba
         </div>
       </div>
 
-      <div className="flex items-center gap-2 self-start sm:self-auto">
+      <div className="flex items-center gap-2 shrink-0">
         <button
           type="button"
           onClick={onRefresh}
+          aria-label="Refresh tasks"
           disabled={isRefreshing}
           className="hq-btn-ghost disabled:opacity-50"
         >
@@ -423,7 +424,8 @@ function TasksHeader({ activeCount, isRefreshing, onRefresh, onNew, onOpenSideba
           className="hq-btn-primary !h-9 !px-4"
         >
           <Plus className="w-3.5 h-3.5" />
-          New Task
+          <span className="hidden min-[420px]:inline">New Task</span>
+          <span className="min-[420px]:hidden sr-only">New Task</span>
         </button>
       </div>
     </div>
@@ -448,7 +450,7 @@ function TasksFilterBar(p: TasksFilterBarProps) {
   const { view, setView, statusTab, setStatusTab, statusFilter, setStatusFilter } = p
   const { tagFilter, setTagFilter, allTags, searchQuery, setSearchQuery } = p
   return (
-    <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-5 w-full max-w-full">
+    <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 sm:gap-3 mb-4 sm:mb-5 w-full max-w-full">
       <div className="flex items-center gap-2 flex-wrap w-full sm:w-auto min-w-0">
         <div className="flex items-center gap-1 p-1 rounded-xl hq-field self-start shrink-0">
           {VIEWS.map(({ id, label, icon: Icon }) => (
@@ -484,29 +486,31 @@ function TasksFilterBar(p: TasksFilterBarProps) {
           </div>
         )}
 
-        <select
-          value={statusFilter}
-          onChange={(e) => setStatusFilter(e.target.value as TaskStatus | 'all')}
-          title="Filter by status"
-          className="px-2.5 py-1.5 rounded-xl text-xs text-neutral-200 hq-field focus:outline-none focus:ring-1 focus:ring-emerald-400 max-w-full truncate"
-        >
-          <option value="all">All statuses</option>
-          {STATUS_ORDER.map((status) => (
-            <option key={status} value={status}>{STATUS_LABELS[status]}</option>
-          ))}
-        </select>
+        <div className="flex items-center gap-2 w-full sm:w-auto min-w-0">
+          <select
+            value={statusFilter}
+            onChange={(e) => setStatusFilter(e.target.value as TaskStatus | 'all')}
+            title="Filter by status"
+            className="px-2.5 py-1.5 rounded-xl text-xs text-neutral-200 hq-field focus:outline-none focus:ring-1 focus:ring-emerald-400 max-w-full truncate flex-1 min-w-0 sm:flex-none"
+          >
+            <option value="all">All statuses</option>
+            {STATUS_ORDER.map((status) => (
+              <option key={status} value={status}>{STATUS_LABELS[status]}</option>
+            ))}
+          </select>
 
-        <select
-          value={tagFilter}
-          onChange={(e) => setTagFilter(e.target.value)}
-          title="Filter by tag"
-          className="px-2.5 py-1.5 rounded-xl text-xs text-neutral-200 hq-field focus:outline-none focus:ring-1 focus:ring-emerald-400 max-w-full truncate"
-        >
-          <option value="all">All tags</option>
-          {allTags.map((tag) => (
-            <option key={tag} value={tag}>{tag}</option>
-          ))}
-        </select>
+          <select
+            value={tagFilter}
+            onChange={(e) => setTagFilter(e.target.value)}
+            title="Filter by tag"
+            className="px-2.5 py-1.5 rounded-xl text-xs text-neutral-200 hq-field focus:outline-none focus:ring-1 focus:ring-emerald-400 max-w-full truncate flex-1 min-w-0 sm:flex-none"
+          >
+            <option value="all">All tags</option>
+            {allTags.map((tag) => (
+              <option key={tag} value={tag}>{tag}</option>
+            ))}
+          </select>
+        </div>
       </div>
 
       <div className="relative w-full sm:w-auto sm:max-w-xs sm:flex-1 min-w-0">
