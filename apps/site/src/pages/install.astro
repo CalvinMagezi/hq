@@ -51,7 +51,7 @@ const docker = installChannels.docker;
           <li><a href="#homebrew">Homebrew</a></li>
           <li><a href="#npx">npx installer</a></li>
           <li><a href="#docker">Docker</a></li>
-          <li><a href="#windows">Windows (WSL2)</a></li>
+          <li><a href="#windows">Windows</a></li>
           <li><a href="#source">Build from source</a></li>
           <li><a href="#server">Server with signed releases</a></li>
           <li><a href="#hetzner">One form on Hetzner</a></li>
@@ -140,11 +140,18 @@ const docker = installChannels.docker;
       <h2 id="windows-h">Windows</h2>
       <div class="prose">
         <p>
-          There is no native Windows build. HQ and its coding agents run inside WSL2, which is a normal
-          Ubuntu: in PowerShell run <code>wsl --install -d Ubuntu</code>, open the Ubuntu terminal and use the
-          install script above exactly as on Linux. Open the web UI from your Windows browser at
-          <code>http://localhost:5678</code>. Install bubblewrap (<code>sudo apt install bubblewrap</code>)
-          so agents run in their sandbox; Ubuntu 24.04 also needs user namespaces allowed.
+          Two editions. In PowerShell, <code>irm https://agent-hq.online/install.ps1 | iex</code> looks at your
+          computer, recommends one and asks. <strong>Full HQ</strong> is the default wherever WSL2 works: HQ
+          and its coding agents run inside WSL2, which is a normal Ubuntu, and you open the web UI from your
+          Windows browser at <code>http://localhost:5678</code>. <strong>HQ Lite</strong> is for work computers
+          that block WSL2 or installers: one program in your user profile, no administrator rights, with the web
+          app, tasks, notes and VS Code over MCP, and no coding agents. It is not code-signed yet, and a computer
+          that only allows approved programs may refuse it; the installer says so and stops.
+        </p>
+        <p>
+          By hand, Full HQ is <code>wsl --install -d Ubuntu</code>, then the Linux install script above inside
+          Ubuntu. Install bubblewrap (<code>sudo apt install bubblewrap</code>) so agents run in their sandbox;
+          Ubuntu 24.04 also needs user namespaces allowed.
         </p>
         <p>
           A Windows PC can instead run the coding agents for an HQ on a server: install <code>hq</code> in
@@ -400,7 +407,7 @@ const docker = installChannels.docker;
           promised for any date.
         </p>
         <ul class="facts">
-          <li>Prebuilt binaries for Intel Macs, and a native Windows build. Windows runs HQ through WSL2 today.</li>
+          <li>Prebuilt binaries for Intel Macs, code-signed Windows builds, and coding agents on native Windows (they need WSL2 today).</li>
         </ul>
       </div>
     </section>

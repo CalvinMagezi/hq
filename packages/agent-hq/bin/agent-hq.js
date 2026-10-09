@@ -41,7 +41,7 @@ async function main() {
   if (command !== "install") throw new Error(`unknown command "${command}"; try --help`);
 
   if (process.platform === "win32") {
-    throw new Error("HQ has no native Windows build. Open an Ubuntu (WSL2) terminal and run npx agent-hq-cli there. Guide: https://agent-hq.online/install/#windows");
+    throw new Error("On Windows use the PowerShell installer, which offers Full HQ in WSL2 or HQ Lite: irm https://agent-hq.online/install.ps1 | iex   Guide: https://agent-hq.online/install/#windows");
   }
   if (values["from-source"] || !hasPrebuilt()) {
     if (!values["from-source"]) console.log("No prebuilt binary for this platform; building from source.");

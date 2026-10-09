@@ -141,9 +141,18 @@ The web UI is built separately (see [PWA Dashboard](#pwa-dashboard)) and needs [
 
 ### Windows
 
-There is no native Windows build: HQ and its coding agents run inside WSL2 (Ubuntu), and you use the
-web app from your Windows browser. Setup, including running coding agents on a Windows PC for an HQ
-elsewhere, is in [docs/WINDOWS.md](docs/WINDOWS.md).
+Two editions. **Full HQ** runs inside WSL2 (Ubuntu) with everything, coding agents included, and you
+use the web app from your Windows browser. **HQ Lite** is one program in your user profile for work
+computers that block WSL2 or installers: the web app, tasks, notes and VS Code over MCP, with no
+coding agents. One command picks for you:
+
+```powershell
+irm https://agent-hq.online/install.ps1 | iex
+```
+
+Details, including running coding agents on a Windows PC for an HQ elsewhere, are in
+[docs/WINDOWS.md](docs/WINDOWS.md); the Lite edition and a work-computer checklist are in
+[docs/HQ_LITE.md](docs/HQ_LITE.md) and [docs/CORPORATE_WORKSTATION.md](docs/CORPORATE_WORKSTATION.md).
 
 ### First Run
 

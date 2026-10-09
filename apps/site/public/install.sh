@@ -55,7 +55,7 @@ platform() {
             fi
             ;;
         MINGW*/* | MSYS*/* | CYGWIN*/*)
-            die "HQ has no native Windows build. Open an Ubuntu (WSL2) terminal and run this command there. Guide: https://agent-hq.online/install/#windows"
+            die "This script is for Linux and macOS. On Windows run, in PowerShell: irm https://agent-hq.online/install.ps1 | iex   (it offers Full HQ in WSL2 or HQ Lite). Guide: https://agent-hq.online/install/#windows"
             ;;
         *) die "no prebuilt binary for $os $arch. Build from source: https://github.com/$REPO#install-from-source" ;;
     esac
