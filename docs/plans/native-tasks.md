@@ -475,8 +475,10 @@ Real-harness acceptance (run against a throwaway vault over HTTP `/mcp`, no skil
   instructions (they need `--allow-all-mcp-server-instructions`) and discovery truncates tool
   descriptions, so the claim reply's `next` now states the status rule itself.
 - Cursor agent (project `.cursor/mcp.json`): claimed, commented and released as `ready_for_review`.
-- Not run: Gemini (not installed here), any run with the skill installed, or any harness against a
-  server with auth on. Each run was one small task, not a long job.
+- With `AGENTHQ_API_KEY` set (unkeyed calls refused): Claude Code, with the `hq-tasks` skill placed in
+  its project, and Codex (key via `bearer_token_env_var`) both finished the loop and ended at
+  `ready_for_review`. Codex needs stdin closed (`< /dev/null`) when scripted.
+- Not run: Gemini (not installed here). Each run was one small task, not a long job.
 
 Rollback of 085, then delete the `085_task_assignees` row from `schema_version`:
 
