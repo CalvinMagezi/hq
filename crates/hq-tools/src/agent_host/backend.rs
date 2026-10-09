@@ -76,6 +76,26 @@ pub trait HostBackend: Send + Sync + std::fmt::Debug {
         })
     }
 
+    /// The folder agents started from the web run in by default on this host, created if
+    /// missing: `{root, os, wsl, explorer_path}`. Only the built-in host has one.
+    fn workspace(&self) -> Result<serde_json::Value, AgentHostError> {
+        Err(self.no_workspace())
+    }
+    /// The sub-folders of `path` (the HQ folder when `None`), resolved on the host.
+    fn list_dirs(&self, _path: Option<&str>) -> Result<serde_json::Value, AgentHostError> {
+        Err(self.no_workspace())
+    }
+    /// Creates `name` inside `parent` (the HQ folder when `None`) and returns `{path}`.
+    fn make_dir(&self, _parent: Option<&str>, _name: &str) -> Result<serde_json::Value, AgentHostError> {
+        Err(self.no_workspace())
+    }
+    fn no_workspace(&self) -> AgentHostError {
+        AgentHostError::Api {
+            code: "unsupported".into(),
+            message: format!("host '{}' has no HQ folder", self.name()),
+        }
+    }
+
     /// The same host with a different launch ceiling.
     fn with_launch_bound_dyn(&self, bound: Duration) -> Host;
     /// The same host with a different ceiling for non-wait calls.
@@ -193,6 +213,15 @@ impl<T: HostBackend + ?Sized> HostBackend for Arc<T> {
     }
     fn resume_awaiting(&self, name: &str, env: Vec<(String, String)>) -> Result<(), AgentHostError> {
         (**self).resume_awaiting(name, env)
+    }
+    fn workspace(&self) -> Result<serde_json::Value, AgentHostError> {
+        (**self).workspace()
+    }
+    fn list_dirs(&self, path: Option<&str>) -> Result<serde_json::Value, AgentHostError> {
+        (**self).list_dirs(path)
+    }
+    fn make_dir(&self, parent: Option<&str>, name: &str) -> Result<serde_json::Value, AgentHostError> {
+        (**self).make_dir(parent, name)
     }
     fn with_launch_bound_dyn(&self, bound: Duration) -> Host {
         (**self).with_launch_bound_dyn(bound)

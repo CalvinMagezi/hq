@@ -387,6 +387,7 @@ fn harness_block_carries_machine_profile_and_tool_notes() {
             tool_notes: Some("## Tool Usage Notes\n\n- **bash**: prefer the dedicated tools.\n"),
             tool_catalog: None,
             can_build_self: true,
+            ..Default::default()
         },
     );
     assert!(block.contains("## Environment"), "{block}");

@@ -336,6 +336,129 @@ fn index_web_note(state: &WsState, abs: &Path, raw: &str) {
     }
 }
 
+/// At most this many exports at once: a PDF or PNG of a long note takes real memory.
+static EXPORT_SLOTS: tokio::sync::Semaphore = tokio::sync::Semaphore::const_new(4);
+
+/// `GET /api/note/pdf?path=<note>[&brand=<slug>]`: the note rendered as a PDF download.
+/// Kept for existing clients; same as `/api/note/export?format=pdf`.
+pub(crate) async fn note_pdf_handler(
+    State(state): State<Arc<WsState>>,
+    axum::extract::Query(params): axum::extract::Query<std::collections::HashMap<String, String>>,
+) -> Response {
+    note_export_response(&state, &params, Some(hq_export::Format::Pdf)).await
+}
+
+/// `GET /api/note/export?path=<note>&format=<fmt>[&brand=<slug>]`: the note as a
+/// download in any format `hq_export` writes. `format` defaults to `pdf`.
+pub(crate) async fn note_export_handler(
+    State(state): State<Arc<WsState>>,
+    axum::extract::Query(params): axum::extract::Query<std::collections::HashMap<String, String>>,
+) -> Response {
+    note_export_response(&state, &params, None).await
+}
+
+async fn note_export_response(
+    state: &Arc<WsState>,
+    params: &std::collections::HashMap<String, String>,
+    fixed_format: Option<hq_export::Format>,
+) -> Response {
+    let path_param = params.get("path").cloned().unwrap_or_default();
+    if is_rejected_note_ref(&path_param) {
+        return ApiError::bad_request("invalid path").into_response();
+    }
+    let format = match fixed_format {
+        Some(f) => f,
+        None => match params.get("format").filter(|f| !f.is_empty()) {
+            Some(raw) => match raw.parse::<hq_export::Format>() {
+                Ok(f) => f,
+                Err(e) => return ApiError::bad_request(e.to_string()).into_response(),
+            },
+            None => hq_export::Format::Pdf,
+        },
+    };
+    let Some((abs, _rel)) = resolve_note_path(&state.vault_path, &path_param) else {
+        return ApiError::not_found().into_response();
+    };
+    let is_text_note = abs
+        .extension()
+        .and_then(|e| e.to_str())
+        .is_some_and(|e| matches!(e.to_ascii_lowercase().as_str(), "md" | "markdown" | "txt"));
+    if !is_text_note {
+        return ApiError::bad_request("only Markdown notes can be exported").into_response();
+    }
+    let brand = match params.get("brand").filter(|b| !b.is_empty()) {
+        Some(slug) => match hq_convert::brand::load_brand_kit(&state.vault_path, slug) {
+            Ok(kit) => Some(kit),
+            Err(e) => return ApiError::bad_request(e.to_string()).into_response(),
+        },
+        None => None,
+    };
+    let languages: Vec<String> = params
+        .get("languages")
+        .map(|l| l.split(',').map(|s| s.trim().to_owned()).filter(|s| !s.is_empty()).collect())
+        .unwrap_or_default();
+    let Ok(_slot) = EXPORT_SLOTS.acquire().await else {
+        return ApiError::internal("export unavailable").into_response();
+    };
+    let done = match hq_export::export_note(&state.vault_path, &abs, format, brand.as_ref(), &languages)
+        .await
+    {
+        Ok(done) => done,
+        // The note simply has nothing of that kind (no tables, no code): the
+        // caller asked for something this note cannot give.
+        Err(e @ hq_export::ExportError::Unsupported(_)) => {
+            return ApiError::bad_request(e.to_string()).into_response();
+        }
+        Err(e @ hq_export::ExportError::Unavailable(_)) => {
+            return ApiError::Unavailable(e.to_string()).into_response();
+        }
+        Err(e) => return ApiError::internal(e).into_response(),
+    };
+    let ascii: String = done
+        .title
+        .chars()
+        .map(|c| {
+            if c.is_ascii_alphanumeric() || c == '-' || c == '_' {
+                c
+            } else {
+                ' '
+            }
+        })
+        .collect::<String>()
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join("-");
+    let ascii = if ascii.is_empty() {
+        "note".to_string()
+    } else {
+        ascii
+    };
+    let encoded: String = done
+        .title
+        .bytes()
+        .map(|b| match b {
+            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' => (b as char).to_string(),
+            _ => format!("%{b:02X}"),
+        })
+        .collect();
+    let ext = &done.output.extension;
+    let disposition =
+        format!("attachment; filename=\"{ascii}.{ext}\"; filename*=UTF-8''{encoded}.{ext}");
+    (
+        axum::http::StatusCode::OK,
+        [
+            (
+                axum::http::header::CONTENT_TYPE,
+                done.output.mime.to_string(),
+            ),
+            (axum::http::header::CONTENT_DISPOSITION, disposition),
+            (axum::http::header::CACHE_CONTROL, "no-store".to_string()),
+        ],
+        axum::body::Body::from(done.output.bytes),
+    )
+        .into_response()
+}
+
 /// `POST /api/note/create {folder?, title, content}`: never overwrites an existing note.
 pub(crate) async fn note_create_handler(
     State(state): State<Arc<WsState>>,

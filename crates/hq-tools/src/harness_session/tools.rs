@@ -78,6 +78,7 @@ impl HqTool for HarnessSessionSpawnTool {
             &cfg.agent_host,
             super::is_handoff_scope(&args),
         )?;
+        super::check_cwd_outside_vault(&cwd, &host, &cfg.agent_host.default_host, &cfg.vault_path)?;
         let host_handle = crate::agent_host::host(Some(host.as_str()).filter(|h| !h.is_empty()))?;
         let report = super::spawn_on(
             &self.vault_path,
@@ -679,12 +680,13 @@ impl HqTool for HarnessSessionHandoffTool {
         let origin = super::start_origin(self.chat.as_ref());
         super::check_origin_cap(&self.db, origin)?;
         let cfg = hq_core::config::HqConfig::load()?;
-        super::require_cwd_in(
+        let handoff_cwd = super::require_cwd_in(
             args.get("cwd").and_then(Value::as_str),
             &cfg.agent_host,
             super::is_handoff_scope(&args),
         )?;
         let host_name = arg_str(&args, "host");
+        super::check_cwd_outside_vault(&handoff_cwd, &host_name, &cfg.agent_host.default_host, &cfg.vault_path)?;
         let host = crate::agent_host::host(Some(host_name.as_str()).filter(|h| !h.is_empty()))?;
         let owned = |key: &str| arg_str(&args, key);
         let acceptance = [owned("acceptance"), owned("done_criteria")]

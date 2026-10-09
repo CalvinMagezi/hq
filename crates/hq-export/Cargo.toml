@@ -1,0 +1,33 @@
+[package]
+name = "hq-export"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Native export of vault notes to PDF, PNG, SVG and other formats, with no external tools"
+
+[dependencies]
+hq-convert = { path = "../hq-convert" }
+pulldown-cmark = { workspace = true }
+base64 = { workspace = true }
+csv = "1"
+dirs = { workspace = true }
+docx-rs = "0.4.22"
+image = { version = "0.25", default-features = false, features = ["png", "jpeg", "gif", "webp"] }
+rust_xlsxwriter = "0.99"
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+tokio = { workspace = true }
+tracing = { workspace = true }
+zip = { version = "8", default-features = false, features = ["deflate"] }
+
+# Typst is the layout engine behind PDF, PNG and SVG. Versions are pinned
+# exactly: its crates change their public API between minor releases.
+typst-as-lib = { version = "=0.17.0", features = ["typst-kit-fonts", "typst-kit-embed-fonts"] }
+typst-layout = "=0.15.1"
+typst-pdf = "=0.15.1"
+typst-render = "=0.15.1"
+typst-svg = "=0.15.1"
+typst-utils = "=0.15.1"
+
+[dev-dependencies]
+tempfile = "3"
