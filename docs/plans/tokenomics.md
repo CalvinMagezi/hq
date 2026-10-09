@@ -44,3 +44,32 @@ by `hq_llm::unscoped_calls()`; `hq doctor` warns when more than 5% of recent cal
 - `hq usage` / `hq usage origin` / `hq usage daily`: spend, tokens, cache hit rate, unpriced warning.
 - `hq usage reconcile`: compares the ledger with OpenRouter's billed spend for today, this week and
   this month (UTC). The daemon runs the same check daily and logs a warning on drift beyond 10%.
+
+## Provider usage adapters (phase 2)
+
+`GET /api/usage/providers` returns one row per enabled backend: what the provider says (balance,
+spend over the UTC day, week and month) and what HQ's own ledger recorded, each labelled with its
+`source` (`provider` or `ledger`) so an estimate is never shown as a provider fact. `status` is
+`ok`, `refused`, `error`, `no_key`, `local`, `subscription` or `ledger_only`.
+
+Capability matrix, from each provider's official documentation as of 2026-10-09. "Not documented"
+means the official page did not state it; nothing here is built on a third-party claim.
+
+| Provider | Balance | Spend | Key needed | Billed cost in responses | Adapter |
+|---|---|---|---|---|---|
+| OpenRouter | `GET /api/v1/key` (limit, `limit_remaining`); `/credits` | `usage_daily`, `usage_weekly`, `usage_monthly` (UTC) on `/key`; `/activity` (management key) | `/key`: the inference key. `/credits` and `/activity`: documented as management key only | Yes, `usage.cost` | `openrouter` |
+| DeepSeek | `GET /user/balance` (`balance_infos[].total_balance`) | none | inference key (Bearer) | no | `deepseek` |
+| Moonshot (Open Platform) | `GET /v1/users/me/balance` (`data.available_balance`) | none | inference key | not documented | `moonshot` |
+| Anthropic | none | `GET /v1/organizations/cost_report` (UTC days, cents) | admin key; unavailable to individual accounts | no, tokens only | `anthropic_admin`, opt in with `usage_ledger.anthropic_admin_key_env` |
+| OpenAI | none | `GET /v1/organization/costs` | admin key | no, tokens only | ledger only (endpoint not verified against OpenAI's own reference) |
+| Google Gemini, Groq, Cerebras | none | none (console only) | n/a | no | ledger only |
+| Kimi Code, GitHub Copilot | subscription quota | console or `/api/copilot-usage` | n/a | no | `subscription` |
+| Ollama and other loopback endpoints | n/a | n/a | n/a | n/a | `local`, tokens tracked, nothing billed |
+
+Open questions, so nobody builds on them unverified: OpenRouter's OpenAPI marks `/credits` as
+requiring a management key, while the existing settings card reads it with the inference key and
+falls back to `/key` figures when refused; check against a real key.
+
+Not built here: rate-limit response headers (`x-ratelimit-*` for OpenAI and Groq,
+`anthropic-ratelimit-*` for Anthropic) as a free quota signal. They need a hook in each provider's
+HTTP layer and are tracked as a follow-up.

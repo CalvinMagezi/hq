@@ -2,11 +2,10 @@
 //! `task_outcomes`, the one row per LLM call that hq-agent's outcome sink writes.
 
 use anyhow::Result;
-use chrono::{Datelike, TimeZone, Utc};
 use hq_core::config::{HqConfig, openrouter_key, openrouter_primary};
 use hq_db::Database;
 use hq_db::usage_ledger::{
-    GroupBy, UsageRow, grouped_usage, provider_spend, sum_rows, unpriced_models,
+    GroupBy, UsageRow, grouped_usage, provider_spend, sum_rows, unpriced_models, utc_period_starts,
 };
 use hq_llm::openrouter_usage::{OpenRouterUsage, fetch_usage};
 use hq_llm::reconcile::{Verdict, WindowDrift, compare};
@@ -193,22 +192,6 @@ fn openrouter_ledger_names(config: &HqConfig) -> Vec<String> {
     names
 }
 
-fn utc_midnight(ts: i64) -> i64 {
-    ts - ts.rem_euclid(SECS_PER_DAY)
-}
-
-/// Start of the UTC day, Monday-based week and month containing `now`, the periods OpenRouter resets on.
-fn period_starts(now: i64) -> [(&'static str, i64); 3] {
-    let day = utc_midnight(now);
-    let dt = Utc.timestamp_opt(now, 0).single().unwrap_or_default();
-    let week = day - i64::from(dt.weekday().num_days_from_monday()) * SECS_PER_DAY;
-    let month = Utc
-        .with_ymd_and_hms(dt.year(), dt.month(), 1, 0, 0, 0)
-        .single()
-        .map_or(day, |m| m.timestamp());
-    [("today", day), ("this week", week), ("this month", month)]
-}
-
 fn reconcile_windows(
     db: &Database,
     names: &[String],
@@ -216,7 +199,7 @@ fn reconcile_windows(
     usage: &OpenRouterUsage,
 ) -> Result<Vec<WindowDrift>> {
     let provider = [usage.usage_daily, usage.usage_weekly, usage.usage_monthly];
-    period_starts(now)
+    utc_period_starts(now)
         .into_iter()
         .zip(provider)
         .map(|((label, since), billed)| {
@@ -444,7 +427,7 @@ mod tests {
     #[test]
     fn periods_start_at_utc_midnight_monday_and_the_first() {
         // 2026-09-20 is a Sunday, so the week began on Monday 2026-09-14.
-        let [(_, day), (_, week), (_, month)] = period_starts(NOW);
+        let [(_, day), (_, week), (_, month)] = utc_period_starts(NOW);
         assert_eq!(day, NOW - 12 * 3600);
         assert_eq!(week, day - 6 * SECS_PER_DAY);
         assert_eq!(month, day - 19 * SECS_PER_DAY);

@@ -3,7 +3,9 @@
 //! counts a call the same way.
 
 use anyhow::Result;
+use chrono::{Datelike, TimeZone, Utc};
 use rusqlite::{Connection, params};
+use serde::Serialize;
 
 const SECS_PER_DAY: i64 = 86_400;
 
@@ -107,6 +109,43 @@ pub fn provider_spend(
         params![provider, since, until],
         |r| Ok((r.get(0)?, r.get(1)?)),
     )?)
+}
+
+/// Start of the UTC day, Monday-based week and month containing `now`: the periods providers
+/// such as OpenRouter and Anthropic reset on.
+pub fn utc_period_starts(now: i64) -> [(&'static str, i64); 3] {
+    let day = now - now.rem_euclid(SECS_PER_DAY);
+    let dt = Utc.timestamp_opt(now, 0).single().unwrap_or_default();
+    let week = day - i64::from(dt.weekday().num_days_from_monday()) * SECS_PER_DAY;
+    let month = Utc
+        .with_ymd_and_hms(dt.year(), dt.month(), 1, 0, 0, 0)
+        .single()
+        .map_or(day, |m| m.timestamp());
+    [("today", day), ("this week", week), ("this month", month)]
+}
+
+/// What HQ's own ledger recorded for one provider, in dollars, over the current UTC periods.
+#[derive(Debug, Clone, Default, Serialize, PartialEq)]
+pub struct LedgerWindows {
+    pub today: f64,
+    pub week: f64,
+    pub month: f64,
+    /// Calls this month whose cost HQ could not price, so the figures are a lower bound.
+    pub unpriced_calls: i64,
+}
+
+pub fn ledger_windows(conn: &Connection, provider: &str, now: i64) -> Result<LedgerWindows> {
+    let [(_, day), (_, week), (_, month)] = utc_period_starts(now);
+    let until = now + 1;
+    let (today, _) = provider_spend(conn, provider, day, until)?;
+    let (week_usd, _) = provider_spend(conn, provider, week, until)?;
+    let (month_usd, unpriced) = provider_spend(conn, provider, month, until)?;
+    Ok(LedgerWindows {
+        today,
+        week: week_usd,
+        month: month_usd,
+        unpriced_calls: unpriced,
+    })
 }
 
 /// Models that ran with no known price, newest first, so a doctor can name them.
@@ -217,6 +256,19 @@ mod tests {
         assert_eq!(rolled, (2, 3.0));
         let raw = grouped_usage(&conn, 0, GroupBy::Origin).unwrap();
         assert_eq!(sum_rows(&raw).cost_usd, 4.0);
+    }
+
+    #[test]
+    fn ledger_windows_split_one_provider_into_utc_periods() {
+        let conn = db();
+        // NOW is Sunday 2026-09-20 12:00 UTC: the week began Monday the 14th, the month on the 1st.
+        put(&conn, NOW - 60, "table", "chat", 1.0, 0);
+        put(&conn, NOW - 2 * SECS_PER_DAY, "unpriced", "chat", 0.0, 0);
+        put(&conn, NOW - 10 * SECS_PER_DAY, "table", "chat", 4.0, 0);
+        put(&conn, NOW - 30 * SECS_PER_DAY, "table", "chat", 8.0, 0);
+        let w = ledger_windows(&conn, "openrouter", NOW).unwrap();
+        assert_eq!((w.today, w.week, w.month, w.unpriced_calls), (1.0, 1.0, 5.0, 1));
+        assert_eq!(ledger_windows(&conn, "nobody", NOW).unwrap(), LedgerWindows::default());
     }
 
     #[test]
