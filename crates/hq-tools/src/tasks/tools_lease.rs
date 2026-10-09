@@ -358,7 +358,7 @@ impl HqTool for TaskNextTool {
             "type": "object",
             "properties": {
                 "actor": { "type": "string", "description": "Your name, for example your agent name" },
-                "assignee": { "type": "string", "description": "Whose queue to take from. Defaults to your actor name." },
+                "assignee": { "type": "string", "description": "Whose queue to take from. Defaults to your actor name, and names you if actor is left out." },
                 "include_unassigned": { "type": "boolean", "default": false },
                 "initiative_id": { "type": "string", "description": "Only from this initiative" },
                 "tag": { "type": "string", "description": "Only tasks with this topical tag" },
@@ -378,7 +378,11 @@ impl HqTool for TaskNextTool {
         Some("what should I work on next, pick my next task, take work from my queue")
     }
     async fn execute(&self, args: Value) -> Result<Value> {
-        let actor = arg_str(&args, "actor");
+        let mut actor = arg_str(&args, "actor");
+        // Someone who names the queue they want has said who they are; a fresh agent often sends only that.
+        if actor.trim().is_empty() {
+            actor = opt_str(&args, "assignee").unwrap_or_default();
+        }
         if actor.trim().is_empty() {
             bail!("actor is required: name yourself, for example your agent name");
         }

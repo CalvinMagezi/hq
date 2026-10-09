@@ -460,6 +460,17 @@ Any agent, whatever harness it runs in, can use tasks as its headquarters. Migra
   only a summary becomes the new resume point but keeps the last checkpoint's next step, open
   questions and files.
 
+Real-harness acceptance (run against a throwaway vault over HTTP `/mcp`, no skill installed, prompt
+"you are <name>, use the hq MCP server to find the work assigned to you and do it"):
+
+- Claude Code with a small model: `task_next`, `task_comment_add`, `task_release` and done. One
+  stumble, `task_next` refused a call that named only `assignee`; it now takes that as the actor too.
+- Codex: first run found nothing because HQ answered the `notifications/initialized` notification
+  with a JSON body, which Codex's client rejects; HQ now returns an empty `202 Accepted`. Codex
+  also needs its per-server tool approval set for non-interactive use (`default_tools_approval_mode`).
+  With both, it found the task through `hq_discover`/`hq_call`, did the work, and released it.
+- Not run: Cursor, Gemini, OpenCode, Copilot CLI, or any run with the skill installed.
+
 Rollback of 085, then delete the `085_task_assignees` row from `schema_version`:
 
 ```sql

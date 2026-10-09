@@ -31,11 +31,23 @@ pub(crate) async fn mcp_handler(
     headers: axum::http::HeaderMap,
     State(state): State<Arc<WsState>>,
     Json(body): Json<Value>,
-) -> Json<Value> {
+) -> axum::response::Response {
     let keys = McpKeys::from_env();
     let switch_on = std::env::var(crate::auth::MCP_DEV_NO_AUTH_ENV).is_ok_and(|v| v == "1");
     let dev_open = crate::auth::mcp_dev_open(&headers, switch_on, state.web_bind_is_loopback);
-    handle_mcp(&state, &headers, body, &keys, dev_open).await
+    let is_notification = body.get("id").is_none();
+    let reply = handle_mcp(&state, &headers, body, &keys, dev_open).await;
+    answer(is_notification, reply)
+}
+
+/// A notification has no response in JSON-RPC, and clients such as Codex fail the connection on a body
+/// for one. A refusal is still returned so an unauthorized client learns why.
+fn answer(is_notification: bool, reply: Json<Value>) -> axum::response::Response {
+    use axum::response::IntoResponse;
+    if is_notification && reply.0.get("error").is_none() {
+        return axum::http::StatusCode::ACCEPTED.into_response();
+    }
+    reply.into_response()
 }
 
 /// The configured keys, one per scope.
@@ -215,6 +227,20 @@ mod tests {
         );
         headers.insert(SPAWNED_SESSION_HEADER, "hs-claude-code-1".parse().unwrap());
         assert_eq!(spawned_by(&headers), Some("hs-claude-code-1"));
+    }
+
+    #[tokio::test]
+    async fn a_notification_gets_an_empty_202_and_a_request_or_a_refusal_gets_its_body() {
+        let ok = rpc_ok(Value::Null, json!({}));
+        let accepted = answer(true, ok);
+        assert_eq!(accepted.status(), axum::http::StatusCode::ACCEPTED);
+        assert!(axum::body::to_bytes(accepted.into_body(), usize::MAX).await.unwrap().is_empty());
+
+        let answered = answer(false, rpc_ok(json!(1), json!({"tools": []})));
+        assert_eq!(answered.status(), axum::http::StatusCode::OK);
+        let refused = answer(true, rpc_err(Value::Null, -32001, "Unauthorized"));
+        let bytes = axum::body::to_bytes(refused.into_body(), usize::MAX).await.unwrap();
+        assert!(String::from_utf8_lossy(&bytes).contains("Unauthorized"));
     }
 
     #[test]

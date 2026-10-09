@@ -2082,6 +2082,10 @@ async fn task_next_starts_the_most_urgent_task_assigned_to_you_and_nobody_else_g
     call_tool(&tools, "task_create", json!({ "title": "Someone else's", "assignees": ["other"] })).await.unwrap();
 
     assert!(call_tool(&tools, "task_next", json!({})).await.is_err(), "it needs to know who is asking");
+    let by_queue = call_tool(&tools, "task_next", json!({ "assignee": "builder" })).await.unwrap();
+    assert_eq!(by_queue["task"]["title"], "Now", "naming the queue also names the asker");
+    assert_eq!(by_queue["task"]["status"], "in_progress");
+    call_tool(&tools, "task_release", json!({ "lease": by_queue["lease"], "status": "to_do" })).await.unwrap();
     let first = call_tool(&tools, "task_next", json!({ "actor": "builder", "harness": "claude-code" })).await.unwrap();
     assert_eq!(first["task"]["title"], "Now");
     assert_eq!(first["task"]["status"], "in_progress");
