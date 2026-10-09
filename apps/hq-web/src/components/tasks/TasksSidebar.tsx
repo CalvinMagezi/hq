@@ -83,7 +83,7 @@ function AddRow({
         }}
         onBlur={() => { if (!name.trim()) setOpen(false) }}
         placeholder={placeholder}
-        className="flex-1 min-w-0 px-2 py-1 rounded-md text-[11px] font-mono text-neutral-200 bg-black/40 border border-white/10 focus:outline-none focus:ring-1 focus:ring-emerald-400"
+        className="flex-1 min-w-0 px-2 py-1 rounded-md text-[11px] text-neutral-200 hq-field focus:outline-none focus:ring-1 focus:ring-emerald-400"
       />
       <button type="button" onClick={submit} disabled={busy || !name.trim()} className="p-1 text-emerald-400 disabled:opacity-40 shrink-0">
         {busy ? <Loader2 className="w-3 h-3 animate-spin" /> : <Plus className="w-3 h-3" />}
@@ -96,7 +96,7 @@ export const ALL_SELECTION: TaskSelection = { spaceId: null, folderId: null, ini
 
 
 function rowClass(active: boolean) {
-  return `w-full text-left py-1.5 px-2 text-xs font-mono flex items-center gap-1.5 rounded-lg transition-all mx-0.5 group ${
+  return `w-full text-left py-1.5 px-2 text-xs flex items-center gap-1.5 rounded-lg transition-all mx-0.5 group ${
     active ? 'bg-emerald-500/10 text-emerald-400' : 'text-neutral-400 hover:bg-white/5 hover:text-neutral-200'
   }`
 }
@@ -146,7 +146,7 @@ export function TasksSidebar({ spaces, folders, initiatives, tasks, selection, o
   const body = (
     <div className="flex flex-col h-full">
       <div className="flex items-center justify-between px-3 pt-3 pb-2 gap-2">
-        <span className="text-[10px] font-mono tracking-widest uppercase font-bold text-neutral-300">Spaces</span>
+        <span className="text-[11px] tracking-widest uppercase font-bold text-neutral-300">Spaces</span>
         <div className="flex items-center gap-1">
           <AddRow
             placeholder="New space"
@@ -178,7 +178,7 @@ export function TasksSidebar({ spaces, folders, initiatives, tasks, selection, o
         >
           <LayoutGrid className="w-3.5 h-3.5 shrink-0" />
           <span className="truncate">All Tasks</span>
-          <span className="ml-auto text-[10px] text-neutral-600">{tasks.length}</span>
+          <span className="ml-auto text-[11px] text-neutral-600">{tasks.length}</span>
         </button>
 
         {spaces.map((space) => {
@@ -202,7 +202,7 @@ export function TasksSidebar({ spaces, folders, initiatives, tasks, selection, o
                   className={`${rowClass(isSelected({ spaceId: space.id }))} flex-1 min-w-0`}
                 >
                   <span className="truncate font-semibold">{space.name}</span>
-                  <span className="ml-auto text-[10px] text-neutral-600">{spaceCount(space.id)}</span>
+                  <span className="ml-auto text-[11px] text-neutral-600">{spaceCount(space.id)}</span>
                 </button>
                 <AddRow
                   placeholder="New list"
@@ -245,7 +245,7 @@ export function TasksSidebar({ spaces, folders, initiatives, tasks, selection, o
                               <FolderIcon className="w-3.5 h-3.5 shrink-0 text-amber-400/70" />
                             )}
                             <span className="truncate">{folder.name}</span>
-                            <span className="ml-auto text-[10px] text-neutral-600">{folderCount(folder.id)}</span>
+                            <span className="ml-auto text-[11px] text-neutral-600">{folderCount(folder.id)}</span>
                           </button>
                           <AddRow
                             placeholder="New list"
@@ -272,7 +272,7 @@ export function TasksSidebar({ spaces, folders, initiatives, tasks, selection, o
                               >
                                 <ListChecks className="w-3.5 h-3.5 shrink-0" />
                                 <span className="truncate">{initiative.name}</span>
-                                <span className="ml-auto text-[10px] text-neutral-600">{initiativeCount(initiative.id)}</span>
+                                <span className="ml-auto text-[11px] text-neutral-600">{initiativeCount(initiative.id)}</span>
                               </button>
                             ))}
                           </div>
@@ -294,7 +294,7 @@ export function TasksSidebar({ spaces, folders, initiatives, tasks, selection, o
                     >
                       <ListChecks className="w-3.5 h-3.5 shrink-0" />
                       <span className="truncate">{initiative.name}</span>
-                      <span className="ml-auto text-[10px] text-neutral-600">{initiativeCount(initiative.id)}</span>
+                      <span className="ml-auto text-[11px] text-neutral-600">{initiativeCount(initiative.id)}</span>
                     </button>
                   ))}
                 </div>
@@ -315,7 +315,7 @@ export function TasksSidebar({ spaces, folders, initiatives, tasks, selection, o
         />
       )}
       <aside
-        className={`fixed md:relative top-0 left-0 z-50 md:z-auto h-full flex-shrink-0 pad-safe-top pb-[var(--safe-bottom)] md:pb-0 w-[260px] border-r border-white/5 bg-neutral-950 md:bg-black/20 transition-transform duration-200 ${
+        className={`fixed md:relative top-0 left-0 z-50 md:z-auto h-full flex-shrink-0 pad-safe-top pb-[var(--safe-bottom)] md:pb-0 w-[260px] border-r border-white/10 bg-neutral-950/90 md:bg-transparent backdrop-blur-xl transition-transform duration-200 ${
           mobileOpen ? 'translate-x-0' : '-translate-x-full md:translate-x-0'
         }`}
       >

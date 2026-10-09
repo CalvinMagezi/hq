@@ -6,7 +6,7 @@ export const PRIORITIES: TaskPriority[] = ['urgent', 'high', 'normal', 'low']
 /** The small uppercase label above a field in the new-task form. */
 export function FieldLabel({ children }: { children: ReactNode }) {
   return (
-    <label className="block text-[10px] font-mono font-semibold text-neutral-500 uppercase tracking-wider mb-1">
+    <label className="block text-[11px] font-semibold text-neutral-500 uppercase tracking-wider mb-1">
       {children}
     </label>
   )
@@ -15,7 +15,7 @@ export function FieldLabel({ children }: { children: ReactNode }) {
 /** A section heading in the task drawer. */
 export function SectionLabel({ children, className = 'mb-1.5' }: { children: ReactNode; className?: string }) {
   return (
-    <h3 className={`text-xs font-mono font-semibold text-neutral-400 uppercase tracking-wider ${className}`}>
+    <h3 className={`text-xs font-semibold text-neutral-400 uppercase tracking-wider ${className}`}>
       {children}
     </h3>
   )

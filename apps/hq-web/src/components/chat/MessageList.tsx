@@ -56,7 +56,7 @@ export function MessageList({ threadId, messages, followSignal, onEdit, onRegene
                 type="button"
                 onClick={() => void olderPage.load()}
                 disabled={olderPage.loading}
-                className="flex items-center gap-1.5 h-9 px-3 rounded-full border border-white/10 text-xs font-mono text-neutral-400 hover:text-white hover:bg-white/5 disabled:opacity-60"
+                className="flex items-center gap-1.5 h-9 px-3 rounded-full border border-white/10 text-xs text-neutral-400 hover:text-white hover:bg-white/5 disabled:opacity-60"
               >
                 {olderPage.loading && <Loader2 className="w-3.5 h-3.5 animate-spin" />}
                 {olderPage.loading ? 'Loading earlier messages' : 'Load earlier messages'}
@@ -95,7 +95,7 @@ export function MessageList({ threadId, messages, followSignal, onEdit, onRegene
           ))}
 
           {unanswered && (
-            <div role="alert" className="flex items-center gap-2 mb-4 px-3 py-2 rounded-xl border border-amber-500/30 bg-amber-500/[0.04] text-xs font-mono text-neutral-200">
+            <div role="alert" className="flex items-center gap-2 mb-4 px-3 py-2 rounded-xl border border-amber-500/30 bg-amber-500/[0.04] text-xs text-neutral-200">
               <AlertTriangle className="w-4 h-4 shrink-0 text-amber-400" />
               <span className="flex-1 min-w-0">HQ did not finish a reply to this message.</span>
               <button
@@ -116,7 +116,7 @@ export function MessageList({ threadId, messages, followSignal, onEdit, onRegene
         <button
           type="button"
           onClick={() => scrollToBottom(true)}
-          className="absolute bottom-3 left-1/2 -translate-x-1/2 z-20 flex items-center gap-1.5 h-10 px-4 rounded-full border border-white/15 bg-neutral-900/90 backdrop-blur text-xs font-mono text-neutral-200 shadow-lg hover:bg-neutral-800"
+          className="absolute bottom-3 left-1/2 -translate-x-1/2 z-20 flex items-center gap-1.5 h-10 px-4 rounded-full border border-white/15 bg-neutral-900/90 backdrop-blur text-xs text-neutral-200 shadow-lg hover:bg-neutral-800"
           title="Scroll to the newest message"
         >
           <ArrowDown className="w-3.5 h-3.5" />

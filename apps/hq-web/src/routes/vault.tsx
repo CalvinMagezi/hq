@@ -206,13 +206,13 @@ function VaultLayout() {
                                     className="w-2 h-2 rounded-full"
                                     style={{ background: 'var(--accent-blue)', boxShadow: '0 0 8px rgba(0,173,238,0.4)' }}
                                 />
-                                <span className="text-xs font-mono font-bold tracking-wider uppercase" style={{ color: 'var(--text-primary)' }}>
+                                <span className="text-xs font-bold tracking-wider uppercase" style={{ color: 'var(--text-primary)' }}>
                                     Vault Explorer
                                 </span>
                             </div>
                             <button
                                 onClick={() => setSidebarOpen(false)}
-                                className="p-1.5 rounded-lg text-xs font-mono transition-all active:scale-95"
+                                className="p-1.5 rounded-lg text-xs transition-all active:scale-95"
                                 style={{
                                     color: 'var(--text-dim)',
                                     background: 'rgba(255,255,255,0.05)',
@@ -235,7 +235,7 @@ function VaultLayout() {
                     <div className="md:hidden flex items-center gap-2 px-3 py-2 flex-shrink-0 glass-heavy border-b border-white/5">
                         <button
                             onClick={() => setSidebarOpen(true)}
-                            className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-mono"
+                            className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs "
                             style={{ color: 'var(--accent-blue)', background: 'rgba(0, 173, 238, 0.08)' }}
                         >
                             <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round">
@@ -253,7 +253,7 @@ function VaultLayout() {
                             <button
                                 onClick={toggleSidebarCollapsed}
                                 title="Expand sidebar"
-                                className="flex items-center gap-2 px-3 py-1.5 rounded-xl text-xs font-mono glass-card hover:border-accent-blue/40 text-text-dim hover:text-accent-blue transition-all"
+                                className="flex items-center gap-2 px-3 py-1.5 rounded-xl text-xs glass-card hover:border-accent-blue/40 text-text-dim hover:text-accent-blue transition-all"
                             >
                                 <PanelLeftOpen className="w-3.5 h-3.5 text-accent-blue" />
                                 <span>Files</span>

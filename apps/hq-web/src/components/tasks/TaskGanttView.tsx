@@ -170,7 +170,7 @@ export function TaskGanttView({ tasks, allById, initiativeById, onSelect, onResc
           </div>
         </div>
         {lines.length === 0 && (
-          <p className="px-4 py-10 text-center text-xs font-mono text-neutral-500">
+          <p className="px-4 py-10 text-center text-xs text-neutral-500">
             No scheduled tasks. Drag one from the tray below onto the timeline.
           </p>
         )}
@@ -180,7 +180,7 @@ export function TaskGanttView({ tasks, allById, initiativeById, onSelect, onResc
 
       {drag?.mode === 'place' && (
         <div
-          className="fixed z-50 pointer-events-none px-2.5 py-1 rounded-lg text-[11px] font-mono border shadow-2xl bg-neutral-950 text-neutral-200 border-emerald-500/40"
+          className="fixed z-50 pointer-events-none px-2.5 py-1 rounded-lg text-[11px] border shadow-2xl bg-neutral-950 text-neutral-200 border-emerald-500/40"
           style={{ left: drag.point.x + BAR_INSET, top: drag.point.y + BAR_INSET }}
         >
           {drag.task.display_id} {drag.task.title}
@@ -193,13 +193,13 @@ export function TaskGanttView({ tasks, allById, initiativeById, onSelect, onResc
 function GanttToolbar({ zoom, onZoom, onToday }: { zoom: Zoom; onZoom: (z: Zoom) => void; onToday: () => void }) {
   return (
     <div className="flex items-center gap-2">
-      <div className="flex items-center gap-1 p-1 rounded-xl bg-black/40 border border-white/10">
+      <div className="flex items-center gap-1 p-1 rounded-xl hq-field">
         {(['week', 'month'] as Zoom[]).map((z) => (
           <button
             key={z}
             type="button"
             onClick={() => onZoom(z)}
-            className={`px-3 py-1 rounded-lg text-xs font-mono font-semibold capitalize transition-all ${
+            className={`px-3 py-1 rounded-lg text-xs font-semibold capitalize transition-all ${
               zoom === z ? 'bg-white/10 text-emerald-400' : 'text-neutral-400 hover:text-neutral-200'
             }`}
           >
@@ -210,7 +210,7 @@ function GanttToolbar({ zoom, onZoom, onToday }: { zoom: Zoom; onZoom: (z: Zoom)
       <button
         type="button"
         onClick={onToday}
-        className="px-3 py-1.5 rounded-xl border border-white/10 text-xs font-mono text-neutral-300 hover:text-white hover:bg-white/5 flex items-center gap-1.5"
+        className="px-3 py-1.5 rounded-xl border border-white/10 text-xs text-neutral-300 hover:text-white hover:bg-white/5 flex items-center gap-1.5"
       >
         <CalendarDays className="w-3.5 h-3.5" />
         Today
@@ -228,7 +228,7 @@ function GanttLabel({ line, onSelect }: { line: Line; onSelect: (task: TaskItem)
   if (line.kind === 'group') {
     return (
       <div
-        className="px-3 flex items-end pb-1 text-[10px] font-mono font-bold uppercase tracking-wider text-neutral-500 truncate"
+        className="px-3 flex items-end pb-1 text-[11px] font-bold uppercase tracking-wider text-neutral-500 truncate"
         style={{ height: ROW_HEIGHT }}
       >
         {line.name}
@@ -243,7 +243,7 @@ function GanttLabel({ line, onSelect }: { line: Line; onSelect: (task: TaskItem)
       className={`w-full text-left px-3 flex items-center gap-1.5 hover:bg-white/5 ${depth === 1 ? 'pl-7' : ''}`}
       style={{ height: ROW_HEIGHT }}
     >
-      <span className="text-[10px] font-mono text-neutral-500 shrink-0">{task.display_id}</span>
+      <span className="text-[11px] text-neutral-500 shrink-0">{task.display_id}</span>
       <span className={`text-xs truncate ${task.status === 'complete' ? 'text-neutral-500 line-through' : 'text-neutral-200'}`}>
         {task.title}
       </span>
@@ -261,13 +261,13 @@ function GanttHeader({ rangeStart, dayCount, dayPx, zoom }: { rangeStart: number
         return (
           <div key={day}>
             {monthStart && (
-              <span className="absolute top-1 text-[10px] font-mono font-semibold text-neutral-400 pl-1 whitespace-nowrap" style={{ left: i * dayPx }}>
+              <span className="absolute top-1 text-[11px] font-semibold text-neutral-400 pl-1 whitespace-nowrap" style={{ left: i * dayPx }}>
                 {monthLabel(day)}
               </span>
             )}
             {showDay && (
               <span
-                className="absolute bottom-1 text-[10px] font-mono text-neutral-500 text-center"
+                className="absolute bottom-1 text-[11px] text-neutral-500 text-center"
                 style={{ left: i * dayPx, width: zoom === 'week' ? dayPx : undefined }}
               >
                 {dayOfMonth(day)}
@@ -328,7 +328,7 @@ function GanttBar({ task, span, top, left, dayPx, overdue, dragging, onPointerDo
       className={`absolute rounded-md border cursor-grab select-none [-webkit-touch-callout:none] overflow-hidden ${colors} ${dragging ? 'ring-1 ring-emerald-400' : ''}`}
       style={{ top: top + BAR_INSET, left, width: (span.end - span.start + 1) * dayPx, height: ROW_HEIGHT - BAR_INSET * 2 }}
     >
-      <span className="absolute inset-0 px-2 flex items-center text-[10px] font-mono whitespace-nowrap">{task.title}</span>
+      <span className="absolute inset-0 px-2 flex items-center text-[11px] whitespace-nowrap">{task.title}</span>
       <div onPointerDown={(e) => onPointerDown(e, 'start')} className={`${EDGE_HANDLE_CLASS} left-0`} />
       <div onPointerDown={(e) => onPointerDown(e, 'end')} className={`${EDGE_HANDLE_CLASS} right-0`} />
     </div>
@@ -398,7 +398,7 @@ function UnscheduledTray({ tasks, draggingId, onPointerDown }: TrayProps) {
   if (tasks.length === 0) return null
   return (
     <div className="rounded-2xl border border-dashed border-white/10 p-3">
-      <h3 className="text-[11px] font-mono font-bold uppercase tracking-wider text-neutral-500 mb-2">
+      <h3 className="text-[11px] font-bold uppercase tracking-wider text-neutral-500 mb-2">
         Unscheduled ({tasks.length}), drag onto the timeline to schedule
       </h3>
       <div className="flex flex-wrap gap-2">
@@ -406,7 +406,7 @@ function UnscheduledTray({ tasks, draggingId, onPointerDown }: TrayProps) {
           <div
             key={task.id}
             onPointerDown={(e) => onPointerDown(e, task)}
-            className={`px-2.5 py-1 rounded-lg text-[11px] font-mono border cursor-grab select-none [-webkit-touch-callout:none] bg-white/5 text-neutral-300 border-white/10 hover:border-emerald-500/30 ${
+            className={`px-2.5 py-1 rounded-lg text-[11px] border cursor-grab select-none [-webkit-touch-callout:none] bg-white/5 text-neutral-300 border-white/10 hover:border-emerald-500/30 ${
               draggingId === task.id ? 'opacity-30' : ''
             }`}
           >

@@ -125,7 +125,7 @@ function NotificationsPage() {
             </div>
             <div>
               <h1 className="text-xl font-bold text-white tracking-tight">Inbox & Approvals</h1>
-              <p className="text-xs font-mono text-neutral-400 mt-0.5">
+              <p className="text-xs text-neutral-400 mt-0.5">
                 Review proposals, value insights, and relay notifications in real time
               </p>
             </div>
@@ -137,7 +137,7 @@ function NotificationsPage() {
             type="button"
             onClick={loadData}
             disabled={isRefreshing}
-            className="px-3 py-1.5 rounded-xl border border-white/10 text-xs font-mono text-neutral-300 hover:text-white hover:bg-white/5 transition-all flex items-center gap-1.5 disabled:opacity-50"
+            className="px-3 py-1.5 rounded-xl border border-white/10 text-xs text-neutral-300 hover:text-white hover:bg-white/5 transition-all flex items-center gap-1.5 disabled:opacity-50"
             title="Refresh feed"
           >
             <RefreshCw className={`w-3.5 h-3.5 ${isRefreshing ? 'animate-spin' : ''}`} />
@@ -148,7 +148,7 @@ function NotificationsPage() {
             <button
               type="button"
               onClick={handleMarkAllRead}
-              className="px-3 py-1.5 rounded-xl border border-white/10 text-xs font-mono text-neutral-300 hover:text-emerald-400 hover:border-emerald-500/30 hover:bg-white/5 transition-all flex items-center gap-1.5"
+              className="hq-btn-ghost"
             >
               <CheckCheck className="w-3.5 h-3.5 text-emerald-400" />
               <span>Mark all read</span>
@@ -160,13 +160,13 @@ function NotificationsPage() {
       {/* Filter Tabs & Search Bar */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-5">
         {/* Tabs */}
-        <div className="flex items-center gap-1 p-1 rounded-xl bg-black/40 border border-white/10 self-start max-w-full overflow-x-auto">
+        <div className="flex items-center gap-1 p-1 rounded-xl hq-field self-start max-w-full overflow-x-auto">
           <button
             type="button"
             onClick={() => setActiveTab('pending')}
-            className={`px-3.5 py-1.5 rounded-lg text-xs font-mono font-semibold transition-all flex items-center gap-1.5 ${
+            className={`px-3.5 py-1.5 rounded-lg text-xs font-semibold transition-all flex items-center gap-1.5 ${
               activeTab === 'pending'
-                ? 'bg-white/10 text-emerald-400 shadow-sm'
+                ? 'hq-seg-on'
                 : 'text-neutral-400 hover:text-neutral-200'
             }`}
           >
@@ -181,7 +181,7 @@ function NotificationsPage() {
           <button
             type="button"
             onClick={() => setActiveTab('all')}
-            className={`px-3.5 py-1.5 rounded-lg text-xs font-mono font-semibold transition-all ${
+            className={`px-3.5 py-1.5 rounded-lg text-xs font-semibold transition-all ${
               activeTab === 'all'
                 ? 'bg-white/10 text-white shadow-sm'
                 : 'text-neutral-400 hover:text-neutral-200'
@@ -193,7 +193,7 @@ function NotificationsPage() {
           <button
             type="button"
             onClick={() => setActiveTab('resolved')}
-            className={`px-3.5 py-1.5 rounded-lg text-xs font-mono font-semibold transition-all ${
+            className={`px-3.5 py-1.5 rounded-lg text-xs font-semibold transition-all ${
               activeTab === 'resolved'
                 ? 'bg-white/10 text-white shadow-sm'
                 : 'text-neutral-400 hover:text-neutral-200'
@@ -211,13 +211,13 @@ function NotificationsPage() {
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
             placeholder="Search proposals, skills..."
-            className="w-full pl-8 pr-3 py-1.5 rounded-xl text-xs font-mono text-neutral-200 bg-black/40 border border-white/10 focus:outline-none focus:ring-1 focus:ring-emerald-400 placeholder:text-neutral-600 transition-all"
+            className="w-full pl-8 pr-3 py-1.5 rounded-xl text-xs text-neutral-200 hq-field focus:outline-none focus:ring-1 focus:ring-emerald-400 placeholder:text-neutral-600 transition-all"
           />
         </div>
       </div>
 
       {/* Category Pills */}
-      <div className="flex items-center gap-2 flex-wrap mb-5 text-xs font-mono">
+      <div className="flex items-center gap-2 flex-wrap mb-5 text-xs ">
         <button
           type="button"
           onClick={() => setSelectedCategory('all')}
@@ -277,7 +277,7 @@ function NotificationsPage() {
               <Inbox className="w-8 h-8" />
             </div>
             <h3 className="text-sm font-bold text-neutral-300">No notifications found</h3>
-            <p className="text-xs font-mono text-neutral-500 max-w-sm mt-1">
+            <p className="text-xs text-neutral-500 max-w-sm mt-1">
               {activeTab === 'pending'
                 ? 'All proposals and suggestions have been approved or dismissed.'
                 : 'No notification records match the current filter selection.'}

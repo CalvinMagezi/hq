@@ -76,15 +76,17 @@ export function ChatBubble({ message, live = false, onEdit, onRegenerate }: Prop
         style={
           isUser
             ? {
-                background: 'rgba(0, 255, 163, 0.08)',
-                border: '1px solid rgba(0, 255, 163, 0.2)',
-                borderRadius: '16px 4px 16px 16px',
+                background: 'rgba(255, 255, 255, 0.07)',
+                border: '1px solid rgba(255, 255, 255, 0.11)',
+                boxShadow: 'inset 0 1px 0 rgba(255, 255, 255, 0.09)',
+                backdropFilter: 'blur(16px)',
+                borderRadius: '20px 6px 20px 20px',
                 color: 'var(--text-primary)',
               }
             : {
-                background: 'rgba(255, 255, 255, 0.03)',
-                border: '1px solid rgba(255, 255, 255, 0.08)',
-                borderRadius: '4px 16px 16px 16px',
+                background: 'rgba(255, 255, 255, 0.025)',
+                border: '1px solid rgba(255, 255, 255, 0.07)',
+                borderRadius: '6px 20px 20px 20px',
                 color: 'var(--text-primary)',
               }
         }
@@ -103,7 +105,7 @@ export function ChatBubble({ message, live = false, onEdit, onRegenerate }: Prop
         {waiting && <div className="text-xs text-neutral-500 animate-pulse">HQ is working...</div>}
 
         {!live && (
-          <div className="flex items-center justify-between mt-1.5 pt-1 border-t border-white/5 opacity-60 text-xs font-mono" style={{ color: 'var(--text-dim)' }}>
+          <div className="flex items-center justify-between mt-1.5 pt-1 border-t border-white/5 opacity-60 text-xs " style={{ color: 'var(--text-dim)' }}>
             <span>
               {new Date(message.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
               {message.stopped && <span className="ml-2" style={{ color: 'var(--accent-amber)' }}>stopped</span>}
@@ -139,7 +141,7 @@ export function ChatBubble({ message, live = false, onEdit, onRegenerate }: Prop
 function McpLabel({ caller }: { caller: string }) {
   return (
     <div
-      className="flex items-center gap-1.5 mb-1.5 text-[11px] font-mono min-w-0"
+      className="flex items-center gap-1.5 mb-1.5 text-[11px] min-w-0"
       style={{ color: 'var(--text-dim)' }}
       title="Asked through HQ's MCP endpoint by an outside client"
     >
@@ -154,7 +156,7 @@ function DriverLabel({ driver }: { driver: DriverMeta }) {
   const drove = driver.mode === 'drive'
   return (
     <div
-      className="flex items-center gap-1.5 mb-1.5 text-[11px] font-mono min-w-0"
+      className="flex items-center gap-1.5 mb-1.5 text-[11px] min-w-0"
       style={{ color: 'var(--text-dim)' }}
       title={drove ? 'HQ acted in this session on your behalf' : 'An update from a session this chat watches'}
     >

@@ -94,7 +94,7 @@ export function VaultNoteDrawer() {
 
   const content = (
     <div
-      className="fixed inset-0 z-[60] flex justify-end bg-black/60 backdrop-blur-sm transition-all duration-300"
+      className="fixed inset-0 z-[60] flex justify-end hq-scrim transition-all duration-300"
       onClick={(e) => {
         if (e.target === e.currentTarget) closeNote()
       }}
@@ -106,8 +106,7 @@ export function VaultNoteDrawer() {
         role="dialog"
         aria-modal="true"
         aria-label={`Vault note: ${title}`}
-        className="w-full max-w-2xl h-full flex flex-col glass-heavy border-l shadow-2xl overflow-hidden animate-in slide-in-from-right duration-200 pad-safe-top pb-[var(--safe-bottom)]"
-        style={{ background: 'var(--bg-card, #111418)', borderColor: 'rgba(255,255,255,0.1)' }}
+        className="w-full max-w-2xl h-full flex flex-col hq-modal border-l shadow-2xl overflow-hidden animate-in slide-in-from-right duration-200 pad-safe-top pb-[var(--safe-bottom)]"
       >
         {/* Header */}
         <div
@@ -124,7 +123,7 @@ export function VaultNoteDrawer() {
               <h2 className="text-sm font-semibold text-white truncate">{title}</h2>
             </div>
             <div className="flex items-center gap-2 mt-0.5">
-              <span className="text-[11px] font-mono text-neutral-400 truncate max-w-md">{notePath}</span>
+              <span className="text-[11px] text-neutral-400 truncate max-w-md">{notePath}</span>
               <button
                 type="button"
                 onClick={handleCopyPath}
@@ -153,7 +152,7 @@ export function VaultNoteDrawer() {
           {loading && (
             <div className="flex flex-col items-center justify-center py-20 text-neutral-400" role="status">
               <Loader2 className="w-6 h-6 animate-spin text-emerald-400 mb-2" />
-              <span className="text-xs font-mono">Loading note...</span>
+              <span className="text-xs ">Loading note...</span>
             </div>
           )}
 
@@ -163,7 +162,7 @@ export function VaultNoteDrawer() {
                 <AlertCircle className="w-4 h-4" />
                 Error loading note
               </div>
-              <p className="text-xs font-mono text-rose-300/80 mb-3">{error}</p>
+              <p className="text-xs text-rose-300/80 mb-3">{error}</p>
               <button
                 type="button"
                 onClick={() => {
@@ -179,7 +178,7 @@ export function VaultNoteDrawer() {
                       setLoading(false)
                     })
                 }}
-                className="px-3 py-1.5 rounded-lg text-xs font-mono font-medium border border-rose-500/30 hover:bg-rose-500/20 text-white"
+                className="px-3 py-1.5 rounded-lg text-xs font-medium border border-rose-500/30 hover:bg-rose-500/20 text-white"
               >
                 Retry
               </button>
@@ -188,17 +187,17 @@ export function VaultNoteDrawer() {
 
           {!loading && !error && data?.notFound && (
             <div className="py-16 text-center text-neutral-400 space-y-3">
-              <div className="w-12 h-12 rounded-2xl bg-neutral-800/80 border border-white/10 flex items-center justify-center mx-auto text-neutral-500">
+              <div className="w-12 h-12 rounded-2xl hq-card flex items-center justify-center mx-auto text-neutral-500">
                 <FileText className="w-6 h-6" />
               </div>
               <div className="font-semibold text-neutral-200">Note Not Found</div>
               <p className="text-xs text-neutral-400 max-w-sm mx-auto">
-                <span className="font-mono text-neutral-300">{notePath}</span> does not exist in the vault or may have been moved.
+                <span className="text-neutral-300">{notePath}</span> does not exist in the vault or may have been moved.
               </p>
               <button
                 type="button"
                 onClick={closeNote}
-                className="px-4 py-2 rounded-xl text-xs font-mono font-medium bg-white/5 hover:bg-white/10 text-neutral-200 border border-white/10 transition-colors"
+                className="px-4 py-2 rounded-xl text-xs font-medium bg-white/5 hover:bg-white/10 text-neutral-200 border border-white/10 transition-colors"
               >
                 Dismiss
               </button>
@@ -209,7 +208,7 @@ export function VaultNoteDrawer() {
             <div>
               {data.isDir ? (
                 <div className="space-y-2">
-                  <div className="text-xs font-mono uppercase text-neutral-500 mb-3">Directory Contents</div>
+                  <div className="text-xs uppercase text-neutral-500 mb-3">Directory Contents</div>
                   {(!data.dirEntries || data.dirEntries.length === 0) && (
                     <div className="text-xs text-neutral-500 italic">Empty directory</div>
                   )}
@@ -218,7 +217,7 @@ export function VaultNoteDrawer() {
                       key={entry.path}
                       type="button"
                       onClick={() => useVaultNoteStore.getState().openNote(entry.path)}
-                      className="w-full flex items-center justify-between p-3 rounded-xl bg-white/5 hover:bg-white/10 border border-white/5 text-left text-xs font-mono transition-colors group"
+                      className="w-full flex items-center justify-between p-3 rounded-xl bg-white/5 hover:bg-white/10 border border-white/5 text-left text-xs transition-colors group"
                     >
                       <div className="flex items-center gap-2 truncate">
                         {entry.isDir ? (

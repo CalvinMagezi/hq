@@ -27,7 +27,7 @@ export function TaskListView({ tasks, allById, initiativeById, onSelect }: Props
     <div className="space-y-6 pb-6">
       {grouped.map(([initiativeName, items]) => (
         <div key={initiativeName}>
-          <h2 className="text-[11px] font-mono font-bold uppercase tracking-wider text-neutral-500 mb-2.5">
+          <h2 className="text-[11px] font-bold uppercase tracking-wider text-neutral-500 mb-2.5">
             {initiativeName}
             <span className="text-neutral-700 ml-1.5">({items.length})</span>
           </h2>
@@ -39,7 +39,7 @@ export function TaskListView({ tasks, allById, initiativeById, onSelect }: Props
                   <button
                     type="button"
                     onClick={() => toggle(task.id)}
-                    className="mt-1 ml-2 text-[10px] font-mono text-neutral-500 hover:text-neutral-300 flex items-center gap-1"
+                    className="mt-1 ml-2 text-[11px] text-neutral-500 hover:text-neutral-300 flex items-center gap-1"
                   >
                     {collapsed.has(task.id) ? <ChevronRight className="w-3 h-3" /> : <ChevronDown className="w-3 h-3" />}
                     {task.subtask_count} sub-task{task.subtask_count === 1 ? '' : 's'}

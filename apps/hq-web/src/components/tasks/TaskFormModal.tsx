@@ -113,10 +113,9 @@ export function TaskFormModal({ open, onClose, spaces, folders, initiatives, tas
   }
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4">
+    <div className="fixed inset-0 z-50 flex items-center justify-center hq-scrim p-4">
       <div
-        className="w-full max-w-lg rounded-2xl border shadow-2xl overflow-hidden"
-        style={{ background: 'var(--bg-card, #111418)', borderColor: 'rgba(255,255,255,0.1)' }}
+        className="w-full max-w-lg rounded-2xl hq-modal overflow-hidden"
       >
         <div
           className="flex items-center justify-between px-5 py-4 border-b"
@@ -134,7 +133,7 @@ export function TaskFormModal({ open, onClose, spaces, folders, initiatives, tas
             value={title}
             onChange={(e) => setTitle(e.target.value)}
             placeholder="Task title"
-            className="w-full px-3.5 py-2.5 rounded-xl text-sm text-neutral-100 bg-black/30 border focus:outline-none focus:ring-1 focus:ring-emerald-400"
+            className="w-full px-3.5 py-2.5 rounded-xl text-sm text-neutral-100 hq-field focus:outline-none focus:ring-1 focus:ring-emerald-400"
             style={{ borderColor: 'rgba(255,255,255,0.1)' }}
           />
           <textarea
@@ -142,7 +141,7 @@ export function TaskFormModal({ open, onClose, spaces, folders, initiatives, tas
             onChange={(e) => setDescription(e.target.value)}
             placeholder="Description (optional)"
             rows={3}
-            className="w-full px-3.5 py-2.5 rounded-xl text-xs text-neutral-200 bg-black/30 border focus:outline-none focus:ring-1 focus:ring-emerald-400 resize-none"
+            className="w-full px-3.5 py-2.5 rounded-xl text-xs text-neutral-200 hq-field focus:outline-none focus:ring-1 focus:ring-emerald-400 resize-none"
             style={{ borderColor: 'rgba(255,255,255,0.1)' }}
           />
 
@@ -151,7 +150,7 @@ export function TaskFormModal({ open, onClose, spaces, folders, initiatives, tas
             <select
               value={parentId}
               onChange={(e) => setParentId(e.target.value)}
-              className="w-full px-2.5 py-1.5 rounded-lg text-xs text-neutral-200 bg-black/30 border border-white/10"
+              className="w-full px-2.5 py-1.5 rounded-lg text-xs text-neutral-200 hq-field"
             >
               <option value="">None, a top-level task</option>
               {parentCandidates.map((t) => (
@@ -161,7 +160,7 @@ export function TaskFormModal({ open, onClose, spaces, folders, initiatives, tas
               ))}
             </select>
             {parentId && (
-              <p className="text-[10px] font-mono text-neutral-500 mt-1">Filed in the parent's initiative.</p>
+              <p className="text-[11px] text-neutral-500 mt-1">Filed in the parent's initiative.</p>
             )}
           </div>
 
@@ -268,7 +267,7 @@ export function TaskFormModal({ open, onClose, spaces, folders, initiatives, tas
               due={dueDate}
               onStart={setStartDate}
               onDue={setDueDate}
-              inputClass="w-full px-2.5 py-1.5 rounded-lg text-xs text-neutral-200 bg-black/30 border border-white/10"
+              inputClass="w-full px-2.5 py-1.5 rounded-lg text-xs text-neutral-200 hq-field"
               label={(text) => <FieldLabel>{text}</FieldLabel>}
             />
           </div>
@@ -292,7 +291,7 @@ export function TaskFormModal({ open, onClose, spaces, folders, initiatives, tas
           <button
             type="button"
             onClick={onClose}
-            className="px-4 py-2 rounded-xl text-xs font-mono font-semibold text-neutral-400 hover:text-neutral-200 hover:bg-white/5 transition-all"
+            className="px-4 py-2 rounded-xl text-xs font-semibold text-neutral-400 hover:text-neutral-200 hover:bg-white/5 transition-all"
           >
             Cancel
           </button>
@@ -300,7 +299,7 @@ export function TaskFormModal({ open, onClose, spaces, folders, initiatives, tas
             type="button"
             onClick={handleSubmit}
             disabled={submitting || !title.trim()}
-            className="px-5 py-2 rounded-xl text-xs font-mono font-bold flex items-center gap-1.5 transition-all disabled:opacity-50"
+            className="px-5 py-2 rounded-xl text-xs font-bold flex items-center gap-1.5 transition-all disabled:opacity-50"
             style={{ background: 'var(--accent-green, #00ffa3)', color: '#000' }}
           >
             {submitting ? <Loader2 className="w-4 h-4 animate-spin" /> : 'Create Task'}

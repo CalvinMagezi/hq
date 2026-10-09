@@ -53,11 +53,10 @@ export function SearchOverlay() {
 
   return (
     <>
-      <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm" onClick={() => setIsOpen(false)} />
+      <div className="fixed inset-0 z-50 hq-scrim" onClick={() => setIsOpen(false)} />
 
       <div
-        className="fixed z-50 w-full shadow-2xl overflow-hidden flex flex-col inset-0 pad-safe-top rounded-none md:inset-auto md:top-[10vh] md:left-1/2 md:-translate-x-1/2 md:max-w-2xl md:rounded-xl md:max-h-[70vh]"
-        style={{ background: 'var(--bg-solid-surface)', border: '1px solid var(--border)' }}
+        className="fixed z-50 w-full shadow-2xl overflow-hidden flex flex-col inset-0 pad-safe-top rounded-none md:inset-auto md:top-[10vh] md:left-1/2 md:-translate-x-1/2 md:max-w-2xl md:rounded-2xl md:max-h-[70vh] hq-modal"
       >
         <div className="flex items-center gap-3 px-4 py-3 border-b" style={{ borderColor: 'var(--border)' }}>
           <span className="text-base" style={{ color: 'var(--text-dim)' }}>⌕</span>
@@ -68,7 +67,7 @@ export function SearchOverlay() {
             onChange={(e) => setQuery(e.target.value)}
             onKeyDown={onKeyDown}
             placeholder="Search vault..."
-            className="flex-1 bg-transparent outline-none font-mono"
+            className="flex-1 bg-transparent outline-none "
             style={{ color: 'var(--text-primary)', fontSize: '16px', caretColor: 'var(--accent-green)' }}
             enterKeyHint="go"
           />
@@ -76,13 +75,13 @@ export function SearchOverlay() {
             <div className="w-4 h-4 rounded-full border-2 border-t-transparent animate-spin" style={{ borderColor: 'var(--accent-amber)', borderTopColor: 'transparent' }} />
           )}
           <button onClick={() => setIsOpen(false)} style={{ color: 'var(--text-dim)' }}>
-            <span className="text-sm font-mono">✕</span>
+            <span className="text-sm ">✕</span>
           </button>
         </div>
 
         <div className="flex-1 overflow-y-auto">
           {query && !isLoading && results.length === 0 && (
-            <div className="px-6 py-12 text-center text-sm font-mono" style={{ color: 'var(--text-dim)' }}>
+            <div className="px-6 py-12 text-center text-sm " style={{ color: 'var(--text-dim)' }}>
               No vault results for "{query}"
             </div>
           )}
@@ -99,19 +98,19 @@ export function SearchOverlay() {
               }}
             >
               <div className="flex items-center justify-between gap-3">
-                <span className="text-sm font-mono font-bold truncate" style={{ color: 'var(--text-primary)' }}>
+                <span className="text-sm font-bold truncate" style={{ color: 'var(--text-primary)' }}>
                   <HighlightedSnippet text={hit.title} query={query} />
                 </span>
-                <span className="text-[10px] font-mono flex-shrink-0" style={{ color: 'var(--text-dim)' }}>
+                <span className="text-[11px] flex-shrink-0" style={{ color: 'var(--text-dim)' }}>
                   {hit.notebook}
                 </span>
               </div>
               {hit.snippet && (
-                <p className="text-xs font-mono line-clamp-2 leading-relaxed mt-1" style={{ color: 'var(--text-dim)' }}>
+                <p className="text-xs line-clamp-2 leading-relaxed mt-1" style={{ color: 'var(--text-dim)' }}>
                   <HighlightedSnippet text={hit.snippet} query={query} />
                 </p>
               )}
-              <div className="text-[9px] font-mono mt-1.5 truncate" style={{ color: 'var(--accent-blue)', opacity: 0.55 }}>
+              <div className="text-[9px] mt-1.5 truncate" style={{ color: 'var(--accent-blue)', opacity: 0.55 }}>
                 {hit.notePath}
               </div>
             </button>
@@ -119,7 +118,7 @@ export function SearchOverlay() {
         </div>
 
         {results.length > 0 && (
-          <div className="px-4 py-2 flex items-center justify-between text-[10px] font-mono" style={{ color: 'var(--text-dim)', borderTop: '1px solid rgba(255,255,255,0.04)' }}>
+          <div className="px-4 py-2 flex items-center justify-between text-[11px] " style={{ color: 'var(--text-dim)', borderTop: '1px solid rgba(255,255,255,0.04)' }}>
             <span>{results.length} vault results</span>
             <div className="flex items-center gap-3">
               <span><kbd className="px-1 rounded" style={{ background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.08)' }}>↑↓</kbd> navigate</span>

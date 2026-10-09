@@ -15,16 +15,16 @@ export function TaskSessions({ taskId }: { taskId: string }) {
     <section aria-label="Linked agents">
       <SectionLabel>Agents</SectionLabel>
       {sessions.loading ? (
-        <div role="status" className="flex items-center gap-2 text-xs font-mono text-neutral-500">
+        <div role="status" className="flex items-center gap-2 text-xs text-neutral-500">
           <Loader2 className="w-3.5 h-3.5 animate-spin" />
           Loading agents
         </div>
       ) : !sessions.data ? (
-        <p role="alert" className="text-xs font-mono text-rose-400">
+        <p role="alert" className="text-xs text-rose-400">
           {sessions.error ?? 'Could not load agents.'}
         </p>
       ) : sessions.data.length === 0 ? (
-        <p className="text-xs font-mono text-neutral-500">No agents on this task yet.</p>
+        <p className="text-xs text-neutral-500">No agents on this task yet.</p>
       ) : (
         <ul className="space-y-1.5">
           {sessions.data.map((s) => (
@@ -34,7 +34,7 @@ export function TaskSessions({ taskId }: { taskId: string }) {
                 search={{ id: s.id }}
                 className="block px-2.5 py-1.5 rounded-lg bg-white/[0.02] border border-white/5 hover:bg-white/5 space-y-0.5"
               >
-                <span className="flex items-center gap-2 min-w-0 text-xs font-mono text-neutral-200">
+                <span className="flex items-center gap-2 min-w-0 text-xs text-neutral-200">
                   <Terminal className="w-3.5 h-3.5 text-neutral-500 shrink-0" />
                   <span className="truncate">
                     {sessionTitle(s)}

@@ -38,7 +38,7 @@ export function ChatHeader({ title, onToggleSidebar, onClose, watching = [], ses
       : 'Notify me when a reply finishes while HQ is in the background'
 
   return (
-    <div className="flex items-center gap-1 border-b border-white/10 px-1 md:px-3 bg-neutral-900/30 shrink-0">
+    <div className="flex items-center gap-1 border-b border-white/10 px-1 md:px-3 shrink-0">
       <button type="button" onClick={onToggleSidebar} className="p-2.5 text-neutral-400 hover:text-white" title="Toggle chat list">
         <PanelLeft className="w-4 h-4" />
       </button>
@@ -81,7 +81,7 @@ function WatchingButton({ sessions, open, onToggle }: { sessions: WatchedSession
     <button
       type="button"
       onClick={onToggle}
-      className={`flex items-center gap-1.5 h-11 min-w-11 sm:h-8 sm:min-w-0 px-2 rounded-lg text-xs font-mono hover:bg-white/10 transition-colors shrink-0 ${open ? 'text-white bg-white/5' : 'text-neutral-400 hover:text-white'}`}
+      className={`flex items-center gap-1.5 h-11 min-w-11 sm:h-8 sm:min-w-0 px-2 rounded-lg text-xs hover:bg-white/10 transition-colors shrink-0 ${open ? 'text-white bg-white/5' : 'text-neutral-400 hover:text-white'}`}
       title="Coding-agent sessions this chat is watching"
       aria-label={watchingLabel(sessions)}
       aria-expanded={open}

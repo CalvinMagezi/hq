@@ -23,7 +23,7 @@ export const STATUS_BADGE_CLASS: Record<TaskStatus, string> = {
 
 export const BLOCKED_CHIP_CLASS = 'bg-rose-500/10 text-rose-400 border-rose-500/20'
 
-const CHIP_CLASS = 'inline-flex items-center gap-1 text-[10px] font-mono px-2 py-0.5 rounded-full border max-w-full'
+const CHIP_CLASS = 'inline-flex items-center gap-1 text-[11px] px-2 py-0.5 rounded-full border max-w-full'
 
 function scheduleLabel(task: TaskItem): string | null {
   if (task.start_date && task.due_date) return `${shortLabel(task.start_date)} → ${shortLabel(task.due_date)}`
@@ -53,8 +53,8 @@ export function TaskCard({ task, onSelect, parentLabel, compact = false }: Props
       onClick={onSelect ? () => onSelect(task) : undefined}
       className={`group relative rounded-2xl border transition-all duration-200 cursor-pointer w-full max-w-full min-w-0 overflow-hidden ${compact ? 'p-3' : 'p-4'} ${
         isDone
-          ? 'bg-black/10 border-white/5 opacity-60 hover:opacity-100'
-          : 'bg-black/30 hover:bg-black/40 border-white/10 hover:border-emerald-500/30'
+          ? 'hq-card opacity-60 hover:opacity-100'
+          : 'hq-card hq-card-live'
       }`}
     >
       <div className="flex items-center justify-between gap-2 flex-wrap mb-2">
@@ -65,17 +65,17 @@ export function TaskCard({ task, onSelect, parentLabel, compact = false }: Props
               title={`Priority: ${task.priority}`}
             />
           )}
-          <span className="text-[10px] font-mono font-bold text-neutral-500 shrink-0">{task.display_id}</span>
+          <span className="text-[11px] font-bold text-neutral-500 shrink-0">{task.display_id}</span>
           {!compact && (
             <span
-              className={`text-[10px] font-mono font-bold uppercase tracking-wider px-2 py-0.5 rounded-full border shrink-0 ${STATUS_BADGE_CLASS[task.status]}`}
+              className={`text-[11px] font-bold uppercase tracking-wider px-2 py-0.5 rounded-full border shrink-0 ${STATUS_BADGE_CLASS[task.status]}`}
             >
               {STATUS_LABELS[task.status]}
             </span>
           )}
         </div>
         {!compact && (
-          <span className="text-[11px] font-mono text-neutral-500 flex items-center gap-1 shrink-0 ml-auto sm:ml-0">
+          <span className="text-[11px] text-neutral-500 flex items-center gap-1 shrink-0 ml-auto sm:ml-0">
             <Clock className="w-3 h-3 shrink-0" />
             <span>{formatTime(task.updated_at)}</span>
           </span>
@@ -83,7 +83,7 @@ export function TaskCard({ task, onSelect, parentLabel, compact = false }: Props
       </div>
 
       {parentLabel && (
-        <p className="text-[10px] font-mono text-neutral-500 mb-1 flex items-center gap-1 min-w-0">
+        <p className="text-[11px] text-neutral-500 mb-1 flex items-center gap-1 min-w-0">
           <CornerDownRight className="w-3 h-3 shrink-0" />
           <span className="truncate">{parentLabel}</span>
         </p>

@@ -12,21 +12,21 @@ interface Props {
   onCreateSubtask: (parent: TaskItem, title: string) => Promise<void>
 }
 
-const SECTION_TITLE_CLASS = 'text-xs font-mono font-semibold text-neutral-400 uppercase tracking-wider mb-2'
+const SECTION_TITLE_CLASS = 'text-xs font-semibold text-neutral-400 uppercase tracking-wider mb-2'
 const INPUT_CLASS =
-  'flex-1 px-3 py-1.5 rounded-xl text-xs font-mono text-neutral-200 bg-black/30 border border-white/10 focus:outline-none focus:ring-1 focus:ring-emerald-400'
+  'flex-1 px-3 py-1.5 rounded-xl text-xs text-neutral-200 hq-field focus:outline-none focus:ring-1 focus:ring-emerald-400'
 
 function TaskLine({ task, onOpen, children }: { task: TaskItem; onOpen: () => void; children?: React.ReactNode }) {
   return (
     <div className="flex items-center gap-2 px-2.5 py-1.5 rounded-lg bg-white/[0.02] border border-white/5">
       {children}
       <button type="button" onClick={onOpen} className="flex items-center gap-2 min-w-0 flex-1 text-left">
-        <span className="text-[10px] font-mono text-neutral-500 shrink-0">{task.display_id}</span>
+        <span className="text-[11px] text-neutral-500 shrink-0">{task.display_id}</span>
         <span className={`text-xs truncate ${task.status === 'complete' ? 'text-neutral-500 line-through' : 'text-neutral-200'}`}>
           {task.title}
         </span>
       </button>
-      <span className={`text-[9px] font-mono uppercase px-1.5 py-0.5 rounded-full border shrink-0 ${STATUS_BADGE_CLASS[task.status]}`}>
+      <span className={`text-[9px] uppercase px-1.5 py-0.5 rounded-full border shrink-0 ${STATUS_BADGE_CLASS[task.status]}`}>
         {STATUS_LABELS[task.status]}
       </span>
     </div>

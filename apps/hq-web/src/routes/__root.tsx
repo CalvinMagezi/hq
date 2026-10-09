@@ -10,19 +10,18 @@ import { PersistQueryClientProvider } from '@tanstack/react-query-persist-client
 import { CACHE_BUSTER, CACHE_MAX_AGE_MS, lastSyncedAt, queryClient, queryPersister } from '~/lib/offlineCache'
 import type { ReactNode } from 'react'
 import { useEffect, useState } from 'react'
-import { MessageSquare, Bell, Search, Settings } from 'lucide-react'
+import { MessageSquare, Search, Settings } from 'lucide-react'
 import { useHQStore } from '~/store/hqStore'
 import { WebSocketProvider } from '~/context/WebSocketContext'
 import { SearchOverlay } from '~/components/SearchOverlay'
 import { QuickNoteOverlay } from '~/components/QuickNoteOverlay'
 import { GlobalChatOverlay } from '~/components/chat/GlobalChatOverlay'
 import { InstallPrompt } from '~/components/InstallPrompt'
+import { AppRail } from '~/components/AppRail'
 import { BottomNav } from '~/components/BottomNav'
 import { useNeedsYouCount } from '~/components/sessions/useNeedsYouCount'
-import { needsYouAria } from '~/lib/workbench'
 import appCss from '../../app.css?url'
 import { relTime } from '~/lib/time'
-import { inboxBadge } from '~/lib/inboxBadge'
 import { openrouterChipLabel, openrouterChipTitle, OPENROUTER_USAGE_POLL_MS, type OpenRouterUsageResponse } from '~/lib/openrouterUsageApi'
 import { budgetChipLabel, budgetChipTitle, USAGE_POLL_MS, type BudgetsResponse } from '~/lib/usageApi'
 import { chipLabel, chipTitle, COPILOT_USAGE_POLL_MS, type CopilotUsage } from '~/lib/copilotUsageApi'
@@ -127,10 +126,6 @@ function VaultShell() {
   const wsConnected = useHQStore((s) => s.wsConnected)
   const setGlobalChatOpen = useHQStore((s) => s.setGlobalChatOpen)
   const chatUnreadCount = useHQStore((s) => s.chatUnreadCount)
-  const unreadNotificationsCount = useHQStore((s) => s.unreadNotificationsCount)
-  const pendingApprovalsCount = useHQStore((s) => s.pendingApprovalsCount)
-  const needsYouCount = useHQStore((s) => s.needsYouCount)
-  const needsYouBadge = inboxBadge(needsYouCount)
   useNeedsYouCount()
   const systemNotice = useHQStore((s) => s.systemNotice)
   const setSystemNotice = useHQStore((s) => s.setSystemNotice)
@@ -204,7 +199,7 @@ function VaultShell() {
 
   return (
     <div
-      className="flex flex-col fixed inset-0 overflow-hidden"
+      className="flex flex-row fixed inset-0 overflow-hidden"
       style={{
         background: 'var(--bg-base)',
         color: 'var(--text-primary)',
@@ -212,6 +207,8 @@ function VaultShell() {
       }}
     >
       <div className="hq-ambient-bg" />
+      <AppRail />
+      <div className="flex flex-col flex-1 min-w-0 min-h-0 relative z-10">
       <InstallPrompt />
 
       {systemNotice && (
@@ -251,91 +248,18 @@ function VaultShell() {
       )}
 
       <header
-        className="flex-shrink-0 flex items-center gap-2 px-3 sticky top-0 z-30 glass-heavy"
-        style={{ height: '44px' }}
+        className="flex-shrink-0 flex items-center gap-2 px-3 sticky top-0 z-30 hq-header"
+        style={{ height: '48px' }}
       >
         <Link
           to="/vault"
-          className="flex items-center gap-2 flex-shrink-0 transition-opacity active:opacity-60"
+          className="flex md:hidden items-center gap-2 flex-shrink-0 transition-opacity active:opacity-60"
         >
           <img src="/icons/hq-mark-96.png" alt="Agent HQ" width="28" height="28" className="flex-shrink-0 object-contain" />
           <span className="text-[11px] font-mono font-bold tracking-widest uppercase" style={{ color: 'var(--text-dim)' }}>
             HQ Vault
           </span>
         </Link>
-
-        {/* Desktop Navigation Links */}
-        <nav className="hidden md:flex items-center gap-4 ml-4 text-xs font-mono">
-          <Link
-            to="/vault"
-            activeProps={{ style: { color: 'var(--accent-green)', fontWeight: 'bold' } }}
-            inactiveProps={{ style: { color: 'var(--text-dim)' } }}
-            activeOptions={{ exact: true }}
-          >
-            Home
-          </Link>
-          <Link
-            to="/chat"
-            activeProps={{ style: { color: 'var(--accent-green)', fontWeight: 'bold' } }}
-            inactiveProps={{ style: { color: 'var(--text-dim)' } }}
-            activeOptions={{ exact: true }}
-          >
-            Chat
-          </Link>
-          <Link
-            to="/tasks"
-            activeProps={{ style: { color: 'var(--accent-green)', fontWeight: 'bold' } }}
-            inactiveProps={{ style: { color: 'var(--text-dim)' } }}
-            activeOptions={{ exact: true }}
-          >
-            Tasks
-          </Link>
-          <Link
-            to="/sessions"
-            activeProps={{ style: { color: 'var(--accent-green)', fontWeight: 'bold' } }}
-            inactiveProps={{ style: { color: 'var(--text-dim)' } }}
-            className="relative flex items-center gap-1.5"
-          >
-            Workbench
-            {needsYouBadge && (
-              <span
-                role="status"
-                aria-label={needsYouAria(needsYouCount)}
-                className="px-1.5 py-0.5 rounded-full text-[9px] font-bold font-mono text-black"
-                style={{ background: 'var(--accent-green)' }}
-              >
-                {needsYouBadge.label}
-              </span>
-            )}
-          </Link>
-          <Link
-            to="/usage"
-            activeProps={{ style: { color: 'var(--accent-green)', fontWeight: 'bold' } }}
-            inactiveProps={{ style: { color: 'var(--text-dim)' } }}
-          >
-            Usage
-          </Link>
-          <Link
-            to="/notifications"
-            activeProps={{ style: { color: 'var(--accent-green)', fontWeight: 'bold' } }}
-            inactiveProps={{ style: { color: 'var(--text-dim)' } }}
-            activeOptions={{ exact: true }}
-            className="relative flex items-center gap-1.5"
-          >
-            Notifications
-            {inboxBadge(unreadNotificationsCount) && (
-              <span
-                className="px-1.5 py-0.5 rounded-full text-[9px] font-bold font-mono transition-all"
-                style={{
-                  background: pendingApprovalsCount > 0 ? 'var(--accent-green)' : 'rgba(255,255,255,0.15)',
-                  color: pendingApprovalsCount > 0 ? '#000' : 'var(--text-primary)',
-                }}
-              >
-                {inboxBadge(unreadNotificationsCount)?.label}
-              </span>
-            )}
-          </Link>
-        </nav>
 
         <div className="flex-1" />
 
@@ -368,7 +292,7 @@ function VaultShell() {
 
         <Link
           to="/settings"
-          className="p-1.5 rounded-lg text-neutral-400 hover:text-neutral-100 hover:bg-white/5 transition-all"
+          className="md:hidden p-1.5 rounded-lg text-neutral-400 hover:text-neutral-100 hover:bg-white/5 transition-all"
           title="Settings"
           aria-label="Settings"
           activeProps={{ className: 'text-neutral-100 bg-white/5' }}
@@ -396,10 +320,11 @@ function VaultShell() {
         </div>
       </header>
 
-      <main className="flex-1 min-h-0 overflow-hidden w-full relative main-content">
+      <main className="flex-1 min-h-0 overflow-hidden relative main-content md:mx-3 md:mb-3 md:rounded-2xl hq-glass-pane">
         <Outlet />
       </main>
 
+      </div>
       <BottomNav />
     </div>
   )

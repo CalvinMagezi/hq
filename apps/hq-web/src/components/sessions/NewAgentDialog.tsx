@@ -7,8 +7,8 @@ import { ErrorText } from './ErrorText'
 import { FolderPicker } from './FolderPicker'
 
 const FIELD_CLASS =
-  'w-full min-w-0 px-3 rounded-lg text-xs font-mono text-neutral-200 bg-black/30 border border-white/10 focus:outline-none focus:ring-1 focus:ring-emerald-400'
-const LABEL_CLASS = 'block mb-1 text-[11px] font-mono text-neutral-400'
+  'w-full min-w-0 px-3 rounded-lg text-xs text-neutral-200 hq-field focus:outline-none focus:ring-1 focus:ring-emerald-400'
+const LABEL_CLASS = 'block mb-1 text-[11px] text-neutral-400'
 
 interface Props {
   onClose: () => void
@@ -110,7 +110,7 @@ export function NewAgentDialog({ onClose, onStarted }: Props) {
   }
 
   return createPortal(
-    <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-black/60 backdrop-blur-sm sm:p-4">
+    <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center hq-scrim sm:p-4">
       <div
         ref={dialogRef}
         tabIndex={-1}
@@ -118,10 +118,10 @@ export function NewAgentDialog({ onClose, onStarted }: Props) {
         role="dialog"
         aria-modal="true"
         aria-labelledby="new-agent-title"
-        className="w-full max-w-lg max-h-[92dvh] outline-none flex flex-col rounded-t-2xl sm:rounded-2xl border border-white/10 bg-neutral-950 shadow-2xl overflow-hidden"
+        className="w-full max-w-lg max-h-[92dvh] outline-none flex flex-col rounded-t-2xl sm:rounded-2xl hq-modal overflow-hidden"
       >
         <div className="flex items-center justify-between px-4 py-3 border-b border-white/10">
-          <h2 id="new-agent-title" className="text-sm font-mono font-bold text-white">
+          <h2 id="new-agent-title" className="text-sm font-bold text-white">
             New agent
           </h2>
           <button type="button" onClick={close} disabled={busy} aria-label="Close" className="disabled:opacity-40 flex items-center justify-center h-11 w-11 -mr-2 rounded-lg text-neutral-400 hover:text-white hover:bg-white/10">
@@ -133,7 +133,7 @@ export function NewAgentDialog({ onClose, onStarted }: Props) {
           {loadError && <ErrorText>{loadError}</ErrorText>}
           {report && <LaunchNotice report={report} />}
           {!hosts && !loadError && (
-            <div role="status" className="flex items-center gap-2 text-xs font-mono text-neutral-500">
+            <div role="status" className="flex items-center gap-2 text-xs text-neutral-500">
               <Loader2 className="w-4 h-4 animate-spin" />
               Looking for your computers
             </div>
@@ -164,7 +164,7 @@ export function NewAgentDialog({ onClose, onStarted }: Props) {
                   })}
                 </select>
                 {hosts.hosts.filter((h) => computerUnavailableReason(h)).map((h) => (
-                  <p key={h.host} className="mt-1 text-[11px] font-mono" style={{ color: 'var(--accent-amber)' }}>
+                  <p key={h.host} className="mt-1 text-[11px] " style={{ color: 'var(--accent-amber)' }}>
                     {computerUnavailableReason(h)}
                   </p>
                 ))}
@@ -224,7 +224,7 @@ export function NewAgentDialog({ onClose, onStarted }: Props) {
             Start agent
           </button>
           )}
-          <p className="text-[11px] font-mono text-neutral-500">The agent asks before it runs commands or changes files. You approve each step here.</p>
+          <p className="text-[11px] text-neutral-500">The agent asks before it runs commands or changes files. You approve each step here.</p>
         </div>
       </div>
     </div>,
@@ -232,20 +232,20 @@ export function NewAgentDialog({ onClose, onStarted }: Props) {
   )
 }
 
-const PRIMARY_CLASS = 'w-full flex items-center justify-center gap-2 h-11 rounded-xl border border-white/10 bg-white/10 text-sm font-mono font-semibold text-white hover:bg-white/15'
+const PRIMARY_CLASS = 'w-full flex items-center justify-center gap-2 h-11 rounded-xl border border-white/10 bg-white/10 text-sm font-semibold text-white hover:bg-white/15'
 
 /** What the agent said right after starting, shown before the dialog closes so a question is never missed. */
 function LaunchNotice({ report }: { report: LaunchReport }) {
   return (
     <div className="space-y-2" role="status">
-      <p className="text-sm font-mono font-semibold text-white">The agent has started.</p>
-      {report.note && <p className="text-xs font-mono text-neutral-300 break-words">{report.note}</p>}
+      <p className="text-sm font-semibold text-white">The agent has started.</p>
+      {report.note && <p className="text-xs text-neutral-300 break-words">{report.note}</p>}
       {report.blocked && (
         <>
-          <p className="text-xs font-mono" style={{ color: 'var(--accent-amber)' }}>
+          <p className="text-xs " style={{ color: 'var(--accent-amber)' }}>
             It is already waiting for you. You can answer once it opens.
           </p>
-          <pre className="max-h-48 overflow-auto rounded-lg bg-black/40 px-3 py-2 text-[11px] leading-snug font-mono text-neutral-200 whitespace-pre-wrap break-words">{report.blocked.screen}</pre>
+          <pre className="max-h-48 overflow-auto rounded-lg bg-black/40 px-3 py-2 text-[11px] leading-snug text-neutral-200 whitespace-pre-wrap break-words">{report.blocked.screen}</pre>
         </>
       )}
     </div>

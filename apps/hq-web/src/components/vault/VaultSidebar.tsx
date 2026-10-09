@@ -49,13 +49,13 @@ export function VaultSidebar(p: Props) {
                         className="w-full text-xs pl-8 pr-7 py-2 rounded-xl outline-none glass-input"
                         style={{
                             color: 'var(--text-primary)',
-                            fontFamily: 'var(--font-mono)',
+                            fontFamily: 'var(--font-body)',
                         }}
                     />
                     {query && (
                         <button
                             onClick={() => setQuery('')}
-                            className="absolute right-2 top-1/2 -translate-y-1/2 text-[10px] p-1 rounded-md transition-colors text-text-dim hover:text-text-primary bg-white/[0.06]"
+                            className="absolute right-2 top-1/2 -translate-y-1/2 text-[11px] p-1 rounded-md transition-colors text-text-dim hover:text-text-primary bg-white/[0.06]"
                         >
                             <X className="w-3 h-3" />
                         </button>
@@ -88,12 +88,12 @@ export function VaultSidebar(p: Props) {
             <div className="flex items-center justify-between gap-2 mb-2 px-1">
                 <div className="flex items-center gap-1.5">
                     <Folder className="w-3.5 h-3.5 text-text-dim" />
-                    <span className="text-[10px] font-mono tracking-widest uppercase font-bold text-text-primary">
+                    <span className="text-[11px] tracking-widest uppercase font-bold text-text-primary">
                         Vault Explorer
                     </span>
                 </div>
                 {tree && (
-                    <span className="text-[9px] font-mono text-text-dim/50">
+                    <span className="text-[9px] text-text-dim/50">
                         {countFiles(tree)} files
                     </span>
                 )}
@@ -108,7 +108,7 @@ export function VaultSidebar(p: Props) {
                     <button
                         key={s}
                         onClick={() => setSection(s)}
-                        className="flex-1 py-1.5 text-[9px] tracking-wider uppercase font-mono font-bold transition-all rounded-lg"
+                        className="flex-1 py-1.5 text-[9px] tracking-wider uppercase font-bold transition-all rounded-lg"
                         style={{
                             color: section === s ? 'var(--accent-blue)' : 'var(--text-dim)',
                             background: section === s ? 'rgba(0, 173, 238, 0.08)' : 'transparent',
@@ -148,13 +148,13 @@ export function VaultSidebar(p: Props) {
                 />
             ) : (
                 <div className="text-center py-8 px-4 flex flex-col items-center gap-2">
-                    <span className="text-xs font-mono text-text-dim">
+                    <span className="text-xs text-text-dim">
                         {query ? `No files matching "${query}"` : 'No files found'}
                     </span>
                     {query && (
                         <button
                             onClick={() => setQuery('')}
-                            className="text-[10px] font-mono px-2.5 py-1 rounded-lg bg-white/5 hover:bg-white/10 text-accent-blue transition-colors"
+                            className="text-[11px] px-2.5 py-1 rounded-lg bg-white/5 hover:bg-white/10 text-accent-blue transition-colors"
                         >
                             Clear filter
                         </button>
@@ -165,7 +165,7 @@ export function VaultSidebar(p: Props) {
 
         {/* Sidebar footer */}
         <div
-            className="flex-shrink-0 px-4 py-2.5 text-[9px] font-mono flex items-center justify-between"
+            className="flex-shrink-0 px-4 py-2.5 text-[9px] flex items-center justify-between"
             style={{
                 borderTop: '1px solid rgba(255,255,255,0.04)',
                 color: 'var(--text-dim)',
@@ -199,12 +199,12 @@ function PinnedSection({ pinned, pinnedExpanded, togglePinned, activePath, onNav
             >
                 <div className="flex items-center gap-1.5 min-w-0">
                     <Pin className="w-3 h-3 text-accent-blue" />
-                    <span className="text-[10px] font-mono tracking-widest uppercase font-bold text-accent-blue">
+                    <span className="text-[11px] tracking-widest uppercase font-bold text-accent-blue">
                         Pinned
                     </span>
                 </div>
                 <div className="flex-1 h-px bg-accent-blue/15" />
-                <span className="text-[9px] font-mono px-1.5 py-0.5 rounded-md bg-accent-blue/10 text-accent-blue font-bold">
+                <span className="text-[9px] px-1.5 py-0.5 rounded-md bg-accent-blue/10 text-accent-blue font-bold">
                     {pinned.length}
                 </span>
                 <ChevronDown
@@ -230,7 +230,7 @@ function PinnedSection({ pinned, pinnedExpanded, togglePinned, activePath, onNav
                             to="/vault/$"
                             params={{ _splat: n.path }}
                             onClick={onNavigate}
-                            className="text-[11px] font-mono truncate py-1 px-2 rounded-lg transition-all flex items-center gap-1.5"
+                            className="text-[11px] truncate py-1 px-2 rounded-lg transition-all flex items-center gap-1.5"
                             style={{
                                 color: activePath === n.path ? 'var(--accent-blue)' : 'var(--text-dim)',
                                 background: activePath === n.path ? 'rgba(0, 173, 238, 0.08)' : 'transparent',
@@ -238,14 +238,14 @@ function PinnedSection({ pinned, pinnedExpanded, togglePinned, activePath, onNav
                             onMouseEnter={(e) => { if (activePath !== n.path) e.currentTarget.style.background = 'rgba(255,255,255,0.03)' }}
                             onMouseLeave={(e) => { if (activePath !== n.path) e.currentTarget.style.background = 'transparent' }}
                         >
-                            <span className="opacity-40 text-[10px]">📌</span>
+                            <span className="opacity-40 text-[11px]">📌</span>
                             <span className="truncate">{n.title}</span>
                         </Link>
                     ))}
                     {pinned.length > 3 && (
                         <button
                             onClick={() => togglePinned()}
-                            className="text-[9px] font-mono py-0.5 px-2 text-left text-text-dim/60 hover:text-accent-blue transition-colors"
+                            className="text-[9px] py-0.5 px-2 text-left text-text-dim/60 hover:text-accent-blue transition-colors"
                         >
                             +{pinned.length - 3} more pinned
                         </button>

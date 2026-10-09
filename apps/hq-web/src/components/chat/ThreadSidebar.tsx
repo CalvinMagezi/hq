@@ -34,7 +34,7 @@ export function ThreadSidebar({ open, collapsed, onClose, loading, onNew, onOpen
       {open && <div className="md:hidden fixed inset-0 z-40 bg-black/60 backdrop-blur-sm" onClick={onClose} />}
 
       <div
-        className={`fixed md:relative inset-y-0 left-0 z-50 md:z-auto w-72 shrink-0 border-r border-white/10 flex flex-col h-full pad-safe-top pb-[var(--safe-bottom)] md:pb-0 bg-neutral-900/95 md:bg-neutral-900/60 backdrop-blur-xl transition-transform duration-200 ${
+        className={`fixed md:relative inset-y-0 left-0 z-50 md:z-auto w-72 shrink-0 border-r border-white/10 flex flex-col h-full pad-safe-top pb-[var(--safe-bottom)] md:pb-0 bg-neutral-950/90 md:bg-transparent backdrop-blur-xl transition-transform duration-200 ${
           open ? 'translate-x-0' : '-translate-x-full md:translate-x-0'
         } ${collapsed ? 'md:hidden' : ''}`}
       >
@@ -42,7 +42,7 @@ export function ThreadSidebar({ open, collapsed, onClose, loading, onNew, onOpen
           <button
             type="button"
             onClick={onNew}
-            className="flex-1 flex items-center justify-center gap-2 py-2 px-3 rounded-xl bg-emerald-500/15 border border-emerald-500/30 text-emerald-400 font-bold text-sm hover:bg-emerald-500/25 transition-all"
+            className="flex-1 flex items-center justify-center gap-2 hq-btn-primary !h-10"
           >
             <Plus className="w-4 h-4" /> New chat
             {runningCount > 0 && <span className="text-[11px] font-normal text-emerald-300/70">({runningCount} running)</span>}
@@ -60,7 +60,7 @@ export function ThreadSidebar({ open, collapsed, onClose, loading, onNew, onOpen
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
               placeholder="Search chats..."
-              className="w-full pl-8 pr-3 py-1.5 rounded-lg bg-white/5 border border-white/10 text-sm outline-none focus:border-emerald-500/40"
+              className="w-full pl-8 pr-3 py-1.5 rounded-lg hq-field text-sm outline-none"
             />
           </div>
         </div>
@@ -76,7 +76,7 @@ export function ThreadSidebar({ open, collapsed, onClose, loading, onNew, onOpen
                 key={t.threadId}
                 onClick={() => onOpen(t.threadId)}
                 className={`group flex items-center justify-between p-2.5 rounded-xl cursor-pointer transition-all ${
-                  isActive ? 'bg-emerald-500/15 border border-emerald-500/30' : 'hover:bg-white/5 border border-transparent'
+                  isActive ? 'hq-row is-selected' : 'hq-row'
                 }`}
               >
                 <div className="flex items-center gap-2.5 overflow-hidden">
@@ -87,7 +87,7 @@ export function ThreadSidebar({ open, collapsed, onClose, loading, onNew, onOpen
                   )}
                   <div className="truncate text-sm">
                     <div className="flex items-center gap-1.5">
-                      <span className={`font-semibold truncate ${isActive ? 'text-emerald-300' : 'text-neutral-200'}`}>{t.title}</span>
+                      <span className={`font-semibold truncate ${isActive ? 'text-white' : 'text-neutral-200'}`}>{t.title}</span>
                       {t.unreadCount > 0 && !isActive && (
                         <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 shrink-0" aria-label="New reply" />
                       )}

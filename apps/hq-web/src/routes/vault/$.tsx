@@ -42,7 +42,7 @@ function VaultFileRoute() {
     const note = useQuery(noteQuery(filePath))
     if (!note.data) {
         return (
-            <div className="h-full flex items-center justify-center text-xs font-mono" style={{ color: 'var(--text-dim)' }}>
+            <div className="h-full flex items-center justify-center text-xs " style={{ color: 'var(--text-dim)' }}>
                 {note.isError ? 'Could not load this note, and no saved copy is on this device.' : 'Loading...'}
             </div>
         )
@@ -64,8 +64,8 @@ function DirView({ dirPath, entries }: { dirPath: string; entries: DirEntry[] })
         <div className="p-6">
             <div className="flex items-center gap-2 mb-5">
                 <span className="text-lg">📁</span>
-                <h1 className="text-sm font-mono font-bold" style={{ color: 'var(--text-primary)' }}>{name}</h1>
-                <span className="text-[10px] font-mono" style={{ color: 'var(--text-dim)', opacity: 0.4 }}>{entries.length} items</span>
+                <h1 className="text-sm font-bold" style={{ color: 'var(--text-primary)' }}>{name}</h1>
+                <span className="text-[11px] " style={{ color: 'var(--text-dim)', opacity: 0.4 }}>{entries.length} items</span>
             </div>
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2">
                 {entries.map(e => (
@@ -79,7 +79,7 @@ function DirView({ dirPath, entries }: { dirPath: string; entries: DirEntry[] })
                         onMouseLeave={ev => { ev.currentTarget.style.background = 'rgba(255,255,255,0.03)'; ev.currentTarget.style.borderColor = 'rgba(255,255,255,0.05)' }}
                     >
                         <span className="text-[14px] flex-shrink-0">{e.isDir ? '📁' : fileIcon(e.name)}</span>
-                        <span className="text-[11px] font-mono truncate" style={{ color: e.isDir ? 'var(--text-primary)' : 'var(--text-dim)' }}>
+                        <span className="text-[11px] truncate" style={{ color: e.isDir ? 'var(--text-primary)' : 'var(--text-dim)' }}>
                             {e.name.replace(/\.md$/, '')}
                         </span>
                     </Link>
@@ -335,7 +335,7 @@ ${safeHtml}
                 className="flex items-center justify-between px-3 py-1.5 flex-shrink-0 sticky top-0 z-10 glass-heavy"
                 style={{ borderBottom: '1px solid rgba(255,255,255,0.05)', minHeight: '36px' }}
             >
-                <span className="text-[11px] font-mono font-bold truncate flex-1 mr-2" style={{ color: 'var(--text-primary)' }}>
+                <span className="text-[11px] font-bold truncate flex-1 mr-2" style={{ color: 'var(--text-primary)' }}>
                     {filename?.replace(/\.md$/, '')}
                 </span>
 
@@ -343,7 +343,7 @@ ${safeHtml}
                     {isMd && (
                         <button
                             onClick={() => setEditing(!editing)}
-                            className="flex items-center gap-1 px-2 py-1 rounded-lg text-[10px] font-mono font-bold transition-all"
+                            className="flex items-center gap-1 px-2 py-1 rounded-lg text-[11px] font-bold transition-all"
                             style={{
                                 color: editing ? 'var(--accent-violet)' : 'var(--text-dim)',
                                 background: editing ? 'rgba(167,139,250,0.1)' : 'rgba(255,255,255,0.04)',
@@ -381,24 +381,24 @@ ${safeHtml}
                             <button
                                 onClick={() => setMdZoomPersisted(mdZoom - MD_ZOOM_STEP)}
                                 disabled={mdZoom <= MD_ZOOM_MIN}
-                                className="px-1.5 py-0.5 text-[10px] font-mono rounded hover:bg-white/10 disabled:opacity-30 transition-all"
+                                className="px-1.5 py-0.5 text-[11px] rounded hover:bg-white/10 disabled:opacity-30 transition-all"
                                 style={{ color: 'var(--text-dim)' }}
                                 title="Decrease text size (Cmd/Ctrl + -)"
                             >A-</button>
-                            <span className="text-[9px] font-mono w-7 text-center" style={{ color: 'var(--text-dim)' }}>
+                            <span className="text-[9px] w-7 text-center" style={{ color: 'var(--text-dim)' }}>
                                 {Math.round(mdZoom * 100)}%
                             </span>
                             <button
                                 onClick={() => setMdZoomPersisted(mdZoom + MD_ZOOM_STEP)}
                                 disabled={mdZoom >= MD_ZOOM_MAX}
-                                className="px-1.5 py-0.5 text-[10px] font-mono rounded hover:bg-white/10 disabled:opacity-30 transition-all"
+                                className="px-1.5 py-0.5 text-[11px] rounded hover:bg-white/10 disabled:opacity-30 transition-all"
                                 style={{ color: 'var(--text-dim)' }}
                                 title="Increase text size (Cmd/Ctrl + +)"
                             >A+</button>
                             {mdZoom !== 1 && (
                                 <button
                                     onClick={() => setMdZoomPersisted(1)}
-                                    className="px-1 text-[9px] font-mono rounded hover:bg-white/10 text-amber-400/70 hover:text-amber-400 transition-all"
+                                    className="px-1 text-[9px] rounded hover:bg-white/10 text-amber-400/70 hover:text-amber-400 transition-all"
                                     title="Reset zoom (Cmd/Ctrl + 0)"
                                 >↺</button>
                             )}
@@ -420,7 +420,7 @@ ${safeHtml}
                             <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                                 <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/>
                             </svg>
-                            <span className="hidden sm:inline text-[10px] font-mono">{exporting ? 'Exporting…' : 'Export'}</span>
+                            <span className="hidden sm:inline text-[11px] ">{exporting ? 'Exporting…' : 'Export'}</span>
                         </button>
                     )}
                     {isMd && (
@@ -455,7 +455,7 @@ ${safeHtml}
             <div className="flex-1 min-h-0 overflow-y-auto overflow-x-hidden w-full">
                 <Suspense fallback={
                     <div className="flex items-center justify-center py-12">
-                        <span className="text-sm font-mono animate-pulse" style={{ color: 'var(--text-dim)' }}>Loading viewer...</span>
+                        <span className="text-sm animate-pulse" style={{ color: 'var(--text-dim)' }}>Loading viewer...</span>
                     </div>
                 }>
                     <div className="max-w-[860px] mx-auto p-4 sm:p-6 overflow-x-hidden" style={{ paddingBottom: 'calc(80px + env(safe-area-inset-bottom))' }}>

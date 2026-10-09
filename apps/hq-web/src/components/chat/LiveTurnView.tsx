@@ -26,7 +26,7 @@ export function LiveTurnView({ threadId }: { threadId: string | null | undefined
         />
       </StreamErrorBoundary>
       {turn.gap && (
-        <p role="status" className="-mt-2 mb-3 px-3 text-xs font-mono text-amber-400">
+        <p role="status" className="-mt-2 mb-3 px-3 text-xs text-amber-400">
           Some of this reply was skipped on a slow connection. The complete reply replaces it when HQ finishes.
         </p>
       )}

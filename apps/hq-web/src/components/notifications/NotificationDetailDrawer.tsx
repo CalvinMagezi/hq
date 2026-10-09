@@ -32,7 +32,7 @@ export function NotificationDetailDrawer({
   }
 
   return (
-    <div className="fixed inset-0 z-50 flex justify-end bg-black/60 backdrop-blur-sm transition-all duration-300">
+    <div className="fixed inset-0 z-50 flex justify-end hq-scrim transition-all duration-300">
       {/* Backdrop click */}
       <div className="flex-1" onClick={onClose} />
 
@@ -53,11 +53,11 @@ export function NotificationDetailDrawer({
             {!isValue && <AlertCircle className="w-5 h-5 text-purple-400" />}
             <div>
               <div className="flex items-center gap-2">
-                <span className="text-[10px] font-mono font-bold uppercase tracking-wider px-2 py-0.5 rounded-full bg-white/5 text-neutral-300">
+                <span className="text-[11px] font-bold uppercase tracking-wider px-2 py-0.5 rounded-full bg-white/5 text-neutral-300">
                   {notification.kind.replace('_', ' ')}
                 </span>
                 <span
-                  className="text-[10px] font-mono font-semibold uppercase px-2 py-0.5 rounded-full"
+                  className="text-[11px] font-semibold uppercase px-2 py-0.5 rounded-full"
                   style={{
                     background:
                       notification.state === 'pending'
@@ -89,7 +89,7 @@ export function NotificationDetailDrawer({
         <div className="flex-1 overflow-y-auto px-6 py-5 space-y-6">
           {/* Summary / Description */}
           <div>
-            <h3 className="text-xs font-mono font-semibold text-neutral-400 uppercase tracking-wider mb-1.5">
+            <h3 className="text-xs font-semibold text-neutral-400 uppercase tracking-wider mb-1.5">
               Summary
             </h3>
             <p className="text-sm text-neutral-200 leading-relaxed whitespace-pre-wrap">
@@ -105,10 +105,10 @@ export function NotificationDetailDrawer({
               borderColor: 'rgba(255,255,255,0.06)',
             }}
           >
-            <h4 className="text-xs font-mono font-semibold text-neutral-400 uppercase tracking-wider">
+            <h4 className="text-xs font-semibold text-neutral-400 uppercase tracking-wider">
               Item Details
             </h4>
-            <div className="grid grid-cols-2 gap-3 text-xs font-mono">
+            <div className="grid grid-cols-2 gap-3 text-xs ">
               <div>
                 <span className="text-neutral-500 block">ID:</span>
                 <span className="text-neutral-300 break-all">{notification.id}</span>
@@ -146,7 +146,7 @@ export function NotificationDetailDrawer({
                   type="button"
                   onClick={handleDismiss}
                   disabled={loadingAction !== null}
-                  className="px-4 py-2 rounded-xl text-xs font-mono font-semibold text-neutral-400 hover:text-neutral-200 hover:bg-white/5 transition-all disabled:opacity-50"
+                  className="px-4 py-2 rounded-xl text-xs font-semibold text-neutral-400 hover:text-neutral-200 hover:bg-white/5 transition-all disabled:opacity-50"
                 >
                   {loadingAction === 'dismiss' ? <Loader2 className="w-4 h-4 animate-spin" /> : 'Dismiss'}
                 </button>
@@ -155,7 +155,7 @@ export function NotificationDetailDrawer({
                   type="button"
                   onClick={handleReject}
                   disabled={loadingAction !== null}
-                  className="px-4 py-2 rounded-xl text-xs font-mono font-bold flex items-center gap-1.5 text-rose-400 hover:bg-rose-500/10 border border-rose-500/20 transition-all disabled:opacity-50"
+                  className="px-4 py-2 rounded-xl text-xs font-bold flex items-center gap-1.5 text-rose-400 hover:bg-rose-500/10 border border-rose-500/20 transition-all disabled:opacity-50"
                 >
                   {loadingAction === 'reject' ? (
                     <Loader2 className="w-4 h-4 animate-spin" />
@@ -171,7 +171,7 @@ export function NotificationDetailDrawer({
                   type="button"
                   onClick={handleApprove}
                   disabled={loadingAction !== null}
-                  className="px-5 py-2 rounded-xl text-xs font-mono font-bold flex items-center gap-1.5 transition-all disabled:opacity-50"
+                  className="px-5 py-2 rounded-xl text-xs font-bold flex items-center gap-1.5 transition-all disabled:opacity-50"
                   style={{
                     background: 'var(--accent-green, #00ffa3)',
                     color: '#000',
@@ -192,7 +192,7 @@ export function NotificationDetailDrawer({
                 type="button"
                 onClick={handleDismiss}
                 disabled={loadingAction !== null}
-                className="px-5 py-2 rounded-xl text-xs font-mono font-semibold text-neutral-200 hover:text-white hover:bg-white/10 border border-white/10 transition-all flex items-center gap-1.5 disabled:opacity-50"
+                className="px-5 py-2 rounded-xl text-xs font-semibold text-neutral-200 hover:text-white hover:bg-white/10 border border-white/10 transition-all flex items-center gap-1.5 disabled:opacity-50"
               >
                 {loadingAction === 'dismiss' ? (
                   <Loader2 className="w-4 h-4 animate-spin" />

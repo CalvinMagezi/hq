@@ -4,9 +4,9 @@ import { ErrorText } from './ErrorText'
 import { INTERRUPT_KEY, QUICK_KEYS, globalSessionsApi, type HarnessSession } from '~/lib/sessionsApi'
 
 const KEY_BUTTON_CLASS =
-  'h-11 sm:h-9 min-w-11 sm:min-w-9 px-2.5 rounded border border-white/10 text-[11px] font-mono text-neutral-300 hover:text-white hover:bg-white/10 disabled:opacity-40 disabled:hover:bg-transparent'
+  'h-11 sm:h-9 min-w-11 sm:min-w-9 px-2.5 rounded border border-white/10 text-[11px] text-neutral-300 hover:text-white hover:bg-white/10 disabled:opacity-40 disabled:hover:bg-transparent'
 const INTERRUPT_BUTTON_CLASS =
-  'h-11 sm:h-9 px-2.5 rounded border border-white/10 text-[11px] font-mono hover:bg-white/10 disabled:opacity-40 disabled:hover:bg-transparent'
+  'h-11 sm:h-9 px-2.5 rounded border border-white/10 text-[11px] hover:bg-white/10 disabled:opacity-40 disabled:hover:bg-transparent'
 /** How long the interrupt button stays armed before it falls back to unarmed. */
 const INTERRUPT_CONFIRM_MS = 4_000
 
@@ -57,7 +57,7 @@ export function MoreKeys({ send, disabled, defaultOpen }: KeysProps) {
   }, [armed])
   return (
     <details open={defaultOpen}>
-      <summary className="flex items-center min-h-11 cursor-pointer text-[11px] font-mono text-neutral-400 hover:text-white select-none">More keys</summary>
+      <summary className="flex items-center min-h-11 cursor-pointer text-[11px] text-neutral-400 hover:text-white select-none">More keys</summary>
       <div className="flex flex-wrap items-center gap-1.5 pb-1" role="group" aria-label="Press a key">
         {QUICK_KEYS.map((key) => (
           <button key={key} type="button" onClick={() => void send({ keys: [key] })} disabled={disabled} className={KEY_BUTTON_CLASS}>
@@ -115,13 +115,13 @@ export function SessionSendBox({ session, onSent }: Props) {
           rows={2}
           placeholder="Tell the agent what to do next"
           aria-label="Message for the agent"
-          className="flex-1 min-w-0 px-3 py-2 rounded-xl text-xs font-mono text-neutral-200 bg-black/30 border border-white/10 focus:outline-none focus:ring-1 focus:ring-emerald-400 disabled:opacity-50 resize-y"
+          className="flex-1 min-w-0 px-3 py-2 rounded-xl text-xs text-neutral-200 hq-field focus:outline-none focus:ring-1 focus:ring-emerald-400 disabled:opacity-50 resize-y"
         />
         <button
           type="button"
           onClick={() => void submitText()}
           disabled={busy || !text.trim()}
-          className="flex items-center justify-center gap-1.5 h-11 sm:h-9 px-3 rounded-xl border border-white/10 text-xs font-mono text-neutral-200 hover:bg-white/10 disabled:opacity-40 disabled:hover:bg-transparent shrink-0"
+          className="flex items-center justify-center gap-1.5 h-11 sm:h-9 px-3 rounded-xl border border-white/10 text-xs text-neutral-200 hover:bg-white/10 disabled:opacity-40 disabled:hover:bg-transparent shrink-0"
         >
           {busy ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Send className="w-3.5 h-3.5" />}
           Send
