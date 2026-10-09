@@ -317,7 +317,9 @@ fn claim_response(claimed: &t::Claimed, resume: Option<&t::TaskCheckpoint>, sett
         "task": task_json_with_warnings(&claimed.task),
         "next": "Work on the task. Pass `lease` on your task_update and task_comment_add calls. \
                  Call task_heartbeat (with a checkpoint when you reach a good stopping point) while you \
-                 work and task_release with a status when you stop.",
+                 work and task_release with a status when you stop: ready_for_review when the work is done \
+                 and needs checking, blocked when you cannot go on, to_do to hand it back. Use complete \
+                 only for work that has been verified.",
     });
     if let Some(checkpoint) = resume {
         out["resume"] = resume_json(checkpoint);

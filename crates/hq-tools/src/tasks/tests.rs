@@ -2094,7 +2094,8 @@ async fn task_next_starts_the_most_urgent_task_assigned_to_you_and_nobody_else_g
     assert_eq!(first["task"]["title"], "Now");
     assert_eq!(first["task"]["status"], "in_progress");
     assert!(first["lease"].as_str().unwrap().starts_with("hql_"));
-    assert!(first["next"].as_str().unwrap().contains("task_release"));
+    let next = first["next"].as_str().unwrap();
+    assert!(next.contains("task_release") && next.contains("ready_for_review") && next.contains("only for work that has been verified"), "{next}");
 
     let second = call_tool(&tools, "task_next", json!({ "actor": "builder" })).await.unwrap();
     assert_eq!(second["task"]["title"], "Later", "the first is held, so the next one");

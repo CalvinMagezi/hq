@@ -469,7 +469,14 @@ Real-harness acceptance (run against a throwaway vault over HTTP `/mcp`, no skil
   with a JSON body, which Codex's client rejects; HQ now returns an empty `202 Accepted`. Codex
   also needs its per-server tool approval set for non-interactive use (`default_tools_approval_mode`).
   With both, it found the task through `hq_discover`/`hq_call`, did the work, and released it.
-- Not run: Cursor, Gemini, OpenCode, Copilot CLI, or any run with the skill installed.
+- OpenCode (a free hosted model): one error on an empty `task_next`, recovered from the message alone,
+  then claimed, commented and released as `ready_for_review`.
+- Copilot CLI: completed the loop but marked the task `complete`. It never received the server
+  instructions (they need `--allow-all-mcp-server-instructions`) and discovery truncates tool
+  descriptions, so the claim reply's `next` now states the status rule itself.
+- Cursor agent (project `.cursor/mcp.json`): claimed, commented and released as `ready_for_review`.
+- Not run: Gemini (not installed here), any run with the skill installed, or any harness against a
+  server with auth on. Each run was one small task, not a long job.
 
 Rollback of 085, then delete the `085_task_assignees` row from `schema_version`:
 

@@ -385,8 +385,13 @@ export function TaskDetailDrawer({
             </div>
           )}
 
-          {!editing && (task.tags.length > 0 || task.due_date || task.start_date || task.work_started_at || task.first_ready_for_review_at || task.completed_at) && (
+          {!editing && (task.tags.length > 0 || task.assignees.length > 0 || task.due_date || task.start_date || task.work_started_at || task.first_ready_for_review_at || task.completed_at) && (
             <div className="flex items-center gap-2 flex-wrap text-xs ">
+              {task.assignees.length > 0 && (
+                <span className="px-2.5 py-1 rounded-full bg-white/5 text-neutral-200 border border-white/10 break-all" title="Assigned to">
+                  for {task.assignees.join(', ')}
+                </span>
+              )}
               {task.tags.map((tag) => (
                 <span key={tag} className="px-2.5 py-1 rounded-full bg-white/5 text-neutral-300 border border-white/10">
                   {tag}
