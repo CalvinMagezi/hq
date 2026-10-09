@@ -27,7 +27,12 @@ pub async fn run(config: &HqConfig, query: &str, limit: usize, json: bool) -> Re
     let mut results: Vec<hq_core::types::SearchResult> =
         db.with_conn(|conn| hq_db::search::keyword_search(conn, query, if lite { limit.saturating_mul(5) } else { limit }))?;
     if config.profile.is_lite() {
-        results.retain(|r| !hq_web::lite_hides(&r.note_path));
+        // By name and by where the note really is: a link in a normal folder can lead into a
+        // hidden one, and the index follows links.
+        results.retain(|r| {
+            !hq_web::lite_hides(&r.note_path)
+                && !hq_web::lite_hides_resolved(&config.vault_path, &config.vault_path.join(r.note_path.trim()))
+        });
         results.truncate(limit);
     }
     if json {

@@ -118,11 +118,12 @@ pub fn create_default_registry(
     registry
 }
 
-/// The tool categories `profile: lite` keeps: the owner's notes and tasks. Everything else (the
+/// The tool categories `profile: lite` keeps: tasks only. The note tools are out too, since they
+/// could read `_system` and the other hidden folders. Everything else (the
 /// shell and file tools, coding-agent sessions, hosts, web search and fetch, image generation,
 /// email, GitHub, remote MCP servers, sub-agents and the chat agent's own tools) is not
 /// registered, so no transport can reach it.
-pub const LITE_CATEGORIES: &[&str] = &["tasks", "vault"];
+pub const LITE_CATEGORIES: &[&str] = &["tasks"];
 
 #[cfg(test)]
 mod tests {
@@ -312,7 +313,7 @@ mod tests {
         assert!(mailbox_entries("relay") >= 1, "an owner call delivers to a tagged mailbox");
     }
     #[test]
-    fn the_lite_profile_registers_only_notes_and_tasks() {
+    fn the_lite_profile_registers_only_tasks() {
         let vault = tempfile::TempDir::new().unwrap();
         let vault_path = vault.path().to_path_buf();
         let build = |lite: bool| {
@@ -334,11 +335,11 @@ mod tests {
         };
         let (full, lite) = (build(false), build(true));
         assert!(full.len() > lite.len() && lite.len() >= 2);
-        assert_eq!(lite.categories(), ["tasks", "vault"]);
-        for must_exist in ["task_create", "vault_read", "vault_search"] {
-            assert!(lite.get(must_exist).is_some(), "{must_exist}");
-        }
+        assert_eq!(lite.categories(), ["tasks"]);
+        assert!(lite.get("task_create").is_some());
         for gone in [
+            // The note tools would read `_system` and the other hidden folders.
+            "vault_read", "vault_batch_read", "vault_list", "vault_outline", "vault_search", "vault_context",
             "bash", "harness_session_spawn", "host_send", "web_fetch", "web_search", "imagegen",
             "hq_ask", "agent_message_send", "config_manage", "gws",
         ] {

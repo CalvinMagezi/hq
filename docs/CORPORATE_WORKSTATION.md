@@ -68,8 +68,8 @@ configured, so a Lite instance cannot be turned into a path around your company'
 accident. The only model route it accepts without being told is your company's own Copilot seat
 through GitHub's CLI (`hq copilot link`).
 
-If MCP is switched off for Copilot but terminal commands are allowed, agents can use the same tasks
-and notes through `hq task` and `hq search --json`; `hq copilot init` writes the instructions that
+If MCP is switched off for Copilot but terminal commands are allowed, agents can use tasks through
+`hq task` and notes through `hq vault` and `hq search --json`; `hq copilot init` writes the instructions that
 tell Copilot how. See [HQ_LITE.md](HQ_LITE.md).
 
 ### If the program will not start

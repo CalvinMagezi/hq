@@ -94,8 +94,11 @@ fn install(config: &HqConfig, scope: &Scope) -> Result<()> {
              instead of rewriting every client's config, including your own full-access ones"
         );
     }
+    // In Lite the server only has task tools, so a plain install writes the tasks scope: the
+    // entry then says what it reaches, even if someone later edits the profile.
+    let default_scope = (config.profile.is_lite() && remote_url.is_none()).then_some(ServeScope::Tasks);
     let opts = EntryOptions {
-        scope: scope.access,
+        scope: scope.access.or(default_scope),
         remote_url,
     };
     println!("Installing HQ MCP server configuration...\n");
