@@ -7,6 +7,7 @@ pub mod context;
 mod credits;
 pub mod r#loop;
 pub mod routing;
+pub(crate) mod role_denial;
 mod skills;
 mod stream;
 
@@ -209,6 +210,8 @@ pub struct AgentSession {
     pub last_resolved_model: Option<String>,
     pub session_id: String,
     pub(super) telemetry_db: Option<Arc<hq_db::Database>>,
+    /// Set for an orchestrator: explains and records calls outside its role.
+    pub(super) role_denial: Option<Arc<role_denial::RoleDenial>>,
     /// Skill hint index, used to auto-load matching skills on the first user
     /// turn. Enrichment cannot happen at build time because it matches against
     /// the user's instruction, which does not exist yet.
@@ -282,6 +285,7 @@ impl AgentSession {
             last_resolved_model: None,
             session_id: uuid::Uuid::new_v4().to_string(),
             telemetry_db: None,
+            role_denial: None,
             skill_index: None,
             skills_enriched: false,
             max_skill_tokens: 3000,
@@ -320,6 +324,10 @@ impl AgentSession {
     ) {
         self.skill_index = Some(index);
         self.max_skill_tokens = max_skill_tokens;
+    }
+
+    pub(crate) fn set_role_denial(&mut self, denial: Arc<role_denial::RoleDenial>) {
+        self.role_denial = Some(denial);
     }
 
     pub fn set_telemetry_db(&mut self, db: Arc<hq_db::Database>) {

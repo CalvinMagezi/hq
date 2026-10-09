@@ -39,6 +39,7 @@ pub mod skill_edit;
 pub mod skill_manage_tool;
 pub mod skills;
 pub mod slash_commands;
+pub mod github;
 pub mod system_info;
 pub mod task_classifier;
 pub mod tasks;

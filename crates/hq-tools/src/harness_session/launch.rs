@@ -548,6 +548,13 @@ pub async fn spawn_with(
     req: SpawnRequest<'_>,
 ) -> Result<Value> {
     require_allowed_cwd(Some(&req.cwd.to_string_lossy()))?;
+    let cfg = hq_core::config::HqConfig::load()?;
+    check_cwd_outside_vault(
+        req.cwd,
+        req.host.unwrap_or_default(),
+        &cfg.agent_host.default_host,
+        &cfg.vault_path,
+    )?;
     let host = agent_host::host(req.host)?;
     spawn_on(vault_path, db, host, req).await
 }
