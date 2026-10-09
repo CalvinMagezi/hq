@@ -219,7 +219,7 @@ mod vault_guard_tests {
         assert!(check("/srv/projects/app", "").is_ok());
         assert!(check("/srv/hq-oss", "native").is_ok());
         assert!(check(VAULT, "laptop").is_ok(), "a remote host's paths are its own");
-        assert!(check("/Users/someone/Documents/GitHub", "laptop").is_ok());
+        assert!(check("/workspace/projects/app", "laptop").is_ok());
     }
 
     #[test]

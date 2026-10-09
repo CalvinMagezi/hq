@@ -115,8 +115,19 @@ async fn web_chat_keeps_spawn_steer_and_planning_tools() {
 #[tokio::test]
 async fn web_chat_today_has_the_writers_the_role_will_remove() {
     let names = web_chat_tool_names().await;
-    for writer in ["edit_file", "write_file", "file_edit_batch", "rollback_file", "git_commit", "git_pr", "bash"] {
-        assert!(names.iter().any(|n| n == writer), "{writer} missing: {names:?}");
+    for writer in [
+        "edit_file",
+        "write_file",
+        "file_edit_batch",
+        "rollback_file",
+        "git_commit",
+        "git_pr",
+        "bash",
+    ] {
+        assert!(
+            names.iter().any(|n| n == writer),
+            "{writer} missing: {names:?}"
+        );
     }
     assert!(
         !names.iter().any(|n| n == "config_manage"),
@@ -170,7 +181,11 @@ fn orchestrator_prompt_block_has_no_coding_framing() {
         derived,
     );
     assert!(block.contains("You are the HQ orchestrator."));
-    for banned in ["primary coding agent", "Self-Management", "Development work on your own source"] {
+    for banned in [
+        "primary coding agent",
+        "Self-Management",
+        "Development work on your own source",
+    ] {
         assert!(!block.contains(banned), "{banned} leaked into: {block}");
     }
     assert!(block.contains("**Delegation:** `spawn_subagents`"));
@@ -206,7 +221,10 @@ async fn orchestrator_catalog_is_today_minus_the_removal_set() {
 async fn orchestrator_keeps_spawn_steer_and_planning_tools() {
     let names = tool_names_for(SessionRole::Orchestrator).await;
     for required in SPAWN_AND_STEER_TOOLS.iter().chain(PLANNING_AND_READ_TOOLS) {
-        assert!(names.iter().any(|n| n == required), "orchestrator lost {required}: {names:?}");
+        assert!(
+            names.iter().any(|n| n == required),
+            "orchestrator lost {required}: {names:?}"
+        );
     }
 }
 
@@ -237,13 +255,21 @@ async fn an_orchestrator_calling_a_removed_tool_is_routed_to_delegation() {
     let vault = tempfile::TempDir::new().unwrap();
     let session = orchestrator_session(vault.path()).await;
     let reply = session
-        .call_tool_for_test("edit_file", serde_json::json!({"file_path": "x", "old_string": "a", "new_string": "b"}))
+        .call_tool_for_test(
+            "edit_file",
+            serde_json::json!({"file_path": "x", "old_string": "a", "new_string": "b"}),
+        )
         .await
         .unwrap();
     let text = result_text(&reply);
-    assert!(text.contains("not available in the orchestrator role"), "{text}");
+    assert!(
+        text.contains("not available in the orchestrator role"),
+        "{text}"
+    );
     assert!(text.contains("harness_session_spawn"), "{text}");
-    let unknown = session.call_tool_for_test("no_such_tool", serde_json::json!({})).await;
+    let unknown = session
+        .call_tool_for_test("no_such_tool", serde_json::json!({}))
+        .await;
     assert!(unknown.is_err(), "other unknown tools still fail as before");
 }
 
@@ -268,14 +294,19 @@ async fn an_orchestrators_shell_cannot_write_and_says_where_to_go() {
     let _ = std::fs::remove_file(&home_probe);
     assert!(!leaked, "orchestrator bash wrote to disk");
     let text = result_text(&reply);
-    assert!(text.contains("harness_session_spawn"), "no routing hint: {text}");
+    assert!(
+        text.contains("harness_session_spawn"),
+        "no routing hint: {text}"
+    );
 }
 
 #[tokio::test]
 async fn an_orchestrator_cannot_export_a_document_outside_notebooks() {
     let vault = tempfile::TempDir::new().unwrap();
     // The temp directory is an allowed root, so the refused target lives in the home directory.
-    let outside = dirs::home_dir().unwrap().join(format!("hq-orch-probe-{}", std::process::id()));
+    let outside = dirs::home_dir()
+        .unwrap()
+        .join(format!("hq-orch-probe-{}", std::process::id()));
     let session = orchestrator_session(vault.path()).await;
     let target = outside.join("x.html");
     let reply = session
@@ -285,17 +316,27 @@ async fn an_orchestrator_cannot_export_a_document_outside_notebooks() {
         )
         .await
         .unwrap();
-    assert!(result_text(&reply).contains("may only write under"), "{}", result_text(&reply));
+    assert!(
+        result_text(&reply).contains("may only write under"),
+        "{}",
+        result_text(&reply)
+    );
     let written = outside.exists();
     let _ = std::fs::remove_dir_all(&outside);
-    assert!(!written, "the refused export still created {}", outside.display());
+    assert!(
+        !written,
+        "the refused export still created {}",
+        outside.display()
+    );
 }
 
 #[tokio::test]
 async fn an_orchestrator_cannot_point_a_note_export_outside_notebooks() {
     let vault = tempfile::TempDir::new().unwrap();
     let session = orchestrator_session(vault.path()).await;
-    let outside = dirs::home_dir().unwrap().join(format!("hq-orch-export-{}", std::process::id()));
+    let outside = dirs::home_dir()
+        .unwrap()
+        .join(format!("hq-orch-export-{}", std::process::id()));
     for tool in ["vault_export", "vault_export_pdf"] {
         let reply = session
             .call_tool_for_test(
@@ -304,7 +345,11 @@ async fn an_orchestrator_cannot_point_a_note_export_outside_notebooks() {
             )
             .await
             .unwrap();
-        assert!(result_text(&reply).contains("may only write under"), "{tool}: {}", result_text(&reply));
+        assert!(
+            result_text(&reply).contains("may only write under"),
+            "{tool}: {}",
+            result_text(&reply)
+        );
     }
     assert!(!outside.exists());
 }

@@ -26,8 +26,10 @@ const SEARCH_KINDS: [&str; 4] = ["repos", "code", "issues", "prs"];
 /// Variables the child may see. The token is the only secret; GH_HOST is deliberately absent.
 const CHILD_ENV: [&str; 6] = ["PATH", "HOME", "GH_TOKEN", "GITHUB_TOKEN", "LANG", "TMPDIR"];
 
-static REPO: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"^[A-Za-z0-9_.-]{1,100}/[A-Za-z0-9_.-]{1,100}$").unwrap());
-static ENDPOINT: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"^[A-Za-z0-9/_.,:%+=&?-]{1,500}$").unwrap());
+static REPO: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"^[A-Za-z0-9_.-]{1,100}/[A-Za-z0-9_.-]{1,100}$").unwrap());
+static ENDPOINT: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"^[A-Za-z0-9/_.,:%+=&?-]{1,500}$").unwrap());
 
 /// One validated GitHub call, ready to run.
 #[derive(Debug, PartialEq, Eq)]
@@ -39,7 +41,10 @@ pub(crate) enum GhCall {
 }
 
 fn text<'a>(args: &'a Value, key: &str) -> Option<&'a str> {
-    args.get(key).and_then(Value::as_str).map(str::trim).filter(|s| !s.is_empty())
+    args.get(key)
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
 }
 
 fn repo(args: &Value) -> Result<String> {
@@ -51,12 +56,19 @@ fn repo(args: &Value) -> Result<String> {
 }
 
 fn number(args: &Value) -> Result<String> {
-    let n = args.get("number").and_then(Value::as_u64).context("`number` is required")?;
+    let n = args
+        .get("number")
+        .and_then(Value::as_u64)
+        .context("`number` is required")?;
     Ok(n.to_string())
 }
 
 fn limit(args: &Value) -> String {
-    args.get("limit").and_then(Value::as_u64).unwrap_or(DEFAULT_LIMIT).clamp(1, MAX_LIMIT).to_string()
+    args.get("limit")
+        .and_then(Value::as_u64)
+        .unwrap_or(DEFAULT_LIMIT)
+        .clamp(1, MAX_LIMIT)
+        .to_string()
 }
 
 /// Free text goes in as one argument; a leading dash would make it a flag.
@@ -88,11 +100,25 @@ pub(crate) fn build_call(args: &Value) -> Result<GhCall> {
         "repo_view" => GhCall::ApiGet(format!("repos/{}", repo(args)?)),
         "pr_list" | "issue_list" | "release_list" | "run_list" => {
             let noun = action.trim_end_matches("_list");
-            gh(&[noun, "list", "--repo", &repo(args)?, "--limit", &limit(args)])
+            gh(&[
+                noun,
+                "list",
+                "--repo",
+                &repo(args)?,
+                "--limit",
+                &limit(args),
+            ])
         }
         "pr_view" | "issue_view" => {
             let noun = action.trim_end_matches("_view");
-            gh(&[noun, "view", &number(args)?, "--repo", &repo(args)?, "--comments"])
+            gh(&[
+                noun,
+                "view",
+                &number(args)?,
+                "--repo",
+                &repo(args)?,
+                "--comments",
+            ])
         }
         "pr_diff" => gh(&["pr", "diff", &number(args)?, "--repo", &repo(args)?]),
         "search" => {
@@ -100,14 +126,24 @@ pub(crate) fn build_call(args: &Value) -> Result<GhCall> {
             if !SEARCH_KINDS.contains(&kind) {
                 bail!("`kind` must be one of repos, code, issues, prs");
             }
-            gh(&["search", kind, free_text(args, "query")?, "--limit", &limit(args)])
+            gh(&[
+                "search",
+                kind,
+                free_text(args, "query")?,
+                "--limit",
+                &limit(args),
+            ])
         }
         "file" => {
             let path = free_text(args, "path")?;
             if path.contains("..") || !ENDPOINT.is_match(path) {
                 bail!("`path` must be a plain repository path");
             }
-            let mut api = format!("repos/{}/contents/{}", repo(args)?, path.trim_start_matches('/'));
+            let mut api = format!(
+                "repos/{}/contents/{}",
+                repo(args)?,
+                path.trim_start_matches('/')
+            );
             if let Some(r) = text(args, "ref") {
                 if r.starts_with('-') || !ENDPOINT.is_match(r) || r.contains("..") {
                     bail!("`ref` must be a plain branch, tag or commit");
@@ -126,7 +162,10 @@ fn child_env() -> Vec<(String, String)> {
     CHILD_ENV
         .iter()
         .filter_map(|k| std::env::var(k).ok().map(|v| (k.to_string(), v)))
-        .chain([("GH_PROMPT_DISABLED".into(), "1".into()), ("NO_COLOR".into(), "1".into())])
+        .chain([
+            ("GH_PROMPT_DISABLED".into(), "1".into()),
+            ("NO_COLOR".into(), "1".into()),
+        ])
         .collect()
 }
 
@@ -157,13 +196,21 @@ async fn run(program: &str, args: &[String], timeout: Duration) -> Result<String
     if out.status.success() {
         return Ok(cap(stdout));
     }
-    bail!("{program} failed: {}", cap(String::from_utf8_lossy(&out.stderr).into_owned()))
+    bail!(
+        "{program} failed: {}",
+        cap(String::from_utf8_lossy(&out.stderr).into_owned())
+    )
 }
 
 /// No `gh` on this machine: public data can still be read over HTTPS.
 async fn http_get(path: &str) -> Result<String> {
-    let client = reqwest::Client::builder().timeout(COMMAND_TIMEOUT).user_agent("hq-github-read").build()?;
-    let mut req = client.get(format!("{API_HOST_URL}{path}")).header("Accept", "application/vnd.github+json");
+    let client = reqwest::Client::builder()
+        .timeout(COMMAND_TIMEOUT)
+        .user_agent("hq-github-read")
+        .build()?;
+    let mut req = client
+        .get(format!("{API_HOST_URL}{path}"))
+        .header("Accept", "application/vnd.github+json");
     if let Ok(token) = std::env::var("GITHUB_TOKEN").or_else(|_| std::env::var("GH_TOKEN")) {
         req = req.bearer_auth(token);
     }
@@ -227,7 +274,12 @@ impl HqTool for GithubReadTool {
         let output = match (call, have_gh) {
             (GhCall::Gh(argv), true) => run("gh", &argv, COMMAND_TIMEOUT).await?,
             (GhCall::ApiGet(path), true) => {
-                run("gh", &["api".into(), "--method".into(), "GET".into(), path], COMMAND_TIMEOUT).await?
+                run(
+                    "gh",
+                    &["api".into(), "--method".into(), "GET".into(), path],
+                    COMMAND_TIMEOUT,
+                )
+                .await?
             }
             (GhCall::ApiGet(path), false) => http_get(&path).await?,
             (GhCall::Gh(_), false) => bail!(
@@ -280,11 +332,30 @@ impl HqTool for GithubCloneTool {
         let dest_arg = dest.display().to_string();
         let have_gh = which::which("gh").is_ok();
         if have_gh {
-            let argv = ["repo", "clone", repo.as_str(), dest_arg.as_str(), "--", "--depth", "1", "--no-tags"].map(String::from);
+            let argv = [
+                "repo",
+                "clone",
+                repo.as_str(),
+                dest_arg.as_str(),
+                "--",
+                "--depth",
+                "1",
+                "--no-tags",
+            ]
+            .map(String::from);
             run("gh", &argv, CLONE_TIMEOUT).await?;
         } else {
             let url = format!("https://github.com/{repo}.git");
-            let argv = ["clone", "--depth", "1", "--no-tags", "--", url.as_str(), dest_arg.as_str()].map(String::from);
+            let argv = [
+                "clone",
+                "--depth",
+                "1",
+                "--no-tags",
+                "--",
+                url.as_str(),
+                dest_arg.as_str(),
+            ]
+            .map(String::from);
             run("git", &argv, CLONE_TIMEOUT).await?;
         }
         Ok(json!({ "path": dest_arg, "cached": false }))
@@ -310,11 +381,13 @@ mod tests {
             gh(&["issue", "list", "--repo", "o/r", "--limit", "100"])
         );
         assert_eq!(
-            call(json!({"action": "api", "endpoint": "/repos/o/r/contents/README.md?ref=main"})).unwrap(),
+            call(json!({"action": "api", "endpoint": "/repos/o/r/contents/README.md?ref=main"}))
+                .unwrap(),
             GhCall::ApiGet("repos/o/r/contents/README.md?ref=main".into())
         );
         assert_eq!(
-            call(json!({"action": "file", "repo": "o/r", "path": "src/lib.rs", "ref": "v1.0"})).unwrap(),
+            call(json!({"action": "file", "repo": "o/r", "path": "src/lib.rs", "ref": "v1.0"}))
+                .unwrap(),
             GhCall::ApiGet("repos/o/r/contents/src/lib.rs?ref=v1.0".into())
         );
     }
@@ -322,10 +395,24 @@ mod tests {
     #[test]
     fn every_write_shaped_request_is_refused() {
         for action in [
-            "pr_create", "pr_merge", "pr_close", "issue_create", "issue_comment", "repo_create", "repo_delete",
-            "release_create", "secret_set", "workflow_run", "pr_review", "gist_create", "auth_login",
+            "pr_create",
+            "pr_merge",
+            "pr_close",
+            "issue_create",
+            "issue_comment",
+            "repo_create",
+            "repo_delete",
+            "release_create",
+            "secret_set",
+            "workflow_run",
+            "pr_review",
+            "gist_create",
+            "auth_login",
         ] {
-            assert!(call(json!({"action": action, "repo": "o/r", "number": 1})).is_err(), "{action}");
+            assert!(
+                call(json!({"action": action, "repo": "o/r", "number": 1})).is_err(),
+                "{action}"
+            );
         }
     }
 
@@ -353,7 +440,10 @@ mod tests {
     #[test]
     fn the_child_never_sees_a_host_override() {
         let env: Vec<String> = child_env().into_iter().map(|(k, _)| k).collect();
-        assert!(!env.iter().any(|k| k == "GH_HOST" || k == "GH_ENTERPRISE_TOKEN"));
+        assert!(
+            !env.iter()
+                .any(|k| k == "GH_HOST" || k == "GH_ENTERPRISE_TOKEN")
+        );
     }
 
     #[test]
@@ -366,12 +456,25 @@ mod tests {
     #[tokio::test]
     #[ignore = "reads api.github.com; run on demand"]
     async fn github_live_reads_a_public_repo() {
-        let view = GithubReadTool.execute(json!({"action": "repo_view", "repo": "rust-lang/rust-analyzer"})).await;
+        let view = GithubReadTool
+            .execute(json!({"action": "repo_view", "repo": "rust-lang/rust-analyzer"}))
+            .await;
         let file = GithubReadTool
-            .execute(json!({"action": "file", "repo": "rust-lang/rust-analyzer", "path": "README.md"}))
+            .execute(
+                json!({"action": "file", "repo": "rust-lang/rust-analyzer", "path": "README.md"}),
+            )
             .await
             .unwrap();
-        println!("repo_view ok={} file bytes={}", view.is_ok(), file["output"].as_str().unwrap_or("").len());
-        assert!(file["output"].as_str().unwrap_or("").contains("rust-analyzer"));
+        println!(
+            "repo_view ok={} file bytes={}",
+            view.is_ok(),
+            file["output"].as_str().unwrap_or("").len()
+        );
+        assert!(
+            file["output"]
+                .as_str()
+                .unwrap_or("")
+                .contains("rust-analyzer")
+        );
     }
 }
