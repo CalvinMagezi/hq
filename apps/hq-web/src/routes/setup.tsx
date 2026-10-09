@@ -38,7 +38,7 @@ function SetupPage() {
       <form onSubmit={submit} className="glass-card rounded-2xl p-5 border border-white/10 mx-auto my-8 w-[calc(100%-2rem)] max-w-md flex flex-col gap-4">
         <div>
           <h1 className="text-sm font-mono uppercase tracking-wider text-neutral-100">Connect a model</h1>
-          <p className="text-xs text-neutral-400 mt-1">HQ needs one model key to start. Other providers can be added later with `hq env`. It is stored on this server and never shown again.</p>
+          <p className="text-xs text-neutral-400 mt-1">HQ needs one model key to start. Other providers can be added later with <code className="font-mono">hq env</code>. It is stored on this server and never shown again.</p>
         </div>
 
         <label className="flex flex-col gap-1 text-xs text-neutral-400">
