@@ -346,6 +346,6 @@ async fn a_scoped_server_sends_instructions_without_the_catalog() {
         )
         .await;
     let instructions = init["result"]["instructions"].as_str().unwrap();
-    assert_eq!(instructions, hq_mcp::gateway::SCOPED_INSTRUCTIONS);
+    assert_eq!(instructions, hq_mcp::gateway::tasks_scope_instructions());
     assert!(!instructions.contains("bash"));
 }

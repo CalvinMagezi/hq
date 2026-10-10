@@ -49,6 +49,12 @@ pub enum TaskCmd {
     /// Change a task's status, title, priority or due date
     Update {
         id: String,
+        /// Your lease from `claim` or `next`, so the change is recorded as yours
+        #[arg(long)]
+        lease: Option<String>,
+        /// Why the task is blocked (needed with --status blocked)
+        #[arg(long)]
+        blocked_reason: Option<String>,
         #[arg(long)]
         status: Option<String>,
         #[arg(long)]
@@ -61,6 +67,9 @@ pub enum TaskCmd {
     /// Add a comment to a task
     Comment {
         id: String,
+        /// Your lease from `claim` or `next`, so the comment is recorded as yours
+        #[arg(long)]
+        lease: Option<String>,
         /// The comment text; with none given it is read from standard input
         #[arg(allow_hyphen_values = true)]
         body: Vec<String>,
@@ -69,6 +78,42 @@ pub enum TaskCmd {
     Comments { id: String },
     /// List spaces (JSON)
     Spaces,
+    /// Claim the most urgent open task assigned to you and start it (JSON, with a lease)
+    Next {
+        /// Your name: the assignee whose queue to take from
+        #[arg(long = "as")]
+        actor: String,
+        /// Also take tasks nobody is assigned to
+        #[arg(long)]
+        include_unassigned: bool,
+    },
+    /// Claim a task before you work on it (JSON, with a lease to pass on later calls)
+    Claim {
+        id: String,
+        /// Your name, shown on the task
+        #[arg(long = "as")]
+        actor: String,
+    },
+    /// Keep your lease alive while you work; optionally leave a resume point
+    Heartbeat {
+        lease: String,
+        /// Where the work stands
+        #[arg(long)]
+        summary: Option<String>,
+        /// The single next thing to do
+        #[arg(long)]
+        next_step: Option<String>,
+    },
+    /// Stop working on a task and say where it stands
+    Release {
+        lease: String,
+        /// ready_for_review when done, blocked when stuck, to_do to hand it back
+        #[arg(long)]
+        status: Option<String>,
+        /// What you did and what is next (the reason, when blocked)
+        #[arg(long)]
+        summary: Option<String>,
+    },
     /// Leased hours, cycle time and estimate accuracy by initiative and agent, read from this
     /// machine's database (text)
     Time {
@@ -118,27 +163,56 @@ fn call_for(cmd: &TaskCmd, stdin: &mut dyn FnMut() -> Result<String>) -> Result<
             put(&mut a, "due_date", due);
             ("task_create", Value::Object(a))
         }
-        TaskCmd::Update { id, status, title, priority, due } => {
+        TaskCmd::Update { id, lease, blocked_reason, status, title, priority, due } => {
             let mut a = Map::new();
             a.insert("id".into(), json!(id));
             put(&mut a, "status", status);
             put(&mut a, "title", title);
             put(&mut a, "priority", priority);
             put(&mut a, "due_date", due);
+            put(&mut a, "blocked_reason", blocked_reason);
             if a.len() == 1 {
                 bail!("nothing to change: pass --status, --title, --priority or --due");
             }
+            put(&mut a, "lease", lease);
             ("task_update", Value::Object(a))
         }
-        TaskCmd::Comment { id, body } => {
+        TaskCmd::Comment { id, lease, body } => {
             let text = if body.is_empty() { stdin()? } else { body.join(" ") };
             if text.trim().is_empty() {
                 bail!("the comment is empty");
             }
-            ("task_comment_add", json!({ "task_id": id, "body": text.trim() }))
+            let mut a = Map::new();
+            a.insert("task_id".into(), json!(id));
+            a.insert("body".into(), json!(text.trim()));
+            put(&mut a, "lease", lease);
+            ("task_comment_add", Value::Object(a))
         }
         TaskCmd::Comments { id } => ("task_comment_list", json!({ "task_id": id })),
         TaskCmd::Spaces => ("space_list", json!({})),
+        TaskCmd::Next { actor, include_unassigned } => (
+            "task_next",
+            json!({ "actor": actor, "harness": "terminal", "include_unassigned": include_unassigned }),
+        ),
+        TaskCmd::Claim { id, actor } => ("task_claim", json!({ "task_id": id, "actor": actor, "harness": "terminal" })),
+        TaskCmd::Heartbeat { lease, summary, next_step } => {
+            let mut a = Map::new();
+            a.insert("lease".into(), json!(lease));
+            if summary.is_some() || next_step.is_some() {
+                let mut cp = Map::new();
+                put(&mut cp, "summary", summary);
+                put(&mut cp, "next_step", next_step);
+                a.insert("checkpoint".into(), Value::Object(cp));
+            }
+            ("task_heartbeat", Value::Object(a))
+        }
+        TaskCmd::Release { lease, status, summary } => {
+            let mut a = Map::new();
+            a.insert("lease".into(), json!(lease));
+            put(&mut a, "status", status);
+            put(&mut a, "summary", summary);
+            ("task_release", Value::Object(a))
+        }
         TaskCmd::Time { .. } | TaskCmd::InstallSkill { .. } => {
             bail!("`time` and `install-skill` run locally, not through the gateway")
         }
@@ -222,6 +296,10 @@ mod tests {
             TaskCmd::Comments { id: "x".into() },
             TaskCmd::Spaces,
             TaskCmd::List { status: None, space: None, initiative: None },
+            TaskCmd::Next { actor: "me".into(), include_unassigned: false },
+            TaskCmd::Claim { id: "x".into(), actor: "me".into() },
+            TaskCmd::Heartbeat { lease: "l".into(), summary: None, next_step: None },
+            TaskCmd::Release { lease: "l".into(), status: None, summary: None },
         ] {
             let (tool, _) = call_for(&cmd, &mut no_stdin).unwrap();
             assert!(hq_mcp::gateway::TASKS_ALLOWLIST.contains(&tool), "{tool}");
@@ -230,11 +308,19 @@ mod tests {
 
     #[test]
     fn an_update_with_no_change_and_an_empty_comment_are_refused() {
-        let upd = TaskCmd::Update { id: "x".into(), status: None, title: None, priority: None, due: None };
+        let upd = TaskCmd::Update {
+            id: "x".into(),
+            lease: Some("l".into()),
+            blocked_reason: None,
+            status: None,
+            title: None,
+            priority: None,
+            due: None,
+        };
         assert!(call_for(&upd, &mut no_stdin).is_err());
-        let c = TaskCmd::Comment { id: "x".into(), body: vec![] };
+        let c = TaskCmd::Comment { id: "x".into(), lease: None, body: vec![] };
         assert!(call_for(&c, &mut || Ok("  \n".into())).is_err());
-        let c = TaskCmd::Comment { id: "x".into(), body: vec!["hello".into(), "there".into()] };
+        let c = TaskCmd::Comment { id: "x".into(), lease: None, body: vec!["hello".into(), "there".into()] };
         let (_, a) = call_for(&c, &mut no_stdin).unwrap();
         assert_eq!(a["body"], "hello there");
     }

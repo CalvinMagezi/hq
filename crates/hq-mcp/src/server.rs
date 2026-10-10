@@ -56,6 +56,7 @@ impl ServerHandler for HqMcpServer {
             .with_server_info(Implementation::new("agent-hq", env!("CARGO_PKG_VERSION")))
             .with_instructions(match self.allowed {
                 None => gateway::server_instructions(&self.registry),
+                Some(allowed) if allowed == gateway::TASKS_ALLOWLIST => gateway::tasks_scope_instructions(),
                 Some(_) => gateway::SCOPED_INSTRUCTIONS.to_string(),
             })
     }
@@ -149,7 +150,8 @@ mod tests {
         let server = server_with_stub_registry().with_allowlist(gateway::TASKS_ALLOWLIST);
         let info = server.get_info();
         let text = info.instructions.clone().unwrap_or_default();
-        assert_eq!(text, gateway::SCOPED_INSTRUCTIONS);
+        assert_eq!(text, gateway::tasks_scope_instructions());
+        assert!(text.starts_with(gateway::SCOPED_INSTRUCTIONS));
         assert!(!text.contains("tool_number_"));
 
         let open = server_with_stub_registry().get_info().instructions.unwrap_or_default();

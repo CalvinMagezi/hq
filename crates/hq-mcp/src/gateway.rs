@@ -91,8 +91,9 @@ pub const HANDOFF_ALLOWLIST: &[&str] = &[
 ];
 
 /// Tool names reachable by a tasks-scoped connection (`AGENTHQ_TASKS_API_KEY`, or
-/// `hq mcp-serve --scope tasks`): reading, filing, updating and commenting on tasks, and
-/// creating the folders and initiatives to place them in. It has no vault tools, so a
+/// `hq mcp-serve --scope tasks`): reading, filing, updating and commenting on tasks, working
+/// them under a lease (claim, next, heartbeat, release), filing or moving many at once, reading
+/// their links and time, and creating the folders and initiatives to place them in. It has no vault tools, so a
 /// client on a machine HQ's owner does not control never sees their notes, and none that
 /// start, read or message a session, ask HQ's chat agent, delete anything or reach another
 /// service, so unlike the handoff scope it is not code execution on any host. The task tools
@@ -107,6 +108,14 @@ pub const TASKS_ALLOWLIST: &[&str] = &[
     "task_create",
     "task_update",
     "task_comment_add",
+    "task_claim",
+    "task_next",
+    "task_heartbeat",
+    "task_release",
+    "task_create_many",
+    "task_update_many",
+    "task_link_list",
+    "task_time_report",
     "folder_list",
     "folder_create",
     "initiative_list",
@@ -233,14 +242,22 @@ pub const SCOPED_INSTRUCTIONS: &str = "Agent-HQ (restricted access). \
 /// plus the tool catalog, so a client knows the tools without calling hq_discover.
 /// How any agent works a task, in the text every MCP client receives on connect. Short on
 /// purpose; the installable `hq-tasks` skill has the long version.
-const TASK_PROTOCOL: &str = "## Working on tasks\n\
+const TASK_PROTOCOL_STEPS: &str = "## Working on tasks\n\
      HQ tracks your work as tasks. Your own queue: `task_next` picks the most urgent task assigned to you and starts it (or `task_list` with `assignee`, then `task_claim`).\n\
      1. Claim before you work. `task_claim` and `task_next` return a `lease` token: keep it for the session.\n\
      2. Pass `lease` on `task_update`, `task_comment_add` and `task_create` so the work is recorded as yours.\n\
      3. Call `task_heartbeat` every few minutes, with a `checkpoint` (summary, next_step) at good stopping points, so another session can pick up where you stopped.\n\
-     4. Stop with `task_release` and a status: `ready_for_review` when done and it needs checking, `blocked` (the summary is the reason) when stuck, `to_do` to hand it back. Never `complete` unless the work is verified.\n\
-     5. Link what a task came from with `task_link_add`. File a big piece of work as its own initiative with one task per workstream.\n\
+     4. Stop with `task_release` and a status: `ready_for_review` when done and it needs checking, `blocked` (the summary is the reason) when stuck, `to_do` to hand it back. Never `complete` unless the work is verified.\n";
+const TASK_PROTOCOL_LINKS: &str = "5. Link what a task came from with `task_link_add`. File a big piece of work as its own initiative with one task per workstream.\n\
      Knowledge and notes belong in the vault, not in tasks.\n\n";
+/// The tasks scope has no link-writing tool and no vault, so its step 5 names what it can do.
+const TASK_PROTOCOL_LINKS_SCOPED: &str = "5. Give `task_create` the `links` a task came from (a url, pull request, commit or task). `task_create_many` files a big piece of work in one call.\n\n";
+
+/// What a tasks-scoped connection is told on connect: the restricted-access note and how to
+/// work a task with the tools it has.
+pub fn tasks_scope_instructions() -> String {
+    format!("{SCOPED_INSTRUCTIONS}\n\n{TASK_PROTOCOL_STEPS}{TASK_PROTOCOL_LINKS_SCOPED}")
+}
 
 pub fn server_instructions(registry: &ToolRegistry) -> String {
     let categories = registry.categories();
@@ -257,7 +274,8 @@ pub fn server_instructions(registry: &ToolRegistry) -> String {
          Prefer `hq_call` when you know which tool to use. Use `hq_discover` to explore.\n\n",
     );
     if registry.get("task_claim").is_some() {
-        instructions.push_str(TASK_PROTOCOL);
+        instructions.push_str(TASK_PROTOCOL_STEPS);
+        instructions.push_str(TASK_PROTOCOL_LINKS);
     }
     // The full catalog lives only here: hq_call reaches every tool and no tool
     // schemas ship over MCP. Hints cost about a third of full descriptions.
@@ -655,6 +673,28 @@ mod tests {
                 "{name} is not a task, folder, initiative or space tool"
             );
         }
+        // Archiving, restoring, purging, writing links and reading who is routed where stay
+        // with the owner's key.
+        for name in ["task_delete", "task_restore", "task_link_add", "task_link_remove", "task_routing_audit"] {
+            assert!(!TASKS_ALLOWLIST.contains(&name), "tasks must not reach {name}");
+        }
+    }
+
+    /// The protocol a tasks-scoped client is told on connect may only name tools it can call.
+    #[test]
+    fn the_tasks_scope_protocol_names_only_tools_the_scope_has() {
+        let text = tasks_scope_instructions();
+        let named = text
+            .split('`')
+            .skip(1)
+            .step_by(2)
+            .filter(|w| w.starts_with("task_"));
+        let mut count = 0;
+        for name in named {
+            count += 1;
+            assert!(TASKS_ALLOWLIST.contains(&name), "the scope protocol names {name}");
+        }
+        assert!(count >= 5, "{text}");
     }
 
     #[tokio::test]

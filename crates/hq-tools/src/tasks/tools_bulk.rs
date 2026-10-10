@@ -18,9 +18,14 @@ const KEY_REF_PREFIX: char = '@';
 /// Fields every item inherits from the call, so the caller sets them once. An item may set its
 /// own `lease`, `actor` or names, as it could in a single call.
 const INHERITED: &[&str] = &["lease", "actor", "created_by", "author"];
-/// The session the gateway proved the caller is. It comes only from the call itself: an item or
-/// `defaults` carrying it is ignored, so a bulk call cannot act as another session.
-const ATTESTED: &str = crate::harness_session::CALLER_SESSION_ARG;
+/// What the gateway proved about the caller: the session it is, and the scoped key it came in on.
+/// They come only from the call itself: an item or `defaults` carrying one is ignored, so a bulk
+/// call can neither act as another session nor drop its scope for its items.
+const ATTESTED: &[&str] = &[
+    crate::harness_session::CALLER_SESSION_ARG,
+    crate::harness_session::TASKS_SCOPE_ARG,
+    crate::harness_session::HANDOFF_SCOPE_ARG,
+];
 
 fn items_of(args: &Value, field: &str) -> Result<Vec<Value>> {
     let Some(items) = args.get(field).and_then(Value::as_array) else {
@@ -36,8 +41,8 @@ fn items_of(args: &Value, field: &str) -> Result<Vec<Value>> {
 /// names where the item set none. The attested session is taken only from the call itself.
 fn prepare(args: &Value, defaults: &Map<String, Value>, item: &Map<String, Value>) -> Map<String, Value> {
     let mut spec = item.clone();
-    spec.remove(ATTESTED);
-    for (field, value) in defaults.iter().filter(|(field, _)| field.as_str() != ATTESTED) {
+    spec.retain(|field, _| !ATTESTED.contains(&field.as_str()));
+    for (field, value) in defaults.iter().filter(|(field, _)| !ATTESTED.contains(&field.as_str())) {
         spec.entry(field.clone()).or_insert_with(|| value.clone());
     }
     for key in INHERITED {
@@ -45,8 +50,10 @@ fn prepare(args: &Value, defaults: &Map<String, Value>, item: &Map<String, Value
             spec.insert((*key).to_string(), v.clone());
         }
     }
-    if let Some(session) = args.get(ATTESTED) {
-        spec.insert(ATTESTED.to_string(), session.clone());
+    for key in ATTESTED {
+        if let Some(proof) = args.get(*key) {
+            spec.insert((*key).to_string(), proof.clone());
+        }
     }
     spec
 }

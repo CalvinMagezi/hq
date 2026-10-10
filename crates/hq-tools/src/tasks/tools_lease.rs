@@ -31,6 +31,42 @@ pub(super) fn ttl_secs(settings: &TasksConfig) -> i64 {
     i64::try_from(settings.lease_ttl()).unwrap_or(i64::MAX)
 }
 
+/// The name a lease is taken under. On the tasks scope it is always `mcp:tasks/<name>`, so a
+/// client on a machine the owner may not control is visibly that wherever its work shows; any
+/// other caller may not take a name of that shape.
+fn lease_actor(args: &Value, actor: &str) -> Result<String> {
+    let scope = crate::harness_session::TASKS_SCOPE_ACTOR;
+    if crate::harness_session::is_tasks_scope(args) {
+        let label = t::clean_label(actor);
+        return Ok(if label.is_empty() { scope.to_string() } else { format!("{scope}/{label}") });
+    }
+    if crate::harness_session::is_tasks_scope_actor(&t::clean_label(actor)) {
+        bail!("{scope} names are for the tasks-scoped key; claim under your own name");
+    }
+    Ok(actor.to_string())
+}
+
+/// The name without the tasks-scope prefix, which is the name a task is assigned to.
+fn assignee_name(actor: &str) -> &str {
+    actor
+        .strip_prefix(crate::harness_session::TASKS_SCOPE_ACTOR)
+        .and_then(|rest| rest.strip_prefix('/'))
+        .unwrap_or(actor)
+}
+
+/// A tasks-scope caller may heartbeat or release only a lease it took on that scope.
+fn check_scope_owns_lease(conn: &rusqlite::Connection, args: &Value, token: &str) -> Result<()> {
+    if !crate::harness_session::is_tasks_scope(args) {
+        return Ok(());
+    }
+    match t::lease_for_token(conn, token)? {
+        Some(lease) if !crate::harness_session::is_tasks_scope_actor(&lease.actor) => {
+            bail!("that lease was not taken on this connection; claim the task here to get your own")
+        }
+        _ => Ok(()),
+    }
+}
+
 /// What a call says about who is making it, before it is checked against the
 /// database. Built from the call's arguments, so it can be cloned into a closure.
 #[derive(Clone)]
@@ -229,9 +265,11 @@ pub(super) fn hide_machine_paths(resume: &mut Value) {
 }
 
 fn is_project_relative(path: &str) -> bool {
-    let p = path.trim();
+    let p = t::clean_label(path);
     let drive = p.as_bytes().get(1) == Some(&b':');
-    !(p.starts_with('/') || p.starts_with('\\') || p.starts_with('~') || drive)
+    let outside = p.starts_with("..") || p.contains("/../") || p.contains("\\..\\");
+    let expands = p.starts_with('$') || p.starts_with('%');
+    !(p.starts_with('/') || p.starts_with('\\') || p.starts_with('~') || drive || p.contains(':') || outside || expands)
 }
 
 fn lease_json(lease: &t::WorkSession) -> Value {
@@ -283,9 +321,16 @@ impl HqTool for TaskClaimTool {
         if task_id.is_empty() {
             bail!("task_id is required");
         }
-        let (actor, harness, session_ref) = (arg_str(&args, "actor"), arg_str(&args, "harness"), arg_str(&args, "session_ref"));
+        let actor = lease_actor(&args, &arg_str(&args, "actor"))?;
+        let (harness, session_ref) = (arg_str(&args, "harness"), arg_str(&args, "session_ref"));
         let (host, cwd, branch) = (arg_str(&args, "host"), arg_str(&args, "cwd"), arg_str(&args, "branch"));
         let takeover = args.get("takeover").and_then(Value::as_bool).unwrap_or(false);
+        let scoped = crate::harness_session::is_tasks_scope(&args);
+        // Taking over ends another session's lease, which may be one HQ launched; a client on the
+        // tasks key waits for a silent lease to expire instead.
+        if scoped && takeover {
+            bail!("this connection cannot take over a lease; wait for it to expire or ask the owner");
+        }
         let settings = self.settings.clone();
         let ttl = ttl_secs(&settings);
         let (claimed, resume) = self.db.with_conn(move |c| {
@@ -297,17 +342,24 @@ impl HqTool for TaskClaimTool {
                 cwd: &cwd,
                 branch: &branch,
             };
-            let claimed = t::claim(c, &task_id, &who, ttl, takeover)?;
+            // The holder's message offers takeover, which this connection cannot use.
+            let claimed = t::claim(c, &task_id, &who, ttl, takeover).map_err(|e| match scoped {
+                true => anyhow::anyhow!(
+                    "{}",
+                    e.to_string().replace(", wait, or pass takeover=true if it is gone", ", or wait for its lease to expire")
+                ),
+                false => e,
+            })?;
             let resume = t::latest_checkpoint(c, &claimed.task.id)?;
             Ok((claimed, resume))
         })?;
-        Ok(claim_response(&claimed, resume.as_ref(), &settings))
+        Ok(claim_response(&claimed, resume.as_ref(), &settings, scoped))
     }
 }
 
 /// What a claim answers: the lease, the task, how to keep going, and where the last session
 /// left off. Shared by `task_claim` and `task_next`.
-fn claim_response(claimed: &t::Claimed, resume: Option<&t::TaskCheckpoint>, settings: &TasksConfig) -> Value {
+fn claim_response(claimed: &t::Claimed, resume: Option<&t::TaskCheckpoint>, settings: &TasksConfig, scoped: bool) -> Value {
     let mut out = json!({
         "lease": claimed.token,
         "lease_id": claimed.session.id,
@@ -323,9 +375,12 @@ fn claim_response(claimed: &t::Claimed, resume: Option<&t::TaskCheckpoint>, sett
     });
     if let Some(checkpoint) = resume {
         out["resume"] = resume_json(checkpoint);
+        if scoped {
+            hide_machine_paths(&mut out["resume"]);
+        }
     }
-    let me = &claimed.session.actor;
-    if !claimed.task.assignees.is_empty() && !claimed.task.assignees.contains(me) {
+    let me = assignee_name(&claimed.session.actor).to_string();
+    if !claimed.task.assignees.is_empty() && !claimed.task.assignees.contains(&me) {
         add_warning(
             &mut out,
             format!(
@@ -389,6 +444,8 @@ impl HqTool for TaskNextTool {
             bail!("actor is required: name yourself, for example your agent name");
         }
         let assignee = opt_str(&args, "assignee").unwrap_or_else(|| actor.clone());
+        let actor = lease_actor(&args, &actor)?;
+        let scoped = crate::harness_session::is_tasks_scope(&args);
         let include_unassigned = args.get("include_unassigned").and_then(Value::as_bool).unwrap_or(false);
         let (initiative_id, tag) = (opt_str(&args, "initiative_id"), opt_str(&args, "tag"));
         let (harness, session_ref) = (arg_str(&args, "harness"), arg_str(&args, "session_ref"));
@@ -419,7 +476,7 @@ impl HqTool for TaskNextTool {
             })
         })?;
         Ok(match picked {
-            Some((claimed, resume)) => claim_response(&claimed, resume.as_ref(), &settings),
+            Some((claimed, resume)) => claim_response(&claimed, resume.as_ref(), &settings, scoped),
             None => json!({
                 "task": null,
                 "reason": "Nothing open is assigned to you that is unblocked and not already held. \
@@ -466,7 +523,11 @@ impl HqTool for TaskHeartbeatTool {
         let ttl = ttl_secs(&settings);
         let checkpoint = checkpoint_arg(&args)?;
         let (lease, saved) = self.db.with_conn(move |c| {
+            // Closed in its own commit, as t::heartbeat intends: a refused heartbeat inside the
+            // transaction below must not roll the expiry back.
+            t::expire_stale_leases(c, ttl)?;
             t::in_write_tx(c, |c| {
+                check_scope_owns_lease(c, &args, &token)?;
                 let lease = t::heartbeat(c, &token, ttl)?;
                 let saved = match &checkpoint {
                     Some(cp) => Some(t::add_checkpoint(c, &lease.task_id, Some(&lease.id), &lease.actor, cp)?),
@@ -485,6 +546,7 @@ impl HqTool for TaskHeartbeatTool {
 
 pub(super) struct TaskReleaseTool {
     pub(super) settings: TasksConfig,
+    pub(super) vault_path: std::path::PathBuf,
     pub(super) db: Arc<Database>,
 }
 
@@ -528,8 +590,14 @@ impl HqTool for TaskReleaseTool {
         let from_summary = explicit.is_none();
         let checkpoint = explicit
             .or_else(|| Some(t::Checkpoint { summary: summary.clone(), ..Default::default() }).filter(|cp| !cp.is_empty()));
-        let done = self.db.with_conn(move |c| {
+        let scoped = crate::harness_session::is_tasks_scope(&args);
+        let (done, previous_status, unblocked) = self.db.with_conn(move |c| {
             t::in_write_tx(c, |c| {
+                check_scope_owns_lease(c, &args, &token)?;
+                let previous_status = match t::lease_for_token(c, &token)? {
+                    Some(lease) => t::get_task(c, &lease.task_id)?.map(|task| task.status),
+                    None => None,
+                };
                 let done = t::release(c, &token, status.as_deref(), &summary, ttl)?;
                 // A late release from a lease that no longer holds the task must not replace the
                 // resume point a newer session left.
@@ -544,9 +612,21 @@ impl HqTool for TaskReleaseTool {
                     }
                     t::add_checkpoint(c, &done.task.id, Some(&done.session.id), &done.session.actor, &cp)?;
                 }
-                Ok(done)
+                let unblocked = unblocked_by_transition(c, previous_status.as_deref(), &done.task)?;
+                Ok((done, previous_status, unblocked))
             })
         })?;
+        // A release says where the work stands just as task_update does, so it tells the same
+        // people: the agents behind tasks it unblocked, and the owner's review queue. Not on the
+        // tasks scope, whose text must not reach a mailbox or the owner's approvals.
+        if !scoped {
+            notify_unblocked(&self.vault_path, &done.task, &unblocked, self.settings.route_tags);
+            let became_ready = done.task.status == t::STATUS_READY_FOR_REVIEW
+                && previous_status.as_deref() != Some(t::STATUS_READY_FOR_REVIEW);
+            if became_ready {
+                notify_ready_for_review(self.vault_path.clone(), done.task.clone()).await;
+            }
+        }
         let mut out = json!({
             "released": true,
             "status_applied": done.status_applied,

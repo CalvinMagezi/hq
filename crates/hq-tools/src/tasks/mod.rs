@@ -100,7 +100,7 @@ pub fn create_task_tools_for_chat(
         Box::new(TaskClaimTool { settings: settings.clone(), db: db.clone() }),
         Box::new(TaskNextTool { settings: settings.clone(), db: db.clone() }),
         Box::new(TaskHeartbeatTool { settings: settings.clone(), db: db.clone() }),
-        Box::new(TaskReleaseTool { settings: settings.clone(), db: db.clone() }),
+        Box::new(TaskReleaseTool { settings: settings.clone(), vault_path: vault_path.clone(), db: db.clone() }),
         Box::new(TaskTimeReportTool { settings: settings.clone(), db: db.clone() }),
         Box::new(TaskStaleTool { settings: settings.clone(), db: db.clone() }),
         Box::new(InitiativeProgressTool { settings: settings.clone(), db: db.clone() }),

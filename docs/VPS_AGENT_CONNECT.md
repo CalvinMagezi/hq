@@ -20,7 +20,8 @@ hq start all (serves /mcp, /health, the web UI)
 1. Set the key HQ checks on `/mcp`. `AGENTHQ_API_KEY` grants full access;
    `AGENTHQ_SPARK_API_KEY` is optional and limited to a read-only tool set.
    `AGENTHQ_TASKS_API_KEY` is optional and opens only the task tools (list, get, create,
-   update, comment, plus folders and initiatives): no vault, no session tools, no way to run
+   update, comment, claim, next, heartbeat, release, bulk create and update, plus folders and
+   initiatives): no vault, no session tools, no way to run
    code, and no mailbox notifications. It is the key to give an editor agent that should use
    HQ's tasks and nothing else.
    `AGENTHQ_HANDOFF_API_KEY` is optional and adds task writes and session
