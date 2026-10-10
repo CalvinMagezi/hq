@@ -317,7 +317,9 @@ fn claim_response(claimed: &t::Claimed, resume: Option<&t::TaskCheckpoint>, sett
         "task": task_json_with_warnings(&claimed.task),
         "next": "Work on the task. Pass `lease` on your task_update and task_comment_add calls. \
                  Call task_heartbeat (with a checkpoint when you reach a good stopping point) while you \
-                 work and task_release with a status when you stop.",
+                 work and task_release with a status when you stop: ready_for_review when the work is done \
+                 and needs checking, blocked when you cannot go on, to_do to hand it back. Use complete \
+                 only for work that has been verified.",
     });
     if let Some(checkpoint) = resume {
         out["resume"] = resume_json(checkpoint);
@@ -358,7 +360,7 @@ impl HqTool for TaskNextTool {
             "type": "object",
             "properties": {
                 "actor": { "type": "string", "description": "Your name, for example your agent name" },
-                "assignee": { "type": "string", "description": "Whose queue to take from. Defaults to your actor name." },
+                "assignee": { "type": "string", "description": "Whose queue to take from. Defaults to your actor name, and names you if actor is left out." },
                 "include_unassigned": { "type": "boolean", "default": false },
                 "initiative_id": { "type": "string", "description": "Only from this initiative" },
                 "tag": { "type": "string", "description": "Only tasks with this topical tag" },
@@ -378,7 +380,11 @@ impl HqTool for TaskNextTool {
         Some("what should I work on next, pick my next task, take work from my queue")
     }
     async fn execute(&self, args: Value) -> Result<Value> {
-        let actor = arg_str(&args, "actor");
+        let mut actor = arg_str(&args, "actor");
+        // Someone who names the queue they want has said who they are; a fresh agent often sends only that.
+        if actor.trim().is_empty() {
+            actor = opt_str(&args, "assignee").unwrap_or_default();
+        }
         if actor.trim().is_empty() {
             bail!("actor is required: name yourself, for example your agent name");
         }

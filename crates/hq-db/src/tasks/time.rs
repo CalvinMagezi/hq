@@ -194,7 +194,8 @@ pub fn time_summary(conn: &Connection, id_or_display_id: &str, ttl_secs: i64) ->
     let lease_count = intervals.len() as i64;
     let leased_seconds = union_seconds(&mut intervals);
     let history = moves(conn, &task.id)?;
-    let variance_minutes = task.estimate_minutes.map(|e| leased_seconds / 60 - e);
+    // With no recorded work there is nothing to compare, so no variance rather than "all of the estimate under".
+    let variance_minutes = task.estimate_minutes.filter(|_| lease_count > 0).map(|e| leased_seconds / 60 - e);
     let cycle_seconds = match (started, completed) {
         (Some(s), Some(c)) if task.status == STATUS_COMPLETE && c >= s => Some(c - s),
         _ => None,

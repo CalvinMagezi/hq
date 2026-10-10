@@ -460,6 +460,37 @@ Any agent, whatever harness it runs in, can use tasks as its headquarters. Migra
   only a summary becomes the new resume point but keeps the last checkpoint's next step, open
   questions and files.
 
+Real-harness acceptance (run against a throwaway vault over HTTP `/mcp`, no skill installed, prompt
+"you are <name>, use the hq MCP server to find the work assigned to you and do it"):
+
+- Claude Code with a small model: `task_next`, `task_comment_add`, `task_release` and done. One
+  stumble, `task_next` refused a call that named only `assignee`; it now takes that as the actor too.
+- Codex: first run found nothing because HQ answered the `notifications/initialized` notification
+  with a JSON body, which Codex's client rejects; HQ now returns an empty `202 Accepted`. Codex
+  also needs its per-server tool approval set for non-interactive use (`default_tools_approval_mode`).
+  With both, it found the task through `hq_discover`/`hq_call`, did the work, and released it.
+- OpenCode (a free hosted model): one error on an empty `task_next`, recovered from the message alone,
+  then claimed, commented and released as `ready_for_review`.
+- Copilot CLI: completed the loop but marked the task `complete`. It never received the server
+  instructions (they need `--allow-all-mcp-server-instructions`) and discovery truncates tool
+  descriptions, so the claim reply's `next` now states the status rule itself.
+- Cursor agent (project `.cursor/mcp.json`): claimed, commented and released as `ready_for_review`.
+- With `AGENTHQ_API_KEY` set (unkeyed calls refused): Claude Code, with the `hq-tasks` skill placed in
+  its project, and Codex (key via `bearer_token_env_var`) both finished the loop and ended at
+  `ready_for_review`. Codex needs stdin closed (`< /dev/null`) when scripted.
+- Auth on, via each tool's own header setting: Cursor agent (`--model auto`; its default model needs a paid
+  plan) and OpenCode ended at `ready_for_review`. Copilot CLI finished the loop but again chose `complete`
+  even though the claim reply says to use it only for verified work; HQ states the rule and does not
+  enforce it.
+- Multi-session handoff on one three-step task, one step per session, lease TTL 60s: Claude Code did
+  step 1 and left a checkpoint naming step 2; Codex, with no shared memory, read it and did step 2;
+  an agent then claimed the task and vanished; a claim by another agent was refused with the holder's
+  name and the way out; after the lease expired OpenCode took it, did step 3 and released it
+  `ready_for_review`. The record shows six leases (the dead agent's two as `expired`) and 83 seconds of
+  leased time against 297 seconds in progress. A task stays `in_progress` after a lease expires and
+  shows as stale instead, by design.
+- Not run: Gemini (not installed here). The longest job was minutes, not days.
+
 Rollback of 085, then delete the `085_task_assignees` row from `schema_version`:
 
 ```sql

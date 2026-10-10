@@ -10,8 +10,9 @@ import {
 import { usePolled } from '../sessions/usePolled'
 import { SectionLabel } from './taskFields'
 import { formatDuration, formatLocalTime, formatSignedMinutes } from './timeFormat'
+import { useRefreshOn } from '~/lib/useRefreshOn'
 
-const TIME_POLL_MS = 30_000
+const TIME_POLL_MS = 120_000
 const SESSIONS_SHOWN = 5
 const STATUS_LABEL: Record<string, string> = {
   to_do: 'To do',
@@ -23,9 +24,9 @@ const STATUS_LABEL: Record<string, string> = {
 function Stat({ label, value, note }: { label: string; value: string; note?: string }) {
   return (
     <div className="min-w-0">
-      <div className="text-[10px] font-mono uppercase tracking-wider text-neutral-500">{label}</div>
-      <div className="text-sm font-mono text-neutral-200 break-words">{value}</div>
-      {note && <div className="text-[10px] font-mono text-neutral-500">{note}</div>}
+      <div className="text-[11px] uppercase tracking-wider text-neutral-500">{label}</div>
+      <div className="text-sm text-neutral-200 break-words">{value}</div>
+      {note && <div className="text-[11px] text-neutral-500">{note}</div>}
     </div>
   )
 }
@@ -50,7 +51,7 @@ function Summary({ time }: { time: TimeSummary }) {
         <Stat label="Cycle time" value={time.cycle_seconds === null ? 'not complete' : formatDuration(time.cycle_seconds)} />
       </div>
       {time.status_seconds ? (
-        <div className="flex flex-wrap gap-x-4 gap-y-1 text-[11px] font-mono text-neutral-400">
+        <div className="flex flex-wrap gap-x-4 gap-y-1 text-[11px] text-neutral-400">
           {Object.entries(time.status_seconds).map(([status, seconds]) => (
             <span key={status}>
               {STATUS_LABEL[status] ?? status} {formatDuration(seconds)}
@@ -58,10 +59,10 @@ function Summary({ time }: { time: TimeSummary }) {
           ))}
         </div>
       ) : (
-        <p className="text-[11px] font-mono text-neutral-500">Time per status is unknown: this task predates the full event log.</p>
+        <p className="text-[11px] text-neutral-500">Time per status is unknown: this task predates the full event log.</p>
       )}
       {time.subtasks && (
-        <p className="text-[11px] font-mono text-neutral-400">
+        <p className="text-[11px] text-neutral-400">
           Sub-tasks: {formatDuration(time.subtasks.leased_seconds)} worked
           {time.subtasks.with_estimate > 0
             ? `, ${formatDuration(time.subtasks.estimate_minutes * 60)} estimated across ${time.subtasks.with_estimate} of ${time.subtasks.count}`
@@ -76,11 +77,11 @@ function SessionRow({ session }: { session: WorkSession }) {
   const who = [session.actor, session.harness].filter(Boolean).join(' · ')
   return (
     <li className="px-2.5 py-1.5 rounded-lg bg-white/[0.02] border border-white/5 space-y-0.5">
-      <div className="flex items-center justify-between gap-2 text-xs font-mono text-neutral-200">
+      <div className="flex items-center justify-between gap-2 text-xs text-neutral-200">
         <span className="truncate">{who}</span>
         <span className="shrink-0 text-neutral-400">{formatDuration(session.active_seconds)}</span>
       </div>
-      <div className="text-[10px] font-mono text-neutral-500 break-words">
+      <div className="text-[11px] text-neutral-500 break-words">
         {formatLocalTime(session.started_at)}
         {session.ended_at === null ? ' · working' : session.end_reason ? ` · ${session.end_reason.replace('_', ' ')}` : ''}
         {session.branch ? ` · ${session.branch}` : ''}
@@ -93,6 +94,8 @@ function SessionRow({ session }: { session: WorkSession }) {
 export function TaskTime({ task }: { task: TaskItem }) {
   const time = usePolled(task.id, () => fetchTaskTimeClient(task.id), TIME_POLL_MS)
   const sessions = usePolled(`${task.id}|sessions`, async () => (await fetchTaskWorkSessionsClient(task.id)).work_sessions, TIME_POLL_MS)
+  useRefreshOn(['task:sync'], time.refresh)
+  useRefreshOn(['task:sync'], sessions.refresh)
   const { refresh: refreshTime } = time
   const { refresh: refreshSessions } = sessions
   // updated_at changes with every write: ask again without dropping what is on screen.
@@ -104,12 +107,12 @@ export function TaskTime({ task }: { task: TaskItem }) {
     <section aria-label="Time on task">
       <SectionLabel>Time</SectionLabel>
       {time.loading ? (
-        <div role="status" className="flex items-center gap-2 text-xs font-mono text-neutral-500">
+        <div role="status" className="flex items-center gap-2 text-xs text-neutral-500">
           <Loader2 className="w-3.5 h-3.5 animate-spin" />
           Loading time
         </div>
       ) : !time.data ? (
-        <p role="alert" className="text-xs font-mono text-rose-400">
+        <p role="alert" className="text-xs text-rose-400">
           {time.error ?? 'Could not load time.'}
         </p>
       ) : (
@@ -121,7 +124,7 @@ export function TaskTime({ task }: { task: TaskItem }) {
             <SessionRow key={s.id} session={s} />
           ))}
           {sessions.data.length > SESSIONS_SHOWN && (
-            <li className="text-[10px] font-mono text-neutral-500">{sessions.data.length - SESSIONS_SHOWN} earlier sessions</li>
+            <li className="text-[11px] text-neutral-500">{sessions.data.length - SESSIONS_SHOWN} earlier sessions</li>
           )}
         </ul>
       )}

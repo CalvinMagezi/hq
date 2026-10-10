@@ -4,6 +4,7 @@ import { STATUS_LABELS, parseSqliteUtc } from '~/lib/tasksApi'
 import { relTime } from '~/lib/time'
 import { shortLabel } from './dates'
 import { useIsStale } from './staleContext'
+import { useWorkingNow } from './workingContext'
 
 interface Props {
   task: TaskItem
@@ -48,6 +49,7 @@ export function TaskCard({ task, onSelect, parentLabel, compact = false }: Props
   const isDone = task.status === 'complete'
   const schedule = scheduleLabel(task)
   const stale = useIsStale(task.id)
+  const workingNow = useWorkingNow(task.id)
   const hasChips =
     task.tags.length > 0 ||
     task.assignees.length > 0 ||
@@ -55,6 +57,7 @@ export function TaskCard({ task, onSelect, parentLabel, compact = false }: Props
     task.subtask_count > 0 ||
     task.blocked_by.length > 0 ||
     stale ||
+    Boolean(workingNow) ||
     task.long_horizon ||
     Boolean(task.blocked_reason)
 
@@ -115,6 +118,12 @@ export function TaskCard({ task, onSelect, parentLabel, compact = false }: Props
           {task.assignees.length > 0 && (
             <span className={`${CHIP_CLASS} bg-white/5 text-neutral-200 border-white/10 max-w-[240px]`} title="Assigned to">
               <span className="truncate">for {task.assignees.join(', ')}</span>
+            </span>
+          )}
+          {workingNow && (
+            <span className={`${CHIP_CLASS} bg-white/5 text-neutral-100 border-white/10 max-w-[220px]`} title="A session holds a work lease on this task">
+              <span className="w-1.5 h-1.5 rounded-full bg-current animate-pulse shrink-0" />
+              <span className="truncate">{workingNow} is working</span>
             </span>
           )}
           {stale && (

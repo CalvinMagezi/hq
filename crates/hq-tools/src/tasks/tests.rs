@@ -1607,7 +1607,11 @@ async fn an_estimate_is_set_validated_cleared_and_compared_with_leased_time() {
     let got = call_tool(&tools, "task_get", json!({ "id": id })).await.unwrap();
     assert_eq!(got["time"]["estimate_minutes"], 90);
     assert_eq!(got["time"]["leased_seconds"], 0);
-    assert_eq!(got["time"]["variance_minutes"], -90);
+    assert!(got["time"]["variance_minutes"].is_null(), "nothing worked yet, so nothing to compare");
+    let claim = call_tool(&tools, "task_claim", json!({ "task_id": id, "actor": "alpha" })).await.unwrap();
+    call_tool(&tools, "task_release", json!({ "lease": claim["lease"], "status": "to_do" })).await.unwrap();
+    let worked = call_tool(&tools, "task_get", json!({ "id": id })).await.unwrap();
+    assert!(worked["time"]["variance_minutes"].as_i64().is_some_and(|v| v <= 0), "{worked}");
 
     let cleared = call_tool(&tools, "task_update", json!({ "id": id, "estimate_minutes": null })).await.unwrap();
     assert!(cleared["estimate_minutes"].is_null());
@@ -2082,11 +2086,16 @@ async fn task_next_starts_the_most_urgent_task_assigned_to_you_and_nobody_else_g
     call_tool(&tools, "task_create", json!({ "title": "Someone else's", "assignees": ["other"] })).await.unwrap();
 
     assert!(call_tool(&tools, "task_next", json!({})).await.is_err(), "it needs to know who is asking");
+    let by_queue = call_tool(&tools, "task_next", json!({ "assignee": "builder" })).await.unwrap();
+    assert_eq!(by_queue["task"]["title"], "Now", "naming the queue also names the asker");
+    assert_eq!(by_queue["task"]["status"], "in_progress");
+    call_tool(&tools, "task_release", json!({ "lease": by_queue["lease"], "status": "to_do" })).await.unwrap();
     let first = call_tool(&tools, "task_next", json!({ "actor": "builder", "harness": "claude-code" })).await.unwrap();
     assert_eq!(first["task"]["title"], "Now");
     assert_eq!(first["task"]["status"], "in_progress");
     assert!(first["lease"].as_str().unwrap().starts_with("hql_"));
-    assert!(first["next"].as_str().unwrap().contains("task_release"));
+    let next = first["next"].as_str().unwrap();
+    assert!(next.contains("task_release") && next.contains("ready_for_review") && next.contains("only for work that has been verified"), "{next}");
 
     let second = call_tool(&tools, "task_next", json!({ "actor": "builder" })).await.unwrap();
     assert_eq!(second["task"]["title"], "Later", "the first is held, so the next one");

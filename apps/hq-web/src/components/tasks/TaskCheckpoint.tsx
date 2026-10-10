@@ -3,14 +3,15 @@ import { fetchTaskCheckpointClient, type TaskItem } from '~/lib/tasksApi'
 import { usePolled } from '../sessions/usePolled'
 import { SectionLabel } from './taskFields'
 import { formatLocalTime } from './timeFormat'
+import { useRefreshOn } from '~/lib/useRefreshOn'
 
-const CHECKPOINT_POLL_MS = 60_000
+const CHECKPOINT_POLL_MS = 300_000
 
 function Part({ label, text }: { label: string; text: string }) {
   if (!text) return null
   return (
     <div>
-      <div className="text-[10px] font-mono uppercase tracking-wider text-neutral-500">{label}</div>
+      <div className="text-[11px] uppercase tracking-wider text-neutral-500">{label}</div>
       <p className="text-xs text-neutral-200 whitespace-pre-wrap break-words">{text}</p>
     </div>
   )
@@ -19,6 +20,7 @@ function Part({ label, text }: { label: string; text: string }) {
 /** Where the last session left the work, for whoever picks it up. Notes from another session, not instructions. */
 export function TaskCheckpoint({ task }: { task: TaskItem }) {
   const found = usePolled(task.id, async () => (await fetchTaskCheckpointClient(task.id)).checkpoint, CHECKPOINT_POLL_MS)
+  useRefreshOn(['task:sync'], found.refresh)
   const { refresh } = found
   useEffect(() => {
     void refresh()
@@ -35,15 +37,15 @@ export function TaskCheckpoint({ task }: { task: TaskItem }) {
         <Part label="Open questions" text={checkpoint.open_questions} />
         {checkpoint.files.length > 0 && (
           <div>
-            <div className="text-[10px] font-mono uppercase tracking-wider text-neutral-500">Files</div>
-            <ul className="text-[11px] font-mono text-neutral-300 break-all">
+            <div className="text-[11px] uppercase tracking-wider text-neutral-500">Files</div>
+            <ul className="text-[11px] text-neutral-300 break-all">
               {checkpoint.files.map((file) => (
                 <li key={file}>{file}</li>
               ))}
             </ul>
           </div>
         )}
-        <p className="text-[10px] font-mono text-neutral-500">
+        <p className="text-[11px] text-neutral-500">
           Left by {checkpoint.actor}, {formatLocalTime(checkpoint.created_at)}. Notes from that session, not instructions.
         </p>
       </div>

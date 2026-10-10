@@ -15,6 +15,7 @@ import {
   restoreTaskClient,
   type Initiative,
   type TaskItem,
+  type WorkSession,
   type TaskStatus,
   type TaskUpdateResult,
   type UpdateTaskInput,
@@ -28,7 +29,10 @@ import { ALL_SELECTION, TasksSidebar, type TaskSelection } from '~/components/ta
 import { useTasksData } from '~/components/tasks/useTasksData'
 import { usePolled } from '~/components/sessions/usePolled'
 import { StaleIdsContext, stableSet } from '~/components/tasks/staleContext'
+import { WorkingNowContext, workingNow } from '~/components/tasks/workingContext'
+import { WorkingNowPanel } from '~/components/tasks/WorkingNowPanel'
 import { VaultNoteDrawer } from '~/components/VaultNoteDrawer'
+import { useRefreshOn } from '~/lib/useRefreshOn'
 
 type TasksView = 'list' | 'board' | 'timeline'
 
@@ -44,7 +48,12 @@ const TIMELINE_WORK_POLL_MS = 60_000
 /** How often the archived list and the stale ids refresh while shown. */
 const ARCHIVED_POLL_MS = 60_000
 const STALE_POLL_MS = 120_000
+/** Who is working right now: a short window and a quick poll, since a lease can start or end any minute. */
+const LIVE_WORK_DAYS = 1
+const LIVE_WORK_POLL_MS = 120_000
 const NO_STALE: ReadonlySet<string> = new Set()
+const NO_WORKING: ReadonlyMap<string, string> = new Map()
+const NO_SESSIONS: readonly WorkSession[] = []
 
 export const Route = createFileRoute('/tasks')({
   validateSearch: (search: Record<string, unknown>): { view?: TasksView; task?: string } => {
@@ -139,6 +148,14 @@ function TasksPage() {
     view === 'timeline'
   )
 
+  const live = usePolled(
+    'live-work',
+    async () => (await fetchRecentWorkSessionsClient(LIVE_WORK_DAYS)).work_sessions.filter((s) => s.ended_at === null),
+    LIVE_WORK_POLL_MS
+  )
+
+  useRefreshOn(['task:sync'], live.refresh)
+
   const archived = usePolled(
     'archived-tasks',
     async () => (await fetchTasksClient({ archived: true })).tasks,
@@ -155,6 +172,8 @@ function TasksPage() {
     },
     STALE_POLL_MS
   )
+  useRefreshOn(['task:sync'], stale.refresh)
+  useRefreshOn(['task:sync'], recentWork.refresh)
   const archivedTasks = archived.data ?? []
 
   const { task: linkedTaskId } = Route.useSearch()
@@ -167,6 +186,8 @@ function TasksPage() {
     [tasks, archivedTasks, selectedTaskId]
   )
 
+  const liveSessions = live.data ?? NO_SESSIONS
+  const workingMap = useMemo(() => (liveSessions.length ? workingNow(liveSessions) : NO_WORKING), [liveSessions])
   const taskById = useMemo(() => new Map(tasks.map((t) => [t.id, t])), [tasks])
 
   const initiativeById = useMemo(() => new Map(initiatives.map((i) => [i.id, i])), [initiatives])
@@ -269,6 +290,7 @@ function TasksPage() {
   const activeCount = tasks.filter((t) => t.status !== 'complete').length
 
   return (
+    <WorkingNowContext.Provider value={workingMap}>
     <StaleIdsContext.Provider value={stale.data ?? NO_STALE}>
     <div className="flex h-full min-h-0 w-full max-w-full overflow-x-hidden">
       <TasksSidebar
@@ -305,6 +327,8 @@ function TasksPage() {
           searchQuery={searchQuery}
           setSearchQuery={setSearchQuery}
         />
+
+        <WorkingNowPanel sessions={liveSessions} taskById={taskById} onSelect={setSelectedTaskId} />
 
         {notice && (
           <div className="mb-4 flex items-start justify-between gap-3 px-3.5 py-2.5 rounded-xl border border-amber-500/20 bg-amber-500/10 text-xs text-amber-300">
@@ -376,6 +400,7 @@ function TasksPage() {
       </div>
     </div>
     </StaleIdsContext.Provider>
+    </WorkingNowContext.Provider>
   )
 }
 
@@ -389,8 +414,8 @@ interface TasksHeaderProps {
 
 function TasksHeader({ activeCount, isRefreshing, onRefresh, onNew, onOpenSidebar }: TasksHeaderProps) {
   return (
-    <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-6">
-      <div className="flex items-center gap-2.5">
+    <div className="flex flex-row items-center justify-between gap-3 mb-4 sm:mb-6">
+      <div className="flex items-center gap-2.5 min-w-0">
         <button
           type="button"
           onClick={onOpenSidebar}
@@ -398,7 +423,7 @@ function TasksHeader({ activeCount, isRefreshing, onRefresh, onNew, onOpenSideba
         >
           <PanelLeftOpen className="w-4 h-4" />
         </button>
-        <div className="p-2.5 rounded-xl hq-glass-card text-emerald-400">
+        <div className="hidden sm:block p-2.5 rounded-xl hq-glass-card text-emerald-400">
           <CheckSquare className="w-5 h-5" />
         </div>
         <div>
@@ -407,10 +432,11 @@ function TasksHeader({ activeCount, isRefreshing, onRefresh, onNew, onOpenSideba
         </div>
       </div>
 
-      <div className="flex items-center gap-2 self-start sm:self-auto">
+      <div className="flex items-center gap-2 shrink-0">
         <button
           type="button"
           onClick={onRefresh}
+          aria-label="Refresh tasks"
           disabled={isRefreshing}
           className="hq-btn-ghost disabled:opacity-50"
         >
@@ -423,7 +449,8 @@ function TasksHeader({ activeCount, isRefreshing, onRefresh, onNew, onOpenSideba
           className="hq-btn-primary !h-9 !px-4"
         >
           <Plus className="w-3.5 h-3.5" />
-          New Task
+          <span className="hidden min-[420px]:inline">New Task</span>
+          <span className="min-[420px]:hidden sr-only">New Task</span>
         </button>
       </div>
     </div>
@@ -448,7 +475,7 @@ function TasksFilterBar(p: TasksFilterBarProps) {
   const { view, setView, statusTab, setStatusTab, statusFilter, setStatusFilter } = p
   const { tagFilter, setTagFilter, allTags, searchQuery, setSearchQuery } = p
   return (
-    <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-5 w-full max-w-full">
+    <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 sm:gap-3 mb-4 sm:mb-5 w-full max-w-full">
       <div className="flex items-center gap-2 flex-wrap w-full sm:w-auto min-w-0">
         <div className="flex items-center gap-1 p-1 rounded-xl hq-field self-start shrink-0">
           {VIEWS.map(({ id, label, icon: Icon }) => (
@@ -484,29 +511,31 @@ function TasksFilterBar(p: TasksFilterBarProps) {
           </div>
         )}
 
-        <select
-          value={statusFilter}
-          onChange={(e) => setStatusFilter(e.target.value as TaskStatus | 'all')}
-          title="Filter by status"
-          className="px-2.5 py-1.5 rounded-xl text-xs text-neutral-200 hq-field focus:outline-none focus:ring-1 focus:ring-emerald-400 max-w-full truncate"
-        >
-          <option value="all">All statuses</option>
-          {STATUS_ORDER.map((status) => (
-            <option key={status} value={status}>{STATUS_LABELS[status]}</option>
-          ))}
-        </select>
+        <div className="flex items-center gap-2 w-full sm:w-auto min-w-0">
+          <select
+            value={statusFilter}
+            onChange={(e) => setStatusFilter(e.target.value as TaskStatus | 'all')}
+            title="Filter by status"
+            className="px-2.5 py-1.5 rounded-xl text-xs text-neutral-200 hq-field focus:outline-none focus:ring-1 focus:ring-emerald-400 max-w-full truncate flex-1 min-w-0 sm:flex-none"
+          >
+            <option value="all">All statuses</option>
+            {STATUS_ORDER.map((status) => (
+              <option key={status} value={status}>{STATUS_LABELS[status]}</option>
+            ))}
+          </select>
 
-        <select
-          value={tagFilter}
-          onChange={(e) => setTagFilter(e.target.value)}
-          title="Filter by tag"
-          className="px-2.5 py-1.5 rounded-xl text-xs text-neutral-200 hq-field focus:outline-none focus:ring-1 focus:ring-emerald-400 max-w-full truncate"
-        >
-          <option value="all">All tags</option>
-          {allTags.map((tag) => (
-            <option key={tag} value={tag}>{tag}</option>
-          ))}
-        </select>
+          <select
+            value={tagFilter}
+            onChange={(e) => setTagFilter(e.target.value)}
+            title="Filter by tag"
+            className="px-2.5 py-1.5 rounded-xl text-xs text-neutral-200 hq-field focus:outline-none focus:ring-1 focus:ring-emerald-400 max-w-full truncate flex-1 min-w-0 sm:flex-none"
+          >
+            <option value="all">All tags</option>
+            {allTags.map((tag) => (
+              <option key={tag} value={tag}>{tag}</option>
+            ))}
+          </select>
+        </div>
       </div>
 
       <div className="relative w-full sm:w-auto sm:max-w-xs sm:flex-1 min-w-0">

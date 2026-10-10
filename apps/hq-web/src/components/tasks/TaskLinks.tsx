@@ -6,11 +6,12 @@ import { fetchTaskLinksClient, type LinkKind, type TaskItem, type TaskLinkItem }
 import { usePolled } from '../sessions/usePolled'
 import { SectionLabel } from './taskFields'
 import { linkTarget, linkText } from './linkTarget'
+import { useRefreshOn } from '~/lib/useRefreshOn'
 
-const LINKS_POLL_MS = 60_000
+const LINKS_POLL_MS = 300_000
 const ICON_CLASS = 'w-3.5 h-3.5 text-neutral-500 shrink-0'
 const ROW_CLASS =
-  'flex items-start gap-2 px-2.5 py-1.5 rounded-lg bg-white/[0.02] border border-white/5 hover:bg-white/5 text-xs font-mono text-neutral-200 min-w-0'
+  'flex items-start gap-2 px-2.5 py-1.5 rounded-lg bg-white/[0.02] border border-white/5 hover:bg-white/5 text-xs text-neutral-200 min-w-0'
 
 const ICONS: Record<LinkKind, ReactNode> = {
   vault_note: <FileText className={ICON_CLASS} />,
@@ -57,6 +58,7 @@ function LinkRow({ link }: { link: TaskLinkItem }) {
 /** What a task came from and produced: notes, chats, sessions, commits, pull requests, links and tasks. */
 export function TaskLinks({ task }: { task: TaskItem }) {
   const links = usePolled(task.id, async () => (await fetchTaskLinksClient(task.id)).links, LINKS_POLL_MS)
+  useRefreshOn(['task:sync'], links.refresh)
   const { refresh } = links
   useEffect(() => {
     void refresh()
@@ -66,7 +68,7 @@ export function TaskLinks({ task }: { task: TaskItem }) {
     return (
       <section aria-label="Links">
         <SectionLabel>Links</SectionLabel>
-        <div role="status" className="flex items-center gap-2 text-xs font-mono text-neutral-500">
+        <div role="status" className="flex items-center gap-2 text-xs text-neutral-500">
           <Loader2 className="w-3.5 h-3.5 animate-spin" />
           Loading links
         </div>
@@ -77,7 +79,7 @@ export function TaskLinks({ task }: { task: TaskItem }) {
     return (
       <section aria-label="Links">
         <SectionLabel>Links</SectionLabel>
-        <p role="alert" className="text-xs font-mono text-rose-400">{links.error ?? 'Could not load links.'}</p>
+        <p role="alert" className="text-xs text-rose-400">{links.error ?? 'Could not load links.'}</p>
       </section>
     )
   }

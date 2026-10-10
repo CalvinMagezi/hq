@@ -2226,3 +2226,13 @@ fn purging_a_task_removes_its_assignees() {
     let left: i64 = db.with_conn(|c| Ok(c.query_row("SELECT COUNT(*) FROM task_assignees", [], |r| r.get(0))?)).unwrap();
     assert_eq!(left, 0);
 }
+
+#[test]
+fn an_estimate_with_no_recorded_work_has_no_variance() {
+    let (db, initiative) = setup();
+    make(&db, "tk-1", &initiative, None).unwrap();
+    db.with_conn(|c| update_task(c, "tk-1", &TaskPatch { estimate_minutes: Some(Some(120)), ..Default::default() }, None).map(|_| ()))
+        .unwrap();
+    let summary = db.with_conn(|c| time_summary(c, "tk-1", TTL)).unwrap();
+    assert_eq!((summary.estimate_minutes, summary.variance_minutes), (Some(120), None));
+}

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { Loader2, Send } from 'lucide-react'
 import type { TaskComment } from '~/lib/tasksApi'
 import { addCommentClient, fetchCommentsClient, parseSqliteUtc } from '~/lib/tasksApi'
@@ -13,10 +13,14 @@ export function TaskComments({ taskId }: { taskId: string }) {
   const [postingComment, setPostingComment] = useState(false)
   const { subscribe } = useWS()
 
+  // One post can set off several reloads; only the newest request may set the list.
+  const latestLoad = useRef(0)
+
   const loadComments = useCallback(async () => {
+    const load = ++latestLoad.current
     try {
       const res = await fetchCommentsClient(taskId)
-      setComments(res.comments)
+      if (load === latestLoad.current) setComments(res.comments)
     } catch (e) {
       console.error('Failed to load comments:', e)
     }
@@ -25,7 +29,8 @@ export function TaskComments({ taskId }: { taskId: string }) {
   useEffect(() => {
     loadComments()
     return subscribe((msg) => {
-      if (msg.type === 'task:comment_added' && msg.task_id === taskId) loadComments()
+      // task:sync covers comments an agent added over MCP, which have no REST request to announce them.
+      if ((msg.type === 'task:comment_added' && msg.task_id === taskId) || msg.type === 'task:sync') loadComments()
     })
   }, [taskId, subscribe, loadComments])
 
