@@ -4,7 +4,8 @@ name: Windows Lite
 # SHA-256 file, and attaches it to the matching main release. It runs by hand (give
 # `release_tag` to attach to a particular release) and after every successful Release run on main,
 # so each main build gets its Lite zip. It is separate from the signed release pipeline, which it
-# does not touch: Lite is unsigned for now (verify the SHA-256), and it is updated by running the
+# does not touch: the zip's checksum is signed with the release minisign key (the installer checks
+# it before running anything); there is no Authenticode signature. It is updated by running the
 # installer again.
 on:
   workflow_run:
@@ -107,9 +108,66 @@ jobs:
           if-no-files-found: error
           retention-days: 30
 
+  # The only job with the signing key. It runs no build code, has no write access, and signs the
+  # small checksum file only after checking it describes exactly the zip the build produced.
+  sign:
+    name: Sign checksum
+    needs: [build]
+    if: (inputs.release_tag != '' && github.ref == 'refs/heads/main') || github.event_name == 'workflow_run'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    environment: release
+    permissions:
+      contents: read # sparse checkout of the release scripts only
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+          sparse-checkout: |
+            scripts/release
+            release
+          sparse-checkout-cone-mode: false
+
+      - name: Install pinned minisign and jq
+        run: |
+          dir=$(bash scripts/release/install-tools.sh "$RUNNER_TEMP/tools")
+          echo "$dir" >> "$GITHUB_PATH"
+
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: hq-lite-windows-x86_64
+          path: lite
+
+      - name: Check the build output, then sign the checksum
+        env:
+          MINISIGN_KEY: ${{ secrets.MINISIGN_KEY }}
+          MINISIGN_PASSWORD: ${{ secrets.MINISIGN_PASSWORD }}
+        run: |
+          set -euo pipefail
+          [ "$(find lite -mindepth 1 | wc -l)" -eq 2 ] || { echo "expected exactly a zip and its checksum" >&2; ls -R lite >&2; exit 1; }
+          shopt -s nullglob
+          zips=(lite/*.zip)
+          [ "${#zips[@]}" -eq 1 ] || { echo "expected exactly one zip" >&2; exit 1; }
+          z=$(basename "${zips[0]}")
+          [[ "$z" =~ ^hq-lite-[0-9A-Za-z.+-]+-windows-x86_64\.zip$ ]] || { echo "unexpected zip name: $z" >&2; exit 1; }
+          [ -f "lite/$z.sha256" ] || { echo "no checksum for $z" >&2; exit 1; }
+          [ "$(head -c 2 "lite/$z")" = "PK" ] || { echo "$z is not a zip" >&2; exit 1; }
+          printf '%s  %s\n' "$(sha256sum "lite/$z" | cut -d' ' -f1)" "$z" > "$RUNNER_TEMP/expected.sha256"
+          cmp "$RUNNER_TEMP/expected.sha256" "lite/$z.sha256" || { echo "the checksum file does not describe this zip" >&2; exit 1; }
+          bash scripts/release/sign.sh "lite/$z.sha256"
+          minisign -V -p release/minisign.pub -m "lite/$z.sha256" -x "lite/$z.sha256.minisig"
+
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: hq-lite-windows-x86_64-signature
+          path: lite/*.minisig
+          if-no-files-found: error
+          retention-days: 30
+
   attach:
     name: Attach to release
-    needs: [build]
+    needs: [build, sign]
     # Only from main: a manual run on another branch must not attach its build to a release.
     if: (inputs.release_tag != '' && github.ref == 'refs/heads/main') || github.event_name == 'workflow_run'
     runs-on: ubuntu-latest
@@ -126,6 +184,10 @@ jobs:
         with:
           name: hq-lite-windows-x86_64
           path: lite
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: hq-lite-windows-x86_64-signature
+          path: lite
       - name: Upload
         run: |
           # After a Release run, the release is the one built from that commit.
@@ -135,6 +197,7 @@ jobs:
           [ -n "$TAG" ] || { echo "no release was built from $WANT_SHA" >&2; exit 1; }
           # Only the two expected file names go up, and a rerun replaces them.
           for f in lite/*; do
-            [[ "$(basename "$f")" =~ ^hq-lite-[0-9A-Za-z.+-]+-windows-x86_64\.zip(\.sha256)?$ ]] || { echo "unexpected file $f" >&2; exit 1; }
+            [[ "$(basename "$f")" =~ ^hq-lite-[0-9A-Za-z.+-]+-windows-x86_64\.zip(\.sha256(\.minisig)?)?$ ]] || { echo "unexpected file $f" >&2; exit 1; }
           done
-          gh release upload "$TAG" lite/*.zip lite/*.sha256 --clobber
+          [ "$(ls lite | wc -l)" -eq 3 ] || { echo "expected the zip, its checksum and its signature" >&2; exit 1; }
+          gh release upload "$TAG" lite/*.zip lite/*.sha256 lite/*.minisig --clobber

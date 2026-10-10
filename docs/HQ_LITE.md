@@ -55,11 +55,13 @@ example `%LOCALAPPDATA%\hq-lite`, then:
 
 - The C runtime is linked in, so no Visual C++ redistributable (which needs an administrator) is
   needed. Nothing is installed as a service, and HQ's own files stay in your user profile (a project-scope `hq mcp install` writes into that project). On Windows those files rely on the profile's normal folder permissions.
-- Not code-signed yet. Verify the zip against its SHA-256. A computer that only allows approved
+- The download is signed with HQ's release key (minisign, the same key as the Linux releases), and
+  the installer checks that before it runs anything. It is not signed with a Windows code-signing
+  certificate (Authenticode). A computer that only allows approved
   programs (AppLocker, WDAC, Smart App Control) may refuse to run it; that is the policy working,
   and HQ does not try to get around it. Connecting VS Code to an HQ that runs elsewhere needs no
   program here at all (`docs/VPS_AGENT_CONNECT.md`).
-- `hq update` looks for a newer Lite zip on GitHub (`--apply` downloads and runs `https://agent-hq.online/install.ps1` with PowerShell, which checks the SHA-256, an integrity check only, and swaps the program; like the installer itself it does not go through your script-execution policy, so skip `--apply` and run the installer by hand if your policy matters here). It is a command you run, not a background updater. Your notes and tasks live
+- `hq update` looks for a newer Lite zip on GitHub (`--apply` downloads and runs `https://agent-hq.online/install.ps1` with PowerShell, which checks the signature and the SHA-256 and swaps the program; like the installer itself it does not go through your script-execution policy, so skip `--apply` and run the installer by hand if your policy matters here). It is a command you run, not a background updater. Your notes and tasks live
   in your user profile (`.hq`), not in the folder you unzipped to.
 - `hq host`, `hq sessions` and pairing a machine answer that they need Full HQ.
 - `hq autostart on|off|status` adds or removes one value under your user's startup key, so the web app
@@ -74,10 +76,14 @@ example `%LOCALAPPDATA%\hq-lite`, then:
   settings and whether the port is free.
 - A small, documented slice of the local REST API is described in `docs/api/lite-local-api.yaml`
   (OpenAPI). `packaging/` holds Scoop and winget templates for after a Lite zip is released.
-- The installer checks the zip against a SHA-256 published beside it. A signature the installer can
-  verify (minisign, like the Linux releases) is not done: Windows PowerShell 5.1 has no Ed25519, the
-  check would have to run inside the freshly unpacked program, and the signing key lives only in the
-  protected release job. Authenticode signing is the planned fix.
+- Each build's checksum file is signed by the protected release job with HQ's minisign key
+  (`<zip>.sha256.minisig`). The installer verifies that signature with a small verifier it carries
+  (Windows PowerShell 5.1 has no Ed25519, so it brings its own, tested against real minisign output
+  in CI), then checks the zip against the signed SHA-256, then unpacks. A release with no signature
+  is never offered, and there is no switch to skip the check. This proves the build came from HQ's
+  release pipeline; it does not replace Authenticode, which is what AppLocker publisher rules and
+  Smart App Control look for, and still needs a code-signing certificate. A signature does not stop
+  someone who can change what GitHub's API returns from steering you to an older signed build.
 
 ## Nothing leaves unless you listed it
 
