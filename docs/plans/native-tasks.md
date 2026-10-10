@@ -203,7 +203,8 @@ the source of time-on-task and the record of which session did the work, for any
 for sessions HQ spawns. Migration `081_task_work_sessions` adds the table and `actor` and
 `work_session_id` columns on `task_events`; old events keep NULLs.
 
-- **Tools** (full-key callers; restricted audiences and launched sessions are refused):
+- **Tools** (full-key and tasks-scoped callers; restricted audiences and launched sessions are refused;
+  on the tasks scope a lease is named `mcp:tasks/<name>`, see `docs/security/WEB_AUTH.md`):
   `task_claim` (task, actor, optional harness, session_ref, host, cwd, branch, takeover) returns a
   lease token once, moves a waiting task to in_progress and leaves a comment. `task_heartbeat`
   keeps it alive. `task_release` ends it, with an optional status and summary.

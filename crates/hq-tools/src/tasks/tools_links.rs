@@ -186,9 +186,18 @@ impl HqTool for TaskLinkListTool {
     async fn execute(&self, args: Value) -> Result<Value> {
         let task_id = opt_str(&args, "task_id");
         let (kind, reference) = (opt_str(&args, "kind"), opt_str(&args, "ref"));
+        // The tasks scope never learns the path of a note in the owner's vault, nor which tasks
+        // started from one.
+        let scoped = crate::harness_session::is_tasks_scope(&args);
+        if scoped && kind.as_deref() == Some(t::LINK_VAULT_NOTE) {
+            bail!("this connection cannot look up vault notes");
+        }
         match (task_id, kind, reference) {
             (Some(task), _, _) => {
-                let links = self.db.with_conn(move |c| t::list_task_links(c, &task))?;
+                let mut links = self.db.with_conn(move |c| t::list_task_links(c, &task))?;
+                if scoped {
+                    links.retain(|l| l.kind != t::LINK_VAULT_NOTE);
+                }
                 Ok(json!({ "count": links.len(), "links": links }))
             }
             (None, Some(kind), Some(reference)) => {

@@ -11,6 +11,7 @@ pub const TASKS_SCOPE_ACTOR: &str = "mcp:tasks";
 /// Whether `name` is one a tasks-scope caller writes under: the bare scope actor, or the
 /// `mcp:tasks/<label>` a work lease taken on that scope is named.
 pub fn is_tasks_scope_actor(name: &str) -> bool {
+    let name = name.to_ascii_lowercase();
     name == TASKS_SCOPE_ACTOR
         || name.strip_prefix(TASKS_SCOPE_ACTOR).is_some_and(|rest| rest.starts_with('/'))
 }

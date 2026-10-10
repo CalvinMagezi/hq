@@ -2297,3 +2297,239 @@ async fn task_next_ignores_a_task_that_has_not_started_and_cleans_the_name_it_is
     let got = call_tool(&tools, "task_next", json!({ "actor": " zed\u{200b} " })).await.unwrap();
     assert_eq!(got["task"]["title"], "Today");
 }
+
+// ─── the agent protocol on the tasks scope ──────────────────────────────
+
+fn pending_review_items(fx: &ScopeFixture) -> usize {
+    let value_db = hq_db::Database::open(&fx.path.join("_data").join("vault.db")).unwrap();
+    hq_db::value_items::list_by_state(&value_db, hq_core::types::ValueState::Pending)
+        .unwrap()
+        .len()
+}
+
+/// A client on the tasks key works a task under a lease like any agent, but its name always
+/// says which key it came in on, and its release reaches no mailbox and no approval queue.
+#[tokio::test]
+async fn the_tasks_scope_works_a_task_under_a_lease_named_for_the_scope() {
+    let fx = ScopeFixture::new(&["relay", "codex"]);
+    let blocker = fx.tool("task_create").execute(json!({"title": "blocker", "assignees": ["codex"]})).await.unwrap();
+    fx.tool("task_create")
+        .execute(json!({"title": "dependent", "tags": ["relay"], "depends_on": [blocker["id"]]}))
+        .await
+        .unwrap();
+    let mail_before = (mailbox_files(&fx.path, "relay"), mailbox_files(&fx.path, "codex"));
+
+    let next = fx.tool("task_next").execute(tasks_scope(json!({"actor": "codex"}))).await.unwrap();
+    assert_eq!(next["task"]["id"], blocker["id"], "{next}");
+    assert!(next.get("warnings").is_none(), "the assignee is the bare name: {next}");
+    let lease = next["lease"].as_str().unwrap().to_string();
+    let held = fx.tool("task_get").execute(json!({"id": blocker["id"]})).await.unwrap();
+    assert_eq!(held["held_by"]["actor"], "mcp:tasks/codex");
+
+    let comment = fx
+        .tool("task_comment_add")
+        .execute(tasks_scope(json!({"task_id": blocker["id"], "body": "working", "lease": lease})))
+        .await
+        .unwrap();
+    assert_eq!(comment["author"], "mcp:tasks/codex");
+    fx.tool("task_heartbeat").execute(tasks_scope(json!({"lease": lease}))).await.unwrap();
+    let done = fx
+        .tool("task_release")
+        .execute(tasks_scope(json!({"lease": lease, "status": "complete", "summary": "done"})))
+        .await
+        .unwrap();
+    assert_eq!(done["task"]["status"], "complete");
+    assert_eq!(
+        (mailbox_files(&fx.path, "relay"), mailbox_files(&fx.path, "codex")),
+        mail_before,
+        "an unblocked dependent's tag is not mailed from the scope"
+    );
+    assert_eq!(pending_review_items(&fx), 0);
+}
+
+#[tokio::test]
+async fn a_scope_release_raises_no_review_item_but_an_owner_release_does() {
+    let fx = ScopeFixture::new(&[]);
+    let scoped_task = fx.tool("task_create").execute(json!({"title": "a"})).await.unwrap();
+    let claim = fx
+        .tool("task_claim")
+        .execute(tasks_scope(json!({"task_id": scoped_task["id"], "actor": "laptop"})))
+        .await
+        .unwrap();
+    fx.tool("task_release")
+        .execute(tasks_scope(json!({"lease": claim["lease"], "status": "ready_for_review", "summary": "s"})))
+        .await
+        .unwrap();
+    assert_eq!(pending_review_items(&fx), 0, "the scope must not raise an approval item");
+
+    let owner_task = fx.tool("task_create").execute(json!({"title": "b"})).await.unwrap();
+    let claim = fx
+        .tool("task_claim")
+        .execute(json!({"task_id": owner_task["id"], "actor": "builder"}))
+        .await
+        .unwrap();
+    fx.tool("task_release")
+        .execute(json!({"lease": claim["lease"], "status": "ready_for_review", "summary": "s"}))
+        .await
+        .unwrap();
+    assert_eq!(pending_review_items(&fx), 1, "a release to review reaches the owner like an update");
+}
+
+#[tokio::test]
+async fn an_owner_release_that_completes_a_blocker_tells_the_dependent() {
+    let fx = ScopeFixture::new(&["reviewer"]);
+    let blocker = fx.tool("task_create").execute(json!({"title": "blocker"})).await.unwrap();
+    fx.tool("task_create")
+        .execute(json!({"title": "dependent", "assignees": ["reviewer"], "depends_on": [blocker["id"]]}))
+        .await
+        .unwrap();
+    let before = mailbox_files(&fx.path, "reviewer");
+    let claim = fx
+        .tool("task_claim")
+        .execute(json!({"task_id": blocker["id"], "actor": "builder"}))
+        .await
+        .unwrap();
+    fx.tool("task_release")
+        .execute(json!({"lease": claim["lease"], "status": "complete", "summary": "done"}))
+        .await
+        .unwrap();
+    assert!(mailbox_files(&fx.path, "reviewer") > before, "the unblocked dependent's assignee is told");
+}
+
+#[tokio::test]
+async fn scope_names_and_leases_do_not_cross_between_keys() {
+    let fx = ScopeFixture::new(&[]);
+    let task = fx.tool("task_create").execute(json!({"title": "a"})).await.unwrap();
+    let posing = fx
+        .tool("task_claim")
+        .execute(json!({"task_id": task["id"], "actor": "mcp:tasks/laptop"}))
+        .await;
+    assert!(posing.is_err(), "the owner's agents cannot pose as a scoped client");
+
+    let owner = fx
+        .tool("task_claim")
+        .execute(json!({"task_id": task["id"], "actor": "builder"}))
+        .await
+        .unwrap();
+    for tool in ["task_heartbeat", "task_release"] {
+        let borrowed = fx.tool(tool).execute(tasks_scope(json!({"lease": owner["lease"]}))).await;
+        assert!(borrowed.is_err(), "{tool} with a full-key lease must be refused on the scope");
+    }
+    let still = fx.tool("task_get").execute(json!({"id": task["id"]})).await.unwrap();
+    assert_eq!(still["held_by"]["actor"], "builder", "the refused release ended nothing");
+}
+
+/// Each bulk item runs as the single tool would for the same caller, so a scoped bulk call
+/// cannot shed its scope for its items.
+#[tokio::test]
+async fn a_scoped_bulk_call_keeps_the_scope_for_every_item() {
+    let fx = ScopeFixture::new(&["relay"]);
+    let made = fx
+        .tool("task_create_many")
+        .execute(tasks_scope(json!({
+            "defaults": {"tags": ["relay"], "_hq_tasks_scope": false},
+            "tasks": [
+                {"key": "a", "title": "one", "assignees": ["relay"], "_hq_tasks_scope": false},
+                {"key": "b", "title": "two", "parent_id": "@a"}
+            ]
+        })))
+        .await
+        .unwrap();
+    assert_eq!(made["created"], 2, "{made}");
+    for r in made["results"].as_array().unwrap() {
+        let task = fx.tool("task_get").execute(json!({"id": r["id"]})).await.unwrap();
+        assert_eq!(task["tags"], json!([]), "{task}");
+        assert_eq!(task["assignees"], json!([]), "{task}");
+        assert_eq!(task["created_by"], "mcp:tasks");
+    }
+    assert_eq!(mailbox_files(&fx.path, "relay"), 0);
+
+    let id = made["results"][0]["id"].clone();
+    fx.tool("task_update_many")
+        .execute(tasks_scope(json!({"updates": [{"id": id, "tags": ["relay"], "_hq_tasks_scope": false}]})))
+        .await
+        .unwrap();
+    let task = fx.tool("task_get").execute(json!({"id": id})).await.unwrap();
+    assert_eq!(task["tags"], json!([]));
+    assert_eq!(mailbox_files(&fx.path, "relay"), 0);
+}
+
+#[tokio::test]
+async fn the_scope_link_list_leaves_out_notes() {
+    let fx = ScopeFixture::new(&[]);
+    let made = fx
+        .tool("task_create")
+        .execute(json!({"title": "a", "links": [
+            {"kind": "vault_note", "ref": "Notebooks/Private/plan.md"},
+            {"kind": "url", "ref": "https://example.com/spec"}
+        ]}))
+        .await
+        .unwrap();
+    let listed = fx.tool("task_link_list").execute(tasks_scope(json!({"task_id": made["id"]}))).await.unwrap();
+    assert_eq!(listed["count"], 1, "{listed}");
+    let lookup = fx
+        .tool("task_link_list")
+        .execute(tasks_scope(json!({"kind": "vault_note", "ref": "Notebooks/Private/plan.md"})))
+        .await;
+    assert!(lookup.is_err());
+    let owner = fx.tool("task_link_list").execute(json!({"task_id": made["id"]})).await.unwrap();
+    assert_eq!(owner["count"], 2);
+}
+
+#[tokio::test]
+async fn the_tasks_scope_cannot_take_over_a_lease() {
+    let fx = ScopeFixture::new(&[]);
+    let made = fx.tool("task_create").execute(json!({"title": "a"})).await.unwrap();
+    fx.tool("task_claim").execute(json!({"task_id": made["id"], "actor": "builder"})).await.unwrap();
+    let taken = fx
+        .tool("task_claim")
+        .execute(tasks_scope(json!({"task_id": made["id"], "actor": "laptop", "takeover": true})))
+        .await;
+    assert!(taken.is_err());
+    let still = fx.tool("task_get").execute(json!({"id": made["id"]})).await.unwrap();
+    assert_eq!(still["held_by"]["actor"], "builder");
+}
+
+#[tokio::test]
+async fn a_scoped_claim_resumes_without_machine_paths() {
+    let fx = ScopeFixture::new(&[]);
+    let made = fx.tool("task_create").execute(json!({"title": "a"})).await.unwrap();
+    let first = fx.tool("task_claim").execute(json!({"task_id": made["id"], "actor": "builder"})).await.unwrap();
+    fx.tool("task_release")
+        .execute(json!({"lease": first["lease"], "status": "to_do", "checkpoint": {
+            "summary": "s", "files": ["src/a.rs", "/home/me/b.rs"]
+        }}))
+        .await
+        .unwrap();
+    let next = fx
+        .tool("task_claim")
+        .execute(tasks_scope(json!({"task_id": made["id"], "actor": "laptop"})))
+        .await
+        .unwrap();
+    assert_eq!(next["resume"]["files"], json!(["src/a.rs"]), "{next}");
+}
+
+#[tokio::test]
+async fn a_scoped_claim_of_a_held_task_is_not_told_to_take_it_over() {
+    let fx = ScopeFixture::new(&[]);
+    let made = fx.tool("task_create").execute(json!({"title": "a"})).await.unwrap();
+    fx.tool("task_claim").execute(json!({"task_id": made["id"], "actor": "builder"})).await.unwrap();
+    let refused = fx
+        .tool("task_claim")
+        .execute(tasks_scope(json!({"task_id": made["id"], "actor": "laptop"})))
+        .await
+        .unwrap_err()
+        .to_string();
+    assert!(refused.contains("held by builder"), "{refused}");
+    assert!(!refused.contains("takeover"), "{refused}");
+}
+
+#[test]
+fn only_project_relative_checkpoint_paths_reach_the_scope() {
+    let mut resume = json!({"files": [
+        "src/lib.rs", "docs/a b.md", "/Users/me/x", "~/x", "C:\\x", "\\\\server\\share",
+        "file:///Users/me/x", "../other/x", "src/../../x", "$HOME/x", "%USERPROFILE%\\x", "\u{200b}/Users/me/x"
+    ]});
+    super::tools_lease::hide_machine_paths(&mut resume);
+    assert_eq!(resume["files"], json!(["src/lib.rs", "docs/a b.md"]));
+}

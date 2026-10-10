@@ -205,8 +205,14 @@ fn initialize_result(
         "capabilities": {"tools": {}},
         "serverInfo": {"name": "agent-hq", "version": env!("CARGO_PKG_VERSION")}
     });
-    if let (Some(registry), None) = (registry, allowed) {
-        result["instructions"] = hq_mcp::gateway::server_instructions(registry).into();
+    match (registry, allowed) {
+        (Some(registry), None) => {
+            result["instructions"] = hq_mcp::gateway::server_instructions(registry).into();
+        }
+        (Some(_), Some(allowed)) if allowed == hq_mcp::gateway::TASKS_ALLOWLIST => {
+            result["instructions"] = hq_mcp::gateway::tasks_scope_instructions().into();
+        }
+        _ => {}
     }
     result
 }

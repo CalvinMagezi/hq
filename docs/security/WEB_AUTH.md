@@ -9,7 +9,9 @@ HQ-SEC-001, HQ-SEC-004 and HQ-SEC-005.
 `/mcp` needs `AGENTHQ_API_KEY` (full access), `AGENTHQ_SPARK_API_KEY` (a
 read-only tool allowlist that includes the vault and session logs), `AGENTHQ_TASKS_API_KEY`
 (task tools only, listed in `hq_mcp::gateway::TASKS_ALLOWLIST`: list, get, create, update and
-comment on tasks, and list or create folders and initiatives) or `AGENTHQ_HANDOFF_API_KEY` (the read-only set minus
+comment on tasks, work them under a lease with `task_claim`, `task_next`, `task_heartbeat` and
+`task_release`, file or move many with `task_create_many` and `task_update_many`, read links and
+time, and list or create folders and initiatives) or `AGENTHQ_HANDOFF_API_KEY` (the read-only set minus
 `harness_session_logs`, plus `task_create`, `task_update`, `task_comment_add`,
 `harness_session_spawn`, `harness_session_handoff`, `hq_ask` and `hq_ask_result`, as listed in
 `hq_mcp::gateway::HANDOFF_ALLOWLIST`; no deletes, no session stop, resume,
@@ -53,7 +55,18 @@ private marker and strips any the caller sends) and then:
   the agent worker and harnesses drain, so a tag would put text in front of your chat or an agent);
 - send no mailbox notification on create, update or unblock, and raise no `ready_for_review`
   approval item in the web inbox;
-- write `mcp:tasks` as the author instead of a name the caller picks;
+- set no assignees (an assignee is mailed like a tag);
+- write `mcp:tasks` as the author instead of a name the caller picks. A work lease taken on the
+  scope is named `mcp:tasks/<name>`, so the agent's own name shows but always marked as this key;
+  any other caller is refused a name of that shape, and the scope cannot heartbeat, release or
+  write under a lease it did not take;
+- see who holds a task and since when, but no session's host, folder or branch, no absolute or
+  out-of-project path in a resume point's `files`, and no link to a vault note (it cannot add one,
+  and `task_link_list` refuses a note lookup). New thread comments no longer name a host, folder or
+  branch, but comments written before this change still do, and agent-written text (a summary, a
+  next step, a comment) can name anything, so treat the thread as readable by this key;
+- never take over another session's lease (`takeover` is refused), so it cannot end one HQ launched;
+- apply all of this to every item of a bulk call, whatever an item or `defaults` says;
 - edit a task's title and description only on tasks the scope filed itself, because a linked
   session's goal and a launched session's prompt are built from them; status, priority, dates and
   comments are open on any task;

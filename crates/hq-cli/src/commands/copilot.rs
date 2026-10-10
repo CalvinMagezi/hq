@@ -47,6 +47,10 @@ Changes (say what you are about to change first):\n\
 - `hq task create \"<title>\" [--description \"...\"] [--priority high] [--due YYYY-MM-DD]`\n\
 - `hq task update <id> --status in_progress` (also `--title`, `--priority`, `--due`)\n\
 - `hq task comment <id> <text>`\n\
+- To work a task: `hq task next --as <your-name>` (or `hq task claim <id> --as <your-name>`) returns a\n\
+  `lease`. Pass `--lease <lease>` on `update` and `comment`, run `hq task heartbeat <lease>` now and then,\n\
+  and finish with `hq task release <lease> --status ready_for_review --summary \"...\"` (`blocked` when\n\
+  stuck, `to_do` to hand it back; `complete` only for verified work).\n\
 - `hq vault write <path> -` writes a note from standard input\n\
 \n\
 Task ids look like `PERSONAL-INBOX-001`. Do not edit files under `_system`, `_data` or other\n\
