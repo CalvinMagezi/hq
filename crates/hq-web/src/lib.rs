@@ -276,6 +276,12 @@ pub fn create_router(state: Arc<WsState>) -> Router {
             "/api/tasks/{id}/work-sessions",
             get(tasks_api::list_work_sessions_handler),
         )
+        .route("/api/tasks/{id}/time", get(tasks_api::task_time_handler))
+        .route("/api/task-time-report", get(tasks_api::time_report_handler))
+        .route(
+            "/api/work-sessions",
+            get(tasks_api::recent_work_sessions_handler),
+        )
         .route(
             "/api/threads/{thread_id}/sessions",
             get(sessions_api::list_thread_sessions_handler),

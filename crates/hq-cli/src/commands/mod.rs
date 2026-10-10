@@ -79,5 +79,6 @@ pub mod stop;
 pub mod task;
 pub mod tools;
 pub mod update;
+pub mod tasks;
 pub mod usage;
 pub mod vault;

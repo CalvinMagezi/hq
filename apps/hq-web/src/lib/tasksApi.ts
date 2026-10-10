@@ -42,6 +42,8 @@ export interface TaskItem {
   first_ready_for_review_at: string | null
   /** UTC timestamp of the latest move into complete; null = not complete or not recorded. */
   completed_at: string | null
+  /** Planned effort in minutes; null = no estimate. */
+  estimate_minutes: number | null
   /** Set on sub-tasks; nesting is one level deep. */
   parent_task_id: string | null
   tags: string[]
@@ -178,6 +180,7 @@ interface CreateTaskInput {
   depends_on?: string[]
   tags?: string[]
   created_by?: string
+  estimate_minutes?: number
 }
 
 export async function createTaskClient(input: CreateTaskInput): Promise<TaskItem> {
@@ -201,6 +204,7 @@ export interface UpdateTaskInput {
   add_depends_on?: string[]
   remove_depends_on?: string[]
   tags?: string[]
+  estimate_minutes?: number | null
   expected_status?: TaskStatus
 }
 
@@ -256,4 +260,49 @@ export const STATUS_ORDER: TaskStatus[] = ['to_do', 'in_progress', 'blocked', 'r
 export function parseSqliteUtc(s: string): Date {
   const iso = s.includes('T') ? s : s.replace(' ', 'T')
   return new Date(iso.endsWith('Z') ? iso : `${iso}Z`)
+}
+
+/** One agent session holding a task for a stretch of time. Times are UTC like every other timestamp. */
+export interface WorkSession {
+  id: string
+  task_id: string
+  actor: string
+  harness: string
+  host: string
+  cwd: string
+  branch: string
+  harness_session_id: string | null
+  started_at: string
+  last_heartbeat_at: string
+  ended_at: string | null
+  end_reason: string | null
+  /** Seconds from start to the end, or to the last sign of life while live. */
+  active_seconds: number
+}
+
+export interface TimeSummary {
+  estimate_minutes: number | null
+  leased_seconds: number
+  lease_count: number
+  live: boolean
+  time_to_start_seconds: number | null
+  cycle_seconds: number | null
+  /** null when the task predates the full event log. */
+  status_seconds: Record<string, number> | null
+  /** Leased minutes minus the estimate; positive means over. */
+  variance_minutes: number | null
+  subtasks: { count: number; leased_seconds: number; estimate_minutes: number; with_estimate: number } | null
+}
+
+export async function fetchTaskTimeClient(taskId: string): Promise<TimeSummary> {
+  return readJson(await hqFetch(`/api/tasks/${encodeURIComponent(taskId)}/time`))
+}
+
+export async function fetchTaskWorkSessionsClient(taskId: string): Promise<{ work_sessions: WorkSession[] }> {
+  return readJson(await hqFetch(`/api/tasks/${encodeURIComponent(taskId)}/work-sessions`))
+}
+
+/** Recent work across all tasks, for drawing actual work beside the plan on the timeline. */
+export async function fetchRecentWorkSessionsClient(days: number): Promise<{ work_sessions: WorkSession[] }> {
+  return readJson(await hqFetch(`/api/work-sessions?days=${days}`))
 }

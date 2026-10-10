@@ -22,8 +22,8 @@ fn tools() -> Vec<Box<dyn HqTool>> {
 }
 
 #[test]
-fn factory_returns_nineteen_tools() {
-    assert_eq!(tools().len(), 19);
+fn factory_returns_twenty_tools() {
+    assert_eq!(tools().len(), 20);
 }
 
 #[test]
@@ -1524,4 +1524,65 @@ async fn releasing_with_a_lease_that_still_holds_applies_the_status() {
         .unwrap();
     assert_eq!(released["status_applied"], true);
     assert!(released.get("warnings").is_none(), "{released}");
+}
+
+#[tokio::test]
+async fn an_estimate_is_set_validated_cleared_and_compared_with_leased_time() {
+    let tools = tools_with(hq_core::config::LeaseMode::Off);
+    let task = call_tool(&tools, "task_create", json!({ "title": "Sized", "estimate_minutes": 90 })).await.unwrap();
+    let id = task["display_id"].as_str().unwrap().to_string();
+    assert_eq!(task["estimate_minutes"], 90);
+    assert!(call_tool(&tools, "task_create", json!({ "title": "Bad", "estimate_minutes": 0 })).await.is_err());
+    assert!(call_tool(&tools, "task_update", json!({ "id": id, "estimate_minutes": -3 })).await.is_err());
+
+    let got = call_tool(&tools, "task_get", json!({ "id": id })).await.unwrap();
+    assert_eq!(got["time"]["estimate_minutes"], 90);
+    assert_eq!(got["time"]["leased_seconds"], 0);
+    assert_eq!(got["time"]["variance_minutes"], -90);
+
+    let cleared = call_tool(&tools, "task_update", json!({ "id": id, "estimate_minutes": null })).await.unwrap();
+    assert!(cleared["estimate_minutes"].is_null());
+}
+
+#[tokio::test]
+async fn the_first_claim_gives_an_unscheduled_task_a_start_date_and_keeps_an_existing_one() {
+    let tools = tools_with(hq_core::config::LeaseMode::Off);
+    let bare = call_tool(&tools, "task_create", json!({ "title": "Bare" })).await.unwrap();
+    let planned = call_tool(&tools, "task_create", json!({ "title": "Planned", "start_date": "2030-01-02" })).await.unwrap();
+    let overdue = call_tool(&tools, "task_create", json!({ "title": "Overdue", "due_date": "2020-01-01" })).await.unwrap();
+    for (task, expect) in [(&bare, "today"), (&planned, "2030-01-02"), (&overdue, "none")] {
+        let id = task["display_id"].as_str().unwrap();
+        let claim = call_tool(&tools, "task_claim", json!({ "task_id": id, "actor": "builder" })).await.unwrap();
+        let start = claim["task"]["start_date"].as_str().map(String::from);
+        match expect {
+            "today" => assert!(start.is_some(), "an unscheduled task is placed on the timeline"),
+            "none" => assert!(start.is_none(), "a start after the due date would be invalid"),
+            date => assert_eq!(start.as_deref(), Some(date)),
+        }
+    }
+}
+
+#[tokio::test]
+async fn the_time_report_tool_answers_with_a_window() {
+    let tools = tools_with(hq_core::config::LeaseMode::Off);
+    let task = call_tool(&tools, "task_create", json!({ "title": "Worked" })).await.unwrap();
+    call_tool(&tools, "task_claim", json!({ "task_id": task["display_id"], "actor": "builder" })).await.unwrap();
+    let report = call_tool(&tools, "task_time_report", json!({ "days": 7 })).await.unwrap();
+    assert_eq!(report["days"], 7);
+    assert_eq!(report["report"]["actors"][0]["actor"], "builder");
+    let clamped = call_tool(&tools, "task_time_report", json!({ "days": 100000 })).await.unwrap();
+    assert_eq!(clamped["days"], 365);
+}
+
+#[tokio::test]
+async fn a_malformed_estimate_is_an_error_and_never_clears_or_drops_one() {
+    let tools = tools_with(hq_core::config::LeaseMode::Off);
+    let task = call_tool(&tools, "task_create", json!({ "title": "Sized", "estimate_minutes": 60 })).await.unwrap();
+    let id = task["display_id"].as_str().unwrap().to_string();
+    for bad in [json!("30"), json!(30.5), json!(true), json!(1.0e30)] {
+        assert!(call_tool(&tools, "task_update", json!({ "id": id, "estimate_minutes": bad })).await.is_err(), "{bad}");
+        assert!(call_tool(&tools, "task_create", json!({ "title": "x", "estimate_minutes": bad })).await.is_err(), "{bad}");
+    }
+    let still = call_tool(&tools, "task_get", json!({ "id": id })).await.unwrap();
+    assert_eq!(still["estimate_minutes"], 60, "a rejected update leaves the estimate alone");
 }

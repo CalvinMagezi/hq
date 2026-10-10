@@ -38,7 +38,7 @@ pub(super) fn row_to_initiative(row: &rusqlite::Row) -> rusqlite::Result<Initiat
 pub(super) const TASK_COLS: &str = "t.id, t.initiative_id, t.display_id, t.title, t.description, t.status, \
      t.priority, t.due_date, t.clickup_task_id, t.created_by, t.created_at, t.updated_at, \
      t.parent_task_id, t.start_date, t.work_started_at, t.first_ready_for_review_at, t.external_id, \
-     t.completed_at";
+     t.completed_at, t.estimate_minutes";
 
 pub(super) fn row_to_task(row: &rusqlite::Row) -> rusqlite::Result<Task> {
     Ok(Task {
@@ -60,6 +60,7 @@ pub(super) fn row_to_task(row: &rusqlite::Row) -> rusqlite::Result<Task> {
         first_ready_for_review_at: row.get(15)?,
         external_id: row.get(16)?,
         completed_at: row.get(17)?,
+        estimate_minutes: row.get(18)?,
         tags: Vec::new(),
         depends_on: Vec::new(),
         blocked_by: Vec::new(),

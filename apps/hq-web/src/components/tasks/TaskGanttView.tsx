@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { CalendarDays } from 'lucide-react'
-import type { Initiative, TaskItem, UpdateTaskInput } from '~/lib/tasksApi'
+import type { Initiative, TaskItem, UpdateTaskInput, WorkSession } from '~/lib/tasksApi'
 import { BLOCKED_CHIP_CLASS, STATUS_BADGE_CLASS } from './TaskCard'
 import { groupByInitiative, nestRows, type TaskRow } from './hierarchy'
 import { dayOfMonth, dayOfWeek, isWeekend, monthLabel, todayDay } from './dates'
@@ -20,6 +20,7 @@ import {
   type Zoom,
 } from './gantt'
 import { usePointerDrag, type DragPoint } from './usePointerDrag'
+import { actualSpans, type ActualSpan } from './timeFormat'
 
 interface Props {
   tasks: TaskItem[]
@@ -27,6 +28,8 @@ interface Props {
   initiativeById: Map<string, Initiative>
   onSelect: (task: TaskItem) => void
   onReschedule: (task: TaskItem, patch: UpdateTaskInput) => void
+  /** Recent work leases, drawn as thin bars under each task's plan. */
+  sessions?: WorkSession[]
 }
 
 type Line = { kind: 'group'; name: string } | { kind: 'task'; row: TaskRow }
@@ -45,7 +48,7 @@ const ARROW_HEAD_SIZE = 6
 const TIMELINE_ATTR = 'data-gantt-timeline'
 const EDGE_HANDLE_CLASS = 'absolute top-0 bottom-0 w-2 cursor-ew-resize'
 
-export function TaskGanttView({ tasks, allById, initiativeById, onSelect, onReschedule }: Props) {
+export function TaskGanttView({ tasks, allById, initiativeById, onSelect, onReschedule, sessions = [] }: Props) {
   const [zoom, setZoom] = useState<Zoom>('week')
   const [drag, setDrag] = useState<DragState | null>(null)
   const scrollRef = useRef<HTMLDivElement>(null)
@@ -64,6 +67,7 @@ export function TaskGanttView({ tasks, allById, initiativeById, onSelect, onResc
     return out
   }, [tasks, allById, initiativeById])
 
+  const actual = useMemo(() => actualSpans(sessions), [sessions])
   const unscheduled = useMemo(() => tasks.filter((t) => spanOf(t) === null), [tasks])
   const range = useMemo(
     () => visibleRange(tasks.map(spanOf).filter((s): s is Span => s !== null), today),
@@ -166,6 +170,25 @@ export function TaskGanttView({ tasks, allById, initiativeById, onSelect, onResc
                   />
                 )
               })}
+              {lines.map((line, i) =>
+                line.kind === 'task'
+                  ? (actual.get(line.row.task.id) ?? []).map((span, n) => {
+                      // Work outside the planned window is cut to it, not drawn off the grid.
+                      const start = Math.max(span.start, range.start)
+                      const end = Math.min(span.end, range.end)
+                      if (end < start) return null
+                      return (
+                        <ActualBar
+                          key={`${line.row.task.id}-actual-${n}`}
+                          span={{ ...span, start, end }}
+                          top={i * ROW_HEIGHT}
+                          left={(start - range.start) * dayPx}
+                          dayPx={dayPx}
+                        />
+                      )
+                    })
+                  : null
+              )}
             </div>
           </div>
         </div>
@@ -332,6 +355,26 @@ function GanttBar({ task, span, top, left, dayPx, overdue, dragging, onPointerDo
       <div onPointerDown={(e) => onPointerDown(e, 'start')} className={`${EDGE_HANDLE_CLASS} left-0`} />
       <div onPointerDown={(e) => onPointerDown(e, 'end')} className={`${EDGE_HANDLE_CLASS} right-0`} />
     </div>
+  )
+}
+
+const ACTUAL_BAR_HEIGHT = 3
+const ACTUAL_BAR_OFFSET = 4
+
+/** Where work actually happened, under the plan. A live session is drawn solid. */
+function ActualBar({ span, top, left, dayPx }: { span: ActualSpan; top: number; left: number; dayPx: number }) {
+  return (
+    <div
+      aria-hidden
+      title={span.live ? 'A session is working on this now' : 'Worked on'}
+      className={`absolute rounded-full pointer-events-none bg-neutral-300 ${span.live ? 'opacity-90' : 'opacity-45'}`}
+      style={{
+        top: top + ROW_HEIGHT - ACTUAL_BAR_HEIGHT - ACTUAL_BAR_OFFSET,
+        left,
+        width: Math.max((span.end - span.start + 1) * dayPx, ACTUAL_BAR_HEIGHT * 2),
+        height: ACTUAL_BAR_HEIGHT,
+      }}
+    />
   )
 }
 

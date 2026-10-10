@@ -21,6 +21,7 @@ const makeTask = (id: string, display_id: string, initiative_id: string, updated
   work_started_at: null,
   first_ready_for_review_at: null,
   completed_at: null,
+  estimate_minutes: null,
   created_by: 'test',
   created_at,
   updated_at,

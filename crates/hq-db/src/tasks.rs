@@ -41,6 +41,9 @@ pub const PRIORITIES: [&str; 4] = [
     PRIORITY_LOW,
 ];
 
+/// Longest estimate accepted: a year of minutes. Anything larger is a typo.
+pub const MAX_ESTIMATE_MINUTES: i64 = 525_600;
+
 /// Largest page `list_tasks` returns. Larger lists are read with `offset`.
 pub const MAX_LIST_LIMIT: usize = 500;
 
@@ -87,6 +90,14 @@ pub fn validate_status(status: &str) -> Result<()> {
         return Ok(());
     }
     anyhow::bail!("unknown status '{status}', expected one of {}", STATUSES.join(", "))
+}
+
+/// An estimate is a whole number of minutes, at least one.
+pub fn validate_estimate(minutes: i64) -> Result<()> {
+    if (1..=MAX_ESTIMATE_MINUTES).contains(&minutes) {
+        return Ok(());
+    }
+    anyhow::bail!("estimate_minutes must be between 1 and {MAX_ESTIMATE_MINUTES}, got {minutes}")
 }
 
 pub fn validate_priority(priority: &str) -> Result<()> {
@@ -176,6 +187,8 @@ pub struct Task {
     /// UTC timestamp of the latest move into complete, cleared when the task
     /// reopens. `None` = not complete, or completed before it was recorded.
     pub completed_at: Option<String>,
+    /// Planned effort in minutes. `None` = no estimate.
+    pub estimate_minutes: Option<i64>,
     /// Caller-supplied idempotency key, unique within the task's space.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub external_id: Option<String>,
@@ -247,6 +260,7 @@ pub struct NewTask<'a> {
     pub created_by: &'a str,
     /// Idempotency key, unique per space. See `create_task_dedup`.
     pub external_id: Option<&'a str>,
+    pub estimate_minutes: Option<i64>,
 }
 
 /// A field left `None` is untouched. The `Option<Option<String>>` fields
@@ -261,11 +275,13 @@ pub struct TaskPatch {
     pub start_date: Option<Option<String>>,
     pub parent_task_id: Option<Option<String>>,
     pub tags: Option<Vec<String>>,
+    pub estimate_minutes: Option<Option<i64>>,
 }
 
 mod crud;
 mod leases;
 mod links;
+mod time;
 mod messages;
 mod org;
 mod rows;
@@ -275,6 +291,7 @@ mod tests;
 pub use crud::*;
 pub use leases::*;
 pub use links::*;
+pub use time::*;
 pub use messages::*;
 pub use org::*;
 pub use rows::{list_task_events, validate_date};

@@ -71,6 +71,7 @@ impl HqTool for TaskCreateTool {
                 "priority": { "type": "string", "enum": ["urgent", "high", "normal", "low"], "description": "Optional priority" },
                 "due_date": { "type": "string", "description": "Optional due date, YYYY-MM-DD" },
                 "start_date": { "type": "string", "description": "Optional start date, YYYY-MM-DD (not after due_date)" },
+                "estimate_minutes": { "type": "integer", "minimum": 1, "description": "Planned effort in minutes. Time you actually spend is recorded from your lease, so set an estimate when you can and it will be compared." },
                 "parent_id": { "type": "string", "description": "Make this a sub-task of that task (id or display id). The parent must be top level." },
                 "depends_on": { "type": "array", "items": { "type": "string" }, "description": "Ids or display ids of tasks that must complete before this one" },
                 "tags": { "type": "array", "items": { "type": "string" }, "description": "Routing tags (e.g. 'hq', 'reviewer') plus any topical tags" },
@@ -132,6 +133,7 @@ impl HqTool for TaskCreateTool {
         };
 
         let external_id = opt_str(&args, "external_id");
+        let estimate_minutes = estimate_arg(&args)?.flatten();
         let id = generate_id("tk");
         let (task, created) = self.db.with_conn(move |c| {
             // A live lease names the filer; otherwise the caller's own words.
@@ -155,6 +157,7 @@ impl HqTool for TaskCreateTool {
                     tags: &tags,
                     created_by: &created_by,
                     external_id: external_id.as_deref(),
+                    estimate_minutes,
                 },
             )?;
             if depends_on.is_empty() || !created {
@@ -290,6 +293,19 @@ impl HqTool for TaskListTool {
     }
 }
 
+/// The `estimate_minutes` argument: absent is untouched, null clears, a whole number
+/// sets. Anything else (a string, 30.5) is an error, never a silent clear or drop.
+fn estimate_arg(args: &Value) -> Result<Option<Option<i64>>> {
+    match args.get("estimate_minutes") {
+        None => Ok(None),
+        Some(Value::Null) => Ok(Some(None)),
+        Some(v) => match v.as_i64() {
+            Some(minutes) => Ok(Some(Some(minutes))),
+            None => bail!("estimate_minutes must be a whole number of minutes, or null to clear it"),
+        },
+    }
+}
+
 /// Most recent work leases `task_get` returns.
 const WORK_SESSIONS_SHOWN: usize = 20;
 
@@ -361,7 +377,7 @@ impl HqTool for TaskGetTool {
         let caller = crate::harness_session::caller_session(&args).map(str::to_string);
         let scoped = crate::harness_session::is_tasks_scope(&args);
         let ttl = super::tools_lease::ttl_secs(&self.settings);
-        let (task, subtasks, dependents, events, sessions) = self.db.with_conn(move |c| {
+        let (task, subtasks, dependents, events, sessions, time) = self.db.with_conn(move |c| {
             let task =
                 t::get_task(c, &id)?.ok_or_else(|| anyhow::anyhow!("no task found for that id"))?;
             crate::a2a::check_task_access(c, caller.as_deref(), &task.id)?;
@@ -372,12 +388,14 @@ impl HqTool for TaskGetTool {
             // never shown as still working.
             t::expire_stale_leases(c, ttl)?;
             let sessions = t::list_work_sessions(c, &task.id, WORK_SESSIONS_SHOWN)?;
-            Ok::<_, anyhow::Error>((task, subtasks, dependents, events, sessions))
+            let time = t::time_summary(c, &task.id, ttl)?;
+            Ok::<_, anyhow::Error>((task, subtasks, dependents, events, sessions, time))
         })?;
         let mut value = task_json(&task);
         value["subtasks"] = json!(subtasks.iter().map(task_summary).collect::<Vec<_>>());
         value["dependents"] = json!(dependents.iter().map(task_summary).collect::<Vec<_>>());
         value["lifecycle_events"] = json!(events);
+        value["time"] = json!(time);
         value["held_by"] = json!(sessions.iter().find(|s| s.ended_at.is_none()));
         value["work_sessions"] = json!(sessions);
         if scoped {
@@ -438,6 +456,7 @@ impl HqTool for TaskUpdateTool {
                 "priority": { "type": ["string", "null"], "enum": ["urgent", "high", "normal", "low", null] },
                 "due_date": { "type": ["string", "null"], "description": "YYYY-MM-DD, null clears" },
                 "start_date": { "type": ["string", "null"], "description": "YYYY-MM-DD, null clears" },
+                "estimate_minutes": { "type": ["integer", "null"], "minimum": 1, "description": "Planned effort in minutes, null clears" },
                 "parent_id": { "type": ["string", "null"], "description": "New parent (id or display id), null promotes to top level" },
                 "add_depends_on": { "type": "array", "items": { "type": "string" }, "description": "Tasks this one should wait for" },
                 "remove_depends_on": { "type": "array", "items": { "type": "string" }, "description": "Dependencies to drop" },
@@ -488,6 +507,7 @@ impl HqTool for TaskUpdateTool {
             } else {
                 args.get("tags").map(|_| tags_from_args(&args, "tags"))
             },
+            estimate_minutes: estimate_arg(&args)?,
         };
         let expected_status = args
             .get("expected_status")

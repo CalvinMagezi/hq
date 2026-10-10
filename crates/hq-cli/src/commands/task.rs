@@ -2,7 +2,8 @@
 //!
 //! Every verb goes through the same gateway the tasks-scoped MCP key uses, so a terminal agent
 //! gets exactly that scope: task and space tools only, writes attributed to `mcp:tasks`, no
-//! routing tags, no notifications, no vault, no sessions. Output is the tool's JSON.
+//! routing tags, no notifications, no vault, no sessions. Output is the tool's JSON. The one
+//! exception is `time`, a text report read from this machine's database (`commands::tasks`).
 
 use std::sync::Arc;
 
@@ -67,6 +68,12 @@ pub enum TaskCmd {
     Comments { id: String },
     /// List spaces (JSON)
     Spaces,
+    /// Leased hours, cycle time and estimate accuracy by initiative and agent, read from this
+    /// machine's database (text)
+    Time {
+        /// Window in days (default 30)
+        days: Option<i64>,
+    },
 }
 
 /// The gateway call a verb makes: tool name and its arguments.
@@ -120,10 +127,14 @@ fn call_for(cmd: &TaskCmd, stdin: &mut dyn FnMut() -> Result<String>) -> Result<
         }
         TaskCmd::Comments { id } => ("task_comment_list", json!({ "task_id": id })),
         TaskCmd::Spaces => ("space_list", json!({})),
+        TaskCmd::Time { .. } => bail!("`time` is a local report, not a gateway call"),
     })
 }
 
 pub async fn run(config: &HqConfig, cmd: TaskCmd) -> Result<()> {
+    if let TaskCmd::Time { days } = cmd {
+        return super::tasks::run(config, "time", days).await;
+    }
     let mut read_stdin = || -> Result<String> {
         use std::io::Read;
         let mut s = String::new();

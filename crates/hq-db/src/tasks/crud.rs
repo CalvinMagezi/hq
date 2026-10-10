@@ -10,6 +10,9 @@ pub fn create_task(
     if let Some(priority) = new.priority {
         validate_priority(priority)?;
     }
+    if let Some(minutes) = new.estimate_minutes {
+        validate_estimate(minutes)?;
+    }
     let parent_id = match new.parent_task_id {
         Some(parent) => Some(resolve_parent(conn, parent, initiative_id)?.id),
         None => None,
@@ -18,8 +21,8 @@ pub fn create_task(
     let display_id = next_display_id(conn, initiative_id)?;
     conn.execute(
         "INSERT INTO tasks (id, initiative_id, display_id, title, description, priority, due_date, \
-         created_by, parent_task_id, start_date, external_id, external_space_id)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)",
+         created_by, parent_task_id, start_date, external_id, external_space_id, estimate_minutes)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13)",
         params![
             id,
             initiative_id,
@@ -32,7 +35,8 @@ pub fn create_task(
             parent_id,
             new.start_date,
             external.as_ref().map(|(_, ext)| ext),
-            external.as_ref().map(|(space, _)| space)
+            external.as_ref().map(|(space, _)| space),
+            new.estimate_minutes
         ],
     )?;
     set_tags(conn, id, new.tags)?;
@@ -208,6 +212,9 @@ pub(super) fn validate_patch(conn: &Connection, current: &Task, patch: &TaskPatc
     if let Some(Some(priority)) = &patch.priority {
         validate_priority(priority)?;
     }
+    if let Some(Some(minutes)) = patch.estimate_minutes {
+        validate_estimate(minutes)?;
+    }
     let start = match &patch.start_date {
         Some(v) => v.as_deref(),
         None => current.start_date.as_deref(),
@@ -308,6 +315,10 @@ fn apply_update(
     if let Some(start_date) = &patch.start_date {
         sets.push("start_date = ?");
         vals.push(Box::new(start_date.clone()));
+    }
+    if let Some(minutes) = &patch.estimate_minutes {
+        sets.push("estimate_minutes = ?");
+        vals.push(Box::new(*minutes));
     }
     if let Some(parent) = &patch.parent_task_id {
         sets.push("parent_task_id = (SELECT id FROM tasks WHERE id = ? OR display_id = ?)");
