@@ -177,6 +177,22 @@ mod tests {
     }
 
     #[test]
+    fn the_task_protocol_is_in_the_instructions_exactly_when_tasks_are() {
+        let without = gateway::server_instructions(&server_with_stub_registry().registry);
+        assert!(!without.contains("Working on tasks"), "no task tools, no task protocol");
+
+        let mut registry = ToolRegistry::new();
+        registry.register(Box::new(Stub { name: "task_claim".into(), description: "claim".into(), category: "tasks".into() }));
+        let with = gateway::server_instructions(&registry);
+        assert!(with.contains("## Working on tasks"));
+        for needed in ["task_next", "task_claim", "lease", "task_heartbeat", "checkpoint", "task_release", "ready_for_review", "blocked"] {
+            assert!(with.contains(needed), "the protocol must mention {needed}");
+        }
+        assert_eq!(with.matches("**task_claim**").count(), 1, "the catalog still lists the tool once");
+        assert!(with.len() < 4000, "the protocol is short: {} bytes", with.len());
+    }
+
+    #[test]
     fn instructions_list_every_tool_once() {
         let server = server_with_stub_registry();
         let instructions = gateway::server_instructions(&server.registry);

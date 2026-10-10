@@ -42,6 +42,7 @@ pub fn create_task(
         ],
     )?;
     set_tags(conn, id, new.tags)?;
+    set_assignees(conn, id, new.assignees)?;
     notify_on_ok(conn, 
         get_task(conn, id)?
             .ok_or_else(|| anyhow::anyhow!("task {id} vanished immediately after creation")),
@@ -128,6 +129,23 @@ pub fn get_task(conn: &Connection, id_or_display_id: &str) -> Result<Option<Task
 
 type SqlParams = Vec<Box<dyn rusqlite::types::ToSql>>;
 
+/// Most search words considered; the rest are ignored.
+const MAX_SEARCH_WORDS: usize = 8;
+
+/// Priority as a sortable rank: urgent first, and a task with no priority counts as normal.
+pub(super) const PRIORITY_RANK_SQL: &str =
+    "CASE t.priority WHEN 'urgent' THEN 0 WHEN 'high' THEN 1 WHEN 'low' THEN 3 ELSE 2 END";
+
+fn order_by(sort: TaskSort) -> String {
+    match sort {
+        TaskSort::Updated => "t.updated_at DESC, t.created_at DESC, t.display_id DESC, t.id DESC".to_string(),
+        TaskSort::Created => "t.created_at DESC, t.display_id DESC, t.id DESC".to_string(),
+        TaskSort::Priority => format!(
+            "{PRIORITY_RANK_SQL}, t.due_date IS NULL, t.due_date, t.created_at, t.id"
+        ),
+    }
+}
+
 /// The `FROM ... WHERE ...` text and its parameters for a filter, shared by the
 /// page query and the count so the two can never disagree.
 fn filter_sql(filter: &TaskFilter) -> (String, SqlParams) {
@@ -143,6 +161,25 @@ fn filter_sql(filter: &TaskFilter) -> (String, SqlParams) {
         sql.push_str(" JOIN task_tags tg ON tg.task_id = t.id");
         conditions.push("tg.tag = ?");
         vals.push(Box::new(tag.clone()));
+    }
+    if let Some(assignee) = &filter.assignee {
+        sql.push_str(" JOIN task_assignees ta ON ta.task_id = t.id");
+        conditions.push("ta.assignee = ?");
+        // Stored names are cleaned, so the name asked for is cleaned the same way.
+        vals.push(Box::new(super::leases::clean_label(assignee)));
+    }
+    if let Some(since) = &filter.updated_since {
+        conditions.push("t.updated_at > ?");
+        vals.push(Box::new(since.clone()));
+    }
+    for word in filter.search.iter().flat_map(|s| s.split_whitespace()).take(MAX_SEARCH_WORDS) {
+        conditions.push(
+            "(t.title LIKE ? ESCAPE '\\' OR t.description LIKE ? ESCAPE '\\' OR t.display_id LIKE ? ESCAPE '\\')",
+        );
+        let pattern = format!("%{}%", word.replace('\\', "\\\\").replace('%', "\\%").replace('_', "\\_"));
+        for _ in 0..3 {
+            vals.push(Box::new(pattern.clone()));
+        }
     }
     if let Some(space_id) = &filter.space_id {
         conditions.push("i.space_id = ?");
@@ -185,8 +222,8 @@ pub fn list_tasks(conn: &Connection, filter: &TaskFilter) -> Result<Vec<Task>> {
     let limit = filter.limit.unwrap_or(MAX_LIST_LIMIT).clamp(1, MAX_LIST_LIMIT);
     let sql = format!(
         "SELECT {TASK_COLS} {from_where} \
-         ORDER BY t.updated_at DESC, t.created_at DESC, t.display_id DESC, t.id DESC \
-         LIMIT {limit} OFFSET {}",
+         ORDER BY {} LIMIT {limit} OFFSET {}",
+        order_by(filter.sort),
         filter.offset.min(i64::MAX as usize)
     );
     let mut stmt = conn.prepare(&sql)?;
@@ -374,6 +411,9 @@ fn apply_update(
 
     if let Some(tags) = &patch.tags {
         set_tags(conn, &current.id, tags)?;
+    }
+    if let Some(assignees) = &patch.assignees {
+        set_assignees(conn, &current.id, assignees)?;
     }
     if let Some(status) = patch.status.as_deref().filter(|s| *s != current.status) {
         record_transition(conn, &current.id, &current.status, status, ctx)?;

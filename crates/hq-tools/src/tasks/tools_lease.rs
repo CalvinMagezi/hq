@@ -141,6 +141,46 @@ pub(super) fn add_warning(value: &mut Value, text: String) {
     }
 }
 
+/// Names already shown the working protocol in this process. Per name, since the transport does not say who a client is.
+static HINTED: std::sync::OnceLock<std::sync::Mutex<std::collections::HashSet<String>>> = std::sync::OnceLock::new();
+
+/// Longest name remembered, and most names remembered, for the once-per-name hint.
+const HINT_NAME_CHARS: usize = 64;
+const MAX_HINTED_NAMES: usize = 1000;
+
+const ONBOARDING_HINT: &str = "Tasks in HQ are worked with a lease: task_claim (or task_next) before you start, \
+     task_heartbeat while you work, task_release with a status when you stop, and pass `lease` on your updates so \
+     the work and its time are recorded as yours. See the hq-tasks skill. This note is shown once per name.";
+
+/// The protocol hint for a caller using tasks without a lease, once per name. Never for a launched
+/// session (HQ runs those) or for a caller that already holds a lease.
+pub(super) fn onboarding_hint(args: &Value) -> Option<Value> {
+    let hints = ActorHints::from_args(args, "actor");
+    if hints.caller_session.is_some() || hints.lease_token.is_some() {
+        return None;
+    }
+    let named: String = [arg_str(args, "actor"), arg_str(args, "created_by"), arg_str(args, "author")]
+        .into_iter()
+        .map(|n| n.trim().chars().take(HINT_NAME_CHARS).collect::<String>())
+        .find(|n| !n.is_empty())
+        .unwrap_or_else(|| "anonymous".to_string());
+    let seen = HINTED.get_or_init(Default::default);
+    let mut seen = seen.lock().ok()?;
+    // Bounded: past the cap the list starts over, so a caller inventing names costs a repeated hint, not memory.
+    if seen.len() >= MAX_HINTED_NAMES {
+        seen.clear();
+    }
+    seen.insert(named).then(|| json!(ONBOARDING_HINT))
+}
+
+/// Adds the hint to a reply when this is the caller's first look.
+pub(super) fn with_onboarding(args: &Value, mut reply: Value) -> Value {
+    if let (Some(hint), Some(obj)) = (onboarding_hint(args), reply.as_object_mut()) {
+        obj.insert("hq_task_protocol".to_string(), hint);
+    }
+    reply
+}
+
 /// The `checkpoint` argument: `{summary, next_step, open_questions, files}`, all optional.
 fn checkpoint_arg(args: &Value) -> Result<Option<t::Checkpoint>> {
     let Some(raw) = args.get("checkpoint").filter(|v| !v.is_null()) else {
@@ -261,21 +301,125 @@ impl HqTool for TaskClaimTool {
             let resume = t::latest_checkpoint(c, &claimed.task.id)?;
             Ok((claimed, resume))
         })?;
-        let mut out = json!({
-            "lease": claimed.token,
-            "lease_id": claimed.session.id,
-            "moved_to_in_progress": claimed.moved,
-            "ttl_secs": settings.lease_ttl(),
-            "heartbeat_every_secs": settings.lease_ttl() / HEARTBEATS_PER_TTL,
-            "task": task_json_with_warnings(&claimed.task),
-            "next": "Work on the task. Pass `lease` on your task_update and task_comment_add calls. \
-                     Call task_heartbeat (with a checkpoint when you reach a good stopping point) while you \
-                     work and task_release with a status when you stop.",
-        });
-        if let Some(checkpoint) = resume {
-            out["resume"] = resume_json(&checkpoint);
+        Ok(claim_response(&claimed, resume.as_ref(), &settings))
+    }
+}
+
+/// What a claim answers: the lease, the task, how to keep going, and where the last session
+/// left off. Shared by `task_claim` and `task_next`.
+fn claim_response(claimed: &t::Claimed, resume: Option<&t::TaskCheckpoint>, settings: &TasksConfig) -> Value {
+    let mut out = json!({
+        "lease": claimed.token,
+        "lease_id": claimed.session.id,
+        "moved_to_in_progress": claimed.moved,
+        "ttl_secs": settings.lease_ttl(),
+        "heartbeat_every_secs": settings.lease_ttl() / HEARTBEATS_PER_TTL,
+        "task": task_json_with_warnings(&claimed.task),
+        "next": "Work on the task. Pass `lease` on your task_update and task_comment_add calls. \
+                 Call task_heartbeat (with a checkpoint when you reach a good stopping point) while you \
+                 work and task_release with a status when you stop.",
+    });
+    if let Some(checkpoint) = resume {
+        out["resume"] = resume_json(checkpoint);
+    }
+    let me = &claimed.session.actor;
+    if !claimed.task.assignees.is_empty() && !claimed.task.assignees.contains(me) {
+        add_warning(
+            &mut out,
+            format!(
+                "{} is assigned to {}, not to {me}. Check with them if this was not agreed.",
+                claimed.task.display_id,
+                claimed.task.assignees.join(", ")
+            ),
+        );
+    }
+    out
+}
+
+pub(super) struct TaskNextTool {
+    pub(super) settings: TasksConfig,
+    pub(super) db: Arc<Database>,
+}
+
+#[async_trait]
+impl HqTool for TaskNextTool {
+    fn name(&self) -> &str {
+        "task_next"
+    }
+    fn description(&self) -> &str {
+        "Get your next task and start it in one step: picks the most urgent open task assigned to you \
+         (then soonest due, then oldest) that nothing blocks and nobody holds, and claims it like \
+         task_claim, so two agents asking at once never get the same one. Replies with the lease, the \
+         task and where the last session left off, or task null when there is nothing to start. \
+         Set include_unassigned to also take tasks nobody is assigned to."
+    }
+    fn parameters(&self) -> Value {
+        json!({
+            "type": "object",
+            "properties": {
+                "actor": { "type": "string", "description": "Your name, for example your agent name" },
+                "assignee": { "type": "string", "description": "Whose queue to take from. Defaults to your actor name." },
+                "include_unassigned": { "type": "boolean", "default": false },
+                "initiative_id": { "type": "string", "description": "Only from this initiative" },
+                "tag": { "type": "string", "description": "Only tasks with this topical tag" },
+                "harness": { "type": "string" },
+                "session_ref": { "type": "string" },
+                "host": { "type": "string" },
+                "cwd": { "type": "string" },
+                "branch": { "type": "string" }
+            },
+            "required": ["actor"]
+        })
+    }
+    fn category(&self) -> &str {
+        "tasks"
+    }
+    fn search_hint(&self) -> Option<&str> {
+        Some("what should I work on next, pick my next task, take work from my queue")
+    }
+    async fn execute(&self, args: Value) -> Result<Value> {
+        let actor = arg_str(&args, "actor");
+        if actor.trim().is_empty() {
+            bail!("actor is required: name yourself, for example your agent name");
         }
-        Ok(out)
+        let assignee = opt_str(&args, "assignee").unwrap_or_else(|| actor.clone());
+        let include_unassigned = args.get("include_unassigned").and_then(Value::as_bool).unwrap_or(false);
+        let (initiative_id, tag) = (opt_str(&args, "initiative_id"), opt_str(&args, "tag"));
+        let (harness, session_ref) = (arg_str(&args, "harness"), arg_str(&args, "session_ref"));
+        let (host, cwd, branch) = (arg_str(&args, "host"), arg_str(&args, "cwd"), arg_str(&args, "branch"));
+        let settings = self.settings.clone();
+        let ttl = ttl_secs(&settings);
+        let picked = self.db.with_conn(move |c| {
+            let who = t::LeaseIdentity {
+                actor: &actor,
+                harness: &harness,
+                external_session_ref: &session_ref,
+                host: &host,
+                cwd: &cwd,
+                branch: &branch,
+            };
+            let query = t::NextTaskQuery {
+                assignee: &assignee,
+                include_unassigned,
+                initiative_id: initiative_id.as_deref(),
+                tag: tag.as_deref(),
+            };
+            t::in_write_tx(c, |c| match t::claim_next(c, &query, &who, ttl)? {
+                Some(claimed) => {
+                    let resume = t::latest_checkpoint(c, &claimed.task.id)?;
+                    Ok(Some((claimed, resume)))
+                }
+                None => Ok(None),
+            })
+        })?;
+        Ok(match picked {
+            Some((claimed, resume)) => claim_response(&claimed, resume.as_ref(), &settings),
+            None => json!({
+                "task": null,
+                "reason": "Nothing open is assigned to you that is unblocked and not already held. \
+                           Check task_list with your assignee, or pass include_unassigned.",
+            }),
+        })
     }
 }
 
@@ -373,18 +517,26 @@ impl HqTool for TaskReleaseTool {
         let asked_for_status = status.is_some();
         let summary = arg_str(&args, "summary");
         let ttl = ttl_secs(&self.settings);
-        let checkpoint = match checkpoint_arg(&args)? {
-            Some(cp) => Some(cp),
-            // A release that says what happened is also the resume point, without asking twice.
-            None => Some(t::Checkpoint { summary: summary.clone(), ..Default::default() }).filter(|cp| !cp.is_empty()),
-        };
+        let explicit = checkpoint_arg(&args)?;
+        // A release that says what happened is also the resume point, without asking twice.
+        let from_summary = explicit.is_none();
+        let checkpoint = explicit
+            .or_else(|| Some(t::Checkpoint { summary: summary.clone(), ..Default::default() }).filter(|cp| !cp.is_empty()));
         let done = self.db.with_conn(move |c| {
             t::in_write_tx(c, |c| {
                 let done = t::release(c, &token, status.as_deref(), &summary, ttl)?;
                 // A late release from a lease that no longer holds the task must not replace the
                 // resume point a newer session left.
                 if let (Some(cp), true) = (&checkpoint, done.current) {
-                    t::add_checkpoint(c, &done.task.id, Some(&done.session.id), &done.session.actor, cp)?;
+                    let mut cp = cp.clone();
+                    // A summary alone says where things ended up, not what comes next, so what the
+                    // last checkpoint said about the next step, the open questions and the files stands.
+                    if from_summary && let Some(last) = t::latest_checkpoint(c, &done.task.id)? {
+                        cp.next_step = last.next_step;
+                        cp.open_questions = last.open_questions;
+                        cp.files = last.files;
+                    }
+                    t::add_checkpoint(c, &done.task.id, Some(&done.session.id), &done.session.actor, &cp)?;
                 }
                 Ok(done)
             })

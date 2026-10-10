@@ -55,6 +55,8 @@ export interface TaskItem {
   /** Set on sub-tasks; nesting is one level deep. */
   parent_task_id: string | null
   tags: string[]
+  /** Who the task is for: agents or people. Tags say what it is about. */
+  assignees: string[]
   /** Internal ids of the tasks this one waits for. */
   depends_on: string[]
   /** Display ids of dependencies that are not complete yet. */
@@ -193,6 +195,7 @@ interface CreateTaskInput {
   created_by?: string
   estimate_minutes?: number
   long_horizon?: boolean
+  assignees?: string[]
 }
 
 export async function createTaskClient(input: CreateTaskInput): Promise<TaskItem> {
@@ -220,6 +223,7 @@ export interface UpdateTaskInput {
   blocked_reason?: string | null
   waiting_on?: string | null
   long_horizon?: boolean
+  assignees?: string[]
   expected_status?: TaskStatus
 }
 

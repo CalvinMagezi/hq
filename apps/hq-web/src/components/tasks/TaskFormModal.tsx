@@ -25,6 +25,7 @@ interface Props {
     estimate_minutes?: number
     parent_task_id?: string
     tags: string[]
+    assignees?: string[]
   }) => Promise<void>
 }
 
@@ -41,6 +42,7 @@ export function TaskFormModal({ open, onClose, spaces, folders, initiatives, tas
   const [estimate, setEstimate] = useState('')
   const [parentId, setParentId] = useState('')
   const [tags, setTags] = useState('')
+  const [assignees, setAssignees] = useState('')
   const [submitting, setSubmitting] = useState(false)
   const [addingSpace, setAddingSpace] = useState(false)
   const [newSpaceName, setNewSpaceName] = useState('')
@@ -68,6 +70,7 @@ export function TaskFormModal({ open, onClose, spaces, folders, initiatives, tas
     setEstimate('')
     setParentId('')
     setTags('')
+    setAssignees('')
   }
 
   const parentCandidates = tasks
@@ -92,6 +95,10 @@ export function TaskFormModal({ open, onClose, spaces, folders, initiatives, tas
         tags: tags
           .split(',')
           .map((t) => t.trim())
+          .filter(Boolean),
+        assignees: assignees
+          .split(',')
+          .map((a) => a.trim())
           .filter(Boolean),
       })
       reset()
@@ -283,7 +290,17 @@ export function TaskFormModal({ open, onClose, spaces, folders, initiatives, tas
           </div>
 
           <div>
-            <FieldLabel>Tags (comma-separated; "hq" routes to that agent)</FieldLabel>
+            <FieldLabel>Assigned to (comma-separated; an agent named here is notified)</FieldLabel>
+            <input
+              value={assignees}
+              onChange={(e) => setAssignees(e.target.value)}
+              placeholder="hq, reviewer"
+              className="w-full px-2.5 py-1.5 rounded-lg text-xs text-neutral-200 bg-black/30 border border-white/10"
+            />
+          </div>
+
+          <div>
+            <FieldLabel>Tags (comma-separated; what the task is about)</FieldLabel>
             <input
               value={tags}
               onChange={(e) => setTags(e.target.value)}

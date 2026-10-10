@@ -38,10 +38,11 @@ fn vanished(id: &str) -> anyhow::Error {
 
 /// Mails `notify` (the tags this write introduced) and tells every open web
 /// client. An edit that adds no tag mails nobody.
-fn notify_and_broadcast(state: &Arc<WsState>, task: &t::Task, event_type: &str, notify: &[String]) {
+fn notify_and_broadcast(state: &Arc<WsState>, task: &t::Task, event_type: &str, previous: Option<&t::Task>) {
     // Lite has no agents to route to, and the mailbox folders are hidden from it.
     if !state.profile().is_lite() {
-        hq_tools::tasks::notify_tags(&state.vault_path, task, notify);
+        let route_tags = hq_tools::tasks::task_settings().route_tags;
+        hq_tools::tasks::notify_recipients(&state.vault_path, task, previous, route_tags);
     }
     state.broadcast(&json!({ "type": event_type, "task": task_json(task) }).to_string());
 }
@@ -226,6 +227,10 @@ pub(crate) struct ListTasksParams {
     /// List archived tasks instead of active ones.
     #[serde(default)]
     pub(crate) archived: bool,
+    pub(crate) assignee: Option<String>,
+    pub(crate) search: Option<String>,
+    pub(crate) updated_since: Option<String>,
+    pub(crate) sort: Option<String>,
 }
 
 pub(crate) async fn list_tasks_handler(
@@ -246,6 +251,16 @@ pub(crate) async fn list_tasks_handler(
         limit: params.limit,
         offset: params.offset.unwrap_or(0),
         archived: params.archived,
+        assignee: params.assignee.filter(|a| !a.is_empty()),
+        search: params.search.filter(|s| !s.trim().is_empty()),
+        updated_since: match params.updated_since.filter(|s| !s.is_empty()).map(|s| t::normalize_since(&s)).transpose() {
+            Ok(since) => since,
+            Err(e) => return ApiError::from(e).into_response(),
+        },
+        sort: match t::TaskSort::parse(params.sort.as_deref().unwrap_or("")) {
+            Ok(sort) => sort,
+            Err(e) => return ApiError::from(e).into_response(),
+        },
     };
     let offset = filter.offset;
     let page = state
@@ -290,6 +305,8 @@ pub(crate) struct CreateTaskBody {
     pub(crate) estimate_minutes: Option<i64>,
     #[serde(default)]
     pub(crate) long_horizon: bool,
+    #[serde(default)]
+    pub(crate) assignees: Vec<String>,
 }
 
 fn default_space() -> String {
@@ -334,6 +351,7 @@ pub(crate) async fn create_task_handler(
                 start_date: body.start_date.as_deref(),
                 parent_task_id: body.parent_task_id.as_deref(),
                 tags: &body.tags,
+                assignees: &body.assignees,
                 created_by: &body.created_by,
                 external_id: body.external_id.as_deref(),
                 estimate_minutes: body.estimate_minutes,
@@ -354,7 +372,7 @@ pub(crate) async fn create_task_handler(
             Json(out).into_response()
         }
         Ok((task, true)) => {
-            notify_and_broadcast(&state, &task, "task:created", &task.tags);
+            notify_and_broadcast(&state, &task, "task:created", None);
             broadcast_related(&state, task.parent_task_id.iter().cloned().collect());
             Json(task_json(&task)).into_response()
         }
@@ -387,6 +405,7 @@ pub(crate) struct UpdateTaskBody {
     #[serde(default, deserialize_with = "deserialize_double_option")]
     pub(crate) waiting_on: Option<Option<String>>,
     pub(crate) long_horizon: Option<bool>,
+    pub(crate) assignees: Option<Vec<String>>,
     pub(crate) expected_status: Option<String>,
 }
 
@@ -419,6 +438,7 @@ pub(crate) async fn update_task_handler(
         blocked_reason: body.blocked_reason,
         waiting_on: body.waiting_on,
         long_horizon: body.long_horizon,
+        assignees: body.assignees,
     };
     let expected_status = body.expected_status;
     let (add_deps, remove_deps) = (body.add_depends_on, body.remove_depends_on);
@@ -443,15 +463,15 @@ pub(crate) async fn update_task_handler(
             let became_ready = task.status == t::STATUS_READY_FOR_REVIEW
                 && previous_status != Some(t::STATUS_READY_FOR_REVIEW);
             let unblocked = unblocked_by_transition(c, previous_status, &task)?;
-            Ok((task, became_ready, unblocked, previous.parent_task_id, previous.tags))
+            Ok((task, became_ready, unblocked, previous))
         })
     });
     match result {
-        Ok((task, became_ready_for_review, unblocked, old_parent, previous_tags)) => {
-            let added = hq_tools::tasks::added_tags(&previous_tags, &task.tags);
-            notify_and_broadcast(&state, &task, "task:updated", &added);
+        Ok((task, became_ready_for_review, unblocked, previous)) => {
+            let old_parent = previous.parent_task_id.clone();
+            notify_and_broadcast(&state, &task, "task:updated", Some(&previous));
             if !state.profile().is_lite() {
-                notify_unblocked(&state.vault_path, &task, &unblocked);
+                notify_unblocked(&state.vault_path, &task, &unblocked, hq_tools::tasks::task_settings().route_tags);
             }
             let mut related: Vec<String> = unblocked.into_iter().map(|u| u.id).collect();
             related.extend(task.parent_task_id.iter().cloned());
@@ -710,7 +730,8 @@ pub(crate) async fn restore_task_handler(
 ) -> Response {
     match state.db.with_conn(move |c| t::restore_task(c, &id, "web")) {
         Ok(task) => {
-            notify_and_broadcast(&state, &task, "task:created", &[]);
+            // Restored, not new: nobody is mailed again.
+            notify_and_broadcast(&state, &task, "task:created", Some(&task.clone()));
             broadcast_related(&state, task.parent_task_id.iter().cloned().collect());
             Json(task_json(&task)).into_response()
         }
@@ -820,6 +841,7 @@ mod tests {
                 external_id: Some("req-1".into()),
                 estimate_minutes: None,
                 long_horizon: false,
+                assignees: vec![],
             };
             create_task_handler(State(state.clone()), Json(body))
         };
@@ -862,6 +884,7 @@ mod tests {
                 external_id: None,
                 estimate_minutes: None,
                 long_horizon: false,
+                assignees: vec![],
             }),
         )
         .await;
@@ -880,6 +903,10 @@ mod tests {
                 limit: None,
                 offset: None,
                 archived: false,
+                assignee: None,
+                search: None,
+                updated_since: None,
+                sort: None,
             }),
         )
         .await;
@@ -995,6 +1022,10 @@ mod tests {
                     limit: None,
                     offset: None,
                     archived,
+                    assignee: None,
+                    search: None,
+                    updated_since: None,
+                    sort: None,
                 }),
             )
         };
@@ -1039,6 +1070,10 @@ mod tests {
                 limit: Some(limit),
                 offset: Some(offset),
                 archived: false,
+                assignee: None,
+                search: None,
+                updated_since: None,
+                sort: None,
             };
             list_tasks_handler(State(state.clone()), Query(params))
         };

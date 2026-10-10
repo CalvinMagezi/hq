@@ -136,6 +136,84 @@ impl HqTool for InitiativeProgressTool {
     }
 }
 
+pub(super) struct TaskRoutingAuditTool {
+    pub(super) settings: TasksConfig,
+    pub(super) vault_path: std::path::PathBuf,
+    pub(super) db: Arc<Database>,
+}
+
+/// Most agent mailboxes one audit lists.
+const MAX_MAILBOXES: usize = 200;
+
+#[async_trait]
+impl HqTool for TaskRoutingAuditTool {
+    fn name(&self) -> &str {
+        "task_routing_audit"
+    }
+    fn description(&self) -> &str {
+        "Which tags currently route tasks to an agent mailbox, and how many open tasks each affects, next to how \
+         many are assigned to that agent. Run it before moving routing from tags to assignees: it changes \
+         nothing. When every task an agent should get is assigned to it, set tasks.route_tags to false and \
+         tags stay purely topical."
+    }
+    fn parameters(&self) -> Value {
+        json!({ "type": "object", "properties": {} })
+    }
+    fn category(&self) -> &str {
+        "tasks"
+    }
+    fn is_read_only(&self) -> bool {
+        true
+    }
+    async fn execute(&self, _args: Value) -> Result<Value> {
+        let dir = self.vault_path.join(hq_core::mailbox::MAILBOX_DIR);
+        let mut names: Vec<String> = std::fs::read_dir(&dir)
+            .map(|rd| {
+                rd.filter_map(|e| e.ok())
+                    .filter(|e| e.path().is_dir())
+                    .filter_map(|e| e.file_name().into_string().ok())
+                    .collect()
+            })
+            .unwrap_or_default();
+        names.sort();
+        names.truncate(MAX_MAILBOXES);
+        let rows = self.db.with_conn(move |c| {
+            names
+                .iter()
+                .map(|name| {
+                    let open = |join: &str| -> Result<i64> {
+                        Ok(c.query_row(
+                            &format!(
+                                "SELECT COUNT(DISTINCT t.id) FROM tasks t JOIN {join} x ON x.task_id = t.id \
+                                 WHERE x.{col} = ?1 AND t.archived_at IS NULL AND t.status <> 'complete'",
+                                col = if join == "task_tags" { "tag" } else { "assignee" }
+                            ),
+                            [name],
+                            |r| r.get(0),
+                        )?)
+                    };
+                    let tagged = open("task_tags")?;
+                    let assigned = open("task_assignees")?;
+                    let tagged_only: i64 = c.query_row(
+                        "SELECT COUNT(DISTINCT t.id) FROM tasks t JOIN task_tags g ON g.task_id = t.id \
+                         WHERE g.tag = ?1 AND t.archived_at IS NULL AND t.status <> 'complete' \
+                           AND NOT EXISTS (SELECT 1 FROM task_assignees a WHERE a.task_id = t.id AND a.assignee = ?1)",
+                        [name],
+                        |r| r.get(0),
+                    )?;
+                    Ok(json!({ "mailbox": name, "open_tasks_tagged": tagged, "open_tasks_assigned": assigned, "tagged_but_not_assigned": tagged_only }))
+                })
+                .collect::<Result<Vec<Value>>>()
+        })?;
+        Ok(json!({
+            "route_tags": self.settings.route_tags,
+            "mailboxes": rows,
+            "next": "A tagged_but_not_assigned count above zero is work that reaches that agent only through its tag. \
+                     Assign those tasks to it (task_update assignees), then set tasks.route_tags to false.",
+        }))
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

@@ -67,6 +67,31 @@ pub fn added_tags(before: &[String], after: &[String]) -> Vec<String> {
     after.iter().filter(|t| !before.contains(t)).cloned().collect()
 }
 
+/// Mails whoever a write newly gave a task to. Assignees are always routed to; tags are too
+/// while `route_tags` is on (the default), so routing by tag keeps working until it is
+/// replaced by assignees. `previous` is the task before the write, `None` for a new task,
+/// and only what is new since then is mailed. A name in both lists is mailed once.
+pub fn notify_recipients(
+    vault_path: &std::path::Path,
+    task: &t::Task,
+    previous: Option<&t::Task>,
+    route_tags: bool,
+) {
+    let (old_tags, old_assignees): (&[String], &[String]) = match previous {
+        Some(p) => (&p.tags, &p.assignees),
+        None => (&[], &[]),
+    };
+    let mut recipients = added_tags(old_assignees, &task.assignees);
+    if route_tags {
+        for tag in added_tags(old_tags, &task.tags) {
+            if !recipients.contains(&tag) {
+                recipients.push(tag);
+            }
+        }
+    }
+    notify_tags(vault_path, task, &recipients);
+}
+
 /// Mails the agents behind `tags`, a subset of the task's own tags.
 pub fn notify_tags(vault_path: &std::path::Path, task: &t::Task, tags: &[String]) {
     if tags.is_empty() {
@@ -76,8 +101,12 @@ pub fn notify_tags(vault_path: &std::path::Path, task: &t::Task, tags: &[String]
 }
 
 /// Tells each unblocked task's tagged agents that its last dependency is done.
-pub fn notify_unblocked(vault_path: &std::path::Path, blocker: &t::Task, unblocked: &[t::Task]) {
-    for task in unblocked.iter().filter(|t| !t.tags.is_empty()) {
+pub fn notify_unblocked(vault_path: &std::path::Path, blocker: &t::Task, unblocked: &[t::Task], route_tags: bool) {
+    for task in unblocked {
+        let recipients = recipients_of(task, route_tags);
+        if recipients.is_empty() {
+            continue;
+        }
         let content = format!(
             "Unblocked: {} ({} is complete)",
             task.title, blocker.display_id
@@ -87,9 +116,22 @@ pub fn notify_unblocked(vault_path: &std::path::Path, blocker: &t::Task, unblock
             &task.id,
             &task.display_id,
             &content,
-            &task.tags,
+            &recipients,
         );
     }
+}
+
+/// Everyone a task is for: its assignees, and its tags too while `route_tags` is on. A name is listed once.
+fn recipients_of(task: &t::Task, route_tags: bool) -> Vec<String> {
+    let mut recipients = task.assignees.clone();
+    if route_tags {
+        for tag in &task.tags {
+            if !recipients.contains(tag) {
+                recipients.push(tag.clone());
+            }
+        }
+    }
+    recipients
 }
 
 /// `parent_id` wins over `top_level_only`; neither means no parent filter.
