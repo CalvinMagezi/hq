@@ -75,7 +75,12 @@ example `%LOCALAPPDATA%\hq-lite`, then:
   can corrupt a live SQLite database), path length, whether `gh`, `code` and `git` are on PATH, proxy
   settings and whether the port is free.
 - A small, documented slice of the local REST API is described in `docs/api/lite-local-api.yaml`
-  (OpenAPI). `packaging/` holds Scoop and winget templates for after a Lite zip is released.
+  (OpenAPI). This repo is also a Scoop bucket (no administrator rights):
+  `scoop bucket add hq https://github.com/CalvinMagezi/hq` then `scoop install hq/hq-lite`. The
+  manifest in `bucket/` is pinned to one signed main build and is not updated automatically (Scoop
+  checks the SHA-256, not the minisign signature; `install.ps1` checks both and always fetches the
+  newest build). `packaging/` holds the templates for that and for winget, which is not submitted
+  yet: it needs a stable release and a manual pull request to Microsoft's package repository.
 - Each build's checksum file is signed by the protected release job with HQ's minisign key
   (`<zip>.sha256.minisig`). The installer verifies that signature with a small verifier it carries
   (Windows PowerShell 5.1 has no Ed25519, so it brings its own, tested against real minisign output
