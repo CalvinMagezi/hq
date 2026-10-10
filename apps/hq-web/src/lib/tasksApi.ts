@@ -306,3 +306,28 @@ export async function fetchTaskWorkSessionsClient(taskId: string): Promise<{ wor
 export async function fetchRecentWorkSessionsClient(days: number): Promise<{ work_sessions: WorkSession[] }> {
   return readJson(await hqFetch(`/api/work-sessions?days=${days}`))
 }
+
+export type LinkKind = 'vault_note' | 'chat_thread' | 'session' | 'commit' | 'pr' | 'url' | 'task'
+
+/** A typed link from a task to what it came from or produced. */
+export interface TaskLinkItem {
+  id: number
+  task_id: string
+  kind: LinkKind
+  ref: string
+  label: string
+  direction: 'origin' | 'related' | 'produced'
+  created_by: string
+  created_at: string
+  /** For a `task` link, the task it points at. */
+  linked_task?: { id: string; display_id: string; title: string; status: TaskStatus }
+}
+
+export async function fetchTaskLinksClient(taskId: string): Promise<{ links: TaskLinkItem[] }> {
+  return readJson(await hqFetch(`/api/tasks/${encodeURIComponent(taskId)}/links`))
+}
+
+/** The tasks that link to a thing, for example every task started from a vault note. */
+export async function fetchTasksLinkedToClient(kind: LinkKind, ref: string): Promise<{ count: number; tasks: TaskItem[] }> {
+  return readJson(await hqFetch(`/api/tasks/linked?kind=${encodeURIComponent(kind)}&ref=${encodeURIComponent(ref)}`))
+}

@@ -166,7 +166,18 @@ impl ScopedTaskTool {
             }
         }
         args["space_id"] = json!(space.slug);
-        self.inner.execute(args).await
+        // A restricted audience cannot link, and the advice block names other
+        // people's tasks, so neither goes in or comes out.
+        if let Some(obj) = args.as_object_mut() {
+            obj.remove("links");
+        }
+        let mut created = self.inner.execute(args).await?;
+        if let Some(obj) = created.as_object_mut() {
+            for key in CREATE_EXTRAS {
+                obj.remove(*key);
+            }
+        }
+        Ok(created)
     }
 
     async fn create_in_space(&self, mut args: Value) -> Result<Value> {
@@ -251,12 +262,16 @@ impl ScopedTaskTool {
     }
 }
 
+/// Parts of a `task_create` reply that name tasks, chats or notes outside the caller's own space.
+const CREATE_EXTRAS: &[&str] = &["links", "similar_open_tasks", "similar_note", "suggested_estimate"];
+
 /// Which machine, directory and branch an agent worked in, and under which lease,
 /// is for the owner. A restricted audience sees what happened and when, not where.
 fn strip_work_details(task: &mut Value) {
     if let Some(obj) = task.as_object_mut() {
         obj.remove("work_sessions");
         obj.remove("held_by");
+        obj.remove("links");
     }
     let events = task.get_mut("lifecycle_events").and_then(Value::as_array_mut);
     for event in events.into_iter().flatten().filter_map(Value::as_object_mut) {
@@ -530,6 +545,38 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn creating_as_a_restricted_audience_reveals_no_other_tasks_and_takes_no_links() {
+        let f = fixture();
+        let owner = super::super::create_task_tools(f.path.clone(), f.vault.clone(), f.db.clone());
+        let secret = call(
+            &owner,
+            "task_create",
+            json!({ "title": "Payroll review for the whole company", "description": "salary payroll review confidential" }),
+        )
+        .await
+        .unwrap();
+        let bob = tools_for(&f, &scope_for("2"));
+        let made = call(
+            &bob,
+            "task_create",
+            json!({
+                "title": "Payroll review for the whole company",
+                "description": "salary payroll review confidential",
+                "links": [{ "kind": "task", "ref": secret["display_id"] }],
+            }),
+        )
+        .await
+        .unwrap();
+        let text = made.to_string();
+        assert!(!text.contains(secret["display_id"].as_str().unwrap()), "{text}");
+        for key in CREATE_EXTRAS {
+            assert!(made.get(*key).is_none(), "{key} leaked: {text}");
+        }
+        let links = f.db.with_conn(|c| t::list_task_links(c, made["id"].as_str().unwrap())).unwrap();
+        assert!(links.is_empty(), "the link a restricted caller asked for was not recorded");
+    }
+
+    #[tokio::test]
     async fn a_restricted_audience_does_not_see_where_or_how_work_was_done() {
         let f = fixture();
         let bob = tools_for(&f, &scope_for("2"));
@@ -541,6 +588,7 @@ mod tests {
         assert!(claim["lease"].is_string());
         let seen = call(&bob, "task_get", json!({ "id": id })).await.unwrap();
         assert!(seen.get("work_sessions").is_none() && seen.get("held_by").is_none(), "{seen}");
+        assert!(seen.get("links").is_none(), "links name chats, sessions and notes the audience may not see");
         let events = seen["lifecycle_events"].as_array().unwrap();
         assert!(!events.is_empty());
         assert!(events.iter().all(|e| e.get("actor").is_none() && e.get("work_session_id").is_none()));

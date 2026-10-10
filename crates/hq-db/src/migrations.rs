@@ -304,6 +304,10 @@ const MIGRATIONS: &[(&str, &str)] = &[
         "082_task_estimate",
         include_str!("../sql/082_task_estimate.sql"),
     ),
+    (
+        "083_task_links",
+        include_str!("../sql/083_task_links.sql"),
+    ),
 ];
 
 const MEMORY_SCHEMA_MIGRATION: &str = "058_memory_schema";

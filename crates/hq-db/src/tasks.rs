@@ -284,6 +284,7 @@ mod links;
 mod time;
 mod messages;
 mod org;
+mod refs;
 mod rows;
 #[cfg(test)]
 mod tests;
@@ -294,5 +295,6 @@ pub use links::*;
 pub use time::*;
 pub use messages::*;
 pub use org::*;
+pub use refs::*;
 pub use rows::{list_task_events, validate_date};
 use rows::*;

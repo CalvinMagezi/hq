@@ -16,6 +16,7 @@ import { useHQStore } from '~/store/hqStore'
 import { CopyPathMenu, type CopyMenuState } from '~/components/CopyPathMenu'
 import { ExportMenu, type ExportMenuState } from '~/components/ExportMenu'
 import { usePersistedState } from '~/lib/usePersistedState'
+import { NoteTasks } from '~/components/tasks/NoteTasks'
 
 const MD_ZOOM_MIN = 0.7
 const MD_ZOOM_MAX = 1.6
@@ -460,6 +461,7 @@ ${safeHtml}
                 }>
                     <div className="max-w-[860px] mx-auto p-4 sm:p-6 overflow-x-hidden" style={{ paddingBottom: 'calc(80px + env(safe-area-inset-bottom))' }}>
                         {viewer}
+                        {isMd && !editing && <NoteTasks path={filePath} />}
                     </div>
                 </Suspense>
             </div>

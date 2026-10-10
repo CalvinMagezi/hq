@@ -17,6 +17,7 @@ mod json;
 mod placement;
 mod scoped;
 mod tools_graph;
+mod tools_links;
 mod tools_lease;
 mod tools_org;
 mod tools_task;
@@ -34,6 +35,7 @@ pub use placement::{
 pub use scoped::{ensure_person_space, scope_task_tools};
 pub use tools_lease::{lease_ttl_secs, task_settings};
 use tools_graph::TaskRelatedTool;
+use tools_links::*;
 use tools_lease::*;
 use tools_org::*;
 use tools_task::*;
@@ -55,9 +57,22 @@ pub fn create_task_tools_with(
     db: Arc<Database>,
     settings: TasksConfig,
 ) -> Vec<Box<dyn HqTool>> {
+    create_task_tools_for_chat(vault_path, vault, db, settings, None)
+}
+
+/// The tools for one web chat. A task it creates gets that thread as its origin
+/// link, with nothing for the agent to remember.
+pub fn create_task_tools_for_chat(
+    vault_path: PathBuf,
+    vault: Arc<VaultClient>,
+    db: Arc<Database>,
+    settings: TasksConfig,
+    origin_thread: Option<String>,
+) -> Vec<Box<dyn HqTool>> {
     vec![
         Box::new(TaskCreateTool {
             settings: settings.clone(),
+            origin_thread,
             vault_path: vault_path.clone(),
             db: db.clone(),
         }),
@@ -75,7 +90,10 @@ pub fn create_task_tools_with(
         Box::new(TaskClaimTool { settings: settings.clone(), db: db.clone() }),
         Box::new(TaskHeartbeatTool { settings: settings.clone(), db: db.clone() }),
         Box::new(TaskReleaseTool { settings: settings.clone(), db: db.clone() }),
-        Box::new(TaskTimeReportTool { settings, db: db.clone() }),
+        Box::new(TaskTimeReportTool { settings: settings.clone(), db: db.clone() }),
+        Box::new(TaskLinkAddTool { settings, db: db.clone() }),
+        Box::new(TaskLinkRemoveTool { db: db.clone() }),
+        Box::new(TaskLinkListTool { db: db.clone() }),
         Box::new(SpaceListTool { db: db.clone() }),
         Box::new(SpaceCreateTool { db: db.clone() }),
         Box::new(SpaceUpdateTool { db: db.clone() }),

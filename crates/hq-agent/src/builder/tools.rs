@@ -287,8 +287,18 @@ impl SessionBuilder {
         // Native task management. External MCP clients already used these;
         // HQ's own session could only reach them through the `hq` gateway.
         if let Ok(vault) = hq_vault::VaultClient::new(vault_path.to_path_buf()) {
-            let task_tools =
-                hq_tools::tasks::create_task_tools(vault_path.to_path_buf(), Arc::new(vault), db.clone());
+            let origin_thread = self
+                .identity
+                .as_ref()
+                .and_then(|id| id.web_thread())
+                .map(str::to_string);
+            let task_tools = hq_tools::tasks::create_task_tools_for_chat(
+                vault_path.to_path_buf(),
+                Arc::new(vault),
+                db.clone(),
+                hq_tools::tasks::task_settings(),
+                origin_thread,
+            );
             // Restricted audiences (FR-073) only reach their own person-scoped task space.
             tools.extend(match self.identity.as_ref() {
                 Some(id) => hq_tools::tasks::scope_task_tools(task_tools, db.clone(), &id.scope),

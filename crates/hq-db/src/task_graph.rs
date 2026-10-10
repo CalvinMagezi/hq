@@ -24,6 +24,20 @@ const MAX_EVIDENCE_TERMS: usize = 5;
 pub const DEFAULT_SYNC_BUDGET: usize = 200;
 const MAX_SYNC_ROUNDS: usize = 20;
 pub const MAX_RESULTS: usize = 25;
+/// A new task is called a likely duplicate at this score or above. Higher than
+/// `MIN_SCORE`, which only decides what is worth showing as related.
+const DUPLICATE_MIN_SCORE: f64 = 0.45;
+/// Most similar open tasks, and most similar completed tasks, `similar_to_text` returns.
+/// Counted apart so any number of completed lookalikes cannot hide an open one.
+pub const MAX_SIMILAR: usize = 5;
+/// Scored candidates looked up for status before the split, bounding the queries.
+const MAX_CANDIDATES: usize = 200;
+/// Completed similar tasks needed before an estimate is suggested.
+const MIN_ESTIMATE_SAMPLES: usize = 2;
+/// A leased time shorter than this is noise, not a sample of how long the work takes.
+const MIN_SAMPLE_SECONDS: i64 = 60;
+/// Suggested estimates are rounded to this many minutes.
+const ESTIMATE_ROUNDING_MINUTES: i64 = 5;
 const MAX_EXPLICIT: usize = 50;
 
 pub const KIND_PARENT: &str = "parent";
@@ -418,3 +432,98 @@ pub fn fallback_listing(conn: &Connection, task_id: &str, limit: usize) -> Resul
 
 #[cfg(test)]
 mod tests;
+
+/// A task like the one being written, with why it is similar.
+#[derive(Debug, Clone, Serialize)]
+pub struct SimilarTask {
+    pub task: TaskRef,
+    pub score: f64,
+    pub evidence: Value,
+}
+
+/// Tasks that read like a task with this title, description, tags and initiative,
+/// highest score first. Nothing is written and nothing is indexed: the text is
+/// scored against the live tasks the way the stored index would score it, so it
+/// works for a task that does not exist yet. `exclude_id` leaves out the task
+/// that was just created from this text.
+pub fn similar_to_text(
+    conn: &Connection,
+    exclude_id: Option<&str>,
+    initiative_id: &str,
+    title: &str,
+    description: &str,
+    tags: &[String],
+) -> Result<Vec<SimilarTask>> {
+    let mut docs = load_docs(conn)?;
+    docs.retain(|d| Some(d.id.as_str()) != exclude_id);
+    let mut term_counts = HashMap::new();
+    tokenize(title, TITLE_TERM_BOOST, &mut term_counts);
+    tokenize(description, 1.0, &mut term_counts);
+    docs.push(Doc {
+        id: String::new(),
+        initiative_id: initiative_id.to_string(),
+        tags: tags.iter().map(|t| t.to_lowercase()).collect(),
+        term_counts,
+        fingerprint: String::new(),
+    });
+    let corpus = Corpus::new(docs);
+    let new = corpus.docs.len() - 1;
+    let mut scored: Vec<(f64, usize, Value)> = (0..new)
+        .filter_map(|j| corpus.compare(new, j).map(|(score, evidence)| (score, j, evidence)))
+        .filter(|(score, _, _)| *score >= DUPLICATE_MIN_SCORE)
+        .collect();
+    scored.sort_by(|a, b| b.0.total_cmp(&a.0).then(a.1.cmp(&b.1)));
+    scored.truncate(MAX_CANDIDATES);
+    let all: Vec<SimilarTask> = scored
+        .into_iter()
+        .filter_map(|(score, j, evidence)| {
+            conn.query_row(
+                "SELECT id, display_id, title, status FROM tasks WHERE id = ?1",
+                params![&corpus.docs[j].id],
+                |r| ref_from_row(r, 0),
+            )
+            .ok()
+            .map(|task| SimilarTask { task, score: round3(score), evidence })
+        })
+        .collect();
+    let (mut open, mut done): (Vec<_>, Vec<_>) = all.into_iter().partition(|s| s.task.status != "complete");
+    open.truncate(MAX_SIMILAR);
+    done.truncate(MAX_SIMILAR);
+    open.extend(done);
+    open.sort_by(|a, b| b.score.total_cmp(&a.score));
+    Ok(open)
+}
+
+/// An estimate suggested by how long similar completed tasks took.
+#[derive(Debug, Clone, Serialize, PartialEq)]
+pub struct EstimateSuggestion {
+    pub minutes: i64,
+    /// Display ids of the completed tasks it is based on.
+    pub based_on: Vec<String>,
+}
+
+/// The median leased time of similar completed tasks, rounded to five minutes,
+/// when at least `MIN_ESTIMATE_SAMPLES` of them have real leased time. A hint with
+/// its evidence, never a value that is written for anyone.
+pub fn suggest_estimate(conn: &Connection, similar: &[SimilarTask]) -> Result<Option<EstimateSuggestion>> {
+    let mut samples: Vec<(i64, String)> = Vec::new();
+    for s in similar.iter().filter(|s| s.task.status == "complete") {
+        let seconds = crate::tasks::leased_seconds(conn, &s.task.id)?;
+        if seconds >= MIN_SAMPLE_SECONDS {
+            samples.push((seconds, s.task.display_id.clone()));
+        }
+    }
+    if samples.len() < MIN_ESTIMATE_SAMPLES {
+        return Ok(None);
+    }
+    samples.sort();
+    let mid = samples.len() / 2;
+    let median = if samples.len().is_multiple_of(2) {
+        (samples[mid - 1].0 + samples[mid].0) / 2
+    } else {
+        samples[mid].0
+    };
+    let minutes = ((median / 60 + ESTIMATE_ROUNDING_MINUTES / 2) / ESTIMATE_ROUNDING_MINUTES * ESTIMATE_ROUNDING_MINUTES)
+        .max(ESTIMATE_ROUNDING_MINUTES);
+    Ok(Some(EstimateSuggestion { minutes, based_on: samples.into_iter().map(|(_, id)| id).collect() }))
+}

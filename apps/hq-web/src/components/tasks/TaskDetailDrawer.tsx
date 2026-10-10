@@ -7,6 +7,7 @@ import { TaskRelations } from './TaskRelations'
 import { TaskComments } from './TaskComments'
 import { TaskSessions } from './TaskSessions'
 import { TaskTime } from './TaskTime'
+import { TaskLinks } from './TaskLinks'
 import { DateRangeInputs, EstimateInput, PRIORITIES, SectionLabel, isInvalidEstimate, parseEstimate } from './taskFields'
 import { formatLocalTime } from './timeFormat'
 import { MarkdownViewer } from '../MarkdownViewer'
@@ -336,6 +337,7 @@ export function TaskDetailDrawer({
             onCreateSubtask={onCreateSubtask}
           />
 
+          <TaskLinks key={`links-${task.id}`} task={task} />
           <TaskTime key={`time-${task.id}`} task={task} />
           <TaskSessions key={task.id} taskId={task.id} />
 

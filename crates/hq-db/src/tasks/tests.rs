@@ -1524,3 +1524,159 @@ fn status_durations_do_not_count_a_stretch_twice_when_a_clock_steps_back() {
     let total: i64 = seconds.values().sum();
     assert_eq!(total, 1000, "every second of the task's life lands in exactly one status");
 }
+
+fn link(db: &Database, task: &str, kind: &str, reference: &str) -> Result<(TaskLink, bool)> {
+    db.with_conn(|c| add_task_link(c, task, kind, reference, "", None, "test"))
+}
+
+#[test]
+fn each_kind_of_link_is_normalised_so_one_thing_is_one_row() {
+    let (db, initiative) = setup();
+    make(&db, "tk-1", &initiative, None).unwrap();
+    for (kind, given, stored) in [
+        (LINK_VAULT_NOTE, "./Notebooks/Projects/plan.md", "Notebooks/Projects/plan.md"),
+        (LINK_CHAT_THREAD, "thread-abc_1.2:3", "thread-abc_1.2:3"),
+        (LINK_SESSION, "hs-claude-code-1", "hs-claude-code-1"),
+        (LINK_COMMIT, "ABCDEF1234", "abcdef1234"),
+        (LINK_COMMIT, "owner/repo@ABCDEF1234", "owner/repo@abcdef1234"),
+        (LINK_PR, "owner/repo#12", "owner/repo#12"),
+        (LINK_PR, "https://github.com/owner/repo/pull/12/", "owner/repo#12"),
+        (LINK_URL, "https://example.com/a?b=1", "https://example.com/a?b=1"),
+    ] {
+        let (made, _) = link(&db, "tk-1", kind, given).unwrap();
+        assert_eq!(made.reference, stored, "{kind} {given}");
+    }
+    let (_, created) = link(&db, "tk-1", LINK_PR, "https://github.com/owner/repo/pull/12").unwrap();
+    assert!(!created, "the URL form of a pull request is the same link as owner/repo#12");
+    assert_eq!(db.with_conn(|c| list_task_links(c, "tk-1")).unwrap().len(), 7);
+}
+
+#[test]
+fn a_link_that_does_not_look_like_its_kind_is_refused() {
+    let (db, initiative) = setup();
+    make(&db, "tk-1", &initiative, None).unwrap();
+    for (kind, bad) in [
+        (LINK_VAULT_NOTE, "/etc/passwd"),
+        (LINK_VAULT_NOTE, "../secrets.md"),
+        (LINK_VAULT_NOTE, "a/../../b.md"),
+        (LINK_VAULT_NOTE, "a\\b.md"),
+        (LINK_CHAT_THREAD, "has space"),
+        (LINK_CHAT_THREAD, "semi;colon"),
+        (LINK_SESSION, ""),
+        (LINK_COMMIT, "xyz"),
+        (LINK_COMMIT, "abc12"),
+        (LINK_COMMIT, "repo with space@abcdef1"),
+        (LINK_PR, "owner/repo"),
+        (LINK_PR, "owner/repo#abc"),
+        (LINK_PR, "https://evil.example/o/r/pull/1"),
+        (LINK_PR, "../evil#1"),
+        (LINK_PR, "owner/../evil#1"),
+        (LINK_COMMIT, "../evil@abcdef1"),
+        (LINK_URL, "javascript:alert(1)"),
+        (LINK_URL, "ftp://example.com/x"),
+        (LINK_URL, "https://exa mple.com"),
+        (LINK_URL, "https://example.com/\nX"),
+        ("email", "a@b.c"),
+    ] {
+        assert!(link(&db, "tk-1", kind, bad).is_err(), "{kind} {bad:?}");
+    }
+    assert!(db.with_conn(|c| list_task_links(c, "tk-1")).unwrap().is_empty());
+}
+
+#[test]
+fn spellings_of_one_ref_collapse_to_one_row() {
+    let (db, initiative) = setup();
+    make(&db, "tk-1", &initiative, None).unwrap();
+    let stored = |kind: &str, given: &str| link(&db, "tk-1", kind, given).unwrap().0.reference;
+    assert_eq!(stored(LINK_VAULT_NOTE, "././a//b/./c.md/"), "a/b/c.md");
+    assert_eq!(stored(LINK_VAULT_NOTE, "a/b/c.md"), "a/b/c.md");
+    assert_eq!(stored(LINK_PR, "Owner/Repo#007"), "owner/repo#7");
+    assert_eq!(stored(LINK_PR, "owner/repo#7"), "owner/repo#7");
+    assert_eq!(stored(LINK_COMMIT, "Owner/Repo@ABCDEF1"), "owner/repo@abcdef1");
+    assert_eq!(db.with_conn(|c| list_task_links(c, "tk-1")).unwrap().len(), 3);
+    for (kind, bad) in [
+        (LINK_VAULT_NOTE, "C:/x/y.md"),
+        (LINK_VAULT_NOTE, "."),
+        (LINK_VAULT_NOTE, "//"),
+        (LINK_PR, "owner/repo#0"),
+        (LINK_PR, "owner/repo#000"),
+        (LINK_COMMIT, "a/b/c@abcdef1"),
+    ] {
+        assert!(link(&db, "tk-1", kind, bad).is_err(), "{kind} {bad}");
+    }
+}
+
+#[test]
+fn adding_the_same_link_twice_keeps_the_first() {
+    let (db, initiative) = setup();
+    make(&db, "tk-1", &initiative, None).unwrap();
+    let (first, created) = db
+        .with_conn(|c| add_task_link(c, "tk-1", LINK_VAULT_NOTE, "a.md", "the plan", Some(DIRECTION_ORIGIN), "alpha"))
+        .unwrap();
+    assert!(created);
+    let (second, created) = db
+        .with_conn(|c| add_task_link(c, "tk-1", LINK_VAULT_NOTE, "a.md", "different", Some(DIRECTION_PRODUCED), "beta"))
+        .unwrap();
+    assert!(!created);
+    assert_eq!((second.id, second.label.as_str(), second.direction.as_str()), (first.id, "the plan", "origin"));
+    assert!(db.with_conn(|c| add_task_link(c, "tk-1", LINK_URL, "https://x.io", "", Some("sideways"), "t")).is_err());
+}
+
+#[test]
+fn a_task_link_points_at_another_task_and_never_at_itself() {
+    let (db, initiative) = setup();
+    make(&db, "tk-1", &initiative, None).unwrap();
+    make(&db, "tk-2", &initiative, None).unwrap();
+    let (made, _) = link(&db, "tk-1", LINK_TASK, "AGENT-HQ-002").unwrap();
+    assert_eq!(made.reference, "tk-2", "stored as the internal id");
+    assert_eq!(made.linked_task.unwrap().display_id, "AGENT-HQ-002");
+    assert!(link(&db, "tk-1", LINK_TASK, "tk-1").is_err());
+    assert!(link(&db, "tk-1", LINK_TASK, "NOPE-9").is_err());
+}
+
+#[test]
+fn a_note_finds_the_tasks_that_came_from_it() {
+    let (db, initiative) = setup();
+    make(&db, "tk-1", &initiative, None).unwrap();
+    make(&db, "tk-2", &initiative, None).unwrap();
+    make(&db, "tk-3", &initiative, None).unwrap();
+    link(&db, "tk-1", LINK_VAULT_NOTE, "Notebooks/plan.md").unwrap();
+    link(&db, "tk-2", LINK_VAULT_NOTE, "./Notebooks/plan.md").unwrap();
+    link(&db, "tk-3", LINK_VAULT_NOTE, "Notebooks/other.md").unwrap();
+    let mut ids: Vec<String> = db
+        .with_conn(|c| tasks_linked_to(c, LINK_VAULT_NOTE, "Notebooks/plan.md"))
+        .unwrap()
+        .into_iter()
+        .map(|t| t.id)
+        .collect();
+    ids.sort();
+    assert_eq!(ids, ["tk-1", "tk-2"]);
+    assert!(db.with_conn(|c| tasks_linked_to(c, LINK_VAULT_NOTE, "Notebooks/none.md")).unwrap().is_empty());
+}
+
+#[test]
+fn origin_links_list_first_and_a_task_holds_a_bounded_number() {
+    let (db, initiative) = setup();
+    make(&db, "tk-1", &initiative, None).unwrap();
+    link(&db, "tk-1", LINK_URL, "https://example.com/first").unwrap();
+    db.with_conn(|c| add_task_link(c, "tk-1", LINK_CHAT_THREAD, "thr-1", "", Some(DIRECTION_ORIGIN), "t")).unwrap();
+    assert_eq!(db.with_conn(|c| list_task_links(c, "tk-1")).unwrap()[0].kind, LINK_CHAT_THREAD);
+    for n in 0..MAX_LINKS_PER_TASK {
+        let _ = link(&db, "tk-1", LINK_URL, &format!("https://example.com/{n}"));
+    }
+    let count = db.with_conn(|c| list_task_links(c, "tk-1")).unwrap().len() as i64;
+    assert_eq!(count, MAX_LINKS_PER_TASK);
+}
+
+#[test]
+fn removing_and_deleting_clean_up_links_in_both_directions() {
+    let (db, initiative) = setup();
+    make(&db, "tk-1", &initiative, None).unwrap();
+    make(&db, "tk-2", &initiative, None).unwrap();
+    link(&db, "tk-1", LINK_URL, "https://example.com/x").unwrap();
+    link(&db, "tk-1", LINK_TASK, "tk-2").unwrap();
+    assert!(db.with_conn(|c| remove_task_link(c, "tk-1", LINK_URL, "https://example.com/x")).unwrap());
+    assert!(!db.with_conn(|c| remove_task_link(c, "tk-1", LINK_URL, "https://example.com/x")).unwrap());
+    db.with_conn(|c| delete_task(c, "tk-2", false)).unwrap();
+    assert!(db.with_conn(|c| list_task_links(c, "tk-1")).unwrap().is_empty(), "a link to a deleted task goes with it");
+}
