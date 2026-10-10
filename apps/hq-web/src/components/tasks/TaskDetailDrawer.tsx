@@ -280,7 +280,7 @@ export function TaskDetailDrawer({
             </>
           )}
 
-          {!editing && (task.tags.length > 0 || task.due_date || task.start_date || task.work_started_at || task.first_ready_for_review_at) && (
+          {!editing && (task.tags.length > 0 || task.due_date || task.start_date || task.work_started_at || task.first_ready_for_review_at || task.completed_at) && (
             <div className="flex items-center gap-2 flex-wrap text-xs ">
               {task.tags.map((tag) => (
                 <span key={tag} className="px-2.5 py-1 rounded-full bg-white/5 text-neutral-300 border border-white/10">
@@ -300,6 +300,11 @@ export function TaskDetailDrawer({
               {task.first_ready_for_review_at && (
                 <span className="px-2.5 py-1 rounded-full bg-white/5 text-neutral-400 border border-white/10">
                   First ready for review {task.first_ready_for_review_at} UTC
+                </span>
+              )}
+              {task.completed_at && (
+                <span className="px-2.5 py-1 rounded-full bg-white/5 text-neutral-400 border border-white/10">
+                  Completed {task.completed_at} UTC
                 </span>
               )}
               {task.due_date && (

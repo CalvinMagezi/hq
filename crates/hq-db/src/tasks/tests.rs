@@ -2,8 +2,10 @@
 fn event_for_status_only_names_real_task_columns() {
     let conn = rusqlite::Connection::open_in_memory().unwrap();
     crate::migrations::run(&conn).unwrap();
-    for status in [STATUS_IN_PROGRESS, STATUS_READY_FOR_REVIEW] {
-        let (_, column) = event_for_status(status).unwrap();
+    for status in STATUSES {
+        let (event, column) = event_for_status(status).unwrap();
+        assert!(event.starts_with("entered_"), "{event}");
+        let Some(column) = column else { continue };
         let exists: bool = conn
             .query_row(
                 "SELECT COUNT(*) > 0 FROM pragma_table_info('tasks') WHERE name = ?1",
@@ -19,7 +21,7 @@ fn event_for_status_only_names_real_task_columns() {
 fn event_for_status_rejects_unknown_and_hostile_statuses() {
     for status in [
         "",
-        "complete",
+        "done",
         "work_started_at",
         "in_progress'; DROP TABLE tasks; --",
     ] {
@@ -415,7 +417,8 @@ fn same_status_and_other_edits_record_nothing() {
     set_status(&db, "tk-1", STATUS_IN_PROGRESS);
     set_status(&db, "tk-1", STATUS_BLOCKED);
     set_status(&db, "tk-1", STATUS_COMPLETE);
-    assert_eq!(events(&db, "tk-1").len(), 1);
+    // in_progress once (the repeat records nothing), then blocked, then complete.
+    assert_eq!(events(&db, "tk-1").len(), 3);
     assert!(get(&db, "tk-1").first_ready_for_review_at.is_none());
 }
 
@@ -591,4 +594,210 @@ fn a_blank_external_id_is_no_key_and_an_oversized_one_is_refused() {
         db.with_conn(|c| create_task_dedup(c, "tk-9", &initiative_id, &keyed("A", &long)))
             .is_err()
     );
+}
+
+
+fn status_patch(status: &str) -> TaskPatch {
+    TaskPatch {
+        status: Some(status.to_string()),
+        ..Default::default()
+    }
+}
+
+fn move_to(db: &Database, id: &str, status: &str) -> Result<Task> {
+    db.with_conn(|c| update_task(c, id, &status_patch(status), None))
+}
+
+#[test]
+fn a_list_longer_than_a_page_is_paged_and_counted_not_cut() {
+    let (db, initiative) = setup();
+    let total = MAX_LIST_LIMIT + 20;
+    db.with_conn(|c| {
+        for n in 0..total {
+            let id = format!("tk-{n}");
+            create_task(c, &id, &initiative, &NewTask { title: "t", created_by: "test", ..Default::default() })?;
+        }
+        Ok(())
+    })
+    .unwrap();
+    let filter = TaskFilter::default();
+    assert_eq!(db.with_conn(|c| count_tasks(c, &filter)).unwrap(), total as i64);
+    let first = db.with_conn(|c| list_tasks(c, &filter)).unwrap();
+    assert_eq!(first.len(), MAX_LIST_LIMIT);
+    let rest = db
+        .with_conn(|c| list_tasks(c, &TaskFilter { offset: MAX_LIST_LIMIT, ..Default::default() }))
+        .unwrap();
+    assert_eq!(rest.len(), 20);
+    let mut ids: Vec<&str> = first.iter().chain(&rest).map(|t| t.id.as_str()).collect();
+    ids.sort();
+    ids.dedup();
+    assert_eq!(ids.len(), total, "no task is missed or repeated across pages");
+}
+
+#[test]
+fn the_count_follows_the_same_filter_as_the_list() {
+    let (db, initiative) = setup();
+    make(&db, "tk-1", &initiative, None).unwrap();
+    make(&db, "tk-2", &initiative, None).unwrap();
+    move_to(&db, "tk-2", STATUS_BLOCKED).unwrap();
+    let blocked = TaskFilter { status: Some(STATUS_BLOCKED.into()), ..Default::default() };
+    assert_eq!(db.with_conn(|c| count_tasks(c, &blocked)).unwrap(), 1);
+    let one_per_page = TaskFilter { limit: Some(1), ..Default::default() };
+    assert_eq!(db.with_conn(|c| list_tasks(c, &one_per_page)).unwrap().len(), 1);
+    assert_eq!(db.with_conn(|c| count_tasks(c, &one_per_page)).unwrap(), 2, "limit does not change the total");
+}
+
+#[test]
+fn an_unknown_status_or_priority_is_refused_with_the_allowed_values() {
+    let (db, initiative) = setup();
+    make(&db, "tk-1", &initiative, None).unwrap();
+    let err = move_to(&db, "tk-1", "doing").unwrap_err().to_string();
+    assert!(err.contains("doing") && err.contains("ready_for_review"), "{err}");
+    let patch = TaskPatch { priority: Some(Some("asap".into())), ..Default::default() };
+    assert!(db.with_conn(|c| update_task(c, "tk-1", &patch, None)).is_err());
+    let created = db.with_conn(|c| {
+        create_task(c, "tk-2", &initiative, &NewTask { title: "t", priority: Some("asap"), created_by: "test", ..Default::default() })
+    });
+    assert!(created.is_err());
+    assert_eq!(get_one(&db, "tk-1").status, STATUS_TO_DO, "a refused write changes nothing");
+}
+
+#[test]
+fn a_legacy_status_does_not_block_an_unrelated_edit() {
+    let (db, initiative) = setup();
+    make(&db, "tk-1", &initiative, None).unwrap();
+    db.with_conn(|c| {
+        c.execute("UPDATE tasks SET status = 'Doing' WHERE id = 'tk-1'", [])?;
+        Ok(())
+    })
+    .unwrap();
+    let patch = TaskPatch { title: Some("renamed".into()), ..Default::default() };
+    let updated = db.with_conn(|c| update_task(c, "tk-1", &patch, None)).unwrap();
+    assert_eq!((updated.title.as_str(), updated.status.as_str()), ("renamed", "Doing"));
+}
+
+fn get_one(db: &Database, id: &str) -> Task {
+    db.with_conn(|c| get_task(c, id)).unwrap().unwrap()
+}
+
+#[test]
+fn every_transition_is_logged_with_from_and_to() {
+    let (db, initiative) = setup();
+    make(&db, "tk-1", &initiative, None).unwrap();
+    for status in [STATUS_IN_PROGRESS, STATUS_BLOCKED, STATUS_IN_PROGRESS, STATUS_READY_FOR_REVIEW, STATUS_COMPLETE, STATUS_TO_DO] {
+        move_to(&db, "tk-1", status).unwrap();
+    }
+    let events = db.with_conn(|c| list_task_events(c, "tk-1")).unwrap();
+    let path: Vec<(&str, &str, &str)> = events
+        .iter()
+        .map(|e| (e.event_type.as_str(), e.from_status.as_deref().unwrap(), e.to_status.as_deref().unwrap()))
+        .collect();
+    assert_eq!(path.len(), 6);
+    assert_eq!(path[0], (EVENT_ENTERED_IN_PROGRESS, STATUS_TO_DO, STATUS_IN_PROGRESS));
+    assert_eq!(path[4], (EVENT_ENTERED_COMPLETE, STATUS_READY_FOR_REVIEW, STATUS_COMPLETE));
+    assert_eq!(path[5], (EVENT_ENTERED_TO_DO, STATUS_COMPLETE, STATUS_TO_DO));
+}
+
+#[test]
+fn completed_at_follows_the_latest_completion_and_clears_on_reopen() {
+    let (db, initiative) = setup();
+    make(&db, "tk-1", &initiative, None).unwrap();
+    assert!(get_one(&db, "tk-1").completed_at.is_none());
+    let first_start = move_to(&db, "tk-1", STATUS_IN_PROGRESS).unwrap().work_started_at;
+    assert!(first_start.is_some());
+    assert!(move_to(&db, "tk-1", STATUS_COMPLETE).unwrap().completed_at.is_some());
+    let reopened = move_to(&db, "tk-1", STATUS_IN_PROGRESS).unwrap();
+    assert!(reopened.completed_at.is_none());
+    assert_eq!(reopened.work_started_at, first_start, "the first start is never overwritten");
+    assert!(move_to(&db, "tk-1", STATUS_COMPLETE).unwrap().completed_at.is_some());
+}
+
+#[test]
+fn a_repeated_status_records_nothing() {
+    let (db, initiative) = setup();
+    make(&db, "tk-1", &initiative, None).unwrap();
+    move_to(&db, "tk-1", STATUS_COMPLETE).unwrap();
+    move_to(&db, "tk-1", STATUS_COMPLETE).unwrap();
+    assert_eq!(db.with_conn(|c| list_task_events(c, "tk-1")).unwrap().len(), 1);
+}
+
+#[test]
+fn a_joined_transaction_commits_or_rolls_back_as_one() {
+    let (db, initiative) = setup();
+    make(&db, "tk-1", &initiative, None).unwrap();
+    let failed: Result<()> = db.with_conn(|c| {
+        in_write_tx(c, |c| {
+            update_task(c, "tk-1", &status_patch(STATUS_IN_PROGRESS), None)?;
+            anyhow::bail!("dependency change failed")
+        })
+    });
+    assert!(failed.is_err());
+    let task = get_one(&db, "tk-1");
+    assert_eq!(task.status, STATUS_TO_DO, "the status write is undone with the failure");
+    assert!(task.work_started_at.is_none());
+    assert!(db.with_conn(|c| list_task_events(c, "tk-1")).unwrap().is_empty());
+
+    db.with_conn(|c| {
+        in_write_tx(c, |c| update_task(c, "tk-1", &status_patch(STATUS_IN_PROGRESS), None).map(|_| ()))
+    })
+    .unwrap();
+    assert_eq!(get_one(&db, "tk-1").status, STATUS_IN_PROGRESS);
+}
+
+#[test]
+fn deleting_a_parent_without_cascade_fails_and_with_cascade_removes_the_family() {
+    let (db, initiative) = setup();
+    make(&db, "tk-p", &initiative, None).unwrap();
+    make(&db, "tk-c", &initiative, Some("tk-p")).unwrap();
+    move_to(&db, "tk-c", STATUS_IN_PROGRESS).unwrap();
+    assert!(db.with_conn(|c| delete_task(c, "tk-p", false)).is_err());
+    assert!(db.with_conn(|c| get_task(c, "tk-c")).unwrap().is_some(), "a refused delete removes nothing");
+    let gone = db.with_conn(|c| delete_task(c, "tk-p", true)).unwrap();
+    assert_eq!(gone.len(), 2);
+    assert!(db.with_conn(|c| get_task(c, "tk-c")).unwrap().is_none());
+    assert!(db.with_conn(|c| list_task_events(c, "tk-c")).unwrap().is_empty());
+}
+
+#[test]
+fn an_absurd_offset_returns_an_empty_page_not_an_error() {
+    let (db, initiative) = setup();
+    make(&db, "tk-1", &initiative, None).unwrap();
+    let filter = TaskFilter { offset: usize::MAX, ..Default::default() };
+    assert!(db.with_conn(|c| list_tasks(c, &filter)).unwrap().is_empty());
+}
+
+#[test]
+fn a_committed_write_notifies_and_a_rolled_back_dependency_never_exists() {
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    static FIRED: AtomicUsize = AtomicUsize::new(0);
+    on_change(|| {
+        FIRED.fetch_add(1, Ordering::SeqCst);
+    });
+    let (db, initiative) = setup();
+    make(&db, "tk-1", &initiative, None).unwrap();
+    make(&db, "tk-2", &initiative, None).unwrap();
+
+    let failed: Result<()> = db.with_conn(|c| {
+        in_write_tx(c, |c| {
+            add_dependency(c, "tk-1", "tk-2", "test")?;
+            anyhow::bail!("rolled back")
+        })
+    });
+    assert!(failed.is_err());
+    // Other tests share this process-wide hook, so measure around our own writes.
+    let before = FIRED.load(Ordering::SeqCst);
+    db.with_conn(|c| in_write_tx(c, |c| add_dependency(c, "tk-1", "tk-2", "test"))).unwrap();
+    assert!(FIRED.load(Ordering::SeqCst) > before, "a committed write notifies");
+    assert!(
+        db.with_conn(|c| get_task(c, "tk-1")).unwrap().unwrap().depends_on.len() == 1,
+        "and the rolled back dependency never existed"
+    );
+}
+
+#[test]
+fn a_zero_limit_still_returns_a_row() {
+    let (db, initiative) = setup();
+    make(&db, "tk-1", &initiative, None).unwrap();
+    let filter = TaskFilter { limit: Some(0), ..Default::default() };
+    assert_eq!(db.with_conn(|c| list_tasks(c, &filter)).unwrap().len(), 1);
 }

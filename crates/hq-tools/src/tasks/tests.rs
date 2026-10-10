@@ -1043,7 +1043,7 @@ async fn the_tasks_scope_sets_no_routing_tags_and_writes_no_mailbox() {
 
 #[tokio::test]
 async fn the_tasks_scope_cannot_retag_or_renotify_through_an_update() {
-    let fx = ScopeFixture::new(&["relay"]);
+    let fx = ScopeFixture::new(&["relay", "claude-code"]);
     let made = fx
         .tool("task_create")
         .execute(json!({"title": "owner task", "tags": ["relay"]}))
@@ -1062,12 +1062,14 @@ async fn the_tasks_scope_cannot_retag_or_renotify_through_an_update() {
     assert_eq!(updated["tags"], json!(["relay"]), "but the tag set is not theirs to change");
     assert_eq!(mailbox_files(&fx.path, "relay"), delivered, "and an update does not notify");
 
-    // Control: the owner's own update still notifies.
+    assert_eq!(mailbox_files(&fx.path, "claude-code"), 0);
+
+    // Control: the owner's own update still notifies the tag it adds.
     fx.tool("task_update")
-        .execute(json!({"id": id, "status": "blocked"}))
+        .execute(json!({"id": id, "status": "to_do", "tags": ["relay", "claude-code"]}))
         .await
         .unwrap();
-    assert!(mailbox_files(&fx.path, "relay") > delivered, "the control must deliver");
+    assert!(mailbox_files(&fx.path, "claude-code") >= 1, "the control must deliver");
 }
 
 #[tokio::test]
@@ -1207,4 +1209,103 @@ async fn the_tasks_scope_emits_no_review_item_and_cannot_force_an_index_rebuild(
         .await
         .unwrap();
     assert_eq!(review_items(&fx), 1, "an owner transition raises an approval item");
+}
+
+#[test]
+fn added_tags_lists_only_what_the_write_introduced() {
+    let tags = |v: &[&str]| v.iter().map(|s| s.to_string()).collect::<Vec<_>>();
+    assert_eq!(super::json::added_tags(&tags(&["a"]), &tags(&["a", "b"])), tags(&["b"]));
+    assert!(super::json::added_tags(&tags(&["a", "b"]), &tags(&["a", "b"])).is_empty());
+    assert!(super::json::added_tags(&tags(&["a", "b"]), &tags(&["a"])).is_empty());
+}
+
+#[tokio::test]
+async fn an_update_notifies_only_newly_added_tags() {
+    let db = Arc::new(Database::open_memory().unwrap());
+    let vault_dir = tempfile::tempdir().unwrap();
+    let vault_path = vault_dir.path().to_path_buf();
+    let inbox = vault_path.join(mailbox::MAILBOX_DIR).join("reviewer");
+    std::fs::create_dir_all(&inbox).unwrap();
+    let vault = Arc::new(VaultClient::new(vault_path.clone()).unwrap());
+    let tools = create_task_tools(vault_path, vault, db);
+    let tool = |name: &str| tools.iter().find(|t| t.name() == name).unwrap();
+
+    let created = tool("task_create")
+        .execute(json!({ "title": "Review me", "tags": ["reviewer"] }))
+        .await
+        .unwrap();
+    let id = created["display_id"].as_str().unwrap().to_string();
+    let after_create = walk_files(&inbox);
+    assert_eq!(after_create, 1, "creating a tagged task notifies once");
+
+    for patch in [
+        json!({ "id": id, "title": "Renamed" }),
+        json!({ "id": id, "status": "in_progress" }),
+        json!({ "id": id, "tags": ["reviewer"] }),
+    ] {
+        tool("task_update").execute(patch).await.unwrap();
+    }
+    assert_eq!(walk_files(&inbox), after_create, "edits that add no tag stay silent");
+
+    std::fs::create_dir_all(inbox.with_file_name("other")).unwrap();
+    tool("task_update")
+        .execute(json!({ "id": id, "tags": ["reviewer", "other"] }))
+        .await
+        .unwrap();
+    assert_eq!(walk_files(&inbox), after_create, "an existing tag is not re-notified");
+    assert_eq!(walk_files(&inbox.with_file_name("other")), 1, "the new tag is");
+}
+
+#[tokio::test]
+async fn task_list_pages_and_reports_the_total() {
+    let db = Arc::new(Database::open_memory().unwrap());
+    let vault_dir = tempfile::tempdir().unwrap();
+    let vault_path = vault_dir.path().to_path_buf();
+    let vault = Arc::new(VaultClient::new(vault_path.clone()).unwrap());
+    let tools = create_task_tools(vault_path, vault, db);
+    let tool = |name: &str| tools.iter().find(|t| t.name() == name).unwrap();
+    for n in 0..5 {
+        tool("task_create").execute(json!({ "title": format!("t{n}") })).await.unwrap();
+    }
+
+    let first = tool("task_list").execute(json!({ "limit": 2 })).await.unwrap();
+    assert_eq!((first["count"].as_i64(), first["total"].as_i64()), (Some(2), Some(5)));
+    assert_eq!(first["has_more"], json!(true));
+    let last = tool("task_list").execute(json!({ "limit": 2, "offset": 4 })).await.unwrap();
+    assert_eq!((last["count"].as_i64(), last["has_more"].clone()), (Some(1), json!(false)));
+
+    let seen: std::collections::HashSet<String> = [first, last, tool("task_list").execute(json!({ "limit": 2, "offset": 2 })).await.unwrap()]
+        .iter()
+        .flat_map(|page| page["tasks"].as_array().unwrap().iter())
+        .map(|t| t["id"].as_str().unwrap().to_string())
+        .collect();
+    assert_eq!(seen.len(), 5, "pages cover every task exactly once");
+}
+
+#[tokio::test]
+async fn an_unknown_status_is_refused_and_a_failed_dependency_undoes_the_status() {
+    let db = Arc::new(Database::open_memory().unwrap());
+    let vault_dir = tempfile::tempdir().unwrap();
+    let vault_path = vault_dir.path().to_path_buf();
+    let vault = Arc::new(VaultClient::new(vault_path.clone()).unwrap());
+    let tools = create_task_tools(vault_path, vault, db);
+    let tool = |name: &str| tools.iter().find(|t| t.name() == name).unwrap();
+    let created = tool("task_create").execute(json!({ "title": "Work" })).await.unwrap();
+    let id = created["display_id"].as_str().unwrap().to_string();
+
+    let err = tool("task_update")
+        .execute(json!({ "id": id, "status": "doing" }))
+        .await
+        .unwrap_err()
+        .to_string();
+    assert!(err.contains("doing") && err.contains("in_progress"), "{err}");
+
+    let failed = tool("task_update")
+        .execute(json!({ "id": id, "status": "in_progress", "add_depends_on": ["NOPE-999"] }))
+        .await;
+    assert!(failed.is_err(), "an unknown dependency fails the whole update");
+    let after = tool("task_get").execute(json!({ "id": id })).await.unwrap();
+    assert_eq!(after["status"], "to_do");
+    assert!(after["work_started_at"].is_null());
+    assert_eq!(after["lifecycle_events"], json!([]));
 }

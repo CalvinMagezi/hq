@@ -36,16 +36,12 @@ fn vanished(id: &str) -> anyhow::Error {
     ApiError::Internal(format!("task {id} vanished after write")).into()
 }
 
-fn notify_and_broadcast(state: &Arc<WsState>, task: &t::Task, event_type: &str) {
+/// Mails `notify` (the tags this write introduced) and tells every open web
+/// client. An edit that adds no tag mails nobody.
+fn notify_and_broadcast(state: &Arc<WsState>, task: &t::Task, event_type: &str, notify: &[String]) {
     // Lite has no agents to route to, and the mailbox folders are hidden from it.
-    if !task.tags.is_empty() && !state.profile().is_lite() {
-        let _ = hq_core::mailbox::notify_tagged_agents(
-            &state.vault_path,
-            &task.id,
-            &task.display_id,
-            &task.title,
-            &task.tags,
-        );
+    if !state.profile().is_lite() {
+        hq_tools::tasks::notify_tags(&state.vault_path, task, notify);
     }
     state.broadcast(&json!({ "type": event_type, "task": task_json(task) }).to_string());
 }
@@ -225,6 +221,8 @@ pub(crate) struct ListTasksParams {
     pub(crate) priority: Option<String>,
     pub(crate) parent_task_id: Option<String>,
     pub(crate) top_level_only: Option<bool>,
+    pub(crate) limit: Option<usize>,
+    pub(crate) offset: Option<usize>,
 }
 
 pub(crate) async fn list_tasks_handler(
@@ -242,10 +240,19 @@ pub(crate) async fn list_tasks_handler(
             (None, Some(true)) => Some(None),
             _ => None,
         },
+        limit: params.limit,
+        offset: params.offset.unwrap_or(0),
     };
-    match state.db.with_conn(move |c| t::list_tasks(c, &filter)) {
-        Ok(tasks) => Json(json!({
+    let offset = filter.offset;
+    let page = state
+        .db
+        .with_conn(move |c| Ok((t::list_tasks(c, &filter)?, t::count_tasks(c, &filter)?)));
+    match page {
+        Ok((tasks, total)) => Json(json!({
             "count": tasks.len(),
+            "total": total,
+            "offset": offset,
+            "has_more": ((offset + tasks.len()) as i64) < total,
             "tasks": tasks.iter().map(task_json).collect::<Vec<_>>()
         }))
         .into_response(),
@@ -338,7 +345,7 @@ pub(crate) async fn create_task_handler(
             Json(out).into_response()
         }
         Ok((task, true)) => {
-            notify_and_broadcast(&state, &task, "task:created");
+            notify_and_broadcast(&state, &task, "task:created", &task.tags);
             broadcast_related(&state, task.parent_task_id.iter().cloned().collect());
             Json(task_json(&task)).into_response()
         }
@@ -394,30 +401,37 @@ pub(crate) async fn update_task_handler(
     };
     let expected_status = body.expected_status;
     let (add_deps, remove_deps) = (body.add_depends_on, body.remove_depends_on);
+    // One transaction: the status and the dependency change commit together or
+    // not at all, and `previous` is read under the same write lock.
     let result = state.db.with_conn(move |c| {
-        let previous = t::get_task(c, &id)?.ok_or_else(|| not_found("no task found for that id"))?;
-        if let Some(expected) = expected_status.as_deref().filter(|e| *e != previous.status) {
-            return Err(ApiError::Conflict(format!(
-                "task {id} was not in expected status '{expected}' (claim conflict)"
-            ))
-            .into());
-        }
-        let mut task = t::update_task(c, &id, &patch, expected_status.as_deref())?;
-        if !add_deps.is_empty() || !remove_deps.is_empty() {
-            apply_dependency_changes(c, &task.id, &add_deps, &remove_deps, "web")?;
-            task = t::get_task(c, &task.id)?.ok_or_else(|| vanished(&id))?;
-        }
-        let previous_status = Some(previous.status.as_str());
-        let became_ready = task.status == t::STATUS_READY_FOR_REVIEW
-            && previous_status != Some(t::STATUS_READY_FOR_REVIEW);
-        let unblocked = unblocked_by_transition(c, previous_status, &task)?;
-        let old_parent = previous.parent_task_id;
-        Ok::<_, anyhow::Error>((task, became_ready, unblocked, old_parent))
+        t::in_write_tx(c, |c| {
+            let previous =
+                t::get_task(c, &id)?.ok_or_else(|| not_found("no task found for that id"))?;
+            if let Some(expected) = expected_status.as_deref().filter(|e| *e != previous.status) {
+                return Err(ApiError::Conflict(format!(
+                    "task {id} was not in expected status '{expected}' (claim conflict)"
+                ))
+                .into());
+            }
+            let mut task = t::update_task(c, &id, &patch, expected_status.as_deref())?;
+            if !add_deps.is_empty() || !remove_deps.is_empty() {
+                apply_dependency_changes(c, &task.id, &add_deps, &remove_deps, "web")?;
+                task = t::get_task(c, &task.id)?.ok_or_else(|| vanished(&id))?;
+            }
+            let previous_status = Some(previous.status.as_str());
+            let became_ready = task.status == t::STATUS_READY_FOR_REVIEW
+                && previous_status != Some(t::STATUS_READY_FOR_REVIEW);
+            let unblocked = unblocked_by_transition(c, previous_status, &task)?;
+            Ok((task, became_ready, unblocked, previous.parent_task_id, previous.tags))
+        })
     });
     match result {
-        Ok((task, became_ready_for_review, unblocked, old_parent)) => {
-            notify_and_broadcast(&state, &task, "task:updated");
-            notify_unblocked(&state.vault_path, &task, &unblocked);
+        Ok((task, became_ready_for_review, unblocked, old_parent, previous_tags)) => {
+            let added = hq_tools::tasks::added_tags(&previous_tags, &task.tags);
+            notify_and_broadcast(&state, &task, "task:updated", &added);
+            if !state.profile().is_lite() {
+                notify_unblocked(&state.vault_path, &task, &unblocked);
+            }
             let mut related: Vec<String> = unblocked.into_iter().map(|u| u.id).collect();
             related.extend(task.parent_task_id.iter().cloned());
             related.extend(old_parent.filter(|p| task.parent_task_id.as_ref() != Some(p)));
@@ -633,10 +647,66 @@ mod tests {
                 priority: None,
                 parent_task_id: None,
                 top_level_only: None,
+                limit: None,
+                offset: None,
             }),
         )
         .await;
         assert_eq!(list.status(), StatusCode::OK);
+    }
+
+    async fn create_titled(state: &Arc<WsState>, title: &str) -> serde_json::Value {
+        let body = serde_json::from_value(json!({ "title": title })).unwrap();
+        body_json(create_task_handler(State(state.clone()), Json(body)).await).await
+    }
+
+    #[tokio::test]
+    async fn the_list_reports_its_total_and_pages_on_offset() {
+        let state = test_state();
+        for n in 0..3 {
+            create_titled(&state, &format!("t{n}")).await;
+        }
+        let page = |limit, offset| {
+            let params = ListTasksParams {
+                space_id: None,
+                initiative_id: None,
+                status: None,
+                tag: None,
+                priority: None,
+                parent_task_id: None,
+                top_level_only: None,
+                limit: Some(limit),
+                offset: Some(offset),
+            };
+            list_tasks_handler(State(state.clone()), Query(params))
+        };
+        let first = body_json(page(2, 0).await).await;
+        assert_eq!((first["count"].as_i64(), first["total"].as_i64()), (Some(2), Some(3)));
+        assert_eq!(first["has_more"], json!(true));
+        let rest = body_json(page(2, 2).await).await;
+        assert_eq!((rest["count"].as_i64(), rest["has_more"].clone()), (Some(1), json!(false)));
+    }
+
+    #[tokio::test]
+    async fn an_unknown_status_is_a_400_and_a_failed_dependency_undoes_the_status() {
+        let state = test_state();
+        let id: String = create_titled(&state, "Work").await["id"].as_str().unwrap().into();
+        let patch = |value: serde_json::Value| Json(serde_json::from_value::<UpdateTaskBody>(value).unwrap());
+
+        let refused =
+            update_task_handler(State(state.clone()), AxumPath(id.clone()), patch(json!({ "status": "doing" }))).await;
+        assert_eq!(refused.status(), StatusCode::BAD_REQUEST);
+        assert!(body_json(refused).await["error"].as_str().unwrap().contains("ready_for_review"));
+
+        let failed = update_task_handler(
+            State(state.clone()),
+            AxumPath(id.clone()),
+            patch(json!({ "status": "in_progress", "add_depends_on": ["NOPE-999"] })),
+        )
+        .await;
+        assert_eq!(failed.status(), StatusCode::BAD_REQUEST);
+        let task = state.db.with_conn(move |c| t::get_task(c, &id)).unwrap().unwrap();
+        assert_eq!(task.status, "to_do", "the status write is undone with the failed dependency");
     }
 
     fn claim_body() -> UpdateTaskBody {

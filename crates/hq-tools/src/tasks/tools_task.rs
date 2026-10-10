@@ -2,7 +2,6 @@
 
 use anyhow::{Result, bail};
 use async_trait::async_trait;
-use hq_core::mailbox;
 use hq_db::Database;
 use hq_db::tasks as t;
 use serde_json::{Value, json};
@@ -174,14 +173,8 @@ impl HqTool for TaskCreateTool {
             out["deduplicated"] = json!(true);
             return Ok(out);
         }
-        if !scoped && !task.tags.is_empty() {
-            let _ = mailbox::notify_tagged_agents(
-                &self.vault_path,
-                &task.id,
-                &task.display_id,
-                &task.title,
-                &task.tags,
-            );
+        if !scoped {
+            notify_tags(&self.vault_path, &task, &task.tags);
         }
         Ok(task_json(&task))
     }
@@ -204,7 +197,8 @@ impl HqTool for TaskListTool {
          `{\"tag\": \"reviewer\"}` returns every task tagged for the agent \"reviewer\" regardless of \
          which Space/List it's filed under. Use parent_id to list one task's sub-tasks, or \
          top_level_only to hide sub-tasks. Rows leave out `description` unless include_description \
-         is true; task_get returns one task in full."
+         is true; task_get returns one task in full. Replies are paged: check `has_more` and pass \
+         `offset` for the rest, never assume one reply is the whole list."
     }
     fn parameters(&self) -> Value {
         json!({
@@ -217,7 +211,9 @@ impl HqTool for TaskListTool {
                 "priority": { "type": "string", "enum": ["urgent", "high", "normal", "low"] },
                 "parent_id": { "type": "string", "description": "Only the sub-tasks of this task (id or display id)" },
                 "top_level_only": { "type": "boolean", "description": "Exclude sub-tasks" },
-                "include_description": { "type": "boolean", "description": "Include each task's full description (large lists may then be cut by the MCP gateway)" }
+                "include_description": { "type": "boolean", "description": "Include each task's full description (large lists may then be cut by the MCP gateway)" },
+                "limit": { "type": "integer", "minimum": 1, "maximum": 500, "description": "Page size (default 100). The reply has `total` and `has_more`; read the next page with `offset`." },
+                "offset": { "type": "integer", "minimum": 0, "description": "Rows to skip, for the next page" }
             }
         })
     }
@@ -231,7 +227,7 @@ impl HqTool for TaskListTool {
         Some("list/filter tasks by space, initiative, status, tag, priority; find my queue by tag")
     }
     async fn execute(&self, args: Value) -> Result<Value> {
-        let filter = t::TaskFilter {
+        let mut filter = t::TaskFilter {
             space_id: args
                 .get("space_id")
                 .and_then(|v| v.as_str())
@@ -250,21 +246,30 @@ impl HqTool for TaskListTool {
                 .and_then(|v| v.as_str())
                 .map(String::from),
             parent_task_id: parent_filter(&args),
+            ..Default::default()
         };
         let with_description = args
             .get("include_description")
             .and_then(|v| v.as_bool())
             .unwrap_or(false);
+        let limit = arg_usize(&args, "limit")
+            .unwrap_or(DEFAULT_LIST_PAGE)
+            .clamp(1, t::MAX_LIST_LIMIT);
+        let offset = arg_usize(&args, "offset").unwrap_or(0);
         let caller = crate::harness_session::caller_session(&args).map(str::to_string);
-        let tasks = self.db.with_conn(move |c| {
-            let tasks = t::list_tasks(c, &filter)?;
-            // A launched agent sees only the tasks it may use.
-            match caller {
-                Some(session) => {
-                    let scope = crate::a2a::task_scope(c, &session)?;
-                    Ok(tasks.into_iter().filter(|task| scope.contains(&task.id)).collect())
-                }
-                None => Ok(tasks),
+        let (tasks, total) = self.db.with_conn(move |c| match caller {
+            // A launched agent sees only the tasks it may use, so the scope is
+            // applied before paging and the total counts what it can see.
+            Some(session) => {
+                let scope = crate::a2a::task_scope(c, &session)?;
+                let visible = visible_tasks(c, &mut filter, &scope)?;
+                let total = visible.len() as i64;
+                Ok((visible.into_iter().skip(offset).take(limit).collect(), total))
+            }
+            None => {
+                filter.limit = Some(limit);
+                filter.offset = offset;
+                Ok((t::list_tasks(c, &filter)?, t::count_tasks(c, &filter)?))
             }
         })?;
         // Full descriptions push a list past the MCP gateway's size cap, which cuts
@@ -276,10 +281,43 @@ impl HqTool for TaskListTool {
             }
             row
         });
+        let next_offset = offset + tasks.len();
         Ok(json!({
             "count": tasks.len(),
+            "total": total,
+            "offset": offset,
+            "has_more": (next_offset as i64) < total,
             "tasks": rows.collect::<Vec<_>>()
         }))
+    }
+}
+
+/// Default page for `task_list`: small enough that a reply with the default
+/// fields stays well under the MCP gateway's size cap.
+const DEFAULT_LIST_PAGE: usize = 100;
+
+fn arg_usize(args: &Value, key: &str) -> Option<usize> {
+    args.get(key).and_then(Value::as_u64).map(|n| n as usize)
+}
+
+/// Every task matching `filter` that is in `scope`, read a page at a time so a
+/// scoped session is never cut off by the page cap.
+fn visible_tasks(
+    c: &rusqlite::Connection,
+    filter: &mut t::TaskFilter,
+    scope: &std::collections::HashSet<String>,
+) -> Result<Vec<t::Task>> {
+    let mut visible = Vec::new();
+    filter.limit = Some(t::MAX_LIST_LIMIT);
+    filter.offset = 0;
+    loop {
+        let page = t::list_tasks(c, filter)?;
+        let full = page.len() == t::MAX_LIST_LIMIT;
+        visible.extend(page.into_iter().filter(|task| scope.contains(&task.id)));
+        if !full {
+            return Ok(visible);
+        }
+        filter.offset += t::MAX_LIST_LIMIT;
     }
 }
 
@@ -352,8 +390,8 @@ impl HqTool for TaskUpdateTool {
         "Update a task's fields. Only fields present in the call are changed (pass a field as null \
          to clear priority/due_date). Set expected_status to make a status change claim-safe: if the \
          task isn't in that status anymore (e.g. another agent already claimed it), the update is \
-         rejected instead of silently overwriting. Re-tags trigger a fresh mailbox notification to any \
-         newly-added routing tag. Dependencies are soft: starting or completing a task with open \
+         rejected instead of silently overwriting. Only tags newly added by this call are notified; \
+         any other edit is silent. Dependencies are soft: starting or completing a task with open \
          dependencies succeeds but returns a warning, and completing a task notifies the agents on \
          any task it unblocked. parent_id moves a task under a parent (null promotes it to top level)."
     }
@@ -425,48 +463,42 @@ impl HqTool for TaskUpdateTool {
         let remove_deps = tags_from_args(&args, "remove_depends_on");
 
         let id_for_update = id.clone();
-        let (task, became_ready_for_review, unblocked) = self.db.with_conn(move |c| {
-            let existing = t::get_task(c, &id_for_update)?;
-            if scoped
-                && edits_text
-                && existing
-                    .as_ref()
-                    .is_some_and(|t| t.created_by != crate::harness_session::TASKS_SCOPE_ACTOR)
-            {
-                bail!(
-                    "this connection may edit the title and description only of tasks it created; \
-                     add a comment to that task instead"
-                );
-            }
-            let previous_status = existing.map(|t| t.status);
-            let mut task = t::update_task(c, &id_for_update, &patch, expected_status.as_deref())?;
-            if !add_deps.is_empty() || !remove_deps.is_empty() {
-                let actor = if scoped {
-                    crate::harness_session::TASKS_SCOPE_ACTOR
-                } else {
-                    "agent"
-                };
-                apply_dependency_changes(c, &task.id, &add_deps, &remove_deps, actor)?;
-                task = t::get_task(c, &task.id)?
-                    .ok_or_else(|| anyhow::anyhow!("task vanished after update"))?;
-            }
-            let became_ready = task.status == t::STATUS_READY_FOR_REVIEW
-                && previous_status.as_deref() != Some(t::STATUS_READY_FOR_REVIEW);
-            let unblocked = unblocked_by_transition(c, previous_status.as_deref(), &task)?;
-            Ok::<_, anyhow::Error>((task, became_ready, unblocked))
+        // One transaction: the status and the dependency change commit together
+        // or not at all, and "previous" is read under the same write lock.
+        let (task, previous, unblocked) = self.db.with_conn(move |c| {
+            t::in_write_tx(c, |c| {
+                let previous = t::get_task(c, &id_for_update)?
+                    .ok_or_else(|| anyhow::anyhow!("task {id_for_update} not found"))?;
+                if scoped
+                    && edits_text
+                    && previous.created_by != crate::harness_session::TASKS_SCOPE_ACTOR
+                {
+                    bail!(
+                        "this connection may edit the title and description only of tasks it created; \
+                         add a comment to that task instead"
+                    );
+                }
+                let mut task =
+                    t::update_task(c, &id_for_update, &patch, expected_status.as_deref())?;
+                if !add_deps.is_empty() || !remove_deps.is_empty() {
+                    let actor = if scoped {
+                        crate::harness_session::TASKS_SCOPE_ACTOR
+                    } else {
+                        "agent"
+                    };
+                    apply_dependency_changes(c, &task.id, &add_deps, &remove_deps, actor)?;
+                    task = t::get_task(c, &task.id)?
+                        .ok_or_else(|| anyhow::anyhow!("task vanished after update"))?;
+                }
+                let unblocked = unblocked_by_transition(c, Some(&previous.status), &task)?;
+                Ok((task, previous, unblocked))
+            })
         })?;
+        let became_ready_for_review = task.status == t::STATUS_READY_FOR_REVIEW
+            && previous.status != t::STATUS_READY_FOR_REVIEW;
         if !scoped {
             notify_unblocked(&self.vault_path, &task, &unblocked);
-        }
-
-        if !scoped && !task.tags.is_empty() {
-            let _ = mailbox::notify_tagged_agents(
-                &self.vault_path,
-                &task.id,
-                &task.display_id,
-                &task.title,
-                &task.tags,
-            );
+            notify_tags(&self.vault_path, &task, &added_tags(&previous.tags, &task.tags));
         }
         // A web-UI approval item with text the caller chose, one per task: not for the tasks scope.
         if became_ready_for_review && !scoped {

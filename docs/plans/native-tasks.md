@@ -129,7 +129,8 @@ nullable columns on `tasks` (`parent_task_id`, `start_date`) and a
 ## Lifecycle timestamps (FR-068)
 
 Migration `062_task_lifecycle_events` adds an append-only `task_events` table
-and two nullable summary columns on `tasks`. Every move into `in_progress` or
+and two nullable summary columns on `tasks`. (Migration 080 later extended the log to every
+status, see "Event log, validation and paging".) Every move into `in_progress` or
 `ready_for_review` inserts one event (`entered_in_progress`,
 `entered_ready_for_review`) in the same `BEGIN IMMEDIATE` transaction as the
 status change in `hq_db::tasks::update_task`. `work_started_at` and
@@ -157,6 +158,42 @@ returns a task's events oldest first.
 DROP TABLE task_events;
 ALTER TABLE tasks DROP COLUMN work_started_at;
 ALTER TABLE tasks DROP COLUMN first_ready_for_review_at;
+```
+
+## Event log, validation and paging (TSV2 WS1)
+
+Migration `080_task_event_log` widens `task_events` (rebuilt, because SQLite cannot widen a
+CHECK) and adds `tasks.completed_at`. Old events keep their ids and times; their new
+`from_status` and `to_status` stay NULL (unknown, not guessed).
+
+- **Every transition is logged.** A move into any of the five statuses appends one event
+  (`entered_to_do`, `entered_in_progress`, `entered_blocked`, `entered_ready_for_review`,
+  `entered_complete`) with the status it came from and went to. A write that does not change the
+  status records nothing. `work_started_at` and `first_ready_for_review_at` are still stamped
+  once. `completed_at` is the latest completion and is cleared when the task reopens.
+- **Status and priority are validated** in `hq-db`, so MCP, REST and the harness supervisor share
+  one rule. An unknown value fails with the allowed values in the message (REST answers 400).
+  Only a status or priority a write actually sets is checked, so a legacy row can still be edited.
+  There is no transition table on purpose: the board moves cards freely and any status is
+  reachable from any other. Gating belongs to the work lease (WS2), not to a table.
+- **Lists are paged.** `list_tasks` takes `limit` (at most `MAX_LIST_LIMIT`, 500) and `offset`,
+  and `count_tasks` returns the total for the same filter. MCP `task_list` and `GET /api/tasks`
+  reply with `total`, `offset` and `has_more`; MCP defaults to 100 rows per page. The web client
+  follows `has_more`, so counts and the active total no longer stop at 500. Row errors while
+  reading a page now fail the call instead of silently dropping rows.
+- **Update and delete are one transaction.** `hq_db::tasks::in_write_tx` takes the write lock,
+  runs the closure and commits, or joins a transaction the caller already holds. The MCP and REST
+  update paths read the previous task, apply the patch, apply dependency changes and compute
+  unblocked tasks inside one, so a failed dependency change undoes the status change.
+- **Notifications follow tags that were added.** An update mails only the routing tags the write
+  introduced (`hq_tools::tasks::added_tags`). Creating a task still mails all of its tags.
+
+Rollback of 080 (SQLite 3.35+). The events table keeps the wider CHECK and the two extra columns,
+which older code ignores, so only the new column needs to go, then delete the
+`080_task_event_log` row from `schema_version`:
+
+```sql
+ALTER TABLE tasks DROP COLUMN completed_at;
 ```
 
 ## Task relationship graph (FR-069)

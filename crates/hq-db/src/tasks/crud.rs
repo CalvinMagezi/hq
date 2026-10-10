@@ -7,6 +7,9 @@ pub fn create_task(
     new: &NewTask,
 ) -> Result<Task> {
     validate_schedule(new.start_date, new.due_date)?;
+    if let Some(priority) = new.priority {
+        validate_priority(priority)?;
+    }
     let parent_id = match new.parent_task_id {
         Some(parent) => Some(resolve_parent(conn, parent, initiative_id)?.id),
         None => None,
@@ -33,7 +36,7 @@ pub fn create_task(
         ],
     )?;
     set_tags(conn, id, new.tags)?;
-    notify_on_ok(
+    notify_on_ok(conn, 
         get_task(conn, id)?
             .ok_or_else(|| anyhow::anyhow!("task {id} vanished immediately after creation")),
     )
@@ -117,16 +120,17 @@ pub fn get_task(conn: &Connection, id_or_display_id: &str) -> Result<Option<Task
     hydrate_one(conn, task)
 }
 
-pub fn list_tasks(conn: &Connection, filter: &TaskFilter) -> Result<Vec<Task>> {
-    let mut sql =
-        format!("SELECT {TASK_COLS} FROM tasks t JOIN initiatives i ON i.id = t.initiative_id");
-    let mut conditions: Vec<&'static str> = Vec::new();
-    let mut vals: Vec<Box<dyn rusqlite::types::ToSql>> = Vec::new();
+type SqlParams = Vec<Box<dyn rusqlite::types::ToSql>>;
 
-    if filter.tag.is_some() {
-        sql.push_str(" JOIN task_tags tg ON tg.task_id = t.id");
-    }
+/// The `FROM ... WHERE ...` text and its parameters for a filter, shared by the
+/// page query and the count so the two can never disagree.
+fn filter_sql(filter: &TaskFilter) -> (String, SqlParams) {
+    let mut sql = String::from("FROM tasks t JOIN initiatives i ON i.id = t.initiative_id");
+    let mut conditions: Vec<&'static str> = Vec::new();
+    let mut vals: SqlParams = Vec::new();
+
     if let Some(tag) = &filter.tag {
+        sql.push_str(" JOIN task_tags tg ON tg.task_id = t.id");
         conditions.push("tg.tag = ?");
         vals.push(Box::new(tag.clone()));
     }
@@ -160,21 +164,50 @@ pub fn list_tasks(conn: &Connection, filter: &TaskFilter) -> Result<Vec<Task>> {
         sql.push_str(" WHERE ");
         sql.push_str(&conditions.join(" AND "));
     }
-    sql.push_str(" ORDER BY t.updated_at DESC, t.created_at DESC, t.display_id DESC LIMIT 500");
+    (sql, vals)
+}
 
+/// One page of tasks, newest activity first. Page with `limit` and `offset`
+/// and read `count_tasks` for the total, so a list longer than a page is never
+/// silently cut.
+pub fn list_tasks(conn: &Connection, filter: &TaskFilter) -> Result<Vec<Task>> {
+    let (from_where, vals) = filter_sql(filter);
+    let limit = filter.limit.unwrap_or(MAX_LIST_LIMIT).clamp(1, MAX_LIST_LIMIT);
+    let sql = format!(
+        "SELECT {TASK_COLS} {from_where} \
+         ORDER BY t.updated_at DESC, t.created_at DESC, t.display_id DESC, t.id DESC \
+         LIMIT {limit} OFFSET {}",
+        filter.offset.min(i64::MAX as usize)
+    );
     let mut stmt = conn.prepare(&sql)?;
     let param_refs: Vec<&dyn rusqlite::types::ToSql> = vals.iter().map(|b| b.as_ref()).collect();
-    let mut tasks: Vec<Task> = stmt
+    let mut tasks = stmt
         .query_map(param_refs.as_slice(), row_to_task)?
-        .filter_map(|r| r.ok())
-        .collect();
+        .collect::<rusqlite::Result<Vec<Task>>>()?;
     hydrate(conn, &mut tasks)?;
     Ok(tasks)
+}
+
+/// How many tasks match the filter, ignoring its `limit` and `offset`.
+pub fn count_tasks(conn: &Connection, filter: &TaskFilter) -> Result<i64> {
+    let (from_where, vals) = filter_sql(filter);
+    let param_refs: Vec<&dyn rusqlite::types::ToSql> = vals.iter().map(|b| b.as_ref()).collect();
+    Ok(conn.query_row(
+        &format!("SELECT COUNT(*) {from_where}"),
+        param_refs.as_slice(),
+        |r| r.get(0),
+    )?)
 }
 
 /// Checks the parent and schedule a patch would produce against the task's
 /// current state, before anything is written.
 pub(super) fn validate_patch(conn: &Connection, current: &Task, patch: &TaskPatch) -> Result<()> {
+    if let Some(status) = &patch.status {
+        validate_status(status)?;
+    }
+    if let Some(Some(priority)) = &patch.priority {
+        validate_priority(priority)?;
+    }
     let start = match &patch.start_date {
         Some(v) => v.as_deref(),
         None => current.start_date.as_deref(),
@@ -222,10 +255,17 @@ pub fn update_task(
     patch: &TaskPatch,
     expected_status: Option<&str>,
 ) -> Result<Task> {
-    // IMMEDIATE takes the write lock before the status read, so "did the status
+    // The write lock is taken before the status read, so "did the status
     // change" is decided on the same state the UPDATE then modifies.
-    let tx = rusqlite::Transaction::new_unchecked(conn, rusqlite::TransactionBehavior::Immediate)?;
-    let conn = &*tx;
+    in_write_tx(conn, |conn| apply_update(conn, id, patch, expected_status))
+}
+
+fn apply_update(
+    conn: &Connection,
+    id: &str,
+    patch: &TaskPatch,
+    expected_status: Option<&str>,
+) -> Result<Task> {
     let current = get_task(conn, id)?.ok_or_else(|| anyhow::anyhow!("task {id} not found"))?;
     validate_patch(conn, &current, patch)?;
 
@@ -286,14 +326,10 @@ pub fn update_task(
         set_tags(conn, &current.id, tags)?;
     }
     if let Some(status) = patch.status.as_deref().filter(|s| *s != current.status) {
-        record_transition(conn, &current.id, status)?;
+        record_transition(conn, &current.id, &current.status, status)?;
     }
 
-    let updated = get_task(conn, &current.id)?
-        .ok_or_else(|| anyhow::anyhow!("task {id} vanished after update"))?;
-    tx.commit()?;
-    changed();
-    Ok(updated)
+    get_task(conn, &current.id)?.ok_or_else(|| anyhow::anyhow!("task {id} vanished after update"))
 }
 
 /// `PRAGMA foreign_keys=ON` (see `pool.rs`) means child rows must go first —
@@ -301,36 +337,29 @@ pub fn update_task(
 /// A task with sub-tasks is only deleted when `cascade` is set, taking its
 /// sub-tasks with it. Returns the internal ids of every deleted task.
 pub fn delete_task(conn: &Connection, id: &str, cascade: bool) -> Result<Vec<String>> {
-    let task = get_task(conn, id)?.ok_or_else(|| anyhow::anyhow!("task {id} not found"))?;
-    let children = subtask_ids(conn, &task.id)?;
-    if !children.is_empty() && !cascade {
-        anyhow::bail!(
-            "{} has {} sub-task(s); delete them first or pass cascade",
-            task.display_id,
-            children.len()
-        );
-    }
+    in_write_tx(conn, |conn| {
+        let task = get_task(conn, id)?.ok_or_else(|| anyhow::anyhow!("task {id} not found"))?;
+        let children = subtask_ids(conn, &task.id)?;
+        if !children.is_empty() && !cascade {
+            anyhow::bail!(
+                "{} has {} sub-task(s); delete them first or pass cascade",
+                task.display_id,
+                children.len()
+            );
+        }
 
-    let tx = conn.unchecked_transaction()?;
-    let mut deleted = children;
-    deleted.push(task.id);
-    for task_id in &deleted {
-        tx.execute(
-            "DELETE FROM task_comments WHERE task_id = ?1",
-            params![task_id],
-        )?;
-        tx.execute("DELETE FROM task_tags WHERE task_id = ?1", params![task_id])?;
-        tx.execute(
-            "DELETE FROM task_events WHERE task_id = ?1",
-            params![task_id],
-        )?;
-        tx.execute(
-            "DELETE FROM task_dependencies WHERE task_id = ?1 OR depends_on_task_id = ?1",
-            params![task_id],
-        )?;
-        tx.execute("DELETE FROM tasks WHERE id = ?1", params![task_id])?;
-    }
-    tx.commit()?;
-    changed();
-    Ok(deleted)
+        let mut deleted = children;
+        deleted.push(task.id);
+        for task_id in &deleted {
+            for table in ["task_comments", "task_tags", "task_events"] {
+                conn.execute(&format!("DELETE FROM {table} WHERE task_id = ?1"), params![task_id])?;
+            }
+            conn.execute(
+                "DELETE FROM task_dependencies WHERE task_id = ?1 OR depends_on_task_id = ?1",
+                params![task_id],
+            )?;
+            conn.execute("DELETE FROM tasks WHERE id = ?1", params![task_id])?;
+        }
+        Ok(deleted)
+    })
 }
