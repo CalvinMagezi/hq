@@ -1,0 +1,14 @@
+{
+    "version": "0.9.1-main.136",
+    "description": "HQ Lite: web app, tasks, notes and MCP for locked-down computers",
+    "homepage": "https://agent-hq.online",
+    "license": "MIT",
+    "architecture": {
+        "64bit": {
+            "url": "https://github.com/CalvinMagezi/hq/releases/download/v0.9.1-main.136/hq-lite-0.9.1-048f474-windows-x86_64.zip",
+            "hash": "bda6ee6ddf6a5e085c542a3061ddbf874151733387baf57c128b4f30a604564b"
+        }
+    },
+    "bin": "hq.exe",
+    "notes": "Pinned to one signed main build; it is not updated automatically. For the newest build run the installer (irm https://agent-hq.online/install.ps1 | iex), which also verifies HQ's minisign signature. The build has no Windows code-signing certificate, so a computer that only allows approved programs may refuse to run it."
+}
