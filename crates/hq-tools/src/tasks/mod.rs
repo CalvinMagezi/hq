@@ -4,6 +4,7 @@
 //! directions — agents and humans both create/update tasks. See
 //! docs/plans/native-tasks for the design.
 
+use hq_core::config::TasksConfig;
 use hq_db::Database;
 use hq_vault::VaultClient;
 use std::path::PathBuf;
@@ -16,6 +17,7 @@ mod json;
 mod placement;
 mod scoped;
 mod tools_graph;
+mod tools_lease;
 mod tools_org;
 mod tools_task;
 
@@ -29,7 +31,9 @@ pub use placement::{
     resolve_space_id, slug,
 };
 pub use scoped::{ensure_person_space, scope_task_tools};
+pub use tools_lease::{lease_ttl_secs, task_settings};
 use tools_graph::TaskRelatedTool;
+use tools_lease::*;
 use tools_org::*;
 use tools_task::*;
 
@@ -38,21 +42,37 @@ pub fn create_task_tools(
     vault: Arc<VaultClient>,
     db: Arc<Database>,
 ) -> Vec<Box<dyn HqTool>> {
+    create_task_tools_with(vault_path, vault, db, task_settings())
+}
+
+/// `create_task_tools` with explicit task settings, for tests and callers that
+/// already hold the loaded config.
+pub fn create_task_tools_with(
+    vault_path: PathBuf,
+    vault: Arc<VaultClient>,
+    db: Arc<Database>,
+    settings: TasksConfig,
+) -> Vec<Box<dyn HqTool>> {
     vec![
         Box::new(TaskCreateTool {
+            settings: settings.clone(),
             vault_path: vault_path.clone(),
             db: db.clone(),
         }),
         Box::new(TaskListTool { db: db.clone() }),
-        Box::new(TaskGetTool { db: db.clone() }),
+        Box::new(TaskGetTool { settings: settings.clone(), db: db.clone() }),
         Box::new(TaskUpdateTool {
+            settings: settings.clone(),
             vault_path,
             db: db.clone(),
         }),
         Box::new(TaskRelatedTool { db: db.clone() }),
         Box::new(TaskDeleteTool { db: db.clone() }),
-        Box::new(TaskCommentAddTool { db: db.clone() }),
+        Box::new(TaskCommentAddTool { settings: settings.clone(), db: db.clone() }),
         Box::new(TaskCommentListTool { db: db.clone() }),
+        Box::new(TaskClaimTool { settings: settings.clone(), db: db.clone() }),
+        Box::new(TaskHeartbeatTool { settings: settings.clone(), db: db.clone() }),
+        Box::new(TaskReleaseTool { settings, db: db.clone() }),
         Box::new(SpaceListTool { db: db.clone() }),
         Box::new(SpaceCreateTool { db: db.clone() }),
         Box::new(SpaceUpdateTool { db: db.clone() }),

@@ -251,6 +251,20 @@ impl ScopedTaskTool {
     }
 }
 
+/// Which machine, directory and branch an agent worked in, and under which lease,
+/// is for the owner. A restricted audience sees what happened and when, not where.
+fn strip_work_details(task: &mut Value) {
+    if let Some(obj) = task.as_object_mut() {
+        obj.remove("work_sessions");
+        obj.remove("held_by");
+    }
+    let events = task.get_mut("lifecycle_events").and_then(Value::as_array_mut);
+    for event in events.into_iter().flatten().filter_map(Value::as_object_mut) {
+        event.remove("actor");
+        event.remove("work_session_id");
+    }
+}
+
 /// Page size when a restricted audience names none; matches `task_list`'s own default.
 const DEFAULT_SCOPED_PAGE: u64 = 100;
 
@@ -325,7 +339,11 @@ impl HqTool for ScopedTaskTool {
         if TASK_READ_TOOLS.contains(&name) {
             let ids = [str_list(&args, "id"), str_list(&args, "task_id")].concat();
             self.check_tasks(&ids, false)?;
-            return self.inner.execute(args).await;
+            let mut result = self.inner.execute(args).await?;
+            if name == "task_get" {
+                strip_work_details(&mut result);
+            }
+            return Ok(result);
         }
         if TASK_WRITE_TOOLS.contains(&name) {
             let mut ids = Self::update_write_targets(&args);
@@ -509,6 +527,36 @@ mod tests {
         assert_eq!(inits["initiatives"].as_array().unwrap().len(), 1);
         let all = call(&owner, "task_list", json!({})).await.unwrap();
         assert_eq!(all["count"], 2);
+    }
+
+    #[tokio::test]
+    async fn a_restricted_audience_does_not_see_where_or_how_work_was_done() {
+        let f = fixture();
+        let bob = tools_for(&f, &scope_for("2"));
+        let id = add(&bob, "bob private").await;
+        let open = super::super::create_task_tools(f.path.clone(), f.vault.clone(), f.db.clone());
+        let claim = call(&open, "task_claim", json!({ "task_id": id, "actor": "builder", "cwd": "/srv/app/secret", "host": "laptop" }))
+            .await
+            .unwrap();
+        assert!(claim["lease"].is_string());
+        let seen = call(&bob, "task_get", json!({ "id": id })).await.unwrap();
+        assert!(seen.get("work_sessions").is_none() && seen.get("held_by").is_none(), "{seen}");
+        let events = seen["lifecycle_events"].as_array().unwrap();
+        assert!(!events.is_empty());
+        assert!(events.iter().all(|e| e.get("actor").is_none() && e.get("work_session_id").is_none()));
+        let owner = call(&open, "task_get", json!({ "id": id })).await.unwrap();
+        assert_eq!(owner["held_by"]["cwd"], "/srv/app/secret", "the owner still sees it");
+    }
+
+    #[tokio::test]
+    async fn a_restricted_audience_cannot_take_work_leases() {
+        let f = fixture();
+        let bob = tools_for(&f, &scope_for("2"));
+        let id = add(&bob, "bob private").await;
+        for tool in ["task_claim", "task_heartbeat", "task_release"] {
+            let args = json!({ "task_id": id, "actor": "x", "lease": "hql_x" });
+            assert!(denied(&call(&bob, tool, args).await), "{tool}");
+        }
     }
 
     #[tokio::test]

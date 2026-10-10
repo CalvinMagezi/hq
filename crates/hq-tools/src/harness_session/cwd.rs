@@ -8,6 +8,13 @@ pub const TASKS_SCOPE_ARG: &str = "_hq_tasks_scope";
 /// Who a tasks-scope write is attributed to, whatever name the caller supplies.
 pub const TASKS_SCOPE_ACTOR: &str = "mcp:tasks";
 
+/// Whether `name` is one a tasks-scope caller writes under: the bare scope actor, or the
+/// `mcp:tasks/<label>` a work lease taken on that scope is named.
+pub fn is_tasks_scope_actor(name: &str) -> bool {
+    name == TASKS_SCOPE_ACTOR
+        || name.strip_prefix(TASKS_SCOPE_ACTOR).is_some_and(|rest| rest.starts_with('/'))
+}
+
 /// Characters a shell would expand inside the path the agent is started in.
 pub(super) const CWD_FORBIDDEN: [char; 4] = ['~', '$', '`', '\0'];
 

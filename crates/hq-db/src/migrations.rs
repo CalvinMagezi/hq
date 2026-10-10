@@ -296,6 +296,10 @@ const MIGRATIONS: &[(&str, &str)] = &[
         "080_task_event_log",
         include_str!("../sql/080_task_event_log.sql"),
     ),
+    (
+        "081_task_work_sessions",
+        include_str!("../sql/081_task_work_sessions.sql"),
+    ),
 ];
 
 const MEMORY_SCHEMA_MIGRATION: &str = "058_memory_schema";
@@ -675,6 +679,46 @@ mod tests {
             .query_row("SELECT MAX(id) FROM task_events", [], |r| r.get(0))
             .unwrap();
         assert_eq!(id, 3, "id 2 belonged to a deleted event and is not handed out again");
+    }
+
+    #[test]
+    fn work_session_migration_keeps_old_events_and_rolls_back() {
+        let conn = rusqlite::Connection::open_in_memory().unwrap();
+        let idx = super::MIGRATIONS
+            .iter()
+            .position(|(v, _)| *v == "081_task_work_sessions")
+            .unwrap();
+        super::apply(&conn, &super::MIGRATIONS[..idx]).unwrap();
+        conn.execute_batch(
+            "INSERT INTO spaces (id, name, slug) VALUES ('s', 'S', 's');
+             INSERT INTO initiatives (id, space_id, name, slug, id_prefix) VALUES ('i', 's', 'I', 'i', 'I');
+             INSERT INTO tasks (id, initiative_id, display_id, title) VALUES ('t1', 'i', 'I-001', 'a');
+             INSERT INTO task_events (task_id, event_type) VALUES ('t1', 'entered_in_progress');",
+        )
+        .unwrap();
+
+        super::run(&conn).unwrap();
+        let actor: Option<String> = conn
+            .query_row("SELECT actor FROM task_events WHERE task_id = 't1'", [], |r| r.get(0))
+            .unwrap();
+        assert!(actor.is_none(), "old events stay unattributed, not guessed");
+        assert!(
+            conn.execute(
+                "INSERT INTO task_work_sessions (id, task_id, actor, token_hash, end_reason) \
+                 VALUES ('w', 't1', 'a', 'h', 'vanished')",
+                [],
+            )
+            .is_err(),
+            "an unknown end reason is refused"
+        );
+
+        // The rollback documented in docs/plans/native-tasks.md.
+        conn.execute_batch(
+            "DROP TABLE task_work_sessions;
+             ALTER TABLE task_events DROP COLUMN actor;
+             ALTER TABLE task_events DROP COLUMN work_session_id;",
+        )
+        .unwrap();
     }
 
     #[test]

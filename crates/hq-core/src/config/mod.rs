@@ -7,6 +7,7 @@ mod copilot_usage;
 mod budgets;
 mod disk_watchdog;
 mod usage_ledger;
+mod tasks;
 mod governance;
 mod harness;
 mod agent_host;
@@ -36,6 +37,7 @@ pub use profile::{
     EgressItem, EnvLookup, LiteConfig, Profile, egress_report, enforce_lite, lite_violations,
     process_env,
 };
+pub use tasks::{DEFAULT_LEASE_TTL_SECS, LeaseMode, MIN_LEASE_TTL_SECS, TasksConfig};
 pub use governance::*;
 pub use harness::*;
 pub use agent_host::{
@@ -246,6 +248,9 @@ pub struct HqConfig {
     /// Spending limits. Empty by default: nothing is enforced until the owner opts in.
     #[serde(default)]
     pub budgets: BudgetsConfig,
+    /// Task system settings: work leases.
+    #[serde(default)]
+    pub tasks: TasksConfig,
 
     /// Copilot credit sampling for the burn-rate meter.
     #[serde(default)]
@@ -410,6 +415,7 @@ impl Default for HqConfig {
             disk_watchdog: DiskWatchdogConfig::default(),
             usage_ledger: UsageLedgerConfig::default(),
             budgets: BudgetsConfig::default(),
+            tasks: TasksConfig::default(),
             copilot_usage: CopilotUsageConfig::default(),
             agent_host: AgentHostConfig::default(),
             budget: BudgetConfig::default(),
