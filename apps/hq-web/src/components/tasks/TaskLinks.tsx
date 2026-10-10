@@ -11,7 +11,7 @@ import { useRefreshOn } from '~/lib/useRefreshOn'
 const LINKS_POLL_MS = 300_000
 const ICON_CLASS = 'w-3.5 h-3.5 text-neutral-500 shrink-0'
 const ROW_CLASS =
-  'flex items-start gap-2 px-2.5 py-1.5 rounded-lg bg-white/[0.02] border border-white/5 hover:bg-white/5 text-xs font-mono text-neutral-200 min-w-0'
+  'flex items-start gap-2 px-2.5 py-1.5 rounded-lg bg-white/[0.02] border border-white/5 hover:bg-white/5 text-xs text-neutral-200 min-w-0'
 
 const ICONS: Record<LinkKind, ReactNode> = {
   vault_note: <FileText className={ICON_CLASS} />,
@@ -68,7 +68,7 @@ export function TaskLinks({ task }: { task: TaskItem }) {
     return (
       <section aria-label="Links">
         <SectionLabel>Links</SectionLabel>
-        <div role="status" className="flex items-center gap-2 text-xs font-mono text-neutral-500">
+        <div role="status" className="flex items-center gap-2 text-xs text-neutral-500">
           <Loader2 className="w-3.5 h-3.5 animate-spin" />
           Loading links
         </div>
@@ -79,7 +79,7 @@ export function TaskLinks({ task }: { task: TaskItem }) {
     return (
       <section aria-label="Links">
         <SectionLabel>Links</SectionLabel>
-        <p role="alert" className="text-xs font-mono text-rose-400">{links.error ?? 'Could not load links.'}</p>
+        <p role="alert" className="text-xs text-rose-400">{links.error ?? 'Could not load links.'}</p>
       </section>
     )
   }

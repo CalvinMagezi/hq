@@ -48,7 +48,7 @@ export function EstimateInput({
         className={inputClass}
       />
       {isInvalidEstimate(value) && (
-        <p role="alert" className="mt-1 text-[10px] font-mono text-rose-400">
+        <p role="alert" className="mt-1 text-[11px] text-rose-400">
           Use a whole number of minutes, or leave it empty.
         </p>
       )}

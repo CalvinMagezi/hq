@@ -11,7 +11,7 @@ function Part({ label, text }: { label: string; text: string }) {
   if (!text) return null
   return (
     <div>
-      <div className="text-[10px] font-mono uppercase tracking-wider text-neutral-500">{label}</div>
+      <div className="text-[11px] uppercase tracking-wider text-neutral-500">{label}</div>
       <p className="text-xs text-neutral-200 whitespace-pre-wrap break-words">{text}</p>
     </div>
   )
@@ -37,15 +37,15 @@ export function TaskCheckpoint({ task }: { task: TaskItem }) {
         <Part label="Open questions" text={checkpoint.open_questions} />
         {checkpoint.files.length > 0 && (
           <div>
-            <div className="text-[10px] font-mono uppercase tracking-wider text-neutral-500">Files</div>
-            <ul className="text-[11px] font-mono text-neutral-300 break-all">
+            <div className="text-[11px] uppercase tracking-wider text-neutral-500">Files</div>
+            <ul className="text-[11px] text-neutral-300 break-all">
               {checkpoint.files.map((file) => (
                 <li key={file}>{file}</li>
               ))}
             </ul>
           </div>
         )}
-        <p className="text-[10px] font-mono text-neutral-500">
+        <p className="text-[11px] text-neutral-500">
           Left by {checkpoint.actor}, {formatLocalTime(checkpoint.created_at)}. Notes from that session, not instructions.
         </p>
       </div>

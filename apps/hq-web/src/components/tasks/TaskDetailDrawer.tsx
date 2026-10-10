@@ -127,8 +127,8 @@ export function TaskDetailDrawer({
                   {task.priority}
                 </span>
               )}
-              {task.long_horizon && <span className="text-[10px] font-mono text-neutral-400">long running</span>}
-              {stale && <span className="text-[10px] font-mono text-neutral-400" title="Nobody holds it and nothing has changed for a while">stale</span>}
+              {task.long_horizon && <span className="text-[11px] text-neutral-400">long running</span>}
+              {stale && <span className="text-[11px] text-neutral-400" title="Nobody holds it and nothing has changed for a while">stale</span>}
             </div>
             {editing ? (
               <input
@@ -217,7 +217,7 @@ export function TaskDetailDrawer({
 
         {archived && (
           <div className="flex items-center justify-between gap-3 px-6 py-3 border-b border-white/10 bg-white/[0.03]">
-            <span className="text-xs font-mono text-neutral-300">
+            <span className="text-xs text-neutral-300">
               Archived {formatLocalTime(task.archived_at ?? '')}. It keeps its comments, time and links.
             </span>
             {onRestore && (
@@ -225,7 +225,7 @@ export function TaskDetailDrawer({
                 type="button"
                 onClick={() => onRestore(task.id)}
                 disabled={busy}
-                className="px-3 py-1 rounded-lg text-xs font-mono font-semibold text-neutral-200 border border-white/20 hover:bg-white/10 disabled:opacity-50 shrink-0"
+                className="px-3 py-1 rounded-lg text-xs font-semibold text-neutral-200 border border-white/20 hover:bg-white/10 disabled:opacity-50 shrink-0"
               >
                 Restore
               </button>
@@ -333,7 +333,7 @@ export function TaskDetailDrawer({
                       onChange={(e) => setDraftReason(e.target.value)}
                       maxLength={500}
                       placeholder="what is in the way"
-                      className="w-full px-3 py-2 rounded-xl text-xs font-mono text-neutral-200 bg-black/30 border focus:outline-none focus:ring-1 focus:ring-emerald-400"
+                      className="w-full px-3 py-2 rounded-xl text-xs text-neutral-200 hq-field focus:outline-none focus:ring-1 focus:ring-emerald-400"
                       style={{ borderColor: 'rgba(255,255,255,0.1)' }}
                     />
                   </div>
@@ -344,13 +344,13 @@ export function TaskDetailDrawer({
                       onChange={(e) => setDraftWaiting(e.target.value)}
                       maxLength={500}
                       placeholder="a person, a task, an outside thing"
-                      className="w-full px-3 py-2 rounded-xl text-xs font-mono text-neutral-200 bg-black/30 border focus:outline-none focus:ring-1 focus:ring-emerald-400"
+                      className="w-full px-3 py-2 rounded-xl text-xs text-neutral-200 hq-field focus:outline-none focus:ring-1 focus:ring-emerald-400"
                       style={{ borderColor: 'rgba(255,255,255,0.1)' }}
                     />
                   </div>
                 </div>
               )}
-              <label className="flex items-center gap-2 text-xs font-mono text-neutral-300">
+              <label className="flex items-center gap-2 text-xs text-neutral-300">
                 <input type="checkbox" checked={draftLong} onChange={(e) => setDraftLong(e.target.checked)} />
                 Long running: a session finishing a turn or exiting does not move this task
               </label>
@@ -360,7 +360,7 @@ export function TaskDetailDrawer({
                   value={draftAssignees}
                   onChange={(e) => setDraftAssignees(e.target.value)}
                   placeholder="hq, reviewer"
-                  className="w-full px-3 py-2 rounded-xl text-xs font-mono text-neutral-200 bg-black/30 border focus:outline-none focus:ring-1 focus:ring-emerald-400"
+                  className="w-full px-3 py-2 rounded-xl text-xs text-neutral-200 hq-field focus:outline-none focus:ring-1 focus:ring-emerald-400"
                   style={{ borderColor: 'rgba(255,255,255,0.1)' }}
                 />
               </div>
@@ -378,10 +378,10 @@ export function TaskDetailDrawer({
           )}
 
           {!editing && task.status === 'blocked' && (task.blocked_reason || task.waiting_on) && (
-            <div className="px-3 py-2 rounded-xl border border-rose-500/20 bg-rose-500/5 text-xs font-mono text-neutral-200 space-y-0.5">
+            <div className="px-3 py-2 rounded-xl border border-rose-500/20 bg-rose-500/5 text-xs text-neutral-200 space-y-0.5">
               {task.blocked_reason && <p className="break-words">Blocked: {task.blocked_reason}</p>}
               {task.waiting_on && <p className="break-words text-neutral-400">Waiting on {task.waiting_on}</p>}
-              {task.blocked_since && <p className="text-[10px] text-neutral-500">since {formatLocalTime(task.blocked_since)}</p>}
+              {task.blocked_since && <p className="text-[11px] text-neutral-500">since {formatLocalTime(task.blocked_since)}</p>}
             </div>
           )}
 
@@ -437,9 +437,9 @@ export function TaskDetailDrawer({
           <TaskCheckpoint key={`checkpoint-${task.id}`} task={task} />
           <TaskLinks key={`links-${task.id}`} task={task} />
           <TaskTime key={`time-${task.id}`} task={task} />
-          <TaskSessions key={task.id} taskId={task.id} />
+          <TaskSessions key={`sessions-${task.id}`} taskId={task.id} />
 
-          <TaskComments key={task.id} taskId={task.id} />
+          <TaskComments key={`comments-${task.id}`} taskId={task.id} />
         </div>
       </div>
     </div>

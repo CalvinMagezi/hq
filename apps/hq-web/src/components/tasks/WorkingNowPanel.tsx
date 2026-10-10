@@ -41,8 +41,8 @@ export function WorkingNowPanel({ sessions, taskById, onSelect }: Props) {
   const now = useNow(sessions.length > 0)
   if (sessions.length === 0) return null
   return (
-    <section aria-label="Working now" className="mb-4 rounded-2xl border border-white/10 bg-white/[0.03] p-2">
-      <h2 className="px-2 pt-1 pb-1.5 text-[10px] font-mono font-bold uppercase tracking-wider text-neutral-400">
+    <section aria-label="Working now" className="mb-4 rounded-2xl hq-card p-2">
+      <h2 className="px-2 pt-1 pb-1.5 text-[11px] font-bold uppercase tracking-wider text-neutral-400">
         Working now ({sessions.length})
       </h2>
       <ul className="space-y-1">
@@ -58,13 +58,13 @@ export function WorkingNowPanel({ sessions, taskById, onSelect }: Props) {
                 <span className="w-1.5 h-1.5 rounded-full bg-current text-neutral-200 animate-pulse shrink-0" />
                 <span className="min-w-0 flex-1">
                   <span className="block truncate text-xs text-neutral-100">{task?.title ?? s.task_id}</span>
-                  <span className="block truncate text-[10px] font-mono text-neutral-500">
+                  <span className="block truncate text-[11px] text-neutral-500">
                     {s.actor}
                     {s.harness ? ` on ${s.harness}` : ''}
                     {s.branch ? `, ${s.branch}` : ''}
                   </span>
                 </span>
-                <span className="shrink-0 text-xs font-mono tabular-nums text-neutral-200">{formatClock(elapsedSeconds(s, now))}</span>
+                <span className="shrink-0 text-xs tabular-nums text-neutral-200">{formatClock(elapsedSeconds(s, now))}</span>
               </button>
             </li>
           )

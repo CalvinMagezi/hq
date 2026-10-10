@@ -16,8 +16,10 @@ const OTHER_PROCESS_POLL: Duration = Duration::from_secs(30);
 struct TasksSnapshot {
     latest_updated_at: String,
     count: i64,
-    // Leases change without touching a task row, so what they look like is part of the fingerprint.
+    // Leases and comments change without touching a task row, so what they look like is part of
+    // the fingerprint: an agent's comment over MCP then reaches an open drawer.
     leases: String,
+    comments: i64,
 }
 
 fn take_tasks_snapshot(db: &hq_db::Database) -> TasksSnapshot {
@@ -25,7 +27,8 @@ fn take_tasks_snapshot(db: &hq_db::Database) -> TasksSnapshot {
         conn.query_row(
             "SELECT COALESCE(MAX(updated_at), ''), COUNT(*), \
                     (SELECT COUNT(*) || '/' || COALESCE(MAX(started_at), '') || '/' || COALESCE(MAX(ended_at), '') \
-                       FROM task_work_sessions) \
+                       FROM task_work_sessions), \
+                    (SELECT COALESCE(MAX(id), 0) FROM task_comments) \
              FROM tasks",
             [],
             |row| {
@@ -33,6 +36,7 @@ fn take_tasks_snapshot(db: &hq_db::Database) -> TasksSnapshot {
                     latest_updated_at: row.get(0)?,
                     count: row.get(1)?,
                     leases: row.get(2)?,
+                    comments: row.get(3)?,
                 })
             },
         )
@@ -122,6 +126,19 @@ mod tests {
         })
         .unwrap();
         assert_ne!(started, take_tasks_snapshot(&db));
+    }
+
+    #[test]
+    fn snapshot_changes_when_a_comment_is_added() {
+        let db = hq_db::Database::open_memory().unwrap();
+        db.with_conn(|c| {
+            hq_db::tasks::create_initiative(c, "in-c", "personal", None, "C", "c", "CMT")?;
+            hq_db::tasks::create_task(c, "tk-c", "in-c", &hq_db::tasks::NewTask { title: "T", created_by: "t", ..Default::default() })
+        })
+        .unwrap();
+        let before = take_tasks_snapshot(&db);
+        db.with_conn(|c| hq_db::tasks::add_comment(c, "tk-c", "agent", "progress", None)).unwrap();
+        assert_ne!(before, take_tasks_snapshot(&db));
     }
 
     #[test]
