@@ -6,8 +6,6 @@ NestedInstallerFiles:
   - RelativeFilePath: hq.exe
     PortableCommandAlias: hq
 Scope: user
-Commands:
-  - hq
 Installers:
   - Architecture: x64
     InstallerUrl: https://github.com/CalvinMagezi/hq/releases/download/v0.9.1-main.136/hq-lite-0.9.1-048f474-windows-x86_64.zip
