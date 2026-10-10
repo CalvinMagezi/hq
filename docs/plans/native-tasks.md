@@ -348,6 +348,74 @@ Rollback of 083, then delete the `083_task_links` row from `schema_version`:
 DROP TABLE task_links;
 ```
 
+## Durable and long-horizon work (TSV2 WS5)
+
+Migration `084_task_durability` adds the columns and tables below. Nothing here changes a task's
+status on its own: staleness is reported, never acted on.
+
+- **Why a task is blocked.** `blocked_reason`, `waiting_on` and `blocked_since` (one line each, at
+  most 500 characters). Over MCP, moving a task to blocked needs a `blocked_reason`, and releasing
+  a lease as blocked takes the summary as the reason. The web board and REST do not insist, since
+  a person dragging a card should not be stopped. All three clear when the task leaves blocked,
+  and a reason on a task that is not blocked is refused.
+- **Long-horizon mode.** `long_horizon` on a task means a harness session finishing a turn or
+  exiting no longer moves it to ready_for_review or blocked (`mission::target`). Starting work
+  still moves it to in_progress, the comment is still written and the session's lease still
+  closes. Set it on create or update.
+- **Checkpoints, the resume packet.** `task_heartbeat` and `task_release` take a `checkpoint`
+  (`summary`, `next_step`, `open_questions`, `files`); a release with a summary and no checkpoint
+  uses the summary. `task_claim` returns the latest as `resume` and `task_get` as `checkpoint`,
+  labelled as notes from an earlier session rather than instructions. Text is cleaned (no control or
+  invisible characters), capped at 2000 characters, at most 50 files, and the latest 50 per task are
+  kept. The drawer shows it as "Where it left off".
+- **Removing archives.** `task_delete`, `DELETE /api/tasks/{id}` and the web delete button archive:
+  the task is hidden from lists and counts but keeps its comments, events, leases, links and
+  checkpoints, and live leases on it end. `task_restore` and `POST /api/tasks/{id}/restore` bring
+  it back with the sub-tasks archived at the same moment, and a sub-task cannot return before its
+  parent. `task_list archived=true` and the web Archived tab list them. Only an archived task can be
+  purged (`task_delete purge=true`, `DELETE ...?purge=true`), which removes everything it holds.
+  Each archive, restore and purge writes a `task_audit` row that outlives the purge. An archived
+  task cannot be changed or claimed, does not block anything, and frees its `external_id`, so a retry
+  after a deliberate delete makes a new task.
+- **Stale tasks.** An in-progress task with no live lease and no write, comment or lease heartbeat
+  for `tasks.stale_after_hours` (default 72) is stale. `task_stale` lists them each with a suggested
+  action and why (review the sub-tasks, close or release a task untouched for 30 days, resume one
+  with a checkpoint, otherwise release), `task_list stale=true` filters to them, `task_get` has a
+  `stale` flag, `GET /api/tasks/stale` serves the web (a "stale" chip on cards and the drawer), and
+  the daemon's `task-stale-digest` posts one web-only item a day. None of them changes a task.
+- **Epics are initiatives.** Nesting stays one level. A large piece of work is its own initiative
+  with a task per workstream and sub-tasks under those, as this epic is filed. `initiative_progress`
+  and `GET /api/initiatives/{id}/progress` roll it up: tasks by status, share complete, summed
+  estimates, worked time and stale count.
+- **Archived tasks stay out of everything.** They do not launch or report sessions (a session
+  already running on one stops recording to it), take sub-tasks or dependencies, appear in the
+  graph, block anything, or count in progress, time or link lookups. A restricted audience's
+  `task_get` also omits the checkpoint, which names files and actors, and a restricted chat cannot
+  attach a watch to a task. A late release from a lease that no longer holds the task writes no
+  checkpoint, so it cannot replace the resume point a newer session left. A blocked reason is
+  judged by what would be stored (a lone control or zero-width character is no reason), and a
+  blocked task's reason cannot be cleared over MCP, only replaced or the task unblocked.
+- **Watches can follow a task.** `watch_create task_id=...` links a recurring watch to an open task:
+  each changed result is left on the task as a quoted note (`watch-<ref>`, at most one per 30
+  minutes, and never counted as work for staleness), the watch's end is noted too, and the watch
+  stops by itself once the task is complete, archived or gone, telling its chat.
+
+Rollback of 084, then delete the `084_task_durability` row from `schema_version` (SQLite 3.35+):
+
+```sql
+DROP TABLE task_checkpoints;
+DROP TABLE task_audit;
+DROP INDEX IF EXISTS idx_tasks_archived;
+ALTER TABLE tasks DROP COLUMN blocked_reason;
+ALTER TABLE tasks DROP COLUMN waiting_on;
+ALTER TABLE tasks DROP COLUMN blocked_since;
+ALTER TABLE tasks DROP COLUMN long_horizon;
+ALTER TABLE tasks DROP COLUMN archived_at;
+ALTER TABLE background_turns DROP COLUMN watch_task_id;
+```
+
+Archived tasks must be restored or purged before rolling back: the old code would show them.
+
 ## Task relationship graph (FR-069)
 
 `task_related` (crates/hq-tools/src/tasks/tools_graph.rs) answers "what else is connected to this task". The

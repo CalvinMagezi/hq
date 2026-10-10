@@ -137,6 +137,19 @@ pub async fn tick(
             }
             continue;
         }
+        // A watch that follows a task ends when the task does, instead of firing on.
+        if let Some(reason) = db.with_conn(|c| background_turns::watch_finished_reason(c, &row.id)).ok().flatten() {
+            if let Err(e) = db.with_conn(|c| background_turns::mark_completed(c, &row.id, &reason, now)) {
+                tracing::warn!(%e, watch = %row.id, "watch scheduler: closing a watch whose task ended failed");
+                continue;
+            }
+            // The chat that set the watch is told it ended, as for an expired one.
+            let notice = format!("Watch `{}` stopped. {reason}", background_turns::short_ref(&row.id));
+            if let Err(e) = notify(row.clone(), notice).await {
+                tracing::warn!(%e, watch = %row.id, "watch scheduler: task-ended notice failed");
+            }
+            continue;
+        }
         if let Err(e) = db.with_conn(|c| background_turns::mark_watch_fired(c, &row.id, now)) {
             // Without the fired-mark the next poll would see the watch as due
             // again; skip dispatch rather than risk a double-fire.
@@ -385,6 +398,42 @@ mod tests {
 
         let due = db.with_conn(|c| background_turns::list_due_watches(c, T0 + 130)).unwrap();
         assert_eq!(due.len(), 1, "a busy firing must be retried, not skipped for an interval");
+    }
+
+    #[tokio::test]
+    async fn a_watch_whose_task_is_complete_is_closed_instead_of_fired() {
+        let db = Database::open_memory().unwrap();
+        db.with_conn(|c| {
+            hq_db::tasks::create_initiative(c, "in-1", "personal", None, "Work", "work", "WK")?;
+            hq_db::tasks::create_task(c, "tk-1", "in-1", &hq_db::tasks::NewTask { title: "Ship", created_by: "t", ..Default::default() })?;
+            Ok(())
+        })
+        .unwrap();
+        seed_watch(&db, "w-task", "telegram", 60, None);
+        db.with_conn(|c| background_turns::set_watch_task(c, "w-task", "WK-001")).unwrap();
+        db.with_conn(|c| {
+            hq_db::tasks::update_task(c, "tk-1", &hq_db::tasks::TaskPatch { status: Some("complete".into()), ..Default::default() }, None)
+                .map(|_| ())
+        })
+        .unwrap();
+
+        let dispatched = Arc::new(Mutex::new(Vec::new()));
+        tick(
+            &db,
+            "telegram",
+            T0 + 100,
+            &recording_dispatch(dispatched.clone(), Arc::new(Mutex::new(vec![]))),
+            &recording_notify(Arc::new(Mutex::new(vec![]))),
+        )
+        .await
+        .unwrap();
+
+        assert!(dispatched.lock().unwrap().is_empty(), "no firing for a finished task");
+        let row = db.with_conn(|c| background_turns::get(c, "w-task")).unwrap().unwrap();
+        assert_eq!(row.status, "completed");
+        assert!(row.result_text.unwrap().contains("complete, so this watch stopped"));
+        let thread = db.with_conn(|c| hq_db::tasks::list_comments(c, "tk-1")).unwrap();
+        assert!(thread.iter().any(|c| c.body.starts_with("Watch finished")), "{thread:?}");
     }
 
     #[tokio::test]

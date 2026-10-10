@@ -19,7 +19,8 @@ const SAME_DAY_ACTION_SOURCES: &[&str] = &["email-triage"];
 /// Source tasks whose items belong in the web inbox only, never the relay.
 /// `skill_review` is `hq_agent::skill_review::VALUE_SOURCE`: skill changes are FYI.
 /// `session_chat` is a harness session a web chat watches that needs an answer.
-pub const WEB_ONLY_SOURCES: &[&str] = &["task_ready_for_review", "skill_review", "session_chat"];
+pub const WEB_ONLY_SOURCES: &[&str] =
+    &["task_ready_for_review", "task_stale_digest", "skill_review", "session_chat"];
 
 /// Only these kinds ask the owner to decide something, so only they get
 /// Approve/Dismiss buttons; everything else is a plain notice.

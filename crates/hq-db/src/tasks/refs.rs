@@ -312,7 +312,8 @@ pub fn tasks_linked_to(conn: &Connection, kind: &str, reference: &str) -> Result
     let (kind, stored, _) = normalize_link(conn, kind, reference, None)?;
     let mut stmt = conn.prepare(&format!(
         "SELECT {TASK_COLS} FROM tasks t JOIN task_links l ON l.task_id = t.id \
-         WHERE l.kind = ?1 AND l.ref = ?2 ORDER BY t.updated_at DESC, t.id DESC LIMIT {MAX_LIST_LIMIT}"
+         WHERE l.kind = ?1 AND l.ref = ?2 AND t.archived_at IS NULL \
+         ORDER BY t.updated_at DESC, t.id DESC LIMIT {MAX_LIST_LIMIT}"
     ))?;
     let mut tasks = stmt
         .query_map(params![kind, stored], row_to_task)?

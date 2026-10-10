@@ -28,6 +28,8 @@ pub struct WatchOrigin {
     pub platform: &'static str,
     pub chat_id: String,
     pub user_id: String,
+    /// A restricted audience (a guest): it may not tie a watch to a task, since the watch writes onto it.
+    pub restricted: bool,
 }
 
 impl WatchOrigin {
@@ -44,6 +46,7 @@ impl WatchOrigin {
             platform,
             chat_id,
             user_id: identity.user_id.clone(),
+            restricted: !identity.scope.is_unrestricted(),
         })
     }
 
@@ -167,7 +170,8 @@ impl HqTool for WatchCreateTool {
             "properties": {
                 "interval_minutes": { "type": "integer", "description": "Minutes between firings, clamped to 5-1440." },
                 "duration_hours": { "type": "integer", "description": "Hours until the watch expires, clamped to 1-8760. Default 720 (30 days)." },
-                "prompt": { "type": "string", "description": "What each firing should check, including the condition that means done." }
+                "prompt": { "type": "string", "description": "What each firing should check, including the condition that means done." },
+                "task_id": { "type": "string", "description": "A task this watch follows (id or display id). Each changed result is noted on it, and the watch stops by itself when the task is complete or archived." }
             },
             "required": ["interval_minutes", "prompt"]
         })
@@ -207,23 +211,37 @@ impl HqTool for WatchCreateTool {
             .clamp(1, MAX_WATCH_EXPIRY_HOURS);
         let id = uuid::Uuid::new_v4().to_string();
         let now = chrono::Utc::now().timestamp();
-        let row = self.db.with_conn(|c| {
-            background_turns::insert_watch(
-                c,
-                &id,
-                origin.platform,
-                &origin.chat_id,
-                None,
-                Some(&origin.user_id),
-                prompt.trim(),
-                now,
-                interval_mins * 60,
-                Some(now + hours * 3600),
-            )?;
-            background_turns::get(c, &id)
+        let task_ref = arg_str(&args, "task_id");
+        if !task_ref.trim().is_empty() && origin.restricted {
+            anyhow::bail!("this chat cannot attach a watch to a task");
+        }
+        let (row, followed) = self.db.with_conn(|c| {
+            hq_db::tasks::in_write_tx(c, |c| {
+                background_turns::insert_watch(
+                    c,
+                    &id,
+                    origin.platform,
+                    &origin.chat_id,
+                    None,
+                    Some(&origin.user_id),
+                    prompt.trim(),
+                    now,
+                    interval_mins * 60,
+                    Some(now + hours * 3600),
+                )?;
+                // An unknown or finished task refuses the whole watch, so none is left running unlinked.
+                let followed = (!task_ref.trim().is_empty())
+                    .then(|| background_turns::set_watch_task(c, &id, task_ref.trim()))
+                    .transpose()?;
+                Ok((background_turns::get(c, &id)?, followed))
+            })
         })?;
         let row = row.ok_or_else(|| anyhow::anyhow!("watch `{id}` was not found after insert"))?;
-        Ok(watch_summary(&row))
+        let mut summary = watch_summary(&row);
+        if let Some(task) = followed {
+            summary["task"] = json!({ "id": task.id, "display_id": task.display_id, "title": task.title });
+        }
+        Ok(summary)
     }
 }
 
@@ -356,6 +374,55 @@ mod tests {
 
     fn telegram_origin() -> Option<WatchOrigin> {
         WatchOrigin::from_identity(&RequestIdentity::from_telegram(42))
+    }
+
+    #[tokio::test]
+    async fn a_watch_can_follow_an_open_task_and_a_bad_task_leaves_no_watch_behind() {
+        let db = Arc::new(Database::open_memory().unwrap());
+        db.with_conn(|c| {
+            hq_db::tasks::create_initiative(c, "in-1", "personal", None, "Work", "work", "WK")?;
+            hq_db::tasks::create_task(c, "tk-1", "in-1", &hq_db::tasks::NewTask { title: "Ship", created_by: "t", ..Default::default() })?;
+            Ok(())
+        })
+        .unwrap();
+        let tools = create_watch_tools(db.clone(), telegram_origin());
+        let ok = tools[0]
+            .execute(json!({ "interval_minutes": 10, "prompt": "is it merged?", "task_id": "WK-001" }))
+            .await
+            .unwrap();
+        assert_eq!(ok["task"]["display_id"], "WK-001");
+        let id = ok["id"].as_str().unwrap().to_string();
+        assert_eq!(db.with_conn(|c| background_turns::watch_task_id(c, &id)).unwrap().as_deref(), Some("tk-1"));
+
+        let running = |db: &Database| db.with_conn(background_turns::list_running).unwrap().len();
+        assert_eq!(running(&db), 1);
+        let bad = tools[0].execute(json!({ "interval_minutes": 10, "prompt": "x", "task_id": "NOPE-9" })).await;
+        assert!(bad.is_err());
+        assert_eq!(running(&db), 1, "the refused watch was not left running without its task");
+    }
+
+    #[tokio::test]
+    async fn a_restricted_chat_cannot_attach_a_watch_to_a_task() {
+        let db = Arc::new(Database::open_memory().unwrap());
+        db.with_conn(|c| {
+            hq_db::tasks::create_initiative(c, "in-1", "personal", None, "Work", "work", "WK")?;
+            hq_db::tasks::create_task(c, "tk-1", "in-1", &hq_db::tasks::NewTask { title: "Private", created_by: "t", ..Default::default() })?;
+            Ok(())
+        })
+        .unwrap();
+        let mut origin = telegram_origin().unwrap();
+        origin.restricted = true;
+        let tools = create_watch_tools(db.clone(), Some(origin));
+        let err = tools[0]
+            .execute(json!({ "interval_minutes": 10, "prompt": "x", "task_id": "WK-001" }))
+            .await
+            .unwrap_err()
+            .to_string();
+        assert!(err.contains("cannot attach"), "{err}");
+        assert!(!err.contains("Private") && !err.contains("WK-001"), "the refusal says nothing about the task");
+        assert!(db.with_conn(background_turns::list_running).unwrap().is_empty(), "no watch was left behind");
+        let plain = tools[0].execute(json!({ "interval_minutes": 10, "prompt": "x" })).await;
+        assert!(plain.is_ok(), "a watch with no task is still fine");
     }
 
     #[tokio::test]

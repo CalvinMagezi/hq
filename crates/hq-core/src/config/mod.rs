@@ -37,7 +37,7 @@ pub use profile::{
     EgressItem, EnvLookup, LiteConfig, Profile, egress_report, enforce_lite, lite_violations,
     process_env,
 };
-pub use tasks::{DEFAULT_LEASE_TTL_SECS, LeaseMode, MIN_LEASE_TTL_SECS, TasksConfig};
+pub use tasks::{DEFAULT_LEASE_TTL_SECS, DEFAULT_STALE_AFTER_HOURS, LeaseMode, MIN_LEASE_TTL_SECS, TasksConfig};
 pub use governance::*;
 pub use harness::*;
 pub use agent_host::{

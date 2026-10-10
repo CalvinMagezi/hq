@@ -223,6 +223,9 @@ pub(crate) struct ListTasksParams {
     pub(crate) top_level_only: Option<bool>,
     pub(crate) limit: Option<usize>,
     pub(crate) offset: Option<usize>,
+    /// List archived tasks instead of active ones.
+    #[serde(default)]
+    pub(crate) archived: bool,
 }
 
 pub(crate) async fn list_tasks_handler(
@@ -242,6 +245,7 @@ pub(crate) async fn list_tasks_handler(
         },
         limit: params.limit,
         offset: params.offset.unwrap_or(0),
+        archived: params.archived,
     };
     let offset = filter.offset;
     let page = state
@@ -284,6 +288,8 @@ pub(crate) struct CreateTaskBody {
     /// Idempotency key, unique per space; a repeat returns the existing task.
     pub(crate) external_id: Option<String>,
     pub(crate) estimate_minutes: Option<i64>,
+    #[serde(default)]
+    pub(crate) long_horizon: bool,
 }
 
 fn default_space() -> String {
@@ -331,6 +337,7 @@ pub(crate) async fn create_task_handler(
                 created_by: &body.created_by,
                 external_id: body.external_id.as_deref(),
                 estimate_minutes: body.estimate_minutes,
+                long_horizon: body.long_horizon,
             },
         )?;
         if body.depends_on.is_empty() || !created {
@@ -375,6 +382,11 @@ pub(crate) struct UpdateTaskBody {
     pub(crate) tags: Option<Vec<String>>,
     #[serde(default, deserialize_with = "deserialize_double_option")]
     pub(crate) estimate_minutes: Option<Option<i64>>,
+    #[serde(default, deserialize_with = "deserialize_double_option")]
+    pub(crate) blocked_reason: Option<Option<String>>,
+    #[serde(default, deserialize_with = "deserialize_double_option")]
+    pub(crate) waiting_on: Option<Option<String>>,
+    pub(crate) long_horizon: Option<bool>,
     pub(crate) expected_status: Option<String>,
 }
 
@@ -404,6 +416,9 @@ pub(crate) async fn update_task_handler(
         parent_task_id: body.parent_task_id,
         tags: body.tags,
         estimate_minutes: body.estimate_minutes,
+        blocked_reason: body.blocked_reason,
+        waiting_on: body.waiting_on,
+        long_horizon: body.long_horizon,
     };
     let expected_status = body.expected_status;
     let (add_deps, remove_deps) = (body.add_depends_on, body.remove_depends_on);
@@ -572,6 +587,61 @@ pub(crate) async fn tasks_linked_to_handler(
     }
 }
 
+/// Where the work last stood, left by the session that worked on it, or null. Notes from
+/// another session: the web shows them as such.
+pub(crate) async fn task_checkpoint_handler(
+    State(state): State<Arc<WsState>>,
+    AxumPath(id): AxumPath<String>,
+) -> Response {
+    let result = state.db.with_conn(move |c| {
+        let task = t::get_task(c, &id)?.ok_or_else(|| not_found("no task found for that id"))?;
+        t::latest_checkpoint(c, &task.id)
+    });
+    match result {
+        Ok(checkpoint) => Json(json!({ "checkpoint": checkpoint })).into_response(),
+        Err(e) => ApiError::from(e).into_response(),
+    }
+}
+
+/// In-progress tasks nobody holds or has touched for the stale window. Reporting only.
+pub(crate) async fn stale_tasks_handler(
+    State(state): State<Arc<WsState>>,
+    Query(params): Query<StaleParams>,
+) -> Response {
+    let settings = hq_tools::tasks::task_settings();
+    let hours = params
+        .hours
+        .filter(|h| *h >= 1)
+        .unwrap_or_else(|| i64::try_from(settings.stale_hours()).unwrap_or(i64::MAX));
+    let ttl = hq_tools::tasks::lease_ttl_secs();
+    match state.db.with_conn(move |c| t::stale_tasks(c, hours, ttl, STALE_LIST_CAP)) {
+        Ok(tasks) => Json(json!({ "stale_after_hours": hours, "count": tasks.len(), "tasks": tasks })).into_response(),
+        Err(e) => ApiError::from(e).into_response(),
+    }
+}
+
+#[derive(Debug, Deserialize)]
+pub(crate) struct StaleParams {
+    hours: Option<i64>,
+}
+
+/// Most stale tasks one reply lists.
+const STALE_LIST_CAP: usize = 500;
+
+/// How an initiative, the epic in this system, is going.
+pub(crate) async fn initiative_progress_handler(
+    State(state): State<Arc<WsState>>,
+    AxumPath(id): AxumPath<String>,
+) -> Response {
+    let settings = hq_tools::tasks::task_settings();
+    let hours = i64::try_from(settings.stale_hours()).unwrap_or(i64::MAX);
+    let ttl = hq_tools::tasks::lease_ttl_secs();
+    match state.db.with_conn(move |c| t::initiative_rollup(c, &id, hours, ttl)) {
+        Ok(rollup) => Json(json!(rollup)).into_response(),
+        Err(e) => ApiError::from(e).into_response(),
+    }
+}
+
 /// Most recent work leases the endpoint returns.
 const WORK_SESSIONS_SHOWN: usize = 50;
 
@@ -597,6 +667,9 @@ pub(crate) async fn list_work_sessions_handler(
 pub(crate) struct DeleteTaskParams {
     #[serde(default)]
     pub(crate) cascade: bool,
+    /// Permanently delete a task that is already archived.
+    #[serde(default)]
+    pub(crate) purge: bool,
 }
 
 pub(crate) async fn delete_task_handler(
@@ -608,7 +681,12 @@ pub(crate) async fn delete_task_handler(
     let result = state.db.with_conn(move |c| {
         let task = t::get_task(c, &target)?.ok_or_else(|| not_found("no task found for that id"))?;
         let dependents: Vec<String> = t::list_dependents(c, &task.id)?.into_iter().map(|d| d.id).collect();
-        let deleted = t::delete_task(c, &task.id, params.cascade)?;
+        // Removing archives, so nothing is lost; only an already archived task can be purged.
+        let deleted = if params.purge {
+            t::purge_task(c, &task.id, "web")?
+        } else {
+            t::archive_task(c, &task.id, params.cascade, "web")?
+        };
         Ok::<_, anyhow::Error>((task, deleted, dependents))
     });
     let (task, deleted, dependents) = match result {
@@ -622,7 +700,22 @@ pub(crate) async fn delete_task_handler(
     let mut related: Vec<String> = dependents.into_iter().filter(|d| !deleted.contains(d)).collect();
     related.extend(task.parent_task_id.iter().cloned());
     broadcast_related(&state, related);
-    Json(json!({ "deleted": true, "id": id, "deleted_ids": deleted })).into_response()
+    Json(json!({ "deleted": true, "archived": !params.purge, "id": id, "deleted_ids": deleted })).into_response()
+}
+
+/// Brings an archived task, and the sub-tasks archived with it, back.
+pub(crate) async fn restore_task_handler(
+    State(state): State<Arc<WsState>>,
+    AxumPath(id): AxumPath<String>,
+) -> Response {
+    match state.db.with_conn(move |c| t::restore_task(c, &id, "web")) {
+        Ok(task) => {
+            notify_and_broadcast(&state, &task, "task:created", &[]);
+            broadcast_related(&state, task.parent_task_id.iter().cloned().collect());
+            Json(task_json(&task)).into_response()
+        }
+        Err(e) => ApiError::from(e).into_response(),
+    }
 }
 
 pub(crate) async fn list_comments_handler(
@@ -726,6 +819,7 @@ mod tests {
                 created_by: "test".into(),
                 external_id: Some("req-1".into()),
                 estimate_minutes: None,
+                long_horizon: false,
             };
             create_task_handler(State(state.clone()), Json(body))
         };
@@ -767,6 +861,7 @@ mod tests {
                 created_by: "test".into(),
                 external_id: None,
                 estimate_minutes: None,
+                long_horizon: false,
             }),
         )
         .await;
@@ -784,6 +879,7 @@ mod tests {
                 top_level_only: None,
                 limit: None,
                 offset: None,
+                archived: false,
             }),
         )
         .await;
@@ -876,6 +972,56 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn removing_archives_and_restoring_and_purging_follow_the_same_rules_as_the_tools() {
+        let state = test_state();
+        let id: String = create_titled(&state, "Maybe later").await["id"].as_str().unwrap().into();
+        let delete = |purge: bool| {
+            delete_task_handler(State(state.clone()), AxumPath(id.clone()), Query(DeleteTaskParams { cascade: false, purge }))
+        };
+        assert_eq!(delete(true).await.status(), StatusCode::BAD_REQUEST, "an active task cannot be purged");
+        let archived = body_json(delete(false).await).await;
+        assert_eq!(archived["archived"], true);
+        let list = |archived: bool| {
+            list_tasks_handler(
+                State(state.clone()),
+                Query(ListTasksParams {
+                    space_id: None,
+                    initiative_id: None,
+                    status: None,
+                    tag: None,
+                    priority: None,
+                    parent_task_id: None,
+                    top_level_only: None,
+                    limit: None,
+                    offset: None,
+                    archived,
+                }),
+            )
+        };
+        assert_eq!(body_json(list(false).await).await["total"], 0);
+        assert_eq!(body_json(list(true).await).await["total"], 1);
+        let back = body_json(restore_task_handler(State(state.clone()), AxumPath(id.clone())).await).await;
+        assert!(back["archived_at"].is_null());
+        assert_eq!(restore_task_handler(State(state.clone()), AxumPath(id.clone())).await.status(), StatusCode::BAD_REQUEST);
+        delete(false).await;
+        let purged = body_json(delete(true).await).await;
+        assert_eq!(purged["archived"], false);
+        assert_eq!(restore_task_handler(State(state), AxumPath(id)).await.status(), StatusCode::BAD_REQUEST);
+    }
+
+    #[tokio::test]
+    async fn stale_and_progress_endpoints_answer_even_when_empty() {
+        let state = test_state();
+        let stale = body_json(stale_tasks_handler(State(state.clone()), Query(StaleParams { hours: None })).await).await;
+        assert_eq!(stale["count"], 0);
+        assert_eq!(stale["stale_after_hours"], 72);
+        let id: String = create_titled(&state, "In an initiative").await["initiative_id"].as_str().unwrap().into();
+        let progress = body_json(initiative_progress_handler(State(state.clone()), AxumPath(id)).await).await;
+        assert_eq!(progress["total"], 1);
+        assert_eq!(initiative_progress_handler(State(state), AxumPath("nope".into())).await.status(), StatusCode::BAD_REQUEST);
+    }
+
+    #[tokio::test]
     async fn the_list_reports_its_total_and_pages_on_offset() {
         let state = test_state();
         for n in 0..3 {
@@ -892,6 +1038,7 @@ mod tests {
                 top_level_only: None,
                 limit: Some(limit),
                 offset: Some(offset),
+                archived: false,
             };
             list_tasks_handler(State(state.clone()), Query(params))
         };
@@ -968,12 +1115,12 @@ mod tests {
         let refused = delete_task_handler(
             State(state.clone()),
             AxumPath(parent_id.clone()),
-            Query(DeleteTaskParams { cascade: false }),
+            Query(DeleteTaskParams { cascade: false, purge: false }),
         )
         .await;
         assert_eq!(refused.status(), StatusCode::BAD_REQUEST);
         let deleted =
-            delete_task_handler(State(state.clone()), AxumPath(parent_id), Query(DeleteTaskParams { cascade: true }))
+            delete_task_handler(State(state.clone()), AxumPath(parent_id), Query(DeleteTaskParams { cascade: true, purge: false }))
                 .await;
         assert_eq!(body_json(deleted).await["deleted_ids"].as_array().unwrap().len(), 2);
     }
@@ -1036,7 +1183,7 @@ mod tests {
         let update = update_task_handler(State(state.clone()), missing(), Json(claim_body())).await;
         assert_eq!(update.status(), StatusCode::NOT_FOUND);
         let delete =
-            delete_task_handler(State(state.clone()), missing(), Query(DeleteTaskParams { cascade: false })).await;
+            delete_task_handler(State(state.clone()), missing(), Query(DeleteTaskParams { cascade: false, purge: false })).await;
         assert_eq!(delete.status(), StatusCode::NOT_FOUND);
         assert_eq!(list_comments_handler(State(state.clone()), missing()).await.status(), StatusCode::NOT_FOUND);
         assert_eq!(list_task_events_handler(State(state.clone()), missing()).await.status(), StatusCode::NOT_FOUND);

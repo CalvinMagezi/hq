@@ -111,8 +111,22 @@ pub fn clean_label(text: &str) -> String {
 
 /// Zero-width, bidirectional-override and byte-order characters: they print as
 /// nothing or reorder what is around them, so a label could look like another.
-fn is_invisible(c: char) -> bool {
-    matches!(c, '\u{200B}'..='\u{200F}' | '\u{202A}'..='\u{202E}' | '\u{2060}'..='\u{2064}' | '\u{2066}'..='\u{2069}' | '\u{FEFF}')
+pub(super) fn is_invisible(c: char) -> bool {
+    matches!(
+        c,
+        '\u{00AD}'
+            | '\u{115F}'..='\u{1160}'
+            | '\u{180E}'
+            | '\u{200B}'..='\u{200F}'
+            | '\u{2028}'..='\u{202E}'
+            | '\u{2060}'..='\u{2064}'
+            | '\u{2066}'..='\u{2069}'
+            | '\u{3164}'
+            | '\u{FE00}'..='\u{FE0F}'
+            | '\u{FEFF}'
+            | '\u{FFA0}'
+            | '\u{E0000}'..='\u{E007F}'
+    )
 }
 
 /// Names a claimer may not take, because HQ writes under them: spawned sessions
@@ -299,6 +313,9 @@ pub fn claim(
     let out = in_write_tx(conn, |conn| {
         let task = get_task(conn, task_ref)?
             .ok_or_else(|| anyhow::anyhow!("no task '{task_ref}'"))?;
+        if task.archived_at.is_some() {
+            anyhow::bail!("task {} is archived; restore it before claiming it", task.display_id);
+        }
         if task.status == STATUS_COMPLETE {
             anyhow::bail!("task {} is complete; reopen it before claiming it", task.display_id);
         }
@@ -384,6 +401,9 @@ pub struct Released {
     /// False when a requested status was not applied because the task had moved
     /// on since an expired lease ended. The summary is still left on the thread.
     pub status_applied: bool,
+    /// Whether the lease still held the task as of this release. A late release from an
+    /// expired lease on a task that has moved on is not current, and writes no checkpoint.
+    pub current: bool,
 }
 
 /// Ends the lease a token names. With `status` the task moves there too, under
@@ -436,7 +456,15 @@ pub fn release(
         let ctx = WriteCtx { actor: Some(&lease.actor), work_session_id: Some(&lease.id) };
         let status_applied = match status {
             Some(status) if may_change_status => {
-                let patch = TaskPatch { status: Some(status.to_string()), ..Default::default() };
+                let reason = (status == STATUS_BLOCKED).then(|| first_line(summary));
+                if status == STATUS_BLOCKED && reason.as_deref().is_none_or(str::is_empty) {
+                    anyhow::bail!("say why you are blocked: give a summary, which becomes the blocked reason");
+                }
+                let patch = TaskPatch {
+                    status: Some(status.to_string()),
+                    blocked_reason: reason.map(Some),
+                    ..Default::default()
+                };
                 update_task_as(conn, &lease.task_id, &patch, None, &ctx)?;
                 true
             }
@@ -450,8 +478,13 @@ pub fn release(
         )?;
         let task = get_task(conn, &lease.task_id)?
             .ok_or_else(|| anyhow::anyhow!("task vanished while releasing"))?;
-        Ok(Released { session, task, status_applied })
+        Ok(Released { session, task, status_applied, current: may_change_status })
     })
+}
+
+/// The first non-empty line of a summary, for the short reason a task is blocked.
+fn first_line(summary: &str) -> String {
+    summary.lines().map(str::trim).find(|l| !l.is_empty()).unwrap_or_default().chars().take(MAX_BLOCK_TEXT_CHARS).collect()
 }
 
 /// The thread comment for a release: what HQ did, then the agent's own words

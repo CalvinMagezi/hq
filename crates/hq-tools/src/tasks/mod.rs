@@ -19,6 +19,7 @@ mod scoped;
 mod tools_graph;
 mod tools_links;
 mod tools_lease;
+mod tools_ops;
 mod tools_org;
 mod tools_task;
 mod tools_time;
@@ -37,6 +38,7 @@ pub use tools_lease::{lease_ttl_secs, task_settings};
 use tools_graph::TaskRelatedTool;
 use tools_links::*;
 use tools_lease::*;
+use tools_ops::{InitiativeProgressTool, TaskStaleTool};
 use tools_org::*;
 use tools_task::*;
 use tools_time::TaskTimeReportTool;
@@ -76,7 +78,7 @@ pub fn create_task_tools_for_chat(
             vault_path: vault_path.clone(),
             db: db.clone(),
         }),
-        Box::new(TaskListTool { db: db.clone() }),
+        Box::new(TaskListTool { settings: settings.clone(), db: db.clone() }),
         Box::new(TaskGetTool { settings: settings.clone(), db: db.clone() }),
         Box::new(TaskUpdateTool {
             settings: settings.clone(),
@@ -84,13 +86,16 @@ pub fn create_task_tools_for_chat(
             db: db.clone(),
         }),
         Box::new(TaskRelatedTool { db: db.clone() }),
-        Box::new(TaskDeleteTool { db: db.clone() }),
+        Box::new(TaskDeleteTool { settings: settings.clone(), db: db.clone() }),
+        Box::new(TaskRestoreTool { settings: settings.clone(), db: db.clone() }),
         Box::new(TaskCommentAddTool { settings: settings.clone(), db: db.clone() }),
         Box::new(TaskCommentListTool { db: db.clone() }),
         Box::new(TaskClaimTool { settings: settings.clone(), db: db.clone() }),
         Box::new(TaskHeartbeatTool { settings: settings.clone(), db: db.clone() }),
         Box::new(TaskReleaseTool { settings: settings.clone(), db: db.clone() }),
         Box::new(TaskTimeReportTool { settings: settings.clone(), db: db.clone() }),
+        Box::new(TaskStaleTool { settings: settings.clone(), db: db.clone() }),
+        Box::new(InitiativeProgressTool { settings: settings.clone(), db: db.clone() }),
         Box::new(TaskLinkAddTool { settings, db: db.clone() }),
         Box::new(TaskLinkRemoveTool { db: db.clone() }),
         Box::new(TaskLinkListTool { db: db.clone() }),

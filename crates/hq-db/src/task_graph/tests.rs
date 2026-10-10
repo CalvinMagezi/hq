@@ -247,7 +247,7 @@ fn deleted_tasks_are_pruned_and_budget_leaves_stale_remaining() {
     );
     sync_all(&db);
 
-    db.with_conn(|c| tasks::delete_task(c, "a2", false))
+    db.with_conn(|c| tasks::archive_task(c, "a2", false, "test"))
         .unwrap();
     let report = sync_all(&db);
     assert_eq!(report.removed, 1);

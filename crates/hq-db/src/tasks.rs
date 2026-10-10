@@ -92,6 +92,19 @@ pub fn validate_status(status: &str) -> Result<()> {
     anyhow::bail!("unknown status '{status}', expected one of {}", STATUSES.join(", "))
 }
 
+/// Longest blocked reason or waiting-on text kept.
+pub const MAX_BLOCK_TEXT_CHARS: usize = 500;
+
+/// A one-line reason or waiting-on text, or an error when it is too long. Empty is `None`.
+pub fn clean_block_text(field: &str, text: &str) -> Result<Option<String>> {
+    let cleaned: String = text.chars().filter(|c| !c.is_control() && !leases::is_invisible(*c)).collect();
+    let cleaned = cleaned.trim();
+    if cleaned.chars().count() > MAX_BLOCK_TEXT_CHARS {
+        anyhow::bail!("{field} is longer than {MAX_BLOCK_TEXT_CHARS} characters");
+    }
+    Ok((!cleaned.is_empty()).then(|| cleaned.to_string()))
+}
+
 /// An estimate is a whole number of minutes, at least one.
 pub fn validate_estimate(minutes: i64) -> Result<()> {
     if (1..=MAX_ESTIMATE_MINUTES).contains(&minutes) {
@@ -189,6 +202,16 @@ pub struct Task {
     pub completed_at: Option<String>,
     /// Planned effort in minutes. `None` = no estimate.
     pub estimate_minutes: Option<i64>,
+    /// Why a blocked task is stuck. Cleared when it leaves blocked.
+    pub blocked_reason: Option<String>,
+    /// What a blocked task waits on: a person, a task, an outside thing.
+    pub waiting_on: Option<String>,
+    /// UTC timestamp of the move into blocked.
+    pub blocked_since: Option<String>,
+    /// A finished turn or an exit of a session on this task does not move it.
+    pub long_horizon: bool,
+    /// UTC timestamp it was archived. `None` = active. Archived tasks are hidden from lists.
+    pub archived_at: Option<String>,
     /// Caller-supplied idempotency key, unique within the task's space.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub external_id: Option<String>,
@@ -244,6 +267,8 @@ pub struct TaskFilter {
     /// Page size, at most `MAX_LIST_LIMIT`. `None` = the maximum.
     pub limit: Option<usize>,
     pub offset: usize,
+    /// `false` = active tasks only (the default); `true` = only archived ones.
+    pub archived: bool,
 }
 
 /// Everything a new task needs besides its id and initiative.
@@ -261,6 +286,7 @@ pub struct NewTask<'a> {
     /// Idempotency key, unique per space. See `create_task_dedup`.
     pub external_id: Option<&'a str>,
     pub estimate_minutes: Option<i64>,
+    pub long_horizon: bool,
 }
 
 /// A field left `None` is untouched. The `Option<Option<String>>` fields
@@ -276,11 +302,17 @@ pub struct TaskPatch {
     pub parent_task_id: Option<Option<String>>,
     pub tags: Option<Vec<String>>,
     pub estimate_minutes: Option<Option<i64>>,
+    pub blocked_reason: Option<Option<String>>,
+    pub waiting_on: Option<Option<String>>,
+    pub long_horizon: Option<bool>,
 }
 
 mod crud;
+mod archive;
+mod checkpoints;
 mod leases;
 mod links;
+mod stale;
 mod time;
 mod messages;
 mod org;
@@ -290,8 +322,11 @@ mod rows;
 mod tests;
 
 pub use crud::*;
+pub use archive::*;
+pub use checkpoints::*;
 pub use leases::*;
 pub use links::*;
+pub use stale::*;
 pub use time::*;
 pub use messages::*;
 pub use org::*;

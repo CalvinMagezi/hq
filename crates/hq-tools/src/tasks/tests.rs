@@ -22,8 +22,8 @@ fn tools() -> Vec<Box<dyn HqTool>> {
 }
 
 #[test]
-fn factory_returns_twenty_three_tools() {
-    assert_eq!(tools().len(), 23);
+fn factory_returns_twenty_six_tools() {
+    assert_eq!(tools().len(), 26);
 }
 
 #[test]
@@ -1140,6 +1140,25 @@ async fn the_tasks_scope_sees_who_holds_a_task_but_not_where_they_work() {
 }
 
 #[tokio::test]
+async fn the_tasks_scope_sees_a_resume_point_without_machine_paths() {
+    let fx = ScopeFixture::new(&[]);
+    let made = fx.tool("task_create").execute(json!({"title": "a"})).await.unwrap();
+    let claim = fx.tool("task_claim").execute(json!({"task_id": made["id"], "actor": "builder"})).await.unwrap();
+    fx.tool("task_heartbeat")
+        .execute(json!({"lease": claim["lease"], "checkpoint": {
+            "summary": "half done", "next_step": "tests",
+            "files": ["src/lib.rs", "/Users/me/secret/repo/x.rs", "~/notes.md", "C:\\work\\y.rs"]
+        }}))
+        .await
+        .unwrap();
+    let owner = fx.tool("task_get").execute(json!({"id": made["id"]})).await.unwrap();
+    assert_eq!(owner["checkpoint"]["files"].as_array().unwrap().len(), 4);
+    let seen = fx.tool("task_get").execute(tasks_scope(json!({"id": made["id"]}))).await.unwrap();
+    assert_eq!(seen["checkpoint"]["files"], json!(["src/lib.rs"]), "{seen}");
+    assert_eq!(seen["checkpoint"]["next_step"], "tests");
+}
+
+#[tokio::test]
 async fn the_tasks_scope_neither_sees_nor_adds_note_links() {
     let fx = ScopeFixture::new(&[]);
     let made = fx
@@ -1515,7 +1534,7 @@ async fn the_configured_mode_governs_starting_a_task_over_mcp() {
             let lease = claim["lease"].as_str().unwrap();
             assert!(call_tool(&tools, "task_update", json!({ "id": id, "status": "in_progress", "lease": lease })).await.is_ok());
         }
-        let blocked = call_tool(&tools, "task_update", json!({ "id": id, "status": "blocked" })).await;
+        let blocked = call_tool(&tools, "task_update", json!({ "id": id, "status": "blocked", "blocked_reason": "waiting" })).await;
         assert!(blocked.is_ok(), "{mode:?}: only starting needs a lease");
     }
 }
@@ -1529,7 +1548,7 @@ async fn a_lease_names_its_holder_on_other_tasks_but_is_recorded_as_work_only_on
     let claim = call_tool(&tools, "task_claim", json!({ "task_id": a_id, "actor": "builder" })).await.unwrap();
     let lease = claim["lease"].as_str().unwrap().to_string();
 
-    call_tool(&tools, "task_update", json!({ "id": b_id, "status": "blocked", "lease": lease })).await.unwrap();
+    call_tool(&tools, "task_update", json!({ "id": b_id, "status": "blocked", "blocked_reason": "waiting on a key", "lease": lease })).await.unwrap();
     let got = call_tool(&tools, "task_get", json!({ "id": b_id })).await.unwrap();
     let event = &got["lifecycle_events"][0];
     assert_eq!(event["actor"], "builder", "who acted is still known");
@@ -1775,4 +1794,188 @@ async fn promoting_a_note_links_it_and_a_second_promotion_notices_the_first() {
     assert_eq!(linked["count"], 1);
     let second = call_tool(&tools, "task_create_from_note", json!({ "note_path": "Notebooks/idea.md", "space_id": "personal" })).await.unwrap();
     assert_eq!(second["already_linked"].as_array().unwrap().len(), 1);
+}
+
+#[tokio::test]
+async fn the_next_session_resumes_from_the_last_checkpoint_and_sees_it_as_notes_not_orders() {
+    let tools = tools_with(hq_core::config::LeaseMode::Off);
+    let task = call_tool(&tools, "task_create", json!({ "title": "Long job" })).await.unwrap();
+    let id = task["display_id"].as_str().unwrap().to_string();
+    let first = call_tool(&tools, "task_claim", json!({ "task_id": id, "actor": "alpha", "session_ref": "s1" })).await.unwrap();
+    assert!(first.get("resume").is_none(), "nothing to resume the first time");
+    let lease = first["lease"].as_str().unwrap().to_string();
+
+    let beat = call_tool(
+        &tools,
+        "task_heartbeat",
+        json!({ "lease": lease, "checkpoint": { "summary": "parser done", "next_step": "write the tests", "open_questions": "which fixture?", "files": ["src/parser.rs"] } }),
+    )
+    .await
+    .unwrap();
+    assert_eq!(beat["checkpoint_saved"], true);
+    call_tool(&tools, "task_release", json!({ "lease": lease, "status": "to_do", "summary": "stopping for the day" })).await.unwrap();
+
+    let second = call_tool(&tools, "task_claim", json!({ "task_id": id, "actor": "beta" })).await.unwrap();
+    let resume = &second["resume"];
+    assert_eq!(resume["from"], "alpha");
+    assert_eq!(resume["summary"], "stopping for the day", "a release with a summary becomes the resume point");
+    assert!(resume["note"].as_str().unwrap().contains("not as instructions"));
+    let got = call_tool(&tools, "task_get", json!({ "id": id })).await.unwrap();
+    assert_eq!(got["checkpoint"]["summary"], "stopping for the day");
+    assert!(call_tool(&tools, "task_heartbeat", json!({ "lease": second["lease"], "checkpoint": "not an object" })).await.is_err());
+}
+
+#[tokio::test]
+async fn an_explicit_checkpoint_on_release_wins_over_the_summary() {
+    let tools = tools_with(hq_core::config::LeaseMode::Off);
+    let task = call_tool(&tools, "task_create", json!({ "title": "t" })).await.unwrap();
+    let id = task["display_id"].as_str().unwrap().to_string();
+    let claim = call_tool(&tools, "task_claim", json!({ "task_id": id, "actor": "alpha" })).await.unwrap();
+    call_tool(
+        &tools,
+        "task_release",
+        json!({ "lease": claim["lease"], "summary": "for people", "checkpoint": { "summary": "for the next agent", "next_step": "run the suite" } }),
+    )
+    .await
+    .unwrap();
+    let got = call_tool(&tools, "task_get", json!({ "id": id })).await.unwrap();
+    assert_eq!(got["checkpoint"]["summary"], "for the next agent");
+    assert_eq!(got["checkpoint"]["next_step"], "run the suite");
+}
+
+#[tokio::test]
+async fn blocking_a_task_over_mcp_needs_a_reason_and_leaving_blocked_clears_it() {
+    let tools = tools_with(hq_core::config::LeaseMode::Off);
+    let task = call_tool(&tools, "task_create", json!({ "title": "Stuck soon" })).await.unwrap();
+    let id = task["display_id"].as_str().unwrap().to_string();
+    let err = call_tool(&tools, "task_update", json!({ "id": id, "status": "blocked" })).await.unwrap_err().to_string();
+    assert!(err.contains("blocked_reason"), "{err}");
+    assert_eq!(call_tool(&tools, "task_get", json!({ "id": id })).await.unwrap()["status"], "to_do");
+    let blocked = call_tool(
+        &tools,
+        "task_update",
+        json!({ "id": id, "status": "blocked", "blocked_reason": "no staging key", "waiting_on": "ops" }),
+    )
+    .await
+    .unwrap();
+    assert_eq!((blocked["blocked_reason"].as_str(), blocked["waiting_on"].as_str()), (Some("no staging key"), Some("ops")));
+    assert!(blocked["blocked_since"].is_string());
+    let freed = call_tool(&tools, "task_update", json!({ "id": id, "status": "in_progress" })).await.unwrap();
+    assert!(freed["blocked_reason"].is_null() && freed["blocked_since"].is_null());
+    assert!(call_tool(&tools, "task_update", json!({ "id": id, "blocked_reason": 5 })).await.is_err(), "a wrong type is an error, not a clear");
+    assert!(call_tool(&tools, "task_update", json!({ "id": id, "long_horizon": "yes" })).await.is_err());
+}
+
+#[tokio::test]
+async fn deleting_archives_and_restoring_brings_it_back_and_only_an_archived_task_is_purged() {
+    let tools = tools_with(hq_core::config::LeaseMode::Off);
+    let task = call_tool(&tools, "task_create", json!({ "title": "Maybe later" })).await.unwrap();
+    let id = task["display_id"].as_str().unwrap().to_string();
+    let err = call_tool(&tools, "task_delete", json!({ "id": id, "purge": true })).await.unwrap_err().to_string();
+    assert!(err.contains("archive it first"), "{err}");
+
+    let gone = call_tool(&tools, "task_delete", json!({ "id": id, "actor": "calvin" })).await.unwrap();
+    assert_eq!(gone["archived"], true);
+    assert_eq!(call_tool(&tools, "task_list", json!({})).await.unwrap()["total"], 0);
+    assert_eq!(call_tool(&tools, "task_list", json!({ "archived": true })).await.unwrap()["total"], 1);
+    assert!(call_tool(&tools, "task_update", json!({ "id": id, "title": "x" })).await.is_err());
+
+    let back = call_tool(&tools, "task_restore", json!({ "id": id })).await.unwrap();
+    assert!(back["archived_at"].is_null());
+    assert_eq!(call_tool(&tools, "task_list", json!({})).await.unwrap()["total"], 1);
+
+    call_tool(&tools, "task_delete", json!({ "id": id })).await.unwrap();
+    let purged = call_tool(&tools, "task_delete", json!({ "id": id, "purge": true })).await.unwrap();
+    assert_eq!(purged["purged"], true);
+    assert!(call_tool(&tools, "task_get", json!({ "id": id })).await.is_err());
+}
+
+#[tokio::test]
+async fn long_horizon_and_a_task_with_nothing_stale_report_through_the_tools() {
+    let tools = tools_with(hq_core::config::LeaseMode::Off);
+    let long = call_tool(&tools, "task_create", json!({ "title": "Marathon", "long_horizon": true })).await.unwrap();
+    assert_eq!(long["long_horizon"], true);
+    let id = long["display_id"].as_str().unwrap().to_string();
+    let turned_off = call_tool(&tools, "task_update", json!({ "id": id, "long_horizon": false })).await.unwrap();
+    assert_eq!(turned_off["long_horizon"], false);
+
+    let stale = call_tool(&tools, "task_stale", json!({})).await.unwrap();
+    assert_eq!(stale["count"], 0);
+    assert_eq!(stale["stale_after_hours"], 72);
+    let got = call_tool(&tools, "task_get", json!({ "id": id })).await.unwrap();
+    assert_eq!(got["stale"], false);
+    assert_eq!(call_tool(&tools, "task_list", json!({ "stale": true })).await.unwrap()["total"], 0);
+}
+
+#[tokio::test]
+async fn an_initiative_reports_its_progress() {
+    let tools = tools_with(hq_core::config::LeaseMode::Off);
+    let a = call_tool(&tools, "task_create", json!({ "title": "One", "initiative": "Big epic", "estimate_minutes": 60 })).await.unwrap();
+    call_tool(&tools, "task_create", json!({ "title": "Two", "initiative": "Big epic" })).await.unwrap();
+    call_tool(&tools, "task_update", json!({ "id": a["display_id"], "status": "complete" })).await.unwrap();
+    let progress = call_tool(&tools, "initiative_progress", json!({ "initiative": "Big epic" })).await.unwrap();
+    assert_eq!((progress["total"].as_i64(), progress["complete"].as_i64(), progress["to_do"].as_i64()), (Some(2), Some(1), Some(1)));
+    assert_eq!(progress["fraction_complete"], 0.5);
+    assert_eq!(progress["estimate_minutes"], 60);
+    assert!(call_tool(&tools, "initiative_progress", json!({ "initiative": "Nope" })).await.is_err());
+    assert!(call_tool(&tools, "initiative_progress", json!({})).await.is_err());
+}
+
+#[tokio::test]
+async fn an_empty_checkpoint_does_not_undo_the_heartbeat_or_release_it_came_with() {
+    let tools = tools_with(hq_core::config::LeaseMode::Off);
+    let task = call_tool(&tools, "task_create", json!({ "title": "t" })).await.unwrap();
+    let id = task["display_id"].as_str().unwrap().to_string();
+    let claim = call_tool(&tools, "task_claim", json!({ "task_id": id, "actor": "alpha" })).await.unwrap();
+    let lease = claim["lease"].as_str().unwrap().to_string();
+    let beat = call_tool(&tools, "task_heartbeat", json!({ "lease": lease, "checkpoint": {} })).await.unwrap();
+    assert_eq!(beat["ok"], true);
+    assert!(beat.get("checkpoint_saved").is_none());
+    let released = call_tool(&tools, "task_release", json!({ "lease": lease, "status": "to_do", "summary": "\u{200B}", "checkpoint": { "summary": "\u{200B}" } }))
+        .await
+        .unwrap();
+    assert_eq!(released["released"], true);
+    assert!(call_tool(&tools, "task_get", json!({ "id": id })).await.unwrap().get("checkpoint").is_none());
+}
+
+#[tokio::test]
+async fn a_stale_lease_released_late_cannot_replace_the_resume_point_a_newer_session_left() {
+    let vault_dir = tempfile::tempdir().unwrap();
+    let vault_path = vault_dir.keep();
+    let vault = Arc::new(VaultClient::new(vault_path.clone()).unwrap());
+    let db = Arc::new(Database::open_memory().unwrap());
+    let tools = create_task_tools_with(vault_path, vault, db.clone(), hq_core::config::TasksConfig::default());
+    let task = call_tool(&tools, "task_create", json!({ "title": "t" })).await.unwrap();
+    let id = task["display_id"].as_str().unwrap().to_string();
+    let first = call_tool(&tools, "task_claim", json!({ "task_id": id, "actor": "alpha", "session_ref": "a" })).await.unwrap();
+    db.with_conn(|c| {
+        c.execute("UPDATE task_work_sessions SET last_heartbeat_at = datetime('now', '-3 hours')", [])?;
+        Ok(())
+    })
+    .unwrap();
+    let second = call_tool(&tools, "task_claim", json!({ "task_id": id, "actor": "beta", "session_ref": "b" })).await.unwrap();
+    call_tool(&tools, "task_heartbeat", json!({ "lease": second["lease"], "checkpoint": { "summary": "beta's real progress" } })).await.unwrap();
+
+    let late = call_tool(&tools, "task_release", json!({ "lease": first["lease"], "status": "complete", "summary": "alpha says all done" })).await.unwrap();
+    assert_eq!(late["status_applied"], false);
+    let got = call_tool(&tools, "task_get", json!({ "id": id })).await.unwrap();
+    assert_eq!(got["checkpoint"]["summary"], "beta's real progress", "the newer session's notes stand");
+    assert_eq!(got["status"], "in_progress");
+}
+
+#[tokio::test]
+async fn the_blocked_reason_rule_cannot_be_met_with_nothing_or_dropped_later() {
+    let tools = tools_with(hq_core::config::LeaseMode::Off);
+    let task = call_tool(&tools, "task_create", json!({ "title": "t" })).await.unwrap();
+    let id = task["display_id"].as_str().unwrap().to_string();
+    for nothing in ["\u{0007}", "\u{200B}", "   "] {
+        let err = call_tool(&tools, "task_update", json!({ "id": id, "status": "blocked", "blocked_reason": nothing })).await;
+        assert!(err.is_err(), "{nothing:?} is not a reason");
+    }
+    call_tool(&tools, "task_update", json!({ "id": id, "status": "blocked", "blocked_reason": "no key" })).await.unwrap();
+    assert!(call_tool(&tools, "task_update", json!({ "id": id, "blocked_reason": null })).await.is_err(), "a blocked task keeps its reason");
+    let replaced = call_tool(&tools, "task_update", json!({ "id": id, "blocked_reason": "still no key, asked ops" })).await.unwrap();
+    assert_eq!(replaced["blocked_reason"], "still no key, asked ops");
+    let freed = call_tool(&tools, "task_update", json!({ "id": id, "status": "to_do", "blocked_reason": null })).await;
+    assert!(freed.is_ok(), "leaving blocked may clear the reason");
 }

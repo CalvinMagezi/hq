@@ -278,7 +278,11 @@ pub fn create_router(state: Arc<WsState>) -> Router {
         )
         .route("/api/tasks/{id}/time", get(tasks_api::task_time_handler))
         .route("/api/tasks/{id}/links", get(tasks_api::list_task_links_handler))
+        .route("/api/tasks/{id}/restore", axum::routing::post(tasks_api::restore_task_handler))
         .route("/api/tasks/linked", get(tasks_api::tasks_linked_to_handler))
+        .route("/api/tasks/stale", get(tasks_api::stale_tasks_handler))
+        .route("/api/tasks/{id}/checkpoint", get(tasks_api::task_checkpoint_handler))
+        .route("/api/initiatives/{id}/progress", get(tasks_api::initiative_progress_handler))
         .route("/api/task-time-report", get(tasks_api::time_report_handler))
         .route(
             "/api/work-sessions",

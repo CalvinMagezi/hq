@@ -804,6 +804,12 @@ fn a_zero_limit_still_returns_a_row() {
 
 const TTL: i64 = 900;
 
+/// What a removal used to be, for tests about what it cleans up: archive, then purge.
+fn delete_task(conn: &Connection, id: &str, cascade: bool) -> Result<Vec<String>> {
+    archive_task(conn, id, cascade, "test")?;
+    purge_task(conn, id, "test")
+}
+
 fn register_session(db: &Database, id: &str) {
     use crate::harness_sessions_registry::{NewSession, Placement, insert};
     db.with_conn(|c| {
@@ -1679,4 +1685,362 @@ fn removing_and_deleting_clean_up_links_in_both_directions() {
     assert!(!db.with_conn(|c| remove_task_link(c, "tk-1", LINK_URL, "https://example.com/x")).unwrap());
     db.with_conn(|c| delete_task(c, "tk-2", false)).unwrap();
     assert!(db.with_conn(|c| list_task_links(c, "tk-1")).unwrap().is_empty(), "a link to a deleted task goes with it");
+}
+
+fn list_archived(db: &Database) -> Vec<String> {
+    let filter = TaskFilter { archived: true, ..Default::default() };
+    db.with_conn(|c| list_tasks(c, &filter)).unwrap().into_iter().map(|t| t.id).collect()
+}
+
+fn list_active(db: &Database) -> Vec<String> {
+    db.with_conn(|c| list_tasks(c, &TaskFilter::default())).unwrap().into_iter().map(|t| t.id).collect()
+}
+
+#[test]
+fn archiving_hides_a_task_but_keeps_everything_it_holds_and_restoring_brings_it_back() {
+    let (db, initiative) = setup();
+    make(&db, "tk-1", &initiative, None).unwrap();
+    db.with_conn(|c| add_comment(c, "tk-1", "alpha", "a note", None).map(|_| ())).unwrap();
+    link(&db, "tk-1", LINK_URL, "https://example.com/x").unwrap();
+    claim_as(&db, "tk-1", "alpha").unwrap();
+
+    db.with_conn(|c| archive_task(c, "tk-1", false, "calvin")).unwrap();
+    assert!(list_active(&db).is_empty());
+    assert_eq!(list_archived(&db), ["tk-1"]);
+    assert_eq!(db.with_conn(|c| count_tasks(c, &TaskFilter::default())).unwrap(), 0);
+    assert!(db.with_conn(|c| live_lease(c, "tk-1", TTL)).unwrap().is_none(), "an archived task is not being worked");
+    assert!(db.with_conn(|c| tasks_linked_to(c, LINK_URL, "https://example.com/x")).unwrap().is_empty());
+
+    let back = db.with_conn(|c| restore_task(c, "tk-1", "calvin")).unwrap();
+    assert!(back.archived_at.is_none());
+    assert_eq!(list_active(&db), ["tk-1"]);
+    assert_eq!(db.with_conn(|c| list_comments(c, "tk-1")).unwrap().len(), 2, "the note and the claim");
+    assert_eq!(db.with_conn(|c| list_task_links(c, "tk-1")).unwrap().len(), 1);
+    assert_eq!(db.with_conn(|c| list_work_sessions(c, "tk-1", 5)).unwrap().len(), 1);
+    let trail: Vec<String> = db.with_conn(|c| list_task_audit(c, Some("tk-1"), 10)).unwrap().into_iter().map(|a| a.action).collect();
+    assert_eq!(trail, ["restored", "archived"], "newest first");
+}
+
+#[test]
+fn an_archived_task_cannot_be_changed_or_claimed_until_it_is_restored() {
+    let (db, initiative) = setup();
+    make(&db, "tk-1", &initiative, None).unwrap();
+    db.with_conn(|c| archive_task(c, "tk-1", false, "t")).unwrap();
+    assert!(move_to(&db, "tk-1", STATUS_IN_PROGRESS).unwrap_err().to_string().contains("archived"));
+    assert!(claim_as(&db, "tk-1", "alpha").unwrap_err().to_string().contains("archived"));
+    assert!(db.with_conn(|c| archive_task(c, "tk-1", false, "t")).is_err(), "already archived");
+    assert!(db.with_conn(|c| restore_task(c, "tk-2", "t")).is_err());
+    make(&db, "tk-3", &initiative, None).unwrap();
+    assert!(db.with_conn(|c| restore_task(c, "tk-3", "t")).is_err(), "an active task is not restorable");
+}
+
+#[test]
+fn a_purge_needs_an_archive_first_and_removes_everything_but_the_audit() {
+    let (db, initiative) = setup();
+    make(&db, "tk-1", &initiative, None).unwrap();
+    db.with_conn(|c| add_comment(c, "tk-1", "a", "x", None).map(|_| ())).unwrap();
+    claim_as(&db, "tk-1", "alpha").unwrap();
+    let err = db.with_conn(|c| purge_task(c, "tk-1", "t")).unwrap_err().to_string();
+    assert!(err.contains("archive it first"), "{err}");
+    db.with_conn(|c| archive_task(c, "tk-1", false, "calvin")).unwrap();
+    db.with_conn(|c| purge_task(c, "tk-1", "calvin")).unwrap();
+    assert!(db.with_conn(|c| get_task(c, "tk-1")).unwrap().is_none());
+    let left: i64 = db
+        .with_conn(|c| {
+            Ok(c.query_row(
+                "SELECT (SELECT COUNT(*) FROM task_comments) + (SELECT COUNT(*) FROM task_work_sessions) + (SELECT COUNT(*) FROM task_events)",
+                [],
+                |r| r.get(0),
+            )?)
+        })
+        .unwrap();
+    assert_eq!(left, 0);
+    let trail = db.with_conn(|c| list_task_audit(c, None, 10)).unwrap();
+    assert_eq!(trail.iter().map(|a| a.action.as_str()).collect::<Vec<_>>(), ["purged", "archived"]);
+    assert_eq!(trail[0].display_id, "AGENT-HQ-001", "the audit says what was removed");
+}
+
+#[test]
+fn archiving_a_parent_needs_cascade_and_a_subtask_waits_for_its_parent_to_return() {
+    let (db, initiative) = setup();
+    make(&db, "tk-p", &initiative, None).unwrap();
+    make(&db, "tk-c", &initiative, Some("tk-p")).unwrap();
+    make(&db, "tk-d", &initiative, Some("tk-p")).unwrap();
+    assert!(db.with_conn(|c| archive_task(c, "tk-p", false, "t")).is_err());
+    assert_eq!(list_active(&db).len(), 3, "a refused archive hides nothing");
+    let archived = db.with_conn(|c| archive_task(c, "tk-p", true, "t")).unwrap();
+    assert_eq!(archived.len(), 3);
+    assert!(db.with_conn(|c| restore_task(c, "tk-c", "t")).unwrap_err().to_string().contains("parent first"));
+    db.with_conn(|c| restore_task(c, "tk-p", "t")).unwrap();
+    assert_eq!(list_active(&db).len(), 3, "the sub-tasks archived with it came back with it");
+    db.with_conn(|c| archive_task(c, "tk-d", false, "t")).unwrap();
+    db.with_conn(|c| archive_task(c, "tk-c", false, "t")).unwrap();
+    db.with_conn(|c| restore_task(c, "tk-c", "t")).unwrap();
+    assert_eq!(list_archived(&db), ["tk-d"], "a sub-task archived on its own stays archived when another returns");
+    let parent_view = get_one(&db, "tk-p");
+    assert_eq!(parent_view.subtask_count, 1, "the archived sub-task is not counted, the restored one is");
+}
+
+#[test]
+fn an_archived_blocker_no_longer_blocks_and_its_key_is_free_for_a_retry() {
+    let (db, initiative) = setup();
+    make(&db, "tk-a", &initiative, None).unwrap();
+    make(&db, "tk-b", &initiative, None).unwrap();
+    db.with_conn(|c| add_dependency(c, "tk-b", "tk-a", "t")).unwrap();
+    assert_eq!(get_one(&db, "tk-b").blocked_by.len(), 1);
+    db.with_conn(|c| archive_task(c, "tk-a", false, "t")).unwrap();
+    assert!(get_one(&db, "tk-b").blocked_by.is_empty(), "a removed task cannot hold another up forever");
+
+    let keyed = |id: &str| {
+        db.with_conn(|c| {
+            create_task_dedup(c, id, &initiative, &NewTask { title: "t", external_id: Some("req-9"), created_by: "t", ..Default::default() })
+        })
+        .unwrap()
+    };
+    let (first, created) = keyed("tk-k1");
+    assert!(created);
+    db.with_conn(|c| archive_task(c, &first.id, false, "t")).unwrap();
+    let (again, created) = keyed("tk-k2");
+    assert!(created && again.id == "tk-k2", "after a deliberate delete the same key makes a new task");
+}
+
+#[test]
+fn a_task_entering_blocked_stamps_when_and_leaving_it_clears_why() {
+    let (db, initiative) = setup();
+    make(&db, "tk-1", &initiative, None).unwrap();
+    let patch = TaskPatch {
+        status: Some(STATUS_BLOCKED.into()),
+        blocked_reason: Some(Some("waiting on the API key".into())),
+        waiting_on: Some(Some("Calvin".into())),
+        ..Default::default()
+    };
+    let blocked = db.with_conn(|c| update_task(c, "tk-1", &patch, None)).unwrap();
+    assert_eq!(blocked.blocked_reason.as_deref(), Some("waiting on the API key"));
+    assert_eq!(blocked.waiting_on.as_deref(), Some("Calvin"));
+    assert!(blocked.blocked_since.is_some());
+    let moving = move_to(&db, "tk-1", STATUS_IN_PROGRESS).unwrap();
+    assert!(moving.blocked_reason.is_none() && moving.waiting_on.is_none() && moving.blocked_since.is_none());
+}
+
+#[test]
+fn a_reason_only_belongs_on_a_blocked_task_and_is_bounded() {
+    let (db, initiative) = setup();
+    make(&db, "tk-1", &initiative, None).unwrap();
+    let on_open = TaskPatch { blocked_reason: Some(Some("why".into())), ..Default::default() };
+    assert!(db.with_conn(|c| update_task(c, "tk-1", &on_open, None)).unwrap_err().to_string().contains("blocked task"));
+    let too_long = TaskPatch {
+        status: Some(STATUS_BLOCKED.into()),
+        blocked_reason: Some(Some("x".repeat(MAX_BLOCK_TEXT_CHARS + 1))),
+        ..Default::default()
+    };
+    assert!(db.with_conn(|c| update_task(c, "tk-1", &too_long, None)).is_err());
+    assert_eq!(get_one(&db, "tk-1").status, STATUS_TO_DO, "a refused write changes nothing");
+    let tidy = TaskPatch {
+        status: Some(STATUS_BLOCKED.into()),
+        blocked_reason: Some(Some("line one\nline two\u{0007}".into())),
+        ..Default::default()
+    };
+    assert_eq!(db.with_conn(|c| update_task(c, "tk-1", &tidy, None)).unwrap().blocked_reason.as_deref(), Some("line oneline two"));
+}
+
+#[test]
+fn releasing_as_blocked_takes_the_summary_as_the_reason_and_needs_one() {
+    let (db, initiative) = setup();
+    make(&db, "tk-1", &initiative, None).unwrap();
+    let a = claim_as(&db, "tk-1", "alpha").unwrap();
+    assert!(db.with_conn(|c| release(c, &a.token, Some(STATUS_BLOCKED), "  ", TTL)).is_err(), "no reason, no block");
+    let done = db.with_conn(|c| release(c, &a.token, Some(STATUS_BLOCKED), "stuck on the deploy key\nmore detail", TTL)).unwrap();
+    assert_eq!(done.task.blocked_reason.as_deref(), Some("stuck on the deploy key"));
+}
+
+#[test]
+fn long_horizon_is_set_on_create_and_changed_by_update() {
+    let (db, initiative) = setup();
+    let made = db
+        .with_conn(|c| create_task(c, "tk-1", &initiative, &NewTask { title: "t", created_by: "t", long_horizon: true, ..Default::default() }))
+        .unwrap();
+    assert!(made.long_horizon);
+    make(&db, "tk-2", &initiative, None).unwrap();
+    assert!(!get_one(&db, "tk-2").long_horizon);
+    let on = TaskPatch { long_horizon: Some(true), ..Default::default() };
+    assert!(db.with_conn(|c| update_task(c, "tk-2", &on, None)).unwrap().long_horizon);
+    let off = TaskPatch { long_horizon: Some(false), ..Default::default() };
+    assert!(!db.with_conn(|c| update_task(c, "tk-2", &off, None)).unwrap().long_horizon);
+}
+
+fn cp(summary: &str, next: &str) -> Checkpoint {
+    Checkpoint { summary: summary.into(), next_step: next.into(), ..Default::default() }
+}
+
+#[test]
+fn a_checkpoint_is_stored_cleaned_capped_and_the_latest_is_what_resumes() {
+    let (db, initiative) = setup();
+    make(&db, "tk-1", &initiative, None).unwrap();
+    assert!(db.with_conn(|c| latest_checkpoint(c, "tk-1")).unwrap().is_none());
+    assert!(db.with_conn(|c| add_checkpoint(c, "tk-1", None, "alpha", &Checkpoint::default())).is_err(), "an empty checkpoint says nothing");
+    db.with_conn(|c| add_checkpoint(c, "tk-1", None, "alpha", &cp("first", "step one"))).unwrap();
+    let hostile = Checkpoint {
+        summary: format!("{}\u{202E}evil\u{0000}", "y".repeat(MAX_CHECKPOINT_TEXT_CHARS * 2)),
+        next_step: "do this\nthen that".into(),
+        open_questions: "which key?".into(),
+        files: (0..80).map(|n| format!("src/file{n}.rs")).chain(["".to_string(), "bad\nname".to_string()]).collect(),
+    };
+    let stored = db.with_conn(|c| add_checkpoint(c, "tk-1", Some("ws-1"), "beta", &hostile)).unwrap();
+    assert_eq!(stored.summary.chars().count(), MAX_CHECKPOINT_TEXT_CHARS);
+    assert!(!stored.summary.contains('\u{202E}'));
+    assert_eq!(stored.next_step, "do this\nthen that", "newlines are kept in text");
+    assert_eq!(stored.files.len(), MAX_CHECKPOINT_FILES);
+    assert!(stored.files.iter().all(|f| !f.contains('\n') && !f.is_empty()));
+    let latest = db.with_conn(|c| latest_checkpoint(c, "tk-1")).unwrap().unwrap();
+    assert_eq!((latest.actor.as_str(), latest.work_session_id.as_deref()), ("beta", Some("ws-1")));
+}
+
+#[test]
+fn only_the_most_recent_checkpoints_are_kept() {
+    let (db, initiative) = setup();
+    make(&db, "tk-1", &initiative, None).unwrap();
+    for n in 0..(MAX_CHECKPOINTS_PER_TASK + 5) {
+        db.with_conn(|c| add_checkpoint(c, "tk-1", None, "a", &cp(&format!("s{n}"), ""))).unwrap();
+    }
+    let kept = db.with_conn(|c| list_checkpoints(c, "tk-1", 500)).unwrap();
+    assert_eq!(kept.len() as i64, MAX_CHECKPOINTS_PER_TASK);
+    assert_eq!(kept[0].summary, format!("s{}", MAX_CHECKPOINTS_PER_TASK + 4), "newest first");
+}
+
+fn idle(db: &Database, id: &str, hours: i64) {
+    db.with_conn(|c| {
+        c.execute(
+            "UPDATE tasks SET updated_at = datetime('now', ?1), created_at = datetime('now', ?1) WHERE id = ?2",
+            params![format!("-{hours} hours"), id],
+        )?;
+        c.execute("UPDATE task_comments SET created_at = datetime('now', ?1) WHERE task_id = ?2", params![format!("-{hours} hours"), id])?;
+        Ok(())
+    })
+    .unwrap();
+}
+
+#[test]
+fn an_in_progress_task_nobody_holds_or_touched_is_stale() {
+    let (db, initiative) = setup();
+    for id in ["tk-old", "tk-fresh", "tk-held", "tk-todo", "tk-arch"] {
+        make(&db, id, &initiative, None).unwrap();
+    }
+    for id in ["tk-old", "tk-fresh", "tk-arch"] {
+        move_to(&db, id, STATUS_IN_PROGRESS).unwrap();
+    }
+    claim_as(&db, "tk-held", "alpha").unwrap();
+    for id in ["tk-old", "tk-held", "tk-todo", "tk-arch"] {
+        idle(&db, id, 100);
+    }
+    db.with_conn(|c| archive_task(c, "tk-arch", false, "t")).unwrap();
+    // The held task's lease is live (heartbeat is fresh), so being quiet in the task row does not matter.
+    let stale = db.with_conn(|c| stale_tasks(c, DEFAULT_STALE_HOURS, TTL, 50)).unwrap();
+    let ids: Vec<&str> = stale.iter().map(|s| s.task_id.as_str()).collect();
+    assert_eq!(ids, ["tk-old"], "{stale:?}");
+    assert!(stale[0].idle_hours >= 99);
+    assert!(db.with_conn(|c| is_stale(c, "tk-old", DEFAULT_STALE_HOURS, TTL)).unwrap());
+    assert!(!db.with_conn(|c| is_stale(c, "tk-fresh", DEFAULT_STALE_HOURS, TTL)).unwrap());
+}
+
+#[test]
+fn a_recent_comment_or_a_lapsed_lease_decides_whether_a_task_is_stale() {
+    let (db, initiative) = setup();
+    make(&db, "tk-c", &initiative, None).unwrap();
+    make(&db, "tk-l", &initiative, None).unwrap();
+    for id in ["tk-c", "tk-l"] {
+        move_to(&db, id, STATUS_IN_PROGRESS).unwrap();
+        idle(&db, id, 200);
+    }
+    db.with_conn(|c| add_comment(c, "tk-c", "alpha", "still on it", None).map(|_| ())).unwrap();
+    let lease = claim_as(&db, "tk-l", "alpha").unwrap();
+    // The lease lapses ten days ago: the session was last heard from then, so the task has been idle since.
+    db.with_conn(|c| {
+        c.execute(
+            "UPDATE task_work_sessions SET started_at = datetime('now', '-10 days'), last_heartbeat_at = datetime('now', '-10 days') WHERE id = ?1",
+            params![lease.session.id],
+        )?;
+        c.execute("UPDATE tasks SET updated_at = datetime('now', '-10 days') WHERE id = 'tk-l'", [])?;
+        c.execute("UPDATE task_comments SET created_at = datetime('now', '-10 days') WHERE task_id = 'tk-l'", [])?;
+        Ok(())
+    })
+    .unwrap();
+    let ids: Vec<String> = db.with_conn(|c| stale_tasks(c, DEFAULT_STALE_HOURS, TTL, 50)).unwrap().into_iter().map(|s| s.task_id).collect();
+    assert_eq!(ids, ["tk-l"], "a fresh comment keeps tk-c alive; tk-l's lease lapsed long ago");
+}
+
+#[test]
+fn an_initiative_rolls_up_its_tasks_estimates_time_and_stale_work() {
+    let (db, initiative) = setup();
+    for id in ["a", "b", "c", "d"] {
+        make(&db, id, &initiative, None).unwrap();
+    }
+    db.with_conn(|c| {
+        update_task(c, "a", &TaskPatch { estimate_minutes: Some(Some(60)), ..Default::default() }, None)?;
+        update_task(c, "b", &TaskPatch { estimate_minutes: Some(Some(30)), ..Default::default() }, None).map(|_| ())
+    })
+    .unwrap();
+    move_to(&db, "a", STATUS_COMPLETE).unwrap();
+    move_to(&db, "b", STATUS_IN_PROGRESS).unwrap();
+    idle(&db, "b", 100);
+    db.with_conn(|c| {
+        update_task(c, "c", &TaskPatch { status: Some(STATUS_BLOCKED.into()), blocked_reason: Some(Some("x".into())), ..Default::default() }, None)
+            .map(|_| ())
+    })
+    .unwrap();
+    db.with_conn(|c| {
+        c.execute(
+            "INSERT INTO task_work_sessions (id, task_id, actor, token_hash, started_at, ended_at, end_reason) \
+             VALUES ('ws-r', 'a', 'x', 'r', datetime('now', '-3 hours'), datetime('now', '-2 hours'), 'released')",
+            [],
+        )?;
+        Ok(())
+    })
+    .unwrap();
+    let r = db.with_conn(|c| initiative_rollup(c, "AGENT-HQ", DEFAULT_STALE_HOURS, TTL)).unwrap();
+    assert_eq!((r.total, r.complete, r.in_progress, r.blocked, r.to_do), (4, 1, 1, 1, 1));
+    assert_eq!(r.fraction_complete, 0.25);
+    assert_eq!((r.estimate_minutes, r.tasks_with_estimate), (90, 2));
+    near(r.leased_seconds, HOUR);
+    assert_eq!(r.stale, 1);
+    assert!(db.with_conn(|c| initiative_rollup(c, "nope", DEFAULT_STALE_HOURS, TTL)).is_err());
+    assert_eq!(db.with_conn(|c| initiative_rollup(c, "agent-hq", 72, TTL)).unwrap().total, 4, "found by slug too");
+}
+
+#[test]
+fn an_archived_task_takes_no_new_sub_tasks_or_dependencies_and_drops_out_of_the_graph() {
+    let (db, initiative) = setup();
+    for id in ["tk-p", "tk-a", "tk-b"] {
+        make(&db, id, &initiative, None).unwrap();
+    }
+    db.with_conn(|c| add_dependency(c, "tk-b", "tk-a", "t")).unwrap();
+    db.with_conn(|c| archive_task(c, "tk-p", false, "t")).unwrap();
+    let sub = db.with_conn(|c| {
+        create_task(c, "tk-s", &initiative, &NewTask { title: "s", parent_task_id: Some("tk-p"), created_by: "t", ..Default::default() })
+    });
+    assert!(sub.unwrap_err().to_string().contains("archived"));
+    assert!(db.with_conn(|c| add_dependency(c, "tk-b", "tk-p", "t")).unwrap_err().to_string().contains("archived"));
+    assert!(db.with_conn(|c| add_dependency(c, "tk-p", "tk-a", "t")).is_err());
+
+    db.with_conn(|c| archive_task(c, "tk-a", false, "t")).unwrap();
+    let links = db.with_conn(|c| crate::task_graph::explicit_links(c, "tk-b")).unwrap();
+    assert!(links.is_empty(), "an archived blocker is not listed as a link: {links:?}");
+}
+
+#[test]
+fn a_checkpoint_of_nothing_visible_is_empty_and_hidden_characters_are_stripped() {
+    assert!(Checkpoint::default().is_empty());
+    let hidden = Checkpoint {
+        summary: "\u{200B}\u{FE0F}\u{E0041}\u{00AD}\u{3164}".into(),
+        files: vec!["\u{200B}".into()],
+        ..Default::default()
+    };
+    assert!(hidden.is_empty(), "zero-width, variation, tag and filler characters are not content");
+    let mixed = Checkpoint { summary: "re\u{E0041}al\u{FE0F}".into(), ..Default::default() };
+    assert!(!mixed.is_empty());
+    let (db, initiative) = setup();
+    make(&db, "tk-1", &initiative, None).unwrap();
+    let stored = db.with_conn(|c| add_checkpoint(c, "tk-1", None, "a", &mixed)).unwrap();
+    assert_eq!(stored.summary, "real");
+    assert_eq!(clean_block_text("r", "no\u{200B}pe").unwrap().as_deref(), Some("nope"));
+    assert!(clean_block_text("r", "\u{200B}\u{0007}").unwrap().is_none(), "a reason of nothing visible is no reason");
 }
