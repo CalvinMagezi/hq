@@ -22,7 +22,7 @@ $script:HqLinuxInstaller = 'https://agent-hq.online/install.sh'
 $script:HqDocs = 'https://agent-hq.online/install/#windows'
 # The public half of HQ's release signing key (release/minisign.pub). HQ Lite builds are signed
 # with the matching secret key, which only the protected release job can use.
-$script:HqSigningKey = 'RWTSi05PPMb9UVVnGilhLWT7h/mjQ1VjfAEXszxJB/Er8UEsCXFc3o1/'
+$script:HqSigningKey = 'RWTSi05PPMb9UVVnGilhLWT7h/mjQ1VjfAEXszxJB/Er8UEsCXFc3o1/' # gitleaks:allow (public key)
 
 # ─── Decisions (pure: no I/O, so they can be tested) ────────────────────────────────────────────
 
