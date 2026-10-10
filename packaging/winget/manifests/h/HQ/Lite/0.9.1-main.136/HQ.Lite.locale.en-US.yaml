@@ -1,0 +1,21 @@
+PackageIdentifier: HQ.Lite
+PackageVersion: 0.9.1-main.136
+PackageLocale: en-US
+Publisher: Calvin Magezi
+PublisherUrl: https://github.com/CalvinMagezi
+PackageName: HQ Lite
+PackageUrl: https://agent-hq.online
+License: MIT
+LicenseUrl: https://github.com/CalvinMagezi/hq/blob/main/LICENSE
+ShortDescription: Web app, tasks, notes and MCP for locked-down Windows computers.
+Description: HQ Lite is the native Windows edition of Agent-HQ, a local-first assistant hub. It runs without WSL2 or administrator rights and serves the web app, task system and notes, and works with VS Code over MCP. It has no coding-agent host. Builds are signed with HQ's release key (minisign, checked by the HQ installer) but have no Windows code-signing certificate, so a computer that only allows approved programs may refuse to run it.
+Moniker: hq-lite
+Tags:
+  - assistant
+  - mcp
+  - notes
+  - tasks
+  - vault
+ReleaseNotesUrl: https://github.com/CalvinMagezi/hq/releases/tag/v0.9.1-main.136
+ManifestType: defaultLocale
+ManifestVersion: 1.6.0
