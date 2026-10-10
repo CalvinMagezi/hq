@@ -1,0 +1,16 @@
+PackageIdentifier: HQ.Lite
+PackageVersion: 0.9.1-main.136
+InstallerType: zip
+NestedInstallerType: portable
+NestedInstallerFiles:
+  - RelativeFilePath: hq.exe
+    PortableCommandAlias: hq
+Scope: user
+Commands:
+  - hq
+Installers:
+  - Architecture: x64
+    InstallerUrl: https://github.com/CalvinMagezi/hq/releases/download/v0.9.1-main.136/hq-lite-0.9.1-048f474-windows-x86_64.zip
+    InstallerSha256: BDA6EE6DDF6A5E085C542A3061DDBF874151733387BAF57C128B4F30A604564B
+ManifestType: installer
+ManifestVersion: 1.6.0
