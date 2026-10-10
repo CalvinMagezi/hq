@@ -32,7 +32,7 @@ would do, and `-Yes` accepts the defaults:
 
 For Full HQ it runs the steps in sections 1 and 2 below for you, each shown first and each
 skippable, and stops after the one that needs a restart. For HQ Lite it downloads the zip, checks
-its SHA-256, unpacks it under `%LOCALAPPDATA%\hq-lite` and starts it once to see whether your
+the release signature and its SHA-256, unpacks it under `%LOCALAPPDATA%\hq-lite` and starts it once to see whether your
 computer lets it run. If a policy (AppLocker, Windows Defender Application Control, Smart App
 Control) refuses, it removes the file and lists what you can do instead. It does not try to get
 past the policy. It changes no system setting, never elevates itself, and Lite builds are not

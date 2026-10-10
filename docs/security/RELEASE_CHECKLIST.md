@@ -24,6 +24,11 @@ must be green on that exact tag before anything is published.
       secret, see `WEB_AUTH.md`).
 - [ ] **Secrets.** Every credential ever committed is rotated or revoked,
       and the release artifacts were scanned.
+- [ ] **HQ Lite signature.** The newest main release carries
+      `hq-lite-*-windows-x86_64.zip`, its `.sha256` and `.sha256.minisig`,
+      and `minisign -V -p release/minisign.pub` accepts the signature. The
+      key used is the same `MINISIGN_KEY` as the manifest, available only to
+      the `release` environment; the Lite build job has no secrets.
 - [ ] **Personal defaults.** No owner-specific hostnames, paths or endpoints
       in default config.
 

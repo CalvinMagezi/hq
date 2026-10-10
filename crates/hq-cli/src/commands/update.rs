@@ -89,8 +89,9 @@ mod windows {
                 // hq-lite-<version>-<short sha>-windows-x86_64.zip
                 if let Some(rest) = name.strip_prefix("hq-lite-").and_then(|n| n.strip_suffix("-windows-x86_64.zip")) {
                     let short = rest.rsplit('-').next().unwrap_or_default();
-                    let has_sum = r["assets"].as_array().into_iter().flatten().any(|b| b["name"].as_str() == Some(&format!("{name}.sha256")));
-                    if has_sum && !short.is_empty() {
+                    let has = |suffix: &str| r["assets"].as_array().into_iter().flatten().any(|b| b["name"].as_str() == Some(&format!("{name}{suffix}")));
+                    // The installer refuses a build without a signed checksum, so never offer one.
+                    if has(".sha256") && has(".sha256.minisig") && !short.is_empty() {
                         return Some((r["tag_name"].as_str().unwrap_or_default().to_string(), name.to_string(), short.to_string()));
                     }
                 }
@@ -145,7 +146,7 @@ mod windows {
         }
         let Ok(exe) = std::env::current_exe() else { return 1 };
         let dir = exe.parent().map(|p| p.display().to_string()).unwrap_or_default();
-        println!("Running the installer from https://agent-hq.online/install.ps1 into {dir} (it checks the download's SHA-256 first; the check shows integrity, not authorship) ...");
+        println!("Running the installer from https://agent-hq.online/install.ps1 into {dir} (it verifies the download's signature against HQ's release key, then its SHA-256) ...");
         let script = format!(
             "& ([scriptblock]::Create((irm https://agent-hq.online/install.ps1))) -Edition lite -Yes -InstallDir '{}'",
             dir.replace('\'', "''")
@@ -166,12 +167,15 @@ mod windows {
         use serde_json::json;
 
         #[test]
-        fn the_newest_lite_zip_needs_a_checksum_and_skips_drafts() {
+        fn the_newest_lite_zip_needs_a_signed_checksum_and_skips_drafts() {
             let zip = "hq-lite-0.9.1-abc1234-windows-x86_64.zip";
+            let all = |tag: &str, draft: bool| json!({ "tag_name": tag, "draft": draft, "assets": [
+                {"name": zip}, {"name": format!("{zip}.sha256")}, {"name": format!("{zip}.sha256.minisig")} ] });
             let rels = json!([
-                { "tag_name": "v3", "draft": true, "assets": [ {"name": zip}, {"name": format!("{zip}.sha256")} ] },
+                all("v4", true),
+                { "tag_name": "v3", "draft": false, "assets": [ {"name": zip}, {"name": format!("{zip}.sha256")} ] },
                 { "tag_name": "v2", "draft": false, "assets": [ {"name": zip} ] },
-                { "tag_name": "v1", "draft": false, "assets": [ {"name": zip}, {"name": format!("{zip}.sha256")} ] },
+                all("v1", false),
             ]);
             assert_eq!(newest_lite(&rels), Some(("v1".into(), zip.into(), "abc1234".into())));
             assert_eq!(newest_lite(&json!([])), None);

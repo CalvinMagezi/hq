@@ -1,0 +1,31 @@
+{
+  "schema": 1,
+  "version": "0.9.1-main.135",
+  "git_sha": "41cb7d758081dabc0ae458516aa8658d49cdbc37",
+  "channel": "main",
+  "built_at": "2026-10-09T17:14:53Z",
+  "min_updater_version": "0.9.0",
+  "requires_db_snapshot": false,
+  "artifacts": [
+    {
+      "name": "hq-0.9.1-main.135-linux-x86_64.tar.gz",
+      "sha256": "8398ec997702070e292b80a07867abf246142035687f780a2156c0a83950298c",
+      "size": 45866359
+    },
+    {
+      "name": "hq-0.9.1-main.135-linux-aarch64.tar.gz",
+      "sha256": "e3376d21804ff4099c67fc26b956a142381857244450c05504113d374746d448",
+      "size": 44209511
+    },
+    {
+      "name": "hq-0.9.1-main.135-darwin-aarch64.tar.gz",
+      "sha256": "6cee5a77a1ce59a7f387639d4d1b5809a4091b1f572efad3bc2d79434401311d",
+      "size": 39800447
+    },
+    {
+      "name": "hq-web-0.9.1-main.135.tar.gz",
+      "sha256": "2706d3e85481e54ba09c695ed6b9222d972bf40c4e6e8ccb6530c6c8227d918a",
+      "size": 3634015
+    }
+  ]
+}

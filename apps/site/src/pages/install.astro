@@ -145,8 +145,8 @@ const docker = installChannels.docker;
           and its coding agents run inside WSL2, which is a normal Ubuntu, and you open the web UI from your
           Windows browser at <code>http://localhost:5678</code>. <strong>HQ Lite</strong> is for work computers
           that block WSL2 or installers: one program in your user profile, no administrator rights, with the web
-          app, tasks, notes and VS Code over MCP, and no coding agents. It is not code-signed yet, and a computer
-          that only allows approved programs may refuse it; the installer says so and stops.
+          app, tasks, notes and VS Code over MCP, and no coding agents. Its download is signed with the HQ release key and checked first, but it has no Windows
+          code-signing certificate yet, so a computer that only allows approved programs may refuse it; the installer says so and stops.
         </p>
         <p>
           By hand, Full HQ is <code>wsl --install -d Ubuntu</code>, then the Linux install script above inside

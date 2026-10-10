@@ -20,6 +20,9 @@
 $script:HqRepo = 'CalvinMagezi/hq'
 $script:HqLinuxInstaller = 'https://agent-hq.online/install.sh'
 $script:HqDocs = 'https://agent-hq.online/install/#windows'
+# The public half of HQ's release signing key (release/minisign.pub). HQ Lite builds are signed
+# with the matching secret key, which only the protected release job can use.
+$script:HqSigningKey = 'RWTSi05PPMb9UVVnGilhLWT7h/mjQ1VjfAEXszxJB/Er8UEsCXFc3o1/' # gitleaks:allow (public key)
 
 # ─── Decisions (pure: no I/O, so they can be tested) ────────────────────────────────────────────
 
@@ -56,7 +59,10 @@ function Select-HqLiteAsset {
         if (-not $zip) { continue }
         $sum = $r.assets | Where-Object { $_.name -eq ($zip.name + '.sha256') } | Select-Object -First 1
         if (-not $sum) { continue }
-        return @{ Tag = $r.tag_name; ZipName = $zip.name; ZipUrl = $zip.browser_download_url; SumUrl = $sum.browser_download_url }
+        # A build without a signature is never installed.
+        $sig = $r.assets | Where-Object { $_.name -eq ($zip.name + '.sha256.minisig') } | Select-Object -First 1
+        if (-not $sig) { continue }
+        return @{ Tag = $r.tag_name; ZipName = $zip.name; ZipUrl = $zip.browser_download_url; SumUrl = $sum.browser_download_url; SigUrl = $sig.browser_download_url }
     }
     return $null
 }
@@ -70,6 +76,264 @@ function Get-HqExpectedHash {
         }
     }
     return $null
+}
+
+# Minisign verification (BLAKE2b-512 and Ed25519), because Windows PowerShell 5.1 has neither.
+# It checks the signature on the small checksum file; the checksum then vouches for the zip.
+# The same code is checked against real minisign output by scripts/windows/install-selftest.ps1.
+$script:HqMinisignSource = @'
+using System;
+using System.Numerics;
+using System.Security.Cryptography;
+using System.Text;
+
+// Verifies a prehashed minisign signature (BLAKE2b-512 + Ed25519) with nothing but the framework.
+// Windows PowerShell 5.1 has neither primitive. Written for the C# 5 compiler it ships with.
+public static class HqMinisign
+{
+    static readonly ulong[] IV = {
+        0x6a09e667f3bcc908UL, 0xbb67ae8584caa73bUL, 0x3c6ef372fe94f82bUL, 0xa54ff53a5f1d36f1UL,
+        0x510e527fade682d1UL, 0x9b05688c2b3e6c1fUL, 0x1f83d9abfb41bd6bUL, 0x5be0cd19137e2179UL };
+
+    static readonly byte[][] SIGMA = {
+        new byte[] { 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15 },
+        new byte[] { 14, 10, 4, 8, 9, 15, 13, 6, 1, 12, 0, 2, 11, 7, 5, 3 },
+        new byte[] { 11, 8, 12, 0, 5, 2, 15, 13, 10, 14, 3, 6, 7, 1, 9, 4 },
+        new byte[] { 7, 9, 3, 1, 13, 12, 11, 14, 2, 6, 5, 10, 4, 0, 15, 8 },
+        new byte[] { 9, 0, 5, 7, 2, 4, 10, 15, 14, 1, 11, 12, 6, 8, 3, 13 },
+        new byte[] { 2, 12, 6, 10, 0, 11, 8, 3, 4, 13, 7, 5, 15, 14, 1, 9 },
+        new byte[] { 12, 5, 1, 15, 14, 13, 4, 10, 0, 7, 6, 3, 9, 2, 8, 11 },
+        new byte[] { 13, 11, 7, 14, 12, 1, 3, 9, 5, 0, 15, 4, 8, 6, 2, 10 },
+        new byte[] { 6, 15, 14, 9, 11, 3, 0, 8, 12, 2, 13, 7, 1, 4, 10, 5 },
+        new byte[] { 10, 2, 8, 4, 7, 6, 1, 5, 15, 11, 9, 14, 3, 12, 13, 0 } };
+
+    static ulong Rotr(ulong x, int n) { return (x >> n) | (x << (64 - n)); }
+
+    static void G(ulong[] v, int a, int b, int c, int d, ulong x, ulong y)
+    {
+        v[a] = v[a] + v[b] + x; v[d] = Rotr(v[d] ^ v[a], 32);
+        v[c] = v[c] + v[d];     v[b] = Rotr(v[b] ^ v[c], 24);
+        v[a] = v[a] + v[b] + y; v[d] = Rotr(v[d] ^ v[a], 16);
+        v[c] = v[c] + v[d];     v[b] = Rotr(v[b] ^ v[c], 63);
+    }
+
+    static void Compress(ulong[] h, byte[] block, ulong t, bool last)
+    {
+        ulong[] m = new ulong[16];
+        for (int i = 0; i < 16; i++) m[i] = BitConverter.ToUInt64(block, i * 8);
+        ulong[] v = new ulong[16];
+        for (int i = 0; i < 8; i++) { v[i] = h[i]; v[i + 8] = IV[i]; }
+        v[12] ^= t;
+        if (last) v[14] = ~v[14];
+        for (int r = 0; r < 12; r++)
+        {
+            byte[] s = SIGMA[r % 10];
+            G(v, 0, 4, 8, 12, m[s[0]], m[s[1]]);
+            G(v, 1, 5, 9, 13, m[s[2]], m[s[3]]);
+            G(v, 2, 6, 10, 14, m[s[4]], m[s[5]]);
+            G(v, 3, 7, 11, 15, m[s[6]], m[s[7]]);
+            G(v, 0, 5, 10, 15, m[s[8]], m[s[9]]);
+            G(v, 1, 6, 11, 12, m[s[10]], m[s[11]]);
+            G(v, 2, 7, 8, 13, m[s[12]], m[s[13]]);
+            G(v, 3, 4, 9, 14, m[s[14]], m[s[15]]);
+        }
+        for (int i = 0; i < 8; i++) h[i] ^= v[i] ^ v[i + 8];
+    }
+
+    public static byte[] Blake2b512(byte[] data)
+    {
+        if (!BitConverter.IsLittleEndian) throw new InvalidOperationException("little-endian only");
+        ulong[] h = (ulong[])IV.Clone();
+        h[0] ^= 0x01010040UL;
+        int pos = 0;
+        while (data.Length - pos > 128)
+        {
+            byte[] blk = new byte[128];
+            Buffer.BlockCopy(data, pos, blk, 0, 128);
+            pos += 128;
+            Compress(h, blk, (ulong)pos, false);
+        }
+        byte[] fin = new byte[128];
+        Buffer.BlockCopy(data, pos, fin, 0, data.Length - pos);
+        Compress(h, fin, (ulong)data.Length, true);
+        byte[] outb = new byte[64];
+        for (int i = 0; i < 8; i++) Buffer.BlockCopy(BitConverter.GetBytes(h[i]), 0, outb, i * 8, 8);
+        return outb;
+    }
+
+    // ---- Ed25519 (RFC 8032), verification only ----
+    static readonly BigInteger P = BigInteger.Pow(2, 255) - 19;
+    static readonly BigInteger L = BigInteger.Pow(2, 252) + BigInteger.Parse("27742317777372353535851937790883648493");
+    static BigInteger Mod(BigInteger a) { BigInteger r = a % P; return r.Sign < 0 ? r + P : r; }
+    static BigInteger Inv(BigInteger a) { return BigInteger.ModPow(Mod(a), P - 2, P); }
+    static readonly BigInteger D = Mod(-121665 * Inv(121666));
+    static readonly BigInteger SqrtM1 = BigInteger.ModPow(2, (P - 1) / 4, P);
+
+    static BigInteger Le(byte[] b, int off, int len)
+    {
+        byte[] t = new byte[len + 1];
+        Buffer.BlockCopy(b, off, t, 0, len);
+        return new BigInteger(t);
+    }
+
+    static BigInteger RecoverX(BigInteger y, int sign)
+    {
+        if (y >= P) return BigInteger.MinusOne;
+        BigInteger x2 = Mod((y * y - 1) * Inv(D * y * y + 1));
+        if (x2.IsZero) return sign != 0 ? BigInteger.MinusOne : BigInteger.Zero;
+        BigInteger x = BigInteger.ModPow(x2, (P + 3) / 8, P);
+        if (!Mod(x * x - x2).IsZero) x = Mod(x * SqrtM1);
+        if (!Mod(x * x - x2).IsZero) return BigInteger.MinusOne;
+        if ((int)(x & 1) != sign) x = P - x;
+        return x;
+    }
+
+    // Extended coordinates: X, Y, Z, T.
+    static BigInteger[] Add(BigInteger[] p, BigInteger[] q)
+    {
+        BigInteger a = Mod((p[1] - p[0]) * (q[1] - q[0]));
+        BigInteger b = Mod((p[1] + p[0]) * (q[1] + q[0]));
+        BigInteger c = Mod(2 * p[3] * q[3] * D);
+        BigInteger d = Mod(2 * p[2] * q[2]);
+        BigInteger e = b - a, f = d - c, g = d + c, h = b + a;
+        return new BigInteger[] { Mod(e * f), Mod(g * h), Mod(f * g), Mod(e * h) };
+    }
+
+    static BigInteger[] Mul(BigInteger s, BigInteger[] p)
+    {
+        BigInteger[] q = new BigInteger[] { 0, 1, 1, 0 };
+        while (s.Sign > 0)
+        {
+            if (!(s & 1).IsZero) q = Add(q, p);
+            p = Add(p, p);
+            s >>= 1;
+        }
+        return q;
+    }
+
+    static bool Equal(BigInteger[] p, BigInteger[] q)
+    {
+        return Mod(p[0] * q[2] - q[0] * p[2]).IsZero && Mod(p[1] * q[2] - q[1] * p[2]).IsZero;
+    }
+
+    static BigInteger[] Decode(byte[] b, int off)
+    {
+        byte[] t = new byte[32];
+        Buffer.BlockCopy(b, off, t, 0, 32);
+        int sign = t[31] >> 7;
+        t[31] &= 0x7f;
+        BigInteger y = Le(t, 0, 32);
+        BigInteger x = RecoverX(y, sign);
+        if (x.Sign < 0) return null;
+        BigInteger[] pt = new BigInteger[] { x, y, 1, Mod(x * y) };
+        // A point of small order (a multiple of the cofactor 8) is never a valid key or R.
+        BigInteger[] e = Mul(8, pt);
+        if (e[0].IsZero) return null;
+        return pt;
+    }
+
+    static bool Ed25519Verify(byte[] pk, byte[] msg, byte[] sig)
+    {
+        if (pk.Length != 32 || sig.Length != 64) return false;
+        BigInteger[] a = Decode(pk, 0);
+        BigInteger[] r = Decode(sig, 0);
+        if (a == null || r == null) return false;
+        BigInteger s = Le(sig, 32, 32);
+        if (s >= L) return false;
+        byte[] buf = new byte[64 + msg.Length];
+        Buffer.BlockCopy(sig, 0, buf, 0, 32);
+        Buffer.BlockCopy(pk, 0, buf, 32, 32);
+        Buffer.BlockCopy(msg, 0, buf, 64, msg.Length);
+        byte[] dig;
+        using (SHA512 sha = SHA512.Create()) dig = sha.ComputeHash(buf);
+        BigInteger h = Le(dig, 0, 64) % L;
+        BigInteger gy = Mod(4 * Inv(5));
+        BigInteger gx = RecoverX(gy, 0);
+        BigInteger[] g = new BigInteger[] { gx, gy, 1, Mod(gx * gy) };
+        return Equal(Mul(s, g), Add(r, Mul(h, a)));
+    }
+
+    static bool Same(byte[] a, int ao, byte[] b, int bo, int n)
+    {
+        for (int i = 0; i < n; i++) if (a[ao + i] != b[bo + i]) return false;
+        return true;
+    }
+
+    // Returns null when `minisig` is a valid prehashed signature of `data` by `pubKeyLine`
+    // (the base64 line of a minisign .pub file), else a short reason. Never throws.
+    public static string Verify(string pubKeyLine, byte[] data, byte[] minisig)
+    {
+        try
+        {
+            byte[] pub = Convert.FromBase64String(pubKeyLine.Trim());
+            if (pub.Length != 42 || pub[0] != (byte)'E' || pub[1] != (byte)'d') return "the public key is not a minisign key";
+            string text = new UTF8Encoding(false, true).GetString(minisig);
+            string[] raw = text.Split('\n');
+            int n = raw.Length;
+            while (n > 0 && raw[n - 1].Trim().Length == 0) n--;
+            if (n != 4) return "the signature file is not in the expected format";
+            string[] ln = new string[4];
+            for (int i = 0; i < 4; i++) ln[i] = raw[i].TrimEnd('\r');
+            if (!ln[0].StartsWith("untrusted comment:", StringComparison.Ordinal)) return "the signature file is not in the expected format";
+            const string TC = "trusted comment: ";
+            if (!ln[2].StartsWith(TC, StringComparison.Ordinal)) return "the signature file is not in the expected format";
+            byte[] sig = Convert.FromBase64String(ln[1].Trim());
+            byte[] glob = Convert.FromBase64String(ln[3].Trim());
+            if (sig.Length != 74 || glob.Length != 64) return "the signature has the wrong size";
+            if (sig[0] != (byte)'E' || sig[1] != (byte)'D') return "the signature is not a prehashed minisign signature";
+            if (!Same(sig, 2, pub, 2, 8)) return "the signature was made by a different key";
+            byte[] pk = new byte[32];
+            Buffer.BlockCopy(pub, 10, pk, 0, 32);
+            byte[] rs = new byte[64];
+            Buffer.BlockCopy(sig, 10, rs, 0, 64);
+            if (!Ed25519Verify(pk, Blake2b512(data), rs)) return "the signature does not match the file";
+            byte[] tc = Encoding.UTF8.GetBytes(ln[2].Substring(TC.Length));
+            byte[] gm = new byte[64 + tc.Length];
+            Buffer.BlockCopy(rs, 0, gm, 0, 64);
+            Buffer.BlockCopy(tc, 0, gm, 64, tc.Length);
+            if (!Ed25519Verify(pk, gm, glob)) return "the signed comment does not match the signature";
+            return null;
+        }
+        catch (Exception)
+        {
+            return "the signature could not be read";
+        }
+    }
+}
+'@
+
+function Initialize-HqMinisign {
+    if ('HqMinisign' -as [type]) { return }
+    if ($PSVersionTable.PSEdition -eq 'Core') { Add-Type -TypeDefinition $script:HqMinisignSource }
+    else { Add-Type -TypeDefinition $script:HqMinisignSource -ReferencedAssemblies 'System.Numerics' }
+}
+
+# $null when `Signature` (the bytes of a .minisig file) is a valid HQ release signature over
+# `Data`, else a short reason.
+function Test-HqSignature {
+    param([byte[]]$Data, [byte[]]$Signature, [string]$PublicKey = $script:HqSigningKey)
+    # Fail closed: anything but a clean `$null` from the verifier is a failure.
+    try {
+        Initialize-HqMinisign
+        $r = [HqMinisign]::Verify($PublicKey, $Data, $Signature)
+    } catch {
+        return "the signature check could not run here ($($_.Exception.Message))"
+    }
+    if ($null -ne $r -and "$r".Length -eq 0) { return 'the signature check gave an unclear answer' }
+    return $r
+}
+
+# The zip's SHA-256 from a checksum file, trusted only after its signature checks out.
+# Throws (so nothing gets installed) when the signature or the file is not right.
+function Get-HqVerifiedHash {
+    param([string]$SumPath, [string]$SigPath, [string]$ZipName, [string]$PublicKey = $script:HqSigningKey)
+    $ErrorActionPreference = 'Stop'
+    $sumBytes = [IO.File]::ReadAllBytes($SumPath)
+    $why = Test-HqSignature -Data $sumBytes -Signature ([IO.File]::ReadAllBytes($SigPath)) -PublicKey $PublicKey
+    if ($why) { throw "this build's signature is not valid ($why); nothing was installed" }
+    $want = Get-HqExpectedHash -Text ([Text.Encoding]::ASCII.GetString($sumBytes)) -FileName $ZipName
+    if (-not $want) { throw 'the checksum file is not in the expected format' }
+    return $want
 }
 
 # `wsl.exe -l -q` prints UTF-16, which arrives with NUL bytes in between.
@@ -187,13 +451,16 @@ function Install-HqLite {
     try {
         $zip = Join-Path $work $asset.ZipName
         Get-HqFile -Url $asset.ZipUrl -To $zip
-        $sumText = (Invoke-WebRequest -Uri $asset.SumUrl -UseBasicParsing -Headers @{ 'User-Agent' = 'hq-install.ps1' }).Content
-        if ($sumText -is [byte[]]) { $sumText = [Text.Encoding]::ASCII.GetString($sumText) }
-        $want = Get-HqExpectedHash -Text "$sumText" -FileName $asset.ZipName
-        if (-not $want) { throw 'the checksum file is not in the expected format' }
+        # The signature comes first: the checksum is trusted only if HQ's release key signed it.
+        $sumPath = Join-Path $work ($asset.ZipName + '.sha256')
+        $sigPath = Join-Path $work ($asset.ZipName + '.sha256.minisig')
+        Get-HqFile -Url $asset.SumUrl -To $sumPath
+        Get-HqFile -Url $asset.SigUrl -To $sigPath
+        $want = Get-HqVerifiedHash -SumPath $sumPath -SigPath $sigPath -ZipName $asset.ZipName
+        Write-HqNote 'Signature OK: signed with the HQ release key.'
         $have = (Get-FileHash -Algorithm SHA256 -Path $zip).Hash.ToLowerInvariant()
         if ($have -ne $want) { throw "the download does not match its checksum (expected $want, got $have)" }
-        Write-HqNote 'Checksum matches. Note: this build is not code-signed yet, so the checksum shows the download is intact, not who made it.'
+        Write-HqNote 'Checksum matches. The build is signed by HQ, not by a Windows code-signing certificate (Authenticode), so Smart App Control or AppLocker rules that need one can still refuse it.'
 
         $stage = Join-Path $work 'x'
         # Refuse a zip whose entries climb out of the folder (older Expand-Archive does not
@@ -270,7 +537,7 @@ function Install-HqLite {
             Write-HqNote 'This usually means a policy on this computer only allows approved programs (AppLocker, Windows Defender Application Control or Smart App Control).'
             Write-HqNote 'HQ does not try to get around that. Your options, lightest first:'
             Write-HqNote "  1. Use an HQ that runs somewhere else from VS Code (nothing to install here): $script:HqDocs"
-            Write-HqNote "  2. Ask IT to allow the program by its hash. hq.exe SHA-256: $exeHash (from $($asset.ZipName), $($asset.Tag); unsigned)"
+            Write-HqNote "  2. Ask IT to allow the program by its hash. hq.exe SHA-256: $exeHash (from $($asset.ZipName), $($asset.Tag); signed by HQ, not Authenticode)"
             Write-HqNote '  3. Use Full HQ in WSL2 if your IT team allows it (run this installer again with -Edition full).'
             return $false
         }

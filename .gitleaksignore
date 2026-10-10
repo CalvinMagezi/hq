@@ -1,0 +1,2 @@
+# Reviewed: the minisign PUBLIC key in install.ps1, flagged as a generic key.
+b0250b78c27f91c350cca907834fa3f91bcc87be:apps/site/public/install.ps1:generic-api-key:25
