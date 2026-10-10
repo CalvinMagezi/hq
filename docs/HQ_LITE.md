@@ -83,7 +83,7 @@ example `%LOCALAPPDATA%\hq-lite`, then:
   is never offered, and there is no switch to skip the check. This proves the build came from HQ's
   release pipeline; it does not replace Authenticode, which is what AppLocker publisher rules and
   Smart App Control look for, and still needs a code-signing certificate. A signature does not stop
-  someone who can change what GitHub's API returns from steering you to an older signed build.
+  someone who controls the release assets from serving you an older signed build (the signature carries no freshness).
 
 ## Nothing leaves unless you listed it
 

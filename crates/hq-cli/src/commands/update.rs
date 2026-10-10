@@ -146,7 +146,7 @@ mod windows {
         }
         let Ok(exe) = std::env::current_exe() else { return 1 };
         let dir = exe.parent().map(|p| p.display().to_string()).unwrap_or_default();
-        println!("Running the installer from https://agent-hq.online/install.ps1 into {dir} (it checks the download's SHA-256 first; the check shows integrity, not authorship) ...");
+        println!("Running the installer from https://agent-hq.online/install.ps1 into {dir} (it verifies the download's signature against HQ's release key, then its SHA-256) ...");
         let script = format!(
             "& ([scriptblock]::Create((irm https://agent-hq.online/install.ps1))) -Edition lite -Yes -InstallDir '{}'",
             dir.replace('\'', "''")

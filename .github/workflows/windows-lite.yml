@@ -90,8 +90,9 @@ jobs:
           Tasks:    .\hq.exe task list
           Editors:  .\hq.exe mcp install
 
-          This build is not code-signed. Check the zip against the published SHA-256 before
-          running it. Organizations that restrict programs (AppLocker, Smart App Control) may
+          This build is signed with the HQ release key (minisign), not with a Windows code-signing
+          certificate. install.ps1 checks the signature for you; by hand, check the zip against
+          the signed SHA-256 before running it. Organizations that restrict programs (AppLocker, Smart App Control) may
           block it; docs/HQ_LITE.md lists the options that need no program on this computer.
           "@ | Set-Content "$dir\README.txt"
           Compress-Archive -Path "$dir\*" -DestinationPath "dist\$name.zip"

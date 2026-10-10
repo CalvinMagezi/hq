@@ -312,14 +312,22 @@ function Initialize-HqMinisign {
 # `Data`, else a short reason.
 function Test-HqSignature {
     param([byte[]]$Data, [byte[]]$Signature, [string]$PublicKey = $script:HqSigningKey)
-    Initialize-HqMinisign
-    return [HqMinisign]::Verify($PublicKey, $Data, $Signature)
+    # Fail closed: anything but a clean `$null` from the verifier is a failure.
+    try {
+        Initialize-HqMinisign
+        $r = [HqMinisign]::Verify($PublicKey, $Data, $Signature)
+    } catch {
+        return "the signature check could not run here ($($_.Exception.Message))"
+    }
+    if ($null -ne $r -and "$r".Length -eq 0) { return 'the signature check gave an unclear answer' }
+    return $r
 }
 
 # The zip's SHA-256 from a checksum file, trusted only after its signature checks out.
 # Throws (so nothing gets installed) when the signature or the file is not right.
 function Get-HqVerifiedHash {
     param([string]$SumPath, [string]$SigPath, [string]$ZipName, [string]$PublicKey = $script:HqSigningKey)
+    $ErrorActionPreference = 'Stop'
     $sumBytes = [IO.File]::ReadAllBytes($SumPath)
     $why = Test-HqSignature -Data $sumBytes -Signature ([IO.File]::ReadAllBytes($SigPath)) -PublicKey $PublicKey
     if ($why) { throw "this build's signature is not valid ($why); nothing was installed" }
