@@ -3,6 +3,7 @@
 use anyhow::{Context, Result, bail};
 use hq_host::{BurstLimit, Client, Host, Server, socket_path};
 use serde_json::json;
+use std::os::unix::fs::DirBuilderExt;
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Duration;
@@ -13,6 +14,8 @@ const DEFAULT_MAX_AGENTS: usize = 16;
 /// Most agents started within `BURST_WINDOW` before the host locks itself.
 const DEFAULT_MAX_STARTS: usize = 10;
 const BURST_WINDOW: Duration = Duration::from_secs(10 * 60);
+/// The host directory's mode, as `hq host serve` creates it.
+const PRIVATE_DIR_MODE: u32 = 0o700;
 
 fn default_dir() -> PathBuf {
     hq_core::config::native_host_dir()
@@ -135,6 +138,12 @@ fn status(dir: &std::path::Path) -> Result<()> {
 /// is asked to stop every agent it runs.
 fn lockdown(dir: &std::path::Path, reason: Option<&str>) -> Result<()> {
     let wanted = hq_host::Lockdown::new(reason.unwrap_or("locked from the command line"), "cli");
+    // A host that has never run here still comes up locked later.
+    std::fs::DirBuilder::new()
+        .recursive(true)
+        .mode(PRIVATE_DIR_MODE)
+        .create(dir)
+        .with_context(|| format!("creating {}", dir.display()))?;
     let held = hq_host::engage_lockdown(dir, &wanted)
         .with_context(|| format!("writing {}", hq_host::lockdown_path(dir).display()))?;
     println!("hq host locked down: {}", held.reason);
