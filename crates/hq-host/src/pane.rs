@@ -390,12 +390,11 @@ impl Pane {
     }
 
     /// Kills the process group at once, with no grace period: for a lockdown,
-    /// where a child that ignores SIGHUP must not outlive its leader.
+    /// where a child that ignores SIGHUP must not outlive its leader. Unlike
+    /// `kill` it signals the group even after the leader exited, since its
+    /// children may live on; the group id stays theirs while any of them does.
     pub(crate) fn kill_now(&self) {
         self.stopping.store(true, Ordering::SeqCst);
-        if lock(&self.shared.state).exit.is_some() {
-            return;
-        }
         match self.pid.and_then(|p| i32::try_from(p).ok()) {
             Some(pid) => {
                 let _ = killpg(Pid::from_raw(pid), Signal::SIGKILL);

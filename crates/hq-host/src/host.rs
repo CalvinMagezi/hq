@@ -342,6 +342,8 @@ impl Host {
         }
         lock(&self.pane_tokens).remove(name);
         self.save();
+        self.forget_files(name);
+        self.events.push(name, EventKind::Removed, None, None);
         Err(HostError::LockedDown(held.reason))
     }
 
@@ -353,8 +355,9 @@ impl Host {
     }
 
     /// Whether a new agent may start now: refused under lockdown, and a start
-    /// past the burst limit locks the host instead of going ahead. Only starts
-    /// that succeeded count, so a caller retrying a bad request cannot trip it.
+    /// past the burst limit locks the host instead of going ahead. An admitted
+    /// start holds its slot so parallel callers cannot overshoot; one that fails
+    /// gives it back (`release_start`), so retrying a bad request cannot trip it.
     fn admit(&self) -> Result<(), HostError> {
         self.refuse_if_locked()?;
         let Some(limit) = self.burst_limit else {
@@ -366,6 +369,7 @@ impl Host {
             starts.pop_front();
         }
         if starts.len() < limit.max {
+            starts.push_back(now);
             return Ok(());
         }
         drop(starts);
@@ -378,9 +382,9 @@ impl Host {
         Err(HostError::LockedDown(held.reason))
     }
 
-    fn count_start(&self) {
+    fn release_start(&self) {
         if self.burst_limit.is_some() {
-            lock(&self.recent_starts).push_back(Instant::now());
+            lock(&self.recent_starts).pop_back();
         }
     }
 
@@ -395,8 +399,7 @@ impl Host {
     /// the burst limit.
     pub fn spawn(&self, spec: SpawnSpec) -> Result<PaneInfo, HostError> {
         self.admit()?;
-        let info = self.start(spec)?;
-        self.count_start();
+        let info = self.start(spec).inspect_err(|_| self.release_start())?;
         self.undo_if_locked(&info.name)?;
         Ok(info)
     }
@@ -632,8 +635,10 @@ impl Host {
                 return report;
             }
         };
-        let locked = self.lockdown_status();
+        let mut locked = None;
         for rec in records {
+            // Read each time: `hq host lockdown` may land while this runs.
+            locked = locked.or_else(|| self.lockdown_status());
             if let Some(held) = &locked {
                 report.skipped.push((rec.name.clone(), format!("the host is locked down, so it is forgotten: {}", held.reason)));
                 continue;
@@ -695,7 +700,12 @@ impl Host {
         // Resuming brings back a known agent, so it skips the burst limit (a host
         // restart resumes many at once) but never a lockdown. The name is taken
         // while it waits, so release it first and put it back if the start fails.
-        self.refuse_if_locked()?;
+        if let Err(locked) = self.refuse_if_locked() {
+            // Under the forget policy a locked host does not keep it for later.
+            lock(&self.awaiting).remove(name);
+            self.save();
+            return Err(locked);
+        }
         lock(&self.awaiting).remove(name);
         let started = self.start(spec_of(rec.clone(), env)).and_then(|info| {
             self.undo_if_locked(&info.name)?;
@@ -703,6 +713,7 @@ impl Host {
         });
         match started {
             Ok(info) => Ok(info),
+            Err(e @ HostError::LockedDown(_)) => Err(e),
             Err(e) => {
                 lock(&self.awaiting).insert(rec.name.clone(), rec);
                 Err(e)
