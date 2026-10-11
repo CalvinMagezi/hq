@@ -45,6 +45,29 @@ const sourceMap = [
   ['Web auth and origin guard', 'crates/hq-web/src/auth.rs'],
   ['Native tasks', 'crates/hq-db/src/tasks.rs'],
 ];
+
+const crateRows = [
+  ['Binary', ['hq-cli']],
+  ['Host', ['hq-host', 'hq-sandbox']],
+  ['Services', ['hq-web', 'hq-relay', 'hq-mcp', 'hq-daemon', 'hq-update']],
+  ['Intelligence', ['hq-agent', 'hq-tools', 'hq-memory', 'hq-convert', 'hq-export']],
+  ['Foundations', ['hq-core', 'hq-vault', 'hq-db', 'hq-llm']],
+] as const;
+
+const MCP_TOOL_DOTS = 100;
+const MCP_HITS = [7, 23, 38, 41, 56, 62, 77, 85, 94];
+const mcpDots = Array.from({ length: MCP_TOOL_DOTS }, (_, i) => MCP_HITS.indexOf(i));
+
+const updateSteps = [
+  'Timer fires every 10 minutes, under a lock',
+  'Verify pointer and manifest signatures',
+  'Refuse equal, lower or replayed versions',
+  'Download with size caps, check SHA-256',
+  'Snapshot the vault database',
+  "Run the staged binary's --version",
+  'Swap by rename, wait for /health',
+  'Upgrade, or roll back and alert',
+];
 ---
 
 <Layout
@@ -52,15 +75,47 @@ const sourceMap = [
   description="How Agent HQ is built: one Rust binary, a markdown and SQLite vault, a daemon, chat relays, a web PWA, an MCP gateway, supervised coding-agent sessions, a bash sandbox and a signed updater."
   path="/architecture/"
 >
-  <section class="band">
-    <div class="container section">
-      <span class="eyebrow">For engineers</span>
-      <h1>Architecture</h1>
-      <p class="lede prose">
-        HQ is one Rust binary around one folder of markdown. This page walks through each part in the
-        order you would meet it, with the code paths to read. Everything here comes from the repository
-        documentation. Where a document and the code could drift, the page points at the file.
-      </p>
+  <section class="sec sec-hero" aria-labelledby="arch-h">
+    <span class="orb orb-b o-tl" aria-hidden="true"></span>
+    <span class="orb orb-i o-c" aria-hidden="true"></span>
+    <span class="orb orb-g o-br slow" aria-hidden="true"></span>
+    <div class="container stack">
+      <div class="hero-grid">
+        <div class="stack">
+          <p class="eyebrow">For engineers</p>
+          <h1 id="arch-h" class="display">
+            <span class="hl"><span>One binary.</span></span>
+            <span class="hl"><span>One folder</span></span>
+            <span class="hl"><span class="accent">of markdown.</span></span>
+          </h1>
+          <div class="rule rule-in" aria-hidden="true"></div>
+          <p class="lede fade-in hero-lede">
+            HQ is one Rust binary around one folder of markdown. This page walks through each part in the
+            order you would meet it, with the code paths to read. Everything here comes from the repository documentation. Where a
+            document and the code could drift, the page points at the file.
+          </p>
+        </div>
+        <div class="pm-panel glass-heavy shine">
+          <div class="pm" role="img" aria-label="One hq binary of about 58 MB takes six roles: terminal chat, the daemon, the Discord and Telegram relays, the web server and the MCP server.">
+            <svg class="pm-lines" viewBox="0 0 520 440" aria-hidden="true" focusable="false">
+              <path d="M260 220 L260 46"></path>
+              <path d="M260 220 L440 122"></path>
+              <path d="M260 220 L440 318"></path>
+              <path d="M260 220 L260 394"></path>
+              <path d="M260 220 L80 318"></path>
+              <path d="M260 220 L80 122"></path>
+            </svg>
+            {[1, 2, 3, 4, 5, 6].map((n) => <span class={`ray ry${n}`}></span>)}
+            <span class="hub glass-heavy"><span class="hub-name">hq</span><span class="label">about 58 MB</span></span>
+            <span class="role pill glass-light r1">Terminal <code>hq chat</code></span>
+            <span class="role pill glass-light r2">Daemon</span>
+            <span class="role pill glass-light r3">Discord relay</span>
+            <span class="role pill glass-light r4">Telegram relay</span>
+            <span class="role pill glass-light r5">Web <code>:5678</code></span>
+            <span class="role pill glass-light r6">MCP <code>mcp-serve</code></span>
+          </div>
+        </div>
+      </div>
       <nav aria-label="On this page">
         <ul class="toc">
           {toc.map(([id, label]) => <li><a href={`#${id}`}>{label}</a></li>)}
@@ -69,465 +124,1679 @@ const sourceMap = [
     </div>
   </section>
 
-  <div class="container">
-    <section class="doc-section" id="process" aria-labelledby="process-h">
-      <h2 id="process-h">Process model and the single binary</h2>
-      <div class="prose">
-        <p>
-          The <code>hq</code> binary is built from the <code>hq-cli</code> crate. A release build is
-          about 58 MB with LTO and symbol stripping. The same file runs the terminal chat, the
-          daemon, the Discord and Telegram relays, the web server and the MCP server. You pick the
-          role with a subcommand.
-        </p>
-        <p>
-          <code>hq start all</code> starts the long-lived components and <code>hq ps</code> lists the
-          managed processes. An MCP client does not need any of that: it launches
-          <code>hq mcp-serve</code> over stdio itself. <code>hq chat</code> runs the agent in
-          process, so the terminal works with nothing else running.
-        </p>
-        <p>
-          Configuration lives in <code>~/.hq/config.yaml</code>, or the file named by
-          <code>HQ_CONFIG_PATH</code>. Any key can also come from an <code>HQ_</code> environment
-          variable, with <code>__</code> for nesting. The file and its backups are written owner-only.
-        </p>
-      </div>
-      <Diagram d={processModel} />
-    </section>
+  <div class="sec sec-top0">
+    <span class="orb orb-i o-ml slow" aria-hidden="true"></span>
+    <span class="orb orb-b o-mr" aria-hidden="true"></span>
+    <span class="orb orb-g orb-y2" aria-hidden="true"></span>
+    <span class="orb orb-b orb-y3 slow" aria-hidden="true"></span>
+    <span class="orb orb-i orb-y4" aria-hidden="true"></span>
+    <span class="orb orb-g orb-y5 slow" aria-hidden="true"></span>
+    <div class="container docs">
+      <section id="process" class="doc glass-heavy shine reveal" aria-labelledby="process-h">
+        <div class="prose">
+          <p class="eyebrow">01</p>
+          <h2 id="process-h" class="h2-sm">Process model and the single binary</h2>
+          <p>
+            The <code>hq</code> binary is built from the <code>hq-cli</code> crate. A release build is about
+            58 MB with LTO and symbol stripping. The same file runs the terminal chat, the daemon, the
+            Discord and Telegram relays, the web server and the MCP server. You pick the role with a
+            subcommand.
+          </p>
+          <p>
+            <code>hq start all</code> starts the long-lived components and <code>hq ps</code> lists the
+            managed processes. An MCP client does not need any of that: it launches
+            <code>hq mcp-serve</code> over stdio itself. <code>hq chat</code> runs the agent in process, so the
+            terminal works with nothing else running.
+          </p>
+          <p>
+            Configuration lives in <code>~/.hq/config.yaml</code>, or the file named by
+            <code>HQ_CONFIG_PATH</code>. Any key can also come from an <code>HQ_</code> environment variable,
+            with <code>__</code> for nesting. The file and its backups are written owner-only.
+          </p>
+        </div>
+        <div class="doc-viz">
+          <div class="viz merge" role="img" aria-label="Three configuration sources, the default file, the HQ_CONFIG_PATH override and HQ_ environment variables, merge into one owner-only config.">
+            <span class="layer glass-light"><code>~/.hq/config.yaml</code><span class="label">Default file</span></span>
+            <span class="layer glass-light"><code>HQ_CONFIG_PATH</code><span class="label">Override path</span></span>
+            <span class="layer glass-light"><code>HQ_SECTION__KEY</code><span class="label">Env, __ nests</span></span>
+            <span class="layer layer-final"><strong>One config, owner-only</strong><span class="label">Loaded</span></span>
+          </div>
+          <details class="more"><summary>Full diagram and text description</summary><Diagram d={processModel} /></details>
+        </div>
+      </section>
 
-    <section class="doc-section" id="crates" aria-labelledby="crates-h">
-      <h2 id="crates-h">Crate map</h2>
-      <div class="prose">
-        <p>
-          The workspace is Rust edition 2024 with 16 crates and about 143,000 lines of Rust. Foundations hold types, storage and the
-          LLM clients. The agent crate holds the session loop, sub-agents, governance and the context engine.
-          Services wrap those for a transport. <code>hq-host</code> and <code>hq-sandbox</code> run and confine coding agents. <code>hq-cli</code> ties them into the binary.
-        </p>
-        <p>
-          The stack, in short: Tokio for async, Axum and tower-http for the web server, rusqlite
-          (bundled, WAL mode) for storage, rmcp for MCP, serenity for Discord, teloxide for Telegram,
-          clap for the CLI and figment for configuration. LLM calls go through async-openai with a
-          swappable base URL, which is how OpenRouter, Ollama and other OpenAI-compatible backends
-          plug in.
-        </p>
-      </div>
-      <Diagram d={crateMap} />
-    </section>
-
-    <section class="doc-section" id="vault" aria-labelledby="vault-h">
-      <h2 id="vault-h">The vault and the memory layers</h2>
-      <div class="prose">
-        <p>
-          The vault is a folder, <code>.vault/</code>, and it is the single source of truth. Notes,
-          memory, skills and conversation threads are markdown with YAML frontmatter. One SQLite file,
-          <code>.vault/_data/vault.db</code> in WAL mode, holds the indexes: FTS5 full-text search,
-          embedding vectors, link graphs and the registries the daemon and relays need. Delete the
-          database and the notes are still there.
-        </p>
-        <p>
-          Embeddings come from OpenRouter when a key is set, and from Ollama
-          (<code>nomic-embed-text</code> by default) when it is not. Memory, consolidation and skill
-          review call the router under the aliases <code>dream</code>, <code>bulk</code> and
-          <code>ingest</code>. Point those at a local model with a <code>backends:</code> block and
-          they stay on your machine.
-        </p>
-        <h3>Memory</h3>
-        <p>
-          The <code>hq-memory</code> crate has an ingester, a consolidator, a querier, a forgetter and
-          an entity graph. The daemon runs consolidation, embedding, note tagging and forgetting on
-          its memory tier, so memory is something the vault does for itself over time, not a log that
-          grows forever.
-        </p>
-        <h3>Context frames</h3>
-        <p>
-          Each turn, the context engine builds a token-budgeted frame from five layers: system, the
-          user message, memory, thread and injections. Surplus tokens cascade between layers, with the
-          thread getting 50 percent, injections 35 percent and memory 15 percent. Private tags are
-          stripped from the memory layer, and older thread messages are compacted.
-        </p>
-        <h3>Who may see what</h3>
-        <p>
-          Notes and tasks can carry a label: private to named people, shared, public, or unmarked,
-          which means owner only. A shared channel discloses only what every verified participant may
-          see, and an unresolved identity is denied by default.
-          <a href={links.sec.identity}>The design note</a> lists what is not covered yet.
-        </p>
-      </div>
-      <Diagram d={vaultMemory} />
-    </section>
-
-    <section class="doc-section" id="daemon" aria-labelledby="daemon-h">
-      <h2 id="daemon-h">The daemon and its scheduled tasks</h2>
-      <div class="prose">
-        <p>
-          The daemon is a plain interval scheduler. It ticks every 5 seconds and runs whichever tasks
-          are due, one after another, each with a timeout derived from its interval tier. A missed
-          task is detected on the next start. After every tick it writes
-          <code>DAEMON-STATUS.md</code> at the vault root, so you can read what ran with
-          <code>cat</code>.
-        </p>
-        <p>
-          The fast tier handles approvals, harness-session supervision, the heartbeat, value-bus
-          delivery and the email poll. The memory tier handles consolidation, embeddings, note tagging
-          and forgetting. The maintenance tier handles vault health, thread rotation, clean-up, a disk
-          watchdog and SQLite vacuum. Beside the scheduler, an agent worker triages inbound events and
-          email, and a machine profile records which CLIs the host has.
-        </p>
-        <p>
-          Recurring prompts are not daemon tasks. They are <code>/watch</code> rows, covered with the
-          relays below.
-        </p>
-      </div>
-      <Diagram d={daemon} />
-    </section>
-
-    <section class="doc-section" id="relays" aria-labelledby="relays-h">
-      <h2 id="relays-h">Chat relays</h2>
-      <div class="prose">
-        <p>
-          Discord and Telegram are built into <code>hq-relay</code> as feature-gated bridges behind
-          one unified bot. They share commands and watch firing, so behavior matches. Send
-          <code>!cancel</code> in either and the agent stops at the next tool boundary and replies
-          with a summary of turns and files touched. A heartbeat message shows the turn count and the
-          tool currently running.
-        </p>
-        <p>
-          Chat bridges are gated to an owner. Run <code>hq pair</code>, then send
-          <code>/pair &lt;code&gt;</code> in a private Telegram chat or <code>!pair &lt;code&gt;</code>
-          in a Discord DM. Earlier versions let the first sender become the owner. That was changed
-          because it hands the agent to whoever messages first.
-        </p>
-        <h3>Turns that outlive the chat</h3>
-        <p>
-          A turn has an ack window, 270 seconds by default. If the turn runs longer, the chat gets an
-          immediate acknowledgement and the session detaches into a persisted
-          <code>background_turns</code> table, then delivers its result when it finishes. A reconciler
-          runs at daemon start and every 6 hours. It marks rows that were running when something died
-          as interrupted, offers a <code>resume &lt;id&gt;</code>, and retires rows older than five
-          days.
-        </p>
-        <p>
-          <code>/watch &lt;minutes&gt; [for &lt;N&gt;h] &lt;prompt&gt;</code> stores a durable
-          recurring turn in the same table, so watches survive restarts. A reply containing
-          <code>WATCH_DONE</code> delivers once and stops the watch.
-        </p>
-        <h3>Session limits</h3>
-        <p>
-          Sessions have no turn-count ceiling. They end on completion, cancellation, an optional USD
-          budget cap, or a wall-clock limit that defaults to five hours.
-        </p>
-      </div>
-      <Diagram d={channels} />
-    </section>
-
-    <section class="doc-section" id="web" aria-labelledby="web-h">
-      <h2 id="web-h">The web PWA</h2>
-      <div class="prose">
-        <p>
-          The Control Center is a React 19 app on TanStack Start and Vite, built to a static
-          single-page bundle. <code>hq start all</code> serves it from <code>:5678</code> along with
-          the REST API and the chat socket, from <code>web/dist</code> next to the vault or the
-          directory in <code>web_static_dir</code>. There is no separate web server process.
-        </p>
-        <p>
-          It streams the agent live, browses and searches the vault, shows daemon status, runs the
-          tasks views, lists and drives sessions, renders DOCX, XLSX and PDF, and takes push
-          notifications. It installs on a phone like any PWA.
-        </p>
-        <h3>Auth in the browser</h3>
-        <p>
-          The server binds to <code>127.0.0.1</code> by default. With <code>web_auth_token</code> set,
-          the token is accepted only as a Bearer header, never in a URL. A browser cannot set headers
-          on a WebSocket, so the app asks <code>POST /api/ws-ticket</code> for a ticket that works
-          once, lasts 30 seconds and opens only <code>/ws</code>. An origin guard refuses requests from
-          origins that are not loopback, not the server's own and not listed in
-          <code>web_allowed_origins</code>, which also stops DNS rebinding. The response CSP has no
-          <code>unsafe-eval</code> and no script <code>unsafe-inline</code>, and remote images are
-          blocked on purpose, because an image URL is a way to send data out of a rendered note.
-          Details: <a href={links.sec.webAuth}>web and MCP auth</a>.
-        </p>
-      </div>
-    </section>
-
-    <section class="doc-section" id="mcp" aria-labelledby="mcp-h">
-      <h2 id="mcp-h">The MCP server and the two-tool gateway</h2>
-      <div class="prose">
-        <p>
-          HQ is an MCP server so the agents you already use can reach your vault, tasks and sessions.
-          A client always sees exactly two tools. <code>hq_discover</code> searches the registry by
-          keyword and returns matching tools with their descriptions. <code>hq_call</code> runs a tool
-          by name with JSON input. The registry behind them holds about a hundred tools, and a client
-          that calls <code>hq_discover</code> at runtime always sees the live list.
-        </p>
-        <p>
-          <code>hq mcp install --target claude-code</code> writes the client config for Claude Code,
-          Claude Desktop, Cursor, VS Code, Copilot, OpenCode, Antigravity or a project file, and
-          <code>hq mcp doctor</code> checks the connection.
-        </p>
-        <h3>Keys and scopes</h3>
-        <p>
-          Over HTTP, <code>/mcp</code> refuses every call unless a key is configured. There are three
-          scopes. A full key sees everything. A read-only key sees an allowlist. A handoff key gets that
-          read-only set, minus session logs, plus filing tasks, starting sessions and asking questions
-          in read-only mode, and nothing else. The gateway sets
-          the scope itself, so a client cannot claim a wider one. Treat the handoff key as the power to
-          start a coding agent anywhere you allow it, and set <code>agent_host.handoff_cwd_allow</code> to
-          bound where.
-        </p>
-        <h3>Both directions</h3>
-        <p>
-          HQ also bridges remote MCP servers. Each <code>remote_mcp:</code> entry becomes a
-          <code>&lt;name&gt;_discover</code> and <code>&lt;name&gt;_call</code> pair in the registry,
-          kept out of unattended sessions by default. From outside, <code>hq_ask</code> lets an MCP
-          client put a question to HQ's own chat agent, in an ordinary web thread you can open and
-          continue (<a href={links.mcpAsk}>docs</a>).
-        </p>
-      </div>
-      <Diagram d={mcpGateway} />
-    </section>
-
-    <section class="doc-section" id="host" aria-labelledby="host-h">
-      <h2 id="host-h">The built-in host and supervised coding-agent sessions</h2>
-      <div class="prose">
-        <p>
-          HQ's built-in host (<code>hq host</code>) owns the terminals. It recognises which coding agent
-          sits in a pane and reports its state: idle, working, blocked on a dialog, or done. HQ drives
-          it over a local socket. Claude Code, Codex, Cursor, Pi, OpenCode, Copilot CLI,
-          Kimi, Qwen and Antigravity are supported harnesses, and you can define your own profiles.
-          This replaced an earlier tmux runner that could only guess state from screen text.
-        </p>
-        <h3>Hosts</h3>
-        <p>
-          A host is a machine running <code>hq host</code>. <code>native</code> is the machine HQ runs
-          on. Any other host is a machine you paired with <code>hq host join</code> and is reached over
-          ssh with a dedicated key that is pinned to one source address and to a forced command,
-          <code>hq host gate</code>, which accepts one request as JSON on stdin and refuses every method
-          outside an allowlist. Agents run in a process sandbox with an egress allowlist. That is how HQ on a VPS can run and watch agents on a laptop, whenever the
-          laptop is on and reachable. Connections are reused between calls, and a write is never
-          retried because the gate may already have run it.
-        </p>
-        <h3>Spawning and watching</h3>
-        <p>
-          <code>harness_session_spawn</code> starts an agent and returns a session id. Send, wait,
-          logs, status, stop and resume sit beside it, and <code>hq sessions</code> mirrors them in the
-          CLI. A supervisor in the daemon polls every host once a minute. It alerts once when a
-          session blocks and once when an agent finishes a turn. A host that cannot be reached counts
-          as unknown, never as exited: a sleeping laptop leaves its sessions running and they are
-          watched again when it answers.
-        </p>
-        <p>
-          HQ does not answer dialogs for you. Claude Code's workspace-trust prompt defaults to "No,
-          exit", so pressing Enter would quit it. A blocked launch is reported with the screen, and you
-          answer with explicit keys.
-        </p>
-        <h3>Sessions that work on a task</h3>
-        <p>
-          A session can be linked to a task. Each event leaves a task comment, and the task moves from
-          in progress to ready for review or blocked as the session finishes or exits. HQ never marks a
-          task complete, because an agent saying it is done is not verification. Comments never quote
-          the pane, since pane text is untrusted input.
-        </p>
-        <h3>Handoff</h3>
-        <p>
-          <code>harness_session_handoff</code> lets an outside client, such as another agent over MCP,
-          start tracked work in one call. It files or reuses a task by an idempotency key, starts one
-          linked session with the acceptance criteria as its definition of done, and opens a chat
-          thread that owns the session. It is idempotent: the same key returns the same task, and a
-          task that already has a running session gets no second one.
-        </p>
-        <h3>Watching and driving from a web chat</h3>
-        <p>
-          A chat can watch a session. Watching posts short updates and never quotes the screen.
-          Driving lets HQ act as the session's project manager: read the session, send the next
-          instruction, approve a permission prompt or resume an exit, toward the linked task's goal. It
-          asks you instead when a step is destructive, touches credentials, deploys or spends money.
-          A new watch starts with Drive on only when the task gives it a usable goal, and
-          observation-only otherwise. A turn that has read untrusted content starts new watches with
-          Drive off, and a tool can never turn it back on once you switched it off. Mechanical limits cut it off
-          without relying on the model: an instruction budget per session, a cap on key presses, a
-          no-progress guard, and a cap on sessions driven at once. Each one switches Drive off and
-          says why. The Sessions page shows every session with its task, host, goal and live state.
-        </p>
-      </div>
-      <Diagram d={agentHost} />
-      <p class="prose muted">
-        Full reference, including setup and troubleshooting:
-        <a href={links.agentSessions}>docs/AGENT_SESSIONS.md</a>.
-      </p>
-    </section>
-
-    <section class="doc-section" id="tasks" aria-labelledby="tasks-h">
-      <h2 id="tasks-h">Tasks</h2>
-      <div class="prose">
-        <p>
-          Tasks are native, with no external tracker to mirror. The model is spaces, then initiatives,
-          then tasks, then comments, with sub-tasks, start dates and soft dependencies. One shared
-          write surface in <code>hq-db</code> backs the MCP tools (<code>task_list</code>,
-          <code>task_create</code>, <code>task_update</code>, <code>task_comment_add</code> and
-          friends), the REST API with its WebSocket broadcast, and the web UI with list, board and
-          timeline views. Tasks have no CLI command.
-        </p>
-        <p>
-          Tagging a task routes it to an agent mailbox synchronously. A person's tasks live in a
-          private space that only that person's turns can read. See
-          <a href={links.nativeTasks}>the design note</a>.
-        </p>
-      </div>
-    </section>
-
-    <section class="doc-section" id="governance" aria-labelledby="governance-h">
-      <h2 id="governance-h">Governance and the bash sandbox</h2>
-      <div class="prose">
-        <p>
-          The agent's <code>bash</code> tool runs model-written shell commands, so HQ does not rely on
-          the model refusing. A governance layer denies dangerous effects mechanically, before a tool
-          runs, and it applies in permissive modes too.
-        </p>
-        <p>
-          Credential files such as <code>~/.ssh</code>, cloud credentials and the HQ config are
-          unreachable always. A session becomes tainted once a tool returns untrusted content: web
-          fetch and search, mail, converted documents, other agents' mailboxes, session logs, pane
-          reads, vault reads and any remote MCP result. Taint is shared with every sub-agent the
-          session spawns, so delegating cannot launder it. After taint, project secrets such as
-          <code>.env</code> files and outbound network from bash (<code>curl</code>,
-          <code>ssh</code>, <code>nc</code> and similar) are denied.
-        </p>
-        <p>
-          For bash, three layers follow. Text checks catch honest mistakes and cheap tricks, but about
-          100 known obfuscation shapes are pinned in tests and some still get through, so they are
-          speed bumps. An environment allowlist starts the child with an empty environment and a short
-          list of variables. HQ's own keys are refused even if you list them. Then the OS sandbox:
-          bubblewrap on Linux, <code>sandbox-exec</code> on macOS. On Linux it gives a read-only root,
-          a fresh <code>/proc</code> in a new pid namespace, writable binds only for home, the working
-          directory, temp and the vault, and optionally no network. Config, env files and private
-          SSH keys are masked.
-        </p>
-        <p>
-          <code>governance.bash.sandbox</code> takes <code>off</code>, <code>best_effort</code> or
-          <code>required</code>. After 0.9.0 the default is <code>required</code>: if no sandbox backend
-          works, every bash command is refused and <code>hq doctor</code> says so.
-        </p>
-      </div>
-      <Diagram d={governance} />
-      <p class="prose muted">
-        What this does not cover is on the <a href="/security/">security page</a>.
-      </p>
-    </section>
-
-    <section class="doc-section" id="updates" aria-labelledby="updates-h">
-      <h2 id="updates-h">The signed release and pull-updater pipeline</h2>
-      <div class="prose">
-        <p>
-          A server instance pulls its updates. Nothing on the build side holds a credential for any
-          instance, and instances hold only a public key.
-        </p>
-        <h3>Build side</h3>
-        <p>
-          Every merge to <code>main</code> runs tests, builds on an older Ubuntu image so the binary
-          needs only an older glibc, and publishes a signed prerelease named like
-          <code>0.9.1-main.6</code>. The job that runs repository build code never sees the signing
-          key: a separate sign job does. Each release carries a binary archive per platform (Linux x86_64, Linux ARM and Apple Silicon), the web
-          bundle, <code>SHA256SUMS</code>, a <code>manifest.json</code> and its
-          <code>.minisig</code>. Channel pointers (<code>channel-main</code>,
-          <code>channel-stable</code>) are small signed JSON files that say which release a channel
-          currently means. Promoting to stable signs a new pointer for an existing release. Nothing is
-          rebuilt.
-        </p>
-        <h3>Instance side</h3>
-        <ol class="facts">
-          <li>
-            A systemd timer fires every 10 minutes with a short random delay and runs
-            <code>hq update --apply</code> under an exclusive lock.
-          </li>
-          <li>
-            It verifies the pointer signature, checks that the manifest URL lives under the configured
-            repository, then verifies the manifest signature and its SHA-256, the schema and the
-            minimum updater version.
-          </li>
-          <li>
-            Equal or lower versions do nothing. A pointer with a lower sequence number than one already
-            accepted is refused as a replay.
-          </li>
-          <li>
-            It downloads with hard size caps, verifies each artifact's SHA-256 against the signed
-            manifest, and unpacks with a strict tar reader that rejects links, devices, absolute and
-            parent paths and duplicates.
-          </li>
-          <li>
-            It snapshots the vault database with <code>VACUUM INTO</code>, as the service user, never
-            as root.
-          </li>
-          <li>
-            It runs the staged binary as the service user with <code>--version</code> and requires the
-            exact build. This is the only downloaded code that runs before the swap.
-          </li>
-          <li>
-            It swaps the binary and web files by rename, keeping the last three binaries and one old
-            web tree, restarts the service and polls <code>/health</code> until it reports the new git
-            sha.
-          </li>
-          <li>
-            On success it runs <code>hq install --upgrade</code>. On failure it rolls back, restores
-            the database only if migrations ran, blocks that version for 24 hours and sends an alert.
-            A crash mid-update is recovered from a journal on the next run.
-          </li>
-        </ol>
-        <p>
-          Signatures are minisign (Ed25519), verified in process. The key is read from a root-owned
-          file or compiled in, and cannot be overridden by an environment variable. Key rotation is a
-          manual step. A compromised signing key and a stale-pointer freeze attack are listed as not
-          mitigated. Read <a href={links.updateSystem}>docs/UPDATE_SYSTEM.md</a> for the contract.
-        </p>
-      </div>
-      <Diagram d={releasePipeline} />
-    </section>
-
-    <section class="doc-section" id="topologies" aria-labelledby="topologies-h">
-      <h2 id="topologies-h">Deployment topologies</h2>
-      <div class="prose">
-        <p>
-          <strong>Laptop only.</strong> Run <code>hq start all</code>. The web server binds to loopback.
-          Set <code>web_auth_token</code> on a shared machine. This is the default and needs no network
-          setup.
-        </p>
-        <p>
-          <strong>VPS plus Tailscale.</strong> Provision a Debian or Ubuntu box with
-          <code>deploy/setup-vps.sh</code>, install the signed updater with
-          <code>deploy/install.sh</code>, and keep HQ on loopback. Caddy bridges to
-          <code>tailscale serve</code>, which terminates HTTPS on your tailnet only, so the UI never
-          touches the public internet. List every origin you serve the UI from in
-          <code>web_allowed_origins</code>. HQ on the VPS can then drive the host on a laptop over the
-          gated ssh key.
-        </p>
-        <p>
-          The only endpoint that may ever be public is <code>/mcp</code>, through a proxy that exposes
-          <code>/mcp</code> and <code>/health</code> and nothing else, with an API key set.
-          <code>/ws</code> and <code>/api</code> must never be public. A host runs one deploy path
-          only: the pull updater, or a manual build, not both. Steps are on the
-          <a href="/install/">install page</a> and in <a href={links.deployReadme}>deploy/README.md</a>.
-        </p>
-      </div>
-      <Diagram d={topologies} />
-    </section>
-
-    <section class="doc-section" id="source" aria-labelledby="source-h">
-      <h2 id="source-h">Source map</h2>
-      <p class="prose">Where to start reading, relative to <a href={REPO}>the repository</a>.</p>
-      <div class="table-scroll" tabindex="0" role="region" aria-label="Source map table">
-        <table>
-          <caption>Entry points</caption>
-          <thead><tr><th scope="col">Area</th><th scope="col">Path</th></tr></thead>
-          <tbody>
+      <section id="crates" class="doc flip glass-heavy shine reveal" aria-labelledby="crates-h">
+        <div class="prose">
+          <p class="eyebrow">02</p>
+          <h2 id="crates-h" class="h2-sm">Crate map</h2>
+          <p>
+            The workspace is Rust edition 2024 with 17 crates and about 143,000 lines of Rust. Foundations
+            hold types, storage and the LLM clients. The agent crate holds the session loop, sub-agents,
+            governance and the context engine. Services wrap those for a transport. <code>hq-host</code> and
+            <code>hq-sandbox</code> run and confine coding agents. <code>hq-cli</code> ties them into the binary.
+          </p>
+          <p>
+            The stack, in short: Tokio for async, Axum and tower-http for the web server, rusqlite (bundled,
+            WAL mode) for storage, rmcp for MCP, serenity for Discord, teloxide for Telegram, clap for the CLI
+            and figment for configuration. LLM calls go through async-openai with a swappable base URL, which
+            is how OpenRouter, Ollama and other OpenAI-compatible backends plug in.
+          </p>
+        </div>
+        <div class="doc-viz">
+          <div class="viz crates" role="img" aria-label="The 17 crates in five layers, lighting up from the foundations to the binary.">
             {
-              sourceMap.map(([area, path]) => (
-                <tr>
-                  <th scope="row">{area}</th>
-                  <td><a href={`${REPO}/${path.endsWith('/') ? 'tree' : 'blob'}/main/${path}`}><code>{path}</code></a></td>
-                </tr>
+              crateRows.map(([layer, crates], i) => (
+                <span class={`crow cr${i}`}>
+                  <span class="label">{layer}</span>
+                  <span class="crate-list">
+                    {crates.map((c) => (
+                      <code class={c === 'hq-cli' ? 'crate crate-top' : 'crate'}>{c}</code>
+                    ))}
+                  </span>
+                </span>
               ))
             }
-          </tbody>
-        </table>
-      </div>
-    </section>
+          </div>
+          <details class="more"><summary>Full diagram and text description</summary><Diagram d={crateMap} /></details>
+        </div>
+      </section>
+
+      <section id="vault" class="doc glass-heavy shine reveal" aria-labelledby="vault-h">
+        <div class="prose">
+          <p class="eyebrow">03</p>
+          <h2 id="vault-h" class="h2-sm">The vault and the memory layers</h2>
+          <p>
+            The vault is a folder, <code>.vault/</code>, and it is the single source of truth. Notes, memory,
+            skills and conversation threads are markdown with YAML frontmatter. One SQLite file,
+            <code>.vault/_data/vault.db</code> in WAL mode, holds the indexes: FTS5 full-text search, embedding
+            vectors, link graphs and the registries the daemon and relays need. Delete the database and the
+            notes are still there.
+          </p>
+          <p>
+            Embeddings come from OpenRouter when a key is set, and from Ollama (<code>nomic-embed-text</code>
+            by default) when it is not. Memory, consolidation and skill review call the router under the
+            aliases <code>dream</code>, <code>bulk</code> and <code>ingest</code>. Point those at a local model
+            with a <code>backends:</code> block and they stay on your machine.
+          </p>
+          <h3>Memory</h3>
+          <p>
+            The <code>hq-memory</code> crate has an ingester, a consolidator, a querier, a forgetter and an
+            entity graph. The daemon runs consolidation, embedding, note tagging and forgetting on its memory
+            tier, so memory is something the vault does for itself over time, not a log that grows forever.
+          </p>
+          <h3>Context frames</h3>
+          <p>
+            Each turn, the context engine builds a token-budgeted frame from five layers: system, the user
+            message, memory, thread and injections. Surplus tokens cascade between layers, with the thread
+            getting 50 percent, injections 35 percent and memory 15 percent. Private tags are stripped from
+            the memory layer, and older thread messages are compacted.
+          </p>
+          <h3>Who may see what</h3>
+          <p>
+            Notes and tasks can carry a label: private to named people, shared, public, or unmarked, which
+            means owner only. A shared channel discloses only what every verified participant may see, and an
+            unresolved identity is denied by default. <a href={links.sec.identity}>The design note</a> lists
+            what is not covered yet.
+          </p>
+        </div>
+        <div class="doc-viz">
+          <div class="viz budget-viz" role="img" aria-label="Surplus context budget per turn: thread 50 percent, injections 35 percent, memory 15 percent.">
+            <span class="label">Surplus budget per turn</span>
+            <span class="budget">
+              <span class="b-thread">Thread 50%</span>
+              <span class="b-inj">Injections 35%</span>
+              <span class="b-mem">15%</span>
+            </span>
+            <span class="tags">
+              <span class="pill glass-light">vault.db</span>
+              <span class="pill glass-light">FTS5</span>
+              <span class="pill glass-light">Embeddings</span>
+              <span class="pill glass-light">Link graph</span>
+            </span>
+          </div>
+          <details class="more"><summary>Full diagram and text description</summary><Diagram d={vaultMemory} /></details>
+        </div>
+      </section>
+
+      <section id="daemon" class="doc flip glass-heavy shine reveal" aria-labelledby="daemon-h">
+        <div class="prose">
+          <p class="eyebrow">04</p>
+          <h2 id="daemon-h" class="h2-sm">The daemon and its scheduled tasks</h2>
+          <p>
+            The daemon is a plain interval scheduler. It ticks every 5 seconds and runs whichever tasks are
+            due, one after another, each with a timeout derived from its interval tier. A missed task is
+            detected on the next start. After every tick it writes <code>DAEMON-STATUS.md</code> at the vault
+            root, so you can read what ran with <code>cat</code>.
+          </p>
+          <p>
+            The fast tier handles approvals, harness-session supervision, the heartbeat, value-bus delivery
+            and the email poll. The memory tier handles consolidation, embeddings, note tagging and
+            forgetting. The maintenance tier handles vault health, thread rotation, clean-up, a disk watchdog
+            and SQLite vacuum. Beside the scheduler, an agent worker triages inbound events and email, and a
+            machine profile records which CLIs the host has.
+          </p>
+          <p>Recurring prompts are not daemon tasks. They are <code>/watch</code> rows, covered with the relays below.</p>
+        </div>
+        <div class="doc-viz">
+          <div class="viz tick-viz" role="img" aria-label="A five second tick runs the fast, memory and maintenance tier tasks in turn.">
+            <span class="clock"><span class="hand"><i></i></span><span class="clock-face"><strong>5s</strong><span class="label">tick</span></span></span>
+            <span class="tiers">
+              <span class="tier"><span class="label">Fast</span><span class="tchips"><span class="tchip">Approvals</span><span class="tchip">Session supervision</span><span class="tchip">Heartbeat</span><span class="tchip">Email poll</span></span></span>
+              <span class="tier"><span class="label">Memory</span><span class="tchips"><span class="tchip">Consolidation</span><span class="tchip">Embeddings</span><span class="tchip">Forgetting</span></span></span>
+              <span class="tier"><span class="label">Maintenance</span><span class="tchips"><span class="tchip">Vault health</span><span class="tchip">Disk watchdog</span><span class="tchip">SQLite vacuum</span></span></span>
+            </span>
+          </div>
+          <details class="more"><summary>Full diagram and text description</summary><Diagram d={daemon} /></details>
+        </div>
+      </section>
+
+      <section id="relays" class="doc glass-heavy shine reveal" aria-labelledby="relays-h">
+        <div class="prose">
+          <p class="eyebrow">05</p>
+          <h2 id="relays-h" class="h2-sm">Chat relays</h2>
+          <p>
+            Discord and Telegram are built into <code>hq-relay</code> as feature-gated bridges behind one
+            unified bot. They share commands and watch firing, so behavior matches. Send <code>!cancel</code>
+            in either and the agent stops at the next tool boundary and replies with a summary of turns and
+            files touched. A heartbeat message shows the turn count and the tool currently running.
+          </p>
+          <p>
+            Chat bridges are gated to an owner. Run <code>hq pair</code>, then send
+            <code>/pair &lt;code&gt;</code> in a private Telegram chat or <code>!pair &lt;code&gt;</code> in a
+            Discord DM. Earlier versions let the first sender become the owner. That was changed because it
+            hands the agent to whoever messages first.
+          </p>
+          <h3>Turns that outlive the chat</h3>
+          <p>
+            A turn has an ack window, 270 seconds by default. If the turn runs longer, the chat gets an
+            immediate acknowledgement and the session detaches into a persisted <code>background_turns</code>
+            table, then delivers its result when it finishes. A reconciler runs at daemon start and every 6
+            hours. It marks rows that were running when something died as interrupted, offers a
+            <code>resume &lt;id&gt;</code>, and retires rows older than five days.
+          </p>
+          <p>
+            <code>/watch &lt;minutes&gt; [for &lt;N&gt;h] &lt;prompt&gt;</code> stores a durable recurring
+            turn in the same table, so watches survive restarts. A reply containing <code>WATCH_DONE</code>
+            delivers once and stops the watch.
+          </p>
+          <h3>Session limits</h3>
+          <p>
+            Sessions have no turn-count ceiling. They end on completion, cancellation, an optional USD budget
+            cap, or a wall-clock limit that defaults to five hours.
+          </p>
+        </div>
+        <div class="doc-viz">
+          <div class="viz ack-viz" role="img" aria-label="A long turn passes the 270 second ack window, is acknowledged and detached to background_turns, then delivers its result.">
+            <span class="ack-scale"><span class="label">Turn starts</span><span class="label">270 s ack window</span></span>
+            <span class="ackbar"><span></span></span>
+            <span class="detach glass-light"><strong>Acknowledged.</strong> Detached to <code>background_turns</code></span>
+            <span class="deliver">Result delivered to the chat</span>
+            <span class="tags"><span class="pill glass-light">!cancel</span><span class="pill glass-light">/watch</span><span class="pill glass-light">resume &lt;id&gt;</span></span>
+          </div>
+          <details class="more"><summary>Full diagram and text description</summary><Diagram d={channels} /></details>
+        </div>
+      </section>
+
+      <section id="web" class="doc flip glass-heavy shine reveal" aria-labelledby="web-h">
+        <div class="prose">
+          <p class="eyebrow">06</p>
+          <h2 id="web-h" class="h2-sm">The web PWA</h2>
+          <p>
+            The Control Center is a React 19 app on TanStack Start and Vite, built to a static single-page
+            bundle. <code>hq start all</code> serves it from <code>:5678</code> along with the REST API and the
+            chat socket, from <code>web/dist</code> next to the vault or the directory in
+            <code>web_static_dir</code>. There is no separate web server process.
+          </p>
+          <p>
+            It streams the agent live, browses and searches the vault, shows daemon status, runs the tasks
+            views, lists and drives sessions, renders DOCX, XLSX and PDF, and takes push notifications. It
+            installs on a phone like any PWA.
+          </p>
+          <h3>Auth in the browser</h3>
+          <p>
+            The server binds to <code>127.0.0.1</code> by default. With <code>web_auth_token</code> set, the
+            token is accepted only as a Bearer header, never in a URL. A browser cannot set headers on a
+            WebSocket, so the app asks <code>POST /api/ws-ticket</code> for a ticket that works once, lasts 30
+            seconds and opens only <code>/ws</code>. An origin guard refuses requests from origins that are not
+            loopback, not the server's own and not listed in <code>web_allowed_origins</code>, which also stops
+            DNS rebinding. The response CSP has no <code>unsafe-eval</code> and no script
+            <code>unsafe-inline</code>, and remote images are blocked on purpose, because an image URL is a way
+            to send data out of a rendered note. Details: <a href={links.sec.webAuth}>web and MCP auth</a>.
+          </p>
+        </div>
+        <div class="doc-viz">
+          <div class="viz ticket-viz" role="img" aria-label="The browser asks for a ticket, the ticket works once for 30 seconds, and it opens the chat socket.">
+            <span class="token" aria-hidden="true"></span>
+            <span class="flow4">
+              <span class="fnode glass-light">Browser<code>Bearer</code></span>
+              <span class="fnode glass-light">Ticket<code>POST /api/ws-ticket</code></span>
+              <span class="fnode glass-light">Single use<span class="ttl"></span><code>30 s</code></span>
+              <span class="fnode fnode-on">Chat socket<code>/ws</code></span>
+            </span>
+          </div>
+        </div>
+      </section>
+
+      <section id="mcp" class="doc glass-heavy shine reveal" aria-labelledby="mcp-h">
+        <div class="prose">
+          <p class="eyebrow">07</p>
+          <h2 id="mcp-h" class="h2-sm">The MCP server and the two-tool gateway</h2>
+          <p>
+            HQ is an MCP server so the agents you already use can reach your vault, tasks and sessions. A
+            client always sees exactly two tools. <code>hq_discover</code> searches the registry by keyword
+            and returns matching tools with their descriptions. <code>hq_call</code> runs a tool by name with
+            JSON input. The registry behind them holds about a hundred tools, and a client that calls
+            <code>hq_discover</code> at runtime always sees the live list.
+          </p>
+          <p>
+            <code>hq mcp install --target claude-code</code> writes the client config for Claude Code, Claude
+            Desktop, Cursor, VS Code, Copilot, OpenCode, Antigravity or a project file, and
+            <code>hq mcp doctor</code> checks the connection.
+          </p>
+          <h3>Keys and scopes</h3>
+          <p>
+            Over HTTP, <code>/mcp</code> refuses every call unless a key is configured. There are three scopes.
+            A full key sees everything. A read-only key sees an allowlist. A handoff key gets that read-only
+            set, minus session logs, plus filing tasks, starting sessions and asking questions in read-only
+            mode, and nothing else. The gateway sets the scope itself, so a client cannot claim a wider one.
+            Treat the handoff key as the power to start a coding agent anywhere you allow it, and set
+            <code>agent_host.handoff_cwd_allow</code> to bound where.
+          </p>
+          <h3>Both directions</h3>
+          <p>
+            HQ also bridges remote MCP servers. Each <code>remote_mcp:</code> entry becomes a
+            <code>&lt;name&gt;_discover</code> and <code>&lt;name&gt;_call</code> pair in the registry, kept out
+            of unattended sessions by default. From outside, <code>hq_ask</code> lets an MCP client put a
+            question to HQ's own chat agent, in an ordinary web thread you can open and continue
+            (<a href={links.mcpAsk}>docs</a>).
+          </p>
+        </div>
+        <div class="doc-viz">
+          <div class="viz mcp-viz" role="img" aria-label="Two gateway tools, hq_discover and hq_call, in front of a registry of about a hundred tools.">
+            <span class="mcp-tools"><code class="pill pill-blue">hq_discover</code><code class="pill pill-green">hq_call</code></span>
+            <span class="label">Registry, about 100 tools</span>
+            <span class="dots">
+              {mcpDots.map((h) => <span class={h >= 0 ? `md hit hd${h}` : 'md'}></span>)}
+            </span>
+          </div>
+          <details class="more"><summary>Full diagram and text description</summary><Diagram d={mcpGateway} /></details>
+        </div>
+      </section>
+
+      <section id="host" class="doc flip glass-heavy shine reveal" aria-labelledby="host-h">
+        <div class="prose">
+          <p class="eyebrow">08</p>
+          <h2 id="host-h" class="h2-sm">The built-in host and supervised coding-agent sessions</h2>
+          <p>
+            HQ's built-in host (<code>hq host</code>) owns the terminals. It recognises which coding agent sits
+            in a pane and reports its state: idle, working, blocked on a dialog, or done. HQ drives it over a
+            local socket. Claude Code, Codex, Cursor, Pi, OpenCode, Copilot CLI, Kimi, Qwen and Antigravity are
+            supported harnesses, and you can define your own profiles. This replaced an earlier tmux runner
+            that could only guess state from screen text.
+          </p>
+          <h3>Hosts</h3>
+          <p>
+            A host is a machine running <code>hq host</code>. <code>native</code> is the machine HQ runs on. Any
+            other host is a machine you paired with <code>hq host join</code> and is reached over ssh with a
+            dedicated key that is pinned to one source address and to a forced command,
+            <code>hq host gate</code>, which accepts one request as JSON on stdin and refuses every method
+            outside an allowlist. Agents run in a process sandbox with an egress allowlist. That is how HQ on a
+            VPS can run and watch agents on a laptop, whenever the laptop is on and reachable. Connections are
+            reused between calls, and a write is never retried because the gate may already have run it.
+          </p>
+          <h3>Spawning and watching</h3>
+          <p>
+            <code>harness_session_spawn</code> starts an agent and returns a session id. Send, wait, logs,
+            status, stop and resume sit beside it, and <code>hq sessions</code> mirrors them in the CLI. A
+            supervisor in the daemon polls every host once a minute. It alerts once when a session blocks and
+            once when an agent finishes a turn. A host that cannot be reached counts as unknown, never as
+            exited: a sleeping laptop leaves its sessions running and they are watched again when it answers.
+          </p>
+          <p>
+            HQ does not answer dialogs for you. Claude Code's workspace-trust prompt defaults to "No, exit", so
+            pressing Enter would quit it. A blocked launch is reported with the screen, and you answer with
+            explicit keys.
+          </p>
+          <h3>Sessions that work on a task</h3>
+          <p>
+            A session can be linked to a task. Each event leaves a task comment, and the task moves from in
+            progress to ready for review or blocked as the session finishes or exits. HQ never marks a task
+            complete, because an agent saying it is done is not verification. Comments never quote the pane,
+            since pane text is untrusted input.
+          </p>
+          <h3>Handoff</h3>
+          <p>
+            <code>harness_session_handoff</code> lets an outside client, such as another agent over MCP, start
+            tracked work in one call. It files or reuses a task by an idempotency key, starts one linked
+            session with the acceptance criteria as its definition of done, and opens a chat thread that owns
+            the session. It is idempotent: the same key returns the same task, and a task that already has a
+            running session gets no second one.
+          </p>
+          <h3>Watching and driving from a web chat</h3>
+          <p>
+            A chat can watch a session. Watching posts short updates and never quotes the screen. Driving lets
+            HQ act as the session's project manager: read the session, send the next instruction, approve a
+            permission prompt or resume an exit, toward the linked task's goal. It asks you instead when a step
+            is destructive, touches credentials, deploys or spends money. A new watch starts with Drive on only
+            when the task gives it a usable goal, and observation-only otherwise. A turn that has read untrusted
+            content starts new watches with Drive off, and a tool can never turn it back on once you switched it
+            off. Mechanical limits cut it off without relying on the model: an instruction budget per session,
+            a cap on key presses, a no-progress guard, and a cap on sessions driven at once. Each one switches
+            Drive off and says why. The Sessions page shows every session with its task, host, goal and live
+            state.
+          </p>
+          <p class="small">Full reference, including setup and troubleshooting: <a href={links.agentSessions}>docs/AGENT_SESSIONS.md</a>.</p>
+        </div>
+        <div class="doc-viz">
+          <div class="viz host-viz">
+            <div class="sup">
+              <img
+                src="/media/art/supervision.jpg"
+                alt="Flat isometric illustration: a tall building with watchful eyes overlooking rows of small cube robots typing at desks, one raising a hand."
+                width="1600"
+                height="995"
+                loading="lazy"
+                decoding="async"
+              />
+              <p class="toast glass-heavy"><span class="dot dot-blue"></span><span><strong>codex is waiting on a trust prompt.</strong> HQ tells you and never answers it for you.</span></p>
+              <ul class="sess glass-heavy" aria-label="Example supervised sessions">
+                <li class="srow"><span class="dot dot-green"></span><code>claude-code</code><span class="s-run">running</span></li>
+                <li class="srow"><span class="dot dot-blue pinging"></span><code>codex</code><span class="s-block">blocked</span></li>
+                <li class="srow"><span class="dot dot-line"></span><code>opencode</code><span class="s-done">done</span></li>
+              </ul>
+            </div>
+            <span class="label">Session state</span>
+            <span class="states" role="img" aria-label="Session states cycle from idle to working to blocked to done.">
+              <span class="st st1">Idle</span><span class="arrow" aria-hidden="true">&#8250;</span>
+              <span class="st st2">Working</span><span class="arrow" aria-hidden="true">&#8250;</span>
+              <span class="st st3">Blocked</span><span class="arrow" aria-hidden="true">&#8250;</span>
+              <span class="st st4">Done</span>
+            </span>
+          </div>
+          <details class="more"><summary>Full diagram and text description</summary><Diagram d={agentHost} /></details>
+        </div>
+      </section>
+
+      <section id="tasks" class="doc glass-heavy shine reveal" aria-labelledby="tasks-h">
+        <div class="prose">
+          <p class="eyebrow">09</p>
+          <h2 id="tasks-h" class="h2-sm">Tasks</h2>
+          <p>
+            Tasks are native, with no external tracker to mirror. The model is spaces, then initiatives, then
+            tasks, then comments, with sub-tasks, start dates and soft dependencies. One shared write surface
+            in <code>hq-db</code> backs the MCP tools (<code>task_list</code>, <code>task_create</code>,
+            <code>task_update</code>, <code>task_comment_add</code> and friends), the REST API with its
+            WebSocket broadcast, and the web UI with list, board and timeline views. Tasks have no CLI command.
+          </p>
+          <p>
+            Tagging a task routes it to an agent mailbox synchronously. A person's tasks live in a private space
+            that only that person's turns can read. See <a href={links.nativeTasks}>the design note</a>.
+          </p>
+        </div>
+        <div class="doc-viz">
+          <div class="viz kanban" role="img" aria-label="A linked task moves from in progress to ready for review. Moving it to complete is left to you.">
+            <span class="kcol"><span class="label">In progress</span><span class="kcard"></span></span>
+            <span class="kcol"><span class="label">Ready for review</span></span>
+            <span class="kcol kcol-done"><span class="label">Complete</span><span class="small">Only you move it here</span></span>
+          </div>
+        </div>
+      </section>
+
+      <section id="governance" class="doc flip glass-heavy shine reveal" aria-labelledby="governance-h">
+        <div class="prose">
+          <p class="eyebrow">10</p>
+          <h2 id="governance-h" class="h2-sm">Governance and the bash sandbox</h2>
+          <p>
+            The agent's <code>bash</code> tool runs model-written shell commands, so HQ does not rely on the
+            model refusing. A governance layer denies dangerous effects mechanically, before a tool runs, and it
+            applies in permissive modes too.
+          </p>
+          <p>
+            Credential files such as <code>~/.ssh</code>, cloud credentials and the HQ config are unreachable
+            always. A session becomes tainted once a tool returns untrusted content: web fetch and search, mail,
+            converted documents, other agents' mailboxes, session logs, pane reads, vault reads and any remote
+            MCP result. Taint is shared with every sub-agent the session spawns, so delegating cannot launder
+            it. After taint, project secrets such as <code>.env</code> files and outbound network from bash
+            (<code>curl</code>, <code>ssh</code>, <code>nc</code> and similar) are denied.
+          </p>
+          <p>
+            For bash, three layers follow. Text checks catch honest mistakes and cheap tricks, but about 100
+            known obfuscation shapes are pinned in tests and some still get through, so they are speed bumps.
+            An environment allowlist starts the child with an empty environment and a short list of variables.
+            HQ's own keys are refused even if you list them. Then the OS sandbox: bubblewrap on Linux,
+            <code>sandbox-exec</code> on macOS. On Linux it gives a read-only root, a fresh <code>/proc</code>
+            in a new pid namespace, writable binds only for home, the working directory, temp and the vault, and
+            optionally no network. Config, env files and private SSH keys are masked.
+          </p>
+          <p>
+            <code>governance.bash.sandbox</code> takes <code>off</code>, <code>best_effort</code> or
+            <code>required</code>. After 0.9.0 the default is <code>required</code>: if no sandbox backend
+            works, every bash command is refused and <code>hq doctor</code> says so.
+          </p>
+          <p class="small">What this does not cover is on the <a href="/security/">security page</a>.</p>
+        </div>
+        <div class="doc-viz">
+          <div class="viz gov" role="img" aria-label="Commands pass through text checks, the environment allowlist with taint, and the OS sandbox. A plain command passes; a curl after untrusted content is denied.">
+            <span class="packet pk1">ls notes/</span>
+            <span class="packet pk2">curl (tainted)</span>
+            <span class="glayer glass-light gl1"><span>Text checks</span><span class="label">Speed bumps</span></span>
+            <span class="glayer glass-light"><span>Env allowlist and taint</span><span class="label l-deny">Denies</span></span>
+            <span class="glayer gl-os"><span>OS sandbox</span><span class="label l-req">Required</span></span>
+          </div>
+          <details class="more"><summary>Full diagram and text description</summary><Diagram d={governance} /></details>
+        </div>
+      </section>
+
+      <section id="updates" class="doc glass-heavy shine reveal" aria-labelledby="updates-h">
+        <div class="prose">
+          <p class="eyebrow">11</p>
+          <h2 id="updates-h" class="h2-sm">The signed release and pull-updater pipeline</h2>
+          <p>
+            A server instance pulls its updates. Nothing on the build side holds a credential for any instance,
+            and instances hold only a public key.
+          </p>
+          <h3>Build side</h3>
+          <p>
+            Every merge to <code>main</code> runs tests, builds on an older Ubuntu image so the binary needs
+            only an older glibc, and publishes a signed prerelease named like <code>0.9.1-main.6</code>. The job
+            that runs repository build code never sees the signing key: a separate sign job does. Each release
+            carries a binary archive per platform (Linux x86_64, Linux ARM and Apple Silicon), the web bundle,
+            <code>SHA256SUMS</code>, a <code>manifest.json</code> and its <code>.minisig</code>. Channel pointers
+            (<code>channel-main</code>, <code>channel-stable</code>) are small signed JSON files that say which
+            release a channel currently means. Promoting to stable signs a new pointer for an existing release.
+            Nothing is rebuilt.
+          </p>
+          <h3>Instance side</h3>
+          <ol class="facts">
+            <li>A systemd timer fires every 10 minutes with a short random delay and runs <code>hq update --apply</code> under an exclusive lock.</li>
+            <li>It verifies the pointer signature, checks that the manifest URL lives under the configured repository, then verifies the manifest signature and its SHA-256, the schema and the minimum updater version.</li>
+            <li>Equal or lower versions do nothing. A pointer with a lower sequence number than one already accepted is refused as a replay.</li>
+            <li>It downloads with hard size caps, verifies each artifact's SHA-256 against the signed manifest, and unpacks with a strict tar reader that rejects links, devices, absolute and parent paths and duplicates.</li>
+            <li>It snapshots the vault database with <code>VACUUM INTO</code>, as the service user, never as root.</li>
+            <li>It runs the staged binary as the service user with <code>--version</code> and requires the exact build. This is the only downloaded code that runs before the swap.</li>
+            <li>It swaps the binary and web files by rename, keeping the last three binaries and one old web tree, restarts the service and polls <code>/health</code> until it reports the new git sha.</li>
+            <li>On success it runs <code>hq install --upgrade</code>. On failure it rolls back, restores the database only if migrations ran, blocks that version for 24 hours and sends an alert. A crash mid-update is recovered from a journal on the next run.</li>
+          </ol>
+          <p>
+            Signatures are minisign (Ed25519), verified in process. The key is read from a root-owned file or
+            compiled in, and cannot be overridden by an environment variable. Key rotation is a manual step. A
+            compromised signing key and a stale-pointer freeze attack are listed as not mitigated. Read
+            <a href={links.updateSystem}>docs/UPDATE_SYSTEM.md</a> for the contract.
+          </p>
+        </div>
+        <div class="doc-viz">
+          <ol class="viz usteps" aria-label="The eight steps an instance runs on every update, lighting in turn.">
+            {updateSteps.map((s, i) => <li class={`us${i}`}><b>{i + 1}</b>{s}</li>)}
+          </ol>
+          <details class="more"><summary>Full diagram and text description</summary><Diagram d={releasePipeline} /></details>
+        </div>
+      </section>
+
+      <section id="topologies" class="doc flip glass-heavy shine reveal" aria-labelledby="topologies-h">
+        <div class="prose">
+          <p class="eyebrow">12</p>
+          <h2 id="topologies-h" class="h2-sm">Deployment topologies</h2>
+          <p>
+            <strong>Laptop only.</strong> Run <code>hq start all</code>. The web server binds to loopback. Set
+            <code>web_auth_token</code> on a shared machine. This is the default and needs no network setup.
+          </p>
+          <p>
+            <strong>VPS plus Tailscale.</strong> Provision a Debian or Ubuntu box with
+            <code>deploy/setup-vps.sh</code>, install the signed updater with <code>deploy/install.sh</code>,
+            and keep HQ on loopback. Caddy bridges to <code>tailscale serve</code>, which terminates HTTPS on
+            your tailnet only, so the UI never touches the public internet. List every origin you serve the UI
+            from in <code>web_allowed_origins</code>. HQ on the VPS can then drive the host on a laptop over the
+            gated ssh key.
+          </p>
+          <p>
+            The only endpoint that may ever be public is <code>/mcp</code>, through a proxy that exposes
+            <code>/mcp</code> and <code>/health</code> and nothing else, with an API key set. <code>/ws</code>
+            and <code>/api</code> must never be public. A host runs one deploy path only: the pull updater, or a
+            manual build, not both. Steps are on the <a href="/install/">install page</a> and in
+            <a href={links.deployReadme}>deploy/README.md</a>.
+          </p>
+        </div>
+        <div class="doc-viz">
+          <div class="viz topo-viz" role="img" aria-label="A request travels from a phone over the tailnet to Caddy on loopback and then to HQ. Only /mcp and /health may be public.">
+            <span class="label">VPS plus Tailscale</span>
+            <span class="tp-track"><span class="tpk"></span></span>
+            <span class="topo">
+              <span class="pill glass-light">Phone</span><span class="arrow" aria-hidden="true">&#8250;</span>
+              <span class="pill glass-light">Tailnet HTTPS</span><span class="arrow" aria-hidden="true">&#8250;</span>
+              <span class="pill glass-light">Caddy 127.0.0.1</span><span class="arrow" aria-hidden="true">&#8250;</span>
+              <span class="pill pill-green">HQ on loopback</span>
+            </span>
+            <span class="public glass-light"><strong>Public:</strong> only <code>/mcp</code> and <code>/health</code>, with a key.</span>
+          </div>
+          <details class="more"><summary>Full diagram and text description</summary><Diagram d={topologies} /></details>
+        </div>
+      </section>
+
+      <section id="source" class="source reveal" aria-labelledby="source-h">
+        <p class="eyebrow">13</p>
+        <h2 id="source-h" class="h2-sm">Source map</h2>
+        <p class="body">Where to start reading, relative to <a href={REPO}>the repository</a>.</p>
+        <div class="table-box glass-heavy shine" tabindex="0" role="region" aria-label="Source map table">
+          <table>
+            <caption>Entry points</caption>
+            <thead><tr><th scope="col">Area</th><th scope="col">Path</th></tr></thead>
+            <tbody>
+              {
+                sourceMap.map(([area, path]) => (
+                  <tr>
+                    <th scope="row">{area}</th>
+                    <td><a href={`${REPO}/${path.endsWith('/') ? 'tree' : 'blob'}/main/${path}`}><code>{path}</code></a></td>
+                  </tr>
+                ))
+              }
+            </tbody>
+          </table>
+        </div>
+      </section>
+    </div>
   </div>
 </Layout>
+
+<style>
+  .hero-grid {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    gap: 48px;
+    align-items: center;
+  }
+  .hero-lede {
+    max-width: 560px;
+  }
+  .pm-panel {
+    border-radius: var(--radius-xl);
+    padding: 20px;
+  }
+  .pm {
+    position: relative;
+    width: 520px;
+    height: 440px;
+    zoom: 0.9;
+  }
+  .pm-lines {
+    position: absolute;
+    inset: 0;
+    width: 520px;
+    height: 440px;
+  }
+  .pm-lines path {
+    stroke: rgba(255, 255, 255, 0.16);
+    stroke-width: 2;
+    stroke-dasharray: 4 6;
+    fill: none;
+  }
+  .ray {
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 9px;
+    height: 9px;
+    border-radius: 50%;
+    opacity: 0;
+    offset-rotate: 0deg;
+  }
+  .ry1 {
+    offset-path: path('M260 220 L260 46');
+    background: var(--brand-blue);
+  }
+  .ry2 {
+    offset-path: path('M260 220 L440 122');
+    background: var(--brand-green);
+    animation-delay: 0.5s;
+  }
+  .ry3 {
+    offset-path: path('M260 220 L440 318');
+    background: var(--brand-blue);
+    animation-delay: 1s;
+  }
+  .ry4 {
+    offset-path: path('M260 220 L260 394');
+    background: var(--brand-green);
+    animation-delay: 1.5s;
+  }
+  .ry5 {
+    offset-path: path('M260 220 L80 318');
+    background: var(--brand-blue);
+    animation-delay: 2s;
+  }
+  .ry6 {
+    offset-path: path('M260 220 L80 122');
+    background: var(--brand-green);
+    animation-delay: 2.5s;
+  }
+  .hub {
+    position: absolute;
+    left: 200px;
+    top: 160px;
+    width: 120px;
+    height: 120px;
+    border-radius: 50%;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 2px;
+  }
+  .hub-name {
+    font-family: var(--font-mono);
+    font-size: 26px;
+    font-weight: 700;
+  }
+  .role {
+    position: absolute;
+    transform: translate(-50%, -50%);
+  }
+  .role code {
+    background: none;
+    border: 0;
+    padding: 0;
+    font-size: 12px;
+    color: var(--ink-muted);
+  }
+  .r1 {
+    left: 260px;
+    top: 46px;
+  }
+  .r2 {
+    left: 440px;
+    top: 122px;
+  }
+  .r3 {
+    left: 440px;
+    top: 318px;
+  }
+  .r4 {
+    left: 260px;
+    top: 394px;
+  }
+  .r5 {
+    left: 80px;
+    top: 318px;
+  }
+  .r6 {
+    left: 80px;
+    top: 122px;
+  }
+
+  .orb-y2 {
+    left: -200px;
+    top: 34%;
+  }
+  .orb-y3 {
+    right: -260px;
+    top: 50%;
+  }
+  .orb-y4 {
+    left: -300px;
+    top: 66%;
+  }
+  .orb-y5 {
+    right: -300px;
+    top: 82%;
+  }
+  .docs {
+    display: flex;
+    flex-direction: column;
+    gap: 28px;
+  }
+  .viz {
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    gap: 16px;
+    padding: 24px;
+  }
+
+  .layer {
+    border-radius: 14px;
+    padding: 12px 16px;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 12px;
+    font-size: 14px;
+  }
+  .layer-final {
+    background: var(--brand-indigo);
+  }
+  .layer-final .label {
+    color: var(--brand-green);
+  }
+  .layer:nth-child(2) {
+    animation-delay: 0.4s;
+  }
+  .layer:nth-child(3) {
+    animation-delay: 0.8s;
+  }
+  .layer:nth-child(4) {
+    animation-delay: 1.2s;
+  }
+
+  .crates {
+    gap: 6px;
+    padding: 16px;
+  }
+  .crow {
+    display: grid;
+    grid-template-columns: 96px minmax(0, 1fr);
+    gap: 12px;
+    align-items: center;
+    padding: 8px 12px;
+    border-radius: 12px;
+  }
+  .crate-list {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+  }
+  .crate {
+    font-size: 12px;
+    padding: 4px 10px;
+    border-radius: var(--radius-pill);
+  }
+  .crate-top {
+    border-color: var(--brand-green);
+    color: var(--text-green);
+  }
+  .cr0 {
+    animation-delay: 4s;
+  }
+  .cr1 {
+    animation-delay: 3s;
+  }
+  .cr2 {
+    animation-delay: 2s;
+  }
+  .cr3 {
+    animation-delay: 1s;
+  }
+
+  .budget {
+    display: flex;
+    height: 40px;
+    border-radius: var(--radius-pill);
+    overflow: hidden;
+    border: 1px solid var(--glass-border);
+  }
+  .budget span {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 12px;
+    font-weight: 700;
+    color: #000000;
+    transform-origin: left center;
+    white-space: nowrap;
+  }
+  .b-thread {
+    width: 50%;
+    background: var(--brand-blue);
+  }
+  .b-inj {
+    width: 35%;
+    background: var(--brand-green);
+    animation-delay: 0.3s;
+  }
+  .b-mem {
+    width: 15%;
+    background: var(--brand-sky);
+    animation-delay: 0.6s;
+  }
+
+  .tick-viz {
+    flex-direction: row;
+    align-items: center;
+    gap: 24px;
+  }
+  .clock {
+    position: relative;
+    flex: none;
+    width: 120px;
+    height: 120px;
+    border-radius: 50%;
+    border: 2px dashed var(--hairline);
+  }
+  .hand {
+    position: absolute;
+    left: 50%;
+    top: 50%;
+    width: 0;
+    height: 0;
+  }
+  .hand i {
+    position: absolute;
+    left: -7px;
+    top: -67px;
+    width: 14px;
+    height: 14px;
+    border-radius: 50%;
+    background: var(--brand-green);
+    box-shadow: 0 0 14px var(--brand-green);
+  }
+  .clock-face {
+    position: absolute;
+    inset: 0;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+  }
+  .clock-face strong {
+    font-size: 28px;
+    line-height: 32px;
+  }
+  .tiers {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    min-width: 0;
+  }
+  .tier {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+  }
+  .tchips {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+  }
+  .tchip {
+    font-size: 12px;
+    font-weight: 700;
+    padding: 4px 10px;
+    border-radius: var(--radius-pill);
+    border: 1px solid var(--glass-border);
+    background: rgba(255, 255, 255, 0.04);
+    color: var(--ink-muted);
+  }
+  .tier:nth-child(2) .tchip {
+    animation-delay: 1.6s;
+  }
+  .tier:nth-child(3) .tchip {
+    animation-delay: 2.8s;
+  }
+
+  .ack-scale {
+    display: flex;
+    justify-content: space-between;
+  }
+  .ackbar {
+    height: 14px;
+    border-radius: var(--radius-pill);
+    background: rgba(255, 255, 255, 0.06);
+    border: 1px solid var(--glass-border);
+    overflow: hidden;
+  }
+  .ackbar span {
+    display: block;
+    height: 100%;
+    background: linear-gradient(90deg, var(--brand-blue), var(--brand-sky));
+    transform-origin: left center;
+  }
+  .detach,
+  .deliver {
+    border-radius: 14px;
+    padding: 12px 16px;
+    font-size: 14px;
+  }
+  .deliver {
+    background: var(--brand-green);
+    color: #000000;
+    font-weight: 700;
+  }
+
+  .ticket-viz {
+    min-height: 260px;
+  }
+  .flow4 {
+    display: grid;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    gap: 12px;
+    margin-top: 28px;
+  }
+  .fnode {
+    border-radius: 14px;
+    padding: 14px 8px;
+    text-align: center;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    align-items: center;
+    font-size: 13px;
+    font-weight: 700;
+  }
+  .fnode code {
+    font-size: 11px;
+    overflow-wrap: anywhere;
+  }
+  .fnode-on {
+    background: var(--brand-blue);
+    color: #000000;
+  }
+  .fnode-on code {
+    background: rgba(0, 0, 0, 0.12);
+    color: #000000;
+  }
+  .token {
+    position: absolute;
+    top: 40px;
+    left: calc(12.5% - 7px);
+    width: 14px;
+    height: 14px;
+    border-radius: 50%;
+    background: var(--brand-green);
+    box-shadow: 0 0 14px var(--brand-green);
+  }
+  .ttl {
+    height: 4px;
+    width: 100%;
+    border-radius: var(--radius-pill);
+    background: var(--brand-blue);
+    transform-origin: left center;
+  }
+
+  .mcp-tools {
+    display: flex;
+    gap: 12px;
+  }
+  .mcp-tools .pill {
+    font-family: var(--font-mono);
+    border: 0;
+  }
+  .dots {
+    display: grid;
+    grid-template-columns: repeat(20, minmax(0, 1fr));
+    gap: 6px;
+  }
+  .md {
+    aspect-ratio: 1;
+    border-radius: 50%;
+    background: rgba(255, 255, 255, 0.12);
+  }
+  .hd1 {
+    animation-delay: 0.4s;
+  }
+  .hd2 {
+    animation-delay: 0.8s;
+  }
+  .hd3 {
+    animation-delay: 1.2s;
+  }
+  .hd4 {
+    animation-delay: 1.6s;
+  }
+  .hd5 {
+    animation-delay: 2s;
+  }
+  .hd6 {
+    animation-delay: 2.4s;
+  }
+  .hd7 {
+    animation-delay: 2.8s;
+  }
+  .hd8 {
+    animation-delay: 3.2s;
+  }
+
+  .host-viz {
+    padding: 16px;
+  }
+  .sup {
+    position: relative;
+    border-radius: 14px;
+    overflow: hidden;
+    background: #000000;
+  }
+  .sup img {
+    display: block;
+    width: 100%;
+    height: auto;
+  }
+  .sess {
+    position: absolute;
+    left: 12px;
+    bottom: 12px;
+    width: 220px;
+    border-radius: 14px;
+    padding: 12px;
+    margin: 0;
+    list-style: none;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+  }
+  .srow {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 12px;
+    line-height: 16px;
+  }
+  .srow code {
+    background: none;
+    border: 0;
+    padding: 0;
+    flex: 1;
+  }
+  .s-run {
+    color: var(--text-green);
+    font-weight: 700;
+  }
+  .s-block {
+    color: var(--brand-sky);
+    font-weight: 700;
+  }
+  .s-done {
+    color: var(--ink-muted);
+    font-weight: 700;
+  }
+  .pinging {
+    position: relative;
+  }
+  .pinging::after {
+    content: '';
+    position: absolute;
+    inset: -4px;
+    border-radius: 50%;
+    border: 2px solid var(--brand-blue);
+    opacity: 0;
+  }
+  .toast {
+    position: absolute;
+    right: 12px;
+    top: 12px;
+    max-width: 230px;
+    border-radius: 14px;
+    padding: 10px 12px;
+    font-size: 12px;
+    line-height: 16px;
+    display: flex;
+    gap: 8px;
+    align-items: flex-start;
+  }
+  .toast .dot {
+    margin-top: 4px;
+  }
+  .states {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 8px;
+  }
+  .st {
+    border-radius: var(--radius-pill);
+    padding: 8px 16px;
+    font-size: 14px;
+    font-weight: 700;
+    border: 1px solid var(--glass-border);
+    background: rgba(255, 255, 255, 0.04);
+    color: var(--ink-muted);
+  }
+  .st2 {
+    animation-delay: 2s;
+  }
+  .st3 {
+    animation-delay: 4s;
+  }
+  .st4 {
+    animation-delay: 6s;
+  }
+  .arrow {
+    color: var(--line);
+    font-size: 18px;
+  }
+
+  .kanban {
+    flex-direction: row;
+    gap: 10px;
+    padding: 20px;
+    align-items: stretch;
+    min-height: 220px;
+  }
+  .kcol {
+    flex: 1 1 0;
+    border: 1px dashed var(--hairline);
+    border-radius: 12px;
+    padding: 10px;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+  }
+  .kcol-done {
+    border-style: solid;
+    border-color: var(--glass-border);
+  }
+  .kcol-done .small {
+    font-size: 12px;
+  }
+  .kcard {
+    height: 44px;
+    border-radius: 10px;
+    background: var(--brand-green);
+  }
+
+  .gov {
+    position: relative;
+    min-height: 300px;
+    justify-content: space-between;
+  }
+  .glayer {
+    position: relative;
+    z-index: 2;
+    border-radius: 12px;
+    padding: 10px 14px;
+    font-size: 13px;
+    font-weight: 700;
+    display: flex;
+    justify-content: space-between;
+    gap: 12px;
+  }
+  .gl1 {
+    margin-top: 44px;
+  }
+  .gl-os {
+    background: var(--brand-indigo);
+  }
+  .l-deny {
+    color: var(--danger-text);
+  }
+  .l-req {
+    color: var(--brand-green);
+  }
+  .packet {
+    position: absolute;
+    left: 50%;
+    top: 24px;
+    width: 128px;
+    margin-left: -64px;
+    z-index: 3;
+    font-family: var(--font-mono);
+    font-size: 11px;
+    text-align: center;
+    padding: 4px 8px;
+    border-radius: var(--radius-pill);
+  }
+  /* Side by side, so both labels stay readable when the drop animation is off. */
+  .pk1 {
+    margin-left: -136px;
+    background: var(--brand-green);
+    color: #000000;
+  }
+  .pk2 {
+    margin-left: 8px;
+    background: #15161a;
+    color: var(--ink);
+    border: 1px solid var(--line);
+  }
+
+  .usteps {
+    list-style: none;
+    margin: 0;
+    gap: 6px;
+    padding: 16px;
+  }
+  .usteps li {
+    display: flex;
+    gap: 10px;
+    align-items: center;
+    font-size: 13px;
+    line-height: 18px;
+    color: var(--ink-muted);
+    padding: 6px 10px;
+    border-radius: 10px;
+  }
+  .usteps b {
+    flex: none;
+    width: 22px;
+    height: 22px;
+    border-radius: 50%;
+    border: 2px solid var(--hairline);
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 11px;
+  }
+  .us1 {
+    animation-delay: 1s;
+  }
+  .us2 {
+    animation-delay: 2s;
+  }
+  .us3 {
+    animation-delay: 3s;
+  }
+  .us4 {
+    animation-delay: 4s;
+  }
+  .us5 {
+    animation-delay: 5s;
+  }
+  .us6 {
+    animation-delay: 6s;
+  }
+  .us7 {
+    animation-delay: 7s;
+  }
+
+  .tp-track {
+    position: relative;
+    height: 12px;
+  }
+  .tpk {
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 12px;
+    height: 12px;
+    border-radius: 50%;
+    background: var(--brand-green);
+    box-shadow: 0 0 12px var(--brand-green);
+  }
+  .topo {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    flex-wrap: wrap;
+  }
+  .public {
+    border-radius: 14px;
+    padding: 12px 16px;
+    font-size: 14px;
+    color: var(--ink-muted);
+  }
+  .public strong {
+    color: var(--ink);
+  }
+
+  .source {
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+    padding-top: 24px;
+  }
+
+  @media (max-width: 1100px) {
+    .pm {
+      zoom: 0.76;
+    }
+  }
+  @media (max-width: 960px) {
+    .hero-grid {
+      grid-template-columns: minmax(0, 1fr);
+    }
+    .pm-panel {
+      justify-self: center;
+    }
+    .pm {
+      zoom: 1;
+    }
+  }
+  @media (max-width: 680px) {
+    .pm {
+      zoom: 0.6;
+    }
+  }
+  @media (max-width: 640px) {
+    .pm-panel {
+      padding: 8px;
+    }
+    .pm {
+      zoom: 0.56;
+    }
+    .dots {
+      grid-template-columns: repeat(10, minmax(0, 1fr));
+    }
+    .flow4 {
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+    .token {
+      display: none;
+    }
+    .tick-viz {
+      flex-direction: column;
+      align-items: flex-start;
+    }
+    .sess,
+    .toast {
+      position: static;
+      width: auto;
+      max-width: none;
+      margin: 8px;
+    }
+    .crow {
+      grid-template-columns: minmax(0, 1fr);
+    }
+  }
+
+  @keyframes flowOut {
+    0% {
+      offset-distance: 0%;
+      opacity: 0;
+    }
+    10% {
+      opacity: 1;
+    }
+    85% {
+      opacity: 1;
+    }
+    100% {
+      offset-distance: 100%;
+      opacity: 0;
+    }
+  }
+  @keyframes layerIn {
+    0% {
+      opacity: 0;
+      transform: translateY(-14px);
+    }
+    12%,
+    85% {
+      opacity: 1;
+      transform: none;
+    }
+    100% {
+      opacity: 0;
+    }
+  }
+  @keyframes rowlit {
+    0%,
+    40%,
+    100% {
+      background: transparent;
+    }
+    10%,
+    30% {
+      background: rgba(0, 173, 238, 0.12);
+    }
+  }
+  @keyframes budget {
+    0% {
+      transform: scaleX(0);
+    }
+    25%,
+    90% {
+      transform: scaleX(1);
+    }
+    100% {
+      transform: scaleX(1);
+      opacity: 0.4;
+    }
+  }
+  @keyframes chiplit {
+    0%,
+    28%,
+    100% {
+      color: var(--ink-muted);
+      background: rgba(255, 255, 255, 0.04);
+      border-color: var(--glass-border);
+    }
+    8%,
+    20% {
+      color: #000000;
+      background: var(--brand-green);
+      border-color: var(--brand-green);
+    }
+  }
+  @keyframes ack {
+    0% {
+      transform: scaleX(0);
+    }
+    55%,
+    100% {
+      transform: scaleX(1);
+    }
+  }
+  @keyframes appear1 {
+    0%,
+    55% {
+      opacity: 0;
+      transform: translateY(8px);
+    }
+    62%,
+    100% {
+      opacity: 1;
+      transform: none;
+    }
+  }
+  @keyframes appear2 {
+    0%,
+    78% {
+      opacity: 0;
+      transform: translateY(8px);
+    }
+    85%,
+    100% {
+      opacity: 1;
+      transform: none;
+    }
+  }
+  @keyframes token {
+    0% {
+      left: calc(12.5% - 7px);
+    }
+    25%,
+    30% {
+      left: calc(37.5% - 7px);
+    }
+    55%,
+    60% {
+      left: calc(62.5% - 7px);
+    }
+    85%,
+    100% {
+      left: calc(87.5% - 7px);
+    }
+  }
+  @keyframes ttl {
+    0%,
+    30% {
+      transform: scaleX(1);
+    }
+    85%,
+    100% {
+      transform: scaleX(0);
+    }
+  }
+  @keyframes hitdot {
+    0%,
+    100% {
+      background: rgba(255, 255, 255, 0.12);
+    }
+    20%,
+    50% {
+      background: var(--brand-green);
+      box-shadow: 0 0 10px var(--brand-green);
+    }
+  }
+  @keyframes stateOn {
+    0% {
+      background: var(--brand-blue);
+      color: #000000;
+      border-color: var(--brand-blue);
+    }
+    25%,
+    100% {
+      background: rgba(255, 255, 255, 0.04);
+      color: var(--ink-muted);
+      border-color: var(--glass-border);
+    }
+  }
+  @keyframes kmove {
+    0%,
+    25% {
+      transform: translateX(0);
+    }
+    40%,
+    70% {
+      transform: translateX(calc(100% + 30px));
+    }
+    85%,
+    100% {
+      transform: translateX(calc(100% + 30px));
+      opacity: 0;
+    }
+  }
+  @keyframes fall1 {
+    0% {
+      transform: translateY(0);
+      opacity: 0;
+    }
+    8% {
+      opacity: 1;
+    }
+    80% {
+      transform: translateY(210px);
+      opacity: 1;
+    }
+    100% {
+      transform: translateY(210px);
+      opacity: 0;
+    }
+  }
+  @keyframes fall2 {
+    0% {
+      transform: translateY(0);
+      opacity: 0;
+    }
+    8% {
+      opacity: 1;
+    }
+    40% {
+      transform: translateY(116px);
+    }
+    45%,
+    80% {
+      transform: translateY(116px);
+      background: var(--danger-text);
+      color: #000000;
+    }
+    100% {
+      transform: translateY(116px);
+      opacity: 0;
+    }
+  }
+  @keyframes ustep {
+    0% {
+      background: rgba(0, 173, 238, 0.14);
+      color: var(--ink);
+    }
+    10%,
+    100% {
+      background: transparent;
+      color: var(--ink-muted);
+    }
+  }
+  @keyframes tpk {
+    0% {
+      left: 0;
+      opacity: 0;
+    }
+    10%,
+    90% {
+      opacity: 1;
+    }
+    100% {
+      left: calc(100% - 12px);
+      opacity: 0;
+    }
+  }
+  @keyframes toast {
+    0%,
+    8% {
+      opacity: 0;
+      transform: translateY(-12px);
+    }
+    16%,
+    72% {
+      opacity: 1;
+      transform: none;
+    }
+    82%,
+    100% {
+      opacity: 0;
+      transform: translateY(-12px);
+    }
+  }
+  @keyframes supZoom {
+    from {
+      transform: scale(1);
+    }
+    to {
+      transform: scale(1.08) translateX(-2%);
+    }
+  }
+
+  @media (prefers-reduced-motion: no-preference) {
+    .ray {
+      animation: flowOut 3s cubic-bezier(0.5, 0, 0.5, 1) infinite;
+    }
+    .hub {
+      animation: pulse 3s ease-in-out infinite;
+    }
+    .layer {
+      animation: layerIn 6s var(--ease-out) infinite;
+    }
+    .crow {
+      animation: rowlit 5s ease-in-out infinite;
+    }
+    .budget span {
+      animation: budget 6s var(--ease-out) infinite;
+    }
+    .hand {
+      animation: spin 5s linear infinite;
+    }
+    .tchip {
+      animation: chiplit 5s ease-in-out infinite;
+    }
+    .ackbar span {
+      animation: ack 8s linear infinite;
+    }
+    .detach {
+      animation: appear1 8s ease-out infinite;
+    }
+    .deliver {
+      animation: appear2 8s ease-out infinite;
+    }
+    .token {
+      animation: token 6s cubic-bezier(0.6, 0, 0.4, 1) infinite;
+    }
+    .ttl {
+      animation: ttl 6s linear infinite;
+    }
+    .md.hit {
+      animation: hitdot 4s ease-in-out infinite;
+    }
+    .st {
+      animation: stateOn 8s steps(1) infinite;
+    }
+    .kcard {
+      animation: kmove 6s cubic-bezier(0.6, 0, 0.3, 1) infinite;
+    }
+    .pk1 {
+      animation: fall1 5s cubic-bezier(0.5, 0, 0.5, 1) infinite;
+    }
+    .pk2 {
+      animation: fall2 5s cubic-bezier(0.5, 0, 0.5, 1) 2.5s infinite;
+    }
+    .usteps li {
+      animation: ustep 10s steps(1) infinite;
+    }
+    .tpk {
+      animation: tpk 4s cubic-bezier(0.6, 0, 0.4, 1) infinite;
+    }
+    .toast {
+      animation: toast 7s var(--ease-out) infinite;
+    }
+    .pinging::after {
+      animation: ping 1.8s ease-out infinite;
+    }
+    .sup img {
+      animation: supZoom 16s ease-in-out infinite alternate;
+    }
+  }
+</style>

@@ -1,51 +1,22 @@
 ---
 import Layout from '../layouts/Layout.astro';
-import CodeBlock from '../components/CodeBlock.astro';
-import Diagram from '../components/Diagram.astro';
 import Media from '../components/Media.astro';
-import { channels } from '../data/diagrams';
 import manifest from '../data/media.json';
-import { links, REPO, SITE_URL } from '../data/site';
+import { links, SITE_URL } from '../data/site';
 
 const installCmd = 'curl -fsSL https://agent-hq.online/install.sh | bash';
 
-const capabilities = [
-  {
-    title: 'One agent on every channel',
-    body: 'Discord, Telegram, a web app that installs as a PWA, and your terminal share one conversation history and one memory. Start a thread on your phone and finish it at your desk.',
-    icon: 'M4 5h7l4 7-4 7H4 M15 12h5',
-  },
-  {
-    title: 'A vault you can read',
-    body: 'Notes, memory, skills and threads are plain markdown files on your disk, plus one SQLite database for full-text search and embeddings. Nothing is locked inside a service.',
-    icon: 'M7 3h10a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2z M9 8h6 M9 12h6 M9 16h4',
-  },
-  {
-    title: 'Coding agents under supervision',
-    body: 'Start, watch, steer and resume Claude Code, Codex, OpenCode and others inside the built-in host, on this machine or a paired one. HQ tells you when one blocks. It never answers a trust prompt for you.',
-    icon: 'M5 4h14a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2z M7 10l3 2-3 2 M13 15h4',
-  },
-  {
-    title: 'Tasks and sub-agents',
-    body: 'Spaces, initiatives, tasks and comments are built in, with list, board and timeline views. Sub-agents run single, parallel, race or graph. Long turns detach and report back, and /watch schedules recurring ones.',
-    icon: 'M4 7l2 2 3-3 M12 7h8 M4 16l2 2 3-3 M12 16h8',
-  },
-  {
-    title: 'Web search with nothing to set up',
-    body: 'web_search queries Google, DuckDuckGo, Brave, Mojeek and engines for news, science, images and code, all inside the hq process. No key, no Docker. Blocked engines are suspended and remembered, and a server on a blocked address can ask a peer HQ.',
-    icon: 'M11 4a7 7 0 1 0 0 14 7 7 0 0 0 0-14z M16 16l4 4',
-  },
-  {
-    title: 'An MCP server for your tools',
-    body: 'Two tools, hq_discover and hq_call, open the whole registry to Claude Code, Cursor, VS Code, Copilot and other MCP clients. Remote MCP servers can be bridged in the other direction.',
-    icon: 'M6 9.5a2.5 2.5 0 1 0 0 5 2.5 2.5 0 0 0 0-5z M18 3.5a2.5 2.5 0 1 0 0 5 2.5 2.5 0 0 0 0-5z M18 15.5a2.5 2.5 0 1 0 0 5 2.5 2.5 0 0 0 0-5z M8.3 10.8l7.4-4.1 M8.3 13.2l7.4 4.1',
-  },
-  {
-    title: 'Safe by default',
-    body: 'Agent shell commands run in a sandbox with an environment allowlist. Untrusted content taints a session and cuts off secrets and outbound network. Servers update from signed releases and roll back on a failed health check.',
-    icon: 'M12 3l8 3v6c0 4.5-3.2 8-8 9-4.8-1-8-4.5-8-9V6z M9 12l2 2 4-4',
-  },
-];
+const agents = ['Claude Code', 'Codex', 'Cursor', 'OpenCode', 'Pi', 'Copilot CLI', 'Kimi', 'Qwen', 'Antigravity'];
+const reach = ['Discord', 'Telegram', 'Web app', 'Terminal', 'MCP server', 'Markdown vault', 'Signed releases', 'Sub-agents'];
+
+const SCREEN_IDS = ['dashboard', 'sessions-list', 'tasks-board', 'vault-browser'];
+const SCREEN_LABELS: Record<string, string> = {
+  dashboard: 'Home',
+  'sessions-list': 'Sessions',
+  'tasks-board': 'Tasks',
+  'vault-browser': 'Vault',
+};
+const screens = SCREEN_IDS.map((id) => manifest.find((m) => m.id === id)!);
 ---
 
 <Layout
@@ -66,105 +37,1797 @@ const capabilities = [
     offers: { '@type': 'Offer', price: '0', priceCurrency: 'USD' },
   }}
 >
-  <section class="band hero">
-    <div class="container">
-      <span class="eyebrow">Open source, local first, version 0.9.x</span>
-      <h1>One agent. Every channel. Your machine.</h1>
-      <div class="rule"></div>
-      <p class="lede">
-        Agent HQ (HQ for short) puts one AI agent on Discord, Telegram, a web app and your terminal.
-        It keeps your data in a markdown vault on your own disk and supervises the coding agents you
-        already use. One Rust binary of about 58 MB. No cloud backend.
-      </p>
-      <div class="prose">
-        <CodeBlock id="hero-install" label="Install" code={installCmd} />
+  <section class="sec sec-hero" aria-labelledby="hero-h" data-spotlight>
+    <span class="orb orb-b o-tl" aria-hidden="true"></span>
+    <span class="orb orb-g o-br slow" aria-hidden="true"></span>
+    <span class="orb orb-i o-c" aria-hidden="true"></span>
+    <span class="spot" aria-hidden="true"></span>
+    <div class="container hero-grid">
+      <div class="stack">
+        <div class="tags">
+          <span class="tag tag-green">Open source</span>
+          <span class="tag tag-blue">Local first</span>
+          <span class="tag glass-light">Version 0.9.x</span>
+        </div>
+        <h1 id="hero-h" class="display">
+          <span class="hl"><span>One agent.</span></span>
+          <span class="hl"><span>Every channel.</span></span>
+          <span class="hl"><span class="accent">Your machine.</span></span>
+        </h1>
+        <div class="rule rule-in" aria-hidden="true"></div>
+        <p class="lede fade-in hero-lede">
+          Agent HQ (HQ for short) puts one AI agent on Discord, Telegram, a web app and your terminal. It
+          keeps your data in a markdown vault on your own disk and supervises the coding agents you already
+          use. One Rust binary of about 58 MB. No cloud backend.
+        </p>
+        <div class="install-pill glass fade-in">
+          <span class="prompt" aria-hidden="true">$</span>
+          <code id="hero-install">{installCmd}</code>
+          <button type="button" class="btn btn-accent btn-sm" data-copy="hero-install" data-label="Copy" aria-label="Copy install command" hidden>Copy</button>
+        </div>
+        <div class="actions fade-in">
+          <a class="btn btn-primary btn-lg" href="/install/">Install guide</a>
+          <a class="btn btn-lg" href="/architecture/">How it works</a>
+          <a class="btn btn-lg" href={links.repo}>View on GitHub</a>
+        </div>
       </div>
-      <div class="hero-actions">
-        <a class="btn btn-primary" href="/install/">Install guide</a>
-        <a class="btn" href="/architecture/">How it works</a>
-        <a class="btn" href={links.repo}>View on GitHub</a>
+
+      <div class="graphic-panel glass-heavy shine">
+        <div class="graphic" role="img" aria-label="Four channels, Discord, Telegram, the web app and the terminal, flow into one agent, which writes to your vault.">
+          <svg class="track" viewBox="0 0 560 440" aria-hidden="true" focusable="false">
+            <path d="M150 60 C 230 60 220 210 300 210"></path>
+            <path d="M150 160 C 230 160 220 210 300 210"></path>
+            <path d="M150 260 C 230 260 220 210 300 210"></path>
+            <path d="M150 360 C 230 360 220 210 300 210"></path>
+            <path d="M368 210 L 420 210"></path>
+          </svg>
+          <span class="flow-dot fd1"></span>
+          <span class="flow-dot fd2"></span>
+          <span class="flow-dot fd3"></span>
+          <span class="flow-dot fd4"></span>
+          <span class="flow-dot fd5"></span>
+          <span class="ch glass-light ch1"><span class="ping ping-blue"></span>Discord</span>
+          <span class="ch glass-light ch2"><span class="ping ping-green"></span>Telegram</span>
+          <span class="ch glass-light ch3"><span class="ping ping-blue"></span>Web app</span>
+          <span class="ch glass-light ch4"><span class="ping ping-green"></span>Terminal</span>
+          <svg class="core" viewBox="0 0 136 88" aria-hidden="true" focusable="false">
+            <defs><clipPath id="core-clip"><circle cx="44" cy="44" r="44"></circle></clipPath></defs>
+            <circle class="c-blue" cx="44" cy="44" r="44"></circle>
+            <circle class="c-green" cx="92" cy="44" r="44"></circle>
+            <circle class="c-ground" cx="92" cy="44" r="44" clip-path="url(#core-clip)"></circle>
+          </svg>
+          <span class="g-label core-label">One agent</span>
+          {[1, 2, 3, 4, 5, 6].map((n) => <span class={`vbar vb${n}`}><span></span></span>)}
+          <span class="g-label vault-label">Your vault</span>
+          <span class="vault-path">.vault/*.md</span>
+        </div>
       </div>
     </div>
   </section>
 
-  <section class="section" aria-labelledby="cap-h">
+  <section class="sec-band" aria-label="Coding agents and channels HQ works with">
+    <span class="orb orb-i o-c" aria-hidden="true"></span>
     <div class="container">
-      <span class="eyebrow">What it does</span>
-      <h2 id="cap-h">Six things HQ is built around</h2>
-      <div class="grid">
+      <div class="band glass shine">
+        <div class="band-head">
+          <p class="eyebrow band-title">Supervises the coding agents you already use</p>
+          <button type="button" class="btn btn-sm mq-pause" data-marquee-pause aria-pressed="false" hidden>Pause</button>
+        </div>
+        <div class="marquee">
+          <div class="mq-track">
+            {
+              [false, true].map((dup) => (
+                <ul class="mq-group" aria-hidden={dup ? 'true' : undefined}>
+                  {agents.map((a) => (
+                    <li class="mq-item">
+                      {a}
+                      <svg class="mq-pair" viewBox="0 0 28 16" aria-hidden="true" focusable="false">
+                        <circle class="c-blue" cx="8" cy="8" r="8" />
+                        <circle class="c-green" cx="20" cy="8" r="8" />
+                      </svg>
+                    </li>
+                  ))}
+                </ul>
+              ))
+            }
+          </div>
+        </div>
+        <div class="marquee">
+          <div class="mq-track mq-rev">
+            {
+              [false, true].map((dup) => (
+                <ul class="mq-group" aria-hidden={dup ? 'true' : undefined}>
+                  {reach.map((r) => (
+                    <li class="mq-item mq-sm">
+                      {r}
+                      <span class="dot dot-blue" aria-hidden="true"></span>
+                    </li>
+                  ))}
+                </ul>
+              ))
+            }
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section class="sec" aria-labelledby="fit-h">
+    <span class="orb orb-b o-tr slow" aria-hidden="true"></span>
+    <span class="orb orb-g o-bl" aria-hidden="true"></span>
+    <div class="container fit-grid">
+      <div class="stack">
+        <p class="eyebrow reveal">How it fits together</p>
+        <h2 id="fit-h" class="reveal">Four ways in, one agent, one vault</h2>
+        <p class="lede reveal">
+          Every channel reaches the same agent loop, and the agent reads and writes the same vault. That is
+          the whole idea. The <a href="/architecture/">architecture page</a> goes through each part.
+        </p>
+        <ol class="rail-steps">
+          <li class="rail" aria-hidden="true"><span></span></li>
+          <li class="gcard reveal">
+            <span class="step-dot dot-blue" aria-hidden="true"></span>
+            <h3>Ask from anywhere</h3>
+            <p class="body">Discord, Telegram, the web app and your terminal share one conversation history and one memory. Start a thread on your phone and finish it at your desk.</p>
+          </li>
+          <li class="gcard reveal reveal-2">
+            <span class="step-dot dot-green" aria-hidden="true"></span>
+            <h3>One agent does the work</h3>
+            <p class="body">Sub-agents run single, parallel, race or graph. Long turns detach and report back when they finish.</p>
+          </li>
+          <li class="gcard reveal reveal-3">
+            <span class="step-dot dot-sky" aria-hidden="true"></span>
+            <h3>Everything lands in your vault</h3>
+            <p class="body">Notes, memory, skills and threads are plain markdown on your disk, plus one SQLite database for search.</p>
+          </li>
+        </ol>
+      </div>
+      <div class="art glass-heavy shine zoom-in">
+        <div class="art-in">
+          <img
+            class="parallax"
+            src="/media/art/four-doors.jpg"
+            alt="Flat isometric illustration: four doorways shaped like a speech bubble, a paper plane, a browser window and a terminal, all opening onto one shared room with a round table."
+            width="1600"
+            height="995"
+            loading="lazy"
+            decoding="async"
+          />
+          <ul class="door-chips" aria-hidden="true">
+            <li class="dchip glass-heavy"><span class="dot dot-blue"></span>Discord</li>
+            <li class="dchip glass-heavy"><span class="dot dot-green"></span>Telegram</li>
+            <li class="dchip glass-heavy"><span class="dot dot-blue"></span>Web app</li>
+            <li class="dchip glass-heavy"><span class="dot dot-green"></span>Terminal</li>
+            <li class="dchip dchip-room">One room: your agent</li>
+          </ul>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section class="sec sec-top0" aria-labelledby="cap-h">
+    <span class="orb orb-i o-ml slow" aria-hidden="true"></span>
+    <span class="orb orb-b o-mr" aria-hidden="true"></span>
+    <span class="orb orb-g o-bl slow" aria-hidden="true"></span>
+    <div class="container stack">
+      <div class="head">
+        <p class="eyebrow reveal">What it does</p>
+        <h2 id="cap-h" class="reveal">What HQ is built around</h2>
+        <div class="rule rule-sm sweep" aria-hidden="true"></div>
+      </div>
+      <div class="bento">
+        <article class="gcard span2 reveal">
+          <div class="stage" aria-hidden="true">
+            <span class="ring"></span>
+            <span class="orbit"><i class="od1"></i><i class="od2"></i><i class="od3"></i><i class="od4"></i></span>
+            <svg class="stage-pair" viewBox="0 0 56 36" aria-hidden="true" focusable="false"><circle class="c-blue" cx="18" cy="18" r="18" /><circle class="c-green" cx="38" cy="18" r="18" /></svg>
+            <span class="mini glass-light m1">Discord</span>
+            <span class="mini glass-light m2">Telegram</span>
+            <span class="mini glass-light m3">Web app</span>
+            <span class="mini glass-light m4">Terminal</span>
+          </div>
+          <h3>One agent on every channel</h3>
+          <p class="body">Discord, Telegram, a web app that installs as a PWA, and your terminal share one conversation history and one memory. Start a thread on your phone and finish it at your desk.</p>
+        </article>
+
+        <article class="gcard reveal reveal-2">
+          <div class="stage stage-bars" aria-hidden="true">
+            <span class="mbar"><span class="fill-blue"></span></span>
+            <span class="mbar w82"><span class="fill-green"></span></span>
+            <span class="mbar w92"><span class="fill-blue"></span></span>
+            <span class="mbar w60"><span class="fill-green"></span></span>
+          </div>
+          <h3>A vault you can read</h3>
+          <p class="body">Notes, memory, skills and threads are plain markdown files on your disk, plus one SQLite database for full-text search and embeddings. Nothing is locked inside a service.</p>
+        </article>
+
+        <article class="gcard reveal">
+          <div class="stage" aria-hidden="true">
+            <div class="term-mini glass-light">
+              <span class="tline w70"></span>
+              <span class="tline w46"></span>
+              <span class="tline w62"></span>
+              <span class="tprompt"><span>$</span><span class="cursor"></span></span>
+            </div>
+            <span class="chip">Blocked</span>
+          </div>
+          <h3>Coding agents under supervision</h3>
+          <p class="body">Start, watch, steer and resume Claude Code, Codex, OpenCode and others inside the built-in host, on this machine or a paired one. HQ tells you when one blocks. It never answers a trust prompt for you.</p>
+        </article>
+
+        <article class="gcard reveal reveal-2">
+          <div class="stage" aria-hidden="true">
+            <div class="cols"><span class="col">To do</span><span class="col">In progress</span><span class="col">Complete</span></div>
+            <span class="mover"><i class="w80"></i><i class="w50"></i></span>
+          </div>
+          <h3>Tasks and sub-agents</h3>
+          <p class="body">Spaces, initiatives, tasks and comments are built in, with list, board and timeline views. Sub-agents run single, parallel, race or graph. Long turns detach and report back, and /watch schedules recurring ones.</p>
+        </article>
+
+        <article class="gcard reveal reveal-3">
+          <div class="stage" aria-hidden="true">
+            <div class="lines"><i class="w88"></i><i class="w64 hit"></i><i class="w76"></i><i class="w52"></i></div>
+            <span class="lens"></span>
+          </div>
+          <h3>Web search with nothing to set up</h3>
+          <p class="body">web_search queries Google, DuckDuckGo, Brave, Mojeek and engines for news, science, images and code, all inside the hq process. No key, no Docker. Blocked engines are suspended and remembered, and a server on a blocked address can ask a peer HQ.</p>
+        </article>
+
+        <article class="gcard reveal">
+          <div class="stage" aria-hidden="true">
+            <span class="node glass-light"></span>
+            <span class="label node-l">Client</span>
+            <span class="link"></span>
+            <span class="packet"></span>
+            <svg class="node-hq" viewBox="0 0 64 44" aria-hidden="true" focusable="false"><circle class="c-blue" cx="22" cy="22" r="22" /><circle class="c-green" cx="42" cy="22" r="22" /></svg>
+            <span class="label node-r">HQ</span>
+          </div>
+          <h3>An MCP server for your tools</h3>
+          <p class="body">Two tools, hq_discover and hq_call, open the whole registry to Claude Code, Cursor, VS Code, Copilot and other MCP clients. Remote MCP servers can be bridged in the other direction.</p>
+        </article>
+
+        <article class="gcard gcard-indigo span2 reveal reveal-2">
+          <div class="stage stage-safe" aria-hidden="true">
+            <span class="scan"></span>
+            <svg class="shield" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M12 3l8 3v6c0 4.5-3.2 8-8 9-4.8-1-8-4.5-8-9V6z M9 12l2 2 4-4"></path></svg>
+            <span class="safe-tags">
+              <span class="tag tag-green">Bash sandbox</span>
+              <span class="tag tag-blue">Env allowlist</span>
+              <span class="tag tag-light">Signed releases</span>
+            </span>
+          </div>
+          <h3>Safe by default</h3>
+          <p class="body">Agent shell commands run in a sandbox with an environment allowlist. Untrusted content taints a session and cuts off secrets and outbound network. Servers update from signed releases and roll back on a failed health check.</p>
+        </article>
+      </div>
+    </div>
+  </section>
+
+  <section class="sec" aria-labelledby="see-h">
+    <span class="see-glow" aria-hidden="true"></span>
+    <div class="container stack" data-tabs>
+      <div class="see-head">
+        <div class="head">
+          <p class="eyebrow reveal">See it</p>
+          <h2 id="see-h" class="reveal">The web app, on your own server</h2>
+        </div>
+        <div class="seg glass-heavy" role="group" aria-label="Choose a screen" data-tablist hidden>
+          <span class="seg-ind" aria-hidden="true"></span>
+          {
+            screens.map((s, i) => (
+              <button type="button" data-tab={s.id} aria-pressed={i === 0 ? 'true' : 'false'}>
+                {SCREEN_LABELS[s.id]}
+              </button>
+            ))
+          }
+        </div>
+      </div>
+      <div class="screens">
         {
-          capabilities.map((c) => (
-            <article class="card">
-              <svg class="icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
-                <path d={c.icon} />
-              </svg>
-              <h3>{c.title}</h3>
-              <p>{c.body}</p>
-            </article>
+          screens.map((s) => (
+            <figure class="screen" data-panel={s.id} data-glow={s.id}>
+              <div class="frame-3d">
+                <div class="frame glass-heavy shine tilt">
+                  <span class="chrome" aria-hidden="true"><i></i><i></i><i></i></span>
+                  <img src={s.src} alt={s.alt} width={s.width} height={s.height} loading="lazy" decoding="async" />
+                </div>
+              </div>
+              <figcaption class="small">{s.caption}</figcaption>
+            </figure>
           ))
         }
       </div>
-    </div>
-  </section>
-
-  <section class="section band" aria-labelledby="fit-h">
-    <div class="container">
-      <span class="eyebrow">How it fits together</span>
-      <h2 id="fit-h">Four ways in, one agent, one vault</h2>
-      <p class="lede prose">
-        Every channel reaches the same agent loop, and the agent reads and writes the same vault. That
-        is the whole idea. The <a href="/architecture/">architecture page</a> goes through each part.
-      </p>
-      <Diagram d={channels} />
-    </div>
-  </section>
-
-  <section class="section" aria-labelledby="see-h">
-    <div class="container">
-      <span class="eyebrow">See it</span>
-      <h2 id="see-h">Screenshots and short demos</h2>
-      <p class="prose muted">
-        Real captures are being added. Until a file lands, you see a labelled placeholder rather than a
-        broken image.
-      </p>
-      <div class="grid grid-2">
-        {manifest.map((m) => <Media id={m.id} />)}
+      <div class="media-pair">
+        <div class="gcard reveal"><Media id="session-watch" /></div>
+        <div class="gcard reveal reveal-2"><Media id="terminal-install" /></div>
       </div>
     </div>
   </section>
 
-  <section class="section band" aria-labelledby="inst-h">
-    <div class="container">
-      <span class="eyebrow">Install</span>
-      <h2 id="inst-h">Three commands from a clone</h2>
-      <p class="prose muted">
-        Build the binary, scaffold a vault, check the setup. You need a recent stable Rust toolchain
-        and at least one LLM API key. Servers have a separate path with signed releases.
-      </p>
-      <div class="grid">
-        <CodeBlock id="strip-build" label="1. Build" code="cargo build --release -p hq-cli" />
-        <CodeBlock id="strip-install" label="2. Scaffold" code="./target/release/hq install" />
-        <CodeBlock id="strip-doctor" label="3. Check" code="./target/release/hq doctor" />
+  <section class="sec" aria-labelledby="local-h">
+    <span class="orb orb-g o-tr" aria-hidden="true"></span>
+    <span class="orb orb-i o-bl slow" aria-hidden="true"></span>
+    <div class="container local-grid">
+      <div class="stack">
+        <p class="eyebrow reveal">Local first</p>
+        <h2 id="local-h" class="reveal">Your data is a folder you can open</h2>
+        <p class="lede reveal">
+          Notes, memory, skills and threads are plain markdown files on your disk, plus one SQLite database
+          for full-text search and embeddings. Nothing is locked inside a service.
+        </p>
+        <div class="tags reveal">
+          <span class="tag tag-indigo">Markdown vault</span>
+          <span class="tag tag-blue">SQLite and FTS5</span>
+          <span class="tag tag-green">No cloud backend</span>
+        </div>
       </div>
-      <p><a class="btn" href="/install/">All install options</a></p>
+      <div class="local-art">
+        <div class="art glass-heavy shine zoom-in">
+          <div class="art-in">
+            <img
+              class="parallax"
+              src="/media/art/local-first.jpg"
+              alt="Flat isometric illustration: a laptop on a desk whose screen spills a stack of document cubes that grow into a small block city."
+              width="1600"
+              height="995"
+              loading="lazy"
+              decoding="async"
+            />
+          </div>
+        </div>
+        <ul class="tree glass-heavy shine" aria-label="Example vault folder">
+          <li class="t-root">.vault/</li>
+          <li class="tr1">Notebooks/</li>
+          <li class="tr1">skills/</li>
+          <li class="tr1">_mailboxes/</li>
+          <li class="tr1">_data/</li>
+          <li class="tr2">vault.db</li>
+        </ul>
+      </div>
     </div>
   </section>
 
-  <section class="section" aria-labelledby="early-h">
+  <section class="sec" aria-labelledby="inst-h">
+    <span class="orb orb-b o-c" aria-hidden="true"></span>
+    <span class="orb orb-g o-bl slow" aria-hidden="true"></span>
+    <div class="container install-grid">
+      <div class="stack">
+        <p class="eyebrow reveal">Install</p>
+        <h2 id="inst-h" class="reveal">Three commands from a clone</h2>
+        <p class="lede reveal">
+          Build the binary, scaffold a vault, check the setup. You need a recent stable Rust toolchain and
+          at least one LLM API key. Servers have a separate path with signed releases.
+        </p>
+        <ol class="isteps list-plain">
+          <li class="istep glass reveal"><span class="num num-blue">01</span><span class="istep-text"><span>Build the binary</span><code id="strip-build">cargo build --release -p hq-cli</code></span><button type="button" class="btn btn-sm" data-copy="strip-build" data-label="Copy" aria-label="Copy build command" hidden>Copy</button></li>
+          <li class="istep glass reveal reveal-2"><span class="num num-green">02</span><span class="istep-text"><span>Scaffold a vault</span><code id="strip-install">./target/release/hq install</code></span><button type="button" class="btn btn-sm" data-copy="strip-install" data-label="Copy" aria-label="Copy scaffold command" hidden>Copy</button></li>
+          <li class="istep glass reveal reveal-3"><span class="num num-indigo">03</span><span class="istep-text"><span>Check the setup</span><code id="strip-doctor">./target/release/hq doctor</code></span><button type="button" class="btn btn-sm" data-copy="strip-doctor" data-label="Copy" aria-label="Copy check command" hidden>Copy</button></li>
+        </ol>
+        <div class="actions"><a class="btn" href="/install/">All install options</a></div>
+      </div>
+      <div class="tw glass-heavy shine zoom-in" role="img" aria-label="A terminal typing the three commands: cargo build --release -p hq-cli, ./target/release/hq install, ./target/release/hq doctor.">
+        <div class="tw-bar" aria-hidden="true"><i></i><i></i><i></i><span>~/hq</span></div>
+        <div class="tw-body" aria-hidden="true">
+          <div class="tw-line"><span class="p">$</span><span class="type t1">cargo build --release -p hq-cli</span></div>
+          <div class="tw-line l2"><span class="p">$</span><span class="type t2">./target/release/hq install</span></div>
+          <div class="tw-line l3"><span class="p">$</span><span class="type t3">./target/release/hq doctor</span><span class="blink"></span></div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section class="sec sec-top0" aria-labelledby="early-h">
+    <span class="orb orb-g o-tl" aria-hidden="true"></span>
+    <span class="orb orb-b o-br slow" aria-hidden="true"></span>
     <div class="container">
-      <div class="callout prose">
-        <h2 id="early-h">HQ is early</h2>
-        <p>
-          <strong>Version 0.9.x.</strong> Expect rough edges and changes between releases. Defaults have
-          tightened since 0.9.0: the bash sandbox is now required by default, and chat relays no longer
-          adopt the first sender as owner.
-        </p>
-        <p>
-          It talks to Discord and Telegram, not Slack or WhatsApp. Signed release binaries are built for
-          Linux (x86_64 and ARM) and for Apple Silicon Macs; Intel Macs build from source. The <a href={links.changelog}>changelog</a>
-          lists every upgrade note.
-        </p>
+      <div class="early gcard gcard-indigo shine reveal">
+        <div class="stack-sm">
+          <p class="eyebrow">Version 0.9.x</p>
+          <h2 id="early-h">HQ is early</h2>
+        </div>
+        <div class="stack-sm">
+          <p>
+            Expect rough edges and changes between releases. Defaults have tightened since 0.9.0: the bash
+            sandbox is now required by default, and chat relays no longer adopt the first sender as owner.
+          </p>
+          <p>
+            It talks to Discord and Telegram, not Slack or WhatsApp. Signed release binaries are built for
+            Linux (x86_64 and ARM) and for Apple Silicon Macs; Intel Macs build from source. The
+            <a href={links.changelog}>changelog</a> lists every upgrade note.
+          </p>
+        </div>
       </div>
     </div>
   </section>
 </Layout>
+
+<style>
+  .spot {
+    position: absolute;
+    inset: 0;
+    pointer-events: none;
+    z-index: 0;
+    background: radial-gradient(520px circle at var(--mx, 78%) var(--my, 45%), rgba(0, 173, 238, 0.11), transparent 62%);
+  }
+  .hero-grid {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    gap: 48px;
+    align-items: center;
+  }
+  .hero-lede {
+    max-width: 560px;
+  }
+  .install-pill {
+    display: flex;
+    align-items: center;
+    gap: var(--space-2);
+    border-radius: 26px;
+    padding: 6px 6px 6px 20px;
+    max-width: 560px;
+  }
+  .install-pill .prompt {
+    color: var(--text-green);
+    font-family: var(--font-mono);
+  }
+  .install-pill code {
+    flex: 1 1 auto;
+    min-width: 0;
+    overflow-wrap: anywhere;
+    font-size: 14px;
+    background: none;
+    border: 0;
+    padding: 0;
+  }
+
+  .graphic-panel {
+    border-radius: var(--radius-xl);
+    padding: 28px;
+  }
+  .graphic {
+    position: relative;
+    width: 560px;
+    height: 440px;
+    zoom: 0.86;
+  }
+  .track {
+    position: absolute;
+    inset: 0;
+    width: 560px;
+    height: 440px;
+    pointer-events: none;
+  }
+  .track path {
+    fill: none;
+    stroke: rgba(255, 255, 255, 0.16);
+    stroke-width: 2;
+    stroke-dasharray: 4 6;
+  }
+  .flow-dot {
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 10px;
+    height: 10px;
+    border-radius: 50%;
+    opacity: 0;
+    offset-rotate: 0deg;
+  }
+  .fd1 {
+    offset-path: path('M150 60 C 230 60 220 210 300 210');
+    background: var(--brand-blue);
+    box-shadow: 0 0 12px var(--brand-blue);
+  }
+  .fd2 {
+    offset-path: path('M150 160 C 230 160 220 210 300 210');
+    background: var(--brand-green);
+    box-shadow: 0 0 12px var(--brand-green);
+    animation-delay: 0.7s;
+  }
+  .fd3 {
+    offset-path: path('M150 260 C 230 260 220 210 300 210');
+    background: var(--brand-blue);
+    box-shadow: 0 0 12px var(--brand-blue);
+    animation-delay: 1.4s;
+  }
+  .fd4 {
+    offset-path: path('M150 360 C 230 360 220 210 300 210');
+    background: var(--brand-green);
+    box-shadow: 0 0 12px var(--brand-green);
+    animation-delay: 2.1s;
+  }
+  .fd5 {
+    offset-path: path('M368 210 L 420 210');
+    background: var(--brand-green);
+    box-shadow: 0 0 12px var(--brand-green);
+    animation-delay: 0.35s;
+  }
+  .ch {
+    position: absolute;
+    left: 0;
+    width: 150px;
+    height: 44px;
+    border-radius: var(--radius-pill);
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 0 16px;
+    font-size: 14px;
+    font-weight: 700;
+  }
+  .ch1 {
+    top: 38px;
+  }
+  .ch2 {
+    top: 138px;
+  }
+  .ch3 {
+    top: 238px;
+  }
+  .ch4 {
+    top: 338px;
+  }
+  .ping {
+    width: 10px;
+    height: 10px;
+    border-radius: 50%;
+    position: relative;
+    flex: none;
+  }
+  .ping::after {
+    content: '';
+    position: absolute;
+    inset: -5px;
+    border-radius: 50%;
+    border: 2px solid currentColor;
+    opacity: 0;
+  }
+  .ping-blue {
+    background: var(--brand-blue);
+    color: var(--brand-blue);
+  }
+  .ping-green {
+    background: var(--brand-green);
+    color: var(--brand-green);
+  }
+  .core {
+    position: absolute;
+    left: 232px;
+    top: 166px;
+    width: 136px;
+    height: 88px;
+  }
+  .c-ground {
+    fill: #0e1014;
+  }
+  .g-label {
+    position: absolute;
+    font-size: 13px;
+    line-height: 16px;
+    font-weight: 700;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+  }
+  .core-label {
+    left: 240px;
+    top: 272px;
+    width: 120px;
+    text-align: center;
+  }
+  .vault-label {
+    left: 420px;
+    top: 300px;
+  }
+  .vault-path {
+    position: absolute;
+    left: 420px;
+    top: 320px;
+    font-family: var(--font-mono);
+    font-size: 12px;
+    color: var(--ink-muted);
+  }
+  .vbar {
+    position: absolute;
+    left: 420px;
+    width: 140px;
+    height: 18px;
+    border-radius: var(--radius-pill);
+    background: rgba(255, 255, 255, 0.06);
+    border: 1px solid var(--glass-border);
+    overflow: hidden;
+  }
+  .vbar > span,
+  .mbar > span {
+    display: block;
+    height: 100%;
+    border-radius: var(--radius-pill);
+    transform-origin: left center;
+  }
+  .vb1 {
+    top: 132px;
+  }
+  .vb2 {
+    top: 158px;
+  }
+  .vb3 {
+    top: 184px;
+  }
+  .vb4 {
+    top: 210px;
+  }
+  .vb5 {
+    top: 236px;
+  }
+  .vb6 {
+    top: 262px;
+  }
+  .vb1 > span,
+  .vb3 > span,
+  .vb5 > span {
+    background: var(--brand-blue);
+  }
+  .vb2 > span,
+  .vb4 > span,
+  .vb6 > span {
+    background: var(--brand-green);
+  }
+  .vb2 > span {
+    width: 80%;
+    animation-delay: 0.5s;
+  }
+  .vb3 > span {
+    width: 92%;
+    animation-delay: 1s;
+  }
+  .vb4 > span {
+    width: 64%;
+    animation-delay: 1.5s;
+  }
+  .vb5 > span {
+    width: 86%;
+    animation-delay: 2s;
+  }
+  .vb6 > span {
+    width: 48%;
+    animation-delay: 2.5s;
+  }
+
+  .sec-band {
+    position: relative;
+    overflow: clip;
+    padding-block: 8px 40px;
+  }
+  .band {
+    border-radius: var(--radius-lg);
+    padding: 24px 0;
+    display: flex;
+    flex-direction: column;
+    gap: 14px;
+  }
+  .band-head {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    padding: 0 28px;
+  }
+  .band-title {
+    color: var(--text-green);
+  }
+  /* Without motion the names wrap so every one is visible; the scroll is added below. */
+  .marquee {
+    overflow: hidden;
+    padding: 0 28px;
+  }
+  .mq-track {
+    display: flex;
+  }
+  .mq-group {
+    display: flex;
+    flex-wrap: wrap;
+    list-style: none;
+    margin: 0;
+    padding: 0;
+  }
+  .mq-group[aria-hidden='true'] {
+    display: none;
+  }
+  .mq-item {
+    display: inline-flex;
+    align-items: center;
+    gap: 28px;
+    padding-right: 28px;
+    font-size: 32px;
+    line-height: 40px;
+    font-weight: 700;
+    white-space: nowrap;
+  }
+  .mq-sm {
+    font-size: 20px;
+    line-height: 28px;
+    color: var(--ink-muted);
+    gap: 20px;
+    padding-right: 20px;
+  }
+  .mq-pair {
+    width: 28px;
+    height: 16px;
+  }
+
+  .fit-grid {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1.1fr);
+    gap: 64px;
+    align-items: center;
+  }
+  .rail-steps {
+    position: relative;
+    list-style: none;
+    margin: 8px 0 0;
+    padding: 0 0 0 44px;
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-4);
+  }
+  .rail {
+    position: absolute;
+    left: 15px;
+    top: 24px;
+    bottom: 24px;
+    width: 2px;
+    border-radius: var(--radius-pill);
+    background: var(--hairline);
+    overflow: hidden;
+  }
+  .rail > span {
+    display: block;
+    width: 100%;
+    height: 100%;
+    background: linear-gradient(180deg, var(--brand-blue), var(--brand-green));
+    transform-origin: top center;
+  }
+  .step-dot {
+    position: absolute;
+    left: -37px;
+    top: 28px;
+    width: 18px;
+    height: 18px;
+    border-radius: 50%;
+    border: 3px solid #000000;
+  }
+  .art-in {
+    position: relative;
+  }
+  .door-chips {
+    position: absolute;
+    left: 16px;
+    top: 16px;
+    margin: 0;
+    padding: 0;
+    list-style: none;
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 10px;
+  }
+  .dchip {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    padding: 6px 14px;
+    border-radius: var(--radius-pill);
+    font-size: 13px;
+    line-height: 18px;
+    font-weight: 700;
+  }
+  .dchip:nth-child(2) {
+    animation-delay: 0.5s;
+  }
+  .dchip:nth-child(3) {
+    animation-delay: 1s;
+  }
+  .dchip:nth-child(4) {
+    animation-delay: 1.5s;
+  }
+  .dchip-room {
+    background: var(--brand-indigo);
+    animation-delay: 2s;
+  }
+
+  .sec-top0 {
+    padding-top: 0;
+  }
+  .bento {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: var(--space-4);
+  }
+  .span2 {
+    grid-column: span 2;
+  }
+  .stage {
+    position: relative;
+    height: 132px;
+    border-radius: 14px;
+    background: rgba(255, 255, 255, 0.025);
+    border: 1px solid rgba(255, 255, 255, 0.05);
+    overflow: hidden;
+    margin-bottom: 8px;
+  }
+  .ring {
+    position: absolute;
+    left: 50%;
+    top: 50%;
+    width: 112px;
+    height: 112px;
+    margin: -56px 0 0 -56px;
+    border: 1px dashed var(--hairline);
+    border-radius: 50%;
+  }
+  .orbit {
+    position: absolute;
+    left: 50%;
+    top: 50%;
+    width: 0;
+    height: 0;
+  }
+  .orbit i {
+    position: absolute;
+    left: -5px;
+    top: -5px;
+    width: 10px;
+    height: 10px;
+    border-radius: 50%;
+  }
+  .od1 {
+    transform: rotate(0deg) translateX(56px);
+    background: var(--brand-blue);
+  }
+  .od2 {
+    transform: rotate(90deg) translateX(56px);
+    background: var(--brand-green);
+  }
+  .od3 {
+    transform: rotate(180deg) translateX(56px);
+    background: var(--brand-blue);
+  }
+  .od4 {
+    transform: rotate(270deg) translateX(56px);
+    background: var(--brand-green);
+  }
+  .stage-pair {
+    position: absolute;
+    left: 50%;
+    top: 50%;
+    width: 56px;
+    height: 36px;
+    margin: -18px 0 0 -28px;
+  }
+  .mini {
+    position: absolute;
+    font-size: 12px;
+    line-height: 16px;
+    font-weight: 700;
+    padding: 5px 12px;
+    border-radius: var(--radius-pill);
+  }
+  .m1 {
+    left: 8%;
+    top: 18px;
+  }
+  .m2 {
+    left: 12%;
+    bottom: 18px;
+  }
+  .m3 {
+    right: 10%;
+    top: 18px;
+  }
+  .m4 {
+    right: 8%;
+    bottom: 18px;
+  }
+  .stage-bars {
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    gap: 10px;
+    padding: 0 22px;
+  }
+  .mbar {
+    display: block;
+    height: 14px;
+    border-radius: var(--radius-pill);
+    background: rgba(255, 255, 255, 0.06);
+    overflow: hidden;
+  }
+  .fill-blue {
+    background: var(--brand-blue);
+  }
+  .fill-green {
+    background: var(--brand-green);
+  }
+  .stage-bars .mbar:nth-child(2) > span {
+    animation-delay: 0.6s;
+  }
+  .stage-bars .mbar:nth-child(3) > span {
+    animation-delay: 1.2s;
+  }
+  .stage-bars .mbar:nth-child(4) > span {
+    animation-delay: 1.8s;
+  }
+  .w46 {
+    width: 46%;
+  }
+  .w50 {
+    width: 50%;
+  }
+  .w52 {
+    width: 52%;
+  }
+  .w60 {
+    width: 60%;
+  }
+  .w62 {
+    width: 62%;
+  }
+  .w64 {
+    width: 64%;
+  }
+  .w70 {
+    width: 70%;
+  }
+  .w76 {
+    width: 76%;
+  }
+  .w80 {
+    width: 80%;
+  }
+  .w82 {
+    width: 82%;
+  }
+  .w88 {
+    width: 88%;
+  }
+  .w92 {
+    width: 92%;
+  }
+  .term-mini {
+    position: absolute;
+    inset: 16px;
+    border-radius: 10px;
+    padding: 12px;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+  }
+  .tline {
+    display: block;
+    height: 8px;
+    border-radius: var(--radius-pill);
+    background: rgba(255, 255, 255, 0.22);
+    transform-origin: left center;
+  }
+  .tline:nth-child(2) {
+    animation-delay: 0.5s;
+  }
+  .tline:nth-child(3) {
+    animation-delay: 1s;
+  }
+  .tprompt {
+    display: flex;
+    gap: 6px;
+    align-items: center;
+    font-family: var(--font-mono);
+    font-size: 11px;
+    color: var(--text-green);
+  }
+  .cursor {
+    width: 8px;
+    height: 12px;
+    background: var(--brand-green);
+    border-radius: 2px;
+  }
+  .chip {
+    position: absolute;
+    right: 28px;
+    top: 26px;
+    font-size: 11px;
+    line-height: 14px;
+    font-weight: 700;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    padding: 4px 10px;
+    border-radius: var(--radius-pill);
+    background: var(--brand-blue);
+    color: var(--on-blue);
+  }
+  .cols {
+    position: absolute;
+    inset: 14px;
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 8px;
+  }
+  .col {
+    border: 1px dashed var(--hairline);
+    border-radius: 10px;
+    padding: 6px 8px;
+    font-size: 10px;
+    line-height: 12px;
+    font-weight: 700;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    color: var(--ink-muted);
+  }
+  .mover {
+    position: absolute;
+    left: 20px;
+    top: 52px;
+    width: calc((100% - 44px) / 3 - 12px);
+    height: 40px;
+    border-radius: 8px;
+    background: var(--brand-green);
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    gap: 5px;
+    padding: 0 10px;
+  }
+  .mover i {
+    display: block;
+    height: 5px;
+    border-radius: var(--radius-pill);
+    background: rgba(0, 0, 0, 0.55);
+  }
+  .lines {
+    position: absolute;
+    inset: 22px 24px;
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+  }
+  .lines i {
+    display: block;
+    height: 8px;
+    border-radius: var(--radius-pill);
+    background: rgba(255, 255, 255, 0.14);
+  }
+  .lens {
+    position: absolute;
+    left: 24px;
+    top: 18px;
+    width: 38px;
+    height: 38px;
+    border-radius: 50%;
+    border: 3px solid var(--brand-blue);
+    background: rgba(0, 173, 238, 0.08);
+  }
+  .lens::after {
+    content: '';
+    position: absolute;
+    right: -12px;
+    bottom: -9px;
+    width: 14px;
+    height: 3px;
+    border-radius: var(--radius-pill);
+    background: var(--brand-blue);
+    transform: rotate(45deg);
+  }
+  .node {
+    position: absolute;
+    top: 50%;
+    left: 28px;
+    margin-top: -22px;
+    width: 44px;
+    height: 44px;
+    border-radius: 50%;
+  }
+  .node-hq {
+    position: absolute;
+    right: 28px;
+    top: 50%;
+    width: 64px;
+    height: 44px;
+    margin-top: -22px;
+  }
+  .node-l {
+    position: absolute;
+    left: 22px;
+    bottom: 12px;
+  }
+  .node-r {
+    position: absolute;
+    right: 50px;
+    bottom: 12px;
+  }
+  .link {
+    position: absolute;
+    top: 50%;
+    left: 80px;
+    right: 100px;
+    height: 2px;
+    margin-top: -1px;
+    background: repeating-linear-gradient(90deg, var(--hairline) 0 6px, transparent 6px 12px);
+  }
+  .packet {
+    position: absolute;
+    top: 50%;
+    left: 80px;
+    width: 12px;
+    height: 12px;
+    margin-top: -6px;
+    border-radius: 50%;
+    background: var(--brand-green);
+    box-shadow: 0 0 12px var(--brand-green);
+  }
+  .stage-safe {
+    background: rgba(0, 0, 0, 0.18);
+    border-color: rgba(255, 255, 255, 0.1);
+  }
+  .scan {
+    position: absolute;
+    left: 0;
+    right: 0;
+    top: 0;
+    height: 2px;
+    background: var(--brand-green);
+    box-shadow: 0 0 16px var(--brand-green);
+  }
+  .shield {
+    position: absolute;
+    left: 32px;
+    top: 50%;
+    width: 72px;
+    height: 72px;
+    margin-top: -36px;
+    fill: none;
+    stroke: var(--brand-green);
+    stroke-width: 1.6;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+  }
+  .safe-tags {
+    position: absolute;
+    left: 136px;
+    right: 24px;
+    top: 50%;
+    transform: translateY(-50%);
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+  }
+  .tag-light {
+    border-color: rgba(255, 255, 255, 0.6);
+    color: var(--on-indigo);
+  }
+
+  .see-glow {
+    position: absolute;
+    left: 50%;
+    top: 50%;
+    width: 1100px;
+    height: 700px;
+    margin-left: -550px;
+    border-radius: 50%;
+    pointer-events: none;
+    z-index: 0;
+    background: radial-gradient(closest-side, rgba(0, 173, 238, 0.2), transparent);
+  }
+  .sec:has([data-active='sessions-list']) .see-glow {
+    background: radial-gradient(closest-side, rgba(34, 255, 55, 0.13), transparent);
+  }
+  .sec:has([data-active='tasks-board']) .see-glow {
+    background: radial-gradient(closest-side, rgba(46, 49, 145, 0.45), transparent);
+  }
+  .sec:has([data-active='vault-browser']) .see-glow {
+    background: radial-gradient(closest-side, rgba(0, 198, 250, 0.18), transparent);
+  }
+  .see-head {
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: space-between;
+    align-items: flex-end;
+    gap: var(--space-5);
+  }
+  .seg {
+    position: relative;
+    display: grid;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    border-radius: var(--radius-pill);
+    padding: 4px;
+    min-width: 420px;
+    --i: 0;
+  }
+  .seg[hidden] {
+    display: none;
+  }
+  .seg-ind {
+    position: absolute;
+    top: 4px;
+    bottom: 4px;
+    left: 4px;
+    width: calc((100% - 8px) / 4);
+    border-radius: var(--radius-pill);
+    background: var(--brand-blue);
+    transform: translateX(calc(var(--i) * 100%));
+    transition: transform 0.45s cubic-bezier(0.3, 0.7, 0.2, 1);
+  }
+  .seg button {
+    position: relative;
+    z-index: 1;
+    font: inherit;
+    font-size: 15px;
+    font-weight: 700;
+    min-height: 44px;
+    border: 0;
+    background: transparent;
+    color: var(--ink);
+    cursor: pointer;
+    border-radius: var(--radius-pill);
+    transition: color 0.3s ease;
+  }
+  .seg button[aria-pressed='true'] {
+    color: var(--on-blue);
+  }
+  .screens {
+    display: flex;
+    flex-direction: column;
+    gap: 40px;
+  }
+  .screen {
+    margin: 0;
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-3);
+  }
+  .screen[hidden] {
+    display: none;
+  }
+  .frame-3d {
+    perspective: 1400px;
+  }
+  .frame {
+    border-radius: 24px;
+    padding: 12px;
+    transform-origin: center top;
+  }
+  .frame img {
+    display: block;
+    width: 100%;
+    height: auto;
+    border-radius: 14px;
+  }
+  .chrome {
+    display: flex;
+    gap: 6px;
+    padding: 4px 6px 12px;
+  }
+  .chrome i,
+  .tw-bar i {
+    width: 10px;
+    height: 10px;
+    border-radius: 50%;
+    background: rgba(255, 255, 255, 0.18);
+    display: block;
+  }
+  .media-pair {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: var(--space-4);
+  }
+
+  .local-grid {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1.15fr);
+    gap: 56px;
+    align-items: center;
+  }
+  .local-art {
+    position: relative;
+  }
+  .tree {
+    position: absolute;
+    left: -28px;
+    bottom: -28px;
+    width: 240px;
+    border-radius: 16px;
+    padding: 16px;
+    margin: 0;
+    list-style: none;
+    font-family: var(--font-mono);
+    font-size: 13px;
+    line-height: 22px;
+    z-index: 2;
+  }
+  .t-root {
+    color: var(--text-green);
+  }
+  .tr1 {
+    padding-left: 16px;
+  }
+  .tr2 {
+    padding-left: 32px;
+    color: var(--text-blue);
+  }
+  .tree li:nth-child(2) {
+    animation-delay: 0.4s;
+  }
+  .tree li:nth-child(3) {
+    animation-delay: 0.8s;
+  }
+  .tree li:nth-child(4) {
+    animation-delay: 1.2s;
+  }
+  .tree li:nth-child(5) {
+    animation-delay: 1.6s;
+  }
+  .tree li:nth-child(6) {
+    animation-delay: 2s;
+  }
+
+  .install-grid {
+    display: grid;
+    grid-template-columns: minmax(0, 0.9fr) minmax(0, 1.1fr);
+    gap: 48px;
+    align-items: center;
+  }
+  .isteps {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+  }
+  .istep-text {
+    flex: 1 1 auto;
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+  }
+  .istep-text code {
+    align-self: flex-start;
+    font-size: 13px;
+    font-weight: 400;
+  }
+  .istep {
+    display: flex;
+    gap: var(--space-4);
+    align-items: center;
+    border-radius: 16px;
+    padding: 14px 16px;
+    font-weight: 700;
+  }
+  .tw {
+    border-radius: var(--radius-lg);
+    overflow: hidden;
+  }
+  .tw-bar {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 12px 16px;
+    border-bottom: 1px solid var(--glass-border);
+  }
+  .tw-bar span {
+    margin-left: 10px;
+    font-size: 12px;
+    color: var(--ink-muted);
+    font-family: var(--font-mono);
+  }
+  .tw-body {
+    padding: 20px 22px 26px;
+    font-family: var(--font-mono);
+    font-size: 15px;
+    line-height: 28px;
+    min-height: 180px;
+    overflow-x: auto;
+  }
+  .tw-line {
+    display: flex;
+    gap: 10px;
+    white-space: nowrap;
+  }
+  .tw-line .p {
+    color: var(--text-green);
+  }
+  .type {
+    display: inline-block;
+    overflow: hidden;
+    white-space: nowrap;
+    vertical-align: bottom;
+  }
+  .t1 {
+    --n: 31;
+  }
+  .t2 {
+    --n: 27;
+  }
+  .t3 {
+    --n: 26;
+  }
+  .tw-line .blink {
+    margin-left: 4px;
+  }
+
+  .early {
+    padding: 56px;
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+    gap: 32px 56px;
+  }
+
+  @media (max-width: 1100px) {
+    .graphic {
+      zoom: 0.72;
+    }
+  }
+  @media (max-width: 960px) {
+    .hero-grid,
+    .fit-grid,
+    .local-grid,
+    .install-grid {
+      grid-template-columns: minmax(0, 1fr);
+    }
+    .graphic-panel {
+      justify-self: center;
+    }
+    .graphic {
+      zoom: 1;
+    }
+    .bento {
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+    .media-pair {
+      grid-template-columns: minmax(0, 1fr);
+    }
+    .tree {
+      left: 16px;
+    }
+  }
+  @media (max-width: 700px) {
+    .graphic {
+      zoom: 0.62;
+    }
+  }
+  @media (max-width: 640px) {
+    .graphic-panel {
+      padding: 12px;
+    }
+    .graphic {
+      zoom: 0.5;
+    }
+    .bento {
+      grid-template-columns: minmax(0, 1fr);
+    }
+    .span2 {
+      grid-column: auto;
+    }
+    .mq-item {
+      font-size: 24px;
+    }
+    .seg {
+      min-width: 0;
+      width: 100%;
+    }
+    .early {
+      padding: 28px;
+    }
+    .tree {
+      position: static;
+      width: auto;
+      margin-top: var(--space-3);
+    }
+    .safe-tags {
+      left: 112px;
+    }
+    .shield {
+      left: 20px;
+    }
+  }
+
+  @keyframes flow {
+    0% {
+      offset-distance: 0%;
+      opacity: 0;
+    }
+    12% {
+      opacity: 1;
+    }
+    88% {
+      opacity: 1;
+    }
+    100% {
+      offset-distance: 100%;
+      opacity: 0;
+    }
+  }
+  @keyframes write {
+    0% {
+      transform: scaleX(0);
+    }
+    35%,
+    85% {
+      transform: scaleX(1);
+    }
+    100% {
+      transform: scaleX(1);
+      opacity: 0.35;
+    }
+  }
+  @keyframes marquee {
+    from {
+      transform: translateX(0);
+    }
+    to {
+      transform: translateX(-50%);
+    }
+  }
+  @keyframes kanban {
+    0%,
+    22% {
+      transform: translateX(0);
+    }
+    33%,
+    55% {
+      transform: translateX(calc(100% + 20px));
+    }
+    66%,
+    88% {
+      transform: translateX(calc(200% + 40px));
+      opacity: 1;
+    }
+    96% {
+      opacity: 0;
+      transform: translateX(calc(200% + 40px));
+    }
+    100% {
+      opacity: 0;
+      transform: translateX(0);
+    }
+  }
+  @keyframes search {
+    0%,
+    100% {
+      transform: translate(0, 0);
+    }
+    25% {
+      transform: translate(140px, 22px);
+    }
+    50% {
+      transform: translate(60px, 44px);
+    }
+    75% {
+      transform: translate(200px, 10px);
+    }
+  }
+  @keyframes hit {
+    0%,
+    40%,
+    80%,
+    100% {
+      background: rgba(255, 255, 255, 0.14);
+    }
+    50%,
+    70% {
+      background: var(--brand-green);
+    }
+  }
+  @keyframes packet {
+    from {
+      left: 80px;
+    }
+    to {
+      left: calc(100% - 112px);
+    }
+  }
+  @keyframes scan {
+    from {
+      transform: translateY(8px);
+    }
+    to {
+      transform: translateY(122px);
+    }
+  }
+  @keyframes treeIn {
+    0% {
+      opacity: 0;
+      transform: translateX(-8px);
+    }
+    12%,
+    85% {
+      opacity: 1;
+      transform: none;
+    }
+    100% {
+      opacity: 0;
+    }
+  }
+  @keyframes type1 {
+    0% {
+      width: 0;
+    }
+    18%,
+    92% {
+      width: calc(var(--n) * 1ch);
+    }
+    100% {
+      width: 0;
+    }
+  }
+  @keyframes type2 {
+    0%,
+    33% {
+      width: 0;
+    }
+    51%,
+    92% {
+      width: calc(var(--n) * 1ch);
+    }
+    100% {
+      width: 0;
+    }
+  }
+  @keyframes type3 {
+    0%,
+    66% {
+      width: 0;
+    }
+    84%,
+    92% {
+      width: calc(var(--n) * 1ch);
+    }
+    100% {
+      width: 0;
+    }
+  }
+  @keyframes show2 {
+    0% {
+      opacity: 0;
+    }
+    31% {
+      opacity: 1;
+    }
+    96% {
+      opacity: 0;
+    }
+  }
+  @keyframes show3 {
+    0% {
+      opacity: 0;
+    }
+    64% {
+      opacity: 1;
+    }
+    96% {
+      opacity: 0;
+    }
+  }
+  @keyframes tilt {
+    from {
+      transform: rotateX(24deg) scale(0.9);
+      opacity: 0.35;
+    }
+    to {
+      transform: none;
+      opacity: 1;
+    }
+  }
+  @keyframes railGrow {
+    from {
+      transform: scaleY(0);
+    }
+    to {
+      transform: scaleY(1);
+    }
+  }
+
+  @media (prefers-reduced-motion: no-preference) {
+    .flow-dot {
+      animation: flow 2.8s cubic-bezier(0.5, 0, 0.5, 1) infinite;
+    }
+    .fd5 {
+      animation-duration: 1.4s;
+    }
+    .ping::after {
+      animation: ping 2.8s ease-out infinite;
+    }
+    .ch2 .ping::after {
+      animation-delay: 0.7s;
+    }
+    .core {
+      animation: pulse 2.8s ease-in-out infinite;
+    }
+    .vbar > span,
+    .mbar > span,
+    .tline {
+      animation: write 5.6s cubic-bezier(0.3, 0.6, 0.2, 1) infinite;
+    }
+    .marquee {
+      padding: 0;
+      mask-image: linear-gradient(90deg, transparent, #000 8%, #000 92%, transparent);
+      -webkit-mask-image: linear-gradient(90deg, transparent, #000 8%, #000 92%, transparent);
+    }
+    .mq-group {
+      flex-wrap: nowrap;
+    }
+    .mq-group[aria-hidden='true'] {
+      display: flex;
+    }
+    .mq-track {
+      width: max-content;
+      animation: marquee 46s linear infinite;
+    }
+    .mq-rev {
+      animation-direction: reverse;
+      animation-duration: 38s;
+    }
+    .band:hover .mq-track,
+    .band:focus-within .mq-track,
+    .band.is-paused .mq-track {
+      animation-play-state: paused;
+    }
+    .dchip {
+      animation: bob 4s ease-in-out infinite;
+    }
+    .orbit {
+      animation: spin 7s linear infinite;
+    }
+    .cursor {
+      animation: blink 1s steps(1) infinite;
+    }
+    .chip {
+      animation: pulse 1.8s ease-in-out infinite;
+    }
+    .mover {
+      animation: kanban 6s cubic-bezier(0.6, 0, 0.3, 1) infinite;
+    }
+    .lens {
+      animation: search 5s ease-in-out infinite;
+    }
+    .hit {
+      animation: hit 5s ease-in-out infinite;
+    }
+    .packet {
+      animation: packet 2.4s cubic-bezier(0.6, 0, 0.4, 1) infinite alternate;
+    }
+    .scan {
+      animation: scan 2.6s ease-in-out infinite alternate;
+    }
+    .tree {
+      animation: bob 6s ease-in-out infinite;
+    }
+    .tree li {
+      animation: treeIn 6s ease-out infinite;
+    }
+    .t1 {
+      animation: type1 10s steps(31) infinite;
+    }
+    .t2 {
+      animation: type2 10s steps(27) infinite;
+    }
+    .t3 {
+      animation: type3 10s steps(26) infinite;
+    }
+    .l2 {
+      animation: show2 10s steps(1) infinite;
+    }
+    .l3 {
+      animation: show3 10s steps(1) infinite;
+    }
+  }
+  @supports (animation-timeline: view()) {
+    @media (prefers-reduced-motion: no-preference) {
+      .tilt {
+        animation: tilt linear both;
+        animation-timeline: view();
+        animation-range: entry 0% cover 45%;
+      }
+      .rail > span {
+        animation: railGrow linear both;
+        animation-timeline: view();
+        animation-range: entry 30% exit 40%;
+      }
+    }
+  }
+</style>

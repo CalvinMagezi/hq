@@ -29,6 +29,16 @@ const npx = installChannels.npx;
 const curl = installChannels.curl;
 const brew = installChannels.brew;
 const docker = installChannels.docker;
+const winCmd = 'irm https://agent-hq.online/install.ps1 | iex';
+
+// The picker offers only the channels install-channels.ts marks available.
+const pickerOptions = [
+  curl.available && { id: 'script', title: curl.title, sub: 'Linux and Apple Silicon. The quickest.' },
+  brew.available && { id: 'homebrew', title: brew.title, sub: 'macOS on Apple Silicon and Linux.' },
+  npx.available && { id: 'npx', title: npx.title, sub: 'Needs Node 18.17 or newer.' },
+  docker.available && { id: 'docker', title: docker.title, sub: 'Multi-arch image from the signed release.' },
+  { id: 'windows', title: 'Windows', sub: 'Full HQ on WSL2, or HQ Lite.' },
+].filter((o): o is { id: string; title: string; sub: string } => Boolean(o));
 ---
 
 <Layout
@@ -36,21 +46,38 @@ const docker = installChannels.docker;
   description="Install Agent HQ with a curl script, Homebrew, npx or Docker, set up a server with signed releases, and reach the web UI over Tailscale."
   path="/install/"
 >
-  <section class="band">
-    <div class="container section">
-      <span class="eyebrow">Install</span>
-      <h1>Install Agent HQ</h1>
-      <p class="lede prose">
-        There are seven working ways in. The quickest is one command that downloads a verified release. Building from source runs on Linux and macOS. The server path
-        installs signed releases and updates itself, and it is Linux only. Tailscale is the
-        optional way to open the web UI from your phone.
-      </p>
+  <section class="sec sec-hero" aria-labelledby="inst-h">
+    <span class="orb orb-b o-tl" aria-hidden="true"></span>
+    <span class="orb orb-g o-tr slow" aria-hidden="true"></span>
+    <span class="orb orb-i o-bl" aria-hidden="true"></span>
+    <img
+      class="hero-art"
+      src="/media/art/stairs.jpg"
+      alt="Flat isometric illustration: a staircase of cubes rising from a terminal prompt block to a small server rack."
+      width="1600"
+      height="995"
+      decoding="async"
+    />
+    <div class="container stack">
+      <div class="stack hero-copy">
+        <p class="eyebrow">Install</p>
+        <h1 id="inst-h" class="display">
+          <span class="hl"><span>Install Agent HQ.</span></span>
+          <span class="hl"><span class="accent">Pick a way in.</span></span>
+        </h1>
+        <div class="rule rule-in" aria-hidden="true"></div>
+        <p class="lede fade-in">
+          There are seven working ways in. The quickest is one command that downloads a verified release.
+          Building from source runs on Linux and macOS. The server path installs signed releases and updates
+          itself, and it is Linux only. Tailscale is the optional way to open the web UI from your phone.
+        </p>
+      </div>
       <nav aria-label="On this page">
         <ul class="toc">
-          <li><a href="#script">Install script</a></li>
-          <li><a href="#homebrew">Homebrew</a></li>
-          <li><a href="#npx">npx installer</a></li>
-          <li><a href="#docker">Docker</a></li>
+          {curl.available && <li><a href="#script">Install script</a></li>}
+          {brew.available && <li><a href="#homebrew">Homebrew</a></li>}
+          {npx.available && <li><a href="#npx">npx installer</a></li>}
+          {docker.available && <li><a href="#docker">Docker</a></li>}
           <li><a href="#windows">Windows</a></li>
           <li><a href="#source">Build from source</a></li>
           <li><a href="#server">Server with signed releases</a></li>
@@ -60,356 +87,889 @@ const docker = installChannels.docker;
           <li><a href="#soon">Not available yet</a></li>
         </ul>
       </nav>
+
+      <div class="picker" data-tabs>
+        <div class="opts" role="group" aria-label="Choose an install method" data-tablist hidden>
+          {
+            pickerOptions.map((o, i) => (
+              <button type="button" class="opt" data-tab={o.id} aria-pressed={i === 0 ? 'true' : 'false'}>
+                <span class="odot" aria-hidden="true"></span>
+                <span class="opt-text"><b>{o.title}</b><small>{o.sub}</small></span>
+              </button>
+            ))
+          }
+        </div>
+        <div class="panels">
+          {
+            curl.available && (
+              <section class="pane" id="script" data-panel="script" aria-labelledby="script-h">
+                <h2 id="script-h" class="h2-sm">{curl.title}</h2>
+                <div class="term glass-heavy shine">
+                  <div class="term-bar" aria-hidden="true"><i></i><i></i><i></i><span>zsh</span></div>
+                  <div class="term-body"><span class="p" aria-hidden="true">$</span><pre class="typing"><code id="curl-cmd">{curl.command}</code></pre></div>
+                </div>
+                <button type="button" class="btn btn-accent" data-copy="curl-cmd" data-label="Copy command" aria-label="Copy command for the install script" hidden>Copy command</button>
+                <div class="prose">
+                  <p>
+                    The quickest way in, with nothing to install first. It detects your platform (Linux x86_64 or ARM,
+                    or an Apple Silicon Mac), downloads the latest stable release, verifies its minisign signature and
+                    SHA-256 checksum against the project key, and installs <code>hq</code> into
+                    <code>~/.local/bin</code> and the web UI into <code>~/.local/share/agent-hq/web</code>. After
+                    <code>hq start all</code> the app is at <code>http://localhost:5678</code>. It checks signatures with
+                    the <code>minisign</code> tool or with OpenSSL; on a Mac, install one of them first
+                    (<code>brew install minisign</code>). Read the script before you run it: <a href="/install.sh">install.sh</a>.
+                  </p>
+                  <p>Then run <code>hq install</code>, add an API key with <code>hq env</code>, and check with <code>hq doctor</code>.</p>
+                </div>
+              </section>
+            )
+          }
+          {
+            brew.available && (
+              <section class="pane" id="homebrew" data-panel="homebrew" aria-labelledby="homebrew-h">
+                <h2 id="homebrew-h" class="h2-sm">{brew.title}</h2>
+                <div class="term glass-heavy shine">
+                  <div class="term-bar" aria-hidden="true"><i></i><i></i><i></i><span>zsh</span></div>
+                  <div class="term-body"><span class="p" aria-hidden="true">$</span><pre class="typing"><code id="brew-cmd">{brew.command}</code></pre></div>
+                </div>
+                <button type="button" class="btn btn-accent" data-copy="brew-cmd" data-label="Copy command" aria-label="Copy command for Homebrew" hidden>Copy command</button>
+                <div class="prose">
+                  <p>
+                    For macOS on Apple Silicon and Linux. The tap installs the signed stable release of <code>hq</code>
+                    and upgrades with <code>brew upgrade agent-hq</code>. The formula is regenerated every six hours from
+                    the signed release manifest, and its checksums are written only after the signature verifies. It
+                    installs the binary only; the install script above also installs the web UI.
+                  </p>
+                </div>
+              </section>
+            )
+          }
+          {
+            npx.available && (
+              <section class="pane" id="npx" data-panel="npx" aria-labelledby="npx-h">
+                <h2 id="npx-h" class="h2-sm">{npx.title}</h2>
+                <div class="term glass-heavy shine">
+                  <div class="term-bar" aria-hidden="true"><i></i><i></i><i></i><span>zsh</span></div>
+                  <div class="term-body"><span class="p" aria-hidden="true">$</span><pre class="typing"><code id="npx-cmd">{npx.command}</code></pre></div>
+                </div>
+                <button type="button" class="btn btn-accent" data-copy="npx-cmd" data-label="Copy command" aria-label="Copy command for npx" hidden>Copy command</button>
+                <div class="prose">
+                  <p>
+                    Needs Node 18.17 or newer, which stock Ubuntu 22.04 does not have; use the install script there. It
+                    downloads the latest stable release for your platform, checks the minisign signature and the SHA-256
+                    checksum against the project key, and installs <code>hq</code> into <code>~/.local/bin</code>. On a
+                    platform without a prebuilt binary it builds from source with cargo.
+                  </p>
+                  <p>Then run <code>hq install</code>, add an API key with <code>hq env</code>, and check with <code>hq doctor</code>.</p>
+                </div>
+              </section>
+            )
+          }
+          {
+            docker.available && (
+              <section class="pane" id="docker" data-panel="docker" aria-labelledby="docker-h">
+                <h2 id="docker-h" class="h2-sm">{docker.title}</h2>
+                <div class="term glass-heavy shine">
+                  <div class="term-bar" aria-hidden="true"><i></i><i></i><i></i><span>zsh</span></div>
+                  <div class="term-body"><span class="p" aria-hidden="true">$</span><pre class="typing"><code id="docker-cmd">{docker.command}</code></pre></div>
+                </div>
+                <button type="button" class="btn btn-accent" data-copy="docker-cmd" data-label="Copy command" aria-label="Copy command for Docker" hidden>Copy command</button>
+                <div class="prose">
+                  <p>
+                    A multi-arch image (Linux x86_64 and ARM) assembled from the signed release, published to the GitHub
+                    Container Registry. The server inside binds a public address, so HQ requires a web token: the first run
+                    prints a link that carries it, once. The port is published on <code>127.0.0.1</code> only. Add
+                    <code>-e HQ_OPENROUTER_API_KEY=...</code> (or another provider key) to give it a model. State lives in the
+                    <code>hq-data</code> volume. Read the <a href={`${links.repo}/blob/main/docs/DOCKER.md`}>Docker guide</a> for
+                    the sandbox note, backups and Tailscale.
+                  </p>
+                  <p>Then run <code>docker logs hq</code> and open the link it prints.</p>
+                </div>
+              </section>
+            )
+          }
+          <section class="pane" id="windows" data-panel="windows" aria-labelledby="windows-h">
+            <h2 id="windows-h" class="h2-sm">Windows</h2>
+            <div class="term glass-heavy shine">
+              <div class="term-bar" aria-hidden="true"><i></i><i></i><i></i><span>PowerShell</span></div>
+              <div class="term-body"><span class="p" aria-hidden="true">PS&gt;</span><pre class="typing"><code id="win-cmd">{winCmd}</code></pre></div>
+            </div>
+            <button type="button" class="btn btn-accent" data-copy="win-cmd" data-label="Copy command" aria-label="Copy command for Windows" hidden>Copy command</button>
+            <div class="prose">
+              <p>
+                Two editions. In PowerShell, <code>irm https://agent-hq.online/install.ps1 | iex</code> looks at your
+                computer, recommends one and asks. <strong>Full HQ</strong> is the default wherever WSL2 works: HQ and its
+                coding agents run inside WSL2, which is a normal Ubuntu, and you open the web UI from your Windows browser at
+                <code>http://localhost:5678</code>. <strong>HQ Lite</strong> is for work computers that block WSL2 or
+                installers: one program in your user profile, no administrator rights, with the web app, tasks, notes and VS
+                Code over MCP, and no coding agents. Its download is signed with the HQ release key and checked first, but it
+                has no Windows code-signing certificate yet, so a computer that only allows approved programs may refuse it;
+                the installer says so and stops.
+              </p>
+              <p>
+                By hand, Full HQ is <code>wsl --install -d Ubuntu</code>, then the Linux install script above inside Ubuntu.
+                Install bubblewrap (<code>sudo apt install bubblewrap</code>) so agents run in their sandbox; Ubuntu 24.04
+                also needs user namespaces allowed.
+              </p>
+              <p>
+                A Windows PC can instead run the coding agents for an HQ on a server: install <code>hq</code> in WSL2, run
+                <code>hq host join</code> and pair it from the HQ with <code>hq host add</code>. The full steps are in
+                <a href={links.windows}>the Windows guide</a> and <a href={links.joinMachine}>the guide for adding a machine</a>.
+              </p>
+            </div>
+          </section>
+        </div>
+      </div>
+      <div class="gcard see-run reveal"><Media id="terminal-install" /></div>
     </div>
   </section>
 
-  <div class="container">
-    {
-      curl.available && (
-        <section class="doc-section" id="script" aria-labelledby="script-h">
-          <h2 id="script-h">{curl.title}</h2>
-          <div class="prose">
-            <p>
-              The quickest way in, with nothing to install first. It detects your platform (Linux x86_64 or
-              ARM, or an Apple Silicon Mac), downloads the latest stable release, verifies its minisign signature
-              and SHA-256 checksum against the project key, and installs <code>hq</code> into
-              <code>~/.local/bin</code> and the web UI into <code>~/.local/share/agent-hq/web</code>. After
-              <code>hq start all</code> the app is at <code>http://localhost:5678</code>. It checks signatures with the <code>minisign</code> tool or with OpenSSL;
-              on a Mac, install one of them first (<code>brew install minisign</code>). Read the script before you
-              run it: <a href="/install.sh">install.sh</a>.
-            </p>
-            <CodeBlock id="curl-cmd" label="Shell" code={curl.command} />
-            <p>Then run <code>hq install</code>, add an API key with <code>hq env</code>, and check with <code>hq doctor</code>.</p>
-          </div>
-        </section>
-      )
-    }
-    {
-      brew.available && (
-        <section class="doc-section" id="homebrew" aria-labelledby="homebrew-h">
-          <h2 id="homebrew-h">{brew.title}</h2>
-          <div class="prose">
-            <p>
-              For macOS on Apple Silicon and Linux. The tap installs the signed stable release of
-              <code>hq</code> and upgrades with <code>brew upgrade agent-hq</code>. The formula is regenerated
-              every six hours from the signed release manifest, and its checksums are written only after the
-              signature verifies. It installs the binary only; the install script above also installs the web UI.
-            </p>
-            <CodeBlock id="brew-cmd" label="Shell" code={brew.command} />
-          </div>
-        </section>
-      )
-    }
-    {
-      npx.available && (
-        <section class="doc-section" id="npx" aria-labelledby="npx-h">
-          <h2 id="npx-h">{npx.title}</h2>
-          <div class="prose">
-            <p>
-              Needs Node 18.17 or newer, which stock Ubuntu 22.04 does not have; use the install script there. It downloads the latest stable release for your platform, checks the
-              minisign signature and the SHA-256 checksum against the project key, and installs
-              <code>hq</code> into <code>~/.local/bin</code>. On a platform without a prebuilt binary it
-              builds from source with cargo.
-            </p>
-            <CodeBlock id="npx-cmd" label="npx" code={npx.command} />
-            <p>Then run <code>hq install</code>, add an API key with <code>hq env</code>, and check with <code>hq doctor</code>.</p>
-          </div>
-        </section>
-      )
-    }
-    {
-      docker.available && (
-        <section class="doc-section" id="docker" aria-labelledby="docker-h">
-          <h2 id="docker-h">{docker.title}</h2>
-          <div class="prose">
-            <p>
-              A multi-arch image (Linux x86_64 and ARM) assembled from the signed release, published to the GitHub
-              Container Registry. The server inside binds a public address, so HQ requires a web token: the first
-              run prints a link that carries it, once. The port is published on <code>127.0.0.1</code> only. Add
-              <code>-e HQ_OPENROUTER_API_KEY=...</code> (or another provider key) to give it a model. State lives in the
-              <code>hq-data</code> volume. Read the <a href="https://github.com/CalvinMagezi/hq/blob/main/docs/DOCKER.md">Docker guide</a>
-              for the sandbox note, backups and Tailscale.
-            </p>
-            <CodeBlock id="docker-cmd" label="Shell" code={docker.command} />
-            <p>Then run <code>docker logs hq</code> and open the link it prints.</p>
-          </div>
-        </section>
-      )
-    }
-    <section class="doc-section" id="windows" aria-labelledby="windows-h">
-      <h2 id="windows-h">Windows</h2>
-      <div class="prose">
-        <p>
-          Two editions. In PowerShell, <code>irm https://agent-hq.online/install.ps1 | iex</code> looks at your
-          computer, recommends one and asks. <strong>Full HQ</strong> is the default wherever WSL2 works: HQ
-          and its coding agents run inside WSL2, which is a normal Ubuntu, and you open the web UI from your
-          Windows browser at <code>http://localhost:5678</code>. <strong>HQ Lite</strong> is for work computers
-          that block WSL2 or installers: one program in your user profile, no administrator rights, with the web
-          app, tasks, notes and VS Code over MCP, and no coding agents. Its download is signed with the HQ release key and checked first, but it has no Windows
-          code-signing certificate yet, so a computer that only allows approved programs may refuse it; the installer says so and stops.
+  <section class="sec" id="source" aria-labelledby="source-h">
+    <span class="orb orb-i o-ml slow" aria-hidden="true"></span>
+    <span class="orb orb-b o-mr" aria-hidden="true"></span>
+    <div class="container two-col">
+      <div class="stack sticky-col">
+        <p class="eyebrow reveal">Linux and macOS</p>
+        <h2 id="source-h" class="reveal">{installChannels.cargo.title}</h2>
+        <p class="lede reveal">
+          You need git, a recent stable Rust toolchain and at least one LLM API key from OpenRouter, Anthropic or
+          Google AI. Edition 2024 needs Rust 1.85 or newer, and CI pins 1.98.1. The web UI also needs
+          <a href={links.bun}>bun</a>.
         </p>
-        <p>
-          By hand, Full HQ is <code>wsl --install -d Ubuntu</code>, then the Linux install script above inside
-          Ubuntu. Install bubblewrap (<code>sudo apt install bubblewrap</code>) so agents run in their sandbox;
-          Ubuntu 24.04 also needs user namespaces allowed.
-        </p>
-        <p>
-          A Windows PC can instead run the coding agents for an HQ on a server: install <code>hq</code> in
-          WSL2, run <code>hq host join</code> and pair it from the HQ with <code>hq host add</code>. The full
-          steps are in <a href={links.windows}>the Windows guide</a> and
-          <a href={links.joinMachine}>the guide for adding a machine</a>.
-        </p>
-      </div>
-    </section>
-    <section class="doc-section" id="source" aria-labelledby="source-h">
-      <h2 id="source-h">{installChannels.cargo.title}</h2>
-      <div class="prose">
-        <p>
-          You need git, a recent stable Rust toolchain and at least one LLM API key from OpenRouter,
-          Anthropic or Google AI. Edition 2024 needs Rust 1.85 or newer, and CI pins 1.98.1. The web UI
-          also needs <a href={links.bun}>bun</a>.
-        </p>
-      </div>
-      <ol class="steps">
-        <li>
-          <p>Install Rust with <a href={links.rustup}>rustup</a>, if you do not have it.</p>
-          <CodeBlock id="src-rustup" label="Install Rust" code={rustupCmd} />
-        </li>
-        <li>
-          <p>Clone the repository.</p>
-          <CodeBlock id="src-clone" label="Clone" code={cloneCmd} />
-        </li>
-        <li>
-          <p>On Debian or Ubuntu, install the build dependencies first.</p>
-          <CodeBlock id="src-deps" label="Linux build dependencies" code={linuxDeps} />
-        </li>
-        <li>
-          <p>Build the release binary. It is about 58 MB.</p>
-          <CodeBlock id="src-build" label="Build" code={buildCmd} />
-        </li>
-        <li>
-          <p>Put it on your PATH. Make sure <code>~/.local/bin</code> is on it.</p>
-          <CodeBlock id="src-path" label="Install the binary" code={pathCmd} />
-        </li>
-        <li>
-          <p>Run first-run setup.</p>
-          <CodeBlock id="src-first" label="First run" code={firstRun} />
-        </li>
-        <li>
-          <p>
-            Optional: build the web UI and serve it. The server serves <code>web/dist</code> next to
-            the vault, or the directory in <code>web_static_dir</code>.
+        <div class="gcard reveal">
+          <p class="body">
+            Chat relays need a bot token in <code>~/.hq/config.yaml</code>. Then run <code>hq pair</code> and send the
+            code from your own account, so the bot knows who the owner is. The <a href={links.readme}>README</a> has the
+            config keys.
           </p>
-          <CodeBlock id="src-web" label="Web UI" code={webBuild} />
-        </li>
-        <li>
-          <p>Optional: connect an MCP client such as Claude Code.</p>
-          <CodeBlock id="src-mcp" label="MCP" code={mcpCmd} />
-        </li>
-      </ol>
-      <div class="prose">
-        <p>
-          Chat relays need a bot token in <code>~/.hq/config.yaml</code>. Then run
-          <code>hq pair</code> and send the code from your own account, so the bot knows who the owner
-          is. The <a href={links.readme}>README</a> has the config keys.
-        </p>
-        <p>
-          Agent shell commands need a sandbox. On macOS that is <code>sandbox-exec</code>, which ships
-          with the system. On Linux install bubblewrap, or HQ refuses to run model-written bash.
-        </p>
+          <p class="body">
+            Agent shell commands need a sandbox. On macOS that is <code>sandbox-exec</code>, which ships with the system.
+            On Linux install bubblewrap, or HQ refuses to run model-written bash.
+          </p>
+        </div>
       </div>
-    </section>
+      <div class="timeline">
+        <span class="trail" aria-hidden="true"><span></span></span>
+        <ol class="steps">
+          <li class="gcard reveal"><p>Install Rust with <a href={links.rustup}>rustup</a>, if you do not have it.</p><CodeBlock id="src-rustup" label="Install Rust" code={rustupCmd} /></li>
+          <li class="gcard reveal"><p>Clone the repository.</p><CodeBlock id="src-clone" label="Clone" code={cloneCmd} /></li>
+          <li class="gcard reveal"><p>On Debian or Ubuntu, install the build dependencies first.</p><CodeBlock id="src-deps" label="Linux build dependencies" code={linuxDeps} /></li>
+          <li class="gcard reveal"><p>Build the release binary. It is about 58 MB.</p><CodeBlock id="src-build" label="Build" code={buildCmd} /></li>
+          <li class="gcard reveal"><p>Put it on your PATH. Make sure <code>~/.local/bin</code> is on it.</p><CodeBlock id="src-path" label="Install the binary" code={pathCmd} /></li>
+          <li class="gcard reveal"><p>Run first-run setup.</p><CodeBlock id="src-first" label="First run" code={firstRun} /></li>
+          <li class="gcard reveal"><p>Optional: build the web UI and serve it. The server serves <code>web/dist</code> next to the vault, or the directory in <code>web_static_dir</code>.</p><CodeBlock id="src-web" label="Web UI" code={webBuild} /></li>
+          <li class="gcard reveal"><p>Optional: connect an MCP client such as Claude Code.</p><CodeBlock id="src-mcp" label="MCP" code={mcpCmd} /></li>
+        </ol>
+      </div>
+    </div>
+  </section>
 
-    <section class="doc-section" id="server" aria-labelledby="server-h">
-      <h2 id="server-h">{installChannels.server.title}</h2>
-      <div class="prose">
-        <p>
-          For an always-on instance on a Debian or Ubuntu VPS. The installer sets up a systemd timer
-          that pulls minisign-verified releases, swaps the binary, checks <code>/health</code> and
-          rolls back if the check fails. It runs from a checkout of the repository on the server,
-          because it installs the unit files from there. Server installs run on Ubuntu 22.04 or newer, on x86_64 or ARM.
+  <section class="sec sec-top0" id="server" aria-labelledby="server-h">
+    <span class="orb orb-g o-c" aria-hidden="true"></span>
+    <span class="orb orb-i o-br slow" aria-hidden="true"></span>
+    <div class="container stack">
+      <div class="head">
+        <p class="eyebrow reveal">Debian or Ubuntu, x86_64 or ARM</p>
+        <h2 id="server-h" class="reveal">{installChannels.server.title}</h2>
+        <p class="lede reveal">
+          For an always-on instance on a Debian or Ubuntu VPS. The installer sets up a systemd timer that pulls
+          minisign-verified releases, swaps the binary, checks <code>/health</code> and rolls back if the check fails.
+          It runs from a checkout of the repository on the server, because it installs the unit files from there.
+          Server installs run on Ubuntu 22.04 or newer, on x86_64 or ARM.
         </p>
       </div>
-      <ol class="steps">
-        <li>
-          <p>
-            Provision the box once from your machine. This installs Tailscale, Caddy, ufw and
-            <code>gh</code>, creates an unprivileged <code>hq</code> user and writes a starter config
-            with both chat relays disabled. <code>&lt;ssh-host&gt;</code> is an SSH alias for your
-            server.
-          </p>
+      <div class="panel glass-heavy shine zoom-in">
+        <ol class="pipe list-plain" aria-label="Every ten minutes the server verifies the signature, swaps the binary, checks health, then keeps the update or rolls back.">
+          <li class="pnode glass-light"><span class="timer" aria-hidden="true"><i></i></span>Timer<span class="label">Every 10 min</span></li>
+          <li class="pnode glass-light"><svg class="picon" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M12 3l8 3v6c0 4.5-3.2 8-8 9-4.8-1-8-4.5-8-9V6z M9 12l2 2 4-4"></path></svg>Verify<span class="label">minisign and SHA-256</span></li>
+          <li class="pnode glass-light"><svg class="picon picon-sky" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M7 7h11l-3-3 M17 17H6l3 3"></path></svg>Swap<span class="label">By rename</span></li>
+          <li class="pnode glass-light"><svg class="picon picon-green" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M3 12h4l2-5 4 10 2-5h6"></path></svg>Health<span class="label">/health shows new sha</span></li>
+          <li class="pnode glass-light"><span class="ok" aria-hidden="true">OK</span>Keep or roll back<span class="label">Alert on failure</span></li>
+        </ol>
+      </div>
+      <ol class="steps steps-grid">
+        <li class="gcard reveal">
+          <p>Provision the box once from your machine. This installs Tailscale, Caddy, ufw and <code>gh</code>, creates an unprivileged <code>hq</code> user and writes a starter config with both chat relays disabled. <code>&lt;ssh-host&gt;</code> is an SSH alias for your server.</p>
           <CodeBlock id="srv-provision" label="Provision" code={provision} />
         </li>
-        <li>
+        <li class="gcard reveal reveal-2">
           <p>On the server, clone the repository (same commands as above).</p>
           <CodeBlock id="srv-clone" label="Clone" code={cloneCmd} />
         </li>
-        <li>
-          <p>
-            Install bubblewrap, which the default sandbox mode needs, and the <code>minisign</code>
-            tool, which the installer uses to check the first download.
-          </p>
+        <li class="gcard reveal">
+          <p>Install bubblewrap, which the default sandbox mode needs, and the <code>minisign</code> tool, which the installer uses to check the first download.</p>
           <CodeBlock id="srv-deps" label="Dependencies" code={serverDeps} />
         </li>
-        <li>
-          <p>
-            Run the installer with the official release key from the repository,
-            <a href={links.officialKey}><code>release/minisign.pub</code></a>. It creates the user and
-            directories, installs the units, writes <code>/etc/hq/update.conf</code> and the key,
-            bootstraps the first binary, runs the first signature-verified update and enables the
-            timer. It is safe to run again.
-          </p>
+        <li class="gcard reveal reveal-2">
+          <p>Run the installer with the official release key from the repository, <a href={links.officialKey}><code>release/minisign.pub</code></a>. It creates the user and directories, installs the units, writes <code>/etc/hq/update.conf</code> and the key, bootstraps the first binary, runs the first signature-verified update and enables the timer. It is safe to run again.</p>
           <CodeBlock id="srv-install" label="Install" code={serverInstall} />
         </li>
-        <li>
+        <li class="gcard reveal span-all">
           <p>Day to day.</p>
           <CodeBlock id="srv-ops" label="Updates" code={updateOps} />
         </li>
       </ol>
-      <div class="prose">
-        <p>
-          <code>deploy/install.sh</code> installs HQ only. Coding agents run on a machine that has them
-          installed, paired with <code>hq host join</code>; see <a href={links.agentSessions}>the sessions docs</a>. Pick one
-          deploy path per host: the updater owns the binary and web files, so do not also build on the
-          server. Full walkthrough: <a href={links.deployReadme}>deploy/README.md</a>. To check a
-          release by hand, see <a href="/security/#verify">verifying a release</a>.
-        </p>
-      </div>
-    </section>
+      <p class="body reveal note">
+        <code>deploy/install.sh</code> installs HQ only. Coding agents run on a machine that has them installed, paired
+        with <code>hq host join</code>; see <a href={links.agentSessions}>the sessions docs</a>. Pick one deploy path per
+        host: the updater owns the binary and web files, so do not also build on the server. Full walkthrough:
+        <a href={links.deployReadme}>deploy/README.md</a>. To check a release by hand, see
+        <a href="/security/#verify">verifying a release</a>.
+      </p>
+    </div>
+  </section>
 
-    <section class="doc-section" id="hetzner" aria-labelledby="hetzner-h">
-      <h2 id="hetzner-h">{installChannels.hetzner.title}</h2>
-      <div class="prose">
-        <p>
-          The quickest way to a private, always-on HQ. A form creates a server in your own Hetzner Cloud project that
-          installs signed releases, updates itself and is reachable only from your tailnet. It takes about ten minutes,
-          most of it waiting, and costs Hetzner&apos;s hourly price for the server: about 6.50 a month for a 4 GB machine.
-        </p>
-        <p>
-          You need a Hetzner account with a payment method, a free Tailscale account with MagicDNS and HTTPS certificates turned on,
-          an SSH key (<code>ssh-keygen -t ed25519</code> makes one), and a model API key such as OpenRouter.
-        </p>
+  <section class="sec sec-top0" id="hetzner" aria-labelledby="hetzner-h">
+    <span class="orb orb-b o-tl slow" aria-hidden="true"></span>
+    <span class="orb orb-g o-br" aria-hidden="true"></span>
+    <div class="container stack">
+      <div class="two-col two-col-center">
+        <div class="stack">
+          <p class="eyebrow reveal">About ten minutes</p>
+          <h2 id="hetzner-h" class="reveal">{installChannels.hetzner.title}</h2>
+          <p class="lede reveal">
+            The quickest way to a private, always-on HQ. A form creates a server in your own Hetzner Cloud project that
+            installs signed releases, updates itself and is reachable only from your tailnet. It takes about ten minutes,
+            most of it waiting, and costs Hetzner&apos;s hourly price for the server: about 6.50 a month for a 4 GB machine.
+          </p>
+          <p class="body reveal">
+            You need a Hetzner account with a payment method, a free Tailscale account with MagicDNS and HTTPS certificates
+            turned on, an SSH key (<code>ssh-keygen -t ed25519</code> makes one), and a model API key such as OpenRouter.
+          </p>
+          <div class="hz reveal" aria-hidden="true">
+            <span class="hzbar"><span></span></span>
+            <span class="hzlabels"><span class="label">Create</span><span class="label">Install</span><span class="label">Join tailnet</span><span class="label">Open HQ</span></span>
+          </div>
+        </div>
+        <div class="gcard zoom-in"><Media id="hetzner-deploy" /></div>
       </div>
-      <Media id="hetzner-deploy" />
-      <ol class="steps">
-        <li>
-          <p>
-            <strong>Make a token.</strong> In the <a href="https://console.hetzner.com/projects">Hetzner Cloud console</a> create a project,
-            then Security, API tokens, Generate. Choose <em>Read &amp; Write</em> and copy it once.
-          </p>
-        </li>
-        <li>
-          <p>
-            <strong>Fill in the form.</strong> Open the <a href="https://deploy.agent-hq.online">deploy form</a>, paste the token, and
-            pick a name, a location, a size with at least 4 GB of memory, your SSH public key and your own IP address. Click Create server.
-          </p>
-        </li>
-        <li>
-          <p><strong>Wait 3 to 5 minutes</strong> after Hetzner shows the server as running. It installs HQ by itself.</p>
-        </li>
-        <li>
-          <p>
-            <strong>Join your tailnet.</strong> Run <code>ssh root@&lt;server-ip&gt; hq-join</code>, open the Tailscale login link it prints and
-            sign in. It then prints your HQ link.
-          </p>
-        </li>
-        <li>
-          <p>
-            <strong>Open HQ.</strong> Open that link on a device on your tailnet, paste your model key on the first screen
-            (<a href={links.firstRunDocs}>what it does</a>), and send a message. Treat the link like a password.
-          </p>
-        </li>
-        <li>
-          <p>
-            <strong>Close public SSH</strong> with the button on the form page once HQ opens. When you are done with the server,
-            the same page deletes it with its firewall and key.
-          </p>
-        </li>
+      <ol class="hz-grid list-plain">
+        <li class="gcard reveal"><span class="num num-blue">1</span><h3 class="h3-sm">Make a token</h3><p class="body">In the <a href="https://console.hetzner.com/projects">Hetzner Cloud console</a> create a project, then Security, API tokens, Generate. Choose <em>Read &amp; Write</em> and copy it once.</p></li>
+        <li class="gcard reveal reveal-2"><span class="num num-blue">2</span><h3 class="h3-sm">Fill in the form</h3><p class="body">Open the <a href="https://deploy.agent-hq.online">deploy form</a>, paste the token, and pick a name, a location, a size with at least 4 GB of memory, your SSH public key and your own IP address. Click Create server.</p></li>
+        <li class="gcard reveal reveal-3"><span class="num num-blue">3</span><h3 class="h3-sm">Wait 3 to 5 minutes</h3><p class="body">After Hetzner shows the server as running. It installs HQ by itself.</p></li>
+        <li class="gcard reveal"><span class="num num-green">4</span><h3 class="h3-sm">Join your tailnet</h3><p class="body">Run <code>ssh root@&lt;server-ip&gt; hq-join</code>, open the Tailscale login link it prints and sign in. It then prints your HQ link.</p></li>
+        <li class="gcard reveal reveal-2"><span class="num num-green">5</span><h3 class="h3-sm">Open HQ</h3><p class="body">Open that link on a device on your tailnet, paste your model key on the first screen (<a href={links.firstRunDocs}>what it does</a>), and send a message. Treat the link like a password.</p></li>
+        <li class="gcard gcard-indigo reveal reveal-3"><span class="num num-green">6</span><h3 class="h3-sm">Close public SSH</h3><p class="body">Use the button on the form page once HQ opens. When you are done with the server, the same page deletes it with its firewall and key.</p></li>
       </ol>
-      <div class="prose">
-        <p>
-          The server&apos;s setup data holds no secret and the admin token is generated on the server, so the form never sees it.
-          More detail, troubleshooting and the security model: <a href={links.hetznerDocs}>docs/HETZNER.md</a>.
-        </p>
-      </div>
-    </section>
+      <p class="body reveal note">
+        The server&apos;s setup data holds no secret and the admin token is generated on the server, so the form never sees
+        it. More detail, troubleshooting and the security model: <a href={links.hetznerDocs}>docs/HETZNER.md</a>.
+      </p>
+    </div>
+  </section>
 
-    <section class="doc-section" id="tailscale" aria-labelledby="ts-h">
-      <h2 id="ts-h">{installChannels.tailscale.title}</h2>
-      <div class="prose">
-        <p>
-          Optional. This puts the web UI on your tailnet over HTTPS, so your phone can reach it and the
-          public internet cannot. HQ stays on loopback, Caddy listens on <code>127.0.0.1:4749</code>,
-          and <a href={links.tailscaleServe}>tailscale serve</a> terminates TLS. HTTPS certificates
-          must be enabled for your tailnet. Run these on the server, from the repository checkout.
-          <code>hq.example.ts.net</code> stands for your server's own MagicDNS name.
+  <section class="sec sec-top0" id="tailscale" aria-labelledby="ts-h">
+    <span class="orb orb-i o-c" aria-hidden="true"></span>
+    <div class="container stack">
+      <div class="head">
+        <p class="eyebrow reveal">Optional</p>
+        <h2 id="ts-h" class="reveal">{installChannels.tailscale.title}</h2>
+        <p class="lede reveal">
+          This puts the web UI on your tailnet over HTTPS, so your phone can reach it and the public internet cannot. HQ
+          stays on loopback, Caddy listens on <code>127.0.0.1:4749</code>, and
+          <a href={links.tailscaleServe}>tailscale serve</a> terminates TLS. HTTPS certificates must be enabled for your
+          tailnet. Run these on the server, from the repository checkout. <code>hq.example.ts.net</code> stands for your
+          server's own MagicDNS name.
         </p>
       </div>
-      <ol class="steps">
-        <li>
-          <p>Join the tailnet.</p>
-          <CodeBlock id="ts-up" label="Tailscale up" code={tsUp} />
-        </li>
-        <li>
-          <p>Add the loopback Caddy bridge.</p>
-          <CodeBlock id="ts-caddy" label="Caddy" code={tsCaddy} />
-        </li>
-        <li>
-          <p>
-            Serve it on an alternate HTTPS port. Port 443 is usually taken by a public Caddyfile.
-          </p>
-          <CodeBlock id="ts-serve" label="Serve" code={tsServe} />
-        </li>
-        <li>
-          <p>
-            List every origin you open the UI from in <code>/opt/hq/config.yaml</code>, and set a web
-            token. Without the origin you get a 403 about an unrecognised Host header. Restart HQ
-            afterwards.
-          </p>
-          <CodeBlock id="ts-config" label="config.yaml" code={tsConfig} />
-        </li>
+      <div class="panel glass-heavy shine zoom-in">
+        <div class="ts" role="img" aria-label="A request goes from your phone to tailscale serve on port 8443, to Caddy on 127.0.0.1:4749, to HQ on loopback.">
+          <span class="tsline" aria-hidden="true"></span>
+          <span class="tspk" aria-hidden="true"></span>
+          <span class="pill glass-heavy">Phone</span>
+          <span class="pill glass-heavy">tailscale serve :8443</span>
+          <span class="pill glass-heavy">Caddy 127.0.0.1:4749</span>
+          <span class="pill pill-green">HQ on loopback</span>
+        </div>
+      </div>
+      <ol class="steps steps-grid">
+        <li class="gcard reveal"><p>Join the tailnet.</p><CodeBlock id="ts-up" label="Tailscale up" code={tsUp} /></li>
+        <li class="gcard reveal reveal-2"><p>Add the loopback Caddy bridge.</p><CodeBlock id="ts-caddy" label="Caddy" code={tsCaddy} /></li>
+        <li class="gcard reveal"><p>Serve it on an alternate HTTPS port. Port 443 is usually taken by a public Caddyfile.</p><CodeBlock id="ts-serve" label="Serve" code={tsServe} /></li>
+        <li class="gcard reveal reveal-2"><p>List every origin you open the UI from in <code>/opt/hq/config.yaml</code>, and set a web token. Without the origin you get a 403 about an unrecognised Host header. Restart HQ afterwards.</p><CodeBlock id="ts-config" label="config.yaml" code={tsConfig} /></li>
       </ol>
-      <div class="prose">
-        <p>To turn it off again, run this. Never publish <code>/ws</code> or <code>/api</code> on a public address.</p>
+      <div class="gcard reveal">
+        <p class="body">To turn it off again, run this. Never publish <code>/ws</code> or <code>/api</code> on a public address.</p>
         <CodeBlock id="ts-off" label="Tailscale serve off" code={tsOff} />
       </div>
-    </section>
+    </div>
+  </section>
 
-    <section class="doc-section" id="maintain" aria-labelledby="maintain-h">
-      <h2 id="maintain-h">Updating and uninstalling</h2>
-      <div class="prose">
-        <p>
+  <section class="sec sec-top0" id="maintain" aria-labelledby="maintain-h">
+    <span class="orb orb-g o-ml slow" aria-hidden="true"></span>
+    <span class="orb orb-b o-br" aria-hidden="true"></span>
+    <div class="container two-col">
+      <div class="stack">
+        <p class="eyebrow reveal">Keeping it current</p>
+        <h2 id="maintain-h" class="reveal">Updating and uninstalling</h2>
+        <p class="lede reveal">
           Each channel updates the way it installed. Your notes and config are never touched by an update.
-          <code>hq update</code> only manages servers set up with the server installer; on any other install it
-          tells you the right command.
+          <code>hq update</code> only manages servers set up with the server installer; on any other install it tells you
+          the right command.
         </p>
-        <ul class="facts">
-          <li><strong>Install script or npx.</strong> Update by running the script again. Uninstall:
-            <code>rm ~/.local/bin/hq</code> and <code>rm -rf ~/.local/share/agent-hq</code>.</li>
-          <li><strong>Homebrew.</strong> <code>brew upgrade agent-hq</code>. Uninstall: <code>brew uninstall agent-hq</code>.</li>
-          <li><strong>Docker.</strong> <code>docker pull ghcr.io/calvinmagezi/hq</code>, then recreate the container.
-            Uninstall: <code>docker rm -f hq</code>; <code>docker volume rm hq-data</code> also deletes your data.</li>
-          <li><strong>Server.</strong> It updates itself from signed releases every ten minutes. To remove it, back up
-            <code>/opt/hq/.vault</code> first, then <code>systemctl disable --now hq hq-update.timer</code> and delete
-            the unit files, <code>/usr/local/bin/hq</code>, <code>/etc/hq</code> and <code>/opt/hq</code>.</li>
-        </ul>
-        <p>
-          Your vault and config live in <code>~/.vault</code> and <code>~/.hq</code> on a personal install. Keep or delete them
-          as you like; nothing above removes them.
+        <p class="body reveal">
+          Your vault and config live in <code>~/.vault</code> and <code>~/.hq</code> on a personal install. Keep or delete
+          them as you like; nothing here removes them.
         </p>
+        <div id="soon" class="gcard gcard-indigo reveal soon">
+          <h3 class="h3-sm">Not available yet</h3>
+          <p>These do not exist today. We list them so you do not go looking, and so you know they are not promised for any date.</p>
+          <ul class="facts">
+            <li>Prebuilt binaries for Intel Macs, code-signed Windows builds, and coding agents on native Windows (they need WSL2 today).</li>
+          </ul>
+        </div>
       </div>
-    </section>
-    <section class="doc-section" id="soon" aria-labelledby="soon-h">
-      <h2 id="soon-h">Not available yet</h2>
-      <div class="callout prose">
-        <p>
-          These do not exist today. We list them so you do not go looking, and so you know they are not
-          promised for any date.
-        </p>
-        <ul class="facts">
-          <li>Prebuilt binaries for Intel Macs, code-signed Windows builds, and coding agents on native Windows (they need WSL2 today).</li>
-        </ul>
+      <div class="acc">
+        <details class="glass-heavy" open>
+          <summary>Install script or npx</summary>
+          <p class="body">Update by running the script again. Uninstall: <code>rm ~/.local/bin/hq</code> and <code>rm -rf ~/.local/share/agent-hq</code>.</p>
+        </details>
+        <details class="glass-heavy">
+          <summary>Homebrew</summary>
+          <p class="body"><code>brew upgrade agent-hq</code>. Uninstall: <code>brew uninstall agent-hq</code>.</p>
+        </details>
+        <details class="glass-heavy">
+          <summary>Docker</summary>
+          <p class="body"><code>docker pull ghcr.io/calvinmagezi/hq</code>, then recreate the container. Uninstall: <code>docker rm -f hq</code>; <code>docker volume rm hq-data</code> also deletes your data.</p>
+        </details>
+        <details class="glass-heavy">
+          <summary>Server</summary>
+          <p class="body">It updates itself from signed releases every ten minutes. To remove it, back up <code>/opt/hq/.vault</code> first, then <code>systemctl disable --now hq hq-update.timer</code> and delete the unit files, <code>/usr/local/bin/hq</code>, <code>/etc/hq</code> and <code>/opt/hq</code>.</p>
+        </details>
       </div>
-    </section>
-  </div>
+    </div>
+  </section>
 </Layout>
+
+<style>
+  .hero-art {
+    position: absolute;
+    right: -60px;
+    top: 60px;
+    width: 720px;
+    height: auto;
+    mix-blend-mode: lighten;
+    pointer-events: none;
+    z-index: 0;
+  }
+  .hero-copy {
+    max-width: 640px;
+  }
+  .picker {
+    display: grid;
+    grid-template-columns: minmax(0, 0.8fr) minmax(0, 1.2fr);
+    gap: 40px;
+    align-items: start;
+  }
+  .opts {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    position: sticky;
+    top: 120px;
+  }
+  .opts[hidden] {
+    display: none;
+  }
+  .opt {
+    display: flex;
+    align-items: center;
+    gap: 14px;
+    text-align: left;
+    width: 100%;
+    min-height: 56px;
+    padding: 12px 16px;
+    border-radius: 16px;
+    cursor: pointer;
+    font: inherit;
+    color: var(--ink);
+    border: 1px solid var(--glass-border);
+    background: rgba(8, 8, 8, 0.5);
+    backdrop-filter: blur(16px) saturate(170%);
+    -webkit-backdrop-filter: blur(16px) saturate(170%);
+    transition: border-color 0.25s ease, background 0.25s ease, transform 0.25s ease;
+  }
+  .opt:hover {
+    border-color: rgba(0, 173, 238, 0.35);
+  }
+  .opt[aria-pressed='true'] {
+    border-color: var(--brand-blue);
+    background: rgba(0, 173, 238, 0.12);
+    transform: translateX(6px);
+  }
+  .opt-text b {
+    display: block;
+    font-size: 16px;
+  }
+  .opt-text small {
+    display: block;
+    font-size: 13px;
+    color: var(--ink-muted);
+  }
+  .odot {
+    flex: none;
+    width: 12px;
+    height: 12px;
+    border-radius: 50%;
+    border: 2px solid var(--line);
+  }
+  .opt[aria-pressed='true'] .odot {
+    background: var(--brand-blue);
+    border-color: var(--brand-blue);
+    box-shadow: 0 0 12px var(--brand-blue);
+  }
+  .panels {
+    display: flex;
+    flex-direction: column;
+    gap: 48px;
+  }
+  .pane {
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+    align-items: flex-start;
+  }
+  .pane[hidden] {
+    display: none;
+  }
+  .pane .prose {
+    max-width: none;
+  }
+  .term {
+    width: 100%;
+    border-radius: var(--radius-lg);
+    overflow: hidden;
+  }
+  .term-bar {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 12px 16px;
+    border-bottom: 1px solid var(--glass-border);
+  }
+  .term-bar i {
+    width: 10px;
+    height: 10px;
+    border-radius: 50%;
+    background: rgba(255, 255, 255, 0.18);
+    display: block;
+  }
+  .term-bar span {
+    margin-left: 10px;
+    font-size: 12px;
+    color: var(--ink-muted);
+    font-family: var(--font-mono);
+  }
+  .term-body {
+    display: flex;
+    gap: 10px;
+    padding: 18px 20px;
+    font-family: var(--font-mono);
+    font-size: 15px;
+    line-height: 26px;
+    min-height: 72px;
+  }
+  .term-body .p {
+    color: var(--text-green);
+    flex: none;
+  }
+  .term-body pre {
+    margin: 0;
+    padding: 0;
+    background: none;
+    border: 0;
+    font-size: 15px;
+    line-height: 26px;
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+  }
+  .see-run {
+    margin-top: 8px;
+  }
+
+  .two-col {
+    display: grid;
+    grid-template-columns: minmax(0, 0.9fr) minmax(0, 1.1fr);
+    gap: 48px;
+    align-items: start;
+  }
+  .two-col-center {
+    align-items: center;
+  }
+  .sticky-col {
+    position: sticky;
+    top: 120px;
+  }
+  .timeline {
+    position: relative;
+    padding-left: 56px;
+  }
+  .trail {
+    position: absolute;
+    left: 15px;
+    top: 24px;
+    bottom: 24px;
+    width: 2px;
+    border-radius: var(--radius-pill);
+    background: var(--hairline);
+    overflow: hidden;
+  }
+  .trail span {
+    display: block;
+    width: 100%;
+    height: 100%;
+    background: linear-gradient(180deg, var(--brand-blue), var(--brand-green));
+    transform-origin: top center;
+  }
+  .timeline .steps > li {
+    padding-left: var(--space-5);
+    overflow: visible;
+  }
+  .timeline .steps > li::before {
+    left: -56px;
+    top: 20px;
+  }
+  .steps-grid {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: var(--space-4);
+  }
+  .steps-grid > li {
+    padding-left: var(--space-5);
+    padding-top: 64px;
+  }
+  .steps-grid > li::before {
+    left: var(--space-5);
+    top: var(--space-5);
+  }
+  .span-all {
+    grid-column: 1 / -1;
+  }
+  .note {
+    max-width: 860px;
+  }
+
+  .pipe {
+    display: grid;
+    grid-template-columns: repeat(5, minmax(0, 1fr));
+    gap: 10px;
+  }
+  .pnode {
+    border-radius: 16px;
+    padding: 16px 12px;
+    text-align: center;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    align-items: center;
+    font-size: 14px;
+    font-weight: 700;
+  }
+  .pnode:nth-child(2) {
+    animation-delay: 1.5s;
+  }
+  .pnode:nth-child(3) {
+    animation-delay: 3s;
+  }
+  .pnode:nth-child(4) {
+    animation-delay: 4.5s;
+  }
+  .pnode:nth-child(5) {
+    animation-delay: 6s;
+  }
+  .timer {
+    width: 44px;
+    height: 44px;
+    border-radius: 50%;
+    border: 2px dashed var(--hairline);
+    position: relative;
+  }
+  .timer i {
+    position: absolute;
+    left: 50%;
+    top: 50%;
+    width: 2px;
+    height: 16px;
+    margin-left: -1px;
+    background: var(--brand-green);
+    transform-origin: top center;
+    border-radius: 2px;
+  }
+  .picon {
+    width: 32px;
+    height: 32px;
+    fill: none;
+    stroke: var(--brand-blue);
+    stroke-width: 1.8;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+  }
+  .picon-sky {
+    stroke: var(--brand-sky);
+  }
+  .picon-green {
+    stroke: var(--brand-green);
+  }
+  .ok {
+    width: 44px;
+    height: 44px;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: var(--brand-green);
+    color: #000000;
+  }
+
+  .hz {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+  }
+  .hzbar {
+    display: block;
+    height: 10px;
+    border-radius: var(--radius-pill);
+    background: rgba(255, 255, 255, 0.06);
+    overflow: hidden;
+    border: 1px solid var(--glass-border);
+  }
+  .hzbar span {
+    display: block;
+    height: 100%;
+    background: linear-gradient(90deg, var(--brand-blue), var(--brand-green));
+    transform-origin: left center;
+  }
+  .hzlabels {
+    display: flex;
+    justify-content: space-between;
+  }
+  .hz-grid {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 14px;
+  }
+  .h3-sm {
+    font-size: 18px;
+    line-height: 24px;
+  }
+
+  .ts {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    flex-wrap: wrap;
+    position: relative;
+    padding: 20px 0;
+  }
+  .tsline {
+    position: absolute;
+    left: 0;
+    right: 0;
+    top: 50%;
+    height: 2px;
+    background: repeating-linear-gradient(90deg, var(--hairline) 0 6px, transparent 6px 12px);
+  }
+  .tspk {
+    position: absolute;
+    top: 50%;
+    left: 0;
+    width: 12px;
+    height: 12px;
+    margin-top: -6px;
+    border-radius: 50%;
+    background: var(--brand-green);
+    box-shadow: 0 0 12px var(--brand-green);
+  }
+  .ts .pill {
+    position: relative;
+    z-index: 1;
+  }
+
+  .acc {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+  }
+  .acc details {
+    border-radius: 16px;
+    padding: 0 20px;
+  }
+  .acc summary {
+    min-height: 56px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    cursor: pointer;
+    font-weight: 700;
+    font-size: 16px;
+    list-style: none;
+  }
+  .acc summary::-webkit-details-marker {
+    display: none;
+  }
+  .acc summary::after {
+    content: '+';
+    font-size: 22px;
+    color: var(--text-blue);
+    transition: transform 0.3s ease;
+  }
+  .acc details[open] summary::after {
+    transform: rotate(45deg);
+  }
+  .acc details > p {
+    padding-bottom: 18px;
+  }
+  .soon {
+    margin-top: 8px;
+  }
+
+  @media (max-width: 960px) {
+    .hero-art {
+      opacity: 0.4;
+      width: 640px;
+    }
+    .picker,
+    .two-col {
+      grid-template-columns: minmax(0, 1fr);
+    }
+    .opts,
+    .sticky-col {
+      position: static;
+    }
+    .pipe {
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+    .hz-grid {
+      grid-template-columns: minmax(0, 1fr);
+    }
+  }
+  @media (max-width: 640px) {
+    .hero-art {
+      display: none;
+    }
+    .timeline {
+      padding-left: 0;
+    }
+    .trail {
+      display: none;
+    }
+    .timeline .steps > li {
+      padding-top: 64px;
+    }
+    .timeline .steps > li::before {
+      left: var(--space-5);
+      top: var(--space-5);
+    }
+    .steps-grid {
+      grid-template-columns: minmax(0, 1fr);
+    }
+    .ts {
+      flex-direction: column;
+      align-items: flex-start;
+    }
+    .tsline,
+    .tspk {
+      display: none;
+    }
+  }
+
+  @keyframes reveal {
+    from {
+      clip-path: inset(0 100% 0 0);
+    }
+    to {
+      clip-path: inset(0 0 0 0);
+    }
+  }
+  @keyframes climb {
+    from {
+      transform: translate(0, 10px);
+    }
+    to {
+      transform: translate(-16px, -14px);
+    }
+  }
+  @keyframes pnode {
+    0%,
+    22%,
+    100% {
+      border-color: var(--glass-border);
+      box-shadow: none;
+    }
+    6%,
+    16% {
+      border-color: var(--brand-blue);
+      box-shadow: 0 0 0 1px rgba(0, 173, 238, 0.3), 0 0 24px rgba(0, 173, 238, 0.18);
+    }
+  }
+  @keyframes hz {
+    0% {
+      transform: scaleX(0);
+    }
+    80%,
+    95% {
+      transform: scaleX(1);
+    }
+    100% {
+      transform: scaleX(1);
+      opacity: 0.4;
+    }
+  }
+  @keyframes tsflow {
+    0% {
+      left: 0;
+      opacity: 0;
+    }
+    8%,
+    92% {
+      opacity: 1;
+    }
+    100% {
+      left: calc(100% - 12px);
+      opacity: 0;
+    }
+  }
+  @keyframes trailGrow {
+    from {
+      transform: scaleY(0);
+    }
+    to {
+      transform: scaleY(1);
+    }
+  }
+
+  @media (prefers-reduced-motion: no-preference) {
+    .typing {
+      animation: reveal 1.6s steps(40) 0.2s both;
+    }
+    .hero-art {
+      animation: climb 10s ease-in-out infinite alternate;
+    }
+    .opt[aria-pressed='true'] .odot {
+      animation: pulse 1.6s ease-in-out infinite;
+    }
+    .timer i {
+      animation: spin 3s linear infinite;
+    }
+    .pnode {
+      animation: pnode 7.5s ease-in-out infinite;
+    }
+    .hzbar span {
+      animation: hz 9s cubic-bezier(0.4, 0, 0.2, 1) infinite;
+    }
+    .tspk {
+      animation: tsflow 3.6s cubic-bezier(0.6, 0, 0.4, 1) infinite;
+    }
+  }
+  @supports (animation-timeline: view()) {
+    @media (prefers-reduced-motion: no-preference) {
+      .trail span {
+        animation: trailGrow linear both;
+        animation-timeline: view();
+        animation-range: entry 20% exit 30%;
+      }
+    }
+  }
+</style>

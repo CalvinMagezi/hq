@@ -9,12 +9,22 @@ const sizes = [{ name: 'desktop', width: 1280, height: 900 }, { name: 'phone', w
 
 const { server, base } = await serve();
 const browser = await chromium.launch({ channel: 'chrome' });
+// The site is dark only; the light run shows what a visitor who prefers light sees.
 for (const theme of ['dark', 'light']) {
   for (const s of sizes) {
     const ctx = await browser.newContext({ viewport: { width: s.width, height: s.height }, colorScheme: theme });
     for (const path of PAGES.filter((p) => p !== '/404/')) {
       const page = await ctx.newPage();
       await page.goto(base + path, { waitUntil: 'networkidle' });
+      // Scroll through once so lazy images load before the full-page capture.
+      await page.evaluate(async () => {
+        for (let y = 0; y < document.body.scrollHeight; y += 600) {
+          window.scrollTo({ top: y, behavior: 'instant' });
+          await new Promise((r) => setTimeout(r, 120));
+        }
+        window.scrollTo({ top: 0, behavior: 'instant' });
+      });
+      await page.waitForLoadState('networkidle');
       const slug = path === '/' ? 'home' : path.replaceAll('/', '');
       await page.screenshot({ path: `${out}/${slug}-${s.name}-${theme}.png`, fullPage: true });
       await page.close();

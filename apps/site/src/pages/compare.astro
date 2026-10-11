@@ -125,48 +125,70 @@ const picks = [
   description={`Agent HQ next to OpenClaw and Hermes Agent: what each is best at, sourced and dated ${AS_OF}. Written by the HQ maintainers, so read it with that in mind.`}
   path="/compare/"
 >
-  <section class="band">
-    <div class="container section">
-      <span class="eyebrow">As of {AS_OF}</span>
-      <h1>HQ, OpenClaw and Hermes Agent</h1>
-      <p class="lede prose">
-        All three are open-source agents you run yourself. They overlap, and they are good at
-        different things. This page is written by the HQ maintainers, so weigh it accordingly.
-      </p>
+  <section class="sec sec-hero" aria-labelledby="cmp-h">
+    <span class="orb orb-b o-tl" aria-hidden="true"></span>
+    <span class="orb orb-i o-c" aria-hidden="true"></span>
+    <span class="orb orb-g o-br slow" aria-hidden="true"></span>
+    <div class="container hero-grid">
+      <div class="stack">
+        <div class="tags">
+          <span class="tag tag-blue">As of {AS_OF}</span>
+          <span class="tag glass-light">Written by the HQ maintainers</span>
+        </div>
+        <h1 id="cmp-h" class="display">
+          <span class="hl"><span>HQ, OpenClaw</span></span>
+          <span class="hl"><span>and</span></span>
+          <span class="hl"><span class="accent">Hermes Agent.</span></span>
+        </h1>
+        <div class="rule rule-in" aria-hidden="true"></div>
+        <p class="lede fade-in hero-lede">
+          All three are open-source agents you run yourself. They overlap, and they are good at different
+          things. This page is written by the HQ maintainers, so weigh it accordingly.
+        </p>
+      </div>
+      <div class="venn" role="img" aria-label="Three overlapping circles, Agent HQ, OpenClaw and Hermes Agent, sharing the middle: open source and run by you.">
+        <span class="ring glass r-hq"><span>Agent HQ</span></span>
+        <span class="ring glass r-oc"><span>OpenClaw</span></span>
+        <span class="ring glass r-ha"><span>Hermes Agent</span></span>
+        <span class="overlap">Open source, run it yourself</span>
+      </div>
     </div>
   </section>
 
-  <div class="container">
-    <section class="doc-section" aria-labelledby="how-h">
-      <h2 id="how-h">How this page was made</h2>
-      <div class="prose">
-        <ul class="facts">
-          <li>HQ facts come from HQ's own repository and docs. That is not an outside audit.</li>
-          <li>
-            Facts about OpenClaw and Hermes Agent come from their official repositories and docs,
-            checked on {AS_OF}, and each cell links its source. Both projects ship often, so details
-            will age.
-          </li>
-          <li>
-            "Reported" means we saw it from third parties and did not verify it. "Not reviewed" means
-            we did not look.
-          </li>
-          <li>
-            Found a mistake? <a href={links.issues}>Open an issue</a> and we will fix it.
-          </li>
-        </ul>
-      </div>
-    </section>
+  <section class="sec sec-tight" aria-labelledby="how-h">
+    <span class="orb orb-i o-c slow" aria-hidden="true"></span>
+    <div class="container stack">
+      <h2 id="how-h" class="h2-sm reveal">How this page was made</h2>
+      <ul class="method list-plain">
+        <li class="gcard reveal"><span class="num num-green">HQ</span><p class="body">HQ facts come from HQ's own repository and docs. That is not an outside audit.</p></li>
+        <li class="gcard reveal reveal-2"><span class="num num-blue">Docs</span><p class="body">Facts about OpenClaw and Hermes Agent come from their official repositories and docs, checked on {AS_OF}, and each cell links its source. Both projects ship often, so details will age.</p></li>
+        <li class="gcard reveal reveal-3"><span class="num glass-light">Terms</span><p class="body">"Reported" means we saw it from third parties and did not verify it. "Not reviewed" means we did not look.</p></li>
+        <li class="gcard gcard-indigo reveal"><span class="num num-green">Fix</span><p class="body">Found a mistake? <a href={links.issues}>Open an issue</a> and we will fix it.</p></li>
+      </ul>
+    </div>
+  </section>
 
-    <section class="doc-section" aria-labelledby="table-h">
-      <h2 id="table-h">Side by side</h2>
-      <div class="table-scroll" tabindex="0" role="region" aria-label="Comparison table, scrollable">
-        <table>
+  <section class="sec sec-tight" aria-labelledby="table-h">
+    <span class="orb orb-b o-tr slow" aria-hidden="true"></span>
+    <span class="orb orb-g o-ml" aria-hidden="true"></span>
+    <div class="container stack">
+      <div class="table-head">
+        <h2 id="table-h" class="reveal">Side by side</h2>
+        <div class="seg glass-heavy" role="group" aria-label="Highlight one column" data-focus-switch="cmp-table" hidden>
+          <span class="seg-ind" aria-hidden="true"></span>
+          <button type="button" data-focus="all" aria-pressed="true">All</button>
+          <button type="button" data-focus="hq" aria-pressed="false">Agent HQ</button>
+          <button type="button" data-focus="oc" aria-pressed="false">OpenClaw</button>
+          <button type="button" data-focus="ha" aria-pressed="false">Hermes</button>
+        </div>
+      </div>
+      <div class="table-box glass-heavy shine" tabindex="0" role="region" aria-label="Comparison table, scrollable">
+        <table id="cmp-table" data-focus="all">
           <caption>Comparison as of {AS_OF}. Sources are linked in each cell.</caption>
           <thead>
             <tr>
               <th scope="col">Topic</th>
-              <th scope="col">Agent HQ</th>
+              <th scope="col" class="col-hq">Agent HQ</th>
               <th scope="col">OpenClaw</th>
               <th scope="col">Hermes Agent</th>
             </tr>
@@ -192,30 +214,427 @@ const picks = [
           </tbody>
         </table>
       </div>
-    </section>
+    </div>
+  </section>
 
-    <section class="doc-section" aria-labelledby="pick-h">
-      <h2 id="pick-h">When to pick which</h2>
-      <div class="grid">
+  <section class="sec" aria-labelledby="pick-h">
+    <span class="orb orb-i o-c" aria-hidden="true"></span>
+    <span class="orb orb-g o-br slow" aria-hidden="true"></span>
+    <div class="container stack">
+      <div class="head">
+        <p class="eyebrow reveal">Choosing</p>
+        <h2 id="pick-h" class="reveal">When to pick which</h2>
+        <div class="rule rule-sm sweep" aria-hidden="true"></div>
+      </div>
+      <div class="picks">
         {
-          picks.map((p) => (
-            <article class="card">
+          picks.map((p, i) => (
+            <article class={i === 2 ? 'gcard gcard-indigo pick reveal reveal-3' : `gcard pick reveal${i === 1 ? ' reveal-2' : ''}`}>
+              <div class={`icon-stage icon-${i}`} aria-hidden="true">
+                {i === 0 && (
+                  <span class="fan">
+                    {[0, 1, 2, 3, 4, 5, 6, 7].map((n) => <i class={`f${n}`}></i>)}
+                  </span>
+                )}
+                {i === 1 && (
+                  <>
+                    <span class="loop"></span>
+                    <span class="loop-arm"><i></i></span>
+                  </>
+                )}
+                {i === 2 && (
+                  <>
+                    <svg class="pick-pair" viewBox="0 0 56 36" aria-hidden="true" focusable="false"><circle class="c-blue" cx="18" cy="18" r="18" /><circle class="c-green" cx="38" cy="18" r="18" /></svg>
+                    <span class="pick-cmd"><span class="p">$</span> hq sessions</span>
+                    <span class="blink"></span>
+                  </>
+                )}
+              </div>
               <h3>{p.title}</h3>
-              <ul class="facts">
+              <ul class="pick-list">
                 {p.points.map((pt) => <li>{pt}</li>)}
               </ul>
             </article>
           ))
         }
       </div>
-      <div class="prose">
-        <p>
-          These are not exclusive. Hermes Agent can import from OpenClaw
-          (<a href={HA}>its repository</a> documents <code>hermes claw migrate</code>), and nothing stops you from
-          running one agent for chat and HQ to keep an eye on your coding sessions. If you are unsure,
-          start with the one whose channels you already use.
-        </p>
-      </div>
-    </section>
-  </div>
+      <p class="body closing reveal">
+        These are not exclusive. Hermes Agent can import from OpenClaw (<a href={HA}>its repository</a> documents
+        <code>hermes claw migrate</code>), and nothing stops you from running one agent for chat and HQ to keep an
+        eye on your coding sessions. If you are unsure, start with the one whose channels you already use.
+      </p>
+    </div>
+  </section>
 </Layout>
+
+<style>
+  .hero-grid {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    gap: 48px;
+    align-items: center;
+  }
+  .hero-lede {
+    max-width: 560px;
+  }
+  .venn {
+    position: relative;
+    width: 440px;
+    height: 400px;
+  }
+  .ring {
+    position: absolute;
+    width: 240px;
+    height: 240px;
+    border-radius: 50%;
+    display: flex;
+    padding: 28px;
+    font-size: 14px;
+    font-weight: 700;
+  }
+  .r-hq {
+    left: 100px;
+    top: 0;
+    border-color: rgba(34, 255, 55, 0.45);
+    align-items: flex-start;
+    justify-content: center;
+    color: var(--text-green);
+  }
+  .r-oc {
+    left: 0;
+    top: 150px;
+    border-color: rgba(0, 173, 238, 0.45);
+    align-items: flex-end;
+    justify-content: flex-start;
+    color: var(--text-blue);
+    animation-delay: -2.6s;
+  }
+  .r-ha {
+    left: 200px;
+    top: 150px;
+    border-color: rgba(0, 198, 250, 0.35);
+    align-items: flex-end;
+    justify-content: flex-end;
+    color: var(--brand-sky);
+    animation-delay: -5.2s;
+  }
+  .overlap {
+    position: absolute;
+    left: 50%;
+    top: 52%;
+    width: 110px;
+    margin-left: -55px;
+    text-align: center;
+    font-size: 12px;
+    line-height: 16px;
+    font-weight: 700;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+  }
+
+  .method {
+    display: grid;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    gap: var(--space-4);
+  }
+
+  .table-head {
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: space-between;
+    align-items: flex-end;
+    gap: 20px;
+  }
+  .seg {
+    position: relative;
+    display: grid;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    border-radius: var(--radius-pill);
+    padding: 4px;
+    min-width: 460px;
+    --i: 0;
+  }
+  .seg[hidden] {
+    display: none;
+  }
+  .seg-ind {
+    position: absolute;
+    top: 4px;
+    bottom: 4px;
+    left: 4px;
+    width: calc((100% - 8px) / 4);
+    border-radius: var(--radius-pill);
+    background: var(--brand-blue);
+    transform: translateX(calc(var(--i) * 100%));
+    transition: transform 0.45s cubic-bezier(0.3, 0.7, 0.2, 1);
+  }
+  .seg button {
+    position: relative;
+    z-index: 1;
+    font: inherit;
+    font-size: 14px;
+    font-weight: 700;
+    min-height: 44px;
+    border: 0;
+    background: transparent;
+    color: var(--ink);
+    cursor: pointer;
+    border-radius: var(--radius-pill);
+    padding: 0 12px;
+    transition: color 0.3s ease;
+  }
+  .seg button[aria-pressed='true'] {
+    color: var(--on-blue);
+  }
+  td,
+  thead th {
+    min-width: 220px;
+    transition: opacity 0.35s ease, background 0.35s ease;
+  }
+  .col-hq {
+    color: var(--text-green);
+  }
+  tbody tr {
+    transition: background 0.2s ease;
+  }
+  tbody tr:hover {
+    background: rgba(255, 255, 255, 0.03);
+  }
+  table[data-focus='hq'] td:not(:nth-of-type(1)),
+  table[data-focus='hq'] thead th:nth-child(n + 3),
+  table[data-focus='oc'] td:not(:nth-of-type(2)),
+  table[data-focus='oc'] thead th:not(:nth-child(1)):not(:nth-child(3)),
+  table[data-focus='ha'] td:not(:nth-of-type(3)),
+  table[data-focus='ha'] thead th:not(:nth-child(1)):not(:nth-child(4)) {
+    opacity: 0.32;
+  }
+  table[data-focus='hq'] td:nth-of-type(1),
+  table[data-focus='oc'] td:nth-of-type(2),
+  table[data-focus='ha'] td:nth-of-type(3) {
+    background: rgba(0, 173, 238, 0.07);
+    color: var(--ink);
+  }
+
+  .picks {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: var(--space-4);
+  }
+  .pick-list {
+    margin: 0;
+    padding: 0;
+    list-style: none;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+  }
+  .pick-list li {
+    display: flex;
+    gap: 10px;
+    font-size: 15px;
+    line-height: 22px;
+    color: var(--ink-muted);
+  }
+  .pick-list li::before {
+    content: '';
+    flex: none;
+    width: 8px;
+    height: 8px;
+    margin-top: 7px;
+    border-radius: 50%;
+    background: var(--brand-blue);
+  }
+  .gcard-indigo .pick-list li {
+    color: var(--on-indigo);
+  }
+  .gcard-indigo .pick-list li::before {
+    background: var(--brand-green);
+  }
+  .icon-stage {
+    position: relative;
+    height: 96px;
+    border-radius: 14px;
+    background: rgba(255, 255, 255, 0.03);
+    border: 1px solid rgba(255, 255, 255, 0.06);
+    overflow: hidden;
+  }
+  .icon-2 {
+    background: rgba(0, 0, 0, 0.18);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 12px;
+  }
+  .fan {
+    position: absolute;
+    left: 50%;
+    top: 78px;
+    width: 0;
+    height: 0;
+  }
+  .fan i {
+    position: absolute;
+    left: -5px;
+    top: -5px;
+    width: 10px;
+    height: 10px;
+    border-radius: 50%;
+    background: var(--brand-blue);
+    opacity: 0.6;
+    transform: var(--t);
+  }
+  .f0 {
+    --t: rotate(-20deg) translateX(56px);
+  }
+  .f1 {
+    --t: rotate(-40deg) translateX(56px);
+    animation-delay: 0.2s;
+  }
+  .f2 {
+    --t: rotate(-60deg) translateX(56px);
+    animation-delay: 0.4s;
+  }
+  .f3 {
+    --t: rotate(-80deg) translateX(56px);
+    animation-delay: 0.6s;
+  }
+  .f4 {
+    --t: rotate(-100deg) translateX(56px);
+    animation-delay: 0.8s;
+  }
+  .f5 {
+    --t: rotate(-120deg) translateX(56px);
+    animation-delay: 1s;
+  }
+  .f6 {
+    --t: rotate(-140deg) translateX(56px);
+    animation-delay: 1.2s;
+  }
+  .f7 {
+    --t: rotate(-160deg) translateX(56px);
+    animation-delay: 1.4s;
+  }
+  .loop {
+    position: absolute;
+    left: 50%;
+    top: 50%;
+    width: 64px;
+    height: 64px;
+    margin: -32px 0 0 -32px;
+    border-radius: 50%;
+    border: 2px dashed var(--hairline);
+  }
+  .loop-arm {
+    position: absolute;
+    left: 50%;
+    top: 50%;
+    width: 0;
+    height: 0;
+  }
+  .loop-arm i {
+    position: absolute;
+    left: -6px;
+    top: -38px;
+    width: 12px;
+    height: 12px;
+    border-radius: 50%;
+    background: var(--brand-green);
+    box-shadow: 0 0 12px var(--brand-green);
+  }
+  .pick-pair {
+    width: 56px;
+    height: 36px;
+  }
+  .pick-cmd {
+    font-family: var(--font-mono);
+    font-size: 14px;
+  }
+  .pick-cmd .p {
+    color: var(--brand-green);
+  }
+  .closing {
+    max-width: 820px;
+  }
+
+  @media (max-width: 960px) {
+    .hero-grid {
+      grid-template-columns: minmax(0, 1fr);
+    }
+    .venn {
+      margin: 0 auto;
+    }
+    .method {
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+    .picks {
+      grid-template-columns: minmax(0, 1fr);
+    }
+  }
+  @media (max-width: 640px) {
+    .venn {
+      zoom: 0.7;
+    }
+    .method {
+      grid-template-columns: minmax(0, 1fr);
+    }
+    .seg {
+      min-width: 0;
+      width: 100%;
+    }
+  }
+
+  @keyframes ringFloat {
+    from {
+      transform: translate(0, 0);
+    }
+    to {
+      transform: translate(10px, -12px);
+    }
+  }
+  @keyframes fanlit {
+    0%,
+    40%,
+    100% {
+      opacity: 0.35;
+      transform: var(--t) scale(1);
+    }
+    20% {
+      opacity: 1;
+      transform: var(--t) scale(1.4);
+    }
+  }
+  @keyframes rowIn {
+    from {
+      opacity: 0;
+      transform: translateX(-16px);
+    }
+    to {
+      opacity: 1;
+      transform: none;
+    }
+  }
+
+  @media (prefers-reduced-motion: no-preference) {
+    .ring {
+      animation: ringFloat 8s ease-in-out infinite alternate;
+    }
+    .overlap {
+      animation: pulse 4s ease-in-out infinite;
+    }
+    .fan i {
+      animation: fanlit 3.2s ease-in-out infinite;
+    }
+    .loop-arm {
+      animation: spin 4s linear infinite;
+    }
+  }
+  @supports (animation-timeline: view()) {
+    @media (prefers-reduced-motion: no-preference) {
+      tbody tr {
+        animation: rowIn linear both;
+        animation-timeline: view();
+        animation-range: entry 0% cover 20%;
+      }
+    }
+  }
+</style>

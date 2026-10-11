@@ -7,4 +7,7 @@ export default defineConfig({
   trailingSlash: 'always',
   build: { format: 'directory', inlineStylesheets: 'never' },
   devToolbar: { enabled: false },
+  // Compression drops the space between a line-wrapped word and the inline element after it
+  // ("needs<a>bun</a>"), so prose would glue words together.
+  compressHTML: false,
 });

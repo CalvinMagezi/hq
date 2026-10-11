@@ -61,6 +61,109 @@
     });
   }
 
+  // Without this script every panel shows in sequence. With it, a row of
+  // toggle buttons shows one panel at a time.
+  function setupTabs() {
+    document.querySelectorAll('[data-tabs]').forEach(function (root) {
+      var list = root.querySelector('[data-tablist]');
+      var buttons = Array.prototype.slice.call(root.querySelectorAll('[data-tab]'));
+      var panels = Array.prototype.slice.call(root.querySelectorAll('[data-panel]'));
+      if (!list || !buttons.length) return;
+      list.hidden = false;
+      function show(id) {
+        buttons.forEach(function (b, i) {
+          var on = b.getAttribute('data-tab') === id;
+          b.setAttribute('aria-pressed', on ? 'true' : 'false');
+          if (on) list.style.setProperty('--i', String(i));
+        });
+        panels.forEach(function (p) {
+          p.hidden = p.getAttribute('data-panel') !== id;
+        });
+        root.setAttribute('data-active', id);
+      }
+      function panelById(id) {
+        return panels.filter(function (p) { return p.getAttribute('data-panel') === id; })[0];
+      }
+      buttons.forEach(function (b) {
+        b.addEventListener('click', function () {
+          var id = b.getAttribute('data-tab');
+          show(id);
+          // Keep the address in step so a table-of-contents link to this panel fires again later.
+          var panel = panelById(id);
+          if (panel && panel.id) history.replaceState(null, '', '#' + panel.id);
+        });
+      });
+      // A link such as /install/#windows must land on its panel even though panels start hidden.
+      function hashTarget() {
+        var raw = location.hash.slice(1);
+        try {
+          raw = decodeURIComponent(raw);
+        } catch (e) {
+          /* a malformed hash matches no panel */
+        }
+        return panels.filter(function (p) { return p.id && p.id === raw; })[0] || null;
+      }
+      function openFromHash() {
+        var target = hashTarget();
+        if (!target) return false;
+        show(target.getAttribute('data-panel'));
+        target.scrollIntoView();
+        return true;
+      }
+      var first = buttons.filter(function (b) { return b.getAttribute('aria-pressed') === 'true'; })[0] || buttons[0];
+      if (!openFromHash()) show(first.getAttribute('data-tab'));
+      window.addEventListener('hashchange', openFromHash);
+    });
+  }
+
+  // A row of buttons that sets one attribute on a target, used to focus a table column.
+  function setupFocusSwitch() {
+    document.querySelectorAll('[data-focus-switch]').forEach(function (list) {
+      var target = document.getElementById(list.getAttribute('data-focus-switch'));
+      var buttons = Array.prototype.slice.call(list.querySelectorAll('[data-focus]'));
+      if (!target || !buttons.length) return;
+      list.hidden = false;
+      buttons.forEach(function (b, i) {
+        b.addEventListener('click', function () {
+          buttons.forEach(function (o) { o.setAttribute('aria-pressed', o === b ? 'true' : 'false'); });
+          list.style.setProperty('--i', String(i));
+          target.setAttribute('data-focus', b.getAttribute('data-focus'));
+        });
+      });
+    });
+  }
+
+  // A soft light follows the pointer inside the hero.
+  function setupSpotlight() {
+    if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) return;
+    document.querySelectorAll('[data-spotlight]').forEach(function (el) {
+      el.addEventListener('pointermove', function (e) {
+        var r = el.getBoundingClientRect();
+        el.style.setProperty('--mx', (e.clientX - r.left) + 'px');
+        el.style.setProperty('--my', (e.clientY - r.top) + 'px');
+      });
+    });
+  }
+
+  // The scrolling list of agents carries information, so it needs a way to stop (WCAG 2.2.2).
+  function setupMarqueePause() {
+    if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) return;
+    document.querySelectorAll('[data-marquee-pause]').forEach(function (btn) {
+      var band = btn.closest('.band');
+      if (!band) return;
+      btn.hidden = false;
+      btn.addEventListener('click', function () {
+        var paused = band.classList.toggle('is-paused');
+        btn.setAttribute('aria-pressed', paused ? 'true' : 'false');
+        btn.textContent = paused ? 'Play' : 'Pause';
+      });
+    });
+  }
+
   setupCopy();
   setupAnimations();
+  setupMarqueePause();
+  setupTabs();
+  setupFocusSwitch();
+  setupSpotlight();
 })();

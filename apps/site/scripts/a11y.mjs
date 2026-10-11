@@ -1,6 +1,7 @@
-// Browser checks: axe-core in both themes at desktop and phone width, CSP
-// violations, horizontal overflow, keyboard focus visibility, theme toggle
-// persistence. Needs Google Chrome (playwright-core drives it, no download).
+// Browser checks: axe-core at desktop and phone width with both colour-scheme
+// preferences (the site is dark only, so a visitor who prefers light must still
+// get a readable page), CSP violations, horizontal overflow, keyboard focus
+// visibility and copy buttons. Needs Google Chrome (playwright-core drives it, no download).
 // Run after `bun run build`: `bun run check:a11y`.
 import { readFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
@@ -82,19 +83,6 @@ for (const theme of THEMES) {
   await ctx.close();
 }
 
-// Theme toggle persists across reloads and wins over the system preference.
-{
-  const ctx = await browser.newContext({ colorScheme: 'dark' });
-  const page = await ctx.newPage();
-  await page.goto(base + '/');
-  await page.click('[data-theme-toggle]');
-  await page.reload();
-  const t = await page.evaluate(() => document.documentElement.getAttribute('data-theme'));
-  const bg = await page.evaluate(() => getComputedStyle(document.body).backgroundColor);
-  if (t !== 'light' || bg !== 'rgb(255, 255, 255)') note('theme toggle', `expected persisted light theme, got ${t} / ${bg}`);
-  await ctx.close();
-}
-
 // Copy buttons exist and say so when used.
 {
   const ctx = await browser.newContext({ permissions: ['clipboard-read', 'clipboard-write'] });
@@ -115,4 +103,4 @@ if (problems.length) {
   console.error(`a11y check failed with ${problems.length} problem(s):\n` + problems.map((p) => `  - ${p}`).join('\n'));
   process.exit(1);
 }
-console.log(`a11y check passed: ${PAGES.length} pages x ${THEMES.length} themes x ${VIEWPORTS.length} viewports, keyboard, theme, copy.`);
+console.log(`a11y check passed: ${PAGES.length} pages x ${THEMES.length} themes x ${VIEWPORTS.length} viewports, keyboard, copy.`);
