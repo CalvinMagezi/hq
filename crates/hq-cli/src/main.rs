@@ -108,10 +108,10 @@ enum Commands {
 
     /// Run or inspect the built-in agent host (long-lived coding agents in pseudo-terminals)
     Host {
-        /// serve (run the host in this terminal), status, stop, install (run it as a login service), join (print this machine's join code), add <code> (pair a machine, on the HQ side), check <host>, authorize (pin a remote key to the gate), report (used by agent hooks), or gate (the ssh forced command for remote access)
+        /// serve (run the host in this terminal), status, stop, lockdown [reason] (stop every agent and refuse new ones), unlock (lift a lockdown; only on this machine), install (run it as a login service), join (print this machine's join code), add <code> (pair a machine, on the HQ side), check <host>, authorize (pin a remote key to the gate), report (used by agent hooks), or gate (the ssh forced command for remote access)
         #[arg(default_value = "status")]
         sub: String,
-        /// add: the join code; check: the host name; join: the name for this machine
+        /// add: the join code; check: the host name; join: the name for this machine; lockdown: the reason
         arg: Option<String>,
         /// Directory holding host.sock and operator.token (default: ~/.hq/run/host)
         #[arg(long)]
@@ -119,6 +119,12 @@ enum Commands {
         /// serve only: also start agents that are not under the process sandbox. Without it the host refuses them, whoever asks.
         #[arg(long)]
         allow_unsandboxed: bool,
+        /// serve only: most agents running or waiting at once (default 16)
+        #[arg(long)]
+        max_agents: Option<usize>,
+        /// serve only: most agents started within 10 minutes before the host locks itself (default 10)
+        #[arg(long)]
+        max_starts: Option<usize>,
         /// authorize only: the ssh public key to pin to `hq host gate`
         #[arg(long)]
         key: Option<String>,
@@ -599,8 +605,8 @@ async fn async_main() -> Result<()> {
 
     // The host's hook reporter and ssh gate need no config, and the reporter
     // runs where the config is unreadable.
-    if let Some(Commands::Host { sub, arg, dir, allow_unsandboxed, key, from, port, unix, rest, addr }) = &cli.command
-        && matches!(sub.as_str(), "report" | "gate" | "relay" | "sandbox-init")
+    if let Some(Commands::Host { sub, arg, dir, allow_unsandboxed, max_agents, max_starts, key, from, port, unix, rest, addr }) = &cli.command
+        && matches!(sub.as_str(), "report" | "gate" | "relay" | "sandbox-init" | "lockdown" | "unlock")
     {
         return commands::host::run(commands::host::HostArgs {
             sub: sub.clone(),
@@ -608,6 +614,8 @@ async fn async_main() -> Result<()> {
             addr: addr.clone(),
             dir: dir.clone(),
             allow_unsandboxed: *allow_unsandboxed,
+            max_agents: *max_agents,
+            max_starts: *max_starts,
             key: key.clone(),
             from: from.clone(),
             port: *port,
@@ -825,7 +833,7 @@ async fn dispatch(command: Commands, config: &HqConfig) -> Result<()> {
             .await
         }
         Commands::Stack { sub, name, task, json } => commands::stack::run(config, &sub, name, task, json).await,
-        Commands::Host { sub, arg, dir, allow_unsandboxed, key, from, port, unix, rest, addr } => commands::host::run(commands::host::HostArgs { sub, arg, dir, allow_unsandboxed, key, from, port, unix, rest, addr }).await,
+        Commands::Host { sub, arg, dir, allow_unsandboxed, max_agents, max_starts, key, from, port, unix, rest, addr } => commands::host::run(commands::host::HostArgs { sub, arg, dir, allow_unsandboxed, max_agents, max_starts, key, from, port, unix, rest, addr }).await,
         Commands::SelfApply { run_id } => commands::self_apply::run(config, run_id).await,
         Commands::NotifyRestart { phase, reason, sha } => {
             commands::notify_restart::run(config, &phase, &reason, sha.as_deref()).await

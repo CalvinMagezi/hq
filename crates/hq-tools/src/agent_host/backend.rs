@@ -101,6 +101,19 @@ pub trait HostBackend: Send + Sync + std::fmt::Debug {
     fn dir_exists(&self, _path: &std::path::Path) -> Option<bool> {
         None
     }
+    /// The kill switch: stops every agent this host runs and refuses new ones until
+    /// someone on that machine runs `hq host unlock`. Returns the lockdown in force.
+    fn lockdown(&self, _reason: &str) -> Result<serde_json::Value, AgentHostError> {
+        Err(AgentHostError::Api {
+            code: "unsupported".into(),
+            message: format!("host '{}' has no lockdown", self.name()),
+        })
+    }
+    /// The lockdown in force on this host, `null` when there is none.
+    fn lockdown_status(&self) -> Result<serde_json::Value, AgentHostError> {
+        Ok(serde_json::Value::Null)
+    }
+
     fn no_workspace(&self) -> AgentHostError {
         AgentHostError::Api {
             code: "unsupported".into(),
@@ -119,9 +132,11 @@ pub trait HostBackend: Send + Sync + std::fmt::Debug {
 pub struct HostEvent {
     pub seq: u64,
     pub name: String,
-    /// `spawned`, `state`, `exited` or `removed`.
+    /// `spawned`, `state`, `exited`, `removed` or `lockdown`.
     pub kind: String,
     pub state: Option<String>,
+    /// What decided it: the rule for a state, the reason for a lockdown.
+    pub rule: Option<String>,
 }
 
 /// What a wait for host events returned.

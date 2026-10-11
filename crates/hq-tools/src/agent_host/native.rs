@@ -48,6 +48,29 @@ enum Link {
     },
 }
 
+/// Whether this process is a cargo test binary, which cargo places in `target/<profile>/deps/`.
+/// A test once started real agents on the developer's machine by leaving out a folder, so a
+/// test binary never talks to a real host. The `hq` binary a test runs as a subprocess
+/// (`CARGO_BIN_EXE_hq`) is not caught here.
+fn is_test_binary() -> bool {
+    std::env::current_exe()
+        .ok()
+        .and_then(|exe| exe.parent().map(|dir| dir.ends_with("deps")))
+        .unwrap_or(false)
+}
+
+/// The built-in host's directory when nothing overrides it.
+fn real_host_dir() -> PathBuf {
+    hq_core::config::HqConfig::hq_dir().join("run").join("host")
+}
+
+/// Whether `dir` is a host directory other than the machine's own. An agent in a host
+/// pane inherits `HQ_HOST_DIR` naming the real one, so that variable proves nothing.
+fn own_host_dir(dir: &Path, real: &Path) -> bool {
+    let canon = |p: &Path| p.canonicalize().unwrap_or_else(|_| p.to_path_buf());
+    canon(dir) != canon(real)
+}
+
 /// What a remote host runs for each request: the gate command pinned to the key.
 pub const NATIVE_GATE_COMMAND: &str = "hq host gate";
 
@@ -148,6 +171,12 @@ impl NativeBackend {
         params: Value,
         timeout: Duration,
     ) -> Result<Value, AgentHostError> {
+        if is_test_binary() && self.is_real_host() {
+            return Err(AgentHostError::Api {
+                code: "test_isolation".into(),
+                message: "this is a test and that host is a real machine's: give the test a host directory of its own or a scripted host".into(),
+            });
+        }
         match &self.link {
             Link::Local(dir) => {
                 let mut client = Client::connect(dir).map_err(|e| self.error(e))?;
@@ -159,6 +188,15 @@ impl NativeBackend {
                 transport,
                 ssh_program,
             } => self.call_remote(transport, ssh_program, name, method, params, timeout),
+        }
+    }
+
+    /// Whether this is the machine's own host or a remote reached with the real
+    /// `ssh`, as opposed to a test's temporary directory or stand-in program.
+    fn is_real_host(&self) -> bool {
+        match &self.link {
+            Link::Local(dir) => !own_host_dir(dir, &real_host_dir()),
+            Link::Remote { ssh_program, .. } => ssh_program == "ssh",
         }
     }
 
@@ -400,6 +438,16 @@ impl HostBackend for NativeBackend {
         self.call("host.workspace", json!({}))
     }
 
+    fn lockdown(&self, reason: &str) -> Result<Value, AgentHostError> {
+        let v = self.call("host.lockdown", json!({ "reason": reason }))?;
+        Ok(v.get("lockdown").cloned().unwrap_or(Value::Null))
+    }
+
+    fn lockdown_status(&self) -> Result<Value, AgentHostError> {
+        let status = self.call("host.status", json!({}))?;
+        Ok(status.get("lockdown").cloned().unwrap_or(Value::Null))
+    }
+
     fn list_dirs(&self, path: Option<&str>) -> Result<Value, AgentHostError> {
         self.call("host.dirs", json!({ "path": path }))
     }
@@ -591,6 +639,7 @@ impl HostBackend for NativeBackend {
                                 name: text(e, "name")?,
                                 kind: text(e, "kind")?,
                                 state: text(e, "state"),
+                                rule: text(e, "rule"),
                             })
                         })
                         .collect()
@@ -643,6 +692,27 @@ impl HostBackend for NativeBackend {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_test_cannot_talk_to_the_machines_own_host_or_a_remote_one() {
+        assert!(is_test_binary());
+        let own = NativeBackend::new(real_host_dir());
+        let remote = NativeBackend::remote("laptop", "me@100.64.0.1", None, None, NATIVE_GATE_COMMAND, None);
+        for host in [own, remote] {
+            let err = host.version().unwrap_err().to_string();
+            assert!(err.contains("this is a test"), "{err}");
+        }
+    }
+
+    #[test]
+    fn only_a_host_directory_other_than_the_real_one_counts_as_the_tests_own() {
+        let tmp = tempfile::tempdir().unwrap();
+        let real = tmp.path().join("real");
+        std::fs::create_dir(&real).unwrap();
+        assert!(!own_host_dir(&real, &real));
+        assert!(!own_host_dir(&real.join("."), &real));
+        assert!(own_host_dir(&tmp.path().join("mine"), &real));
+    }
 
     fn req(kind: &str, command: Option<&str>) -> LaunchRequest {
         LaunchRequest {

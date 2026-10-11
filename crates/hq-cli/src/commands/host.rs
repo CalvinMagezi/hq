@@ -1,10 +1,18 @@
 //! `hq host`: run or inspect the built-in agent host.
 
 use anyhow::{Context, Result, bail};
-use hq_host::{Client, Host, Server, socket_path};
+use hq_host::{BurstLimit, Client, Host, Server, socket_path};
 use serde_json::json;
 use std::path::PathBuf;
 use std::sync::Arc;
+use std::time::Duration;
+
+/// Most agents a served host runs or holds at once. Several times what one
+/// person's sessions have needed, low enough that a runaway is bounded.
+const DEFAULT_MAX_AGENTS: usize = 16;
+/// Most agents started within `BURST_WINDOW` before the host locks itself.
+const DEFAULT_MAX_STARTS: usize = 10;
+const BURST_WINDOW: Duration = Duration::from_secs(10 * 60);
 
 fn default_dir() -> PathBuf {
     hq_core::config::native_host_dir()
@@ -16,6 +24,8 @@ pub struct HostArgs {
     pub addr: Option<String>,
     pub dir: Option<PathBuf>,
     pub allow_unsandboxed: bool,
+    pub max_agents: Option<usize>,
+    pub max_starts: Option<usize>,
     pub key: Option<String>,
     pub from: Option<String>,
     pub port: Option<u16>,
@@ -24,14 +34,22 @@ pub struct HostArgs {
 }
 
 pub async fn run(args: HostArgs) -> Result<()> {
-    let HostArgs { sub, arg, addr, dir, allow_unsandboxed, key, from, port, unix, rest } = args;
+    let HostArgs { sub, arg, addr, dir, allow_unsandboxed, max_agents, max_starts, key, from, port, unix, rest } = args;
     let sub = sub.as_str();
     let dir_arg = dir.clone();
     let dir = dir.unwrap_or_else(default_dir);
     match sub {
-        "serve" => serve(dir, allow_unsandboxed).await,
+        "serve" => {
+            let caps = Caps {
+                max_agents: max_agents.unwrap_or(DEFAULT_MAX_AGENTS),
+                max_starts: max_starts.unwrap_or(DEFAULT_MAX_STARTS),
+            };
+            serve(dir, allow_unsandboxed, caps).await
+        }
         "status" => status(&dir),
         "stop" => stop(&dir),
+        "lockdown" => lockdown(&dir, arg.as_deref()),
+        "unlock" => unlock(&dir),
         "report" => report(dir_arg),
         "gate" => gate(&dir),
         "relay" => relay(port, unix),
@@ -41,16 +59,29 @@ pub async fn run(args: HostArgs) -> Result<()> {
         "add" => super::host_install::add(arg.as_deref(), from.as_deref()),
         "check" => super::host_install::check(arg.as_deref()),
         "authorize" => super::host_install::authorize(key.as_deref(), from.as_deref()),
-        other => bail!("unknown subcommand '{other}': use serve, status, stop, install, authorize, report or gate"),
+        other => bail!("unknown subcommand '{other}': use serve, status, stop, lockdown, unlock, install, authorize, report or gate"),
     }
 }
 
-async fn serve(dir: PathBuf, allow_unsandboxed: bool) -> Result<()> {
+struct Caps {
+    max_agents: usize,
+    max_starts: usize,
+}
+
+async fn serve(dir: PathBuf, allow_unsandboxed: bool, caps: Caps) -> Result<()> {
+    if caps.max_agents == 0 || caps.max_starts == 0 {
+        bail!("--max-agents and --max-starts must be at least 1");
+    }
     let host = Arc::new(
         Host::new()
             .with_state_dir(&dir)
-            .with_require_sandbox(!allow_unsandboxed),
+            .with_require_sandbox(!allow_unsandboxed)
+            .with_max_agents(caps.max_agents)
+            .with_burst_limit(BurstLimit { max: caps.max_starts, window: BURST_WINDOW }),
     );
+    if let Some(held) = host.lockdown_status() {
+        eprintln!("hq host is LOCKED DOWN ({}); no agent will start until `hq host unlock`", held.reason);
+    }
     let server = Server::bind(&dir, host.clone())
         .with_context(|| format!("starting the host in {}", dir.display()))?;
     match hq_host::ensure_workspace() {
@@ -95,6 +126,39 @@ fn status(dir: &std::path::Path) -> Result<()> {
             a["quiet_ms"].as_u64().unwrap_or(0) / 1000,
             a["age_ms"].as_u64().unwrap_or(0) / 1000,
         );
+    }
+    Ok(())
+}
+
+/// `hq host lockdown`: the kill switch. The lockdown file goes down first, so new
+/// starts are refused even when the host is wedged or not running; then the host
+/// is asked to stop every agent it runs.
+fn lockdown(dir: &std::path::Path, reason: Option<&str>) -> Result<()> {
+    let wanted = hq_host::Lockdown::new(reason.unwrap_or("locked from the command line"), "cli");
+    let held = hq_host::engage_lockdown(dir, &wanted)
+        .with_context(|| format!("writing {}", hq_host::lockdown_path(dir).display()))?;
+    println!("hq host locked down: {}", held.reason);
+    let stopped = Client::connect(dir).and_then(|mut c| c.call("host.lockdown", json!({ "reason": held.reason })));
+    match stopped {
+        Ok(_) => println!("every agent the host ran has been stopped; nothing starts until `hq host unlock`"),
+        Err(e) => {
+            println!("the host could not be asked to stop its agents ({e}); no new agent will start, but check for running ones");
+            std::process::exit(1);
+        }
+    }
+    Ok(())
+}
+
+/// `hq host unlock`: lifts a lockdown by deleting the file, which only someone on
+/// this machine can do. Nothing restarts by itself: HQ resumes what it needs.
+fn unlock(dir: &std::path::Path) -> Result<()> {
+    let previous = hq_host::read_lockdown(dir);
+    let cleared = hq_host::clear_lockdown(dir)
+        .with_context(|| format!("removing {}", hq_host::lockdown_path(dir).display()))?;
+    match (cleared, previous) {
+        (true, Some(held)) => println!("hq host unlocked (it was locked by {}: {})", held.source, held.reason),
+        (true, None) => println!("hq host unlocked"),
+        (false, _) => println!("hq host was not locked down"),
     }
     Ok(())
 }

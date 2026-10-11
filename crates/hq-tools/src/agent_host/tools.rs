@@ -1,7 +1,7 @@
 //! MCP tools over hosts. They see every agent on a host, including ones
 //! a person started by hand. All are read-only except `host_send`, the one
-//! way to prompt such an agent; sessions HQ launched go through
-//! `harness_session_*`.
+//! way to prompt such an agent (sessions HQ launched go through
+//! `harness_session_*`), and `host_lockdown`, the kill switch.
 
 use super::{AgentStatus, HostBackend, all_hosts, blocking, host};
 use crate::registry::HqTool;
@@ -45,8 +45,58 @@ impl HqTool for HostListTool {
 
 fn host_status(h: &dyn HostBackend) -> Value {
     match h.version() {
-        Ok(version) => json!({ "host": h.name(), "reachable": true, "host_version": version }),
+        Ok(version) => {
+            let lockdown = h.lockdown_status().unwrap_or(Value::Null);
+            json!({ "host": h.name(), "reachable": true, "host_version": version, "lockdown": lockdown })
+        }
         Err(e) => json!({ "host": h.name(), "reachable": false, "error": e.to_string() }),
+    }
+}
+
+/// The kill switch over HQ: stops every agent on one host, or on all of them,
+/// and leaves each refusing new starts until it is unlocked on that machine.
+pub struct HostLockdownTool;
+
+#[async_trait]
+impl HqTool for HostLockdownTool {
+    fn name(&self) -> &str {
+        "host_lockdown"
+    }
+    fn description(&self) -> &str {
+        "Emergency stop for coding agents: on a host (default every host) stop every agent it runs, including ones HQ did not start, and refuse every new start, resume and restart until someone at that machine runs `hq host unlock`. HQ cannot unlock a host. Use when agents are starting that nobody asked for, or one is doing harm. The agents' records and transcripts are kept. A host that cannot be reached is reported as not locked; lock it there with `hq host lockdown`."
+    }
+    fn parameters(&self) -> Value {
+        json!({
+            "type": "object",
+            "properties": {
+                "reason": { "type": "string", "description": "Why, kept with the lockdown and shown on that machine" },
+                "host": { "type": "string", "description": "One host from host_list. Omit to lock every host." }
+            },
+            "required": ["reason"]
+        })
+    }
+    fn category(&self) -> &str {
+        "harness"
+    }
+    async fn execute(&self, args: Value) -> Result<Value> {
+        let reason = arg_str(&args, "reason");
+        if reason.trim().is_empty() {
+            bail!("reason is required");
+        }
+        let named = arg_str(&args, "host");
+        let hosts = if named.is_empty() { all_hosts()? } else { vec![host(Some(&named))?] };
+        let rows = blocking(move || {
+            hosts
+                .iter()
+                .map(|h| match h.lockdown(&reason) {
+                    Ok(held) => json!({ "host": h.name(), "locked": true, "lockdown": held }),
+                    Err(e) => json!({ "host": h.name(), "locked": false, "error": e.to_string() }),
+                })
+                .collect::<Vec<_>>()
+        })
+        .await?;
+        let all_locked = rows.iter().all(|r| r["locked"] == true);
+        Ok(json!({ "all_locked": all_locked, "hosts": rows }))
     }
 }
 
@@ -333,6 +383,7 @@ pub fn create_host_tools(db: Arc<Database>) -> Vec<Box<dyn HqTool>> {
         Box::new(HostAddTool),
         Box::new(HostCheckTool),
         Box::new(HostListTool),
+        Box::new(HostLockdownTool),
         Box::new(HostAgentsTool { db }),
         Box::new(HostReadTool),
         Box::new(HostSendTool),
