@@ -888,9 +888,14 @@ mod tests {
             family_guest: None,
         };
 
-        let result = tool.execute(json!({ "harness": "claude-code" })).await;
-        if let Err(e) = result {
-            assert!(!e.to_string().contains("only has access to the Agy"));
-        }
+        // A root cwd is refused after the guest check and before any host is asked, so the
+        // test never launches a real agent on the machine running it.
+        let err = tool
+            .execute(json!({ "harness": "claude-code", "cwd": "/" }))
+            .await
+            .unwrap_err()
+            .to_string();
+        assert!(!err.contains("is not one of them"), "{err}");
+        assert!(err.contains("home or root directory"), "{err}");
     }
 }
