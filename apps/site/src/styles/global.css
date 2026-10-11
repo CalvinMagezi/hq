@@ -744,7 +744,7 @@ pre {
   }
   /* On a phone the wrapped nav would cover a quarter of the screen, so it scrolls away. */
   .site-header {
-    position: static;
+    position: relative;
   }
   .navshell {
     border-radius: var(--radius-lg);
