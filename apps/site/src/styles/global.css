@@ -688,32 +688,19 @@ pre {
 .brand:hover {
   color: var(--ink);
 }
-.brand-mark {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-}
-.brand-mark span {
-  display: block;
-  height: 8px;
-  border-radius: var(--radius-pill);
-}
-.brand-mark span:first-child {
-  width: 20px;
-  margin-left: 6px;
-  background: var(--brand-blue);
-}
-.brand-mark span:last-child {
+.brand img {
   width: 32px;
-  background: var(--brand-green);
+  height: 32px;
+  border-radius: var(--radius-sm);
 }
 .site-nav {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
   gap: var(--space-1) var(--space-5);
+  margin-left: auto;
 }
-.site-nav a:not(.btn) {
+.site-nav a {
   display: inline-flex;
   align-items: center;
   min-height: 44px;
@@ -722,9 +709,10 @@ pre {
   font-size: 15px;
   font-weight: 700;
   text-decoration: none;
+  white-space: nowrap;
 }
-.site-nav a:not(.btn):hover,
-.site-nav a:not(.btn)[aria-current='page'] {
+.site-nav a:hover,
+.site-nav a[aria-current='page'] {
   color: var(--text-green);
 }
 .progress {
@@ -738,24 +726,42 @@ pre {
   transform-origin: left center;
   transform: scaleX(0);
 }
+/* On a phone the header stays pinned but compact: logo and Install on one row, the page
+   links in a second row that scrolls sideways instead of wrapping. */
 @media (max-width: 760px) {
   html {
-    scroll-padding-top: 16px;
+    scroll-padding-top: 140px;
   }
-  /* On a phone the wrapped nav would cover a quarter of the screen, so it scrolls away. */
   .site-header {
-    position: relative;
+    top: 8px;
+    padding-inline: var(--space-2);
   }
   .navshell {
+    margin-top: 8px;
     border-radius: var(--radius-lg);
-    padding: 8px 12px 8px 16px;
+    padding: 6px 8px 0 14px;
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    gap: 0 var(--space-3);
   }
   .site-nav {
-    width: 100%;
-    gap: 0 var(--space-4);
+    grid-column: 1 / -1;
+    grid-row: 2;
+    margin-left: 0;
+    flex-wrap: nowrap;
+    gap: var(--space-4);
+    overflow-x: auto;
+    scrollbar-width: none;
+    /* Room for the 3px focus ring and its offset, which the scroll box would otherwise clip. */
+    padding: 4px 6px 6px;
+    margin-inline: -6px;
   }
-  .site-nav .btn {
-    margin-left: auto;
+  .site-nav::-webkit-scrollbar {
+    display: none;
+  }
+  .site-nav a {
+    min-height: 36px;
+    font-size: 14px;
   }
 }
 
