@@ -71,10 +71,7 @@ const csp = [
     <a class="skip-link" href="#main">Skip to content</a>
     <header class="site-header">
       <div class="navshell glass-heavy shine">
-        <a class="brand" href="/" aria-current={current === '/' ? 'page' : undefined}>
-          <span class="brand-mark" aria-hidden="true"><span></span><span></span></span>
-          <span>Agent HQ</span>
-        </a>
+        <a class="brand" href="/" aria-current={current === '/' ? 'page' : undefined}><img src="/icons/hq-mark-96.png" alt="" width="32" height="32" /><span>Agent HQ</span></a>
         <nav class="site-nav" aria-label="Main">
           {
             textLinks.map((item) => (
@@ -84,10 +81,10 @@ const csp = [
             ))
           }
           <a href={links.repo}>GitHub</a>
-          <a class="btn btn-primary btn-sm" href={INSTALL_PATH} aria-current={current === INSTALL_PATH ? 'page' : undefined}>
-            Install
-          </a>
         </nav>
+        <a class="btn btn-primary btn-sm nav-cta" href={INSTALL_PATH} aria-current={current === INSTALL_PATH ? 'page' : undefined}>
+          Install
+        </a>
         <span class="progress" aria-hidden="true"></span>
       </div>
     </header>
