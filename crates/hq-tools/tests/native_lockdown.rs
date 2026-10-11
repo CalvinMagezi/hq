@@ -2,7 +2,7 @@
 #![cfg(unix)]
 
 use hq_host::{Host, Server, SpawnSpec};
-use hq_tools::agent_host::{HostBackend, NativeBackend};
+use hq_tools::agent_host::{Host as HostHandle, HostBackend, NativeBackend};
 use std::sync::Arc;
 
 fn sleeper(name: &str) -> SpawnSpec {
@@ -23,7 +23,8 @@ fn hq_can_lock_a_host_and_see_it_locked() {
     let thread = std::thread::spawn(move || server.serve());
     host.spawn(sleeper("running")).unwrap();
 
-    let backend = NativeBackend::new(&dir);
+    // Through the shared handle every caller holds, so a method it fails to forward shows here.
+    let backend: HostHandle = Arc::new(NativeBackend::new(&dir));
     assert!(backend.lockdown_status().unwrap().is_null());
     let held = backend.lockdown("agents nobody asked for").unwrap();
     assert_eq!(held["reason"], "agents nobody asked for");

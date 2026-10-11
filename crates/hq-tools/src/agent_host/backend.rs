@@ -247,6 +247,12 @@ impl<T: HostBackend + ?Sized> HostBackend for Arc<T> {
     fn workspace(&self) -> Result<serde_json::Value, AgentHostError> {
         (**self).workspace()
     }
+    fn lockdown(&self, reason: &str) -> Result<serde_json::Value, AgentHostError> {
+        (**self).lockdown(reason)
+    }
+    fn lockdown_status(&self) -> Result<serde_json::Value, AgentHostError> {
+        (**self).lockdown_status()
+    }
     fn list_dirs(&self, path: Option<&str>) -> Result<serde_json::Value, AgentHostError> {
         (**self).list_dirs(path)
     }
