@@ -1830,6 +1830,9 @@ async fn identical_concurrent_searches_share_one_run_of_the_pool() {
     assert!(!urls(&a).is_empty() && urls(&a) == urls(&b) && urls(&b) == urls(&c));
 }
 
+/// How long an abandoned search may take to finish in the background and fill the cache.
+const ABANDONED_SEARCH_WAIT: Duration = Duration::from_secs(15);
+
 #[tokio::test]
 async fn a_search_whose_caller_gave_up_still_warms_the_cache() {
     let server = native_server().await;
@@ -1855,10 +1858,9 @@ async fn a_search_whose_caller_gave_up_still_warms_the_cache() {
         "the caller was cancelled before the engines answered"
     );
     let key = cache_key("abandoned query", &opts, Some(&server.uri()));
-    for _ in 0..60 {
-        if cached_page(&key).is_some() {
-            break;
-        }
+    // Generous because the whole suite runs in parallel; a passing run stops at the first hit.
+    let deadline = std::time::Instant::now() + ABANDONED_SEARCH_WAIT;
+    while cached_page(&key).is_none() && std::time::Instant::now() < deadline {
         tokio::time::sleep(Duration::from_millis(50)).await;
     }
     assert!(

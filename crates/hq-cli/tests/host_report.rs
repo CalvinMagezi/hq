@@ -74,6 +74,10 @@ fn a_hook_event_reaches_the_host_from_inside_the_sandbox() {
     // The test binary lives under the user's home, which the sandbox hides.
     let copy = project.path().join("hq");
     std::fs::copy(hq(), &copy).unwrap();
+    // macOS checks a binary it has never seen on its first run, which takes seconds and more under
+    // parallel tests; run the copy once here so the hook's own run is not racing that check.
+    let warmed = std::process::Command::new(&copy).arg("--version").output().unwrap();
+    assert!(warmed.status.success(), "{warmed:?}");
     let server = Server::bind(&dir, Arc::new(Host::new().with_helper_binary(hq()))).unwrap();
     let stop = server.stop_handle();
     let thread = std::thread::spawn(move || server.serve());
