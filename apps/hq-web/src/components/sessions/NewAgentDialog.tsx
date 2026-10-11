@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { Loader2, X } from 'lucide-react'
 import { GENERAL_PURPOSES, workbenchApi, type LaunchReport, type Purpose, type WorkbenchHosts } from '~/lib/sessionsApi'
@@ -14,6 +14,7 @@ import {
 } from '~/lib/workbench'
 import { ErrorText } from './ErrorText'
 import { FolderPicker } from './FolderPicker'
+import { useModal } from './useModal'
 
 const FIELD_CLASS =
   'w-full min-w-0 px-3 rounded-lg text-xs text-neutral-200 hq-field focus:outline-none focus:ring-1 focus:ring-emerald-400'
@@ -38,22 +39,6 @@ export function NewAgentDialog({ onClose, onStarted }: Props) {
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [report, setReport] = useState<LaunchReport | null>(null)
-  const dialogRef = useRef<HTMLDivElement>(null)
-  const [portal] = useState(() => document.createElement('div'))
-
-  // Mount in a portal, hide the rest of the page from assistive tech and the keyboard, and hand focus back afterwards.
-  useEffect(() => {
-    const opener = document.activeElement as HTMLElement | null
-    document.body.appendChild(portal)
-    const hidden = Array.from(document.body.children).filter((el) => el !== portal && !el.hasAttribute('inert'))
-    hidden.forEach((el) => el.setAttribute('inert', ''))
-    dialogRef.current?.focus()
-    return () => {
-      hidden.forEach((el) => el.removeAttribute('inert'))
-      portal.remove()
-      opener?.focus()
-    }
-  }, [portal])
 
   useEffect(() => {
     workbenchApi
@@ -72,32 +57,7 @@ export function NewAgentDialog({ onClose, onStarted }: Props) {
     if (report) onStarted(report.session_id)
     else onClose()
   }
-  const closeRef = useRef(close)
-  closeRef.current = close
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => e.key === 'Escape' && closeRef.current()
-    window.addEventListener('keydown', onKey)
-    return () => window.removeEventListener('keydown', onKey)
-  }, [])
-
-  const trapTab = (e: React.KeyboardEvent) => {
-    if (e.key !== 'Tab') return
-    const items = Array.from(dialogRef.current?.querySelectorAll<HTMLElement>('button, input, select, textarea, summary, [href], [tabindex]:not([tabindex="-1"])') ?? []).filter(
-      (el) => !el.hasAttribute('disabled') && el.offsetParent !== null
-    )
-    if (items.length === 0) return
-    const first = items[0]
-    const last = items[items.length - 1]
-    const active = document.activeElement
-    if (e.shiftKey && (active === first || active === dialogRef.current)) {
-      e.preventDefault()
-      last.focus()
-    } else if (!e.shiftKey && active === last) {
-      e.preventDefault()
-      first.focus()
-    }
-  }
-
+  const { dialogRef, portal, trapTab } = useModal(close)
   const selected = hosts?.hosts.find((h) => h.host === host)
   // A general-purpose agent is started for a stated purpose; a coding agent's purpose is code.
   const generalPurpose = agentCategory(hosts, harness) === 'general_purpose'

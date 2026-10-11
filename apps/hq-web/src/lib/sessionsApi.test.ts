@@ -109,6 +109,16 @@ test('making a folder and starting an agent post the expected bodies', async () 
   ])
 })
 
+test('the emergency stop posts its reason and optional computer', async () => {
+  const calls = recordCalls()
+  await workbenchApi.lockdown({ reason: 'runaway' })
+  await workbenchApi.lockdown({ reason: 'runaway', host: 'laptop' })
+  expect(calls).toEqual([
+    { url: '/api/workbench/lockdown', method: 'POST', body: { reason: 'runaway' } },
+    { url: '/api/workbench/lockdown', method: 'POST', body: { reason: 'runaway', host: 'laptop' } },
+  ])
+})
+
 test('stop, resume, rename and archive hit their own endpoints', async () => {
   const calls = recordCalls()
   await globalSessionsApi.stop('hs-1')

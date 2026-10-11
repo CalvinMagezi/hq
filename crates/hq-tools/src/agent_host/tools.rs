@@ -84,20 +84,36 @@ impl HqTool for HostLockdownTool {
             bail!("reason is required");
         }
         let named = arg_str(&args, "host");
-        let hosts = if named.is_empty() { all_hosts()? } else { vec![host(Some(&named))?] };
-        let rows = blocking(move || {
-            hosts
-                .iter()
-                .map(|h| match h.lockdown(&reason) {
+        let named = (!named.is_empty()).then_some(named);
+        blocking(move || lock_down(named.as_deref(), &reason)).await?
+    }
+}
+
+/// Locks one host, or every host when `named` is `None`, all at once so an
+/// unreachable one does not hold up the rest. Blocks on the hosts; call it from
+/// a blocking thread. Shared by `host_lockdown` and the web app's stop button.
+pub fn lock_down(named: Option<&str>, reason: &str) -> Result<Value> {
+    let hosts = match named {
+        Some(name) => vec![host(Some(name))?],
+        None => all_hosts()?,
+    };
+    let rows: Vec<Value> = std::thread::scope(|scope| {
+        let pending: Vec<_> = hosts
+            .iter()
+            .map(|h| {
+                scope.spawn(move || match h.lockdown(reason) {
                     Ok(held) => json!({ "host": h.name(), "locked": true, "lockdown": held }),
                     Err(e) => json!({ "host": h.name(), "locked": false, "error": e.to_string() }),
                 })
-                .collect::<Vec<_>>()
-        })
-        .await?;
-        let all_locked = rows.iter().all(|r| r["locked"] == true);
-        Ok(json!({ "all_locked": all_locked, "hosts": rows }))
-    }
+            })
+            .collect();
+        pending
+            .into_iter()
+            .map(|p| p.join().unwrap_or_else(|_| json!({ "locked": false, "error": "the lockdown call panicked" })))
+            .collect()
+    });
+    let all_locked = rows.iter().all(|r| r["locked"] == true);
+    Ok(json!({ "all_locked": all_locked, "hosts": rows }))
 }
 
 pub struct HostAgentsTool {

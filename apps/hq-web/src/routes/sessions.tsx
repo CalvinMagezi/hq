@@ -2,11 +2,12 @@ import { createFileRoute } from '@tanstack/react-router'
 import { Archive, Loader2, PanelLeftClose, PanelLeftOpen, Plus, RefreshCw, Terminal } from 'lucide-react'
 import { useEffect, useMemo, useState } from 'react'
 import { NewAgentDialog } from '~/components/sessions/NewAgentDialog'
+import { LockdownBanner, StopAllButton } from '~/components/sessions/EmergencyStop'
 import { SessionDetail } from '~/components/sessions/SessionDetail'
 import { SessionInspector } from '~/components/sessions/SessionInspector'
 import { SessionRow } from '~/components/sessions/SessionRow'
 import { usePolled } from '~/components/sessions/usePolled'
-import { globalSessionsApi, type HarnessSession } from '~/lib/sessionsApi'
+import { globalSessionsApi, workbenchApi, type HarnessSession } from '~/lib/sessionsApi'
 import { useHQStore } from '~/store/hqStore'
 import { archivable, groupSessions, needsYouCount, sessionTitle, statusInfo } from '~/lib/workbench'
 import { useSidebarLayout } from '~/components/sessions/useSidebarLayout'
@@ -15,6 +16,8 @@ import { ErrorText } from '~/components/sessions/ErrorText'
 
 const LIST_POLL_MS = 8_000
 const DETAIL_POLL_MS = 5_000
+/** Each computer is asked over the network, so its lockdown state is read less often. */
+const HOSTS_POLL_MS = 60_000
 
 interface SessionsSearch {
   id?: string
@@ -43,6 +46,8 @@ function WorkbenchPage() {
   const filters = useMemo(() => ({ ...(task ? { task_id: task } : {}), include_archived: true }), [task])
   const list = usePolled(JSON.stringify(filters), () => globalSessionsApi.list(filters), LIST_POLL_MS, true, true)
   const detail = usePolled(selectedId ?? '', () => globalSessionsApi.get(selectedId ?? ''), DETAIL_POLL_MS, Boolean(selectedId), true)
+  const hosts = usePolled('hosts', () => workbenchApi.hosts(), HOSTS_POLL_MS, true, true)
+  const afterStop = () => void Promise.all([list.refresh(), hosts.refresh()])
 
   // An unfiltered list is the nav badge's source, so the nav stops polling while this page is open.
   const setCount = useHQStore((st) => st.setNeedsYouCount)
@@ -74,7 +79,7 @@ function WorkbenchPage() {
         className={`${selectedId ? 'hidden md:flex' : 'flex'} flex-col w-full md:w-[var(--wb-w)] md:border-r md:border-white/10 min-h-0 shrink-0 ${sidebar.dragging ? '' : 'md:transition-[width] md:duration-200'}`}
       >
         {collapsed ? (
-          <CollapsedRail list={list.data ?? []} selectedId={selectedId} onSelect={select} onNew={() => setCreating(true)} onExpand={sidebar.toggle} />
+          <CollapsedRail list={list.data ?? []} selectedId={selectedId} onSelect={select} onNew={() => setCreating(true)} onExpand={sidebar.toggle} onStopped={afterStop} />
         ) : (
           <>
             <div className="flex items-center gap-2 px-4 pt-4 pb-3">
@@ -93,12 +98,14 @@ function WorkbenchPage() {
                 </button>
               </span>
             </div>
-            <div className="px-4 pb-3">
-              <button type="button" onClick={() => setCreating(true)} className="hq-btn-primary w-full">
+            <div className="flex gap-2 px-4 pb-3">
+              <button type="button" onClick={() => setCreating(true)} className="hq-btn-primary flex-1 min-w-0">
                 <Plus className="w-4 h-4" />
                 New agent
               </button>
+              <StopAllButton onStopped={afterStop} />
             </div>
+            <LockdownBanner hosts={hosts.data?.hosts ?? []} />
             {task && (
               <button
                 type="button"
@@ -315,6 +322,7 @@ interface RailProps {
   onSelect: (id: string) => void
   onNew: () => void
   onExpand: () => void
+  onStopped: () => void
 }
 
 const initials = (title: string) =>
@@ -326,7 +334,7 @@ const initials = (title: string) =>
     .join('')
 
 /** The sidebar folded down to one avatar per agent, with a status dot, so nothing that needs you is hidden. */
-function CollapsedRail({ list, selectedId, onSelect, onNew, onExpand }: RailProps) {
+function CollapsedRail({ list, selectedId, onSelect, onNew, onExpand, onStopped }: RailProps) {
   const visible = list.filter((s) => !s.archived).slice(0, 14)
   return (
     <div className="flex flex-col items-center gap-2.5 py-4 overflow-y-auto min-h-0">
@@ -336,6 +344,7 @@ function CollapsedRail({ list, selectedId, onSelect, onNew, onExpand }: RailProp
       <button type="button" onClick={onNew} className="hq-btn-primary !h-11 !w-11 !p-0" aria-label="New agent">
         <Plus className="w-4 h-4" />
       </button>
+      <StopAllButton compact onStopped={onStopped} />
       {visible.map((s) => {
         const status = statusInfo(s)
         const title = sessionTitle(s)
