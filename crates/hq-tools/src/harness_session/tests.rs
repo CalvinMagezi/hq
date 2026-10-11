@@ -60,6 +60,7 @@ fn launch<'a>(host: ScriptedHost, id: &'a str, prompt: Option<&'a str>) -> Launc
         purpose: Purpose::Code,
         observe: &[],
         one_shot: None,
+        origin: None,
     }
 }
 
@@ -642,6 +643,7 @@ fn alive(name: &str) -> Liveness {
         launch_pending: false,
         agent_session_id: None,
         exited: false,
+        exit_code: None,
     }))
 }
 
@@ -2268,6 +2270,71 @@ async fn a_run_that_cannot_start_leaves_a_comment_and_backs_off() {
     let resolve2 = stack_resolver(host2);
     let again = stack::dispatch(vault.path(), &db, &cfg, &resolve2).await.unwrap();
     assert!(again.started.is_empty() && again.skipped.is_empty(), "backed off, not retried at once: {again:?}");
+}
+
+#[tokio::test]
+async fn a_backed_off_task_does_not_hold_up_the_rest_of_the_queue() {
+    let (_dir, host) = startable_host();
+    let db = Arc::new(Database::open_memory().unwrap());
+    let vault = tempfile::tempdir().unwrap();
+    let cfg = stack_config("specialists:\n  - name: hermes\n    harness: hermes\n    cwd: /t\n", vault.path());
+    let first = assigned_task(&db, "tk-stuck", "Could not start last time", "hermes", &[]);
+    let second = assigned_task(&db, "tk-next", "Ready to go", "hermes", &[]);
+    stack::back_off(&first);
+
+    let resolve = stack_resolver(host);
+    let report = stack::dispatch(vault.path(), &db, &cfg, &resolve).await.unwrap();
+    assert_eq!(report.started.len(), 1, "{report:?}");
+    let row = get_row(&db, report.started[0]["session_id"].as_str().unwrap()).unwrap();
+    assert_eq!(row.mission_id.as_deref(), Some(second.as_str()), "the queue's next task runs instead");
+    assert_eq!(row.origin, "stack", "the origin is written with the row");
+}
+
+#[tokio::test]
+async fn a_spent_budget_is_nothing_to_do_not_a_problem() {
+    let (_dir, host) = startable_host();
+    let db = Arc::new(Database::open_memory().unwrap());
+    let vault = tempfile::tempdir().unwrap();
+    let cfg = stack_config("specialists:\n  - name: hermes\n    harness: hermes\n    cwd: /t\n    runs_per_day: 1\n", vault.path());
+    assigned_task(&db, "tk-one", "First", "hermes", &[]);
+    assigned_task(&db, "tk-two", "Second", "hermes", &[]);
+
+    let resolve = stack_resolver(host);
+    let report = stack::dispatch(vault.path(), &db, &cfg, &resolve).await.unwrap();
+    assert_eq!(report.started.len(), 1, "{report:?}");
+    let id = report.started[0]["session_id"].as_str().unwrap().to_string();
+    db.with_conn(|c| registry::set_status(c, &id, registry::STATUS_EXITED)).unwrap();
+
+    let (_dir2, host2) = startable_host();
+    let resolve2 = stack_resolver(host2);
+    let again = stack::dispatch(vault.path(), &db, &cfg, &resolve2).await.unwrap();
+    assert!(again.started.is_empty() && again.skipped.is_empty(), "a spent budget is quiet: {again:?}");
+    assert_eq!(stack::status(&db, &cfg).unwrap()[0]["runs_last_24h"], 1);
+}
+
+#[tokio::test]
+async fn a_stack_run_is_never_resumed() {
+    let db = Arc::new(Database::open_memory().unwrap());
+    let vault = tempfile::tempdir().unwrap();
+    db.with_conn(|c| {
+        registry::insert(
+            c,
+            &registry::NewSession {
+                id: "hs-run",
+                harness: "hermes",
+                label: "stack/hermes",
+                cwd: "/t",
+                mission_id: None,
+                placement: registry::Placement { host: "local", agent_name: "hs-run", workspace_id: "w1", pane_id: "w1:p1" },
+                purpose: Some("research"),
+            },
+        )?;
+        registry::set_origin(c, "hs-run", registry::ORIGIN_STACK)?;
+        registry::set_status(c, "hs-run", registry::STATUS_EXITED)
+    })
+    .unwrap();
+    let err = resume(vault.path(), &db, "hs-run", None).await.unwrap_err().to_string();
+    assert!(err.contains("one-shot run") && err.contains("hq stack run"), "{err}");
 }
 
 #[test]

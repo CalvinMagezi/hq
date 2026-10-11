@@ -39,8 +39,8 @@ use spec::SPECS;
 pub use launch::resume_awaiting;
 pub use category::{HarnessCategory, Purpose};
 pub use spec::{
-    Harness, HarnessSessionSpec, ResumeStrategy, category_of, known_harnesses, names_in, resolve, resolve_in,
-    spec_for,
+    Harness, HarnessSessionSpec, ResumeStrategy, agent_host_config, category_in, category_of, known_harnesses,
+    known_in, names_in, resolve, resolve_in, spec_for,
 };
 
 /// Under the home of the host that runs pi, inside the state directory its sandbox may write.

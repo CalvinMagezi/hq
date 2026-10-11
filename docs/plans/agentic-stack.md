@@ -67,7 +67,7 @@ stack:
     - name: hermes                 # tasks assigned to "hermes" are its queue
       harness: hermes              # a built-in general-purpose harness or a profile
       purposes: [research, general] # its lane; code is never accepted
-      cwd: ~/stack/hermes          # where runs start; default ~/.hq/stack/<name>
+      cwd: ~/stack/hermes          # where runs start; default: stack-<name> in the host's HQ folder
       host: native                 # optional; any paired host
       run_minutes: 30              # a run longer than this is stopped
       runs_per_day: 24             # budget in the only currency we can measure
@@ -91,10 +91,11 @@ stack:
 3. **Output.** The process exiting is the completion signal. The supervisor
    keeps the final screen, closes the pane, and records `RunEnded` on the task:
    lease released, status `in_progress` to `ready_for_review`, with a comment
-   that points at the session's logs. A run that exits with nothing on screen
-   is recorded as an exit, which blocks the task as a crashed session does. A run
-   past `run_minutes` is stopped. A launch that fails leaves one comment and
-   backs off for half an hour.
+   that points at the session's logs. A run that exits non-zero is recorded as
+   `RunFailed`, which blocks the task as a crashed session does; a run is never
+   resumed. A run past `run_minutes` is stopped. A launch that fails leaves one
+   comment and backs off for half an hour, and the next task in the queue runs
+   meanwhile.
 4. **Budget.** `runs_per_day` is counted from the session registry. Harness
    token usage is collected after the fact only for the coding agents whose
    transcripts HQ can read, so money is not a currency HQ can enforce for

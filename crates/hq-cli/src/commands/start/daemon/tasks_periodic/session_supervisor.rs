@@ -30,7 +30,7 @@ use hq_core::types::{ChatMessage, MailboxMessageType, MessageRole, ValueItem, Va
 use hq_db::Database;
 use hq_db::harness_sessions_registry as registry;
 use hq_tools::harness_session::mission::{self, Event};
-use hq_tools::harness_session::{Liveness, exited_pane, liveness, poll_hosts_with};
+use hq_tools::harness_session::{HarnessCategory, Liveness, exited_pane, liveness, poll_hosts_with};
 use hq_tools::agent_host::{AgentInfo, AgentStatus, Host, HostBackend};
 use std::collections::HashMap;
 use std::future::Future;
@@ -337,12 +337,13 @@ async fn dismiss_survey(
 /// is idle. One per sweep: the agent finishes a turn, and the idle event that
 /// follows delivers the next.
 async fn deliver_messages(db: &Database, row: &registry::HarnessSessionRow, agent: &AgentInfo) {
-    if !hq_tools::a2a::can_receive_agent(agent) {
+    let category = hq_tools::harness_session::category_of(&row.harness).unwrap_or(HarnessCategory::Coding);
+    if !hq_tools::a2a::can_receive_agent(agent, category) {
         return;
     }
     let (db_arc, id, agent) = (Arc::new(db.clone()), row.id.clone(), agent.clone());
     let delivered =
-        tokio::task::spawn_blocking(move || hq_tools::a2a::deliver_to(&db_arc, &id, &agent))
+        tokio::task::spawn_blocking(move || hq_tools::a2a::deliver_to(&db_arc, &id, &agent, category))
             .await;
     match delivered {
         Ok(Ok(Some(message))) => {
@@ -461,11 +462,20 @@ async fn supervise(
         tracing::info!(session = %row.id, harness = %row.harness, "session-supervisor: marked exited");
         // Before the summarizer: the daemon may kill this sweep at its timeout,
         // and the claim above means no later sweep would record the exit.
-        // A stack specialist's run is over when its process ends: with output on
-        // screen that is its finished turn, with none it is a crash.
-        let is_run = row.origin == registry::ORIGIN_STACK;
-        let has_output = final_output(&db_arc, &row.id).is_some();
-        let event = if is_run && has_output { Event::RunEnded } else { Event::Exited };
+        // A stack specialist's run is over when its process ends. Its exit code
+        // says how: zero is a finished run, anything else a crash. A host that
+        // reports no code (or a pane already gone) falls back to the screen:
+        // output means a run, nothing means a crash.
+        let event = if row.origin == registry::ORIGIN_STACK {
+            match exited.as_ref().and_then(|a| a.exit_code) {
+                Some(0) => Event::RunEnded,
+                Some(_) => Event::RunFailed,
+                None if final_output(&db_arc, &row.id).is_some() => Event::RunEnded,
+                None => Event::RunFailed,
+            }
+        } else {
+            Event::Exited
+        };
         let link = record_on_task(db, &row, event);
         // Sessions started for one that ended on its own stop with it too.
         let stopped = hq_tools::harness_session::stop_children(&db_arc, &row.id);

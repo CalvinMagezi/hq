@@ -581,11 +581,13 @@ stack:
   `harness_session_logs` like any other. A tag on the task that names a purpose in the lane
   (`review`, `monitor`, `research`) picks the run's purpose.
 - **Output.** The process ending is the completion signal. The supervisor keeps the final
-  screen as the session's snapshot, closes the pane, and records the run on the task: with
-  output, the task moves from in progress to ready for review and its lease is released; with
-  nothing on screen it is treated as a crash and the task is blocked. A person reads the
-  output (`harness_session_logs`) and marks the task complete, or not. A monitor's or
-  reviewer's run comments and never moves the task, as its interactive turns do.
+  screen as the session's snapshot, closes the pane, and records the run on the task by its
+  exit code: zero moves the task from in progress to ready for review and releases its lease;
+  anything else is a crash and blocks the task (on a host that reports no code, output on
+  screen counts as a finished run and a blank screen as a crash). A run is never resumed:
+  fix the cause, then assign the task again or `hq stack run`. A person reads the output
+  (`harness_session_logs`) and marks the task complete, or not. A monitor's or reviewer's run
+  comments and never moves the task, as its interactive turns do.
 - **Limits.** `runs_per_day` is counted over a rolling 24 hours. A run past `run_minutes` is
   stopped and its task blocked with the reason. A launch that fails leaves one comment on the
   task and is not retried for 30 minutes. Token cost is not a limit HQ can enforce for these
@@ -684,5 +686,39 @@ as the key. The directory is 0700 and holds nothing else; keep `identity_file` m
 owned by the HQ user.
 
 If the socket directory cannot be made private or its path would be too long for a unix
-socket, HQ logs a warning and uses plain connections. If ssh itself reports a control socket
 problem before a session opens, a read-only call (`status`, `agent get`, `agent list`,
+`agent read`) is retried once on a fresh connection. A write (send, prompt, launch) is never
+retried, since the gate may already have run it. A master that hangs rather than failing is
+bounded by the normal command timeout. Run HQ with `RUST_LOG=hq_tools::agent_host=debug` to
+log the elapsed milliseconds of every host call.
+
+## Security model
+
+The gate limits what the key can ask for, but the host starts arbitrary commands by design
+(`agent.spawn`, and any agent it starts can run code). Treat the key as shell access to the
+machine as you, scoped to the host's own API and to one source address. Consequences:
+
+- Keep the private key readable only by the HQ user and out of backups you do not control.
+- Anyone who can call HQ's `harness_session_*` tools can start an agent on a paired machine,
+  and anyone who can call `host_send` can type into any agent pane there, including ones you
+  started by hand. Do not expose those tools to callers you would not give a shell.
+- Agents run in a process sandbox (see [AGENT_HOST.md](AGENT_HOST.md)): they cannot read the
+  host's own files or your credentials directories, and reach only the sites you allow.
+- The host's control socket is a local unix socket, so access control is its file permissions
+  plus the ssh key above; agents get a separate socket that accepts only their own token.
+
+## Troubleshooting
+
+| Symptom | Likely cause |
+|---------|--------------|
+| `host_check` or `host_list` shows `unreachable` with `Permission denied` | The pinned key is missing from `authorized_keys` (run the `hq host authorize` command again), the `from=` address is wrong, or `identity_file` is unreadable by the HQ user. |
+| `unreachable` with `Host key verification failed` | Trust the machine's host key from the HQ's user: `ssh-keyscan -H <address> >> ~/.ssh/known_hosts`. |
+| `unreachable` with `timed out` | Machine asleep, off the tailnet, its host service stopped, or sshd disabled. |
+| `unreachable` with `No such file or directory` | The host is not running on that machine: `hq host install`. |
+| `gate_denied` | The call used a method the gate does not allow. |
+| `agent_not_ready` at spawn | Agent is at a dialog. Read the screen from the spawn result and answer with `keys`. |
+| Spawn fails with `cannot sandbox the agent` | No sandbox program works on that machine (install `bubblewrap` on Linux, allow user namespaces on Ubuntu 24.04), or the project directory contains your home. |
+| An agent's MCP server or plugin is missing | The sandbox refused its host; see the egress log and add it to `agent_host.sandbox.allow_domains`. |
+| Spawned Claude replies `Login expired` | The user account on that host is not logged in to that CLI. |
+| A stack specialist starts nothing | `hq stack list` shows its `problem` (a coding harness, an unknown purpose, a profile without `one_shot_args`), its queue is empty (`task_next` for that name, less code-shaped work), a run is up, or its `runs_per_day` budget is spent. A task whose run could not start is left a comment and tried again after 30 minutes. |
+| A stack run ended and its task is blocked | The process exited non-zero (a crash or a refused login). Its last screen is in `harness_session_logs`; fix the cause, then assign the task to the specialist again or `hq stack run <name> <task>`. |

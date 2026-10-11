@@ -67,9 +67,10 @@ fn host_row(h: &Host) -> Value {
 
 /// Each known harness and profile with its category (`coding` or `general_purpose`).
 fn harness_categories() -> serde_json::Map<String, Value> {
-    harness::known_harnesses()
+    let cfg = harness::agent_host_config();
+    harness::known_in(&cfg)
         .into_iter()
-        .filter_map(|name| harness::category_of(&name).map(|c| (name, json!(c.as_str()))))
+        .filter_map(|name| harness::category_in(&cfg, &name).map(|c| (name, json!(c.as_str()))))
         .collect()
 }
 

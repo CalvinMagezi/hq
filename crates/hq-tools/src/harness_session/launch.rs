@@ -109,6 +109,11 @@ pub(super) struct Launch<'a> {
     /// in place of an interactive start. No prompt is typed and a host restart
     /// does not bring the agent back.
     pub(super) one_shot: Option<&'a str>,
+    /// Who started the session (`registry::ORIGIN_*`), written with the row so
+    /// no reader ever sees it under the default origin. `None` keeps the
+    /// column's default (`user`); callers that learn the origin late set it
+    /// with `tag_origin`.
+    pub(super) origin: Option<&'a str>,
 }
 
 pub(super) fn workspace_label(harness: &str, label: &str) -> String {
@@ -164,6 +169,7 @@ pub(super) struct OwnedLaunch {
     purpose: Purpose,
     observe: Vec<String>,
     one_shot: Option<String>,
+    origin: Option<String>,
 }
 
 impl OwnedLaunch {
@@ -184,6 +190,7 @@ impl OwnedLaunch {
             purpose: l.purpose,
             observe: l.observe.to_vec(),
             one_shot: own(l.one_shot),
+            origin: own(l.origin),
         }
     }
 
@@ -210,6 +217,7 @@ impl OwnedLaunch {
             purpose: self.purpose,
             observe: &self.observe,
             one_shot: self.one_shot.as_deref(),
+            origin: self.origin.as_deref(),
         }
     }
 }
@@ -392,6 +400,7 @@ pub(super) fn record_placement(
     let goal = (l.goal.goal.map(str::to_string), l.goal.done_criteria.map(str::to_string));
     let parent = l.parent.map(|(id, depth)| (id.to_string(), depth));
     let (purpose, observe) = (l.purpose, l.observe.to_vec());
+    let origin = l.origin.map(str::to_string);
     db.with_conn(move |c| {
         let (host, name, ws, pane) = &placement_owned;
         let placement = Placement {
@@ -415,6 +424,9 @@ pub(super) fn record_placement(
                 purpose: Some(purpose.as_str()),
             },
         )?;
+        if let Some(origin) = &origin {
+            registry::set_origin(c, name, origin)?;
+        }
         if let Some((parent, depth)) = &parent {
             registry::set_parent(c, name, parent, *depth)?;
         }
@@ -650,6 +662,7 @@ pub(crate) async fn spawn_on(
             purpose,
             observe: req.observe,
             one_shot: None,
+            origin: None,
         },
     )
     .await?;

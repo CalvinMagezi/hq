@@ -651,5 +651,6 @@ fn agent_from_json(v: &Value) -> Option<AgentInfo> {
             .unwrap_or(false),
         agent_session_id: None,
         exited: v.get("status").and_then(Value::as_str) == Some("exited"),
+        exit_code: v.get("exit_code").and_then(Value::as_u64).map(|c| c as u32),
     })
 }

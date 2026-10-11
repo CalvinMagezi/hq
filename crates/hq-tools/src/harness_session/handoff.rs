@@ -207,7 +207,7 @@ fn existing_report(
         "thread_id": row.owner_thread,
         "host": row.host,
         "links": links(row.owner_thread.as_deref(), &task.id),
-        "session": super::session_view(&row, &live),
+        "session": super::session_view(&row, &live, &super::spec::agent_host_config()),
     });
     if unreachable {
         report["note"] = json!(

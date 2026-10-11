@@ -42,9 +42,9 @@ pub struct Specialist {
     #[serde(default)]
     pub purposes: Vec<String>,
 
-    /// Where runs start. Unset: `~/.hq/stack/<name>` on the host, created on a
-    /// local host when missing. Must pass the same deny and allow lists as any
-    /// other session folder.
+    /// Where runs start. Unset: a `stack-<name>` folder in the host's HQ folder
+    /// (`~/Documents/HQ` on that machine), made when missing. Must pass the same
+    /// deny and allow lists as any other session folder.
     #[serde(default)]
     pub cwd: Option<String>,
 

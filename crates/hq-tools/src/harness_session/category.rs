@@ -61,11 +61,7 @@ impl HarnessCategory {
 }
 
 fn coding_names() -> Vec<&'static str> {
-    super::spec::SPECS
-        .iter()
-        .filter(|s| s.category == HarnessCategory::Coding)
-        .map(|s| s.harness)
-        .collect()
+    super::spec::names_in(HarnessCategory::Coding)
 }
 
 /// What a session was started to do. Stored on the session, reported in every

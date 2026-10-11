@@ -35,6 +35,10 @@ pub type HostResolver<'a> = &'a (dyn Fn(Option<&str>) -> Result<Host> + Sync);
 /// Tasks whose last launch failed, and when: tried again after `LAUNCH_BACKOFF`.
 static BACKOFF: Mutex<Option<HashMap<String, Instant>>> = Mutex::new(None);
 
+/// How far down a specialist's queue one sweep looks for a task that is not
+/// backed off, so one task that cannot start never holds up the rest.
+const QUEUE_LOOKAHEAD: usize = 25;
+
 fn backed_off(task_id: &str) -> bool {
     let guard = BACKOFF.lock().unwrap_or_else(|p| p.into_inner());
     guard
@@ -43,7 +47,7 @@ fn backed_off(task_id: &str) -> bool {
         .is_some_and(|at| at.elapsed() < LAUNCH_BACKOFF)
 }
 
-fn back_off(task_id: &str) {
+pub(super) fn back_off(task_id: &str) {
     let mut guard = BACKOFF.lock().unwrap_or_else(|p| p.into_inner());
     guard.get_or_insert_with(HashMap::new).insert(task_id.to_string(), Instant::now());
 }
@@ -100,7 +104,8 @@ pub fn purpose_for_task(task: &t::Task, lane: &[Purpose]) -> Purpose {
         .iter()
         .filter_map(|tag| Purpose::parse(tag).ok())
         .find(|p| lane.contains(p))
-        .unwrap_or(lane[0])
+        .or_else(|| lane.first().copied())
+        .unwrap_or(Purpose::General)
 }
 
 /// The text a run starts with: the task, where it sits, where the last run left
@@ -150,7 +155,10 @@ pub fn brief_for(
 }
 
 /// One sweep: for every enabled specialist, start a run for its next task when
-/// nothing of its is running, its budget has room, and a task is ready.
+/// nothing of its is running, its budget has room, and a task is ready. A spent
+/// budget and a running run are nothing to do, not a problem to report; a
+/// specialist that cannot be resolved or a run that could not start is one line
+/// in `skipped`.
 pub async fn dispatch(
     vault_path: &Path,
     db: &Arc<Database>,
@@ -179,10 +187,12 @@ async fn dispatch_one(
     s: &Specialist,
     resolve: HostResolver<'_>,
 ) -> Result<Option<Value>> {
-    let lane = lane_for(cfg, s)?;
+    // Before the lane: a run past its limit is stopped even when the
+    // specialist's config has stopped resolving since it started.
     if stop_overrunning(db, s)? {
         return Ok(None);
     }
+    let lane = lane_for(cfg, s)?;
     let label = s.label();
     let running = db.with_conn({
         let label = label.clone();
@@ -196,12 +206,13 @@ async fn dispatch_one(
         move |c| registry::count_started_since(c, registry::ORIGIN_STACK, &label, BUDGET_WINDOW_MINUTES)
     })?;
     if started_today >= s.runs_per_day() as i64 {
-        bail!("{started_today} runs in the last 24h, the budget is {} (runs_per_day)", s.runs_per_day());
+        tracing::debug!(specialist = %s.name, started_today, budget = s.runs_per_day(), "stack: run budget spent");
+        return Ok(None);
     }
     let name = s.name.clone();
     let no_code = lane.harness.category() == HarnessCategory::GeneralPurpose;
     let next = db.with_conn(move |c| {
-        t::next_task(
+        t::next_tasks(
             c,
             &t::NextTaskQuery {
                 assignee: &name,
@@ -210,9 +221,10 @@ async fn dispatch_one(
                 tag: None,
                 no_code_work: no_code,
             },
+            QUEUE_LOOKAHEAD,
         )
     })?;
-    let Some(task) = next.filter(|task| !backed_off(&task.id)) else {
+    let Some(task) = next.into_iter().find(|task| !backed_off(&task.id)) else {
         return Ok(None);
     };
     start_run(vault_path, db, cfg, s, &lane, &task, resolve).await.map(Some)
@@ -252,7 +264,10 @@ pub async fn run_for(
     let task = db
         .with_conn(move |c| t::get_task(c, &wanted))?
         .ok_or_else(|| anyhow::anyhow!("no task '{task_ref}'"))?;
-    if lane.harness.category() == HarnessCategory::GeneralPurpose && is_code_shaped(db, &task)? {
+    let task_id = task.id.clone();
+    if lane.harness.category() == HarnessCategory::GeneralPurpose
+        && db.with_conn(move |c| t::is_code_work(c, &task_id))?
+    {
         bail!(
             "task {} is code work (tagged '{}' or linked to a commit or pull request); a general-purpose specialist never takes it",
             task.display_id,
@@ -260,15 +275,6 @@ pub async fn run_for(
         );
     }
     start_run(vault_path, db, cfg, s, &lane, &task, resolve).await
-}
-
-fn is_code_shaped(db: &Arc<Database>, task: &t::Task) -> Result<bool> {
-    if task.tags.iter().any(|tag| tag == t::CODE_TAG) {
-        return Ok(true);
-    }
-    let id = task.id.clone();
-    let links = db.with_conn(move |c| t::list_task_links(c, &id))?;
-    Ok(links.iter().any(|l| l.kind == "commit" || l.kind == "pr"))
 }
 
 /// Launch the run and leave the task a comment when it could not start.
@@ -315,10 +321,12 @@ async fn start_run(
                 purpose,
                 observe: &[],
                 one_shot: Some(&brief),
+                // In the row's own write: a run under the default origin would
+                // escape the one-at-a-time rule and the budget.
+                origin: Some(registry::ORIGIN_STACK),
             },
         )
         .await?;
-        super::tag_origin(db, &report, registry::ORIGIN_STACK);
         anyhow::Ok(report)
     }
     .await;
@@ -343,8 +351,8 @@ async fn start_run(
     }
 }
 
-/// The folder a specialist's runs start in: the configured one, else a folder
-/// of its own in the host's HQ folder, made there when missing.
+/// The folder a specialist's runs start in: the configured one, else
+/// `stack-<name>` in the host's HQ folder, made there when missing.
 fn run_dir(host: &dyn crate::agent_host::HostBackend, cfg: &HqConfig, s: &Specialist) -> Result<String> {
     if let Some(cwd) = s.cwd.as_deref().map(str::trim).filter(|c| !c.is_empty()) {
         let path = super::require_cwd_in(Some(cwd), &cfg.agent_host, false)?;

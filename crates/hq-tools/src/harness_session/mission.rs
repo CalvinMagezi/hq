@@ -39,6 +39,10 @@ pub enum Event {
     /// A stack specialist's one-shot run ended with output on screen: the run is
     /// its whole turn, so this is `Finished` for a session that will not come back.
     RunEnded,
+    /// A stack specialist's one-shot run ended with a non-zero exit code (or
+    /// nothing on screen on a host that reports no code): the run did not
+    /// finish, so the task is blocked like an exit. A run is never resumed.
+    RunFailed,
     Exited,
     Stopped,
     /// The supervisor dismissed a known harmless prompt; commented once per session.
@@ -94,7 +98,7 @@ fn record_in(
         return Ok(None);
     };
     let siblings_running = match event {
-        Event::Exited | Event::BlockedAtLaunch => {
+        Event::Exited | Event::RunFailed | Event::BlockedAtLaunch => {
             registry::count_running_for_mission(conn, &task.id, &session.id)? > 0
         }
         _ => false,
@@ -171,7 +175,10 @@ fn target(
     // Work that spans many turns is not done, or stuck, because one turn ended or a
     // session exited; the people and agents on it say when it is.
     if long_horizon
-        && matches!(event, Event::Finished | Event::RunEnded | Event::Exited | Event::BlockedAtLaunch)
+        && matches!(
+            event,
+            Event::Finished | Event::RunEnded | Event::RunFailed | Event::Exited | Event::BlockedAtLaunch
+        )
     {
         return None;
     }
@@ -184,11 +191,14 @@ fn target(
         Event::Finished | Event::RunEnded => {
             Some((&[t::STATUS_IN_PROGRESS], t::STATUS_READY_FOR_REVIEW))
         }
-        Event::Exited if !siblings_running => Some((&[t::STATUS_IN_PROGRESS], t::STATUS_BLOCKED)),
+        Event::Exited | Event::RunFailed if !siblings_running => {
+            Some((&[t::STATUS_IN_PROGRESS], t::STATUS_BLOCKED))
+        }
         Event::BlockedAtLaunch if !siblings_running => {
             Some((&[t::STATUS_IN_PROGRESS], t::STATUS_BLOCKED))
         }
         Event::Exited
+        | Event::RunFailed
         | Event::BlockedAtLaunch
         | Event::Blocked
         | Event::Stopped
@@ -236,7 +246,7 @@ fn open_lease(
 fn close_lease(conn: &Connection, session: &HarnessSessionRow, event: Event) -> Result<()> {
     let reason = match event {
         Event::Finished | Event::RunEnded => t::END_RELEASED,
-        Event::Exited | Event::Stopped | Event::BlockedAtLaunch => t::END_SESSION_ENDED,
+        Event::Exited | Event::RunFailed | Event::Stopped | Event::BlockedAtLaunch => t::END_SESSION_ENDED,
         _ => return Ok(()),
     };
     t::close_for_session(conn, &session.id, reason)?;
@@ -298,6 +308,10 @@ fn comment(session: &HarnessSessionRow, event: Event, moved: Option<&Task>) -> O
             "{who} finished its run, so the task is ready for review. Its output is the session's last screen (`harness_session_logs`); read it before marking the task complete, the agent finishing is not verification."
         ),
         Event::RunEnded => format!("{who} finished its run; its output is in `harness_session_logs`."),
+        Event::RunFailed if moved.is_some() => format!(
+            "{who}'s run ended without finishing (the process exited with an error), so the task is blocked. Its last screen is in `harness_session_logs`. A run is never resumed: fix the cause, then assign the task to the specialist again or `hq stack run`."
+        ),
+        Event::RunFailed => format!("{who}'s run ended without finishing; its last screen is in `harness_session_logs`."),
         Event::Exited if moved.is_some() => format!(
             "{who} exited. No other session is working on this task, so it is blocked until someone resumes the session (`harness_session_resume`) or reviews its last output (`harness_session_logs`)."
         ),

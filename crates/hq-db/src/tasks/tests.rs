@@ -2252,6 +2252,13 @@ fn a_general_purpose_queue_leaves_out_code_shaped_tasks() {
     assert_eq!(db.with_conn(|c| next_task(c, &want("hermes", false))).unwrap().unwrap().id, "linked");
     let no_code = NextTaskQuery { no_code_work: true, ..want("hermes", false) };
     assert_eq!(db.with_conn(|c| next_task(c, &no_code)).unwrap().unwrap().id, "plain", "tagged and linked tasks are code work");
+    // The same rule answers for a task in hand, and the multi-pick keeps the queue's order.
+    let shaped: Vec<bool> = db
+        .with_conn(|c| ["tagged", "linked", "plain"].iter().map(|id| is_code_work(c, id)).collect())
+        .unwrap();
+    assert_eq!(shaped, [true, true, false]);
+    let picks: Vec<String> = db.with_conn(|c| next_tasks(c, &want("hermes", false), 10)).unwrap().into_iter().map(|t| t.id).collect();
+    assert_eq!(picks, ["linked", "plain", "tagged"]);
     move_to(&db, "plain", STATUS_COMPLETE).unwrap();
     assert!(db.with_conn(|c| next_task(c, &no_code)).unwrap().is_none());
 }

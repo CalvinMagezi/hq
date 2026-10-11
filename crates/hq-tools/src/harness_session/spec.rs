@@ -207,9 +207,15 @@ pub fn names_in(category: HarnessCategory) -> Vec<&'static str> {
     SPECS.iter().filter(|s| s.category == category).map(|s| s.harness).collect()
 }
 
-/// The category of a harness or profile name, when it resolves.
+/// The category of a harness or profile name, when it resolves. Loads the
+/// config; a caller with many names uses `category_in` on one load.
 pub fn category_of(name: &str) -> Option<HarnessCategory> {
-    resolve(name).ok().map(|h| h.spec.category)
+    category_in(&agent_host_config(), name)
+}
+
+/// `category_of` against a config already in hand.
+pub fn category_in(cfg: &AgentHostConfig, name: &str) -> Option<HarnessCategory> {
+    resolve_in(cfg, name).ok().map(|h| h.spec.category)
 }
 
 /// Aliases accepted in addition to each spec's canonical `harness` name
@@ -318,7 +324,7 @@ fn builtin_names() -> Vec<String> {
     SPECS.iter().map(|s| s.harness.to_string()).collect()
 }
 
-fn agent_host_config() -> AgentHostConfig {
+pub fn agent_host_config() -> AgentHostConfig {
     HqConfig::load().map(|c| c.agent_host).unwrap_or_default()
 }
 

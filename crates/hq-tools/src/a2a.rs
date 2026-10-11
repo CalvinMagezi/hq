@@ -13,7 +13,7 @@ use hq_db::tasks as t;
 use serde_json::{Value, json};
 use std::sync::Arc;
 
-use crate::harness_session::caller_session;
+use crate::harness_session::{HarnessCategory, caller_session};
 use crate::agent_host::AgentStatus;
 use crate::registry::HqTool;
 use crate::util::arg_str;
@@ -516,12 +516,16 @@ pub fn can_receive(status: AgentStatus) -> bool {
     matches!(status, AgentStatus::Idle | AgentStatus::Done)
 }
 
-/// `can_receive`, plus an agent the host does not classify (a kind with no rule
-/// file, such as a general-purpose agent): once its launch is over it is taken
-/// as able to read its input, since nothing will ever report it idle. Its own
-/// interface queues text typed mid-turn, as a person's would be.
-pub fn can_receive_agent(agent: &crate::agent_host::AgentInfo) -> bool {
-    can_receive(agent.status) || (agent.status == AgentStatus::Unknown && !agent.launch_pending)
+/// `can_receive`, plus a general-purpose agent the host does not classify (no
+/// rule file says when it is idle): once its launch is over it is taken as able
+/// to read its input, since nothing will ever report it idle, and its own
+/// interface queues text typed mid-turn as a person's would be. A coding agent
+/// without a rule file stays as strict as the others: `unknown` is not idle.
+pub fn can_receive_agent(agent: &crate::agent_host::AgentInfo, category: HarnessCategory) -> bool {
+    can_receive(agent.status)
+        || (category == HarnessCategory::GeneralPurpose
+            && agent.status == AgentStatus::Unknown
+            && !agent.launch_pending)
 }
 
 /// Types the next waiting message into the session if it is idle or done. A
@@ -544,8 +548,9 @@ pub fn deliver_to(
     db: &Arc<Database>,
     session_id: &str,
     agent: &crate::agent_host::AgentInfo,
+    category: HarnessCategory,
 ) -> Result<Option<i64>> {
-    if !can_receive_agent(agent) {
+    if !can_receive_agent(agent, category) {
         return Ok(None);
     }
     deliver_next(db, session_id, |text| {
@@ -692,16 +697,21 @@ mod tests {
             launch_pending,
             agent_session_id: None,
             exited: false,
+            exit_code: None,
         }
     }
 
     #[test]
-    fn an_agent_the_host_cannot_classify_takes_a_message_once_its_launch_is_over() {
-        assert!(can_receive_agent(&agent(AgentStatus::Idle, false)));
-        assert!(!can_receive_agent(&agent(AgentStatus::Working, false)));
-        assert!(!can_receive_agent(&agent(AgentStatus::Blocked, false)));
-        assert!(!can_receive_agent(&agent(AgentStatus::Unknown, true)), "still launching");
-        assert!(can_receive_agent(&agent(AgentStatus::Unknown, false)), "running, with no rule file to say idle");
+    fn a_general_purpose_agent_the_host_cannot_classify_takes_a_message_once_its_launch_is_over() {
+        let gp = HarnessCategory::GeneralPurpose;
+        assert!(can_receive_agent(&agent(AgentStatus::Idle, false), gp));
+        assert!(!can_receive_agent(&agent(AgentStatus::Working, false), gp));
+        assert!(!can_receive_agent(&agent(AgentStatus::Blocked, false), gp));
+        assert!(!can_receive_agent(&agent(AgentStatus::Unknown, true), gp), "still launching");
+        assert!(can_receive_agent(&agent(AgentStatus::Unknown, false), gp), "running, with no rule file to say idle");
+        let coding = HarnessCategory::Coding;
+        assert!(can_receive_agent(&agent(AgentStatus::Idle, false), coding));
+        assert!(!can_receive_agent(&agent(AgentStatus::Unknown, false), coding), "a coding agent without a rule file is not taken as idle");
     }
 
     #[test]

@@ -136,6 +136,9 @@ pub struct AgentInfo {
     /// The process has ended but the host still lists the pane (its screen can
     /// still be read). HQ treats such an agent as gone.
     pub exited: bool,
+    /// How the process ended, when `exited` and the host says. Zero is a run
+    /// that finished; anything else is a crash or a refusal.
+    pub exit_code: Option<u32>,
 }
 
 impl AgentInfo {
