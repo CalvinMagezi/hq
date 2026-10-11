@@ -389,6 +389,23 @@ impl Pane {
         });
     }
 
+    /// Kills the process group at once, with no grace period: for a lockdown,
+    /// where a child that ignores SIGHUP must not outlive its leader.
+    pub(crate) fn kill_now(&self) {
+        self.stopping.store(true, Ordering::SeqCst);
+        if lock(&self.shared.state).exit.is_some() {
+            return;
+        }
+        match self.pid.and_then(|p| i32::try_from(p).ok()) {
+            Some(pid) => {
+                let _ = killpg(Pid::from_raw(pid), Signal::SIGKILL);
+            }
+            None => {
+                let _ = lock(&self.killer).kill();
+            }
+        }
+    }
+
     pub(crate) fn wait_exit(&self, timeout: Duration) -> Result<u32, HostError> {
         self.shared.wait_exit(timeout)
     }

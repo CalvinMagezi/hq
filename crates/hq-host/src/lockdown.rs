@@ -10,6 +10,7 @@ use std::fs;
 use std::io::{ErrorKind, Write};
 use std::os::unix::fs::OpenOptionsExt;
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 const LOCKDOWN_FILE: &str = "lockdown.json";
@@ -69,23 +70,40 @@ pub fn read(dir: &Path) -> Option<Lockdown> {
 }
 
 /// Locks the host. A lockdown already in force is kept as it is, so the first
-/// cause is the one on record. Returns the lockdown that holds.
+/// cause is the one on record: the file is published with a hard link, which
+/// fails when one is already there, so two callers at once cannot overwrite each
+/// other. Returns the lockdown that holds.
 pub fn engage(dir: &Path, lockdown: &Lockdown) -> std::io::Result<Lockdown> {
     if let Some(existing) = read(dir) {
         return Ok(existing);
     }
-    let path = lockdown_path(dir);
-    let tmp = dir.join(format!(".{LOCKDOWN_FILE}.{}", std::process::id()));
+    let tmp = unique_tmp(dir);
+    let written =
+        write_private(&tmp, lockdown).and_then(|()| fs::hard_link(&tmp, lockdown_path(dir)));
+    let _ = fs::remove_file(&tmp);
+    match written {
+        Ok(()) => Ok(lockdown.clone()),
+        Err(e) if e.kind() == ErrorKind::AlreadyExists => {
+            Ok(read(dir).unwrap_or_else(|| lockdown.clone()))
+        }
+        Err(e) => Err(e),
+    }
+}
+
+fn unique_tmp(dir: &Path) -> PathBuf {
+    static NEXT: AtomicU64 = AtomicU64::new(0);
+    let n = NEXT.fetch_add(1, Ordering::Relaxed);
+    dir.join(format!(".{LOCKDOWN_FILE}.{}.{n}", std::process::id()))
+}
+
+fn write_private(path: &Path, lockdown: &Lockdown) -> std::io::Result<()> {
     let mut file = fs::OpenOptions::new()
         .write(true)
-        .create(true)
-        .truncate(true)
+        .create_new(true)
         .mode(FILE_MODE)
-        .open(&tmp)?;
+        .open(path)?;
     file.write_all(&serde_json::to_vec_pretty(lockdown).map_err(std::io::Error::other)?)?;
-    file.sync_all()?;
-    fs::rename(&tmp, &path)?;
-    Ok(lockdown.clone())
+    file.sync_all()
 }
 
 /// Lifts the lockdown. Returns whether there was one.
@@ -112,6 +130,26 @@ mod tests {
         assert!(clear(dir.path()).unwrap());
         assert!(!clear(dir.path()).unwrap());
         assert_eq!(read(dir.path()), None);
+    }
+
+    #[test]
+    fn concurrent_engages_agree_on_one_cause() {
+        let dir = tempfile::tempdir().unwrap();
+        let held: Vec<Lockdown> = std::thread::scope(|scope| {
+            let workers: Vec<_> = (0..8)
+                .map(|n| {
+                    let dir = dir.path();
+                    scope.spawn(move || {
+                        engage(dir, &Lockdown::new(&format!("cause {n}"), "test")).unwrap()
+                    })
+                })
+                .collect();
+            workers.into_iter().map(|w| w.join().unwrap()).collect()
+        });
+        let on_disk = read(dir.path()).unwrap();
+        assert!(held.iter().all(|h| h.reason == on_disk.reason), "{held:?}");
+        let leftovers = fs::read_dir(dir.path()).unwrap().count();
+        assert_eq!(leftovers, 1, "only lockdown.json remains");
     }
 
     #[test]

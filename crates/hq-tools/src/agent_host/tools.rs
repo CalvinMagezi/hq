@@ -63,7 +63,7 @@ impl HqTool for HostLockdownTool {
         "host_lockdown"
     }
     fn description(&self) -> &str {
-        "Emergency stop for coding agents: on a host (default every host) stop every agent it runs, including ones HQ did not start, and refuse every new start, resume and restart until someone at that machine runs `hq host unlock`. HQ cannot unlock a host. Use when agents are starting that nobody asked for, or one is doing harm. The agents' records and transcripts are kept. A host that cannot be reached is reported as not locked; lock it there with `hq host lockdown`."
+        "Emergency stop for coding agents: on a host (default every host) stop every agent it runs, including ones HQ did not start, and refuse every new start, resume and restart until someone at that machine runs `hq host unlock`. HQ cannot unlock a host. Use when agents are starting that nobody asked for, or one is doing harm. The host forgets the stopped agents so unlocking restarts none of them; their transcripts stay, and harness_session_resume can bring one back on purpose. A host that cannot be reached is reported as not locked; lock it there with `hq host lockdown`."
     }
     fn parameters(&self) -> Value {
         json!({

@@ -491,8 +491,7 @@ impl Conn {
             // method that unlocks.
             "host.lockdown" => {
                 let reason = params.get("reason").and_then(Value::as_str).unwrap_or_default();
-                let held = self.host.lockdown(reason, "operator").map_err(host_err)?;
-                Ok(json!({ "lockdown": held }))
+                Ok(json!({ "lockdown": self.host.lockdown(reason, "operator") }))
             }
             "host.workspace" => self.workspace_call(|root| Ok(crate::workspace::describe(root))),
             "host.dirs" => {

@@ -252,31 +252,38 @@ egress proxy; the host sets it for all agents.
 
 The kill switch for agents nobody asked for. While `lockdown.json` (mode 0600)
 sits in the host directory, `agent.spawn` and `agent.resume` answer
-`locked_down`, and a host that starts up restores nothing: every saved agent is
-kept as waiting, so it can be resumed by hand once the host is unlocked.
+`locked_down`, and a host that starts up restores nothing. A lockdown forgets
+the agents it stopped and any waiting ones, so unlocking brings none of them
+back by itself; the agents' own transcripts stay, and HQ keeps what it needs to
+resume one on purpose (`harness_session_resume`).
 
 - **Locking** is open to everyone who can drive the host: `hq host lockdown
   "<reason>"` on the machine, the `host.lockdown` method (also through the ssh
   gate), and HQ's `host_lockdown` tool, which locks every host when none is named.
-  It stops every agent the host runs with its whole process group, and keeps
-  their records and transcripts. `hq host lockdown` writes the file before it
-  asks the host, so new starts are refused even when the host is wedged or down.
+  It kills every agent the host runs with its whole process group at once (no
+  grace period, so a child that ignores SIGHUP dies too). A start that raced
+  the lockdown is killed as soon as it lands. `hq host lockdown` writes the
+  file before it asks the host, so new starts are refused even when the host is
+  wedged or down. A host that cannot write the file stays locked in memory
+  until it restarts.
 - **Unlocking** is only `hq host unlock` on that machine, which deletes the file.
   No method unlocks, so a key that can drive the host from elsewhere cannot lift
   a lockdown, and sandboxed agents cannot reach the directory.
 - **The breaker.** `hq host serve` locks itself when more than `--max-starts`
   agents (default 10) start within 10 minutes. It refuses the start that went
-  over but stops nothing already running. Agents restored at startup do not
-  count.
+  over but stops nothing already running. Only starts that succeeded count;
+  agents restored or resumed after a restart do not.
 - **The cap.** `--max-agents` (default 16) bounds the agents running or waiting
-  at once, so a slow leak stops at a known number.
+  at once, so a slow leak stops at a known number. Saved agents over the cap at
+  startup wait instead of being dropped.
 - **Alerts.** A lockdown is an event (`kind: lockdown`, the reason in `rule`).
   HQ's daemon raises an action-needed inbox item and an interrupting relay
   message for it.
 - **Tests.** A cargo test binary that resolves a real host through
-  `agent_host::host` or `all_hosts` is refused: a remote host always, the
-  built-in one unless `HQ_HOST_DIR` names a directory other than the machine's
-  own. A test that forgot its folder once started real agents this way.
+  `NativeBackend` refuses every call it makes to the machine's own host
+  directory or to a remote over the real `ssh`; a test uses a temporary host
+  directory or a stand-in program. A test that forgot its folder once started
+  real agents this way.
 
 The lockdown covers agents this host runs. Agents a person starts in a terminal,
 and other tools that start agents, are outside it.

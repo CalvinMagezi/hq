@@ -1,7 +1,9 @@
 //! The kill switch and the start-rate breaker, through real sockets and processes.
 #![cfg(unix)]
 
-use hq_host::{BurstLimit, Client, ClientError, Host, Server, clear_lockdown, read_lockdown};
+use hq_host::{
+    BurstLimit, Client, ClientError, Host, Server, SpawnSpec, clear_lockdown, read_lockdown,
+};
 use serde_json::{Value, json};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -49,6 +51,10 @@ impl Drop for Running {
 fn sleeper(name: &str) -> Value {
     json!({ "name": name, "argv": ["sh", "-c", "sleep 60"], "cwd": std::env::temp_dir(),
             "resume_argv": ["sh", "-c", "sleep 60"] })
+}
+
+fn sh(script: &str) -> Vec<String> {
+    vec!["sh".into(), "-c".into(), script.into()]
 }
 
 fn error_code(result: Result<Value, ClientError>) -> String {
@@ -102,7 +108,7 @@ fn there_is_no_method_that_unlocks() {
 }
 
 #[test]
-fn a_locked_host_restores_nothing_after_a_restart_until_unlocked() {
+fn a_locked_host_restores_nothing_after_a_restart_and_forgets_it() {
     let tmp = tempfile::tempdir().unwrap();
     let run = tmp.path().join("run");
     {
@@ -122,14 +128,82 @@ fn a_locked_host_restores_nothing_after_a_restart_until_unlocked() {
             .any(|(name, why)| name == "kept" && why.contains("locked down"))
     );
     assert!(
-        host.awaiting().iter().any(|a| a.name == "kept"),
-        "the record is kept for later"
+        host.awaiting().is_empty(),
+        "unlocking must not bring it back by itself"
     );
     assert!(host.list().is_empty());
 
     assert!(clear_lockdown(&run).unwrap());
-    let info = host.resume("kept", Vec::new()).unwrap();
-    assert_eq!(info.name, "kept");
+    assert!(
+        Host::new()
+            .with_state_dir(&run)
+            .restore()
+            .restored
+            .is_empty(),
+        "forgotten for good"
+    );
+    host.spawn(SpawnSpec::new(
+        "fresh",
+        sh("sleep 60"),
+        std::env::temp_dir(),
+    ))
+    .unwrap();
+    host.shutdown();
+}
+
+#[test]
+fn refused_starts_do_not_trip_the_breaker() {
+    let tmp = tempfile::tempdir().unwrap();
+    let run = tmp.path().join("run");
+    let limit = BurstLimit {
+        max: BREAKER_MAX,
+        window: BREAKER_WINDOW,
+    };
+    let host = Host::new().with_state_dir(&run).with_burst_limit(limit);
+    for _ in 0..BREAKER_MAX * 3 {
+        assert!(
+            host.spawn(SpawnSpec::new("Bad Name", sh("true"), std::env::temp_dir()))
+                .is_err()
+        );
+    }
+    host.spawn(SpawnSpec::new("good", sh("sleep 60"), std::env::temp_dir()))
+        .unwrap();
+    assert!(read_lockdown(&run).is_none());
+    host.shutdown();
+}
+
+#[test]
+fn resuming_after_a_restart_skips_the_breaker() {
+    let tmp = tempfile::tempdir().unwrap();
+    let run = tmp.path().join("run");
+    let count = BREAKER_MAX * 2;
+    {
+        let first = Host::new().with_state_dir(&run);
+        for n in 0..count {
+            let mut spec = SpawnSpec::new(format!("s{n}"), sh("sleep 60"), std::env::temp_dir());
+            spec.env = vec![("HQ_SESSION_ID".into(), format!("s{n}"))];
+            spec.resume_argv = Some(sh("sleep 60"));
+            first.spawn(spec).unwrap();
+        }
+        first.shutdown();
+    }
+    let limit = BurstLimit {
+        max: BREAKER_MAX,
+        window: BREAKER_WINDOW,
+    };
+    let host = Host::new().with_state_dir(&run).with_burst_limit(limit);
+    host.restore();
+    for n in 0..count {
+        host.resume(
+            &format!("s{n}"),
+            vec![("HQ_SESSION_ID".into(), format!("s{n}"))],
+        )
+        .unwrap();
+    }
+    assert!(
+        read_lockdown(&run).is_none(),
+        "a restart's resumes are not a burst"
+    );
     host.shutdown();
 }
 
