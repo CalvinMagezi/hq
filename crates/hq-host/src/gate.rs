@@ -17,9 +17,11 @@ pub const GATE_DENIED_EXIT: i32 = 64;
 
 /// Methods a remote caller may use. `host.stop` is left out (a remote key must
 /// not end the host), and so is `agent.report`, which belongs to the agent's own
-/// hooks on the machine where it runs.
-const ALLOWED: [&str; 22] = [
+/// hooks on the machine where it runs. `host.lockdown` is in so HQ can stop a
+/// machine's agents from anywhere; unlocking has no method at all.
+const ALLOWED: [&str; 23] = [
     "host.status",
+    "host.lockdown",
     "host.workspace",
     "host.dirs",
     "host.mkdir",
@@ -89,6 +91,12 @@ mod tests {
 
     fn request(method: &str, params: &str) -> String {
         serde_json::to_string(&[method, params]).unwrap()
+    }
+
+    #[test]
+    fn a_remote_caller_can_lock_a_host_but_never_unlock_it() {
+        assert!(parse_request(&request("host.lockdown", r#"{"reason":"r"}"#)).is_ok());
+        assert!(parse_request(&request("host.unlock", "{}")).is_err());
     }
 
     #[test]

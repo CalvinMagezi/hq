@@ -32,6 +32,8 @@ mod hooks;
 #[cfg(unix)]
 mod keys;
 #[cfg(unix)]
+mod lockdown;
+#[cfg(unix)]
 mod pane;
 #[cfg(unix)]
 mod proto;
@@ -65,8 +67,10 @@ pub use error::HostError;
 #[cfg(unix)]
 pub use events::{Event, EventKind, EventLog, Poll};
 #[cfg(unix)]
+pub use lockdown::{Lockdown, clear as clear_lockdown, engage as engage_lockdown, lockdown_path, read as read_lockdown};
+#[cfg(unix)]
 pub use host::{
-    AwaitingInfo, Host, PANE_TOKEN_ENV, RUN_DIR_ENV, PaneInfo, PaneStatus, ReadSource, RestoreReport, SpawnSpec, valid_name,
+    AwaitingInfo, BurstLimit, Host, PANE_TOKEN_ENV, RUN_DIR_ENV, PaneInfo, PaneStatus, ReadSource, RestoreReport, SpawnSpec, valid_name,
 };
 #[cfg(unix)]
 pub use gate::{Denied, GATE_DENIED_EXIT, MAX_GATE_INPUT, forward as gate_forward, parse_request as gate_parse_request};

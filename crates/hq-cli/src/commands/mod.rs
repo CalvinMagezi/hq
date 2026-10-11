@@ -26,6 +26,8 @@ pub mod host {
         pub addr: Option<String>,
         pub dir: Option<PathBuf>,
         pub allow_unsandboxed: bool,
+        pub max_agents: Option<usize>,
+        pub max_starts: Option<usize>,
         pub key: Option<String>,
         pub from: Option<String>,
         pub port: Option<u16>,

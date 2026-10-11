@@ -23,11 +23,13 @@ again after updates. Run `hq host install` again after replacing the binary.
 
 ```
 hq host serve            # run the host in this terminal (Ctrl-C stops it)
-hq host status           # protocol and host version, pid, number of agents
+hq host status           # protocol and host version, pid, number of agents, lockdown
 hq host stop             # ask a running host to exit
+hq host lockdown "why"   # emergency stop: stop every agent, start none (see Lockdown)
+hq host unlock           # lift a lockdown; only works on this machine
 ```
 
-All three take `--dir <path>` (default `~/.hq/run/host`). The directory is
+All of them take `--dir <path>` (default `~/.hq/run/host`). The directory is
 created with mode 0700 and holds:
 
 - `host.sock`: the control socket, mode 0600.
@@ -50,7 +52,8 @@ version gets `protocol_mismatch`.
 
 | Method | Params | Result |
 |---|---|---|
-| `host.status` | none | `protocol_version`, `host_version`, `pid`, `agents`, `agents_working`, `agents_blocked`, `binary_stale` |
+| `host.status` | none | `protocol_version`, `host_version`, `pid`, `agents`, `agents_working`, `agents_blocked`, `binary_stale`, `lockdown` (`reason`, `source`, `at`, or null) |
+| `host.lockdown` | optional `reason` | `{"lockdown"}`; stops every agent and refuses every start until `hq host unlock` (see Lockdown). There is no unlock method. |
 | `host.workspace` | none | `root` (the HQ folder, `~/Documents/HQ`, created if missing), `os`, `wsl`, `explorer_path` (the `\\wsl$\...` path on WSL2, else null) |
 | `host.dirs` | optional `path` (the HQ folder when absent) | `path`, `parent`, `dirs` (`name`, `path`), `truncated`; only folders inside the HQ folder, symlinks out of it refused |
 | `host.mkdir` | `name`, optional `parent` | `{"path"}`; one folder name (no slashes, colons, `~`, `$` or backticks), idempotent |
@@ -244,6 +247,47 @@ screen.
 
 Every Node-based agent (Cursor, pi) needs `NODE_USE_ENV_PROXY=1` to send its requests through the
 egress proxy; the host sets it for all agents.
+
+## Lockdown
+
+The kill switch for agents nobody asked for. While `lockdown.json` (mode 0600)
+sits in the host directory, `agent.spawn` and `agent.resume` answer
+`locked_down`, and a host that starts up restores nothing. A lockdown forgets
+the agents it stopped and any waiting ones, so unlocking brings none of them
+back by itself; the agents' own transcripts stay, and HQ keeps what it needs to
+resume one on purpose (`harness_session_resume`).
+
+- **Locking** is open to everyone who can drive the host: `hq host lockdown
+  "<reason>"` on the machine, the `host.lockdown` method (also through the ssh
+  gate), and HQ's `host_lockdown` tool, which locks every host when none is named.
+  It kills every agent the host runs with its whole process group at once (no
+  grace period, so a child that ignores SIGHUP dies with its running agent;
+  children left behind by an agent that already exited are not reached). A start that raced
+  the lockdown is killed as soon as it lands. `hq host lockdown` writes the
+  file before it asks the host, so new starts are refused even when the host is
+  wedged or down. A host that cannot write the file stays locked in memory
+  until it restarts.
+- **Unlocking** is only `hq host unlock` on that machine, which deletes the file.
+  No method unlocks, so a key that can drive the host from elsewhere cannot lift
+  a lockdown, and sandboxed agents cannot reach the directory.
+- **The breaker.** `hq host serve` locks itself when more than `--max-starts`
+  agents (default 10) start within 10 minutes. It refuses the start that went
+  over but stops nothing already running. Only starts that succeeded count;
+  agents restored or resumed after a restart do not.
+- **The cap.** `--max-agents` (default 16) bounds the agents running or waiting
+  at once, so a slow leak stops at a known number. Saved agents over the cap at
+  startup wait instead of being dropped.
+- **Alerts.** A lockdown is an event (`kind: lockdown`, the reason in `rule`).
+  HQ's daemon raises an action-needed inbox item and an interrupting relay
+  message for it.
+- **Tests.** A cargo test binary that resolves a real host through
+  `NativeBackend` refuses every call it makes to the machine's own host
+  directory or to a remote over the real `ssh`; a test uses a temporary host
+  directory or a stand-in program. A test that forgot its folder once started
+  real agents this way.
+
+The lockdown covers agents this host runs. Agents a person starts in a terminal,
+and other tools that start agents, are outside it.
 
 ## Restarts
 

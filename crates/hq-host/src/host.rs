@@ -6,6 +6,7 @@ use crate::env::pane_env;
 use crate::error::HostError;
 use crate::events::{EventKind, EventLog};
 use crate::keys::encode_key;
+use crate::lockdown::{self, Lockdown};
 use crate::report;
 use crate::sandbox::{self, Mode, SandboxSpec};
 use crate::egress::{Decision, Egress};
@@ -13,7 +14,7 @@ use crate::token;
 pub use crate::pane::PaneStatus;
 use crate::pane::{ExitHook, LaunchArgs, Pane, Resume};
 use crate::state::{PaneRecord, StateFile};
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, VecDeque};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, MutexGuard};
 use std::time::{Duration, Instant};
@@ -179,6 +180,20 @@ pub struct Host {
     /// The `hq` binary a Linux sandbox runs its egress relay with; this process's
     /// own binary when unset (right for `hq host serve`).
     helper: Option<PathBuf>,
+    /// Where `lockdown.json` lives (the state directory). A host without one keeps
+    /// its lockdown in memory.
+    lockdown_dir: Option<PathBuf>,
+    memory_lockdown: Mutex<Option<Lockdown>>,
+    /// Most starts allowed within a window before the host locks itself.
+    burst_limit: Option<BurstLimit>,
+    recent_starts: Mutex<VecDeque<Instant>>,
+}
+
+/// The start-rate breaker: more than `max` starts within `window` locks the host.
+#[derive(Debug, Clone, Copy)]
+pub struct BurstLimit {
+    pub max: usize,
+    pub window: Duration,
 }
 
 /// What `Host::restore` did.
@@ -234,6 +249,10 @@ impl Host {
             egress: Arc::new(Egress::new()),
             require_sandbox: false,
             helper: None,
+            lockdown_dir: None,
+            memory_lockdown: Mutex::new(None),
+            burst_limit: None,
+            recent_starts: Mutex::new(VecDeque::new()),
         }
     }
 
@@ -258,10 +277,115 @@ impl Host {
         self
     }
 
-    /// A host that remembers its resumable agents in `<dir>/session.json`.
+    /// A host that remembers its resumable agents in `<dir>/session.json` and
+    /// keeps its lockdown in `<dir>/lockdown.json`.
     pub fn with_state_dir(mut self, dir: &Path) -> Self {
         self.state = Some(Arc::new(StateFile::new(dir)));
+        self.lockdown_dir = Some(dir.to_path_buf());
         self
+    }
+
+    /// A host that locks itself when more than `limit.max` agents are started
+    /// within `limit.window`. Agents restored at startup do not count.
+    pub fn with_burst_limit(mut self, limit: BurstLimit) -> Self {
+        self.burst_limit = Some(limit);
+        self
+    }
+
+    /// The lockdown in force, if any: the file, or the one held in memory when
+    /// the file could not be written.
+    pub fn lockdown_status(&self) -> Option<Lockdown> {
+        let on_disk = self.lockdown_dir.as_deref().and_then(lockdown::read);
+        on_disk.or_else(|| lock(&self.memory_lockdown).clone())
+    }
+
+    /// Never fails: a lockdown file that cannot be written still locks this
+    /// process, which then needs a restart as well as `hq host unlock`.
+    fn engage_lockdown(&self, wanted: Lockdown) -> Lockdown {
+        let on_disk = self.lockdown_dir.as_deref().map(|dir| lockdown::engage(dir, &wanted));
+        let held = match on_disk {
+            Some(Ok(held)) => held,
+            Some(Err(e)) => {
+                eprintln!("hq host: could not write the lockdown file ({e}); locked until restart");
+                lock(&self.memory_lockdown).get_or_insert(wanted).clone()
+            }
+            None => lock(&self.memory_lockdown).get_or_insert(wanted).clone(),
+        };
+        self.events.push("", EventKind::Lockdown, None, Some(held.reason.clone()));
+        held
+    }
+
+    /// The kill switch: no agent starts from now on, every running one is killed
+    /// with its whole process group at once, and the host forgets them and any
+    /// waiting ones, so unlocking brings none back by itself. Their transcripts
+    /// stay with the agents, and HQ keeps what it needs to resume one on purpose.
+    /// Only deleting the lockdown file (`hq host unlock`) lifts it.
+    pub fn lockdown(&self, reason: &str, source: &str) -> Lockdown {
+        let held = self.engage_lockdown(Lockdown::new(reason, source));
+        let panes: Vec<Arc<Pane>> = lock(&self.panes).values().cloned().collect();
+        for pane in panes {
+            pane.kill_now();
+        }
+        lock(&self.awaiting).clear();
+        self.save();
+        held
+    }
+
+    /// A start that raced a lockdown (admitted before it, inserted after the
+    /// lockdown took its list of panes) is killed here rather than left running.
+    fn undo_if_locked(&self, name: &str) -> Result<(), HostError> {
+        let Some(held) = self.lockdown_status() else {
+            return Ok(());
+        };
+        if let Some(pane) = lock(&self.panes).remove(name) {
+            pane.kill_now();
+        }
+        lock(&self.pane_tokens).remove(name);
+        self.save();
+        self.forget_files(name);
+        self.events.push(name, EventKind::Removed, None, None);
+        Err(HostError::LockedDown(held.reason))
+    }
+
+    fn refuse_if_locked(&self) -> Result<(), HostError> {
+        match self.lockdown_status() {
+            Some(held) => Err(HostError::LockedDown(held.reason)),
+            None => Ok(()),
+        }
+    }
+
+    /// Whether a new agent may start now: refused under lockdown, and a start
+    /// past the burst limit locks the host instead of going ahead. An admitted
+    /// start holds its slot so parallel callers cannot overshoot; one that fails
+    /// gives it back (`release_start`), so retrying a bad request cannot trip it.
+    fn admit(&self) -> Result<(), HostError> {
+        self.refuse_if_locked()?;
+        let Some(limit) = self.burst_limit else {
+            return Ok(());
+        };
+        let now = Instant::now();
+        let mut starts = lock(&self.recent_starts);
+        while starts.front().is_some_and(|t| now.duration_since(*t) > limit.window) {
+            starts.pop_front();
+        }
+        if starts.len() < limit.max {
+            starts.push_back(now);
+            return Ok(());
+        }
+        drop(starts);
+        let reason = format!(
+            "more than {} agents were started within {} minutes; the host locked itself",
+            limit.max,
+            limit.window.as_secs() / 60
+        );
+        let held = self.engage_lockdown(Lockdown::new(&reason, "breaker"));
+        Err(HostError::LockedDown(held.reason))
+    }
+
+    fn release_start(&self) {
+        if self.burst_limit.is_some() {
+            lock(&self.recent_starts).pop_back();
+        }
     }
 
     fn pane(&self, name: &str) -> Result<Arc<Pane>, HostError> {
@@ -271,7 +395,16 @@ impl Host {
             .ok_or_else(|| HostError::NotFound(name.to_string()))
     }
 
+    /// Starts an agent, unless the host is locked down or the start would pass
+    /// the burst limit.
     pub fn spawn(&self, spec: SpawnSpec) -> Result<PaneInfo, HostError> {
+        self.admit()?;
+        let info = self.start(spec).inspect_err(|_| self.release_start())?;
+        self.undo_if_locked(&info.name)?;
+        Ok(info)
+    }
+
+    fn start(&self, spec: SpawnSpec) -> Result<PaneInfo, HostError> {
         if !valid_name(&spec.name) {
             return Err(HostError::InvalidName(spec.name));
         }
@@ -486,7 +619,8 @@ impl Host {
     }
 
     /// Starts again every agent the state file lists, using its resume
-    /// command. Call once, before serving.
+    /// command. Call once, before serving. Under lockdown nothing starts: every
+    /// record waits, so it is kept and can be resumed once the host is unlocked.
     pub fn restore(&self) -> RestoreReport {
         let mut report = RestoreReport::default();
         let Some(state) = &self.state else {
@@ -501,16 +635,31 @@ impl Host {
                 return report;
             }
         };
+        let mut locked = None;
         for rec in records {
+            // Read each time: `hq host lockdown` may land while this runs.
+            locked = locked.or_else(|| self.lockdown_status());
+            if let Some(held) = &locked {
+                report.skipped.push((rec.name.clone(), format!("the host is locked down, so it is forgotten: {}", held.reason)));
+                continue;
+            }
             if !rec.env_keys.is_empty() {
                 lock(&self.awaiting).insert(rec.name.clone(), rec);
                 continue;
             }
             let name = rec.name.clone();
-            match self.spawn(spec_of(rec, Vec::new())) {
+            match self.start(spec_of(rec.clone(), Vec::new())) {
                 Ok(_) => report.restored.push(name),
+                // Over the cap the record waits instead of being lost at the next save.
+                Err(e @ HostError::TooManyAgents(_)) => {
+                    report.skipped.push((name, e.to_string()));
+                    lock(&self.awaiting).insert(rec.name.clone(), rec);
+                }
                 Err(e) => report.skipped.push((name, e.to_string())),
             }
+        }
+        if locked.is_some() {
+            self.save();
         }
         self.sweep_agent_files();
         report
@@ -548,11 +697,23 @@ impl Host {
                 missing: missing.join(", "),
             });
         }
-        // Spawn sees the name as taken while it is waiting, so release it first
-        // and put it back if the start fails.
+        // Resuming brings back a known agent, so it skips the burst limit (a host
+        // restart resumes many at once) but never a lockdown. The name is taken
+        // while it waits, so release it first and put it back if the start fails.
+        if let Err(locked) = self.refuse_if_locked() {
+            // Under the forget policy a locked host does not keep it for later.
+            lock(&self.awaiting).remove(name);
+            self.save();
+            return Err(locked);
+        }
         lock(&self.awaiting).remove(name);
-        match self.spawn(spec_of(rec.clone(), env)) {
+        let started = self.start(spec_of(rec.clone(), env)).and_then(|info| {
+            self.undo_if_locked(&info.name)?;
+            Ok(info)
+        });
+        match started {
             Ok(info) => Ok(info),
+            Err(e @ HostError::LockedDown(_)) => Err(e),
             Err(e) => {
                 lock(&self.awaiting).insert(rec.name.clone(), rec);
                 Err(e)
