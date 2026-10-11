@@ -261,7 +261,8 @@ resume one on purpose (`harness_session_resume`).
   "<reason>"` on the machine, the `host.lockdown` method (also through the ssh
   gate), and HQ's `host_lockdown` tool, which locks every host when none is named.
   It kills every agent the host runs with its whole process group at once (no
-  grace period, so a child that ignores SIGHUP dies too). A start that raced
+  grace period, so a child that ignores SIGHUP dies with its running agent;
+  children left behind by an agent that already exited are not reached). A start that raced
   the lockdown is killed as soon as it lands. `hq host lockdown` writes the
   file before it asks the host, so new starts are refused even when the host is
   wedged or down. A host that cannot write the file stays locked in memory
