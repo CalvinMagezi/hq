@@ -314,12 +314,12 @@ async fn dismiss_survey(
 /// is idle. One per sweep: the agent finishes a turn, and the idle event that
 /// follows delivers the next.
 async fn deliver_messages(db: &Database, row: &registry::HarnessSessionRow, agent: &AgentInfo) {
-    if !hq_tools::a2a::can_receive(agent.status) {
+    if !hq_tools::a2a::can_receive_agent(agent) {
         return;
     }
-    let (db_arc, id, status) = (Arc::new(db.clone()), row.id.clone(), agent.status);
+    let (db_arc, id, agent) = (Arc::new(db.clone()), row.id.clone(), agent.clone());
     let delivered =
-        tokio::task::spawn_blocking(move || hq_tools::a2a::deliver_if_idle(&db_arc, &id, status))
+        tokio::task::spawn_blocking(move || hq_tools::a2a::deliver_to(&db_arc, &id, &agent))
             .await;
     match delivered {
         Ok(Ok(Some(message))) => {
@@ -436,6 +436,7 @@ async fn supervise(
         if let Err(e) = hq_tools::a2a::report_to_parent(db, &row, "exited", &last_output) {
             tracing::warn!(session = %row.id, error = %e, "session-supervisor: could not report to the parent");
         }
+        alerts::report_to_observers(db, &row, "exited", &last_output);
         if hand_to_chat(db, &row, WAKE_EXITED) {
             continue;
         }

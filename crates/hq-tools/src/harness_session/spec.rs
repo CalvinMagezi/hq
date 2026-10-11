@@ -6,6 +6,8 @@
 use anyhow::{Result, bail};
 use hq_core::config::{HarnessProfileConfig, AgentHostConfig, HqConfig};
 
+use super::category::HarnessCategory;
+
 /// How a harness resumes a prior session.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum ResumeStrategy {
@@ -29,6 +31,8 @@ pub enum ResumeStrategy {
 #[derive(Debug, Clone)]
 pub struct HarnessSessionSpec {
     pub harness: &'static str,
+    /// Coding agent or general-purpose agent: decides what HQ hands it.
+    pub category: HarnessCategory,
     /// host agent kind (`agent start --kind`). The host resolves the CLI on
     /// the target host, so HQ never needs the binary on its own machine.
     pub kind: &'static str,
@@ -63,6 +67,7 @@ impl HarnessSessionSpec {
 pub const SPECS: &[HarnessSessionSpec] = &[
     HarnessSessionSpec {
         harness: "claude-code",
+        category: HarnessCategory::Coding,
         kind: "claude",
         // Without the permission bypass every tool call in an unattended
         // session blocks on an approval dialog nobody is there to answer.
@@ -78,6 +83,7 @@ pub const SPECS: &[HarnessSessionSpec] = &[
     },
     HarnessSessionSpec {
         harness: "qwen",
+        category: HarnessCategory::Coding,
         kind: "qwen",
         args: &["--auth-type", "qwen-oauth"],
         resume: ResumeStrategy::Args(&["--auth-type", "qwen-oauth", "--continue"]),
@@ -86,6 +92,7 @@ pub const SPECS: &[HarnessSessionSpec] = &[
     },
     HarnessSessionSpec {
         harness: "cursor",
+        category: HarnessCategory::Coding,
         kind: "cursor",
         // `--trust` only works in headless mode; the interactive trust dialog is answered at launch.
         args: &["--force"],
@@ -95,6 +102,7 @@ pub const SPECS: &[HarnessSessionSpec] = &[
     },
     HarnessSessionSpec {
         harness: "pi",
+        category: HarnessCategory::Coding,
         kind: "pi",
         args: &[],
         resume: ResumeStrategy::SessionDir,
@@ -103,6 +111,7 @@ pub const SPECS: &[HarnessSessionSpec] = &[
     },
     HarnessSessionSpec {
         harness: "codex",
+        category: HarnessCategory::Coding,
         kind: "codex",
         // The background daemon check reads other processes, which the sandbox forbids.
         args: &["--no-daemon"],
@@ -112,6 +121,7 @@ pub const SPECS: &[HarnessSessionSpec] = &[
     },
     HarnessSessionSpec {
         harness: "opencode",
+        category: HarnessCategory::Coding,
         kind: "opencode",
         args: &[],
         resume: ResumeStrategy::Args(&["--continue"]),
@@ -120,6 +130,7 @@ pub const SPECS: &[HarnessSessionSpec] = &[
     },
     HarnessSessionSpec {
         harness: "kimi",
+        category: HarnessCategory::Coding,
         kind: "kimi",
         args: &[],
         resume: ResumeStrategy::None,
@@ -128,6 +139,7 @@ pub const SPECS: &[HarnessSessionSpec] = &[
     },
     HarnessSessionSpec {
         harness: "antigravity",
+        category: HarnessCategory::Coding,
         kind: "agy",
         args: &["--dangerously-skip-permissions"],
         // `agy -c` continues the most recent conversation in the cwd.
@@ -139,13 +151,58 @@ pub const SPECS: &[HarnessSessionSpec] = &[
     },
     HarnessSessionSpec {
         harness: "github-copilot",
+        category: HarnessCategory::Coding,
         kind: "copilot",
         args: &[],
         resume: ResumeStrategy::None,
         token_pattern: None,
         trust_pattern: None,
     },
+    // General-purpose agents. Each is launched into its interactive chat the way
+    // its own documentation starts it; the resume flags are not verified, so a
+    // resume is a fresh start that the agent's own session store may continue.
+    // `agent_host.harness_profiles` can replace the command and arguments for
+    // an install that differs (a profile may reuse the built-in name).
+    HarnessSessionSpec {
+        harness: "hermes",
+        category: HarnessCategory::GeneralPurpose,
+        kind: "hermes",
+        // Nous Research's Hermes Agent: `hermes chat` is its interactive loop.
+        args: &["chat"],
+        resume: ResumeStrategy::None,
+        token_pattern: None,
+        trust_pattern: None,
+    },
+    HarnessSessionSpec {
+        harness: "openclaw",
+        category: HarnessCategory::GeneralPurpose,
+        kind: "openclaw",
+        // OpenClaw's terminal interface.
+        args: &["tui"],
+        resume: ResumeStrategy::None,
+        token_pattern: None,
+        trust_pattern: None,
+    },
+    HarnessSessionSpec {
+        harness: "nanoclaw",
+        category: HarnessCategory::GeneralPurpose,
+        kind: "nanoclaw",
+        args: &[],
+        resume: ResumeStrategy::None,
+        token_pattern: None,
+        trust_pattern: None,
+    },
 ];
+
+/// The built-in harnesses of one category, by name.
+pub fn names_in(category: HarnessCategory) -> Vec<&'static str> {
+    SPECS.iter().filter(|s| s.category == category).map(|s| s.harness).collect()
+}
+
+/// The category of a harness or profile name, when it resolves.
+pub fn category_of(name: &str) -> Option<HarnessCategory> {
+    resolve(name).ok().map(|h| h.spec.category)
+}
 
 /// Aliases accepted in addition to each spec's canonical `harness` name
 /// (relay/dispatch paths already map "agy"/"jetski" etc.; sessions match).
@@ -176,6 +233,10 @@ pub struct Harness {
 }
 
 impl Harness {
+    pub fn category(&self) -> HarnessCategory {
+        self.spec.category
+    }
+
     /// Arguments for a fresh spawn: the profile's when it sets any.
     pub fn fresh_args(&self) -> Vec<String> {
         match self.profile.as_ref().and_then(|p| p.args.as_ref()) {
@@ -322,6 +383,18 @@ mod tests {
         assert_eq!(spec_for("agy").unwrap().binary(), "agy");
         assert_eq!(spec_for("cursor").unwrap().binary(), "cursor-agent");
         assert_eq!(spec_for("github-copilot").unwrap().binary(), "copilot");
+    }
+
+    #[test]
+    fn general_purpose_agents_are_their_own_category() {
+        assert_eq!(names_in(HarnessCategory::GeneralPurpose), vec!["hermes", "openclaw", "nanoclaw"]);
+        assert!(names_in(HarnessCategory::Coding).contains(&"claude-code"));
+        assert_eq!(spec_for("hermes").unwrap().binary(), "hermes");
+        assert_eq!(spec_for("hermes").unwrap().args, &["chat"]);
+        assert_eq!(resolve_in(&AgentHostConfig::default(), "openclaw").unwrap().category(), HarnessCategory::GeneralPurpose);
+        // A profile takes its base's category.
+        let cfg = cfg_with_profile("  hermes-work:\n    base: hermes\n    command: hermes-work\n");
+        assert_eq!(resolve_in(&cfg, "hermes-work").unwrap().category(), HarnessCategory::GeneralPurpose);
     }
 
     #[test]

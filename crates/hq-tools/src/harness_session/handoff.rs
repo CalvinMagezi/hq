@@ -47,6 +47,8 @@ pub struct HandoffRequest {
     /// allows it (`agent_host.drive_new_watches`, unless the caller opts out).
     pub drive_new: bool,
     pub drive_opted_out: bool,
+    /// What the session is for; `None` is the harness's default.
+    pub purpose: Option<super::Purpose>,
 }
 
 fn non_blank(s: &str) -> Option<&str> {
@@ -293,6 +295,8 @@ async fn run_handoff(
                 goal: None,
                 done_criteria: non_blank(&req.acceptance),
             },
+            purpose: req.purpose,
+            observe: &[],
         },
     )
     .await;

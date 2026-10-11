@@ -57,6 +57,8 @@ fn launch<'a>(host: ScriptedHost, id: &'a str, prompt: Option<&'a str>) -> Launc
         watch: None,
         parent: None,
         goal: GoalText::default(),
+        purpose: Purpose::Code,
+        observe: &[],
     }
 }
 
@@ -125,6 +127,7 @@ fn a_reported_conversation_id_becomes_the_resume_token_once() {
                     workspace_id: "hs-id",
                     pane_id: "hs-id",
                 },
+                purpose: None,
             },
         )
     })
@@ -257,6 +260,8 @@ fn every_spec_names_a_kind_the_host_supports() {
         "amp",
         "grok",
         "hermes",
+        "openclaw",
+        "nanoclaw",
         "kilo",
         "qodercli",
         "qwen",
@@ -495,6 +500,7 @@ fn row(host: &str, name: &str) -> HarnessSessionRow {
         drive_off_reason: None,
         parent_session_id: None,
         spawn_depth: 0,
+        purpose: "code".into(),
     }
 }
 
@@ -607,6 +613,7 @@ fn seed_watched(db: &Arc<Database>, id: &str, goal: Option<GoalText<'_>>) {
                 cwd: "/t",
                 mission_id: None,
                 placement: Placement { host: "local", agent_name: id, workspace_id: "w1", pane_id: "w1:p1" },
+                purpose: None,
             },
         )?;
         registry::watch_from_chat(c, id, "th-1", false)?;
@@ -808,6 +815,7 @@ async fn the_watch_tool_defaults_drive_on_and_never_turns_it_back_on() {
                         workspace_id: "w1",
                         pane_id: "w1:p1",
                     },
+                    purpose: None,
                 },
             )?;
             registry::set_goal(c, id, Some(GOAL), Some(DONE), registry::ACTOR_USER)?;
@@ -878,6 +886,7 @@ fn linking_from_a_chat_reports_whether_it_drives() {
                     cwd: "/t",
                     mission_id: None,
                     placement: Placement { host: "local", agent_name: "hs-l", workspace_id: "w1", pane_id: "w1:p1" },
+                    purpose: None,
                 },
             )?;
             Ok(id)
@@ -996,6 +1005,169 @@ fn handoff_req(external_id: &str) -> handoff::HandoffRequest {
         drive_new: true,
         ..Default::default()
     }
+}
+
+/// A task to launch work on, in a fresh database.
+fn a_task(db: &Database) -> String {
+    db.with_conn(|c| {
+        c.execute(
+            "INSERT OR IGNORE INTO initiatives (id, space_id, name, slug, id_prefix) VALUES ('in-1', 'personal', 'Work', 'work', 'FR')",
+            [],
+        )?;
+        let new = hq_db::tasks::NewTask { title: "watch the refactor", created_by: "test", ..Default::default() };
+        Ok(hq_db::tasks::create_task(c, "tk-watch", "in-1", &new)?.id)
+    })
+    .unwrap()
+}
+
+fn spawn_req<'a>(harness: &'a str, purpose: Option<Purpose>, task: Option<&'a str>, observe: &'a [String]) -> SpawnRequest<'a> {
+    SpawnRequest {
+        host: None,
+        harness,
+        prompt: None,
+        cwd: std::path::Path::new("/t"),
+        label: "",
+        mission_id: task,
+        watch: None,
+        parent: None,
+        goal: GoalText::default(),
+        purpose,
+        observe,
+    }
+}
+
+#[tokio::test]
+async fn a_general_purpose_agent_is_never_started_for_code_work() {
+    let (dir, host) = startable_host();
+    let db = Arc::new(Database::open_memory().unwrap());
+    let vault = tempfile::tempdir().unwrap();
+    let err = spawn_on(vault.path(), &db, Arc::new(host), spawn_req("hermes", Some(Purpose::Code), None, &[]))
+        .await
+        .unwrap_err()
+        .to_string();
+    assert!(err.contains("'hermes' is a general-purpose agent"), "{err}");
+    assert!(err.contains("claude-code"), "it says where code goes: {err}");
+    assert!(!calls(&dir).contains("workspace create"), "refused before anything started");
+    assert_eq!(count(&db, "SELECT COUNT(*) FROM harness_sessions"), 0);
+}
+
+#[tokio::test]
+async fn a_general_purpose_agent_defaults_to_general_and_a_coding_agent_to_code() {
+    let (dir, host) = startable_host();
+    let db = Arc::new(Database::open_memory().unwrap());
+    let vault = tempfile::tempdir().unwrap();
+    let report = spawn_on(vault.path(), &db, Arc::new(host), spawn_req("hermes", None, None, &[])).await.unwrap();
+    assert_eq!(report["category"], "general_purpose");
+    assert_eq!(report["purpose"], "general");
+    let id = report["session_id"].as_str().unwrap();
+    assert_eq!(get_row(&db, id).unwrap().purpose, "general");
+    assert!(report.get("observing").is_none());
+    let log = calls(&dir);
+    assert!(log.contains("agent start") && log.contains("hermes") && log.contains("chat"), "launched as `hermes chat`: {log}");
+
+    let (_dir, host) = startable_host();
+    let report = spawn_on(vault.path(), &db, Arc::new(host), spawn_req("claude-code", None, None, &[])).await.unwrap();
+    assert_eq!(report["category"], "coding");
+    assert_eq!(report["purpose"], "code");
+}
+
+#[tokio::test]
+async fn only_a_monitor_or_reviewer_on_a_task_can_be_given_sessions_to_observe() {
+    let db = Arc::new(Database::open_memory().unwrap());
+    let vault = tempfile::tempdir().unwrap();
+    let task = a_task(&db);
+    let watched = vec!["hs-coder".to_string()];
+
+    let (dir, host) = startable_host();
+    let err = spawn_on(vault.path(), &db, Arc::new(host), spawn_req("hermes", Some(Purpose::Research), Some(&task), &watched))
+        .await
+        .unwrap_err()
+        .to_string();
+    assert!(err.contains("only a session with purpose monitor or review"), "{err}");
+    assert!(!calls(&dir).contains("workspace create"));
+
+    let (dir, host) = startable_host();
+    let err = spawn_on(vault.path(), &db, Arc::new(host), spawn_req("hermes", Some(Purpose::Monitor), None, &watched))
+        .await
+        .unwrap_err()
+        .to_string();
+    assert!(err.contains("needs a task_id"), "{err}");
+    assert!(!calls(&dir).contains("workspace create"));
+
+    let too_many: Vec<String> = (0..11).map(|i| format!("hs-{i}")).collect();
+    let (_dir, host) = startable_host();
+    let err = spawn_on(vault.path(), &db, Arc::new(host), spawn_req("hermes", Some(Purpose::Monitor), Some(&task), &too_many))
+        .await
+        .unwrap_err()
+        .to_string();
+    assert!(err.contains("at most 10"), "{err}");
+
+    // An id that is no session is caught before anything is launched.
+    let (dir, host) = startable_host();
+    let err = spawn_on(vault.path(), &db, Arc::new(host), spawn_req("hermes", Some(Purpose::Monitor), Some(&task), &watched))
+        .await
+        .unwrap_err()
+        .to_string();
+    assert!(err.contains("no harness session 'hs-coder' to observe"), "{err}");
+    assert!(!calls(&dir).contains("workspace create"));
+    assert_eq!(count(&db, "SELECT COUNT(*) FROM harness_sessions"), 0, "{err}");
+}
+
+#[tokio::test]
+async fn a_monitor_records_what_it_observes_and_a_coding_agent_may_review_too() {
+    let db = Arc::new(Database::open_memory().unwrap());
+    let vault = tempfile::tempdir().unwrap();
+    let task = a_task(&db);
+    let (_dir, host) = startable_host();
+    let coder = spawn_on(vault.path(), &db, Arc::new(host), spawn_req("claude-code", None, Some(&task), &[])).await.unwrap();
+    let coder_id = coder["session_id"].as_str().unwrap().to_string();
+
+    let watched = vec![coder_id.clone()];
+    let (_dir, host) = startable_host();
+    let monitor = spawn_on(vault.path(), &db, Arc::new(host), spawn_req("hermes", Some(Purpose::Monitor), Some(&task), &watched))
+        .await
+        .unwrap();
+    assert_eq!(monitor["purpose"], "monitor");
+    assert_eq!(monitor["observing"], serde_json::json!([coder_id]));
+    assert!(monitor["observing_note"].as_str().unwrap().contains("never an instruction"));
+    let monitor_id = monitor["session_id"].as_str().unwrap();
+    let observed = db.with_conn(|c| registry::observed_by(c, monitor_id)).unwrap();
+    assert_eq!(observed, watched);
+    let observers: Vec<String> = db
+        .with_conn(|c| registry::running_observers(c, &coder_id))
+        .unwrap()
+        .into_iter()
+        .map(|r| r.id)
+        .collect();
+    assert_eq!(observers, vec![monitor_id.to_string()]);
+
+    // A coding agent can be the reviewer: the category decides what is refused, not what is allowed.
+    let (_dir, host) = startable_host();
+    let reviewer = spawn_on(vault.path(), &db, Arc::new(host), spawn_req("codex", Some(Purpose::Review), Some(&task), &watched))
+        .await
+        .unwrap();
+    assert_eq!(reviewer["purpose"], "review");
+    assert_eq!(reviewer["category"], "coding");
+}
+
+#[tokio::test]
+async fn a_handoff_to_a_general_purpose_agent_takes_a_purpose_but_not_code() {
+    let (dir, host) = startable_host();
+    let db = Arc::new(Database::open_memory().unwrap());
+    let vault = tempfile::tempdir().unwrap();
+    let req = handoff::HandoffRequest { harness: "openclaw".into(), purpose: Some(Purpose::Code), ..handoff_req("ext-gp") };
+    let err = handoff::handoff(vault.path(), &db, Arc::new(host), req).await.unwrap_err().to_string();
+    assert!(err.contains("'openclaw' is a general-purpose agent"), "{err}");
+    assert!(!calls(&dir).contains("workspace create"));
+
+    let (_dir, host) = startable_host();
+    let req = handoff::HandoffRequest { harness: "openclaw".into(), purpose: Some(Purpose::Review), ..handoff_req("ext-gp2") };
+    let report = handoff::handoff(vault.path(), &db, Arc::new(host), req).await.unwrap();
+    assert_eq!(report["handoff"], "started");
+    let row = get_row(&db, report["session_id"].as_str().unwrap()).unwrap();
+    assert_eq!(row.purpose, "review");
+    // A reviewer never moves the task: the handoff's own launch left it where it was.
+    assert_eq!(report["task"]["status"], "to_do", "{report}");
 }
 
 fn startable_host() -> (tempfile::TempDir, ScriptedHost) {
@@ -1493,6 +1665,7 @@ async fn a_row_that_cannot_be_recorded_closes_the_workspace_that_was_just_launch
                 cwd: "/t",
                 mission_id: None,
                 placement: Placement { host: "local", agent_name: "hs-t8", workspace_id: "w0", pane_id: "w0:p1" },
+                purpose: None,
             },
         )
     })
@@ -1938,6 +2111,7 @@ fn row_with_snapshot(id: &str, status: &str) -> Arc<Database> {
                 cwd: "/t",
                 mission_id: None,
                 placement: Placement { host: "local", agent_name: "hs-tl", workspace_id: "w1", pane_id: "w1:p1" },
+                purpose: None,
             },
         )?;
         registry::set_last_snapshot(c, &id, "stored line")?;

@@ -2,7 +2,9 @@ import { expect, test } from 'bun:test'
 import type { HarnessSession } from './sessionsApi'
 import {
   ANSWER_HOLD_MS,
+  agentCategory,
   agentName,
+  harnessesIn,
   answerHeld,
   archivable,
   classifyBlocked,
@@ -51,6 +53,9 @@ test('known agents get friendly names and unknown ones are shown as they are', (
   expect(agentName('github-copilot')).toBe('GitHub Copilot')
   expect(agentName('opencode')).toBe('OpenCode')
   expect(agentName('mystery-agent')).toBe('mystery-agent')
+  expect(agentName('hermes')).toBe('Hermes')
+  expect(agentName('openclaw')).toBe('OpenClaw')
+  expect(agentName('nanoclaw')).toBe('NanoClaw')
 })
 
 test('this computer covers both native and local, other names pass through', () => {
@@ -209,4 +214,17 @@ test('an answered prompt stays held while the screen is unchanged and frees once
 test('a Windows extended-length prefix is hidden from paths', () => {
   expect(plainPath('\\\\?\\C:\\Users\\me\\HQ')).toBe('C:\\Users\\me\\HQ')
   expect(plainPath('/home/me/HQ')).toBe('/home/me/HQ')
+})
+
+test('agents are grouped by the category the server gives, and an unlisted one is a coding agent', () => {
+  const hosts = {
+    harnesses: ['claude-code', 'hermes', 'mystery-agent', 'openclaw'],
+    categories: { 'claude-code': 'coding' as const, hermes: 'general_purpose' as const, openclaw: 'general_purpose' as const },
+  }
+  expect(agentCategory(hosts, 'hermes')).toBe('general_purpose')
+  expect(agentCategory(hosts, 'mystery-agent')).toBe('coding')
+  expect(agentCategory(null, 'hermes')).toBe('coding')
+  expect(harnessesIn(hosts, 'coding')).toEqual(['claude-code', 'mystery-agent'])
+  expect(harnessesIn(hosts, 'general_purpose')).toEqual(['hermes', 'openclaw'])
+  expect(harnessesIn({ harnesses: ['claude-code'] }, 'general_purpose')).toEqual([])
 })

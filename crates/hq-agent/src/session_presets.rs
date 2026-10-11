@@ -56,6 +56,12 @@ const ORCHESTRATOR_CODER_ROW: &str =
 const ORCHESTRATOR_CODE_WORK_RULE: &str = "- Children read and report; they cannot write files. Code and repository changes are never yours or a child's: start a coding session with \
      `harness_session_spawn` (task_id, goal, done criteria), then watch and steer it.\n";
 
+/// How the two categories of host agent are told apart, for every chat surface.
+const AGENT_CATEGORIES_BLOCK: &str = "## Two kinds of host agent\n\
+         - Coding agents (claude-code, codex, cursor, opencode, pi, kimi, qwen, antigravity, github-copilot) take code and repository changes.\n\
+         - General-purpose agents (hermes, openclaw, nanoclaw) are full assistants with their own tools, skills and memory. Never give one a coding task; `harness_session_spawn` refuses `purpose: code` for them. Give them `purpose: monitor` (watch other sessions and report back; pass the session ids in `observe` with a task_id), `purpose: research` (parallel reading and searching, several at once), `purpose: review` (peer review of a coding agent's work or a draft) or `purpose: general`. A monitor or reviewer comments on its task and never moves the task's status.\n\
+         - Both run in the host's process sandbox with an egress allowlist and their own state directory; a general-purpose agent gets no HQ token.\n\n";
+
 /// `chat_harness_instructions` for a session role. The Implementor text is unchanged.
 pub fn chat_harness_instructions_for(cwd: &Path, role: crate::builder::SessionRole) -> String {
     let text = chat_harness_instructions(cwd);
@@ -88,12 +94,13 @@ pub fn chat_harness_instructions(cwd: &Path) -> String {
          - `vault_batch_read(paths[])` - Read up to 20 notes in one call.\n\
          - `vault_write_note(path, title, content)` - Write/update a note under Notebooks/.\n\
          - `memory_entity_graph(seeds[])` - Graph traversal from entity names.\n\
-         - `harness_session_spawn(harness, cwd, prompt, task_id)` - Launch a coding agent (Claude Code, Codex, Cursor, ...) in a host session, tied to an HQ task when there is one. From a web chat the chat watches it.\n\
-         - `harness_session_status(id)` - Check on a running coding-agent session.\n\
+         - `harness_session_spawn(harness, cwd, prompt, task_id, purpose, observe)` - Launch a coding agent (Claude Code, Codex, Cursor, ...) or a general-purpose agent (Hermes, OpenClaw, NanoClaw) in a host session, tied to an HQ task when there is one. From a web chat the chat watches it. See \"Two kinds of host agent\" below.\n\
+         - `harness_session_status(id)` - Check on a running session.\n\
          - `harness_session_watch(session_id)` - Have this web chat watch an existing session. A session no chat watched starts with Drive on when it has a specific goal and definition of done, otherwise HQ only observes; pass drive=false here, to spawn or to link when the user wants updates only.\n\
          - `harness_session_goal(session_id, goal, done_criteria)` - Record what the session is for and what would show it is done. Drive needs both, specific enough to judge; ask the user when they are missing or vague.\n\
          - `harness_session_mode(session_id, mode)` - Switch HQ between `drive` and `observe` for a watched session. Observe stops HQ's steering at once and never pauses or stops the agent (`harness_session_stop` does that).\n\
          - `harness_session_attach(agent, host)` - Watch an agent the host already runs that HQ did not launch (see `host_agents`). It starts observation-only.\n\n\
+         {AGENT_CATEGORIES_BLOCK}\
          ## Delegation - for anything that is actually a task\n\
          Use `spawn_subagents` for HQ's own child agents (single, parallel, race or graph mode):\n\n\
          | Task | Role | Model alias | Best for |\n\
@@ -134,5 +141,15 @@ mod role_tests {
         let orchestrated = chat_harness_instructions_for(cwd, SessionRole::Orchestrator);
         assert!(!orchestrated.contains("Writing/editing files"));
         assert!(orchestrated.contains("harness_session_spawn` (task_id, goal, done criteria)"));
+    }
+
+    #[test]
+    fn every_chat_surface_is_told_the_two_kinds_of_host_agent_apart() {
+        let text = chat_harness_instructions(Path::new("/work"));
+        assert!(text.contains("## Two kinds of host agent"), "{text}");
+        assert!(text.contains("General-purpose agents (hermes, openclaw, nanoclaw)"));
+        assert!(text.contains("Never give one a coding task"));
+        assert!(text.contains("`purpose: monitor`") && text.contains("`purpose: review`"));
+        assert!(text.contains("gets no HQ token"));
     }
 }

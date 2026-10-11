@@ -132,6 +132,40 @@ pub fn report_to_parent(db: &Database, child: &HarnessSessionRow, event: &str, o
     Ok(Some(message.id))
 }
 
+/// Tells every running session that observes `observed` (a monitor or reviewer
+/// given it to watch) that it finished a turn, blocked or exited, with the tail
+/// of its output, as a message on the observer's own task thread. An observer
+/// without a task gets nothing, since there is no thread to keep the message
+/// on. The supervisor types it in when the observer is next idle. Returns the
+/// observers told.
+pub fn report_to_observers(db: &Database, observed: &HarnessSessionRow, event: &str, output: &str) -> Result<Vec<String>> {
+    let id = observed.id.clone();
+    let observers = db.with_conn(move |c| registry::running_observers(c, &id))?;
+    if observers.is_empty() {
+        return Ok(Vec::new());
+    }
+    let body = match (last_reply(output), tail_of(output)) {
+        (Some(reply), _) => format!(
+            "Observed session {} ({}) {event}. Its last reply:\n{}",
+            observed.id,
+            observed.harness,
+            tail_of(&reply)
+        ),
+        (None, tail) if !tail.is_empty() => {
+            format!("Observed session {} ({}) {event}. Its last output:\n{tail}", observed.id, observed.harness)
+        }
+        _ => format!("Observed session {} ({}) {event}.", observed.id, observed.harness),
+    };
+    let mut told = Vec::new();
+    for observer in observers {
+        let Some(task) = observer.mission_id.clone() else { continue };
+        let (from, to, body) = (observed.id.clone(), observer.id.clone(), body.clone());
+        db.with_conn(move |c| t::add_message(c, &task, &from, &to, &body, None))?;
+        told.push(observer.id);
+    }
+    Ok(told)
+}
+
 fn running(db: &Database, id: &str) -> Result<Option<HarnessSessionRow>> {
     let id = id.to_string();
     Ok(db
@@ -356,6 +390,8 @@ async fn run_delegation(
             watch: None,
             parent: Some((&slot.parent.id, slot.depth)),
             goal: crate::harness_session::GoalText::default(),
+            purpose: None,
+            observe: &[],
         },
     )
     .await?;
@@ -480,6 +516,14 @@ pub fn can_receive(status: AgentStatus) -> bool {
     matches!(status, AgentStatus::Idle | AgentStatus::Done)
 }
 
+/// `can_receive`, plus an agent the host does not classify (a kind with no rule
+/// file, such as a general-purpose agent): once its launch is over it is taken
+/// as able to read its input, since nothing will ever report it idle. Its own
+/// interface queues text typed mid-turn, as a person's would be.
+pub fn can_receive_agent(agent: &crate::agent_host::AgentInfo) -> bool {
+    can_receive(agent.status) || (agent.status == AgentStatus::Unknown && !agent.launch_pending)
+}
+
 /// Types the next waiting message into the session if it is idle or done. A
 /// working or blocked agent keeps the message queued until its next idle.
 pub fn deliver_if_idle(
@@ -488,6 +532,20 @@ pub fn deliver_if_idle(
     status: AgentStatus,
 ) -> Result<Option<i64>> {
     if !can_receive(status) {
+        return Ok(None);
+    }
+    deliver_next(db, session_id, |text| {
+        crate::harness_session::send(db, session_id, text, None).map(|_| ())
+    })
+}
+
+/// `deliver_if_idle` judged by the whole agent record (`can_receive_agent`).
+pub fn deliver_to(
+    db: &Arc<Database>,
+    session_id: &str,
+    agent: &crate::agent_host::AgentInfo,
+) -> Result<Option<i64>> {
+    if !can_receive_agent(agent) {
         return Ok(None);
     }
     deliver_next(db, session_id, |text| {
@@ -578,6 +636,7 @@ mod tests {
                         workspace_id: id,
                         pane_id: id,
                     },
+                    purpose: None,
                 },
             )
         })
@@ -618,6 +677,57 @@ mod tests {
         for busy in [AgentStatus::Working, AgentStatus::Blocked, AgentStatus::Unknown] {
             assert!(!can_receive(busy), "{busy:?}");
         }
+    }
+
+    fn agent(status: AgentStatus, launch_pending: bool) -> crate::agent_host::AgentInfo {
+        crate::agent_host::AgentInfo {
+            name: Some("hs-x".into()),
+            kind: "hermes".into(),
+            status,
+            pane_id: "p".into(),
+            workspace_id: "w".into(),
+            cwd: "/t".into(),
+            title: None,
+            state_change_seq: 1,
+            launch_pending,
+            agent_session_id: None,
+        }
+    }
+
+    #[test]
+    fn an_agent_the_host_cannot_classify_takes_a_message_once_its_launch_is_over() {
+        assert!(can_receive_agent(&agent(AgentStatus::Idle, false)));
+        assert!(!can_receive_agent(&agent(AgentStatus::Working, false)));
+        assert!(!can_receive_agent(&agent(AgentStatus::Blocked, false)));
+        assert!(!can_receive_agent(&agent(AgentStatus::Unknown, true)), "still launching");
+        assert!(can_receive_agent(&agent(AgentStatus::Unknown, false)), "running, with no rule file to say idle");
+    }
+
+    #[test]
+    fn observers_on_a_task_hear_what_an_observed_session_did_and_the_rest_do_not() {
+        let w = world();
+        let observed = w.db.with_conn(|c| registry::get(c, "hs-a")).unwrap().unwrap();
+        w.db.with_conn(|c| {
+            registry::add_observed(c, "hs-b", &["hs-a".to_string()])?;
+            registry::add_observed(c, "hs-loose", &["hs-a".to_string()])?;
+            registry::add_observed(c, "hs-other", &["hs-a".to_string()])
+        })
+        .unwrap();
+        let told = report_to_observers(&w.db, &observed, "finished a turn", "⏺ All tests pass.\n❯ ").unwrap();
+        assert_eq!(told, vec!["hs-b".to_string(), "hs-other".to_string()], "the taskless observer gets no thread");
+
+        let delivered = deliver_next(&w.db, "hs-b", |text| {
+            assert!(text.contains("Observed session hs-a (claude-code) finished a turn."), "{text}");
+            assert!(text.contains("All tests pass."), "{text}");
+            Ok(())
+        })
+        .unwrap();
+        assert!(delivered.is_some());
+        assert!(deliver_next(&w.db, "hs-loose", |_| Ok(())).unwrap().is_none());
+
+        // Nobody watching: nothing written.
+        let other = w.db.with_conn(|c| registry::get(c, "hs-other")).unwrap().unwrap();
+        assert!(report_to_observers(&w.db, &other, "exited", "").unwrap().is_empty());
     }
 
     #[test]

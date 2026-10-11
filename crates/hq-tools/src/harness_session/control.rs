@@ -80,6 +80,8 @@ pub async fn resume(
             mission_id: row.mission_id.as_deref(),
             watch: None,
             goal: GoalText::default(),
+            purpose: Purpose::parse(&row.purpose).unwrap_or(Purpose::Code),
+            observe: &[],
         },
     )
     .await?;
@@ -123,7 +125,7 @@ pub(super) fn session_view(row: &HarnessSessionRow, live: &Liveness) -> Value {
 
 pub(super) fn live_view(row: &HarnessSessionRow, live: &Liveness) -> Value {
     let running = row.status == registry::STATUS_RUNNING;
-    match live {
+    let mut view = match live {
         Liveness::Alive(agent) => json!({
             "session": row, "alive": true, "reachable": true,
             "agent_status": agent.status, "title": agent.title,
@@ -133,7 +135,10 @@ pub(super) fn live_view(row: &HarnessSessionRow, live: &Liveness) -> Value {
             "session": row, "alive": null, "reachable": false, "detail": detail,
         }),
         Liveness::HostUnreachable(_) => json!({ "session": row, "alive": false }),
-    }
+    };
+    // Which kind of agent this is, so a reader never has to know the harness names.
+    view["category"] = json!(spec::category_of(&row.harness).map(HarnessCategory::as_str));
+    view
 }
 
 pub fn list(db: &Arc<Database>, status_filter: Option<String>) -> Result<Value> {
@@ -296,7 +301,17 @@ pub fn attach(db: &Arc<Database>, host: &dyn HostBackend, target: &str, thread: 
         if !already {
             let placement = Placement { host: &host_name, agent_name: &name, workspace_id: &agent.workspace_id, pane_id: &agent.pane_id };
             let title = agent.title.clone().unwrap_or_default();
-            let new = registry::NewSession { id: &id, harness: spec.harness, label: &title, cwd: &agent.cwd, mission_id: None, placement };
+            // An agent someone started by hand is taken for its harness's default purpose.
+            let purpose = spec.category.default_purpose();
+            let new = registry::NewSession {
+                id: &id,
+                harness: spec.harness,
+                label: &title,
+                cwd: &agent.cwd,
+                mission_id: None,
+                placement,
+                purpose: Some(purpose.as_str()),
+            };
             registry::insert(c, &new)?;
         }
         start_watch(c, &id, NewWatch { thread, drive: false, opted_out: false })?;

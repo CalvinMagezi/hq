@@ -875,6 +875,7 @@ async fn comment_as(attested: Option<&str>, supplied_author: Option<&str>) -> St
                     cwd: "/t",
                     mission_id: made["id"].as_str(),
                     placement: Placement { host: "native", agent_name: id, workspace_id: "w", pane_id: "p" },
+                    purpose: None,
                 },
             )
         })
@@ -932,6 +933,7 @@ async fn a_launched_agent_reaches_only_its_own_task_through_the_task_tools() {
                 cwd: "/t",
                 mission_id: mine["id"].as_str(),
                 placement: Placement { host: "native", agent_name: "hs-me", workspace_id: "w", pane_id: "p" },
+                purpose: None,
             },
         )
     })

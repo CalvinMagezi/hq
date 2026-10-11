@@ -1,11 +1,13 @@
-# Coding-agent sessions
+# Agent sessions
 
-Agent HQ runs and monitors coding agents (Claude Code, Codex, Cursor, Pi, OpenCode,
-Copilot CLI, Kimi, Qwen, Antigravity) in its built-in host (`hq host`, see
-[AGENT_HOST.md](AGENT_HOST.md)). The host owns the terminals, recognises which agent
-sits in a pane, and reports its state: `idle`, `working`, `blocked` (waiting on a dialog
-or approval), or `done`. It replaced the earlier tmux-based runner, which could only
-guess state from screen text.
+Agent HQ runs and monitors two kinds of agent in its built-in host (`hq host`, see
+[AGENT_HOST.md](AGENT_HOST.md)): coding agents (Claude Code, Codex, Cursor, Pi, OpenCode,
+Copilot CLI, Kimi, Qwen, Antigravity), which edit code, and general-purpose agents (Hermes,
+OpenClaw, NanoClaw), full assistants with their own tools and memory that never take code
+work (see [General-purpose agents](#general-purpose-agents)). The host owns the terminals,
+recognises which agent sits in a pane, and reports its state: `idle`, `working`, `blocked`
+(waiting on a dialog or approval), or `done`. It replaced the earlier tmux-based runner,
+which could only guess state from screen text.
 
 A **host** is a machine running `hq host`. `native` (also written `local`) is the machine
 HQ runs on. Any other host is a machine you paired (see [JOIN_A_MACHINE.md](JOIN_A_MACHINE.md))
@@ -488,6 +490,64 @@ the goal and criteria in force at the time (`registry::list_events`).
   is the only tool that ends it, and it is never called as a side effect of a mode change.
   After a resume the row keeps its goal, so Drive can be turned on again.
 
+## General-purpose agents
+
+Hermes (`hermes chat`), OpenClaw (`openclaw tui`) and NanoClaw are a second category of
+harness, `general_purpose`, next to the coding agents. They run in the same host, the same
+process sandbox and the same session registry, and the same `harness_session_*` tools, web
+page and `hq sessions` commands start, read, steer and stop them. What differs is what HQ
+hands them, and that is mechanical rather than a matter of prompt wording:
+
+- **Never code.** Every session records a `purpose`: `code`, `monitor`, `research`,
+  `review` or `general`. A coding agent defaults to `code` and takes any purpose. A
+  general-purpose agent defaults to `general` and refuses `code` before anything is started,
+  naming the coding harnesses instead. Profiles built on a general-purpose base
+  (`base: hermes`) inherit the refusal. HQ's own chat prompt is told the same rule.
+- **Monitoring, research, review.** `purpose: monitor` and `purpose: review` sessions are
+  about someone else's work. Linked to a task, they leave comments on it (`Session ... (hermes,
+  a monitor) finished a turn.`) but never hold its work lease or move its status, so a
+  reviewer finishing a turn does not put a coding task into review. `research` and `general`
+  sessions do their task's own work and move it like a coding session does. Several research
+  sessions can run at once; each is an ordinary session with its own task.
+- **Observing other sessions.** A monitor or reviewer started with `task_id` can be given
+  `observe: [session ids]` (at most 10). When an observed session finishes a turn, blocks at a
+  dialog or exits, the supervisor leaves the observer a message on the observer's task thread,
+  with the observed agent's last reply or screen tail, and types it in when the observer is
+  next idle, the same route a delegated child uses to report to its parent. The text is the
+  observed agent's screen and is presented as such, never as an instruction. Spawn reports
+  `observing` and says so in `observing_note`. The ids are checked before anything launches.
+
+```
+harness_session_spawn(harness: "hermes", purpose: "monitor", task_id: "FR-053",
+                      observe: ["hs-claude-code-1a2b3c"],
+                      prompt: "Watch the refactor session and tell me when it stalls or asks for a decision.")
+hq sessions spawn hermes --purpose review --task FR-053 --observe hs-codex-4d5e6f --prompt "Review the diff when it lands."
+```
+
+Security, which is the point of running these agents through the host at all:
+
+- They are confined like every other agent: the process sandbox, a private copy of the
+  temporary directories, no read of the host's token or your credential directories, and an
+  egress allowlist. Their own state lives in `~/.hermes`, `~/.openclaw` or `~/.nanoclaw`, which
+  is writable for them and hidden from other agents. They reach whichever model provider you
+  configured for them, so add that provider's host to `agent_host.sandbox.allow_domains`; HQ
+  ships no default for it.
+- They get no HQ session token and no MCP configuration. HQ never wires itself into a
+  general-purpose agent's own tool loop; what reaches the agent is what HQ types into it, and
+  what comes back is read from its screen, which `harness_session_logs` treats as untrusted.
+- They count against the same origin and driven-session caps, their folders pass the same
+  deny and allow lists, and a family guest's harness allowlist does not include them.
+- The host has no state rule file for them yet, so their state shows as `unknown` rather than
+  `idle` or `working`: `harness_session_wait` cannot wait on them, the finished-turn alert does
+  not fire for them, and a message for them is typed once the launch is over rather than at the
+  next idle. A rule file for each, built into the host like the Claude Code and Codex ones
+  (see [AGENT_HOST.md](AGENT_HOST.md), "Agent state"), fixes all three and is the next step.
+  Resume is a fresh start that the agent's own session store may continue.
+
+The launch commands are the ones each project documents; an install that starts differently
+gets a profile (`base: hermes`, `command: ...`, `args: [...]`), and a profile may reuse the
+built-in name.
+
 ## Custom harness profiles
 
 A profile in `config.yaml` names a launcher that is not one of the built-in harnesses (a
@@ -591,6 +651,8 @@ machine as you, scoped to the host's own API and to one source address. Conseque
   started by hand. Do not expose those tools to callers you would not give a shell.
 - Agents run in a process sandbox (see [AGENT_HOST.md](AGENT_HOST.md)): they cannot read the
   host's own files or your credentials directories, and reach only the sites you allow.
+  General-purpose agents (Hermes, OpenClaw, NanoClaw) get no HQ token on top of that, and
+  `harness_session_spawn` refuses to start one for code work.
 - The host's control socket is a local unix socket, so access control is its file permissions
   plus the ssh key above; agents get a separate socket that accepts only their own token.
 

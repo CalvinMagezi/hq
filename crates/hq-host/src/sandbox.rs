@@ -63,6 +63,10 @@ const AGENT_STATE_DIRS: &[(&str, &[&str])] = &[
     ("kimi", &[".kimi"]),
     ("qwen", &[".qwen"]),
     ("pi", &[".pi"]),
+    // General-purpose agents keep their config, skills and memory here.
+    ("hermes", &[".hermes"]),
+    ("openclaw", &[".openclaw"]),
+    ("nanoclaw", &[".nanoclaw"]),
 ];
 /// Hosts an agent needs to sign in and reach its own models, over HTTPS. HQ sends
 /// the Anthropic API for every launch; these cover the others, so a launch does not

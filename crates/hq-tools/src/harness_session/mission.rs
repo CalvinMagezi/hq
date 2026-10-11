@@ -12,6 +12,7 @@
 //! session read through `harness_session_logs`), while task comments are read
 //! back as trusted input, so they point at the logs instead.
 
+use super::category::Purpose;
 use anyhow::{Result, anyhow, bail};
 use hq_db::harness_sessions_registry::{self as registry, HarnessSessionRow};
 use hq_db::tasks::{self as t, Task};
@@ -96,11 +97,17 @@ fn record_in(
         _ => false,
     };
     let session_running = session.status == registry::STATUS_RUNNING;
-    let lease = open_lease(conn, &task, session, event, session_running)?;
+    // A monitor or reviewer is about someone else's work on the task: its events
+    // are recorded, but it never holds the task's lease or moves its status.
+    let does_work = does_the_tasks_work(session);
+    let lease = match does_work {
+        true => open_lease(conn, &task, session, event, session_running)?,
+        false => None,
+    };
     let ctx = t::WriteCtx { actor: Some(&session.id), work_session_id: lease.as_deref() };
-    let moved = match target(event, siblings_running, session_running, task.long_horizon) {
-        Some((from, to)) => advance(conn, &task, from, to, &ctx)?,
-        None => None,
+    let moved = match (does_work, target(event, siblings_running, session_running, task.long_horizon)) {
+        (true, Some((from, to))) => advance(conn, &task, from, to, &ctx)?,
+        _ => None,
     };
     close_lease(conn, session, event)?;
     if let Some(body) = comment(session, event, moved.as_ref()) {
@@ -128,6 +135,12 @@ pub fn link(conn: &Connection, session_id: &str, id_or_display_id: &str) -> Resu
         .ok_or_else(|| anyhow!("harness session '{session_id}' vanished while linking"))?;
     record(conn, &session, Event::Linked)?
         .ok_or_else(|| anyhow!("task {task_id} vanished while linking"))
+}
+
+/// Whether the session does the task's own work (see `Purpose::does_the_tasks_work`).
+/// A purpose this build does not know is treated as work, the historical meaning.
+fn does_the_tasks_work(session: &HarnessSessionRow) -> bool {
+    Purpose::parse(&session.purpose).map_or(true, Purpose::does_the_tasks_work)
 }
 
 fn linked_task(conn: &Connection, session: &HarnessSessionRow) -> Result<Option<Task>> {
@@ -245,7 +258,12 @@ fn advance(
 /// The thread names the session, never its machine or folder: every reader of the thread, the
 /// tasks-scoped key included, sees it. `harness_session_status` has the rest for the owner.
 fn comment(session: &HarnessSessionRow, event: Event, moved: Option<&Task>) -> Option<String> {
-    let who = format!("Session `{}` ({})", session.id, session.harness);
+    let role = match Purpose::parse(&session.purpose) {
+        Ok(Purpose::Monitor) => ", a monitor",
+        Ok(Purpose::Review) => ", a reviewer",
+        _ => "",
+    };
+    let who = format!("Session `{}` ({}{role})", session.id, session.harness);
     let body = match event {
         Event::Launched => format!("{who} launched."),
         Event::Linked => format!("{who} was linked to this task."),
@@ -323,6 +341,7 @@ mod tests {
                         workspace_id: "w1",
                         pane_id: "w1:p1",
                     },
+                    purpose: None,
                 },
             )?;
             Ok(registry::get(c, id)?.unwrap())
@@ -417,6 +436,65 @@ mod tests {
         let s = session(&db, "hs-1", None);
         assert!(apply(&db, &s, Event::Launched).is_none());
         assert!(leases(&db, &task).is_empty());
+    }
+
+    fn session_for(db: &Database, id: &str, mission: &str, purpose: &str) -> HarnessSessionRow {
+        db.with_conn(|c| {
+            registry::insert(
+                c,
+                &NewSession {
+                    id,
+                    harness: "hermes",
+                    label: "",
+                    cwd: "/repo",
+                    mission_id: Some(mission),
+                    placement: Placement { host: "laptop", agent_name: id, workspace_id: "w2", pane_id: "w2:p1" },
+                    purpose: Some(purpose),
+                },
+            )?;
+            Ok(registry::get(c, id)?.unwrap())
+        })
+        .unwrap()
+    }
+
+    #[test]
+    fn a_monitor_or_reviewer_comments_on_the_task_but_never_moves_or_leases_it() {
+        for purpose in [registry::PURPOSE_MONITOR, registry::PURPOSE_REVIEW] {
+            let (db, task) = setup();
+            let watcher = session_for(&db, "hs-watch", &task, purpose);
+            let launched = apply(&db, &watcher, Event::Launched).unwrap();
+            assert!(!launched.moved, "{purpose}: launching a watcher is not starting the work");
+            assert_eq!(status(&db, &task), t::STATUS_TO_DO);
+            assert!(leases(&db, &task).is_empty(), "{purpose}: a watcher holds no work lease");
+
+            // The coding session does the work and moves the task as before.
+            let coder = session(&db, "hs-code", Some(&task));
+            apply(&db, &coder, Event::Launched);
+            assert_eq!(status(&db, &task), t::STATUS_IN_PROGRESS);
+
+            let finished = apply(&db, &watcher, Event::Finished).unwrap();
+            assert!(!finished.moved, "{purpose}: a watcher's turn ending is not the work being done");
+            assert_eq!(status(&db, &task), t::STATUS_IN_PROGRESS);
+            let exited = apply(&db, &watcher, Event::Exited).unwrap();
+            assert!(!exited.moved);
+            assert_eq!(status(&db, &task), t::STATUS_IN_PROGRESS, "{purpose}: a watcher leaving does not block the work");
+
+            let notes = comments(&db, &task);
+            let role = if purpose == registry::PURPOSE_MONITOR { "a monitor" } else { "a reviewer" };
+            assert!(notes.iter().any(|c| c.contains(&format!("(hermes, {role}) launched."))), "{notes:?}");
+            assert!(notes.iter().any(|c| c.contains(&format!("(hermes, {role}) finished a turn."))), "{notes:?}");
+            assert!(!notes.iter().any(|c| c.contains("ready for review")), "{notes:?}");
+        }
+    }
+
+    #[test]
+    fn a_research_session_does_its_tasks_work() {
+        let (db, task) = setup();
+        let researcher = session_for(&db, "hs-research", &task, "research");
+        assert!(apply(&db, &researcher, Event::Launched).unwrap().moved);
+        assert_eq!(status(&db, &task), t::STATUS_IN_PROGRESS);
+        assert!(apply(&db, &researcher, Event::Finished).unwrap().moved);
+        assert_eq!(status(&db, &task), t::STATUS_READY_FOR_REVIEW);
     }
 
     fn mark_long_horizon(db: &Database, task: &str) {

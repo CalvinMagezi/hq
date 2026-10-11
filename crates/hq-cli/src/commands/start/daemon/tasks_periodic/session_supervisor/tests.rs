@@ -89,6 +89,7 @@ fn seed_for(db: &Database, id: &str, mission: Option<&str>) {
                     workspace_id: "w1",
                     pane_id: "w1:p1",
                 },
+                purpose: None,
             },
         )
     })

@@ -1,12 +1,15 @@
 //! Harness-agnostic session manager: spawn, monitor, steer, stop, and resume
-//! long-lived external agent CLIs (claude-code, cursor, opencode, pi, kimi,
-//! codex, qwen, antigravity, github-copilot) inside the host, on this machine or
-//! on a remote host, tracked in the `harness_sessions` table.
+//! long-lived external agent CLIs inside the host, on this machine or on a
+//! remote host, tracked in the `harness_sessions` table. Two categories run
+//! there (`category.rs`): coding agents (claude-code, cursor, opencode, pi,
+//! kimi, codex, qwen, antigravity, github-copilot) and general-purpose agents
+//! (hermes, openclaw, nanoclaw), which never take code work.
 //!
 //! These tools only mutate sessions HQ launched. Agents a person started by
 //! hand are visible through `host_agents`/`host_read` and steerable only
 //! through `host_send`.
 
+pub mod category;
 pub mod dismiss;
 mod coalesce;
 pub mod handoff;
@@ -33,7 +36,11 @@ use std::time::Duration;
 
 use spec::SPECS;
 pub use launch::resume_awaiting;
-pub use spec::{Harness, HarnessSessionSpec, ResumeStrategy, known_harnesses, resolve, resolve_in, spec_for};
+pub use category::{HarnessCategory, Purpose};
+pub use spec::{
+    Harness, HarnessSessionSpec, ResumeStrategy, category_of, known_harnesses, names_in, resolve, resolve_in,
+    spec_for,
+};
 
 /// Under the home of the host that runs pi, inside the state directory its sandbox may write.
 const PI_SESSION_DIR: &str = ".pi/hq-sessions";

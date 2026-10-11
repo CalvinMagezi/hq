@@ -822,6 +822,7 @@ fn register_session(db: &Database, id: &str) {
                 cwd: "/repo",
                 mission_id: None,
                 placement: Placement { host: "laptop", agent_name: id, workspace_id: "w", pane_id: "w:p" },
+                purpose: None,
             },
         )
     })

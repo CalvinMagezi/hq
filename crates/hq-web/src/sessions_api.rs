@@ -723,6 +723,7 @@ mod tests {
                             workspace_id: "w1",
                             pane_id: "w1:p1",
                         },
+                        purpose: None,
                     },
                 )?;
                 registry::set_owner(c, id, thread)?;

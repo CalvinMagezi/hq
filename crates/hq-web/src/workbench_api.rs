@@ -65,6 +65,14 @@ fn host_row(h: &Host) -> Value {
     }
 }
 
+/// Each known harness and profile with its category (`coding` or `general_purpose`).
+fn harness_categories() -> serde_json::Map<String, Value> {
+    harness::known_harnesses()
+        .into_iter()
+        .filter_map(|name| harness::category_of(&name).map(|c| (name, json!(c.as_str()))))
+        .collect()
+}
+
 /// The computers HQ can start agents on, each with its HQ folder when it has one.
 pub(crate) async fn hosts_handler() -> Response {
     let result = tokio::task::spawn_blocking(|| {
@@ -80,7 +88,13 @@ pub(crate) async fn hosts_handler() -> Response {
     })
     .await;
     match result {
-        Ok(Ok(rows)) => Json(json!({ "hosts": rows, "harnesses": harness::known_harnesses() })).into_response(),
+        Ok(Ok(rows)) => Json(json!({
+            "hosts": rows,
+            "harnesses": harness::known_harnesses(),
+            // Which kind each agent is, so the page can group them and offer a purpose.
+            "categories": harness_categories(),
+        }))
+        .into_response(),
         Ok(Err(e)) => ApiError::internal(e).into_response(),
         Err(e) => ApiError::internal(e).into_response(),
     }
@@ -133,6 +147,8 @@ pub(crate) struct SpawnBody {
     new_folder: Option<String>,
     prompt: Option<String>,
     label: Option<String>,
+    /// `code`, `monitor`, `research`, `review` or `general`; blank is the agent's default.
+    purpose: Option<String>,
 }
 
 /// Free text that lands in lists and relays: no control characters, so no escape sequences or line breaks.
@@ -198,6 +214,7 @@ async fn spawn(state: &Arc<WsState>, body: SpawnBody) -> Result<Value, ApiError>
         return Err(ApiError::bad_request(format!("the name is longer than {MAX_LABEL_CHARS} characters")));
     }
     plain_text(&label, "a name")?;
+    let purpose = harness::Purpose::parse_opt(body.purpose.as_deref()).map_err(|e| ApiError::bad_request(e.to_string()))?;
     let host_name = trimmed(body.host);
     let (folder, new_folder) = (trimmed(body.folder), trimmed(body.new_folder));
 
@@ -228,6 +245,8 @@ async fn spawn(state: &Arc<WsState>, body: SpawnBody) -> Result<Value, ApiError>
             watch: None,
             parent: None,
             goal: GoalText { goal: None, done_criteria: None },
+            purpose,
+            observe: &[],
         },
     )
     .await
@@ -368,6 +387,7 @@ mod tests {
                         cwd: "/repo",
                         mission_id: None,
                         placement: Placement { host: "laptop", agent_name: id, workspace_id: "w1", pane_id: "w1:p1" },
+                        purpose: None,
                     },
                 )
             })
@@ -413,11 +433,13 @@ mod tests {
             new_folder: None,
             prompt,
             label,
+            purpose: None,
         };
         for bad in [
             body("  ", None, None),
             body("claude-code", Some("x".repeat(MAX_PROMPT_CHARS + 1)), None),
             body("claude-code", None, Some("x".repeat(MAX_LABEL_CHARS + 1))),
+            SpawnBody { purpose: Some("coding".into()), ..body("hermes", None, None) },
         ] {
             assert_eq!(spawn_handler(State(state.clone()), Json(bad)).await.status(), StatusCode::BAD_REQUEST);
         }
