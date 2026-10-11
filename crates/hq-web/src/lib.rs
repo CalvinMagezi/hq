@@ -294,6 +294,7 @@ pub fn create_router(state: Arc<WsState>) -> Router {
         )
         .route("/api/harness-sessions", get(sessions_api::list_all_handler).post(workbench_api::spawn_handler))
         .route("/api/workbench/hosts", get(workbench_api::hosts_handler))
+        .route("/api/workbench/lockdown", post(workbench_api::lockdown_handler))
         .route(
             "/api/workbench/hosts/{host}/dirs",
             get(workbench_api::list_dirs_handler).post(workbench_api::make_dir_handler),

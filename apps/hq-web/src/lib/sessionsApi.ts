@@ -148,6 +148,15 @@ export interface HostWorkspace {
   explorer_path: string
 }
 
+/** Why a computer refuses to start agents; only `hq host unlock` on that computer lifts it. */
+export interface HostLockdown {
+  reason: string
+  /** `operator`, `cli` or `breaker` (too many agents started at once). */
+  source: string
+  /** Seconds since the Unix epoch. */
+  at: number
+}
+
 export interface WorkbenchHost {
   host: string
   reachable: boolean
@@ -155,6 +164,13 @@ export interface WorkbenchHost {
   workspace?: HostWorkspace
   workspace_error?: string
   error?: string
+  lockdown?: HostLockdown | null
+}
+
+/** What the emergency stop did on each computer; an unreachable one is not locked. */
+export interface LockdownResult {
+  all_locked: boolean
+  hosts: { host: string; locked: boolean; lockdown?: HostLockdown; error?: string }[]
 }
 
 export interface WorkbenchHosts {
@@ -219,6 +235,10 @@ export const workbenchApi = {
     hqJson(`${hostPath(host)}/dirs`, 'POST', body),
 
   spawn: (input: SpawnInput): Promise<LaunchReport> => hqJson('/api/harness-sessions', 'POST', input),
+
+  /** Stops every agent on one computer, or on all of them when `host` is left out. */
+  lockdown: (body: { reason?: string; host?: string }): Promise<LockdownResult> =>
+    hqJson('/api/workbench/lockdown', 'POST', body),
 }
 
 export const globalSessionsApi = {

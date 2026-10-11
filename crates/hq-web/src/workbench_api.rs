@@ -1,6 +1,6 @@
 //! REST behind the Workbench page: which computers can run agents and where, folder
 //! browsing inside each computer's HQ folder, and starting, stopping, resuming,
-//! renaming and archiving agents. Folder paths are resolved on the computer that runs
+//! renaming and archiving agents, and the emergency stop. Folder paths are resolved on the computer that runs
 //! the agent, so this server never judges a path by its own operating system.
 
 use axum::{
@@ -22,6 +22,9 @@ use crate::error::ApiError;
 const MAX_LABEL_CHARS: usize = 80;
 const MAX_PROMPT_CHARS: usize = 20_000;
 const UNKNOWN_HOST: &str = "no such computer";
+/// Longest lockdown reason the page may send; the host keeps the same bound.
+const MAX_LOCKDOWN_REASON_CHARS: usize = 300;
+const DEFAULT_LOCKDOWN_REASON: &str = "stopped from the web app";
 
 fn host_by_name(name: &str) -> Result<Host, ApiError> {
     let known = agent_host::all_hosts().map_err(ApiError::internal)?;
@@ -56,10 +59,12 @@ fn host_row(h: &Host) -> Value {
     let workspace = h.workspace();
     match (h.version(), workspace) {
         (Ok(version), Ok(workspace)) => {
-            json!({ "host": h.name(), "reachable": true, "host_version": version, "workspace": workspace })
+            let lockdown = h.lockdown_status().unwrap_or(Value::Null);
+            json!({ "host": h.name(), "reachable": true, "host_version": version, "workspace": workspace, "lockdown": lockdown })
         }
         (Ok(version), Err(e)) => {
-            json!({ "host": h.name(), "reachable": true, "host_version": version, "workspace": null, "workspace_error": host_error(e).to_string() })
+            let lockdown = h.lockdown_status().unwrap_or(Value::Null);
+            json!({ "host": h.name(), "reachable": true, "host_version": version, "workspace": null, "workspace_error": host_error(e).to_string(), "lockdown": lockdown })
         }
         (Err(e), _) => json!({ "host": h.name(), "reachable": false, "error": host_error(e).to_string() }),
     }
@@ -150,6 +155,43 @@ pub(crate) struct SpawnBody {
     label: Option<String>,
     /// `code`, `monitor`, `research`, `review` or `general`; blank is the agent's default.
     purpose: Option<String>,
+}
+
+#[derive(Deserialize)]
+pub(crate) struct LockdownBody {
+    reason: Option<String>,
+    /// One computer; blank stops every computer.
+    host: Option<String>,
+}
+
+/// The emergency stop: every agent on one computer, or on all of them, is
+/// killed and nothing starts until someone at that computer runs
+/// `hq host unlock`. Reports each computer, since an unreachable one is not locked.
+pub(crate) async fn lockdown_handler(Json(body): Json<LockdownBody>) -> Response {
+    match lockdown(body).await {
+        Ok(v) => Json(v).into_response(),
+        Err(e) => e.into_response(),
+    }
+}
+
+async fn lockdown(body: LockdownBody) -> Result<Value, ApiError> {
+    let given = trimmed(body.reason);
+    if let Some(reason) = &given {
+        plain_text(reason, "a reason")?;
+        if reason.chars().count() > MAX_LOCKDOWN_REASON_CHARS {
+            return Err(ApiError::bad_request(format!("a reason is at most {MAX_LOCKDOWN_REASON_CHARS} characters")));
+        }
+    }
+    let host = trimmed(body.host);
+    let reason = given.map_or_else(|| DEFAULT_LOCKDOWN_REASON.to_string(), |r| format!("{r} (from the web app)"));
+    tokio::task::spawn_blocking(move || {
+        if let Some(name) = &host {
+            host_by_name(name)?;
+        }
+        agent_host::tools::lock_down(host.as_deref(), &reason).map_err(ApiError::internal)
+    })
+    .await
+    .map_err(join_error)?
 }
 
 /// Free text that lands in lists and relays: no control characters, so no escape sequences or line breaks.
@@ -459,6 +501,17 @@ mod tests {
         assert!(plain_text("fine name", "a name").is_ok());
         assert!(plain_text("two\nlines", "a name").is_err());
         assert!(plain_text("esc\u{1b}[31m", "a name").is_err());
+    }
+
+    #[tokio::test]
+    async fn a_lockdown_refuses_a_bad_reason_and_an_unknown_computer() {
+        let status = |reason: &str, host: Option<&str>| {
+            let body = LockdownBody { reason: Some(reason.into()), host: host.map(str::to_string) };
+            async move { lockdown_handler(Json(body)).await.status() }
+        };
+        assert_eq!(status("two\nlines", None).await, StatusCode::BAD_REQUEST);
+        assert_eq!(status(&"x".repeat(MAX_LOCKDOWN_REASON_CHARS + 1), None).await, StatusCode::BAD_REQUEST);
+        assert_eq!(status("fine", Some("no-such-box")).await, StatusCode::NOT_FOUND);
     }
 
     #[tokio::test]

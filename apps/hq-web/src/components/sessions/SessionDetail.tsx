@@ -6,6 +6,7 @@ import { SessionTerminal } from './SessionTerminal'
 import { SessionSendBox } from './SessionSendBox'
 import { SessionBadges, SessionTaskLink } from './SessionRow'
 import { BlockedCallout } from './BlockedCallout'
+import { StopAllButton } from './EmergencyStop'
 import { ActionError, ArchiveButton, FollowInChat, RenameTitle, ResumeButton, StopButton, useAction } from './SessionActions'
 
 type Refresh = () => void | Promise<void>
@@ -48,6 +49,10 @@ export function SessionDetail({ session: s, onBack, onChanged }: Props) {
             <ArrowLeft className="w-4 h-4" />
           </button>
           <RenameTitle session={s} action={action} />
+          {/* On a phone the agent list, and its Stop all, is hidden while an agent is open. */}
+          <span className="md:hidden ml-auto">
+            <StopAllButton compact onStopped={() => void onChanged()} />
+          </span>
         </div>
         {folder && <p className="text-[11px] text-neutral-500 truncate">Folder: {folder}</p>}
         <SessionBadges session={s} />
