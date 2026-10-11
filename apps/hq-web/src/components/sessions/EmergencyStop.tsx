@@ -145,7 +145,9 @@ function StopAllDialog({ onClose, onStopped }: { onClose: () => void; onStopped:
           ) : (
             <button type="button" onClick={() => void stop()} disabled={busy} className="hq-btn-primary w-full">
               {busy ? <Loader2 className="w-4 h-4 animate-spin" /> : <OctagonX className="w-4 h-4" />}
-              {busy ? 'Stopping' : target ? `Stop every agent on ${computerName(target)}` : 'Stop every agent everywhere'}
+              <span className="truncate">
+                {busy ? 'Stopping' : target ? `Stop agents on ${computerName(target)}` : 'Stop every agent everywhere'}
+              </span>
             </button>
           )}
         </div>

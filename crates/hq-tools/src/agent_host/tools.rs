@@ -95,21 +95,27 @@ impl HqTool for HostLockdownTool {
 pub fn lock_down(named: Option<&str>, reason: &str) -> Result<Value> {
     let hosts = match named {
         Some(name) => vec![host(Some(name))?],
-        None => all_hosts()?,
+        // An unreadable config must not leave this machine running: lock its own host at least.
+        None => all_hosts().or_else(|_| super::build(&Default::default(), super::NATIVE_HOST).map(|h| vec![h]))?,
     };
     let rows: Vec<Value> = std::thread::scope(|scope| {
         let pending: Vec<_> = hosts
             .iter()
             .map(|h| {
-                scope.spawn(move || match h.lockdown(reason) {
+                let worker = scope.spawn(move || match h.lockdown(reason) {
                     Ok(held) => json!({ "host": h.name(), "locked": true, "lockdown": held }),
                     Err(e) => json!({ "host": h.name(), "locked": false, "error": e.to_string() }),
-                })
+                });
+                (h.name().to_string(), worker)
             })
             .collect();
         pending
             .into_iter()
-            .map(|p| p.join().unwrap_or_else(|_| json!({ "locked": false, "error": "the lockdown call panicked" })))
+            .map(|(name, worker)| {
+                worker
+                    .join()
+                    .unwrap_or_else(|_| json!({ "host": name, "locked": false, "error": "the lockdown call panicked" }))
+            })
             .collect()
     });
     let all_locked = rows.iter().all(|r| r["locked"] == true);
