@@ -133,6 +133,12 @@ pub struct AgentInfo {
     /// The agent's own id for its conversation, when the host knows it (the
     /// built-in host learns it from the agent's hooks). The host never does.
     pub agent_session_id: Option<String>,
+    /// The process has ended but the host still lists the pane (its screen can
+    /// still be read). HQ treats such an agent as gone.
+    pub exited: bool,
+    /// How the process ended, when `exited` and the host says. Zero is a run
+    /// that finished; anything else is a crash or a refusal.
+    pub exit_code: Option<u32>,
 }
 
 impl AgentInfo {

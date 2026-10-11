@@ -30,7 +30,7 @@ use hq_core::types::{ChatMessage, MailboxMessageType, MessageRole, ValueItem, Va
 use hq_db::Database;
 use hq_db::harness_sessions_registry as registry;
 use hq_tools::harness_session::mission::{self, Event};
-use hq_tools::harness_session::{Liveness, liveness, poll_hosts_with};
+use hq_tools::harness_session::{HarnessCategory, Liveness, exited_pane, liveness, poll_hosts_with};
 use hq_tools::agent_host::{AgentInfo, AgentStatus, Host, HostBackend};
 use std::collections::HashMap;
 use std::future::Future;
@@ -126,7 +126,9 @@ fn gather_hosts(
 
     let mut screens = HashMap::new();
     for row in rows {
-        if !matches!(liveness(&polled, row), Liveness::Alive(_)) || Instant::now() >= deadline {
+        // An exited pane is read once more: its last screen is the run's output.
+        let readable = matches!(liveness(&polled, row), Liveness::Alive(_)) || exited_pane(&polled, row).is_some();
+        if !readable || Instant::now() >= deadline {
             continue;
         }
         let read = (resolve.as_ref())(&row.host)
@@ -144,6 +146,27 @@ fn gather_hosts(
     HostPhase { polled, screens }
 }
 
+
+/// Closes the pane of a session whose process has ended, so the host's list
+/// does not keep every finished run. Best effort: a pane that cannot be closed
+/// is reaped by the host's own idle limit later.
+fn close_exited_pane(row: &registry::HarnessSessionRow, agent: Option<&AgentInfo>, resolve: &HostResolver) {
+    let workspace = row
+        .workspace_id
+        .clone()
+        .or_else(|| agent.map(|a| a.workspace_id.clone()));
+    let Some(ws) = workspace else { return };
+    match (resolve.as_ref())(&row.host) {
+        Ok(host) => {
+            if let Err(e) = host.close_workspace(&ws)
+                && e.code() != Some("not_found")
+            {
+                tracing::warn!(session = %row.id, error = %e, "session-supervisor: could not close an exited pane");
+            }
+        }
+        Err(e) => tracing::debug!(session = %row.id, error = %e, "session-supervisor: no host to close the exited pane on"),
+    }
+}
 
 /// Cleaned final output for a session: the newest stored snapshot.
 fn final_output(db: &Arc<Database>, session_id: &str) -> Option<String> {
@@ -314,12 +337,13 @@ async fn dismiss_survey(
 /// is idle. One per sweep: the agent finishes a turn, and the idle event that
 /// follows delivers the next.
 async fn deliver_messages(db: &Database, row: &registry::HarnessSessionRow, agent: &AgentInfo) {
-    if !hq_tools::a2a::can_receive(agent.status) {
+    let category = hq_tools::harness_session::category_of(&row.harness).unwrap_or(HarnessCategory::Coding);
+    if !hq_tools::a2a::can_receive_agent(agent, category) {
         return;
     }
-    let (db_arc, id, status) = (Arc::new(db.clone()), row.id.clone(), agent.status);
+    let (db_arc, id, agent) = (Arc::new(db.clone()), row.id.clone(), agent.clone());
     let delivered =
-        tokio::task::spawn_blocking(move || hq_tools::a2a::deliver_if_idle(&db_arc, &id, status))
+        tokio::task::spawn_blocking(move || hq_tools::a2a::deliver_to(&db_arc, &id, &agent, category))
             .await;
     match delivered {
         Ok(Ok(Some(message))) => {
@@ -415,6 +439,19 @@ async fn supervise(
             Liveness::Gone => {}
         }
 
+        // A pane whose process ended keeps its final screen until it is closed:
+        // store it as the last snapshot, then close the pane so the host does not
+        // fill up with dead runs. Only then is the exit claimed below.
+        let exited = exited_pane(&phase.polled, &row);
+        if exited.is_some() {
+            if let Some(screen) = phase.screens.get(&row.id).filter(|s| !s.trim().is_empty()) {
+                let (id, snapshot) = (row.id.clone(), last_lines(screen, SNAPSHOT_LINES));
+                if let Err(e) = db.with_conn(move |c| registry::set_last_snapshot(c, &id, &snapshot)) {
+                    tracing::warn!(session = %row.id, error = %e, "session-supervisor: final snapshot store failed");
+                }
+            }
+            close_exited_pane(&row, exited.as_ref(), &resolve);
+        }
         // Claim the transition inside the UPDATE. Two overlapping sweeps would
         // otherwise both see `running` and both notify.
         let id = row.id.clone();
@@ -425,7 +462,21 @@ async fn supervise(
         tracing::info!(session = %row.id, harness = %row.harness, "session-supervisor: marked exited");
         // Before the summarizer: the daemon may kill this sweep at its timeout,
         // and the claim above means no later sweep would record the exit.
-        let link = record_on_task(db, &row, Event::Exited);
+        // A stack specialist's run is over when its process ends. Its exit code
+        // says how: zero is a finished run, anything else a crash. A host that
+        // reports no code (or a pane already gone) falls back to the screen:
+        // output means a run, nothing means a crash.
+        let event = if row.origin == registry::ORIGIN_STACK {
+            match exited.as_ref().and_then(|a| a.exit_code) {
+                Some(0) => Event::RunEnded,
+                Some(_) => Event::RunFailed,
+                None if final_output(&db_arc, &row.id).is_some() => Event::RunEnded,
+                None => Event::RunFailed,
+            }
+        } else {
+            Event::Exited
+        };
+        let link = record_on_task(db, &row, event);
         // Sessions started for one that ended on its own stop with it too.
         let stopped = hq_tools::harness_session::stop_children(&db_arc, &row.id);
         if !stopped.is_empty() {
@@ -436,6 +487,7 @@ async fn supervise(
         if let Err(e) = hq_tools::a2a::report_to_parent(db, &row, "exited", &last_output) {
             tracing::warn!(session = %row.id, error = %e, "session-supervisor: could not report to the parent");
         }
+        alerts::report_to_observers(db, &row, "exited", &last_output);
         if hand_to_chat(db, &row, WAKE_EXITED) {
             continue;
         }

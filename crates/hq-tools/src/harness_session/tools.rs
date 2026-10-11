@@ -56,13 +56,15 @@ impl HqTool for HarnessSessionSpawnTool {
         "harness_session_spawn"
     }
     fn description(&self) -> &str {
-        "Spawn a long-lived interactive session for a coding-agent harness (claude-code, cursor, opencode, pi, kimi, codex, qwen, antigravity, github-copilot) in the host, on this machine or a remote host such as the user's laptop (see host_list). Returns a session_id for status/logs/wait/send/stop/resume. If the agent stops at a dialog the result carries the screen and no prompt is typed. A configured profile name (agent_host.harness_profiles, such as a named Claude account) is accepted as the harness and reported back as `harness`. Pass task_id to make an HQ task the durable record of the work: the supervisor then comments on it and moves its status as the session starts, finishes a turn, blocks or exits (never to complete; a person verifies that). Aliases: agy = antigravity."
+        "Spawn a long-lived interactive session for an agent in the host, on this machine or a remote host such as the user's laptop (see host_list). Two categories of agent run there. Coding agents (claude-code, cursor, opencode, pi, kimi, codex, qwen, antigravity, github-copilot) take code and repository changes. General-purpose agents (hermes, openclaw) are full assistants with their own tools and memory: they take `purpose` monitor (watch other sessions and report), research (parallel reading and searching), review (peer review of another agent's work) or general, and they refuse `purpose` code, so never send them a coding task. A monitor or reviewer linked to a task can be given sessions to `observe`: their finished turns, blocks and exits are relayed to it. Returns a session_id for status/logs/wait/send/stop/resume. If the agent stops at a dialog the result carries the screen and no prompt is typed. A configured profile name (agent_host.harness_profiles, such as a named Claude account) is accepted as the harness and reported back as `harness`. Pass task_id to make an HQ task the durable record of the work: the supervisor then comments on it and moves its status as the session starts, finishes a turn, blocks or exits (never to complete; a person verifies that). A monitor or reviewer comments on its task but never moves it. Aliases: agy = antigravity."
     }
     fn parameters(&self) -> Value {
         json!({
             "type": "object",
             "properties": {
-                "harness": { "type": "string", "description": format!("One of: {} (built-in harnesses plus any agent_host.harness_profiles)", super::spec::known_harnesses().join(", ")) },
+                "harness": { "type": "string", "description": format!("One of: {} (built-in harnesses plus any agent_host.harness_profiles). Coding agents: {}. General-purpose agents: {}.", super::spec::known_harnesses().join(", "), super::spec::names_in(super::HarnessCategory::Coding).join(", "), super::spec::names_in(super::HarnessCategory::GeneralPurpose).join(", ")) },
+                "purpose": { "type": "string", "enum": ["code", "monitor", "research", "review", "general"], "description": "What the session is for. Default: code for a coding agent, general for a general-purpose agent. A general-purpose agent refuses code. monitor and review sessions never move their task's status." },
+                "observe": { "type": "array", "items": { "type": "string" }, "description": "Session ids a monitor or reviewer watches (at most 10; needs task_id). When one finishes a turn, blocks or exits, this session gets a message on its task thread, typed in when it is next idle." },
                 "prompt": { "type": "string", "description": "Initial prompt typed into the session after it starts" },
                 "host": { "type": "string", "description": "host to run on, from host_list (default: the configured default host)" },
                 "cwd": { "type": "string", "description": "Project directory on that host. Optional: when omitted, or when the folder does not exist there, the session starts in a folder inside that machine's own HQ folder (Documents/HQ), created if needed. A home or root directory is refused." },
@@ -98,6 +100,8 @@ impl HqTool for HarnessSessionSpawnTool {
         let host = arg_str(&args, "host");
         let task_id = arg_str(&args, "task_id");
         let (goal, done) = (arg_str(&args, "goal"), arg_str(&args, "done_criteria"));
+        let purpose = super::Purpose::parse_opt(args.get("purpose").and_then(Value::as_str))?;
+        let observe = arg_str_list(&args, "observe");
         let cfg = hq_core::config::HqConfig::load()?;
         if self.chat.as_ref().is_some_and(|c| c.driver_turn) {
             anyhow::bail!("a driver turn cannot start sessions; tell the user what you need");
@@ -123,6 +127,8 @@ impl HqTool for HarnessSessionSpawnTool {
                         goal: Some(goal.as_str()).filter(|g| !g.is_empty()),
                         done_criteria: Some(done.as_str()).filter(|d| !d.is_empty()),
                     },
+                    purpose,
+                    observe: &observe,
                 }
             };
         }
@@ -688,7 +694,7 @@ impl HqTool for HarnessSessionHandoffTool {
         "harness_session_handoff"
     }
     fn description(&self) -> &str {
-        "Hand a piece of work to a coding agent in one call: files an HQ task (or reuses one), starts a session linked to it with the goal and acceptance criteria, and opens a web chat thread that owns the session so its finished turns, blocks and Drive show up there instead of the relay. Returns the task id and display id, session id, thread id and web links (/chat?thread=<id>, /tasks?task=<id>). Idempotent: the same external_id returns the same task, and a task that already has a live session gets no second one. If the host is unreachable or the agent stops at a dialog the result says so (blocked_at_dialog, prompt not typed) and nothing is claimed as running."
+        "Hand a piece of work to an agent in one call: files an HQ task (or reuses one), starts a session linked to it with the goal and acceptance criteria, and opens a web chat thread that owns the session so its finished turns, blocks and Drive show up there instead of the relay. Returns the task id and display id, session id, thread id and web links (/chat?thread=<id>, /tasks?task=<id>). Idempotent: the same external_id returns the same task, and a task that already has a live session gets no second one. If the host is unreachable or the agent stops at a dialog the result says so (blocked_at_dialog, prompt not typed) and nothing is claimed as running."
     }
     fn parameters(&self) -> Value {
         json!({
@@ -698,7 +704,8 @@ impl HqTool for HarnessSessionHandoffTool {
                 "description": { "type": "string", "description": "What the work is, for the task and the agent" },
                 "acceptance": { "type": "string", "description": "Observable conditions that show the work is done (also accepted as done_criteria). HQ drives the session only when these are specific." },
                 "done_criteria": { "type": "string", "description": "Alias of acceptance" },
-                "harness": { "type": "string", "description": format!("One of: {}", super::spec::known_harnesses().join(", ")) },
+                "harness": { "type": "string", "description": format!("One of: {}. A general-purpose agent ({}) refuses code work; give it purpose research, review or general.", super::spec::known_harnesses().join(", "), super::spec::names_in(super::HarnessCategory::GeneralPurpose).join(", ")) },
+                "purpose": { "type": "string", "enum": ["code", "monitor", "research", "review", "general"], "description": "What the session is for. Default: code for a coding agent, general for a general-purpose agent." },
                 "cwd": { "type": "string", "description": "Project directory on that host. Optional: when omitted, or when the folder does not exist there, the session starts in a folder inside that machine's own HQ folder (Documents/HQ), created if needed. A home or root directory is refused, as is anything matching agent_host.spawn_cwd_deny." },
                 "host": { "type": "string", "description": "host from host_list (default: the configured default host, normally local)" },
                 "external_id": { "type": "string", "description": "Idempotency key for the task, unique per space. Not combinable with task_id." },
@@ -755,6 +762,7 @@ impl HqTool for HarnessSessionHandoffTool {
                 // so a handoff-key holder cannot fill the driven-session cap and starve the owner.
                 drive_new: handoff_drives_new(cfg.agent_host.drive_new_watches, &args, self.chat.as_ref()),
                 drive_opted_out: args.get("drive").and_then(Value::as_bool) == Some(false),
+                purpose: super::Purpose::parse_opt(args.get("purpose").and_then(Value::as_str))?,
             },
         )
         .await?;

@@ -57,6 +57,10 @@ fn launch<'a>(host: ScriptedHost, id: &'a str, prompt: Option<&'a str>) -> Launc
         watch: None,
         parent: None,
         goal: GoalText::default(),
+        purpose: Purpose::Code,
+        observe: &[],
+        one_shot: None,
+        origin: None,
     }
 }
 
@@ -125,6 +129,7 @@ fn a_reported_conversation_id_becomes_the_resume_token_once() {
                     workspace_id: "hs-id",
                     pane_id: "hs-id",
                 },
+                purpose: None,
             },
         )
     })
@@ -257,6 +262,7 @@ fn every_spec_names_a_kind_the_host_supports() {
         "amp",
         "grok",
         "hermes",
+        "openclaw",
         "kilo",
         "qodercli",
         "qwen",
@@ -495,6 +501,7 @@ fn row(host: &str, name: &str) -> HarnessSessionRow {
         drive_off_reason: None,
         parent_session_id: None,
         spawn_depth: 0,
+        purpose: "code".into(),
     }
 }
 
@@ -607,6 +614,7 @@ fn seed_watched(db: &Arc<Database>, id: &str, goal: Option<GoalText<'_>>) {
                 cwd: "/t",
                 mission_id: None,
                 placement: Placement { host: "local", agent_name: id, workspace_id: "w1", pane_id: "w1:p1" },
+                purpose: None,
             },
         )?;
         registry::watch_from_chat(c, id, "th-1", false)?;
@@ -634,6 +642,8 @@ fn alive(name: &str) -> Liveness {
         state_change_seq: 1,
         launch_pending: false,
         agent_session_id: None,
+        exited: false,
+        exit_code: None,
     }))
 }
 
@@ -808,6 +818,7 @@ async fn the_watch_tool_defaults_drive_on_and_never_turns_it_back_on() {
                         workspace_id: "w1",
                         pane_id: "w1:p1",
                     },
+                    purpose: None,
                 },
             )?;
             registry::set_goal(c, id, Some(GOAL), Some(DONE), registry::ACTOR_USER)?;
@@ -878,6 +889,7 @@ fn linking_from_a_chat_reports_whether_it_drives() {
                     cwd: "/t",
                     mission_id: None,
                     placement: Placement { host: "local", agent_name: "hs-l", workspace_id: "w1", pane_id: "w1:p1" },
+                    purpose: None,
                 },
             )?;
             Ok(id)
@@ -996,6 +1008,169 @@ fn handoff_req(external_id: &str) -> handoff::HandoffRequest {
         drive_new: true,
         ..Default::default()
     }
+}
+
+/// A task to launch work on, in a fresh database.
+fn a_task(db: &Database) -> String {
+    db.with_conn(|c| {
+        c.execute(
+            "INSERT OR IGNORE INTO initiatives (id, space_id, name, slug, id_prefix) VALUES ('in-1', 'personal', 'Work', 'work', 'FR')",
+            [],
+        )?;
+        let new = hq_db::tasks::NewTask { title: "watch the refactor", created_by: "test", ..Default::default() };
+        Ok(hq_db::tasks::create_task(c, "tk-watch", "in-1", &new)?.id)
+    })
+    .unwrap()
+}
+
+fn spawn_req<'a>(harness: &'a str, purpose: Option<Purpose>, task: Option<&'a str>, observe: &'a [String]) -> SpawnRequest<'a> {
+    SpawnRequest {
+        host: None,
+        harness,
+        prompt: None,
+        cwd: std::path::Path::new("/t"),
+        label: "",
+        mission_id: task,
+        watch: None,
+        parent: None,
+        goal: GoalText::default(),
+        purpose,
+        observe,
+    }
+}
+
+#[tokio::test]
+async fn a_general_purpose_agent_is_never_started_for_code_work() {
+    let (dir, host) = startable_host();
+    let db = Arc::new(Database::open_memory().unwrap());
+    let vault = tempfile::tempdir().unwrap();
+    let err = spawn_on(vault.path(), &db, Arc::new(host), spawn_req("hermes", Some(Purpose::Code), None, &[]))
+        .await
+        .unwrap_err()
+        .to_string();
+    assert!(err.contains("'hermes' is a general-purpose agent"), "{err}");
+    assert!(err.contains("claude-code"), "it says where code goes: {err}");
+    assert!(!calls(&dir).contains("workspace create"), "refused before anything started");
+    assert_eq!(count(&db, "SELECT COUNT(*) FROM harness_sessions"), 0);
+}
+
+#[tokio::test]
+async fn a_general_purpose_agent_defaults_to_general_and_a_coding_agent_to_code() {
+    let (dir, host) = startable_host();
+    let db = Arc::new(Database::open_memory().unwrap());
+    let vault = tempfile::tempdir().unwrap();
+    let report = spawn_on(vault.path(), &db, Arc::new(host), spawn_req("hermes", None, None, &[])).await.unwrap();
+    assert_eq!(report["category"], "general_purpose");
+    assert_eq!(report["purpose"], "general");
+    let id = report["session_id"].as_str().unwrap();
+    assert_eq!(get_row(&db, id).unwrap().purpose, "general");
+    assert!(report.get("observing").is_none());
+    let log = calls(&dir);
+    assert!(log.contains("agent start") && log.contains("hermes") && log.contains("chat"), "launched as `hermes chat`: {log}");
+
+    let (_dir, host) = startable_host();
+    let report = spawn_on(vault.path(), &db, Arc::new(host), spawn_req("claude-code", None, None, &[])).await.unwrap();
+    assert_eq!(report["category"], "coding");
+    assert_eq!(report["purpose"], "code");
+}
+
+#[tokio::test]
+async fn only_a_monitor_or_reviewer_on_a_task_can_be_given_sessions_to_observe() {
+    let db = Arc::new(Database::open_memory().unwrap());
+    let vault = tempfile::tempdir().unwrap();
+    let task = a_task(&db);
+    let watched = vec!["hs-coder".to_string()];
+
+    let (dir, host) = startable_host();
+    let err = spawn_on(vault.path(), &db, Arc::new(host), spawn_req("hermes", Some(Purpose::Research), Some(&task), &watched))
+        .await
+        .unwrap_err()
+        .to_string();
+    assert!(err.contains("only a session with purpose monitor or review"), "{err}");
+    assert!(!calls(&dir).contains("workspace create"));
+
+    let (dir, host) = startable_host();
+    let err = spawn_on(vault.path(), &db, Arc::new(host), spawn_req("hermes", Some(Purpose::Monitor), None, &watched))
+        .await
+        .unwrap_err()
+        .to_string();
+    assert!(err.contains("needs a task_id"), "{err}");
+    assert!(!calls(&dir).contains("workspace create"));
+
+    let too_many: Vec<String> = (0..11).map(|i| format!("hs-{i}")).collect();
+    let (_dir, host) = startable_host();
+    let err = spawn_on(vault.path(), &db, Arc::new(host), spawn_req("hermes", Some(Purpose::Monitor), Some(&task), &too_many))
+        .await
+        .unwrap_err()
+        .to_string();
+    assert!(err.contains("at most 10"), "{err}");
+
+    // An id that is no session is caught before anything is launched.
+    let (dir, host) = startable_host();
+    let err = spawn_on(vault.path(), &db, Arc::new(host), spawn_req("hermes", Some(Purpose::Monitor), Some(&task), &watched))
+        .await
+        .unwrap_err()
+        .to_string();
+    assert!(err.contains("no harness session 'hs-coder' to observe"), "{err}");
+    assert!(!calls(&dir).contains("workspace create"));
+    assert_eq!(count(&db, "SELECT COUNT(*) FROM harness_sessions"), 0, "{err}");
+}
+
+#[tokio::test]
+async fn a_monitor_records_what_it_observes_and_a_coding_agent_may_review_too() {
+    let db = Arc::new(Database::open_memory().unwrap());
+    let vault = tempfile::tempdir().unwrap();
+    let task = a_task(&db);
+    let (_dir, host) = startable_host();
+    let coder = spawn_on(vault.path(), &db, Arc::new(host), spawn_req("claude-code", None, Some(&task), &[])).await.unwrap();
+    let coder_id = coder["session_id"].as_str().unwrap().to_string();
+
+    let watched = vec![coder_id.clone()];
+    let (_dir, host) = startable_host();
+    let monitor = spawn_on(vault.path(), &db, Arc::new(host), spawn_req("hermes", Some(Purpose::Monitor), Some(&task), &watched))
+        .await
+        .unwrap();
+    assert_eq!(monitor["purpose"], "monitor");
+    assert_eq!(monitor["observing"], serde_json::json!([coder_id]));
+    assert!(monitor["observing_note"].as_str().unwrap().contains("never an instruction"));
+    let monitor_id = monitor["session_id"].as_str().unwrap();
+    let observed = db.with_conn(|c| registry::observed_by(c, monitor_id)).unwrap();
+    assert_eq!(observed, watched);
+    let observers: Vec<String> = db
+        .with_conn(|c| registry::running_observers(c, &coder_id))
+        .unwrap()
+        .into_iter()
+        .map(|r| r.id)
+        .collect();
+    assert_eq!(observers, vec![monitor_id.to_string()]);
+
+    // A coding agent can be the reviewer: the category decides what is refused, not what is allowed.
+    let (_dir, host) = startable_host();
+    let reviewer = spawn_on(vault.path(), &db, Arc::new(host), spawn_req("codex", Some(Purpose::Review), Some(&task), &watched))
+        .await
+        .unwrap();
+    assert_eq!(reviewer["purpose"], "review");
+    assert_eq!(reviewer["category"], "coding");
+}
+
+#[tokio::test]
+async fn a_handoff_to_a_general_purpose_agent_takes_a_purpose_but_not_code() {
+    let (dir, host) = startable_host();
+    let db = Arc::new(Database::open_memory().unwrap());
+    let vault = tempfile::tempdir().unwrap();
+    let req = handoff::HandoffRequest { harness: "openclaw".into(), purpose: Some(Purpose::Code), ..handoff_req("ext-gp") };
+    let err = handoff::handoff(vault.path(), &db, Arc::new(host), req).await.unwrap_err().to_string();
+    assert!(err.contains("'openclaw' is a general-purpose agent"), "{err}");
+    assert!(!calls(&dir).contains("workspace create"));
+
+    let (_dir, host) = startable_host();
+    let req = handoff::HandoffRequest { harness: "openclaw".into(), purpose: Some(Purpose::Review), ..handoff_req("ext-gp2") };
+    let report = handoff::handoff(vault.path(), &db, Arc::new(host), req).await.unwrap();
+    assert_eq!(report["handoff"], "started");
+    let row = get_row(&db, report["session_id"].as_str().unwrap()).unwrap();
+    assert_eq!(row.purpose, "review");
+    // A reviewer never moves the task: the handoff's own launch left it where it was.
+    assert_eq!(report["task"]["status"], "to_do", "{report}");
 }
 
 fn startable_host() -> (tempfile::TempDir, ScriptedHost) {
@@ -1493,6 +1668,7 @@ async fn a_row_that_cannot_be_recorded_closes_the_workspace_that_was_just_launch
                 cwd: "/t",
                 mission_id: None,
                 placement: Placement { host: "local", agent_name: "hs-t8", workspace_id: "w0", pane_id: "w0:p1" },
+                purpose: None,
             },
         )
     })
@@ -1938,6 +2114,7 @@ fn row_with_snapshot(id: &str, status: &str) -> Arc<Database> {
                 cwd: "/t",
                 mission_id: None,
                 placement: Placement { host: "local", agent_name: "hs-tl", workspace_id: "w1", pane_id: "w1:p1" },
+                purpose: None,
             },
         )?;
         registry::set_last_snapshot(c, &id, "stored line")?;
@@ -1977,4 +2154,267 @@ fn a_running_session_is_read_live_once_and_falls_back_when_the_read_fails() {
     let down = tail_log_with(&db, "hs-tl", 10, |_| None).unwrap();
     assert_eq!(down["source"], "snapshot");
     assert!(down["host_source"].is_null());
+}
+
+// ---- The Agentic Stack -------------------------------------------------------
+
+fn stack_config(yaml: &str, vault: &std::path::Path) -> hq_core::config::HqConfig {
+    hq_core::config::HqConfig {
+        vault_path: vault.to_path_buf(),
+        stack: serde_yaml::from_str(yaml).unwrap(),
+        ..Default::default()
+    }
+}
+
+/// A task assigned to `assignee` in a fresh initiative.
+fn assigned_task(db: &Database, id: &str, title: &str, assignee: &str, tags: &[&str]) -> String {
+    let tags: Vec<String> = tags.iter().map(|t| t.to_string()).collect();
+    let assignees = vec![assignee.to_string()];
+    db.with_conn(|c| {
+        let _ = c.execute(
+            "INSERT OR IGNORE INTO initiatives (id, space_id, name, slug, id_prefix) VALUES ('in-1', 'personal', 'Market research', 'mr', 'MR')",
+            [],
+        );
+        let new = hq_db::tasks::NewTask {
+            title,
+            description: "Find three suppliers of solar pumps in Uganda.\nDone when each has a price and a contact.",
+            created_by: "test",
+            tags: &tags,
+            assignees: &assignees,
+            ..Default::default()
+        };
+        Ok(hq_db::tasks::create_task(c, id, "in-1", &new)?.id)
+    })
+    .unwrap()
+}
+
+fn stack_resolver(host: ScriptedHost) -> impl Fn(Option<&str>) -> anyhow::Result<Host> + Sync {
+    move |_| Ok(Arc::new(host.clone()) as Host)
+}
+
+#[tokio::test]
+async fn a_specialist_runs_the_task_assigned_to_it_once_and_as_one_shot() {
+    let (dir, host) = startable_host();
+    let db = Arc::new(Database::open_memory().unwrap());
+    let vault = tempfile::tempdir().unwrap();
+    let cfg = stack_config("specialists:\n  - name: hermes\n    harness: hermes\n    purposes: [research, general]\n    cwd: /t\n", vault.path());
+    let task = assigned_task(&db, "tk-1", "Solar pump suppliers", "hermes", &[]);
+    assigned_task(&db, "tk-other", "Someone else's", "codex", &[]);
+
+    let resolve = stack_resolver(host);
+    let report = stack::dispatch(vault.path(), &db, &cfg, &resolve).await.unwrap();
+    assert_eq!(report.started.len(), 1, "{report:?}");
+    assert!(report.skipped.is_empty(), "{report:?}");
+    let run = &report.started[0];
+    assert_eq!(run["specialist"], "hermes");
+    assert_eq!(run["purpose"], "research", "the lane's first purpose when the task hints at none");
+    let id = run["session_id"].as_str().unwrap();
+    let row = get_row(&db, id).unwrap();
+    assert_eq!((row.origin.as_str(), row.label.as_str(), row.purpose.as_str()), ("stack", "stack/hermes", "research"));
+    assert_eq!(row.mission_id.as_deref(), Some(task.as_str()));
+    let log = calls(&dir);
+    assert!(log.contains("agent start") && log.contains("-q") && log.contains("Task MR-001: Solar pump suppliers"), "one-shot with the brief: {log}");
+    assert!(log.contains("solar pumps in Uganda"), "the description is the brief: {log}");
+    assert!(!log.contains("agent prompt"), "nothing is typed into a one-shot run: {log}");
+    let status: String = db.with_conn(|c| Ok(hq_db::tasks::get_task(c, "tk-1")?.unwrap().status)).unwrap();
+    assert_eq!(status, "in_progress");
+
+    // Nothing more starts while the run is up, and the other assignee's task is never touched.
+    let (_dir2, host2) = startable_host();
+    let resolve2 = stack_resolver(host2);
+    let again = stack::dispatch(vault.path(), &db, &cfg, &resolve2).await.unwrap();
+    assert!(again.started.is_empty(), "{again:?}");
+    assert_eq!(count(&db, "SELECT COUNT(*) FROM harness_sessions"), 1);
+}
+
+#[tokio::test]
+async fn a_specialist_is_never_offered_code_work_and_a_tag_picks_its_purpose() {
+    let (_dir, host) = startable_host();
+    let db = Arc::new(Database::open_memory().unwrap());
+    let vault = tempfile::tempdir().unwrap();
+    let cfg = stack_config("specialists:\n  - name: hermes\n    harness: hermes\n    purposes: [research, review]\n    cwd: /t\n", vault.path());
+    assigned_task(&db, "tk-code", "Fix the login bug", "hermes", &["code"]);
+    let reviewed = assigned_task(&db, "tk-review", "Read the draft", "hermes", &["review"]);
+
+    let resolve = stack_resolver(host);
+    let report = stack::dispatch(vault.path(), &db, &cfg, &resolve).await.unwrap();
+    assert_eq!(report.started.len(), 1, "{report:?}");
+    let run = &report.started[0];
+    assert_eq!(run["purpose"], "review");
+    assert_eq!(get_row(&db, run["session_id"].as_str().unwrap()).unwrap().mission_id.as_deref(), Some(reviewed.as_str()));
+    let code_status: String = db.with_conn(|c| Ok(hq_db::tasks::get_task(c, "tk-code")?.unwrap().status)).unwrap();
+    assert_eq!(code_status, "to_do", "the code task was left for a coding agent");
+
+    let err = stack::run_for(vault.path(), &db, &cfg, "hermes", "tk-code", &resolve).await.unwrap_err().to_string();
+    assert!(err.contains("already running") || err.contains("code work"), "{err}");
+}
+
+#[tokio::test]
+async fn a_run_that_cannot_start_leaves_a_comment_and_backs_off() {
+    let (_dir, host) = fake_host(&[("workspace create", String::new(), Some("no such host"))]);
+    let db = Arc::new(Database::open_memory().unwrap());
+    let vault = tempfile::tempdir().unwrap();
+    let cfg = stack_config("specialists:\n  - name: hermes\n    harness: hermes\n    cwd: /t\n", vault.path());
+    let task = assigned_task(&db, "tk-fail", "Will not start", "hermes", &[]);
+
+    let resolve = stack_resolver(host);
+    let report = stack::dispatch(vault.path(), &db, &cfg, &resolve).await.unwrap();
+    assert!(report.started.is_empty());
+    assert_eq!(report.skipped.len(), 1, "{report:?}");
+    assert!(report.skipped[0].starts_with("hermes:"), "{report:?}");
+    let notes: Vec<String> = db.with_conn(|c| Ok(hq_db::tasks::list_comments(c, &task)?.into_iter().map(|c| c.body).collect())).unwrap();
+    assert_eq!(notes.len(), 1, "{notes:?}");
+    assert!(notes[0].contains("could not start") && notes[0].contains("30 minutes"), "{notes:?}");
+
+    let (_dir2, host2) = startable_host();
+    let resolve2 = stack_resolver(host2);
+    let again = stack::dispatch(vault.path(), &db, &cfg, &resolve2).await.unwrap();
+    assert!(again.started.is_empty() && again.skipped.is_empty(), "backed off, not retried at once: {again:?}");
+}
+
+#[tokio::test]
+async fn a_backed_off_task_does_not_hold_up_the_rest_of_the_queue() {
+    let (_dir, host) = startable_host();
+    let db = Arc::new(Database::open_memory().unwrap());
+    let vault = tempfile::tempdir().unwrap();
+    let cfg = stack_config("specialists:\n  - name: hermes\n    harness: hermes\n    cwd: /t\n", vault.path());
+    let first = assigned_task(&db, "tk-stuck", "Could not start last time", "hermes", &[]);
+    let second = assigned_task(&db, "tk-next", "Ready to go", "hermes", &[]);
+    stack::back_off(&first);
+
+    let resolve = stack_resolver(host);
+    let report = stack::dispatch(vault.path(), &db, &cfg, &resolve).await.unwrap();
+    assert_eq!(report.started.len(), 1, "{report:?}");
+    let row = get_row(&db, report.started[0]["session_id"].as_str().unwrap()).unwrap();
+    assert_eq!(row.mission_id.as_deref(), Some(second.as_str()), "the queue's next task runs instead");
+    assert_eq!(row.origin, "stack", "the origin is written with the row");
+}
+
+#[tokio::test]
+async fn a_spent_budget_is_nothing_to_do_not_a_problem() {
+    let (_dir, host) = startable_host();
+    let db = Arc::new(Database::open_memory().unwrap());
+    let vault = tempfile::tempdir().unwrap();
+    let cfg = stack_config("specialists:\n  - name: hermes\n    harness: hermes\n    cwd: /t\n    runs_per_day: 1\n", vault.path());
+    assigned_task(&db, "tk-one", "First", "hermes", &[]);
+    assigned_task(&db, "tk-two", "Second", "hermes", &[]);
+
+    let resolve = stack_resolver(host);
+    let report = stack::dispatch(vault.path(), &db, &cfg, &resolve).await.unwrap();
+    assert_eq!(report.started.len(), 1, "{report:?}");
+    let id = report.started[0]["session_id"].as_str().unwrap().to_string();
+    db.with_conn(|c| registry::set_status(c, &id, registry::STATUS_EXITED)).unwrap();
+
+    let (_dir2, host2) = startable_host();
+    let resolve2 = stack_resolver(host2);
+    let again = stack::dispatch(vault.path(), &db, &cfg, &resolve2).await.unwrap();
+    assert!(again.started.is_empty() && again.skipped.is_empty(), "a spent budget is quiet: {again:?}");
+    assert_eq!(stack::status(&db, &cfg).unwrap()[0]["runs_last_24h"], 1);
+}
+
+#[tokio::test]
+async fn a_stack_run_is_never_resumed() {
+    let db = Arc::new(Database::open_memory().unwrap());
+    let vault = tempfile::tempdir().unwrap();
+    db.with_conn(|c| {
+        registry::insert(
+            c,
+            &registry::NewSession {
+                id: "hs-run",
+                harness: "hermes",
+                label: "stack/hermes",
+                cwd: "/t",
+                mission_id: None,
+                placement: registry::Placement { host: "local", agent_name: "hs-run", workspace_id: "w1", pane_id: "w1:p1" },
+                purpose: Some("research"),
+            },
+        )?;
+        registry::set_origin(c, "hs-run", registry::ORIGIN_STACK)?;
+        registry::set_status(c, "hs-run", registry::STATUS_EXITED)
+    })
+    .unwrap();
+    let err = resume(vault.path(), &db, "hs-run", None).await.unwrap_err().to_string();
+    assert!(err.contains("one-shot run") && err.contains("hq stack run"), "{err}");
+}
+
+#[test]
+fn a_lane_refuses_coding_agents_and_the_code_purpose() {
+    let vault = tempfile::tempdir().unwrap();
+    let cfg = stack_config(
+        "specialists:\n  - name: coder\n    harness: claude-code\n  - name: hermes\n    harness: hermes\n    purposes: [code]\n  - name: ok\n    harness: openclaw\n    purposes: [general, research, general]\n",
+        vault.path(),
+    );
+    let err = stack::lane_for(&cfg, cfg.stack.get("coder").unwrap()).unwrap_err().to_string();
+    assert!(err.contains("a coding agent") && err.contains("hermes"), "{err}");
+    let err = stack::lane_for(&cfg, cfg.stack.get("hermes").unwrap()).unwrap_err().to_string();
+    assert!(err.contains("general-purpose agent"), "{err}");
+    let lane = stack::lane_for(&cfg, cfg.stack.get("ok").unwrap()).unwrap();
+    assert_eq!(lane.purposes, vec![Purpose::General, Purpose::Research]);
+    let status = stack::status(&Arc::new(Database::open_memory().unwrap()), &cfg).unwrap();
+    assert_eq!(status.len(), 3);
+    assert!(status[0]["problem"].as_str().unwrap().contains("coding agent"));
+    assert_eq!(status[2]["purposes"], serde_json::json!(["general", "research"]));
+}
+
+#[test]
+fn the_brief_carries_the_task_its_resume_point_and_the_rules() {
+    let db = Database::open_memory().unwrap();
+    assigned_task(&db, "tk-b", "Price the pumps", "hermes", &[]);
+    let task = db.with_conn(|c| Ok(hq_db::tasks::get_task(c, "tk-b")?.unwrap())).unwrap();
+    let cp = hq_db::tasks::TaskCheckpoint {
+        id: 1,
+        task_id: task.id.clone(),
+        work_session_id: None,
+        actor: "hermes".into(),
+        summary: "Two suppliers found".into(),
+        next_step: "Call the third".into(),
+        open_questions: "Import duty?".into(),
+        files: vec![],
+        created_at: String::new(),
+    };
+    let brief = stack::brief_for("hermes", Purpose::Research, &task, Some("Market research"), Some(&cp));
+    for needle in ["'hermes'", "Purpose: research", "Task MR-001: Price the pumps", "Initiative: Market research", "Done when each has a price", "Two suppliers found", "Call the third", "Import duty?", "REPORT", "change no repository"] {
+        assert!(brief.contains(needle), "missing {needle:?} in:\n{brief}");
+    }
+    assert!(brief.contains("Where the last run left off"));
+    let fresh = stack::brief_for("hermes", Purpose::General, &task, None, None);
+    assert!(!fresh.contains("Where the last run left off") && !fresh.contains("Initiative:"));
+}
+
+#[test]
+fn an_exited_pane_counts_as_gone_but_can_still_be_read() {
+    let row = db_row_for_liveness("hs-ran");
+    let mut polled = HostPoll::new();
+    let mut agent = match alive("hs-ran") {
+        Liveness::Alive(a) => *a,
+        _ => unreachable!(),
+    };
+    agent.exited = true;
+    polled.insert("local".into(), Ok(vec![agent]));
+    assert_eq!(liveness(&polled, &row), Liveness::Gone);
+    assert!(exited_pane(&polled, &row).is_some());
+    let mut live = HostPoll::new();
+    live.insert("local".into(), Ok(vec![match alive("hs-ran") { Liveness::Alive(a) => *a, _ => unreachable!() }]));
+    assert!(matches!(liveness(&live, &row), Liveness::Alive(_)));
+    assert!(exited_pane(&live, &row).is_none());
+}
+
+fn db_row_for_liveness(id: &str) -> HarnessSessionRow {
+    let db = Database::open_memory().unwrap();
+    db.with_conn(|c| {
+        registry::insert(
+            c,
+            &registry::NewSession {
+                id,
+                harness: "hermes",
+                label: "stack/hermes",
+                cwd: "/t",
+                mission_id: None,
+                placement: Placement { host: "local", agent_name: id, workspace_id: "w1", pane_id: "w1:p1" },
+                purpose: None,
+            },
+        )?;
+        Ok(registry::get(c, id)?.unwrap())
+    })
+    .unwrap()
 }

@@ -227,7 +227,7 @@ async fn a_watch_started_after_untrusted_content_starts_with_drive_off() {
     db.with_conn(|c| {
         for id in ["hs-clean", "hs-tainted"] {
             let placement = Placement { host: "local", agent_name: id, workspace_id: "w1", pane_id: "w1:p1" };
-            registry::insert(c, &NewSession { id, harness: "pi", label: "", cwd: "/t", mission_id: None, placement })?;
+            registry::insert(c, &NewSession { id, harness: "pi", label: "", cwd: "/t", mission_id: None, placement, purpose: None })?;
             let (goal, done) = ("Add rate limiting to the login endpoint", "Login returns 429 after 5 failed attempts");
             registry::set_goal(c, id, Some(goal), Some(done), registry::ACTOR_USER)?;
         }

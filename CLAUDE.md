@@ -59,7 +59,20 @@ placeholders (`example.com`, `hq.example.ts.net`, `<owner>/<repo>`).
   handing text to `relay` or another local mailbox id.
 - **Coding-agent runtime**: long-lived coding agents (Claude Code, Codex, Cursor,
   Pi, OpenCode, Copilot CLI, Kimi, Qwen, Antigravity) run in HQ's built-in host
-  (`hq host`, crate `hq-host`). `crates/hq-tools/src/agent_host/`
+  (`hq host`, crate `hq-host`). General-purpose agents (Hermes, OpenClaw) run
+  there too as a second harness category
+  (`crates/hq-tools/src/harness_session/category.rs`): every session has a
+  `purpose` (`code`, `monitor`, `research`, `review`, `general`), a
+  general-purpose agent refuses `code`, a monitor or reviewer never moves its
+  task, and one given sessions to `observe` hears their finished turns, blocks
+  and exits through the task-thread messages the supervisor delivers. They get
+  no HQ token. The **Agentic Stack** (`stack:` config,
+  `crates/hq-tools/src/harness_session/stack.rs`, daemon task `stack-dispatch`,
+  `hq stack`) names such agents as specialists that pull the tasks assigned to
+  them and run each as one one-shot job (`hermes chat -q "<brief>"`); the
+  process ending puts the task into review (`mission::Event::RunEnded`). A pane
+  whose process ended counts as gone (`AgentInfo::exited`). "General-purpose
+  agents" in `docs/AGENT_SESSIONS.md`, plan in `docs/plans/agentic-stack.md`. `crates/hq-tools/src/agent_host/`
   (to be renamed) holds the client: `NativeBackend` talks to the host on this
   machine, or to one on another machine over SSH through a key pinned to
   `hq host gate`. Agents run in a process sandbox with an egress allowlist.

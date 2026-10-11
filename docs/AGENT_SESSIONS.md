@@ -1,11 +1,13 @@
-# Coding-agent sessions
+# Agent sessions
 
-Agent HQ runs and monitors coding agents (Claude Code, Codex, Cursor, Pi, OpenCode,
-Copilot CLI, Kimi, Qwen, Antigravity) in its built-in host (`hq host`, see
-[AGENT_HOST.md](AGENT_HOST.md)). The host owns the terminals, recognises which agent
-sits in a pane, and reports its state: `idle`, `working`, `blocked` (waiting on a dialog
-or approval), or `done`. It replaced the earlier tmux-based runner, which could only
-guess state from screen text.
+Agent HQ runs and monitors two kinds of agent in its built-in host (`hq host`, see
+[AGENT_HOST.md](AGENT_HOST.md)): coding agents (Claude Code, Codex, Cursor, Pi, OpenCode,
+Copilot CLI, Kimi, Qwen, Antigravity), which edit code, and general-purpose agents (Hermes,
+OpenClaw), full assistants with their own tools and memory that never take code
+work (see [General-purpose agents](#general-purpose-agents)). The host owns the terminals,
+recognises which agent sits in a pane, and reports its state: `idle`, `working`, `blocked`
+(waiting on a dialog or approval), or `done`. It replaced the earlier tmux-based runner,
+which could only guess state from screen text.
 
 A **host** is a machine running `hq host`. `native` (also written `local`) is the machine
 HQ runs on. Any other host is a machine you paired (see [JOIN_A_MACHINE.md](JOIN_A_MACHINE.md))
@@ -488,6 +490,118 @@ the goal and criteria in force at the time (`registry::list_events`).
   is the only tool that ends it, and it is never called as a side effect of a mode change.
   After a resume the row keeps its goal, so Drive can be turned on again.
 
+## General-purpose agents
+
+Hermes (`hermes chat`) and OpenClaw (`openclaw tui`) are a second category of
+harness, `general_purpose`, next to the coding agents. They run in the same host, the same
+process sandbox and the same session registry, and the same `harness_session_*` tools, web
+page and `hq sessions` commands start, read, steer and stop them. What differs is what HQ
+hands them, and that is mechanical rather than a matter of prompt wording:
+
+- **Never code.** Every session records a `purpose`: `code`, `monitor`, `research`,
+  `review` or `general`. A coding agent defaults to `code` and takes any purpose. A
+  general-purpose agent defaults to `general` and refuses `code` before anything is started,
+  naming the coding harnesses instead. Profiles built on a general-purpose base
+  (`base: hermes`) inherit the refusal. HQ's own chat prompt is told the same rule.
+- **Monitoring, research, review.** `purpose: monitor` and `purpose: review` sessions are
+  about someone else's work. Linked to a task, they leave comments on it (`Session ... (hermes,
+  a monitor) finished a turn.`) but never hold its work lease or move its status, so a
+  reviewer finishing a turn does not put a coding task into review. `research` and `general`
+  sessions do their task's own work and move it like a coding session does. Several research
+  sessions can run at once; each is an ordinary session with its own task.
+- **Observing other sessions.** A monitor or reviewer started with `task_id` can be given
+  `observe: [session ids]` (at most 10). When an observed session finishes a turn, blocks at a
+  dialog or exits, the supervisor leaves the observer a message on the observer's task thread,
+  with the observed agent's last reply or screen tail, and types it in when the observer is
+  next idle, the same route a delegated child uses to report to its parent. The text is the
+  observed agent's screen and is presented as such, never as an instruction. Spawn reports
+  `observing` and says so in `observing_note`. The ids are checked before anything launches.
+
+```
+harness_session_spawn(harness: "hermes", purpose: "monitor", task_id: "FR-053",
+                      observe: ["hs-claude-code-1a2b3c"],
+                      prompt: "Watch the refactor session and tell me when it stalls or asks for a decision.")
+hq sessions spawn hermes --purpose review --task FR-053 --observe hs-codex-4d5e6f --prompt "Review the diff when it lands."
+```
+
+Security, which is the point of running these agents through the host at all:
+
+- They are confined like every other agent: the process sandbox, a private copy of the
+  temporary directories, no read of the host's token or your credential directories, and an
+  egress allowlist. Their own state lives in `~/.hermes` or `~/.openclaw`, which
+  is writable for them and hidden from other agents. They reach whichever model provider you
+  configured for them, so add that provider's host to `agent_host.sandbox.allow_domains`; HQ
+  ships no default for it.
+- They get no HQ session token and no MCP configuration. HQ never wires itself into a
+  general-purpose agent's own tool loop; what reaches the agent is what HQ types into it, and
+  what comes back is read from its screen, which `harness_session_logs` treats as untrusted.
+- They count against the same origin and driven-session caps, their folders pass the same
+  deny and allow lists, and a family guest's harness allowlist does not include them.
+- The host has no state rule file for them yet, so their state shows as `unknown` rather than
+  `idle` or `working`: `harness_session_wait` cannot wait on them, the finished-turn alert does
+  not fire for them, and a message for them is typed once the launch is over rather than at the
+  next idle. A rule file for each, built into the host like the Claude Code and Codex ones
+  (see [AGENT_HOST.md](AGENT_HOST.md), "Agent state"), fixes all three and is the next step.
+  A stack run (below) needs none of this: its process ending is its signal. Resume is a fresh
+  start that the agent's own session store may continue.
+
+The launch commands are the ones each project documents; an install that starts differently
+gets a profile (`base: hermes`, `command: ...`, `args: [...]`), and a profile may reuse the
+built-in name.
+
+### The Agentic Stack: specialists that pull their tasks
+
+An interactive pane is the slow way to use these agents. The faster one is to name them in
+your stack and assign them tasks. The words are Kola Academy's: a *stack* of *specialists*,
+each with a lane, directed toward outcomes a person reviews
+(`docs/plans/agentic-stack.md`).
+
+```yaml
+stack:
+  specialists:
+    - name: hermes                  # tasks assigned to "hermes" are its queue
+      harness: hermes               # a general-purpose harness or a profile on one
+      purposes: [research, general] # its lane; first is the default; code is refused
+      cwd: /home/me/Documents/HQ/stack-hermes   # optional: a folder of its own by default
+      run_minutes: 30               # a run past this is stopped and the task blocked
+      runs_per_day: 24              # the budget, counted from the session registry
+```
+
+- **Trigger.** Assign a task to the specialist's name (web board, `task_update`, chat). Every
+  minute the daemon's `stack-dispatch` asks the queue for that name's next task, the same pick
+  `task_next` makes (open, dependencies done, nobody holding it, start date reached, most
+  urgent first), less anything code-shaped: a task tagged `code` or linked to a commit or
+  pull request is never offered to a general-purpose specialist.
+- **Run.** One run per specialist at a time. HQ builds a brief from the task (display id,
+  title, description as the definition of done, initiative, the resume point from its last
+  checkpoint, and what to print at the end) and starts the harness's one-shot command in the
+  sandbox: `hermes chat -q "<brief>"`, `openclaw agent --message "<brief>"`. A profile's
+  `one_shot_args` (with `{brief}`) replaces that for an install that differs. The session has
+  origin `stack` and label `stack/<name>`, and shows in the Workbench, `hq sessions` and
+  `harness_session_logs` like any other. A tag on the task that names a purpose in the lane
+  (`review`, `monitor`, `research`) picks the run's purpose.
+- **Output.** The process ending is the completion signal. The supervisor keeps the final
+  screen as the session's snapshot, closes the pane, and records the run on the task by its
+  exit code: zero moves the task from in progress to ready for review and releases its lease;
+  anything else is a crash and blocks the task (on a host that reports no code, output on
+  screen counts as a finished run and a blank screen as a crash). A run is never resumed:
+  fix the cause, then assign the task again or `hq stack run`. A person reads the output
+  (`harness_session_logs`) and marks the task complete, or not. A monitor's or reviewer's run
+  comments and never moves the task, as its interactive turns do.
+- **Limits.** `runs_per_day` is counted over a rolling 24 hours. A run past `run_minutes` is
+  stopped and its task blocked with the reason. A launch that fails leaves one comment on the
+  task and is not retried for 30 minutes. Token cost is not a limit HQ can enforce for these
+  agents yet: it reads usage from the coding agents' own transcripts only.
+- **Fire now.** `hq stack run <specialist> <task>` starts a run for one task without waiting
+  for a sweep, whoever the task is assigned to; the lane, the budget and one-run-at-a-time
+  still hold. `hq stack list` shows each specialist with its lane, its queue, what is running
+  and the day's count.
+
+What a specialist never gets: an HQ token, MCP wiring, a coding task, or the right to complete
+a task. What it keeps: the sandbox, its own state directory, and the egress allowlist, so add
+its model provider's host to `agent_host.sandbox.allow_domains`. The one-shot arguments are
+the ones each project documents and have not been run against a live install here.
+
 ## Custom harness profiles
 
 A profile in `config.yaml` names a launcher that is not one of the built-in harnesses (a
@@ -572,7 +686,6 @@ as the key. The directory is 0700 and holds nothing else; keep `identity_file` m
 owned by the HQ user.
 
 If the socket directory cannot be made private or its path would be too long for a unix
-socket, HQ logs a warning and uses plain connections. If ssh itself reports a control socket
 problem before a session opens, a read-only call (`status`, `agent get`, `agent list`,
 `agent read`) is retried once on a fresh connection. A write (send, prompt, launch) is never
 retried, since the gate may already have run it. A master that hangs rather than failing is
@@ -607,3 +720,5 @@ machine as you, scoped to the host's own API and to one source address. Conseque
 | Spawn fails with `cannot sandbox the agent` | No sandbox program works on that machine (install `bubblewrap` on Linux, allow user namespaces on Ubuntu 24.04), or the project directory contains your home. |
 | An agent's MCP server or plugin is missing | The sandbox refused its host; see the egress log and add it to `agent_host.sandbox.allow_domains`. |
 | Spawned Claude replies `Login expired` | The user account on that host is not logged in to that CLI. |
+| A stack specialist starts nothing | `hq stack list` shows its `problem` (a coding harness, an unknown purpose, a profile without `one_shot_args`), its queue is empty (`task_next` for that name, less code-shaped work), a run is up, or its `runs_per_day` budget is spent. A task whose run could not start is left a comment and tried again after 30 minutes. |
+| A stack run ended and its task is blocked | The process exited non-zero (a crash or a refused login). Its last screen is in `harness_session_logs`; fix the cause, then assign the task to the specialist again or `hq stack run <name> <task>`. |

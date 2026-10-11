@@ -365,6 +365,8 @@ fn parse_info(v: &Value) -> Option<AgentInfo> {
         launch_pending: false,
         agent_session_id: text("agent_session_id"),
         name: Some(name),
+        exited,
+        exit_code: v.get("exit_code").and_then(Value::as_u64).map(|c| c as u32),
     })
 }
 
@@ -678,6 +680,11 @@ mod tests {
         assert_eq!(parse_status(Some("blocked")), AgentStatus::Blocked);
         assert_eq!(parse_status(None), AgentStatus::Unknown);
         let exited = json!({"name": "a", "status": "exited", "state": "idle"});
-        assert_eq!(parse_info(&exited).unwrap().status, AgentStatus::Unknown);
+        let info = parse_info(&exited).unwrap();
+        assert_eq!(info.status, AgentStatus::Unknown);
+        assert!(info.exited, "an exited pane says so, so the supervisor can treat it as gone");
+        assert_eq!(info.exit_code, None, "no code in the record means unknown");
+        let crashed = json!({"name": "a", "status": "exited", "state": "idle", "exit_code": 1});
+        assert_eq!(parse_info(&crashed).unwrap().exit_code, Some(1));
     }
 }

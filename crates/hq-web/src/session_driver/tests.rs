@@ -34,6 +34,7 @@ fn row(drive: bool) -> HarnessSessionRow {
         drive_off_reason: None,
         parent_session_id: None,
         spawn_depth: 0,
+        purpose: "code".into(),
     }
 }
 
@@ -65,6 +66,7 @@ fn watched_with_wake(state: &WsState) -> String {
                     cwd: "/repo",
                     mission_id: None,
                     placement: registry::Placement { host: "laptop", agent_name: "hs-w", workspace_id: "w1", pane_id: "w1:p1" },
+                    purpose: None,
                 },
             )?;
             registry::set_owner(c, "hs-w", Some(&thread))?;

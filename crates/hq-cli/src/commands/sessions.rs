@@ -15,17 +15,36 @@ fn print_json(value: &serde_json::Value) {
     );
 }
 
-#[allow(clippy::too_many_arguments)]
+/// The `spawn` flags.
+#[derive(Debug, Default)]
+pub struct SpawnOpts {
+    pub cwd: Option<String>,
+    pub label: Option<String>,
+    pub host: Option<String>,
+    /// `code`, `monitor`, `research`, `review` or `general`; blank is the harness's default.
+    pub purpose: Option<String>,
+    /// Sessions a monitor or reviewer watches.
+    pub observe: Vec<String>,
+    /// HQ task the session works on.
+    pub task: Option<String>,
+}
+
 pub async fn run(
     config: &HqConfig,
     sub: &str,
     arg1: Option<String>,
     prompt: Option<String>,
-    cwd: Option<String>,
-    label: Option<String>,
-    host: Option<String>,
+    opts: SpawnOpts,
     lines: usize,
 ) -> Result<()> {
+    let SpawnOpts {
+        cwd,
+        label,
+        host,
+        purpose,
+        observe,
+        task,
+    } = opts;
     let db = open_db(config)?;
     let vault = &config.vault_path;
 
@@ -63,9 +82,10 @@ pub async fn run(
         "spawn" => {
             let harness = arg1.ok_or_else(|| {
                 anyhow::anyhow!(
-                    "usage: hq sessions spawn <harness> [--prompt ...] [--cwd ...] [--label ...]"
+                    "usage: hq sessions spawn <harness> [--prompt ...] [--cwd ...] [--label ...] [--purpose ...] [--task ...] [--observe <id>]..."
                 )
             })?;
+            let purpose = hq_tools::harness_session::Purpose::parse_opt(purpose.as_deref())?;
             // No --cwd, or one the host does not have: a folder in that machine's HQ folder.
             let cwd = match cwd.as_deref().map(str::trim).filter(|c| !c.is_empty()) {
                 Some(c) => {
@@ -105,10 +125,12 @@ pub async fn run(
                     prompt: prompt.as_deref(),
                     cwd: &cwd,
                     label: label.as_deref().unwrap_or(""),
-                    mission_id: None,
+                    mission_id: task.as_deref().map(str::trim).filter(|t| !t.is_empty()),
                     watch: None,
                     parent: None,
                     goal: Default::default(),
+                    purpose,
+                    observe: &observe,
                 },
             )
             .await?;

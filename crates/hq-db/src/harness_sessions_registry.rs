@@ -70,13 +70,27 @@ pub struct HarnessSessionRow {
     pub parent_session_id: Option<String>,
     /// 0 for a session a person or HQ started, one more than its parent's otherwise.
     pub spawn_depth: i64,
+    /// What the session was started to do: `code`, `monitor`, `research`,
+    /// `review` or `general` (see `PURPOSE_*`). Decides whether its lifecycle
+    /// moves its task.
+    pub purpose: String,
 }
 
 pub const ORIGIN_USER: &str = "user";
 pub const ORIGIN_MCP: &str = "mcp";
 pub const ORIGIN_ASK: &str = "ask";
+/// Started by the stack dispatcher for a task assigned to a specialist.
+pub const ORIGIN_STACK: &str = "stack";
 
-const COLS: &str = "id, harness, label, host, agent_name, workspace_id, pane_id, cwd, status, resume_token, mission_id, created_at, updated_at, owner_thread, drive, pm_wake, last_driven_at, last_agent_status, last_seen_at, goal, done_criteria, nudges_sent, last_wake_nudges, no_progress_streak, progress_mark, drive_off_reason, keys_sent, origin, dismissals, last_dismiss_tail, parent_session_id, spawn_depth";
+/// The default purpose: code or repository changes, what every session was
+/// before purposes existed.
+pub const PURPOSE_CODE: &str = "code";
+pub const PURPOSE_MONITOR: &str = "monitor";
+pub const PURPOSE_REVIEW: &str = "review";
+/// Most sessions one monitor or reviewer may be given to observe.
+pub const MAX_OBSERVED: usize = 10;
+
+const COLS: &str = "id, harness, label, host, agent_name, workspace_id, pane_id, cwd, status, resume_token, mission_id, created_at, updated_at, owner_thread, drive, pm_wake, last_driven_at, last_agent_status, last_seen_at, goal, done_criteria, nudges_sent, last_wake_nudges, no_progress_streak, progress_mark, drive_off_reason, keys_sent, origin, dismissals, last_dismiss_tail, parent_session_id, spawn_depth, purpose";
 
 type ChangeHook = Box<dyn Fn(&str) + Send + Sync>;
 
@@ -131,6 +145,7 @@ fn row_to_session(row: &rusqlite::Row) -> rusqlite::Result<HarnessSessionRow> {
         last_dismiss_tail: row.get(29)?,
         parent_session_id: row.get(30)?,
         spawn_depth: row.get(31)?,
+        purpose: row.get(32)?,
     })
 }
 
@@ -150,14 +165,16 @@ pub struct NewSession<'a> {
     pub cwd: &'a str,
     pub mission_id: Option<&'a str>,
     pub placement: Placement<'a>,
+    /// `None` records `PURPOSE_CODE`.
+    pub purpose: Option<&'a str>,
 }
 
 pub fn insert(conn: &Connection, s: &NewSession) -> Result<()> {
     // `logfile` predates the host and is NOT NULL; nothing writes a log any more.
     conn.execute(
         "INSERT INTO harness_sessions
-             (id, harness, label, host, agent_name, workspace_id, pane_id, cwd, logfile, mission_id)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, '', ?9)",
+             (id, harness, label, host, agent_name, workspace_id, pane_id, cwd, logfile, mission_id, purpose)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, '', ?9, ?10)",
         params![
             s.id,
             s.harness,
@@ -167,7 +184,8 @@ pub fn insert(conn: &Connection, s: &NewSession) -> Result<()> {
             s.placement.workspace_id,
             s.placement.pane_id,
             s.cwd,
-            s.mission_id
+            s.mission_id,
+            s.purpose.unwrap_or(PURPOSE_CODE)
         ],
     )?;
     Ok(())
@@ -644,6 +662,29 @@ pub fn count_running_with_origin(conn: &Connection, origin: &str) -> Result<i64>
     )?)
 }
 
+/// Sessions with this origin and label started in the last `minutes`, whatever
+/// their status now: how a specialist's daily run budget is counted.
+pub fn count_started_since(conn: &Connection, origin: &str, label: &str, minutes: i64) -> Result<i64> {
+    Ok(conn.query_row(
+        "SELECT COUNT(*) FROM harness_sessions WHERE origin = ?1 AND label = ?2 \
+         AND created_at >= datetime('now', ?3)",
+        params![origin, label, format!("-{} minutes", minutes.max(0))],
+        |r| r.get(0),
+    )?)
+}
+
+/// Running sessions with this origin and label, newest first.
+pub fn running_with_label(conn: &Connection, origin: &str, label: &str) -> Result<Vec<HarnessSessionRow>> {
+    let mut stmt = conn.prepare(&format!(
+        "SELECT {COLS} FROM harness_sessions WHERE status = 'running' AND origin = ?1 AND label = ?2 ORDER BY created_at DESC"
+    ))?;
+    let rows = stmt
+        .query_map(params![origin, label], row_to_session)?
+        .filter_map(|r| r.ok())
+        .collect();
+    Ok(rows)
+}
+
 /// Mark that the owning thread owes the session a look, replacing an older
 /// reason still pending. False for a session no thread watches.
 pub fn set_wake(conn: &Connection, id: &str, reason: &str) -> Result<bool> {
@@ -819,6 +860,49 @@ pub fn running_children(conn: &Connection, parent: &str) -> Result<Vec<HarnessSe
     ))?;
     let rows = stmt
         .query_map(params![parent], row_to_session)?
+        .collect::<rusqlite::Result<Vec<_>>>()?;
+    Ok(rows)
+}
+
+/// Give `observer` the sessions `observed` to watch. Each must exist; a session
+/// never observes itself. Repeats are kept once.
+pub fn add_observed(conn: &Connection, observer: &str, observed: &[String]) -> Result<()> {
+    for id in observed {
+        if id == observer {
+            anyhow::bail!("a session cannot observe itself");
+        }
+        if get(conn, id)?.is_none() {
+            anyhow::bail!("no harness session '{id}' to observe");
+        }
+        conn.execute(
+            "INSERT OR IGNORE INTO harness_session_observers (observer_id, observed_id) VALUES (?1, ?2)",
+            params![observer, id],
+        )?;
+    }
+    Ok(())
+}
+
+/// The ids `observer` was given to watch.
+pub fn observed_by(conn: &Connection, observer: &str) -> Result<Vec<String>> {
+    let mut stmt = conn.prepare(
+        "SELECT observed_id FROM harness_session_observers WHERE observer_id = ?1 ORDER BY created_at, observed_id",
+    )?;
+    let ids = stmt
+        .query_map(params![observer], |r| r.get(0))?
+        .collect::<rusqlite::Result<Vec<_>>>()?;
+    Ok(ids)
+}
+
+/// The running sessions watching `observed`.
+pub fn running_observers(conn: &Connection, observed: &str) -> Result<Vec<HarnessSessionRow>> {
+    let mut stmt = conn.prepare(&format!(
+        "SELECT {COLS} FROM harness_sessions \
+         WHERE status = 'running' AND id IN \
+           (SELECT observer_id FROM harness_session_observers WHERE observed_id = ?1) \
+         ORDER BY created_at"
+    ))?;
+    let rows = stmt
+        .query_map(params![observed], row_to_session)?
         .collect::<rusqlite::Result<Vec<_>>>()?;
     Ok(rows)
 }

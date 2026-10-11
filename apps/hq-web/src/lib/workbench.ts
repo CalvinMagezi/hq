@@ -1,4 +1,13 @@
-import { needsAttention, type AgentStatus, type HarnessSession, type HostWorkspace, type WorkbenchHost } from './sessionsApi'
+import {
+  needsAttention,
+  type AgentCategory,
+  type AgentStatus,
+  type HarnessSession,
+  type HostWorkspace,
+  type Purpose,
+  type WorkbenchHost,
+  type WorkbenchHosts,
+} from './sessionsApi'
 
 const AGENT_NAMES: Record<string, string> = {
   'claude-code': 'Claude Code',
@@ -10,8 +19,31 @@ const AGENT_NAMES: Record<string, string> = {
   qwen: 'Qwen',
   antigravity: 'Antigravity',
   'github-copilot': 'GitHub Copilot',
+  hermes: 'Hermes',
+  openclaw: 'OpenClaw',
 }
 export const DEFAULT_AGENT = 'claude-code'
+
+export const CATEGORY_NAMES: Record<AgentCategory, string> = {
+  coding: 'Coding agents',
+  general_purpose: 'General-purpose agents',
+}
+
+export const PURPOSE_NAMES: Record<Purpose, string> = {
+  code: 'Code changes',
+  general: 'General help',
+  research: 'Research',
+  review: 'Peer review',
+  monitor: 'Monitor other sessions',
+}
+
+/** A harness the server did not classify is a coding agent, as every harness was before categories. */
+export const agentCategory = (hosts: Pick<WorkbenchHosts, 'categories'> | null, harness: string): AgentCategory =>
+  hosts?.categories?.[harness] ?? 'coding'
+
+/** The harnesses of one category, in the server's order. */
+export const harnessesIn = (hosts: Pick<WorkbenchHosts, 'harnesses' | 'categories'>, category: AgentCategory): string[] =>
+  hosts.harnesses.filter((h) => agentCategory(hosts, h) === category)
 
 /** Screen polling periods: fast while the agent is moving or waiting on you, slow once it is ready. */
 export const BUSY_POLL_MS = 1_500

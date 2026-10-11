@@ -1,8 +1,17 @@
 import { useEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { Loader2, X } from 'lucide-react'
-import { workbenchApi, type LaunchReport, type WorkbenchHosts } from '~/lib/sessionsApi'
-import { DEFAULT_AGENT, agentName, computerName, computerUnavailableReason } from '~/lib/workbench'
+import { GENERAL_PURPOSES, workbenchApi, type LaunchReport, type Purpose, type WorkbenchHosts } from '~/lib/sessionsApi'
+import {
+  CATEGORY_NAMES,
+  DEFAULT_AGENT,
+  PURPOSE_NAMES,
+  agentCategory,
+  agentName,
+  computerName,
+  computerUnavailableReason,
+  harnessesIn,
+} from '~/lib/workbench'
 import { ErrorText } from './ErrorText'
 import { FolderPicker } from './FolderPicker'
 
@@ -23,6 +32,7 @@ export function NewAgentDialog({ onClose, onStarted }: Props) {
   const [host, setHost] = useState('')
   const [folder, setFolder] = useState('')
   const [harness, setHarness] = useState('')
+  const [purpose, setPurpose] = useState<Purpose>('general')
   const [prompt, setPrompt] = useState('')
   const [label, setLabel] = useState('')
   const [busy, setBusy] = useState(false)
@@ -89,6 +99,8 @@ export function NewAgentDialog({ onClose, onStarted }: Props) {
   }
 
   const selected = hosts?.hosts.find((h) => h.host === host)
+  // A general-purpose agent is started for a stated purpose; a coding agent's purpose is code.
+  const generalPurpose = agentCategory(hosts, harness) === 'general_purpose'
   const start = async () => {
     setBusy(true)
     setError(null)
@@ -96,6 +108,7 @@ export function NewAgentDialog({ onClose, onStarted }: Props) {
       const launched = await workbenchApi.spawn({
         harness,
         host,
+        ...(generalPurpose ? { purpose } : {}),
         ...(folder ? { folder } : {}),
         ...(prompt.trim() ? { prompt: prompt.trim() } : {}),
         ...(label.trim() ? { label: label.trim() } : {}),
@@ -182,13 +195,43 @@ export function NewAgentDialog({ onClose, onStarted }: Props) {
                   Agent
                 </label>
                 <select id="agent-kind" value={harness} onChange={(e) => setHarness(e.target.value)} className={`${FIELD_CLASS} h-11 sm:h-9`}>
-                  {hosts.harnesses.map((h) => (
-                    <option key={h} value={h}>
-                      {agentName(h)}
-                    </option>
-                  ))}
+                  {(['coding', 'general_purpose'] as const)
+                    .map((category) => [category, harnessesIn(hosts, category)] as const)
+                    .filter(([, names]) => names.length > 0)
+                    .map(([category, names]) => (
+                      <optgroup key={category} label={CATEGORY_NAMES[category]}>
+                        {names.map((h) => (
+                          <option key={h} value={h}>
+                            {agentName(h)}
+                          </option>
+                        ))}
+                      </optgroup>
+                    ))}
                 </select>
               </div>
+
+              {generalPurpose && (
+                <div>
+                  <label htmlFor="agent-purpose" className={LABEL_CLASS}>
+                    Purpose
+                  </label>
+                  <select
+                    id="agent-purpose"
+                    value={purpose}
+                    onChange={(e) => setPurpose(e.target.value as Purpose)}
+                    className={`${FIELD_CLASS} h-11 sm:h-9`}
+                  >
+                    {GENERAL_PURPOSES.map((p) => (
+                      <option key={p} value={p}>
+                        {PURPOSE_NAMES[p]}
+                      </option>
+                    ))}
+                  </select>
+                  <p className="mt-1 text-[11px] text-neutral-500">
+                    {agentName(harness)} is a general-purpose agent: it never takes code changes. A monitor or reviewer leaves comments on its task and never moves it.
+                  </p>
+                </div>
+              )}
 
               <div>
                 <label htmlFor="agent-first" className={LABEL_CLASS}>

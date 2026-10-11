@@ -465,6 +465,7 @@ mod tests {
                     cwd,
                     mission_id: None,
                     placement,
+                    purpose: None,
                 },
             )
         })

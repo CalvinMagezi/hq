@@ -1,4 +1,6 @@
 use super::*;
+use super::category::purpose_for;
+use hq_core::config::AgentHostConfig;
 
 pub(super) const MODE_DRIVE: &str = "drive";
 pub(super) const MODE_OBSERVE: &str = "observe";
@@ -45,9 +47,18 @@ pub async fn resume(
     prompt: Option<&str>,
 ) -> Result<Value> {
     let row = get_row(db, session_id)?;
+    if row.origin == registry::ORIGIN_STACK {
+        bail!(
+            "session {session_id} was a stack specialist's one-shot run; a run is never resumed. \
+             Assign the task to the specialist again, or `hq stack run <specialist> <task>`"
+        );
+    }
     require_allowed_cwd(Some(&row.cwd))?;
     let harness = resolve(&row.harness)?;
     let spec = harness.spec;
+    // The row's purpose, checked as a new spawn's would be: a row this build
+    // cannot read never comes back as `code` on a general-purpose agent.
+    let purpose = purpose_for(&harness, Purpose::parse(&row.purpose).ok())?;
     let host = agent_host::host(Some(&row.host))?;
     let probe_host = host.clone();
     let name = row.agent_name.clone();
@@ -80,6 +91,10 @@ pub async fn resume(
             mission_id: row.mission_id.as_deref(),
             watch: None,
             goal: GoalText::default(),
+            purpose,
+            observe: &[],
+            one_shot: None,
+            origin: None,
         },
     )
     .await?;
@@ -103,14 +118,14 @@ pub async fn resume(
 pub fn status(db: &Arc<Database>, session_id: &str) -> Result<Value> {
     let row = get_row(db, session_id)?;
     let polled = poll_hosts(std::slice::from_ref(&row));
-    Ok(session_view(&row, &liveness(&polled, &row)))
+    Ok(session_view(&row, &liveness(&polled, &row), &spec::agent_host_config()))
 }
 
 /// The row, its live state, and what HQ is doing with it: the goal and
 /// definition of done travel inside `session`, `mode` says whether HQ drives
 /// or only observes, and `drive_blocked_by` says what the gate still wants.
-pub(super) fn session_view(row: &HarnessSessionRow, live: &Liveness) -> Value {
-    let mut view = live_view(row, live);
+pub(super) fn session_view(row: &HarnessSessionRow, live: &Liveness, cfg: &AgentHostConfig) -> Value {
+    let mut view = live_view(row, live, cfg);
     if row.owner_thread.is_some() {
         view["mode"] = json!(mode_name(row.drive));
         let gaps = registry::goal_gaps(row);
@@ -121,9 +136,11 @@ pub(super) fn session_view(row: &HarnessSessionRow, live: &Liveness) -> Value {
     view
 }
 
-pub(super) fn live_view(row: &HarnessSessionRow, live: &Liveness) -> Value {
+/// `cfg` is the loaded agent-host config: a list of rows renders against one
+/// load, not one per row.
+pub(super) fn live_view(row: &HarnessSessionRow, live: &Liveness, cfg: &AgentHostConfig) -> Value {
     let running = row.status == registry::STATUS_RUNNING;
-    match live {
+    let mut view = match live {
         Liveness::Alive(agent) => json!({
             "session": row, "alive": true, "reachable": true,
             "agent_status": agent.status, "title": agent.title,
@@ -133,7 +150,10 @@ pub(super) fn live_view(row: &HarnessSessionRow, live: &Liveness) -> Value {
             "session": row, "alive": null, "reachable": false, "detail": detail,
         }),
         Liveness::HostUnreachable(_) => json!({ "session": row, "alive": false }),
-    }
+    };
+    // Which kind of agent this is, so a reader never has to know the harness names.
+    view["category"] = json!(spec::category_in(cfg, &row.harness).map(HarnessCategory::as_str));
+    view
 }
 
 pub fn list(db: &Arc<Database>, status_filter: Option<String>) -> Result<Value> {
@@ -296,7 +316,17 @@ pub fn attach(db: &Arc<Database>, host: &dyn HostBackend, target: &str, thread: 
         if !already {
             let placement = Placement { host: &host_name, agent_name: &name, workspace_id: &agent.workspace_id, pane_id: &agent.pane_id };
             let title = agent.title.clone().unwrap_or_default();
-            let new = registry::NewSession { id: &id, harness: spec.harness, label: &title, cwd: &agent.cwd, mission_id: None, placement };
+            // An agent someone started by hand is taken for its harness's default purpose.
+            let purpose = spec.category.default_purpose();
+            let new = registry::NewSession {
+                id: &id,
+                harness: spec.harness,
+                label: &title,
+                cwd: &agent.cwd,
+                mission_id: None,
+                placement,
+                purpose: Some(purpose.as_str()),
+            };
             registry::insert(c, &new)?;
         }
         start_watch(c, &id, NewWatch { thread, drive: false, opted_out: false })?;
@@ -347,9 +377,9 @@ pub fn list_live(db: &Arc<Database>, filter: &ListFilter) -> Result<Vec<(Harness
 
 /// The live half of a session's view as flat fields (`alive`, `reachable`,
 /// `agent_status`, `title`, `detail`), for callers that build their own row JSON.
-pub fn live_fields(row: &HarnessSessionRow, live: Option<&Liveness>) -> Value {
+pub fn live_fields(row: &HarnessSessionRow, live: Option<&Liveness>, cfg: &AgentHostConfig) -> Value {
     let mut view = match live {
-        Some(live) => live_view(row, live),
+        Some(live) => live_view(row, live, cfg),
         None => json!({ "alive": false }),
     };
     if let Some(obj) = view.as_object_mut() {
@@ -377,10 +407,11 @@ pub(super) fn session_views(rows: &[HarnessSessionRow]) -> Vec<Value> {
         .cloned()
         .collect();
     let polled = poll_hosts(&running);
+    let cfg = spec::agent_host_config();
     rows.iter()
         .map(|row| {
             if row.status == registry::STATUS_RUNNING {
-                session_view(row, &liveness(&polled, row))
+                session_view(row, &liveness(&polled, row), &cfg)
             } else {
                 json!({ "session": row, "alive": false })
             }

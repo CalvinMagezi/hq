@@ -18,6 +18,7 @@ pub mod model_switch;
 mod profile;
 mod relay;
 mod self_update;
+mod stack;
 
 pub use agent::*;
 pub use backends::{BACKENDS_SCHEMA_VERSION, BackendEntry, BackendKind, BackendsConfig, WireApi};
@@ -49,6 +50,7 @@ pub use llm::*;
 pub use memory::*;
 pub use relay::*;
 pub use self_update::SelfUpdateConfig;
+pub use stack::{Specialist, StackConfig};
 
 use figment::{
     Figment,
@@ -266,6 +268,11 @@ pub struct HqConfig {
     #[serde(default)]
     pub agent_host: AgentHostConfig,
 
+    /// The Agentic Stack: named general-purpose agents that pull the tasks
+    /// assigned to them and run each as one bounded job in the host.
+    #[serde(default)]
+    pub stack: StackConfig,
+
     /// GitHub Copilot CLI (`gh copilot`) headless harness settings.
     #[serde(default)]
     pub github_copilot: GitHubCopilotConfig,
@@ -418,6 +425,7 @@ impl Default for HqConfig {
             tasks: TasksConfig::default(),
             copilot_usage: CopilotUsageConfig::default(),
             agent_host: AgentHostConfig::default(),
+            stack: StackConfig::default(),
             budget: BudgetConfig::default(),
             github_copilot: GitHubCopilotConfig::default(),
             governance: GovernanceConfig::default(),

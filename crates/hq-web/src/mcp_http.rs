@@ -489,6 +489,7 @@ mod tests {
                             workspace_id: "hs-agent",
                             pane_id: "hs-agent",
                         },
+                        purpose: None,
                     },
                 )?;
                 hq_db::session_tokens::mint(c, "hs-agent")

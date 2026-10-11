@@ -351,6 +351,7 @@ fn default_tasks() -> Vec<DaemonTask> {
         // Every 1 minute (fast tier — 30s timeout)
         DaemonTask::with_default_timeout("expire-approvals", Duration::from_secs(60)),
         DaemonTask::with_default_timeout("session-supervisor", Duration::from_secs(60)),
+        DaemonTask::with_default_timeout("stack-dispatch", Duration::from_secs(60)),
         DaemonTask::with_default_timeout("copilot-usage", Duration::from_secs(60)),
         DaemonTask::with_default_timeout("subagent-supervisor", Duration::from_secs(60)),
         // Every 5 minutes (periodic tier — 2min timeout)
@@ -502,6 +503,7 @@ async fn dispatch_task(
         "session-supervisor" => {
             tasks_periodic::session_supervisor::run_session_supervisor(vault_path, db, config).await
         }
+        "stack-dispatch" => tasks_periodic::run_stack_dispatch(vault_path, db, config).await,
         "email-poll" => tasks_periodic::run_email_poll(vault_path, config).await,
         "memory-consolidation" => {
             if config.dream.enabled {
@@ -754,6 +756,7 @@ mod lite_tests {
             "inbox-triage",
             "memory-consolidation",
             "session-supervisor",
+            "stack-dispatch",
             "subagent-supervisor",
             "copilot-usage",
             "harness-usage",

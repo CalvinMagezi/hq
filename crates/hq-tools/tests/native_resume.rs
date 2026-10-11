@@ -57,6 +57,7 @@ fn a_restarted_host_gets_each_agents_env_back_from_hq() {
                     workspace_id: SESSION,
                     pane_id: SESSION,
                 },
+                purpose: None,
             },
         )
     })
@@ -78,6 +79,7 @@ fn a_restarted_host_gets_each_agents_env_back_from_hq() {
                     workspace_id: "w1",
                     pane_id: "w1:p1",
                 },
+                purpose: None,
             },
         )
     })
@@ -160,6 +162,7 @@ fn a_reported_conversation_id_becomes_the_hosts_restart_command() {
                     workspace_id: SESSION,
                     pane_id: SESSION,
                 },
+                purpose: None,
             },
         )
     })

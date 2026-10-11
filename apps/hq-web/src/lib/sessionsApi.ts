@@ -160,6 +160,8 @@ export interface WorkbenchHost {
 export interface WorkbenchHosts {
   hosts: WorkbenchHost[]
   harnesses: string[]
+  /** Each harness's category; a harness missing here is treated as a coding agent. */
+  categories?: Record<string, AgentCategory>
 }
 
 export interface DirEntry {
@@ -181,7 +183,15 @@ export interface SpawnInput {
   new_folder?: string
   prompt?: string
   label?: string
+  /** What the session is for; omitted means the agent's default (code for a coding agent, general otherwise). */
+  purpose?: Purpose
 }
+
+/** Coding agents edit code; general-purpose agents (Hermes, OpenClaw) never take code work. */
+export type AgentCategory = 'coding' | 'general_purpose'
+export type Purpose = 'code' | 'monitor' | 'research' | 'review' | 'general'
+/** The purposes a general-purpose agent can be started for, in menu order. */
+export const GENERAL_PURPOSES: Purpose[] = ['general', 'research', 'review', 'monitor']
 
 /** What launching, stopping or resuming reports back. `blocked` means the agent is waiting at a dialog. */
 export interface LaunchReport {
@@ -191,6 +201,8 @@ export interface LaunchReport {
   cwd: string
   status: SessionStatus
   agent_status: AgentStatus | null
+  category?: AgentCategory
+  purpose?: Purpose
   blocked?: { screen: string; next: string }
   note?: string
 }

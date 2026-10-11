@@ -186,9 +186,10 @@ fn live_session_json(
     conn: &Connection,
     row: &HarnessSessionRow,
     live: Option<&Liveness>,
+    cfg: &hq_core::config::AgentHostConfig,
 ) -> anyhow::Result<Value> {
     let mut v = session_json(conn, row)?;
-    if let (Some(base), Value::Object(extra)) = (v.as_object_mut(), harness::live_fields(row, live))
+    if let (Some(base), Value::Object(extra)) = (v.as_object_mut(), harness::live_fields(row, live, cfg))
     {
         base.extend(extra);
     }
@@ -273,13 +274,14 @@ pub(crate) async fn list_all_handler(
     let db = Arc::new(state.db.clone());
     let result = tokio::task::spawn_blocking(move || {
         let listed = harness::list_live(&db, &filter)?;
+        let cfg = harness::agent_host_config();
         db.with_conn(|c| {
             let archived = registry::archived_ids(c)?;
             listed
                 .iter()
                 .filter(|(row, _)| include_archived || !archived.contains(&row.id))
                 .map(|(row, live)| {
-                    let mut v = live_session_json(c, row, live.as_ref())?;
+                    let mut v = live_session_json(c, row, live.as_ref(), &cfg)?;
                     v["archived"] = json!(archived.contains(&row.id));
                     Ok(v)
                 })
@@ -306,8 +308,9 @@ pub(crate) async fn get_session_handler(
     let result = tokio::task::spawn_blocking(move || {
         let live = (row.status == registry::STATUS_RUNNING)
             .then(|| harness::liveness(&harness::poll_hosts(std::slice::from_ref(&row)), &row));
+        let cfg = harness::agent_host_config();
         db.with_conn(|c| {
-            let mut v = live_session_json(c, &row, live.as_ref())?;
+            let mut v = live_session_json(c, &row, live.as_ref(), &cfg)?;
             v["archived"] = json!(registry::archived_ids(c)?.contains(&row.id));
             Ok(v)
         })
@@ -723,6 +726,7 @@ mod tests {
                             workspace_id: "w1",
                             pane_id: "w1:p1",
                         },
+                        purpose: None,
                     },
                 )?;
                 registry::set_owner(c, id, thread)?;

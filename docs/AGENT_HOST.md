@@ -1,8 +1,11 @@
 # Agent host
 
-`hq host` is HQ's built-in host for long-lived coding agents. It runs each agent
+`hq host` is HQ's built-in host for long-lived agents: coding agents, and the
+general-purpose agents (Hermes, OpenClaw) that HQ uses for monitoring,
+research and review but never for code (see "General-purpose agents" in
+[AGENT_SESSIONS.md](AGENT_SESSIONS.md)). It runs each agent
 in a pseudo-terminal, keeps an emulated screen and scrollback you can read back,
-and accepts typed input. It is where every coding-agent session HQ starts runs,
+and accepts typed input. It is where every agent session HQ starts runs,
 on this machine or on a machine you paired (see [JOIN_A_MACHINE.md](JOIN_A_MACHINE.md); on Windows the host runs inside WSL2, see [WINDOWS.md](WINDOWS.md); HQ Lite on native Windows has no host).
 
 ## macOS: a stable signature
@@ -189,11 +192,13 @@ agent with its state, sandbox mode, idle time and age. A busy agent is never
 reaped.
 
 Each agent also gets what it needs to be that agent: its own login and history directory
-(`~/.gemini` for Antigravity, `~/.codex`, `~/.cursor`, `~/.copilot`, `~/.pi` and so on, and
-never another agent's) and the HTTPS hosts it signs in and reaches its models through. Those
-defaults are verified for Claude Code and Antigravity; for agents that talk to whichever
-provider you configure (opencode, kimi, qwen) add the provider's host to
-`agent_host.sandbox.allow_domains`.
+(`~/.gemini` for Antigravity, `~/.codex`, `~/.cursor`, `~/.copilot`, `~/.pi`, `~/.hermes`,
+`~/.openclaw` and so on, and never another agent's) and the HTTPS hosts it
+signs in and reaches its models through. Those defaults are verified for Claude Code and
+Antigravity; for agents that talk to whichever provider you configure (opencode, kimi, qwen,
+and the general-purpose agents hermes and openclaw) add the provider's host to
+`agent_host.sandbox.allow_domains`. Only Claude Code is handed an HQ session token and MCP
+configuration; a general-purpose agent is never wired into HQ that way.
 
 The sandbox policy is kept in `session.json` and applied again on restore.
 `agent.list` shows each agent's mode and `host.status` counts agents running

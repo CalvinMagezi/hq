@@ -103,6 +103,7 @@ mod tests {
                     workspace_id: id,
                     pane_id: id,
                 },
+                purpose: None,
             },
         )
         .unwrap();

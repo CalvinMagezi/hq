@@ -466,6 +466,7 @@ impl HqTool for TaskNextTool {
                 include_unassigned,
                 initiative_id: initiative_id.as_deref(),
                 tag: tag.as_deref(),
+                no_code_work: false,
             };
             t::in_write_tx(c, |c| match t::claim_next(c, &query, &who, ttl)? {
                 Some(claimed) => {

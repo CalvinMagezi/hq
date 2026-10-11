@@ -1,18 +1,22 @@
 //! Harness-agnostic session manager: spawn, monitor, steer, stop, and resume
-//! long-lived external agent CLIs (claude-code, cursor, opencode, pi, kimi,
-//! codex, qwen, antigravity, github-copilot) inside the host, on this machine or
-//! on a remote host, tracked in the `harness_sessions` table.
+//! long-lived external agent CLIs inside the host, on this machine or on a
+//! remote host, tracked in the `harness_sessions` table. Two categories run
+//! there (`category.rs`): coding agents (claude-code, cursor, opencode, pi,
+//! kimi, codex, qwen, antigravity, github-copilot) and general-purpose agents
+//! (hermes, openclaw), which never take code work.
 //!
 //! These tools only mutate sessions HQ launched. Agents a person started by
 //! hand are visible through `host_agents`/`host_read` and steerable only
 //! through `host_send`.
 
+pub mod category;
 pub mod dismiss;
 mod coalesce;
 pub mod handoff;
 pub mod mission;
 mod preflight;
 pub mod spec;
+pub mod stack;
 pub mod tools;
 mod control;
 mod cwd;
@@ -33,7 +37,11 @@ use std::time::Duration;
 
 use spec::SPECS;
 pub use launch::resume_awaiting;
-pub use spec::{Harness, HarnessSessionSpec, ResumeStrategy, known_harnesses, resolve, resolve_in, spec_for};
+pub use category::{HarnessCategory, Purpose};
+pub use spec::{
+    Harness, HarnessSessionSpec, ResumeStrategy, agent_host_config, category_in, category_of, known_harnesses,
+    known_in, names_in, resolve, resolve_in, spec_for,
+};
 
 /// Under the home of the host that runs pi, inside the state directory its sandbox may write.
 const PI_SESSION_DIR: &str = ".pi/hq-sessions";
@@ -56,7 +64,7 @@ pub type HostPoll = HashMap<String, std::result::Result<Vec<AgentInfo>, String>>
 #[derive(Debug, Clone, PartialEq)]
 pub enum Liveness {
     Alive(Box<AgentInfo>),
-    /// The host answered and the agent is not there.
+    /// The host answered and the agent is not there, or its process has ended.
     Gone,
     /// The host could not be asked; nothing is known about the agent.
     HostUnreachable(String),
@@ -84,14 +92,29 @@ pub fn poll_hosts_with(
     polled
 }
 
+/// An agent whose process ended counts as gone even while the host still lists
+/// its pane: a one-shot run ends that way, and nothing is left to drive.
 pub fn liveness(polled: &HostPoll, row: &HarnessSessionRow) -> Liveness {
     match polled.get(&row.host) {
         Some(Ok(agents)) => agents
             .iter()
             .find(|a| a.name.as_deref() == Some(row.agent_name.as_str()))
+            .filter(|a| !a.exited)
             .map_or(Liveness::Gone, |a| Liveness::Alive(Box::new(a.clone()))),
         Some(Err(detail)) => Liveness::HostUnreachable(detail.clone()),
         None => Liveness::HostUnreachable(format!("host '{}' was not polled", row.host)),
+    }
+}
+
+/// The pane of a session whose process has ended but which the host still
+/// lists: its screen can still be read once, and the pane should be closed.
+pub fn exited_pane(polled: &HostPoll, row: &HarnessSessionRow) -> Option<AgentInfo> {
+    match polled.get(&row.host) {
+        Some(Ok(agents)) => agents
+            .iter()
+            .find(|a| a.name.as_deref() == Some(row.agent_name.as_str()) && a.exited)
+            .cloned(),
+        _ => None,
     }
 }
 

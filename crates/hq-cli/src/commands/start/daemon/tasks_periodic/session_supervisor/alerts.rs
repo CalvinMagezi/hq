@@ -39,6 +39,7 @@ pub(super) fn alert_finished(
     if let Err(e) = hq_tools::a2a::report_to_parent(db, row, "finished", &excerpt) {
         tracing::warn!(session = %row.id, error = %e, "session-supervisor: could not report to the parent");
     }
+    report_to_observers(db, row, "finished a turn", &excerpt);
     if hand_to_chat(db, row, WAKE_FINISHED) {
         return;
     }
@@ -57,6 +58,18 @@ pub(super) fn alert_finished(
         false,
     );
     tracing::info!(session = %row.id, host = %row.host, "session-supervisor: agent finished, alert sent");
+}
+
+/// Tells the monitors and reviewers watching this session what happened. A
+/// failure is logged: the event is already recorded and alerted on.
+pub(super) fn report_to_observers(db: &Database, row: &registry::HarnessSessionRow, event: &str, excerpt: &str) {
+    match hq_tools::a2a::report_to_observers(db, row, event, excerpt) {
+        Ok(told) if !told.is_empty() => {
+            tracing::info!(session = %row.id, observers = ?told, "session-supervisor: told the observers");
+        }
+        Ok(_) => {}
+        Err(e) => tracing::warn!(session = %row.id, error = %e, "session-supervisor: could not tell the observers"),
+    }
 }
 
 /// Untagged, so the notification gate sends it to the digest: a finished
@@ -93,6 +106,8 @@ pub(super) fn alert_blocked(
         _ => return,
     }
     let link = record_on_task(db, row, Event::Blocked);
+    // A monitor hears about the block too; it can tell whoever can answer it.
+    report_to_observers(db, row, "is blocked at a dialog", &tail_excerpt(screen, MAX_TAIL_BYTES));
     if hand_to_chat(db, row, WAKE_BLOCKED) {
         badge_web_inbox(db, row, seq);
         return;

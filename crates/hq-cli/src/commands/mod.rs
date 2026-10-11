@@ -73,6 +73,7 @@ pub mod service;
 pub mod sessions;
 pub mod shortcuts;
 pub mod skills;
+pub mod stack;
 pub mod start;
 pub mod status;
 pub mod stop;

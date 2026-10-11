@@ -34,8 +34,55 @@ fn add(c: &Connection, id: &str, harness: &str) -> Result<()> {
                 workspace_id: "w1",
                 pane_id: "w1:p1",
             },
+            purpose: None,
         },
     )
+}
+
+#[test]
+fn purpose_defaults_to_code_and_is_stored_when_given() {
+    let db = Database::open_memory().unwrap();
+    db.with_conn(|c| {
+        add(c, "hs-a", "claude-code")?;
+        insert(
+            c,
+            &NewSession {
+                id: "hs-b",
+                harness: "hermes",
+                label: "",
+                cwd: "/tmp",
+                mission_id: None,
+                placement: Placement { host: "local", agent_name: "hs-b", workspace_id: "w2", pane_id: "w2:p1" },
+                purpose: Some(PURPOSE_MONITOR),
+            },
+        )?;
+        assert_eq!(get(c, "hs-a")?.unwrap().purpose, PURPOSE_CODE);
+        assert_eq!(get(c, "hs-b")?.unwrap().purpose, PURPOSE_MONITOR);
+        Ok(())
+    })
+    .unwrap();
+}
+
+#[test]
+fn observers_are_recorded_once_and_only_running_ones_are_listed() {
+    let db = Database::open_memory().unwrap();
+    db.with_conn(|c| {
+        add(c, "hs-coder", "claude-code")?;
+        add(c, "hs-watch", "hermes")?;
+        add(c, "hs-watch2", "hermes")?;
+        assert!(add_observed(c, "hs-watch", &["hs-watch".to_string()]).is_err());
+        assert!(add_observed(c, "hs-watch", &["hs-ghost".to_string()]).is_err());
+        add_observed(c, "hs-watch", &["hs-coder".to_string(), "hs-coder".to_string()])?;
+        add_observed(c, "hs-watch2", &["hs-coder".to_string()])?;
+        assert_eq!(observed_by(c, "hs-watch")?, vec!["hs-coder".to_string()]);
+        let watching: Vec<String> = running_observers(c, "hs-coder")?.into_iter().map(|r| r.id).collect();
+        assert_eq!(watching, vec!["hs-watch".to_string(), "hs-watch2".to_string()]);
+        set_status(c, "hs-watch2", "stopped")?;
+        let watching: Vec<String> = running_observers(c, "hs-coder")?.into_iter().map(|r| r.id).collect();
+        assert_eq!(watching, vec!["hs-watch".to_string()]);
+        Ok(())
+    })
+    .unwrap();
 }
 
 const GOAL: &str = "Add rate limiting to the login endpoint";
@@ -187,6 +234,7 @@ fn mission_queries_see_only_that_missions_sessions() {
                         workspace_id: "w1",
                         pane_id: "w1:p1",
                     },
+                    purpose: None,
                 },
             )?;
         }
@@ -423,8 +471,11 @@ fn the_session_registry_migration_orphans_tmux_era_running_rows() {
         .unwrap();
     conn.execute_batch(include_str!("../../sql/076_session_parent.sql"))
         .unwrap();
+    conn.execute_batch(include_str!("../../sql/086_harness_session_purpose.sql"))
+        .unwrap();
     let s = get(&conn, "old").unwrap().unwrap();
     assert_eq!(s.status, STATUS_ORPHANED);
+    assert_eq!(s.purpose, PURPOSE_CODE, "a row from before purposes is code work");
     assert_eq!(s.agent_name, "hq-old");
     assert_eq!(s.host, "local");
 }
@@ -589,6 +640,7 @@ fn insert_session(c: &rusqlite::Connection, id: &str) {
             cwd: "/t",
             mission_id: None,
             placement: Placement { host: "native", agent_name: id, workspace_id: id, pane_id: id },
+            purpose: None,
         },
     )
     .unwrap();

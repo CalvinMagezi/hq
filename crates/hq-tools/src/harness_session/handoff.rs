@@ -47,6 +47,8 @@ pub struct HandoffRequest {
     /// allows it (`agent_host.drive_new_watches`, unless the caller opts out).
     pub drive_new: bool,
     pub drive_opted_out: bool,
+    /// What the session is for; `None` is the harness's default.
+    pub purpose: Option<super::Purpose>,
 }
 
 fn non_blank(s: &str) -> Option<&str> {
@@ -205,7 +207,7 @@ fn existing_report(
         "thread_id": row.owner_thread,
         "host": row.host,
         "links": links(row.owner_thread.as_deref(), &task.id),
-        "session": super::session_view(&row, &live),
+        "session": super::session_view(&row, &live, &super::spec::agent_host_config()),
     });
     if unreachable {
         report["note"] = json!(
@@ -293,6 +295,8 @@ async fn run_handoff(
                 goal: None,
                 done_criteria: non_blank(&req.acceptance),
             },
+            purpose: req.purpose,
+            observe: &[],
         },
     )
     .await;
