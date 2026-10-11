@@ -27,6 +27,8 @@ pub enum EventKind {
     State,
     Exited,
     Removed,
+    /// The host locked itself or was locked; `rule` holds the reason.
+    Lockdown,
 }
 
 impl EventKind {
@@ -36,6 +38,7 @@ impl EventKind {
             EventKind::State => "state",
             EventKind::Exited => "exited",
             EventKind::Removed => "removed",
+            EventKind::Lockdown => "lockdown",
         }
     }
 }

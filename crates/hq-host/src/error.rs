@@ -28,6 +28,8 @@ pub enum HostError {
     TooLarge(&'static str),
     #[error("the host is running as many agents as it allows ({0})")]
     TooManyAgents(usize),
+    #[error("the host is locked down and starts no agent ({0}); only `hq host unlock` on that machine lifts it")]
+    LockedDown(String),
     #[error("'{name}' needs these variables to resume: {missing}")]
     MissingEnv { name: String, missing: String },
 }
@@ -50,6 +52,7 @@ impl HostError {
             HostError::TooLarge(_) => "too_large",
             HostError::TooManyAgents(_) => "too_many_agents",
             HostError::MissingEnv { .. } => "missing_env",
+            HostError::LockedDown(_) => "locked_down",
         }
     }
 }

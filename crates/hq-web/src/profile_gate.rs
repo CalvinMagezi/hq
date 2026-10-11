@@ -121,6 +121,7 @@ mod tests {
             (Method::GET, "/api/harness-sessions/x/screen/stream"),
             (Method::GET, "/api/workbench/hosts"),
             (Method::POST, "/api/workbench/hosts/h/dirs"),
+            (Method::POST, "/api/workbench/lockdown"),
             (Method::GET, "/api/setup/status"),
             (Method::POST, "/api/setup/provider"),
             (Method::POST, "/api/admin/broadcast"),

@@ -484,7 +484,14 @@ impl Conn {
                     "agents_blocked": count(AgentState::Blocked),
                     "agents_unsandboxed": agents.iter().filter(|a| a.sandbox == "none").count(),
                     "binary_stale": self.exe.as_ref().is_some_and(ExeStamp::is_stale),
+                    "lockdown": self.host.lockdown_status(),
                 }))
+            }
+            // Locking is open to every operator caller; there is deliberately no
+            // method that unlocks.
+            "host.lockdown" => {
+                let reason = params.get("reason").and_then(Value::as_str).unwrap_or_default();
+                Ok(json!({ "lockdown": self.host.lockdown(reason, "operator") }))
             }
             "host.workspace" => self.workspace_call(|root| Ok(crate::workspace::describe(root))),
             "host.dirs" => {
