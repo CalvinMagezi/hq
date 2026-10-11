@@ -15,6 +15,9 @@ const canonical = new URL(path, SITE_URL).href;
 const ogImage = `${SITE_URL}/og.png`;
 const fullTitle = title.includes('Agent HQ') ? title : `${title} | Agent HQ`;
 const current = path;
+const INSTALL_PATH = '/install/';
+// Home is the brand link and Install is the call to action, so the text links are the rest.
+const textLinks = nav.filter((n) => n.href !== '/' && n.href !== INSTALL_PATH);
 
 // Scripts and styles are all same-origin files, so no inline hashes are needed.
 const csp = [
@@ -37,9 +40,8 @@ const csp = [
     <meta charset="utf-8" />
     <meta http-equiv="Content-Security-Policy" content={csp} />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <meta name="color-scheme" content="dark light" />
-    <meta name="theme-color" content="#000000" media="(prefers-color-scheme: dark)" />
-    <meta name="theme-color" content="#ffffff" media="(prefers-color-scheme: light)" />
+    <meta name="color-scheme" content="dark" />
+    <meta name="theme-color" content="#000000" />
     <title>{fullTitle}</title>
     <meta name="description" content={description} />
     {noindex && <meta name="robots" content="noindex" />}
@@ -47,6 +49,7 @@ const csp = [
     <link rel="icon" type="image/png" sizes="32x32" href="/icons/hq-favicon-32.png" />
     <link rel="apple-touch-icon" href="/icons/hq-apple-touch-180.png" />
     <link rel="sitemap" href="/sitemap.xml" />
+    <link rel="preload" href="/fonts/ClearSans-Bold.woff2" as="font" type="font/woff2" crossorigin />
     <meta property="og:type" content="website" />
     <meta property="og:site_name" content="Agent HQ" />
     <meta property="og:locale" content="en_US" />
@@ -63,48 +66,77 @@ const csp = [
     <meta name="twitter:image" content={ogImage} />
     <meta name="twitter:image:alt" content="Agent HQ: a local-first AI agent hub. One Rust binary, a markdown vault, your machine." />
     {jsonLd && <script is:inline type="application/ld+json" set:html={JSON.stringify(jsonLd)} />}
-    <script is:inline src="/js/theme.js"></script>
   </head>
   <body>
     <a class="skip-link" href="#main">Skip to content</a>
     <header class="site-header">
-      <div class="container">
-        <a class="brand" href="/">
-          <img src="/icons/hq-mark-96.png" alt="" width="32" height="32" />
+      <div class="navshell glass-heavy shine">
+        <a class="brand" href="/" aria-current={current === '/' ? 'page' : undefined}>
+          <span class="brand-mark" aria-hidden="true"><span></span><span></span></span>
           <span>Agent HQ</span>
         </a>
         <nav class="site-nav" aria-label="Main">
           {
-            nav.map((item) => (
+            textLinks.map((item) => (
               <a href={item.href} aria-current={current === item.href ? 'page' : undefined}>
                 {item.label}
               </a>
             ))
           }
-          <span class="spacer"></span>
           <a href={links.repo}>GitHub</a>
-          <button type="button" class="btn btn-sm theme-toggle" data-theme-toggle hidden>
-            Light theme
-          </button>
+          <a class="btn btn-primary btn-sm" href={INSTALL_PATH} aria-current={current === INSTALL_PATH ? 'page' : undefined}>
+            Install
+          </a>
         </nav>
+        <span class="progress" aria-hidden="true"></span>
       </div>
     </header>
     <main id="main" tabindex="-1">
       <slot />
     </main>
     <footer class="site-footer">
+      <span class="orb orb-b o-tl" aria-hidden="true"></span>
+      <span class="orb orb-g o-br slow" aria-hidden="true"></span>
       <div class="container">
-        <ul class="footer-links">
-          <li><a href={links.repo}>GitHub</a></li>
-          <li><a href={links.license}>MIT license</a></li>
-          <li><a href={links.changelog}>Changelog</a></li>
-          <li><a href={links.securityPolicy}>Security policy</a></li>
-        </ul>
-        <p>
-          Agent HQ is an independent open-source project, released under the MIT license. It is not
-          affiliated with the other projects named on the comparison page.
-        </p>
-        <p>This site sets no cookies, runs no analytics and loads nothing from other origins.</p>
+        <div class="pairs" aria-hidden="true">
+          {
+            ['pair-1', 'pair-2', 'pair-3', 'pair-4'].map((cls) => (
+              <svg class={`pair ${cls}`} viewBox="0 0 64 40" aria-hidden="true" focusable="false">
+                <circle class="c-blue" cx="20" cy="20" r="20" />
+                <circle class="c-green" cx="44" cy="20" r="20" />
+              </svg>
+            ))
+          }
+        </div>
+        <div class="foot-grid">
+          <div class="stack-sm">
+            <p class="foot-title">Connect every channel to one agent.</p>
+            <p class="body">Agent HQ is open source under the MIT license.</p>
+            <div class="actions"><a class="btn btn-primary" href={links.repo}>View on GitHub</a></div>
+          </div>
+          <nav class="foot-nav glass" aria-label="Site">
+            <p class="eyebrow">Site</p>
+            <ul class="foot-links">
+              {nav.map((item) => <li><a href={item.href}>{item.label}</a></li>)}
+            </ul>
+          </nav>
+          <nav class="foot-nav glass" aria-label="Project">
+            <p class="eyebrow">Project</p>
+            <ul class="foot-links">
+              <li><a href={links.releases}>Releases</a></li>
+              <li><a href={links.changelog}>Changelog</a></li>
+              <li><a href={links.license}>MIT license</a></li>
+              <li><a href={links.securityPolicy}>Security policy</a></li>
+            </ul>
+          </nav>
+        </div>
+        <div class="foot-note">
+          <p class="small">
+            Agent HQ is an independent open-source project, released under the MIT license. It is not
+            affiliated with the other projects named on the comparison page.
+          </p>
+          <p class="small">This site sets no cookies, runs no analytics and loads nothing from other origins.</p>
+        </div>
       </div>
     </footer>
     <p id="copy-status" class="visually-hidden" role="status" aria-live="polite"></p>

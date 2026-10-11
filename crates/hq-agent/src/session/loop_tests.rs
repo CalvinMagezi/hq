@@ -1711,7 +1711,12 @@ fn tool_then_answer() -> Arc<MockProvider> {
     ))
 }
 
+/// Copilot runs register in the process-wide `COPILOT_RUNS`, so two of these tests running at
+/// once would each see the other and withhold their deltas.
+static COPILOT_CREDIT_TESTS: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
+
 async fn run_with_credits(backend_name: &str, readings: Vec<Option<f64>>) -> Vec<SessionEvent> {
+    let _serial = COPILOT_CREDIT_TESTS.lock().await;
     let provider = tool_then_answer();
     let events = Arc::new(Mutex::new(Vec::new()));
     let mut agent = session(

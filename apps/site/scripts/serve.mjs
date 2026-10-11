@@ -14,6 +14,10 @@ const TYPES = {
   '.xml': 'application/xml',
   '.txt': 'text/plain',
   '.svg': 'image/svg+xml',
+  '.jpg': 'image/jpeg',
+  '.gif': 'image/gif',
+  '.mp4': 'video/mp4',
+  '.woff2': 'font/woff2',
 };
 
 export function serve() {

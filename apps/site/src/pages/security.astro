@@ -41,14 +41,41 @@ const dry = 'hq update --apply --dry-run';
   description="What Agent HQ protects against, what it does not, how to verify a signed release, and how to report a vulnerability."
   path="/security/"
 >
-  <section class="band">
-    <div class="container section">
-      <span class="eyebrow">Security model</span>
-      <h1>Security</h1>
-      <p class="lede prose">
-        HQ runs tool-using agents that can execute shell commands. That is the risk, so this page says
-        what holds, what does not, and how to check the parts that ship to your server.
-      </p>
+  <section class="sec sec-hero" aria-labelledby="sec-h">
+    <span class="orb orb-b o-tl" aria-hidden="true"></span>
+    <span class="orb orb-i o-tr" aria-hidden="true"></span>
+    <span class="orb orb-g o-c slow" aria-hidden="true"></span>
+    <div class="container stack">
+      <div class="hero-grid">
+        <div class="stack">
+          <p class="eyebrow">Security model</p>
+          <h1 id="sec-h" class="display">
+            <span class="hl"><span>What holds.</span></span>
+            <span class="hl"><span>What does not.</span></span>
+            <span class="hl"><span class="accent">How to check.</span></span>
+          </h1>
+          <div class="rule rule-in" aria-hidden="true"></div>
+          <p class="lede fade-in hero-lede">
+            HQ runs tool-using agents that can execute shell commands. That is the risk, so this page says what
+            holds, what does not, and how to check the parts that ship to your server.
+          </p>
+        </div>
+        <div class="vault-art">
+          <img
+            src="/media/art/vault.jpg"
+            alt="Flat isometric illustration: a vault cube with a round barred door inside a stepped wall, small cube figures passing parcels through one checked gate."
+            width="1600"
+            height="995"
+            decoding="async"
+          />
+          <span class="vscan" aria-hidden="true"></span>
+          <ul class="vchips list-plain" aria-hidden="true">
+            <li class="vchip glass-heavy"><span class="dot dot-green"></span>Sandbox required</li>
+            <li class="vchip glass-heavy"><span class="dot dot-blue"></span>Env allowlist and taint</li>
+            <li class="vchip glass-heavy"><span class="dot dot-sky"></span>Signed releases</li>
+          </ul>
+        </div>
+      </div>
       <nav aria-label="On this page">
         <ul class="toc">
           <li><a href="#shapes">Deployment shapes</a></li>
@@ -61,149 +88,676 @@ const dry = 'hq update --apply --dry-run';
     </div>
   </section>
 
-  <div class="container">
-    <section class="doc-section" id="shapes" aria-labelledby="shapes-h">
-      <h2 id="shapes-h">Supported deployment shapes</h2>
-      <div class="grid">
-        <article class="card">
+  <section class="sec sec-tight" id="shapes" aria-labelledby="shapes-h">
+    <span class="orb orb-i o-c slow" aria-hidden="true"></span>
+    <div class="container stack">
+      <h2 id="shapes-h" class="reveal">Supported deployment shapes</h2>
+      <div class="shapes">
+        <article class="gcard reveal">
+          <div class="mini" aria-hidden="true"><span class="loop"><code>127.0.0.1</code></span><span class="orbit"><i></i></span></div>
           <h3>Local, single user</h3>
-          <p>
-            The default. The web server binds to <code>127.0.0.1</code>. The machine and its user are
-            trusted. Set <code>web_auth_token</code> on a shared machine.
-          </p>
+          <p class="body">The default. The web server binds to <code>127.0.0.1</code>. The machine and its user are trusted. Set <code>web_auth_token</code> on a shared machine.</p>
         </article>
-        <article class="card">
+        <article class="gcard reveal reveal-2">
+          <div class="mini" aria-hidden="true"><span class="bubble"><span class="pill glass-light">Phone</span><span class="pill pill-green">HQ</span></span><span class="tpacket"></span></div>
           <h3>Private network</h3>
-          <p>
-            HQ stays on loopback behind <code>tailscale serve</code> or a reverse proxy. List the
-            served origins in <code>web_allowed_origins</code>.
-          </p>
+          <p class="body">HQ stays on loopback behind <code>tailscale serve</code> or a reverse proxy. List the served origins in <code>web_allowed_origins</code>.</p>
         </article>
-        <article class="card">
+        <article class="gcard reveal reveal-3">
+          <div class="mini" aria-hidden="true">
+            <span class="gate"></span>
+            <span class="lane ln1"><span class="ok">/mcp + key</span></span>
+            <span class="lane ln2"><span class="ok ok-2">/health</span></span>
+            <span class="lane ln3"><span class="no glass-light">/ws and /api</span></span>
+          </div>
           <h3>Public /mcp</h3>
-          <p>
-            Only through a proxy that exposes <code>/mcp</code> and <code>/health</code> and nothing
-            else, with <code>AGENTHQ_API_KEY</code> set. <code>/ws</code> and <code>/api</code> must
-            never be public.
-          </p>
+          <p class="body">Only through a proxy that exposes <code>/mcp</code> and <code>/health</code> and nothing else, with <code>AGENTHQ_API_KEY</code> set. <code>/ws</code> and <code>/api</code> must never be public.</p>
         </article>
       </div>
-    </section>
+    </div>
+  </section>
 
-    <section class="doc-section" id="protects" aria-labelledby="protects-h">
-      <h2 id="protects-h">What it protects against</h2>
-      <p class="prose muted">
-        Each line is a control that exists in the code and is described in the repository docs. None
-        of them is a promise that nothing can go wrong.
-      </p>
-      <dl class="stack">
+  <section class="sec sec-tight" id="protects" aria-labelledby="protects-h">
+    <span class="orb orb-b o-tr" aria-hidden="true"></span>
+    <span class="orb orb-g o-bl slow" aria-hidden="true"></span>
+    <div class="container stack">
+      <div class="head">
+        <h2 id="protects-h" class="reveal">What it protects against</h2>
+        <p class="lede reveal">
+          Each line is a control that exists in the code and is described in the repository docs. None of them is a
+          promise that nothing can go wrong.
+        </p>
+      </div>
+      <ul class="prot list-plain">
         {
-          protects.map(([threat, control]) => (
-            <div class="card">
-              <dt><h3>{threat}</h3></dt>
-              <dd>{control}</dd>
-            </div>
-          ))
-        }
-      </dl>
-    </section>
-
-    <section class="doc-section" id="gaps" aria-labelledby="gaps-h">
-      <h2 id="gaps-h">What it does not protect against</h2>
-      <p class="prose muted">
-        Plain list of limits, taken from the project's own security notes.
-      </p>
-      <ul class="list-plain stack">
-        {
-          gaps.map(([head, body]) => (
-            <li class="card">
-              <h3>{head}</h3>
-              <p>{body}</p>
+          protects.map(([threat, control], i) => (
+            <li class={`gcard prot-card reveal${i % 2 ? ' reveal-2' : ''}`}>
+              <svg class="shield" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M12 3l8 3v6c0 4.5-3.2 8-8 9-4.8-1-8-4.5-8-9V6z"></path><path class="chk" d="M9 12l2 2 4-4"></path></svg>
+              <h3 class="h3-sm">{threat}</h3>
+              <p class="body">{control}</p>
             </li>
           ))
         }
       </ul>
-    </section>
+    </div>
+  </section>
 
-    <section class="doc-section" id="verify" aria-labelledby="verify-h">
-      <h2 id="verify-h">Verifying a signed release</h2>
-      <div class="prose">
-        <p>
-          The updater does this for you, in process, on every update. You can repeat it by hand. The
-          trust chain is the minisign signature on <code>manifest.json</code>, then the SHA-256 of
-          each artifact in that signed manifest. <code>SHA256SUMS</code> in the release is unsigned and
-          for humans, so do not rely on it alone.
-        </p>
-        <p>
-          Get the official public key from the repository file
-          <a href={links.officialKey}><code>release/minisign.pub</code></a>, not from a page that could
-          be altered, and compare. Its key id is <code>{keyId}</code> and its key line begins
-          <code>{keyLine.slice(0, 12)}</code>. Install the <a href={links.minisign}>minisign</a> tool
-          and <code>jq</code> first.
-        </p>
+  <section class="sec sec-tight" id="gaps" aria-labelledby="gaps-h">
+    <span class="orb orb-i o-c" aria-hidden="true"></span>
+    <div class="container stack">
+      <div class="head">
+        <div class="tags reveal"><span class="tag tag-dashed">Known gaps</span></div>
+        <h2 id="gaps-h" class="reveal">What it does not protect against</h2>
+        <p class="lede reveal">Plain list of limits, taken from the project's own security notes.</p>
       </div>
-      <ol class="steps">
-        <li>
-          <p>Download the manifest, its signature, the binary archive and the key.</p>
-          <CodeBlock id="ver-dl" label="Download" code={dl} />
-        </li>
-        <li>
-          <p>Verify the manifest signature. It must report a good signature.</p>
-          <CodeBlock id="ver-sig" label="Signature" code={verify} />
-        </li>
-        <li>
-          <p>Check each downloaded artifact against the hash in the signed manifest.</p>
-          <CodeBlock id="ver-hash" label="Hashes" code={hashCheck} />
-        </li>
-        <li>
+      <ul class="gaps list-plain">
+        {
+          gaps.map(([head, body], i) => (
+            <li class={`gap glass reveal${i % 3 === 1 ? ' reveal-2' : i % 3 === 2 ? ' reveal-3' : ''}`}>
+              <span class="num glass-light gap-num">{String(i + 1).padStart(2, '0')}</span>
+              <h3 class="h3-sm">{head}</h3>
+              <p class="body">{body}</p>
+            </li>
+          ))
+        }
+      </ul>
+    </div>
+  </section>
+
+  <section class="sec sec-tight" id="verify" aria-labelledby="verify-h">
+    <span class="orb orb-g o-tr" aria-hidden="true"></span>
+    <span class="orb orb-b o-bl slow" aria-hidden="true"></span>
+    <div class="container stack">
+      <div class="head">
+        <h2 id="verify-h" class="reveal">Verifying a signed release</h2>
+        <div class="prose reveal">
           <p>
-            On an instance, <code>--dry-run</code> repeats every check, including the channel pointer,
-            and changes nothing.
+            The updater does this for you, in process, on every update. You can repeat it by hand. The trust chain is
+            the minisign signature on <code>manifest.json</code>, then the SHA-256 of each artifact in that signed
+            manifest. <code>SHA256SUMS</code> in the release is unsigned and for humans, so do not rely on it alone.
           </p>
-          <CodeBlock id="ver-dry" label="Dry run" code={dry} />
-        </li>
-      </ol>
-      <div class="prose">
-        <p>
-          Channel pointers (<code>channel-stable.json</code> and <code>channel-main.json</code>) have
-          their own <code>.minisig</code>. Only prehashed signatures are accepted, which is the default
-          of <code>minisign -S</code>. Format and trust model:
-          <a href={links.updateSystem}>docs/UPDATE_SYSTEM.md</a>.
-        </p>
+          <p>
+            Get the official public key from the repository file <a href={links.officialKey}><code>release/minisign.pub</code></a>,
+            not from a page that could be altered, and compare. Its key id is <code>{keyId}</code> and its key line begins
+            <code>{keyLine.slice(0, 12)}</code>. Install the <a href={links.minisign}>minisign</a> tool and <code>jq</code> first.
+          </p>
+        </div>
       </div>
-    </section>
+      <div class="panel glass-heavy shine zoom-in">
+        <p class="label chain-title">Trust chain</p>
+        <ol class="chain list-plain" aria-label="The public key verifies the manifest signature, the signed manifest lists a hash per artifact, and each artifact must match its hash.">
+          <li class="link-node glass-light"><span class="tick" aria-hidden="true">&#10003;</span><code>minisign.pub</code><span class="label">From the repo</span></li>
+          <li class="link-node glass-light"><span class="tick" aria-hidden="true">&#10003;</span><code>manifest.json.minisig</code><span class="label">Good signature</span></li>
+          <li class="link-node glass-light"><span class="tick" aria-hidden="true">&#10003;</span><code>manifest.json</code><span class="label">SHA-256 per artifact</span></li>
+          <li class="link-node glass-light"><span class="tick" aria-hidden="true">&#10003;</span><code>hq-&lt;V&gt;-linux-x86_64.tar.gz</code><span class="label">Hash matches</span></li>
+        </ol>
+      </div>
+      <ol class="steps vsteps">
+        <li class="gcard reveal"><p>Download the manifest, its signature, the binary archive and the key.</p><CodeBlock id="ver-dl" label="Download" code={dl} /></li>
+        <li class="gcard reveal reveal-2"><p>Verify the manifest signature. It must report a good signature.</p><CodeBlock id="ver-sig" label="Signature" code={verify} /></li>
+        <li class="gcard reveal"><p>Check each downloaded artifact against the hash in the signed manifest.</p><CodeBlock id="ver-hash" label="Hashes" code={hashCheck} /></li>
+        <li class="gcard reveal reveal-2"><p>On an instance, <code>--dry-run</code> repeats every check, including the channel pointer, and changes nothing.</p><CodeBlock id="ver-dry" label="Dry run" code={dry} /></li>
+      </ol>
+      <p class="body reveal note">
+        Channel pointers (<code>channel-stable.json</code> and <code>channel-main.json</code>) have their own
+        <code>.minisig</code>. Only prehashed signatures are accepted, which is the default of <code>minisign -S</code>.
+        Format and trust model: <a href={links.updateSystem}>docs/UPDATE_SYSTEM.md</a>.
+      </p>
+    </div>
+  </section>
 
-    <section class="doc-section" id="report" aria-labelledby="report-h">
-      <h2 id="report-h">Reporting a vulnerability</h2>
-      <div class="prose">
+  <section class="sec" id="report" aria-labelledby="report-h">
+    <span class="orb orb-b o-c" aria-hidden="true"></span>
+    <span class="orb orb-g o-br slow" aria-hidden="true"></span>
+    <div class="container report-grid">
+      <div class="gcard gcard-indigo shine reveal report">
+        <p class="eyebrow">Privately, never in a public issue</p>
+        <h2 id="report-h" class="h2-sm">Reporting a vulnerability</h2>
         <p>
-          Report privately, not in a public issue. Use
-          <a href={links.reportVulnerability}>GitHub's private vulnerability reporting</a> on the
-          repository. If that is unavailable, open a public issue that says only that you have a
+          Report privately, not in a public issue. Use <a href={links.reportVulnerability}>GitHub's private vulnerability
+          reporting</a> on the repository. If that is unavailable, open a public issue that says only that you have a
           security report and asks for a private channel, with no details.
         </p>
         <p>
-          Include what you found, how to reproduce it, the affected version and the impact you expect.
-          Expect an acknowledgement within 7 days, and please allow 90 days or until a fix ships before
-          disclosing. Do not include real credentials or other people's vault contents. Only the latest
-          release and the latest commit on <code>main</code> are supported.
+          Include what you found, how to reproduce it, the affected version and the impact you expect. Expect an
+          acknowledgement within 7 days, and please allow 90 days or until a fix ships before disclosing. Do not include
+          real credentials or other people's vault contents. Only the latest release and the latest commit on
+          <code>main</code> are supported.
         </p>
-        <p>
-          The full policy, including what is in and out of scope, is in
-          <a href={links.securityPolicy}>SECURITY.md</a>.
-        </p>
-        <h3>Read the details</h3>
-        <ul class="facts">
-          <li><a href={links.sec.webAuth}>Web and MCP authentication</a></li>
-          <li><a href={links.sec.bashSandbox}>Bash isolation</a></li>
-          <li><a href={links.sec.promptInjection}>Prompt-injection containment</a></li>
-          <li><a href={links.sec.webFetch}>Outbound fetches</a></li>
-          <li><a href={links.sec.selfUpdate}>Self-update tools</a></li>
-          <li><a href={links.sec.agentEnv}>What a coding agent can see of your environment</a></li>
-          <li><a href={links.sec.identity}>Identity-scoped disclosure</a></li>
-          <li><a href={links.sec.releaseChecklist}>Release checklist</a></li>
+        <p>The full policy, including what is in and out of scope, is in <a href={links.securityPolicy}>SECURITY.md</a>.</p>
+        <div class="actions"><a class="btn btn-primary" href={links.reportVulnerability}>Report privately</a></div>
+      </div>
+      <div class="stack-sm">
+        <h3 class="reveal">Read the details</h3>
+        <ul class="doc-links list-plain">
+          <li><a class="glass reveal" href={links.sec.webAuth}>Web and MCP authentication</a></li>
+          <li><a class="glass reveal" href={links.sec.bashSandbox}>Bash isolation</a></li>
+          <li><a class="glass reveal" href={links.sec.promptInjection}>Prompt-injection containment</a></li>
+          <li><a class="glass reveal" href={links.sec.webFetch}>Outbound fetches</a></li>
+          <li><a class="glass reveal" href={links.sec.selfUpdate}>Self-update tools</a></li>
+          <li><a class="glass reveal" href={links.sec.agentEnv}>What a coding agent can see of your environment</a></li>
+          <li><a class="glass reveal" href={links.sec.identity}>Identity-scoped disclosure</a></li>
+          <li><a class="glass reveal" href={links.sec.releaseChecklist}>Release checklist</a></li>
         </ul>
       </div>
-    </section>
-  </div>
+    </div>
+  </section>
 </Layout>
+
+<style>
+  .hero-grid {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    gap: 48px;
+    align-items: center;
+  }
+  .hero-lede {
+    max-width: 560px;
+  }
+  .vault-art {
+    position: relative;
+    width: 520px;
+    height: 400px;
+  }
+  .vault-art img {
+    position: absolute;
+    right: -40px;
+    top: 0;
+    width: auto;
+    max-width: none;
+    height: 100%;
+    mix-blend-mode: lighten;
+    pointer-events: none;
+  }
+  .vscan {
+    position: absolute;
+    right: 30px;
+    top: 60px;
+    width: 300px;
+    height: 2px;
+    background: var(--brand-green);
+    box-shadow: 0 0 18px var(--brand-green);
+    opacity: 0.8;
+  }
+  .vchips {
+    position: absolute;
+    inset: 0;
+    pointer-events: none;
+  }
+  .vchip {
+    position: absolute;
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    padding: 8px 16px;
+    border-radius: var(--radius-pill);
+    font-size: 14px;
+    font-weight: 700;
+    z-index: 2;
+  }
+  .vchip:nth-child(1) {
+    left: 8px;
+    top: 64px;
+  }
+  .vchip:nth-child(2) {
+    left: 40px;
+    top: 176px;
+    animation-delay: 0.8s;
+  }
+  .vchip:nth-child(3) {
+    left: 0;
+    top: 288px;
+    animation-delay: 1.6s;
+  }
+
+  .shapes {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: var(--space-4);
+  }
+  .mini {
+    position: relative;
+    height: 150px;
+    border-radius: 14px;
+    background: rgba(255, 255, 255, 0.03);
+    border: 1px solid rgba(255, 255, 255, 0.06);
+    overflow: hidden;
+    margin-bottom: 6px;
+  }
+  .loop {
+    position: absolute;
+    left: 50%;
+    top: 50%;
+    width: 110px;
+    height: 110px;
+    margin: -55px 0 0 -55px;
+    border-radius: 50%;
+    border: 2px dashed var(--hairline);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+  .loop code {
+    font-size: 12px;
+  }
+  .orbit {
+    position: absolute;
+    left: 50%;
+    top: 50%;
+    width: 0;
+    height: 0;
+  }
+  .orbit i {
+    position: absolute;
+    left: -5px;
+    top: -60px;
+    width: 10px;
+    height: 10px;
+    border-radius: 50%;
+    background: var(--brand-green);
+  }
+  .bubble {
+    position: absolute;
+    inset: 18px 24px;
+    border-radius: var(--radius-pill);
+    border: 2px solid rgba(0, 173, 238, 0.4);
+    background: rgba(0, 173, 238, 0.06);
+    display: flex;
+    align-items: center;
+    justify-content: space-around;
+  }
+  .tpacket {
+    position: absolute;
+    top: 50%;
+    left: 24%;
+    width: 12px;
+    height: 12px;
+    margin-top: -6px;
+    border-radius: 50%;
+    background: var(--brand-blue);
+    box-shadow: 0 0 12px var(--brand-blue);
+  }
+  .gate {
+    position: absolute;
+    left: 50%;
+    top: 14px;
+    bottom: 14px;
+    width: 10px;
+    margin-left: -5px;
+    border-radius: var(--radius-pill);
+    background: var(--brand-indigo);
+  }
+  .lane {
+    position: absolute;
+    left: 12px;
+    right: 12px;
+    height: 24px;
+  }
+  .ln1 {
+    top: 22px;
+  }
+  .ln2 {
+    top: 62px;
+  }
+  .ln3 {
+    top: 102px;
+  }
+  .lane span {
+    position: absolute;
+    left: 0;
+    font-family: var(--font-mono);
+    font-size: 11px;
+    padding: 2px 8px;
+    border-radius: var(--radius-pill);
+  }
+  .ok {
+    background: var(--brand-green);
+    color: #000000;
+  }
+  .ok-2 {
+    animation-delay: 1.3s;
+  }
+  .no {
+    color: var(--ink);
+    animation-delay: 0.6s;
+  }
+
+  .prot {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 14px;
+    margin: 0;
+  }
+  .prot-card {
+    display: grid;
+    grid-template-columns: 40px minmax(0, 1fr);
+    column-gap: 16px;
+    row-gap: 8px;
+    align-items: start;
+  }
+  .prot-card .shield {
+    grid-row: span 2;
+  }
+  .shield {
+    width: 40px;
+    height: 40px;
+    fill: none;
+    stroke: var(--brand-green);
+    stroke-width: 1.8;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+  }
+  .chk {
+    stroke-dasharray: 12;
+    stroke-dashoffset: 0;
+  }
+  .h3-sm {
+    font-size: 18px;
+    line-height: 24px;
+  }
+
+  .tag-dashed {
+    border-style: dashed;
+    color: var(--brand-sky);
+  }
+  .gaps {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 14px;
+  }
+  .gap {
+    border-radius: var(--radius-lg);
+    padding: 22px;
+    border: 1px dashed rgba(255, 255, 255, 0.24);
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+  }
+  .gap-num {
+    color: var(--brand-sky);
+  }
+
+  .chain-title {
+    margin-bottom: 14px;
+  }
+  .chain {
+    display: flex;
+    align-items: stretch;
+    flex-wrap: wrap;
+    gap: 10px;
+  }
+  .link-node {
+    flex: 1 1 180px;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    align-items: center;
+    border-radius: 16px;
+    padding: 14px 16px;
+    text-align: center;
+  }
+  .link-node code {
+    background: none;
+    border: 0;
+    padding: 0;
+    font-size: 13px;
+    overflow-wrap: anywhere;
+  }
+  .tick {
+    width: 24px;
+    height: 24px;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 12px;
+    font-weight: 700;
+    color: #000000;
+    background: var(--brand-green);
+    border: 2px solid var(--brand-green);
+  }
+  .link-node:nth-child(2),
+  .link-node:nth-child(2) .tick {
+    animation-delay: 2s;
+  }
+  .link-node:nth-child(3),
+  .link-node:nth-child(3) .tick {
+    animation-delay: 4s;
+  }
+  .link-node:nth-child(4),
+  .link-node:nth-child(4) .tick {
+    animation-delay: 6s;
+  }
+  .vsteps {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: var(--space-4);
+  }
+  .vsteps > li {
+    padding-left: var(--space-5);
+    padding-top: 64px;
+  }
+  .vsteps > li::before {
+    left: var(--space-5);
+    top: var(--space-5);
+  }
+  .note {
+    max-width: 860px;
+  }
+
+  .report-grid {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+    gap: 24px;
+    align-items: start;
+  }
+  .report {
+    padding: 40px;
+    gap: 16px;
+  }
+  .doc-links {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 8px;
+  }
+  .doc-links a {
+    display: flex;
+    align-items: center;
+    min-height: 52px;
+    height: 100%;
+    padding: 8px 14px;
+    border-radius: 12px;
+    color: var(--ink);
+    text-decoration: none;
+    font-size: 15px;
+  }
+  .doc-links a:hover {
+    border-color: rgba(34, 255, 55, 0.45);
+  }
+
+  @media (max-width: 960px) {
+    .hero-grid {
+      grid-template-columns: minmax(0, 1fr);
+    }
+    .vault-art {
+      width: 100%;
+      max-width: 600px;
+      justify-self: center;
+    }
+    .shapes,
+    .prot,
+    .vsteps,
+    .report-grid {
+      grid-template-columns: minmax(0, 1fr);
+    }
+    .gaps {
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+  }
+  @media (max-width: 640px) {
+    .vault-art {
+      height: 300px;
+    }
+    .vault-art img {
+      right: -20px;
+    }
+    .vscan {
+      right: 10px;
+      width: 200px;
+    }
+    .vchip {
+      font-size: 12px;
+      padding: 6px 12px;
+    }
+    .vchip:nth-child(2) {
+      top: 136px;
+      left: 8px;
+    }
+    .vchip:nth-child(3) {
+      top: 208px;
+    }
+    .gaps,
+    .doc-links {
+      grid-template-columns: minmax(0, 1fr);
+    }
+    .report {
+      padding: 24px;
+    }
+  }
+
+  @keyframes vscan {
+    from {
+      transform: translateY(0);
+    }
+    to {
+      transform: translateY(300px);
+    }
+  }
+  @keyframes vfloat {
+    from {
+      transform: translateY(6px);
+    }
+    to {
+      transform: translateY(-10px);
+    }
+  }
+  @keyframes tpacket {
+    0% {
+      left: 24%;
+      opacity: 0;
+    }
+    10%,
+    90% {
+      opacity: 1;
+    }
+    100% {
+      left: 72%;
+      opacity: 0;
+    }
+  }
+  @keyframes pass {
+    0% {
+      left: 0;
+      opacity: 0;
+    }
+    10%,
+    90% {
+      opacity: 1;
+    }
+    100% {
+      left: calc(100% - 90px);
+      opacity: 0;
+    }
+  }
+  @keyframes stop {
+    0% {
+      left: 0;
+      opacity: 0;
+    }
+    10% {
+      opacity: 1;
+    }
+    45%,
+    80% {
+      left: calc(50% - 98px);
+      opacity: 1;
+      background: var(--danger-text);
+      color: #000000;
+    }
+    100% {
+      left: calc(50% - 98px);
+      opacity: 0;
+    }
+  }
+  @keyframes draw {
+    from {
+      stroke-dashoffset: 12;
+    }
+    to {
+      stroke-dashoffset: 0;
+    }
+  }
+  @keyframes tick {
+    0% {
+      color: transparent;
+      background: transparent;
+      border-color: var(--hairline);
+    }
+    20%,
+    100% {
+      color: #000000;
+      background: var(--brand-green);
+      border-color: var(--brand-green);
+    }
+  }
+  @keyframes nodelit {
+    0%,
+    25%,
+    100% {
+      border-color: var(--glass-border);
+    }
+    5%,
+    15% {
+      border-color: var(--brand-green);
+    }
+  }
+
+  @media (prefers-reduced-motion: no-preference) {
+    .vscan {
+      animation: vscan 3.2s ease-in-out infinite alternate;
+    }
+    .vchip {
+      animation: bob 5s ease-in-out infinite;
+    }
+    .vault-art img {
+      animation: vfloat 9s ease-in-out infinite alternate;
+    }
+    .orbit {
+      animation: spin 4s linear infinite;
+    }
+    .tpacket {
+      animation: tpacket 3.4s cubic-bezier(0.6, 0, 0.4, 1) infinite;
+    }
+    .ok {
+      animation: pass 4s cubic-bezier(0.6, 0, 0.4, 1) infinite;
+    }
+    .no {
+      animation: stop 4s cubic-bezier(0.6, 0, 0.4, 1) infinite;
+    }
+    .tick {
+      animation: tick 8s steps(1) infinite;
+    }
+    .link-node {
+      animation: nodelit 8s ease-in-out infinite;
+    }
+  }
+  @supports (animation-timeline: view()) {
+    @media (prefers-reduced-motion: no-preference) {
+      .chk {
+        animation: draw linear both;
+        animation-timeline: view();
+        animation-range: entry 20% cover 45%;
+      }
+    }
+  }
+</style>

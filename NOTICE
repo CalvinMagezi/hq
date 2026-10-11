@@ -13,3 +13,10 @@ licensed under the Apache License, Version 2.0:
 The Apache License 2.0 text is at https://www.apache.org/licenses/LICENSE-2.0.
 The rest of the repository is MIT. Details of what was taken and the rules for
 taking more are in docs/provenance/herdr.md.
+
+The website (apps/site) ships the Clear Sans typeface by Intel Corporation,
+licensed under the Apache License, Version 2.0:
+
+  apps/site/public/fonts/ClearSans-Regular.woff2
+  apps/site/public/fonts/ClearSans-Bold.woff2
+  apps/site/public/fonts/ClearSans-Italic.woff2
