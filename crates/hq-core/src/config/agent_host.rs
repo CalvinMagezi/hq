@@ -189,6 +189,11 @@ pub struct HarnessProfileConfig {
     #[serde(default)]
     pub args: Option<Vec<String>>,
 
+    /// Replaces the base harness's one-shot arguments (a stack specialist's run
+    /// for one brief), with `{brief}` standing for the text.
+    #[serde(default)]
+    pub one_shot_args: Option<Vec<String>>,
+
     /// Environment for the pane's shell, and so for the launched CLI.
     #[serde(default)]
     pub env: BTreeMap<String, String>,

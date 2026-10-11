@@ -830,3 +830,58 @@ async fn the_observed_draft_pane_gets_no_key() {
     sweep(tmp.path(), &db, &host, None).await;
     assert!(keys_logged(&log).is_empty());
 }
+
+/// A host whose one agent's process has ended: the pane is still listed, with
+/// `status: exited`, and its screen can be read. Every call is logged.
+fn exited_host(dir: &Path, name: &str, screen: &str) -> ScriptedHost {
+    let agent = format!(
+        r#"{{"agent":"hermes","agent_status":"unknown","status":"exited","cwd":"/tmp","name":"{name}","pane_id":"w1:p1","workspace_id":"w1","state_change_seq":3}}"#
+    );
+    let script = format!(
+        "#!/bin/sh\necho \"$@\" >> \"$(dirname \"$0\")/calls.log\"\ncase \"$*\" in\n  *\"agent list\"*) printf '%s' '{{\"id\":\"x\",\"result\":{{\"agents\":[{agent}]}}}}' ;;\n  *\"agent read\"*) printf '%s' '{}' ;;\n  *\"workspace close\"*) printf '%s' '{{\"id\":\"x\",\"result\":{{\"type\":\"ok\"}}}}' ;;\n  *) exit 2 ;;\nesac\n",
+        screen.replace('\'', "")
+    );
+    let path = dir.join("scripted-host");
+    std::fs::write(&path, script).unwrap();
+    std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o755)).unwrap();
+    ScriptedHost::new(path)
+}
+
+#[tokio::test]
+async fn a_stack_run_whose_process_ended_is_read_closed_and_put_into_review() {
+    let tmp = tempfile::tempdir().unwrap();
+    let db = Database::open_memory().unwrap();
+    let task = seed_with_task(&db, "hs-run");
+    db.with_conn(|c| {
+        registry::set_origin(c, "hs-run", registry::ORIGIN_STACK)?;
+        hq_db::tasks::open_for_session(c, "tk-1", "hs-run", "hs-run", "hermes", "local", "/tmp").map(|_| ())
+    })
+    .unwrap();
+    let host = exited_host(tmp.path(), "hs-run", "REPORT\nThree suppliers found.\n");
+
+    sweep(tmp.path(), &db, &host, None).await;
+
+    assert_eq!(status_of(&db, "hs-run"), registry::STATUS_EXITED);
+    let (status, _) = task_state(&db, &task);
+    assert_eq!(status, hq_db::tasks::STATUS_READY_FOR_REVIEW, "a run with output is a finished turn");
+    let snap = db.with_conn(|c| registry::last_snapshot(c, "hs-run")).unwrap().unwrap();
+    assert!(snap.contains("Three suppliers found"), "the final screen is kept: {snap}");
+    let calls = std::fs::read_to_string(tmp.path().join("calls.log")).unwrap();
+    assert!(calls.contains("workspace close w1"), "the dead pane is closed: {calls}");
+    assert!(only_message(tmp.path()).contains("Three suppliers found"));
+}
+
+#[tokio::test]
+async fn a_stack_run_that_ended_with_nothing_on_screen_blocks_its_task() {
+    let tmp = tempfile::tempdir().unwrap();
+    let db = Database::open_memory().unwrap();
+    let task = seed_with_task(&db, "hs-empty");
+    db.with_conn(|c| registry::set_origin(c, "hs-empty", registry::ORIGIN_STACK)).unwrap();
+    let host = exited_host(tmp.path(), "hs-empty", "   \n");
+
+    sweep(tmp.path(), &db, &host, None).await;
+
+    assert_eq!(status_of(&db, "hs-empty"), registry::STATUS_EXITED);
+    let (status, _) = task_state(&db, &task);
+    assert_eq!(status, hq_db::tasks::STATUS_BLOCKED, "no output means the run crashed");
+}

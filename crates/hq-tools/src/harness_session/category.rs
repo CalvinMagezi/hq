@@ -1,7 +1,7 @@
 //! Two kinds of agent run in the host, and HQ hands them different work.
 //!
 //! A **coding agent** (Claude Code, Codex, Cursor, ...) edits repositories. A
-//! **general-purpose agent** (Hermes, OpenClaw, NanoClaw, ...) is a full
+//! **general-purpose agent** (Hermes, OpenClaw, ...) is a full
 //! assistant with its own tool loop, skills and memory; HQ never hands it code
 //! or repository changes, but it can take watching a coding session, a round of
 //! parallel research, or a peer review. The split is kept on the harness spec,

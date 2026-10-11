@@ -12,7 +12,13 @@ pub struct NextTaskQuery<'a> {
     pub include_unassigned: bool,
     pub initiative_id: Option<&'a str>,
     pub tag: Option<&'a str>,
+    /// Leave out code-shaped tasks: tagged `code`, or linked to a commit or a
+    /// pull request. What a general-purpose agent is never offered.
+    pub no_code_work: bool,
 }
+
+/// The tag that marks a task as code work for `no_code_work`.
+pub const CODE_TAG: &str = "code";
 
 /// The best task to start, or `None`. Open (`to_do`), not archived, with every dependency
 /// done, nobody holding it, and assigned to the asker (or to no one, when allowed). Most
@@ -29,13 +35,15 @@ pub fn next_task(conn: &Connection, q: &NextTaskQuery) -> Result<Option<Task>> {
                 OR (?2 AND NOT EXISTS (SELECT 1 FROM task_assignees a WHERE a.task_id = t.id))) \
            AND (?3 IS NULL OR t.initiative_id = ?3) \
            AND (?4 IS NULL OR EXISTS (SELECT 1 FROM task_tags g WHERE g.task_id = t.id AND g.tag = ?4)) \
+           AND (NOT ?5 OR NOT (EXISTS (SELECT 1 FROM task_tags g WHERE g.task_id = t.id AND g.tag = ?6) \
+                               OR EXISTS (SELECT 1 FROM task_links l WHERE l.task_id = t.id AND l.kind IN ('commit', 'pr')))) \
          ORDER BY {PRIORITY_RANK_SQL}, t.due_date IS NULL, t.due_date, t.created_at, t.id LIMIT 1"
     );
     let assignee = super::leases::clean_label(q.assignee);
     let task = conn
         .query_row(
             &sql,
-            params![assignee, q.include_unassigned, q.initiative_id, q.tag],
+            params![assignee, q.include_unassigned, q.initiative_id, q.tag, q.no_code_work, CODE_TAG],
             row_to_task,
         )
         .optional()?;

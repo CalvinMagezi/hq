@@ -55,7 +55,6 @@ test('known agents get friendly names and unknown ones are shown as they are', (
   expect(agentName('mystery-agent')).toBe('mystery-agent')
   expect(agentName('hermes')).toBe('Hermes')
   expect(agentName('openclaw')).toBe('OpenClaw')
-  expect(agentName('nanoclaw')).toBe('NanoClaw')
 })
 
 test('this computer covers both native and local, other names pass through', () => {

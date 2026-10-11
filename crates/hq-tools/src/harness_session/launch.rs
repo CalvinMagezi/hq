@@ -105,6 +105,10 @@ pub(super) struct Launch<'a> {
     pub(super) purpose: Purpose,
     /// Sessions this one watches; only a monitor or reviewer has any.
     pub(super) observe: &'a [String],
+    /// A brief the agent runs once and exits on (a stack specialist's run),
+    /// in place of an interactive start. No prompt is typed and a host restart
+    /// does not bring the agent back.
+    pub(super) one_shot: Option<&'a str>,
 }
 
 pub(super) fn workspace_label(harness: &str, label: &str) -> String {
@@ -159,6 +163,7 @@ pub(super) struct OwnedLaunch {
     goal: (Option<String>, Option<String>),
     purpose: Purpose,
     observe: Vec<String>,
+    one_shot: Option<String>,
 }
 
 impl OwnedLaunch {
@@ -178,6 +183,7 @@ impl OwnedLaunch {
             goal: (own(l.goal.goal), own(l.goal.done_criteria)),
             purpose: l.purpose,
             observe: l.observe.to_vec(),
+            one_shot: own(l.one_shot),
         }
     }
 
@@ -203,6 +209,7 @@ impl OwnedLaunch {
             },
             purpose: self.purpose,
             observe: &self.observe,
+            one_shot: self.one_shot.as_deref(),
         }
     }
 }
@@ -291,14 +298,17 @@ async fn launch_with(
         cwd: l.cwd.to_string(),
         label: workspace_label(&harness.name, l.label),
         env: launch_env(harness, l.session_id),
-        args: build_args(
-            harness,
-            l.session_id,
-            l.resume_token,
-            l.resuming,
-        ),
+        args: match l.one_shot {
+            Some(brief) => harness
+                .one_shot_args(brief)
+                .ok_or_else(|| anyhow::anyhow!("'{}' has no one-shot command to run a brief with", harness.name))?,
+            None => build_args(harness, l.session_id, l.resume_token, l.resuming),
+        },
         command: profile.and_then(|p| p.command.clone()),
-        resume_args: restart_args(harness, l.session_id),
+        resume_args: match l.one_shot {
+            Some(_) => None,
+            None => restart_args(harness, l.session_id),
+        },
         mcp,
         start_timeout: l.host.launch_bound(),
     };
@@ -639,6 +649,7 @@ pub(crate) async fn spawn_on(
             goal,
             purpose,
             observe: req.observe,
+            one_shot: None,
         },
     )
     .await?;

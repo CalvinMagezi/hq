@@ -59,6 +59,7 @@ fn launch<'a>(host: ScriptedHost, id: &'a str, prompt: Option<&'a str>) -> Launc
         goal: GoalText::default(),
         purpose: Purpose::Code,
         observe: &[],
+        one_shot: None,
     }
 }
 
@@ -261,7 +262,6 @@ fn every_spec_names_a_kind_the_host_supports() {
         "grok",
         "hermes",
         "openclaw",
-        "nanoclaw",
         "kilo",
         "qodercli",
         "qwen",
@@ -641,6 +641,7 @@ fn alive(name: &str) -> Liveness {
         state_change_seq: 1,
         launch_pending: false,
         agent_session_id: None,
+        exited: false,
     }))
 }
 
@@ -2151,4 +2152,202 @@ fn a_running_session_is_read_live_once_and_falls_back_when_the_read_fails() {
     let down = tail_log_with(&db, "hs-tl", 10, |_| None).unwrap();
     assert_eq!(down["source"], "snapshot");
     assert!(down["host_source"].is_null());
+}
+
+// ---- The Agentic Stack -------------------------------------------------------
+
+fn stack_config(yaml: &str, vault: &std::path::Path) -> hq_core::config::HqConfig {
+    hq_core::config::HqConfig {
+        vault_path: vault.to_path_buf(),
+        stack: serde_yaml::from_str(yaml).unwrap(),
+        ..Default::default()
+    }
+}
+
+/// A task assigned to `assignee` in a fresh initiative.
+fn assigned_task(db: &Database, id: &str, title: &str, assignee: &str, tags: &[&str]) -> String {
+    let tags: Vec<String> = tags.iter().map(|t| t.to_string()).collect();
+    let assignees = vec![assignee.to_string()];
+    db.with_conn(|c| {
+        let _ = c.execute(
+            "INSERT OR IGNORE INTO initiatives (id, space_id, name, slug, id_prefix) VALUES ('in-1', 'personal', 'Market research', 'mr', 'MR')",
+            [],
+        );
+        let new = hq_db::tasks::NewTask {
+            title,
+            description: "Find three suppliers of solar pumps in Uganda.\nDone when each has a price and a contact.",
+            created_by: "test",
+            tags: &tags,
+            assignees: &assignees,
+            ..Default::default()
+        };
+        Ok(hq_db::tasks::create_task(c, id, "in-1", &new)?.id)
+    })
+    .unwrap()
+}
+
+fn stack_resolver(host: ScriptedHost) -> impl Fn(Option<&str>) -> anyhow::Result<Host> + Sync {
+    move |_| Ok(Arc::new(host.clone()) as Host)
+}
+
+#[tokio::test]
+async fn a_specialist_runs_the_task_assigned_to_it_once_and_as_one_shot() {
+    let (dir, host) = startable_host();
+    let db = Arc::new(Database::open_memory().unwrap());
+    let vault = tempfile::tempdir().unwrap();
+    let cfg = stack_config("specialists:\n  - name: hermes\n    harness: hermes\n    purposes: [research, general]\n    cwd: /t\n", vault.path());
+    let task = assigned_task(&db, "tk-1", "Solar pump suppliers", "hermes", &[]);
+    assigned_task(&db, "tk-other", "Someone else's", "codex", &[]);
+
+    let resolve = stack_resolver(host);
+    let report = stack::dispatch(vault.path(), &db, &cfg, &resolve).await.unwrap();
+    assert_eq!(report.started.len(), 1, "{report:?}");
+    assert!(report.skipped.is_empty(), "{report:?}");
+    let run = &report.started[0];
+    assert_eq!(run["specialist"], "hermes");
+    assert_eq!(run["purpose"], "research", "the lane's first purpose when the task hints at none");
+    let id = run["session_id"].as_str().unwrap();
+    let row = get_row(&db, id).unwrap();
+    assert_eq!((row.origin.as_str(), row.label.as_str(), row.purpose.as_str()), ("stack", "stack/hermes", "research"));
+    assert_eq!(row.mission_id.as_deref(), Some(task.as_str()));
+    let log = calls(&dir);
+    assert!(log.contains("agent start") && log.contains("-q") && log.contains("Task MR-001: Solar pump suppliers"), "one-shot with the brief: {log}");
+    assert!(log.contains("solar pumps in Uganda"), "the description is the brief: {log}");
+    assert!(!log.contains("agent prompt"), "nothing is typed into a one-shot run: {log}");
+    let status: String = db.with_conn(|c| Ok(hq_db::tasks::get_task(c, "tk-1")?.unwrap().status)).unwrap();
+    assert_eq!(status, "in_progress");
+
+    // Nothing more starts while the run is up, and the other assignee's task is never touched.
+    let (_dir2, host2) = startable_host();
+    let resolve2 = stack_resolver(host2);
+    let again = stack::dispatch(vault.path(), &db, &cfg, &resolve2).await.unwrap();
+    assert!(again.started.is_empty(), "{again:?}");
+    assert_eq!(count(&db, "SELECT COUNT(*) FROM harness_sessions"), 1);
+}
+
+#[tokio::test]
+async fn a_specialist_is_never_offered_code_work_and_a_tag_picks_its_purpose() {
+    let (_dir, host) = startable_host();
+    let db = Arc::new(Database::open_memory().unwrap());
+    let vault = tempfile::tempdir().unwrap();
+    let cfg = stack_config("specialists:\n  - name: hermes\n    harness: hermes\n    purposes: [research, review]\n    cwd: /t\n", vault.path());
+    assigned_task(&db, "tk-code", "Fix the login bug", "hermes", &["code"]);
+    let reviewed = assigned_task(&db, "tk-review", "Read the draft", "hermes", &["review"]);
+
+    let resolve = stack_resolver(host);
+    let report = stack::dispatch(vault.path(), &db, &cfg, &resolve).await.unwrap();
+    assert_eq!(report.started.len(), 1, "{report:?}");
+    let run = &report.started[0];
+    assert_eq!(run["purpose"], "review");
+    assert_eq!(get_row(&db, run["session_id"].as_str().unwrap()).unwrap().mission_id.as_deref(), Some(reviewed.as_str()));
+    let code_status: String = db.with_conn(|c| Ok(hq_db::tasks::get_task(c, "tk-code")?.unwrap().status)).unwrap();
+    assert_eq!(code_status, "to_do", "the code task was left for a coding agent");
+
+    let err = stack::run_for(vault.path(), &db, &cfg, "hermes", "tk-code", &resolve).await.unwrap_err().to_string();
+    assert!(err.contains("already running") || err.contains("code work"), "{err}");
+}
+
+#[tokio::test]
+async fn a_run_that_cannot_start_leaves_a_comment_and_backs_off() {
+    let (_dir, host) = fake_host(&[("workspace create", String::new(), Some("no such host"))]);
+    let db = Arc::new(Database::open_memory().unwrap());
+    let vault = tempfile::tempdir().unwrap();
+    let cfg = stack_config("specialists:\n  - name: hermes\n    harness: hermes\n    cwd: /t\n", vault.path());
+    let task = assigned_task(&db, "tk-fail", "Will not start", "hermes", &[]);
+
+    let resolve = stack_resolver(host);
+    let report = stack::dispatch(vault.path(), &db, &cfg, &resolve).await.unwrap();
+    assert!(report.started.is_empty());
+    assert_eq!(report.skipped.len(), 1, "{report:?}");
+    assert!(report.skipped[0].starts_with("hermes:"), "{report:?}");
+    let notes: Vec<String> = db.with_conn(|c| Ok(hq_db::tasks::list_comments(c, &task)?.into_iter().map(|c| c.body).collect())).unwrap();
+    assert_eq!(notes.len(), 1, "{notes:?}");
+    assert!(notes[0].contains("could not start") && notes[0].contains("30 minutes"), "{notes:?}");
+
+    let (_dir2, host2) = startable_host();
+    let resolve2 = stack_resolver(host2);
+    let again = stack::dispatch(vault.path(), &db, &cfg, &resolve2).await.unwrap();
+    assert!(again.started.is_empty() && again.skipped.is_empty(), "backed off, not retried at once: {again:?}");
+}
+
+#[test]
+fn a_lane_refuses_coding_agents_and_the_code_purpose() {
+    let vault = tempfile::tempdir().unwrap();
+    let cfg = stack_config(
+        "specialists:\n  - name: coder\n    harness: claude-code\n  - name: hermes\n    harness: hermes\n    purposes: [code]\n  - name: ok\n    harness: openclaw\n    purposes: [general, research, general]\n",
+        vault.path(),
+    );
+    let err = stack::lane_for(&cfg, cfg.stack.get("coder").unwrap()).unwrap_err().to_string();
+    assert!(err.contains("a coding agent") && err.contains("hermes"), "{err}");
+    let err = stack::lane_for(&cfg, cfg.stack.get("hermes").unwrap()).unwrap_err().to_string();
+    assert!(err.contains("general-purpose agent"), "{err}");
+    let lane = stack::lane_for(&cfg, cfg.stack.get("ok").unwrap()).unwrap();
+    assert_eq!(lane.purposes, vec![Purpose::General, Purpose::Research]);
+    let status = stack::status(&Arc::new(Database::open_memory().unwrap()), &cfg).unwrap();
+    assert_eq!(status.len(), 3);
+    assert!(status[0]["problem"].as_str().unwrap().contains("coding agent"));
+    assert_eq!(status[2]["purposes"], serde_json::json!(["general", "research"]));
+}
+
+#[test]
+fn the_brief_carries_the_task_its_resume_point_and_the_rules() {
+    let db = Database::open_memory().unwrap();
+    assigned_task(&db, "tk-b", "Price the pumps", "hermes", &[]);
+    let task = db.with_conn(|c| Ok(hq_db::tasks::get_task(c, "tk-b")?.unwrap())).unwrap();
+    let cp = hq_db::tasks::TaskCheckpoint {
+        id: 1,
+        task_id: task.id.clone(),
+        work_session_id: None,
+        actor: "hermes".into(),
+        summary: "Two suppliers found".into(),
+        next_step: "Call the third".into(),
+        open_questions: "Import duty?".into(),
+        files: vec![],
+        created_at: String::new(),
+    };
+    let brief = stack::brief_for("hermes", Purpose::Research, &task, Some("Market research"), Some(&cp));
+    for needle in ["'hermes'", "Purpose: research", "Task MR-001: Price the pumps", "Initiative: Market research", "Done when each has a price", "Two suppliers found", "Call the third", "Import duty?", "REPORT", "change no repository"] {
+        assert!(brief.contains(needle), "missing {needle:?} in:\n{brief}");
+    }
+    assert!(brief.contains("Where the last run left off"));
+    let fresh = stack::brief_for("hermes", Purpose::General, &task, None, None);
+    assert!(!fresh.contains("Where the last run left off") && !fresh.contains("Initiative:"));
+}
+
+#[test]
+fn an_exited_pane_counts_as_gone_but_can_still_be_read() {
+    let row = db_row_for_liveness("hs-ran");
+    let mut polled = HostPoll::new();
+    let mut agent = match alive("hs-ran") {
+        Liveness::Alive(a) => *a,
+        _ => unreachable!(),
+    };
+    agent.exited = true;
+    polled.insert("local".into(), Ok(vec![agent]));
+    assert_eq!(liveness(&polled, &row), Liveness::Gone);
+    assert!(exited_pane(&polled, &row).is_some());
+    let mut live = HostPoll::new();
+    live.insert("local".into(), Ok(vec![match alive("hs-ran") { Liveness::Alive(a) => *a, _ => unreachable!() }]));
+    assert!(matches!(liveness(&live, &row), Liveness::Alive(_)));
+    assert!(exited_pane(&live, &row).is_none());
+}
+
+fn db_row_for_liveness(id: &str) -> HarnessSessionRow {
+    let db = Database::open_memory().unwrap();
+    db.with_conn(|c| {
+        registry::insert(
+            c,
+            &registry::NewSession {
+                id,
+                harness: "hermes",
+                label: "stack/hermes",
+                cwd: "/t",
+                mission_id: None,
+                placement: Placement { host: "local", agent_name: id, workspace_id: "w1", pane_id: "w1:p1" },
+                purpose: None,
+            },
+        )?;
+        Ok(registry::get(c, id)?.unwrap())
+    })
+    .unwrap()
 }

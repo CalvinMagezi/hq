@@ -21,7 +21,6 @@ const AGENT_NAMES: Record<string, string> = {
   'github-copilot': 'GitHub Copilot',
   hermes: 'Hermes',
   openclaw: 'OpenClaw',
-  nanoclaw: 'NanoClaw',
 }
 export const DEFAULT_AGENT = 'claude-code'
 

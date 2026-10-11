@@ -41,6 +41,10 @@ pub struct HarnessSessionSpec {
     pub resume: ResumeStrategy,
     /// Regex with one capture group extracting a resume token from session output.
     pub token_pattern: Option<&'static str>,
+    /// Arguments that run the agent once for a single brief and exit, with
+    /// `{brief}` standing for the text: how a stack specialist works a task.
+    /// `None` means the harness has no one-shot mode wired.
+    pub one_shot: Option<&'static [&'static str]>,
     /// Substring of a workspace-trust dialog whose default answer is "trust".
     /// Only for harnesses verified to default that way: when spawn finds the
     /// agent blocked on it, spawn presses Enter. Any other blocked dialog is
@@ -79,6 +83,7 @@ pub const SPECS: &[HarnessSessionSpec] = &[
             otherwise: &["--dangerously-skip-permissions", "-c"],
         },
         token_pattern: None,
+        one_shot: None,
         trust_pattern: None,
     },
     HarnessSessionSpec {
@@ -88,6 +93,7 @@ pub const SPECS: &[HarnessSessionSpec] = &[
         args: &["--auth-type", "qwen-oauth"],
         resume: ResumeStrategy::Args(&["--auth-type", "qwen-oauth", "--continue"]),
         token_pattern: None,
+        one_shot: None,
         trust_pattern: None,
     },
     HarnessSessionSpec {
@@ -98,6 +104,7 @@ pub const SPECS: &[HarnessSessionSpec] = &[
         args: &["--force"],
         resume: ResumeStrategy::Args(&["--force", "--resume", "{token}"]),
         token_pattern: Some(r"chat[_-]id[:=]\s*([A-Za-z0-9_-]+)"),
+        one_shot: None,
         trust_pattern: None,
     },
     HarnessSessionSpec {
@@ -107,6 +114,7 @@ pub const SPECS: &[HarnessSessionSpec] = &[
         args: &[],
         resume: ResumeStrategy::SessionDir,
         token_pattern: None,
+        one_shot: None,
         trust_pattern: None,
     },
     HarnessSessionSpec {
@@ -117,6 +125,7 @@ pub const SPECS: &[HarnessSessionSpec] = &[
         args: &["--no-daemon"],
         resume: ResumeStrategy::Args(&["--no-daemon", "resume", "--last"]),
         token_pattern: None,
+        one_shot: None,
         trust_pattern: None,
     },
     HarnessSessionSpec {
@@ -126,6 +135,7 @@ pub const SPECS: &[HarnessSessionSpec] = &[
         args: &[],
         resume: ResumeStrategy::Args(&["--continue"]),
         token_pattern: None,
+        one_shot: None,
         trust_pattern: None,
     },
     HarnessSessionSpec {
@@ -135,6 +145,7 @@ pub const SPECS: &[HarnessSessionSpec] = &[
         args: &[],
         resume: ResumeStrategy::None,
         token_pattern: None,
+        one_shot: None,
         trust_pattern: None,
     },
     HarnessSessionSpec {
@@ -145,6 +156,7 @@ pub const SPECS: &[HarnessSessionSpec] = &[
         // `agy -c` continues the most recent conversation in the cwd.
         resume: ResumeStrategy::Args(&["--dangerously-skip-permissions", "-c"]),
         token_pattern: None,
+        one_shot: None,
         // agy asks "Do you trust the contents of this project?" on first use
         // of a cwd; default selection is "Yes, I trust this folder".
         trust_pattern: Some("trust the contents"),
@@ -156,6 +168,7 @@ pub const SPECS: &[HarnessSessionSpec] = &[
         args: &[],
         resume: ResumeStrategy::None,
         token_pattern: None,
+        one_shot: None,
         trust_pattern: None,
     },
     // General-purpose agents. Each is launched into its interactive chat the way
@@ -167,29 +180,24 @@ pub const SPECS: &[HarnessSessionSpec] = &[
         harness: "hermes",
         category: HarnessCategory::GeneralPurpose,
         kind: "hermes",
-        // Nous Research's Hermes Agent: `hermes chat` is its interactive loop.
+        // Nous Research's Hermes Agent: `hermes chat` is its interactive loop,
+        // `hermes chat -q` answers one query and exits.
         args: &["chat"],
         resume: ResumeStrategy::None,
         token_pattern: None,
+        one_shot: Some(&["chat", "-q", "{brief}"]),
         trust_pattern: None,
     },
     HarnessSessionSpec {
         harness: "openclaw",
         category: HarnessCategory::GeneralPurpose,
         kind: "openclaw",
-        // OpenClaw's terminal interface.
+        // OpenClaw's terminal interface; `openclaw agent --message` is the
+        // one-turn form its own automations use.
         args: &["tui"],
         resume: ResumeStrategy::None,
         token_pattern: None,
-        trust_pattern: None,
-    },
-    HarnessSessionSpec {
-        harness: "nanoclaw",
-        category: HarnessCategory::GeneralPurpose,
-        kind: "nanoclaw",
-        args: &[],
-        resume: ResumeStrategy::None,
-        token_pattern: None,
+        one_shot: Some(&["agent", "--message", "{brief}"]),
         trust_pattern: None,
     },
 ];
@@ -243,6 +251,16 @@ impl Harness {
             Some(args) => args.clone(),
             None => self.spec.args.iter().map(|a| a.to_string()).collect(),
         }
+    }
+
+    /// Arguments that run the agent once for `brief` and exit: the profile's
+    /// `one_shot_args` when set, else the spec's. `None` when neither has one.
+    pub fn one_shot_args(&self, brief: &str) -> Option<Vec<String>> {
+        let template: Vec<String> = match self.profile.as_ref().and_then(|p| p.one_shot_args.as_ref()) {
+            Some(args) => args.clone(),
+            None => self.spec.one_shot?.iter().map(|a| a.to_string()).collect(),
+        };
+        Some(template.iter().map(|a| a.replace("{brief}", brief)).collect())
     }
 }
 
@@ -387,7 +405,8 @@ mod tests {
 
     #[test]
     fn general_purpose_agents_are_their_own_category() {
-        assert_eq!(names_in(HarnessCategory::GeneralPurpose), vec!["hermes", "openclaw", "nanoclaw"]);
+        assert_eq!(names_in(HarnessCategory::GeneralPurpose), vec!["hermes", "openclaw"]);
+        assert!(spec_for("nanoclaw").is_none(), "NanoClaw has no CLI to drive and is not a harness");
         assert!(names_in(HarnessCategory::Coding).contains(&"claude-code"));
         assert_eq!(spec_for("hermes").unwrap().binary(), "hermes");
         assert_eq!(spec_for("hermes").unwrap().args, &["chat"]);
@@ -395,6 +414,19 @@ mod tests {
         // A profile takes its base's category.
         let cfg = cfg_with_profile("  hermes-work:\n    base: hermes\n    command: hermes-work\n");
         assert_eq!(resolve_in(&cfg, "hermes-work").unwrap().category(), HarnessCategory::GeneralPurpose);
+    }
+
+    #[test]
+    fn one_shot_args_substitute_the_brief_and_a_profile_can_replace_them() {
+        let hermes = resolve_in(&AgentHostConfig::default(), "hermes").unwrap();
+        assert_eq!(hermes.one_shot_args("do x").unwrap(), vec!["chat", "-q", "do x"]);
+        assert_eq!(
+            resolve_in(&AgentHostConfig::default(), "openclaw").unwrap().one_shot_args("b").unwrap(),
+            vec!["agent", "--message", "b"]
+        );
+        assert!(resolve_in(&AgentHostConfig::default(), "claude-code").unwrap().one_shot_args("b").is_none());
+        let cfg = cfg_with_profile("  my-hermes:\n    base: hermes\n    one_shot_args: [\"run\", \"--once\", \"{brief}\"]\n");
+        assert_eq!(resolve_in(&cfg, "my-hermes").unwrap().one_shot_args("q").unwrap(), vec!["run", "--once", "q"]);
     }
 
     #[test]

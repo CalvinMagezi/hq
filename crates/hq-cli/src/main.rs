@@ -58,7 +58,7 @@ enum Commands {
     },
 
     /// Manage long-lived agent sessions: coding agents (claude-code, cursor, opencode, antigravity, pi...)
-    /// and general-purpose agents (hermes, openclaw, nanoclaw), which never take code work
+    /// and general-purpose agents (hermes, openclaw), which never take code work
     Sessions {
         /// Subcommand: list (default), spawn <harness>, status <id>, logs <id>, send <id>, stop <id>, resume <id>
         #[arg(default_value = "list")]
@@ -90,6 +90,20 @@ enum Commands {
         /// Log lines to tail (logs)
         #[arg(long, default_value_t = 40)]
         lines: usize,
+    },
+
+    /// The Agentic Stack: general-purpose agents that run the tasks assigned to them (config `stack:`)
+    Stack {
+        /// list (default) or run <specialist> <task>
+        #[arg(default_value = "list")]
+        sub: String,
+        /// Specialist name (run)
+        name: Option<String>,
+        /// Task id or display id (run)
+        task: Option<String>,
+        /// Print JSON (list)
+        #[arg(long)]
+        json: bool,
     },
 
     /// Run or inspect the built-in agent host (long-lived coding agents in pseudo-terminals)
@@ -748,7 +762,7 @@ enum LiteRule {
 
 fn lite_rule(command: &Commands) -> LiteRule {
     match command {
-        Commands::Chat { .. } | Commands::Sessions { .. } | Commands::Host { .. } | Commands::SelfApply { .. }
+        Commands::Chat { .. } | Commands::Sessions { .. } | Commands::Stack { .. } | Commands::Host { .. } | Commands::SelfApply { .. }
         | Commands::Agents { .. } | Commands::Models { .. } => LiteRule::NotInLite,
         Commands::Install { .. } | Commands::Update(_) | Commands::UpdateDb { .. } | Commands::Health
         | Commands::Doctor { egress: true, .. } | Commands::Doctor { windows: true, .. } | Commands::Autostart { .. } | Commands::Lite { .. } | Commands::Env | Commands::Task { .. } | Commands::Copilot { .. } | Commands::Status | Commands::Stop { .. }
@@ -810,6 +824,7 @@ async fn dispatch(command: Commands, config: &HqConfig) -> Result<()> {
             )
             .await
         }
+        Commands::Stack { sub, name, task, json } => commands::stack::run(config, &sub, name, task, json).await,
         Commands::Host { sub, arg, dir, allow_unsandboxed, key, from, port, unix, rest, addr } => commands::host::run(commands::host::HostArgs { sub, arg, dir, allow_unsandboxed, key, from, port, unix, rest, addr }).await,
         Commands::SelfApply { run_id } => commands::self_apply::run(config, run_id).await,
         Commands::NotifyRestart { phase, reason, sha } => {

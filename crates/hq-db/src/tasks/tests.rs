@@ -2162,7 +2162,7 @@ fn a_list_can_be_ordered_by_activity_age_or_urgency() {
 }
 
 fn want<'a>(assignee: &'a str, unassigned: bool) -> NextTaskQuery<'a> {
-    NextTaskQuery { assignee, include_unassigned: unassigned, initiative_id: None, tag: None }
+    NextTaskQuery { assignee, include_unassigned: unassigned, initiative_id: None, tag: None, no_code_work: false }
 }
 
 #[test]
@@ -2236,4 +2236,22 @@ fn an_estimate_with_no_recorded_work_has_no_variance() {
         .unwrap();
     let summary = db.with_conn(|c| time_summary(c, "tk-1", TTL)).unwrap();
     assert_eq!((summary.estimate_minutes, summary.variance_minutes), (Some(120), None));
+}
+
+#[test]
+fn a_general_purpose_queue_leaves_out_code_shaped_tasks() {
+    let (db, initiative) = setup();
+    for id in ["tagged", "linked", "plain"] {
+        make(&db, id, &initiative, None).unwrap();
+        assign(&db, id, &["hermes"]);
+    }
+    db.with_conn(|c| update_task(c, "tagged", &TaskPatch { tags: Some(vec![CODE_TAG.into()]), ..Default::default() }, None).map(|_| ()))
+        .unwrap();
+    db.with_conn(|c| add_task_link(c, "linked", "pr", "https://github.com/o/r/pull/7", "", None, "t").map(|_| ())).unwrap();
+    // Equal age, so the id decides: without the clause a code-shaped task comes first.
+    assert_eq!(db.with_conn(|c| next_task(c, &want("hermes", false))).unwrap().unwrap().id, "linked");
+    let no_code = NextTaskQuery { no_code_work: true, ..want("hermes", false) };
+    assert_eq!(db.with_conn(|c| next_task(c, &no_code)).unwrap().unwrap().id, "plain", "tagged and linked tasks are code work");
+    move_to(&db, "plain", STATUS_COMPLETE).unwrap();
+    assert!(db.with_conn(|c| next_task(c, &no_code)).unwrap().is_none());
 }

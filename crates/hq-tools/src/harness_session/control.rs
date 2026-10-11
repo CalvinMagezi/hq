@@ -82,6 +82,7 @@ pub async fn resume(
             goal: GoalText::default(),
             purpose: Purpose::parse(&row.purpose).unwrap_or(Purpose::Code),
             observe: &[],
+            one_shot: None,
         },
     )
     .await?;

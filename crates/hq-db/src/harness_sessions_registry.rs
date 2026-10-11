@@ -79,6 +79,8 @@ pub struct HarnessSessionRow {
 pub const ORIGIN_USER: &str = "user";
 pub const ORIGIN_MCP: &str = "mcp";
 pub const ORIGIN_ASK: &str = "ask";
+/// Started by the stack dispatcher for a task assigned to a specialist.
+pub const ORIGIN_STACK: &str = "stack";
 
 /// The default purpose: code or repository changes, what every session was
 /// before purposes existed.
@@ -658,6 +660,29 @@ pub fn count_running_with_origin(conn: &Connection, origin: &str) -> Result<i64>
         [origin],
         |r| r.get(0),
     )?)
+}
+
+/// Sessions with this origin and label started in the last `minutes`, whatever
+/// their status now: how a specialist's daily run budget is counted.
+pub fn count_started_since(conn: &Connection, origin: &str, label: &str, minutes: i64) -> Result<i64> {
+    Ok(conn.query_row(
+        "SELECT COUNT(*) FROM harness_sessions WHERE origin = ?1 AND label = ?2 \
+         AND created_at >= datetime('now', ?3)",
+        params![origin, label, format!("-{} minutes", minutes.max(0))],
+        |r| r.get(0),
+    )?)
+}
+
+/// Running sessions with this origin and label, newest first.
+pub fn running_with_label(conn: &Connection, origin: &str, label: &str) -> Result<Vec<HarnessSessionRow>> {
+    let mut stmt = conn.prepare(&format!(
+        "SELECT {COLS} FROM harness_sessions WHERE status = 'running' AND origin = ?1 AND label = ?2 ORDER BY created_at DESC"
+    ))?;
+    let rows = stmt
+        .query_map(params![origin, label], row_to_session)?
+        .filter_map(|r| r.ok())
+        .collect();
+    Ok(rows)
 }
 
 /// Mark that the owning thread owes the session a look, replacing an older

@@ -1,7 +1,7 @@
 # Agent host
 
 `hq host` is HQ's built-in host for long-lived agents: coding agents, and the
-general-purpose agents (Hermes, OpenClaw, NanoClaw) that HQ uses for monitoring,
+general-purpose agents (Hermes, OpenClaw) that HQ uses for monitoring,
 research and review but never for code (see "General-purpose agents" in
 [AGENT_SESSIONS.md](AGENT_SESSIONS.md)). It runs each agent
 in a pseudo-terminal, keeps an emulated screen and scrollback you can read back,
@@ -193,10 +193,10 @@ reaped.
 
 Each agent also gets what it needs to be that agent: its own login and history directory
 (`~/.gemini` for Antigravity, `~/.codex`, `~/.cursor`, `~/.copilot`, `~/.pi`, `~/.hermes`,
-`~/.openclaw`, `~/.nanoclaw` and so on, and never another agent's) and the HTTPS hosts it
+`~/.openclaw` and so on, and never another agent's) and the HTTPS hosts it
 signs in and reaches its models through. Those defaults are verified for Claude Code and
 Antigravity; for agents that talk to whichever provider you configure (opencode, kimi, qwen,
-and the general-purpose agents hermes, openclaw and nanoclaw) add the provider's host to
+and the general-purpose agents hermes and openclaw) add the provider's host to
 `agent_host.sandbox.allow_domains`. Only Claude Code is handed an HQ session token and MCP
 configuration; a general-purpose agent is never wired into HQ that way.
 

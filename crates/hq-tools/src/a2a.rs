@@ -691,6 +691,7 @@ mod tests {
             state_change_seq: 1,
             launch_pending,
             agent_session_id: None,
+            exited: false,
         }
     }
 

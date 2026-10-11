@@ -36,6 +36,9 @@ pub enum Event {
     BlockedAtLaunch,
     /// The host's `done`: the agent finished a turn, not necessarily the task.
     Finished,
+    /// A stack specialist's one-shot run ended with output on screen: the run is
+    /// its whole turn, so this is `Finished` for a session that will not come back.
+    RunEnded,
     Exited,
     Stopped,
     /// The supervisor dismissed a known harmless prompt; commented once per session.
@@ -167,7 +170,9 @@ fn target(
 ) -> Option<(&'static [&'static str], &'static str)> {
     // Work that spans many turns is not done, or stuck, because one turn ended or a
     // session exited; the people and agents on it say when it is.
-    if long_horizon && matches!(event, Event::Finished | Event::Exited | Event::BlockedAtLaunch) {
+    if long_horizon
+        && matches!(event, Event::Finished | Event::RunEnded | Event::Exited | Event::BlockedAtLaunch)
+    {
         return None;
     }
     match event {
@@ -176,7 +181,9 @@ fn target(
         }
         Event::Linked if session_running => Some((RESTARTABLE, t::STATUS_IN_PROGRESS)),
         Event::Linked => None,
-        Event::Finished => Some((&[t::STATUS_IN_PROGRESS], t::STATUS_READY_FOR_REVIEW)),
+        Event::Finished | Event::RunEnded => {
+            Some((&[t::STATUS_IN_PROGRESS], t::STATUS_READY_FOR_REVIEW))
+        }
         Event::Exited if !siblings_running => Some((&[t::STATUS_IN_PROGRESS], t::STATUS_BLOCKED)),
         Event::BlockedAtLaunch if !siblings_running => {
             Some((&[t::STATUS_IN_PROGRESS], t::STATUS_BLOCKED))
@@ -228,7 +235,7 @@ fn open_lease(
 /// time on the task counts work and not the wait for the next instruction.
 fn close_lease(conn: &Connection, session: &HarnessSessionRow, event: Event) -> Result<()> {
     let reason = match event {
-        Event::Finished => t::END_RELEASED,
+        Event::Finished | Event::RunEnded => t::END_RELEASED,
         Event::Exited | Event::Stopped | Event::BlockedAtLaunch => t::END_SESSION_ENDED,
         _ => return Ok(()),
     };
@@ -263,6 +270,10 @@ fn comment(session: &HarnessSessionRow, event: Event, moved: Option<&Task>) -> O
         Ok(Purpose::Review) => ", a reviewer",
         _ => "",
     };
+    let role = match session.origin == registry::ORIGIN_STACK {
+        true => format!("{role}, a stack run"),
+        false => role.to_string(),
+    };
     let who = format!("Session `{}` ({}{role})", session.id, session.harness);
     let body = match event {
         Event::Launched => format!("{who} launched."),
@@ -283,6 +294,10 @@ fn comment(session: &HarnessSessionRow, event: Event, moved: Option<&Task>) -> O
             "{who} finished a turn, so the task is ready for review. The agent saying it is done is not verification: check the work (`harness_session_logs`) before marking the task complete."
         ),
         Event::Finished => format!("{who} finished a turn."),
+        Event::RunEnded if moved.is_some() => format!(
+            "{who} finished its run, so the task is ready for review. Its output is the session's last screen (`harness_session_logs`); read it before marking the task complete, the agent finishing is not verification."
+        ),
+        Event::RunEnded => format!("{who} finished its run; its output is in `harness_session_logs`."),
         Event::Exited if moved.is_some() => format!(
             "{who} exited. No other session is working on this task, so it is blocked until someone resumes the session (`harness_session_resume`) or reviews its last output (`harness_session_logs`)."
         ),
@@ -495,6 +510,26 @@ mod tests {
         assert_eq!(status(&db, &task), t::STATUS_IN_PROGRESS);
         assert!(apply(&db, &researcher, Event::Finished).unwrap().moved);
         assert_eq!(status(&db, &task), t::STATUS_READY_FOR_REVIEW);
+    }
+
+    #[test]
+    fn a_stack_run_ending_asks_for_review_and_releases_the_lease() {
+        let (db, task) = setup();
+        let run = session_for(&db, "hs-run", &task, "research");
+        db.with_conn(|c| registry::set_origin(c, "hs-run", registry::ORIGIN_STACK)).unwrap();
+        let run = db.with_conn(|c| Ok(registry::get(c, "hs-run")?.unwrap())).unwrap_or(run);
+        assert!(apply(&db, &run, Event::Launched).unwrap().moved);
+        assert!(apply(&db, &run, Event::RunEnded).unwrap().moved);
+        assert_eq!(status(&db, &task), t::STATUS_READY_FOR_REVIEW);
+        assert!(db.with_conn(|c| t::lease_for_session(c, "hs-run")).unwrap().is_none(), "the run's lease ended");
+        let notes = comments(&db, &task);
+        let last = notes.last().unwrap();
+        assert!(last.contains("a stack run") && last.contains("finished its run") && last.contains("ready for review"), "{notes:?}");
+        // A monitor's run ends without moving the task, like its finished turn.
+        let (db, task) = setup();
+        let watcher = session_for(&db, "hs-watch", &task, "monitor");
+        assert!(!apply(&db, &watcher, Event::RunEnded).unwrap().moved);
+        assert_eq!(status(&db, &task), t::STATUS_TO_DO);
     }
 
     fn mark_long_horizon(db: &Database, task: &str) {

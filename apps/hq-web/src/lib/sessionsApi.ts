@@ -187,7 +187,7 @@ export interface SpawnInput {
   purpose?: Purpose
 }
 
-/** Coding agents edit code; general-purpose agents (Hermes, OpenClaw, NanoClaw) never take code work. */
+/** Coding agents edit code; general-purpose agents (Hermes, OpenClaw) never take code work. */
 export type AgentCategory = 'coding' | 'general_purpose'
 export type Purpose = 'code' | 'monitor' | 'research' | 'review' | 'general'
 /** The purposes a general-purpose agent can be started for, in menu order. */
