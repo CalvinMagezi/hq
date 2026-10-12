@@ -19,6 +19,7 @@ import { GlobalChatOverlay } from '~/components/chat/GlobalChatOverlay'
 import { InstallPrompt } from '~/components/InstallPrompt'
 import { AppRail } from '~/components/AppRail'
 import { BottomNav } from '~/components/BottomNav'
+import { HeaderClock } from '~/components/HeaderClock'
 import { useNeedsYouCount } from '~/components/sessions/useNeedsYouCount'
 import appCss from '../../app.css?url'
 import { relTime } from '~/lib/time'
@@ -256,10 +257,13 @@ function VaultShell() {
           className="flex md:hidden items-center gap-2 flex-shrink-0 transition-opacity active:opacity-60"
         >
           <img src="/icons/hq-mark-96.png" alt="Agent HQ" width="28" height="28" className="flex-shrink-0 object-contain" />
-          <span className="text-[11px] font-mono font-bold tracking-widest uppercase" style={{ color: 'var(--text-dim)' }}>
+          {/* Gives way on the narrowest phones so the clock always fits. */}
+          <span className="hidden min-[380px]:inline text-[11px] font-mono font-bold tracking-widest uppercase" style={{ color: 'var(--text-dim)' }}>
             HQ Vault
           </span>
         </Link>
+
+        <HeaderClock />
 
         <div className="flex-1" />
 

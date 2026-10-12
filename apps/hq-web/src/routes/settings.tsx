@@ -1,9 +1,10 @@
 import { createFileRoute } from '@tanstack/react-router'
 import { useQuery } from '@tanstack/react-query'
-import type { ReactNode } from 'react'
+import { useMemo, type ReactNode } from 'react'
 import { AlertCircle, Loader2, RefreshCw } from 'lucide-react'
 import { fetchSettings, formatSeconds, type HqSettings } from '~/lib/settingsApi'
 import { relTime } from '~/lib/time'
+import { availableTimeZones, deviceTimeZone, setClockZone, useClockZone, zoneCity } from '~/lib/clock'
 import { formatUsd, openrouterUsageQuery } from '~/lib/openrouterUsageApi'
 import { forecastQuery } from '~/lib/usageApi'
 import {
@@ -189,9 +190,36 @@ function CodingAgentsSection({ host: h }: { host: HqSettings['agent_host'] }) {
   )
 }
 
+/** The header clock's zone. Kept on this device, so a phone and a laptop can each have their own. */
+function ClockSection() {
+  const pinned = useClockZone()
+  const device = deviceTimeZone()
+  const zones = useMemo(availableTimeZones, [])
+  return (
+    <Section id="clock" title="Clock">
+      <Row label="Time zone">
+        <select
+          value={pinned}
+          onChange={(e) => setClockZone(e.target.value)}
+          aria-label="Clock time zone"
+          style={{ colorScheme: 'dark' }}
+          className="max-w-full rounded-lg border border-white/10 bg-black/40 px-2 py-1 text-sm text-neutral-50"
+        >
+          <option value="">This device ({zoneCity(device)})</option>
+          {zones.map((z) => (
+            <option key={z} value={z}>{z.replace(/_/g, ' ')}</option>
+          ))}
+        </select>
+      </Row>
+      <Row label="Saved on">this device only</Row>
+    </Section>
+  )
+}
+
 function SettingsBody({ s }: { s: HqSettings }) {
   return (
     <div className="flex flex-col gap-6 min-w-0 flex-1 max-w-[760px]">
+      <ClockSection />
       <CopilotCreditsSection />
       <OpenRouterSpendSection />
       <ModelSection s={s} />
@@ -230,6 +258,7 @@ function SettingsBody({ s }: { s: HqSettings }) {
 }
 
 const NAV = [
+  ['clock', 'Clock'],
   ['model', 'Model'],
   ['backends', 'Backend chain'],
   ['keys', 'Provider keys'],
@@ -247,18 +276,24 @@ function SettingsPage() {
         <header className="flex items-start justify-between gap-4 mb-6">
           <div>
             <h1 className="text-3xl font-semibold tracking-tight text-neutral-50" style={{ fontFamily: 'var(--font-heading)' }}>Settings</h1>
-            <p className="mt-1 text-sm text-neutral-400 max-w-prose">Read-only view of the running HQ configuration. Secrets are never shown.</p>
+            <p className="mt-1 text-sm text-neutral-400 max-w-prose">The clock zone is yours to set. Everything else is a read-only view of the running HQ configuration, and secrets are never shown.</p>
           </div>
           <button type="button" onClick={() => refetch()} className="hq-icon-btn" aria-label="Reload settings" title="Reload settings">
             <RefreshCw className={`w-4 h-4 ${isFetching ? 'animate-spin' : ''}`} />
           </button>
         </header>
-        {isLoading && (
-          <div className="flex items-center gap-2 text-sm text-neutral-400"><Loader2 className="w-4 h-4 animate-spin" /> Loading settings</div>
-        )}
-        {error && !data && (
-          <div className="flex items-center gap-2 text-sm text-red-400" role="alert">
-            <AlertCircle className="w-4 h-4" /> Could not load settings. {error instanceof Error ? error.message : ''}
+        {!data && (
+          // The clock lives on this device, so it stays settable while the gateway is loading or unreachable.
+          <div className="flex flex-col gap-6 max-w-[760px]">
+            <ClockSection />
+            {isLoading && (
+              <div className="flex items-center gap-2 text-sm text-neutral-400"><Loader2 className="w-4 h-4 animate-spin" /> Loading settings</div>
+            )}
+            {error && (
+              <div className="flex items-center gap-2 text-sm text-red-400" role="alert">
+                <AlertCircle className="w-4 h-4" /> Could not load settings. {error instanceof Error ? error.message : ''}
+              </div>
+            )}
           </div>
         )}
         {data && (
