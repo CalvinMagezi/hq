@@ -14,6 +14,7 @@ const protects = [
   ['The first stranger to message your bot', 'Chat relays no longer adopt the first sender as owner. You pair explicitly.'],
   ['Cross-person disclosure in shared chats', 'Notes and tasks carry labels, and a shared channel sees only what every verified participant may see. Unknown identities get public content only.'],
   ['Coding agents being clicked through', 'HQ never answers a trust dialog for you, and driving a session has mechanical limits that do not depend on the model deciding to stop.'],
+  ['A personal agent reaching past its lane', 'Hermes Agent and OpenClaw run in the same process sandbox with no HQ token, no MCP wiring and no model provider on the egress allowlist until you add one. HQ refuses to give them code work, and their output goes to a person for review, never straight to done.'],
 ];
 
 const gaps = [
@@ -21,6 +22,7 @@ const gaps = [
   ['The bash text checks.', 'They catch honest mistakes and cheap tricks. Variables, string building, two-step commands and interpreter code can still get through, and the docs list the shapes. Without a working sandbox, you are relying on them plus the environment allowlist.'],
   ['The sandbox itself.', 'HOME stays writable, so shell rc files can be changed and will run later outside the sandbox. The sandbox shares the host network unless you set network to false, and that cuts off gh and git from bash. On macOS, a bash child can still see the daemon\'s environment with ps.'],
   ['Coding agents HQ starts.', 'A harness session is a separate program with its own shell. The host starts each agent from a clean environment and runs it in a process sandbox, but whatever you hand an agent (profile env values, wrapper scripts) is readable by a prompt-injected session. Keep secrets out of profile env.'],
+  ['Personal agents HQ runs.', 'Each keeps its own model provider key in its own state folder, which it can read, so a prompt-injected session can use it. HQ cannot cap their token spend. Give them a key with a spending limit set at the provider.'],
   ['The handoff key.', 'It is equivalent to code execution on every host you paired. Bound it with agent_host.handoff_cwd_allow, and give it only to callers you would give a shell.'],
   ['An attacker who is already you.', 'Anyone who controls the host user, the vault directory or the config file is out of scope. On loopback with no token set, any process on the machine can call the API without an Origin header, so set a token on shared machines.'],
   ['A stolen signing key, or a stale pointer.', 'Both are listed as not mitigated by the updater. A compromised service user can also fake a healthy /health answer to defeat the automatic rollback. Locally built self-update binaries are not signed.'],
@@ -236,6 +238,7 @@ const dry = 'hq update --apply --dry-run';
           <li><a class="glass reveal" href={links.sec.webFetch}>Outbound fetches</a></li>
           <li><a class="glass reveal" href={links.sec.selfUpdate}>Self-update tools</a></li>
           <li><a class="glass reveal" href={links.sec.agentEnv}>What a coding agent can see of your environment</a></li>
+          <li><a class="glass reveal" href={links.personalAgents}>Running personal agents (Hermes, OpenClaw) under HQ</a></li>
           <li><a class="glass reveal" href={links.sec.identity}>Identity-scoped disclosure</a></li>
           <li><a class="glass reveal" href={links.sec.releaseChecklist}>Release checklist</a></li>
         </ul>

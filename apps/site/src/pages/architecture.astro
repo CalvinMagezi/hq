@@ -434,6 +434,15 @@ const updateSteps = [
             supported harnesses, and you can define your own profiles. This replaced an earlier tmux runner
             that could only guess state from screen text.
           </p>
+          <h3>Personal agents</h3>
+          <p>
+            Hermes Agent and OpenClaw run in the same host as a second kind of harness, general-purpose agents.
+            Every session has a purpose (research, review, monitor or general), and a request to give one code
+            work is refused before anything starts. They get no HQ token and no MCP wiring: HQ types into them
+            and reads their screen as untrusted text. Named in a <code>stack:</code> block, each pulls the tasks
+            assigned to it and runs one as a single job, and the process ending puts the task into review. Setup
+            and removal are in the <a href={links.personalAgents}>personal agents guide</a>.
+          </p>
           <h3>Hosts</h3>
           <p>
             A host is a machine running <code>hq host</code>. <code>native</code> is the machine HQ runs on. Any
