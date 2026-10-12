@@ -6,6 +6,7 @@ const CLIENT: &str = "https://claude.ai/oauth/mcp-oauth-client-metadata";
 const REDIRECT: &str = "https://claude.ai/api/mcp/auth_callback";
 const RESOURCE: &str = "https://hq.example.com/mcp";
 const CHALLENGE: &str = "E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cM";
+const BINDER: &str = "browser-cookie";
 
 fn new_request() -> NewRequest<'static> {
     NewRequest {
@@ -29,11 +30,22 @@ fn exchange(code: &str) -> CodeExchange<'_> {
     }
 }
 
+/// Stores a request while armed, returning its id.
+fn pending(c: &Connection) -> String {
+    match create_request(c, &new_request(), BINDER, NOW).unwrap() {
+        Pending::Created(id) => id,
+        other => panic!("not stored: {other:?}"),
+    }
+}
+
 /// A request approved with `scope`, returning its code.
 fn approved(c: &Connection, scope: GrantScope) -> String {
-    let id = create_request(c, &new_request(), NOW).unwrap();
-    let req = take_request(c, &id, NOW).unwrap().unwrap();
-    issue_code(c, &req, scope, "Claude", NOW).unwrap()
+    arm(c, NOW + 600).unwrap();
+    let id = pending(c);
+    match approve_request(c, &id, BINDER, scope, "Claude", NOW).unwrap() {
+        Approval::Issued { code, .. } => code,
+        other => panic!("not approved: {other:?}"),
+    }
 }
 
 fn connected(c: &Connection) -> TokenPair {
@@ -58,18 +70,85 @@ fn the_arming_window_opens_closes_and_expires() {
 }
 
 #[test]
-fn a_request_is_decided_once_and_expires() {
+fn a_request_needs_the_window_is_decided_once_and_expires() {
     let db = Database::open_memory().unwrap();
     db.with_conn(|c| {
-        let id = create_request(c, &new_request(), NOW)?;
-        let req = get_request(c, &id, NOW)?.unwrap();
+        assert_eq!(
+            create_request(c, &new_request(), BINDER, NOW)?,
+            Pending::NotArmed
+        );
+        arm(c, NOW + 600)?;
+        let id = pending(c);
+        let req = get_request(c, &id, BINDER, NOW)?.unwrap();
         assert_eq!(req.state.as_deref(), Some("xyz"));
-        assert!(take_request(c, &id, NOW)?.is_some());
-        assert!(take_request(c, &id, NOW)?.is_none(), "taken twice");
+        assert_eq!((req.created_at, req.armed_until), (NOW, NOW + 600));
+        assert!(deny_request(c, &id, BINDER, NOW)?.is_some());
+        assert!(deny_request(c, &id, BINDER, NOW)?.is_none(), "taken twice");
 
-        let late = create_request(c, &new_request(), NOW)?;
-        assert!(get_request(c, &late, NOW + REQUEST_TTL_SECS)?.is_none());
-        assert!(take_request(c, &late, NOW + REQUEST_TTL_SECS)?.is_none());
+        let late = pending(c);
+        assert!(get_request(c, &late, BINDER, NOW + REQUEST_TTL_SECS)?.is_none());
+        Ok(())
+    })
+    .unwrap();
+}
+
+#[test]
+fn only_the_browser_that_started_a_request_can_see_or_decide_it() {
+    let db = Database::open_memory().unwrap();
+    db.with_conn(|c| {
+        arm(c, NOW + 600)?;
+        let id = pending(c);
+        assert!(get_request(c, &id, "another-browser", NOW)?.is_none());
+        assert!(deny_request(c, &id, "another-browser", NOW)?.is_none());
+        assert_eq!(
+            approve_request(c, &id, "another-browser", GrantScope::Full, "x", NOW)?,
+            Approval::Gone
+        );
+        assert!(
+            get_request(c, &id, BINDER, NOW)?.is_some(),
+            "still there for its owner"
+        );
+        Ok(())
+    })
+    .unwrap();
+}
+
+#[test]
+fn a_request_from_an_earlier_window_cannot_be_approved() {
+    let db = Database::open_memory().unwrap();
+    db.with_conn(|c| {
+        arm(c, NOW + 600)?;
+        let stale = pending(c);
+        close_window(c)?;
+        assert!(
+            get_request(c, &stale, BINDER, NOW)?.is_none(),
+            "closing drops pending requests"
+        );
+        arm(c, NOW + 600)?;
+        let id = pending(c);
+        arm(c, NOW + 900)?;
+        assert_eq!(
+            approve_request(c, &id, BINDER, GrantScope::Full, "x", NOW)?,
+            Approval::Gone,
+            "re-arming starts a new window"
+        );
+        Ok(())
+    })
+    .unwrap();
+}
+
+#[test]
+fn an_open_window_takes_a_bounded_number_of_requests() {
+    let db = Database::open_memory().unwrap();
+    db.with_conn(|c| {
+        arm(c, NOW + 600)?;
+        for _ in 0..MAX_PENDING_REQUESTS {
+            pending(c);
+        }
+        assert_eq!(
+            create_request(c, &new_request(), BINDER, NOW)?,
+            Pending::Full
+        );
         Ok(())
     })
     .unwrap();
@@ -146,7 +225,7 @@ fn a_reused_code_revokes_the_grant_it_produced() {
         let pair = redeem_code(c, &exchange(&code), NOW)?.unwrap();
         assert!(redeem_code(c, &exchange(&code), NOW + 5)?.is_none());
         assert!(grant_for_access_token(c, &pair.access_token, NOW + 5)?.is_none());
-        let grants = list_grants(c, true)?;
+        let grants = list_grants(c, true, NOW)?;
         assert_eq!(
             grants[0].revoked_reason.as_deref(),
             Some("authorization code used twice")
@@ -268,14 +347,62 @@ fn revoking_by_token_or_all_at_once_ends_grants_and_disarms() {
         assert!(grant_for_access_token(c, &a.access_token, NOW)?.is_none());
 
         let (b, d) = (connected(c), connected(c));
+        let unexchanged = approved(c, GrantScope::Full);
         arm(c, NOW + 600)?;
+        let waiting = pending(c);
         assert_eq!(revoke_all(c, "kill switch", NOW)?, 2);
+        assert!(
+            redeem_code(c, &exchange(&unexchanged), NOW)?.is_none(),
+            "an approved code not yet exchanged dies with the switch"
+        );
+        assert!(get_request(c, &waiting, BINDER, NOW)?.is_none());
         assert_eq!(armed_until(c, NOW)?, None);
         for pair in [b, d] {
             assert!(grant_for_access_token(c, &pair.access_token, NOW)?.is_none());
         }
-        assert!(list_grants(c, false)?.is_empty());
-        assert_eq!(list_grants(c, true)?.len(), 3);
+        assert!(list_grants(c, false, NOW)?.is_empty());
+        assert_eq!(list_grants(c, true, NOW)?.len(), 3);
+        Ok(())
+    })
+    .unwrap();
+}
+
+#[test]
+fn an_approval_needs_the_window_and_closes_it() {
+    let db = Database::open_memory().unwrap();
+    db.with_conn(|c| {
+        arm(c, NOW + 600)?;
+        let (first, second) = (pending(c), pending(c));
+        disarm(c)?;
+        assert_eq!(
+            approve_request(c, &first, BINDER, GrantScope::Full, "x", NOW)?,
+            Approval::NotArmed
+        );
+        arm(c, NOW + 600)?;
+        assert!(matches!(
+            approve_request(c, &first, BINDER, GrantScope::Full, "x", NOW)?,
+            Approval::Issued { .. }
+        ));
+        assert_eq!(
+            approve_request(c, &second, BINDER, GrantScope::Full, "x", NOW)?,
+            Approval::NotArmed,
+            "one arming admits one client"
+        );
+        Ok(())
+    })
+    .unwrap();
+}
+
+#[test]
+fn an_expired_grant_is_not_listed_as_live() {
+    let db = Database::open_memory().unwrap();
+    db.with_conn(|c| {
+        connected(c);
+        let later = NOW + GRANT_MAX_SECS;
+        assert_eq!(list_grants(c, false, NOW)?.len(), 1);
+        assert!(list_grants(c, false, later)?.is_empty());
+        assert_eq!(list_grants(c, true, later)?.len(), 1);
+        assert_eq!(revoke_all(c, "off", later)?, 0);
         Ok(())
     })
     .unwrap();

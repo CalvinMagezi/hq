@@ -60,20 +60,55 @@ fn app() -> axum::Router {
 }
 
 async fn send(app: &axum::Router, req: Request<Body>) -> (StatusCode, Option<String>, Value) {
+    let (status, location, _, body) = send_full(app, req).await;
+    (status, location, body)
+}
+
+/// Status, `Location`, `Set-Cookie` and the JSON body.
+async fn send_full(
+    app: &axum::Router,
+    req: Request<Body>,
+) -> (StatusCode, Option<String>, Option<String>, Value) {
     let res = app.clone().oneshot(req).await.unwrap();
     let status = res.status();
-    let location = res
-        .headers()
-        .get("location")
-        .map(|v| v.to_str().unwrap().to_string());
+    let header = |name: &str| {
+        res.headers()
+            .get(name)
+            .map(|v| v.to_str().unwrap().to_string())
+    };
+    let (location, cookie) = (header("location"), header("set-cookie"));
     let bytes = axum::body::to_bytes(res.into_body(), usize::MAX)
         .await
         .unwrap();
-    (
-        status,
-        location,
-        serde_json::from_slice(&bytes).unwrap_or(Value::Null),
-    )
+    let body = serde_json::from_slice(&bytes).unwrap_or(Value::Null);
+    (status, location, cookie, body)
+}
+
+/// A request carrying the browser's binder cookie.
+fn with_cookie(mut req: Request<Body>, cookie: &str) -> Request<Body> {
+    let pair = cookie.split(';').next().unwrap().to_string();
+    req.headers_mut().insert("cookie", pair.parse().unwrap());
+    req
+}
+
+/// Arms and runs `/oauth/authorize`; returns the request id and the cookie it set.
+async fn authorized(app: &axum::Router) -> (String, String) {
+    let (status, _, _) = send(app, post_json("/api/oauth/connector/arm", json!({}))).await;
+    assert_eq!(status, StatusCode::OK);
+    let (status, location, cookie, _) = send_full(app, get(&authorize_path())).await;
+    assert_eq!(status, StatusCode::FOUND);
+    let cookie = cookie.expect("a binder cookie");
+    for attr in [
+        "HttpOnly",
+        "Secure",
+        "SameSite=Strict",
+        "Path=/api/oauth/requests",
+    ] {
+        assert!(cookie.contains(attr), "{cookie}");
+    }
+    let id = location.unwrap();
+    let id = id.strip_prefix("/connect?request=").unwrap().to_string();
+    (id, cookie)
 }
 
 fn get(path: &str) -> Request<Body> {
@@ -129,22 +164,19 @@ fn call(tool: &str) -> Value {
 
 /// Arms, authorizes and approves with `scope`; returns the code from the redirect.
 async fn approved_code(app: &axum::Router, scope: &str) -> String {
-    let (status, _, _) = send(app, post_json("/api/oauth/connector/arm", json!({}))).await;
-    assert_eq!(status, StatusCode::OK);
-    let (status, location, _) = send(app, get(&authorize_path())).await;
-    assert_eq!(status, StatusCode::FOUND);
-    let location = location.unwrap();
-    let id = location.strip_prefix("/connect?request=").unwrap();
-    let (status, _, shown) = send(app, get(&format!("/api/oauth/requests/{id}"))).await;
+    let (id, cookie) = authorized(app).await;
+    let shown = with_cookie(get(&format!("/api/oauth/requests/{id}")), &cookie);
+    let (status, _, shown) = send(app, shown).await;
     assert_eq!(status, StatusCode::OK);
     assert_eq!(shown["client_name"], "Claude");
     assert_eq!(shown["redirect_host"], "claude.ai");
     assert_eq!(shown["default_scope"], "read_only");
+    assert!(shown["armed_until"].is_i64(), "{shown}");
     let approve = post_json(
         &format!("/api/oauth/requests/{id}/approve"),
         json!({"scope": scope, "label": "Claude on the web"}),
     );
-    let (status, _, decided) = send(app, approve).await;
+    let (status, _, decided) = send(app, with_cookie(approve, &cookie)).await;
     assert_eq!(status, StatusCode::OK, "{decided}");
     let redirect = url::Url::parse(decided["redirect"].as_str().unwrap()).unwrap();
     assert_eq!(redirect.as_str().split('?').next(), Some(REDIRECT));
@@ -257,29 +289,44 @@ async fn nothing_connects_without_arming_and_one_arming_admits_one_client() {
 #[tokio::test]
 async fn a_denied_request_sends_claude_an_error_and_cannot_be_approved_after() {
     let app = app();
-    send(
-        &app,
-        post_json("/api/oauth/connector/arm", json!({"minutes": 5})),
-    )
-    .await;
-    let (_, location, _) = send(&app, get(&authorize_path())).await;
-    let id = location.unwrap().replace("/connect?request=", "");
+    let (id, cookie) = authorized(&app).await;
     let deny = Request::post(format!("/api/oauth/requests/{id}/deny"))
         .body(Body::empty())
         .unwrap();
-    let (status, _, body) = send(&app, deny).await;
+    let (status, _, body) = send(&app, with_cookie(deny, &cookie)).await;
     assert_eq!(status, StatusCode::OK);
-    assert!(
-        body["redirect"]
-            .as_str()
-            .unwrap()
-            .contains("error=access_denied")
-    );
+    let redirect = body["redirect"].as_str().unwrap();
+    assert!(redirect.contains("error=access_denied"), "{redirect}");
     let approve = post_json(
         &format!("/api/oauth/requests/{id}/approve"),
         json!({"scope": "full"}),
     );
-    assert_eq!(send(&app, approve).await.0, StatusCode::CONFLICT);
+    let (status, _, _) = send(&app, with_cookie(approve, &cookie)).await;
+    assert_eq!(status, StatusCode::CONFLICT);
+}
+
+#[tokio::test]
+async fn another_browser_cannot_see_or_decide_the_request() {
+    let app = app();
+    let (id, cookie) = authorized(&app).await;
+    let elsewhere = "hq_oauth_request=someone-else";
+    let path = format!("/api/oauth/requests/{id}");
+    assert_eq!(
+        send(&app, with_cookie(get(&path), elsewhere)).await.0,
+        StatusCode::NOT_FOUND
+    );
+    assert_eq!(send(&app, get(&path)).await.0, StatusCode::NOT_FOUND);
+    let approve = post_json(&format!("{path}/approve"), json!({"scope": "full"}));
+    assert_eq!(
+        send(&app, with_cookie(approve, elsewhere)).await.0,
+        StatusCode::CONFLICT
+    );
+    let mine = send(&app, with_cookie(get(&path), &cookie)).await;
+    assert_eq!(
+        mine.0,
+        StatusCode::OK,
+        "still there for the browser that started it"
+    );
 }
 
 #[tokio::test]

@@ -121,7 +121,15 @@ Lite should support connectors; the first cut leaves Lite out.
 - **Arming.** Authorization works only inside an armed window that the owner opens from Settings or `hq connector arm` (default 10 minutes, stored in the database so the
   CLI and daemon agree). A stranger who learns the URL cannot start a flow, and a phishing link
   to an authorize URL is dead outside the window. Refreshing an existing grant does not need
-  arming.
+  arming. Approving closes the window (one approval per arming), closing it drops waiting
+  requests, and at most 20 requests can wait at once. A request is approvable only in the
+  window it arrived in.
+- **Request binding.** `/oauth/authorize` sets an HttpOnly, Secure, `SameSite=Strict` cookie
+  scoped to `/api/oauth/requests` holding a random binder, stored hashed on the request. The
+  consent API answers only the browser holding it, so a request started in someone else's
+  browser cannot be shown to, or approved by, the owner. A link to the authorize URL itself
+  still creates a request in whoever opens it; the consent page shows when the request arrived
+  and says to approve only right after pressing Connect.
 
 ### Tokens and grants
 
@@ -201,7 +209,8 @@ tasks and handoff scopes (`HANDOFF_SCOPE_ARG`, `TASKS_SCOPE_ARG`, `mark_spawned_
 5. **Visibility.** A relay notice when a grant is created, on its first call, on every confirm-tier
    call and on refresh-token reuse. An audit table records grant, tool, time, outcome and a
    truncated argument digest; Settings shows the last calls per grant.
-6. **Kill switch.** One button and `hq connector off`: revoke every grant and disarm. With no
+6. **Kill switch.** One button and `hq connector off`: revoke every grant, cancel approved codes
+   not yet exchanged and waiting requests, and disarm, in one transaction. With no
    grant and no armed window, nothing can connect until the owner arms again; `enabled: false`
    removes the routes entirely.
 
@@ -298,6 +307,11 @@ the PRs for slices 3 to 5, and again after fixes.
 - **Defaults differ from a personal instance.** The shipped default scope is `read_only`; an
   owner who wants Claude as a full orchestrator sets `default_scope: full`.
 - **Anthropic's egress range** can change; the IP rule is not a control to rely on.
+- **Accepted trade-offs from the security review.** A refresh token presented again within 60
+  seconds of its use is refused without revoking the grant, so a client retrying a refresh
+  does not lose its connection; a thief inside that minute is refused too, and slice 5 tells the
+  owner. `/oauth/authorize` answers differently when armed, so someone who knows the URL can
+  tell when the window is open; they still need the owner's browser to approve.
 - **Confirm-tier waits** depend on how long claude.ai waits for a tool result. Unknown; the
   pending-and-retry path covers a short limit.
 - **Static headers** may open up to all accounts later. OAuth stays the better path (per-grant

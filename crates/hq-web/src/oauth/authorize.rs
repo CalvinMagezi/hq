@@ -90,42 +90,31 @@ pub(crate) async fn authorize(
     State(state): State<Arc<WsState>>,
     Query(q): Query<HashMap<String, String>>,
 ) -> Response {
-    let Some(origins) = state.connector.as_ref() else {
+    let Some(settings) = state.connector.as_ref() else {
         return StatusCode::NOT_FOUND.into_response();
     };
     let now = super::now();
-    let armed = state
-        .db
-        .with_conn(|c| store::armed_until(c, now))
-        .ok()
-        .flatten();
-    if armed.is_none() {
-        return page(
-            StatusCode::FORBIDDEN,
-            "HQ is not accepting new connections right now",
-            "In HQ, open Settings, then Claude connector, and choose Allow a new connection. \
-             Then press Connect in Claude again within ten minutes.",
-        );
+    let armed = state.db.with_conn(|c| store::armed_until(c, now));
+    if !matches!(armed, Ok(Some(_))) {
+        return not_armed();
     }
-    let resource = origins.resource();
+    let resource = settings.resource();
     let checked = match check(&q, &resource) {
         Ok(c) => c,
-        Err(why) => {
-            return page(
-                StatusCode::BAD_REQUEST,
-                "This connection request is not valid",
-                why,
-            );
-        }
+        Err(why) => return page(StatusCode::BAD_REQUEST, INVALID, why),
     };
     let meta = match cimd::client_metadata(checked.client_id).await {
         Ok(m) => m,
         Err(why) => return page(StatusCode::BAD_REQUEST, "This client cannot connect", why),
     };
-    if !meta.redirect_uris.iter().any(|u| u == checked.redirect_uri) {
+    if !meta
+        .redirect_uris
+        .iter()
+        .any(|listed| redirect_matches(listed, checked.redirect_uri))
+    {
         return page(
             StatusCode::BAD_REQUEST,
-            "This connection request is not valid",
+            INVALID,
             "the client does not list this redirect URI",
         );
     }
@@ -138,12 +127,45 @@ pub(crate) async fn authorize(
         resource: &resource,
         scope: checked.scope,
     };
-    match state.db.with_conn(|c| store::create_request(c, &new, now)) {
-        Ok(id) => (
+    store_request(&state, &new, now)
+}
+
+const INVALID: &str = "This connection request is not valid";
+
+fn not_armed() -> Response {
+    page(
+        StatusCode::FORBIDDEN,
+        "HQ is not accepting new connections right now",
+        "In HQ, open Settings, then Claude connector, and choose Allow a new connection. \
+         Then press Connect in Claude again within ten minutes.",
+    )
+}
+
+/// Stores the request bound to a fresh cookie in this browser and sends it to the consent page.
+fn store_request(state: &WsState, new: &store::NewRequest, now: i64) -> Response {
+    let binder = format!(
+        "{}{}",
+        uuid::Uuid::new_v4().simple(),
+        uuid::Uuid::new_v4().simple()
+    );
+    match state
+        .db
+        .with_conn(|c| store::create_request(c, new, &binder, now))
+    {
+        Ok(store::Pending::Created(id)) => (
             StatusCode::FOUND,
-            [(header::LOCATION, format!("/connect?request={id}"))],
+            [
+                (header::LOCATION, format!("/connect?request={id}")),
+                (header::SET_COOKIE, super::consent::binder_cookie(&binder)),
+            ],
         )
             .into_response(),
+        Ok(store::Pending::NotArmed) => not_armed(),
+        Ok(store::Pending::Full) => page(
+            StatusCode::TOO_MANY_REQUESTS,
+            "Too many connection requests are waiting",
+            "Close the window in HQ's Settings, allow a new connection again, then press Connect in Claude.",
+        ),
         Err(e) => {
             tracing::error!("oauth: storing an authorization request failed: {e}");
             page(
@@ -153,6 +175,26 @@ pub(crate) async fn authorize(
             )
         }
     }
+}
+
+/// Whether a redirect URI matches one the client's document lists. Loopback URIs match on
+/// scheme, host and path with any port (RFC 8252 section 7.3): Claude Code lists them with no
+/// port and picks one per session.
+fn redirect_matches(listed: &str, requested: &str) -> bool {
+    if listed == requested {
+        return true;
+    }
+    let (Ok(a), Ok(b)) = (reqwest::Url::parse(listed), reqwest::Url::parse(requested)) else {
+        return false;
+    };
+    let loopback = matches!(a.host_str(), Some("localhost" | "127.0.0.1"));
+    loopback
+        && a.scheme() == "http"
+        && a.scheme() == b.scheme()
+        && a.host_str() == b.host_str()
+        && a.path() == b.path()
+        && a.query().is_none()
+        && b.query().is_none()
 }
 
 /// A plain page for the owner. Every string is a constant from this module, so nothing a

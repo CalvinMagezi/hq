@@ -91,3 +91,27 @@ fn each_broken_field_is_refused() {
         assert!(check(&q, RESOURCE).is_err(), "{overrides:?}");
     }
 }
+
+#[test]
+fn loopback_redirects_match_the_listed_ones_on_any_port() {
+    // As listed in Claude Code's published client document.
+    let listed = ["http://localhost/callback", "http://127.0.0.1/callback"];
+    let any = |requested: &str| listed.iter().any(|l| redirect_matches(l, requested));
+    assert!(any("http://localhost:3118/callback"));
+    assert!(any("http://127.0.0.1:55001/callback"));
+    assert!(any("http://localhost/callback"));
+    assert!(!any("http://localhost:3118/other"));
+    assert!(!any("http://localhost:3118/callback?x=1"));
+    assert!(!redirect_matches(
+        "http://localhost/callback",
+        "http://127.0.0.1:3118/callback"
+    ));
+    assert!(!redirect_matches(
+        "https://claude.ai/api/mcp/auth_callback",
+        "https://claude.ai:8443/api/mcp/auth_callback"
+    ));
+    assert!(redirect_matches(
+        "https://claude.ai/api/mcp/auth_callback",
+        "https://claude.ai/api/mcp/auth_callback"
+    ));
+}

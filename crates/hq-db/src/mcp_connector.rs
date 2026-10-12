@@ -3,7 +3,7 @@
 //! returned once and stored only as SHA-256. Callers pass `now` in unix seconds.
 
 use anyhow::{Result, bail};
-use rusqlite::{Connection, OptionalExtension, Row, params};
+use rusqlite::{Connection, OptionalExtension, Row, Transaction, TransactionBehavior, params};
 use sha2::{Digest, Sha256};
 
 /// Prefixes that make a leaked secret easy to recognise and scan for.
@@ -55,6 +55,15 @@ fn hash(secret: &str) -> String {
         .collect()
 }
 
+/// A write transaction taken up front, so a read inside it cannot be overtaken by another
+/// writer before this one decides (the code, approval and kill-switch paths).
+fn immediate(conn: &Connection) -> Result<Transaction<'_>> {
+    Ok(Transaction::new_unchecked(
+        conn,
+        TransactionBehavior::Immediate,
+    )?)
+}
+
 fn random_secret(prefix: &str) -> String {
     format!(
         "{prefix}{}{}",
@@ -75,6 +84,15 @@ pub fn arm(conn: &Connection, until: i64) -> Result<()> {
 
 pub fn disarm(conn: &Connection) -> Result<()> {
     conn.execute("DELETE FROM mcp_connector_arming", [])?;
+    Ok(())
+}
+
+/// The owner closing the window: nothing new can start and no pending request can be approved.
+pub fn close_window(conn: &Connection) -> Result<()> {
+    let tx = immediate(conn)?;
+    disarm(&tx)?;
+    tx.execute("DELETE FROM mcp_oauth_requests", [])?;
+    tx.commit()?;
     Ok(())
 }
 
@@ -112,11 +130,17 @@ pub struct AuthRequest {
     pub code_challenge: String,
     pub resource: String,
     pub scope: String,
+    pub created_at: i64,
     pub expires_at: i64,
+    /// The arming window it arrived in; a request from an earlier window cannot be approved.
+    pub armed_until: i64,
 }
 
-const REQUEST_COLS: &str =
-    "id, client_id, client_name, redirect_uri, state, code_challenge, resource, scope, expires_at";
+const REQUEST_COLS: &str = "id, client_id, client_name, redirect_uri, state, code_challenge, \
+                            resource, scope, created_at, expires_at, armed_until";
+
+/// Requests waiting at once, so an open window cannot be flooded.
+pub const MAX_PENDING_REQUESTS: i64 = 20;
 
 fn request_from_row(r: &Row) -> rusqlite::Result<AuthRequest> {
     Ok(AuthRequest {
@@ -128,17 +152,44 @@ fn request_from_row(r: &Row) -> rusqlite::Result<AuthRequest> {
         code_challenge: r.get(5)?,
         resource: r.get(6)?,
         scope: r.get(7)?,
-        expires_at: r.get(8)?,
+        created_at: r.get(8)?,
+        expires_at: r.get(9)?,
+        armed_until: r.get(10)?,
     })
 }
 
-/// Stores a request for the consent page and returns its id.
-pub fn create_request(conn: &Connection, req: &NewRequest, now: i64) -> Result<String> {
-    purge_expired(conn, now)?;
+/// How storing a request ended.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Pending {
+    /// Stored under this id, for the consent page.
+    Created(String),
+    NotArmed,
+    /// Too many requests are already waiting.
+    Full,
+}
+
+/// Stores a request for the consent page. `binder` is a secret held by the browser that
+/// started it (an HttpOnly cookie), so only that browser can see or decide the request.
+pub fn create_request(
+    conn: &Connection,
+    req: &NewRequest,
+    binder: &str,
+    now: i64,
+) -> Result<Pending> {
+    let tx = immediate(conn)?;
+    purge_expired(&tx, now)?;
+    let Some(armed) = armed_until(&tx, now)? else {
+        return Ok(Pending::NotArmed);
+    };
+    let waiting: i64 = tx.query_row("SELECT COUNT(*) FROM mcp_oauth_requests", [], |r| r.get(0))?;
+    if waiting >= MAX_PENDING_REQUESTS {
+        return Ok(Pending::Full);
+    }
     let id = uuid::Uuid::new_v4().simple().to_string();
-    conn.execute(
+    tx.execute(
         &format!(
-            "INSERT INTO mcp_oauth_requests ({REQUEST_COLS}) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9)"
+            "INSERT INTO mcp_oauth_requests ({REQUEST_COLS}, binder_hash)
+             VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12)"
         ),
         params![
             id,
@@ -149,34 +200,107 @@ pub fn create_request(conn: &Connection, req: &NewRequest, now: i64) -> Result<S
             req.code_challenge,
             req.resource,
             req.scope,
-            now + REQUEST_TTL_SECS
+            now,
+            now + REQUEST_TTL_SECS,
+            armed,
+            hash(binder)
         ],
     )?;
-    Ok(id)
+    tx.commit()?;
+    Ok(Pending::Created(id))
 }
 
-/// A request that has not expired.
-pub fn get_request(conn: &Connection, id: &str, now: i64) -> Result<Option<AuthRequest>> {
+/// A live request, for the browser holding its binder only.
+pub fn get_request(
+    conn: &Connection,
+    id: &str,
+    binder: &str,
+    now: i64,
+) -> Result<Option<AuthRequest>> {
     Ok(conn
         .query_row(
             &format!(
-                "SELECT {REQUEST_COLS} FROM mcp_oauth_requests WHERE id = ?1 AND expires_at > ?2"
+                "SELECT {REQUEST_COLS} FROM mcp_oauth_requests
+                 WHERE id = ?1 AND binder_hash = ?2 AND expires_at > ?3"
             ),
-            params![id, now],
+            params![id, hash(binder), now],
             request_from_row,
         )
         .optional()?)
 }
 
 /// Removes a request and returns it if it was still valid, so a decision is made once.
-pub fn take_request(conn: &Connection, id: &str, now: i64) -> Result<Option<AuthRequest>> {
-    let req = get_request(conn, id, now)?;
+fn take_request(
+    conn: &Connection,
+    id: &str,
+    binder: &str,
+    now: i64,
+) -> Result<Option<AuthRequest>> {
+    let req = get_request(conn, id, binder, now)?;
+    if req.is_none() {
+        return Ok(None);
+    }
     let removed = conn.execute("DELETE FROM mcp_oauth_requests WHERE id = ?1", params![id])?;
     Ok(req.filter(|_| removed == 1))
 }
 
-/// The owner's approval of a request: a single-use code for the client to exchange.
-pub fn issue_code(
+/// The owner's refusal: the request is gone and the client is told so.
+pub fn deny_request(
+    conn: &Connection,
+    id: &str,
+    binder: &str,
+    now: i64,
+) -> Result<Option<AuthRequest>> {
+    take_request(conn, id, binder, now)
+}
+
+/// How an owner's approval ended.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Approval {
+    /// The code for the client, and the request it answers.
+    Issued {
+        request: Box<AuthRequest>,
+        code: String,
+    },
+    /// The arming window had closed.
+    NotArmed,
+    /// The request expired, was already answered, belongs to another browser or to an
+    /// earlier window.
+    Gone,
+}
+
+/// The owner's approval of a pending request. One approval per arming: the window closes in
+/// the same transaction, so two approvals at once cannot both get in.
+pub fn approve_request(
+    conn: &Connection,
+    id: &str,
+    binder: &str,
+    grant_scope: GrantScope,
+    label: &str,
+    now: i64,
+) -> Result<Approval> {
+    let tx = immediate(conn)?;
+    let Some(armed) = armed_until(&tx, now)? else {
+        return Ok(Approval::NotArmed);
+    };
+    let Some(request) = take_request(&tx, id, binder, now)? else {
+        return Ok(Approval::Gone);
+    };
+    if request.armed_until != armed {
+        tx.commit()?;
+        return Ok(Approval::Gone);
+    }
+    let code = issue_code(&tx, &request, grant_scope, label, now)?;
+    disarm(&tx)?;
+    tx.commit()?;
+    Ok(Approval::Issued {
+        request: Box::new(request),
+        code,
+    })
+}
+
+/// A single-use code for an approved request.
+fn issue_code(
     conn: &Connection,
     req: &AuthRequest,
     grant_scope: GrantScope,
@@ -264,20 +388,23 @@ fn code_row(conn: &Connection, code_hash: &str) -> Result<Option<CodeRow>> {
 }
 
 /// Exchanges a code for tokens, or `None` for anything wrong with it. The code is spent by
-/// the first attempt, right or wrong; a second use revokes the grant the first one made.
+/// the first attempt, right or wrong; a second use revokes the grant the first one made. One
+/// transaction covers it all, so a failure leaves the code unspent and two uses never race.
 pub fn redeem_code(conn: &Connection, ex: &CodeExchange, now: i64) -> Result<Option<TokenPair>> {
     let code_hash = hash(ex.code);
-    let Some(row) = code_row(conn, &code_hash)? else {
+    let tx = immediate(conn)?;
+    let Some(row) = code_row(&tx, &code_hash)? else {
         return Ok(None);
     };
-    let claimed = conn.execute(
+    let claimed = tx.execute(
         "UPDATE mcp_oauth_codes SET used = 1 WHERE code_hash = ?1 AND used = 0",
         params![code_hash],
     )?;
     if claimed == 0 {
         if let Some(grant_id) = &row.grant_id {
-            revoke_grant(conn, grant_id, "authorization code used twice", now)?;
+            revoke_grant(&tx, grant_id, "authorization code used twice", now)?;
         }
+        tx.commit()?;
         return Ok(None);
     }
     let matches = row.expires_at > now
@@ -286,9 +413,9 @@ pub fn redeem_code(conn: &Connection, ex: &CodeExchange, now: i64) -> Result<Opt
         && row.code_challenge == ex.challenge
         && ex.resource.is_none_or(|r| r == row.resource);
     if !matches {
+        tx.commit()?;
         return Ok(None);
     }
-    let tx = conn.unchecked_transaction()?;
     let grant_id = create_grant(&tx, &row, now)?;
     tx.execute(
         "UPDATE mcp_oauth_codes SET grant_id = ?2 WHERE code_hash = ?1",
@@ -513,16 +640,22 @@ pub fn revoke_grant(conn: &Connection, grant_id: &str, reason: &str, now: i64) -
     Ok(changed == 1)
 }
 
-/// Revokes every live grant and closes the arming window. Returns how many were revoked.
+/// The kill switch: revokes every live grant, cancels approved codes not yet exchanged and
+/// pending requests, and closes the window, in one transaction so an exchange in flight either
+/// finishes first (and is revoked) or finds its code gone. Returns how many grants it revoked.
 pub fn revoke_all(conn: &Connection, reason: &str, now: i64) -> Result<usize> {
-    let ids: Vec<String> = conn
-        .prepare("SELECT id FROM mcp_oauth_grants WHERE revoked_at IS NULL")?
-        .query_map([], |r| r.get(0))?
+    let tx = immediate(conn)?;
+    let ids: Vec<String> = tx
+        .prepare("SELECT id FROM mcp_oauth_grants WHERE revoked_at IS NULL AND expires_at > ?1")?
+        .query_map(params![now], |r| r.get(0))?
         .collect::<rusqlite::Result<_>>()?;
     for id in &ids {
-        revoke_grant(conn, id, reason, now)?;
+        revoke_grant(&tx, id, reason, now)?;
     }
-    disarm(conn)?;
+    tx.execute("DELETE FROM mcp_oauth_codes WHERE used = 0", [])?;
+    tx.execute("DELETE FROM mcp_oauth_requests", [])?;
+    disarm(&tx)?;
+    tx.commit()?;
     Ok(ids.len())
 }
 
@@ -541,21 +674,21 @@ pub struct Grant {
     pub revoked_reason: Option<String>,
 }
 
-/// Grants, newest first. Revoked ones only when asked for.
-pub fn list_grants(conn: &Connection, include_revoked: bool) -> Result<Vec<Grant>> {
+/// Grants, newest first: the live ones, or every grant ever made when `include_ended`.
+pub fn list_grants(conn: &Connection, include_ended: bool, now: i64) -> Result<Vec<Grant>> {
     let sql = format!(
         "SELECT id, client_id, client_name, label, grant_scope, created_at, expires_at,
                 last_used_at, revoked_at, revoked_reason
          FROM mcp_oauth_grants {} ORDER BY created_at DESC, rowid DESC",
-        if include_revoked {
-            ""
+        if include_ended {
+            "WHERE ?1 IS NOT NULL"
         } else {
-            "WHERE revoked_at IS NULL"
+            "WHERE revoked_at IS NULL AND expires_at > ?1"
         }
     );
     let rows = conn
         .prepare(&sql)?
-        .query_map([], |r| {
+        .query_map(params![now], |r| {
             Ok(Grant {
                 id: r.get(0)?,
                 client_id: r.get(1)?,

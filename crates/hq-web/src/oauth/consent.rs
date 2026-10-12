@@ -4,7 +4,7 @@
 use crate::WsState;
 use axum::Json;
 use axum::extract::{Path, State};
-use axum::http::StatusCode;
+use axum::http::{HeaderMap, StatusCode, header};
 use axum::response::{IntoResponse, Response};
 use hq_db::mcp_connector::{self as store, GrantScope};
 use serde::Deserialize;
@@ -14,6 +14,33 @@ use std::sync::Arc;
 const DEFAULT_ARM_MINUTES: i64 = 10;
 const MAX_ARM_MINUTES: i64 = 60;
 const MAX_LABEL_CHARS: usize = 60;
+/// The cookie tying a pending request to the browser that started it.
+const BINDER_COOKIE: &str = "hq_oauth_request";
+/// Matches the request's lifetime in the store.
+const BINDER_MAX_AGE_SECS: i64 = store::REQUEST_TTL_SECS;
+const GONE: &str = "this request has expired, was already answered, or was started in another \
+                    browser; press Connect in Claude again from this one";
+
+/// `Set-Cookie` for a request's binder: unreadable by scripts, sent only to the request routes.
+pub(crate) fn binder_cookie(binder: &str) -> String {
+    format!(
+        "{BINDER_COOKIE}={binder}; Path=/api/oauth/requests; HttpOnly; Secure; \
+         SameSite=Strict; Max-Age={BINDER_MAX_AGE_SECS}"
+    )
+}
+
+/// The binder this browser holds, if any.
+fn binder(headers: &HeaderMap) -> String {
+    headers
+        .get_all(header::COOKIE)
+        .iter()
+        .filter_map(|v| v.to_str().ok())
+        .flat_map(|v| v.split(';'))
+        .filter_map(|pair| pair.trim().split_once('='))
+        .find(|(name, _)| *name == BINDER_COOKIE)
+        .map(|(_, value)| value.to_string())
+        .unwrap_or_default()
+}
 
 fn refuse(status: StatusCode, message: &str) -> Response {
     (status, Json(json!({ "error": message }))).into_response()
@@ -34,9 +61,12 @@ pub(crate) async fn status(State(state): State<Arc<WsState>>) -> Response {
         return Json(json!({ "enabled": false })).into_response();
     };
     let now = super::now();
-    let read = state
-        .db
-        .with_conn(|c| Ok((store::armed_until(c, now)?, store::list_grants(c, false)?)));
+    let read = state.db.with_conn(|c| {
+        Ok((
+            store::armed_until(c, now)?,
+            store::list_grants(c, false, now)?,
+        ))
+    });
     match read {
         Ok((armed_until, grants)) => Json(json!({
             "enabled": true,
@@ -74,8 +104,9 @@ pub(crate) async fn arm(
     }
 }
 
+/// Closes the window and drops requests waiting in it.
 pub(crate) async fn disarm(State(state): State<Arc<WsState>>) -> Response {
-    match state.db.with_conn(store::disarm) {
+    match state.db.with_conn(store::close_window) {
         Ok(()) => Json(json!({ "armed_until": null })).into_response(),
         Err(e) => db_error(e),
     }
@@ -107,14 +138,19 @@ pub(crate) async fn revoke_grant(
 }
 
 /// A pending request as the consent page shows it.
-pub(crate) async fn request(State(state): State<Arc<WsState>>, Path(id): Path<String>) -> Response {
+pub(crate) async fn request(
+    State(state): State<Arc<WsState>>,
+    Path(id): Path<String>,
+    headers: HeaderMap,
+) -> Response {
     if state.connector.is_none() {
         return connector_off();
     }
     let now = super::now();
+    let binder = binder(&headers);
     let found = state.db.with_conn(|c| {
         Ok((
-            store::get_request(c, &id, now)?,
+            store::get_request(c, &id, &binder, now)?,
             store::armed_until(c, now)?,
         ))
     });
@@ -124,15 +160,13 @@ pub(crate) async fn request(State(state): State<Arc<WsState>>, Path(id): Path<St
             "client_id": req.client_id,
             "redirect_host": host_of(&req.redirect_uri),
             "resource": req.resource,
+            "created_at": req.created_at,
             "expires_at": req.expires_at,
-            "armed_until": armed_until,
+            "armed_until": armed_until.filter(|a| *a == req.armed_until),
             "default_scope": state.connector_default_scope().as_str(),
         }))
         .into_response(),
-        Ok((None, _)) => refuse(
-            StatusCode::NOT_FOUND,
-            "this request has expired or was already answered",
-        ),
+        Ok((None, _)) => refuse(StatusCode::NOT_FOUND, GONE),
         Err(e) => db_error(e),
     }
 }
@@ -154,6 +188,7 @@ pub(crate) struct ApproveBody {
 pub(crate) async fn approve(
     State(state): State<Arc<WsState>>,
     Path(id): Path<String>,
+    headers: HeaderMap,
     Json(body): Json<ApproveBody>,
 ) -> Response {
     if state.connector.is_none() {
@@ -167,39 +202,39 @@ pub(crate) async fn approve(
     };
     let label = clean_label(body.label.as_deref());
     let now = super::now();
-    let decided = state.db.with_conn(|c| {
-        if store::armed_until(c, now)?.is_none() {
-            return Ok(Err(
-                "HQ is no longer accepting connections; allow one again in Settings",
-            ));
-        }
-        let Some(req) = store::take_request(c, &id, now)? else {
-            return Ok(Err("this request has expired or was already answered"));
-        };
-        let code = store::issue_code(c, &req, scope, &label, now)?;
-        store::disarm(c)?;
-        Ok(Ok(callback(&req, &[("code", &code)])))
-    });
+    let binder = binder(&headers);
+    let decided = state
+        .db
+        .with_conn(|c| store::approve_request(c, &id, &binder, scope, &label, now));
     match decided {
-        Ok(Ok(redirect)) => Json(json!({ "redirect": redirect })).into_response(),
-        Ok(Err(why)) => refuse(StatusCode::CONFLICT, why),
+        Ok(store::Approval::Issued { request, code }) => {
+            let redirect = callback(&request, &[("code", &code)]);
+            Json(json!({ "redirect": redirect })).into_response()
+        }
+        Ok(store::Approval::NotArmed) => refuse(
+            StatusCode::CONFLICT,
+            "HQ is no longer accepting connections; allow one again in Settings",
+        ),
+        Ok(store::Approval::Gone) => refuse(StatusCode::CONFLICT, GONE),
         Err(e) => db_error(e),
     }
 }
 
-pub(crate) async fn deny(State(state): State<Arc<WsState>>, Path(id): Path<String>) -> Response {
+pub(crate) async fn deny(
+    State(state): State<Arc<WsState>>,
+    Path(id): Path<String>,
+    headers: HeaderMap,
+) -> Response {
+    let binder = binder(&headers);
     let taken = state
         .db
-        .with_conn(|c| store::take_request(c, &id, super::now()));
+        .with_conn(|c| store::deny_request(c, &id, &binder, super::now()));
     match taken {
         Ok(Some(req)) => {
             let redirect = callback(&req, &[("error", "access_denied")]);
             Json(json!({ "redirect": redirect })).into_response()
         }
-        Ok(None) => refuse(
-            StatusCode::NOT_FOUND,
-            "this request has expired or was already answered",
-        ),
+        Ok(None) => refuse(StatusCode::NOT_FOUND, GONE),
         Err(e) => db_error(e),
     }
 }

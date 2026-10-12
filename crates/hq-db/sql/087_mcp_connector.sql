@@ -7,7 +7,9 @@ CREATE TABLE IF NOT EXISTS mcp_connector_arming (
     armed_until INTEGER NOT NULL
 );
 
--- An authorization request waiting on the owner's decision on the consent page.
+-- An authorization request waiting on the owner's decision on the consent page. Only the
+-- browser that started it (holding the binder, an HttpOnly cookie) can see or decide it, and
+-- only within the arming window it arrived in.
 CREATE TABLE IF NOT EXISTS mcp_oauth_requests (
     id TEXT PRIMARY KEY,
     client_id TEXT NOT NULL,
@@ -17,7 +19,10 @@ CREATE TABLE IF NOT EXISTS mcp_oauth_requests (
     code_challenge TEXT NOT NULL,
     resource TEXT NOT NULL,
     scope TEXT NOT NULL,
-    expires_at INTEGER NOT NULL
+    created_at INTEGER NOT NULL,
+    expires_at INTEGER NOT NULL,
+    armed_until INTEGER NOT NULL,
+    binder_hash TEXT NOT NULL
 );
 
 -- An approved request, exchanged once for tokens. `grant_id` is set at the exchange, so a

@@ -19,7 +19,7 @@ pub enum ConnectorAction {
         #[arg(long, default_value_t = DEFAULT_ARM_MINUTES)]
         minutes: i64,
     },
-    /// Close the window without connecting anything
+    /// Close the window and drop requests waiting in it
     Disarm,
     /// List connected clients, with revoked ones when asked
     Grants {
@@ -53,10 +53,19 @@ fn run_with_output(
     match action {
         ConnectorAction::Status => status(config, db, now, out),
         ConnectorAction::Arm { minutes } => {
-            if !config.mcp_connector.enabled {
-                bail!(
+            // Same checks the server runs at startup: arming a connector it will not serve helps nobody.
+            if config.profile.is_lite() {
+                bail!("the connector is not available under profile: lite");
+            }
+            match config
+                .mcp_connector
+                .settings(config.web_auth_token.as_deref())
+            {
+                Ok(Some(_)) => {}
+                Ok(None) => bail!(
                     "the connector is off: set mcp_connector.enabled in the config and restart HQ"
-                );
+                ),
+                Err(why) => bail!("the connector cannot start: {why}"),
             }
             let until = now + minutes.clamp(1, MAX_ARM_MINUTES) * 60;
             db.with_conn(|c| store::arm(c, until))?;
@@ -68,11 +77,11 @@ fn run_with_output(
             Ok(())
         }
         ConnectorAction::Disarm => {
-            db.with_conn(store::disarm)?;
+            db.with_conn(store::close_window)?;
             writeln!(out, "Closed. No new client can connect.")?;
             Ok(())
         }
-        ConnectorAction::Grants { all } => grants(db, all, out),
+        ConnectorAction::Grants { all } => grants(db, all, now, out),
         ConnectorAction::Revoke { id } => {
             let revoked =
                 db.with_conn(|c| store::revoke_grant(c, &id, "revoked by the owner", now))?;
@@ -112,11 +121,11 @@ fn status(config: &HqConfig, db: &hq_db::Database, now: i64, out: &mut dyn Write
         Some(until) => writeln!(out, "Accepting a new connection until {}.", clock(until))?,
         None => writeln!(out, "Not accepting new connections (`hq connector arm`).")?,
     }
-    grants(db, false, out)
+    grants(db, false, now, out)
 }
 
-fn grants(db: &hq_db::Database, all: bool, out: &mut dyn Write) -> Result<()> {
-    let grants = db.with_conn(|c| store::list_grants(c, all))?;
+fn grants(db: &hq_db::Database, all: bool, now: i64, out: &mut dyn Write) -> Result<()> {
+    let grants = db.with_conn(|c| store::list_grants(c, all, now))?;
     if grants.is_empty() {
         writeln!(out, "No connected clients.")?;
         return Ok(());
@@ -190,6 +199,10 @@ mod tests {
     fn arming_needs_the_connector_on_and_is_capped() {
         let db = hq_db::Database::open_memory().unwrap();
         assert!(run(&config(false), &db, ConnectorAction::Arm { minutes: 10 }).is_err());
+        let mut no_token = config(true);
+        no_token.web_auth_token = None;
+        let refused = run(&no_token, &db, ConnectorAction::Arm { minutes: 10 }).unwrap_err();
+        assert!(refused.to_string().contains("web_auth_token"), "{refused}");
         run(&config(true), &db, ConnectorAction::Arm { minutes: 600 }).unwrap();
         let until = db.with_conn(|c| store::armed_until(c, NOW)).unwrap();
         assert_eq!(until, Some(NOW + MAX_ARM_MINUTES * 60));
