@@ -492,6 +492,9 @@ the goal and criteria in force at the time (`registry::list_events`).
 
 ## General-purpose agents
 
+Setting one up, everyday use and removal are in [PERSONAL_AGENTS.md](PERSONAL_AGENTS.md).
+This section is the reference.
+
 Hermes (`hermes chat`) and OpenClaw (`openclaw tui --local`) are a second category of
 harness, `general_purpose`, next to the coding agents. They run in the same host, the same
 process sandbox and the same session registry, and the same `harness_session_*` tools, web

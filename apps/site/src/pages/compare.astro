@@ -61,6 +61,12 @@ const rows: Row[] = [
     ha: { text: 'We have not verified how Hermes Agent handles this.' },
   },
   {
+    topic: 'Running the others',
+    hq: { text: 'HQ can run Hermes Agent and OpenClaw as personal agents in its sandbox, for research, review and monitoring, and hand them tasks from its board. They never get code work, an HQ token or your credentials, and a person reviews what they produce.', src: ['personal agents guide', links.personalAgents] },
+    oc: { text: 'Runs under HQ in local mode, with its own provider key and without its gateway daemon.', src: ['personal agents guide', links.personalAgents] },
+    ha: { text: 'Runs under HQ, interactively or as one-shot jobs, with its own provider key.', src: ['personal agents guide', links.personalAgents] },
+  },
+  {
     topic: 'Isolating what the agent runs',
     hq: { text: 'Agent shell commands run in a bubblewrap or sandbox-exec sandbox, required by default after 0.9.0, with an environment allowlist and taint tracking after untrusted reads.', src: ['bash sandbox', links.sec.bashSandbox] },
     oc: { text: 'Sandboxing is off by default. When enabled, only tool execution moves into Docker, Podman, SSH, OpenShell or Crabbox while the Gateway stays on the host. The docs call it "not a perfect security boundary".', src: ['sandboxing docs', OC_SANDBOX] },
@@ -115,6 +121,7 @@ const picks = [
       'Your main job for an agent is running and watching coding agents from your phone or a chat.',
       'You want your memory as plain markdown on your own disk, in one small binary.',
       'Discord, Telegram, the web and a terminal are enough channels, and you accept early software.',
+      'You already use Hermes Agent or OpenClaw and want them sandboxed and supervised next to your coding agents.',
     ],
   },
 ];
@@ -260,8 +267,10 @@ const picks = [
       </div>
       <p class="body closing reveal">
         These are not exclusive. Hermes Agent can import from OpenClaw (<a href={HA}>its repository</a> documents
-        <code>hermes claw migrate</code>), and nothing stops you from running one agent for chat and HQ to keep an
-        eye on your coding sessions. If you are unsure, start with the one whose channels you already use.
+        <code>hermes claw migrate</code>), and HQ can run either one for you as a personal agent: sandboxed, with
+        its own provider key, kept away from code, and handed research or review tasks from your board. The
+        <a href={links.personalAgents}>personal agents guide</a> covers setup and removal. If you are unsure,
+        start with the one whose channels you already use.
       </p>
     </div>
   </section>

@@ -6,7 +6,7 @@ import { links, SITE_URL } from '../data/site';
 
 const installCmd = 'curl -fsSL https://agent-hq.online/install.sh | bash';
 
-const agents = ['Claude Code', 'Codex', 'Cursor', 'OpenCode', 'Pi', 'Copilot CLI', 'Kimi', 'Qwen', 'Antigravity'];
+const agents = ['Claude Code', 'Codex', 'Cursor', 'OpenCode', 'Pi', 'Copilot CLI', 'Kimi', 'Qwen', 'Antigravity', 'Hermes Agent', 'OpenClaw'];
 const reach = ['Discord', 'Telegram', 'Web app', 'Terminal', 'MCP server', 'Markdown vault', 'Signed releases', 'Sub-agents'];
 
 const SCREEN_IDS = ['dashboard', 'sessions-list', 'tasks-board', 'vault-browser'];
@@ -105,12 +105,12 @@ const screens = SCREEN_IDS.map((id) => manifest.find((m) => m.id === id)!);
     </div>
   </section>
 
-  <section class="sec-band" aria-label="Coding agents and channels HQ works with">
+  <section class="sec-band" aria-label="Coding agents, personal agents and channels HQ works with">
     <span class="orb orb-i o-c" aria-hidden="true"></span>
     <div class="container">
       <div class="band glass shine">
         <div class="band-head">
-          <p class="eyebrow band-title">Supervises the coding agents you already use</p>
+          <p class="eyebrow band-title">Supervises the coding and personal agents you already use</p>
           <button type="button" class="btn btn-sm mq-pause" data-marquee-pause aria-pressed="false" hidden>Pause</button>
         </div>
         <div class="marquee">
@@ -252,7 +252,7 @@ const screens = SCREEN_IDS.map((id) => manifest.find((m) => m.id === id)!);
             <span class="chip">Blocked</span>
           </div>
           <h3>Coding agents under supervision</h3>
-          <p class="body">Start, watch, steer and resume Claude Code, Codex, OpenCode and others inside the built-in host, on this machine or a paired one. HQ tells you when one blocks. It never answers a trust prompt for you.</p>
+          <p class="body">Start, watch, steer and resume Claude Code, Codex, OpenCode and others inside the built-in host, on this machine or a paired one. Personal agents such as Hermes and OpenClaw run there too, sandboxed and kept to research, review and monitoring. HQ tells you when one blocks. It never answers a trust prompt for you.</p>
         </article>
 
         <article class="gcard reveal reveal-2">

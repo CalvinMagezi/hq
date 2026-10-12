@@ -125,6 +125,14 @@ nullable columns on `tasks` (`parent_task_id`, `start_date`) and a
   starts before its blocker ends). Unscheduled tasks sit in a tray and can be
   dragged onto the grid. Both views use `usePointerDrag` (pointer events, with
   long-press on touch) instead of HTML5 drag-and-drop.
+- **Bulk actions** (list view, "Select"): tick tasks (a card, an initiative's box, or
+  "Select all" for everything the filters show), then set their status or priority
+  at once. There is no bulk endpoint: the page sends one `PATCH /api/tasks/:id` per
+  task, four at a time, so each task keeps its own `expected_status` check,
+  notifications and soft-dependency warnings. A task someone else moved meanwhile is
+  skipped with a 409, named in the notice, and stays ticked for a retry. Only tasks
+  still on screen count as ticked, and tasks already at the target are left alone.
+  Archive and restore are not bulk actions yet: they depend on sub-task order.
 
 ## Lifecycle timestamps (FR-068)
 

@@ -13,6 +13,8 @@ interface Props {
   /** Shown when a sub-task appears without its parent next to it. */
   parentLabel?: string
   compact?: boolean
+  /** Set while picking tasks for a bulk action: a click ticks the card instead of opening it. */
+  select?: { ticked: boolean; onToggle: (task: TaskItem) => void }
 }
 
 export const STATUS_BADGE_CLASS: Record<TaskStatus, string> = {
@@ -45,7 +47,7 @@ function formatTime(iso: string) {
   return relTime(parseSqliteUtc(iso)) || iso
 }
 
-export function TaskCard({ task, onSelect, parentLabel, compact = false }: Props) {
+export function TaskCard({ task, onSelect, parentLabel, compact = false, select }: Props) {
   const isDone = task.status === 'complete'
   const schedule = scheduleLabel(task)
   const stale = useIsStale(task.id)
@@ -61,17 +63,29 @@ export function TaskCard({ task, onSelect, parentLabel, compact = false }: Props
     task.long_horizon ||
     Boolean(task.blocked_reason)
 
+  const onClick = select ? () => select.onToggle(task) : onSelect ? () => onSelect(task) : undefined
+
   return (
     <div
-      onClick={onSelect ? () => onSelect(task) : undefined}
+      onClick={onClick}
       className={`group relative rounded-2xl border transition-all duration-200 cursor-pointer w-full max-w-full min-w-0 overflow-hidden ${compact ? 'p-3' : 'p-4'} ${
         isDone
           ? 'hq-card opacity-60 hover:opacity-100'
           : 'hq-card hq-card-live'
-      }`}
+      } ${select?.ticked ? 'ring-1 ring-emerald-400/60' : ''}`}
     >
       <div className="flex items-center justify-between gap-2 flex-wrap mb-2">
         <div className="flex items-center gap-2 min-w-0 flex-wrap">
+          {select && (
+            // The card's own click does the toggling; the box only shows the state (and takes the keyboard).
+            <input
+              type="checkbox"
+              checked={select.ticked}
+              onChange={() => {}}
+              aria-label={`Select ${task.display_id}`}
+              className="w-4 h-4 shrink-0 cursor-pointer accent-emerald-400"
+            />
+          )}
           {task.priority && (
             <span
               className={`w-1.5 h-1.5 rounded-full shrink-0 ${PRIORITY_DOT_CLASS[task.priority]}`}
