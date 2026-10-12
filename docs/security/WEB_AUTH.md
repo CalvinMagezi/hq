@@ -148,6 +148,10 @@ because URLs end up in browser history, proxy logs and `Referer` headers.
   link and keeps it in local storage. The fragment never reaches the server.
   Old `?token=` links still work in the PWA but have already been logged by
   whatever proxy served the page, so rotate a token that was shared that way.
+  When the server answers a request with 401 (no token here, or a rotated one),
+  the PWA shows a "Sign in to HQ" banner with a field to paste the token, which
+  it stores the same way. Copies the service worker serves from its cache never
+  trigger it.
 
 One exception remains: `/hooks/gmail` takes its own `GMAIL_WEBHOOK_SECRET`. Send
 it as `Authorization: Bearer <secret>` whenever the sender can set headers. The
