@@ -154,7 +154,7 @@ pub enum CwdBound {
     Any,
     /// The handoff key: `handoff_cwd_allow`, when it lists anything.
     Handoff,
-    /// A claude.ai connector grant: `handoff_cwd_allow`, and nothing at all while it is empty.
+    /// A claude.ai connector grant: the host's own HQ folder plus `handoff_cwd_allow`.
     Connector,
 }
 
@@ -171,22 +171,35 @@ impl CwdBound {
     }
 }
 
-/// A connector grant starts sessions only in folders the owner listed: an empty list means none,
+/// A connector grant starts sessions only in folders the owner chose: an empty list means none,
 /// because a hijacked conversation must not choose where an agent with a shell runs.
 pub fn check_connector_cwd(cwd: &Path, allow: &[String]) -> Result<()> {
     connector_may_spawn(allow)?;
     check_handoff_cwd(cwd, allow)
 }
 
-/// Whether a connector may start any session: only once the owner has listed folders.
+/// Whether a connector may start any session: only with a folder to start in.
 pub fn connector_may_spawn(allow: &[String]) -> Result<()> {
     if allow.iter().all(|a| a.trim().is_empty()) {
         bail!(
-            "a claude.ai connector can start coding sessions only in folders listed in \
-             agent_host.handoff_cwd_allow, which is empty; no session was started"
+            "a claude.ai connector can start coding sessions only in the host's HQ folder \
+             (Documents/HQ) or folders listed in agent_host.handoff_cwd_allow; this host has no \
+             HQ folder and the list is empty, so no session was started"
         );
     }
     Ok(())
+}
+
+/// The folders a connector may start sessions in on one host: that host's own HQ folder, the
+/// same place HQ starts a session given no folder, plus whatever the owner listed.
+pub fn connector_folders(
+    agent_host: &hq_core::config::AgentHostConfig,
+    host_hq_folder: Option<&str>,
+) -> hq_core::config::AgentHostConfig {
+    let mut bounded = agent_host.clone();
+    let root = host_hq_folder.map(str::trim).filter(|r| !r.is_empty());
+    bounded.handoff_cwd_allow.extend(root.map(str::to_string));
+    bounded
 }
 
 /// `require_cwd` plus the deny list and, for a bounded caller, its allow list, from an already

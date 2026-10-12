@@ -1171,6 +1171,31 @@ fn the_deny_list_ignores_trailing_and_doubled_slashes_in_entries_and_paths() {
 }
 
 #[test]
+fn a_connector_may_use_the_hosts_hq_folder_without_any_list() {
+    let owner = hq_core::config::AgentHostConfig::default();
+    let bounded = connector_folders(&owner, Some("/home/user/Documents/HQ"));
+    let ok = |p: &str| require_cwd_in(Some(p), &bounded, CwdBound::Connector).is_ok();
+    assert!(ok("/home/user/Documents/HQ/app"));
+    assert!(
+        !ok("/home/user/Documents/HQ-other"),
+        "a sibling with the same prefix is not inside"
+    );
+    assert!(
+        !ok("/home/user/Documents/HQ/../../.ssh"),
+        "dot-dot does not climb out"
+    );
+    assert!(!ok("/etc"));
+    assert!(
+        owner.handoff_cwd_allow.is_empty(),
+        "the owner's config is not changed"
+    );
+    let none = connector_folders(&owner, None);
+    assert!(require_cwd_in(Some("/srv/app"), &none, CwdBound::Connector).is_err());
+    let blank = connector_folders(&owner, Some("  "));
+    assert!(require_cwd_in(Some("/srv/app"), &blank, CwdBound::Connector).is_err());
+}
+
+#[test]
 fn a_connector_starts_sessions_only_in_listed_folders_and_none_while_the_list_is_empty() {
     let mut host_cfg = hq_core::config::AgentHostConfig::default();
     let refused = require_cwd_in(Some("/srv/work/app"), &host_cfg, CwdBound::Connector)

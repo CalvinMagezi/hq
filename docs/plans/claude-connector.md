@@ -211,10 +211,12 @@ tasks and handoff scopes (`HANDOFF_SCOPE_ARG`, `TASKS_SCOPE_ARG`, `mark_spawned_
    again. One connection may have five requests waiting at once. There is no setting to change
    the list: an owner who wants to skip a check uses a key instead of the connector.
 2. **Spawned work stays bounded.** A session HQ launches gets its own session token, so its calls
-   back to HQ are refused further spawns. A session started on a connector grant must run under
-   `agent_host.handoff_cwd_allow`, and while that list is empty a connector starts no session at
-   all (`CwdBound::Connector` in `harness_session/cwd.rs`, checked before any folder is made). An
-   owner who wants Claude to drive coding agents lists the project roots there. Those sessions
+   back to HQ are refused further spawns. A session started on a connector grant must run in the HQ folder of
+   the host it runs on (`Documents/HQ`, as that host resolves it) or under
+   `agent_host.handoff_cwd_allow` (`connector_folders` and `CwdBound::Connector` in
+   `harness_session/cwd.rs`, checked before any folder is made). A host with no HQ folder and an
+   empty list starts no connector session at all. An owner who wants Claude in other project
+   folders lists them there. Those sessions
    are recorded with origin `connector` (only when a session actually starts, never for one a
    handoff found already working), count against `agent_host.max_mcp_started_sessions`, do not
    start out driven, and are the only ones a connector may send to, resume, stop, re-goal, link
