@@ -27,9 +27,11 @@ pub const RATE_WINDOW_MINUTES: i64 = 60;
 /// How deep a chain of delegated sessions may go (a person's session is 0).
 pub const MAX_SPAWN_DEPTH: i64 = 2;
 /// Children one session may have running at once.
-pub const MAX_LIVE_CHILDREN: usize = 3;
-/// Sessions one session may start inside the rate window.
-pub const MAX_CHILDREN_PER_WINDOW: i64 = 10;
+pub const MAX_LIVE_CHILDREN: usize = 20;
+/// Sessions one session may start inside the rate window. Above the live cap,
+/// so a parent with every slot full can still replace children as they finish.
+pub const MAX_CHILDREN_PER_WINDOW: i64 = 60;
+const _: () = assert!(MAX_CHILDREN_PER_WINDOW as usize > MAX_LIVE_CHILDREN);
 /// The most output quoted to a parent when a child reports in.
 const REPORT_TAIL_CHARS: usize = 1500;
 
@@ -1066,12 +1068,13 @@ mod tests {
             "level 2 may still be started by level 1"
         );
 
-        // Running children: hs-l1 already has one (hs-l2); two more fills it.
-        child_of(&w.db, "hs-l1", "hs-l3", "tk-2", 2);
-        child_of(&w.db, "hs-l1", "hs-l4", "tk-2", 2);
+        // Running children: hs-l1 already has one (hs-l2); the rest fill it.
+        for i in 1..MAX_LIVE_CHILDREN {
+            child_of(&w.db, "hs-l1", &format!("hs-full{i}"), "tk-2", 2);
+        }
         let err = authorize_delegate(&w.db, "hs-l1").unwrap_err().to_string();
         assert!(err.contains("running children"), "{err}");
-        w.db.with_conn(|c| registry::set_status_exited_if_running(c, "hs-l4"))
+        w.db.with_conn(|c| registry::set_status_exited_if_running(c, "hs-full1"))
             .unwrap();
         assert!(
             authorize_delegate(&w.db, "hs-l1").is_ok(),

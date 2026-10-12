@@ -304,10 +304,10 @@ resume one on purpose (`harness_session_resume`).
   No method unlocks, so a key that can drive the host from elsewhere cannot lift
   a lockdown, and sandboxed agents cannot reach the directory.
 - **The breaker.** `hq host serve` locks itself when more than `--max-starts`
-  agents (default 10) start within 10 minutes. It refuses the start that went
+  agents (default 50) start within 10 minutes. It refuses the start that went
   over but stops nothing already running. Only starts that succeeded count;
   agents restored or resumed after a restart do not.
-- **The cap.** `--max-agents` (default 16) bounds the agents running or waiting
+- **The cap.** `--max-agents` (default 64) bounds the agents running or waiting
   at once, so a slow leak stops at a known number. Saved agents over the cap at
   startup wait instead of being dropped.
 - **Alerts.** A lockdown is an event (`kind: lockdown`, the reason in `rule`).
