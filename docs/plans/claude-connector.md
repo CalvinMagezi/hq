@@ -1,6 +1,6 @@
 # HQ as a Claude connector
 
-Status: plan, not started. Lets a person add their own HQ to claude.ai (web, Desktop, mobile)
+Status: plan; slice 0 (prototype) done, findings below. Lets a person add their own HQ to claude.ai (web, Desktop, mobile)
 as a custom connector, so a Claude conversation can reach the same `hq_discover` and `hq_call`
 gateway that Claude Code already uses with a key. Off by default; nothing changes for an
 instance that does not opt in.
@@ -13,11 +13,12 @@ It works on Pro, Max, Team and Enterprise today, with two conditions HQ does not
    from Anthropic's network (`160.79.104.0/21` at the time of writing), not from the user's
    browser. A tailnet-only instance cannot be added. Anthropic's private-network option (MCP
    tunnels) is Enterprise only and in research preview, so it is not a general answer.
-2. **HQ must speak OAuth.** The "Add custom connector" dialog asks for a name and a URL only.
-   Static request headers (an API key) are a beta limited to some organizations, so the
-   existing `AGENTHQ_*` keys cannot be entered there. Claude supports OAuth 2.0 with Dynamic
-   Client Registration (RFC 7591) or a Client ID Metadata Document (CIMD), PKCE S256, and
-   refresh tokens.
+2. **HQ must speak OAuth.** Static request headers (an API key) are a beta limited to some
+   accounts: the dialog shows a "Request headers" section only where it is enabled, so most
+   owners cannot paste an `AGENTHQ_*` key there. Claude supports OAuth 2.0 with a Client ID
+   Metadata Document (CIMD) or Dynamic Client Registration (RFC 7591), PKCE S256, and refresh
+   tokens. After probing the server the dialog shows what it detected ("Sign in now", "Use
+   Claude's published identity") and lets the owner override it.
 
 What Claude's client requires, and where HQ stands:
 
@@ -27,9 +28,9 @@ What Claude's client requires, and where HQ stands:
 | `401` with `WWW-Authenticate: Bearer resource_metadata="..."` on an unauthenticated call. A header on a `200` is ignored. | A refusal is a `200` with a JSON-RPC error (`mcp_http.rs` `handle_mcp`). |
 | Protected resource metadata (RFC 9728) whose `resource` equals the URL the user typed | Missing. |
 | Authorization server metadata (RFC 8414) reachable from Anthropic's range | Missing. |
-| DCR or CIMD, PKCE S256, form-urlencoded `/token`, refresh rotation, `invalid_grant` for a dead refresh token | Missing. |
+| CIMD (or DCR), PKCE S256, form-urlencoded `/token`, refresh rotation, `invalid_grant` for a dead refresh token | Missing. |
 | Callback `https://claude.ai/api/mcp/auth_callback` (and the announced `claude.com` variant); loopback on any port for Claude Code | Missing. |
-| Discovery, registration and token answers in under 10 s, refresh under 30 s | Local SQLite, no issue. |
+| Discovery and token answers in under 10 s, refresh under 30 s | Local SQLite, no issue. |
 
 A side benefit: Claude Code supports the same OAuth flow, so a laptop could connect to a remote
 HQ without a key in its config file.
@@ -51,18 +52,23 @@ HQ without a key in its config file.
   layer. HQ's job is to shrink what a hijacked conversation can do and make it visible.
 - **The consent page never needs to be public.** The browser that approves is the owner's, so the
   authorization page can live on a private origin (a tailnet name) while only the machine-facing
-  endpoints are public. This needs a prototype before it is relied on (see Risks).
+  endpoints are public. Confirmed in slice 0.
+- **CIMD only in the first cut.** claude.ai (web, Desktop, mobile) and Claude Code both identify
+  themselves with a Client ID Metadata Document hosted on `claude.ai`, and claude.ai picks CIMD
+  whenever the metadata offers it (slice 0). Dropping Dynamic Client Registration removes the
+  registration endpoint, the stored-client table and its cap. DCR can be added later if an
+  owner needs a client that only does DCR.
 
 ## Architecture
 
 ```
 claude.ai (Anthropic servers, 160.79.104.0/21)
-   │  POST /mcp, /oauth/token, /oauth/register, GET /.well-known/*
+   │  POST /mcp, /oauth/token, GET /.well-known/*
    ▼
 public ingress (Caddy, Cloudflare Tunnel or Tailscale Funnel), only those paths
    │
    ▼
-hq-web on 127.0.0.1:5678 ─── vault.db (clients, grants, hashed tokens, audit)
+hq-web on 127.0.0.1:5678 ─── vault.db (grants, hashed tokens, audit)
    ▲
    │  GET /oauth/authorize, /connect (PWA consent page), /api/oauth/*
 owner's browser, on the private origin (tailnet) or the same public origin
@@ -78,7 +84,6 @@ registered at all, so they 404 like any unknown path.
 |---|---|---|
 | `GET /.well-known/oauth-protected-resource` and `.../oauth-protected-resource/mcp` | Claude | `{resource: "<public_url>/mcp", authorization_servers: ["<issuer>"], scopes_supported, bearer_methods_supported: ["header"]}` |
 | `GET /.well-known/oauth-authorization-server` | Claude | Issuer, endpoints, `response_types_supported: ["code"]`, `grant_types_supported: ["authorization_code", "refresh_token"]`, `code_challenge_methods_supported: ["S256"]`, `token_endpoint_auth_methods_supported: ["none"]`, `client_id_metadata_document_supported: true`, `scopes_supported` including `offline_access` |
-| `POST /oauth/register` | Claude | DCR for public clients. Refused unless the connector is armed. Every `redirect_uri` must pass the redirect rules. Caps the number of stored clients. |
 | `GET /oauth/authorize` | owner's browser | Validates the request, stores it for 5 minutes under a random id, redirects to the PWA `/connect?request=<id>`. Never issues a code itself. |
 | `GET /api/oauth/requests/{id}`, `POST .../approve`, `POST .../deny` | PWA | Behind the web token, the origin guard and `X-HQ-Client`. Approve returns the callback URL with `code` and `state`; the page navigates there with JS. |
 | `POST /oauth/token` | Claude | `application/x-www-form-urlencoded`. `authorization_code` and `refresh_token` grants. |
@@ -100,20 +105,21 @@ Lite should support connectors; the first cut leaves Lite out.
 - **Redirect URIs.** Exactly `https://claude.ai/api/mcp/auth_callback` and
   `https://claude.com/api/mcp/auth_callback`, plus `http://localhost:<any>/callback` and
   `http://127.0.0.1:<any>/callback` for Claude Code when `allow_loopback_redirects` is on.
-  Configurable, but the default list is closed. Anything else is refused at registration and
-  at authorization.
-- **CIMD.** A `client_id` that is an https URL is fetched only if its host is in `cimd_hosts`
-  (default: `claude.ai`, to be confirmed in slice 0). No redirects followed, 64 KiB cap, 5 s
-  timeout, private and loopback addresses refused. This prevents the client id from being an
-  SSRF lever. The `redirect_uri` must appear in the document's own `redirect_uris` and pass the
-  rule above.
+  Configurable, but the default list is closed. Anything else is refused at authorization.
+- **CIMD.** The `client_id` must be an https URL whose host is in `cimd_hosts` (default:
+  `claude.ai`; claude.ai uses `https://claude.ai/oauth/mcp-oauth-client-metadata`, Claude Code
+  `https://claude.ai/oauth/claude-code-client-metadata`). No redirects followed, 64 KiB cap, 5 s
+  timeout, private and loopback addresses refused, so the client id is not an SSRF lever. The
+  fetch sends an explicit `User-Agent`: claude.ai's edge answers `403` to a library default
+  (Python's was refused in slice 0; reqwest sends none unless told to). The document's
+  `client_id` must equal the URL, and the `redirect_uri` must appear in its `redirect_uris` and
+  pass the rule above. Documents are cached for an hour.
 - **PKCE.** `code_challenge` with `S256` is mandatory; `plain` is refused.
 - **Resource.** If the request carries `resource` (RFC 8707) it must equal `<public_url>/mcp`.
   Tokens are stored with it and only accepted on `/mcp`.
 - **Codes.** Single use, 60 seconds, bound to client, redirect URI, PKCE challenge, resource
   and the approved scope. A second use revokes the grant it produced.
-- **Arming.** Registration and authorization work only inside an armed window that the owner
-  opens from Settings or `hq connector arm` (default 10 minutes, stored in the database so the
+- **Arming.** Authorization works only inside an armed window that the owner opens from Settings or `hq connector arm` (default 10 minutes, stored in the database so the
   CLI and daemon agree). A stranger who learns the URL cannot start a flow, and a phishing link
   to an authorize URL is dead outside the window. Refreshing an existing grant does not need
   arming.
@@ -144,8 +150,11 @@ Lite should support connectors; the first cut leaves Lite out.
    `crates/hq-web/src/auth.rs` gets a `Connector { grant_id, scope }` variant, or the grant id
    travels beside it; settled during slice 1.
 3. `initialize` echoes the client's `protocolVersion` when HQ supports it instead of the fixed
-   `2024-11-05` (`mcp_http.rs` `initialize_result`). Claude Code already works with the fixed
-   value; claude.ai has not been tested against it.
+   `2024-11-05` (`mcp_http.rs` `initialize_result`). claude.ai asks for `2025-11-25`.
+4. Unknown methods keep answering JSON-RPC `-32601`. claude.ai first sends `server/discover`
+   (header `MCP-Protocol-Version: 2026-07-28`) and falls back to `initialize` on `-32601`, so
+   that answer is load-bearing. Params may carry `_meta` (a `traceparent` on `tools/call`),
+   which HQ ignores.
 
 ## Limiting the blast radius
 
@@ -156,10 +165,15 @@ tasks and handoff scopes (`HANDOFF_SCOPE_ARG`, `TASKS_SCOPE_ARG`, `mark_spawned_
 
 1. **Owner confirmation for high-risk tools.** A short, named list
    (`CONNECTOR_CONFIRM_TOOLS` beside the allowlists, with a test that every entry is a real
-   tool): sending mail through `gws`, `hq_ask` in `full` mode, self-update, skill and
-   slash-command edits (they persist instructions into future sessions), and deletes. Whether
-   harness session tools (spawn, send, handoff, `host_send`) belong on it is an open decision
-   (below). On a connector grant such a call raises an approval through `value_items`, which the
+   tool): sending mail through `gws`, `hq_ask` in `full` mode (otherwise HQ's own agent is a
+   way around the list), self-update, skill and slash-command edits (they persist instructions
+   into future sessions), and deletes. Harness session tools (spawn, send, handoff, `host_send`)
+   are deliberately not on it: Claude driving coding sessions is much of the point. The
+   consequence, stated plainly: a spawned coding agent runs with permissions skipped and a
+   shell on its host, so the list stops a single injected instruction from reaching mail or a
+   delete directly, but it is not a wall. The notice on every connector-started session (item
+   5) is the main control there, and it shows the real prompt, directory and host. On a
+   connector grant such a call raises an approval through `value_items`, which the
    owner approves from the chat relay button, the web inbox or `hq queue approve`. Those
    approvals are signed with the install key (`value_items::is_signed_approval`), so a tool
    cannot approve itself. A signature alone does not stop a hijacked conversation from getting
@@ -226,8 +240,8 @@ CLI, a new top-level command beside `hq mcp`: `hq connector status | arm [--minu
 
 ## Ingress
 
-Machine-facing paths published to the internet: `/mcp`, `/oauth/register`, `/oauth/token`,
-`/oauth/revoke` and `/.well-known/oauth-*`.
+Machine-facing paths published to the internet: `/mcp`, `/oauth/token`, `/oauth/revoke` and
+`/.well-known/oauth-*`.
 
 With `authorize_url` set (recommended), nothing else is public: the consent flow
 (`/oauth/authorize`, `/connect`, `/assets/*`, `/api/oauth/*`) runs on the private origin. Without
@@ -235,11 +249,13 @@ it, those four also have to be public, which puts the PWA shell and the web-toke
 internet. Every other `/api` route and `/ws` stay private in both cases.
 
 - **Caddy on a VPS with a public name.** Path-scoped `handle` blocks and a `remote_ip`
-  matcher for `160.79.104.0/21` on the machine-facing paths. The IP rule is defence in depth
-  only: Anthropic can change the range, and OAuth is the real control. A sample
+  matcher for `160.79.104.0/21` on the machine-facing paths (slice 0 saw every Anthropic call,
+  discovery, token and MCP alike, come from inside it). The IP rule is defence in depth only:
+  Anthropic can change the range, and OAuth is the real control. A sample
   `deploy/Caddyfile.connector` ships with the docs.
 - **Cloudflare Tunnel.** For a box without a public address: a public hostname with the same
-  path rules and a WAF rule on the source range.
+  path rules and a WAF rule on the source range. The client address arrives in
+  `Cf-Connecting-Ip`. Slice 0 ran through a Cloudflare quick tunnel without trouble.
 - **Tailscale Funnel.** Publishes a tailnet service on the internet. Whether HQ can see the real
   client address behind it is unverified, so the IP rule may not be possible there.
 
@@ -251,21 +267,17 @@ owner's browser, on the tailnet, loads the consent page; Anthropic never can.
 
 Each slice ends with a check that fails if it breaks.
 
-0. **Prototype the unknowns.** A throwaway build on a test instance (the Hetzner demo box):
-   does claude.ai accept an `authorization_endpoint` on a different origin from the token
-   endpoint, which `protocolVersion` it sends, whether it uses CIMD or DCR against HQ's
-   metadata, and which host its CIMD `client_id` URL is on (the `cimd_hosts` default is a guess,
-   and a wrong guess fails every connect). Outcome recorded in this document before slice 3.
+0. **Prototype the unknowns.** Done; see "Slice 0 findings".
 1. **401 and discovery.** `401` plus `WWW-Authenticate`, protected resource metadata, protocol
    version negotiation, config struct and startup validation. Tests in `mcp_http.rs` for the
    status, the header and every key still working.
-2. **Storage.** Migration `087_mcp_connector.sql`: clients, pending requests, codes, grants,
+2. **Storage.** Migration `087_mcp_connector.sql`: pending requests, codes, grants,
    tokens (hashed), audit, armed window. `crates/hq-db/src/mcp_connector.rs` with unit tests for
    expiry, single-use codes, rotation and reuse detection.
-3. **Authorization server.** Metadata, register, authorize, token, revoke; redirect, CIMD and
-   PKCE rules; arming; `hq connector` CLI. Tests drive a full flow in process with a
-   hand-written client, plus each refusal (wrong redirect, `plain` PKCE, reused code, unarmed
-   registration, foreign CIMD host, rotated refresh token).
+3. **Authorization server.** Metadata, authorize, token, revoke; redirect, CIMD and PKCE rules;
+   arming; `hq connector` CLI. Tests drive a full flow in process with a hand-written client
+   that replays the requests recorded in slice 0, plus each refusal (wrong redirect, `plain`
+   PKCE, reused code, unarmed authorize, foreign CIMD host, rotated refresh token).
 4. **Consent and management UI.** PWA `/connect` route and a "Claude connector" section in
    Settings: arm, grants with last use, revoke, kill switch. Checked in the browser on desktop
    and mobile, including the expired-request and unarmed states.
@@ -282,17 +294,11 @@ the PRs for slices 3 to 5, and again after fixes.
 
 ## Risks and open questions
 
-- **Open decision: are harness sessions on the confirm list?** Letting Claude start and drive
-  coding sessions freely is much of the point of the connector, and the directory allowlist
-  plus a notice on every spawn already bound it. The alternative is a per-grant checkbox on the
-  consent page ("ask me before starting sessions"), preselected from config. Mail, deletes,
-  self-update and skill edits stay gated either way.
+- **Decided: harness sessions are not on the confirm list.** The directory allowlist and a
+  notice on every connector-started session bound them. A later option, if needed: force
+  connector-started sessions into `governance.bash.sandbox: required`.
 - **Defaults differ from a personal instance.** The shipped default scope is `read_only`; an
   owner who wants Claude as a full orchestrator sets `default_scope: full`.
-
-- **Split origins** are allowed by RFC 8414 and not forbidden by Claude's connector docs, but
-  not confirmed either. If claude.ai refuses them, the consent page must be public; arming and
-  the web-token login then carry the protection.
 - **Anthropic's egress range** can change; the IP rule is not a control to rely on.
 - **Confirm-tier waits** depend on how long claude.ai waits for a tool result. Unknown; the
   pending-and-retry path covers a short limit.
@@ -301,6 +307,41 @@ the PRs for slices 3 to 5, and again after fixes.
   option would then be a few lines of docs.
 - **Data leaving the box.** Tool results become part of a claude.ai conversation under
   Anthropic's retention terms. The docs say so on the consent page and in the guide.
+
+## Slice 0 findings
+
+Run on 2026-10-12 with a throwaway stub (Python, two listeners on loopback): the public side
+behind a Cloudflare quick tunnel served `/mcp`, `/.well-known/*`, `/register` and `/token`; the
+consent side behind `tailscale serve` (tailnet only) served `/authorize`. The stub advertised
+CIMD and DCR, echoed the protocol version, and issued 2 minute access tokens to force a refresh.
+A real claude.ai account added it, connected, listed the tool and called it.
+
+- **Split origins work.** claude.ai read the metadata on the public origin and sent the owner's
+  browser to `authorization_endpoint` on the tailnet origin. The code came back through
+  `https://claude.ai/api/mcp/auth_callback` and the token exchange succeeded.
+- **CIMD is chosen when offered.** `client_id` was `https://claude.ai/oauth/mcp-oauth-client-metadata`.
+  Its document lists one redirect URI (`https://claude.ai/api/mcp/auth_callback`), grant types
+  `authorization_code`, `refresh_token` and `urn:ietf:params:oauth:grant-type:jwt-bearer`, and
+  `token_endpoint_auth_method: none`. `/register` was never called.
+- **The CIMD fetch needs a real User-Agent.** claude.ai answered `403` to Python's default agent
+  and `200` to an explicit one. The first connect attempt failed on this.
+- **Authorize request:** `response_type=code`, PKCE S256, `state`, `scope` = every entry of
+  `scopes_supported` plus `offline_access`, `resource` = the exact `/mcp` URL, `prompt=consent`.
+- **Token exchange:** form-urlencoded, `client_id`, `code_verifier` (128 characters),
+  `redirect_uri` and `resource`. PKCE, client and redirect all matched.
+- **Refresh:** proactive, before expiry, with `client_id` and `resource` and no `scope`.
+  Rotation was honoured: the next calls used the new tokens.
+- **MCP:** `server/discover` first (`MCP-Protocol-Version: 2026-07-28`); on `-32601` it falls
+  back to `initialize` with `2025-11-25`, then `notifications/initialized` (`202`) and
+  `tools/list`. Two client identities connect (`Anthropic/Toolbox` and `Anthropic/ClaudeAI`).
+  No `GET /mcp`, no `Mcp-Session-Id`, no batches. The `readOnlyHint` annotation put the tool in
+  claude.ai's "Read-only tools" group.
+- **Network:** every Anthropic request came from `160.79.106.x`. Discovery and token calls use
+  `python-httpx`; MCP calls use the agent `Claude-User`.
+- **The connector also appears in Claude Desktop's Code sessions** on the same account, so a
+  desktop coding session can call HQ through it with no key in its config.
+- **Not tested:** DCR (not needed in the first cut) and HQ's current fixed `2024-11-05` answer
+  (slice 1 replaces it with an echo).
 
 ## Sources
 
