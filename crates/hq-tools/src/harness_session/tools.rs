@@ -20,16 +20,20 @@ async fn choose_start_dir(
     requested: Option<&str>,
     cfg: &hq_core::config::HqConfig,
     host_name: &str,
-    handoff_scope: bool,
+    bound: super::CwdBound,
     label: &str,
     harness: &str,
 ) -> Result<super::StartDir> {
     let agent_host = &cfg.agent_host;
+    // Refused before any folder is made for it.
+    if bound == super::CwdBound::Connector {
+        super::connector_may_spawn(&agent_host.handoff_cwd_allow)?;
+    }
     let vault_guard = |p: &std::path::Path| {
         super::check_cwd_outside_vault(p, host_name, &agent_host.default_host, &cfg.vault_path)
     };
     let wanted = requested
-        .map(|r| super::require_cwd_in(Some(r), agent_host, handoff_scope))
+        .map(|r| super::require_cwd_in(Some(r), agent_host, bound))
         .transpose()?;
     // A folder that is not allowed is refused whether or not it exists, never quietly swapped.
     if let Some(path) = &wanted {
@@ -48,11 +52,7 @@ async fn choose_start_dir(
     let fallback =
         tokio::task::spawn_blocking(move || super::workspace_start_dir(&*h, w.as_deref(), &l, &k))
             .await??;
-    super::require_cwd_in(
-        Some(&fallback.path.to_string_lossy()),
-        agent_host,
-        handoff_scope,
-    )?;
+    super::require_cwd_in(Some(&fallback.path.to_string_lossy()), agent_host, bound)?;
     vault_guard(&fallback.path)?;
     Ok(fallback)
 }
@@ -126,7 +126,7 @@ impl HqTool for HarnessSessionSpawnTool {
         if self.chat.as_ref().is_some_and(|c| c.driver_turn) {
             anyhow::bail!("a driver turn cannot start sessions; tell the user what you need");
         }
-        let origin = super::start_origin(self.chat.as_ref());
+        let origin = super::call_origin(self.chat.as_ref(), &args);
         super::check_origin_cap(&self.db, origin)?;
         let host_handle = crate::agent_host::host(Some(host.as_str()).filter(|h| !h.is_empty()))?;
         let requested = args
@@ -134,13 +134,13 @@ impl HqTool for HarnessSessionSpawnTool {
             .and_then(|v| v.as_str())
             .map(str::trim)
             .filter(|c| !c.is_empty());
-        let scope = super::is_handoff_scope(&args);
+        let bound = super::CwdBound::of(&args);
         let start = choose_start_dir(
             &host_handle,
             requested,
             &cfg,
             &host,
-            scope,
+            bound,
             &label,
             &harness,
         )
@@ -179,7 +179,7 @@ impl HqTool for HarnessSessionSpawnTool {
             && super::is_missing_dir_error(e)
         {
             let fallback =
-                choose_start_dir(&host_handle, None, &cfg, &host, scope, &label, &harness).await?;
+                choose_start_dir(&host_handle, None, &cfg, &host, bound, &label, &harness).await?;
             note = Some(format!(
                 "{asked} does not exist on host '{}', so the session started in {} instead.",
                 host_handle.name(),
@@ -198,6 +198,9 @@ impl HqTool for HarnessSessionSpawnTool {
             report["cwd_note"] = json!(note);
         }
         super::tag_origin(&self.db, &report, origin);
+        let brief = super::connector_brief(&args, &["prompt", "goal", "done_criteria"]);
+        let cwd = report["cwd"].as_str().unwrap_or("unknown").to_string();
+        super::notify_connector_start(&self.vault_path, &self.db, &args, &report, &brief, &cwd);
         Ok(report)
     }
 }
@@ -319,6 +322,7 @@ impl HqTool for HarnessSessionLogsTool {
         let lines = args.get("lines").and_then(|v| v.as_u64()).unwrap_or(40) as usize;
         let db = self.db.clone();
         let id = arg_str(&args, "session_id");
+        super::connector_may_drive(&db, &args, &id)?;
         tokio::task::spawn_blocking(move || super::tail_log(&db, &id, lines.clamp(1, 500))).await?
     }
 }
@@ -354,6 +358,7 @@ impl HqTool for HarnessSessionSendTool {
         let db = self.db.clone();
         let id = arg_str(&args, "session_id");
         super::spawned_may_target(&args, &id)?;
+        super::connector_may_drive(&db, &args, &id)?;
         let text = arg_str(&args, "text");
         let keys = arg_str_list(&args, "keys");
         if text.is_empty() && keys.is_empty() {
@@ -398,6 +403,7 @@ impl HqTool for HarnessSessionStopTool {
     async fn execute(&self, args: Value) -> Result<Value> {
         let db = self.db.clone();
         let id = arg_str(&args, "session_id");
+        super::connector_may_drive(&db, &args, &id)?;
         tokio::task::spawn_blocking(move || super::stop(&db, &id)).await?
     }
 }
@@ -433,6 +439,7 @@ impl HqTool for HarnessSessionResumeTool {
         super::refuse_if_spawned(&args)?;
         let prompt = arg_str(&args, "prompt");
         let id = arg_str(&args, "session_id");
+        super::connector_may_drive(&self.db, &args, &id)?;
         let reserved =
             super::reserve_send(&self.db, &id, self.chat.as_ref(), super::SendKind::Text)?;
         let result = super::resume(
@@ -539,6 +546,7 @@ impl HqTool for HarnessSessionLinkTool {
         if id.is_empty() || task.is_empty() {
             anyhow::bail!("session_id and task_id are required");
         }
+        super::connector_may_drive(&db, &args, &id)?;
         let chat = self.chat.clone();
         tokio::task::spawn_blocking(move || {
             super::link(&db, &id, &task, chat.as_ref().map(|c| c.new_watch(&args)))
@@ -625,6 +633,7 @@ impl HqTool for HarnessSessionGoalTool {
                 "this turn read untrusted content, so it cannot change a session's goal; ask the user"
             );
         }
+        super::connector_may_drive(&self.db, &args, &arg_str(&args, "session_id"))?;
         let db = self.db.clone();
         let id = arg_str(&args, "session_id");
         let (goal, done) = (arg_str(&args, "goal"), arg_str(&args, "done_criteria"));
@@ -805,7 +814,7 @@ impl HqTool for HarnessSessionHandoffTool {
                 guest.name
             );
         }
-        let origin = super::start_origin(self.chat.as_ref());
+        let origin = super::call_origin(self.chat.as_ref(), &args);
         super::check_origin_cap(&self.db, origin)?;
         let cfg = hq_core::config::HqConfig::load()?;
         let host_name = arg_str(&args, "host");
@@ -816,9 +825,9 @@ impl HqTool for HarnessSessionHandoffTool {
             .map(str::trim)
             .filter(|c| !c.is_empty());
         let (label, harness) = (arg_str(&args, "title"), arg_str(&args, "harness"));
-        let scope = super::is_handoff_scope(&args);
+        let bound = super::CwdBound::of(&args);
         let start =
-            choose_start_dir(&host, requested, &cfg, &host_name, scope, &label, &harness).await?;
+            choose_start_dir(&host, requested, &cfg, &host_name, bound, &label, &harness).await?;
         let owned = |key: &str| arg_str(&args, key);
         let acceptance = [owned("acceptance"), owned("done_criteria")]
             .into_iter()
@@ -855,19 +864,49 @@ impl HqTool for HarnessSessionHandoffTool {
         if let Some(note) = start.note {
             report["cwd_note"] = json!(note);
         }
-        super::tag_origin(&self.db, &report, origin);
+        // A handoff that found a session already working started nothing: its origin stays as it was.
+        if report["handoff"] != "existing_session" {
+            super::tag_origin(&self.db, &report, origin);
+        }
+        let mut brief = super::connector_brief(
+            &args,
+            &[
+                "task_id",
+                "title",
+                "description",
+                "acceptance",
+                "done_criteria",
+                "prompt",
+            ],
+        );
+        // The prompt is built from the stored task, which may hold text written earlier.
+        if let Some(task_id) = report["task"]["id"].as_str() {
+            let stored = self.db.with_conn(|c| hq_db::tasks::get_task(c, task_id));
+            if let Ok(Some(task)) = stored {
+                brief.push_str(&format!(
+                    "\nstored task title: {}\nstored task description: {}",
+                    task.title, task.description
+                ));
+            }
+        }
+        let cwd = start.path.to_string_lossy().into_owned();
+        super::notify_connector_start(&self.vault_path, &self.db, &args, &report, &brief, &cwd);
         Ok(report)
     }
 }
 
 /// Whether a handoff may start its session driven: not from the handoff key (so its holder cannot
-/// fill the driven-session cap) and not from an `hq_ask` reply.
+/// fill the driven-session cap), not from a claude.ai connector for the same reason, and not from
+/// an `hq_ask` reply.
 pub(super) fn handoff_drives_new(
     default_on: bool,
     args: &Value,
     chat: Option<&WatchingChat>,
 ) -> bool {
-    default_on && !super::is_handoff_scope(args) && !chat.is_some_and(|c| c.from_ask)
+    default_on
+        && !super::is_handoff_scope(args)
+        && super::connector_label(args).is_none()
+        && !chat.is_some_and(|c| c.from_ask)
 }
 
 /// `chat` is the web chat of the calling session, if any.

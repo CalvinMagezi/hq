@@ -30,6 +30,13 @@ pub enum ConnectorAction {
     Revoke { id: String },
     /// Disconnect every client and close the window
     Off,
+    /// The newest calls connected clients made: tool, outcome and time, never the arguments
+    Log {
+        #[arg(long)]
+        grant: Option<String>,
+        #[arg(long, default_value_t = 30)]
+        limit: i64,
+    },
 }
 
 pub fn run(config: &HqConfig, action: ConnectorAction) -> Result<()> {
@@ -89,6 +96,23 @@ fn run_with_output(
                 bail!("no live grant {id}; `hq connector grants` lists them");
             }
             writeln!(out, "Revoked {id}.")?;
+            Ok(())
+        }
+        ConnectorAction::Log { grant, limit } => {
+            let calls = db.with_conn(|c| store::recent_calls(c, grant.as_deref(), limit))?;
+            if calls.is_empty() {
+                writeln!(out, "No calls logged.")?;
+            }
+            for c in calls {
+                writeln!(
+                    out,
+                    "{}  {}  {}  {}",
+                    clock(c.at),
+                    c.grant_id,
+                    c.tool,
+                    c.outcome
+                )?;
+            }
             Ok(())
         }
         ConnectorAction::Off => {
@@ -233,6 +257,21 @@ mod tests {
             run(&cfg, &db, ConnectorAction::Grants { all: true })
                 .unwrap()
                 .contains("No connected")
+        );
+        db.with_conn(|c| store::record_call(c, "grant-a", "vault_search", "ok", "h", NOW))
+            .unwrap();
+        let log = run(
+            &cfg,
+            &db,
+            ConnectorAction::Log {
+                grant: None,
+                limit: 5,
+            },
+        )
+        .unwrap();
+        assert!(
+            log.contains("grant-a") && log.contains("vault_search"),
+            "{log}"
         );
     }
 }

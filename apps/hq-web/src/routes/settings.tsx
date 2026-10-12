@@ -202,6 +202,7 @@ function CodingAgentsSection({ host: h }: { host: HqSettings['agent_host'] }) {
 }
 
 const CONNECTOR_QUERY_KEY = ['oauth-connector']
+const ARMED_REFRESH_MS = 15_000
 const scopeTitle = (id: string) => SCOPE_CHOICES.find((s) => s.id === id)?.title ?? id
 
 /** Small text button that runs one connector action. */
@@ -228,7 +229,12 @@ function GrantRow({ grant, onRevoke, busy }: { grant: ConnectorGrant; onRevoke: 
 /** The claude.ai connector: where Claude reaches HQ, the window for a new connection, and who is connected. */
 function ConnectorSection() {
   const client = useQueryClient()
-  const { data } = useQuery({ queryKey: CONNECTOR_QUERY_KEY, queryFn: fetchConnector })
+  const { data } = useQuery({
+    queryKey: CONNECTOR_QUERY_KEY,
+    queryFn: fetchConnector,
+    // While a window is open, look again so its closing shows without a reload.
+    refetchInterval: (q) => (q.state.data?.enabled && q.state.data.armed_until !== null ? ARMED_REFRESH_MS : false),
+  })
   const act = useMutation({
     mutationFn: (run: () => Promise<unknown>) => run(),
     onSettled: () => client.invalidateQueries({ queryKey: CONNECTOR_QUERY_KEY }),
@@ -243,6 +249,7 @@ function ConnectorSection() {
     )
   }
   const busy = act.isPending
+  const armedUntil = data.armed_until !== null && unixToMs(data.armed_until) > Date.now() ? data.armed_until : null
   const disconnectAll = () => {
     if (window.confirm('Disconnect every Claude client from this HQ?')) act.mutate(connectorOff)
   }
@@ -250,16 +257,16 @@ function ConnectorSection() {
     <Section id="connector" title="Claude connector">
       <Row label="Connector URL"><span className="font-mono text-xs select-all">{data.url}</span></Row>
       <Row label="New connections">
-        {data.armed_until === null ? (
+        {armedUntil === null ? (
           <ActionButton busy={busy} onClick={() => act.mutate(() => armConnector())}>Allow a new connection</ActionButton>
         ) : (
           <span className="inline-flex flex-wrap items-baseline justify-end gap-x-3 gap-y-1">
-            <span>Open until {clockTime(data.armed_until)}</span>
+            <span>Open until {clockTime(armedUntil)}</span>
             <ActionButton busy={busy} onClick={() => act.mutate(disarmConnector)}>Close</ActionButton>
           </span>
         )}
       </Row>
-      {data.armed_until !== null && (
+      {armedUntil !== null && (
         <Row label="Next step" block>In Claude, open Settings, then Connectors, add a custom connector with the URL above and press Connect. Approve it on the page that opens.</Row>
       )}
       {data.grants.length === 0 && <Row label="Connected">nobody</Row>}
@@ -268,6 +275,15 @@ function ConnectorSection() {
       ))}
       {data.grants.length > 0 && (
         <Row label="Disconnect everything"><ActionButton busy={busy} onClick={disconnectAll}>Disconnect all</ActionButton></Row>
+      )}
+      {data.recent_calls.length > 0 && (
+        <Row label="Recent calls" block>
+          <ul className="flex flex-col gap-1 font-mono text-xs">
+            {data.recent_calls.map((c, i) => (
+              <li key={`${c.at}-${i}`}>{c.tool} · {c.outcome.replace('_', ' ')} · {relTime(unixToMs(c.at))}</li>
+            ))}
+          </ul>
+        </Row>
       )}
       {act.error && <Row label="Error" block>{act.error instanceof Error ? act.error.message : 'That did not work.'}</Row>}
     </Section>

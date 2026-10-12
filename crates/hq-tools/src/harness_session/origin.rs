@@ -75,6 +75,29 @@ pub fn refuse_attach(chat: Option<&WatchingChat>) -> Result<()> {
 }
 
 /// Where a session started from: an MCP client with no chat, an `hq_ask` chat, or the owner's chat.
+/// How a call starts a session: a claude.ai connector, or as `start_origin` reads the chat.
+pub fn call_origin(chat: Option<&WatchingChat>, args: &Value) -> &'static str {
+    if super::connector_label(args).is_some() {
+        return registry::ORIGIN_CONNECTOR;
+    }
+    start_origin(chat)
+}
+
+/// A claude.ai connection drives only sessions a connection started; the owner's own sessions
+/// stay theirs.
+pub fn connector_may_drive(db: &Arc<Database>, args: &Value, session_id: &str) -> Result<()> {
+    if super::connector_label(args).is_none() {
+        return Ok(());
+    }
+    let row = db.with_conn(|c| registry::get(c, session_id))?;
+    if row.is_some_and(|r| r.origin == registry::ORIGIN_CONNECTOR) {
+        return Ok(());
+    }
+    bail!(
+        "a claude.ai connection may drive only sessions it started; {session_id} is not one of them"
+    )
+}
+
 pub fn start_origin(chat: Option<&WatchingChat>) -> &'static str {
     match chat {
         None => registry::ORIGIN_MCP,
@@ -86,6 +109,21 @@ pub fn start_origin(chat: Option<&WatchingChat>) -> &'static str {
 /// Refuse a start that would pass the cap on sessions of its origin. The owner's own chats are not capped.
 pub fn check_origin_cap(db: &Arc<Database>, origin: &str) -> Result<()> {
     let cfg = agent_host_config();
+    if origin == registry::ORIGIN_CONNECTOR {
+        let running = db.with_conn(|c| {
+            Ok(
+                registry::count_running_with_origin(c, registry::ORIGIN_MCP)?
+                    + registry::count_running_with_origin(c, registry::ORIGIN_CONNECTOR)?,
+            )
+        })?;
+        let cap = cfg.mcp_started_session_cap();
+        if running >= cap {
+            bail!(
+                "{cap} sessions started over MCP are already running (agent_host.max_mcp_started_sessions); stop one or ask the owner"
+            );
+        }
+        return Ok(());
+    }
     let (cap, setting) = match origin {
         registry::ORIGIN_ASK => (
             cfg.ask_spawned_session_cap(),

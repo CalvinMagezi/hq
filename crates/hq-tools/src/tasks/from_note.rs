@@ -296,9 +296,18 @@ impl HqTool for TaskCreateFromNoteTool {
             .and_then(|v| v.as_str())
             .filter(|s| !s.is_empty())
             .map(String::from);
-        let created_by = {
-            let v = arg_str(&args, "created_by");
-            if v.is_empty() { "hq".to_string() } else { v }
+        if crate::harness_session::is_connector_actor(&hq_db::tasks::clean_label(&arg_str(
+            &args,
+            "created_by",
+        ))) {
+            bail!("mcp:connector names are for claude.ai connections; file under your own name");
+        }
+        let created_by = match crate::harness_session::connector_label(&args) {
+            Some(label) => crate::harness_session::connector_actor(label),
+            None => {
+                let v = arg_str(&args, "created_by");
+                if v.is_empty() { "hq".to_string() } else { v }
+            }
         };
         // The tasks scope may rewrite the text of tasks filed under its name, and a promoted
         // note's text becomes a launched session's prompt, so no other caller files under it.
@@ -404,7 +413,10 @@ impl HqTool for TaskCreateFromNoteTool {
             })
         })?;
 
-        notify_recipients(self.vault.vault_path(), &task, None, self.route_tags);
+        // A connector's note tags would put text in a mailbox without the owner's approval.
+        if crate::harness_session::connector_label(&args).is_none() {
+            notify_recipients(self.vault.vault_path(), &task, None, self.route_tags);
+        }
 
         let mut out = json!({
             "task": task_json(&task),

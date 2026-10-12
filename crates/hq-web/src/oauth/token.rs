@@ -68,6 +68,7 @@ fn exchange_code(state: &WsState, form: &Params, now: i64) -> Response {
     {
         Ok(Some(pair)) => {
             tracing::info!(grant = %pair.grant_id, "oauth: a client connected");
+            announce_connection(state, &pair.grant_id, now);
             tokens(&pair)
         }
         Ok(None) => oauth_error("invalid_grant"),
@@ -88,10 +89,40 @@ fn refresh(state: &WsState, form: &Params, now: i64) -> Response {
         Ok(Refresh::Refused) => oauth_error("invalid_grant"),
         Ok(Refresh::Reused { grant_id }) => {
             tracing::warn!(grant = %grant_id, "oauth: a spent refresh token came back; grant revoked");
+            super::guard::notify_owner(
+                state,
+                "A Claude connection was disconnected",
+                &format!(
+                    "Grant {grant_id} presented a refresh token that had already been used, which \
+                     means a copy of it exists somewhere else. HQ revoked the grant. Reconnect \
+                     from Claude if it was yours."
+                ),
+            );
             oauth_error("invalid_grant")
         }
         Err(e) => server_error(e),
     }
+}
+
+/// Tells the owner a new connection is live, with its name and what it may reach.
+fn announce_connection(state: &WsState, grant_id: &str, now: i64) {
+    let grant = state
+        .db
+        .with_conn(|c| store::list_grants(c, false, now))
+        .ok()
+        .and_then(|gs| gs.into_iter().find(|g| g.id == grant_id));
+    let Some(g) = grant else {
+        return;
+    };
+    super::guard::notify_owner(
+        state,
+        "Claude is connected to HQ",
+        &format!(
+            "\"{}\" ({}) can now reach HQ with {} access. Disconnect it any time in Settings or \
+             with `hq connector revoke {}`.",
+            g.label, g.client_name, g.grant_scope, g.id
+        ),
+    );
 }
 
 /// RFC 7009: the answer is the same whether or not the token was known.

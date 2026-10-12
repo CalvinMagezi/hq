@@ -706,6 +706,7 @@ impl HqTool for TaskUpdateTool {
         if scoped {
             check_scoped_text(&args)?;
         }
+        let scope_args = args.clone();
         // The goal of a linked session and the prompt of a launched one are built from a
         // task's title and description, so the tasks scope may rewrite them only on tasks it
         // filed itself. Status, priority, dates and comments stay open to it.
@@ -761,7 +762,7 @@ impl HqTool for TaskUpdateTool {
                     .ok_or_else(|| anyhow::anyhow!("task {id_for_update} not found"))?;
                 if scoped
                     && edits_text
-                    && !crate::harness_session::is_tasks_scope_actor(&previous.created_by)
+                    && !crate::harness_session::is_own_scope_actor(&scope_args, &previous.created_by)
                 {
                     bail!(
                         "this connection may edit the title and description only of tasks it created; \

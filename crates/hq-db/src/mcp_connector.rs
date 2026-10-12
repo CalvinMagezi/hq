@@ -711,6 +711,70 @@ pub fn list_grants(conn: &Connection, include_ended: bool, now: i64) -> Result<V
     Ok(rows)
 }
 
+/// How long the call log is kept.
+pub const AUDIT_RETENTION_SECS: i64 = 30 * 24 * 60 * 60;
+
+/// One logged call.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
+pub struct AuditEntry {
+    pub grant_id: String,
+    pub tool: String,
+    pub outcome: String,
+    pub args_sha256: String,
+    pub at: i64,
+}
+
+/// Logs a call: the tool, how it ended, and a hash of its arguments, never the arguments.
+/// Each write also drops what has aged out, so the log keeps 30 days without a separate task.
+pub fn record_call(
+    conn: &Connection,
+    grant_id: &str,
+    tool: &str,
+    outcome: &str,
+    args_sha256: &str,
+    now: i64,
+) -> Result<()> {
+    conn.execute(
+        "INSERT INTO mcp_connector_audit (grant_id, tool, outcome, args_sha256, at)
+         VALUES (?1, ?2, ?3, ?4, ?5)",
+        params![grant_id, tool, outcome, args_sha256, now],
+    )?;
+    purge_expired(conn, now)
+}
+
+/// Calls a grant made since `since`, for its rate limit.
+pub fn calls_since(conn: &Connection, grant_id: &str, since: i64) -> Result<i64> {
+    Ok(conn.query_row(
+        "SELECT COUNT(*) FROM mcp_connector_audit WHERE grant_id = ?1 AND at >= ?2",
+        params![grant_id, since],
+        |r| r.get(0),
+    )?)
+}
+
+/// The newest logged calls, for one grant or all of them.
+pub fn recent_calls(
+    conn: &Connection,
+    grant_id: Option<&str>,
+    limit: i64,
+) -> Result<Vec<AuditEntry>> {
+    let rows = conn
+        .prepare(
+            "SELECT grant_id, tool, outcome, args_sha256, at FROM mcp_connector_audit
+             WHERE ?1 IS NULL OR grant_id = ?1 ORDER BY at DESC, id DESC LIMIT ?2",
+        )?
+        .query_map(params![grant_id, limit], |r| {
+            Ok(AuditEntry {
+                grant_id: r.get(0)?,
+                tool: r.get(1)?,
+                outcome: r.get(2)?,
+                args_sha256: r.get(3)?,
+                at: r.get(4)?,
+            })
+        })?
+        .collect::<rusqlite::Result<_>>()?;
+    Ok(rows)
+}
+
 /// Drops requests, codes and tokens that can no longer be used.
 pub fn purge_expired(conn: &Connection, now: i64) -> Result<()> {
     conn.execute(
@@ -724,6 +788,10 @@ pub fn purge_expired(conn: &Connection, now: i64) -> Result<()> {
     conn.execute(
         "DELETE FROM mcp_oauth_tokens WHERE expires_at <= ?1 - ?2",
         params![now, REUSE_GRACE_SECS],
+    )?;
+    conn.execute(
+        "DELETE FROM mcp_connector_audit WHERE at <= ?1 - ?2",
+        params![now, AUDIT_RETENTION_SECS],
     )?;
     Ok(())
 }

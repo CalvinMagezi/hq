@@ -79,6 +79,8 @@ pub struct HarnessSessionRow {
 pub const ORIGIN_USER: &str = "user";
 pub const ORIGIN_MCP: &str = "mcp";
 pub const ORIGIN_ASK: &str = "ask";
+/// Started over a claude.ai connector grant. Counted with `ORIGIN_MCP` against its cap.
+pub const ORIGIN_CONNECTOR: &str = "connector";
 /// Started by the stack dispatcher for a task assigned to a specialist.
 pub const ORIGIN_STACK: &str = "stack";
 

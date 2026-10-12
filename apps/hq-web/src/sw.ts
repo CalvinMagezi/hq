@@ -176,10 +176,15 @@ self.addEventListener('notificationclick', (event) => {
   )
 })
 
+/** Server pages and redirects the app shell must never stand in for: the claude.ai connector's
+ * sign-in (a redirect the worker sees as an opaque, not-ok response) and its metadata. */
+const NETWORK_ONLY_PREFIXES = ['/oauth/', '/.well-known/']
+
 self.addEventListener('fetch', (event) => {
   const { request } = event
   const url = new URL(request.url)
   if (request.method !== 'GET' || url.origin !== self.location.origin) return
+  if (NETWORK_ONLY_PREFIXES.some((p) => url.pathname.startsWith(p))) return
 
   // Pages: every route is the same SPA shell. Network first, cached shell after 3s.
   if (request.mode === 'navigate') {

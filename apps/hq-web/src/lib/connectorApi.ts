@@ -13,6 +13,13 @@ export interface ConnectorGrant {
   last_used_at: number | null
 }
 
+export interface ConnectorCall {
+  grant_id: string
+  tool: string
+  outcome: 'ok' | 'error' | 'pending' | 'declined' | 'refused' | 'rate_limited'
+  at: number
+}
+
 export type ConnectorStatus =
   | { enabled: false }
   | {
@@ -22,6 +29,7 @@ export type ConnectorStatus =
       default_scope: GrantScope
       armed_until: number | null
       grants: ConnectorGrant[]
+      recent_calls: ConnectorCall[]
     }
 
 export interface ConnectRequest {

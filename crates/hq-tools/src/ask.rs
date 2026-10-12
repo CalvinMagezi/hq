@@ -85,7 +85,9 @@ impl AskMode {
         }
     }
 
-    fn parse(raw: &str) -> Result<Self> {
+    /// The mode a call asks for, as the tool reads it. The connector's approval gate uses this
+    /// too, so the two can never disagree about what counts as `full`.
+    pub fn parse(raw: &str) -> Result<Self> {
         match raw.trim() {
             "" | "read_only" => Ok(Self::ReadOnly),
             "full" => Ok(Self::Full),

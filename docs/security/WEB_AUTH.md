@@ -31,9 +31,13 @@ denied, so a new tool stays out of the scoped keys until it is added by hand.
 
 A refused call is an HTTP `401` with a `WWW-Authenticate: Bearer` challenge (and
 `error="invalid_token"` when a credential was sent), carrying the JSON-RPC error as its body.
-With the claude.ai connector on (`mcp_connector`, see `docs/plans/claude-connector.md`), the
-challenge also names `resource_metadata`, and `/.well-known/oauth-protected-resource` is served;
-both stay absent otherwise. `initialize` answers with the protocol version the client asked for
+With the claude.ai connector on (`mcp_connector`, see `docs/CLAUDE_CONNECTOR.md`), the challenge
+also names `resource_metadata`, HQ serves OAuth metadata, `/oauth/authorize` (consent origin
+only), `/oauth/token` and `/oauth/revoke`, and a connector access token resolves to its grant's
+scope (full, Spark read-only or tasks) with the guards in `crates/hq-web/src/oauth/guard.rs`;
+none of it exists otherwise. `/oauth/*` and `/.well-known/*` sit outside the origin guard
+because Claude calls them server to server; `/api/oauth/*` is behind the web token, the origin
+guard and `X-HQ-Client` like the rest of `/api`. `initialize` answers with the protocol version the client asked for
 when HQ speaks it (`2025-11-25`, `2025-06-18`, `2025-03-26`, `2024-11-05`), else the newest.
 
 For local development only, `HQ_MCP_DEV_NO_AUTH=1` opens `/mcp` when no key is
