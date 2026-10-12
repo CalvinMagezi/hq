@@ -20,6 +20,7 @@ mod self_update;
 mod stack;
 mod tasks;
 mod usage_ledger;
+mod web_push;
 
 pub use agent::*;
 pub use agent_host::{
@@ -54,6 +55,7 @@ pub use tasks::{
     DEFAULT_LEASE_TTL_SECS, DEFAULT_STALE_AFTER_HOURS, LeaseMode, MIN_LEASE_TTL_SECS, TasksConfig,
 };
 pub use usage_ledger::UsageLedgerConfig;
+pub use web_push::{PUSH_SERVICE_HOSTS, WebPushConfig};
 
 use figment::{
     Figment,
@@ -254,6 +256,10 @@ pub struct HqConfig {
     #[serde(default)]
     pub mcp_connector: McpConnectorConfig,
 
+    /// Web Push notifications to the PWA. Off by default.
+    #[serde(default)]
+    pub web_push: WebPushConfig,
+
     /// Spending limits. Empty by default: nothing is enforced until the owner opts in.
     #[serde(default)]
     pub budgets: BudgetsConfig,
@@ -433,6 +439,7 @@ impl Default for HqConfig {
             disk_watchdog: DiskWatchdogConfig::default(),
             usage_ledger: UsageLedgerConfig::default(),
             mcp_connector: McpConnectorConfig::default(),
+            web_push: WebPushConfig::default(),
             budgets: BudgetsConfig::default(),
             tasks: TasksConfig::default(),
             copilot_usage: CopilotUsageConfig::default(),

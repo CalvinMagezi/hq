@@ -17,11 +17,13 @@ const SAME_DAY_ACTION_SOURCES: &[&str] = &["email-triage"];
 /// Source tasks whose items belong in the web inbox only, never the relay.
 /// `skill_review` is `hq_agent::skill_review::VALUE_SOURCE`: skill changes are FYI.
 /// `session_chat` is a harness session a web chat watches that needs an answer.
+/// `agent_notify` is `hq_tools::notify::NOTIFY_SOURCE`: `notify_owner` with `channels: web`.
 pub const WEB_ONLY_SOURCES: &[&str] = &[
     "task_ready_for_review",
     "task_stale_digest",
     "skill_review",
     "session_chat",
+    "agent_notify",
 ];
 
 /// Decide whether an item interrupts now or goes through normal relay batching.

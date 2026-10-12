@@ -9,6 +9,7 @@ pub mod harness_sessions_registry;
 pub mod mcp_connector;
 pub mod migrations;
 pub mod pool;
+pub mod push_subscriptions;
 pub mod search;
 pub mod self_update_runs;
 pub mod session_tokens;

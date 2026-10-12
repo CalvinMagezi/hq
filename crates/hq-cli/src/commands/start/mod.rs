@@ -302,6 +302,10 @@ pub(crate) fn build_web_state(
         tracing::error!("ws: claude.ai connector stays off: {e}");
         eprintln!("claude.ai connector not enabled: {e}");
     }
+    if let Err(e) = state.configure_web_push(&config.web_push) {
+        tracing::error!("ws: web push stays off: {e}");
+        eprintln!("web push not enabled: {e}");
+    }
     let state = Arc::new(state);
     hq_web::install_ask_runner(&state);
     state

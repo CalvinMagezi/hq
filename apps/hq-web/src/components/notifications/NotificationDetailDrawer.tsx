@@ -1,4 +1,5 @@
-import { X, CheckCircle2, XCircle, FileCode, Check, Loader2, AlertCircle } from 'lucide-react'
+import { useRouter } from '@tanstack/react-router'
+import { X, CheckCircle2, XCircle, FileCode, Check, Loader2, AlertCircle, ArrowUpRight } from 'lucide-react'
 import type { NotificationItem } from '~/lib/notificationsApi'
 
 interface Props {
@@ -14,6 +15,7 @@ export function NotificationDetailDrawer({
   onAction,
   loadingAction,
 }: Props) {
+  const router = useRouter()
   if (!notification) return null
 
   const isPending = notification.state === 'pending'
@@ -95,6 +97,19 @@ export function NotificationDetailDrawer({
             <p className="text-sm text-neutral-200 leading-relaxed whitespace-pre-wrap">
               {notification.description}
             </p>
+            {notification.metadata.link && (
+              <button
+                type="button"
+                onClick={() => {
+                  onClose()
+                  router.history.push(notification.metadata.link!)
+                }}
+                className="hq-btn-ghost mt-3"
+              >
+                <ArrowUpRight className="w-3.5 h-3.5" />
+                <span>Open</span>
+              </button>
+            )}
           </div>
 
           {/* Metadata details */}

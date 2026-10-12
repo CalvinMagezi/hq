@@ -6,7 +6,7 @@ use rusqlite::{OptionalExtension, Row, params};
 use crate::Database;
 
 const COLS: &str = "id, source_task, kind, title, body, artifact_path, score, dedup_key, \
-                    state, created_at, routed_at, delivered_at, engaged_at, expires_at, engagement";
+                    state, created_at, routed_at, delivered_at, engaged_at, expires_at, engagement, link";
 
 fn ts(dt: &DateTime<Utc>) -> String {
     dt.to_rfc3339()
@@ -45,6 +45,7 @@ fn row_to_item(r: &Row) -> rusqlite::Result<ValueItem> {
         engaged_at: parse_opt_ts(r.get::<_, Option<String>>(12)?),
         expires_at: parse_opt_ts(r.get::<_, Option<String>>(13)?),
         engagement: r.get(14)?,
+        link: r.get(15)?,
     })
 }
 
@@ -53,8 +54,8 @@ pub fn insert(db: &Database, item: &ValueItem) -> Result<()> {
     db.with_conn(|c| {
         c.execute(
             "INSERT INTO value_items (id, source_task, kind, title, body, artifact_path, score, \
-             dedup_key, state, created_at, routed_at, delivered_at, engaged_at, expires_at, engagement) \
-             VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15)",
+             dedup_key, state, created_at, routed_at, delivered_at, engaged_at, expires_at, engagement, link) \
+             VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16)",
             params![
                 item.id,
                 item.source_task,
@@ -71,6 +72,7 @@ pub fn insert(db: &Database, item: &ValueItem) -> Result<()> {
                 opt_ts(&item.engaged_at),
                 opt_ts(&item.expires_at),
                 item.engagement,
+                item.link,
             ],
         )?;
         Ok(())
@@ -527,6 +529,53 @@ pub fn dismiss_all(
     })
 }
 
+/// Items created since `since` that no push dispatcher has taken yet, oldest first. Older
+/// ones are left alone, so turning push on never replays a backlog.
+pub fn list_unpushed(db: &Database, since: &DateTime<Utc>) -> Result<Vec<ValueItem>> {
+    db.with_conn(|c| {
+        let sql = format!(
+            "SELECT {COLS} FROM value_items WHERE pushed_at IS NULL AND created_at >= ?1 \
+             ORDER BY created_at ASC LIMIT 50"
+        );
+        let mut stmt = c.prepare(&sql)?;
+        let rows = stmt
+            .query_map(params![ts(since)], row_to_item)?
+            .collect::<rusqlite::Result<Vec<_>>>()?;
+        Ok(rows)
+    })
+}
+
+/// Takes `id` for pushing. Exactly one caller gets `true`, however many processes ask.
+pub fn claim_push(db: &Database, id: &str) -> Result<bool> {
+    db.with_conn(|c| {
+        let n = c.execute(
+            "UPDATE value_items SET pushed_at = ?2 WHERE id = ?1 AND pushed_at IS NULL",
+            params![id, ts(&Utc::now())],
+        )?;
+        Ok(n == 1)
+    })
+}
+
+/// How many items any of `sources` created since `since`.
+pub fn count_from_sources_since(
+    db: &Database,
+    sources: &[&str],
+    since: &DateTime<Utc>,
+) -> Result<usize> {
+    db.with_conn(|c| {
+        let mut total = 0usize;
+        for source in sources {
+            let n: i64 = c.query_row(
+                "SELECT COUNT(*) FROM value_items WHERE source_task = ?1 AND created_at >= ?2",
+                params![source, ts(since)],
+                |r| r.get(0),
+            )?;
+            total += n as usize;
+        }
+        Ok(total)
+    })
+}
+
 #[derive(Debug, Clone, serde::Serialize)]
 pub struct TaskEngagement {
     pub source_task: String,
@@ -863,5 +912,43 @@ mod tests {
         assert_eq!(gc_expired(&db).unwrap(), 1);
         assert_eq!(list_by_state(&db, ValueState::Pending).unwrap().len(), 1);
         assert_eq!(list_by_state(&db, ValueState::Expired).unwrap().len(), 1);
+    }
+
+    #[test]
+    fn link_round_trips_and_new_items_wait_for_one_push_claim() {
+        let db = open_db();
+        let since = Utc::now() - chrono::Duration::minutes(1);
+        let item =
+            ValueItem::new("agent_notify", ValueKind::Fyi, "Deploy done", "ok").with_link("/tasks");
+        emit(&db, &item).unwrap();
+
+        let unpushed = list_unpushed(&db, &since).unwrap();
+        assert_eq!(unpushed.len(), 1);
+        assert_eq!(unpushed[0].link.as_deref(), Some("/tasks"));
+        assert!(claim_push(&db, &item.id).unwrap());
+        assert!(!claim_push(&db, &item.id).unwrap(), "a second claim loses");
+        assert!(list_unpushed(&db, &since).unwrap().is_empty());
+    }
+
+    #[test]
+    fn unpushed_items_older_than_the_window_are_not_listed() {
+        let db = open_db();
+        let mut old = ValueItem::new("agent_notify", ValueKind::Fyi, "old", "b");
+        old.created_at = Utc::now() - chrono::Duration::hours(3);
+        insert(&db, &old).unwrap();
+        let since = Utc::now() - chrono::Duration::hours(1);
+        assert!(list_unpushed(&db, &since).unwrap().is_empty());
+    }
+
+    #[test]
+    fn counts_items_from_the_named_sources_in_the_window() {
+        let db = open_db();
+        let since = Utc::now() - chrono::Duration::hours(1);
+        for source in ["agent_notify", "agent_notify_relay", "email-triage"] {
+            emit(&db, &ValueItem::new(source, ValueKind::Fyi, "t", "b")).unwrap();
+        }
+        let n =
+            count_from_sources_since(&db, &["agent_notify", "agent_notify_relay"], &since).unwrap();
+        assert_eq!(n, 2);
     }
 }

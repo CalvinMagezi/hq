@@ -128,10 +128,40 @@ self.addEventListener('message', (event) => {
   }
 })
 
-// A reply alert opens its chat: in an HQ window already open, or a new one.
+/** A page of this app to open, never another origin, whatever the notification carried. */
+function appUrl(raw: unknown, fallback: string): string {
+  try {
+    const url = new URL(typeof raw === 'string' ? raw : fallback, self.location.origin)
+    if (url.origin === self.location.origin) return url.href
+  } catch {
+    // Unparseable: fall through to the fallback.
+  }
+  return new URL(fallback, self.location.origin).href
+}
+
+// Web Push from the server (docs/WEB_PUSH.md): the payload is {title, body, url, tag}.
+self.addEventListener('push', (event) => {
+  let data: { title?: string; body?: string; url?: string; tag?: string } = {}
+  try {
+    data = event.data?.json() ?? {}
+  } catch {
+    data = { body: event.data?.text() }
+  }
+  event.waitUntil(
+    self.registration.showNotification(data.title || 'HQ', {
+      body: data.body ?? '',
+      icon: '/icons/hq-icon-192.png',
+      badge: '/icons/hq-mark-96.png',
+      tag: data.tag,
+      data: { url: appUrl(data.url, '/notifications') },
+    }),
+  )
+})
+
+// A notification (a reply alert or a push) opens its page: in an HQ window already open, or a new one.
 self.addEventListener('notificationclick', (event) => {
   event.notification.close()
-  const target = new URL((event.notification.data?.url as string | undefined) ?? '/chat', self.location.origin).href
+  const target = appUrl(event.notification.data?.url, '/chat')
   event.waitUntil(
     (async () => {
       const windows = await self.clients.matchAll({ type: 'window', includeUncontrolled: true })

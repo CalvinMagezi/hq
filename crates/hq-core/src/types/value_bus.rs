@@ -95,6 +95,9 @@ pub struct ValueItem {
     pub engaged_at: Option<DateTime<Utc>>,
     pub expires_at: Option<DateTime<Utc>>,
     pub engagement: Option<String>,
+    /// A page of the web app this item opens, a same-origin path such as `/tasks`.
+    #[serde(default)]
+    pub link: Option<String>,
 }
 
 const DEFAULT_TTL_DAYS: i64 = 7;
@@ -123,11 +126,17 @@ impl ValueItem {
             engaged_at: None,
             expires_at: Some(now + Duration::days(DEFAULT_TTL_DAYS)),
             engagement: None,
+            link: None,
         }
     }
 
     pub fn with_dedup_key(mut self, key: impl Into<String>) -> Self {
         self.dedup_key = Some(key.into());
+        self
+    }
+
+    pub fn with_link(mut self, link: impl Into<String>) -> Self {
+        self.link = Some(link.into());
         self
     }
 }

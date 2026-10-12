@@ -3135,6 +3135,7 @@ dependencies = [
  "hq-tools",
  "hq-vault",
  "reqwest",
+ "ring",
  "rusqlite",
  "serde",
  "serde_json",

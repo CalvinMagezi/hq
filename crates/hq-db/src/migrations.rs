@@ -321,6 +321,7 @@ const MIGRATIONS: &[(&str, &str)] = &[
         "087_mcp_connector",
         include_str!("../sql/087_mcp_connector.sql"),
     ),
+    ("088_web_push", include_str!("../sql/088_web_push.sql")),
 ];
 
 const MEMORY_SCHEMA_MIGRATION: &str = "058_memory_schema";

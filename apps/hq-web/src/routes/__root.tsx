@@ -27,6 +27,7 @@ import { openrouterChipLabel, openrouterChipTitle, OPENROUTER_USAGE_POLL_MS, typ
 import { budgetChipLabel, budgetChipTitle, USAGE_POLL_MS, type BudgetsResponse } from '~/lib/usageApi'
 import { chipLabel, chipTitle, COPILOT_USAGE_POLL_MS, type CopilotUsage } from '~/lib/copilotUsageApi'
 import { hqJson } from '~/lib/hqAuth'
+import { syncPushSubscription } from '~/lib/webPush'
 import { fetchSetupStatus, shouldRedirectToSetup } from '~/lib/setupApi'
 
 const SYSTEM_NOTICE_DISMISS_MS = 6_000
@@ -173,6 +174,9 @@ function VaultShell() {
         })
       })
       .catch((err) => console.warn('[hq-sw] registration failed:', err))
+
+    // A device that turned push on re-sends its subscription, so the server keeps it current.
+    void syncPushSubscription()
 
     // Chunks this page loaded before the worker took control: hand them over for offline use.
     navigator.serviceWorker.ready.then((reg) => window.setTimeout(() => {

@@ -1,6 +1,7 @@
 // Opt-in alerts for a reply that finishes while HQ is not on screen. They only
-// fire while the page is still running (a background tab, Android). A suspended
-// iOS home-screen app needs Web Push, which the server does not send yet.
+// fire while the page is still running (a background tab, Android). Inbox items
+// and notify_owner reach a closed or suspended app through Web Push instead
+// (lib/webPush.ts, docs/WEB_PUSH.md).
 
 const PREF_KEY = 'hq.chat.replyAlerts'
 const SOUND_URL = '/notification.wav'

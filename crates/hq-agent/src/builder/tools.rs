@@ -195,6 +195,13 @@ impl SessionBuilder {
             .is_none_or(|id| matches!(id.scope, hq_core::privacy::DisclosureScope::Unrestricted));
         if owner_scope {
             tools.extend(hq_tools::model_control::create_model_tools());
+            // Notifications reach the owner's phone, so a restricted audience cannot send them.
+            if let Some(ref db) = shared_db {
+                tools.extend(hq_tools::notify::create_notify_tools(
+                    db.clone(),
+                    Some(&self.config),
+                ));
+            }
         }
 
         // Git / GitHub — these existed only in the MCP registry, so an agent
