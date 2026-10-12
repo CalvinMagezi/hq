@@ -12,6 +12,7 @@ ignore = [
     { id = "RUSTSEC-2024-0436", reason = "paste is an unmaintained proc-macro that runs at build time only. Transitive via rav1e/ravif/image." },
     { id = "RUSTSEC-2026-0173", reason = "proc-macro-error2 is an unmaintained build-time proc-macro. Transitive via aquamarine/teloxide." },
     { id = "RUSTSEC-2026-0192", reason = "ttf-parser is unmaintained (no vulnerability). Transitive via lopdf/pdf-extract and ab_glyph/imageproc." },
+    { id = "RUSTSEC-2024-0449", reason = "unsafe-libyaml is unmaintained (no vulnerability). Comes with serde_yaml 0.9, which HQ's config and frontmatter code uses directly and figment and hayagriva also pull in; moving off serde_yaml is tracked in TECHDEBT.md." },
     # Unmaintained notices (no vulnerability) that arrive only through Typst, the
     # renderer behind hq-export. Same exit as the quick-xml ids below: drop them
     # when typst moves off these crates.
