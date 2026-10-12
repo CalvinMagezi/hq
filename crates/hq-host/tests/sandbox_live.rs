@@ -32,6 +32,7 @@ fn claude_answers_a_prompt_under_the_sandbox() {
         allow: vec![Allow { host: "api.anthropic.com".into(), ports: vec![443], private: false }],
         writable: Vec::new(),
         readable: Vec::new(),
+        ..SandboxSpec::none()
     });
     host.spawn(spec).unwrap();
     let deadline = Instant::now() + WAIT;

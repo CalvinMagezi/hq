@@ -208,7 +208,7 @@ fn the_proxy_network_reaches_only_the_proxy_port() {
     });
     std::thread::spawn(move || while other.accept().is_ok() {});
     let mut s = sandbox(&h.project);
-    s.network = Network::Proxy { port: proxy_port, unix_sockets: vec![], relay: None };
+    s.network = Network::Proxy { port: proxy_port, unix_sockets: vec![], relay: None, loopback_ports: vec![] };
     let connect = |port: u16| {
         inside(
             backend,
@@ -219,6 +219,55 @@ fn the_proxy_network_reaches_only_the_proxy_port() {
     assert!(connect(proxy_port).contains("proxy-here"), "the proxy port must work");
     let blocked = connect(other_port);
     assert!(!blocked.contains("CONNECTED") && !blocked.contains("proxy-here"), "{blocked}");
+}
+
+#[test]
+fn a_listed_loopback_port_is_reachable_directly_and_others_stay_closed() {
+    let backend = need_backend!();
+    if !matches!(backend, Backend::SandboxExec(_)) {
+        return; // bubblewrap refuses loopback ports; see the test below
+    }
+    let h = host();
+    let listen = || {
+        let l = TcpListener::bind("127.0.0.1:0").unwrap();
+        let port = l.local_addr().unwrap().port();
+        std::thread::spawn(move || {
+            while let Ok((mut c, _)) = l.accept() {
+                let _ = c.write_all(b"service-here");
+            }
+        });
+        port
+    };
+    let (proxy_port, service_port, other_port) = (listen(), listen(), listen());
+    let mut s = sandbox(&h.project);
+    s.network = Network::Proxy {
+        port: proxy_port,
+        unix_sockets: vec![],
+        relay: None,
+        loopback_ports: vec![service_port],
+    };
+    let connect = |port: u16| {
+        inside(
+            backend,
+            &s,
+            &format!("python3 -c \"import socket; c=socket.create_connection(('127.0.0.1',{port}),3); print(c.recv(20).decode())\" 2>&1"),
+        )
+    };
+    assert!(connect(service_port).contains("service-here"), "the listed port must work");
+    assert!(!connect(other_port).contains("service-here"), "an unlisted port stays closed");
+}
+
+#[test]
+fn bubblewrap_refuses_loopback_ports_it_cannot_open() {
+    let mut s = sandbox(Path::new("/p"));
+    s.network = Network::Proxy {
+        port: 18080,
+        unix_sockets: vec![],
+        relay: Some(Relay { program: "/bin/hq".into(), unix_socket: "/run/eg.sock".into() }),
+        loopback_ports: vec![11434],
+    };
+    let err = bwrap_args(&s, &argv("true")).unwrap_err();
+    assert!(err.0.contains("loopback"), "{err}");
 }
 
 #[test]
@@ -247,7 +296,7 @@ fn a_file_can_be_replaced_atomically_when_it_and_its_temp_siblings_are_writable(
 #[test]
 fn bubblewrap_refuses_a_proxy_network_instead_of_pretending() {
     let mut s = sandbox(Path::new("/p"));
-    s.network = Network::Proxy { port: 1, unix_sockets: vec![], relay: None };
+    s.network = Network::Proxy { port: 1, unix_sockets: vec![], relay: None, loopback_ports: vec![] };
     let err = bwrap_args(&s, &argv("true")).unwrap_err();
     assert!(err.0.contains("relay"), "{err}");
 }
@@ -261,7 +310,7 @@ fn the_profile_denies_before_it_allows_and_lists_every_rule() {
     s.masked_files = vec!["/m/secret".into()];
     s.hidden_dirs = vec![HiddenDir { dir: "/run".into(), allow: vec!["/run/sock".into()] }];
     s.hide_other_processes = true;
-    s.network = Network::Proxy { port: 18080, unix_sockets: vec!["/run/sock".into()], relay: None };
+    s.network = Network::Proxy { port: 18080, unix_sockets: vec!["/run/sock".into()], relay: None, loopback_ports: vec![] };
     let p = seatbelt_profile(&s);
     let at = |needle: &str| p.find(needle).unwrap_or_else(|| panic!("{needle} missing in {p}"));
     assert!(at("(deny file-write*)") < at("(allow file-write*"));
@@ -273,6 +322,10 @@ fn the_profile_denies_before_it_allows_and_lists_every_rule() {
     assert!(p.contains("(deny process-info* (target others))"));
     assert!(at("(deny network-outbound)") < at("(allow network-outbound (remote ip \"localhost:18080\")"));
     assert!(p.contains("(literal \"/run/sock\")"));
+    assert!(!p.contains("localhost:11434"), "no loopback port unless listed");
+    s.network = Network::Proxy { port: 18080, unix_sockets: vec![], relay: None, loopback_ports: vec![11434] };
+    let p = seatbelt_profile(&s);
+    assert!(p.contains("(allow network-outbound (remote ip \"localhost:18080\") (remote ip \"localhost:11434\"))"), "{p}");
 }
 
 #[test]
@@ -393,6 +446,7 @@ fn bubblewrap_with_a_relay_unshares_the_network_and_starts_the_relay_first() {
         port: 18080,
         unix_sockets: vec![],
         relay: Some(Relay { program: "/bin/hq".into(), unix_socket: "/run/eg.sock".into() }),
+        loopback_ports: vec![],
     };
     s.private_tmp = vec!["/tmp".into()];
     let args: Vec<String> = bwrap_args(&s, &argv("true")).unwrap().iter().map(|a| a.to_string_lossy().into_owned()).collect();
