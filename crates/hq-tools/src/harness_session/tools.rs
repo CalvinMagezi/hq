@@ -20,7 +20,7 @@ async fn choose_start_dir(
     requested: Option<&str>,
     cfg: &hq_core::config::HqConfig,
     host_name: &str,
-    handoff_scope: bool,
+    bound: super::CwdBound,
     label: &str,
     harness: &str,
 ) -> Result<super::StartDir> {
@@ -29,7 +29,7 @@ async fn choose_start_dir(
         super::check_cwd_outside_vault(p, host_name, &agent_host.default_host, &cfg.vault_path)
     };
     let wanted = requested
-        .map(|r| super::require_cwd_in(Some(r), agent_host, handoff_scope))
+        .map(|r| super::require_cwd_in(Some(r), agent_host, bound))
         .transpose()?;
     // A folder that is not allowed is refused whether or not it exists, never quietly swapped.
     if let Some(path) = &wanted {
@@ -48,11 +48,7 @@ async fn choose_start_dir(
     let fallback =
         tokio::task::spawn_blocking(move || super::workspace_start_dir(&*h, w.as_deref(), &l, &k))
             .await??;
-    super::require_cwd_in(
-        Some(&fallback.path.to_string_lossy()),
-        agent_host,
-        handoff_scope,
-    )?;
+    super::require_cwd_in(Some(&fallback.path.to_string_lossy()), agent_host, bound)?;
     vault_guard(&fallback.path)?;
     Ok(fallback)
 }
@@ -134,13 +130,13 @@ impl HqTool for HarnessSessionSpawnTool {
             .and_then(|v| v.as_str())
             .map(str::trim)
             .filter(|c| !c.is_empty());
-        let scope = super::is_handoff_scope(&args);
+        let bound = super::CwdBound::of(&args);
         let start = choose_start_dir(
             &host_handle,
             requested,
             &cfg,
             &host,
-            scope,
+            bound,
             &label,
             &harness,
         )
@@ -179,7 +175,7 @@ impl HqTool for HarnessSessionSpawnTool {
             && super::is_missing_dir_error(e)
         {
             let fallback =
-                choose_start_dir(&host_handle, None, &cfg, &host, scope, &label, &harness).await?;
+                choose_start_dir(&host_handle, None, &cfg, &host, bound, &label, &harness).await?;
             note = Some(format!(
                 "{asked} does not exist on host '{}', so the session started in {} instead.",
                 host_handle.name(),
@@ -198,6 +194,7 @@ impl HqTool for HarnessSessionSpawnTool {
             report["cwd_note"] = json!(note);
         }
         super::tag_origin(&self.db, &report, origin);
+        super::notify_connector_start(&self.vault_path, &self.db, &args, &report, &prompt);
         Ok(report)
     }
 }
@@ -816,9 +813,9 @@ impl HqTool for HarnessSessionHandoffTool {
             .map(str::trim)
             .filter(|c| !c.is_empty());
         let (label, harness) = (arg_str(&args, "title"), arg_str(&args, "harness"));
-        let scope = super::is_handoff_scope(&args);
+        let bound = super::CwdBound::of(&args);
         let start =
-            choose_start_dir(&host, requested, &cfg, &host_name, scope, &label, &harness).await?;
+            choose_start_dir(&host, requested, &cfg, &host_name, bound, &label, &harness).await?;
         let owned = |key: &str| arg_str(&args, key);
         let acceptance = [owned("acceptance"), owned("done_criteria")]
             .into_iter()
@@ -856,6 +853,11 @@ impl HqTool for HarnessSessionHandoffTool {
             report["cwd_note"] = json!(note);
         }
         super::tag_origin(&self.db, &report, origin);
+        let brief = [owned("prompt"), owned("description"), owned("title")]
+            .into_iter()
+            .find(|b| !b.trim().is_empty())
+            .unwrap_or_default();
+        super::notify_connector_start(&self.vault_path, &self.db, &args, &report, &brief);
         Ok(report)
     }
 }

@@ -31,6 +31,25 @@ impl HqTool for Fake {
     }
 }
 
+/// Hands back the arguments it ran with, markers included.
+struct EchoArgs;
+
+#[async_trait::async_trait]
+impl HqTool for EchoArgs {
+    fn name(&self) -> &str {
+        "task_get"
+    }
+    fn description(&self) -> &str {
+        "echo"
+    }
+    fn parameters(&self) -> Value {
+        json!({})
+    }
+    async fn execute(&self, args: Value) -> anyhow::Result<Value> {
+        Ok(args)
+    }
+}
+
 fn settings() -> hq_core::config::ConnectorSettings {
     hq_core::config::ConnectorSettings {
         public: "https://hq.example.com".into(),
@@ -40,23 +59,34 @@ fn settings() -> hq_core::config::ConnectorSettings {
 }
 
 fn app() -> axum::Router {
+    let (app, _, vault) = app_and_db();
+    // The router's database stays open; the directory goes, as the other tests here expect.
+    drop(vault);
+    app
+}
+
+/// The router, its state for reaching the database and vault, and the vault directory, which
+/// lives as long as the caller holds it.
+fn app_and_db() -> (axum::Router, Arc<WsState>, tempfile::TempDir) {
     super::cimd::remember(super::cimd::ClientMetadata {
         client_id: CLIENT.into(),
         client_name: "Claude".into(),
         redirect_uris: vec![REDIRECT.into()],
     });
     let mut registry = ToolRegistry::new();
-    for name in ["vault_search", "config_manage"] {
+    for name in ["vault_search", "config_manage", "vault_delete"] {
         registry.register(Box::new(Fake(name)));
     }
+    registry.register(Box::new(EchoArgs));
     let vault = tempfile::TempDir::new().unwrap();
     let mut state =
         WsState::new(vault.path().to_path_buf(), None).with_registry(Arc::new(registry));
     state.connector = Some(settings());
     let state = Arc::new(state);
-    routes(axum::Router::new(), &state)
+    let app = routes(axum::Router::new(), &state)
         .route("/mcp", axum::routing::post(crate::mcp_http::mcp_handler))
-        .with_state(state)
+        .with_state(state.clone());
+    (app, state, vault)
 }
 
 async fn send(app: &axum::Router, req: Request<Body>) -> (StatusCode, Option<String>, Value) {
@@ -391,4 +421,129 @@ async fn the_server_metadata_matches_what_claude_reads() {
     assert_eq!(m["code_challenge_methods_supported"], json!(["S256"]));
     assert_eq!(m["token_endpoint_auth_methods_supported"], json!(["none"]));
     assert!(m.get("registration_endpoint").is_none());
+}
+
+fn call_with(tool: &str, args: Value) -> Value {
+    json!({"jsonrpc": "2.0", "id": 7, "method": "tools/call",
+           "params": {"name": "hq_call", "arguments": {"tool": tool, "args": args}}})
+}
+
+async fn full_access(app: &axum::Router) -> String {
+    let code = approved_code(app, "full").await;
+    exchange(app, &code).await.1["access_token"]
+        .as_str()
+        .unwrap()
+        .to_string()
+}
+
+fn text_of(reply: &Value) -> String {
+    reply["result"]["content"][0]["text"]
+        .as_str()
+        .unwrap_or_default()
+        .to_string()
+}
+
+/// The newest approval request for a call, as the owner's inbox holds it.
+fn newest_request(state_db: &hq_db::Database) -> hq_core::types::ValueItem {
+    let mut items = hq_db::value_items::list_filtered(state_db, None, None, 50).unwrap();
+    items
+        .retain(|i| i.source_task == "mcp-connector" && i.title.starts_with("Claude wants to run"));
+    items.into_iter().next().expect("an approval request")
+}
+
+#[tokio::test]
+async fn a_high_risk_call_runs_once_per_approval_with_exactly_its_arguments() {
+    let (app, state, _vault) = app_and_db();
+    let db = &state.db;
+    let token = full_access(&app).await;
+    let target = json!({"path": "Notebooks/a.md"});
+
+    let (_, _, first) = send(&app, mcp(&token, call_with("vault_delete", target.clone()))).await;
+    assert!(text_of(&first).contains("Waiting for the owner"), "{first}");
+    assert_eq!(first["result"]["isError"], false);
+    let ask = newest_request(db);
+    assert!(
+        ask.body.contains("Notebooks/a.md"),
+        "the owner sees the real arguments"
+    );
+
+    assert!(hq_db::value_items::approve_by_id(db, &ask.id).unwrap());
+    let (_, _, ran) = send(&app, mcp(&token, call_with("vault_delete", target.clone()))).await;
+    assert!(text_of(&ran).contains("\"ran\""), "{ran}");
+
+    let (_, _, again) = send(&app, mcp(&token, call_with("vault_delete", target.clone()))).await;
+    assert!(
+        text_of(&again).contains("Waiting"),
+        "an approval is spent by one call: {again}"
+    );
+
+    let other = json!({"path": "Notebooks/b.md"});
+    assert!(hq_db::value_items::approve_by_id(db, &newest_request(db).id).unwrap());
+    let (_, _, swapped) = send(&app, mcp(&token, call_with("vault_delete", other))).await;
+    assert!(
+        text_of(&swapped).contains("Waiting"),
+        "an approval does not carry to other arguments"
+    );
+}
+
+#[tokio::test]
+async fn a_declined_call_stays_declined_and_ordinary_calls_never_wait() {
+    let (app, state, _vault) = app_and_db();
+    let db = &state.db;
+    let token = full_access(&app).await;
+    let (_, _, quick) = send(&app, mcp(&token, call_with("vault_search", json!({})))).await;
+    assert!(text_of(&quick).contains("vault_search"), "{quick}");
+
+    let target = json!({"path": "x.md"});
+    send(&app, mcp(&token, call_with("vault_delete", target.clone()))).await;
+    assert!(hq_db::value_items::dismiss_by_id(db, &newest_request(db).id).unwrap());
+    let (_, _, no) = send(&app, mcp(&token, call_with("vault_delete", target))).await;
+    assert_eq!(no["result"]["isError"], true);
+    assert!(text_of(&no).contains("declined"), "{no}");
+}
+
+#[tokio::test]
+async fn tools_see_the_connection_and_a_busy_connection_is_slowed() {
+    let (app, state, _vault) = app_and_db();
+    let db = &state.db;
+    let token = full_access(&app).await;
+    let forged = json!({ hq_tools::harness_session::CONNECTOR_ARG: "owner" });
+    let (_, _, echoed) = send(&app, mcp(&token, call_with("task_get", forged))).await;
+    let seen: Value = serde_json::from_str(&text_of(&echoed)).unwrap();
+    assert_eq!(
+        seen[hq_tools::harness_session::CONNECTOR_ARG],
+        "Claude on the web"
+    );
+
+    let grant = db
+        .with_conn(|c| hq_db::mcp_connector::list_grants(c, false, now()))
+        .unwrap()[0]
+        .id
+        .clone();
+    db.with_conn(|c| {
+        for _ in 0..super::guard::MAX_CALLS_PER_MINUTE {
+            hq_db::mcp_connector::record_call(c, &grant, "vault_search", "ok", "h", now())?;
+        }
+        Ok(())
+    })
+    .unwrap();
+    let (_, _, slowed) = send(&app, mcp(&token, call_with("vault_search", json!({})))).await;
+    assert!(text_of(&slowed).contains("Too many calls"), "{slowed}");
+    let log = db
+        .with_conn(|c| hq_db::mcp_connector::recent_calls(c, Some(&grant), 1))
+        .unwrap();
+    assert_eq!(log[0].outcome, "rate_limited");
+}
+
+#[tokio::test]
+async fn connecting_tells_the_owner_at_once() {
+    let (app, state, _vault) = app_and_db();
+    full_access(&app).await;
+    let inbox = hq_core::mailbox::peek_messages(&state.vault_path, "relay").unwrap();
+    assert!(
+        inbox
+            .iter()
+            .any(|m| m.content.contains("Claude on the web")),
+        "{inbox:?}"
+    );
 }

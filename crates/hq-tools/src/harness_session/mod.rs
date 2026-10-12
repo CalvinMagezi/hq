@@ -11,6 +11,7 @@
 
 pub mod category;
 mod coalesce;
+mod connector_notice;
 mod control;
 mod cwd;
 pub mod dismiss;
@@ -136,6 +137,7 @@ fn new_session_id(harness: &str) -> String {
     format!("hs-{slug}-{:x}", nanos as u64 & 0xff_ffff_ffff)
 }
 
+pub use connector_notice::*;
 pub use control::*;
 pub use cwd::*;
 pub use launch::*;

@@ -1072,6 +1072,24 @@ impl ScopeFixture {
     }
 }
 
+/// A claude.ai connection's writes carry its own name, and nobody else may borrow that name.
+#[tokio::test]
+async fn a_connector_write_is_attributed_to_the_connection() {
+    let fx = ScopeFixture::new(&[]);
+    let create = fx.tool("task_create");
+    let mut args = json!({"title": "from Claude", "created_by": "the owner"});
+    args[crate::harness_session::CONNECTOR_ARG] = json!("Claude on the web");
+    let made = create.execute(args).await.unwrap();
+    assert_eq!(
+        made["created_by"], "mcp:connector/Claude on the web",
+        "{made}"
+    );
+    let forged = create
+        .execute(json!({"title": "x", "created_by": "mcp:connector/Claude"}))
+        .await;
+    assert!(forged.is_err(), "only a connection writes under that name");
+}
+
 fn tasks_scope(mut args: serde_json::Value) -> serde_json::Value {
     args[crate::harness_session::TASKS_SCOPE_ARG] = json!(true);
     args

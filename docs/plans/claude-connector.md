@@ -175,45 +175,50 @@ connector grant, through the same private-marker pattern the gateway already use
 tasks and handoff scopes (`HANDOFF_SCOPE_ARG`, `TASKS_SCOPE_ARG`, `mark_spawned_session` in
 `gateway.rs`), so a caller cannot forge or strip the marker.
 
-1. **Owner confirmation for high-risk tools.** A short, named list
-   (`CONNECTOR_CONFIRM_TOOLS` beside the allowlists, with a test that every entry is a real
-   tool): sending mail through `gws`, `hq_ask` in `full` mode (otherwise HQ's own agent is a
-   way around the list), self-update, skill and slash-command edits (they persist instructions
-   into future sessions), and deletes. Harness session tools (spawn, send, handoff, `host_send`)
-   are deliberately not on it: Claude driving coding sessions is much of the point. The
+1. **Owner confirmation for high-risk tools.** `CONNECTOR_CONFIRM_TOOLS` in
+   `crates/hq-mcp/src/gateway.rs` (a registry test checks every name is a served tool): Google
+   Workspace, `agent_send_message` (it reaches the owner's chat or an agent that acts on it),
+   `config_manage`, `host_add`, self-update install and rollback, skill and slash-command edits
+   (they persist instructions), task and note deletes, file edits, commits, PRs and clones on the
+   HQ host. Every remote MCP server's tools count too (they act on the owner's accounts), and
+   `hq_ask` in `full` mode (otherwise HQ's own agent is a way around the list). Harness session
+   tools are deliberately not on it: Claude driving coding sessions is much of the point. The
    consequence, stated plainly: a spawned coding agent runs with permissions skipped and a
    shell on its host, so the list stops a single injected instruction from reaching mail or a
-   delete directly, but it is not a wall. The notice on every connector-started session (item
-   5) is the main control there, and it shows the real prompt, directory and host. On a
-   connector grant such a call raises an approval through `value_items`, which the
-   owner approves from the chat relay button, the web inbox or `hq queue approve`. Those
-   approvals are signed with the install key (`value_items::is_signed_approval`), so a tool
-   cannot approve itself. A signature alone does not stop a hijacked conversation from getting
-   a harmless call approved and replaying the approval on a harmful one, so an approval is:
-   - bound to the grant, the tool name and a SHA-256 of the canonical arguments;
-   - single use;
-   - passed in a gateway-owned argument that `hq_call` strips and checks, like the scope
-     markers, so the tool never sees it;
-   - shown to the owner with the real arguments (the full spawn prompt and directory, the mail
-     recipients and body), not a summary the model wrote.
+   delete directly, but it is not a wall. Items 2 and 5 are the controls there.
 
-   The call waits up to about 45 seconds, then returns a pending result telling Claude to call
-   again with the same arguments and the approval id. `mcp_connector.confirm_tools` can widen
-   the list, or set it to `[]` to turn this off for an owner who accepts the risk.
-2. **Spawned work stays bounded.** A session HQ launches gets its own session token
-   (`harness_session/launch.rs` mints it), so its calls back to HQ already resolve to that
-   session and are refused further spawns; nothing new is needed there. New: a session started
-   on a connector grant must have its working directory under `mcp_connector.spawn_cwd_allow`
-   (default: `agent_host.handoff_cwd_allow`), as the handoff key already must.
-3. **Provenance on every write.** Tasks and comments get the author `mcp:connector/<grant
-   label>`. `hq_ask` questions are already shown to later turns as an untrusted MCP-client
-   message (`docs/MCP_ASK.md`); connector asks use the same label. Anything a connector writes is
-   treated by HQ's own agent as external input, never as the owner speaking.
-4. **Rate limits per grant.** Calls per minute and confirm-tier calls per day, with the counters
-   in the database like `ask_requests` keeps its limits.
-5. **Visibility.** A relay notice when a grant is created, on its first call, on every confirm-tier
-   call and on refresh-token reuse. An audit table records grant, tool, time, outcome and a
-   truncated argument digest; Settings shows the last calls per grant.
+   The check runs in `crates/hq-web/src/oauth/guard.rs`, only for tools inside the grant's
+   scope. It files an `ActionNeeded` value item and sends it to the owner's chat at once as an
+   interrupt (the value bus's learned batching may hold or drop other notices, and its cycle is
+   five minutes), with Approve and Dismiss buttons; the web inbox and `hq queue approve` work
+   too. Approvals are signed with the install key (`value_items::is_signed_approval`), so a
+   tool cannot approve itself. An approval is:
+   - bound to the grant, the tool and a SHA-256 of the canonical arguments (keys sorted, gateway
+     markers left out), so it cannot be replayed on other arguments;
+   - spent by the one call it lets through (`value_items::consume_approval`);
+   - shown to the owner with the real arguments. Arguments too long for a chat message (3000
+     characters) are refused rather than shown cut.
+
+   The call waits 40 seconds, then answers "pending" and asks Claude to call again with the same
+   tool and arguments. A dismissed call stays declined for those exact arguments until the item
+   expires (seven days). There is no setting to change the list: an owner who wants to skip a
+   check uses a key instead of the connector.
+2. **Spawned work stays bounded.** A session HQ launches gets its own session token, so its calls
+   back to HQ are refused further spawns. A session started on a connector grant must run under
+   `agent_host.handoff_cwd_allow`, and while that list is empty a connector starts no session at
+   all (`CwdBound::Connector` in `harness_session/cwd.rs`, on every spawn path). An owner who
+   wants Claude to drive coding agents lists the project roots there.
+3. **Provenance on every write.** Task writes from a connector are attributed to
+   `mcp:connector/<grant label>` whatever name the call passes, a lease taken on one is named
+   the same way, and no other caller may write under that prefix. `hq_ask` questions are already
+   shown to later turns as an untrusted MCP-client message (`docs/MCP_ASK.md`).
+4. **Rate limit per grant.** 120 calls a minute, counted from the call log.
+5. **Visibility.** Immediate interrupt notices to the owner's chat when a grant is created, when a
+   replayed refresh token revokes one, and for every coding session a connector starts (with the
+   session, host, folder and prompt; a long prompt is cut with a note saying where the rest is).
+   The call log (`mcp_connector_audit`) keeps grant, tool, outcome and a SHA-256 of the
+   arguments, never the arguments, for 30 days. Settings shows the newest calls and `hq
+   connector log` lists them.
 6. **Kill switch.** One button and `hq connector off`: revoke every grant, cancel approved codes
    not yet exchanged and waiting requests, and disarm, in one transaction. With no
    grant and no armed window, nothing can connect until the owner arms again; `enabled: false`
@@ -232,9 +237,9 @@ mcp_connector:
   public_url: https://hq.example.com          # origin Claude reaches; the resource is public_url + /mcp
   authorize_url: null                          # browser-only origin for the consent page, e.g. https://hq.example.ts.net; defaults to public_url
   default_scope: read_only                     # preselected on the consent page: read_only | tasks | full
-  confirm_tools: default                       # default | [] | a list of tool names
-  spawn_cwd_allow: null                        # defaults to agent_host.handoff_cwd_allow
 ```
+
+Coding sessions a connector starts use `agent_host.handoff_cwd_allow`; see item 2 above.
 
 Token lifetimes (1 hour access, 30 day refresh, 90 day cap), the arming window (10 minutes, `hq
 connector arm --minutes` overrides it), the redirect list and the CIMD hosts are constants, not

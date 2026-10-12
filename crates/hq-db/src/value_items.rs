@@ -232,6 +232,89 @@ pub fn is_signed_approval(db: &Database, dedup_key: &str) -> Result<bool> {
     })
 }
 
+/// Engagement that marks a signed approval as spent by the one action it approved.
+pub const ENGAGEMENT_USED: &str = "used";
+
+/// State and engagement of the newest item with this dedup key, in any state.
+pub fn latest_engagement_by_dedup(
+    db: &Database,
+    dedup_key: &str,
+) -> Result<Option<(ValueState, Option<String>)>> {
+    db.with_conn(|c| {
+        let row: Option<(String, Option<String>)> = c
+            .query_row(
+                "SELECT state, engagement FROM value_items WHERE dedup_key = ?1 ORDER BY created_at DESC, rowid DESC LIMIT 1",
+                params![dedup_key],
+                |r| Ok((r.get(0)?, r.get(1)?)),
+            )
+            .optional()?;
+        Ok(row.and_then(|(s, e)| ValueState::from_str(&s).map(|s| (s, e))))
+    })
+}
+
+/// Spends the newest signed approval for `dedup_key`: true for the one caller that may act on
+/// it, false when there is none or it was already spent.
+pub fn consume_approval(db: &Database, dedup_key: &str) -> Result<bool> {
+    if !is_signed_approval(db, dedup_key)? {
+        return Ok(false);
+    }
+    db.with_conn(|c| {
+        let n = c.execute(
+            "UPDATE value_items SET engagement = ?2
+             WHERE id = (SELECT id FROM value_items WHERE dedup_key = ?1
+                         ORDER BY created_at DESC, rowid DESC LIMIT 1)
+               AND state = 'engaged' AND engagement = 'approved'",
+            params![dedup_key, ENGAGEMENT_USED],
+        )?;
+        Ok(n == 1)
+    })
+}
+
+/// Sender id the relay recognises: its items get Approve and Dismiss buttons.
+pub const VALUE_BUS_SENDER: &str = "value-bus";
+
+/// Sends one item into the relay mailbox now and marks it delivered. A decision gets the
+/// Approve and Dismiss buttons; `interrupt` skips the relay's learned batching, which may
+/// otherwise hold or drop a notice. Returns whether the mailbox took it.
+pub fn deliver(
+    vault_path: &std::path::Path,
+    db: &Database,
+    item: &ValueItem,
+    interrupt: bool,
+) -> Result<bool> {
+    use hq_core::mailbox;
+    let mut out = mailbox::new_message(
+        VALUE_BUS_SENDER,
+        "relay",
+        hq_core::types::MailboxMessageType::Nudge,
+        Some(&item.title),
+        &render(item),
+        None,
+    );
+    if matches!(item.kind, ValueKind::ActionNeeded | ValueKind::Proposal) {
+        let token: String = item.id.chars().take(8).collect();
+        out.meta.insert("value_token".to_string(), token);
+    }
+    if interrupt {
+        out.meta
+            .insert(mailbox::META_INTERRUPT.to_string(), "true".to_string());
+    }
+    if mailbox::send_message(vault_path, &out).is_err() {
+        return Ok(false);
+    }
+    set_delivered(db, &item.id)?;
+    Ok(true)
+}
+
+/// The relay layer attaches the buttons itself, so the text carries no instructions.
+fn render(item: &ValueItem) -> String {
+    let mut s = format!("{}\n\n{}", item.title, item.body);
+    if let Some(p) = &item.artifact_path {
+        s.push_str(&format!("\n\n↪ {p}"));
+    }
+    s
+}
+
 /// State of the newest item with this dedup key in any state, e.g. whether an
 /// approval request was engaged or dismissed. `None` when never emitted.
 pub fn latest_state_by_dedup(db: &Database, dedup_key: &str) -> Result<Option<ValueState>> {
@@ -494,6 +577,60 @@ mod tests {
             !is_signed_approval(&db, "sg").unwrap(),
             "a wrong signature is refused"
         );
+    }
+
+    #[test]
+    fn a_signed_approval_is_spent_once_and_a_new_request_can_follow() {
+        let db = open_db();
+        let first = ValueItem::new("t", ValueKind::ActionNeeded, "a", "b").with_dedup_key("once");
+        emit(&db, &first).unwrap();
+        assert!(
+            !consume_approval(&db, "once").unwrap(),
+            "nothing approved yet"
+        );
+        assert!(approve_by_id(&db, &first.id).unwrap());
+        assert!(consume_approval(&db, "once").unwrap());
+        assert!(!consume_approval(&db, "once").unwrap(), "spent");
+        assert_eq!(
+            latest_engagement_by_dedup(&db, "once").unwrap(),
+            Some((ValueState::Engaged, Some(ENGAGEMENT_USED.to_string())))
+        );
+        let second = ValueItem::new("t", ValueKind::ActionNeeded, "a", "b").with_dedup_key("once");
+        emit(&db, &second).unwrap();
+        assert_eq!(
+            latest_state_by_dedup(&db, "once").unwrap(),
+            Some(ValueState::Pending),
+            "a spent approval does not swallow the next request"
+        );
+    }
+
+    #[test]
+    fn deliver_sends_now_with_buttons_for_decisions_and_marks_delivered() {
+        let db = open_db();
+        let vault = tempfile::TempDir::new().unwrap();
+        let ask = ValueItem::new("t", ValueKind::ActionNeeded, "Approve?", "body");
+        let note = ValueItem::new("t", ValueKind::Fyi, "Notice", "body");
+        for item in [&ask, &note] {
+            emit(&db, item).unwrap();
+            assert!(deliver(vault.path(), &db, item, true).unwrap());
+        }
+        assert_eq!(list_by_state(&db, ValueState::Delivered).unwrap().len(), 2);
+        let messages = hq_core::mailbox::peek_messages(vault.path(), "relay").unwrap();
+        assert_eq!(messages.len(), 2);
+        for m in &messages {
+            assert_eq!(m.from, VALUE_BUS_SENDER);
+            assert_eq!(
+                m.meta
+                    .get(hq_core::mailbox::META_INTERRUPT)
+                    .map(String::as_str),
+                Some("true")
+            );
+        }
+        let with_token = messages
+            .iter()
+            .filter(|m| m.meta.contains_key("value_token"))
+            .count();
+        assert_eq!(with_token, 1, "only the decision gets buttons");
     }
 
     #[test]

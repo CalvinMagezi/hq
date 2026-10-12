@@ -5,10 +5,8 @@
 use anyhow::Result;
 use std::path::Path;
 
-use hq_core::types::{MailboxMessageType, ValueItem, ValueKind, ValueState};
+use hq_core::types::{ValueItem, ValueKind, ValueState};
 use hq_db::Database;
-
-use hq_core::mailbox;
 
 /// Max items delivered per cycle. Keeps Telegram from being flooded; the rest
 /// stay Pending for the next cycle.
@@ -25,12 +23,6 @@ pub const WEB_ONLY_SOURCES: &[&str] = &[
     "skill_review",
     "session_chat",
 ];
-
-/// Only these kinds ask the owner to decide something, so only they get
-/// Approve/Dismiss buttons; everything else is a plain notice.
-fn is_actionable(kind: ValueKind) -> bool {
-    matches!(kind, ValueKind::ActionNeeded | ValueKind::Proposal)
-}
 
 /// Decide whether an item interrupts now or goes through normal relay batching.
 pub fn is_urgent(item: &ValueItem) -> bool {
@@ -56,45 +48,11 @@ pub async fn run_value_bus_delivery(vault_path: &Path, db: &Database) -> Result<
         hq_db::value_items::set_delivered(db, &item.id)?;
     }
     for item in relayed.into_iter().take(VALUE_BUS_BUDGET) {
-        let token: String = item.id.chars().take(8).collect();
-        let body = render(&item);
-        let mut out = mailbox::new_message(
-            "value-bus",
-            "relay",
-            MailboxMessageType::Nudge,
-            Some(&item.title),
-            &body,
-            None,
-        );
-        if is_actionable(item.kind) {
-            out.meta.insert("value_token".to_string(), token);
-        }
         // No digest collects non-urgent items any more, so every item is sent;
         // only urgent ones bypass the notification gate's batching.
-        if is_urgent(&item) {
-            out.meta.insert(
-                hq_core::mailbox::META_INTERRUPT.to_string(),
-                "true".to_string(),
-            );
-        }
-        if mailbox::send_message(vault_path, &out).is_ok() {
-            hq_db::value_items::set_delivered(db, &item.id)?;
-        }
+        hq_db::value_items::deliver(vault_path, db, &item, is_urgent(&item))?;
     }
     Ok(())
-}
-
-fn render(item: &ValueItem) -> String {
-    let mut s = format!("{}\n\n{}", item.title, item.body);
-    if let Some(p) = &item.artifact_path {
-        s.push_str(&format!("\n\n↪ {p}"));
-    }
-    // No text instructions here: the relay layer attaches Approve/Dismiss
-    // inline-keyboard buttons for this message (see
-    // hq-relay/src/telegram/mailbox.rs, `msg.from == "value-bus"` branch).
-    // Baking `approve {token}`/`dismiss {token}` text in here as well was
-    // stale, kept alongside the button after the pill migration landed.
-    s
 }
 
 /// Parse a Telegram reply like "approve a1b2c3d4" or "dismiss a1b2c3d4".

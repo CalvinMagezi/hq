@@ -269,6 +269,15 @@ function ConnectorSection() {
       {data.grants.length > 0 && (
         <Row label="Disconnect everything"><ActionButton busy={busy} onClick={disconnectAll}>Disconnect all</ActionButton></Row>
       )}
+      {data.recent_calls.length > 0 && (
+        <Row label="Recent calls" block>
+          <ul className="flex flex-col gap-1 font-mono text-xs">
+            {data.recent_calls.map((c, i) => (
+              <li key={`${c.at}-${i}`}>{c.tool} · {c.outcome.replace('_', ' ')} · {relTime(unixToMs(c.at))}</li>
+            ))}
+          </ul>
+        </Row>
+      )}
       {act.error && <Row label="Error" block>{act.error instanceof Error ? act.error.message : 'That did not work.'}</Row>}
     </Section>
   )

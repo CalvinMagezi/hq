@@ -35,6 +35,14 @@ pub(super) fn ttl_secs(settings: &TasksConfig) -> i64 {
 /// client on a machine the owner may not control is visibly that wherever its work shows; any
 /// other caller may not take a name of that shape.
 fn lease_actor(args: &Value, actor: &str) -> Result<String> {
+    if let Some(label) = crate::harness_session::connector_label(args) {
+        return Ok(crate::harness_session::connector_actor(&t::clean_label(
+            label,
+        )));
+    }
+    if crate::harness_session::is_connector_actor(&t::clean_label(actor)) {
+        bail!("mcp:connector names are for claude.ai connections; claim under your own name");
+    }
     let scope = crate::harness_session::TASKS_SCOPE_ACTOR;
     if crate::harness_session::is_tasks_scope(args) {
         let label = t::clean_label(actor);
@@ -81,6 +89,7 @@ pub(super) struct ActorHints {
     lease_token: Option<String>,
     named: String,
     tasks_scope: bool,
+    connector: Option<String>,
 }
 
 /// Who a write is attributed to, and the lease behind it when there is one.
@@ -113,6 +122,7 @@ impl ActorHints {
             lease_token: opt_str(args, "lease"),
             named: arg_str(args, name_arg),
             tasks_scope: crate::harness_session::is_tasks_scope(args),
+            connector: crate::harness_session::connector_label(args).map(t::clean_label),
         }
     }
 
@@ -158,6 +168,17 @@ impl ActorHints {
                 "{} names are for the tasks-scoped key; write under your own name",
                 crate::harness_session::TASKS_SCOPE_ACTOR
             );
+        }
+        // A claude.ai connection is named for what it is, whatever name it passes.
+        if let Some(label) = &self.connector {
+            return Ok(Actor {
+                name: crate::harness_session::connector_actor(label),
+                work_session_id: None,
+                lease: None,
+            });
+        }
+        if crate::harness_session::is_connector_actor(&t::clean_label(&self.named)) {
+            bail!("mcp:connector names are for claude.ai connections; write under your own name");
         }
         let name = if self.tasks_scope {
             crate::harness_session::TASKS_SCOPE_ACTOR.to_string()

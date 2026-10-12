@@ -426,3 +426,24 @@ fn only_hashes_are_stored() {
     })
     .unwrap();
 }
+
+#[test]
+fn the_call_log_counts_per_grant_and_lists_newest_first() {
+    let db = Database::open_memory().unwrap();
+    db.with_conn(|c| {
+        record_call(c, "grant-a", "vault_search", "ok", "h1", NOW)?;
+        record_call(c, "grant-a", "task_create", "ok", "h2", NOW + 30)?;
+        record_call(c, "grant-b", "vault_read", "refused", "h3", NOW + 40)?;
+        assert_eq!(calls_since(c, "grant-a", NOW)?, 2);
+        assert_eq!(calls_since(c, "grant-a", NOW + 1)?, 1);
+        let all = recent_calls(c, None, 10)?;
+        assert_eq!(all[0].tool, "vault_read");
+        let mine = recent_calls(c, Some("grant-a"), 10)?;
+        assert_eq!(mine.len(), 2);
+        assert_eq!(mine[0].tool, "task_create");
+        purge_expired(c, NOW + 30 + AUDIT_RETENTION_SECS)?;
+        assert_eq!(recent_calls(c, None, 10)?.len(), 1, "old rows age out");
+        Ok(())
+    })
+    .unwrap();
+}

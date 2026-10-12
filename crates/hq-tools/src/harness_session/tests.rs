@@ -1171,31 +1171,54 @@ fn the_deny_list_ignores_trailing_and_doubled_slashes_in_entries_and_paths() {
 }
 
 #[test]
+fn a_connector_starts_sessions_only_in_listed_folders_and_none_while_the_list_is_empty() {
+    let mut host_cfg = hq_core::config::AgentHostConfig::default();
+    let refused = require_cwd_in(Some("/srv/work/app"), &host_cfg, CwdBound::Connector)
+        .unwrap_err()
+        .to_string();
+    assert!(refused.contains("handoff_cwd_allow"), "{refused}");
+    host_cfg.handoff_cwd_allow = deny(&["/srv/work"]);
+    assert!(require_cwd_in(Some("/srv/work/app"), &host_cfg, CwdBound::Connector).is_ok());
+    assert!(require_cwd_in(Some("/etc"), &host_cfg, CwdBound::Connector).is_err());
+    let marked = json!({ CONNECTOR_ARG: "Claude", HANDOFF_SCOPE_ARG: true });
+    assert_eq!(
+        CwdBound::of(&marked),
+        CwdBound::Connector,
+        "the stricter bound wins"
+    );
+    assert_eq!(
+        CwdBound::of(&json!({ HANDOFF_SCOPE_ARG: true })),
+        CwdBound::Handoff
+    );
+    assert_eq!(CwdBound::of(&json!({})), CwdBound::Any);
+}
+
+#[test]
 fn the_handoff_allow_list_binds_only_the_handoff_scope() {
     let mut host_cfg = hq_core::config::AgentHostConfig {
         handoff_cwd_allow: deny(&["/srv/work"]),
         ..Default::default()
     };
     let inside = Some("/srv/work/app");
-    assert!(require_cwd_in(inside, &host_cfg, true).is_ok());
-    assert!(require_cwd_in(Some("/srv/work"), &host_cfg, true).is_ok());
+    assert!(require_cwd_in(inside, &host_cfg, CwdBound::Handoff).is_ok());
+    assert!(require_cwd_in(Some("/srv/work"), &host_cfg, CwdBound::Handoff).is_ok());
     assert!(
-        require_cwd_in(Some("/srv/worker"), &host_cfg, true).is_err(),
+        require_cwd_in(Some("/srv/worker"), &host_cfg, CwdBound::Handoff).is_err(),
         "a sibling that shares a prefix is outside"
     );
-    assert!(require_cwd_in(Some("/etc"), &host_cfg, true).is_err());
+    assert!(require_cwd_in(Some("/etc"), &host_cfg, CwdBound::Handoff).is_err());
     assert!(
-        require_cwd_in(Some("/etc"), &host_cfg, false).is_ok(),
+        require_cwd_in(Some("/etc"), &host_cfg, CwdBound::Any).is_ok(),
         "other keys are not bound by it"
     );
     host_cfg.handoff_cwd_allow.clear();
     assert!(
-        require_cwd_in(Some("/etc"), &host_cfg, true).is_ok(),
+        require_cwd_in(Some("/etc"), &host_cfg, CwdBound::Handoff).is_ok(),
         "empty means unrestricted"
     );
     host_cfg.spawn_cwd_deny = deny(&["/etc"]);
     assert!(
-        require_cwd_in(Some("/etc"), &host_cfg, true).is_err(),
+        require_cwd_in(Some("/etc"), &host_cfg, CwdBound::Handoff).is_err(),
         "the deny list still applies"
     );
 }

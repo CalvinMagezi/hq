@@ -14,11 +14,11 @@ const TASKS_KEY_ENV: &str = "AGENTHQ_TASKS_API_KEY";
 /// back; any other request gets the newest.
 const PROTOCOL_VERSIONS: &[&str] = &["2025-11-25", "2025-06-18", "2025-03-26", "2024-11-05"];
 
-fn rpc_ok(id: Value, result: Value) -> Json<Value> {
+pub(crate) fn rpc_ok(id: Value, result: Value) -> Json<Value> {
     Json(json!({"jsonrpc": "2.0", "id": id, "result": result}))
 }
 
-fn rpc_err(id: Value, code: i64, message: impl Into<String>) -> Json<Value> {
+pub(crate) fn rpc_err(id: Value, code: i64, message: impl Into<String>) -> Json<Value> {
     Json(json!({"jsonrpc": "2.0", "id": id, "error": {"code": code, "message": message.into()}}))
 }
 
@@ -186,11 +186,19 @@ async fn handle_mcp(
                 .unwrap_or(json!([]));
             rpc_ok(id, json!({"tools": tools}))
         }
-        "tools/call" => {
-            // A proven session is also marked as spawned, so it can never start more.
-            let spawned = session.as_deref().or_else(|| spawned_by(headers));
-            call_tool(state, id, &body, allowed, spawned, session.as_deref()).await
-        }
+        "tools/call" => match &grant {
+            Some(g) => crate::oauth::guard::connector_call(state, id, &body, allowed, g).await,
+            None => {
+                // A proven session is also marked as spawned, so it can never start more.
+                let spawned = session.as_deref().or_else(|| spawned_by(headers));
+                let caller = CallCaller {
+                    spawned_by: spawned,
+                    session: session.as_deref(),
+                    connector: None,
+                };
+                call_tool(state, id, &body, allowed, caller).await
+            }
+        },
         // Load-bearing: claude.ai probes `server/discover` first and falls back to
         // `initialize` only on this error.
         _ => rpc_err(id, -32601, "Method not found"),
@@ -244,13 +252,21 @@ fn spawned_by(headers: &axum::http::HeaderMap) -> Option<&str> {
         .filter(|v| !v.trim().is_empty())
 }
 
-async fn call_tool(
+/// Who a `tools/call` comes from, as the transport proved it.
+#[derive(Default, Clone, Copy)]
+pub(crate) struct CallCaller<'a> {
+    pub spawned_by: Option<&'a str>,
+    pub session: Option<&'a str>,
+    /// A claude.ai connector grant's label.
+    pub connector: Option<&'a str>,
+}
+
+pub(crate) async fn call_tool(
     state: &WsState,
     id: Value,
     body: &Value,
     allowed: Option<&[&str]>,
-    spawned_by: Option<&str>,
-    caller_session: Option<&str>,
+    caller: CallCaller<'_>,
 ) -> Json<Value> {
     let params = body.get("params").and_then(|v| v.as_object());
     let tool_name = params
@@ -261,7 +277,7 @@ async fn call_tool(
         .and_then(|p| p.get("arguments"))
         .and_then(|v| v.as_object())
         .cloned();
-    let arguments = match spawned_by {
+    let arguments = match caller.spawned_by {
         Some(session) => hq_mcp::gateway::mark_spawned_session(arguments.as_ref(), session),
         None => arguments,
     };
@@ -274,7 +290,8 @@ async fn call_tool(
         arguments.as_ref(),
         &state.db,
         allowed,
-        caller_session,
+        caller.session,
+        caller.connector,
     )
     .await;
     match result {
