@@ -322,6 +322,10 @@ const MIGRATIONS: &[(&str, &str)] = &[
         include_str!("../sql/087_mcp_connector.sql"),
     ),
     ("088_web_push", include_str!("../sql/088_web_push.sql")),
+    (
+        "089_mcp_connector_audit",
+        include_str!("../sql/089_mcp_connector_audit.sql"),
+    ),
 ];
 
 const MEMORY_SCHEMA_MIGRATION: &str = "058_memory_schema";
@@ -562,6 +566,27 @@ mod tests {
             )
             .unwrap();
         assert_eq!(tables, 2, "entity tables present, dead tables dropped");
+    }
+
+    #[test]
+    fn connector_audit_reaches_a_database_that_ran_087_before_it_had_the_table() {
+        let conn = rusqlite::Connection::open_in_memory().unwrap();
+        let idx = super::MIGRATIONS
+            .iter()
+            .position(|(v, _)| *v == "089_mcp_connector_audit")
+            .unwrap();
+        super::apply(&conn, &super::MIGRATIONS[..idx]).unwrap();
+        let audit = |c: &rusqlite::Connection| -> i64 {
+            c.query_row(
+                "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='mcp_connector_audit'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap()
+        };
+        assert_eq!(audit(&conn), 0, "087 as shipped has no call log");
+        super::run(&conn).unwrap();
+        assert_eq!(audit(&conn), 1);
     }
 
     #[test]
