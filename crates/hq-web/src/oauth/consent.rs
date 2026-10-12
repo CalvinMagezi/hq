@@ -171,11 +171,17 @@ pub(crate) async fn request(
     }
 }
 
+/// The redirect's host, with its port when it has one, so a loopback callback shows which
+/// local port will receive the code.
 fn host_of(uri: &str) -> String {
-    reqwest::Url::parse(uri)
-        .ok()
-        .and_then(|u| u.host_str().map(str::to_string))
-        .unwrap_or_default()
+    let Ok(url) = reqwest::Url::parse(uri) else {
+        return String::new();
+    };
+    let host = url.host_str().unwrap_or_default();
+    match url.port() {
+        Some(port) => format!("{host}:{port}"),
+        None => host.to_string(),
+    }
 }
 
 #[derive(Deserialize)]

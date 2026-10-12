@@ -129,7 +129,12 @@ Lite should support connectors; the first cut leaves Lite out.
   consent API answers only the browser holding it, so a request started in someone else's
   browser cannot be shown to, or approved by, the owner. A link to the authorize URL itself
   still creates a request in whoever opens it; the consent page shows when the request arrived
-  and says to approve only right after pressing Connect.
+  and says to approve only right after pressing Connect, and a loopback redirect shows its port.
+- **Consent origin only.** `/oauth/authorize` answers only when the request's `Host` is the
+  consent origin, so with `authorize_url` set the public name never reveals the window or takes
+  requests, whatever the proxy forwards. With a single public origin, someone who knows the
+  URL can watch for the window and fill its 20 request slots, which keeps the owner from
+  connecting while they keep it up; a private `authorize_url` is the fix, and the docs say so.
 
 ### Tokens and grants
 

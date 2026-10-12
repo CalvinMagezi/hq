@@ -4,7 +4,7 @@
 use super::cimd;
 use crate::WsState;
 use axum::extract::{Query, State};
-use axum::http::{StatusCode, header};
+use axum::http::{HeaderMap, StatusCode, header};
 use axum::response::{IntoResponse, Response};
 use hq_db::mcp_connector as store;
 use std::collections::HashMap;
@@ -88,11 +88,17 @@ fn check<'a>(q: &'a HashMap<String, String>, resource: &str) -> Result<Checked<'
 
 pub(crate) async fn authorize(
     State(state): State<Arc<WsState>>,
+    headers: HeaderMap,
     Query(q): Query<HashMap<String, String>>,
 ) -> Response {
     let Some(settings) = state.connector.as_ref() else {
         return StatusCode::NOT_FOUND.into_response();
     };
+    // With a private consent origin, the public name never answers here: no arming oracle and
+    // no way to fill the waiting list from the internet, whatever the proxy in front forwards.
+    if !on_origin(&headers, &settings.consent) {
+        return StatusCode::NOT_FOUND.into_response();
+    }
     let now = super::now();
     let armed = state.db.with_conn(|c| store::armed_until(c, now));
     if !matches!(armed, Ok(Some(_))) {
@@ -131,6 +137,20 @@ pub(crate) async fn authorize(
 }
 
 const INVALID: &str = "This connection request is not valid";
+const HTTPS_DEFAULT_PORT: &str = ":443";
+
+/// Whether the request's `Host` is the given https origin's authority.
+pub(crate) fn on_origin(headers: &HeaderMap, origin: &str) -> bool {
+    let Some(authority) = origin.strip_prefix("https://") else {
+        return false;
+    };
+    let host = headers
+        .get(header::HOST)
+        .and_then(|v| v.to_str().ok())
+        .map(|h| h.trim().to_ascii_lowercase())
+        .unwrap_or_default();
+    host.strip_suffix(HTTPS_DEFAULT_PORT).unwrap_or(&host) == authority
+}
 
 fn not_armed() -> Response {
     page(

@@ -95,7 +95,7 @@ fn with_cookie(mut req: Request<Body>, cookie: &str) -> Request<Body> {
 async fn authorized(app: &axum::Router) -> (String, String) {
     let (status, _, _) = send(app, post_json("/api/oauth/connector/arm", json!({}))).await;
     assert_eq!(status, StatusCode::OK);
-    let (status, location, cookie, _) = send_full(app, get(&authorize_path())).await;
+    let (status, location, cookie, _) = send_full(app, authorize_req()).await;
     assert_eq!(status, StatusCode::FOUND);
     let cookie = cookie.expect("a binder cookie");
     for attr in [
@@ -113,6 +113,14 @@ async fn authorized(app: &axum::Router) -> (String, String) {
 
 fn get(path: &str) -> Request<Body> {
     Request::get(path).body(Body::empty()).unwrap()
+}
+
+/// The browser's request to the consent origin, as claude.ai sends it there.
+fn authorize_req() -> Request<Body> {
+    Request::get(authorize_path())
+        .header("host", "hq.example.ts.net")
+        .body(Body::empty())
+        .unwrap()
 }
 
 fn post_json(path: &str, body: Value) -> Request<Body> {
@@ -278,11 +286,11 @@ async fn a_code_works_once_and_only_with_its_verifier() {
 #[tokio::test]
 async fn nothing_connects_without_arming_and_one_arming_admits_one_client() {
     let app = app();
-    let (status, _, _) = send(&app, get(&authorize_path())).await;
+    let (status, _, _) = send(&app, authorize_req()).await;
     assert_eq!(status, StatusCode::FORBIDDEN);
 
     let _ = approved_code(&app, "tasks").await;
-    let (status, _, _) = send(&app, get(&authorize_path())).await;
+    let (status, _, _) = send(&app, authorize_req()).await;
     assert_eq!(status, StatusCode::FORBIDDEN, "approving closed the window");
 }
 
@@ -303,6 +311,21 @@ async fn a_denied_request_sends_claude_an_error_and_cannot_be_approved_after() {
     );
     let (status, _, _) = send(&app, with_cookie(approve, &cookie)).await;
     assert_eq!(status, StatusCode::CONFLICT);
+}
+
+#[tokio::test]
+async fn the_public_name_never_answers_authorize() {
+    let app = app();
+    send(&app, post_json("/api/oauth/connector/arm", json!({}))).await;
+    let public = Request::get(authorize_path())
+        .header("host", "hq.example.com")
+        .body(Body::empty())
+        .unwrap();
+    assert_eq!(send(&app, public).await.0, StatusCode::NOT_FOUND);
+    assert_eq!(
+        send(&app, get(&authorize_path())).await.0,
+        StatusCode::NOT_FOUND
+    );
 }
 
 #[tokio::test]

@@ -115,3 +115,30 @@ fn loopback_redirects_match_the_listed_ones_on_any_port() {
         "https://claude.ai/api/mcp/auth_callback"
     ));
 }
+
+#[test]
+fn authorize_answers_only_on_the_consent_origin() {
+    let with_host = |h: &str| {
+        let mut headers = HeaderMap::new();
+        headers.insert(header::HOST, h.parse().unwrap());
+        headers
+    };
+    let consent = "https://hq.example.ts.net:8443";
+    assert!(on_origin(&with_host("hq.example.ts.net:8443"), consent));
+    assert!(on_origin(&with_host("HQ.example.ts.net:8443"), consent));
+    assert!(!on_origin(&with_host("hq.example.com"), consent));
+    assert!(!on_origin(&with_host("hq.example.ts.net"), consent));
+    assert!(!on_origin(&HeaderMap::new(), consent));
+    assert!(on_origin(
+        &with_host("hq.example.com"),
+        "https://hq.example.com"
+    ));
+    assert!(on_origin(
+        &with_host("hq.example.com:443"),
+        "https://hq.example.com"
+    ));
+    assert!(!on_origin(
+        &with_host("localhost:5799"),
+        "https://hq.example.com"
+    ));
+}

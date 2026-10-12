@@ -392,6 +392,11 @@ fn code_row(conn: &Connection, code_hash: &str) -> Result<Option<CodeRow>> {
 /// transaction covers it all, so a failure leaves the code unspent and two uses never race.
 pub fn redeem_code(conn: &Connection, ex: &CodeExchange, now: i64) -> Result<Option<TokenPair>> {
     let code_hash = hash(ex.code);
+    // An unknown code is refused on a plain read, so junk from the public token endpoint never
+    // takes the database's write lock.
+    if code_row(conn, &code_hash)?.is_none() {
+        return Ok(None);
+    }
     let tx = immediate(conn)?;
     let Some(row) = code_row(&tx, &code_hash)? else {
         return Ok(None);
