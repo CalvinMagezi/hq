@@ -74,13 +74,16 @@ The access level you approve maps onto the gateway's existing scopes:
 On top of the scope:
 
 - **Your approval for high-risk calls.** Mail and other Google Workspace calls, remote MCP
-  accounts, messages into your chat or an agent's mailbox, config changes, pairing a machine,
-  self-update, skill and slash-command edits, deletes, file edits, commits, PRs and clones on the
-  HQ host, and `hq_ask` in full mode each wait for you. HQ sends the exact call to your chat (and
-  the web inbox) with Approve and Dismiss. One approval runs that call once, with exactly those
-  arguments. Claude is told to call again after you approve. A dismissed call stays refused.
+  accounts, messages into your chat or an agent's mailbox (including task tags and assignees),
+  config changes, pairing a machine, typing into a pane with `host_send`, self-update, skill,
+  slash-command and agent-definition edits, deletes, file reads and writes outside the vault
+  (file edits, exports to a path, convert and OCR), commits, PRs and clones, and `hq_ask` in full
+  mode each wait for you. HQ sends the exact call to your chat (and the web inbox) with Approve
+  and Dismiss. One approval runs that call once, with exactly those arguments. Claude is told to
+  call again after you approve. A request, and a dismissal, lasts a day.
 - **Coding sessions are not gated**, so Claude can drive agents for you, but only in
-  `handoff_cwd_allow` folders, and every one it starts sends you a notice with the prompt.
+  `handoff_cwd_allow` folders, only the sessions it started (yours stay yours), and every one it
+  starts sends you a notice with what it was told.
 - **Provenance.** Tasks Claude writes are attributed to `mcp:connector/<connection name>`.
 - **Limits and records.** 120 calls a minute per connection. Every call is logged (tool, outcome
   and a hash of its arguments, never the arguments) for 30 days: Settings shows the newest, and

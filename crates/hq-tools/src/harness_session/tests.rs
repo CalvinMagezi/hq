@@ -3288,3 +3288,44 @@ fn db_row_for_liveness(id: &str) -> HarnessSessionRow {
     })
     .unwrap()
 }
+
+#[test]
+fn a_connection_drives_only_sessions_a_connection_started() {
+    let db = Arc::new(Database::open_memory().unwrap());
+    for (id, origin) in [
+        ("hs-owner", registry::ORIGIN_USER),
+        ("hs-claude", registry::ORIGIN_CONNECTOR),
+    ] {
+        db.with_conn(|c| {
+            registry::insert(
+                c,
+                &registry::NewSession {
+                    id,
+                    harness: "claude-code",
+                    label: "t",
+                    cwd: "/srv/work",
+                    mission_id: None,
+                    placement: registry::Placement {
+                        host: "native",
+                        agent_name: id,
+                        workspace_id: id,
+                        pane_id: id,
+                    },
+                    purpose: None,
+                },
+            )?;
+            registry::set_origin(c, id, origin)
+        })
+        .unwrap();
+    }
+    let connector = json!({ CONNECTOR_ARG: "Claude" });
+    assert!(connector_may_drive(&db, &connector, "hs-claude").is_ok());
+    assert!(connector_may_drive(&db, &connector, "hs-owner").is_err());
+    assert!(connector_may_drive(&db, &connector, "hs-missing").is_err());
+    assert!(
+        connector_may_drive(&db, &json!({}), "hs-owner").is_ok(),
+        "other callers are unaffected"
+    );
+    assert_eq!(call_origin(None, &connector), registry::ORIGIN_CONNECTOR);
+    assert_eq!(call_origin(None, &json!({})), registry::ORIGIN_MCP);
+}

@@ -82,3 +82,4 @@ CREATE TABLE IF NOT EXISTS mcp_connector_audit (
 );
 
 CREATE INDEX IF NOT EXISTS idx_mcp_connector_audit_grant_at ON mcp_connector_audit(grant_id, at);
+CREATE INDEX IF NOT EXISTS idx_mcp_connector_audit_at ON mcp_connector_audit(at);

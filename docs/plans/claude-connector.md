@@ -178,10 +178,16 @@ tasks and handoff scopes (`HANDOFF_SCOPE_ARG`, `TASKS_SCOPE_ARG`, `mark_spawned_
 1. **Owner confirmation for high-risk tools.** `CONNECTOR_CONFIRM_TOOLS` in
    `crates/hq-mcp/src/gateway.rs` (a registry test checks every name is a served tool): Google
    Workspace, `agent_send_message` (it reaches the owner's chat or an agent that acts on it),
-   `config_manage`, `host_add`, self-update install and rollback, skill and slash-command edits
-   (they persist instructions), task and note deletes, file edits, commits, PRs and clones on the
-   HQ host. Every remote MCP server's tools count too (they act on the owner's accounts), and
-   `hq_ask` in `full` mode (otherwise HQ's own agent is a way around the list). Harness session
+   `config_manage`, `host_add`, `host_send` (raw keys into any pane), self-update install and
+   rollback, skill and slash-command edits (they persist instructions), task and note deletes,
+   file edits, commits, PRs and clones on the HQ host, and the convert and OCR tools (they read
+   and write host paths). Some count only by their arguments: a vault export with `output`
+   (it writes anywhere the HQ user can), a note write or move into `skills/`, `_commands/` or
+   `Agents/` (they become instructions), and a task call that sets tags or assignees (they put
+   text in a mailbox the owner's chat or an agent drains, the reach `agent_send_message` has).
+   Every remote MCP server's tools count too (they act on the owner's accounts), and `hq_ask` in
+   `full` mode, read by the tool's own parser (otherwise HQ's own agent is a way around the
+   list). Harness session
    tools are deliberately not on it: Claude driving coding sessions is much of the point. The
    consequence, stated plainly: a spawned coding agent runs with permissions skipped and a
    shell on its host, so the list stops a single injected instruction from reaching mail or a
@@ -200,22 +206,27 @@ tasks and handoff scopes (`HANDOFF_SCOPE_ARG`, `TASKS_SCOPE_ARG`, `mark_spawned_
      characters) are refused rather than shown cut.
 
    The call waits 40 seconds, then answers "pending" and asks Claude to call again with the same
-   tool and arguments. A dismissed call stays declined for those exact arguments until the item
-   expires (seven days). There is no setting to change the list: an owner who wants to skip a
-   check uses a key instead of the connector.
+   tool and arguments. A request, and a decline, lasts a day; after that the same call asks
+   again. One connection may have five requests waiting at once. There is no setting to change
+   the list: an owner who wants to skip a check uses a key instead of the connector.
 2. **Spawned work stays bounded.** A session HQ launches gets its own session token, so its calls
    back to HQ are refused further spawns. A session started on a connector grant must run under
    `agent_host.handoff_cwd_allow`, and while that list is empty a connector starts no session at
-   all (`CwdBound::Connector` in `harness_session/cwd.rs`, on every spawn path). An owner who
-   wants Claude to drive coding agents lists the project roots there.
+   all (`CwdBound::Connector` in `harness_session/cwd.rs`, checked before any folder is made). An
+   owner who wants Claude to drive coding agents lists the project roots there. Those sessions
+   are recorded with origin `connector`, count against `agent_host.max_mcp_started_sessions`, do
+   not start out driven, and are the only ones a connector may send to, resume, stop or re-goal:
+   the owner's own sessions stay theirs.
 3. **Provenance on every write.** Task writes from a connector are attributed to
    `mcp:connector/<grant label>` whatever name the call passes, a lease taken on one is named
    the same way, and no other caller may write under that prefix. `hq_ask` questions are already
    shown to later turns as an untrusted MCP-client message (`docs/MCP_ASK.md`).
-4. **Rate limit per grant.** 120 calls a minute, counted from the call log.
+4. **Rate limit per grant.** 120 calls a minute, counted from the call log; a count that cannot be
+   read refuses the call.
 5. **Visibility.** Immediate interrupt notices to the owner's chat when a grant is created, when a
    replayed refresh token revokes one, and for every coding session a connector starts (with the
-   session, host, folder and prompt; a long prompt is cut with a note saying where the rest is).
+   session, host, folder and every field that reaches the agent as instructions; a long text is
+   cut with a note saying where the rest is).
    The call log (`mcp_connector_audit`) keeps grant, tool, outcome and a SHA-256 of the
    arguments, never the arguments, for 30 days. Settings shows the newest calls and `hq
    connector log` lists them.
@@ -252,7 +263,7 @@ origin, or under `profile: lite`. The rest of the web server starts normally. Th
 calls `/api/oauth/*` from its own origin, which the origin guard already accepts as same-origin
 (the `Host` matches), so `web_allowed_origins` needs no entry for it.
 
-CLI, a new top-level command beside `hq mcp`: `hq connector status | arm [--minutes N] | grants
+CLI, a new top-level command beside `hq mcp`: `hq connector status | arm [--minutes N] | disarm | log | grants
 | revoke <id> | off`.
 
 ## Ingress

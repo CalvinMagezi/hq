@@ -31,6 +31,11 @@ const APPROVAL_POLL: Duration = if cfg!(test) {
 /// rather than approved from a cut view.
 pub(crate) const MAX_APPROVAL_ARGS_CHARS: usize = 3000;
 const SOURCE: &str = "mcp-connector";
+/// Approval requests one grant may have waiting at once, so a hijacked conversation cannot
+/// flood the owner's chat.
+pub(crate) const MAX_WAITING_APPROVALS: i64 = 5;
+/// How long an approval request, and a decline, lasts.
+const APPROVAL_TTL_HOURS: i64 = 24;
 /// Gateway markers start with this; a caller's copy never counts toward the arguments' hash.
 const MARKER_PREFIX: &str = "_hq_";
 
@@ -47,7 +52,8 @@ pub(crate) async fn connector_call(
     let busy = state
         .db
         .with_conn(|c| store::calls_since(c, &grant.grant_id, now - RATE_WINDOW_SECS));
-    if busy.is_ok_and(|n| n >= MAX_CALLS_PER_MINUTE) {
+    // An unreadable count fails closed, like the limit itself.
+    if busy.is_err() || busy.is_ok_and(|n| n >= MAX_CALLS_PER_MINUTE) {
         log(state, grant, &call, "rate_limited");
         return tool_text(
             id,
@@ -74,13 +80,16 @@ struct Call {
     tool: String,
     args: Value,
     digest: String,
+    /// Only `hq_call` runs a registry tool; any other name is a gateway tool or refused.
+    via_hq_call: bool,
 }
 
 impl Call {
     fn of(body: &Value) -> Self {
         let params = &body["params"];
         let outer = params["name"].as_str().unwrap_or_default();
-        let (tool, args) = if outer == "hq_call" {
+        let via_hq_call = outer == "hq_call";
+        let (tool, args) = if via_hq_call {
             let inner = &params["arguments"];
             let args = match &inner["args"] {
                 Value::Null => json!({}),
@@ -92,7 +101,12 @@ impl Call {
         };
         let args = without_markers(&args);
         let digest = sha256_hex(&canonical(&args));
-        Self { tool, args, digest }
+        Self {
+            tool,
+            args,
+            digest,
+            via_hq_call,
+        }
     }
 }
 
@@ -152,36 +166,46 @@ async fn confirmation(
 ) -> Option<Stop> {
     let registry = state.registry.as_ref()?;
     // A tool outside the grant's scope is refused by the gateway; the owner is never asked.
-    if allowed.is_some_and(|a| !a.contains(&call.tool.as_str())) {
+    let gated = call.via_hq_call
+        && allowed.is_none_or(|a| a.contains(&call.tool.as_str()))
+        && hq_mcp::gateway::needs_owner_confirmation(registry, &call.tool, &call.args);
+    if !gated {
         return None;
     }
-    if !hq_mcp::gateway::needs_owner_confirmation(registry, &call.tool, &call.args) {
-        return None;
-    }
-    let key = format!("connector:{}:{}:{}", grant.grant_id, call.tool, call.digest);
-    let gate = |db: &hq_db::Database| -> Option<Gate> {
-        let latest = value_items::latest_engagement_by_dedup(db, &key).ok()?;
-        if value_items::consume_approval(db, &key).ok()? {
-            return Some(Gate::Run);
-        }
-        Some(Gate::from_latest(latest))
-    };
-    match gate(&state.db) {
+    let prefix = format!("connector:{}:", grant.grant_id);
+    let key = format!("{prefix}{}:{}", call.tool, call.digest);
+    match gate(&state.db, &key) {
+        None => return Some(lookup_failed()),
         Some(Gate::Run) => return None,
         Some(Gate::Declined) => return Some(declined()),
         Some(Gate::Ask) => {
-            if let Err(stop) = ask_owner(state, grant, call, &key) {
+            if let Err(stop) = ask_owner(state, grant, call, &key, &prefix) {
                 return Some(stop);
             }
         }
-        Some(Gate::Wait) | None => {}
+        Some(Gate::Wait) => {}
     }
+    wait_for_owner(&state.db, &key, &call.tool).await
+}
+
+/// Where the approval for one exact call stands, spending it when it is there to spend.
+/// `None` when the store cannot be read.
+fn gate(db: &hq_db::Database, key: &str) -> Option<Gate> {
+    let latest = value_items::latest_engagement_by_dedup(db, key).ok()?;
+    if value_items::consume_approval(db, key).ok()? {
+        return Some(Gate::Run);
+    }
+    Some(Gate::from_latest(latest, chrono::Utc::now()))
+}
+
+async fn wait_for_owner(db: &hq_db::Database, key: &str, tool: &str) -> Option<Stop> {
     let deadline = tokio::time::Instant::now() + APPROVAL_WAIT;
     while tokio::time::Instant::now() < deadline {
         tokio::time::sleep(APPROVAL_POLL).await;
-        match gate(&state.db) {
+        match gate(db, key) {
             Some(Gate::Run) => return None,
             Some(Gate::Declined) => return Some(declined()),
+            None => return Some(lookup_failed()),
             _ => {}
         }
     }
@@ -189,10 +213,9 @@ async fn confirmation(
         outcome: "pending",
         is_error: false,
         text: format!(
-            "Waiting for the owner to approve this {} call in HQ (sent to their chat and the web inbox). \
+            "Waiting for the owner to approve this {tool} call in HQ (sent to their chat and the web inbox). \
              Once they say it is approved, call hq_call again with exactly the same tool and arguments; \
-             any change needs a new approval.",
-            call.tool
+             any change needs a new approval."
         ),
     })
 }
@@ -208,14 +231,34 @@ enum Gate {
 }
 
 impl Gate {
-    fn from_latest(latest: Option<(ValueState, Option<String>)>) -> Self {
-        match latest {
-            None => Self::Ask,
-            Some((ValueState::Engaged, Some(e))) if e == value_items::ENGAGEMENT_USED => Self::Ask,
-            Some((ValueState::Expired, _)) => Self::Ask,
-            Some((ValueState::Dismissed, _)) => Self::Declined,
-            Some(_) => Self::Wait,
+    /// An expired request, answered or not, is asked again: the owner may have missed it, and a
+    /// decline lasts as long as the request does.
+    fn from_latest(
+        latest: Option<value_items::LatestEngagement>,
+        now: chrono::DateTime<chrono::Utc>,
+    ) -> Self {
+        let Some(latest) = latest else {
+            return Self::Ask;
+        };
+        if latest.expires_at.is_some_and(|at| at <= now) {
+            return Self::Ask;
         }
+        let spent = latest.engagement.as_deref() == Some(value_items::ENGAGEMENT_USED);
+        match latest.state {
+            ValueState::Engaged if spent => Self::Ask,
+            ValueState::Expired => Self::Ask,
+            ValueState::Dismissed => Self::Declined,
+            _ => Self::Wait,
+        }
+    }
+}
+
+fn lookup_failed() -> Stop {
+    Stop {
+        outcome: "error",
+        is_error: true,
+        text: "HQ could not check the owner's approvals just now; nothing ran. Try again shortly."
+            .into(),
     }
 }
 
@@ -230,7 +273,25 @@ fn declined() -> Stop {
 }
 
 /// Files the approval request and sends it to the owner's chat at once, past the batching.
-fn ask_owner(state: &WsState, grant: &GrantAccess, call: &Call, key: &str) -> Result<(), Stop> {
+fn ask_owner(
+    state: &WsState,
+    grant: &GrantAccess,
+    call: &Call,
+    key: &str,
+    prefix: &str,
+) -> Result<(), Stop> {
+    let waiting =
+        value_items::count_waiting_with_prefix(&state.db, prefix).map_err(|_| lookup_failed())?;
+    if waiting >= MAX_WAITING_APPROVALS {
+        return Err(Stop {
+            outcome: "refused",
+            is_error: true,
+            text: format!(
+                "{MAX_WAITING_APPROVALS} approval requests from this connection are already waiting \
+                 for the owner. Wait for them to answer before asking for more."
+            ),
+        });
+    }
     let shown = serde_json::to_string_pretty(&call.args).unwrap_or_default();
     if shown.chars().count() > MAX_APPROVAL_ARGS_CHARS {
         return Err(Stop {
@@ -243,7 +304,7 @@ fn ask_owner(state: &WsState, grant: &GrantAccess, call: &Call, key: &str) -> Re
             ),
         });
     }
-    let item = ValueItem::new(
+    let mut item = ValueItem::new(
         SOURCE,
         ValueKind::ActionNeeded,
         format!("Claude wants to run {}", call.tool),
@@ -255,6 +316,7 @@ fn ask_owner(state: &WsState, grant: &GrantAccess, call: &Call, key: &str) -> Re
         ),
     )
     .with_dedup_key(key.to_string());
+    item.expires_at = Some(chrono::Utc::now() + chrono::Duration::hours(APPROVAL_TTL_HOURS));
     let sent = value_items::insert(&state.db, &item)
         .and_then(|()| value_items::deliver(&state.vault_path, &state.db, &item, true));
     if !matches!(sent, Ok(true)) {
@@ -263,17 +325,20 @@ fn ask_owner(state: &WsState, grant: &GrantAccess, call: &Call, key: &str) -> Re
     Ok(())
 }
 
+/// Longest tool name the log keeps: real names are far shorter, and a caller picks this one.
+const MAX_LOGGED_TOOL_CHARS: usize = 64;
+
 fn log(state: &WsState, grant: &GrantAccess, call: &Call, outcome: &str) {
-    let tool = if call.tool.is_empty() {
-        "unknown"
+    let tool: String = if call.tool.is_empty() {
+        "unknown".into()
     } else {
-        &call.tool
+        call.tool.chars().take(MAX_LOGGED_TOOL_CHARS).collect()
     };
     let logged = state.db.with_conn(|c| {
         store::record_call(
             c,
             &grant.grant_id,
-            tool,
+            &tool,
             outcome,
             &call.digest,
             super::now(),

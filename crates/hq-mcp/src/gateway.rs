@@ -471,6 +471,29 @@ pub const CONNECTOR_CONFIRM_TOOLS: &[&str] = &[
     "git_commit",
     "git_pr",
     "github_clone",
+    "host_send",
+    "convert_to_markdown",
+    "convert_from_markdown",
+    "ocr_extract_text",
+];
+
+/// Vault folders whose notes become instructions: skills, slash commands and agent definitions.
+const INSTRUCTION_FOLDERS: &[&str] = &["skills/", "_commands/", "agents/"];
+/// Vault tools that write a note at `path` (or move one to `to`).
+const VAULT_WRITE_TOOLS: &[&str] = &[
+    "vault_write_note",
+    "vault_append_note",
+    "vault_patch_section",
+    "vault_frontmatter_update",
+    "vault_move",
+];
+/// Task tools whose tags and assignees put text in a mailbox that the owner's chat or an agent
+/// drains, the same reach `agent_send_message` has.
+const TASK_ROUTING_TOOLS: &[&str] = &[
+    "task_create",
+    "task_update",
+    "task_create_many",
+    "task_update_many",
 ];
 
 /// Whether a connector's call to `tool` with `args` waits for the owner's approval. Remote MCP
@@ -478,12 +501,57 @@ pub const CONNECTOR_CONFIRM_TOOLS: &[&str] = &[
 /// agent with every tool, so both count.
 pub fn needs_owner_confirmation(registry: &ToolRegistry, tool: &str, args: &Value) -> bool {
     if tool == "hq_ask" {
-        return args.get("mode").and_then(Value::as_str) == Some("full");
+        let mode = args.get("mode").and_then(Value::as_str).unwrap_or_default();
+        return matches!(
+            hq_tools::ask::AskMode::parse(mode),
+            Ok(hq_tools::ask::AskMode::Full)
+        );
+    }
+    // An export with `output` writes a file anywhere the HQ user can.
+    if matches!(tool, "vault_export" | "vault_export_pdf") {
+        return args
+            .get("output")
+            .and_then(Value::as_str)
+            .is_some_and(|o| !o.trim().is_empty());
+    }
+    if VAULT_WRITE_TOOLS.contains(&tool) {
+        return ["path", "to", "destination", "dest"]
+            .iter()
+            .filter_map(|k| args.get(*k).and_then(Value::as_str))
+            .any(in_instruction_folder);
+    }
+    if TASK_ROUTING_TOOLS.contains(&tool) {
+        return routes_to_mailbox(args);
     }
     CONNECTOR_CONFIRM_TOOLS.contains(&tool)
         || registry
             .get(tool)
             .is_some_and(|t| t.category() == hq_tools::remote_mcp::REMOTE_MCP_CATEGORY)
+}
+
+fn in_instruction_folder(path: &str) -> bool {
+    let path = path
+        .trim()
+        .trim_start_matches("./")
+        .trim_start_matches('/')
+        .to_ascii_lowercase();
+    INSTRUCTION_FOLDERS.iter().any(|f| path.starts_with(f))
+}
+
+/// Whether a task call sets tags or assignees, on the call, its `defaults` or any item.
+fn routes_to_mailbox(args: &Value) -> bool {
+    let sets = |v: &Value| {
+        ["tags", "assignees"].iter().any(|k| {
+            v.get(*k)
+                .and_then(Value::as_array)
+                .is_some_and(|a| !a.is_empty())
+        })
+    };
+    let items = ["tasks", "updates"]
+        .iter()
+        .filter_map(|k| args.get(*k).and_then(Value::as_array))
+        .flatten();
+    sets(args) || args.get("defaults").is_some_and(sets) || items.into_iter().any(sets)
 }
 
 /// The longest session id a marker carries; anything else is cut.
@@ -862,12 +930,73 @@ mod tests {
             "hq_ask",
             &json!({"mode": "full"})
         ));
+        assert!(needs_owner_confirmation(
+            &registry,
+            "vault_export",
+            &json!({"output": "/home/u/.bashrc"})
+        ));
+        assert!(!needs_owner_confirmation(
+            &registry,
+            "vault_export",
+            &json!({"path": "a.md"})
+        ));
+        for path in [
+            "skills/x/SKILL.md",
+            "/_commands/deploy.md",
+            "./Agents/coder.md",
+        ] {
+            assert!(
+                needs_owner_confirmation(&registry, "vault_write_note", &json!({ "path": path })),
+                "{path}"
+            );
+        }
+        assert!(!needs_owner_confirmation(
+            &registry,
+            "vault_write_note",
+            &json!({"path": "Notebooks/a.md"})
+        ));
+        assert!(needs_owner_confirmation(
+            &registry,
+            "vault_move",
+            &json!({"path": "a.md", "to": "skills/a.md"})
+        ));
+        assert!(needs_owner_confirmation(
+            &registry,
+            "task_create",
+            &json!({"title": "t", "tags": ["relay"]})
+        ));
+        assert!(!needs_owner_confirmation(
+            &registry,
+            "task_create",
+            &json!({"title": "t", "tags": []})
+        ));
+        assert!(needs_owner_confirmation(
+            &registry,
+            "task_create_many",
+            &json!({"tasks": [{"title": "a"}, {"title": "b", "assignees": ["hq"]}]})
+        ));
+        assert!(needs_owner_confirmation(
+            &registry,
+            "task_update_many",
+            &json!({"updates": [{"id": "x"}], "defaults": {"tags": ["relay"]}})
+        ));
+        assert!(!needs_owner_confirmation(
+            &registry,
+            "task_update",
+            &json!({"id": "x", "status": "complete"})
+        ));
         assert!(!needs_owner_confirmation(
             &registry,
             "hq_ask",
             &json!({"mode": "read_only"})
         ));
         assert!(!needs_owner_confirmation(&registry, "hq_ask", &none));
+        for padded in [" full", "full\n", "\tfull "] {
+            assert!(
+                needs_owner_confirmation(&registry, "hq_ask", &json!({ "mode": padded })),
+                "the gate reads {padded:?} as the tool does"
+            );
+        }
     }
 
     #[test]

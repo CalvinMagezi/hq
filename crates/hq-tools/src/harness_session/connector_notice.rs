@@ -10,22 +10,47 @@ use std::path::Path;
 const MAX_PROMPT_CHARS: usize = 2500;
 const NOTICE_SOURCE: &str = "mcp-connector";
 
-/// The notice for a session started on a connector grant, or `None` for any other caller.
-pub fn connector_start_notice(args: &Value, report: &Value, prompt: &str) -> Option<ValueItem> {
+/// Every field of the call that reaches the agent as instructions, labelled, so nothing the
+/// model wrote into a side field is missing from what the owner reads.
+pub fn connector_brief(args: &Value, fields: &[&str]) -> String {
+    fields
+        .iter()
+        .filter_map(|f| {
+            let v = args.get(*f)?.as_str()?.trim();
+            (!v.is_empty()).then(|| format!("{f}: {v}"))
+        })
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
+/// The notice for a session started on a connector grant, or `None` for any other caller and
+/// for a handoff that found a session already working (nothing started).
+pub fn connector_start_notice(
+    args: &Value,
+    report: &Value,
+    brief: &str,
+    cwd: &str,
+) -> Option<ValueItem> {
     let label = super::connector_label(args)?;
+    if report["handoff"] == "existing_session" {
+        return None;
+    }
     let field = |k: &str| report[k].as_str().unwrap_or("unknown").to_string();
-    let shown: String = prompt.chars().take(MAX_PROMPT_CHARS).collect();
-    let cut = if prompt.chars().count() > MAX_PROMPT_CHARS {
-        "\n\n[Cut here. The full prompt is in the session's task thread and on the Sessions page.]"
+    let shown: String = brief.chars().take(MAX_PROMPT_CHARS).collect();
+    let cut = if brief.chars().count() > MAX_PROMPT_CHARS {
+        "\n\n[Cut here. The full text is in the session's task thread and on the Sessions page.]"
     } else {
         ""
     };
     let body = format!(
-        "Started by the claude.ai connection \"{label}\".\nSession: {}\nHost: {}\nFolder: {}\n\nPrompt:\n{}{cut}\n\nIf you did not ask Claude for this, stop the session and disconnect it in Settings.",
+        "Started by the claude.ai connection \"{label}\".\nSession: {}\nHost: {}\nFolder: {cwd}\n\nWhat it was told:\n{}{cut}\n\nIf you did not ask Claude for this, stop the session and disconnect it in Settings.",
         field("session_id"),
         field("host"),
-        field("cwd"),
-        if shown.is_empty() { "(none)" } else { &shown },
+        if shown.is_empty() {
+            "(nothing)"
+        } else {
+            &shown
+        },
     );
     Some(ValueItem::new(
         NOTICE_SOURCE,
@@ -42,9 +67,10 @@ pub fn notify_connector_start(
     db: &Database,
     args: &Value,
     report: &Value,
-    prompt: &str,
+    brief: &str,
+    cwd: &str,
 ) {
-    let Some(item) = connector_start_notice(args, report, prompt) else {
+    let Some(item) = connector_start_notice(args, report, brief, cwd) else {
         return;
     };
     let sent = hq_db::value_items::insert(db, &item)
@@ -65,9 +91,10 @@ mod tests {
 
     #[test]
     fn only_a_connector_start_gets_a_notice() {
-        assert!(connector_start_notice(&json!({}), &report(), "fix it").is_none());
+        assert!(connector_start_notice(&json!({}), &report(), "fix it", "/srv/work/app").is_none());
         let args = json!({ super::super::CONNECTOR_ARG: "Claude on the web" });
-        let item = connector_start_notice(&args, &report(), "fix the login bug").unwrap();
+        let item =
+            connector_start_notice(&args, &report(), "fix the login bug", "/srv/work/app").unwrap();
         for part in [
             "Claude on the web",
             "hs-claude-code-1",
@@ -79,12 +106,27 @@ mod tests {
     }
 
     #[test]
+    fn every_instruction_field_is_shown_and_an_existing_session_sends_nothing() {
+        let args = json!({
+            super::super::CONNECTOR_ARG: "Claude",
+            "prompt": "fix it", "goal": "ship", "done_criteria": "tests pass", "title": ""
+        });
+        let brief = connector_brief(&args, &["prompt", "goal", "done_criteria", "title"]);
+        assert_eq!(
+            brief,
+            "prompt: fix it\ngoal: ship\ndone_criteria: tests pass"
+        );
+        let existing = json!({"handoff": "existing_session", "session_id": "hs-1"});
+        assert!(connector_start_notice(&args, &existing, &brief, "/srv").is_none());
+    }
+
+    #[test]
     fn a_long_prompt_is_cut_visibly() {
         let args = json!({ super::super::CONNECTOR_ARG: "Claude" });
         let long = "x".repeat(MAX_PROMPT_CHARS + 50);
-        let item = connector_start_notice(&args, &report(), &long).unwrap();
+        let item = connector_start_notice(&args, &report(), &long, "/srv").unwrap();
         assert!(item.body.contains("[Cut here."));
-        let short = connector_start_notice(&args, &report(), "short").unwrap();
+        let short = connector_start_notice(&args, &report(), "short", "/srv").unwrap();
         assert!(!short.body.contains("[Cut here."));
     }
 
@@ -93,7 +135,7 @@ mod tests {
         let vault = tempfile::TempDir::new().unwrap();
         let db = Database::open_memory().unwrap();
         let args = json!({ super::super::CONNECTOR_ARG: "Claude" });
-        notify_connector_start(vault.path(), &db, &args, &report(), "go");
+        notify_connector_start(vault.path(), &db, &args, &report(), "go", "/srv");
         let inbox = hq_core::mailbox::peek_messages(vault.path(), "relay").unwrap();
         assert_eq!(inbox.len(), 1);
         assert_eq!(

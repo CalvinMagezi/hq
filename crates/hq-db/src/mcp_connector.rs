@@ -725,6 +725,7 @@ pub struct AuditEntry {
 }
 
 /// Logs a call: the tool, how it ended, and a hash of its arguments, never the arguments.
+/// Each write also drops what has aged out, so the log keeps 30 days without a separate task.
 pub fn record_call(
     conn: &Connection,
     grant_id: &str,
@@ -738,7 +739,7 @@ pub fn record_call(
          VALUES (?1, ?2, ?3, ?4, ?5)",
         params![grant_id, tool, outcome, args_sha256, now],
     )?;
-    Ok(())
+    purge_expired(conn, now)
 }
 
 /// Calls a grant made since `since`, for its rate limit.

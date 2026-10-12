@@ -547,3 +547,43 @@ async fn connecting_tells_the_owner_at_once() {
         "{inbox:?}"
     );
 }
+
+#[tokio::test]
+async fn approving_while_the_call_waits_lets_it_run() {
+    let (app, state, _vault) = app_and_db();
+    let token = full_access(&app).await;
+    let request = mcp(&token, call_with("vault_delete", json!({"path": "w.md"})));
+    let owner = async {
+        loop {
+            let found = hq_db::value_items::list_filtered(&state.db, None, None, 50)
+                .unwrap()
+                .into_iter()
+                .find(|i| i.title == "Claude wants to run vault_delete");
+            if let Some(item) = found {
+                assert!(hq_db::value_items::approve_by_id(&state.db, &item.id).unwrap());
+                return;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+        }
+    };
+    let ((_, _, ran), ()) = tokio::join!(send(&app, request), owner);
+    assert!(text_of(&ran).contains("\"ran\""), "{ran}");
+}
+
+#[tokio::test]
+async fn a_connection_cannot_flood_the_owner_with_requests() {
+    let (app, _state, _vault) = app_and_db();
+    let token = full_access(&app).await;
+    for i in 0..super::guard::MAX_WAITING_APPROVALS {
+        let call = call_with("vault_delete", json!({ "path": format!("{i}.md") }));
+        let (_, _, r) = send(&app, mcp(&token, call)).await;
+        assert!(text_of(&r).contains("Waiting"), "{r}");
+    }
+    let (_, _, refused) = send(
+        &app,
+        mcp(&token, call_with("vault_delete", json!({"path": "x.md"}))),
+    )
+    .await;
+    assert_eq!(refused["result"]["isError"], true);
+    assert!(text_of(&refused).contains("already waiting"), "{refused}");
+}

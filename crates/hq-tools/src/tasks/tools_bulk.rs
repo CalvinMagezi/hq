@@ -25,6 +25,7 @@ const ATTESTED: &[&str] = &[
     crate::harness_session::CALLER_SESSION_ARG,
     crate::harness_session::TASKS_SCOPE_ARG,
     crate::harness_session::HANDOFF_SCOPE_ARG,
+    crate::harness_session::CONNECTOR_ARG,
 ];
 
 fn items_of(args: &Value, field: &str) -> Result<Vec<Value>> {

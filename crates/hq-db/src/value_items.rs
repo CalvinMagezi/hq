@@ -235,20 +235,48 @@ pub fn is_signed_approval(db: &Database, dedup_key: &str) -> Result<bool> {
 /// Engagement that marks a signed approval as spent by the one action it approved.
 pub const ENGAGEMENT_USED: &str = "used";
 
-/// State and engagement of the newest item with this dedup key, in any state.
+/// The newest item with a dedup key, as an approval gate reads it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct LatestEngagement {
+    pub state: ValueState,
+    pub engagement: Option<String>,
+    pub expires_at: Option<DateTime<Utc>>,
+}
+
+/// State, engagement and expiry of the newest item with this dedup key, in any state.
 pub fn latest_engagement_by_dedup(
     db: &Database,
     dedup_key: &str,
-) -> Result<Option<(ValueState, Option<String>)>> {
+) -> Result<Option<LatestEngagement>> {
     db.with_conn(|c| {
-        let row: Option<(String, Option<String>)> = c
+        let row: Option<(String, Option<String>, Option<String>)> = c
             .query_row(
-                "SELECT state, engagement FROM value_items WHERE dedup_key = ?1 ORDER BY created_at DESC, rowid DESC LIMIT 1",
+                "SELECT state, engagement, expires_at FROM value_items WHERE dedup_key = ?1 ORDER BY created_at DESC, rowid DESC LIMIT 1",
                 params![dedup_key],
-                |r| Ok((r.get(0)?, r.get(1)?)),
+                |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
             )
             .optional()?;
-        Ok(row.and_then(|(s, e)| ValueState::from_str(&s).map(|s| (s, e))))
+        Ok(row.and_then(|(s, engagement, exp)| {
+            ValueState::from_str(&s).map(|state| LatestEngagement {
+                state,
+                engagement,
+                expires_at: parse_opt_ts(exp),
+            })
+        }))
+    })
+}
+
+/// Items still waiting on the owner whose dedup key starts with `prefix` and that have not
+/// expired, for a producer that caps how many it has open at once.
+pub fn count_waiting_with_prefix(db: &Database, prefix: &str) -> Result<i64> {
+    db.with_conn(|c| {
+        Ok(c.query_row(
+            "SELECT COUNT(*) FROM value_items
+             WHERE dedup_key LIKE ?1 ESCAPE '\\' AND state IN ('pending','routed','delivered')
+               AND (expires_at IS NULL OR expires_at > ?2)",
+            params![format!("{}%", escape_like(prefix)), ts(&Utc::now())],
+            |r| r.get(0),
+        )?)
     })
 }
 
@@ -591,10 +619,9 @@ mod tests {
         assert!(approve_by_id(&db, &first.id).unwrap());
         assert!(consume_approval(&db, "once").unwrap());
         assert!(!consume_approval(&db, "once").unwrap(), "spent");
-        assert_eq!(
-            latest_engagement_by_dedup(&db, "once").unwrap(),
-            Some((ValueState::Engaged, Some(ENGAGEMENT_USED.to_string())))
-        );
+        let latest = latest_engagement_by_dedup(&db, "once").unwrap().unwrap();
+        assert_eq!(latest.state, ValueState::Engaged);
+        assert_eq!(latest.engagement.as_deref(), Some(ENGAGEMENT_USED));
         let second = ValueItem::new("t", ValueKind::ActionNeeded, "a", "b").with_dedup_key("once");
         emit(&db, &second).unwrap();
         assert_eq!(
@@ -602,6 +629,30 @@ mod tests {
             Some(ValueState::Pending),
             "a spent approval does not swallow the next request"
         );
+    }
+
+    #[test]
+    fn waiting_items_are_counted_by_prefix_until_answered_or_expired() {
+        let db = open_db();
+        for key in ["connector:g1:a", "connector:g1:b", "connector:g2:a"] {
+            let item = ValueItem::new("t", ValueKind::ActionNeeded, "a", "b").with_dedup_key(key);
+            emit(&db, &item).unwrap();
+        }
+        let mut stale =
+            ValueItem::new("t", ValueKind::ActionNeeded, "a", "b").with_dedup_key("connector:g1:c");
+        stale.expires_at = Some(Utc::now() - chrono::Duration::hours(1));
+        emit(&db, &stale).unwrap();
+        assert_eq!(count_waiting_with_prefix(&db, "connector:g1:").unwrap(), 2);
+        assert_eq!(
+            count_waiting_with_prefix(&db, "connector:g_:").unwrap(),
+            0,
+            "no LIKE wildcards"
+        );
+        let first = find_active_by_dedup(&db, ValueKind::ActionNeeded, "connector:g1:a")
+            .unwrap()
+            .unwrap();
+        assert!(dismiss_by_id(&db, &first.id).unwrap());
+        assert_eq!(count_waiting_with_prefix(&db, "connector:g1:").unwrap(), 1);
     }
 
     #[test]

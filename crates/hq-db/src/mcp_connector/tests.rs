@@ -441,8 +441,16 @@ fn the_call_log_counts_per_grant_and_lists_newest_first() {
         let mine = recent_calls(c, Some("grant-a"), 10)?;
         assert_eq!(mine.len(), 2);
         assert_eq!(mine[0].tool, "task_create");
-        purge_expired(c, NOW + 30 + AUDIT_RETENTION_SECS)?;
-        assert_eq!(recent_calls(c, None, 10)?.len(), 1, "old rows age out");
+        record_call(
+            c,
+            "grant-b",
+            "vault_read",
+            "ok",
+            "h4",
+            NOW + 30 + AUDIT_RETENTION_SECS,
+        )?;
+        let left = recent_calls(c, None, 10)?;
+        assert_eq!(left.len(), 2, "a write drops what aged out: {left:?}");
         Ok(())
     })
     .unwrap();

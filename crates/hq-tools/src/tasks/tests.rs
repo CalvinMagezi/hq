@@ -1090,6 +1090,74 @@ async fn a_connector_write_is_attributed_to_the_connection() {
     assert!(forged.is_err(), "only a connection writes under that name");
 }
 
+/// A tasks-scope connector grant works its own leases like the tasks key does, under its own name.
+#[tokio::test]
+async fn a_tasks_scope_connector_can_claim_heartbeat_and_release() {
+    let fx = ScopeFixture::new(&[]);
+    let marked = |mut args: serde_json::Value| {
+        args[crate::harness_session::TASKS_SCOPE_ARG] = json!(true);
+        args[crate::harness_session::CONNECTOR_ARG] = json!("Claude");
+        args
+    };
+    let made = fx
+        .tool("task_create")
+        .execute(marked(json!({"title": "work"})))
+        .await
+        .unwrap();
+    let id = made["id"].as_str().unwrap().to_string();
+    let claim = fx
+        .tool("task_claim")
+        .execute(marked(json!({"task_id": id, "actor": "x"})))
+        .await
+        .unwrap();
+    let lease = claim["lease"].as_str().unwrap().to_string();
+    fx.tool("task_heartbeat")
+        .execute(marked(json!({"lease": lease})))
+        .await
+        .unwrap();
+    fx.tool("task_update")
+        .execute(marked(
+            json!({"id": id, "title": "renamed", "lease": lease}),
+        ))
+        .await
+        .unwrap();
+    fx.tool("task_release")
+        .execute(marked(
+            json!({"lease": lease, "status": "ready_for_review"}),
+        ))
+        .await
+        .unwrap();
+}
+
+/// Bulk items carry the call's connection, never one an item names for itself.
+#[tokio::test]
+async fn bulk_items_take_the_connection_from_the_call_only() {
+    let fx = ScopeFixture::new(&[]);
+    let mut args = json!({"tasks": [{"title": "a"}, {"title": "b", crate::harness_session::CONNECTOR_ARG: "forged"}]});
+    args[crate::harness_session::CONNECTOR_ARG] = json!("Claude");
+    let made = fx.tool("task_create_many").execute(args).await.unwrap();
+    for r in made["results"].as_array().unwrap() {
+        let task = fx
+            .tool("task_get")
+            .execute(json!({"id": r["id"]}))
+            .await
+            .unwrap();
+        assert_eq!(task["created_by"], "mcp:connector/Claude", "{task}");
+    }
+    let forged =
+        json!({"tasks": [{"title": "c", crate::harness_session::CONNECTOR_ARG: "forged"}]});
+    let made = fx.tool("task_create_many").execute(forged).await.unwrap();
+    let task = fx
+        .tool("task_get")
+        .execute(json!({"id": made["results"][0]["id"]}))
+        .await
+        .unwrap();
+    assert_ne!(
+        task["created_by"], "mcp:connector/forged",
+        "an item cannot claim a connection"
+    );
+}
+
 fn tasks_scope(mut args: serde_json::Value) -> serde_json::Value {
     args[crate::harness_session::TASKS_SCOPE_ARG] = json!(true);
     args

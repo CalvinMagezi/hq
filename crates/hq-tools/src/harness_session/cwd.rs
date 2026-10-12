@@ -20,7 +20,14 @@ pub fn connector_label(args: &Value) -> Option<&str> {
 
 /// The name a connector grant's writes are attributed to: `mcp:connector/<label>`.
 pub fn connector_actor(label: &str) -> String {
-    format!("{CONNECTOR_ACTOR}/{label}")
+    format!("{CONNECTOR_ACTOR}/{}", hq_db::tasks::clean_label(label))
+}
+
+/// Whether a scoped call may treat `name` as its own: the tasks scope's names, or this
+/// connector grant's name. A tasks-scope grant writes and leases under the latter.
+pub fn is_own_scope_actor(args: &Value, name: &str) -> bool {
+    connector_label(args).is_some_and(|label| name == connector_actor(label))
+        || is_tasks_scope_actor(name)
 }
 
 /// Whether `name` is of the connector's shape, which only a connector grant may write under.
@@ -167,13 +174,19 @@ impl CwdBound {
 /// A connector grant starts sessions only in folders the owner listed: an empty list means none,
 /// because a hijacked conversation must not choose where an agent with a shell runs.
 pub fn check_connector_cwd(cwd: &Path, allow: &[String]) -> Result<()> {
+    connector_may_spawn(allow)?;
+    check_handoff_cwd(cwd, allow)
+}
+
+/// Whether a connector may start any session: only once the owner has listed folders.
+pub fn connector_may_spawn(allow: &[String]) -> Result<()> {
     if allow.iter().all(|a| a.trim().is_empty()) {
         bail!(
             "a claude.ai connector can start coding sessions only in folders listed in \
              agent_host.handoff_cwd_allow, which is empty; no session was started"
         );
     }
-    check_handoff_cwd(cwd, allow)
+    Ok(())
 }
 
 /// `require_cwd` plus the deny list and, for a bounded caller, its allow list, from an already
