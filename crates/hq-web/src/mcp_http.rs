@@ -10,6 +10,9 @@ use std::sync::Arc;
 const HANDOFF_KEY_ENV: &str = "AGENTHQ_HANDOFF_API_KEY";
 /// Env var holding the tasks-scoped key.
 const TASKS_KEY_ENV: &str = "AGENTHQ_TASKS_API_KEY";
+/// Protocol versions HQ answers with, newest first. A client asking for one of these gets it
+/// back; any other request gets the newest.
+const PROTOCOL_VERSIONS: &[&str] = &["2025-11-25", "2025-06-18", "2025-03-26", "2024-11-05"];
 
 fn rpc_ok(id: Value, result: Value) -> Json<Value> {
     Json(json!({"jsonrpc": "2.0", "id": id, "result": result}))
@@ -35,9 +38,39 @@ pub(crate) async fn mcp_handler(
     let keys = McpKeys::from_env();
     let switch_on = std::env::var(crate::auth::MCP_DEV_NO_AUTH_ENV).is_ok_and(|v| v == "1");
     let dev_open = crate::auth::mcp_dev_open(&headers, switch_on, state.web_bind_is_loopback);
+    respond(&state, &headers, body, &keys, dev_open).await
+}
+
+async fn respond(
+    state: &WsState,
+    headers: &axum::http::HeaderMap,
+    body: Value,
+    keys: &McpKeys,
+    dev_open: bool,
+) -> axum::response::Response {
     let is_notification = body.get("id").is_none();
-    let reply = handle_mcp(&state, &headers, body, &keys, dev_open).await;
-    answer(is_notification, reply)
+    match handle_mcp(state, headers, body, keys, dev_open).await {
+        Ok(reply) => answer(is_notification, reply),
+        Err(refusal) => unauthorized(state, headers, refusal),
+    }
+}
+
+/// A refused call is a `401` carrying the reason. With the connector on, its challenge points
+/// claude.ai at the OAuth metadata, which it reads only from a `401`.
+fn unauthorized(
+    state: &WsState,
+    headers: &axum::http::HeaderMap,
+    refusal: Json<Value>,
+) -> axum::response::Response {
+    use axum::response::IntoResponse;
+    let presented = !crate::auth::presented_secret(headers).is_empty();
+    let challenge = crate::oauth::www_authenticate(state.connector.as_ref(), presented);
+    (
+        axum::http::StatusCode::UNAUTHORIZED,
+        [(axum::http::header::WWW_AUTHENTICATE, challenge)],
+        refusal,
+    )
+        .into_response()
 }
 
 /// A notification has no response in JSON-RPC, and clients such as Codex fail the connection on a body
@@ -87,7 +120,7 @@ async fn handle_mcp(
     body: Value,
     keys: &McpKeys,
     dev_open: bool,
-) -> Json<Value> {
+) -> Result<Json<Value>, Json<Value>> {
     let id = body.get("id").cloned().unwrap_or(Value::Null);
     let identity = crate::auth::resolve_identity(
         headers,
@@ -105,13 +138,13 @@ async fn handle_mcp(
     if identity.is_none() && session.is_none() {
         if keys.none_configured() {
             tracing::warn!("mcp_http: refused, no AGENTHQ_API_KEY configured");
-            return rpc_err(
+            return Err(rpc_err(
                 id,
                 -32001,
                 "Unauthorized: this server has no AGENTHQ_API_KEY configured",
-            );
+            ));
         }
-        return rpc_err(id, -32001, "Unauthorized");
+        return Err(rpc_err(id, -32001, "Unauthorized"));
     }
     let allowed: Option<&[&str]> = match (identity, &session) {
         (Some(crate::auth::ApiIdentity::Full), _) => None,
@@ -126,9 +159,15 @@ async fn handle_mcp(
     let method = body.get("method").and_then(|v| v.as_str()).unwrap_or("");
     tracing::debug!(method = %method, "mcp_http: handling json-rpc method");
 
-    match method {
-        "initialize" => rpc_ok(id, initialize_result(state.registry.as_deref(), allowed)),
-        "notifications/initialized" | "ping" => rpc_ok(id, json!({})),
+    Ok(match method {
+        "initialize" => rpc_ok(
+            id,
+            initialize_result(state.registry.as_deref(), allowed, &body),
+        ),
+        "ping" => rpc_ok(id, json!({})),
+        // Every notification is acknowledged with an empty 202: clients such as Codex drop
+        // the connection on a body, and newer protocol versions send `notifications/cancelled`.
+        m if m.starts_with("notifications/") => rpc_ok(id, json!({})),
         "tools/list" => {
             let tools = state
                 .registry
@@ -145,8 +184,10 @@ async fn handle_mcp(
             let spawned = session.as_deref().or_else(|| spawned_by(headers));
             call_tool(state, id, &body, allowed, spawned, session.as_deref()).await
         }
+        // Load-bearing: claude.ai probes `server/discover` first and falls back to
+        // `initialize` only on this error.
         _ => rpc_err(id, -32601, "Method not found"),
-    }
+    })
 }
 
 /// The running session a presented secret belongs to, if it is a session token.
@@ -220,9 +261,10 @@ async fn call_tool(
 fn initialize_result(
     registry: Option<&hq_tools::registry::ToolRegistry>,
     allowed: Option<&[&str]>,
+    request: &Value,
 ) -> Value {
     let mut result = json!({
-        "protocolVersion": "2024-11-05",
+        "protocolVersion": negotiated_version(request),
         "capabilities": {"tools": {}},
         "serverInfo": {"name": "agent-hq", "version": env!("CARGO_PKG_VERSION")}
     });
@@ -236,6 +278,15 @@ fn initialize_result(
         _ => {}
     }
     result
+}
+
+/// The version a client asked for in `initialize`, when HQ speaks it, else the newest.
+fn negotiated_version(request: &Value) -> &'static str {
+    let asked = request["params"]["protocolVersion"].as_str().unwrap_or("");
+    PROTOCOL_VERSIONS
+        .iter()
+        .find(|v| **v == asked)
+        .unwrap_or(&PROTOCOL_VERSIONS[0])
 }
 
 #[cfg(test)]
@@ -281,13 +332,32 @@ mod tests {
     fn initialize_omits_instructions_instead_of_sending_null() {
         let spark: &[&str] = &["vault_read"];
         let registry = hq_tools::registry::ToolRegistry::new();
-        assert!(initialize_result(None, None).get("instructions").is_none());
+        let req = json!({});
         assert!(
-            initialize_result(Some(&registry), Some(spark))
+            initialize_result(None, None, &req)
                 .get("instructions")
                 .is_none()
         );
-        assert!(initialize_result(Some(&registry), None)["instructions"].is_string());
+        assert!(
+            initialize_result(Some(&registry), Some(spark), &req)
+                .get("instructions")
+                .is_none()
+        );
+        assert!(initialize_result(Some(&registry), None, &req)["instructions"].is_string());
+    }
+
+    #[test]
+    fn initialize_answers_the_version_asked_for_or_the_newest() {
+        let ask = |v: &str| json!({"params": {"protocolVersion": v}});
+        for v in PROTOCOL_VERSIONS {
+            assert_eq!(negotiated_version(&ask(v)), *v);
+        }
+        assert_eq!(negotiated_version(&ask("2099-01-01")), PROTOCOL_VERSIONS[0]);
+        assert_eq!(negotiated_version(&json!({})), PROTOCOL_VERSIONS[0]);
+        assert_eq!(
+            initialize_result(None, None, &ask("2025-11-25"))["protocolVersion"],
+            "2025-11-25"
+        );
     }
 
     use axum::body::Body;
@@ -324,6 +394,10 @@ mod tests {
     /// `vault_search` is in every scope, `harness_session_logs` only in Spark's,
     /// `task_create` only in handoff's, and `config_manage` in neither.
     fn app() -> axum::Router {
+        app_with(None)
+    }
+
+    fn app_with(connector: Option<hq_core::config::ConnectorOrigins>) -> axum::Router {
         let mut registry = ToolRegistry::new();
         for (name, category) in [
             ("vault_search", "vault"),
@@ -335,9 +409,10 @@ mod tests {
             registry.register(Box::new(Fake(name, category)));
         }
         let vault = tempfile::TempDir::new().unwrap();
-        let state = Arc::new(
-            WsState::new(vault.path().to_path_buf(), None).with_registry(Arc::new(registry)),
-        );
+        let mut state =
+            WsState::new(vault.path().to_path_buf(), None).with_registry(Arc::new(registry));
+        state.connector = connector;
+        let state = Arc::new(state);
         let keys = Arc::new(McpKeys {
             full: Some(FULL.into()),
             spark: Some(SPARK.into()),
@@ -349,22 +424,25 @@ mod tests {
             axum::routing::post(
                 move |headers: axum::http::HeaderMap, Json(body): Json<Value>| {
                     let (state, keys) = (state.clone(), keys.clone());
-                    async move { handle_mcp(&state, &headers, body, &keys, false).await }
+                    async move { respond(&state, &headers, body, &keys, false).await }
                 },
             ),
         )
     }
 
-    async fn rpc(app: &axum::Router, key: Option<&str>, body: Value) -> Value {
+    async fn send(app: &axum::Router, key: Option<&str>, body: Value) -> axum::response::Response {
         let mut req = Request::post("/mcp").header("content-type", "application/json");
         if let Some(key) = key {
             req = req.header("authorization", format!("Bearer {key}"));
         }
-        let res = app
-            .clone()
+        app.clone()
             .oneshot(req.body(Body::from(body.to_string())).unwrap())
             .await
-            .unwrap();
+            .unwrap()
+    }
+
+    async fn rpc(app: &axum::Router, key: Option<&str>, body: Value) -> Value {
+        let res = send(app, key, body).await;
         let bytes = axum::body::to_bytes(res.into_body(), usize::MAX)
             .await
             .unwrap();
@@ -406,6 +484,70 @@ mod tests {
         }
         let wrong = rpc(&app, Some("nope"), list()).await;
         assert_eq!(wrong["error"]["code"], -32001);
+    }
+
+    fn challenge(res: &axum::response::Response) -> String {
+        res.headers()
+            .get(axum::http::header::WWW_AUTHENTICATE)
+            .map(|v| v.to_str().unwrap().to_string())
+            .unwrap_or_default()
+    }
+
+    #[tokio::test]
+    async fn a_refusal_is_a_401_with_a_challenge_and_a_key_is_a_200() {
+        use axum::http::StatusCode;
+        let app = app();
+        let res = send(&app, None, list()).await;
+        assert_eq!(res.status(), StatusCode::UNAUTHORIZED);
+        assert_eq!(challenge(&res), r#"Bearer realm="agent-hq""#);
+        let wrong = send(&app, Some("nope"), list()).await;
+        assert_eq!(wrong.status(), StatusCode::UNAUTHORIZED);
+        assert!(challenge(&wrong).contains(r#"error="invalid_token""#));
+        assert!(!challenge(&wrong).contains("resource_metadata"));
+        let notification = json!({"jsonrpc": "2.0", "method": "notifications/initialized"});
+        let refused = send(&app, None, notification.clone()).await;
+        assert_eq!(refused.status(), StatusCode::UNAUTHORIZED);
+        for key in [FULL, SPARK, HANDOFF, TASKS] {
+            assert_eq!(send(&app, Some(key), list()).await.status(), StatusCode::OK);
+            let accepted = send(&app, Some(key), notification.clone()).await;
+            assert_eq!(accepted.status(), StatusCode::ACCEPTED, "{key}");
+        }
+    }
+
+    #[tokio::test]
+    async fn with_the_connector_on_the_challenge_points_at_the_metadata() {
+        let app = app_with(Some(hq_core::config::ConnectorOrigins {
+            public: "https://hq.example.com".into(),
+            consent: "https://hq.example.com".into(),
+        }));
+        let res = send(&app, None, list()).await;
+        assert_eq!(res.status(), axum::http::StatusCode::UNAUTHORIZED);
+        assert_eq!(
+            challenge(&res),
+            r#"Bearer realm="agent-hq", resource_metadata="https://hq.example.com/.well-known/oauth-protected-resource""#
+        );
+    }
+
+    #[tokio::test]
+    async fn every_notification_is_an_empty_202() {
+        let app = app();
+        for method in ["notifications/initialized", "notifications/cancelled"] {
+            let note = json!({"jsonrpc": "2.0", "method": method});
+            let res = send(&app, Some(FULL), note).await;
+            assert_eq!(res.status(), axum::http::StatusCode::ACCEPTED, "{method}");
+            let bytes = axum::body::to_bytes(res.into_body(), usize::MAX)
+                .await
+                .unwrap();
+            assert!(bytes.is_empty(), "{method}");
+        }
+    }
+
+    #[tokio::test]
+    async fn unknown_methods_answer_method_not_found() {
+        let app = app();
+        let probe = json!({"jsonrpc": "2.0", "id": 9, "method": "server/discover"});
+        let res = rpc(&app, Some(FULL), probe).await;
+        assert_eq!(res["error"]["code"], -32601, "{res}");
     }
 
     #[tokio::test]
@@ -571,7 +713,7 @@ mod tests {
             axum::routing::post(
                 move |headers: axum::http::HeaderMap, Json(body): Json<Value>| {
                     let (state, keys) = (state.clone(), keys.clone());
-                    async move { handle_mcp(&state, &headers, body, &keys, false).await }
+                    async move { respond(&state, &headers, body, &keys, false).await }
                 },
             ),
         );

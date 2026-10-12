@@ -11,6 +11,7 @@ mod governance;
 mod harness;
 mod instance;
 mod llm;
+mod mcp_connector;
 mod memory;
 pub mod model_switch;
 mod profile;
@@ -40,6 +41,7 @@ pub use governance::*;
 pub use harness::*;
 pub use instance::*;
 pub use llm::*;
+pub use mcp_connector::{ConnectorOrigins, McpConnectorConfig};
 pub use memory::*;
 pub use profile::{
     EgressItem, EnvLookup, LiteConfig, Profile, egress_report, enforce_lite, lite_violations,
@@ -248,6 +250,10 @@ pub struct HqConfig {
     #[serde(default)]
     pub usage_ledger: UsageLedgerConfig,
 
+    /// claude.ai custom connector over OAuth. Off by default.
+    #[serde(default)]
+    pub mcp_connector: McpConnectorConfig,
+
     /// Spending limits. Empty by default: nothing is enforced until the owner opts in.
     #[serde(default)]
     pub budgets: BudgetsConfig,
@@ -426,6 +432,7 @@ impl Default for HqConfig {
             self_update: SelfUpdateConfig::default(),
             disk_watchdog: DiskWatchdogConfig::default(),
             usage_ledger: UsageLedgerConfig::default(),
+            mcp_connector: McpConnectorConfig::default(),
             budgets: BudgetsConfig::default(),
             tasks: TasksConfig::default(),
             copilot_usage: CopilotUsageConfig::default(),

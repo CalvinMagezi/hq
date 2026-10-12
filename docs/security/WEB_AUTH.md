@@ -29,6 +29,13 @@ or drop the scope. Send the key as `Authorization: Bearer <key>` or
 across scopes gets the narrower one (Spark, then tasks, then handoff, then full), and a tool missing from a scope's list is
 denied, so a new tool stays out of the scoped keys until it is added by hand.
 
+A refused call is an HTTP `401` with a `WWW-Authenticate: Bearer` challenge (and
+`error="invalid_token"` when a credential was sent), carrying the JSON-RPC error as its body.
+With the claude.ai connector on (`mcp_connector`, see `docs/plans/claude-connector.md`), the
+challenge also names `resource_metadata`, and `/.well-known/oauth-protected-resource` is served;
+both stay absent otherwise. `initialize` answers with the protocol version the client asked for
+when HQ speaks it (`2025-11-25`, `2025-06-18`, `2025-03-26`, `2024-11-05`), else the newest.
+
 For local development only, `HQ_MCP_DEV_NO_AUTH=1` opens `/mcp` when no key is
 configured. It is honoured only when `web_bind` is a loopback address and the
 request carries no `Forwarded`, `X-Forwarded-For`, `X-Forwarded-Host`,
