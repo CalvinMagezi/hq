@@ -1,5 +1,5 @@
-use super::*;
 use super::category::{Purpose, purpose_for};
+use super::*;
 use crate::agent_host::McpAccess;
 
 pub(super) fn build_args(
@@ -26,7 +26,11 @@ pub(super) fn build_args(
                 with_token,
                 otherwise,
             } => {
-                let chosen = if resume_token.is_some() { with_token } else { otherwise };
+                let chosen = if resume_token.is_some() {
+                    with_token
+                } else {
+                    otherwise
+                };
                 chosen
                     .iter()
                     .map(|a| a.replace("{token}", resume_token.unwrap_or_default()))
@@ -128,16 +132,23 @@ pub(super) fn workspace_label(harness: &str, label: &str) -> String {
 /// so several in-memory databases in one test process do not see each other's launches. A retry or resume of the same
 /// agent while an earlier launch is still waiting would otherwise start a second
 /// one under the same name.
-pub(super) static LAUNCHES_IN_FLIGHT: std::sync::Mutex<Vec<(usize, String, String)>> = std::sync::Mutex::new(Vec::new());
+pub(super) static LAUNCHES_IN_FLIGHT: std::sync::Mutex<Vec<(usize, String, String)>> =
+    std::sync::Mutex::new(Vec::new());
 
 pub(super) struct InFlight(usize, String, String);
 
 impl InFlight {
     pub(super) fn claim(db: &Arc<Database>, host: &str, agent: &str) -> Result<Self> {
         let mut live = LAUNCHES_IN_FLIGHT.lock().unwrap_or_else(|e| e.into_inner());
-        let key = (Arc::as_ptr(db) as usize, host.to_string(), agent.to_string());
+        let key = (
+            Arc::as_ptr(db) as usize,
+            host.to_string(),
+            agent.to_string(),
+        );
         if live.contains(&key) {
-            bail!("a launch of agent '{agent}' on host '{host}' is already in progress; wait for it to finish");
+            bail!(
+                "a launch of agent '{agent}' on host '{host}' is already in progress; wait for it to finish"
+            );
         }
         let owner = key.0;
         live.push(key);
@@ -184,7 +195,9 @@ impl OwnedLaunch {
             resume_token: own(l.resume_token),
             resuming: l.resuming,
             mission_id: own(l.mission_id),
-            watch: l.watch.map(|w| (w.thread.to_string(), w.drive, w.opted_out)),
+            watch: l
+                .watch
+                .map(|w| (w.thread.to_string(), w.drive, w.opted_out)),
             parent: l.parent.map(|(id, depth)| (id.to_string(), depth)),
             goal: (own(l.goal.goal), own(l.goal.done_criteria)),
             purpose: l.purpose,
@@ -204,12 +217,18 @@ impl OwnedLaunch {
             resume_token: self.resume_token.as_deref(),
             resuming: self.resuming,
             mission_id: self.mission_id.as_deref(),
-            watch: self.watch.as_ref().map(|(thread, drive, opted_out)| NewWatch {
-                thread,
-                drive: *drive,
-                opted_out: *opted_out,
-            }),
-            parent: self.parent.as_ref().map(|(id, depth)| (id.as_str(), *depth)),
+            watch: self
+                .watch
+                .as_ref()
+                .map(|(thread, drive, opted_out)| NewWatch {
+                    thread,
+                    drive: *drive,
+                    opted_out: *opted_out,
+                }),
+            parent: self
+                .parent
+                .as_ref()
+                .map(|(id, depth)| (id.as_str(), *depth)),
             goal: GoalText {
                 goal: self.goal.0.as_deref(),
                 done_criteria: self.goal.1.as_deref(),
@@ -238,15 +257,19 @@ pub(super) async fn launch_session(
     harness: &Harness,
     l: Launch<'_>,
 ) -> Result<Value> {
-    let (vault_path, db, harness, owned) =
-        (vault_path.to_path_buf(), db.clone(), harness.clone(), OwnedLaunch::new(&l));
+    let (vault_path, db, harness, owned) = (
+        vault_path.to_path_buf(),
+        db.clone(),
+        harness.clone(),
+        OwnedLaunch::new(&l),
+    );
     let in_flight = InFlight::claim(&db, owned.host.name(), &owned.session_id)?;
     tokio::spawn(async move {
         let _in_flight = in_flight;
         run_launch(&vault_path, &db, &harness, owned.borrow()).await
     })
-        .await
-        .map_err(|e| anyhow::anyhow!("the launch task did not finish: {e}"))?
+    .await
+    .map_err(|e| anyhow::anyhow!("the launch task did not finish: {e}"))?
 }
 
 /// The launch itself. From the moment the workspace exists until its row is
@@ -255,7 +278,12 @@ pub(super) async fn launch_session(
 /// later failures leave it tracked.
 /// A secret for this session and the endpoint to use it on, when HQ is set up
 /// to let launched agents call back and the host can deliver it.
-fn mcp_access(db: &Arc<Database>, host: &Host, harness: &Harness, session_id: &str) -> Option<McpAccess> {
+fn mcp_access(
+    db: &Arc<Database>,
+    host: &Host,
+    harness: &Harness,
+    session_id: &str,
+) -> Option<McpAccess> {
     let Some(url) = agent_host_config().agent_mcp_url else {
         // No endpoint now: an older secret of a resumed session must not revive.
         let id = session_id.to_string();
@@ -287,7 +315,8 @@ pub(super) async fn run_launch(
     let session_id = l.session_id.to_string();
     let launched = launch_with(vault_path, db, harness, l, mcp).await;
     if launched.is_err() && minted {
-        let _ = db.with_conn(move |c| hq_db::session_tokens::revoke_if_unregistered(c, &session_id));
+        let _ =
+            db.with_conn(move |c| hq_db::session_tokens::revoke_if_unregistered(c, &session_id));
     }
     launched
 }
@@ -307,9 +336,12 @@ async fn launch_with(
         label: workspace_label(&harness.name, l.label),
         env: launch_env(harness, l.session_id),
         args: match l.one_shot {
-            Some(brief) => harness
-                .one_shot_args(brief)
-                .ok_or_else(|| anyhow::anyhow!("'{}' has no one-shot command to run a brief with", harness.name))?,
+            Some(brief) => harness.one_shot_args(brief).ok_or_else(|| {
+                anyhow::anyhow!(
+                    "'{}' has no one-shot command to run a brief with",
+                    harness.name
+                )
+            })?,
             None => build_args(harness, l.session_id, l.resume_token, l.resuming),
         },
         command: profile.and_then(|p| p.command.clone()),
@@ -336,7 +368,9 @@ async fn launch_with(
     } else {
         mission::Event::Launched
     };
-    let task = l.mission_id.and_then(|_| record_on_task(db, l.session_id, event));
+    let task = l
+        .mission_id
+        .and_then(|_| record_on_task(db, l.session_id, event));
 
     let host = l.host.clone();
     let name = l.session_id.to_string();
@@ -365,7 +399,11 @@ async fn launch_with(
 /// Record `event` on the session's linked task, as JSON for the caller's
 /// report. The session already exists, so a failure here is reported, never
 /// raised: the work is running whether or not its task heard about it.
-pub(super) fn record_on_task(db: &Arc<Database>, session_id: &str, event: mission::Event) -> Option<Value> {
+pub(super) fn record_on_task(
+    db: &Arc<Database>,
+    session_id: &str,
+    event: mission::Event,
+) -> Option<Value> {
     let result = db.with_conn(|c| {
         let Some(row) = registry::get(c, session_id)? else {
             return Ok(None);
@@ -376,7 +414,9 @@ pub(super) fn record_on_task(db: &Arc<Database>, session_id: &str, event: missio
         Ok(link) => link.map(|l| json!(l)),
         Err(e) => {
             tracing::warn!(session = %session_id, error = %e, "harness-session: task update failed");
-            Some(json!({ "error": format!("session is running but its task was not updated: {e}") }))
+            Some(
+                json!({ "error": format!("session is running but its task was not updated: {e}") }),
+            )
         }
     }
 }
@@ -396,8 +436,13 @@ pub(super) fn record_placement(
     );
     let (harness, label, cwd) = (harness.name.clone(), l.label.to_string(), l.cwd.to_string());
     let (resuming, mission) = (l.resuming, l.mission_id.map(str::to_string));
-    let watch = l.watch.map(|w| (w.thread.to_string(), w.drive, w.opted_out));
-    let goal = (l.goal.goal.map(str::to_string), l.goal.done_criteria.map(str::to_string));
+    let watch = l
+        .watch
+        .map(|w| (w.thread.to_string(), w.drive, w.opted_out));
+    let goal = (
+        l.goal.goal.map(str::to_string),
+        l.goal.done_criteria.map(str::to_string),
+    );
     let parent = l.parent.map(|(id, depth)| (id.to_string(), depth));
     let (purpose, observe) = (l.purpose, l.observe.to_vec());
     let origin = l.origin.map(str::to_string);
@@ -434,10 +479,24 @@ pub(super) fn record_placement(
             registry::add_observed(c, name, &observe)?;
         }
         if goal.0.is_some() || goal.1.is_some() {
-            registry::set_goal(c, name, goal.0.as_deref(), goal.1.as_deref(), registry::ACTOR_HQ)?;
+            registry::set_goal(
+                c,
+                name,
+                goal.0.as_deref(),
+                goal.1.as_deref(),
+                registry::ACTOR_HQ,
+            )?;
         }
         if let Some((thread, drive, opted_out)) = &watch {
-            start_watch(c, name, NewWatch { thread, drive: *drive, opted_out: *opted_out })?;
+            start_watch(
+                c,
+                name,
+                NewWatch {
+                    thread,
+                    drive: *drive,
+                    opted_out: *opted_out,
+                },
+            )?;
         }
         Ok(())
     })
@@ -640,7 +699,10 @@ pub(crate) async fn spawn_on(
         (Some(id), None) => db.with_conn(|c| Ok(task_goal(c, id)))?,
         _ => None,
     };
-    let goal = GoalText { goal: req.goal.goal.or(task_goal.as_deref()), ..req.goal };
+    let goal = GoalText {
+        goal: req.goal.goal.or(task_goal.as_deref()),
+        ..req.goal
+    };
     let session_id = new_session_id(&harness.name);
     let cwd = req.cwd.to_string_lossy();
     let report = launch_session(
@@ -687,10 +749,15 @@ pub(super) fn check_observe(observe: &[String], purpose: Purpose, has_task: bool
         );
     }
     if !has_task {
-        bail!("a session that observes others needs a task_id: its task thread is where what it sees is kept");
+        bail!(
+            "a session that observes others needs a task_id: its task thread is where what it sees is kept"
+        );
     }
     if observe.len() > registry::MAX_OBSERVED {
-        bail!("at most {} sessions can be observed by one session", registry::MAX_OBSERVED);
+        bail!(
+            "at most {} sessions can be observed by one session",
+            registry::MAX_OBSERVED
+        );
     }
     Ok(())
 }

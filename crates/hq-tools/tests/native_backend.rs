@@ -3,7 +3,7 @@
 
 use hq_host::{Host, Server, StopHandle};
 use hq_tools::agent_host::{
-    AgentStatus, AgentHostError, HostBackend, LaunchRequest, NativeBackend, PromptOutcome,
+    AgentHostError, AgentStatus, HostBackend, LaunchRequest, NativeBackend, PromptOutcome,
 };
 use std::sync::Arc;
 use std::time::{Duration, Instant};
@@ -74,7 +74,10 @@ fn read_until(b: &NativeBackend, name: &str, needle: &str) -> String {
 #[test]
 fn an_unreachable_host_is_reported_as_unreachable() {
     let b = NativeBackend::new("/nonexistent/hq-host-run");
-    assert!(matches!(b.version(), Err(AgentHostError::Unreachable { .. })));
+    assert!(matches!(
+        b.version(),
+        Err(AgentHostError::Unreachable { .. })
+    ));
 }
 
 #[test]

@@ -94,7 +94,9 @@ async fn broadcast_web(config: &HqConfig, text: &str) {
         return;
     };
     let url = format!("http://127.0.0.1:{}/api/admin/broadcast", config.ws_port);
-    let mut request = client.post(&url).json(&serde_json::json!({ "message": text }));
+    let mut request = client
+        .post(&url)
+        .json(&serde_json::json!({ "message": text }));
     if let Some(token) = config.web_auth_token.as_deref() {
         request = request.bearer_auth(token);
     }

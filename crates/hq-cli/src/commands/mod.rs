@@ -51,17 +51,17 @@ pub mod mcp;
 pub mod mcp_serve;
 pub mod memory;
 pub mod models;
+pub mod notify_restart;
 pub mod onboard;
 pub mod pair;
 pub mod profile;
 pub mod ps;
-pub mod web;
+pub mod queue;
 pub mod restart;
 pub mod search;
-pub mod notify_restart;
-pub mod queue;
 #[cfg(unix)]
 pub mod self_apply;
+pub mod web;
 #[cfg(not(unix))]
 pub mod self_apply {
     use anyhow::{Result, bail};
@@ -71,6 +71,7 @@ pub mod self_apply {
         bail!("self-apply is not available on Windows")
     }
 }
+pub mod agent_skill;
 pub mod service;
 pub mod sessions;
 pub mod shortcuts;
@@ -80,9 +81,8 @@ pub mod start;
 pub mod status;
 pub mod stop;
 pub mod task;
+pub mod tasks;
 pub mod tools;
 pub mod update;
-pub mod agent_skill;
-pub mod tasks;
 pub mod usage;
 pub mod vault;

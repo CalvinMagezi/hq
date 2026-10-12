@@ -237,7 +237,8 @@ mod tests {
     fn interrupt_tagged_nudge_is_urgent() {
         let tmp = TempDir::new().unwrap();
         let mut m = msg("anything", MailboxMessageType::Nudge);
-        m.meta.insert(META_INTERRUPT.to_string(), "true".to_string());
+        m.meta
+            .insert(META_INTERRUPT.to_string(), "true".to_string());
         assert_eq!(gate_decision(tmp.path(), &m), GateDecision::Urgent);
     }
 
@@ -247,7 +248,9 @@ mod tests {
         // the fix verifiable from the log alone.
         let tmp = TempDir::new().unwrap();
         let mut nudge = msg("nudge", MailboxMessageType::Nudge);
-        nudge.meta.insert(META_INTERRUPT.to_string(), "true".to_string());
+        nudge
+            .meta
+            .insert(META_INTERRUPT.to_string(), "true".to_string());
         gate_decision(tmp.path(), &nudge);
 
         let log = std::fs::read_to_string(tmp.path().join("_system/notif-gate-log.jsonl")).unwrap();

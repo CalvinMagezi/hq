@@ -5,7 +5,9 @@
 use crate::egress::{Egress, Rule};
 use crate::error::HostError;
 use crate::server;
-use hq_sandbox::{AgentSandbox, Backend, HiddenDir, Network, ReadRestriction, Relay, backend, canonical, wrap};
+use hq_sandbox::{
+    AgentSandbox, Backend, HiddenDir, Network, ReadRestriction, Relay, backend, canonical, wrap,
+};
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
@@ -14,17 +16,46 @@ use std::path::{Path, PathBuf};
 const HQ_HOME_DIR: &str = ".hq";
 /// Directories under HOME that hold credentials and have no place in an agent.
 const SECRET_HOME_DIRS: &[&str] = &[
-    ".ssh", ".gnupg", ".aws", ".kube", ".hq", ".docker", ".config/gh",
+    ".ssh",
+    ".gnupg",
+    ".aws",
+    ".kube",
+    ".hq",
+    ".docker",
+    ".config/gh",
 ];
 /// What an agent may read under HOME. Everything else there is unreadable, so a
 /// token or note the operator keeps in some other directory cannot be read and
 /// sent to an allowed host. Tool installs, shell and git configuration, and the
 /// agent's own state are listed; `agent_host.sandbox.readable` adds more.
 const HOME_READABLE: &[&str] = &[
-    ".local", ".cache", ".config", ".cargo", ".rustup", ".nvm", ".npm", ".bun",
-    ".volta", ".pyenv", ".asdf", ".deno", ".gitconfig", ".gitignore_global", ".terminfo", ".zshenv",
-    ".zprofile", ".zshrc", ".zlogin", ".bashrc", ".bash_profile", ".profile", ".inputrc", ".oh-my-zsh",
-    "Library/Caches", "Library/Preferences", "Library/Keychains",
+    ".local",
+    ".cache",
+    ".config",
+    ".cargo",
+    ".rustup",
+    ".nvm",
+    ".npm",
+    ".bun",
+    ".volta",
+    ".pyenv",
+    ".asdf",
+    ".deno",
+    ".gitconfig",
+    ".gitignore_global",
+    ".terminfo",
+    ".zshenv",
+    ".zprofile",
+    ".zshrc",
+    ".zlogin",
+    ".bashrc",
+    ".bash_profile",
+    ".profile",
+    ".inputrc",
+    ".oh-my-zsh",
+    "Library/Caches",
+    "Library/Preferences",
+    "Library/Keychains",
 ];
 /// Where other people's files live, which an agent has no reason to read: other
 /// users' home directories and external volumes. What the agent is allowed
@@ -42,14 +73,30 @@ const SECRET_HOME_FILES: &[&str] = &[".netrc", ".npmrc", ".git-credentials"];
 /// Files and directories the operator's own tools run code from later, outside
 /// the sandbox. Writable roots must not let an agent plant anything in them.
 /// Inside the Claude config directory (`~/.claude`, or the profile's `CLAUDE_CONFIG_DIR`).
-const CLAUDE_DIR_READONLY_FILES: &[&str] = &["settings.json", "settings.local.json", ".claude.json"];
+const CLAUDE_DIR_READONLY_FILES: &[&str] =
+    &["settings.json", "settings.local.json", ".claude.json"];
 const CLAUDE_DIR_READONLY_DIRS: &[&str] = &["hooks"];
 const CLAUDE_CONFIG_DIR_ENV: &str = "CLAUDE_CONFIG_DIR";
 const DEFAULT_CLAUDE_DIR: &str = ".claude";
-const PROJECT_READONLY: &[&str] = &[".git/hooks", ".git/config", ".mcp.json", ".claude/settings.json", ".claude/settings.local.json", ".claude/hooks"];
+const PROJECT_READONLY: &[&str] = &[
+    ".git/hooks",
+    ".git/config",
+    ".mcp.json",
+    ".claude/settings.json",
+    ".claude/settings.local.json",
+    ".claude/hooks",
+];
 /// Ways out of Seatbelt: starting an app outside it, or scheduling one.
-const DENIED_PROGRAMS: &[&str] = &["/usr/bin/open", "/usr/bin/osascript", "/bin/launchctl", "/usr/bin/launchctl"];
-const DENIED_SERVICES: &[&str] = &["com.apple.coreservices.launchservicesd", "com.apple.dnssd.service"];
+const DENIED_PROGRAMS: &[&str] = &[
+    "/usr/bin/open",
+    "/usr/bin/osascript",
+    "/bin/launchctl",
+    "/usr/bin/launchctl",
+];
+const DENIED_SERVICES: &[&str] = &[
+    "com.apple.coreservices.launchservicesd",
+    "com.apple.dnssd.service",
+];
 /// What Claude Code needs to write under HOME, besides the project.
 /// `~/.claude.json` is deliberately not writable: it holds MCP server commands the
 /// operator's own Claude runs later. The host records trust for the project itself.
@@ -61,7 +108,14 @@ const AGENT_STATE_DIRS: &[(&str, &[&str])] = &[
     ("antigravity", &[".gemini"]),
     ("codex", &[".codex"]),
     ("cursor", &[".cursor", ".config/cursor"]),
-    ("opencode", &[".config/opencode", ".local/share/opencode", ".local/state/opencode"]),
+    (
+        "opencode",
+        &[
+            ".config/opencode",
+            ".local/share/opencode",
+            ".local/state/opencode",
+        ],
+    ),
     ("copilot", &[".copilot", ".config/github-copilot"]),
     ("kimi", &[".kimi"]),
     ("qwen", &[".qwen"]),
@@ -90,9 +144,15 @@ const AGENT_DEFAULT_ALLOW: &[(&str, &[&str])] = &[
             "lh3.googleusercontent.com",
         ],
     ),
-    ("codex", &["api.openai.com", "auth.openai.com", "chatgpt.com"]),
+    (
+        "codex",
+        &["api.openai.com", "auth.openai.com", "chatgpt.com"],
+    ),
     ("cursor", &["*.cursor.sh"]),
-    ("copilot", &["*.githubcopilot.com", "api.github.com", "github.com"]),
+    (
+        "copilot",
+        &["*.githubcopilot.com", "api.github.com", "github.com"],
+    ),
     ("pi", &["pi.dev", "generativelanguage.googleapis.com"]),
 ];
 const HOME_WRITABLE: &[&str] = &[".cache", "Library/Caches"];
@@ -216,7 +276,11 @@ fn claude_config(env: &[(String, String)]) -> Option<ClaudeConfig> {
         .filter(|p| p.is_absolute() && p.is_dir());
     if let Some(dir) = custom {
         let dir = dir.canonicalize().unwrap_or(dir);
-        return Some(ClaudeConfig { json_dir: dir.clone(), dir, is_default: false });
+        return Some(ClaudeConfig {
+            json_dir: dir.clone(),
+            dir,
+            is_default: false,
+        });
     }
     let home = home()?;
     let home = home.canonicalize().unwrap_or(home);
@@ -228,7 +292,9 @@ fn claude_config(env: &[(String, String)]) -> Option<ClaudeConfig> {
 }
 
 fn home() -> Option<PathBuf> {
-    std::env::var_os("HOME").map(PathBuf::from).filter(|h| h.is_absolute())
+    std::env::var_os("HOME")
+        .map(PathBuf::from)
+        .filter(|h| h.is_absolute())
 }
 
 fn policy(
@@ -257,7 +323,9 @@ fn policy(
         TMP_ROOTS.iter().map(PathBuf::from).collect()
     };
     let tmp = std::env::temp_dir();
-    let own_tmp = canonical([tmp]).into_iter().filter(|t| !private_tmp.iter().any(|p| t.starts_with(p)));
+    let own_tmp = canonical([tmp])
+        .into_iter()
+        .filter(|t| !private_tmp.iter().any(|p| t.starts_with(p)));
     let writable = canonical(
         under(HOME_WRITABLE)
             .into_iter()
@@ -266,13 +334,21 @@ fn policy(
             .chain(own_tmp)
             .chain(spec.writable.iter().cloned()),
     );
-    let run_dir = run_dir.canonicalize().map_err(|e| HostError::Io(format!("the host directory: {e}")))?;
-    let project = cwd.canonicalize().map_err(|e| HostError::Io(format!("the working directory: {e}")))?;
+    let run_dir = run_dir
+        .canonicalize()
+        .map_err(|e| HostError::Io(format!("the host directory: {e}")))?;
+    let project = cwd
+        .canonicalize()
+        .map_err(|e| HostError::Io(format!("the working directory: {e}")))?;
     let other_profiles = std::fs::read_dir(&home)
         .into_iter()
         .flatten()
         .flatten()
-        .filter(|e| e.file_name().to_string_lossy().starts_with(OTHER_PROFILE_PREFIX))
+        .filter(|e| {
+            e.file_name()
+                .to_string_lossy()
+                .starts_with(OTHER_PROFILE_PREFIX)
+        })
         .map(|e| e.path())
         .filter(|p| p.canonicalize().ok().as_deref() != Some(claude_dir));
     // With a profile's own config directory, the default ~/.claude is another account.
@@ -295,7 +371,9 @@ fn policy(
         .collect();
     // A writable root that contains HOME, the run directory or a secret directory
     // would let the agent rename or rewrite them, which no read rule survives.
-    let guarded = [home.clone(), run_dir.clone()].into_iter().chain(secret_dirs.iter().cloned());
+    let guarded = [home.clone(), run_dir.clone()]
+        .into_iter()
+        .chain(secret_dirs.iter().cloned());
     for root in std::iter::once(&project).chain(&writable) {
         if let Some(inside) = guarded.clone().find(|g| g.starts_with(root)) {
             return Err(HostError::Sandbox(format!(
@@ -305,7 +383,11 @@ fn policy(
             )));
         }
         // Writing inside one of them is as bad: hiding only stops reads.
-        if let Some(outer) = [&run_dir].into_iter().chain(&secret_dirs).find(|g| root.starts_with(g)) {
+        if let Some(outer) = [&run_dir]
+            .into_iter()
+            .chain(&secret_dirs)
+            .find(|g| root.starts_with(g))
+        {
             return Err(HostError::Sandbox(format!(
                 "{} is writable but lies inside {}, which agents may not write",
                 root.display(),
@@ -330,16 +412,28 @@ fn policy(
     allow.extend(bridge.map(|b| b.socket.clone()));
     // A bubblewrap bind needs the file to exist.
     allow.retain(|p| !bwrap || p.exists());
-    let mut hidden = vec![HiddenDir { dir: run_dir, allow }];
+    let mut hidden = vec![HiddenDir {
+        dir: run_dir,
+        allow,
+    }];
     hidden.extend(
         secret_dirs
             .into_iter()
             .filter(|d| !revealed.contains(d))
-            .map(|dir| HiddenDir { dir, allow: Vec::new() }),
+            .map(|dir| HiddenDir {
+                dir,
+                allow: Vec::new(),
+            }),
     );
     let under_project = |names: &[&str]| names.iter().map(|n| project.join(n)).collect::<Vec<_>>();
-    let home_files: Vec<PathBuf> = CLAUDE_DIR_READONLY_FILES.iter().map(|f| claude_dir.join(f)).collect();
-    let home_dirs: Vec<PathBuf> = CLAUDE_DIR_READONLY_DIRS.iter().map(|d| claude_dir.join(d)).collect();
+    let home_files: Vec<PathBuf> = CLAUDE_DIR_READONLY_FILES
+        .iter()
+        .map(|f| claude_dir.join(f))
+        .collect();
+    let home_dirs: Vec<PathBuf> = CLAUDE_DIR_READONLY_DIRS
+        .iter()
+        .map(|d| claude_dir.join(d))
+        .collect();
     let (project_files, project_dirs): (Vec<_>, Vec<_>) = under_project(PROJECT_READONLY)
         .into_iter()
         .partition(|p| p.extension().is_some() || p.ends_with("config"));
@@ -365,25 +459,49 @@ fn policy(
         writable,
         writable_files: Vec::new(),
         readonly_files: keep(home_files.into_iter().chain(project_files).collect()),
-        readonly_subpaths: keep(home_dirs.into_iter().chain(project_dirs).chain(revealed).collect()),
-        denied_programs: if macos { DENIED_PROGRAMS.iter().map(PathBuf::from).collect() } else { Vec::new() },
-        denied_services: if macos { DENIED_SERVICES.iter().map(|s| s.to_string()).collect() } else { Vec::new() },
+        readonly_subpaths: keep(
+            home_dirs
+                .into_iter()
+                .chain(project_dirs)
+                .chain(revealed)
+                .collect(),
+        ),
+        denied_programs: if macos {
+            DENIED_PROGRAMS.iter().map(PathBuf::from).collect()
+        } else {
+            Vec::new()
+        },
+        denied_services: if macos {
+            DENIED_SERVICES.iter().map(|s| s.to_string()).collect()
+        } else {
+            Vec::new()
+        },
         masked_files: keep(under(SECRET_HOME_FILES)),
         hidden_dirs: hidden,
         private_tmp,
         read_restrictions: outer_restrictions(&read_allow)
             .into_iter()
-            .chain([ReadRestriction { root: home.clone(), allow: read_allow }])
+            .chain([ReadRestriction {
+                root: home.clone(),
+                allow: read_allow,
+            }])
             .collect(),
         hide_other_processes: true,
         network: Network::Proxy {
             port,
             unix_sockets: vec![socket],
-            relay: bridge.map(|b| Relay { program: b.program.clone(), unix_socket: b.socket.clone() }),
+            relay: bridge.map(|b| Relay {
+                program: b.program.clone(),
+                unix_socket: b.socket.clone(),
+            }),
             loopback_ports: if bwrap {
                 Vec::new()
             } else {
-                spec.loopback_ports.iter().copied().filter(|p| *p != 0).collect()
+                spec.loopback_ports
+                    .iter()
+                    .copied()
+                    .filter(|p| *p != 0)
+                    .collect()
             },
         },
     })
@@ -435,22 +553,41 @@ pub(crate) fn confine(
     spec: &SandboxSpec,
     launch: &Launch,
 ) -> Result<Confined, HostError> {
-    let Launch { name, cwd, run_dir, argv, agent, env, helper } = *launch;
+    let Launch {
+        name,
+        cwd,
+        run_dir,
+        argv,
+        agent,
+        env,
+        helper,
+    } = *launch;
     let refuse = |why: &str| HostError::Sandbox(why.to_string());
     // The caller cannot know this machine's home, so `{home}` in a launch argument is filled in here.
-    let home_dir = home().map(|h| h.to_string_lossy().into_owned()).unwrap_or_default();
-    let expanded: Vec<String> = argv.iter().map(|a| a.replace(HOME_PLACEHOLDER, &home_dir)).collect();
+    let home_dir = home()
+        .map(|h| h.to_string_lossy().into_owned())
+        .unwrap_or_default();
+    let expanded: Vec<String> = argv
+        .iter()
+        .map(|a| a.replace(HOME_PLACEHOLDER, &home_dir))
+        .collect();
     let argv = expanded.as_slice();
     let run_dir = run_dir.ok_or_else(|| refuse("the host has no run directory to protect"))?;
-    let backend = backend().ok_or_else(|| refuse("no sandbox program (sandbox-exec or bwrap) on this machine"))?;
+    let backend = backend()
+        .ok_or_else(|| refuse("no sandbox program (sandbox-exec or bwrap) on this machine"))?;
     let claude = claude_config(env);
     // The agent's own state directories are writable (created if its first run has
     // not made them yet, so there is something to allow).
     let mut own_spec = spec.clone();
     let kind = agent.map(agent_kind);
-    own_spec.agent_readable.retain(|k, _| Some(agent_kind(k)) == kind);
+    own_spec
+        .agent_readable
+        .retain(|k, _| Some(agent_kind(k)) == kind);
     if matches!(backend, Backend::Bwrap(_)) && !own_spec.loopback_ports.is_empty() {
-        eprintln!("hq host: loopback ports {:?} are not opened under bubblewrap; HTTP to them still goes through the proxy", own_spec.loopback_ports);
+        eprintln!(
+            "hq host: loopback ports {:?} are not opened under bubblewrap; HTTP to them still goes through the proxy",
+            own_spec.loopback_ports
+        );
     }
     if let Some(kind) = kind {
         if let Some((_, dirs)) = AGENT_STATE_DIRS.iter().find(|(k, _)| *k == kind) {
@@ -463,7 +600,11 @@ pub(crate) fn confine(
         if let Some((_, hosts)) = AGENT_DEFAULT_ALLOW.iter().find(|(k, _)| *k == kind) {
             for host in *hosts {
                 if !own_spec.allow.iter().any(|a| a.host == *host) {
-                    own_spec.allow.push(Allow { host: host.to_string(), ports: vec![443], private: false });
+                    own_spec.allow.push(Allow {
+                        host: host.to_string(),
+                        ports: vec![443],
+                        private: false,
+                    });
                 }
             }
         }
@@ -481,7 +622,8 @@ pub(crate) fn confine(
         Backend::Bwrap(_) => Some(Bridge {
             program: match helper {
                 Some(path) => path.to_path_buf(),
-                None => std::env::current_exe().map_err(|e| HostError::Io(format!("this binary: {e}")))?,
+                None => std::env::current_exe()
+                    .map_err(|e| HostError::Io(format!("this binary: {e}")))?,
             },
             socket: run_dir
                 .canonicalize()
@@ -491,7 +633,11 @@ pub(crate) fn confine(
         Backend::SandboxExec(_) => None,
     };
     let port = egress
-        .open_with_bridge(name, rules(&spec.allow), bridge.as_ref().map(|b| b.socket.as_path()))
+        .open_with_bridge(
+            name,
+            rules(&spec.allow),
+            bridge.as_ref().map(|b| b.socket.as_path()),
+        )
         .map_err(|e| HostError::Io(format!("the egress listener: {e}")))?;
     let wrapped = claude
         .ok_or_else(|| HostError::Io("HOME is not set".into()))
@@ -518,11 +664,18 @@ pub(crate) fn confine(
         }
     };
     let url = format!("http://127.0.0.1:{port}");
-    let mut env: Vec<(String, String)> = PROXY_ENV_NAMES.iter().map(|n| (n.to_string(), url.clone())).collect();
+    let mut env: Vec<(String, String)> = PROXY_ENV_NAMES
+        .iter()
+        .map(|n| (n.to_string(), url.clone()))
+        .collect();
     env.push(("DISABLE_AUTOUPDATER".into(), "1".into()));
     // Node's fetch ignores HTTPS_PROXY unless told to read it; without this cursor and pi go direct, are denied, and report "fetch failed".
     env.push((NODE_PROXY_SWITCH.into(), "1".into()));
-    Ok(Confined { argv, env, egress_port: port })
+    Ok(Confined {
+        argv,
+        env,
+        egress_port: port,
+    })
 }
 
 /// Records that the operator trusts `cwd` in `<home>/.claude.json`, which the
@@ -577,10 +730,15 @@ mod tests {
     fn trust_is_recorded_without_disturbing_the_rest() {
         let home = tempfile::tempdir().unwrap();
         let file = home.path().join(".claude.json");
-        std::fs::write(&file, r#"{"mcpServers":{"a":{"command":"x"}},"projects":{"/p":{"allowedTools":["t"]}}}"#).unwrap();
+        std::fs::write(
+            &file,
+            r#"{"mcpServers":{"a":{"command":"x"}},"projects":{"/p":{"allowedTools":["t"]}}}"#,
+        )
+        .unwrap();
         trust_claude_project(home.path(), Path::new("/p")).unwrap();
         trust_claude_project(home.path(), Path::new("/q")).unwrap();
-        let doc: serde_json::Value = serde_json::from_str(&std::fs::read_to_string(&file).unwrap()).unwrap();
+        let doc: serde_json::Value =
+            serde_json::from_str(&std::fs::read_to_string(&file).unwrap()).unwrap();
         assert_eq!(doc["mcpServers"]["a"]["command"], "x");
         assert_eq!(doc["projects"]["/p"]["allowedTools"][0], "t");
         assert_eq!(doc["projects"]["/p"]["hasTrustDialogAccepted"], true);
@@ -592,11 +750,17 @@ mod tests {
         use std::os::unix::fs::PermissionsExt;
         let home = tempfile::tempdir().unwrap();
         trust_claude_project(home.path(), Path::new("/p")).unwrap();
-        let mode = std::fs::metadata(home.path().join(".claude.json")).unwrap().permissions().mode();
+        let mode = std::fs::metadata(home.path().join(".claude.json"))
+            .unwrap()
+            .permissions()
+            .mode();
         assert_eq!(mode & 0o777, 0o600);
         let broken = tempfile::tempdir().unwrap();
         std::fs::write(broken.path().join(".claude.json"), "{not json").unwrap();
         assert!(trust_claude_project(broken.path(), Path::new("/p")).is_err());
-        assert_eq!(std::fs::read_to_string(broken.path().join(".claude.json")).unwrap(), "{not json");
+        assert_eq!(
+            std::fs::read_to_string(broken.path().join(".claude.json")).unwrap(),
+            "{not json"
+        );
     }
 }

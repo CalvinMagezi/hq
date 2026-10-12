@@ -381,23 +381,31 @@ async fn start_telegram(
     anyhow::bail!("this build was compiled without the \"telegram\" feature")
 }
 
-
 /// Where the web UI is looked for when `web_static_dir` is unset. The first candidate with an
 /// `index.html` wins; with none, the first is returned so the "no web UI build" warning names it.
 pub(crate) fn default_static_dir(repo_root: &std::path::Path) -> std::path::PathBuf {
     let mut candidates = vec![
         repo_root.join("web").join("dist"),
         // A source checkout after `bun run build` (what `hq web --build` runs).
-        repo_root.join("apps").join("hq-web").join("dist").join("client"),
+        repo_root
+            .join("apps")
+            .join("hq-web")
+            .join("dist")
+            .join("client"),
     ];
     // A portable install keeps the web files next to the program: `hq.exe` and `web\`. They are
     // plain files, so a policy that restricts which programs run does not touch them.
-    if let Some(dir) = std::env::current_exe().ok().and_then(|e| e.parent().map(std::path::Path::to_path_buf)) {
+    if let Some(dir) = std::env::current_exe()
+        .ok()
+        .and_then(|e| e.parent().map(std::path::Path::to_path_buf))
+    {
         candidates.push(dir.join("web"));
     }
     let data_home = std::env::var_os("XDG_DATA_HOME")
         .map(std::path::PathBuf::from)
-        .or_else(|| std::env::var_os("HOME").map(|h| std::path::PathBuf::from(h).join(".local/share")));
+        .or_else(|| {
+            std::env::var_os("HOME").map(|h| std::path::PathBuf::from(h).join(".local/share"))
+        });
     if let Some(dir) = data_home {
         // Where the install script puts the web UI.
         candidates.push(dir.join("agent-hq").join("web").join("dist"));
@@ -408,7 +416,10 @@ pub(crate) fn default_static_dir(repo_root: &std::path::Path) -> std::path::Path
 
 fn first_with_index(candidates: Vec<std::path::PathBuf>) -> std::path::PathBuf {
     let first = candidates[0].clone();
-    candidates.into_iter().find(|c| c.join("index.html").exists()).unwrap_or(first)
+    candidates
+        .into_iter()
+        .find(|c| c.join("index.html").exists())
+        .unwrap_or(first)
 }
 
 #[cfg(test)]

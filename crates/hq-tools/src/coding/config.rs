@@ -23,7 +23,9 @@ fn check_key(key: &str) -> Result<()> {
 /// One line of YAML for `value`: no control characters, quoted by the YAML serializer when needed.
 fn yaml_scalar(value: &str) -> Result<String> {
     if value.chars().any(char::is_control) || value.chars().count() > MAX_VALUE_CHARS {
-        anyhow::bail!("value must be one line of at most {MAX_VALUE_CHARS} characters with no control characters");
+        anyhow::bail!(
+            "value must be one line of at most {MAX_VALUE_CHARS} characters with no control characters"
+        );
     }
     Ok(serde_yaml::to_string(value)?.trim_end().to_string())
 }
@@ -158,7 +160,6 @@ impl HqTool for ConfigTool {
     }
 }
 
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -172,9 +173,19 @@ mod tests {
         assert!(yaml_scalar("a\nweb_allowed_origins: [\"*\"]").is_err());
         assert!(yaml_scalar("a\rb").is_err());
         assert_eq!(yaml_scalar("dark").unwrap(), "dark");
-        assert_eq!(yaml_scalar("x: y # z").unwrap(), "'x: y # z'", "structure is quoted, not interpreted");
+        assert_eq!(
+            yaml_scalar("x: y # z").unwrap(),
+            "'x: y # z'",
+            "structure is quoted, not interpreted"
+        );
         assert!(is_entry("theme: dark", "theme"));
-        assert!(!is_entry("theme_extra: 1", "theme"), "exact keys, not prefixes");
-        assert!(!is_entry("  theme: 1", "theme"), "nested entries are not top-level");
+        assert!(
+            !is_entry("theme_extra: 1", "theme"),
+            "exact keys, not prefixes"
+        );
+        assert!(
+            !is_entry("  theme: 1", "theme"),
+            "nested entries are not top-level"
+        );
     }
 }

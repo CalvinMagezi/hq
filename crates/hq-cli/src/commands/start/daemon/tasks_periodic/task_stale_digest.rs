@@ -20,14 +20,22 @@ pub fn digest_item(stale: &[StaleTask], day: &str) -> Option<ValueItem> {
     }
     let mut body = String::new();
     for s in stale.iter().take(MAX_LISTED) {
-        body.push_str(&format!("{}: {} (quiet for {} days)\n", s.display_id, s.title, s.idle_hours / 24));
+        body.push_str(&format!(
+            "{}: {} (quiet for {} days)\n",
+            s.display_id,
+            s.title,
+            s.idle_hours / 24
+        ));
     }
     if stale.len() > MAX_LISTED {
         body.push_str(&format!("and {} more\n", stale.len() - MAX_LISTED));
     }
     body.push_str("Nothing was changed. Release, block (with a reason), close or claim each one; the task_stale tool says what each looks like.");
     let title = format!("{} in-progress tasks look abandoned", stale.len());
-    Some(ValueItem::new(STALE_DIGEST_SOURCE, ValueKind::Fyi, title, body).with_dedup_key(format!("task-stale-{day}")))
+    Some(
+        ValueItem::new(STALE_DIGEST_SOURCE, ValueKind::Fyi, title, body)
+            .with_dedup_key(format!("task-stale-{day}")),
+    )
 }
 
 /// Daily digest of in-progress tasks nobody holds or has touched. Reports only; it
@@ -39,7 +47,10 @@ pub async fn run_task_stale_digest(db: &Database, config: &HqConfig) -> Result<(
     let day = chrono::Utc::now().format("%Y-%m-%d").to_string();
     if let Some(item) = digest_item(&stale, &day) {
         hq_db::value_items::emit(db, &item)?;
-        info!(count = stale.len(), "task-stale-digest: reported abandoned in-progress tasks");
+        info!(
+            count = stale.len(),
+            "task-stale-digest: reported abandoned in-progress tasks"
+        );
     }
     Ok(())
 }
@@ -73,7 +84,10 @@ mod tests {
         assert!(item.body.contains("FR-0: Task 0 (quiet for 4 days)"));
         assert!(item.body.contains("and 4 more"));
         assert!(item.body.contains("Nothing was changed"));
-        assert!(!item.body.contains("FR-10:"), "only the first ten are named");
+        assert!(
+            !item.body.contains("FR-10:"),
+            "only the first ten are named"
+        );
         assert_eq!(item.dedup_key.as_deref(), Some("task-stale-2026-10-09"));
         assert_eq!(item.source_task, STALE_DIGEST_SOURCE);
     }
@@ -86,7 +100,13 @@ mod tests {
         let again = digest_item(&stale(3), "2026-10-09").unwrap();
         hq_db::value_items::emit(&db, &again).unwrap();
         let count: i64 = db
-            .with_conn(|c| Ok(c.query_row("SELECT COUNT(*) FROM value_items WHERE source_task = ?1", [STALE_DIGEST_SOURCE], |r| r.get(0))?))
+            .with_conn(|c| {
+                Ok(c.query_row(
+                    "SELECT COUNT(*) FROM value_items WHERE source_task = ?1",
+                    [STALE_DIGEST_SOURCE],
+                    |r| r.get(0),
+                )?)
+            })
             .unwrap();
         assert_eq!(count, 1);
     }
@@ -94,7 +114,9 @@ mod tests {
     #[tokio::test]
     async fn the_run_reads_the_vault_and_stays_quiet_when_all_is_well() {
         let db = Database::open_memory().unwrap();
-        run_task_stale_digest(&db, &HqConfig::default()).await.unwrap();
+        run_task_stale_digest(&db, &HqConfig::default())
+            .await
+            .unwrap();
         let count: i64 = db
             .with_conn(|c| Ok(c.query_row("SELECT COUNT(*) FROM value_items", [], |r| r.get(0))?))
             .unwrap();

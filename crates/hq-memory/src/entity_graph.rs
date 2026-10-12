@@ -221,4 +221,3 @@ pub fn spreading_activation(
     });
     Ok(results.into_iter().take(max_results).collect())
 }
-

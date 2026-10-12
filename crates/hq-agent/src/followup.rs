@@ -234,10 +234,12 @@ pub fn maintain(db: &Database, alive: impl Fn(i64) -> bool) -> Maintenance {
             warn!(error = %e, "subagent maintenance: reconcile failed");
             Vec::new()
         });
-    let overdue = db.with_conn(|c| runs::reconcile_overdue(c, at)).unwrap_or_else(|e| {
-        warn!(error = %e, "subagent maintenance: overdue sweep failed");
-        Vec::new()
-    });
+    let overdue = db
+        .with_conn(|c| runs::reconcile_overdue(c, at))
+        .unwrap_or_else(|e| {
+            warn!(error = %e, "subagent maintenance: overdue sweep failed");
+            Vec::new()
+        });
     let dead: Vec<String> = dead.into_iter().chain(overdue).collect();
     report.interrupted = dead.len();
     for id in &dead {

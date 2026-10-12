@@ -92,7 +92,10 @@ mod tests {
         assert_eq!(cfg.require_lease, LeaseMode::Off);
         assert_eq!(cfg.lease_ttl_secs, DEFAULT_LEASE_TTL_SECS);
         assert_eq!(cfg.stale_hours(), DEFAULT_STALE_AFTER_HOURS);
-        assert!(cfg.route_tags, "tags keep routing until someone turns it off");
+        assert!(
+            cfg.route_tags,
+            "tags keep routing until someone turns it off"
+        );
     }
 
     #[test]

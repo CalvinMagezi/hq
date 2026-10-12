@@ -278,7 +278,10 @@ mod tests {
     async fn note_falls_back_to_untitled_when_content_has_no_usable_first_line() {
         let tmp = tempfile::tempdir().unwrap();
         let tool = VaultNoteShortcut::new(tmp.path().to_path_buf());
-        let result = tool.execute(json!({"content": "# \n\nbody"})).await.unwrap();
+        let result = tool
+            .execute(json!({"content": "# \n\nbody"}))
+            .await
+            .unwrap();
         assert_eq!(result["path"], json!("Notebooks/Inbox/Untitled.md"));
     }
 

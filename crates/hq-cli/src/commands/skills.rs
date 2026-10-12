@@ -90,12 +90,24 @@ fn skill_history(skills_dir: &Path, name: &str, output: &mut dyn Write) -> Resul
         bail!("no audit entries or archived versions for skill '{name}'");
     }
     for e in &entries {
-        let flags = if e.flags.is_empty() { String::new() } else { format!(" flags=[{}]", e.flags.join("; ")) };
-        let run = e.run_id.as_deref().map(|r| format!(" run={r}")).unwrap_or_default();
+        let flags = if e.flags.is_empty() {
+            String::new()
+        } else {
+            format!(" flags=[{}]", e.flags.join("; "))
+        };
+        let run = e
+            .run_id
+            .as_deref()
+            .map(|r| format!(" run={r}"))
+            .unwrap_or_default();
         writeln!(
             output,
             "{}  {:?}  v{}  sha256={}{run}{flags}  {}",
-            e.ts, e.disposition, e.version, e.sha256.get(..SHA_PREFIX_CHARS).unwrap_or(&e.sha256), e.reason
+            e.ts,
+            e.disposition,
+            e.version,
+            e.sha256.get(..SHA_PREFIX_CHARS).unwrap_or(&e.sha256),
+            e.reason
         )?;
     }
     for (n, path) in &archives {
@@ -109,9 +121,21 @@ fn set_managed(skills_dir: &Path, name: &str, managed: bool, output: &mut dyn Wr
     use hq_tools::skill_edit::{SkillEdit, edit_skill};
 
     validate_name(name)?;
-    edit_skill(skills_dir, name, &SkillEdit { managed: Some(managed), ..Default::default() })?;
+    edit_skill(
+        skills_dir,
+        name,
+        &SkillEdit {
+            managed: Some(managed),
+            ..Default::default()
+        },
+    )?;
     let verb = if managed { "adopted" } else { "unadopted" };
-    audit_live(skills_dir, name, Disposition::Adopted, &format!("{verb} by owner"))?;
+    audit_live(
+        skills_dir,
+        name,
+        Disposition::Adopted,
+        &format!("{verb} by owner"),
+    )?;
     writeln!(output, "Skill '{name}' {verb}")?;
     Ok(())
 }
@@ -409,15 +433,35 @@ mod tests {
         let config = test_config(temp.path());
         let skill_dir = temp.path().join("Skills").join("hist");
         std::fs::create_dir_all(skill_dir.join("archive"))?;
-        std::fs::write(skill_dir.join("archive/SKILL-v1.md"), "---\ndescription: Old\n---\nold\n")?;
-        std::fs::write(skill_dir.join("SKILL.md"), "---\ndescription: New\n---\nnew\n")?;
+        std::fs::write(
+            skill_dir.join("archive/SKILL-v1.md"),
+            "---\ndescription: Old\n---\nold\n",
+        )?;
+        std::fs::write(
+            skill_dir.join("SKILL.md"),
+            "---\ndescription: New\n---\nnew\n",
+        )?;
 
         let mut out = Vec::new();
-        run_with_output(&config, SkillsAction::Revert { name: "hist".to_string() }, &mut out).await?;
+        run_with_output(
+            &config,
+            SkillsAction::Revert {
+                name: "hist".to_string(),
+            },
+            &mut out,
+        )
+        .await?;
         assert!(std::fs::read_to_string(skill_dir.join("SKILL.md"))?.contains("old"));
 
         let mut out = Vec::new();
-        run_with_output(&config, SkillsAction::History { name: "hist".to_string() }, &mut out).await?;
+        run_with_output(
+            &config,
+            SkillsAction::History {
+                name: "hist".to_string(),
+            },
+            &mut out,
+        )
+        .await?;
         let out = String::from_utf8(out)?;
         assert!(out.contains("Reverted"), "{out}");
         assert!(out.contains("archive v2"), "{out}");
@@ -431,17 +475,36 @@ mod tests {
         let skills_dir = temp.path().join("Skills");
         let skill_dir = skills_dir.join("mine");
         std::fs::create_dir_all(&skill_dir)?;
-        std::fs::write(skill_dir.join("SKILL.md"), "---\nname: mine\ndescription: Mine\n---\n# Mine\n")?;
+        std::fs::write(
+            skill_dir.join("SKILL.md"),
+            "---\nname: mine\ndescription: Mine\n---\n# Mine\n",
+        )?;
 
         let mut out = Vec::new();
-        run_with_output(&config, SkillsAction::Adopt { name: "mine".to_string() }, &mut out).await?;
+        run_with_output(
+            &config,
+            SkillsAction::Adopt {
+                name: "mine".to_string(),
+            },
+            &mut out,
+        )
+        .await?;
         assert!(hq_tools::skill_edit::is_managed(&skills_dir, "mine"));
         assert!(std::fs::read_to_string(skill_dir.join("SKILL.md"))?.contains("name: mine"));
 
-        run_with_output(&config, SkillsAction::Unadopt { name: "mine".to_string() }, &mut out).await?;
+        run_with_output(
+            &config,
+            SkillsAction::Unadopt {
+                name: "mine".to_string(),
+            },
+            &mut out,
+        )
+        .await?;
         assert!(!hq_tools::skill_edit::is_managed(&skills_dir, "mine"));
-        let reasons: Vec<String> =
-            hq_tools::skill_audit::audit_history(&skills_dir, "mine").into_iter().map(|e| e.reason).collect();
+        let reasons: Vec<String> = hq_tools::skill_audit::audit_history(&skills_dir, "mine")
+            .into_iter()
+            .map(|e| e.reason)
+            .collect();
         assert_eq!(reasons, vec!["adopted by owner", "unadopted by owner"]);
         Ok(())
     }

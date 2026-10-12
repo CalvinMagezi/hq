@@ -60,7 +60,6 @@ pub(super) fn with_health<T>(key: &str, f: impl FnOnce(&mut BackendHealth) -> T)
     Some(f(map.entry(key.to_string()).or_default()))
 }
 
-
 /// What kind of failure a backend reported, which sets how long it is
 /// suspended. The classes and their flat durations are SearxNG's shipped
 /// `suspended_times`: a captcha an hour, a rate limit or an access denial three
@@ -494,7 +493,9 @@ where
     let (base, cap) = (backend.backoff)(failure.class);
     let suspension = with_health(backend.key, |h| {
         h.record_failure(base, cap);
-        let left = h.unreachable_until.map(|t| t.saturating_duration_since(Instant::now()));
+        let left = h
+            .unreachable_until
+            .map(|t| t.saturating_duration_since(Instant::now()));
         (h.consecutive_failures, left)
     });
     if let Some((failures, left)) = suspension {

@@ -52,9 +52,12 @@ pub(crate) fn lite_allows(path: &str) -> bool {
     if path.split('/').skip(1).any(|seg| seg == "." || seg == "..") || path.contains("//") {
         return false;
     }
-    let listed = LITE_API
-        .iter()
-        .any(|p| path == *p || path.strip_prefix(p).is_some_and(|rest| rest.starts_with('/')));
+    let listed = LITE_API.iter().any(|p| {
+        path == *p
+            || path
+                .strip_prefix(p)
+                .is_some_and(|rest| rest.starts_with('/'))
+    });
     // Starting a conversation is chat, which Lite does not run.
     listed && !is_export(path)
 }
@@ -148,7 +151,13 @@ mod tests {
 
     #[test]
     fn a_prefix_does_not_match_a_longer_name() {
-        for path in ["/api/tasksX", "/api/notes", "/api/searching", "/api/pinned-x", "/api/vaults"] {
+        for path in [
+            "/api/tasksX",
+            "/api/notes",
+            "/api/searching",
+            "/api/pinned-x",
+            "/api/vaults",
+        ] {
             assert!(!lite_allows(path), "{path}");
         }
     }
@@ -211,7 +220,11 @@ mod tests {
             ("POST", "/api/admin/broadcast"),
             ("POST", "/hooks/gmail"),
         ] {
-            assert_eq!(status(&lite, method, path).await, unknown, "lite {method} {path}");
+            assert_eq!(
+                status(&lite, method, path).await,
+                unknown,
+                "lite {method} {path}"
+            );
             assert_ne!(
                 status(&full, method, path).await,
                 StatusCode::NOT_FOUND,
@@ -230,7 +243,11 @@ mod tests {
             ("GET", "/api/vault-status"),
             ("GET", "/health"),
         ] {
-            assert_ne!(status(&lite, method, path).await, StatusCode::NOT_FOUND, "{method} {path}");
+            assert_ne!(
+                status(&lite, method, path).await,
+                StatusCode::NOT_FOUND,
+                "{method} {path}"
+            );
         }
     }
 
@@ -263,35 +280,80 @@ mod tests {
             "/api/note?path=_system/IDENTITY.md",
             "/api/tree?path=_system",
         ] {
-            assert_eq!(status(&lite, "GET", uri).await, StatusCode::NOT_FOUND, "lite {uri}");
+            assert_eq!(
+                status(&lite, "GET", uri).await,
+                StatusCode::NOT_FOUND,
+                "lite {uri}"
+            );
         }
         // Controls: the full profile serves the same requests, and Lite serves a real note.
-        assert_eq!(status(&full, "GET", "/api/vault-asset?path=_system/IDENTITY.md").await, StatusCode::OK);
-        assert_eq!(status(&full, "GET", "/api/tree?path=_system").await, StatusCode::OK);
-        assert_eq!(status(&lite, "GET", "/api/note?path=Notebooks/plan.md").await, StatusCode::OK);
-        assert_eq!(status(&lite, "GET", "/api/vault-asset?path=Notebooks/plan.md").await, StatusCode::OK);
+        assert_eq!(
+            status(&full, "GET", "/api/vault-asset?path=_system/IDENTITY.md").await,
+            StatusCode::OK
+        );
+        assert_eq!(
+            status(&full, "GET", "/api/tree?path=_system").await,
+            StatusCode::OK
+        );
+        assert_eq!(
+            status(&lite, "GET", "/api/note?path=Notebooks/plan.md").await,
+            StatusCode::OK
+        );
+        assert_eq!(
+            status(&lite, "GET", "/api/vault-asset?path=Notebooks/plan.md").await,
+            StatusCode::OK
+        );
 
         // Writes into those folders are refused too, and nothing is created.
         let put = r#"{"path":"_system/IDENTITY.md","content":"overwritten"}"#;
-        assert_eq!(body_status(&lite, "PUT", "/api/note", put).await, StatusCode::NOT_FOUND);
-        assert_eq!(std::fs::read_to_string(lv.path().join("_system/IDENTITY.md")).unwrap(), "who i am");
+        assert_eq!(
+            body_status(&lite, "PUT", "/api/note", put).await,
+            StatusCode::NOT_FOUND
+        );
+        assert_eq!(
+            std::fs::read_to_string(lv.path().join("_system/IDENTITY.md")).unwrap(),
+            "who i am"
+        );
         let create = r#"{"folder":"_system","title":"planted","content":"x"}"#;
-        assert_eq!(body_status(&lite, "POST", "/api/note/create", create).await, StatusCode::NOT_FOUND);
+        assert_eq!(
+            body_status(&lite, "POST", "/api/note/create", create).await,
+            StatusCode::NOT_FOUND
+        );
         assert!(!lv.path().join("_system/planted.md").exists());
         let hidden = r#"{"folder":".git","title":"planted","content":"x"}"#;
-        assert_eq!(body_status(&lite, "POST", "/api/note/create", hidden).await, StatusCode::NOT_FOUND);
+        assert_eq!(
+            body_status(&lite, "POST", "/api/note/create", hidden).await,
+            StatusCode::NOT_FOUND
+        );
         // Control: a note in a normal folder is created.
         let ok = r#"{"folder":"Notebooks/Inbox","title":"fresh","content":"x"}"#;
-        assert_eq!(body_status(&lite, "POST", "/api/note/create", ok).await, StatusCode::OK);
+        assert_eq!(
+            body_status(&lite, "POST", "/api/note/create", ok).await,
+            StatusCode::OK
+        );
         assert!(lv.path().join("Notebooks/Inbox/fresh.md").exists());
     }
 
     #[test]
     fn hidden_and_underscore_folders_are_the_ones_lite_hides() {
-        for rel in ["_system/x.md", "_data/vault.db", "_threads/t.md", "_mailboxes/relay", "./_system/x", ".git/config", "_Odd/x"] {
+        for rel in [
+            "_system/x.md",
+            "_data/vault.db",
+            "_threads/t.md",
+            "_mailboxes/relay",
+            "./_system/x",
+            ".git/config",
+            "_Odd/x",
+        ] {
             assert!(crate::vault_api::lite_hides(rel), "{rel}");
         }
-        for rel in ["Notebooks/_draft.md", "Notebooks/Inbox/x.md", "plan.md", "Projects/a_b/c.md", ""] {
+        for rel in [
+            "Notebooks/_draft.md",
+            "Notebooks/Inbox/x.md",
+            "plan.md",
+            "Projects/a_b/c.md",
+            "",
+        ] {
             assert!(!crate::vault_api::lite_hides(rel), "{rel:?}");
         }
     }
@@ -305,26 +367,55 @@ mod tests {
         let (full, fv) = app(Profile::Full);
         for v in [&lv, &fv] {
             std::fs::create_dir_all(v.path().join("_system")).unwrap();
-            std::fs::write(v.path().join("_system/SOUL.md"), "---\ntitle: Soul\n---\nprivate words").unwrap();
+            std::fs::write(
+                v.path().join("_system/SOUL.md"),
+                "---\ntitle: Soul\n---\nprivate words",
+            )
+            .unwrap();
             std::fs::create_dir_all(v.path().join("Notebooks")).unwrap();
             std::fs::write(v.path().join("Notebooks/plan.md"), "a plan").unwrap();
             #[cfg(unix)]
-            std::os::unix::fs::symlink(v.path().join("_system"), v.path().join("Notebooks/linked")).unwrap();
+            std::os::unix::fs::symlink(v.path().join("_system"), v.path().join("Notebooks/linked"))
+                .unwrap();
         }
 
         // A padded path is the same path once the resolver trims it.
-        for uri in ["/api/note?path=%20_system/SOUL.md", "/api/note?path=%09_system/SOUL.md", "/api/note?path=_system/SOUL.md%20"] {
-            assert_eq!(status(&lite, "GET", uri).await, StatusCode::NOT_FOUND, "lite {uri}");
+        for uri in [
+            "/api/note?path=%20_system/SOUL.md",
+            "/api/note?path=%09_system/SOUL.md",
+            "/api/note?path=_system/SOUL.md%20",
+        ] {
+            assert_eq!(
+                status(&lite, "GET", uri).await,
+                StatusCode::NOT_FOUND,
+                "lite {uri}"
+            );
         }
-        assert_eq!(status(&full, "GET", "/api/note?path=%20_system/SOUL.md").await, StatusCode::OK, "control");
+        assert_eq!(
+            status(&full, "GET", "/api/note?path=%20_system/SOUL.md").await,
+            StatusCode::OK,
+            "control"
+        );
 
         // The vault root and its dot spellings are not a notes folder.
-        for uri in ["/api/tree?path=.", "/api/tree?path=./", "/api/tree?path=Notebooks/..%2F"] {
+        for uri in [
+            "/api/tree?path=.",
+            "/api/tree?path=./",
+            "/api/tree?path=Notebooks/..%2F",
+        ] {
             let got = status(&lite, "GET", uri).await;
             assert_ne!(got, StatusCode::OK, "lite {uri}");
         }
-        assert_eq!(status(&full, "GET", "/api/tree?path=.").await, StatusCode::OK, "control");
-        assert_eq!(status(&lite, "GET", "/api/tree").await, StatusCode::OK, "the default folder still lists");
+        assert_eq!(
+            status(&full, "GET", "/api/tree?path=.").await,
+            StatusCode::OK,
+            "control"
+        );
+        assert_eq!(
+            status(&lite, "GET", "/api/tree").await,
+            StatusCode::OK,
+            "the default folder still lists"
+        );
 
         // The activity bucket would preview `_system` notes.
         let signals = |app: axum::Router| async move {
@@ -334,13 +425,21 @@ mod tests {
                 .body(Body::empty())
                 .unwrap();
             let res = app.oneshot(req).await.unwrap();
-            let bytes = axum::body::to_bytes(res.into_body(), usize::MAX).await.unwrap();
+            let bytes = axum::body::to_bytes(res.into_body(), usize::MAX)
+                .await
+                .unwrap();
             String::from_utf8_lossy(&bytes).into_owned()
         };
         let lite_signals = signals(lite.clone()).await;
-        assert!(!lite_signals.contains("private words") && !lite_signals.contains("Soul"), "{lite_signals}");
+        assert!(
+            !lite_signals.contains("private words") && !lite_signals.contains("Soul"),
+            "{lite_signals}"
+        );
         let full_signals = signals(full.clone()).await;
-        assert!(full_signals.contains("Soul"), "the full profile shows activity, so this proves something: {full_signals}");
+        assert!(
+            full_signals.contains("Soul"),
+            "the full profile shows activity, so this proves something: {full_signals}"
+        );
 
         // A symlink inside the notes that leads into a hidden folder.
         #[cfg(unix)]
@@ -349,28 +448,55 @@ mod tests {
                 "/api/note?path=Notebooks/linked/SOUL.md",
                 "/api/vault-asset?path=Notebooks/linked/SOUL.md",
             ] {
-                assert_eq!(status(&lite, "GET", uri).await, StatusCode::NOT_FOUND, "lite {uri}");
-                assert_eq!(status(&full, "GET", uri).await, StatusCode::OK, "full {uri}");
+                assert_eq!(
+                    status(&lite, "GET", uri).await,
+                    StatusCode::NOT_FOUND,
+                    "lite {uri}"
+                );
+                assert_eq!(
+                    status(&full, "GET", uri).await,
+                    StatusCode::OK,
+                    "full {uri}"
+                );
             }
             let put = r#"{"path":"Notebooks/linked/SOUL.md","content":"overwritten"}"#;
-            assert_eq!(body_status(&lite, "PUT", "/api/note", put).await, StatusCode::NOT_FOUND);
-            assert!(std::fs::read_to_string(lv.path().join("_system/SOUL.md")).unwrap().contains("private words"));
+            assert_eq!(
+                body_status(&lite, "PUT", "/api/note", put).await,
+                StatusCode::NOT_FOUND
+            );
+            assert!(
+                std::fs::read_to_string(lv.path().join("_system/SOUL.md"))
+                    .unwrap()
+                    .contains("private words")
+            );
             let create = r#"{"folder":"Notebooks/linked","title":"planted","content":"x"}"#;
-            assert_eq!(body_status(&lite, "POST", "/api/note/create", create).await, StatusCode::NOT_FOUND);
+            assert_eq!(
+                body_status(&lite, "POST", "/api/note/create", create).await,
+                StatusCode::NOT_FOUND
+            );
             assert!(!lv.path().join("_system/planted.md").exists());
         }
     }
 
     #[test]
     fn padded_and_resolved_paths_are_judged_like_the_resolver_reads_them() {
-        for rel in [" _system/x", "\t_system/x", " ./_system/x", "  .git/config "] {
+        for rel in [
+            " _system/x",
+            "\t_system/x",
+            " ./_system/x",
+            "  .git/config ",
+        ] {
             assert!(crate::vault_api::lite_hides(rel), "{rel:?}");
         }
         let vault = tempfile::tempdir().unwrap();
         std::fs::create_dir_all(vault.path().join("_system")).unwrap();
         std::fs::create_dir_all(vault.path().join("Notebooks")).unwrap();
-        let hides = |p: &str| crate::vault_api::lite_hides_resolved(vault.path(), &vault.path().join(p));
-        assert!(hides("_system/new-note.md"), "a note that does not exist yet");
+        let hides =
+            |p: &str| crate::vault_api::lite_hides_resolved(vault.path(), &vault.path().join(p));
+        assert!(
+            hides("_system/new-note.md"),
+            "a note that does not exist yet"
+        );
         assert!(hides(""), "the vault root");
         assert!(!hides("Notebooks/new/deeper/x.md"));
         assert!(hides("../elsewhere"), "outside the vault is hidden too");

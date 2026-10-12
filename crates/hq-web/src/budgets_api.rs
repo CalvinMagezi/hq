@@ -21,7 +21,9 @@ fn current(state: &WsState) -> BudgetsConfig {
 pub(crate) async fn budgets_handler(
     State(state): State<Arc<WsState>>,
 ) -> Result<impl IntoResponse, ApiError> {
-    let config = HqConfig::load().map(|c| c.budgets).unwrap_or_else(|_| current(&state));
+    let config = HqConfig::load()
+        .map(|c| c.budgets)
+        .unwrap_or_else(|_| current(&state));
     let now = chrono::Utc::now().timestamp();
     let statuses = config
         .budgets

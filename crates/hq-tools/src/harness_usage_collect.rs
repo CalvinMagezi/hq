@@ -15,8 +15,8 @@ use hq_llm::cost::{ProviderClass, price_call};
 use rusqlite::{Connection, OpenFlags, params};
 
 use crate::harness_usage::{
-    CodexSession, HarnessUsageEvent, PiSession, parse_claude_line, parse_codex_line, parse_kimi_line,
-    parse_pi_line, read_copilot, read_opencode,
+    CodexSession, HarnessUsageEvent, PiSession, parse_claude_line, parse_codex_line,
+    parse_kimi_line, parse_pi_line, read_copilot, read_opencode,
 };
 
 /// A session's calls can land slightly before it was registered or after its last update.
@@ -87,7 +87,11 @@ fn outcome_for(event: &HarnessUsageEvent, sessions: &[HarnessSessionRow]) -> Tas
     o
 }
 
-fn record(db: &Database, events: &[HarnessUsageEvent], sessions: &[HarnessSessionRow]) -> Result<usize> {
+fn record(
+    db: &Database,
+    events: &[HarnessUsageEvent],
+    sessions: &[HarnessSessionRow],
+) -> Result<usize> {
     db.with_conn(|conn| {
         let tx = conn.unchecked_transaction()?;
         let mut new = 0;
@@ -196,7 +200,11 @@ fn scan_jsonl(
             continue;
         }
         let start = saved.map_or(0, |(offset, _)| offset).clamp(0, size);
-        let start = if saved.is_some_and(|(offset, _)| offset > size) { 0 } else { start };
+        let start = if saved.is_some_and(|(offset, _)| offset > size) {
+            0
+        } else {
+            start
+        };
         let Ok(mut file) = File::open(&path) else {
             continue;
         };
@@ -230,7 +238,8 @@ fn scan_jsonl(
 /// A Claude transcript repeats a message's line once per content block. Keep one event per message,
 /// with the largest output seen, so a first line written before the answer was complete cannot win.
 fn keep_largest_per_message(events: Vec<HarnessUsageEvent>) -> Vec<HarnessUsageEvent> {
-    let mut by_id: std::collections::HashMap<String, HarnessUsageEvent> = std::collections::HashMap::new();
+    let mut by_id: std::collections::HashMap<String, HarnessUsageEvent> =
+        std::collections::HashMap::new();
     let mut order = Vec::new();
     for e in events {
         match by_id.get_mut(&e.source_id) {
@@ -242,7 +251,10 @@ fn keep_largest_per_message(events: Vec<HarnessUsageEvent>) -> Vec<HarnessUsageE
             }
         }
     }
-    order.into_iter().filter_map(|id| by_id.remove(&id)).collect()
+    order
+        .into_iter()
+        .filter_map(|id| by_id.remove(&id))
+        .collect()
 }
 
 fn keep_all(events: Vec<HarnessUsageEvent>) -> Vec<HarnessUsageEvent> {
@@ -264,15 +276,25 @@ pub fn scan(db: &Database, home: &Path) -> Result<ScanReport> {
         .flatten()
         .flatten()
         .map(|e| e.path())
-        .filter(|p| p.file_name().is_some_and(|n| n.to_string_lossy().starts_with(".claude")))
+        .filter(|p| {
+            p.file_name()
+                .is_some_and(|n| n.to_string_lossy().starts_with(".claude"))
+        })
         .map(|p| p.join("projects"))
         .collect();
     for dir in claude_dirs {
-        scan_jsonl(db, find_files(&dir, &is_jsonl), &sessions, &mut report, &keep_largest_per_message, |line, _, emit, _| {
-            if let Some(e) = parse_claude_line(line) {
-                emit(e);
-            }
-        })?;
+        scan_jsonl(
+            db,
+            find_files(&dir, &is_jsonl),
+            &sessions,
+            &mut report,
+            &keep_largest_per_message,
+            |line, _, emit, _| {
+                if let Some(e) = parse_claude_line(line) {
+                    emit(e);
+                }
+            },
+        )?;
     }
 
     // Codex: one rollout file per session, with the session's id and model near the top.
@@ -282,27 +304,44 @@ pub fn scan(db: &Database, home: &Path) -> Result<ScanReport> {
             id: file_stem(&path),
             ..CodexSession::default()
         };
-        scan_jsonl(db, vec![path], &sessions, &mut report, &keep_all, |line, i, emit, _| {
-            session.observe(line);
-            if let Some(e) = parse_codex_line(line, i, &session) {
-                emit(e);
-            }
-        })?;
+        scan_jsonl(
+            db,
+            vec![path],
+            &sessions,
+            &mut report,
+            &keep_all,
+            |line, i, emit, _| {
+                session.observe(line);
+                if let Some(e) = parse_codex_line(line, i, &session) {
+                    emit(e);
+                }
+            },
+        )?;
     }
 
     // Pi: interactive sessions and the ones HQ launches in its own directory.
-    for root in [home.join(".pi/agent/sessions"), home.join(".pi/hq-sessions")] {
+    for root in [
+        home.join(".pi/agent/sessions"),
+        home.join(".pi/hq-sessions"),
+    ] {
         for path in find_files(&root, &is_jsonl) {
             let mut session = PiSession {
                 id: file_stem(&path),
                 ..PiSession::default()
             };
-            scan_jsonl(db, vec![path], &sessions, &mut report, &keep_all, |line, _, emit, _| {
-                session.observe(line);
-                if let Some((e, _)) = parse_pi_line(line, &session) {
-                    emit(e);
-                }
-            })?;
+            scan_jsonl(
+                db,
+                vec![path],
+                &sessions,
+                &mut report,
+                &keep_all,
+                |line, _, emit, _| {
+                    session.observe(line);
+                    if let Some((e, _)) = parse_pi_line(line, &session) {
+                        emit(e);
+                    }
+                },
+            )?;
         }
     }
 
@@ -311,24 +350,39 @@ pub fn scan(db: &Database, home: &Path) -> Result<ScanReport> {
         p.file_name().is_some_and(|n| n == "wire.jsonl")
     });
     for path in kimi_files {
-        scan_jsonl(db, vec![path], &sessions, &mut report, &keep_all, |line, i, emit, p| {
-            let session = p
-                .parent()
-                .and_then(|d| d.file_name())
-                .map(|n| n.to_string_lossy().to_string())
-                .unwrap_or_default();
-            if let Some(e) = parse_kimi_line(line, &session, i, "") {
-                emit(e);
-            }
-        })?;
+        scan_jsonl(
+            db,
+            vec![path],
+            &sessions,
+            &mut report,
+            &keep_all,
+            |line, i, emit, p| {
+                let session = p
+                    .parent()
+                    .and_then(|d| d.file_name())
+                    .map(|n| n.to_string_lossy().to_string())
+                    .unwrap_or_default();
+                if let Some(e) = parse_kimi_line(line, &session, i, "") {
+                    emit(e);
+                }
+            },
+        )?;
     }
 
-    scan_sqlite(db, &home.join(".local/share/opencode/opencode.db"), &sessions, &mut report, |conn, after| {
-        read_opencode(conn, after)
-    })?;
-    scan_sqlite(db, &home.join(".copilot/session-store.db"), &sessions, &mut report, |conn, after| {
-        read_copilot(conn, after)
-    })?;
+    scan_sqlite(
+        db,
+        &home.join(".local/share/opencode/opencode.db"),
+        &sessions,
+        &mut report,
+        read_opencode,
+    )?;
+    scan_sqlite(
+        db,
+        &home.join(".copilot/session-store.db"),
+        &sessions,
+        &mut report,
+        read_copilot,
+    )?;
     Ok(report)
 }
 
@@ -394,7 +448,14 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let file = dir.path().join(".claude/projects/-w/s1.jsonl");
         // The same message id appears twice, as Claude writes it once per content block.
-        write(&file, &[&claude_line("m1", "s1", "/w"), &claude_line("m1", "s1", "/w"), &claude_line("m2", "s1", "/w")]);
+        write(
+            &file,
+            &[
+                &claude_line("m1", "s1", "/w"),
+                &claude_line("m1", "s1", "/w"),
+                &claude_line("m2", "s1", "/w"),
+            ],
+        );
         (dir, file)
     }
 
@@ -404,21 +465,34 @@ mod tests {
         let db = Database::open_memory().unwrap();
 
         let first = scan(&db, home.path()).unwrap();
-        assert_eq!(first.calls_recorded, 2, "duplicate lines of one message count once");
+        assert_eq!(
+            first.calls_recorded, 2,
+            "duplicate lines of one message count once"
+        );
 
         // Unchanged file: skipped outright.
         assert_eq!(scan(&db, home.path()).unwrap().calls_recorded, 0);
 
         // The file grows; the old calls are not counted again, the new one is.
-        let mut f = std::fs::OpenOptions::new().append(true).open(&file).unwrap();
+        let mut f = std::fs::OpenOptions::new()
+            .append(true)
+            .open(&file)
+            .unwrap();
         writeln!(f, "{}", claude_line("m3", "s1", "/w")).unwrap();
         drop(f);
         // Make the signature differ even on a coarse clock.
         let later = std::time::SystemTime::now() + std::time::Duration::from_secs(5);
-        File::options().write(true).open(&file).unwrap().set_modified(later).unwrap();
+        File::options()
+            .write(true)
+            .open(&file)
+            .unwrap()
+            .set_modified(later)
+            .unwrap();
         assert_eq!(scan(&db, home.path()).unwrap().calls_recorded, 1);
 
-        let rows = db.with_conn(|c| grouped_usage(c, 0, GroupBy::Origin)).unwrap();
+        let rows = db
+            .with_conn(|c| grouped_usage(c, 0, GroupBy::Origin))
+            .unwrap();
         assert_eq!((rows[0].key.as_str(), rows[0].calls), ("harness", 3));
         assert_eq!(rows[0].cache_read_tokens, 3000);
     }
@@ -430,7 +504,12 @@ mod tests {
         scan(&db, home.path()).unwrap();
         let spent = db
             .with_conn(|c| {
-                hq_db::usage_ledger::scope_spend(c, &hq_core::config::BudgetScope::Global, 0, i64::MAX)
+                hq_db::usage_ledger::scope_spend(
+                    c,
+                    &hq_core::config::BudgetScope::Global,
+                    0,
+                    i64::MAX,
+                )
             })
             .unwrap();
         assert_eq!(spent, 0.0);
@@ -444,7 +523,10 @@ mod tests {
                 )
             })
             .unwrap();
-        assert!(harness > 0.0, "the same calls are visible to an origin:harness budget");
+        assert!(
+            harness > 0.0,
+            "the same calls are visible to an origin:harness budget"
+        );
     }
 
     fn register(db: &Database, id: &str, harness: &str, cwd: &str) {
@@ -472,7 +554,11 @@ mod tests {
         .unwrap();
     }
 
-    fn event_at(db: &Database, harness: &'static str, cwd: &str) -> (HarnessUsageEvent, Vec<HarnessSessionRow>) {
+    fn event_at(
+        db: &Database,
+        harness: &'static str,
+        cwd: &str,
+    ) -> (HarnessUsageEvent, Vec<HarnessSessionRow>) {
         let now = chrono::Utc::now().timestamp();
         let sessions = db.with_conn(|c| list(c, None, 10)).unwrap();
         let event = HarnessUsageEvent {
@@ -519,13 +605,20 @@ mod tests {
             cwd: None,
             ts: 1,
             model: "gpt-x".into(),
-            usage: hq_llm::cost::Usage { input: 10, output: 5, ..Default::default() },
+            usage: hq_llm::cost::Usage {
+                input: 10,
+                output: 5,
+                ..Default::default()
+            },
         };
         assert_eq!(outcome_for(&e, &[]).cost_source, "flat");
         e.harness = "pi";
         e.usage.billed_usd = Some(0.02);
         let o = outcome_for(&e, &[]);
-        assert_eq!((o.cost_source.as_str(), o.cost_usd, o.session_id.as_str()), ("provider", 0.02, "external:pi:r"));
+        assert_eq!(
+            (o.cost_source.as_str(), o.cost_usd, o.session_id.as_str()),
+            ("provider", 0.02, "external:pi:r")
+        );
     }
 
     #[test]
@@ -535,13 +628,19 @@ mod tests {
         let full = claude_line("m1", "s1", "/w");
         let (head, tail) = full.split_at(full.len() / 2);
         write(&file, &[&claude_line("m0", "s1", "/w")]);
-        let mut f = std::fs::OpenOptions::new().append(true).open(&file).unwrap();
+        let mut f = std::fs::OpenOptions::new()
+            .append(true)
+            .open(&file)
+            .unwrap();
         write!(f, "{head}").unwrap();
         drop(f);
         let db = Database::open_memory().unwrap();
         assert_eq!(scan(&db, home.path()).unwrap().calls_recorded, 1);
 
-        let mut f = std::fs::OpenOptions::new().append(true).open(&file).unwrap();
+        let mut f = std::fs::OpenOptions::new()
+            .append(true)
+            .open(&file)
+            .unwrap();
         writeln!(f, "{tail}").unwrap();
         drop(f);
         assert_eq!(scan(&db, home.path()).unwrap().calls_recorded, 1);
@@ -565,7 +664,10 @@ mod tests {
     fn a_symlink_in_a_session_directory_is_not_followed() {
         let home = tempfile::tempdir().unwrap();
         let outside = tempfile::tempdir().unwrap();
-        write(&outside.path().join("other.jsonl"), &[&claude_line("m9", "s9", "/x")]);
+        write(
+            &outside.path().join("other.jsonl"),
+            &[&claude_line("m9", "s9", "/x")],
+        );
         let projects = home.path().join(".claude/projects");
         std::fs::create_dir_all(&projects).unwrap();
         std::os::unix::fs::symlink(outside.path(), projects.join("link")).unwrap();
@@ -590,7 +692,10 @@ mod tests {
         let db = Database::open_memory().unwrap();
         register(&db, "hs-1", "claude-code", "/w");
         db.with_conn(|c| {
-            c.execute("UPDATE harness_sessions SET updated_at = datetime('now', '-3 hours')", [])?;
+            c.execute(
+                "UPDATE harness_sessions SET updated_at = datetime('now', '-3 hours')",
+                [],
+            )?;
             Ok(())
         })
         .unwrap();
@@ -602,6 +707,10 @@ mod tests {
         })
         .unwrap();
         let (event, sessions) = event_at(&db, "claude-code", "/w");
-        assert_eq!(match_session(&sessions, &event), None, "an exited session has an end");
+        assert_eq!(
+            match_session(&sessions, &event),
+            None,
+            "an exited session has an end"
+        );
     }
 }

@@ -52,7 +52,12 @@ fn purpose_defaults_to_code_and_is_stored_when_given() {
                 label: "",
                 cwd: "/tmp",
                 mission_id: None,
-                placement: Placement { host: "local", agent_name: "hs-b", workspace_id: "w2", pane_id: "w2:p1" },
+                placement: Placement {
+                    host: "local",
+                    agent_name: "hs-b",
+                    workspace_id: "w2",
+                    pane_id: "w2:p1",
+                },
                 purpose: Some(PURPOSE_MONITOR),
             },
         )?;
@@ -72,13 +77,26 @@ fn observers_are_recorded_once_and_only_running_ones_are_listed() {
         add(c, "hs-watch2", "hermes")?;
         assert!(add_observed(c, "hs-watch", &["hs-watch".to_string()]).is_err());
         assert!(add_observed(c, "hs-watch", &["hs-ghost".to_string()]).is_err());
-        add_observed(c, "hs-watch", &["hs-coder".to_string(), "hs-coder".to_string()])?;
+        add_observed(
+            c,
+            "hs-watch",
+            &["hs-coder".to_string(), "hs-coder".to_string()],
+        )?;
         add_observed(c, "hs-watch2", &["hs-coder".to_string()])?;
         assert_eq!(observed_by(c, "hs-watch")?, vec!["hs-coder".to_string()]);
-        let watching: Vec<String> = running_observers(c, "hs-coder")?.into_iter().map(|r| r.id).collect();
-        assert_eq!(watching, vec!["hs-watch".to_string(), "hs-watch2".to_string()]);
+        let watching: Vec<String> = running_observers(c, "hs-coder")?
+            .into_iter()
+            .map(|r| r.id)
+            .collect();
+        assert_eq!(
+            watching,
+            vec!["hs-watch".to_string(), "hs-watch2".to_string()]
+        );
         set_status(c, "hs-watch2", "stopped")?;
-        let watching: Vec<String> = running_observers(c, "hs-coder")?.into_iter().map(|r| r.id).collect();
+        let watching: Vec<String> = running_observers(c, "hs-coder")?
+            .into_iter()
+            .map(|r| r.id)
+            .collect();
         assert_eq!(watching, vec!["hs-watch".to_string()]);
         Ok(())
     })
@@ -99,28 +117,56 @@ fn drive_needs_a_goal_that_passes_the_gate_and_refusals_are_audited() {
     let db = Database::open_memory().unwrap();
     db.with_conn(|c| {
         watched(c, "hs-g")?;
-        assert_eq!(request_drive(c, "hs-missing", true, ACTOR_USER)?, DriveChange::NotWatched);
+        assert_eq!(
+            request_drive(c, "hs-missing", true, ACTOR_USER)?,
+            DriveChange::NotWatched
+        );
 
         let DriveChange::Refused(gaps) = request_drive(c, "hs-g", true, ACTOR_USER)? else {
             panic!("a session with no goal must not be driven");
         };
-        assert!(gaps.iter().any(|g| g.starts_with("goal is missing")), "{gaps:?}");
+        assert!(
+            gaps.iter().any(|g| g.starts_with("goal is missing")),
+            "{gaps:?}"
+        );
         assert!(!get(c, "hs-g")?.unwrap().drive);
 
         set_goal(c, "hs-g", Some("TBD"), Some("when done"), ACTOR_USER)?;
-        assert!(matches!(request_drive(c, "hs-g", true, ACTOR_HQ)?, DriveChange::Refused(_)), "ambiguous");
+        assert!(
+            matches!(
+                request_drive(c, "hs-g", true, ACTOR_HQ)?,
+                DriveChange::Refused(_)
+            ),
+            "ambiguous"
+        );
 
         set_goal(c, "hs-g", Some(GOAL), Some(DONE), ACTOR_USER)?;
-        assert_eq!(request_drive(c, "hs-g", true, ACTOR_USER)?, DriveChange::Changed(true));
+        assert_eq!(
+            request_drive(c, "hs-g", true, ACTOR_USER)?,
+            DriveChange::Changed(true)
+        );
         assert!(get(c, "hs-g")?.unwrap().drive);
 
-        let kinds: Vec<String> = list_events(c, "hs-g", 20)?.into_iter().map(|e| e.kind).collect();
+        let kinds: Vec<String> = list_events(c, "hs-g", 20)?
+            .into_iter()
+            .map(|e| e.kind)
+            .collect();
         assert_eq!(
             kinds,
-            [EVENT_DRIVE_REFUSED, EVENT_GOAL_SET, EVENT_DRIVE_REFUSED, EVENT_GOAL_SET, EVENT_DRIVE_ON]
+            [
+                EVENT_DRIVE_REFUSED,
+                EVENT_GOAL_SET,
+                EVENT_DRIVE_REFUSED,
+                EVENT_GOAL_SET,
+                EVENT_DRIVE_ON
+            ]
         );
         let last = list_events(c, "hs-g", 1)?.pop().unwrap();
-        assert_eq!(last.goal.as_deref(), Some(GOAL), "the audit record carries the goal in force");
+        assert_eq!(
+            last.goal.as_deref(),
+            Some(GOAL),
+            "the audit record carries the goal in force"
+        );
         assert_eq!(last.done_criteria.as_deref(), Some(DONE));
         Ok(())
     })
@@ -135,15 +181,28 @@ fn a_changed_goal_that_fails_the_gate_stops_driving() {
         set_goal(c, "hs-c", Some(GOAL), Some(DONE), ACTOR_USER)?;
         request_drive(c, "hs-c", true, ACTOR_USER)?;
 
-        let same = set_goal(c, "hs-c", Some("Add rate limiting to the signup endpoint too"), None, ACTOR_USER)?.unwrap();
+        let same = set_goal(
+            c,
+            "hs-c",
+            Some("Add rate limiting to the signup endpoint too"),
+            None,
+            ACTOR_USER,
+        )?
+        .unwrap();
         assert!(!same.drive_stopped && same.gaps.is_empty());
-        assert!(get(c, "hs-c")?.unwrap().drive, "a still-valid edit keeps driving");
+        assert!(
+            get(c, "hs-c")?.unwrap().drive,
+            "a still-valid edit keeps driving"
+        );
 
         let update = set_goal(c, "hs-c", None, Some("done"), ACTOR_USER)?.unwrap();
         assert!(update.drive_stopped, "{update:?}");
         assert!(!get(c, "hs-c")?.unwrap().drive);
         let last = list_events(c, "hs-c", 1)?.pop().unwrap();
-        assert_eq!((last.kind.as_str(), last.actor.as_str()), (EVENT_DRIVE_OFF, ACTOR_GATE));
+        assert_eq!(
+            (last.kind.as_str(), last.actor.as_str()),
+            (EVENT_DRIVE_OFF, ACTOR_GATE)
+        );
         assert_eq!(set_goal(c, "hs-nope", Some(GOAL), None, ACTOR_USER)?, None);
         Ok(())
     })
@@ -177,14 +236,30 @@ fn drive_off_always_works_and_an_ended_session_cannot_be_driven() {
         request_drive(c, "hs-e", true, ACTOR_USER)?;
         set_status(c, "hs-e", STATUS_EXITED)?;
 
-        assert_eq!(request_drive(c, "hs-e", false, ACTOR_USER)?, DriveChange::Changed(false));
+        assert_eq!(
+            request_drive(c, "hs-e", false, ACTOR_USER)?,
+            DriveChange::Changed(false)
+        );
         let DriveChange::Refused(why) = request_drive(c, "hs-e", true, ACTOR_USER)? else {
             panic!("an exited session must not be driven");
         };
         assert!(why[0].contains("not running"), "{why:?}");
 
-        relaunch(c, "hs-e", &Placement { host: "local", agent_name: "hs-e", workspace_id: "w2", pane_id: "w2:p1" })?;
-        assert_eq!(request_drive(c, "hs-e", true, ACTOR_USER)?, DriveChange::Changed(true), "goal survives a resume");
+        relaunch(
+            c,
+            "hs-e",
+            &Placement {
+                host: "local",
+                agent_name: "hs-e",
+                workspace_id: "w2",
+                pane_id: "w2:p1",
+            },
+        )?;
+        assert_eq!(
+            request_drive(c, "hs-e", true, ACTOR_USER)?,
+            DriveChange::Changed(true),
+            "goal survives a resume"
+        );
         Ok(())
     })
     .unwrap();
@@ -219,7 +294,11 @@ fn crud_roundtrip() {
 fn mission_queries_see_only_that_missions_sessions() {
     let db = Database::open_memory().unwrap();
     db.with_conn(|c| {
-        for (id, mission) in [("hs-a", Some("tk-1")), ("hs-b", Some("tk-1")), ("hs-c", None)] {
+        for (id, mission) in [
+            ("hs-a", Some("tk-1")),
+            ("hs-b", Some("tk-1")),
+            ("hs-c", None),
+        ] {
             insert(
                 c,
                 &NewSession {
@@ -253,16 +332,25 @@ fn a_wake_needs_a_watching_thread_and_is_claimed_once() {
     let db = Database::open_memory().unwrap();
     db.with_conn(|c| {
         add(c, "hs-w", "pi")?;
-        assert!(!set_wake(c, "hs-w", "finished")?, "no thread watches it yet");
+        assert!(
+            !set_wake(c, "hs-w", "finished")?,
+            "no thread watches it yet"
+        );
         assert!(!set_drive(c, "hs-w", true)?);
         assert!(set_owner(c, "hs-w", Some("th-1"))?);
         assert!(set_wake(c, "hs-w", "blocked")?);
         assert!(set_wake(c, "hs-w", "finished")?);
-        assert!(!claim_wake(c, "hs-w", "blocked")?, "a newer wake replaced it");
+        assert!(
+            !claim_wake(c, "hs-w", "blocked")?,
+            "a newer wake replaced it"
+        );
         assert_eq!(list_due_for_driver(c, 30)?.len(), 1);
         assert!(claim_wake(c, "hs-w", "finished")?);
         assert!(!claim_wake(c, "hs-w", "finished")?);
-        assert!(list_due_for_driver(c, 30)?.is_empty(), "not driven, nothing due");
+        assert!(
+            list_due_for_driver(c, 30)?.is_empty(),
+            "not driven, nothing due"
+        );
         assert_eq!(list_for_thread(c, "th-1")?.len(), 1);
         Ok(())
     })
@@ -287,15 +375,24 @@ fn only_a_session_no_chat_watched_takes_the_new_watch_drive() {
         add(c, "hs-off", "pi")?;
         set_owner(c, "hs-off", Some("th-1"))?;
         watch_from_chat(c, "hs-off", "th-1", true)?;
-        assert!(!drive(c, "hs-off")?, "watching again never turns the user's switch on");
+        assert!(
+            !drive(c, "hs-off")?,
+            "watching again never turns the user's switch on"
+        );
         set_drive(c, "hs-off", true)?;
         watch_from_chat(c, "hs-off", "th-1", false)?;
-        assert!(drive(c, "hs-off")?, "nor off: the switch stays where the user left it");
+        assert!(
+            drive(c, "hs-off")?,
+            "nor off: the switch stays where the user left it"
+        );
 
         watch_from_chat(c, "hs-off", "th-2", true)?;
         let moved = get(c, "hs-off")?.unwrap();
         assert_eq!(moved.owner_thread.as_deref(), Some("th-2"));
-        assert!(!moved.drive, "a session taken from another chat starts with Drive off");
+        assert!(
+            !moved.drive,
+            "a session taken from another chat starts with Drive off"
+        );
         Ok(())
     })
     .unwrap();
@@ -365,8 +462,20 @@ fn a_relaunch_resets_the_alert_claim_for_the_new_agent() {
         add(c, "hs-re", "pi")?;
         assert!(claim_state_alert(c, "hs-re", 9)?);
         set_status(c, "hs-re", STATUS_EXITED)?;
-        relaunch(c, "hs-re", &Placement { host: "local", agent_name: "hs-re", workspace_id: "w2", pane_id: "w2:p1" })?;
-        assert!(claim_state_alert(c, "hs-re", 2)?, "the new agent's first state alerts");
+        relaunch(
+            c,
+            "hs-re",
+            &Placement {
+                host: "local",
+                agent_name: "hs-re",
+                workspace_id: "w2",
+                pane_id: "w2:p1",
+            },
+        )?;
+        assert!(
+            claim_state_alert(c, "hs-re", 2)?,
+            "the new agent's first state alerts"
+        );
         Ok(())
     })
     .unwrap();
@@ -463,19 +572,26 @@ fn the_session_registry_migration_orphans_tmux_era_running_rows() {
         .unwrap();
     conn.execute_batch(include_str!("../../sql/064_harness_session_goal.sql"))
         .unwrap();
-    conn.execute_batch(include_str!("../../sql/070_harness_session_drive_guards.sql"))
-        .unwrap();
+    conn.execute_batch(include_str!(
+        "../../sql/070_harness_session_drive_guards.sql"
+    ))
+    .unwrap();
     conn.execute_batch(include_str!("../../sql/071_harness_session_dismissals.sql"))
         .unwrap();
-    conn.execute_batch(include_str!("../../sql/072_harness_session_dismiss_tail.sql"))
-        .unwrap();
+    conn.execute_batch(include_str!(
+        "../../sql/072_harness_session_dismiss_tail.sql"
+    ))
+    .unwrap();
     conn.execute_batch(include_str!("../../sql/076_session_parent.sql"))
         .unwrap();
     conn.execute_batch(include_str!("../../sql/086_harness_session_purpose.sql"))
         .unwrap();
     let s = get(&conn, "old").unwrap().unwrap();
     assert_eq!(s.status, STATUS_ORPHANED);
-    assert_eq!(s.purpose, PURPOSE_CODE, "a row from before purposes is code work");
+    assert_eq!(
+        s.purpose, PURPOSE_CODE,
+        "a row from before purposes is code work"
+    );
     assert_eq!(s.agent_name, "hq-old");
     assert_eq!(s.host, "local");
 }
@@ -581,11 +697,23 @@ fn a_reservation_is_atomic_per_counter_and_only_for_the_driving_chat() {
         request_drive(c, "hs-a", true, ACTOR_USER)?;
         assert!(reserve_nudge(c, "hs-a", "th-1", false, 2)?);
         assert!(reserve_nudge(c, "hs-a", "th-1", false, 2)?);
-        assert!(!reserve_nudge(c, "hs-a", "th-1", false, 2)?, "the limit holds, not one more");
-        assert!(reserve_nudge(c, "hs-a", "th-1", true, 2)?, "keys have their own allowance");
-        assert!(!reserve_nudge(c, "hs-a", "th-other", true, 9)?, "not the chat that drives it");
+        assert!(
+            !reserve_nudge(c, "hs-a", "th-1", false, 2)?,
+            "the limit holds, not one more"
+        );
+        assert!(
+            reserve_nudge(c, "hs-a", "th-1", true, 2)?,
+            "keys have their own allowance"
+        );
+        assert!(
+            !reserve_nudge(c, "hs-a", "th-other", true, 9)?,
+            "not the chat that drives it"
+        );
         refund_nudge(c, "hs-a", false)?;
-        assert!(reserve_nudge(c, "hs-a", "th-1", false, 2)?, "a failed send gives its slot back");
+        assert!(
+            reserve_nudge(c, "hs-a", "th-1", false, 2)?,
+            "a failed send gives its slot back"
+        );
         stop_drive(c, "hs-a", ACTOR_GUARD, "x")?;
         assert!(!reserve_nudge(c, "hs-a", "th-1", true, 9)?, "Drive is off");
         Ok(())
@@ -601,9 +729,18 @@ fn a_non_user_cannot_drive_past_the_cap_but_the_user_can() {
             watched(c, id)?;
             set_goal(c, id, Some(GOAL), Some(DONE), ACTOR_USER)?;
         }
-        assert_eq!(request_drive_capped(c, "hs-1", true, ACTOR_HQ, Some(1))?, DriveChange::Changed(true));
-        assert!(matches!(request_drive_capped(c, "hs-2", true, ACTOR_HQ, Some(1))?, DriveChange::Refused(_)));
-        assert_eq!(request_drive_capped(c, "hs-2", true, ACTOR_USER, Some(1))?, DriveChange::Changed(true));
+        assert_eq!(
+            request_drive_capped(c, "hs-1", true, ACTOR_HQ, Some(1))?,
+            DriveChange::Changed(true)
+        );
+        assert!(matches!(
+            request_drive_capped(c, "hs-2", true, ACTOR_HQ, Some(1))?,
+            DriveChange::Refused(_)
+        ));
+        assert_eq!(
+            request_drive_capped(c, "hs-2", true, ACTOR_USER, Some(1))?,
+            DriveChange::Changed(true)
+        );
         Ok(())
     })
     .unwrap();
@@ -621,7 +758,13 @@ fn the_caps_count_running_driven_sessions_and_sessions_by_origin() {
         assert_eq!(count_running_with_origin(c, ORIGIN_ASK)?, 0);
         set_origin(c, "hs-2", ORIGIN_ASK)?;
         set_origin(c, "hs-1", ORIGIN_MCP)?;
-        assert_eq!((count_running_with_origin(c, ORIGIN_ASK)?, count_running_with_origin(c, ORIGIN_MCP)?), (1, 1));
+        assert_eq!(
+            (
+                count_running_with_origin(c, ORIGIN_ASK)?,
+                count_running_with_origin(c, ORIGIN_MCP)?
+            ),
+            (1, 1)
+        );
         set_status(c, "hs-1", STATUS_STOPPED)?;
         assert_eq!(count_driven_running(c)?, 0);
         assert_eq!(count_running_with_origin(c, ORIGIN_MCP)?, 0);
@@ -639,7 +782,12 @@ fn insert_session(c: &rusqlite::Connection, id: &str) {
             label: "t",
             cwd: "/t",
             mission_id: None,
-            placement: Placement { host: "native", agent_name: id, workspace_id: id, pane_id: id },
+            placement: Placement {
+                host: "native",
+                agent_name: id,
+                workspace_id: id,
+                pane_id: id,
+            },
             purpose: None,
         },
     )
@@ -656,7 +804,10 @@ fn a_child_remembers_its_parent_and_depth_and_only_running_children_are_listed()
         set_parent(c, "hs-c1", "hs-p", 1)?;
         set_parent(c, "hs-c2", "hs-p", 1)?;
         let row = get(c, "hs-c1")?.unwrap();
-        assert_eq!((row.parent_session_id.as_deref(), row.spawn_depth), (Some("hs-p"), 1));
+        assert_eq!(
+            (row.parent_session_id.as_deref(), row.spawn_depth),
+            (Some("hs-p"), 1)
+        );
         assert_eq!(get(c, "hs-x")?.unwrap().parent_session_id, None);
 
         assert_eq!(running_children(c, "hs-p")?.len(), 2);
@@ -664,7 +815,11 @@ fn a_child_remembers_its_parent_and_depth_and_only_running_children_are_listed()
         let running = running_children(c, "hs-p")?;
         assert_eq!(running.len(), 1);
         assert_eq!(running[0].id, "hs-c1");
-        assert_eq!(children_started_since(c, "hs-p", 60)?, 2, "stopped ones still count toward the rate");
+        assert_eq!(
+            children_started_since(c, "hs-p", 60)?,
+            2,
+            "stopped ones still count toward the rate"
+        );
         assert_eq!(children_started_since(c, "hs-x", 60)?, 0);
         Ok(())
     })
@@ -676,7 +831,10 @@ fn only_a_session_that_is_not_running_can_be_archived_and_it_can_be_restored() {
     let db = crate::Database::open_memory().unwrap();
     db.with_conn(|c| {
         insert_session(c, "hs-a");
-        assert!(!set_archived(c, "hs-a", true)?, "a running session stays listed");
+        assert!(
+            !set_archived(c, "hs-a", true)?,
+            "a running session stays listed"
+        );
         set_status(c, "hs-a", STATUS_STOPPED)?;
         assert!(set_archived(c, "hs-a", true)?);
         assert!(archived_ids(c)?.contains("hs-a"));

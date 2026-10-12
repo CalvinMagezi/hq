@@ -204,7 +204,18 @@ fn is_read_only(args: &[String]) -> bool {
         (first, words.next()),
         (Some("status"), _)
             | (Some("agent"), Some("get" | "list" | "read"))
-            | (Some("host.status" | "host.workspace" | "host.dirs" | "events.poll" | "agent.get" | "agent.list" | "agent.read"), _)
+            | (
+                Some(
+                    "host.status"
+                        | "host.workspace"
+                        | "host.dirs"
+                        | "events.poll"
+                        | "agent.get"
+                        | "agent.list"
+                        | "agent.read"
+                ),
+                _
+            )
     )
 }
 
@@ -329,7 +340,10 @@ mod tests {
 
     #[test]
     fn a_native_requests_params_never_reach_the_log() {
-        let native = vec!["agent.mcp_config".to_string(), r#"{"token":"hqs_secret"}"#.to_string()];
+        let native = vec![
+            "agent.mcp_config".to_string(),
+            r#"{"token":"hqs_secret"}"#.to_string(),
+        ];
         assert_eq!(loggable(&native), ["agent.mcp_config"]);
         let host_cfg = vec!["agent".to_string(), "get".to_string(), "x".to_string()];
         assert_eq!(loggable(&host_cfg), ["agent", "get"]);
@@ -540,7 +554,12 @@ mod tests {
 
     #[test]
     fn a_missing_binary_is_an_error_not_a_panic() {
-        let err = run_with_deadline(&mut Command::new("/nonexistent/ssh"), None, Duration::from_secs(2)).unwrap_err();
+        let err = run_with_deadline(
+            &mut Command::new("/nonexistent/ssh"),
+            None,
+            Duration::from_secs(2),
+        )
+        .unwrap_err();
         assert!(!err.is_empty());
     }
 

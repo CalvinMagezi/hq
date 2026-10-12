@@ -32,6 +32,20 @@ Copy `.env.example` for local environment variables. Never commit real keys,
 tokens, chat ids, hostnames or personal data; use placeholders such as
 `example.com`.
 
+## Git hooks
+
+Run `./scripts/install-hooks.sh` once per clone. It links `scripts/pre-commit`
+into `.git/hooks`, and from then on every commit:
+
+- runs rustfmt over the staged `.rs` files and re-stages them, so the CI format
+  check never fails on formatting alone (`HQ_SKIP_FMT=1 git commit ...` skips
+  this for one commit);
+- refuses staged changes that look like secrets or personal data.
+
+A file that is only partly staged is not rewritten, since re-staging it would
+pull your unstaged edits into the commit. The hook stops and asks you to run
+`cargo fmt --all` instead.
+
 ## Checks before you open a PR
 
 All of these must pass:

@@ -705,7 +705,10 @@ async fn only_a_couple_of_full_mode_questions_can_wait_at_once() {
         .execute(json!({"question": "one more", "mode": "full", "wait_secs": 0}))
         .await
         .unwrap_err();
-    assert!(err.to_string().contains("agent_host.max_full_asks"), "{err}");
+    assert!(
+        err.to_string().contains("agent_host.max_full_asks"),
+        "{err}"
+    );
     assert!(
         r.ask
             .execute(json!({"question": "read only is not held to it", "wait_secs": 0}))

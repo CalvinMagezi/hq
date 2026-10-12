@@ -8,9 +8,9 @@ use std::path::PathBuf;
 use std::sync::Arc;
 
 use super::WatchingChat;
-use hq_db::harness_sessions_registry as registry;
 use crate::registry::HqTool;
 use crate::util::{arg_str, arg_str_list};
+use hq_db::harness_sessions_registry as registry;
 
 /// Where a tool-started session runs. An explicit folder that exists is used as given. A blank one,
 /// or one the host does not have, falls back to a folder in that machine's HQ folder, which the
@@ -28,17 +28,31 @@ async fn choose_start_dir(
     let vault_guard = |p: &std::path::Path| {
         super::check_cwd_outside_vault(p, host_name, &agent_host.default_host, &cfg.vault_path)
     };
-    let wanted = requested.map(|r| super::require_cwd_in(Some(r), agent_host, handoff_scope)).transpose()?;
+    let wanted = requested
+        .map(|r| super::require_cwd_in(Some(r), agent_host, handoff_scope))
+        .transpose()?;
     // A folder that is not allowed is refused whether or not it exists, never quietly swapped.
     if let Some(path) = &wanted {
         vault_guard(path)?;
     }
-    if let Some(path) = wanted.as_ref().filter(|p| host.dir_exists(p) != Some(false)) {
-        return Ok(super::StartDir { path: path.clone(), note: None });
+    if let Some(path) = wanted
+        .as_ref()
+        .filter(|p| host.dir_exists(p) != Some(false))
+    {
+        return Ok(super::StartDir {
+            path: path.clone(),
+            note: None,
+        });
     }
     let (h, w, l, k) = (host.clone(), wanted, label.to_string(), harness.to_string());
-    let fallback = tokio::task::spawn_blocking(move || super::workspace_start_dir(&*h, w.as_deref(), &l, &k)).await??;
-    super::require_cwd_in(Some(&fallback.path.to_string_lossy()), agent_host, handoff_scope)?;
+    let fallback =
+        tokio::task::spawn_blocking(move || super::workspace_start_dir(&*h, w.as_deref(), &l, &k))
+            .await??;
+    super::require_cwd_in(
+        Some(&fallback.path.to_string_lossy()),
+        agent_host,
+        handoff_scope,
+    )?;
     vault_guard(&fallback.path)?;
     Ok(fallback)
 }
@@ -84,7 +98,13 @@ impl HqTool for HarnessSessionSpawnTool {
         super::refuse_if_spawned(&args)?;
         let harness = arg_str(&args, "harness");
         if let Some(guest) = &self.family_guest {
-            let canonical = |h: &str| if h == "antigravity" { "agy".to_string() } else { h.to_string() };
+            let canonical = |h: &str| {
+                if h == "antigravity" {
+                    "agy".to_string()
+                } else {
+                    h.to_string()
+                }
+            };
             let allowed = &guest.allowed_harnesses;
             if !allowed.is_empty() && !allowed.iter().any(|a| canonical(a) == canonical(&harness)) {
                 anyhow::bail!(
@@ -109,9 +129,22 @@ impl HqTool for HarnessSessionSpawnTool {
         let origin = super::start_origin(self.chat.as_ref());
         super::check_origin_cap(&self.db, origin)?;
         let host_handle = crate::agent_host::host(Some(host.as_str()).filter(|h| !h.is_empty()))?;
-        let requested = args.get("cwd").and_then(|v| v.as_str()).map(str::trim).filter(|c| !c.is_empty());
+        let requested = args
+            .get("cwd")
+            .and_then(|v| v.as_str())
+            .map(str::trim)
+            .filter(|c| !c.is_empty());
         let scope = super::is_handoff_scope(&args);
-        let start = choose_start_dir(&host_handle, requested, &cfg, &host, scope, &label, &harness).await?;
+        let start = choose_start_dir(
+            &host_handle,
+            requested,
+            &cfg,
+            &host,
+            scope,
+            &label,
+            &harness,
+        )
+        .await?;
         macro_rules! launch {
             ($cwd:expr) => {
                 super::SpawnRequest {
@@ -133,19 +166,32 @@ impl HqTool for HarnessSessionSpawnTool {
             };
         }
         let mut note = start.note;
-        let mut report = super::spawn_on(&self.vault_path, &self.db, host_handle.clone(), launch!(&start.path)).await;
+        let mut report = super::spawn_on(
+            &self.vault_path,
+            &self.db,
+            host_handle.clone(),
+            launch!(&start.path),
+        )
+        .await;
         // A remote host cannot be asked whether a folder exists; its launch error says so, and
         // nothing was started, so the one retry is in the machine's own HQ folder.
         if let (Err(e), Some(asked), None) = (&report, requested, &note)
             && super::is_missing_dir_error(e)
         {
-            let fallback = choose_start_dir(&host_handle, None, &cfg, &host, scope, &label, &harness).await?;
-                note = Some(format!(
+            let fallback =
+                choose_start_dir(&host_handle, None, &cfg, &host, scope, &label, &harness).await?;
+            note = Some(format!(
                 "{asked} does not exist on host '{}', so the session started in {} instead.",
                 host_handle.name(),
                 fallback.path.display()
             ));
-            report = super::spawn_on(&self.vault_path, &self.db, host_handle.clone(), launch!(&fallback.path)).await;
+            report = super::spawn_on(
+                &self.vault_path,
+                &self.db,
+                host_handle.clone(),
+                launch!(&fallback.path),
+            )
+            .await;
         }
         let mut report = report?;
         if let Some(note) = note {
@@ -387,7 +433,8 @@ impl HqTool for HarnessSessionResumeTool {
         super::refuse_if_spawned(&args)?;
         let prompt = arg_str(&args, "prompt");
         let id = arg_str(&args, "session_id");
-        let reserved = super::reserve_send(&self.db, &id, self.chat.as_ref(), super::SendKind::Text)?;
+        let reserved =
+            super::reserve_send(&self.db, &id, self.chat.as_ref(), super::SendKind::Text)?;
         let result = super::resume(
             &self.vault_path,
             &self.db,
@@ -395,7 +442,14 @@ impl HqTool for HarnessSessionResumeTool {
             Some(prompt.as_str()).filter(|p| !p.is_empty()),
         )
         .await;
-        super::settle_send(&self.db, &id, self.chat.as_ref(), super::SendKind::Text, reserved, result.is_ok());
+        super::settle_send(
+            &self.db,
+            &id,
+            self.chat.as_ref(),
+            super::SendKind::Text,
+            reserved,
+            result.is_ok(),
+        );
         result
     }
 }
@@ -567,12 +621,18 @@ impl HqTool for HarnessSessionGoalTool {
     }
     async fn execute(&self, args: Value) -> Result<Value> {
         if args.get(super::UNTRUSTED_TURN_ARG).and_then(Value::as_bool) == Some(true) {
-            anyhow::bail!("this turn read untrusted content, so it cannot change a session's goal; ask the user");
+            anyhow::bail!(
+                "this turn read untrusted content, so it cannot change a session's goal; ask the user"
+            );
         }
         let db = self.db.clone();
         let id = arg_str(&args, "session_id");
         let (goal, done) = (arg_str(&args, "goal"), arg_str(&args, "done_criteria"));
-        let actor = if self.chat.is_some() { registry::ACTOR_HQ } else { registry::ACTOR_MCP };
+        let actor = if self.chat.is_some() {
+            registry::ACTOR_HQ
+        } else {
+            registry::ACTOR_MCP
+        };
         tokio::task::spawn_blocking(move || {
             let text = super::GoalText {
                 goal: Some(goal.as_str()).filter(|g| !g.is_empty()),
@@ -612,7 +672,9 @@ impl HqTool for HarnessSessionModeTool {
     }
     async fn execute(&self, args: Value) -> Result<Value> {
         let Some(chat) = self.chat.clone() else {
-            anyhow::bail!("harness_session_mode only works from a web chat; this session has no chat thread");
+            anyhow::bail!(
+                "harness_session_mode only works from a web chat; this session has no chat thread"
+            );
         };
         let drive = match arg_str(&args, "mode").as_str() {
             "drive" => true,
@@ -628,7 +690,12 @@ impl HqTool for HarnessSessionModeTool {
         let db = self.db.clone();
         let id = arg_str(&args, "session_id");
         tokio::task::spawn_blocking(move || {
-            let req = super::ModeRequest { thread: &chat.thread, drive, untrusted, actor: registry::ACTOR_HQ };
+            let req = super::ModeRequest {
+                thread: &chat.thread,
+                drive,
+                untrusted,
+                actor: registry::ACTOR_HQ,
+            };
             super::set_mode(&db, &id, req)
         })
         .await?
@@ -665,10 +732,15 @@ impl HqTool for HarnessSessionAttachTool {
     async fn execute(&self, args: Value) -> Result<Value> {
         super::refuse_attach(self.chat.as_ref())?;
         if let Some(guest) = &self.family_guest {
-            anyhow::bail!("{} cannot attach to existing sessions; only the owner can", guest.name);
+            anyhow::bail!(
+                "{} cannot attach to existing sessions; only the owner can",
+                guest.name
+            );
         }
         let Some(chat) = self.chat.clone() else {
-            anyhow::bail!("harness_session_attach only works from a web chat; this session has no chat thread");
+            anyhow::bail!(
+                "harness_session_attach only works from a web chat; this session has no chat thread"
+            );
         };
         let target = arg_str(&args, "agent");
         if target.is_empty() {
@@ -677,7 +749,8 @@ impl HqTool for HarnessSessionAttachTool {
         let host_name = arg_str(&args, "host");
         let host = crate::agent_host::host(Some(host_name.as_str()).filter(|h| !h.is_empty()))?;
         let db = self.db.clone();
-        crate::agent_host::blocking(move || super::attach(&db, &host, &target, &chat.thread)).await?
+        crate::agent_host::blocking(move || super::attach(&db, &host, &target, &chat.thread))
+            .await?
     }
 }
 
@@ -727,17 +800,25 @@ impl HqTool for HarnessSessionHandoffTool {
             anyhow::bail!("a driver turn cannot start sessions; tell the user what you need");
         }
         if let Some(guest) = &self.family_guest {
-            anyhow::bail!("{} cannot hand work to coding agents; only the owner can", guest.name);
+            anyhow::bail!(
+                "{} cannot hand work to coding agents; only the owner can",
+                guest.name
+            );
         }
         let origin = super::start_origin(self.chat.as_ref());
         super::check_origin_cap(&self.db, origin)?;
         let cfg = hq_core::config::HqConfig::load()?;
         let host_name = arg_str(&args, "host");
         let host = crate::agent_host::host(Some(host_name.as_str()).filter(|h| !h.is_empty()))?;
-        let requested = args.get("cwd").and_then(Value::as_str).map(str::trim).filter(|c| !c.is_empty());
+        let requested = args
+            .get("cwd")
+            .and_then(Value::as_str)
+            .map(str::trim)
+            .filter(|c| !c.is_empty());
         let (label, harness) = (arg_str(&args, "title"), arg_str(&args, "harness"));
         let scope = super::is_handoff_scope(&args);
-        let start = choose_start_dir(&host, requested, &cfg, &host_name, scope, &label, &harness).await?;
+        let start =
+            choose_start_dir(&host, requested, &cfg, &host_name, scope, &label, &harness).await?;
         let owned = |key: &str| arg_str(&args, key);
         let acceptance = [owned("acceptance"), owned("done_criteria")]
             .into_iter()
@@ -760,7 +841,11 @@ impl HqTool for HarnessSessionHandoffTool {
                 initiative: owned("initiative"),
                 // A handoff from an hq_ask reply or over the handoff key never starts out driving,
                 // so a handoff-key holder cannot fill the driven-session cap and starve the owner.
-                drive_new: handoff_drives_new(cfg.agent_host.drive_new_watches, &args, self.chat.as_ref()),
+                drive_new: handoff_drives_new(
+                    cfg.agent_host.drive_new_watches,
+                    &args,
+                    self.chat.as_ref(),
+                ),
                 drive_opted_out: args.get("drive").and_then(Value::as_bool) == Some(false),
                 purpose: super::Purpose::parse_opt(args.get("purpose").and_then(Value::as_str))?,
             },
@@ -777,7 +862,11 @@ impl HqTool for HarnessSessionHandoffTool {
 
 /// Whether a handoff may start its session driven: not from the handoff key (so its holder cannot
 /// fill the driven-session cap) and not from an `hq_ask` reply.
-pub(super) fn handoff_drives_new(default_on: bool, args: &Value, chat: Option<&WatchingChat>) -> bool {
+pub(super) fn handoff_drives_new(
+    default_on: bool,
+    args: &Value,
+    chat: Option<&WatchingChat>,
+) -> bool {
     default_on && !super::is_handoff_scope(args) && !chat.is_some_and(|c| c.from_ask)
 }
 
@@ -875,7 +964,11 @@ mod tests {
             .execute(json!({ "harness": "cursor" }))
             .await
             .unwrap_err();
-        assert!(err_cursor.to_string().contains("'cursor' is not one of them"));
+        assert!(
+            err_cursor
+                .to_string()
+                .contains("'cursor' is not one of them")
+        );
     }
 
     #[tokio::test]

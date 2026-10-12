@@ -69,8 +69,7 @@ impl SessionBuilder {
         if self.role != SessionRole::Orchestrator {
             return tools;
         }
-        let shell_is_safe =
-            crate::bash_sandbox::available_backend_for(false).is_some();
+        let shell_is_safe = crate::bash_sandbox::available_backend_for(false).is_some();
         tools
             .into_iter()
             .filter(|t| !super::ORCHESTRATOR_REMOVED_TOOLS.contains(&t.name()))
@@ -128,10 +127,10 @@ impl SessionBuilder {
             Box::new({
                 hq_tools::web::set_search_peer(self.config.web_search_peer_server().cloned());
                 crate::web::WebSearchTool::new(
-                self.config.searxng_url.clone(),
-                self.config.brave_api_key.clone(),
-                self.config.web_search_native,
-            )
+                    self.config.searxng_url.clone(),
+                    self.config.brave_api_key.clone(),
+                    self.config.web_search_native,
+                )
             }),
             Box::new(crate::web::WebFetchTool),
         ]
@@ -144,7 +143,8 @@ impl SessionBuilder {
         shared_db: Option<Arc<hq_db::Database>>,
     ) -> Vec<Box<dyn hq_tools::HqTool>> {
         // Vault + memory tools — direct vault access without subagent overhead
-        let mut tools = hq_tools::vault::create_vault_tools(vault_path.to_path_buf(), shared_db.clone());
+        let mut tools =
+            hq_tools::vault::create_vault_tools(vault_path.to_path_buf(), shared_db.clone());
         // Restricted audiences (FR-072) only see vault context labelled for them.
         if let (Some(id), Ok(vault)) = (
             self.identity.as_ref(),
@@ -163,13 +163,17 @@ impl SessionBuilder {
         // model-agnostic). Was previously MCP-only (hq-mcp/src/registry.rs),
         // so hq's own native session — including the relay/Telegram agent —
         // had no way to read an image's text on demand.
-        tools.extend(hq_tools::convert::create_convert_tools(vault_path.to_path_buf()));
+        tools.extend(hq_tools::convert::create_convert_tools(
+            vault_path.to_path_buf(),
+        ));
 
         // Mechanical AI-slop check for document/report drafts.
         tools.extend(hq_tools::prose_lint::create_prose_lint_tools());
 
         // Per-brand asset knowledge base (logos/palette/reference-docs).
-        tools.extend(hq_tools::brand::create_brand_tools(vault_path.to_path_buf()));
+        tools.extend(hq_tools::brand::create_brand_tools(
+            vault_path.to_path_buf(),
+        ));
 
         if let Some(ref db) = shared_db {
             tools.extend(self.db_backed_tools(vault_path, db));
@@ -185,9 +189,10 @@ impl SessionBuilder {
         ));
 
         // Model control (Copilot catalog, primary switch) is for the owner only.
-        let owner_scope = self.identity.as_ref().is_none_or(|id| {
-            matches!(id.scope, hq_core::privacy::DisclosureScope::Unrestricted)
-        });
+        let owner_scope = self
+            .identity
+            .as_ref()
+            .is_none_or(|id| matches!(id.scope, hq_core::privacy::DisclosureScope::Unrestricted));
         if owner_scope {
             tools.extend(hq_tools::model_control::create_model_tools());
         }

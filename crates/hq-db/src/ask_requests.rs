@@ -315,10 +315,15 @@ mod tests {
             crate::chat::add_message(c, &mine, "user", "my own question")?;
             open(c, &new_ask(ThreadTarget::Existing(&mine), None))?;
             assert!(thread_has_ask(c, &mine, None, None)? && !thread_is_ask_owned(c, &mine)?);
-            let created = open(c, &new_ask(ThreadTarget::New { title: "q" }, None))?.row.thread_id;
+            let created = open(c, &new_ask(ThreadTarget::New { title: "q" }, None))?
+                .row
+                .thread_id;
             assert!(thread_is_ask_owned(c, &created)?);
             crate::chat::add_message(c, &created, "user", "I joined in")?;
-            assert!(!thread_is_ask_owned(c, &created)?, "once the owner types, it is theirs");
+            assert!(
+                !thread_is_ask_owned(c, &created)?,
+                "once the owner types, it is theirs"
+            );
             assert!(!thread_is_ask_owned(c, "no-such-thread")?);
             Ok(())
         })

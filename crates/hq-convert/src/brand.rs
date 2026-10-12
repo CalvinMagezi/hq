@@ -59,7 +59,10 @@ pub fn discover_brands(vault_path: &Path) -> Vec<BrandProject> {
 }
 
 fn unknown_brand_error(vault_path: &Path, brand_slug: &str) -> ConvertError {
-    let known: Vec<String> = discover_brands(vault_path).into_iter().map(|b| b.slug).collect();
+    let known: Vec<String> = discover_brands(vault_path)
+        .into_iter()
+        .map(|b| b.slug)
+        .collect();
     let known_str = if known.is_empty() {
         "(none registered yet — add Notebooks/Projects/<Name>/Branding/)".to_string()
     } else {
@@ -91,8 +94,7 @@ pub struct BrandKit {
 }
 
 fn default_voice_notes() -> String {
-    "No brand-specific voice override; pass drafts through prose_lint before delivery."
-        .to_string()
+    "No brand-specific voice override; pass drafts through prose_lint before delivery.".to_string()
 }
 
 /// `Notebooks/Projects/<Brand>/Branding` for a known brand slug (matched
@@ -130,9 +132,8 @@ pub fn load_brand_kit(vault_path: &Path, brand_slug: &str) -> Result<BrandKit, C
             manifest_path.display()
         ))
     })?;
-    let mut kit: BrandKit = serde_yaml::from_str(&raw).map_err(|e| {
-        ConvertError::Other(format!("invalid brand.yaml for '{brand_slug}': {e}"))
-    })?;
+    let mut kit: BrandKit = serde_yaml::from_str(&raw)
+        .map_err(|e| ConvertError::Other(format!("invalid brand.yaml for '{brand_slug}': {e}")))?;
 
     kit.logo_light = kit.logo_light.map(|p| resolve_relative(&dir, p));
     kit.logo_dark = kit.logo_dark.map(|p| resolve_relative(&dir, p));
@@ -192,7 +193,12 @@ logo_light: Assets/logo.png
         // A brand is "known" once its Branding/ dir exists, even before it
         // has a brand.yaml manifest (see BrandAssetsAddTool, which creates
         // this dir on a brand's first uploaded asset).
-        std::fs::create_dir_all(vault.path().join("Notebooks/Projects/ExampleProject/Branding")).unwrap();
+        std::fs::create_dir_all(
+            vault
+                .path()
+                .join("Notebooks/Projects/ExampleProject/Branding"),
+        )
+        .unwrap();
         let err = load_brand_kit(vault.path(), "exampleproject").unwrap_err();
         assert!(err.to_string().contains("no brand.yaml"));
     }

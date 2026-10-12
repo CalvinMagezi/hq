@@ -25,11 +25,17 @@ fn run_egress_with(config: &HqConfig, env: hq_core::config::EnvLookup<'_>) -> Re
     use hq_core::config::{egress_report, lite_violations};
     let report = egress_report(config, env);
     let lite = config.profile.is_lite();
-    println!("Outbound destinations (profile: {})", if lite { "lite" } else { "full" });
+    println!(
+        "Outbound destinations (profile: {})",
+        if lite { "lite" } else { "full" }
+    );
     if report.is_empty() {
         println!("  none: nothing configured sends data to another service");
     }
-    let refused: Vec<String> = lite_violations(config, env).into_iter().map(|v| v.id).collect();
+    let refused: Vec<String> = lite_violations(config, env)
+        .into_iter()
+        .map(|v| v.id)
+        .collect();
     for e in &report {
         let verdict = if !lite {
             ""
@@ -409,13 +415,22 @@ mod tests {
             openrouter_api_key: Some("k".into()),
             ..HqConfig::default()
         };
-        assert!(run_egress_with(&cfg, &none).is_ok(), "the full profile only reports");
+        assert!(
+            run_egress_with(&cfg, &none).is_ok(),
+            "the full profile only reports"
+        );
 
         cfg.profile = hq_core::config::Profile::Lite;
-        assert!(run_egress_with(&cfg, &none).is_err(), "lite refuses a configured OpenRouter key");
+        assert!(
+            run_egress_with(&cfg, &none).is_err(),
+            "lite refuses a configured OpenRouter key"
+        );
 
         cfg.lite.allow_egress = vec!["openrouter".into()];
-        assert!(run_egress_with(&cfg, &none).is_ok(), "listing the item allows it");
+        assert!(
+            run_egress_with(&cfg, &none).is_ok(),
+            "listing the item allows it"
+        );
 
         // The environment counts too: a key exported in the shell is refused.
         let env = |n: &str| (n == "ANTHROPIC_API_KEY").then(|| "k".to_string());

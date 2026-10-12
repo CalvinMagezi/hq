@@ -5,7 +5,6 @@ use std::path::Path;
 
 use crate::registry::HqTool;
 
-
 pub struct ListDirTool;
 
 #[async_trait]

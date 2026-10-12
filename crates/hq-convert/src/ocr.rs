@@ -79,7 +79,9 @@ impl OcrEngine {
     pub async fn extract_text(image_path: &Path) -> Result<String, ConvertError> {
         let mut cmd = tokio::process::Command::new(compiled_binary_path().await?);
         cmd.kill_on_drop(true).arg(image_path);
-        let stdout = crate::run_tool(cmd, "OCR binary").await.map_err(ConvertError::Other)?;
+        let stdout = crate::run_tool(cmd, "OCR binary")
+            .await
+            .map_err(ConvertError::Other)?;
         Ok(String::from_utf8_lossy(&stdout).trim().to_string())
     }
 
@@ -93,7 +95,9 @@ impl OcrEngine {
         // `stdout` as the output base tells tesseract to write to stdout
         // instead of `<base>.txt`.
         cmd.kill_on_drop(true).arg(image_path).arg("stdout");
-        let stdout = crate::run_tool(cmd, "tesseract").await.map_err(ConvertError::Other)?;
+        let stdout = crate::run_tool(cmd, "tesseract")
+            .await
+            .map_err(ConvertError::Other)?;
         Ok(String::from_utf8_lossy(&stdout).trim().to_string())
     }
 
@@ -114,7 +118,9 @@ impl OcrEngine {
             .arg("-png")
             .arg(pdf_path)
             .arg(tmp.path().join("p"));
-        crate::run_tool(cmd, "pdftoppm").await.map_err(ConvertError::Other)?;
+        crate::run_tool(cmd, "pdftoppm")
+            .await
+            .map_err(ConvertError::Other)?;
 
         // pdftoppm zero-pads page numbers to a common width, so a name sort is page order.
         let mut pages: Vec<_> = std::fs::read_dir(tmp.path())

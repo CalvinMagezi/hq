@@ -111,11 +111,18 @@ impl ChannelState {
             // chat) keeps every message; the prompt goes in front of it.
             _ => self.messages.insert(
                 0,
-                chat_message(hq_core::types::MessageRole::System, system_prompt, Vec::new()),
+                chat_message(
+                    hq_core::types::MessageRole::System,
+                    system_prompt,
+                    Vec::new(),
+                ),
             ),
         }
-        self.messages
-            .push(chat_message(hq_core::types::MessageRole::User, text, images));
+        self.messages.push(chat_message(
+            hq_core::types::MessageRole::User,
+            text,
+            images,
+        ));
         if self.messages.len() > MAX_HISTORY {
             let tail = self.messages.split_off(self.messages.len() - KEPT_HISTORY);
             self.messages.truncate(1);
@@ -492,12 +499,13 @@ pub(crate) fn parse_unwatch_command(lower: &str) -> Option<Option<String>> {
             return Some(None);
         }
         if let Some(rest) = lower.strip_prefix(prefix)
-            && rest.starts_with(char::is_whitespace) {
-                let id = rest.trim();
-                if !id.is_empty() {
-                    return Some(Some(id.to_string()));
-                }
+            && rest.starts_with(char::is_whitespace)
+        {
+            let id = rest.trim();
+            if !id.is_empty() {
+                return Some(Some(id.to_string()));
             }
+        }
     }
     None
 }
@@ -641,7 +649,9 @@ pub fn split_message(text: &str, max_len: usize) -> Vec<String> {
         }
         // Cut on a char boundary: slicing mid-character (an em-dash, an emoji) panics.
         // Always take at least one char, or a limit below its width would loop forever.
-        let limit = remaining.floor_char_boundary(max_len).max(remaining.ceil_char_boundary(1));
+        let limit = remaining
+            .floor_char_boundary(max_len)
+            .max(remaining.ceil_char_boundary(1));
         let search = &remaining[..limit];
         let split_at = search
             .rfind("\n\n")
@@ -711,7 +721,12 @@ pub(crate) fn lookup_turn(
 }
 
 /// Close a `background_turns` row as completed or failed. Best-effort.
-pub(crate) fn close_turn_row(db: Option<&hq_db::Database>, turn_id: &str, text: &str, success: bool) {
+pub(crate) fn close_turn_row(
+    db: Option<&hq_db::Database>,
+    turn_id: &str,
+    text: &str,
+    success: bool,
+) {
     let Some(db) = db else { return };
     let now = chrono::Utc::now().timestamp();
     let update = if success {

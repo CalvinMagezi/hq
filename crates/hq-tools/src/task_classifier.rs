@@ -211,7 +211,8 @@ mod tests {
 
     #[test]
     fn vault_from_search() {
-        let p = "Search the vault for everything about ExampleProject and summarize the open questions";
+        let p =
+            "Search the vault for everything about ExampleProject and summarize the open questions";
         assert_eq!(classify_task(p), TaskType::Vault);
     }
 

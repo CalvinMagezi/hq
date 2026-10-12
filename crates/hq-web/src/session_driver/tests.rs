@@ -65,7 +65,12 @@ fn watched_with_wake(state: &WsState) -> String {
                     label: "",
                     cwd: "/repo",
                     mission_id: None,
-                    placement: registry::Placement { host: "laptop", agent_name: "hs-w", workspace_id: "w1", pane_id: "w1:p1" },
+                    placement: registry::Placement {
+                        host: "laptop",
+                        agent_name: "hs-w",
+                        workspace_id: "w1",
+                        pane_id: "w1:p1",
+                    },
                     purpose: None,
                 },
             )?;
@@ -78,7 +83,10 @@ fn watched_with_wake(state: &WsState) -> String {
 }
 
 fn messages(state: &WsState, thread: &str) -> Vec<hq_db::chat::ChatMessage> {
-    state.db.with_conn(|c| hq_db::chat::get_messages(c, thread, 100)).unwrap()
+    state
+        .db
+        .with_conn(|c| hq_db::chat::get_messages(c, thread, 100))
+        .unwrap()
 }
 
 #[tokio::test]
@@ -103,7 +111,10 @@ async fn a_driven_session_over_its_daily_cap_gets_updates_instead_of_turns() {
 
     let last = messages(&state, &thread).pop().unwrap();
     assert!(last.content.contains("Drive is paused"), "{}", last.content);
-    assert!(state.active_chat_turns.read().await.is_empty(), "no driver turn was started");
+    assert!(
+        state.active_chat_turns.read().await.is_empty(),
+        "no driver turn was started"
+    );
 }
 
 #[tokio::test]
@@ -135,23 +146,47 @@ async fn a_wake_for_a_chat_a_read_only_ask_owns_is_dropped_with_one_notice_not_r
 
     let notes = messages(&state, &thread);
     assert_eq!(notes.len(), 1, "one notice, and the wake did not come back");
-    assert!(notes[0].content.contains("read-only question"), "{}", notes[0].content);
-    assert!(state.active_chat_turns.read().await.is_empty(), "no driver turn was started");
-    let row = state.db.with_conn(|c| registry::get(c, "hs-w")).unwrap().unwrap();
-    assert!(row.pm_wake.is_none(), "the wake is dropped, not handed back");
+    assert!(
+        notes[0].content.contains("read-only question"),
+        "{}",
+        notes[0].content
+    );
+    assert!(
+        state.active_chat_turns.read().await.is_empty(),
+        "no driver turn was started"
+    );
+    let row = state
+        .db
+        .with_conn(|c| registry::get(c, "hs-w"))
+        .unwrap()
+        .unwrap();
+    assert!(
+        row.pm_wake.is_none(),
+        "the wake is dropped, not handed back"
+    );
 }
 
 #[tokio::test]
 async fn an_archived_chat_lets_go_of_its_sessions() {
     let state = test_state();
     let thread = watched_with_wake(&state);
-    state.db.with_conn(|c| hq_db::chat::archive_thread(c, &thread)).unwrap();
+    state
+        .db
+        .with_conn(|c| hq_db::chat::archive_thread(c, &thread))
+        .unwrap();
 
     drive_due(&state).await;
 
     assert!(messages(&state, &thread).is_empty());
-    let row = state.db.with_conn(|c| registry::get(c, "hs-w")).unwrap().unwrap();
-    assert!(row.owner_thread.is_none(), "its events go back to the relay");
+    let row = state
+        .db
+        .with_conn(|c| registry::get(c, "hs-w"))
+        .unwrap()
+        .unwrap();
+    assert!(
+        row.owner_thread.is_none(),
+        "its events go back to the relay"
+    );
 }
 
 #[tokio::test]
@@ -162,10 +197,21 @@ async fn a_watched_session_wake_posts_one_update_into_its_chat() {
     drive_due(&state).await;
     drive_due(&state).await;
 
-    let messages = state.db.with_conn(|c| hq_db::chat::get_messages(c, &thread, 10)).unwrap();
+    let messages = state
+        .db
+        .with_conn(|c| hq_db::chat::get_messages(c, &thread, 10))
+        .unwrap();
     assert_eq!(messages.len(), 1, "one update, the wake is claimed once");
-    assert!(messages[0].content.contains("needs an answer"), "{}", messages[0].content);
-    let row = state.db.with_conn(|c| registry::get(c, "hs-w")).unwrap().unwrap();
+    assert!(
+        messages[0].content.contains("needs an answer"),
+        "{}",
+        messages[0].content
+    );
+    let row = state
+        .db
+        .with_conn(|c| registry::get(c, "hs-w"))
+        .unwrap()
+        .unwrap();
     assert!(row.pm_wake.is_none());
 }
 
@@ -178,7 +224,10 @@ async fn a_driven_session_whose_goal_stopped_passing_the_gate_is_observed_not_dr
         .with_conn(|c| {
             registry::set_goal(c, "hs-w", Some(GOAL), Some(DONE), registry::ACTOR_USER)?;
             registry::set_drive(c, "hs-w", true)?;
-            c.execute("UPDATE harness_sessions SET done_criteria = 'done' WHERE id = 'hs-w'", [])?;
+            c.execute(
+                "UPDATE harness_sessions SET done_criteria = 'done' WHERE id = 'hs-w'",
+                [],
+            )?;
             Ok(())
         })
         .unwrap();
@@ -186,20 +235,30 @@ async fn a_driven_session_whose_goal_stopped_passing_the_gate_is_observed_not_dr
     drive_due(&state).await;
 
     let last = messages(&state, &thread).pop().unwrap();
-    assert!(last.content.contains("needs an answer"), "an update, not a driver turn: {}", last.content);
-    assert!(state.active_chat_turns.read().await.is_empty(), "no driver turn was started");
-    let row = state.db.with_conn(|c| registry::get(c, "hs-w")).unwrap().unwrap();
+    assert!(
+        last.content.contains("needs an answer"),
+        "an update, not a driver turn: {}",
+        last.content
+    );
+    assert!(
+        state.active_chat_turns.read().await.is_empty(),
+        "no driver turn was started"
+    );
+    let row = state
+        .db
+        .with_conn(|c| registry::get(c, "hs-w"))
+        .unwrap()
+        .unwrap();
     assert!(!row.drive);
-    let events = state.db.with_conn(|c| registry::list_events(c, "hs-w", 10)).unwrap();
+    let events = state
+        .db
+        .with_conn(|c| registry::list_events(c, "hs-w", 10))
+        .unwrap();
     assert_eq!(events.last().unwrap().kind, registry::EVENT_DRIVE_OFF);
 }
 
 /// `hs-w` driven with a goal, a wake of `reason` pending, and an optional linked task.
-fn driven(
-    state: &WsState,
-    reason: &str,
-    task_status: Option<&str>,
-) -> (String, Option<String>) {
+fn driven(state: &WsState, reason: &str, task_status: Option<&str>) -> (String, Option<String>) {
     let thread = watched_with_wake(state);
     let task = task_status.map(|status| {
         state
@@ -314,8 +373,7 @@ async fn finished_turns_with_no_new_tool_activity_switch_drive_off() {
 
 #[test]
 fn progress_is_new_tool_lines_and_a_harness_that_prints_none_is_left_to_the_budget() {
-    let first =
-        tool_activity("⏺ Bash(cargo test 12 passed)\nplain chatter\n⏺ Update(src/lib.rs)");
+    let first = tool_activity("⏺ Bash(cargo test 12 passed)\nplain chatter\n⏺ Update(src/lib.rs)");
     assert_eq!(first, ["Bash(cargo test ## passed)", "Update(src/lib.rs)"]);
     assert_eq!(
         tool_activity("• Ran cargo fmt\n> Do it again"),
@@ -448,9 +506,17 @@ fn running_the_same_tool_again_is_work_but_an_unchanged_screen_is_not() {
     let once = tool_activity("⏺ Bash(cargo test)\n⏺ Update(src/lib.rs)");
     let twice = tool_activity("⏺ Bash(cargo test)\nok\n⏺ Bash(cargo test)\n⏺ Update(src/lib.rs)");
     assert_eq!(twice.len(), 3, "repeats are kept");
-    assert_eq!(judge_progress(&once, &twice), Progress::Moved, "another run of the same command is new work");
+    assert_eq!(
+        judge_progress(&once, &twice),
+        Progress::Moved,
+        "another run of the same command is new work"
+    );
     assert_eq!(judge_progress(&twice, &twice), Progress::Stalled);
-    assert_eq!(judge_progress(&twice, &once), Progress::Stalled, "fewer lines scrolled out is not work");
+    assert_eq!(
+        judge_progress(&twice, &once),
+        Progress::Stalled,
+        "fewer lines scrolled out is not work"
+    );
 }
 
 #[tokio::test]
@@ -462,15 +528,30 @@ async fn a_finished_turn_after_a_user_typed_send_is_not_counted_as_a_stall() {
         .db
         .with_conn(|c| {
             registry::set_last_snapshot(c, "hs-w", screen)?;
-            registry::set_progress(c, "hs-w", agent_host_config(&state).no_progress_limit() - 1, Some(&tool_activity(screen).join("\n")))
+            registry::set_progress(
+                c,
+                "hs-w",
+                agent_host_config(&state).no_progress_limit() - 1,
+                Some(&tool_activity(screen).join("\n")),
+            )
         })
         .unwrap();
     assert!(row_of(&state).last_wake_nudges.is_none());
 
-    let stop = driver_guard(&state, &row_of(&state), None, WAKE_FINISHED, &agent_host_config(&state));
+    let stop = driver_guard(
+        &state,
+        &row_of(&state),
+        None,
+        WAKE_FINISHED,
+        &agent_host_config(&state),
+    );
 
     assert!(stop.is_none(), "{stop:?}");
-    assert_eq!(row_of(&state).no_progress_streak, agent_host_config(&state).no_progress_limit() - 1, "left alone");
+    assert_eq!(
+        row_of(&state).no_progress_streak,
+        agent_host_config(&state).no_progress_limit() - 1,
+        "left alone"
+    );
     assert!(messages(&state, &thread).is_empty());
 }
 
@@ -479,7 +560,15 @@ async fn the_key_allowance_stops_drive_separately_from_the_instruction_budget() 
     let state = test_state();
     let (thread, _) = driven(&state, "blocked", None);
     let keys = agent_host_config(&state).key_allowance();
-    state.db.with_conn(|c| Ok(c.execute("UPDATE harness_sessions SET keys_sent = ?1 WHERE id = 'hs-w'", [keys])?)).unwrap();
+    state
+        .db
+        .with_conn(|c| {
+            Ok(c.execute(
+                "UPDATE harness_sessions SET keys_sent = ?1 WHERE id = 'hs-w'",
+                [keys],
+            )?)
+        })
+        .unwrap();
 
     drive_due(&state).await;
 
@@ -495,9 +584,16 @@ async fn a_check_in_does_not_stop_drive_on_the_task_rule_while_the_agent_is_work
 
     let mut row = row_of(&state);
     row.last_agent_status = Some("working".into());
-    assert!(driver_guard(&state, &row, task.as_ref(), CHECK_IN, &cfg).is_none(), "someone is typing in the pane");
+    assert!(
+        driver_guard(&state, &row, task.as_ref(), CHECK_IN, &cfg).is_none(),
+        "someone is typing in the pane"
+    );
     row.last_agent_status = Some("idle".into());
-    assert!(driver_guard(&state, &row, task.as_ref(), CHECK_IN, &cfg).unwrap().contains("ready for review"));
+    assert!(
+        driver_guard(&state, &row, task.as_ref(), CHECK_IN, &cfg)
+            .unwrap()
+            .contains("ready for review")
+    );
 }
 
 #[test]
@@ -518,5 +614,8 @@ fn a_driver_prompt_carries_the_goal_and_the_escalation_limits() {
 #[test]
 fn an_update_names_the_session_and_its_task() {
     let text = update_text(&row(false), None, "finished");
-    assert!(text.contains("hs-1") && text.contains("finished a turn"), "{text}");
+    assert!(
+        text.contains("hs-1") && text.contains("finished a turn"),
+        "{text}"
+    );
 }

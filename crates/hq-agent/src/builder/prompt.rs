@@ -61,7 +61,10 @@ impl SessionBuilder {
             }
 
             if let Some(ref identity) = self.identity
-                && matches!(identity.source, hq_core::identity::RequestSource::Web { .. })
+                && matches!(
+                    identity.source,
+                    hq_core::identity::RequestSource::Web { .. }
+                )
             {
                 soul_with_user.push_str(WEB_CHART_GUIDANCE);
             }

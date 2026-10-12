@@ -64,7 +64,11 @@ pub fn unblocked_by_transition(
 /// Tags in `after` that `before` did not have: the only ones a write to an
 /// existing task should notify, so an edit to a title or status stays quiet.
 pub fn added_tags(before: &[String], after: &[String]) -> Vec<String> {
-    after.iter().filter(|t| !before.contains(t)).cloned().collect()
+    after
+        .iter()
+        .filter(|t| !before.contains(t))
+        .cloned()
+        .collect()
 }
 
 /// Mails whoever a write newly gave a task to. Assignees are always routed to; tags are too
@@ -97,11 +101,17 @@ pub fn notify_tags(vault_path: &std::path::Path, task: &t::Task, tags: &[String]
     if tags.is_empty() {
         return;
     }
-    let _ = mailbox::notify_tagged_agents(vault_path, &task.id, &task.display_id, &task.title, tags);
+    let _ =
+        mailbox::notify_tagged_agents(vault_path, &task.id, &task.display_id, &task.title, tags);
 }
 
 /// Tells each unblocked task's tagged agents that its last dependency is done.
-pub fn notify_unblocked(vault_path: &std::path::Path, blocker: &t::Task, unblocked: &[t::Task], route_tags: bool) {
+pub fn notify_unblocked(
+    vault_path: &std::path::Path,
+    blocker: &t::Task,
+    unblocked: &[t::Task],
+    route_tags: bool,
+) {
     for task in unblocked {
         let recipients = recipients_of(task, route_tags);
         if recipients.is_empty() {

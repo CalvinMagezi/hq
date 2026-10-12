@@ -97,7 +97,9 @@ impl Specialist {
         let first_ok = chars.next().is_some_and(|c| c.is_ascii_lowercase());
         first_ok
             && name.len() <= MAX_NAME_LEN
-            && name.chars().all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-' || c == '_')
+            && name
+                .chars()
+                .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-' || c == '_')
     }
 }
 

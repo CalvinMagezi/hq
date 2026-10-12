@@ -90,7 +90,11 @@ fn repoint_content(content: &str, old_lower: &str, new_stem: &str) -> Option<Str
     changed.then_some(out)
 }
 
-pub(crate) fn repoint_wikilinks(vault_path: &Path, old_stem: &str, new_stem: &str) -> anyhow::Result<u32> {
+pub(crate) fn repoint_wikilinks(
+    vault_path: &Path,
+    old_stem: &str,
+    new_stem: &str,
+) -> anyhow::Result<u32> {
     let mut paths = Vec::new();
     md_files(&vault_path.join("Notebooks"), &mut paths);
 
@@ -119,7 +123,8 @@ mod tests {
 
     #[test]
     fn repoint_keeps_aliases_and_other_links() {
-        let out = repoint_content("[[Old]] [[old|Alias]] [[Other]] [[broken", "old", "New").unwrap();
+        let out =
+            repoint_content("[[Old]] [[old|Alias]] [[Other]] [[broken", "old", "New").unwrap();
         assert_eq!(out, "[[New]] [[New|Alias]] [[Other]] [[broken");
         assert!(repoint_content("[[Other]]", "old", "New").is_none());
     }

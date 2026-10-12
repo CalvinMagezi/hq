@@ -77,7 +77,12 @@ fn clean_text(text: &str) -> String {
 fn clean_files(files: &[String]) -> Vec<String> {
     files
         .iter()
-        .map(|f| f.chars().filter(|c| !c.is_control() && !is_invisible(*c)).take(MAX_FILE_CHARS).collect::<String>())
+        .map(|f| {
+            f.chars()
+                .filter(|c| !c.is_control() && !is_invisible(*c))
+                .take(MAX_FILE_CHARS)
+                .collect::<String>()
+        })
         .map(|f| f.trim().to_string())
         .filter(|f| !f.is_empty())
         .take(MAX_CHECKPOINT_FILES)
@@ -103,7 +108,8 @@ pub fn add_checkpoint(
         anyhow::bail!("a checkpoint needs a summary, a next step, open questions or files");
     }
     in_write_tx(conn, |conn| {
-        let task = get_task(conn, task_ref)?.ok_or_else(|| anyhow::anyhow!("no task '{task_ref}'"))?;
+        let task =
+            get_task(conn, task_ref)?.ok_or_else(|| anyhow::anyhow!("no task '{task_ref}'"))?;
         conn.execute(
             "INSERT INTO task_checkpoints \
              (task_id, work_session_id, actor, summary, next_step, open_questions, files) \
@@ -148,7 +154,11 @@ pub fn latest_checkpoint(conn: &Connection, task_ref: &str) -> Result<Option<Tas
 }
 
 /// A task's checkpoints, newest first.
-pub fn list_checkpoints(conn: &Connection, task_ref: &str, limit: usize) -> Result<Vec<TaskCheckpoint>> {
+pub fn list_checkpoints(
+    conn: &Connection,
+    task_ref: &str,
+    limit: usize,
+) -> Result<Vec<TaskCheckpoint>> {
     let task = get_task(conn, task_ref)?.ok_or_else(|| anyhow::anyhow!("no task '{task_ref}'"))?;
     let mut stmt = conn.prepare(&format!(
         "SELECT {CHECKPOINT_COLS} FROM task_checkpoints WHERE task_id = ?1 ORDER BY id DESC LIMIT {limit}"

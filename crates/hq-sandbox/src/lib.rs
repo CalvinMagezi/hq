@@ -174,13 +174,22 @@ pub fn seatbelt_profile(s: &AgentSandbox) -> String {
     ));
 
     if !s.readonly_files.is_empty() {
-        p.push_str(&format!("(deny file-write* {})", literals(&s.readonly_files)));
+        p.push_str(&format!(
+            "(deny file-write* {})",
+            literals(&s.readonly_files)
+        ));
     }
     for dir in &s.readonly_subpaths {
-        p.push_str(&format!("(deny file-write* (subpath {}))", sbpl_string(dir)));
+        p.push_str(&format!(
+            "(deny file-write* (subpath {}))",
+            sbpl_string(dir)
+        ));
     }
     for r in &s.read_restrictions {
-        p.push_str(&format!("(deny file-read-data (subpath {}))", sbpl_string(&r.root)));
+        p.push_str(&format!(
+            "(deny file-read-data (subpath {}))",
+            sbpl_string(&r.root)
+        ));
         let allowed: Vec<String> = r
             .allow
             .iter()
@@ -199,13 +208,22 @@ pub fn seatbelt_profile(s: &AgentSandbox) -> String {
         ));
     }
     for hidden in s.hidden_dirs.iter().filter(|h| !h.allow.is_empty()) {
-        p.push_str(&format!("(allow file-read-data {})", literals(&hidden.allow)));
+        p.push_str(&format!(
+            "(allow file-read-data {})",
+            literals(&hidden.allow)
+        ));
     }
     for program in &s.denied_programs {
-        p.push_str(&format!("(deny process-exec (literal {}))", sbpl_string(program)));
+        p.push_str(&format!(
+            "(deny process-exec (literal {}))",
+            sbpl_string(program)
+        ));
     }
     for service in &s.denied_services {
-        p.push_str(&format!("(deny mach-lookup (global-name {}))", sbpl_string(Path::new(service))));
+        p.push_str(&format!(
+            "(deny mach-lookup (global-name {}))",
+            sbpl_string(Path::new(service))
+        ));
     }
     if !s.masked_files.is_empty() {
         p.push_str(&format!(
@@ -219,10 +237,16 @@ pub fn seatbelt_profile(s: &AgentSandbox) -> String {
     match &s.network {
         Network::Full => {}
         Network::Off => p.push_str("(deny network-outbound (remote ip))"),
-        Network::Proxy { port, unix_sockets, loopback_ports, .. } => {
+        Network::Proxy {
+            port,
+            unix_sockets,
+            loopback_ports,
+            ..
+        } => {
             let allowed_ports = std::iter::once(port).chain(loopback_ports);
-            let mut allowed: Vec<String> =
-                allowed_ports.map(|p| format!("(remote ip \"localhost:{p}\")")).collect();
+            let mut allowed: Vec<String> = allowed_ports
+                .map(|p| format!("(remote ip \"localhost:{p}\")"))
+                .collect();
             allowed.extend(
                 unix_sockets
                     .iter()
@@ -255,7 +279,11 @@ pub fn bwrap_args(s: &AgentSandbox, argv: &[String]) -> Result<Vec<OsString>, Un
                 "bubblewrap cannot open a port on the host's loopback to the sandbox".into(),
             ));
         }
-        Network::Proxy { port, relay: Some(relay), .. } => Some((*port, relay)),
+        Network::Proxy {
+            port,
+            relay: Some(relay),
+            ..
+        } => Some((*port, relay)),
         _ => None,
     };
     let mut args: Vec<OsString> = [
@@ -297,7 +325,12 @@ pub fn bwrap_args(s: &AgentSandbox, argv: &[String]) -> Result<Vec<OsString>, Un
     hidden.sort_by_key(|h| h.dir.components().count());
     for hidden in hidden {
         // Private, like the real directory: programs inside check that before trusting it.
-        args.extend(["--perms".into(), "0700".into(), "--tmpfs".into(), (&hidden.dir).into()]);
+        args.extend([
+            "--perms".into(),
+            "0700".into(),
+            "--tmpfs".into(),
+            (&hidden.dir).into(),
+        ]);
         for file in &hidden.allow {
             args.extend(["--bind".into(), file.into(), file.into()]);
         }
@@ -332,13 +365,26 @@ pub fn backend() -> Option<&'static Backend> {
 fn probe() -> Option<Backend> {
     if cfg!(target_os = "macos") {
         let program = PathBuf::from(SANDBOX_EXEC_PATH);
-        let ok = run(&program, &["-p", "(version 1)(allow default)", "/usr/bin/true"]);
+        let ok = run(
+            &program,
+            &["-p", "(version 1)(allow default)", "/usr/bin/true"],
+        );
         return ok.then_some(Backend::SandboxExec(program));
     }
     let program = which::which("bwrap").ok()?;
     let ok = run(
         &program,
-        &["--ro-bind", "/", "/", "--dev", "/dev", "--proc", "/proc", "--unshare-pid", "true"],
+        &[
+            "--ro-bind",
+            "/",
+            "/",
+            "--dev",
+            "/dev",
+            "--proc",
+            "/proc",
+            "--unshare-pid",
+            "true",
+        ],
     );
     ok.then_some(Backend::Bwrap(program))
 }

@@ -64,7 +64,11 @@ fn spend_since(events: &[SpendEvent], since: DateTime<Utc>, now: DateTime<Utc>) 
 
 /// Average spend per hour for each weekday (Monday first) over whole days of history, or `None`
 /// when a weekday has never been seen.
-fn weekday_hourly(events: &[SpendEvent], first: DateTime<Utc>, now: DateTime<Utc>) -> [Option<f64>; 7] {
+fn weekday_hourly(
+    events: &[SpendEvent],
+    first: DateTime<Utc>,
+    now: DateTime<Utc>,
+) -> [Option<f64>; 7] {
     let mut spent = [0.0f64; 7];
     let mut days = [0u32; 7];
     let mut day = first.date_naive();
@@ -72,20 +76,29 @@ fn weekday_hourly(events: &[SpendEvent], first: DateTime<Utc>, now: DateTime<Utc
         days[day.weekday().num_days_from_monday() as usize] += 1;
         day = day.succ_opt().unwrap_or(now.date_naive());
     }
-    for e in events.iter().filter(|e| e.ts.date_naive() < now.date_naive()) {
+    for e in events
+        .iter()
+        .filter(|e| e.ts.date_naive() < now.date_naive())
+    {
         spent[e.ts.weekday().num_days_from_monday() as usize] += e.usd;
     }
     std::array::from_fn(|i| (days[i] > 0).then(|| spent[i] / f64::from(days[i]) / HOURS_PER_DAY))
 }
 
 /// Spend expected between `now` and `end` using each weekday's own hourly average.
-fn weekday_projection(profile: &[Option<f64>; 7], fallback: f64, now: DateTime<Utc>, end: DateTime<Utc>) -> f64 {
+fn weekday_projection(
+    profile: &[Option<f64>; 7],
+    fallback: f64,
+    now: DateTime<Utc>,
+    end: DateTime<Utc>,
+) -> f64 {
     let mut total = 0.0;
     let mut cursor = now;
     while cursor < end {
-        let next = (cursor.date_naive().succ_opt().map_or(end, |d| {
-            d.and_hms_opt(0, 0, 0).map_or(end, |t| t.and_utc())
-        }))
+        let next = (cursor
+            .date_naive()
+            .succ_opt()
+            .map_or(end, |d| d.and_hms_opt(0, 0, 0).map_or(end, |t| t.and_utc())))
         .min(end);
         let rate = profile[cursor.weekday().num_days_from_monday() as usize].unwrap_or(fallback);
         total += rate * hours(cursor, next);
@@ -125,18 +138,21 @@ pub fn forecast(
             WindowRate {
                 window_hours: *w,
                 usd,
-                per_hour: if history_hours <= 0.0 { 0.0 } else { usd / span },
+                per_hour: if history_hours <= 0.0 {
+                    0.0
+                } else {
+                    usd / span
+                },
             }
         })
         .collect();
     // A day is long enough to smooth a burst and short enough to follow a change.
-    let rate = (history_hours > 0.0)
-        .then(|| {
-            windows
-                .iter()
-                .find(|w| w.window_hours == 24)
-                .map_or(0.0, |w| w.per_hour)
-        });
+    let rate = (history_hours > 0.0).then(|| {
+        windows
+            .iter()
+            .find(|w| w.window_hours == 24)
+            .map_or(0.0, |w| w.per_hour)
+    });
     let hours_to_reset = hours(now, period_end).max(0.0);
     let seasonal = first.filter(|f| hours(*f, now) / HOURS_PER_DAY >= SEASONALITY_MIN_DAYS);
     let seasonality_note = match (rate, seasonal) {
@@ -156,9 +172,9 @@ pub fn forecast(
         };
         spent_this_period + remaining
     });
-    let hours_to_limit = limit_usd.zip(rate).and_then(|(limit, r)| {
-        (r > 0.0).then(|| ((limit - spent_this_period).max(0.0)) / r)
-    });
+    let hours_to_limit = limit_usd
+        .zip(rate)
+        .and_then(|(limit, r)| (r > 0.0).then(|| ((limit - spent_this_period).max(0.0)) / r));
     let exhausts_before_reset = hours_to_limit.is_some_and(|h| h < hours_to_reset);
     Forecast {
         windows,
@@ -198,7 +214,11 @@ mod tests {
     }
 
     fn rate(f: &Forecast, hours: i64) -> f64 {
-        f.windows.iter().find(|w| w.window_hours == hours).unwrap().per_hour
+        f.windows
+            .iter()
+            .find(|w| w.window_hours == hours)
+            .unwrap()
+            .per_hour
     }
 
     #[test]
@@ -227,7 +247,13 @@ mod tests {
     #[test]
     fn a_young_history_is_averaged_over_its_own_length_not_the_whole_window() {
         let now = at(NOW);
-        let f = forecast(&hourly(now, 3, 2.0), 6.0, at("2026-10-15T00:00:00Z"), None, now);
+        let f = forecast(
+            &hourly(now, 3, 2.0),
+            6.0,
+            at("2026-10-15T00:00:00Z"),
+            None,
+            now,
+        );
         // Three events over about two hours of history, not spread across 24 or 168 hours.
         assert!(rate(&f, 24) > 2.0, "{}", rate(&f, 24));
         assert_eq!(f.confidence, Confidence::Low);
@@ -236,7 +262,13 @@ mod tests {
     #[test]
     fn zero_spend_never_exhausts() {
         let now = at(NOW);
-        let events = vec![SpendEvent { ts: now - Duration::hours(30), usd: 0.0 }; 5];
+        let events = vec![
+            SpendEvent {
+                ts: now - Duration::hours(30),
+                usd: 0.0
+            };
+            5
+        ];
         let f = forecast(&events, 0.0, at("2026-11-01T00:00:00Z"), Some(5.0), now);
         assert_eq!(f.rate_per_hour, Some(0.0));
         assert!(f.hours_to_limit.is_none() && !f.exhausts_before_reset);
@@ -251,10 +283,16 @@ mod tests {
         for day in 1..=20 {
             let d = now.date_naive() - chrono::Days::new(day);
             if d.weekday() == chrono::Weekday::Thu {
-                events.push(SpendEvent { ts: d.and_hms_opt(10, 0, 0).unwrap().and_utc(), usd: 24.0 });
+                events.push(SpendEvent {
+                    ts: d.and_hms_opt(10, 0, 0).unwrap().and_utc(),
+                    usd: 24.0,
+                });
             }
         }
-        events.push(SpendEvent { ts: now - Duration::days(20), usd: 0.0 });
+        events.push(SpendEvent {
+            ts: now - Duration::days(20),
+            usd: 0.0,
+        });
         let end = at("2026-10-18T00:00:00Z");
         let f = forecast(&events, 0.0, end, None, now);
         assert!(f.seasonality_note.is_none());

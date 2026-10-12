@@ -262,7 +262,6 @@ enum Commands {
         prompt: Option<String>,
     },
 
-
     // ─── Services ────────────────────────────────────────────────────
     /// Show vault status and system info
     #[command(alias = "s")]
@@ -365,7 +364,6 @@ enum Commands {
 
     /// Generate quality profiles (anti-slop)
     Profile(commands::profile::ProfileArgs),
-
 
     // ─── Agents ──────────────────────────────────────────────────────
     /// Inspect and maintain the inter-agent mailboxes
@@ -494,7 +492,6 @@ enum Commands {
         sub: String,
     },
 
-
     // ─── Web Dashboard ───────────────────────────────────────────────
     /// Host the web UI: start it, open the browser (`hq web --help` for more)
     #[command(alias = "pwa", alias = "dashboard")]
@@ -605,8 +602,24 @@ async fn async_main() -> Result<()> {
 
     // The host's hook reporter and ssh gate need no config, and the reporter
     // runs where the config is unreadable.
-    if let Some(Commands::Host { sub, arg, dir, allow_unsandboxed, max_agents, max_starts, key, from, port, unix, rest, addr }) = &cli.command
-        && matches!(sub.as_str(), "report" | "gate" | "relay" | "sandbox-init" | "lockdown" | "unlock")
+    if let Some(Commands::Host {
+        sub,
+        arg,
+        dir,
+        allow_unsandboxed,
+        max_agents,
+        max_starts,
+        key,
+        from,
+        port,
+        unix,
+        rest,
+        addr,
+    }) = &cli.command
+        && matches!(
+            sub.as_str(),
+            "report" | "gate" | "relay" | "sandbox-init" | "lockdown" | "unlock"
+        )
     {
         return commands::host::run(commands::host::HostArgs {
             sub: sub.clone(),
@@ -635,7 +648,9 @@ async fn async_main() -> Result<()> {
     let Some(command) = cli.command else {
         // Bare `hq` is chat, which Lite does not have.
         if config.profile.is_lite() {
-            anyhow::bail!("chat is not part of HQ Lite (profile: lite). Try `hq doctor --egress` or `hq web`.");
+            anyhow::bail!(
+                "chat is not part of HQ Lite (profile: lite). Try `hq doctor --egress` or `hq web`."
+            );
         }
         require_scaffolded_vault(&config);
         return run_chat(&config, None, false, None).await;
@@ -688,7 +703,8 @@ fn init_tracing() {
     // `hq task` and `--json` print data for another program: logs go to stderr, quietly.
     let before_dashes = args.iter().skip(1).take_while(|a| *a != "--");
     let is_data = before_dashes.clone().take(4).any(|a| a == "task")
-        || (args.get(1).is_some_and(|a| a == "search" || a == "vault") && before_dashes.clone().any(|a| a == "--json"));
+        || (args.get(1).is_some_and(|a| a == "search" || a == "vault")
+            && before_dashes.clone().any(|a| a == "--json"));
     let default_level = if is_chat {
         "off"
     } else if is_data {
@@ -730,7 +746,10 @@ async fn run_chat(
     tui: bool,
     permission_preset: Option<String>,
 ) -> Result<()> {
-    let preset = permission_preset.as_deref().map(parse_permission_preset).transpose()?;
+    let preset = permission_preset
+        .as_deref()
+        .map(parse_permission_preset)
+        .transpose()?;
     let flag = commands::chat::ServerFlag::from_cli(false, None, commands::chat::auto_from_env());
     commands::chat::start(config, model, tui, preset, flag, None).await
 }
@@ -770,15 +789,45 @@ enum LiteRule {
 
 fn lite_rule(command: &Commands) -> LiteRule {
     match command {
-        Commands::Chat { .. } | Commands::Sessions { .. } | Commands::Stack { .. } | Commands::Host { .. } | Commands::SelfApply { .. }
-        | Commands::Agents { .. } | Commands::Models { .. } => LiteRule::NotInLite,
-        Commands::Install { .. } | Commands::Update(_) | Commands::UpdateDb { .. } | Commands::Health
-        | Commands::Doctor { egress: true, .. } | Commands::Doctor { windows: true, .. } | Commands::Autostart { .. } | Commands::Lite { .. } | Commands::Env | Commands::Task { .. } | Commands::Copilot { .. } | Commands::Status | Commands::Stop { .. }
-        | Commands::Restart { .. } | Commands::Logs { .. } | Commands::Errors { .. } | Commands::Follow { .. }
-        | Commands::Ps | Commands::Vault { .. } | Commands::Search { .. } | Commands::Config { .. }
-        | Commands::Mcp { .. } | Commands::Link { .. } | Commands::Cursor { .. } | Commands::Kill
-        | Commands::Clean | Commands::Service { .. } | Commands::Uninstall { .. } | Commands::Tools
-        | Commands::Cost | Commands::Summary | Commands::Version => LiteRule::Open,
+        Commands::Chat { .. }
+        | Commands::Sessions { .. }
+        | Commands::Stack { .. }
+        | Commands::Host { .. }
+        | Commands::SelfApply { .. }
+        | Commands::Agents { .. }
+        | Commands::Models { .. } => LiteRule::NotInLite,
+        Commands::Install { .. }
+        | Commands::Update(_)
+        | Commands::UpdateDb { .. }
+        | Commands::Health
+        | Commands::Doctor { egress: true, .. }
+        | Commands::Doctor { windows: true, .. }
+        | Commands::Autostart { .. }
+        | Commands::Lite { .. }
+        | Commands::Env
+        | Commands::Task { .. }
+        | Commands::Copilot { .. }
+        | Commands::Status
+        | Commands::Stop { .. }
+        | Commands::Restart { .. }
+        | Commands::Logs { .. }
+        | Commands::Errors { .. }
+        | Commands::Follow { .. }
+        | Commands::Ps
+        | Commands::Vault { .. }
+        | Commands::Search { .. }
+        | Commands::Config { .. }
+        | Commands::Mcp { .. }
+        | Commands::Link { .. }
+        | Commands::Cursor { .. }
+        | Commands::Kill
+        | Commands::Clean
+        | Commands::Service { .. }
+        | Commands::Uninstall { .. }
+        | Commands::Tools
+        | Commands::Cost
+        | Commands::Summary
+        | Commands::Version => LiteRule::Open,
         // `hq web status` and `hq web stop` only manage the process.
         Commands::Web(args) if !args.serves() => LiteRule::Open,
         _ => LiteRule::Checked,
@@ -827,13 +876,54 @@ async fn dispatch(command: Commands, config: &HqConfig) -> Result<()> {
                 &sub,
                 arg,
                 prompt,
-                commands::sessions::SpawnOpts { cwd, label, host, purpose, observe, task },
+                commands::sessions::SpawnOpts {
+                    cwd,
+                    label,
+                    host,
+                    purpose,
+                    observe,
+                    task,
+                },
                 lines,
             )
             .await
         }
-        Commands::Stack { sub, name, task, json } => commands::stack::run(config, &sub, name, task, json).await,
-        Commands::Host { sub, arg, dir, allow_unsandboxed, max_agents, max_starts, key, from, port, unix, rest, addr } => commands::host::run(commands::host::HostArgs { sub, arg, dir, allow_unsandboxed, max_agents, max_starts, key, from, port, unix, rest, addr }).await,
+        Commands::Stack {
+            sub,
+            name,
+            task,
+            json,
+        } => commands::stack::run(config, &sub, name, task, json).await,
+        Commands::Host {
+            sub,
+            arg,
+            dir,
+            allow_unsandboxed,
+            max_agents,
+            max_starts,
+            key,
+            from,
+            port,
+            unix,
+            rest,
+            addr,
+        } => {
+            commands::host::run(commands::host::HostArgs {
+                sub,
+                arg,
+                dir,
+                allow_unsandboxed,
+                max_agents,
+                max_starts,
+                key,
+                from,
+                port,
+                unix,
+                rest,
+                addr,
+            })
+            .await
+        }
         Commands::SelfApply { run_id } => commands::self_apply::run(config, run_id).await,
         Commands::NotifyRestart { phase, reason, sha } => {
             commands::notify_restart::run(config, &phase, &reason, sha.as_deref()).await
@@ -850,9 +940,12 @@ async fn dispatch(command: Commands, config: &HqConfig) -> Result<()> {
         Commands::Pair { platform } => commands::pair::run(config, &platform),
         Commands::Env => commands::env::run(config).await,
         Commands::Task { cmd } => commands::task::run(config, cmd).await,
-        Commands::Copilot { sub, model, write, agents } => {
-            commands::copilot::run(config, &sub, model.as_deref(), write, agents).await
-        }
+        Commands::Copilot {
+            sub,
+            model,
+            write,
+            agents,
+        } => commands::copilot::run(config, &sub, model.as_deref(), write, agents).await,
 
         // Chat
         Commands::Chat {
@@ -863,9 +956,15 @@ async fn dispatch(command: Commands, config: &HqConfig) -> Result<()> {
             local,
             prompt,
         } => {
-            let flag =
-                commands::chat::ServerFlag::from_cli(local, server, commands::chat::auto_from_env());
-            let preset = permission_preset.as_deref().map(parse_permission_preset).transpose()?;
+            let flag = commands::chat::ServerFlag::from_cli(
+                local,
+                server,
+                commands::chat::auto_from_env(),
+            );
+            let preset = permission_preset
+                .as_deref()
+                .map(parse_permission_preset)
+                .transpose()?;
             commands::chat::start(config, model, tui, preset, flag, prompt).await
         }
 
@@ -912,7 +1011,13 @@ async fn dispatch(command: Commands, config: &HqConfig) -> Result<()> {
             url,
         } => {
             let path = path.map(PathBuf::from);
-            let scope = commands::mcp::Scope { target, global, path, access, url };
+            let scope = commands::mcp::Scope {
+                target,
+                global,
+                path,
+                access,
+                url,
+            };
             commands::mcp::run(config, &sub, scope).await
         }
         Commands::McpServe { scope } => commands::mcp_serve::run(config, scope).await,
@@ -928,7 +1033,9 @@ async fn dispatch(command: Commands, config: &HqConfig) -> Result<()> {
         Commands::Kill => commands::kill::run(config).await,
         Commands::Clean => commands::clean::run(config).await,
         Commands::Service { sub, target } => commands::service::run(config, &sub, &target).await,
-        Commands::Uninstall { target } if target == "lite" => commands::lite::uninstall_lite(config),
+        Commands::Uninstall { target } if target == "lite" => {
+            commands::lite::uninstall_lite(config)
+        }
         Commands::Uninstall { target } => {
             commands::service::run(config, "uninstall", &target).await
         }
@@ -947,7 +1054,9 @@ async fn dispatch(command: Commands, config: &HqConfig) -> Result<()> {
         Commands::Shortcuts { sub } => commands::shortcuts::run(config, &sub).await,
         Commands::Skills(action) => commands::skills::run(config, action).await,
         Commands::Queue(action) => commands::queue::run(config, action).await,
-        Commands::Decisions { days, site } => commands::decisions::run(config, days, site.as_deref()),
+        Commands::Decisions { days, site } => {
+            commands::decisions::run(config, days, site.as_deref())
+        }
 
         Commands::Version => {
             println!("hq {} (rust)", commands::update::VERSION);
@@ -1051,7 +1160,13 @@ mod lite_rule_tests {
 
     #[test]
     fn chat_sessions_and_hosts_are_not_in_lite() {
-        for argv in [&["chat"][..], &["sessions", "list"], &["host", "status"], &["agents", "list"], &["models"]] {
+        for argv in [
+            &["chat"][..],
+            &["sessions", "list"],
+            &["host", "status"],
+            &["agents", "list"],
+            &["models"],
+        ] {
             assert_eq!(rule(argv), "not-in-lite", "{argv:?}");
         }
     }

@@ -163,7 +163,9 @@ impl HqTool for BatchEditTool {
                 Err(e) => {
                     let reason = format!("re-read before write failed: {e}");
                     failure = Some(format!("{file_path}: {reason}"));
-                    results.push(json!({"file_path": file_path, "status": "failed", "reason": reason}));
+                    results.push(
+                        json!({"file_path": file_path, "status": "failed", "reason": reason}),
+                    );
                     continue;
                 }
             };
@@ -218,12 +220,16 @@ impl HqTool for BatchEditTool {
                 Ok(_) => {
                     let reason = "read-back mismatch after write";
                     failure = Some(format!("{file_path}: {reason}"));
-                    results.push(json!({"file_path": file_path, "status": "failed", "reason": reason}));
+                    results.push(
+                        json!({"file_path": file_path, "status": "failed", "reason": reason}),
+                    );
                 }
                 Err(e) => {
                     let reason = format!("read-back failed: {e}");
                     failure = Some(format!("{file_path}: {reason}"));
-                    results.push(json!({"file_path": file_path, "status": "failed", "reason": reason}));
+                    results.push(
+                        json!({"file_path": file_path, "status": "failed", "reason": reason}),
+                    );
                 }
             }
         }
@@ -275,8 +281,9 @@ impl HqTool for BatchEditTool {
                         }
                         Err(e) => {
                             entry["status"] = json!("rollback_failed");
-                            entry["reason"] =
-                                json!(format!("rollback write failed: {e}; file left in its edited state"));
+                            entry["reason"] = json!(format!(
+                                "rollback write failed: {e}; file left in its edited state"
+                            ));
                         }
                     },
                     None => {

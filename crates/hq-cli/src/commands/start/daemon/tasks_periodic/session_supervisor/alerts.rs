@@ -47,8 +47,7 @@ pub(super) fn alert_finished(
     let task_line = task_line(link.as_ref());
     let body = format!(
         "Session {} on {} finished its task and is waiting for the next instruction.\n{OUTPUT_OPEN}\n{excerpt}\n{OUTPUT_CLOSE}\nGive it more work with `harness_session_send`, or end it with `harness_session_stop`.{task_line}",
-        row.id,
-        row.host,
+        row.id, row.host,
     );
     post_relay_nudge(
         vault_path,
@@ -62,13 +61,20 @@ pub(super) fn alert_finished(
 
 /// Tells the monitors and reviewers watching this session what happened. A
 /// failure is logged: the event is already recorded and alerted on.
-pub(super) fn report_to_observers(db: &Database, row: &registry::HarnessSessionRow, event: &str, excerpt: &str) {
+pub(super) fn report_to_observers(
+    db: &Database,
+    row: &registry::HarnessSessionRow,
+    event: &str,
+    excerpt: &str,
+) {
     match hq_tools::a2a::report_to_observers(db, row, event, excerpt) {
         Ok(told) if !told.is_empty() => {
             tracing::info!(session = %row.id, observers = ?told, "session-supervisor: told the observers");
         }
         Ok(_) => {}
-        Err(e) => tracing::warn!(session = %row.id, error = %e, "session-supervisor: could not tell the observers"),
+        Err(e) => {
+            tracing::warn!(session = %row.id, error = %e, "session-supervisor: could not tell the observers")
+        }
     }
 }
 
@@ -76,7 +82,13 @@ pub(super) fn report_to_observers(db: &Database, row: &registry::HarnessSessionR
 /// session is a status update (FR-001 criterion 3). `interrupt` is for the few
 /// that need the operator now; a session blocked on a dialog alerts through
 /// `alert_blocked` instead.
-pub(super) fn post_relay_nudge(vault_path: &Path, session_id: &str, subject: &str, body: &str, interrupt: bool) {
+pub(super) fn post_relay_nudge(
+    vault_path: &Path,
+    session_id: &str,
+    subject: &str,
+    body: &str,
+    interrupt: bool,
+) {
     let mut msg = hq_core::mailbox::new_message(
         "session-supervisor",
         "relay",
@@ -86,8 +98,10 @@ pub(super) fn post_relay_nudge(vault_path: &Path, session_id: &str, subject: &st
         None,
     );
     if interrupt {
-        msg.meta
-            .insert(hq_core::mailbox::META_INTERRUPT.to_string(), "true".to_string());
+        msg.meta.insert(
+            hq_core::mailbox::META_INTERRUPT.to_string(),
+            "true".to_string(),
+        );
     }
     if let Err(e) = hq_core::mailbox::send_message(vault_path, &msg) {
         tracing::warn!(session = %session_id, error = %e, "session-supervisor: relay mailbox post failed");
@@ -107,7 +121,12 @@ pub(super) fn alert_blocked(
     }
     let link = record_on_task(db, row, Event::Blocked);
     // A monitor hears about the block too; it can tell whoever can answer it.
-    report_to_observers(db, row, "is blocked at a dialog", &tail_excerpt(screen, MAX_TAIL_BYTES));
+    report_to_observers(
+        db,
+        row,
+        "is blocked at a dialog",
+        &tail_excerpt(screen, MAX_TAIL_BYTES),
+    );
     if hand_to_chat(db, row, WAKE_BLOCKED) {
         badge_web_inbox(db, row, seq);
         return;

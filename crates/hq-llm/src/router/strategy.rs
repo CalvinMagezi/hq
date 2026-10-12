@@ -157,9 +157,14 @@ impl LlmRouter {
         let task = TaskHint::from_request(request);
         let candidates = {
             let health = self.health.lock().unwrap();
-            resolve_scored(&request.model, task, &self.providers, &self.routes, &health, &|p| {
-                self.instruments.pressure_for(p)
-            })
+            resolve_scored(
+                &request.model,
+                task,
+                &self.providers,
+                &self.routes,
+                &health,
+                &|p| self.instruments.pressure_for(p),
+            )
         };
 
         for candidate in &candidates {
@@ -175,7 +180,8 @@ impl LlmRouter {
                         &candidate.provider_name,
                         task,
                         call_start.elapsed(),
-                        usage);
+                        usage,
+                    );
                     return Ok(resp);
                 }
                 Err(e) => {
@@ -187,11 +193,7 @@ impl LlmRouter {
                         score = candidate.score,
                         "route failed, trying next candidate"
                     );
-                    self.record_attempt_err(
-                        &candidate.provider_name,
-                        task,
-                        latency,
-                        &e);
+                    self.record_attempt_err(&candidate.provider_name, task, latency, &e);
                     continue;
                 }
             }
@@ -215,11 +217,7 @@ impl LlmRouter {
                         self.round_robin
                             .store(idx + 1, std::sync::atomic::Ordering::Relaxed);
                         let usage = Some(usage_of(&resp));
-                        self.record_attempt_ok(
-                            name,
-                            task,
-                            latency,
-                            usage);
+                        self.record_attempt_ok(name, task, latency, usage);
                         return Ok(resp);
                     }
                     Err(e) => {
@@ -244,9 +242,14 @@ impl LlmRouter {
         let task = TaskHint::from_request(request);
         let candidates = {
             let health = self.health.lock().unwrap();
-            resolve_scored(&request.model, task, &self.providers, &self.routes, &health, &|p| {
-                self.instruments.pressure_for(p)
-            })
+            resolve_scored(
+                &request.model,
+                task,
+                &self.providers,
+                &self.routes,
+                &health,
+                &|p| self.instruments.pressure_for(p),
+            )
         };
 
         for candidate in &candidates {
@@ -265,7 +268,8 @@ impl LlmRouter {
                             &candidate.provider_name,
                             task,
                             call_start.elapsed(),
-                            usage);
+                            usage,
+                        );
                         return Ok(response_to_stream(resp));
                     }
                     Err(e2) => {
@@ -276,11 +280,7 @@ impl LlmRouter {
                             fallback_err = %e2,
                             "both stream and fallback failed"
                         );
-                        self.record_attempt_err(
-                            &candidate.provider_name,
-                            task,
-                            latency,
-                            &e2);
+                        self.record_attempt_err(&candidate.provider_name, task, latency, &e2);
                         continue;
                     }
                 },
@@ -290,11 +290,7 @@ impl LlmRouter {
                 Err(_timeout) => {
                     let latency = call_start.elapsed();
                     let timeout_err = anyhow::anyhow!("stream timeout: no first chunk in 30s");
-                    self.record_attempt_err(
-                        &candidate.provider_name,
-                        task,
-                        latency,
-                        &timeout_err);
+                    self.record_attempt_err(&candidate.provider_name, task, latency, &timeout_err);
                     continue;
                 }
                 Ok(inner) => match inner {
@@ -318,11 +314,7 @@ impl LlmRouter {
                                 provider = candidate.provider_name,
                                 "stream 429 — skipping to next provider"
                             );
-                            self.record_attempt_err(
-                                &candidate.provider_name,
-                                task,
-                                latency,
-                                &e);
+                            self.record_attempt_err(&candidate.provider_name, task, latency, &e);
                             continue;
                         }
 
@@ -338,7 +330,8 @@ impl LlmRouter {
                                     &candidate.provider_name,
                                     task,
                                     call_start.elapsed(),
-                                    usage);
+                                    usage,
+                                );
                                 return Ok(response_to_stream(resp));
                             }
                             Err(e2) => {
@@ -347,7 +340,8 @@ impl LlmRouter {
                                     &candidate.provider_name,
                                     task,
                                     latency,
-                                    &e2);
+                                    &e2,
+                                );
                                 continue;
                             }
                         }
@@ -359,7 +353,8 @@ impl LlmRouter {
                             &candidate.provider_name,
                             task,
                             latency,
-                            &empty_err);
+                            &empty_err,
+                        );
                         continue;
                     }
                 },
@@ -408,11 +403,7 @@ impl LlmRouter {
                         return Ok(s);
                     }
                     Err(e) => {
-                        self.record_attempt_err(
-                            name,
-                            task,
-                            call_start.elapsed(),
-                            &e);
+                        self.record_attempt_err(name, task, call_start.elapsed(), &e);
                     }
                 }
             }

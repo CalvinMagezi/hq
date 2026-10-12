@@ -382,8 +382,15 @@ pub struct SelfUpdateInstallTool {
 
 impl SelfUpdateInstallTool {
     fn new(config: HqConfig, db: Arc<Database>) -> Self {
-        let args = ["build", "--release", "--locked", "-p", "hq-cli"].map(String::from).to_vec();
-        Self { config, db, build: ("cargo".into(), args), spawn_apply: true }
+        let args = ["build", "--release", "--locked", "-p", "hq-cli"]
+            .map(String::from)
+            .to_vec();
+        Self {
+            config,
+            db,
+            build: ("cargo".into(), args),
+            spawn_apply: true,
+        }
     }
 }
 
@@ -479,9 +486,8 @@ impl HqTool for SelfUpdateInstallTool {
             &key_bytes,
             &hq_core::approval_key::self_update_message(run_id, &tree, &binary_sha),
         );
-        self.db.with_conn(|c| {
-            hq_db::self_update_runs::set_approved(c, run_id, &binary_sha, &mac)
-        })?;
+        self.db
+            .with_conn(|c| hq_db::self_update_runs::set_approved(c, run_id, &binary_sha, &mac))?;
 
         // Detached applier: survives this process exiting or restarting.
         let exe = std::env::current_exe().unwrap_or_else(|_| PathBuf::from("hq"));
@@ -733,7 +739,10 @@ mod tests {
         tool.spawn_apply = false;
         tool.build = (
             "sh".into(),
-            vec!["-c".into(), "mkdir -p target/release && echo fake-binary > target/release/hq".into()],
+            vec![
+                "-c".into(),
+                "mkdir -p target/release && echo fake-binary > target/release/hq".into(),
+            ],
         );
         (tool, db, run_id)
     }
@@ -824,9 +833,18 @@ mod tests {
     #[test]
     fn approval_key_differs_per_tree_and_per_run() {
         let a = approval_dedup_key(1, "aaaaaaaaaaaaaaaa", "1111111111111111");
-        assert_ne!(a, approval_dedup_key(1, "bbbbbbbbbbbbbbbb", "1111111111111111"));
-        assert_ne!(a, approval_dedup_key(2, "aaaaaaaaaaaaaaaa", "1111111111111111"));
-        assert_ne!(a, approval_dedup_key(1, "aaaaaaaaaaaaaaaa", "2222222222222222"));
+        assert_ne!(
+            a,
+            approval_dedup_key(1, "bbbbbbbbbbbbbbbb", "1111111111111111")
+        );
+        assert_ne!(
+            a,
+            approval_dedup_key(2, "aaaaaaaaaaaaaaaa", "1111111111111111")
+        );
+        assert_ne!(
+            a,
+            approval_dedup_key(1, "aaaaaaaaaaaaaaaa", "2222222222222222")
+        );
     }
 
     #[tokio::test]
@@ -917,7 +935,11 @@ mod tests {
         )
         .unwrap();
         let message = hq_core::approval_key::self_update_message(run_id, tree.trim(), &sha);
-        assert!(hq_core::approval_key::verify_hex(&key, &message, &run.approval_mac.unwrap()));
+        assert!(hq_core::approval_key::verify_hex(
+            &key,
+            &message,
+            &run.approval_mac.unwrap()
+        ));
     }
 
     #[tokio::test]
@@ -937,7 +959,11 @@ mod tests {
         .unwrap();
         let again = tool.execute(json!({ "run_id": run_id })).await.unwrap();
         assert_eq!(again["status"], "awaiting_owner_approval");
-        let status = db.with_conn(|c| runs::get(c, run_id)).unwrap().unwrap().status;
+        let status = db
+            .with_conn(|c| runs::get(c, run_id))
+            .unwrap()
+            .unwrap()
+            .status;
         assert_eq!(status, runs::STATUS_CHECKED);
     }
 
@@ -947,7 +973,10 @@ mod tests {
         std::fs::write(repo.path().join("change.txt"), "x").unwrap();
         let (mut tool, db, run_id) = install_tool(config_for(repo.path(), true));
         let first = tool.execute(json!({ "run_id": run_id })).await.unwrap();
-        tool.build.1 = vec!["-c".into(), "mkdir -p target/release && echo other-binary > target/release/hq".into()];
+        tool.build.1 = vec![
+            "-c".into(),
+            "mkdir -p target/release && echo other-binary > target/release/hq".into(),
+        ];
         let second = tool.execute(json!({ "run_id": run_id })).await.unwrap();
         assert_ne!(first["approval_key"], second["approval_key"]);
         let _ = db;

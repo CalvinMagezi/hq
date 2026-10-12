@@ -62,8 +62,10 @@ async fn deliver(state: &Arc<WsState>, f: Followup) {
             crate::session_driver::broadcast_sync(state, &thread);
         }
         crate::ws::DriverStart::Busy => followup::busy(&state.db, &f),
-        crate::ws::DriverStart::Refused => {
-            followup::failed(&state.db, &f, "the chat belongs to a read-only question from an MCP client")
-        }
+        crate::ws::DriverStart::Refused => followup::failed(
+            &state.db,
+            &f,
+            "the chat belongs to a read-only question from an MCP client",
+        ),
     }
 }

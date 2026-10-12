@@ -380,7 +380,10 @@ impl BackendError {
     pub fn from_anyhow(err: anyhow::Error) -> Self {
         // A refused budget is this backend's limit, so the chain may try the next one. Its text
         // holds dollar amounts, which must never be keyword-matched as status codes.
-        if err.downcast_ref::<hq_llm::budget::BudgetBlocked>().is_some() {
+        if err
+            .downcast_ref::<hq_llm::budget::BudgetBlocked>()
+            .is_some()
+        {
             return BackendError::Unavailable(err.to_string());
         }
         if let Some(llm) = err.downcast_ref::<LlmError>() {

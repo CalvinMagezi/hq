@@ -27,6 +27,10 @@ placeholders (`example.com`, `hq.example.ts.net`, `<owner>/<repo>`).
 - Tests that need external state go behind `#[ignore]` with a reason and a
   documented opt-in command: a real vault, Ollama, an authenticated harness
   binary, the network. They are diagnostics, not regression gates.
+- CI fails on unformatted Rust. Run `./scripts/install-hooks.sh` at the start of
+  a session (fresh clones, cloud sessions included, don't have it): the
+  pre-commit hook then rustfmts staged `.rs` files on every commit. Without it,
+  run `cargo fmt --all` before committing.
 - `cargo test --workspace` aborts at the first failing test binary, so one bad
   test masks every crate after it. A partial run is not a green run: check the
   totals, not the exit of the first suite.

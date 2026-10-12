@@ -434,10 +434,17 @@ async fn run_due_tasks(
         task.last_run = now;
         debug!(task = task.name, "daemon: running task");
         let start = std::time::Instant::now();
-        let outcome =
-            tokio::time::timeout(task.timeout, dispatch_task(task.name, vault_path, db, config))
-                .await;
-        record_outcome(task, task_state, outcome, start.elapsed().as_millis() as u64);
+        let outcome = tokio::time::timeout(
+            task.timeout,
+            dispatch_task(task.name, vault_path, db, config),
+        )
+        .await;
+        record_outcome(
+            task,
+            task_state,
+            outcome,
+            start.elapsed().as_millis() as u64,
+        );
     }
 }
 
@@ -525,7 +532,6 @@ async fn dispatch_task(
         "usage-ledger" => tasks_periodic::run_usage_ledger(db, config).await,
         "harness-usage" => tasks_periodic::run_harness_usage(db).await,
 
-
         // Slow cycle (6h — daily)
         "vault-health" => tasks_slow::run_vault_health(vault_path, db).await,
         "memory-forgetting" => tasks_slow::run_memory_forgetting(vault_path, db).await,
@@ -535,13 +541,6 @@ async fn dispatch_task(
         "vault-cap-enforcer" => tasks_slow::run_vault_cap_enforcer(vault_path, db).await,
         "turn-reconcile" => tasks_periodic::run_turn_reconcile(vault_path, db, config).await,
         "task-stale-digest" => tasks_periodic::run_task_stale_digest(db, config).await,
-
-
-
-
-
-
-
 
         unknown => {
             warn!(task = unknown, "daemon: unknown task");
@@ -704,14 +703,29 @@ mod lite_tests {
 
     #[test]
     fn the_scheduler_runs_only_the_lite_tasks_under_lite_and_all_of_them_otherwise() {
-        let full: Vec<&str> = scheduled_tasks(Profile::Full).iter().map(|t| t.name).collect();
-        let lite: Vec<&str> = scheduled_tasks(Profile::Lite).iter().map(|t| t.name).collect();
-        assert!(full.len() > lite.len() && full.contains(&"email-poll") && full.contains(&"session-supervisor"));
+        let full: Vec<&str> = scheduled_tasks(Profile::Full)
+            .iter()
+            .map(|t| t.name)
+            .collect();
+        let lite: Vec<&str> = scheduled_tasks(Profile::Lite)
+            .iter()
+            .map(|t| t.name)
+            .collect();
+        assert!(
+            full.len() > lite.len()
+                && full.contains(&"email-poll")
+                && full.contains(&"session-supervisor")
+        );
         assert_eq!(lite.len(), LITE_DAEMON_TASKS.len(), "{lite:?}");
         for name in &lite {
             assert!(LITE_DAEMON_TASKS.contains(name), "{name}");
         }
-        for reaches_out in ["email-poll", "session-supervisor", "copilot-usage", "inbox-triage"] {
+        for reaches_out in [
+            "email-poll",
+            "session-supervisor",
+            "copilot-usage",
+            "inbox-triage",
+        ] {
             assert!(!lite.contains(&reaches_out), "{reaches_out}");
         }
     }
@@ -742,7 +756,11 @@ mod lite_tests {
         assert_eq!(running.lite.allow_egress, ["telegram"]);
 
         apply_reload(&mut running, Err(anyhow::anyhow!("bad yaml")), &no_env);
-        assert_eq!(running.lite.allow_egress, ["telegram"], "an unreadable file changes nothing");
+        assert_eq!(
+            running.lite.allow_egress,
+            ["telegram"],
+            "an unreadable file changes nothing"
+        );
     }
 
     #[test]
@@ -765,7 +783,10 @@ mod lite_tests {
             "value-bus-deliver",
             "turn-reconcile",
         ] {
-            assert!(!LITE_DAEMON_TASKS.contains(&reaches_out), "{reaches_out} must not run in Lite");
+            assert!(
+                !LITE_DAEMON_TASKS.contains(&reaches_out),
+                "{reaches_out} must not run in Lite"
+            );
         }
     }
 
@@ -792,7 +813,10 @@ mod lite_tests {
             },
             ..lite()
         };
-        assert!(accept_reload(&old, allowed, &no_env).is_ok(), "an explicit listing is accepted");
+        assert!(
+            accept_reload(&old, allowed, &no_env).is_ok(),
+            "an explicit listing is accepted"
+        );
     }
 
     #[test]

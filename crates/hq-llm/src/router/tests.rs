@@ -1698,8 +1698,10 @@ async fn streaming_fallback_skips_a_provider_whose_stream_fails_on_the_first_chu
 fn budget_pressure_widens_the_gap_between_a_cheap_and_a_dear_provider() {
     use super::selection::compute_score_pressured;
     let gap = |pressure: f64| {
-        let cheap = compute_score_pressured(CostTier::Free, false, None, TaskHint::ToolUse, pressure);
-        let dear = compute_score_pressured(CostTier::Premium, false, None, TaskHint::ToolUse, pressure);
+        let cheap =
+            compute_score_pressured(CostTier::Free, false, None, TaskHint::ToolUse, pressure);
+        let dear =
+            compute_score_pressured(CostTier::Premium, false, None, TaskHint::ToolUse, pressure);
         cheap - dear
     };
     assert!(gap(1.0) > gap(0.5) && gap(0.5) > gap(0.0));

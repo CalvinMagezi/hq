@@ -38,7 +38,11 @@ fn lease_actor(args: &Value, actor: &str) -> Result<String> {
     let scope = crate::harness_session::TASKS_SCOPE_ACTOR;
     if crate::harness_session::is_tasks_scope(args) {
         let label = t::clean_label(actor);
-        return Ok(if label.is_empty() { scope.to_string() } else { format!("{scope}/{label}") });
+        return Ok(if label.is_empty() {
+            scope.to_string()
+        } else {
+            format!("{scope}/{label}")
+        });
     }
     if crate::harness_session::is_tasks_scope_actor(&t::clean_label(actor)) {
         bail!("{scope} names are for the tasks-scoped key; claim under your own name");
@@ -61,7 +65,9 @@ fn check_scope_owns_lease(conn: &rusqlite::Connection, args: &Value, token: &str
     }
     match t::lease_for_token(conn, token)? {
         Some(lease) if !crate::harness_session::is_tasks_scope_actor(&lease.actor) => {
-            bail!("that lease was not taken on this connection; claim the task here to get your own")
+            bail!(
+                "that lease was not taken on this connection; claim the task here to get your own"
+            )
         }
         _ => Ok(()),
     }
@@ -86,7 +92,10 @@ pub(super) struct Actor {
 
 impl Actor {
     pub fn ctx(&self) -> t::WriteCtx<'_> {
-        t::WriteCtx { actor: Some(&self.name), work_session_id: self.work_session_id.as_deref() }
+        t::WriteCtx {
+            actor: Some(&self.name),
+            work_session_id: self.work_session_id.as_deref(),
+        }
     }
 
     /// Whether the actor holds a live lease on this task.
@@ -130,7 +139,9 @@ impl ActorHints {
             let lease = t::require_live_lease(conn, token, ttl_secs(settings))?;
             // The tasks scope never writes under a name it did not get on that scope.
             if self.tasks_scope && !crate::harness_session::is_tasks_scope_actor(&lease.actor) {
-                bail!("that lease was not taken on this connection; claim the task here to get your own");
+                bail!(
+                    "that lease was not taken on this connection; claim the task here to get your own"
+                );
             }
             let on_own_task = target_task.is_some_and(|task| task == lease.task_id);
             return Ok(Actor {
@@ -140,8 +151,13 @@ impl ActorHints {
             });
         }
         // A name of the scope's shape would let the scope edit that task's text as its own.
-        if !self.tasks_scope && crate::harness_session::is_tasks_scope_actor(&t::clean_label(&self.named)) {
-            bail!("{} names are for the tasks-scoped key; write under your own name", crate::harness_session::TASKS_SCOPE_ACTOR);
+        if !self.tasks_scope
+            && crate::harness_session::is_tasks_scope_actor(&t::clean_label(&self.named))
+        {
+            bail!(
+                "{} names are for the tasks-scoped key; write under your own name",
+                crate::harness_session::TASKS_SCOPE_ACTOR
+            );
         }
         let name = if self.tasks_scope {
             crate::harness_session::TASKS_SCOPE_ACTOR.to_string()
@@ -150,13 +166,22 @@ impl ActorHints {
         } else {
             self.named.clone()
         };
-        Ok(Actor { name, work_session_id: None, lease: None })
+        Ok(Actor {
+            name,
+            work_session_id: None,
+            lease: None,
+        })
     }
 }
 
 /// What starting a task without a lease costs under `mode`: nothing, a warning
 /// for the reply, or a refusal. Only a move into in_progress is ever checked.
-pub(super) fn lease_policy(mode: LeaseMode, entering_in_progress: bool, holds: bool, display_id: &str) -> Result<Option<String>> {
+pub(super) fn lease_policy(
+    mode: LeaseMode,
+    entering_in_progress: bool,
+    holds: bool,
+    display_id: &str,
+) -> Result<Option<String>> {
     if !entering_in_progress || holds || mode == LeaseMode::Off {
         return Ok(None);
     }
@@ -178,7 +203,8 @@ pub(super) fn add_warning(value: &mut Value, text: String) {
 }
 
 /// Names already shown the working protocol in this process. Per name, since the transport does not say who a client is.
-static HINTED: std::sync::OnceLock<std::sync::Mutex<std::collections::HashSet<String>>> = std::sync::OnceLock::new();
+static HINTED: std::sync::OnceLock<std::sync::Mutex<std::collections::HashSet<String>>> =
+    std::sync::OnceLock::new();
 
 /// Longest name remembered, and most names remembered, for the once-per-name hint.
 const HINT_NAME_CHARS: usize = 64;
@@ -195,11 +221,15 @@ pub(super) fn onboarding_hint(args: &Value) -> Option<Value> {
     if hints.caller_session.is_some() || hints.lease_token.is_some() {
         return None;
     }
-    let named: String = [arg_str(args, "actor"), arg_str(args, "created_by"), arg_str(args, "author")]
-        .into_iter()
-        .map(|n| n.trim().chars().take(HINT_NAME_CHARS).collect::<String>())
-        .find(|n| !n.is_empty())
-        .unwrap_or_else(|| "anonymous".to_string());
+    let named: String = [
+        arg_str(args, "actor"),
+        arg_str(args, "created_by"),
+        arg_str(args, "author"),
+    ]
+    .into_iter()
+    .map(|n| n.trim().chars().take(HINT_NAME_CHARS).collect::<String>())
+    .find(|n| !n.is_empty())
+    .unwrap_or_else(|| "anonymous".to_string());
     let seen = HINTED.get_or_init(Default::default);
     let mut seen = seen.lock().ok()?;
     // Bounded: past the cap the list starts over, so a caller inventing names costs a repeated hint, not memory.
@@ -225,10 +255,18 @@ fn checkpoint_arg(args: &Value) -> Result<Option<t::Checkpoint>> {
     let Some(obj) = raw.as_object() else {
         bail!("checkpoint must be an object with summary, next_step, open_questions and files");
     };
-    let text = |key: &str| obj.get(key).and_then(Value::as_str).unwrap_or_default().to_string();
+    let text = |key: &str| {
+        obj.get(key)
+            .and_then(Value::as_str)
+            .unwrap_or_default()
+            .to_string()
+    };
     let files = match obj.get("files") {
         None | Some(Value::Null) => Vec::new(),
-        Some(Value::Array(items)) => items.iter().filter_map(|v| v.as_str().map(str::to_string)).collect(),
+        Some(Value::Array(items)) => items
+            .iter()
+            .filter_map(|v| v.as_str().map(str::to_string))
+            .collect(),
         Some(_) => bail!("checkpoint files must be a list of paths"),
     };
     let checkpoint = t::Checkpoint {
@@ -269,7 +307,13 @@ fn is_project_relative(path: &str) -> bool {
     let drive = p.as_bytes().get(1) == Some(&b':');
     let outside = p.starts_with("..") || p.contains("/../") || p.contains("\\..\\");
     let expands = p.starts_with('$') || p.starts_with('%');
-    !(p.starts_with('/') || p.starts_with('\\') || p.starts_with('~') || drive || p.contains(':') || outside || expands)
+    !(p.starts_with('/')
+        || p.starts_with('\\')
+        || p.starts_with('~')
+        || drive
+        || p.contains(':')
+        || outside
+        || expands)
 }
 
 fn lease_json(lease: &t::WorkSession) -> Value {
@@ -323,13 +367,22 @@ impl HqTool for TaskClaimTool {
         }
         let actor = lease_actor(&args, &arg_str(&args, "actor"))?;
         let (harness, session_ref) = (arg_str(&args, "harness"), arg_str(&args, "session_ref"));
-        let (host, cwd, branch) = (arg_str(&args, "host"), arg_str(&args, "cwd"), arg_str(&args, "branch"));
-        let takeover = args.get("takeover").and_then(Value::as_bool).unwrap_or(false);
+        let (host, cwd, branch) = (
+            arg_str(&args, "host"),
+            arg_str(&args, "cwd"),
+            arg_str(&args, "branch"),
+        );
+        let takeover = args
+            .get("takeover")
+            .and_then(Value::as_bool)
+            .unwrap_or(false);
         let scoped = crate::harness_session::is_tasks_scope(&args);
         // Taking over ends another session's lease, which may be one HQ launched; a client on the
         // tasks key waits for a silent lease to expire instead.
         if scoped && takeover {
-            bail!("this connection cannot take over a lease; wait for it to expire or ask the owner");
+            bail!(
+                "this connection cannot take over a lease; wait for it to expire or ask the owner"
+            );
         }
         let settings = self.settings.clone();
         let ttl = ttl_secs(&settings);
@@ -346,7 +399,10 @@ impl HqTool for TaskClaimTool {
             let claimed = t::claim(c, &task_id, &who, ttl, takeover).map_err(|e| match scoped {
                 true => anyhow::anyhow!(
                     "{}",
-                    e.to_string().replace(", wait, or pass takeover=true if it is gone", ", or wait for its lease to expire")
+                    e.to_string().replace(
+                        ", wait, or pass takeover=true if it is gone",
+                        ", or wait for its lease to expire"
+                    )
                 ),
                 false => e,
             })?;
@@ -359,7 +415,12 @@ impl HqTool for TaskClaimTool {
 
 /// What a claim answers: the lease, the task, how to keep going, and where the last session
 /// left off. Shared by `task_claim` and `task_next`.
-fn claim_response(claimed: &t::Claimed, resume: Option<&t::TaskCheckpoint>, settings: &TasksConfig, scoped: bool) -> Value {
+fn claim_response(
+    claimed: &t::Claimed,
+    resume: Option<&t::TaskCheckpoint>,
+    settings: &TasksConfig,
+    scoped: bool,
+) -> Value {
     let mut out = json!({
         "lease": claimed.token,
         "lease_id": claimed.session.id,
@@ -446,10 +507,17 @@ impl HqTool for TaskNextTool {
         let assignee = opt_str(&args, "assignee").unwrap_or_else(|| actor.clone());
         let actor = lease_actor(&args, &actor)?;
         let scoped = crate::harness_session::is_tasks_scope(&args);
-        let include_unassigned = args.get("include_unassigned").and_then(Value::as_bool).unwrap_or(false);
+        let include_unassigned = args
+            .get("include_unassigned")
+            .and_then(Value::as_bool)
+            .unwrap_or(false);
         let (initiative_id, tag) = (opt_str(&args, "initiative_id"), opt_str(&args, "tag"));
         let (harness, session_ref) = (arg_str(&args, "harness"), arg_str(&args, "session_ref"));
-        let (host, cwd, branch) = (arg_str(&args, "host"), arg_str(&args, "cwd"), arg_str(&args, "branch"));
+        let (host, cwd, branch) = (
+            arg_str(&args, "host"),
+            arg_str(&args, "cwd"),
+            arg_str(&args, "branch"),
+        );
         let settings = self.settings.clone();
         let ttl = ttl_secs(&settings);
         let picked = self.db.with_conn(move |c| {
@@ -531,13 +599,20 @@ impl HqTool for TaskHeartbeatTool {
                 check_scope_owns_lease(c, &args, &token)?;
                 let lease = t::heartbeat(c, &token, ttl)?;
                 let saved = match &checkpoint {
-                    Some(cp) => Some(t::add_checkpoint(c, &lease.task_id, Some(&lease.id), &lease.actor, cp)?),
+                    Some(cp) => Some(t::add_checkpoint(
+                        c,
+                        &lease.task_id,
+                        Some(&lease.id),
+                        &lease.actor,
+                        cp,
+                    )?),
                     None => None,
                 };
                 Ok((lease, saved))
             })
         })?;
-        let mut out = json!({ "ok": true, "lease": lease_json(&lease), "ttl_secs": settings.lease_ttl() });
+        let mut out =
+            json!({ "ok": true, "lease": lease_json(&lease), "ttl_secs": settings.lease_ttl() });
         if saved.is_some() {
             out["checkpoint_saved"] = json!(true);
         }
@@ -589,8 +664,13 @@ impl HqTool for TaskReleaseTool {
         let explicit = checkpoint_arg(&args)?;
         // A release that says what happened is also the resume point, without asking twice.
         let from_summary = explicit.is_none();
-        let checkpoint = explicit
-            .or_else(|| Some(t::Checkpoint { summary: summary.clone(), ..Default::default() }).filter(|cp| !cp.is_empty()));
+        let checkpoint = explicit.or_else(|| {
+            Some(t::Checkpoint {
+                summary: summary.clone(),
+                ..Default::default()
+            })
+            .filter(|cp| !cp.is_empty())
+        });
         let scoped = crate::harness_session::is_tasks_scope(&args);
         let (done, previous_status, unblocked) = self.db.with_conn(move |c| {
             t::in_write_tx(c, |c| {
@@ -611,7 +691,13 @@ impl HqTool for TaskReleaseTool {
                         cp.open_questions = last.open_questions;
                         cp.files = last.files;
                     }
-                    t::add_checkpoint(c, &done.task.id, Some(&done.session.id), &done.session.actor, &cp)?;
+                    t::add_checkpoint(
+                        c,
+                        &done.task.id,
+                        Some(&done.session.id),
+                        &done.session.actor,
+                        &cp,
+                    )?;
                 }
                 let unblocked = unblocked_by_transition(c, previous_status.as_deref(), &done.task)?;
                 Ok((done, previous_status, unblocked))
@@ -621,7 +707,12 @@ impl HqTool for TaskReleaseTool {
         // people: the agents behind tasks it unblocked, and the owner's review queue. Not on the
         // tasks scope, whose text must not reach a mailbox or the owner's approvals.
         if !scoped {
-            notify_unblocked(&self.vault_path, &done.task, &unblocked, self.settings.route_tags);
+            notify_unblocked(
+                &self.vault_path,
+                &done.task,
+                &unblocked,
+                self.settings.route_tags,
+            );
             let became_ready = done.task.status == t::STATUS_READY_FOR_REVIEW
                 && previous_status.as_deref() != Some(t::STATUS_READY_FOR_REVIEW);
             if became_ready {

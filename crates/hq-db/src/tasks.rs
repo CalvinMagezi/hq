@@ -89,7 +89,10 @@ pub fn validate_status(status: &str) -> Result<()> {
     if STATUSES.contains(&status) {
         return Ok(());
     }
-    anyhow::bail!("unknown status '{status}', expected one of {}", STATUSES.join(", "))
+    anyhow::bail!(
+        "unknown status '{status}', expected one of {}",
+        STATUSES.join(", ")
+    )
 }
 
 /// Longest blocked reason or waiting-on text kept.
@@ -97,7 +100,10 @@ pub const MAX_BLOCK_TEXT_CHARS: usize = 500;
 
 /// A one-line reason or waiting-on text, or an error when it is too long. Empty is `None`.
 pub fn clean_block_text(field: &str, text: &str) -> Result<Option<String>> {
-    let cleaned: String = text.chars().filter(|c| !c.is_control() && !leases::is_invisible(*c)).collect();
+    let cleaned: String = text
+        .chars()
+        .filter(|c| !c.is_control() && !leases::is_invisible(*c))
+        .collect();
     let cleaned = cleaned.trim();
     if cleaned.chars().count() > MAX_BLOCK_TEXT_CHARS {
         anyhow::bail!("{field} is longer than {MAX_BLOCK_TEXT_CHARS} characters");
@@ -117,7 +123,10 @@ pub fn validate_priority(priority: &str) -> Result<()> {
     if PRIORITIES.contains(&priority) {
         return Ok(());
     }
-    anyhow::bail!("unknown priority '{priority}', expected one of {}", PRIORITIES.join(", "))
+    anyhow::bail!(
+        "unknown priority '{priority}', expected one of {}",
+        PRIORITIES.join(", ")
+    )
 }
 
 /// Fires the change hooks after a successful write, unless the connection is
@@ -361,31 +370,31 @@ pub struct TaskPatch {
     pub assignees: Option<Vec<String>>,
 }
 
-mod crud;
 mod archive;
 mod checkpoints;
+mod crud;
 mod leases;
 mod links;
-mod queue;
-mod stale;
-mod time;
 mod messages;
 mod org;
+mod queue;
 mod refs;
 mod rows;
+mod stale;
 #[cfg(test)]
 mod tests;
+mod time;
 
-pub use crud::*;
 pub use archive::*;
 pub use checkpoints::*;
+pub use crud::*;
 pub use leases::*;
 pub use links::*;
-pub use queue::*;
-pub use stale::*;
-pub use time::*;
 pub use messages::*;
 pub use org::*;
+pub use queue::*;
 pub use refs::*;
-pub use rows::{list_task_events, validate_date};
 use rows::*;
+pub use rows::{list_task_events, validate_date};
+pub use stale::*;
+pub use time::*;

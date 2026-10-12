@@ -37,7 +37,11 @@ fn run_dir() -> tempfile::TempDir {
     }
     std::fs::write(p.join("operator.token"), SECRET).unwrap();
     for name in ["a", "b"] {
-        std::fs::write(p.join("mcp").join(format!("{name}.json")), format!("mcp-of-{name}")).unwrap();
+        std::fs::write(
+            p.join("mcp").join(format!("{name}.json")),
+            format!("mcp-of-{name}"),
+        )
+        .unwrap();
         std::fs::write(p.join("hooks").join(format!("{name}.json")), "{}").unwrap();
     }
     for sock in ["host.sock", "agent.sock"] {
@@ -148,8 +152,14 @@ fn network_goes_only_through_the_allowlist_and_denials_are_logged() {
     assert!(out.contains("200 Connection Established"), "{out}");
     assert!(out.contains("autoupdate=1"), "{out}");
     let log = host.egress_decisions("a");
-    assert!(log.iter().any(|d| d.host == "evil.test" && !d.allowed), "{log:?}");
-    assert!(log.iter().any(|d| d.host == "localhost" && d.allowed), "{log:?}");
+    assert!(
+        log.iter().any(|d| d.host == "evil.test" && !d.allowed),
+        "{log:?}"
+    );
+    assert!(
+        log.iter().any(|d| d.host == "localhost" && d.allowed),
+        "{log:?}"
+    );
     host.kill("a").unwrap();
     drop(accept);
 }
@@ -162,12 +172,25 @@ fn a_sibling_environment_is_not_visible() {
     let dir = run_dir();
     let project = tempfile::tempdir().unwrap();
     let host = host_for(dir.path());
-    let mut other = SpawnSpec::new("b", vec!["sh".into(), "-c".into(), "sleep 60".into()], project.path());
+    let mut other = SpawnSpec::new(
+        "b",
+        vec!["sh".into(), "-c".into(), "sleep 60".into()],
+        project.path(),
+    );
     other.env = vec![("SIBLING_SECRET".into(), SECRET.into())];
     host.spawn(other).unwrap();
-    let out = run(&host, "a", project.path(), spec(vec![]), "ps eww -ax 2>&1 | grep -c SIBLING_SECRET; echo DONE");
+    let out = run(
+        &host,
+        "a",
+        project.path(),
+        spec(vec![]),
+        "ps eww -ax 2>&1 | grep -c SIBLING_SECRET; echo DONE",
+    );
     assert!(!out.contains(SECRET));
-    assert!(out.lines().any(|l| l.trim() == "0") || out.contains("not permitted"), "{out}");
+    assert!(
+        out.lines().any(|l| l.trim() == "0") || out.contains("not permitted"),
+        "{out}"
+    );
     host.kill("a").unwrap();
     host.kill("b").unwrap();
 }
@@ -180,10 +203,19 @@ fn the_listener_closes_when_the_agent_exits() {
     let dir = run_dir();
     let project = tempfile::tempdir().unwrap();
     let host = host_for(dir.path());
-    run(&host, "a", project.path(), spec(vec![]), "echo $HTTPS_PROXY; echo DONE");
+    run(
+        &host,
+        "a",
+        project.path(),
+        spec(vec![]),
+        "echo $HTTPS_PROXY; echo DONE",
+    );
     host.wait_exit("a", WAIT).unwrap();
     let text = host.read("a", ReadSource::Recent, 0).unwrap();
-    let port: u16 = text.lines().find_map(|l| l.trim().rsplit(':').next()?.parse().ok()).unwrap();
+    let port: u16 = text
+        .lines()
+        .find_map(|l| l.trim().rsplit(':').next()?.parse().ok())
+        .unwrap();
     std::thread::sleep(Duration::from_millis(300));
     let addr = std::net::SocketAddr::from(([127, 0, 0, 1], port));
     assert!(std::net::TcpStream::connect_timeout(&addr, Duration::from_millis(500)).is_err());
@@ -194,7 +226,10 @@ fn a_sandbox_that_cannot_be_applied_is_an_error_not_an_unsandboxed_start() {
     let host = Host::new();
     let mut s = SpawnSpec::new("a", vec!["sleep".into(), "1".into()], std::env::temp_dir());
     s.sandbox = Some(spec(vec![]));
-    assert!(matches!(host.spawn(s), Err(HostError::Sandbox(_))), "no run directory");
+    assert!(
+        matches!(host.spawn(s), Err(HostError::Sandbox(_))),
+        "no run directory"
+    );
     assert!(host.list().is_empty());
     if !sandbox_available() {
         let dir = run_dir();
@@ -214,7 +249,11 @@ fn mode_none_runs_unsandboxed_and_says_so() {
     assert_eq!(info.sandbox, "none");
     host.kill("a").unwrap();
     let plain = host
-        .spawn(SpawnSpec::new("b", vec!["sleep".into(), "30".into()], std::env::temp_dir()))
+        .spawn(SpawnSpec::new(
+            "b",
+            vec!["sleep".into(), "30".into()],
+            std::env::temp_dir(),
+        ))
         .unwrap();
     assert_eq!(plain.sandbox, "none");
     host.kill("b").unwrap();
@@ -231,7 +270,11 @@ fn a_writable_root_that_contains_the_host_directory_or_home_is_refused() {
     for cwd in [home, dir.path().parent().unwrap().to_path_buf()] {
         let mut s = SpawnSpec::new("a", vec!["sleep".into(), "1".into()], &cwd);
         s.sandbox = Some(spec(vec![]));
-        let err = host.spawn(s).err().map(|e| e.to_string()).unwrap_or_default();
+        let err = host
+            .spawn(s)
+            .err()
+            .map(|e| e.to_string())
+            .unwrap_or_default();
         assert!(err.contains("contains"), "{}: {err}", cwd.display());
     }
     assert!(host.list().is_empty());
@@ -253,7 +296,13 @@ fn the_agent_cannot_plant_code_the_operator_runs_later() {
         t hook 'echo x > .git/hooks/pre-commit'; t mcp 'echo {} > .mcp.json'; t cfg 'echo x >> .git/config'; \
         t src 'echo y > src.txt'; t open '/usr/bin/open -h'; echo DONE";
     let out = run(&host, "a", project.path(), spec(vec![]), script);
-    for (probe, allowed) in [("hook", false), ("mcp", false), ("cfg", false), ("src", true), ("open", false)] {
+    for (probe, allowed) in [
+        ("hook", false),
+        ("mcp", false),
+        ("cfg", false),
+        ("src", true),
+        ("open", false),
+    ] {
         let want = format!("{probe}={}", if allowed { "yes" } else { "no" });
         assert!(out.contains(&want), "expected {want}; got:\n{out}");
     }
@@ -288,7 +337,10 @@ fn a_launch_profile_keeps_its_own_claude_config_and_loses_the_default_one() {
         t read_default 'ls \"$HOME/.claude\"'; t read_other 'cat \"$HOME/.claude-hqtest-other-PID/credentials\"'; echo DONE"
         .replace("PID", &pid.to_string());
     let mut s = SpawnSpec::new("a", vec!["sh".into(), "-c".into(), script], project.path());
-    s.env = vec![("CLAUDE_CONFIG_DIR".into(), mine.to_string_lossy().into_owned())];
+    s.env = vec![(
+        "CLAUDE_CONFIG_DIR".into(),
+        mine.to_string_lossy().into_owned(),
+    )];
     s.sandbox = Some(spec(vec![]));
     host.spawn(s).unwrap();
     let deadline = Instant::now() + WAIT;
@@ -390,7 +442,9 @@ fn a_credential_directory_named_for_one_agent_is_readable_by_it_alone_and_never_
     let mut sandbox = spec(vec![]);
     // HQ's own directory is never revealed, even when named.
     let hq_dir = home.join(".hq");
-    sandbox.agent_readable.insert("hqtest-reader".into(), vec![secret.clone(), hq_dir.clone()]);
+    sandbox
+        .agent_readable
+        .insert("hqtest-reader".into(), vec![secret.clone(), hq_dir.clone()]);
     let script = format!(
         "t() {{ if eval \"$2\" >/dev/null 2>&1; then echo \"$1=yes\"; else echo \"$1=no\"; fi; }}; \
          t read 'grep -q REVEALED \"{0}/hosts.yml\"'; t write 'echo x > \"{0}/hosts.yml\"'; t hq 'ls \"{1}\"'; echo DONE",
@@ -406,14 +460,27 @@ fn a_credential_directory_named_for_one_agent_is_readable_by_it_alone_and_never_
     s.agent = Some("hqtest-reader".into());
     s.sandbox = Some(planting);
     let refused = host.spawn(s);
-    let reader = run_as(&host, "hqtest-reader", project.path(), sandbox.clone(), &script);
+    let reader = run_as(
+        &host,
+        "hqtest-reader",
+        project.path(),
+        sandbox.clone(),
+        &script,
+    );
     let other = run_as(&host, "hqtest-other", project.path(), sandbox, &script);
     let untouched = std::fs::read_to_string(secret.join("hosts.yml")).unwrap();
     let _ = std::fs::remove_dir_all(&secret);
-    assert!(reader.contains("read=yes") && reader.contains("write=no"), "{reader}");
-    let refused = refused.expect_err("a writable root inside a credential directory must be refused");
+    assert!(
+        reader.contains("read=yes") && reader.contains("write=no"),
+        "{reader}"
+    );
+    let refused =
+        refused.expect_err("a writable root inside a credential directory must be refused");
     assert!(refused.to_string().contains("lies inside"), "{refused}");
-    assert!(other.contains("read=no") && other.contains("write=no"), "{other}");
+    assert!(
+        other.contains("read=no") && other.contains("write=no"),
+        "{other}"
+    );
     if hq_dir.is_dir() {
         assert!(reader.contains("hq=no"), "{reader}");
     }
@@ -444,7 +511,9 @@ fn a_listed_loopback_port_is_reachable_on_macos_and_an_unlisted_one_is_not() {
     let mut sandbox = spec(vec![]);
     sandbox.loopback_ports = vec![listed];
     let probe = |port: u16| {
-        format!("python3 -c \"import socket; c=socket.create_connection(('127.0.0.1',{port}),3); print('p{port}=' + c.recv(20).decode())\" 2>&1")
+        format!(
+            "python3 -c \"import socket; c=socket.create_connection(('127.0.0.1',{port}),3); print('p{port}=' + c.recv(20).decode())\" 2>&1"
+        )
     };
     let script = format!("{}; {}; echo DONE", probe(listed), probe(unlisted));
     let out = run(&host, "a", project.path(), sandbox, &script);

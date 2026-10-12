@@ -61,7 +61,12 @@ pub async fn run_session_event_loop(
             }
         };
         for event in events.events.iter().filter(|e| e.kind == "lockdown") {
-            alert_lockdown(&vault_path, &db, &host_name, event.rule.as_deref().unwrap_or("no reason given"));
+            alert_lockdown(
+                &vault_path,
+                &db,
+                &host_name,
+                event.rule.as_deref().unwrap_or("no reason given"),
+            );
         }
         let first_look = cursor.is_none();
         cursor = Some(events.last_seq);
@@ -82,13 +87,28 @@ fn alert_lockdown(vault_path: &Path, db: &Database, host: &str, reason: &str) {
     let body = format!(
         "No coding agent starts on '{host}' and the ones it ran were stopped (unless its start-rate breaker tripped, which only freezes new starts). Reason: {reason}. Check what started them with `host_agents` and the session logs, then lift it on that machine with `hq host unlock`."
     );
-    let item = ValueItem::new("agent-host", ValueKind::ActionNeeded, subject.clone(), body.clone())
-        .with_dedup_key(format!("host-lockdown-{host}"));
+    let item = ValueItem::new(
+        "agent-host",
+        ValueKind::ActionNeeded,
+        subject.clone(),
+        body.clone(),
+    )
+    .with_dedup_key(format!("host-lockdown-{host}"));
     if let Err(e) = hq_db::value_items::emit(db, &item) {
         warn!(host, error = %e, "session-events: lockdown inbox item failed");
     }
-    let mut msg = hq_core::mailbox::new_message("agent-host", "relay", MailboxMessageType::Nudge, Some(&subject), &body, None);
-    msg.meta.insert(hq_core::mailbox::META_INTERRUPT.to_string(), "true".to_string());
+    let mut msg = hq_core::mailbox::new_message(
+        "agent-host",
+        "relay",
+        MailboxMessageType::Nudge,
+        Some(&subject),
+        &body,
+        None,
+    );
+    msg.meta.insert(
+        hq_core::mailbox::META_INTERRUPT.to_string(),
+        "true".to_string(),
+    );
     if let Err(e) = hq_core::mailbox::send_message(vault_path, &msg) {
         warn!(host, error = %e, "session-events: lockdown relay alert failed");
     }

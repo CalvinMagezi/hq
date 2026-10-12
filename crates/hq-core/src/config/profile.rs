@@ -247,12 +247,15 @@ pub fn egress_report(cfg: &HqConfig, env: EnvLookup<'_>) -> Vec<EgressItem> {
             }
             kind => {
                 let endpoint = b.resolved_endpoint();
-                let host = endpoint.as_deref().and_then(host_of).unwrap_or_else(|| match kind {
-                    BackendKind::Openrouter => "openrouter.ai".into(),
-                    BackendKind::KimiCode => "api.kimi.com".into(),
-                    BackendKind::AnthropicCompatible => "api.anthropic.com".into(),
-                    _ => String::new(),
-                });
+                let host = endpoint
+                    .as_deref()
+                    .and_then(host_of)
+                    .unwrap_or_else(|| match kind {
+                        BackendKind::Openrouter => "openrouter.ai".into(),
+                        BackendKind::KimiCode => "api.kimi.com".into(),
+                        BackendKind::AnthropicCompatible => "api.anthropic.com".into(),
+                        _ => String::new(),
+                    });
                 if !host.is_empty() && !is_loopback(&host) {
                     items.push(item(
                         &format!("backend:{}", b.name),
@@ -316,7 +319,8 @@ pub fn egress_report(cfg: &HqConfig, env: EnvLookup<'_>) -> Vec<EgressItem> {
     }
 
     let reads_gmail = cfg.companies.iter().any(|c| {
-        c.listeners.iter().any(|l| l.kind == "email") || c.connectors.iter().any(|b| b.kind == "gws")
+        c.listeners.iter().any(|l| l.kind == "email")
+            || c.connectors.iter().any(|b| b.kind == "gws")
     });
     if reads_gmail {
         items.push(item(
@@ -405,7 +409,11 @@ fn host_allowed(host: &str, listed: &str) -> bool {
 /// Whether the owner's `lite.allow_egress` lets `e` through: its id, or a listing for every one
 /// of its hosts (an item that reaches two hosts is not allowed by naming only one).
 fn listed_in_allow_egress(cfg: &HqConfig, e: &EgressItem) -> bool {
-    let by_id = cfg.lite.allow_egress.iter().any(|a| a.eq_ignore_ascii_case(&e.id));
+    let by_id = cfg
+        .lite
+        .allow_egress
+        .iter()
+        .any(|a| a.eq_ignore_ascii_case(&e.id));
     let by_hosts = !e.hosts.is_empty()
         && e.hosts
             .iter()
@@ -508,9 +516,14 @@ mod tests {
         cfg.openrouter_api_key = Some("sk-or-test".into());
         assert_eq!(ids(&egress_report(&cfg, &no_env)), ["openrouter"]);
 
-        let env: HashMap<&str, &str> = HashMap::from([("ANTHROPIC_API_KEY", "k"), ("GROQ_API_KEY", "  ")]);
+        let env: HashMap<&str, &str> =
+            HashMap::from([("ANTHROPIC_API_KEY", "k"), ("GROQ_API_KEY", "  ")]);
         let lookup = |n: &str| env.get(n).map(|v| v.to_string());
-        assert_eq!(ids(&egress_report(&lite(), &lookup)), ["anthropic"], "a blank value is not a key");
+        assert_eq!(
+            ids(&egress_report(&lite(), &lookup)),
+            ["anthropic"],
+            "a blank value is not a key"
+        );
     }
 
     #[test]
@@ -538,14 +551,23 @@ mod tests {
         cfg.openrouter_api_key = Some("k".into());
         assert_eq!(ids(&lite_violations(&cfg, &no_env)), ["openrouter"]);
         let err = enforce_lite(&cfg, &no_env).unwrap_err().to_string();
-        assert!(err.contains("OpenRouter") && err.contains("lite.allow_egress"), "{err}");
+        assert!(
+            err.contains("OpenRouter") && err.contains("lite.allow_egress"),
+            "{err}"
+        );
 
         cfg.lite.allow_egress = vec!["openrouter".into()];
         assert!(lite_violations(&cfg, &no_env).is_empty());
         cfg.lite.allow_egress = vec!["OpenRouter.AI".into()];
-        assert!(lite_violations(&cfg, &no_env).is_empty(), "host match ignores case");
+        assert!(
+            lite_violations(&cfg, &no_env).is_empty(),
+            "host match ignores case"
+        );
         cfg.lite.allow_egress = vec!["ai".into()];
-        assert!(!lite_violations(&cfg, &no_env).is_empty(), "a suffix is not a subdomain");
+        assert!(
+            !lite_violations(&cfg, &no_env).is_empty(),
+            "a suffix is not a subdomain"
+        );
         cfg.lite.allow_egress = vec!["notopenrouter.ai".into()];
         assert!(!lite_violations(&cfg, &no_env).is_empty());
     }
@@ -563,7 +585,10 @@ mod tests {
         assert!(v[0].refusal.is_some());
 
         cfg.lite.allow_unofficial_copilot = true;
-        assert!(lite_violations(&cfg, &no_env).is_empty(), "the switch lifts both");
+        assert!(
+            lite_violations(&cfg, &no_env).is_empty(),
+            "the switch lifts both"
+        );
 
         cfg.lite.allow_unofficial_copilot = false;
         cfg.copilot_usage.enabled = false;
@@ -574,9 +599,21 @@ mod tests {
     fn a_backend_on_this_machine_is_not_egress() {
         let mut cfg = lite();
         cfg.backends.backends = vec![
-            backend("local", BackendKind::OpenaiCompatible, Some("http://localhost:11434/v1")),
-            backend("loop", BackendKind::OpenaiCompatible, Some("http://127.0.0.1:8080/v1")),
-            backend("lan", BackendKind::OpenaiCompatible, Some("http://192.168.1.5:8080/v1")),
+            backend(
+                "local",
+                BackendKind::OpenaiCompatible,
+                Some("http://localhost:11434/v1"),
+            ),
+            backend(
+                "loop",
+                BackendKind::OpenaiCompatible,
+                Some("http://127.0.0.1:8080/v1"),
+            ),
+            backend(
+                "lan",
+                BackendKind::OpenaiCompatible,
+                Some("http://192.168.1.5:8080/v1"),
+            ),
         ];
         assert_eq!(ids(&egress_report(&cfg, &no_env)), ["backend:lan"]);
     }
@@ -605,17 +642,34 @@ mod tests {
         }];
         cfg.self_update.enabled = true;
         let report = egress_report(&cfg, &no_env);
-        assert_eq!(ids(&report), ["telegram", "remote-mcp:diagrams", "self-update"]);
-        assert_eq!(report[1].hosts, ["mcp.example.com"], "no credentials or port in the host");
+        assert_eq!(
+            ids(&report),
+            ["telegram", "remote-mcp:diagrams", "self-update"]
+        );
+        assert_eq!(
+            report[1].hosts,
+            ["mcp.example.com"],
+            "no credentials or port in the host"
+        );
     }
 
     #[test]
     fn host_parsing_handles_the_awkward_shapes() {
-        assert_eq!(host_of("https://API.Example.com./v1").as_deref(), Some("api.example.com"));
+        assert_eq!(
+            host_of("https://API.Example.com./v1").as_deref(),
+            Some("api.example.com")
+        );
         assert_eq!(host_of("http://[::1]:8080/x").as_deref(), Some("::1"));
-        assert_eq!(host_of("http://a@b.example.com").as_deref(), Some("b.example.com"));
+        assert_eq!(
+            host_of("http://a@b.example.com").as_deref(),
+            Some("b.example.com")
+        );
         assert_eq!(host_of("https://").as_deref(), None);
-        assert!(is_loopback("127.0.0.7") && is_loopback("localhost") && !is_loopback("localhost.evil.example"));
+        assert!(
+            is_loopback("127.0.0.7")
+                && is_loopback("localhost")
+                && !is_loopback("localhost.evil.example")
+        );
     }
 
     #[test]
@@ -637,7 +691,11 @@ mod tests {
 
         std::fs::write(&path, format!("vault_path: {}\n", dir.path().display())).unwrap();
         let plain = HqConfig::load_from_path(&path).unwrap();
-        assert_eq!(plain.profile, Profile::Full, "an existing config stays on the full profile");
+        assert_eq!(
+            plain.profile,
+            Profile::Full,
+            "an existing config stays on the full profile"
+        );
         assert!(plain.lite.allow_egress.is_empty());
     }
     #[test]
@@ -653,15 +711,32 @@ mod tests {
         let lookup = |n: &str| env.get(n).map(|v| v.to_string());
         let report = egress_report(&lite(), &lookup);
         let got = ids(&report);
-        for id in ["siliconflow", "novita", "ollama", "turboquant", "openrouter"] {
+        for id in [
+            "siliconflow",
+            "novita",
+            "ollama",
+            "turboquant",
+            "openrouter",
+        ] {
             assert!(got.contains(&id), "{id} missing from {got:?}");
         }
         let openrouter = report.iter().find(|e| e.id == "openrouter").unwrap();
-        assert!(openrouter.hosts.contains(&"gateway.example.com".to_string()), "{openrouter:?}");
+        assert!(
+            openrouter
+                .hosts
+                .contains(&"gateway.example.com".to_string()),
+            "{openrouter:?}"
+        );
 
-        let local: HashMap<&str, &str> = HashMap::from([("OLLAMA_HOST", "127.0.0.1:11434"), ("TURBOQUANT_BASE_URL", "http://localhost:9/v1")]);
+        let local: HashMap<&str, &str> = HashMap::from([
+            ("OLLAMA_HOST", "127.0.0.1:11434"),
+            ("TURBOQUANT_BASE_URL", "http://localhost:9/v1"),
+        ]);
         let lookup = |n: &str| local.get(n).map(|v| v.to_string());
-        assert!(egress_report(&lite(), &lookup).is_empty(), "a local Ollama is not egress");
+        assert!(
+            egress_report(&lite(), &lookup).is_empty(),
+            "a local Ollama is not egress"
+        );
     }
 
     #[test]
@@ -681,7 +756,10 @@ mod tests {
         cfg.companies = vec![crate::config::CompanyConfig {
             id: "acme".into(),
             name: "Acme".into(),
-            identity: crate::config::CompanyIdentity { contact_name: "A".into(), role: "owner".into() },
+            identity: crate::config::CompanyIdentity {
+                contact_name: "A".into(),
+                role: "owner".into(),
+            },
             vault_prefix: "Notebooks/Companies/acme".into(),
             listeners: vec![crate::config::ListenerDef {
                 id: "inbox".into(),
@@ -710,7 +788,11 @@ mod tests {
             .find(|e| e.id == "agent-host:build")
             .unwrap()
             .hosts;
-        assert_eq!(hosts, ["build.example.com"], "the ssh user is not part of the host");
+        assert_eq!(
+            hosts,
+            ["build.example.com"],
+            "the ssh user is not part of the host"
+        );
     }
 
     /// The dedicated switch is the only way past a refusal; a parent-domain listing is not.
@@ -718,8 +800,16 @@ mod tests {
     fn allow_egress_cannot_lift_a_refusal_by_the_back_door() {
         let mut cfg = lite();
         cfg.backends.backends = vec![backend("work", BackendKind::GithubCopilotApi, None)];
-        cfg.lite.allow_egress = vec!["github.com".into(), "githubcopilot.com".into(), "github-copilot-api".into(), "copilot-usage".into()];
-        assert_eq!(ids(&lite_violations(&cfg, &no_env)), ["github-copilot-api", "copilot-usage"]);
+        cfg.lite.allow_egress = vec![
+            "github.com".into(),
+            "githubcopilot.com".into(),
+            "github-copilot-api".into(),
+            "copilot-usage".into(),
+        ];
+        assert_eq!(
+            ids(&lite_violations(&cfg, &no_env)),
+            ["github-copilot-api", "copilot-usage"]
+        );
         cfg.lite.allow_unofficial_copilot = true;
         assert!(lite_violations(&cfg, &no_env).is_empty());
     }
@@ -729,11 +819,18 @@ mod tests {
         let mut cfg = lite();
         cfg.kimi_code_api_key = Some("sk-kimi-x".into());
         cfg.lite.allow_egress = vec!["api.kimi.com".into()];
-        assert_eq!(ids(&lite_violations(&cfg, &no_env)), ["kimi"], "api.moonshot.ai is still unlisted");
+        assert_eq!(
+            ids(&lite_violations(&cfg, &no_env)),
+            ["kimi"],
+            "api.moonshot.ai is still unlisted"
+        );
         cfg.lite.allow_egress = vec!["api.kimi.com".into(), "api.moonshot.ai".into()];
         assert!(lite_violations(&cfg, &no_env).is_empty());
         cfg.lite.allow_egress = vec!["kimi".into()];
-        assert!(lite_violations(&cfg, &no_env).is_empty(), "the id covers every host");
+        assert!(
+            lite_violations(&cfg, &no_env).is_empty(),
+            "the id covers every host"
+        );
     }
 
     #[test]
@@ -741,12 +838,24 @@ mod tests {
         let mut cfg = lite();
         cfg.relay.discord_token = Some("tok".into());
         cfg.relay.telegram_token = Some("tok".into());
-        cfg.lite.allow_egress = vec!["discord".into(), "telegram".into(), "discord.com".into(), "gateway.discord.gg".into(), "api.telegram.org".into()];
-        assert_eq!(ids(&lite_violations(&cfg, &no_env)), ["telegram", "discord"]);
+        cfg.lite.allow_egress = vec![
+            "discord".into(),
+            "telegram".into(),
+            "discord.com".into(),
+            "gateway.discord.gg".into(),
+            "api.telegram.org".into(),
+        ];
+        assert_eq!(
+            ids(&lite_violations(&cfg, &no_env)),
+            ["telegram", "discord"]
+        );
     }
 
     #[test]
     fn a_backslash_ends_the_host_like_a_slash() {
-        assert_eq!(host_of("https://a.example.com\\@b.example.com").as_deref(), Some("a.example.com"));
+        assert_eq!(
+            host_of("https://a.example.com\\@b.example.com").as_deref(),
+            Some("a.example.com")
+        );
     }
 }

@@ -3,31 +3,31 @@
 mod api;
 pub use api::HEALTH_SERVICE;
 pub use vault_api::{lite_hides, lite_hides_resolved};
-mod chat_uploads;
-mod error;
 pub mod auth;
+mod budgets_api;
+mod chat_uploads;
+mod copilot_usage_api;
+mod error;
 pub mod gmail_ingest;
 mod mcp_http;
 mod notifications_api;
 mod notifications_watch;
+mod openrouter_usage_api;
 mod origin;
 mod profile_gate;
 mod security_headers;
 mod session_driver;
 mod sessions_api;
-mod workbench_api;
-mod copilot_usage_api;
-mod openrouter_usage_api;
-mod budgets_api;
-mod usage_forecast_api;
-mod usage_providers_api;
 mod settings_api;
 mod setup_api;
 mod subagent_followup;
 mod tasks_api;
 mod tasks_watch;
 mod threads_api;
+mod usage_forecast_api;
+mod usage_providers_api;
 mod vault_api;
+mod workbench_api;
 mod ws;
 
 use axum::{
@@ -108,7 +108,10 @@ impl WsState {
     /// The edition this server runs as. Lite is decided by the config the server was started
     /// with; a server with no readable config is the full profile.
     pub fn profile(&self) -> hq_core::config::Profile {
-        self.hq_config.as_ref().map(|c| c.profile).unwrap_or_default()
+        self.hq_config
+            .as_ref()
+            .map(|c| c.profile)
+            .unwrap_or_default()
     }
 
     /// Whether a client-supplied vault path may be read or written. Everything outside the
@@ -139,7 +142,6 @@ impl WsState {
     pub(crate) fn broadcast(&self, msg: &str) {
         let _ = self.tx.send(msg.to_string());
     }
-
 }
 
 /// Makes `hq_ask` usable on this server: fails the asks a previous process left
@@ -148,7 +150,10 @@ impl WsState {
 pub fn install_ask_runner(state: &Arc<WsState>) {
     let failed = ws::reconcile_asks_after_restart(&state.db);
     if failed > 0 {
-        tracing::info!(failed, "failed hq_ask questions whose reply died with the last process");
+        tracing::info!(
+            failed,
+            "failed hq_ask questions whose reply died with the last process"
+        );
     }
     if !hq_tools::ask::install_runner(Arc::new(ws::WebAskRunner::new(state))) {
         tracing::warn!("an hq_ask runner was already installed; keeping it");
@@ -234,7 +239,10 @@ pub fn create_router(state: Arc<WsState>) -> Router {
             "/api/threads/{thread_id}/archive",
             axum::routing::post(threads_api::archive_thread_handler),
         )
-        .route("/api/notifications", get(notifications_api::list_notifications_handler))
+        .route(
+            "/api/notifications",
+            get(notifications_api::list_notifications_handler),
+        )
         .route(
             "/api/notifications/{id}/action",
             axum::routing::post(notifications_api::notification_action_handler),
@@ -277,12 +285,24 @@ pub fn create_router(state: Arc<WsState>) -> Router {
             get(tasks_api::list_work_sessions_handler),
         )
         .route("/api/tasks/{id}/time", get(tasks_api::task_time_handler))
-        .route("/api/tasks/{id}/links", get(tasks_api::list_task_links_handler))
-        .route("/api/tasks/{id}/restore", axum::routing::post(tasks_api::restore_task_handler))
+        .route(
+            "/api/tasks/{id}/links",
+            get(tasks_api::list_task_links_handler),
+        )
+        .route(
+            "/api/tasks/{id}/restore",
+            axum::routing::post(tasks_api::restore_task_handler),
+        )
         .route("/api/tasks/linked", get(tasks_api::tasks_linked_to_handler))
         .route("/api/tasks/stale", get(tasks_api::stale_tasks_handler))
-        .route("/api/tasks/{id}/checkpoint", get(tasks_api::task_checkpoint_handler))
-        .route("/api/initiatives/{id}/progress", get(tasks_api::initiative_progress_handler))
+        .route(
+            "/api/tasks/{id}/checkpoint",
+            get(tasks_api::task_checkpoint_handler),
+        )
+        .route(
+            "/api/initiatives/{id}/progress",
+            get(tasks_api::initiative_progress_handler),
+        )
         .route("/api/task-time-report", get(tasks_api::time_report_handler))
         .route(
             "/api/work-sessions",
@@ -292,22 +312,55 @@ pub fn create_router(state: Arc<WsState>) -> Router {
             "/api/threads/{thread_id}/sessions",
             get(sessions_api::list_thread_sessions_handler),
         )
-        .route("/api/harness-sessions", get(sessions_api::list_all_handler).post(workbench_api::spawn_handler))
+        .route(
+            "/api/harness-sessions",
+            get(sessions_api::list_all_handler).post(workbench_api::spawn_handler),
+        )
         .route("/api/workbench/hosts", get(workbench_api::hosts_handler))
-        .route("/api/workbench/lockdown", post(workbench_api::lockdown_handler))
+        .route(
+            "/api/workbench/lockdown",
+            post(workbench_api::lockdown_handler),
+        )
         .route(
             "/api/workbench/hosts/{host}/dirs",
             get(workbench_api::list_dirs_handler).post(workbench_api::make_dir_handler),
         )
-        .route("/api/harness-sessions/{id}/stop", post(workbench_api::stop_handler))
-        .route("/api/harness-sessions/{id}/resume", post(workbench_api::resume_handler))
-        .route("/api/harness-sessions/{id}/rename", post(workbench_api::rename_handler))
-        .route("/api/harness-sessions/{id}/archive", post(workbench_api::archive_handler))
-        .route("/api/harness-sessions/{id}", get(sessions_api::get_session_handler))
-        .route("/api/harness-sessions/{id}/screen", get(sessions_api::screen_handler))
-        .route("/api/harness-sessions/{id}/screen/stream", get(sessions_api::screen_stream_handler))
-        .route("/api/harness-sessions/{id}/send", post(sessions_api::send_handler))
-        .route("/api/harness-sessions/{id}/adopt", post(sessions_api::adopt_handler))
+        .route(
+            "/api/harness-sessions/{id}/stop",
+            post(workbench_api::stop_handler),
+        )
+        .route(
+            "/api/harness-sessions/{id}/resume",
+            post(workbench_api::resume_handler),
+        )
+        .route(
+            "/api/harness-sessions/{id}/rename",
+            post(workbench_api::rename_handler),
+        )
+        .route(
+            "/api/harness-sessions/{id}/archive",
+            post(workbench_api::archive_handler),
+        )
+        .route(
+            "/api/harness-sessions/{id}",
+            get(sessions_api::get_session_handler),
+        )
+        .route(
+            "/api/harness-sessions/{id}/screen",
+            get(sessions_api::screen_handler),
+        )
+        .route(
+            "/api/harness-sessions/{id}/screen/stream",
+            get(sessions_api::screen_stream_handler),
+        )
+        .route(
+            "/api/harness-sessions/{id}/send",
+            post(sessions_api::send_handler),
+        )
+        .route(
+            "/api/harness-sessions/{id}/adopt",
+            post(sessions_api::adopt_handler),
+        )
         .route(
             "/api/harness-sessions/{id}/drive",
             post(sessions_api::set_drive_handler),
@@ -336,7 +389,9 @@ pub fn create_router(state: Arc<WsState>) -> Router {
         .nest_service("/assets", ServeDir::new(static_dir.join("assets")))
         // The PWA: static files, and index.html for every client-side route.
         // Added before the layers so they wrap it too.
-        .fallback_service(ServeDir::new(&static_dir).fallback(ServeFile::new(static_dir.join("index.html"))))
+        .fallback_service(
+            ServeDir::new(&static_dir).fallback(ServeFile::new(static_dir.join("index.html"))),
+        )
         .layer(axum::middleware::from_fn(no_cache_shell))
         // Slow mobile links: gzip/brotli the PWA's JS and CSS and every JSON response.
         .layer(tower_http::compression::CompressionLayer::new())
@@ -440,7 +495,10 @@ mod web_auth_router_tests {
         let app = create_router(Arc::new(state));
 
         let get = |uri: &str| Request::get(uri).body(Body::empty()).unwrap();
-        assert_eq!(status(&app, get("/api/spaces")).await, StatusCode::UNAUTHORIZED);
+        assert_eq!(
+            status(&app, get("/api/spaces")).await,
+            StatusCode::UNAUTHORIZED
+        );
         assert_eq!(status(&app, get("/health")).await, StatusCode::OK);
         let authed = Request::get("/api/spaces")
             .header("authorization", "Bearer s3cret")
@@ -454,18 +512,34 @@ mod web_auth_router_tests {
                 .body(Body::empty())
                 .unwrap()
         };
-        let own = app.clone().oneshot(preflight("http://localhost:5173")).await.unwrap();
+        let own = app
+            .clone()
+            .oneshot(preflight("http://localhost:5173"))
+            .await
+            .unwrap();
         assert_eq!(own.status(), StatusCode::OK);
-        assert_eq!(own.headers()["access-control-allow-origin"], "http://localhost:5173");
-        let hostile = app.clone().oneshot(preflight("https://evil.example")).await.unwrap();
+        assert_eq!(
+            own.headers()["access-control-allow-origin"],
+            "http://localhost:5173"
+        );
+        let hostile = app
+            .clone()
+            .oneshot(preflight("https://evil.example"))
+            .await
+            .unwrap();
         assert!(
-            !hostile.headers().contains_key("access-control-allow-origin"),
+            !hostile
+                .headers()
+                .contains_key("access-control-allow-origin"),
             "a hostile origin must not be granted read access"
         );
     }
 
     fn local(method: &str, uri: &str) -> axum::http::request::Builder {
-        Request::builder().method(method).uri(uri).header("host", "127.0.0.1:5678")
+        Request::builder()
+            .method(method)
+            .uri(uri)
+            .header("host", "127.0.0.1:5678")
     }
 
     /// Unauthenticated loopback mode: a hostile page can neither change state
@@ -485,7 +559,10 @@ mod web_auth_router_tests {
         assert_eq!(status(&app, post).await, StatusCode::FORBIDDEN);
         assert!(!vault.path().join("Notebooks/Inbox/pwned.md").exists());
 
-        let socket = local("GET", "/ws").header("origin", "https://evil.example").body(Body::empty()).unwrap();
+        let socket = local("GET", "/ws")
+            .header("origin", "https://evil.example")
+            .body(Body::empty())
+            .unwrap();
         assert_eq!(status(&app, socket).await, StatusCode::FORBIDDEN);
 
         let rebound = Request::get("/api/spaces")
@@ -494,7 +571,10 @@ mod web_auth_router_tests {
             .unwrap();
         assert_eq!(status(&app, rebound).await, StatusCode::FORBIDDEN);
 
-        let own = local("GET", "/api/spaces").header("origin", "http://127.0.0.1:5678").body(Body::empty()).unwrap();
+        let own = local("GET", "/api/spaces")
+            .header("origin", "http://127.0.0.1:5678")
+            .body(Body::empty())
+            .unwrap();
         assert_eq!(status(&app, own).await, StatusCode::OK);
     }
 
@@ -535,8 +615,16 @@ mod web_auth_router_tests {
             );
         }
         for path in ["/api/harness-sessions", "/api/workbench/hosts/native/dirs"] {
-            assert_eq!(status(&app, post(path, false)).await, StatusCode::FORBIDDEN, "{path}");
-            assert_ne!(status(&app, post(path, true)).await, StatusCode::FORBIDDEN, "{path}");
+            assert_eq!(
+                status(&app, post(path, false)).await,
+                StatusCode::FORBIDDEN,
+                "{path}"
+            );
+            assert_ne!(
+                status(&app, post(path, true)).await,
+                StatusCode::FORBIDDEN,
+                "{path}"
+            );
         }
         let preflight = Request::options("/api/harness-sessions/hs-none/send")
             .header("origin", "http://localhost:9999")
@@ -567,7 +655,9 @@ mod web_auth_router_tests {
         let state = Arc::new(state);
         let app = create_router(state.clone());
 
-        let url_token = local("GET", "/api/spaces?token=s3cret").body(Body::empty()).unwrap();
+        let url_token = local("GET", "/api/spaces?token=s3cret")
+            .body(Body::empty())
+            .unwrap();
         assert_eq!(status(&app, url_token).await, StatusCode::UNAUTHORIZED);
         let unauthed_mint = local("POST", "/api/ws-ticket").body(Body::empty()).unwrap();
         assert_eq!(status(&app, unauthed_mint).await, StatusCode::UNAUTHORIZED);
@@ -584,14 +674,31 @@ mod web_auth_router_tests {
             .unwrap()
             .to_string();
 
-        let with_ticket = |t: &str| local("GET", &format!("/ws?ticket={t}")).body(Body::empty()).unwrap();
+        let with_ticket = |t: &str| {
+            local("GET", &format!("/ws?ticket={t}"))
+                .body(Body::empty())
+                .unwrap()
+        };
         // A plain GET is not an upgrade, so the handler rejects it, but it got past auth.
-        assert_ne!(status(&app, with_ticket(&ticket)).await, StatusCode::UNAUTHORIZED);
-        assert_eq!(status(&app, with_ticket(&ticket)).await, StatusCode::UNAUTHORIZED, "replayed");
-        let ticket_elsewhere = local("GET", &format!("/api/spaces?ticket={}", state.ws_tickets.mint()))
-            .body(Body::empty())
-            .unwrap();
-        assert_eq!(status(&app, ticket_elsewhere).await, StatusCode::UNAUTHORIZED);
+        assert_ne!(
+            status(&app, with_ticket(&ticket)).await,
+            StatusCode::UNAUTHORIZED
+        );
+        assert_eq!(
+            status(&app, with_ticket(&ticket)).await,
+            StatusCode::UNAUTHORIZED,
+            "replayed"
+        );
+        let ticket_elsewhere = local(
+            "GET",
+            &format!("/api/spaces?ticket={}", state.ws_tickets.mint()),
+        )
+        .body(Body::empty())
+        .unwrap();
+        assert_eq!(
+            status(&app, ticket_elsewhere).await,
+            StatusCode::UNAUTHORIZED
+        );
     }
 
     /// Client routes get the PWA shell (never cached); unknown API paths 404 as JSON.
@@ -614,20 +721,39 @@ mod web_auth_router_tests {
         }
         let gz = app
             .clone()
-            .oneshot(Request::get("/assets/app-1.js").header("accept-encoding", "gzip").body(Body::empty()).unwrap())
+            .oneshot(
+                Request::get("/assets/app-1.js")
+                    .header("accept-encoding", "gzip")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
             .await
             .unwrap();
-        assert_eq!(gz.headers()["content-encoding"], "gzip", "static assets are compressed");
+        assert_eq!(
+            gz.headers()["content-encoding"],
+            "gzip",
+            "static assets are compressed"
+        );
         let sw = app.clone().oneshot(get("/sw.js")).await.unwrap();
         assert_eq!(sw.headers()["cache-control"], "no-cache");
         let asset = app.clone().oneshot(get("/assets/app-1.js")).await.unwrap();
         assert_eq!(asset.status(), StatusCode::OK);
-        let chunk = app.clone().oneshot(get("/assets/gone-123.js")).await.unwrap();
+        let chunk = app
+            .clone()
+            .oneshot(get("/assets/gone-123.js"))
+            .await
+            .unwrap();
         assert_eq!(chunk.status(), StatusCode::NOT_FOUND);
         for uri in ["/api/nope", "/ws/nope", "/mcp/nope", "/hooks/nope"] {
             let res = app.clone().oneshot(get(uri)).await.unwrap();
             assert_eq!(res.status(), StatusCode::NOT_FOUND, "{uri}");
-            assert!(res.headers()["content-type"].to_str().unwrap().starts_with("application/json"), "{uri}");
+            assert!(
+                res.headers()["content-type"]
+                    .to_str()
+                    .unwrap()
+                    .starts_with("application/json"),
+                "{uri}"
+            );
         }
     }
 
@@ -651,14 +777,22 @@ mod web_auth_router_tests {
             get("/api/note?path=../etc/passwd"),
             get("/api/note/pdf?path=../etc/passwd"),
             get("/api/note/export?path=../etc/passwd&format=html"),
-            json_req("POST", "/api/note/create", r#"{"folder":"../x","title":"t","content":""}"#),
+            json_req(
+                "POST",
+                "/api/note/create",
+                r#"{"folder":"../x","title":"t","content":""}"#,
+            ),
             json_req("PUT", "/api/note", r#"{"path":"../x.md","content":""}"#),
             json_req("PUT", "/api/note", r#"{"path":"/etc/hosts","content":""}"#),
         ] {
             let uri = req.uri().to_string();
             assert_eq!(status(&app, req).await, StatusCode::BAD_REQUEST, "{uri}");
         }
-        let created = json_req("POST", "/api/note/create", r#"{"title":"Hello","content":"hi"}"#);
+        let created = json_req(
+            "POST",
+            "/api/note/create",
+            r#"{"title":"Hello","content":"hi"}"#,
+        );
         assert_eq!(status(&app, created).await, StatusCode::OK);
         assert!(vault.path().join("Notebooks/Inbox/Hello.md").exists());
     }
@@ -670,8 +804,14 @@ mod web_auth_router_tests {
         std::fs::write(vault.path().join("Notebooks/pic.png"), b"x").unwrap();
         let app = create_router(Arc::new(WsState::new(vault.path().to_path_buf(), None)));
         let get = |uri: &str| Request::get(uri).body(Body::empty()).unwrap();
-        assert_eq!(status(&app, get("/api/note/pdf")).await, StatusCode::BAD_REQUEST);
-        assert_eq!(status(&app, get("/api/note/pdf?path=Missing")).await, StatusCode::NOT_FOUND);
+        assert_eq!(
+            status(&app, get("/api/note/pdf")).await,
+            StatusCode::BAD_REQUEST
+        );
+        assert_eq!(
+            status(&app, get("/api/note/pdf?path=Missing")).await,
+            StatusCode::NOT_FOUND
+        );
         assert_eq!(
             status(&app, get("/api/note/pdf?path=Notebooks/pic.png")).await,
             StatusCode::BAD_REQUEST
@@ -696,7 +836,10 @@ mod web_auth_router_tests {
     async fn note_export_endpoint_validates_its_input() {
         let (_vault, app) = export_vault().await;
         let get = |uri: &str| Request::get(uri).body(Body::empty()).unwrap();
-        assert_eq!(status(&app, get("/api/note/export")).await, StatusCode::BAD_REQUEST);
+        assert_eq!(
+            status(&app, get("/api/note/export")).await,
+            StatusCode::BAD_REQUEST
+        );
         assert_eq!(
             status(&app, get("/api/note/export?path=Missing&format=html")).await,
             StatusCode::NOT_FOUND
@@ -707,13 +850,21 @@ mod web_auth_router_tests {
             "an unknown format is the caller's mistake"
         );
         assert_eq!(
-            status(&app, get("/api/note/export?path=Notebooks/pic.png&format=html")).await,
+            status(
+                &app,
+                get("/api/note/export?path=Notebooks/pic.png&format=html")
+            )
+            .await,
             StatusCode::BAD_REQUEST
         );
         // A note that has nothing of the requested kind is a 400, not a 500.
         for format in ["csv", "xlsx", "json", "code"] {
             let uri = format!("/api/note/export?path=Prose&format={format}");
-            assert_eq!(status(&app, get(&uri)).await, StatusCode::BAD_REQUEST, "{uri}");
+            assert_eq!(
+                status(&app, get(&uri)).await,
+                StatusCode::BAD_REQUEST,
+                "{uri}"
+            );
         }
     }
 
@@ -725,7 +876,11 @@ mod web_auth_router_tests {
             ("md", "text/markdown", "md"),
             ("csv", "text/csv", "csv"),
             ("json", "application/json", "json"),
-            ("xlsx", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", "xlsx"),
+            (
+                "xlsx",
+                "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                "xlsx",
+            ),
             ("ipynb", "application/x-ipynb+json", "ipynb"),
         ] {
             let uri = format!("/api/note/export?path=Plan&format={format}");
@@ -735,14 +890,31 @@ mod web_auth_router_tests {
                 .await
                 .unwrap();
             assert_eq!(res.status(), StatusCode::OK, "{uri}");
-            assert!(res.headers()["content-type"].to_str().unwrap().starts_with(mime), "{uri}");
-            let disposition = res.headers()["content-disposition"].to_str().unwrap().to_owned();
-            assert!(disposition.contains(&format!("Plan.{ext}")), "{uri}: {disposition}");
+            assert!(
+                res.headers()["content-type"]
+                    .to_str()
+                    .unwrap()
+                    .starts_with(mime),
+                "{uri}"
+            );
+            let disposition = res.headers()["content-disposition"]
+                .to_str()
+                .unwrap()
+                .to_owned();
+            assert!(
+                disposition.contains(&format!("Plan.{ext}")),
+                "{uri}: {disposition}"
+            );
             // A router layer may rewrite no-store to no-cache; either keeps a
             // private note export out of shared caches.
             let cache = res.headers()["cache-control"].to_str().unwrap().to_owned();
-            assert!(cache.contains("no-store") || cache.contains("no-cache"), "{uri}: {cache}");
-            let body = axum::body::to_bytes(res.into_body(), 16 * 1024 * 1024).await.unwrap();
+            assert!(
+                cache.contains("no-store") || cache.contains("no-cache"),
+                "{uri}: {cache}"
+            );
+            let body = axum::body::to_bytes(res.into_body(), 16 * 1024 * 1024)
+                .await
+                .unwrap();
             assert!(!body.is_empty(), "{uri}");
         }
     }
@@ -755,7 +927,11 @@ mod web_auth_router_tests {
             return;
         }
         let (_vault, app) = export_vault().await;
-        for uri in ["/api/note/pdf?path=Plan", "/api/note/export?path=Plan&format=pdf", "/api/note/export?path=Plan"] {
+        for uri in [
+            "/api/note/pdf?path=Plan",
+            "/api/note/export?path=Plan&format=pdf",
+            "/api/note/export?path=Plan",
+        ] {
             let res = app
                 .clone()
                 .oneshot(Request::get(uri).body(Body::empty()).unwrap())
@@ -763,8 +939,15 @@ mod web_auth_router_tests {
                 .unwrap();
             assert_eq!(res.status(), StatusCode::OK, "{uri}");
             assert_eq!(res.headers()["content-type"], "application/pdf", "{uri}");
-            assert!(res.headers()["content-disposition"].to_str().unwrap().contains("Plan.pdf"));
-            let body = axum::body::to_bytes(res.into_body(), 16 * 1024 * 1024).await.unwrap();
+            assert!(
+                res.headers()["content-disposition"]
+                    .to_str()
+                    .unwrap()
+                    .contains("Plan.pdf")
+            );
+            let body = axum::body::to_bytes(res.into_body(), 16 * 1024 * 1024)
+                .await
+                .unwrap();
             assert!(body.starts_with(b"%PDF"), "{uri}");
         }
     }
@@ -808,7 +991,10 @@ mod security_header_tests {
             assert_eq!(h["referrer-policy"], "no-referrer", "{uri}");
             assert_eq!(h["x-frame-options"], "DENY", "{uri}");
             let csp = h["content-security-policy"].to_str().unwrap();
-            assert!(csp.contains("default-src 'self'") && csp.contains("frame-ancestors 'none'"), "{uri}: {csp}");
+            assert!(
+                csp.contains("default-src 'self'") && csp.contains("frame-ancestors 'none'"),
+                "{uri}: {csp}"
+            );
         }
     }
 
@@ -816,15 +1002,27 @@ mod security_header_tests {
     async fn the_served_shell_is_runnable_under_its_own_policy() {
         let (app, _v, _w) = app_with_vault(&[]);
         let res = get(&app, "/").await;
-        let csp = res.headers()["content-security-policy"].to_str().unwrap().to_string();
+        let csp = res.headers()["content-security-policy"]
+            .to_str()
+            .unwrap()
+            .to_string();
         let html = String::from_utf8(
-            axum::body::to_bytes(res.into_body(), usize::MAX).await.unwrap().to_vec(),
+            axum::body::to_bytes(res.into_body(), usize::MAX)
+                .await
+                .unwrap()
+                .to_vec(),
         )
         .unwrap();
         for hash in security_headers::inline_script_hashes(&html) {
-            assert!(csp.contains(&format!("'{hash}'")), "inline script not allowed: {hash}");
+            assert!(
+                csp.contains(&format!("'{hash}'")),
+                "inline script not allowed: {hash}"
+            );
         }
-        let script_src = csp.split(';').find(|d| d.trim().starts_with("script-src")).unwrap();
+        let script_src = csp
+            .split(';')
+            .find(|d| d.trim().starts_with("script-src"))
+            .unwrap();
         assert!(!script_src.contains("'unsafe-inline'"), "{script_src}");
     }
 
@@ -841,16 +1039,26 @@ mod security_header_tests {
     #[tokio::test]
     async fn the_socket_host_of_the_request_is_allowed_in_connect_src() {
         let (app, _v, _w) = app_with_vault(&[]);
-        let req = Request::get("/").header("host", "hq.example.ts.net:8443").body(Body::empty()).unwrap();
+        let req = Request::get("/")
+            .header("host", "hq.example.ts.net:8443")
+            .body(Body::empty())
+            .unwrap();
         let res = app.clone().oneshot(req).await.unwrap();
-        let csp = res.headers()["content-security-policy"].to_str().unwrap().to_string();
-        assert!(csp.contains("ws://hq.example.ts.net:8443 wss://hq.example.ts.net:8443"), "{csp}");
+        let csp = res.headers()["content-security-policy"]
+            .to_str()
+            .unwrap()
+            .to_string();
+        assert!(
+            csp.contains("ws://hq.example.ts.net:8443 wss://hq.example.ts.net:8443"),
+            "{csp}"
+        );
     }
 
     /// Reads the real build when it exists (`bun run build` in apps/hq-web).
     #[test]
     fn a_built_shell_only_loads_same_origin_assets_allowed_by_the_policy() {
-        let dist = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../apps/hq-web/dist/client");
+        let dist =
+            std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../apps/hq-web/dist/client");
         let Ok(bytes) = std::fs::read(dist.join("index.html")) else {
             built_app_missing("index.html");
             return;
@@ -864,39 +1072,64 @@ mod security_header_tests {
             .skip(1)
             .filter(|t| !t.split('>').next().unwrap_or("").contains("src="))
             .count();
-        assert!(inline_count >= 1 && hashes.len() == inline_count, "{inline_count} inline scripts, {} hashes", hashes.len());
+        assert!(
+            inline_count >= 1 && hashes.len() == inline_count,
+            "{inline_count} inline scripts, {} hashes",
+            hashes.len()
+        );
         for hash in &hashes {
-            assert!(csp.contains(&format!("'{hash}'")), "inline script missing from CSP");
+            assert!(
+                csp.contains(&format!("'{hash}'")),
+                "inline script missing from CSP"
+            );
         }
         // The TanStack stream barrier holds raw NUL bytes; the hash must be of the parser's text.
         if html.contains('\u{FFFD}') || bytes.contains(&0) {
             let raw_hash = |t: &str| {
                 use base64::Engine;
                 use sha2::Digest;
-                format!("sha256-{}", base64::engine::general_purpose::STANDARD.encode(sha2::Sha256::digest(t.as_bytes())))
+                format!(
+                    "sha256-{}",
+                    base64::engine::general_purpose::STANDARD
+                        .encode(sha2::Sha256::digest(t.as_bytes()))
+                )
             };
-            let raw_script = html.split("<script class=\"$tsr\" id=\"$tsr-stream-barrier\">").nth(1).and_then(|r| r.split("</script>").next());
+            let raw_script = html
+                .split("<script class=\"$tsr\" id=\"$tsr-stream-barrier\">")
+                .nth(1)
+                .and_then(|r| r.split("</script>").next());
             if let Some(raw) = raw_script.filter(|r| r.contains('\0')) {
-                assert!(!csp.contains(&raw_hash(raw)), "the raw-byte hash must not be what is served");
+                assert!(
+                    !csp.contains(&raw_hash(raw)),
+                    "the raw-byte hash must not be what is served"
+                );
             }
         }
         for attr in ["src=\"", "href=\""] {
             for part in html.split(attr).skip(1) {
                 let url = part.split('"').next().unwrap();
-                assert!(url.starts_with('/') && !url.starts_with("//"), "cross-origin or inline load: {url}");
+                assert!(
+                    url.starts_with('/') && !url.starts_with("//"),
+                    "cross-origin or inline load: {url}"
+                );
             }
         }
-        assert!(!html.contains("onclick="), "inline event handlers are blocked by the policy");
+        assert!(
+            !html.contains("onclick="),
+            "inline event handlers are blocked by the policy"
+        );
     }
 
     /// `nosniff` makes a browser refuse a worker script served with a non-JS type.
     #[tokio::test]
     async fn the_built_pdf_worker_is_served_as_javascript() {
-        let dist = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../apps/hq-web/dist/client");
-        let Some(worker) = std::fs::read_dir(dist.join("assets"))
-            .ok()
-            .and_then(|d| d.filter_map(|e| e.ok()).map(|e| e.file_name().to_string_lossy().into_owned()).find(|n| n.starts_with("pdf.worker")))
-        else {
+        let dist =
+            std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../apps/hq-web/dist/client");
+        let Some(worker) = std::fs::read_dir(dist.join("assets")).ok().and_then(|d| {
+            d.filter_map(|e| e.ok())
+                .map(|e| e.file_name().to_string_lossy().into_owned())
+                .find(|n| n.starts_with("pdf.worker"))
+        }) else {
             built_app_missing("pdf.worker asset");
             return;
         };
@@ -924,13 +1157,21 @@ mod security_header_tests {
             let res = get(&app, &format!("/api/vault-asset?path={name}")).await;
             assert_eq!(res.status(), StatusCode::OK, "{name}");
             assert_eq!(res.headers()["content-disposition"], "attachment", "{name}");
-            assert_eq!(res.headers()["content-security-policy"], "sandbox", "{name}");
+            assert_eq!(
+                res.headers()["content-security-policy"],
+                "sandbox",
+                "{name}"
+            );
             assert_eq!(res.headers()["x-content-type-options"], "nosniff", "{name}");
         }
         for name in ["photo.png", "note.txt"] {
             let res = get(&app, &format!("/api/vault-asset?path={name}")).await;
             assert!(!res.headers().contains_key("content-disposition"), "{name}");
-            assert_ne!(res.headers()["content-security-policy"], "sandbox", "{name}");
+            assert_ne!(
+                res.headers()["content-security-policy"],
+                "sandbox",
+                "{name}"
+            );
         }
     }
 }

@@ -48,7 +48,9 @@ pub async fn start(
     };
     eprintln!("hq chat: remote mode via {}", target.http_base);
     if model_override.is_some() || permission_preset.is_some() || tui {
-        eprintln!("hq chat: --model, --permission-preset and --tui are ignored in remote mode (the daemon decides).");
+        eprintln!(
+            "hq chat: --model, --permission-preset and --tui are ignored in remote mode (the daemon decides)."
+        );
     }
     eprintln!("hq chat: tools run on the daemon's host, in the daemon's working directory.");
     match prompt {
@@ -187,39 +189,37 @@ async fn check_provider_health(config: &HqConfig, model_override: Option<&str>, 
                 let model_name = effective_model
                     .strip_prefix("ollama/")
                     .unwrap_or(&effective_model);
-                if let Ok(resp) = client
-                    .get("http://localhost:11434/api/tags")
-                    .send()
-                    .await
-                    && let Ok(json) = resp.json::<serde_json::Value>().await {
-                        let pulled = json
-                            .get("models")
-                            .and_then(|m| m.as_array())
-                            .map(|arr| {
-                                arr.iter().any(|m| {
-                                    m.get("name")
-                                        .and_then(|n| n.as_str())
-                                        .map(|n| n.starts_with(model_name))
-                                        .unwrap_or(false)
-                                })
+                if let Ok(resp) = client.get("http://localhost:11434/api/tags").send().await
+                    && let Ok(json) = resp.json::<serde_json::Value>().await
+                {
+                    let pulled = json
+                        .get("models")
+                        .and_then(|m| m.as_array())
+                        .map(|arr| {
+                            arr.iter().any(|m| {
+                                m.get("name")
+                                    .and_then(|n| n.as_str())
+                                    .map(|n| n.starts_with(model_name))
+                                    .unwrap_or(false)
                             })
-                            .unwrap_or(false);
+                        })
+                        .unwrap_or(false);
 
-                        if !pulled {
-                            println!(
-                                "\x1b[{warn}m  \u{26a0} Model '{model_name}' not found in Ollama.\x1b[0m",
-                                warn = render::fg(&theme.warning),
-                            );
-                            println!(
-                                "\x1b[{dim}m  Pull it: `ollama pull {model_name}`\x1b[0m",
-                                dim = render::fg(&theme.text_dim),
-                            );
-                            println!(
-                                "\x1b[{dim}m  Or switch provider: /model deepseek/deepseek-chat\x1b[0m",
-                                dim = render::fg(&theme.text_dim),
-                            );
-                        }
+                    if !pulled {
+                        println!(
+                            "\x1b[{warn}m  \u{26a0} Model '{model_name}' not found in Ollama.\x1b[0m",
+                            warn = render::fg(&theme.warning),
+                        );
+                        println!(
+                            "\x1b[{dim}m  Pull it: `ollama pull {model_name}`\x1b[0m",
+                            dim = render::fg(&theme.text_dim),
+                        );
+                        println!(
+                            "\x1b[{dim}m  Or switch provider: /model deepseek/deepseek-chat\x1b[0m",
+                            dim = render::fg(&theme.text_dim),
+                        );
                     }
+                }
             }
         }
     }

@@ -107,7 +107,6 @@ impl VaultClient {
         crate::reorg::trash_note(&self.vault_path, rel_path, dry_run)
     }
 
-
     /// Set and/or remove frontmatter keys on a note, preserving the body.
     pub fn update_frontmatter(
         &self,

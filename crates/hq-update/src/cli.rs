@@ -146,10 +146,15 @@ async fn within_deadline<T>(
 /// The updater only manages server installs set up by `deploy/install.sh`, which write the
 /// update config. Anything else gets told how its own channel upgrades.
 fn unmanaged_hint(exe: Option<&Path>, in_container: bool) -> String {
-    let path = exe.map(|p| p.to_string_lossy().into_owned()).unwrap_or_default();
+    let path = exe
+        .map(|p| p.to_string_lossy().into_owned())
+        .unwrap_or_default();
     let how = if in_container {
         "This is a container image. Update it with: docker pull ghcr.io/calvinmagezi/hq, then recreate the container (your data volume is kept)."
-    } else if path.contains("/Cellar/") || path.contains("/homebrew/") || path.contains("/linuxbrew/") {
+    } else if path.contains("/Cellar/")
+        || path.contains("/homebrew/")
+        || path.contains("/linuxbrew/")
+    {
         "This install is managed by Homebrew. Update it with: brew update && brew upgrade agent-hq"
     } else if path.contains("/.cargo/bin/") {
         "This install came from cargo. Update it with: cargo install --locked --git https://github.com/CalvinMagezi/hq hq-cli --force"
@@ -288,7 +293,9 @@ mod unmanaged_hint_tests {
     #[test]
     fn names_the_right_upgrade_path_per_install_channel() {
         let hint = |p: &str, c: bool| unmanaged_hint(Some(Path::new(p)), c);
-        assert!(hint("/opt/homebrew/Cellar/agent-hq/1/bin/hq", false).contains("brew upgrade agent-hq"));
+        assert!(
+            hint("/opt/homebrew/Cellar/agent-hq/1/bin/hq", false).contains("brew upgrade agent-hq")
+        );
         assert!(hint("/home/u/.local/bin/hq", false).contains("install.sh"));
         assert!(hint("/home/u/.cargo/bin/hq", false).contains("cargo install"));
         assert!(hint("/usr/local/bin/hq", false).contains("deploy/install.sh"));

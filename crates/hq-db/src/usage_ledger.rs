@@ -157,8 +157,15 @@ pub fn period_bounds(period: BudgetPeriod, now: i64) -> (i64, i64) {
         BudgetPeriod::Week => (week, week + 7 * SECS_PER_DAY),
         BudgetPeriod::Month => {
             let dt = Utc.timestamp_opt(month, 0).single().unwrap_or_default();
-            let (y, m) = if dt.month() == 12 { (dt.year() + 1, 1) } else { (dt.year(), dt.month() + 1) };
-            let next = Utc.with_ymd_and_hms(y, m, 1, 0, 0, 0).single().map_or(month, |t| t.timestamp());
+            let (y, m) = if dt.month() == 12 {
+                (dt.year() + 1, 1)
+            } else {
+                (dt.year(), dt.month() + 1)
+            };
+            let next = Utc
+                .with_ymd_and_hms(y, m, 1, 0, 0, 0)
+                .single()
+                .map_or(month, |t| t.timestamp());
             (month, next)
         }
     }
@@ -191,7 +198,12 @@ pub fn scope_spend(conn: &Connection, scope: &BudgetScope, since: i64, until: i6
 }
 
 /// Spend per hour for the calls a scope covers, as `(hour start, dollars)`, oldest first.
-pub fn spend_by_hour(conn: &Connection, scope: &BudgetScope, since: i64, until: i64) -> Result<Vec<(i64, f64)>> {
+pub fn spend_by_hour(
+    conn: &Connection,
+    scope: &BudgetScope,
+    since: i64,
+    until: i64,
+) -> Result<Vec<(i64, f64)>> {
     let (clause, value) = scope_clause(scope);
     let sql = format!(
         "SELECT recorded_at / 3600 * 3600 AS hour, SUM(cost_usd) FROM task_outcomes
@@ -201,14 +213,23 @@ pub fn spend_by_hour(conn: &Connection, scope: &BudgetScope, since: i64, until: 
     let map = |r: &rusqlite::Row| Ok((r.get::<_, i64>(0)?, r.get::<_, f64>(1)?));
     let mut stmt = conn.prepare(&sql)?;
     let rows = match value {
-        Some(v) => stmt.query_map(params![since, until, v], map)?.collect::<rusqlite::Result<Vec<_>>>()?,
-        None => stmt.query_map(params![since, until], map)?.collect::<rusqlite::Result<Vec<_>>>()?,
+        Some(v) => stmt
+            .query_map(params![since, until, v], map)?
+            .collect::<rusqlite::Result<Vec<_>>>()?,
+        None => stmt
+            .query_map(params![since, until], map)?
+            .collect::<rusqlite::Result<Vec<_>>>()?,
     };
     Ok(rows)
 }
 
 /// The groups that cost the most since `since`, biggest first.
-pub fn top_drivers(conn: &Connection, group: GroupBy, since: i64, limit: usize) -> Result<Vec<UsageRow>> {
+pub fn top_drivers(
+    conn: &Connection,
+    group: GroupBy,
+    since: i64,
+    limit: usize,
+) -> Result<Vec<UsageRow>> {
     let mut rows = grouped_usage(conn, since, group)?;
     rows.sort_by(|a, b| b.cost_usd.total_cmp(&a.cost_usd));
     rows.truncate(limit);
@@ -386,8 +407,14 @@ mod tests {
         put(&conn, NOW - 10 * SECS_PER_DAY, "table", "chat", 4.0, 0);
         put(&conn, NOW - 30 * SECS_PER_DAY, "table", "chat", 8.0, 0);
         let w = ledger_windows(&conn, "openrouter", NOW).unwrap();
-        assert_eq!((w.today, w.week, w.month, w.unpriced_calls), (1.0, 1.0, 5.0, 1));
-        assert_eq!(ledger_windows(&conn, "nobody", NOW).unwrap(), LedgerWindows::default());
+        assert_eq!(
+            (w.today, w.week, w.month, w.unpriced_calls),
+            (1.0, 1.0, 5.0, 1)
+        );
+        assert_eq!(
+            ledger_windows(&conn, "nobody", NOW).unwrap(),
+            LedgerWindows::default()
+        );
     }
 
     #[test]
@@ -406,9 +433,15 @@ mod tests {
             downgrade_model: None,
         };
         let global = budget_status(&conn, &mk("global", 10.0), NOW).unwrap();
-        assert_eq!((global.spent_usd, global.state), (5.0, BudgetState::Warning));
+        assert_eq!(
+            (global.spent_usd, global.state),
+            (5.0, BudgetState::Warning)
+        );
         let memory = budget_status(&conn, &mk("origin:memory", 2.0), NOW).unwrap();
-        assert_eq!((memory.spent_usd, memory.state), (2.0, BudgetState::Exceeded));
+        assert_eq!(
+            (memory.spent_usd, memory.state),
+            (2.0, BudgetState::Exceeded)
+        );
         let none = budget_status(&conn, &mk("model:other", 1.0), NOW).unwrap();
         assert_eq!((none.spent_usd, none.state), (0.0, BudgetState::Ok));
     }
@@ -417,7 +450,10 @@ mod tests {
     fn periods_end_where_the_next_one_starts() {
         let (start, end) = period_bounds(BudgetPeriod::Month, NOW);
         assert_eq!(end - start, 30 * SECS_PER_DAY);
-        assert_eq!(period_bounds(BudgetPeriod::Week, NOW).1 - period_bounds(BudgetPeriod::Week, NOW).0, 7 * SECS_PER_DAY);
+        assert_eq!(
+            period_bounds(BudgetPeriod::Week, NOW).1 - period_bounds(BudgetPeriod::Week, NOW).0,
+            7 * SECS_PER_DAY
+        );
         // December rolls into January of the next year.
         let dec = 1_798_761_600 + 5 * SECS_PER_DAY; // 2027-01-01 + 5d is January; use a December ts below.
         let dec_ts = dec - 20 * SECS_PER_DAY;

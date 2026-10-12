@@ -20,21 +20,41 @@ fn audit(conn: &Connection, task: &Task, action: &str, actor: &str, detail: &str
     conn.execute(
         "INSERT INTO task_audit (task_id, display_id, title, action, actor, detail) \
          VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
-        params![task.id, task.display_id, task.title, action, clean_actor(actor), detail],
+        params![
+            task.id,
+            task.display_id,
+            task.title,
+            action,
+            clean_actor(actor),
+            detail
+        ],
     )?;
     Ok(())
 }
 
 fn clean_actor(actor: &str) -> String {
-    let cleaned: String = actor.chars().filter(|c| !c.is_control()).take(120).collect();
-    if cleaned.trim().is_empty() { "unknown".to_string() } else { cleaned.trim().to_string() }
+    let cleaned: String = actor
+        .chars()
+        .filter(|c| !c.is_control())
+        .take(120)
+        .collect();
+    if cleaned.trim().is_empty() {
+        "unknown".to_string()
+    } else {
+        cleaned.trim().to_string()
+    }
 }
 
 /// Hides a task, and with `cascade` its sub-tasks, from lists. Everything it holds is
 /// kept. A task with sub-tasks needs `cascade`. Its idempotency key is freed, so a
 /// retried create after a deliberate delete makes a new task, and live leases end.
 /// Returns the ids archived.
-pub fn archive_task(conn: &Connection, id: &str, cascade: bool, actor: &str) -> Result<Vec<String>> {
+pub fn archive_task(
+    conn: &Connection,
+    id: &str,
+    cascade: bool,
+    actor: &str,
+) -> Result<Vec<String>> {
     in_write_tx(conn, |conn| {
         let task = get_task(conn, id)?.ok_or_else(|| anyhow::anyhow!("task {id} not found"))?;
         if task.archived_at.is_some() {
@@ -52,8 +72,13 @@ pub fn archive_task(conn: &Connection, id: &str, cascade: bool, actor: &str) -> 
         let mut archived = children;
         archived.push(task.id.clone());
         for task_id in &archived {
-            let member = get_task(conn, task_id)?.ok_or_else(|| anyhow::anyhow!("task {task_id} vanished"))?;
-            let detail = member.external_id.as_deref().map(|e| format!("external_id {e}")).unwrap_or_default();
+            let member = get_task(conn, task_id)?
+                .ok_or_else(|| anyhow::anyhow!("task {task_id} vanished"))?;
+            let detail = member
+                .external_id
+                .as_deref()
+                .map(|e| format!("external_id {e}"))
+                .unwrap_or_default();
             conn.execute(
                 "UPDATE tasks SET archived_at = ?1, updated_at = ?1, external_id = NULL, external_space_id = NULL \
                  WHERE id = ?2",
@@ -78,12 +103,22 @@ pub fn restore_task(conn: &Connection, id: &str, actor: &str) -> Result<Task> {
         let Some(stamp) = task.archived_at.clone() else {
             anyhow::bail!("{} is not archived", task.display_id);
         };
-        if let Some(parent) = task.parent_task_id.as_deref().map(|p| get_task(conn, p)).transpose()?.flatten()
+        if let Some(parent) = task
+            .parent_task_id
+            .as_deref()
+            .map(|p| get_task(conn, p))
+            .transpose()?
+            .flatten()
             && parent.archived_at.is_some()
         {
-            anyhow::bail!("{} is a sub-task of the archived {}; restore the parent first", task.display_id, parent.display_id);
+            anyhow::bail!(
+                "{} is a sub-task of the archived {}; restore the parent first",
+                task.display_id,
+                parent.display_id
+            );
         }
-        let mut stmt = conn.prepare("SELECT id FROM tasks WHERE parent_task_id = ?1 AND archived_at = ?2")?;
+        let mut stmt =
+            conn.prepare("SELECT id FROM tasks WHERE parent_task_id = ?1 AND archived_at = ?2")?;
         let together = stmt
             .query_map(params![task.id, stamp], |r| r.get::<_, String>(0))?
             .collect::<rusqlite::Result<Vec<_>>>()?;
@@ -108,14 +143,23 @@ pub fn purge_task(conn: &Connection, id: &str, actor: &str) -> Result<Vec<String
     in_write_tx(conn, |conn| {
         let task = get_task(conn, id)?.ok_or_else(|| anyhow::anyhow!("task {id} not found"))?;
         if task.archived_at.is_none() {
-            anyhow::bail!("{} is not archived; archive it first, then purge it", task.display_id);
+            anyhow::bail!(
+                "{} is not archived; archive it first, then purge it",
+                task.display_id
+            );
         }
-        let mut stmt = conn.prepare("SELECT id, archived_at IS NULL FROM tasks WHERE parent_task_id = ?1")?;
+        let mut stmt =
+            conn.prepare("SELECT id, archived_at IS NULL FROM tasks WHERE parent_task_id = ?1")?;
         let children = stmt
-            .query_map(params![task.id], |r| Ok((r.get::<_, String>(0)?, r.get::<_, bool>(1)?)))?
+            .query_map(params![task.id], |r| {
+                Ok((r.get::<_, String>(0)?, r.get::<_, bool>(1)?))
+            })?
             .collect::<rusqlite::Result<Vec<_>>>()?;
         if children.iter().any(|(_, active)| *active) {
-            anyhow::bail!("{} has active sub-tasks; archive or restore them first", task.display_id);
+            anyhow::bail!(
+                "{} has active sub-tasks; archive or restore them first",
+                task.display_id
+            );
         }
         let mut removed: Vec<String> = children.into_iter().map(|(child, _)| child).collect();
         removed.push(task.id.clone());
@@ -123,8 +167,18 @@ pub fn purge_task(conn: &Connection, id: &str, actor: &str) -> Result<Vec<String
             if let Some(member) = get_task(conn, task_id)? {
                 audit(conn, &member, "purged", actor, "")?;
             }
-            for table in ["task_comments", "task_tags", "task_assignees", "task_events", "task_work_sessions", "task_checkpoints"] {
-                conn.execute(&format!("DELETE FROM {table} WHERE task_id = ?1"), params![task_id])?;
+            for table in [
+                "task_comments",
+                "task_tags",
+                "task_assignees",
+                "task_events",
+                "task_work_sessions",
+                "task_checkpoints",
+            ] {
+                conn.execute(
+                    &format!("DELETE FROM {table} WHERE task_id = ?1"),
+                    params![task_id],
+                )?;
             }
             conn.execute(
                 "DELETE FROM task_dependencies WHERE task_id = ?1 OR depends_on_task_id = ?1",
@@ -142,9 +196,17 @@ pub fn purge_task(conn: &Connection, id: &str, actor: &str) -> Result<Vec<String
 }
 
 /// The most recent removals and restores, newest first, for one task or for all.
-pub fn list_task_audit(conn: &Connection, task_ref: Option<&str>, limit: usize) -> Result<Vec<AuditEntry>> {
+pub fn list_task_audit(
+    conn: &Connection,
+    task_ref: Option<&str>,
+    limit: usize,
+) -> Result<Vec<AuditEntry>> {
     let task_id = match task_ref {
-        Some(r) => Some(get_task(conn, r)?.map(|t| t.id).unwrap_or_else(|| r.to_string())),
+        Some(r) => Some(
+            get_task(conn, r)?
+                .map(|t| t.id)
+                .unwrap_or_else(|| r.to_string()),
+        ),
         None => None,
     };
     let mut stmt = conn.prepare(&format!(

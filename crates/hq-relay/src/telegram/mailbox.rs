@@ -9,7 +9,6 @@ use std::sync::Arc;
 use teloxide::prelude::*;
 use teloxide::types::{InlineKeyboardButton, InlineKeyboardMarkup, KeyboardButton, KeyboardMarkup};
 
-
 use super::access::get_notification_chat_id;
 
 // ─── Value-bus nudge approval (inline keyboard, not reply-keyboard pills) ──
@@ -259,7 +258,9 @@ pub async fn run_mailbox_poller(vault_path: Arc<std::path::PathBuf>, bot_token: 
     loop {
         interval.tick().await;
         // Resolved once per tick; every send in this tick goes to this chat.
-        let relay = hq_core::config::HqConfig::load().map(|c| c.relay).unwrap_or_default();
+        let relay = hq_core::config::HqConfig::load()
+            .map(|c| c.relay)
+            .unwrap_or_default();
         let poller = Poller {
             bot: &bot,
             vault_path: &vault_path,
@@ -304,7 +305,11 @@ impl Poller<'_> {
         // Categories Discord owns are re-enqueued for its poller, before the
         // gate, so they are not gated and audit-logged twice.
         #[cfg(feature = "discord")]
-        if crate::discord_channels::telegram_defers_to_discord(self.vault_path, &msg, chrono::Utc::now()) {
+        if crate::discord_channels::telegram_defers_to_discord(
+            self.vault_path,
+            &msg,
+            chrono::Utc::now(),
+        ) {
             let _ = hq_core::mailbox::send_message(self.vault_path, &msg);
             return;
         }
@@ -328,7 +333,9 @@ impl Poller<'_> {
             // Urgent ones wait for the next tick with a chat; the rest drop.
             None if is_urgent => {
                 save_pending_notif(self.vault_path, &to_send);
-                tracing::info!("mailbox-poller: no active chat_id, queued notification for later delivery");
+                tracing::info!(
+                    "mailbox-poller: no active chat_id, queued notification for later delivery"
+                );
             }
             None => {}
         }
@@ -361,7 +368,12 @@ impl Poller<'_> {
             KeyboardButton::new(format!("skip {token}")),
         ]])
         .resize_keyboard();
-        if let Err(e) = self.bot.send_message(chat, &msg.content).reply_markup(keyboard).await {
+        if let Err(e) = self
+            .bot
+            .send_message(chat, &msg.content)
+            .reply_markup(keyboard)
+            .await
+        {
             tracing::warn!(error = %e, "mailbox-poller: email-nudge send failed");
         }
         true

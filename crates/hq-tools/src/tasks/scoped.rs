@@ -23,7 +23,12 @@ use crate::util::generate_id;
 /// Tools whose only input is one task id under `id` or `task_id`, read-only.
 const TASK_READ_TOOLS: &[&str] = &["task_get", "task_comment_list"];
 /// Tools that change one task, so the task must be in the caller's own space.
-const TASK_WRITE_TOOLS: &[&str] = &["task_update", "task_delete", "task_restore", "task_comment_add"];
+const TASK_WRITE_TOOLS: &[&str] = &[
+    "task_update",
+    "task_delete",
+    "task_restore",
+    "task_comment_add",
+];
 
 struct ScopedTaskTool {
     inner: Box<dyn HqTool>,
@@ -229,7 +234,10 @@ impl ScopedTaskTool {
     /// caller's `limit` and `offset` apply to what it may see. Otherwise `total` and
     /// `has_more` would describe tasks in spaces it cannot read.
     async fn scoped_task_list(&self, args: Value) -> Result<Value> {
-        let page_size = args.get("limit").and_then(Value::as_u64).unwrap_or(DEFAULT_SCOPED_PAGE) as usize;
+        let page_size = args
+            .get("limit")
+            .and_then(Value::as_u64)
+            .unwrap_or(DEFAULT_SCOPED_PAGE) as usize;
         let offset = args.get("offset").and_then(Value::as_u64).unwrap_or(0) as usize;
         let mut visible: Vec<Value> = Vec::new();
         let mut inner_args = args;
@@ -251,7 +259,11 @@ impl ScopedTaskTool {
             }
         }
         let total = visible.len();
-        let rows: Vec<Value> = visible.into_iter().skip(offset).take(page_size.max(1)).collect();
+        let rows: Vec<Value> = visible
+            .into_iter()
+            .skip(offset)
+            .take(page_size.max(1))
+            .collect();
         Ok(json!({
             "count": rows.len(),
             "total": total,
@@ -263,7 +275,12 @@ impl ScopedTaskTool {
 }
 
 /// Parts of a `task_create` reply that name tasks, chats or notes outside the caller's own space.
-const CREATE_EXTRAS: &[&str] = &["links", "similar_open_tasks", "similar_note", "suggested_estimate"];
+const CREATE_EXTRAS: &[&str] = &[
+    "links",
+    "similar_open_tasks",
+    "similar_note",
+    "suggested_estimate",
+];
 
 /// Which machine, directory and branch an agent worked in, and under which lease,
 /// is for the owner. A restricted audience sees what happened and when, not where.
@@ -274,8 +291,14 @@ fn strip_work_details(task: &mut Value) {
         obj.remove("links");
         obj.remove("checkpoint");
     }
-    let events = task.get_mut("lifecycle_events").and_then(Value::as_array_mut);
-    for event in events.into_iter().flatten().filter_map(Value::as_object_mut) {
+    let events = task
+        .get_mut("lifecycle_events")
+        .and_then(Value::as_array_mut);
+    for event in events
+        .into_iter()
+        .flatten()
+        .filter_map(Value::as_object_mut)
+    {
         event.remove("actor");
         event.remove("work_session_id");
     }
@@ -569,12 +592,20 @@ mod tests {
         .await
         .unwrap();
         let text = made.to_string();
-        assert!(!text.contains(secret["display_id"].as_str().unwrap()), "{text}");
+        assert!(
+            !text.contains(secret["display_id"].as_str().unwrap()),
+            "{text}"
+        );
         for key in CREATE_EXTRAS {
             assert!(made.get(*key).is_none(), "{key} leaked: {text}");
         }
-        let links = f.db.with_conn(|c| t::list_task_links(c, made["id"].as_str().unwrap())).unwrap();
-        assert!(links.is_empty(), "the link a restricted caller asked for was not recorded");
+        let links =
+            f.db.with_conn(|c| t::list_task_links(c, made["id"].as_str().unwrap()))
+                .unwrap();
+        assert!(
+            links.is_empty(),
+            "the link a restricted caller asked for was not recorded"
+        );
     }
 
     #[tokio::test]
@@ -588,14 +619,30 @@ mod tests {
             .unwrap();
         assert!(claim["lease"].is_string());
         let seen = call(&bob, "task_get", json!({ "id": id })).await.unwrap();
-        assert!(seen.get("work_sessions").is_none() && seen.get("held_by").is_none(), "{seen}");
-        assert!(seen.get("links").is_none(), "links name chats, sessions and notes the audience may not see");
-        assert!(seen.get("checkpoint").is_none(), "a checkpoint names files and actors");
+        assert!(
+            seen.get("work_sessions").is_none() && seen.get("held_by").is_none(),
+            "{seen}"
+        );
+        assert!(
+            seen.get("links").is_none(),
+            "links name chats, sessions and notes the audience may not see"
+        );
+        assert!(
+            seen.get("checkpoint").is_none(),
+            "a checkpoint names files and actors"
+        );
         let events = seen["lifecycle_events"].as_array().unwrap();
         assert!(!events.is_empty());
-        assert!(events.iter().all(|e| e.get("actor").is_none() && e.get("work_session_id").is_none()));
+        assert!(
+            events
+                .iter()
+                .all(|e| e.get("actor").is_none() && e.get("work_session_id").is_none())
+        );
         let owner = call(&open, "task_get", json!({ "id": id })).await.unwrap();
-        assert_eq!(owner["held_by"]["cwd"], "/srv/app/secret", "the owner still sees it");
+        assert_eq!(
+            owner["held_by"]["cwd"], "/srv/app/secret",
+            "the owner still sees it"
+        );
     }
 
     #[tokio::test]
@@ -621,11 +668,21 @@ mod tests {
             add(&bob, &format!("bob {n}")).await;
         }
 
-        let first = call(&bob, "task_list", json!({ "limit": 2 })).await.unwrap();
-        assert_eq!((first["count"].as_i64(), first["total"].as_i64()), (Some(2), Some(3)));
+        let first = call(&bob, "task_list", json!({ "limit": 2 }))
+            .await
+            .unwrap();
+        assert_eq!(
+            (first["count"].as_i64(), first["total"].as_i64()),
+            (Some(2), Some(3))
+        );
         assert_eq!(first["has_more"], json!(true));
-        let rest = call(&bob, "task_list", json!({ "limit": 2, "offset": 2 })).await.unwrap();
-        assert_eq!((rest["count"].as_i64(), rest["has_more"].clone()), (Some(1), json!(false)));
+        let rest = call(&bob, "task_list", json!({ "limit": 2, "offset": 2 }))
+            .await
+            .unwrap();
+        assert_eq!(
+            (rest["count"].as_i64(), rest["has_more"].clone()),
+            (Some(1), json!(false))
+        );
         let titles: Vec<&str> = first["tasks"]
             .as_array()
             .unwrap()

@@ -61,7 +61,10 @@ impl AskTurn {
                 .collect(),
             AskScope::Full => Vec::new(),
         };
-        scoped.into_iter().chain(["config_manage".to_string()]).collect()
+        scoped
+            .into_iter()
+            .chain(["config_manage".to_string()])
+            .collect()
     }
 }
 

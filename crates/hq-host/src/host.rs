@@ -1,19 +1,19 @@
 //! The set of agents this host runs, and the operations on them.
 
 use crate::detect::{AgentState, Detector, Input};
+use crate::egress::{Decision, Egress};
 use crate::emu::{Row, VtEmulator};
 use crate::env::pane_env;
 use crate::error::HostError;
 use crate::events::{EventKind, EventLog};
 use crate::keys::encode_key;
 use crate::lockdown::{self, Lockdown};
-use crate::report;
-use crate::sandbox::{self, Mode, SandboxSpec};
-use crate::egress::{Decision, Egress};
-use crate::token;
 pub use crate::pane::PaneStatus;
 use crate::pane::{ExitHook, LaunchArgs, Pane, Resume};
+use crate::report;
+use crate::sandbox::{self, Mode, SandboxSpec};
 use crate::state::{PaneRecord, StateFile};
+use crate::token;
 use std::collections::{BTreeMap, VecDeque};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, MutexGuard};
@@ -302,7 +302,10 @@ impl Host {
     /// Never fails: a lockdown file that cannot be written still locks this
     /// process, which then needs a restart as well as `hq host unlock`.
     fn engage_lockdown(&self, wanted: Lockdown) -> Lockdown {
-        let on_disk = self.lockdown_dir.as_deref().map(|dir| lockdown::engage(dir, &wanted));
+        let on_disk = self
+            .lockdown_dir
+            .as_deref()
+            .map(|dir| lockdown::engage(dir, &wanted));
         let held = match on_disk {
             Some(Ok(held)) => held,
             Some(Err(e)) => {
@@ -311,7 +314,8 @@ impl Host {
             }
             None => lock(&self.memory_lockdown).get_or_insert(wanted).clone(),
         };
-        self.events.push("", EventKind::Lockdown, None, Some(held.reason.clone()));
+        self.events
+            .push("", EventKind::Lockdown, None, Some(held.reason.clone()));
         held
     }
 
@@ -365,7 +369,10 @@ impl Host {
         };
         let now = Instant::now();
         let mut starts = lock(&self.recent_starts);
-        while starts.front().is_some_and(|t| now.duration_since(*t) > limit.window) {
+        while starts
+            .front()
+            .is_some_and(|t| now.duration_since(*t) > limit.window)
+        {
             starts.pop_front();
         }
         if starts.len() < limit.max {
@@ -409,14 +416,22 @@ impl Host {
             return Err(HostError::InvalidName(spec.name));
         }
         check_size(spec.rows, spec.cols)?;
-        if self.require_sandbox && spec.sandbox.as_ref().is_none_or(|s| s.mode != Mode::Process) {
+        if self.require_sandbox
+            && spec
+                .sandbox
+                .as_ref()
+                .is_none_or(|s| s.mode != Mode::Process)
+        {
             return Err(HostError::Sandbox(
                 "this host only starts sandboxed agents; the machine's owner can start it with --allow-unsandboxed".into(),
             ));
         }
         let argv_bytes = |v: &[String]| v.iter().map(String::len).sum::<usize>();
         if argv_bytes(&spec.argv) > MAX_ARGV_BYTES
-            || spec.resume_argv.as_deref().is_some_and(|a| argv_bytes(a) > MAX_ARGV_BYTES)
+            || spec
+                .resume_argv
+                .as_deref()
+                .is_some_and(|a| argv_bytes(a) > MAX_ARGV_BYTES)
         {
             return Err(HostError::TooLarge("the command line"));
         }
@@ -528,16 +543,20 @@ impl Host {
         // An MCP config written for this agent goes along, so a restart or a
         // changed resume command keeps the agent connected to HQ.
         if let Some(mcp) = crate::hooks::claude_mcp_config_path(&dir, name) {
-            flags.extend(["--mcp-config".to_string(), mcp.to_string_lossy().into_owned()]);
+            flags.extend([
+                "--mcp-config".to_string(),
+                mcp.to_string_lossy().into_owned(),
+            ]);
         }
-        let exe = std::env::current_exe().map_or_else(
-            |_| "hq".to_string(),
-            |p| p.to_string_lossy().into_owned(),
-        );
+        let exe = std::env::current_exe()
+            .map_or_else(|_| "hq".to_string(), |p| p.to_string_lossy().into_owned());
         let command = format!("{} host report", shell_quote(&exe));
         match crate::hooks::write_claude_settings(&dir, name, &command) {
             Ok(path) => {
-                flags.extend(["--settings".to_string(), path.to_string_lossy().into_owned()]);
+                flags.extend([
+                    "--settings".to_string(),
+                    path.to_string_lossy().into_owned(),
+                ]);
                 flags
             }
             Err(e) => {
@@ -640,7 +659,13 @@ impl Host {
             // Read each time: `hq host lockdown` may land while this runs.
             locked = locked.or_else(|| self.lockdown_status());
             if let Some(held) = &locked {
-                report.skipped.push((rec.name.clone(), format!("the host is locked down, so it is forgotten: {}", held.reason)));
+                report.skipped.push((
+                    rec.name.clone(),
+                    format!(
+                        "the host is locked down, so it is forgotten: {}",
+                        held.reason
+                    ),
+                ));
                 continue;
             }
             if !rec.env_keys.is_empty() {
@@ -803,7 +828,10 @@ impl Host {
             if state == Some(AgentState::Working) {
                 continue;
             }
-            eprintln!("hq host: stopping '{name}', idle for over {}s", ttl.as_secs());
+            eprintln!(
+                "hq host: stopping '{name}', idle for over {}s",
+                ttl.as_secs()
+            );
             let _ = self.remove(name);
         }
     }
@@ -850,7 +878,11 @@ impl Host {
         // An id that is not a plain token is dropped, not stored: it ends up in
         // the agent's restart command line.
         let session_id = session_id.filter(|id| valid_session_id(id));
-        pane.record_report(report::state_for(event, notification_type), event, session_id);
+        pane.record_report(
+            report::state_for(event, notification_type),
+            event,
+            session_id,
+        );
         self.announce(name);
         Ok(())
     }
@@ -1048,7 +1080,9 @@ fn valid_session_id(id: &str) -> bool {
     !id.is_empty()
         && id.len() <= MAX_SESSION_ID_CHARS
         && !id.starts_with('-')
-        && id.chars().all(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '_' | '.'))
+        && id
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '_' | '.'))
 }
 
 /// `text` without the bracketed-paste start and end sequences.
@@ -1068,7 +1102,9 @@ fn without_paste_markers(text: &str) -> String {
 /// `arg` as one shell word.
 fn shell_quote(arg: &str) -> String {
     let plain = !arg.is_empty()
-        && arg.chars().all(|c| c.is_ascii_alphanumeric() || "/._-+=:@%".contains(c));
+        && arg
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || "/._-+=:@%".contains(c));
     if plain {
         arg.to_string()
     } else {
@@ -1124,11 +1160,8 @@ fn info_of(name: &str, pane: &Pane, detector: &Detector) -> PaneInfo {
     });
     let screen = detection.as_ref().map(|d| d.state);
     let reported = pane.reported();
-    let (state, from_hook) = report::combine(
-        reported.as_ref().map(|r| r.state),
-        screen,
-        pane.quiet_for(),
-    );
+    let (state, from_hook) =
+        report::combine(reported.as_ref().map(|r| r.state), screen, pane.quiet_for());
     let rule = match (&reported, from_hook) {
         (Some(r), true) => Some(format!("hook:{}", r.event)),
         _ => detection.and_then(|d| d.rule),
@@ -1145,7 +1178,11 @@ fn info_of(name: &str, pane: &Pane, detector: &Detector) -> PaneInfo {
         state,
         rule,
         cwd: pane.cwd.clone(),
-        sandbox: pane.sandbox.as_ref().map_or(Mode::None, |s| s.mode).as_str(),
+        sandbox: pane
+            .sandbox
+            .as_ref()
+            .map_or(Mode::None, |s| s.mode)
+            .as_str(),
         pid: pane.pid,
         status: pane.status(),
         rows,

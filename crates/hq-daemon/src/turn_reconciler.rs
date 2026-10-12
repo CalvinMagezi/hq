@@ -56,7 +56,9 @@ pub fn reconcile_expired_turns(db: &Database, max_age_days: u64) -> Result<usize
     let running = db.with_conn(background_turns::list_running)?;
     let mut expired = 0;
     for row in running {
-        if row.kind == background_turns::KIND_WATCH || now.saturating_sub(row.created_at) <= max_age_secs {
+        if row.kind == background_turns::KIND_WATCH
+            || now.saturating_sub(row.created_at) <= max_age_secs
+        {
             continue;
         }
         let id = row.id.clone();
@@ -324,7 +326,12 @@ mod tests {
 
         assert_eq!(reconcile_expired_turns(&db, 5).unwrap(), 1);
 
-        let status = |id: &'static str| db.with_conn(move |c| background_turns::get(c, id)).unwrap().unwrap().status;
+        let status = |id: &'static str| {
+            db.with_conn(move |c| background_turns::get(c, id))
+                .unwrap()
+                .unwrap()
+                .status
+        };
         assert_eq!(status("bt-live"), background_turns::STATUS_RUNNING);
         assert_eq!(status("bt-old"), background_turns::STATUS_INTERRUPTED);
         assert!(mailbox_files(tmp.path()).is_empty());

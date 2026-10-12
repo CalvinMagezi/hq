@@ -2,8 +2,8 @@
 
 use super::{
     BRAVE_ENDPOINT, NATIVE_ENGINE_TIMEOUT, NativeEnv, Page, SearchOptions, brave_params,
-    decode_json, error_chain, get_client, parse_brave_results, search_pool,
-    parse_searxng_results, searxng_params,
+    decode_json, error_chain, get_client, parse_brave_results, parse_searxng_results, search_pool,
+    searxng_params,
 };
 use hq_core::machine::WebSearchBackendStatus;
 use reqwest::RequestBuilder;

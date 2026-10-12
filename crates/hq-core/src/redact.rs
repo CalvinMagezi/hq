@@ -117,7 +117,8 @@ pub fn looks_like_credential(text: &str) -> bool {
 
 /// The value after `Bearer`, for [`looks_like_credential`].
 static BEARER_VALUE: LazyLock<Regex> = LazyLock::new(|| {
-    Regex::new(r"(?i)\bbearer\s+([A-Za-z0-9][A-Za-z0-9._~+/-]{19,}=*)").expect("static pattern must compile")
+    Regex::new(r"(?i)\bbearer\s+([A-Za-z0-9][A-Za-z0-9._~+/-]{19,}=*)")
+        .expect("static pattern must compile")
 });
 
 const PLACEHOLDER: &str = "[REDACTED]";
@@ -202,23 +203,37 @@ mod tests {
     #[test]
     fn redacts_known_secret_shapes() {
         assert_eq!(
-            redact_secrets("token: MTIzNDU2Nzg5MDEyMzQ1Njc4.AAAAAA.FakeToken0ForRedaction1Test2FakeToken3X done"),
+            redact_secrets(
+                "token: MTIzNDU2Nzg5MDEyMzQ1Njc4.AAAAAA.FakeToken0ForRedaction1Test2FakeToken3X done"
+            ),
             "token: [REDACTED] done"
         );
         assert_eq!(
             redact_secrets("key sk-abcdefghijklmnopqrstuvwx here"),
             "key [REDACTED] here"
         );
-        assert_eq!(redact_secrets("plain sentence, nothing secret here"), "plain sentence, nothing secret here");
+        assert_eq!(
+            redact_secrets("plain sentence, nothing secret here"),
+            "plain sentence, nothing secret here"
+        );
     }
 
     #[test]
     fn redacts_dashed_provider_keys() {
-        let openrouter = format!("key {} end", ["sk", "or", "v1", &"a1b2".repeat(16)].join("-"));
+        let openrouter = format!(
+            "key {} end",
+            ["sk", "or", "v1", &"a1b2".repeat(16)].join("-")
+        );
         assert_eq!(redact_secrets(&openrouter), "key [REDACTED] end");
-        let anthropic = format!("key {} end", ["sk", "ant", "api03", &"Zx9_".repeat(20)].join("-"));
+        let anthropic = format!(
+            "key {} end",
+            ["sk", "ant", "api03", &"Zx9_".repeat(20)].join("-")
+        );
         assert_eq!(redact_secrets(&anthropic), "key [REDACTED] end");
-        assert_eq!(redact_secrets("a desk-organizer-for-small-offices"), "a desk-organizer-for-small-offices");
+        assert_eq!(
+            redact_secrets("a desk-organizer-for-small-offices"),
+            "a desk-organizer-for-small-offices"
+        );
     }
 
     #[test]
@@ -231,21 +246,28 @@ mod tests {
             redact_secrets("  telegram_token: \"123456:ABCdefGHIjkl\""),
             "  telegram_token: \"[REDACTED]\""
         );
-        assert_eq!(redact_secrets("GITHUB_TOKEN = ghx0123456789"), "GITHUB_TOKEN = [REDACTED]"); // gitleaks:allow
+        let spaced = "GITHUB_TOKEN = ghx0123456789"; // gitleaks:allow
+        assert_eq!(redact_secrets(spaced), "GITHUB_TOKEN = [REDACTED]");
         let config = "openrouter_api_key: sk-or-v1-0123456789abcdef0123456789abcdef0123456789abcdef\nGITHUB_TOKEN=\"ghx_notatypicalshape99\"\nmodel: sonnet"; // gitleaks:allow
         assert_eq!(
             redact_secrets(config),
             "openrouter_api_key: [REDACTED]\nGITHUB_TOKEN=\"[REDACTED]\"\nmodel: sonnet"
         );
+        let inline = "OPENROUTER_API_KEY=sk-or-v1-0123456789abcdef0123456789abcdef0123456789abcdef hq doctor"; // gitleaks:allow
         assert_eq!(
-            redact_secrets("OPENROUTER_API_KEY=sk-or-v1-0123456789abcdef0123456789abcdef0123456789abcdef hq doctor"), // gitleaks:allow
+            redact_secrets(inline),
             "OPENROUTER_API_KEY=[REDACTED] hq doctor"
         );
         assert_eq!(
             redact_secrets("key is sk-ant-api03-AbCdEf0123456789_AbCdEf0123456789-xyz"),
             "key is [REDACTED]"
         );
-        for untouched in ["max_tokens: 100", "max_tokens: 4096", "input_token: 1234", "password_hint: ask the owner"] {
+        for untouched in [
+            "max_tokens: 100",
+            "max_tokens: 4096",
+            "input_token: 1234",
+            "password_hint: ask the owner",
+        ] {
             assert_eq!(redact_secrets(untouched), untouched);
         }
     }
@@ -256,7 +278,8 @@ mod tests {
         // dot-separated runs of word-ish characters with a 6-char middle
         // run — extremely common in dotted module paths and hyphenated
         // identifiers, none of which are secrets.
-        let module_path = "python -m anthropic_skills_office_validate.render.docx_schema_validator_module";
+        let module_path =
+            "python -m anthropic_skills_office_validate.render.docx_schema_validator_module";
         assert_eq!(redact_secrets(module_path), module_path);
 
         let file_path = "see crates/hq-relay-adapter.protocol-implementation-notes for details";
@@ -276,23 +299,42 @@ mod tests {
         ];
         for cmd in secret_shapes {
             let out = loggable_command(cmd);
-            assert!(!out.contains("hunter2") && !out.contains("abc123") && !out.contains("ghp_"), "{cmd} -> {out}");
+            assert!(
+                !out.contains("hunter2") && !out.contains("abc123") && !out.contains("ghp_"),
+                "{cmd} -> {out}"
+            );
             assert!(out.contains(&format!("len {}", cmd.len())), "{out}");
         }
         assert_eq!(
             loggable_command("GITHUB_TOKEN=x MYSQL_PWD=y gh pr list"),
             "gh (len 37, 2 arg(s), 2 env assignment(s))"
         );
-        assert_eq!(loggable_command(""), " (len 0, 0 arg(s), 0 env assignment(s))");
+        assert_eq!(
+            loggable_command(""),
+            " (len 0, 0 arg(s), 0 env assignment(s))"
+        );
         assert!(loggable_command("echo a=b").starts_with("echo (len 8, 1 arg(s)"));
     }
 
     #[test]
     fn secret_keys_are_recognised_but_env_names_are_not() {
-        for k in ["openrouter_api_key", "web_auth_token", "discord_token", "api_key", "client_secret", "DB_PASSWORD"] {
+        for k in [
+            "openrouter_api_key",
+            "web_auth_token",
+            "discord_token",
+            "api_key",
+            "client_secret",
+            "DB_PASSWORD",
+        ] {
             assert!(is_secret_key(k), "{k}");
         }
-        for k in ["api_key_env", "credential_env", "secret_ref", "max_tokens", "model"] {
+        for k in [
+            "api_key_env",
+            "credential_env",
+            "secret_ref",
+            "max_tokens",
+            "model",
+        ] {
             assert!(!is_secret_key(k), "{k}");
         }
     }

@@ -60,10 +60,12 @@ pub fn parse_request(input: &str) -> Result<(String, Value), Denied> {
     let [method, params] = <[String; 2]>::try_from(parts)
         .map_err(|_| Denied("expected exactly a method and its params".into()))?;
     if !ALLOWED.contains(&method.as_str()) {
-        return Err(Denied(format!("method {method:?} is not allowed through the gate")));
+        return Err(Denied(format!(
+            "method {method:?} is not allowed through the gate"
+        )));
     }
-    let params: Value = serde_json::from_str(&params)
-        .map_err(|_| Denied("params must be JSON".into()))?;
+    let params: Value =
+        serde_json::from_str(&params).map_err(|_| Denied("params must be JSON".into()))?;
     if !params.is_object() {
         return Err(Denied("params must be a JSON object".into()));
     }

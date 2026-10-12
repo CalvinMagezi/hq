@@ -140,7 +140,12 @@ impl EventLog {
         }
         let first = inner.events.front().map_or(inner.last + 1, |e| e.seq);
         Poll {
-            events: inner.events.iter().filter(|e| e.seq > after).cloned().collect(),
+            events: inner
+                .events
+                .iter()
+                .filter(|e| e.seq > after)
+                .cloned()
+                .collect(),
             last_seq: inner.last,
             lost: inner.last > after && first > after + 1,
         }
@@ -180,7 +185,10 @@ mod tests {
         let got = log.poll(0, Duration::from_secs(5));
         t.join().unwrap();
         assert_eq!(got.events.len(), 1);
-        assert!(began.elapsed() < Duration::from_secs(2), "woke by timeout, not by the event");
+        assert!(
+            began.elapsed() < Duration::from_secs(2),
+            "woke by timeout, not by the event"
+        );
     }
 
     #[test]

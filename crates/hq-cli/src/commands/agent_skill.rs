@@ -35,7 +35,11 @@ impl Harness {
         Self::ALL
             .into_iter()
             .find(|h| h.name() == text.to_ascii_lowercase())
-            .ok_or_else(|| anyhow::anyhow!("unknown agent '{text}', expected one of claude, codex, cursor, or all"))
+            .ok_or_else(|| {
+                anyhow::anyhow!(
+                    "unknown agent '{text}', expected one of claude, codex, cursor, or all"
+                )
+            })
     }
 }
 
@@ -53,7 +57,9 @@ impl Roots {
     pub fn from_env() -> Option<Self> {
         let home = dirs::home_dir()?;
         let from_var = |var: &str, fallback: &str| {
-            std::env::var_os(var).map(PathBuf::from).unwrap_or_else(|| home.join(fallback))
+            std::env::var_os(var)
+                .map(PathBuf::from)
+                .unwrap_or_else(|| home.join(fallback))
         };
         Some(Self {
             claude: from_var("CLAUDE_CONFIG_DIR", ".claude"),
@@ -73,7 +79,9 @@ impl Roots {
     pub fn target(&self, harness: Harness) -> PathBuf {
         let root = self.root(harness);
         match harness {
-            Harness::Claude | Harness::Codex => root.join("skills").join(SKILL_NAME).join("SKILL.md"),
+            Harness::Claude | Harness::Codex => {
+                root.join("skills").join(SKILL_NAME).join("SKILL.md")
+            }
             Harness::Cursor => root.join("rules").join(format!("{SKILL_NAME}.mdc")),
         }
     }
@@ -155,13 +163,24 @@ fn existing_at(path: &Path) -> Result<Existing> {
     if meta.file_type().is_symlink() || !meta.is_file() {
         return Ok(Existing::NotHqs);
     }
-    Ok(match std::fs::read(path).ok().and_then(|b| String::from_utf8(b).ok()) {
-        Some(text) if text.contains(MANAGED_MARKER) => Existing::Managed(text),
-        _ => Existing::NotHqs,
-    })
+    Ok(
+        match std::fs::read(path)
+            .ok()
+            .and_then(|b| String::from_utf8(b).ok())
+        {
+            Some(text) if text.contains(MANAGED_MARKER) => Existing::Managed(text),
+            _ => Existing::NotHqs,
+        },
+    )
 }
 
-fn install_one(roots: &Roots, harness: Harness, create_root: bool, dry_run: bool, force: bool) -> Result<(PathBuf, Outcome)> {
+fn install_one(
+    roots: &Roots,
+    harness: Harness,
+    create_root: bool,
+    dry_run: bool,
+    force: bool,
+) -> Result<(PathBuf, Outcome)> {
     let target = roots.target(harness);
     if !create_root && !roots.root(harness).is_dir() {
         return Ok((target, Outcome::NotFound));
@@ -188,9 +207,18 @@ fn is_link(path: &Path) -> bool {
 /// Installs the skill for the named agents (all of them when `wanted` is empty), writing
 /// nothing under `dry_run`. An agent named on purpose gets its directory made; with none
 /// named only agents found on this machine are touched.
-pub fn install(roots: &Roots, wanted: &[Harness], dry_run: bool, force: bool) -> Result<Vec<(Harness, PathBuf, Outcome)>> {
+pub fn install(
+    roots: &Roots,
+    wanted: &[Harness],
+    dry_run: bool,
+    force: bool,
+) -> Result<Vec<(Harness, PathBuf, Outcome)>> {
     let named = !wanted.is_empty();
-    let targets: Vec<Harness> = if named { wanted.to_vec() } else { Harness::ALL.to_vec() };
+    let targets: Vec<Harness> = if named {
+        wanted.to_vec()
+    } else {
+        Harness::ALL.to_vec()
+    };
     let mut out = Vec::new();
     for harness in targets {
         let (path, outcome) = install_one(roots, harness, named, dry_run, force)?;
@@ -200,11 +228,19 @@ pub fn install(roots: &Roots, wanted: &[Harness], dry_run: bool, force: bool) ->
 }
 
 /// Runs the command: parses the agent names, installs, and prints one line each.
-pub fn run(args: &[String], dry_run: bool, force: bool, out: &mut dyn std::io::Write) -> Result<()> {
+pub fn run(
+    args: &[String],
+    dry_run: bool,
+    force: bool,
+    out: &mut dyn std::io::Write,
+) -> Result<()> {
     let wanted: Vec<Harness> = match args {
         [] => Vec::new(),
         [all] if all == "all" => Vec::new(),
-        names => names.iter().map(|n| Harness::parse(n)).collect::<Result<_>>()?,
+        names => names
+            .iter()
+            .map(|n| Harness::parse(n))
+            .collect::<Result<_>>()?,
     };
     let Some(roots) = Roots::from_env() else {
         bail!("cannot find your home directory");
@@ -212,11 +248,17 @@ pub fn run(args: &[String], dry_run: bool, force: bool, out: &mut dyn std::io::W
     report(&install(&roots, &wanted, dry_run, force)?, dry_run, out)
 }
 
-fn report(results: &[(Harness, PathBuf, Outcome)], dry_run: bool, out: &mut dyn std::io::Write) -> Result<()> {
+fn report(
+    results: &[(Harness, PathBuf, Outcome)],
+    dry_run: bool,
+    out: &mut dyn std::io::Write,
+) -> Result<()> {
     let prefix = if dry_run { "would " } else { "" };
     for (harness, path, outcome) in results {
         let line = match outcome {
-            Outcome::Installed => format!("{prefix}install {} ({})", path.display(), harness.name()),
+            Outcome::Installed => {
+                format!("{prefix}install {} ({})", path.display(), harness.name())
+            }
             Outcome::Updated => format!("{prefix}update {} ({})", path.display(), harness.name()),
             Outcome::Unchanged => format!("{} is up to date ({})", path.display(), harness.name()),
             Outcome::SkippedEdited => format!(
@@ -229,7 +271,10 @@ fn report(results: &[(Harness, PathBuf, Outcome)], dry_run: bool, out: &mut dyn 
         writeln!(out, "{line}")?;
     }
     if results.iter().all(|(_, _, o)| *o == Outcome::NotFound) {
-        writeln!(out, "No supported agent was found. Name one to install anyway: hq task install-skill claude")?;
+        writeln!(
+            out,
+            "No supported agent was found. Name one to install anyway: hq task install-skill claude"
+        )?;
     }
     Ok(())
 }
@@ -239,28 +284,59 @@ mod tests {
     use super::*;
 
     fn roots(dir: &Path) -> Roots {
-        Roots { claude: dir.join(".claude"), codex: dir.join(".codex"), cursor: dir.join(".cursor") }
+        Roots {
+            claude: dir.join(".claude"),
+            codex: dir.join(".codex"),
+            cursor: dir.join(".cursor"),
+        }
     }
 
     #[test]
     fn the_skill_is_generic_and_valid() {
         let text = SKILL_SOURCE;
         // Spelled in pieces so this file does not itself trip the personal-data scan.
-        let private_words = [["cal", "vin"], ["mage", "zi"], ["kola", "borate"], ["/Us", "ers/"], ["out", "look"]];
+        let private_words = [
+            ["cal", "vin"],
+            ["mage", "zi"],
+            ["kola", "borate"],
+            ["/Us", "ers/"],
+            ["out", "look"],
+        ];
         for [head, tail] in private_words {
             let word = format!("{head}{tail}");
-            assert!(!text.to_lowercase().contains(&word.to_lowercase()), "the skill names a private word");
+            assert!(
+                !text.to_lowercase().contains(&word.to_lowercase()),
+                "the skill names a private word"
+            );
         }
         assert!(!text.contains('\u{2014}'), "no em dashes in prose");
-        for tool in ["task_next", "task_claim", "task_heartbeat", "task_release", "task_create_many", "task_link_list", "task_stale", "task_restore"] {
+        for tool in [
+            "task_next",
+            "task_claim",
+            "task_heartbeat",
+            "task_release",
+            "task_create_many",
+            "task_link_list",
+            "task_stale",
+            "task_restore",
+        ] {
             assert!(text.contains(tool), "{tool}");
         }
         let dir = tempfile::tempdir().unwrap();
         let skills = dir.path().join("skills");
         std::fs::create_dir_all(skills.join(SKILL_NAME)).unwrap();
-        std::fs::write(skills.join(SKILL_NAME).join("SKILL.md"), rendered(Harness::Claude)).unwrap();
+        std::fs::write(
+            skills.join(SKILL_NAME).join("SKILL.md"),
+            rendered(Harness::Claude),
+        )
+        .unwrap();
         let issues = hq_tools::skills::validate_skills(&skills);
-        assert!(issues.iter().all(|i| i.severity != hq_tools::skills::Severity::Error), "{issues:?}");
+        assert!(
+            issues
+                .iter()
+                .all(|i| i.severity != hq_tools::skills::Severity::Error),
+            "{issues:?}"
+        );
     }
 
     #[test]
@@ -275,7 +351,10 @@ mod tests {
         let written = std::fs::read_to_string(roots(dir.path()).target(Harness::Claude)).unwrap();
         assert!(written.starts_with("---\nname: hq-tasks"));
         assert!(written.contains(MANAGED_MARKER));
-        assert!(!dir.path().join(".codex").exists(), "an agent that is not there is not created");
+        assert!(
+            !dir.path().join(".codex").exists(),
+            "an agent that is not there is not created"
+        );
     }
 
     #[test]
@@ -288,7 +367,10 @@ mod tests {
         let text = std::fs::read_to_string(path).unwrap();
         assert!(text.starts_with("---\ndescription: Work HQ tasks properly."));
         assert!(text.contains("alwaysApply: false"));
-        assert!(!text.contains("name: hq-tasks"), "the rule file carries cursor's frontmatter, not the skill's");
+        assert!(
+            !text.contains("name: hq-tasks"),
+            "the rule file carries cursor's frontmatter, not the skill's"
+        );
     }
 
     #[test]
@@ -299,7 +381,10 @@ mod tests {
         assert_eq!(dry[0].2, Outcome::Installed);
         assert!(!roots.target(Harness::Claude).exists());
         install(&roots, &[Harness::Claude], false, false).unwrap();
-        assert_eq!(install(&roots, &[Harness::Claude], false, false).unwrap()[0].2, Outcome::Unchanged);
+        assert_eq!(
+            install(&roots, &[Harness::Claude], false, false).unwrap()[0].2,
+            Outcome::Unchanged
+        );
     }
 
     #[test]
@@ -307,19 +392,44 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let roots = roots(dir.path());
         let path = roots.target(Harness::Claude);
-        write(&path, &format!("---\nname: hq-tasks\n---\n{MANAGED_MARKER}\nold text\n")).unwrap();
-        assert_eq!(install(&roots, &[Harness::Claude], false, false).unwrap()[0].2, Outcome::Updated);
-        assert!(std::fs::read_to_string(&path).unwrap().contains("# Working HQ tasks"));
+        write(
+            &path,
+            &format!("---\nname: hq-tasks\n---\n{MANAGED_MARKER}\nold text\n"),
+        )
+        .unwrap();
+        assert_eq!(
+            install(&roots, &[Harness::Claude], false, false).unwrap()[0].2,
+            Outcome::Updated
+        );
+        assert!(
+            std::fs::read_to_string(&path)
+                .unwrap()
+                .contains("# Working HQ tasks")
+        );
 
         write(&path, "---\nname: hq-tasks\n---\nmy own version\n").unwrap();
-        assert_eq!(install(&roots, &[Harness::Claude], false, false).unwrap()[0].2, Outcome::SkippedEdited);
-        assert_eq!(std::fs::read_to_string(&path).unwrap(), "---\nname: hq-tasks\n---\nmy own version\n");
-        assert_eq!(install(&roots, &[Harness::Claude], false, true).unwrap()[0].2, Outcome::Updated);
-        assert!(std::fs::read_to_string(&path).unwrap().contains("# Working HQ tasks"));
+        assert_eq!(
+            install(&roots, &[Harness::Claude], false, false).unwrap()[0].2,
+            Outcome::SkippedEdited
+        );
+        assert_eq!(
+            std::fs::read_to_string(&path).unwrap(),
+            "---\nname: hq-tasks\n---\nmy own version\n"
+        );
+        assert_eq!(
+            install(&roots, &[Harness::Claude], false, true).unwrap()[0].2,
+            Outcome::Updated
+        );
+        assert!(
+            std::fs::read_to_string(&path)
+                .unwrap()
+                .contains("# Working HQ tasks")
+        );
     }
 
     #[test]
-    fn a_symlink_is_never_written_through_even_with_force_and_an_unreadable_file_does_not_stop_the_rest() {
+    fn a_symlink_is_never_written_through_even_with_force_and_an_unreadable_file_does_not_stop_the_rest()
+     {
         let dir = tempfile::tempdir().unwrap();
         let roots = roots(dir.path());
         let victim = dir.path().join("victim.txt");
@@ -330,16 +440,26 @@ mod tests {
         {
             std::os::unix::fs::symlink(&victim, &path).unwrap();
             for force in [false, true] {
-                assert_eq!(install(&roots, &[Harness::Claude], false, force).unwrap()[0].2, Outcome::SkippedEdited);
+                assert_eq!(
+                    install(&roots, &[Harness::Claude], false, force).unwrap()[0].2,
+                    Outcome::SkippedEdited
+                );
             }
-            assert_eq!(std::fs::read_to_string(&victim).unwrap(), format!("precious {MANAGED_MARKER}"));
+            assert_eq!(
+                std::fs::read_to_string(&victim).unwrap(),
+                format!("precious {MANAGED_MARKER}")
+            );
         }
         let codex = roots.target(Harness::Codex);
         std::fs::create_dir_all(codex.parent().unwrap()).unwrap();
         std::fs::write(&codex, [0xff, 0xfe, 0x00]).unwrap();
         let r = install(&roots, &[Harness::Codex, Harness::Cursor], false, false).unwrap();
         assert_eq!(r[0].2, Outcome::SkippedEdited, "not text, so not HQ's");
-        assert_eq!(r[1].2, Outcome::Installed, "the next agent still gets its copy");
+        assert_eq!(
+            r[1].2,
+            Outcome::Installed,
+            "the next agent still gets its copy"
+        );
     }
 
     #[test]
@@ -348,14 +468,20 @@ mod tests {
         let roots = roots(dir.path());
         let path = roots.target(Harness::Claude);
         write(&path, "my notes: this is not managed by hq: at all\n").unwrap();
-        assert_eq!(install(&roots, &[Harness::Claude], false, false).unwrap()[0].2, Outcome::SkippedEdited);
+        assert_eq!(
+            install(&roots, &[Harness::Claude], false, false).unwrap()[0].2,
+            Outcome::SkippedEdited
+        );
     }
 
     #[test]
     fn names_parse_and_an_unknown_one_is_an_error_naming_the_choices() {
         assert_eq!(Harness::parse("Codex").unwrap(), Harness::Codex);
         let err = Harness::parse("emacs").unwrap_err().to_string();
-        assert!(err.contains("claude") && err.contains("codex") && err.contains("cursor"), "{err}");
+        assert!(
+            err.contains("claude") && err.contains("codex") && err.contains("cursor"),
+            "{err}"
+        );
     }
 
     #[test]

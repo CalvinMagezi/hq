@@ -82,7 +82,11 @@ where
 {
     let mut seen: Vec<&str> = Vec::new();
     let mut tried = Vec::new();
-    for model in preference.iter().map(|m| m.trim()).filter(|m| !m.is_empty()) {
+    for model in preference
+        .iter()
+        .map(|m| m.trim())
+        .filter(|m| !m.is_empty())
+    {
         if seen.contains(&model) {
             continue;
         }
@@ -122,12 +126,16 @@ mod tests {
     }
 
     /// A seat that answers on exactly the models in `have`.
-    fn seat(have: &'static [&'static str]) -> impl FnMut(String) -> std::future::Ready<Result<(), String>> {
+    fn seat(
+        have: &'static [&'static str],
+    ) -> impl FnMut(String) -> std::future::Ready<Result<(), String>> {
         move |m| {
             std::future::ready(if have.contains(&m.as_str()) {
                 Ok(())
             } else {
-                Err(format!("error: model \"{m}\" is not available for your plan"))
+                Err(format!(
+                    "error: model \"{m}\" is not available for your plan"
+                ))
             })
         }
     }
@@ -135,7 +143,13 @@ mod tests {
     #[tokio::test]
     async fn the_first_preference_wins_when_the_seat_has_it() {
         let got = pick_first_usable(&prefs(), seat(&["gpt-6-luna", "claude-haiku-5.5"])).await;
-        assert_eq!(got, Pick::Chosen { model: "gpt-6-luna".into(), skipped: vec![] });
+        assert_eq!(
+            got,
+            Pick::Chosen {
+                model: "gpt-6-luna".into(),
+                skipped: vec![]
+            }
+        );
     }
 
     #[tokio::test]
@@ -167,13 +181,23 @@ mod tests {
             std::future::ready(Err("You are not logged in. Run gh auth login".to_string()))
         })
         .await;
-        assert_eq!(got, Pick::NotSignedIn { model: "gpt-6-luna".into() });
+        assert_eq!(
+            got,
+            Pick::NotSignedIn {
+                model: "gpt-6-luna".into()
+            }
+        );
         assert_eq!(calls, 1);
     }
 
     #[tokio::test]
     async fn blank_and_repeated_entries_are_not_tried_twice() {
-        let list = vec!["".to_string(), "a".to_string(), " a ".to_string(), "b".to_string()];
+        let list = vec![
+            "".to_string(),
+            "a".to_string(),
+            " a ".to_string(),
+            "b".to_string(),
+        ];
         let mut seen = Vec::new();
         let _ = pick_first_usable(&list, |m| {
             seen.push(m);
@@ -186,21 +210,46 @@ mod tests {
     #[tokio::test]
     async fn a_timeout_ends_the_walk_instead_of_linking_a_lesser_model() {
         let got = pick_first_usable(&prefs(), |m| {
-            std::future::ready(if m == "gpt-6-luna" { Err("timed out".to_string()) } else { Ok(()) })
+            std::future::ready(if m == "gpt-6-luna" {
+                Err("timed out".to_string())
+            } else {
+                Ok(())
+            })
         })
         .await;
-        assert!(matches!(got, Pick::Inconclusive { ref model, .. } if model == "gpt-6-luna"), "{got:?}");
+        assert!(
+            matches!(got, Pick::Inconclusive { ref model, .. } if model == "gpt-6-luna"),
+            "{got:?}"
+        );
     }
 
     #[test]
     fn failure_text_is_classified() {
         use ProbeFailure::*;
-        assert_eq!(classify_failure("Model 'x' is not available"), ModelUnavailable);
-        assert_eq!(classify_failure("error: invalid model: x"), ModelUnavailable);
-        assert_eq!(classify_failure("Invalid or expired token, cannot access models"), NotSignedIn);
-        assert_eq!(classify_failure("Usage: copilot [options]  unknown option --model"), Other);
-        assert_eq!(classify_failure("Authentication required. Run gh auth login"), NotSignedIn);
+        assert_eq!(
+            classify_failure("Model 'x' is not available"),
+            ModelUnavailable
+        );
+        assert_eq!(
+            classify_failure("error: invalid model: x"),
+            ModelUnavailable
+        );
+        assert_eq!(
+            classify_failure("Invalid or expired token, cannot access models"),
+            NotSignedIn
+        );
+        assert_eq!(
+            classify_failure("Usage: copilot [options]  unknown option --model"),
+            Other
+        );
+        assert_eq!(
+            classify_failure("Authentication required. Run gh auth login"),
+            NotSignedIn
+        );
         assert_eq!(classify_failure("connection reset by peer"), Other);
-        assert_eq!(classify_failure("your organization has disabled model gpt-6-luna"), ModelUnavailable);
+        assert_eq!(
+            classify_failure("your organization has disabled model gpt-6-luna"),
+            ModelUnavailable
+        );
     }
 }

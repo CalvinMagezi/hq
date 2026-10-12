@@ -213,7 +213,10 @@ mod tests {
     fn direct_providers_drop_the_router_vendor_prefix() {
         assert_eq!(wire_model(SetupProvider::Anthropic), "claude-haiku-5.5");
         assert_eq!(wire_model(SetupProvider::Google), "gemini-2.5-flash");
-        assert_eq!(wire_model(SetupProvider::OpenRouter), SetupProvider::OpenRouter.cheap_model());
+        assert_eq!(
+            wire_model(SetupProvider::OpenRouter),
+            SetupProvider::OpenRouter.cheap_model()
+        );
     }
 
     #[test]
@@ -302,12 +305,19 @@ mod tests {
 
         // Each provider's key lands in the field the router reads for it, with its own cheap model.
         for (provider, field, model) in [
-            ("anthropic", "anthropic_api_key", "anthropic/claude-haiku-5.5"),
+            (
+                "anthropic",
+                "anthropic_api_key",
+                "anthropic/claude-haiku-5.5",
+            ),
             ("google", "google_ai_api_key", "google/gemini-2.5-flash"),
         ] {
             std::fs::remove_file(&config_path).unwrap();
             let body = format!(r#"{{"provider":"{provider}","api_key":"sk-test-456"}}"#);
-            assert_eq!(status_of(&app, post("/api/setup/provider", &body)).await, StatusCode::OK);
+            assert_eq!(
+                status_of(&app, post("/api/setup/provider", &body)).await,
+                StatusCode::OK
+            );
             let saved = HqConfig::load_from_path(&config_path).unwrap();
             let stored = match field {
                 "anthropic_api_key" => saved.anthropic_api_key.as_deref(),

@@ -278,7 +278,9 @@ pub(crate) fn extract_outline(content: &str) -> Vec<NoteHeading> {
 /// Case-insensitive heading lookup that accepts the title with or without its `#` marks.
 fn find_heading<'a>(outline: &'a [NoteHeading], target: &str) -> Option<&'a NoteHeading> {
     let normalized = target.trim().trim_start_matches('#').trim().to_lowercase();
-    outline.iter().find(|h| h.title.to_lowercase() == normalized)
+    outline
+        .iter()
+        .find(|h| h.title.to_lowercase() == normalized)
 }
 
 /// Read a specific section by heading title.
@@ -441,7 +443,10 @@ mod atomic_write_tests {
         std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o644)).unwrap();
         write_atomic(&path, b"new").unwrap();
         assert_eq!(std::fs::read_to_string(&path).unwrap(), "new");
-        assert_eq!(std::fs::metadata(&path).unwrap().permissions().mode() & 0o777, 0o644);
+        assert_eq!(
+            std::fs::metadata(&path).unwrap().permissions().mode() & 0o777,
+            0o644
+        );
     }
     use tempfile::TempDir;
 

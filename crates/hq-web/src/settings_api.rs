@@ -12,7 +12,11 @@ use serde_json::{Value, json};
 fn host_of(url: &str) -> String {
     let rest = url.split("://").nth(1).unwrap_or(url);
     let authority = rest.split(['/', '?', '#']).next().unwrap_or(rest);
-    authority.rsplit('@').next().unwrap_or(authority).to_string()
+    authority
+        .rsplit('@')
+        .next()
+        .unwrap_or(authority)
+        .to_string()
 }
 
 fn key_presence(config: &HqConfig) -> Value {
@@ -135,7 +139,11 @@ mod tests {
         };
         config.remote_mcp.push(RemoteMcpServer {
             name: "diagrams".into(),
-            url: concat!("https://user:", "SECRETVALUE3@mcp.example.com/api/mcp?key=SECRETVALUE4").into(),
+            url: concat!(
+                "https://user:",
+                "SECRETVALUE3@mcp.example.com/api/mcp?key=SECRETVALUE4"
+            )
+            .into(),
             api_key: Some("SECRETVALUE5".into()),
             live_user_turn_only: true,
         });
@@ -153,7 +161,8 @@ mod tests {
         };
         let view = settings_view(&config);
         let keys = view["provider_keys"].as_array().unwrap();
-        let configured = |name: &str| keys.iter().find(|k| k["name"] == name).unwrap()["configured"].clone();
+        let configured =
+            |name: &str| keys.iter().find(|k| k["name"] == name).unwrap()["configured"].clone();
         assert_eq!(configured("OpenRouter"), json!(true));
         assert_eq!(configured("Groq"), json!(false));
         assert_eq!(configured("Anthropic"), json!(false));
@@ -172,7 +181,10 @@ mod tests {
 
     #[test]
     fn host_of_drops_credentials_path_and_query() {
-        assert_eq!(host_of("https://u:p@host.example:8443/a/b?k=v"), "host.example:8443");
+        assert_eq!(
+            host_of("https://u:p@host.example:8443/a/b?k=v"),
+            "host.example:8443"
+        );
         assert_eq!(host_of("http://127.0.0.1:8080"), "127.0.0.1:8080");
     }
 }

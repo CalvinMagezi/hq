@@ -75,7 +75,8 @@ pub fn check_trusted_dir(dir: &Path) -> std::io::Result<()> {
 /// The operator token in `dir`, after checking the directory and the file.
 pub(crate) fn load_trusted(dir: &Path) -> std::io::Result<String> {
     check_trusted_dir(dir)?;
-    read_token(&token_path(dir))?.ok_or_else(|| Error::new(ErrorKind::NotFound, "no operator token"))
+    read_token(&token_path(dir))?
+        .ok_or_else(|| Error::new(ErrorKind::NotFound, "no operator token"))
 }
 
 pub(crate) fn random_hex() -> std::io::Result<String> {

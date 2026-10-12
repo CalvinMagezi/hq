@@ -15,7 +15,13 @@ const FILE_MODE: u32 = 0o600;
 const MAX_KEY_BYTES: usize = 2048;
 /// Folders macOS keeps launchd jobs from reading.
 const PROTECTED_DIRS: &[&str] = &["Documents", "Desktop", "Downloads"];
-const KEY_TYPES: &[&str] = &["ssh-ed25519", "ssh-rsa", "ecdsa-sha2-nistp256", "ecdsa-sha2-nistp384", "ecdsa-sha2-nistp521"];
+const KEY_TYPES: &[&str] = &[
+    "ssh-ed25519",
+    "ssh-rsa",
+    "ecdsa-sha2-nistp256",
+    "ecdsa-sha2-nistp384",
+    "ecdsa-sha2-nistp521",
+];
 
 fn home() -> Result<PathBuf> {
     std::env::var_os("HOME")
@@ -49,7 +55,9 @@ fn path_env(home: &Path) -> String {
 }
 
 fn xml_escape(text: &str) -> String {
-    text.replace('&', "&amp;").replace('<', "&lt;").replace('>', "&gt;")
+    text.replace('&', "&amp;")
+        .replace('<', "&lt;")
+        .replace('>', "&gt;")
 }
 
 pub(crate) fn launchd_plist(exe: &Path, home: &Path) -> String {
@@ -100,9 +108,16 @@ fn write_private(path: &Path, text: &str) -> Result<()> {
 }
 
 fn run(program: &str, args: &[&str]) -> Result<()> {
-    let out = Command::new(program).args(args).output().with_context(|| format!("running {program}"))?;
+    let out = Command::new(program)
+        .args(args)
+        .output()
+        .with_context(|| format!("running {program}"))?;
     if !out.status.success() {
-        bail!("{program} {} failed: {}", args.join(" "), String::from_utf8_lossy(&out.stderr).trim());
+        bail!(
+            "{program} {} failed: {}",
+            args.join(" "),
+            String::from_utf8_lossy(&out.stderr).trim()
+        );
     }
     Ok(())
 }
@@ -115,7 +130,12 @@ fn reload_launch_agent(domain: &str, plist: &Path) -> Result<()> {
     const UNLOAD_WAIT: usize = 25;
     const LOAD_TRIES: usize = 5;
     let target = format!("{domain}/{LAUNCHD_LABEL}");
-    let loaded = || Command::new("launchctl").args(["print", &target]).output().is_ok_and(|o| o.status.success());
+    let loaded = || {
+        Command::new("launchctl")
+            .args(["print", &target])
+            .output()
+            .is_ok_and(|o| o.status.success())
+    };
     if loaded() {
         let _ = run("launchctl", &["bootout", &target]);
         for _ in 0..UNLOAD_WAIT {
@@ -127,7 +147,10 @@ fn reload_launch_agent(domain: &str, plist: &Path) -> Result<()> {
     }
     let mut last = None;
     for _ in 0..LOAD_TRIES {
-        match run("launchctl", &["bootstrap", domain, &plist.to_string_lossy()]) {
+        match run(
+            "launchctl",
+            &["bootstrap", domain, &plist.to_string_lossy()],
+        ) {
             Ok(()) => return Ok(()),
             Err(e) => last = Some(e),
         }
@@ -142,9 +165,15 @@ fn reload_launch_agent(domain: &str, plist: &Path) -> Result<()> {
 #[cfg(target_os = "macos")]
 fn sign_for_macos(home: &Path, exe: &Path) {
     match signing::sign(home, exe) {
-        Ok(true) => println!("signed {} with a stable local identity; approve the folder-access prompt macOS shows once, and it stays approved across updates", exe.display()),
+        Ok(true) => println!(
+            "signed {} with a stable local identity; approve the folder-access prompt macOS shows once, and it stays approved across updates",
+            exe.display()
+        ),
         Ok(false) => {}
-        Err(e) => eprintln!("warning: could not give {} a stable signature ({e:#}); macOS will ask for folder access again after each update", exe.display()),
+        Err(e) => eprintln!(
+            "warning: could not give {} a stable signature ({e:#}); macOS will ask for folder access again after each update",
+            exe.display()
+        ),
     }
 }
 
@@ -156,19 +185,29 @@ pub fn install() -> Result<()> {
     let exe = service_binary(&home)?;
     if cfg!(target_os = "macos") {
         sign_for_macos(&home, &exe);
-        let path = home.join("Library/LaunchAgents").join(format!("{LAUNCHD_LABEL}.plist"));
+        let path = home
+            .join("Library/LaunchAgents")
+            .join(format!("{LAUNCHD_LABEL}.plist"));
         write_private(&path, &launchd_plist(&exe, &home))?;
         // SAFETY of the id: `id -u` is the current user's.
-        let uid = String::from_utf8(Command::new("id").arg("-u").output()?.stdout)?.trim().to_string();
+        let uid = String::from_utf8(Command::new("id").arg("-u").output()?.stdout)?
+            .trim()
+            .to_string();
         let domain = format!("gui/{uid}");
         reload_launch_agent(&domain, &path)?;
-        println!("hq host installed as a LaunchAgent ({}); logs in ~/Library/Logs/hq-host.log", path.display());
+        println!(
+            "hq host installed as a LaunchAgent ({}); logs in ~/Library/Logs/hq-host.log",
+            path.display()
+        );
     } else {
         let path = home.join(".config/systemd/user").join(SYSTEMD_UNIT);
         write_private(&path, &systemd_unit(&exe, &home))?;
         run("systemctl", &["--user", "daemon-reload"])?;
         run("systemctl", &["--user", "enable", "--now", SYSTEMD_UNIT])?;
-        println!("hq host installed as a user service ({}); `loginctl enable-linger` keeps it running after logout", path.display());
+        println!(
+            "hq host installed as a user service ({}); `loginctl enable-linger` keeps it running after logout",
+            path.display()
+        );
     }
     Ok(())
 }
@@ -182,7 +221,9 @@ fn valid_key(key: &str) -> Result<&str> {
         || key.contains(['\n', '\r', '"'])
         || !KEY_TYPES.contains(&kind)
         || blob.is_empty()
-        || !blob.chars().all(|c| c.is_ascii_alphanumeric() || matches!(c, '+' | '/' | '='))
+        || !blob
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || matches!(c, '+' | '/' | '='))
     {
         bail!("expected one ssh public key line such as `ssh-ed25519 AAAA... comment`");
     }
@@ -192,9 +233,13 @@ fn valid_key(key: &str) -> Result<&str> {
 fn valid_from(from: &str) -> Result<&str> {
     let ok = !from.is_empty()
         && from.len() <= 255
-        && from.chars().all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | ':' | '*' | ',' | '-' | '/' | '_'));
+        && from.chars().all(|c| {
+            c.is_ascii_alphanumeric() || matches!(c, '.' | ':' | '*' | ',' | '-' | '/' | '_')
+        });
     if !ok {
-        bail!("--from must be an address or pattern for ssh's `from=` option, for example a tailnet IP");
+        bail!(
+            "--from must be an address or pattern for ssh's `from=` option, for example a tailnet IP"
+        );
     }
     Ok(from)
 }
@@ -207,21 +252,31 @@ pub(crate) fn authorized_line(exe: &Path, key: &str, from: &str) -> Result<Strin
     if exe.contains(['"', '\n']) {
         bail!("the binary path cannot be used in an authorized_keys command");
     }
-    Ok(format!("restrict,from=\"{from}\",command=\"{exe} host gate\" {key}"))
+    Ok(format!(
+        "restrict,from=\"{from}\",command=\"{exe} host gate\" {key}"
+    ))
 }
 
 /// Adds `line` to `file` unless that key is already there. True when added.
 pub(crate) fn append_authorized(file: &Path, line: &str) -> Result<bool> {
     let blob = line.split_whitespace().rev().nth(1).unwrap_or("");
     let existing = std::fs::read_to_string(file).unwrap_or_default();
-    if !blob.is_empty() && existing.lines().any(|l| l.split_whitespace().any(|w| w == blob)) {
+    if !blob.is_empty()
+        && existing
+            .lines()
+            .any(|l| l.split_whitespace().any(|w| w == blob))
+    {
         return Ok(false);
     }
     if let Some(parent) = file.parent() {
         std::fs::create_dir_all(parent)?;
         std::fs::set_permissions(parent, std::fs::Permissions::from_mode(DIR_MODE))?;
     }
-    let mut out = std::fs::OpenOptions::new().append(true).create(true).mode(FILE_MODE).open(file)?;
+    let mut out = std::fs::OpenOptions::new()
+        .append(true)
+        .create(true)
+        .mode(FILE_MODE)
+        .open(file)?;
     if !existing.is_empty() && !existing.ends_with('\n') {
         out.write_all(b"\n")?;
     }
@@ -231,14 +286,19 @@ pub(crate) fn append_authorized(file: &Path, line: &str) -> Result<bool> {
 
 pub fn authorize(key: Option<&str>, from: Option<&str>) -> Result<()> {
     let (Some(key), Some(from)) = (key, from) else {
-        bail!("usage: hq host authorize --key '<ssh public key>' --from <address of the machine that will connect>");
+        bail!(
+            "usage: hq host authorize --key '<ssh public key>' --from <address of the machine that will connect>"
+        );
     };
     let home = home()?;
     let exe = std::env::current_exe().context("finding this binary")?;
     let line = authorized_line(&exe.canonicalize().unwrap_or(exe), key, from)?;
     let file = home.join(".ssh/authorized_keys");
     if append_authorized(&file, &line)? {
-        println!("key added to {}: it can call the host through `hq host gate`, from {from} only", file.display());
+        println!(
+            "key added to {}: it can call the host through `hq host gate`, from {from} only",
+            file.display()
+        );
     } else {
         println!("that key is already in {}", file.display());
     }
@@ -251,7 +311,13 @@ pub(crate) fn default_host_name(hostname: &str) -> String {
     let mut name: String = hostname
         .to_ascii_lowercase()
         .chars()
-        .map(|c| if c.is_ascii_alphanumeric() || c == '_' { c } else { '-' })
+        .map(|c| {
+            if c.is_ascii_alphanumeric() || c == '_' {
+                c
+            } else {
+                '-'
+            }
+        })
         .collect();
     name = name.trim_matches('-').to_string();
     if !name.chars().next().is_some_and(|c| c.is_ascii_lowercase()) {
@@ -271,9 +337,13 @@ pub fn join(name: Option<&str>, addr: Option<&str>) -> Result<()> {
     use hq_tools::agent_host::pairing::{Join, encode_join, valid_host_name};
     let name = match name {
         Some(n) if valid_host_name(n) => n.to_string(),
-        Some(n) => bail!("{n:?} is not a usable host name: lowercase letters, digits, - and _, starting with a letter"),
+        Some(n) => bail!(
+            "{n:?} is not a usable host name: lowercase letters, digits, - and _, starting with a letter"
+        ),
         None => {
-            let out = Command::new("hostname").output().context("running hostname")?;
+            let out = Command::new("hostname")
+                .output()
+                .context("running hostname")?;
             default_host_name(String::from_utf8_lossy(&out.stdout).trim())
         }
     };
@@ -282,14 +352,30 @@ pub fn join(name: Option<&str>, addr: Option<&str>) -> Result<()> {
         None => hq_tools::agent_host::pairing::tailscale_ip()
             .context("could not ask tailscale for this machine's address; is it installed and up? Pass --addr <tailnet address> otherwise")?,
     };
-    let user = std::env::var("USER").or_else(|_| std::env::var("LOGNAME")).context("USER is not set")?;
+    let user = std::env::var("USER")
+        .or_else(|_| std::env::var("LOGNAME"))
+        .context("USER is not set")?;
     install()?;
     let workspace = hq_host::ensure_workspace().context("creating the HQ folder")?;
-    println!("Agents started from the web run in {} by default.", workspace.display());
-    let code = encode_join(&Join { name: name.clone(), user, addr, os: std::env::consts::OS.to_string() });
-    println!("\nThis machine is ready to host agents as '{name}'. Give your HQ this join code:\n\n  {code}\n");
-    println!("On the HQ run `hq host add {code}` (or have its agent call the host_add tool with the code).");
-    println!("It answers with one command, `hq host authorize ...`; run that here, then `hq host check {name}` on the HQ.");
+    println!(
+        "Agents started from the web run in {} by default.",
+        workspace.display()
+    );
+    let code = encode_join(&Join {
+        name: name.clone(),
+        user,
+        addr,
+        os: std::env::consts::OS.to_string(),
+    });
+    println!(
+        "\nThis machine is ready to host agents as '{name}'. Give your HQ this join code:\n\n  {code}\n"
+    );
+    println!(
+        "On the HQ run `hq host add {code}` (or have its agent call the host_add tool with the code)."
+    );
+    println!(
+        "It answers with one command, `hq host authorize ...`; run that here, then `hq host check {name}` on the HQ."
+    );
     Ok(())
 }
 
@@ -297,8 +383,20 @@ pub fn join(name: Option<&str>, addr: Option<&str>) -> Result<()> {
 pub fn add(code: Option<&str>, gateway: Option<&str>) -> Result<()> {
     let code = code.context("usage: hq host add <join code from `hq host join`>")?;
     let added = hq_tools::agent_host::pairing::add_host(code, gateway)?;
-    println!("Host '{}' ({}) {} in the config.", added.name, added.ssh, if added.config_changed { "added" } else { "was already" });
-    println!("\nRun this on that machine, so it accepts this HQ:\n\n  {}\n", added.authorize_command);
+    println!(
+        "Host '{}' ({}) {} in the config.",
+        added.name,
+        added.ssh,
+        if added.config_changed {
+            "added"
+        } else {
+            "was already"
+        }
+    );
+    println!(
+        "\nRun this on that machine, so it accepts this HQ:\n\n  {}\n",
+        added.authorize_command
+    );
     println!("Then check it with `hq host check {}`.", added.name);
     Ok(())
 }

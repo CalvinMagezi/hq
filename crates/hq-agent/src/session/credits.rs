@@ -27,7 +27,9 @@ impl CopilotRuns {
     }
 
     fn guard(&self) -> std::sync::MutexGuard<'_, Vec<String>> {
-        self.active.lock().unwrap_or_else(std::sync::PoisonError::into_inner)
+        self.active
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
     }
 
     pub(super) fn started(&self, session: &str) -> u64 {
@@ -36,7 +38,9 @@ impl CopilotRuns {
             active.push(session.to_string());
         }
         drop(active);
-        self.generation.fetch_add(1, std::sync::atomic::Ordering::SeqCst) + 1
+        self.generation
+            .fetch_add(1, std::sync::atomic::Ordering::SeqCst)
+            + 1
     }
 
     pub(super) fn ended(&self, session: &str) {
@@ -46,7 +50,8 @@ impl CopilotRuns {
         let removed = active.len() != before;
         drop(active);
         if removed {
-            self.generation.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            self.generation
+                .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
         }
     }
 

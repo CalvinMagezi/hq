@@ -81,8 +81,7 @@ pub(crate) struct NotificationActionResponse {
     pub(crate) message: String,
 }
 
-const VALUE_ITEM_COLUMNS: &str =
-    "SELECT id, source_task, kind, title, body, artifact_path, score, state, created_at FROM value_items";
+const VALUE_ITEM_COLUMNS: &str = "SELECT id, source_task, kind, title, body, artifact_path, score, state, created_at FROM value_items";
 
 fn state_where(state_filter: Option<&str>) -> &'static str {
     match state_filter {
@@ -107,14 +106,25 @@ fn notification_from_row(row: &rusqlite::Row) -> rusqlite::Result<NotificationIt
         _ => NotificationState::Pending,
     };
     let needs_answer = kind_str == "proposal" || kind_str == "action_needed";
-    let kind = if needs_answer { NotificationKind::ActionNeeded } else { NotificationKind::ValueItem };
-    let category = if source_task == "email_triage" { "system" } else { "value" };
+    let kind = if needs_answer {
+        NotificationKind::ActionNeeded
+    } else {
+        NotificationKind::ValueItem
+    };
+    let category = if source_task == "email_triage" {
+        "system"
+    } else {
+        "value"
+    };
     let actions: &[&str] = match (state == NotificationState::Pending, needs_answer) {
         (false, _) => &[],
         (true, true) => &["approve", "reject"],
         (true, false) => &["dismiss", "acknowledge"],
     };
-    let extra = HashMap::from([("source_task".to_string(), source_task), ("val_kind".to_string(), kind_str)]);
+    let extra = HashMap::from([
+        ("source_task".to_string(), source_task),
+        ("val_kind".to_string(), kind_str),
+    ]);
     Ok(NotificationItem {
         id: format!("val_{id}"),
         kind,
@@ -122,8 +132,14 @@ fn notification_from_row(row: &rusqlite::Row) -> rusqlite::Result<NotificationIt
         title: row.get(3)?,
         description: row.get(4)?,
         state,
-        created_at: created_at_str.parse::<DateTime<Utc>>().unwrap_or_else(|_| Utc::now()),
-        metadata: NotificationMetadata { artifact_path: row.get(5)?, score: Some(row.get(6)?), extra },
+        created_at: created_at_str
+            .parse::<DateTime<Utc>>()
+            .unwrap_or_else(|_| Utc::now()),
+        metadata: NotificationMetadata {
+            artifact_path: row.get(5)?,
+            score: Some(row.get(6)?),
+            extra,
+        },
         actions: actions.iter().map(|a| a.to_string()).collect(),
     })
 }
@@ -136,7 +152,9 @@ pub(crate) fn scan_value_items(
     db.with_conn(|conn| {
         let sql = format!("{VALUE_ITEM_COLUMNS}{}", state_where(state_filter));
         let mut stmt = conn.prepare(&sql)?;
-        let items = stmt.query_map([], notification_from_row)?.collect::<rusqlite::Result<Vec<_>>>()?;
+        let items = stmt
+            .query_map([], notification_from_row)?
+            .collect::<rusqlite::Result<Vec<_>>>()?;
         Ok(items)
     })
 }
@@ -155,11 +173,17 @@ pub(crate) fn aggregate_notifications(
     all.sort_by_key(|a| std::cmp::Reverse(a.created_at));
 
     let pending = || all.iter().filter(|n| n.state == NotificationState::Pending);
-    let pending_approvals_count = pending().filter(|n| n.kind == NotificationKind::ActionNeeded).count();
+    let pending_approvals_count = pending()
+        .filter(|n| n.kind == NotificationKind::ActionNeeded)
+        .count();
     let unread_count = pending().count();
     all.truncate(limit);
 
-    Ok(NotificationsResponse { notifications: all, unread_count, pending_approvals_count })
+    Ok(NotificationsResponse {
+        notifications: all,
+        unread_count,
+        pending_approvals_count,
+    })
 }
 
 /// Maps a client action to the value item's `(engagement, state)`.
@@ -172,7 +196,12 @@ fn action_outcome(action: &str) -> Option<(&'static str, &'static str)> {
 }
 
 /// Returns false when no value item has that id.
-fn record_action(db: &hq_db::Database, val_id: &str, engagement: &str, db_state: &str) -> anyhow::Result<bool> {
+fn record_action(
+    db: &hq_db::Database,
+    val_id: &str,
+    engagement: &str,
+    db_state: &str,
+) -> anyhow::Result<bool> {
     // The token path only matches delivered items; anything else is updated by exact id.
     if hq_db::value_items::record_engagement_by_token(db, val_id, engagement)? {
         return Ok(true);
@@ -191,7 +220,12 @@ pub(crate) async fn list_notifications_handler(
     Query(params): Query<ListNotificationsParams>,
 ) -> Response {
     let limit = params.limit.unwrap_or(50);
-    match aggregate_notifications(&state.db, params.state.as_deref(), params.category.as_deref(), limit) {
+    match aggregate_notifications(
+        &state.db,
+        params.state.as_deref(),
+        params.category.as_deref(),
+        limit,
+    ) {
         Ok(res) => Json(res).into_response(),
         Err(e) => {
             warn!(error = %e, "list_notifications_handler failed");
@@ -206,10 +240,12 @@ pub(crate) async fn notification_action_handler(
     Json(body): Json<NotificationActionRequest>,
 ) -> Response {
     let Some(val_id) = id.strip_prefix("val_") else {
-        return ApiError::bad_request(format!("unrecognized notification ID format '{id}'")).into_response();
+        return ApiError::bad_request(format!("unrecognized notification ID format '{id}'"))
+            .into_response();
     };
     let Some((engagement, db_state)) = action_outcome(&body.action) else {
-        return ApiError::bad_request(format!("unknown action '{}' for value item", body.action)).into_response();
+        return ApiError::bad_request(format!("unknown action '{}' for value item", body.action))
+            .into_response();
     };
     match record_action(&state.db, val_id, engagement, db_state) {
         Err(e) => {
@@ -263,7 +299,12 @@ pub(crate) async fn mark_all_read_handler(State(state): State<Arc<WsState>>) -> 
 mod tests {
     #[test]
     fn state_where_ignores_unknown_and_hostile_filters() {
-        for filter in ["", "bogus", "pending' OR 1=1 --", "approved; DROP TABLE value_items"] {
+        for filter in [
+            "",
+            "bogus",
+            "pending' OR 1=1 --",
+            "approved; DROP TABLE value_items",
+        ] {
             assert_eq!(state_where(Some(filter)), "", "{filter}");
         }
         assert_eq!(state_where(None), "");
@@ -336,7 +377,9 @@ mod tests {
             })
             .unwrap();
         let act = |id: &str, action: &str| {
-            let body = NotificationActionRequest { action: action.into() };
+            let body = NotificationActionRequest {
+                action: action.into(),
+            };
             notification_action_handler(State(state.clone()), AxumPath(id.into()), Json(body))
         };
         assert_eq!(act("val_abc12345", "approve").await.status(), 200);

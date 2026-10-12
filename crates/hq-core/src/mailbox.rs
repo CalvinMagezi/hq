@@ -252,7 +252,8 @@ pub fn notify_tagged_agents_with(
             content,
             None,
         );
-        msg.meta.insert(META_TASK_ID.to_string(), task_id.to_string());
+        msg.meta
+            .insert(META_TASK_ID.to_string(), task_id.to_string());
         if send_message(vault_path, &msg).is_ok() {
             sent += 1;
         }

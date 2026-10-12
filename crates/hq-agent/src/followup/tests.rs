@@ -253,7 +253,10 @@ fn maintenance_closes_overdue_runs_of_a_live_pid_and_escalates_once() {
     let db = db();
     add_run(&db, "run-od111111", "t1", 777);
     db.with_conn(|c| {
-        c.execute("UPDATE subagent_runs SET deadline_at = 1 WHERE run_id = 'run-od111111'", [])?;
+        c.execute(
+            "UPDATE subagent_runs SET deadline_at = 1 WHERE run_id = 'run-od111111'",
+            [],
+        )?;
         Ok(())
     })
     .unwrap();
@@ -277,8 +280,11 @@ fn a_lost_claim_does_not_acknowledge_or_rerun() {
     let f = claim_followups(&db, &cfg(true), "web", "w1").remove(0);
     // The claim expires and a second worker takes the event over.
     let later = chrono::Utc::now().timestamp() + runs::CLAIM_TTL_SECS + 1;
-    let taken = db.with_conn(|c| runs::claim_due(c, "w2", "web", later, 5)).unwrap();
+    let taken = db
+        .with_conn(|c| runs::claim_due(c, "w2", "web", later, 5))
+        .unwrap();
     assert_eq!(taken.len(), 1);
-    db.with_conn(|c| runs::mark_delivered(c, taken[0].0.id, later)).unwrap();
+    db.with_conn(|c| runs::mark_delivered(c, taken[0].0.id, later))
+        .unwrap();
     assert!(!delivered(&db, &f));
 }

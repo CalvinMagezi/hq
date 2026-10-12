@@ -11,4 +11,3 @@ pub async fn send_message(token: &str, chat_id: i64, text: &str) -> anyhow::Resu
     bot.send_message(chat, text).await?;
     Ok(())
 }
-

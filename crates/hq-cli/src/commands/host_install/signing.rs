@@ -33,7 +33,9 @@ pub(super) fn lists_identity(output: &str) -> bool {
 /// Whether `codesign -dr -` output says the binary is signed by a certificate
 /// (anything but an ad-hoc cdhash requirement) for our identifier.
 pub(super) fn is_stably_signed(requirement: &str) -> bool {
-    requirement.contains(SIGN_IDENTIFIER) && requirement.contains("certificate") && !requirement.contains("cdhash")
+    requirement.contains(SIGN_IDENTIFIER)
+        && requirement.contains("certificate")
+        && !requirement.contains("cdhash")
 }
 
 fn tool(program: &str, args: &[&str]) -> Result<std::process::Output> {
@@ -43,7 +45,11 @@ fn tool(program: &str, args: &[&str]) -> Result<std::process::Output> {
         .output()
         .with_context(|| format!("running {program}"))?;
     if !out.status.success() {
-        bail!("{program} {} failed: {}", args.first().unwrap_or(&""), String::from_utf8_lossy(&out.stderr).trim());
+        bail!(
+            "{program} {} failed: {}",
+            args.first().unwrap_or(&""),
+            String::from_utf8_lossy(&out.stderr).trim()
+        );
     }
     Ok(out)
 }
@@ -79,14 +85,34 @@ fn create_identity(work: &Path, kc: &str) -> Result<()> {
     let key = work.join("key.pem");
     let cert = work.join("cert.pem");
     let p12 = work.join("id.p12");
-    let (key, cert, p12) = (key.to_string_lossy(), cert.to_string_lossy(), p12.to_string_lossy());
+    let (key, cert, p12) = (
+        key.to_string_lossy(),
+        cert.to_string_lossy(),
+        p12.to_string_lossy(),
+    );
     let subject = format!("/CN={CERT_NAME}/O=Agent HQ");
     tool(
         "openssl",
         &[
-            "req", "-x509", "-newkey", "rsa:2048", "-keyout", &key, "-out", &cert, "-days", CERT_DAYS, "-nodes", "-subj",
-            &subject, "-addext", "keyUsage=critical,digitalSignature", "-addext", "extendedKeyUsage=critical,codeSigning",
-            "-addext", "basicConstraints=critical,CA:FALSE",
+            "req",
+            "-x509",
+            "-newkey",
+            "rsa:2048",
+            "-keyout",
+            &key,
+            "-out",
+            &cert,
+            "-days",
+            CERT_DAYS,
+            "-nodes",
+            "-subj",
+            &subject,
+            "-addext",
+            "keyUsage=critical,digitalSignature",
+            "-addext",
+            "extendedKeyUsage=critical,codeSigning",
+            "-addext",
+            "basicConstraints=critical,CA:FALSE",
         ],
     )?;
     // macOS's `security` only reads the legacy PKCS12 ciphers.
@@ -94,16 +120,53 @@ fn create_identity(work: &Path, kc: &str) -> Result<()> {
     tool(
         "openssl",
         &[
-            "pkcs12", "-export", "-out", &p12, "-inkey", &key, "-in", &cert, "-passout", &pass, "-certpbe",
-            "PBE-SHA1-3DES", "-keypbe", "PBE-SHA1-3DES", "-macalg", "SHA1",
+            "pkcs12",
+            "-export",
+            "-out",
+            &p12,
+            "-inkey",
+            &key,
+            "-in",
+            &cert,
+            "-passout",
+            &pass,
+            "-certpbe",
+            "PBE-SHA1-3DES",
+            "-keypbe",
+            "PBE-SHA1-3DES",
+            "-macalg",
+            "SHA1",
         ],
     )?;
     tool("security", &["create-keychain", "-p", "", kc])?;
     tool("security", &["set-keychain-settings", kc])?;
     tool("security", &["unlock-keychain", "-p", "", kc])?;
-    tool("security", &["import", &p12, "-k", kc, "-P", P12_PASSWORD, "-T", "/usr/bin/codesign"])?;
+    tool(
+        "security",
+        &[
+            "import",
+            &p12,
+            "-k",
+            kc,
+            "-P",
+            P12_PASSWORD,
+            "-T",
+            "/usr/bin/codesign",
+        ],
+    )?;
     // Lets codesign use the key without asking.
-    tool("security", &["set-key-partition-list", "-S", "apple-tool:,apple:,codesign:", "-s", "-k", "", kc])?;
+    tool(
+        "security",
+        &[
+            "set-key-partition-list",
+            "-S",
+            "apple-tool:,apple:,codesign:",
+            "-s",
+            "-k",
+            "",
+            kc,
+        ],
+    )?;
     // codesign finds the identity through the keychain search list.
     let listed = tool("security", &["list-keychains", "-d", "user"])?;
     let mut all: Vec<String> = String::from_utf8_lossy(&listed.stdout)
@@ -129,7 +192,10 @@ fn wait_with_deadline(child: &mut std::process::Child) -> Result<bool> {
         if Instant::now() > deadline {
             let _ = child.kill();
             let _ = child.wait();
-            bail!("codesign did not finish in {}s; it is probably waiting on a keychain dialog", SIGN_TIMEOUT.as_secs());
+            bail!(
+                "codesign did not finish in {}s; it is probably waiting on a keychain dialog",
+                SIGN_TIMEOUT.as_secs()
+            );
         }
         std::thread::sleep(POLL);
     }
@@ -139,8 +205,16 @@ fn wait_with_deadline(child: &mut std::process::Child) -> Result<bool> {
 /// copy keeps its old inode (changing a running binary's signature in place kills
 /// it). Does nothing when it is already signed that way. Returns whether it signed.
 pub(super) fn sign(home: &Path, exe: &Path) -> Result<bool> {
-    let current = Command::new("codesign").args(["-dr", "-"]).arg(exe).stdin(Stdio::null()).output()?;
-    let text = format!("{}{}", String::from_utf8_lossy(&current.stdout), String::from_utf8_lossy(&current.stderr));
+    let current = Command::new("codesign")
+        .args(["-dr", "-"])
+        .arg(exe)
+        .stdin(Stdio::null())
+        .output()?;
+    let text = format!(
+        "{}{}",
+        String::from_utf8_lossy(&current.stdout),
+        String::from_utf8_lossy(&current.stderr)
+    );
     if is_stably_signed(&text) {
         return Ok(false);
     }
@@ -187,9 +261,13 @@ mod tests {
 
     #[test]
     fn only_a_certificate_requirement_counts_as_stable() {
-        assert!(is_stably_signed("designated => identifier \"com.agent-hq.hq\" and certificate root = H\"7d1c\""));
+        assert!(is_stably_signed(
+            "designated => identifier \"com.agent-hq.hq\" and certificate root = H\"7d1c\""
+        ));
         assert!(!is_stably_signed("designated => cdhash H\"a6fd\""));
-        assert!(!is_stably_signed("designated => identifier \"other\" and certificate root = H\"7d1c\""));
+        assert!(!is_stably_signed(
+            "designated => identifier \"other\" and certificate root = H\"7d1c\""
+        ));
         assert!(!is_stably_signed("code object is not signed at all"));
     }
 }

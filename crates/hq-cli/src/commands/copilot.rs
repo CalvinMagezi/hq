@@ -16,7 +16,13 @@ use serde_yaml::{Mapping, Value};
 /// Name of the backend entry `link` writes.
 const BACKEND_NAME: &str = "copilot";
 
-pub async fn run(config: &HqConfig, sub: &str, model: Option<&str>, write: bool, agents: bool) -> Result<()> {
+pub async fn run(
+    config: &HqConfig,
+    sub: &str,
+    model: Option<&str>,
+    write: bool,
+    agents: bool,
+) -> Result<()> {
     match sub {
         "link" => link(config, model, write).await,
         "init" => init(&std::env::current_dir()?, agents),
@@ -70,7 +76,11 @@ fn upsert_block(existing: &str, block: &str) -> Result<String> {
             let a = existing.find(BEGIN).expect("counted");
             let b = existing.find(END).expect("counted") + END.len();
             let b = b + existing[b..].bytes().take_while(|c| *c == b'\r').count();
-            let b = if existing[b..].starts_with('\n') { b + 1 } else { b };
+            let b = if existing[b..].starts_with('\n') {
+                b + 1
+            } else {
+                b
+            };
             return Ok(format!("{}{}{}", &existing[..a], block, &existing[b..]));
         }
         _ => bail!(
@@ -102,7 +112,9 @@ fn init(dir: &Path, agents: bool) -> Result<()> {
     std::fs::write(&path, upsert_block(&existing, &instructions_block())?)
         .with_context(|| format!("writing {}", path.display()))?;
     println!("Wrote the HQ section to {}", path.display());
-    println!("Everything outside the <!-- hq:begin --> and <!-- hq:end --> markers is left as it was.");
+    println!(
+        "Everything outside the <!-- hq:begin --> and <!-- hq:end --> markers is left as it was."
+    );
     Ok(())
 }
 
@@ -120,7 +132,9 @@ async fn link(config: &HqConfig, model: Option<&str>, write: bool) -> Result<()>
     if preference.iter().all(|m| m.trim().is_empty()) {
         bail!("no model to try: set github_copilot.model_preference or pass --model");
     }
-    println!("Checking your Copilot seat through `gh copilot` (this sends one short test request per model).");
+    println!(
+        "Checking your Copilot seat through `gh copilot` (this sends one short test request per model)."
+    );
 
     let timeout = config.github_copilot.timeout_secs.clamp(10, 60);
     // An empty directory, so the CLI has no project files, instructions or git state to send.
@@ -145,7 +159,10 @@ async fn link(config: &HqConfig, model: Option<&str>, write: bool) -> Result<()>
                 if out.to_ascii_lowercase().contains("ok") {
                     Ok(())
                 } else {
-                    Err(format!("unexpected reply: {}", out.trim().chars().take(200).collect::<String>()))
+                    Err(format!(
+                        "unexpected reply: {}",
+                        out.trim().chars().take(200).collect::<String>()
+                    ))
                 }
             })
         }
@@ -163,9 +180,15 @@ async fn link(config: &HqConfig, model: Option<&str>, write: bool) -> Result<()>
             let path = target_path();
             if write {
                 apply(&path, &model)?;
-                println!("Wrote {} (the first version is kept as config.yaml.bak; comments are not preserved).", path.display());
+                println!(
+                    "Wrote {} (the first version is kept as config.yaml.bak; comments are not preserved).",
+                    path.display()
+                );
             } else {
-                println!("\nAdd this to {} (or rerun with --write):\n", path.display());
+                println!(
+                    "\nAdd this to {} (or rerun with --write):\n",
+                    path.display()
+                );
                 println!("{}", snippet(&model));
             }
             Ok(())
@@ -194,17 +217,29 @@ async fn link(config: &HqConfig, model: Option<&str>, write: bool) -> Result<()>
 
 /// The headless invocation the `github-copilot-cli` backend uses, without tool permissions.
 fn probe_args(model: &str) -> Vec<String> {
-    ["copilot", "--", "-s", "--no-ask-user", "--model", model, "-p"]
-        .iter()
-        .map(|s| s.to_string())
-        .collect()
+    [
+        "copilot",
+        "--",
+        "-s",
+        "--no-ask-user",
+        "--model",
+        model,
+        "-p",
+    ]
+    .iter()
+    .map(|s| s.to_string())
+    .collect()
 }
 
 /// Where `--write` goes: the file `load()` reads when there is one, so a deployed config is not
 /// shadowed by a new per-user file; otherwise the per-user path.
 fn target_path() -> std::path::PathBuf {
     let read = HqConfig::config_read_path();
-    if read.exists() { read } else { HqConfig::config_file_path() }
+    if read.exists() {
+        read
+    } else {
+        HqConfig::config_file_path()
+    }
 }
 
 fn describe(why: ProbeFailure) -> &'static str {
@@ -244,9 +279,9 @@ fn merged(doc: Value, model: &str) -> Result<Value> {
     if list.is_null() {
         *list = Value::Sequence(vec![]);
     }
-    let list = list
-        .as_sequence_mut()
-        .ok_or_else(|| anyhow::anyhow!("`backends.backends` in the config is not a list; fix it first"))?;
+    let list = list.as_sequence_mut().ok_or_else(|| {
+        anyhow::anyhow!("`backends.backends` in the config is not a list; fix it first")
+    })?;
     let existing = list
         .iter_mut()
         .find(|e| e.get("name").and_then(Value::as_str) == Some(BACKEND_NAME));
@@ -290,7 +325,8 @@ fn apply(path: &Path, model: &str) -> Result<()> {
     let doc: Value = if current.trim().is_empty() {
         Value::Mapping(Mapping::new())
     } else {
-        serde_yaml::from_str(&current).with_context(|| format!("{} is not valid YAML", path.display()))?
+        serde_yaml::from_str(&current)
+            .with_context(|| format!("{} is not valid YAML", path.display()))?
     };
     let doc = merged(doc, model)?;
     let out = serde_yaml::to_string(&doc)?;
@@ -336,7 +372,11 @@ mod tests {
         assert_eq!(entries.len(), 2);
         assert_eq!(entries[1].model.as_deref(), Some("claude-haiku-5.5"));
         assert!(entries[1].enabled);
-        assert_eq!(v["backends"]["primary"].as_str(), Some("work"), "a chosen primary stays");
+        assert_eq!(
+            v["backends"]["primary"].as_str(),
+            Some("work"),
+            "a chosen primary stays"
+        );
         assert_eq!(v["vault_path"].as_str(), Some("/v"));
     }
 
@@ -361,7 +401,8 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         init(dir.path(), false).unwrap();
         init(dir.path(), true).unwrap();
-        let g = std::fs::read_to_string(dir.path().join(".github/copilot-instructions.md")).unwrap();
+        let g =
+            std::fs::read_to_string(dir.path().join(".github/copilot-instructions.md")).unwrap();
         assert!(g.contains("hq task list") && g.contains("hq task comment"));
         assert!(dir.path().join("AGENTS.md").exists());
     }
@@ -369,14 +410,22 @@ mod tests {
     #[test]
     fn the_commands_it_names_exist() {
         // Every `hq ...` verb the block advertises must be a real task verb.
-        for verb in ["list", "get", "comments", "spaces", "create", "update", "comment"] {
-            assert!(instructions_block().contains(&format!("hq task {verb}")), "{verb}");
+        for verb in [
+            "list", "get", "comments", "spaces", "create", "update", "comment",
+        ] {
+            assert!(
+                instructions_block().contains(&format!("hq task {verb}")),
+                "{verb}"
+            );
         }
     }
 
     #[test]
     fn another_kind_under_the_same_name_or_a_malformed_config_is_refused() {
-        let other: Value = serde_yaml::from_str("backends:\n  backends:\n    - {name: copilot, kind: openrouter}\n").unwrap();
+        let other: Value = serde_yaml::from_str(
+            "backends:\n  backends:\n    - {name: copilot, kind: openrouter}\n",
+        )
+        .unwrap();
         assert!(merged(other, "m").is_err());
         let bad: Value = serde_yaml::from_str("backends: [1]\n").unwrap();
         assert!(merged(bad, "m").is_err());
@@ -390,11 +439,19 @@ mod tests {
         std::fs::write(&path, "default_model: x\n").unwrap();
         apply(&path, "gpt-6-luna").unwrap();
         apply(&path, "claude-haiku-5.5").unwrap();
-        assert_eq!(std::fs::read_to_string(dir.path().join("config.yaml.bak")).unwrap(), "default_model: x\n", "the first backup survives a second write");
+        assert_eq!(
+            std::fs::read_to_string(dir.path().join("config.yaml.bak")).unwrap(),
+            "default_model: x\n",
+            "the first backup survives a second write"
+        );
         let doc: Value = serde_yaml::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
-        let backends: hq_core::config::BackendsConfig = serde_yaml::from_value(doc["backends"].clone()).unwrap();
+        let backends: hq_core::config::BackendsConfig =
+            serde_yaml::from_value(doc["backends"].clone()).unwrap();
         assert!(backends.is_configured());
         assert_eq!(doc["default_model"].as_str(), Some("x"));
-        assert_eq!(doc["github_copilot"]["model"].as_str(), Some("claude-haiku-5.5"));
+        assert_eq!(
+            doc["github_copilot"]["model"].as_str(),
+            Some("claude-haiku-5.5")
+        );
     }
 }

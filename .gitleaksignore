@@ -1,2 +1,6 @@
 # Reviewed: the minisign PUBLIC key in install.ps1, flagged as a generic key.
 b0250b78c27f91c350cca907834fa3f91bcc87be:apps/site/public/install.ps1:generic-api-key:25
+# Reviewed: test fixtures in redact.rs (fake tokens). The rustfmt pass moved
+# their `gitleaks:allow` comments off the fixture lines; fixed in a later commit.
+8bc00b4854df93a8590eba869d8fee8558f7e4f2:crates/hq-core/src/redact.rs:generic-api-key:250
+8bc00b4854df93a8590eba869d8fee8558f7e4f2:crates/hq-core/src/redact.rs:generic-api-key:260

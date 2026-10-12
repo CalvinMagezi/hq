@@ -216,7 +216,11 @@ impl Ledger {
 
     /// Poll the registry while the child runs and trip its cancel flag when
     /// the run is cancelled there. Stops when the returned guard is dropped.
-    pub(super) fn watch_cancel(&self, child_id: &str, cancel: Arc<AtomicBool>) -> Option<CancelWatch> {
+    pub(super) fn watch_cancel(
+        &self,
+        child_id: &str,
+        cancel: Arc<AtomicBool>,
+    ) -> Option<CancelWatch> {
         let db = self.db.clone()?;
         let run_id = self.entries.get(child_id)?.run_id.clone();
         Some(CancelWatch(tokio::spawn(async move {
@@ -303,9 +307,7 @@ impl Ledger {
                 };
                 match db.with_conn(|c| runs::settle(c, &entry.run_id, &s, now(), self.detached)) {
                     Ok(true) => true,
-                    Ok(false) => {
-                        self.reconcile_with_registry(db, &entry.run_id, outcome)
-                    }
+                    Ok(false) => self.reconcile_with_registry(db, &entry.run_id, outcome),
                     Err(e) => {
                         warn!(error = %e, "subagent runs: could not settle run");
                         true
@@ -323,7 +325,12 @@ impl Ledger {
     /// failed, so this still counts as the first (and only) report. A row
     /// already settled elsewhere wins: a cancelled run is reported as such, so
     /// the parent never sees a result the registry says was discarded.
-    fn reconcile_with_registry(&self, db: &Database, run_id: &str, outcome: &mut ChildOutcome) -> bool {
+    fn reconcile_with_registry(
+        &self,
+        db: &Database,
+        run_id: &str,
+        outcome: &mut ChildOutcome,
+    ) -> bool {
         match db.with_conn(|c| runs::get(c, run_id)) {
             Ok(Some(row)) => {
                 if row.exec_status == runs::EXEC_CANCELLED {

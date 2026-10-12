@@ -374,9 +374,16 @@ pub fn keep_reason(t: &Target, opts: &EntryOptions) -> Option<&'static str> {
     if opts.scope.is_some() || opts.remote_url.is_some() {
         return None;
     }
-    match existing_entry(t, false).ok().flatten().as_ref().map(classify) {
+    match existing_entry(t, false)
+        .ok()
+        .flatten()
+        .as_ref()
+        .map(classify)
+    {
         Some(Existing::Remote) => Some("a remote entry (use --url to change it)"),
-        Some(Existing::Unrecognized) => Some("an entry with a --scope this version does not recognize"),
+        Some(Existing::Unrecognized) => {
+            Some("an entry with a --scope this version does not recognize")
+        }
         _ => None,
     }
 }
@@ -387,7 +394,12 @@ pub fn effective_scope(t: &Target, opts: &EntryOptions) -> ServeScope {
     if let Some(scope) = opts.scope {
         return scope;
     }
-    match existing_entry(t, false).ok().flatten().as_ref().map(classify) {
+    match existing_entry(t, false)
+        .ok()
+        .flatten()
+        .as_ref()
+        .map(classify)
+    {
         Some(Existing::Local(scope)) => scope,
         _ => ServeScope::Full,
     }
@@ -414,7 +426,9 @@ pub fn describe(t: &Target) -> String {
         Some(Existing::Local(ServeScope::Full)) => "installed (full access)".into(),
         Some(Existing::Local(ServeScope::Tasks)) => "installed (tasks only)".into(),
         Some(Existing::Remote) => "installed (remote HQ)".into(),
-        Some(Existing::Unrecognized) => "installed (unrecognized scope, treated as narrowed)".into(),
+        Some(Existing::Unrecognized) => {
+            "installed (unrecognized scope, treated as narrowed)".into()
+        }
     }
 }
 
@@ -686,7 +700,11 @@ mod tests {
     #[test]
     fn a_scoped_stdio_entry_launches_mcp_serve_with_that_scope() {
         let full = build_stdio_entry(Path::new("/vault"), "x", ServeScope::Full, false);
-        assert_eq!(full["args"], json!(["mcp-serve"]), "full access adds no flag");
+        assert_eq!(
+            full["args"],
+            json!(["mcp-serve"]),
+            "full access adds no flag"
+        );
         let tasks = build_stdio_entry(Path::new("/vault"), "x", ServeScope::Tasks, false);
         assert_eq!(tasks["args"], json!(["mcp-serve", "--scope", "tasks"]));
         assert!(tasks.get("type").is_none());
@@ -697,7 +715,10 @@ mod tests {
     #[test]
     fn serve_scopes_map_to_the_gateway_allowlists() {
         assert!(ServeScope::Full.allowlist().is_none());
-        assert_eq!(ServeScope::Tasks.allowlist(), Some(hq_mcp::gateway::TASKS_ALLOWLIST));
+        assert_eq!(
+            ServeScope::Tasks.allowlist(),
+            Some(hq_mcp::gateway::TASKS_ALLOWLIST)
+        );
     }
 
     /// VS Code's workspace file keys its servers under `servers`; `mcpServers` is ignored.
@@ -716,8 +737,14 @@ mod tests {
         write_target(&t, Path::new("/vault"), &EntryOptions::default()).unwrap();
         let root = read_json(&t.path).unwrap();
         assert_eq!(root["servers"]["agent-hq"]["type"], "stdio");
-        assert!(root["mcpServers"].get("agent-hq").is_none(), "the ignored old entry is removed");
-        assert_eq!(root["mcpServers"]["keep"]["command"], "k", "other servers are untouched");
+        assert!(
+            root["mcpServers"].get("agent-hq").is_none(),
+            "the ignored old entry is removed"
+        );
+        assert_eq!(
+            root["mcpServers"]["keep"]["command"], "k",
+            "other servers are untouched"
+        );
     }
 
     #[test]
@@ -739,14 +766,25 @@ mod tests {
         let entry = &root["servers"]["agent-hq"];
         assert_eq!(entry["type"], "http");
         assert_eq!(entry["url"], "https://hq.example.com/mcp");
-        assert_eq!(entry["headers"]["Authorization"], "Bearer ${input:agent-hq-key}");
+        assert_eq!(
+            entry["headers"]["Authorization"],
+            "Bearer ${input:agent-hq-key}"
+        );
         assert_eq!(root["servers"]["x"]["command"], "y");
         let inputs = root["inputs"].as_array().unwrap();
-        assert_eq!(inputs.len(), 2, "the existing input stays and ours is added once");
+        assert_eq!(
+            inputs.len(),
+            2,
+            "the existing input stays and ours is added once"
+        );
         let ours = inputs.iter().find(|i| i["id"] == "agent-hq-key").unwrap();
         assert_eq!(ours["password"], true);
         let text = std::fs::read_to_string(&t.path).unwrap();
-        assert_eq!(text.matches("Bearer ").count(), 1, "one header, and only the placeholder");
+        assert_eq!(
+            text.matches("Bearer ").count(),
+            1,
+            "one header, and only the placeholder"
+        );
         assert!(text.contains("Bearer ${input:agent-hq-key}"));
     }
 
@@ -758,7 +796,11 @@ mod tests {
             remote_url: Some("https://hq.example.com/mcp".into()),
             ..EntryOptions::default()
         };
-        assert!(write_target(&t, Path::new("/vault"), &opts).unwrap().is_none());
+        assert!(
+            write_target(&t, Path::new("/vault"), &opts)
+                .unwrap()
+                .is_none()
+        );
         assert!(!t.path.exists());
     }
 
@@ -767,14 +809,22 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let t = Target {
             legacy: true,
-            ..target(dir.path().join("settings.json"), "mcp.servers", "claude-code")
+            ..target(
+                dir.path().join("settings.json"),
+                "mcp.servers",
+                "claude-code",
+            )
         };
         write_json(
             &t.path,
             &json!({ "editor.fontSize": 14, "mcp.servers": { "agent-hq": { "command": "old" } } }),
         )
         .unwrap();
-        assert!(write_target(&t, Path::new("/vault"), &EntryOptions::default()).unwrap().is_none());
+        assert!(
+            write_target(&t, Path::new("/vault"), &EntryOptions::default())
+                .unwrap()
+                .is_none()
+        );
         assert!(remove_target(&t).unwrap());
         let root = read_json(&t.path).unwrap();
         assert_eq!(root["editor.fontSize"], 14);
@@ -785,7 +835,10 @@ mod tests {
     fn re_running_a_plain_install_keeps_a_narrowed_entry_and_a_flag_changes_it() {
         let dir = tempfile::tempdir().unwrap();
         let t = vscode_target(dir.path().join("mcp.json"));
-        let scoped = EntryOptions { scope: Some(ServeScope::Tasks), ..EntryOptions::default() };
+        let scoped = EntryOptions {
+            scope: Some(ServeScope::Tasks),
+            ..EntryOptions::default()
+        };
         write_target(&t, Path::new("/vault"), &scoped).unwrap();
         let args = |t: &Target| read_json(&t.path).unwrap()["servers"]["agent-hq"]["args"].clone();
         assert_eq!(args(&t), json!(["mcp-serve", "--scope", "tasks"]));
@@ -797,9 +850,16 @@ mod tests {
             "a plain re-install must not widen the entry"
         );
 
-        let full = EntryOptions { scope: Some(ServeScope::Full), ..EntryOptions::default() };
+        let full = EntryOptions {
+            scope: Some(ServeScope::Full),
+            ..EntryOptions::default()
+        };
         write_target(&t, Path::new("/vault"), &full).unwrap();
-        assert_eq!(args(&t), json!(["mcp-serve"]), "asking for full is explicit");
+        assert_eq!(
+            args(&t),
+            json!(["mcp-serve"]),
+            "asking for full is explicit"
+        );
     }
 
     #[test]
@@ -807,14 +867,20 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let t = vscode_target(dir.path().join("mcp.json"));
         write_target(&t, Path::new("/vault"), &EntryOptions::default()).unwrap();
-        assert_eq!(read_json(&t.path).unwrap()["servers"]["agent-hq"]["args"], json!(["mcp-serve"]));
+        assert_eq!(
+            read_json(&t.path).unwrap()["servers"]["agent-hq"]["args"],
+            json!(["mcp-serve"])
+        );
     }
 
     #[test]
     fn the_remote_snippet_is_a_complete_vscode_file() {
         let snippet: Value =
             serde_json::from_str(&remote_snippet("https://hq.example.com/mcp").unwrap()).unwrap();
-        assert_eq!(snippet["servers"]["agent-hq"]["url"], "https://hq.example.com/mcp");
+        assert_eq!(
+            snippet["servers"]["agent-hq"]["url"],
+            "https://hq.example.com/mcp"
+        );
         assert_eq!(snippet["inputs"][0]["id"], "agent-hq-key");
     }
 
@@ -863,7 +929,10 @@ mod tests {
             validate_remote_url("HTTPS://HQ.Example.com/mcp").unwrap(),
             "https://hq.example.com/mcp"
         );
-        assert_eq!(validate_remote_url("https://hq.example.com").unwrap(), "https://hq.example.com/");
+        assert_eq!(
+            validate_remote_url("https://hq.example.com").unwrap(),
+            "https://hq.example.com/"
+        );
     }
 
     #[test]
@@ -893,34 +962,77 @@ mod tests {
     fn a_plain_install_keeps_a_remote_entry_and_an_explicit_choice_replaces_it() {
         let dir = tempfile::tempdir().unwrap();
         let t = vscode_target(dir.path().join("mcp.json"));
-        let remote = EntryOptions { remote_url: Some("https://hq.example.com/mcp".into()), ..EntryOptions::default() };
+        let remote = EntryOptions {
+            remote_url: Some("https://hq.example.com/mcp".into()),
+            ..EntryOptions::default()
+        };
         write_target(&t, Path::new("/vault"), &remote).unwrap();
 
         let plain = EntryOptions::default();
         assert!(keep_reason(&t, &plain).is_some());
-        assert!(write_target(&t, Path::new("/vault"), &plain).unwrap().is_none());
+        assert!(
+            write_target(&t, Path::new("/vault"), &plain)
+                .unwrap()
+                .is_none()
+        );
         let kept = read_json(&t.path).unwrap();
-        assert_eq!(kept["servers"]["agent-hq"]["url"], "https://hq.example.com/mcp");
-        assert!(kept["servers"]["agent-hq"].get("command").is_none(), "no local full-access server appeared");
+        assert_eq!(
+            kept["servers"]["agent-hq"]["url"],
+            "https://hq.example.com/mcp"
+        );
+        assert!(
+            kept["servers"]["agent-hq"].get("command").is_none(),
+            "no local full-access server appeared"
+        );
 
-        let full = EntryOptions { scope: Some(ServeScope::Full), ..EntryOptions::default() };
-        assert!(write_target(&t, Path::new("/vault"), &full).unwrap().is_some());
-        assert!(read_json(&t.path).unwrap()["servers"]["agent-hq"].get("command").is_some());
+        let full = EntryOptions {
+            scope: Some(ServeScope::Full),
+            ..EntryOptions::default()
+        };
+        assert!(
+            write_target(&t, Path::new("/vault"), &full)
+                .unwrap()
+                .is_some()
+        );
+        assert!(
+            read_json(&t.path).unwrap()["servers"]["agent-hq"]
+                .get("command")
+                .is_some()
+        );
     }
 
     #[test]
     fn every_spelling_of_scope_counts_as_narrowed_and_unknown_ones_are_never_widened() {
         let cases = [
-            (json!(["mcp-serve", "--scope", "tasks"]), Existing::Local(ServeScope::Tasks)),
-            (json!(["mcp-serve", "--scope=tasks"]), Existing::Local(ServeScope::Tasks)),
-            (json!(["mcp-serve", "--scope", "full"]), Existing::Local(ServeScope::Full)),
+            (
+                json!(["mcp-serve", "--scope", "tasks"]),
+                Existing::Local(ServeScope::Tasks),
+            ),
+            (
+                json!(["mcp-serve", "--scope=tasks"]),
+                Existing::Local(ServeScope::Tasks),
+            ),
+            (
+                json!(["mcp-serve", "--scope", "full"]),
+                Existing::Local(ServeScope::Full),
+            ),
             (json!(["mcp-serve"]), Existing::Local(ServeScope::Full)),
-            (json!(["mcp-serve", "--scope", "vault-only"]), Existing::Unrecognized),
-            (json!(["mcp-serve", "--scope=Tasks"]), Existing::Unrecognized),
+            (
+                json!(["mcp-serve", "--scope", "vault-only"]),
+                Existing::Unrecognized,
+            ),
+            (
+                json!(["mcp-serve", "--scope=Tasks"]),
+                Existing::Unrecognized,
+            ),
             (json!(["mcp-serve", "--scope"]), Existing::Unrecognized),
         ];
         for (args, expected) in cases {
-            assert_eq!(classify(&json!({ "command": "hq", "args": args.clone() })), expected, "{args}");
+            assert_eq!(
+                classify(&json!({ "command": "hq", "args": args.clone() })),
+                expected,
+                "{args}"
+            );
         }
 
         let dir = tempfile::tempdir().unwrap();
@@ -930,22 +1042,46 @@ mod tests {
             &json!({ "servers": { "agent-hq": { "command": "hq", "args": ["mcp-serve", "--scope=restricted-future"] } } }),
         )
         .unwrap();
-        assert!(write_target(&t, Path::new("/vault"), &EntryOptions::default()).unwrap().is_none());
-        assert_eq!(entry_args(&t), json!(["mcp-serve", "--scope=restricted-future"]));
+        assert!(
+            write_target(&t, Path::new("/vault"), &EntryOptions::default())
+                .unwrap()
+                .is_none()
+        );
+        assert_eq!(
+            entry_args(&t),
+            json!(["mcp-serve", "--scope=restricted-future"])
+        );
     }
 
     #[test]
     fn an_unreadable_antigravity_style_file_is_not_overwritten_by_a_plain_install() {
         let dir = tempfile::tempdir().unwrap();
-        let t = Target { key: None, ..target(dir.path().join("agent-hq.json"), "unused", "antigravity") };
+        let t = Target {
+            key: None,
+            ..target(dir.path().join("agent-hq.json"), "unused", "antigravity")
+        };
         std::fs::write(&t.path, "{ \"command\": // hand edited\n }").unwrap();
         assert!(write_target(&t, Path::new("/vault"), &EntryOptions::default()).is_err());
-        assert!(std::fs::read_to_string(&t.path).unwrap().contains("hand edited"));
+        assert!(
+            std::fs::read_to_string(&t.path)
+                .unwrap()
+                .contains("hand edited")
+        );
 
         // Asking for a scope on purpose replaces it.
-        let on_purpose = EntryOptions { scope: Some(ServeScope::Tasks), ..EntryOptions::default() };
-        assert!(write_target(&t, Path::new("/vault"), &on_purpose).unwrap().is_some());
-        assert_eq!(read_json(&t.path).unwrap()["args"], json!(["mcp-serve", "--scope", "tasks"]));
+        let on_purpose = EntryOptions {
+            scope: Some(ServeScope::Tasks),
+            ..EntryOptions::default()
+        };
+        assert!(
+            write_target(&t, Path::new("/vault"), &on_purpose)
+                .unwrap()
+                .is_some()
+        );
+        assert_eq!(
+            read_json(&t.path).unwrap()["args"],
+            json!(["mcp-serve", "--scope", "tasks"])
+        );
     }
 
     #[test]
@@ -955,10 +1091,16 @@ mod tests {
         assert_eq!(describe(&t), "not found");
         write_target(&t, Path::new("/vault"), &EntryOptions::default()).unwrap();
         assert_eq!(describe(&t), "installed (full access)");
-        let tasks = EntryOptions { scope: Some(ServeScope::Tasks), ..EntryOptions::default() };
+        let tasks = EntryOptions {
+            scope: Some(ServeScope::Tasks),
+            ..EntryOptions::default()
+        };
         write_target(&t, Path::new("/vault"), &tasks).unwrap();
         assert_eq!(describe(&t), "installed (tasks only)");
-        let remote = EntryOptions { remote_url: Some("https://hq.example.com/mcp".into()), ..EntryOptions::default() };
+        let remote = EntryOptions {
+            remote_url: Some("https://hq.example.com/mcp".into()),
+            ..EntryOptions::default()
+        };
         write_target(&t, Path::new("/vault"), &remote).unwrap();
         assert_eq!(describe(&t), "installed (remote HQ)");
     }
@@ -967,12 +1109,24 @@ mod tests {
     fn the_legacy_check_finds_both_spellings_of_the_old_setting() {
         let dir = tempfile::tempdir().unwrap();
         let legacy = |name: &str, body: Value| {
-            let t = Target { legacy: true, ..target(dir.path().join(name), "mcp.servers", "claude-code") };
+            let t = Target {
+                legacy: true,
+                ..target(dir.path().join(name), "mcp.servers", "claude-code")
+            };
             write_json(&t.path, &body).unwrap();
             t
         };
-        assert!(has_entry(&legacy("flat.json", json!({ "mcp.servers": { "agent-hq": {} } }))));
-        assert!(has_entry(&legacy("nested.json", json!({ "mcp": { "servers": { "agent-hq": {} } } }))));
-        assert!(!has_entry(&legacy("none.json", json!({ "editor.fontSize": 14 }))));
+        assert!(has_entry(&legacy(
+            "flat.json",
+            json!({ "mcp.servers": { "agent-hq": {} } })
+        )));
+        assert!(has_entry(&legacy(
+            "nested.json",
+            json!({ "mcp": { "servers": { "agent-hq": {} } } })
+        )));
+        assert!(!has_entry(&legacy(
+            "none.json",
+            json!({ "editor.fontSize": 14 })
+        )));
     }
 }

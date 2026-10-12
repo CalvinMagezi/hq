@@ -38,7 +38,13 @@ impl HqTool for HostListTool {
     }
     async fn execute(&self, _args: Value) -> Result<Value> {
         let hosts = all_hosts()?;
-        let rows = blocking(move || hosts.iter().map(|h| host_status(h.as_ref())).collect::<Vec<_>>()).await?;
+        let rows = blocking(move || {
+            hosts
+                .iter()
+                .map(|h| host_status(h.as_ref()))
+                .collect::<Vec<_>>()
+        })
+        .await?;
         Ok(json!({ "hosts": rows }))
     }
 }
@@ -96,7 +102,8 @@ pub fn lock_down(named: Option<&str>, reason: &str) -> Result<Value> {
     let hosts = match named {
         Some(name) => vec![host(Some(name))?],
         // An unreadable config must not leave this machine running: lock its own host at least.
-        None => all_hosts().or_else(|_| super::build(&Default::default(), super::NATIVE_HOST).map(|h| vec![h]))?,
+        None => all_hosts()
+            .or_else(|_| super::build(&Default::default(), super::NATIVE_HOST).map(|h| vec![h]))?,
     };
     let rows: Vec<Value> = std::thread::scope(|scope| {
         let pending: Vec<_> = hosts
@@ -285,7 +292,12 @@ impl HqTool for HostSendTool {
 }
 
 /// Checks the target first so a stale pane id or a sleeping host sends nothing.
-pub(super) fn send_to(h: &dyn HostBackend, target: &str, text: &str, keys: &[String]) -> Result<Value> {
+pub(super) fn send_to(
+    h: &dyn HostBackend,
+    target: &str,
+    text: &str,
+    keys: &[String],
+) -> Result<Value> {
     let agent = match h.agent(target) {
         Err(e) if e.is_unreachable() => bail!("host {} unreachable, nothing sent", h.name()),
         Err(e) => return Err(e.into()),

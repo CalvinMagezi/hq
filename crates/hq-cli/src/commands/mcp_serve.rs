@@ -1,5 +1,5 @@
-use anyhow::{Context, Result};
 use super::cursor_mcp_config::ServeScope;
+use anyhow::{Context, Result};
 use hq_core::config::HqConfig;
 use hq_db::Database;
 use hq_vault::VaultClient;

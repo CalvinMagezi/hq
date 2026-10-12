@@ -1,13 +1,62 @@
 #!/usr/bin/env bash
-# Pre-commit hook: block personal data from being committed.
-# Scans staged files for personal hostnames, hardcoded home paths,
-# API keys, and other sensitive patterns.
-# Install once per clone: ln -sf ../../scripts/pre-commit .git/hooks/pre-commit
+# Pre-commit hook:
+#   1. rustfmt the staged .rs files and re-stage them, so CI's fmt gate passes.
+#   2. Block personal data: scans staged changes for personal hostnames,
+#      hardcoded home paths, API keys, and other sensitive patterns.
+# Install once per clone: ./scripts/install-hooks.sh
 
 set -euo pipefail
 
 RED='\033[0;31m'
+YELLOW='\033[0;33m'
 NC='\033[0m'
+
+# --- rustfmt -----------------------------------------------------------------
+# Formats the staged content through stdin so rustfmt does not follow
+# `mod foo;` into files that are not part of this commit. A file whose
+# working copy also has unstaged edits is not rewritten (re-staging it would
+# sweep those edits into the commit); the commit stops and says what to run.
+# HQ_SKIP_FMT=1 skips this step.
+if [ "${HQ_SKIP_FMT:-0}" != "1" ]; then
+    # Plain read loop, not mapfile: macOS ships bash 3.2.
+    RS_FILES=()
+    while IFS= read -r f; do
+        RS_FILES+=("$f")
+    done < <(git diff --cached --name-only --diff-filter=ACMR -- '*.rs')
+    if [ "${#RS_FILES[@]}" -gt 0 ]; then
+        if ! command -v rustfmt >/dev/null 2>&1; then
+            echo -e "${YELLOW}rustfmt not found, skipping format step (rustup component add rustfmt).${NC}"
+        else
+            EDITION=$(sed -nE 's/^edition = "([0-9]+)"/\1/p' Cargo.toml | head -1)
+            EDITION=${EDITION:-2024}
+            NEEDS_MANUAL=()
+            for f in "${RS_FILES[@]}"; do
+                staged=$(git show ":$f")
+                if ! formatted=$(printf '%s\n' "$staged" | rustfmt --edition "$EDITION" --emit stdout 2>/dev/null); then
+                    # Unparseable source: let the compiler report it, not this hook.
+                    continue
+                fi
+                [ "$formatted" = "$staged" ] && continue
+                if git diff --quiet -- "$f"; then
+                    printf '%s\n' "$formatted" > "$f"
+                    git add -- "$f"
+                    echo "rustfmt: formatted $f"
+                else
+                    NEEDS_MANUAL+=("$f")
+                fi
+            done
+            if [ "${#NEEDS_MANUAL[@]}" -gt 0 ]; then
+                echo -e "${RED}rustfmt: these files are partly staged and not formatted:${NC}"
+                printf '    %s\n' "${NEEDS_MANUAL[@]}"
+                echo "  Run: cargo fmt --all, then stage the result and commit again."
+                echo "  To skip formatting for this commit: HQ_SKIP_FMT=1 git commit ..."
+                exit 1
+            fi
+        fi
+    fi
+fi
+
+# --- personal data -----------------------------------------------------------
 
 # Generic secret shapes. Personal identifiers (names, hosts, paths, IDs) live
 # in a denylist outside the repo: one extended regex per line, read from

@@ -12,9 +12,9 @@ use super::json::*;
 use super::placement::*;
 use super::tools_lease::{ActorHints, add_warning, lease_policy, with_onboarding};
 use super::tools_links::{advice_for_new_task, check_links, link_requests};
-use hq_core::config::TasksConfig;
 use crate::registry::HqTool;
 use crate::util::{arg_str, generate_id};
+use hq_core::config::TasksConfig;
 
 /// Longest title and longest free text (description, comment) the tasks scope may write.
 /// The scope has no rate limit, so these bound what one call can add to the owner's database.
@@ -23,7 +23,10 @@ const SCOPED_TEXT_MAX: usize = 20_000;
 
 /// Refuses a tasks-scope write whose `field` is longer than `max` characters.
 fn scoped_len(args: &Value, field: &str, max: usize) -> Result<()> {
-    let len = args.get(field).and_then(Value::as_str).map_or(0, |s| s.chars().count());
+    let len = args
+        .get(field)
+        .and_then(Value::as_str)
+        .map_or(0, |s| s.chars().count());
     if len > max {
         bail!("{field} is {len} characters; this connection may write at most {max}");
     }
@@ -110,8 +113,16 @@ impl HqTool for TaskCreateTool {
         if scoped {
             check_scoped_text(&args)?;
         }
-        let tags = if scoped { Vec::new() } else { tags_from_args(&args, "tags") };
-        let assignees = if scoped { Vec::new() } else { tags_from_args(&args, "assignees") };
+        let tags = if scoped {
+            Vec::new()
+        } else {
+            tags_from_args(&args, "tags")
+        };
+        let assignees = if scoped {
+            Vec::new()
+        } else {
+            tags_from_args(&args, "assignees")
+        };
         let hints = ActorHints::from_args(&args, "created_by");
         let settings = self.settings.clone();
         let initiative_id = args
@@ -141,7 +152,9 @@ impl HqTool for TaskCreateTool {
         let id = generate_id("tk");
         let requests = link_requests(&args)?;
         if scoped && requests.iter().any(|r| r.kind == t::LINK_VAULT_NOTE) {
-            bail!("this connection cannot link vault notes; link a url, pull request, commit or task instead");
+            bail!(
+                "this connection cannot link vault notes; link a url, pull request, commit or task instead"
+            );
         }
         let origin_thread = self.origin_thread.clone();
         let caller_session = crate::harness_session::caller_session(&args).map(str::to_string);
@@ -182,9 +195,23 @@ impl HqTool for TaskCreateTool {
                     apply_dependency_changes(c, &task.id, &depends_on, &[], &created_by)?;
                 }
                 for r in &requests {
-                    t::add_task_link(c, &task.id, &r.kind, &r.reference, &r.label, r.direction.as_deref(), &created_by)?;
+                    t::add_task_link(
+                        c,
+                        &task.id,
+                        &r.kind,
+                        &r.reference,
+                        &r.label,
+                        r.direction.as_deref(),
+                        &created_by,
+                    )?;
                 }
-                record_origin(c, &task.id, origin_thread.as_deref(), caller_session.as_deref(), &created_by);
+                record_origin(
+                    c,
+                    &task.id,
+                    origin_thread.as_deref(),
+                    caller_session.as_deref(),
+                    &created_by,
+                );
                 let task = t::get_task(c, &task.id)?
                     .ok_or_else(|| anyhow::anyhow!("task {} vanished after creation", task.id))?;
                 Ok((task, true))
@@ -201,7 +228,12 @@ impl HqTool for TaskCreateTool {
         }
         let (links, advice) = self
             .db
-            .with_conn(|c| Ok((t::list_task_links(c, &task.id).unwrap_or_default(), advice_for_new_task(c, &task))))
+            .with_conn(|c| {
+                Ok((
+                    t::list_task_links(c, &task.id).unwrap_or_default(),
+                    advice_for_new_task(c, &task),
+                ))
+            })
             .unwrap_or_default();
         let mut out = task_json(&task);
         if !links.is_empty() {
@@ -217,12 +249,34 @@ impl HqTool for TaskCreateTool {
 /// Where a task came from, recorded without the agent doing anything: the web
 /// chat that asked for it and the launched session that called. A failure here
 /// never fails the creation, since the link is a convenience.
-fn record_origin(conn: &rusqlite::Connection, task: &str, thread: Option<&str>, session: Option<&str>, who: &str) {
+fn record_origin(
+    conn: &rusqlite::Connection,
+    task: &str,
+    thread: Option<&str>,
+    session: Option<&str>,
+    who: &str,
+) {
     if let Some(thread) = thread {
-        let _ = t::add_task_link(conn, task, t::LINK_CHAT_THREAD, thread, "created in this chat", Some(t::DIRECTION_ORIGIN), who);
+        let _ = t::add_task_link(
+            conn,
+            task,
+            t::LINK_CHAT_THREAD,
+            thread,
+            "created in this chat",
+            Some(t::DIRECTION_ORIGIN),
+            who,
+        );
     }
     if let Some(session) = session {
-        let _ = t::add_task_link(conn, task, t::LINK_SESSION, session, "created by this session", Some(t::DIRECTION_ORIGIN), who);
+        let _ = t::add_task_link(
+            conn,
+            task,
+            t::LINK_SESSION,
+            session,
+            "created by this session",
+            Some(t::DIRECTION_ORIGIN),
+            who,
+        );
     }
 }
 
@@ -299,17 +353,24 @@ impl HqTool for TaskListTool {
                 .and_then(|v| v.as_str())
                 .map(String::from),
             parent_task_id: parent_filter(&args),
-            archived: args.get("archived").and_then(Value::as_bool).unwrap_or(false),
+            archived: args
+                .get("archived")
+                .and_then(Value::as_bool)
+                .unwrap_or(false),
             assignee: opt_str(&args, "assignee"),
             search: opt_str(&args, "search"),
-            updated_since: opt_str(&args, "updated_since").map(|s| t::normalize_since(&s)).transpose()?,
+            updated_since: opt_str(&args, "updated_since")
+                .map(|s| t::normalize_since(&s))
+                .transpose()?,
             sort: t::TaskSort::parse(&arg_str(&args, "sort"))?,
             ..Default::default()
         };
         // The server's clock a second before the read: the next `updated_since` for a poll. A change
         // may be seen twice, never missed, since updates are stamped to the second.
         let as_of = self.db.with_conn(|c| {
-            Ok(c.query_row("SELECT datetime('now', '-1 second')", [], |r| r.get::<_, String>(0))?)
+            Ok(c.query_row("SELECT datetime('now', '-1 second')", [], |r| {
+                r.get::<_, String>(0)
+            })?)
         })?;
         let with_description = args
             .get("include_description")
@@ -332,7 +393,12 @@ impl HqTool for TaskListTool {
             };
             let stale_ids: Option<std::collections::HashSet<String>> = if want_stale {
                 filter.status = Some(t::STATUS_IN_PROGRESS.to_string());
-                Some(t::stale_tasks(c, stale_hours, ttl, usize::MAX >> 1)?.into_iter().map(|s| s.task_id).collect())
+                Some(
+                    t::stale_tasks(c, stale_hours, ttl, usize::MAX >> 1)?
+                        .into_iter()
+                        .map(|s| s.task_id)
+                        .collect(),
+                )
             } else {
                 None
             };
@@ -346,7 +412,10 @@ impl HqTool for TaskListTool {
                     && stale_ids.as_ref().is_none_or(|s| s.contains(&task.id))
             })?;
             let total = visible.len() as i64;
-            Ok((visible.into_iter().skip(offset).take(limit).collect(), total))
+            Ok((
+                visible.into_iter().skip(offset).take(limit).collect(),
+                total,
+            ))
         })?;
         // Full descriptions push a list past the MCP gateway's size cap, which cuts
         // the middle out of the JSON and silently drops tasks.
@@ -410,8 +479,12 @@ fn require_block_reason(patch: &t::TaskPatch, previous: &t::Task) -> Result<()> 
             previous.display_id
         );
     }
-    if previous.status == t::STATUS_BLOCKED && stored.is_none() && previous.blocked_reason.is_some() {
-        bail!("{} is blocked for a reason; unblock it, or replace the reason instead of clearing it", previous.display_id);
+    if previous.status == t::STATUS_BLOCKED && stored.is_none() && previous.blocked_reason.is_some()
+    {
+        bail!(
+            "{} is blocked for a reason; unblock it, or replace the reason instead of clearing it",
+            previous.display_id
+        );
     }
     Ok(())
 }
@@ -424,7 +497,9 @@ fn estimate_arg(args: &Value) -> Result<Option<Option<i64>>> {
         Some(Value::Null) => Ok(Some(None)),
         Some(v) => match v.as_i64() {
             Some(minutes) => Ok(Some(Some(minutes))),
-            None => bail!("estimate_minutes must be a whole number of minutes, or null to clear it"),
+            None => {
+                bail!("estimate_minutes must be a whole number of minutes, or null to clear it")
+            }
         },
     }
 }
@@ -501,23 +576,26 @@ impl HqTool for TaskGetTool {
         let scoped = crate::harness_session::is_tasks_scope(&args);
         let ttl = super::tools_lease::ttl_secs(&self.settings);
         let stale_hours = i64::try_from(self.settings.stale_hours()).unwrap_or(i64::MAX);
-        let (task, subtasks, dependents, events, sessions, time, links, checkpoint, stale) = self.db.with_conn(move |c| {
-            let task =
-                t::get_task(c, &id)?.ok_or_else(|| anyhow::anyhow!("no task found for that id"))?;
-            crate::a2a::check_task_access(c, caller.as_deref(), &task.id)?;
-            let subtasks = t::list_subtasks(c, &task.id)?;
-            let dependents = t::list_dependents(c, &task.id)?;
-            let events = t::list_task_events(c, &task.id)?;
-            // A lease that went silent is closed first, so a crashed session is
-            // never shown as still working.
-            t::expire_stale_leases(c, ttl)?;
-            let sessions = t::list_work_sessions(c, &task.id, WORK_SESSIONS_SHOWN)?;
-            let time = t::time_summary(c, &task.id, ttl)?;
-            let links = t::list_task_links(c, &task.id)?;
-            let checkpoint = t::latest_checkpoint(c, &task.id)?;
-            let stale = t::is_stale_now(c, &task.id, stale_hours)?;
-            Ok::<_, anyhow::Error>((task, subtasks, dependents, events, sessions, time, links, checkpoint, stale))
-        })?;
+        let (task, subtasks, dependents, events, sessions, time, links, checkpoint, stale) =
+            self.db.with_conn(move |c| {
+                let task = t::get_task(c, &id)?
+                    .ok_or_else(|| anyhow::anyhow!("no task found for that id"))?;
+                crate::a2a::check_task_access(c, caller.as_deref(), &task.id)?;
+                let subtasks = t::list_subtasks(c, &task.id)?;
+                let dependents = t::list_dependents(c, &task.id)?;
+                let events = t::list_task_events(c, &task.id)?;
+                // A lease that went silent is closed first, so a crashed session is
+                // never shown as still working.
+                t::expire_stale_leases(c, ttl)?;
+                let sessions = t::list_work_sessions(c, &task.id, WORK_SESSIONS_SHOWN)?;
+                let time = t::time_summary(c, &task.id, ttl)?;
+                let links = t::list_task_links(c, &task.id)?;
+                let checkpoint = t::latest_checkpoint(c, &task.id)?;
+                let stale = t::is_stale_now(c, &task.id, stale_hours)?;
+                Ok::<_, anyhow::Error>((
+                    task, subtasks, dependents, events, sessions, time, links, checkpoint, stale,
+                ))
+            })?;
         let mut value = task_json(&task);
         value["subtasks"] = json!(subtasks.iter().map(task_summary).collect::<Vec<_>>());
         value["dependents"] = json!(dependents.iter().map(task_summary).collect::<Vec<_>>());
@@ -541,7 +619,9 @@ impl HqTool for TaskGetTool {
 /// task and since when, never which machine, folder or branch any session worked in, and never
 /// the path of a note in the owner's vault.
 fn hide_work_details_from_tasks_scope(task: &mut Value) {
-    let Some(obj) = task.as_object_mut() else { return };
+    let Some(obj) = task.as_object_mut() else {
+        return;
+    };
     obj.remove("work_sessions");
     if let Some(checkpoint) = obj.get_mut("checkpoint") {
         super::tools_lease::hide_machine_paths(checkpoint);
@@ -654,7 +734,8 @@ impl HqTool for TaskUpdateTool {
             assignees: if scoped {
                 None
             } else {
-                args.get("assignees").map(|_| tags_from_args(&args, "assignees"))
+                args.get("assignees")
+                    .map(|_| tags_from_args(&args, "assignees"))
             },
             estimate_minutes: estimate_arg(&args)?,
             blocked_reason: text_arg(&args, "blocked_reason")?,
@@ -715,8 +796,18 @@ impl HqTool for TaskUpdateTool {
         let became_ready_for_review = task.status == t::STATUS_READY_FOR_REVIEW
             && previous.status != t::STATUS_READY_FOR_REVIEW;
         if !scoped {
-            notify_unblocked(&self.vault_path, &task, &unblocked, self.settings.route_tags);
-            notify_recipients(&self.vault_path, &task, Some(&previous), self.settings.route_tags);
+            notify_unblocked(
+                &self.vault_path,
+                &task,
+                &unblocked,
+                self.settings.route_tags,
+            );
+            notify_recipients(
+                &self.vault_path,
+                &task,
+                Some(&previous),
+                self.settings.route_tags,
+            );
         }
         // A web-UI approval item with text the caller chose, one per task: not for the tasks scope.
         if became_ready_for_review && !scoped {
@@ -772,14 +863,21 @@ impl HqTool for TaskDeleteTool {
         if id.is_empty() {
             bail!("id is required");
         }
-        let cascade = args.get("cascade").and_then(|v| v.as_bool()).unwrap_or(false);
+        let cascade = args
+            .get("cascade")
+            .and_then(|v| v.as_bool())
+            .unwrap_or(false);
         let purge = args.get("purge").and_then(|v| v.as_bool()).unwrap_or(false);
         let hints = ActorHints::from_args(&args, "actor");
         let settings = self.settings.clone();
         let target = id.clone();
         let (ids, who) = self.db.with_conn(move |c| {
             let who = hints.resolve(c, &settings, None)?.name;
-            let ids = if purge { t::purge_task(c, &target, &who)? } else { t::archive_task(c, &target, cascade, &who)? };
+            let ids = if purge {
+                t::purge_task(c, &target, &who)?
+            } else {
+                t::archive_task(c, &target, cascade, &who)?
+            };
             Ok((ids, who))
         })?;
         let key = if purge { "purged" } else { "archived" };

@@ -490,7 +490,10 @@ impl Conn {
             // Locking is open to every operator caller; there is deliberately no
             // method that unlocks.
             "host.lockdown" => {
-                let reason = params.get("reason").and_then(Value::as_str).unwrap_or_default();
+                let reason = params
+                    .get("reason")
+                    .and_then(Value::as_str)
+                    .unwrap_or_default();
                 Ok(json!({ "lockdown": self.host.lockdown(reason, "operator") }))
             }
             "host.workspace" => self.workspace_call(|root| Ok(crate::workspace::describe(root))),
@@ -500,7 +503,10 @@ impl Conn {
             }
             "host.mkdir" => {
                 let parent = params.get("parent").and_then(Value::as_str);
-                let name = params.get("name").and_then(Value::as_str).unwrap_or_default();
+                let name = params
+                    .get("name")
+                    .and_then(Value::as_str)
+                    .unwrap_or_default();
                 self.workspace_call(|root| {
                     crate::workspace::make_dir(root, parent, name).map(|p| json!({ "path": p }))
                 })
@@ -518,11 +524,20 @@ impl Conn {
 
     /// Runs `f` against the workspace folder, creating it first. A bad path or name is the
     /// caller's mistake (`invalid`); anything else is the machine's (`workspace_unavailable`).
-    fn workspace_call(&self, f: impl FnOnce(&std::path::Path) -> std::io::Result<Value>) -> Result<Value, ErrorBody> {
-        let root = crate::workspace::ensure_workspace()
-            .map_err(|e| body("workspace_unavailable", format!("cannot prepare the HQ folder: {e}")))?;
+    fn workspace_call(
+        &self,
+        f: impl FnOnce(&std::path::Path) -> std::io::Result<Value>,
+    ) -> Result<Value, ErrorBody> {
+        let root = crate::workspace::ensure_workspace().map_err(|e| {
+            body(
+                "workspace_unavailable",
+                format!("cannot prepare the HQ folder: {e}"),
+            )
+        })?;
         f(&root).map_err(|e| match e.kind() {
-            std::io::ErrorKind::InvalidInput | std::io::ErrorKind::NotFound => body("invalid", e.to_string()),
+            std::io::ErrorKind::InvalidInput | std::io::ErrorKind::NotFound => {
+                body("invalid", e.to_string())
+            }
             _ => body("workspace_unavailable", e.to_string()),
         })
     }
@@ -746,7 +761,11 @@ struct PollParams {
 const MAX_WAIT_TIMEOUT_MS: u64 = 10 * 60 * 1000;
 
 fn clamp_wait(requested: Option<u64>) -> Duration {
-    Duration::from_millis(requested.unwrap_or(DEFAULT_WAIT_TIMEOUT_MS).min(MAX_WAIT_TIMEOUT_MS))
+    Duration::from_millis(
+        requested
+            .unwrap_or(DEFAULT_WAIT_TIMEOUT_MS)
+            .min(MAX_WAIT_TIMEOUT_MS),
+    )
 }
 
 /// How long an `events.poll` waits when the caller names no timeout, and the
@@ -974,9 +993,15 @@ mod tests {
 
     #[test]
     fn a_wait_is_clamped_to_the_longest_the_host_allows() {
-        assert_eq!(clamp_wait(Some(u64::MAX)), Duration::from_millis(MAX_WAIT_TIMEOUT_MS));
+        assert_eq!(
+            clamp_wait(Some(u64::MAX)),
+            Duration::from_millis(MAX_WAIT_TIMEOUT_MS)
+        );
         assert_eq!(clamp_wait(Some(1500)), Duration::from_millis(1500));
-        assert_eq!(clamp_wait(None), Duration::from_millis(DEFAULT_WAIT_TIMEOUT_MS));
+        assert_eq!(
+            clamp_wait(None),
+            Duration::from_millis(DEFAULT_WAIT_TIMEOUT_MS)
+        );
     }
 
     #[test]
@@ -990,7 +1015,11 @@ mod tests {
         })
         .join();
         assert!(result.is_err());
-        assert_eq!(open.load(Ordering::SeqCst), 0, "a panicking connection must not leak its slot");
+        assert_eq!(
+            open.load(Ordering::SeqCst),
+            0,
+            "a panicking connection must not leak its slot"
+        );
     }
 
     #[test]

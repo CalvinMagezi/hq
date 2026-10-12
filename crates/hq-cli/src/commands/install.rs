@@ -412,20 +412,32 @@ fn detect_mcp_status() -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use hq_core::setup_provider::{CHEAP_ANTHROPIC_MODEL, CHEAP_GOOGLE_MODEL, CHEAP_OPENROUTER_MODEL};
+    use hq_core::setup_provider::{
+        CHEAP_ANTHROPIC_MODEL, CHEAP_GOOGLE_MODEL, CHEAP_OPENROUTER_MODEL,
+    };
 
     fn keys(or: &str, an: &str, go: &str) -> ApiKeys {
         let opt = |v: &str| Some(v.to_string()).filter(|v| !v.is_empty());
-        ApiKeys { openrouter: opt(or), anthropic: opt(an), google: opt(go) }
+        ApiKeys {
+            openrouter: opt(or),
+            anthropic: opt(an),
+            google: opt(go),
+        }
     }
 
     #[test]
     fn fresh_install_defaults_to_a_cheap_model_for_the_provider_that_has_a_key() {
-        assert_eq!(default_model_for(&keys("k", "", "")), CHEAP_OPENROUTER_MODEL);
+        assert_eq!(
+            default_model_for(&keys("k", "", "")),
+            CHEAP_OPENROUTER_MODEL
+        );
         assert_eq!(default_model_for(&keys("", "", "")), CHEAP_OPENROUTER_MODEL);
         assert_eq!(default_model_for(&keys("", "k", "")), CHEAP_ANTHROPIC_MODEL);
         assert_eq!(default_model_for(&keys("", "", "k")), CHEAP_GOOGLE_MODEL);
-        assert_eq!(default_model_for(&keys("k", "k", "k")), CHEAP_OPENROUTER_MODEL);
+        assert_eq!(
+            default_model_for(&keys("k", "k", "k")),
+            CHEAP_OPENROUTER_MODEL
+        );
     }
 
     #[cfg(unix)]

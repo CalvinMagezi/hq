@@ -62,7 +62,6 @@ pub fn format_search_results(results: &WebSearchResults) -> String {
     out
 }
 
-
 /// Tool-level deadlines, shared with hq-agent's own web tool wrappers.
 pub const SEARCH_TOOL_TIMEOUT_MS: u64 = 30_000;
 pub const FETCH_TOOL_TIMEOUT_MS: u64 = 95_000;
@@ -162,7 +161,6 @@ impl HqTool for WebSearchHqTool {
         }))
     }
 }
-
 
 /// Fetch a web page and extract clean text content. No API key required.
 pub struct WebFetchHqTool;

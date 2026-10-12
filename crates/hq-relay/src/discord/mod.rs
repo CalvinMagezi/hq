@@ -305,7 +305,8 @@ pub async fn run_discord_relay(
 
     let threads: Arc<TokioMutex<HashMap<u64, ChannelState>>> = Arc::new(TokioMutex::new(restored));
 
-    if discord_allowed_user_ids.is_empty() && !discord_auth_owner_path(vault.vault_path()).exists() {
+    if discord_allowed_user_ids.is_empty() && !discord_auth_owner_path(vault.vault_path()).exists()
+    {
         tracing::warn!(
             "discord: no owner configured, so every message is refused. Set \
              relay.discord_allowed_user_ids, or run `hq pair --platform discord` and DM the \

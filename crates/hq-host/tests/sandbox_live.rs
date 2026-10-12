@@ -9,7 +9,8 @@ use std::time::{Duration, Instant};
 const WAIT: Duration = Duration::from_secs(120);
 
 fn screen(host: &Host) -> String {
-    host.read("live", ReadSource::Visible, 0).unwrap_or_default()
+    host.read("live", ReadSource::Visible, 0)
+        .unwrap_or_default()
 }
 
 #[test]
@@ -19,7 +20,11 @@ fn claude_answers_a_prompt_under_the_sandbox() {
     let run = tempfile::tempdir_in(env!("CARGO_MANIFEST_DIR")).unwrap();
     let host = Host::new();
     host.set_run_dir(run.path());
-    let mut spec = SpawnSpec::new("live", vec!["claude".into(), "--version".into()], project.path());
+    let mut spec = SpawnSpec::new(
+        "live",
+        vec!["claude".into(), "--version".into()],
+        project.path(),
+    );
     spec.argv = vec!["claude".into()];
     spec.agent = Some("claude".into());
     spec.env = vec![("PATH".into(), std::env::var("PATH").unwrap())];
@@ -29,7 +34,11 @@ fn claude_answers_a_prompt_under_the_sandbox() {
     }
     spec.sandbox = Some(SandboxSpec {
         mode: SandboxMode::Process,
-        allow: vec![Allow { host: "api.anthropic.com".into(), ports: vec![443], private: false }],
+        allow: vec![Allow {
+            host: "api.anthropic.com".into(),
+            ports: vec![443],
+            private: false,
+        }],
         writable: Vec::new(),
         readable: Vec::new(),
         ..SandboxSpec::none()
@@ -39,7 +48,11 @@ fn claude_answers_a_prompt_under_the_sandbox() {
     let mut asked = false;
     loop {
         let text = screen(&host);
-        assert!(host.info("live").unwrap().status == hq_host::PaneStatus::Running, "claude exited; screen:\n{}", host.read("live", ReadSource::Recent, 0).unwrap_or_default());
+        assert!(
+            host.info("live").unwrap().status == hq_host::PaneStatus::Running,
+            "claude exited; screen:\n{}",
+            host.read("live", ReadSource::Recent, 0).unwrap_or_default()
+        );
         if asked && text.contains("node v") && text.contains("· done") {
             break;
         }
@@ -55,7 +68,13 @@ fn claude_answers_a_prompt_under_the_sandbox() {
         std::thread::sleep(Duration::from_millis(500));
     }
     for d in host.egress_decisions("live") {
-        println!("egress {} {}:{} {}", if d.allowed { "ALLOW" } else { "DENY " }, d.host, d.port, d.reason);
+        println!(
+            "egress {} {}:{} {}",
+            if d.allowed { "ALLOW" } else { "DENY " },
+            d.host,
+            d.port,
+            d.reason
+        );
     }
     host.kill("live").unwrap();
 }

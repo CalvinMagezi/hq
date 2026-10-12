@@ -70,7 +70,10 @@ pub fn resolve_task(conn: &Connection, id_or_display_id: &str) -> Result<String>
     let task = t::get_task(conn, id_or_display_id)?
         .ok_or_else(|| anyhow!("no task '{id_or_display_id}'"))?;
     if task.archived_at.is_some() {
-        bail!("task {} is archived; restore it before launching work on it", task.display_id);
+        bail!(
+            "task {} is archived; restore it before launching work on it",
+            task.display_id
+        );
     }
     if task.status == t::STATUS_COMPLETE {
         bail!(
@@ -116,8 +119,14 @@ fn record_in(
         true => open_lease(conn, &task, session, event, session_running)?,
         false => None,
     };
-    let ctx = t::WriteCtx { actor: Some(&session.id), work_session_id: lease.as_deref() };
-    let moved = match (does_work, target(event, siblings_running, session_running, task.long_horizon)) {
+    let ctx = t::WriteCtx {
+        actor: Some(&session.id),
+        work_session_id: lease.as_deref(),
+    };
+    let moved = match (
+        does_work,
+        target(event, siblings_running, session_running, task.long_horizon),
+    ) {
         (true, Some((from, to))) => {
             let reason = match to == t::STATUS_BLOCKED {
                 true => Some(blocked_reason(conn, session, event)?),
@@ -188,7 +197,11 @@ fn target(
     if long_horizon
         && matches!(
             event,
-            Event::Finished | Event::RunEnded | Event::RunFailed | Event::Exited | Event::BlockedAtLaunch
+            Event::Finished
+                | Event::RunEnded
+                | Event::RunFailed
+                | Event::Exited
+                | Event::BlockedAtLaunch
         )
     {
         return None;
@@ -257,7 +270,9 @@ fn open_lease(
 fn close_lease(conn: &Connection, session: &HarnessSessionRow, event: Event) -> Result<()> {
     let reason = match event {
         Event::Finished | Event::RunEnded => t::END_RELEASED,
-        Event::Exited | Event::RunFailed | Event::Stopped | Event::BlockedAtLaunch => t::END_SESSION_ENDED,
+        Event::Exited | Event::RunFailed | Event::Stopped | Event::BlockedAtLaunch => {
+            t::END_SESSION_ENDED
+        }
         _ => return Ok(()),
     };
     t::close_for_session(conn, &session.id, reason)?;
@@ -298,9 +313,13 @@ fn blocked_reason(conn: &Connection, session: &HarnessSessionRow, event: Event) 
                 .and_then(last_screen_message)
                 .map(|message| format!("{base}; the agent's last screen line: \"{message}\""));
             // An over-long reason would fail the whole write, the status move included.
-            quoted.filter(|r| r.chars().count() <= t::MAX_BLOCK_TEXT_CHARS).unwrap_or(base)
+            quoted
+                .filter(|r| r.chars().count() <= t::MAX_BLOCK_TEXT_CHARS)
+                .unwrap_or(base)
         }
-        Event::BlockedAtLaunch => format!("{who} stopped at a startup dialog before its prompt was typed"),
+        Event::BlockedAtLaunch => {
+            format!("{who} stopped at a startup dialog before its prompt was typed")
+        }
         _ => format!("{who} exited and no other session is working on the task"),
     };
     Ok(reason)
@@ -313,7 +332,10 @@ fn blocked_reason(conn: &Connection, session: &HarnessSessionRow, event: Event) 
 fn last_screen_message(snapshot: &str) -> Option<String> {
     let lines: Vec<&str> = snapshot.lines().map(str::trim).collect();
     let end = lines.iter().rposition(|line| !line.is_empty())? + 1;
-    let start = lines[..end].iter().rposition(|line| line.is_empty()).map_or(0, |i| i + 1);
+    let start = lines[..end]
+        .iter()
+        .rposition(|line| line.is_empty())
+        .map_or(0, |i| i + 1);
     let message = lines[start..end].join(" ");
     (message.chars().count() <= MAX_QUOTED_SCREEN_CHARS).then_some(message)
 }
@@ -353,11 +375,15 @@ fn comment(session: &HarnessSessionRow, event: Event, moved: Option<&Task>) -> O
         Event::RunEnded if moved.is_some() => format!(
             "{who} finished its run, so the task is ready for review. Its output is the session's last screen (`harness_session_logs`); read it before marking the task complete, the agent finishing is not verification."
         ),
-        Event::RunEnded => format!("{who} finished its run; its output is in `harness_session_logs`."),
+        Event::RunEnded => {
+            format!("{who} finished its run; its output is in `harness_session_logs`.")
+        }
         Event::RunFailed if moved.is_some() => format!(
             "{who}'s run ended without finishing (the process exited with an error), so the task is blocked. Its last screen is in `harness_session_logs`. A run is never resumed: fix the cause, then assign the task to the specialist again or `hq stack run`."
         ),
-        Event::RunFailed => format!("{who}'s run ended without finishing; its last screen is in `harness_session_logs`."),
+        Event::RunFailed => format!(
+            "{who}'s run ended without finishing; its last screen is in `harness_session_logs`."
+        ),
         Event::Exited if moved.is_some() => format!(
             "{who} exited. No other session is working on this task, so it is blocked until someone resumes the session (`harness_session_resume`) or reviews its last output (`harness_session_logs`)."
         ),
@@ -451,7 +477,8 @@ mod tests {
     }
 
     fn leases(db: &Database, task: &str) -> Vec<t::WorkSession> {
-        db.with_conn(|c| t::list_work_sessions(c, task, 10)).unwrap()
+        db.with_conn(|c| t::list_work_sessions(c, task, 10))
+            .unwrap()
     }
 
     #[test]
@@ -461,9 +488,15 @@ mod tests {
         apply(&db, &s, Event::Launched);
         let held = leases(&db, &task);
         assert_eq!(held.len(), 1);
-        assert_eq!((held[0].actor.as_str(), held[0].harness.as_str()), ("hs-1", "claude-code"));
+        assert_eq!(
+            (held[0].actor.as_str(), held[0].harness.as_str()),
+            ("hs-1", "claude-code")
+        );
         assert!(held[0].ended_at.is_none());
-        let event = db.with_conn(|c| t::list_task_events(c, &task)).unwrap().remove(0);
+        let event = db
+            .with_conn(|c| t::list_task_events(c, &task))
+            .unwrap()
+            .remove(0);
         assert_eq!(event.actor.as_deref(), Some("hs-1"));
         assert_eq!(event.work_session_id.as_deref(), Some(held[0].id.as_str()));
     }
@@ -474,11 +507,17 @@ mod tests {
         let s = session(&db, "hs-1", Some(&task));
         apply(&db, &s, Event::Launched);
         apply(&db, &s, Event::Finished);
-        assert_eq!(leases(&db, &task)[0].end_reason.as_deref(), Some(t::END_RELEASED));
+        assert_eq!(
+            leases(&db, &task)[0].end_reason.as_deref(),
+            Some(t::END_RELEASED)
+        );
         apply(&db, &s, Event::Steered);
         let held = leases(&db, &task);
         assert_eq!(held.len(), 2);
-        assert!(held[0].ended_at.is_none(), "the newest lease is the open one");
+        assert!(
+            held[0].ended_at.is_none(),
+            "the newest lease is the open one"
+        );
     }
 
     #[test]
@@ -499,7 +538,11 @@ mod tests {
         apply(&db, &b, Event::Launched);
         apply(&db, &a, Event::Exited);
         let held = leases(&db, &task);
-        let open: Vec<&str> = held.iter().filter(|l| l.ended_at.is_none()).map(|l| l.actor.as_str()).collect();
+        let open: Vec<&str> = held
+            .iter()
+            .filter(|l| l.ended_at.is_none())
+            .map(|l| l.actor.as_str())
+            .collect();
         assert_eq!(open, ["hs-2"]);
         apply(&db, &b, Event::Stopped);
         assert!(leases(&db, &task).iter().all(|l| l.ended_at.is_some()));
@@ -523,7 +566,12 @@ mod tests {
                     label: "",
                     cwd: "/repo",
                     mission_id: Some(mission),
-                    placement: Placement { host: "laptop", agent_name: id, workspace_id: "w2", pane_id: "w2:p1" },
+                    placement: Placement {
+                        host: "laptop",
+                        agent_name: id,
+                        workspace_id: "w2",
+                        pane_id: "w2:p1",
+                    },
                     purpose: Some(purpose),
                 },
             )?;
@@ -538,9 +586,15 @@ mod tests {
             let (db, task) = setup();
             let watcher = session_for(&db, "hs-watch", &task, purpose);
             let launched = apply(&db, &watcher, Event::Launched).unwrap();
-            assert!(!launched.moved, "{purpose}: launching a watcher is not starting the work");
+            assert!(
+                !launched.moved,
+                "{purpose}: launching a watcher is not starting the work"
+            );
             assert_eq!(status(&db, &task), t::STATUS_TO_DO);
-            assert!(leases(&db, &task).is_empty(), "{purpose}: a watcher holds no work lease");
+            assert!(
+                leases(&db, &task).is_empty(),
+                "{purpose}: a watcher holds no work lease"
+            );
 
             // The coding session does the work and moves the task as before.
             let coder = session(&db, "hs-code", Some(&task));
@@ -548,17 +602,41 @@ mod tests {
             assert_eq!(status(&db, &task), t::STATUS_IN_PROGRESS);
 
             let finished = apply(&db, &watcher, Event::Finished).unwrap();
-            assert!(!finished.moved, "{purpose}: a watcher's turn ending is not the work being done");
+            assert!(
+                !finished.moved,
+                "{purpose}: a watcher's turn ending is not the work being done"
+            );
             assert_eq!(status(&db, &task), t::STATUS_IN_PROGRESS);
             let exited = apply(&db, &watcher, Event::Exited).unwrap();
             assert!(!exited.moved);
-            assert_eq!(status(&db, &task), t::STATUS_IN_PROGRESS, "{purpose}: a watcher leaving does not block the work");
+            assert_eq!(
+                status(&db, &task),
+                t::STATUS_IN_PROGRESS,
+                "{purpose}: a watcher leaving does not block the work"
+            );
 
             let notes = comments(&db, &task);
-            let role = if purpose == registry::PURPOSE_MONITOR { "a monitor" } else { "a reviewer" };
-            assert!(notes.iter().any(|c| c.contains(&format!("(hermes, {role}) launched."))), "{notes:?}");
-            assert!(notes.iter().any(|c| c.contains(&format!("(hermes, {role}) finished a turn."))), "{notes:?}");
-            assert!(!notes.iter().any(|c| c.contains("ready for review")), "{notes:?}");
+            let role = if purpose == registry::PURPOSE_MONITOR {
+                "a monitor"
+            } else {
+                "a reviewer"
+            };
+            assert!(
+                notes
+                    .iter()
+                    .any(|c| c.contains(&format!("(hermes, {role}) launched."))),
+                "{notes:?}"
+            );
+            assert!(
+                notes
+                    .iter()
+                    .any(|c| c.contains(&format!("(hermes, {role}) finished a turn."))),
+                "{notes:?}"
+            );
+            assert!(
+                !notes.iter().any(|c| c.contains("ready for review")),
+                "{notes:?}"
+            );
         }
     }
 
@@ -576,15 +654,28 @@ mod tests {
     fn a_stack_run_ending_asks_for_review_and_releases_the_lease() {
         let (db, task) = setup();
         let run = session_for(&db, "hs-run", &task, "research");
-        db.with_conn(|c| registry::set_origin(c, "hs-run", registry::ORIGIN_STACK)).unwrap();
-        let run = db.with_conn(|c| Ok(registry::get(c, "hs-run")?.unwrap())).unwrap_or(run);
+        db.with_conn(|c| registry::set_origin(c, "hs-run", registry::ORIGIN_STACK))
+            .unwrap();
+        let run = db
+            .with_conn(|c| Ok(registry::get(c, "hs-run")?.unwrap()))
+            .unwrap_or(run);
         assert!(apply(&db, &run, Event::Launched).unwrap().moved);
         assert!(apply(&db, &run, Event::RunEnded).unwrap().moved);
         assert_eq!(status(&db, &task), t::STATUS_READY_FOR_REVIEW);
-        assert!(db.with_conn(|c| t::lease_for_session(c, "hs-run")).unwrap().is_none(), "the run's lease ended");
+        assert!(
+            db.with_conn(|c| t::lease_for_session(c, "hs-run"))
+                .unwrap()
+                .is_none(),
+            "the run's lease ended"
+        );
         let notes = comments(&db, &task);
         let last = notes.last().unwrap();
-        assert!(last.contains("a stack run") && last.contains("finished its run") && last.contains("ready for review"), "{notes:?}");
+        assert!(
+            last.contains("a stack run")
+                && last.contains("finished its run")
+                && last.contains("ready for review"),
+            "{notes:?}"
+        );
         // A monitor's run ends without moving the task, like its finished turn.
         let (db, task) = setup();
         let watcher = session_for(&db, "hs-watch", &task, "monitor");
@@ -594,12 +685,15 @@ mod tests {
 
     fn stack_run(db: &Database, id: &str, task: &str) -> HarnessSessionRow {
         session_for(db, id, task, "research");
-        db.with_conn(|c| registry::set_origin(c, id, registry::ORIGIN_STACK)).unwrap();
-        db.with_conn(|c| Ok(registry::get(c, id)?.unwrap())).unwrap()
+        db.with_conn(|c| registry::set_origin(c, id, registry::ORIGIN_STACK))
+            .unwrap();
+        db.with_conn(|c| Ok(registry::get(c, id)?.unwrap()))
+            .unwrap()
     }
 
     fn blocked_reason_of(db: &Database, task: &str) -> Option<String> {
-        db.with_conn(|c| Ok(t::get_task(c, task)?.unwrap().blocked_reason)).unwrap()
+        db.with_conn(|c| Ok(t::get_task(c, task)?.unwrap().blocked_reason))
+            .unwrap()
     }
 
     #[test]
@@ -609,28 +703,42 @@ mod tests {
         let (db, task) = setup();
         let run = stack_run(&db, "hs-run", &task);
         apply(&db, &run, Event::Launched);
-        db.with_conn(|c| registry::set_last_snapshot(c, "hs-run", screen)).unwrap();
+        db.with_conn(|c| registry::set_last_snapshot(c, "hs-run", screen))
+            .unwrap();
         assert!(apply(&db, &run, Event::RunFailed).unwrap().moved);
         assert_eq!(status(&db, &task), t::STATUS_BLOCKED);
         let reason = blocked_reason_of(&db, &task).unwrap();
-        assert!(reason.contains("hs-run") && reason.contains("ended without finishing"), "{reason}");
+        assert!(
+            reason.contains("hs-run") && reason.contains("ended without finishing"),
+            "{reason}"
+        );
         assert!(reason.contains("\"A Gateway is running for this state directory (pid 1234, port 5678). Run without --local to use it, or stop the Gateway first.\""), "{reason}");
 
         // A long last paragraph is left out; the reason still names the run.
         let (db, task) = setup();
         let run = stack_run(&db, "hs-run", &task);
         apply(&db, &run, Event::Launched);
-        db.with_conn(|c| registry::set_last_snapshot(c, "hs-run", &"x".repeat(MAX_QUOTED_SCREEN_CHARS + 1))).unwrap();
+        db.with_conn(|c| {
+            registry::set_last_snapshot(c, "hs-run", &"x".repeat(MAX_QUOTED_SCREEN_CHARS + 1))
+        })
+        .unwrap();
         assert!(apply(&db, &run, Event::RunFailed).unwrap().moved);
         let reason = blocked_reason_of(&db, &task).unwrap();
-        assert!(reason.ends_with("ended without finishing") && !reason.contains("xxx"), "{reason}");
+        assert!(
+            reason.ends_with("ended without finishing") && !reason.contains("xxx"),
+            "{reason}"
+        );
 
         // No screen at all, and a plain session exiting, still say why.
         let (db, task) = setup();
         let run = stack_run(&db, "hs-run", &task);
         apply(&db, &run, Event::Launched);
         assert!(apply(&db, &run, Event::RunFailed).unwrap().moved);
-        assert!(blocked_reason_of(&db, &task).unwrap().ends_with("ended without finishing"));
+        assert!(
+            blocked_reason_of(&db, &task)
+                .unwrap()
+                .ends_with("ended without finishing")
+        );
         let (db, task) = setup();
         let s = session(&db, "hs-1", Some(&task));
         apply(&db, &s, Event::Launched);
@@ -640,7 +748,16 @@ mod tests {
 
     fn mark_long_horizon(db: &Database, task: &str) {
         db.with_conn(|c| {
-            t::update_task(c, task, &t::TaskPatch { long_horizon: Some(true), ..Default::default() }, None).map(|_| ())
+            t::update_task(
+                c,
+                task,
+                &t::TaskPatch {
+                    long_horizon: Some(true),
+                    ..Default::default()
+                },
+                None,
+            )
+            .map(|_| ())
         })
         .unwrap();
     }
@@ -651,17 +768,40 @@ mod tests {
         mark_long_horizon(&db, &task);
         let s = session(&db, "hs-1", Some(&task));
         apply(&db, &s, Event::Launched);
-        assert_eq!(status(&db, &task), t::STATUS_IN_PROGRESS, "starting work still starts the task");
+        assert_eq!(
+            status(&db, &task),
+            t::STATUS_IN_PROGRESS,
+            "starting work still starts the task"
+        );
         let finished = apply(&db, &s, Event::Finished).unwrap();
         assert!(!finished.moved);
-        assert_eq!(status(&db, &task), t::STATUS_IN_PROGRESS, "one turn ending is not the end of the work");
+        assert_eq!(
+            status(&db, &task),
+            t::STATUS_IN_PROGRESS,
+            "one turn ending is not the end of the work"
+        );
         let exited = apply(&db, &s, Event::Exited).unwrap();
         assert!(!exited.moved);
-        assert_eq!(status(&db, &task), t::STATUS_IN_PROGRESS, "and an exit is not a block");
+        assert_eq!(
+            status(&db, &task),
+            t::STATUS_IN_PROGRESS,
+            "and an exit is not a block"
+        );
         let notes = comments(&db, &task);
-        assert!(notes.iter().any(|c| c.contains("finished a turn.")), "still commented: {notes:?}");
-        assert!(!notes.iter().any(|c| c.contains("ready for review") || c.contains("is blocked until")), "{notes:?}");
-        assert!(leases(&db, &task).iter().all(|l| l.ended_at.is_some()), "the lease still closes with the session");
+        assert!(
+            notes.iter().any(|c| c.contains("finished a turn.")),
+            "still commented: {notes:?}"
+        );
+        assert!(
+            !notes
+                .iter()
+                .any(|c| c.contains("ready for review") || c.contains("is blocked until")),
+            "{notes:?}"
+        );
+        assert!(
+            leases(&db, &task).iter().all(|l| l.ended_at.is_some()),
+            "the lease still closes with the session"
+        );
     }
 
     #[test]
@@ -669,8 +809,12 @@ mod tests {
         let (db, task) = setup();
         let s = session(&db, "hs-1", Some(&task));
         apply(&db, &s, Event::Launched);
-        db.with_conn(|c| t::archive_task(c, &task, false, "t").map(|_| ())).unwrap();
-        let err = db.with_conn(|c| resolve_task(c, &task)).unwrap_err().to_string();
+        db.with_conn(|c| t::archive_task(c, &task, false, "t").map(|_| ()))
+            .unwrap();
+        let err = db
+            .with_conn(|c| resolve_task(c, &task))
+            .unwrap_err()
+            .to_string();
         assert!(err.contains("archived"), "{err}");
         // Events from the still-running session are no longer an error: there is just nothing to record.
         assert!(apply(&db, &s, Event::Finished).is_none());

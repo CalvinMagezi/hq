@@ -110,10 +110,7 @@ pub async fn run(config: &HqConfig, sub: &str, args: &[String]) -> Result<()> {
                 ctx.pinned_scan.scanned.join(", ")
             );
             if !ctx.pinned_scan.skipped.is_empty() {
-                println!(
-                    "Skipped (missing): {}",
-                    ctx.pinned_scan.skipped.join(", ")
-                );
+                println!("Skipped (missing): {}", ctx.pinned_scan.skipped.join(", "));
             }
         }
         "graph" => {

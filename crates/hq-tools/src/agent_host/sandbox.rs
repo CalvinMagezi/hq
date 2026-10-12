@@ -25,7 +25,10 @@ fn split_entry(entry: &str) -> Option<(String, u16)> {
 /// chose, often on a tailnet, so its rule may resolve to a private address.
 fn mcp_target(url: &str) -> Option<(String, u16)> {
     let parsed = url::Url::parse(url).ok()?;
-    Some((parsed.host_str()?.to_string(), parsed.port_or_known_default()?))
+    Some((
+        parsed.host_str()?.to_string(),
+        parsed.port_or_known_default()?,
+    ))
 }
 
 const SECS_PER_HOUR: u64 = 3600;
@@ -49,7 +52,11 @@ pub(super) fn plan(cfg: &AgentHostConfig) -> Value {
     // refuses local addresses unless a rule names them as private. They go
     // before `allow_domains` because the proxy takes the first rule that matches.
     if !ports.is_empty() {
-        allow.extend(LOOPBACK_NAMES.iter().map(|host| json!({ "host": host, "ports": ports, "private": true })));
+        allow.extend(
+            LOOPBACK_NAMES
+                .iter()
+                .map(|host| json!({ "host": host, "ports": ports, "private": true })),
+        );
     }
     for entry in &sandbox.allow_domains {
         if entry.trim_start().starts_with("*.") {
@@ -57,7 +64,9 @@ pub(super) fn plan(cfg: &AgentHostConfig) -> Value {
         }
         match split_entry(entry) {
             Some((host, port)) => allow.push(json!({ "host": host, "ports": [port] })),
-            None => tracing::warn!(entry = %entry, "ignoring a malformed agent_host.sandbox.allow_domains entry"),
+            None => {
+                tracing::warn!(entry = %entry, "ignoring a malformed agent_host.sandbox.allow_domains entry")
+            }
         }
     }
     json!({
@@ -90,7 +99,10 @@ mod tests {
     fn process_is_the_default_and_allows_only_the_api() {
         let p = plan(&cfg());
         assert_eq!(p["mode"], "process");
-        assert_eq!(p["allow"], json!([{ "host": "api.anthropic.com", "ports": [443] }]));
+        assert_eq!(
+            p["allow"],
+            json!([{ "host": "api.anthropic.com", "ports": [443] }])
+        );
     }
 
     #[test]
@@ -98,18 +110,38 @@ mod tests {
         let mut c = cfg();
         c.agent_mcp_url = Some("https://hq.example.ts.net:8444/mcp".into());
         let p = plan(&c);
-        assert_eq!(p["allow"][1], json!({ "host": "hq.example.ts.net", "ports": [8444], "private": true }));
+        assert_eq!(
+            p["allow"][1],
+            json!({ "host": "hq.example.ts.net", "ports": [8444], "private": true })
+        );
     }
 
     #[test]
     fn extra_domains_take_an_optional_port_and_bad_entries_are_dropped() {
         let mut c = cfg();
-        c.sandbox.allow_domains = vec!["github.com".into(), "*.npmjs.org:443".into(), "x:notaport".into(), " ".into(), "dev.test:8080".into()];
+        c.sandbox.allow_domains = vec![
+            "github.com".into(),
+            "*.npmjs.org:443".into(),
+            "x:notaport".into(),
+            " ".into(),
+            "dev.test:8080".into(),
+        ];
         let p = plan(&c);
-        let hosts: Vec<&str> = p["allow"].as_array().unwrap().iter().map(|a| a["host"].as_str().unwrap()).collect();
-        assert_eq!(hosts, ["api.anthropic.com", "github.com", "*.npmjs.org", "dev.test"]);
+        let hosts: Vec<&str> = p["allow"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|a| a["host"].as_str().unwrap())
+            .collect();
+        assert_eq!(
+            hosts,
+            ["api.anthropic.com", "github.com", "*.npmjs.org", "dev.test"]
+        );
         assert_eq!(p["allow"][3]["ports"], json!([8080]));
-        assert!(p["allow"][1].get("private").is_none(), "extra domains never get a private address");
+        assert!(
+            p["allow"][1].get("private").is_none(),
+            "extra domains never get a private address"
+        );
     }
 
     #[test]
@@ -117,11 +149,24 @@ mod tests {
         let mut c = cfg();
         c.sandbox.loopback_ports = vec![11434, 0, 5037, 11434];
         let p = plan(&c);
-        assert_eq!(p["loopback_ports"], json!([5037, 11434]), "port 0 and repeats are dropped");
+        assert_eq!(
+            p["loopback_ports"],
+            json!([5037, 11434]),
+            "port 0 and repeats are dropped"
+        );
         let allow = p["allow"].as_array().unwrap();
-        assert_eq!(allow[1], json!({ "host": "127.0.0.1", "ports": [5037, 11434], "private": true }));
-        assert_eq!(allow[2], json!({ "host": "::1", "ports": [5037, 11434], "private": true }));
-        assert_eq!(allow[3], json!({ "host": "localhost", "ports": [5037, 11434], "private": true }));
+        assert_eq!(
+            allow[1],
+            json!({ "host": "127.0.0.1", "ports": [5037, 11434], "private": true })
+        );
+        assert_eq!(
+            allow[2],
+            json!({ "host": "::1", "ports": [5037, 11434], "private": true })
+        );
+        assert_eq!(
+            allow[3],
+            json!({ "host": "localhost", "ports": [5037, 11434], "private": true })
+        );
         assert_eq!(allow.len(), 4);
     }
 
@@ -131,23 +176,42 @@ mod tests {
         c.sandbox.allow_domains = vec!["localhost:11434".into()];
         c.sandbox.loopback_ports = vec![11434];
         let p = plan(&c);
-        let first_localhost = p["allow"].as_array().unwrap().iter().find(|a| a["host"] == "localhost").unwrap();
-        assert_eq!(first_localhost["private"], true, "the proxy takes the first match");
+        let first_localhost = p["allow"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|a| a["host"] == "localhost")
+            .unwrap();
+        assert_eq!(
+            first_localhost["private"], true,
+            "the proxy takes the first match"
+        );
     }
 
     #[test]
     fn no_loopback_ports_adds_no_private_rule() {
         let p = plan(&cfg());
         assert_eq!(p["loopback_ports"], json!([]));
-        assert!(p["allow"].as_array().unwrap().iter().all(|a| a.get("private").is_none()));
+        assert!(
+            p["allow"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .all(|a| a.get("private").is_none())
+        );
     }
 
     #[test]
     fn agent_readable_paths_are_passed_through_by_agent() {
         let mut c = cfg();
-        c.sandbox.agent_readable.insert("claude".into(), vec!["/home/alice/.config/gh".into()]);
+        c.sandbox
+            .agent_readable
+            .insert("claude".into(), vec!["/home/alice/.config/gh".into()]);
         let p = plan(&c);
-        assert_eq!(p["agent_readable"], json!({ "claude": ["/home/alice/.config/gh"] }));
+        assert_eq!(
+            p["agent_readable"],
+            json!({ "claude": ["/home/alice/.config/gh"] })
+        );
     }
 
     #[test]

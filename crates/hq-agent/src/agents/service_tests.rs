@@ -269,9 +269,15 @@ fn orchestrator_children_have_no_file_writers() {
     };
     let implementor = names(service_with_fleet());
     let orchestrator = names(service_with_fleet().with_role(SessionRole::Orchestrator));
-    assert!(implementor.iter().any(|n| n == "write_file"), "premise: today's child can write");
+    assert!(
+        implementor.iter().any(|n| n == "write_file"),
+        "premise: today's child can write"
+    );
     for removed in ORCHESTRATOR_REMOVED_TOOLS {
-        assert!(!orchestrator.iter().any(|n| n == removed), "{removed} reached an orchestrator child");
+        assert!(
+            !orchestrator.iter().any(|n| n == removed),
+            "{removed} reached an orchestrator child"
+        );
     }
     for kept in ["read_file", "grep", "find_files", "bash"] {
         assert!(orchestrator.iter().any(|n| n == kept), "{kept} missing");
@@ -290,10 +296,16 @@ fn orchestrator_children_cannot_use_a_file_editing_external_backend() {
 
     let mut leaf = ChildRequest::new("t2", "summarize this");
     leaf.backend = Some("groq".to_string());
-    assert!(service.authorize_and_resolve(&leaf).is_ok(), "text-only backends stay available");
+    assert!(
+        service.authorize_and_resolve(&leaf).is_ok(),
+        "text-only backends stay available"
+    );
 
     let mut auto = ChildRequest::new("t3", "think about this");
     auto.agent_type = hq_core::types::SubagentType::Planner;
     let resolved = service.authorize_and_resolve(&auto).expect("auto resolves");
-    assert_eq!(resolved.resolved_backend, INPROCESS_BACKEND, "auto policy stays in-process");
+    assert_eq!(
+        resolved.resolved_backend, INPROCESS_BACKEND,
+        "auto policy stays in-process"
+    );
 }

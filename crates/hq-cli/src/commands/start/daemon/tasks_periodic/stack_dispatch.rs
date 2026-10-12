@@ -12,13 +12,18 @@ use std::sync::{Arc, Mutex};
 /// warn once, then at debug until it changes.
 static LAST_SKIPPED: Mutex<Vec<String>> = Mutex::new(Vec::new());
 
-pub async fn run_stack_dispatch(vault_path: &std::path::Path, db: &Database, config: &HqConfig) -> Result<()> {
+pub async fn run_stack_dispatch(
+    vault_path: &std::path::Path,
+    db: &Database,
+    config: &HqConfig,
+) -> Result<()> {
     if config.stack.specialists.is_empty() {
         return Ok(());
     }
     let db = Arc::new(db.clone());
     let resolve = |name: Option<&str>| hq_tools::agent_host::host(name);
-    let report = hq_tools::harness_session::stack::dispatch(vault_path, &db, config, &resolve).await?;
+    let report =
+        hq_tools::harness_session::stack::dispatch(vault_path, &db, config, &resolve).await?;
     let changed = {
         let mut last = LAST_SKIPPED.lock().unwrap_or_else(|p| p.into_inner());
         let changed = *last != report.skipped;
@@ -33,7 +38,10 @@ pub async fn run_stack_dispatch(vault_path: &std::path::Path, db: &Database, con
         }
     }
     if !report.started.is_empty() {
-        tracing::info!(started = report.started.len(), "stack-dispatch: runs started");
+        tracing::info!(
+            started = report.started.len(),
+            "stack-dispatch: runs started"
+        );
     }
     Ok(())
 }

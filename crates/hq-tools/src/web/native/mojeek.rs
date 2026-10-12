@@ -4,10 +4,10 @@
 //! offers every visitor is ordinary client work; nothing here pretends to be a
 //! person or hides what the client is.
 
+use super::super::state;
 use super::super::*;
 use super::engines::{BROWSER_USER_AGENT, accept_language, element_text, result};
 use super::markup::sel;
-use super::super::state;
 use ring::pbkdf2;
 use std::num::NonZeroU32;
 

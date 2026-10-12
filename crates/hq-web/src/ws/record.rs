@@ -18,7 +18,15 @@ pub(super) const LIVE_RESULT_CHARS: usize = 4_000;
 const REDACTED: &str = "[REDACTED]";
 /// Argument keys whose values are credentials whatever they look like.
 const SECRET_KEY_HINTS: &[&str] = &[
-    "token", "secret", "password", "passwd", "apikey", "api_key", "authorization", "cookie", "credential",
+    "token",
+    "secret",
+    "password",
+    "passwd",
+    "apikey",
+    "api_key",
+    "authorization",
+    "cookie",
+    "credential",
     "private_key",
 ];
 
@@ -75,7 +83,9 @@ impl TurnRecord {
     /// Whether the session driver started this reply, not the user.
     /// Whether the session driver (not a sub-agent follow-up) started this reply.
     pub(super) fn is_session_driver_turn(&self) -> bool {
-        self.driver.as_ref().is_some_and(|d| d.get("session_id").is_some())
+        self.driver
+            .as_ref()
+            .is_some_and(|d| d.get("session_id").is_some())
     }
 
     pub(super) fn is_driver_turn(&self) -> bool {
@@ -88,7 +98,11 @@ impl TurnRecord {
             SessionEvent::Reasoning(s) if self.reasoning.chars().count() < MAX_REASONING_CHARS => {
                 self.reasoning.push_str(s);
             }
-            SessionEvent::ToolStart { tool_name, tool_call_id, arguments } if self.steps.len() < MAX_STEPS => {
+            SessionEvent::ToolStart {
+                tool_name,
+                tool_call_id,
+                arguments,
+            } if self.steps.len() < MAX_STEPS => {
                 self.steps.push(StepRecord {
                     id: tool_call_id.clone(),
                     name: tool_name.clone(),
@@ -98,8 +112,14 @@ impl TurnRecord {
                     duration_ms: None,
                 });
             }
-            SessionEvent::StepCredits { .. } if self.credits.len() < MAX_STEPS => self.record_credits(event),
-            SessionEvent::ToolEnd { tool_call_id, result, .. } => {
+            SessionEvent::StepCredits { .. } if self.credits.len() < MAX_STEPS => {
+                self.record_credits(event)
+            }
+            SessionEvent::ToolEnd {
+                tool_call_id,
+                result,
+                ..
+            } => {
                 if let Some(step) = self.steps.iter_mut().find(|s| &s.id == tool_call_id) {
                     step.result = Some(result_preview(result, MAX_STEP_RESULT_CHARS));
                     step.duration_ms = Some(step.started.elapsed().as_millis() as u64);
@@ -111,7 +131,15 @@ impl TurnRecord {
 
     /// Keeps a step's credits with the first tool call it started, so a reload shows the badge in place.
     fn record_credits(&mut self, event: &SessionEvent) {
-        let SessionEvent::StepCredits { turn, delta, input_tokens, output_tokens, model, .. } = event else {
+        let SessionEvent::StepCredits {
+            turn,
+            delta,
+            input_tokens,
+            output_tokens,
+            model,
+            ..
+        } = event
+        else {
             return;
         };
         let mut entry = json!({
@@ -132,13 +160,19 @@ impl TurnRecord {
             return None;
         }
         self.saved = true;
-        let content = final_text.filter(|t| !t.is_empty()).unwrap_or(&self.content).to_string();
+        let content = final_text
+            .filter(|t| !t.is_empty())
+            .unwrap_or(&self.content)
+            .to_string();
         // A stop flag alone is not worth a message: stopped before anything happened saves nothing.
         let did_work = !self.steps.is_empty() || !self.reasoning.trim().is_empty();
         if content.trim().is_empty() && !did_work {
             return None;
         }
-        Some(ReplyToSave { content, meta: self.meta(stopped) })
+        Some(ReplyToSave {
+            content,
+            meta: self.meta(stopped),
+        })
     }
 
     fn meta(&self, stopped: bool) -> Option<Value> {
@@ -206,14 +240,24 @@ const SETTING_VALUE_FIELD: &str = "value";
 fn scrub(v: &Value) -> Value {
     match v {
         Value::Object(map) => {
-            let secret_setting = SETTING_NAME_FIELDS
-                .iter()
-                .any(|f| map.get(*f).and_then(Value::as_str).is_some_and(names_a_secret));
+            let secret_setting = SETTING_NAME_FIELDS.iter().any(|f| {
+                map.get(*f)
+                    .and_then(Value::as_str)
+                    .is_some_and(names_a_secret)
+            });
             Value::Object(
                 map.iter()
                     .map(|(k, v)| {
-                        let secret = names_a_secret(k) || (secret_setting && k == SETTING_VALUE_FIELD);
-                        (k.clone(), if secret { Value::String(REDACTED.into()) } else { scrub(v) })
+                        let secret =
+                            names_a_secret(k) || (secret_setting && k == SETTING_VALUE_FIELD);
+                        (
+                            k.clone(),
+                            if secret {
+                                Value::String(REDACTED.into())
+                            } else {
+                                scrub(v)
+                            },
+                        )
                     })
                     .collect(),
             )
@@ -228,11 +272,19 @@ mod tests {
     use super::*;
 
     fn start(id: &str, args: Value) -> SessionEvent {
-        SessionEvent::ToolStart { tool_name: "bash".into(), tool_call_id: id.into(), arguments: args }
+        SessionEvent::ToolStart {
+            tool_name: "bash".into(),
+            tool_call_id: id.into(),
+            arguments: args,
+        }
     }
 
     fn end(id: &str, result: &str) -> SessionEvent {
-        SessionEvent::ToolEnd { tool_name: "bash".into(), tool_call_id: id.into(), result: result.into() }
+        SessionEvent::ToolEnd {
+            tool_name: "bash".into(),
+            tool_call_id: id.into(),
+            result: result.into(),
+        }
     }
 
     #[test]
@@ -252,7 +304,10 @@ mod tests {
             "list": [{"password": "hunter2"}],
         });
         let shown = args_preview(&args, 10_000);
-        assert!(!shown.contains("plain-looking") && !shown.contains("hunter2"), "{shown}");
+        assert!(
+            !shown.contains("plain-looking") && !shown.contains("hunter2"),
+            "{shown}"
+        );
         assert!(!shown.contains("abcdefghijklmnop1234"), "{shown}");
         assert!(shown.contains("\"name\":\"ok\""), "{shown}");
 
@@ -274,9 +329,14 @@ mod tests {
             assert!(!shown.contains(secret), "{secret} leaked in {shown}");
         }
 
-        let file = format!("openrouter_api_key: {openrouter}\nGITHUB_TOKEN=\"ghx_notatypicalshape99\"\nmodel: sonnet"); // gitleaks:allow
+        let file = format!(
+            "openrouter_api_key: {openrouter}\nGITHUB_TOKEN=\"ghx_notatypicalshape99\"\nmodel: sonnet"
+        ); // gitleaks:allow
         let result = result_preview(&file, 10_000);
-        assert!(!result.contains(openrouter) && !result.contains("ghx_notatypicalshape99"), "{result}");
+        assert!(
+            !result.contains(openrouter) && !result.contains("ghx_notatypicalshape99"),
+            "{result}"
+        );
         assert!(result.contains("model: sonnet"), "{result}");
     }
 
@@ -293,8 +353,14 @@ mod tests {
         assert_eq!(meta["reasoning"], "thinking");
         let step = &meta["tool_steps"][0];
         assert_eq!(step["name"], "bash");
-        assert_eq!(step["args"].as_str().unwrap().chars().count(), MAX_STEP_ARGS_CHARS);
-        assert_eq!(step["result"].as_str().unwrap().chars().count(), MAX_STEP_RESULT_CHARS);
+        assert_eq!(
+            step["args"].as_str().unwrap().chars().count(),
+            MAX_STEP_ARGS_CHARS
+        );
+        assert_eq!(
+            step["result"].as_str().unwrap().chars().count(),
+            MAX_STEP_RESULT_CHARS
+        );
         assert!(step["duration_ms"].is_u64());
         assert!(meta.get("stopped").is_none());
     }
@@ -318,7 +384,10 @@ mod tests {
         assert!(saved.meta.is_none());
 
         assert!(TurnRecord::default().take(Some(""), false).is_none());
-        assert!(TurnRecord::default().take(None, true).is_none(), "a stop before any output saves nothing");
+        assert!(
+            TurnRecord::default().take(None, true).is_none(),
+            "a stop before any output saves nothing"
+        );
     }
 
     fn credits(turn: u32, delta: Option<f64>) -> SessionEvent {
@@ -346,9 +415,24 @@ mod tests {
         let meta = r.take(Some("done"), false).unwrap().meta.unwrap();
         let saved = meta["step_credits"].as_array().unwrap();
         assert_eq!(saved.len(), 3);
-        assert_eq!((saved[0]["tool_call_id"].as_str(), saved[0]["delta"].as_f64()), (Some("a"), Some(3.0)));
-        assert_eq!((saved[1]["tool_call_id"].as_str(), saved[1]["delta"].is_null()), (Some("c"), true));
-        assert!(saved[2].get("tool_call_id").is_none(), "the answering step used no tool");
+        assert_eq!(
+            (
+                saved[0]["tool_call_id"].as_str(),
+                saved[0]["delta"].as_f64()
+            ),
+            (Some("a"), Some(3.0))
+        );
+        assert_eq!(
+            (
+                saved[1]["tool_call_id"].as_str(),
+                saved[1]["delta"].is_null()
+            ),
+            (Some("c"), true)
+        );
+        assert!(
+            saved[2].get("tool_call_id").is_none(),
+            "the answering step used no tool"
+        );
     }
 
     #[test]

@@ -79,7 +79,6 @@ pub struct Connection {
     pub relationship: String,
 }
 
-
 /// Aggregate memory stats.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct MemoryStats {

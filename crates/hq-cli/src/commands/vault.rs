@@ -22,7 +22,10 @@ pub async fn run(config: &HqConfig, sub: &str, args: &[String]) -> Result<()> {
     let deny = |rel: &str| -> Result<()> {
         if lite
             && (hq_web::lite_hides(rel)
-                || hq_web::lite_hides_resolved(&config.vault_path, &config.vault_path.join(rel.trim())))
+                || hq_web::lite_hides_resolved(
+                    &config.vault_path,
+                    &config.vault_path.join(rel.trim()),
+                ))
         {
             anyhow::bail!("`{rel}` is not part of the notes in HQ Lite (profile: lite)");
         }
@@ -163,8 +166,9 @@ pub async fn run(config: &HqConfig, sub: &str, args: &[String]) -> Result<()> {
                     "-f" | "--format" if !pdf_only => {
                         format = Some(it.next().ok_or_else(|| anyhow::anyhow!(usage))?)
                     }
-                    "--lang" | "--language" if !pdf_only => languages
-                        .push(it.next().ok_or_else(|| anyhow::anyhow!(usage))?.clone()),
+                    "--lang" | "--language" if !pdf_only => {
+                        languages.push(it.next().ok_or_else(|| anyhow::anyhow!(usage))?.clone())
+                    }
                     other if other.starts_with('-') => {
                         anyhow::bail!("unknown option {other}\n{usage}")
                     }
@@ -178,7 +182,8 @@ pub async fn run(config: &HqConfig, sub: &str, args: &[String]) -> Result<()> {
                 hq_export::Format::Pdf
             } else {
                 let raw = format.ok_or_else(|| anyhow::anyhow!("--format is required\n{usage}"))?;
-                raw.parse::<hq_export::Format>().map_err(|e| anyhow::anyhow!("{e}"))?
+                raw.parse::<hq_export::Format>()
+                    .map_err(|e| anyhow::anyhow!("{e}"))?
             };
             let note = hq_convert::note_pdf::resolve_note(&config.vault_path, note_ref)
                 .ok_or_else(|| anyhow::anyhow!("note not found in the vault: {note_ref}"))?;
@@ -189,15 +194,10 @@ pub async fn run(config: &HqConfig, sub: &str, args: &[String]) -> Result<()> {
                 .map(|slug| hq_convert::brand::load_brand_kit(&config.vault_path, slug))
                 .transpose()
                 .map_err(|e| anyhow::anyhow!("brand resolution failed: {e}"))?;
-            let done = hq_export::export_note(
-                &config.vault_path,
-                &note,
-                format,
-                kit.as_ref(),
-                &languages,
-            )
-            .await
-            .map_err(|e| anyhow::anyhow!("{e}"))?;
+            let done =
+                hq_export::export_note(&config.vault_path, &note, format, kit.as_ref(), &languages)
+                    .await
+                    .map_err(|e| anyhow::anyhow!("{e}"))?;
             // The extension comes from the result: several tables export as a zip.
             let dest = match output {
                 Some(o) => std::path::PathBuf::from(o),
@@ -231,7 +231,9 @@ pub async fn run(config: &HqConfig, sub: &str, args: &[String]) -> Result<()> {
         }
         "context" => {
             if lite {
-                anyhow::bail!("`vault context` reads HQ's own notes, which are not part of HQ Lite");
+                anyhow::bail!(
+                    "`vault context` reads HQ's own notes, which are not part of HQ Lite"
+                );
             }
             let ctx = vault.get_system_context()?;
             println!("System Context");
@@ -323,7 +325,10 @@ mod lite_tests {
         ] {
             assert!(run(&cfg, sub, &args(a)).await.is_err(), "{sub} {a:?}");
         }
-        assert_eq!(std::fs::read_to_string(dir.path().join("_system/SOUL.md")).unwrap(), "private");
+        assert_eq!(
+            std::fs::read_to_string(dir.path().join("_system/SOUL.md")).unwrap(),
+            "private"
+        );
         assert!(run(&cfg, "read", &args(&["Notebooks/a.md"])).await.is_ok());
     }
 
@@ -331,9 +336,21 @@ mod lite_tests {
     #[tokio::test]
     async fn lite_refuses_a_symlink_into_a_hq_folder() {
         let (dir, cfg) = vault_with_notes();
-        std::os::unix::fs::symlink(dir.path().join("_system"), dir.path().join("Notebooks/link")).unwrap();
-        assert!(run(&cfg, "read", &args(&["Notebooks/link/SOUL.md"])).await.is_err());
-        assert!(run(&cfg, "write", &args(&["Notebooks/link/new.md", "x"])).await.is_err());
+        std::os::unix::fs::symlink(
+            dir.path().join("_system"),
+            dir.path().join("Notebooks/link"),
+        )
+        .unwrap();
+        assert!(
+            run(&cfg, "read", &args(&["Notebooks/link/SOUL.md"]))
+                .await
+                .is_err()
+        );
+        assert!(
+            run(&cfg, "write", &args(&["Notebooks/link/new.md", "x"]))
+                .await
+                .is_err()
+        );
         assert!(!dir.path().join("_system/new.md").exists());
     }
 

@@ -100,9 +100,12 @@ pub async fn run_memory_cycle(
     touch(&stamp);
     // "dream" is the shared router alias for memory consolidation; T1 has no alias of its own.
     let consolidator = match provider {
-        Some(p) => {
-            MemoryConsolidator::new_with_provider(db.clone(), vault_path.to_path_buf(), p, "dream".to_string())
-        }
+        Some(p) => MemoryConsolidator::new_with_provider(
+            db.clone(),
+            vault_path.to_path_buf(),
+            p,
+            "dream".to_string(),
+        ),
         None => MemoryConsolidator::new(db.clone(), vault_path.to_path_buf()),
     };
     match consolidator.run_cycle().await {
@@ -126,4 +129,3 @@ pub async fn run_memory_cycle(
 
     Ok(())
 }
-

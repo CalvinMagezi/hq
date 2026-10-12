@@ -2,8 +2,8 @@
 //! creating of folders inside it. Everything is resolved on the machine that runs
 //! the agents, so the HQ server never judges a path by its own operating system.
 
-use nix::unistd::{User, geteuid};
 use crate::names::check_folder_name;
+use nix::unistd::{User, geteuid};
 use serde_json::{Value, json};
 use std::fs;
 use std::io::{Error, ErrorKind};
@@ -24,12 +24,16 @@ fn invalid(message: impl Into<String>) -> Error {
 }
 
 fn home_dir() -> Option<PathBuf> {
-    let from_env = std::env::var_os("HOME").map(PathBuf::from).filter(|p| p.is_absolute());
+    let from_env = std::env::var_os("HOME")
+        .map(PathBuf::from)
+        .filter(|p| p.is_absolute());
     from_env.or_else(|| User::from_uid(geteuid()).ok().flatten().map(|u| u.dir))
 }
 
 fn root_in(home: &Path) -> PathBuf {
-    WORKSPACE_PARTS.iter().fold(home.to_path_buf(), |p, part| p.join(part))
+    WORKSPACE_PARTS
+        .iter()
+        .fold(home.to_path_buf(), |p, part| p.join(part))
 }
 
 /// `<home>/Documents/HQ`.
@@ -61,28 +65,43 @@ const WSL_KERNEL_MARK: &str = "microsoft";
 const KERNEL_RELEASE_FILE: &str = "/proc/sys/kernel/osrelease";
 
 fn wsl_distro() -> Option<String> {
-    std::env::var("WSL_DISTRO_NAME").ok().filter(|d| !d.is_empty())
+    std::env::var("WSL_DISTRO_NAME")
+        .ok()
+        .filter(|d| !d.is_empty())
 }
 
 fn running_on_wsl_kernel() -> bool {
-    fs::read_to_string(KERNEL_RELEASE_FILE).is_ok_and(|k| k.to_lowercase().contains(WSL_KERNEL_MARK))
+    fs::read_to_string(KERNEL_RELEASE_FILE)
+        .is_ok_and(|k| k.to_lowercase().contains(WSL_KERNEL_MARK))
 }
 
 /// `wslpath -w` is what WSL itself uses to turn a Linux path into the Windows one.
 fn windows_path_from_wslpath(root: &Path) -> Option<String> {
-    let out = std::process::Command::new("wslpath").arg("-w").arg(root).output().ok()?;
+    let out = std::process::Command::new("wslpath")
+        .arg("-w")
+        .arg(root)
+        .output()
+        .ok()?;
     let path = String::from_utf8_lossy(&out.stdout).trim().to_string();
     (out.status.success() && !path.is_empty()).then_some(path)
 }
 
 fn explorer_from_distro(root: &Path, distro: &str) -> String {
-    format!("\\\\wsl$\\{distro}{}", root.to_string_lossy().replace('/', "\\"))
+    format!(
+        "\\\\wsl$\\{distro}{}",
+        root.to_string_lossy().replace('/', "\\")
+    )
 }
 
 /// How a Windows user opens `root` in Explorer, when this is WSL2: from the distro name when the
 /// environment has it, else asked of `wslpath`. None on any other system.
 fn wsl_explorer_path(root: &Path) -> Option<String> {
-    pick_explorer(root, wsl_distro(), running_on_wsl_kernel(), windows_path_from_wslpath)
+    pick_explorer(
+        root,
+        wsl_distro(),
+        running_on_wsl_kernel(),
+        windows_path_from_wslpath,
+    )
 }
 
 fn pick_explorer(
@@ -100,7 +119,11 @@ fn pick_explorer(
 /// What the web needs to offer the folder: where it is, which OS, and how a
 /// Windows user would open it in Explorer.
 pub fn describe(root: &Path) -> Value {
-    describe_with(root, wsl_explorer_path(root), wsl_distro().is_some() || running_on_wsl_kernel())
+    describe_with(
+        root,
+        wsl_explorer_path(root),
+        wsl_distro().is_some() || running_on_wsl_kernel(),
+    )
 }
 
 fn describe_with(root: &Path, explorer: Option<String>, wsl: bool) -> Value {
@@ -122,7 +145,10 @@ pub fn resolve_inside(root: &Path, path: Option<&str>) -> std::io::Result<PathBu
         Some(p) if Path::new(p).is_absolute() => PathBuf::from(p),
         Some(p) => root.join(p),
     };
-    if wanted.components().any(|c| matches!(c, Component::ParentDir)) {
+    if wanted
+        .components()
+        .any(|c| matches!(c, Component::ParentDir))
+    {
         return Err(invalid("a folder path cannot contain '..'"));
     }
     // Before the disk is touched, so a path elsewhere cannot be probed for existence.
@@ -156,7 +182,9 @@ pub fn list_dirs(root: &Path, path: Option<&str>) -> std::io::Result<Value> {
     names.sort_by_key(|n| n.to_lowercase());
     let truncated = names.len() > MAX_LISTED_DIRS || names.len() > MAX_SCANNED_ENTRIES;
     names.truncate(MAX_LISTED_DIRS);
-    let parent = (dir != root).then(|| dir.parent().map(Path::to_path_buf)).flatten();
+    let parent = (dir != root)
+        .then(|| dir.parent().map(Path::to_path_buf))
+        .flatten();
     let dirs: Vec<Value> = names
         .iter()
         .map(|n| json!({ "name": n, "path": dir.join(n) }))
@@ -175,7 +203,9 @@ pub fn make_dir(root: &Path, parent: Option<&str>, name: &str) -> std::io::Resul
         Err(e) if e.kind() == ErrorKind::AlreadyExists && target.is_dir() => {}
         Err(e) => return Err(e),
     }
-    let target = target.to_str().ok_or_else(|| invalid("that folder's name is not plain text"))?;
+    let target = target
+        .to_str()
+        .ok_or_else(|| invalid("that folder's name is not plain text"))?;
     resolve_inside(root, Some(target))
 }
 
@@ -197,7 +227,12 @@ mod tests {
     fn listing_shows_visible_folders_only() {
         let (_d, root) = root();
         let v = list_dirs(&root, None).unwrap();
-        let names: Vec<&str> = v["dirs"].as_array().unwrap().iter().map(|d| d["name"].as_str().unwrap()).collect();
+        let names: Vec<&str> = v["dirs"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|d| d["name"].as_str().unwrap())
+            .collect();
         assert_eq!(names, ["alpha"]);
         assert!(v["parent"].is_null());
     }
@@ -246,21 +281,39 @@ mod tests {
     #[test]
     fn the_explorer_path_comes_from_the_distro_name_else_from_wslpath_else_nothing() {
         let root = Path::new("/home/user/Documents/HQ");
-        let from_distro = pick_explorer(root, Some("Ubuntu".into()), false, |_| panic!("not asked"));
-        assert_eq!(from_distro.as_deref(), Some("\\\\wsl$\\Ubuntu\\home\\user\\Documents\\HQ"));
+        let from_distro =
+            pick_explorer(root, Some("Ubuntu".into()), false, |_| panic!("not asked"));
+        assert_eq!(
+            from_distro.as_deref(),
+            Some("\\\\wsl$\\Ubuntu\\home\\user\\Documents\\HQ")
+        );
         let asked = pick_explorer(root, None, true, |p| Some(format!("W:{}", p.display())));
         assert_eq!(asked.as_deref(), Some("W:/home/user/Documents/HQ"));
-        assert_eq!(pick_explorer(root, None, true, |_| None), None, "wslpath missing or failing");
-        assert_eq!(pick_explorer(root, None, false, |_| panic!("not asked")), None, "not WSL");
+        assert_eq!(
+            pick_explorer(root, None, true, |_| None),
+            None,
+            "wslpath missing or failing"
+        );
+        assert_eq!(
+            pick_explorer(root, None, false, |_| panic!("not asked")),
+            None,
+            "not WSL"
+        );
     }
 
     #[test]
     fn describe_reports_wsl_only_with_a_path_to_show() {
         let root = Path::new("/home/user/Documents/HQ");
         let on = describe_with(root, Some("\\\\wsl$\\U".into()), true);
-        assert_eq!((on["wsl"].as_bool(), on["explorer_path"].is_string()), (Some(true), true));
+        assert_eq!(
+            (on["wsl"].as_bool(), on["explorer_path"].is_string()),
+            (Some(true), true)
+        );
         let off = describe_with(root, None, false);
-        assert_eq!((off["wsl"].as_bool(), off["explorer_path"].is_null()), (Some(false), true));
+        assert_eq!(
+            (off["wsl"].as_bool(), off["explorer_path"].is_null()),
+            (Some(false), true)
+        );
     }
 
     #[test]

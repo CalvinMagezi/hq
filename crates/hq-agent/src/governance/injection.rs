@@ -27,12 +27,19 @@ const WATCH_STARTING_TOOLS: &[&str] = &[
 
 /// A tainted turn must not hand itself prompt approvals, so what it newly
 /// watches starts with Drive off; the user's switch in the web panel still works.
-pub(super) fn without_default_drive(tool_name: &str, mut args: Value, taint: &TaintTracker) -> Value {
+pub(super) fn without_default_drive(
+    tool_name: &str,
+    mut args: Value,
+    taint: &TaintTracker,
+) -> Value {
     if taint.is_tainted()
         && WATCH_STARTING_TOOLS.contains(&tool_name)
         && let Some(obj) = args.as_object_mut()
     {
-        obj.insert(hq_tools::harness_session::UNTRUSTED_TURN_ARG.into(), Value::Bool(true));
+        obj.insert(
+            hq_tools::harness_session::UNTRUSTED_TURN_ARG.into(),
+            Value::Bool(true),
+        );
     }
     args
 }
@@ -59,7 +66,11 @@ pub(super) fn injection_denial(
     if TAINT_DENIED_TOOLS.contains(&tool_name)
         && let Some(source) = tainted_by.as_deref()
     {
-        return Some(tainted_message(tool_name, "a change to the model configuration", Some(source)));
+        return Some(tainted_message(
+            tool_name,
+            "a change to the model configuration",
+            Some(source),
+        ));
     }
     if tool_name != BASH_TOOL {
         return None;

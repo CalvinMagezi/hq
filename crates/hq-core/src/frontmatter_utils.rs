@@ -123,8 +123,14 @@ mod tests {
 
     #[test]
     fn split_handles_crlf_and_unclosed_blocks() {
-        assert_eq!(split_frontmatter("---\r\nx: 1\r\n---\r\nbody"), (Some("x: 1\r\n"), "body"));
-        assert_eq!(split_frontmatter("---\nx: 1\nno close"), (None, "---\nx: 1\nno close"));
+        assert_eq!(
+            split_frontmatter("---\r\nx: 1\r\n---\r\nbody"),
+            (Some("x: 1\r\n"), "body")
+        );
+        assert_eq!(
+            split_frontmatter("---\nx: 1\nno close"),
+            (None, "---\nx: 1\nno close")
+        );
         assert_eq!(strip_frontmatter("---\nx: 1\n---\n\nBody"), "Body");
     }
 

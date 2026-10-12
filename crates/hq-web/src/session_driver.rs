@@ -59,7 +59,9 @@ pub(crate) fn spawn_session_driver(state: Arc<WsState>) {
 
 /// Tell every open tab that a session changed, so task and Sessions panels refresh now instead of on a timer.
 fn announce_changed(state: &WsState, session_id: &str) {
-    state.broadcast(&serde_json::json!({ "type": SESSION_CHANGED_EVENT, "id": session_id }).to_string());
+    state.broadcast(
+        &serde_json::json!({ "type": SESSION_CHANGED_EVENT, "id": session_id }).to_string(),
+    );
 }
 
 pub(crate) const SESSION_CHANGED_EVENT: &str = "session:changed";
@@ -133,7 +135,9 @@ async fn handle_due(
     }
     if !chat_is_open(state, &thread) {
         // Its events go back to the relay rather than into a chat no one sees.
-        let _ = state.db.with_conn(|c| registry::set_owner(c, &row.id, None));
+        let _ = state
+            .db
+            .with_conn(|c| registry::set_owner(c, &row.id, None));
         return;
     }
     if state.active_chat_turns.read().await.contains_key(&thread) {
@@ -179,7 +183,12 @@ async fn handle_due(
                 "\n\nDrive is paused for this session: it had {MAX_DRIVE_TURNS_PER_DAY} driver turns in the last day."
             ));
         }
-        crate::ws::post_assistant_message(state, &thread, &content, &json!({"driver": meta(MODE_UPDATE)}));
+        crate::ws::post_assistant_message(
+            state,
+            &thread,
+            &content,
+            &json!({"driver": meta(MODE_UPDATE)}),
+        );
         return;
     }
     let prompt = driver_prompt(
@@ -199,7 +208,9 @@ async fn handle_due(
         crate::ws::DriverStart::Busy if reason == CHECK_IN => {}
         // The chat got busy after the check: hand the wake back for the next pass.
         crate::ws::DriverStart::Busy => {
-            let _ = state.db.with_conn(|c| registry::set_wake(c, &row.id, &reason));
+            let _ = state
+                .db
+                .with_conn(|c| registry::set_wake(c, &row.id, &reason));
         }
         // The wake is dropped, not handed back, or it would be refused on every pass.
         crate::ws::DriverStart::Refused => {
@@ -208,7 +219,12 @@ async fn handle_due(
                     "{}\n\nHQ did not act on this: the chat belongs to a read-only question from an MCP client.",
                     update_text(&row, task.as_ref(), &reason)
                 );
-                crate::ws::post_assistant_message(state, &thread, &note, &json!({"driver": meta(MODE_UPDATE)}));
+                crate::ws::post_assistant_message(
+                    state,
+                    &thread,
+                    &note,
+                    &json!({"driver": meta(MODE_UPDATE)}),
+                );
             }
         }
     }
@@ -406,7 +422,10 @@ fn switch_off(
 
 /// A deleted or archived chat can no longer show what its sessions do.
 pub(crate) fn chat_is_open(state: &WsState, thread_id: &str) -> bool {
-    match state.db.with_conn(|c| hq_db::chat::get_thread(c, thread_id)) {
+    match state
+        .db
+        .with_conn(|c| hq_db::chat::get_thread(c, thread_id))
+    {
         Ok(Some(thread)) => thread.status != "archived",
         Ok(None) => false,
         // Unknown is not gone: keep the session and try again next pass.
@@ -448,7 +467,12 @@ fn session_name(row: &HarnessSessionRow) -> String {
 
 fn task_sentence(task: Option<&Task>) -> String {
     task.map_or_else(String::new, |t| {
-        format!(" Task {} ({}) is {}.", t.display_id, t.title, t.status.replace('_', " "))
+        format!(
+            " Task {} ({}) is {}.",
+            t.display_id,
+            t.title,
+            t.status.replace('_', " ")
+        )
     })
 }
 
@@ -486,7 +510,11 @@ pub(crate) fn driver_prompt(
             t.display_id,
             t.title,
             t.status,
-            if t.description.trim().is_empty() { "(no description)" } else { t.description.as_str() }
+            if t.description.trim().is_empty() {
+                "(no description)"
+            } else {
+                t.description.as_str()
+            }
         ),
         (None, None) => "No goal is recorded. Do not act; ask the user for one.".to_string(),
     };

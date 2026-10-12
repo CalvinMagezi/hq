@@ -3,11 +3,11 @@
 
 use anyhow::{Result, bail};
 use async_trait::async_trait;
-use hq_core::config::{HqConfig, copilot_active};
 use hq_core::config::model_switch::{
     ModelResolution, declare_backend, resolve_model_arg, set_primary_backend,
 };
 use hq_core::config::{BackendEntry, BackendKind, WireApi, resolve_session_model};
+use hq_core::config::{HqConfig, copilot_active};
 use hq_llm::copilot_catalog::{CopilotModelInfo, fetch_live_catalog};
 use serde_json::{Value, json};
 
@@ -170,28 +170,39 @@ impl HqTool for CopilotCreditsTool {
         let refresh = args.get("refresh").and_then(Value::as_bool).unwrap_or(true);
         let config = HqConfig::load().unwrap_or_default();
         if !copilot_active(&config) {
-            return Ok(json!({ "active": false, "note": "No Copilot backend is enabled in the backend chain." }));
+            return Ok(
+                json!({ "active": false, "note": "No Copilot backend is enabled in the backend chain." }),
+            );
         }
         let db = hq_db::Database::open(&config.db_path())?;
         let fetched = if refresh {
             copilot_credits::sample_now(&db).await
         } else {
-            hq_llm::copilot_usage::fetch_quota().await.map_err(|e| anyhow::anyhow!("{e}"))
+            hq_llm::copilot_usage::fetch_quota()
+                .await
+                .map_err(|e| anyhow::anyhow!("{e}"))
         };
         let quota = match fetched {
             Ok(q) => q,
             Err(e) => {
-                return Ok(json!({ "active": true, "note": format!("Could not read the Copilot balance: {e}. No numbers are shown.") }));
+                return Ok(
+                    json!({ "active": true, "note": format!("Could not read the Copilot balance: {e}. No numbers are shown.") }),
+                );
             }
         };
         Ok(credits_json(&db, &quota)?)
     }
 }
 
-fn credits_json(db: &hq_db::Database, quota: &hq_llm::copilot_usage::CopilotQuota) -> Result<Value> {
+fn credits_json(
+    db: &hq_db::Database,
+    quota: &hq_llm::copilot_usage::CopilotQuota,
+) -> Result<Value> {
     let identity = json!({ "login": quota.login, "plan": quota.plan, "sku": quota.sku });
     if !quota.is_metered() {
-        return Ok(json!({ "active": true, "account": identity, "note": copilot_credits::NOT_METERED_NOTE }));
+        return Ok(
+            json!({ "active": true, "account": identity, "note": copilot_credits::NOT_METERED_NOTE }),
+        );
     }
     let view = copilot_credits::burn_view(db, quota, chrono::Utc::now(), 0)?;
     Ok(json!({

@@ -18,14 +18,24 @@ pub struct StaleTask {
 
 /// In-progress tasks nobody holds and nothing has touched for `stale_after_hours`: no
 /// live lease, and no write, comment or lease heartbeat since. Oldest first.
-pub fn stale_tasks(conn: &Connection, stale_after_hours: i64, ttl_secs: i64, limit: usize) -> Result<Vec<StaleTask>> {
+pub fn stale_tasks(
+    conn: &Connection,
+    stale_after_hours: i64,
+    ttl_secs: i64,
+    limit: usize,
+) -> Result<Vec<StaleTask>> {
     expire_stale_leases(conn, ttl_secs)?;
     stale_rows(conn, stale_after_hours, limit, None)
 }
 
 /// The rule itself. `only` narrows it to one task, so asking about one task does not scan them all.
 /// Leases are assumed already expired by the caller.
-fn stale_rows(conn: &Connection, stale_after_hours: i64, limit: usize, only: Option<&str>) -> Result<Vec<StaleTask>> {
+fn stale_rows(
+    conn: &Connection,
+    stale_after_hours: i64,
+    limit: usize,
+    only: Option<&str>,
+) -> Result<Vec<StaleTask>> {
     let mut stmt = conn.prepare(&format!(
         "SELECT id, display_id, title, initiative_id, last_activity, \
                 CAST((strftime('%s','now') - strftime('%s', last_activity)) / 3600 AS INTEGER) \
@@ -57,7 +67,12 @@ fn stale_rows(conn: &Connection, stale_after_hours: i64, limit: usize, only: Opt
 }
 
 /// Whether one task is stale by the same rule.
-pub fn is_stale(conn: &Connection, task_id: &str, stale_after_hours: i64, ttl_secs: i64) -> Result<bool> {
+pub fn is_stale(
+    conn: &Connection,
+    task_id: &str,
+    stale_after_hours: i64,
+    ttl_secs: i64,
+) -> Result<bool> {
     expire_stale_leases(conn, ttl_secs)?;
     is_stale_now(conn, task_id, stale_after_hours)
 }
@@ -87,7 +102,12 @@ pub struct InitiativeRollup {
 }
 
 /// Counts, estimates and worked time across every active task of an initiative.
-pub fn initiative_rollup(conn: &Connection, initiative_ref: &str, stale_after_hours: i64, ttl_secs: i64) -> Result<InitiativeRollup> {
+pub fn initiative_rollup(
+    conn: &Connection,
+    initiative_ref: &str,
+    stale_after_hours: i64,
+    ttl_secs: i64,
+) -> Result<InitiativeRollup> {
     let (id, name): (String, String) = conn
         .query_row(
             "SELECT id, name FROM initiatives WHERE id = ?1 OR slug = ?1 OR id_prefix = ?1 OR name = ?1",
@@ -118,7 +138,8 @@ pub fn initiative_rollup(conn: &Connection, initiative_ref: &str, stale_after_ho
         |r| Ok((r.get(0)?, r.get(1)?)),
     )?;
     let mut leased_seconds = 0;
-    let mut stmt = conn.prepare("SELECT id FROM tasks WHERE initiative_id = ?1 AND archived_at IS NULL")?;
+    let mut stmt =
+        conn.prepare("SELECT id FROM tasks WHERE initiative_id = ?1 AND archived_at IS NULL")?;
     for task in stmt.query_map(params![id], |r| r.get::<_, String>(0))? {
         leased_seconds += leased_seconds_of(conn, &task?)?;
     }
@@ -135,7 +156,11 @@ pub fn initiative_rollup(conn: &Connection, initiative_ref: &str, stale_after_ho
         blocked,
         ready_for_review,
         complete,
-        fraction_complete: if total == 0 { 0.0 } else { (complete as f64 / total as f64 * 1000.0).round() / 1000.0 },
+        fraction_complete: if total == 0 {
+            0.0
+        } else {
+            (complete as f64 / total as f64 * 1000.0).round() / 1000.0
+        },
         estimate_minutes,
         tasks_with_estimate,
         leased_seconds,

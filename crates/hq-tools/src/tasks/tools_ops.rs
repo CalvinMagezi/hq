@@ -23,13 +23,29 @@ const OBSOLETE_AFTER_HOURS: i64 = 30 * 24;
 pub fn propose(stale: &t::StaleTask, has_open_subtasks: bool, has_checkpoint: bool) -> Value {
     let days = stale.idle_hours / 24;
     let (action, why) = if has_open_subtasks {
-        ("review_subtasks", format!("{days} days idle, and it has open sub-tasks: decide those first"))
+        (
+            "review_subtasks",
+            format!("{days} days idle, and it has open sub-tasks: decide those first"),
+        )
     } else if stale.idle_hours >= OBSOLETE_AFTER_HOURS {
-        ("close_or_release", format!("untouched for {days} days: close it if it no longer matters, otherwise move it back to to_do"))
+        (
+            "close_or_release",
+            format!(
+                "untouched for {days} days: close it if it no longer matters, otherwise move it back to to_do"
+            ),
+        )
     } else if has_checkpoint {
-        ("resume", format!("{days} days idle with a checkpoint to resume from: claim it with task_claim"))
+        (
+            "resume",
+            format!("{days} days idle with a checkpoint to resume from: claim it with task_claim"),
+        )
     } else {
-        ("release", format!("{days} days with nobody on it: move it back to to_do, or claim it with task_claim"))
+        (
+            "release",
+            format!(
+                "{days} days with nobody on it: move it back to to_do, or claim it with task_claim"
+            ),
+        )
     };
     json!({
         "task_id": stale.task_id,
@@ -84,7 +100,9 @@ impl HqTool for TaskStaleTool {
             stale
                 .iter()
                 .map(|s| {
-                    let open_children = t::list_subtasks(c, &s.task_id)?.iter().any(|k| k.status != t::STATUS_COMPLETE);
+                    let open_children = t::list_subtasks(c, &s.task_id)?
+                        .iter()
+                        .any(|k| k.status != t::STATUS_COMPLETE);
                     let checkpoint = t::latest_checkpoint(c, &s.task_id)?.is_some();
                     Ok(propose(s, open_children, checkpoint))
                 })
@@ -131,7 +149,9 @@ impl HqTool for InitiativeProgressTool {
         }
         let hours = i64::try_from(self.settings.stale_hours()).unwrap_or(i64::MAX);
         let ttl = ttl_secs(&self.settings);
-        let rollup = self.db.with_conn(move |c| t::initiative_rollup(c, &initiative, hours, ttl))?;
+        let rollup = self
+            .db
+            .with_conn(move |c| t::initiative_rollup(c, &initiative, hours, ttl))?;
         Ok(json!(rollup))
     }
 }
@@ -231,18 +251,35 @@ mod tests {
 
     #[test]
     fn a_task_with_open_subtasks_is_reviewed_through_them_first() {
-        assert_eq!(propose(&stale(24 * 100), true, true)["suggested_action"], "review_subtasks");
+        assert_eq!(
+            propose(&stale(24 * 100), true, true)["suggested_action"],
+            "review_subtasks"
+        );
     }
 
     #[test]
     fn a_long_untouched_task_is_closed_or_released() {
-        assert_eq!(propose(&stale(24 * 45), false, true)["suggested_action"], "close_or_release");
+        assert_eq!(
+            propose(&stale(24 * 45), false, true)["suggested_action"],
+            "close_or_release"
+        );
     }
 
     #[test]
     fn a_recent_one_with_a_checkpoint_is_resumed_and_without_one_released() {
-        assert_eq!(propose(&stale(24 * 5), false, true)["suggested_action"], "resume");
-        assert_eq!(propose(&stale(24 * 5), false, false)["suggested_action"], "release");
-        assert!(propose(&stale(24 * 5), false, false)["why"].as_str().unwrap().contains("5 days"));
+        assert_eq!(
+            propose(&stale(24 * 5), false, true)["suggested_action"],
+            "resume"
+        );
+        assert_eq!(
+            propose(&stale(24 * 5), false, false)["suggested_action"],
+            "release"
+        );
+        assert!(
+            propose(&stale(24 * 5), false, false)["why"]
+                .as_str()
+                .unwrap()
+                .contains("5 days")
+        );
     }
 }

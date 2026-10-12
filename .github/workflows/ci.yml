@@ -193,12 +193,9 @@ jobs:
         run: pwsh -NoProfile -File scripts/windows/install-selftest.ps1
 
   rustfmt:
-    name: Rust (fmt, non-blocking)
+    name: Rust (fmt)
     runs-on: ubuntu-latest
     timeout-minutes: 10
-    # TODO(TECHDEBT.md): the tree is not rustfmt-clean (~130 files). Run one
-    # `cargo fmt --all` commit, then delete continue-on-error to make this a gate.
-    continue-on-error: true
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:

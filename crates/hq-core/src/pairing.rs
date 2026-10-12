@@ -70,7 +70,9 @@ struct PairLock(#[allow(dead_code)] std::fs::File);
 #[cfg(unix)]
 fn lock(vault: &Path, platform: PairPlatform) -> Result<PairLock, PairError> {
     use std::os::unix::io::AsRawFd;
-    let path = vault.join("_system").join(format!(".pairing-{}.lock", platform.as_str()));
+    let path = vault
+        .join("_system")
+        .join(format!(".pairing-{}.lock", platform.as_str()));
     let io = |e: std::io::Error| PairError::Io(e.to_string());
     std::fs::create_dir_all(path.parent().unwrap_or(vault)).map_err(io)?;
     let file = std::fs::OpenOptions::new()
@@ -170,7 +172,11 @@ fn read_record(vault: &Path, platform: PairPlatform) -> Option<PairingRecord> {
     serde_json::from_str(&raw).ok()
 }
 
-fn write_record(vault: &Path, platform: PairPlatform, record: &PairingRecord) -> Result<(), PairError> {
+fn write_record(
+    vault: &Path,
+    platform: PairPlatform,
+    record: &PairingRecord,
+) -> Result<(), PairError> {
     use std::io::Write;
     let path = record_path(vault, platform);
     let io = |e: std::io::Error| PairError::Io(e.to_string());
@@ -300,13 +306,22 @@ mod tests {
         let v = vault();
         let code = create_pairing_code(v.path(), PairPlatform::Telegram, 0).unwrap();
         let first = read_record(v.path(), PairPlatform::Telegram).unwrap();
-        assert_ne!(first.hash, hex::encode(Sha256::digest(normalize(&code).as_bytes())));
+        assert_ne!(
+            first.hash,
+            hex::encode(Sha256::digest(normalize(&code).as_bytes()))
+        );
         create_pairing_code(v.path(), PairPlatform::Telegram, 0).unwrap();
-        assert_ne!(first.salt, read_record(v.path(), PairPlatform::Telegram).unwrap().salt);
+        assert_ne!(
+            first.salt,
+            read_record(v.path(), PairPlatform::Telegram).unwrap().salt
+        );
         #[cfg(unix)]
         {
             use std::os::unix::fs::PermissionsExt;
-            let mode = std::fs::metadata(record_path(v.path(), PairPlatform::Telegram)).unwrap().permissions().mode();
+            let mode = std::fs::metadata(record_path(v.path(), PairPlatform::Telegram))
+                .unwrap()
+                .permissions()
+                .mode();
             assert_eq!(mode & 0o777, 0o600);
         }
     }
@@ -319,10 +334,17 @@ mod tests {
         let handles: Vec<_> = (0..8)
             .map(|_| {
                 let (path, code) = (path.clone(), code.clone());
-                std::thread::spawn(move || redeem_pairing_code(&path, PairPlatform::Telegram, &code, 1).is_ok())
+                std::thread::spawn(move || {
+                    redeem_pairing_code(&path, PairPlatform::Telegram, &code, 1).is_ok()
+                })
             })
             .collect();
-        let wins = handles.into_iter().filter(|_| true).map(|h| h.join().unwrap()).filter(|w| *w).count();
+        let wins = handles
+            .into_iter()
+            .filter(|_| true)
+            .map(|h| h.join().unwrap())
+            .filter(|w| *w)
+            .count();
         assert_eq!(wins, 1);
     }
 

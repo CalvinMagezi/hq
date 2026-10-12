@@ -61,7 +61,11 @@ pub async fn generate_embedding(text: &str, api_key: &str) -> Result<Vec<f32>> {
     result.map(|(embedding, _)| embedding)
 }
 
-async fn embed_once(text: &str, api_key: &str, model: &str) -> Result<(Vec<f32>, hq_llm::cost::Usage)> {
+async fn embed_once(
+    text: &str,
+    api_key: &str,
+    model: &str,
+) -> Result<(Vec<f32>, hq_llm::cost::Usage)> {
     let model = model.to_string();
 
     let client = reqwest::Client::builder()

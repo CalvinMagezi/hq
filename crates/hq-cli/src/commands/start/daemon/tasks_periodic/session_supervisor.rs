@@ -29,9 +29,11 @@ use hq_core::config::HqConfig;
 use hq_core::types::{ChatMessage, MailboxMessageType, MessageRole, ValueItem, ValueKind};
 use hq_db::Database;
 use hq_db::harness_sessions_registry as registry;
-use hq_tools::harness_session::mission::{self, Event};
-use hq_tools::harness_session::{HarnessCategory, Liveness, exited_pane, liveness, poll_hosts_with};
 use hq_tools::agent_host::{AgentInfo, AgentStatus, Host, HostBackend};
+use hq_tools::harness_session::mission::{self, Event};
+use hq_tools::harness_session::{
+    HarnessCategory, Liveness, exited_pane, liveness, poll_hosts_with,
+};
 use std::collections::HashMap;
 use std::future::Future;
 use std::path::Path;
@@ -127,7 +129,8 @@ fn gather_hosts(
     let mut screens = HashMap::new();
     for row in rows {
         // An exited pane is read once more: its last screen is the run's output.
-        let readable = matches!(liveness(&polled, row), Liveness::Alive(_)) || exited_pane(&polled, row).is_some();
+        let readable = matches!(liveness(&polled, row), Liveness::Alive(_))
+            || exited_pane(&polled, row).is_some();
         if !readable || Instant::now() >= deadline {
             continue;
         }
@@ -146,11 +149,14 @@ fn gather_hosts(
     HostPhase { polled, screens }
 }
 
-
 /// Closes the pane of a session whose process has ended, so the host's list
 /// does not keep every finished run. Best effort: a pane that cannot be closed
 /// is reaped by the host's own idle limit later.
-fn close_exited_pane(row: &registry::HarnessSessionRow, agent: Option<&AgentInfo>, resolve: &HostResolver) {
+fn close_exited_pane(
+    row: &registry::HarnessSessionRow,
+    agent: Option<&AgentInfo>,
+    resolve: &HostResolver,
+) {
     let workspace = row
         .workspace_id
         .clone()
@@ -164,7 +170,9 @@ fn close_exited_pane(row: &registry::HarnessSessionRow, agent: Option<&AgentInfo
                 tracing::warn!(session = %row.id, error = %e, "session-supervisor: could not close an exited pane");
             }
         }
-        Err(e) => tracing::debug!(session = %row.id, error = %e, "session-supervisor: no host to close the exited pane on"),
+        Err(e) => {
+            tracing::debug!(session = %row.id, error = %e, "session-supervisor: no host to close the exited pane on")
+        }
     }
 }
 
@@ -198,13 +206,12 @@ fn llm_summarizer(timeout_secs: u64) -> Summarizer {
                 }],
                 ..Default::default()
             };
-            let response =
-                tokio::time::timeout(
-                    Duration::from_secs(timeout_secs),
-                    hq_llm::with_origin(hq_llm::origin::SUPERVISOR, router.chat(&request)),
-                )
-                    .await
-                    .map_err(|_| anyhow!("summary timed out after {timeout_secs}s"))??;
+            let response = tokio::time::timeout(
+                Duration::from_secs(timeout_secs),
+                hq_llm::with_origin(hq_llm::origin::SUPERVISOR, router.chat(&request)),
+            )
+            .await
+            .map_err(|_| anyhow!("summary timed out after {timeout_secs}s"))??;
             let summary = response.message.content.trim().to_string();
             if summary.is_empty() {
                 bail!("summary came back empty");
@@ -287,8 +294,8 @@ async fn dismiss_survey(
     let (db2, row2, screen2, resolve2) =
         (db.clone(), row.clone(), screen.to_string(), resolve.clone());
     let outcome = tokio::task::spawn_blocking(move || {
-        let host =
-            (resolve2.as_ref())(&row2.host).map(|h| h.with_command_timeout_dyn(DISMISS_HOST_TIMEOUT));
+        let host = (resolve2.as_ref())(&row2.host)
+            .map(|h| h.with_command_timeout_dyn(DISMISS_HOST_TIMEOUT));
         let (reread_host, press_host) = (host.as_ref().ok().cloned(), host.as_ref().ok().cloned());
         let target = row2.agent_name.clone();
         let reread_target = target.clone();
@@ -306,7 +313,11 @@ async fn dismiss_survey(
                 host.send_keys(&target, keys).map_err(|e| {
                     // An answer from the host means it refused the keys; silence or a lost
                     // connection may still have delivered them.
-                    if e.is_unreachable() { PressError::MaybeSent } else { PressError::NotSent }
+                    if e.is_unreachable() {
+                        PressError::MaybeSent
+                    } else {
+                        PressError::NotSent
+                    }
                 })
             },
         )
@@ -322,11 +333,19 @@ async fn dismiss_survey(
             true
         }
         Outcome::CapReached => {
-            notify_dismiss_cap(db, row, "showed the same known prompt more than the allowed number of times");
+            notify_dismiss_cap(
+                db,
+                row,
+                "showed the same known prompt more than the allowed number of times",
+            );
             false
         }
         Outcome::Stuck => {
-            notify_dismiss_cap(db, row, "kept showing a known prompt that did not close after the key was sent");
+            notify_dismiss_cap(
+                db,
+                row,
+                "kept showing a known prompt that did not close after the key was sent",
+            );
             false
         }
         Outcome::Failed | Outcome::Untouched => false,
@@ -337,14 +356,16 @@ async fn dismiss_survey(
 /// is idle. One per sweep: the agent finishes a turn, and the idle event that
 /// follows delivers the next.
 async fn deliver_messages(db: &Database, row: &registry::HarnessSessionRow, agent: &AgentInfo) {
-    let category = hq_tools::harness_session::category_of(&row.harness).unwrap_or(HarnessCategory::Coding);
+    let category =
+        hq_tools::harness_session::category_of(&row.harness).unwrap_or(HarnessCategory::Coding);
     if !hq_tools::a2a::can_receive_agent(agent, category) {
         return;
     }
     let (db_arc, id, agent) = (Arc::new(db.clone()), row.id.clone(), agent.clone());
-    let delivered =
-        tokio::task::spawn_blocking(move || hq_tools::a2a::deliver_to(&db_arc, &id, &agent, category))
-            .await;
+    let delivered = tokio::task::spawn_blocking(move || {
+        hq_tools::a2a::deliver_to(&db_arc, &id, &agent, category)
+    })
+    .await;
     match delivered {
         Ok(Ok(Some(message))) => {
             tracing::info!(session = %row.id, message, "session-supervisor: delivered an agent message");
@@ -446,7 +467,9 @@ async fn supervise(
         if exited.is_some() {
             if let Some(screen) = phase.screens.get(&row.id).filter(|s| !s.trim().is_empty()) {
                 let (id, snapshot) = (row.id.clone(), last_lines(screen, SNAPSHOT_LINES));
-                if let Err(e) = db.with_conn(move |c| registry::set_last_snapshot(c, &id, &snapshot)) {
+                if let Err(e) =
+                    db.with_conn(move |c| registry::set_last_snapshot(c, &id, &snapshot))
+                {
                     tracing::warn!(session = %row.id, error = %e, "session-supervisor: final snapshot store failed");
                 }
             }
@@ -554,7 +577,13 @@ async fn supervise(
             },
             row.id
         );
-        post_relay_nudge(vault_path, &row.id, &subject, &body, exit_interrupts(link.as_ref()));
+        post_relay_nudge(
+            vault_path,
+            &row.id,
+            &subject,
+            &body,
+            exit_interrupts(link.as_ref()),
+        );
     }
 
     for (row, agent) in &alive {
@@ -564,10 +593,10 @@ async fn supervise(
 }
 
 mod alerts;
-mod text;
 #[cfg(test)]
 #[cfg(unix)]
 mod tests;
+mod text;
 
 use alerts::*;
 use text::*;

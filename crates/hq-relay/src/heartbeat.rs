@@ -218,7 +218,10 @@ mod tests {
         f.on_tool_start("vault_search");
         f.on_tool_progress("vault_search", "\u{201C}Value Bus\u{201D}");
         f.on_tool_end("vault_search", "4 results\nNotebooks/...");
-        assert_eq!(f.last_tool, "vault_search", "Discord's ticker keeps the last tool after it ends");
+        assert_eq!(
+            f.last_tool, "vault_search",
+            "Discord's ticker keeps the last tool after it ends"
+        );
         f.on_subagent("researcher", "hq", "Value Bus fixes effort-without-payoff");
         let r = f.render(83);
         assert!(r.contains("deepseek-v4-pro"));

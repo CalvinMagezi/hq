@@ -378,10 +378,16 @@ async fn an_exit_is_recorded_on_the_task_once_across_sweeps() {
     sweep(tmp.path(), &db, &host, None).await;
     sweep(tmp.path(), &db, &host, None).await;
 
-    assert_eq!(task_state(&db, &task), (hq_db::tasks::STATUS_BLOCKED.into(), 1));
+    assert_eq!(
+        task_state(&db, &task),
+        (hq_db::tasks::STATUS_BLOCKED.into(), 1)
+    );
     let body = only_body(tmp.path());
     assert!(body.contains("Task FR-001 is blocked"), "{body}");
-    assert!(interrupts(tmp.path()), "stopped work on a task is a blocker, not digest news");
+    assert!(
+        interrupts(tmp.path()),
+        "stopped work on a task is a blocker, not digest news"
+    );
 }
 
 fn interrupts(vault: &Path) -> bool {
@@ -413,7 +419,10 @@ async fn routine_sweeps_of_a_working_task_session_notify_nothing() {
 
     assert!(mailbox_files(tmp.path()).is_empty());
     assert_eq!(alert_count(&db), 0);
-    assert_eq!(task_state(&db, &task), (hq_db::tasks::STATUS_IN_PROGRESS.into(), 0));
+    assert_eq!(
+        task_state(&db, &task),
+        (hq_db::tasks::STATUS_IN_PROGRESS.into(), 0)
+    );
 }
 
 #[tokio::test]
@@ -427,7 +436,10 @@ async fn an_unreachable_host_leaves_the_task_untouched() {
         .await
         .unwrap();
 
-    assert_eq!(task_state(&db, &task), (hq_db::tasks::STATUS_IN_PROGRESS.into(), 0));
+    assert_eq!(
+        task_state(&db, &task),
+        (hq_db::tasks::STATUS_IN_PROGRESS.into(), 0)
+    );
 }
 
 #[tokio::test]
@@ -445,7 +457,10 @@ async fn a_finished_turn_puts_the_task_up_for_review_not_complete() {
         (hq_db::tasks::STATUS_READY_FOR_REVIEW.into(), 1)
     );
     assert!(only_body(tmp.path()).contains("Task FR-001 is ready for review"));
-    assert!(!interrupts(tmp.path()), "a finished turn is a digest update");
+    assert!(
+        !interrupts(tmp.path()),
+        "a finished turn is a digest update"
+    );
 }
 
 #[tokio::test]
@@ -469,11 +484,15 @@ async fn a_task_session_blocked_on_a_dialog_raises_one_action_item() {
         })
         .unwrap();
     assert!(body.contains("Task FR-001 is in progress"), "{body}");
-    assert_eq!(task_state(&db, &task), (hq_db::tasks::STATUS_IN_PROGRESS.into(), 1));
+    assert_eq!(
+        task_state(&db, &task),
+        (hq_db::tasks::STATUS_IN_PROGRESS.into(), 1)
+    );
 }
 
 fn watch_from_chat(db: &Database, id: &str) {
-    db.with_conn(|c| registry::set_owner(c, id, Some("th-web"))).unwrap();
+    db.with_conn(|c| registry::set_owner(c, id, Some("th-web")))
+        .unwrap();
 }
 
 fn row_of(db: &Database, id: &str) -> registry::HarnessSessionRow {
@@ -481,8 +500,12 @@ fn row_of(db: &Database, id: &str) -> registry::HarnessSessionRow {
 }
 
 fn value_item_count(db: &Database) -> i64 {
-    db.with_conn(|c| Ok(c.query_row("SELECT COUNT(*) FROM value_items", [], |r| r.get::<_, i64>(0))?))
-        .unwrap()
+    db.with_conn(|c| {
+        Ok(c.query_row("SELECT COUNT(*) FROM value_items", [], |r| {
+            r.get::<_, i64>(0)
+        })?)
+    })
+    .unwrap()
 }
 
 #[tokio::test]
@@ -497,13 +520,23 @@ async fn a_watched_session_wakes_its_chat_instead_of_the_relay() {
     let row = row_of(&db, "hs-web");
     assert_eq!(row.pm_wake.as_deref(), Some(WAKE_FINISHED));
     assert_eq!(row.last_agent_status.as_deref(), Some("done"));
-    assert!(mailbox_files(tmp.path()).is_empty(), "web chat only: nothing for Telegram");
-    assert_eq!(task_state(&db, &task).0, hq_db::tasks::STATUS_READY_FOR_REVIEW);
+    assert!(
+        mailbox_files(tmp.path()).is_empty(),
+        "web chat only: nothing for Telegram"
+    );
+    assert_eq!(
+        task_state(&db, &task).0,
+        hq_db::tasks::STATUS_READY_FOR_REVIEW
+    );
 
     let blocked = fake_host(tmp.path(), &[("hs-web", "blocked", 5)], "Approve the edit?");
     sweep(tmp.path(), &db, &blocked, None).await;
     assert_eq!(row_of(&db, "hs-web").pm_wake.as_deref(), Some(WAKE_BLOCKED));
-    assert_eq!(value_item_count(&db), 1, "one web-inbox badge for the block");
+    assert_eq!(
+        value_item_count(&db),
+        1,
+        "one web-inbox badge for the block"
+    );
     assert!(
         hq_daemon::value_bus::WEB_ONLY_SOURCES.contains(&WEB_INBOX_SOURCE),
         "the badge must never reach Telegram"
@@ -514,7 +547,11 @@ async fn a_watched_session_wakes_its_chat_instead_of_the_relay() {
     assert_eq!(row.status, registry::STATUS_EXITED);
     assert_eq!(row.pm_wake.as_deref(), Some(WAKE_EXITED));
     assert!(mailbox_files(tmp.path()).is_empty());
-    assert_eq!(value_item_count(&db), 1, "the exit adds nothing for the relay");
+    assert_eq!(
+        value_item_count(&db),
+        1,
+        "the exit adds nothing for the relay"
+    );
 }
 
 #[tokio::test]
@@ -761,16 +798,27 @@ async fn a_finished_alert_and_wake_survive_a_state_change_after_the_keypress() {
 
     sweep(tmp.path(), &db, &host, None).await;
     assert_eq!(keys_logged(&log).len(), 1);
-    assert_eq!(wake(&db).as_deref(), Some(WAKE_FINISHED), "wake despite dismissal");
+    assert_eq!(
+        wake(&db).as_deref(),
+        Some(WAKE_FINISHED),
+        "wake despite dismissal"
+    );
 
     // The host bumped state_change_seq after the key; the next finished turn must wake again.
     db.with_conn(|c| {
-        c.execute("UPDATE harness_sessions SET pm_wake = NULL WHERE id = 'hs-f'", [])?;
+        c.execute(
+            "UPDATE harness_sessions SET pm_wake = NULL WHERE id = 'hs-f'",
+            [],
+        )?;
         Ok(())
     })
     .unwrap();
     sweep(tmp.path(), &db, &host, None).await;
-    assert_eq!(wake(&db).as_deref(), Some(WAKE_FINISHED), "new seq, new wake");
+    assert_eq!(
+        wake(&db).as_deref(),
+        Some(WAKE_FINISHED),
+        "new seq, new wake"
+    );
 }
 
 #[tokio::test]
@@ -806,7 +854,11 @@ async fn a_survey_that_does_not_close_is_dismissed_once_then_reported() {
     for _ in 0..4 {
         sweep(tmp.path(), &db, &host, None).await;
     }
-    assert_eq!(keys_logged(&log).len(), 1, "an unchanged tail means the key did nothing");
+    assert_eq!(
+        keys_logged(&log).len(),
+        1,
+        "an unchanged tail means the key did nothing"
+    );
     let notices: i64 = db
         .with_conn(|c| {
             Ok(c.query_row(
@@ -840,7 +892,9 @@ fn exited_host(dir: &Path, name: &str, screen: &str) -> ScriptedHost {
 /// `exited_host` with the exit code the host reports; `None` is a host that
 /// reports none.
 fn exited_host_with_code(dir: &Path, name: &str, screen: &str, code: Option<u32>) -> ScriptedHost {
-    let code = code.map(|c| format!(r#","exit_code":{c}"#)).unwrap_or_default();
+    let code = code
+        .map(|c| format!(r#","exit_code":{c}"#))
+        .unwrap_or_default();
     let agent = format!(
         r#"{{"agent":"hermes","agent_status":"unknown","status":"exited","cwd":"/tmp","name":"{name}","pane_id":"w1:p1","workspace_id":"w1","state_change_seq":3{code}}}"#
     );
@@ -861,7 +915,8 @@ async fn a_stack_run_whose_process_ended_is_read_closed_and_put_into_review() {
     let task = seed_with_task(&db, "hs-run");
     db.with_conn(|c| {
         registry::set_origin(c, "hs-run", registry::ORIGIN_STACK)?;
-        hq_db::tasks::open_for_session(c, "tk-1", "hs-run", "hs-run", "hermes", "local", "/tmp").map(|_| ())
+        hq_db::tasks::open_for_session(c, "tk-1", "hs-run", "hs-run", "hermes", "local", "/tmp")
+            .map(|_| ())
     })
     .unwrap();
     let host = exited_host(tmp.path(), "hs-run", "REPORT\nThree suppliers found.\n");
@@ -870,11 +925,24 @@ async fn a_stack_run_whose_process_ended_is_read_closed_and_put_into_review() {
 
     assert_eq!(status_of(&db, "hs-run"), registry::STATUS_EXITED);
     let (status, _) = task_state(&db, &task);
-    assert_eq!(status, hq_db::tasks::STATUS_READY_FOR_REVIEW, "a run with output is a finished turn");
-    let snap = db.with_conn(|c| registry::last_snapshot(c, "hs-run")).unwrap().unwrap();
-    assert!(snap.contains("Three suppliers found"), "the final screen is kept: {snap}");
+    assert_eq!(
+        status,
+        hq_db::tasks::STATUS_READY_FOR_REVIEW,
+        "a run with output is a finished turn"
+    );
+    let snap = db
+        .with_conn(|c| registry::last_snapshot(c, "hs-run"))
+        .unwrap()
+        .unwrap();
+    assert!(
+        snap.contains("Three suppliers found"),
+        "the final screen is kept: {snap}"
+    );
     let calls = std::fs::read_to_string(tmp.path().join("calls.log")).unwrap();
-    assert!(calls.contains("workspace close w1"), "the dead pane is closed: {calls}");
+    assert!(
+        calls.contains("workspace close w1"),
+        "the dead pane is closed: {calls}"
+    );
     assert!(only_message(tmp.path()).contains("Three suppliers found"));
 }
 
@@ -889,17 +957,36 @@ async fn a_stack_run_that_exited_non_zero_blocks_its_task_whatever_is_on_screen(
         registry::set_last_snapshot(c, "hs-crash", "Starting up...\nFetching sources\n")
     })
     .unwrap();
-    let host = exited_host_with_code(tmp.path(), "hs-crash", "Traceback (most recent call last)\n", Some(1));
+    let host = exited_host_with_code(
+        tmp.path(),
+        "hs-crash",
+        "Traceback (most recent call last)\n",
+        Some(1),
+    );
 
     sweep(tmp.path(), &db, &host, None).await;
 
     assert_eq!(status_of(&db, "hs-crash"), registry::STATUS_EXITED);
     let (status, _) = task_state(&db, &task);
-    assert_eq!(status, hq_db::tasks::STATUS_BLOCKED, "a non-zero exit is a crash, however much it printed before");
+    assert_eq!(
+        status,
+        hq_db::tasks::STATUS_BLOCKED,
+        "a non-zero exit is a crash, however much it printed before"
+    );
     let notes: Vec<String> = db
-        .with_conn(|c| Ok(hq_db::tasks::list_comments(c, &task)?.into_iter().map(|c| c.body).collect()))
+        .with_conn(|c| {
+            Ok(hq_db::tasks::list_comments(c, &task)?
+                .into_iter()
+                .map(|c| c.body)
+                .collect())
+        })
         .unwrap();
-    assert!(notes.iter().any(|n| n.contains("without finishing") && n.contains("never resumed")), "{notes:?}");
+    assert!(
+        notes
+            .iter()
+            .any(|n| n.contains("without finishing") && n.contains("never resumed")),
+        "{notes:?}"
+    );
 }
 
 #[tokio::test]
@@ -907,12 +994,17 @@ async fn a_stack_run_on_a_host_that_reports_no_exit_code_is_judged_by_its_screen
     let tmp = tempfile::tempdir().unwrap();
     let db = Database::open_memory().unwrap();
     let task = seed_with_task(&db, "hs-empty");
-    db.with_conn(|c| registry::set_origin(c, "hs-empty", registry::ORIGIN_STACK)).unwrap();
+    db.with_conn(|c| registry::set_origin(c, "hs-empty", registry::ORIGIN_STACK))
+        .unwrap();
     let host = exited_host_with_code(tmp.path(), "hs-empty", "   \n", None);
 
     sweep(tmp.path(), &db, &host, None).await;
 
     assert_eq!(status_of(&db, "hs-empty"), registry::STATUS_EXITED);
     let (status, _) = task_state(&db, &task);
-    assert_eq!(status, hq_db::tasks::STATUS_BLOCKED, "no code and no output means the run crashed");
+    assert_eq!(
+        status,
+        hq_db::tasks::STATUS_BLOCKED,
+        "no code and no output means the run crashed"
+    );
 }

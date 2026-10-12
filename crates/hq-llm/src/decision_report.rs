@@ -45,7 +45,10 @@ pub fn report(vault_path: &Path, days: u32, site_filter: Option<&str>) -> String
     files.sort();
     for path in files {
         let text = std::fs::read_to_string(&path).unwrap_or_default();
-        for entry in text.lines().filter_map(|l| serde_json::from_str::<Value>(l).ok()) {
+        for entry in text
+            .lines()
+            .filter_map(|l| serde_json::from_str::<Value>(l).ok())
+        {
             let site = entry["site"].as_str().unwrap_or("?").to_string();
             if site_filter.is_none_or(|f| f == site) {
                 add(sites.entry(site).or_default(), &entry);
@@ -91,9 +94,16 @@ fn score_of(entry: &Value) -> Option<f64> {
 }
 
 fn example(entry: &Value) -> String {
-    let ts = entry["ts"].as_str().unwrap_or("?").get(5..16).unwrap_or("?");
+    let ts = entry["ts"]
+        .as_str()
+        .unwrap_or("?")
+        .get(5..16)
+        .unwrap_or("?");
     let score = score_of(entry).map_or("?".to_string(), |s| format!("{s:.2}"));
-    let what = match (entry["incumbent"]["from"].as_str(), entry["incumbent"]["subject"].as_str()) {
+    let what = match (
+        entry["incumbent"]["from"].as_str(),
+        entry["incumbent"]["subject"].as_str(),
+    ) {
         (Some(from), Some(subject)) => format!("{from} | {subject}"),
         _ => entry["excerpt"].as_str().unwrap_or("").replace('\n', " "),
     };
@@ -112,14 +122,20 @@ fn percentile(sorted: &[u64], pct: usize) -> u64 {
 fn render(sites: &BTreeMap<String, SiteStats>, days: u32) -> String {
     let mut out = format!("Decision log, last {days} day(s)\n");
     if sites.is_empty() {
-        out.push_str("\nNo records. Either decisions are disabled or nothing has reached a gate yet.\n");
+        out.push_str(
+            "\nNo records. Either decisions are disabled or nothing has reached a gate yet.\n",
+        );
         return out;
     }
     for (site, s) in sites {
         let mut latencies = s.latencies_ms.clone();
         latencies.sort_unstable();
         let _ = writeln!(out, "\n{site}");
-        let _ = writeln!(out, "  calls {}  errors {}  cost ${:.5}", s.calls, s.errors, s.cost);
+        let _ = writeln!(
+            out,
+            "  calls {}  errors {}  cost ${:.5}",
+            s.calls, s.errors, s.cost
+        );
         if !s.actions.is_empty() {
             let actions: Vec<String> = s.actions.iter().map(|(a, n)| format!("{a} {n}")).collect();
             let _ = writeln!(out, "  outcomes: {}", actions.join(", "));
@@ -187,7 +203,10 @@ mod tests {
         assert!(text.contains("email_fyi"));
         assert!(text.contains("outcomes: forwarded 1, suppressed 1"));
         assert!(text.contains("Glovo | Top Sellers"));
-        assert!(!text.contains("Tax Certificate"), "forwarded mail is not listed as hidden");
+        assert!(
+            !text.contains("Tax Certificate"),
+            "forwarded mail is not listed as hidden"
+        );
         assert!(text.contains("cognition_insight"));
         assert!(text.contains("errors 1"));
         assert!(text.contains("<0.15 1"));

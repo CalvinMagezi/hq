@@ -94,12 +94,17 @@ pub fn is_pid_alive(pid: u32) -> bool {
 pub fn is_pid_alive(pid: u32) -> bool {
     // On Unix, kill(pid, 0) checks if process exists without sending a signal
     // pid 0 and values above i32::MAX would address a process group, not a process.
-    let Ok(pid) = i32::try_from(pid) else { return false };
+    let Ok(pid) = i32::try_from(pid) else {
+        return false;
+    };
     if pid == 0 {
         return false;
     }
     // EPERM means the process exists but belongs to someone else.
-    unsafe { libc::kill(pid, 0) == 0 || std::io::Error::last_os_error().raw_os_error() == Some(libc::EPERM) }
+    unsafe {
+        libc::kill(pid, 0) == 0
+            || std::io::Error::last_os_error().raw_os_error() == Some(libc::EPERM)
+    }
 }
 
 /// Detect dead harnesses: those with stale heartbeats or dead PIDs.

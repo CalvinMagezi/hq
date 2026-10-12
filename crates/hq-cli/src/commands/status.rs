@@ -1,8 +1,8 @@
+use crate::render as ansi;
+use crate::render::Theme;
 use anyhow::Result;
 use hq_core::config::HqConfig;
 use hq_db::Database;
-use crate::render as ansi;
-use crate::render::Theme;
 use hq_vault::VaultClient;
 
 pub async fn run(config: &HqConfig) -> Result<()> {

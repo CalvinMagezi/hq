@@ -85,7 +85,9 @@ fn install(config: &HqConfig, scope: &Scope) -> Result<()> {
             );
         }
         if scope.access.is_some() {
-            anyhow::bail!("--scope applies to a local server; the key you give a remote HQ sets its scope");
+            anyhow::bail!(
+                "--scope applies to a local server; the key you give a remote HQ sets its scope"
+            );
         }
     }
     if scope.access.is_some_and(|a| a != ServeScope::Full) && scope.target.is_none() {
@@ -96,7 +98,8 @@ fn install(config: &HqConfig, scope: &Scope) -> Result<()> {
     }
     // In Lite the server only has task tools, so a plain install writes the tasks scope: the
     // entry then says what it reaches, even if someone later edits the profile.
-    let default_scope = (config.profile.is_lite() && remote_url.is_none()).then_some(ServeScope::Tasks);
+    let default_scope =
+        (config.profile.is_lite() && remote_url.is_none()).then_some(ServeScope::Tasks);
     let opts = EntryOptions {
         scope: scope.access.or(default_scope),
         remote_url,
@@ -150,7 +153,9 @@ fn install(config: &HqConfig, scope: &Scope) -> Result<()> {
     if installed == 0 {
         println!("No supported AI editor configs found.");
         if let Some(url) = &opts.remote_url {
-            println!("Add this to a VS Code mcp.json (a workspace's .vscode/mcp.json, or --target project):\n");
+            println!(
+                "Add this to a VS Code mcp.json (a workspace's .vscode/mcp.json, or --target project):\n"
+            );
             println!("{}", cursor_mcp_config::remote_snippet(url)?);
             return Ok(());
         }
@@ -167,7 +172,11 @@ fn status(config: &HqConfig, scope: &Scope) -> Result<()> {
     println!("MCP Server Status");
     println!("=================\n");
     for t in selected_targets(scope)? {
-        println!("  {}: {}", t.path.display(), cursor_mcp_config::describe(&t));
+        println!(
+            "  {}: {}",
+            t.path.display(),
+            cursor_mcp_config::describe(&t)
+        );
     }
     println!("  Vault: {}", config.vault_path.display());
     Ok(())

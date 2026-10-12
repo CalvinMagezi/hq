@@ -11,7 +11,9 @@ use async_trait::async_trait;
 use serde_json::{Value, json};
 
 use crate::registry::HqTool;
-use crate::skill_audit::{Disposition, archive_current, audit_live, delete_live_skill, keep_if_valid};
+use crate::skill_audit::{
+    Disposition, archive_current, audit_live, delete_live_skill, keep_if_valid,
+};
 use crate::skills::{SkillDefinition, SkillProvenance, render_skill};
 
 const ALLOWED_FILES: &[&str] = &["SKILL.md", "SUMMARY.md", "README.md"];
@@ -66,10 +68,20 @@ impl SkillManageTool {
     /// A live SKILL.md that fails validation is rolled back before it is audited.
     fn keep_and_audit(&self, name: &str, archived: Option<PathBuf>, action: &str) -> Result<()> {
         if self.write_approval {
-            return audit_live(&self.skills_dir, name, Disposition::Held, &format!("skill_manage {action}"));
+            return audit_live(
+                &self.skills_dir,
+                name,
+                Disposition::Held,
+                &format!("skill_manage {action}"),
+            );
         }
         keep_if_valid(&self.skills_dir, name, archived)?;
-        audit_live(&self.skills_dir, name, Disposition::Adopted, &format!("skill_manage {action}"))
+        audit_live(
+            &self.skills_dir,
+            name,
+            Disposition::Adopted,
+            &format!("skill_manage {action}"),
+        )
     }
 
     async fn create(&self, name: &str, content: &str) -> Result<Value> {
@@ -156,7 +168,12 @@ impl SkillManageTool {
         }
         tokio::fs::remove_file(&path).await?;
         if removes_live_skill {
-            audit_live(&self.skills_dir, name, Disposition::Deleted, "skill_manage remove_file")?;
+            audit_live(
+                &self.skills_dir,
+                name,
+                Disposition::Deleted,
+                "skill_manage remove_file",
+            )?;
         }
         Ok(json!({
             "status": "removed",
@@ -382,7 +399,9 @@ mod tests {
             .await
             .unwrap();
         assert!(tmp.path().join("gone/archive/SKILL-v1.md").exists());
-        let last = crate::skill_audit::audit_history(tmp.path(), "gone").pop().unwrap();
+        let last = crate::skill_audit::audit_history(tmp.path(), "gone")
+            .pop()
+            .unwrap();
         assert_eq!(last.disposition, Disposition::Deleted);
     }
 
@@ -392,7 +411,11 @@ mod tests {
         let t = tool(tmp.path(), false);
         let broken = "---\ndescription: \"x\"\nautoLoad: true\n---\n# Never fires";
 
-        assert!(t.execute(json!({"action": "create", "name": "bad", "content": broken})).await.is_err());
+        assert!(
+            t.execute(json!({"action": "create", "name": "bad", "content": broken}))
+                .await
+                .is_err()
+        );
         assert!(!tmp.path().join("bad").exists());
 
         t.execute(json!({"action": "create", "name": "ok", "content": "# Fine"}))
@@ -404,7 +427,10 @@ mod tests {
         assert!(res.is_err());
         let live = std::fs::read_to_string(tmp.path().join("ok/SKILL.md")).unwrap();
         assert!(live.contains("# Fine"), "{live}");
-        assert!(!tmp.path().join("ok/archive/SKILL-v1.md").exists(), "the archive went back into place");
+        assert!(
+            !tmp.path().join("ok/archive/SKILL-v1.md").exists(),
+            "the archive went back into place"
+        );
     }
 
     #[tokio::test]
@@ -424,7 +450,10 @@ mod tests {
             .into_iter()
             .map(|e| e.disposition)
             .collect();
-        assert_eq!(dispositions, vec![Disposition::Adopted, Disposition::Adopted]);
+        assert_eq!(
+            dispositions,
+            vec![Disposition::Adopted, Disposition::Adopted]
+        );
     }
 
     #[tokio::test]

@@ -91,7 +91,10 @@ async fn run_with_output(
             let kind = parse_kind(kind.as_deref())?;
             let state = parse_state(state.as_deref())?;
             if let Some(s) = state
-                && !matches!(s, ValueState::Pending | ValueState::Routed | ValueState::Delivered)
+                && !matches!(
+                    s,
+                    ValueState::Pending | ValueState::Routed | ValueState::Delivered
+                )
             {
                 anyhow::bail!(
                     "queue clear --state {}: clearing only makes sense for an active state \
@@ -119,7 +122,9 @@ async fn run_with_output(
                     writeln!(output, "Dismissed {n} item(s).")?;
                 }
                 (None, false) => {
-                    anyhow::bail!("queue clear: pass an id, or --all to clear everything matching --kind/--state");
+                    anyhow::bail!(
+                        "queue clear: pass an id, or --all to clear everything matching --kind/--state"
+                    );
                 }
             }
         }
@@ -130,9 +135,9 @@ async fn run_with_output(
 fn parse_kind(s: Option<&str>) -> Result<Option<ValueKind>> {
     match s {
         None => Ok(None),
-        Some(s) => ValueKind::from_str(s)
-            .map(Some)
-            .ok_or_else(|| anyhow::anyhow!("unknown kind '{s}' (expected action_needed|insight|proposal|fyi)")),
+        Some(s) => ValueKind::from_str(s).map(Some).ok_or_else(|| {
+            anyhow::anyhow!("unknown kind '{s}' (expected action_needed|insight|proposal|fyi)")
+        }),
     }
 }
 
@@ -152,7 +157,9 @@ fn approve_interactively(db: &hq_db::Database, id: &str, output: &mut dyn Write)
     use std::io::{BufRead, IsTerminal};
 
     if !std::io::stdin().is_terminal() {
-        anyhow::bail!("queue approve needs an interactive terminal; approve from a chat relay instead");
+        anyhow::bail!(
+            "queue approve needs an interactive terminal; approve from a chat relay instead"
+        );
     }
     let items = hq_db::value_items::list_filtered(db, None, None, 500)?;
     let Some(item) = items.iter().find(|i| i.id.starts_with(id) && id.len() >= 4) else {
@@ -168,7 +175,15 @@ fn approve_interactively(db: &hq_db::Database, id: &str, output: &mut dyn Write)
         return Ok(());
     }
     let matched = hq_db::value_items::approve_by_id(db, &item.id)?;
-    writeln!(output, "{}", if matched { "Approved." } else { "That item is no longer active." })?;
+    writeln!(
+        output,
+        "{}",
+        if matched {
+            "Approved."
+        } else {
+            "That item is no longer active."
+        }
+    )?;
     Ok(())
 }
 

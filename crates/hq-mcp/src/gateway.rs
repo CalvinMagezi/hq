@@ -146,10 +146,7 @@ pub fn create_gateway_tools(registry: &ToolRegistry) -> Vec<Tool> {
 /// Like [`create_gateway_tools`], but a scoped caller (`allowed` is `Some`) is
 /// told only about the categories that hold a tool it may use, so the tool
 /// description does not enumerate the rest of the catalog.
-pub fn create_gateway_tools_scoped(
-    registry: &ToolRegistry,
-    allowed: Option<&[&str]>,
-) -> Vec<Tool> {
+pub fn create_gateway_tools_scoped(registry: &ToolRegistry, allowed: Option<&[&str]>) -> Vec<Tool> {
     let categories = match allowed {
         None => registry.categories(),
         Some(allowed) => {
@@ -368,9 +365,15 @@ async fn handle_call_as(
     if call_args.is_null() {
         call_args = json!({});
     }
-    if MARKED_DENIED_TOOLS.contains(&args.tool.as_str()) && hq_tools::harness_session::spawned_session(&call_args).is_some() {
+    if MARKED_DENIED_TOOLS.contains(&args.tool.as_str())
+        && hq_tools::harness_session::spawned_session(&call_args).is_some()
+    {
         return Err(ErrorData::invalid_params(
-            format!("{}: {}", args.tool, hq_tools::harness_session::SPAWNED_REFUSAL),
+            format!(
+                "{}: {}",
+                args.tool,
+                hq_tools::harness_session::SPAWNED_REFUSAL
+            ),
             None,
         ));
     }
@@ -420,7 +423,9 @@ pub async fn call_tool_whole(
     if allowed.is_some_and(|a| !a.contains(&tool)) {
         return Err(format!("tool not permitted for this connection: {tool}"));
     }
-    let t = registry.get(tool).ok_or_else(|| format!("unknown tool: {tool}"))?;
+    let t = registry
+        .get(tool)
+        .ok_or_else(|| format!("unknown tool: {tool}"))?;
     let mut args = if args.is_null() { json!({}) } else { args };
     mark_scope(&mut args, allowed);
     hq_tools::registry::validate_and_execute(t, args)
@@ -665,18 +670,32 @@ mod tests {
             "agent_message_send",
             "agent_delegate",
         ] {
-            assert!(!TASKS_ALLOWLIST.contains(&name), "tasks must not reach {name}");
+            assert!(
+                !TASKS_ALLOWLIST.contains(&name),
+                "tasks must not reach {name}"
+            );
         }
         for name in TASKS_ALLOWLIST {
             assert!(
-                ["task_", "folder_", "initiative_", "space_"].iter().any(|p| name.starts_with(p)),
+                ["task_", "folder_", "initiative_", "space_"]
+                    .iter()
+                    .any(|p| name.starts_with(p)),
                 "{name} is not a task, folder, initiative or space tool"
             );
         }
         // Archiving, restoring, purging, writing links and reading who is routed where stay
         // with the owner's key.
-        for name in ["task_delete", "task_restore", "task_link_add", "task_link_remove", "task_routing_audit"] {
-            assert!(!TASKS_ALLOWLIST.contains(&name), "tasks must not reach {name}");
+        for name in [
+            "task_delete",
+            "task_restore",
+            "task_link_add",
+            "task_link_remove",
+            "task_routing_audit",
+        ] {
+            assert!(
+                !TASKS_ALLOWLIST.contains(&name),
+                "tasks must not reach {name}"
+            );
         }
     }
 
@@ -692,7 +711,10 @@ mod tests {
         let mut count = 0;
         for name in named {
             count += 1;
-            assert!(TASKS_ALLOWLIST.contains(&name), "the scope protocol names {name}");
+            assert!(
+                TASKS_ALLOWLIST.contains(&name),
+                "the scope protocol names {name}"
+            );
         }
         assert!(count >= 5, "{text}");
     }
@@ -700,13 +722,22 @@ mod tests {
     #[tokio::test]
     async fn tasks_scope_calls_task_tools_and_refuses_spawn_and_delete() {
         let mut registry = ToolRegistry::new();
-        for name in ["task_create", "task_delete", "harness_session_spawn", "hq_ask"] {
+        for name in [
+            "task_create",
+            "task_delete",
+            "harness_session_spawn",
+            "hq_ask",
+        ] {
             registry.register(Box::new(DummyTool { name }));
         }
         let db = hq_db::Database::open_memory().unwrap();
         let call = |name: &str| serde_json::json!({"tool": name, "args": {}});
         let ok = call("task_create");
-        assert!(handle_call(&registry, ok.as_object(), &db, Some(TASKS_ALLOWLIST)).await.is_ok());
+        assert!(
+            handle_call(&registry, ok.as_object(), &db, Some(TASKS_ALLOWLIST))
+                .await
+                .is_ok()
+        );
         for name in ["task_delete", "harness_session_spawn", "hq_ask"] {
             let denied = call(name);
             assert!(
@@ -747,7 +778,10 @@ mod tests {
 
         let mut args = forged();
         mark_scope(&mut args, None);
-        assert!(args.get(handoff).is_none() && args.get(tasks).is_none(), "owner calls carry no marker");
+        assert!(
+            args.get(handoff).is_none() && args.get(tasks).is_none(),
+            "owner calls carry no marker"
+        );
 
         let mut args = forged();
         mark_scope(&mut args, Some(SPARK_READONLY_ALLOWLIST));
@@ -756,12 +790,18 @@ mod tests {
         let mut args = forged();
         mark_scope(&mut args, Some(TASKS_ALLOWLIST));
         assert_eq!(args[tasks], true);
-        assert!(args.get(handoff).is_none(), "a tasks call is never marked as handoff");
+        assert!(
+            args.get(handoff).is_none(),
+            "a tasks call is never marked as handoff"
+        );
 
         let mut args = forged();
         mark_scope(&mut args, Some(HANDOFF_ALLOWLIST));
         assert_eq!(args[handoff], true);
-        assert!(args.get(tasks).is_none(), "a handoff call is never marked as tasks");
+        assert!(
+            args.get(tasks).is_none(),
+            "a handoff call is never marked as tasks"
+        );
     }
 
     #[tokio::test]
@@ -805,18 +845,35 @@ mod tests {
     #[tokio::test]
     async fn a_marked_caller_cannot_use_the_config_tool_and_null_args_are_tolerated() {
         let mut registry = ToolRegistry::new();
-        registry.register(Box::new(DummyTool { name: "config_manage" }));
+        registry.register(Box::new(DummyTool {
+            name: "config_manage",
+        }));
         let db = hq_db::Database::open_memory().unwrap();
         let marker = hq_tools::harness_session::SPAWNED_SESSION_ARG;
         let marked = serde_json::json!({"tool": "config_manage", "args": {marker: "hs-1"}});
-        assert!(handle_call(&registry, Some(marked.as_object().unwrap()), &db, None).await.is_err());
+        assert!(
+            handle_call(&registry, Some(marked.as_object().unwrap()), &db, None)
+                .await
+                .is_err()
+        );
         let plain = serde_json::json!({"tool": "config_manage", "args": {}});
-        assert!(handle_call(&registry, Some(plain.as_object().unwrap()), &db, None).await.is_ok());
+        assert!(
+            handle_call(&registry, Some(plain.as_object().unwrap()), &db, None)
+                .await
+                .is_ok()
+        );
 
         let null_args = serde_json::json!({"tool": "config_manage", "args": null});
         let marked = mark_spawned_session(null_args.as_object(), "hs-1").unwrap();
-        assert_eq!(marked["args"][marker], "hs-1", "null args become an object, not a lost marker");
-        assert!(handle_call(&registry, Some(&marked), &db, None).await.is_err());
+        assert_eq!(
+            marked["args"][marker], "hs-1",
+            "null args become an object, not a lost marker"
+        );
+        assert!(
+            handle_call(&registry, Some(&marked), &db, None)
+                .await
+                .is_err()
+        );
     }
 
     #[tokio::test]
@@ -991,16 +1048,27 @@ mod tests {
 
     #[tokio::test]
     async fn the_attested_session_replaces_anything_the_caller_wrote() {
-        assert_eq!(caller_seen(None, Some("hs-real")).await.as_deref(), Some("hs-real"));
         assert_eq!(
-            caller_seen(Some("hs-victim"), Some("hs-real")).await.as_deref(),
+            caller_seen(None, Some("hs-real")).await.as_deref(),
+            Some("hs-real")
+        );
+        assert_eq!(
+            caller_seen(Some("hs-victim"), Some("hs-real"))
+                .await
+                .as_deref(),
             Some("hs-real")
         );
     }
 
     #[test]
     fn a_session_token_reaches_task_threads_and_nothing_wider() {
-        for denied in ["config_manage", "vault_read", "vault_write_note", "harness_session_spawn", "hq_ask"] {
+        for denied in [
+            "config_manage",
+            "vault_read",
+            "vault_write_note",
+            "harness_session_spawn",
+            "hq_ask",
+        ] {
             assert!(!SESSION_ALLOWLIST.contains(&denied), "{denied}");
         }
         assert!(SESSION_ALLOWLIST.contains(&"task_comment_add"));

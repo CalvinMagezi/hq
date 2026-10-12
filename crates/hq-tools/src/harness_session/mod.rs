@@ -10,21 +10,22 @@
 //! through `host_send`.
 
 pub mod category;
-pub mod dismiss;
 mod coalesce;
+mod control;
+mod cwd;
+pub mod dismiss;
 pub mod handoff;
+mod launch;
 pub mod mission;
+mod origin;
 mod preflight;
 pub mod spec;
 pub mod stack;
 pub mod tools;
-mod control;
-mod cwd;
-mod launch;
-mod origin;
 
 use crate::agent_host::{
-    self, AgentInfo, AgentStatus, AgentHostError, Host, HostBackend, LaunchRequest, Launched, PromptOutcome,
+    self, AgentHostError, AgentInfo, AgentStatus, Host, HostBackend, LaunchRequest, Launched,
+    PromptOutcome,
 };
 use anyhow::{Result, bail};
 use hq_db::Database;
@@ -35,12 +36,12 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::Duration;
 
-use spec::SPECS;
-pub use launch::resume_awaiting;
 pub use category::{HarnessCategory, Purpose};
+pub use launch::resume_awaiting;
+use spec::SPECS;
 pub use spec::{
-    Harness, HarnessSessionSpec, ResumeStrategy, agent_host_config, category_in, category_of, known_harnesses,
-    known_in, names_in, resolve, resolve_in, spec_for,
+    Harness, HarnessSessionSpec, ResumeStrategy, agent_host_config, category_in, category_of,
+    known_harnesses, known_in, names_in, resolve, resolve_in, spec_for,
 };
 
 /// Under the home of the host that runs pi, inside the state directory its sandbox may write.

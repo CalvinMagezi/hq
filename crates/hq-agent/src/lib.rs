@@ -5,6 +5,7 @@ pub mod agents;
 pub(crate) mod backend;
 pub mod bash_policy;
 pub mod bash_sandbox;
+pub mod budget_gate;
 pub mod builder;
 pub(crate) mod callable_agents;
 pub(crate) mod coding;
@@ -15,7 +16,6 @@ pub(crate) mod lsp;
 pub(crate) mod lsp_tools;
 pub(crate) mod middleware_runtime;
 pub mod native_hq;
-pub mod budget_gate;
 pub use hq_tools::usage_forecast;
 pub(crate) mod outcome_sink;
 pub use outcome_sink::dropped_outcomes;
@@ -36,8 +36,6 @@ pub fn install_ledger(db: std::sync::Arc<hq_db::Database>) {
     instruments.set_sink(outcome_sink::DbOutcomeSink::new(db.clone()));
     instruments.set_gate(budget_gate::LedgerBudgetGate::new(
         db,
-        std::sync::Arc::new(|| {
-            hq_core::config::HqConfig::load().ok().map(|c| c.budgets)
-        }),
+        std::sync::Arc::new(|| hq_core::config::HqConfig::load().ok().map(|c| c.budgets)),
     ));
 }

@@ -120,7 +120,11 @@ fn question_json(q: &Question) -> Value {
             let criteria: Map<String, Value> = options
                 .iter()
                 .map(|(label, desc)| {
-                    let desc = if desc.is_empty() { Value::Null } else { json!(desc) };
+                    let desc = if desc.is_empty() {
+                        Value::Null
+                    } else {
+                        json!(desc)
+                    };
                     (label.clone(), desc)
                 })
                 .collect();
@@ -184,14 +188,18 @@ impl DecisionResponse {
     pub fn noul(&self, key: &str) -> Result<f64, DecisionError> {
         match self.answers.get(key) {
             Some(Answer::Noul { noul }) => Ok(*noul),
-            _ => Err(DecisionError::Invalid(format!("no yes/no answer for `{key}`"))),
+            _ => Err(DecisionError::Invalid(format!(
+                "no yes/no answer for `{key}`"
+            ))),
         }
     }
 
     pub fn choice(&self, key: &str) -> Result<&str, DecisionError> {
         match self.answers.get(key) {
             Some(Answer::Choice { choice, .. }) => Ok(choice),
-            _ => Err(DecisionError::Invalid(format!("no choice answer for `{key}`"))),
+            _ => Err(DecisionError::Invalid(format!(
+                "no choice answer for `{key}`"
+            ))),
         }
     }
 
@@ -213,14 +221,19 @@ impl DecisionResponse {
     fn validate(&self, req: &DecisionRequest) -> Result<(), DecisionError> {
         for (key, question) in &req.questions {
             match (&question.kind, self.answers.get(key)) {
-                (QuestionKind::Noul, Some(Answer::Noul { noul })) if (0.0..=1.0).contains(noul) => {}
+                (QuestionKind::Noul, Some(Answer::Noul { noul })) if (0.0..=1.0).contains(noul) => {
+                }
                 (QuestionKind::Choice(options), Some(Answer::Choice { choice, .. }))
                     if options.iter().any(|(label, _)| label == choice) => {}
                 (_, None) => {
-                    return Err(DecisionError::Invalid(format!("missing answer for `{key}`")));
+                    return Err(DecisionError::Invalid(format!(
+                        "missing answer for `{key}`"
+                    )));
                 }
                 _ => {
-                    return Err(DecisionError::Invalid(format!("unusable answer for `{key}`")));
+                    return Err(DecisionError::Invalid(format!(
+                        "unusable answer for `{key}`"
+                    )));
                 }
             }
         }
@@ -350,7 +363,12 @@ impl Decisions {
     /// Runs the question in the background and logs it beside the incumbent's
     /// decision. Never blocks the caller; at most `SHADOW_CONCURRENCY` calls are in
     /// flight and the rest wait for a slot, so a burst is delayed rather than lost.
-    pub fn shadow(self: &Arc<Self>, site: &'static str, request: DecisionRequest, incumbent: Value) {
+    pub fn shadow(
+        self: &Arc<Self>,
+        site: &'static str,
+        request: DecisionRequest,
+        incumbent: Value,
+    ) {
         let this = Arc::clone(self);
         tokio::spawn(async move {
             let Ok(_permit) = this.shadow_slots.clone().acquire_owned().await else {
@@ -480,7 +498,11 @@ mod tests {
             .choice(
                 "urgency",
                 "How urgent?",
-                &[("routine", "newsletters"), ("actionable", ""), ("critical", "outage")],
+                &[
+                    ("routine", "newsletters"),
+                    ("actionable", ""),
+                    ("critical", "outage"),
+                ],
             )
     }
 
@@ -490,7 +512,11 @@ mod tests {
             model: "typesafe/jev-1.13".to_string(),
             credential_env: "UNUSED".to_string(),
         };
-        HttpDecisionProvider::new(route, "test-key".to_string(), Duration::from_millis(timeout_ms))
+        HttpDecisionProvider::new(
+            route,
+            "test-key".to_string(),
+            Duration::from_millis(timeout_ms),
+        )
     }
 
     #[test]
@@ -534,7 +560,10 @@ mod tests {
         let body = request().to_body("typesafe/jev-1.13");
         assert_eq!(body["model"], "typesafe/jev-1.13");
         assert_eq!(body["questions"]["should_interrupt"]["type"], "noul");
-        assert_eq!(body["questions"]["urgency"]["criteria"]["routine"], "newsletters");
+        assert_eq!(
+            body["questions"]["urgency"]["criteria"]["routine"],
+            "newsletters"
+        );
         assert!(body["questions"]["urgency"]["criteria"]["actionable"].is_null());
     }
 
@@ -543,7 +572,10 @@ mod tests {
         let req = DecisionRequest::new("state").choice_or_abstain(
             "route",
             "Which harness fits?",
-            &[("fast", "cheap and quick"), ("careful", "slow and thorough")],
+            &[
+                ("fast", "cheap and quick"),
+                ("careful", "slow and thorough"),
+            ],
             "Neither the task nor the state gives a clear signal.",
         );
         let body = req.to_body("typesafe/jev-1.13");
@@ -551,7 +583,10 @@ mod tests {
             body["questions"]["route"]["criteria"]["unclear"],
             "Neither the task nor the state gives a clear signal."
         );
-        assert_eq!(body["questions"]["route"]["criteria"]["fast"], "cheap and quick");
+        assert_eq!(
+            body["questions"]["route"]["criteria"]["fast"],
+            "cheap and quick"
+        );
     }
 
     #[test]
@@ -564,7 +599,10 @@ mod tests {
         );
 
         let mut picked = choice_response(&req, "route", "fast");
-        assert_eq!(picked.choice_or_abstain("route").unwrap(), ChoiceOrAbstain::Picked("fast"));
+        assert_eq!(
+            picked.choice_or_abstain("route").unwrap(),
+            ChoiceOrAbstain::Picked("fast")
+        );
 
         picked.answers.insert(
             "route".into(),
@@ -574,7 +612,10 @@ mod tests {
                 confidence: 0.4,
             },
         );
-        assert_eq!(picked.choice_or_abstain("route").unwrap(), ChoiceOrAbstain::Unclear);
+        assert_eq!(
+            picked.choice_or_abstain("route").unwrap(),
+            ChoiceOrAbstain::Unclear
+        );
     }
 
     /// Builds a minimal valid response answering only `key` with `choice`, for
@@ -589,7 +630,11 @@ mod tests {
                 confidence: 1.0,
             },
         );
-        let response = DecisionResponse { model: "fake".to_string(), answers, usage: Usage::default() };
+        let response = DecisionResponse {
+            model: "fake".to_string(),
+            answers,
+            usage: Usage::default(),
+        };
         response.validate(req).unwrap();
         response
     }
@@ -609,7 +654,10 @@ mod tests {
             .respond_with(ResponseTemplate::new(200).set_body_string(LIVE_RESPONSE))
             .mount(&server)
             .await;
-        let response = provider_for(&server, 2000).decide(&request()).await.unwrap();
+        let response = provider_for(&server, 2000)
+            .decide(&request())
+            .await
+            .unwrap();
         assert_eq!(response.choice("urgency").unwrap(), "routine");
     }
 
@@ -622,7 +670,10 @@ mod tests {
             ))
             .mount(&server)
             .await;
-        let err = provider_for(&server, 2000).decide(&request()).await.unwrap_err();
+        let err = provider_for(&server, 2000)
+            .decide(&request())
+            .await
+            .unwrap_err();
         assert!(matches!(err, DecisionError::Http(_)));
 
         let bad = MockServer::start().await;
@@ -630,7 +681,10 @@ mod tests {
             .respond_with(ResponseTemplate::new(200).set_body_string("not json"))
             .mount(&bad)
             .await;
-        let err = provider_for(&bad, 2000).decide(&request()).await.unwrap_err();
+        let err = provider_for(&bad, 2000)
+            .decide(&request())
+            .await
+            .unwrap_err();
         assert!(matches!(err, DecisionError::Decode(_)));
 
         let slow = MockServer::start().await;
@@ -642,7 +696,10 @@ mod tests {
             )
             .mount(&slow)
             .await;
-        let err = provider_for(&slow, 100).decide(&request()).await.unwrap_err();
+        let err = provider_for(&slow, 100)
+            .decide(&request())
+            .await
+            .unwrap_err();
         assert!(matches!(err, DecisionError::Http(LlmError::Network(_))));
     }
 

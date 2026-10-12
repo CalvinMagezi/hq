@@ -135,16 +135,41 @@ mod tests {
     #[tokio::test]
     async fn enforce_skips_only_confident_ephemeral_turns_and_logs_both_outcomes() {
         let dir = tempfile::tempdir().unwrap();
-        let low = gate_for(SITE_MEMORY_TURN, DecisionMode::Enforce, Some(0.02), dir.path());
-        assert!(!admit(low.as_ref(), "chat:1", "ok thanks, key sk-abcdefghijklmnopqrstuvwx").await);
+        let low = gate_for(
+            SITE_MEMORY_TURN,
+            DecisionMode::Enforce,
+            Some(0.02),
+            dir.path(),
+        );
+        assert!(
+            !admit(
+                low.as_ref(),
+                "chat:1",
+                "ok thanks, key sk-abcdefghijklmnopqrstuvwx"
+            )
+            .await
+        );
         let log = logged(dir.path());
         assert!(log.contains("\"action\":\"skipped\""));
         assert!(log.contains("\"text_hash\""));
-        assert!(!log.contains("sk-abcdefghijklmnopqrstuvwx"), "excerpt must be redacted");
+        assert!(
+            !log.contains("sk-abcdefghijklmnopqrstuvwx"),
+            "excerpt must be redacted"
+        );
 
-        let ambiguous = gate_for(SITE_MEMORY_TURN, DecisionMode::Enforce, Some(0.4), dir.path());
+        let ambiguous = gate_for(
+            SITE_MEMORY_TURN,
+            DecisionMode::Enforce,
+            Some(0.4),
+            dir.path(),
+        );
         assert!(admit(ambiguous.as_ref(), "chat:1", "maybe a preference").await);
-        let durable = gate_for(SITE_MEMORY_TURN, DecisionMode::Enforce, Some(0.9), dir.path());
+        let durable = gate_for(
+            SITE_MEMORY_TURN,
+            DecisionMode::Enforce,
+            Some(0.9),
+            dir.path(),
+        );
         assert!(admit(durable.as_ref(), "chat:1", "I always deploy on Fridays").await);
         assert!(logged(dir.path()).contains("\"action\":\"admitted\""));
     }
@@ -154,7 +179,12 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let failing = gate_for(SITE_MEMORY_TURN, DecisionMode::Enforce, None, dir.path());
         assert!(admit(failing.as_ref(), "s", "anything").await);
-        let shadow = gate_for(SITE_MEMORY_TURN, DecisionMode::Shadow, Some(0.0), dir.path());
+        let shadow = gate_for(
+            SITE_MEMORY_TURN,
+            DecisionMode::Shadow,
+            Some(0.0),
+            dir.path(),
+        );
         assert!(admit(shadow.as_ref(), "s", "anything").await);
         let off = gate_for(SITE_MEMORY_TURN, DecisionMode::Off, Some(0.0), dir.path());
         assert!(admit(off.as_ref(), "s", "anything").await);

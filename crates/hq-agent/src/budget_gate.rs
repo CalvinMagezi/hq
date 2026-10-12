@@ -63,7 +63,9 @@ impl LedgerBudgetGate {
 
     fn cache(&self) -> std::sync::MutexGuard<'_, Cache> {
         // A panic elsewhere must not turn every later LLM call into a panic.
-        self.cache.lock().unwrap_or_else(std::sync::PoisonError::into_inner)
+        self.cache
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
     }
 
     fn budgets(&self) -> BudgetsConfig {
@@ -102,13 +104,18 @@ impl LedgerBudgetGate {
             return Some(s.clone());
         }
         let (db, b) = (self.db.clone(), budget.clone());
-        let status = tokio::task::spawn_blocking(move || db.with_conn(|c| budget_status(c, &b, now)))
-            .await
-            .map_err(|e| warn!(error = %e, "budget spend read was cancelled"))
-            .ok()?
-            .map_err(|e| warn!(error = %e, budget = %budget.name, "budget spend could not be read"))
-            .ok()?;
-        self.cache().status.insert(key, (Instant::now(), status.clone()));
+        let status =
+            tokio::task::spawn_blocking(move || db.with_conn(|c| budget_status(c, &b, now)))
+                .await
+                .map_err(|e| warn!(error = %e, "budget spend read was cancelled"))
+                .ok()?
+                .map_err(
+                    |e| warn!(error = %e, budget = %budget.name, "budget spend could not be read"),
+                )
+                .ok()?;
+        self.cache()
+            .status
+            .insert(key, (Instant::now(), status.clone()));
         Some(status)
     }
 
@@ -120,7 +127,8 @@ impl LedgerBudgetGate {
             BudgetScope::Provider(p) => p.as_str(),
             BudgetScope::Model(_) | BudgetScope::Origin(_) => return,
         };
-        let pressure = ((status.pct - PRESSURE_STARTS_PCT) / (100.0 - PRESSURE_STARTS_PCT)).clamp(0.0, 1.0);
+        let pressure =
+            ((status.pct - PRESSURE_STARTS_PCT) / (100.0 - PRESSURE_STARTS_PCT)).clamp(0.0, 1.0);
         self.instruments.set_pressure(key, pressure);
     }
 
@@ -128,25 +136,34 @@ impl LedgerBudgetGate {
     fn alert(&self, budget: &Budget, status: &BudgetStatus) {
         let thresholds = budget.soft_pct.iter().copied().chain([FULL_PCT]);
         for t in thresholds.filter(|t| status.pct >= f64::from(*t)) {
-            let first = self
-                .cache
-                .lock()
-                .unwrap()
-                .alerted
-                .insert((budget.name.clone(), status.period_start, t));
+            let first = self.cache.lock().unwrap().alerted.insert((
+                budget.name.clone(),
+                status.period_start,
+                t,
+            ));
             if !first {
                 continue;
             }
             let item = ValueItem::new(
                 "budget",
                 ValueKind::Fyi,
-                format!("Budget '{}' is at {t}% of ${:.2}", budget.name, budget.limit_usd),
+                format!(
+                    "Budget '{}' is at {t}% of ${:.2}",
+                    budget.name, budget.limit_usd
+                ),
                 format!(
                     "${:.2} of the ${:.2} {} limit on {} is spent. Action at the limit: {:?}.",
-                    status.spent_usd, budget.limit_usd, period_word(budget), budget.scope, budget.action
+                    status.spent_usd,
+                    budget.limit_usd,
+                    period_word(budget),
+                    budget.scope,
+                    budget.action
                 ),
             )
-            .with_dedup_key(format!("budget:{}:{}:{t}", budget.name, status.period_start));
+            .with_dedup_key(format!(
+                "budget:{}:{}:{t}",
+                budget.name, status.period_start
+            ));
             let db = self.db.clone();
             tokio::task::spawn_blocking(move || {
                 if let Err(e) = hq_db::value_items::emit(&db, &item) {
@@ -189,7 +206,11 @@ impl BudgetGate for LedgerBudgetGate {
         let cfg = self.budgets();
         let now = chrono::Utc::now().timestamp();
         let mut verdict = Admission::Allow;
-        for budget in cfg.enforceable().into_iter().filter(|b| covers(&b.scope, req)) {
+        for budget in cfg
+            .enforceable()
+            .into_iter()
+            .filter(|b| covers(&b.scope, req))
+        {
             let Some(status) = self.status(budget, now).await else {
                 continue;
             };
@@ -280,13 +301,20 @@ mod tests {
     #[tokio::test]
     async fn under_the_limit_a_call_goes_through() {
         let g = gate(db_with_spend("chat", 1.0), MONTH_BLOCK);
-        assert!(matches!(g.admit(&req("haiku", ProviderClass::Metered, Some(0.01))).await, Admission::Allow));
+        assert!(matches!(
+            g.admit(&req("haiku", ProviderClass::Metered, Some(0.01)))
+                .await,
+            Admission::Allow
+        ));
     }
 
     #[tokio::test]
     async fn a_call_that_would_cross_the_limit_is_blocked_with_the_numbers() {
         let g = gate(db_with_spend("chat", 9.995), MONTH_BLOCK);
-        let Admission::Deny(b) = g.admit(&req("haiku", ProviderClass::Metered, Some(0.02))).await else {
+        let Admission::Deny(b) = g
+            .admit(&req("haiku", ProviderClass::Metered, Some(0.02)))
+            .await
+        else {
             panic!("expected a refusal");
         };
         assert_eq!((b.budget.as_str(), b.limit_usd), ("month", 10.0));
@@ -296,33 +324,53 @@ mod tests {
     #[tokio::test]
     async fn a_call_that_costs_nothing_is_allowed_even_when_the_budget_is_used_up() {
         let g = gate(db_with_spend("chat", 50.0), MONTH_BLOCK);
-        assert!(matches!(g.admit(&req("ollama", ProviderClass::Local, Some(0.0))).await, Admission::Allow));
+        assert!(matches!(
+            g.admit(&req("ollama", ProviderClass::Local, Some(0.0)))
+                .await,
+            Admission::Allow
+        ));
     }
 
     #[tokio::test]
     async fn an_unpriced_model_is_refused_under_a_blocking_budget_unless_allow_listed() {
         let g = gate(db_with_spend("chat", 0.0), MONTH_BLOCK);
-        assert!(matches!(g.admit(&req("haiku", ProviderClass::Metered, None)).await, Admission::Deny(_)));
+        assert!(matches!(
+            g.admit(&req("haiku", ProviderClass::Metered, None)).await,
+            Admission::Deny(_)
+        ));
         let allowed = gate(
             db_with_spend("chat", 0.0),
             &format!("{MONTH_BLOCK}allow_unpriced_models: ['{MODEL}']\n"),
         );
-        assert!(matches!(allowed.admit(&req("haiku", ProviderClass::Metered, None)).await, Admission::Allow));
+        assert!(matches!(
+            allowed
+                .admit(&req("haiku", ProviderClass::Metered, None))
+                .await,
+            Admission::Allow
+        ));
     }
 
     #[tokio::test]
     async fn a_budget_only_binds_the_calls_in_its_scope() {
-        let yaml = "budgets:\n  - {name: mem, scope: 'origin:memory', period: day, limit_usd: 0.5}\n";
+        let yaml =
+            "budgets:\n  - {name: mem, scope: 'origin:memory', period: day, limit_usd: 0.5}\n";
         let g = gate(db_with_spend("memory", 5.0), yaml);
         // Origin 'chat' is outside the memory budget even though memory is over its limit.
-        assert!(matches!(g.admit(&req("haiku", ProviderClass::Metered, Some(0.01))).await, Admission::Allow));
+        assert!(matches!(
+            g.admit(&req("haiku", ProviderClass::Metered, Some(0.01)))
+                .await,
+            Admission::Allow
+        ));
     }
 
     #[tokio::test]
     async fn a_downgrade_budget_moves_the_call_to_the_cheaper_model() {
         let yaml = "budgets:\n  - {name: d, scope: global, period: day, limit_usd: 1, action: downgrade, downgrade_model: cheap/model}\n";
         let g = gate(db_with_spend("chat", 2.0), yaml);
-        match g.admit(&req("haiku", ProviderClass::Metered, Some(0.01))).await {
+        match g
+            .admit(&req("haiku", ProviderClass::Metered, Some(0.01)))
+            .await
+        {
             Admission::Downgrade { model } => assert_eq!(model, "cheap/model"),
             _ => panic!("expected a downgrade"),
         }
@@ -337,7 +385,8 @@ mod tests {
             Arc::new(move || Some(cfg.clone())),
             instruments.clone(),
         );
-        g.admit(&req("haiku", ProviderClass::Metered, Some(0.01))).await;
+        g.admit(&req("haiku", ProviderClass::Metered, Some(0.01)))
+            .await;
         // $7.50 of $10 is 75%: halfway between the 50% start and the limit.
         assert!((instruments.pressure_for("haiku") - 0.5).abs() < 1e-9);
         assert_eq!(hq_llm::Instruments::new().pressure_for("haiku"), 0.0);
@@ -348,11 +397,13 @@ mod tests {
         let db = db_with_spend("chat", 9.0);
         let g = gate(db.clone(), MONTH_BLOCK);
         for _ in 0..3 {
-            g.admit(&req("haiku", ProviderClass::Metered, Some(0.01))).await;
+            g.admit(&req("haiku", ProviderClass::Metered, Some(0.01)))
+                .await;
         }
         // The alert is written on the blocking pool; give it a moment to land.
         tokio::time::sleep(Duration::from_millis(150)).await;
-        let items = hq_db::value_items::list_by_state(&db, hq_core::types::ValueState::Pending).unwrap();
+        let items =
+            hq_db::value_items::list_by_state(&db, hq_core::types::ValueState::Pending).unwrap();
         let titles: Vec<&str> = items.iter().map(|i| i.title.as_str()).collect();
         assert_eq!(titles.len(), 1, "{titles:?}");
         assert!(titles[0].contains("80%"));
@@ -367,13 +418,22 @@ mod tests {
             db_with_spend("chat", 50.0),
             Arc::new(move || {
                 // The first read works; every later one fails.
-                (counter.fetch_add(1, std::sync::atomic::Ordering::SeqCst) == 0).then(|| cfg.clone())
+                (counter.fetch_add(1, std::sync::atomic::Ordering::SeqCst) == 0)
+                    .then(|| cfg.clone())
             }),
         );
-        assert!(matches!(g.admit(&req("haiku", ProviderClass::Metered, Some(0.01))).await, Admission::Deny(_)));
+        assert!(matches!(
+            g.admit(&req("haiku", ProviderClass::Metered, Some(0.01)))
+                .await,
+            Admission::Deny(_)
+        ));
         // Force the next call to reload.
         g.cache().config = None;
-        assert!(matches!(g.admit(&req("haiku", ProviderClass::Metered, Some(0.01))).await, Admission::Deny(_)));
+        assert!(matches!(
+            g.admit(&req("haiku", ProviderClass::Metered, Some(0.01)))
+                .await,
+            Admission::Deny(_)
+        ));
         assert_eq!(reads.load(std::sync::atomic::Ordering::SeqCst), 2);
     }
 }

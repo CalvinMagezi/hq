@@ -229,7 +229,8 @@ async fn mount_general(server: &MockServer, ddg_status: u16) {
     Mock::given(method("GET"))
         .and(path("/search"))
         .respond_with(
-            ResponseTemplate::new(200).set_body_string(include_str!("fixtures/mojeek-results.html")),
+            ResponseTemplate::new(200)
+                .set_body_string(include_str!("fixtures/mojeek-results.html")),
         )
         .mount(server)
         .await;
@@ -2149,13 +2150,21 @@ async fn the_pool_stops_waiting_for_slow_engines_once_google_has_answered() {
     };
     Mock::given(method("POST"))
         .and(path("/html/"))
-        .respond_with(ResponseTemplate::new(200).set_body_string(DDG_HTML).set_delay(slow))
+        .respond_with(
+            ResponseTemplate::new(200)
+                .set_body_string(DDG_HTML)
+                .set_delay(slow),
+        )
         .mount(&server)
         .await;
     Mock::given(method("GET"))
         .and(path("/search"))
         .and(query_param("source", "web"))
-        .respond_with(ResponseTemplate::new(200).set_body_string(BRAVE_HTML).set_delay(slow))
+        .respond_with(
+            ResponseTemplate::new(200)
+                .set_body_string(BRAVE_HTML)
+                .set_delay(slow),
+        )
         .mount(&server)
         .await;
     mount_wikipedia_missing(&server).await;
@@ -2167,10 +2176,21 @@ async fn the_pool_stops_waiting_for_slow_engines_once_google_has_answered() {
         native_engine: Duration::from_secs(2),
         brave: Duration::from_millis(400),
     };
-    let r = search_chain("straggler grace query", &SearchOptions::default(), None, None, Some(&patient), &budgets)
-        .await
-        .unwrap();
-    assert!(started.elapsed() < Duration::from_millis(1000), "{:?}", started.elapsed());
+    let r = search_chain(
+        "straggler grace query",
+        &SearchOptions::default(),
+        None,
+        None,
+        Some(&patient),
+        &budgets,
+    )
+    .await
+    .unwrap();
+    assert!(
+        started.elapsed() < Duration::from_millis(1000),
+        "{:?}",
+        started.elapsed()
+    );
     assert_eq!(r.results[0].engines, ["google cse"]);
 }
 
@@ -2216,8 +2236,14 @@ async fn mojeek_solves_its_challenge_once_and_reuses_the_cookie() {
     }
     let reqs = server.received_requests().await.unwrap();
     let count = |p: &str| reqs.iter().filter(|r| r.url.path() == p).count();
-    assert_eq!((count("/captcha/verify"), count("/captcha/challenge")), (1, 1));
-    let verify = reqs.iter().find(|r| r.url.path() == "/captcha/verify").unwrap();
+    assert_eq!(
+        (count("/captcha/verify"), count("/captcha/challenge")),
+        (1, 1)
+    );
+    let verify = reqs
+        .iter()
+        .find(|r| r.url.path() == "/captcha/verify")
+        .unwrap();
     let body = String::from_utf8_lossy(&verify.body);
     assert!(body.contains("name=\"altcha\""), "{body}");
 }
@@ -2238,9 +2264,7 @@ async fn mojeek_that_keeps_challenging_is_a_captcha_failure_not_empty_results() 
         .await;
     Mock::given(method("POST"))
         .and(path("/captcha/verify"))
-        .respond_with(
-            ResponseTemplate::new(200).insert_header("set-cookie", "chllg=tok; Path=/"),
-        )
+        .respond_with(ResponseTemplate::new(200).insert_header("set-cookie", "chllg=tok; Path=/"))
         .mount(&server)
         .await;
     let err = Engine::Mojeek
@@ -2295,18 +2319,33 @@ async fn crossref_identifies_itself_and_asks_only_for_the_fields_it_reads() {
         .mount(&server)
         .await;
     let body = Engine::Crossref
-        .fetch(test_client(), &server.uri(), "protein folding", &SearchOptions::default())
+        .fetch(
+            test_client(),
+            &server.uri(),
+            "protein folding",
+            &SearchOptions::default(),
+        )
         .await
         .unwrap();
     assert!(Engine::Crossref.parse(&body).unwrap().is_empty());
     let reqs = server.received_requests().await.unwrap();
-    let ua = reqs[0].headers.get("user-agent").unwrap().to_str().unwrap().to_string();
+    let ua = reqs[0]
+        .headers
+        .get("user-agent")
+        .unwrap()
+        .to_str()
+        .unwrap()
+        .to_string();
     assert!(ua.starts_with("HQ-Agent/"), "{ua}");
 }
 
 #[test]
 fn an_exact_title_match_outranks_a_loosely_related_hit_from_an_earlier_list() {
-    let loose = hit("https://arxiv.example/1", "does attention need you", "arxiv");
+    let loose = hit(
+        "https://arxiv.example/1",
+        "does attention need you",
+        "arxiv",
+    );
     let exact = SearchResult {
         title: "Attention Is All You Need".into(),
         ..hit("https://openalex.example/2", "", "openalex")

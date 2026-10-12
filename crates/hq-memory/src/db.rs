@@ -4,9 +4,7 @@
 use anyhow::Result;
 use hq_db::Database;
 
-use crate::types::{
-    Connection as MemConnection, Consolidation, Memory, MemoryStats,
-};
+use crate::types::{Connection as MemConnection, Consolidation, Memory, MemoryStats};
 
 // ─── Row parsing ────────────────────────────────────────────────────
 

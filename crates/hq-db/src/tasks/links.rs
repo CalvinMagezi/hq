@@ -1,6 +1,10 @@
 use super::*;
 
-pub(super) fn resolve_pair(conn: &Connection, task: &str, depends_on: &str) -> Result<(Task, Task)> {
+pub(super) fn resolve_pair(
+    conn: &Connection,
+    task: &str,
+    depends_on: &str,
+) -> Result<(Task, Task)> {
     let dependent =
         get_task(conn, task)?.ok_or_else(|| anyhow::anyhow!("task {task} not found"))?;
     let blocker = get_task(conn, depends_on)?
@@ -29,8 +33,14 @@ pub fn add_dependency(
     if dependent.id == blocker.id {
         anyhow::bail!("a task cannot depend on itself");
     }
-    if let Some(archived) = [&dependent, &blocker].into_iter().find(|t| t.archived_at.is_some()) {
-        anyhow::bail!("{} is archived; restore it before linking it to other tasks", archived.display_id);
+    if let Some(archived) = [&dependent, &blocker]
+        .into_iter()
+        .find(|t| t.archived_at.is_some())
+    {
+        anyhow::bail!(
+            "{} is archived; restore it before linking it to other tasks",
+            archived.display_id
+        );
     }
     let closes_cycle: bool = conn
         .query_row(
@@ -115,7 +125,6 @@ pub fn newly_unblocked(conn: &Connection, completed_task_id: &str) -> Result<Vec
         completed_task_id,
     )
 }
-
 
 /// `created_at` is settable (defaults to now) so the migration can preserve
 /// original ClickUp comment timestamps instead of stamping import time.

@@ -21,10 +21,7 @@ pub async fn run_usage_ledger(db: &Database, config: &HqConfig) -> Result<()> {
             "usage ledger: folded old rows into daily totals"
         );
     }
-    let (dropped, unscoped) = (
-        hq_agent::dropped_outcomes(),
-        hq_llm::unscoped_calls(),
-    );
+    let (dropped, unscoped) = (hq_agent::dropped_outcomes(), hq_llm::unscoped_calls());
     if dropped > 0 || unscoped > 0 {
         warn!(
             dropped,
