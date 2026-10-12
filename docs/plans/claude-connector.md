@@ -379,6 +379,30 @@ A real claude.ai account added it, connected, listed the tool and called it.
 - **Not tested:** DCR (not needed in the first cut) and HQ's current fixed `2024-11-05` answer
   (slice 1 replaces it with an echo).
 
+## End-to-end run
+
+On 2026-10-12, a build of slices 1 to 5 ran on a test instance with a throwaway vault: the public
+side behind a Cloudflare quick tunnel, the consent page on a tailnet origin. A real claude.ai
+account added it as a custom connector.
+
+- The connect flow ran as designed: Claude reached the tailnet consent page through the
+  metadata, an approval that arrived after the window closed was refused ("no longer accepting
+  connections"), and after re-arming the owner approved Full access and Claude connected.
+  Approving closed the window and sent the "Claude is connected to HQ" notice.
+- A claude.ai chat then ran `hq_discover`, read a note, and filed a task, which HQ attributed to
+  `mcp:connector/Claude` though Claude passed another name. Its `vault_delete` came back
+  "waiting for the owner"; the inbox showed the exact path; after the owner approved, the
+  identical call ran and moved the note to `_trash/`. The call log held every call and outcome.
+- **Disconnect all** revoked the grant, and Claude's next call ended in "Reconnect a connector to
+  keep using it".
+
+It found three defects, all fixed in the same PR: the PWA's service worker answered
+`/oauth/authorize` with the cached app shell (the redirect looks like a failed response to a
+worker), Settings kept showing an expired window as open, and the test server needed a restart
+after a web rebuild (the content-security-policy hashes are read at startup, as documented).
+`hq_discover` with no filter returns about 126k characters to Claude, which it truncates; that
+affects every client and is tracked separately.
+
 ## Sources
 
 - Authentication for connectors: https://claude.com/docs/connectors/building/authentication
