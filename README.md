@@ -24,7 +24,7 @@
 
 ---
 
-Agent-HQ (HQ for short) puts one AI agent on every channel you use (Discord, Telegram, a web UI that installs as a PWA, the terminal) and keeps all your data in a markdown vault on your filesystem. Coding agents such as Claude Code, Codex CLI or OpenCode run as supervised harness sessions inside its built-in host (`hq host`).
+Agent-HQ (HQ for short) puts one AI agent on every channel you use (Discord, Telegram, a web UI that installs as a PWA, the terminal) and keeps all your data in a markdown vault on your filesystem. Coding agents such as Claude Code, Codex CLI or OpenCode run as supervised harness sessions inside its built-in host (`hq host`), and so can personal agents such as Hermes and OpenClaw, sandboxed and kept away from code ([guide](docs/PERSONAL_AGENTS.md)).
 
 No cloud backend. No vendor lock-in. One binary of about 58 MB.
 
@@ -657,6 +657,7 @@ Read [`SECURITY.md`](SECURITY.md) for the policy and how to report a vulnerabili
 | Deploying to a server | [`deploy/README.md`](deploy/README.md) |
 | Signed updates | [`docs/UPDATE_SYSTEM.md`](docs/UPDATE_SYSTEM.md) |
 | Coding-agent sessions | [`docs/AGENT_HOST.md`](docs/AGENT_HOST.md), [`docs/AGENT_SESSIONS.md`](docs/AGENT_SESSIONS.md) |
+| Personal agents (Hermes, OpenClaw) | [`docs/PERSONAL_AGENTS.md`](docs/PERSONAL_AGENTS.md) |
 | Windows (WSL2) | [`docs/WINDOWS.md`](docs/WINDOWS.md) |
 | Adding a machine that runs coding agents | [`docs/JOIN_A_MACHINE.md`](docs/JOIN_A_MACHINE.md) |
 | Asking HQ from MCP clients | [`docs/MCP_ASK.md`](docs/MCP_ASK.md) |

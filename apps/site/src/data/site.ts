@@ -18,6 +18,7 @@ export const links = {
   firstRunDocs: `${REPO_BLOB}/docs/FIRST_RUN.md`,
   updateSystem: `${REPO_BLOB}/docs/UPDATE_SYSTEM.md`,
   agentSessions: `${REPO_BLOB}/docs/AGENT_SESSIONS.md`,
+  personalAgents: `${REPO_BLOB}/docs/PERSONAL_AGENTS.md`,
   windows: `${REPO_BLOB}/docs/WINDOWS.md`,
   joinMachine: `${REPO_BLOB}/docs/JOIN_A_MACHINE.md`,
   mcpAsk: `${REPO_BLOB}/docs/MCP_ASK.md`,
