@@ -374,14 +374,14 @@ pub fn scan(db: &Database, home: &Path) -> Result<ScanReport> {
         &home.join(".local/share/opencode/opencode.db"),
         &sessions,
         &mut report,
-        |conn, after| read_opencode(conn, after),
+        read_opencode,
     )?;
     scan_sqlite(
         db,
         &home.join(".copilot/session-store.db"),
         &sessions,
         &mut report,
-        |conn, after| read_copilot(conn, after),
+        read_copilot,
     )?;
     Ok(report)
 }
