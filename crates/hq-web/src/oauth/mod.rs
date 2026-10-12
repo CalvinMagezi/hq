@@ -136,7 +136,9 @@ mod tests {
             public_url: Some("https://hq.example.com".into()),
             authorize_url: None,
         };
-        let mut state = WsState::new(vault.path().to_path_buf(), None);
+        // Pinned, not read from the machine: CI runs this under an ambient Lite profile.
+        let mut state = WsState::new(vault.path().to_path_buf(), None)
+            .with_profile(hq_core::config::Profile::Full);
         assert!(
             state
                 .configure_connector(&cfg)
