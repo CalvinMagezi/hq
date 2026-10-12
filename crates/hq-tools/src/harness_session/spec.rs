@@ -180,12 +180,14 @@ pub const SPECS: &[HarnessSessionSpec] = &[
         harness: "hermes",
         category: HarnessCategory::GeneralPurpose,
         kind: "hermes",
-        // Nous Research's Hermes Agent: `hermes chat` is its interactive loop,
-        // `hermes chat -q` answers one query and exits.
+        // Nous Research's Hermes Agent: `hermes chat` is its interactive loop.
+        // On a TTY (a host pane is one) `hermes chat -q` stays open after its
+        // answer; `--oneshot` makes it exit, and it skips the first-run
+        // telemetry dialog.
         args: &["chat"],
         resume: ResumeStrategy::None,
         token_pattern: None,
-        one_shot: Some(&["chat", "-q", "{brief}"]),
+        one_shot: Some(&["chat", "--oneshot", "-q", "{brief}"]),
         trust_pattern: None,
     },
     HarnessSessionSpec {
@@ -193,11 +195,14 @@ pub const SPECS: &[HarnessSessionSpec] = &[
         category: HarnessCategory::GeneralPurpose,
         kind: "openclaw",
         // OpenClaw's terminal interface; `openclaw agent --message` is the
-        // one-turn form its own automations use.
-        args: &["tui"],
+        // one-turn form its own automations use. Both talk to a gateway on
+        // loopback by default, which the sandbox refuses, so `--local` runs the
+        // agent in process. OpenClaw refuses `--local` while a gateway runs for
+        // the same state directory, so an HQ host does not run that daemon.
+        args: &["tui", "--local"],
         resume: ResumeStrategy::None,
         token_pattern: None,
-        one_shot: Some(&["agent", "--message", "{brief}"]),
+        one_shot: Some(&["agent", "--local", "--message", "{brief}"]),
         trust_pattern: None,
     },
 ];
@@ -416,6 +421,7 @@ mod tests {
         assert!(names_in(HarnessCategory::Coding).contains(&"claude-code"));
         assert_eq!(spec_for("hermes").unwrap().binary(), "hermes");
         assert_eq!(spec_for("hermes").unwrap().args, &["chat"]);
+        assert_eq!(spec_for("openclaw").unwrap().args, &["tui", "--local"]);
         assert_eq!(resolve_in(&AgentHostConfig::default(), "openclaw").unwrap().category(), HarnessCategory::GeneralPurpose);
         // A profile takes its base's category.
         let cfg = cfg_with_profile("  hermes-work:\n    base: hermes\n    command: hermes-work\n");
@@ -425,10 +431,10 @@ mod tests {
     #[test]
     fn one_shot_args_substitute_the_brief_and_a_profile_can_replace_them() {
         let hermes = resolve_in(&AgentHostConfig::default(), "hermes").unwrap();
-        assert_eq!(hermes.one_shot_args("do x").unwrap(), vec!["chat", "-q", "do x"]);
+        assert_eq!(hermes.one_shot_args("do x").unwrap(), vec!["chat", "--oneshot", "-q", "do x"]);
         assert_eq!(
             resolve_in(&AgentHostConfig::default(), "openclaw").unwrap().one_shot_args("b").unwrap(),
-            vec!["agent", "--message", "b"]
+            vec!["agent", "--local", "--message", "b"]
         );
         assert!(resolve_in(&AgentHostConfig::default(), "claude-code").unwrap().one_shot_args("b").is_none());
         let cfg = cfg_with_profile("  my-hermes:\n    base: hermes\n    one_shot_args: [\"run\", \"--once\", \"{brief}\"]\n");
