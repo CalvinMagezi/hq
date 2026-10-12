@@ -8,11 +8,15 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Duration;
 
-/// Most agents a served host runs or holds at once. Several times what one
-/// person's sessions have needed, low enough that a runaway is bounded.
-const DEFAULT_MAX_AGENTS: usize = 16;
-/// Most agents started within `BURST_WINDOW` before the host locks itself.
-const DEFAULT_MAX_STARTS: usize = 10;
+/// Most agents a served host runs or holds at once. Room for a few parents
+/// each running a full set of delegated children, low enough that a runaway is
+/// bounded.
+const DEFAULT_MAX_AGENTS: usize = 64;
+/// Most agents started within `BURST_WINDOW` before the host locks itself. A
+/// parent filling every child slot at once must not trip it.
+const DEFAULT_MAX_STARTS: usize = 50;
+const _: () = assert!(DEFAULT_MAX_AGENTS > hq_tools::a2a::MAX_LIVE_CHILDREN);
+const _: () = assert!(DEFAULT_MAX_STARTS > hq_tools::a2a::MAX_LIVE_CHILDREN);
 const BURST_WINDOW: Duration = Duration::from_secs(10 * 60);
 /// The host directory's mode, as `hq host serve` creates it.
 const PRIVATE_DIR_MODE: u32 = 0o700;

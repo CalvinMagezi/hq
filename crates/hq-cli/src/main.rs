@@ -119,10 +119,10 @@ enum Commands {
         /// serve only: also start agents that are not under the process sandbox. Without it the host refuses them, whoever asks.
         #[arg(long)]
         allow_unsandboxed: bool,
-        /// serve only: most agents running or waiting at once (default 16)
+        /// serve only: most agents running or waiting at once (default 64)
         #[arg(long)]
         max_agents: Option<usize>,
-        /// serve only: most agents started within 10 minutes before the host locks itself (default 10)
+        /// serve only: most agents started within 10 minutes before the host locks itself (default 50)
         #[arg(long)]
         max_starts: Option<usize>,
         /// authorize only: the ssh public key to pin to `hq host gate`

@@ -55,8 +55,8 @@ The worker always runs as the delegator's own agent, so it can never spend a
 different account's credit than the one the delegator is on. Delegations are taken one at a time, so two calls
 cannot both pass the limits before either worker exists.
 
-Limits: the chain is at most 2 levels deep, a session may have 3 children running
-at once, and may start 10 in an hour. Stopping a session stops the sessions
+Limits: the chain is at most 2 levels deep, a session may have 20 children running
+at once, and may start 60 in an hour. Stopping a session stops the sessions
 started for it, and theirs.
 
 ## What is checked, and what is cleaned

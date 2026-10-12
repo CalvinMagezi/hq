@@ -22,6 +22,9 @@ use super::types::{
     ChildExecContext, ChildMode, ChildOutcome, ChildPlan, ChildRequest, ChildStatus,
 };
 
+/// Children run at once when the caller does not say.
+const DEFAULT_MAX_CONCURRENT: u64 = 20;
+
 /// Native tool wrapping [`AgentService`] as the primary delegation surface.
 pub struct SpawnSubagentsTool {
     service: Arc<AgentService>,
@@ -90,7 +93,7 @@ impl AgentTool for SpawnSubagentsTool {
                 },
                 "max_concurrent": {
                     "type": "integer",
-                    "default": 3,
+                    "default": DEFAULT_MAX_CONCURRENT,
                     "description": "Max children running at once (parallel/graph)."
                 },
                 "blocking": {
@@ -122,7 +125,7 @@ impl AgentTool for SpawnSubagentsTool {
         let max_concurrent = args
             .get("max_concurrent")
             .and_then(|v| v.as_u64())
-            .unwrap_or(3)
+            .unwrap_or(DEFAULT_MAX_CONCURRENT)
             .max(1) as usize;
 
         // Resolve mode: explicit when given, else inferred.
