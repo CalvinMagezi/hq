@@ -103,6 +103,8 @@ pub(crate) const CLIENT_HEADER: &str = "x-hq-client";
 const SESSION_API_PREFIX: &str = "/api/harness-sessions/";
 /// First-run setup writes a credential, so its POSTs need the header too.
 const SETUP_API_PREFIX: &str = "/api/setup/";
+/// Approving a claude.ai connection, arming and revoking grant or end remote access.
+const OAUTH_API_PREFIX: &str = "/api/oauth/";
 
 /// Endpoints that type into or take over a session. `drive`, `goal` and `unwatch` predate the
 /// header and must keep working for a cached PWA that does not send it yet.
@@ -122,7 +124,8 @@ pub(crate) fn missing_client_header(method: &Method, path: &str, has_header: boo
     let guarded = guarded
         || path == SPAWN_API_PATH
         || path.starts_with(WORKBENCH_API_PREFIX)
-        || path.starts_with(SETUP_API_PREFIX);
+        || path.starts_with(SETUP_API_PREFIX)
+        || path.starts_with(OAUTH_API_PREFIX);
     guarded && !matches!(*method, Method::GET | Method::HEAD | Method::OPTIONS) && !has_header
 }
 
@@ -314,6 +317,20 @@ mod tests {
         assert!(!missing_client_header(
             &Method::GET,
             "/api/setup/status",
+            false
+        ));
+        for path in [
+            "/api/oauth/requests/r1/approve",
+            "/api/oauth/connector/arm",
+            "/api/oauth/connector/off",
+            "/api/oauth/grants/g1/revoke",
+        ] {
+            assert!(post(path, false), "{path} without the header");
+            assert!(!post(path, true), "{path} with the header");
+        }
+        assert!(!missing_client_header(
+            &Method::GET,
+            "/api/oauth/requests/r1",
             false
         ));
         assert!(!post("/api/tasks", false), "other routes are unchanged");

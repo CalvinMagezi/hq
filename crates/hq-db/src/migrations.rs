@@ -317,6 +317,10 @@ const MIGRATIONS: &[(&str, &str)] = &[
         "086_harness_session_purpose",
         include_str!("../sql/086_harness_session_purpose.sql"),
     ),
+    (
+        "087_mcp_connector",
+        include_str!("../sql/087_mcp_connector.sql"),
+    ),
 ];
 
 const MEMORY_SCHEMA_MIGRATION: &str = "058_memory_schema";

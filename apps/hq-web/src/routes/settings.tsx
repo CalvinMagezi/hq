@@ -1,5 +1,5 @@
 import { createFileRoute } from '@tanstack/react-router'
-import { useQuery } from '@tanstack/react-query'
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useMemo, type ReactNode } from 'react'
 import { AlertCircle, Loader2, RefreshCw } from 'lucide-react'
 import { fetchSettings, formatSeconds, type HqSettings } from '~/lib/settingsApi'
@@ -7,6 +7,17 @@ import { relTime } from '~/lib/time'
 import { availableTimeZones, deviceTimeZone, setClockZone, useClockZone, zoneCity } from '~/lib/clock'
 import { formatUsd, openrouterUsageQuery } from '~/lib/openrouterUsageApi'
 import { forecastQuery } from '~/lib/usageApi'
+import {
+  SCOPE_CHOICES,
+  armConnector,
+  clockTime,
+  connectorOff,
+  disarmConnector,
+  fetchConnector,
+  revokeGrant,
+  unixToMs,
+  type ConnectorGrant,
+} from '~/lib/connectorApi'
 import {
   copilotUsageQuery,
   exhaustionText,
@@ -190,6 +201,79 @@ function CodingAgentsSection({ host: h }: { host: HqSettings['agent_host'] }) {
   )
 }
 
+const CONNECTOR_QUERY_KEY = ['oauth-connector']
+const scopeTitle = (id: string) => SCOPE_CHOICES.find((s) => s.id === id)?.title ?? id
+
+/** Small text button that runs one connector action. */
+function ActionButton({ busy, onClick, children }: { busy: boolean; onClick: () => void; children: ReactNode }) {
+  return (
+    <button type="button" onClick={onClick} disabled={busy} className="hq-btn-ghost disabled:opacity-40">
+      {children}
+    </button>
+  )
+}
+
+function GrantRow({ grant, onRevoke, busy }: { grant: ConnectorGrant; onRevoke: () => void; busy: boolean }) {
+  const used = grant.last_used_at === null ? 'never used' : `used ${relTime(unixToMs(grant.last_used_at))}`
+  return (
+    <Row label={`${grant.label} (${grant.client_name})`}>
+      <span className="inline-flex flex-wrap items-baseline justify-end gap-x-3 gap-y-1">
+        <span>{scopeTitle(grant.grant_scope)} · {used}</span>
+        <ActionButton busy={busy} onClick={onRevoke}>Disconnect</ActionButton>
+      </span>
+    </Row>
+  )
+}
+
+/** The claude.ai connector: where Claude reaches HQ, the window for a new connection, and who is connected. */
+function ConnectorSection() {
+  const client = useQueryClient()
+  const { data } = useQuery({ queryKey: CONNECTOR_QUERY_KEY, queryFn: fetchConnector })
+  const act = useMutation({
+    mutationFn: (run: () => Promise<unknown>) => run(),
+    onSettled: () => client.invalidateQueries({ queryKey: CONNECTOR_QUERY_KEY }),
+  })
+  if (!data) return null
+  if (!data.enabled) {
+    return (
+      <Section id="connector" title="Claude connector">
+        <Row label="Status"><Flag on={false} /></Row>
+        <Row label="Turn on" block>Set mcp_connector.enabled and mcp_connector.public_url in the config, then restart HQ.</Row>
+      </Section>
+    )
+  }
+  const busy = act.isPending
+  const disconnectAll = () => {
+    if (window.confirm('Disconnect every Claude client from this HQ?')) act.mutate(connectorOff)
+  }
+  return (
+    <Section id="connector" title="Claude connector">
+      <Row label="Connector URL"><span className="font-mono text-xs select-all">{data.url}</span></Row>
+      <Row label="New connections">
+        {data.armed_until === null ? (
+          <ActionButton busy={busy} onClick={() => act.mutate(() => armConnector())}>Allow a new connection</ActionButton>
+        ) : (
+          <span className="inline-flex flex-wrap items-baseline justify-end gap-x-3 gap-y-1">
+            <span>Open until {clockTime(data.armed_until)}</span>
+            <ActionButton busy={busy} onClick={() => act.mutate(disarmConnector)}>Close</ActionButton>
+          </span>
+        )}
+      </Row>
+      {data.armed_until !== null && (
+        <Row label="Next step" block>In Claude, open Settings, then Connectors, add a custom connector with the URL above and press Connect. Approve it on the page that opens.</Row>
+      )}
+      {data.grants.length === 0 && <Row label="Connected">nobody</Row>}
+      {data.grants.map((g) => (
+        <GrantRow key={g.id} grant={g} busy={busy} onRevoke={() => act.mutate(() => revokeGrant(g.id))} />
+      ))}
+      {data.grants.length > 0 && (
+        <Row label="Disconnect everything"><ActionButton busy={busy} onClick={disconnectAll}>Disconnect all</ActionButton></Row>
+      )}
+      {act.error && <Row label="Error" block>{act.error instanceof Error ? act.error.message : 'That did not work.'}</Row>}
+    </Section>
+  )
+}
+
 /** The header clock's zone. Kept on this device, so a phone and a laptop can each have their own. */
 function ClockSection() {
   const pinned = useClockZone()
@@ -244,6 +328,7 @@ function SettingsBody({ s }: { s: HqSettings }) {
         <Row label="Allowed web origins">{s.safety.web_allowed_origins.length ? s.safety.web_allowed_origins.join(', ') : 'none'}</Row>
       </Section>
       <CodingAgentsSection host={s.agent_host} />
+      <ConnectorSection />
       <Section id="integrations" title="Integrations">
         {s.integrations.remote_mcp.length === 0 && <Row label="Remote MCP servers">none</Row>}
         {s.integrations.remote_mcp.map((m) => (
@@ -265,6 +350,7 @@ const NAV = [
   ['limits', 'Limits'],
   ['safety', 'Safety'],
   ['agents', 'Coding agents'],
+  ['connector', 'Claude connector'],
   ['integrations', 'Integrations'],
 ] as const
 
@@ -276,7 +362,7 @@ function SettingsPage() {
         <header className="flex items-start justify-between gap-4 mb-6">
           <div>
             <h1 className="text-3xl font-semibold tracking-tight text-neutral-50" style={{ fontFamily: 'var(--font-heading)' }}>Settings</h1>
-            <p className="mt-1 text-sm text-neutral-400 max-w-prose">The clock zone is yours to set. Everything else is a read-only view of the running HQ configuration, and secrets are never shown.</p>
+            <p className="mt-1 text-sm text-neutral-400 max-w-prose">The clock zone is yours to set. The Claude connector can be managed here too. Everything else is a read-only view of the running HQ configuration, and secrets are never shown.</p>
           </div>
           <button type="button" onClick={() => refetch()} className="hq-icon-btn" aria-label="Reload settings" title="Reload settings">
             <RefreshCw className={`w-4 h-4 ${isFetching ? 'animate-spin' : ''}`} />

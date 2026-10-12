@@ -6,6 +6,7 @@ pub mod chat;
 pub mod copilot_usage_samples;
 pub mod harness_drive_gate;
 pub mod harness_sessions_registry;
+pub mod mcp_connector;
 pub mod migrations;
 pub mod pool;
 pub mod search;

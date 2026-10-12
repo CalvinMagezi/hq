@@ -9,6 +9,7 @@ static GLOBAL: mimalloc::MiMalloc = mimalloc::MiMalloc;
 
 mod commands;
 mod render;
+use commands::connector::ConnectorAction;
 use commands::queue::QueueAction;
 use commands::skills::SkillsAction;
 
@@ -518,6 +519,10 @@ enum Commands {
     /// List/clear the value-bus notification queue
     #[command(alias = "q", subcommand)]
     Queue(QueueAction),
+
+    /// The claude.ai connector: status, allow a new connection, revoke clients
+    #[command(subcommand)]
+    Connector(ConnectorAction),
 
     /// Show what the structured-decision gates did (counts, scores, cost, what was hidden)
     Decisions {
@@ -1054,6 +1059,7 @@ async fn dispatch(command: Commands, config: &HqConfig) -> Result<()> {
         Commands::Shortcuts { sub } => commands::shortcuts::run(config, &sub).await,
         Commands::Skills(action) => commands::skills::run(config, action).await,
         Commands::Queue(action) => commands::queue::run(config, action).await,
+        Commands::Connector(action) => commands::connector::run(config, action),
         Commands::Decisions { days, site } => {
             commands::decisions::run(config, days, site.as_deref())
         }

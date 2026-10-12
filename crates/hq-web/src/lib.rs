@@ -73,7 +73,7 @@ pub struct WsState {
     /// Single-use tickets for opening `/ws` when a web token is set.
     pub(crate) ws_tickets: Arc<auth::WsTickets>,
     /// The claude.ai connector's origins, when `mcp_connector` is on and valid.
-    pub(crate) connector: Option<hq_core::config::ConnectorOrigins>,
+    pub(crate) connector: Option<hq_core::config::ConnectorSettings>,
     /// Abort handles for in-flight chat turns, keyed by thread id. A "stop"
     /// WS message aborts the turn's driver task, which drops the harness
     /// stream and finalizes the turn.
@@ -153,7 +153,7 @@ impl WsState {
         if cfg.enabled && self.profile().is_lite() {
             return Err("mcp_connector is not available under profile: lite".into());
         }
-        self.connector = cfg.origins(self.web_auth_token.as_deref())?;
+        self.connector = cfg.settings(self.web_auth_token.as_deref())?;
         Ok(())
     }
 
