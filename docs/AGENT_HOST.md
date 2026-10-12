@@ -173,14 +173,44 @@ when that is not possible. The agent:
   tool installs, shell and git configuration, caches, and `agent_host.sandbox.readable`),
   and cannot write `~/.claude.json`: the host records trust for the project
   itself, so the agent cannot plant an MCP server command there;
-- can connect only to its own egress proxy and the agent socket (`agent.sock`,
+- can connect only to its own egress proxy, the agent socket (`agent.sock`,
   pane tokens only, with its own connection limits, so an agent cannot crowd the
-  operator off `host.sock`). The proxy allows
+  operator off `host.sock`) and any `agent_host.sandbox.loopback_ports` (below). The proxy allows
   `api.anthropic.com`, the HQ MCP endpoint and `agent_host.sandbox.allow_domains`,
   resolves names itself, and refuses private, loopback and link-local addresses
-  unless the endpoint is the MCP one. A tunnel must open with a TLS hello naming
+  unless the endpoint is the MCP one or a listed loopback port. A tunnel must open with a TLS hello naming
   the host it asked for. Every decision is logged
   (`agent.egress`); a denied host shows up there so you can add it.
+
+Two opt-in settings widen this for one machine's own needs:
+
+```yaml
+agent_host:
+  sandbox:
+    # A local model server and the adb server on the agent's machine.
+    loopback_ports: [11434, 5037]
+    # Only Claude Code may read gh's configuration, and never write it.
+    agent_readable:
+      claude: ["/home/alice/.config/gh"]
+```
+
+`loopback_ports` lets an agent reach those ports on its own machine. A client
+that sends loopback requests to the proxy (curl does) gets there through it as
+plain HTTP, logged like any other request, on every platform. On macOS the sandbox also allows a
+direct connection of any protocol to exactly those ports, which is what adb and
+clients that ignore `HTTPS_PROXY` (Dart's `HttpClient`) need. Under bubblewrap
+loopback inside the sandbox is the sandbox's own, so only the proxied HTTP path
+works there. Every agent on the host gets these ports: a port that drives
+something (adb reaches every attached phone and emulator) is a capability, so
+list only what agents should have.
+
+`agent_readable` maps an agent kind (`claude`, `codex`, `agy`, `hermes`, ...;
+not a harness or profile name such as `claude-code`) to paths only it may read.
+Naming one of the credential directories exactly (such as `~/.config/gh`) lifts
+its hiding for that agent alone and keeps it read-only. `~/.hq` is never
+revealed.
+Paths use the agent machine's absolute paths; one that does not exist there is
+skipped.
 
 The host itself decides whether the sandbox is optional. `hq host serve` refuses
 to start any agent that is not under the process sandbox, whoever asks over the
