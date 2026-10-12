@@ -1,7 +1,7 @@
 import { HqHttpError } from '~/lib/hqAuth'
 import { createFileRoute } from '@tanstack/react-router'
 import { useState, useMemo, useEffect, useRef } from 'react'
-import { CheckSquare, Plus, RefreshCw, Search, Loader2, PanelLeftOpen, List, Columns3, GanttChart, X } from 'lucide-react'
+import { CheckSquare, ListChecks, Plus, RefreshCw, Search, Loader2, PanelLeftOpen, List, Columns3, GanttChart, X } from 'lucide-react'
 import {
   createTaskClient,
   updateTaskClient,
@@ -15,12 +15,16 @@ import {
   restoreTaskClient,
   type Initiative,
   type TaskItem,
+  type TaskPriority,
   type WorkSession,
   type TaskStatus,
   type TaskUpdateResult,
   type UpdateTaskInput,
 } from '~/lib/tasksApi'
 import { TaskListView } from '~/components/tasks/TaskListView'
+import { BulkActionBar } from '~/components/tasks/BulkActionBar'
+import { bulkMessage, failureNotice, runBulk, splitUnchanged, uniqueWarnings } from '~/components/tasks/bulk'
+import { useTaskSelection } from '~/components/tasks/useTaskSelection'
 import { TaskBoardView } from '~/components/tasks/TaskBoardView'
 import { TaskGanttView } from '~/components/tasks/TaskGanttView'
 import { TaskDetailDrawer } from '~/components/tasks/TaskDetailDrawer'
@@ -208,6 +212,11 @@ function TasksPage() {
     [tasks, archivedTasks, statusTab, statusFilter, tagFilter, selection, initiativeById, searchQuery, view]
   )
 
+  // Picking tasks for a bulk action only makes sense in the list, and not in the archive.
+  const picking = useTaskSelection(filtered, view === 'list' && statusTab !== 'archived')
+  const [bulkProgress, setBulkProgress] = useState<{ settled: number; total: number } | null>(null)
+  const [bulkResult, setBulkResult] = useState<string | null>(null)
+
   const setView = (next: TasksView) =>
     navigate({ search: next === 'list' ? {} : { view: next }, replace: true })
 
@@ -287,6 +296,60 @@ function TasksPage() {
       await archived.refresh()
     }, 'Restore failed')
 
+  // One PATCH per task, a few at a time: each keeps its own checks, notifications and
+  // soft-dependency warnings, and one task failing leaves the rest done.
+  const runBulkUpdate = async (
+    targets: TaskItem[],
+    unchanged: number,
+    patchFor: (task: TaskItem) => UpdateTaskInput,
+    phrase: string
+  ) => {
+    setNotice(null)
+    if (targets.length === 0) {
+      setBulkResult(bulkMessage(0, 0, unchanged, phrase))
+      return
+    }
+    setBulkResult(null)
+    setBulkProgress({ settled: 0, total: targets.length })
+    const outcome = await runBulk(
+      targets,
+      async (task) => {
+        const updated = await updateTaskClient(task.id, patchFor(task))
+        upsertTask(updated)
+        return updated
+      },
+      (settled, total) => setBulkProgress({ settled, total })
+    )
+    setBulkProgress(null)
+    // Done ones are un-ticked; a failed one stays ticked so it can be tried again.
+    picking.setMany(outcome.done.map((d) => d.task), false)
+    setBulkResult(bulkMessage(outcome.done.length, targets.length, unchanged, phrase))
+    const problems = [failureNotice(outcome.failed), ...uniqueWarnings(outcome.done.map((d) => d.value.warnings))]
+    if (problems.some(Boolean)) setNotice(problems.filter(Boolean).join(' '))
+    if (outcome.failed.some((f) => f.error instanceof HqHttpError && f.error.status === HTTP_CONFLICT)) loadTasks()
+  }
+
+  const handleBulkStatus = (status: TaskStatus) => {
+    const { toChange, unchanged } = splitUnchanged(picking.selected, (t) => t.status === status)
+    return runBulkUpdate(
+      toChange,
+      unchanged,
+      (task) => ({ status, expected_status: task.status }),
+      `moved to ${STATUS_LABELS[status]}`
+    )
+  }
+
+  const handleBulkPriority = (priority: TaskPriority | null) => {
+    const { toChange, unchanged } = splitUnchanged(picking.selected, (t) => t.priority === priority)
+    return runBulkUpdate(toChange, unchanged, () => ({ priority }), `set to ${priority ?? 'no'} priority`)
+  }
+
+  // Any change to what is ticked retires the last result line.
+  const afterPick = <A extends unknown[]>(fn: (...args: A) => void) => (...args: A) => {
+    setBulkResult(null)
+    fn(...args)
+  }
+
   const activeCount = tasks.filter((t) => t.status !== 'complete').length
 
   return (
@@ -326,6 +389,13 @@ function TasksPage() {
           allTags={allTags}
           searchQuery={searchQuery}
           setSearchQuery={setSearchQuery}
+          canSelect={view === 'list' && statusTab !== 'archived'}
+          selecting={picking.active}
+          onToggleSelecting={() => {
+            setBulkResult(null)
+            if (picking.active) picking.stop()
+            else picking.start()
+          }}
         />
 
         <WorkingNowPanel sessions={liveSessions} taskById={taskById} onSelect={setSelectedTaskId} />
@@ -370,6 +440,29 @@ function TasksPage() {
             allById={taskById}
             initiativeById={initiativeById}
             onSelect={(t) => setSelectedTaskId(t.id)}
+            selection={
+              picking.active
+                ? {
+                    ticked: picking.selectedIds,
+                    onToggle: afterPick(picking.toggle),
+                    onToggleMany: afterPick(picking.setMany),
+                  }
+                : undefined
+            }
+          />
+        )}
+
+        {picking.active && (
+          <BulkActionBar
+            total={filtered.length}
+            ticked={picking.selected.length}
+            progress={bulkProgress}
+            message={bulkResult}
+            onSelectAll={afterPick(() => picking.setMany(filtered, true))}
+            onClear={afterPick(picking.clear)}
+            onDone={afterPick(picking.stop)}
+            onStatus={handleBulkStatus}
+            onPriority={handleBulkPriority}
           />
         )}
 
@@ -469,6 +562,9 @@ interface TasksFilterBarProps {
   allTags: string[]
   searchQuery: string
   setSearchQuery: (q: string) => void
+  canSelect: boolean
+  selecting: boolean
+  onToggleSelecting: () => void
 }
 
 function TasksFilterBar(p: TasksFilterBarProps) {
@@ -535,6 +631,21 @@ function TasksFilterBar(p: TasksFilterBarProps) {
               <option key={tag} value={tag}>{tag}</option>
             ))}
           </select>
+
+          {p.canSelect && (
+            <button
+              type="button"
+              onClick={p.onToggleSelecting}
+              aria-pressed={p.selecting}
+              title="Pick several tasks to change at once"
+              className={`px-2.5 py-1.5 rounded-xl text-xs font-semibold flex items-center gap-1.5 shrink-0 transition-all ${
+                p.selecting ? 'hq-seg-on' : 'hq-field text-neutral-300 hover:text-white'
+              }`}
+            >
+              <ListChecks className="w-3.5 h-3.5 shrink-0" />
+              Select
+            </button>
+          )}
         </div>
       </div>
 
