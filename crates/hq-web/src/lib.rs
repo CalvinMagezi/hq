@@ -12,6 +12,7 @@ pub mod gmail_ingest;
 mod mcp_http;
 mod notifications_api;
 mod notifications_watch;
+mod oauth;
 mod openrouter_usage_api;
 mod origin;
 mod profile_gate;
@@ -71,6 +72,8 @@ pub struct WsState {
     pub web_bind_is_loopback: bool,
     /// Single-use tickets for opening `/ws` when a web token is set.
     pub(crate) ws_tickets: Arc<auth::WsTickets>,
+    /// The claude.ai connector's origins, when `mcp_connector` is on and valid.
+    pub(crate) connector: Option<hq_core::config::ConnectorOrigins>,
     /// Abort handles for in-flight chat turns, keyed by thread id. A "stop"
     /// WS message aborts the turn's driver task, which drops the harness
     /// stream and finalizes the turn.
@@ -101,6 +104,7 @@ impl WsState {
             allowed_origins,
             web_bind_is_loopback,
             ws_tickets: Arc::new(auth::WsTickets::default()),
+            connector: None,
             active_chat_turns: Arc::new(tokio::sync::RwLock::new(std::collections::HashMap::new())),
         }
     }
@@ -137,6 +141,20 @@ impl WsState {
     pub fn with_registry(mut self, registry: Arc<ToolRegistry>) -> Self {
         self.registry = Some(registry);
         self
+    }
+
+    /// Turns the claude.ai connector on when `cfg` asks for it and is valid. Call after
+    /// `web_auth_token` is set: the consent page signs the owner in with it.
+    pub fn configure_connector(
+        &mut self,
+        cfg: &hq_core::config::McpConnectorConfig,
+    ) -> Result<(), String> {
+        self.connector = None;
+        if cfg.enabled && self.profile().is_lite() {
+            return Err("mcp_connector is not available under profile: lite".into());
+        }
+        self.connector = cfg.origins(self.web_auth_token.as_deref())?;
+        Ok(())
     }
 
     pub(crate) fn broadcast(&self, msg: &str) {
@@ -179,7 +197,7 @@ pub fn create_router(state: Arc<WsState>) -> Router {
         subagent_followup::spawn_subagent_followup(state.clone());
     }
 
-    let router = Router::new()
+    let router = oauth::routes(Router::new(), &state)
         .route("/ws", get(ws::ws_handler))
         .route("/health", get(api::health_handler))
         .route("/api/vault-status", get(api::vault_status_handler))

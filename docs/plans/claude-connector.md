@@ -82,7 +82,7 @@ registered at all, so they 404 like any unknown path.
 
 | Route | Caller | What it does |
 |---|---|---|
-| `GET /.well-known/oauth-protected-resource` and `.../oauth-protected-resource/mcp` | Claude | `{resource: "<public_url>/mcp", authorization_servers: ["<issuer>"], scopes_supported, bearer_methods_supported: ["header"]}` |
+| `GET /.well-known/oauth-protected-resource` and `.../oauth-protected-resource/mcp` | Claude | `{resource: "<public_url>/mcp", authorization_servers: ["<issuer>"], scopes_supported: ["hq"], bearer_methods_supported: ["header"]}`. One scope only: Claude requests every advertised scope, so the grant's real scope is picked on the consent page. |
 | `GET /.well-known/oauth-authorization-server` | Claude | Issuer, endpoints, `response_types_supported: ["code"]`, `grant_types_supported: ["authorization_code", "refresh_token"]`, `code_challenge_methods_supported: ["S256"]`, `token_endpoint_auth_methods_supported: ["none"]`, `client_id_metadata_document_supported: true`, `scopes_supported` including `offline_access` |
 | `GET /oauth/authorize` | owner's browser | Validates the request, stores it for 5 minutes under a random id, redirects to the PWA `/connect?request=<id>`. Never issues a code itself. |
 | `GET /api/oauth/requests/{id}`, `POST .../approve`, `POST .../deny` | PWA | Behind the web token, the origin guard and `X-HQ-Client`. Approve returns the callback URL with `code` and `state`; the page navigates there with JS. |
@@ -104,8 +104,7 @@ Lite should support connectors; the first cut leaves Lite out.
 
 - **Redirect URIs.** Exactly `https://claude.ai/api/mcp/auth_callback` and
   `https://claude.com/api/mcp/auth_callback`, plus `http://localhost:<any>/callback` and
-  `http://127.0.0.1:<any>/callback` for Claude Code when `allow_loopback_redirects` is on.
-  Configurable, but the default list is closed. Anything else is refused at authorization.
+  `http://127.0.0.1:<any>/callback` for Claude Code. The list is fixed in code. Anything else is refused at authorization.
 - **CIMD.** The `client_id` must be an https URL whose host is in `cimd_hosts` (default:
   `claude.ai`; claude.ai uses `https://claude.ai/oauth/mcp-oauth-client-metadata`, Claude Code
   `https://claude.ai/oauth/claude-code-client-metadata`). No redirects followed, 64 KiB cap, 5 s
@@ -202,8 +201,9 @@ tasks and handoff scopes (`HANDOFF_SCOPE_ARG`, `TASKS_SCOPE_ARG`, `mark_spawned_
 5. **Visibility.** A relay notice when a grant is created, on its first call, on every confirm-tier
    call and on refresh-token reuse. An audit table records grant, tool, time, outcome and a
    truncated argument digest; Settings shows the last calls per grant.
-6. **Kill switch.** One button and `hq connector off`: revoke every grant, disarm, and stop
-   answering the OAuth routes until re-enabled.
+6. **Kill switch.** One button and `hq connector off`: revoke every grant and disarm. With no
+   grant and no armed window, nothing can connect until the owner arms again; `enabled: false`
+   removes the routes entirely.
 
 What remains, stated plainly: a full-scope grant can read the whole vault and act on anything
 not on the confirm list, and whatever a tool returns is sent to Anthropic as part of the
@@ -218,22 +218,20 @@ mcp_connector:
   public_url: https://hq.example.com          # origin Claude reaches; the resource is public_url + /mcp
   authorize_url: null                          # browser-only origin for the consent page, e.g. https://hq.example.ts.net; defaults to public_url
   default_scope: read_only                     # preselected on the consent page: read_only | tasks | full
-  max_scope: full                              # the widest scope the consent page offers
-  arm_minutes: 10
-  access_token_ttl_secs: 3600
-  refresh_token_days: 30
-  allow_loopback_redirects: true               # Claude Code's OAuth flow
-  extra_redirect_uris: []
-  cimd_hosts: [claude.ai]
   confirm_tools: default                       # default | [] | a list of tool names
   spawn_cwd_allow: null                        # defaults to agent_host.handoff_cwd_allow
 ```
 
-Startup refuses `enabled: true` when `web_auth_token` is unset (the consent page needs the
-owner's identity), when `public_url` is not https, when `authorize_url` is set and not https, or
-when the origin that serves the consent page (`authorize_url`, else `public_url`) is missing from
-`web_allowed_origins`: the page calls `/api/oauth/*` from that origin, and the origin guard
-would refuse it.
+Token lifetimes (1 hour access, 30 day refresh, 90 day cap), the arming window (10 minutes, `hq
+connector arm --minutes` overrides it), the redirect list and the CIMD hosts are constants, not
+settings: none of them is a choice an owner should have to make. Fields are added in the slice
+that first reads them.
+
+The connector stays off, with an error at startup, when `web_auth_token` is unset (the consent
+page needs the owner's identity), when `public_url` or `authorize_url` is not a bare https
+origin, or under `profile: lite`. The rest of the web server starts normally. The consent page
+calls `/api/oauth/*` from its own origin, which the origin guard already accepts as same-origin
+(the `Host` matches), so `web_allowed_origins` needs no entry for it.
 
 CLI, a new top-level command beside `hq mcp`: `hq connector status | arm [--minutes N] | grants
 | revoke <id> | off`.
