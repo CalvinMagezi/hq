@@ -6,6 +6,7 @@ All notable changes to Agent-HQ will be documented in this file.
 
 ### Added
 
+- **The pre-commit hook formats Rust before you commit.** `scripts/pre-commit` now runs rustfmt over the staged `.rs` files and re-stages them, so the CI format check (now a blocking gate) doesn't fail on formatting. `./scripts/install-hooks.sh` installs it in one step; `HQ_SKIP_FMT=1` skips formatting for a single commit.
 - **A clock in the web app header.** Every screen, phone and desktop, shows the time (24-hour) and the zone's short name in the header. It follows the device's zone until Settings > Clock pins it to any IANA zone; the choice is kept per device in the browser and reaches every open tab at once. Tapping the clock opens that setting, which stays usable when the gateway's settings cannot load.
 - **A guide to running personal agents under HQ.** `docs/PERSONAL_AGENTS.md` covers Hermes Agent and OpenClaw end to end: what HQ does and never does with them, giving each its own provider key, keeping OpenClaw's gateway daemon off an HQ host, the egress allowlist, interactive use, the Agentic Stack, known limits and removal. The README, `docs/AGENT_SESSIONS.md`, the site's compare page and the homepage now say HQ can run them.
 
