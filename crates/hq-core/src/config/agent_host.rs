@@ -120,7 +120,8 @@ pub struct AgentHostConfig {
     /// When non-empty, a session started through the handoff-scoped MCP key
     /// (`AGENTHQ_HANDOFF_API_KEY`) must have a working directory in or under
     /// one of these absolute paths. Empty leaves that key unrestricted, which
-    /// makes it equivalent to shell access on every configured host.
+    /// makes it equivalent to shell access on every configured host. A claude.ai connector
+    /// may use these and the host's own HQ folder (`Documents/HQ`), never anything else.
     #[serde(default)]
     pub handoff_cwd_allow: Vec<String>,
 

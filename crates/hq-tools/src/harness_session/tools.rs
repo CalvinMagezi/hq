@@ -24,11 +24,16 @@ async fn choose_start_dir(
     label: &str,
     harness: &str,
 ) -> Result<super::StartDir> {
-    let agent_host = &cfg.agent_host;
-    // Refused before any folder is made for it.
-    if bound == super::CwdBound::Connector {
-        super::connector_may_spawn(&agent_host.handoff_cwd_allow)?;
-    }
+    let connector_bounds;
+    let agent_host = if bound == super::CwdBound::Connector {
+        connector_bounds =
+            super::connector_folders(&cfg.agent_host, host_hq_folder(host).await.as_deref());
+        // Refused before any folder is made for it.
+        super::connector_may_spawn(&connector_bounds.handoff_cwd_allow)?;
+        &connector_bounds
+    } else {
+        &cfg.agent_host
+    };
     let vault_guard = |p: &std::path::Path| {
         super::check_cwd_outside_vault(p, host_name, &agent_host.default_host, &cfg.vault_path)
     };
@@ -55,6 +60,16 @@ async fn choose_start_dir(
     super::require_cwd_in(Some(&fallback.path.to_string_lossy()), agent_host, bound)?;
     vault_guard(&fallback.path)?;
     Ok(fallback)
+}
+
+/// The host's own HQ folder as that machine resolves it, or `None` for a host without one.
+async fn host_hq_folder(host: &crate::agent_host::Host) -> Option<String> {
+    let h = host.clone();
+    let workspace = tokio::task::spawn_blocking(move || h.workspace())
+        .await
+        .ok()?
+        .ok()?;
+    workspace["root"].as_str().map(str::to_string)
 }
 
 pub struct HarnessSessionSpawnTool {

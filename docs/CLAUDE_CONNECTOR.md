@@ -40,14 +40,16 @@ default. Design, threat model and test notes: `docs/plans/claude-connector.md`.
    web app, `/api` and `/ws` stay private. A Cloudflare Tunnel with the same path rules works on
    a machine with no public address; behind Cloudflare, filter on `Cf-Connecting-Ip` in a WAF
    rule rather than Caddy's `remote_ip`.
-4. **If you want Claude to start coding agents**, list the project folders it may use:
+4. **Coding agents Claude starts** run in the HQ folder of the machine they run on
+   (`~/Documents/HQ`, the same place HQ starts a session given no folder), on every host,
+   with no setup. To let Claude use other project folders too, list them:
 
    ```yaml
    agent_host:
      handoff_cwd_allow: [/srv/projects]
    ```
 
-   While that list is empty, a connector can start no coding session at all.
+   Anything outside the HQ folder and that list is refused.
 
 ## Connect
 
@@ -81,9 +83,9 @@ On top of the scope:
   mode each wait for you. HQ sends the exact call to your chat (and the web inbox) with Approve
   and Dismiss. One approval runs that call once, with exactly those arguments. Claude is told to
   call again after you approve. A request, and a dismissal, lasts a day.
-- **Coding sessions are not gated**, so Claude can drive agents for you, but only in
-  `handoff_cwd_allow` folders, only the sessions it started (yours stay yours), and every one it
-  starts sends you a notice with what it was told.
+- **Coding sessions are not gated**, so Claude can drive agents for you, but only in the host's
+  HQ folder and `handoff_cwd_allow` folders, only the sessions it started (yours stay yours), and
+  every one it starts sends you a notice with what it was told.
 - **Provenance.** Tasks Claude writes are attributed to `mcp:connector/<connection name>`.
 - **Limits and records.** 120 calls a minute per connection. Every call is logged (tool, outcome
   and a hash of its arguments, never the arguments) for 30 days: Settings shows the newest, and
