@@ -291,11 +291,12 @@ pub async fn dispatch(
     db: &hq_db::Database,
     allowed: Option<&[&str]>,
 ) -> Result<CallToolResult, ErrorData> {
-    dispatch_as(registry, name, arguments, db, allowed, None).await
+    dispatch_as(registry, name, arguments, db, allowed, None, None).await
 }
 
 /// Like `dispatch`, for a caller that proved it is the launched session
-/// `caller_session`. Tools see that id and nothing a caller wrote in its place.
+/// `caller_session`, or a claude.ai connector grant labelled `connector`. Tools see those and
+/// nothing a caller wrote in their place.
 pub async fn dispatch_as(
     registry: &ToolRegistry,
     name: &str,
@@ -303,10 +304,17 @@ pub async fn dispatch_as(
     db: &hq_db::Database,
     allowed: Option<&[&str]>,
     caller_session: Option<&str>,
+    connector: Option<&str>,
 ) -> Result<CallToolResult, ErrorData> {
     let result = match name {
         "hq_discover" => handle_discover(registry, arguments, allowed),
-        "hq_call" => handle_call_as(registry, arguments, db, allowed, caller_session).await,
+        "hq_call" => {
+            let caller = Caller {
+                session: caller_session,
+                connector,
+            };
+            handle_call_as(registry, arguments, db, allowed, caller).await
+        }
         other => Err(ErrorData::invalid_params(
             format!("unknown tool: {other}. Use hq_discover or hq_call."),
             None,
@@ -329,7 +337,14 @@ pub(crate) async fn handle_call(
     db: &hq_db::Database,
     allowed: Option<&[&str]>,
 ) -> Result<CallToolResult, ErrorData> {
-    handle_call_as(registry, arguments, db, allowed, None).await
+    handle_call_as(registry, arguments, db, allowed, Caller::default()).await
+}
+
+/// Who the transport proved is calling, beyond the key's allowlist.
+#[derive(Default, Clone, Copy)]
+struct Caller<'a> {
+    session: Option<&'a str>,
+    connector: Option<&'a str>,
 }
 
 async fn handle_call_as(
@@ -337,7 +352,7 @@ async fn handle_call_as(
     arguments: Option<&serde_json::Map<String, Value>>,
     db: &hq_db::Database,
     allowed: Option<&[&str]>,
-    caller_session: Option<&str>,
+    caller: Caller<'_>,
 ) -> Result<CallToolResult, ErrorData> {
     let session_id = format!("mcp-{}", std::process::id());
 
@@ -377,8 +392,8 @@ async fn handle_call_as(
             None,
         ));
     }
-    mark_scope(&mut call_args, allowed);
-    attest_caller(&mut call_args, caller_session);
+    mark_scope(&mut call_args, allowed, caller.connector);
+    attest_caller(&mut call_args, caller.session);
     let call_result = hq_tools::registry::validate_and_execute(tool, call_args).await;
 
     // Telemetry is best-effort and must not fail the call. This layer never sees
@@ -427,7 +442,7 @@ pub async fn call_tool_whole(
         .get(tool)
         .ok_or_else(|| format!("unknown tool: {tool}"))?;
     let mut args = if args.is_null() { json!({}) } else { args };
-    mark_scope(&mut args, allowed);
+    mark_scope(&mut args, allowed, None);
     hq_tools::registry::validate_and_execute(t, args)
         .await
         .map_err(|e| format!("tool error: {e}"))
@@ -435,6 +450,110 @@ pub async fn call_tool_whole(
 
 /// Tools a caller inside an HQ-spawned session may not use: they rewrite HQ's own settings.
 const MARKED_DENIED_TOOLS: &[&str] = &["config_manage"];
+
+/// Tools a claude.ai connector may run only once the owner approves that exact call: they act
+/// on the owner's outside accounts, reach the owner's chat or an agent that acts on what it is
+/// sent, persist instructions or settings, pair a machine, delete, or write and publish on the
+/// HQ host. Only tools the gateway serves belong here; a registry test checks each name.
+/// Coding-agent session tools are deliberately absent (`docs/plans/claude-connector.md`).
+pub const CONNECTOR_CONFIRM_TOOLS: &[&str] = &[
+    "google_workspace",
+    "agent_send_message",
+    "config_manage",
+    "host_add",
+    "self_update_install",
+    "self_update_rollback",
+    "skill_manage",
+    "slash_command_manage",
+    "task_delete",
+    "vault_delete",
+    "file_edit_batch",
+    "git_commit",
+    "git_pr",
+    "github_clone",
+    "host_send",
+    "host_read",
+    "convert_to_markdown",
+    "convert_from_markdown",
+    "ocr_extract_text",
+];
+
+/// Vault folders whose notes become instructions: skills, slash commands and agent definitions.
+const INSTRUCTION_FOLDERS: &[&str] = &["skills/", "_skills/", "_commands/", "agents/"];
+/// Vault tools that write a note at `path` (or move one to `to`).
+const VAULT_WRITE_TOOLS: &[&str] = &[
+    "vault_write_note",
+    "vault_append_note",
+    "vault_patch_section",
+    "vault_frontmatter_update",
+    "vault_move",
+];
+/// Task tools whose tags and assignees put text in a mailbox that the owner's chat or an agent
+/// drains, the same reach `agent_send_message` has.
+pub const TASK_ROUTING_TOOLS: &[&str] = &[
+    "task_create",
+    "task_update",
+    "task_create_many",
+    "task_update_many",
+];
+
+/// Whether a connector's call to `tool` with `args` waits for the owner's approval. Remote MCP
+/// servers proxy the owner's accounts, and `hq_ask` in full mode hands the question to HQ's own
+/// agent with every tool, so both count.
+pub fn needs_owner_confirmation(registry: &ToolRegistry, tool: &str, args: &Value) -> bool {
+    if tool == "hq_ask" {
+        let mode = args.get("mode").and_then(Value::as_str).unwrap_or_default();
+        return matches!(
+            hq_tools::ask::AskMode::parse(mode),
+            Ok(hq_tools::ask::AskMode::Full)
+        );
+    }
+    // An export with `output` writes a file anywhere the HQ user can.
+    if matches!(tool, "vault_export" | "vault_export_pdf") {
+        return args
+            .get("output")
+            .and_then(Value::as_str)
+            .is_some_and(|o| !o.is_empty());
+    }
+    if VAULT_WRITE_TOOLS.contains(&tool) {
+        return ["path", "to", "destination", "dest"]
+            .iter()
+            .filter_map(|k| args.get(*k).and_then(Value::as_str))
+            .any(in_instruction_folder);
+    }
+    if TASK_ROUTING_TOOLS.contains(&tool) {
+        return routes_to_mailbox(args);
+    }
+    CONNECTOR_CONFIRM_TOOLS.contains(&tool)
+        || registry
+            .get(tool)
+            .is_some_and(|t| t.category() == hq_tools::remote_mcp::REMOTE_MCP_CATEGORY)
+}
+
+fn in_instruction_folder(path: &str) -> bool {
+    let path = path
+        .trim()
+        .trim_start_matches("./")
+        .trim_start_matches('/')
+        .to_ascii_lowercase();
+    INSTRUCTION_FOLDERS.iter().any(|f| path.starts_with(f))
+}
+
+/// Whether a task call sets tags or assignees, on the call, its `defaults` or any item.
+fn routes_to_mailbox(args: &Value) -> bool {
+    let sets = |v: &Value| {
+        ["tags", "assignees"].iter().any(|k| {
+            v.get(*k)
+                .and_then(Value::as_array)
+                .is_some_and(|a| !a.is_empty())
+        })
+    };
+    let items = ["tasks", "updates"]
+        .iter()
+        .filter_map(|k| args.get(*k).and_then(Value::as_array))
+        .flatten();
+    sets(args) || args.get("defaults").is_some_and(sets) || items.into_iter().any(sets)
+}
 
 /// The longest session id a marker carries; anything else is cut.
 const MAX_SPAWNED_ID_CHARS: usize = 64;
@@ -491,13 +610,21 @@ fn attest_caller(args: &mut Value, caller_session: Option<&str>) {
 }
 
 /// Tools learn which key a call came in on only from these arguments: any value
-/// the caller sent is dropped, and they are set here for the handoff and tasks scopes.
-fn mark_scope(args: &mut Value, allowed: Option<&[&str]>) {
+/// the caller sent is dropped, and they are set here for the handoff and tasks scopes and for
+/// a connector grant.
+fn mark_scope(args: &mut Value, allowed: Option<&[&str]>, connector: Option<&str>) {
     let Some(obj) = args.as_object_mut() else {
         return;
     };
     obj.remove(hq_tools::harness_session::HANDOFF_SCOPE_ARG);
     obj.remove(hq_tools::harness_session::TASKS_SCOPE_ARG);
+    obj.remove(hq_tools::harness_session::CONNECTOR_ARG);
+    if let Some(label) = connector {
+        obj.insert(
+            hq_tools::harness_session::CONNECTOR_ARG.into(),
+            json!(label),
+        );
+    }
     if allowed == Some(HANDOFF_ALLOWLIST) {
         obj.insert(
             hq_tools::harness_session::HANDOFF_SCOPE_ARG.into(),
@@ -771,24 +898,127 @@ mod tests {
     }
 
     #[test]
+    fn only_an_attested_grant_carries_the_connector_marker() {
+        let key = hq_tools::harness_session::CONNECTOR_ARG;
+        let mut forged = json!({"q": 1, key: "owner"});
+        mark_scope(&mut forged, None, None);
+        assert!(
+            forged.get(key).is_none(),
+            "a caller cannot claim to be a connector"
+        );
+        let mut granted = json!({key: "forged-label"});
+        mark_scope(&mut granted, None, Some("Claude"));
+        assert_eq!(granted[key], "Claude");
+    }
+
+    #[test]
+    fn connector_confirmation_covers_the_listed_tools_remote_mcp_and_full_asks_only() {
+        let registry = ToolRegistry::new();
+        let none = json!({});
+        assert!(needs_owner_confirmation(&registry, "vault_delete", &none));
+        assert!(needs_owner_confirmation(
+            &registry,
+            "google_workspace",
+            &none
+        ));
+        assert!(!needs_owner_confirmation(&registry, "vault_search", &none));
+        assert!(
+            !needs_owner_confirmation(&registry, "harness_session_spawn", &none),
+            "coding sessions are deliberately not gated"
+        );
+        assert!(needs_owner_confirmation(
+            &registry,
+            "hq_ask",
+            &json!({"mode": "full"})
+        ));
+        assert!(needs_owner_confirmation(
+            &registry,
+            "vault_export",
+            &json!({"output": "/home/u/.bashrc"})
+        ));
+        assert!(!needs_owner_confirmation(
+            &registry,
+            "vault_export",
+            &json!({"path": "a.md"})
+        ));
+        for path in [
+            "skills/x/SKILL.md",
+            "/_commands/deploy.md",
+            "./Agents/coder.md",
+        ] {
+            assert!(
+                needs_owner_confirmation(&registry, "vault_write_note", &json!({ "path": path })),
+                "{path}"
+            );
+        }
+        assert!(!needs_owner_confirmation(
+            &registry,
+            "vault_write_note",
+            &json!({"path": "Notebooks/a.md"})
+        ));
+        assert!(needs_owner_confirmation(
+            &registry,
+            "vault_move",
+            &json!({"path": "a.md", "to": "skills/a.md"})
+        ));
+        assert!(needs_owner_confirmation(
+            &registry,
+            "task_create",
+            &json!({"title": "t", "tags": ["relay"]})
+        ));
+        assert!(!needs_owner_confirmation(
+            &registry,
+            "task_create",
+            &json!({"title": "t", "tags": []})
+        ));
+        assert!(needs_owner_confirmation(
+            &registry,
+            "task_create_many",
+            &json!({"tasks": [{"title": "a"}, {"title": "b", "assignees": ["hq"]}]})
+        ));
+        assert!(needs_owner_confirmation(
+            &registry,
+            "task_update_many",
+            &json!({"updates": [{"id": "x"}], "defaults": {"tags": ["relay"]}})
+        ));
+        assert!(!needs_owner_confirmation(
+            &registry,
+            "task_update",
+            &json!({"id": "x", "status": "complete"})
+        ));
+        assert!(!needs_owner_confirmation(
+            &registry,
+            "hq_ask",
+            &json!({"mode": "read_only"})
+        ));
+        assert!(!needs_owner_confirmation(&registry, "hq_ask", &none));
+        for padded in [" full", "full\n", "\tfull "] {
+            assert!(
+                needs_owner_confirmation(&registry, "hq_ask", &json!({ "mode": padded })),
+                "the gate reads {padded:?} as the tool does"
+            );
+        }
+    }
+
+    #[test]
     fn each_scope_gets_only_its_own_marker_and_a_caller_cannot_forge_either() {
         let handoff = hq_tools::harness_session::HANDOFF_SCOPE_ARG;
         let tasks = hq_tools::harness_session::TASKS_SCOPE_ARG;
         let forged = || serde_json::json!({ handoff: true, tasks: true, "x": 1 });
 
         let mut args = forged();
-        mark_scope(&mut args, None);
+        mark_scope(&mut args, None, None);
         assert!(
             args.get(handoff).is_none() && args.get(tasks).is_none(),
             "owner calls carry no marker"
         );
 
         let mut args = forged();
-        mark_scope(&mut args, Some(SPARK_READONLY_ALLOWLIST));
+        mark_scope(&mut args, Some(SPARK_READONLY_ALLOWLIST), None);
         assert!(args.get(handoff).is_none() && args.get(tasks).is_none());
 
         let mut args = forged();
-        mark_scope(&mut args, Some(TASKS_ALLOWLIST));
+        mark_scope(&mut args, Some(TASKS_ALLOWLIST), None);
         assert_eq!(args[tasks], true);
         assert!(
             args.get(handoff).is_none(),
@@ -796,7 +1026,7 @@ mod tests {
         );
 
         let mut args = forged();
-        mark_scope(&mut args, Some(HANDOFF_ALLOWLIST));
+        mark_scope(&mut args, Some(HANDOFF_ALLOWLIST), None);
         assert_eq!(args[handoff], true);
         assert!(
             args.get(tasks).is_none(),
@@ -832,13 +1062,13 @@ mod tests {
     fn only_the_handoff_key_gets_the_scope_marker_and_a_caller_cannot_forge_it() {
         let key = hq_tools::harness_session::HANDOFF_SCOPE_ARG;
         let mut args = serde_json::json!({ key: true, "cwd": "/x" });
-        mark_scope(&mut args, None);
+        mark_scope(&mut args, None, None);
         assert!(args.get(key).is_none(), "owner calls carry no marker");
         let mut args = serde_json::json!({ key: true });
-        mark_scope(&mut args, Some(SPARK_READONLY_ALLOWLIST));
+        mark_scope(&mut args, Some(SPARK_READONLY_ALLOWLIST), None);
         assert!(args.get(key).is_none(), "a forged marker is stripped");
         let mut args = serde_json::json!({});
-        mark_scope(&mut args, Some(HANDOFF_ALLOWLIST));
+        mark_scope(&mut args, Some(HANDOFF_ALLOWLIST), None);
         assert_eq!(args[key], true);
     }
 
@@ -1030,9 +1260,18 @@ mod tests {
             inner[hq_tools::harness_session::CALLER_SESSION_ARG] = id.into();
         }
         let call = serde_json::json!({"tool": "echo_args", "args": inner});
-        let result = handle_call_as(&registry, call.as_object(), &db, None, attested)
-            .await
-            .unwrap();
+        let result = handle_call_as(
+            &registry,
+            call.as_object(),
+            &db,
+            None,
+            Caller {
+                session: attested,
+                connector: None,
+            },
+        )
+        .await
+        .unwrap();
         let text = serde_json::to_value(&result).unwrap()["content"][0]["text"]
             .as_str()
             .unwrap()

@@ -14,6 +14,8 @@ use std::sync::Arc;
 const DEFAULT_ARM_MINUTES: i64 = 10;
 const MAX_ARM_MINUTES: i64 = 60;
 const MAX_LABEL_CHARS: usize = 60;
+/// Calls Settings lists, newest first.
+const RECENT_CALLS: i64 = 20;
 /// The cookie tying a pending request to the browser that started it.
 const BINDER_COOKIE: &str = "hq_oauth_request";
 /// Matches the request's lifetime in the store.
@@ -65,16 +67,18 @@ pub(crate) async fn status(State(state): State<Arc<WsState>>) -> Response {
         Ok((
             store::armed_until(c, now)?,
             store::list_grants(c, false, now)?,
+            store::recent_calls(c, None, RECENT_CALLS)?,
         ))
     });
     match read {
-        Ok((armed_until, grants)) => Json(json!({
+        Ok((armed_until, grants, calls)) => Json(json!({
             "enabled": true,
             "url": origins.resource(),
             "consent_origin": origins.consent,
             "default_scope": state.connector_default_scope().as_str(),
             "armed_until": armed_until,
             "grants": grants,
+            "recent_calls": calls,
         }))
         .into_response(),
         Err(e) => db_error(e),

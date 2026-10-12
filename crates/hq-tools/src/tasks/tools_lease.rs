@@ -35,6 +35,12 @@ pub(super) fn ttl_secs(settings: &TasksConfig) -> i64 {
 /// client on a machine the owner may not control is visibly that wherever its work shows; any
 /// other caller may not take a name of that shape.
 fn lease_actor(args: &Value, actor: &str) -> Result<String> {
+    if let Some(label) = crate::harness_session::connector_label(args) {
+        return Ok(crate::harness_session::connector_actor(label));
+    }
+    if crate::harness_session::is_connector_actor(&t::clean_label(actor)) {
+        bail!("mcp:connector names are for claude.ai connections; claim under your own name");
+    }
     let scope = crate::harness_session::TASKS_SCOPE_ACTOR;
     if crate::harness_session::is_tasks_scope(args) {
         let label = t::clean_label(actor);
@@ -64,7 +70,7 @@ fn check_scope_owns_lease(conn: &rusqlite::Connection, args: &Value, token: &str
         return Ok(());
     }
     match t::lease_for_token(conn, token)? {
-        Some(lease) if !crate::harness_session::is_tasks_scope_actor(&lease.actor) => {
+        Some(lease) if !crate::harness_session::is_own_scope_actor(args, &lease.actor) => {
             bail!(
                 "that lease was not taken on this connection; claim the task here to get your own"
             )
@@ -81,6 +87,7 @@ pub(super) struct ActorHints {
     lease_token: Option<String>,
     named: String,
     tasks_scope: bool,
+    connector: Option<String>,
 }
 
 /// Who a write is attributed to, and the lease behind it when there is one.
@@ -113,6 +120,7 @@ impl ActorHints {
             lease_token: opt_str(args, "lease"),
             named: arg_str(args, name_arg),
             tasks_scope: crate::harness_session::is_tasks_scope(args),
+            connector: crate::harness_session::connector_label(args).map(str::to_string),
         }
     }
 
@@ -138,7 +146,11 @@ impl ActorHints {
         if let Some(token) = &self.lease_token {
             let lease = t::require_live_lease(conn, token, ttl_secs(settings))?;
             // The tasks scope never writes under a name it did not get on that scope.
-            if self.tasks_scope && !crate::harness_session::is_tasks_scope_actor(&lease.actor) {
+            let own =
+                self.connector.as_deref().is_some_and(|label| {
+                    lease.actor == crate::harness_session::connector_actor(label)
+                }) || crate::harness_session::is_tasks_scope_actor(&lease.actor);
+            if self.tasks_scope && !own {
                 bail!(
                     "that lease was not taken on this connection; claim the task here to get your own"
                 );
@@ -158,6 +170,17 @@ impl ActorHints {
                 "{} names are for the tasks-scoped key; write under your own name",
                 crate::harness_session::TASKS_SCOPE_ACTOR
             );
+        }
+        // A claude.ai connection is named for what it is, whatever name it passes.
+        if let Some(label) = &self.connector {
+            return Ok(Actor {
+                name: crate::harness_session::connector_actor(label),
+                work_session_id: None,
+                lease: None,
+            });
+        }
+        if crate::harness_session::is_connector_actor(&t::clean_label(&self.named)) {
+            bail!("mcp:connector names are for claude.ai connections; write under your own name");
         }
         let name = if self.tasks_scope {
             crate::harness_session::TASKS_SCOPE_ACTOR.to_string()

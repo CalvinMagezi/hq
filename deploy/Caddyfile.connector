@@ -1,0 +1,35 @@
+# Agent HQ: public endpoints for the claude.ai connector (docs/CLAUDE_CONNECTOR.md).
+# Publishes only what Claude's servers call. The consent page and the rest of the web app stay
+# on a private origin (set mcp_connector.authorize_url to it, for example a tailnet name).
+# Replace hq.example.com with your domain, and set mcp_connector.public_url to
+# https://hq.example.com in HQ's config.
+
+{
+	servers {
+		protocols h1 h2
+	}
+}
+
+hq.example.com {
+	@machine path /mcp /oauth/token /oauth/revoke /.well-known/oauth-protected-resource /.well-known/oauth-protected-resource/mcp /.well-known/oauth-authorization-server
+	handle @machine {
+		# Anthropic's outbound range at the time of writing
+		# (https://platform.claude.com/docs/en/api/ip-addresses). Defence in depth only: the
+		# range can change, and OAuth is what protects HQ. Remove these two lines if you would
+		# rather not track it.
+		@outside not remote_ip 160.79.104.0/21
+		respond @outside "Not found" 404
+		reverse_proxy 127.0.0.1:5678 {
+			flush_interval -1
+			transport http {
+				versions 1.1
+			}
+		}
+	}
+
+	# Everything else (the web app, /api, /ws, /oauth/authorize) is not public. HQ also answers
+	# /oauth/authorize only on the consent origin, so this host never shows it.
+	handle {
+		respond "Not found" 404
+	}
+}

@@ -7,6 +7,33 @@ pub const HANDOFF_SCOPE_ARG: &str = "_hq_handoff_scope";
 pub const TASKS_SCOPE_ARG: &str = "_hq_tasks_scope";
 /// Who a tasks-scope write is attributed to, whatever name the caller supplies.
 pub const TASKS_SCOPE_ACTOR: &str = "mcp:tasks";
+/// Set by the gateway, never by a caller, on a call from a claude.ai connector grant. Its
+/// value is the grant's label.
+pub const CONNECTOR_ARG: &str = "_hq_connector";
+/// Prefix of the name a connector grant's writes are attributed to.
+pub const CONNECTOR_ACTOR: &str = "mcp:connector";
+
+/// The connector grant's label, when the call came in on one.
+pub fn connector_label(args: &Value) -> Option<&str> {
+    args.get(CONNECTOR_ARG).and_then(Value::as_str)
+}
+
+/// The name a connector grant's writes are attributed to: `mcp:connector/<label>`.
+pub fn connector_actor(label: &str) -> String {
+    format!("{CONNECTOR_ACTOR}/{}", hq_db::tasks::clean_label(label))
+}
+
+/// Whether a scoped call may treat `name` as its own: the tasks scope's names, or this
+/// connector grant's name. A tasks-scope grant writes and leases under the latter.
+pub fn is_own_scope_actor(args: &Value, name: &str) -> bool {
+    connector_label(args).is_some_and(|label| name == connector_actor(label))
+        || is_tasks_scope_actor(name)
+}
+
+/// Whether `name` is of the connector's shape, which only a connector grant may write under.
+pub fn is_connector_actor(name: &str) -> bool {
+    name.to_ascii_lowercase().starts_with(CONNECTOR_ACTOR)
+}
 
 /// Whether `name` is one a tasks-scope caller writes under: the bare scope actor, or the
 /// `mcp:tasks/<label>` a work lease taken on that scope is named.
@@ -120,17 +147,61 @@ pub fn check_handoff_cwd(cwd: &Path, allow: &[String]) -> Result<()> {
     )
 }
 
-/// `require_cwd` plus the deny list (and, for the handoff key, the allow list)
-/// of an already loaded config.
+/// Which folder list binds a caller starting a session.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CwdBound {
+    /// The owner or a full key: only the deny list applies.
+    Any,
+    /// The handoff key: `handoff_cwd_allow`, when it lists anything.
+    Handoff,
+    /// A claude.ai connector grant: `handoff_cwd_allow`, and nothing at all while it is empty.
+    Connector,
+}
+
+impl CwdBound {
+    /// The bound the gateway's markers put on this call.
+    pub fn of(args: &Value) -> Self {
+        if connector_label(args).is_some() {
+            Self::Connector
+        } else if is_handoff_scope(args) {
+            Self::Handoff
+        } else {
+            Self::Any
+        }
+    }
+}
+
+/// A connector grant starts sessions only in folders the owner listed: an empty list means none,
+/// because a hijacked conversation must not choose where an agent with a shell runs.
+pub fn check_connector_cwd(cwd: &Path, allow: &[String]) -> Result<()> {
+    connector_may_spawn(allow)?;
+    check_handoff_cwd(cwd, allow)
+}
+
+/// Whether a connector may start any session: only once the owner has listed folders.
+pub fn connector_may_spawn(allow: &[String]) -> Result<()> {
+    if allow.iter().all(|a| a.trim().is_empty()) {
+        bail!(
+            "a claude.ai connector can start coding sessions only in folders listed in \
+             agent_host.handoff_cwd_allow, which is empty; no session was started"
+        );
+    }
+    Ok(())
+}
+
+/// `require_cwd` plus the deny list and, for a bounded caller, its allow list, from an already
+/// loaded config.
 pub fn require_cwd_in(
     cwd: Option<&str>,
     agent_host: &hq_core::config::AgentHostConfig,
-    handoff_scope: bool,
+    bound: CwdBound,
 ) -> Result<PathBuf> {
     let path = require_cwd(cwd)?;
     check_cwd_allowed(&path.to_string_lossy(), &agent_host.spawn_cwd_deny)?;
-    if handoff_scope {
-        check_handoff_cwd(&path, &agent_host.handoff_cwd_allow)?;
+    match bound {
+        CwdBound::Any => {}
+        CwdBound::Handoff => check_handoff_cwd(&path, &agent_host.handoff_cwd_allow)?,
+        CwdBound::Connector => check_connector_cwd(&path, &agent_host.handoff_cwd_allow)?,
     }
     Ok(path)
 }
@@ -141,7 +212,7 @@ pub fn require_allowed_cwd(cwd: Option<&str>) -> Result<PathBuf> {
     let cfg = hq_core::config::HqConfig::load().map_err(|e| {
         anyhow::anyhow!("cannot read the config to check agent_host.spawn_cwd_deny: {e}")
     })?;
-    require_cwd_in(cwd, &cfg.agent_host, false)
+    require_cwd_in(cwd, &cfg.agent_host, CwdBound::Any)
 }
 
 /// What the host says when a session's folder is not there. A remote host cannot be asked

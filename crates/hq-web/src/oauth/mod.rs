@@ -4,6 +4,7 @@
 mod authorize;
 mod cimd;
 mod consent;
+pub(crate) mod guard;
 mod token;
 
 use crate::WsState;

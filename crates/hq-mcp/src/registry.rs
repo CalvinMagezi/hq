@@ -147,6 +147,24 @@ mod tests {
         )
     }
 
+    /// A typo or a renamed tool would silently drop a confirmation, so every entry must be a
+    /// real tool. Two are registered only with config or a build feature.
+    #[test]
+    fn every_connector_confirm_tool_exists() {
+        const OPTIONAL: &[&str] = &[
+            "google_workspace",
+            "self_update_install",
+            "self_update_rollback",
+        ];
+        let vault = tempfile::TempDir::new().unwrap();
+        let registry = real_registry(&vault);
+        let missing: Vec<_> = crate::gateway::CONNECTOR_CONFIRM_TOOLS
+            .iter()
+            .filter(|name| registry.get(name).is_none() && !OPTIONAL.contains(name))
+            .collect();
+        assert!(missing.is_empty(), "not registered tools: {missing:?}");
+    }
+
     /// The tools were dead code for months while the server prompt named them,
     /// because nothing ever asserted the wiring existed.
     #[test]

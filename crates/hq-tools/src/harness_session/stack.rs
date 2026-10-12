@@ -407,7 +407,7 @@ fn run_dir(
     s: &Specialist,
 ) -> Result<String> {
     if let Some(cwd) = s.cwd.as_deref().map(str::trim).filter(|c| !c.is_empty()) {
-        let path = super::require_cwd_in(Some(cwd), &cfg.agent_host, false)?;
+        let path = super::require_cwd_in(Some(cwd), &cfg.agent_host, super::CwdBound::Any)?;
         return Ok(path.to_string_lossy().into_owned());
     }
     let made = host.make_dir(None, &format!("stack-{}", s.name)).map_err(|e| {
@@ -416,7 +416,7 @@ fn run_dir(
     let path = made["path"].as_str().ok_or_else(|| {
         anyhow::anyhow!("host '{}' did not say which folder it made", host.name())
     })?;
-    super::require_cwd_in(Some(path), &cfg.agent_host, false)?;
+    super::require_cwd_in(Some(path), &cfg.agent_host, super::CwdBound::Any)?;
     Ok(path.to_string())
 }
 
