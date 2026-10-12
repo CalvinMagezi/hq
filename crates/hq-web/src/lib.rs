@@ -400,6 +400,8 @@ pub fn create_router(state: Arc<WsState>) -> Router {
         .route("/ws/{*rest}", axum::routing::any(not_found_json))
         .route("/hooks/{*rest}", axum::routing::any(not_found_json))
         .route("/mcp/{*rest}", axum::routing::any(not_found_json))
+        // OAuth clients probe here after a 401; a disabled connector must not answer with the shell.
+        .route("/.well-known/{*rest}", axum::routing::any(not_found_json))
         .route("/mcp", axum::routing::post(mcp_http::mcp_handler));
 
     router
@@ -762,7 +764,13 @@ mod web_auth_router_tests {
             .await
             .unwrap();
         assert_eq!(chunk.status(), StatusCode::NOT_FOUND);
-        for uri in ["/api/nope", "/ws/nope", "/mcp/nope", "/hooks/nope"] {
+        for uri in [
+            "/api/nope",
+            "/ws/nope",
+            "/mcp/nope",
+            "/hooks/nope",
+            "/.well-known/oauth-protected-resource",
+        ] {
             let res = app.clone().oneshot(get(uri)).await.unwrap();
             assert_eq!(res.status(), StatusCode::NOT_FOUND, "{uri}");
             assert!(

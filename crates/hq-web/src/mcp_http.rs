@@ -164,7 +164,10 @@ async fn handle_mcp(
             id,
             initialize_result(state.registry.as_deref(), allowed, &body),
         ),
-        "notifications/initialized" | "ping" => rpc_ok(id, json!({})),
+        "ping" => rpc_ok(id, json!({})),
+        // Every notification is acknowledged with an empty 202: clients such as Codex drop
+        // the connection on a body, and newer protocol versions send `notifications/cancelled`.
+        m if m.starts_with("notifications/") => rpc_ok(id, json!({})),
         "tools/list" => {
             let tools = state
                 .registry
@@ -523,6 +526,20 @@ mod tests {
             challenge(&res),
             r#"Bearer realm="agent-hq", resource_metadata="https://hq.example.com/.well-known/oauth-protected-resource""#
         );
+    }
+
+    #[tokio::test]
+    async fn every_notification_is_an_empty_202() {
+        let app = app();
+        for method in ["notifications/initialized", "notifications/cancelled"] {
+            let note = json!({"jsonrpc": "2.0", "method": method});
+            let res = send(&app, Some(FULL), note).await;
+            assert_eq!(res.status(), axum::http::StatusCode::ACCEPTED, "{method}");
+            let bytes = axum::body::to_bytes(res.into_body(), usize::MAX)
+                .await
+                .unwrap();
+            assert!(bytes.is_empty(), "{method}");
+        }
     }
 
     #[tokio::test]

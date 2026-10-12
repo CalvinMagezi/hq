@@ -75,8 +75,12 @@ fn https_origin(raw: &str) -> Result<String, String> {
             "{raw:?} must be an origin, with no path, query or fragment"
         ));
     }
-    if url.host_str().is_none() {
-        return Err(format!("{raw:?} has no host"));
+    let host_ok = url.host_str().is_some_and(|h| {
+        h.bytes()
+            .all(|b| b.is_ascii_alphanumeric() || b"-.:[]".contains(&b))
+    });
+    if !host_ok {
+        return Err(format!("{raw:?} needs a plain host name or address"));
     }
     Ok(url.as_str().trim_end_matches('/').to_ascii_lowercase())
 }
@@ -139,6 +143,7 @@ mod tests {
             "https://hq.example.com/?a=1",
             "https://hq.example.com/#x",
             "https://user:pw@hq.example.com",
+            "https://hq\"x.example.com",
             "hq.example.com",
         ] {
             assert!(
