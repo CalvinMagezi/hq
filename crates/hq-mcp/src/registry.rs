@@ -5,7 +5,7 @@ use hq_db::Database;
 use hq_tools::registry::{HqTool, ToolRegistry};
 use hq_tools::{
     a2a, agent_comm, agent_host, agents, ask, background_turns, brand, budget_status, coding,
-    convert, github, harness_session, imagegen, prose_lint, remote_mcp, self_update,
+    convert, github, harness_session, imagegen, notify, prose_lint, remote_mcp, self_update,
     session_search, shortcuts, skill_manage_tool, skills, slash_commands, subagent_runs,
     system_info, tasks, vault, web,
 };
@@ -104,6 +104,7 @@ pub fn create_default_registry(
     tools.extend(github::create_github_tools());
     tools.extend(system_info::create_system_info_tools(vault_path.clone()));
     tools.extend(budget_status::create_budget_status_tools(db.clone()));
+    tools.extend(notify::create_notify_tools(db.clone(), config));
     tools.extend(convert::create_convert_tools(vault_path.clone()));
     tools.extend(prose_lint::create_prose_lint_tools());
     tools.extend(brand::create_brand_tools(vault_path.clone()));
@@ -161,6 +162,18 @@ mod tests {
             );
         }
         assert!(registry.categories().contains(&"agent-comm".to_string()));
+    }
+
+    /// Agents reaching HQ over MCP can notify the owner.
+    #[test]
+    fn notify_owner_is_registered_and_not_read_only() {
+        let vault = tempfile::TempDir::new().unwrap();
+        let registry = real_registry(&vault);
+        let tool = registry
+            .get("notify_owner")
+            .expect("notify_owner is registered");
+        assert!(!tool.is_read_only());
+        assert_eq!(tool.category(), "notifications");
     }
 
     /// A read-only chat turn denies every tool that does not say it only reads, so a

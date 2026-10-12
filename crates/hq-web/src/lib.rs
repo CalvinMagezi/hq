@@ -28,6 +28,7 @@ mod threads_api;
 mod usage_forecast_api;
 mod usage_providers_api;
 mod vault_api;
+mod web_push;
 mod workbench_api;
 mod ws;
 
@@ -78,6 +79,8 @@ pub struct WsState {
     /// WS message aborts the turn's driver task, which drops the harness
     /// stream and finalizes the turn.
     pub(crate) active_chat_turns: ws::ChatTurnMap,
+    /// Web Push, when `web_push` is on and its key could be loaded.
+    pub(crate) web_push: Option<Arc<web_push::WebPush>>,
 }
 
 impl WsState {
@@ -106,6 +109,7 @@ impl WsState {
             ws_tickets: Arc::new(auth::WsTickets::default()),
             connector: None,
             active_chat_turns: Arc::new(tokio::sync::RwLock::new(std::collections::HashMap::new())),
+            web_push: None,
         }
     }
 
@@ -157,6 +161,21 @@ impl WsState {
         Ok(())
     }
 
+    /// Turns Web Push on when `cfg` asks for it, creating the VAPID key on first use.
+    pub fn configure_web_push(
+        &mut self,
+        cfg: &hq_core::config::WebPushConfig,
+    ) -> Result<(), String> {
+        self.web_push = None;
+        if !cfg.enabled {
+            return Ok(());
+        }
+        let push = web_push::WebPush::new(&self.vault_path, cfg, &self.allowed_origins)
+            .map_err(|e| format!("{e:#}"))?;
+        self.web_push = Some(Arc::new(push));
+        Ok(())
+    }
+
     pub(crate) fn broadcast(&self, msg: &str) {
         let _ = self.tx.send(msg.to_string());
     }
@@ -190,6 +209,7 @@ pub fn create_router(state: Arc<WsState>) -> Router {
         .to_path_buf();
 
     notifications_watch::spawn_notifications_watcher(state.clone());
+    web_push::spawn_dispatcher(state.clone());
     tasks_watch::spawn_tasks_watcher(state.clone());
     // Both act on coding-agent sessions and sub-agent runs, which Lite does not have.
     if !state.profile().is_lite() {
@@ -268,6 +288,22 @@ pub fn create_router(state: Arc<WsState>) -> Router {
         .route(
             "/api/notifications/mark-all-read",
             axum::routing::post(notifications_api::mark_all_read_handler),
+        )
+        .route(
+            "/api/notifications/push",
+            get(web_push::api::status_handler),
+        )
+        .route(
+            "/api/notifications/push/subscribe",
+            post(web_push::api::subscribe_handler),
+        )
+        .route(
+            "/api/notifications/push/unsubscribe",
+            post(web_push::api::unsubscribe_handler),
+        )
+        .route(
+            "/api/notifications/push/test",
+            post(web_push::api::test_handler),
         )
         .route(
             "/api/spaces",

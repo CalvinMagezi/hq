@@ -31,6 +31,7 @@ pub mod harness_usage;
 pub mod harness_usage_collect;
 pub mod imagegen;
 pub mod model_control;
+pub mod notify;
 pub mod prose_lint;
 pub mod registry;
 pub mod remote_mcp;

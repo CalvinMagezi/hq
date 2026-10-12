@@ -381,6 +381,17 @@ pub fn egress_report(cfg: &HqConfig, env: EnvLookup<'_>) -> Vec<EgressItem> {
         ));
     }
 
+    if cfg.web_push.enabled {
+        let hosts = cfg.web_push.hosts();
+        let hosts: Vec<&str> = hosts.iter().map(String::as_str).collect();
+        items.push(item(
+            "web-push",
+            "Web Push to subscribed browsers",
+            &hosts,
+            "notification titles and short bodies, encrypted end to end",
+        ));
+    }
+
     if cfg.copilot_usage.enabled && super::copilot_active(cfg) {
         let mut e = item(
             "copilot-usage",
@@ -651,6 +662,18 @@ mod tests {
             ["mcp.example.com"],
             "no credentials or port in the host"
         );
+    }
+
+    #[test]
+    fn web_push_is_listed_and_lite_needs_it_allowed() {
+        let mut cfg = lite();
+        cfg.web_push.enabled = true;
+        let report = egress_report(&cfg, &no_env);
+        assert_eq!(ids(&report), ["web-push"]);
+        assert!(report[0].hosts.iter().any(|h| h == "fcm.googleapis.com"));
+        assert_eq!(ids(&lite_violations(&cfg, &no_env)), ["web-push"]);
+        cfg.lite.allow_egress = vec!["web-push".into()];
+        assert!(lite_violations(&cfg, &no_env).is_empty());
     }
 
     #[test]

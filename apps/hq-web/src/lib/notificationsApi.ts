@@ -7,6 +7,8 @@ interface NotificationMetadata {
   artifact_path?: string
   score?: number
   extra?: Record<string, string>
+  /** A page of the web app the item opens, such as /tasks. */
+  link?: string
 }
 
 export interface NotificationItem {

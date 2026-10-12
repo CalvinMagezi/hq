@@ -40,6 +40,9 @@ pub(crate) struct NotificationMetadata {
     pub(crate) score: Option<f64>,
     #[serde(default, skip_serializing_if = "HashMap::is_empty")]
     pub(crate) extra: HashMap<String, String>,
+    /// A page of the web app the item opens, from `notify_owner`'s `link`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) link: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -81,7 +84,7 @@ pub(crate) struct NotificationActionResponse {
     pub(crate) message: String,
 }
 
-const VALUE_ITEM_COLUMNS: &str = "SELECT id, source_task, kind, title, body, artifact_path, score, state, created_at FROM value_items";
+const VALUE_ITEM_COLUMNS: &str = "SELECT id, source_task, kind, title, body, artifact_path, score, state, created_at, link FROM value_items";
 
 fn state_where(state_filter: Option<&str>) -> &'static str {
     match state_filter {
@@ -139,6 +142,9 @@ fn notification_from_row(row: &rusqlite::Row) -> rusqlite::Result<NotificationIt
             artifact_path: row.get(5)?,
             score: Some(row.get(6)?),
             extra,
+            link: row
+                .get::<_, Option<String>>(9)?
+                .filter(|l| crate::web_push::is_app_path(l)),
         },
         actions: actions.iter().map(|a| a.to_string()).collect(),
     })

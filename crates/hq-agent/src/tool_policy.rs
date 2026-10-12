@@ -151,6 +151,7 @@ pub fn default_profile_for_agent(name: &str) -> Option<AgentProfile> {
                 "dev_start".into(),
                 "dev_cancel".into(),
                 "native_code".into(),
+                "notify_owner".into(),
             ],
             allow_tools: vec![],
         }),
