@@ -37,7 +37,9 @@ pub(crate) fn read_system_file(vault_path: &Path, name: &str) -> Result<String> 
 /// A `_system/` file's body with frontmatter stripped and trimmed; empty if absent or unreadable.
 fn read_stripped(vault_path: &Path, name: &str) -> String {
     let raw = read_system_file(vault_path, name).unwrap_or_default();
-    hq_core::frontmatter_utils::strip_frontmatter(raw.trim()).trim().to_string()
+    hq_core::frontmatter_utils::strip_frontmatter(raw.trim())
+        .trim()
+        .to_string()
 }
 
 /// Canonical SOUL loader — single source of truth for HQ identity.

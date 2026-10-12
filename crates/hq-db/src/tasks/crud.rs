@@ -43,7 +43,8 @@ pub fn create_task(
     )?;
     set_tags(conn, id, new.tags)?;
     set_assignees(conn, id, new.assignees)?;
-    notify_on_ok(conn, 
+    notify_on_ok(
+        conn,
         get_task(conn, id)?
             .ok_or_else(|| anyhow::anyhow!("task {id} vanished immediately after creation")),
     )
@@ -138,11 +139,13 @@ pub(super) const PRIORITY_RANK_SQL: &str =
 
 fn order_by(sort: TaskSort) -> String {
     match sort {
-        TaskSort::Updated => "t.updated_at DESC, t.created_at DESC, t.display_id DESC, t.id DESC".to_string(),
+        TaskSort::Updated => {
+            "t.updated_at DESC, t.created_at DESC, t.display_id DESC, t.id DESC".to_string()
+        }
         TaskSort::Created => "t.created_at DESC, t.display_id DESC, t.id DESC".to_string(),
-        TaskSort::Priority => format!(
-            "{PRIORITY_RANK_SQL}, t.due_date IS NULL, t.due_date, t.created_at, t.id"
-        ),
+        TaskSort::Priority => {
+            format!("{PRIORITY_RANK_SQL}, t.due_date IS NULL, t.due_date, t.created_at, t.id")
+        }
     }
 }
 
@@ -172,11 +175,21 @@ fn filter_sql(filter: &TaskFilter) -> (String, SqlParams) {
         conditions.push("t.updated_at > ?");
         vals.push(Box::new(since.clone()));
     }
-    for word in filter.search.iter().flat_map(|s| s.split_whitespace()).take(MAX_SEARCH_WORDS) {
+    for word in filter
+        .search
+        .iter()
+        .flat_map(|s| s.split_whitespace())
+        .take(MAX_SEARCH_WORDS)
+    {
         conditions.push(
             "(t.title LIKE ? ESCAPE '\\' OR t.description LIKE ? ESCAPE '\\' OR t.display_id LIKE ? ESCAPE '\\')",
         );
-        let pattern = format!("%{}%", word.replace('\\', "\\\\").replace('%', "\\%").replace('_', "\\_"));
+        let pattern = format!(
+            "%{}%",
+            word.replace('\\', "\\\\")
+                .replace('%', "\\%")
+                .replace('_', "\\_")
+        );
         for _ in 0..3 {
             vals.push(Box::new(pattern.clone()));
         }
@@ -219,7 +232,10 @@ fn filter_sql(filter: &TaskFilter) -> (String, SqlParams) {
 /// silently cut.
 pub fn list_tasks(conn: &Connection, filter: &TaskFilter) -> Result<Vec<Task>> {
     let (from_where, vals) = filter_sql(filter);
-    let limit = filter.limit.unwrap_or(MAX_LIST_LIMIT).clamp(1, MAX_LIST_LIMIT);
+    let limit = filter
+        .limit
+        .unwrap_or(MAX_LIST_LIMIT)
+        .clamp(1, MAX_LIST_LIMIT);
     let sql = format!(
         "SELECT {TASK_COLS} {from_where} \
          ORDER BY {} LIMIT {limit} OFFSET {}",
@@ -324,7 +340,9 @@ pub fn update_task_as(
 ) -> Result<Task> {
     // The write lock is taken before the status read, so "did the status
     // change" is decided on the same state the UPDATE then modifies.
-    in_write_tx(conn, |conn| apply_update(conn, id, patch, expected_status, ctx))
+    in_write_tx(conn, |conn| {
+        apply_update(conn, id, patch, expected_status, ctx)
+    })
 }
 
 fn apply_update(
@@ -336,7 +354,10 @@ fn apply_update(
 ) -> Result<Task> {
     let current = get_task(conn, id)?.ok_or_else(|| anyhow::anyhow!("task {id} not found"))?;
     if current.archived_at.is_some() {
-        anyhow::bail!("{} is archived; restore it before changing it", current.display_id);
+        anyhow::bail!(
+            "{} is archived; restore it before changing it",
+            current.display_id
+        );
     }
     validate_patch(conn, &current, patch)?;
 
@@ -374,11 +395,23 @@ fn apply_update(
     }
     if let Some(reason) = &patch.blocked_reason {
         sets.push("blocked_reason = ?");
-        vals.push(Box::new(reason.as_deref().map(|r| clean_block_text("blocked_reason", r)).transpose()?.flatten()));
+        vals.push(Box::new(
+            reason
+                .as_deref()
+                .map(|r| clean_block_text("blocked_reason", r))
+                .transpose()?
+                .flatten(),
+        ));
     }
     if let Some(waiting) = &patch.waiting_on {
         sets.push("waiting_on = ?");
-        vals.push(Box::new(waiting.as_deref().map(|w| clean_block_text("waiting_on", w)).transpose()?.flatten()));
+        vals.push(Box::new(
+            waiting
+                .as_deref()
+                .map(|w| clean_block_text("waiting_on", w))
+                .transpose()?
+                .flatten(),
+        ));
     }
     if let Some(long) = patch.long_horizon {
         sets.push("long_horizon = ?");
@@ -426,16 +459,34 @@ fn apply_update(
 /// Keeps the blocked bookkeeping in step with the status: `blocked_since` stamps the move
 /// in, and the reason and the waiting-on clear when the task leaves blocked, unless this
 /// same write sets them.
-fn track_blocked(conn: &Connection, id: &str, from: &str, to: &str, patch: &TaskPatch) -> Result<()> {
+fn track_blocked(
+    conn: &Connection,
+    id: &str,
+    from: &str,
+    to: &str,
+    patch: &TaskPatch,
+) -> Result<()> {
     if to == STATUS_BLOCKED {
-        conn.execute("UPDATE tasks SET blocked_since = datetime('now') WHERE id = ?1", params![id])?;
+        conn.execute(
+            "UPDATE tasks SET blocked_since = datetime('now') WHERE id = ?1",
+            params![id],
+        )?;
     } else if from == STATUS_BLOCKED {
-        conn.execute("UPDATE tasks SET blocked_since = NULL WHERE id = ?1", params![id])?;
+        conn.execute(
+            "UPDATE tasks SET blocked_since = NULL WHERE id = ?1",
+            params![id],
+        )?;
         if patch.blocked_reason.is_none() {
-            conn.execute("UPDATE tasks SET blocked_reason = NULL WHERE id = ?1", params![id])?;
+            conn.execute(
+                "UPDATE tasks SET blocked_reason = NULL WHERE id = ?1",
+                params![id],
+            )?;
         }
         if patch.waiting_on.is_none() {
-            conn.execute("UPDATE tasks SET waiting_on = NULL WHERE id = ?1", params![id])?;
+            conn.execute(
+                "UPDATE tasks SET waiting_on = NULL WHERE id = ?1",
+                params![id],
+            )?;
         }
     }
     Ok(())

@@ -45,7 +45,9 @@ pub async fn run(config: &HqConfig, sub: &str) -> Result<()> {
             println!("Usage: hq shortcuts <subcommand>");
             println!();
             println!("Subcommands:");
-            println!("  test    Run shortcut smoke tests (built-in, or the vault's shortcut_probes.yaml)");
+            println!(
+                "  test    Run shortcut smoke tests (built-in, or the vault's shortcut_probes.yaml)"
+            );
             Ok(())
         }
     }
@@ -63,8 +65,7 @@ async fn run_test(config: &HqConfig) -> Result<()> {
     // Open the database and build the shortcut tool registry.
     let vault_path = config.vault_path.clone();
     let db = tokio::task::spawn_blocking(move || open_db_at(&vault_path)).await??;
-    let tools =
-        hq_tools::shortcuts::create_shortcut_tools(config.vault_path.clone(), db);
+    let tools = hq_tools::shortcuts::create_shortcut_tools(config.vault_path.clone(), db);
 
     // Index tools by name for O(1) lookup.
     let tool_map: std::collections::HashMap<&str, &dyn hq_tools::registry::HqTool> =
@@ -106,9 +107,10 @@ async fn load_probes(config: &HqConfig) -> Result<(ProbeFile, String)> {
         .join("shortcut_probes.yaml");
     let (text, source) = match tokio::fs::read_to_string(&probe_path).await {
         Ok(text) => (text, probe_path.display().to_string()),
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
-            (BUILTIN_PROBES.to_string(), "the built-in probe set".to_string())
-        }
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => (
+            BUILTIN_PROBES.to_string(),
+            "the built-in probe set".to_string(),
+        ),
         Err(e) => return Err(e.into()),
     };
     let probes = serde_yaml::from_str(&text)

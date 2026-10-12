@@ -454,9 +454,18 @@ impl HqTool for HqAskTool {
         };
         // Full-mode replies hold every tool, so few may run at once whatever the client says about itself.
         if known.is_none() && req.mode == AskMode::Full {
-            let cap = hq_core::config::HqConfig::load().map(|c| c.agent_host).unwrap_or_default().full_ask_cap();
-            if self.db.with_conn(|c| asks::count_pending_mode(c, scope, AskMode::Full.as_str()))? >= cap {
-                bail!("{cap} full-mode questions are already waiting for answers (agent_host.max_full_asks); collect one with hq_ask_result first");
+            let cap = hq_core::config::HqConfig::load()
+                .map(|c| c.agent_host)
+                .unwrap_or_default()
+                .full_ask_cap();
+            if self
+                .db
+                .with_conn(|c| asks::count_pending_mode(c, scope, AskMode::Full.as_str()))?
+                >= cap
+            {
+                bail!(
+                    "{cap} full-mode questions are already waiting for answers (agent_host.max_full_asks); collect one with hq_ask_result first"
+                );
             }
         }
         // Resending a question already asked costs nothing, so only new ones count.

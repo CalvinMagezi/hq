@@ -8,8 +8,8 @@ use axum::{
     response::{IntoResponse, Response},
 };
 use hq_db::harness_sessions_registry::{self as registry, HarnessSessionRow};
-use hq_tools::harness_session::{self as harness, ListFilter, Liveness, NewWatch};
 use hq_tools::agent_host::{AgentHostError, INVALID_KEYS_CODE, validate_keys};
+use hq_tools::harness_session::{self as harness, ListFilter, Liveness, NewWatch};
 use rusqlite::{Connection, TransactionBehavior};
 use serde::Deserialize;
 use serde_json::{Value, json};
@@ -189,7 +189,8 @@ fn live_session_json(
     cfg: &hq_core::config::AgentHostConfig,
 ) -> anyhow::Result<Value> {
     let mut v = session_json(conn, row)?;
-    if let (Some(base), Value::Object(extra)) = (v.as_object_mut(), harness::live_fields(row, live, cfg))
+    if let (Some(base), Value::Object(extra)) =
+        (v.as_object_mut(), harness::live_fields(row, live, cfg))
     {
         base.extend(extra);
     }
@@ -227,7 +228,10 @@ pub(crate) fn session_error(e: anyhow::Error) -> ApiError {
     let msg = e.to_string();
     if msg.contains("no harness session") || msg.starts_with("no task") {
         ApiError::NotFound(msg)
-    } else if msg.contains("waiting at a dialog") || msg.contains("is not running") || msg.contains("is still running on") {
+    } else if msg.contains("waiting at a dialog")
+        || msg.contains("is not running")
+        || msg.contains("is still running on")
+    {
         ApiError::Conflict(msg)
     } else {
         tracing::warn!(error = %e, "sessions api: request failed");
@@ -353,7 +357,12 @@ pub(crate) async fn screen_handler(
 }
 
 /// One shared screen read, with `styled: false` added when the plain read was used.
-fn read_screen(db: &Arc<hq_db::Database>, id: &str, lines: usize, styled: bool) -> anyhow::Result<Value> {
+fn read_screen(
+    db: &Arc<hq_db::Database>,
+    id: &str,
+    lines: usize,
+    styled: bool,
+) -> anyhow::Result<Value> {
     if styled {
         return harness::tail_log_styled_shared(db, id, lines);
     }
@@ -380,7 +389,10 @@ struct SlotPool {
 
 impl SlotPool {
     const fn new(max: usize) -> Self {
-        Self { open: std::sync::atomic::AtomicUsize::new(0), max }
+        Self {
+            open: std::sync::atomic::AtomicUsize::new(0),
+            max,
+        }
     }
 
     fn take(&'static self) -> Option<StreamSlot> {
@@ -406,7 +418,9 @@ impl StreamSlot {
 
 impl Drop for StreamSlot {
     fn drop(&mut self) {
-        self.0.open.fetch_sub(1, std::sync::atomic::Ordering::SeqCst);
+        self.0
+            .open
+            .fetch_sub(1, std::sync::atomic::Ordering::SeqCst);
     }
 }
 
@@ -441,14 +455,19 @@ fn screen_fingerprint(screen: &Value) -> u64 {
 }
 
 fn sse(event: &str, data: String) -> Result<axum::response::sse::Event, std::convert::Infallible> {
-    Ok(axum::response::sse::Event::default().event(event).data(data))
+    Ok(axum::response::sse::Event::default()
+        .event(event)
+        .data(data))
 }
 
 /// The next event of a live view: `screen` when the content changed (and once on connect), then `end`
 /// when the session is not running any more or the time is up.
 async fn next_stream_event(
     mut st: StreamState,
-) -> Option<(Result<axum::response::sse::Event, std::convert::Infallible>, StreamState)> {
+) -> Option<(
+    Result<axum::response::sse::Event, std::convert::Infallible>,
+    StreamState,
+)> {
     loop {
         if st.finished {
             return None;
@@ -506,12 +525,16 @@ pub(crate) async fn screen_stream_handler(
         return e.into_response();
     }
     let Some(slot) = StreamSlot::take() else {
-        return ApiError::Unavailable("too many live views are open; try again in a moment".into()).into_response();
+        return ApiError::Unavailable("too many live views are open; try again in a moment".into())
+            .into_response();
     };
     let state = StreamState {
         db: Arc::new(state.db.clone()),
         id,
-        lines: q.lines.unwrap_or(DEFAULT_SCREEN_LINES).clamp(1, MAX_SCREEN_LINES),
+        lines: q
+            .lines
+            .unwrap_or(DEFAULT_SCREEN_LINES)
+            .clamp(1, MAX_SCREEN_LINES),
         started: std::time::Instant::now(),
         last: None,
         ending: None,
@@ -522,10 +545,17 @@ pub(crate) async fn screen_stream_handler(
     };
     let events = futures::stream::unfold(state, next_stream_event);
     let mut response = axum::response::sse::Sse::new(events)
-        .keep_alive(axum::response::sse::KeepAlive::new().interval(STREAM_KEEPALIVE).text("keepalive"))
+        .keep_alive(
+            axum::response::sse::KeepAlive::new()
+                .interval(STREAM_KEEPALIVE)
+                .text("keepalive"),
+        )
         .into_response();
     // Tells nginx-style proxies not to hold the stream back.
-    response.headers_mut().insert("x-accel-buffering", axum::http::HeaderValue::from_static("no"));
+    response.headers_mut().insert(
+        "x-accel-buffering",
+        axum::http::HeaderValue::from_static("no"),
+    );
     response
 }
 
@@ -831,14 +861,20 @@ mod tests {
         let missing = screen_handler(
             State(state.clone()),
             AxumPath("nope".into()),
-            Query(ScreenQuery { lines: None, styled: None }),
+            Query(ScreenQuery {
+                lines: None,
+                styled: None,
+            }),
         )
         .await;
         assert_eq!(missing.status(), StatusCode::NOT_FOUND);
         let shown = screen_handler(
             State(state.clone()),
             AxumPath("hs-s".into()),
-            Query(ScreenQuery { lines: Some(5), styled: None }),
+            Query(ScreenQuery {
+                lines: Some(5),
+                styled: None,
+            }),
         )
         .await;
         assert_eq!(shown.status(), StatusCode::OK);
@@ -1037,11 +1073,17 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn a_running_session_whose_screen_cannot_be_read_ends_unavailable_without_sending_stale_text() {
+    async fn a_running_session_whose_screen_cannot_be_read_ends_unavailable_without_sending_stale_text()
+     {
         let state = test_state();
         seed(&state, "hs-run", None);
-        let (_event, after) = next_stream_event(stream_state(&state, "hs-run")).await.expect("an end event");
-        assert!(after.last.is_none(), "no screen event was sent for a failed read");
+        let (_event, after) = next_stream_event(stream_state(&state, "hs-run"))
+            .await
+            .expect("an end event");
+        assert!(
+            after.last.is_none(),
+            "no screen event was sent for a failed read"
+        );
         assert_eq!(after.ending, Some("unavailable"));
         assert!(after.finished);
     }
@@ -1050,8 +1092,13 @@ mod tests {
     async fn a_stopped_session_sends_its_saved_screen_once_and_then_ends() {
         let state = test_state();
         seed(&state, "hs-done", None);
-        state.db.with_conn(|c| registry::set_status(c, "hs-done", registry::STATUS_STOPPED)).unwrap();
-        let (_screen, after) = next_stream_event(stream_state(&state, "hs-done")).await.expect("the saved screen");
+        state
+            .db
+            .with_conn(|c| registry::set_status(c, "hs-done", registry::STATUS_STOPPED))
+            .unwrap();
+        let (_screen, after) = next_stream_event(stream_state(&state, "hs-done"))
+            .await
+            .expect("the saved screen");
         assert!(after.last.is_some() && !after.finished);
         assert_eq!(after.ending, Some("stopped"));
         let (_end, after) = next_stream_event(after).await.expect("the end event");
@@ -1063,15 +1110,34 @@ mod tests {
     fn the_same_screen_has_the_same_fingerprint_and_a_changed_one_does_not() {
         let a = json!({"lines": ["x"], "source": "live"});
         assert_eq!(screen_fingerprint(&a), screen_fingerprint(&a.clone()));
-        assert_ne!(screen_fingerprint(&a), screen_fingerprint(&json!({"lines": ["y"], "source": "live"})));
+        assert_ne!(
+            screen_fingerprint(&a),
+            screen_fingerprint(&json!({"lines": ["y"], "source": "live"}))
+        );
     }
 
     #[tokio::test]
     async fn the_stream_and_a_styled_read_404_an_unknown_session() {
         let state = test_state();
-        let stream = screen_stream_handler(State(state.clone()), AxumPath("hs-none".into()), Query(ScreenQuery { lines: None, styled: None })).await;
+        let stream = screen_stream_handler(
+            State(state.clone()),
+            AxumPath("hs-none".into()),
+            Query(ScreenQuery {
+                lines: None,
+                styled: None,
+            }),
+        )
+        .await;
         assert_eq!(stream.status(), StatusCode::NOT_FOUND);
-        let read = screen_handler(State(state), AxumPath("hs-none".into()), Query(ScreenQuery { lines: None, styled: Some(true) })).await;
+        let read = screen_handler(
+            State(state),
+            AxumPath("hs-none".into()),
+            Query(ScreenQuery {
+                lines: None,
+                styled: Some(true),
+            }),
+        )
+        .await;
         assert_eq!(read.status(), StatusCode::NOT_FOUND);
     }
 

@@ -188,7 +188,10 @@ mod tests {
         let vault = tempfile::tempdir().unwrap();
         assert_eq!(DaemonLock::holder_pid(vault.path()), None);
         let lock = DaemonLock::try_acquire(vault.path()).unwrap().unwrap();
-        assert_eq!(DaemonLock::holder_pid(vault.path()), Some(std::process::id()));
+        assert_eq!(
+            DaemonLock::holder_pid(vault.path()),
+            Some(std::process::id())
+        );
         lock.release();
         assert_eq!(DaemonLock::holder_pid(vault.path()), None);
     }

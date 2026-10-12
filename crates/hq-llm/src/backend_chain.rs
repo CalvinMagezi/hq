@@ -17,7 +17,7 @@ use tokio_stream::Stream;
 use crate::anthropic::AnthropicProvider;
 use crate::copilot::CopilotProvider;
 use crate::cost::ProviderClass;
-use crate::instrument::{Instruments, InstrumentedProvider};
+use crate::instrument::{InstrumentedProvider, Instruments};
 use crate::openai_compat::OpenRouterProvider;
 use crate::provider::{ChatRequest, ChatResponse, LlmError, LlmProvider, StreamChunk};
 
@@ -364,10 +364,13 @@ mod tests {
     #[tokio::test]
     async fn primary_answers_with_its_own_model() {
         let (luna, gemini) = (Fake::new(None), Fake::new(None));
-        let chain = ChainProvider::from_links(vec![
-            ("luna", luna.clone(), "gpt-6-luna"),
-            ("copilot", gemini.clone(), "gemini-3.8-flash"),
-        ], Instruments::new());
+        let chain = ChainProvider::from_links(
+            vec![
+                ("luna", luna.clone(), "gpt-6-luna"),
+                ("copilot", gemini.clone(), "gemini-3.8-flash"),
+            ],
+            Instruments::new(),
+        );
         let reply = chain.chat(&request("fast")).await.unwrap();
         assert_eq!(reply.model, "gpt-6-luna");
         assert!(gemini.seen.lock().unwrap().is_empty());
@@ -380,10 +383,13 @@ mod tests {
             message: "model_not_supported".into(),
         }));
         let gemini = Fake::new(None);
-        let chain = ChainProvider::from_links(vec![
-            ("luna", luna.clone(), "gpt-6-luna"),
-            ("copilot", gemini.clone(), "gemini-3.8-flash"),
-        ], Instruments::new());
+        let chain = ChainProvider::from_links(
+            vec![
+                ("luna", luna.clone(), "gpt-6-luna"),
+                ("copilot", gemini.clone(), "gemini-3.8-flash"),
+            ],
+            Instruments::new(),
+        );
         let reply = chain.chat(&request("bulk")).await.unwrap();
         assert_eq!(reply.model, "gemini-3.8-flash");
         assert_eq!(*luna.seen.lock().unwrap(), vec!["gpt-6-luna"]);
@@ -395,10 +401,13 @@ mod tests {
             message: "too long".into(),
         }));
         let gemini = Fake::new(None);
-        let chain = ChainProvider::from_links(vec![
-            ("luna", luna, "gpt-6-luna"),
-            ("copilot", gemini.clone(), "gemini-3.8-flash"),
-        ], Instruments::new());
+        let chain = ChainProvider::from_links(
+            vec![
+                ("luna", luna, "gpt-6-luna"),
+                ("copilot", gemini.clone(), "gemini-3.8-flash"),
+            ],
+            Instruments::new(),
+        );
         assert!(chain.chat(&request("fast")).await.is_err());
         assert!(gemini.seen.lock().unwrap().is_empty());
     }

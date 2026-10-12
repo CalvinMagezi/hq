@@ -11,11 +11,18 @@ async fn live_route_answers_noul_and_choice() {
     let key = std::env::var("OPENROUTER_API_KEY").expect("OPENROUTER_API_KEY");
     let provider = HttpDecisionProvider::new(DecisionRoute::default(), key, Duration::from_secs(5));
     let request = DecisionRequest::new("Weekly newsletter: 5 product updates from a SaaS vendor.")
-        .noul("should_interrupt", "Should the owner be interrupted right now?")
+        .noul(
+            "should_interrupt",
+            "Should the owner be interrupted right now?",
+        )
         .choice(
             "urgency",
             "How urgent is this message?",
-            &[("routine", "newsletters"), ("actionable", "needs a reply"), ("critical", "outage")],
+            &[
+                ("routine", "newsletters"),
+                ("actionable", "needs a reply"),
+                ("critical", "outage"),
+            ],
         );
     let response = provider.decide(&request).await.expect("live decision");
     assert!(response.noul("should_interrupt").unwrap() < 0.5);

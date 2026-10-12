@@ -91,22 +91,24 @@ pub fn serve_bridge(path: &Path, port: u16, stop: Arc<AtomicBool>) -> std::io::R
     std::fs::set_permissions(path, std::fs::Permissions::from_mode(SOCKET_MODE))?;
     listener.set_nonblocking(true)?;
     let path = path.to_path_buf();
-    std::thread::Builder::new().name("egress-bridge".into()).spawn(move || {
-        while !stop.load(Ordering::SeqCst) {
-            match listener.accept() {
-                Ok((client, _)) => {
-                    let _ = client.set_nonblocking(false);
-                    let Ok(proxy) = TcpStream::connect((Ipv4Addr::LOCALHOST, port)) else {
-                        client.close();
-                        continue;
-                    };
-                    std::thread::spawn(move || pipe(client, proxy));
+    std::thread::Builder::new()
+        .name("egress-bridge".into())
+        .spawn(move || {
+            while !stop.load(Ordering::SeqCst) {
+                match listener.accept() {
+                    Ok((client, _)) => {
+                        let _ = client.set_nonblocking(false);
+                        let Ok(proxy) = TcpStream::connect((Ipv4Addr::LOCALHOST, port)) else {
+                            client.close();
+                            continue;
+                        };
+                        std::thread::spawn(move || pipe(client, proxy));
+                    }
+                    Err(_) => std::thread::sleep(ACCEPT_POLL),
                 }
-                Err(_) => std::thread::sleep(ACCEPT_POLL),
             }
-        }
-        let _ = std::fs::remove_file(&path);
-    })?;
+            let _ = std::fs::remove_file(&path);
+        })?;
     Ok(())
 }
 

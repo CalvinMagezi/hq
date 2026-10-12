@@ -93,7 +93,9 @@ impl KeyRule {
         match self {
             KeyRule::Any(env) => key(env),
             KeyRule::NonEmpty(env) => key(env).filter(|k| !k.is_empty()),
-            KeyRule::FirstNonEmpty(envs) => envs.iter().find_map(|env| key(env).filter(|k| !k.is_empty())),
+            KeyRule::FirstNonEmpty(envs) => envs
+                .iter()
+                .find_map(|env| key(env).filter(|k| !k.is_empty())),
             KeyRule::Moonshot => {
                 key("KIMI_API_KEY").filter(|k| !k.is_empty() && !k.starts_with("sk-kimi-"))
             }
@@ -350,9 +352,19 @@ const ALIAS_ROUTES: &[(&str, &str, &str, CostTier)] = &[
     ("dream", "groq", "llama-3.1-8b-instant", Free),
     ("deep-sleep", "groq", "llama-3.1-8b-instant", Free),
     ("dream", "openrouter", LLAMA_70B_FREE, Free),
-    ("dream", "openrouter", OPENROUTER_BACKGROUND_FALLBACK, Budget),
+    (
+        "dream",
+        "openrouter",
+        OPENROUTER_BACKGROUND_FALLBACK,
+        Budget,
+    ),
     ("deep-sleep", "openrouter", LLAMA_70B_FREE, Free),
-    ("deep-sleep", "openrouter", OPENROUTER_BACKGROUND_FALLBACK, Budget),
+    (
+        "deep-sleep",
+        "openrouter",
+        OPENROUTER_BACKGROUND_FALLBACK,
+        Budget,
+    ),
     ("dream", "openai", "gpt-4.1-nano", Budget),
     ("deep-sleep", "openai", "gpt-4.1-nano", Budget),
     ("dream", "deepseek", "deepseek-chat", Budget),
@@ -791,7 +803,10 @@ mod config_key_provider_tests {
     use hq_core::config::HqConfig;
 
     fn router_with_only(env: &'static str) -> LlmRouter {
-        LlmRouter::from_keys(&move |name| (name == env).then(|| "test-key".to_string()), false)
+        LlmRouter::from_keys(
+            &move |name| (name == env).then(|| "test-key".to_string()),
+            false,
+        )
     }
 
     /// (provider, model id) per candidate. An empty id is a wildcard route, which sends the
@@ -811,9 +826,18 @@ mod config_key_provider_tests {
             google_ai_api_key: Some("g-x".into()),
             ..HqConfig::default()
         };
-        assert_eq!(config_key(Some(&cfg), "ANTHROPIC_API_KEY").as_deref(), Some("sk-ant-x"));
-        assert_eq!(config_key(Some(&cfg), "GEMINI_API_KEY").as_deref(), Some("g-x"));
-        let empty = HqConfig { anthropic_api_key: Some(String::new()), ..HqConfig::default() };
+        assert_eq!(
+            config_key(Some(&cfg), "ANTHROPIC_API_KEY").as_deref(),
+            Some("sk-ant-x")
+        );
+        assert_eq!(
+            config_key(Some(&cfg), "GEMINI_API_KEY").as_deref(),
+            Some("g-x")
+        );
+        let empty = HqConfig {
+            anthropic_api_key: Some(String::new()),
+            ..HqConfig::default()
+        };
         assert_eq!(config_key(Some(&empty), "ANTHROPIC_API_KEY"), None);
     }
 
@@ -826,7 +850,11 @@ mod config_key_provider_tests {
             ("anthropic/claude-sonnet-5.5", "claude-sonnet-5-5"),
             ("anthropic/claude-opus-5.5", "claude-opus-5-5"),
         ] {
-            assert_eq!(route(&router, id), vec![("anthropic-api".to_string(), direct.to_string())], "{id}");
+            assert_eq!(
+                route(&router, id),
+                vec![("anthropic-api".to_string(), direct.to_string())],
+                "{id}"
+            );
         }
     }
 
@@ -842,10 +870,25 @@ mod config_key_provider_tests {
     fn every_alias_has_a_real_model_with_only_an_anthropic_key() {
         let router = router_with_only("ANTHROPIC_API_KEY");
         for alias in [
-            "relay", "premium", "plan", "code", "mid", "fast", "bulk", "dream", "deep-sleep",
-            "verify", "critic", "notification", "nudge",
+            "relay",
+            "premium",
+            "plan",
+            "code",
+            "mid",
+            "fast",
+            "bulk",
+            "dream",
+            "deep-sleep",
+            "verify",
+            "critic",
+            "notification",
+            "nudge",
         ] {
-            assert_eq!(router.fallback_model("anthropic-api", alias), "claude-haiku-5-5", "{alias}");
+            assert_eq!(
+                router.fallback_model("anthropic-api", alias),
+                "claude-haiku-5-5",
+                "{alias}"
+            );
         }
     }
 

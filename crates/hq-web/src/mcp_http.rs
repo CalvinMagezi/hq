@@ -64,8 +64,12 @@ impl McpKeys {
         Self {
             full: std::env::var("AGENTHQ_API_KEY").ok(),
             spark: std::env::var("AGENTHQ_SPARK_API_KEY").ok(),
-            handoff: std::env::var(HANDOFF_KEY_ENV).ok().filter(|k| !k.trim().is_empty()),
-            tasks: std::env::var(TASKS_KEY_ENV).ok().filter(|k| !k.trim().is_empty()),
+            handoff: std::env::var(HANDOFF_KEY_ENV)
+                .ok()
+                .filter(|k| !k.trim().is_empty()),
+            tasks: std::env::var(TASKS_KEY_ENV)
+                .ok()
+                .filter(|k| !k.trim().is_empty()),
         }
     }
 
@@ -101,13 +105,19 @@ async fn handle_mcp(
     if identity.is_none() && session.is_none() {
         if keys.none_configured() {
             tracing::warn!("mcp_http: refused, no AGENTHQ_API_KEY configured");
-            return rpc_err(id, -32001, "Unauthorized: this server has no AGENTHQ_API_KEY configured");
+            return rpc_err(
+                id,
+                -32001,
+                "Unauthorized: this server has no AGENTHQ_API_KEY configured",
+            );
         }
         return rpc_err(id, -32001, "Unauthorized");
     }
     let allowed: Option<&[&str]> = match (identity, &session) {
         (Some(crate::auth::ApiIdentity::Full), _) => None,
-        (Some(crate::auth::ApiIdentity::Spark), _) => Some(hq_mcp::gateway::SPARK_READONLY_ALLOWLIST),
+        (Some(crate::auth::ApiIdentity::Spark), _) => {
+            Some(hq_mcp::gateway::SPARK_READONLY_ALLOWLIST)
+        }
         (Some(crate::auth::ApiIdentity::Tasks), _) => Some(hq_mcp::gateway::TASKS_ALLOWLIST),
         (Some(crate::auth::ApiIdentity::Handoff), _) => Some(hq_mcp::gateway::HANDOFF_ALLOWLIST),
         (None, _) => Some(hq_mcp::gateway::SESSION_ALLOWLIST),
@@ -123,7 +133,10 @@ async fn handle_mcp(
             let tools = state
                 .registry
                 .as_ref()
-                .and_then(|r| serde_json::to_value(hq_mcp::gateway::create_gateway_tools_scoped(r, allowed)).ok())
+                .and_then(|r| {
+                    serde_json::to_value(hq_mcp::gateway::create_gateway_tools_scoped(r, allowed))
+                        .ok()
+                })
                 .unwrap_or(json!([]));
             rpc_ok(id, json!({"tools": tools}))
         }
@@ -168,8 +181,14 @@ async fn call_tool(
     caller_session: Option<&str>,
 ) -> Json<Value> {
     let params = body.get("params").and_then(|v| v.as_object());
-    let tool_name = params.and_then(|p| p.get("name")).and_then(|v| v.as_str()).unwrap_or("");
-    let arguments = params.and_then(|p| p.get("arguments")).and_then(|v| v.as_object()).cloned();
+    let tool_name = params
+        .and_then(|p| p.get("name"))
+        .and_then(|v| v.as_str())
+        .unwrap_or("");
+    let arguments = params
+        .and_then(|p| p.get("arguments"))
+        .and_then(|v| v.as_object())
+        .cloned();
     let arguments = match spawned_by {
         Some(session) => hq_mcp::gateway::mark_spawned_session(arguments.as_ref(), session),
         None => arguments,
@@ -177,18 +196,20 @@ async fn call_tool(
     let Some(registry) = &state.registry else {
         return rpc_err(id, -32603, "MCP registry not initialized");
     };
-    let result =
-        hq_mcp::gateway::dispatch_as(
-            registry,
-            tool_name,
-            arguments.as_ref(),
-            &state.db,
-            allowed,
-            caller_session,
-        )
-        .await;
+    let result = hq_mcp::gateway::dispatch_as(
+        registry,
+        tool_name,
+        arguments.as_ref(),
+        &state.db,
+        allowed,
+        caller_session,
+    )
+    .await;
     match result {
-        Ok(call_result) => rpc_ok(id, serde_json::to_value(&call_result).unwrap_or(json!({"content": []}))),
+        Ok(call_result) => rpc_ok(
+            id,
+            serde_json::to_value(&call_result).unwrap_or(json!({"content": []})),
+        ),
         Err(e) => rpc_err(id, e.code.0.into(), e.message),
     }
 }
@@ -240,12 +261,19 @@ mod tests {
         let ok = rpc_ok(Value::Null, json!({}));
         let accepted = answer(true, ok);
         assert_eq!(accepted.status(), axum::http::StatusCode::ACCEPTED);
-        assert!(axum::body::to_bytes(accepted.into_body(), usize::MAX).await.unwrap().is_empty());
+        assert!(
+            axum::body::to_bytes(accepted.into_body(), usize::MAX)
+                .await
+                .unwrap()
+                .is_empty()
+        );
 
         let answered = answer(false, rpc_ok(json!(1), json!({"tools": []})));
         assert_eq!(answered.status(), axum::http::StatusCode::OK);
         let refused = answer(true, rpc_err(Value::Null, -32001, "Unauthorized"));
-        let bytes = axum::body::to_bytes(refused.into_body(), usize::MAX).await.unwrap();
+        let bytes = axum::body::to_bytes(refused.into_body(), usize::MAX)
+            .await
+            .unwrap();
         assert!(String::from_utf8_lossy(&bytes).contains("Unauthorized"));
     }
 
@@ -254,7 +282,11 @@ mod tests {
         let spark: &[&str] = &["vault_read"];
         let registry = hq_tools::registry::ToolRegistry::new();
         assert!(initialize_result(None, None).get("instructions").is_none());
-        assert!(initialize_result(Some(&registry), Some(spark)).get("instructions").is_none());
+        assert!(
+            initialize_result(Some(&registry), Some(spark))
+                .get("instructions")
+                .is_none()
+        );
         assert!(initialize_result(Some(&registry), None)["instructions"].is_string());
     }
 
@@ -333,7 +365,9 @@ mod tests {
             .oneshot(req.body(Body::from(body.to_string())).unwrap())
             .await
             .unwrap();
-        let bytes = axum::body::to_bytes(res.into_body(), usize::MAX).await.unwrap();
+        let bytes = axum::body::to_bytes(res.into_body(), usize::MAX)
+            .await
+            .unwrap();
         serde_json::from_slice(&bytes).unwrap()
     }
 
@@ -352,9 +386,14 @@ mod tests {
     }
 
     fn names(listing: &Value) -> Vec<String> {
-        let text = listing["result"]["content"][0]["text"].as_str().unwrap_or("[]");
+        let text = listing["result"]["content"][0]["text"]
+            .as_str()
+            .unwrap_or("[]");
         let tools: Vec<Value> = serde_json::from_str(text).unwrap();
-        tools.iter().map(|t| t["name"].as_str().unwrap().to_string()).collect()
+        tools
+            .iter()
+            .map(|t| t["name"].as_str().unwrap().to_string())
+            .collect()
     }
 
     #[tokio::test]
@@ -380,13 +419,28 @@ mod tests {
             assert_eq!(listed, ["hq_discover", "hq_call"], "{key}");
         }
         let full = description(&rpc(&app, Some(FULL), list()).await);
-        assert!(full.contains("config") && full.contains("tasks") && full.contains("sessions"), "{full}");
+        assert!(
+            full.contains("config") && full.contains("tasks") && full.contains("sessions"),
+            "{full}"
+        );
         let spark = description(&rpc(&app, Some(SPARK), list()).await);
-        assert!(spark.contains("vault") && spark.contains("sessions"), "{spark}");
-        assert!(!spark.contains("config") && !spark.contains("tasks"), "{spark}");
+        assert!(
+            spark.contains("vault") && spark.contains("sessions"),
+            "{spark}"
+        );
+        assert!(
+            !spark.contains("config") && !spark.contains("tasks"),
+            "{spark}"
+        );
         let handoff = description(&rpc(&app, Some(HANDOFF), list()).await);
-        assert!(handoff.contains("tasks") && !handoff.contains("config"), "{handoff}");
-        assert!(handoff.contains("sessions"), "handoff can spawn sessions: {handoff}");
+        assert!(
+            handoff.contains("tasks") && !handoff.contains("config"),
+            "{handoff}"
+        );
+        assert!(
+            handoff.contains("sessions"),
+            "handoff can spawn sessions: {handoff}"
+        );
         let tasks = description(&rpc(&app, Some(TASKS), list()).await);
         assert!(tasks.contains("tasks"), "{tasks}");
         assert!(
@@ -403,9 +457,16 @@ mod tests {
         let spark = names(&rpc(&app, Some(SPARK), discover()).await);
         assert_eq!(spark, ["harness_session_logs", "vault_search"]);
         let handoff = names(&rpc(&app, Some(HANDOFF), discover()).await);
-        assert_eq!(handoff, ["harness_session_spawn", "task_create", "vault_search"]);
+        assert_eq!(
+            handoff,
+            ["harness_session_spawn", "task_create", "vault_search"]
+        );
         let tasks = names(&rpc(&app, Some(TASKS), discover()).await);
-        assert_eq!(tasks, ["task_create"], "no vault and no session tools on the tasks key");
+        assert_eq!(
+            tasks,
+            ["task_create"],
+            "no vault and no session tools on the tasks key"
+        );
     }
 
     fn call_failed(res: &Value) -> bool {
@@ -438,7 +499,13 @@ mod tests {
                 assert!(!call_failed(&res), "{key} should run {tool}: {res}");
                 assert!(res.to_string().contains(tool), "{res}");
             } else {
-                assert!(res["error"]["message"].as_str().unwrap().contains("not permitted"), "{key} {tool}: {res}");
+                assert!(
+                    res["error"]["message"]
+                        .as_str()
+                        .unwrap()
+                        .contains("not permitted"),
+                    "{key} {tool}: {res}"
+                );
             }
         }
     }
@@ -517,7 +584,9 @@ mod tests {
     }
 
     fn result_of(res: &Value) -> Value {
-        let text = res["result"]["content"][0]["text"].as_str().unwrap_or("null");
+        let text = res["result"]["content"][0]["text"]
+            .as_str()
+            .unwrap_or("null");
         serde_json::from_str(text).unwrap_or(Value::Null)
     }
 

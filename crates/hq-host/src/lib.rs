@@ -26,9 +26,9 @@ mod events;
 #[cfg(unix)]
 mod gate;
 #[cfg(unix)]
-mod host;
-#[cfg(unix)]
 mod hooks;
+#[cfg(unix)]
+mod host;
 #[cfg(unix)]
 mod keys;
 #[cfg(unix)]
@@ -67,23 +67,33 @@ pub use error::HostError;
 #[cfg(unix)]
 pub use events::{Event, EventKind, EventLog, Poll};
 #[cfg(unix)]
-pub use lockdown::{Lockdown, clear as clear_lockdown, engage as engage_lockdown, lockdown_path, read as read_lockdown};
-#[cfg(unix)]
-pub use host::{
-    AwaitingInfo, BurstLimit, Host, PANE_TOKEN_ENV, RUN_DIR_ENV, PaneInfo, PaneStatus, ReadSource, RestoreReport, SpawnSpec, valid_name,
+pub use gate::{
+    Denied, GATE_DENIED_EXIT, MAX_GATE_INPUT, forward as gate_forward,
+    parse_request as gate_parse_request,
 };
 #[cfg(unix)]
-pub use gate::{Denied, GATE_DENIED_EXIT, MAX_GATE_INPUT, forward as gate_forward, parse_request as gate_parse_request};
+pub use hooks::{
+    claude_mcp_config, claude_settings, report_params, write_claude_mcp_config,
+    write_claude_settings,
+};
 #[cfg(unix)]
-pub use hooks::{claude_mcp_config, claude_settings, write_claude_mcp_config, report_params, write_claude_settings};
+pub use host::{
+    AwaitingInfo, BurstLimit, Host, PANE_TOKEN_ENV, PaneInfo, PaneStatus, RUN_DIR_ENV, ReadSource,
+    RestoreReport, SpawnSpec, valid_name,
+};
 #[cfg(unix)]
 pub use keys::encode_key;
+#[cfg(unix)]
+pub use lockdown::{
+    Lockdown, clear as clear_lockdown, engage as engage_lockdown, lockdown_path,
+    read as read_lockdown,
+};
+#[cfg(unix)]
+pub use proto::{MAX_LINE_BYTES, PROTOCOL_VERSION, Request, Response};
 #[cfg(unix)]
 pub use relay::{run_relay, sandbox_init};
 #[cfg(unix)]
 pub use report::{STALE_WORKING_AFTER, combine as combine_state, state_for};
-#[cfg(unix)]
-pub use proto::{MAX_LINE_BYTES, PROTOCOL_VERSION, Request, Response};
 #[cfg(unix)]
 pub use sandbox::{Allow, Mode as SandboxMode, SandboxSpec};
 #[cfg(unix)]
@@ -91,4 +101,7 @@ pub use server::{Limits, Server, StopHandle, agent_socket_path, socket_path};
 #[cfg(unix)]
 pub use token::{load_or_create as load_or_create_token, token_path};
 #[cfg(unix)]
-pub use workspace::{describe as describe_workspace, ensure_workspace, list_dirs, make_dir, resolve_inside, workspace_root};
+pub use workspace::{
+    describe as describe_workspace, ensure_workspace, list_dirs, make_dir, resolve_inside,
+    workspace_root,
+};

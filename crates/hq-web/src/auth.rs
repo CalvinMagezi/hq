@@ -126,9 +126,7 @@ pub(crate) fn tokens_match(provided: &str, expected: &str) -> bool {
 
 /// Whether the development switch may open `/mcp` for this request.
 pub(crate) fn mcp_dev_open(headers: &HeaderMap, switch_on: bool, bind_is_loopback: bool) -> bool {
-    switch_on
-        && bind_is_loopback
-        && !FORWARDING_HEADERS.iter().any(|h| headers.contains_key(*h))
+    switch_on && bind_is_loopback && !FORWARDING_HEADERS.iter().any(|h| headers.contains_key(*h))
 }
 
 /// Whether a request carries the web token as a Bearer header. Tokens in the
@@ -150,12 +148,19 @@ pub(crate) struct WsTickets {
 
 impl WsTickets {
     pub(crate) fn mint(&self) -> String {
-        let ticket = format!("{}{}", uuid::Uuid::new_v4().simple(), uuid::Uuid::new_v4().simple());
+        let ticket = format!(
+            "{}{}",
+            uuid::Uuid::new_v4().simple(),
+            uuid::Uuid::new_v4().simple()
+        );
         let mut issued = self.issued.lock().unwrap_or_else(|e| e.into_inner());
         let now = Instant::now();
         issued.retain(|_, expires| *expires > now);
         if issued.len() >= MAX_OUTSTANDING_TICKETS {
-            let oldest = issued.iter().min_by_key(|(_, e)| **e).map(|(k, _)| k.clone());
+            let oldest = issued
+                .iter()
+                .min_by_key(|(_, e)| **e)
+                .map(|(k, _)| k.clone());
             if let Some(oldest) = oldest {
                 issued.remove(&oldest);
             }
@@ -253,7 +258,12 @@ mod tests {
 
     #[test]
     fn guards_socket_and_api_but_not_health_mcp_or_oauth_redirect() {
-        for p in ["/ws", "/ws/other", "/api/tasks", "/api/notifications/x/action"] {
+        for p in [
+            "/ws",
+            "/ws/other",
+            "/api/tasks",
+            "/api/notifications/x/action",
+        ] {
             assert!(web_path_is_guarded(p), "{p}");
         }
         for p in ["/health", "/mcp", "/mcp/sse", "/", "/assets/app.js", "/wsx"] {
@@ -322,16 +332,28 @@ mod tests {
     #[test]
     fn closed_when_no_keys_configured() {
         let headers = HeaderMap::new();
-        assert_eq!(resolve_identity(&headers, None, None, None, None, false), None);
+        assert_eq!(
+            resolve_identity(&headers, None, None, None, None, false),
+            None
+        );
         let any_key = headers_with("x-api-key", "anything");
-        assert_eq!(resolve_identity(&any_key, None, None, None, None, false), None);
+        assert_eq!(
+            resolve_identity(&any_key, None, None, None, None, false),
+            None
+        );
     }
 
     #[test]
     fn dev_switch_opens_only_without_keys() {
         let headers = HeaderMap::new();
-        assert_eq!(resolve_identity(&headers, None, None, None, None, true), Some(ApiIdentity::Full));
-        assert_eq!(resolve_identity(&headers, Some("full-secret"), None, None, None, true), None);
+        assert_eq!(
+            resolve_identity(&headers, None, None, None, None, true),
+            Some(ApiIdentity::Full)
+        );
+        assert_eq!(
+            resolve_identity(&headers, Some("full-secret"), None, None, None, true),
+            None
+        );
     }
 
     #[test]
@@ -350,7 +372,14 @@ mod tests {
     fn matches_full_key_via_x_api_key() {
         let headers = headers_with("x-api-key", "full-secret");
         assert_eq!(
-            resolve_identity(&headers, Some("full-secret"), Some("spark-secret"), None, None, false),
+            resolve_identity(
+                &headers,
+                Some("full-secret"),
+                Some("spark-secret"),
+                None,
+                None,
+                false
+            ),
             Some(ApiIdentity::Full)
         );
     }
@@ -363,7 +392,14 @@ mod tests {
             "Bearer spark-secret".parse().unwrap(),
         );
         assert_eq!(
-            resolve_identity(&headers, Some("full-secret"), Some("spark-secret"), None, None, false),
+            resolve_identity(
+                &headers,
+                Some("full-secret"),
+                Some("spark-secret"),
+                None,
+                None,
+                false
+            ),
             Some(ApiIdentity::Spark)
         );
     }
@@ -372,7 +408,14 @@ mod tests {
     fn rejects_unknown_key() {
         let headers = headers_with("x-api-key", "not-a-real-key");
         assert_eq!(
-            resolve_identity(&headers, Some("full-secret"), Some("spark-secret"), None, None, false),
+            resolve_identity(
+                &headers,
+                Some("full-secret"),
+                Some("spark-secret"),
+                None,
+                None,
+                false
+            ),
             None
         );
     }
@@ -381,7 +424,14 @@ mod tests {
     fn rejects_missing_key_when_keys_configured() {
         let headers = HeaderMap::new();
         assert_eq!(
-            resolve_identity(&headers, Some("full-secret"), Some("spark-secret"), None, None, false),
+            resolve_identity(
+                &headers,
+                Some("full-secret"),
+                Some("spark-secret"),
+                None,
+                None,
+                false
+            ),
             None
         );
     }
@@ -390,12 +440,26 @@ mod tests {
     fn matches_handoff_key_and_never_full() {
         let headers = headers_with("x-api-key", "handoff-secret");
         assert_eq!(
-            resolve_identity(&headers, Some("full-secret"), Some("spark-secret"), Some("handoff-secret"), None, false),
+            resolve_identity(
+                &headers,
+                Some("full-secret"),
+                Some("spark-secret"),
+                Some("handoff-secret"),
+                None,
+                false
+            ),
             Some(ApiIdentity::Handoff)
         );
         let full = headers_with("x-api-key", "full-secret");
         assert_eq!(
-            resolve_identity(&full, Some("full-secret"), Some("spark-secret"), Some("handoff-secret"), None, false),
+            resolve_identity(
+                &full,
+                Some("full-secret"),
+                Some("spark-secret"),
+                Some("handoff-secret"),
+                None,
+                false
+            ),
             Some(ApiIdentity::Full),
             "the full key is unchanged"
         );
@@ -409,8 +473,21 @@ mod tests {
             Some(ApiIdentity::Handoff)
         );
         let wrong = headers_with("x-api-key", "nope");
-        assert_eq!(resolve_identity(&wrong, None, None, Some("handoff-secret"), None, false), None);
-        assert_eq!(resolve_identity(&HeaderMap::new(), None, None, Some("handoff-secret"), None, false), None);
+        assert_eq!(
+            resolve_identity(&wrong, None, None, Some("handoff-secret"), None, false),
+            None
+        );
+        assert_eq!(
+            resolve_identity(
+                &HeaderMap::new(),
+                None,
+                None,
+                Some("handoff-secret"),
+                None,
+                false
+            ),
+            None
+        );
         assert_eq!(
             resolve_identity(&headers, None, None, Some("other"), None, true),
             None,
@@ -426,7 +503,14 @@ mod tests {
             Some(ApiIdentity::Handoff)
         );
         assert_eq!(
-            resolve_identity(&headers, Some("same"), Some("same"), Some("same"), None, false),
+            resolve_identity(
+                &headers,
+                Some("same"),
+                Some("same"),
+                Some("same"),
+                None,
+                false
+            ),
             Some(ApiIdentity::Spark)
         );
         assert_eq!(
@@ -447,7 +531,14 @@ mod tests {
     fn tasks_key_resolves_tasks_and_never_wider() {
         let headers = headers_with("x-api-key", "tasks-secret");
         assert_eq!(
-            resolve_identity(&headers, Some("full"), Some("spark"), Some("handoff"), Some("tasks-secret"), false),
+            resolve_identity(
+                &headers,
+                Some("full"),
+                Some("spark"),
+                Some("handoff"),
+                Some("tasks-secret"),
+                false
+            ),
             Some(ApiIdentity::Tasks)
         );
         assert_eq!(
@@ -456,7 +547,10 @@ mod tests {
             "a tasks key alone opens the tasks scope"
         );
         let wrong = headers_with("x-api-key", "nope");
-        assert_eq!(resolve_identity(&wrong, None, None, None, Some("tasks-secret"), false), None);
+        assert_eq!(
+            resolve_identity(&wrong, None, None, None, Some("tasks-secret"), false),
+            None
+        );
         assert_eq!(
             resolve_identity(&headers, None, None, None, Some("other"), true),
             None,

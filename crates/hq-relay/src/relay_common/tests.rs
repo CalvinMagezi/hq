@@ -357,7 +357,10 @@ fn staging_never_overwrites_a_leading_user_message() {
     ));
     state.stage_turn("prompt", "next", Vec::new());
     let contents: Vec<&str> = state.messages.iter().map(|m| m.content.as_str()).collect();
-    assert_eq!(contents, ["prompt", "[focus] switching topic to: tax", "next"]);
+    assert_eq!(
+        contents,
+        ["prompt", "[focus] switching topic to: tax", "next"]
+    );
     assert_eq!(state.messages[0].role, hq_core::types::MessageRole::System);
 }
 

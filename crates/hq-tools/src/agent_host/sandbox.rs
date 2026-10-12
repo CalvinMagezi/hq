@@ -23,7 +23,10 @@ fn split_entry(entry: &str) -> Option<(String, u16)> {
 /// chose, often on a tailnet, so its rule may resolve to a private address.
 fn mcp_target(url: &str) -> Option<(String, u16)> {
     let parsed = url::Url::parse(url).ok()?;
-    Some((parsed.host_str()?.to_string(), parsed.port_or_known_default()?))
+    Some((
+        parsed.host_str()?.to_string(),
+        parsed.port_or_known_default()?,
+    ))
 }
 
 const SECS_PER_HOUR: u64 = 3600;
@@ -48,7 +51,9 @@ pub(super) fn plan(cfg: &AgentHostConfig) -> Value {
         }
         match split_entry(entry) {
             Some((host, port)) => allow.push(json!({ "host": host, "ports": [port] })),
-            None => tracing::warn!(entry = %entry, "ignoring a malformed agent_host.sandbox.allow_domains entry"),
+            None => {
+                tracing::warn!(entry = %entry, "ignoring a malformed agent_host.sandbox.allow_domains entry")
+            }
         }
     }
     json!({ "mode": "process", "allow": allow, "writable": sandbox.writable, "readable": sandbox.readable })
@@ -66,7 +71,10 @@ mod tests {
     fn process_is_the_default_and_allows_only_the_api() {
         let p = plan(&cfg());
         assert_eq!(p["mode"], "process");
-        assert_eq!(p["allow"], json!([{ "host": "api.anthropic.com", "ports": [443] }]));
+        assert_eq!(
+            p["allow"],
+            json!([{ "host": "api.anthropic.com", "ports": [443] }])
+        );
     }
 
     #[test]
@@ -74,18 +82,38 @@ mod tests {
         let mut c = cfg();
         c.agent_mcp_url = Some("https://hq.example.ts.net:8444/mcp".into());
         let p = plan(&c);
-        assert_eq!(p["allow"][1], json!({ "host": "hq.example.ts.net", "ports": [8444], "private": true }));
+        assert_eq!(
+            p["allow"][1],
+            json!({ "host": "hq.example.ts.net", "ports": [8444], "private": true })
+        );
     }
 
     #[test]
     fn extra_domains_take_an_optional_port_and_bad_entries_are_dropped() {
         let mut c = cfg();
-        c.sandbox.allow_domains = vec!["github.com".into(), "*.npmjs.org:443".into(), "x:notaport".into(), " ".into(), "dev.test:8080".into()];
+        c.sandbox.allow_domains = vec![
+            "github.com".into(),
+            "*.npmjs.org:443".into(),
+            "x:notaport".into(),
+            " ".into(),
+            "dev.test:8080".into(),
+        ];
         let p = plan(&c);
-        let hosts: Vec<&str> = p["allow"].as_array().unwrap().iter().map(|a| a["host"].as_str().unwrap()).collect();
-        assert_eq!(hosts, ["api.anthropic.com", "github.com", "*.npmjs.org", "dev.test"]);
+        let hosts: Vec<&str> = p["allow"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|a| a["host"].as_str().unwrap())
+            .collect();
+        assert_eq!(
+            hosts,
+            ["api.anthropic.com", "github.com", "*.npmjs.org", "dev.test"]
+        );
         assert_eq!(p["allow"][3]["ports"], json!([8080]));
-        assert!(p["allow"][1].get("private").is_none(), "extra domains never get a private address");
+        assert!(
+            p["allow"][1].get("private").is_none(),
+            "extra domains never get a private address"
+        );
     }
 
     #[test]

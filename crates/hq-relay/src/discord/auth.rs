@@ -30,7 +30,10 @@ pub(super) async fn is_message_author_allowed(
         return is_discord_user_allowed(user_id, allowed);
     }
     match tokio::fs::read_to_string(discord_auth_owner_path(vault_path)).await {
-        Ok(existing) => existing.trim().parse::<u64>().is_ok_and(|owner| owner == user_id),
+        Ok(existing) => existing
+            .trim()
+            .parse::<u64>()
+            .is_ok_and(|owner| owner == user_id),
         Err(_) => false,
     }
 }
@@ -190,9 +193,14 @@ mod tests {
         assert!(try_pair_dm(dir.path(), 42, true, true, &[], &cmd, 1));
         assert!(is_message_author_allowed(dir.path(), 42, &[]).await);
         assert!(!is_message_author_allowed(dir.path(), 99, &[]).await);
-        assert!(!try_pair_dm(dir.path(), 99, true, true, &[], &cmd, 2), "code is single use");
+        assert!(
+            !try_pair_dm(dir.path(), 99, true, true, &[], &cmd, 2),
+            "code is single use"
+        );
         assert_eq!(
-            std::fs::read_to_string(discord_auth_owner_path(dir.path())).unwrap().trim(),
+            std::fs::read_to_string(discord_auth_owner_path(dir.path()))
+                .unwrap()
+                .trim(),
             "42"
         );
     }
@@ -201,11 +209,33 @@ mod tests {
     async fn wrong_expired_guild_and_bot_pairing_attempts_are_refused() {
         let dir = tempfile::tempdir().unwrap();
         let code = code_for(dir.path());
-        assert!(!try_pair_dm(dir.path(), 1, true, true, &[], "!pair WRONG-WRONG", 1));
-        assert!(!try_pair_dm(dir.path(), 1, false, true, &[], &format!("!pair {code}"), 1), "guild");
-        assert!(!try_pair_dm(dir.path(), 1, true, false, &[], &format!("!pair {code}"), 1), "bot");
+        assert!(!try_pair_dm(
+            dir.path(),
+            1,
+            true,
+            true,
+            &[],
+            "!pair WRONG-WRONG",
+            1
+        ));
+        assert!(
+            !try_pair_dm(dir.path(), 1, false, true, &[], &format!("!pair {code}"), 1),
+            "guild"
+        );
+        assert!(
+            !try_pair_dm(dir.path(), 1, true, false, &[], &format!("!pair {code}"), 1),
+            "bot"
+        );
         let late = pairing::PAIRING_TTL_SECS + 1;
-        assert!(!try_pair_dm(dir.path(), 1, true, true, &[], &format!("!pair {code}"), late));
+        assert!(!try_pair_dm(
+            dir.path(),
+            1,
+            true,
+            true,
+            &[],
+            &format!("!pair {code}"),
+            late
+        ));
         assert!(!is_message_author_allowed(dir.path(), 1, &[]).await);
     }
 

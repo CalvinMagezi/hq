@@ -110,7 +110,10 @@ pub fn recent_skills(conn: &Connection, hours: u32, limit: u32) -> Result<Vec<Re
           LIMIT ?2",
     )?;
     let rows = stmt.query_map(params![format!("-{hours} hours"), limit], |row| {
-        Ok(RecentSkill { skill_name: row.get(0)?, trigger: row.get(1)? })
+        Ok(RecentSkill {
+            skill_name: row.get(0)?,
+            trigger: row.get(1)?,
+        })
     })?;
     Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
 }
@@ -130,7 +133,12 @@ pub fn set_latest_outcome(
           WHERE id = (SELECT id FROM skill_invocations
                        WHERE skill_name = ?3 AND loaded_at >= datetime('now', ?4)
                        ORDER BY loaded_at DESC, rowid DESC LIMIT 1)",
-        params![outcome_score, outcome_source, skill_name, format!("-{hours} hours")],
+        params![
+            outcome_score,
+            outcome_source,
+            skill_name,
+            format!("-{hours} hours")
+        ],
     )?;
     Ok(updated)
 }

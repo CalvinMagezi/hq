@@ -470,7 +470,11 @@ pub fn similar_to_text(
     let corpus = Corpus::new(docs);
     let new = corpus.docs.len() - 1;
     let mut scored: Vec<(f64, usize, Value)> = (0..new)
-        .filter_map(|j| corpus.compare(new, j).map(|(score, evidence)| (score, j, evidence)))
+        .filter_map(|j| {
+            corpus
+                .compare(new, j)
+                .map(|(score, evidence)| (score, j, evidence))
+        })
         .filter(|(score, _, _)| *score >= DUPLICATE_MIN_SCORE)
         .collect();
     scored.sort_by(|a, b| b.0.total_cmp(&a.0).then(a.1.cmp(&b.1)));
@@ -484,10 +488,15 @@ pub fn similar_to_text(
                 |r| ref_from_row(r, 0),
             )
             .ok()
-            .map(|task| SimilarTask { task, score: round3(score), evidence })
+            .map(|task| SimilarTask {
+                task,
+                score: round3(score),
+                evidence,
+            })
         })
         .collect();
-    let (mut open, mut done): (Vec<_>, Vec<_>) = all.into_iter().partition(|s| s.task.status != "complete");
+    let (mut open, mut done): (Vec<_>, Vec<_>) =
+        all.into_iter().partition(|s| s.task.status != "complete");
     open.truncate(MAX_SIMILAR);
     done.truncate(MAX_SIMILAR);
     open.extend(done);
@@ -506,7 +515,10 @@ pub struct EstimateSuggestion {
 /// The median leased time of similar completed tasks, rounded to five minutes,
 /// when at least `MIN_ESTIMATE_SAMPLES` of them have real leased time. A hint with
 /// its evidence, never a value that is written for anyone.
-pub fn suggest_estimate(conn: &Connection, similar: &[SimilarTask]) -> Result<Option<EstimateSuggestion>> {
+pub fn suggest_estimate(
+    conn: &Connection,
+    similar: &[SimilarTask],
+) -> Result<Option<EstimateSuggestion>> {
     let mut samples: Vec<(i64, String)> = Vec::new();
     for s in similar.iter().filter(|s| s.task.status == "complete") {
         let seconds = crate::tasks::leased_seconds(conn, &s.task.id)?;
@@ -524,7 +536,11 @@ pub fn suggest_estimate(conn: &Connection, similar: &[SimilarTask]) -> Result<Op
     } else {
         samples[mid].0
     };
-    let minutes = ((median / 60 + ESTIMATE_ROUNDING_MINUTES / 2) / ESTIMATE_ROUNDING_MINUTES * ESTIMATE_ROUNDING_MINUTES)
+    let minutes = ((median / 60 + ESTIMATE_ROUNDING_MINUTES / 2) / ESTIMATE_ROUNDING_MINUTES
+        * ESTIMATE_ROUNDING_MINUTES)
         .max(ESTIMATE_ROUNDING_MINUTES);
-    Ok(Some(EstimateSuggestion { minutes, based_on: samples.into_iter().map(|(_, id)| id).collect() }))
+    Ok(Some(EstimateSuggestion {
+        minutes,
+        based_on: samples.into_iter().map(|(_, id)| id).collect(),
+    }))
 }

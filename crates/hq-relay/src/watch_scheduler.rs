@@ -138,13 +138,22 @@ pub async fn tick(
             continue;
         }
         // A watch that follows a task ends when the task does, instead of firing on.
-        if let Some(reason) = db.with_conn(|c| background_turns::watch_finished_reason(c, &row.id)).ok().flatten() {
-            if let Err(e) = db.with_conn(|c| background_turns::mark_completed(c, &row.id, &reason, now)) {
+        if let Some(reason) = db
+            .with_conn(|c| background_turns::watch_finished_reason(c, &row.id))
+            .ok()
+            .flatten()
+        {
+            if let Err(e) =
+                db.with_conn(|c| background_turns::mark_completed(c, &row.id, &reason, now))
+            {
                 tracing::warn!(%e, watch = %row.id, "watch scheduler: closing a watch whose task ended failed");
                 continue;
             }
             // The chat that set the watch is told it ended, as for an expired one.
-            let notice = format!("Watch `{}` stopped. {reason}", background_turns::short_ref(&row.id));
+            let notice = format!(
+                "Watch `{}` stopped. {reason}",
+                background_turns::short_ref(&row.id)
+            );
             if let Err(e) = notify(row.clone(), notice).await {
                 tracing::warn!(%e, watch = %row.id, "watch scheduler: task-ended notice failed");
             }
@@ -161,7 +170,9 @@ pub async fn tick(
             Err(e) if e.is::<ChatBusy>() => {
                 // NULL and created_at are equivalent for list_due_watches' COALESCE.
                 let previous = row.watch_last_fired.unwrap_or(row.created_at);
-                if let Err(e) = db.with_conn(|c| background_turns::mark_watch_fired(c, &row.id, previous)) {
+                if let Err(e) =
+                    db.with_conn(|c| background_turns::mark_watch_fired(c, &row.id, previous))
+                {
                     tracing::warn!(%e, watch = %row.id, "watch scheduler: could not un-mark a busy firing");
                 }
                 tracing::info!(watch = %row.id, "watch scheduler: chat busy, retrying next tick");
@@ -184,7 +195,9 @@ pub(crate) struct WatchSurface<K> {
 }
 
 /// The scheduler's dispatch and notify closures for one surface.
-pub(crate) fn watch_callbacks<K: ChatKey>(surface: WatchSurface<K>) -> (WatchDispatch, WatchNotify) {
+pub(crate) fn watch_callbacks<K: ChatKey>(
+    surface: WatchSurface<K>,
+) -> (WatchDispatch, WatchNotify) {
     let surface = Arc::new(surface);
     let dispatch: WatchDispatch = {
         let surface = surface.clone();
@@ -210,7 +223,10 @@ fn parse_chat_key<K: ChatKey>(row: &BackgroundTurnRow) -> Result<K> {
 }
 
 /// Take the chat's single-flight slot, or report it busy with a live turn.
-pub(crate) async fn claim_chat<K: ChatKey>(threads: &TokioMutex<HashMap<K, ChannelState>>, key: K) -> bool {
+pub(crate) async fn claim_chat<K: ChatKey>(
+    threads: &TokioMutex<HashMap<K, ChannelState>>,
+    key: K,
+) -> bool {
     let mut t = threads.lock().await;
     let state = t.entry(key).or_insert_with(ChannelState::new_default);
     if state.turn_in_flight {
@@ -255,7 +271,13 @@ async fn run_watch_firing<K: ChatKey>(
     );
 
     // Each firing owns a fresh kind='turn' row; the watch row only tracks cadence.
-    let turn = TurnRow::register(&config, surface.platform, &row.chat_id, row.identity.as_deref(), &row.prompt);
+    let turn = TurnRow::register(
+        &config,
+        surface.platform,
+        &row.chat_id,
+        row.identity.as_deref(),
+        &row.prompt,
+    );
     let send = (surface.sender)(key);
     let on_detached: hq_agent::native_hq::DetachedTurnSink = {
         let (db, send, watch_id) = (turn.db.clone(), send.clone(), row.id.clone());
@@ -282,7 +304,12 @@ async fn run_watch_firing<K: ChatKey>(
         hq_agent::native_hq::NativeHqHooks {
             on_detached: Some(on_detached),
             permission_preset,
-            ..turn.hooks(&config, (surface.identity)(key), send.clone(), surface.progress_chars)
+            ..turn.hooks(
+                &config,
+                (surface.identity)(key),
+                send.clone(),
+                surface.progress_chars,
+            )
         },
     )
     .await;
@@ -297,7 +324,12 @@ async fn run_watch_firing<K: ChatKey>(
             Ok(())
         }
         Err(e) => {
-            crate::relay_common::close_turn_row(turn.db.as_deref(), &turn.id, &e.to_string(), false);
+            crate::relay_common::close_turn_row(
+                turn.db.as_deref(),
+                &turn.id,
+                &e.to_string(),
+                false,
+            );
             Err(anyhow::anyhow!("watch dispatch: run_native_hq failed: {e}"))
         }
     }
@@ -392,12 +424,24 @@ mod tests {
         seed_watch(&db, "w-busy", "telegram", 60, None);
         let busy: WatchDispatch = Arc::new(|_row| Box::pin(async { Err(ChatBusy.into()) }));
 
-        tick(&db, "telegram", T0 + 100, &busy, &recording_notify(Arc::new(Mutex::new(vec![]))))
-            .await
-            .unwrap();
+        tick(
+            &db,
+            "telegram",
+            T0 + 100,
+            &busy,
+            &recording_notify(Arc::new(Mutex::new(vec![]))),
+        )
+        .await
+        .unwrap();
 
-        let due = db.with_conn(|c| background_turns::list_due_watches(c, T0 + 130)).unwrap();
-        assert_eq!(due.len(), 1, "a busy firing must be retried, not skipped for an interval");
+        let due = db
+            .with_conn(|c| background_turns::list_due_watches(c, T0 + 130))
+            .unwrap();
+        assert_eq!(
+            due.len(),
+            1,
+            "a busy firing must be retried, not skipped for an interval"
+        );
     }
 
     #[tokio::test]
@@ -405,15 +449,33 @@ mod tests {
         let db = Database::open_memory().unwrap();
         db.with_conn(|c| {
             hq_db::tasks::create_initiative(c, "in-1", "personal", None, "Work", "work", "WK")?;
-            hq_db::tasks::create_task(c, "tk-1", "in-1", &hq_db::tasks::NewTask { title: "Ship", created_by: "t", ..Default::default() })?;
+            hq_db::tasks::create_task(
+                c,
+                "tk-1",
+                "in-1",
+                &hq_db::tasks::NewTask {
+                    title: "Ship",
+                    created_by: "t",
+                    ..Default::default()
+                },
+            )?;
             Ok(())
         })
         .unwrap();
         seed_watch(&db, "w-task", "telegram", 60, None);
-        db.with_conn(|c| background_turns::set_watch_task(c, "w-task", "WK-001")).unwrap();
+        db.with_conn(|c| background_turns::set_watch_task(c, "w-task", "WK-001"))
+            .unwrap();
         db.with_conn(|c| {
-            hq_db::tasks::update_task(c, "tk-1", &hq_db::tasks::TaskPatch { status: Some("complete".into()), ..Default::default() }, None)
-                .map(|_| ())
+            hq_db::tasks::update_task(
+                c,
+                "tk-1",
+                &hq_db::tasks::TaskPatch {
+                    status: Some("complete".into()),
+                    ..Default::default()
+                },
+                None,
+            )
+            .map(|_| ())
         })
         .unwrap();
 
@@ -428,12 +490,27 @@ mod tests {
         .await
         .unwrap();
 
-        assert!(dispatched.lock().unwrap().is_empty(), "no firing for a finished task");
-        let row = db.with_conn(|c| background_turns::get(c, "w-task")).unwrap().unwrap();
+        assert!(
+            dispatched.lock().unwrap().is_empty(),
+            "no firing for a finished task"
+        );
+        let row = db
+            .with_conn(|c| background_turns::get(c, "w-task"))
+            .unwrap()
+            .unwrap();
         assert_eq!(row.status, "completed");
-        assert!(row.result_text.unwrap().contains("complete, so this watch stopped"));
-        let thread = db.with_conn(|c| hq_db::tasks::list_comments(c, "tk-1")).unwrap();
-        assert!(thread.iter().any(|c| c.body.starts_with("Watch finished")), "{thread:?}");
+        assert!(
+            row.result_text
+                .unwrap()
+                .contains("complete, so this watch stopped")
+        );
+        let thread = db
+            .with_conn(|c| hq_db::tasks::list_comments(c, "tk-1"))
+            .unwrap();
+        assert!(
+            thread.iter().any(|c| c.body.starts_with("Watch finished")),
+            "{thread:?}"
+        );
     }
 
     #[tokio::test]
@@ -655,8 +732,12 @@ mod tests {
     #[tokio::test]
     async fn claim_chat_takes_a_free_slot_once() {
         let threads = TokioMutex::new(HashMap::<i64, ChannelState>::new());
-        threads.lock().await.entry(7).or_insert_with(ChannelState::new_default).pending_steer =
-            Some(Arc::new(std::sync::Mutex::new(None)));
+        threads
+            .lock()
+            .await
+            .entry(7)
+            .or_insert_with(ChannelState::new_default)
+            .pending_steer = Some(Arc::new(std::sync::Mutex::new(None)));
         assert!(claim_chat(&threads, 7).await);
         assert!(threads.lock().await[&7].pending_steer.is_none());
         assert!(!claim_chat(&threads, 7).await);

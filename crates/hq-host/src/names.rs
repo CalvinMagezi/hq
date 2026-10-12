@@ -17,7 +17,9 @@ pub fn check_folder_name(name: &str) -> std::io::Result<&str> {
         || name == ".."
         || name.chars().count() > MAX_NAME_CHARS
         || name.len() > MAX_NAME_BYTES
-        || name.chars().any(|c| c.is_control() || matches!(c, '/' | '\\' | ':' | '~' | '$' | '`'));
+        || name
+            .chars()
+            .any(|c| c.is_control() || matches!(c, '/' | '\\' | ':' | '~' | '$' | '`'));
     if bad {
         return Err(invalid(
             "a folder name is 1 to 100 characters with no slashes, colons, '~', '$' or backticks",

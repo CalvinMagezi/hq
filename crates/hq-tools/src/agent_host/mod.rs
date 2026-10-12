@@ -18,9 +18,9 @@ mod native;
 #[cfg(unix)]
 pub mod pairing;
 // Builds on the SSH transport, which is Unix-only.
+mod sandbox;
 #[cfg(all(unix, any(test, feature = "test-support")))]
 pub mod scripted;
-mod sandbox;
 pub mod tools;
 #[cfg(unix)]
 mod transport;
@@ -216,7 +216,6 @@ pub enum PromptOutcome {
     TimedOut(String),
 }
 
-
 /// The host calls block on a subprocess or ssh, so async callers hand them to the
 /// blocking pool instead of stalling a runtime thread.
 pub(crate) async fn blocking<T: Send + 'static>(
@@ -257,7 +256,10 @@ fn build(cfg: &AgentHostConfig, name: &str) -> anyhow::Result<Host> {
     }
     let remote = cfg.hosts.get(name).with_context(|| {
         let known: Vec<&str> = cfg.hosts.keys().map(String::as_str).collect();
-        format!("unknown host '{name}' (known: {NATIVE_HOST}, {})", known.join(", "))
+        format!(
+            "unknown host '{name}' (known: {NATIVE_HOST}, {})",
+            known.join(", ")
+        )
     })?;
     Ok(Arc::new(remote_native(cfg, name, remote)))
 }
@@ -271,14 +273,21 @@ fn remote_native(cfg: &AgentHostConfig, name: &str, remote: &RemoteHostConfig) -
         .ssh_multiplex
         .then(|| transport::prepare_mux_dir(&HqConfig::hq_dir().join("run").join("ssh")))
         .flatten();
-    NativeBackend::remote(name, &remote.ssh, remote.port, remote.identity_file.clone(), gate, mux_dir)
-        .with_launch_bound(Duration::from_secs(
-            cfg.launch_bound_secs
-                .clamp(MIN_LAUNCH_BOUND_SECS, MAX_LAUNCH_BOUND_SECS),
-        ))
-        .with_command_timeout(Duration::from_secs(cfg.command_timeout_secs))
-        .with_sandbox(sandbox::plan(cfg))
-        .with_idle_ttl(sandbox::idle_ttl_secs(cfg))
+    NativeBackend::remote(
+        name,
+        &remote.ssh,
+        remote.port,
+        remote.identity_file.clone(),
+        gate,
+        mux_dir,
+    )
+    .with_launch_bound(Duration::from_secs(
+        cfg.launch_bound_secs
+            .clamp(MIN_LAUNCH_BOUND_SECS, MAX_LAUNCH_BOUND_SECS),
+    ))
+    .with_command_timeout(Duration::from_secs(cfg.command_timeout_secs))
+    .with_sandbox(sandbox::plan(cfg))
+    .with_idle_ttl(sandbox::idle_ttl_secs(cfg))
 }
 
 /// The machine HQ itself runs on.
@@ -289,8 +298,12 @@ pub fn local() -> anyhow::Result<Host> {
 /// Names of the hosts HQ may talk to: this machine's built-in host and every
 /// configured remote.
 pub fn native_host_names() -> Vec<String> {
-    let remotes = HqConfig::load().map(|c| c.agent_host.hosts).unwrap_or_default();
-    std::iter::once(NATIVE_HOST.to_string()).chain(remotes.into_keys()).collect()
+    let remotes = HqConfig::load()
+        .map(|c| c.agent_host.hosts)
+        .unwrap_or_default();
+    std::iter::once(NATIVE_HOST.to_string())
+        .chain(remotes.into_keys())
+        .collect()
 }
 
 /// This machine's host plus every configured remote.
@@ -333,7 +346,10 @@ mod tests {
     #[test]
     fn the_launch_bound_comes_from_config_and_stays_under_the_transport_limit() {
         let bound = |secs: u64| {
-            let cfg = AgentHostConfig { launch_bound_secs: secs, ..AgentHostConfig::default() };
+            let cfg = AgentHostConfig {
+                launch_bound_secs: secs,
+                ..AgentHostConfig::default()
+            };
             build(&cfg, NATIVE_HOST).unwrap().launch_bound()
         };
         assert_eq!(AgentHostConfig::default().launch_bound_secs, 25);
@@ -351,7 +367,10 @@ mod tests {
         );
         assert_eq!(build(&cfg, LOCAL_HOST).unwrap().name(), NATIVE_HOST);
         assert_eq!(build(&cfg, "laptop").unwrap().name(), "laptop");
-        let err = build(&cfg, "nope").err().map(|e| e.to_string()).unwrap_or_default();
+        let err = build(&cfg, "nope")
+            .err()
+            .map(|e| e.to_string())
+            .unwrap_or_default();
         assert!(err.contains("laptop") && err.contains("native"), "{err}");
     }
 }

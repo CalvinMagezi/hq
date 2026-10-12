@@ -106,7 +106,12 @@ mod tests {
     fn headers(pairs: &[(&str, &str)]) -> HeaderMap {
         pairs
             .iter()
-            .map(|(k, v)| (HeaderName::from_bytes(k.as_bytes()).unwrap(), HeaderValue::from_str(v).unwrap()))
+            .map(|(k, v)| {
+                (
+                    HeaderName::from_bytes(k.as_bytes()).unwrap(),
+                    HeaderValue::from_str(v).unwrap(),
+                )
+            })
             .collect()
     }
 
@@ -121,7 +126,10 @@ mod tests {
             ("x-ratelimit-reset-tokens", "1s"),
         ]);
         let r = parse(&h, 7).unwrap();
-        assert_eq!((r.requests_remaining, r.tokens_remaining, r.captured_at), (Some(499), Some(29500), 7));
+        assert_eq!(
+            (r.requests_remaining, r.tokens_remaining, r.captured_at),
+            (Some(499), Some(29500), 7)
+        );
         assert_eq!(r.requests_reset.as_deref(), Some("120ms"));
     }
 
@@ -134,7 +142,10 @@ mod tests {
             ("anthropic-ratelimit-tokens-reset", "2026-10-09T05:00:00Z"),
         ]);
         let r = parse(&h, 0).unwrap();
-        assert_eq!((r.requests_limit, r.tokens_remaining), (Some(50), Some(39000)));
+        assert_eq!(
+            (r.requests_limit, r.tokens_remaining),
+            (Some(50), Some(39000))
+        );
         assert_eq!(r.tokens_reset.as_deref(), Some("2026-10-09T05:00:00Z"));
     }
 
@@ -148,7 +159,12 @@ mod tests {
     fn the_latest_reading_is_kept_per_host_and_found_from_an_endpoint() {
         let h = headers(&[("x-ratelimit-remaining-requests", "7")]);
         observe("https://api.groq.test/openai/v1", &h);
-        assert_eq!(latest_for("https://api.groq.test/other/path").unwrap().requests_remaining, Some(7));
+        assert_eq!(
+            latest_for("https://api.groq.test/other/path")
+                .unwrap()
+                .requests_remaining,
+            Some(7)
+        );
         assert!(latest_for("https://elsewhere.test/v1").is_none());
     }
 }

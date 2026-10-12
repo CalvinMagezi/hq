@@ -84,7 +84,10 @@ fn test_validate_url_blocks_localhost() {
 #[test]
 fn private_ipv6_ranges_are_blocked() {
     for ip in ["fd12::1", "fe80::1", "::ffff:10.0.0.1", "::ffff:127.0.0.1"] {
-        assert!(is_non_public_ip(&ip.parse().unwrap()), "{ip} should be private");
+        assert!(
+            is_non_public_ip(&ip.parse().unwrap()),
+            "{ip} should be private"
+        );
     }
     assert!(!is_non_public_ip(&"2606:4700::1111".parse().unwrap()));
     assert!(!is_non_public_ip(&"::ffff:8.8.8.8".parse().unwrap()));
@@ -157,7 +160,8 @@ fn test_format_search_results_with_items() {
 
 #[test]
 fn old_serialized_results_still_deserialize() {
-    let old = json!({"query": "q", "results": [{"title": "t", "url": "https://a.com", "snippet": "s"}]});
+    let old =
+        json!({"query": "q", "results": [{"title": "t", "url": "https://a.com", "snippet": "s"}]});
     let parsed: WebSearchResults = serde_json::from_value(old).unwrap();
     assert_eq!(parsed.page, 1);
     assert_eq!(parsed.results[0].position, 0);
@@ -428,7 +432,8 @@ fn tiny_pdf(text: &str) -> Vec<u8> {
 
 #[tokio::test]
 async fn pdf_text_layer_is_extracted() {
-    let sentence = "Quarterly research findings show search coverage improved across every region we measured";
+    let sentence =
+        "Quarterly research findings show search coverage improved across every region we measured";
     let (text, method) = extract_pdf(&tiny_pdf(sentence)).await.unwrap();
     assert_eq!(method, METHOD_PDF_TEXT);
     assert!(text.contains("Quarterly research findings"), "{text}");
@@ -469,7 +474,10 @@ async fn mount(server: &MockServer, route: &str, response: ResponseTemplate) {
 async fn fresh_server() -> MockServer {
     let server = MockServer::start().await;
     let uri = server.uri();
-    HEALTH.lock().unwrap().retain(|key, _| !key.starts_with(&uri));
+    HEALTH
+        .lock()
+        .unwrap()
+        .retain(|key, _| !key.starts_with(&uri));
     server
 }
 
@@ -552,9 +560,16 @@ async fn malformed_json_falls_back_and_cools_the_primary_down() {
     let endpoint = brave_endpoint(&br);
     let opts = SearchOptions::default();
 
-    let r = search_chain("q", &opts, Some(&sx.uri()), Some((&endpoint, "k")), None, &FAST)
-        .await
-        .unwrap();
+    let r = search_chain(
+        "q",
+        &opts,
+        Some(&sx.uri()),
+        Some((&endpoint, "k")),
+        None,
+        &FAST,
+    )
+    .await
+    .unwrap();
     assert_eq!(r.backend.as_deref(), Some("brave"));
     assert!(
         r.attempts[0].outcome.contains("malformed JSON"),
@@ -562,9 +577,16 @@ async fn malformed_json_falls_back_and_cools_the_primary_down() {
         r.attempts
     );
 
-    let again = search_chain("q", &opts, Some(&sx.uri()), Some((&endpoint, "k")), None, &FAST)
-        .await
-        .unwrap();
+    let again = search_chain(
+        "q",
+        &opts,
+        Some(&sx.uri()),
+        Some((&endpoint, "k")),
+        None,
+        &FAST,
+    )
+    .await
+    .unwrap();
     assert!(
         again.attempts[0].outcome.contains("cooling down"),
         "{:?}",
@@ -581,9 +603,16 @@ async fn invalid_shape_counts_as_a_failure() {
         ResponseTemplate::new(200).set_body_json(json!({ "unexpected": true })),
     )
     .await;
-    let err = search_chain("q", &SearchOptions::default(), Some(&sx.uri()), None, None, &FAST)
-        .await
-        .unwrap_err();
+    let err = search_chain(
+        "q",
+        &SearchOptions::default(),
+        Some(&sx.uri()),
+        None,
+        None,
+        &FAST,
+    )
+    .await
+    .unwrap_err();
     assert!(err.to_string().contains("invalid response"), "{err}");
     assert!(with_health(&sx.uri(), |h| h.is_cooling_down()).unwrap());
 }
@@ -613,7 +642,8 @@ async fn timeout_is_bounded_and_falls_back() {
         &SearchOptions::default(),
         Some(&sx.uri()),
         Some((&endpoint, "k")),
-        None, &FAST,
+        None,
+        &FAST,
     )
     .await
     .unwrap();
@@ -667,16 +697,30 @@ async fn rate_limit_then_cooldown_and_credentials_not_leaked() {
     mount(&br, "/res/v1/web/search", ResponseTemplate::new(429)).await;
     let endpoint = brave_endpoint(&br);
     let opts = SearchOptions::default();
-    let err = search_chain("q", &opts, None, Some((&endpoint, "secret-key")), None, &FAST)
-        .await
-        .unwrap_err()
-        .to_string();
+    let err = search_chain(
+        "q",
+        &opts,
+        None,
+        Some((&endpoint, "secret-key")),
+        None,
+        &FAST,
+    )
+    .await
+    .unwrap_err()
+    .to_string();
     assert!(err.contains("rate limited"), "{err}");
     assert!(!err.contains("secret-key"));
-    let err = search_chain("q", &opts, None, Some((&endpoint, "secret-key")), None, &FAST)
-        .await
-        .unwrap_err()
-        .to_string();
+    let err = search_chain(
+        "q",
+        &opts,
+        None,
+        Some((&endpoint, "secret-key")),
+        None,
+        &FAST,
+    )
+    .await
+    .unwrap_err()
+    .to_string();
     assert!(err.contains("cooling down"), "{err}");
 }
 
@@ -692,7 +736,8 @@ async fn invalid_credentials_and_all_provider_failure() {
         &SearchOptions::default(),
         Some(&sx.uri()),
         Some((&endpoint, "bad")),
-        None, &FAST,
+        None,
+        &FAST,
     )
     .await
     .unwrap_err()
@@ -711,9 +756,16 @@ async fn empty_results_are_an_answer_not_a_missing_backend() {
         ResponseTemplate::new(200).set_body_json(searxng_body(&[])),
     )
     .await;
-    let r = search_chain("q", &SearchOptions::default(), Some(&sx.uri()), None, None, &FAST)
-        .await
-        .unwrap();
+    let r = search_chain(
+        "q",
+        &SearchOptions::default(),
+        Some(&sx.uri()),
+        None,
+        None,
+        &FAST,
+    )
+    .await
+    .unwrap();
     assert!(r.results.is_empty());
     assert_eq!(r.next_page, None);
     assert!(with_health(&sx.uri(), |h| !h.is_cooling_down()).unwrap());
@@ -751,7 +803,9 @@ async fn live_filter_probe() {
         if sx.is_none() && key.is_none() {
             continue;
         }
-        let r = web_search("tokio release", &opts, sx, key, false).await.unwrap();
+        let r = web_search("tokio release", &opts, sx, key, false)
+            .await
+            .unwrap();
         println!("{label}: {}", format_search_results(&r));
         assert!(r.results.iter().all(|x| x.url.contains("github.com")));
     }
@@ -761,15 +815,21 @@ async fn live_filter_probe() {
 async fn a_query_that_contains_a_credential_is_refused_before_any_engine_is_asked() {
     for query in [
         "why does sk-or-v1-0123456789abcdef0123456789abcdef fail", // gitleaks:allow
-        "OPENAI_API_KEY=abcd1234efgh5678 not working", // gitleaks:allow
-        concat!("github ghp_", "abcdefghijklmnopqrstuvwxyz0123456789 clone error"),
+        "OPENAI_API_KEY=abcd1234efgh5678 not working",             // gitleaks:allow
+        concat!(
+            "github ghp_",
+            "abcdefghijklmnopqrstuvwxyz0123456789 clone error"
+        ),
         "-----BEGIN RSA PRIVATE KEY-----\nMIIB\n-----END RSA PRIVATE KEY----- parse error", // gitleaks:allow
     ] {
         let err = web_search(query, &SearchOptions::default(), None, None, true)
             .await
             .unwrap_err()
             .to_string();
-        assert!(err.contains("looks like it contains a credential"), "{query}: {err}");
+        assert!(
+            err.contains("looks like it contains a credential"),
+            "{query}: {err}"
+        );
     }
 }
 
@@ -777,7 +837,12 @@ async fn a_query_that_contains_a_credential_is_refused_before_any_engine_is_aske
 async fn ordinary_queries_that_mention_keys_and_tokens_are_not_refused() {
     // The refusal happens before any network I/O; with every backend off an ordinary
     // query reaches the "no backend" error instead.
-    for query in ["how do api keys work", "jwt token expiry best practice", "max_tokens: 4096 openai", "sk-learn pipeline"] {
+    for query in [
+        "how do api keys work",
+        "jwt token expiry best practice",
+        "max_tokens: 4096 openai",
+        "sk-learn pipeline",
+    ] {
         let err = web_search(query, &SearchOptions::default(), None, None, false)
             .await
             .unwrap_err()
@@ -800,10 +865,17 @@ fn flagged_results_carry_a_warning_in_the_text_and_the_json_flag() {
         unsupported_filters: vec![],
     };
     let text = format_search_results(&r);
-    assert_eq!(text.matches("[Warning: this result contains text that reads like instructions").count(), 1);
+    assert_eq!(
+        text.matches("[Warning: this result contains text that reads like instructions")
+            .count(),
+        1
+    );
     let json = serde_json::to_value(&r.results).unwrap();
     assert_eq!(json[0]["flagged"], true);
-    assert!(json[1].get("flagged").is_none(), "unflagged results stay as they were");
+    assert!(
+        json[1].get("flagged").is_none(),
+        "unflagged results stay as they were"
+    );
 }
 
 #[tokio::test]
@@ -817,9 +889,16 @@ async fn finished_results_are_sanitised_and_flagged_and_upstream_notes_are_clean
         ]})))
         .mount(&sx)
         .await;
-    let r = search_chain("q", &SearchOptions::default(), Some(&sx.uri()), None, None, &FAST)
-        .await
-        .unwrap();
+    let r = search_chain(
+        "q",
+        &SearchOptions::default(),
+        Some(&sx.uri()),
+        None,
+        None,
+        &FAST,
+    )
+    .await
+    .unwrap();
     assert_eq!(r.results[0].title, "Docs page");
     assert!(r.results[0].flagged && !r.results[1].flagged);
     assert_eq!(r.results[1].snippet, "hello world");
@@ -859,12 +938,23 @@ async fn a_peer_answers_when_nothing_local_is_enabled_and_is_told_not_to_forward
     )
     .await;
     let server = peer_server(&peer.uri());
-    let r = search_chain_via("tokio", &SearchOptions::default(), None, None, None, Some(&server), &FAST)
-        .await
-        .unwrap();
+    let r = search_chain_via(
+        "tokio",
+        &SearchOptions::default(),
+        None,
+        None,
+        None,
+        Some(&server),
+        &FAST,
+    )
+    .await
+    .unwrap();
     assert_eq!(r.backend.as_deref(), Some("peer"));
     assert_eq!(r.results.len(), 2);
-    assert!(r.results[1].flagged, "a peer's results are sanitised like any engine's");
+    assert!(
+        r.results[1].flagged,
+        "a peer's results are sanitised like any engine's"
+    );
     let req = &peer.received_requests().await.unwrap()[0];
     assert_eq!(req.headers.get("authorization").unwrap(), "Bearer peer-key");
     let body: Value = serde_json::from_slice(&req.body).unwrap();
@@ -878,9 +968,15 @@ async fn a_forwarded_call_is_never_forwarded_again() {
     let peer = MockServer::start().await;
     mount_peer_answer(&peer, json!([])).await;
     let server = peer_server(&peer.uri());
-    let opts = SearchOptions { peer_hop: true, ..SearchOptions::default() };
+    let opts = SearchOptions {
+        peer_hop: true,
+        ..SearchOptions::default()
+    };
     let err = search_chain_via("q", &opts, None, None, None, Some(&server), &FAST).await;
-    assert!(err.is_err(), "with only a peer and a hop flag there is no backend left");
+    assert!(
+        err.is_err(),
+        "with only a peer and a hop flag there is no backend left"
+    );
     assert!(peer.received_requests().await.unwrap().is_empty());
 }
 
@@ -906,5 +1002,9 @@ async fn a_sleeping_peer_falls_through_to_brave_and_is_cooled_down() {
     .await
     .unwrap();
     assert_eq!(r.backend.as_deref(), Some("brave"));
-    assert!(r.attempts.iter().any(|a| a.provider == "peer" && !a.outcome.starts_with("ok")));
+    assert!(
+        r.attempts
+            .iter()
+            .any(|a| a.provider == "peer" && !a.outcome.starts_with("ok"))
+    );
 }

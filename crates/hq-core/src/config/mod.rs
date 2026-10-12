@@ -1,16 +1,14 @@
 mod agent;
+mod agent_host;
 mod backends;
+mod budgets;
 mod collaboration;
 pub mod company;
-mod decisions;
 mod copilot_usage;
-mod budgets;
+mod decisions;
 mod disk_watchdog;
-mod usage_ledger;
-mod tasks;
 mod governance;
 mod harness;
-mod agent_host;
 mod instance;
 mod llm;
 mod memory;
@@ -19,38 +17,41 @@ mod profile;
 mod relay;
 mod self_update;
 mod stack;
+mod tasks;
+mod usage_ledger;
 
 pub use agent::*;
-pub use backends::{BACKENDS_SCHEMA_VERSION, BackendEntry, BackendKind, BackendsConfig, WireApi};
-pub use collaboration::*;
-pub use company::{
-    CompanyConfig, CompanyIdentity, ConnectorBinding, ListenerDef, company_by_id,
+pub use agent_host::{
+    AgentHostConfig, HarnessProfileConfig, LOCAL_HOST, MAX_LAUNCH_BOUND_SECS,
+    MIN_LAUNCH_BOUND_SECS, NATIVE_HOST, RemoteHostConfig, SandboxConfig, SandboxMode,
+    native_host_dir,
 };
+pub use backends::{BACKENDS_SCHEMA_VERSION, BackendEntry, BackendKind, BackendsConfig, WireApi};
+pub use budgets::{Budget, BudgetAction, BudgetPeriod, BudgetScope, BudgetsConfig};
+pub use collaboration::*;
+pub use company::{CompanyConfig, CompanyIdentity, ConnectorBinding, ListenerDef, company_by_id};
+pub use copilot_usage::{CopilotUsageConfig, copilot_active, openrouter_key, openrouter_primary};
 pub use decisions::{
     DecisionMode, DecisionRoute, DecisionSite, DecisionsConfig, SITE_EMAIL_FYI, SITE_MEMORY_TURN,
     SITE_NOTIFY_GATE, SITE_TASK_PLACEMENT,
 };
-pub use copilot_usage::{CopilotUsageConfig, copilot_active, openrouter_key, openrouter_primary};
-pub use budgets::{Budget, BudgetAction, BudgetPeriod, BudgetScope, BudgetsConfig};
 pub use disk_watchdog::DiskWatchdogConfig;
-pub use usage_ledger::UsageLedgerConfig;
+pub use governance::*;
+pub use harness::*;
+pub use instance::*;
+pub use llm::*;
+pub use memory::*;
 pub use profile::{
     EgressItem, EnvLookup, LiteConfig, Profile, egress_report, enforce_lite, lite_violations,
     process_env,
 };
-pub use tasks::{DEFAULT_LEASE_TTL_SECS, DEFAULT_STALE_AFTER_HOURS, LeaseMode, MIN_LEASE_TTL_SECS, TasksConfig};
-pub use governance::*;
-pub use harness::*;
-pub use agent_host::{
-    HarnessProfileConfig, AgentHostConfig, RemoteHostConfig, SandboxConfig, SandboxMode, LOCAL_HOST, NATIVE_HOST, native_host_dir, MAX_LAUNCH_BOUND_SECS,
-    MIN_LAUNCH_BOUND_SECS,
-};
-pub use instance::*;
-pub use llm::*;
-pub use memory::*;
 pub use relay::*;
 pub use self_update::SelfUpdateConfig;
 pub use stack::{Specialist, StackConfig};
+pub use tasks::{
+    DEFAULT_LEASE_TTL_SECS, DEFAULT_STALE_AFTER_HOURS, LeaseMode, MIN_LEASE_TTL_SECS, TasksConfig,
+};
+pub use usage_ledger::UsageLedgerConfig;
 
 use figment::{
     Figment,
@@ -346,7 +347,11 @@ const SERVER_VAULT_PATH: &str = "/opt/hq/.vault";
 /// The profile a config runs as. Native Windows builds have no coding-agent host, sandbox or
 /// chat relay, so they are HQ Lite whatever the file says; Full HQ on Windows is WSL2.
 fn effective_profile(configured: Profile, native_windows: bool) -> Profile {
-    if native_windows { Profile::Lite } else { configured }
+    if native_windows {
+        Profile::Lite
+    } else {
+        configured
+    }
 }
 
 fn home_vault_path() -> PathBuf {
@@ -462,7 +467,9 @@ struct InstanceTypeProbeInner {
 static HTTP_REFERER: std::sync::RwLock<Option<String>> = std::sync::RwLock::new(None);
 
 fn set_http_referer(value: Option<String>) {
-    let value = value.map(|v| v.trim().to_string()).filter(|v| !v.is_empty());
+    let value = value
+        .map(|v| v.trim().to_string())
+        .filter(|v| !v.is_empty());
     if let Ok(mut slot) = HTTP_REFERER.write() {
         *slot = value;
     }
@@ -489,7 +496,13 @@ fn config_yaml(path: &std::path::Path) -> Option<figment::providers::Data<Yaml>>
     if has(OLD) && !has(NEW) {
         let upgraded: String = text
             .split_inclusive('\n')
-            .map(|l| if l.starts_with(OLD) { l.replacen(OLD, NEW, 1) } else { l.to_string() })
+            .map(|l| {
+                if l.starts_with(OLD) {
+                    l.replacen(OLD, NEW, 1)
+                } else {
+                    l.to_string()
+                }
+            })
             .collect();
         return Some(Yaml::string(&upgraded));
     }
@@ -559,7 +572,12 @@ impl HqConfig {
             || set(&self.anthropic_api_key)
             || set(&self.google_ai_api_key)
             || !self.providers.is_empty()
-            || from_env(&["OPENROUTER_API_KEY", "ANTHROPIC_API_KEY", "GOOGLE_AI_API_KEY", "GEMINI_API_KEY"])
+            || from_env(&[
+                "OPENROUTER_API_KEY",
+                "ANTHROPIC_API_KEY",
+                "GOOGLE_AI_API_KEY",
+                "GEMINI_API_KEY",
+            ])
     }
 
     /// The guts of `load()`, parameterized on the config file path so it's
@@ -753,7 +771,6 @@ impl HqConfig {
             self.companies.first()
         }
     }
-
 }
 
 /// Resolve the model a fresh session will actually start on.
@@ -800,12 +817,24 @@ fn provider_label(entry: &BackendEntry) -> String {
         .clone()
         .or_else(|| entry.kind.default_endpoint().map(str::to_string))
         .unwrap_or_default();
-    let host = endpoint.split("://").last().unwrap_or_default().split('/').next().unwrap_or_default();
+    let host = endpoint
+        .split("://")
+        .last()
+        .unwrap_or_default()
+        .split('/')
+        .next()
+        .unwrap_or_default();
     PROVIDER_HOSTS
         .iter()
         .find(|(h, _)| host == *h || host.ends_with(&format!(".{h}")))
         .map(|(_, name)| (*name).to_string())
-        .unwrap_or_else(|| if host.is_empty() { entry.name.clone() } else { host.to_string() })
+        .unwrap_or_else(|| {
+            if host.is_empty() {
+                entry.name.clone()
+            } else {
+                host.to_string()
+            }
+        })
 }
 
 /// What an agent is told about its own model, so it never has to guess or quote
@@ -822,20 +851,37 @@ pub fn runtime_identity_block(config: &HqConfig) -> String {
 /// from the same chain `resolve_session_model` reads, so the two never differ.
 pub fn runtime_identity(config: &HqConfig) -> String {
     let model = resolve_session_model(config);
-    let primary = config.backends.is_configured().then(|| config.backends.backend(&config.backends.primary)).flatten();
+    let primary = config
+        .backends
+        .is_configured()
+        .then(|| config.backends.backend(&config.backends.primary))
+        .flatten();
     let Some(primary) = primary else {
         return format!("`{model}`");
     };
-    let mut line = format!("`{model}` through {} (backend `{}`)", provider_label(primary), primary.name);
+    let mut line = format!(
+        "`{model}` through {} (backend `{}`)",
+        provider_label(primary),
+        primary.name
+    );
     let fallbacks: Vec<String> = config
         .backends
         .fallbacks
         .iter()
         .filter_map(|n| config.backends.backend(n))
-        .map(|b| format!("`{}` through {}", b.model.as_deref().unwrap_or(&b.name), provider_label(b)))
+        .map(|b| {
+            format!(
+                "`{}` through {}",
+                b.model.as_deref().unwrap_or(&b.name),
+                provider_label(b)
+            )
+        })
         .collect();
     if !fallbacks.is_empty() {
-        line.push_str(&format!("; if that backend fails, a turn is answered by {}", fallbacks.join(", then ")));
+        line.push_str(&format!(
+            "; if that backend fails, a turn is answered by {}",
+            fallbacks.join(", then ")
+        ));
     }
     line
 }

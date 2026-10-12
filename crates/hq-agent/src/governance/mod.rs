@@ -45,7 +45,6 @@ pub use secrets::{SecretTier, always_denied_roots, classify_path};
 pub use taint::{TaintTracker, is_untrusted_source};
 pub use trackers::{DenialTracker, RepeatCallTracker};
 
-
 // ─── Security floor ─────────────────────────────────────────────
 
 /// Minimum security profile allowed. Profiles below this floor are
@@ -293,7 +292,11 @@ impl ToolGuardian {
     /// constructor, so there is no way for such a tool to reach a live
     /// `AgentSession` from an unattended session, regardless of any
     /// allow-list applied elsewhere.
-    pub fn build_registry(&self, tools: Vec<Box<dyn AgentTool>>, live: LiveUserTurn) -> GovernedRegistry {
+    pub fn build_registry(
+        &self,
+        tools: Vec<Box<dyn AgentTool>>,
+        live: LiveUserTurn,
+    ) -> GovernedRegistry {
         let mut registry = ToolRegistry::new();
         for tool in tools {
             if !live.is_live() && tool.requires_live_user_turn() {

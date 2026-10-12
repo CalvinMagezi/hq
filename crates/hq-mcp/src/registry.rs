@@ -4,9 +4,10 @@ use hq_core::config::HqConfig;
 use hq_db::Database;
 use hq_tools::registry::{HqTool, ToolRegistry};
 use hq_tools::{
-    a2a, agent_comm, agents, ask, background_turns, brand, coding, convert, harness_session, agent_host,
-    imagegen, prose_lint, remote_mcp, self_update, session_search, shortcuts, skill_manage_tool,
-    budget_status, github, skills, slash_commands, subagent_runs, system_info, tasks, vault, web,
+    a2a, agent_comm, agent_host, agents, ask, background_turns, brand, budget_status, coding,
+    convert, github, harness_session, imagegen, prose_lint, remote_mcp, self_update,
+    session_search, shortcuts, skill_manage_tool, skills, slash_commands, subagent_runs,
+    system_info, tasks, vault, web,
 };
 
 #[cfg(feature = "gws")]
@@ -83,7 +84,13 @@ pub fn create_default_registry(
 
     // web_search: SearxNG when configured, then the built-in keyless engines, then Brave.
     let (searxng_url, brave_api_key, native) = config
-        .map(|c| (c.searxng_url.clone(), c.brave_api_key.clone(), c.web_search_native))
+        .map(|c| {
+            (
+                c.searxng_url.clone(),
+                c.brave_api_key.clone(),
+                c.web_search_native,
+            )
+        })
         .unwrap_or((None, None, true));
     web::set_search_peer(config.and_then(|c| c.web_search_peer_server()).cloned());
     tools.push(Box::new(web::WebSearchHqTool::new(
@@ -236,7 +243,10 @@ mod tests {
         let tasks = Some(crate::gateway::TASKS_ALLOWLIST);
 
         let call = |tool: &str, args: serde_json::Value| {
-            serde_json::json!({"tool": tool, "args": args}).as_object().unwrap().clone()
+            serde_json::json!({"tool": tool, "args": args})
+                .as_object()
+                .unwrap()
+                .clone()
         };
 
         let filed = crate::gateway::handle_call(
@@ -251,21 +261,34 @@ mod tests {
         .await
         .unwrap();
         let text = format!("{filed:?}");
-        assert!(text.contains("mcp:tasks"), "attributed to the scope, not a name the caller chose: {text}");
+        assert!(
+            text.contains("mcp:tasks"),
+            "attributed to the scope, not a name the caller chose: {text}"
+        );
 
         let mailbox_entries = |tag: &str| {
-            std::fs::read_dir(vault.path().join("_mailboxes").join(tag)).unwrap().count()
+            std::fs::read_dir(vault.path().join("_mailboxes").join(tag))
+                .unwrap()
+                .count()
         };
         for tag in ["relay", "agent-worker", "claude-code"] {
-            assert_eq!(mailbox_entries(tag), 0, "{tag} received something from the tasks scope");
+            assert_eq!(
+                mailbox_entries(tag),
+                0,
+                "{tag} received something from the tasks scope"
+            );
         }
 
         for (tool, args) in [
             ("vault_read", serde_json::json!({"path": "secret.md"})),
             ("vault_search", serde_json::json!({"query": "private"})),
-            ("harness_session_spawn", serde_json::json!({"harness": "claude-code", "cwd": "/tmp"})),
+            (
+                "harness_session_spawn",
+                serde_json::json!({"harness": "claude-code", "cwd": "/tmp"}),
+            ),
         ] {
-            let denied = crate::gateway::handle_call(&registry, Some(&call(tool, args)), &db, tasks).await;
+            let denied =
+                crate::gateway::handle_call(&registry, Some(&call(tool, args)), &db, tasks).await;
             assert!(denied.is_err(), "{tool} must be refused on the tasks scope");
         }
 
@@ -280,37 +303,59 @@ mod tests {
         assert!(id.len() > 5, "found the filed task's id in {text}");
         let moved = crate::gateway::handle_call(
             &registry,
-            Some(&call("task_update", serde_json::json!({"id": id, "status": "in_progress", "tags": ["relay"]}))),
+            Some(&call(
+                "task_update",
+                serde_json::json!({"id": id, "status": "in_progress", "tags": ["relay"]}),
+            )),
             &db,
             tasks,
         )
         .await
         .unwrap();
-        assert!(!format!("{moved:?}").contains("isError: Some(true)"), "{moved:?}");
+        assert!(
+            !format!("{moved:?}").contains("isError: Some(true)"),
+            "{moved:?}"
+        );
         let commented = crate::gateway::handle_call(
             &registry,
-            Some(&call("task_comment_add", serde_json::json!({"task_id": id, "body": "hello", "author": "the owner"}))),
+            Some(&call(
+                "task_comment_add",
+                serde_json::json!({"task_id": id, "body": "hello", "author": "the owner"}),
+            )),
             &db,
             tasks,
         )
         .await
         .unwrap();
-        assert!(format!("{commented:?}").contains("mcp:tasks"), "{commented:?}");
+        assert!(
+            format!("{commented:?}").contains("mcp:tasks"),
+            "{commented:?}"
+        );
         for tag in ["relay", "agent-worker", "claude-code"] {
-            assert_eq!(mailbox_entries(tag), 0, "{tag} received something after update and comment");
+            assert_eq!(
+                mailbox_entries(tag),
+                0,
+                "{tag} received something after update and comment"
+            );
         }
 
         // Control: the unscoped call with the same tags does deliver, so the assertion above
         // is not passing because nothing could ever be delivered.
         crate::gateway::handle_call(
             &registry,
-            Some(&call("task_create", serde_json::json!({"title": "owner", "tags": ["relay"]}))),
+            Some(&call(
+                "task_create",
+                serde_json::json!({"title": "owner", "tags": ["relay"]}),
+            )),
             &db,
             None,
         )
         .await
         .unwrap();
-        assert!(mailbox_entries("relay") >= 1, "an owner call delivers to a tagged mailbox");
+        assert!(
+            mailbox_entries("relay") >= 1,
+            "an owner call delivers to a tagged mailbox"
+        );
     }
     #[test]
     fn the_lite_profile_registers_only_tasks() {
@@ -339,11 +384,27 @@ mod tests {
         assert!(lite.get("task_create").is_some());
         for gone in [
             // The note tools would read `_system` and the other hidden folders.
-            "vault_read", "vault_batch_read", "vault_list", "vault_outline", "vault_search", "vault_context",
-            "bash", "harness_session_spawn", "host_send", "web_fetch", "web_search", "imagegen",
-            "hq_ask", "agent_message_send", "config_manage", "gws",
+            "vault_read",
+            "vault_batch_read",
+            "vault_list",
+            "vault_outline",
+            "vault_search",
+            "vault_context",
+            "bash",
+            "harness_session_spawn",
+            "host_send",
+            "web_fetch",
+            "web_search",
+            "imagegen",
+            "hq_ask",
+            "agent_message_send",
+            "config_manage",
+            "gws",
         ] {
-            assert!(lite.get(gone).is_none(), "{gone} must not be registered in Lite");
+            assert!(
+                lite.get(gone).is_none(),
+                "{gone} must not be registered in Lite"
+            );
         }
         // The full profile still has them, so the assertion above is not an empty registry.
         assert!(full.get("harness_session_spawn").is_some() && full.get("web_fetch").is_some());

@@ -309,10 +309,7 @@ mod tests {
             allowed_harnesses: Vec::new(),
         };
         let tools = create_remote_mcp_tools(&servers, Some(guest));
-        let call_tool = tools
-            .into_iter()
-            .find(|t| t.name() == "acme_call")
-            .unwrap();
+        let call_tool = tools.into_iter().find(|t| t.name() == "acme_call").unwrap();
         let res = call_tool
             .execute(json!({ "tool": "invoice_create", "args": { "amount": 100 } }))
             .await

@@ -171,8 +171,23 @@ const GLOB_DENY_SENTINEL: &str = "/proc/self/environ";
 /// Name fragments that make an over-budget glob worth denying even when its
 /// literal prefix is not near a known credential directory.
 const SECRET_NAME_HINTS: &[&str] = &[
-    "ssh", "ss?", "ss*", "id_", "env", "pem", "key", "secret", "credential", "aws", "gnupg",
-    "netrc", "token", "hosts.yml", "config.yaml", "wallet", "seed",
+    "ssh",
+    "ss?",
+    "ss*",
+    "id_",
+    "env",
+    "pem",
+    "key",
+    "secret",
+    "credential",
+    "aws",
+    "gnupg",
+    "netrc",
+    "token",
+    "hosts.yml",
+    "config.yaml",
+    "wallet",
+    "seed",
 ];
 
 /// Every token in a shell command that could name a file, resolved against
@@ -407,7 +422,11 @@ mod tests {
         let start = std::time::Instant::now();
         let _ = path_tokens("ls /*/*/*/*/*/*/*/*/*/*/x", None, None);
         let _ = path_tokens("ls /**/*.pem", None, None);
-        assert!(start.elapsed() < std::time::Duration::from_secs(2), "{:?}", start.elapsed());
+        assert!(
+            start.elapsed() < std::time::Duration::from_secs(2),
+            "{:?}",
+            start.elapsed()
+        );
     }
 
     #[test]

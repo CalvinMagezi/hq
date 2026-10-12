@@ -132,7 +132,11 @@ async fn a_redirect_loop_stops_at_the_limit() {
     assert!(err.contains("too many redirects"), "{err}");
     let hops = server.received_requests().await.unwrap().len();
     // Regression: the cap once counted the initial request, allowing one redirect fewer.
-    assert_eq!(hops, MAX_REDIRECTS + 1, "the initial request plus every allowed redirect");
+    assert_eq!(
+        hops,
+        MAX_REDIRECTS + 1,
+        "the initial request plus every allowed redirect"
+    );
 }
 
 #[tokio::test]
@@ -251,9 +255,18 @@ async fn an_empty_text_body_is_an_explicit_empty_extraction() {
 async fn a_public_looking_hostname_that_resolves_to_loopback_is_refused() {
     let server = MockServer::start().await;
     let port = server.address().port();
-    mount(&server, "/secret", ResponseTemplate::new(200).set_body_string("internal")).await;
+    mount(
+        &server,
+        "/secret",
+        ResponseTemplate::new(200).set_body_string("internal"),
+    )
+    .await;
     let client = test_client_with(&server, rebinding_resolver());
-    let fetcher = Fetcher { client: &client, timeout: TEST_TIMEOUT, jina_base: "http://unused/" };
+    let fetcher = Fetcher {
+        client: &client,
+        timeout: TEST_TIMEOUT,
+        jina_base: "http://unused/",
+    };
 
     let err = fetcher
         .fetch(&format!("http://rebind.example:{port}/secret"))
@@ -262,19 +275,39 @@ async fn a_public_looking_hostname_that_resolves_to_loopback_is_refused() {
         .to_string();
 
     assert!(err.contains("SSRF protection"), "{err}");
-    assert!(server.received_requests().await.unwrap().is_empty(), "no request may reach the server");
+    assert!(
+        server.received_requests().await.unwrap().is_empty(),
+        "no request may reach the server"
+    );
 }
 
 #[tokio::test]
 async fn a_redirect_to_a_hostname_that_resolves_to_loopback_is_refused() {
     let server = MockServer::start().await;
     let port = server.address().port();
-    mount(&server, "/hop", redirect_to(&format!("http://rebind.example:{port}/secret"))).await;
-    mount(&server, "/secret", ResponseTemplate::new(200).set_body_string("internal")).await;
+    mount(
+        &server,
+        "/hop",
+        redirect_to(&format!("http://rebind.example:{port}/secret")),
+    )
+    .await;
+    mount(
+        &server,
+        "/secret",
+        ResponseTemplate::new(200).set_body_string("internal"),
+    )
+    .await;
     let client = test_client_with(&server, rebinding_resolver());
-    let fetcher = Fetcher { client: &client, timeout: TEST_TIMEOUT, jina_base: "http://unused/" };
+    let fetcher = Fetcher {
+        client: &client,
+        timeout: TEST_TIMEOUT,
+        jina_base: "http://unused/",
+    };
 
-    let err = fetcher.fetch(&format!("{}/hop", server.uri())).await.unwrap_err();
+    let err = fetcher
+        .fetch(&format!("{}/hop", server.uri()))
+        .await
+        .unwrap_err();
 
     assert!(error_text(&err).contains("SSRF protection"), "{err:?}");
     let hit_secret = server
@@ -291,9 +324,16 @@ async fn a_dot_localhost_name_is_refused_before_any_lookup() {
     let server = MockServer::start().await;
     let port = server.address().port();
     let client = test_client_with(&server, rebinding_resolver());
-    let fetcher = Fetcher { client: &client, timeout: TEST_TIMEOUT, jina_base: "http://unused/" };
+    let fetcher = Fetcher {
+        client: &client,
+        timeout: TEST_TIMEOUT,
+        jina_base: "http://unused/",
+    };
 
-    let err = fetcher.fetch(&format!("http://api.localhost:{port}/")).await.unwrap_err();
+    let err = fetcher
+        .fetch(&format!("http://api.localhost:{port}/"))
+        .await
+        .unwrap_err();
 
     assert!(error_text(&err).contains("SSRF protection"), "{err:?}");
 }
@@ -306,20 +346,47 @@ fn error_text(e: &anyhow::Error) -> String {
 async fn a_configured_proxy_is_not_used_unless_opted_in() {
     let proxy = MockServer::start().await;
     let target = MockServer::start().await;
-    mount(&proxy, "/ok", ResponseTemplate::new(200).set_body_string("via proxy")).await;
-    mount(&target, "/ok", ResponseTemplate::new(200).set_body_string("direct")).await;
+    mount(
+        &proxy,
+        "/ok",
+        ResponseTemplate::new(200).set_body_string("via proxy"),
+    )
+    .await;
+    mount(
+        &target,
+        "/ok",
+        ResponseTemplate::new(200).set_body_string("direct"),
+    )
+    .await;
     let build = |use_proxy: bool| {
         let builder = Client::builder().proxy(reqwest::Proxy::all(proxy.uri()).unwrap());
         proxy_policy(builder, use_proxy).build().unwrap()
     };
     let url = format!("{}/ok", target.uri());
 
-    let direct = build(false).get(&url).send().await.unwrap().text().await.unwrap();
+    let direct = build(false)
+        .get(&url)
+        .send()
+        .await
+        .unwrap()
+        .text()
+        .await
+        .unwrap();
     assert_eq!(direct, "direct");
     assert!(proxy.received_requests().await.unwrap().is_empty());
 
-    let proxied = build(true).get(&url).send().await.unwrap().text().await.unwrap();
-    assert_eq!(proxied, "via proxy", "the opt-in does route through the proxy");
+    let proxied = build(true)
+        .get(&url)
+        .send()
+        .await
+        .unwrap()
+        .text()
+        .await
+        .unwrap();
+    assert_eq!(
+        proxied, "via proxy",
+        "the opt-in does route through the proxy"
+    );
 }
 
 const ARTICLE_HTML: &str = r#"<html><head><title>Post</title></head><body>
@@ -334,20 +401,38 @@ const LD_JSON_SHELL: &str = r#"<html><head><script type="application/ld+json">{"
 #[tokio::test]
 async fn an_article_page_is_extracted_without_its_chrome() {
     let server = MockServer::start().await;
-    mount(&server, "/post", ResponseTemplate::new(200).set_body_raw(ARTICLE_HTML, HTML)).await;
+    mount(
+        &server,
+        "/post",
+        ResponseTemplate::new(200).set_body_raw(ARTICLE_HTML, HTML),
+    )
+    .await;
 
     let page = fetch(&server, "/post").await.unwrap();
 
     assert_eq!(page.method, METHOD_ARTICLE);
     assert!(page.content.contains("ordinary prose"), "{}", page.content);
-    assert!(!page.content.contains("Navigation link text"), "{}", page.content);
-    assert!(!page.content.contains("Footer legal text"), "{}", page.content);
+    assert!(
+        !page.content.contains("Navigation link text"),
+        "{}",
+        page.content
+    );
+    assert!(
+        !page.content.contains("Footer legal text"),
+        "{}",
+        page.content
+    );
 }
 
 #[tokio::test]
 async fn a_shell_with_embedded_data_is_recovered_without_calling_jina() {
     let server = MockServer::start().await;
-    mount(&server, "/app", ResponseTemplate::new(200).set_body_raw(LD_JSON_SHELL, HTML)).await;
+    mount(
+        &server,
+        "/app",
+        ResponseTemplate::new(200).set_body_raw(LD_JSON_SHELL, HTML),
+    )
+    .await;
     Mock::given(method("GET"))
         .and(path_regex("^/jina/"))
         .respond_with(ResponseTemplate::new(200).set_body_string("should not be used"))
@@ -358,22 +443,54 @@ async fn a_shell_with_embedded_data_is_recovered_without_calling_jina() {
     let page = fetch(&server, "/app").await.unwrap();
 
     assert_eq!(page.method, METHOD_EMBEDDED);
-    assert!(page.content.contains("only present in the structured data"), "{}", page.content);
-    assert!(page.notes.iter().any(|n| n.contains("embedded in its HTML")), "{:?}", page.notes);
+    assert!(
+        page.content.contains("only present in the structured data"),
+        "{}",
+        page.content
+    );
+    assert!(
+        page.notes
+            .iter()
+            .any(|n| n.contains("embedded in its HTML")),
+        "{:?}",
+        page.notes
+    );
 }
 
 #[tokio::test]
 async fn a_shell_stays_unrendered_and_says_so_when_jina_is_disabled() {
     let server = MockServer::start().await;
-    mount(&server, "/app", ResponseTemplate::new(200).set_body_raw(SPA_SHELL, HTML)).await;
+    mount(
+        &server,
+        "/app",
+        ResponseTemplate::new(200).set_body_raw(SPA_SHELL, HTML),
+    )
+    .await;
     let client = test_client(&server);
-    let fetcher = Fetcher { client: &client, timeout: TEST_TIMEOUT, jina_base: "" };
+    let fetcher = Fetcher {
+        client: &client,
+        timeout: TEST_TIMEOUT,
+        jina_base: "",
+    };
 
-    let page = fetcher.fetch(&format!("{}/app", server.uri())).await.unwrap();
+    let page = fetcher
+        .fetch(&format!("{}/app", server.uri()))
+        .await
+        .unwrap();
 
     assert_eq!(page.method, METHOD_HTML);
-    assert!(page.notes.iter().any(|n| n.contains("fallback is disabled")), "{:?}", page.notes);
-    assert_eq!(server.received_requests().await.unwrap().len(), 1, "nothing but the page was requested");
+    assert!(
+        page.notes
+            .iter()
+            .any(|n| n.contains("fallback is disabled")),
+        "{:?}",
+        page.notes
+    );
+    assert_eq!(
+        server.received_requests().await.unwrap().len(),
+        1,
+        "nothing but the page was requested"
+    );
 }
 
 #[tokio::test]
@@ -384,7 +501,12 @@ async fn a_large_bundle_page_with_a_little_server_copy_still_goes_to_recovery() 
         "<html><head><script type=\"application/ld+json\">{{\"articleBody\":\"{}\"}}</script></head><body><p>A short intro line that is real copy but not the article itself, plus a cookie notice.</p>{filler}</body></html>",
         "The full article only exists in the embedded data, written long enough to be trusted as content. ".repeat(3)
     );
-    mount(&server, "/big", ResponseTemplate::new(200).set_body_raw(html, HTML)).await;
+    mount(
+        &server,
+        "/big",
+        ResponseTemplate::new(200).set_body_raw(html, HTML),
+    )
+    .await;
 
     let page = fetch(&server, "/big").await.unwrap();
 
@@ -394,13 +516,30 @@ async fn a_large_bundle_page_with_a_little_server_copy_still_goes_to_recovery() 
 #[tokio::test]
 async fn invisible_characters_in_a_page_are_removed_from_the_fetched_text() {
     let server = MockServer::start().await;
-    let html = "<html><body><p>Visible text \u{200B}here\u{202E}.\u{E0049}\u{E0047}</p></body></html>";
-    mount(&server, "/p", ResponseTemplate::new(200).set_body_raw(html, HTML)).await;
+    let html =
+        "<html><body><p>Visible text \u{200B}here\u{202E}.\u{E0049}\u{E0047}</p></body></html>";
+    mount(
+        &server,
+        "/p",
+        ResponseTemplate::new(200).set_body_raw(html, HTML),
+    )
+    .await;
 
     let page = fetch(&server, "/p").await.unwrap();
 
-    assert!(page.content.contains("Visible text here."), "{:?}", page.content);
-    assert!(!page.content.chars().any(|c| matches!(c, '\u{200B}' | '\u{202E}' | '\u{E0049}')), "{:?}", page.content);
+    assert!(
+        page.content.contains("Visible text here."),
+        "{:?}",
+        page.content
+    );
+    assert!(
+        !page
+            .content
+            .chars()
+            .any(|c| matches!(c, '\u{200B}' | '\u{202E}' | '\u{E0049}')),
+        "{:?}",
+        page.content
+    );
 }
 
 /// Browser Stage 0 (`docs/plans/agent-browser.md`): how often does the native
@@ -425,9 +564,17 @@ async fn bench_web_fetch_vs_jina() {
             Ok(p) => (
                 p.total_chars,
                 p.method,
-                p.content.chars().take(PEEK_CHARS).collect::<String>().replace('\n', " "),
+                p.content
+                    .chars()
+                    .take(PEEK_CHARS)
+                    .collect::<String>()
+                    .replace('\n', " "),
             ),
-            Err(e) => (0, "error", format!("{e}").chars().take(PEEK_CHARS).collect()),
+            Err(e) => (
+                0,
+                "error",
+                format!("{e}").chars().take(PEEK_CHARS).collect(),
+            ),
         };
         let jina = fetch_via_jina(JINA_READER_BASE, url).await;
         let j_chars = jina.as_ref().map_or(0, |t| t.chars().count());
@@ -445,9 +592,13 @@ async fn bench_web_fetch_vs_jina() {
                 "both-fail"
             }
         };
-        println!("{verdict:<12} native {n_chars:>6} {n_method:<14} jina {j_chars:>6}  {url}  | {n_peek}");
-        rows.push(json!({"url": url, "verdict": verdict, "native_chars": n_chars,
-            "native_method": n_method, "jina_chars": j_chars, "native_peek": n_peek}));
+        println!(
+            "{verdict:<12} native {n_chars:>6} {n_method:<14} jina {j_chars:>6}  {url}  | {n_peek}"
+        );
+        rows.push(
+            json!({"url": url, "verdict": verdict, "native_chars": n_chars,
+            "native_method": n_method, "jina_chars": j_chars, "native_peek": n_peek}),
+        );
         tokio::time::sleep(Duration::from_millis(400)).await;
     }
     let total = rows.len();

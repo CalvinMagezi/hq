@@ -55,7 +55,10 @@ fn render_help(out: &mut dyn Write) -> Result<()> {
         "  origin    Cost by kind of work (chat, memory, subagent...) over the same window"
     )?;
     writeln!(out, "  budgets   Each configured budget against the ledger")?;
-    writeln!(out, "  forecast  Burn rate, month-end projection and what drives the spend")?;
+    writeln!(
+        out,
+        "  forecast  Burn rate, month-end projection and what drives the spend"
+    )?;
     writeln!(
         out,
         "  reconcile Compare the ledger with what OpenRouter says it billed"
@@ -98,7 +101,10 @@ fn render_summary(db: &Database, now: i64, out: &mut dyn Write) -> Result<()> {
 fn render_budgets(db: &Database, now: i64, out: &mut dyn Write) -> Result<()> {
     let budgets = HqConfig::load().map(|c| c.budgets).unwrap_or_default();
     if budgets.budgets.is_empty() {
-        writeln!(out, "No budgets are configured, so nothing is enforced. Add a `budgets:` list to config.yaml.")?;
+        writeln!(
+            out,
+            "No budgets are configured, so nothing is enforced. Add a `budgets:` list to config.yaml."
+        )?;
         return Ok(());
     }
     for problem in budgets.problems() {
@@ -120,16 +126,30 @@ fn render_forecast(db: &Database, now: i64, out: &mut dyn Write) -> Result<()> {
     let r = hq_agent::usage_forecast::forecast_report(db, &budgets, now)?;
     let m = &r.month;
     let Some(rate) = m.rate_per_hour else {
-        writeln!(out, "No spend recorded yet, so there is nothing to forecast.")?;
+        writeln!(
+            out,
+            "No spend recorded yet, so there is nothing to forecast."
+        )?;
         return Ok(());
     };
-    writeln!(out, "This month: ${:.2} spent, ${:.3}/hour now ({:?} confidence)", m.spent_this_period, rate, m.confidence)?;
+    writeln!(
+        out,
+        "This month: ${:.2} spent, ${:.3}/hour now ({:?} confidence)",
+        m.spent_this_period, rate, m.confidence
+    )?;
     if let Some(total) = m.projected_period_total {
         writeln!(out, "Projected month end: ${total:.2}")?;
     }
     if let (Some(h), Some(limit)) = (m.hours_to_limit, m.limit_usd) {
-        let verdict = if m.exhausts_before_reset { "BEFORE the month ends" } else { "after the month ends" };
-        writeln!(out, "The ${limit:.2} monthly budget is used up in {h:.0}h, {verdict}")?;
+        let verdict = if m.exhausts_before_reset {
+            "BEFORE the month ends"
+        } else {
+            "after the month ends"
+        };
+        writeln!(
+            out,
+            "The ${limit:.2} monthly budget is used up in {h:.0}h, {verdict}"
+        )?;
     }
     if let Some(note) = &m.seasonality_note {
         writeln!(out, "Note: {note}")?;

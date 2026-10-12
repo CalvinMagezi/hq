@@ -20,16 +20,28 @@ fn autostart_command(exe: &Path) -> String {
 
 /// `reg.exe` arguments to set the autostart value.
 fn reg_add_args(exe: &Path) -> Vec<String> {
-    ["add", RUN_KEY, "/v", RUN_VALUE, "/t", "REG_SZ", "/d", &autostart_command(exe), "/f"]
-        .iter()
-        .map(|s| s.to_string())
-        .collect()
+    [
+        "add",
+        RUN_KEY,
+        "/v",
+        RUN_VALUE,
+        "/t",
+        "REG_SZ",
+        "/d",
+        &autostart_command(exe),
+        "/f",
+    ]
+    .iter()
+    .map(|s| s.to_string())
+    .collect()
 }
 
 /// A Windows system program by full path: a bare name is also looked up in the folder `hq.exe`
 /// itself sits in, which a user can write to.
 fn system_tool(rel: &str) -> PathBuf {
-    let root = std::env::var_os("SystemRoot").map(PathBuf::from).unwrap_or_else(|| PathBuf::from(r"C:\Windows"));
+    let root = std::env::var_os("SystemRoot")
+        .map(PathBuf::from)
+        .unwrap_or_else(|| PathBuf::from(r"C:\Windows"));
     root.join("System32").join(rel)
 }
 
@@ -41,9 +53,14 @@ fn reg(args: &[String]) -> Result<std::process::Output> {
 }
 
 fn autostart_is_on() -> bool {
-    reg(&["query".into(), RUN_KEY.into(), "/v".into(), RUN_VALUE.into()])
-        .map(|o| o.status.success())
-        .unwrap_or(false)
+    reg(&[
+        "query".into(),
+        RUN_KEY.into(),
+        "/v".into(),
+        RUN_VALUE.into(),
+    ])
+    .map(|o| o.status.success())
+    .unwrap_or(false)
 }
 
 /// `hq autostart on|off|status`.
@@ -55,28 +72,49 @@ pub fn autostart(sub: &str) -> Result<()> {
     }
     match sub {
         "status" | "" => {
-            println!("autostart: {}", if autostart_is_on() { "on" } else { "off" });
+            println!(
+                "autostart: {}",
+                if autostart_is_on() { "on" } else { "off" }
+            );
             Ok(())
         }
         "on" => {
             let exe = std::env::current_exe().context("cannot find the hq program")?;
             if exe.to_string_lossy().contains('%') {
-                bail!("the program path contains a %, which Windows would expand at sign-in; move HQ to a folder without one");
+                bail!(
+                    "the program path contains a %, which Windows would expand at sign-in; move HQ to a folder without one"
+                );
             }
             let out = reg(&reg_add_args(&exe))?;
             if !out.status.success() {
-                bail!("could not set the startup entry: {}", String::from_utf8_lossy(&out.stderr).trim());
+                bail!(
+                    "could not set the startup entry: {}",
+                    String::from_utf8_lossy(&out.stderr).trim()
+                );
             }
             println!("HQ will start the web app in the background when you sign in.");
-            println!("It is one value under {RUN_KEY} for your user only. Turn it off with `hq autostart off`.");
-            println!("Security software sometimes flags startup entries; that is why this is opt-in.");
+            println!(
+                "It is one value under {RUN_KEY} for your user only. Turn it off with `hq autostart off`."
+            );
+            println!(
+                "Security software sometimes flags startup entries; that is why this is opt-in."
+            );
             Ok(())
         }
         "off" => {
             if autostart_is_on() {
-                let out = reg(&["delete".into(), RUN_KEY.into(), "/v".into(), RUN_VALUE.into(), "/f".into()])?;
+                let out = reg(&[
+                    "delete".into(),
+                    RUN_KEY.into(),
+                    "/v".into(),
+                    RUN_VALUE.into(),
+                    "/f".into(),
+                ])?;
                 if !out.status.success() {
-                    bail!("could not remove the startup entry: {}", String::from_utf8_lossy(&out.stderr).trim());
+                    bail!(
+                        "could not remove the startup entry: {}",
+                        String::from_utf8_lossy(&out.stderr).trim()
+                    );
                 }
             }
             println!("autostart: off");
@@ -90,7 +128,9 @@ pub fn autostart(sub: &str) -> Result<()> {
 pub fn uninstall_lite(config: &HqConfig) -> Result<()> {
     let state = HqConfig::hq_dir().join("web.json");
     if let Ok(text) = std::fs::read_to_string(&state)
-        && let Some(pid) = serde_json::from_str::<serde_json::Value>(&text).ok().and_then(|v| v["pid"].as_u64())
+        && let Some(pid) = serde_json::from_str::<serde_json::Value>(&text)
+            .ok()
+            .and_then(|v| v["pid"].as_u64())
     {
         // The pid file can outlive a crashed server, and Windows reuses pids: only stop it if it
         // is still one of ours.
@@ -108,8 +148,14 @@ pub fn uninstall_lite(config: &HqConfig) -> Result<()> {
     if let Some(dir) = exe.as_deref().and_then(Path::parent) {
         println!("  the program folder:   {}", dir.display());
     }
-    println!("  your notes and tasks: {} (and {})", config.vault_path.display(), HqConfig::hq_dir().display());
-    println!("If you added the program folder to your PATH, remove it in Settings > System > About > Advanced system settings > Environment Variables.");
+    println!(
+        "  your notes and tasks: {} (and {})",
+        config.vault_path.display(),
+        HqConfig::hq_dir().display()
+    );
+    println!(
+        "If you added the program folder to your PATH, remove it in Settings > System > About > Advanced system settings > Environment Variables."
+    );
     println!("Take your notes with you first if you want them: `hq lite export <folder>`.");
     Ok(())
 }
@@ -125,7 +171,11 @@ pub fn in_synced_folder(p: &Path) -> bool {
 /// The path with symlinks, junctions, `..` and spelling differences resolved, even when the
 /// last parts do not exist yet.
 fn resolve(p: &Path) -> PathBuf {
-    let abs = if p.is_absolute() { p.to_path_buf() } else { std::env::current_dir().unwrap_or_default().join(p) };
+    let abs = if p.is_absolute() {
+        p.to_path_buf()
+    } else {
+        std::env::current_dir().unwrap_or_default().join(p)
+    };
     let mut existing = abs.as_path();
     let mut tail = Vec::new();
     while !existing.exists() {
@@ -150,7 +200,13 @@ fn copy_visible(src: &Path, dst: &Path) -> Result<(usize, usize)> {
     fn is_link(p: &Path) -> bool {
         std::fs::symlink_metadata(p).is_ok_and(|m| m.file_type().is_symlink())
     }
-    fn walk(from: &Path, to: &Path, top: bool, skip: &Path, counts: &mut (usize, usize)) -> Result<()> {
+    fn walk(
+        from: &Path,
+        to: &Path,
+        top: bool,
+        skip: &Path,
+        counts: &mut (usize, usize),
+    ) -> Result<()> {
         if is_link(to) {
             bail!("{} is a link; refusing to write through it", to.display());
         }
@@ -177,7 +233,11 @@ fn copy_visible(src: &Path, dst: &Path) -> Result<(usize, usize)> {
                     counts.1 += 1;
                     continue;
                 }
-                let mut out = match std::fs::OpenOptions::new().write(true).create_new(true).open(&target) {
+                let mut out = match std::fs::OpenOptions::new()
+                    .write(true)
+                    .create_new(true)
+                    .open(&target)
+                {
                     Ok(f) => f,
                     Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => {
                         counts.1 += 1;
@@ -200,7 +260,9 @@ fn copy_visible(src: &Path, dst: &Path) -> Result<(usize, usize)> {
 /// `hq lite export <folder>` and `hq lite import <folder>`: the vault is plain markdown, so moving
 /// between Lite and Full HQ is a folder copy. Only notes move; HQ's own folders stay behind.
 pub fn lite(config: &HqConfig, sub: &str, folder: Option<&Path>) -> Result<()> {
-    let folder = folder.ok_or_else(|| anyhow::anyhow!("usage: hq lite export <folder> | hq lite import <folder>"))?;
+    let folder = folder.ok_or_else(|| {
+        anyhow::anyhow!("usage: hq lite export <folder> | hq lite import <folder>")
+    })?;
     let vault = &config.vault_path;
     match sub {
         "export" => {
@@ -209,11 +271,16 @@ pub fn lite(config: &HqConfig, sub: &str, folder: Option<&Path>) -> Result<()> {
                 bail!("choose a folder that is neither inside the vault nor contains it");
             }
             if folder.exists() && std::fs::read_dir(folder)?.next().is_some() {
-                bail!("{} is not empty; choose a new or empty folder", folder.display());
+                bail!(
+                    "{} is not empty; choose a new or empty folder",
+                    folder.display()
+                );
             }
             let (copied, _) = copy_visible(vault, folder)?;
             println!("Exported {copied} file(s) to {}", folder.display());
-            println!("To use them in Full HQ, copy that folder's contents into its vault (or run `hq lite import` there).");
+            println!(
+                "To use them in Full HQ, copy that folder's contents into its vault (or run `hq lite import` there)."
+            );
             Ok(())
         }
         "import" => {
@@ -225,11 +292,16 @@ pub fn lite(config: &HqConfig, sub: &str, folder: Option<&Path>) -> Result<()> {
                 bail!("choose a folder that is neither inside the vault nor contains it");
             }
             let (copied, skipped) = copy_visible(folder, vault)?;
-            println!("Imported {copied} file(s) into {}; {skipped} already existed and were left as they were.", vault.display());
+            println!(
+                "Imported {copied} file(s) into {}; {skipped} already existed and were left as they were.",
+                vault.display()
+            );
             println!("Run `hq reindex` so search finds them.");
             Ok(())
         }
-        other => bail!("unknown option `{other}`; use `hq lite export <folder>` or `hq lite import <folder>`"),
+        other => bail!(
+            "unknown option `{other}`; use `hq lite export <folder>` or `hq lite import <folder>`"
+        ),
     }
 }
 
@@ -255,32 +327,101 @@ pub fn doctor_windows(config: &HqConfig) -> Result<()> {
         };
         println!("  [{mark}] {what}: {detail}");
     };
-    line(None, "profile", (if config.profile.is_lite() { "lite" } else { "full" }).to_string());
-    line(None, "program", std::env::current_exe().map(|p| p.display().to_string()).unwrap_or_else(|_| "unknown".into()));
-    line(None, "config file", HqConfig::config_read_path().display().to_string());
+    line(
+        None,
+        "profile",
+        (if config.profile.is_lite() {
+            "lite"
+        } else {
+            "full"
+        })
+        .to_string(),
+    );
+    line(
+        None,
+        "program",
+        std::env::current_exe()
+            .map(|p| p.display().to_string())
+            .unwrap_or_else(|_| "unknown".into()),
+    );
+    line(
+        None,
+        "config file",
+        HqConfig::config_read_path().display().to_string(),
+    );
     let vault = &config.vault_path;
-    line(Some(!in_synced_folder(vault)), "notes folder", format!(
-        "{}{}", vault.display(),
-        if in_synced_folder(vault) { " (inside a synced folder: a SQLite database there can be corrupted by sync; set vault_path to a local folder)" } else { "" }
-    ));
+    line(
+        Some(!in_synced_folder(vault)),
+        "notes folder",
+        format!(
+            "{}{}",
+            vault.display(),
+            if in_synced_folder(vault) {
+                " (inside a synced folder: a SQLite database there can be corrupted by sync; set vault_path to a local folder)"
+            } else {
+                ""
+            }
+        ),
+    );
     let db = config.db_path();
-    line(Some(!in_synced_folder(&db)), "database", db.display().to_string());
-    line(Some(db.as_os_str().len() < 200), "path length", format!("database path is {} characters (Windows limits paths near 260 unless long paths are enabled)", db.as_os_str().len()));
-    for (tool, why) in [("gh", "needed for `hq copilot link`"), ("code", "VS Code command line"), ("git", "for projects")] {
+    line(
+        Some(!in_synced_folder(&db)),
+        "database",
+        db.display().to_string(),
+    );
+    line(
+        Some(db.as_os_str().len() < 200),
+        "path length",
+        format!(
+            "database path is {} characters (Windows limits paths near 260 unless long paths are enabled)",
+            db.as_os_str().len()
+        ),
+    );
+    for (tool, why) in [
+        ("gh", "needed for `hq copilot link`"),
+        ("code", "VS Code command line"),
+        ("git", "for projects"),
+    ] {
         match on_path(tool) {
             Some(p) => line(Some(true), tool, format!("{} ({why})", p.display())),
             None => line(None, tool, format!("not on PATH ({why})")),
         }
     }
-    let proxy = ["HTTPS_PROXY", "https_proxy", "HTTP_PROXY"].iter().find_map(|k| std::env::var(k).ok());
-    line(None, "proxy", proxy.unwrap_or_else(|| "none set in the environment (the Windows system proxy is used by the installer)".into()));
+    let proxy = ["HTTPS_PROXY", "https_proxy", "HTTP_PROXY"]
+        .iter()
+        .find_map(|k| std::env::var(k).ok());
+    line(
+        None,
+        "proxy",
+        proxy.unwrap_or_else(|| {
+            "none set in the environment (the Windows system proxy is used by the installer)".into()
+        }),
+    );
     let port = config.ws_port;
     let free = std::net::TcpListener::bind(("127.0.0.1", port)).is_ok();
-    line(None, &format!("port {port}"), if free { "free".into() } else { "in use (an HQ may already be running, or another program)".into() });
+    line(
+        None,
+        &format!("port {port}"),
+        if free {
+            "free".into()
+        } else {
+            "in use (an HQ may already be running, or another program)".into()
+        },
+    );
     if cfg!(windows) {
-        line(None, "autostart", if autostart_is_on() { "on".into() } else { "off".into() });
+        line(
+            None,
+            "autostart",
+            if autostart_is_on() {
+                "on".into()
+            } else {
+                "off".into()
+            },
+        );
     }
-    println!("\nWhether AppLocker, WDAC or Smart App Control allow programs from your profile is decided when a program starts; the installer tests that once. See docs/CORPORATE_WORKSTATION.md.");
+    println!(
+        "\nWhether AppLocker, WDAC or Smart App Control allow programs from your profile is decided when a program starts; the installer tests that once. See docs/CORPORATE_WORKSTATION.md."
+    );
     println!("Run `hq doctor --egress` to see what, if anything, could leave this computer.");
     Ok(())
 }
@@ -292,7 +433,10 @@ mod tests {
     #[test]
     fn the_startup_value_quotes_the_program_and_starts_quietly() {
         let cmd = autostart_command(Path::new(r"D:\apps\Some One\hq-lite\hq.exe"));
-        assert_eq!(cmd, "\"D:\\apps\\Some One\\hq-lite\\hq.exe\" web --detach --no-open");
+        assert_eq!(
+            cmd,
+            "\"D:\\apps\\Some One\\hq-lite\\hq.exe\" web --detach --no-open"
+        );
         let args = reg_add_args(Path::new("hq.exe"));
         assert_eq!(&args[..4], ["add", RUN_KEY, "/v", RUN_VALUE]);
         assert!(args.contains(&"/f".to_string()));
@@ -300,8 +444,12 @@ mod tests {
 
     #[test]
     fn synced_folders_are_recognised() {
-        assert!(in_synced_folder(Path::new("D:/data/OneDrive/Documents/vault")));
-        assert!(in_synced_folder(Path::new("D:/data/OneDrive - Example/vault")));
+        assert!(in_synced_folder(Path::new(
+            "D:/data/OneDrive/Documents/vault"
+        )));
+        assert!(in_synced_folder(Path::new(
+            "D:/data/OneDrive - Example/vault"
+        )));
         assert!(in_synced_folder(Path::new("D:/data/Dropbox/vault")));
         assert!(!in_synced_folder(Path::new("D:/data/.hq/vault")));
     }
@@ -332,7 +480,10 @@ mod tests {
         let inner = s.join("Notebooks/copy");
         assert!(copy_visible(s, &inner).is_ok());
         assert!(!inner.join("Notebooks/copy").exists());
-        assert_eq!(std::fs::read_to_string(back.path().join("Notebooks/a.md")).unwrap(), "mine");
+        assert_eq!(
+            std::fs::read_to_string(back.path().join("Notebooks/a.md")).unwrap(),
+            "mine"
+        );
     }
 
     #[cfg(unix)]
@@ -343,6 +494,9 @@ mod tests {
         std::fs::write(secret.path().join("s.md"), "secret").unwrap();
         std::os::unix::fs::symlink(secret.path(), src.path().join("link")).unwrap();
         let dst = tempfile::tempdir().unwrap();
-        assert_eq!(copy_visible(src.path(), &dst.path().join("o")).unwrap(), (0, 0));
+        assert_eq!(
+            copy_visible(src.path(), &dst.path().join("o")).unwrap(),
+            (0, 0)
+        );
     }
 }

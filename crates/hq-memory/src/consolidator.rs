@@ -16,10 +16,7 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use tracing::{info, warn};
 
-use crate::db::{
-    get_consolidation_history, get_unconsolidated_memories,
-    store_consolidation,
-};
+use crate::db::{get_consolidation_history, get_unconsolidated_memories, store_consolidation};
 use crate::llm_bridge::MemoryLlm;
 use crate::types::{Connection, ConsolidationResult, Memory};
 

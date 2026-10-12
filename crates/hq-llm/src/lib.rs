@@ -29,16 +29,16 @@ pub mod provider;
 pub mod provider_usage;
 pub mod ratelimit;
 pub mod reconcile;
-mod tap;
 pub mod responses;
 pub mod router;
+mod tap;
 #[cfg(feature = "turboquant")]
 pub mod turboquant;
 
 pub use anthropic::AnthropicProvider;
-pub use instrument::{ExternalCall, Instruments, InstrumentedProvider, usage_from_openrouter};
 pub use cerebras::CerebrasProvider;
 pub use copilot::CopilotProvider;
+pub use instrument::{ExternalCall, InstrumentedProvider, Instruments, usage_from_openrouter};
 pub use ollama::OllamaProvider;
 pub use openai_compat::OpenRouterProvider;
 pub use outcome_sink::{

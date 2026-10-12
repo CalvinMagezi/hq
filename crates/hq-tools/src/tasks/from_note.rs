@@ -303,7 +303,10 @@ impl HqTool for TaskCreateFromNoteTool {
         // The tasks scope may rewrite the text of tasks filed under its name, and a promoted
         // note's text becomes a launched session's prompt, so no other caller files under it.
         if crate::harness_session::is_tasks_scope_actor(&hq_db::tasks::clean_label(&created_by)) {
-            bail!("{} names are for the tasks-scoped key; file under your own name", crate::harness_session::TASKS_SCOPE_ACTOR);
+            bail!(
+                "{} names are for the tasks-scoped key; file under your own name",
+                crate::harness_session::TASKS_SCOPE_ACTOR
+            );
         }
 
         let vault = self.vault.clone();
@@ -410,8 +413,9 @@ impl HqTool for TaskCreateFromNoteTool {
         });
         if !earlier.is_empty() {
             out["already_linked"] = json!(earlier.iter().map(task_summary).collect::<Vec<_>>());
-            out["already_linked_note"] =
-                json!("This note already started these tasks. If one is the same work, continue it and delete the new task.");
+            out["already_linked_note"] = json!(
+                "This note already started these tasks. If one is the same work, continue it and delete the new task."
+            );
         }
         Ok(out)
     }

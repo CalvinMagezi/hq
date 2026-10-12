@@ -105,7 +105,11 @@ fn the_operator_token_and_a_siblings_config_cannot_be_read() {
     let backend = need_backend!();
     let h = host();
     let s = hiding(&h);
-    let token = inside(backend, &s, &format!("cat {}", h.dir.join("operator.token").display()));
+    let token = inside(
+        backend,
+        &s,
+        &format!("cat {}", h.dir.join("operator.token").display()),
+    );
     assert!(!token.contains("OPERATOR-TOKEN"), "{token}");
     let sibling = inside(backend, &s, &format!("cat {}", h.sibling.display()));
     assert!(!sibling.contains("SIBLING-TOKEN"), "{sibling}");
@@ -136,10 +140,24 @@ fn writes_land_in_the_project_and_nowhere_else() {
     let outside = tempfile::tempdir().unwrap().keep().canonicalize().unwrap();
     let mut s = sandbox(&h.project);
     s.hidden_dirs = vec![];
-    let ok = inside(backend, &s, &format!("echo yes > {0}/new.txt && cat {0}/new.txt", h.project.display()));
+    let ok = inside(
+        backend,
+        &s,
+        &format!(
+            "echo yes > {0}/new.txt && cat {0}/new.txt",
+            h.project.display()
+        ),
+    );
     assert!(ok.contains("yes"), "{ok}");
-    let _ = inside(backend, &s, &format!("echo no > {}/escaped.txt", outside.display()));
-    assert!(!outside.join("escaped.txt").exists(), "a write outside the project got through");
+    let _ = inside(
+        backend,
+        &s,
+        &format!("echo no > {}/escaped.txt", outside.display()),
+    );
+    assert!(
+        !outside.join("escaped.txt").exists(),
+        "a write outside the project got through"
+    );
     let _ = std::fs::remove_dir_all(&outside);
 }
 
@@ -161,13 +179,26 @@ fn other_processes_and_their_environments_are_hidden() {
         "cat /proc/[0-9]*/environ 2>/dev/null | tr '\\0' '\\n' | grep -c victim-secret-xyz; true"
     };
     // Positive control: without the sandbox the same command does see it.
-    let outside = Command::new("/bin/sh").args(["-c", script]).output().unwrap();
+    let outside = Command::new("/bin/sh")
+        .args(["-c", script])
+        .output()
+        .unwrap();
     let outside = String::from_utf8_lossy(&outside.stdout).trim().to_string();
     let seen = inside(backend, &s, script);
     let _ = victim.kill();
     let _ = victim.wait();
-    assert!(outside.parse::<u32>().is_ok_and(|n| n >= 1), "the control found nothing: {outside:?}");
-    let count = seen.trim().lines().last().unwrap_or("").trim().parse::<u32>().unwrap_or(0);
+    assert!(
+        outside.parse::<u32>().is_ok_and(|n| n >= 1),
+        "the control found nothing: {outside:?}"
+    );
+    let count = seen
+        .trim()
+        .lines()
+        .last()
+        .unwrap_or("")
+        .trim()
+        .parse::<u32>()
+        .unwrap_or(0);
     assert_eq!(count, 0, "a sibling's environment was visible: {seen}");
 }
 
@@ -183,7 +214,9 @@ fn network_off_refuses_a_direct_connection() {
     let out = inside(
         backend,
         &s,
-        &format!("python3 -c \"import socket; socket.create_connection(('127.0.0.1',{port}),3); print('CONN'+'ECTED')\" 2>&1"),
+        &format!(
+            "python3 -c \"import socket; socket.create_connection(('127.0.0.1',{port}),3); print('CONN'+'ECTED')\" 2>&1"
+        ),
     );
     assert!(!out.contains("CONNECTED"), "{out}");
 }
@@ -208,17 +241,29 @@ fn the_proxy_network_reaches_only_the_proxy_port() {
     });
     std::thread::spawn(move || while other.accept().is_ok() {});
     let mut s = sandbox(&h.project);
-    s.network = Network::Proxy { port: proxy_port, unix_sockets: vec![], relay: None };
+    s.network = Network::Proxy {
+        port: proxy_port,
+        unix_sockets: vec![],
+        relay: None,
+    };
     let connect = |port: u16| {
         inside(
             backend,
             &s,
-            &format!("python3 -c \"import socket; c=socket.create_connection(('127.0.0.1',{port}),3); print(c.recv(20).decode() or 'CONN'+'ECTED')\" 2>&1"),
+            &format!(
+                "python3 -c \"import socket; c=socket.create_connection(('127.0.0.1',{port}),3); print(c.recv(20).decode() or 'CONN'+'ECTED')\" 2>&1"
+            ),
         )
     };
-    assert!(connect(proxy_port).contains("proxy-here"), "the proxy port must work");
+    assert!(
+        connect(proxy_port).contains("proxy-here"),
+        "the proxy port must work"
+    );
     let blocked = connect(other_port);
-    assert!(!blocked.contains("CONNECTED") && !blocked.contains("proxy-here"), "{blocked}");
+    assert!(
+        !blocked.contains("CONNECTED") && !blocked.contains("proxy-here"),
+        "{blocked}"
+    );
 }
 
 #[test]
@@ -241,13 +286,20 @@ fn a_file_can_be_replaced_atomically_when_it_and_its_temp_siblings_are_writable(
     );
     let out = inside(backend, &s, &script);
     assert!(out.contains("new"), "{out}");
-    assert!(!home.join("stray.txt").exists(), "only that file and its siblings were writable");
+    assert!(
+        !home.join("stray.txt").exists(),
+        "only that file and its siblings were writable"
+    );
 }
 
 #[test]
 fn bubblewrap_refuses_a_proxy_network_instead_of_pretending() {
     let mut s = sandbox(Path::new("/p"));
-    s.network = Network::Proxy { port: 1, unix_sockets: vec![], relay: None };
+    s.network = Network::Proxy {
+        port: 1,
+        unix_sockets: vec![],
+        relay: None,
+    };
     let err = bwrap_args(&s, &argv("true")).unwrap_err();
     assert!(err.0.contains("relay"), "{err}");
 }
@@ -259,19 +311,37 @@ fn the_profile_denies_before_it_allows_and_lists_every_rule() {
     s.writable_files = vec!["/h/.c.json".into()];
     s.readonly_files = vec!["/w/ro".into()];
     s.masked_files = vec!["/m/secret".into()];
-    s.hidden_dirs = vec![HiddenDir { dir: "/run".into(), allow: vec!["/run/sock".into()] }];
+    s.hidden_dirs = vec![HiddenDir {
+        dir: "/run".into(),
+        allow: vec!["/run/sock".into()],
+    }];
     s.hide_other_processes = true;
-    s.network = Network::Proxy { port: 18080, unix_sockets: vec!["/run/sock".into()], relay: None };
+    s.network = Network::Proxy {
+        port: 18080,
+        unix_sockets: vec!["/run/sock".into()],
+        relay: None,
+    };
     let p = seatbelt_profile(&s);
-    let at = |needle: &str| p.find(needle).unwrap_or_else(|| panic!("{needle} missing in {p}"));
+    let at = |needle: &str| {
+        p.find(needle)
+            .unwrap_or_else(|| panic!("{needle} missing in {p}"))
+    };
     assert!(at("(deny file-write*)") < at("(allow file-write*"));
-    assert!(at("(deny file-read-data (subpath \"/run\"))") < at("(allow file-read-data (literal \"/run/sock\"))"));
+    assert!(
+        at("(deny file-read-data (subpath \"/run\"))")
+            < at("(allow file-read-data (literal \"/run/sock\"))")
+    );
     assert!(p.contains("(subpath \"/proj\")") && p.contains("(subpath \"/w\")"));
-    assert!(p.contains("(literal \"/h/.c.json\")") && p.contains("(regex #\"^/h/\\.c\\.json\\..*\")"));
+    assert!(
+        p.contains("(literal \"/h/.c.json\")") && p.contains("(regex #\"^/h/\\.c\\.json\\..*\")")
+    );
     assert!(p.contains("(deny file-write* (literal \"/w/ro\"))"));
     assert!(p.contains("(deny file-read* file-write* (literal \"/m/secret\"))"));
     assert!(p.contains("(deny process-info* (target others))"));
-    assert!(at("(deny network-outbound)") < at("(allow network-outbound (remote ip \"localhost:18080\")"));
+    assert!(
+        at("(deny network-outbound)")
+            < at("(allow network-outbound (remote ip \"localhost:18080\")")
+    );
     assert!(p.contains("(literal \"/run/sock\")"));
 }
 
@@ -280,24 +350,39 @@ fn hiding_a_directory_never_hides_it_from_stat() {
     // Claude Code stats every parent of a file it reads and refuses what it cannot
     // examine, so only reading data is denied, never `file-read*` as a whole.
     let mut s = sandbox(Path::new("/proj"));
-    s.hidden_dirs = vec![HiddenDir { dir: "/run".into(), allow: vec![] }];
+    s.hidden_dirs = vec![HiddenDir {
+        dir: "/run".into(),
+        allow: vec![],
+    }];
     let p = seatbelt_profile(&s);
-    assert!(p.contains("file-read-data") && !p.contains("(deny file-read* (subpath"), "{p}");
+    assert!(
+        p.contains("file-read-data") && !p.contains("(deny file-read* (subpath"),
+        "{p}"
+    );
 }
 
 #[test]
 fn bubblewrap_hides_a_directory_with_an_empty_tmpfs_and_binds_back_only_the_allowed_files() {
     let mut s = sandbox(Path::new("/proj"));
-    s.hidden_dirs = vec![HiddenDir { dir: "/run".into(), allow: vec!["/run/sock".into()] }];
+    s.hidden_dirs = vec![HiddenDir {
+        dir: "/run".into(),
+        allow: vec!["/run/sock".into()],
+    }];
     s.network = Network::Off;
     let args: Vec<String> = bwrap_args(&s, &argv("true"))
         .unwrap()
         .iter()
         .map(|a| a.to_string_lossy().into_owned())
         .collect();
-    let at = |a: &[&str]| args.windows(a.len()).position(|w| w == a).unwrap_or_else(|| panic!("{a:?} not in {args:?}"));
+    let at = |a: &[&str]| {
+        args.windows(a.len())
+            .position(|w| w == a)
+            .unwrap_or_else(|| panic!("{a:?} not in {args:?}"))
+    };
     assert!(at(&["--tmpfs", "/run"]) < at(&["--bind", "/run/sock", "/run/sock"]));
-    assert!(args.contains(&"--unshare-net".to_string()) && args.contains(&"--unshare-pid".to_string()));
+    assert!(
+        args.contains(&"--unshare-net".to_string()) && args.contains(&"--unshare-pid".to_string())
+    );
     assert_eq!(args[args.len() - 3..], ["/bin/sh", "-c", "true"]);
 }
 
@@ -306,7 +391,12 @@ fn canonical_resolves_dedups_and_puts_parents_first() {
     let tmp = tempfile::tempdir().unwrap();
     let root = tmp.path().canonicalize().unwrap();
     std::fs::create_dir_all(root.join("a/b")).unwrap();
-    let got = canonical([root.join("a/b"), root.join("a"), root.join("a/b/../b"), root.join("missing")]);
+    let got = canonical([
+        root.join("a/b"),
+        root.join("a"),
+        root.join("a/b/../b"),
+        root.join("missing"),
+    ]);
     assert_eq!(got, vec![root.join("a"), root.join("a/b")]);
 }
 
@@ -329,10 +419,23 @@ fn an_allowance_inside_a_hidden_dir_survives_a_hidden_parent_listed_later() {
     std::fs::write(inner.join("theirs.json"), "THEIRS-SECRET").unwrap();
     let mut s = sandbox(&root);
     s.hidden_dirs = vec![
-        HiddenDir { dir: inner.clone(), allow: vec![inner.join("mine.json")] },
-        HiddenDir { dir: root.clone(), allow: vec![] },
+        HiddenDir {
+            dir: inner.clone(),
+            allow: vec![inner.join("mine.json")],
+        },
+        HiddenDir {
+            dir: root.clone(),
+            allow: vec![],
+        },
     ];
-    let out = inside(backend, &s, &format!("cat {i}/mine.json; cat {i}/theirs.json", i = inner.display()));
+    let out = inside(
+        backend,
+        &s,
+        &format!(
+            "cat {i}/mine.json; cat {i}/theirs.json",
+            i = inner.display()
+        ),
+    );
     assert!(out.contains("MINE-OK"), "{out}");
     assert!(!out.contains("THEIRS-SECRET"), "{out}");
 }
@@ -348,7 +451,10 @@ fn readonly_subpaths_and_denied_programs_are_enforced() {
     let out = inside(
         backend,
         &s,
-        &format!("echo x > {r}/hooks/pre-commit; echo y > {r}/ok && echo WROTE", r = root.display()),
+        &format!(
+            "echo x > {r}/hooks/pre-commit; echo y > {r}/ok && echo WROTE",
+            r = root.display()
+        ),
     );
     assert!(!root.join("hooks/pre-commit").exists(), "{out}");
     assert!(out.contains("WROTE"), "{out}");
@@ -374,16 +480,28 @@ fn reads_under_a_restricted_root_are_limited_to_the_allowed_paths() {
     std::fs::create_dir_all(&project).unwrap();
     std::fs::write(project.join("src"), "SRC-OK").unwrap();
     let mut s = sandbox(&project);
-    s.read_restrictions = vec![ReadRestriction { root: root.clone(), allow: vec![root.join("tools"), project.clone()] }];
-    s.hidden_dirs = vec![HiddenDir { dir: root.join("tools/secret"), allow: vec![] }];
+    s.read_restrictions = vec![ReadRestriction {
+        root: root.clone(),
+        allow: vec![root.join("tools"), project.clone()],
+    }];
+    s.hidden_dirs = vec![HiddenDir {
+        dir: root.join("tools/secret"),
+        allow: vec![],
+    }];
     let out = inside(
         backend,
         &s,
-        &format!("cat {r}/tools/bin; cat {r}/tools/proj/src; cat {r}/private/diary; cat {r}/tools/secret/key", r = root.display()),
+        &format!(
+            "cat {r}/tools/bin; cat {r}/tools/proj/src; cat {r}/private/diary; cat {r}/tools/secret/key",
+            r = root.display()
+        ),
     );
     assert!(out.contains("TOOL-OK") && out.contains("SRC-OK"), "{out}");
     assert!(!out.contains("PRIVATE-DATA"), "{out}");
-    assert!(!out.contains("KEY-DATA"), "a hidden dir inside an allowed path stays hidden: {out}");
+    assert!(
+        !out.contains("KEY-DATA"),
+        "a hidden dir inside an allowed path stays hidden: {out}"
+    );
 }
 
 #[test]
@@ -392,14 +510,37 @@ fn bubblewrap_with_a_relay_unshares_the_network_and_starts_the_relay_first() {
     s.network = Network::Proxy {
         port: 18080,
         unix_sockets: vec![],
-        relay: Some(Relay { program: "/bin/hq".into(), unix_socket: "/run/eg.sock".into() }),
+        relay: Some(Relay {
+            program: "/bin/hq".into(),
+            unix_socket: "/run/eg.sock".into(),
+        }),
     };
     s.private_tmp = vec!["/tmp".into()];
-    let args: Vec<String> = bwrap_args(&s, &argv("true")).unwrap().iter().map(|a| a.to_string_lossy().into_owned()).collect();
+    let args: Vec<String> = bwrap_args(&s, &argv("true"))
+        .unwrap()
+        .iter()
+        .map(|a| a.to_string_lossy().into_owned())
+        .collect();
     assert!(args.contains(&"--unshare-net".to_string()));
-    let at = |w: &str| args.iter().position(|a| a == w).unwrap_or_else(|| panic!("{w} missing in {args:?}"));
+    let at = |w: &str| {
+        args.iter()
+            .position(|a| a == w)
+            .unwrap_or_else(|| panic!("{w} missing in {args:?}"))
+    };
     assert!(at("--tmpfs") < at("--chdir"));
     let tail = &args[at("--") + 1..];
-    assert_eq!(&tail[..8], ["/bin/hq", "host", "sandbox-init", "--port", "18080", "--unix", "/run/eg.sock", "--"]);
+    assert_eq!(
+        &tail[..8],
+        [
+            "/bin/hq",
+            "host",
+            "sandbox-init",
+            "--port",
+            "18080",
+            "--unix",
+            "/run/eg.sock",
+            "--"
+        ]
+    );
     assert_eq!(&tail[8..], ["/bin/sh", "-c", "true"]);
 }

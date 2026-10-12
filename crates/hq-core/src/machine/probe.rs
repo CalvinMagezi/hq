@@ -21,7 +21,9 @@ const AUTH_PROBE_TIMEOUT: Duration = Duration::from_secs(3);
 /// disagrees with reality is worse than no profile.
 pub fn which_binary(name: &str) -> Option<PathBuf> {
     let valid = !name.is_empty()
-        && name.chars().all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '_' | '-'));
+        && name
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '_' | '-'));
     if !valid {
         return None;
     }
@@ -29,7 +31,12 @@ pub fn which_binary(name: &str) -> Option<PathBuf> {
     let extra = format!("{home}/.local/bin:{home}/bin:/opt/homebrew/bin:/usr/local/bin");
     // The name is a positional parameter, never part of the script text.
     Command::new("sh")
-        .args(["-c", &format!("PATH=\"{extra}:$PATH\" command -v \"$1\""), "sh", name])
+        .args([
+            "-c",
+            &format!("PATH=\"{extra}:$PATH\" command -v \"$1\""),
+            "sh",
+            name,
+        ])
         .output()
         .ok()
         .filter(|o| o.status.success())

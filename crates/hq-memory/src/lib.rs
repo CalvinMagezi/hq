@@ -11,8 +11,8 @@
 //!
 
 pub mod concept_pages;
-pub mod context_packet;
 pub mod consolidator;
+pub mod context_packet;
 pub mod db;
 pub mod entity_graph;
 pub mod forgetter;
@@ -29,16 +29,9 @@ pub mod types;
 
 pub use consolidator::MemoryConsolidator;
 pub use db::{
-    StoreMemoryParams,
-    decay_old_memories,
-    get_consolidation_history,
-    get_memory_stats,
-    get_recent_memories,
-    get_unconsolidated_memories,
-    store_consolidation,
-    store_consolidation_chained,
-    store_memory,
-    touch_memory,
+    StoreMemoryParams, decay_old_memories, get_consolidation_history, get_memory_stats,
+    get_recent_memories, get_unconsolidated_memories, store_consolidation,
+    store_consolidation_chained, store_memory, touch_memory,
 };
 pub use forgetter::{ForgetterResult, MemoryForgetter};
 pub use ingester::MemoryIngester;
@@ -49,4 +42,3 @@ pub use openrouter_embed::{
 };
 pub use querier::{MemoryContext, MemoryQuerier};
 pub use types::*;
-

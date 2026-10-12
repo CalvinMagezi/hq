@@ -218,7 +218,8 @@ async fn run_gmail_hook(
 ) -> axum::response::Response {
     if expected.is_empty() {
         tracing::warn!("/hooks/gmail refused: GMAIL_WEBHOOK_SECRET is not set");
-        return ApiError::Unavailable("GMAIL_WEBHOOK_SECRET is not set".to_string()).into_response();
+        return ApiError::Unavailable("GMAIL_WEBHOOK_SECRET is not set".to_string())
+            .into_response();
     }
     if !hook_request_authorized(headers, query, expected) {
         tracing::warn!("/hooks/gmail refused: missing or wrong secret");
@@ -260,7 +261,9 @@ mod tests {
         }
         let vault = tempfile::TempDir::new().unwrap();
         let app = crate::create_router(Arc::new(WsState::new(vault.path().to_path_buf(), None)));
-        let req = axum::http::Request::post("/hooks/gmail").body(axum::body::Body::empty()).unwrap();
+        let req = axum::http::Request::post("/hooks/gmail")
+            .body(axum::body::Body::empty())
+            .unwrap();
         let res = app.oneshot(req).await.unwrap();
         assert_eq!(res.status(), StatusCode::SERVICE_UNAVAILABLE);
     }
@@ -288,11 +291,15 @@ mod tests {
         wrong_bearer.insert("authorization", format!("Bearer {WRONG}").parse().unwrap());
 
         let status = |r: axum::response::Response| r.status();
-        let ok_query = run_gmail_hook(&state, Some(&format!("a=1&token={SECRET}")), &none, SECRET).await;
+        let ok_query =
+            run_gmail_hook(&state, Some(&format!("a=1&token={SECRET}")), &none, SECRET).await;
         let ok_header = run_gmail_hook(&state, None, &bearer, SECRET).await;
-        let bad_query = run_gmail_hook(&state, Some(&format!("token={WRONG}")), &none, SECRET).await;
+        let bad_query =
+            run_gmail_hook(&state, Some(&format!("token={WRONG}")), &none, SECRET).await;
         let bad_header = run_gmail_hook(&state, None, &wrong_bearer, SECRET).await;
-        let body = axum::body::to_bytes(bad_query.into_body(), usize::MAX).await.unwrap();
+        let body = axum::body::to_bytes(bad_query.into_body(), usize::MAX)
+            .await
+            .unwrap();
 
         // Past the auth gate the handler stops at "config not loaded", before any poll.
         assert_eq!(status(ok_query), StatusCode::SERVICE_UNAVAILABLE);
@@ -301,7 +308,10 @@ mod tests {
         assert!(!String::from_utf8_lossy(&body).contains(WRONG));
         let out = logs.contents();
         assert!(out.contains("missing or wrong secret"), "{out}");
-        assert!(!out.contains(SECRET) && !out.contains(WRONG), "secret in logs: {out}");
+        assert!(
+            !out.contains(SECRET) && !out.contains(WRONG),
+            "secret in logs: {out}"
+        );
     }
 
     #[test]

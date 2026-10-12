@@ -104,8 +104,14 @@ mod tests {
         let claim = anyhow::anyhow!("task moved on (claim conflict)");
         assert_eq!(ApiError::from(claim).status(), StatusCode::CONFLICT);
         let db: anyhow::Error = rusqlite::Error::QueryReturnedNoRows.into();
-        assert_eq!(ApiError::from(db).status(), StatusCode::INTERNAL_SERVER_ERROR);
-        assert_eq!(ApiError::from(anyhow::anyhow!("bad slug")).status(), StatusCode::BAD_REQUEST);
+        assert_eq!(
+            ApiError::from(db).status(),
+            StatusCode::INTERNAL_SERVER_ERROR
+        );
+        assert_eq!(
+            ApiError::from(anyhow::anyhow!("bad slug")).status(),
+            StatusCode::BAD_REQUEST
+        );
     }
 
     #[tokio::test]
@@ -113,6 +119,9 @@ mod tests {
         let res = ApiError::bad_request("nope").into_response();
         assert_eq!(res.status(), StatusCode::BAD_REQUEST);
         let body = axum::body::to_bytes(res.into_body(), 1024).await.unwrap();
-        assert_eq!(serde_json::from_slice::<serde_json::Value>(&body).unwrap(), json!({"error": "nope"}));
+        assert_eq!(
+            serde_json::from_slice::<serde_json::Value>(&body).unwrap(),
+            json!({"error": "nope"})
+        );
     }
 }

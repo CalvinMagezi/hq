@@ -22,7 +22,10 @@ use crate::registry::HqTool;
 /// empty `enum` would reject every value). Built fresh per call since the
 /// vault's registered brands can change without a rebuild.
 pub(crate) fn brand_param_schema(vault_path: &Path) -> Value {
-    let known: Vec<String> = discover_brands(vault_path).into_iter().map(|b| b.slug).collect();
+    let known: Vec<String> = discover_brands(vault_path)
+        .into_iter()
+        .map(|b| b.slug)
+        .collect();
     if known.is_empty() {
         json!({
             "type": "string",
@@ -269,7 +272,12 @@ mod tests {
     async fn add_then_list_round_trips() {
         let vault = tempfile::tempdir().unwrap();
         // A brand is "known" once its Branding/ dir exists in the vault.
-        std::fs::create_dir_all(vault.path().join("Notebooks/Projects/ExampleProject/Branding")).unwrap();
+        std::fs::create_dir_all(
+            vault
+                .path()
+                .join("Notebooks/Projects/ExampleProject/Branding"),
+        )
+        .unwrap();
         let add = BrandAssetsAddTool {
             vault_path: vault.path().to_path_buf(),
         };
@@ -285,7 +293,10 @@ mod tests {
         let list = BrandAssetsListTool {
             vault_path: vault.path().to_path_buf(),
         };
-        let out = list.execute(json!({ "brand": "exampleproject" })).await.unwrap();
+        let out = list
+            .execute(json!({ "brand": "exampleproject" }))
+            .await
+            .unwrap();
         let assets = out["assets"].as_array().unwrap();
         assert!(assets.iter().any(|a| a == "logo.svg"));
     }

@@ -76,18 +76,22 @@ fn a_hook_event_reaches_the_host_from_inside_the_sandbox() {
     std::fs::copy(hq(), &copy).unwrap();
     // macOS checks a binary it has never seen on its first run, which takes seconds and more under
     // parallel tests; run the copy once here so the hook's own run is not racing that check.
-    let warmed = std::process::Command::new(&copy).arg("--version").output().unwrap();
+    let warmed = std::process::Command::new(&copy)
+        .arg("--version")
+        .output()
+        .unwrap();
     assert!(warmed.status.success(), "{warmed:?}");
     let server = Server::bind(&dir, Arc::new(Host::new().with_helper_binary(hq()))).unwrap();
     let stop = server.stop_handle();
     let thread = std::thread::spawn(move || server.serve());
 
     let payload = r#"{"hook_event_name":"UserPromptSubmit","session_id":"conv-sandboxed"}"#;
-    let command = claude_settings(&format!("'{}' host report", copy.display()))["hooks"]["UserPromptSubmit"][0]
-        ["hooks"][0]["command"]
-        .as_str()
-        .unwrap()
-        .to_string();
+    let command =
+        claude_settings(&format!("'{}' host report", copy.display()))["hooks"]["UserPromptSubmit"]
+            [0]["hooks"][0]["command"]
+            .as_str()
+            .unwrap()
+            .to_string();
     // Show the hook's own output on the screen, so a failure explains itself.
     let command = command.replace(">/dev/null 2>&1 || true", "2>&1; echo rc=$?");
     let script = format!("printf '%s' '{payload}' | {command}; sleep 60");
@@ -101,7 +105,9 @@ fn a_hook_event_reaches_the_host_from_inside_the_sandbox() {
         .unwrap();
     let deadline = Instant::now() + WAIT;
     let info = loop {
-        let info = client.call("agent.get", json!({ "name": "boxed" })).unwrap();
+        let info = client
+            .call("agent.get", json!({ "name": "boxed" }))
+            .unwrap();
         if info["agent_session_id"] == "conv-sandboxed" || Instant::now() > deadline {
             break info;
         }
@@ -113,7 +119,10 @@ fn a_hook_event_reaches_the_host_from_inside_the_sandbox() {
         .call("agent.read", json!({ "name": "boxed", "source": "recent" }))
         .map(|v| v["text"].to_string())
         .unwrap_or_default();
-    assert_eq!(info["agent_session_id"], "conv-sandboxed", "{info}\nscreen: {screen}");
+    assert_eq!(
+        info["agent_session_id"], "conv-sandboxed",
+        "{info}\nscreen: {screen}"
+    );
     assert_eq!(info["sandbox"], "process");
 }
 

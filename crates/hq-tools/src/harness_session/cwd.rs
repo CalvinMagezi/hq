@@ -13,7 +13,9 @@ pub const TASKS_SCOPE_ACTOR: &str = "mcp:tasks";
 pub fn is_tasks_scope_actor(name: &str) -> bool {
     let name = name.to_ascii_lowercase();
     name == TASKS_SCOPE_ACTOR
-        || name.strip_prefix(TASKS_SCOPE_ACTOR).is_some_and(|rest| rest.starts_with('/'))
+        || name
+            .strip_prefix(TASKS_SCOPE_ACTOR)
+            .is_some_and(|rest| rest.starts_with('/'))
 }
 
 /// Characters a shell would expand inside the path the agent is started in.
@@ -35,7 +37,10 @@ pub fn require_cwd(cwd: Option<&str>) -> Result<PathBuf> {
     if !path.is_absolute() {
         bail!("cwd '{cwd}' is not an absolute path");
     }
-    if path.components().any(|c| matches!(c, std::path::Component::ParentDir)) {
+    if path
+        .components()
+        .any(|c| matches!(c, std::path::Component::ParentDir))
+    {
         bail!("cwd '{cwd}' contains '..'; name the directory without parent references");
     }
     let is_own_home = dirs::home_dir().is_some_and(|home| home == path);
@@ -101,7 +106,11 @@ pub fn check_cwd_allowed(cwd: &str, deny: &[String]) -> Result<()> {
 
 /// With `allow` non-empty, the handoff key may only start sessions in or under one of its entries.
 pub fn check_handoff_cwd(cwd: &Path, allow: &[String]) -> Result<()> {
-    let entries: Vec<&str> = allow.iter().map(|a| a.trim()).filter(|a| !a.is_empty()).collect();
+    let entries: Vec<&str> = allow
+        .iter()
+        .map(|a| a.trim())
+        .filter(|a| !a.is_empty())
+        .collect();
     if entries.is_empty() || entries.iter().any(|a| cwd.starts_with(a)) {
         return Ok(());
     }
@@ -129,8 +138,9 @@ pub fn require_cwd_in(
 /// `require_cwd_in` with the config read from disk. A config that cannot be
 /// read fails the check rather than skipping it.
 pub fn require_allowed_cwd(cwd: Option<&str>) -> Result<PathBuf> {
-    let cfg = hq_core::config::HqConfig::load()
-        .map_err(|e| anyhow::anyhow!("cannot read the config to check agent_host.spawn_cwd_deny: {e}"))?;
+    let cfg = hq_core::config::HqConfig::load().map_err(|e| {
+        anyhow::anyhow!("cannot read the config to check agent_host.spawn_cwd_deny: {e}")
+    })?;
     require_cwd_in(cwd, &cfg.agent_host, false)
 }
 
@@ -147,12 +157,26 @@ pub struct StartDir {
 /// A folder name for an agent given no folder: the label or harness and the time, so two agents
 /// never share one write scope.
 fn own_folder_name(label: &str, harness: &str) -> String {
-    let base = if label.trim().is_empty() { harness } else { label };
+    let base = if label.trim().is_empty() {
+        harness
+    } else {
+        label
+    };
     let safe: String = base
         .chars()
-        .map(|c| if c.is_alphanumeric() || matches!(c, ' ' | '-' | '_') { c } else { '-' })
+        .map(|c| {
+            if c.is_alphanumeric() || matches!(c, ' ' | '-' | '_') {
+                c
+            } else {
+                '-'
+            }
+        })
         .collect();
-    format!("{} {}", safe.trim(), chrono::Local::now().format("%Y-%m-%d %H%M"))
+    format!(
+        "{} {}",
+        safe.trim(),
+        chrono::Local::now().format("%Y-%m-%d %H%M")
+    )
 }
 
 /// The name of the folder that was asked for, when it is fit to recreate inside the HQ folder.
@@ -163,7 +187,9 @@ fn requested_name(wanted: &Path) -> Option<String> {
 
 /// The name the fallback folder gets: the missing folder's own name, else one unique to the agent.
 fn fallback_folder_name(wanted: Option<&Path>, label: &str, harness: &str) -> String {
-    wanted.and_then(requested_name).unwrap_or_else(|| own_folder_name(label, harness))
+    wanted
+        .and_then(requested_name)
+        .unwrap_or_else(|| own_folder_name(label, harness))
 }
 
 /// A folder inside the machine's own HQ folder (`Documents/HQ`), made on that machine if it is
@@ -183,10 +209,9 @@ pub fn workspace_start_dir(
             host.name()
         )
     })?;
-    let path = made["path"]
-        .as_str()
-        .map(PathBuf::from)
-        .ok_or_else(|| anyhow::anyhow!("host '{}' did not say which folder it made", host.name()))?;
+    let path = made["path"].as_str().map(PathBuf::from).ok_or_else(|| {
+        anyhow::anyhow!("host '{}' did not say which folder it made", host.name())
+    })?;
     let note = match wanted {
         Some(w) => format!(
             "{} does not exist on host '{}', so the session started in {} instead.",
@@ -200,7 +225,10 @@ pub fn workspace_start_dir(
             host.name()
         ),
     };
-    Ok(StartDir { path, note: Some(note) })
+    Ok(StartDir {
+        path,
+        note: Some(note),
+    })
 }
 
 /// Whether a launch error says the folder was missing.
@@ -266,7 +294,9 @@ pub fn check_cwd_outside_vault(
     let cwd = absolute_normalized(cwd);
     let vault = absolute_normalized(vault);
     let hq_dir = absolute_normalized(&hq_core::config::HqConfig::hq_dir());
-    let private = VAULT_PRIVATE_DIRS.iter().any(|d| is_inside(&cwd, &vault.join(d)));
+    let private = VAULT_PRIVATE_DIRS
+        .iter()
+        .any(|d| is_inside(&cwd, &vault.join(d)));
     let is_vault = lowercase_parts(&cwd) == lowercase_parts(&vault);
     let holds_vault = is_inside(&vault, &cwd) && !cwd.join(".git").is_dir();
     if private || is_vault || holds_vault || is_inside(&cwd, &hq_dir) {
@@ -303,7 +333,10 @@ mod vault_guard_tests {
             assert!(check(cwd, "local").is_err(), "{cwd}");
         }
         let hq_dir = hq_core::config::HqConfig::hq_dir();
-        assert!(check(&hq_dir.display().to_string(), "").is_err(), "HQ's config directory");
+        assert!(
+            check(&hq_dir.display().to_string(), "").is_err(),
+            "HQ's config directory"
+        );
     }
 
     #[test]
@@ -311,7 +344,10 @@ mod vault_guard_tests {
         assert!(check("/srv/hq/.vault/Notebooks/Projects/site", "").is_ok());
         assert!(check("/srv/projects/app", "").is_ok());
         assert!(check("/srv/hq-oss", "native").is_ok());
-        assert!(check(VAULT, "laptop").is_ok(), "a remote host's paths are its own");
+        assert!(
+            check(VAULT, "laptop").is_ok(),
+            "a remote host's paths are its own"
+        );
         assert!(check("/workspace/projects/app", "laptop").is_ok());
     }
 
@@ -336,7 +372,8 @@ mod fallback_tests {
 
     #[test]
     fn a_missing_folder_keeps_its_name_so_one_project_keeps_one_folder() {
-        let name = fallback_folder_name(Some(Path::new("/srv/clients/Agent-HQ")), "", "claude-code");
+        let name =
+            fallback_folder_name(Some(Path::new("/srv/clients/Agent-HQ")), "", "claude-code");
         assert_eq!(name, "Agent-HQ");
     }
 
@@ -346,7 +383,10 @@ mod fallback_tests {
         assert!(labelled.starts_with("auth-refactor "), "{labelled}");
         let bare = fallback_folder_name(None, "  ", "codex");
         assert!(bare.starts_with("codex "), "{bare}");
-        assert!(hq_host::check_folder_name(&labelled).is_ok() && hq_host::check_folder_name(&bare).is_ok());
+        assert!(
+            hq_host::check_folder_name(&labelled).is_ok()
+                && hq_host::check_folder_name(&bare).is_ok()
+        );
     }
 
     #[test]
@@ -359,6 +399,8 @@ mod fallback_tests {
     fn the_host_launch_error_for_a_missing_folder_is_recognised() {
         let e = anyhow::anyhow!("working directory /nope is not an existing absolute directory");
         assert!(is_missing_dir_error(&e));
-        assert!(!is_missing_dir_error(&anyhow::anyhow!("harness binary not found")));
+        assert!(!is_missing_dir_error(&anyhow::anyhow!(
+            "harness binary not found"
+        )));
     }
 }

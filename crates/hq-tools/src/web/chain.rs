@@ -42,7 +42,15 @@ pub async fn web_search(
         .filter(|s| !s.is_empty())
         .map(|key| (BRAVE_ENDPOINT, key));
     let env = native.then(NativeEnv::production);
-    search_chain(query, opts, searxng_url, brave, env.as_ref(), &DEFAULT_BUDGETS).await
+    search_chain(
+        query,
+        opts,
+        searxng_url,
+        brave,
+        env.as_ref(),
+        &DEFAULT_BUDGETS,
+    )
+    .await
 }
 
 pub(super) async fn search_chain(
@@ -54,7 +62,16 @@ pub(super) async fn search_chain(
     budgets: &Budgets,
 ) -> Result<WebSearchResults> {
     let peer = peer::configured();
-    search_chain_via(query, opts, searxng_url, brave, native, peer.as_ref(), budgets).await
+    search_chain_via(
+        query,
+        opts,
+        searxng_url,
+        brave,
+        native,
+        peer.as_ref(),
+        budgets,
+    )
+    .await
 }
 
 /// `search_chain` with the peer given explicitly, so tests need no global.
@@ -205,7 +222,10 @@ pub(super) fn native_unsupported(opts: &SearchOptions) -> Vec<String> {
         notes.push("freshness (arXiv and Europe PMC ignore it; OpenAlex applies it)".to_string());
     }
     if opts.freshness.is_some() && opts.category == Some(Category::Images) {
-        notes.push("freshness (Google Images applies it; Wikimedia Commons and Openverse ignore it)".to_string());
+        notes.push(
+            "freshness (Google Images applies it; Wikimedia Commons and Openverse ignore it)"
+                .to_string(),
+        );
     }
     if opts.freshness.is_some() && opts.category == Some(Category::Code) {
         notes.push(

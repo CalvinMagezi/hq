@@ -115,7 +115,13 @@ pub async fn handle_media(
     }
     if let Some(voice) = msg.voice() {
         let filename = format!("voice_{}.ogg", msg.id.0);
-        out.saved_only(&filename, &voice.file.id, "Voice note", " (not transcribed)").await;
+        out.saved_only(
+            &filename,
+            &voice.file.id,
+            "Voice note",
+            " (not transcribed)",
+        )
+        .await;
     }
     if let Some(video) = msg.video() {
         let ext = video
@@ -136,13 +142,20 @@ pub async fn handle_media(
 
 impl MediaOut<'_> {
     async fn download(&self, file_id: &FileId, filename: &str) -> Result<std::path::PathBuf> {
-        download_file(self.bot, self.token, file_id, &self.media_dir.join(filename)).await
+        download_file(
+            self.bot,
+            self.token,
+            file_id,
+            &self.media_dir.join(filename),
+        )
+        .await
     }
 
     /// A compressed photo, attached as an image part (FR-017).
     async fn photo(&mut self, msg: &teloxide::types::Message, photo: &teloxide::types::PhotoSize) {
         let filename = format!("photo_{}_{}.jpg", msg.id.0, photo.file.unique_id);
-        self.download_and_attach(&photo.file.id, &filename, "image/jpeg").await;
+        self.download_and_attach(&photo.file.id, &filename, "image/jpeg")
+            .await;
     }
 
     async fn document(&mut self, doc: &teloxide::types::Document) {
@@ -150,7 +163,8 @@ impl MediaOut<'_> {
             .file_name
             .clone()
             .unwrap_or_else(|| format!("doc_{}", doc.file.unique_id));
-        self.download_and_attach(&doc.file.id, &filename, "document").await;
+        self.download_and_attach(&doc.file.id, &filename, "document")
+            .await;
     }
 
     /// Text is inlined, documents converted, images sent as image parts with
@@ -161,15 +175,20 @@ impl MediaOut<'_> {
             Err(e) => {
                 tracing::warn!("telegram: failed to download {filename}: {e}");
                 let status = attachments::failed("download failed");
-                self.files.push(FileEntry::new(filename, kind, None, status));
+                self.files
+                    .push(FileEntry::new(filename, kind, None, status));
                 return;
             }
         };
         let prepared = attachments::prepare_attachments(&[(filename.to_string(), path)]).await;
         self.augmented.push_str(&prepared.body);
-        self.images.extend(prepared.images.into_iter().map(|(path, mime)| {
-            hq_core::types::ImageAttachment { path, mime_type: mime.to_string() }
-        }));
+        self.images
+            .extend(prepared.images.into_iter().map(|(path, mime)| {
+                hq_core::types::ImageAttachment {
+                    path,
+                    mime_type: mime.to_string(),
+                }
+            }));
         self.files.extend(prepared.files);
     }
 

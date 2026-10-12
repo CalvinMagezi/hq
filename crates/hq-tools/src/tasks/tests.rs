@@ -124,19 +124,29 @@ async fn task_create_with_an_external_id_is_idempotent_per_space() {
         .unwrap();
     assert_eq!(again["deduplicated"], true);
     assert_eq!(again["id"], first["id"]);
-    assert_eq!(again["title"], "Import", "the existing task is returned untouched");
+    assert_eq!(
+        again["title"], "Import",
+        "the existing task is returned untouched"
+    );
 
-    db.with_conn(|c| t::create_space(c, "sp-2", "Other", "other")).unwrap();
+    db.with_conn(|c| t::create_space(c, "sp-2", "Other", "other"))
+        .unwrap();
     let other_space = create
         .execute(json!({ "title": "Import", "external_id": "req-1", "space_id": "other" }))
         .await
         .unwrap();
-    assert!(other_space.get("deduplicated").is_none(), "another space has its own key space");
+    assert!(
+        other_space.get("deduplicated").is_none(),
+        "another space has its own key space"
+    );
     assert_ne!(other_space["id"], first["id"]);
 
     let plain = create.execute(json!({ "title": "No key" })).await.unwrap();
     let plain_again = create.execute(json!({ "title": "No key" })).await.unwrap();
-    assert_ne!(plain["id"], plain_again["id"], "no external_id means no dedup");
+    assert_ne!(
+        plain["id"], plain_again["id"],
+        "no external_id means no dedup"
+    );
 }
 
 #[tokio::test]
@@ -874,7 +884,12 @@ async fn comment_as(attested: Option<&str>, supplied_author: Option<&str>) -> St
                     label: "t",
                     cwd: "/t",
                     mission_id: made["id"].as_str(),
-                    placement: Placement { host: "native", agent_name: id, workspace_id: "w", pane_id: "p" },
+                    placement: Placement {
+                        host: "native",
+                        agent_name: id,
+                        workspace_id: "w",
+                        pane_id: "p",
+                    },
                     purpose: None,
                 },
             )
@@ -887,7 +902,10 @@ async fn comment_as(attested: Option<&str>, supplied_author: Option<&str>) -> St
         .execute(json!({"task_id": made["id"]}))
         .await
         .unwrap();
-    listed["comments"][0]["author"].as_str().unwrap().to_string()
+    listed["comments"][0]["author"]
+        .as_str()
+        .unwrap()
+        .to_string()
 }
 
 fn hq_tools_arg() -> &'static str {
@@ -920,7 +938,11 @@ async fn a_launched_agent_reaches_only_its_own_task_through_the_task_tools() {
     let make = |title: &str| {
         let t = tool("task_create");
         let title = title.to_string();
-        async move { t.execute(json!({"title": title, "created_by": "calvin"})).await.unwrap() }
+        async move {
+            t.execute(json!({"title": title, "created_by": "calvin"}))
+                .await
+                .unwrap()
+        }
     };
     let (mine, theirs) = (make("mine").await, make("theirs").await);
     db.with_conn(|c| {
@@ -932,7 +954,12 @@ async fn a_launched_agent_reaches_only_its_own_task_through_the_task_tools() {
                 label: "t",
                 cwd: "/t",
                 mission_id: mine["id"].as_str(),
-                placement: Placement { host: "native", agent_name: "hs-me", workspace_id: "w", pane_id: "p" },
+                placement: Placement {
+                    host: "native",
+                    agent_name: "hs-me",
+                    workspace_id: "w",
+                    pane_id: "p",
+                },
                 purpose: None,
             },
         )
@@ -944,21 +971,50 @@ async fn a_launched_agent_reaches_only_its_own_task_through_the_task_tools() {
     };
 
     for name in ["task_get"] {
-        assert!(tool(name).execute(as_me(json!({"id": mine["id"]}))).await.is_ok());
-        assert!(tool(name).execute(as_me(json!({"id": theirs["id"]}))).await.is_err());
+        assert!(
+            tool(name)
+                .execute(as_me(json!({"id": mine["id"]})))
+                .await
+                .is_ok()
+        );
+        assert!(
+            tool(name)
+                .execute(as_me(json!({"id": theirs["id"]})))
+                .await
+                .is_err()
+        );
     }
     for name in ["task_comment_list"] {
-        assert!(tool(name).execute(as_me(json!({"task_id": mine["id"]}))).await.is_ok());
-        assert!(tool(name).execute(as_me(json!({"task_id": theirs["id"]}))).await.is_err());
+        assert!(
+            tool(name)
+                .execute(as_me(json!({"task_id": mine["id"]})))
+                .await
+                .is_ok()
+        );
+        assert!(
+            tool(name)
+                .execute(as_me(json!({"task_id": theirs["id"]})))
+                .await
+                .is_err()
+        );
     }
     let add = |task: &serde_json::Value| as_me(json!({"task_id": task["id"], "body": "note"}));
     assert!(tool("task_comment_add").execute(add(&mine)).await.is_ok());
-    assert!(tool("task_comment_add").execute(add(&theirs)).await.is_err(), "no planting text on other tasks");
+    assert!(
+        tool("task_comment_add")
+            .execute(add(&theirs))
+            .await
+            .is_err(),
+        "no planting text on other tasks"
+    );
 
     let listed = tool("task_list").execute(as_me(json!({}))).await.unwrap();
     assert_eq!(listed["count"], 1, "{listed}");
     let unscoped = tool("task_list").execute(json!({})).await.unwrap();
-    assert_eq!(unscoped["count"], 2, "callers without a session are not scoped");
+    assert_eq!(
+        unscoped["count"], 2,
+        "callers without a session are not scoped"
+    );
 }
 
 // ─── the tasks scope ────────────────────────────────────────────────────
@@ -968,7 +1024,13 @@ fn mailbox_files(vault: &std::path::Path, tag: &str) -> usize {
         std::fs::read_dir(dir)
             .map(|rd| {
                 rd.flatten()
-                    .map(|e| if e.path().is_dir() { count(&e.path()) } else { 1 })
+                    .map(|e| {
+                        if e.path().is_dir() {
+                            count(&e.path())
+                        } else {
+                            1
+                        }
+                    })
                     .sum()
             })
             .unwrap_or(0)
@@ -993,11 +1055,20 @@ impl ScopeFixture {
         let db = Arc::new(Database::open_memory().unwrap());
         let client = Arc::new(VaultClient::new(path.clone()).unwrap());
         let tools = create_task_tools(path.clone(), client, db.clone());
-        Self { _vault: vault, path, db, tools }
+        Self {
+            _vault: vault,
+            path,
+            db,
+            tools,
+        }
     }
 
     fn tool(&self, name: &str) -> &dyn HqTool {
-        self.tools.iter().find(|t| t.name() == name).unwrap().as_ref()
+        self.tools
+            .iter()
+            .find(|t| t.name() == name)
+            .unwrap()
+            .as_ref()
     }
 }
 
@@ -1018,7 +1089,10 @@ async fn the_tasks_scope_sets_no_routing_tags_and_writes_no_mailbox() {
         .execute(json!({"title": "owner task", "tags": ["relay", "claude-code"]}))
         .await
         .unwrap();
-    assert!(mailbox_files(&fx.path, "relay") >= 1, "the control must deliver");
+    assert!(
+        mailbox_files(&fx.path, "relay") >= 1,
+        "the control must deliver"
+    );
     let before = (
         mailbox_files(&fx.path, "relay"),
         mailbox_files(&fx.path, "agent-worker"),
@@ -1034,13 +1108,19 @@ async fn the_tasks_scope_sets_no_routing_tags_and_writes_no_mailbox() {
         .await
         .unwrap();
     assert_eq!(made["tags"], json!([]), "a scoped caller sets no tags");
-    assert_eq!(made["created_by"], "mcp:tasks", "and cannot choose who it writes as");
+    assert_eq!(
+        made["created_by"], "mcp:tasks",
+        "and cannot choose who it writes as"
+    );
     let after = (
         mailbox_files(&fx.path, "relay"),
         mailbox_files(&fx.path, "agent-worker"),
         mailbox_files(&fx.path, "claude-code"),
     );
-    assert_eq!(before, after, "no mailbox may receive anything from the tasks scope");
+    assert_eq!(
+        before, after,
+        "no mailbox may receive anything from the tasks scope"
+    );
 }
 
 #[tokio::test]
@@ -1057,12 +1137,25 @@ async fn the_tasks_scope_cannot_retag_or_renotify_through_an_update() {
 
     let updated = fx
         .tool("task_update")
-        .execute(tasks_scope(json!({"id": id, "status": "in_progress", "tags": ["claude-code"]})))
+        .execute(tasks_scope(
+            json!({"id": id, "status": "in_progress", "tags": ["claude-code"]}),
+        ))
         .await
         .unwrap();
-    assert_eq!(updated["status"], "in_progress", "scoped callers do move tasks");
-    assert_eq!(updated["tags"], json!(["relay"]), "but the tag set is not theirs to change");
-    assert_eq!(mailbox_files(&fx.path, "relay"), delivered, "and an update does not notify");
+    assert_eq!(
+        updated["status"], "in_progress",
+        "scoped callers do move tasks"
+    );
+    assert_eq!(
+        updated["tags"],
+        json!(["relay"]),
+        "but the tag set is not theirs to change"
+    );
+    assert_eq!(
+        mailbox_files(&fx.path, "relay"),
+        delivered,
+        "and an update does not notify"
+    );
 
     assert_eq!(mailbox_files(&fx.path, "claude-code"), 0);
 
@@ -1071,7 +1164,10 @@ async fn the_tasks_scope_cannot_retag_or_renotify_through_an_update() {
         .execute(json!({"id": id, "status": "to_do", "tags": ["relay", "claude-code"]}))
         .await
         .unwrap();
-    assert!(mailbox_files(&fx.path, "claude-code") >= 1, "the control must deliver");
+    assert!(
+        mailbox_files(&fx.path, "claude-code") >= 1,
+        "the control must deliver"
+    );
 }
 
 /// A lease token is proof of who is acting, so one taken with the full key must not let a
@@ -1082,13 +1178,17 @@ async fn the_tasks_scope_assigns_no_one() {
     let fx = ScopeFixture::new(&["reviewer"]);
     let made = fx
         .tool("task_create")
-        .execute(tasks_scope(json!({"title": "x", "assignees": ["reviewer"]})))
+        .execute(tasks_scope(
+            json!({"title": "x", "assignees": ["reviewer"]}),
+        ))
         .await
         .unwrap();
     assert_eq!(made["assignees"], json!([]), "{made}");
     let updated = fx
         .tool("task_update")
-        .execute(tasks_scope(json!({"id": made["id"], "assignees": ["reviewer"]})))
+        .execute(tasks_scope(
+            json!({"id": made["id"], "assignees": ["reviewer"]}),
+        ))
         .await
         .unwrap();
     assert_eq!(updated["assignees"], json!([]), "{updated}");
@@ -1099,7 +1199,10 @@ async fn the_tasks_scope_assigns_no_one() {
         .execute(json!({"id": made["id"], "assignees": ["reviewer"]}))
         .await
         .unwrap();
-    assert!(mailbox_files(&fx.path, "reviewer") >= 1, "the control must deliver");
+    assert!(
+        mailbox_files(&fx.path, "reviewer") >= 1,
+        "the control must deliver"
+    );
 }
 
 /// The scope edits text only on tasks filed as `mcp:tasks`, so no other caller may file or
@@ -1108,10 +1211,17 @@ async fn the_tasks_scope_assigns_no_one() {
 async fn only_the_tasks_scope_writes_under_its_name() {
     let fx = ScopeFixture::new(&[]);
     for name in ["mcp:tasks", "mcp:tasks/laptop", "mcp:tasks\u{200b}/laptop"] {
-        let filed = fx.tool("task_create").execute(json!({"title": "x", "created_by": name})).await;
+        let filed = fx
+            .tool("task_create")
+            .execute(json!({"title": "x", "created_by": name}))
+            .await;
         assert!(filed.is_err(), "{name} must be refused");
     }
-    let made = fx.tool("task_create").execute(json!({"title": "x", "created_by": "owner"})).await.unwrap();
+    let made = fx
+        .tool("task_create")
+        .execute(json!({"title": "x", "created_by": "owner"}))
+        .await
+        .unwrap();
     let posing = fx
         .tool("task_comment_add")
         .execute(json!({"task_id": made["id"], "body": "hi", "author": "mcp:tasks"}))
@@ -1122,7 +1232,11 @@ async fn only_the_tasks_scope_writes_under_its_name() {
 #[tokio::test]
 async fn the_tasks_scope_cannot_write_under_a_lease_it_did_not_take() {
     let fx = ScopeFixture::new(&[]);
-    let made = fx.tool("task_create").execute(json!({"title": "owner task"})).await.unwrap();
+    let made = fx
+        .tool("task_create")
+        .execute(json!({"title": "owner task"}))
+        .await
+        .unwrap();
     let id = made["id"].as_str().unwrap().to_string();
     let claim = fx
         .tool("task_claim")
@@ -1133,13 +1247,20 @@ async fn the_tasks_scope_cannot_write_under_a_lease_it_did_not_take() {
 
     let borrowed = fx
         .tool("task_comment_add")
-        .execute(tasks_scope(json!({"task_id": id, "body": "hi", "lease": lease})))
+        .execute(tasks_scope(
+            json!({"task_id": id, "body": "hi", "lease": lease}),
+        ))
         .await;
-    assert!(borrowed.is_err(), "a full-key lease is refused on the tasks scope");
+    assert!(
+        borrowed.is_err(),
+        "a full-key lease is refused on the tasks scope"
+    );
 
     let own = fx
         .tool("task_comment_add")
-        .execute(tasks_scope(json!({"task_id": id, "body": "hi", "author": "owner-agent"})))
+        .execute(tasks_scope(
+            json!({"task_id": id, "body": "hi", "author": "owner-agent"}),
+        ))
         .await
         .unwrap();
     assert_eq!(own["author"], "mcp:tasks");
@@ -1148,17 +1269,32 @@ async fn the_tasks_scope_cannot_write_under_a_lease_it_did_not_take() {
 #[tokio::test]
 async fn the_tasks_scope_sees_who_holds_a_task_but_not_where_they_work() {
     let fx = ScopeFixture::new(&[]);
-    let made = fx.tool("task_create").execute(json!({"title": "owner task"})).await.unwrap();
+    let made = fx
+        .tool("task_create")
+        .execute(json!({"title": "owner task"}))
+        .await
+        .unwrap();
     let id = made["id"].as_str().unwrap().to_string();
     fx.tool("task_claim")
         .execute(json!({"task_id": id, "actor": "builder", "host": "box-1", "cwd": "/srv/app", "branch": "feat/x"}))
         .await
         .unwrap();
 
-    let owner = fx.tool("task_get").execute(json!({"id": id})).await.unwrap();
-    assert_eq!(owner["held_by"]["host"], "box-1", "the owner sees the details");
+    let owner = fx
+        .tool("task_get")
+        .execute(json!({"id": id}))
+        .await
+        .unwrap();
+    assert_eq!(
+        owner["held_by"]["host"], "box-1",
+        "the owner sees the details"
+    );
 
-    let seen = fx.tool("task_get").execute(tasks_scope(json!({"id": id}))).await.unwrap();
+    let seen = fx
+        .tool("task_get")
+        .execute(tasks_scope(json!({"id": id})))
+        .await
+        .unwrap();
     assert_eq!(seen["held_by"]["actor"], "builder");
     assert!(seen.get("work_sessions").is_none());
     let text = seen.to_string();
@@ -1170,8 +1306,16 @@ async fn the_tasks_scope_sees_who_holds_a_task_but_not_where_they_work() {
 #[tokio::test]
 async fn the_tasks_scope_sees_a_resume_point_without_machine_paths() {
     let fx = ScopeFixture::new(&[]);
-    let made = fx.tool("task_create").execute(json!({"title": "a"})).await.unwrap();
-    let claim = fx.tool("task_claim").execute(json!({"task_id": made["id"], "actor": "builder"})).await.unwrap();
+    let made = fx
+        .tool("task_create")
+        .execute(json!({"title": "a"}))
+        .await
+        .unwrap();
+    let claim = fx
+        .tool("task_claim")
+        .execute(json!({"task_id": made["id"], "actor": "builder"}))
+        .await
+        .unwrap();
     fx.tool("task_heartbeat")
         .execute(json!({"lease": claim["lease"], "checkpoint": {
             "summary": "half done", "next_step": "tests",
@@ -1179,9 +1323,17 @@ async fn the_tasks_scope_sees_a_resume_point_without_machine_paths() {
         }}))
         .await
         .unwrap();
-    let owner = fx.tool("task_get").execute(json!({"id": made["id"]})).await.unwrap();
+    let owner = fx
+        .tool("task_get")
+        .execute(json!({"id": made["id"]}))
+        .await
+        .unwrap();
     assert_eq!(owner["checkpoint"]["files"].as_array().unwrap().len(), 4);
-    let seen = fx.tool("task_get").execute(tasks_scope(json!({"id": made["id"]}))).await.unwrap();
+    let seen = fx
+        .tool("task_get")
+        .execute(tasks_scope(json!({"id": made["id"]})))
+        .await
+        .unwrap();
     assert_eq!(seen["checkpoint"]["files"], json!(["src/lib.rs"]), "{seen}");
     assert_eq!(seen["checkpoint"]["next_step"], "tests");
 }
@@ -1197,7 +1349,11 @@ async fn the_tasks_scope_neither_sees_nor_adds_note_links() {
         ]}))
         .await
         .unwrap();
-    let seen = fx.tool("task_get").execute(tasks_scope(json!({"id": made["id"]}))).await.unwrap();
+    let seen = fx
+        .tool("task_get")
+        .execute(tasks_scope(json!({"id": made["id"]})))
+        .await
+        .unwrap();
     let links = seen["links"].as_array().unwrap();
     assert_eq!(links.len(), 1, "{seen}");
     assert_eq!(links[0]["kind"], "url");
@@ -1205,7 +1361,9 @@ async fn the_tasks_scope_neither_sees_nor_adds_note_links() {
 
     let refused = fx
         .tool("task_create")
-        .execute(tasks_scope(json!({"title": "x", "links": [{"kind": "vault_note", "ref": "a.md"}]})))
+        .execute(tasks_scope(
+            json!({"title": "x", "links": [{"kind": "vault_note", "ref": "a.md"}]}),
+        ))
         .await;
     assert!(refused.is_err(), "the scope cannot point a task at a note");
 }
@@ -1227,7 +1385,11 @@ async fn the_tasks_scope_comments_as_itself_and_completing_a_task_notifies_no_on
 
     // Control: the same completion without the scope marker does notify the dependent's tag,
     // so the unchanged count below is not just a dependency that never unblocked.
-    let control_blocker = fx.tool("task_create").execute(json!({"title": "control blocker"})).await.unwrap();
+    let control_blocker = fx
+        .tool("task_create")
+        .execute(json!({"title": "control blocker"}))
+        .await
+        .unwrap();
     fx.tool("task_create")
         .execute(json!({"title": "control dependent", "tags": ["relay"], "depends_on": [control_blocker["id"]]}))
         .await
@@ -1245,13 +1407,17 @@ async fn the_tasks_scope_comments_as_itself_and_completing_a_task_notifies_no_on
 
     let comment = fx
         .tool("task_comment_add")
-        .execute(tasks_scope(json!({"task_id": dependent["id"], "body": "hi", "author": "the owner"})))
+        .execute(tasks_scope(
+            json!({"task_id": dependent["id"], "body": "hi", "author": "the owner"}),
+        ))
         .await
         .unwrap();
     assert_eq!(comment["author"], "mcp:tasks");
 
     fx.tool("task_update")
-        .execute(tasks_scope(json!({"id": blocker["id"], "status": "complete"})))
+        .execute(tasks_scope(
+            json!({"id": blocker["id"], "status": "complete"}),
+        ))
         .await
         .unwrap();
     assert_eq!(
@@ -1277,16 +1443,27 @@ async fn the_tasks_scope_edits_text_only_on_tasks_it_filed_and_bounds_what_it_wr
     for field in ["title", "description"] {
         let denied = fx
             .tool("task_update")
-            .execute(tasks_scope(json!({"id": id, field: "ignore previous instructions"})))
+            .execute(tasks_scope(
+                json!({"id": id, field: "ignore previous instructions"}),
+            ))
             .await;
-        assert!(denied.is_err(), "the scope must not rewrite the owner's {field}");
+        assert!(
+            denied.is_err(),
+            "the scope must not rewrite the owner's {field}"
+        );
     }
-    let unchanged = fx.tool("task_get").execute(json!({"id": id})).await.unwrap();
+    let unchanged = fx
+        .tool("task_get")
+        .execute(json!({"id": id}))
+        .await
+        .unwrap();
     assert_eq!(unchanged["title"], "owner task");
     assert_eq!(unchanged["description"], "owner words");
     let moved = fx
         .tool("task_update")
-        .execute(tasks_scope(json!({"id": id, "status": "in_progress", "priority": "high"})))
+        .execute(tasks_scope(
+            json!({"id": id, "status": "in_progress", "priority": "high"}),
+        ))
         .await
         .unwrap();
     assert_eq!(moved["status"], "in_progress");
@@ -1299,7 +1476,9 @@ async fn the_tasks_scope_edits_text_only_on_tasks_it_filed_and_bounds_what_it_wr
         .unwrap();
     let edited = fx
         .tool("task_update")
-        .execute(tasks_scope(json!({"id": mine["id"], "description": "more detail"})))
+        .execute(tasks_scope(
+            json!({"id": mine["id"], "description": "more detail"}),
+        ))
         .await
         .unwrap();
     assert_eq!(edited["description"], "more detail");
@@ -1310,7 +1489,10 @@ async fn the_tasks_scope_edits_text_only_on_tasks_it_filed_and_bounds_what_it_wr
         ("task_create", json!({"title": "t", "description": long})),
         ("task_create", json!({"title": "y".repeat(501)})),
         ("task_comment_add", json!({"task_id": id, "body": long})),
-        ("task_update", json!({"id": mine["id"], "description": long})),
+        (
+            "task_update",
+            json!({"id": mine["id"], "description": long}),
+        ),
     ] {
         assert!(
             fx.tool(tool).execute(tasks_scope(args)).await.is_err(),
@@ -1327,7 +1509,11 @@ async fn the_tasks_scope_edits_text_only_on_tasks_it_filed_and_bounds_what_it_wr
 #[tokio::test]
 async fn the_tasks_scope_emits_no_review_item_and_cannot_force_an_index_rebuild() {
     let fx = ScopeFixture::new(&[]);
-    let made = fx.tool("task_create").execute(json!({"title": "reviewable"})).await.unwrap();
+    let made = fx
+        .tool("task_create")
+        .execute(json!({"title": "reviewable"}))
+        .await
+        .unwrap();
     let review_items = |fx: &ScopeFixture| {
         let value_db = hq_db::Database::open(&fx.path.join("_data").join("vault.db")).unwrap();
         hq_db::value_items::list_by_state(&value_db, hq_core::types::ValueState::Pending)
@@ -1335,24 +1521,41 @@ async fn the_tasks_scope_emits_no_review_item_and_cannot_force_an_index_rebuild(
             .len()
     };
     fx.tool("task_update")
-        .execute(tasks_scope(json!({"id": made["id"], "status": "ready_for_review"})))
+        .execute(tasks_scope(
+            json!({"id": made["id"], "status": "ready_for_review"}),
+        ))
         .await
         .unwrap();
-    assert_eq!(review_items(&fx), 0, "the scope must not raise an approval item for the owner");
+    assert_eq!(
+        review_items(&fx),
+        0,
+        "the scope must not raise an approval item for the owner"
+    );
 
     // Control: the owner's own transition does raise one.
-    let other = fx.tool("task_create").execute(json!({"title": "owner reviewable"})).await.unwrap();
+    let other = fx
+        .tool("task_create")
+        .execute(json!({"title": "owner reviewable"}))
+        .await
+        .unwrap();
     fx.tool("task_update")
         .execute(json!({"id": other["id"], "status": "ready_for_review"}))
         .await
         .unwrap();
-    assert_eq!(review_items(&fx), 1, "an owner transition raises an approval item");
+    assert_eq!(
+        review_items(&fx),
+        1,
+        "an owner transition raises an approval item"
+    );
 }
 
 #[test]
 fn added_tags_lists_only_what_the_write_introduced() {
     let tags = |v: &[&str]| v.iter().map(|s| s.to_string()).collect::<Vec<_>>();
-    assert_eq!(super::json::added_tags(&tags(&["a"]), &tags(&["a", "b"])), tags(&["b"]));
+    assert_eq!(
+        super::json::added_tags(&tags(&["a"]), &tags(&["a", "b"])),
+        tags(&["b"])
+    );
     assert!(super::json::added_tags(&tags(&["a", "b"]), &tags(&["a", "b"])).is_empty());
     assert!(super::json::added_tags(&tags(&["a", "b"]), &tags(&["a"])).is_empty());
 }
@@ -1383,15 +1586,27 @@ async fn an_update_notifies_only_newly_added_tags() {
     ] {
         tool("task_update").execute(patch).await.unwrap();
     }
-    assert_eq!(walk_files(&inbox), after_create, "edits that add no tag stay silent");
+    assert_eq!(
+        walk_files(&inbox),
+        after_create,
+        "edits that add no tag stay silent"
+    );
 
     std::fs::create_dir_all(inbox.with_file_name("other")).unwrap();
     tool("task_update")
         .execute(json!({ "id": id, "tags": ["reviewer", "other"] }))
         .await
         .unwrap();
-    assert_eq!(walk_files(&inbox), after_create, "an existing tag is not re-notified");
-    assert_eq!(walk_files(&inbox.with_file_name("other")), 1, "the new tag is");
+    assert_eq!(
+        walk_files(&inbox),
+        after_create,
+        "an existing tag is not re-notified"
+    );
+    assert_eq!(
+        walk_files(&inbox.with_file_name("other")),
+        1,
+        "the new tag is"
+    );
 }
 
 #[tokio::test]
@@ -1403,20 +1618,42 @@ async fn task_list_pages_and_reports_the_total() {
     let tools = create_task_tools(vault_path, vault, db);
     let tool = |name: &str| tools.iter().find(|t| t.name() == name).unwrap();
     for n in 0..5 {
-        tool("task_create").execute(json!({ "title": format!("t{n}") })).await.unwrap();
+        tool("task_create")
+            .execute(json!({ "title": format!("t{n}") }))
+            .await
+            .unwrap();
     }
 
-    let first = tool("task_list").execute(json!({ "limit": 2 })).await.unwrap();
-    assert_eq!((first["count"].as_i64(), first["total"].as_i64()), (Some(2), Some(5)));
+    let first = tool("task_list")
+        .execute(json!({ "limit": 2 }))
+        .await
+        .unwrap();
+    assert_eq!(
+        (first["count"].as_i64(), first["total"].as_i64()),
+        (Some(2), Some(5))
+    );
     assert_eq!(first["has_more"], json!(true));
-    let last = tool("task_list").execute(json!({ "limit": 2, "offset": 4 })).await.unwrap();
-    assert_eq!((last["count"].as_i64(), last["has_more"].clone()), (Some(1), json!(false)));
+    let last = tool("task_list")
+        .execute(json!({ "limit": 2, "offset": 4 }))
+        .await
+        .unwrap();
+    assert_eq!(
+        (last["count"].as_i64(), last["has_more"].clone()),
+        (Some(1), json!(false))
+    );
 
-    let seen: std::collections::HashSet<String> = [first, last, tool("task_list").execute(json!({ "limit": 2, "offset": 2 })).await.unwrap()]
-        .iter()
-        .flat_map(|page| page["tasks"].as_array().unwrap().iter())
-        .map(|t| t["id"].as_str().unwrap().to_string())
-        .collect();
+    let seen: std::collections::HashSet<String> = [
+        first,
+        last,
+        tool("task_list")
+            .execute(json!({ "limit": 2, "offset": 2 }))
+            .await
+            .unwrap(),
+    ]
+    .iter()
+    .flat_map(|page| page["tasks"].as_array().unwrap().iter())
+    .map(|t| t["id"].as_str().unwrap().to_string())
+    .collect();
     assert_eq!(seen.len(), 5, "pages cover every task exactly once");
 }
 
@@ -1428,7 +1665,10 @@ async fn an_unknown_status_is_refused_and_a_failed_dependency_undoes_the_status(
     let vault = Arc::new(VaultClient::new(vault_path.clone()).unwrap());
     let tools = create_task_tools(vault_path, vault, db);
     let tool = |name: &str| tools.iter().find(|t| t.name() == name).unwrap();
-    let created = tool("task_create").execute(json!({ "title": "Work" })).await.unwrap();
+    let created = tool("task_create")
+        .execute(json!({ "title": "Work" }))
+        .await
+        .unwrap();
     let id = created["display_id"].as_str().unwrap().to_string();
 
     let err = tool("task_update")
@@ -1436,12 +1676,18 @@ async fn an_unknown_status_is_refused_and_a_failed_dependency_undoes_the_status(
         .await
         .unwrap_err()
         .to_string();
-    assert!(err.contains("doing") && err.contains("in_progress"), "{err}");
+    assert!(
+        err.contains("doing") && err.contains("in_progress"),
+        "{err}"
+    );
 
     let failed = tool("task_update")
         .execute(json!({ "id": id, "status": "in_progress", "add_depends_on": ["NOPE-999"] }))
         .await;
-    assert!(failed.is_err(), "an unknown dependency fails the whole update");
+    assert!(
+        failed.is_err(),
+        "an unknown dependency fails the whole update"
+    );
     let after = tool("task_get").execute(json!({ "id": id })).await.unwrap();
     assert_eq!(after["status"], "to_do");
     assert!(after["work_started_at"].is_null());
@@ -1452,92 +1698,202 @@ fn tools_with(mode: hq_core::config::LeaseMode) -> Vec<Box<dyn HqTool>> {
     let vault_dir = tempfile::tempdir().unwrap();
     let vault_path = vault_dir.keep();
     let vault = Arc::new(VaultClient::new(vault_path.clone()).unwrap());
-    let settings = hq_core::config::TasksConfig { require_lease: mode, ..Default::default() };
-    create_task_tools_with(vault_path, vault, Arc::new(Database::open_memory().unwrap()), settings)
+    let settings = hq_core::config::TasksConfig {
+        require_lease: mode,
+        ..Default::default()
+    };
+    create_task_tools_with(
+        vault_path,
+        vault,
+        Arc::new(Database::open_memory().unwrap()),
+        settings,
+    )
 }
 
-async fn call_tool(tools: &[Box<dyn HqTool>], name: &str, args: serde_json::Value) -> anyhow::Result<serde_json::Value> {
-    tools.iter().find(|t| t.name() == name).unwrap().execute(args).await
+async fn call_tool(
+    tools: &[Box<dyn HqTool>],
+    name: &str,
+    args: serde_json::Value,
+) -> anyhow::Result<serde_json::Value> {
+    tools
+        .iter()
+        .find(|t| t.name() == name)
+        .unwrap()
+        .execute(args)
+        .await
 }
 
 #[tokio::test]
 async fn claim_heartbeat_release_attributes_the_work_to_the_lease_holder() {
     let tools = tools_with(hq_core::config::LeaseMode::Off);
-    let task = call_tool(&tools, "task_create", json!({ "title": "Ship" })).await.unwrap();
-    let id = task["display_id"].as_str().unwrap().to_string();
-
-    let claim = call_tool(&tools, "task_claim", json!({ "task_id": id, "actor": "builder", "harness": "claude-code", "branch": "feat/x" }))
+    let task = call_tool(&tools, "task_create", json!({ "title": "Ship" }))
         .await
         .unwrap();
+    let id = task["display_id"].as_str().unwrap().to_string();
+
+    let claim = call_tool(
+        &tools,
+        "task_claim",
+        json!({ "task_id": id, "actor": "builder", "harness": "claude-code", "branch": "feat/x" }),
+    )
+    .await
+    .unwrap();
     let lease = claim["lease"].as_str().unwrap().to_string();
     assert_eq!(claim["task"]["status"], "in_progress");
     assert_eq!(claim["moved_to_in_progress"], true);
 
-    let beat = call_tool(&tools, "task_heartbeat", json!({ "lease": lease })).await.unwrap();
+    let beat = call_tool(&tools, "task_heartbeat", json!({ "lease": lease }))
+        .await
+        .unwrap();
     assert_eq!(beat["ok"], true);
 
-    let comment = call_tool(&tools, "task_comment_add", json!({ "task_id": id, "body": "halfway", "author": "someone else", "lease": lease }))
-        .await
-        .unwrap();
-    assert_eq!(comment["author"], "builder", "the lease names the author, whatever was typed");
+    let comment = call_tool(
+        &tools,
+        "task_comment_add",
+        json!({ "task_id": id, "body": "halfway", "author": "someone else", "lease": lease }),
+    )
+    .await
+    .unwrap();
+    assert_eq!(
+        comment["author"], "builder",
+        "the lease names the author, whatever was typed"
+    );
 
-    let updated = call_tool(&tools, "task_update", json!({ "id": id, "priority": "high", "lease": lease })).await.unwrap();
+    let updated = call_tool(
+        &tools,
+        "task_update",
+        json!({ "id": id, "priority": "high", "lease": lease }),
+    )
+    .await
+    .unwrap();
     assert_eq!(updated["priority"], "high");
 
-    let released = call_tool(&tools, "task_release", json!({ "lease": lease, "status": "ready_for_review", "summary": "done, please check" }))
-        .await
-        .unwrap();
+    let released = call_tool(
+        &tools,
+        "task_release",
+        json!({ "lease": lease, "status": "ready_for_review", "summary": "done, please check" }),
+    )
+    .await
+    .unwrap();
     assert_eq!(released["released"], true);
     assert_eq!(released["task"]["status"], "ready_for_review");
 
-    let got = call_tool(&tools, "task_get", json!({ "id": id })).await.unwrap();
+    let got = call_tool(&tools, "task_get", json!({ "id": id }))
+        .await
+        .unwrap();
     assert!(got["held_by"].is_null(), "released, so nobody holds it");
     assert_eq!(got["work_sessions"].as_array().unwrap().len(), 1);
-    let actors: Vec<&str> = got["lifecycle_events"].as_array().unwrap().iter().filter_map(|e| e["actor"].as_str()).collect();
-    assert_eq!(actors, ["builder", "builder"], "start and handoff are both attributed");
+    let actors: Vec<&str> = got["lifecycle_events"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter_map(|e| e["actor"].as_str())
+        .collect();
+    assert_eq!(
+        actors,
+        ["builder", "builder"],
+        "start and handoff are both attributed"
+    );
 }
 
 #[tokio::test]
 async fn a_task_held_by_another_session_is_refused_and_shows_who_holds_it() {
     let tools = tools_with(hq_core::config::LeaseMode::Off);
-    let task = call_tool(&tools, "task_create", json!({ "title": "Contested" })).await.unwrap();
+    let task = call_tool(&tools, "task_create", json!({ "title": "Contested" }))
+        .await
+        .unwrap();
     let id = task["display_id"].as_str().unwrap().to_string();
-    call_tool(&tools, "task_claim", json!({ "task_id": id, "actor": "alpha" })).await.unwrap();
+    call_tool(
+        &tools,
+        "task_claim",
+        json!({ "task_id": id, "actor": "alpha" }),
+    )
+    .await
+    .unwrap();
 
-    let err = call_tool(&tools, "task_claim", json!({ "task_id": id, "actor": "beta" })).await.unwrap_err().to_string();
+    let err = call_tool(
+        &tools,
+        "task_claim",
+        json!({ "task_id": id, "actor": "beta" }),
+    )
+    .await
+    .unwrap_err()
+    .to_string();
     assert!(err.contains("alpha"), "{err}");
-    let got = call_tool(&tools, "task_get", json!({ "id": id })).await.unwrap();
+    let got = call_tool(&tools, "task_get", json!({ "id": id }))
+        .await
+        .unwrap();
     assert_eq!(got["held_by"]["actor"], "alpha");
-    assert!(call_tool(&tools, "task_claim", json!({ "task_id": id, "actor": "beta", "takeover": true })).await.is_ok());
+    assert!(
+        call_tool(
+            &tools,
+            "task_claim",
+            json!({ "task_id": id, "actor": "beta", "takeover": true })
+        )
+        .await
+        .is_ok()
+    );
 }
 
 #[tokio::test]
 async fn a_wrong_lease_is_an_error_not_an_anonymous_write() {
     let tools = tools_with(hq_core::config::LeaseMode::Off);
-    let task = call_tool(&tools, "task_create", json!({ "title": "Quiet" })).await.unwrap();
+    let task = call_tool(&tools, "task_create", json!({ "title": "Quiet" }))
+        .await
+        .unwrap();
     let id = task["display_id"].as_str().unwrap().to_string();
     for call in [
-        call_tool(&tools, "task_update", json!({ "id": id, "priority": "low", "lease": "hql_nope" })).await,
-        call_tool(&tools, "task_comment_add", json!({ "task_id": id, "body": "x", "lease": "garbage" })).await,
+        call_tool(
+            &tools,
+            "task_update",
+            json!({ "id": id, "priority": "low", "lease": "hql_nope" }),
+        )
+        .await,
+        call_tool(
+            &tools,
+            "task_comment_add",
+            json!({ "task_id": id, "body": "x", "lease": "garbage" }),
+        )
+        .await,
         call_tool(&tools, "task_heartbeat", json!({ "lease": "hql_nope" })).await,
         call_tool(&tools, "task_release", json!({ "lease": "hql_nope" })).await,
     ] {
         assert!(call.is_err());
     }
-    let got = call_tool(&tools, "task_get", json!({ "id": id })).await.unwrap();
-    assert!(got["priority"].is_null(), "the refused update changed nothing");
+    let got = call_tool(&tools, "task_get", json!({ "id": id }))
+        .await
+        .unwrap();
+    assert!(
+        got["priority"].is_null(),
+        "the refused update changed nothing"
+    );
 }
 
 #[test]
 fn the_lease_policy_costs_nothing_unless_a_task_is_being_started_without_one() {
     use hq_core::config::LeaseMode::*;
-    let check = |mode, starting, holds| super::tools_lease::lease_policy(mode, starting, holds, "FR-001");
+    let check =
+        |mode, starting, holds| super::tools_lease::lease_policy(mode, starting, holds, "FR-001");
     assert!(check(Off, true, false).unwrap().is_none());
-    assert!(check(Warn, true, true).unwrap().is_none(), "a holder is never warned");
-    assert!(check(Warn, false, false).unwrap().is_none(), "only starting a task is checked");
-    assert!(check(Warn, true, false).unwrap().unwrap().contains("task_claim"));
+    assert!(
+        check(Warn, true, true).unwrap().is_none(),
+        "a holder is never warned"
+    );
+    assert!(
+        check(Warn, false, false).unwrap().is_none(),
+        "only starting a task is checked"
+    );
+    assert!(
+        check(Warn, true, false)
+            .unwrap()
+            .unwrap()
+            .contains("task_claim")
+    );
     let refusal = check(Enforce, true, false).unwrap_err().to_string();
-    assert!(refusal.contains("task_claim") && refusal.contains("FR-001"), "{refusal}");
+    assert!(
+        refusal.contains("task_claim") && refusal.contains("FR-001"),
+        "{refusal}"
+    );
     assert!(check(Enforce, true, true).unwrap().is_none());
 }
 
@@ -1546,23 +1902,54 @@ async fn the_configured_mode_governs_starting_a_task_over_mcp() {
     use hq_core::config::LeaseMode::*;
     for (mode, expect) in [(Off, "ok"), (Warn, "warned"), (Enforce, "refused")] {
         let tools = tools_with(mode);
-        let task = call_tool(&tools, "task_create", json!({ "title": "Policy" })).await.unwrap();
+        let task = call_tool(&tools, "task_create", json!({ "title": "Policy" }))
+            .await
+            .unwrap();
         let id = task["display_id"].as_str().unwrap().to_string();
-        let started = call_tool(&tools, "task_update", json!({ "id": id, "status": "in_progress" })).await;
+        let started = call_tool(
+            &tools,
+            "task_update",
+            json!({ "id": id, "status": "in_progress" }),
+        )
+        .await;
         match (expect, started) {
             ("ok", Ok(v)) => assert!(v.get("warnings").is_none(), "{v}"),
-            ("warned", Ok(v)) => assert!(v["warnings"][0].as_str().unwrap().contains("task_claim"), "{v}"),
+            ("warned", Ok(v)) => assert!(
+                v["warnings"][0].as_str().unwrap().contains("task_claim"),
+                "{v}"
+            ),
             ("refused", Err(e)) => assert!(e.to_string().contains("task_claim"), "{e}"),
             (_, other) => panic!("{mode:?}: {other:?}"),
         }
         if mode == Enforce {
-            let got = call_tool(&tools, "task_get", json!({ "id": id })).await.unwrap();
+            let got = call_tool(&tools, "task_get", json!({ "id": id }))
+                .await
+                .unwrap();
             assert_eq!(got["status"], "to_do", "a refused start changes nothing");
-            let claim = call_tool(&tools, "task_claim", json!({ "task_id": id, "actor": "ok" })).await.unwrap();
+            let claim = call_tool(
+                &tools,
+                "task_claim",
+                json!({ "task_id": id, "actor": "ok" }),
+            )
+            .await
+            .unwrap();
             let lease = claim["lease"].as_str().unwrap();
-            assert!(call_tool(&tools, "task_update", json!({ "id": id, "status": "in_progress", "lease": lease })).await.is_ok());
+            assert!(
+                call_tool(
+                    &tools,
+                    "task_update",
+                    json!({ "id": id, "status": "in_progress", "lease": lease })
+                )
+                .await
+                .is_ok()
+            );
         }
-        let blocked = call_tool(&tools, "task_update", json!({ "id": id, "status": "blocked", "blocked_reason": "waiting" })).await;
+        let blocked = call_tool(
+            &tools,
+            "task_update",
+            json!({ "id": id, "status": "blocked", "blocked_reason": "waiting" }),
+        )
+        .await;
         assert!(blocked.is_ok(), "{mode:?}: only starting needs a lease");
     }
 }
@@ -1570,29 +1957,59 @@ async fn the_configured_mode_governs_starting_a_task_over_mcp() {
 #[tokio::test]
 async fn a_lease_names_its_holder_on_other_tasks_but_is_recorded_as_work_only_on_its_own() {
     let tools = tools_with(hq_core::config::LeaseMode::Off);
-    let a = call_tool(&tools, "task_create", json!({ "title": "Mine" })).await.unwrap();
-    let b = call_tool(&tools, "task_create", json!({ "title": "Not mine" })).await.unwrap();
-    let (a_id, b_id) = (a["display_id"].as_str().unwrap().to_string(), b["display_id"].as_str().unwrap().to_string());
-    let claim = call_tool(&tools, "task_claim", json!({ "task_id": a_id, "actor": "builder" })).await.unwrap();
+    let a = call_tool(&tools, "task_create", json!({ "title": "Mine" }))
+        .await
+        .unwrap();
+    let b = call_tool(&tools, "task_create", json!({ "title": "Not mine" }))
+        .await
+        .unwrap();
+    let (a_id, b_id) = (
+        a["display_id"].as_str().unwrap().to_string(),
+        b["display_id"].as_str().unwrap().to_string(),
+    );
+    let claim = call_tool(
+        &tools,
+        "task_claim",
+        json!({ "task_id": a_id, "actor": "builder" }),
+    )
+    .await
+    .unwrap();
     let lease = claim["lease"].as_str().unwrap().to_string();
 
     call_tool(&tools, "task_update", json!({ "id": b_id, "status": "blocked", "blocked_reason": "waiting on a key", "lease": lease })).await.unwrap();
-    let got = call_tool(&tools, "task_get", json!({ "id": b_id })).await.unwrap();
+    let got = call_tool(&tools, "task_get", json!({ "id": b_id }))
+        .await
+        .unwrap();
     let event = &got["lifecycle_events"][0];
     assert_eq!(event["actor"], "builder", "who acted is still known");
-    assert!(event["work_session_id"].is_null(), "but it is not work done under this task's lease");
+    assert!(
+        event["work_session_id"].is_null(),
+        "but it is not work done under this task's lease"
+    );
     assert!(got["work_sessions"].as_array().unwrap().is_empty());
 }
 
 #[tokio::test]
 async fn releasing_with_a_lease_that_still_holds_applies_the_status() {
     let tools = tools_with(hq_core::config::LeaseMode::Off);
-    let task = call_tool(&tools, "task_create", json!({ "title": "Quick" })).await.unwrap();
-    let id = task["display_id"].as_str().unwrap().to_string();
-    let claim = call_tool(&tools, "task_claim", json!({ "task_id": id, "actor": "builder" })).await.unwrap();
-    let released = call_tool(&tools, "task_release", json!({ "lease": claim["lease"], "status": "blocked", "summary": "waiting on a key" }))
+    let task = call_tool(&tools, "task_create", json!({ "title": "Quick" }))
         .await
         .unwrap();
+    let id = task["display_id"].as_str().unwrap().to_string();
+    let claim = call_tool(
+        &tools,
+        "task_claim",
+        json!({ "task_id": id, "actor": "builder" }),
+    )
+    .await
+    .unwrap();
+    let released = call_tool(
+        &tools,
+        "task_release",
+        json!({ "lease": claim["lease"], "status": "blocked", "summary": "waiting on a key" }),
+    )
+    .await
+    .unwrap();
     assert_eq!(released["status_applied"], true);
     assert!(released.get("warnings").is_none(), "{released}");
 }
@@ -1600,38 +2017,120 @@ async fn releasing_with_a_lease_that_still_holds_applies_the_status() {
 #[tokio::test]
 async fn an_estimate_is_set_validated_cleared_and_compared_with_leased_time() {
     let tools = tools_with(hq_core::config::LeaseMode::Off);
-    let task = call_tool(&tools, "task_create", json!({ "title": "Sized", "estimate_minutes": 90 })).await.unwrap();
+    let task = call_tool(
+        &tools,
+        "task_create",
+        json!({ "title": "Sized", "estimate_minutes": 90 }),
+    )
+    .await
+    .unwrap();
     let id = task["display_id"].as_str().unwrap().to_string();
     assert_eq!(task["estimate_minutes"], 90);
-    assert!(call_tool(&tools, "task_create", json!({ "title": "Bad", "estimate_minutes": 0 })).await.is_err());
-    assert!(call_tool(&tools, "task_update", json!({ "id": id, "estimate_minutes": -3 })).await.is_err());
+    assert!(
+        call_tool(
+            &tools,
+            "task_create",
+            json!({ "title": "Bad", "estimate_minutes": 0 })
+        )
+        .await
+        .is_err()
+    );
+    assert!(
+        call_tool(
+            &tools,
+            "task_update",
+            json!({ "id": id, "estimate_minutes": -3 })
+        )
+        .await
+        .is_err()
+    );
 
-    let got = call_tool(&tools, "task_get", json!({ "id": id })).await.unwrap();
+    let got = call_tool(&tools, "task_get", json!({ "id": id }))
+        .await
+        .unwrap();
     assert_eq!(got["time"]["estimate_minutes"], 90);
     assert_eq!(got["time"]["leased_seconds"], 0);
-    assert!(got["time"]["variance_minutes"].is_null(), "nothing worked yet, so nothing to compare");
-    let claim = call_tool(&tools, "task_claim", json!({ "task_id": id, "actor": "alpha" })).await.unwrap();
-    call_tool(&tools, "task_release", json!({ "lease": claim["lease"], "status": "to_do" })).await.unwrap();
-    let worked = call_tool(&tools, "task_get", json!({ "id": id })).await.unwrap();
-    assert!(worked["time"]["variance_minutes"].as_i64().is_some_and(|v| v <= 0), "{worked}");
+    assert!(
+        got["time"]["variance_minutes"].is_null(),
+        "nothing worked yet, so nothing to compare"
+    );
+    let claim = call_tool(
+        &tools,
+        "task_claim",
+        json!({ "task_id": id, "actor": "alpha" }),
+    )
+    .await
+    .unwrap();
+    call_tool(
+        &tools,
+        "task_release",
+        json!({ "lease": claim["lease"], "status": "to_do" }),
+    )
+    .await
+    .unwrap();
+    let worked = call_tool(&tools, "task_get", json!({ "id": id }))
+        .await
+        .unwrap();
+    assert!(
+        worked["time"]["variance_minutes"]
+            .as_i64()
+            .is_some_and(|v| v <= 0),
+        "{worked}"
+    );
 
-    let cleared = call_tool(&tools, "task_update", json!({ "id": id, "estimate_minutes": null })).await.unwrap();
+    let cleared = call_tool(
+        &tools,
+        "task_update",
+        json!({ "id": id, "estimate_minutes": null }),
+    )
+    .await
+    .unwrap();
     assert!(cleared["estimate_minutes"].is_null());
 }
 
 #[tokio::test]
 async fn the_first_claim_gives_an_unscheduled_task_a_start_date_and_keeps_an_existing_one() {
     let tools = tools_with(hq_core::config::LeaseMode::Off);
-    let bare = call_tool(&tools, "task_create", json!({ "title": "Bare" })).await.unwrap();
-    let planned = call_tool(&tools, "task_create", json!({ "title": "Planned", "start_date": "2030-01-02" })).await.unwrap();
-    let overdue = call_tool(&tools, "task_create", json!({ "title": "Overdue", "due_date": "2020-01-01" })).await.unwrap();
-    for (task, expect) in [(&bare, "today"), (&planned, "2030-01-02"), (&overdue, "none")] {
+    let bare = call_tool(&tools, "task_create", json!({ "title": "Bare" }))
+        .await
+        .unwrap();
+    let planned = call_tool(
+        &tools,
+        "task_create",
+        json!({ "title": "Planned", "start_date": "2030-01-02" }),
+    )
+    .await
+    .unwrap();
+    let overdue = call_tool(
+        &tools,
+        "task_create",
+        json!({ "title": "Overdue", "due_date": "2020-01-01" }),
+    )
+    .await
+    .unwrap();
+    for (task, expect) in [
+        (&bare, "today"),
+        (&planned, "2030-01-02"),
+        (&overdue, "none"),
+    ] {
         let id = task["display_id"].as_str().unwrap();
-        let claim = call_tool(&tools, "task_claim", json!({ "task_id": id, "actor": "builder" })).await.unwrap();
+        let claim = call_tool(
+            &tools,
+            "task_claim",
+            json!({ "task_id": id, "actor": "builder" }),
+        )
+        .await
+        .unwrap();
         let start = claim["task"]["start_date"].as_str().map(String::from);
         match expect {
-            "today" => assert!(start.is_some(), "an unscheduled task is placed on the timeline"),
-            "none" => assert!(start.is_none(), "a start after the due date would be invalid"),
+            "today" => assert!(
+                start.is_some(),
+                "an unscheduled task is placed on the timeline"
+            ),
+            "none" => assert!(
+                start.is_none(),
+                "a start after the due date would be invalid"
+            ),
             date => assert_eq!(start.as_deref(), Some(date)),
         }
     }
@@ -1640,34 +2139,82 @@ async fn the_first_claim_gives_an_unscheduled_task_a_start_date_and_keeps_an_exi
 #[tokio::test]
 async fn the_time_report_tool_answers_with_a_window() {
     let tools = tools_with(hq_core::config::LeaseMode::Off);
-    let task = call_tool(&tools, "task_create", json!({ "title": "Worked" })).await.unwrap();
-    call_tool(&tools, "task_claim", json!({ "task_id": task["display_id"], "actor": "builder" })).await.unwrap();
-    let report = call_tool(&tools, "task_time_report", json!({ "days": 7 })).await.unwrap();
+    let task = call_tool(&tools, "task_create", json!({ "title": "Worked" }))
+        .await
+        .unwrap();
+    call_tool(
+        &tools,
+        "task_claim",
+        json!({ "task_id": task["display_id"], "actor": "builder" }),
+    )
+    .await
+    .unwrap();
+    let report = call_tool(&tools, "task_time_report", json!({ "days": 7 }))
+        .await
+        .unwrap();
     assert_eq!(report["days"], 7);
     assert_eq!(report["report"]["actors"][0]["actor"], "builder");
-    let clamped = call_tool(&tools, "task_time_report", json!({ "days": 100000 })).await.unwrap();
+    let clamped = call_tool(&tools, "task_time_report", json!({ "days": 100000 }))
+        .await
+        .unwrap();
     assert_eq!(clamped["days"], 365);
 }
 
 #[tokio::test]
 async fn a_malformed_estimate_is_an_error_and_never_clears_or_drops_one() {
     let tools = tools_with(hq_core::config::LeaseMode::Off);
-    let task = call_tool(&tools, "task_create", json!({ "title": "Sized", "estimate_minutes": 60 })).await.unwrap();
+    let task = call_tool(
+        &tools,
+        "task_create",
+        json!({ "title": "Sized", "estimate_minutes": 60 }),
+    )
+    .await
+    .unwrap();
     let id = task["display_id"].as_str().unwrap().to_string();
     for bad in [json!("30"), json!(30.5), json!(true), json!(1.0e30)] {
-        assert!(call_tool(&tools, "task_update", json!({ "id": id, "estimate_minutes": bad })).await.is_err(), "{bad}");
-        assert!(call_tool(&tools, "task_create", json!({ "title": "x", "estimate_minutes": bad })).await.is_err(), "{bad}");
+        assert!(
+            call_tool(
+                &tools,
+                "task_update",
+                json!({ "id": id, "estimate_minutes": bad })
+            )
+            .await
+            .is_err(),
+            "{bad}"
+        );
+        assert!(
+            call_tool(
+                &tools,
+                "task_create",
+                json!({ "title": "x", "estimate_minutes": bad })
+            )
+            .await
+            .is_err(),
+            "{bad}"
+        );
     }
-    let still = call_tool(&tools, "task_get", json!({ "id": id })).await.unwrap();
-    assert_eq!(still["estimate_minutes"], 60, "a rejected update leaves the estimate alone");
+    let still = call_tool(&tools, "task_get", json!({ "id": id }))
+        .await
+        .unwrap();
+    assert_eq!(
+        still["estimate_minutes"], 60,
+        "a rejected update leaves the estimate alone"
+    );
 }
 
 #[tokio::test]
 async fn links_are_added_listed_found_from_the_other_side_and_removed() {
     let tools = tools_with(hq_core::config::LeaseMode::Off);
-    let a = call_tool(&tools, "task_create", json!({ "title": "From a note" })).await.unwrap();
-    let b = call_tool(&tools, "task_create", json!({ "title": "Also from it" })).await.unwrap();
-    let (a_id, b_id) = (a["display_id"].as_str().unwrap().to_string(), b["display_id"].as_str().unwrap().to_string());
+    let a = call_tool(&tools, "task_create", json!({ "title": "From a note" }))
+        .await
+        .unwrap();
+    let b = call_tool(&tools, "task_create", json!({ "title": "Also from it" }))
+        .await
+        .unwrap();
+    let (a_id, b_id) = (
+        a["display_id"].as_str().unwrap().to_string(),
+        b["display_id"].as_str().unwrap().to_string(),
+    );
 
     let added = call_tool(&tools, "task_link_add", json!({ "task_id": a_id, "kind": "vault_note", "ref": "./Notebooks/plan.md", "direction": "origin", "actor": "builder" }))
         .await
@@ -1675,22 +2222,66 @@ async fn links_are_added_listed_found_from_the_other_side_and_removed() {
     assert_eq!(added["created"], true);
     assert_eq!(added["link"]["ref"], "Notebooks/plan.md");
     assert_eq!(added["link"]["created_by"], "builder");
-    call_tool(&tools, "task_link_add", json!({ "task_id": b_id, "kind": "vault_note", "ref": "Notebooks/plan.md" })).await.unwrap();
+    call_tool(
+        &tools,
+        "task_link_add",
+        json!({ "task_id": b_id, "kind": "vault_note", "ref": "Notebooks/plan.md" }),
+    )
+    .await
+    .unwrap();
     assert_eq!(
-        call_tool(&tools, "task_link_add", json!({ "task_id": a_id, "kind": "vault_note", "ref": "Notebooks/plan.md" })).await.unwrap()["created"],
+        call_tool(
+            &tools,
+            "task_link_add",
+            json!({ "task_id": a_id, "kind": "vault_note", "ref": "Notebooks/plan.md" })
+        )
+        .await
+        .unwrap()["created"],
         false
     );
 
-    let from_note = call_tool(&tools, "task_link_list", json!({ "kind": "vault_note", "ref": "Notebooks/plan.md" })).await.unwrap();
+    let from_note = call_tool(
+        &tools,
+        "task_link_list",
+        json!({ "kind": "vault_note", "ref": "Notebooks/plan.md" }),
+    )
+    .await
+    .unwrap();
     assert_eq!(from_note["count"], 2);
-    let got = call_tool(&tools, "task_get", json!({ "id": a_id })).await.unwrap();
+    let got = call_tool(&tools, "task_get", json!({ "id": a_id }))
+        .await
+        .unwrap();
     assert_eq!(got["links"][0]["kind"], "vault_note");
 
-    let removed = call_tool(&tools, "task_link_remove", json!({ "task_id": a_id, "kind": "vault_note", "ref": "Notebooks/plan.md" })).await.unwrap();
+    let removed = call_tool(
+        &tools,
+        "task_link_remove",
+        json!({ "task_id": a_id, "kind": "vault_note", "ref": "Notebooks/plan.md" }),
+    )
+    .await
+    .unwrap();
     assert_eq!(removed["removed"], true);
-    assert_eq!(call_tool(&tools, "task_link_list", json!({ "task_id": a_id })).await.unwrap()["count"], 0);
-    assert!(call_tool(&tools, "task_link_add", json!({ "task_id": a_id, "kind": "vault_note", "ref": "/etc/passwd" })).await.is_err());
-    assert!(call_tool(&tools, "task_link_list", json!({})).await.is_err(), "it needs a task or a kind and ref");
+    assert_eq!(
+        call_tool(&tools, "task_link_list", json!({ "task_id": a_id }))
+            .await
+            .unwrap()["count"],
+        0
+    );
+    assert!(
+        call_tool(
+            &tools,
+            "task_link_add",
+            json!({ "task_id": a_id, "kind": "vault_note", "ref": "/etc/passwd" })
+        )
+        .await
+        .is_err()
+    );
+    assert!(
+        call_tool(&tools, "task_link_list", json!({}))
+            .await
+            .is_err(),
+        "it needs a task or a kind and ref"
+    );
 }
 
 #[tokio::test]
@@ -1710,8 +2301,24 @@ async fn a_task_is_created_with_its_links_or_not_at_all() {
     assert!(bad.is_err());
     let after = call_tool(&tools, "task_list", json!({})).await.unwrap()["total"].clone();
     assert_eq!(before, after, "a malformed link means no task is created");
-    assert!(call_tool(&tools, "task_create", json!({ "title": "x", "links": "not a list" })).await.is_err());
-    assert!(call_tool(&tools, "task_create", json!({ "title": "x", "links": [{ "kind": "url" }] })).await.is_err());
+    assert!(
+        call_tool(
+            &tools,
+            "task_create",
+            json!({ "title": "x", "links": "not a list" })
+        )
+        .await
+        .is_err()
+    );
+    assert!(
+        call_tool(
+            &tools,
+            "task_create",
+            json!({ "title": "x", "links": [{ "kind": "url" }] })
+        )
+        .await
+        .is_err()
+    );
 }
 
 #[tokio::test]
@@ -1726,15 +2333,39 @@ async fn a_chat_toolset_records_its_thread_as_the_origin_of_what_it_creates() {
         hq_core::config::TasksConfig::default(),
         Some("thread-42".to_string()),
     );
-    let made = call_tool(&tools, "task_create", json!({ "title": "Asked for in chat" })).await.unwrap();
+    let made = call_tool(
+        &tools,
+        "task_create",
+        json!({ "title": "Asked for in chat" }),
+    )
+    .await
+    .unwrap();
     assert_eq!(made["links"][0]["kind"], "chat_thread");
     assert_eq!(made["links"][0]["ref"], "thread-42");
     assert_eq!(made["links"][0]["direction"], "origin");
-    let found = call_tool(&tools, "task_link_list", json!({ "kind": "chat_thread", "ref": "thread-42" })).await.unwrap();
+    let found = call_tool(
+        &tools,
+        "task_link_list",
+        json!({ "kind": "chat_thread", "ref": "thread-42" }),
+    )
+    .await
+    .unwrap();
     assert_eq!(found["count"], 1, "a thread finds the tasks it started");
 
-    let again = call_tool(&tools, "task_create", json!({ "title": "Asked for in chat", "external_id": "k" })).await.unwrap();
-    let dup = call_tool(&tools, "task_create", json!({ "title": "Asked for in chat", "external_id": "k" })).await.unwrap();
+    let again = call_tool(
+        &tools,
+        "task_create",
+        json!({ "title": "Asked for in chat", "external_id": "k" }),
+    )
+    .await
+    .unwrap();
+    let dup = call_tool(
+        &tools,
+        "task_create",
+        json!({ "title": "Asked for in chat", "external_id": "k" }),
+    )
+    .await
+    .unwrap();
     assert_eq!(dup["deduplicated"], true);
     assert_eq!(dup["id"], again["id"]);
 }
@@ -1749,7 +2380,10 @@ async fn a_new_task_that_reads_like_an_open_one_is_flagged_without_being_blocked
     )
     .await
     .unwrap();
-    assert!(first.get("similar_open_tasks").is_none(), "nothing to be similar to yet");
+    assert!(
+        first.get("similar_open_tasks").is_none(),
+        "nothing to be similar to yet"
+    );
     let second = call_tool(
         &tools,
         "task_create",
@@ -1757,10 +2391,24 @@ async fn a_new_task_that_reads_like_an_open_one_is_flagged_without_being_blocked
     )
     .await
     .unwrap();
-    assert_eq!(second["similar_open_tasks"][0]["display_id"], first["display_id"]);
+    assert_eq!(
+        second["similar_open_tasks"][0]["display_id"],
+        first["display_id"]
+    );
     assert!(second["similar_open_tasks"][0]["evidence"]["shared_terms"].is_array());
-    assert!(second["similar_note"].as_str().unwrap().contains("open tasks"));
-    let other = call_tool(&tools, "task_create", json!({ "title": "Order running shoes", "description": "size ten" })).await.unwrap();
+    assert!(
+        second["similar_note"]
+            .as_str()
+            .unwrap()
+            .contains("open tasks")
+    );
+    let other = call_tool(
+        &tools,
+        "task_create",
+        json!({ "title": "Order running shoes", "description": "size ten" }),
+    )
+    .await
+    .unwrap();
     assert!(other.get("similar_open_tasks").is_none());
 }
 
@@ -1782,7 +2430,10 @@ async fn a_parent_or_a_sibling_is_not_reported_as_a_duplicate_of_its_own_subtask
     )
     .await
     .unwrap();
-    assert!(first.get("similar_open_tasks").is_none(), "the parent is related by design: {first}");
+    assert!(
+        first.get("similar_open_tasks").is_none(),
+        "the parent is related by design: {first}"
+    );
     let second = call_tool(
         &tools,
         "task_create",
@@ -1790,7 +2441,10 @@ async fn a_parent_or_a_sibling_is_not_reported_as_a_duplicate_of_its_own_subtask
     )
     .await
     .unwrap();
-    assert!(second.get("similar_open_tasks").is_none(), "a sibling is related by design: {second}");
+    assert!(
+        second.get("similar_open_tasks").is_none(),
+        "a sibling is related by design: {second}"
+    );
 }
 
 #[tokio::test]
@@ -1803,11 +2457,33 @@ async fn an_agent_cannot_mark_a_chat_or_session_it_names_as_where_a_task_came_fr
     )
     .await
     .unwrap();
-    let by_kind = |kind: &str| made["links"].as_array().unwrap().iter().find(|l| l["kind"] == kind).unwrap().clone();
-    assert_eq!(by_kind("chat_thread")["direction"], "related", "only HQ records chat origins");
-    assert_eq!(by_kind("vault_note")["direction"], "origin", "a note the agent really worked from can be an origin");
+    let by_kind = |kind: &str| {
+        made["links"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|l| l["kind"] == kind)
+            .unwrap()
+            .clone()
+    };
+    assert_eq!(
+        by_kind("chat_thread")["direction"],
+        "related",
+        "only HQ records chat origins"
+    );
+    assert_eq!(
+        by_kind("vault_note")["direction"],
+        "origin",
+        "a note the agent really worked from can be an origin"
+    );
     let id = made["display_id"].as_str().unwrap();
-    let added = call_tool(&tools, "task_link_add", json!({ "task_id": id, "kind": "session", "ref": "hs-x", "direction": "origin" })).await.unwrap();
+    let added = call_tool(
+        &tools,
+        "task_link_add",
+        json!({ "task_id": id, "kind": "session", "ref": "hs-x", "direction": "origin" }),
+    )
+    .await
+    .unwrap();
     assert_eq!(added["link"]["direction"], "related");
 }
 
@@ -1816,25 +2492,63 @@ async fn promoting_a_note_links_it_and_a_second_promotion_notices_the_first() {
     let vault_dir = tempfile::tempdir().unwrap();
     let vault_path = vault_dir.path().to_path_buf();
     std::fs::create_dir_all(vault_path.join("Notebooks")).unwrap();
-    std::fs::write(vault_path.join("Notebooks/idea.md"), "---\ntitle: Big idea\n---\nBuild the thing properly.\n").unwrap();
+    std::fs::write(
+        vault_path.join("Notebooks/idea.md"),
+        "---\ntitle: Big idea\n---\nBuild the thing properly.\n",
+    )
+    .unwrap();
     let vault = Arc::new(VaultClient::new(vault_path.clone()).unwrap());
-    let tools = create_task_tools_with(vault_path, vault, Arc::new(Database::open_memory().unwrap()), hq_core::config::TasksConfig::default());
+    let tools = create_task_tools_with(
+        vault_path,
+        vault,
+        Arc::new(Database::open_memory().unwrap()),
+        hq_core::config::TasksConfig::default(),
+    );
 
-    let first = call_tool(&tools, "task_create_from_note", json!({ "note_path": "Notebooks/idea.md", "space_id": "personal" })).await.unwrap();
+    let first = call_tool(
+        &tools,
+        "task_create_from_note",
+        json!({ "note_path": "Notebooks/idea.md", "space_id": "personal" }),
+    )
+    .await
+    .unwrap();
     assert!(first.get("already_linked").is_none());
-    let linked = call_tool(&tools, "task_link_list", json!({ "kind": "vault_note", "ref": "Notebooks/idea.md" })).await.unwrap();
+    let linked = call_tool(
+        &tools,
+        "task_link_list",
+        json!({ "kind": "vault_note", "ref": "Notebooks/idea.md" }),
+    )
+    .await
+    .unwrap();
     assert_eq!(linked["count"], 1);
-    let second = call_tool(&tools, "task_create_from_note", json!({ "note_path": "Notebooks/idea.md", "space_id": "personal" })).await.unwrap();
+    let second = call_tool(
+        &tools,
+        "task_create_from_note",
+        json!({ "note_path": "Notebooks/idea.md", "space_id": "personal" }),
+    )
+    .await
+    .unwrap();
     assert_eq!(second["already_linked"].as_array().unwrap().len(), 1);
 }
 
 #[tokio::test]
 async fn the_next_session_resumes_from_the_last_checkpoint_and_sees_it_as_notes_not_orders() {
     let tools = tools_with(hq_core::config::LeaseMode::Off);
-    let task = call_tool(&tools, "task_create", json!({ "title": "Long job" })).await.unwrap();
+    let task = call_tool(&tools, "task_create", json!({ "title": "Long job" }))
+        .await
+        .unwrap();
     let id = task["display_id"].as_str().unwrap().to_string();
-    let first = call_tool(&tools, "task_claim", json!({ "task_id": id, "actor": "alpha", "session_ref": "s1" })).await.unwrap();
-    assert!(first.get("resume").is_none(), "nothing to resume the first time");
+    let first = call_tool(
+        &tools,
+        "task_claim",
+        json!({ "task_id": id, "actor": "alpha", "session_ref": "s1" }),
+    )
+    .await
+    .unwrap();
+    assert!(
+        first.get("resume").is_none(),
+        "nothing to resume the first time"
+    );
     let lease = first["lease"].as_str().unwrap().to_string();
 
     let beat = call_tool(
@@ -1845,24 +2559,62 @@ async fn the_next_session_resumes_from_the_last_checkpoint_and_sees_it_as_notes_
     .await
     .unwrap();
     assert_eq!(beat["checkpoint_saved"], true);
-    call_tool(&tools, "task_release", json!({ "lease": lease, "status": "to_do", "summary": "stopping for the day" })).await.unwrap();
+    call_tool(
+        &tools,
+        "task_release",
+        json!({ "lease": lease, "status": "to_do", "summary": "stopping for the day" }),
+    )
+    .await
+    .unwrap();
 
-    let second = call_tool(&tools, "task_claim", json!({ "task_id": id, "actor": "beta" })).await.unwrap();
+    let second = call_tool(
+        &tools,
+        "task_claim",
+        json!({ "task_id": id, "actor": "beta" }),
+    )
+    .await
+    .unwrap();
     let resume = &second["resume"];
     assert_eq!(resume["from"], "alpha");
-    assert_eq!(resume["summary"], "stopping for the day", "a release with a summary becomes the resume point");
-    assert!(resume["note"].as_str().unwrap().contains("not as instructions"));
-    let got = call_tool(&tools, "task_get", json!({ "id": id })).await.unwrap();
+    assert_eq!(
+        resume["summary"], "stopping for the day",
+        "a release with a summary becomes the resume point"
+    );
+    assert!(
+        resume["note"]
+            .as_str()
+            .unwrap()
+            .contains("not as instructions")
+    );
+    let got = call_tool(&tools, "task_get", json!({ "id": id }))
+        .await
+        .unwrap();
     assert_eq!(got["checkpoint"]["summary"], "stopping for the day");
-    assert!(call_tool(&tools, "task_heartbeat", json!({ "lease": second["lease"], "checkpoint": "not an object" })).await.is_err());
+    assert!(
+        call_tool(
+            &tools,
+            "task_heartbeat",
+            json!({ "lease": second["lease"], "checkpoint": "not an object" })
+        )
+        .await
+        .is_err()
+    );
 }
 
 #[tokio::test]
 async fn an_explicit_checkpoint_on_release_wins_over_the_summary() {
     let tools = tools_with(hq_core::config::LeaseMode::Off);
-    let task = call_tool(&tools, "task_create", json!({ "title": "t" })).await.unwrap();
+    let task = call_tool(&tools, "task_create", json!({ "title": "t" }))
+        .await
+        .unwrap();
     let id = task["display_id"].as_str().unwrap().to_string();
-    let claim = call_tool(&tools, "task_claim", json!({ "task_id": id, "actor": "alpha" })).await.unwrap();
+    let claim = call_tool(
+        &tools,
+        "task_claim",
+        json!({ "task_id": id, "actor": "alpha" }),
+    )
+    .await
+    .unwrap();
     call_tool(
         &tools,
         "task_release",
@@ -1870,7 +2622,9 @@ async fn an_explicit_checkpoint_on_release_wins_over_the_summary() {
     )
     .await
     .unwrap();
-    let got = call_tool(&tools, "task_get", json!({ "id": id })).await.unwrap();
+    let got = call_tool(&tools, "task_get", json!({ "id": id }))
+        .await
+        .unwrap();
     assert_eq!(got["checkpoint"]["summary"], "for the next agent");
     assert_eq!(got["checkpoint"]["next_step"], "run the suite");
 }
@@ -1878,11 +2632,25 @@ async fn an_explicit_checkpoint_on_release_wins_over_the_summary() {
 #[tokio::test]
 async fn blocking_a_task_over_mcp_needs_a_reason_and_leaving_blocked_clears_it() {
     let tools = tools_with(hq_core::config::LeaseMode::Off);
-    let task = call_tool(&tools, "task_create", json!({ "title": "Stuck soon" })).await.unwrap();
+    let task = call_tool(&tools, "task_create", json!({ "title": "Stuck soon" }))
+        .await
+        .unwrap();
     let id = task["display_id"].as_str().unwrap().to_string();
-    let err = call_tool(&tools, "task_update", json!({ "id": id, "status": "blocked" })).await.unwrap_err().to_string();
+    let err = call_tool(
+        &tools,
+        "task_update",
+        json!({ "id": id, "status": "blocked" }),
+    )
+    .await
+    .unwrap_err()
+    .to_string();
     assert!(err.contains("blocked_reason"), "{err}");
-    assert_eq!(call_tool(&tools, "task_get", json!({ "id": id })).await.unwrap()["status"], "to_do");
+    assert_eq!(
+        call_tool(&tools, "task_get", json!({ "id": id }))
+            .await
+            .unwrap()["status"],
+        "to_do"
+    );
     let blocked = call_tool(
         &tools,
         "task_update",
@@ -1890,84 +2658,231 @@ async fn blocking_a_task_over_mcp_needs_a_reason_and_leaving_blocked_clears_it()
     )
     .await
     .unwrap();
-    assert_eq!((blocked["blocked_reason"].as_str(), blocked["waiting_on"].as_str()), (Some("no staging key"), Some("ops")));
+    assert_eq!(
+        (
+            blocked["blocked_reason"].as_str(),
+            blocked["waiting_on"].as_str()
+        ),
+        (Some("no staging key"), Some("ops"))
+    );
     assert!(blocked["blocked_since"].is_string());
-    let freed = call_tool(&tools, "task_update", json!({ "id": id, "status": "in_progress" })).await.unwrap();
+    let freed = call_tool(
+        &tools,
+        "task_update",
+        json!({ "id": id, "status": "in_progress" }),
+    )
+    .await
+    .unwrap();
     assert!(freed["blocked_reason"].is_null() && freed["blocked_since"].is_null());
-    assert!(call_tool(&tools, "task_update", json!({ "id": id, "blocked_reason": 5 })).await.is_err(), "a wrong type is an error, not a clear");
-    assert!(call_tool(&tools, "task_update", json!({ "id": id, "long_horizon": "yes" })).await.is_err());
+    assert!(
+        call_tool(
+            &tools,
+            "task_update",
+            json!({ "id": id, "blocked_reason": 5 })
+        )
+        .await
+        .is_err(),
+        "a wrong type is an error, not a clear"
+    );
+    assert!(
+        call_tool(
+            &tools,
+            "task_update",
+            json!({ "id": id, "long_horizon": "yes" })
+        )
+        .await
+        .is_err()
+    );
 }
 
 #[tokio::test]
 async fn deleting_archives_and_restoring_brings_it_back_and_only_an_archived_task_is_purged() {
     let tools = tools_with(hq_core::config::LeaseMode::Off);
-    let task = call_tool(&tools, "task_create", json!({ "title": "Maybe later" })).await.unwrap();
+    let task = call_tool(&tools, "task_create", json!({ "title": "Maybe later" }))
+        .await
+        .unwrap();
     let id = task["display_id"].as_str().unwrap().to_string();
-    let err = call_tool(&tools, "task_delete", json!({ "id": id, "purge": true })).await.unwrap_err().to_string();
+    let err = call_tool(&tools, "task_delete", json!({ "id": id, "purge": true }))
+        .await
+        .unwrap_err()
+        .to_string();
     assert!(err.contains("archive it first"), "{err}");
 
-    let gone = call_tool(&tools, "task_delete", json!({ "id": id, "actor": "calvin" })).await.unwrap();
+    let gone = call_tool(
+        &tools,
+        "task_delete",
+        json!({ "id": id, "actor": "calvin" }),
+    )
+    .await
+    .unwrap();
     assert_eq!(gone["archived"], true);
-    assert_eq!(call_tool(&tools, "task_list", json!({})).await.unwrap()["total"], 0);
-    assert_eq!(call_tool(&tools, "task_list", json!({ "archived": true })).await.unwrap()["total"], 1);
-    assert!(call_tool(&tools, "task_update", json!({ "id": id, "title": "x" })).await.is_err());
+    assert_eq!(
+        call_tool(&tools, "task_list", json!({})).await.unwrap()["total"],
+        0
+    );
+    assert_eq!(
+        call_tool(&tools, "task_list", json!({ "archived": true }))
+            .await
+            .unwrap()["total"],
+        1
+    );
+    assert!(
+        call_tool(&tools, "task_update", json!({ "id": id, "title": "x" }))
+            .await
+            .is_err()
+    );
 
-    let back = call_tool(&tools, "task_restore", json!({ "id": id })).await.unwrap();
+    let back = call_tool(&tools, "task_restore", json!({ "id": id }))
+        .await
+        .unwrap();
     assert!(back["archived_at"].is_null());
-    assert_eq!(call_tool(&tools, "task_list", json!({})).await.unwrap()["total"], 1);
+    assert_eq!(
+        call_tool(&tools, "task_list", json!({})).await.unwrap()["total"],
+        1
+    );
 
-    call_tool(&tools, "task_delete", json!({ "id": id })).await.unwrap();
-    let purged = call_tool(&tools, "task_delete", json!({ "id": id, "purge": true })).await.unwrap();
+    call_tool(&tools, "task_delete", json!({ "id": id }))
+        .await
+        .unwrap();
+    let purged = call_tool(&tools, "task_delete", json!({ "id": id, "purge": true }))
+        .await
+        .unwrap();
     assert_eq!(purged["purged"], true);
-    assert!(call_tool(&tools, "task_get", json!({ "id": id })).await.is_err());
+    assert!(
+        call_tool(&tools, "task_get", json!({ "id": id }))
+            .await
+            .is_err()
+    );
 }
 
 #[tokio::test]
 async fn long_horizon_and_a_task_with_nothing_stale_report_through_the_tools() {
     let tools = tools_with(hq_core::config::LeaseMode::Off);
-    let long = call_tool(&tools, "task_create", json!({ "title": "Marathon", "long_horizon": true })).await.unwrap();
+    let long = call_tool(
+        &tools,
+        "task_create",
+        json!({ "title": "Marathon", "long_horizon": true }),
+    )
+    .await
+    .unwrap();
     assert_eq!(long["long_horizon"], true);
     let id = long["display_id"].as_str().unwrap().to_string();
-    let turned_off = call_tool(&tools, "task_update", json!({ "id": id, "long_horizon": false })).await.unwrap();
+    let turned_off = call_tool(
+        &tools,
+        "task_update",
+        json!({ "id": id, "long_horizon": false }),
+    )
+    .await
+    .unwrap();
     assert_eq!(turned_off["long_horizon"], false);
 
     let stale = call_tool(&tools, "task_stale", json!({})).await.unwrap();
     assert_eq!(stale["count"], 0);
     assert_eq!(stale["stale_after_hours"], 72);
-    let got = call_tool(&tools, "task_get", json!({ "id": id })).await.unwrap();
+    let got = call_tool(&tools, "task_get", json!({ "id": id }))
+        .await
+        .unwrap();
     assert_eq!(got["stale"], false);
-    assert_eq!(call_tool(&tools, "task_list", json!({ "stale": true })).await.unwrap()["total"], 0);
+    assert_eq!(
+        call_tool(&tools, "task_list", json!({ "stale": true }))
+            .await
+            .unwrap()["total"],
+        0
+    );
 }
 
 #[tokio::test]
 async fn an_initiative_reports_its_progress() {
     let tools = tools_with(hq_core::config::LeaseMode::Off);
-    let a = call_tool(&tools, "task_create", json!({ "title": "One", "initiative": "Big epic", "estimate_minutes": 60 })).await.unwrap();
-    call_tool(&tools, "task_create", json!({ "title": "Two", "initiative": "Big epic" })).await.unwrap();
-    call_tool(&tools, "task_update", json!({ "id": a["display_id"], "status": "complete" })).await.unwrap();
-    let progress = call_tool(&tools, "initiative_progress", json!({ "initiative": "Big epic" })).await.unwrap();
-    assert_eq!((progress["total"].as_i64(), progress["complete"].as_i64(), progress["to_do"].as_i64()), (Some(2), Some(1), Some(1)));
+    let a = call_tool(
+        &tools,
+        "task_create",
+        json!({ "title": "One", "initiative": "Big epic", "estimate_minutes": 60 }),
+    )
+    .await
+    .unwrap();
+    call_tool(
+        &tools,
+        "task_create",
+        json!({ "title": "Two", "initiative": "Big epic" }),
+    )
+    .await
+    .unwrap();
+    call_tool(
+        &tools,
+        "task_update",
+        json!({ "id": a["display_id"], "status": "complete" }),
+    )
+    .await
+    .unwrap();
+    let progress = call_tool(
+        &tools,
+        "initiative_progress",
+        json!({ "initiative": "Big epic" }),
+    )
+    .await
+    .unwrap();
+    assert_eq!(
+        (
+            progress["total"].as_i64(),
+            progress["complete"].as_i64(),
+            progress["to_do"].as_i64()
+        ),
+        (Some(2), Some(1), Some(1))
+    );
     assert_eq!(progress["fraction_complete"], 0.5);
     assert_eq!(progress["estimate_minutes"], 60);
-    assert!(call_tool(&tools, "initiative_progress", json!({ "initiative": "Nope" })).await.is_err());
-    assert!(call_tool(&tools, "initiative_progress", json!({})).await.is_err());
+    assert!(
+        call_tool(
+            &tools,
+            "initiative_progress",
+            json!({ "initiative": "Nope" })
+        )
+        .await
+        .is_err()
+    );
+    assert!(
+        call_tool(&tools, "initiative_progress", json!({}))
+            .await
+            .is_err()
+    );
 }
 
 #[tokio::test]
 async fn an_empty_checkpoint_does_not_undo_the_heartbeat_or_release_it_came_with() {
     let tools = tools_with(hq_core::config::LeaseMode::Off);
-    let task = call_tool(&tools, "task_create", json!({ "title": "t" })).await.unwrap();
+    let task = call_tool(&tools, "task_create", json!({ "title": "t" }))
+        .await
+        .unwrap();
     let id = task["display_id"].as_str().unwrap().to_string();
-    let claim = call_tool(&tools, "task_claim", json!({ "task_id": id, "actor": "alpha" })).await.unwrap();
+    let claim = call_tool(
+        &tools,
+        "task_claim",
+        json!({ "task_id": id, "actor": "alpha" }),
+    )
+    .await
+    .unwrap();
     let lease = claim["lease"].as_str().unwrap().to_string();
-    let beat = call_tool(&tools, "task_heartbeat", json!({ "lease": lease, "checkpoint": {} })).await.unwrap();
+    let beat = call_tool(
+        &tools,
+        "task_heartbeat",
+        json!({ "lease": lease, "checkpoint": {} }),
+    )
+    .await
+    .unwrap();
     assert_eq!(beat["ok"], true);
     assert!(beat.get("checkpoint_saved").is_none());
     let released = call_tool(&tools, "task_release", json!({ "lease": lease, "status": "to_do", "summary": "\u{200B}", "checkpoint": { "summary": "\u{200B}" } }))
         .await
         .unwrap();
     assert_eq!(released["released"], true);
-    assert!(call_tool(&tools, "task_get", json!({ "id": id })).await.unwrap().get("checkpoint").is_none());
+    assert!(
+        call_tool(&tools, "task_get", json!({ "id": id }))
+            .await
+            .unwrap()
+            .get("checkpoint")
+            .is_none()
+    );
 }
 
 #[tokio::test]
@@ -1976,45 +2891,125 @@ async fn a_stale_lease_released_late_cannot_replace_the_resume_point_a_newer_ses
     let vault_path = vault_dir.keep();
     let vault = Arc::new(VaultClient::new(vault_path.clone()).unwrap());
     let db = Arc::new(Database::open_memory().unwrap());
-    let tools = create_task_tools_with(vault_path, vault, db.clone(), hq_core::config::TasksConfig::default());
-    let task = call_tool(&tools, "task_create", json!({ "title": "t" })).await.unwrap();
+    let tools = create_task_tools_with(
+        vault_path,
+        vault,
+        db.clone(),
+        hq_core::config::TasksConfig::default(),
+    );
+    let task = call_tool(&tools, "task_create", json!({ "title": "t" }))
+        .await
+        .unwrap();
     let id = task["display_id"].as_str().unwrap().to_string();
-    let first = call_tool(&tools, "task_claim", json!({ "task_id": id, "actor": "alpha", "session_ref": "a" })).await.unwrap();
+    let first = call_tool(
+        &tools,
+        "task_claim",
+        json!({ "task_id": id, "actor": "alpha", "session_ref": "a" }),
+    )
+    .await
+    .unwrap();
     db.with_conn(|c| {
-        c.execute("UPDATE task_work_sessions SET last_heartbeat_at = datetime('now', '-3 hours')", [])?;
+        c.execute(
+            "UPDATE task_work_sessions SET last_heartbeat_at = datetime('now', '-3 hours')",
+            [],
+        )?;
         Ok(())
     })
     .unwrap();
-    let second = call_tool(&tools, "task_claim", json!({ "task_id": id, "actor": "beta", "session_ref": "b" })).await.unwrap();
-    call_tool(&tools, "task_heartbeat", json!({ "lease": second["lease"], "checkpoint": { "summary": "beta's real progress" } })).await.unwrap();
+    let second = call_tool(
+        &tools,
+        "task_claim",
+        json!({ "task_id": id, "actor": "beta", "session_ref": "b" }),
+    )
+    .await
+    .unwrap();
+    call_tool(
+        &tools,
+        "task_heartbeat",
+        json!({ "lease": second["lease"], "checkpoint": { "summary": "beta's real progress" } }),
+    )
+    .await
+    .unwrap();
 
-    let late = call_tool(&tools, "task_release", json!({ "lease": first["lease"], "status": "complete", "summary": "alpha says all done" })).await.unwrap();
+    let late = call_tool(
+        &tools,
+        "task_release",
+        json!({ "lease": first["lease"], "status": "complete", "summary": "alpha says all done" }),
+    )
+    .await
+    .unwrap();
     assert_eq!(late["status_applied"], false);
-    let got = call_tool(&tools, "task_get", json!({ "id": id })).await.unwrap();
-    assert_eq!(got["checkpoint"]["summary"], "beta's real progress", "the newer session's notes stand");
+    let got = call_tool(&tools, "task_get", json!({ "id": id }))
+        .await
+        .unwrap();
+    assert_eq!(
+        got["checkpoint"]["summary"], "beta's real progress",
+        "the newer session's notes stand"
+    );
     assert_eq!(got["status"], "in_progress");
 }
 
 #[tokio::test]
 async fn the_blocked_reason_rule_cannot_be_met_with_nothing_or_dropped_later() {
     let tools = tools_with(hq_core::config::LeaseMode::Off);
-    let task = call_tool(&tools, "task_create", json!({ "title": "t" })).await.unwrap();
+    let task = call_tool(&tools, "task_create", json!({ "title": "t" }))
+        .await
+        .unwrap();
     let id = task["display_id"].as_str().unwrap().to_string();
     for nothing in ["\u{0007}", "\u{200B}", "   "] {
-        let err = call_tool(&tools, "task_update", json!({ "id": id, "status": "blocked", "blocked_reason": nothing })).await;
+        let err = call_tool(
+            &tools,
+            "task_update",
+            json!({ "id": id, "status": "blocked", "blocked_reason": nothing }),
+        )
+        .await;
         assert!(err.is_err(), "{nothing:?} is not a reason");
     }
-    call_tool(&tools, "task_update", json!({ "id": id, "status": "blocked", "blocked_reason": "no key" })).await.unwrap();
-    assert!(call_tool(&tools, "task_update", json!({ "id": id, "blocked_reason": null })).await.is_err(), "a blocked task keeps its reason");
-    let replaced = call_tool(&tools, "task_update", json!({ "id": id, "blocked_reason": "still no key, asked ops" })).await.unwrap();
+    call_tool(
+        &tools,
+        "task_update",
+        json!({ "id": id, "status": "blocked", "blocked_reason": "no key" }),
+    )
+    .await
+    .unwrap();
+    assert!(
+        call_tool(
+            &tools,
+            "task_update",
+            json!({ "id": id, "blocked_reason": null })
+        )
+        .await
+        .is_err(),
+        "a blocked task keeps its reason"
+    );
+    let replaced = call_tool(
+        &tools,
+        "task_update",
+        json!({ "id": id, "blocked_reason": "still no key, asked ops" }),
+    )
+    .await
+    .unwrap();
     assert_eq!(replaced["blocked_reason"], "still no key, asked ops");
-    let freed = call_tool(&tools, "task_update", json!({ "id": id, "status": "to_do", "blocked_reason": null })).await;
+    let freed = call_tool(
+        &tools,
+        "task_update",
+        json!({ "id": id, "status": "to_do", "blocked_reason": null }),
+    )
+    .await;
     assert!(freed.is_ok(), "leaving blocked may clear the reason");
 }
 
-fn tools_in(vault_dir: &std::path::Path, settings: hq_core::config::TasksConfig) -> Vec<Box<dyn HqTool>> {
+fn tools_in(
+    vault_dir: &std::path::Path,
+    settings: hq_core::config::TasksConfig,
+) -> Vec<Box<dyn HqTool>> {
     let vault = Arc::new(VaultClient::new(vault_dir.to_path_buf()).unwrap());
-    create_task_tools_with(vault_dir.to_path_buf(), vault, Arc::new(Database::open_memory().unwrap()), settings)
+    create_task_tools_with(
+        vault_dir.to_path_buf(),
+        vault,
+        Arc::new(Database::open_memory().unwrap()),
+        settings,
+    )
 }
 
 fn mailbox_count(vault_dir: &std::path::Path, name: &str) -> usize {
@@ -2028,19 +3023,60 @@ async fn an_assignee_is_mailed_when_added_and_a_tag_only_while_tag_routing_is_on
         for name in ["worker", "reviewer"] {
             std::fs::create_dir_all(dir.path().join(mailbox::MAILBOX_DIR).join(name)).unwrap();
         }
-        let settings = hq_core::config::TasksConfig { route_tags, ..Default::default() };
+        let settings = hq_core::config::TasksConfig {
+            route_tags,
+            ..Default::default()
+        };
         let tools = tools_in(dir.path(), settings);
-        let made = call_tool(&tools, "task_create", json!({ "title": "Routed", "assignees": ["worker"], "tags": ["reviewer"] })).await.unwrap();
+        let made = call_tool(
+            &tools,
+            "task_create",
+            json!({ "title": "Routed", "assignees": ["worker"], "tags": ["reviewer"] }),
+        )
+        .await
+        .unwrap();
         assert_eq!(made["assignees"], json!(["worker"]));
-        assert_eq!(mailbox_count(dir.path(), "worker"), 1, "an assignee is always mailed");
-        assert_eq!(mailbox_count(dir.path(), "reviewer"), usize::from(route_tags), "route_tags={route_tags}");
+        assert_eq!(
+            mailbox_count(dir.path(), "worker"),
+            1,
+            "an assignee is always mailed"
+        );
+        assert_eq!(
+            mailbox_count(dir.path(), "reviewer"),
+            usize::from(route_tags),
+            "route_tags={route_tags}"
+        );
 
         let id = made["display_id"].as_str().unwrap().to_string();
-        call_tool(&tools, "task_update", json!({ "id": id, "title": "Renamed" })).await.unwrap();
-        assert_eq!(mailbox_count(dir.path(), "worker"), 1, "an edit that adds nobody mails nobody");
-        call_tool(&tools, "task_update", json!({ "id": id, "assignees": ["worker", "reviewer"] })).await.unwrap();
-        assert_eq!(mailbox_count(dir.path(), "reviewer"), usize::from(route_tags) + 1, "the newly assigned is mailed");
-        assert_eq!(mailbox_count(dir.path(), "worker"), 1, "the one who was already assigned is not mailed again");
+        call_tool(
+            &tools,
+            "task_update",
+            json!({ "id": id, "title": "Renamed" }),
+        )
+        .await
+        .unwrap();
+        assert_eq!(
+            mailbox_count(dir.path(), "worker"),
+            1,
+            "an edit that adds nobody mails nobody"
+        );
+        call_tool(
+            &tools,
+            "task_update",
+            json!({ "id": id, "assignees": ["worker", "reviewer"] }),
+        )
+        .await
+        .unwrap();
+        assert_eq!(
+            mailbox_count(dir.path(), "reviewer"),
+            usize::from(route_tags) + 1,
+            "the newly assigned is mailed"
+        );
+        assert_eq!(
+            mailbox_count(dir.path(), "worker"),
+            1,
+            "the one who was already assigned is not mailed again"
+        );
     }
 }
 
@@ -2049,33 +3085,86 @@ async fn a_name_that_is_both_tag_and_assignee_is_mailed_once() {
     let dir = tempfile::tempdir().unwrap();
     std::fs::create_dir_all(dir.path().join(mailbox::MAILBOX_DIR).join("hq")).unwrap();
     let tools = tools_in(dir.path(), Default::default());
-    call_tool(&tools, "task_create", json!({ "title": "Both", "assignees": ["hq"], "tags": ["hq"] })).await.unwrap();
+    call_tool(
+        &tools,
+        "task_create",
+        json!({ "title": "Both", "assignees": ["hq"], "tags": ["hq"] }),
+    )
+    .await
+    .unwrap();
     assert_eq!(mailbox_count(dir.path(), "hq"), 1);
 }
 
 #[tokio::test]
 async fn the_list_finds_a_queue_searches_polls_and_sorts() {
     let tools = tools_with(hq_core::config::LeaseMode::Off);
-    for (title, priority, assignee) in [("Fix login redirect", "low", "hq"), ("Fix logout bug", "urgent", "hq"), ("Write docs", "normal", "other")] {
-        call_tool(&tools, "task_create", json!({ "title": title, "priority": priority, "assignees": [assignee] })).await.unwrap();
+    for (title, priority, assignee) in [
+        ("Fix login redirect", "low", "hq"),
+        ("Fix logout bug", "urgent", "hq"),
+        ("Write docs", "normal", "other"),
+    ] {
+        call_tool(
+            &tools,
+            "task_create",
+            json!({ "title": title, "priority": priority, "assignees": [assignee] }),
+        )
+        .await
+        .unwrap();
     }
     let titles = |v: &serde_json::Value| -> Vec<String> {
-        v["tasks"].as_array().unwrap().iter().map(|t| t["title"].as_str().unwrap().to_string()).collect()
+        v["tasks"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|t| t["title"].as_str().unwrap().to_string())
+            .collect()
     };
-    let mine = call_tool(&tools, "task_list", json!({ "assignee": "hq", "sort": "priority" })).await.unwrap();
-    assert_eq!(titles(&mine), ["Fix logout bug", "Fix login redirect"], "urgent first");
+    let mine = call_tool(
+        &tools,
+        "task_list",
+        json!({ "assignee": "hq", "sort": "priority" }),
+    )
+    .await
+    .unwrap();
+    assert_eq!(
+        titles(&mine),
+        ["Fix logout bug", "Fix login redirect"],
+        "urgent first"
+    );
     assert_eq!(mine["total"], 2);
-    let found = call_tool(&tools, "task_list", json!({ "search": "fix login" })).await.unwrap();
+    let found = call_tool(&tools, "task_list", json!({ "search": "fix login" }))
+        .await
+        .unwrap();
     assert_eq!(titles(&found), ["Fix login redirect"]);
-    assert!(call_tool(&tools, "task_list", json!({ "sort": "random" })).await.is_err());
-    assert!(call_tool(&tools, "task_list", json!({ "updated_since": "yesterday" })).await.is_err());
+    assert!(
+        call_tool(&tools, "task_list", json!({ "sort": "random" }))
+            .await
+            .is_err()
+    );
+    assert!(
+        call_tool(&tools, "task_list", json!({ "updated_since": "yesterday" }))
+            .await
+            .is_err()
+    );
 
     let all = call_tool(&tools, "task_list", json!({})).await.unwrap();
     let as_of = all["as_of"].as_str().unwrap().to_string();
     assert_eq!(as_of.len(), 19, "a UTC time to the second: {as_of}");
-    let none = call_tool(&tools, "task_list", json!({ "updated_since": "2999-01-01" })).await.unwrap();
+    let none = call_tool(
+        &tools,
+        "task_list",
+        json!({ "updated_since": "2999-01-01" }),
+    )
+    .await
+    .unwrap();
     assert_eq!(none["total"], 0);
-    let everything = call_tool(&tools, "task_list", json!({ "updated_since": "2000-01-01T00:00:00Z" })).await.unwrap();
+    let everything = call_tool(
+        &tools,
+        "task_list",
+        json!({ "updated_since": "2000-01-01T00:00:00Z" }),
+    )
+    .await
+    .unwrap();
     assert_eq!(everything["total"], 3);
 }
 
@@ -2083,38 +3172,126 @@ async fn the_list_finds_a_queue_searches_polls_and_sorts() {
 async fn task_next_starts_the_most_urgent_task_assigned_to_you_and_nobody_else_gets_it() {
     let tools = tools_with(hq_core::config::LeaseMode::Enforce);
     for (title, priority) in [("Later", "low"), ("Now", "urgent")] {
-        call_tool(&tools, "task_create", json!({ "title": title, "priority": priority, "assignees": ["builder"], "actor": "x" })).await.unwrap();
+        call_tool(
+            &tools,
+            "task_create",
+            json!({ "title": title, "priority": priority, "assignees": ["builder"], "actor": "x" }),
+        )
+        .await
+        .unwrap();
     }
-    call_tool(&tools, "task_create", json!({ "title": "Someone else's", "assignees": ["other"] })).await.unwrap();
+    call_tool(
+        &tools,
+        "task_create",
+        json!({ "title": "Someone else's", "assignees": ["other"] }),
+    )
+    .await
+    .unwrap();
 
-    assert!(call_tool(&tools, "task_next", json!({})).await.is_err(), "it needs to know who is asking");
-    let by_queue = call_tool(&tools, "task_next", json!({ "assignee": "builder" })).await.unwrap();
-    assert_eq!(by_queue["task"]["title"], "Now", "naming the queue also names the asker");
+    assert!(
+        call_tool(&tools, "task_next", json!({})).await.is_err(),
+        "it needs to know who is asking"
+    );
+    let by_queue = call_tool(&tools, "task_next", json!({ "assignee": "builder" }))
+        .await
+        .unwrap();
+    assert_eq!(
+        by_queue["task"]["title"], "Now",
+        "naming the queue also names the asker"
+    );
     assert_eq!(by_queue["task"]["status"], "in_progress");
-    call_tool(&tools, "task_release", json!({ "lease": by_queue["lease"], "status": "to_do" })).await.unwrap();
-    let first = call_tool(&tools, "task_next", json!({ "actor": "builder", "harness": "claude-code" })).await.unwrap();
+    call_tool(
+        &tools,
+        "task_release",
+        json!({ "lease": by_queue["lease"], "status": "to_do" }),
+    )
+    .await
+    .unwrap();
+    let first = call_tool(
+        &tools,
+        "task_next",
+        json!({ "actor": "builder", "harness": "claude-code" }),
+    )
+    .await
+    .unwrap();
     assert_eq!(first["task"]["title"], "Now");
     assert_eq!(first["task"]["status"], "in_progress");
     assert!(first["lease"].as_str().unwrap().starts_with("hql_"));
     let next = first["next"].as_str().unwrap();
-    assert!(next.contains("task_release") && next.contains("ready_for_review") && next.contains("only for work that has been verified"), "{next}");
+    assert!(
+        next.contains("task_release")
+            && next.contains("ready_for_review")
+            && next.contains("only for work that has been verified"),
+        "{next}"
+    );
 
-    let second = call_tool(&tools, "task_next", json!({ "actor": "builder" })).await.unwrap();
-    assert_eq!(second["task"]["title"], "Later", "the first is held, so the next one");
-    let none = call_tool(&tools, "task_next", json!({ "actor": "builder" })).await.unwrap();
+    let second = call_tool(&tools, "task_next", json!({ "actor": "builder" }))
+        .await
+        .unwrap();
+    assert_eq!(
+        second["task"]["title"], "Later",
+        "the first is held, so the next one"
+    );
+    let none = call_tool(&tools, "task_next", json!({ "actor": "builder" }))
+        .await
+        .unwrap();
     assert!(none["task"].is_null());
-    assert!(none["reason"].as_str().unwrap().contains("include_unassigned"));
-    assert_eq!(call_tool(&tools, "task_next", json!({ "actor": "builder", "assignee": "other" })).await.unwrap()["task"]["title"], "Someone else's");
+    assert!(
+        none["reason"]
+            .as_str()
+            .unwrap()
+            .contains("include_unassigned")
+    );
+    assert_eq!(
+        call_tool(
+            &tools,
+            "task_next",
+            json!({ "actor": "builder", "assignee": "other" })
+        )
+        .await
+        .unwrap()["task"]["title"],
+        "Someone else's"
+    );
 }
 
 #[tokio::test]
 async fn claiming_a_task_assigned_to_someone_else_goes_through_with_a_warning() {
     let tools = tools_with(hq_core::config::LeaseMode::Off);
-    let task = call_tool(&tools, "task_create", json!({ "title": "Not yours", "assignees": ["alice"] })).await.unwrap();
-    let claim = call_tool(&tools, "task_claim", json!({ "task_id": task["display_id"], "actor": "bob" })).await.unwrap();
-    assert!(claim["warnings"][0].as_str().unwrap().contains("assigned to alice, not to bob"), "{claim}");
-    let mine = call_tool(&tools, "task_create", json!({ "title": "Yours", "assignees": ["bob"] })).await.unwrap();
-    let claim = call_tool(&tools, "task_claim", json!({ "task_id": mine["display_id"], "actor": "bob" })).await.unwrap();
+    let task = call_tool(
+        &tools,
+        "task_create",
+        json!({ "title": "Not yours", "assignees": ["alice"] }),
+    )
+    .await
+    .unwrap();
+    let claim = call_tool(
+        &tools,
+        "task_claim",
+        json!({ "task_id": task["display_id"], "actor": "bob" }),
+    )
+    .await
+    .unwrap();
+    assert!(
+        claim["warnings"][0]
+            .as_str()
+            .unwrap()
+            .contains("assigned to alice, not to bob"),
+        "{claim}"
+    );
+    let mine = call_tool(
+        &tools,
+        "task_create",
+        json!({ "title": "Yours", "assignees": ["bob"] }),
+    )
+    .await
+    .unwrap();
+    let claim = call_tool(
+        &tools,
+        "task_claim",
+        json!({ "task_id": mine["display_id"], "actor": "bob" }),
+    )
+    .await
+    .unwrap();
     assert!(claim.get("warnings").is_none() || claim["warnings"].as_array().unwrap().is_empty());
 }
 
@@ -2125,14 +3302,55 @@ async fn the_routing_audit_shows_what_tags_still_route_before_anyone_switches_th
         std::fs::create_dir_all(dir.path().join(mailbox::MAILBOX_DIR).join(name)).unwrap();
     }
     let tools = tools_in(dir.path(), Default::default());
-    call_tool(&tools, "task_create", json!({ "title": "A", "tags": ["hq"] })).await.unwrap();
-    call_tool(&tools, "task_create", json!({ "title": "B", "tags": ["hq"], "assignees": ["hq"] })).await.unwrap();
-    call_tool(&tools, "task_create", json!({ "title": "C", "assignees": ["reviewer"] })).await.unwrap();
-    let audit = call_tool(&tools, "task_routing_audit", json!({})).await.unwrap();
+    call_tool(
+        &tools,
+        "task_create",
+        json!({ "title": "A", "tags": ["hq"] }),
+    )
+    .await
+    .unwrap();
+    call_tool(
+        &tools,
+        "task_create",
+        json!({ "title": "B", "tags": ["hq"], "assignees": ["hq"] }),
+    )
+    .await
+    .unwrap();
+    call_tool(
+        &tools,
+        "task_create",
+        json!({ "title": "C", "assignees": ["reviewer"] }),
+    )
+    .await
+    .unwrap();
+    let audit = call_tool(&tools, "task_routing_audit", json!({}))
+        .await
+        .unwrap();
     assert_eq!(audit["route_tags"], true);
-    let row = |name: &str| audit["mailboxes"].as_array().unwrap().iter().find(|m| m["mailbox"] == name).unwrap().clone();
-    assert_eq!((row("hq")["open_tasks_tagged"].as_i64(), row("hq")["open_tasks_assigned"].as_i64(), row("hq")["tagged_but_not_assigned"].as_i64()), (Some(2), Some(1), Some(1)));
-    assert_eq!((row("reviewer")["open_tasks_tagged"].as_i64(), row("reviewer")["tagged_but_not_assigned"].as_i64()), (Some(0), Some(0)));
+    let row = |name: &str| {
+        audit["mailboxes"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|m| m["mailbox"] == name)
+            .unwrap()
+            .clone()
+    };
+    assert_eq!(
+        (
+            row("hq")["open_tasks_tagged"].as_i64(),
+            row("hq")["open_tasks_assigned"].as_i64(),
+            row("hq")["tagged_but_not_assigned"].as_i64()
+        ),
+        (Some(2), Some(1), Some(1))
+    );
+    assert_eq!(
+        (
+            row("reviewer")["open_tasks_tagged"].as_i64(),
+            row("reviewer")["tagged_but_not_assigned"].as_i64()
+        ),
+        (Some(0), Some(0))
+    );
     let before = call_tool(&tools, "task_list", json!({})).await.unwrap()["total"].clone();
     assert_eq!(before, 3, "the audit changed nothing");
 }
@@ -2151,36 +3369,82 @@ async fn bulk_create_links_items_by_key_inherits_defaults_and_is_safe_to_repeat(
             { "key": "c", "title": "Linked", "links": [{ "kind": "task", "ref": "@ws1" }] }
         ]
     });
-    let first = call_tool(&tools, "task_create_many", call.clone()).await.unwrap();
-    assert_eq!((first["created"].as_i64(), first["failed"].as_i64()), (Some(4), Some(1)));
+    let first = call_tool(&tools, "task_create_many", call.clone())
+        .await
+        .unwrap();
+    assert_eq!(
+        (first["created"].as_i64(), first["failed"].as_i64()),
+        (Some(4), Some(1))
+    );
     let r = |i: usize| first["results"][i].clone();
     assert_eq!(r(3)["ok"], false);
     assert!(r(3)["error"].as_str().unwrap().contains("@nobody"));
     let ws1 = r(0)["display_id"].as_str().unwrap().to_string();
-    let b = call_tool(&tools, "task_get", json!({ "id": r(2)["display_id"] })).await.unwrap();
-    assert_eq!(b["parent_task_id"], r(0)["id"], "@ws1 became the real parent");
-    assert_eq!(b["blocked_by"], json!([r(1)["display_id"]]), "@a became a dependency");
+    let b = call_tool(&tools, "task_get", json!({ "id": r(2)["display_id"] }))
+        .await
+        .unwrap();
+    assert_eq!(
+        b["parent_task_id"],
+        r(0)["id"],
+        "@ws1 became the real parent"
+    );
+    assert_eq!(
+        b["blocked_by"],
+        json!([r(1)["display_id"]]),
+        "@a became a dependency"
+    );
     assert_eq!(b["tags"], json!(["epic"]), "defaults applied");
     assert_eq!(b["assignees"], json!(["worker"]));
-    let c = call_tool(&tools, "task_get", json!({ "id": r(4)["display_id"] })).await.unwrap();
+    let c = call_tool(&tools, "task_get", json!({ "id": r(4)["display_id"] }))
+        .await
+        .unwrap();
     assert_eq!(c["links"][0]["kind"], "task");
-    assert_eq!(call_tool(&tools, "task_get", json!({ "id": ws1 })).await.unwrap()["subtask_count"], 2);
+    assert_eq!(
+        call_tool(&tools, "task_get", json!({ "id": ws1 }))
+            .await
+            .unwrap()["subtask_count"],
+        2
+    );
 
     let again = call_tool(&tools, "task_create_many", call).await.unwrap();
-    assert_eq!(again["results"][0]["deduplicated"], true, "a repeat creates nothing twice");
-    assert_eq!(call_tool(&tools, "task_list", json!({})).await.unwrap()["total"], 4);
+    assert_eq!(
+        again["results"][0]["deduplicated"], true,
+        "a repeat creates nothing twice"
+    );
+    assert_eq!(
+        call_tool(&tools, "task_list", json!({})).await.unwrap()["total"],
+        4
+    );
 }
 
 #[tokio::test]
 async fn bulk_calls_are_bounded_and_bulk_update_reports_each_item() {
     let tools = tools_with(hq_core::config::LeaseMode::Off);
-    assert!(call_tool(&tools, "task_create_many", json!({ "tasks": [] })).await.is_err());
-    assert!(call_tool(&tools, "task_create_many", json!({})).await.is_err());
-    let too_many: Vec<_> = (0..101).map(|n| json!({ "title": format!("t{n}") })).collect();
-    assert!(call_tool(&tools, "task_create_many", json!({ "tasks": too_many })).await.is_err());
+    assert!(
+        call_tool(&tools, "task_create_many", json!({ "tasks": [] }))
+            .await
+            .is_err()
+    );
+    assert!(
+        call_tool(&tools, "task_create_many", json!({}))
+            .await
+            .is_err()
+    );
+    let too_many: Vec<_> = (0..101)
+        .map(|n| json!({ "title": format!("t{n}") }))
+        .collect();
+    assert!(
+        call_tool(&tools, "task_create_many", json!({ "tasks": too_many }))
+            .await
+            .is_err()
+    );
 
-    let a = call_tool(&tools, "task_create", json!({ "title": "A" })).await.unwrap();
-    let b = call_tool(&tools, "task_create", json!({ "title": "B" })).await.unwrap();
+    let a = call_tool(&tools, "task_create", json!({ "title": "A" }))
+        .await
+        .unwrap();
+    let b = call_tool(&tools, "task_create", json!({ "title": "B" }))
+        .await
+        .unwrap();
     let out = call_tool(
         &tools,
         "task_update_many",
@@ -2188,45 +3452,124 @@ async fn bulk_calls_are_bounded_and_bulk_update_reports_each_item() {
     )
     .await
     .unwrap();
-    assert_eq!((out["updated"].as_i64(), out["failed"].as_i64()), (Some(1), Some(3)));
-    assert!(out["results"][1]["error"].as_str().unwrap().contains("doing"));
-    let got = call_tool(&tools, "task_get", json!({ "id": a["display_id"] })).await.unwrap();
-    assert_eq!((got["status"].as_str(), got["priority"].as_str()), (Some("in_progress"), Some("high")));
-    assert_eq!(call_tool(&tools, "task_get", json!({ "id": b["display_id"] })).await.unwrap()["status"], "to_do", "a refused item changed nothing");
+    assert_eq!(
+        (out["updated"].as_i64(), out["failed"].as_i64()),
+        (Some(1), Some(3))
+    );
+    assert!(
+        out["results"][1]["error"]
+            .as_str()
+            .unwrap()
+            .contains("doing")
+    );
+    let got = call_tool(&tools, "task_get", json!({ "id": a["display_id"] }))
+        .await
+        .unwrap();
+    assert_eq!(
+        (got["status"].as_str(), got["priority"].as_str()),
+        (Some("in_progress"), Some("high"))
+    );
+    assert_eq!(
+        call_tool(&tools, "task_get", json!({ "id": b["display_id"] }))
+            .await
+            .unwrap()["status"],
+        "to_do",
+        "a refused item changed nothing"
+    );
 }
 
 #[tokio::test]
 async fn the_working_protocol_is_shown_once_per_name_and_never_to_a_lease_holder() {
     let tools = tools_with(hq_core::config::LeaseMode::Off);
-    let first = call_tool(&tools, "task_list", json!({ "actor": "onboard-new-agent" })).await.unwrap();
-    assert!(first["hq_task_protocol"].as_str().unwrap().contains("task_claim"));
-    let second = call_tool(&tools, "task_list", json!({ "actor": "onboard-new-agent" })).await.unwrap();
+    let first = call_tool(&tools, "task_list", json!({ "actor": "onboard-new-agent" }))
+        .await
+        .unwrap();
+    assert!(
+        first["hq_task_protocol"]
+            .as_str()
+            .unwrap()
+            .contains("task_claim")
+    );
+    let second = call_tool(&tools, "task_list", json!({ "actor": "onboard-new-agent" }))
+        .await
+        .unwrap();
     assert!(second.get("hq_task_protocol").is_none(), "once per name");
-    let other = call_tool(&tools, "task_create", json!({ "title": "t", "created_by": "onboard-another" })).await.unwrap();
-    assert!(other.get("hq_task_protocol").is_some(), "a different name has not been shown it");
+    let other = call_tool(
+        &tools,
+        "task_create",
+        json!({ "title": "t", "created_by": "onboard-another" }),
+    )
+    .await
+    .unwrap();
+    assert!(
+        other.get("hq_task_protocol").is_some(),
+        "a different name has not been shown it"
+    );
 
-    let task = call_tool(&tools, "task_create", json!({ "title": "t2", "actor": "onboard-holder" })).await.unwrap();
-    let claim = call_tool(&tools, "task_claim", json!({ "task_id": task["display_id"], "actor": "onboard-holder" })).await.unwrap();
-    let held = call_tool(&tools, "task_get", json!({ "id": task["display_id"], "lease": claim["lease"] })).await.unwrap();
-    assert!(held.get("hq_task_protocol").is_none(), "someone who holds a lease already knows");
+    let task = call_tool(
+        &tools,
+        "task_create",
+        json!({ "title": "t2", "actor": "onboard-holder" }),
+    )
+    .await
+    .unwrap();
+    let claim = call_tool(
+        &tools,
+        "task_claim",
+        json!({ "task_id": task["display_id"], "actor": "onboard-holder" }),
+    )
+    .await
+    .unwrap();
+    let held = call_tool(
+        &tools,
+        "task_get",
+        json!({ "id": task["display_id"], "lease": claim["lease"] }),
+    )
+    .await
+    .unwrap();
+    assert!(
+        held.get("hq_task_protocol").is_none(),
+        "someone who holds a lease already knows"
+    );
 }
 
 #[test]
 fn every_task_tool_description_is_short_enough_to_read_and_names_no_retired_system() {
     for tool in tools() {
         let description = tool.description();
-        assert!(description.len() <= 800, "{} is {} bytes, too long to be read", tool.name(), description.len());
-        assert!(!description.to_lowercase().contains("clickup"), "{} still mentions a retired system", tool.name());
-        assert!(!description.contains('\u{2014}'), "{} uses an em dash", tool.name());
+        assert!(
+            description.len() <= 800,
+            "{} is {} bytes, too long to be read",
+            tool.name(),
+            description.len()
+        );
+        assert!(
+            !description.to_lowercase().contains("clickup"),
+            "{} still mentions a retired system",
+            tool.name()
+        );
+        assert!(
+            !description.contains('\u{2014}'),
+            "{} uses an em dash",
+            tool.name()
+        );
     }
 }
 
 #[tokio::test]
 async fn a_release_with_only_a_summary_keeps_the_next_step_the_last_checkpoint_gave() {
     let tools = tools_with(hq_core::config::LeaseMode::Off);
-    let task = call_tool(&tools, "task_create", json!({ "title": "t" })).await.unwrap();
+    let task = call_tool(&tools, "task_create", json!({ "title": "t" }))
+        .await
+        .unwrap();
     let id = task["display_id"].as_str().unwrap().to_string();
-    let claim = call_tool(&tools, "task_claim", json!({ "task_id": id, "actor": "alpha" })).await.unwrap();
+    let claim = call_tool(
+        &tools,
+        "task_claim",
+        json!({ "task_id": id, "actor": "alpha" }),
+    )
+    .await
+    .unwrap();
     call_tool(
         &tools,
         "task_heartbeat",
@@ -2234,8 +3577,16 @@ async fn a_release_with_only_a_summary_keeps_the_next_step_the_last_checkpoint_g
     )
     .await
     .unwrap();
-    call_tool(&tools, "task_release", json!({ "lease": claim["lease"], "status": "to_do", "summary": "stopping, out of time" })).await.unwrap();
-    let got = call_tool(&tools, "task_get", json!({ "id": id })).await.unwrap();
+    call_tool(
+        &tools,
+        "task_release",
+        json!({ "lease": claim["lease"], "status": "to_do", "summary": "stopping, out of time" }),
+    )
+    .await
+    .unwrap();
+    let got = call_tool(&tools, "task_get", json!({ "id": id }))
+        .await
+        .unwrap();
     assert_eq!(got["checkpoint"]["summary"], "stopping, out of time");
     assert_eq!(got["checkpoint"]["next_step"], "port orders");
     assert_eq!(got["checkpoint"]["open_questions"], "which db?");
@@ -2252,11 +3603,25 @@ async fn a_bulk_call_cannot_name_another_session_and_a_reused_prefix_is_an_error
     )
     .await
     .unwrap();
-    let id = spoof["results"][0]["display_id"].as_str().unwrap().to_string();
-    let got = call_tool(&tools, "task_get", json!({ "id": id })).await.unwrap();
-    assert!(!got.to_string().contains("hs-victim"), "an item cannot choose the session: {got}");
+    let id = spoof["results"][0]["display_id"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    let got = call_tool(&tools, "task_get", json!({ "id": id }))
+        .await
+        .unwrap();
+    assert!(
+        !got.to_string().contains("hs-victim"),
+        "an item cannot choose the session: {got}"
+    );
 
-    let first = call_tool(&tools, "task_create_many", json!({ "external_prefix": "p", "tasks": [{ "key": "a", "title": "Original" }] })).await.unwrap();
+    let first = call_tool(
+        &tools,
+        "task_create_many",
+        json!({ "external_prefix": "p", "tasks": [{ "key": "a", "title": "Original" }] }),
+    )
+    .await
+    .unwrap();
     assert_eq!(first["created"], 1);
     let reused = call_tool(
         &tools,
@@ -2266,10 +3631,22 @@ async fn a_bulk_call_cannot_name_another_session_and_a_reused_prefix_is_an_error
     .await
     .unwrap();
     assert_eq!(reused["results"][0]["ok"], false, "{reused}");
-    assert_eq!(reused["results"][1]["ok"], false, "the child must not attach to someone else's task");
+    assert_eq!(
+        reused["results"][1]["ok"], false,
+        "the child must not attach to someone else's task"
+    );
 
-    let dup = call_tool(&tools, "task_create_many", json!({ "tasks": [{ "key": "k", "title": "One" }, { "key": "k", "title": "Two" }] })).await.unwrap();
-    assert_eq!((dup["created"].as_i64(), dup["failed"].as_i64()), (Some(1), Some(1)));
+    let dup = call_tool(
+        &tools,
+        "task_create_many",
+        json!({ "tasks": [{ "key": "k", "title": "One" }, { "key": "k", "title": "Two" }] }),
+    )
+    .await
+    .unwrap();
+    assert_eq!(
+        (dup["created"].as_i64(), dup["failed"].as_i64()),
+        (Some(1), Some(1))
+    );
 }
 
 #[tokio::test]
@@ -2279,24 +3656,66 @@ async fn unblocking_mails_assignees_and_honors_route_tags() {
         for name in ["worker", "tagged"] {
             std::fs::create_dir_all(dir.path().join(mailbox::MAILBOX_DIR).join(name)).unwrap();
         }
-        let settings = hq_core::config::TasksConfig { route_tags, ..Default::default() };
+        let settings = hq_core::config::TasksConfig {
+            route_tags,
+            ..Default::default()
+        };
         let tools = tools_in(dir.path(), settings);
-        let blocker = call_tool(&tools, "task_create", json!({ "title": "Blocker" })).await.unwrap();
+        let blocker = call_tool(&tools, "task_create", json!({ "title": "Blocker" }))
+            .await
+            .unwrap();
         let waiting = call_tool(&tools, "task_create", json!({ "title": "Waiting", "assignees": ["worker"], "tags": ["tagged"], "depends_on": [blocker["display_id"]] })).await.unwrap();
-        let (w, t) = (mailbox_count(dir.path(), "worker"), mailbox_count(dir.path(), "tagged"));
-        call_tool(&tools, "task_update", json!({ "id": blocker["display_id"], "status": "complete" })).await.unwrap();
-        assert_eq!(mailbox_count(dir.path(), "worker"), w + 1, "the assignee hears it ({})", waiting["display_id"]);
-        assert_eq!(mailbox_count(dir.path(), "tagged"), t + usize::from(route_tags), "route_tags={route_tags}");
+        let (w, t) = (
+            mailbox_count(dir.path(), "worker"),
+            mailbox_count(dir.path(), "tagged"),
+        );
+        call_tool(
+            &tools,
+            "task_update",
+            json!({ "id": blocker["display_id"], "status": "complete" }),
+        )
+        .await
+        .unwrap();
+        assert_eq!(
+            mailbox_count(dir.path(), "worker"),
+            w + 1,
+            "the assignee hears it ({})",
+            waiting["display_id"]
+        );
+        assert_eq!(
+            mailbox_count(dir.path(), "tagged"),
+            t + usize::from(route_tags),
+            "route_tags={route_tags}"
+        );
     }
 }
 
 #[tokio::test]
 async fn task_next_ignores_a_task_that_has_not_started_and_cleans_the_name_it_is_given() {
     let tools = tools_with(hq_core::config::LeaseMode::Off);
-    call_tool(&tools, "task_create", json!({ "title": "Future", "assignees": ["zed"], "start_date": "2999-01-01" })).await.unwrap();
-    assert!(call_tool(&tools, "task_next", json!({ "actor": "zed" })).await.unwrap()["task"].is_null());
-    call_tool(&tools, "task_create", json!({ "title": "Today", "assignees": ["zed"] })).await.unwrap();
-    let got = call_tool(&tools, "task_next", json!({ "actor": " zed\u{200b} " })).await.unwrap();
+    call_tool(
+        &tools,
+        "task_create",
+        json!({ "title": "Future", "assignees": ["zed"], "start_date": "2999-01-01" }),
+    )
+    .await
+    .unwrap();
+    assert!(
+        call_tool(&tools, "task_next", json!({ "actor": "zed" }))
+            .await
+            .unwrap()["task"]
+            .is_null()
+    );
+    call_tool(
+        &tools,
+        "task_create",
+        json!({ "title": "Today", "assignees": ["zed"] }),
+    )
+    .await
+    .unwrap();
+    let got = call_tool(&tools, "task_next", json!({ "actor": " zed\u{200b} " }))
+        .await
+        .unwrap();
     assert_eq!(got["task"]["title"], "Today");
 }
 
@@ -2314,35 +3733,63 @@ fn pending_review_items(fx: &ScopeFixture) -> usize {
 #[tokio::test]
 async fn the_tasks_scope_works_a_task_under_a_lease_named_for_the_scope() {
     let fx = ScopeFixture::new(&["relay", "codex"]);
-    let blocker = fx.tool("task_create").execute(json!({"title": "blocker", "assignees": ["codex"]})).await.unwrap();
+    let blocker = fx
+        .tool("task_create")
+        .execute(json!({"title": "blocker", "assignees": ["codex"]}))
+        .await
+        .unwrap();
     fx.tool("task_create")
         .execute(json!({"title": "dependent", "tags": ["relay"], "depends_on": [blocker["id"]]}))
         .await
         .unwrap();
-    let mail_before = (mailbox_files(&fx.path, "relay"), mailbox_files(&fx.path, "codex"));
+    let mail_before = (
+        mailbox_files(&fx.path, "relay"),
+        mailbox_files(&fx.path, "codex"),
+    );
 
-    let next = fx.tool("task_next").execute(tasks_scope(json!({"actor": "codex"}))).await.unwrap();
+    let next = fx
+        .tool("task_next")
+        .execute(tasks_scope(json!({"actor": "codex"})))
+        .await
+        .unwrap();
     assert_eq!(next["task"]["id"], blocker["id"], "{next}");
-    assert!(next.get("warnings").is_none(), "the assignee is the bare name: {next}");
+    assert!(
+        next.get("warnings").is_none(),
+        "the assignee is the bare name: {next}"
+    );
     let lease = next["lease"].as_str().unwrap().to_string();
-    let held = fx.tool("task_get").execute(json!({"id": blocker["id"]})).await.unwrap();
+    let held = fx
+        .tool("task_get")
+        .execute(json!({"id": blocker["id"]}))
+        .await
+        .unwrap();
     assert_eq!(held["held_by"]["actor"], "mcp:tasks/codex");
 
     let comment = fx
         .tool("task_comment_add")
-        .execute(tasks_scope(json!({"task_id": blocker["id"], "body": "working", "lease": lease})))
+        .execute(tasks_scope(
+            json!({"task_id": blocker["id"], "body": "working", "lease": lease}),
+        ))
         .await
         .unwrap();
     assert_eq!(comment["author"], "mcp:tasks/codex");
-    fx.tool("task_heartbeat").execute(tasks_scope(json!({"lease": lease}))).await.unwrap();
+    fx.tool("task_heartbeat")
+        .execute(tasks_scope(json!({"lease": lease})))
+        .await
+        .unwrap();
     let done = fx
         .tool("task_release")
-        .execute(tasks_scope(json!({"lease": lease, "status": "complete", "summary": "done"})))
+        .execute(tasks_scope(
+            json!({"lease": lease, "status": "complete", "summary": "done"}),
+        ))
         .await
         .unwrap();
     assert_eq!(done["task"]["status"], "complete");
     assert_eq!(
-        (mailbox_files(&fx.path, "relay"), mailbox_files(&fx.path, "codex")),
+        (
+            mailbox_files(&fx.path, "relay"),
+            mailbox_files(&fx.path, "codex")
+        ),
         mail_before,
         "an unblocked dependent's tag is not mailed from the scope"
     );
@@ -2352,19 +3799,35 @@ async fn the_tasks_scope_works_a_task_under_a_lease_named_for_the_scope() {
 #[tokio::test]
 async fn a_scope_release_raises_no_review_item_but_an_owner_release_does() {
     let fx = ScopeFixture::new(&[]);
-    let scoped_task = fx.tool("task_create").execute(json!({"title": "a"})).await.unwrap();
+    let scoped_task = fx
+        .tool("task_create")
+        .execute(json!({"title": "a"}))
+        .await
+        .unwrap();
     let claim = fx
         .tool("task_claim")
-        .execute(tasks_scope(json!({"task_id": scoped_task["id"], "actor": "laptop"})))
+        .execute(tasks_scope(
+            json!({"task_id": scoped_task["id"], "actor": "laptop"}),
+        ))
         .await
         .unwrap();
     fx.tool("task_release")
-        .execute(tasks_scope(json!({"lease": claim["lease"], "status": "ready_for_review", "summary": "s"})))
+        .execute(tasks_scope(
+            json!({"lease": claim["lease"], "status": "ready_for_review", "summary": "s"}),
+        ))
         .await
         .unwrap();
-    assert_eq!(pending_review_items(&fx), 0, "the scope must not raise an approval item");
+    assert_eq!(
+        pending_review_items(&fx),
+        0,
+        "the scope must not raise an approval item"
+    );
 
-    let owner_task = fx.tool("task_create").execute(json!({"title": "b"})).await.unwrap();
+    let owner_task = fx
+        .tool("task_create")
+        .execute(json!({"title": "b"}))
+        .await
+        .unwrap();
     let claim = fx
         .tool("task_claim")
         .execute(json!({"task_id": owner_task["id"], "actor": "builder"}))
@@ -2374,15 +3837,25 @@ async fn a_scope_release_raises_no_review_item_but_an_owner_release_does() {
         .execute(json!({"lease": claim["lease"], "status": "ready_for_review", "summary": "s"}))
         .await
         .unwrap();
-    assert_eq!(pending_review_items(&fx), 1, "a release to review reaches the owner like an update");
+    assert_eq!(
+        pending_review_items(&fx),
+        1,
+        "a release to review reaches the owner like an update"
+    );
 }
 
 #[tokio::test]
 async fn an_owner_release_that_completes_a_blocker_tells_the_dependent() {
     let fx = ScopeFixture::new(&["reviewer"]);
-    let blocker = fx.tool("task_create").execute(json!({"title": "blocker"})).await.unwrap();
+    let blocker = fx
+        .tool("task_create")
+        .execute(json!({"title": "blocker"}))
+        .await
+        .unwrap();
     fx.tool("task_create")
-        .execute(json!({"title": "dependent", "assignees": ["reviewer"], "depends_on": [blocker["id"]]}))
+        .execute(
+            json!({"title": "dependent", "assignees": ["reviewer"], "depends_on": [blocker["id"]]}),
+        )
         .await
         .unwrap();
     let before = mailbox_files(&fx.path, "reviewer");
@@ -2395,18 +3868,28 @@ async fn an_owner_release_that_completes_a_blocker_tells_the_dependent() {
         .execute(json!({"lease": claim["lease"], "status": "complete", "summary": "done"}))
         .await
         .unwrap();
-    assert!(mailbox_files(&fx.path, "reviewer") > before, "the unblocked dependent's assignee is told");
+    assert!(
+        mailbox_files(&fx.path, "reviewer") > before,
+        "the unblocked dependent's assignee is told"
+    );
 }
 
 #[tokio::test]
 async fn scope_names_and_leases_do_not_cross_between_keys() {
     let fx = ScopeFixture::new(&[]);
-    let task = fx.tool("task_create").execute(json!({"title": "a"})).await.unwrap();
+    let task = fx
+        .tool("task_create")
+        .execute(json!({"title": "a"}))
+        .await
+        .unwrap();
     let posing = fx
         .tool("task_claim")
         .execute(json!({"task_id": task["id"], "actor": "mcp:tasks/laptop"}))
         .await;
-    assert!(posing.is_err(), "the owner's agents cannot pose as a scoped client");
+    assert!(
+        posing.is_err(),
+        "the owner's agents cannot pose as a scoped client"
+    );
 
     let owner = fx
         .tool("task_claim")
@@ -2414,11 +3897,24 @@ async fn scope_names_and_leases_do_not_cross_between_keys() {
         .await
         .unwrap();
     for tool in ["task_heartbeat", "task_release"] {
-        let borrowed = fx.tool(tool).execute(tasks_scope(json!({"lease": owner["lease"]}))).await;
-        assert!(borrowed.is_err(), "{tool} with a full-key lease must be refused on the scope");
+        let borrowed = fx
+            .tool(tool)
+            .execute(tasks_scope(json!({"lease": owner["lease"]})))
+            .await;
+        assert!(
+            borrowed.is_err(),
+            "{tool} with a full-key lease must be refused on the scope"
+        );
     }
-    let still = fx.tool("task_get").execute(json!({"id": task["id"]})).await.unwrap();
-    assert_eq!(still["held_by"]["actor"], "builder", "the refused release ended nothing");
+    let still = fx
+        .tool("task_get")
+        .execute(json!({"id": task["id"]}))
+        .await
+        .unwrap();
+    assert_eq!(
+        still["held_by"]["actor"], "builder",
+        "the refused release ended nothing"
+    );
 }
 
 /// Each bulk item runs as the single tool would for the same caller, so a scoped bulk call
@@ -2439,7 +3935,11 @@ async fn a_scoped_bulk_call_keeps_the_scope_for_every_item() {
         .unwrap();
     assert_eq!(made["created"], 2, "{made}");
     for r in made["results"].as_array().unwrap() {
-        let task = fx.tool("task_get").execute(json!({"id": r["id"]})).await.unwrap();
+        let task = fx
+            .tool("task_get")
+            .execute(json!({"id": r["id"]}))
+            .await
+            .unwrap();
         assert_eq!(task["tags"], json!([]), "{task}");
         assert_eq!(task["assignees"], json!([]), "{task}");
         assert_eq!(task["created_by"], "mcp:tasks");
@@ -2448,10 +3948,16 @@ async fn a_scoped_bulk_call_keeps_the_scope_for_every_item() {
 
     let id = made["results"][0]["id"].clone();
     fx.tool("task_update_many")
-        .execute(tasks_scope(json!({"updates": [{"id": id, "tags": ["relay"], "_hq_tasks_scope": false}]})))
+        .execute(tasks_scope(
+            json!({"updates": [{"id": id, "tags": ["relay"], "_hq_tasks_scope": false}]}),
+        ))
         .await
         .unwrap();
-    let task = fx.tool("task_get").execute(json!({"id": id})).await.unwrap();
+    let task = fx
+        .tool("task_get")
+        .execute(json!({"id": id}))
+        .await
+        .unwrap();
     assert_eq!(task["tags"], json!([]));
     assert_eq!(mailbox_files(&fx.path, "relay"), 0);
 }
@@ -2467,45 +3973,80 @@ async fn the_scope_link_list_leaves_out_notes() {
         ]}))
         .await
         .unwrap();
-    let listed = fx.tool("task_link_list").execute(tasks_scope(json!({"task_id": made["id"]}))).await.unwrap();
+    let listed = fx
+        .tool("task_link_list")
+        .execute(tasks_scope(json!({"task_id": made["id"]})))
+        .await
+        .unwrap();
     assert_eq!(listed["count"], 1, "{listed}");
     let lookup = fx
         .tool("task_link_list")
-        .execute(tasks_scope(json!({"kind": "vault_note", "ref": "Notebooks/Private/plan.md"})))
+        .execute(tasks_scope(
+            json!({"kind": "vault_note", "ref": "Notebooks/Private/plan.md"}),
+        ))
         .await;
     assert!(lookup.is_err());
-    let owner = fx.tool("task_link_list").execute(json!({"task_id": made["id"]})).await.unwrap();
+    let owner = fx
+        .tool("task_link_list")
+        .execute(json!({"task_id": made["id"]}))
+        .await
+        .unwrap();
     assert_eq!(owner["count"], 2);
 }
 
 #[tokio::test]
 async fn the_tasks_scope_cannot_take_over_a_lease() {
     let fx = ScopeFixture::new(&[]);
-    let made = fx.tool("task_create").execute(json!({"title": "a"})).await.unwrap();
-    fx.tool("task_claim").execute(json!({"task_id": made["id"], "actor": "builder"})).await.unwrap();
+    let made = fx
+        .tool("task_create")
+        .execute(json!({"title": "a"}))
+        .await
+        .unwrap();
+    fx.tool("task_claim")
+        .execute(json!({"task_id": made["id"], "actor": "builder"}))
+        .await
+        .unwrap();
     let taken = fx
         .tool("task_claim")
-        .execute(tasks_scope(json!({"task_id": made["id"], "actor": "laptop", "takeover": true})))
+        .execute(tasks_scope(
+            json!({"task_id": made["id"], "actor": "laptop", "takeover": true}),
+        ))
         .await;
     assert!(taken.is_err());
-    let still = fx.tool("task_get").execute(json!({"id": made["id"]})).await.unwrap();
+    let still = fx
+        .tool("task_get")
+        .execute(json!({"id": made["id"]}))
+        .await
+        .unwrap();
     assert_eq!(still["held_by"]["actor"], "builder");
 }
 
 #[tokio::test]
 async fn a_scoped_claim_resumes_without_machine_paths() {
     let fx = ScopeFixture::new(&[]);
-    let made = fx.tool("task_create").execute(json!({"title": "a"})).await.unwrap();
-    let first = fx.tool("task_claim").execute(json!({"task_id": made["id"], "actor": "builder"})).await.unwrap();
+    let made = fx
+        .tool("task_create")
+        .execute(json!({"title": "a"}))
+        .await
+        .unwrap();
+    let first = fx
+        .tool("task_claim")
+        .execute(json!({"task_id": made["id"], "actor": "builder"}))
+        .await
+        .unwrap();
     fx.tool("task_release")
-        .execute(json!({"lease": first["lease"], "status": "to_do", "checkpoint": {
-            "summary": "s", "files": ["src/a.rs", "/home/me/b.rs"]
-        }}))
+        .execute(
+            json!({"lease": first["lease"], "status": "to_do", "checkpoint": {
+                "summary": "s", "files": ["src/a.rs", "/home/me/b.rs"]
+            }}),
+        )
         .await
         .unwrap();
     let next = fx
         .tool("task_claim")
-        .execute(tasks_scope(json!({"task_id": made["id"], "actor": "laptop"})))
+        .execute(tasks_scope(
+            json!({"task_id": made["id"], "actor": "laptop"}),
+        ))
         .await
         .unwrap();
     assert_eq!(next["resume"]["files"], json!(["src/a.rs"]), "{next}");
@@ -2514,11 +4055,20 @@ async fn a_scoped_claim_resumes_without_machine_paths() {
 #[tokio::test]
 async fn a_scoped_claim_of_a_held_task_is_not_told_to_take_it_over() {
     let fx = ScopeFixture::new(&[]);
-    let made = fx.tool("task_create").execute(json!({"title": "a"})).await.unwrap();
-    fx.tool("task_claim").execute(json!({"task_id": made["id"], "actor": "builder"})).await.unwrap();
+    let made = fx
+        .tool("task_create")
+        .execute(json!({"title": "a"}))
+        .await
+        .unwrap();
+    fx.tool("task_claim")
+        .execute(json!({"task_id": made["id"], "actor": "builder"}))
+        .await
+        .unwrap();
     let refused = fx
         .tool("task_claim")
-        .execute(tasks_scope(json!({"task_id": made["id"], "actor": "laptop"})))
+        .execute(tasks_scope(
+            json!({"task_id": made["id"], "actor": "laptop"}),
+        ))
         .await
         .unwrap_err()
         .to_string();

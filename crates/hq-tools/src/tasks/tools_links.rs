@@ -41,7 +41,12 @@ pub(super) fn link_requests(args: &Value) -> Result<Vec<LinkRequest>> {
                 bail!("each link needs a kind and a ref");
             };
             let direction = agent_direction(&kind, text("direction").as_deref());
-            Ok(LinkRequest { kind, reference, label: text("label").unwrap_or_default(), direction })
+            Ok(LinkRequest {
+                kind,
+                reference,
+                label: text("label").unwrap_or_default(),
+                direction,
+            })
         })
         .collect()
 }
@@ -101,7 +106,11 @@ impl HqTool for TaskLinkAddTool {
         "tasks"
     }
     async fn execute(&self, args: Value) -> Result<Value> {
-        let (task_id, kind, reference) = (arg_str(&args, "task_id"), arg_str(&args, "kind"), arg_str(&args, "ref"));
+        let (task_id, kind, reference) = (
+            arg_str(&args, "task_id"),
+            arg_str(&args, "kind"),
+            arg_str(&args, "ref"),
+        );
         if task_id.is_empty() || kind.is_empty() || reference.is_empty() {
             bail!("task_id, kind and ref are required ({KIND_LIST})");
         }
@@ -111,7 +120,15 @@ impl HqTool for TaskLinkAddTool {
         let settings = self.settings.clone();
         let (link, created) = self.db.with_conn(move |c| {
             let who = hints.resolve(c, &settings, None)?.name;
-            t::add_task_link(c, &task_id, &kind, &reference, &label, direction.as_deref(), &who)
+            t::add_task_link(
+                c,
+                &task_id,
+                &kind,
+                &reference,
+                &label,
+                direction.as_deref(),
+                &who,
+            )
         })?;
         Ok(json!({ "created": created, "link": link }))
     }
@@ -144,11 +161,17 @@ impl HqTool for TaskLinkRemoveTool {
         "tasks"
     }
     async fn execute(&self, args: Value) -> Result<Value> {
-        let (task_id, kind, reference) = (arg_str(&args, "task_id"), arg_str(&args, "kind"), arg_str(&args, "ref"));
+        let (task_id, kind, reference) = (
+            arg_str(&args, "task_id"),
+            arg_str(&args, "kind"),
+            arg_str(&args, "ref"),
+        );
         if task_id.is_empty() || kind.is_empty() || reference.is_empty() {
             bail!("task_id, kind and ref are required");
         }
-        let removed = self.db.with_conn(move |c| t::remove_task_link(c, &task_id, &kind, &reference))?;
+        let removed = self
+            .db
+            .with_conn(move |c| t::remove_task_link(c, &task_id, &kind, &reference))?;
         Ok(json!({ "removed": removed }))
     }
 }
@@ -201,8 +224,12 @@ impl HqTool for TaskLinkListTool {
                 Ok(json!({ "count": links.len(), "links": links }))
             }
             (None, Some(kind), Some(reference)) => {
-                let tasks = self.db.with_conn(move |c| t::tasks_linked_to(c, &kind, &reference))?;
-                Ok(json!({ "count": tasks.len(), "tasks": tasks.iter().map(task_summary).collect::<Vec<_>>() }))
+                let tasks = self
+                    .db
+                    .with_conn(move |c| t::tasks_linked_to(c, &kind, &reference))?;
+                Ok(
+                    json!({ "count": tasks.len(), "tasks": tasks.iter().map(task_summary).collect::<Vec<_>>() }),
+                )
             }
             _ => bail!("pass task_id, or kind and ref together"),
         }
@@ -212,11 +239,12 @@ impl HqTool for TaskLinkListTool {
 /// Ids of the tasks already tied to this one on purpose: its parent and sub-tasks, its
 /// siblings, and what it depends on or blocks.
 fn relative_ids(conn: &rusqlite::Connection, task: &t::Task) -> std::collections::HashSet<String> {
-    let mut ids: std::collections::HashSet<String> = hq_db::task_graph::explicit_links(conn, &task.id)
-        .unwrap_or_default()
-        .into_iter()
-        .map(|l| l.task.id)
-        .collect();
+    let mut ids: std::collections::HashSet<String> =
+        hq_db::task_graph::explicit_links(conn, &task.id)
+            .unwrap_or_default()
+            .into_iter()
+            .map(|l| l.task.id)
+            .collect();
     if let Some(parent) = &task.parent_task_id
         && let Ok(siblings) = t::list_subtasks(conn, parent)
     {
@@ -252,14 +280,16 @@ pub(super) fn advice_for_new_task(conn: &rusqlite::Connection, task: &t::Task) -
         .iter()
         .filter(|s| s.task.status != t::STATUS_COMPLETE && !relatives.contains(&s.task.id))
         .take(MAX_REPORTED_DUPLICATES)
-        .map(|s| json!({
-            "task_id": s.task.id,
-            "display_id": s.task.display_id,
-            "title": s.task.title,
-            "status": s.task.status,
-            "score": s.score,
-            "evidence": s.evidence,
-        }))
+        .map(|s| {
+            json!({
+                "task_id": s.task.id,
+                "display_id": s.task.display_id,
+                "title": s.task.title,
+                "status": s.task.status,
+                "score": s.score,
+                "evidence": s.evidence,
+            })
+        })
         .collect();
     let mut advice = json!({});
     if !duplicates.is_empty() {

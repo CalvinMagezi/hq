@@ -87,12 +87,20 @@ pub fn start_origin(chat: Option<&WatchingChat>) -> &'static str {
 pub fn check_origin_cap(db: &Arc<Database>, origin: &str) -> Result<()> {
     let cfg = agent_host_config();
     let (cap, setting) = match origin {
-        registry::ORIGIN_ASK => (cfg.ask_spawned_session_cap(), "agent_host.max_ask_spawned_sessions"),
-        registry::ORIGIN_MCP => (cfg.mcp_started_session_cap(), "agent_host.max_mcp_started_sessions"),
+        registry::ORIGIN_ASK => (
+            cfg.ask_spawned_session_cap(),
+            "agent_host.max_ask_spawned_sessions",
+        ),
+        registry::ORIGIN_MCP => (
+            cfg.mcp_started_session_cap(),
+            "agent_host.max_mcp_started_sessions",
+        ),
         _ => return Ok(()),
     };
     if db.with_conn(|c| registry::count_running_with_origin(c, origin))? >= cap {
-        bail!("{cap} sessions started this way are already running ({setting}); stop one or ask the owner");
+        bail!(
+            "{cap} sessions started this way are already running ({setting}); stop one or ask the owner"
+        );
     }
     Ok(())
 }
@@ -124,8 +132,15 @@ pub enum SendKind {
 /// Claim one of the driver's instructions before sending, in a single conditional write so
 /// parallel tool calls cannot overshoot. `Ok(false)` means nothing was claimed because this is
 /// not a driver turn. A driver turn may steer only the session its chat drives, within its allowance.
-pub fn reserve_send(db: &Arc<Database>, session_id: &str, chat: Option<&WatchingChat>, kind: SendKind) -> Result<bool> {
-    let Some(chat) = chat.filter(|c| c.driver_turn) else { return Ok(false) };
+pub fn reserve_send(
+    db: &Arc<Database>,
+    session_id: &str,
+    chat: Option<&WatchingChat>,
+    kind: SendKind,
+) -> Result<bool> {
+    let Some(chat) = chat.filter(|c| c.driver_turn) else {
+        return Ok(false);
+    };
     let cfg = agent_host_config();
     let (limit, noun) = match kind {
         SendKind::Text => (cfg.nudge_budget(), "instructions"),
@@ -137,13 +152,24 @@ pub fn reserve_send(db: &Arc<Database>, session_id: &str, chat: Option<&Watching
     }
     let row = get_row(db, session_id)?;
     if row.owner_thread.as_deref() != Some(chat.thread.as_str()) || !row.drive {
-        bail!("Drive is off for session {session_id}, so HQ sends it nothing. Tell the user what you found instead.");
+        bail!(
+            "Drive is off for session {session_id}, so HQ sends it nothing. Tell the user what you found instead."
+        );
     }
-    bail!("the driver has used its {limit} {noun} for session {session_id}. Do not send more; tell the user what the session last did.");
+    bail!(
+        "the driver has used its {limit} {noun} for session {session_id}. Do not send more; tell the user what the session last did."
+    );
 }
 
 /// Close out a send: a failed one gives its reservation back, a successful one is recorded.
-pub(crate) fn settle_send(db: &Arc<Database>, session_id: &str, chat: Option<&WatchingChat>, kind: SendKind, reserved: bool, sent: bool) {
+pub(crate) fn settle_send(
+    db: &Arc<Database>,
+    session_id: &str,
+    chat: Option<&WatchingChat>,
+    kind: SendKind,
+    reserved: bool,
+    sent: bool,
+) {
     let keys = kind == SendKind::Keys;
     let done = db.with_conn(|c| match (sent, reserved) {
         (false, true) => registry::refund_nudge(c, session_id, keys),
@@ -156,7 +182,13 @@ pub(crate) fn settle_send(db: &Arc<Database>, session_id: &str, chat: Option<&Wa
 }
 
 /// Run a send under the driver's allowance.
-pub(crate) fn metered<T>(db: &Arc<Database>, session_id: &str, chat: Option<&WatchingChat>, kind: SendKind, send: impl FnOnce() -> Result<T>) -> Result<T> {
+pub(crate) fn metered<T>(
+    db: &Arc<Database>,
+    session_id: &str,
+    chat: Option<&WatchingChat>,
+    kind: SendKind,
+    send: impl FnOnce() -> Result<T>,
+) -> Result<T> {
     let reserved = reserve_send(db, session_id, chat, kind)?;
     let result = send();
     settle_send(db, session_id, chat, kind, reserved, result.is_ok());
@@ -233,5 +265,9 @@ pub struct GoalText<'a> {
 pub(super) fn task_goal(c: &rusqlite::Connection, task_id: &str) -> Option<String> {
     let task = hq_db::tasks::get_task(c, task_id).ok().flatten()?;
     let description = task.description.trim();
-    Some(if description.is_empty() { task.title } else { format!("{}: {description}", task.title) })
+    Some(if description.is_empty() {
+        task.title
+    } else {
+        format!("{}: {description}", task.title)
+    })
 }

@@ -111,7 +111,10 @@ fn warn_on_restart_failure(
 
 /// Refuse anything but a run the owner approved, so running this command by
 /// hand (or from an agent's shell) cannot swap the binary.
-fn ensure_applicable(config: &HqConfig, run: &hq_db::self_update_runs::SelfUpdateRun) -> Result<()> {
+fn ensure_applicable(
+    config: &HqConfig,
+    run: &hq_db::self_update_runs::SelfUpdateRun,
+) -> Result<()> {
     if !config.self_update.enabled {
         anyhow::bail!("self_update is disabled in config");
     }
@@ -200,7 +203,8 @@ pub async fn run(config: &HqConfig, run_id: i64) -> Result<()> {
         return Ok(());
     }
 
-    let first_restart = hq_core::daemon_restart::restart_daemon(&config.self_update.launchd_label).await;
+    let first_restart =
+        hq_core::daemon_restart::restart_daemon(&config.self_update.launchd_label).await;
     warn_on_restart_failure(config, run_id, &first_restart);
 
     // A binary that cannot report its version is broken: restore the snapshot.
@@ -299,8 +303,17 @@ mod tests {
     #[test]
     fn only_an_approved_run_is_applied() {
         assert!(ensure_applicable(&enabled(), &run_with(STATUS_APPROVED)).is_ok());
-        for status in [STATUS_OPEN, STATUS_CHECKED, STATUS_INSTALLED, STATUS_ROLLED_BACK, STATUS_FAILED] {
-            assert!(ensure_applicable(&enabled(), &run_with(status)).is_err(), "{status}");
+        for status in [
+            STATUS_OPEN,
+            STATUS_CHECKED,
+            STATUS_INSTALLED,
+            STATUS_ROLLED_BACK,
+            STATUS_FAILED,
+        ] {
+            assert!(
+                ensure_applicable(&enabled(), &run_with(status)).is_err(),
+                "{status}"
+            );
         }
     }
 

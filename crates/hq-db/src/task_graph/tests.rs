@@ -321,9 +321,17 @@ fn a_near_copy_of_an_existing_task_is_called_a_likely_duplicate() {
             )
         })
         .unwrap();
-    assert_eq!(found.first().map(|s| s.task.id.as_str()), Some("a1"), "{found:?}");
+    assert_eq!(
+        found.first().map(|s| s.task.id.as_str()),
+        Some("a1"),
+        "{found:?}"
+    );
     assert!(found[0].score >= 0.45);
-    assert!(found[0].evidence["shared_terms"].as_array().is_some_and(|t| !t.is_empty()));
+    assert!(
+        found[0].evidence["shared_terms"]
+            .as_array()
+            .is_some_and(|t| !t.is_empty())
+    );
 }
 
 #[test]
@@ -331,7 +339,16 @@ fn unrelated_text_matches_nothing_and_a_cluster_never_reaches_across() {
     let db = db();
     load_fixture(&db);
     let none = db
-        .with_conn(|c| similar_to_text(c, None, INIT, "Order new running shoes", "size ten, wide fit", &[]))
+        .with_conn(|c| {
+            similar_to_text(
+                c,
+                None,
+                INIT,
+                "Order new running shoes",
+                "size ten, wide fit",
+                &[],
+            )
+        })
         .unwrap();
     assert!(none.is_empty(), "{none:?}");
     for (id, title, description, tags) in FIXTURE {
@@ -341,7 +358,12 @@ fn unrelated_text_matches_nothing_and_a_cluster_never_reaches_across() {
             .with_conn(|c| similar_to_text(c, Some(id), INIT, title, description, &tags))
             .unwrap();
         for s in &found {
-            assert_eq!(&s.task.id[..1], cluster, "{id} matched {} from another cluster", s.task.id);
+            assert_eq!(
+                &s.task.id[..1],
+                cluster,
+                "{id} matched {} from another cluster",
+                s.task.id
+            );
             assert_ne!(s.task.id, *id, "the task itself is excluded");
         }
     }
@@ -363,11 +385,39 @@ fn finish_with_lease(db: &Database, id: &str, minutes: i64) {
 #[test]
 fn an_estimate_is_suggested_only_from_enough_real_samples_and_rounded() {
     let db = db();
-    mk(&db, "s1", "Write the invoice receipt email template", "receipt invoice email", &[]);
-    mk(&db, "s2", "Write the invoice receipt PDF template", "receipt invoice pdf", &[]);
-    mk(&db, "s3", "Write the invoice receipt SMS template", "receipt invoice sms", &[]);
+    mk(
+        &db,
+        "s1",
+        "Write the invoice receipt email template",
+        "receipt invoice email",
+        &[],
+    );
+    mk(
+        &db,
+        "s2",
+        "Write the invoice receipt PDF template",
+        "receipt invoice pdf",
+        &[],
+    );
+    mk(
+        &db,
+        "s3",
+        "Write the invoice receipt SMS template",
+        "receipt invoice sms",
+        &[],
+    );
     let similar = |db: &Database| {
-        db.with_conn(|c| similar_to_text(c, None, INIT, "Write the invoice receipt template", "receipt invoice", &[])).unwrap()
+        db.with_conn(|c| {
+            similar_to_text(
+                c,
+                None,
+                INIT,
+                "Write the invoice receipt template",
+                "receipt invoice",
+                &[],
+            )
+        })
+        .unwrap()
     };
     let suggest = |db: &Database| db.with_conn(|c| suggest_estimate(c, &similar(db))).unwrap();
 
@@ -377,23 +427,56 @@ fn an_estimate_is_suggested_only_from_enough_real_samples_and_rounded() {
     finish_with_lease(&db, "s2", 50);
     finish_with_lease(&db, "s3", 62);
     let got = suggest(&db).unwrap();
-    assert_eq!(got.minutes, 50, "the median of 40, 50 and 62, to the nearest five");
+    assert_eq!(
+        got.minutes, 50,
+        "the median of 40, 50 and 62, to the nearest five"
+    );
     assert_eq!(got.based_on.len(), 3);
 }
 
 #[test]
 fn many_completed_lookalikes_do_not_hide_an_open_duplicate() {
     let db = db();
-    mk(&db, "open", "Write the invoice receipt template for email", "invoice receipt email template", &[]);
+    mk(
+        &db,
+        "open",
+        "Write the invoice receipt template for email",
+        "invoice receipt email template",
+        &[],
+    );
     for n in 0..8 {
-        mk(&db, &format!("done-{n}"), "Write the invoice receipt template for email now", "invoice receipt email template now", &[]);
+        mk(
+            &db,
+            &format!("done-{n}"),
+            "Write the invoice receipt template for email now",
+            "invoice receipt email template now",
+            &[],
+        );
         db.with_conn(|c| {
-            tasks::update_task(c, &format!("done-{n}"), &TaskPatch { status: Some("complete".into()), ..Default::default() }, None).map(|_| ())
+            tasks::update_task(
+                c,
+                &format!("done-{n}"),
+                &TaskPatch {
+                    status: Some("complete".into()),
+                    ..Default::default()
+                },
+                None,
+            )
+            .map(|_| ())
         })
         .unwrap();
     }
     let found = db
-        .with_conn(|c| similar_to_text(c, None, INIT, "Write the invoice receipt template for email", "invoice receipt email template", &[]))
+        .with_conn(|c| {
+            similar_to_text(
+                c,
+                None,
+                INIT,
+                "Write the invoice receipt template for email",
+                "invoice receipt email template",
+                &[],
+            )
+        })
         .unwrap();
     assert!(found.iter().any(|s| s.task.id == "open"), "{found:?}");
     assert!(found.iter().filter(|s| s.task.status == "complete").count() <= MAX_SIMILAR);
@@ -402,21 +485,60 @@ fn many_completed_lookalikes_do_not_hide_an_open_duplicate() {
 #[test]
 fn an_even_number_of_samples_takes_the_middle_of_the_two() {
     let db = db();
-    mk(&db, "s1", "Write the invoice receipt email template", "receipt invoice email", &[]);
-    mk(&db, "s2", "Write the invoice receipt PDF template", "receipt invoice pdf", &[]);
+    mk(
+        &db,
+        "s1",
+        "Write the invoice receipt email template",
+        "receipt invoice email",
+        &[],
+    );
+    mk(
+        &db,
+        "s2",
+        "Write the invoice receipt PDF template",
+        "receipt invoice pdf",
+        &[],
+    );
     finish_with_lease(&db, "s1", 30);
     finish_with_lease(&db, "s2", 60);
     let similar = db
-        .with_conn(|c| similar_to_text(c, None, INIT, "Write the invoice receipt template", "receipt invoice", &[]))
+        .with_conn(|c| {
+            similar_to_text(
+                c,
+                None,
+                INIT,
+                "Write the invoice receipt template",
+                "receipt invoice",
+                &[],
+            )
+        })
         .unwrap();
-    assert_eq!(db.with_conn(|c| suggest_estimate(c, &similar)).unwrap().unwrap().minutes, 45);
+    assert_eq!(
+        db.with_conn(|c| suggest_estimate(c, &similar))
+            .unwrap()
+            .unwrap()
+            .minutes,
+        45
+    );
 }
 
 #[test]
 fn leases_shorter_than_a_minute_are_not_samples() {
     let db = db();
-    mk(&db, "s1", "Write the invoice receipt email template", "receipt invoice email", &[]);
-    mk(&db, "s2", "Write the invoice receipt PDF template", "receipt invoice pdf", &[]);
+    mk(
+        &db,
+        "s1",
+        "Write the invoice receipt email template",
+        "receipt invoice email",
+        &[],
+    );
+    mk(
+        &db,
+        "s2",
+        "Write the invoice receipt PDF template",
+        "receipt invoice pdf",
+        &[],
+    );
     for id in ["s1", "s2"] {
         db.with_conn(|c| {
             tasks::update_task(c, id, &TaskPatch { status: Some("complete".into()), ..Default::default() }, None)?;
@@ -430,7 +552,20 @@ fn leases_shorter_than_a_minute_are_not_samples() {
         .unwrap();
     }
     let similar = db
-        .with_conn(|c| similar_to_text(c, None, INIT, "Write the invoice receipt template", "receipt invoice", &[]))
+        .with_conn(|c| {
+            similar_to_text(
+                c,
+                None,
+                INIT,
+                "Write the invoice receipt template",
+                "receipt invoice",
+                &[],
+            )
+        })
         .unwrap();
-    assert!(db.with_conn(|c| suggest_estimate(c, &similar)).unwrap().is_none());
+    assert!(
+        db.with_conn(|c| suggest_estimate(c, &similar))
+            .unwrap()
+            .is_none()
+    );
 }

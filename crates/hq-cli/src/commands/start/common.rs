@@ -25,7 +25,10 @@ mod tests {
             let id = resolve_model_alias(alias);
             assert!(id.contains('/') && !id.contains(' '), "{alias} -> {id}");
         }
-        assert_eq!(resolve_model_alias("Anthropic/Claude-Opus-5"), "anthropic/claude-opus-5");
+        assert_eq!(
+            resolve_model_alias("Anthropic/Claude-Opus-5"),
+            "anthropic/claude-opus-5"
+        );
         assert_eq!(resolve_model_alias("haiku"), "anthropic/claude-haiku-5.5");
     }
 }

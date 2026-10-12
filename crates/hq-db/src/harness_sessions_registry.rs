@@ -106,7 +106,11 @@ pub fn on_change(hook: impl Fn(&str) + Send + Sync + 'static) {
 }
 
 fn changed(id: &str) {
-    for hook in CHANGE_HOOKS.read().unwrap_or_else(|e| e.into_inner()).iter() {
+    for hook in CHANGE_HOOKS
+        .read()
+        .unwrap_or_else(|e| e.into_inner())
+        .iter()
+    {
         hook(id);
     }
 }
@@ -261,7 +265,11 @@ pub fn list_for_mission(conn: &Connection, mission_id: &str) -> Result<Vec<Harne
 
 /// Sessions of a mission still marked running, not counting `except_id`. A
 /// session on an unreachable host stays running, so it counts as working.
-pub fn count_running_for_mission(conn: &Connection, mission_id: &str, except_id: &str) -> Result<usize> {
+pub fn count_running_for_mission(
+    conn: &Connection,
+    mission_id: &str,
+    except_id: &str,
+) -> Result<usize> {
     let n: i64 = conn.query_row(
         "SELECT COUNT(*) FROM harness_sessions WHERE mission_id = ?1 AND status = 'running' AND id <> ?2",
         params![mission_id, except_id],
@@ -423,7 +431,13 @@ pub struct SessionEvent {
 }
 
 /// Append an audit record, snapshotting the session's current goal and criteria.
-pub fn record_event(conn: &Connection, id: &str, kind: &str, actor: &str, detail: Option<&str>) -> Result<()> {
+pub fn record_event(
+    conn: &Connection,
+    id: &str,
+    kind: &str,
+    actor: &str,
+    detail: Option<&str>,
+) -> Result<()> {
     conn.execute(
         "INSERT INTO harness_session_events (session_id, kind, actor, goal, done_criteria, detail)
          SELECT id, ?2, ?3, goal, done_criteria, ?4 FROM harness_sessions WHERE id = ?1",
@@ -483,7 +497,9 @@ pub fn set_goal(
     done_criteria: Option<&str>,
     actor: &str,
 ) -> Result<Option<GoalUpdate>> {
-    let Some(row) = get(conn, id)? else { return Ok(None) };
+    let Some(row) = get(conn, id)? else {
+        return Ok(None);
+    };
     let goal = goal.map_or(row.goal.clone(), clean);
     let criteria = done_criteria.map_or(row.done_criteria.clone(), clean);
     conn.execute(
@@ -497,7 +513,10 @@ pub fn set_goal(
         stop_drive(conn, id, ACTOR_GATE, &gaps.join("; "))?;
     }
     changed(id);
-    Ok(Some(GoalUpdate { drive_stopped, gaps }))
+    Ok(Some(GoalUpdate {
+        drive_stopped,
+        gaps,
+    }))
 }
 
 /// What asking for a drive mode did.
@@ -518,13 +537,22 @@ pub fn request_drive(conn: &Connection, id: &str, on: bool, actor: &str) -> Resu
 }
 
 /// `request_drive` where anyone but the user is held to `cap` running driven sessions.
-pub fn request_drive_capped(conn: &Connection, id: &str, on: bool, actor: &str, cap: Option<i64>) -> Result<DriveChange> {
+pub fn request_drive_capped(
+    conn: &Connection,
+    id: &str,
+    on: bool,
+    actor: &str,
+    cap: Option<i64>,
+) -> Result<DriveChange> {
     let Some(row) = get(conn, id)?.filter(|r| r.owner_thread.is_some()) else {
         return Ok(DriveChange::NotWatched);
     };
     let mut blockers = if on { goal_gaps(&row) } else { Vec::new() };
     if on && row.status != STATUS_RUNNING {
-        blockers.push(format!("session is {}, not running; resume it first", row.status));
+        blockers.push(format!(
+            "session is {}, not running; resume it first",
+            row.status
+        ));
     }
     if let (true, false, Some(cap)) = (on, row.drive, cap)
         && actor != ACTOR_USER
@@ -533,7 +561,13 @@ pub fn request_drive_capped(conn: &Connection, id: &str, on: bool, actor: &str, 
         blockers.push(format!("HQ already drives {cap} running sessions (agent_host.max_driven_sessions); only the user can add another"));
     }
     if !blockers.is_empty() {
-        record_event(conn, id, EVENT_DRIVE_REFUSED, actor, Some(&blockers.join("; ")))?;
+        record_event(
+            conn,
+            id,
+            EVENT_DRIVE_REFUSED,
+            actor,
+            Some(&blockers.join("; ")),
+        )?;
         if row.drive {
             set_drive(conn, id, false)?;
         }
@@ -541,7 +575,13 @@ pub fn request_drive_capped(conn: &Connection, id: &str, on: bool, actor: &str, 
     }
     if row.drive != on {
         set_drive(conn, id, on)?;
-        record_event(conn, id, if on { EVENT_DRIVE_ON } else { EVENT_DRIVE_OFF }, actor, None)?;
+        record_event(
+            conn,
+            id,
+            if on { EVENT_DRIVE_ON } else { EVENT_DRIVE_OFF },
+            actor,
+            None,
+        )?;
     }
     if on && actor == ACTOR_USER {
         // The person who switches Drive on grants a fresh budget; HQ cannot top itself up.
@@ -558,7 +598,9 @@ pub fn request_drive_capped(conn: &Connection, id: &str, on: bool, actor: &str, 
 /// the switch or a row from before the gate existed. Stops driving when it
 /// fails. Returns whether the session is still driven.
 pub fn enforce_gate(conn: &Connection, id: &str) -> Result<bool> {
-    let Some(row) = get(conn, id)?.filter(|r| r.drive) else { return Ok(false) };
+    let Some(row) = get(conn, id)?.filter(|r| r.drive) else {
+        return Ok(false);
+    };
     let gaps = goal_gaps(&row);
     if gaps.is_empty() {
         return Ok(true);
@@ -591,7 +633,13 @@ fn nudge_column(keys: bool) -> &'static str {
 /// Claim one driver instruction in a single conditional write, so parallel tool calls cannot
 /// overshoot `limit`. Text prompts and key presses have separate counters. False when the
 /// session is not driven by `thread` or the allowance is used up.
-pub fn reserve_nudge(conn: &Connection, id: &str, thread: &str, keys: bool, limit: i64) -> Result<bool> {
+pub fn reserve_nudge(
+    conn: &Connection,
+    id: &str,
+    thread: &str,
+    keys: bool,
+    limit: i64,
+) -> Result<bool> {
     let column = nudge_column(keys);
     let n = conn.execute(
         &format!(
@@ -606,7 +654,10 @@ pub fn reserve_nudge(conn: &Connection, id: &str, thread: &str, keys: bool, limi
 /// Give back a reservation whose send failed.
 pub fn refund_nudge(conn: &Connection, id: &str, keys: bool) -> Result<()> {
     let column = nudge_column(keys);
-    conn.execute(&format!("UPDATE harness_sessions SET {column} = MAX({column} - 1, 0) WHERE id = ?1"), params![id])?;
+    conn.execute(
+        &format!("UPDATE harness_sessions SET {column} = MAX({column} - 1, 0) WHERE id = ?1"),
+        params![id],
+    )?;
     Ok(())
 }
 
@@ -614,15 +665,27 @@ pub fn refund_nudge(conn: &Connection, id: &str, keys: bool) -> Result<()> {
 /// any other send re-arms the one-wake-per-nudge rule, so a user steering the session is never ignored.
 pub fn note_send(conn: &Connection, id: &str, by_driver: bool, keys: bool) -> Result<()> {
     if by_driver {
-        record_event(conn, id, EVENT_NUDGE, ACTOR_HQ, Some(if keys { "keys" } else { "text" }))?;
+        record_event(
+            conn,
+            id,
+            EVENT_NUDGE,
+            ACTOR_HQ,
+            Some(if keys { "keys" } else { "text" }),
+        )?;
     } else {
-        conn.execute("UPDATE harness_sessions SET last_wake_nudges = NULL WHERE id = ?1", params![id])?;
+        conn.execute(
+            "UPDATE harness_sessions SET last_wake_nudges = NULL WHERE id = ?1",
+            params![id],
+        )?;
     }
     Ok(())
 }
 
 pub fn set_origin(conn: &Connection, id: &str, origin: &str) -> Result<()> {
-    conn.execute("UPDATE harness_sessions SET origin = ?2 WHERE id = ?1", params![id, origin])?;
+    conn.execute(
+        "UPDATE harness_sessions SET origin = ?2 WHERE id = ?1",
+        params![id, origin],
+    )?;
     Ok(())
 }
 
@@ -664,7 +727,12 @@ pub fn count_running_with_origin(conn: &Connection, origin: &str) -> Result<i64>
 
 /// Sessions with this origin and label started in the last `minutes`, whatever
 /// their status now: how a specialist's daily run budget is counted.
-pub fn count_started_since(conn: &Connection, origin: &str, label: &str, minutes: i64) -> Result<i64> {
+pub fn count_started_since(
+    conn: &Connection,
+    origin: &str,
+    label: &str,
+    minutes: i64,
+) -> Result<i64> {
     Ok(conn.query_row(
         "SELECT COUNT(*) FROM harness_sessions WHERE origin = ?1 AND label = ?2 \
          AND created_at >= datetime('now', ?3)",
@@ -674,7 +742,11 @@ pub fn count_started_since(conn: &Connection, origin: &str, label: &str, minutes
 }
 
 /// Running sessions with this origin and label, newest first.
-pub fn running_with_label(conn: &Connection, origin: &str, label: &str) -> Result<Vec<HarnessSessionRow>> {
+pub fn running_with_label(
+    conn: &Connection,
+    origin: &str,
+    label: &str,
+) -> Result<Vec<HarnessSessionRow>> {
     let mut stmt = conn.prepare(&format!(
         "SELECT {COLS} FROM harness_sessions WHERE status = 'running' AND origin = ?1 AND label = ?2 ORDER BY created_at DESC"
     ))?;
@@ -727,7 +799,10 @@ pub fn claim_checkin(conn: &Connection, id: &str, every_minutes: u64) -> Result<
 
 /// Watched sessions the web driver owes a look: a pending wake, or a driven
 /// running session whose check-in is due.
-pub fn list_due_for_driver(conn: &Connection, every_minutes: u64) -> Result<Vec<HarnessSessionRow>> {
+pub fn list_due_for_driver(
+    conn: &Connection,
+    every_minutes: u64,
+) -> Result<Vec<HarnessSessionRow>> {
     let mut stmt = conn.prepare(&format!(
         "SELECT {COLS} FROM harness_sessions
          WHERE owner_thread IS NOT NULL AND (pm_wake IS NOT NULL OR (drive = 1 AND status = 'running'
@@ -736,7 +811,10 @@ pub fn list_due_for_driver(conn: &Connection, every_minutes: u64) -> Result<Vec<
          ORDER BY created_at"
     ))?;
     let rows = stmt
-        .query_map(params![format!("-{every_minutes} minutes"), CHECKIN_SEEN_WITHIN], row_to_session)?
+        .query_map(
+            params![format!("-{every_minutes} minutes"), CHECKIN_SEEN_WITHIN],
+            row_to_session,
+        )?
         .filter_map(|r| r.ok())
         .collect();
     Ok(rows)
@@ -794,9 +872,12 @@ pub fn set_archived(conn: &Connection, id: &str, archived: bool) -> Result<bool>
 
 /// Ids of the sessions the user archived that are not running again, so a resumed one is listed.
 pub fn archived_ids(conn: &Connection) -> Result<std::collections::HashSet<String>> {
-    let mut stmt =
-        conn.prepare("SELECT id FROM harness_sessions WHERE archived_at IS NOT NULL AND status != 'running'")?;
-    let ids = stmt.query_map([], |r| r.get::<_, String>(0))?.collect::<rusqlite::Result<_>>()?;
+    let mut stmt = conn.prepare(
+        "SELECT id FROM harness_sessions WHERE archived_at IS NOT NULL AND status != 'running'",
+    )?;
+    let ids = stmt
+        .query_map([], |r| r.get::<_, String>(0))?
+        .collect::<rusqlite::Result<_>>()?;
     Ok(ids)
 }
 

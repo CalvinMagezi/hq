@@ -121,7 +121,6 @@ impl ExportFormat {
             Self::Custom(s) => s.as_str(),
         }
     }
-
 }
 
 impl fmt::Display for ExportFormat {

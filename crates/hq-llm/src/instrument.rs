@@ -13,7 +13,9 @@ use tokio_stream::Stream;
 
 use crate::budget::{Admission, GateRequest, SharedGate, estimate_cost, note_blocked};
 use crate::cost::{ProviderClass, Usage, price_outcome};
-use crate::outcome_sink::{OutcomeEvent, SessionContext, SharedSink, context_for_record, current_context};
+use crate::outcome_sink::{
+    OutcomeEvent, SessionContext, SharedSink, context_for_record, current_context,
+};
 use crate::provider::{ChatRequest, ChatResponse, LlmProvider, StreamChunk};
 use crate::router::{TaskHint, classify_error_for_telemetry};
 use crate::tap::OutcomeTap;
@@ -91,7 +93,10 @@ pub struct ExternalCall<'a> {
 
 impl Instruments {
     /// Ask the budget gate about an external call. A refusal says which budget stopped it.
-    pub async fn admit_external(&self, call: &ExternalCall<'_>) -> Result<(), crate::budget::BudgetBlocked> {
+    pub async fn admit_external(
+        &self,
+        call: &ExternalCall<'_>,
+    ) -> Result<(), crate::budget::BudgetBlocked> {
         let Some(gate) = self.gate() else {
             return Ok(());
         };
@@ -155,7 +160,12 @@ impl Instruments {
 
 /// OpenRouter's `usage` object as a [`Usage`]: tokens plus the billed `cost`.
 pub fn usage_from_openrouter(usage: &serde_json::Value) -> Usage {
-    let n = |p: &str| usage.pointer(p).and_then(|v| v.as_u64()).map_or(0, |v| v.min(u64::from(u32::MAX)) as u32);
+    let n = |p: &str| {
+        usage
+            .pointer(p)
+            .and_then(|v| v.as_u64())
+            .map_or(0, |v| v.min(u64::from(u32::MAX)) as u32)
+    };
     Usage {
         input: n("/prompt_tokens"),
         output: n("/completion_tokens"),
@@ -412,7 +422,10 @@ mod tests {
     impl BudgetGate for Refuse {
         async fn admit(&self, req: &GateRequest<'_>) -> Admission {
             assert_eq!(req.origin, "imagegen");
-            assert!(req.estimate_usd.is_some_and(|e| e > 0.0), "unknown cost must not read as free or unpriced");
+            assert!(
+                req.estimate_usd.is_some_and(|e| e > 0.0),
+                "unknown cost must not read as free or unpriced"
+            );
             Admission::Deny(BudgetBlocked {
                 budget: "img".into(),
                 spent_usd: 1.0,
@@ -438,8 +451,14 @@ mod tests {
             "prompt_tokens": 12, "completion_tokens": 3, "cost": 0.04,
             "prompt_tokens_details": {"cached_tokens": 2}, "completion_tokens_details": {"reasoning_tokens": 1}
         }));
-        assert_eq!((u.input, u.output, u.cache_read, u.reasoning, u.billed_usd), (12, 3, 2, 1, Some(0.04)));
-        assert_eq!(usage_from_openrouter(&serde_json::json!({})), Usage::default());
+        assert_eq!(
+            (u.input, u.output, u.cache_read, u.reasoning, u.billed_usd),
+            (12, 3, 2, 1, Some(0.04))
+        );
+        assert_eq!(
+            usage_from_openrouter(&serde_json::json!({})),
+            Usage::default()
+        );
     }
 
     #[tokio::test]
@@ -447,12 +466,20 @@ mod tests {
         let rows = Arc::new(Rows::default());
         let instruments = Instruments::new();
         instruments.set_sink(rows.clone());
-        let usage = Usage { billed_usd: Some(0.04), ..Usage::default() };
+        let usage = Usage {
+            billed_usd: Some(0.04),
+            ..Usage::default()
+        };
         instruments.record_external(&call(), Some(usage), Duration::from_millis(5), None);
         tokio::task::yield_now().await;
         let rows = rows.0.lock().unwrap();
         assert_eq!(
-            (rows[0].origin, rows[0].cost_source, rows[0].cost_usd, rows[0].task_hint),
+            (
+                rows[0].origin,
+                rows[0].cost_source,
+                rows[0].cost_usd,
+                rows[0].task_hint
+            ),
             ("imagegen", "provider", 0.04, "image")
         );
     }
@@ -460,7 +487,10 @@ mod tests {
     #[tokio::test]
     async fn an_origin_budget_that_is_used_up_refuses_an_external_call() {
         let instruments = Instruments::new();
-        assert!(instruments.admit_external(&call()).await.is_ok(), "no gate, no limit");
+        assert!(
+            instruments.admit_external(&call()).await.is_ok(),
+            "no gate, no limit"
+        );
         instruments.set_gate(Arc::new(Refuse));
         let err = instruments.admit_external(&call()).await.unwrap_err();
         assert_eq!(err.budget, "img");

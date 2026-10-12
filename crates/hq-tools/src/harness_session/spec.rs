@@ -4,7 +4,7 @@
 //! caller that accepts a harness name accepts a profile name.
 
 use anyhow::{Result, bail};
-use hq_core::config::{HarnessProfileConfig, AgentHostConfig, HqConfig};
+use hq_core::config::{AgentHostConfig, HarnessProfileConfig, HqConfig};
 
 use super::category::HarnessCategory;
 
@@ -209,7 +209,11 @@ pub const SPECS: &[HarnessSessionSpec] = &[
 
 /// The built-in harnesses of one category, by name.
 pub fn names_in(category: HarnessCategory) -> Vec<&'static str> {
-    SPECS.iter().filter(|s| s.category == category).map(|s| s.harness).collect()
+    SPECS
+        .iter()
+        .filter(|s| s.category == category)
+        .map(|s| s.harness)
+        .collect()
 }
 
 /// The category of a harness or profile name, when it resolves. Loads the
@@ -267,11 +271,17 @@ impl Harness {
     /// Arguments that run the agent once for `brief` and exit: the profile's
     /// `one_shot_args` when set, else the spec's. `None` when neither has one.
     pub fn one_shot_args(&self, brief: &str) -> Option<Vec<String>> {
-        let template: Vec<String> = match self.profile.as_ref().and_then(|p| p.one_shot_args.as_ref()) {
-            Some(args) => args.clone(),
-            None => self.spec.one_shot?.iter().map(|a| a.to_string()).collect(),
-        };
-        Some(template.iter().map(|a| a.replace("{brief}", brief)).collect())
+        let template: Vec<String> =
+            match self.profile.as_ref().and_then(|p| p.one_shot_args.as_ref()) {
+                Some(args) => args.clone(),
+                None => self.spec.one_shot?.iter().map(|a| a.to_string()).collect(),
+            };
+        Some(
+            template
+                .iter()
+                .map(|a| a.replace("{brief}", brief))
+                .collect(),
+        )
     }
 }
 
@@ -416,29 +426,62 @@ mod tests {
 
     #[test]
     fn general_purpose_agents_are_their_own_category() {
-        assert_eq!(names_in(HarnessCategory::GeneralPurpose), vec!["hermes", "openclaw"]);
-        assert!(spec_for("nanoclaw").is_none(), "NanoClaw has no CLI to drive and is not a harness");
+        assert_eq!(
+            names_in(HarnessCategory::GeneralPurpose),
+            vec!["hermes", "openclaw"]
+        );
+        assert!(
+            spec_for("nanoclaw").is_none(),
+            "NanoClaw has no CLI to drive and is not a harness"
+        );
         assert!(names_in(HarnessCategory::Coding).contains(&"claude-code"));
         assert_eq!(spec_for("hermes").unwrap().binary(), "hermes");
         assert_eq!(spec_for("hermes").unwrap().args, &["chat"]);
         assert_eq!(spec_for("openclaw").unwrap().args, &["tui", "--local"]);
-        assert_eq!(resolve_in(&AgentHostConfig::default(), "openclaw").unwrap().category(), HarnessCategory::GeneralPurpose);
+        assert_eq!(
+            resolve_in(&AgentHostConfig::default(), "openclaw")
+                .unwrap()
+                .category(),
+            HarnessCategory::GeneralPurpose
+        );
         // A profile takes its base's category.
         let cfg = cfg_with_profile("  hermes-work:\n    base: hermes\n    command: hermes-work\n");
-        assert_eq!(resolve_in(&cfg, "hermes-work").unwrap().category(), HarnessCategory::GeneralPurpose);
+        assert_eq!(
+            resolve_in(&cfg, "hermes-work").unwrap().category(),
+            HarnessCategory::GeneralPurpose
+        );
     }
 
     #[test]
     fn one_shot_args_substitute_the_brief_and_a_profile_can_replace_them() {
         let hermes = resolve_in(&AgentHostConfig::default(), "hermes").unwrap();
-        assert_eq!(hermes.one_shot_args("do x").unwrap(), vec!["chat", "--oneshot", "-q", "do x"]);
         assert_eq!(
-            resolve_in(&AgentHostConfig::default(), "openclaw").unwrap().one_shot_args("b").unwrap(),
+            hermes.one_shot_args("do x").unwrap(),
+            vec!["chat", "--oneshot", "-q", "do x"]
+        );
+        assert_eq!(
+            resolve_in(&AgentHostConfig::default(), "openclaw")
+                .unwrap()
+                .one_shot_args("b")
+                .unwrap(),
             vec!["agent", "--local", "--message", "b"]
         );
-        assert!(resolve_in(&AgentHostConfig::default(), "claude-code").unwrap().one_shot_args("b").is_none());
-        let cfg = cfg_with_profile("  my-hermes:\n    base: hermes\n    one_shot_args: [\"run\", \"--once\", \"{brief}\"]\n");
-        assert_eq!(resolve_in(&cfg, "my-hermes").unwrap().one_shot_args("q").unwrap(), vec!["run", "--once", "q"]);
+        assert!(
+            resolve_in(&AgentHostConfig::default(), "claude-code")
+                .unwrap()
+                .one_shot_args("b")
+                .is_none()
+        );
+        let cfg = cfg_with_profile(
+            "  my-hermes:\n    base: hermes\n    one_shot_args: [\"run\", \"--once\", \"{brief}\"]\n",
+        );
+        assert_eq!(
+            resolve_in(&cfg, "my-hermes")
+                .unwrap()
+                .one_shot_args("q")
+                .unwrap(),
+            vec!["run", "--once", "q"]
+        );
     }
 
     #[test]

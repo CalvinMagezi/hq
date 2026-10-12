@@ -51,8 +51,7 @@ pub fn chat_session_config(config: &hq_core::config::HqConfig) -> SessionConfig 
 }
 
 const CODER_ROW: &str = "| Document creation / drafting | coder | code | Writing/editing files |";
-const ORCHESTRATOR_CODER_ROW: &str =
-    "| Drafting text for notes and documents | coder | code | Returns the draft; you save it with `vault_write_note` |";
+const ORCHESTRATOR_CODER_ROW: &str = "| Drafting text for notes and documents | coder | code | Returns the draft; you save it with `vault_write_note` |";
 const ORCHESTRATOR_CODE_WORK_RULE: &str = "- Children read and report; they cannot write files. Code and repository changes are never yours or a child's: start a coding session with \
      `harness_session_spawn` (task_id, goal, done criteria), then watch and steer it.\n";
 
@@ -69,11 +68,10 @@ pub fn chat_harness_instructions_for(cwd: &Path, role: crate::builder::SessionRo
     if role != crate::builder::SessionRole::Orchestrator {
         return text;
     }
-    text.replace(CODER_ROW, ORCHESTRATOR_CODER_ROW)
-        .replace(
-            "## Orchestration rules\n",
-            &format!("## Orchestration rules\n{ORCHESTRATOR_CODE_WORK_RULE}"),
-        )
+    text.replace(CODER_ROW, ORCHESTRATOR_CODER_ROW).replace(
+        "## Orchestration rules\n",
+        &format!("## Orchestration rules\n{ORCHESTRATOR_CODE_WORK_RULE}"),
+    )
 }
 
 /// Harness instructions for the HQ chat orchestrator.

@@ -154,8 +154,19 @@ mod tests {
     #[tokio::test]
     async fn confident_promo_is_suppressed_and_the_log_names_it() {
         let dir = tempfile::tempdir().unwrap();
-        let d = decisions(DecisionMode::Enforce, Some((0.09, "promo_newsletter")), dir.path());
-        assert!(suppress_fyi(d.as_ref(), "Glovo <no-reply@glovo.com>", "Top Sellers: PROMO").await);
+        let d = decisions(
+            DecisionMode::Enforce,
+            Some((0.09, "promo_newsletter")),
+            dir.path(),
+        );
+        assert!(
+            suppress_fyi(
+                d.as_ref(),
+                "Glovo <no-reply@glovo.com>",
+                "Top Sellers: PROMO"
+            )
+            .await
+        );
         let line = log(dir.path());
         assert!(line.contains("\"action\":\"suppressed\""));
         assert!(line.contains("Glovo"));
@@ -165,12 +176,31 @@ mod tests {
     #[tokio::test]
     async fn people_accounts_and_worthwhile_mail_are_forwarded() {
         let dir = tempfile::tempdir().unwrap();
-        let human = decisions(DecisionMode::Enforce, Some((0.05, "personal_human")), dir.path());
+        let human = decisions(
+            DecisionMode::Enforce,
+            Some((0.05, "personal_human")),
+            dir.path(),
+        );
         assert!(!suppress_fyi(human.as_ref(), "A Person", "hi").await);
-        let account = decisions(DecisionMode::Enforce, Some((0.1, "account_or_security")), dir.path());
+        let account = decisions(
+            DecisionMode::Enforce,
+            Some((0.1, "account_or_security")),
+            dir.path(),
+        );
         assert!(!suppress_fyi(account.as_ref(), "Bank", "New sign-in").await);
-        let worthwhile = decisions(DecisionMode::Enforce, Some((0.84, "work_or_admin")), dir.path());
-        assert!(!suppress_fyi(worthwhile.as_ref(), "", "Withholding Tax Credit Certificate").await);
+        let worthwhile = decisions(
+            DecisionMode::Enforce,
+            Some((0.84, "work_or_admin")),
+            dir.path(),
+        );
+        assert!(
+            !suppress_fyi(
+                worthwhile.as_ref(),
+                "",
+                "Withholding Tax Credit Certificate"
+            )
+            .await
+        );
         assert!(log(dir.path()).contains("\"action\":\"forwarded\""));
     }
 
@@ -180,14 +210,22 @@ mod tests {
         assert!(!suppress_fyi(None, "x", "y").await);
         let failing = decisions(DecisionMode::Enforce, None, dir.path());
         assert!(!suppress_fyi(failing.as_ref(), "x", "y").await);
-        let shadow = decisions(DecisionMode::Shadow, Some((0.0, "promo_newsletter")), dir.path());
+        let shadow = decisions(
+            DecisionMode::Shadow,
+            Some((0.0, "promo_newsletter")),
+            dir.path(),
+        );
         assert!(!suppress_fyi(shadow.as_ref(), "x", "y").await);
     }
 
     #[tokio::test]
     async fn secrets_in_the_subject_are_redacted_before_logging() {
         let dir = tempfile::tempdir().unwrap();
-        let d = decisions(DecisionMode::Enforce, Some((0.02, "promo_newsletter")), dir.path());
+        let d = decisions(
+            DecisionMode::Enforce,
+            Some((0.02, "promo_newsletter")),
+            dir.path(),
+        );
         assert!(suppress_fyi(d.as_ref(), "x", "key sk-abcdefghijklmnopqrstuvwx").await);
         assert!(!log(dir.path()).contains("sk-abcdefghijklmnopqrstuvwx"));
     }

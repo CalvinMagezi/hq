@@ -40,7 +40,14 @@ pub fn authorize_chat(
     is_private: bool,
     text: &str,
 ) -> ChatGate {
-    authorize_chat_at(vault_path, relay, chat_id, is_private, text, pairing::now_secs())
+    authorize_chat_at(
+        vault_path,
+        relay,
+        chat_id,
+        is_private,
+        text,
+        pairing::now_secs(),
+    )
 }
 
 /// Whether a button tap from `user_id` may change state: only the owner.
@@ -59,7 +66,11 @@ fn authorize_chat_at(
     let is_allowed = relay.telegram_allowed_chat_ids.contains(&chat_id);
     match owner_chat_id(vault_path, relay) {
         Some(owner) if owner != chat_id && !is_allowed => {
-            tracing::warn!(chat_id, authorized = owner, "telegram: rejecting message from unauthorized chat");
+            tracing::warn!(
+                chat_id,
+                authorized = owner,
+                "telegram: rejecting message from unauthorized chat"
+            );
             ChatGate::Drop
         }
         None if !is_allowed => try_pair(vault_path, chat_id, is_private, text, now),
@@ -69,12 +80,14 @@ fn authorize_chat_at(
 
 fn try_pair(vault_path: &Path, chat_id: i64, is_private: bool, text: &str, now: i64) -> ChatGate {
     if !is_private {
-        tracing::warn!(chat_id, "telegram: ignoring message from a group while no owner is configured; pair from a private chat");
+        tracing::warn!(
+            chat_id,
+            "telegram: ignoring message from a group while no owner is configured; pair from a private chat"
+        );
         return ChatGate::Drop;
     }
-    let redeemed = pairing::parse_pair_command(text).map(|code| {
-        pairing::redeem_pairing_code(vault_path, PairPlatform::Telegram, code, now)
-    });
+    let redeemed = pairing::parse_pair_command(text)
+        .map(|code| pairing::redeem_pairing_code(vault_path, PairPlatform::Telegram, code, now));
     if !matches!(redeemed, Some(Ok(()))) {
         tracing::warn!(
             chat_id,
@@ -260,7 +273,10 @@ mod tests {
         let relay = RelayConfig::default();
         let code = pairing::create_pairing_code(v.path(), PairPlatform::Telegram, 0).unwrap();
         let cmd = format!("/pair {code}");
-        assert_eq!(authorize_chat_at(v.path(), &relay, -100, false, &cmd, 1), ChatGate::Drop);
+        assert_eq!(
+            authorize_chat_at(v.path(), &relay, -100, false, &cmd, 1),
+            ChatGate::Drop
+        );
         assert_eq!(owner_chat_id(v.path(), &relay), None);
         assert_eq!(gate(v.path(), &relay, 7, &cmd, 2), ChatGate::Paired);
     }
@@ -276,7 +292,11 @@ mod tests {
         assert!(callback_sender_allowed(v.path(), &relay, 1));
         assert!(!callback_sender_allowed(v.path(), &relay, 2));
         assert!(!callback_sender_allowed(v.path(), &relay, 3));
-        assert!(!callback_sender_allowed(v.path(), &RelayConfig::default(), 1));
+        assert!(!callback_sender_allowed(
+            v.path(),
+            &RelayConfig::default(),
+            1
+        ));
     }
 
     #[test]
@@ -284,7 +304,10 @@ mod tests {
         let v = vault();
         let relay = RelayConfig::default();
         assert_eq!(gate(v.path(), &relay, 5, "hello", 0), ChatGate::Drop);
-        assert_eq!(gate(v.path(), &relay, 5, "/pair ABCDE-FGHJK", 0), ChatGate::Drop);
+        assert_eq!(
+            gate(v.path(), &relay, 5, "/pair ABCDE-FGHJK", 0),
+            ChatGate::Drop
+        );
         assert!(!v.path().join("_system/.telegram-auth-chat").exists());
         assert_eq!(owner_chat_id(v.path(), &relay), None);
     }
@@ -307,9 +330,15 @@ mod tests {
         let v = vault();
         let relay = RelayConfig::default();
         let code = pairing::create_pairing_code(v.path(), PairPlatform::Telegram, 0).unwrap();
-        assert_eq!(gate(v.path(), &relay, 7, "/pair WRONG-WRONG", 1), ChatGate::Drop);
+        assert_eq!(
+            gate(v.path(), &relay, 7, "/pair WRONG-WRONG", 1),
+            ChatGate::Drop
+        );
         let late = pairing::PAIRING_TTL_SECS + 1;
-        assert_eq!(gate(v.path(), &relay, 7, &format!("/pair {code}"), late), ChatGate::Drop);
+        assert_eq!(
+            gate(v.path(), &relay, 7, &format!("/pair {code}"), late),
+            ChatGate::Drop
+        );
         assert_eq!(owner_chat_id(v.path(), &relay), None);
     }
 
@@ -321,7 +350,10 @@ mod tests {
             ..Default::default()
         };
         let code = pairing::create_pairing_code(v.path(), PairPlatform::Telegram, 0).unwrap();
-        assert_eq!(gate(v.path(), &relay, 9, &format!("/pair {code}"), 1), ChatGate::Drop);
+        assert_eq!(
+            gate(v.path(), &relay, 9, &format!("/pair {code}"), 1),
+            ChatGate::Drop
+        );
         assert_eq!(gate(v.path(), &relay, 1, "hi", 1), ChatGate::Proceed);
     }
 

@@ -616,7 +616,10 @@ backends:
             Some("https://openrouter.ai/api/v1")
         );
         assert!(cfg.backend("copilot").unwrap().enabled); // default_true
-        assert_eq!(cfg.backend("copilot").unwrap().wire, WireApi::ChatCompletions);
+        assert_eq!(
+            cfg.backend("copilot").unwrap().wire,
+            WireApi::ChatCompletions
+        );
         assert!(cfg.validate().is_ok());
     }
 

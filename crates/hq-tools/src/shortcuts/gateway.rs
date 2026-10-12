@@ -178,14 +178,11 @@ mod tests {
     /// dispatch(), so the two tables cannot drift apart.
     #[test]
     fn all_aliases_canonicals_are_dispatchable() {
-        let known_canonicals: std::collections::HashSet<&str> = [
-            "vault_find",
-            "vault_note",
-            "vault_log",
-        ]
-        .iter()
-        .copied()
-        .collect();
+        let known_canonicals: std::collections::HashSet<&str> =
+            ["vault_find", "vault_note", "vault_log"]
+                .iter()
+                .copied()
+                .collect();
 
         for (_key, canonical) in ALIASES {
             assert!(

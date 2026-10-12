@@ -1,7 +1,7 @@
-use anyhow::Result;
-use hq_core::config::HqConfig;
 use crate::render as ansi;
 use crate::render::Theme;
+use anyhow::Result;
+use hq_core::config::HqConfig;
 use hq_vault::VaultClient;
 #[cfg(unix)]
 use std::process::Command;

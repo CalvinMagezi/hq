@@ -637,7 +637,10 @@ async fn a_background_run_gets_the_owners_per_run_ceiling_unless_it_has_a_lower_
     config.budgets.background_run_usd = Some(CEILING);
 
     let session = super::provider::resolve_session_config(&config, None).await;
-    assert_eq!(session.max_budget_usd.map(|c| c.min(CEILING)), Some(session.max_budget_usd.unwrap()));
+    assert_eq!(
+        session.max_budget_usd.map(|c| c.min(CEILING)),
+        Some(session.max_budget_usd.unwrap())
+    );
     assert!(session.max_budget_usd.unwrap() <= CEILING);
 
     let live = crate::session::SessionConfig {

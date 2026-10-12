@@ -4,7 +4,9 @@ use anyhow::Result;
 use chrono::{DateTime, TimeZone, Utc};
 use hq_core::config::{BudgetPeriod, BudgetScope, BudgetsConfig};
 use hq_db::Database;
-use hq_db::usage_ledger::{GroupBy, UsageRow, period_bounds, scope_spend, spend_by_hour, top_drivers};
+use hq_db::usage_ledger::{
+    GroupBy, UsageRow, period_bounds, scope_spend, spend_by_hour, top_drivers,
+};
 use hq_llm::forecast::{Forecast, SpendEvent, forecast};
 use serde::Serialize;
 
@@ -65,7 +67,11 @@ pub struct Drivers {
 fn drivers_of(rows: Vec<UsageRow>) -> Vec<Driver> {
     rows.into_iter()
         .map(|r| Driver {
-            avg_input_tokens: if r.calls > 0 { r.input_tokens as f64 / r.calls as f64 } else { 0.0 },
+            avg_input_tokens: if r.calls > 0 {
+                r.input_tokens as f64 / r.calls as f64
+            } else {
+                0.0
+            },
             cache_hit_rate: r.cache_hit_rate(),
             name: r.key,
             usd: r.cost_usd,
@@ -106,7 +112,13 @@ pub fn forecast_report(db: &Database, budgets: &BudgetsConfig, now: i64) -> Resu
         .filter(|b| b.scope == BudgetScope::Global && b.period == BudgetPeriod::Month)
         .map(|b| b.limit_usd)
         .min_by(f64::total_cmp);
-    let month = forecast_scope(db, &BudgetScope::Global, BudgetPeriod::Month, month_limit, now)?;
+    let month = forecast_scope(
+        db,
+        &BudgetScope::Global,
+        BudgetPeriod::Month,
+        month_limit,
+        now,
+    )?;
     let per_budget = enforceable
         .into_iter()
         .map(|b| {
@@ -137,14 +149,22 @@ pub fn budget_note(db: &Database, budgets: &BudgetsConfig, now: i64) -> Option<S
     let tightest = budgets
         .enforceable()
         .into_iter()
-        .filter_map(|b| db.with_conn(|c| hq_db::usage_ledger::budget_status(c, b, now)).ok())
+        .filter_map(|b| {
+            db.with_conn(|c| hq_db::usage_ledger::budget_status(c, b, now))
+                .ok()
+        })
         .filter(|s| s.pct >= GUIDANCE_PCT)
         .max_by(|a, b| a.pct.total_cmp(&b.pct))?;
     let days = (tightest.resets_at - now) as f64 / SECS_PER_DAY_F;
     Some(format!(
         "\n\nBudget note: '{}' ({}) is at {:.0}% (${:.2} of ${:.2}) and resets in {:.0} days. Prefer cheaper \
          models for delegated sub-tasks, do not re-read what is already in context, and stop once the goal is met.",
-        tightest.name, tightest.scope, tightest.pct, tightest.spent_usd, tightest.limit_usd, days.max(0.0)
+        tightest.name,
+        tightest.scope,
+        tightest.pct,
+        tightest.spent_usd,
+        tightest.limit_usd,
+        days.max(0.0)
     ))
 }
 
@@ -175,7 +195,11 @@ mod tests {
         )
         .unwrap();
         let report = forecast_report(&db, &cfg, NOW).unwrap();
-        assert!((report.month.rate_per_hour.unwrap() - 0.5).abs() < 0.05, "{:?}", report.month.rate_per_hour);
+        assert!(
+            (report.month.rate_per_hour.unwrap() - 0.5).abs() < 0.05,
+            "{:?}",
+            report.month.rate_per_hour
+        );
         assert!(report.month.exhausts_before_reset);
         assert_eq!(report.budgets[0].budget, "month");
         assert_eq!(report.month.limit_usd, Some(40.0));
@@ -188,7 +212,10 @@ mod tests {
         spend(&db, NOW - 120, "pricey", "chat", 5.0);
         spend(&db, NOW - 180, "pricey", "chat", 3.0);
         let d = drivers(&db, NOW).unwrap();
-        assert_eq!((d.models[0].name.as_str(), d.models[0].calls), ("pricey", 2));
+        assert_eq!(
+            (d.models[0].name.as_str(), d.models[0].calls),
+            ("pricey", 2)
+        );
         assert_eq!(d.origins[0].name, "chat");
         assert!((d.origins[0].usd - 8.0).abs() < 1e-9);
     }

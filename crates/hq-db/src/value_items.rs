@@ -178,7 +178,9 @@ pub fn record_engagement_by_token(db: &Database, token: &str, outcome: &str) -> 
 /// Ids matching `pattern` whose state is in `states` (a pre-quoted list body).
 fn matching_ids(c: &rusqlite::Connection, pattern: &str, states: &str) -> Result<Vec<String>> {
     // `states` is only ever one of this file's own literals.
-    let sql = format!("SELECT id FROM value_items WHERE id LIKE ?1 ESCAPE '\\' AND state IN ('{states}')");
+    let sql = format!(
+        "SELECT id FROM value_items WHERE id LIKE ?1 ESCAPE '\\' AND state IN ('{states}')"
+    );
     let mut stmt = c.prepare(&sql)?;
     let ids = stmt
         .query_map(params![pattern], |r| r.get::<_, String>(0))?
@@ -194,8 +196,14 @@ fn sign_approvals(c: &rusqlite::Connection, ids: &[String]) {
         return;
     };
     for id in ids {
-        let mac = hq_core::approval_key::hmac_hex(&key, &hq_core::approval_key::value_approval_message(id));
-        let _ = c.execute("UPDATE value_items SET engagement_mac = ?2 WHERE id = ?1", params![id, mac]);
+        let mac = hq_core::approval_key::hmac_hex(
+            &key,
+            &hq_core::approval_key::value_approval_message(id),
+        );
+        let _ = c.execute(
+            "UPDATE value_items SET engagement_mac = ?2 WHERE id = ?1",
+            params![id, mac],
+        );
     }
 }
 
@@ -293,9 +301,10 @@ pub fn list_filtered(
         } else {
             format!("WHERE {}", clauses.join(" AND "))
         };
-        let sql =
-            format!("SELECT {COLS} FROM value_items {where_clause} ORDER BY created_at DESC LIMIT ?{}",
-                clauses.len() + 1);
+        let sql = format!(
+            "SELECT {COLS} FROM value_items {where_clause} ORDER BY created_at DESC LIMIT ?{}",
+            clauses.len() + 1
+        );
         let mut stmt = c.prepare(&sql)?;
         let rows = match (state, kind) {
             (Some(s), Some(k)) => stmt
@@ -336,7 +345,9 @@ pub fn count_by_state(db: &Database) -> Result<Vec<(String, i64)>> {
 /// from an unauthenticated web API route (`hq-web`'s notifications endpoint),
 /// which is the more exposed caller.
 fn escape_like(s: &str) -> String {
-    s.replace('\\', "\\\\").replace('%', "\\%").replace('_', "\\_")
+    s.replace('\\', "\\\\")
+        .replace('%', "\\%")
+        .replace('_', "\\_")
 }
 
 /// Minimum id-prefix length accepted by `dismiss_by_id`. IDs are UUIDs; this
@@ -371,7 +382,11 @@ pub fn dismiss_by_id(db: &Database, id_or_token: &str) -> Result<bool> {
 /// dismissing is a one-way transition out of the active set, never a way to
 /// re-terminalize an already-engaged/dismissed/expired row (that would
 /// destroy the engagement ledger). Returns rows affected.
-pub fn dismiss_all(db: &Database, kind: Option<ValueKind>, state: Option<ValueState>) -> Result<usize> {
+pub fn dismiss_all(
+    db: &Database,
+    kind: Option<ValueKind>,
+    state: Option<ValueState>,
+) -> Result<usize> {
     db.with_conn(|c| {
         let now = ts(&Utc::now());
         let n = match (state, kind) {
@@ -446,24 +461,39 @@ mod tests {
         emit(&db, &item).unwrap();
         assert!(!is_signed_approval(&db, "sg").unwrap());
         db.with_conn(|c| {
-            c.execute("UPDATE value_items SET state='engaged', engagement='approved' WHERE id=?1", params![id])?;
+            c.execute(
+                "UPDATE value_items SET state='engaged', engagement='approved' WHERE id=?1",
+                params![id],
+            )?;
             Ok(())
         })
         .unwrap();
-        assert!(!is_signed_approval(&db, "sg").unwrap(), "a hand-edited row has no signature");
+        assert!(
+            !is_signed_approval(&db, "sg").unwrap(),
+            "a hand-edited row has no signature"
+        );
         db.with_conn(|c| {
-            c.execute("UPDATE value_items SET state='delivered', engagement=NULL WHERE id=?1", params![id])?;
+            c.execute(
+                "UPDATE value_items SET state='delivered', engagement=NULL WHERE id=?1",
+                params![id],
+            )?;
             Ok(())
         })
         .unwrap();
         assert!(approve_by_id(&db, &id).unwrap());
         assert!(is_signed_approval(&db, "sg").unwrap());
         db.with_conn(|c| {
-            c.execute("UPDATE value_items SET engagement_mac='00' WHERE id=?1", params![id])?;
+            c.execute(
+                "UPDATE value_items SET engagement_mac='00' WHERE id=?1",
+                params![id],
+            )?;
             Ok(())
         })
         .unwrap();
-        assert!(!is_signed_approval(&db, "sg").unwrap(), "a wrong signature is refused");
+        assert!(
+            !is_signed_approval(&db, "sg").unwrap(),
+            "a wrong signature is refused"
+        );
     }
 
     #[test]
@@ -472,11 +502,23 @@ mod tests {
         let item = ValueItem::new("t", ValueKind::ActionNeeded, "a", "b").with_dedup_key("ap");
         let id = item.id.clone();
         emit(&db, &item).unwrap();
-        assert_eq!(latest_state_by_dedup(&db, "ap").unwrap(), Some(ValueState::Pending));
-        assert!(approve_by_id(&db, "ab").is_err(), "short prefix must not match everything");
+        assert_eq!(
+            latest_state_by_dedup(&db, "ap").unwrap(),
+            Some(ValueState::Pending)
+        );
+        assert!(
+            approve_by_id(&db, "ab").is_err(),
+            "short prefix must not match everything"
+        );
         assert!(approve_by_id(&db, &id).unwrap());
-        assert_eq!(latest_state_by_dedup(&db, "ap").unwrap(), Some(ValueState::Engaged));
-        assert!(!approve_by_id(&db, &id).unwrap(), "an engaged item cannot be approved again");
+        assert_eq!(
+            latest_state_by_dedup(&db, "ap").unwrap(),
+            Some(ValueState::Engaged)
+        );
+        assert!(
+            !approve_by_id(&db, &id).unwrap(),
+            "an engaged item cannot be approved again"
+        );
         assert_eq!(latest_state_by_dedup(&db, "never-emitted").unwrap(), None);
     }
 
@@ -494,7 +536,10 @@ mod tests {
         emit(&db, &again).unwrap();
 
         assert_eq!(list_by_state(&db, ValueState::Pending).unwrap().len(), 0);
-        assert_eq!(count_by_state(&db).unwrap(), vec![("dismissed".to_string(), 1)]);
+        assert_eq!(
+            count_by_state(&db).unwrap(),
+            vec![("dismissed".to_string(), 1)]
+        );
     }
 
     #[test]

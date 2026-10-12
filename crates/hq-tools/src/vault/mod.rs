@@ -164,7 +164,9 @@ pub fn create_vault_tools(
         tools.push(Box::new(VaultSearchTool::new(db.clone())));
         tools.push(Box::new(VaultFindSimilarTool::new(db.clone())));
         tools.push(Box::new(VaultTagsTool::new(db.clone())));
-        tools.push(Box::new(MemoryEntityGraphTool::new(db.clone()).with_vault(vault.clone())));
+        tools.push(Box::new(
+            MemoryEntityGraphTool::new(db.clone()).with_vault(vault.clone()),
+        ));
         tools.push(Box::new(VaultReindexTool::new(
             db,
             vault.vault_path().to_path_buf(),
@@ -364,10 +366,21 @@ mod private_folder_tests {
 
     #[test]
     fn private_folders_are_recognised_however_they_are_spelled() {
-        for p in ["_system/SOUL.md", "./_system/SOUL.md", "_System/x.md", "_threads/a.md", "_data/b.md", "./././_data/c.md"] {
+        for p in [
+            "_system/SOUL.md",
+            "./_system/SOUL.md",
+            "_System/x.md",
+            "_threads/a.md",
+            "_data/b.md",
+            "./././_data/c.md",
+        ] {
             assert!(names_private_folder(p), "{p}");
         }
-        for p in ["Notebooks/_system/x.md", "Notebooks/Projects/a.md", "system/a.md"] {
+        for p in [
+            "Notebooks/_system/x.md",
+            "Notebooks/Projects/a.md",
+            "system/a.md",
+        ] {
             assert!(!names_private_folder(p), "{p}");
         }
     }

@@ -32,17 +32,27 @@ fn items_of(args: &Value, field: &str) -> Result<Vec<Value>> {
         bail!("{field} must be a list");
     };
     if items.is_empty() || items.len() > MAX_BULK_ITEMS {
-        bail!("{field} must have between 1 and {MAX_BULK_ITEMS} items, got {}", items.len());
+        bail!(
+            "{field} must have between 1 and {MAX_BULK_ITEMS} items, got {}",
+            items.len()
+        );
     }
     Ok(items.to_vec())
 }
 
 /// One item's arguments: its own fields, then the call's `defaults` and the call's own lease and
 /// names where the item set none. The attested session is taken only from the call itself.
-fn prepare(args: &Value, defaults: &Map<String, Value>, item: &Map<String, Value>) -> Map<String, Value> {
+fn prepare(
+    args: &Value,
+    defaults: &Map<String, Value>,
+    item: &Map<String, Value>,
+) -> Map<String, Value> {
     let mut spec = item.clone();
     spec.retain(|field, _| !ATTESTED.contains(&field.as_str()));
-    for (field, value) in defaults.iter().filter(|(field, _)| !ATTESTED.contains(&field.as_str())) {
+    for (field, value) in defaults
+        .iter()
+        .filter(|(field, _)| !ATTESTED.contains(&field.as_str()))
+    {
         spec.entry(field.clone()).or_insert_with(|| value.clone());
     }
     for key in INHERITED {
@@ -63,10 +73,9 @@ fn resolve_refs(spec: &mut Map<String, Value>, made: &HashMap<String, String>) -
     let resolve = |text: &str| -> Result<String> {
         match text.strip_prefix(KEY_REF_PREFIX) {
             None => Ok(text.to_string()),
-            Some(key) => made
-                .get(key)
-                .cloned()
-                .ok_or_else(|| anyhow::anyhow!("'@{key}' does not name an earlier item that was created")),
+            Some(key) => made.get(key).cloned().ok_or_else(|| {
+                anyhow::anyhow!("'@{key}' does not name an earlier item that was created")
+            }),
         }
     };
     if let Some(Value::String(parent)) = spec.get("parent_id") {
@@ -81,7 +90,10 @@ fn resolve_refs(spec: &mut Map<String, Value>, made: &HashMap<String, String>) -
         }
     }
     if let Some(Value::Array(links)) = spec.get_mut("links") {
-        for link in links.iter_mut().filter(|l| l.get("kind") == Some(&json!("task"))) {
+        for link in links
+            .iter_mut()
+            .filter(|l| l.get("kind") == Some(&json!("task")))
+        {
             if let Some(text) = link.get("ref").and_then(Value::as_str) {
                 link["ref"] = json!(resolve(text)?);
             }
@@ -124,8 +136,15 @@ impl HqTool for TaskCreateManyTool {
     }
     async fn execute(&self, args: Value) -> Result<Value> {
         let items = items_of(&args, "tasks")?;
-        let defaults = args.get("defaults").and_then(Value::as_object).cloned().unwrap_or_default();
-        let prefix = args.get("external_prefix").and_then(Value::as_str).filter(|p| !p.trim().is_empty());
+        let defaults = args
+            .get("defaults")
+            .and_then(Value::as_object)
+            .cloned()
+            .unwrap_or_default();
+        let prefix = args
+            .get("external_prefix")
+            .and_then(Value::as_str)
+            .filter(|p| !p.trim().is_empty());
         // Taken now, before the items run, so the hint reaches this reply and not one inner call's.
         let hint = onboarding_hint(&args);
         let mut made: HashMap<String, String> = HashMap::new();
@@ -133,11 +152,15 @@ impl HqTool for TaskCreateManyTool {
         let mut results = Vec::new();
         for (index, item) in items.iter().enumerate() {
             let Some(item) = item.as_object() else {
-                results.push(json!({ "index": index, "ok": false, "error": "each task must be an object" }));
+                results.push(
+                    json!({ "index": index, "ok": false, "error": "each task must be an object" }),
+                );
                 continue;
             };
             let mut spec = prepare(&args, &defaults, item);
-            let key = spec.remove("key").and_then(|k| k.as_str().map(str::to_string));
+            let key = spec
+                .remove("key")
+                .and_then(|k| k.as_str().map(str::to_string));
             if let Some(key) = &key
                 && !keys_seen.insert(key.clone())
             {
@@ -145,9 +168,19 @@ impl HqTool for TaskCreateManyTool {
                 continue;
             }
             if let (Some(prefix), false) = (prefix, spec.contains_key("external_id")) {
-                spec.insert("external_id".into(), json!(format!("{prefix}-{}", key.clone().unwrap_or_else(|| index.to_string()))));
+                spec.insert(
+                    "external_id".into(),
+                    json!(format!(
+                        "{prefix}-{}",
+                        key.clone().unwrap_or_else(|| index.to_string())
+                    )),
+                );
             }
-            let wanted_title = spec.get("title").and_then(Value::as_str).unwrap_or_default().to_string();
+            let wanted_title = spec
+                .get("title")
+                .and_then(Value::as_str)
+                .unwrap_or_default()
+                .to_string();
             let outcome = match resolve_refs(&mut spec, &made) {
                 Ok(()) => self.inner.execute(Value::Object(spec)).await,
                 Err(e) => Err(e),
@@ -178,11 +211,14 @@ impl HqTool for TaskCreateManyTool {
                         "deduplicated": task.get("deduplicated").cloned().unwrap_or(json!(false)),
                     }));
                 }
-                Err(e) => results.push(json!({ "index": index, "key": key, "ok": false, "error": e.to_string() })),
+                Err(e) => results.push(
+                    json!({ "index": index, "key": key, "ok": false, "error": e.to_string() }),
+                ),
             }
         }
         let failed = results.iter().filter(|r| r["ok"] == json!(false)).count();
-        let mut out = json!({ "created": results.len() - failed, "failed": failed, "results": results });
+        let mut out =
+            json!({ "created": results.len() - failed, "failed": failed, "results": results });
         if let (Some(hint), Some(obj)) = (hint, out.as_object_mut()) {
             obj.insert("hq_task_protocol".to_string(), hint);
         }
@@ -220,7 +256,11 @@ impl HqTool for TaskUpdateManyTool {
     }
     async fn execute(&self, args: Value) -> Result<Value> {
         let items = items_of(&args, "updates")?;
-        let defaults = args.get("defaults").and_then(Value::as_object).cloned().unwrap_or_default();
+        let defaults = args
+            .get("defaults")
+            .and_then(Value::as_object)
+            .cloned()
+            .unwrap_or_default();
         let hint = onboarding_hint(&args);
         let mut results = Vec::new();
         for (index, item) in items.iter().enumerate() {
@@ -238,11 +278,13 @@ impl HqTool for TaskUpdateManyTool {
                     "status": task["status"],
                     "warnings": task.get("warnings").cloned().unwrap_or(json!([])),
                 })),
-                Err(e) => results.push(json!({ "index": index, "id": id, "ok": false, "error": e.to_string() })),
+                Err(e) => results
+                    .push(json!({ "index": index, "id": id, "ok": false, "error": e.to_string() })),
             }
         }
         let failed = results.iter().filter(|r| r["ok"] == json!(false)).count();
-        let mut out = json!({ "updated": results.len() - failed, "failed": failed, "results": results });
+        let mut out =
+            json!({ "updated": results.len() - failed, "failed": failed, "results": results });
         if let (Some(hint), Some(obj)) = (hint, out.as_object_mut()) {
             obj.insert("hq_task_protocol".to_string(), hint);
         }

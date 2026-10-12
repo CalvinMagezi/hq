@@ -32,7 +32,9 @@ pub struct GateRequest<'a> {
 pub enum Admission {
     Allow,
     /// Run the attempt on this model instead.
-    Downgrade { model: String },
+    Downgrade {
+        model: String,
+    },
     Deny(BudgetBlocked),
 }
 
@@ -96,7 +98,9 @@ pub fn estimate_cost(class: ProviderClass, request: &ChatRequest) -> Option<f64>
         + hq_core::tokens::count_tokens_fast(
             &serde_json::to_string(&request.tools).unwrap_or_else(|_| TOOLS_JSON_FALLBACK.into()),
         );
-    let output_tokens = request.max_tokens.unwrap_or(DEFAULT_OUTPUT_ALLOWANCE_TOKENS);
+    let output_tokens = request
+        .max_tokens
+        .unwrap_or(DEFAULT_OUTPUT_ALLOWANCE_TOKENS);
     Some(
         (input_tokens as f64 * info.input_cost_per_million
             + f64::from(output_tokens) * info.output_cost_per_million)
@@ -134,7 +138,8 @@ mod tests {
             ProviderClass::Metered,
             &request(PRICED, &"word ".repeat(50_000), Some(10)),
         );
-        let big_output = estimate_cost(ProviderClass::Metered, &request(PRICED, "hi", Some(50_000)));
+        let big_output =
+            estimate_cost(ProviderClass::Metered, &request(PRICED, "hi", Some(50_000)));
         assert!(small.unwrap() < big_prompt.unwrap());
         assert!(small.unwrap() < big_output.unwrap());
     }

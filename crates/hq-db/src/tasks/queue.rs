@@ -50,7 +50,14 @@ pub fn next_tasks(conn: &Connection, q: &NextTaskQuery, limit: usize) -> Result<
     let mut stmt = conn.prepare(&sql)?;
     let mut tasks: Vec<Task> = stmt
         .query_map(
-            params![assignee, q.include_unassigned, q.initiative_id, q.tag, q.no_code_work, limit.max(1) as i64],
+            params![
+                assignee,
+                q.include_unassigned,
+                q.initiative_id,
+                q.tag,
+                q.no_code_work,
+                limit.max(1) as i64
+            ],
             row_to_task,
         )?
         .collect::<std::result::Result<_, _>>()?;
@@ -72,7 +79,10 @@ fn code_work_sql(alias: &str) -> String {
 /// a task instead of asking for the next one (`hq stack run`).
 pub fn is_code_work(conn: &Connection, task_id: &str) -> Result<bool> {
     let sql = format!("SELECT {} FROM tasks t WHERE t.id = ?1", code_work_sql("t"));
-    Ok(conn.query_row(&sql, [task_id], |r| r.get::<_, bool>(0)).optional()?.unwrap_or(false))
+    Ok(conn
+        .query_row(&sql, [task_id], |r| r.get::<_, bool>(0))
+        .optional()?
+        .unwrap_or(false))
 }
 
 /// Picks the next task and claims it, in one write, or `None` when there is nothing to start.

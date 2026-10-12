@@ -324,11 +324,13 @@ fn each_agent_has_its_own_rules_and_close_stops_the_listener() {
     assert!(egress.decisions("b").is_empty());
     egress.close("a");
     std::thread::sleep(ACCEPT_POLL * 4);
-    assert!(TcpStream::connect_timeout(
-        &SocketAddr::from((Ipv4Addr::LOCALHOST, a)),
-        Duration::from_millis(500)
-    )
-    .is_err());
+    assert!(
+        TcpStream::connect_timeout(
+            &SocketAddr::from((Ipv4Addr::LOCALHOST, a)),
+            Duration::from_millis(500)
+        )
+        .is_err()
+    );
     assert_eq!(
         egress.decisions("a").len(),
         1,
@@ -344,16 +346,20 @@ fn reopening_replaces_the_earlier_listener() {
     let first = egress.open("a", vec![]).unwrap();
     let second = egress.open("a", vec![]).unwrap();
     std::thread::sleep(ACCEPT_POLL * 4);
-    assert!(TcpStream::connect_timeout(
-        &SocketAddr::from((Ipv4Addr::LOCALHOST, first)),
-        Duration::from_millis(500)
-    )
-    .is_err());
-    assert!(TcpStream::connect_timeout(
-        &SocketAddr::from((Ipv4Addr::LOCALHOST, second)),
-        Duration::from_millis(500)
-    )
-    .is_ok());
+    assert!(
+        TcpStream::connect_timeout(
+            &SocketAddr::from((Ipv4Addr::LOCALHOST, first)),
+            Duration::from_millis(500)
+        )
+        .is_err()
+    );
+    assert!(
+        TcpStream::connect_timeout(
+            &SocketAddr::from((Ipv4Addr::LOCALHOST, second)),
+            Duration::from_millis(500)
+        )
+        .is_ok()
+    );
 }
 
 #[test]

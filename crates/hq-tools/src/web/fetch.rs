@@ -116,7 +116,10 @@ pub(super) const JINA_ENV: &str = "HQ_WEB_FETCH_JINA";
 /// A privacy opt-out, so any plausible "off" spelling disables it.
 pub(super) fn jina_base_from_env() -> &'static str {
     let off = std::env::var(JINA_ENV).is_ok_and(|v| {
-        matches!(v.trim().to_lowercase().as_str(), "" | "0" | "false" | "off" | "no")
+        matches!(
+            v.trim().to_lowercase().as_str(),
+            "" | "0" | "false" | "off" | "no"
+        )
     });
     if off { "" } else { JINA_READER_BASE }
 }

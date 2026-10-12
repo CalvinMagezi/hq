@@ -70,7 +70,12 @@ pub fn append_audit(skills_dir: &Path, entry: &AuditEntry) -> Result<()> {
 
 /// Audit the skill as it now stands: the `_proposed/` copy when held, the live
 /// one otherwise. A deleted skill hashes as empty.
-pub fn audit_live(skills_dir: &Path, name: &str, disposition: Disposition, reason: &str) -> Result<()> {
+pub fn audit_live(
+    skills_dir: &Path,
+    name: &str,
+    disposition: Disposition,
+    reason: &str,
+) -> Result<()> {
     let root = match disposition {
         Disposition::Held => skills_dir.join(PROPOSED_DIR),
         _ => skills_dir.to_path_buf(),
@@ -102,7 +107,11 @@ pub fn archived_versions(skills_dir: &Path, name: &str) -> Vec<(u32, PathBuf)> {
         .flatten()
         .filter_map(|e| {
             let file = e.file_name().to_string_lossy().to_string();
-            let n = file.strip_prefix(ARCHIVE_PREFIX)?.strip_suffix(ARCHIVE_SUFFIX)?.parse().ok()?;
+            let n = file
+                .strip_prefix(ARCHIVE_PREFIX)?
+                .strip_suffix(ARCHIVE_SUFFIX)?
+                .parse()
+                .ok()?;
             Some((n, e.path()))
         })
         .collect();
@@ -118,7 +127,9 @@ pub fn archive_current(skills_dir: &Path, name: &str) -> Result<Option<PathBuf>>
     if !live.exists() {
         return Ok(None);
     }
-    let next = archived_versions(skills_dir, name).last().map_or(1, |(n, _)| n + 1);
+    let next = archived_versions(skills_dir, name)
+        .last()
+        .map_or(1, |(n, _)| n + 1);
     let dir = skills_dir.join(name).join(ARCHIVE_DIR);
     std::fs::create_dir_all(&dir)?;
     let dest = dir.join(format!("{ARCHIVE_PREFIX}{next}{ARCHIVE_SUFFIX}"));
@@ -151,7 +162,10 @@ pub fn keep_if_valid(skills_dir: &Path, name: &str, archived: Option<PathBuf>) -
         return Ok(());
     }
     rollback(skills_dir, name, archived)?;
-    bail!("skill {name:?} failed validation and was reverted: {}", errors.join("; "))
+    bail!(
+        "skill {name:?} failed validation and was reverted: {}",
+        errors.join("; ")
+    )
 }
 
 /// Archive the live skill, then remove everything but its archive.
@@ -181,7 +195,12 @@ pub fn revert_skill(skills_dir: &Path, name: &str) -> Result<PathBuf> {
     archive_current(skills_dir, name)?;
     let live = skills_dir.join(name).join(SKILL_FILE);
     std::fs::rename(&target, &live)?;
-    audit_live(skills_dir, name, Disposition::Reverted, &format!("restored archive v{version}"))?;
+    audit_live(
+        skills_dir,
+        name,
+        Disposition::Reverted,
+        &format!("restored archive v{version}"),
+    )?;
     Ok(live)
 }
 
@@ -192,7 +211,11 @@ mod tests {
     fn write(skills_dir: &Path, name: &str, body: &str) {
         let dir = skills_dir.join(name);
         std::fs::create_dir_all(&dir).unwrap();
-        std::fs::write(dir.join(SKILL_FILE), format!("---\ndescription: \"d\"\n---\n{body}")).unwrap();
+        std::fs::write(
+            dir.join(SKILL_FILE),
+            format!("---\ndescription: \"d\"\n---\n{body}"),
+        )
+        .unwrap();
     }
 
     fn live(skills_dir: &Path, name: &str) -> String {
@@ -205,7 +228,10 @@ mod tests {
         write(dir.path(), "s", "one");
         archive_current(dir.path(), "s").unwrap();
         archive_current(dir.path(), "s").unwrap();
-        let versions: Vec<u32> = archived_versions(dir.path(), "s").into_iter().map(|(n, _)| n).collect();
+        let versions: Vec<u32> = archived_versions(dir.path(), "s")
+            .into_iter()
+            .map(|(n, _)| n)
+            .collect();
         assert_eq!(versions, vec![1, 2]);
         assert!(archive_current(dir.path(), "missing").unwrap().is_none());
     }
@@ -225,7 +251,11 @@ mod tests {
 
         let history = audit_history(dir.path(), "s");
         assert_eq!(history.len(), 2);
-        assert!(history.iter().all(|e| e.disposition == Disposition::Reverted));
+        assert!(
+            history
+                .iter()
+                .all(|e| e.disposition == Disposition::Reverted)
+        );
         assert_eq!(history[0].sha256.len(), 64);
     }
 
@@ -251,8 +281,13 @@ mod tests {
 
         revert_skill(dir.path(), "s").unwrap();
         assert!(live(dir.path(), "s").contains("keep me"));
-        let dispositions: Vec<Disposition> =
-            audit_history(dir.path(), "s").into_iter().map(|e| e.disposition).collect();
-        assert_eq!(dispositions, vec![Disposition::Deleted, Disposition::Reverted]);
+        let dispositions: Vec<Disposition> = audit_history(dir.path(), "s")
+            .into_iter()
+            .map(|e| e.disposition)
+            .collect();
+        assert_eq!(
+            dispositions,
+            vec![Disposition::Deleted, Disposition::Reverted]
+        );
     }
 }

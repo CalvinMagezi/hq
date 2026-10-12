@@ -16,10 +16,7 @@ use std::sync::Arc;
 ///
 /// `vault_path` — path to the vault directory.
 /// `db` — open database handle.
-pub fn create_shortcut_tools(
-    vault_path: PathBuf,
-    db: Arc<Database>,
-) -> Vec<Box<dyn HqTool>> {
+pub fn create_shortcut_tools(vault_path: PathBuf, db: Arc<Database>) -> Vec<Box<dyn HqTool>> {
     vec![
         // Vault shortcuts
         Box::new(vault::VaultFindShortcut::new(db.clone())),

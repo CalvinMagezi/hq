@@ -94,7 +94,10 @@ fn start_server() -> Client {
         let _ = running.waiting().await;
     });
     let (reader, writer) = tokio::io::split(client_io);
-    Client { writer, lines: BufReader::new(reader).lines() }
+    Client {
+        writer,
+        lines: BufReader::new(reader).lines(),
+    }
 }
 
 async fn initialized_client() -> (Client, Value) {
@@ -126,14 +129,27 @@ async fn initialize_reports_server_identity_and_tools_capability() {
     let result = &init["result"];
     let keys: Vec<&String> = result.as_object().unwrap().keys().collect();
     assert_eq!(init["jsonrpc"], "2.0");
-    assert_eq!(keys, ["capabilities", "instructions", "protocolVersion", "serverInfo"]);
+    assert_eq!(
+        keys,
+        [
+            "capabilities",
+            "instructions",
+            "protocolVersion",
+            "serverInfo"
+        ]
+    );
     assert_eq!(result["protocolVersion"], PINNED_PROTOCOL_VERSION);
     assert_eq!(
         result["serverInfo"],
         json!({"name": "agent-hq", "version": env!("CARGO_PKG_VERSION")})
     );
     assert_eq!(result["capabilities"], json!({"tools": {}}));
-    assert!(result["instructions"].as_str().unwrap().contains("**echo_tool**"));
+    assert!(
+        result["instructions"]
+            .as_str()
+            .unwrap()
+            .contains("**echo_tool**")
+    );
 }
 
 #[tokio::test]
@@ -152,14 +168,20 @@ async fn tools_list_is_exactly_the_two_gateway_tools() {
     let names: Vec<&str> = tools.iter().map(|t| t["name"].as_str().unwrap()).collect();
     assert_eq!(names, ["hq_discover", "hq_call"]);
     assert_eq!(tools[0]["inputSchema"]["type"], "object");
-    assert!(tools[0]["inputSchema"]["properties"]["category"]["description"]
-        .as_str()
-        .unwrap()
-        .contains("testing"));
+    assert!(
+        tools[0]["inputSchema"]["properties"]["category"]["description"]
+            .as_str()
+            .unwrap()
+            .contains("testing")
+    );
     assert_eq!(tools[1]["inputSchema"]["required"], json!(["tool"]));
     for tool in tools {
         let keys: Vec<&String> = tool.as_object().unwrap().keys().collect();
-        assert_eq!(keys, ["description", "inputSchema", "name"], "unexpected fields on {tool}");
+        assert_eq!(
+            keys,
+            ["description", "inputSchema", "name"],
+            "unexpected fields on {tool}"
+        );
     }
 }
 
@@ -186,20 +208,38 @@ async fn tools_call_runs_the_named_tool_through_hq_call() {
 async fn tools_call_discover_lists_registered_tools() {
     let (mut client, _) = initialized_client().await;
     let reply = client
-        .request(4, "tools/call", json!({"name": "hq_discover", "arguments": {}}))
+        .request(
+            4,
+            "tools/call",
+            json!({"name": "hq_discover", "arguments": {}}),
+        )
         .await;
     assert_eq!(reply["result"]["isError"], false);
-    assert!(reply["result"]["content"][0]["text"].as_str().unwrap().contains("echo_tool"));
+    assert!(
+        reply["result"]["content"][0]["text"]
+            .as_str()
+            .unwrap()
+            .contains("echo_tool")
+    );
 }
 
 #[tokio::test]
 async fn unknown_gateway_tool_is_an_invalid_params_error() {
     let (mut client, _) = initialized_client().await;
     let reply = client
-        .request(5, "tools/call", json!({"name": "vault_read", "arguments": {}}))
+        .request(
+            5,
+            "tools/call",
+            json!({"name": "vault_read", "arguments": {}}),
+        )
         .await;
     assert_eq!(reply["error"]["code"], -32602);
-    assert!(reply["error"]["message"].as_str().unwrap().contains("unknown tool: vault_read"));
+    assert!(
+        reply["error"]["message"]
+            .as_str()
+            .unwrap()
+            .contains("unknown tool: vault_read")
+    );
 }
 
 #[tokio::test]
@@ -213,14 +253,23 @@ async fn unknown_inner_tool_is_an_invalid_params_error() {
         )
         .await;
     assert_eq!(reply["error"]["code"], -32602);
-    assert!(reply["error"]["message"].as_str().unwrap().contains("unknown tool: no_such_tool"));
+    assert!(
+        reply["error"]["message"]
+            .as_str()
+            .unwrap()
+            .contains("unknown tool: no_such_tool")
+    );
 }
 
 #[tokio::test]
 async fn failing_inner_tool_is_a_tool_error_not_a_protocol_error() {
     let (mut client, _) = initialized_client().await;
     let reply = client
-        .request(7, "tools/call", json!({"name": "hq_call", "arguments": {"tool": "fail_tool"}}))
+        .request(
+            7,
+            "tools/call",
+            json!({"name": "hq_call", "arguments": {"tool": "fail_tool"}}),
+        )
         .await;
     let result = &reply["result"];
     let keys: Vec<&String> = result.as_object().unwrap().keys().collect();
@@ -261,19 +310,27 @@ impl HqTool for NamedTool {
 /// A server limited to the tasks scope, the way `hq mcp-serve --scope tasks` builds it.
 async fn tasks_scoped_client() -> Client {
     let mut registry = ToolRegistry::new();
-    for name in ["task_create", "task_delete", "harness_session_spawn", "bash"] {
+    for name in [
+        "task_create",
+        "task_delete",
+        "harness_session_spawn",
+        "bash",
+    ] {
         registry.register(Box::new(NamedTool(name)));
     }
     let db = hq_db::Database::open_memory().unwrap();
-    let server = HqMcpServer::new(Arc::new(registry), db)
-        .with_allowlist(hq_mcp::gateway::TASKS_ALLOWLIST);
+    let server =
+        HqMcpServer::new(Arc::new(registry), db).with_allowlist(hq_mcp::gateway::TASKS_ALLOWLIST);
     let (client_io, server_io) = tokio::io::duplex(PIPE_BUFFER_BYTES);
     tokio::spawn(async move {
         let running = rmcp::serve_server(server, server_io).await.unwrap();
         let _ = running.waiting().await;
     });
     let (reader, writer) = tokio::io::split(client_io);
-    let mut client = Client { writer, lines: BufReader::new(reader).lines() };
+    let mut client = Client {
+        writer,
+        lines: BufReader::new(reader).lines(),
+    };
     client
         .request(
             1,
@@ -296,13 +353,25 @@ async fn a_tasks_scoped_server_runs_task_tools_and_refuses_the_rest() {
     let mut client = tasks_scoped_client().await;
 
     let ok = client
-        .request(2, "tools/call", json!({"name": "hq_call", "arguments": {"tool": "task_create", "args": {}}}))
+        .request(
+            2,
+            "tools/call",
+            json!({"name": "hq_call", "arguments": {"tool": "task_create", "args": {}}}),
+        )
         .await;
     assert_eq!(ok["result"]["isError"], false, "{ok}");
 
-    for (id, tool) in [(3, "task_delete"), (4, "harness_session_spawn"), (5, "bash")] {
+    for (id, tool) in [
+        (3, "task_delete"),
+        (4, "harness_session_spawn"),
+        (5, "bash"),
+    ] {
         let denied = client
-            .request(id, "tools/call", json!({"name": "hq_call", "arguments": {"tool": tool, "args": {}}}))
+            .request(
+                id,
+                "tools/call",
+                json!({"name": "hq_call", "arguments": {"tool": tool, "args": {}}}),
+            )
             .await;
         assert!(
             denied.get("error").is_some() || denied["result"]["isError"] == true,
@@ -311,12 +380,19 @@ async fn a_tasks_scoped_server_runs_task_tools_and_refuses_the_rest() {
     }
 
     let found = client
-        .request(6, "tools/call", json!({"name": "hq_discover", "arguments": {}}))
+        .request(
+            6,
+            "tools/call",
+            json!({"name": "hq_discover", "arguments": {}}),
+        )
         .await;
     let text = found["result"]["content"][0]["text"].as_str().unwrap();
     assert!(text.contains("task_create"), "{text}");
     for hidden in ["task_delete", "harness_session_spawn", "bash"] {
-        assert!(!text.contains(hidden), "discovery must not list {hidden}: {text}");
+        assert!(
+            !text.contains(hidden),
+            "discovery must not list {hidden}: {text}"
+        );
     }
 }
 
@@ -325,15 +401,18 @@ async fn a_scoped_server_sends_instructions_without_the_catalog() {
     let mut registry = ToolRegistry::new();
     registry.register(Box::new(NamedTool("bash")));
     let db = hq_db::Database::open_memory().unwrap();
-    let server = HqMcpServer::new(Arc::new(registry), db)
-        .with_allowlist(hq_mcp::gateway::TASKS_ALLOWLIST);
+    let server =
+        HqMcpServer::new(Arc::new(registry), db).with_allowlist(hq_mcp::gateway::TASKS_ALLOWLIST);
     let (client_io, server_io) = tokio::io::duplex(PIPE_BUFFER_BYTES);
     tokio::spawn(async move {
         let running = rmcp::serve_server(server, server_io).await.unwrap();
         let _ = running.waiting().await;
     });
     let (reader, writer) = tokio::io::split(client_io);
-    let mut client = Client { writer, lines: BufReader::new(reader).lines() };
+    let mut client = Client {
+        writer,
+        lines: BufReader::new(reader).lines(),
+    };
     let init = client
         .request(
             1,

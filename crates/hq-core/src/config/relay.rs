@@ -301,10 +301,7 @@ mod tests {
         assert!(serialized.contains("Bob"));
         assert!(serialized.contains("Carol"));
         let reparsed: RelayConfig = serde_yaml::from_str(&serialized).unwrap();
-        assert_eq!(
-            reparsed.discord_family_channel_id,
-            Some(100200300400500600)
-        );
+        assert_eq!(reparsed.discord_family_channel_id, Some(100200300400500600));
         assert_eq!(reparsed.discord_family_users.len(), 2);
         assert_eq!(reparsed.discord_family_users[0].name, "Bob");
         assert_eq!(reparsed.discord_family_users[1].name, "Carol");

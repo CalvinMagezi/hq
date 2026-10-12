@@ -47,7 +47,9 @@ fn valid_user(user: &str) -> bool {
     !user.is_empty()
         && user.len() <= MAX_USER_LEN
         && !user.starts_with('-')
-        && user.chars().all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '_' | '-'))
+        && user
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '_' | '-'))
 }
 
 /// An address or name ssh can use, and one that cannot be read as an option or
@@ -56,7 +58,9 @@ fn valid_addr(addr: &str) -> bool {
     !addr.is_empty()
         && addr.len() <= MAX_ADDR_LEN
         && !addr.starts_with('-')
-        && addr.chars().all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '-' | ':'))
+        && addr
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '-' | ':'))
 }
 
 pub fn encode_join(join: &Join) -> String {
@@ -69,11 +73,18 @@ pub fn decode_join(code: &str) -> Result<Join> {
     if code.len() > MAX_JOIN_BYTES {
         bail!("that join code is too long");
     }
-    let body = code.strip_prefix(JOIN_PREFIX).context("not a join code (it starts with hqjoin1.)")?;
-    let bytes = URL_SAFE_NO_PAD.decode(body).context("the join code is damaged")?;
+    let body = code
+        .strip_prefix(JOIN_PREFIX)
+        .context("not a join code (it starts with hqjoin1.)")?;
+    let bytes = URL_SAFE_NO_PAD
+        .decode(body)
+        .context("the join code is damaged")?;
     let join: Join = serde_json::from_slice(&bytes).context("the join code is damaged")?;
     if !valid_host_name(&join.name) {
-        bail!("host name {:?} is not allowed: use a lowercase name (letters, digits, - or _), not local or native", join.name);
+        bail!(
+            "host name {:?} is not allowed: use a lowercase name (letters, digits, - or _), not local or native",
+            join.name
+        );
     }
     if !valid_user(&join.user) {
         bail!("user name {:?} is not allowed", join.user);
@@ -86,7 +97,10 @@ pub fn decode_join(code: &str) -> Result<Join> {
 
 /// This machine's tailnet IPv4 address, when tailscale is installed and up.
 pub fn tailscale_ip() -> Option<String> {
-    const CANDIDATES: &[&str] = &["tailscale", "/Applications/Tailscale.app/Contents/MacOS/Tailscale"];
+    const CANDIDATES: &[&str] = &[
+        "tailscale",
+        "/Applications/Tailscale.app/Contents/MacOS/Tailscale",
+    ];
     CANDIDATES.iter().find_map(|bin| {
         let out = Command::new(bin).args(["ip", "-4"]).output().ok()?;
         let text = String::from_utf8(out.stdout).ok()?;
@@ -115,12 +129,24 @@ fn ensure_key(path: &Path, name: &str) -> Result<String> {
     }
     if !path.exists() {
         let out = Command::new("ssh-keygen")
-            .args(["-q", "-t", "ed25519", "-N", "", "-C", &format!("hq-gate-{name}"), "-f"])
+            .args([
+                "-q",
+                "-t",
+                "ed25519",
+                "-N",
+                "",
+                "-C",
+                &format!("hq-gate-{name}"),
+                "-f",
+            ])
             .arg(path)
             .output()
             .context("running ssh-keygen (is OpenSSH installed?)")?;
         if !out.status.success() {
-            bail!("ssh-keygen failed: {}", String::from_utf8_lossy(&out.stderr).trim());
+            bail!(
+                "ssh-keygen failed: {}",
+                String::from_utf8_lossy(&out.stderr).trim()
+            );
         }
     }
     std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o600))?;
@@ -132,10 +158,17 @@ fn ensure_key(path: &Path, name: &str) -> Result<String> {
 
 /// Records the machine as a built-in host in the config at `config_path`, with a
 /// key pair under `ssh_dir`, and returns the command for the machine to run.
-pub fn add_host_at(config_path: &Path, join_code: &str, gateway_addr: &str, ssh_dir: &Path) -> Result<Added> {
+pub fn add_host_at(
+    config_path: &Path,
+    join_code: &str,
+    gateway_addr: &str,
+    ssh_dir: &Path,
+) -> Result<Added> {
     let join = decode_join(join_code)?;
     if !valid_addr(gateway_addr) {
-        bail!("this machine's address {gateway_addr:?} is not usable; pass the tailnet address the host should accept connections from");
+        bail!(
+            "this machine's address {gateway_addr:?} is not usable; pass the tailnet address the host should accept connections from"
+        );
     }
     let identity = ssh_dir.join(format!("hq_gate_{}", join.name));
     let public_key = ensure_key(&identity, &join.name)?;
@@ -163,10 +196,18 @@ pub fn add_host_at(config_path: &Path, join_code: &str, gateway_addr: &str, ssh_
 pub fn add_host(join_code: &str, gateway_addr: Option<&str>) -> Result<Added> {
     let gateway = match gateway_addr {
         Some(addr) => addr.to_string(),
-        None => tailscale_ip().context("could not find this machine's tailnet address; pass it explicitly")?,
+        None => tailscale_ip()
+            .context("could not find this machine's tailnet address; pass it explicitly")?,
     };
-    let home = std::env::var_os("HOME").map(PathBuf::from).context("HOME is not set")?;
-    add_host_at(&HqConfig::config_file_path(), join_code, &gateway, &home.join(".ssh"))
+    let home = std::env::var_os("HOME")
+        .map(PathBuf::from)
+        .context("HOME is not set")?;
+    add_host_at(
+        &HqConfig::config_file_path(),
+        join_code,
+        &gateway,
+        &home.join(".ssh"),
+    )
 }
 
 /// Asks the host `name` for its status and turns a failure into the likely cause.
@@ -179,7 +220,9 @@ pub fn check_host(name: &str) -> serde_json::Value {
         }
     };
     match host.version() {
-        Ok(version) => serde_json::json!({ "host": name, "reachable": true, "host_version": version }),
+        Ok(version) => {
+            serde_json::json!({ "host": name, "reachable": true, "host_version": version })
+        }
         Err(e) => serde_json::json!({
             "host": name,
             "reachable": false,
@@ -203,12 +246,21 @@ fn is_blank_or_comment(line: &str) -> bool {
 /// written (comments, order, unrelated keys, defaults not pinned). None when the
 /// config already holds exactly this entry. An entry for the same name with a
 /// different address or key is replaced.
-pub(crate) fn insert_host(text: &str, name: &str, ssh: &str, identity: &str) -> Result<Option<String>> {
+pub(crate) fn insert_host(
+    text: &str,
+    name: &str,
+    ssh: &str,
+    identity: &str,
+) -> Result<Option<String>> {
     let lines: Vec<&str> = text.lines().collect();
     let entry = |child: usize| -> Vec<String> {
         let pad = " ".repeat(child);
         let inner = " ".repeat(child + 2);
-        vec![format!("{pad}{name}:"), format!("{inner}ssh: \"{ssh}\""), format!("{inner}identity_file: \"{identity}\"")]
+        vec![
+            format!("{pad}{name}:"),
+            format!("{inner}ssh: \"{ssh}\""),
+            format!("{inner}identity_file: \"{identity}\""),
+        ]
     };
     // A config written before the section was renamed gets its heading migrated.
     let top = lines
@@ -234,8 +286,13 @@ pub(crate) fn insert_host(text: &str, name: &str, ssh: &str, identity: &str) -> 
             if rest.chars().next().is_some_and(|c| c != '#') {
                 bail!("`{SECTION}` in the config is written inline; add the host by hand");
             }
-            let end = (h + 1..lines.len()).find(|&i| !lines[i].trim().is_empty() && indent_of(lines[i]) == 0).unwrap_or(lines.len());
-            let hosts = (h + 1..end).find(|&i| lines[i].trim_start().starts_with("hosts:") && !lines[i].trim_start().starts_with('#'));
+            let end = (h + 1..lines.len())
+                .find(|&i| !lines[i].trim().is_empty() && indent_of(lines[i]) == 0)
+                .unwrap_or(lines.len());
+            let hosts = (h + 1..end).find(|&i| {
+                lines[i].trim_start().starts_with("hosts:")
+                    && !lines[i].trim_start().starts_with('#')
+            });
             match hosts {
                 None => {
                     let mut block = vec!["  hosts:".to_string()];
@@ -250,20 +307,33 @@ pub(crate) fn insert_host(text: &str, name: &str, ssh: &str, identity: &str) -> 
                         bail!("`hosts:` in the config is written inline; add the host by hand");
                     }
                     let base = indent_of(lines[hi]);
-                    let block_end = (hi + 1..end).find(|&i| !is_blank_or_comment(lines[i]) && indent_of(lines[i]) <= base).unwrap_or(end);
+                    let block_end = (hi + 1..end)
+                        .find(|&i| !is_blank_or_comment(lines[i]) && indent_of(lines[i]) <= base)
+                        .unwrap_or(end);
                     let child = (hi + 1..block_end)
                         .find(|&i| !is_blank_or_comment(lines[i]))
                         .map_or(base + 2, |i| indent_of(lines[i]));
-                    let own = (hi + 1..block_end).find(|&i| indent_of(lines[i]) == child && lines[i].trim() == format!("{name}:"));
+                    let own = (hi + 1..block_end).find(|&i| {
+                        indent_of(lines[i]) == child && lines[i].trim() == format!("{name}:")
+                    });
                     if let Some(oi) = own {
-                        let own_end = (oi + 1..block_end).find(|&i| !is_blank_or_comment(lines[i]) && indent_of(lines[i]) <= child).unwrap_or(block_end);
+                        let own_end = (oi + 1..block_end)
+                            .find(|&i| {
+                                !is_blank_or_comment(lines[i]) && indent_of(lines[i]) <= child
+                            })
+                            .unwrap_or(block_end);
                         let body = lines[oi + 1..own_end].join("\n");
-                        if body.contains(&format!("ssh: \"{ssh}\"")) && body.contains(&format!("identity_file: \"{identity}\"")) {
+                        if body.contains(&format!("ssh: \"{ssh}\""))
+                            && body.contains(&format!("identity_file: \"{identity}\""))
+                        {
                             return Ok(None);
                         }
                         out.splice(oi..own_end, entry(child));
                     } else {
-                        let last = (hi + 1..block_end).rev().find(|&i| !lines[i].trim().is_empty()).unwrap_or(hi);
+                        let last = (hi + 1..block_end)
+                            .rev()
+                            .find(|&i| !lines[i].trim().is_empty())
+                            .unwrap_or(hi);
                         out.splice(last + 1..last + 1, entry(child));
                     }
                 }
@@ -272,7 +342,8 @@ pub(crate) fn insert_host(text: &str, name: &str, ssh: &str, identity: &str) -> 
     }
     let mut updated = out.join("\n");
     updated.push('\n');
-    let parsed: serde_yaml::Value = serde_yaml::from_str(&updated).context("the edited config is not valid YAML")?;
+    let parsed: serde_yaml::Value =
+        serde_yaml::from_str(&updated).context("the edited config is not valid YAML")?;
     let got = parsed["agent_host"]["hosts"][name]["ssh"].as_str();
     if got != Some(ssh) {
         bail!("could not add the host to the config cleanly; add it by hand");
@@ -288,14 +359,24 @@ fn write_config(path: &Path, before: &str, after: &str) -> Result<()> {
         std::fs::create_dir_all(dir)?;
     }
     if !before.is_empty() {
-        let stamp = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_secs());
-        let backup = path.with_file_name(format!("{}.bak-{stamp}", path.file_name().map_or("config".into(), |n| n.to_string_lossy())));
+        let stamp = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map_or(0, |d| d.as_secs());
+        let backup = path.with_file_name(format!(
+            "{}.bak-{stamp}",
+            path.file_name()
+                .map_or("config".into(), |n| n.to_string_lossy())
+        ));
         std::fs::write(&backup, before)?;
         std::fs::set_permissions(&backup, std::fs::Permissions::from_mode(0o600))?;
     }
     let tmp = path.with_extension("hq-tmp");
     let _ = std::fs::remove_file(&tmp);
-    let mut file = std::fs::OpenOptions::new().write(true).create_new(true).mode(0o600).open(&tmp)?;
+    let mut file = std::fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .mode(0o600)
+        .open(&tmp)?;
     file.write_all(after.as_bytes())?;
     file.sync_all()?;
     std::fs::rename(&tmp, path)?;

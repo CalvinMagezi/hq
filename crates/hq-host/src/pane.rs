@@ -355,7 +355,11 @@ impl Pane {
     /// The command that brings this agent back, if it can be brought back.
     pub(crate) fn resume_argv(&self) -> Option<Vec<String>> {
         let own = self.resume.as_ref()?;
-        Some(lock(&self.resume_argv).clone().unwrap_or_else(|| own.argv.clone()))
+        Some(
+            lock(&self.resume_argv)
+                .clone()
+                .unwrap_or_else(|| own.argv.clone()),
+        )
     }
 
     pub(crate) fn reported(&self) -> Option<Reported> {

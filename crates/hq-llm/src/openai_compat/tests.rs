@@ -706,8 +706,10 @@ async fn a_buffered_response_carries_the_billed_cost_and_reasoning_tokens() {
         })))
         .mount(&server)
         .await;
-    let provider =
-        OpenRouterProvider::new_with_base("k", &format!("{}/proxy/openrouter.ai/api/v1", server.uri()));
+    let provider = OpenRouterProvider::new_with_base(
+        "k",
+        &format!("{}/proxy/openrouter.ai/api/v1", server.uri()),
+    );
     let request = ChatRequest {
         model: "anthropic/claude-haiku-5.5".into(),
         ..Default::default()
@@ -782,7 +784,10 @@ async fn a_non_openrouter_cost_field_is_ignored() {
         ..Default::default()
     };
 
-    assert_eq!(provider.chat(&request).await.unwrap().provider_cost_usd, None);
+    assert_eq!(
+        provider.chat(&request).await.unwrap().provider_cost_usd,
+        None
+    );
 }
 
 /// The quota a provider reports on an ordinary response is remembered, with no extra request.
@@ -816,5 +821,12 @@ async fn a_completion_remembers_the_quota_headers_it_came_with() {
     provider.chat(&request).await.unwrap();
 
     let seen = crate::ratelimit::latest_for(&server.uri()).expect("a reading");
-    assert_eq!((seen.requests_remaining, seen.requests_limit, seen.tokens_remaining), (Some(41), Some(50), Some(9000)));
+    assert_eq!(
+        (
+            seen.requests_remaining,
+            seen.requests_limit,
+            seen.tokens_remaining
+        ),
+        (Some(41), Some(50), Some(9000))
+    );
 }

@@ -143,7 +143,10 @@ async fn a_refused_backend_hands_the_call_to_the_next_one_in_the_chain() {
 
 #[tokio::test]
 async fn when_every_backend_is_refused_the_caller_sees_the_budget_not_a_generic_failure() {
-    let router = chained(Gate::denying(&["primary", "fallback"]), Arc::new(Rows::default()));
+    let router = chained(
+        Gate::denying(&["primary", "fallback"]),
+        Arc::new(Rows::default()),
+    );
 
     let chat_err = router.chat(&request()).await.unwrap_err();
     let stream_err = router.chat_stream(&request()).await.err().unwrap();
@@ -168,7 +171,10 @@ async fn a_refusal_is_not_recorded_as_a_provider_failure() {
     assert!(router.chat(&request()).await.is_err());
 
     tokio::task::yield_now().await;
-    assert!(sink.0.lock().unwrap().is_empty(), "no call was made, so no ledger row");
+    assert!(
+        sink.0.lock().unwrap().is_empty(),
+        "no call was made, so no ledger row"
+    );
     let health = router.health.lock().unwrap();
     let solo = health.iter().find(|(n, _)| n == "solo").unwrap();
     assert_eq!(solo.1.total_failures, 0);
@@ -197,7 +203,10 @@ async fn with_no_gate_nothing_changes() {
     router.add_provider("solo", Arc::new(Answers));
     router.add_route("*", "solo", MODEL, CostTier::Budget);
 
-    assert_eq!(router.chat(&request()).await.unwrap().message.content, MODEL);
+    assert_eq!(
+        router.chat(&request()).await.unwrap().message.content,
+        MODEL
+    );
 }
 
 /// Blocks the original model, downgrades it, then blocks the cheaper one too.

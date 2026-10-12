@@ -84,8 +84,8 @@ pub fn render_markdown(p: &MachineProfile) -> String {
     }
 
     let utils: Vec<&str> = [
-        "gws", "rg", "jq", "fd", "sqlite3", "ffmpeg", "curl", "ollama", "npm", "pnpm",
-        "gcloud", "aws", "vercel", "psql",
+        "gws", "rg", "jq", "fd", "sqlite3", "ffmpeg", "curl", "ollama", "npm", "pnpm", "gcloud",
+        "aws", "vercel", "psql",
     ]
     .into_iter()
     .filter(|n| named(p, n).is_some())

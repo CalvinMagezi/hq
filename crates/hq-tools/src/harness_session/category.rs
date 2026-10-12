@@ -91,8 +91,12 @@ impl Purpose {
     ];
 
     /// The purposes a general-purpose agent may be started for.
-    pub const GENERAL_PURPOSE: [Purpose; 4] =
-        [Purpose::Monitor, Purpose::Research, Purpose::Review, Purpose::General];
+    pub const GENERAL_PURPOSE: [Purpose; 4] = [
+        Purpose::Monitor,
+        Purpose::Research,
+        Purpose::Review,
+        Purpose::General,
+    ];
 
     pub fn as_str(self) -> &'static str {
         match self {
@@ -110,7 +114,11 @@ impl Purpose {
             Some(p) => Ok(*p),
             None => bail!(
                 "unknown purpose '{text}' (one of: {})",
-                Self::ALL.iter().map(|p| p.as_str()).collect::<Vec<_>>().join(", ")
+                Self::ALL
+                    .iter()
+                    .map(|p| p.as_str())
+                    .collect::<Vec<_>>()
+                    .join(", ")
             ),
         }
     }
@@ -165,10 +173,16 @@ mod tests {
 
     #[test]
     fn the_refusal_names_where_code_goes() {
-        let err = HarnessCategory::GeneralPurpose.check("hermes", Purpose::Code).unwrap_err().to_string();
+        let err = HarnessCategory::GeneralPurpose
+            .check("hermes", Purpose::Code)
+            .unwrap_err()
+            .to_string();
         assert!(err.contains("claude-code"), "{err}");
         assert!(err.contains("monitor, research, review, general"), "{err}");
-        assert!(!err.contains("hermes,"), "a general-purpose agent is not offered for code: {err}");
+        assert!(
+            !err.contains("hermes,"),
+            "a general-purpose agent is not offered for code: {err}"
+        );
     }
 
     #[test]
@@ -177,10 +191,18 @@ mod tests {
             assert_eq!(Purpose::parse(p.as_str()).unwrap(), p);
         }
         assert_eq!(Purpose::parse(" Review ").unwrap(), Purpose::Review);
-        assert!(Purpose::parse("coding").unwrap_err().to_string().contains("one of"));
+        assert!(
+            Purpose::parse("coding")
+                .unwrap_err()
+                .to_string()
+                .contains("one of")
+        );
         assert_eq!(Purpose::parse_opt(None).unwrap(), None);
         assert_eq!(Purpose::parse_opt(Some("  ")).unwrap(), None);
-        assert_eq!(Purpose::parse_opt(Some("monitor")).unwrap(), Some(Purpose::Monitor));
+        assert_eq!(
+            Purpose::parse_opt(Some("monitor")).unwrap(),
+            Some(Purpose::Monitor)
+        );
     }
 
     #[test]
@@ -199,17 +221,30 @@ mod tests {
         let hermes = super::super::resolve_in(&cfg, "hermes").unwrap();
         assert_eq!(purpose_for(&claude, None).unwrap(), Purpose::Code);
         assert_eq!(purpose_for(&hermes, None).unwrap(), Purpose::General);
-        assert_eq!(purpose_for(&claude, Some(Purpose::Review)).unwrap(), Purpose::Review);
-        assert_eq!(purpose_for(&hermes, Some(Purpose::Monitor)).unwrap(), Purpose::Monitor);
+        assert_eq!(
+            purpose_for(&claude, Some(Purpose::Review)).unwrap(),
+            Purpose::Review
+        );
+        assert_eq!(
+            purpose_for(&hermes, Some(Purpose::Monitor)).unwrap(),
+            Purpose::Monitor
+        );
         assert!(purpose_for(&hermes, Some(Purpose::Code)).is_err());
     }
 
     #[test]
     fn a_profile_on_a_general_purpose_base_keeps_the_refusal() {
-        let cfg: hq_core::config::AgentHostConfig =
-            serde_yaml::from_str("harness_profiles:\n  my-hermes:\n    base: hermes\n    command: hermes-wrapped\n").unwrap();
+        let cfg: hq_core::config::AgentHostConfig = serde_yaml::from_str(
+            "harness_profiles:\n  my-hermes:\n    base: hermes\n    command: hermes-wrapped\n",
+        )
+        .unwrap();
         let h = super::super::resolve_in(&cfg, "my-hermes").unwrap();
-        let err = purpose_for(&h, Some(Purpose::Code)).unwrap_err().to_string();
-        assert!(err.contains("'my-hermes' is a general-purpose agent"), "{err}");
+        let err = purpose_for(&h, Some(Purpose::Code))
+            .unwrap_err()
+            .to_string();
+        assert!(
+            err.contains("'my-hermes' is a general-purpose agent"),
+            "{err}"
+        );
     }
 }

@@ -75,7 +75,12 @@ pub struct Move {
 /// statuses, or when the moves do not end in the task's `status` now: a task that
 /// moved before the log recorded its moves has gaps that cannot be filled honestly.
 /// Time in `complete` is not counted: it is not time spent.
-pub fn status_durations(created_at: i64, moves: &[Move], now: i64, status: &str) -> Option<BTreeMap<String, i64>> {
+pub fn status_durations(
+    created_at: i64,
+    moves: &[Move],
+    now: i64,
+    status: &str,
+) -> Option<BTreeMap<String, i64>> {
     let mut out: BTreeMap<String, i64> = BTreeMap::new();
     let mut add = |status: &str, seconds: i64| {
         if status != STATUS_COMPLETE && seconds > 0 {
@@ -122,7 +127,11 @@ fn lease_intervals(conn: &Connection, task_id: &str) -> Result<(Vec<(i64, i64)>,
     let mut live = false;
     let mut out = Vec::new();
     for row in stmt.query_map(params![task_id], |r| {
-        Ok((r.get::<_, Option<i64>>(0)?, r.get::<_, Option<i64>>(1)?, r.get::<_, bool>(2)?))
+        Ok((
+            r.get::<_, Option<i64>>(0)?,
+            r.get::<_, Option<i64>>(1)?,
+            r.get::<_, bool>(2)?,
+        ))
     })? {
         let (start, end, open) = row?;
         live |= open;
@@ -141,7 +150,9 @@ fn moves(conn: &Connection, task_id: &str) -> Result<Option<Vec<Move>>> {
          FROM task_events WHERE task_id = ?1 ORDER BY id"
     ))?;
     let rows = stmt
-        .query_map(params![task_id], |r| Ok((r.get::<_, Option<i64>>(0)?, r.get(1)?, r.get(2)?)))?
+        .query_map(params![task_id], |r| {
+            Ok((r.get::<_, Option<i64>>(0)?, r.get(1)?, r.get(2)?))
+        })?
         .collect::<rusqlite::Result<Vec<(Option<i64>, Option<String>, Option<String>)>>>()?;
     Ok(rows
         .into_iter()
@@ -154,7 +165,12 @@ fn subtask_rollup(conn: &Connection, task: &Task) -> Result<Option<SubtaskRollup
     if children.is_empty() {
         return Ok(None);
     }
-    let mut rollup = SubtaskRollup { count: children.len() as i64, leased_seconds: 0, estimate_minutes: 0, with_estimate: 0 };
+    let mut rollup = SubtaskRollup {
+        count: children.len() as i64,
+        leased_seconds: 0,
+        estimate_minutes: 0,
+        with_estimate: 0,
+    };
     for id in &children {
         let (mut intervals, _) = lease_intervals(conn, id)?;
         rollup.leased_seconds += union_seconds(&mut intervals);
@@ -180,22 +196,43 @@ pub fn leased_seconds(conn: &Connection, task_id: &str) -> Result<i64> {
 /// Everything known about the time spent on `id_or_display_id`. Leases that went
 /// silent past `ttl_secs` are closed first, so `live` and the totals never include
 /// a session that is already gone.
-pub fn time_summary(conn: &Connection, id_or_display_id: &str, ttl_secs: i64) -> Result<TimeSummary> {
+pub fn time_summary(
+    conn: &Connection,
+    id_or_display_id: &str,
+    ttl_secs: i64,
+) -> Result<TimeSummary> {
     expire_stale_leases(conn, ttl_secs)?;
     let task = get_task(conn, id_or_display_id)?
         .ok_or_else(|| anyhow::anyhow!("no task '{id_or_display_id}'"))?;
-    let created = epoch(conn, &format!("SELECT {EPOCH}created_at) AS INTEGER) FROM tasks WHERE id = ?1"), &task.id)?
-        .ok_or_else(|| anyhow::anyhow!("task {} has no creation time", task.display_id))?;
-    let now: i64 = conn.query_row(&format!("SELECT {EPOCH}'now') AS INTEGER)"), [], |r| r.get(0))?;
-    let started = epoch(conn, &format!("SELECT {EPOCH}work_started_at) AS INTEGER) FROM tasks WHERE id = ?1"), &task.id)?;
-    let completed = epoch(conn, &format!("SELECT {EPOCH}completed_at) AS INTEGER) FROM tasks WHERE id = ?1"), &task.id)?;
+    let created = epoch(
+        conn,
+        &format!("SELECT {EPOCH}created_at) AS INTEGER) FROM tasks WHERE id = ?1"),
+        &task.id,
+    )?
+    .ok_or_else(|| anyhow::anyhow!("task {} has no creation time", task.display_id))?;
+    let now: i64 = conn.query_row(&format!("SELECT {EPOCH}'now') AS INTEGER)"), [], |r| {
+        r.get(0)
+    })?;
+    let started = epoch(
+        conn,
+        &format!("SELECT {EPOCH}work_started_at) AS INTEGER) FROM tasks WHERE id = ?1"),
+        &task.id,
+    )?;
+    let completed = epoch(
+        conn,
+        &format!("SELECT {EPOCH}completed_at) AS INTEGER) FROM tasks WHERE id = ?1"),
+        &task.id,
+    )?;
 
     let (mut intervals, live) = lease_intervals(conn, &task.id)?;
     let lease_count = intervals.len() as i64;
     let leased_seconds = union_seconds(&mut intervals);
     let history = moves(conn, &task.id)?;
     // With no recorded work there is nothing to compare, so no variance rather than "all of the estimate under".
-    let variance_minutes = task.estimate_minutes.filter(|_| lease_count > 0).map(|e| leased_seconds / 60 - e);
+    let variance_minutes = task
+        .estimate_minutes
+        .filter(|_| lease_count > 0)
+        .map(|e| leased_seconds / 60 - e);
     let cycle_seconds = match (started, completed) {
         (Some(s), Some(c)) if task.status == STATUS_COMPLETE && c >= s => Some(c - s),
         _ => None,
@@ -207,7 +244,8 @@ pub fn time_summary(conn: &Connection, id_or_display_id: &str, ttl_secs: i64) ->
         live,
         time_to_start_seconds: started.map(|s| (s - created).max(0)),
         cycle_seconds,
-        status_seconds: history.and_then(|moves| status_durations(created, &moves, now, &task.status)),
+        status_seconds: history
+            .and_then(|moves| status_durations(created, &moves, now, &task.status)),
         variance_minutes,
         subtasks: subtask_rollup(conn, &task)?,
     })
@@ -290,31 +328,55 @@ pub fn time_report(conn: &Connection, since_days: i64, ttl_secs: i64) -> Result<
                 (Some(s), Some(c)) if done && c >= s => Some(c - s),
                 _ => None,
             };
-            by_task.insert(task, ReportTask { initiative_id: init, name, estimate, cycle, done });
+            by_task.insert(
+                task,
+                ReportTask {
+                    initiative_id: init,
+                    name,
+                    estimate,
+                    cycle,
+                    done,
+                },
+            );
         }
     }
     let mut initiatives: BTreeMap<String, InitiativeTime> = BTreeMap::new();
     let mut ratios: BTreeMap<String, Vec<f64>> = BTreeMap::new();
     let mut cycles: BTreeMap<String, Vec<i64>> = BTreeMap::new();
-    let since_epoch: i64 = conn.query_row(&format!("SELECT {EPOCH}?1) AS INTEGER)"), params![since], |r| r.get(0))?;
+    let since_epoch: i64 = conn.query_row(
+        &format!("SELECT {EPOCH}?1) AS INTEGER)"),
+        params![since],
+        |r| r.get(0),
+    )?;
     for (task, row) in &by_task {
-        let ReportTask { initiative_id: init, name, estimate, cycle, done } = row;
+        let ReportTask {
+            initiative_id: init,
+            name,
+            estimate,
+            cycle,
+            done,
+        } = row;
         // Only the part of each lease inside the window counts, so an old lease on a
         // task worked again this week adds nothing from last year.
         let (mut intervals, _) = lease_intervals(conn, task)?;
-        let mut intervals: Vec<(i64, i64)> = intervals.drain(..).map(|(s, e)| (s.max(since_epoch), e)).collect();
+        let mut intervals: Vec<(i64, i64)> = intervals
+            .drain(..)
+            .map(|(s, e)| (s.max(since_epoch), e))
+            .collect();
         let leased = union_seconds(&mut intervals);
-        let entry = initiatives.entry(init.clone()).or_insert_with(|| InitiativeTime {
-            initiative_id: init.clone(),
-            name: name.clone(),
-            leased_seconds: 0,
-            tasks_worked: 0,
-            tasks_completed: 0,
-            mean_cycle_seconds: None,
-            estimated_completed: 0,
-            mean_actual_over_estimate: None,
-            unknown_tasks: 0,
-        });
+        let entry = initiatives
+            .entry(init.clone())
+            .or_insert_with(|| InitiativeTime {
+                initiative_id: init.clone(),
+                name: name.clone(),
+                leased_seconds: 0,
+                tasks_worked: 0,
+                tasks_completed: 0,
+                mean_cycle_seconds: None,
+                estimated_completed: 0,
+                mean_actual_over_estimate: None,
+                unknown_tasks: 0,
+            });
         entry.leased_seconds += leased;
         if leased > 0 {
             entry.tasks_worked += 1;
@@ -327,12 +389,18 @@ pub fn time_report(conn: &Connection, since_days: i64, ttl_secs: i64) -> Result<
             }
             if let (Some(est), true) = (estimate, leased > 0) {
                 entry.estimated_completed += 1;
-                ratios.entry(init.clone()).or_default().push(leased as f64 / (*est as f64 * 60.0));
+                ratios
+                    .entry(init.clone())
+                    .or_default()
+                    .push(leased as f64 / (*est as f64 * 60.0));
             }
         }
     }
     for (init, entry) in initiatives.iter_mut() {
-        entry.mean_cycle_seconds = cycles.get(init).filter(|v| !v.is_empty()).map(|v| v.iter().sum::<i64>() / v.len() as i64);
+        entry.mean_cycle_seconds = cycles
+            .get(init)
+            .filter(|v| !v.is_empty())
+            .map(|v| v.iter().sum::<i64>() / v.len() as i64);
         entry.mean_actual_over_estimate = ratios
             .get(init)
             .filter(|v| !v.is_empty())
@@ -348,7 +416,11 @@ pub fn time_report(conn: &Connection, since_days: i64, ttl_secs: i64) -> Result<
     // agent working at once are one agent's time, not two.
     let mut per_actor: BTreeMap<String, (Vec<(i64, i64)>, i64)> = BTreeMap::new();
     for row in stmt.query_map(params![since], |r| {
-        Ok((r.get::<_, String>(0)?, r.get::<_, Option<i64>>(1)?, r.get::<_, Option<i64>>(2)?))
+        Ok((
+            r.get::<_, String>(0)?,
+            r.get::<_, Option<i64>>(1)?,
+            r.get::<_, Option<i64>>(2)?,
+        ))
     })? {
         let (actor, start, end) = row?;
         if let (Some(start), Some(end)) = (start, end) {
@@ -365,8 +437,20 @@ pub fn time_report(conn: &Connection, since_days: i64, ttl_secs: i64) -> Result<
             sessions,
         })
         .collect();
-    actors.sort_by(|a, b| b.leased_seconds.cmp(&a.leased_seconds).then(a.actor.cmp(&b.actor)));
+    actors.sort_by(|a, b| {
+        b.leased_seconds
+            .cmp(&a.leased_seconds)
+            .then(a.actor.cmp(&b.actor))
+    });
     let mut initiatives: Vec<InitiativeTime> = initiatives.into_values().collect();
-    initiatives.sort_by(|a, b| b.leased_seconds.cmp(&a.leased_seconds).then(a.name.cmp(&b.name)));
-    Ok(TimeReport { since, initiatives, actors })
+    initiatives.sort_by(|a, b| {
+        b.leased_seconds
+            .cmp(&a.leased_seconds)
+            .then(a.name.cmp(&b.name))
+    });
+    Ok(TimeReport {
+        since,
+        initiatives,
+        actors,
+    })
 }

@@ -87,12 +87,25 @@ mod windows {
             for a in r["assets"].as_array().into_iter().flatten() {
                 let name = a["name"].as_str().unwrap_or_default();
                 // hq-lite-<version>-<short sha>-windows-x86_64.zip
-                if let Some(rest) = name.strip_prefix("hq-lite-").and_then(|n| n.strip_suffix("-windows-x86_64.zip")) {
+                if let Some(rest) = name
+                    .strip_prefix("hq-lite-")
+                    .and_then(|n| n.strip_suffix("-windows-x86_64.zip"))
+                {
                     let short = rest.rsplit('-').next().unwrap_or_default();
-                    let has = |suffix: &str| r["assets"].as_array().into_iter().flatten().any(|b| b["name"].as_str() == Some(&format!("{name}{suffix}")));
+                    let has = |suffix: &str| {
+                        r["assets"]
+                            .as_array()
+                            .into_iter()
+                            .flatten()
+                            .any(|b| b["name"].as_str() == Some(&format!("{name}{suffix}")))
+                    };
                     // The installer refuses a build without a signed checksum, so never offer one.
                     if has(".sha256") && has(".sha256.minisig") && !short.is_empty() {
-                        return Some((r["tag_name"].as_str().unwrap_or_default().to_string(), name.to_string(), short.to_string()));
+                        return Some((
+                            r["tag_name"].as_str().unwrap_or_default().to_string(),
+                            name.to_string(),
+                            short.to_string(),
+                        ));
                     }
                 }
             }
@@ -105,17 +118,30 @@ mod windows {
     }
 
     pub(super) async fn run(apply: bool, json: bool) -> i32 {
-        let client = match reqwest::Client::builder().user_agent("hq-update").timeout(std::time::Duration::from_secs(30)).build() {
+        let client = match reqwest::Client::builder()
+            .user_agent("hq-update")
+            .timeout(std::time::Duration::from_secs(30))
+            .build()
+        {
             Ok(c) => c,
             Err(e) => {
                 eprintln!("could not set up a connection: {e}");
                 return 1;
             }
         };
-        let listing: Value = match client.get(format!("https://api.github.com/repos/{REPO}/releases?per_page=30")).send().await {
+        let listing: Value = match client
+            .get(format!(
+                "https://api.github.com/repos/{REPO}/releases?per_page=30"
+            ))
+            .send()
+            .await
+        {
             Ok(r) if r.status().is_success() => r.json().await.unwrap_or(Value::Null),
             Ok(r) => {
-                eprintln!("GitHub answered {} (anonymous requests are limited per address; try again later)", r.status());
+                eprintln!(
+                    "GitHub answered {} (anonymous requests are limited per address; try again later)",
+                    r.status()
+                );
                 return 1;
             }
             Err(e) => {
@@ -129,11 +155,17 @@ mod windows {
         };
         let current = is_current(&short, GIT_SHA);
         if json {
-            println!("{}", serde_json::json!({ "current": GIT_SHA, "newest": name, "tag": tag, "up_to_date": current }));
+            println!(
+                "{}",
+                serde_json::json!({ "current": GIT_SHA, "newest": name, "tag": tag, "up_to_date": current })
+            );
         } else if current {
             println!("HQ Lite is up to date ({name}).");
         } else {
-            println!("A different HQ Lite build is published: {name} ({tag}). You have commit {}.", &GIT_SHA[..GIT_SHA.len().min(7)]);
+            println!(
+                "A different HQ Lite build is published: {name} ({tag}). You have commit {}.",
+                &GIT_SHA[..GIT_SHA.len().min(7)]
+            );
         }
         if current {
             return 0;
@@ -144,14 +176,29 @@ mod windows {
             }
             return 10;
         }
-        let Ok(exe) = std::env::current_exe() else { return 1 };
-        let dir = exe.parent().map(|p| p.display().to_string()).unwrap_or_default();
-        println!("Running the installer from https://agent-hq.online/install.ps1 into {dir} (it verifies the download's signature against HQ's release key, then its SHA-256) ...");
+        let Ok(exe) = std::env::current_exe() else {
+            return 1;
+        };
+        let dir = exe
+            .parent()
+            .map(|p| p.display().to_string())
+            .unwrap_or_default();
+        println!(
+            "Running the installer from https://agent-hq.online/install.ps1 into {dir} (it verifies the download's signature against HQ's release key, then its SHA-256) ..."
+        );
         let script = format!(
             "& ([scriptblock]::Create((irm https://agent-hq.online/install.ps1))) -Edition lite -Yes -InstallDir '{}'",
             dir.replace('\'', "''")
         );
-        match std::process::Command::new(std::env::var_os("SystemRoot").map(std::path::PathBuf::from).unwrap_or_else(|| "C:\\Windows".into()).join(r"System32\WindowsPowerShell\v1.0\powershell.exe")).args(["-NoProfile", "-Command", &script]).status() {
+        match std::process::Command::new(
+            std::env::var_os("SystemRoot")
+                .map(std::path::PathBuf::from)
+                .unwrap_or_else(|| "C:\\Windows".into())
+                .join(r"System32\WindowsPowerShell\v1.0\powershell.exe"),
+        )
+        .args(["-NoProfile", "-Command", &script])
+        .status()
+        {
             Ok(s) if s.success() => 0,
             Ok(s) => s.code().unwrap_or(1),
             Err(e) => {
@@ -169,22 +216,33 @@ mod windows {
         #[test]
         fn the_newest_lite_zip_needs_a_signed_checksum_and_skips_drafts() {
             let zip = "hq-lite-0.9.1-abc1234-windows-x86_64.zip";
-            let all = |tag: &str, draft: bool| json!({ "tag_name": tag, "draft": draft, "assets": [
-                {"name": zip}, {"name": format!("{zip}.sha256")}, {"name": format!("{zip}.sha256.minisig")} ] });
+            let all = |tag: &str, draft: bool| {
+                json!({ "tag_name": tag, "draft": draft, "assets": [
+                {"name": zip}, {"name": format!("{zip}.sha256")}, {"name": format!("{zip}.sha256.minisig")} ] })
+            };
             let rels = json!([
                 all("v4", true),
                 { "tag_name": "v3", "draft": false, "assets": [ {"name": zip}, {"name": format!("{zip}.sha256")} ] },
                 { "tag_name": "v2", "draft": false, "assets": [ {"name": zip} ] },
                 all("v1", false),
             ]);
-            assert_eq!(newest_lite(&rels), Some(("v1".into(), zip.into(), "abc1234".into())));
+            assert_eq!(
+                newest_lite(&rels),
+                Some(("v1".into(), zip.into(), "abc1234".into()))
+            );
             assert_eq!(newest_lite(&json!([])), None);
         }
 
         #[test]
         fn current_means_the_build_commit_starts_with_the_zip_s_short_sha() {
-            assert!(is_current("abc1234", "abc1234def5678900000000000000000000000000"));
-            assert!(!is_current("abc1234", "fff1234def5678900000000000000000000000000"));
+            assert!(is_current(
+                "abc1234",
+                "abc1234def5678900000000000000000000000000"
+            ));
+            assert!(!is_current(
+                "abc1234",
+                "fff1234def5678900000000000000000000000000"
+            ));
             assert!(!is_current("", "abc"));
         }
     }

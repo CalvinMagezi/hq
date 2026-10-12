@@ -488,11 +488,15 @@ async fn orchestrator_is_not_downgraded_to_the_weak_catalog() {
                 ..SessionConfig::default()
             })
             .role(role);
-        let builder = configure_native_hq_builder(builder, &config, "remember this note", String::new());
+        let builder =
+            configure_native_hq_builder(builder, &config, "remember this note", String::new());
         async move { builder.build().await.unwrap().tool_names().await }
     };
     let implementor = names(SessionRole::Implementor).await;
     let orchestrator = names(SessionRole::Orchestrator).await;
-    assert!(!implementor.iter().any(|n| n == "harness_session_spawn"), "premise: Weak drops it");
+    assert!(
+        !implementor.iter().any(|n| n == "harness_session_spawn"),
+        "premise: Weak drops it"
+    );
     assert!(orchestrator.iter().any(|n| n == "harness_session_spawn"));
 }

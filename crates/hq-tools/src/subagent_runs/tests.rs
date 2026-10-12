@@ -326,13 +326,25 @@ fn one_accepted_run_does_not_ready_a_task_with_open_siblings() {
     task(&c, "tk-1", t::STATUS_IN_PROGRESS);
     run(&c, "run-s1s1s1s1", "chat-a", Some("tk-1"));
     run(&c, "run-s2s2s2s2", "chat-a", Some("tk-1"));
-    settle(&c, "run-s1s1s1s1", runs::EXEC_COMPLETED, runs::ACCEPT_UNVERIFIED, "done");
+    settle(
+        &c,
+        "run-s1s1s1s1",
+        runs::EXEC_COMPLETED,
+        runs::ACCEPT_UNVERIFIED,
+        "done",
+    );
     runs::review(&c, "run-s1s1s1s1", runs::ACCEPT_ACCEPTED, &[], None, 120).unwrap();
     let row = runs::get(&c, "run-s1s1s1s1").unwrap().unwrap();
     record_on_task(&c, &row, TaskEvent::Reviewed).unwrap();
     assert_eq!(status(&c, "tk-1"), t::STATUS_IN_PROGRESS);
 
-    settle(&c, "run-s2s2s2s2", runs::EXEC_COMPLETED, runs::ACCEPT_UNVERIFIED, "done");
+    settle(
+        &c,
+        "run-s2s2s2s2",
+        runs::EXEC_COMPLETED,
+        runs::ACCEPT_UNVERIFIED,
+        "done",
+    );
     runs::review(&c, "run-s2s2s2s2", runs::ACCEPT_ACCEPTED, &[], None, 121).unwrap();
     let row = runs::get(&c, "run-s2s2s2s2").unwrap().unwrap();
     record_on_task(&c, &row, TaskEvent::Reviewed).unwrap();

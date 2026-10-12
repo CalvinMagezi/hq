@@ -334,7 +334,10 @@ impl Engine {
                 ];
                 if let Some(f) = opts.freshness {
                     let since = chrono::Utc::now() - chrono::Duration::seconds(freshness_secs(f));
-                    params.push(("filter", format!("from-pub-date:{}", since.format("%Y-%m-%d"))));
+                    params.push((
+                        "filter",
+                        format!("from-pub-date:{}", since.format("%Y-%m-%d")),
+                    ));
                 }
                 // Crossref routes clients that identify themselves to its faster pool.
                 let request = client

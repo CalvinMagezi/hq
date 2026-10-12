@@ -459,25 +459,31 @@ async fn note_export_response(
     };
     let languages: Vec<String> = params
         .get("languages")
-        .map(|l| l.split(',').map(|s| s.trim().to_owned()).filter(|s| !s.is_empty()).collect())
+        .map(|l| {
+            l.split(',')
+                .map(|s| s.trim().to_owned())
+                .filter(|s| !s.is_empty())
+                .collect()
+        })
         .unwrap_or_default();
     let Ok(_slot) = EXPORT_SLOTS.acquire().await else {
         return ApiError::internal("export unavailable").into_response();
     };
-    let done = match hq_export::export_note(&state.vault_path, &abs, format, brand.as_ref(), &languages)
-        .await
-    {
-        Ok(done) => done,
-        // The note simply has nothing of that kind (no tables, no code): the
-        // caller asked for something this note cannot give.
-        Err(e @ hq_export::ExportError::Unsupported(_)) => {
-            return ApiError::bad_request(e.to_string()).into_response();
-        }
-        Err(e @ hq_export::ExportError::Unavailable(_)) => {
-            return ApiError::Unavailable(e.to_string()).into_response();
-        }
-        Err(e) => return ApiError::internal(e).into_response(),
-    };
+    let done =
+        match hq_export::export_note(&state.vault_path, &abs, format, brand.as_ref(), &languages)
+            .await
+        {
+            Ok(done) => done,
+            // The note simply has nothing of that kind (no tables, no code): the
+            // caller asked for something this note cannot give.
+            Err(e @ hq_export::ExportError::Unsupported(_)) => {
+                return ApiError::bad_request(e.to_string()).into_response();
+            }
+            Err(e @ hq_export::ExportError::Unavailable(_)) => {
+                return ApiError::Unavailable(e.to_string()).into_response();
+            }
+            Err(e) => return ApiError::internal(e).into_response(),
+        };
     let ascii: String = done
         .title
         .chars()
@@ -872,7 +878,12 @@ pub(crate) async fn signals_handler(State(state): State<Arc<WsState>>) -> Respon
         Err(e) => return ApiError::internal(e).into_response(),
     };
     if let Ok(mut guard) = SIGNALS_CACHE.lock() {
-        *guard = Some((state.vault_path.clone(), lite, Instant::now(), value.clone()));
+        *guard = Some((
+            state.vault_path.clone(),
+            lite,
+            Instant::now(),
+            value.clone(),
+        ));
     }
     Json(value).into_response()
 }

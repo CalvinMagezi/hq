@@ -15,7 +15,8 @@ use axum::{
 use hq_db::tasks as t;
 use hq_tools::tasks::{
     apply_dependency_changes, derive_id_prefix, find_or_create_folder, find_or_create_initiative,
-    notify_unblocked, resolve_space_id, slug, task_json, task_json_with_warnings, unblocked_by_transition,
+    notify_unblocked, resolve_space_id, slug, task_json, task_json_with_warnings,
+    unblocked_by_transition,
 };
 use serde::Deserialize;
 use serde_json::json;
@@ -38,7 +39,12 @@ fn vanished(id: &str) -> anyhow::Error {
 
 /// Mails `notify` (the tags this write introduced) and tells every open web
 /// client. An edit that adds no tag mails nobody.
-fn notify_and_broadcast(state: &Arc<WsState>, task: &t::Task, event_type: &str, previous: Option<&t::Task>) {
+fn notify_and_broadcast(
+    state: &Arc<WsState>,
+    task: &t::Task,
+    event_type: &str,
+    previous: Option<&t::Task>,
+) {
     // Lite has no agents to route to, and the mailbox folders are hidden from it.
     if !state.profile().is_lite() {
         let route_tags = hq_tools::tasks::task_settings().route_tags;
@@ -61,7 +67,9 @@ fn broadcast_related(state: &Arc<WsState>, ids: Vec<String>) {
     match related {
         Ok(tasks) => {
             for task in tasks {
-                state.broadcast(&json!({ "type": "task:updated", "task": task_json(&task) }).to_string());
+                state.broadcast(
+                    &json!({ "type": "task:updated", "task": task_json(&task) }).to_string(),
+                );
             }
         }
         Err(e) => warn!(error = %e, "tasks: failed to load related tasks for broadcast"),
@@ -98,7 +106,9 @@ pub(crate) async fn create_space_handler(
         .db
         .with_conn(move |c| t::create_space(c, &id, &body.name, &space_slug))
     {
-        Ok(space) => Json(json!({ "id": space.id, "name": space.name, "slug": space.slug })).into_response(),
+        Ok(space) => {
+            Json(json!({ "id": space.id, "name": space.name, "slug": space.slug })).into_response()
+        }
         Err(e) => ApiError::from(e).into_response(),
     }
 }
@@ -112,7 +122,10 @@ pub(crate) async fn list_folders_handler(
     State(state): State<Arc<WsState>>,
     Query(params): Query<ListFoldersParams>,
 ) -> Response {
-    match state.db.with_conn(move |c| t::list_folders(c, params.space_id.as_deref())) {
+    match state
+        .db
+        .with_conn(move |c| t::list_folders(c, params.space_id.as_deref()))
+    {
         Ok(folders) => Json(json!({
             "folders": folders.iter().map(|f| json!({
                 "id": f.id, "space_id": f.space_id, "name": f.name, "slug": f.slug,
@@ -159,7 +172,11 @@ pub(crate) async fn list_initiatives_handler(
     Query(params): Query<ListInitiativesParams>,
 ) -> Response {
     match state.db.with_conn(move |c| {
-        t::list_initiatives(c, params.space_id.as_deref(), params.folder_id.as_deref().map(Some))
+        t::list_initiatives(
+            c,
+            params.space_id.as_deref(),
+            params.folder_id.as_deref().map(Some),
+        )
     }) {
         Ok(initiatives) => Json(json!({
             "initiatives": initiatives.iter().map(|i| json!({
@@ -194,14 +211,24 @@ pub(crate) async fn create_initiative_handler(
         let space = t::get_space(c, &space_id)?
             .ok_or_else(|| not_found(format!("space '{space_id}' does not exist")))?;
         let folder_id = match &body.folder {
-            Some(fname) if !fname.trim().is_empty() => Some(find_or_create_folder(c, &space_id, fname)?.id),
+            Some(fname) if !fname.trim().is_empty() => {
+                Some(find_or_create_folder(c, &space_id, fname)?.id)
+            }
             _ => None,
         };
         let id_prefix = match body.id_prefix {
             Some(p) if !p.trim().is_empty() => p,
             _ => derive_id_prefix(c, &space.slug, &body.name)?,
         };
-        t::create_initiative(c, &id, &space.id, folder_id.as_deref(), &body.name, &initiative_slug, &id_prefix)
+        t::create_initiative(
+            c,
+            &id,
+            &space.id,
+            folder_id.as_deref(),
+            &body.name,
+            &initiative_slug,
+            &id_prefix,
+        )
     });
     match result {
         Ok(initiative) => Json(json!({
@@ -253,7 +280,12 @@ pub(crate) async fn list_tasks_handler(
         archived: params.archived,
         assignee: params.assignee.filter(|a| !a.is_empty()),
         search: params.search.filter(|s| !s.trim().is_empty()),
-        updated_since: match params.updated_since.filter(|s| !s.is_empty()).map(|s| t::normalize_since(&s)).transpose() {
+        updated_since: match params
+            .updated_since
+            .filter(|s| !s.is_empty())
+            .map(|s| t::normalize_since(&s))
+            .transpose()
+        {
             Ok(since) => since,
             Err(e) => return ApiError::from(e).into_response(),
         },
@@ -329,15 +361,28 @@ pub(crate) async fn create_task_handler(
     let id = hq_tools::util::generate_id("tk");
     let result = state.db.with_conn(move |c| {
         let parent = match &body.parent_task_id {
-            Some(pid) => Some(t::get_task(c, pid)?.ok_or_else(|| not_found(format!("parent task {pid} not found")))?),
+            Some(pid) => Some(
+                t::get_task(c, pid)?
+                    .ok_or_else(|| not_found(format!("parent task {pid} not found")))?,
+            ),
             None => None,
         };
         let initiative_id = match (&body.initiative_id, &parent) {
-            (Some(iid), _) => t::get_initiative(c, iid)?
-                .ok_or_else(|| not_found(format!("initiative '{iid}' does not exist")))?
-                .id,
+            (Some(iid), _) => {
+                t::get_initiative(c, iid)?
+                    .ok_or_else(|| not_found(format!("initiative '{iid}' does not exist")))?
+                    .id
+            }
             (None, Some(p)) => p.initiative_id.clone(),
-            (None, None) => find_or_create_initiative(c, &body.space_id, body.folder.as_deref(), &body.initiative)?.id,
+            (None, None) => {
+                find_or_create_initiative(
+                    c,
+                    &body.space_id,
+                    body.folder.as_deref(),
+                    &body.initiative,
+                )?
+                .id
+            }
         };
         let (task, created) = t::create_task_dedup(
             c,
@@ -471,14 +516,20 @@ pub(crate) async fn update_task_handler(
             let old_parent = previous.parent_task_id.clone();
             notify_and_broadcast(&state, &task, "task:updated", Some(&previous));
             if !state.profile().is_lite() {
-                notify_unblocked(&state.vault_path, &task, &unblocked, hq_tools::tasks::task_settings().route_tags);
+                notify_unblocked(
+                    &state.vault_path,
+                    &task,
+                    &unblocked,
+                    hq_tools::tasks::task_settings().route_tags,
+                );
             }
             let mut related: Vec<String> = unblocked.into_iter().map(|u| u.id).collect();
             related.extend(task.parent_task_id.iter().cloned());
             related.extend(old_parent.filter(|p| task.parent_task_id.as_ref() != Some(p)));
             broadcast_related(&state, related);
             if became_ready_for_review {
-                hq_tools::tasks::notify_ready_for_review(state.vault_path.clone(), task.clone()).await;
+                hq_tools::tasks::notify_ready_for_review(state.vault_path.clone(), task.clone())
+                    .await;
             }
             Json(task_json_with_warnings(&task)).into_response()
         }
@@ -529,7 +580,10 @@ const MAX_WINDOW_DAYS: i64 = 365;
 const TIMELINE_SESSIONS_CAP: usize = 2000;
 
 fn window_days(params: &DaysParams) -> i64 {
-    params.days.unwrap_or(DEFAULT_WINDOW_DAYS).clamp(1, MAX_WINDOW_DAYS)
+    params
+        .days
+        .unwrap_or(DEFAULT_WINDOW_DAYS)
+        .clamp(1, MAX_WINDOW_DAYS)
 }
 
 /// Leased time by initiative and by agent over a window.
@@ -634,8 +688,14 @@ pub(crate) async fn stale_tasks_handler(
         .filter(|h| *h >= 1)
         .unwrap_or_else(|| i64::try_from(settings.stale_hours()).unwrap_or(i64::MAX));
     let ttl = hq_tools::tasks::lease_ttl_secs();
-    match state.db.with_conn(move |c| t::stale_tasks(c, hours, ttl, STALE_LIST_CAP)) {
-        Ok(tasks) => Json(json!({ "stale_after_hours": hours, "count": tasks.len(), "tasks": tasks })).into_response(),
+    match state
+        .db
+        .with_conn(move |c| t::stale_tasks(c, hours, ttl, STALE_LIST_CAP))
+    {
+        Ok(tasks) => {
+            Json(json!({ "stale_after_hours": hours, "count": tasks.len(), "tasks": tasks }))
+                .into_response()
+        }
         Err(e) => ApiError::from(e).into_response(),
     }
 }
@@ -656,7 +716,10 @@ pub(crate) async fn initiative_progress_handler(
     let settings = hq_tools::tasks::task_settings();
     let hours = i64::try_from(settings.stale_hours()).unwrap_or(i64::MAX);
     let ttl = hq_tools::tasks::lease_ttl_secs();
-    match state.db.with_conn(move |c| t::initiative_rollup(c, &id, hours, ttl)) {
+    match state
+        .db
+        .with_conn(move |c| t::initiative_rollup(c, &id, hours, ttl))
+    {
         Ok(rollup) => Json(json!(rollup)).into_response(),
         Err(e) => ApiError::from(e).into_response(),
     }
@@ -699,8 +762,12 @@ pub(crate) async fn delete_task_handler(
 ) -> Response {
     let target = id.clone();
     let result = state.db.with_conn(move |c| {
-        let task = t::get_task(c, &target)?.ok_or_else(|| not_found("no task found for that id"))?;
-        let dependents: Vec<String> = t::list_dependents(c, &task.id)?.into_iter().map(|d| d.id).collect();
+        let task =
+            t::get_task(c, &target)?.ok_or_else(|| not_found("no task found for that id"))?;
+        let dependents: Vec<String> = t::list_dependents(c, &task.id)?
+            .into_iter()
+            .map(|d| d.id)
+            .collect();
         // Removing archives, so nothing is lost; only an already archived task can be purged.
         let deleted = if params.purge {
             t::purge_task(c, &task.id, "web")?
@@ -714,13 +781,24 @@ pub(crate) async fn delete_task_handler(
         Err(e) => return ApiError::from(e).into_response(),
     };
     for deleted_id in &deleted {
-        let display_id = if *deleted_id == task.id { Some(&task.display_id) } else { None };
-        state.broadcast(&json!({ "type": "task:deleted", "id": deleted_id, "display_id": display_id }).to_string());
+        let display_id = if *deleted_id == task.id {
+            Some(&task.display_id)
+        } else {
+            None
+        };
+        state.broadcast(
+            &json!({ "type": "task:deleted", "id": deleted_id, "display_id": display_id })
+                .to_string(),
+        );
     }
-    let mut related: Vec<String> = dependents.into_iter().filter(|d| !deleted.contains(d)).collect();
+    let mut related: Vec<String> = dependents
+        .into_iter()
+        .filter(|d| !deleted.contains(d))
+        .collect();
     related.extend(task.parent_task_id.iter().cloned());
     broadcast_related(&state, related);
-    Json(json!({ "deleted": true, "archived": !params.purge, "id": id, "deleted_ids": deleted })).into_response()
+    Json(json!({ "deleted": true, "archived": !params.purge, "id": id, "deleted_ids": deleted }))
+        .into_response()
 }
 
 /// Brings an archived task, and the sub-tasks archived with it, back.
@@ -809,15 +887,17 @@ mod tests {
     #[test]
     fn a_claim_race_from_hq_db_is_still_a_409() {
         let e = anyhow::anyhow!("task tk-1 was not in expected status 'to_do' (claim conflict)");
-        assert_eq!(ApiError::from(e).into_response().status(), StatusCode::CONFLICT);
+        assert_eq!(
+            ApiError::from(e).into_response().status(),
+            StatusCode::CONFLICT
+        );
     }
-    
 
     fn test_state() -> Arc<WsState> {
-        Arc::new(WsState::new(std::env::temp_dir().join(format!(
-            "hq-tasks-api-test-{}",
-            uuid::Uuid::new_v4()
-        )), None))
+        Arc::new(WsState::new(
+            std::env::temp_dir().join(format!("hq-tasks-api-test-{}", uuid::Uuid::new_v4())),
+            None,
+        ))
     }
 
     #[tokio::test]
@@ -851,7 +931,9 @@ mod tests {
 
         assert_eq!(second.status(), StatusCode::OK);
         let read = |r: Response| async {
-            let bytes = axum::body::to_bytes(r.into_body(), usize::MAX).await.unwrap();
+            let bytes = axum::body::to_bytes(r.into_body(), usize::MAX)
+                .await
+                .unwrap();
             serde_json::from_slice::<serde_json::Value>(&bytes).unwrap()
         };
         let (first, second) = (read(first).await, read(second).await);
@@ -921,19 +1003,29 @@ mod tests {
     #[tokio::test]
     async fn work_sessions_lists_leases_and_404s_a_missing_task() {
         let state = test_state();
-        let id: String = create_titled(&state, "Held").await["id"].as_str().unwrap().into();
+        let id: String = create_titled(&state, "Held").await["id"]
+            .as_str()
+            .unwrap()
+            .into();
         let task_id = id.clone();
         state
             .db
             .with_conn(move |c| {
-                let who = t::LeaseIdentity { actor: "builder", ..Default::default() };
+                let who = t::LeaseIdentity {
+                    actor: "builder",
+                    ..Default::default()
+                };
                 t::claim(c, &task_id, &who, 900, false).map(|_| ())
             })
             .unwrap();
-        let listed = body_json(list_work_sessions_handler(State(state.clone()), AxumPath(id)).await).await;
+        let listed =
+            body_json(list_work_sessions_handler(State(state.clone()), AxumPath(id)).await).await;
         assert_eq!(listed["work_sessions"][0]["actor"], "builder");
         assert!(listed["work_sessions"][0]["ended_at"].is_null());
-        assert!(listed["work_sessions"][0].get("token_hash").is_none(), "a token never leaves the server");
+        assert!(
+            listed["work_sessions"][0].get("token_hash").is_none(),
+            "a token never leaves the server"
+        );
         let missing = list_work_sessions_handler(State(state), AxumPath("NOPE-1".into())).await;
         assert_eq!(missing.status(), StatusCode::NOT_FOUND);
     }
@@ -941,47 +1033,92 @@ mod tests {
     #[tokio::test]
     async fn estimate_time_and_report_endpoints_round_trip() {
         let state = test_state();
-        let body = serde_json::from_value(json!({ "title": "Sized", "estimate_minutes": 45 })).unwrap();
+        let body =
+            serde_json::from_value(json!({ "title": "Sized", "estimate_minutes": 45 })).unwrap();
         let created = body_json(create_task_handler(State(state.clone()), Json(body)).await).await;
         let id: String = created["id"].as_str().unwrap().into();
         assert_eq!(created["estimate_minutes"], 45);
 
-        let patch = |value: serde_json::Value| Json(serde_json::from_value::<UpdateTaskBody>(value).unwrap());
-        let bad = update_task_handler(State(state.clone()), AxumPath(id.clone()), patch(json!({ "estimate_minutes": 0 }))).await;
+        let patch = |value: serde_json::Value| {
+            Json(serde_json::from_value::<UpdateTaskBody>(value).unwrap())
+        };
+        let bad = update_task_handler(
+            State(state.clone()),
+            AxumPath(id.clone()),
+            patch(json!({ "estimate_minutes": 0 })),
+        )
+        .await;
         assert_eq!(bad.status(), StatusCode::BAD_REQUEST);
-        let cleared = update_task_handler(State(state.clone()), AxumPath(id.clone()), patch(json!({ "estimate_minutes": null }))).await;
+        let cleared = update_task_handler(
+            State(state.clone()),
+            AxumPath(id.clone()),
+            patch(json!({ "estimate_minutes": null })),
+        )
+        .await;
         assert!(body_json(cleared).await["estimate_minutes"].is_null());
-        let untouched = update_task_handler(State(state.clone()), AxumPath(id.clone()), patch(json!({ "title": "Renamed" }))).await;
-        assert!(body_json(untouched).await["estimate_minutes"].is_null(), "absent key leaves the field alone");
+        let untouched = update_task_handler(
+            State(state.clone()),
+            AxumPath(id.clone()),
+            patch(json!({ "title": "Renamed" })),
+        )
+        .await;
+        assert!(
+            body_json(untouched).await["estimate_minutes"].is_null(),
+            "absent key leaves the field alone"
+        );
 
-        let time = body_json(task_time_handler(State(state.clone()), AxumPath(id.clone())).await).await;
+        let time =
+            body_json(task_time_handler(State(state.clone()), AxumPath(id.clone())).await).await;
         assert_eq!(time["leased_seconds"], 0);
         let missing = task_time_handler(State(state.clone()), AxumPath("NOPE-1".into())).await;
         assert_eq!(missing.status(), StatusCode::NOT_FOUND);
 
-        let report = body_json(time_report_handler(State(state.clone()), Query(DaysParams { days: Some(7) })).await).await;
+        let report = body_json(
+            time_report_handler(State(state.clone()), Query(DaysParams { days: Some(7) })).await,
+        )
+        .await;
         assert_eq!(report["days"], 7);
-        let recent = body_json(recent_work_sessions_handler(State(state), Query(DaysParams { days: None })).await).await;
+        let recent = body_json(
+            recent_work_sessions_handler(State(state), Query(DaysParams { days: None })).await,
+        )
+        .await;
         assert_eq!(recent["work_sessions"], json!([]));
     }
 
     #[tokio::test]
     async fn links_are_read_per_task_and_found_from_the_other_side() {
         let state = test_state();
-        let id: String = create_titled(&state, "From a note").await["id"].as_str().unwrap().into();
+        let id: String = create_titled(&state, "From a note").await["id"]
+            .as_str()
+            .unwrap()
+            .into();
         let task_id = id.clone();
         state
             .db
             .with_conn(move |c| {
-                t::add_task_link(c, &task_id, t::LINK_VAULT_NOTE, "Notebooks/plan.md", "", Some(t::DIRECTION_ORIGIN), "test").map(|_| ())
+                t::add_task_link(
+                    c,
+                    &task_id,
+                    t::LINK_VAULT_NOTE,
+                    "Notebooks/plan.md",
+                    "",
+                    Some(t::DIRECTION_ORIGIN),
+                    "test",
+                )
+                .map(|_| ())
             })
             .unwrap();
-        let links = body_json(list_task_links_handler(State(state.clone()), AxumPath(id.clone())).await).await;
+        let links =
+            body_json(list_task_links_handler(State(state.clone()), AxumPath(id.clone())).await)
+                .await;
         assert_eq!(links["links"][0]["ref"], "Notebooks/plan.md");
         let found = body_json(
             tasks_linked_to_handler(
                 State(state.clone()),
-                Query(LinkedParams { kind: "vault_note".into(), reference: "./Notebooks/plan.md".into() }),
+                Query(LinkedParams {
+                    kind: "vault_note".into(),
+                    reference: "./Notebooks/plan.md".into(),
+                }),
             )
             .await,
         )
@@ -990,7 +1127,10 @@ mod tests {
         assert_eq!(found["tasks"][0]["id"], id);
         let bad = tasks_linked_to_handler(
             State(state.clone()),
-            Query(LinkedParams { kind: "vault_note".into(), reference: "/etc/passwd".into() }),
+            Query(LinkedParams {
+                kind: "vault_note".into(),
+                reference: "/etc/passwd".into(),
+            }),
         )
         .await;
         assert_eq!(bad.status(), StatusCode::BAD_REQUEST);
@@ -1001,11 +1141,25 @@ mod tests {
     #[tokio::test]
     async fn removing_archives_and_restoring_and_purging_follow_the_same_rules_as_the_tools() {
         let state = test_state();
-        let id: String = create_titled(&state, "Maybe later").await["id"].as_str().unwrap().into();
+        let id: String = create_titled(&state, "Maybe later").await["id"]
+            .as_str()
+            .unwrap()
+            .into();
         let delete = |purge: bool| {
-            delete_task_handler(State(state.clone()), AxumPath(id.clone()), Query(DeleteTaskParams { cascade: false, purge }))
+            delete_task_handler(
+                State(state.clone()),
+                AxumPath(id.clone()),
+                Query(DeleteTaskParams {
+                    cascade: false,
+                    purge,
+                }),
+            )
         };
-        assert_eq!(delete(true).await.status(), StatusCode::BAD_REQUEST, "an active task cannot be purged");
+        assert_eq!(
+            delete(true).await.status(),
+            StatusCode::BAD_REQUEST,
+            "an active task cannot be purged"
+        );
         let archived = body_json(delete(false).await).await;
         assert_eq!(archived["archived"], true);
         let list = |archived: bool| {
@@ -1031,25 +1185,48 @@ mod tests {
         };
         assert_eq!(body_json(list(false).await).await["total"], 0);
         assert_eq!(body_json(list(true).await).await["total"], 1);
-        let back = body_json(restore_task_handler(State(state.clone()), AxumPath(id.clone())).await).await;
+        let back =
+            body_json(restore_task_handler(State(state.clone()), AxumPath(id.clone())).await).await;
         assert!(back["archived_at"].is_null());
-        assert_eq!(restore_task_handler(State(state.clone()), AxumPath(id.clone())).await.status(), StatusCode::BAD_REQUEST);
+        assert_eq!(
+            restore_task_handler(State(state.clone()), AxumPath(id.clone()))
+                .await
+                .status(),
+            StatusCode::BAD_REQUEST
+        );
         delete(false).await;
         let purged = body_json(delete(true).await).await;
         assert_eq!(purged["archived"], false);
-        assert_eq!(restore_task_handler(State(state), AxumPath(id)).await.status(), StatusCode::BAD_REQUEST);
+        assert_eq!(
+            restore_task_handler(State(state), AxumPath(id))
+                .await
+                .status(),
+            StatusCode::BAD_REQUEST
+        );
     }
 
     #[tokio::test]
     async fn stale_and_progress_endpoints_answer_even_when_empty() {
         let state = test_state();
-        let stale = body_json(stale_tasks_handler(State(state.clone()), Query(StaleParams { hours: None })).await).await;
+        let stale = body_json(
+            stale_tasks_handler(State(state.clone()), Query(StaleParams { hours: None })).await,
+        )
+        .await;
         assert_eq!(stale["count"], 0);
         assert_eq!(stale["stale_after_hours"], 72);
-        let id: String = create_titled(&state, "In an initiative").await["initiative_id"].as_str().unwrap().into();
-        let progress = body_json(initiative_progress_handler(State(state.clone()), AxumPath(id)).await).await;
+        let id: String = create_titled(&state, "In an initiative").await["initiative_id"]
+            .as_str()
+            .unwrap()
+            .into();
+        let progress =
+            body_json(initiative_progress_handler(State(state.clone()), AxumPath(id)).await).await;
         assert_eq!(progress["total"], 1);
-        assert_eq!(initiative_progress_handler(State(state), AxumPath("nope".into())).await.status(), StatusCode::BAD_REQUEST);
+        assert_eq!(
+            initiative_progress_handler(State(state), AxumPath("nope".into()))
+                .await
+                .status(),
+            StatusCode::BAD_REQUEST
+        );
     }
 
     #[tokio::test]
@@ -1078,22 +1255,42 @@ mod tests {
             list_tasks_handler(State(state.clone()), Query(params))
         };
         let first = body_json(page(2, 0).await).await;
-        assert_eq!((first["count"].as_i64(), first["total"].as_i64()), (Some(2), Some(3)));
+        assert_eq!(
+            (first["count"].as_i64(), first["total"].as_i64()),
+            (Some(2), Some(3))
+        );
         assert_eq!(first["has_more"], json!(true));
         let rest = body_json(page(2, 2).await).await;
-        assert_eq!((rest["count"].as_i64(), rest["has_more"].clone()), (Some(1), json!(false)));
+        assert_eq!(
+            (rest["count"].as_i64(), rest["has_more"].clone()),
+            (Some(1), json!(false))
+        );
     }
 
     #[tokio::test]
     async fn an_unknown_status_is_a_400_and_a_failed_dependency_undoes_the_status() {
         let state = test_state();
-        let id: String = create_titled(&state, "Work").await["id"].as_str().unwrap().into();
-        let patch = |value: serde_json::Value| Json(serde_json::from_value::<UpdateTaskBody>(value).unwrap());
+        let id: String = create_titled(&state, "Work").await["id"]
+            .as_str()
+            .unwrap()
+            .into();
+        let patch = |value: serde_json::Value| {
+            Json(serde_json::from_value::<UpdateTaskBody>(value).unwrap())
+        };
 
-        let refused =
-            update_task_handler(State(state.clone()), AxumPath(id.clone()), patch(json!({ "status": "doing" }))).await;
+        let refused = update_task_handler(
+            State(state.clone()),
+            AxumPath(id.clone()),
+            patch(json!({ "status": "doing" })),
+        )
+        .await;
         assert_eq!(refused.status(), StatusCode::BAD_REQUEST);
-        assert!(body_json(refused).await["error"].as_str().unwrap().contains("ready_for_review"));
+        assert!(
+            body_json(refused).await["error"]
+                .as_str()
+                .unwrap()
+                .contains("ready_for_review")
+        );
 
         let failed = update_task_handler(
             State(state.clone()),
@@ -1102,16 +1299,26 @@ mod tests {
         )
         .await;
         assert_eq!(failed.status(), StatusCode::BAD_REQUEST);
-        let task = state.db.with_conn(move |c| t::get_task(c, &id)).unwrap().unwrap();
-        assert_eq!(task.status, "to_do", "the status write is undone with the failed dependency");
+        let task = state
+            .db
+            .with_conn(move |c| t::get_task(c, &id))
+            .unwrap()
+            .unwrap();
+        assert_eq!(
+            task.status, "to_do",
+            "the status write is undone with the failed dependency"
+        );
     }
 
     fn claim_body() -> UpdateTaskBody {
-        serde_json::from_value(json!({ "status": "in_progress", "expected_status": "to_do" })).unwrap()
+        serde_json::from_value(json!({ "status": "in_progress", "expected_status": "to_do" }))
+            .unwrap()
     }
 
     async fn body_json(response: Response) -> serde_json::Value {
-        let bytes = axum::body::to_bytes(response.into_body(), usize::MAX).await.unwrap();
+        let bytes = axum::body::to_bytes(response.into_body(), usize::MAX)
+            .await
+            .unwrap();
         serde_json::from_slice(&bytes).unwrap()
     }
 
@@ -1121,43 +1328,75 @@ mod tests {
         let create = |body: serde_json::Value| {
             let state = state.clone();
             async move {
-                let response = create_task_handler(State(state), Json(serde_json::from_value(body).unwrap())).await;
+                let response =
+                    create_task_handler(State(state), Json(serde_json::from_value(body).unwrap()))
+                        .await;
                 assert_eq!(response.status(), StatusCode::OK);
                 body_json(response).await
             }
         };
 
         let parent = create(json!({ "title": "Launch" })).await;
-        let child = create(json!({ "title": "Copy", "parent_task_id": parent["display_id"] })).await;
+        let child =
+            create(json!({ "title": "Copy", "parent_task_id": parent["display_id"] })).await;
         assert_eq!(child["parent_task_id"], parent["id"]);
         let dependent = create(json!({ "title": "Publish", "depends_on": [child["id"]] })).await;
         assert_eq!(dependent["blocked_by"], json!([child["display_id"]]));
 
         let bad_dates: UpdateTaskBody =
-            serde_json::from_value(json!({ "start_date": "2026-10-05", "due_date": "2026-10-01" })).unwrap();
-        let response =
-            update_task_handler(State(state.clone()), AxumPath(child["id"].as_str().unwrap().into()), Json(bad_dates))
-                .await;
+            serde_json::from_value(json!({ "start_date": "2026-10-05", "due_date": "2026-10-01" }))
+                .unwrap();
+        let response = update_task_handler(
+            State(state.clone()),
+            AxumPath(child["id"].as_str().unwrap().into()),
+            Json(bad_dates),
+        )
+        .await;
         assert_eq!(response.status(), StatusCode::BAD_REQUEST);
 
-        let complete: UpdateTaskBody = serde_json::from_value(json!({ "status": "complete" })).unwrap();
-        update_task_handler(State(state.clone()), AxumPath(child["id"].as_str().unwrap().into()), Json(complete)).await;
+        let complete: UpdateTaskBody =
+            serde_json::from_value(json!({ "status": "complete" })).unwrap();
+        update_task_handler(
+            State(state.clone()),
+            AxumPath(child["id"].as_str().unwrap().into()),
+            Json(complete),
+        )
+        .await;
         let dependent_id: String = dependent["id"].as_str().unwrap().into();
-        let refreshed = state.db.with_conn(move |c| t::get_task(c, &dependent_id)).unwrap().unwrap();
+        let refreshed = state
+            .db
+            .with_conn(move |c| t::get_task(c, &dependent_id))
+            .unwrap()
+            .unwrap();
         assert_eq!(task_json(&refreshed)["blocked_by"], json!([]));
 
         let parent_id: String = parent["id"].as_str().unwrap().into();
         let refused = delete_task_handler(
             State(state.clone()),
             AxumPath(parent_id.clone()),
-            Query(DeleteTaskParams { cascade: false, purge: false }),
+            Query(DeleteTaskParams {
+                cascade: false,
+                purge: false,
+            }),
         )
         .await;
         assert_eq!(refused.status(), StatusCode::BAD_REQUEST);
-        let deleted =
-            delete_task_handler(State(state.clone()), AxumPath(parent_id), Query(DeleteTaskParams { cascade: true, purge: false }))
-                .await;
-        assert_eq!(body_json(deleted).await["deleted_ids"].as_array().unwrap().len(), 2);
+        let deleted = delete_task_handler(
+            State(state.clone()),
+            AxumPath(parent_id),
+            Query(DeleteTaskParams {
+                cascade: true,
+                purge: false,
+            }),
+        )
+        .await;
+        assert_eq!(
+            body_json(deleted).await["deleted_ids"]
+                .as_array()
+                .unwrap()
+                .len(),
+            2
+        );
     }
 
     #[tokio::test]
@@ -1172,7 +1411,11 @@ mod tests {
                     c,
                     &id,
                     &initiative.id,
-                    &t::NewTask { title: "Claim me", created_by: "test", ..Default::default() },
+                    &t::NewTask {
+                        title: "Claim me",
+                        created_by: "test",
+                        ..Default::default()
+                    },
                 )
             })
             .unwrap();
@@ -1197,18 +1440,31 @@ mod tests {
     #[tokio::test]
     async fn claim_exposes_work_start_and_events() {
         let state = test_state();
-        let created = create_task_handler(State(state.clone()), Json(serde_json::from_value(json!({ "title": "x" })).unwrap())).await;
+        let created = create_task_handler(
+            State(state.clone()),
+            Json(serde_json::from_value(json!({ "title": "x" })).unwrap()),
+        )
+        .await;
         let task = body_json(created).await;
         assert!(task["work_started_at"].is_null());
         let id: String = task["id"].as_str().unwrap().into();
 
-        let claimed = update_task_handler(State(state.clone()), AxumPath(id.clone()), Json(claim_body())).await;
+        let claimed = update_task_handler(
+            State(state.clone()),
+            AxumPath(id.clone()),
+            Json(claim_body()),
+        )
+        .await;
         let claimed = body_json(claimed).await;
         assert_eq!(claimed["work_started_at"].as_str().map(str::len), Some(19));
 
-        let events = body_json(list_task_events_handler(State(state.clone()), AxumPath(id)).await).await;
+        let events =
+            body_json(list_task_events_handler(State(state.clone()), AxumPath(id)).await).await;
         assert_eq!(events["events"][0]["event_type"], "entered_in_progress");
-        assert_eq!(events["events"][0]["occurred_at"], claimed["work_started_at"]);
+        assert_eq!(
+            events["events"][0]["occurred_at"],
+            claimed["work_started_at"]
+        );
     }
 
     #[tokio::test]
@@ -1217,18 +1473,45 @@ mod tests {
         let missing = || AxumPath("tk_does_not_exist".to_string());
         let update = update_task_handler(State(state.clone()), missing(), Json(claim_body())).await;
         assert_eq!(update.status(), StatusCode::NOT_FOUND);
-        let delete =
-            delete_task_handler(State(state.clone()), missing(), Query(DeleteTaskParams { cascade: false, purge: false })).await;
+        let delete = delete_task_handler(
+            State(state.clone()),
+            missing(),
+            Query(DeleteTaskParams {
+                cascade: false,
+                purge: false,
+            }),
+        )
+        .await;
         assert_eq!(delete.status(), StatusCode::NOT_FOUND);
-        assert_eq!(list_comments_handler(State(state.clone()), missing()).await.status(), StatusCode::NOT_FOUND);
-        assert_eq!(list_task_events_handler(State(state.clone()), missing()).await.status(), StatusCode::NOT_FOUND);
-        let comment = AddCommentBody { body: "hi".into(), author: "test".into() };
+        assert_eq!(
+            list_comments_handler(State(state.clone()), missing())
+                .await
+                .status(),
+            StatusCode::NOT_FOUND
+        );
+        assert_eq!(
+            list_task_events_handler(State(state.clone()), missing())
+                .await
+                .status(),
+            StatusCode::NOT_FOUND
+        );
+        let comment = AddCommentBody {
+            body: "hi".into(),
+            author: "test".into(),
+        };
         let added = add_comment_handler(State(state.clone()), missing(), Json(comment)).await;
         assert_eq!(added.status(), StatusCode::NOT_FOUND);
 
-        let created = create_task_handler(State(state.clone()), Json(serde_json::from_value(json!({ "title": "x" })).unwrap())).await;
+        let created = create_task_handler(
+            State(state.clone()),
+            Json(serde_json::from_value(json!({ "title": "x" })).unwrap()),
+        )
+        .await;
         let id = body_json(created).await["id"].as_str().unwrap().to_string();
-        state.db.with_conn(|c| Ok(c.execute_batch("DROP TABLE task_comments")?)).unwrap();
+        state
+            .db
+            .with_conn(|c| Ok(c.execute_batch("DROP TABLE task_comments")?))
+            .unwrap();
         let faulted = list_comments_handler(State(state.clone()), AxumPath(id)).await;
         assert_eq!(faulted.status(), StatusCode::INTERNAL_SERVER_ERROR);
     }

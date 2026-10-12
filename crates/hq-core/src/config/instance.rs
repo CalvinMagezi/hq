@@ -21,9 +21,7 @@ pub struct InstanceFeatures {
 
 impl Default for InstanceFeatures {
     fn default() -> Self {
-        Self {
-            local_ollama: true,
-        }
+        Self { local_ollama: true }
     }
 }
 

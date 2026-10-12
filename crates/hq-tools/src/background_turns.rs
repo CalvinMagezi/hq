@@ -38,7 +38,9 @@ impl WatchOrigin {
         let (platform, chat_id) = match &identity.source {
             RequestSource::Telegram { chat_id } => ("telegram", chat_id.to_string()),
             RequestSource::Discord { channel_id } => ("discord", channel_id.to_string()),
-            RequestSource::ProxyApi { .. } | RequestSource::Web { .. } | RequestSource::LocalCli => {
+            RequestSource::ProxyApi { .. }
+            | RequestSource::Web { .. }
+            | RequestSource::LocalCli => {
                 return None;
             }
         };
@@ -239,7 +241,8 @@ impl HqTool for WatchCreateTool {
         let row = row.ok_or_else(|| anyhow::anyhow!("watch `{id}` was not found after insert"))?;
         let mut summary = watch_summary(&row);
         if let Some(task) = followed {
-            summary["task"] = json!({ "id": task.id, "display_id": task.display_id, "title": task.title });
+            summary["task"] =
+                json!({ "id": task.id, "display_id": task.display_id, "title": task.title });
         }
         Ok(summary)
     }
@@ -381,24 +384,46 @@ mod tests {
         let db = Arc::new(Database::open_memory().unwrap());
         db.with_conn(|c| {
             hq_db::tasks::create_initiative(c, "in-1", "personal", None, "Work", "work", "WK")?;
-            hq_db::tasks::create_task(c, "tk-1", "in-1", &hq_db::tasks::NewTask { title: "Ship", created_by: "t", ..Default::default() })?;
+            hq_db::tasks::create_task(
+                c,
+                "tk-1",
+                "in-1",
+                &hq_db::tasks::NewTask {
+                    title: "Ship",
+                    created_by: "t",
+                    ..Default::default()
+                },
+            )?;
             Ok(())
         })
         .unwrap();
         let tools = create_watch_tools(db.clone(), telegram_origin());
         let ok = tools[0]
-            .execute(json!({ "interval_minutes": 10, "prompt": "is it merged?", "task_id": "WK-001" }))
+            .execute(
+                json!({ "interval_minutes": 10, "prompt": "is it merged?", "task_id": "WK-001" }),
+            )
             .await
             .unwrap();
         assert_eq!(ok["task"]["display_id"], "WK-001");
         let id = ok["id"].as_str().unwrap().to_string();
-        assert_eq!(db.with_conn(|c| background_turns::watch_task_id(c, &id)).unwrap().as_deref(), Some("tk-1"));
+        assert_eq!(
+            db.with_conn(|c| background_turns::watch_task_id(c, &id))
+                .unwrap()
+                .as_deref(),
+            Some("tk-1")
+        );
 
         let running = |db: &Database| db.with_conn(background_turns::list_running).unwrap().len();
         assert_eq!(running(&db), 1);
-        let bad = tools[0].execute(json!({ "interval_minutes": 10, "prompt": "x", "task_id": "NOPE-9" })).await;
+        let bad = tools[0]
+            .execute(json!({ "interval_minutes": 10, "prompt": "x", "task_id": "NOPE-9" }))
+            .await;
         assert!(bad.is_err());
-        assert_eq!(running(&db), 1, "the refused watch was not left running without its task");
+        assert_eq!(
+            running(&db),
+            1,
+            "the refused watch was not left running without its task"
+        );
     }
 
     #[tokio::test]
@@ -406,7 +431,16 @@ mod tests {
         let db = Arc::new(Database::open_memory().unwrap());
         db.with_conn(|c| {
             hq_db::tasks::create_initiative(c, "in-1", "personal", None, "Work", "work", "WK")?;
-            hq_db::tasks::create_task(c, "tk-1", "in-1", &hq_db::tasks::NewTask { title: "Private", created_by: "t", ..Default::default() })?;
+            hq_db::tasks::create_task(
+                c,
+                "tk-1",
+                "in-1",
+                &hq_db::tasks::NewTask {
+                    title: "Private",
+                    created_by: "t",
+                    ..Default::default()
+                },
+            )?;
             Ok(())
         })
         .unwrap();
@@ -419,9 +453,19 @@ mod tests {
             .unwrap_err()
             .to_string();
         assert!(err.contains("cannot attach"), "{err}");
-        assert!(!err.contains("Private") && !err.contains("WK-001"), "the refusal says nothing about the task");
-        assert!(db.with_conn(background_turns::list_running).unwrap().is_empty(), "no watch was left behind");
-        let plain = tools[0].execute(json!({ "interval_minutes": 10, "prompt": "x" })).await;
+        assert!(
+            !err.contains("Private") && !err.contains("WK-001"),
+            "the refusal says nothing about the task"
+        );
+        assert!(
+            db.with_conn(background_turns::list_running)
+                .unwrap()
+                .is_empty(),
+            "no watch was left behind"
+        );
+        let plain = tools[0]
+            .execute(json!({ "interval_minutes": 10, "prompt": "x" }))
+            .await;
         assert!(plain.is_ok(), "a watch with no task is still fine");
     }
 

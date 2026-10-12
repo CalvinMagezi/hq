@@ -42,9 +42,11 @@ pub async fn restart_daemon(label: &str) -> RestartOutcome {
                     ),
                 };
             }
-            Err(e) => return RestartOutcome::Failed {
-                message: format!("could not resolve uid for launchctl kickstart: {e}"),
-            },
+            Err(e) => {
+                return RestartOutcome::Failed {
+                    message: format!("could not resolve uid for launchctl kickstart: {e}"),
+                };
+            }
         };
         let target = format!("gui/{uid}/{label}");
         match tokio::process::Command::new("launchctl")

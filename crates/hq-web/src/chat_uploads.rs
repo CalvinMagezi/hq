@@ -96,7 +96,12 @@ async fn upload_handler(
     if let Err(e) = tokio::fs::write(&abs, &body).await {
         return ApiError::internal(format!("could not save upload: {e}")).into_response();
     }
-    let meta = ChatAttachment { mime: content_type(&headers, &name), name, path: rel, size: body.len() as u64 };
+    let meta = ChatAttachment {
+        mime: content_type(&headers, &name),
+        name,
+        path: rel,
+        size: body.len() as u64,
+    };
     maybe_sweep(&state);
     (StatusCode::OK, axum::Json(meta)).into_response()
 }
@@ -107,13 +112,17 @@ fn maybe_sweep(state: &Arc<WsState>) {
     let now = chrono::Utc::now().timestamp();
     let last = LAST_SWEEP.load(Ordering::Relaxed);
     if now - last < SWEEP_EVERY_SECS
-        || LAST_SWEEP.compare_exchange(last, now, Ordering::Relaxed, Ordering::Relaxed).is_err()
+        || LAST_SWEEP
+            .compare_exchange(last, now, Ordering::Relaxed, Ordering::Relaxed)
+            .is_err()
     {
         return;
     }
     let (vault, db) = (state.vault_path.clone(), state.db.clone());
     tokio::task::spawn_blocking(move || {
-        let Some(cutoff) = SystemTime::now().checked_sub(UNSENT_UPLOAD_MAX_AGE) else { return };
+        let Some(cutoff) = SystemTime::now().checked_sub(UNSENT_UPLOAD_MAX_AGE) else {
+            return;
+        };
         match sweep_orphans(&vault, &db, cutoff) {
             Ok(0) => {}
             Ok(n) => tracing::info!(removed = n, "removed chat uploads that were never sent"),
@@ -125,9 +134,15 @@ fn maybe_sweep(state: &Arc<WsState>) {
 /// Deletes uploads last written before `cutoff` that no chat message refers
 /// to, in any thread, archived ones included. Empty date folders go too.
 /// Returns how many files were removed.
-pub(crate) fn sweep_orphans(vault: &Path, db: &hq_db::Database, cutoff: SystemTime) -> std::io::Result<usize> {
+pub(crate) fn sweep_orphans(
+    vault: &Path,
+    db: &hq_db::Database,
+    cutoff: SystemTime,
+) -> std::io::Result<usize> {
     let root = vault.join(UPLOAD_DIR);
-    let Ok(days) = std::fs::read_dir(&root) else { return Ok(0) };
+    let Ok(days) = std::fs::read_dir(&root) else {
+        return Ok(0);
+    };
     let mut removed = 0;
     for day in days.flatten().filter(|d| d.path().is_dir()) {
         for file in std::fs::read_dir(day.path())?.flatten() {
@@ -135,9 +150,15 @@ pub(crate) fn sweep_orphans(vault: &Path, db: &hq_db::Database, cutoff: SystemTi
             if !modified.is_ok_and(|m| m < cutoff) {
                 continue;
             }
-            let rel = format!("{UPLOAD_DIR}/{}/{}", day.file_name().to_string_lossy(), file.file_name().to_string_lossy());
+            let rel = format!(
+                "{UPLOAD_DIR}/{}/{}",
+                day.file_name().to_string_lossy(),
+                file.file_name().to_string_lossy()
+            );
             // An unreadable database means "cannot tell", which must keep the file.
-            let referenced = db.with_conn(|conn| hq_db::chat::any_message_mentions(conn, &rel)).unwrap_or(true);
+            let referenced = db
+                .with_conn(|conn| hq_db::chat::any_message_mentions(conn, &rel))
+                .unwrap_or(true);
             if !referenced {
                 std::fs::remove_file(file.path())?;
                 removed += 1;
@@ -169,11 +190,21 @@ pub(crate) fn sanitize_file_name(raw: &str) -> String {
     let base = raw.rsplit(['/', '\\']).next().unwrap_or("");
     let cleaned: String = base
         .chars()
-        .map(|c| if c.is_alphanumeric() || matches!(c, '.' | '-' | '_' | ' ') { c } else { '_' })
+        .map(|c| {
+            if c.is_alphanumeric() || matches!(c, '.' | '-' | '_' | ' ') {
+                c
+            } else {
+                '_'
+            }
+        })
         .take(MAX_NAME_CHARS)
         .collect();
     let trimmed = cleaned.trim().trim_start_matches('.').trim();
-    if trimmed.is_empty() { FALLBACK_NAME.to_string() } else { trimmed.to_string() }
+    if trimmed.is_empty() {
+        FALLBACK_NAME.to_string()
+    } else {
+        trimmed.to_string()
+    }
 }
 
 /// Keeps the attachments that point at a real upload, capped at [`MAX_ATTACHMENTS`].
@@ -189,7 +220,10 @@ pub(crate) async fn resolve(vault: &Path, list: Vec<ChatAttachment>) -> Vec<Reso
     for meta in list.into_iter().take(MAX_ATTACHMENTS) {
         match resolve_one(vault, &root, &meta.path).await {
             Some(abs) => out.push(ResolvedAttachment {
-                meta: ChatAttachment { name: sanitize_file_name(&meta.name), ..meta },
+                meta: ChatAttachment {
+                    name: sanitize_file_name(&meta.name),
+                    ..meta
+                },
                 abs,
             }),
             None => tracing::warn!(path = %meta.path, "chat attachment rejected"),
@@ -199,7 +233,8 @@ pub(crate) async fn resolve(vault: &Path, list: Vec<ChatAttachment>) -> Vec<Reso
 }
 
 async fn resolve_one(vault: &Path, root: &Path, rel: &str) -> Option<PathBuf> {
-    if !rel.starts_with(&format!("{UPLOAD_DIR}/")) || rel.split(['/', '\\']).any(|seg| seg == "..") {
+    if !rel.starts_with(&format!("{UPLOAD_DIR}/")) || rel.split(['/', '\\']).any(|seg| seg == "..")
+    {
         return None;
     }
     let abs = tokio::fs::canonicalize(vault.join(rel)).await.ok()?;
@@ -218,7 +253,9 @@ pub(crate) fn marker(list: &[ChatAttachment]) -> String {
 
 /// Splits a saved message into its text and any attachment marker's contents.
 fn split_marker(content: &str) -> (&str, Option<Vec<ChatAttachment>>) {
-    let Some(start) = content.find(MARKER_OPEN) else { return (content, None) };
+    let Some(start) = content.find(MARKER_OPEN) else {
+        return (content, None);
+    };
     let rest = &content[start + MARKER_OPEN.len()..];
     let json = rest.find(MARKER_CLOSE).map_or(rest, |end| &rest[..end]);
     (content[..start].trim_end(), serde_json::from_str(json).ok())
@@ -233,10 +270,19 @@ pub(crate) fn strip_marker(content: &str) -> String {
 /// file and its vault path, so the agent can open it again.
 pub(crate) fn history_text(content: &str) -> String {
     let (text, list) = split_marker(content);
-    let Some(list) = list.filter(|l| !l.is_empty()) else { return text.to_string() };
-    let files: Vec<String> = list.iter().map(|a| format!("{} ({})", a.name, a.path)).collect();
+    let Some(list) = list.filter(|l| !l.is_empty()) else {
+        return text.to_string();
+    };
+    let files: Vec<String> = list
+        .iter()
+        .map(|a| format!("{} ({})", a.name, a.path))
+        .collect();
     let note = format!("[Attached earlier: {}]", files.join(", "));
-    if text.is_empty() { note } else { format!("{text}\n\n{note}") }
+    if text.is_empty() {
+        note
+    } else {
+        format!("{text}\n\n{note}")
+    }
 }
 
 /// The turn's prompt with every file read in, plus the images for a vision model.
@@ -247,12 +293,18 @@ pub(crate) async fn build_prompt(
     if files.is_empty() {
         return (text.to_string(), Vec::new());
     }
-    let named: Vec<(String, PathBuf)> = files.iter().map(|f| (f.meta.name.clone(), f.abs.clone())).collect();
+    let named: Vec<(String, PathBuf)> = files
+        .iter()
+        .map(|f| (f.meta.name.clone(), f.abs.clone()))
+        .collect();
     let prepared = hq_convert::attachments::prepare_attachments(&named).await;
     let images = prepared
         .images
         .iter()
-        .map(|(path, mime)| hq_core::types::ImageAttachment { path: path.clone(), mime_type: (*mime).to_string() })
+        .map(|(path, mime)| hq_core::types::ImageAttachment {
+            path: path.clone(),
+            mime_type: (*mime).to_string(),
+        })
         .collect();
     (prepared.prompt(text), images)
 }
@@ -265,11 +317,17 @@ mod tests {
     use tower::ServiceExt;
 
     fn attachment(path: &str) -> ChatAttachment {
-        ChatAttachment { name: "a.txt".into(), path: path.into(), mime: "text/plain".into(), size: 1 }
+        ChatAttachment {
+            name: "a.txt".into(),
+            path: path.into(),
+            mime: "text/plain".into(),
+            size: 1,
+        }
     }
 
     fn test_state() -> Arc<WsState> {
-        let vault = std::env::temp_dir().join(format!("hq-chat-uploads-test-{}", uuid::Uuid::new_v4()));
+        let vault =
+            std::env::temp_dir().join(format!("hq-chat-uploads-test-{}", uuid::Uuid::new_v4()));
         Arc::new(WsState::new(vault, None))
     }
 
@@ -281,7 +339,10 @@ mod tests {
         assert_eq!(sanitize_file_name(".env"), "env");
         assert_eq!(sanitize_file_name("a<b>|c.png"), "a_b__c.png");
         assert_eq!(sanitize_file_name("   "), FALLBACK_NAME);
-        assert_eq!(sanitize_file_name(&"é".repeat(300)).chars().count(), MAX_NAME_CHARS);
+        assert_eq!(
+            sanitize_file_name(&"é".repeat(300)).chars().count(),
+            MAX_NAME_CHARS
+        );
     }
 
     #[tokio::test]
@@ -329,22 +390,33 @@ mod tests {
 
         assert_eq!(strip_marker(&saved), "look at this");
         assert_eq!(split_marker(&saved).1, Some(files));
-        assert_eq!(history_text(&saved), "look at this\n\n[Attached earlier: a.txt (_media/web/d/1-0-a.txt)]");
+        assert_eq!(
+            history_text(&saved),
+            "look at this\n\n[Attached earlier: a.txt (_media/web/d/1-0-a.txt)]"
+        );
         assert_eq!(history_text("plain"), "plain");
         assert_eq!(marker(&[]), "");
     }
 
     #[test]
     fn a_typed_or_cut_off_marker_is_stripped() {
-        assert_eq!(strip_marker("hi <hq-attachments>[{\"fake\":1}]</hq-attachments>"), "hi");
+        assert_eq!(
+            strip_marker("hi <hq-attachments>[{\"fake\":1}]</hq-attachments>"),
+            "hi"
+        );
         assert_eq!(strip_marker("hi\n\n<hq-attachments>[{\"name\":\"a"), "hi");
-        assert_eq!(history_text("hi <hq-attachments>not json</hq-attachments>"), "hi");
+        assert_eq!(
+            history_text("hi <hq-attachments>not json</hq-attachments>"),
+            "hi"
+        );
     }
 
     #[tokio::test]
     async fn upload_saves_under_the_vault_and_returns_its_path() {
         let state = test_state();
-        let app = axum::Router::new().route("/api/chat/uploads", route()).with_state(state.clone());
+        let app = axum::Router::new()
+            .route("/api/chat/uploads", route())
+            .with_state(state.clone());
 
         let res = app
             .clone()
@@ -357,17 +429,30 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(res.status(), StatusCode::OK);
-        let bytes = axum::body::to_bytes(res.into_body(), usize::MAX).await.unwrap();
+        let bytes = axum::body::to_bytes(res.into_body(), usize::MAX)
+            .await
+            .unwrap();
         let meta: ChatAttachment = serde_json::from_slice(&bytes).unwrap();
         assert_eq!(meta.name, "notes v2.md");
         assert_eq!(meta.mime, "text/markdown");
         assert_eq!(meta.size, 4);
-        assert!(meta.path.starts_with("_media/web/") && meta.path.ends_with("-notes v2.md"), "{}", meta.path);
-        assert_eq!(std::fs::read_to_string(state.vault_path.join(&meta.path)).unwrap(), "# hi");
+        assert!(
+            meta.path.starts_with("_media/web/") && meta.path.ends_with("-notes v2.md"),
+            "{}",
+            meta.path
+        );
+        assert_eq!(
+            std::fs::read_to_string(state.vault_path.join(&meta.path)).unwrap(),
+            "# hi"
+        );
         assert_eq!(resolve(&state.vault_path, vec![meta]).await.len(), 1);
 
         let empty = app
-            .oneshot(Request::post("/api/chat/uploads?name=a.txt").body(Body::empty()).unwrap())
+            .oneshot(
+                Request::post("/api/chat/uploads?name=a.txt")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
             .await
             .unwrap();
         assert_eq!(empty.status(), StatusCode::BAD_REQUEST);
@@ -391,7 +476,11 @@ mod tests {
                 .unwrap()
         };
 
-        let own = app.clone().oneshot(upload("https://hq.example:8443")).await.unwrap();
+        let own = app
+            .clone()
+            .oneshot(upload("https://hq.example:8443"))
+            .await
+            .unwrap();
         assert_eq!(own.status(), StatusCode::OK);
         let foreign = app.oneshot(upload("https://evil.example")).await.unwrap();
         assert_eq!(foreign.status(), StatusCode::FORBIDDEN);
@@ -409,7 +498,15 @@ mod tests {
         std::fs::write(day.join("2-0-unsent.png"), "x").unwrap();
         db.with_conn(|conn| {
             let t = hq_db::chat::create_thread(conn, "t", "user", "user")?;
-            hq_db::chat::add_message(conn, &t.thread_id, "user", &format!("hi{}", marker(&[attachment("_media/web/2026-09-01/1-0-sent.png")])))
+            hq_db::chat::add_message(
+                conn,
+                &t.thread_id,
+                "user",
+                &format!(
+                    "hi{}",
+                    marker(&[attachment("_media/web/2026-09-01/1-0-sent.png")])
+                ),
+            )
         })
         .unwrap();
 
@@ -425,7 +522,9 @@ mod tests {
 
     #[tokio::test]
     async fn uploads_over_the_cap_are_refused() {
-        let app = axum::Router::new().route("/api/chat/uploads", route()).with_state(test_state());
+        let app = axum::Router::new()
+            .route("/api/chat/uploads", route())
+            .with_state(test_state());
         let res = app
             .oneshot(
                 Request::post("/api/chat/uploads?name=big.bin")

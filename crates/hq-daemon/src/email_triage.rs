@@ -7,10 +7,10 @@
 //! resolves the token and calls `email_send::send_via_company`, which sends
 //! the reply in-process through the company's gws connector.
 
-use hq_core::mailbox;
 use crate::notif_gate::parse_event_header;
 use anyhow::Result;
 use chrono::{DateTime, Utc};
+use hq_core::mailbox;
 use hq_core::types::{MailboxMessage, MailboxMessageType};
 use serde::{Deserialize, Serialize};
 use std::path::Path;
@@ -180,8 +180,7 @@ pub async fn resolve_email_action(
                 pe.company_id.clone()
             };
             let subject = format!("Re: {}", pe.subject);
-            match crate::email_send::send_via_company(&company_id, &pe.from, &subject, &body)
-                .await
+            match crate::email_send::send_via_company(&company_id, &pe.from, &subject, &body).await
             {
                 Ok(()) => "✅ Sent.".to_string(),
                 Err(e) => format!("⚠️ Send failed: {e}"),
@@ -269,60 +268,60 @@ pub async fn handle(
     if t.needs_reply
         && let (Some(draft), Some(message_id)) =
             (t.draft.clone(), msg.meta.get("messageId").cloned())
-        {
-            let token = msg.id.chars().take(6).collect::<String>();
-            add_pending(
-                vault_path,
-                PendingEmail {
-                    token: token.clone(),
-                    message_id,
-                    from: from.clone(),
-                    subject: subject.clone(),
-                    draft: draft.clone(),
-                    created_at: Utc::now(),
-                    company_id: company_id.clone(),
-                },
-            )?;
-            let company_label = if company_id.is_empty() {
-                String::new()
-            } else {
-                format!("[{company_id}] ")
-            };
-            let text = format!(
-                "{company_label}Reply needed — {from}\nRe: {subject}\n\n{}\n\nDraft:\n---\n{draft}\n---\nReply `send {token}` to send as-is, `skip {token}` to ignore, or type your own version then `send {token}`.",
-                t.summary
-            );
-            let mut out = mailbox::new_message(
-                "email-triage",
-                "relay",
-                MailboxMessageType::Nudge,
-                Some("Email needs reply"),
-                &text,
-                None,
-            );
-            // Carry the token so the relay renders tap-to-send/skip keyboard pills
-            // instead of making the user type `send <token>`.
-            out.meta.insert("email_token".to_string(), token.clone());
-            // Same-day actionable: a reply-needed prompt with send/skip
-            // tokens, not a status ping.
-            out.meta.insert(
-                hq_core::mailbox::META_INTERRUPT.to_string(),
-                "true".to_string(),
-            );
-            mailbox::send_message(vault_path, &out)?;
+    {
+        let token = msg.id.chars().take(6).collect::<String>();
+        add_pending(
+            vault_path,
+            PendingEmail {
+                token: token.clone(),
+                message_id,
+                from: from.clone(),
+                subject: subject.clone(),
+                draft: draft.clone(),
+                created_at: Utc::now(),
+                company_id: company_id.clone(),
+            },
+        )?;
+        let company_label = if company_id.is_empty() {
+            String::new()
+        } else {
+            format!("[{company_id}] ")
+        };
+        let text = format!(
+            "{company_label}Reply needed — {from}\nRe: {subject}\n\n{}\n\nDraft:\n---\n{draft}\n---\nReply `send {token}` to send as-is, `skip {token}` to ignore, or type your own version then `send {token}`.",
+            t.summary
+        );
+        let mut out = mailbox::new_message(
+            "email-triage",
+            "relay",
+            MailboxMessageType::Nudge,
+            Some("Email needs reply"),
+            &text,
+            None,
+        );
+        // Carry the token so the relay renders tap-to-send/skip keyboard pills
+        // instead of making the user type `send <token>`.
+        out.meta.insert("email_token".to_string(), token.clone());
+        // Same-day actionable: a reply-needed prompt with send/skip
+        // tokens, not a status ping.
+        out.meta.insert(
+            hq_core::mailbox::META_INTERRUPT.to_string(),
+            "true".to_string(),
+        );
+        mailbox::send_message(vault_path, &out)?;
 
-            // Surface the reply-needed item on the value bus (best-effort).
-            // message_id was moved into PendingEmail above, so re-read it for the dedup key.
-            let vi = hq_core::types::ValueItem::new(
-                "email-triage",
-                hq_core::types::ValueKind::ActionNeeded,
-                format!("Reply needed — {from}"),
-                t.summary.clone(),
-            )
-            .with_dedup_key(msg.meta.get("messageId").cloned().unwrap_or_default());
-            let _ = hq_db::value_items::emit_at(vault_path, &vi);
-            return Ok(());
-        }
+        // Surface the reply-needed item on the value bus (best-effort).
+        // message_id was moved into PendingEmail above, so re-read it for the dedup key.
+        let vi = hq_core::types::ValueItem::new(
+            "email-triage",
+            hq_core::types::ValueKind::ActionNeeded,
+            format!("Reply needed — {from}"),
+            t.summary.clone(),
+        )
+        .with_dedup_key(msg.meta.get("messageId").cloned().unwrap_or_default());
+        let _ = hq_db::value_items::emit_at(vault_path, &vi);
+        return Ok(());
+    }
 
     // FYI (or no draft/message id): quiet one-liner, unless it is not worth the owner's attention.
     // The event note is already written by the caller, so a suppressed FYI is still on record.

@@ -109,7 +109,10 @@ pub fn sweep_agent_files(dir: &Path, keep: &[String]) {
         };
         for entry in entries.flatten() {
             let path = entry.path();
-            let stem = path.file_stem().and_then(|s| s.to_str()).unwrap_or_default();
+            let stem = path
+                .file_stem()
+                .and_then(|s| s.to_str())
+                .unwrap_or_default();
             let ours = path.extension().is_some_and(|e| e == "json" || e == "tmp");
             if ours && !keep.iter().any(|k| k == stem.trim_end_matches(".json")) {
                 let _ = fs::remove_file(&path);
@@ -202,8 +205,14 @@ mod tests {
     fn file_names_must_be_agent_names() {
         let tmp = tempfile::tempdir().unwrap();
         for bad in ["../x", "a/b", "", "A", "a.b", "-a"] {
-            assert!(write_claude_settings(tmp.path(), bad, "c").is_err(), "{bad}");
-            assert!(write_claude_mcp_config(tmp.path(), bad, "u", "t").is_err(), "{bad}");
+            assert!(
+                write_claude_settings(tmp.path(), bad, "c").is_err(),
+                "{bad}"
+            );
+            assert!(
+                write_claude_mcp_config(tmp.path(), bad, "u", "t").is_err(),
+                "{bad}"
+            );
         }
         assert!(!tmp.path().join("x.json").exists());
     }

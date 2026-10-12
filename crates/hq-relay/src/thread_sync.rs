@@ -139,13 +139,7 @@ mod tests {
         let (tx, mut rx) = broadcast::channel(8);
         let sync = ThreadSync::new(db, Some(tx));
 
-        sync.record(
-            "telegram",
-            "1234",
-            "Telegram: @someone",
-            "user",
-            "ping",
-        );
+        sync.record("telegram", "1234", "Telegram: @someone", "user", "ping");
 
         let received = rx.try_recv().expect("expected a broadcast event");
         let value: serde_json::Value = serde_json::from_str(&received).unwrap();

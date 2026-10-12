@@ -414,7 +414,14 @@ pub fn available_backend_for(network: bool) -> Option<&'static Backend> {
 
 fn bwrap_probe_args(network: bool) -> Vec<&'static str> {
     let mut args = vec![
-        "--ro-bind", "/", "/", "--dev", "/dev", "--proc", "/proc", "--unshare-pid",
+        "--ro-bind",
+        "/",
+        "/",
+        "--dev",
+        "/dev",
+        "--proc",
+        "/proc",
+        "--unshare-pid",
     ];
     if !network {
         args.push("--unshare-net");
@@ -536,7 +543,11 @@ pub fn seatbelt_profile(ctx: &SandboxContext) -> String {
             .writable
             .iter()
             .map(|p| format!("(subpath {})", sbpl_string(p)))
-            .chain(MACOS_SCRATCH_ROOTS.iter().map(|p| format!("(subpath \"{p}\")")))
+            .chain(
+                MACOS_SCRATCH_ROOTS
+                    .iter()
+                    .map(|p| format!("(subpath \"{p}\")")),
+            )
             .collect();
         profile.push_str(&format!("(deny process-exec {})", scratch.join(" ")));
     }

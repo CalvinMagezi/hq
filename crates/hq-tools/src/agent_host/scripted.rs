@@ -6,8 +6,8 @@
 use super::backend::HostBackend;
 use super::transport::{RawOutput, run_with_deadline};
 use super::{
-    AgentInfo, AgentStatus, AgentHostError, Host, INVALID_KEYS_CODE, LaunchRequest, Launched, PromptOutcome,
-    validate_keys,
+    AgentHostError, AgentInfo, AgentStatus, Host, INVALID_KEYS_CODE, LaunchRequest, Launched,
+    PromptOutcome, validate_keys,
 };
 use serde_json::Value;
 use std::path::PathBuf;
@@ -38,7 +38,6 @@ const UNDETECTED_SCREEN_LINES: usize = 20;
 
 /// How often a wrapper launch asks whether the host has recognized an agent yet.
 const DETECT_POLL: Duration = Duration::from_millis(500);
-
 
 #[derive(Debug, Clone)]
 pub struct ScriptedHost {
@@ -97,9 +96,11 @@ impl ScriptedHost {
     fn run(&self, args: &[&str], timeout: Duration) -> Result<RawOutput, AgentHostError> {
         let mut command = Command::new(&self.binary);
         command.args(args);
-        run_with_deadline(&mut command, None, timeout).map_err(|detail| AgentHostError::Unreachable {
-            host: self.name.clone(),
-            detail,
+        run_with_deadline(&mut command, None, timeout).map_err(|detail| {
+            AgentHostError::Unreachable {
+                host: self.name.clone(),
+                detail,
+            }
         })
     }
 
@@ -429,7 +430,12 @@ impl ScriptedHost {
         }
     }
 
-    fn read_from(&self, target: &str, lines: usize, source: &str) -> Result<String, AgentHostError> {
+    fn read_from(
+        &self,
+        target: &str,
+        lines: usize,
+        source: &str,
+    ) -> Result<String, AgentHostError> {
         let n = lines.to_string();
         self.text(
             &["agent", "read", target, "--source", source, "--lines", &n],
@@ -556,7 +562,6 @@ fn api_error(out: &RawOutput) -> AgentHostError {
     }
 }
 
-
 impl HostBackend for ScriptedHost {
     fn name(&self) -> &str {
         ScriptedHost::name(self)
@@ -579,7 +584,11 @@ impl HostBackend for ScriptedHost {
     fn launch(&self, req: &LaunchRequest) -> Result<Launched, AgentHostError> {
         ScriptedHost::launch(self, req)
     }
-    fn await_started(&self, name: &str, within: Duration) -> Result<Option<AgentInfo>, AgentHostError> {
+    fn await_started(
+        &self,
+        name: &str,
+        within: Duration,
+    ) -> Result<Option<AgentInfo>, AgentHostError> {
         ScriptedHost::await_started(self, name, within)
     }
     fn prompt(

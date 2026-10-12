@@ -18,8 +18,8 @@ mod placement;
 mod scoped;
 mod tools_bulk;
 mod tools_graph;
-mod tools_links;
 mod tools_lease;
+mod tools_links;
 mod tools_ops;
 mod tools_org;
 mod tools_task;
@@ -28,19 +28,18 @@ mod tools_time;
 use from_note::TaskCreateFromNoteTool;
 pub use json::{
     added_tags, apply_dependency_changes, notify_ready_for_review, notify_recipients, notify_tags,
-    notify_unblocked,
-    task_json, task_json_with_warnings, unblocked_by_transition,
+    notify_unblocked, task_json, task_json_with_warnings, unblocked_by_transition,
 };
 pub use placement::{
     Placement, create_task_in, derive_id_prefix, find_or_create_folder, find_or_create_initiative,
     resolve_space_id, slug,
 };
 pub use scoped::{ensure_person_space, scope_task_tools};
-pub use tools_lease::{lease_ttl_secs, task_settings};
 use tools_bulk::{TaskCreateManyTool, TaskUpdateManyTool};
 use tools_graph::TaskRelatedTool;
-use tools_links::*;
 use tools_lease::*;
+pub use tools_lease::{lease_ttl_secs, task_settings};
+use tools_links::*;
 use tools_ops::{InitiativeProgressTool, TaskRoutingAuditTool, TaskStaleTool};
 use tools_org::*;
 use tools_task::*;
@@ -89,23 +88,67 @@ pub fn create_task_tools_for_chat(
         Box::new(create()),
         Box::new(TaskCreateManyTool { inner: create() }),
         Box::new(TaskUpdateManyTool { inner: update() }),
-        Box::new(TaskListTool { settings: settings.clone(), db: db.clone() }),
-        Box::new(TaskGetTool { settings: settings.clone(), db: db.clone() }),
+        Box::new(TaskListTool {
+            settings: settings.clone(),
+            db: db.clone(),
+        }),
+        Box::new(TaskGetTool {
+            settings: settings.clone(),
+            db: db.clone(),
+        }),
         Box::new(update()),
         Box::new(TaskRelatedTool { db: db.clone() }),
-        Box::new(TaskDeleteTool { settings: settings.clone(), db: db.clone() }),
-        Box::new(TaskRestoreTool { settings: settings.clone(), db: db.clone() }),
-        Box::new(TaskCommentAddTool { settings: settings.clone(), db: db.clone() }),
+        Box::new(TaskDeleteTool {
+            settings: settings.clone(),
+            db: db.clone(),
+        }),
+        Box::new(TaskRestoreTool {
+            settings: settings.clone(),
+            db: db.clone(),
+        }),
+        Box::new(TaskCommentAddTool {
+            settings: settings.clone(),
+            db: db.clone(),
+        }),
         Box::new(TaskCommentListTool { db: db.clone() }),
-        Box::new(TaskClaimTool { settings: settings.clone(), db: db.clone() }),
-        Box::new(TaskNextTool { settings: settings.clone(), db: db.clone() }),
-        Box::new(TaskHeartbeatTool { settings: settings.clone(), db: db.clone() }),
-        Box::new(TaskReleaseTool { settings: settings.clone(), vault_path: vault_path.clone(), db: db.clone() }),
-        Box::new(TaskTimeReportTool { settings: settings.clone(), db: db.clone() }),
-        Box::new(TaskStaleTool { settings: settings.clone(), db: db.clone() }),
-        Box::new(InitiativeProgressTool { settings: settings.clone(), db: db.clone() }),
-        Box::new(TaskRoutingAuditTool { settings: settings.clone(), vault_path: vault_path.clone(), db: db.clone() }),
-        Box::new(TaskLinkAddTool { settings: settings.clone(), db: db.clone() }),
+        Box::new(TaskClaimTool {
+            settings: settings.clone(),
+            db: db.clone(),
+        }),
+        Box::new(TaskNextTool {
+            settings: settings.clone(),
+            db: db.clone(),
+        }),
+        Box::new(TaskHeartbeatTool {
+            settings: settings.clone(),
+            db: db.clone(),
+        }),
+        Box::new(TaskReleaseTool {
+            settings: settings.clone(),
+            vault_path: vault_path.clone(),
+            db: db.clone(),
+        }),
+        Box::new(TaskTimeReportTool {
+            settings: settings.clone(),
+            db: db.clone(),
+        }),
+        Box::new(TaskStaleTool {
+            settings: settings.clone(),
+            db: db.clone(),
+        }),
+        Box::new(InitiativeProgressTool {
+            settings: settings.clone(),
+            db: db.clone(),
+        }),
+        Box::new(TaskRoutingAuditTool {
+            settings: settings.clone(),
+            vault_path: vault_path.clone(),
+            db: db.clone(),
+        }),
+        Box::new(TaskLinkAddTool {
+            settings: settings.clone(),
+            db: db.clone(),
+        }),
         Box::new(TaskLinkRemoveTool { db: db.clone() }),
         Box::new(TaskLinkListTool { db: db.clone() }),
         Box::new(SpaceListTool { db: db.clone() }),
@@ -115,7 +158,11 @@ pub fn create_task_tools_for_chat(
         Box::new(FolderCreateTool { db: db.clone() }),
         Box::new(InitiativeListTool { db: db.clone() }),
         Box::new(InitiativeCreateTool { db: db.clone() }),
-        Box::new(TaskCreateFromNoteTool { route_tags: settings.route_tags, vault, db }),
+        Box::new(TaskCreateFromNoteTool {
+            route_tags: settings.route_tags,
+            vault,
+            db,
+        }),
     ]
 }
 

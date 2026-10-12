@@ -31,7 +31,9 @@ fn u32_at(v: &Value, pointer: &str) -> u32 {
 }
 
 fn str_at<'a>(v: &'a Value, pointer: &str) -> Option<&'a str> {
-    v.pointer(pointer).and_then(Value::as_str).filter(|s| !s.is_empty())
+    v.pointer(pointer)
+        .and_then(Value::as_str)
+        .filter(|s| !s.is_empty())
 }
 
 /// Ids and model names come from files HQ does not control, so none is stored longer than this.
@@ -237,7 +239,10 @@ pub fn parse_kimi_line(
 // ─── OpenCode (SQLite) ──────────────────────────────────────────────
 
 /// Assistant messages are one call each. The session's own totals are cumulative and are not read.
-pub fn read_opencode(conn: &Connection, after_time_ms: i64) -> rusqlite::Result<Vec<HarnessUsageEvent>> {
+pub fn read_opencode(
+    conn: &Connection,
+    after_time_ms: i64,
+) -> rusqlite::Result<Vec<HarnessUsageEvent>> {
     let mut stmt = conn.prepare(
         "SELECT m.id, m.session_id, s.directory, m.time_created,
                 json_extract(m.data, '$.modelID'),
@@ -251,7 +256,10 @@ pub fn read_opencode(conn: &Connection, after_time_ms: i64) -> rusqlite::Result<
                 OR json_extract(m.data, '$.tokens.output') > 0)",
     )?;
     let rows = stmt.query_map([after_time_ms], |r| {
-        let n = |i: usize| r.get::<_, Option<i64>>(i).map(|v| v.unwrap_or(0).clamp(0, i64::from(u32::MAX)) as u32);
+        let n = |i: usize| {
+            r.get::<_, Option<i64>>(i)
+                .map(|v| v.unwrap_or(0).clamp(0, i64::from(u32::MAX)) as u32)
+        };
         let cache_read = n(8)?;
         let cost: Option<f64> = r.get(10)?;
         Ok(HarnessUsageEvent {
@@ -287,7 +295,10 @@ pub fn read_copilot(conn: &Connection, after_id: i64) -> rusqlite::Result<Vec<Ha
          WHERE e.id > ?1",
     )?;
     let rows = stmt.query_map([after_id], |r| {
-        let n = |i: usize| r.get::<_, Option<i64>>(i).map(|v| v.unwrap_or(0).clamp(0, i64::from(u32::MAX)) as u32);
+        let n = |i: usize| {
+            r.get::<_, Option<i64>>(i)
+                .map(|v| v.unwrap_or(0).clamp(0, i64::from(u32::MAX)) as u32)
+        };
         let (input, cache_read, cache_write) = (n(5)?, n(7)?, n(8)?);
         let created: String = r.get(3)?;
         Ok(HarnessUsageEvent {
@@ -322,8 +333,23 @@ mod tests {
             "output_tokens":50,"cache_read_input_tokens":1000,"cache_creation_input_tokens":30}}}"#
             .replace('\n', "");
         let e = parse_claude_line(&line).unwrap();
-        assert_eq!((e.source_id.as_str(), e.session_ref.as_str(), e.model.as_str()), ("m1", "s1", "claude-x"));
-        assert_eq!((e.usage.input, e.usage.output, e.usage.cache_read, e.usage.cache_write), (1002, 50, 1000, 30));
+        assert_eq!(
+            (
+                e.source_id.as_str(),
+                e.session_ref.as_str(),
+                e.model.as_str()
+            ),
+            ("m1", "s1", "claude-x")
+        );
+        assert_eq!(
+            (
+                e.usage.input,
+                e.usage.output,
+                e.usage.cache_read,
+                e.usage.cache_write
+            ),
+            (1002, 50, 1000, 30)
+        );
         assert!(parse_claude_line(r#"{"type":"user","message":{"id":"m"}}"#).is_none());
         assert!(parse_claude_line("not json").is_none());
     }
@@ -339,7 +365,10 @@ mod tests {
             .replace('\n', "");
         let e = parse_codex_line(&line, 7, &s).unwrap();
         assert_eq!((e.source_id.as_str(), e.model.as_str()), ("c1:7", "gpt-x"));
-        assert_eq!((e.usage.input, e.usage.cache_read, e.usage.reasoning), (14489, 9000, 40));
+        assert_eq!(
+            (e.usage.input, e.usage.cache_read, e.usage.reasoning),
+            (14489, 9000, 40)
+        );
         let other = r#"{"timestamp":"2026-10-08T10:00:00Z","payload":{"type":"agent_message"}}"#;
         assert!(parse_codex_line(other, 8, &s).is_none());
     }
@@ -359,11 +388,15 @@ mod tests {
 
     #[test]
     fn kimi_status_updates_are_steps_and_other_messages_are_skipped() {
-        let line = r#"{"timestamp":1791500000.5,"message":{"type":"StatusUpdate","payload":{"token_usage":
+        let line =
+            r#"{"timestamp":1791500000.5,"message":{"type":"StatusUpdate","payload":{"token_usage":
             {"input_other":7689,"output":10,"input_cache_read":9216,"input_cache_creation":5}}}}"#
-            .replace('\n', "");
+                .replace('\n', "");
         let e = parse_kimi_line(&line, "k1", 3, "kimi-k3").unwrap();
-        assert_eq!((e.source_id.as_str(), e.usage.input, e.usage.cache_write), ("k1:3", 16905, 5));
+        assert_eq!(
+            (e.source_id.as_str(), e.usage.input, e.usage.cache_write),
+            ("k1:3", 16905, 5)
+        );
         assert!(parse_kimi_line(r#"{"message":{"type":"TurnBegin"}}"#, "k1", 4, "").is_none());
     }
 
@@ -383,7 +416,10 @@ mod tests {
         .unwrap();
         let events = read_opencode(&conn, 0).unwrap();
         assert_eq!(events.len(), 2);
-        assert_eq!((events[0].usage.input, events[0].usage.billed_usd), (150, None));
+        assert_eq!(
+            (events[0].usage.input, events[0].usage.billed_usd),
+            (150, None)
+        );
         assert_eq!(events[1].usage.billed_usd, Some(0.25));
         assert_eq!(read_opencode(&conn, 1_791_500_000_500).unwrap().len(), 1);
     }
@@ -401,13 +437,19 @@ mod tests {
         )
         .unwrap();
         let e = &read_copilot(&conn, 0).unwrap()[0];
-        assert_eq!((e.usage.input, e.usage.cache_read, e.usage.cache_write), (36251, 36249, 150));
+        assert_eq!(
+            (e.usage.input, e.usage.cache_read, e.usage.cache_write),
+            (36251, 36249, 150)
+        );
         assert!(read_copilot(&conn, 1).unwrap().is_empty());
     }
 
     #[test]
     fn a_pi_cost_of_zero_is_not_a_billed_zero() {
-        let s = PiSession { id: "p1".into(), cwd: None };
+        let s = PiSession {
+            id: "p1".into(),
+            cwd: None,
+        };
         let line = r#"{"type":"message","id":"e1","timestamp":"2026-08-02T09:59:30Z","message":{"role":"assistant","model":"m","usage":{"input":1,"output":1,"cost":{"total":0}}}}"#;
         let (e, cost) = parse_pi_line(line, &s).unwrap();
         assert_eq!((cost, e.usage.billed_usd), (None, None));
@@ -424,13 +466,20 @@ mod tests {
              INSERT INTO message VALUES ('m2','s1',1791500001000,'{\"role\":\"assistant\",\"modelID\":\"o\",\"time\":{\"completed\":1791500002000},\"tokens\":{\"input\":5,\"output\":0}}');",
         )
         .unwrap();
-        let ids: Vec<String> = read_opencode(&conn, 0).unwrap().into_iter().map(|e| e.source_id).collect();
+        let ids: Vec<String> = read_opencode(&conn, 0)
+            .unwrap()
+            .into_iter()
+            .map(|e| e.source_id)
+            .collect();
         assert_eq!(ids, ["m2"]);
     }
 
     #[test]
     fn a_sqlite_style_timestamp_is_understood() {
-        assert_eq!(parse_ts("2026-10-08 10:00:00"), parse_ts("2026-10-08T10:00:00Z"));
+        assert_eq!(
+            parse_ts("2026-10-08 10:00:00"),
+            parse_ts("2026-10-08T10:00:00Z")
+        );
         assert!(parse_ts("2026-10-08 10:00:00.250").is_some());
         assert!(parse_ts("garbage").is_none());
     }

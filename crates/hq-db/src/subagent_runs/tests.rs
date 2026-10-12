@@ -506,7 +506,11 @@ fn overdue_runs_are_closed_even_when_their_pid_is_alive() {
     let c = conn();
     insert_run(&c, &new_run("run-ov1111", "t1"), 1000).unwrap();
     mark_running(&c, "run-ov1111", 1000, 100).unwrap();
-    assert!(reconcile_overdue(&c, 1100 + OVERDUE_GRACE_SECS).unwrap().is_empty());
+    assert!(
+        reconcile_overdue(&c, 1100 + OVERDUE_GRACE_SECS)
+            .unwrap()
+            .is_empty()
+    );
     let closed = reconcile_overdue(&c, 1100 + OVERDUE_GRACE_SECS + 1).unwrap();
     assert_eq!(closed, vec!["run-ov1111".to_string()]);
     assert_eq!(events_for_run(&c, "run-ov1111").unwrap().len(), 1);
@@ -519,7 +523,11 @@ fn queued_run_gets_a_deadline_and_is_not_flagged_stale() {
     insert_run(&c, &new_run("run-qq2222", "t1"), 1000).unwrap();
     let row = get(&c, "run-qq2222").unwrap().unwrap();
     assert_eq!(row.deadline_at, Some(1000 + QUEUE_DEADLINE_SECS));
-    assert!(flag_stalled(&c, 1000 + STALE_AFTER_SECS * 4).unwrap().is_empty());
+    assert!(
+        flag_stalled(&c, 1000 + STALE_AFTER_SECS * 4)
+            .unwrap()
+            .is_empty()
+    );
 }
 
 #[test]
@@ -528,7 +536,10 @@ fn no_telemetry_is_reported_as_unknown_but_never_raises_a_stale_event() {
     insert_run(&c, &new_run("run-nt3333", "t1"), 1000).unwrap();
     mark_running(&c, "run-nt3333", 1000, 6000).unwrap();
     let at = 1000 + STALE_AFTER_SECS + 5;
-    assert_eq!(get(&c, "run-nt3333").unwrap().unwrap().liveness(at), Liveness::Unknown);
+    assert_eq!(
+        get(&c, "run-nt3333").unwrap().unwrap().liveness(at),
+        Liveness::Unknown
+    );
     assert!(flag_stalled(&c, at).unwrap().is_empty());
 }
 
@@ -536,14 +547,24 @@ fn no_telemetry_is_reported_as_unknown_but_never_raises_a_stale_event() {
 fn only_a_completed_run_can_be_accepted_and_a_cancelled_one_cannot_be_reviewed() {
     let c = conn();
     insert_run(&c, &new_run("run-rv4444", "t1"), 100).unwrap();
-    settle(&c, "run-rv4444", &settlement(EXEC_FAILED, ACCEPT_BLOCKED, "x"), 110, false).unwrap();
+    settle(
+        &c,
+        "run-rv4444",
+        &settlement(EXEC_FAILED, ACCEPT_BLOCKED, "x"),
+        110,
+        false,
+    )
+    .unwrap();
     assert!(review(&c, "run-rv4444", ACCEPT_ACCEPTED, &[], None, 120).is_err());
     review(&c, "run-rv4444", ACCEPT_PARTIAL, &["x".into()], None, 121).unwrap();
 
     insert_run(&c, &new_run("run-rv5555", "t1"), 100).unwrap();
     cancel(&c, "run-rv5555", 110).unwrap();
     assert!(review(&c, "run-rv5555", ACCEPT_PARTIAL, &[], None, 120).is_err());
-    assert_eq!(get(&c, "run-rv5555").unwrap().unwrap().accept_status, ACCEPT_BLOCKED);
+    assert_eq!(
+        get(&c, "run-rv5555").unwrap().unwrap().accept_status,
+        ACCEPT_BLOCKED
+    );
 }
 
 #[test]
@@ -556,7 +577,14 @@ fn unscoped_callers_see_only_unrouted_runs() {
     let scope = Some(Origin::unrouted());
     assert!(find(&c, "run-sc6666", scope.as_ref()).unwrap().is_none());
     assert!(find(&c, "run-sc7777", scope.as_ref()).unwrap().is_some());
-    let rows = list(&c, &ListFilter { scope, ..Default::default() }).unwrap();
+    let rows = list(
+        &c,
+        &ListFilter {
+            scope,
+            ..Default::default()
+        },
+    )
+    .unwrap();
     assert_eq!(rows.len(), 1);
     assert_eq!(rows[0].run_id, "run-sc7777");
 }

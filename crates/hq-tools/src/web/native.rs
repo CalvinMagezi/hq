@@ -336,16 +336,14 @@ pub(super) async fn search_pool(
     let mut grace_ends: Option<Instant> = None;
     loop {
         let next = match grace_ends {
-            Some(end) => {
-                match tokio::time::timeout_at(end.into(), set.join_next()).await {
-                    Ok(next) => next,
-                    Err(_) => {
-                        cut_short = true;
-                        set.abort_all();
-                        break;
-                    }
+            Some(end) => match tokio::time::timeout_at(end.into(), set.join_next()).await {
+                Ok(next) => next,
+                Err(_) => {
+                    cut_short = true;
+                    set.abort_all();
+                    break;
                 }
-            }
+            },
             None => set.join_next().await,
         };
         let Some(joined) = next else { break };
@@ -353,7 +351,8 @@ pub(super) async fn search_pool(
             Ok(run) => {
                 let answered_well = run.weight >= PRIMARY_WEIGHT
                     && run.results.as_ref().is_some_and(|r| !r.is_empty());
-                if let (true, None, Some(grace)) = (answered_well, grace_ends, env.straggler_grace) {
+                if let (true, None, Some(grace)) = (answered_well, grace_ends, env.straggler_grace)
+                {
                     grace_ends = Some(Instant::now() + grace);
                 }
                 runs.push(run);
@@ -581,7 +580,8 @@ fn relevance(terms: &[String], phrase: &str, r: &SearchResult) -> f32 {
     let in_title = share(&r.title);
     let base = MIN_RELEVANCE + (1.0 - MIN_RELEVANCE) * all;
     let phrase_hit = phrase.contains(' ') && squash(&r.title).contains(phrase);
-    base * (1.0 + TITLE_BOOST * in_title * in_title) * if phrase_hit { 1.0 + PHRASE_BOOST } else { 1.0 }
+    base * (1.0 + TITLE_BOOST * in_title * in_title)
+        * if phrase_hit { 1.0 + PHRASE_BOOST } else { 1.0 }
 }
 
 /// Lowercase words joined by single spaces, so phrases compare across punctuation.

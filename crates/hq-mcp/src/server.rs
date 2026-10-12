@@ -31,7 +31,11 @@ const PROTOCOL_VERSIONS: &[ProtocolVersion] = &[ProtocolVersion::V_2024_11_05];
 
 impl HqMcpServer {
     pub fn new(registry: Arc<ToolRegistry>, db: hq_db::Database) -> Self {
-        Self { registry, db, allowed: None }
+        Self {
+            registry,
+            db,
+            allowed: None,
+        }
     }
 
     /// Limit this server to `allowed` (for example [`gateway::TASKS_ALLOWLIST`]).
@@ -56,7 +60,9 @@ impl ServerHandler for HqMcpServer {
             .with_server_info(Implementation::new("agent-hq", env!("CARGO_PKG_VERSION")))
             .with_instructions(match self.allowed {
                 None => gateway::server_instructions(&self.registry),
-                Some(allowed) if allowed == gateway::TASKS_ALLOWLIST => gateway::tasks_scope_instructions(),
+                Some(allowed) if allowed == gateway::TASKS_ALLOWLIST => {
+                    gateway::tasks_scope_instructions()
+                }
                 Some(_) => gateway::SCOPED_INSTRUCTIONS.to_string(),
             })
     }
@@ -70,7 +76,9 @@ impl ServerHandler for HqMcpServer {
         _request: Option<PaginatedRequestParams>,
         _context: RequestContext<RoleServer>,
     ) -> Result<ListToolsResult, ErrorData> {
-        Ok(ListToolsResult::with_all_items(gateway::create_gateway_tools_scoped(&self.registry, self.allowed)))
+        Ok(ListToolsResult::with_all_items(
+            gateway::create_gateway_tools_scoped(&self.registry, self.allowed),
+        ))
     }
 
     async fn call_tool(
@@ -154,8 +162,14 @@ mod tests {
         assert!(text.starts_with(gateway::SCOPED_INSTRUCTIONS));
         assert!(!text.contains("tool_number_"));
 
-        let open = server_with_stub_registry().get_info().instructions.unwrap_or_default();
-        assert!(open.contains("tool_number_000"), "the unscoped server keeps the catalog");
+        let open = server_with_stub_registry()
+            .get_info()
+            .instructions
+            .unwrap_or_default();
+        assert!(
+            open.contains("tool_number_000"),
+            "the unscoped server keeps the catalog"
+        );
     }
 
     /// Instructions ship on every MCP handshake. Swapping the full
@@ -181,17 +195,41 @@ mod tests {
     #[test]
     fn the_task_protocol_is_in_the_instructions_exactly_when_tasks_are() {
         let without = gateway::server_instructions(&server_with_stub_registry().registry);
-        assert!(!without.contains("Working on tasks"), "no task tools, no task protocol");
+        assert!(
+            !without.contains("Working on tasks"),
+            "no task tools, no task protocol"
+        );
 
         let mut registry = ToolRegistry::new();
-        registry.register(Box::new(Stub { name: "task_claim".into(), description: "claim".into(), category: "tasks".into() }));
+        registry.register(Box::new(Stub {
+            name: "task_claim".into(),
+            description: "claim".into(),
+            category: "tasks".into(),
+        }));
         let with = gateway::server_instructions(&registry);
         assert!(with.contains("## Working on tasks"));
-        for needed in ["task_next", "task_claim", "lease", "task_heartbeat", "checkpoint", "task_release", "ready_for_review", "blocked"] {
+        for needed in [
+            "task_next",
+            "task_claim",
+            "lease",
+            "task_heartbeat",
+            "checkpoint",
+            "task_release",
+            "ready_for_review",
+            "blocked",
+        ] {
             assert!(with.contains(needed), "the protocol must mention {needed}");
         }
-        assert_eq!(with.matches("**task_claim**").count(), 1, "the catalog still lists the tool once");
-        assert!(with.len() < 4000, "the protocol is short: {} bytes", with.len());
+        assert_eq!(
+            with.matches("**task_claim**").count(),
+            1,
+            "the catalog still lists the tool once"
+        );
+        assert!(
+            with.len() < 4000,
+            "the protocol is short: {} bytes",
+            with.len()
+        );
     }
 
     #[test]

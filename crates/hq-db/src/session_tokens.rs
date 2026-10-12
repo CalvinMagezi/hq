@@ -130,11 +130,10 @@ mod tests {
         db.with_conn(|c| {
             session(c, "hs-a");
             let token = mint(c, "hs-a")?;
-            let stored: String = c.query_row(
-                "SELECT token_hash FROM harness_session_tokens",
-                [],
-                |r| r.get(0),
-            )?;
+            let stored: String =
+                c.query_row("SELECT token_hash FROM harness_session_tokens", [], |r| {
+                    r.get(0)
+                })?;
             assert_ne!(stored, token);
             assert!(!stored.contains(&token));
             assert_eq!(stored.len(), 64);
@@ -198,7 +197,11 @@ mod tests {
             session(c, "hs-a");
             let token = mint(c, "hs-a")?;
             registry::set_status_exited_if_running(c, "hs-a")?;
-            assert_eq!(session_for_token(c, &token)?, None, "a fresh token is not a way back in");
+            assert_eq!(
+                session_for_token(c, &token)?,
+                None,
+                "a fresh token is not a way back in"
+            );
             Ok(())
         })
         .unwrap();

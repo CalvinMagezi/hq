@@ -56,11 +56,15 @@ impl Client {
         Self::connect_at(dir, agent_socket_path(dir), token)
     }
 
-    fn connect_at(dir: &Path, socket: std::path::PathBuf, token: &str) -> Result<Self, ClientError> {
+    fn connect_at(
+        dir: &Path,
+        socket: std::path::PathBuf,
+        token: &str,
+    ) -> Result<Self, ClientError> {
         token::check_trusted_dir(dir)
             .map_err(|e| ClientError::Unreachable(format!("host directory: {e}")))?;
-        let stream = UnixStream::connect(socket)
-            .map_err(|e| ClientError::Unreachable(e.to_string()))?;
+        let stream =
+            UnixStream::connect(socket).map_err(|e| ClientError::Unreachable(e.to_string()))?;
         let writer = stream
             .try_clone()
             .map_err(|e| ClientError::Unreachable(e.to_string()))?;

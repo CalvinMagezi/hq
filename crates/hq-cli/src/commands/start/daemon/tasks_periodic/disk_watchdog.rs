@@ -219,9 +219,7 @@ mod tests {
         let vault = Path::new("/home/alice/Documents/GitHub/agent-hq/.vault");
         assert_eq!(
             default_watch_root(vault),
-            Some(PathBuf::from(
-                "/home/alice/Documents/GitHub/agent-hq"
-            ))
+            Some(PathBuf::from("/home/alice/Documents/GitHub/agent-hq"))
         );
     }
 

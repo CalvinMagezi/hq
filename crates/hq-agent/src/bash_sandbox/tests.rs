@@ -356,10 +356,24 @@ fn bwrap_probe_requests_unshare_net_exactly_when_the_real_argv_does() {
 #[test]
 fn authorized_keys_is_read_only_and_control_sockets_are_masked() {
     let args = strings(&bwrap_args(&ctx(true), "true"));
-    let ro = position(&args, &["--ro-bind", "/home/u/.ssh/authorized_keys", "/home/u/.ssh/authorized_keys"]).unwrap();
+    let ro = position(
+        &args,
+        &[
+            "--ro-bind",
+            "/home/u/.ssh/authorized_keys",
+            "/home/u/.ssh/authorized_keys",
+        ],
+    )
+    .unwrap();
     let bind = position(&args, &["--bind", "/home/u", "/home/u"]).unwrap();
-    assert!(bind < ro, "the read-only bind must come after the writable one");
-    assert!(seatbelt_profile(&ctx(true)).contains("(deny file-write* (literal \"/home/u/.ssh/authorized_keys\"))"));
+    assert!(
+        bind < ro,
+        "the read-only bind must come after the writable one"
+    );
+    assert!(
+        seatbelt_profile(&ctx(true))
+            .contains("(deny file-write* (literal \"/home/u/.ssh/authorized_keys\"))")
+    );
     assert!(control_sockets().iter().any(|p| p.ends_with("docker.sock")));
 }
 
@@ -370,7 +384,9 @@ fn refusing_status_files_one_notification_per_boot() {
     assert!(report_refusal(&settings, None, &db, "boot1").unwrap());
     assert!(report_refusal(&settings, None, &db, "boot1").unwrap());
     let count = |db: &hq_db::Database| {
-        hq_db::value_items::list_filtered(db, None, None, 50).unwrap().len()
+        hq_db::value_items::list_filtered(db, None, None, 50)
+            .unwrap()
+            .len()
     };
     assert_eq!(count(&db), 1, "same boot collapses");
     report_refusal(&settings, None, &db, "boot2").unwrap();
@@ -384,7 +400,11 @@ fn working_or_opted_out_sandbox_files_nothing() {
     assert!(!report_refusal(&BashSettings::default(), Some(&b), &db, "b").unwrap());
     assert!(!report_refusal(&settings_with(BashSandboxMode::BestEffort), None, &db, "b").unwrap());
     assert!(!report_refusal(&settings_with(BashSandboxMode::Off), None, &db, "b").unwrap());
-    assert!(hq_db::value_items::list_filtered(&db, None, None, 5).unwrap().is_empty());
+    assert!(
+        hq_db::value_items::list_filtered(&db, None, None, 5)
+            .unwrap()
+            .is_empty()
+    );
 }
 
 #[test]
@@ -394,7 +414,11 @@ fn read_only_context_leaves_only_scratch_writable() {
     let ctx = SandboxContext::for_process(&settings);
     let home = dirs::home_dir().and_then(|h| h.canonicalize().ok());
     let cwd = std::env::current_dir().unwrap().canonicalize().unwrap();
-    assert!(!ctx.writable.iter().any(|p| Some(p) == home.as_ref() || *p == cwd));
+    assert!(
+        !ctx.writable
+            .iter()
+            .any(|p| Some(p) == home.as_ref() || *p == cwd)
+    );
     assert!(!ctx.network);
 }
 
@@ -431,7 +455,10 @@ fn read_only_seatbelt_profile_closes_local_ipc_and_app_launchers() {
     let profile = seatbelt_profile(&context);
     assert!(profile.contains("(deny network*)"));
     assert!(profile.contains("/usr/bin/open") && profile.contains("launchctl"));
-    assert!(!seatbelt_profile(&ctx(false)).contains("(deny network*)"), "normal bash keeps unix sockets");
+    assert!(
+        !seatbelt_profile(&ctx(false)).contains("(deny network*)"),
+        "normal bash keeps unix sockets"
+    );
 }
 
 #[cfg(target_os = "macos")]
@@ -445,7 +472,10 @@ async fn read_only_bash_still_investigates_but_cannot_launch_apps() {
         "ls / >/dev/null && echo listed; git --version; /usr/bin/open -a Calculator; echo after",
     )
     .await;
-    assert!(out.contains("listed") && out.contains("git version"), "{out}");
+    assert!(
+        out.contains("listed") && out.contains("git version"),
+        "{out}"
+    );
     assert!(out.contains("after"), "{out}");
     assert!(!out.to_lowercase().contains("calculator.app"), "{out}");
     let launched = run_bash(
@@ -453,5 +483,8 @@ async fn read_only_bash_still_investigates_but_cannot_launch_apps() {
         "/usr/bin/open -a Calculator; echo rc=$?; cp /usr/bin/true /tmp/hq-ro-exec && /tmp/hq-ro-exec; echo copied_rc=$?; rm -f /tmp/hq-ro-exec",
     )
     .await;
-    assert!(!launched.contains("rc=0"), "open or a copied binary ran: {launched}");
+    assert!(
+        !launched.contains("rc=0"),
+        "open or a copied binary ran: {launched}"
+    );
 }

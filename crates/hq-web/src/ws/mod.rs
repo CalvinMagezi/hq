@@ -28,9 +28,11 @@ pub(crate) struct ChatTurnSlot {
     ask_id: Option<String>,
 }
 
-pub(crate) type ChatTurnMap = Arc<tokio::sync::RwLock<std::collections::HashMap<String, ChatTurnSlot>>>;
+pub(crate) type ChatTurnMap =
+    Arc<tokio::sync::RwLock<std::collections::HashMap<String, ChatTurnSlot>>>;
 
-const BUSY_REASON: &str = "A reply is still running in this chat. Stop it or wait for it to finish.";
+const BUSY_REASON: &str =
+    "A reply is still running in this chat. Stop it or wait for it to finish.";
 const LITE_CHAT_REASON: &str =
     "Chat is not part of HQ Lite. Use tasks and notes here, or run the full HQ for chat.";
 const GONE_REASON: &str = "That message is no longer in this chat, so it could not be edited.";
@@ -115,19 +117,47 @@ async fn dispatch(state: &Arc<WsState>, text: &str) {
         return;
     };
     match msg {
-        ClientMsg::Chat { thread_id, client_id, .. } if state.profile().is_lite() => {
+        ClientMsg::Chat {
+            thread_id,
+            client_id,
+            ..
+        } if state.profile().is_lite() => {
             // Chat turns run tools, which Lite's server does not offer a browser.
-            reject(state, thread_id.as_deref().unwrap_or(""), client_id.as_deref(), LITE_CHAT_REASON, false);
+            reject(
+                state,
+                thread_id.as_deref().unwrap_or(""),
+                client_id.as_deref(),
+                LITE_CHAT_REASON,
+                false,
+            );
         }
-        ClientMsg::Chat { content, thread_id, attachments, client_id, replace_from } => {
+        ClientMsg::Chat {
+            content,
+            thread_id,
+            attachments,
+            client_id,
+            replace_from,
+        } => {
             let text = chat_uploads::strip_marker(&content);
             let files = chat_uploads::resolve(&state.vault_path, attachments).await;
             let trimmed = text.trim();
             if (!trimmed.is_empty() || !files.is_empty()) && trimmed != "/reset" {
-                handle_chat(state, ChatRequest { text, thread_id, files, client_id, replace_from }).await;
+                handle_chat(
+                    state,
+                    ChatRequest {
+                        text,
+                        thread_id,
+                        files,
+                        client_id,
+                        replace_from,
+                    },
+                )
+                .await;
             }
         }
-        ClientMsg::Stop { thread_id: Some(tid) } if !tid.is_empty() => stop_chat_turn(state, &tid).await,
+        ClientMsg::Stop {
+            thread_id: Some(tid),
+        } if !tid.is_empty() => stop_chat_turn(state, &tid).await,
         ClientMsg::Stop { .. } => info!("ws chat stop requested with no thread_id"),
         ClientMsg::Other => info!(msg = %text, "ws client message"),
     }
@@ -137,7 +167,12 @@ async fn dispatch(state: &Arc<WsState>, text: &str) {
 /// far, and end it for every tab. Aborting the driver task drops the harness stream.
 async fn stop_chat_turn(state: &Arc<WsState>, thread_id: &str) {
     // Settled before the slot goes, so a waiting hq_ask never sees an idle thread and a reason of its own.
-    let ask_id = state.active_chat_turns.read().await.get(thread_id).and_then(|s| s.ask_id.clone());
+    let ask_id = state
+        .active_chat_turns
+        .read()
+        .await
+        .get(thread_id)
+        .and_then(|s| s.ask_id.clone());
     if let Some(ask_id) = &ask_id {
         ask::settle_failed(&state.db, ask_id, ask::STOPPED_REASON);
     }
@@ -172,10 +207,21 @@ fn save_reply_message(
     final_text: Option<&str>,
     stopped: bool,
 ) -> Option<hq_db::chat::ChatMessage> {
-    let reply = record.lock().unwrap_or_else(|e| e.into_inner()).take(final_text, stopped)?;
-    db.with_conn(|conn| hq_db::chat::add_message_with_meta(conn, thread_id, "assistant", &reply.content, reply.meta.as_ref()))
-        .inspect_err(|e| tracing::warn!(thread_id, "could not save chat reply: {e}"))
-        .ok()
+    let reply = record
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .take(final_text, stopped)?;
+    db.with_conn(|conn| {
+        hq_db::chat::add_message_with_meta(
+            conn,
+            thread_id,
+            "assistant",
+            &reply.content,
+            reply.meta.as_ref(),
+        )
+    })
+    .inspect_err(|e| tracing::warn!(thread_id, "could not save chat reply: {e}"))
+    .ok()
 }
 
 /// One chat message as the browser sent it, after its files were resolved.
@@ -207,10 +253,19 @@ async fn handle_chat(state: &Arc<WsState>, req: ChatRequest) {
         }
         if let Some(from) = &req.replace_from {
             if ask::replaces_mcp_question(&state.db, t, from) {
-                reject(state, t, req.client_id.as_deref(), ask::MCP_EDIT_REASON, false);
+                reject(
+                    state,
+                    t,
+                    req.client_id.as_deref(),
+                    ask::MCP_EDIT_REASON,
+                    false,
+                );
                 return;
             }
-            let deleted = state.db.with_conn(|conn| hq_db::chat::delete_messages_from(conn, t, from)).unwrap_or(0);
+            let deleted = state
+                .db
+                .with_conn(|conn| hq_db::chat::delete_messages_from(conn, t, from))
+                .unwrap_or(0);
             if deleted == 0 {
                 reject(state, t, req.client_id.as_deref(), GONE_REASON, false);
                 return;
@@ -218,7 +273,9 @@ async fn handle_chat(state: &Arc<WsState>, req: ChatRequest) {
         }
     }
     let (tid, history) = open_thread(state, &req);
-    let Some(config) = load_config(state, &tid) else { return };
+    let Some(config) = load_config(state, &tid) else {
+        return;
+    };
     let record: SharedRecord = Arc::new(std::sync::Mutex::new(TurnRecord::default()));
     let turn = ChatTurn {
         db: state.db.clone(),
@@ -230,7 +287,14 @@ async fn handle_chat(state: &Arc<WsState>, req: ChatRequest) {
     };
     let abort = spawn_supervised(turn, config, req.text, history, req.files);
     if let Some(t) = tid {
-        turns.insert(t, ChatTurnSlot { abort, record, ask_id: None });
+        turns.insert(
+            t,
+            ChatTurnSlot {
+                abort,
+                record,
+                ask_id: None,
+            },
+        );
     }
 }
 
@@ -241,10 +305,15 @@ fn open_thread(state: &WsState, req: &ChatRequest) -> (Option<String>, Vec<Agent
     let (message, files) = (req.text.as_str(), req.files.as_slice());
     let db = &state.db;
     let tid = req.thread_id.clone().or_else(|| {
-        db.with_conn(|conn| hq_db::chat::create_thread(conn, "New Chat", "user", "user").map(|t| t.thread_id))
-            .ok()
+        db.with_conn(|conn| {
+            hq_db::chat::create_thread(conn, "New Chat", "user", "user").map(|t| t.thread_id)
+        })
+        .ok()
     });
-    let history = tid.as_deref().map(|t| thread_history(db, t)).unwrap_or_default();
+    let history = tid
+        .as_deref()
+        .map(|t| thread_history(db, t))
+        .unwrap_or_default();
 
     let Some(t) = tid.as_deref() else {
         state.broadcast(&json!({"type": "turn_start", "thread_id": tid}).to_string());
@@ -254,7 +323,9 @@ fn open_thread(state: &WsState, req: &ChatRequest) -> (Option<String>, Vec<Agent
     let user_clean = hq_agent::threads::strip_hq_context(message);
     let metas: Vec<ChatAttachment> = files.iter().map(|f| f.meta.clone()).collect();
     let stored = format!("{user_clean}{}", chat_uploads::marker(&metas));
-    let saved = db.with_conn(|conn| hq_db::chat::add_message(conn, t, "user", stored.trim_start())).ok();
+    let saved = db
+        .with_conn(|conn| hq_db::chat::add_message(conn, t, "user", stored.trim_start()))
+        .ok();
     // Ack before the first token. Carrying the saved message lets every other
     // tab show the question, and the sender swap its local copy for this one;
     // `replace_from` tells the other tabs which messages an edit replaced.
@@ -271,13 +342,20 @@ fn open_thread(state: &WsState, req: &ChatRequest) -> (Option<String>, Vec<Agent
     // Name a new chat after its opening message so parallel chats are tellable apart.
     let mut title = thread_title(&user_clean);
     if title.is_empty() {
-        title = metas.first().map(|a| thread_title(&a.name)).unwrap_or_default();
+        title = metas
+            .first()
+            .map(|a| thread_title(&a.name))
+            .unwrap_or_default();
     }
     if history.is_empty()
         && !title.is_empty()
-        && db.with_conn(|conn| hq_db::chat::set_thread_title(conn, t, &title)).is_ok()
+        && db
+            .with_conn(|conn| hq_db::chat::set_thread_title(conn, t, &title))
+            .is_ok()
     {
-        state.broadcast(&json!({"type": "thread_title", "thread_id": t, "title": title}).to_string());
+        state.broadcast(
+            &json!({"type": "thread_title", "thread_id": t, "title": title}).to_string(),
+        );
     }
     (tid, history)
 }
@@ -298,7 +376,11 @@ fn thread_history(db: &hq_db::Database, thread_id: &str) -> Vec<AgentMsg> {
         })
         .map(|(m, content)| AgentMsg {
             image_parts: Vec::new(),
-            role: if m.role == "user" { MessageRole::User } else { MessageRole::Assistant },
+            role: if m.role == "user" {
+                MessageRole::User
+            } else {
+                MessageRole::Assistant
+            },
             content,
             tool_calls: Vec::new(),
             tool_call_id: None,
@@ -311,7 +393,12 @@ fn thread_history(db: &hq_db::Database, thread_id: &str) -> Vec<AgentMsg> {
 /// that drives a harness session. It streams and saves like any reply, the
 /// prompt itself is not stored. `Busy` while the chat already has a reply
 /// running (try again later), `Refused` for a chat that must never get one.
-pub(crate) async fn start_driver_turn(state: &Arc<WsState>, thread_id: &str, prompt: String, driver: serde_json::Value) -> DriverStart {
+pub(crate) async fn start_driver_turn(
+    state: &Arc<WsState>,
+    thread_id: &str,
+    prompt: String,
+    driver: serde_json::Value,
+) -> DriverStart {
     let mut turns = state.active_chat_turns.write().await;
     if turns.contains_key(thread_id) {
         return DriverStart::Busy;
@@ -329,7 +416,9 @@ pub(crate) async fn start_driver_turn(state: &Arc<WsState>, thread_id: &str, pro
         return DriverStart::Refused;
     }
     let tid = Some(thread_id.to_string());
-    let Some(config) = load_config(state, &tid) else { return DriverStart::Busy };
+    let Some(config) = load_config(state, &tid) else {
+        return DriverStart::Busy;
+    };
     let history = thread_history(&state.db, thread_id);
     let record: SharedRecord = Arc::new(std::sync::Mutex::new(TurnRecord::with_driver(driver)));
     state.broadcast(&json!({"type": "turn_start", "thread_id": thread_id}).to_string());
@@ -342,7 +431,14 @@ pub(crate) async fn start_driver_turn(state: &Arc<WsState>, thread_id: &str, pro
         ask: None,
     };
     let abort = spawn_supervised(turn, config, prompt, history, Vec::new());
-    turns.insert(thread_id.to_string(), ChatTurnSlot { abort, record, ask_id: None });
+    turns.insert(
+        thread_id.to_string(),
+        ChatTurnSlot {
+            abort,
+            record,
+            ask_id: None,
+        },
+    );
     DriverStart::Started
 }
 
@@ -363,13 +459,23 @@ pub(crate) enum DriverStart {
 
 /// Posts a finished assistant message into a chat and tells every tab to
 /// reload it. Returns the message id.
-pub(crate) fn post_assistant_message(state: &WsState, thread_id: &str, content: &str, meta: &serde_json::Value) -> Option<String> {
+pub(crate) fn post_assistant_message(
+    state: &WsState,
+    thread_id: &str,
+    content: &str,
+    meta: &serde_json::Value,
+) -> Option<String> {
     let saved = state
         .db
-        .with_conn(|conn| hq_db::chat::add_message_with_meta(conn, thread_id, "assistant", content, Some(meta)))
+        .with_conn(|conn| {
+            hq_db::chat::add_message_with_meta(conn, thread_id, "assistant", content, Some(meta))
+        })
         .inspect_err(|e| tracing::warn!(thread_id, "could not save session update: {e}"))
         .ok()?;
-    state.broadcast(&json!({"type": "turn_end", "thread_id": thread_id, "message_id": saved.message_id}).to_string());
+    state.broadcast(
+        &json!({"type": "turn_end", "thread_id": thread_id, "message_id": saved.message_id})
+            .to_string(),
+    );
     Some(saved.message_id)
 }
 
@@ -382,7 +488,10 @@ fn load_config(state: &WsState, tid: &Option<String>) -> Option<Arc<hq_core::con
     if let Some(c) = &state.hq_config {
         return Some(c.clone());
     }
-    state.broadcast(&json!({"type": "text_delta", "thread_id": tid, "content": "Config unavailable"}).to_string());
+    state.broadcast(
+        &json!({"type": "text_delta", "thread_id": tid, "content": "Config unavailable"})
+            .to_string(),
+    );
     state.broadcast(&json!({"type": "turn_end", "thread_id": tid}).to_string());
     None
 }
@@ -425,7 +534,8 @@ impl ChatTurn {
         }
         tracing::error!(thread_id = ?self.tid, "chat turn panicked: {err}");
         self.send(json!({"type": "error", "thread_id": self.tid, "content": "The reply stopped unexpectedly. What was written so far is kept; try again."}));
-        self.finish("", true, err.id(), Some(ask::PANIC_REASON)).await;
+        self.finish("", true, err.id(), Some(ask::PANIC_REASON))
+            .await;
     }
 
     fn send(&self, v: serde_json::Value) {
@@ -445,7 +555,11 @@ impl ChatTurn {
         let cwd = std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."));
         let (driver_turn, session_driver, followup_turn_id) = {
             let record = self.record.lock().unwrap_or_else(|e| e.into_inner());
-            (record.is_driver_turn(), record.is_session_driver_turn(), record.followup_turn_id())
+            (
+                record.is_driver_turn(),
+                record.is_session_driver_turn(),
+                record.followup_turn_id(),
+            )
         };
         let hooks_role = if config.governance.orchestrator_role && self.ask.is_none() {
             hq_agent::builder::SessionRole::Orchestrator
@@ -459,7 +573,9 @@ impl ChatTurn {
             on_event: Some(self.event_sink(streamed.clone())),
             on_progress: Some(self.progress_sink()),
             timeout: Some(std::time::Duration::from_secs(match &self.ask {
-                Some(_) => config.chat_turn_timeout_secs.clamp(60, ask::ASK_TURN_TIMEOUT_SECS),
+                Some(_) => config
+                    .chat_turn_timeout_secs
+                    .clamp(60, ask::ASK_TURN_TIMEOUT_SECS),
                 None => config.chat_turn_timeout_secs.max(60),
             })),
             skip_memory_ingestion: self.ask.is_some(),
@@ -475,8 +591,16 @@ impl ChatTurn {
             permission_preset: self.ask.as_ref().and_then(ask::AskTurn::permission_preset),
             role: hooks_role,
             identity: Some(match self.tid.as_deref() {
-                Some(t) => hq_core::identity::RequestIdentity::from_web_thread(t, driver_turn, session_driver),
-                None => hq_core::identity::RequestIdentity::from_proxy_user("web", vec!["*".into()], None),
+                Some(t) => hq_core::identity::RequestIdentity::from_web_thread(
+                    t,
+                    driver_turn,
+                    session_driver,
+                ),
+                None => hq_core::identity::RequestIdentity::from_proxy_user(
+                    "web",
+                    vec!["*".into()],
+                    None,
+                ),
             }),
             isolated: true,
             image_parts,
@@ -494,16 +618,31 @@ impl ChatTurn {
         )
         .await;
         let (content, failure) = match run {
-            Ok(r) => (r.text.clone(), (!r.success).then(|| ask::failure_reason(&r.text))),
+            Ok(r) => (
+                r.text.clone(),
+                (!r.success).then(|| ask::failure_reason(&r.text)),
+            ),
             Err(e) => {
                 self.send(json!({"type": "error", "thread_id": self.tid, "content": format!("Session error: {e}")}));
-                (String::new(), Some(ask::failure_reason(&format!("Session error: {e}"))))
+                (
+                    String::new(),
+                    Some(ask::failure_reason(&format!("Session error: {e}"))),
+                )
             }
         };
-        self.finish(&content, streamed.load(Ordering::Relaxed), tokio::task::id(), failure.as_deref()).await;
+        self.finish(
+            &content,
+            streamed.load(Ordering::Relaxed),
+            tokio::task::id(),
+            failure.as_deref(),
+        )
+        .await;
     }
 
-    fn session_config(&self, config: &hq_core::config::HqConfig) -> hq_agent::session::SessionConfig {
+    fn session_config(
+        &self,
+        config: &hq_core::config::HqConfig,
+    ) -> hq_agent::session::SessionConfig {
         let mut session = hq_agent::session_presets::chat_session_config(config);
         if let Some(ask) = &self.ask {
             session.is_live_user_turn = ask.is_live_user_turn();
@@ -513,13 +652,19 @@ impl ChatTurn {
         session
     }
 
-    fn event_sink(&self, streamed: Arc<AtomicBool>) -> Box<dyn Fn(SessionEvent) + Send + Sync + 'static> {
+    fn event_sink(
+        &self,
+        streamed: Arc<AtomicBool>,
+    ) -> Box<dyn Fn(SessionEvent) + Send + Sync + 'static> {
         let (tx, tid, record) = (self.tx.clone(), self.tid.clone(), self.record.clone());
         Box::new(move |event| {
             if matches!(event, SessionEvent::TextDelta(_)) {
                 streamed.store(true, Ordering::Relaxed);
             }
-            record.lock().unwrap_or_else(|e| e.into_inner()).observe(&event);
+            record
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .observe(&event);
             if let Some(msg) = session_event_json(&event, &tid) {
                 let _ = tx.send(msg);
             }
@@ -535,15 +680,27 @@ impl ChatTurn {
             let followup_on = hq_core::config::HqConfig::load()
                 .map(|c| c.collaboration.supervision_followup)
                 .unwrap_or(false);
-            let Some(thread) = tid.as_deref().filter(|_| !followup_on) else { return };
-            let state = if event.success { "finished" } else { "did not finish cleanly" };
+            let Some(thread) = tid.as_deref().filter(|_| !followup_on) else {
+                return;
+            };
+            let state = if event.success {
+                "finished"
+            } else {
+                "did not finish cleanly"
+            };
             let run = event.run_id.as_deref().unwrap_or("-");
             let content = format!(
                 "Sub-agent `{}` ({}) {state} (run `{run}`). This is a notice only: ask me to review it, or check `subagent_run_list`.",
                 event.task_id, event.role
             );
             let saved = db.with_conn(|c| {
-                hq_db::chat::add_message_with_meta(c, thread, "assistant", &content, Some(&json!({"subagent_notice": event.run_id})))
+                hq_db::chat::add_message_with_meta(
+                    c,
+                    thread,
+                    "assistant",
+                    &content,
+                    Some(&json!({"subagent_notice": event.run_id})),
+                )
             });
             match saved {
                 Ok(m) => {
@@ -570,8 +727,17 @@ impl ChatTurn {
 
     /// Saves the reply (a tools-only turn too) and ends it for every tab.
     /// `failure` says why the run did not complete, which only an `hq_ask` cares about.
-    async fn finish(&self, content: &str, streamed: bool, task_id: tokio::task::Id, failure: Option<&str>) {
-        let saved = self.tid.as_deref().and_then(|t| save_reply_message(&self.db, t, &self.record, Some(content), false));
+    async fn finish(
+        &self,
+        content: &str,
+        streamed: bool,
+        task_id: tokio::task::Id,
+        failure: Option<&str>,
+    ) {
+        let saved = self
+            .tid
+            .as_deref()
+            .and_then(|t| save_reply_message(&self.db, t, &self.record, Some(content), false));
         let message_id = saved.as_ref().map(|m| m.message_id.clone());
         // Before the thread is freed below, so an ask never reads as pending on an idle thread.
         if let Some(turn) = &self.ask {
@@ -594,7 +760,11 @@ const THREAD_TITLE_CHARS: usize = 60;
 
 /// First line of a message, cut to a sidebar-sized title on a char boundary.
 fn thread_title(message: &str) -> String {
-    let line = message.lines().map(str::trim).find(|l| !l.is_empty()).unwrap_or("");
+    let line = message
+        .lines()
+        .map(str::trim)
+        .find(|l| !l.is_empty())
+        .unwrap_or("");
     match line.char_indices().nth(THREAD_TITLE_CHARS) {
         Some((cut, _)) => format!("{}...", line[..cut].trim_end()),
         None => line.to_string(),
@@ -665,7 +835,9 @@ mod tests {
             ClientMsg::Chat { content, thread_id: None, attachments, client_id: None, replace_from: None }
                 if content == "hi" && attachments.is_empty()
         ));
-        let edit = parse(r#"{"type":"chat","content":"again","thread_id":"t1","client_id":"local-1","replace_from":"m7"}"#);
+        let edit = parse(
+            r#"{"type":"chat","content":"again","thread_id":"t1","client_id":"local-1","replace_from":"m7"}"#,
+        );
         assert!(matches!(
             edit,
             ClientMsg::Chat { client_id: Some(c), replace_from: Some(r), .. } if c == "local-1" && r == "m7"
@@ -673,8 +845,13 @@ mod tests {
         let with_files = parse(
             r#"{"type":"chat","content":"","thread_id":"t1","attachments":[{"name":"a.png","path":"_media/web/d/a.png","mime":"image/png","size":3}]}"#,
         );
-        assert!(matches!(with_files, ClientMsg::Chat { attachments, .. } if attachments.len() == 1));
-        assert!(matches!(parse(r#"{"type":"stop","thread_id":"t1"}"#), ClientMsg::Stop { thread_id: Some(_) }));
+        assert!(
+            matches!(with_files, ClientMsg::Chat { attachments, .. } if attachments.len() == 1)
+        );
+        assert!(matches!(
+            parse(r#"{"type":"stop","thread_id":"t1"}"#),
+            ClientMsg::Stop { thread_id: Some(_) }
+        ));
         assert!(matches!(parse(r#"{"type":"ping"}"#), ClientMsg::Other));
     }
 
@@ -686,10 +863,21 @@ mod tests {
     /// A running reply in `tid`, as handle_chat would register it.
     async fn plant_turn(state: &Arc<WsState>, tid: &str, streamed: &str) -> SharedRecord {
         let record: SharedRecord = Arc::new(std::sync::Mutex::new(TurnRecord::default()));
-        record.lock().unwrap().observe(&SessionEvent::TextDelta(streamed.into()));
+        record
+            .lock()
+            .unwrap()
+            .observe(&SessionEvent::TextDelta(streamed.into()));
         let task = tokio::spawn(std::future::pending::<()>());
-        let slot = ChatTurnSlot { abort: task.abort_handle(), record: record.clone(), ask_id: None };
-        state.active_chat_turns.write().await.insert(tid.to_string(), slot);
+        let slot = ChatTurnSlot {
+            abort: task.abort_handle(),
+            record: record.clone(),
+            ask_id: None,
+        };
+        state
+            .active_chat_turns
+            .write()
+            .await
+            .insert(tid.to_string(), slot);
         record
     }
 
@@ -710,7 +898,11 @@ mod tests {
     #[tokio::test]
     async fn a_second_send_while_a_reply_runs_is_refused_and_not_saved() {
         let state = test_state();
-        let tid = state.db.with_conn(|c| hq_db::chat::create_thread(c, "t", "user", "user")).unwrap().thread_id;
+        let tid = state
+            .db
+            .with_conn(|c| hq_db::chat::create_thread(c, "t", "user", "user"))
+            .unwrap()
+            .thread_id;
         plant_turn(&state, &tid, "").await;
         let mut rx = state.tx.subscribe();
 
@@ -720,13 +912,23 @@ mod tests {
         assert_eq!(ev["type"], "chat_rejected");
         assert_eq!(ev["client_id"], "local-1");
         assert_eq!(ev["running"], true);
-        assert!(state.db.with_conn(|c| hq_db::chat::get_messages(c, &tid, 10)).unwrap().is_empty());
+        assert!(
+            state
+                .db
+                .with_conn(|c| hq_db::chat::get_messages(c, &tid, 10))
+                .unwrap()
+                .is_empty()
+        );
     }
 
     #[tokio::test]
     async fn editing_a_message_that_is_gone_is_refused() {
         let state = test_state();
-        let tid = state.db.with_conn(|c| hq_db::chat::create_thread(c, "t", "user", "user")).unwrap().thread_id;
+        let tid = state
+            .db
+            .with_conn(|c| hq_db::chat::create_thread(c, "t", "user", "user"))
+            .unwrap()
+            .thread_id;
         let mut rx = state.tx.subscribe();
 
         handle_chat(&state, request(&tid, "edited", Some("no-such-message"))).await;
@@ -739,7 +941,11 @@ mod tests {
     #[tokio::test]
     async fn stop_keeps_what_streamed_and_ends_the_turn_with_its_id() {
         let state = test_state();
-        let tid = state.db.with_conn(|c| hq_db::chat::create_thread(c, "t", "user", "user")).unwrap().thread_id;
+        let tid = state
+            .db
+            .with_conn(|c| hq_db::chat::create_thread(c, "t", "user", "user"))
+            .unwrap()
+            .thread_id;
         let record = plant_turn(&state, &tid, "half an answer").await;
         let mut rx = state.tx.subscribe();
 
@@ -748,7 +954,10 @@ mod tests {
         let ev = next_event(&mut rx);
         assert_eq!(ev["type"], "turn_end");
         assert_eq!(ev["stopped"], true);
-        let saved = state.db.with_conn(|c| hq_db::chat::get_messages_page(c, &tid, 10, None)).unwrap();
+        let saved = state
+            .db
+            .with_conn(|c| hq_db::chat::get_messages_page(c, &tid, 10, None))
+            .unwrap();
         assert_eq!(saved.len(), 1);
         assert_eq!(saved[0].message.content, "half an answer");
         assert_eq!(saved[0].meta.as_ref().unwrap()["stopped"], true);
@@ -764,7 +973,8 @@ mod tests {
         for i in 0..5 {
             tx.send(format!("delta {i}")).unwrap();
         }
-        let frame: serde_json::Value = serde_json::from_str(&next_frame(&mut rx).await.unwrap()).unwrap();
+        let frame: serde_json::Value =
+            serde_json::from_str(&next_frame(&mut rx).await.unwrap()).unwrap();
         assert_eq!(frame["type"], "stream_lag");
         assert_eq!(frame["skipped"], 3);
         assert_eq!(next_frame(&mut rx).await.as_deref(), Some("delta 3"));
@@ -776,9 +986,16 @@ mod tests {
     #[tokio::test]
     async fn a_panicking_turn_keeps_its_partial_ends_for_every_tab_and_frees_the_chat() {
         let state = test_state();
-        let tid = state.db.with_conn(|c| hq_db::chat::create_thread(c, "t", "user", "user")).unwrap().thread_id;
+        let tid = state
+            .db
+            .with_conn(|c| hq_db::chat::create_thread(c, "t", "user", "user"))
+            .unwrap()
+            .thread_id;
         let record: SharedRecord = Arc::new(std::sync::Mutex::new(TurnRecord::default()));
-        record.lock().unwrap().observe(&SessionEvent::TextDelta("half".into()));
+        record
+            .lock()
+            .unwrap()
+            .observe(&SessionEvent::TextDelta("half".into()));
         let turn = ChatTurn {
             db: state.db.clone(),
             tx: state.tx.clone(),
@@ -788,11 +1005,14 @@ mod tests {
             ask: None,
         };
         let task = tokio::spawn(async { panic!("boom") });
-        state
-            .active_chat_turns
-            .write()
-            .await
-            .insert(tid.clone(), ChatTurnSlot { abort: task.abort_handle(), record, ask_id: None });
+        state.active_chat_turns.write().await.insert(
+            tid.clone(),
+            ChatTurnSlot {
+                abort: task.abort_handle(),
+                record,
+                ask_id: None,
+            },
+        );
         let mut rx = state.tx.subscribe();
 
         turn.supervise(task).await;
@@ -800,7 +1020,10 @@ mod tests {
         assert_eq!(next_event(&mut rx)["type"], "error");
         let end = next_event(&mut rx);
         assert_eq!(end["type"], "turn_end");
-        let saved = state.db.with_conn(|c| hq_db::chat::get_messages_page(c, &tid, 10, None)).unwrap();
+        let saved = state
+            .db
+            .with_conn(|c| hq_db::chat::get_messages_page(c, &tid, 10, None))
+            .unwrap();
         assert_eq!(saved[0].message.content, "half");
         assert_eq!(end["message_id"], saved[0].message.message_id);
         assert!(state.active_chat_turns.read().await.is_empty());
@@ -826,7 +1049,10 @@ mod tests {
 
     #[test]
     fn thread_title_is_the_first_line_cut_to_size() {
-        assert_eq!(thread_title("\n  Plan the launch  \nmore"), "Plan the launch");
+        assert_eq!(
+            thread_title("\n  Plan the launch  \nmore"),
+            "Plan the launch"
+        );
         let long = "é".repeat(80);
         assert_eq!(thread_title(&long), format!("{}...", "é".repeat(60)));
         assert_eq!(thread_title("   "), "");
@@ -839,7 +1065,11 @@ mod tests {
         let lite = Arc::new(WsState::new(vault, None).with_profile(hq_core::config::Profile::Lite));
         let mut rx = lite.tx.subscribe();
 
-        dispatch(&lite, r#"{"type":"chat","content":"run the deploy","thread_id":"t1","client_id":"local-1"}"#).await;
+        dispatch(
+            &lite,
+            r#"{"type":"chat","content":"run the deploy","thread_id":"t1","client_id":"local-1"}"#,
+        )
+        .await;
 
         let ev: serde_json::Value = serde_json::from_str(&rx.try_recv().unwrap()).unwrap();
         assert_eq!(ev["type"], "chat_rejected");
@@ -847,7 +1077,10 @@ mod tests {
         assert_eq!(ev["reason"], LITE_CHAT_REASON);
         assert!(rx.try_recv().is_err(), "no turn_start or reply followed");
         assert!(lite.active_chat_turns.read().await.is_empty());
-        let threads = lite.db.with_conn(|c| hq_db::chat::list_threads(c, 50, 0, None)).unwrap_or_default();
+        let threads = lite
+            .db
+            .with_conn(|c| hq_db::chat::list_threads(c, 50, 0, None))
+            .unwrap_or_default();
         assert!(threads.is_empty(), "nothing was saved: {threads:?}");
     }
 }

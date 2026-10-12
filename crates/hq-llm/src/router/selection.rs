@@ -268,7 +268,11 @@ pub(super) fn compute_score_pressured(
     };
     let pressure = pressure.clamp(0.0, 1.0);
     let boosted = (w_cost * (1.0 + PRESSURE_COST_BOOST * pressure)).min(1.0);
-    let rest = if w_cost < 1.0 { (1.0 - boosted) / (1.0 - w_cost) } else { 1.0 };
+    let rest = if w_cost < 1.0 {
+        (1.0 - boosted) / (1.0 - w_cost)
+    } else {
+        1.0
+    };
     cost_score * boosted
         + health_score * w_health * rest
         + reliability_score * w_reliability * rest

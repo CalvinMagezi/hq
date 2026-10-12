@@ -69,7 +69,11 @@ pub(super) async fn collect_attachments(
     let mut images = Vec::new();
     for att in &msg.attachments {
         let img = is_image(&att.filename);
-        descriptors.push(format_attachment_descriptor(&att.filename, att.size as u64, img));
+        descriptors.push(format_attachment_descriptor(
+            &att.filename,
+            att.size as u64,
+            img,
+        ));
         let saved =
             download_discord_attachment(&att.url, &att.filename, msg.channel_id.get(), vault_path)
                 .await;

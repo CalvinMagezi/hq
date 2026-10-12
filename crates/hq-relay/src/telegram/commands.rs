@@ -21,16 +21,16 @@ pub async fn register_hq_commands(bot: &Bot) -> anyhow::Result<()> {
     let commands: Vec<BotCommand> = [
         ("new", "Start a fresh conversation (alias of /reset)"),
         ("reset", "Clear history"),
-        ("focus", "Pivot focus: clear history, keep model and permission pin"),
+        (
+            "focus",
+            "Pivot focus: clear history, keep model and permission pin",
+        ),
         ("model", "List the backend chain or switch its primary"),
         (
             "permission",
             "Pin a permission preset for this chat: read-only, workspace-write, danger-full-access",
         ),
-        (
-            "status",
-            "Show model and message count",
-        ),
+        ("status", "Show model and message count"),
         ("backend", "Show or switch the LLM backend"),
         ("cancel", "Stop the current running task gracefully"),
         (
@@ -282,8 +282,7 @@ pub async fn handle_help(ctx: &CommandContext<'_>) -> anyhow::Result<bool> {
 pub async fn handle_status(ctx: &CommandContext<'_>) -> anyhow::Result<bool> {
     use teloxide::prelude::Requester;
     if ctx.text_lower == "/status" || ctx.text_lower == "!status" {
-        let status =
-            crate::chat_commands::status_fields(&ctx.threads, &ctx.chat_key).await;
+        let status = crate::chat_commands::status_fields(&ctx.threads, &ctx.chat_key).await;
         ctx.bot.send_message(ctx.msg.chat.id, status.text()).await?;
         return Ok(true);
     }

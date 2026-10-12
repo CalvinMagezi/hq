@@ -24,7 +24,14 @@ pub fn add_message(
         "INSERT INTO task_comments \
          (task_id, author, body, kind, sender_session_id, to_session_id, reply_to) \
          VALUES (?1, ?2, ?3, ?4, ?2, ?5, ?6)",
-        params![task_id, from_session, body, KIND_MESSAGE, to_session, reply_to],
+        params![
+            task_id,
+            from_session,
+            body,
+            KIND_MESSAGE,
+            to_session,
+            reply_to
+        ],
     )?;
     let id = conn.last_insert_rowid();
     changed();
@@ -93,7 +100,11 @@ pub fn claim_next_message(conn: &Connection, to_session: &str) -> Result<Option<
              WHERE to_session_id = ?1 AND kind = ?2 AND delivered_at IS NULL \
                AND created_at >= datetime('now', ?3) \
              ORDER BY id LIMIT 1",
-            params![to_session, KIND_MESSAGE, format!("-{MESSAGE_TTL_HOURS} hours")],
+            params![
+                to_session,
+                KIND_MESSAGE,
+                format!("-{MESSAGE_TTL_HOURS} hours")
+            ],
             |r| r.get(0),
         )
         .optional()?;
@@ -136,8 +147,8 @@ pub fn messages_sent_since(conn: &Connection, from_session: &str, minutes: i64) 
 #[cfg(test)]
 mod tests {
     use super::super::tests::{make, setup as test_db};
-    use crate::Database;
     use super::*;
+    use crate::Database;
 
     fn setup() -> (Database, String) {
         let (db, initiative) = test_db();
@@ -162,11 +173,16 @@ mod tests {
     #[test]
     fn a_plain_comment_has_no_recipient_and_is_never_claimed() {
         let (db, task) = setup();
-        db.with_conn(|c| add_comment(c, &task, "calvin", "note", None)).unwrap();
+        db.with_conn(|c| add_comment(c, &task, "calvin", "note", None))
+            .unwrap();
         let comment = db.with_conn(|c| list_comments(c, &task)).unwrap().remove(0);
         assert_eq!(comment.kind, "comment");
         assert!(comment.to_session_id.is_none());
-        assert!(db.with_conn(|c| claim_next_message(c, "hs-b")).unwrap().is_none());
+        assert!(
+            db.with_conn(|c| claim_next_message(c, "hs-b"))
+                .unwrap()
+                .is_none()
+        );
     }
 
     #[test]
@@ -192,9 +208,15 @@ mod tests {
         let sent = db
             .with_conn(|c| add_message(c, &task, "hs-a", "hs-b", "retry me", None))
             .unwrap();
-        let first = db.with_conn(|c| claim_next_message(c, "hs-b")).unwrap().unwrap();
+        let first = db
+            .with_conn(|c| claim_next_message(c, "hs-b"))
+            .unwrap()
+            .unwrap();
         db.with_conn(|c| release_message(c, first.id)).unwrap();
-        let again = db.with_conn(|c| claim_next_message(c, "hs-b")).unwrap().unwrap();
+        let again = db
+            .with_conn(|c| claim_next_message(c, "hs-b"))
+            .unwrap()
+            .unwrap();
         assert_eq!(again.id, sent.id);
     }
 
@@ -207,19 +229,32 @@ mod tests {
             add_message(c, &task, "hs-z", "hs-b", "other sender", None)
         })
         .unwrap();
-        assert_eq!(db.with_conn(|c| messages_sent_since(c, "hs-a", 60)).unwrap(), 2);
-        assert_eq!(db.with_conn(|c| messages_sent_since(c, "nobody", 60)).unwrap(), 0);
+        assert_eq!(
+            db.with_conn(|c| messages_sent_since(c, "hs-a", 60))
+                .unwrap(),
+            2
+        );
+        assert_eq!(
+            db.with_conn(|c| messages_sent_since(c, "nobody", 60))
+                .unwrap(),
+            0
+        );
     }
 
     #[test]
     fn the_limit_is_enforced_in_the_insert_itself() {
         let (db, task) = setup();
         let send = |n: i64| {
-            db.with_conn(|c| add_message_limited(c, &task, "hs-a", "hs-b", &format!("m{n}"), None, 2, 60))
-                .unwrap()
+            db.with_conn(|c| {
+                add_message_limited(c, &task, "hs-a", "hs-b", &format!("m{n}"), None, 2, 60)
+            })
+            .unwrap()
         };
         assert!(send(1).is_some() && send(2).is_some());
-        assert!(send(3).is_none(), "the third inside the window is refused, with no separate check to race");
+        assert!(
+            send(3).is_none(),
+            "the third inside the window is refused, with no separate check to race"
+        );
         let other = db
             .with_conn(|c| add_message_limited(c, &task, "hs-z", "hs-b", "fine", None, 2, 60))
             .unwrap();
@@ -240,8 +275,19 @@ mod tests {
             Ok(())
         })
         .unwrap();
-        assert!(db.with_conn(|c| claim_next_message(c, "hs-b")).unwrap().is_none());
-        db.with_conn(|c| add_message(c, &task, "hs-a", "hs-b", "fresh", None)).unwrap();
-        assert_eq!(db.with_conn(|c| claim_next_message(c, "hs-b")).unwrap().unwrap().body, "fresh");
+        assert!(
+            db.with_conn(|c| claim_next_message(c, "hs-b"))
+                .unwrap()
+                .is_none()
+        );
+        db.with_conn(|c| add_message(c, &task, "hs-a", "hs-b", "fresh", None))
+            .unwrap();
+        assert_eq!(
+            db.with_conn(|c| claim_next_message(c, "hs-b"))
+                .unwrap()
+                .unwrap()
+                .body,
+            "fresh"
+        );
     }
 }

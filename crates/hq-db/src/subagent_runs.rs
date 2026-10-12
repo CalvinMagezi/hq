@@ -478,7 +478,9 @@ pub fn review(
         params![run_id, accept, serde_json::to_string(missing)?, note, now],
     )?;
     if changed == 0 {
-        bail!("run `{run_id}` cannot take this verdict: it is unsettled, cancelled, missing, or (for accepted) did not complete");
+        bail!(
+            "run `{run_id}` cannot take this verdict: it is unsettled, cancelled, missing, or (for accepted) did not complete"
+        );
     }
     Ok(())
 }
@@ -524,7 +526,13 @@ fn interrupt(conn: &Connection, ids: &[String], reason: &str, now: i64) -> Resul
             params![id, EXEC_INTERRUPTED, reason, now],
         )?;
         if changed == 1 {
-            insert_event(&tx, id, KIND_INTERRUPTED, &format!("{KIND_INTERRUPTED}:{id}"), now)?;
+            insert_event(
+                &tx,
+                id,
+                KIND_INTERRUPTED,
+                &format!("{KIND_INTERRUPTED}:{id}"),
+                now,
+            )?;
             closed.push(id.clone());
         }
     }
@@ -545,7 +553,12 @@ pub fn reconcile_dead_owners(
         .filter(|r| r.owner_pid.is_some_and(|pid| !alive(pid)))
         .map(|r| r.run_id)
         .collect();
-    interrupt(conn, &dead, "the process running this child ended before it settled", now)
+    interrupt(
+        conn,
+        &dead,
+        "the process running this child ended before it settled",
+        now,
+    )
 }
 
 /// Close open runs far past their deadline whoever owns them. A live child
@@ -558,7 +571,12 @@ pub fn reconcile_overdue(conn: &Connection, now: i64) -> Result<Vec<String>> {
         .filter(|r| r.deadline_at.is_some_and(|d| now > d + OVERDUE_GRACE_SECS))
         .map(|r| r.run_id)
         .collect();
-    interrupt(conn, &overdue, "this child did not settle before its deadline", now)
+    interrupt(
+        conn,
+        &overdue,
+        "this child did not settle before its deadline",
+        now,
+    )
 }
 
 /// Queue one event per open run that has gone quiet or overrun its deadline.

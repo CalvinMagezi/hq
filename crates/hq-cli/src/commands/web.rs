@@ -489,7 +489,11 @@ fn checkout_from(start: &Path) -> Option<PathBuf> {
 
 fn which(program: &str) -> Option<PathBuf> {
     let names: Vec<String> = if cfg!(windows) {
-        vec![format!("{program}.exe"), format!("{program}.cmd"), program.to_string()]
+        vec![
+            format!("{program}.exe"),
+            format!("{program}.cmd"),
+            program.to_string(),
+        ]
     } else {
         vec![program.to_string()]
     };
@@ -618,7 +622,11 @@ async fn probe(addr: SocketAddr) -> Probe {
         // can be taken: Windows does not refuse a closed local port at once but retries for
         // longer than the timeout.
         Err(e) if e.is_timeout() => {
-            if std::net::TcpListener::bind(addr).is_ok() { Probe::Free } else { Probe::Other }
+            if std::net::TcpListener::bind(addr).is_ok() {
+                Probe::Free
+            } else {
+                Probe::Other
+            }
         }
         Err(_) => Probe::Free,
     }
@@ -702,7 +710,10 @@ pub(crate) fn is_our_server(pid: u32) -> bool {
             .is_some_and(|out| {
                 let me = std::env::current_exe()
                     .ok()
-                    .and_then(|e| e.file_name().map(|n| n.to_string_lossy().to_ascii_lowercase()))
+                    .and_then(|e| {
+                        e.file_name()
+                            .map(|n| n.to_string_lossy().to_ascii_lowercase())
+                    })
                     .unwrap_or_else(|| "hq.exe".into());
                 out.to_ascii_lowercase().starts_with(&format!("\"{me}\""))
             })

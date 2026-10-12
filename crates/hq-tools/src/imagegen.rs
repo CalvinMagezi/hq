@@ -60,7 +60,9 @@ impl ImageGenTool {
         let started = std::time::Instant::now();
         let result = self.call_openrouter_inner(api_key, model_id, prompt).await;
         match &result {
-            Ok((_, usage)) => instruments.record_external(&call, Some(*usage), started.elapsed(), None),
+            Ok((_, usage)) => {
+                instruments.record_external(&call, Some(*usage), started.elapsed(), None)
+            }
             Err(_) => instruments.record_external(&call, None, started.elapsed(), Some("error")),
         }
         result.map(|(url, _)| url)

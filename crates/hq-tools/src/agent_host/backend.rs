@@ -1,6 +1,4 @@
-use super::{
-    AgentInfo, AgentStatus, AgentHostError, LaunchRequest, Launched, PromptOutcome,
-};
+use super::{AgentHostError, AgentInfo, AgentStatus, LaunchRequest, Launched, PromptOutcome};
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -18,7 +16,11 @@ pub trait HostBackend: Send + Sync + std::fmt::Debug {
     fn agents(&self) -> Result<Vec<AgentInfo>, AgentHostError>;
     fn agent(&self, target: &str) -> Result<Option<AgentInfo>, AgentHostError>;
     fn launch(&self, req: &LaunchRequest) -> Result<Launched, AgentHostError>;
-    fn await_started(&self, name: &str, within: Duration) -> Result<Option<AgentInfo>, AgentHostError>;
+    fn await_started(
+        &self,
+        name: &str,
+        within: Duration,
+    ) -> Result<Option<AgentInfo>, AgentHostError>;
     fn prompt(
         &self,
         target: &str,
@@ -59,7 +61,11 @@ pub trait HostBackend: Send + Sync + std::fmt::Debug {
     /// Waits up to `wait` for events after `after` (`None` just reads the
     /// current position). Only the built-in host can push events; others are
     /// swept by polling.
-    fn poll_events(&self, _after: Option<u64>, _wait: Duration) -> Result<HostEvents, AgentHostError> {
+    fn poll_events(
+        &self,
+        _after: Option<u64>,
+        _wait: Duration,
+    ) -> Result<HostEvents, AgentHostError> {
         Err(AgentHostError::Api {
             code: "unsupported".into(),
             message: format!("host '{}' has no event stream", self.name()),
@@ -73,13 +79,25 @@ pub trait HostBackend: Send + Sync + std::fmt::Debug {
     }
     /// Tells the host the command that brings `name` back after the host
     /// restarts. Only the built-in host restarts agents, so others ignore it.
-    fn update_resume(&self, _name: &str, _kind: &str, _args: Vec<String>) -> Result<(), AgentHostError> {
+    fn update_resume(
+        &self,
+        _name: &str,
+        _kind: &str,
+        _args: Vec<String>,
+    ) -> Result<(), AgentHostError> {
         Ok(())
     }
-    fn resume_awaiting(&self, name: &str, _env: Vec<(String, String)>) -> Result<(), AgentHostError> {
+    fn resume_awaiting(
+        &self,
+        name: &str,
+        _env: Vec<(String, String)>,
+    ) -> Result<(), AgentHostError> {
         Err(AgentHostError::Api {
             code: "unsupported".into(),
-            message: format!("host '{}' does not hold agents for resume ({name})", self.name()),
+            message: format!(
+                "host '{}' does not hold agents for resume ({name})",
+                self.name()
+            ),
         })
     }
 
@@ -93,7 +111,11 @@ pub trait HostBackend: Send + Sync + std::fmt::Debug {
         Err(self.no_workspace())
     }
     /// Creates `name` inside `parent` (the HQ folder when `None`) and returns `{path}`.
-    fn make_dir(&self, _parent: Option<&str>, _name: &str) -> Result<serde_json::Value, AgentHostError> {
+    fn make_dir(
+        &self,
+        _parent: Option<&str>,
+        _name: &str,
+    ) -> Result<serde_json::Value, AgentHostError> {
         Err(self.no_workspace())
     }
     /// Whether `path` is an existing folder on this host: `None` when it cannot be told from
@@ -159,7 +181,6 @@ pub struct AwaitingAgent {
 /// A shared handle to a host, as callers hold it.
 pub type Host = Arc<dyn HostBackend>;
 
-
 impl<T: HostBackend + ?Sized> HostBackend for Arc<T> {
     fn name(&self) -> &str {
         (**self).name()
@@ -182,7 +203,11 @@ impl<T: HostBackend + ?Sized> HostBackend for Arc<T> {
     fn launch(&self, req: &LaunchRequest) -> Result<Launched, AgentHostError> {
         (**self).launch(req)
     }
-    fn await_started(&self, name: &str, within: Duration) -> Result<Option<AgentInfo>, AgentHostError> {
+    fn await_started(
+        &self,
+        name: &str,
+        within: Duration,
+    ) -> Result<Option<AgentInfo>, AgentHostError> {
         (**self).await_started(name, within)
     }
     fn prompt(
@@ -232,16 +257,29 @@ impl<T: HostBackend + ?Sized> HostBackend for Arc<T> {
     fn accepts_mcp(&self) -> bool {
         (**self).accepts_mcp()
     }
-    fn poll_events(&self, after: Option<u64>, wait: Duration) -> Result<HostEvents, AgentHostError> {
+    fn poll_events(
+        &self,
+        after: Option<u64>,
+        wait: Duration,
+    ) -> Result<HostEvents, AgentHostError> {
         (**self).poll_events(after, wait)
     }
-    fn update_resume(&self, name: &str, kind: &str, args: Vec<String>) -> Result<(), AgentHostError> {
+    fn update_resume(
+        &self,
+        name: &str,
+        kind: &str,
+        args: Vec<String>,
+    ) -> Result<(), AgentHostError> {
         (**self).update_resume(name, kind, args)
     }
     fn awaiting(&self) -> Result<Vec<AwaitingAgent>, AgentHostError> {
         (**self).awaiting()
     }
-    fn resume_awaiting(&self, name: &str, env: Vec<(String, String)>) -> Result<(), AgentHostError> {
+    fn resume_awaiting(
+        &self,
+        name: &str,
+        env: Vec<(String, String)>,
+    ) -> Result<(), AgentHostError> {
         (**self).resume_awaiting(name, env)
     }
     fn workspace(&self) -> Result<serde_json::Value, AgentHostError> {
@@ -256,7 +294,11 @@ impl<T: HostBackend + ?Sized> HostBackend for Arc<T> {
     fn list_dirs(&self, path: Option<&str>) -> Result<serde_json::Value, AgentHostError> {
         (**self).list_dirs(path)
     }
-    fn make_dir(&self, parent: Option<&str>, name: &str) -> Result<serde_json::Value, AgentHostError> {
+    fn make_dir(
+        &self,
+        parent: Option<&str>,
+        name: &str,
+    ) -> Result<serde_json::Value, AgentHostError> {
         (**self).make_dir(parent, name)
     }
     fn dir_exists(&self, path: &std::path::Path) -> Option<bool> {

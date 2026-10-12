@@ -32,7 +32,6 @@ pub(super) fn cache_put(url: &str, page: &FetchedPage) {
     }
 }
 
-
 /// For search backends and Jina. Per-request timeouts are set at each call site.
 pub(super) static HTTP_CLIENT: std::sync::LazyLock<Client> = std::sync::LazyLock::new(|| {
     Client::builder()
@@ -101,8 +100,15 @@ pub(super) fn use_proxy_from_env() -> bool {
     on
 }
 
-pub(super) fn proxy_policy(builder: reqwest::ClientBuilder, use_proxy: bool) -> reqwest::ClientBuilder {
-    if use_proxy { builder } else { builder.no_proxy() }
+pub(super) fn proxy_policy(
+    builder: reqwest::ClientBuilder,
+    use_proxy: bool,
+) -> reqwest::ClientBuilder {
+    if use_proxy {
+        builder
+    } else {
+        builder.no_proxy()
+    }
 }
 
 /// The SSRF-guarded client for other tools that fetch a URL they did not choose

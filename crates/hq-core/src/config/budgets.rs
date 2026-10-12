@@ -134,7 +134,10 @@ impl BudgetsConfig {
         self.budgets
             .iter()
             .filter(|b| {
-                let has_model = b.downgrade_model.as_deref().is_some_and(|m| !m.trim().is_empty());
+                let has_model = b
+                    .downgrade_model
+                    .as_deref()
+                    .is_some_and(|m| !m.trim().is_empty());
                 !b.name.trim().is_empty()
                     && seen.insert(b.name.clone())
                     && b.limit_usd.is_finite()
@@ -157,14 +160,23 @@ impl BudgetsConfig {
                 out.push(format!("budget '{name}' is defined more than once"));
             }
             if !b.limit_usd.is_finite() || b.limit_usd <= 0.0 {
-                out.push(format!("budget '{name}': limit_usd must be a positive number"));
+                out.push(format!(
+                    "budget '{name}': limit_usd must be a positive number"
+                ));
             }
             if b.soft_pct.iter().any(|p| *p == 0 || *p > MAX_PCT) {
-                out.push(format!("budget '{name}': soft_pct values must be 1 to {MAX_PCT}"));
+                out.push(format!(
+                    "budget '{name}': soft_pct values must be 1 to {MAX_PCT}"
+                ));
             }
-            let has_model = b.downgrade_model.as_deref().is_some_and(|m| !m.trim().is_empty());
+            let has_model = b
+                .downgrade_model
+                .as_deref()
+                .is_some_and(|m| !m.trim().is_empty());
             if b.action == BudgetAction::Downgrade && !has_model {
-                out.push(format!("budget '{name}': action downgrade needs downgrade_model"));
+                out.push(format!(
+                    "budget '{name}': action downgrade needs downgrade_model"
+                ));
             }
         }
         if let Some(v) = self.background_run_usd
@@ -193,7 +205,12 @@ mod tests {
 
     #[test]
     fn scopes_round_trip_through_their_string_form() {
-        for s in ["global", "provider:haiku", "model:anthropic/claude-haiku-5.5", "origin:memory"] {
+        for s in [
+            "global",
+            "provider:haiku",
+            "model:anthropic/claude-haiku-5.5",
+            "origin:memory",
+        ] {
             assert_eq!(s.parse::<BudgetScope>().unwrap().to_string(), s);
         }
         assert!("provider:".parse::<BudgetScope>().is_err());

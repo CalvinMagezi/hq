@@ -49,7 +49,9 @@ fn backed_off(task_id: &str) -> bool {
 
 pub(super) fn back_off(task_id: &str) {
     let mut guard = BACKOFF.lock().unwrap_or_else(|p| p.into_inner());
-    guard.get_or_insert_with(HashMap::new).insert(task_id.to_string(), Instant::now());
+    guard
+        .get_or_insert_with(HashMap::new)
+        .insert(task_id.to_string(), Instant::now());
 }
 
 /// What one sweep did.
@@ -81,7 +83,11 @@ pub fn lane_for(cfg: &HqConfig, s: &Specialist) -> Result<Lane> {
         );
     }
     if harness.one_shot_args("").is_none() {
-        bail!("specialist '{}': '{}' has no one-shot command; give its profile `one_shot_args`", s.name, s.harness);
+        bail!(
+            "specialist '{}': '{}' has no one-shot command; give its profile `one_shot_args`",
+            s.name,
+            s.harness
+        );
     }
     let mut purposes = Vec::new();
     for text in &s.purposes {
@@ -131,7 +137,10 @@ pub fn brief_for(
     let description = task.description.trim();
     if !description.is_empty() {
         out.push_str("\nBrief and definition of done:\n");
-        out.push_str(hq_core::text::truncate_chars(description, MAX_BRIEF_DESCRIPTION));
+        out.push_str(hq_core::text::truncate_chars(
+            description,
+            MAX_BRIEF_DESCRIPTION,
+        ));
         out.push('\n');
     }
     if let Some(cp) = resume {
@@ -169,7 +178,12 @@ pub async fn dispatch(
     for problem in cfg.stack.problems() {
         report.skipped.push(problem);
     }
-    for s in cfg.stack.specialists.iter().filter(|s| s.enabled && Specialist::valid_name(&s.name)) {
+    for s in cfg
+        .stack
+        .specialists
+        .iter()
+        .filter(|s| s.enabled && Specialist::valid_name(&s.name))
+    {
         match dispatch_one(vault_path, db, cfg, s, resolve).await {
             Ok(Some(launched)) => report.started.push(launched),
             Ok(None) => {}
@@ -203,7 +217,9 @@ async fn dispatch_one(
     }
     let started_today = db.with_conn({
         let label = label.clone();
-        move |c| registry::count_started_since(c, registry::ORIGIN_STACK, &label, BUDGET_WINDOW_MINUTES)
+        move |c| {
+            registry::count_started_since(c, registry::ORIGIN_STACK, &label, BUDGET_WINDOW_MINUTES)
+        }
     })?;
     if started_today >= s.runs_per_day() as i64 {
         tracing::debug!(specialist = %s.name, started_today, budget = s.runs_per_day(), "stack: run budget spent");
@@ -227,7 +243,9 @@ async fn dispatch_one(
     let Some(task) = next.into_iter().find(|task| !backed_off(&task.id)) else {
         return Ok(None);
     };
-    start_run(vault_path, db, cfg, s, &lane, &task, resolve).await.map(Some)
+    start_run(vault_path, db, cfg, s, &lane, &task, resolve)
+        .await
+        .map(Some)
 }
 
 /// `hq stack run <name> <task>`: start a run for one task now, whoever it is
@@ -241,8 +259,16 @@ pub async fn run_for(
     resolve: HostResolver<'_>,
 ) -> Result<Value> {
     let Some(s) = cfg.stack.get(name) else {
-        let known: Vec<&str> = cfg.stack.specialists.iter().map(|s| s.name.as_str()).collect();
-        bail!("no specialist '{name}' in stack.specialists (known: {})", known.join(", "));
+        let known: Vec<&str> = cfg
+            .stack
+            .specialists
+            .iter()
+            .map(|s| s.name.as_str())
+            .collect();
+        bail!(
+            "no specialist '{name}' in stack.specialists (known: {})",
+            known.join(", ")
+        );
     };
     let lane = lane_for(cfg, s)?;
     let label = s.label();
@@ -251,14 +277,22 @@ pub async fn run_for(
         move |c| registry::running_with_label(c, registry::ORIGIN_STACK, &label)
     })?;
     if let Some(run) = running.first() {
-        bail!("'{name}' is already running session {} ; one run at a time", run.id);
+        bail!(
+            "'{name}' is already running session {} ; one run at a time",
+            run.id
+        );
     }
     let started = db.with_conn({
         let label = label.clone();
-        move |c| registry::count_started_since(c, registry::ORIGIN_STACK, &label, BUDGET_WINDOW_MINUTES)
+        move |c| {
+            registry::count_started_since(c, registry::ORIGIN_STACK, &label, BUDGET_WINDOW_MINUTES)
+        }
     })?;
     if started >= s.runs_per_day() as i64 {
-        bail!("'{name}' has started {started} runs in the last 24h, its budget (runs_per_day {})", s.runs_per_day());
+        bail!(
+            "'{name}' has started {started} runs in the last 24h, its budget (runs_per_day {})",
+            s.runs_per_day()
+        );
     }
     let wanted = task_ref.to_string();
     let task = db
@@ -295,11 +329,22 @@ async fn start_run(
             Ok((name, t::latest_checkpoint(c, &task_id)?))
         }
     })?;
-    let brief = brief_for(&s.name, purpose, task, initiative.as_deref(), resume.as_ref());
+    let brief = brief_for(
+        &s.name,
+        purpose,
+        task,
+        initiative.as_deref(),
+        resume.as_ref(),
+    );
     let launched = async {
         let host = resolve(s.host.as_deref())?;
         let cwd = run_dir(&*host, cfg, s)?;
-        super::check_cwd_outside_vault(Path::new(&cwd), host.name(), &cfg.agent_host.default_host, &cfg.vault_path)?;
+        super::check_cwd_outside_vault(
+            Path::new(&cwd),
+            host.name(),
+            &cfg.agent_host.default_host,
+            &cfg.vault_path,
+        )?;
         let session_id = super::new_session_id(&lane.harness.name);
         let label = s.label();
         let report = launch_session(
@@ -317,7 +362,10 @@ async fn start_run(
                 mission_id: Some(&task.id),
                 watch: None,
                 parent: None,
-                goal: GoalText { goal: Some(&task.title), done_criteria: None },
+                goal: GoalText {
+                    goal: Some(&task.title),
+                    done_criteria: None,
+                },
                 purpose,
                 observe: &[],
                 one_shot: Some(&brief),
@@ -353,7 +401,11 @@ async fn start_run(
 
 /// The folder a specialist's runs start in: the configured one, else
 /// `stack-<name>` in the host's HQ folder, made there when missing.
-fn run_dir(host: &dyn crate::agent_host::HostBackend, cfg: &HqConfig, s: &Specialist) -> Result<String> {
+fn run_dir(
+    host: &dyn crate::agent_host::HostBackend,
+    cfg: &HqConfig,
+    s: &Specialist,
+) -> Result<String> {
     if let Some(cwd) = s.cwd.as_deref().map(str::trim).filter(|c| !c.is_empty()) {
         let path = super::require_cwd_in(Some(cwd), &cfg.agent_host, false)?;
         return Ok(path.to_string_lossy().into_owned());
@@ -361,9 +413,9 @@ fn run_dir(host: &dyn crate::agent_host::HostBackend, cfg: &HqConfig, s: &Specia
     let made = host.make_dir(None, &format!("stack-{}", s.name)).map_err(|e| {
         anyhow::anyhow!("no cwd is configured and host '{}' could not make a folder for the run ({e}); set stack.specialists[].cwd", host.name())
     })?;
-    let path = made["path"]
-        .as_str()
-        .ok_or_else(|| anyhow::anyhow!("host '{}' did not say which folder it made", host.name()))?;
+    let path = made["path"].as_str().ok_or_else(|| {
+        anyhow::anyhow!("host '{}' did not say which folder it made", host.name())
+    })?;
     super::require_cwd_in(Some(path), &cfg.agent_host, false)?;
     Ok(path.to_string())
 }
@@ -372,11 +424,14 @@ fn run_dir(host: &dyn crate::agent_host::HostBackend, cfg: &HqConfig, s: &Specia
 /// True when something was stopped, so the sweep starts nothing else this time.
 fn stop_overrunning(db: &Arc<Database>, s: &Specialist) -> Result<bool> {
     let label = s.label();
-    let running = db.with_conn(move |c| registry::running_with_label(c, registry::ORIGIN_STACK, &label))?;
+    let running =
+        db.with_conn(move |c| registry::running_with_label(c, registry::ORIGIN_STACK, &label))?;
     let limit = chrono::Duration::minutes(s.run_minutes() as i64);
     let mut stopped = false;
     for row in running {
-        let Ok(started) = chrono::NaiveDateTime::parse_from_str(&row.created_at, "%Y-%m-%d %H:%M:%S") else {
+        let Ok(started) =
+            chrono::NaiveDateTime::parse_from_str(&row.created_at, "%Y-%m-%d %H:%M:%S")
+        else {
             continue;
         };
         if chrono::Utc::now().naive_utc() - started < limit {
@@ -389,7 +444,11 @@ fn stop_overrunning(db: &Arc<Database>, s: &Specialist) -> Result<bool> {
         }
         stopped = true;
         if let Some(task_id) = row.mission_id.clone() {
-            let reason = format!("stack run by '{}' exceeded {} minutes and was stopped", s.name, s.run_minutes());
+            let reason = format!(
+                "stack run by '{}' exceeded {} minutes and was stopped",
+                s.name,
+                s.run_minutes()
+            );
             let _ = db.with_conn(move |c| {
                 let patch = t::TaskPatch {
                     status: Some(t::STATUS_BLOCKED.into()),
@@ -397,7 +456,10 @@ fn stop_overrunning(db: &Arc<Database>, s: &Specialist) -> Result<bool> {
                     ..Default::default()
                 };
                 let _ = t::update_task(c, &task_id, &patch, Some(t::STATUS_IN_PROGRESS));
-                let body = format!("{reason}. Its last screen is in `harness_session_logs` for session `{}`.", row.id);
+                let body = format!(
+                    "{reason}. Its last screen is in `harness_session_logs` for session `{}`.",
+                    row.id
+                );
                 t::add_comment(c, &task_id, COMMENT_AUTHOR, &body, None).map(|_| ())
             });
         }
@@ -414,11 +476,17 @@ pub fn status(db: &Arc<Database>, cfg: &HqConfig) -> Result<Vec<Value>> {
         let (running, started, queued) = db.with_conn({
             let (label, name) = (label.clone(), s.name.clone());
             move |c| {
-                let running: Vec<String> = registry::running_with_label(c, registry::ORIGIN_STACK, &label)?
-                    .into_iter()
-                    .map(|r| r.id)
-                    .collect();
-                let started = registry::count_started_since(c, registry::ORIGIN_STACK, &label, BUDGET_WINDOW_MINUTES)?;
+                let running: Vec<String> =
+                    registry::running_with_label(c, registry::ORIGIN_STACK, &label)?
+                        .into_iter()
+                        .map(|r| r.id)
+                        .collect();
+                let started = registry::count_started_since(
+                    c,
+                    registry::ORIGIN_STACK,
+                    &label,
+                    BUDGET_WINDOW_MINUTES,
+                )?;
                 let filter = t::TaskFilter {
                     assignee: Some(name),
                     status: Some(t::STATUS_TO_DO.into()),
@@ -428,7 +496,10 @@ pub fn status(db: &Arc<Database>, cfg: &HqConfig) -> Result<Vec<Value>> {
             }
         })?;
         let (lane, problem) = match lane_for(cfg, s) {
-            Ok(lane) => (lane.purposes.iter().map(|p| p.as_str()).collect::<Vec<_>>(), None),
+            Ok(lane) => (
+                lane.purposes.iter().map(|p| p.as_str()).collect::<Vec<_>>(),
+                None,
+            ),
             Err(e) => (Vec::new(), Some(e.to_string())),
         };
         out.push(json!({

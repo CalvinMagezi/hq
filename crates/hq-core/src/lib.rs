@@ -22,9 +22,9 @@ pub mod prose_quality;
 pub mod redact;
 pub mod setup_provider;
 pub mod telegram_access;
-pub mod text;
 #[cfg(any(test, feature = "test-util"))]
 pub mod test_util;
+pub mod text;
 pub mod tokens;
 pub mod types;
 

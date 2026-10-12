@@ -37,16 +37,24 @@ fn host_by_name(name: &str) -> Result<Host, ApiError> {
 /// Host calls that can fail on the caller's input (`invalid`) or on the machine.
 fn host_error(e: AgentHostError) -> ApiError {
     match &e {
-        AgentHostError::Api { code, message } if code == "invalid" => ApiError::BadRequest(message.clone()),
-        AgentHostError::Api { code, .. } if code == "unsupported" => {
-            ApiError::Conflict("that computer cannot start agents from the web yet; update HQ on it".into())
+        AgentHostError::Api { code, message } if code == "invalid" => {
+            ApiError::BadRequest(message.clone())
         }
+        AgentHostError::Api { code, .. } if code == "unsupported" => ApiError::Conflict(
+            "that computer cannot start agents from the web yet; update HQ on it".into(),
+        ),
         // The host's own words (it names the folder and the system's reason), safe to show: no ssh text.
-        AgentHostError::Api { code, message } if code == "workspace_unavailable" => ApiError::Conflict(message.clone()),
-        err if err.is_unreachable() => ApiError::Unavailable("that computer is unreachable right now".into()),
+        AgentHostError::Api { code, message } if code == "workspace_unavailable" => {
+            ApiError::Conflict(message.clone())
+        }
+        err if err.is_unreachable() => {
+            ApiError::Unavailable("that computer is unreachable right now".into())
+        }
         _ => {
             tracing::warn!(error = %e, "workbench api: host call failed");
-            ApiError::Internal("the computer could not do that; the server log has the details".into())
+            ApiError::Internal(
+                "the computer could not do that; the server log has the details".into(),
+            )
         }
     }
 }
@@ -66,7 +74,9 @@ fn host_row(h: &Host) -> Value {
             let lockdown = h.lockdown_status().unwrap_or(Value::Null);
             json!({ "host": h.name(), "reachable": true, "host_version": version, "workspace": null, "workspace_error": host_error(e).to_string(), "lockdown": lockdown })
         }
-        (Err(e), _) => json!({ "host": h.name(), "reachable": false, "error": host_error(e).to_string() }),
+        (Err(e), _) => {
+            json!({ "host": h.name(), "reachable": false, "error": host_error(e).to_string() })
+        }
     }
 }
 
@@ -111,7 +121,10 @@ pub(crate) struct DirsQuery {
     path: Option<String>,
 }
 
-pub(crate) async fn list_dirs_handler(AxumPath(name): AxumPath<String>, Query(q): Query<DirsQuery>) -> Response {
+pub(crate) async fn list_dirs_handler(
+    AxumPath(name): AxumPath<String>,
+    Query(q): Query<DirsQuery>,
+) -> Response {
     let result = tokio::task::spawn_blocking(move || {
         let host = host_by_name(&name)?;
         host.list_dirs(q.path.as_deref()).map_err(host_error)
@@ -130,10 +143,14 @@ pub(crate) struct MakeDirBody {
     name: String,
 }
 
-pub(crate) async fn make_dir_handler(AxumPath(name): AxumPath<String>, Json(body): Json<MakeDirBody>) -> Response {
+pub(crate) async fn make_dir_handler(
+    AxumPath(name): AxumPath<String>,
+    Json(body): Json<MakeDirBody>,
+) -> Response {
     let result = tokio::task::spawn_blocking(move || {
         let host = host_by_name(&name)?;
-        host.make_dir(body.parent.as_deref(), &body.name).map_err(host_error)
+        host.make_dir(body.parent.as_deref(), &body.name)
+            .map_err(host_error)
     })
     .await;
     match result {
@@ -179,11 +196,16 @@ async fn lockdown(body: LockdownBody) -> Result<Value, ApiError> {
     if let Some(reason) = &given {
         plain_text(reason, "a reason")?;
         if reason.chars().count() > MAX_LOCKDOWN_REASON_CHARS {
-            return Err(ApiError::bad_request(format!("a reason is at most {MAX_LOCKDOWN_REASON_CHARS} characters")));
+            return Err(ApiError::bad_request(format!(
+                "a reason is at most {MAX_LOCKDOWN_REASON_CHARS} characters"
+            )));
         }
     }
     let host = trimmed(body.host);
-    let reason = given.map_or_else(|| DEFAULT_LOCKDOWN_REASON.to_string(), |r| format!("{r} (from the web app)"));
+    let reason = given.map_or_else(
+        || DEFAULT_LOCKDOWN_REASON.to_string(),
+        |r| format!("{r} (from the web app)"),
+    );
     tokio::task::spawn_blocking(move || {
         if let Some(name) = &host {
             host_by_name(name)?;
@@ -197,7 +219,9 @@ async fn lockdown(body: LockdownBody) -> Result<Value, ApiError> {
 /// Free text that lands in lists and relays: no control characters, so no escape sequences or line breaks.
 fn plain_text(value: &str, what: &str) -> Result<(), ApiError> {
     if value.chars().any(char::is_control) {
-        return Err(ApiError::bad_request(format!("{what} cannot contain line breaks or control characters")));
+        return Err(ApiError::bad_request(format!(
+            "{what} cannot contain line breaks or control characters"
+        )));
     }
     Ok(())
 }
@@ -212,9 +236,19 @@ fn own_folder_name(label: &str, harness: &str) -> String {
     let base = if label.is_empty() { harness } else { label };
     let safe: String = base
         .chars()
-        .map(|c| if c.is_alphanumeric() || matches!(c, ' ' | '-' | '_') { c } else { '-' })
+        .map(|c| {
+            if c.is_alphanumeric() || matches!(c, ' ' | '-' | '_') {
+                c
+            } else {
+                '-'
+            }
+        })
         .collect();
-    format!("{} {}", safe.trim(), chrono::Local::now().format("%Y-%m-%d %H%M"))
+    format!(
+        "{} {}",
+        safe.trim(),
+        chrono::Local::now().format("%Y-%m-%d %H%M")
+    )
 }
 
 fn path_of(value: &Value) -> Result<PathBuf, ApiError> {
@@ -226,20 +260,32 @@ fn path_of(value: &Value) -> Result<PathBuf, ApiError> {
 
 /// Where the agent will run, resolved and confined to the computer's HQ folder by the computer.
 /// With no folder chosen, or the HQ folder itself, the agent gets a new folder of its own inside it.
-fn resolve_folder(host: &Host, folder: Option<&str>, new_folder: Option<&str>, own: &str) -> Result<PathBuf, ApiError> {
+fn resolve_folder(
+    host: &Host,
+    folder: Option<&str>,
+    new_folder: Option<&str>,
+    own: &str,
+) -> Result<PathBuf, ApiError> {
     if let Some(name) = new_folder {
         return path_of(&host.make_dir(folder, name).map_err(host_error)?);
     }
     let listing = host.list_dirs(folder).map_err(host_error)?;
     let at_root = listing["parent"].is_null();
     if at_root {
-        return path_of(&host.make_dir(Some(listing["path"].as_str().unwrap_or_default()), own).map_err(host_error)?);
+        return path_of(
+            &host
+                .make_dir(Some(listing["path"].as_str().unwrap_or_default()), own)
+                .map_err(host_error)?,
+        );
     }
     path_of(&listing)
 }
 
 /// Start an agent in a folder on a computer, with the harness's default flags.
-pub(crate) async fn spawn_handler(State(state): State<Arc<WsState>>, Json(body): Json<SpawnBody>) -> Response {
+pub(crate) async fn spawn_handler(
+    State(state): State<Arc<WsState>>,
+    Json(body): Json<SpawnBody>,
+) -> Response {
     match spawn(&state, body).await {
         Ok(report) => Json(report).into_response(),
         Err(e) => e.into_response(),
@@ -247,17 +293,26 @@ pub(crate) async fn spawn_handler(State(state): State<Arc<WsState>>, Json(body):
 }
 
 async fn spawn(state: &Arc<WsState>, body: SpawnBody) -> Result<Value, ApiError> {
-    let harness_name = trimmed(Some(body.harness)).ok_or_else(|| ApiError::bad_request("choose which agent to start"))?;
+    let harness_name = trimmed(Some(body.harness))
+        .ok_or_else(|| ApiError::bad_request("choose which agent to start"))?;
     let prompt = trimmed(body.prompt);
-    if prompt.as_deref().is_some_and(|p| p.chars().count() > MAX_PROMPT_CHARS) {
-        return Err(ApiError::bad_request(format!("the first message is longer than {MAX_PROMPT_CHARS} characters")));
+    if prompt
+        .as_deref()
+        .is_some_and(|p| p.chars().count() > MAX_PROMPT_CHARS)
+    {
+        return Err(ApiError::bad_request(format!(
+            "the first message is longer than {MAX_PROMPT_CHARS} characters"
+        )));
     }
     let label = trimmed(body.label).unwrap_or_default();
     if label.chars().count() > MAX_LABEL_CHARS {
-        return Err(ApiError::bad_request(format!("the name is longer than {MAX_LABEL_CHARS} characters")));
+        return Err(ApiError::bad_request(format!(
+            "the name is longer than {MAX_LABEL_CHARS} characters"
+        )));
     }
     plain_text(&label, "a name")?;
-    let purpose = harness::Purpose::parse_opt(body.purpose.as_deref()).map_err(|e| ApiError::bad_request(e.to_string()))?;
+    let purpose = harness::Purpose::parse_opt(body.purpose.as_deref())
+        .map_err(|e| ApiError::bad_request(e.to_string()))?;
     let host_name = trimmed(body.host);
     let (folder, new_folder) = (trimmed(body.folder), trimmed(body.new_folder));
 
@@ -287,7 +342,10 @@ async fn spawn(state: &Arc<WsState>, body: SpawnBody) -> Result<Value, ApiError>
             mission_id: None,
             watch: None,
             parent: None,
-            goal: GoalText { goal: None, done_criteria: None },
+            goal: GoalText {
+                goal: None,
+                done_criteria: None,
+            },
             purpose,
             observe: &[],
         },
@@ -298,7 +356,10 @@ async fn spawn(state: &Arc<WsState>, body: SpawnBody) -> Result<Value, ApiError>
     Ok(report)
 }
 
-pub(crate) async fn stop_handler(State(state): State<Arc<WsState>>, AxumPath(id): AxumPath<String>) -> Response {
+pub(crate) async fn stop_handler(
+    State(state): State<Arc<WsState>>,
+    AxumPath(id): AxumPath<String>,
+) -> Response {
     let db = Arc::new(state.db.clone());
     match tokio::task::spawn_blocking(move || harness::stop(&db, &id)).await {
         Ok(Ok(report)) => Json(report).into_response(),
@@ -351,7 +412,10 @@ pub(crate) async fn resume_handler(
     if let Err(e) = confine_resume(&state, &id).await {
         return e.into_response();
     }
-    if let Err(e) = state.db.with_conn(|c| registry::set_archived(c, &id, false)) {
+    if let Err(e) = state
+        .db
+        .with_conn(|c| registry::set_archived(c, &id, false))
+    {
         tracing::warn!(session = %id, error = %e, "workbench api: could not clear the archive mark on resume");
     }
     match harness::resume(&state.vault_path, &db, &id, prompt.as_deref()).await {
@@ -372,7 +436,8 @@ pub(crate) async fn rename_handler(
 ) -> Response {
     let label = body.label.trim().to_string();
     if label.is_empty() || label.chars().count() > MAX_LABEL_CHARS {
-        return ApiError::bad_request(format!("a name is 1 to {MAX_LABEL_CHARS} characters")).into_response();
+        return ApiError::bad_request(format!("a name is 1 to {MAX_LABEL_CHARS} characters"))
+            .into_response();
     }
     if let Err(e) = plain_text(&label, "a name") {
         return e.into_response();
@@ -394,12 +459,25 @@ pub(crate) async fn archive_handler(
     AxumPath(id): AxumPath<String>,
     Json(body): Json<ArchiveBody>,
 ) -> Response {
-    match state.db.with_conn(|c| registry::set_archived(c, &id, body.archived)) {
+    match state
+        .db
+        .with_conn(|c| registry::set_archived(c, &id, body.archived))
+    {
         Ok(true) => Json(json!({ "ok": true, "archived": body.archived })).into_response(),
-        Ok(false) if state.db.with_conn(|c| registry::get(c, &id)).ok().flatten().is_none() => {
+        Ok(false)
+            if state
+                .db
+                .with_conn(|c| registry::get(c, &id))
+                .ok()
+                .flatten()
+                .is_none() =>
+        {
             ApiError::NotFound(format!("no harness session '{id}'")).into_response()
         }
-        Ok(false) => ApiError::Conflict("only a session that is not running can be archived".into()).into_response(),
+        Ok(false) => {
+            ApiError::Conflict("only a session that is not running can be archived".into())
+                .into_response()
+        }
         Err(e) => ApiError::from(e).into_response(),
     }
 }
@@ -429,7 +507,12 @@ mod tests {
                         label: "",
                         cwd: "/repo",
                         mission_id: None,
-                        placement: Placement { host: "laptop", agent_name: id, workspace_id: "w1", pane_id: "w1:p1" },
+                        placement: Placement {
+                            host: "laptop",
+                            agent_name: id,
+                            workspace_id: "w1",
+                            pane_id: "w1:p1",
+                        },
                         purpose: None,
                     },
                 )
@@ -442,13 +525,30 @@ mod tests {
         let state = test_state();
         seed(&state, "hs-a");
         let rename = |id: &str, label: &str| {
-            rename_handler(State(state.clone()), AxumPath(id.into()), Json(RenameBody { label: label.into() }))
+            rename_handler(
+                State(state.clone()),
+                AxumPath(id.into()),
+                Json(RenameBody {
+                    label: label.into(),
+                }),
+            )
         };
         assert_eq!(rename("hs-a", "  ").await.status(), StatusCode::BAD_REQUEST);
-        assert_eq!(rename("hs-a", &"x".repeat(MAX_LABEL_CHARS + 1)).await.status(), StatusCode::BAD_REQUEST);
-        assert_eq!(rename("hs-none", "Budget").await.status(), StatusCode::NOT_FOUND);
+        assert_eq!(
+            rename("hs-a", &"x".repeat(MAX_LABEL_CHARS + 1))
+                .await
+                .status(),
+            StatusCode::BAD_REQUEST
+        );
+        assert_eq!(
+            rename("hs-none", "Budget").await.status(),
+            StatusCode::NOT_FOUND
+        );
         assert_eq!(rename("hs-a", " Budget ").await.status(), StatusCode::OK);
-        let label = state.db.with_conn(|c| Ok(registry::get(c, "hs-a")?.unwrap().label)).unwrap();
+        let label = state
+            .db
+            .with_conn(|c| Ok(registry::get(c, "hs-a")?.unwrap().label))
+            .unwrap();
         assert_eq!(label, "Budget");
     }
 
@@ -457,11 +557,21 @@ mod tests {
         let state = test_state();
         seed(&state, "hs-a");
         let archive = |id: &str, archived: bool| {
-            archive_handler(State(state.clone()), AxumPath(id.into()), Json(ArchiveBody { archived }))
+            archive_handler(
+                State(state.clone()),
+                AxumPath(id.into()),
+                Json(ArchiveBody { archived }),
+            )
         };
         assert_eq!(archive("hs-a", true).await.status(), StatusCode::CONFLICT);
-        assert_eq!(archive("hs-none", true).await.status(), StatusCode::NOT_FOUND);
-        state.db.with_conn(|c| registry::set_status(c, "hs-a", registry::STATUS_STOPPED)).unwrap();
+        assert_eq!(
+            archive("hs-none", true).await.status(),
+            StatusCode::NOT_FOUND
+        );
+        state
+            .db
+            .with_conn(|c| registry::set_status(c, "hs-a", registry::STATUS_STOPPED))
+            .unwrap();
         assert_eq!(archive("hs-a", true).await.status(), StatusCode::OK);
         assert_eq!(archive("hs-a", false).await.status(), StatusCode::OK);
     }
@@ -482,9 +592,17 @@ mod tests {
             body("  ", None, None),
             body("claude-code", Some("x".repeat(MAX_PROMPT_CHARS + 1)), None),
             body("claude-code", None, Some("x".repeat(MAX_LABEL_CHARS + 1))),
-            SpawnBody { purpose: Some("coding".into()), ..body("hermes", None, None) },
+            SpawnBody {
+                purpose: Some("coding".into()),
+                ..body("hermes", None, None)
+            },
         ] {
-            assert_eq!(spawn_handler(State(state.clone()), Json(bad)).await.status(), StatusCode::BAD_REQUEST);
+            assert_eq!(
+                spawn_handler(State(state.clone()), Json(bad))
+                    .await
+                    .status(),
+                StatusCode::BAD_REQUEST
+            );
         }
     }
 
@@ -506,17 +624,30 @@ mod tests {
     #[tokio::test]
     async fn a_lockdown_refuses_a_bad_reason_and_an_unknown_computer() {
         let status = |reason: &str, host: Option<&str>| {
-            let body = LockdownBody { reason: Some(reason.into()), host: host.map(str::to_string) };
+            let body = LockdownBody {
+                reason: Some(reason.into()),
+                host: host.map(str::to_string),
+            };
             async move { lockdown_handler(Json(body)).await.status() }
         };
         assert_eq!(status("two\nlines", None).await, StatusCode::BAD_REQUEST);
-        assert_eq!(status(&"x".repeat(MAX_LOCKDOWN_REASON_CHARS + 1), None).await, StatusCode::BAD_REQUEST);
-        assert_eq!(status("fine", Some("no-such-box")).await, StatusCode::NOT_FOUND);
+        assert_eq!(
+            status(&"x".repeat(MAX_LOCKDOWN_REASON_CHARS + 1), None).await,
+            StatusCode::BAD_REQUEST
+        );
+        assert_eq!(
+            status("fine", Some("no-such-box")).await,
+            StatusCode::NOT_FOUND
+        );
     }
 
     #[tokio::test]
     async fn an_unknown_computer_is_a_404_not_a_server_error() {
-        let response = list_dirs_handler(AxumPath("no-such-box".into()), Query(DirsQuery { path: None })).await;
+        let response = list_dirs_handler(
+            AxumPath("no-such-box".into()),
+            Query(DirsQuery { path: None }),
+        )
+        .await;
         assert_eq!(response.status(), StatusCode::NOT_FOUND);
     }
 }

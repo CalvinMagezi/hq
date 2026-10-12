@@ -84,12 +84,18 @@ mod tests {
         state
             .db
             .with_conn(|c| {
-                hq_db::tasks::create_initiative(c, "in-w", "personal", None, "Watch", "watch", "WATCH")?;
+                hq_db::tasks::create_initiative(
+                    c, "in-w", "personal", None, "Watch", "watch", "WATCH",
+                )?;
                 hq_db::tasks::create_task(
                     c,
                     "tk-w",
                     "in-w",
-                    &hq_db::tasks::NewTask { title: "Task", created_by: "test", ..Default::default() },
+                    &hq_db::tasks::NewTask {
+                        title: "Task",
+                        created_by: "test",
+                        ..Default::default()
+                    },
                 )
             })
             .unwrap();
@@ -105,8 +111,19 @@ mod tests {
     fn snapshot_changes_when_a_lease_starts_or_ends_without_the_task_row_moving() {
         let db = hq_db::Database::open_memory().unwrap();
         db.with_conn(|c| {
-            hq_db::tasks::create_initiative(c, "in-l", "personal", None, "Leases", "leases", "LEASE")?;
-            hq_db::tasks::create_task(c, "tk-l", "in-l", &hq_db::tasks::NewTask { title: "T", created_by: "t", ..Default::default() })
+            hq_db::tasks::create_initiative(
+                c, "in-l", "personal", None, "Leases", "leases", "LEASE",
+            )?;
+            hq_db::tasks::create_task(
+                c,
+                "tk-l",
+                "in-l",
+                &hq_db::tasks::NewTask {
+                    title: "T",
+                    created_by: "t",
+                    ..Default::default()
+                },
+            )
         })
         .unwrap();
         let before = take_tasks_snapshot(&db);
@@ -133,11 +150,21 @@ mod tests {
         let db = hq_db::Database::open_memory().unwrap();
         db.with_conn(|c| {
             hq_db::tasks::create_initiative(c, "in-c", "personal", None, "C", "c", "CMT")?;
-            hq_db::tasks::create_task(c, "tk-c", "in-c", &hq_db::tasks::NewTask { title: "T", created_by: "t", ..Default::default() })
+            hq_db::tasks::create_task(
+                c,
+                "tk-c",
+                "in-c",
+                &hq_db::tasks::NewTask {
+                    title: "T",
+                    created_by: "t",
+                    ..Default::default()
+                },
+            )
         })
         .unwrap();
         let before = take_tasks_snapshot(&db);
-        db.with_conn(|c| hq_db::tasks::add_comment(c, "tk-c", "agent", "progress", None)).unwrap();
+        db.with_conn(|c| hq_db::tasks::add_comment(c, "tk-c", "agent", "progress", None))
+            .unwrap();
         assert_ne!(before, take_tasks_snapshot(&db));
     }
 
@@ -147,12 +174,18 @@ mod tests {
         let before = take_tasks_snapshot(&db);
 
         db.with_conn(|c| {
-            hq_db::tasks::create_initiative(c, "in-1", "personal", None, "Inbox", "inbox", "INBOX")?;
+            hq_db::tasks::create_initiative(
+                c, "in-1", "personal", None, "Inbox", "inbox", "INBOX",
+            )?;
             hq_db::tasks::create_task(
                 c,
                 "tk-1",
                 "in-1",
-                &hq_db::tasks::NewTask { title: "Task", created_by: "test", ..Default::default() },
+                &hq_db::tasks::NewTask {
+                    title: "Task",
+                    created_by: "test",
+                    ..Default::default()
+                },
             )
         })
         .unwrap();

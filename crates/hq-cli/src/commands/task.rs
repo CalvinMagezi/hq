@@ -134,14 +134,21 @@ pub enum TaskCmd {
 }
 
 /// The gateway call a verb makes: tool name and its arguments.
-fn call_for(cmd: &TaskCmd, stdin: &mut dyn FnMut() -> Result<String>) -> Result<(&'static str, Value)> {
+fn call_for(
+    cmd: &TaskCmd,
+    stdin: &mut dyn FnMut() -> Result<String>,
+) -> Result<(&'static str, Value)> {
     fn put(m: &mut Map<String, Value>, k: &str, v: &Option<String>) {
         if let Some(v) = v {
             m.insert(k.into(), json!(v));
         }
     }
     Ok(match cmd {
-        TaskCmd::List { status, space, initiative } => {
+        TaskCmd::List {
+            status,
+            space,
+            initiative,
+        } => {
             let mut a = Map::new();
             put(&mut a, "status", status);
             put(&mut a, "space_id", space);
@@ -149,7 +156,15 @@ fn call_for(cmd: &TaskCmd, stdin: &mut dyn FnMut() -> Result<String>) -> Result<
             ("task_list", Value::Object(a))
         }
         TaskCmd::Get { id } => ("task_get", json!({ "id": id })),
-        TaskCmd::Create { title, description, description_stdin, space, initiative, priority, due } => {
+        TaskCmd::Create {
+            title,
+            description,
+            description_stdin,
+            space,
+            initiative,
+            priority,
+            due,
+        } => {
             let mut a = Map::new();
             a.insert("title".into(), json!(title));
             if *description_stdin {
@@ -163,7 +178,15 @@ fn call_for(cmd: &TaskCmd, stdin: &mut dyn FnMut() -> Result<String>) -> Result<
             put(&mut a, "due_date", due);
             ("task_create", Value::Object(a))
         }
-        TaskCmd::Update { id, lease, blocked_reason, status, title, priority, due } => {
+        TaskCmd::Update {
+            id,
+            lease,
+            blocked_reason,
+            status,
+            title,
+            priority,
+            due,
+        } => {
             let mut a = Map::new();
             a.insert("id".into(), json!(id));
             put(&mut a, "status", status);
@@ -178,7 +201,11 @@ fn call_for(cmd: &TaskCmd, stdin: &mut dyn FnMut() -> Result<String>) -> Result<
             ("task_update", Value::Object(a))
         }
         TaskCmd::Comment { id, lease, body } => {
-            let text = if body.is_empty() { stdin()? } else { body.join(" ") };
+            let text = if body.is_empty() {
+                stdin()?
+            } else {
+                body.join(" ")
+            };
             if text.trim().is_empty() {
                 bail!("the comment is empty");
             }
@@ -190,12 +217,22 @@ fn call_for(cmd: &TaskCmd, stdin: &mut dyn FnMut() -> Result<String>) -> Result<
         }
         TaskCmd::Comments { id } => ("task_comment_list", json!({ "task_id": id })),
         TaskCmd::Spaces => ("space_list", json!({})),
-        TaskCmd::Next { actor, include_unassigned } => (
+        TaskCmd::Next {
+            actor,
+            include_unassigned,
+        } => (
             "task_next",
             json!({ "actor": actor, "harness": "terminal", "include_unassigned": include_unassigned }),
         ),
-        TaskCmd::Claim { id, actor } => ("task_claim", json!({ "task_id": id, "actor": actor, "harness": "terminal" })),
-        TaskCmd::Heartbeat { lease, summary, next_step } => {
+        TaskCmd::Claim { id, actor } => (
+            "task_claim",
+            json!({ "task_id": id, "actor": actor, "harness": "terminal" }),
+        ),
+        TaskCmd::Heartbeat {
+            lease,
+            summary,
+            next_step,
+        } => {
             let mut a = Map::new();
             a.insert("lease".into(), json!(lease));
             if summary.is_some() || next_step.is_some() {
@@ -206,7 +243,11 @@ fn call_for(cmd: &TaskCmd, stdin: &mut dyn FnMut() -> Result<String>) -> Result<
             }
             ("task_heartbeat", Value::Object(a))
         }
-        TaskCmd::Release { lease, status, summary } => {
+        TaskCmd::Release {
+            lease,
+            status,
+            summary,
+        } => {
             let mut a = Map::new();
             a.insert("lease".into(), json!(lease));
             put(&mut a, "status", status);
@@ -222,7 +263,11 @@ fn call_for(cmd: &TaskCmd, stdin: &mut dyn FnMut() -> Result<String>) -> Result<
 pub async fn run(config: &HqConfig, cmd: TaskCmd) -> Result<()> {
     match cmd {
         TaskCmd::Time { days } => return super::tasks::run(config, "time", days).await,
-        TaskCmd::InstallSkill { agents, dry_run, force } => {
+        TaskCmd::InstallSkill {
+            agents,
+            dry_run,
+            force,
+        } => {
             return super::agent_skill::run(&agents, dry_run, force, &mut std::io::stdout());
         }
         _ => {}
@@ -235,7 +280,10 @@ pub async fn run(config: &HqConfig, cmd: TaskCmd) -> Result<()> {
             bail!("nothing piped in: give the text as an argument, or pipe it in");
         }
         const MAX: u64 = 64 * 1024;
-        std::io::stdin().take(MAX + 1).read_to_string(&mut s).context("standard input is not valid text")?;
+        std::io::stdin()
+            .take(MAX + 1)
+            .read_to_string(&mut s)
+            .context("standard input is not valid text")?;
         if s.len() as u64 > MAX {
             bail!("the text on standard input is over 64 KiB");
         }
@@ -243,7 +291,8 @@ pub async fn run(config: &HqConfig, cmd: TaskCmd) -> Result<()> {
     };
     let (tool, args) = call_for(&cmd, &mut read_stdin)?;
 
-    let vault = Arc::new(VaultClient::new(config.vault_path.clone()).context("failed to open vault")?);
+    let vault =
+        Arc::new(VaultClient::new(config.vault_path.clone()).context("failed to open vault")?);
     let db = Arc::new(Database::open(&config.db_path()).context("failed to open database")?);
     let registry = hq_mcp::registry::create_default_registry(
         vault,
@@ -290,16 +339,37 @@ mod tests {
         assert_eq!(tool, "task_create");
         assert_eq!(args["due_date"], "2030-01-02");
         assert_eq!(args["space_id"], "personal");
-        assert!(args.get("tags").is_none(), "the CLI never sets routing tags");
+        assert!(
+            args.get("tags").is_none(),
+            "the CLI never sets routing tags"
+        );
         for cmd in [
             TaskCmd::Get { id: "x".into() },
             TaskCmd::Comments { id: "x".into() },
             TaskCmd::Spaces,
-            TaskCmd::List { status: None, space: None, initiative: None },
-            TaskCmd::Next { actor: "me".into(), include_unassigned: false },
-            TaskCmd::Claim { id: "x".into(), actor: "me".into() },
-            TaskCmd::Heartbeat { lease: "l".into(), summary: None, next_step: None },
-            TaskCmd::Release { lease: "l".into(), status: None, summary: None },
+            TaskCmd::List {
+                status: None,
+                space: None,
+                initiative: None,
+            },
+            TaskCmd::Next {
+                actor: "me".into(),
+                include_unassigned: false,
+            },
+            TaskCmd::Claim {
+                id: "x".into(),
+                actor: "me".into(),
+            },
+            TaskCmd::Heartbeat {
+                lease: "l".into(),
+                summary: None,
+                next_step: None,
+            },
+            TaskCmd::Release {
+                lease: "l".into(),
+                status: None,
+                summary: None,
+            },
         ] {
             let (tool, _) = call_for(&cmd, &mut no_stdin).unwrap();
             assert!(hq_mcp::gateway::TASKS_ALLOWLIST.contains(&tool), "{tool}");
@@ -318,9 +388,17 @@ mod tests {
             due: None,
         };
         assert!(call_for(&upd, &mut no_stdin).is_err());
-        let c = TaskCmd::Comment { id: "x".into(), lease: None, body: vec![] };
+        let c = TaskCmd::Comment {
+            id: "x".into(),
+            lease: None,
+            body: vec![],
+        };
         assert!(call_for(&c, &mut || Ok("  \n".into())).is_err());
-        let c = TaskCmd::Comment { id: "x".into(), lease: None, body: vec!["hello".into(), "there".into()] };
+        let c = TaskCmd::Comment {
+            id: "x".into(),
+            lease: None,
+            body: vec!["hello".into(), "there".into()],
+        };
         let (_, a) = call_for(&c, &mut no_stdin).unwrap();
         assert_eq!(a["body"], "hello there");
     }

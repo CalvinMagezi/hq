@@ -160,8 +160,11 @@ pub(super) async fn resolve_session_config(
     if !session_config.is_live_user_turn
         && let Some(ceiling) = config.budgets.background_run_usd
     {
-        session_config.max_budget_usd =
-            Some(session_config.max_budget_usd.map_or(ceiling, |own| own.min(ceiling)));
+        session_config.max_budget_usd = Some(
+            session_config
+                .max_budget_usd
+                .map_or(ceiling, |own| own.min(ceiling)),
+        );
     }
     session_config
 }

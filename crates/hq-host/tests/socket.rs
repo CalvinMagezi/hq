@@ -634,9 +634,14 @@ fn each_state_change_bumps_the_agents_change_counter() {
         }
     };
     let first = wait_past(&mut c, 0);
-    c.call("agent.report", json!({ "name": "seq", "event": "UserPromptSubmit" })).unwrap();
+    c.call(
+        "agent.report",
+        json!({ "name": "seq", "event": "UserPromptSubmit" }),
+    )
+    .unwrap();
     let second = wait_past(&mut c, first);
-    c.call("agent.report", json!({ "name": "seq", "event": "Stop" })).unwrap();
+    c.call("agent.report", json!({ "name": "seq", "event": "Stop" }))
+        .unwrap();
     let third = wait_past(&mut c, second);
     assert!(first < second && second < third);
     std::thread::sleep(Duration::from_millis(600));
@@ -663,14 +668,27 @@ fn a_finished_turn_is_done_until_the_agent_works_again() {
             std::thread::sleep(Duration::from_millis(50));
         }
     };
-    assert_eq!(info(&mut c)["done"], false, "a fresh agent has not finished anything");
+    assert_eq!(
+        info(&mut c)["done"],
+        false,
+        "a fresh agent has not finished anything"
+    );
 
-    c.call("agent.report", json!({ "name": "fin", "event": "UserPromptSubmit" })).unwrap();
+    c.call(
+        "agent.report",
+        json!({ "name": "fin", "event": "UserPromptSubmit" }),
+    )
+    .unwrap();
     wait_for(&mut c, false);
-    c.call("agent.report", json!({ "name": "fin", "event": "Stop" })).unwrap();
+    c.call("agent.report", json!({ "name": "fin", "event": "Stop" }))
+        .unwrap();
     let finished = wait_for(&mut c, true);
 
-    c.call("agent.report", json!({ "name": "fin", "event": "UserPromptSubmit" })).unwrap();
+    c.call(
+        "agent.report",
+        json!({ "name": "fin", "event": "UserPromptSubmit" }),
+    )
+    .unwrap();
     let working = wait_for(&mut c, false);
     assert!(working["state_seq"].as_u64() > finished["state_seq"].as_u64());
 }
@@ -683,14 +701,22 @@ fn a_client_refuses_a_host_directory_others_can_write_or_read() {
     assert!(Client::connect(&dir).is_ok());
 
     std::fs::set_permissions(&dir, std::fs::Permissions::from_mode(0o755)).unwrap();
-    let Err(err) = Client::connect(&dir) else { panic!("a world-readable directory was trusted") };
+    let Err(err) = Client::connect(&dir) else {
+        panic!("a world-readable directory was trusted")
+    };
     assert!(err.to_string().contains("0700"), "{err}");
-    assert!(Client::connect_with_token(&dir, "x").is_err(), "the token path checks it too");
+    assert!(
+        Client::connect_with_token(&dir, "x").is_err(),
+        "the token path checks it too"
+    );
     std::fs::set_permissions(&dir, std::fs::Permissions::from_mode(0o700)).unwrap();
 
     let token = dir.join("operator.token");
     std::fs::set_permissions(&token, std::fs::Permissions::from_mode(0o644)).unwrap();
-    assert!(Client::connect(&dir).is_err(), "a readable token file is not trusted");
+    assert!(
+        Client::connect(&dir).is_err(),
+        "a readable token file is not trusted"
+    );
     std::fs::set_permissions(&token, std::fs::Permissions::from_mode(0o600)).unwrap();
     assert!(Client::connect(&dir).is_ok());
 }
@@ -702,17 +728,31 @@ fn a_removed_agents_files_go_with_it_and_an_old_token_never_works_for_the_next_o
     let dir = host.run_dir();
 
     let (old_token, _) = spawn_reporter(&mut op, "reuse");
-    op.call("agent.mcp_config", json!({"name": "reuse", "agent": "claude", "url": "http://h/mcp", "token": "hqs_x"})).unwrap();
-    op.call("agent.hook_flags", json!({"name": "reuse", "agent": "claude"})).unwrap();
+    op.call(
+        "agent.mcp_config",
+        json!({"name": "reuse", "agent": "claude", "url": "http://h/mcp", "token": "hqs_x"}),
+    )
+    .unwrap();
+    op.call(
+        "agent.hook_flags",
+        json!({"name": "reuse", "agent": "claude"}),
+    )
+    .unwrap();
     assert!(dir.join("mcp/reuse.json").exists() && dir.join("hooks/reuse.json").exists());
 
     op.call("agent.remove", json!({"name": "reuse"})).unwrap();
-    assert!(!dir.join("mcp/reuse.json").exists(), "the file holding the agent's HQ token must not outlive it");
+    assert!(
+        !dir.join("mcp/reuse.json").exists(),
+        "the file holding the agent's HQ token must not outlive it"
+    );
     assert!(!dir.join("hooks/reuse.json").exists());
 
     let (new_token, _) = spawn_reporter(&mut op, "reuse");
     assert_ne!(old_token, new_token);
-    assert!(Client::connect_with_token(&dir, &old_token).is_err(), "a leftover process cannot pose as the new agent");
+    assert!(
+        Client::connect_with_token(&dir, &old_token).is_err(),
+        "a leftover process cannot pose as the new agent"
+    );
     assert!(Client::connect_with_token(&dir, &new_token).is_ok());
 }
 
@@ -721,11 +761,17 @@ fn oversized_mcp_settings_and_too_many_agents_are_refused() {
     let host = Running::start();
     let mut op = host.client();
     let err = op
-        .call("agent.mcp_config", json!({"name": "cap", "agent": "claude", "url": "u".repeat(3000), "token": "t"}))
+        .call(
+            "agent.mcp_config",
+            json!({"name": "cap", "agent": "claude", "url": "u".repeat(3000), "token": "t"}),
+        )
         .unwrap_err();
     assert_eq!(err.code(), Some("too_large"));
     let err = op
-        .call("agent.mcp_config", json!({"name": "cap", "agent": "claude", "url": "http://h", "token": "t".repeat(300)}))
+        .call(
+            "agent.mcp_config",
+            json!({"name": "cap", "agent": "claude", "url": "http://h", "token": "t".repeat(300)}),
+        )
         .unwrap_err();
     assert_eq!(err.code(), Some("too_large"));
     assert!(!host.run_dir().join("mcp/cap.json").exists());
@@ -739,8 +785,11 @@ fn the_agent_socket_takes_pane_tokens_only() {
     let dir = std::path::Path::new(&dir);
     let operator_token = std::fs::read_to_string(dir.join("operator.token")).unwrap();
     let mut pane = Client::connect_pane(dir, &token).unwrap();
-    pane.call("agent.report", json!({ "event": "UserPromptSubmit", "session_id": "conv-9" }))
-        .unwrap();
+    pane.call(
+        "agent.report",
+        json!({ "event": "UserPromptSubmit", "session_id": "conv-9" }),
+    )
+    .unwrap();
     assert!(
         Client::connect_pane(dir, operator_token.trim()).is_err(),
         "the operator token must not work on the socket agents can reach"
@@ -763,7 +812,14 @@ fn a_line_every_few_seconds_does_not_keep_an_unauthenticated_connection_open() {
         let _ = s.write_all(b"x\n");
         match s.read(&mut buf) {
             Ok(0) => break true,
-            Err(e) if !matches!(e.kind(), std::io::ErrorKind::WouldBlock | std::io::ErrorKind::TimedOut) => break true,
+            Err(e)
+                if !matches!(
+                    e.kind(),
+                    std::io::ErrorKind::WouldBlock | std::io::ErrorKind::TimedOut
+                ) =>
+            {
+                break true;
+            }
             _ => {}
         }
         if started.elapsed() > Duration::from_secs(3) {
@@ -772,7 +828,11 @@ fn a_line_every_few_seconds_does_not_keep_an_unauthenticated_connection_open() {
         std::thread::sleep(Duration::from_millis(150));
     };
     assert!(closed, "still open after {:?}", started.elapsed());
-    assert!(started.elapsed() < Duration::from_millis(1800), "{:?}", started.elapsed());
+    assert!(
+        started.elapsed() < Duration::from_millis(1800),
+        "{:?}",
+        started.elapsed()
+    );
 }
 
 #[test]
@@ -803,7 +863,9 @@ fn agents_cannot_crowd_the_operator_out() {
     let second = Client::connect_pane(dir, &token).unwrap();
     let third = Client::connect_pane(dir, &token);
     let mut third = third.expect("hello itself succeeds");
-    let refused = third.call("agent.report", json!({ "event": "Stop" })).is_err();
+    let refused = third
+        .call("agent.report", json!({ "event": "Stop" }))
+        .is_err();
     assert!(refused, "a third pane connection should be dropped");
     drop((first, second));
     host.client().call("host.status", json!({})).unwrap();

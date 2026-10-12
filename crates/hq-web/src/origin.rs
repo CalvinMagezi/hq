@@ -87,7 +87,9 @@ pub(crate) fn rejection(
         return Some("unrecognised Host header");
     }
     match origin {
-        Some(origin) if !origin_allowed(origin, host, allowed) => Some("cross-origin request refused"),
+        Some(origin) if !origin_allowed(origin, host, allowed) => {
+            Some("cross-origin request refused")
+        }
         _ => None,
     }
 }
@@ -185,17 +187,37 @@ mod tests {
         assert!(origin_allowed("http://localhost:5173", None, &[]));
         assert!(origin_allowed("http://127.0.0.1:5678", None, &[]));
         assert!(origin_allowed("http://[::1]:5678", None, &[]));
-        assert!(origin_allowed("https://HQ.example.ts.net:8443", None, &allowed));
-        assert!(origin_allowed("https://box.lan:5678", Some("box.lan:5678"), &[]));
+        assert!(origin_allowed(
+            "https://HQ.example.ts.net:8443",
+            None,
+            &allowed
+        ));
+        assert!(origin_allowed(
+            "https://box.lan:5678",
+            Some("box.lan:5678"),
+            &[]
+        ));
     }
 
     #[test]
     fn hostile_and_opaque_origins_are_refused() {
         let allowed = tailnet();
-        assert!(!origin_allowed("https://evil.example", Some("127.0.0.1:5678"), &allowed));
+        assert!(!origin_allowed(
+            "https://evil.example",
+            Some("127.0.0.1:5678"),
+            &allowed
+        ));
         assert!(!origin_allowed("null", Some("127.0.0.1:5678"), &allowed));
-        assert!(!origin_allowed("https://hq.example.ts.net:9999", None, &allowed));
-        assert!(!origin_allowed("https://localhost.evil.example", None, &allowed));
+        assert!(!origin_allowed(
+            "https://hq.example.ts.net:9999",
+            None,
+            &allowed
+        ));
+        assert!(!origin_allowed(
+            "https://localhost.evil.example",
+            None,
+            &allowed
+        ));
     }
 
     #[test]
@@ -212,8 +234,14 @@ mod tests {
     #[test]
     fn state_changing_request_from_hostile_page_is_refused() {
         for path in ["/api/tasks", "/api/note/create", "/ws", "/mcp"] {
-            assert!(rejection(&Method::POST, path, LOCAL, EVIL, &[], false).is_some(), "{path}");
-            assert!(rejection(&Method::POST, path, LOCAL, EVIL, &[], true).is_some(), "{path}");
+            assert!(
+                rejection(&Method::POST, path, LOCAL, EVIL, &[], false).is_some(),
+                "{path}"
+            );
+            assert!(
+                rejection(&Method::POST, path, LOCAL, EVIL, &[], true).is_some(),
+                "{path}"
+            );
         }
         assert!(rejection(&Method::GET, "/ws", LOCAL, EVIL, &[], false).is_some());
         assert!(rejection(&Method::GET, "/api/tasks", LOCAL, EVIL, &[], false).is_some());
@@ -221,20 +249,44 @@ mod tests {
 
     #[test]
     fn non_browser_clients_and_own_pages_pass() {
-        assert_eq!(rejection(&Method::POST, "/mcp", LOCAL, None, &[], false), None);
-        assert_eq!(rejection(&Method::POST, "/mcp", None, None, &[], false), None);
-        let (host, origin) = (Some("hq.example.ts.net:8443"), Some("https://hq.example.ts.net:8443"));
-        assert_eq!(rejection(&Method::POST, "/api/tasks", host, origin, &tailnet(), false), None);
-        assert_eq!(rejection(&Method::GET, "/ws", host, origin, &tailnet(), false), None);
+        assert_eq!(
+            rejection(&Method::POST, "/mcp", LOCAL, None, &[], false),
+            None
+        );
+        assert_eq!(
+            rejection(&Method::POST, "/mcp", None, None, &[], false),
+            None
+        );
+        let (host, origin) = (
+            Some("hq.example.ts.net:8443"),
+            Some("https://hq.example.ts.net:8443"),
+        );
+        assert_eq!(
+            rejection(&Method::POST, "/api/tasks", host, origin, &tailnet(), false),
+            None
+        );
+        assert_eq!(
+            rejection(&Method::GET, "/ws", host, origin, &tailnet(), false),
+            None
+        );
     }
 
     #[test]
     fn rebound_host_is_refused_only_without_a_token() {
         let rebound = Some("rebind.evil.example:5678");
         assert!(rejection(&Method::GET, "/api/tasks", rebound, None, &[], false).is_some());
-        assert_eq!(rejection(&Method::GET, "/api/tasks", rebound, None, &[], true), None);
-        assert_eq!(rejection(&Method::GET, "/health", rebound, None, &[], false), None);
-        assert_eq!(rejection(&Method::GET, "/", rebound, None, &[], false), None);
+        assert_eq!(
+            rejection(&Method::GET, "/api/tasks", rebound, None, &[], true),
+            None
+        );
+        assert_eq!(
+            rejection(&Method::GET, "/health", rebound, None, &[], false),
+            None
+        );
+        assert_eq!(
+            rejection(&Method::GET, "/", rebound, None, &[], false),
+            None
+        );
     }
 
     #[test]
@@ -254,14 +306,24 @@ mod tests {
             "/api/harness-sessions/hs-1",
             false
         ));
-        assert!(post("/api/setup/provider", false), "setup writes a credential");
+        assert!(
+            post("/api/setup/provider", false),
+            "setup writes a credential"
+        );
         assert!(!post("/api/setup/provider", true));
-        assert!(!missing_client_header(&Method::GET, "/api/setup/status", false));
+        assert!(!missing_client_header(
+            &Method::GET,
+            "/api/setup/status",
+            false
+        ));
         assert!(!post("/api/tasks", false), "other routes are unchanged");
     }
 
     #[test]
     fn preflight_is_left_to_the_cors_layer() {
-        assert_eq!(rejection(&Method::OPTIONS, "/api/tasks", LOCAL, EVIL, &[], false), None);
+        assert_eq!(
+            rejection(&Method::OPTIONS, "/api/tasks", LOCAL, EVIL, &[], false),
+            None
+        );
     }
 }

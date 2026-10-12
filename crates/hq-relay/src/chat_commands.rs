@@ -60,18 +60,25 @@ pub(crate) fn registry_command(
     let cmd = if let Some(turn_ref) = parse_resume_command(lower) {
         RegistryCommand::Resume(turn_ref)
     } else if let Some(args) = parse_watch_command(lower, text) {
-        let Some(args) = args else { return usage(WATCH_USAGE) };
+        let Some(args) = args else {
+            return usage(WATCH_USAGE);
+        };
         RegistryCommand::Watch(args)
     } else {
         let turn_ref = parse_unwatch_command(lower)?;
-        let Some(turn_ref) = turn_ref else { return usage(UNWATCH_USAGE) };
+        let Some(turn_ref) = turn_ref else {
+            return usage(UNWATCH_USAGE);
+        };
         RegistryCommand::Unwatch(turn_ref)
     };
     let Some(db) = open_db() else {
         return usage(REGISTRY_UNAVAILABLE);
     };
     let chat_id = chat_key.to_string();
-    let chat = ChatRef { platform, chat_id: &chat_id };
+    let chat = ChatRef {
+        platform,
+        chat_id: &chat_id,
+    };
     Some(match cmd {
         RegistryCommand::Resume(turn_ref) => resume(&db, &chat, turn_ref),
         RegistryCommand::Watch(args) => watch(&db, &chat, identity, args),
@@ -125,7 +132,9 @@ fn list_interrupted(db: &Database, chat: &ChatRef<'_>) -> String {
         background_turns::list_recent_interrupted(c, chat.platform, chat.chat_id, 5)
     });
     match rows {
-        Ok(rows) if rows.is_empty() => "No interrupted background turns to resume here.".to_string(),
+        Ok(rows) if rows.is_empty() => {
+            "No interrupted background turns to resume here.".to_string()
+        }
         Ok(rows) => {
             let mut lines = vec!["Interrupted background turns:".to_string()];
             for row in &rows {
@@ -146,7 +155,12 @@ fn list_interrupted(db: &Database, chat: &ChatRef<'_>) -> String {
 }
 
 /// `/watch`: record a recurring watch row, then fire its prompt once right away.
-fn watch(db: &Database, chat: &ChatRef<'_>, identity: Option<&str>, args: WatchArgs) -> CommandReply {
+fn watch(
+    db: &Database,
+    chat: &ChatRef<'_>,
+    identity: Option<&str>,
+    args: WatchArgs,
+) -> CommandReply {
     let turn_id = uuid::Uuid::new_v4().to_string();
     let now = chrono::Utc::now().timestamp();
     let watch_until = args.expiry_hours.map(|h| now + h * 3600);
@@ -243,7 +257,10 @@ pub(crate) fn model(name: &str, cmd: &str) -> String {
 }
 
 /// Clear the chat and return the reset banner.
-pub(crate) async fn reset<K: Eq + Hash>(threads: &TokioMutex<HashMap<K, ChannelState>>, key: &K) -> String {
+pub(crate) async fn reset<K: Eq + Hash>(
+    threads: &TokioMutex<HashMap<K, ChannelState>>,
+    key: &K,
+) -> String {
     threads.lock().await.remove(key);
     session_info::reset_banner_from_config().await
 }
@@ -251,7 +268,10 @@ pub(crate) async fn reset<K: Eq + Hash>(threads: &TokioMutex<HashMap<K, ChannelS
 /// Signal the running turn to stop and always free the busy gate: a detached
 /// turn has no live cancel handle and a watch firing never wires one, so
 /// without the unconditional clear the chat would stay wedged until a restart.
-pub(crate) async fn cancel<K: Eq + Hash>(threads: &TokioMutex<HashMap<K, ChannelState>>, key: K) -> &'static str {
+pub(crate) async fn cancel<K: Eq + Hash>(
+    threads: &TokioMutex<HashMap<K, ChannelState>>,
+    key: K,
+) -> &'static str {
     let (flag, was_stuck) = {
         let mut t = threads.lock().await;
         let state = t.entry(key).or_insert_with(ChannelState::new_default);
@@ -371,7 +391,10 @@ pub(crate) async fn permission<K: Eq + Hash>(
         return "Permission preset pin cleared. The process default applies again.".to_string();
     }
     let Some(preset) = PermissionPreset::from_name(&arg) else {
-        return format!("Unknown permission preset `{arg}`. Available: {}", preset_names());
+        return format!(
+            "Unknown permission preset `{arg}`. Available: {}",
+            preset_names()
+        );
     };
     state.pinned_permission_preset = Some(preset);
     format!(
@@ -392,7 +415,11 @@ pub(crate) async fn status_fields<K: Eq + Hash>(
     threads: &TokioMutex<HashMap<K, ChannelState>>,
     key: &K,
 ) -> StatusFields {
-    let messages = threads.lock().await.get(key).map_or(0, |s| s.messages.len());
+    let messages = threads
+        .lock()
+        .await
+        .get(key)
+        .map_or(0, |s| s.messages.len());
     let config = hq_core::config::HqConfig::load().unwrap_or_default();
     StatusFields {
         model: session_info::resolve_session_model(&config),
@@ -402,10 +429,7 @@ pub(crate) async fn status_fields<K: Eq + Hash>(
 
 impl StatusFields {
     pub fn text(&self) -> String {
-        format!(
-            "Status\nModel: {}\nMessages: {}",
-            self.model, self.messages
-        )
+        format!("Status\nModel: {}\nMessages: {}", self.model, self.messages)
     }
 }
 
@@ -413,7 +437,10 @@ impl StatusFields {
 mod tests {
     use super::*;
 
-    const CHAT: ChatRef<'static> = ChatRef { platform: "telegram", chat_id: "1" };
+    const CHAT: ChatRef<'static> = ChatRef {
+        platform: "telegram",
+        chat_id: "1",
+    };
 
     fn seed_interrupted(db: &Database, id: &str, chat_id: &str) {
         db.with_conn(|c| {
@@ -458,7 +485,10 @@ mod tests {
         assert!(is_permission_command("!permission"));
         assert!(!is_permission_command("/permissionx"));
         assert!(!is_permission_command("hello permission"));
-        assert_eq!(permission_arg("/permission  danger-full-access  "), Some("danger-full-access"));
+        assert_eq!(
+            permission_arg("/permission  danger-full-access  "),
+            Some("danger-full-access")
+        );
         assert_eq!(permission_arg("/permission "), None);
     }
 
@@ -466,17 +496,38 @@ mod tests {
     async fn permission_pins_clears_and_rejects() {
         let threads = TokioMutex::new(HashMap::<u64, ChannelState>::new());
         let name = PermissionPreset::all()[0].name();
-        assert!(permission(&threads, 1, Some(name), "!permission").await.starts_with("Pinned"));
+        assert!(
+            permission(&threads, 1, Some(name), "!permission")
+                .await
+                .starts_with("Pinned")
+        );
         assert!(threads.lock().await[&1].pinned_permission_preset.is_some());
-        assert!(permission(&threads, 1, Some("DEFAULT"), "!permission").await.contains("cleared"));
-        assert!(permission(&threads, 1, Some("bogus"), "!permission").await.starts_with("Unknown"));
-        assert!(permission(&threads, 1, None, "!permission").await.contains("No permission preset"));
+        assert!(
+            permission(&threads, 1, Some("DEFAULT"), "!permission")
+                .await
+                .contains("cleared")
+        );
+        assert!(
+            permission(&threads, 1, Some("bogus"), "!permission")
+                .await
+                .starts_with("Unknown")
+        );
+        assert!(
+            permission(&threads, 1, None, "!permission")
+                .await
+                .contains("No permission preset")
+        );
     }
 
     #[tokio::test]
     async fn cancel_frees_a_stuck_slot() {
         let threads = TokioMutex::new(HashMap::<u64, ChannelState>::new());
-        threads.lock().await.entry(1).or_insert_with(ChannelState::new_default).turn_in_flight = true;
+        threads
+            .lock()
+            .await
+            .entry(1)
+            .or_insert_with(ChannelState::new_default)
+            .turn_in_flight = true;
         assert!(cancel(&threads, 1).await.contains("cleared the busy flag"));
         assert!(!threads.lock().await[&1].turn_in_flight);
         assert_eq!(cancel(&threads, 1).await, "No active task to cancel.");
@@ -485,14 +536,21 @@ mod tests {
     #[test]
     fn watch_then_unwatch_round_trips() {
         let db = Database::open_memory().unwrap();
-        let args = WatchArgs { interval_mins: 30, expiry_hours: Some(48), prompt: "check".into() };
+        let args = WatchArgs {
+            interval_mins: 30,
+            expiry_hours: Some(48),
+            prompt: "check".into(),
+        };
         let CommandReply::Redispatch { ack, prompt } = watch(&db, &CHAT, None, args) else {
             panic!("expected the first firing");
         };
         assert_eq!(prompt, "check");
         assert!(ack.contains("every 30m") && ack.contains("expires in 2d"));
         let short = ack.split('`').nth(1).unwrap();
-        assert_eq!(unwatch(&db, &CHAT, short), format!("Stopped watch `{short}`."));
+        assert_eq!(
+            unwatch(&db, &CHAT, short),
+            format!("Stopped watch `{short}`.")
+        );
     }
 
     #[test]
@@ -520,7 +578,11 @@ mod tests {
         let contents: Vec<&str> = state.messages.iter().map(|m| m.content.as_str()).collect();
         assert_eq!(
             contents,
-            ["new prompt", "[focus] switching topic to: tax returns", "where do we start?"]
+            [
+                "new prompt",
+                "[focus] switching topic to: tax returns",
+                "where do we start?"
+            ]
         );
     }
 
@@ -532,7 +594,10 @@ mod tests {
         let state = t.get_mut(&1).unwrap();
         state.stage_turn("prompt", "hi", Vec::new());
         assert_eq!(state.messages[0].role, MessageRole::System);
-        assert_eq!(state.messages[1].content, "[focus] switching topic to: travel");
+        assert_eq!(
+            state.messages[1].content,
+            "[focus] switching topic to: travel"
+        );
     }
 
     #[tokio::test]

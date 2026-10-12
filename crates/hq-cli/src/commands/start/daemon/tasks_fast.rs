@@ -4,7 +4,6 @@ use anyhow::Result;
 use std::path::Path;
 use tracing::info;
 
-
 /// Expire pending approval files older than 5 minutes.
 pub async fn run_expire_approvals(vault_path: &Path) -> Result<()> {
     let pending_dir = vault_path.join("_approvals").join("pending");

@@ -62,7 +62,10 @@ pub(crate) async fn search_handler(
         // note endpoints do, so a hit in a hidden folder never reaches the client.
         let hits: Vec<_> = hits
             .into_iter()
-            .filter(|h| state.path_allowed(&h.note_path) && state.resolved_allowed(&state.vault_path.join(h.note_path.trim())))
+            .filter(|h| {
+                state.path_allowed(&h.note_path)
+                    && state.resolved_allowed(&state.vault_path.join(h.note_path.trim()))
+            })
             .collect();
         return axum::Json(serde_json::json!({ "results": hits })).into_response();
     }
@@ -247,7 +250,12 @@ pub(crate) async fn note_read_handler(
     if !state.path_allowed(&effective_path) || !state.resolved_allowed(&abs) {
         return ApiError::not_found().into_response();
     }
-    crate::vault_api::read_note(&state.vault_path, &effective_path, &abs, state.profile().is_lite())
+    crate::vault_api::read_note(
+        &state.vault_path,
+        &effective_path,
+        &abs,
+        state.profile().is_lite(),
+    )
 }
 
 /// The web UI always asks for the recursive tree; it filters client-side.

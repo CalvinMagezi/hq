@@ -93,7 +93,11 @@ pub fn render_tool_start(tool_name: &str, theme: &Theme) -> String {
 }
 
 pub fn render_error(msg: &str, theme: &Theme) -> String {
-    format!("  {} {}", bold("✗", &theme.error), colored(msg, &theme.error))
+    format!(
+        "  {} {}",
+        bold("✗", &theme.error),
+        colored(msg, &theme.error)
+    )
 }
 
 pub fn render_compaction(old_count: usize, new_count: usize, theme: &Theme) -> String {
@@ -225,7 +229,11 @@ mod tests {
             id: "s1".into(),
             model: "m".into(),
             title: "t".into(),
-            messages: vec![SavedMessage { role: "user".into(), content: "hi".into(), ttft_ms: None }],
+            messages: vec![SavedMessage {
+                role: "user".into(),
+                content: "hi".into(),
+                ttft_ms: None,
+            }],
             tokens_in: 1,
             tokens_out: 2,
             cost_usd: 0.0,

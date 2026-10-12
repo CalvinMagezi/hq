@@ -46,7 +46,8 @@ pub const MAX_TITLE_BYTES: usize = 256;
 
 impl vt100::Callbacks for TitleCapture {
     fn set_window_title(&mut self, _: &mut vt100::Screen, title: &[u8]) {
-        let mut text = String::from_utf8_lossy(&title[..title.len().min(MAX_TITLE_BYTES)]).into_owned();
+        let mut text =
+            String::from_utf8_lossy(&title[..title.len().min(MAX_TITLE_BYTES)]).into_owned();
         // A cut in the middle of a character leaves a replacement mark at the end.
         while text.ends_with('\u{fffd}') && text.len() > 1 {
             text.pop();
@@ -104,12 +105,18 @@ fn expand_cursor_forward(row: &str) -> String {
         }
         chars.next();
         let mut params = String::new();
-        while let Some(&p) = chars.peek().filter(|p| p.is_ascii_digit() || matches!(p, ';' | '?')) {
+        while let Some(&p) = chars
+            .peek()
+            .filter(|p| p.is_ascii_digit() || matches!(p, ';' | '?'))
+        {
             params.push(p);
             chars.next();
         }
         match chars.next() {
-            Some('C') => out.extend(std::iter::repeat_n(' ', params.parse::<usize>().unwrap_or(1).clamp(1, MAX_FORWARD))),
+            Some('C') => out.extend(std::iter::repeat_n(
+                ' ',
+                params.parse::<usize>().unwrap_or(1).clamp(1, MAX_FORWARD),
+            )),
             Some(last) => {
                 out.push_str("\x1b[");
                 out.push_str(&params);
@@ -176,14 +183,22 @@ impl Emulator for VtEmulator {
         self.parser.screen_mut().set_scrollback(usize::MAX);
         let history_len = self.parser.screen().scrollback();
         // Newest page first, so a long scrollback is read only as far back as the caller wants.
-        let want = if limit == 0 { usize::MAX } else { limit.saturating_add(page) };
+        let want = if limit == 0 {
+            usize::MAX
+        } else {
+            limit.saturating_add(page)
+        };
         let mut by_index: BTreeMap<usize, (Row, String)> = BTreeMap::new();
         let mut back = 0;
         loop {
             let offset = back.min(history_len);
             self.parser.screen_mut().set_scrollback(offset);
             let first_index = history_len - offset;
-            let styled = self.parser.screen().rows_formatted(0, cols).map(|r| expand_cursor_forward(&String::from_utf8_lossy(&r)));
+            let styled = self
+                .parser
+                .screen()
+                .rows_formatted(0, cols)
+                .map(|r| expand_cursor_forward(&String::from_utf8_lossy(&r)));
             for (i, (row, styled)) in self.page_rows().into_iter().zip(styled).enumerate() {
                 by_index.entry(first_index + i).or_insert((row, styled));
             }
@@ -194,7 +209,10 @@ impl Emulator for VtEmulator {
         }
         self.parser.screen_mut().set_scrollback(0);
         let mut rows: Vec<(Row, String)> = by_index.into_values().collect();
-        while rows.last().is_some_and(|(r, _)| r.text.is_empty() && !r.wrapped) {
+        while rows
+            .last()
+            .is_some_and(|(r, _)| r.text.is_empty() && !r.wrapped)
+        {
             rows.pop();
         }
         let mut lines: Vec<String> = Vec::new();
@@ -252,15 +270,30 @@ mod tests {
 
     #[test]
     fn styled_history_keeps_colors_and_matches_the_plain_rows() {
-        let mut emu = fed(3, 20, "plain\r\n\x1b[31mred text\x1b[0m\r\nthree\r\nfour\r\nfive");
+        let mut emu = fed(
+            3,
+            20,
+            "plain\r\n\x1b[31mred text\x1b[0m\r\nthree\r\nfour\r\nfive",
+        );
         let styled = emu.styled_history(0);
         let plain: Vec<String> = emu.history().into_iter().map(|r| r.text).collect();
         assert_eq!(styled.len(), plain.len());
         for (s, p) in styled.iter().zip(&plain) {
-            assert_eq!(strip_sgr(s).trim_end(), p.trim_end(), "styled and plain rows differ");
+            assert_eq!(
+                strip_sgr(s).trim_end(),
+                p.trim_end(),
+                "styled and plain rows differ"
+            );
         }
-        let red = styled.iter().position(|r| r.contains("red text")).expect("red row");
-        assert!(styled[red].contains("\x1b[31m") || styled[red].contains("\x1b[3"), "{:?}", styled[red]);
+        let red = styled
+            .iter()
+            .position(|r| r.contains("red text"))
+            .expect("red row");
+        assert!(
+            styled[red].contains("\x1b[31m") || styled[red].contains("\x1b[3"),
+            "{:?}",
+            styled[red]
+        );
         assert!(!styled[0].contains("red"));
     }
 
@@ -283,12 +316,22 @@ mod tests {
 
     #[test]
     fn styled_history_joins_wrapped_rows_and_keeps_only_the_newest_lines() {
-        let mut emu = fed(4, 10, "short\r\n\x1b[32mabcdefghijklmnopqrst\x1b[0m\r\nlast\r\n1\r\n2\r\n3\r\n4");
+        let mut emu = fed(
+            4,
+            10,
+            "short\r\n\x1b[32mabcdefghijklmnopqrst\x1b[0m\r\nlast\r\n1\r\n2\r\n3\r\n4",
+        );
         let unwrapped: Vec<String> = emu.history().into_iter().map(|r| r.text).collect();
         let styled = emu.styled_history(0);
-        let long = styled.iter().find(|l| l.contains("abcdefghij")).expect("long line");
+        let long = styled
+            .iter()
+            .find(|l| l.contains("abcdefghij"))
+            .expect("long line");
         assert!(strip_sgr(long).contains("abcdefghijklmnopqrst"), "{long:?}");
-        assert!(unwrapped.len() > styled.len(), "physical rows are joined into fewer lines");
+        assert!(
+            unwrapped.len() > styled.len(),
+            "physical rows are joined into fewer lines"
+        );
         let newest = emu.styled_history(2);
         assert_eq!(newest.len(), 2);
         assert!(strip_sgr(&newest[1]).starts_with('4'), "{newest:?}");
@@ -297,8 +340,14 @@ mod tests {
     #[test]
     fn cursor_forward_codes_become_the_spaces_they_skip() {
         assert_eq!(expand_cursor_forward("a\x1b[Cb\x1b[3Cc"), "a b   c");
-        assert_eq!(expand_cursor_forward("\x1b[31mred\x1b[0m"), "\x1b[31mred\x1b[0m");
-        assert_eq!(expand_cursor_forward("x\x1b[99999999Cy").len(), 2 + MAX_FORWARD);
+        assert_eq!(
+            expand_cursor_forward("\x1b[31mred\x1b[0m"),
+            "\x1b[31mred\x1b[0m"
+        );
+        assert_eq!(
+            expand_cursor_forward("x\x1b[99999999Cy").len(),
+            2 + MAX_FORWARD
+        );
         assert_eq!(expand_cursor_forward("cut\x1b"), "cut\x1b");
     }
 
@@ -343,7 +392,11 @@ mod tests {
         bytes.extend(std::iter::repeat_n(b'x', 100_000));
         bytes.push(0x07);
         emu.process(&bytes);
-        assert!(emu.title().len() <= MAX_TITLE_BYTES, "{}", emu.title().len());
+        assert!(
+            emu.title().len() <= MAX_TITLE_BYTES,
+            "{}",
+            emu.title().len()
+        );
         assert!(emu.title().starts_with("xxxx"));
     }
 

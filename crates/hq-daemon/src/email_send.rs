@@ -24,12 +24,24 @@ pub async fn send_via_company(company_id: &str, to: &str, subject: &str, body: &
     let config = HqConfig::load().context("failed to load HqConfig")?;
     check_company(company_id, &config)?;
     let output = Command::new(hq_core::paths::resolve_gws_binary())
-        .args(["gmail", "+send", "--to", to, "--subject", subject, "--body", body])
+        .args([
+            "gmail",
+            "+send",
+            "--to",
+            to,
+            "--subject",
+            subject,
+            "--body",
+            body,
+        ])
         .output()
         .await
         .context("failed to spawn gws")?;
     if !output.status.success() {
-        bail!("gws gmail +send failed: {}", String::from_utf8_lossy(&output.stderr).trim());
+        bail!(
+            "gws gmail +send failed: {}",
+            String::from_utf8_lossy(&output.stderr).trim()
+        );
     }
     Ok(())
 }
@@ -54,7 +66,6 @@ mod tests {
     }
 
     fn config_with(companies: Vec<CompanyConfig>) -> HqConfig {
-        
         HqConfig {
             companies,
             ..Default::default()

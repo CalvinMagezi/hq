@@ -93,7 +93,12 @@ fn find_referrers(vault_path: &Path, stem: &str) -> Vec<String> {
 /// With `dry_run`, nothing changes on disk; the report shows what would move
 /// and which notes reference it. Rewriting covers `[[wikilinks]]` (the vault's
 /// link convention); plain relative markdown links are not rewritten.
-pub(crate) fn move_note(vault_path: &Path, from: &str, to: &str, dry_run: bool) -> Result<MoveReport> {
+pub(crate) fn move_note(
+    vault_path: &Path,
+    from: &str,
+    to: &str,
+    dry_run: bool,
+) -> Result<MoveReport> {
     guard_rel_path(from)?;
     guard_rel_path(to)?;
     require_md(from)?;

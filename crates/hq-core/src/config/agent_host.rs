@@ -404,10 +404,26 @@ mod tests {
             ),
             (1, 2, 1, 20)
         );
-        assert_eq!((cfg.key_allowance(), cfg.mcp_started_session_cap(), cfg.full_ask_cap()), (40, 3, 2));
-        let wild2: AgentHostConfig =
-            serde_yaml::from_str("driver_key_allowance: 0\nmax_mcp_started_sessions: 0\nmax_full_asks: 99").unwrap();
-        assert_eq!((wild2.key_allowance(), wild2.mcp_started_session_cap(), wild2.full_ask_cap()), (1, 1, 10));
+        assert_eq!(
+            (
+                cfg.key_allowance(),
+                cfg.mcp_started_session_cap(),
+                cfg.full_ask_cap()
+            ),
+            (40, 3, 2)
+        );
+        let wild2: AgentHostConfig = serde_yaml::from_str(
+            "driver_key_allowance: 0\nmax_mcp_started_sessions: 0\nmax_full_asks: 99",
+        )
+        .unwrap();
+        assert_eq!(
+            (
+                wild2.key_allowance(),
+                wild2.mcp_started_session_cap(),
+                wild2.full_ask_cap()
+            ),
+            (1, 1, 10)
+        );
         let huge: AgentHostConfig = serde_yaml::from_str("driver_nudge_budget: 5000").unwrap();
         assert_eq!(huge.nudge_budget(), 100);
     }

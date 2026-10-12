@@ -19,8 +19,12 @@ const SAME_DAY_ACTION_SOURCES: &[&str] = &["email-triage"];
 /// Source tasks whose items belong in the web inbox only, never the relay.
 /// `skill_review` is `hq_agent::skill_review::VALUE_SOURCE`: skill changes are FYI.
 /// `session_chat` is a harness session a web chat watches that needs an answer.
-pub const WEB_ONLY_SOURCES: &[&str] =
-    &["task_ready_for_review", "task_stale_digest", "skill_review", "session_chat"];
+pub const WEB_ONLY_SOURCES: &[&str] = &[
+    "task_ready_for_review",
+    "task_stale_digest",
+    "skill_review",
+    "session_chat",
+];
 
 /// Only these kinds ask the owner to decide something, so only they get
 /// Approve/Dismiss buttons; everything else is a plain notice.
@@ -98,7 +102,10 @@ fn render(item: &ValueItem) -> String {
 pub fn parse_value_command(text: &str) -> Option<(ValueAction, String)> {
     crate::parse_token_command(
         text,
-        &[("approve", ValueAction::Approve), ("dismiss", ValueAction::Dismiss)],
+        &[
+            ("approve", ValueAction::Approve),
+            ("dismiss", ValueAction::Dismiss),
+        ],
     )
     .map(|(action, token, _)| (action, token))
 }
@@ -156,7 +163,12 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let vault = dir.path();
         let db = open_vault_db(vault);
-        let task = ValueItem::new("task_ready_for_review", ValueKind::ActionNeeded, "FR-1: x", "b");
+        let task = ValueItem::new(
+            "task_ready_for_review",
+            ValueKind::ActionNeeded,
+            "FR-1: x",
+            "b",
+        );
         let notice = ValueItem::new("memory-consolidation", ValueKind::Fyi, "Notice", "b");
         hq_db::value_items::emit(&db, &task).unwrap();
         hq_db::value_items::emit(&db, &notice).unwrap();
@@ -171,7 +183,10 @@ mod tests {
         assert_eq!(msgs.len(), 1, "only the notice reaches the relay");
         assert!(msgs[0].contains("Notice") && !msgs[0].contains("value_token"));
         let pending = hq_db::value_items::list_by_state(&db, ValueState::Pending).unwrap();
-        assert!(pending.is_empty(), "the task item is marked delivered for the web inbox");
+        assert!(
+            pending.is_empty(),
+            "the task item is marked delivered for the web inbox"
+        );
     }
 
     #[tokio::test]
@@ -219,5 +234,4 @@ mod tests {
         assert_eq!(et.delivered, 1);
         assert_eq!(et.engaged, 1);
     }
-
 }

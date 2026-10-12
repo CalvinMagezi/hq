@@ -95,7 +95,10 @@ pub(super) fn parse(json: &Value) -> Result<Page, String> {
     let results = items
         .iter()
         .filter_map(|r| {
-            let url = r["url"].as_str().filter(|u| u.starts_with("http"))?.to_string();
+            let url = r["url"]
+                .as_str()
+                .filter(|u| u.starts_with("http"))?
+                .to_string();
             Some(SearchResult {
                 title: r["title"].as_str().unwrap_or_default().to_string(),
                 snippet: r["snippet"].as_str().unwrap_or_default().to_string(),
@@ -116,7 +119,9 @@ pub(super) fn parse(json: &Value) -> Result<Page, String> {
         .collect();
     Ok(Page {
         results,
-        next_page: json["next_page"].as_u64().and_then(|n| u32::try_from(n).ok()),
+        next_page: json["next_page"]
+            .as_u64()
+            .and_then(|n| u32::try_from(n).ok()),
     })
 }
 
@@ -139,7 +144,10 @@ mod tests {
         assert_eq!(args["category"], "code");
         assert_eq!(args["include_domains"][0], "docs.rs");
         assert!(args.get("country").is_none());
-        assert!(SearchOptions::from_args(&args).is_ok(), "the peer must accept what we send");
+        assert!(
+            SearchOptions::from_args(&args).is_ok(),
+            "the peer must accept what we send"
+        );
     }
 
     #[test]

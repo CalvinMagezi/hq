@@ -126,7 +126,15 @@ pub(super) fn record_transition(
         "INSERT INTO task_events \
          (task_id, event_type, occurred_at, from_status, to_status, actor, work_session_id) \
          VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
-        params![task_id, event_type, now, from, to, ctx.actor, ctx.work_session_id],
+        params![
+            task_id,
+            event_type,
+            now,
+            from,
+            to,
+            ctx.actor,
+            ctx.work_session_id
+        ],
     )?;
     if let Some(col) = summary_col {
         conn.execute(
@@ -285,11 +293,18 @@ pub(super) fn validate_schedule(start_date: Option<&str>, due_date: Option<&str>
 
 /// Resolves and checks a would-be parent: it must exist, be top level (one
 /// level of nesting), and share the child's initiative.
-pub(super) fn resolve_parent(conn: &Connection, parent: &str, child_initiative_id: &str) -> Result<Task> {
+pub(super) fn resolve_parent(
+    conn: &Connection,
+    parent: &str,
+    child_initiative_id: &str,
+) -> Result<Task> {
     let parent_task =
         get_task(conn, parent)?.ok_or_else(|| anyhow::anyhow!("parent task {parent} not found"))?;
     if parent_task.archived_at.is_some() {
-        anyhow::bail!("{} is archived; restore it before adding sub-tasks to it", parent_task.display_id);
+        anyhow::bail!(
+            "{} is archived; restore it before adding sub-tasks to it",
+            parent_task.display_id
+        );
     }
     if parent_task.parent_task_id.is_some() {
         anyhow::bail!(
@@ -307,7 +322,8 @@ pub(super) fn resolve_parent(conn: &Connection, parent: &str, child_initiative_i
 }
 
 pub(super) fn subtask_ids(conn: &Connection, task_id: &str) -> Result<Vec<String>> {
-    let mut stmt = conn.prepare("SELECT id FROM tasks WHERE parent_task_id = ?1 AND archived_at IS NULL")?;
+    let mut stmt =
+        conn.prepare("SELECT id FROM tasks WHERE parent_task_id = ?1 AND archived_at IS NULL")?;
     let ids = stmt
         .query_map(params![task_id], |r| r.get::<_, String>(0))?
         .collect::<rusqlite::Result<Vec<_>>>()?;
@@ -327,7 +343,10 @@ pub(super) fn set_assignees(conn: &Connection, task_id: &str, assignees: &[Strin
     if clean.len() > MAX_ASSIGNEES {
         anyhow::bail!("a task has at most {MAX_ASSIGNEES} assignees");
     }
-    conn.execute("DELETE FROM task_assignees WHERE task_id = ?1", params![task_id])?;
+    conn.execute(
+        "DELETE FROM task_assignees WHERE task_id = ?1",
+        params![task_id],
+    )?;
     for name in clean {
         conn.execute(
             "INSERT INTO task_assignees (task_id, assignee) VALUES (?1, ?2)",

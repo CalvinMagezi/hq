@@ -37,7 +37,20 @@ pub struct HostArgs {
 }
 
 pub async fn run(args: HostArgs) -> Result<()> {
-    let HostArgs { sub, arg, addr, dir, allow_unsandboxed, max_agents, max_starts, key, from, port, unix, rest } = args;
+    let HostArgs {
+        sub,
+        arg,
+        addr,
+        dir,
+        allow_unsandboxed,
+        max_agents,
+        max_starts,
+        key,
+        from,
+        port,
+        unix,
+        rest,
+    } = args;
     let sub = sub.as_str();
     let dir_arg = dir.clone();
     let dir = dir.unwrap_or_else(default_dir);
@@ -62,7 +75,9 @@ pub async fn run(args: HostArgs) -> Result<()> {
         "add" => super::host_install::add(arg.as_deref(), from.as_deref()),
         "check" => super::host_install::check(arg.as_deref()),
         "authorize" => super::host_install::authorize(key.as_deref(), from.as_deref()),
-        other => bail!("unknown subcommand '{other}': use serve, status, stop, lockdown, unlock, install, authorize, report or gate"),
+        other => bail!(
+            "unknown subcommand '{other}': use serve, status, stop, lockdown, unlock, install, authorize, report or gate"
+        ),
     }
 }
 
@@ -80,10 +95,16 @@ async fn serve(dir: PathBuf, allow_unsandboxed: bool, caps: Caps) -> Result<()> 
             .with_state_dir(&dir)
             .with_require_sandbox(!allow_unsandboxed)
             .with_max_agents(caps.max_agents)
-            .with_burst_limit(BurstLimit { max: caps.max_starts, window: BURST_WINDOW }),
+            .with_burst_limit(BurstLimit {
+                max: caps.max_starts,
+                window: BURST_WINDOW,
+            }),
     );
     if let Some(held) = host.lockdown_status() {
-        eprintln!("hq host is LOCKED DOWN ({}); no agent will start until `hq host unlock`", held.reason);
+        eprintln!(
+            "hq host is LOCKED DOWN ({}); no agent will start until `hq host unlock`",
+            held.reason
+        );
     }
     let server = Server::bind(&dir, host.clone())
         .with_context(|| format!("starting the host in {}", dir.display()))?;
@@ -147,11 +168,16 @@ fn lockdown(dir: &std::path::Path, reason: Option<&str>) -> Result<()> {
     let held = hq_host::engage_lockdown(dir, &wanted)
         .with_context(|| format!("writing {}", hq_host::lockdown_path(dir).display()))?;
     println!("hq host locked down: {}", held.reason);
-    let stopped = Client::connect(dir).and_then(|mut c| c.call("host.lockdown", json!({ "reason": held.reason })));
+    let stopped = Client::connect(dir)
+        .and_then(|mut c| c.call("host.lockdown", json!({ "reason": held.reason })));
     match stopped {
-        Ok(_) => println!("every agent the host ran has been stopped; nothing starts until `hq host unlock`"),
+        Ok(_) => println!(
+            "every agent the host ran has been stopped; nothing starts until `hq host unlock`"
+        ),
         Err(e) => {
-            println!("the host could not be asked to stop its agents ({e}); no new agent will start, but check for running ones");
+            println!(
+                "the host could not be asked to stop its agents ({e}); no new agent will start, but check for running ones"
+            );
             std::process::exit(1);
         }
     }
@@ -165,7 +191,10 @@ fn unlock(dir: &std::path::Path) -> Result<()> {
     let cleared = hq_host::clear_lockdown(dir)
         .with_context(|| format!("removing {}", hq_host::lockdown_path(dir).display()))?;
     match (cleared, previous) {
-        (true, Some(held)) => println!("hq host unlocked (it was locked by {}: {})", held.source, held.reason),
+        (true, Some(held)) => println!(
+            "hq host unlocked (it was locked by {}: {})",
+            held.source, held.reason
+        ),
         (true, None) => println!("hq host unlocked"),
         (false, _) => println!("hq host was not locked down"),
     }
@@ -196,7 +225,9 @@ fn report(dir: Option<PathBuf>) -> Result<()> {
         return Ok(());
     };
     let mut input = String::new();
-    let _ = std::io::stdin().take(MAX_HOOK_INPUT).read_to_string(&mut input);
+    let _ = std::io::stdin()
+        .take(MAX_HOOK_INPUT)
+        .read_to_string(&mut input);
     let Some(params) = hq_host::report_params(&input) else {
         return Ok(());
     };
@@ -224,7 +255,10 @@ fn gate(dir: &std::path::Path) -> Result<()> {
             Ok(())
         }
         Err(hq_host::Denied(message)) => {
-            eprintln!("{}", json!({ "error": { "code": "gate_denied", "message": message } }));
+            eprintln!(
+                "{}",
+                json!({ "error": { "code": "gate_denied", "message": message } })
+            );
             std::process::exit(hq_host::GATE_DENIED_EXIT);
         }
     }

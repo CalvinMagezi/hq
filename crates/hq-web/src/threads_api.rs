@@ -46,9 +46,20 @@ pub(crate) async fn list_threads_handler(
 ) -> Response {
     // Web chat is its own surface; Telegram/Discord conversations stay there.
     let listed = state.db.with_conn(|conn| {
-        hq_db::chat::list_threads(conn, q.limit.unwrap_or(50), q.offset.unwrap_or(0), Some("web"))
+        hq_db::chat::list_threads(
+            conn,
+            q.limit.unwrap_or(50),
+            q.offset.unwrap_or(0),
+            Some("web"),
+        )
     });
-    let running = state.active_chat_turns.read().await.keys().cloned().collect();
+    let running = state
+        .active_chat_turns
+        .read()
+        .await
+        .keys()
+        .cloned()
+        .collect();
     match listed {
         Ok(threads) => Json(ThreadsResponse { threads, running }).into_response(),
         Err(e) => ApiError::internal(e).into_response(),
@@ -59,7 +70,10 @@ pub(crate) async fn create_thread_handler(
     State(state): State<Arc<WsState>>,
     Json(req): Json<CreateThreadRequest>,
 ) -> Response {
-    match state.db.with_conn(|conn| hq_db::chat::create_thread(conn, &req.title, "user", "user")) {
+    match state
+        .db
+        .with_conn(|conn| hq_db::chat::create_thread(conn, &req.title, "user", "user"))
+    {
         Ok(thread) => (StatusCode::CREATED, Json(thread)).into_response(),
         Err(e) => ApiError::internal(e).into_response(),
     }
@@ -70,9 +84,15 @@ pub(crate) async fn get_thread_messages_handler(
     Path(thread_id): Path<String>,
     Query(q): Query<MessagesQuery>,
 ) -> Response {
-    let limit = q.limit.unwrap_or(DEFAULT_MESSAGE_PAGE).clamp(1, MAX_MESSAGE_PAGE);
+    let limit = q
+        .limit
+        .unwrap_or(DEFAULT_MESSAGE_PAGE)
+        .clamp(1, MAX_MESSAGE_PAGE);
     let before = q.before.as_deref().filter(|b| !b.is_empty());
-    match state.db.with_conn(|conn| hq_db::chat::get_messages_page(conn, &thread_id, limit, before)) {
+    match state
+        .db
+        .with_conn(|conn| hq_db::chat::get_messages_page(conn, &thread_id, limit, before))
+    {
         Ok(messages) => Json(messages).into_response(),
         Err(e) => ApiError::internal(e).into_response(),
     }
@@ -82,7 +102,10 @@ pub(crate) async fn archive_thread_handler(
     State(state): State<Arc<WsState>>,
     Path(thread_id): Path<String>,
 ) -> Response {
-    match state.db.with_conn(|conn| hq_db::chat::archive_thread(conn, &thread_id)) {
+    match state
+        .db
+        .with_conn(|conn| hq_db::chat::archive_thread(conn, &thread_id))
+    {
         Ok(_) => StatusCode::NO_CONTENT.into_response(),
         Err(e) => ApiError::internal(e).into_response(),
     }

@@ -6,8 +6,8 @@
 pub mod context;
 mod credits;
 pub mod r#loop;
-pub mod routing;
 pub(crate) mod role_denial;
+pub mod routing;
 mod skills;
 mod stream;
 

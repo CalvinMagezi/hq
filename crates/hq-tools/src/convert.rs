@@ -20,8 +20,8 @@ use tracing::info;
 use hq_convert::brand::load_brand_kit;
 use hq_convert::inbound::InboundConverter;
 use hq_convert::note_pdf::resolve_note;
-use hq_export::{Format, export_note};
 use hq_convert::ocr::OcrEngine;
+use hq_export::{Format, export_note};
 
 use crate::brand::brand_param_schema;
 use hq_convert::outbound::OutboundConverter;
@@ -263,7 +263,11 @@ async fn run_note_export(
     let languages: Vec<String> = args
         .get("languages")
         .and_then(|v| v.as_array())
-        .map(|a| a.iter().filter_map(|l| l.as_str().map(str::to_owned)).collect())
+        .map(|a| {
+            a.iter()
+                .filter_map(|l| l.as_str().map(str::to_owned))
+                .collect()
+        })
         .unwrap_or_default();
 
     let note = resolve_note(vault_path, reference)
@@ -350,7 +354,11 @@ fn export_params(vault_path: &std::path::Path, with_format: bool) -> Value {
             "description": "For format=code only: keep just the code blocks in these languages."
         });
     }
-    let required: Vec<&str> = if with_format { vec!["path", "format"] } else { vec!["path"] };
+    let required: Vec<&str> = if with_format {
+        vec!["path", "format"]
+    } else {
+        vec!["path"]
+    };
     json!({ "type": "object", "properties": props, "required": required })
 }
 
@@ -490,7 +498,9 @@ impl HqTool for OcrExtractTextTool {
 pub fn create_convert_tools(vault_path: PathBuf) -> Vec<Box<dyn HqTool>> {
     vec![
         Box::new(ConvertToMarkdownTool),
-        Box::new(ConvertFromMarkdownTool { vault_path: vault_path.clone() }),
+        Box::new(ConvertFromMarkdownTool {
+            vault_path: vault_path.clone(),
+        }),
         Box::new(VaultExportTool {
             vault_path: vault_path.clone(),
         }),
@@ -513,10 +523,21 @@ mod protected_output_tests {
             vault.join("_threads/x.jsonl"),
             vault.join("Notebooks/../_data/vault.db"),
         ] {
-            assert!(refuse_protected_output(&bad, vault).is_err(), "{}", bad.display());
+            assert!(
+                refuse_protected_output(&bad, vault).is_err(),
+                "{}",
+                bad.display()
+            );
         }
-        for ok in [vault.join("Notebooks/report.docx"), PathBuf::from("/tmp/out.pdf")] {
-            assert!(refuse_protected_output(&ok, vault).is_ok(), "{}", ok.display());
+        for ok in [
+            vault.join("Notebooks/report.docx"),
+            PathBuf::from("/tmp/out.pdf"),
+        ] {
+            assert!(
+                refuse_protected_output(&ok, vault).is_ok(),
+                "{}",
+                ok.display()
+            );
         }
     }
 }
@@ -586,8 +607,13 @@ mod export_tests {
         assert!(err(t.execute(json!({"format": "csv"})).await).contains("path"));
         assert!(err(t.execute(json!({"path": "Plan"})).await).contains("format"));
         let unknown = err(t.execute(json!({"path": "Plan", "format": "wat"})).await);
-        assert!(unknown.contains("unknown export format") && unknown.contains("xlsx"), "{unknown}");
-        assert!(err(t.execute(json!({"path": "Missing", "format": "csv"})).await).contains("not found"));
+        assert!(
+            unknown.contains("unknown export format") && unknown.contains("xlsx"),
+            "{unknown}"
+        );
+        assert!(
+            err(t.execute(json!({"path": "Missing", "format": "csv"})).await).contains("not found")
+        );
         let no_tables = err(t.execute(json!({"path": "Prose", "format": "xlsx"})).await);
         assert!(no_tables.contains("no tables"), "{no_tables}");
         assert!(

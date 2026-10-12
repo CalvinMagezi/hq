@@ -214,10 +214,25 @@ async fn bypass_permissions_still_enforces_the_injection_policy() {
 
 /// The real watch tool, as a web chat session registers it, behind governance.
 fn governed_watch(session: &Session, db: &std::sync::Arc<hq_db::Database>) -> Box<dyn AgentTool> {
-    let chat = hq_tools::harness_session::WatchingChat { thread: "th-1".into(), drive_new: true, driver_turn: false, from_ask: false };
-    let tools = hq_tools::harness_session::tools::create_harness_session_tools(PathBuf::from("/tmp"), db.clone(), Some(chat), None);
-    let inner = tools.into_iter().find(|t| t.name() == "harness_session_watch").unwrap();
-    session.guardian.govern(Box::new(crate::builder::HqToolAdapter { inner }))
+    let chat = hq_tools::harness_session::WatchingChat {
+        thread: "th-1".into(),
+        drive_new: true,
+        driver_turn: false,
+        from_ask: false,
+    };
+    let tools = hq_tools::harness_session::tools::create_harness_session_tools(
+        PathBuf::from("/tmp"),
+        db.clone(),
+        Some(chat),
+        None,
+    );
+    let inner = tools
+        .into_iter()
+        .find(|t| t.name() == "harness_session_watch")
+        .unwrap();
+    session
+        .guardian
+        .govern(Box::new(crate::builder::HqToolAdapter { inner }))
 }
 
 #[tokio::test]
@@ -226,36 +241,80 @@ async fn a_watch_started_after_untrusted_content_starts_with_drive_off() {
     let db = std::sync::Arc::new(hq_db::Database::open_memory().unwrap());
     db.with_conn(|c| {
         for id in ["hs-clean", "hs-tainted"] {
-            let placement = Placement { host: "local", agent_name: id, workspace_id: "w1", pane_id: "w1:p1" };
-            registry::insert(c, &NewSession { id, harness: "pi", label: "", cwd: "/t", mission_id: None, placement, purpose: None })?;
-            let (goal, done) = ("Add rate limiting to the login endpoint", "Login returns 429 after 5 failed attempts");
+            let placement = Placement {
+                host: "local",
+                agent_name: id,
+                workspace_id: "w1",
+                pane_id: "w1:p1",
+            };
+            registry::insert(
+                c,
+                &NewSession {
+                    id,
+                    harness: "pi",
+                    label: "",
+                    cwd: "/t",
+                    mission_id: None,
+                    placement,
+                    purpose: None,
+                },
+            )?;
+            let (goal, done) = (
+                "Add rate limiting to the login endpoint",
+                "Login returns 429 after 5 failed attempts",
+            );
             registry::set_goal(c, id, Some(goal), Some(done), registry::ACTOR_USER)?;
         }
         Ok(())
     })
     .unwrap();
-    let drive = |id: &str| db.with_conn(|c| registry::get(c, id)).unwrap().unwrap().drive;
+    let drive = |id: &str| {
+        db.with_conn(|c| registry::get(c, id))
+            .unwrap()
+            .unwrap()
+            .drive
+    };
     let session = Session::new();
     let watch = governed_watch(&session, &db);
 
-    watch.execute("id", json!({"session_id": "hs-clean"})).await.unwrap();
+    watch
+        .execute("id", json!({"session_id": "hs-clean"}))
+        .await
+        .unwrap();
     assert!(drive("hs-clean"), "a clean turn's new watch drives");
 
     session.read_untrusted_page().await;
-    let result = watch.execute("id", json!({"session_id": "hs-tainted"})).await.unwrap();
-    assert!(result.content[0].text.contains("hs-tainted"), "{}", result.content[0].text);
-    assert!(!drive("hs-tainted"), "an injected page must not buy prompt approvals");
-    assert!(drive("hs-clean"), "and it leaves the user's existing switch alone");
+    let result = watch
+        .execute("id", json!({"session_id": "hs-tainted"}))
+        .await
+        .unwrap();
+    assert!(
+        result.content[0].text.contains("hs-tainted"),
+        "{}",
+        result.content[0].text
+    );
+    assert!(
+        !drive("hs-tainted"),
+        "an injected page must not buy prompt approvals"
+    );
+    assert!(
+        drive("hs-clean"),
+        "and it leaves the user's existing switch alone"
+    );
 }
 
 #[tokio::test]
 async fn a_tainted_session_cannot_switch_the_model() {
     let session = Session::new();
-    let (ran, _) = session.call("model_switch", json!({"model": "expensive"})).await;
+    let (ran, _) = session
+        .call("model_switch", json!({"model": "expensive"}))
+        .await;
     assert!(ran, "an untainted session may switch models");
 
     session.read_untrusted_page().await;
-    let (ran, text) = session.call("model_switch", json!({"model": "expensive"})).await;
+    let (ran, text) = session
+        .call("model_switch", json!({"model": "expensive"}))
+        .await;
     assert!(!ran, "model_switch ran after reading untrusted content");
     assert!(text.contains("model configuration"), "{text}");
 }

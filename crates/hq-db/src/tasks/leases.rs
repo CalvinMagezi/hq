@@ -137,7 +137,10 @@ fn is_reserved_actor(actor: &str) -> bool {
 }
 
 fn hash_token(token: &str) -> String {
-    Sha256::digest(token.as_bytes()).iter().map(|b| format!("{b:02x}")).collect()
+    Sha256::digest(token.as_bytes())
+        .iter()
+        .map(|b| format!("{b:02x}"))
+        .collect()
 }
 
 fn new_token() -> String {
@@ -223,7 +226,11 @@ pub fn require_live_lease(conn: &Connection, token: &str, ttl_secs: i64) -> Resu
 }
 
 /// Recent leases on a task, newest first, live ones included.
-pub fn list_work_sessions(conn: &Connection, task_id: &str, limit: usize) -> Result<Vec<WorkSession>> {
+pub fn list_work_sessions(
+    conn: &Connection,
+    task_id: &str,
+    limit: usize,
+) -> Result<Vec<WorkSession>> {
     let mut stmt = conn.prepare(&format!(
         "SELECT {LEASE_COLS} FROM task_work_sessions WHERE task_id = ?1 \
          ORDER BY started_at DESC, rowid DESC LIMIT {limit}"
@@ -236,7 +243,9 @@ pub fn list_work_sessions(conn: &Connection, task_id: &str, limit: usize) -> Res
 
 fn end_lease(conn: &Connection, id: &str, ended_at_sql: &str, reason: &str) -> Result<()> {
     conn.execute(
-        &format!("UPDATE task_work_sessions SET ended_at = {ended_at_sql}, end_reason = ?1 WHERE id = ?2"),
+        &format!(
+            "UPDATE task_work_sessions SET ended_at = {ended_at_sql}, end_reason = ?1 WHERE id = ?2"
+        ),
         params![reason, id],
     )?;
     Ok(())
@@ -258,7 +267,11 @@ fn held_message(task: &Task, lease: &WorkSession) -> String {
          pass takeover=true if it is gone.",
         task.display_id,
         lease.actor,
-        if lease.harness.is_empty() { "unknown harness" } else { &lease.harness },
+        if lease.harness.is_empty() {
+            "unknown harness"
+        } else {
+            &lease.harness
+        },
         lease.started_at,
         lease.last_heartbeat_at
     )
@@ -311,13 +324,19 @@ pub fn claim(
         anyhow::bail!("'{actor}' is a name HQ uses for itself; pick your own agent name");
     }
     let out = in_write_tx(conn, |conn| {
-        let task = get_task(conn, task_ref)?
-            .ok_or_else(|| anyhow::anyhow!("no task '{task_ref}'"))?;
+        let task =
+            get_task(conn, task_ref)?.ok_or_else(|| anyhow::anyhow!("no task '{task_ref}'"))?;
         if task.archived_at.is_some() {
-            anyhow::bail!("task {} is archived; restore it before claiming it", task.display_id);
+            anyhow::bail!(
+                "task {} is archived; restore it before claiming it",
+                task.display_id
+            );
         }
         if task.status == STATUS_COMPLETE {
-            anyhow::bail!("task {} is complete; reopen it before claiming it", task.display_id);
+            anyhow::bail!(
+                "task {} is complete; reopen it before claiming it",
+                task.display_id
+            );
         }
         let recent: i64 = conn.query_row(
             "SELECT COUNT(*) FROM task_work_sessions WHERE actor = ?1 \
@@ -326,7 +345,9 @@ pub fn claim(
             |r| r.get(0),
         )?;
         if recent >= CLAIMS_PER_WINDOW {
-            anyhow::bail!("{actor} started {recent} leases in {CLAIM_WINDOW_MINUTES} minutes; slow down");
+            anyhow::bail!(
+                "{actor} started {recent} leases in {CLAIM_WINDOW_MINUTES} minutes; slow down"
+            );
         }
         expire_stale_leases(conn, ttl_secs)?;
         for held in live_on_task(conn, &task.id)? {
@@ -354,10 +375,16 @@ pub fn claim(
                 hash_token(&token)
             ],
         )?;
-        let ctx = WriteCtx { actor: Some(&actor), work_session_id: Some(&id) };
+        let ctx = WriteCtx {
+            actor: Some(&actor),
+            work_session_id: Some(&id),
+        };
         let moved = CLAIMABLE.contains(&task.status.as_str());
         if moved {
-            let patch = TaskPatch { status: Some(STATUS_IN_PROGRESS.to_string()), ..Default::default() };
+            let patch = TaskPatch {
+                status: Some(STATUS_IN_PROGRESS.to_string()),
+                ..Default::default()
+            };
             update_task_as(conn, &task.id, &patch, Some(&task.status), &ctx)?;
         }
         stamp_start_date(conn, &task)?;
@@ -367,8 +394,14 @@ pub fn claim(
             params![id],
             row_to_lease,
         )?;
-        let task = get_task(conn, &task.id)?.ok_or_else(|| anyhow::anyhow!("task vanished while claiming"))?;
-        Ok(Claimed { session, token, task, moved })
+        let task = get_task(conn, &task.id)?
+            .ok_or_else(|| anyhow::anyhow!("task vanished while claiming"))?;
+        Ok(Claimed {
+            session,
+            token,
+            task,
+            moved,
+        })
     })?;
     Ok(out)
 }
@@ -424,8 +457,8 @@ pub fn release(
         validate_status(status)?;
     }
     in_write_tx(conn, |conn| {
-        let lease = lease_for_token(conn, token)?
-            .ok_or_else(|| anyhow::anyhow!("unknown lease token"))?;
+        let lease =
+            lease_for_token(conn, token)?.ok_or_else(|| anyhow::anyhow!("unknown lease token"))?;
         let may_change_status = match (&lease.ended_at, lease.end_reason.as_deref()) {
             (None, _) => {
                 let silent: bool = conn.query_row(
@@ -434,7 +467,11 @@ pub fn release(
                     params![lease.id, ttl_expr(ttl_secs)],
                     |r| r.get(0),
                 )?;
-                let ended_at = if silent { "last_heartbeat_at" } else { "datetime('now')" };
+                let ended_at = if silent {
+                    "last_heartbeat_at"
+                } else {
+                    "datetime('now')"
+                };
                 end_lease(conn, &lease.id, ended_at, END_RELEASED)?;
                 true
             }
@@ -453,12 +490,17 @@ pub fn release(
                 reason.unwrap_or("ended")
             ),
         };
-        let ctx = WriteCtx { actor: Some(&lease.actor), work_session_id: Some(&lease.id) };
+        let ctx = WriteCtx {
+            actor: Some(&lease.actor),
+            work_session_id: Some(&lease.id),
+        };
         let status_applied = match status {
             Some(status) if may_change_status => {
                 let reason = (status == STATUS_BLOCKED).then(|| first_line(summary));
                 if status == STATUS_BLOCKED && reason.as_deref().is_none_or(str::is_empty) {
-                    anyhow::bail!("say why you are blocked: give a summary, which becomes the blocked reason");
+                    anyhow::bail!(
+                        "say why you are blocked: give a summary, which becomes the blocked reason"
+                    );
                 }
                 let patch = TaskPatch {
                     status: Some(status.to_string()),
@@ -470,7 +512,13 @@ pub fn release(
             }
             _ => false,
         };
-        add_comment(conn, &lease.task_id, &lease.actor, &release_note(status, status_applied, summary), None)?;
+        add_comment(
+            conn,
+            &lease.task_id,
+            &lease.actor,
+            &release_note(status, status_applied, summary),
+            None,
+        )?;
         let session = conn.query_row(
             &format!("SELECT {LEASE_COLS} FROM task_work_sessions WHERE id = ?1"),
             params![lease.id],
@@ -478,13 +526,25 @@ pub fn release(
         )?;
         let task = get_task(conn, &lease.task_id)?
             .ok_or_else(|| anyhow::anyhow!("task vanished while releasing"))?;
-        Ok(Released { session, task, status_applied, current: may_change_status })
+        Ok(Released {
+            session,
+            task,
+            status_applied,
+            current: may_change_status,
+        })
     })
 }
 
 /// The first non-empty line of a summary, for the short reason a task is blocked.
 fn first_line(summary: &str) -> String {
-    summary.lines().map(str::trim).find(|l| !l.is_empty()).unwrap_or_default().chars().take(MAX_BLOCK_TEXT_CHARS).collect()
+    summary
+        .lines()
+        .map(str::trim)
+        .find(|l| !l.is_empty())
+        .unwrap_or_default()
+        .chars()
+        .take(MAX_BLOCK_TEXT_CHARS)
+        .collect()
 }
 
 /// The thread comment for a release: what HQ did, then the agent's own words
@@ -507,7 +567,11 @@ fn release_note(status: Option<&str>, applied: bool, summary: &str) -> String {
         .filter(|l| !l.is_empty())
         .map(|l| format!("> {l}"))
         .collect();
-    if quoted.is_empty() { head } else { format!("{head}\n{}", quoted.join("\n")) }
+    if quoted.is_empty() {
+        head
+    } else {
+        format!("{head}\n{}", quoted.join("\n"))
+    }
 }
 
 /// Opens the lease of a spawned session on its task, replacing any earlier lease
@@ -544,7 +608,11 @@ pub fn open_for_session(
 }
 
 /// Ends every open lease of a spawned session. Returns how many it ended.
-pub fn close_for_session(conn: &Connection, harness_session_id: &str, reason: &str) -> Result<usize> {
+pub fn close_for_session(
+    conn: &Connection,
+    harness_session_id: &str,
+    reason: &str,
+) -> Result<usize> {
     let closed = conn.execute(
         "UPDATE task_work_sessions SET ended_at = datetime('now'), end_reason = ?1 \
          WHERE harness_session_id = ?2 AND ended_at IS NULL",
@@ -558,7 +626,11 @@ pub fn close_for_session(conn: &Connection, harness_session_id: &str, reason: &s
 
 /// Leases that overlap the last `days` days or are still open, newest first,
 /// for drawing actual work on the timeline. Capped at `limit`.
-pub fn list_recent_work_sessions(conn: &Connection, days: i64, limit: usize) -> Result<Vec<WorkSession>> {
+pub fn list_recent_work_sessions(
+    conn: &Connection,
+    days: i64,
+    limit: usize,
+) -> Result<Vec<WorkSession>> {
     let mut stmt = conn.prepare(&format!(
         "SELECT {LEASE_COLS} FROM task_work_sessions \
          WHERE ended_at IS NULL OR ended_at >= datetime('now', ?1) \
@@ -571,7 +643,10 @@ pub fn list_recent_work_sessions(conn: &Connection, days: i64, limit: usize) -> 
 }
 
 /// The open lease a spawned session holds, if any.
-pub fn lease_for_session(conn: &Connection, harness_session_id: &str) -> Result<Option<WorkSession>> {
+pub fn lease_for_session(
+    conn: &Connection,
+    harness_session_id: &str,
+) -> Result<Option<WorkSession>> {
     Ok(conn
         .query_row(
             &format!(

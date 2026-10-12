@@ -1,7 +1,8 @@
 use super::transport::Transport;
 use super::{
-    AgentInfo, AgentStatus, AwaitingAgent, AgentHostError, Host, HostBackend, HostEvent, HostEvents,
-    INVALID_KEYS_CODE, LaunchRequest, Launched, PromptOutcome, shell_line, validate_keys,
+    AgentHostError, AgentInfo, AgentStatus, AwaitingAgent, Host, HostBackend, HostEvent,
+    HostEvents, INVALID_KEYS_CODE, LaunchRequest, Launched, PromptOutcome, shell_line,
+    validate_keys,
 };
 use hq_host::{Client, ClientError};
 use serde_json::{Value, json};
@@ -89,7 +90,15 @@ impl NativeBackend {
         gate_command: &str,
         mux_dir: Option<PathBuf>,
     ) -> Self {
-        Self::remote_with_program(name, target, port, identity_file, gate_command, mux_dir, "ssh")
+        Self::remote_with_program(
+            name,
+            target,
+            port,
+            identity_file,
+            gate_command,
+            mux_dir,
+            "ssh",
+        )
     }
 
     /// Like `remote`, with the program that stands in for `ssh` (tests).
@@ -519,7 +528,11 @@ impl HostBackend for NativeBackend {
         })
     }
 
-    fn await_started(&self, name: &str, within: Duration) -> Result<Option<AgentInfo>, AgentHostError> {
+    fn await_started(
+        &self,
+        name: &str,
+        within: Duration,
+    ) -> Result<Option<AgentInfo>, AgentHostError> {
         match self.wait_for(name, &SETTLED, within)? {
             Some(info) => Ok(Some(info)),
             None => self.agent(name),
@@ -588,8 +601,14 @@ impl HostBackend for NativeBackend {
     }
 
     fn read_styled(&self, target: &str, lines: usize) -> Result<String, AgentHostError> {
-        let v = self.call("agent.read", json!({ "name": target, "source": "styled", "lines": lines }))?;
-        Ok(v.get("text").and_then(Value::as_str).unwrap_or_default().to_string())
+        let v = self.call(
+            "agent.read",
+            json!({ "name": target, "source": "styled", "lines": lines }),
+        )?;
+        Ok(v.get("text")
+            .and_then(Value::as_str)
+            .unwrap_or_default()
+            .to_string())
     }
 
     fn wait(
@@ -624,7 +643,11 @@ impl HostBackend for NativeBackend {
         true
     }
 
-    fn poll_events(&self, after: Option<u64>, wait: Duration) -> Result<HostEvents, AgentHostError> {
+    fn poll_events(
+        &self,
+        after: Option<u64>,
+        wait: Duration,
+    ) -> Result<HostEvents, AgentHostError> {
         let params = json!({ "after": after, "timeout_ms": wait.as_millis() as u64 });
         let v = self.call_within("events.poll", params, wait + self.command_timeout)?;
         let text = |e: &Value, k: &str| e.get(k).and_then(Value::as_str).map(str::to_string);
@@ -650,7 +673,12 @@ impl HostBackend for NativeBackend {
         })
     }
 
-    fn update_resume(&self, name: &str, kind: &str, args: Vec<String>) -> Result<(), AgentHostError> {
+    fn update_resume(
+        &self,
+        name: &str,
+        kind: &str,
+        args: Vec<String>,
+    ) -> Result<(), AgentHostError> {
         let mut argv = vec![binary_for(kind)];
         argv.extend(args);
         argv.extend(self.hook_flags(name, kind));
@@ -666,7 +694,11 @@ impl HostBackend for NativeBackend {
             .unwrap_or_default())
     }
 
-    fn resume_awaiting(&self, name: &str, env: Vec<(String, String)>) -> Result<(), AgentHostError> {
+    fn resume_awaiting(
+        &self,
+        name: &str,
+        env: Vec<(String, String)>,
+    ) -> Result<(), AgentHostError> {
         let env: serde_json::Map<String, Value> = env
             .into_iter()
             .map(|(k, v)| (k, Value::String(v)))
@@ -697,7 +729,14 @@ mod tests {
     fn a_test_cannot_talk_to_the_machines_own_host_or_a_remote_one() {
         assert!(is_test_binary());
         let own = NativeBackend::new(real_host_dir());
-        let remote = NativeBackend::remote("laptop", "me@100.64.0.1", None, None, NATIVE_GATE_COMMAND, None);
+        let remote = NativeBackend::remote(
+            "laptop",
+            "me@100.64.0.1",
+            None,
+            None,
+            NATIVE_GATE_COMMAND,
+            None,
+        );
         for host in [own, remote] {
             let err = host.version().unwrap_err().to_string();
             assert!(err.contains("this is a test"), "{err}");
@@ -752,7 +791,10 @@ mod tests {
         let exited = json!({"name": "a", "status": "exited", "state": "idle"});
         let info = parse_info(&exited).unwrap();
         assert_eq!(info.status, AgentStatus::Unknown);
-        assert!(info.exited, "an exited pane says so, so the supervisor can treat it as gone");
+        assert!(
+            info.exited,
+            "an exited pane says so, so the supervisor can treat it as gone"
+        );
         assert_eq!(info.exit_code, None, "no code in the record means unknown");
         let crashed = json!({"name": "a", "status": "exited", "state": "idle", "exit_code": 1});
         assert_eq!(parse_info(&crashed).unwrap().exit_code, Some(1));
