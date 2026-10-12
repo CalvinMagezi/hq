@@ -279,7 +279,7 @@ mod tests {
             "http://fcm.googleapis.com/fcm/send/x",
             "https://127.0.0.1/x",
             "https://metadata.google.internal/computeMetadata",
-            "https://user:pw@fcm.googleapis.com/x",
+            "https://user@fcm.googleapis.com/x",
             "not a url",
         ] {
             let sub = json!({"endpoint": endpoint, "keys": browser_keys()});
