@@ -246,19 +246,16 @@ mod tests {
             redact_secrets("  telegram_token: \"123456:ABCdefGHIjkl\""),
             "  telegram_token: \"[REDACTED]\""
         );
-        assert_eq!(
-            redact_secrets("GITHUB_TOKEN = ghx0123456789"),
-            "GITHUB_TOKEN = [REDACTED]"
-        ); // gitleaks:allow
+        let spaced = "GITHUB_TOKEN = ghx0123456789"; // gitleaks:allow
+        assert_eq!(redact_secrets(spaced), "GITHUB_TOKEN = [REDACTED]");
         let config = "openrouter_api_key: sk-or-v1-0123456789abcdef0123456789abcdef0123456789abcdef\nGITHUB_TOKEN=\"ghx_notatypicalshape99\"\nmodel: sonnet"; // gitleaks:allow
         assert_eq!(
             redact_secrets(config),
             "openrouter_api_key: [REDACTED]\nGITHUB_TOKEN=\"[REDACTED]\"\nmodel: sonnet"
         );
+        let inline = "OPENROUTER_API_KEY=sk-or-v1-0123456789abcdef0123456789abcdef0123456789abcdef hq doctor"; // gitleaks:allow
         assert_eq!(
-            redact_secrets(
-                "OPENROUTER_API_KEY=sk-or-v1-0123456789abcdef0123456789abcdef0123456789abcdef hq doctor"
-            ), // gitleaks:allow
+            redact_secrets(inline),
             "OPENROUTER_API_KEY=[REDACTED] hq doctor"
         );
         assert_eq!(
