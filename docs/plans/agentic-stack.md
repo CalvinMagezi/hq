@@ -8,8 +8,8 @@ single, bounded, sandboxed job. The interactive panes stay for people.
 
 ## Where the first cut choked the agents
 
-- HQ drove agents with real APIs through a terminal. Hermes has `hermes chat -q`
-  for one-shot runs; OpenClaw's automations run `openclaw agent --message` in an
+- HQ drove agents with real APIs through a terminal. Hermes has `hermes chat --oneshot -q`
+  for one-shot runs; OpenClaw's automations run `openclaw agent --message` (run with `--local` under HQ) in an
   isolated session. Screen-scraping a TUI that has no state rule file left every
   session as `unknown`: no wait, no finished alert, messages typed in blind.
 - HQ took itself away from the agent, then re-fed it by hand. A general-purpose
@@ -83,8 +83,8 @@ stack:
 2. **Run.** One run per specialist at a time. The dispatcher builds a brief from
    the task (display id, title, description, initiative, the resume point from
    its last checkpoint, and what to print at the end) and launches the harness's
-   one-shot command in the host's sandbox: `hermes chat -q "<brief>"`,
-   `openclaw agent --message "<brief>"`. A profile can replace the command for
+   one-shot command in the host's sandbox: `hermes chat --oneshot -q "<brief>"`,
+   `openclaw agent --local --message "<brief>"`. A profile can replace the command for
    an install that differs (`one_shot_args`, with `{brief}`). The session is an
    ordinary harness session with origin `stack`, so the Workbench, `hq sessions`
    and `harness_session_logs` show it like any other.

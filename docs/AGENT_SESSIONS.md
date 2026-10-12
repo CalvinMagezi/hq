@@ -492,7 +492,7 @@ the goal and criteria in force at the time (`registry::list_events`).
 
 ## General-purpose agents
 
-Hermes (`hermes chat`) and OpenClaw (`openclaw tui`) are a second category of
+Hermes (`hermes chat`) and OpenClaw (`openclaw tui --local`) are a second category of
 harness, `general_purpose`, next to the coding agents. They run in the same host, the same
 process sandbox and the same session registry, and the same `harness_session_*` tools, web
 page and `hq sessions` commands start, read, steer and stop them. What differs is what HQ
@@ -549,6 +549,13 @@ The launch commands are the ones each project documents; an install that starts 
 gets a profile (`base: hermes`, `command: ...`, `args: [...]`), and a profile may reuse the
 built-in name.
 
+OpenClaw runs with `--local`: its default talks to the OpenClaw gateway on a loopback port,
+and the sandbox refuses loopback connections. OpenClaw refuses `--local` while a gateway runs
+for the same state directory (`A Gateway is running for this state directory ... Run without
+--local to use it, or stop the Gateway first`), so on an HQ host do not run OpenClaw's gateway
+daemon (skip `--install-daemon` when you set it up). If that machine needs the gateway for
+something else, give HQ a harness profile for OpenClaw instead.
+
 ### The Agentic Stack: specialists that pull their tasks
 
 An interactive pane is the slow way to use these agents. The faster one is to name them in
@@ -575,7 +582,7 @@ stack:
 - **Run.** One run per specialist at a time. HQ builds a brief from the task (display id,
   title, description as the definition of done, initiative, the resume point from its last
   checkpoint, and what to print at the end) and starts the harness's one-shot command in the
-  sandbox: `hermes chat -q "<brief>"`, `openclaw agent --message "<brief>"`. A profile's
+  sandbox: `hermes chat --oneshot -q "<brief>"`, `openclaw agent --local --message "<brief>"`. A profile's
   `one_shot_args` (with `{brief}`) replaces that for an install that differs. The session has
   origin `stack` and label `stack/<name>`, and shows in the Workbench, `hq sessions` and
   `harness_session_logs` like any other. A tag on the task that names a purpose in the lane
@@ -583,7 +590,9 @@ stack:
 - **Output.** The process ending is the completion signal. The supervisor keeps the final
   screen as the session's snapshot, closes the pane, and records the run on the task by its
   exit code: zero moves the task from in progress to ready for review and releases its lease;
-  anything else is a crash and blocks the task (on a host that reports no code, output on
+  anything else is a crash and blocks the task with a reason that names the run and, when it
+is short, quotes the last paragraph on its screen, where a CLI prints the error it stopped on
+(on a host that reports no code, output on
   screen counts as a finished run and a blank screen as a crash). A run is never resumed:
   fix the cause, then assign the task again or `hq stack run`. A person reads the output
   (`harness_session_logs`) and marks the task complete, or not. A monitor's or reviewer's run

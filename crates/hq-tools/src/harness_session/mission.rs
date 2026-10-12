@@ -10,7 +10,9 @@
 //!
 //! Comments never quote the agent's screen. Pane text is untrusted (it taints a
 //! session read through `harness_session_logs`), while task comments are read
-//! back as trusted input, so they point at the logs instead.
+//! back as trusted input, so they point at the logs instead. The one exception
+//! is a crashed stack run's `blocked_reason`: the error a CLI died on is the
+//! reason, so a short last paragraph is quoted there, labelled as the agent's.
 
 use super::category::Purpose;
 use anyhow::{Result, anyhow, bail};
@@ -20,6 +22,9 @@ use rusqlite::Connection;
 use serde::Serialize;
 
 const COMMENT_AUTHOR: &str = "harness-session";
+/// Longest screen text quoted in a crashed run's `blocked_reason`, well under
+/// `t::MAX_BLOCK_TEXT_CHARS` so the reason around it always fits.
+const MAX_QUOTED_SCREEN_CHARS: usize = 300;
 
 /// A lifecycle event of a session.
 #[derive(Debug, Clone, Copy)]
@@ -113,7 +118,13 @@ fn record_in(
     };
     let ctx = t::WriteCtx { actor: Some(&session.id), work_session_id: lease.as_deref() };
     let moved = match (does_work, target(event, siblings_running, session_running, task.long_horizon)) {
-        (true, Some((from, to))) => advance(conn, &task, from, to, &ctx)?,
+        (true, Some((from, to))) => {
+            let reason = match to == t::STATUS_BLOCKED {
+                true => Some(blocked_reason(conn, session, event)?),
+                false => None,
+            };
+            advance(conn, &task, from, to, reason, &ctx)?
+        }
         _ => None,
     };
     close_lease(conn, session, event)?;
@@ -260,6 +271,7 @@ fn advance(
     task: &Task,
     from: &[&str],
     to: &str,
+    blocked_reason: Option<String>,
     ctx: &t::WriteCtx,
 ) -> Result<Option<Task>> {
     if !from.contains(&task.status.as_str()) {
@@ -267,9 +279,43 @@ fn advance(
     }
     let patch = t::TaskPatch {
         status: Some(to.to_string()),
+        blocked_reason: blocked_reason.map(Some),
         ..Default::default()
     };
     t::update_task_as(conn, &task.id, &patch, Some(&task.status), ctx).map(Some)
+}
+
+/// Why `event` blocks the task, in the style of the stack's run-time limit, so a
+/// blocked task always says why without a trip to the logs.
+fn blocked_reason(conn: &Connection, session: &HarnessSessionRow, event: Event) -> Result<String> {
+    let who = format!("session `{}` ({})", session.id, session.harness);
+    let reason = match event {
+        Event::RunFailed => {
+            let base = format!("stack run by {who} ended without finishing");
+            let snapshot = registry::last_snapshot(conn, &session.id)?;
+            let quoted = snapshot
+                .as_deref()
+                .and_then(last_screen_message)
+                .map(|message| format!("{base}; the agent's last screen line: \"{message}\""));
+            // An over-long reason would fail the whole write, the status move included.
+            quoted.filter(|r| r.chars().count() <= t::MAX_BLOCK_TEXT_CHARS).unwrap_or(base)
+        }
+        Event::BlockedAtLaunch => format!("{who} stopped at a startup dialog before its prompt was typed"),
+        _ => format!("{who} exited and no other session is working on the task"),
+    };
+    Ok(reason)
+}
+
+/// The last paragraph of a final screen, where a CLI prints the error it died on,
+/// joined across the rows the pane wrapped it into. `None` when it is too long to quote.
+// ponytail: a paragraph ends at a blank row, so an error printed right under other
+// output is too long and left out; split on the pane width if that turns out common.
+fn last_screen_message(snapshot: &str) -> Option<String> {
+    let lines: Vec<&str> = snapshot.lines().map(str::trim).collect();
+    let end = lines.iter().rposition(|line| !line.is_empty())? + 1;
+    let start = lines[..end].iter().rposition(|line| line.is_empty()).map_or(0, |i| i + 1);
+    let message = lines[start..end].join(" ");
+    (message.chars().count() <= MAX_QUOTED_SCREEN_CHARS).then_some(message)
 }
 
 /// The thread names the session, never its machine or folder: every reader of the thread, the
@@ -544,6 +590,52 @@ mod tests {
         let watcher = session_for(&db, "hs-watch", &task, "monitor");
         assert!(!apply(&db, &watcher, Event::RunEnded).unwrap().moved);
         assert_eq!(status(&db, &task), t::STATUS_TO_DO);
+    }
+
+    fn stack_run(db: &Database, id: &str, task: &str) -> HarnessSessionRow {
+        session_for(db, id, task, "research");
+        db.with_conn(|c| registry::set_origin(c, id, registry::ORIGIN_STACK)).unwrap();
+        db.with_conn(|c| Ok(registry::get(c, id)?.unwrap())).unwrap()
+    }
+
+    fn blocked_reason_of(db: &Database, task: &str) -> Option<String> {
+        db.with_conn(|c| Ok(t::get_task(c, task)?.unwrap().blocked_reason)).unwrap()
+    }
+
+    #[test]
+    fn a_crashed_stack_run_blocks_its_task_with_a_reason() {
+        // The gateway refusal as a 120-column pane wraps it, under earlier output.
+        let screen = "Starting agent...\n\nA Gateway is running for this state directory (pid 1234, port 5678). Run without --local to use it, or stop\nthe Gateway first.\n\n";
+        let (db, task) = setup();
+        let run = stack_run(&db, "hs-run", &task);
+        apply(&db, &run, Event::Launched);
+        db.with_conn(|c| registry::set_last_snapshot(c, "hs-run", screen)).unwrap();
+        assert!(apply(&db, &run, Event::RunFailed).unwrap().moved);
+        assert_eq!(status(&db, &task), t::STATUS_BLOCKED);
+        let reason = blocked_reason_of(&db, &task).unwrap();
+        assert!(reason.contains("hs-run") && reason.contains("ended without finishing"), "{reason}");
+        assert!(reason.contains("\"A Gateway is running for this state directory (pid 1234, port 5678). Run without --local to use it, or stop the Gateway first.\""), "{reason}");
+
+        // A long last paragraph is left out; the reason still names the run.
+        let (db, task) = setup();
+        let run = stack_run(&db, "hs-run", &task);
+        apply(&db, &run, Event::Launched);
+        db.with_conn(|c| registry::set_last_snapshot(c, "hs-run", &"x".repeat(MAX_QUOTED_SCREEN_CHARS + 1))).unwrap();
+        assert!(apply(&db, &run, Event::RunFailed).unwrap().moved);
+        let reason = blocked_reason_of(&db, &task).unwrap();
+        assert!(reason.ends_with("ended without finishing") && !reason.contains("xxx"), "{reason}");
+
+        // No screen at all, and a plain session exiting, still say why.
+        let (db, task) = setup();
+        let run = stack_run(&db, "hs-run", &task);
+        apply(&db, &run, Event::Launched);
+        assert!(apply(&db, &run, Event::RunFailed).unwrap().moved);
+        assert!(blocked_reason_of(&db, &task).unwrap().ends_with("ended without finishing"));
+        let (db, task) = setup();
+        let s = session(&db, "hs-1", Some(&task));
+        apply(&db, &s, Event::Launched);
+        assert!(apply(&db, &s, Event::Exited).unwrap().moved);
+        assert!(blocked_reason_of(&db, &task).unwrap().contains("exited"));
     }
 
     fn mark_long_horizon(db: &Database, task: &str) {

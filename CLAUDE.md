@@ -69,7 +69,7 @@ placeholders (`example.com`, `hq.example.ts.net`, `<owner>/<repo>`).
   no HQ token. The **Agentic Stack** (`stack:` config,
   `crates/hq-tools/src/harness_session/stack.rs`, daemon task `stack-dispatch`,
   `hq stack`) names such agents as specialists that pull the tasks assigned to
-  them and run each as one one-shot job (`hermes chat -q "<brief>"`); the
+  them and run each as one one-shot job (`hermes chat --oneshot -q "<brief>"`); the
   process ending puts the task into review (`mission::Event::RunEnded`). A pane
   whose process ended counts as gone (`AgentInfo::exited`). "General-purpose
   agents" in `docs/AGENT_SESSIONS.md`, plan in `docs/plans/agentic-stack.md`. `crates/hq-tools/src/agent_host/`
