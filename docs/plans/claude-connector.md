@@ -103,8 +103,10 @@ Lite should support connectors; the first cut leaves Lite out.
   Configurable, but the default list is closed. Anything else is refused at registration and
   at authorization.
 - **CIMD.** A `client_id` that is an https URL is fetched only if its host is in `cimd_hosts`
-  (default: `claude.ai`). No redirects followed, 64 KiB cap, 5 s timeout, private and loopback
-  addresses refused. This prevents the client id from being an SSRF lever.
+  (default: `claude.ai`, to be confirmed in slice 0). No redirects followed, 64 KiB cap, 5 s
+  timeout, private and loopback addresses refused. This prevents the client id from being an
+  SSRF lever. The `redirect_uri` must appear in the document's own `redirect_uris` and pass the
+  rule above.
 - **PKCE.** `code_challenge` with `S256` is mandatory; `plain` is refused.
 - **Resource.** If the request carries `resource` (RFC 8707) it must equal `<public_url>/mcp`.
   Tokens are stored with it and only accepted on `/mcp`.
@@ -134,7 +136,8 @@ Lite should support connectors; the first cut leaves Lite out.
    `WWW-Authenticate: Bearer resource_metadata="<public_url>/.well-known/oauth-protected-resource"`.
    The JSON-RPC error body stays, so key-based clients still see the reason. The `401` applies
    whether or not the connector is enabled, because it is the correct status; existing tests in
-   `mcp_http.rs` that assert the refusal shape change with it.
+   `mcp_http.rs` that assert the refusal shape change with it. `deploy/test-vps-connection.sh`
+   and `hq mcp doctor` are checked for anything that expects a `200` refusal.
 2. Identity resolution gains a third source after the static keys and session tokens: an
    OAuth access token, which yields the grant's scope (`None`, `SPARK_READONLY_ALLOWLIST` or
    `TASKS_ALLOWLIST`) and the grant id for the checks below. `ApiIdentity` in
@@ -153,18 +156,29 @@ tasks and handoff scopes (`HANDOFF_SCOPE_ARG`, `TASKS_SCOPE_ARG`, `mark_spawned_
 
 1. **Owner confirmation for high-risk tools.** A short, named list
    (`CONNECTOR_CONFIRM_TOOLS` beside the allowlists, with a test that every entry is a real
-   tool): starting, sending to or handing off harness sessions, `host_send`, sending mail through
-   `gws`, `hq_ask` in `full` mode, self-update, skill and slash-command edits (they persist
-   instructions into future sessions), and deletes. On a connector grant such a call raises an
-   approval through `value_items`, which the owner approves from the chat relay button, the web
-   inbox or `hq queue approve`. Those approvals are signed with the install key
-   (`value_items::is_signed_approval`), so a tool cannot approve itself. The call waits up to
-   about 45 seconds, then returns a pending result telling Claude to retry with the approval id.
-   `mcp_connector.confirm_tools` can widen the list, or set it to `[]` to turn this off for an
-   owner who accepts the risk.
-2. **Spawned work stays bounded.** Sessions started through a connector grant are marked as
-   spawned (`mark_spawned_session`), so they cannot start more, and their working directory
-   must fall under `mcp_connector.spawn_cwd_allow` (default: `agent_host.handoff_cwd_allow`).
+   tool): sending mail through `gws`, `hq_ask` in `full` mode, self-update, skill and
+   slash-command edits (they persist instructions into future sessions), and deletes. Whether
+   harness session tools (spawn, send, handoff, `host_send`) belong on it is an open decision
+   (below). On a connector grant such a call raises an approval through `value_items`, which the
+   owner approves from the chat relay button, the web inbox or `hq queue approve`. Those
+   approvals are signed with the install key (`value_items::is_signed_approval`), so a tool
+   cannot approve itself. A signature alone does not stop a hijacked conversation from getting
+   a harmless call approved and replaying the approval on a harmful one, so an approval is:
+   - bound to the grant, the tool name and a SHA-256 of the canonical arguments;
+   - single use;
+   - passed in a gateway-owned argument that `hq_call` strips and checks, like the scope
+     markers, so the tool never sees it;
+   - shown to the owner with the real arguments (the full spawn prompt and directory, the mail
+     recipients and body), not a summary the model wrote.
+
+   The call waits up to about 45 seconds, then returns a pending result telling Claude to call
+   again with the same arguments and the approval id. `mcp_connector.confirm_tools` can widen
+   the list, or set it to `[]` to turn this off for an owner who accepts the risk.
+2. **Spawned work stays bounded.** A session HQ launches gets its own session token
+   (`harness_session/launch.rs` mints it), so its calls back to HQ already resolve to that
+   session and are refused further spawns; nothing new is needed there. New: a session started
+   on a connector grant must have its working directory under `mcp_connector.spawn_cwd_allow`
+   (default: `agent_host.handoff_cwd_allow`), as the handoff key already must.
 3. **Provenance on every write.** Tasks and comments get the author `mcp:connector/<grant
    label>`. `hq_ask` questions are already shown to later turns as an untrusted MCP-client
    message (`docs/MCP_ASK.md`); connector asks use the same label. Anything a connector writes is
@@ -202,16 +216,23 @@ mcp_connector:
 ```
 
 Startup refuses `enabled: true` when `web_auth_token` is unset (the consent page needs the
-owner's identity), when `public_url` is not https, or when `authorize_url` is set and not https.
+owner's identity), when `public_url` is not https, when `authorize_url` is set and not https, or
+when the origin that serves the consent page (`authorize_url`, else `public_url`) is missing from
+`web_allowed_origins`: the page calls `/api/oauth/*` from that origin, and the origin guard
+would refuse it.
 
 CLI, a new top-level command beside `hq mcp`: `hq connector status | arm [--minutes N] | grants
 | revoke <id> | off`.
 
 ## Ingress
 
-The PWA and `/api` stay off the public ingress in every option. Only these paths are published:
-`/mcp`, `/oauth/register`, `/oauth/token`, `/oauth/revoke`, `/.well-known/oauth-*`, plus
-`/oauth/authorize` and the PWA when `authorize_url` is not set.
+Machine-facing paths published to the internet: `/mcp`, `/oauth/register`, `/oauth/token`,
+`/oauth/revoke` and `/.well-known/oauth-*`.
+
+With `authorize_url` set (recommended), nothing else is public: the consent flow
+(`/oauth/authorize`, `/connect`, `/assets/*`, `/api/oauth/*`) runs on the private origin. Without
+it, those four also have to be public, which puts the PWA shell and the web-token login on the
+internet. Every other `/api` route and `/ws` stay private in both cases.
 
 - **Caddy on a VPS with a public name.** Path-scoped `handle` blocks and a `remote_ip`
   matcher for `160.79.104.0/21` on the machine-facing paths. The IP rule is defence in depth
@@ -232,8 +253,9 @@ Each slice ends with a check that fails if it breaks.
 
 0. **Prototype the unknowns.** A throwaway build on a test instance (the Hetzner demo box):
    does claude.ai accept an `authorization_endpoint` on a different origin from the token
-   endpoint, which `protocolVersion` it sends, and whether it uses CIMD or DCR against HQ's
-   metadata. Outcome recorded in this document before slice 3.
+   endpoint, which `protocolVersion` it sends, whether it uses CIMD or DCR against HQ's
+   metadata, and which host its CIMD `client_id` URL is on (the `cimd_hosts` default is a guess,
+   and a wrong guess fails every connect). Outcome recorded in this document before slice 3.
 1. **401 and discovery.** `401` plus `WWW-Authenticate`, protected resource metadata, protocol
    version negotiation, config struct and startup validation. Tests in `mcp_http.rs` for the
    status, the header and every key still working.
@@ -259,6 +281,14 @@ Security review (independent reviewers on authz, token handling and the consent 
 the PRs for slices 3 to 5, and again after fixes.
 
 ## Risks and open questions
+
+- **Open decision: are harness sessions on the confirm list?** Letting Claude start and drive
+  coding sessions freely is much of the point of the connector, and the directory allowlist
+  plus a notice on every spawn already bound it. The alternative is a per-grant checkbox on the
+  consent page ("ask me before starting sessions"), preselected from config. Mail, deletes,
+  self-update and skill edits stay gated either way.
+- **Defaults differ from a personal instance.** The shipped default scope is `read_only`; an
+  owner who wants Claude as a full orchestrator sets `default_scope: full`.
 
 - **Split origins** are allowed by RFC 8414 and not forbidden by Claude's connector docs, but
   not confirmed either. If claude.ai refuses them, the consent page must be public; arming and
