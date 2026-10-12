@@ -311,7 +311,9 @@ const pickerOptions = [
       </ol>
       <p class="body reveal note">
         <code>deploy/install.sh</code> installs HQ only. Coding agents run on a machine that has them installed, paired
-        with <code>hq host join</code>; see <a href={links.agentSessions}>the sessions docs</a>. Pick one deploy path per
+        with <code>hq host join</code>; see <a href={links.agentSessions}>the sessions docs</a>. Personal agents such as
+        Hermes and OpenClaw are optional and set up the same way; see <a href={links.personalAgents}>the personal agents
+        guide</a>. Pick one deploy path per
         host: the updater owns the binary and web files, so do not also build on the server. Full walkthrough:
         <a href={links.deployReadme}>deploy/README.md</a>. To check a release by hand, see
         <a href="/security/#verify">verifying a release</a>.
