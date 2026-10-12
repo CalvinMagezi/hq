@@ -41,7 +41,7 @@ pub use governance::*;
 pub use harness::*;
 pub use instance::*;
 pub use llm::*;
-pub use mcp_connector::{ConnectorOrigins, McpConnectorConfig};
+pub use mcp_connector::{CONNECTOR_SCOPES, ConnectorSettings, McpConnectorConfig};
 pub use memory::*;
 pub use profile::{
     EgressItem, EnvLookup, LiteConfig, Profile, egress_report, enforce_lite, lite_violations,

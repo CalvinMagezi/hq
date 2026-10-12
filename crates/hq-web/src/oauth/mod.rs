@@ -1,11 +1,18 @@
 //! HQ as an OAuth-protected MCP resource for claude.ai custom connectors.
 //! Plan and threat model: `docs/plans/claude-connector.md`.
 
+mod authorize;
+mod cimd;
+mod consent;
+mod token;
+
 use crate::WsState;
 use axum::Json;
 use axum::extract::State;
 use axum::http::HeaderValue;
-use hq_core::config::ConnectorOrigins;
+use axum::routing::{get, post};
+use hq_core::config::ConnectorSettings;
+use hq_db::mcp_connector::GrantScope;
 use serde_json::{Value, json};
 use std::sync::Arc;
 
@@ -16,24 +23,73 @@ pub(crate) const PROTECTED_RESOURCE_MCP_PATH: &str = "/.well-known/oauth-protect
 /// The one scope advertised. Claude requests every advertised scope, so the grant's real
 /// scope (full, read-only or tasks) is chosen on the consent page instead.
 pub(crate) const SCOPE: &str = "hq";
+/// Where Claude reads the authorization server metadata (RFC 8414).
+pub(crate) const AUTHORIZATION_SERVER_PATH: &str = "/.well-known/oauth-authorization-server";
 
-/// Registers the connector's routes when it is on; otherwise they stay unknown paths.
+/// Unix seconds, the clock every OAuth record is kept in.
+pub(crate) fn now() -> i64 {
+    chrono::Utc::now().timestamp()
+}
+
+/// Registers the connector's routes. Settings can always ask whether it is on; everything
+/// else exists only while it is, so a disabled connector answers nothing.
 pub(crate) fn routes(
     router: axum::Router<Arc<WsState>>,
     state: &WsState,
 ) -> axum::Router<Arc<WsState>> {
+    let router = router.route("/api/oauth/connector", get(consent::status));
     if state.connector.is_none() {
         return router;
     }
     router
-        .route(
-            PROTECTED_RESOURCE_PATH,
-            axum::routing::get(protected_resource),
-        )
-        .route(
-            PROTECTED_RESOURCE_MCP_PATH,
-            axum::routing::get(protected_resource),
-        )
+        .route(PROTECTED_RESOURCE_PATH, get(protected_resource))
+        .route(PROTECTED_RESOURCE_MCP_PATH, get(protected_resource))
+        .route(AUTHORIZATION_SERVER_PATH, get(authorization_server))
+        .route("/oauth/authorize", get(authorize::authorize))
+        .route("/oauth/token", post(token::token))
+        .route("/oauth/revoke", post(token::revoke))
+        .route("/api/oauth/connector/arm", post(consent::arm))
+        .route("/api/oauth/connector/disarm", post(consent::disarm))
+        .route("/api/oauth/connector/off", post(consent::off))
+        .route("/api/oauth/grants/{id}/revoke", post(consent::revoke_grant))
+        .route("/api/oauth/requests/{id}", get(consent::request))
+        .route("/api/oauth/requests/{id}/approve", post(consent::approve))
+        .route("/api/oauth/requests/{id}/deny", post(consent::deny))
+}
+
+impl WsState {
+    /// The scope the consent page preselects.
+    pub(crate) fn connector_default_scope(&self) -> GrantScope {
+        self.connector
+            .as_ref()
+            .and_then(|c| GrantScope::parse(&c.default_scope))
+            .unwrap_or(GrantScope::ReadOnly)
+    }
+}
+
+async fn authorization_server(State(state): State<Arc<WsState>>) -> Json<Value> {
+    let settings = state
+        .connector
+        .as_ref()
+        .expect("route registered only with a connector");
+    Json(server_metadata(settings))
+}
+
+/// No registration endpoint: clients identify themselves with a metadata document (CIMD).
+fn server_metadata(s: &ConnectorSettings) -> Value {
+    json!({
+        "issuer": s.public,
+        "authorization_endpoint": format!("{}/oauth/authorize", s.consent),
+        "token_endpoint": format!("{}/oauth/token", s.public),
+        "revocation_endpoint": format!("{}/oauth/revoke", s.public),
+        "response_types_supported": ["code"],
+        "grant_types_supported": ["authorization_code", "refresh_token"],
+        "code_challenge_methods_supported": ["S256"],
+        "token_endpoint_auth_methods_supported": ["none"],
+        "revocation_endpoint_auth_methods_supported": ["none"],
+        "client_id_metadata_document_supported": true,
+        "scopes_supported": [SCOPE, "offline_access"],
+    })
 }
 
 async fn protected_resource(State(state): State<Arc<WsState>>) -> Json<Value> {
@@ -44,7 +100,7 @@ async fn protected_resource(State(state): State<Arc<WsState>>) -> Json<Value> {
     Json(resource_metadata(origins))
 }
 
-fn resource_metadata(origins: &ConnectorOrigins) -> Value {
+fn resource_metadata(origins: &ConnectorSettings) -> Value {
     json!({
         "resource": origins.resource(),
         "authorization_servers": [origins.public],
@@ -58,7 +114,7 @@ fn resource_metadata(origins: &ConnectorOrigins) -> Value {
 /// Claude at the metadata; `invalid_token` tells a client its credential was presented and
 /// refused (an expired access token), so it refreshes instead of starting over.
 pub(crate) fn www_authenticate(
-    origins: Option<&ConnectorOrigins>,
+    origins: Option<&ConnectorSettings>,
     secret_presented: bool,
 ) -> HeaderValue {
     let mut params = vec![r#"realm="agent-hq""#.to_string()];
@@ -76,13 +132,17 @@ pub(crate) fn www_authenticate(
 }
 
 #[cfg(test)]
+mod flow_tests;
+
+#[cfg(test)]
 mod tests {
     use super::*;
 
-    fn origins() -> ConnectorOrigins {
-        ConnectorOrigins {
+    fn origins() -> ConnectorSettings {
+        ConnectorSettings {
             public: "https://hq.example.com".into(),
             consent: "https://hq.example.ts.net".into(),
+            default_scope: "read_only".into(),
         }
     }
 
@@ -135,6 +195,7 @@ mod tests {
             enabled: true,
             public_url: Some("https://hq.example.com".into()),
             authorize_url: None,
+            default_scope: None,
         };
         // Pinned, not read from the machine: CI runs this under an ambient Lite profile.
         let mut state = WsState::new(vault.path().to_path_buf(), None)

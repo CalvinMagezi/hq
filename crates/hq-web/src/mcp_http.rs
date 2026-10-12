@@ -130,12 +130,18 @@ async fn handle_mcp(
         keys.tasks.as_deref(),
         dev_open,
     );
+    let secret = crate::auth::presented_secret(headers);
     // A launched agent's own token, when none of the configured keys matched.
     let session = match identity {
         Some(_) => None,
-        None => session_for_secret(state, crate::auth::presented_secret(headers)),
+        None => session_for_secret(state, secret),
     };
-    if identity.is_none() && session.is_none() {
+    // Then a claude.ai connector's access token.
+    let grant = match (identity, &session) {
+        (None, None) => grant_for_secret(state, secret),
+        _ => None,
+    };
+    if identity.is_none() && session.is_none() && grant.is_none() {
         if keys.none_configured() {
             tracing::warn!("mcp_http: refused, no AGENTHQ_API_KEY configured");
             return Err(rpc_err(
@@ -146,14 +152,15 @@ async fn handle_mcp(
         }
         return Err(rpc_err(id, -32001, "Unauthorized"));
     }
-    let allowed: Option<&[&str]> = match (identity, &session) {
+    let allowed: Option<&[&str]> = match (identity, &grant) {
         (Some(crate::auth::ApiIdentity::Full), _) => None,
         (Some(crate::auth::ApiIdentity::Spark), _) => {
             Some(hq_mcp::gateway::SPARK_READONLY_ALLOWLIST)
         }
         (Some(crate::auth::ApiIdentity::Tasks), _) => Some(hq_mcp::gateway::TASKS_ALLOWLIST),
         (Some(crate::auth::ApiIdentity::Handoff), _) => Some(hq_mcp::gateway::HANDOFF_ALLOWLIST),
-        (None, _) => Some(hq_mcp::gateway::SESSION_ALLOWLIST),
+        (None, Some(g)) => grant_allowlist(g.grant_scope),
+        (None, None) => Some(hq_mcp::gateway::SESSION_ALLOWLIST),
     };
 
     let method = body.get("method").and_then(|v| v.as_str()).unwrap_or("");
@@ -200,6 +207,30 @@ fn session_for_secret(state: &WsState, secret: &str) -> Option<String> {
         .with_conn(|c| hq_db::session_tokens::session_for_token(c, secret))
         .ok()
         .flatten()
+}
+
+/// The live connector grant an access token belongs to. A disabled connector honours none,
+/// so turning it off in config cuts every client at once.
+fn grant_for_secret(state: &WsState, secret: &str) -> Option<hq_db::mcp_connector::GrantAccess> {
+    if state.connector.is_none() || secret.is_empty() {
+        return None;
+    }
+    let now = crate::oauth::now();
+    state
+        .db
+        .with_conn(|c| hq_db::mcp_connector::grant_for_access_token(c, secret, now))
+        .ok()
+        .flatten()
+}
+
+/// A grant's scope as a gateway allowlist; `None` is the full registry.
+fn grant_allowlist(scope: hq_db::mcp_connector::GrantScope) -> Option<&'static [&'static str]> {
+    use hq_db::mcp_connector::GrantScope;
+    match scope {
+        GrantScope::Full => None,
+        GrantScope::ReadOnly => Some(hq_mcp::gateway::SPARK_READONLY_ALLOWLIST),
+        GrantScope::Tasks => Some(hq_mcp::gateway::TASKS_ALLOWLIST),
+    }
 }
 
 /// Header an MCP client config fills from the `HQ_SESSION_ID` a pane launched by HQ carries.
@@ -397,7 +428,7 @@ mod tests {
         app_with(None)
     }
 
-    fn app_with(connector: Option<hq_core::config::ConnectorOrigins>) -> axum::Router {
+    fn app_with(connector: Option<hq_core::config::ConnectorSettings>) -> axum::Router {
         let mut registry = ToolRegistry::new();
         for (name, category) in [
             ("vault_search", "vault"),
@@ -516,9 +547,10 @@ mod tests {
 
     #[tokio::test]
     async fn with_the_connector_on_the_challenge_points_at_the_metadata() {
-        let app = app_with(Some(hq_core::config::ConnectorOrigins {
+        let app = app_with(Some(hq_core::config::ConnectorSettings {
             public: "https://hq.example.com".into(),
             consent: "https://hq.example.com".into(),
+            default_scope: "read_only".into(),
         }));
         let res = send(&app, None, list()).await;
         assert_eq!(res.status(), axum::http::StatusCode::UNAUTHORIZED);

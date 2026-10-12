@@ -42,6 +42,7 @@ pub mod host {
         )
     }
 }
+pub mod connector;
 pub mod install;
 pub mod kill;
 pub mod lite;

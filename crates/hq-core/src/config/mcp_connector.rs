@@ -16,16 +16,25 @@ pub struct McpConnectorConfig {
     /// owner's browser. Unset: the consent page is on `public_url`.
     #[serde(default)]
     pub authorize_url: Option<String>,
+
+    /// The scope preselected on the consent page: `read_only` (the default), `tasks` or
+    /// `full`. The owner can still pick another one there.
+    #[serde(default)]
+    pub default_scope: Option<String>,
 }
 
-/// The connector's origins once checked: lowercase, no trailing slash.
+/// Grant scopes a consent page may offer, narrowest first.
+pub const CONNECTOR_SCOPES: &[&str] = &["read_only", "tasks", "full"];
+
+/// The connector's settings once checked. Origins are lowercase, with no trailing slash.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct ConnectorOrigins {
+pub struct ConnectorSettings {
     pub public: String,
     pub consent: String,
+    pub default_scope: String,
 }
 
-impl ConnectorOrigins {
+impl ConnectorSettings {
     /// The protected resource Claude is given tokens for.
     pub fn resource(&self) -> String {
         format!("{}/mcp", self.public)
@@ -33,11 +42,11 @@ impl ConnectorOrigins {
 }
 
 impl McpConnectorConfig {
-    /// The checked origins, `None` when the connector is off, or why it cannot be turned on.
-    pub fn origins(
+    /// The checked settings, `None` when the connector is off, or why it cannot be turned on.
+    pub fn settings(
         &self,
         web_auth_token: Option<&str>,
-    ) -> Result<Option<ConnectorOrigins>, String> {
+    ) -> Result<Option<ConnectorSettings>, String> {
         if !self.enabled {
             return Ok(None);
         }
@@ -57,7 +66,21 @@ impl McpConnectorConfig {
             Some(u) => https_origin(u).map_err(|e| format!("mcp_connector.authorize_url: {e}"))?,
             None => public.clone(),
         };
-        Ok(Some(ConnectorOrigins { public, consent }))
+        let default_scope = self
+            .default_scope
+            .as_deref()
+            .unwrap_or(CONNECTOR_SCOPES[0])
+            .to_string();
+        if !CONNECTOR_SCOPES.contains(&default_scope.as_str()) {
+            return Err(format!(
+                "mcp_connector.default_scope must be one of {CONNECTOR_SCOPES:?}"
+            ));
+        }
+        Ok(Some(ConnectorSettings {
+            public,
+            consent,
+            default_scope,
+        }))
     }
 }
 
@@ -94,26 +117,27 @@ mod tests {
             enabled: true,
             public_url: public.map(Into::into),
             authorize_url: authorize.map(Into::into),
+            default_scope: None,
         }
     }
 
     #[test]
     fn off_by_default_and_off_needs_nothing() {
-        assert_eq!(McpConnectorConfig::default().origins(None), Ok(None));
+        assert_eq!(McpConnectorConfig::default().settings(None), Ok(None));
     }
 
     #[test]
     fn on_needs_a_web_token_and_a_public_url() {
         let c = cfg(Some("https://hq.example.com"), None);
-        assert!(c.origins(None).unwrap_err().contains("web_auth_token"));
+        assert!(c.settings(None).unwrap_err().contains("web_auth_token"));
         assert!(
-            c.origins(Some("  "))
+            c.settings(Some("  "))
                 .unwrap_err()
                 .contains("web_auth_token")
         );
         assert!(
             cfg(None, None)
-                .origins(Some("t"))
+                .settings(Some("t"))
                 .unwrap_err()
                 .contains("public_url")
         );
@@ -122,17 +146,30 @@ mod tests {
     #[test]
     fn origins_are_normalised_and_consent_defaults_to_public() {
         let c = cfg(Some("https://HQ.example.com/"), None);
-        let o = c.origins(Some("t")).unwrap().unwrap();
+        let o = c.settings(Some("t")).unwrap().unwrap();
         assert_eq!(o.public, "https://hq.example.com");
         assert_eq!(o.consent, o.public);
         assert_eq!(o.resource(), "https://hq.example.com/mcp");
+        assert_eq!(o.default_scope, "read_only");
 
         let split = cfg(
             Some("https://hq.example.com"),
             Some("https://hq.example.ts.net:8443"),
         );
-        let o = split.origins(Some("t")).unwrap().unwrap();
+        let o = split.settings(Some("t")).unwrap().unwrap();
         assert_eq!(o.consent, "https://hq.example.ts.net:8443");
+    }
+
+    #[test]
+    fn the_default_scope_must_be_a_known_one() {
+        let mut c = cfg(Some("https://hq.example.com"), None);
+        c.default_scope = Some("full".into());
+        assert_eq!(
+            c.settings(Some("t")).unwrap().unwrap().default_scope,
+            "full"
+        );
+        c.default_scope = Some("handoff".into());
+        assert!(c.settings(Some("t")).unwrap_err().contains("default_scope"));
     }
 
     #[test]
@@ -147,12 +184,12 @@ mod tests {
             "hq.example.com",
         ] {
             assert!(
-                cfg(Some(bad), None).origins(Some("t")).is_err(),
+                cfg(Some(bad), None).settings(Some("t")).is_err(),
                 "public {bad}"
             );
             assert!(
                 cfg(Some("https://hq.example.com"), Some(bad))
-                    .origins(Some("t"))
+                    .settings(Some("t"))
                     .is_err(),
                 "authorize {bad}"
             );
