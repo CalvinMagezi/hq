@@ -48,6 +48,53 @@ export function adoptLinkToken(): void {
   hqToken()
 }
 
+/** Store a pasted token the way a `#token=` link does, replacing any older one. */
+export function saveWebToken(raw: string): boolean {
+  const token = raw.trim()
+  if (!token) return false
+  try {
+    localStorage.setItem(STORAGE_KEY, token)
+    return true
+  } catch {
+    return false
+  }
+}
+
+// Set when the server itself answers 401: this browser has no token, or one that was rotated.
+let signInNeeded = false
+const signInListeners = new Set<() => void>()
+
+function setSignInNeeded(next: boolean) {
+  if (signInNeeded === next) return
+  signInNeeded = next
+  for (const listener of signInListeners) listener()
+}
+
+/** Whether the server refused this browser's token (or lack of one). */
+export function needsSignIn(): boolean {
+  return signInNeeded
+}
+
+/** Listen for changes to needsSignIn(); returns the unsubscribe. Fits useSyncExternalStore. */
+export function onSignInChange(listener: () => void): () => void {
+  signInListeners.add(listener)
+  return () => signInListeners.delete(listener)
+}
+
+const HTTP_UNAUTHORIZED = 401
+// The service worker marks the copies it answers from its cache with this header.
+const FROM_CACHE_HEADER = 'x-hq-cache'
+
+/** Track what a response says about sign-in and sync. A copy from the worker's cache says nothing about either, whatever its status. */
+function noteAuth(res: Response) {
+  if (res.headers.has(FROM_CACHE_HEADER)) return
+  if (res.status === HTTP_UNAUTHORIZED) setSignInNeeded(true)
+  else if (res.ok) {
+    setSignInNeeded(false)
+    markSynced()
+  }
+}
+
 /** Whether requests need the token, which means plain URLs will not load. */
 export function hasWebToken(): boolean {
   return hqToken() !== null
@@ -72,8 +119,7 @@ export async function hqFetch(input: string, init: RequestInit = {}): Promise<Re
   if (token) headers.set('Authorization', `Bearer ${token}`)
   if (!SAFE_METHODS.has((init.method ?? 'GET').toUpperCase())) headers.set(CLIENT_HEADER, CLIENT_HEADER_VALUE)
   const res = await fetch(input, { ...init, headers })
-  // A copy the service worker served from its cache is not a sync, whatever its status.
-  if (res.ok && !res.headers.has('x-hq-cache')) markSynced()
+  noteAuth(res)
   return res
 }
 

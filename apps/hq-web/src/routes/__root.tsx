@@ -9,7 +9,7 @@ import {
 import { PersistQueryClientProvider } from '@tanstack/react-query-persist-client'
 import { CACHE_BUSTER, CACHE_MAX_AGE_MS, lastSyncedAt, queryClient, queryPersister } from '~/lib/offlineCache'
 import type { ReactNode } from 'react'
-import { useEffect, useState } from 'react'
+import { useEffect, useState, useSyncExternalStore } from 'react'
 import { MessageSquare, Search, Settings } from 'lucide-react'
 import { useHQStore } from '~/store/hqStore'
 import { WebSocketProvider } from '~/context/WebSocketContext'
@@ -17,6 +17,7 @@ import { SearchOverlay } from '~/components/SearchOverlay'
 import { QuickNoteOverlay } from '~/components/QuickNoteOverlay'
 import { GlobalChatOverlay } from '~/components/chat/GlobalChatOverlay'
 import { InstallPrompt } from '~/components/InstallPrompt'
+import { SignInPrompt } from '~/components/SignInPrompt'
 import { AppRail } from '~/components/AppRail'
 import { BottomNav } from '~/components/BottomNav'
 import { HeaderClock } from '~/components/HeaderClock'
@@ -26,7 +27,7 @@ import { relTime } from '~/lib/time'
 import { openrouterChipLabel, openrouterChipTitle, OPENROUTER_USAGE_POLL_MS, type OpenRouterUsageResponse } from '~/lib/openrouterUsageApi'
 import { budgetChipLabel, budgetChipTitle, USAGE_POLL_MS, type BudgetsResponse } from '~/lib/usageApi'
 import { chipLabel, chipTitle, COPILOT_USAGE_POLL_MS, type CopilotUsage } from '~/lib/copilotUsageApi'
-import { hqJson } from '~/lib/hqAuth'
+import { hqJson, needsSignIn, onSignInChange } from '~/lib/hqAuth'
 import { syncPushSubscription } from '~/lib/webPush'
 import { fetchSetupStatus, shouldRedirectToSetup } from '~/lib/setupApi'
 
@@ -130,6 +131,7 @@ function VaultShell() {
   const chatUnreadCount = useHQStore((s) => s.chatUnreadCount)
   useNeedsYouCount()
   const systemNotice = useHQStore((s) => s.systemNotice)
+  const signInNeeded = useSyncExternalStore(onSignInChange, needsSignIn, () => false)
   const setSystemNotice = useHQStore((s) => s.setSystemNotice)
   const [isOnline, setIsOnline] = useState(typeof navigator !== 'undefined' ? navigator.onLine : true)
   const [swUpdateAvailable, setSwUpdateAvailable] = useState(false)
@@ -215,6 +217,7 @@ function VaultShell() {
       <AppRail />
       <div className="flex flex-col flex-1 min-w-0 min-h-0 relative z-10">
       <InstallPrompt />
+      <SignInPrompt />
 
       {systemNotice && (
         <div
@@ -308,7 +311,10 @@ function VaultShell() {
           <Settings className="w-4 h-4" />
         </Link>
 
-        <div className="flex items-center gap-1.5 flex-shrink-0" title={wsConnected ? 'Connected' : 'Showing data saved on this device'}>
+        <div
+          className="flex items-center gap-1.5 flex-shrink-0"
+          title={wsConnected ? 'Connected' : signInNeeded ? 'Sign in to HQ to sync' : 'Showing data saved on this device'}
+        >
           <div className="relative">
             <div className={`status-dot ${wsConnected ? 'active' : 'error'}`} />
             {wsConnected && (
