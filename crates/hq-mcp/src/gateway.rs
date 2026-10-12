@@ -472,13 +472,14 @@ pub const CONNECTOR_CONFIRM_TOOLS: &[&str] = &[
     "git_pr",
     "github_clone",
     "host_send",
+    "host_read",
     "convert_to_markdown",
     "convert_from_markdown",
     "ocr_extract_text",
 ];
 
 /// Vault folders whose notes become instructions: skills, slash commands and agent definitions.
-const INSTRUCTION_FOLDERS: &[&str] = &["skills/", "_commands/", "agents/"];
+const INSTRUCTION_FOLDERS: &[&str] = &["skills/", "_skills/", "_commands/", "agents/"];
 /// Vault tools that write a note at `path` (or move one to `to`).
 const VAULT_WRITE_TOOLS: &[&str] = &[
     "vault_write_note",
@@ -489,7 +490,7 @@ const VAULT_WRITE_TOOLS: &[&str] = &[
 ];
 /// Task tools whose tags and assignees put text in a mailbox that the owner's chat or an agent
 /// drains, the same reach `agent_send_message` has.
-const TASK_ROUTING_TOOLS: &[&str] = &[
+pub const TASK_ROUTING_TOOLS: &[&str] = &[
     "task_create",
     "task_update",
     "task_create_many",
@@ -512,7 +513,7 @@ pub fn needs_owner_confirmation(registry: &ToolRegistry, tool: &str, args: &Valu
         return args
             .get("output")
             .and_then(Value::as_str)
-            .is_some_and(|o| !o.trim().is_empty());
+            .is_some_and(|o| !o.is_empty());
     }
     if VAULT_WRITE_TOOLS.contains(&tool) {
         return ["path", "to", "destination", "dest"]

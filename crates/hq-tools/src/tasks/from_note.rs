@@ -413,7 +413,10 @@ impl HqTool for TaskCreateFromNoteTool {
             })
         })?;
 
-        notify_recipients(self.vault.vault_path(), &task, None, self.route_tags);
+        // A connector's note tags would put text in a mailbox without the owner's approval.
+        if crate::harness_session::connector_label(&args).is_none() {
+            notify_recipients(self.vault.vault_path(), &task, None, self.route_tags);
+        }
 
         let mut out = json!({
             "task": task_json(&task),

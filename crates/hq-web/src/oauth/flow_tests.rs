@@ -74,7 +74,12 @@ fn app_and_db() -> (axum::Router, Arc<WsState>, tempfile::TempDir) {
         redirect_uris: vec![REDIRECT.into()],
     });
     let mut registry = ToolRegistry::new();
-    for name in ["vault_search", "config_manage", "vault_delete"] {
+    for name in [
+        "vault_search",
+        "config_manage",
+        "vault_delete",
+        "task_create",
+    ] {
         registry.register(Box::new(Fake(name)));
     }
     registry.register(Box::new(EchoArgs));
@@ -586,4 +591,28 @@ async fn a_connection_cannot_flood_the_owner_with_requests() {
     .await;
     assert_eq!(refused["result"]["isError"], true);
     assert!(text_of(&refused).contains("already waiting"), "{refused}");
+}
+
+#[tokio::test]
+async fn a_tasks_scope_task_write_never_waits_for_routing_approval() {
+    let (app, _state, _vault) = app_and_db();
+    let code = approved_code(&app, "tasks").await;
+    let token = exchange(&app, &code).await.1["access_token"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    let call = call_with("task_create", json!({"title": "t", "tags": ["relay"]}));
+    let (_, _, done) = send(&app, mcp(&token, call)).await;
+    assert!(
+        text_of(&done).contains("task_create"),
+        "the scope drops tags itself: {done}"
+    );
+
+    let full = full_access(&app).await;
+    let call = call_with("task_create", json!({"title": "t", "tags": ["relay"]}));
+    let (_, _, held) = send(&app, mcp(&full, call)).await;
+    assert!(
+        text_of(&held).contains("Waiting"),
+        "a full grant routing to a mailbox asks first: {held}"
+    );
 }

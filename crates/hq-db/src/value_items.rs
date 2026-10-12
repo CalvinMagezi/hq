@@ -291,8 +291,9 @@ pub fn consume_approval(db: &Database, dedup_key: &str) -> Result<bool> {
             "UPDATE value_items SET engagement = ?2
              WHERE id = (SELECT id FROM value_items WHERE dedup_key = ?1
                          ORDER BY created_at DESC, rowid DESC LIMIT 1)
-               AND state = 'engaged' AND engagement = 'approved'",
-            params![dedup_key, ENGAGEMENT_USED],
+               AND state = 'engaged' AND engagement = 'approved'
+               AND (expires_at IS NULL OR expires_at > ?3)",
+            params![dedup_key, ENGAGEMENT_USED, ts(&Utc::now())],
         )?;
         Ok(n == 1)
     })
@@ -619,6 +620,23 @@ mod tests {
         assert!(approve_by_id(&db, &first.id).unwrap());
         assert!(consume_approval(&db, "once").unwrap());
         assert!(!consume_approval(&db, "once").unwrap(), "spent");
+        let mut late =
+            ValueItem::new("t", ValueKind::ActionNeeded, "a", "b").with_dedup_key("late");
+        late.expires_at = Some(Utc::now() - chrono::Duration::minutes(1));
+        insert(&db, &late).unwrap();
+        db.with_conn(|c| {
+            c.execute(
+                "UPDATE value_items SET state='delivered' WHERE id=?1",
+                params![late.id],
+            )?;
+            Ok(())
+        })
+        .unwrap();
+        assert!(approve_by_id(&db, &late.id).unwrap());
+        assert!(
+            !consume_approval(&db, "late").unwrap(),
+            "an approval ends with its request"
+        );
         let latest = latest_engagement_by_dedup(&db, "once").unwrap().unwrap();
         assert_eq!(latest.state, ValueState::Engaged);
         assert_eq!(latest.engagement.as_deref(), Some(ENGAGEMENT_USED));

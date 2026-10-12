@@ -178,7 +178,8 @@ tasks and handoff scopes (`HANDOFF_SCOPE_ARG`, `TASKS_SCOPE_ARG`, `mark_spawned_
 1. **Owner confirmation for high-risk tools.** `CONNECTOR_CONFIRM_TOOLS` in
    `crates/hq-mcp/src/gateway.rs` (a registry test checks every name is a served tool): Google
    Workspace, `agent_send_message` (it reaches the owner's chat or an agent that acts on it),
-   `config_manage`, `host_add`, `host_send` (raw keys into any pane), self-update install and
+   `config_manage`, `host_add`, `host_send` and `host_read` (any pane, including the owner's),
+   self-update install and
    rollback, skill and slash-command edits (they persist instructions), task and note deletes,
    file edits, commits, PRs and clones on the HQ host, and the convert and OCR tools (they read
    and write host paths). Some count only by their arguments: a vault export with `output`
@@ -214,9 +215,11 @@ tasks and handoff scopes (`HANDOFF_SCOPE_ARG`, `TASKS_SCOPE_ARG`, `mark_spawned_
    `agent_host.handoff_cwd_allow`, and while that list is empty a connector starts no session at
    all (`CwdBound::Connector` in `harness_session/cwd.rs`, checked before any folder is made). An
    owner who wants Claude to drive coding agents lists the project roots there. Those sessions
-   are recorded with origin `connector`, count against `agent_host.max_mcp_started_sessions`, do
-   not start out driven, and are the only ones a connector may send to, resume, stop or re-goal:
-   the owner's own sessions stay theirs.
+   are recorded with origin `connector` (only when a session actually starts, never for one a
+   handoff found already working), count against `agent_host.max_mcp_started_sessions`, do not
+   start out driven, and are the only ones a connector may send to, resume, stop, re-goal, link
+   or read logs from: the owner's own sessions stay theirs. A task a connector files from a note
+   routes nowhere.
 3. **Provenance on every write.** Task writes from a connector are attributed to
    `mcp:connector/<grant label>` whatever name the call passes, a lease taken on one is named
    the same way, and no other caller may write under that prefix. `hq_ask` questions are already
@@ -235,8 +238,8 @@ tasks and handoff scopes (`HANDOFF_SCOPE_ARG`, `TASKS_SCOPE_ARG`, `mark_spawned_
    grant and no armed window, nothing can connect until the owner arms again; `enabled: false`
    removes the routes entirely.
 
-What remains, stated plainly: a full-scope grant can read the whole vault and act on anything
-not on the confirm list, and whatever a tool returns is sent to Anthropic as part of the
+What remains, stated plainly: a full-scope grant can read the whole vault, list directories and
+read git history on the HQ host, and act on anything not on the confirm list, and whatever a tool returns is sent to Anthropic as part of the
 conversation. Owners who keep sensitive notes in the vault should pick the tasks or read-only
 scope, or not connect.
 

@@ -166,7 +166,11 @@ async fn confirmation(
 ) -> Option<Stop> {
     let registry = state.registry.as_ref()?;
     // A tool outside the grant's scope is refused by the gateway; the owner is never asked.
-    let gated = call.via_hq_call
+    // The tasks scope drops tags and assignees itself, so its task writes route nowhere.
+    let tasks_scope = allowed == Some(hq_mcp::gateway::TASKS_ALLOWLIST)
+        && hq_mcp::gateway::TASK_ROUTING_TOOLS.contains(&call.tool.as_str());
+    let gated = !tasks_scope
+        && call.via_hq_call
         && allowed.is_none_or(|a| a.contains(&call.tool.as_str()))
         && hq_mcp::gateway::needs_owner_confirmation(registry, &call.tool, &call.args);
     if !gated {

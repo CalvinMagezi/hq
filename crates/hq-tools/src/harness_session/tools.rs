@@ -322,6 +322,7 @@ impl HqTool for HarnessSessionLogsTool {
         let lines = args.get("lines").and_then(|v| v.as_u64()).unwrap_or(40) as usize;
         let db = self.db.clone();
         let id = arg_str(&args, "session_id");
+        super::connector_may_drive(&db, &args, &id)?;
         tokio::task::spawn_blocking(move || super::tail_log(&db, &id, lines.clamp(1, 500))).await?
     }
 }
@@ -545,6 +546,7 @@ impl HqTool for HarnessSessionLinkTool {
         if id.is_empty() || task.is_empty() {
             anyhow::bail!("session_id and task_id are required");
         }
+        super::connector_may_drive(&db, &args, &id)?;
         let chat = self.chat.clone();
         tokio::task::spawn_blocking(move || {
             super::link(&db, &id, &task, chat.as_ref().map(|c| c.new_watch(&args)))
@@ -862,8 +864,11 @@ impl HqTool for HarnessSessionHandoffTool {
         if let Some(note) = start.note {
             report["cwd_note"] = json!(note);
         }
-        super::tag_origin(&self.db, &report, origin);
-        let brief = super::connector_brief(
+        // A handoff that found a session already working started nothing: its origin stays as it was.
+        if report["handoff"] != "existing_session" {
+            super::tag_origin(&self.db, &report, origin);
+        }
+        let mut brief = super::connector_brief(
             &args,
             &[
                 "task_id",
@@ -874,6 +879,16 @@ impl HqTool for HarnessSessionHandoffTool {
                 "prompt",
             ],
         );
+        // The prompt is built from the stored task, which may hold text written earlier.
+        if let Some(task_id) = report["task"]["id"].as_str() {
+            let stored = self.db.with_conn(|c| hq_db::tasks::get_task(c, task_id));
+            if let Ok(Some(task)) = stored {
+                brief.push_str(&format!(
+                    "\nstored task title: {}\nstored task description: {}",
+                    task.title, task.description
+                ));
+            }
+        }
         let cwd = start.path.to_string_lossy().into_owned();
         super::notify_connector_start(&self.vault_path, &self.db, &args, &report, &brief, &cwd);
         Ok(report)

@@ -75,7 +75,7 @@ On top of the scope:
 
 - **Your approval for high-risk calls.** Mail and other Google Workspace calls, remote MCP
   accounts, messages into your chat or an agent's mailbox (including task tags and assignees),
-  config changes, pairing a machine, typing into a pane with `host_send`, self-update, skill,
+  config changes, pairing a machine, reading or typing into a terminal pane, self-update, skill,
   slash-command and agent-definition edits, deletes, file reads and writes outside the vault
   (file edits, exports to a path, convert and OCR), commits, PRs and clones, and `hq_ask` in full
   mode each wait for you. HQ sends the exact call to your chat (and the web inbox) with Approve
