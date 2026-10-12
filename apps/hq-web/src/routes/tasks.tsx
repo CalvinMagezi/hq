@@ -21,10 +21,12 @@ import {
   type TaskUpdateResult,
   type UpdateTaskInput,
 } from '~/lib/tasksApi'
-import { TaskListView } from '~/components/tasks/TaskListView'
+import { TaskListView, type ListSections } from '~/components/tasks/TaskListView'
 import { BulkActionBar } from '~/components/tasks/BulkActionBar'
 import { bulkMessage, failureNotice, runBulk, splitUnchanged, uniqueWarnings } from '~/components/tasks/bulk'
 import { useTaskSelection } from '~/components/tasks/useTaskSelection'
+import { withoutSections } from '~/components/tasks/hierarchy'
+import { usePersistedState } from '~/lib/usePersistedState'
 import { TaskBoardView } from '~/components/tasks/TaskBoardView'
 import { TaskGanttView } from '~/components/tasks/TaskGanttView'
 import { TaskDetailDrawer } from '~/components/tasks/TaskDetailDrawer'
@@ -69,6 +71,9 @@ export const Route = createFileRoute('/tasks')({
 })
 
 type StatusTab = 'active' | 'all' | 'complete' | 'archived'
+
+const FOLDED_SECTIONS_KEY = 'hq-tasks-collapsed-sections'
+const isStringArray = (v: unknown) => Array.isArray(v) && v.every((x) => typeof x === 'string')
 
 const errorMessage = (e: unknown, fallback: string) => (e instanceof Error ? e.message : fallback)
 
@@ -212,8 +217,27 @@ function TasksPage() {
     [tasks, archivedTasks, statusTab, statusFilter, tagFilter, selection, initiativeById, searchQuery, view]
   )
 
+  // Initiative sections the list folds away. Kept in the browser, so a section skipped once stays skipped.
+  const [foldedNames, setFoldedNames] = usePersistedState<string[]>(FOLDED_SECTIONS_KEY, [], isStringArray)
+  const sections = useMemo<ListSections>(
+    () => ({
+      collapsed: new Set(foldedNames),
+      onToggle: (name) => setFoldedNames((prev) => (prev.includes(name) ? prev.filter((n) => n !== name) : [...prev, name])),
+      onSetMany: (names, folded) =>
+        setFoldedNames((prev) => (folded ? [...new Set([...prev, ...names])] : prev.filter((n) => !names.includes(n)))),
+    }),
+    [foldedNames, setFoldedNames]
+  )
+
+  // What the list actually shows: a folded section hides its tasks, so they are neither counted nor
+  // ticked by "Select all", and folding a section un-ticks what was ticked in it.
+  const onScreen = useMemo(
+    () => withoutSections(filtered, sections.collapsed, initiativeById),
+    [filtered, sections, initiativeById]
+  )
+
   // Picking tasks for a bulk action only makes sense in the list, and not in the archive.
-  const picking = useTaskSelection(filtered, view === 'list' && statusTab !== 'archived')
+  const picking = useTaskSelection(onScreen, view === 'list' && statusTab !== 'archived')
   const [bulkProgress, setBulkProgress] = useState<{ settled: number; total: number } | null>(null)
   const [bulkResult, setBulkResult] = useState<string | null>(null)
 
@@ -440,6 +464,7 @@ function TasksPage() {
             allById={taskById}
             initiativeById={initiativeById}
             onSelect={(t) => setSelectedTaskId(t.id)}
+            sections={sections}
             selection={
               picking.active
                 ? {
@@ -454,11 +479,11 @@ function TasksPage() {
 
         {picking.active && (
           <BulkActionBar
-            total={filtered.length}
+            total={onScreen.length}
             ticked={picking.selected.length}
             progress={bulkProgress}
             message={bulkResult}
-            onSelectAll={afterPick(() => picking.setMany(filtered, true))}
+            onSelectAll={afterPick(() => picking.setMany(onScreen, true))}
             onClear={afterPick(picking.clear)}
             onDone={afterPick(picking.stop)}
             onStatus={handleBulkStatus}

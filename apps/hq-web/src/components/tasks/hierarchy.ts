@@ -48,6 +48,21 @@ export function compareTasksByActivity(a: TaskItem, b: TaskItem): number {
   return (b.id || '').localeCompare(a.id || '')
 }
 
+/** The list section a task sits in: its initiative's name. */
+export function sectionName(task: TaskItem, initiativeById: Map<string, Initiative>): string {
+  return initiativeById.get(task.initiative_id)?.name ?? 'Other'
+}
+
+/** The tasks that are not inside a collapsed section: the ones actually on screen. */
+export function withoutSections(
+  tasks: TaskItem[],
+  collapsed: ReadonlySet<string>,
+  initiativeById: Map<string, Initiative>
+): TaskItem[] {
+  if (collapsed.size === 0) return tasks
+  return tasks.filter((t) => !collapsed.has(sectionName(t, initiativeById)))
+}
+
 /**
  * Groups tasks by initiative name. Initiative groups are sorted by the latest
  * activity of their tasks (newest task group first), with deterministic tie-break
@@ -59,7 +74,7 @@ export function groupByInitiative(
 ): [string, TaskItem[]][] {
   const groups = new Map<string, TaskItem[]>()
   for (const t of tasks) {
-    const name = initiativeById.get(t.initiative_id)?.name ?? 'Other'
+    const name = sectionName(t, initiativeById)
     const list = groups.get(name) ?? []
     list.push(t)
     groups.set(name, list)
