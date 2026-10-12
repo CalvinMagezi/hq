@@ -9,8 +9,11 @@ use hq_sandbox::{
     AgentSandbox, Backend, HiddenDir, Network, ReadRestriction, Relay, backend, canonical, wrap,
 };
 use serde::{Deserialize, Serialize};
+use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
+/// HQ's own directory under HOME, which no setting reveals.
+const HQ_HOME_DIR: &str = ".hq";
 /// Directories under HOME that hold credentials and have no place in an agent.
 const SECRET_HOME_DIRS: &[&str] = &[
     ".ssh",
@@ -201,6 +204,13 @@ pub struct SandboxSpec {
     /// Extra paths under HOME the agent may read.
     #[serde(default)]
     pub readable: Vec<PathBuf>,
+    /// Paths only one kind of agent may read, keyed by agent. A credential
+    /// directory named exactly is revealed to that agent, read-only.
+    #[serde(default)]
+    pub agent_readable: BTreeMap<String, Vec<PathBuf>>,
+    /// Loopback ports the agent may connect to directly (macOS only).
+    #[serde(default)]
+    pub loopback_ports: Vec<u16>,
 }
 
 impl SandboxSpec {
@@ -210,8 +220,15 @@ impl SandboxSpec {
             allow: Vec::new(),
             writable: Vec::new(),
             readable: Vec::new(),
+            agent_readable: BTreeMap::new(),
+            loopback_ports: Vec::new(),
         }
     }
+}
+
+/// The name an agent kind goes by in the tables here and in `agent_readable`.
+fn agent_kind(agent: &str) -> &str {
+    if agent == "antigravity" { "agy" } else { agent }
 }
 
 /// The unix socket a bubblewrap sandbox reaches the egress proxy through, and the
@@ -342,6 +359,16 @@ fn policy(
             .chain(other_profiles)
             .chain(default_dir),
     );
+    // `confine` keeps only this agent's entries.
+    let agent_readable = canonical(spec.agent_readable.values().flatten().cloned());
+    // HQ's own directory holds the operator's tokens and is never revealed.
+    let hq_dir = home.join(HQ_HOME_DIR);
+    let hq_dir = hq_dir.canonicalize().unwrap_or(hq_dir);
+    let revealed: Vec<PathBuf> = secret_dirs
+        .iter()
+        .filter(|d| agent_readable.contains(d) && **d != hq_dir)
+        .cloned()
+        .collect();
     // A writable root that contains HOME, the run directory or a secret directory
     // would let the agent rename or rewrite them, which no read rule survives.
     let guarded = [home.clone(), run_dir.clone()]
@@ -353,6 +380,18 @@ fn policy(
                 "{} is writable but contains {}; start the agent in a project directory",
                 root.display(),
                 inside.display()
+            )));
+        }
+        // Writing inside one of them is as bad: hiding only stops reads.
+        if let Some(outer) = [&run_dir]
+            .into_iter()
+            .chain(&secret_dirs)
+            .find(|g| root.starts_with(g))
+        {
+            return Err(HostError::Sandbox(format!(
+                "{} is writable but lies inside {}, which agents may not write",
+                root.display(),
+                outer.display()
             )));
         }
     }
@@ -377,10 +416,15 @@ fn policy(
         dir: run_dir,
         allow,
     }];
-    hidden.extend(secret_dirs.into_iter().map(|dir| HiddenDir {
-        dir,
-        allow: Vec::new(),
-    }));
+    hidden.extend(
+        secret_dirs
+            .into_iter()
+            .filter(|d| !revealed.contains(d))
+            .map(|dir| HiddenDir {
+                dir,
+                allow: Vec::new(),
+            }),
+    );
     let under_project = |names: &[&str]| names.iter().map(|n| project.join(n)).collect::<Vec<_>>();
     let home_files: Vec<PathBuf> = CLAUDE_DIR_READONLY_FILES
         .iter()
@@ -405,6 +449,7 @@ fn policy(
             .chain([claude_dir.to_path_buf()])
             .chain(default_claude.then(|| home.join(".claude.json")))
             .chain(spec.readable.iter().cloned())
+            .chain(agent_readable)
             .chain(std::env::current_exe())
             .chain(std::iter::once(project.clone()))
             .chain(writable.iter().cloned()),
@@ -414,7 +459,13 @@ fn policy(
         writable,
         writable_files: Vec::new(),
         readonly_files: keep(home_files.into_iter().chain(project_files).collect()),
-        readonly_subpaths: keep(home_dirs.into_iter().chain(project_dirs).collect()),
+        readonly_subpaths: keep(
+            home_dirs
+                .into_iter()
+                .chain(project_dirs)
+                .chain(revealed)
+                .collect(),
+        ),
         denied_programs: if macos {
             DENIED_PROGRAMS.iter().map(PathBuf::from).collect()
         } else {
@@ -443,6 +494,15 @@ fn policy(
                 program: b.program.clone(),
                 unix_socket: b.socket.clone(),
             }),
+            loopback_ports: if bwrap {
+                Vec::new()
+            } else {
+                spec.loopback_ports
+                    .iter()
+                    .copied()
+                    .filter(|p| *p != 0)
+                    .collect()
+            },
         },
     })
 }
@@ -519,7 +579,17 @@ pub(crate) fn confine(
     // The agent's own state directories are writable (created if its first run has
     // not made them yet, so there is something to allow).
     let mut own_spec = spec.clone();
-    if let Some(kind) = agent.map(|a| if a == "antigravity" { "agy" } else { a }) {
+    let kind = agent.map(agent_kind);
+    own_spec
+        .agent_readable
+        .retain(|k, _| Some(agent_kind(k)) == kind);
+    if matches!(backend, Backend::Bwrap(_)) && !own_spec.loopback_ports.is_empty() {
+        eprintln!(
+            "hq host: loopback ports {:?} are not opened under bubblewrap; HTTP to them still goes through the proxy",
+            own_spec.loopback_ports
+        );
+    }
+    if let Some(kind) = kind {
         if let Some((_, dirs)) = AGENT_STATE_DIRS.iter().find(|(k, _)| *k == kind) {
             let home = home().ok_or_else(|| refuse("HOME is not set"))?;
             for dir in dirs.iter().map(|d| home.join(d)) {

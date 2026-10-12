@@ -48,7 +48,7 @@ sed -e "s|@REPO@|$repo|g" -e "s|@REF@|$ref|g" -e "s|@SHA256@|$sha|g" -e "s|@HOST
 fw="$name-fw"
 hcloud firewall create --name "$fw"
 {
-    hcloud firewall add-rule "$fw" --direction in --protocol tcp --port 22 --source-ip "$cidr" &&
+    hcloud firewall add-rule "$fw" --direction in --protocol tcp --port 22 --source-ips "$cidr" &&
     hcloud server create --name "$name" --type "$type" --location "$location" --image "$IMAGE" \
     --ssh-key "$ssh_key" --firewall "$fw" --user-data-from-file "$userdata"
 } || { hcloud firewall delete "$fw"; die "server create failed; removed firewall $fw"; }

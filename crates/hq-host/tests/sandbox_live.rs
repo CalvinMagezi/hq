@@ -41,6 +41,7 @@ fn claude_answers_a_prompt_under_the_sandbox() {
         }],
         writable: Vec::new(),
         readable: Vec::new(),
+        ..SandboxSpec::none()
     });
     host.spawn(spec).unwrap();
     let deadline = Instant::now() + WAIT;

@@ -21,6 +21,7 @@ fn spec(allow: Vec<Allow>) -> SandboxSpec {
         allow,
         writable: Vec::new(),
         readable: Vec::new(),
+        ..SandboxSpec::none()
     }
 }
 
@@ -406,5 +407,117 @@ fn an_agent_may_write_its_own_state_directory_and_no_other_agents() {
     let _ = std::fs::remove_file(&other);
     assert!(out.contains("own=yes") && own_written, "{out}");
     assert!(!out.contains("other=yes") && !other_written, "{out}");
+    host.kill("a").unwrap();
+}
+
+fn run_as(host: &Host, agent: &str, cwd: &Path, sandbox: SandboxSpec, script: &str) -> String {
+    let mut spec = SpawnSpec::new(agent, vec!["sh".into(), "-c".into(), script.into()], cwd);
+    spec.agent = Some(agent.into());
+    spec.sandbox = Some(sandbox);
+    host.spawn(spec).unwrap();
+    let deadline = Instant::now() + WAIT;
+    loop {
+        let text = host.read(agent, ReadSource::Recent, 0).unwrap();
+        if text.contains("DONE") {
+            return text;
+        }
+        assert!(Instant::now() < deadline, "never finished:\n{text}");
+        std::thread::sleep(Duration::from_millis(50));
+    }
+}
+
+#[test]
+fn a_credential_directory_named_for_one_agent_is_readable_by_it_alone_and_never_writable() {
+    if !sandbox_available() {
+        return;
+    }
+    let home = std::path::PathBuf::from(std::env::var("HOME").unwrap());
+    // Another Claude profile is one of the directories hidden by default.
+    let secret = home.join(format!(".claude-hqtest-reveal-{}", std::process::id()));
+    std::fs::create_dir_all(&secret).unwrap();
+    std::fs::write(secret.join("hosts.yml"), "REVEALED").unwrap();
+    let dir = run_dir();
+    let project = tempfile::tempdir().unwrap();
+    let host = host_for(dir.path());
+    let mut sandbox = spec(vec![]);
+    // HQ's own directory is never revealed, even when named.
+    let hq_dir = home.join(".hq");
+    sandbox
+        .agent_readable
+        .insert("hqtest-reader".into(), vec![secret.clone(), hq_dir.clone()]);
+    let script = format!(
+        "t() {{ if eval \"$2\" >/dev/null 2>&1; then echo \"$1=yes\"; else echo \"$1=no\"; fi; }}; \
+         t read 'grep -q REVEALED \"{0}/hosts.yml\"'; t write 'echo x > \"{0}/hosts.yml\"'; t hq 'ls \"{1}\"'; echo DONE",
+        secret.display(),
+        hq_dir.display()
+    );
+    // A writable root nested inside it would open it up, so that launch is refused.
+    let nested = secret.join("sub");
+    std::fs::create_dir_all(&nested).unwrap();
+    let mut planting = sandbox.clone();
+    planting.writable = vec![nested];
+    let mut s = SpawnSpec::new("hqtest-reader", vec!["true".into()], project.path());
+    s.agent = Some("hqtest-reader".into());
+    s.sandbox = Some(planting);
+    let refused = host.spawn(s);
+    let reader = run_as(
+        &host,
+        "hqtest-reader",
+        project.path(),
+        sandbox.clone(),
+        &script,
+    );
+    let other = run_as(&host, "hqtest-other", project.path(), sandbox, &script);
+    let untouched = std::fs::read_to_string(secret.join("hosts.yml")).unwrap();
+    let _ = std::fs::remove_dir_all(&secret);
+    assert!(
+        reader.contains("read=yes") && reader.contains("write=no"),
+        "{reader}"
+    );
+    let refused =
+        refused.expect_err("a writable root inside a credential directory must be refused");
+    assert!(refused.to_string().contains("lies inside"), "{refused}");
+    assert!(
+        other.contains("read=no") && other.contains("write=no"),
+        "{other}"
+    );
+    if hq_dir.is_dir() {
+        assert!(reader.contains("hq=no"), "{reader}");
+    }
+    assert_eq!(untouched, "REVEALED");
+    host.kill("hqtest-reader").unwrap();
+    host.kill("hqtest-other").unwrap();
+}
+
+#[test]
+fn a_listed_loopback_port_is_reachable_on_macos_and_an_unlisted_one_is_not() {
+    if !sandbox_available() || !cfg!(target_os = "macos") {
+        return;
+    }
+    let listen = || {
+        let l = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let port = l.local_addr().unwrap().port();
+        std::thread::spawn(move || {
+            while let Ok((mut c, _)) = l.accept() {
+                let _ = std::io::Write::write_all(&mut c, b"service-here");
+            }
+        });
+        port
+    };
+    let (listed, unlisted) = (listen(), listen());
+    let dir = run_dir();
+    let project = tempfile::tempdir().unwrap();
+    let host = host_for(dir.path());
+    let mut sandbox = spec(vec![]);
+    sandbox.loopback_ports = vec![listed];
+    let probe = |port: u16| {
+        format!(
+            "python3 -c \"import socket; c=socket.create_connection(('127.0.0.1',{port}),3); print('p{port}=' + c.recv(20).decode())\" 2>&1"
+        )
+    };
+    let script = format!("{}; {}; echo DONE", probe(listed), probe(unlisted));
+    let out = run(&host, "a", project.path(), sandbox, &script);
+    assert!(out.contains(&format!("p{listed}=service-here")), "{out}");
+    assert!(!out.contains(&format!("p{unlisted}=service-here")), "{out}");
     host.kill("a").unwrap();
 }

@@ -169,6 +169,18 @@ pub struct SandboxConfig {
     /// Everything else under home is unreadable to them.
     #[serde(default)]
     pub readable: Vec<String>,
+
+    /// Paths one kind of agent may read, keyed by agent (`claude`, `codex`,
+    /// `hermes`, ...). Naming a credential directory such as `~/.config/gh`
+    /// here lifts its hiding for that agent only, read-only.
+    #[serde(default)]
+    pub agent_readable: BTreeMap<String, Vec<String>>,
+
+    /// Ports on the agent's own machine it may connect to, such as a local
+    /// model server or the adb server. HTTP through the proxy works on every
+    /// platform; a direct connection (any protocol) only under macOS.
+    #[serde(default)]
+    pub loopback_ports: Vec<u16>,
 }
 
 /// A launcher built on a built-in harness. It inherits that harness's resume,

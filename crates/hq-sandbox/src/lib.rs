@@ -52,6 +52,9 @@ pub enum Network {
         port: u16,
         unix_sockets: Vec<PathBuf>,
         relay: Option<Relay>,
+        /// Further loopback ports reachable directly, any protocol (Seatbelt
+        /// only: inside bubblewrap's namespace loopback is the sandbox's own).
+        loopback_ports: Vec<u16>,
     },
 }
 
@@ -235,9 +238,15 @@ pub fn seatbelt_profile(s: &AgentSandbox) -> String {
         Network::Full => {}
         Network::Off => p.push_str("(deny network-outbound (remote ip))"),
         Network::Proxy {
-            port, unix_sockets, ..
+            port,
+            unix_sockets,
+            loopback_ports,
+            ..
         } => {
-            let mut allowed = vec![format!("(remote ip \"localhost:{port}\")")];
+            let allowed_ports = std::iter::once(port).chain(loopback_ports);
+            let mut allowed: Vec<String> = allowed_ports
+                .map(|p| format!("(remote ip \"localhost:{p}\")"))
+                .collect();
             allowed.extend(
                 unix_sockets
                     .iter()
@@ -263,6 +272,11 @@ pub fn bwrap_args(s: &AgentSandbox, argv: &[String]) -> Result<Vec<OsString>, Un
                 "a domain-allowlisted network needs a relay inside the bubblewrap sandbox, and \
                  none was given"
                     .into(),
+            ));
+        }
+        Network::Proxy { loopback_ports, .. } if !loopback_ports.is_empty() => {
+            return Err(Unsupported(
+                "bubblewrap cannot open a port on the host's loopback to the sandbox".into(),
             ));
         }
         Network::Proxy {
