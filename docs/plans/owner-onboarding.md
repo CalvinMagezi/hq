@@ -1,6 +1,6 @@
 # Owner onboarding: from a provisioned server to a signed-in phone and a paired chat
 
-Status: slices 0, 1, 2, 3, 4, 7 and 8 built; 5 and 6 open. This doc maps the journey for an **owner** who has never used a
+Status: slices 0, 1, 2, 3, 4, 6, 7 and 8 built; 5 open. This doc maps the journey for an **owner** who has never used a
 terminal. An **operator** provisions an HQ server for them on Hetzner (`docs/HETZNER.md`), and the
 server joins the owner's own Tailscale tailnet. Today the owner can't sign in again or connect
 Telegram or Discord without the operator's root shell. The target is that, once the operator hands
