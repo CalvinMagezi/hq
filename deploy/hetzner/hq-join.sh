@@ -45,7 +45,8 @@ grep -qs '"state":"\(ready\|joined\)"' "$STATE_DIR/status.json" || die "bootstra
 ts_host="$(cat "$STATE_DIR/hostname")"
 
 if [ "$print_link" -eq 1 ]; then
-    origin="$(grep -m1 -o 'https://[^"]*' "$CONFIG" 2>/dev/null || true)"
+    origin="$(awk '/^web_allowed_origins:/ {in_list=1; next} in_list && /^[^[:space:]-]/ {exit}
+        in_list && match($0, /https:\/\/[^"[:space:]]+/) {print substr($0, RSTART, RLENGTH); exit}' "$CONFIG" 2>/dev/null || true)"
     [ -n "$origin" ] || die "no web_allowed_origins in $CONFIG; run hq-join without flags first"
     print_owner_message "$origin"
     exit 0
