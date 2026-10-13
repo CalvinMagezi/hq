@@ -18,7 +18,7 @@ export function SignInPrompt() {
   const submit = (e: FormEvent) => {
     e.preventDefault()
     if (!saveWebToken(token)) {
-      setError(token.trim() ? 'This browser blocked saving the token.' : 'Paste the token first.')
+      setError(token.trim() ? 'This browser blocked saving the token.' : 'Paste the login link or token first.')
       return
     }
     window.location.reload()
@@ -37,9 +37,12 @@ export function SignInPrompt() {
         </div>
         <p className="text-xs" style={{ color: 'var(--text-dim)' }}>
           {replacing ? 'The server no longer accepts the token saved here. ' : ''}
-          Open your HQ login link (the <code className="font-mono">login_url</code> from{' '}
-          <code className="font-mono whitespace-nowrap">hq web --json</code>) or paste your web token. Until then, screens show data
-          saved on this device.
+          Open the HQ login link you were given, or paste the link here. Until then, screens show data saved on this device.
+        </p>
+        <p className="text-xs" style={{ color: 'var(--text-dim)' }}>
+          Lost the link? Whoever set up your HQ server can print it again with{' '}
+          <code className="font-mono whitespace-nowrap">sudo hq-join --print-link</code>. If HQ runs on your own computer, run{' '}
+          <code className="font-mono whitespace-nowrap">hq web</code> there.
         </p>
         <div className="flex gap-2">
           <input
@@ -49,8 +52,8 @@ export function SignInPrompt() {
               setToken(e.target.value)
               setError(null)
             }}
-            placeholder="Web token"
-            aria-label="Web token"
+            placeholder="Login link or web token"
+            aria-label="Login link or web token"
             autoComplete="off"
             spellCheck={false}
             className="flex-1 min-w-0 px-3 py-1.5 rounded-lg text-xs font-mono bg-white/5 border border-white/10 text-neutral-100 placeholder:text-neutral-500 focus:outline-none focus:border-white/30"

@@ -92,6 +92,18 @@ test('a pasted token replaces a rotated one and is sent from then on', async () 
   expect(sent[0].get('Authorization')).toBe(`Bearer ${TOKEN}`)
 })
 
+test('a pasted login link stores only its token', () => {
+  const { store } = browser('https://hq.example.ts.net:8443/vault')
+  expect(saveWebToken(`https://hq.example.ts.net:8443/vault#token=${TOKEN}`)).toBe(true)
+  expect(store.get('hq-web-token')).toBe(TOKEN)
+})
+
+test('a link with no token after the marker stores nothing', () => {
+  const { store } = browser('https://hq.example.ts.net:8443/vault')
+  expect(saveWebToken('https://hq.example.ts.net:8443/vault#token=')).toBe(false)
+  expect(store.has('hq-web-token')).toBe(false)
+})
+
 test('a blank paste stores nothing', () => {
   const { store } = browser('https://hq.example.ts.net:8443/vault')
   expect(saveWebToken('   ')).toBe(false)

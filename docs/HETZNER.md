@@ -18,7 +18,7 @@ The recording uses sample data: a placeholder address and no real account.
 1. **Create a Hetzner token.** In the [Hetzner Cloud console](https://console.hetzner.com/projects) create a project (or open an empty one you can delete later). Go to Security, then API tokens, then Generate API token. Choose **Read & Write** and copy the token; Hetzner shows it once.
 2. **Open <https://deploy.agent-hq.online>** and paste the token. Pick a name, a location, a size with at least 4 GB of memory, your SSH key (paste the public key if it is new) and your own IP address as `x.x.x.x/32`. Only that address can reach SSH. Click **Create server**.
 3. **Wait about 3 to 5 minutes** after Hetzner shows the server as `running`. The server installs HQ from signed releases by itself, and the page cannot see its progress because HQ is private to your tailnet.
-4. **Join your tailnet.** On your computer run the command the page shows, `ssh root@<server-ip> hq-join`. It prints a Tailscale login link: open it and sign in. When it finishes it prints your HQ link, `https://hq.example.ts.net:8443/vault#token=...`. Treat that link like a password, because it signs you in as admin.
+4. **Join your tailnet.** On your computer run the command the page shows, `ssh root@<server-ip> hq-join`. It prints a Tailscale login link: open it and sign in. When it finishes it prints your HQ link, `https://hq.example.ts.net:8443/vault#token=...`. Treat that link like a password, because it signs you in as admin. If you are setting HQ up for someone else, it prints the link inside a block you can forward as is; send them [the owner guide](OWNER_GUIDE.md) first, since they need Tailscale ready before this step.
 5. **Open the HQ link** on a device on your tailnet. HQ asks for a model key on first run; [what that screen does and how to fix problems](FIRST_RUN.md).
 6. **Close public SSH** with the button on the form page, once HQ opens. From then on only your tailnet reaches the server. If you ever lose the tailnet path, **Reopen SSH for my IP** brings it back.
 
@@ -41,7 +41,7 @@ Pick values with `hcloud server-type list` and `hcloud location list`. The commi
 ## Troubleshooting
 
 - **`status.json` does not say `ready`.** Read `/var/log/cloud-init-output.log`, fix the cause, and re-run `bash /root/bootstrap.sh --repo <repo> --ref <sha> --hostname <name>`. It is safe to run again.
-- **HQ opens but every panel shows 401.** The browser did not store the sign-in token. Open the link from `hq-join` again in a fresh tab. Servers older than release `main.98` need a link that points at `/vault#token=...` rather than `/#token=...`.
+- **HQ opens but every panel shows 401, or asks to sign in.** The browser did not store the sign-in token. Open the link from `hq-join` again in a fresh tab, or paste it into the sign-in box. Lost the link? `sudo hq-join --print-link` prints it again without touching the tailnet or restarting HQ. Servers older than release `main.98` need a link that points at `/vault#token=...` rather than `/#token=...`.
 - **`tailscale serve` asks you to enable HTTPS.** Turn on MagicDNS and HTTPS certificates in the Tailscale admin console under DNS, then run `hq-join` again.
 - **SSH asks for a password or refuses the key.** Password login is off. Use the key whose public half you gave the form, with `ssh -i ~/.ssh/<key> root@<ip>` if it is not your default.
 - **The node expired.** Tailscale node keys expire after 180 days. Disable key expiry for the machine in the admin console, or reopen SSH from the form page and run `tailscale up` again.
