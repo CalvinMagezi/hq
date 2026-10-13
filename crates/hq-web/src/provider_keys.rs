@@ -21,7 +21,7 @@ use serde_json::{Value, json};
 
 use crate::WsState;
 use crate::error::ApiError;
-use crate::setup_api::{SAVE_LOCK, clean_key, first_key_patch, scrub_key, token_configured};
+use crate::setup_api::{SAVE_LOCK, clean_key, first_key_patch, scrub_key};
 
 const NO_WEB_TOKEN: &str = "Changing model keys from the web needs a web token (web_auth_token). Use `hq env` on the server instead.";
 /// Variables under this prefix override config.yaml through figment, even when empty.
@@ -107,7 +107,7 @@ pub(crate) async fn replace_handler(
     State(state): State<Arc<WsState>>,
     Json(body): Json<ReplaceBody>,
 ) -> Result<impl IntoResponse, ApiError> {
-    if !token_configured(&state) {
+    if !state.web_auth_enabled() {
         return Err(ApiError::Forbidden(NO_WEB_TOKEN.into()));
     }
     let path = HqConfig::config_file_path();
