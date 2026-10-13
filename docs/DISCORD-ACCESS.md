@@ -6,7 +6,38 @@ there is currently no separate guest role — the allowlist/owner governs
 **both** direct messages and @-mentions in a guild, with no way to scope one
 without the other.
 
-## Configuration (`~/.hq/config.yaml`)
+## Connect from the web app
+
+No shell needed. In HQ, open **Settings**, then **Chat apps**, and use the Discord card:
+
+1. Open the [Discord developer portal](https://discord.com/developers/applications) and choose
+   **New Application**. Open **Bot**, press **Reset Token** and copy the token.
+2. On the same page, under **Privileged Gateway Intents**, turn on **Message Content Intent** and
+   save. The relay asks for it (`crates/hq-relay/src/discord/mod.rs`), and without it the bot sees
+   empty messages.
+3. Paste the token and press **Check token**. HQ asks Discord (`GET /users/@me` and
+   `GET /oauth2/applications/@me`) for the bot's name and application id; it never decodes the
+   token. If the application's flags show the intent off, the card says so.
+4. Press **Save and restart**. HQ writes `relay.discord_token` and `relay.discord_enabled: true`
+   and restarts itself.
+5. Use **Open the invite link** to add the bot to a server you own. The link asks for the `bot` and
+   `applications.commands` scopes and these permissions only: View Channels, Send Messages, Embed
+   Links, Read Message History, Add Reactions, Create Public Threads and Send Messages in Threads
+   (permission integer `309237730368`).
+6. Press **Pair my Discord** and DM the bot `!pair <code>`. The code lasts 15 minutes.
+
+The card refuses to change a token or switch set through `HQ_RELAY__DISCORD_TOKEN` or
+`HQ_RELAY__DISCORD_ENABLED`, offers no pairing while `discord_allowed_user_ids` is set, and changes
+nothing on an instance without a web token. HQ restarts itself only under systemd or its launchd
+job; elsewhere the card asks you to restart HQ by hand.
+
+## Connect from the command line
+
+To build the invite yourself, use
+`https://discord.com/oauth2/authorize?client_id=<application id>&scope=bot%20applications.commands&permissions=309237730368`.
+Turn on Message Content Intent as in step 2 above.
+
+### Configuration (`~/.hq/config.yaml`)
 
 ```yaml
 relay:
@@ -52,7 +83,8 @@ Webhooks on a channel can post as one), not trusted-bot-shaped.
 | File | Purpose |
 |------|---------|
 | `_system/.discord-auth-user` | Owner ID written by a successful `!pair`, used when `discord_allowed_user_ids` is unset |
-| `_system/.pairing-discord.json` | Pending pairing code hash and expiry (written by `hq pair`) |
+| `_system/.pairing-discord.json` | Pending pairing code hash and expiry (written by `hq pair` or Settings) |
+| `_system/chat-apps.json` | The bot's public name and application id, remembered from the last token check, with a short hash of the token they belong to |
 
 ## Verifying the recorded owner is actually you
 

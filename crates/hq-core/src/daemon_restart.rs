@@ -1,5 +1,46 @@
 //! OS-aware daemon restart helper, shared by self-update's install and
-//! rollback paths (`hq-tools::self_update`, `hq-cli::self_apply`).
+//! rollback paths (`hq-tools::self_update`, `hq-cli::self_apply`), and the
+//! web app's "Save and restart" (`request_restart`).
+
+use std::sync::OnceLock;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::time::Duration;
+
+/// Exit status after a requested restart. Non-zero on purpose: systemd's
+/// `Restart=on-failure` (what `hq service install` writes) ignores a clean exit.
+pub const RESTART_EXIT_CODE: i32 = 75;
+/// Graceful shutdown gets this long before the process exits anyway.
+const RESTART_FAILSAFE: Duration = Duration::from_secs(30);
+
+static RESTART_REQUESTED: AtomicBool = AtomicBool::new(false);
+static PROCESS_STARTED_AT: OnceLock<i64> = OnceLock::new();
+
+/// Unix time this process started (first call wins; `main` calls it at once).
+pub fn process_started_at() -> i64 {
+    *PROCESS_STARTED_AT.get_or_init(|| chrono::Utc::now().timestamp())
+}
+
+/// Whether `request_restart` ran, so `main` exits with [`RESTART_EXIT_CODE`].
+pub fn restart_requested() -> bool {
+    RESTART_REQUESTED.load(Ordering::SeqCst)
+}
+
+/// Stop this process through the normal SIGTERM shutdown and exit non-zero, so
+/// the supervisor that started it starts it again. Only call under one.
+pub fn request_restart() {
+    RESTART_REQUESTED.store(true, Ordering::SeqCst);
+    std::thread::spawn(|| {
+        std::thread::sleep(RESTART_FAILSAFE);
+        std::process::exit(RESTART_EXIT_CODE);
+    });
+    #[cfg(unix)]
+    // SAFETY: signalling our own pid; the installed SIGTERM handler runs the graceful shutdown.
+    unsafe {
+        libc::kill(libc::getpid(), libc::SIGTERM);
+    }
+    #[cfg(not(unix))]
+    std::process::exit(RESTART_EXIT_CODE);
+}
 
 /// Outcome of attempting to restart the running HQ daemon process after a
 /// binary swap.

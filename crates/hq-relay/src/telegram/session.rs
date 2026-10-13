@@ -214,6 +214,10 @@ impl TgRelay {
                     .await;
                 return;
             }
+            ChatGate::PairingHelp(reply) => {
+                let _ = bot.send_message(msg.chat.id, reply).await;
+                return;
+            }
         }
         let Some(media) = self.collect_inbound(&bot, &msg).await else {
             return;

@@ -29,6 +29,29 @@ pub enum ChatGate {
     Drop,
     /// The sender redeemed a pairing code and is now the owner.
     Paired,
+    /// No owner yet: answer once with how to pair, then drop the message.
+    PairingHelp(&'static str),
+}
+
+/// Reply to a bare `/start` while the bot has no owner.
+pub const NOT_PAIRED_REPLY: &str = "This bot is not paired with HQ yet. In HQ, open Settings, then Chat apps, and press Pair my Telegram.";
+/// Reply when a pairing code is refused, so an expired link is not a silent dead end.
+pub const CODE_REFUSED_REPLY: &str = "That pairing code did not work. It may have expired or been used already. Get a fresh one from HQ Settings, Chat apps.";
+
+/// The command word of `text` without a `@botname` suffix.
+fn command_word(text: &str) -> Option<&str> {
+    text.split_whitespace().next()?.split('@').next()
+}
+
+/// The code from `/pair CODE`, or from `/start CODE`, which a `t.me/<bot>?start=CODE` link sends.
+fn pairing_code(text: &str) -> Option<&str> {
+    if let Some(code) = pairing::parse_pair_command(text) {
+        return Some(code);
+    }
+    if command_word(text) != Some("/start") {
+        return None;
+    }
+    text.split_whitespace().nth(1)
 }
 
 /// The relay's first gate. With no owner known, everything is refused except a
@@ -86,18 +109,24 @@ fn try_pair(vault_path: &Path, chat_id: i64, is_private: bool, text: &str, now: 
         );
         return ChatGate::Drop;
     }
-    let redeemed = pairing::parse_pair_command(text)
-        .map(|code| pairing::redeem_pairing_code(vault_path, PairPlatform::Telegram, code, now));
-    if !matches!(redeemed, Some(Ok(()))) {
+    let Some(code) = pairing_code(text) else {
         tracing::warn!(
             chat_id,
             "telegram: no owner configured, ignoring message. Set relay.telegram_authorized_chat_id or run `hq pair` and send /pair <code>"
         );
+        // Only `/start` gets an answer, so other traffic to an unpaired bot still learns nothing.
+        if command_word(text) == Some("/start") {
+            return ChatGate::PairingHelp(NOT_PAIRED_REPLY);
+        }
         return ChatGate::Drop;
+    };
+    if pairing::redeem_pairing_code(vault_path, PairPlatform::Telegram, code, now).is_err() {
+        tracing::warn!(chat_id, "telegram: pairing code refused");
+        return ChatGate::PairingHelp(CODE_REFUSED_REPLY);
     }
-    let system_dir = vault_path.join("_system");
-    let written = std::fs::create_dir_all(&system_dir)
-        .and_then(|()| std::fs::write(system_dir.join(".telegram-auth-chat"), chat_id.to_string()));
+    let owner_file = hq_core::telegram_access::owner_file(vault_path);
+    let written = std::fs::create_dir_all(owner_file.parent().unwrap_or(vault_path))
+        .and_then(|()| std::fs::write(&owner_file, chat_id.to_string()));
     if let Err(e) = written {
         tracing::error!(error = %e, "telegram: pairing code accepted but owner file could not be written");
         return ChatGate::Drop;
@@ -306,7 +335,7 @@ mod tests {
         assert_eq!(gate(v.path(), &relay, 5, "hello", 0), ChatGate::Drop);
         assert_eq!(
             gate(v.path(), &relay, 5, "/pair ABCDE-FGHJK", 0),
-            ChatGate::Drop
+            ChatGate::PairingHelp(CODE_REFUSED_REPLY)
         );
         assert!(!v.path().join("_system/.telegram-auth-chat").exists());
         assert_eq!(owner_chat_id(v.path(), &relay), None);
@@ -332,14 +361,64 @@ mod tests {
         let code = pairing::create_pairing_code(v.path(), PairPlatform::Telegram, 0).unwrap();
         assert_eq!(
             gate(v.path(), &relay, 7, "/pair WRONG-WRONG", 1),
-            ChatGate::Drop
+            ChatGate::PairingHelp(CODE_REFUSED_REPLY)
         );
         let late = pairing::PAIRING_TTL_SECS + 1;
         assert_eq!(
             gate(v.path(), &relay, 7, &format!("/pair {code}"), late),
-            ChatGate::Drop
+            ChatGate::PairingHelp(CODE_REFUSED_REPLY)
         );
         assert_eq!(owner_chat_id(v.path(), &relay), None);
+    }
+
+    #[test]
+    fn a_start_link_pairs_like_pair() {
+        let v = vault();
+        let relay = RelayConfig::default();
+        let code = pairing::create_pairing_code(v.path(), PairPlatform::Telegram, 0).unwrap();
+        assert_eq!(
+            gate(v.path(), &relay, 7, &format!("/start {code}"), 1),
+            ChatGate::Paired
+        );
+        assert_eq!(owner_chat_id(v.path(), &relay), Some(7));
+    }
+
+    #[test]
+    fn a_start_link_with_the_bot_suffix_pairs_too() {
+        let v = vault();
+        let relay = RelayConfig::default();
+        let code = pairing::create_pairing_code(v.path(), PairPlatform::Telegram, 0).unwrap();
+        assert_eq!(
+            gate(v.path(), &relay, 7, &format!("/start@my_bot {code}"), 1),
+            ChatGate::Paired
+        );
+    }
+
+    #[test]
+    fn a_bare_start_gets_one_hint_and_other_text_gets_nothing() {
+        let v = vault();
+        let relay = RelayConfig::default();
+        let hint = ChatGate::PairingHelp(NOT_PAIRED_REPLY);
+        assert_eq!(gate(v.path(), &relay, 7, "/start", 0), hint);
+        assert_eq!(gate(v.path(), &relay, 7, "/start@my_bot", 0), hint);
+        assert_eq!(gate(v.path(), &relay, 7, "/started", 0), ChatGate::Drop);
+        assert_eq!(gate(v.path(), &relay, 7, "start", 0), ChatGate::Drop);
+        assert_eq!(gate(v.path(), &relay, 7, "/help", 0), ChatGate::Drop);
+        assert_eq!(
+            authorize_chat_at(v.path(), &relay, -100, false, "/start", 0),
+            ChatGate::Drop
+        );
+    }
+
+    #[test]
+    fn a_start_once_paired_is_an_ordinary_message() {
+        let v = vault();
+        let relay = RelayConfig {
+            telegram_authorized_chat_id: Some(1),
+            ..Default::default()
+        };
+        assert_eq!(gate(v.path(), &relay, 1, "/start", 0), ChatGate::Proceed);
+        assert_eq!(gate(v.path(), &relay, 2, "/start", 0), ChatGate::Drop);
     }
 
     #[test]

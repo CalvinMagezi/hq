@@ -193,6 +193,16 @@ neither call it nor read its answer.
   Web Push (when each is set up).
 - The token handed out is the shared web token, not a per-device one, so
   signing one device out means rotating it for all.
+- **Chat apps and restart.** `POST`/`DELETE /api/chat-apps/{platform}`,
+  `.../verify`, `.../pair` and `POST /api/system/restart` refuse to run unless a
+  web token is configured, like first-run setup: behind `tailscale serve` every
+  request comes from loopback, and a pairing code makes its holder the owner of
+  an agent with full tools. Bot tokens go into `config.yaml` and nowhere else;
+  `GET /api/chat-apps` reports only whether one is set, and outbound check
+  errors are replaced with fixed text because a Telegram token sits in the
+  request URL. Restart is offered only under systemd (`INVOCATION_ID`) or the
+  configured launchd job (`XPC_SERVICE_NAME`), and Lite serves none of these
+  routes.
 
 One exception remains: `/hooks/gmail` takes its own `GMAIL_WEBHOOK_SECRET`. Send
 it as `Authorization: Bearer <secret>` whenever the sender can set headers. The

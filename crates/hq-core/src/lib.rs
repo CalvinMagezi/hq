@@ -5,6 +5,7 @@ pub mod build_info;
 pub mod config;
 pub mod critic;
 pub mod daemon_restart;
+pub mod discord_access;
 pub mod discord_notify;
 pub mod frontmatter_utils;
 pub mod fs_private;

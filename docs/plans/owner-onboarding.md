@@ -1,6 +1,6 @@
 # Owner onboarding: from a provisioned server to a signed-in phone and a paired chat
 
-Status: plan, nothing built. This doc maps the journey for an **owner** who has never used a
+Status: slices 0, 1, 2, 3, 4 and 7 built; 5, 6 and 8 open. This doc maps the journey for an **owner** who has never used a
 terminal. An **operator** provisions an HQ server for them on Hetzner (`docs/HETZNER.md`), and the
 server joins the owner's own Tailscale tailnet. Today the owner can't sign in again or connect
 Telegram or Discord without the operator's root shell. The target is that, once the operator hands
@@ -216,3 +216,4 @@ Each slice is one PR and leaves the product better on its own.
 | 5 | Token rotation from Settings, after open decision 1. | 13 |
 | 6 | Replace the model key from Settings. | 11 |
 | 7 | Reachability banner: tell "Tailscale off or server unreachable" apart from "signed out" and from "device offline". | 14 |
+| 8 | **Get started** checklist on the home screen after setup (install on phone, connect a chat app, turn on notifications), so an owner finds Devices and Chat apps without being told. | 5 (discovery) |

@@ -5,6 +5,7 @@ pub use api::HEALTH_SERVICE;
 pub use vault_api::{lite_hides, lite_hides_resolved};
 pub mod auth;
 mod budgets_api;
+mod chat_apps;
 mod chat_uploads;
 mod copilot_usage_api;
 mod device_auth;
@@ -17,6 +18,7 @@ mod oauth;
 mod openrouter_usage_api;
 mod origin;
 mod profile_gate;
+mod restart_api;
 mod security_headers;
 mod session_driver;
 mod sessions_api;
@@ -264,6 +266,20 @@ pub fn create_router(state: Arc<WsState>) -> Router {
         .route("/api/setup/status", get(setup_api::status_handler))
         .route("/api/setup/test", post(setup_api::test_handler))
         .route("/api/setup/provider", post(setup_api::provider_handler))
+        .route("/api/chat-apps", get(chat_apps::status_handler))
+        .route(
+            "/api/chat-apps/{platform}",
+            post(chat_apps::save_handler).delete(chat_apps::delete_handler),
+        )
+        .route(
+            "/api/chat-apps/{platform}/verify",
+            post(chat_apps::verify_handler),
+        )
+        .route(
+            "/api/chat-apps/{platform}/pair",
+            post(chat_apps::pair_handler),
+        )
+        .route("/api/system/restart", post(restart_api::restart_handler))
         .route(
             "/api/copilot-usage",
             get(copilot_usage_api::copilot_usage_handler),
