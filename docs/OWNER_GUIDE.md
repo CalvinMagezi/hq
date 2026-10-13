@@ -38,8 +38,15 @@ If the installed app asks you to sign in, paste the same login link into the box
 
 HQ shows a **Sign in to HQ** box. Paste your login link (or just the token) there.
 
-If you've lost the link, ask the person who set up your server. They can print it again by
-running `sudo hq-join --print-link` on the server.
+If you've lost the link and your HQ bot is connected on Telegram or Discord, ask it for the link.
+Anyone with the link can sign in as you, so keep it out of chat history:
+
+- **Telegram:** send `/login` to the bot in a private chat. Delete its reply once you've used it.
+- **Discord:** in a direct message to the bot, type `/login` and pick the slash command. Only you
+  see the reply, and Discord doesn't keep it.
+
+Otherwise, ask the person who set up your server. They can print it again by running
+`sudo hq-join --print-link` on the server.
 
 ## If HQ won't open at all
 

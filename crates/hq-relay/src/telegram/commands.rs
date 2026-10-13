@@ -42,6 +42,7 @@ pub async fn register_hq_commands(bot: &Bot) -> anyhow::Result<()> {
             "Recurring check: /watch <minutes> [for <hours>h] <prompt>",
         ),
         ("unwatch", "Stop a watch: /unwatch <id>"),
+        ("login", "Get your web login link"),
         ("help", "Show available commands"),
     ]
     .into_iter()
@@ -77,6 +78,7 @@ pub struct CommandContext<'a> {
     pub text_lower: &'a str,
     pub threads: Arc<TokioMutex<HashMap<i64, ChannelState>>>,
     pub caller: &'a CallerContext,
+    pub hq_cfg: &'a hq_core::config::HqConfig,
 }
 
 /// Guest-only commands return true when handled (caller should return early).
@@ -269,6 +271,7 @@ pub async fn handle_help(ctx: &CommandContext<'_>) -> anyhow::Result<bool> {
             "/resume <id> — Rerun an interrupted background turn (bare /resume lists them)",
             "/watch <minutes> [for <hours>h] <prompt> — Recurring check that keeps you posted",
             "/unwatch <id> — Stop a running watch",
+            "/login: Get your web login link (private chat only)",
             "/help — Show this help",
         ]
         .join("\n");
@@ -276,6 +279,43 @@ pub async fn handle_help(ctx: &CommandContext<'_>) -> anyhow::Result<bool> {
         return Ok(true);
     }
     Ok(false)
+}
+
+const LOGIN_NOT_PRIVATE_REPLY: &str = "Send /login to me in a private chat.";
+const LOGIN_LINK_WARNING: &str = "This link signs anyone on your Tailscale network in as you. Delete this message once you have used it.";
+
+/// `/login`: the owner's web login link, in a private chat only. Sent straight
+/// to the chat, never through the thread mirror, so the token stays out of the DB.
+pub async fn handle_login(ctx: &CommandContext<'_>) -> anyhow::Result<bool> {
+    use crate::chat_commands::{LOGIN_UNCONFIGURED_REPLY, LoginReply, login_reply};
+    use teloxide::prelude::Requester;
+    if !crate::chat_commands::is_login_command(ctx.text_lower) {
+        return Ok(false);
+    }
+    let is_owner = ctx.caller.role == TelegramRole::Owner;
+    let decision = login_reply(
+        ctx.msg.chat.is_private(),
+        is_owner,
+        ctx.hq_cfg.web_login_link(),
+    );
+    let reply = match decision {
+        LoginReply::NotOwner => return require_owner(ctx, "/login").await,
+        LoginReply::NotPrivate => LOGIN_NOT_PRIVATE_REPLY.to_string(),
+        LoginReply::NotConfigured => LOGIN_UNCONFIGURED_REPLY.to_string(),
+        LoginReply::Link(link) => format!("{link}\n\n{LOGIN_LINK_WARNING}"),
+    };
+    // No parse mode, so nothing in the token is read as markup.
+    ctx.bot
+        .send_message(ctx.msg.chat.id, reply)
+        .link_preview_options(teloxide::types::LinkPreviewOptions {
+            is_disabled: true,
+            url: None,
+            prefer_small_media: false,
+            prefer_large_media: false,
+            show_above_text: false,
+        })
+        .await?;
+    Ok(true)
 }
 
 /// Returns true if the message was a /status command.

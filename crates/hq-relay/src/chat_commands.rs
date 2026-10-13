@@ -352,6 +352,36 @@ pub(crate) fn is_permission_command(text_lower: &str) -> bool {
     })
 }
 
+/// Shown to an owner whose server can't build a link; the operator can still print one.
+pub(crate) const LOGIN_UNCONFIGURED_REPLY: &str = "HQ can't build your login link: it doesn't know its web address or has no web token. Ask whoever set up your HQ server to run this on it: sudo hq-join --print-link";
+
+/// True for `/login` or `!login`.
+pub(crate) fn is_login_command(text_lower: &str) -> bool {
+    matches!(text_lower.trim(), "/login" | "!login")
+}
+
+/// What `/login` answers, before each bridge words it.
+#[derive(Debug, PartialEq, Eq)]
+pub(crate) enum LoginReply {
+    NotPrivate,
+    NotOwner,
+    NotConfigured,
+    Link(String),
+}
+
+/// The login link is an admin credential, so only the owner in a private chat
+/// gets it. The private check runs first: in a shared channel the reply only
+/// says where to ask, whoever asked.
+pub(crate) fn login_reply(is_private: bool, is_owner: bool, link: Option<String>) -> LoginReply {
+    if !is_private {
+        return LoginReply::NotPrivate;
+    }
+    if !is_owner {
+        return LoginReply::NotOwner;
+    }
+    link.map_or(LoginReply::NotConfigured, LoginReply::Link)
+}
+
 /// The argument after the permission command, trimmed; `None` for the bare form.
 pub(crate) fn permission_arg(text: &str) -> Option<&str> {
     let (_, rest) = text.trim().split_once(char::is_whitespace)?;
@@ -477,6 +507,48 @@ mod tests {
     fn plain_messages_never_open_the_registry() {
         let reply = registry_command("hello", "hello", "telegram", 1, None, || panic!("opened"));
         assert!(reply.is_none());
+    }
+
+    const LINK: &str = "https://hq.example.ts.net:8443/vault#token=abc123";
+
+    #[test]
+    fn login_gives_the_owner_the_link_in_a_private_chat() {
+        assert_eq!(
+            login_reply(true, true, Some(LINK.into())),
+            LoginReply::Link(LINK.into())
+        );
+    }
+
+    #[test]
+    fn login_refuses_a_guest_and_any_shared_chat() {
+        assert_eq!(
+            login_reply(true, false, Some(LINK.into())),
+            LoginReply::NotOwner
+        );
+        assert_eq!(
+            login_reply(false, true, Some(LINK.into())),
+            LoginReply::NotPrivate
+        );
+        assert_eq!(
+            login_reply(false, false, Some(LINK.into())),
+            LoginReply::NotPrivate
+        );
+    }
+
+    #[test]
+    fn login_explains_a_missing_link_to_the_owner_only() {
+        assert_eq!(login_reply(true, true, None), LoginReply::NotConfigured);
+        assert_eq!(login_reply(true, false, None), LoginReply::NotOwner);
+        assert!(LOGIN_UNCONFIGURED_REPLY.contains("sudo hq-join --print-link"));
+    }
+
+    #[test]
+    fn login_command_parses_both_prefixes_only() {
+        assert!(is_login_command("/login"));
+        assert!(is_login_command("!login"));
+        assert!(!is_login_command("/login now"));
+        assert!(!is_login_command("/loginx"));
+        assert!(!is_login_command("please login"));
     }
 
     #[test]

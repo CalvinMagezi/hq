@@ -689,6 +689,21 @@ impl HqConfig {
         Ok(updated)
     }
 
+    /// The owner's web login link, `<first web_allowed_origins entry>/vault#token=<token>`,
+    /// the same shape `hq-join --print-link` prints. `None` without an origin or a token.
+    pub fn web_login_link(&self) -> Option<String> {
+        let token = self
+            .web_auth_token
+            .as_deref()
+            .filter(|t| !t.trim().is_empty())?;
+        let origin = self
+            .web_allowed_origins
+            .iter()
+            .map(|o| o.trim().trim_end_matches('/'))
+            .find(|o| !o.is_empty())?;
+        Some(format!("{origin}/vault#token={token}"))
+    }
+
     /// Path every writer (`save_patch`, `set_key`, `hq config`, onboarding)
     /// uses: `HQ_CONFIG_PATH`, else `~/.hq/config.yaml`. Never the server
     /// fallback, so a shell on a server cannot silently edit the daemon's config.

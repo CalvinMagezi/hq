@@ -23,8 +23,9 @@ use super::access::{
 };
 use super::caller_context::{CallerContext, build_caller_block, guest_intro_line};
 use super::commands::{
-    CommandContext, handle_backend, handle_cancel, handle_focus, handle_help, handle_model,
-    handle_permission_pin, handle_reset, handle_status, normalize_command, register_hq_commands,
+    CommandContext, handle_backend, handle_cancel, handle_focus, handle_help, handle_login,
+    handle_model, handle_permission_pin, handle_reset, handle_status, normalize_command,
+    register_hq_commands,
 };
 use super::dispatch::{TG_MESSAGE_CHARS, TG_PROGRESS_CHARS, dispatch_hq, tg_sender};
 use super::mailbox::run_mailbox_poller;
@@ -263,6 +264,7 @@ impl TgRelay {
             text_lower: &text_lower,
             threads: self.threads.clone(),
             caller: &caller,
+            hq_cfg: &self.hq_cfg,
         };
         if run_commands(&cmd_ctx).await {
             return;
@@ -371,7 +373,10 @@ impl TgRelay {
         text_clean: &str,
         text_lower: &str,
     ) -> bool {
-        if text_lower == "/cancel" || text_lower == "!cancel" {
+        if text_lower == "/cancel"
+            || text_lower == "!cancel"
+            || crate::chat_commands::is_login_command(text_lower)
+        {
             return false;
         }
         let busy = self
@@ -594,6 +599,7 @@ async fn run_commands(ctx: &CommandContext<'_>) -> bool {
         || handle_backend(ctx).await.unwrap_or(false)
         || handle_permission_pin(ctx).await.unwrap_or(false)
         || handle_help(ctx).await.unwrap_or(false)
+        || handle_login(ctx).await.unwrap_or(false)
         || handle_status(ctx).await.unwrap_or(false)
 }
 

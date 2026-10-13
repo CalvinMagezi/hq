@@ -40,7 +40,8 @@ export function SignInPrompt() {
           Open the HQ login link you were given, or paste the link here. Until then, screens show data saved on this device.
         </p>
         <p className="text-xs" style={{ color: 'var(--text-dim)' }}>
-          Lost the link? Whoever set up your HQ server can print it again with{' '}
+          Lost the link? Send <code className="font-mono whitespace-nowrap">/login</code> to your HQ bot on Telegram or
+          Discord. Otherwise, whoever set up your HQ server can print it again with{' '}
           <code className="font-mono whitespace-nowrap">sudo hq-join --print-link</code>. If HQ runs on your own computer, run{' '}
           <code className="font-mono whitespace-nowrap">hq web</code> there.
         </p>
