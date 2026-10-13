@@ -357,7 +357,7 @@ pub(crate) const TELEGRAM_LOGIN_LABEL: &str = "Telegram /login";
 pub(crate) const DISCORD_LOGIN_LABEL: &str = "Discord /login";
 
 /// Shown to an owner whose server can't build a link; the operator can still print one.
-pub(crate) const LOGIN_UNCONFIGURED_REPLY: &str = "HQ can't build your login link: it doesn't know its web address or has no web token. Ask whoever set up your HQ server to run this on it: sudo hq-join --print-link";
+pub(crate) const LOGIN_UNCONFIGURED_REPLY: &str = "HQ can't build your login link: it doesn't know its web address or has no web token. Ask whoever set up your HQ server for a new login link.";
 
 /// True for `/login` or `!login`.
 pub(crate) fn is_login_command(text_lower: &str) -> bool {
@@ -563,7 +563,7 @@ mod tests {
     fn login_explains_a_missing_link_to_the_owner_only() {
         assert_eq!(login_reply(true, true, || None), LoginReply::NotConfigured);
         assert_eq!(login_reply(true, false, || None), LoginReply::NotOwner);
-        assert!(LOGIN_UNCONFIGURED_REPLY.contains("sudo hq-join --print-link"));
+        assert!(LOGIN_UNCONFIGURED_REPLY.contains("new login link"));
     }
 
     fn login_config(vault: &std::path::Path, token: Option<&str>) -> hq_core::config::HqConfig {

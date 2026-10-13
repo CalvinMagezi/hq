@@ -41,10 +41,28 @@ Pick values with `hcloud server-type list` and `hcloud location list`. The commi
 ## Troubleshooting
 
 - **`status.json` does not say `ready`.** Read `/var/log/cloud-init-output.log`, fix the cause, and re-run `bash /root/bootstrap.sh --repo <repo> --ref <sha> --hostname <name>`. It is safe to run again.
-- **HQ opens but every panel shows 401, or asks to sign in.** The browser did not store the sign-in token. Open the link from `hq-join` again in a fresh tab, or paste it into the sign-in box. Lost the link? `sudo hq-join --print-link` prints a new one without touching the tailnet or restarting HQ: it runs `hq web link` as the `hq` user, which signs in one more device, and keeps working after the owner signs out everywhere. Servers older than release `main.98` need a link that points at `/vault#token=...` rather than `/#token=...`.
+- **HQ opens but every panel shows 401, or asks to sign in.** The browser did not store the sign-in token. Open the link from `hq-join` again in a fresh tab, or paste it into the sign-in box. Lost the link? See [Making a new login link](#making-a-new-login-link). Servers older than release `main.98` need a link that points at `/vault#token=...` rather than `/#token=...`.
 - **`tailscale serve` asks you to enable HTTPS.** Turn on MagicDNS and HTTPS certificates in the Tailscale admin console under DNS, then run `hq-join` again.
 - **SSH asks for a password or refuses the key.** Password login is off. Use the key whose public half you gave the form, with `ssh -i ~/.ssh/<key> root@<ip>` if it is not your default.
 - **The node expired.** Tailscale node keys expire after 180 days. Disable key expiry for the machine in the admin console, or reopen SSH from the form page and run `tailscale up` again.
+
+## Making a new login link
+
+Each link signs in one more device and keeps working after the owner signs out everywhere. Over SSH as root:
+
+```
+sudo hq-join --print-link
+```
+
+Updates replace the `hq` binary but not `hq-join`, so a server set up before `--print-link` existed doesn't have that flag. Run the command it wraps instead:
+
+```
+HQ_WEB_AUTH_TOKEN="$(sed -n 's/^HQ_WEB_AUTH_TOKEN=//p' /etc/hq/mcp.env)" runuser -u hq -- env HQ_CONFIG_PATH=/opt/hq/config.yaml HQ_VAULT_PATH=/opt/hq/.vault /usr/local/bin/hq web link
+```
+
+It reads the web token from `mcp.env` because `hq web link` only signs a device in on a server where sign-in is on.
+
+Never run `hq web link` as root directly: it refuses to open a database it does not own, so the daemon never meets root-owned files. Send the link privately; it is a password.
 
 ## The hosted wizard
 

@@ -141,8 +141,7 @@ export function SignInPrompt() {
           on this device.
         </p>
         <p className="text-xs" style={{ color: 'var(--text-dim)' }}>
-          None of those? Whoever set up your HQ server can print the link again with{' '}
-          <code className="font-mono whitespace-nowrap">sudo hq-join --print-link</code>. If HQ runs on your own computer, run{' '}
+          None of those? Ask whoever set up your HQ server for a new login link. If HQ runs on your own computer, run{' '}
           <code className="font-mono whitespace-nowrap">hq web link</code> there.
         </p>
         <CodeForm />
