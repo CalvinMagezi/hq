@@ -60,16 +60,62 @@ const CONFIG_BACKED_KEYS: &[&str] = &[
     "GEMINI_API_KEY",
 ];
 
-/// Copy config-only keys into the process env, never overriding a set var.
-fn export_config_keys(cfg: Option<&hq_core::config::HqConfig>) {
-    for &env in CONFIG_BACKED_KEYS {
+/// Variables `export_config_keys` set in this process. Those follow config.yaml on later calls;
+/// any other set variable belongs to the operator and is never touched.
+static EXPORTED: std::sync::Mutex<Vec<&'static str>> = std::sync::Mutex::new(Vec::new());
+
+fn exported() -> std::sync::MutexGuard<'static, Vec<&'static str>> {
+    EXPORTED
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+}
+
+/// Whether the variable `name` holds a key HQ copied from config.yaml, rather than one set in
+/// the environment HQ started with.
+pub fn exported_from_config(name: &str) -> bool {
+    exported().iter().any(|n| n.eq_ignore_ascii_case(name))
+}
+
+/// What `export_config_keys` should do to each variable: `Some` sets it, `None` removes it.
+fn export_plan(
+    cfg: &hq_core::config::HqConfig,
+    env: &dyn Fn(&str) -> Option<String>,
+    ours: &[&'static str],
+) -> Vec<(&'static str, Option<String>)> {
+    let mut plan = Vec::new();
+    for &name in CONFIG_BACKED_KEYS {
+        let mine = ours.contains(&name);
         // An empty variable counts as unset, matching how the key rules read it.
-        if std::env::var(env).is_ok_and(|v| !v.is_empty()) {
+        if !mine && env(name).is_some_and(|v| !v.is_empty()) {
             continue;
         }
-        if let Some(value) = config_key(cfg, env) {
-            // Still read from env by Cerebras/GroqProvider::from_env, credential_env lookups and child processes.
-            unsafe { std::env::set_var(env, value) };
+        let current = env(name);
+        match config_key(Some(cfg), name) {
+            // Writing the environment races other threads reading it, so only write on a change.
+            Some(value) if current.as_deref() == Some(value.as_str()) => {}
+            Some(value) => plan.push((name, Some(value))),
+            None if mine && current.is_some() => plan.push((name, None)),
+            None => {}
+        }
+    }
+    plan
+}
+
+/// Copy config-only keys into the process env, never overriding a variable the operator set.
+/// A key replaced in config.yaml (from the web Settings page) replaces the earlier copy.
+fn export_config_keys(cfg: Option<&hq_core::config::HqConfig>) {
+    // An unreadable config is not a reason to drop keys exported earlier.
+    let Some(cfg) = cfg else { return };
+    let mut ours = exported();
+    for (name, value) in export_plan(cfg, &|n| std::env::var(n).ok(), &ours) {
+        // Still read from env by Cerebras/GroqProvider::from_env, credential_env lookups and child processes.
+        match value {
+            Some(value) => unsafe { std::env::set_var(name, value) },
+            None => unsafe { std::env::remove_var(name) },
+        }
+        ours.retain(|n| *n != name);
+        if std::env::var_os(name).is_some() {
+            ours.push(name);
         }
     }
 }
@@ -793,6 +839,51 @@ mod kimi_code_key_tests {
             Some("sk-kimi-real".to_string())
         );
         assert_eq!(select_kimi_code_key(Some(""), Some("")), None);
+    }
+}
+
+#[cfg(test)]
+mod export_plan_tests {
+    use super::export_plan;
+    use hq_core::config::HqConfig;
+
+    fn anthropic(key: Option<&str>) -> HqConfig {
+        HqConfig {
+            anthropic_api_key: key.map(str::to_string),
+            ..HqConfig::default()
+        }
+    }
+
+    #[test]
+    fn an_exported_key_follows_config_and_an_operator_key_is_left_alone() {
+        let old = || Some("sk-old".to_string());
+        let env = |n: &str| (n == "ANTHROPIC_API_KEY").then(old).flatten();
+        let replaced = anthropic(Some("sk-new"));
+
+        assert_eq!(
+            export_plan(&replaced, &env, &[]),
+            Vec::<(&str, Option<String>)>::new(),
+            "a variable HQ did not set is the operator's"
+        );
+        assert_eq!(
+            export_plan(&replaced, &env, &["ANTHROPIC_API_KEY"]),
+            vec![("ANTHROPIC_API_KEY", Some("sk-new".to_string()))]
+        );
+        assert_eq!(
+            export_plan(&anthropic(None), &env, &["ANTHROPIC_API_KEY"]),
+            vec![("ANTHROPIC_API_KEY", None)],
+            "a key removed from config leaves the environment too"
+        );
+        assert_eq!(
+            export_plan(&replaced, &|_| None, &[]),
+            vec![("ANTHROPIC_API_KEY", Some("sk-new".to_string()))]
+        );
+        let same = |n: &str| (n == "ANTHROPIC_API_KEY").then(|| "sk-new".to_string());
+        assert_eq!(
+            export_plan(&replaced, &same, &["ANTHROPIC_API_KEY"]),
+            Vec::<(&str, Option<String>)>::new(),
+            "an unchanged key is not written again"
+        );
     }
 }
 

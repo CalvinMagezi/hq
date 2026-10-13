@@ -1,4 +1,5 @@
 import { hqJson } from './hqAuth'
+import type { SetupProviderId } from './setupApi'
 
 interface SettingsBackend {
   name: string
@@ -22,10 +23,18 @@ export interface AgentHostSettings {
   driver_no_progress_limit: number
 }
 
+/** `id` and `source` are present only for the providers whose key can be changed from Settings. */
+export interface ProviderKeyRow {
+  name: string
+  configured: boolean
+  id?: SetupProviderId
+  source?: 'config' | 'env' | null
+}
+
 export interface HqSettings {
   model: { active: string; default_model: string; relay_override: string | null; local_only: boolean }
   backends: { configured: boolean; primary: string; fallbacks: string[]; entries: SettingsBackend[] }
-  provider_keys: { name: string; configured: boolean }[]
+  provider_keys: ProviderKeyRow[]
   limits: {
     chat_turn_timeout_secs: number
     turn_ack_timeout_secs: number

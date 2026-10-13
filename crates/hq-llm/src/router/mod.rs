@@ -11,6 +11,7 @@ mod ledger_tests;
 #[cfg(test)]
 mod tests;
 
+pub use builder::exported_from_config;
 pub use health::ProviderHealth;
 pub(crate) use health::classify_error_for_telemetry;
 pub use types::{CostTier, RouteEntry, TaskHint};

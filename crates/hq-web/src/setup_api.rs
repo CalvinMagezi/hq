@@ -4,7 +4,7 @@
 //! These routes write a credential to disk, so they refuse to run unless the instance has
 //! a web token. There is deliberately no loopback exception: behind `tailscale serve` or a
 //! reverse proxy every request arrives from 127.0.0.1. They also refuse once a key exists,
-//! so setup cannot be used to swap keys later (that is Settings and `hq env`).
+//! so setup cannot be used to swap keys later; that is `provider_keys` (Settings) or `hq env`.
 //!
 //! The key lands in the config field the chat router reads for that provider, so whichever of
 //! OpenRouter, Anthropic or Google is chosen is the one that answers the next turn.
@@ -34,7 +34,8 @@ const MAX_KEY_CHARS: usize = 512;
 const STOCK_DEFAULT_MODEL: &str = "relay";
 
 /// Serializes the "no key yet" check with the config write, so two setups cannot both pass it.
-static SAVE_LOCK: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
+/// Settings' key replacement takes it too.
+pub(crate) static SAVE_LOCK: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
 
 #[derive(Deserialize)]
 pub(crate) struct KeyBody {
@@ -68,7 +69,7 @@ async fn load_config() -> Result<HqConfig, ApiError> {
         .map_err(|e| ApiError::internal(format!("could not read the HQ config: {e}")))
 }
 
-fn clean_key(raw: &str) -> Result<String, ApiError> {
+pub(crate) fn clean_key(raw: &str) -> Result<String, ApiError> {
     let key = raw.trim();
     if key.is_empty()
         || key.chars().count() > MAX_KEY_CHARS
@@ -102,8 +103,14 @@ fn client_for(provider: SetupProvider, key: &str) -> Box<dyn LlmProvider> {
     }
 }
 
-/// One-token completion. The error text is the provider's, with the key scrubbed.
-async fn try_key(provider: SetupProvider, key: &str) -> Result<(), String> {
+/// The provider's error text with the key taken out, so it can be shown and logged.
+pub(crate) fn scrub_key(error: &str, key: &str) -> String {
+    error.replace(key, "[key]")
+}
+
+/// One-token completion. The error text is the provider's and may contain the key: pass it
+/// through [`scrub_key`] before it goes anywhere.
+pub(crate) async fn try_key(provider: SetupProvider, key: &str) -> Result<(), String> {
     let request = ChatRequest {
         model: wire_model(provider).to_string(),
         messages: vec![ChatMessage {
@@ -121,9 +128,19 @@ async fn try_key(provider: SetupProvider, key: &str) -> Result<(), String> {
     let llm = client_for(provider, key);
     match tokio::time::timeout(TEST_TIMEOUT, llm.chat(&request)).await {
         Ok(Ok(_)) => Ok(()),
-        Ok(Err(e)) => Err(e.to_string().replace(key, "[key]")),
+        Ok(Err(e)) => Err(e.to_string()),
         Err(_) => Err("the provider did not answer in time".to_string()),
     }
+}
+
+/// The first model key: it also moves a stock or local default model onto that provider's
+/// cheap model, so the next turn has something to answer with.
+pub(crate) fn first_key_patch(config: &mut HqConfig, provider: SetupProvider, key: String) {
+    provider.set_key(config, key);
+    if config.default_model == STOCK_DEFAULT_MODEL || config.default_model.starts_with("ollama/") {
+        config.default_model = provider.cheap_model().to_string();
+    }
+    config.apply_cloud_key_flip(true);
 }
 
 pub(crate) async fn status_handler(
@@ -144,7 +161,7 @@ pub(crate) async fn test_handler(
     let key = clean_key(&body.api_key)?;
     Ok(Json(match try_key(body.provider, &key).await {
         Ok(()) => json!({"ok": true}),
-        Err(error) => json!({"ok": false, "error": error}),
+        Err(error) => json!({"ok": false, "error": scrub_key(&error, &key)}),
     }))
 }
 
@@ -162,13 +179,7 @@ pub(crate) async fn provider_handler(
     }
     let provider = body.provider;
     tokio::task::spawn_blocking(move || {
-        HqConfig::save_patch(|c| {
-            provider.set_key(c, key);
-            if c.default_model == STOCK_DEFAULT_MODEL || c.default_model.starts_with("ollama/") {
-                c.default_model = provider.cheap_model().to_string();
-            }
-            c.apply_cloud_key_flip(true);
-        })
+        HqConfig::save_patch(|c| first_key_patch(c, provider, key))
     })
     .await
     .map_err(ApiError::internal)?

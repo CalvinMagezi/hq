@@ -31,6 +31,17 @@ on your Tailscale network who has it can use your HQ.
    links to the right place. On a computer, tap **Mark done** once your phone is set up. **Hide**
    puts the list away on that device, and it goes away by itself once every step is done.
 
+## Changing your model key
+
+If a key runs out of credit, is revoked, or you want to add another provider, open **Settings**
+and find **Provider keys**. Press **Replace** next to the provider (or **Add** if it has no key
+yet), paste the new key and press **Test and save**. HQ checks the key with the provider first and
+keeps the old one if the new one doesn't work. Your next message uses the new key, and the model
+you chose stays the same.
+
+A provider marked **Set by the server's environment** gets its key from the server's own setup,
+so it can't be changed from the app. Ask whoever set up your server.
+
 ## Putting HQ on your phone's home screen
 
 - **iPhone (Safari):** open HQ, tap **Share**, then **Add to Home Screen**.
@@ -105,6 +116,7 @@ Otherwise, ask the person who set up your server. They can print it again by run
 | You see | What to do |
 |---------|------------|
 | **Can't reach your HQ** | Switch Tailscale on, on this device, and tap **Try again**. If Tailscale is on, wait a minute (HQ may be updating). Still nothing: check your HQ server shows as connected in the Tailscale admin console, and if it doesn't, ask whoever set it up. |
+| A chat reply says the key was refused, is out of credit or hit a limit | Replace the key: see [Changing your model key](#changing-your-model-key). |
 | **This device is offline** | You have no internet. HQ shows what it saved and reconnects by itself. |
 | **Sign in to HQ** | Paste your login link into the box. Lost it? See [If you're signed out](#if-youre-signed-out). |
 | Your Telegram or Discord bot doesn't answer | Open **Settings**, **Chat apps**. The card shows whether the bot is running and paired, and lets you check the token, pair again or restart HQ. |

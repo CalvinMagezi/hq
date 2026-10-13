@@ -18,6 +18,7 @@ mod oauth;
 mod openrouter_usage_api;
 mod origin;
 mod profile_gate;
+mod provider_keys;
 mod restart_api;
 mod security_headers;
 mod session_driver;
@@ -263,6 +264,10 @@ pub fn create_router(state: Arc<WsState>) -> Router {
         .route("/api/vault-signals", get(vault_api::signals_handler))
         .route("/api/tree", get(api::tree_handler))
         .route("/api/settings", get(settings_api::settings_handler))
+        .route(
+            "/api/settings/provider-key",
+            post(provider_keys::replace_handler),
+        )
         .route("/api/setup/status", get(setup_api::status_handler))
         .route("/api/setup/test", post(setup_api::test_handler))
         .route("/api/setup/provider", post(setup_api::provider_handler))

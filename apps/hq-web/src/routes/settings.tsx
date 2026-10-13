@@ -9,6 +9,7 @@ import { availableTimeZones, deviceTimeZone, setClockZone, useClockZone, zoneCit
 import { formatUsd, openrouterUsageQuery } from '~/lib/openrouterUsageApi'
 import { forecastQuery } from '~/lib/usageApi'
 import { DevicesSection } from '~/components/settings/DevicesSection'
+import { ProviderKeysSection } from '~/components/settings/ProviderKeysSection'
 import {
   SCOPE_CHOICES,
   armConnector,
@@ -328,11 +329,7 @@ function SettingsBody({ s }: { s: HqSettings }) {
       <OpenRouterSpendSection />
       <ModelSection s={s} />
       <BackendsSection s={s} />
-      <Section id="keys" title="Provider keys">
-        {s.provider_keys.map((k) => (
-          <Row key={k.name} label={k.name}><Flag on={k.configured} onLabel="Configured" offLabel="Not set" /></Row>
-        ))}
-      </Section>
+      <ProviderKeysSection rows={s.provider_keys} />
       <Section id="limits" title="Limits">
         <Row label="Chat turn timeout">{formatSeconds(s.limits.chat_turn_timeout_secs)}</Row>
         <Row label="Relay ack window">{formatSeconds(s.limits.turn_ack_timeout_secs)}</Row>
@@ -411,7 +408,7 @@ function SettingsPage() {
         <header className="flex items-start justify-between gap-4 mb-6">
           <div>
             <h1 className="text-3xl font-semibold tracking-tight text-neutral-50" style={{ fontFamily: 'var(--font-heading)' }}>Settings</h1>
-            <p className="mt-1 text-sm text-neutral-400 max-w-prose">The clock zone, devices, chat apps and the Claude connector can be managed here. Everything else is a read-only view of the running HQ configuration, and secrets are never shown.</p>
+            <p className="mt-1 text-sm text-neutral-400 max-w-prose">The clock zone, devices, chat apps, model keys and the Claude connector can be managed here. Everything else is a read-only view of the running HQ configuration, and secrets are never shown.</p>
           </div>
           <button type="button" onClick={() => refetch()} className="hq-icon-btn" aria-label="Reload settings" title="Reload settings">
             <RefreshCw className={`w-4 h-4 ${isFetching ? 'animate-spin' : ''}`} />
