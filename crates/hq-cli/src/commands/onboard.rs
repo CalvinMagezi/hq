@@ -426,30 +426,20 @@ async fn step_relay_setup(config: &HqConfig) -> Result<StepResult> {
     let telegram_token = prompt_secret("    Bot token (Enter to skip): ")?;
 
     if !discord_token.is_empty() || !telegram_token.is_empty() {
-        // Update config with relay tokens
-        let config_path = HqConfig::config_file_path();
-        let existing = std::fs::read_to_string(&config_path).unwrap_or_default();
-        let mut content = existing;
-
-        if !content.contains("relay:") {
-            content.push_str("\nrelay:\n");
-        }
-        if !discord_token.is_empty() && !content.contains("discord_token:") {
-            content.push_str(&format!(
-                "  discord_token: \"{}\"\n",
-                yaml_escape(&discord_token)
-            ));
-        }
-        if !telegram_token.is_empty() && !content.contains("telegram_token:") {
-            content.push_str(&format!(
-                "  telegram_token: \"{}\"\n",
-                yaml_escape(&telegram_token)
-            ));
-        }
-
-        hq_core::fs_private::write_private(&config_path, content)?;
+        // The enable flags matter as much as the tokens: a relay with a token but its flag off
+        // never starts, and says nothing about it.
+        HqConfig::save_patch(|c| {
+            if !discord_token.is_empty() {
+                c.relay.discord_token = Some(discord_token.clone());
+                c.relay.discord_enabled = true;
+            }
+            if !telegram_token.is_empty() {
+                c.relay.telegram_token = Some(telegram_token.clone());
+                c.relay.telegram_enabled = true;
+            }
+        })?;
         println!();
-        println!("    Relay config saved. Start relays with: hq start relay");
+        println!("    Relay config saved. Restart HQ so the relays start with it.");
         println!();
         println!("    A relay refuses every message until it has an owner. Either set");
         println!("    relay.telegram_authorized_chat_id / relay.discord_allowed_user_ids,");
@@ -677,15 +667,6 @@ Run `hq onboard --reset` to start fresh.
 }
 
 // ── Prompt helpers ──────────────────────────────────────────────────────────
-
-/// Escape a string for safe inclusion in a YAML double-quoted value.
-/// Handles double quotes, backslashes, and newlines.
-fn yaml_escape(s: &str) -> String {
-    s.replace('\\', "\\\\")
-        .replace('"', "\\\"")
-        .replace('\n', "\\n")
-        .replace('\r', "\\r")
-}
 
 fn prompt_line(prompt: &str) -> Result<String> {
     let mut stdout = io::stdout();

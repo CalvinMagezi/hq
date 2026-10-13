@@ -40,6 +40,15 @@ function hqToken(): string | null {
   return browserToken()
 }
 
+/** Owners paste whatever they were sent: the bare token or the whole login link. */
+function tokenFromPaste(raw: string): string {
+  const text = raw.trim()
+  const marker = `${LINK_PARAM}=`
+  const at = text.lastIndexOf(marker)
+  if (at < 0) return text
+  return text.slice(at + marker.length).split('&')[0].trim()
+}
+
 /**
  * Store the token from a `#token=` link right away. The index route redirects before any request
  * runs, and the redirect drops the fragment, so waiting for the first fetch to read it loses it.
@@ -50,7 +59,7 @@ export function adoptLinkToken(): void {
 
 /** Store a pasted token the way a `#token=` link does, replacing any older one. */
 export function saveWebToken(raw: string): boolean {
-  const token = raw.trim()
+  const token = tokenFromPaste(raw)
   if (!token) return false
   try {
     localStorage.setItem(STORAGE_KEY, token)
