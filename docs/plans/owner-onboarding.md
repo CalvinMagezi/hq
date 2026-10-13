@@ -53,6 +53,7 @@ over one link, the owner never needs them again.
 | 11 | Changing the model key after setup means `hq env` or editing `config.yaml`. | `apps/hq-web/src/routes/setup.tsx:43` |
 | 12 | Tailscale node keys expire after 180 days. Fixing it needs the operator back on SSH. | `docs/HETZNER.md:47,69` |
 | 13 | Rotating a leaked token needs root: edit `mcp.env`, then restart. | `docs/HETZNER.md:66` |
+| 14 | Tailscale switched off on the device. The phone is still online, so the cached app opens with saved data and only a small amber "saved" label in the header. Nothing points at Tailscale. This is what an owner actually hit first. | `apps/hq-web/src/routes/__root.tsx:330-332` |
 
 ## The target journey
 
@@ -150,6 +151,25 @@ invalidates the old one. Every other device gets the banner.
   run only.
 - Chat app cards can replace a token, re-pair, or disconnect.
 
+## Situations an owner can run into
+
+Each row is a situation the owner might hit later, how HQ should tell them, and what gets them
+out. The last column is the slice that makes it self-service.
+
+| Situation | What the owner sees | Way out | Slice |
+|-----------|---------------------|---------|-------|
+| Tailscale off on this device | "Can't reach your HQ" banner: check Tailscale first | Switch Tailscale on, tap Try again | 7 |
+| Device has no internet | "This device is offline" banner, saved data | Reconnects by itself | 7 |
+| Server restarting or updating | Same banner for under a minute, then live again | Wait. Restart notices also go to the paired chat | 7 |
+| Server node expired or offline in Tailscale | Banner persists; server shows as disconnected in the admin console | Prevented by disabling key expiry (owner guide). Otherwise the operator re-adds SSH and runs `tailscale up` | 0, guide |
+| New device, cleared storage, or home-screen app with its own storage | "Sign in to HQ" box | Enter a code from a signed-in device, scan its QR, send `/login` to the bot, or paste the link | 1, 4 |
+| Lost the link and no other device or chat | "Sign in to HQ" box | Operator runs `sudo hq-join --print-link` | 0 |
+| Link leaked, or a phone was lost | Nothing yet | Sign out everywhere from Settings (new token) | 5 |
+| Bot says nothing | Chat app card shows the relay status or error; an unpaired bot answers `/start` with how to pair | Fix from the card: replace token, re-pair, restart | 2, 3 |
+| Want a second chat app or a new phone number | Chat app card | Pair a different account | 2, 3 |
+| Model key out of credit or revoked | Chat replies show the provider's error | Replace the key in Settings | 6 |
+| Operator unreachable | Everything above except an expired server node, a deleted server or billing | Those three stay with the operator | |
+
 ## Security
 
 - `/api/auth/exchange` is the only new unauthenticated surface. Codes are high entropy (at least
@@ -195,3 +215,4 @@ Each slice is one PR and leaves the product better on its own.
 | 4 | `/login` and `!login`: owner and DM only, with the banner copy updated to mention them. | 1, 2 |
 | 5 | Token rotation from Settings, after open decision 1. | 13 |
 | 6 | Replace the model key from Settings. | 11 |
+| 7 | Reachability banner: tell "Tailscale off or server unreachable" apart from "signed out" and from "device offline". | 14 |
