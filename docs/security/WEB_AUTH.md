@@ -116,8 +116,8 @@ with mode 0600 owned by the service user.
 
 ## Web token: headers only
 
-`web_auth_token` (env `HQ_WEB_AUTH_TOKEN`) guards `/ws` and `/api/*`. It is
-accepted only as `Authorization: Bearer`. URL tokens (`?token=`) are refused,
+`web_auth_token` (env `HQ_WEB_AUTH_TOKEN`) guards `/ws` and `/api/*`, together with
+the device tokens described below. Both are accepted only as `Authorization: Bearer`. URL tokens (`?token=`) are refused,
 because URLs end up in browser history, proxy logs and `Referer` headers.
 
 - **Chat socket.** Browsers cannot set headers on a WebSocket, so the PWA calls
@@ -148,12 +148,15 @@ because URLs end up in browser history, proxy logs and `Referer` headers.
   link and keeps it in local storage. The fragment never reaches the server.
   Old `?token=` links still work in the PWA but have already been logged by
   whatever proxy served the page, so rotate a token that was shared that way.
-  When the server answers a request with 401 (no token here, or a rotated one),
+  When the server answers a request with 401 (no token here, or one that was signed out),
   the PWA shows a "Sign in to HQ" banner with a field to paste the token, which
   it stores the same way. Copies the service worker serves from its cache never
   trigger it.
 - **`/login` from a chat.** The Telegram and Discord bots answer `/login` (and
-  `!login`) with the `#token=` link, so the token lands in that chat's history.
+  `!login`) with a `#token=` link carrying a new device token ("Telegram /login" or
+  "Discord /login" in Settings, Devices), so that token lands in that chat's history.
+  It is minted only after the owner and private-chat checks pass, and only on a server
+  that already asks for a sign-in, so `/login` never turns sign-in on.
   That chat already drives the whole agent, so it gains no new reach. Only the
   owner gets the link, only in a private chat or DM, never a guest or a Discord
   family user, and the reply is never mirrored into HQ's thread store. Telegram
@@ -170,9 +173,11 @@ because URLs end up in browser history, proxy logs and `Referer` headers.
   config does not count. Lite does not serve it.
 - **Signing in another device.** Settings, Devices on a signed-in browser calls
   `POST /api/auth/device-code` (behind the token) and shows a one-time code and
-  a QR code of the login link. The QR code is the token itself, drawn in the
-  browser; the server never sends it anywhere. On the new device the banner
-  trades the code at `POST /api/auth/exchange` for the token. Details below.
+  a QR code of `<origin>/vault#code=<code>`. The QR code carries the same
+  one-time code, never a token: the PWA takes `#code=` out of the address bar
+  before the first redirect and the banner trades it. On the new device the
+  banner trades the code at `POST /api/auth/exchange` for a device token of its
+  own. Details below.
 
 ### `/api/auth/exchange`, the one unauthenticated `/api` route
 
@@ -194,13 +199,85 @@ neither call it nor read its answer.
 - The real bound is global: 20 wrong codes from anyone within 10 minutes burn
   the pending code and answer `429` to everyone until the window passes. That
   is at most 20 guesses per code against 31^10.
-- Both routes answer `404` when no web token is set, since there is nothing to
-  hand out, and both send `Cache-Control: no-store`.
+- Both routes answer `404` when the server asks for no sign-in (no configured
+  token and no device token), since there is nothing to hand out, and both send
+  `Cache-Control: no-store`.
 - A successful exchange is logged (without the code or the token) and the owner
   gets a "A new device signed in to HQ" notice in the inbox, the chat relay and
   Web Push (when each is set up).
-- The token handed out is the shared web token, not a per-device one, so
-  signing one device out means rotating it for all.
+- The token handed out is a new device token ("Signed in with a code"), never
+  the configured one, so that device can be signed out on its own.
+
+### Device tokens and signing out
+
+Every sign-in HQ hands out is its own device token: the exchange, `/login`,
+`hq web link` (and `sudo hq-join --print-link`, which runs it) and "Sign out
+everywhere". A device token is `hqw_` plus 64 hex characters (two v4 UUIDs). It
+is returned once; the `web_device_tokens` table keeps only its SHA-256 (hex),
+a label, when it was made and when it was last used (updated at most every five
+minutes, so a request is not a write). A presented Bearer secret is valid when:
+
+- it equals the configured token (constant-time compare) and that token's hash is
+  not in `web_revoked_tokens`; or
+- it starts with `hqw_` and its SHA-256 matches a row that has not expired. The
+  lookup is by hash, so it leaks no timing an attacker can use without a preimage.
+
+A database error refuses the secret. The checks live in one place,
+`WsState::web_credential` (`crates/hq-web/src/auth.rs`), and the matched
+credential rides in the request's extensions so the devices list can mark
+"this device".
+
+**Whether sign-in is on at all** (`WsState::web_auth_enabled`) means a configured
+token exists, signed out or not, or any device token row does. A signed-out
+configured token still counts, so signing out every device never leaves the API
+open; the middleware then refuses everything until someone mints a new token with
+`hq web link` or `/login`. First-run setup, chat apps, restart, the origin guard's
+token-less host check and the device routes all read this one function. A database
+error counts as "on". An instance with no configured token and no device rows
+behaves exactly as before. `check_web_bind` still looks only at the configured
+token, so a non-loopback bind still needs one at startup.
+
+**Routes**, all behind the sign-in, the origin guard and (for writes)
+`X-HQ-Client`, all `404` when sign-in is off:
+
+- `GET /api/auth/devices`: id, label, created and last-used times, whether it is
+  the caller, whether the configured token still works. Never a token or a hash.
+- `DELETE /api/auth/devices/{id}`: signs one device out. It also closes every open
+  chat socket and voids socket tickets; devices still signed in reconnect.
+- `POST /api/auth/rotate` ("Sign out everywhere"): in one SQLite transaction it
+  deletes every device token, records the configured token's hash as signed out,
+  and mints one token labelled "Sign out everywhere", which it returns
+  (`Cache-Control: no-store`). It then voids the pending device code and socket
+  tickets, closes every open chat socket (an epoch every socket watches), and
+  notifies the owner without the token. The PWA stores the new token and reloads.
+
+**The configured token after a sign-out everywhere.** It is refused from then on.
+Revocation is stored as the token's hash, not a flag, so an operator who puts a new
+value in `HQ_WEB_AUTH_TOKEN` (or `web_auth_token`) turns the configured token back
+on by design. `hq-join --print-link` no longer prints the bootstrap token when the
+installed `hq` has `web link`: it runs
+`runuser -u hq -- env HQ_CONFIG_PATH=... HQ_VAULT_PATH=... hq web link`, passing the
+bootstrap token in the environment so the CLI knows sign-in is on, and fails rather
+than print a token that may be signed out. `hq web link` refuses to open the
+database unless the vault's database (or `_data`, or the vault) belongs to the
+user running it, so root never creates WAL files the service cannot write.
+
+**Local callers that used the configured token:**
+
+- `hq notify-restart` (run by the updater as the service user) sends the configured
+  token while it is not signed out. After that it mints a device token labelled
+  "Restart notice" that expires in 60 seconds, uses it for the one loopback call,
+  and deletes it. It opens the database only as its owner.
+- `hq web` and `hq web --json` print the configured token while it works; once it is
+  signed out they mint an "Operator link" device token for the printed link, or
+  print none when run by a user who does not own the vault.
+- `hq chat --server` still sends `HQ_WEB_AUTH_TOKEN` (or, for the local daemon, the
+  configured token). It does not open the database, since any user can run it. After
+  a sign-out everywhere, set `HQ_WEB_AUTH_TOKEN` to the token from an `hq web link`
+  link; the connect error says so.
+- `hq connector` and `mcp_connector` only check that a configured token exists. The
+  consent page signs the owner in through the browser's own token, so a device token
+  works there.
 - **Chat apps and restart.** `POST`/`DELETE /api/chat-apps/{platform}`,
   `.../verify`, `.../pair` and `POST /api/system/restart` refuse to run unless a
   web token is configured, like first-run setup: behind `tailscale serve` every
@@ -302,6 +379,11 @@ origin it is served from is missing from this list.
   so set `web_auth_token` on shared machines.
 - The token lives in the PWA's local storage, so script injection into the PWA
   would expose it. Vault HTML is sanitised with DOMPurify before rendering.
+- Any valid token can sign every other device out, the owner's included. That
+  holder could already drive the whole agent; the owner gets back in with `/login`
+  or a new operator link and signs out everywhere again.
+- Signing one device out closes every open chat socket, not only that device's,
+  because sockets are not tied to a device. The others reconnect at once.
 - Tested with Axum request-level tests (`crates/hq-web/src/origin.rs`,
   `auth.rs`, `lib.rs`). They send the `Origin` and `Host` headers that Chrome,
   Firefox and Safari send, but no real browser runs them.

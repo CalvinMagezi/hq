@@ -1,6 +1,6 @@
 # Owner onboarding: from a provisioned server to a signed-in phone and a paired chat
 
-Status: slices 0, 1, 2, 3, 4, 6, 7 and 8 built; 5 open. This doc maps the journey for an **owner** who has never used a
+Status: all slices (0 to 8) built. This doc maps the journey for an **owner** who has never used a
 terminal. An **operator** provisions an HQ server for them on Hetzner (`docs/HETZNER.md`), and the
 server joins the owner's own Tailscale tailnet. Today the owner can't sign in again or connect
 Telegram or Discord without the operator's root shell. The target is that, once the operator hands
@@ -142,8 +142,17 @@ code from a device that is already signed in. `hq web --json` stays only as the 
 
 ### Stage 5: rotate the token (owner)
 
-Settings, Security, **Sign out everywhere** issues a new token, signs this device in with it, and
+Settings, Devices, **Sign out everywhere** issues a new token, signs this device in with it, and
 invalidates the old one. Every other device gets the banner.
+
+Built (slice 5): every sign-in (code, QR code, `/login`, `hq web link`) now mints its own device
+token, kept in the database only as a SHA-256. Devices lists them with **Sign out** per row.
+**Sign out everywhere** (`POST /api/auth/rotate`) deletes every device token, records the
+configured token's hash as signed out, voids the pending code, closes open chat sockets, and
+returns one new token to the caller. The QR code now carries the one-time code (`#code=`) instead
+of a token. `sudo hq-join --print-link` runs `hq web link` as the `hq` user, so the operator can
+always mint a working link. Details: "Device tokens and signing out" in
+`docs/security/WEB_AUTH.md`.
 
 ### Stage 6: change things later (owner)
 
@@ -164,7 +173,7 @@ out. The last column is the slice that makes it self-service.
 | Server node expired or offline in Tailscale | Banner persists; server shows as disconnected in the admin console | Prevented by disabling key expiry (owner guide). Otherwise the operator re-adds SSH and runs `tailscale up` | 0, guide |
 | New device, cleared storage, or home-screen app with its own storage | "Sign in to HQ" box | Enter a code from a signed-in device, scan its QR, send `/login` to the bot, or paste the link | 1, 4 |
 | Lost the link and no other device or chat | "Sign in to HQ" box | Operator runs `sudo hq-join --print-link` | 0 |
-| Link leaked, or a phone was lost | Nothing yet | Sign out everywhere from Settings (new token) | 5 |
+| Link leaked, or a phone was lost | Settings, Devices lists every sign-in with its last use | Sign that device out, or sign out everywhere (new token for this device) | 5 |
 | Bot says nothing | Chat app card shows the relay status or error; an unpaired bot answers `/start` with how to pair | Fix from the card: replace token, re-pair, restart | 2, 3 |
 | Want a second chat app or a new phone number | Chat app card | Pair a different account | 2, 3 |
 | Model key out of credit or revoked | Chat replies show the provider's error | Replace the key in Settings | 6 |
@@ -187,7 +196,10 @@ out. The last column is the slice that makes it self-service.
 
 ## Open decisions
 
-1. **Where the web token lives, for rotation.** `HQ_*` env vars are merged after `config.yaml`
+1. **Where the web token lives, for rotation.** *Resolved (slice 5): the second option. The env
+   token stays the bootstrap secret; signing out everywhere records its hash in
+   `web_revoked_tokens`, and new device tokens live hashed in `web_device_tokens`. An operator who
+   sets a new env value turns the configured token back on.* `HQ_*` env vars are merged after `config.yaml`
    (`crates/hq-core/src/config/mod.rs:601-605`). A token rotated into `config.yaml` would be
    hidden by `HQ_WEB_AUTH_TOKEN` in root-owned `mcp.env`. The options are:
    - an `hq`-owned token file under `_data` that overrides the env var, with bootstrap writing
@@ -196,7 +208,9 @@ out. The last column is the slice that makes it self-service.
      auth accepts the newest DB token once one exists.
 
    The second also makes per-device tokens possible later.
-2. **Per-device tokens.** The device-code exchange could mint a token per device instead of
+2. **Per-device tokens.** *Resolved (slice 5): built. The exchange, `/login`, `hq web link` and
+   rotation each mint a device token, and a single device can be signed out.* The device-code
+   exchange could mint a token per device instead of
    handing out the one shared token. That allows signing out one lost phone. It's more work, and
    it isn't needed to unblock owners.
 3. **Restart on non-systemd installs.** Docker and plain `hq start` have no supervisor to
