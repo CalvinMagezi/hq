@@ -44,7 +44,7 @@ pub(crate) struct KeyBody {
     api_key: String,
 }
 
-fn token_configured(state: &WsState) -> bool {
+pub(crate) fn token_configured(state: &WsState) -> bool {
     state
         .web_auth_token
         .as_deref()

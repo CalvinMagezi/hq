@@ -585,11 +585,16 @@ fn main() -> Result<()> {
         load_env_file(&std::path::PathBuf::from(".env"));
     }
     apply_config_flag()?;
+    hq_core::daemon_restart::process_started_at();
 
-    tokio::runtime::Builder::new_multi_thread()
+    let result = tokio::runtime::Builder::new_multi_thread()
         .enable_all()
         .build()?
-        .block_on(async_main())
+        .block_on(async_main());
+    if result.is_ok() && hq_core::daemon_restart::restart_requested() {
+        std::process::exit(hq_core::daemon_restart::RESTART_EXIT_CODE);
+    }
+    result
 }
 
 async fn async_main() -> Result<()> {

@@ -4,6 +4,7 @@ import { useMemo, type ReactNode } from 'react'
 import { AlertCircle, Loader2, RefreshCw } from 'lucide-react'
 import { fetchSettings, formatSeconds, type HqSettings } from '~/lib/settingsApi'
 import { relTime } from '~/lib/time'
+import { ChatAppsSection } from '~/components/settings/ChatAppsSection'
 import { availableTimeZones, deviceTimeZone, setClockZone, useClockZone, zoneCity } from '~/lib/clock'
 import { formatUsd, openrouterUsageQuery } from '~/lib/openrouterUsageApi'
 import { forecastQuery } from '~/lib/usageApi'
@@ -347,6 +348,7 @@ function SettingsBody({ s }: { s: HqSettings }) {
       </Section>
       <CodingAgentsSection host={s.agent_host} />
       <ConnectorSection />
+      <ChatAppsSection />
       <Section id="integrations" title="Integrations">
         {s.integrations.remote_mcp.length === 0 && <Row label="Remote MCP servers">none</Row>}
         {s.integrations.remote_mcp.map((m) => (

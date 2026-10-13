@@ -53,6 +53,34 @@ your own devices, and press **Hide** when you're done. When a device signs in, H
 inbox (and on your phone, if notifications are on). If you didn't expect that, tell whoever runs
 your server.
 
+## Connect Telegram or Discord
+
+You can talk to HQ from Telegram or Discord as well as the web app. Everything happens in HQ:
+open **Settings** and scroll to **Chat apps**.
+
+**Telegram** (about 3 minutes)
+
+1. In Telegram, open [@BotFather](https://t.me/BotFather) and send `/newbot`. Give your bot a
+   name, then a username that ends in `bot`. BotFather sends you a token.
+2. Paste the token into the Telegram card and press **Check token**. HQ shows your bot's name.
+3. Press **Save and restart**. HQ restarts by itself, which takes a few seconds.
+4. Press **Pair my Telegram**, then **Open in Telegram**, then **Start**. HQ now answers you, and
+   only you, in that chat.
+
+**Discord** (about 5 minutes)
+
+1. Open the [Discord developer portal](https://discord.com/developers/applications), choose
+   **New Application**, open **Bot** and press **Reset Token**. Copy the token.
+2. On the same page, turn on **Message Content Intent** and save. Without it the bot can't read
+   your messages.
+3. Paste the token into the Discord card, press **Check token**, then **Save and restart**.
+4. Use **Open the invite link** to add the bot to a server you own.
+5. Press **Pair my Discord** and send the bot the `!pair` message the card shows, in a direct
+   message.
+
+A pairing code lasts 15 minutes. If it runs out, press the pair button again. If the card says HQ
+can't restart itself, ask the person who set up your server to restart it.
+
 ## If you're signed out
 
 HQ shows a **Sign in to HQ** box. Paste your login link there, or enter a code from a device
@@ -75,4 +103,5 @@ Otherwise, ask the person who set up your server. They can print it again by run
 | **Can't reach your HQ** | Switch Tailscale on, on this device, and tap **Try again**. If Tailscale is on, wait a minute (HQ may be updating). Still nothing: check your HQ server shows as connected in the Tailscale admin console, and if it doesn't, ask whoever set it up. |
 | **This device is offline** | You have no internet. HQ shows what it saved and reconnects by itself. |
 | **Sign in to HQ** | Paste your login link into the box. Lost it? See [If you're signed out](#if-youre-signed-out). |
+| Your Telegram or Discord bot doesn't answer | Open **Settings**, **Chat apps**. The card shows whether the bot is running and paired, and lets you check the token, pair again or restart HQ. |
 | A page won't open at all, not even saved data | Same as "Can't reach your HQ": Tailscale first. |

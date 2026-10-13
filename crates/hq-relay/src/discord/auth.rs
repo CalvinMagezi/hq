@@ -12,7 +12,7 @@ fn is_discord_user_allowed(user_id: u64, allowed: &[u64]) -> bool {
 /// on first use: with neither an allowlist nor a paired owner, nobody is
 /// authorized.
 pub(super) fn discord_auth_owner_path(vault_path: &std::path::Path) -> std::path::PathBuf {
-    vault_path.join("_system").join(".discord-auth-user")
+    hq_core::discord_access::owner_file(vault_path)
 }
 
 /// Whether a Discord user (chat message author or button-click actor) may
