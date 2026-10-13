@@ -107,7 +107,7 @@ const NOT_CONNECTED: &str = "Connect the bot first, then pair.";
 
 /// Refuses writes on an instance without a web token.
 pub(crate) fn require_web_token(state: &WsState) -> Result<(), ApiError> {
-    if crate::setup_api::token_configured(state) {
+    if state.web_auth_enabled() {
         return Ok(());
     }
     Err(ApiError::Forbidden(NO_WEB_TOKEN.into()))
@@ -226,7 +226,7 @@ pub(crate) async fn status_handler(
     let running = state.hq_config.as_deref().map(|c| &c.relay);
     let (can_restart, restart_hint) = restart_json(&state);
     let mut body = json!({
-        "writable": crate::setup_api::token_configured(&state),
+        "writable": state.web_auth_enabled(),
         "can_restart": can_restart,
         "restart_hint": restart_hint,
         "started_at": hq_core::daemon_restart::process_started_at(),

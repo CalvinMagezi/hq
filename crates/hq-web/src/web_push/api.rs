@@ -60,9 +60,18 @@ pub(crate) async fn status_handler(
     })))
 }
 
+/// The signed-in device a request came from, so its subscriptions go when it is signed out.
+fn device_id(credential: Option<&axum::Extension<crate::auth::WebCredential>>) -> Option<&str> {
+    match credential.map(|axum::Extension(c)| c) {
+        Some(crate::auth::WebCredential::Device(id)) => Some(id),
+        _ => None,
+    }
+}
+
 /// `POST /api/notifications/push/subscribe`: saves this browser's subscription.
 pub(crate) async fn subscribe_handler(
     State(state): State<Arc<WsState>>,
+    credential: Option<axum::Extension<crate::auth::WebCredential>>,
     headers: HeaderMap,
     Json(req): Json<SubscribeRequest>,
 ) -> Result<Json<Value>, ApiError> {
@@ -81,6 +90,7 @@ pub(crate) async fn subscribe_handler(
         &B64.encode(&p256dh),
         &B64.encode(&auth),
         user_agent.as_deref(),
+        device_id(credential.as_ref()),
     )
     .map_err(ApiError::internal)?;
     Ok(Json(json!({ "subscribed": true })))
@@ -234,6 +244,70 @@ mod tests {
             json!({"endpoint": "https://fcm.googleapis.com/fcm/send/x", "keys": browser_keys()});
         let (status, _) = call(&app, "POST", "/api/notifications/push/subscribe", Some(sub)).await;
         assert_eq!(status, StatusCode::CONFLICT);
+    }
+
+    #[tokio::test]
+    async fn a_subscription_remembers_the_device_that_saved_it() {
+        let vault = tempfile::TempDir::new().unwrap();
+        let mut state = WsState::new(vault.path().to_path_buf(), None);
+        state.web_auth_token = Some("operator-env-token".into());
+        let cfg = hq_core::config::WebPushConfig {
+            enabled: true,
+            ..Default::default()
+        };
+        state.configure_web_push(&cfg).unwrap();
+        let state = Arc::new(state);
+        let app = crate::create_router(state.clone());
+        let device = hq_db::web_auth::mint(&state.db, "Signed in with a code", 1, None).unwrap();
+        let sub =
+            |endpoint: &str| json!({"endpoint": endpoint, "keys": browser_keys()}).to_string();
+        for (bearer, endpoint) in [
+            (
+                device.token.as_str(),
+                "https://fcm.googleapis.com/fcm/send/phone",
+            ),
+            (
+                "operator-env-token",
+                "https://fcm.googleapis.com/fcm/send/laptop",
+            ),
+        ] {
+            let req = Request::post("/api/notifications/push/subscribe")
+                .header("host", "127.0.0.1:5678")
+                .header("authorization", format!("Bearer {bearer}"))
+                .header("x-hq-client", "web")
+                .header("content-type", "application/json")
+                .body(Body::from(sub(endpoint)))
+                .unwrap();
+            assert_eq!(
+                app.clone().oneshot(req).await.unwrap().status(),
+                StatusCode::OK
+            );
+        }
+        let stored: Vec<(String, Option<String>)> = state
+            .db
+            .with_conn(|c| {
+                let mut s = c.prepare(
+                    "SELECT endpoint, device_id FROM push_subscriptions ORDER BY endpoint",
+                )?;
+                let rows = s
+                    .query_map([], |r| Ok((r.get(0)?, r.get(1)?)))?
+                    .collect::<rusqlite::Result<Vec<_>>>()?;
+                Ok(rows)
+            })
+            .unwrap();
+        assert_eq!(
+            stored,
+            vec![
+                (
+                    "https://fcm.googleapis.com/fcm/send/laptop".to_string(),
+                    None
+                ),
+                (
+                    "https://fcm.googleapis.com/fcm/send/phone".to_string(),
+                    Some(device.id.clone())
+                ),
+            ]
+        );
     }
 
     #[tokio::test]

@@ -53,6 +53,23 @@ pub fn copy_private(from: &Path, to: &Path) -> io::Result<u64> {
     Ok(data.len() as u64)
 }
 
+/// Whether `path` belongs to this process's effective user. Files another user creates next to
+/// a database (SQLite's WAL and shared-memory files) can lock its owner out.
+pub fn owned_by_current_user(path: &Path) -> io::Result<bool> {
+    let meta = std::fs::metadata(path)?;
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::MetadataExt;
+        // SAFETY: geteuid has no preconditions.
+        Ok(meta.uid() == unsafe { libc::geteuid() })
+    }
+    #[cfg(not(unix))]
+    {
+        let _ = meta;
+        Ok(true)
+    }
+}
+
 #[cfg(all(test, unix))]
 mod tests {
     use super::*;
@@ -92,6 +109,13 @@ mod tests {
         copy_private(&src, &dst).unwrap();
         assert_eq!(mode(&dst), 0o600);
         assert_eq!(std::fs::read_to_string(&dst).unwrap(), "secret");
+    }
+
+    #[test]
+    fn a_file_this_process_made_is_its_own() {
+        let dir = tempfile::tempdir().unwrap();
+        assert!(owned_by_current_user(dir.path()).unwrap());
+        assert!(owned_by_current_user(&dir.path().join("missing")).is_err());
     }
 
     #[test]

@@ -1,5 +1,5 @@
 import { afterEach, expect, test } from 'bun:test'
-import { adoptLinkToken, hasWebToken, hqFetch, needsSignIn, onSignInChange, saveWebToken } from './hqAuth'
+import { adoptLinkToken, hasWebToken, hqFetch, needsSignIn, onSignInChange, saveWebToken, takeLinkCode } from './hqAuth'
 
 const TOKEN = 'a'.repeat(64)
 const globals = globalThis as unknown as Record<string, unknown>
@@ -38,6 +38,15 @@ test('a token in the link is stored and removed from the address bar before any 
   adoptLinkToken()
   expect(store.get('hq-web-token')).toBe(TOKEN)
   expect(replaced[0]).not.toContain(TOKEN)
+})
+
+test('a code in the link is held once for the banner and removed from the address bar', () => {
+  const { store, replaced } = browser('https://hq.example.ts.net:8443/vault#code=ABCDEFGH2J')
+  adoptLinkToken()
+  expect(replaced.at(-1)).not.toContain('ABCDEFGH2J')
+  expect(store.has('hq-web-token')).toBe(false)
+  expect(takeLinkCode()).toBe('ABCDEFGH2J')
+  expect(takeLinkCode()).toBeNull()
 })
 
 test('a link without a token leaves a stored one alone', () => {

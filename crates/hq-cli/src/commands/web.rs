@@ -86,6 +86,9 @@ enum WebAction {
         #[arg(long)]
         json: bool,
     },
+    /// Print a new login link for this HQ, for a device or owner who lost theirs. Run it as
+    /// the user that owns the vault (the service user on a server).
+    Link,
 }
 
 /// What `hq web` writes to `~/.hq/web.json` while a server it started runs.
@@ -117,12 +120,16 @@ struct Report {
     static_dir: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     log: Option<String>,
+    /// The configured token was signed out from Settings, so no token is printed.
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    token_signed_out: bool,
 }
 
 pub async fn run(config: &HqConfig, args: WebArgs) -> Result<()> {
     match args.action {
         Some(WebAction::Status { json }) => status(config, json).await,
         Some(WebAction::Stop { json }) => stop(config, json),
+        Some(WebAction::Link) => link(config),
         None => {
             let json = args.start.json;
             match start(config, args.start).await {
@@ -164,7 +171,7 @@ async fn start(config: &HqConfig, mut args: StartArgs) -> Result<()> {
     hq_web::auth::check_web_bind(&bind, token.as_deref()).map_err(anyhow::Error::msg)?;
 
     let static_dir = ensure_ui(config, args.build, args.json)?;
-    let mut report = Report::new(&bind, port, token, Some(&static_dir));
+    let mut report = Report::for_token(config, &bind, port, token.clone(), Some(&static_dir));
 
     if args.detach {
         let log = log_path();
@@ -179,14 +186,8 @@ async fn start(config: &HqConfig, mut args: StartArgs) -> Result<()> {
         Arc::new(VaultClient::new(config.vault_path.clone()).context("failed to open vault")?);
     let db = Arc::new(Database::open(&config.db_path()).context("failed to open database")?);
     hq_agent::install_ledger(db.clone());
-    let state = super::start::build_web_state(
-        config,
-        &vault,
-        &db,
-        Some(static_dir.clone()),
-        report.token.clone(),
-        &bind,
-    );
+    let state =
+        super::start::build_web_state(config, &vault, &db, Some(static_dir.clone()), token, &bind);
     let addr = listen_addr(&bind, port)?;
     let listener = tokio::net::TcpListener::bind(addr)
         .await
@@ -234,7 +235,7 @@ fn report_running(config: &HqConfig, args: &StartArgs, bind: &str, port: u16) ->
             .map(|t| t.trim().to_string())
             .filter(|t| !t.is_empty())
     };
-    let mut report = Report::new(&running, port, token, None);
+    let mut report = Report::for_token(config, &running, port, token, None);
     report.already_running = true;
     finish(report, args)
 }
@@ -281,6 +282,12 @@ fn render_text(report: &Report, detach: bool, supervised: bool) -> String {
             report.login_url
         ));
     }
+    if report.token_signed_out {
+        out.push_str(
+            "  Sign-in: the web token was signed out from Settings. Run `hq web link` for a new \
+             login link.\n",
+        );
+    }
     if let Some(log) = &report.log {
         out.push_str(&format!("  Log:     {log}\n"));
     }
@@ -322,7 +329,24 @@ impl Report {
             network_url,
             static_dir: static_dir.map(|d| d.display().to_string()),
             log: None,
+            token_signed_out: false,
         }
+    }
+
+    /// Like [`Report::new`], but a configured token the owner signed out is not printed, since
+    /// a link built on it would not work.
+    fn for_token(
+        config: &HqConfig,
+        bind: &str,
+        port: u16,
+        token: Option<String>,
+        static_dir: Option<&Path>,
+    ) -> Self {
+        let token_signed_out = signed_out(config, token.as_deref());
+        let token = if token_signed_out { None } else { token };
+        let mut report = Report::new(bind, port, token, static_dir);
+        report.token_signed_out = token_signed_out;
+        report
     }
 }
 
@@ -753,6 +777,85 @@ fn open_log(log: &Path) -> Result<std::fs::File> {
 /// The token a server on `bind` needs: the configured one, else for a
 /// non-loopback bind a generated one kept in `~/.hq/web.token` so the sign-in
 /// link survives restarts. A loopback bind needs no token.
+/// How the link `hq web link` mints shows in Settings, Devices.
+const OPERATOR_LINK_LABEL: &str = "Operator link";
+
+/// Opens the vault database only as the user that owns it. A database root opens on a server
+/// gets root-owned WAL files, and the service can no longer write to it.
+pub(crate) fn open_db_as_owner(config: &HqConfig) -> Result<Database> {
+    require_vault_owner(config)?;
+    Database::open(&config.db_path()).context("failed to open database")
+}
+
+/// Like [`open_db_as_owner`], but only an existing database and without running migrations: a
+/// newer binary must not migrate the file under the daemon that is still using it.
+pub(crate) fn open_existing_db_as_owner(config: &HqConfig) -> Result<Database> {
+    require_vault_owner(config)?;
+    Database::open_existing(&config.db_path())
+}
+
+fn require_vault_owner(config: &HqConfig) -> Result<()> {
+    let db_path = config.db_path();
+    let probe = [
+        db_path.clone(),
+        config.vault_path.join("_data"),
+        config.vault_path.clone(),
+    ]
+    .into_iter()
+    .find(|p| p.exists())
+    .with_context(|| format!("no vault at {}", config.vault_path.display()))?;
+    if !hq_core::fs_private::owned_by_current_user(&probe)? {
+        bail!(
+            "{} belongs to another user. Run this as that user, for example: \
+             runuser -u hq -- env HQ_CONFIG_PATH=<config> HQ_VAULT_PATH={} hq web link",
+            probe.display(),
+            config.vault_path.display()
+        );
+    }
+    Ok(())
+}
+
+/// A login link for `token`: the first `web_allowed_origins` entry, else the local address.
+fn login_link(config: &HqConfig, token: &str) -> String {
+    config.web_login_link(token).unwrap_or_else(|| {
+        let host = local_host(&config.web_bind);
+        format!("http://{host}:{}/vault#token={token}", config.ws_port)
+    })
+}
+
+/// `hq web link`: mints a device token and prints only its login link, so the output can be
+/// piped. Refuses on a server that asks for no sign-in, rather than turning sign-in on.
+fn link(config: &HqConfig) -> Result<()> {
+    let db = open_db_as_owner(config)?;
+    let configured = config.web_auth_token.as_deref();
+    if !hq_db::web_auth::sign_in_enabled(&db, configured)? {
+        bail!(
+            "this HQ has no web token, so it asks for no sign-in and there is no link to make. \
+             Set web_auth_token (or HQ_WEB_AUTH_TOKEN) first."
+        );
+    }
+    let now = chrono::Utc::now().timestamp();
+    let minted = hq_db::web_auth::mint(&db, OPERATOR_LINK_LABEL, now, None)?;
+    println!("{}", login_link(config, &minted.token));
+    Ok(())
+}
+
+/// Whether `token` is the configured web token and the owner signed it out. Checked only as the
+/// vault's owner; anyone else prints what they always did. Never mints: `hq web link` is the one
+/// command that makes a new sign-in, so polling `hq web --json` leaves no stray devices.
+fn signed_out(config: &HqConfig, token: Option<&str>) -> bool {
+    let Some(token) = token else {
+        return false;
+    };
+    if config.web_auth_token.as_deref().map(str::trim) != Some(token) {
+        return false;
+    }
+    let Ok(db) = open_existing_db_as_owner(config) else {
+        return false;
+    };
+    hq_db::web_auth::is_revoked(&db, token).unwrap_or(false)
+}
+
 fn resolve_token(bind: &str, configured: Option<&str>) -> Result<Option<String>> {
     let configured = configured.map(str::trim).filter(|t| !t.is_empty());
     if let Some(t) = configured {
@@ -855,6 +958,105 @@ fn open_browser(url: &str) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn vault_config(token: Option<&str>) -> (HqConfig, tempfile::TempDir) {
+        let vault = tempfile::TempDir::new().unwrap();
+        std::fs::create_dir_all(vault.path().join("_data")).unwrap();
+        let config = HqConfig {
+            vault_path: vault.path().to_path_buf(),
+            web_auth_token: token.map(str::to_string),
+            web_allowed_origins: vec!["https://hq.example.ts.net:8443".into()],
+            ..Default::default()
+        };
+        (config, vault)
+    }
+
+    #[test]
+    fn a_signed_out_configured_token_is_never_printed_and_nothing_is_minted() {
+        let (config, _vault) = vault_config(Some("operator-env-token"));
+        let report = Report::for_token(
+            &config,
+            "127.0.0.1",
+            5678,
+            Some("operator-env-token".into()),
+            None,
+        );
+        assert_eq!(
+            report.token.as_deref(),
+            Some("operator-env-token"),
+            "an instance that never rotated prints what it always did"
+        );
+        assert!(!report.token_signed_out);
+
+        let db = open_db_as_owner(&config).unwrap();
+        hq_db::web_auth::rotate(&db, Some("operator-env-token"), "Sign out everywhere", 1).unwrap();
+        let report = Report::for_token(
+            &config,
+            "127.0.0.1",
+            5678,
+            Some("operator-env-token".into()),
+            None,
+        );
+        assert_eq!(report.token, None);
+        assert!(report.token_signed_out);
+        assert!(!report.login_url.contains("#token="));
+        assert!(render_text(&report, false, false).contains("hq web link"));
+        let json = serde_json::to_value(&report).unwrap();
+        assert_eq!(json["token_signed_out"], true);
+        assert_eq!(
+            hq_db::web_auth::list(&db, 0).unwrap().len(),
+            1,
+            "only the rotating device; hq web minted nothing"
+        );
+
+        let lan = Report::for_token(
+            &config,
+            "0.0.0.0",
+            5678,
+            Some("generated-lan-token".into()),
+            None,
+        );
+        assert_eq!(lan.token.as_deref(), Some("generated-lan-token"));
+        let fresh = Report::for_token(&config, "127.0.0.1", 5678, None, None);
+        assert!(
+            !serde_json::to_string(&fresh)
+                .unwrap()
+                .contains("token_signed_out")
+        );
+    }
+
+    #[test]
+    fn web_link_mints_a_working_operator_link_and_refuses_an_open_server() {
+        let (config, _vault) = vault_config(Some("operator-env-token"));
+        link(&config).unwrap();
+        let db = open_db_as_owner(&config).unwrap();
+        let devices = hq_db::web_auth::list(&db, 0).unwrap();
+        assert_eq!(devices.len(), 1);
+        assert_eq!(devices[0].label, OPERATOR_LINK_LABEL);
+        assert_eq!(
+            login_link(&config, "hqw_x"),
+            "https://hq.example.ts.net:8443/vault#token=hqw_x"
+        );
+
+        let (open, _vault) = vault_config(None);
+        assert!(
+            link(&open)
+                .unwrap_err()
+                .to_string()
+                .contains("no web token")
+        );
+        let db = open_db_as_owner(&open).unwrap();
+        assert!(hq_db::web_auth::list(&db, 0).unwrap().is_empty());
+    }
+
+    #[test]
+    fn the_database_is_not_opened_without_a_vault() {
+        let config = HqConfig {
+            vault_path: std::path::PathBuf::from("/nonexistent/hq-test-vault"),
+            ..Default::default()
+        };
+        assert!(open_db_as_owner(&config).is_err());
+    }
 
     fn text(report: &Report, detach: bool, supervised: bool) -> String {
         render_text(report, detach, supervised)

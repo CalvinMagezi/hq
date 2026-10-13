@@ -350,7 +350,9 @@ impl RemoteChat {
             .await
             .with_context(|| {
                 format!(
-                    "connecting to {} (wrong token, or is the daemon up?)",
+                    "connecting to {} (is the daemon up? A refused token may have been signed \
+                     out from Settings: set {SERVER_TOKEN_ENV} to the token in a link from \
+                     `hq web link`)",
                     target.ws_url
                 )
             })?;

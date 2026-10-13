@@ -69,6 +69,7 @@ pub async fn ws_handler(
 
 async fn handle_ws(socket: WebSocket, state: Arc<WsState>) {
     let mut rx = state.tx.subscribe();
+    let mut signed_out = state.auth_epoch.subscribe();
     let (mut sender, mut receiver) = socket.split();
 
     let mut send_task = tokio::spawn(async move {
@@ -90,9 +91,14 @@ async fn handle_ws(socket: WebSocket, state: Arc<WsState>) {
     });
 
     // Whichever half ends first takes the other with it, so a gone client leaves no subscriber behind.
+    // A sign-out closes the socket too: it was opened with a credential that may be gone.
     tokio::select! {
         _ = &mut send_task => recv_task.abort(),
         _ = &mut recv_task => send_task.abort(),
+        _ = signed_out.changed() => {
+            send_task.abort();
+            recv_task.abort();
+        }
     }
 }
 

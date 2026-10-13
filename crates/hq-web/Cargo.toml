@@ -37,3 +37,4 @@ url = { workspace = true }
 hq-core = { workspace = true, features = ["test-util"] }
 tempfile = "3"
 tower = { workspace = true, features = ["util"] }
+tokio-tungstenite = { workspace = true }

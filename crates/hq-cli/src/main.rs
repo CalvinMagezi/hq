@@ -713,8 +713,11 @@ fn init_tracing() {
     // `hq task` and `--json` print data for another program: logs go to stderr, quietly.
     let before_dashes = args.iter().skip(1).take_while(|a| *a != "--");
     let is_data = before_dashes.clone().take(4).any(|a| a == "task")
-        || (args.get(1).is_some_and(|a| a == "search" || a == "vault")
-            && before_dashes.clone().any(|a| a == "--json"));
+        || (args
+            .get(1)
+            .is_some_and(|a| a == "search" || a == "vault" || a == "web")
+            && before_dashes.clone().any(|a| a == "--json"))
+        || (args.get(1).is_some_and(|a| a == "web") && before_dashes.clone().any(|a| a == "link"));
     let default_level = if is_chat {
         "off"
     } else if is_data {

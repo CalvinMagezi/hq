@@ -98,7 +98,8 @@ confirm identity on your behalf.
 
 - Rejections are logged: `"discord: rejecting message from unauthorized user"`.
 - **`!login`** and the **`/login`** slash command reply with the owner's web login link
-  (`<first web_allowed_origins entry>/vault#token=<web token>`). Only an allowlisted or paired
+  (`<first web_allowed_origins entry>/vault#token=<token>`), carrying a new device token that
+  Settings, Devices lists as "Discord /login" and can sign out on its own. Only an allowlisted or paired
   owner gets it, and only in a direct message. In any server channel, including the family
   channel and its threads, the reply is just "Send !login to me in a direct message.", and
   family users never get the link. `/login` answers with a reply only you can see, which

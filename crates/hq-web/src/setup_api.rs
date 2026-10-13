@@ -45,15 +45,8 @@ pub(crate) struct KeyBody {
     api_key: String,
 }
 
-pub(crate) fn token_configured(state: &WsState) -> bool {
-    state
-        .web_auth_token
-        .as_deref()
-        .is_some_and(|t| !t.trim().is_empty())
-}
-
 fn require_token(state: &WsState) -> Result<(), ApiError> {
-    if token_configured(state) {
+    if state.web_auth_enabled() {
         return Ok(());
     }
     Err(ApiError::Forbidden(
@@ -149,7 +142,7 @@ pub(crate) async fn status_handler(
     let config = load_config().await?;
     Ok(Json(json!({
         "needs_setup": !config.has_llm_key(),
-        "available": token_configured(&state),
+        "available": state.web_auth_enabled(),
     })))
 }
 

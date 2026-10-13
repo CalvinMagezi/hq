@@ -3144,6 +3144,7 @@ dependencies = [
  "tempfile",
  "tokio",
  "tokio-rustls",
+ "tokio-tungstenite 0.28.0",
  "tower",
  "tower-http",
  "tracing",

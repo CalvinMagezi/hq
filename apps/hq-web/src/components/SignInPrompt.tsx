@@ -1,6 +1,6 @@
-import { useState, useSyncExternalStore, type FormEvent } from 'react'
+import { useEffect, useRef, useState, useSyncExternalStore, type FormEvent } from 'react'
 import { KeyRound } from 'lucide-react'
-import { hasWebToken, needsSignIn, onSignInChange, saveWebToken } from '~/lib/hqAuth'
+import { hasWebToken, needsSignIn, onSignInChange, saveWebToken, takeLinkCode } from '~/lib/hqAuth'
 import { exchangeCode } from '~/lib/deviceSignIn'
 
 const INPUT_CLASS =
@@ -17,23 +17,35 @@ function ErrorLine({ message }: { message: string | null }) {
   )
 }
 
-/** Trades a one-time code from a signed-in device for the web token. */
+/** Trades a one-time code from a signed-in device for a device token; a code from a scanned QR link goes in by itself. */
 function CodeForm() {
   const [code, setCode] = useState('')
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
-  const submit = async (e: FormEvent) => {
-    e.preventDefault()
+  const redeem = async (typed: string) => {
     setBusy(true)
     setError(null)
     try {
-      const token = await exchangeCode(code)
+      const token = await exchangeCode(typed)
       if (!saveWebToken(token)) throw new Error('This browser blocked saving the sign-in.')
       window.location.reload()
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Could not sign in. Try again.')
       setBusy(false)
     }
+  }
+  const fromLink = useRef(false)
+  useEffect(() => {
+    if (fromLink.current) return
+    fromLink.current = true
+    const linked = takeLinkCode()
+    if (!linked) return
+    setCode(linked)
+    void redeem(linked)
+  }, [])
+  const submit = (e: FormEvent) => {
+    e.preventDefault()
+    void redeem(code)
   }
   return (
     <form onSubmit={submit} className="flex flex-col gap-2">
@@ -123,7 +135,7 @@ export function SignInPrompt() {
           Sign in to HQ
         </div>
         <p className="text-xs" style={{ color: 'var(--text-dim)' }}>
-          {replacing ? 'The server no longer accepts the token saved here. ' : ''}
+          {replacing ? 'This device was signed out, or the server no longer accepts its sign-in. ' : ''}
           Open your HQ login link, enter a code from a device that is already signed in, or send{' '}
           <code className="font-mono">/login</code> to your HQ bot on Telegram or Discord. Until then, screens show data saved
           on this device.
@@ -131,7 +143,7 @@ export function SignInPrompt() {
         <p className="text-xs" style={{ color: 'var(--text-dim)' }}>
           None of those? Whoever set up your HQ server can print the link again with{' '}
           <code className="font-mono whitespace-nowrap">sudo hq-join --print-link</code>. If HQ runs on your own computer, run{' '}
-          <code className="font-mono whitespace-nowrap">hq web</code> there.
+          <code className="font-mono whitespace-nowrap">hq web link</code> there.
         </p>
         <CodeForm />
         <TokenForm replacing={replacing} />

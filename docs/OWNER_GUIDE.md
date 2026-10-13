@@ -21,7 +21,8 @@ expiry**. Otherwise it drops off your network after 180 days and needs the setup
 ## Signing in
 
 You'll receive an HQ login link that ends in `#token=...`. **Treat it like a password.** Anyone
-on your Tailscale network who has it can use your HQ.
+on your Tailscale network who has it can use your HQ until you sign it out (see "Signing a device
+out" below).
 
 1. With Tailscale on, open the link. HQ remembers the sign-in on that browser.
 2. The first time, HQ asks for a model key: an OpenRouter, Anthropic or Google AI key. The page
@@ -63,10 +64,27 @@ that is already signed in. The new device needs Tailscale on and signed in to yo
 The code works once and lasts ten minutes. **New code** gives you another and stops the old one.
 After five wrong tries, wait a few minutes.
 
-Treat the QR code like a password: anyone who scans it is signed in to your HQ. Show it only to
-your own devices, and press **Hide** when you're done. When a device signs in, HQ tells you in its
-inbox (and on your phone, if notifications are on). If you didn't expect that, tell whoever runs
-your server.
+The QR code holds the same one-time code, so it signs in one device, once. Show it only to your
+own devices, and press **Hide** when you're done. When a device signs in, HQ tells you in its
+inbox (and on your phone, if notifications are on). If you didn't expect that, sign that device
+out (next section).
+
+## Signing a device out
+
+**Settings**, **Devices** lists every device that signed in with a code, a QR code or `/login`,
+with when it signed in and when it was last used. The one you are holding says *this device*.
+
+- **A lost or sold phone:** press **Sign out** next to it. Its next request is refused, and the
+  other devices stay signed in.
+- **Sign out everywhere:** use this when you can't tell which device is which, or a login link
+  was shared by mistake. HQ signs out every device and the original link from whoever set up your
+  server. The device you pressed it on is signed back in at once; every other phone, browser and
+  home-screen app shows **Sign in to HQ** and needs a code from this device, `/login` from your
+  chat app, or a new link. HQ sends you a notice when it happens. It also stops notifications
+  on every other device and disconnects Claude (claude.ai), so connect Claude again afterwards.
+
+If someone else signs you out everywhere, send `/login` to your HQ bot, or ask whoever runs your
+server for a new link (`sudo hq-join --print-link`), then sign out everywhere again.
 
 ## Connect Telegram or Discord
 

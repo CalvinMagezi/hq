@@ -66,8 +66,9 @@ pub struct WsState {
     pub(crate) static_dir: Option<PathBuf>,
     pub(crate) registry: Option<Arc<ToolRegistry>>,
     pub(crate) hq_config: Option<Arc<hq_core::config::HqConfig>>,
-    /// Token required on /ws and /api (see `auth::web_auth_middleware`). Set
-    /// by the caller from the same config its bind check used.
+    /// The configured web token for /ws and /api (see `auth::web_auth_middleware`). Set by the
+    /// caller from the same config its bind check used. Device tokens live in the database;
+    /// read sign-in state through `web_auth_enabled` and `web_credential`, never this field.
     pub web_auth_token: Option<String>,
     /// Browser origins allowed besides loopback and same-origin pages, from
     /// `web_allowed_origins` (see `origin::origin_guard`).
@@ -87,6 +88,15 @@ pub struct WsState {
     pub(crate) web_push: Option<Arc<web_push::WebPush>>,
     /// The one-time code a signed-in device hands to a new one.
     pub(crate) device_codes: device_auth::DeviceCodes,
+    /// Bumped on every sign-out, which closes the chat sockets opened before it.
+    pub(crate) auth_epoch: tokio::sync::watch::Sender<u64>,
+    /// Held by a code exchange and by sign-out everywhere, so a code redeemed during a rotate
+    /// cannot mint a token after the rotate deleted them all, and two rotates run one at a time.
+    pub(crate) auth_lock: tokio::sync::Mutex<()>,
+    /// Whether the configured token was signed out (`auth::CONFIGURED_*`), cached.
+    pub(crate) configured_state: std::sync::atomic::AtomicU8,
+    /// When `configured_state` was last read from the database, unix seconds.
+    pub(crate) configured_checked_at: std::sync::atomic::AtomicI64,
 }
 
 impl WsState {
@@ -117,6 +127,10 @@ impl WsState {
             active_chat_turns: Arc::new(tokio::sync::RwLock::new(std::collections::HashMap::new())),
             web_push: None,
             device_codes: device_auth::DeviceCodes::default(),
+            auth_epoch: tokio::sync::watch::channel(0).0,
+            auth_lock: tokio::sync::Mutex::new(()),
+            configured_state: std::sync::atomic::AtomicU8::new(auth::CONFIGURED_UNKNOWN),
+            configured_checked_at: std::sync::atomic::AtomicI64::new(0),
         }
     }
 
@@ -220,6 +234,7 @@ const BROADCAST_CAPACITY: usize = 4096;
 
 /// Create the web router — vault-focused endpoints only.
 pub fn create_router(state: Arc<WsState>) -> Router {
+    state.load_configured_state();
     let static_dir = state
         .static_dir
         .as_deref()
@@ -247,6 +262,18 @@ pub fn create_router(state: Arc<WsState>) -> Router {
         .route(
             device_auth::EXCHANGE_PATH,
             post(device_auth::exchange_handler),
+        )
+        .route(
+            device_auth::devices::DEVICES_PATH,
+            get(device_auth::devices::list_handler),
+        )
+        .route(
+            device_auth::devices::DEVICE_PATH,
+            axum::routing::delete(device_auth::devices::delete_handler),
+        )
+        .route(
+            device_auth::devices::ROTATE_PATH,
+            post(device_auth::devices::rotate_handler),
         )
         .route(
             "/api/admin/broadcast",

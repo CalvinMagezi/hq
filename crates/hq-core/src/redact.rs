@@ -36,6 +36,8 @@ static SECRET_PATTERNS: LazyLock<Vec<Regex>> = LazyLock::new(|| {
         r"AKIA[0-9A-Z]{16}",
         r"(?i)(?:bearer|authorization:\s*bearer)\s+[A-Za-z0-9._~+/-]{16,}=*",
         r"(?s)-----BEGIN [A-Z ]*PRIVATE KEY-----.*?-----END [A-Z ]*PRIVATE KEY-----",
+        // HQ's own web device tokens (`hq_db::web_auth`). Kept last: the Bearer index above is fixed.
+        r"hqw_[0-9a-f]{64}",
     ]
     .iter()
     .map(|p| Regex::new(p).expect("static secret pattern must compile"))
@@ -216,6 +218,19 @@ mod tests {
             redact_secrets("plain sentence, nothing secret here"),
             "plain sentence, nothing secret here"
         );
+    }
+
+    #[test]
+    fn redacts_hq_web_device_tokens() {
+        let token = format!("hqw_{}", "0123456789abcdef".repeat(4));
+        assert_eq!(
+            redact_secrets(&format!(
+                "link https://hq.example.ts.net/vault#token={token} ok"
+            )),
+            "link https://hq.example.ts.net/vault#token=[REDACTED] ok"
+        );
+        assert!(looks_like_credential(&format!("sent {token}")));
+        assert_eq!(redact_secrets("hqw_short"), "hqw_short");
     }
 
     #[test]

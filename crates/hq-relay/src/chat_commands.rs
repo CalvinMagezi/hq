@@ -352,6 +352,10 @@ pub(crate) fn is_permission_command(text_lower: &str) -> bool {
     })
 }
 
+/// How the device token each bridge's `/login` mints shows in Settings, Devices.
+pub(crate) const TELEGRAM_LOGIN_LABEL: &str = "Telegram /login";
+pub(crate) const DISCORD_LOGIN_LABEL: &str = "Discord /login";
+
 /// Shown to an owner whose server can't build a link; the operator can still print one.
 pub(crate) const LOGIN_UNCONFIGURED_REPLY: &str = "HQ can't build your login link: it doesn't know its web address or has no web token. Ask whoever set up your HQ server to run this on it: sudo hq-join --print-link";
 
@@ -371,15 +375,42 @@ pub(crate) enum LoginReply {
 
 /// The login link is an admin credential, so only the owner in a private chat
 /// gets it. The private check runs first: in a shared channel the reply only
-/// says where to ask, whoever asked.
-pub(crate) fn login_reply(is_private: bool, is_owner: bool, link: Option<String>) -> LoginReply {
+/// says where to ask, whoever asked. `link` mints a credential, so it runs only
+/// once both checks pass.
+pub(crate) fn login_reply(
+    is_private: bool,
+    is_owner: bool,
+    link: impl FnOnce() -> Option<String>,
+) -> LoginReply {
     if !is_private {
         return LoginReply::NotPrivate;
     }
     if !is_owner {
         return LoginReply::NotOwner;
     }
-    link.map_or(LoginReply::NotConfigured, LoginReply::Link)
+    link().map_or(LoginReply::NotConfigured, LoginReply::Link)
+}
+
+/// A login link carrying a new device token labelled `label`, so the owner can later sign
+/// that one device out. `None` without a web address, or when the server asks for no sign-in
+/// at all: minting would turn sign-in on for a server that runs open on loopback.
+pub(crate) fn mint_login_link(cfg: &hq_core::config::HqConfig, label: &str) -> Option<String> {
+    cfg.web_login_origin()?;
+    let db = Database::open(&cfg.db_path())
+        .inspect_err(|e| tracing::warn!("relay: /login could not open the database: {e}"))
+        .ok()?;
+    let enabled = hq_db::web_auth::sign_in_enabled(&db, cfg.web_auth_token.as_deref())
+        .inspect_err(|e| tracing::warn!("relay: /login could not read sign-in state: {e}"))
+        .ok()?;
+    if !enabled {
+        return None;
+    }
+    let now = chrono::Utc::now().timestamp();
+    let minted = hq_db::web_auth::mint(&db, label, now, None)
+        .inspect_err(|e| tracing::warn!("relay: /login could not save a device token: {e}"))
+        .ok()?;
+    tracing::info!(device = %minted.id, label, "relay: /login minted a device token");
+    cfg.web_login_link(&minted.token)
 }
 
 /// The argument after the permission command, trimmed; `None` for the bare form.
@@ -511,35 +542,69 @@ mod tests {
 
     const LINK: &str = "https://hq.example.ts.net:8443/vault#token=abc123";
 
-    #[test]
-    fn login_gives_the_owner_the_link_in_a_private_chat() {
-        assert_eq!(
-            login_reply(true, true, Some(LINK.into())),
-            LoginReply::Link(LINK.into())
-        );
+    fn link() -> Option<String> {
+        Some(LINK.into())
     }
 
     #[test]
-    fn login_refuses_a_guest_and_any_shared_chat() {
-        assert_eq!(
-            login_reply(true, false, Some(LINK.into())),
-            LoginReply::NotOwner
-        );
-        assert_eq!(
-            login_reply(false, true, Some(LINK.into())),
-            LoginReply::NotPrivate
-        );
-        assert_eq!(
-            login_reply(false, false, Some(LINK.into())),
-            LoginReply::NotPrivate
-        );
+    fn login_gives_the_owner_the_link_in_a_private_chat() {
+        assert_eq!(login_reply(true, true, link), LoginReply::Link(LINK.into()));
+    }
+
+    #[test]
+    fn login_refuses_a_guest_and_any_shared_chat_without_minting() {
+        let never = || -> Option<String> { panic!("minted a credential for a refused request") };
+        assert_eq!(login_reply(true, false, never), LoginReply::NotOwner);
+        assert_eq!(login_reply(false, true, never), LoginReply::NotPrivate);
+        assert_eq!(login_reply(false, false, never), LoginReply::NotPrivate);
     }
 
     #[test]
     fn login_explains_a_missing_link_to_the_owner_only() {
-        assert_eq!(login_reply(true, true, None), LoginReply::NotConfigured);
-        assert_eq!(login_reply(true, false, None), LoginReply::NotOwner);
+        assert_eq!(login_reply(true, true, || None), LoginReply::NotConfigured);
+        assert_eq!(login_reply(true, false, || None), LoginReply::NotOwner);
         assert!(LOGIN_UNCONFIGURED_REPLY.contains("sudo hq-join --print-link"));
+    }
+
+    fn login_config(vault: &std::path::Path, token: Option<&str>) -> hq_core::config::HqConfig {
+        hq_core::config::HqConfig {
+            vault_path: vault.to_path_buf(),
+            web_allowed_origins: vec!["https://hq.example.ts.net:8443".into()],
+            web_auth_token: token.map(str::to_string),
+            ..Default::default()
+        }
+    }
+
+    #[test]
+    fn login_mints_a_device_token_that_is_not_the_shared_one() {
+        let vault = tempfile::TempDir::new().unwrap();
+        std::fs::create_dir_all(vault.path().join("_data")).unwrap();
+        let cfg = login_config(vault.path(), Some("operator-env-token"));
+        let link = mint_login_link(&cfg, TELEGRAM_LOGIN_LABEL).unwrap();
+        let token = link.split("#token=").nth(1).unwrap();
+        assert_ne!(token, "operator-env-token");
+        let db = Database::open(&cfg.db_path()).unwrap();
+        let now = chrono::Utc::now().timestamp();
+        assert!(hq_db::web_auth::verify(&db, token, now).unwrap().is_some());
+        let devices = hq_db::web_auth::list(&db, now).unwrap();
+        assert_eq!(devices.len(), 1);
+        assert_eq!(devices[0].label, TELEGRAM_LOGIN_LABEL);
+    }
+
+    #[test]
+    fn login_never_turns_sign_in_on_for_an_open_server() {
+        let vault = tempfile::TempDir::new().unwrap();
+        std::fs::create_dir_all(vault.path().join("_data")).unwrap();
+        let cfg = login_config(vault.path(), None);
+        assert_eq!(mint_login_link(&cfg, DISCORD_LOGIN_LABEL), None);
+        let db = Database::open(&cfg.db_path()).unwrap();
+        assert!(!hq_db::web_auth::sign_in_enabled(&db, None).unwrap());
+        let no_origin = hq_core::config::HqConfig {
+            web_allowed_origins: vec![],
+            ..login_config(vault.path(), Some("operator-env-token"))
+        };
+        assert_eq!(mint_login_link(&no_origin, DISCORD_LOGIN_LABEL), None);
+        assert!(hq_db::web_auth::list(&db, 0).unwrap().is_empty());
     }
 
     #[test]

@@ -134,11 +134,7 @@ pub(crate) fn mcp_dev_open(headers: &HeaderMap, switch_on: bool, bind_is_loopbac
 /// Whether a request carries the web token as a Bearer header. Tokens in the
 /// URL are refused: they end up in history, proxy logs and referrers.
 pub(crate) fn web_request_authorized(headers: &HeaderMap, expected: &str) -> bool {
-    headers
-        .get(axum::http::header::AUTHORIZATION)
-        .and_then(|v| v.to_str().ok())
-        .and_then(|v| v.strip_prefix("Bearer "))
-        .is_some_and(|t| tokens_match(t, expected))
+    bearer(headers).is_some_and(|t| tokens_match(t, expected))
 }
 
 /// Single-use, short-lived tickets that stand in for the web token on the
@@ -169,6 +165,14 @@ impl WsTickets {
         }
         issued.insert(ticket.clone(), now + WS_TICKET_TTL);
         ticket
+    }
+
+    /// Voids every outstanding ticket.
+    pub(crate) fn clear(&self) {
+        self.issued
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .clear();
     }
 
     /// Redeem a ticket. It is removed either way, so it can never be replayed.
@@ -208,24 +212,202 @@ pub fn check_web_bind(bind: &str, token: Option<&str>) -> Result<(), String> {
     ))
 }
 
-/// Axum middleware enforcing `web_auth_token` on guarded paths. A no-op when
-/// no token is configured (loopback-only deployments).
+/// Which credential a request signed in with, kept in its extensions for handlers that care.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum WebCredential {
+    /// The configured web token (`web_auth_token`, `HQ_WEB_AUTH_TOKEN`).
+    Configured,
+    /// A device token, by its row id in `web_device_tokens`.
+    Device(String),
+}
+
+fn bearer(headers: &HeaderMap) -> Option<&str> {
+    headers
+        .get(axum::http::header::AUTHORIZATION)
+        .and_then(|v| v.to_str().ok())
+        .and_then(|v| v.strip_prefix("Bearer "))
+}
+
+/// Whether the configured token was signed out, cached on `WsState` so the configured-token
+/// path needs no database read while the answer is fresh.
+pub(crate) const CONFIGURED_UNKNOWN: u8 = 0;
+const CONFIGURED_LIVE: u8 = 1;
+const CONFIGURED_SIGNED_OUT: u8 = 2;
+/// Another server on the same database (an `hq web` beside `hq start all`) may sign it out, so a
+/// "live" answer is read again after this long.
+const CONFIGURED_RECHECK_SECS: i64 = 60;
+
+impl crate::WsState {
+    /// The configured web token, when it is set and not blank. It may have been signed out.
+    pub(crate) fn configured_web_token(&self) -> Option<&str> {
+        self.web_auth_token
+            .as_deref()
+            .filter(|t| !t.trim().is_empty())
+    }
+
+    /// Whether `/ws` and `/api` ask for a sign-in: a configured token exists, signed out or
+    /// not, or a device token does. A database error counts as yes, so it never opens the API.
+    pub(crate) fn web_auth_enabled(&self) -> bool {
+        hq_db::web_auth::sign_in_enabled(&self.db, self.configured_web_token()).unwrap_or_else(
+            |e| {
+                tracing::warn!(
+                    "web auth: could not read device tokens, treating sign-in as on: {e}"
+                );
+                true
+            },
+        )
+    }
+
+    /// The credential `secret` is, if any: the configured token unless the owner signed it
+    /// out, or a device token. A database error refuses.
+    pub(crate) fn web_credential(&self, secret: &str) -> Option<WebCredential> {
+        if secret.is_empty() {
+            return None;
+        }
+        if let Some(configured) = self.configured_web_token()
+            && tokens_match(secret, configured)
+        {
+            return self.configured_token_live(configured);
+        }
+        let now = chrono::Utc::now().timestamp();
+        match hq_db::web_auth::verify(&self.db, secret, now) {
+            Ok(device) => device.map(WebCredential::Device),
+            Err(e) => {
+                tracing::warn!("web auth: could not check a device token: {e}");
+                None
+            }
+        }
+    }
+
+    /// [`Self::web_auth_enabled`] off the async worker threads. A configured token answers
+    /// without touching the database.
+    pub(crate) async fn web_auth_enabled_async(self: &std::sync::Arc<Self>) -> bool {
+        if self.configured_web_token().is_some() {
+            return true;
+        }
+        let state = self.clone();
+        tokio::task::spawn_blocking(move || state.web_auth_enabled())
+            .await
+            .unwrap_or(true)
+    }
+
+    /// The configured token, when `secret` is it and it was seen live within
+    /// [`CONFIGURED_RECHECK_SECS`]: no database read.
+    fn configured_credential_cached(&self, secret: &str) -> Option<WebCredential> {
+        let configured = self.configured_web_token()?;
+        (self.configured_live_and_fresh() && tokens_match(secret, configured))
+            .then_some(WebCredential::Configured)
+    }
+
+    fn configured_live_and_fresh(&self) -> bool {
+        use std::sync::atomic::Ordering;
+        let checked = self.configured_checked_at.load(Ordering::Acquire);
+        self.configured_state.load(Ordering::Acquire) == CONFIGURED_LIVE
+            && chrono::Utc::now().timestamp() - checked < CONFIGURED_RECHECK_SECS
+    }
+
+    /// Reads whether the configured token was signed out into the cache. Called when the server
+    /// starts; a database error leaves it unknown, to be read again on the next request.
+    pub(crate) fn load_configured_state(&self) {
+        if let Some(configured) = self.configured_web_token() {
+            let _ = self.configured_token_live(configured);
+        }
+    }
+
+    /// Records that the configured token is signed out. It stays so for this process: the
+    /// revocation is by hash, and only a new value (which needs a restart) undoes it.
+    pub(crate) fn mark_configured_signed_out(&self) {
+        self.configured_state
+            .store(CONFIGURED_SIGNED_OUT, std::sync::atomic::Ordering::Release);
+    }
+
+    /// Live or signed out, from the cache when fresh. A database error keeps an earlier "live"
+    /// (so an instance that never rotates is not locked out by a busy database) and refuses
+    /// when nothing is known yet.
+    fn configured_token_live(&self, configured: &str) -> Option<WebCredential> {
+        use std::sync::atomic::Ordering;
+        if self.configured_state.load(Ordering::Acquire) == CONFIGURED_SIGNED_OUT {
+            return None;
+        }
+        if self.configured_live_and_fresh() {
+            return Some(WebCredential::Configured);
+        }
+        match hq_db::web_auth::is_revoked(&self.db, configured) {
+            Ok(false) => {
+                self.configured_checked_at
+                    .store(chrono::Utc::now().timestamp(), Ordering::Release);
+                let _ = self.configured_state.compare_exchange(
+                    CONFIGURED_UNKNOWN,
+                    CONFIGURED_LIVE,
+                    Ordering::AcqRel,
+                    Ordering::Acquire,
+                );
+                self.configured_token_known_live()
+            }
+            Ok(true) => {
+                self.mark_configured_signed_out();
+                None
+            }
+            Err(e) => {
+                tracing::warn!(
+                    "web auth: could not check whether the web token was signed out: {e}"
+                );
+                self.configured_token_known_live()
+            }
+        }
+    }
+
+    fn configured_token_known_live(&self) -> Option<WebCredential> {
+        (self
+            .configured_state
+            .load(std::sync::atomic::Ordering::Acquire)
+            == CONFIGURED_LIVE)
+            .then_some(WebCredential::Configured)
+    }
+
+    /// After a sign-out: closes every open chat socket and voids outstanding socket tickets.
+    /// Devices still signed in reconnect with their own token.
+    pub(crate) fn end_web_sessions(&self) {
+        self.ws_tickets.clear();
+        self.auth_epoch
+            .send_modify(|epoch| *epoch = epoch.wrapping_add(1));
+    }
+}
+
+/// Axum middleware enforcing the web sign-in on guarded paths. A no-op when no web token is
+/// configured and no device token exists (loopback-only deployments).
 pub(crate) async fn web_auth_middleware(
     axum::extract::State(state): axum::extract::State<std::sync::Arc<crate::WsState>>,
-    request: axum::extract::Request,
+    mut request: axum::extract::Request,
     next: axum::middleware::Next,
 ) -> axum::response::Response {
-    let expected = state
-        .web_auth_token
-        .as_deref()
-        .filter(|t| !t.trim().is_empty());
-    let Some(expected) = expected else {
-        return next.run(request).await;
-    };
-    let uri = request.uri();
-    if !web_path_is_guarded(uri.path()) || web_request_authorized(request.headers(), expected) {
+    if !web_path_is_guarded(request.uri().path()) {
         return next.run(request).await;
     }
+    let presented = bearer(request.headers()).map(str::to_string);
+    let cached = presented
+        .as_deref()
+        .and_then(|t| state.configured_credential_cached(t));
+    let (enabled, credential) = match cached {
+        Some(credential) => (true, Some(credential)),
+        None => {
+            let checking = state.clone();
+            tokio::task::spawn_blocking(move || {
+                let credential = presented.and_then(|t| checking.web_credential(&t));
+                (checking.web_auth_enabled(), credential)
+            })
+            .await
+            .unwrap_or((true, None))
+        }
+    };
+    if !enabled {
+        return next.run(request).await;
+    }
+    if let Some(credential) = credential {
+        request.extensions_mut().insert(credential);
+        return next.run(request).await;
+    }
+    let uri = request.uri();
     let ticket_ok = uri.path() == "/ws"
         && query_param(uri.query(), "ticket").is_some_and(|t| state.ws_tickets.redeem(t));
     if !ticket_ok {

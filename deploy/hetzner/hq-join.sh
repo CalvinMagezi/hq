@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Puts this server on your tailnet and publishes HQ there. Run over SSH as root, once:
 #   sudo hq-join [--close-ssh]
-# Safe to repeat. It prints the sign-in link at the end; `sudo hq-join --print-link` prints it again
+# Safe to repeat. It prints a sign-in link at the end; `sudo hq-join --print-link` prints a new one
 # without touching the tailnet or restarting HQ. Public SSH stays open in ufw by default so a lapsed
 # tailnet key can be fixed; the Hetzner Cloud Firewall (your IP only) is what blocks it.
 # Pass --close-ssh to also close it here once you have confirmed SSH works over the tailnet.
@@ -15,6 +15,8 @@ HEALTH_URL="http://127.0.0.1:5678/health"
 HEALTH_WAIT_SECS=180
 SERVE_PORT=8443
 UPSTREAM="http://127.0.0.1:5678"
+HQ_BIN="/usr/local/bin/hq"
+HQ_VAULT="$HQ_HOME/.vault"
 
 close_ssh=0
 print_link=0
@@ -26,16 +28,34 @@ case "${1:-}" in
     *) die "usage: hq-join [--close-ssh | --print-link]" ;;
 esac
 
+# A login link. A build with `hq web link` mints a fresh device token as the hq user (never as root,
+# which would leave root-owned database files), so a link the owner signed out of from Settings is
+# never printed again. Older builds print the bootstrap token from mcp.env, as before.
+owner_link() {
+    local origin="$1" token help
+    token="$(sed -n 's/^HQ_WEB_AUTH_TOKEN=//p' "$MCP_ENV")"
+    # Captured first: `grep -q` exiting early would SIGPIPE hq and fail the pipe under pipefail.
+    help="$("$HQ_BIN" web --help 2>/dev/null || true)"
+    if grep -qE '^[[:space:]]+link([[:space:]]|$)' <<< "$help"; then
+        # In the environment, not on a command line, so other users cannot read it from ps.
+        HQ_WEB_AUTH_TOKEN="$token" runuser -u hq -- \
+            env HQ_CONFIG_PATH="$CONFIG" HQ_VAULT_PATH="$HQ_VAULT" "$HQ_BIN" web link \
+            || die "hq web link failed; see the error above"
+        return
+    fi
+    [ -n "$token" ] || die "no HQ_WEB_AUTH_TOKEN in $MCP_ENV"
+    printf '%s/vault#token=%s\n' "$origin" "$token"
+}
+
 # The block an operator forwards to the owner as is. The link is the owner's password.
 print_owner_message() {
-    local origin="$1" token
-    token="$(sed -n 's/^HQ_WEB_AUTH_TOKEN=//p' "$MCP_ENV")"
-    [ -n "$token" ] || die "no HQ_WEB_AUTH_TOKEN in $MCP_ENV"
+    local link
+    link="$(owner_link "$1")"
     printf '\n---- send this to the owner, privately ----\n\n'
     printf 'Your HQ is ready. Open this link on a device signed in to your Tailscale account:\n\n'
-    printf '  %s/vault#token=%s\n\n' "$origin" "$token"
+    printf '  %s\n\n' "$link"
     printf 'Treat it like a password. Once you are in, Settings shows how to sign in on another\n'
-    printf 'device and how to connect Telegram or Discord.\n'
+    printf 'device, how to sign a lost one out, and how to connect Telegram or Discord.\n'
     printf '\n-------------------------------------------\n\n'
 }
 

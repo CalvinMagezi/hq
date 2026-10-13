@@ -301,7 +301,7 @@ mod tests {
 
     fn subscribe(db: &hq_db::Database, endpoint: &str) {
         let (p256dh, auth) = browser_keys();
-        hq_db::push_subscriptions::upsert(db, endpoint, &p256dh, &auth, None).unwrap();
+        hq_db::push_subscriptions::upsert(db, endpoint, &p256dh, &auth, None, None).unwrap();
     }
 
     #[tokio::test]
