@@ -32,14 +32,19 @@ export function pushSupported(): boolean {
   )
 }
 
+/** Whether this page runs as an app added to the home screen rather than in a browser tab. */
+export function isStandalone(): boolean {
+  if (typeof window === 'undefined') return false
+  return window.matchMedia?.('(display-mode: standalone)').matches ||
+    (navigator as Navigator & { standalone?: boolean }).standalone === true
+}
+
 /** iPhone and iPad only allow push for an app added to the Home Screen. */
 function iosOutsideHomeScreen(): boolean {
   if (typeof navigator === 'undefined') return false
   const ios = /iPad|iPhone|iPod/.test(navigator.userAgent) ||
     (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1)
-  const standalone = window.matchMedia?.('(display-mode: standalone)').matches ||
-    (navigator as Navigator & { standalone?: boolean }).standalone === true
-  return ios && !standalone
+  return ios && !isStandalone()
 }
 
 function serverStatus(): Promise<ServerPushStatus> {

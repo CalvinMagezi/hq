@@ -26,6 +26,10 @@ on your Tailscale network who has it can use your HQ.
 1. With Tailscale on, open the link. HQ remembers the sign-in on that browser.
 2. The first time, HQ asks for a model key: an OpenRouter, Anthropic or Google AI key. The page
    links to where you get one.
+3. The home screen then shows a **Get started** checklist: open HQ on your phone, connect
+   Telegram or Discord, and turn on notifications (when the server has push turned on). Each step
+   links to the right place. On a computer, tap **Mark done** once your phone is set up. **Hide**
+   puts the list away on that device, and it goes away by itself once every step is done.
 
 ## Putting HQ on your phone's home screen
 
