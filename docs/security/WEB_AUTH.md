@@ -152,6 +152,14 @@ because URLs end up in browser history, proxy logs and `Referer` headers.
   the PWA shows a "Sign in to HQ" banner with a field to paste the token, which
   it stores the same way. Copies the service worker serves from its cache never
   trigger it.
+- **`/login` from a chat.** The Telegram and Discord bots answer `/login` (and
+  `!login`) with the `#token=` link, so the token lands in that chat's history.
+  That chat already drives the whole agent, so it gains no new reach. Only the
+  owner gets the link, only in a private chat or DM, never a guest or a Discord
+  family user, and the reply is never mirrored into HQ's thread store. Telegram
+  asks the owner to delete it. A Discord DM user can't delete the bot's
+  messages, so `!login` points at the `/login` slash command, whose ephemeral
+  reply Discord doesn't keep.
 
 One exception remains: `/hooks/gmail` takes its own `GMAIL_WEBHOOK_SECRET`. Send
 it as `Authorization: Bearer <secret>` whenever the sender can set headers. The

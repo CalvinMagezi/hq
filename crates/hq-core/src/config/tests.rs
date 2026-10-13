@@ -490,3 +490,53 @@ fn runtime_identity_names_primary_provider_and_fallbacks() {
     );
     assert!(block.find("haiku").unwrap() < block.find("deepseek").unwrap());
 }
+
+mod web_login_link_tests {
+    use crate::HqConfig;
+
+    fn config(origins: &[&str], token: Option<&str>) -> HqConfig {
+        HqConfig {
+            web_allowed_origins: origins.iter().map(|o| o.to_string()).collect(),
+            web_auth_token: token.map(str::to_string),
+            ..Default::default()
+        }
+    }
+
+    #[test]
+    fn builds_the_vault_link_from_the_first_origin() {
+        let c = config(
+            &[
+                "https://hq.example.ts.net:8443",
+                "https://other.example.com",
+            ],
+            Some("abc123"),
+        );
+        assert_eq!(
+            c.web_login_link().as_deref(),
+            Some("https://hq.example.ts.net:8443/vault#token=abc123")
+        );
+    }
+
+    #[test]
+    fn trims_a_trailing_slash_and_skips_blank_origins() {
+        let c = config(&["  ", "https://hq.example.ts.net:8443/"], Some("abc123"));
+        assert_eq!(
+            c.web_login_link().as_deref(),
+            Some("https://hq.example.ts.net:8443/vault#token=abc123")
+        );
+    }
+
+    #[test]
+    fn needs_both_an_origin_and_a_token() {
+        assert_eq!(config(&[], Some("abc123")).web_login_link(), None);
+        assert_eq!(config(&[""], Some("abc123")).web_login_link(), None);
+        assert_eq!(
+            config(&["https://hq.example.ts.net:8443"], None).web_login_link(),
+            None
+        );
+        assert_eq!(
+            config(&["https://hq.example.ts.net:8443"], Some("  ")).web_login_link(),
+            None
+        );
+    }
+}

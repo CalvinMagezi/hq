@@ -11,6 +11,21 @@ use super::*;
 const TYPING_REFRESH: std::time::Duration = std::time::Duration::from_secs(8);
 const PLACEHOLDER_TEXT: &str = "Thinking\u{2026} \u{258D}";
 const SKILL_HINT_BUDGET: usize = 2000;
+/// A DM keeps `!login`'s reply and Discord won't let the owner delete it, so point at `/login`.
+const LOGIN_DM_WARNING: &str = "This link signs anyone on your Tailscale network in as you. It stays in this chat and only I can delete it, so next time use the /login slash command: only you see that reply and Discord doesn't keep it.";
+const LOGIN_EPHEMERAL_WARNING: &str =
+    "This link signs anyone on your Tailscale network in as you. Only you can see this reply.";
+
+/// Discord wording for a `/login` decision. `<...>` stops Discord fetching a link preview.
+fn login_text(reply: crate::chat_commands::LoginReply, cmd: &str, warning: &str) -> String {
+    use crate::chat_commands::{LOGIN_UNCONFIGURED_REPLY, LoginReply};
+    match reply {
+        LoginReply::NotPrivate => format!("Send {cmd} to me in a direct message."),
+        LoginReply::NotOwner => "Not authorized.".to_string(),
+        LoginReply::NotConfigured => LOGIN_UNCONFIGURED_REPLY.to_string(),
+        LoginReply::Link(link) => format!("<{link}>\n\n{warning}"),
+    }
+}
 
 impl Handler {
     /// While a turn runs, steer the message into it (or say it is busy) before
@@ -25,7 +40,8 @@ impl Handler {
         content: &str,
         lower: &str,
     ) -> bool {
-        if lower == "!cancel" || lower == "/cancel" {
+        if lower == "!cancel" || lower == "/cancel" || crate::chat_commands::is_login_command(lower)
+        {
             return false;
         }
         let busy = self
@@ -89,8 +105,25 @@ impl Handler {
         let _ = std::fs::write(presence_dir.join("DISCORD-PRESENCE.md"), content);
     }
 
-    /// `!reset`, `!focus`, `!model`, `!help`, `!status`, `!cancel` and `!permission`.
-    /// True when one of them answered the message.
+    /// Only an allowlisted human in a DM gets the link. Checked here rather than
+    /// trusted from the message gate, which also admits family users and bots.
+    async fn login_decision(
+        &self,
+        user_id: u64,
+        is_human: bool,
+        is_dm: bool,
+    ) -> crate::chat_commands::LoginReply {
+        let is_owner = is_human
+            && is_message_author_allowed(&self.vault_path, user_id, &self.discord_allowed_user_ids)
+                .await;
+        let link = hq_core::config::HqConfig::load()
+            .ok()
+            .and_then(|c| c.web_login_link());
+        crate::chat_commands::login_reply(is_dm, is_owner, link)
+    }
+
+    /// `!reset`, `!focus`, `!model`, `!help`, `!status`, `!cancel`, `!permission`
+    /// and `!login`. True when one of them answered the message.
     pub(super) async fn bang_command(
         &self,
         ctx: &Ctx,
@@ -100,6 +133,14 @@ impl Handler {
         lower: &str,
     ) -> bool {
         let channel_key = effective_channel.get();
+        if crate::chat_commands::is_login_command(lower) {
+            let decision = self
+                .login_decision(msg.author.id.get(), !msg.author.bot, msg.guild_id.is_none())
+                .await;
+            let reply = login_text(decision, "!login", LOGIN_DM_WARNING);
+            let _ = effective_channel.say(&ctx.http, reply).await;
+            return true;
+        }
         if self.family_authorized(msg).await {
             if lower == "!model"
                 || lower.starts_with("!model ")
@@ -351,6 +392,18 @@ impl Handler {
                 .ephemeral(true);
             let _ = cmd
                 .create_response(&ctx.http, CreateInteractionResponse::Message(refusal))
+                .await;
+            return;
+        }
+        if cmd.data.name == "login" {
+            let decision = self
+                .login_decision(cmd.user.id.get(), !cmd.user.bot, cmd.guild_id.is_none())
+                .await;
+            let reply = CreateInteractionResponseMessage::new()
+                .content(login_text(decision, "/login", LOGIN_EPHEMERAL_WARNING))
+                .ephemeral(true);
+            let _ = cmd
+                .create_response(&ctx.http, CreateInteractionResponse::Message(reply))
                 .await;
             return;
         }

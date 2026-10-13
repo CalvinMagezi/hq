@@ -88,9 +88,10 @@ impl Handler {
             "`resume <id>` — Rerun an interrupted background turn (bare `resume` lists them)",
             "`/watch <minutes> [for <hours>h] <prompt>` — Recurring check that keeps you posted",
             "`/unwatch <id>` — Stop a running watch",
+            "`!login`: your web login link, in a direct message only (`/login` replies so only you see it)",
             "`!help` — Show this help",
             "",
-            "**Slash commands:** `/reset`, `/model`, `/status`, `/help`",
+            "**Slash commands:** `/reset`, `/model`, `/status`, `/login`, `/help`",
         ]
         .join("\n")
     }
@@ -244,6 +245,8 @@ impl EventHandler for Handler {
                     "Backend name or model id — omit to list available choices",
                 )),
             CreateCommand::new("status").description("Show the current model and message count"),
+            CreateCommand::new("login")
+                .description("Get your web login link (direct message only, only you see it)"),
             CreateCommand::new("help").description("Show available commands"),
         ];
 

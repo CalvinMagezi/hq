@@ -65,6 +65,12 @@ confirm identity on your behalf.
 ## Behavior
 
 - Rejections are logged: `"discord: rejecting message from unauthorized user"`.
+- **`!login`** and the **`/login`** slash command reply with the owner's web login link
+  (`<first web_allowed_origins entry>/vault#token=<web token>`). Only an allowlisted or paired
+  owner gets it, and only in a direct message. In any server channel, including the family
+  channel and its threads, the reply is just "Send !login to me in a direct message.", and
+  family users never get the link. `/login` answers with a reply only you can see, which
+  Discord doesn't keep; `!login`'s reply stays in the DM, and only the bot can delete it.
 - Any I/O failure while claiming or reading the owner file fails **closed**
   (rejects), not open.
 - A live test — an actual unauthorized Discord account attempting a DM or
