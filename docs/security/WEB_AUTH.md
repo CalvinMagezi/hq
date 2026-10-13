@@ -268,9 +268,12 @@ user running it, so root never creates WAL files the service cannot write.
   token while it is not signed out. After that it mints a device token labelled
   "Restart notice" that expires in 60 seconds, uses it for the one loopback call,
   and deletes it. It opens the database only as its owner.
-- `hq web` and `hq web --json` print the configured token while it works; once it is
-  signed out they mint an "Operator link" device token for the printed link, or
-  print none when run by a user who does not own the vault.
+- `hq web` and `hq web --json` print the configured token while it works. Once it is
+  signed out they print no token (`login_url` is the bare address, and the JSON
+  carries `"token_signed_out": true`) and point at `hq web link`. They never mint, so
+  an agent polling `hq web --json` leaves no stray devices; `hq web link` is the one
+  CLI command that makes a sign-in. A user who does not own the vault cannot check,
+  and prints the configured token as before.
 - `hq chat --server` still sends `HQ_WEB_AUTH_TOKEN` (or, for the local daemon, the
   configured token). It does not open the database, since any user can run it. After
   a sign-out everywhere, set `HQ_WEB_AUTH_TOKEN` to the token from an `hq web link`

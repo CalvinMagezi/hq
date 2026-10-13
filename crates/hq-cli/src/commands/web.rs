@@ -120,6 +120,9 @@ struct Report {
     static_dir: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     log: Option<String>,
+    /// The configured token was signed out from Settings, so no token is printed.
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    token_signed_out: bool,
 }
 
 pub async fn run(config: &HqConfig, args: WebArgs) -> Result<()> {
@@ -168,8 +171,7 @@ async fn start(config: &HqConfig, mut args: StartArgs) -> Result<()> {
     hq_web::auth::check_web_bind(&bind, token.as_deref()).map_err(anyhow::Error::msg)?;
 
     let static_dir = ensure_ui(config, args.build, args.json)?;
-    let printed = sign_in_token(config, token.clone());
-    let mut report = Report::new(&bind, port, printed, Some(&static_dir));
+    let mut report = Report::for_token(config, &bind, port, token.clone(), Some(&static_dir));
 
     if args.detach {
         let log = log_path();
@@ -233,7 +235,7 @@ fn report_running(config: &HqConfig, args: &StartArgs, bind: &str, port: u16) ->
             .map(|t| t.trim().to_string())
             .filter(|t| !t.is_empty())
     };
-    let mut report = Report::new(&running, port, sign_in_token(config, token), None);
+    let mut report = Report::for_token(config, &running, port, token, None);
     report.already_running = true;
     finish(report, args)
 }
@@ -280,6 +282,12 @@ fn render_text(report: &Report, detach: bool, supervised: bool) -> String {
             report.login_url
         ));
     }
+    if report.token_signed_out {
+        out.push_str(
+            "  Sign-in: the web token was signed out from Settings. Run `hq web link` for a new \
+             login link.\n",
+        );
+    }
     if let Some(log) = &report.log {
         out.push_str(&format!("  Log:     {log}\n"));
     }
@@ -321,7 +329,24 @@ impl Report {
             network_url,
             static_dir: static_dir.map(|d| d.display().to_string()),
             log: None,
+            token_signed_out: false,
         }
+    }
+
+    /// Like [`Report::new`], but a configured token the owner signed out is not printed, since
+    /// a link built on it would not work.
+    fn for_token(
+        config: &HqConfig,
+        bind: &str,
+        port: u16,
+        token: Option<String>,
+        static_dir: Option<&Path>,
+    ) -> Self {
+        let token_signed_out = signed_out(config, token.as_deref());
+        let token = if token_signed_out { None } else { token };
+        let mut report = Report::new(bind, port, token, static_dir);
+        report.token_signed_out = token_signed_out;
+        report
     }
 }
 
@@ -803,31 +828,20 @@ fn link(config: &HqConfig) -> Result<()> {
     Ok(())
 }
 
-/// The token to print for signing in. The configured token is replaced by a fresh operator
-/// device token once the owner has signed it out, so the printed link works; a user who does
-/// not own the vault gets none rather than a dead link.
-fn sign_in_token(config: &HqConfig, token: Option<String>) -> Option<String> {
-    let token = token?;
-    let configured = config.web_auth_token.as_deref().map(str::trim);
-    if configured != Some(token.as_str()) {
-        return Some(token);
+/// Whether `token` is the configured web token and the owner signed it out. Checked only as the
+/// vault's owner; anyone else prints what they always did. Never mints: `hq web link` is the one
+/// command that makes a new sign-in, so polling `hq web --json` leaves no stray devices.
+fn signed_out(config: &HqConfig, token: Option<&str>) -> bool {
+    let Some(token) = token else {
+        return false;
+    };
+    if config.web_auth_token.as_deref().map(str::trim) != Some(token) {
+        return false;
     }
     let Ok(db) = open_db_as_owner(config) else {
-        return Some(token);
+        return false;
     };
-    if !hq_db::web_auth::is_revoked(&db, &token).unwrap_or(false) {
-        return Some(token);
-    }
-    let now = chrono::Utc::now().timestamp();
-    match hq_db::web_auth::mint(&db, OPERATOR_LINK_LABEL, now, None) {
-        Ok(minted) => Some(minted.token),
-        Err(e) => {
-            tracing::warn!(
-                "hq web: the web token was signed out and no new link could be made: {e}"
-            );
-            None
-        }
-    }
+    hq_db::web_auth::is_revoked(&db, token).unwrap_or(false)
 }
 
 fn resolve_token(bind: &str, configured: Option<&str>) -> Result<Option<String>> {
@@ -946,26 +960,56 @@ mod tests {
     }
 
     #[test]
-    fn a_signed_out_configured_token_is_never_printed_as_a_link() {
+    fn a_signed_out_configured_token_is_never_printed_and_nothing_is_minted() {
         let (config, _vault) = vault_config(Some("operator-env-token"));
+        let report = Report::for_token(
+            &config,
+            "127.0.0.1",
+            5678,
+            Some("operator-env-token".into()),
+            None,
+        );
         assert_eq!(
-            sign_in_token(&config, Some("operator-env-token".into())).as_deref(),
+            report.token.as_deref(),
             Some("operator-env-token"),
             "an instance that never rotated prints what it always did"
         );
+        assert!(!report.token_signed_out);
+
         let db = open_db_as_owner(&config).unwrap();
         hq_db::web_auth::rotate(&db, Some("operator-env-token"), "Sign out everywhere", 1).unwrap();
-        let printed = sign_in_token(&config, Some("operator-env-token".into())).unwrap();
-        assert_ne!(printed, "operator-env-token");
-        let now = chrono::Utc::now().timestamp();
-        assert!(
-            hq_db::web_auth::verify(&db, &printed, now)
-                .unwrap()
-                .is_some()
+        let report = Report::for_token(
+            &config,
+            "127.0.0.1",
+            5678,
+            Some("operator-env-token".into()),
+            None,
         );
+        assert_eq!(report.token, None);
+        assert!(report.token_signed_out);
+        assert!(!report.login_url.contains("#token="));
+        assert!(render_text(&report, false, false).contains("hq web link"));
+        let json = serde_json::to_value(&report).unwrap();
+        assert_eq!(json["token_signed_out"], true);
         assert_eq!(
-            sign_in_token(&config, Some("generated-lan-token".into())).as_deref(),
-            Some("generated-lan-token")
+            hq_db::web_auth::list(&db, 0).unwrap().len(),
+            1,
+            "only the rotating device; hq web minted nothing"
+        );
+
+        let lan = Report::for_token(
+            &config,
+            "0.0.0.0",
+            5678,
+            Some("generated-lan-token".into()),
+            None,
+        );
+        assert_eq!(lan.token.as_deref(), Some("generated-lan-token"));
+        let fresh = Report::for_token(&config, "127.0.0.1", 5678, None, None);
+        assert!(
+            !serde_json::to_string(&fresh)
+                .unwrap()
+                .contains("token_signed_out")
         );
     }
 
