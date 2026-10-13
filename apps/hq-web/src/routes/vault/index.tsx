@@ -4,6 +4,7 @@ import { useQuery, useQueryClient } from '@tanstack/react-query'
 import type { VaultSignals } from '~/lib/vaultApi'
 import { pinnedNotesQuery, vaultSignalsQuery } from '~/lib/queries'
 import { HomeSections } from '~/components/vault/HomeSections'
+import { GetStartedCard } from '~/components/vault/GetStartedCard'
 import { fetchTasksClient } from '~/lib/tasksApi'
 import { inProgressTasks, sectionState } from '~/lib/homeSections'
 import { useWS } from '~/context/WebSocketContext'
@@ -154,6 +155,8 @@ function VaultHome() {
                         <span className="hidden sm:inline">New note</span>
                     </button>
                 </div>
+
+                <GetStartedCard />
 
                 <HomeSections
                     pinned={sectionState(pinnedQuery)}

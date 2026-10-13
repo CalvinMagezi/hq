@@ -1,6 +1,6 @@
-import { createFileRoute } from '@tanstack/react-router'
+import { createFileRoute, useLocation } from '@tanstack/react-router'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { useMemo, type ReactNode } from 'react'
+import { useEffect, useMemo, type ReactNode } from 'react'
 import { AlertCircle, Loader2, RefreshCw } from 'lucide-react'
 import { fetchSettings, formatSeconds, type HqSettings } from '~/lib/settingsApi'
 import { relTime } from '~/lib/time'
@@ -364,6 +364,8 @@ function SettingsBody({ s }: { s: HqSettings }) {
 
 const NAV = [
   ['clock', 'Clock'],
+  ['devices', 'Devices'],
+  ['chat-apps', 'Chat apps'],
   ['model', 'Model'],
   ['backends', 'Backend chain'],
   ['keys', 'Provider keys'],
@@ -374,8 +376,35 @@ const NAV = [
   ['integrations', 'Integrations'],
 ] as const
 
+const HASH_SCROLL_WAIT_MS = 10_000
+
+/** Scrolls to `#section` once it renders. Sections wait for their data, so the router's own scroll can run before they exist. */
+function useScrollToHash() {
+  const { hash } = useLocation()
+  useEffect(() => {
+    const id = hash.replace(/^#/, '')
+    if (!id) return
+    const scroll = () => {
+      const el = document.getElementById(id)
+      el?.scrollIntoView({ block: 'start' })
+      return el !== null
+    }
+    if (scroll()) return
+    const observer = new MutationObserver(() => {
+      if (scroll()) observer.disconnect()
+    })
+    observer.observe(document.body, { childList: true, subtree: true })
+    const timer = window.setTimeout(() => observer.disconnect(), HASH_SCROLL_WAIT_MS)
+    return () => {
+      observer.disconnect()
+      window.clearTimeout(timer)
+    }
+  }, [hash])
+}
+
 function SettingsPage() {
   const { data, error, isLoading, isFetching, refetch } = useQuery({ queryKey: ['settings'], queryFn: fetchSettings })
+  useScrollToHash()
   return (
     <div className="h-full min-h-0 overflow-y-auto overflow-x-hidden">
       <div className="mx-auto w-full max-w-5xl px-4 py-5 sm:px-8 sm:py-8">
