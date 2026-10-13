@@ -64,10 +64,14 @@ pub(crate) fn host_allowed(host_header: &str, allowed: &[String]) -> bool {
         })
 }
 
-/// Paths a hostile page must not reach: everything the web token guards, plus
-/// `/mcp`, whose key a browser would never hold but whose dev mode is open.
+/// Paths a hostile page must not reach: everything the web token guards, the token-free
+/// device-code exchange, and `/mcp`, whose key a browser would never hold but whose dev
+/// mode is open.
 fn is_protected_path(path: &str) -> bool {
-    crate::auth::web_path_is_guarded(path) || path == "/mcp" || path.starts_with("/mcp/")
+    crate::auth::web_path_is_guarded(path)
+        || path == crate::device_auth::EXCHANGE_PATH
+        || path == "/mcp"
+        || path.starts_with("/mcp/")
 }
 
 /// Why a request is refused, if it is. `host` is the `Host` header, or the URI
@@ -105,6 +109,8 @@ const SESSION_API_PREFIX: &str = "/api/harness-sessions/";
 const SETUP_API_PREFIX: &str = "/api/setup/";
 /// Approving a claude.ai connection, arming and revoking grant or end remote access.
 const OAUTH_API_PREFIX: &str = "/api/oauth/";
+/// Issuing a sign-in code and trading one for the web token hand out a credential.
+const AUTH_API_PREFIX: &str = "/api/auth/";
 
 /// Endpoints that type into or take over a session. `drive`, `goal` and `unwatch` predate the
 /// header and must keep working for a cached PWA that does not send it yet.
@@ -125,7 +131,8 @@ pub(crate) fn missing_client_header(method: &Method, path: &str, has_header: boo
         || path == SPAWN_API_PATH
         || path.starts_with(WORKBENCH_API_PREFIX)
         || path.starts_with(SETUP_API_PREFIX)
-        || path.starts_with(OAUTH_API_PREFIX);
+        || path.starts_with(OAUTH_API_PREFIX)
+        || path.starts_with(AUTH_API_PREFIX);
     guarded && !matches!(*method, Method::GET | Method::HEAD | Method::OPTIONS) && !has_header
 }
 
@@ -333,7 +340,25 @@ mod tests {
             "/api/oauth/requests/r1",
             false
         ));
+        for path in ["/api/auth/device-code", "/api/auth/exchange"] {
+            assert!(post(path, false), "{path} without the header");
+            assert!(!post(path, true), "{path} with the header");
+        }
         assert!(!post("/api/tasks", false), "other routes are unchanged");
+    }
+
+    #[test]
+    fn the_token_free_exchange_is_still_origin_checked() {
+        let path = "/api/auth/exchange";
+        assert!(rejection(&Method::POST, path, LOCAL, EVIL, &[], true).is_some());
+        let (host, origin) = (
+            Some("hq.example.ts.net:8443"),
+            Some("https://hq.example.ts.net:8443"),
+        );
+        assert_eq!(
+            rejection(&Method::POST, path, host, origin, &tailnet(), true),
+            None
+        );
     }
 
     #[test]

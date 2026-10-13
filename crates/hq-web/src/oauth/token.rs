@@ -89,8 +89,8 @@ fn refresh(state: &WsState, form: &Params, now: i64) -> Response {
         Ok(Refresh::Refused) => oauth_error("invalid_grant"),
         Ok(Refresh::Reused { grant_id }) => {
             tracing::warn!(grant = %grant_id, "oauth: a spent refresh token came back; grant revoked");
-            super::guard::notify_owner(
-                state,
+            state.notify_owner(
+                super::guard::SOURCE,
                 "A Claude connection was disconnected",
                 &format!(
                     "Grant {grant_id} presented a refresh token that had already been used, which \
@@ -114,8 +114,8 @@ fn announce_connection(state: &WsState, grant_id: &str, now: i64) {
     let Some(g) = grant else {
         return;
     };
-    super::guard::notify_owner(
-        state,
+    state.notify_owner(
+        super::guard::SOURCE,
         "Claude is connected to HQ",
         &format!(
             "\"{}\" ({}) can now reach HQ with {} access. Disconnect it any time in Settings or \

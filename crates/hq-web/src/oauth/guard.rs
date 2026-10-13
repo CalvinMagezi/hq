@@ -30,7 +30,7 @@ const APPROVAL_POLL: Duration = if cfg!(test) {
 /// Arguments longer than this are not shown in a chat message, so such a call is refused
 /// rather than approved from a cut view.
 pub(crate) const MAX_APPROVAL_ARGS_CHARS: usize = 3000;
-const SOURCE: &str = "mcp-connector";
+pub(crate) const SOURCE: &str = "mcp-connector";
 /// Approval requests one grant may have waiting at once, so a hijacked conversation cannot
 /// flood the owner's chat.
 pub(crate) const MAX_WAITING_APPROVALS: i64 = 5;
@@ -358,16 +358,6 @@ fn tool_text(id: Value, is_error: bool, text: &str) -> Json<Value> {
         id,
         json!({ "content": [{ "type": "text", "text": text }], "isError": is_error }),
     )
-}
-
-/// Tells the owner, past the relay's batching, about a connection event they should see.
-pub(crate) fn notify_owner(state: &WsState, title: &str, body: &str) {
-    let item = ValueItem::new(SOURCE, ValueKind::Fyi, title, body);
-    let sent = value_items::insert(&state.db, &item)
-        .and_then(|()| value_items::deliver(&state.vault_path, &state.db, &item, true));
-    if !matches!(sent, Ok(true)) {
-        tracing::warn!("connector: a notice did not reach the relay mailbox: {title}");
-    }
 }
 
 #[cfg(test)]

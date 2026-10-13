@@ -7,6 +7,7 @@ import { relTime } from '~/lib/time'
 import { availableTimeZones, deviceTimeZone, setClockZone, useClockZone, zoneCity } from '~/lib/clock'
 import { formatUsd, openrouterUsageQuery } from '~/lib/openrouterUsageApi'
 import { forecastQuery } from '~/lib/usageApi'
+import { DevicesSection } from '~/components/settings/DevicesSection'
 import {
   SCOPE_CHOICES,
   armConnector,
@@ -320,6 +321,7 @@ function SettingsBody({ s }: { s: HqSettings }) {
   return (
     <div className="flex flex-col gap-6 min-w-0 flex-1 max-w-[760px]">
       <ClockSection />
+      <DevicesSection />
       <CopilotCreditsSection />
       <OpenRouterSpendSection />
       <ModelSection s={s} />

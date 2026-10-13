@@ -7,6 +7,7 @@ pub mod auth;
 mod budgets_api;
 mod chat_uploads;
 mod copilot_usage_api;
+mod device_auth;
 mod error;
 pub mod gmail_ingest;
 mod mcp_http;
@@ -81,6 +82,8 @@ pub struct WsState {
     pub(crate) active_chat_turns: ws::ChatTurnMap,
     /// Web Push, when `web_push` is on and its key could be loaded.
     pub(crate) web_push: Option<Arc<web_push::WebPush>>,
+    /// The one-time code a signed-in device hands to a new one.
+    pub(crate) device_codes: device_auth::DeviceCodes,
 }
 
 impl WsState {
@@ -110,6 +113,18 @@ impl WsState {
             connector: None,
             active_chat_turns: Arc::new(tokio::sync::RwLock::new(std::collections::HashMap::new())),
             web_push: None,
+            device_codes: device_auth::DeviceCodes::default(),
+        }
+    }
+
+    /// Tells the owner, past the relay's batching, about an event they should see.
+    pub(crate) fn notify_owner(&self, source: &str, title: &str, body: &str) {
+        use hq_core::types::{ValueItem, ValueKind};
+        let item = ValueItem::new(source, ValueKind::Fyi, title, body);
+        let sent = hq_db::value_items::insert(&self.db, &item)
+            .and_then(|()| hq_db::value_items::deliver(&self.vault_path, &self.db, &item, true));
+        if !matches!(sent, Ok(true)) {
+            tracing::warn!("web: a notice did not reach the relay mailbox: {title}");
         }
     }
 
@@ -222,6 +237,14 @@ pub fn create_router(state: Arc<WsState>) -> Router {
         .route("/health", get(api::health_handler))
         .route("/api/vault-status", get(api::vault_status_handler))
         .route("/api/ws-ticket", post(auth::ws_ticket_handler))
+        .route(
+            device_auth::DEVICE_CODE_PATH,
+            post(device_auth::device_code_handler),
+        )
+        .route(
+            device_auth::EXCHANGE_PATH,
+            post(device_auth::exchange_handler),
+        )
         .route(
             "/api/admin/broadcast",
             axum::routing::post(api::admin_broadcast_handler),

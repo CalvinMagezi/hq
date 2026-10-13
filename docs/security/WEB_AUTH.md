@@ -160,6 +160,39 @@ because URLs end up in browser history, proxy logs and `Referer` headers.
   asks the owner to delete it. A Discord DM user can't delete the bot's
   messages, so `!login` points at the `/login` slash command, whose ephemeral
   reply Discord doesn't keep.
+- **Signing in another device.** Settings, Devices on a signed-in browser calls
+  `POST /api/auth/device-code` (behind the token) and shows a one-time code and
+  a QR code of the login link. The QR code is the token itself, drawn in the
+  browser; the server never sends it anywhere. On the new device the banner
+  trades the code at `POST /api/auth/exchange` for the token. Details below.
+
+### `/api/auth/exchange`, the one unauthenticated `/api` route
+
+The web token guard skips exactly this path (not `/api/auth/exchange/...`); the
+origin guard still checks it, and it needs `X-HQ-Client`, so a hostile page can
+neither call it nor read its answer.
+
+- A code is 10 characters from the alphabet `hq pair` uses (no 0, O, 1, I or L),
+  about 49 bits, shown as `XXXXX-XXXXX`. Case, spaces and hyphens are ignored.
+- It works once and lasts 10 minutes. Issuing a new one replaces the old one.
+  Only a salted SHA-256 is kept, in memory, so a restart voids it.
+- A wrong, spent or expired code all get the same `401`. The comparison is
+  constant time.
+- Five wrong codes from one client within 10 minutes get that client `429`
+  until the window passes, even with the right code. The client is the first
+  `X-Forwarded-For` (or `X-Real-IP`) address: behind Tailscale Serve or Caddy
+  every peer is loopback, so a caller who reaches HQ directly can forge it.
+  That limit is best effort.
+- The real bound is global: 20 wrong codes from anyone within 10 minutes burn
+  the pending code and answer `429` to everyone until the window passes. That
+  is at most 20 guesses per code against 31^10.
+- Both routes answer `404` when no web token is set, since there is nothing to
+  hand out, and both send `Cache-Control: no-store`.
+- A successful exchange is logged (without the code or the token) and the owner
+  gets a "A new device signed in to HQ" notice in the inbox, the chat relay and
+  Web Push (when each is set up).
+- The token handed out is the shared web token, not a per-device one, so
+  signing one device out means rotating it for all.
 
 One exception remains: `/hooks/gmail` takes its own `GMAIL_WEBHOOK_SECRET`. Send
 it as `Authorization: Bearer <secret>` whenever the sender can set headers. The

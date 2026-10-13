@@ -105,18 +105,23 @@ pub fn constant_time_eq(a: &[u8], b: &[u8]) -> bool {
     a.iter().zip(b).fold(0u8, |acc, (x, y)| acc | (x ^ y)) == 0
 }
 
+/// A fresh code of `CODE_LEN` characters from the retype-safe alphabet, unformatted.
+pub fn random_code() -> String {
+    let mut rng = rand::thread_rng();
+    (0..CODE_LEN)
+        .map(|_| CODE_ALPHABET[rng.gen_range(0..CODE_ALPHABET.len())] as char)
+        .collect()
+}
+
 /// Writes a fresh pending code (replacing any earlier one) and returns it in clear.
 pub fn create_pairing_code(
     vault: &Path,
     platform: PairPlatform,
     now: i64,
 ) -> Result<String, PairError> {
-    let mut rng = rand::thread_rng();
-    let code: String = (0..CODE_LEN)
-        .map(|_| CODE_ALPHABET[rng.gen_range(0..CODE_ALPHABET.len())] as char)
-        .collect();
+    let code = random_code();
     let _guard = lock(vault, platform)?;
-    let salt = hex::encode(rng.r#gen::<[u8; 16]>());
+    let salt = hex::encode(rand::thread_rng().r#gen::<[u8; 16]>());
     let record = PairingRecord {
         hash: hex::encode(hash_code(&salt, &code)),
         salt,

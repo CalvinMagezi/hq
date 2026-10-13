@@ -113,9 +113,11 @@ pub(crate) fn presented_secret(headers: &HeaderMap) -> &str {
 }
 
 /// Whether `path` needs the web token: the chat sockets and the REST API.
-/// `/health` (deploy checks), `/mcp` (own key) and static files stay open.
+/// `/health` (deploy checks), `/mcp` (own key) and static files stay open, and so does
+/// the device-code exchange, which a device without the token must reach.
 pub(crate) fn web_path_is_guarded(path: &str) -> bool {
-    path == "/ws" || path.starts_with("/ws/") || path.starts_with("/api/")
+    let api = path == "/ws" || path.starts_with("/ws/") || path.starts_with("/api/");
+    api && path != crate::device_auth::EXCHANGE_PATH
 }
 
 /// Compare without an early exit, so response timing doesn't leak the token.
@@ -266,8 +268,27 @@ mod tests {
         ] {
             assert!(web_path_is_guarded(p), "{p}");
         }
-        for p in ["/health", "/mcp", "/mcp/sse", "/", "/assets/app.js", "/wsx"] {
+        for p in [
+            "/health",
+            "/mcp",
+            "/mcp/sse",
+            "/",
+            "/assets/app.js",
+            "/wsx",
+            "/api/auth/exchange",
+        ] {
             assert!(!web_path_is_guarded(p), "{p}");
+        }
+        for p in [
+            "/api/auth/device-code",
+            "/api/auth/exchange/x",
+            "/api/auth/exchangeX",
+            "/api/auth/exchange/",
+        ] {
+            assert!(
+                web_path_is_guarded(p),
+                "only the exact exchange path is open: {p}"
+            );
         }
     }
 

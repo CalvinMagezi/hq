@@ -35,10 +35,12 @@ const BODY_CHARS: usize = 300;
 /// Where a tap goes when the item names no page.
 const DEFAULT_LINK: &str = "/notifications";
 
-/// Inbox sources that are always pushed: what agents send through `notify_owner`.
-const AGENT_SOURCES: &[&str] = &[
+/// Inbox sources that are always pushed: what agents send through `notify_owner`, and a new
+/// device signing in, which the owner must hear about even with no chat app connected.
+const ALWAYS_PUSHED_SOURCES: &[&str] = &[
     hq_tools::notify::NOTIFY_SOURCE,
     hq_tools::notify::NOTIFY_RELAY_SOURCE,
+    crate::device_auth::DEVICE_SIGN_IN_SOURCE,
 ];
 
 pub(crate) struct WebPush {
@@ -87,7 +89,7 @@ impl WebPush {
             ValueState::Pending | ValueState::Routed | ValueState::Delivered
         );
         open && (self.config.push_all
-            || AGENT_SOURCES.contains(&item.source_task.as_str())
+            || ALWAYS_PUSHED_SOURCES.contains(&item.source_task.as_str())
             || matches!(item.kind, ValueKind::ActionNeeded | ValueKind::Proposal))
     }
 

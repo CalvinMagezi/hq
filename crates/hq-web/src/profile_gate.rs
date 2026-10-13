@@ -35,6 +35,9 @@ const LITE_API: &[&str] = &[
     "/api/notifications",
     // Opens the update socket the app listens on for live task changes.
     "/api/ws-ticket",
+    // Signing in another device.
+    "/api/auth/device-code",
+    "/api/auth/exchange",
 ];
 
 /// Whether `profile: lite` serves this request. Everything outside `/api` and `/hooks` is the
@@ -102,6 +105,8 @@ mod tests {
             (Method::GET, "/api/vault/folders"),
             (Method::GET, "/api/vault-status"),
             (Method::POST, "/api/ws-ticket"),
+            (Method::POST, "/api/auth/device-code"),
+            (Method::POST, "/api/auth/exchange"),
             (Method::GET, "/api/notifications"),
             (Method::POST, "/api/notifications/mark-all-read"),
             (Method::GET, "/health"),
