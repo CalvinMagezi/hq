@@ -323,6 +323,7 @@ function SettingsBody({ s }: { s: HqSettings }) {
     <div className="flex flex-col gap-6 min-w-0 flex-1 max-w-[760px]">
       <ClockSection />
       <DevicesSection />
+      <ChatAppsSection />
       <CopilotCreditsSection />
       <OpenRouterSpendSection />
       <ModelSection s={s} />
@@ -348,7 +349,6 @@ function SettingsBody({ s }: { s: HqSettings }) {
       </Section>
       <CodingAgentsSection host={s.agent_host} />
       <ConnectorSection />
-      <ChatAppsSection />
       <Section id="integrations" title="Integrations">
         {s.integrations.remote_mcp.length === 0 && <Row label="Remote MCP servers">none</Row>}
         {s.integrations.remote_mcp.map((m) => (
@@ -382,7 +382,7 @@ function SettingsPage() {
         <header className="flex items-start justify-between gap-4 mb-6">
           <div>
             <h1 className="text-3xl font-semibold tracking-tight text-neutral-50" style={{ fontFamily: 'var(--font-heading)' }}>Settings</h1>
-            <p className="mt-1 text-sm text-neutral-400 max-w-prose">The clock zone is yours to set. The Claude connector can be managed here too. Everything else is a read-only view of the running HQ configuration, and secrets are never shown.</p>
+            <p className="mt-1 text-sm text-neutral-400 max-w-prose">The clock zone, devices, chat apps and the Claude connector can be managed here. Everything else is a read-only view of the running HQ configuration, and secrets are never shown.</p>
           </div>
           <button type="button" onClick={() => refetch()} className="hq-icon-btn" aria-label="Reload settings" title="Reload settings">
             <RefreshCw className={`w-4 h-4 ${isFetching ? 'animate-spin' : ''}`} />
