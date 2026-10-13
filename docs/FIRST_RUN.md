@@ -33,12 +33,12 @@ Open HQ in the browser the first time, using the sign-in link your setup printed
 
 - The key is sent only to your own HQ server over your tailnet or HTTPS, and from there only to the chosen provider's fixed address. It is never returned by the API, never written to logs, and scrubbed from any error text.
 - The setup endpoints refuse to run on a server without a web token. They do not make an exception for requests that look local, because behind a proxy or `tailscale serve` every request looks local.
-- They refuse once any key exists (`409`), so the screen cannot be used to swap keys later. Use the **Settings** page to see which providers are configured, or `hq env` on the server to change them.
+- They refuse once any key exists (`409`), so the screen cannot be used to swap keys later. Replace or add a key from **Settings**, **Provider keys** instead (see below), or with `hq env` on the server.
 - Like other changes from the web app, the requests need the `X-HQ-Client` header, which a page on another site cannot add.
 
 ## When it does not appear
 
-- **A key already exists.** Open **Settings** to see which providers are configured. To change one, use `hq env` or edit `config.yaml`.
+- **A key already exists.** Open **Settings**, **Provider keys**. **Replace** or **Add** tests the new key the same way and saves it only if it works. It leaves the model choice alone, except that a first key ever moves a stock default onto that provider's low-cost model, as setup does. A provider whose key comes from the server's environment (`HQ_OPENROUTER_API_KEY`, `OPENROUTER_API_KEY`, `HQ_ANTHROPIC_API_KEY`, `ANTHROPIC_API_KEY`, `HQ_GOOGLE_AI_API_KEY` or `GEMINI_API_KEY`) shows as set by the environment and is refused (`409`), because a config write could not override it. Change those where they are set and restart. Like setup, this needs a web token.
 - **Local use without a web token.** On `localhost` with no token the screen is unavailable by design (`403`: "first-run setup needs a web token"). Run `hq env` or add `openrouter_api_key` to `~/.hq/config.yaml`.
 - **An older release.** Servers that installed before the screen shipped have no `/setup`. Update with `hq update --apply`, or follow the terminal route.
 

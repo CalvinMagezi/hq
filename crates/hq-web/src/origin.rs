@@ -111,6 +111,8 @@ const SETUP_API_PREFIX: &str = "/api/setup/";
 const OAUTH_API_PREFIX: &str = "/api/oauth/";
 /// Issuing a sign-in code and trading one for the web token hand out a credential.
 const AUTH_API_PREFIX: &str = "/api/auth/";
+/// Replacing a model key from Settings writes a credential, like setup.
+const PROVIDER_KEY_PATH: &str = "/api/settings/provider-key";
 
 /// Endpoints that type into or take over a session. `drive`, `goal` and `unwatch` predate the
 /// header and must keep working for a cached PWA that does not send it yet.
@@ -132,7 +134,8 @@ pub(crate) fn missing_client_header(method: &Method, path: &str, has_header: boo
         || path.starts_with(WORKBENCH_API_PREFIX)
         || path.starts_with(SETUP_API_PREFIX)
         || path.starts_with(OAUTH_API_PREFIX)
-        || path.starts_with(AUTH_API_PREFIX);
+        || path.starts_with(AUTH_API_PREFIX)
+        || path == PROVIDER_KEY_PATH;
     guarded && !matches!(*method, Method::GET | Method::HEAD | Method::OPTIONS) && !has_header
 }
 
@@ -321,6 +324,11 @@ mod tests {
             "setup writes a credential"
         );
         assert!(!post("/api/setup/provider", true));
+        assert!(
+            post("/api/settings/provider-key", false),
+            "replacing a model key writes a credential"
+        );
+        assert!(!post("/api/settings/provider-key", true));
         assert!(!missing_client_header(
             &Method::GET,
             "/api/setup/status",

@@ -132,6 +132,7 @@ mod tests {
             (Method::POST, "/api/workbench/lockdown"),
             (Method::GET, "/api/setup/status"),
             (Method::POST, "/api/setup/provider"),
+            (Method::POST, "/api/settings/provider-key"),
             (Method::POST, "/api/admin/broadcast"),
             (Method::GET, "/api/settings"),
             (Method::GET, "/api/threads"),

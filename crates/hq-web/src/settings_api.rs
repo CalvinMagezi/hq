@@ -1,11 +1,14 @@
-//! Read-only view of the running HQ configuration for the web app's Settings page.
+//! View of the running HQ configuration for the web app's Settings page. Provider keys are
+//! changed through `provider_keys`; this view stays read-only.
 //!
 //! The view is built field by field. Nothing is serialized wholesale, so a secret added
 //! to `HqConfig` later cannot leak here by accident.
 
 use crate::error::ApiError;
+use crate::provider_keys;
 use axum::response::IntoResponse;
 use hq_core::config::{HqConfig, resolve_session_model};
+use hq_core::setup_provider::SetupProvider;
 use serde_json::{Value, json};
 
 /// Host part of a URL, so an endpoint can be shown without its path or credentials.
@@ -19,12 +22,31 @@ fn host_of(url: &str) -> String {
         .to_string()
 }
 
-fn key_presence(config: &HqConfig) -> Value {
-    let present = |key: &Option<String>| key.as_deref().is_some_and(|k| !k.trim().is_empty());
+fn present(key: &Option<String>) -> bool {
+    key.as_deref().is_some_and(|k| !k.trim().is_empty())
+}
+
+/// A provider the Settings page can change: `id` is what the replace endpoint takes, and
+/// `source` says where the key in force comes from (`env` cannot be changed from the web).
+fn editable_key(
+    name: &str,
+    provider: SetupProvider,
+    key: &Option<String>,
+    env_set: &dyn Fn(&str) -> bool,
+) -> Value {
+    let source = if provider_keys::env_lock(provider, env_set).is_some() {
+        Some("env")
+    } else {
+        present(key).then_some("config")
+    };
+    json!({"name": name, "id": provider, "configured": present(key), "source": source})
+}
+
+fn key_presence(config: &HqConfig, env_set: &dyn Fn(&str) -> bool) -> Value {
     json!([
-        {"name": "OpenRouter", "configured": present(&config.openrouter_api_key)},
-        {"name": "Anthropic", "configured": present(&config.anthropic_api_key)},
-        {"name": "Google AI", "configured": present(&config.google_ai_api_key)},
+        editable_key("OpenRouter", SetupProvider::OpenRouter, &config.openrouter_api_key, env_set),
+        editable_key("Anthropic", SetupProvider::Anthropic, &config.anthropic_api_key, env_set),
+        editable_key("Google AI", SetupProvider::Google, &config.google_ai_api_key, env_set),
         {"name": "DeepSeek", "configured": present(&config.deepseek_api_key)},
         {"name": "OpenAI", "configured": present(&config.openai_api_key)},
         {"name": "Groq", "configured": present(&config.groq_api_key)},
@@ -59,7 +81,7 @@ fn backends_view(config: &HqConfig) -> Value {
     })
 }
 
-pub(crate) fn settings_view(config: &HqConfig) -> Value {
+pub(crate) fn settings_view(config: &HqConfig, env_set: &dyn Fn(&str) -> bool) -> Value {
     let sandbox = serde_json::to_value(config.governance.bash.sandbox).unwrap_or(Value::Null);
     let hosts: Vec<&String> = config.agent_host.hosts.keys().collect();
     let remote_mcp: Vec<Value> = config
@@ -81,7 +103,7 @@ pub(crate) fn settings_view(config: &HqConfig) -> Value {
             "local_only": config.local_only,
         },
         "backends": backends_view(config),
-        "provider_keys": key_presence(config),
+        "provider_keys": key_presence(config, env_set),
         "limits": {
             "chat_turn_timeout_secs": config.chat_turn_timeout_secs,
             "turn_ack_timeout_secs": config.relay.turn_ack_timeout_secs,
@@ -122,13 +144,20 @@ pub(crate) async fn settings_handler() -> Result<impl IntoResponse, ApiError> {
         .await
         .map_err(|e| ApiError::internal(format!("settings task failed: {e}")))?
         .map_err(|e| ApiError::internal(format!("could not read the HQ config: {e}")))?;
-    Ok(axum::Json(settings_view(&config)))
+    Ok(axum::Json(settings_view(
+        &config,
+        &provider_keys::operator_env_set,
+    )))
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use hq_core::config::RemoteMcpServer;
+
+    fn no_env(_: &str) -> bool {
+        false
+    }
 
     #[test]
     fn the_view_never_contains_a_secret_value() {
@@ -147,7 +176,7 @@ mod tests {
             api_key: Some("SECRETVALUE5".into()),
             live_user_turn_only: true,
         });
-        let text = settings_view(&config).to_string();
+        let text = settings_view(&config, &no_env).to_string();
         assert!(!text.contains("SECRETVALUE"), "{text}");
         assert!(text.contains("mcp.example.com"));
     }
@@ -159,7 +188,7 @@ mod tests {
             groq_api_key: Some("   ".into()),
             ..Default::default()
         };
-        let view = settings_view(&config);
+        let view = settings_view(&config, &no_env);
         let keys = view["provider_keys"].as_array().unwrap();
         let configured =
             |name: &str| keys.iter().find(|k| k["name"] == name).unwrap()["configured"].clone();
@@ -169,14 +198,45 @@ mod tests {
     }
 
     #[test]
+    fn editable_keys_say_whether_the_config_or_the_environment_sets_them() {
+        let config = HqConfig {
+            openrouter_api_key: Some("sk-or-x".into()),
+            anthropic_api_key: Some("sk-ant-x".into()),
+            ..Default::default()
+        };
+        let env = |n: &str| n == "ANTHROPIC_API_KEY";
+        let view = settings_view(&config, &env);
+        let row = |name: &str| {
+            view["provider_keys"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .find(|k| k["name"] == name)
+                .unwrap()
+                .clone()
+        };
+        assert_eq!(row("OpenRouter")["id"], json!("open_router"));
+        assert_eq!(row("OpenRouter")["source"], json!("config"));
+        assert_eq!(row("Anthropic")["source"], json!("env"));
+        assert_eq!(row("Google AI")["source"], Value::Null);
+        assert!(row("Groq").get("source").is_none());
+    }
+
+    #[test]
     fn the_active_model_follows_the_session_resolution_rule() {
         let mut config = HqConfig {
             default_model: "model-a".into(),
             ..Default::default()
         };
-        assert_eq!(settings_view(&config)["model"]["active"], json!("model-a"));
+        assert_eq!(
+            settings_view(&config, &no_env)["model"]["active"],
+            json!("model-a")
+        );
         config.relay.model = Some("model-b".into());
-        assert_eq!(settings_view(&config)["model"]["active"], json!("model-b"));
+        assert_eq!(
+            settings_view(&config, &no_env)["model"]["active"],
+            json!("model-b")
+        );
     }
 
     #[test]

@@ -160,6 +160,14 @@ because URLs end up in browser history, proxy logs and `Referer` headers.
   asks the owner to delete it. A Discord DM user can't delete the bot's
   messages, so `!login` points at the `/login` slash command, whose ephemeral
   reply Discord doesn't keep.
+- **Replacing a model key.** `POST /api/settings/provider-key` refuses to run
+  unless a web token is configured, like first-run setup, and needs the
+  `X-HQ-Client` header. It tests the key with a one-token call and writes it to
+  `config.yaml` only if that works. The key is never returned or logged, and is
+  scrubbed from the provider's error text. A key the environment pins
+  (`HQ_<PROVIDER>_API_KEY` or the provider's own variable) answers 409, because
+  a config write would be hidden behind it; a copy HQ itself exported from the
+  config does not count. Lite does not serve it.
 - **Signing in another device.** Settings, Devices on a signed-in browser calls
   `POST /api/auth/device-code` (behind the token) and shows a one-time code and
   a QR code of the login link. The QR code is the token itself, drawn in the
