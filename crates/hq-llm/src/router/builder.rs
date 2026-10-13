@@ -89,9 +89,12 @@ fn export_plan(
         if !mine && env(name).is_some_and(|v| !v.is_empty()) {
             continue;
         }
+        let current = env(name);
         match config_key(Some(cfg), name) {
+            // Writing the environment races other threads reading it, so only write on a change.
+            Some(value) if current.as_deref() == Some(value.as_str()) => {}
             Some(value) => plan.push((name, Some(value))),
-            None if mine => plan.push((name, None)),
+            None if mine && current.is_some() => plan.push((name, None)),
             None => {}
         }
     }
@@ -874,6 +877,12 @@ mod export_plan_tests {
         assert_eq!(
             export_plan(&replaced, &|_| None, &[]),
             vec![("ANTHROPIC_API_KEY", Some("sk-new".to_string()))]
+        );
+        let same = |n: &str| (n == "ANTHROPIC_API_KEY").then(|| "sk-new".to_string());
+        assert_eq!(
+            export_plan(&replaced, &same, &["ANTHROPIC_API_KEY"]),
+            Vec::<(&str, Option<String>)>::new(),
+            "an unchanged key is not written again"
         );
     }
 }
