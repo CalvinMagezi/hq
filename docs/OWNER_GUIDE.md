@@ -54,5 +54,5 @@ Otherwise, ask the person who set up your server. They can print it again by run
 |---------|------------|
 | **Can't reach your HQ** | Switch Tailscale on, on this device, and tap **Try again**. If Tailscale is on, wait a minute (HQ may be updating). Still nothing: check your HQ server shows as connected in the Tailscale admin console, and if it doesn't, ask whoever set it up. |
 | **This device is offline** | You have no internet. HQ shows what it saved and reconnects by itself. |
-| **Sign in to HQ** | Paste your login link into the box. |
+| **Sign in to HQ** | Paste your login link into the box. Lost it? See [If you're signed out](#if-youre-signed-out). |
 | A page won't open at all, not even saved data | Same as "Can't reach your HQ": Tailscale first. |
