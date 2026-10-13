@@ -211,7 +211,9 @@ neither call it nor read its answer.
 ### Device tokens and signing out
 
 Every sign-in HQ hands out is its own device token: the exchange, `/login`,
-`hq web link` (and `sudo hq-join --print-link`, which runs it) and "Sign out
+`hq web link` (and `sudo hq-join --print-link`, which runs it; servers whose
+`hq-join` predates that flag run `hq web link` as the `hq` user, see
+`docs/HETZNER.md`) and "Sign out
 everywhere". A device token is `hqw_` plus 64 hex characters (two v4 UUIDs). It
 is returned once; the `web_device_tokens` table keeps only its SHA-256 (hex),
 a label, when it was made and when it was last used (updated at most every five

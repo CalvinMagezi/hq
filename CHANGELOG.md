@@ -51,6 +51,7 @@ All notable changes to Agent-HQ will be documented in this file.
 
 ### Fixed
 
+- **Owners are no longer told to ask for `hq-join --print-link`, which most servers lack.** Updates replace the `hq` binary but never `hq-join`, so servers set up earlier have no such flag. The sign-in banner and `/login` now just say to ask whoever set up the server for a new link, and `docs/HETZNER.md` gives the operator the direct `hq web link` command for those servers.
 - **The header no longer says "offline" on a device that is online.** It read the network state once into React state, which could go stale; it now reads it live, the same way the new reachability banner does.
 - **`hq onboard` turns on the relays it configures.** It wrote the Discord and Telegram tokens but never `relay.discord_enabled` or `relay.telegram_enabled`, so the relay never started and said nothing. It also appended the tokens as text, which landed under the wrong section when `relay:` was not the last block; it now writes through the config writer.
 

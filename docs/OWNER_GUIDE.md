@@ -84,7 +84,7 @@ with when it signed in and when it was last used. The one you are holding says *
   on every other device and disconnects Claude (claude.ai), so connect Claude again afterwards.
 
 If someone else signs you out everywhere, send `/login` to your HQ bot, or ask whoever runs your
-server for a new link (`sudo hq-join --print-link`), then sign out everywhere again.
+server for a new link, then sign out everywhere again.
 
 ## Connect Telegram or Discord
 
@@ -126,8 +126,8 @@ Anyone with the link can sign in as you, so keep it out of chat history:
 - **Discord:** in a direct message to the bot, type `/login` and pick the slash command. Only you
   see the reply, and Discord doesn't keep it.
 
-Otherwise, ask the person who set up your server. They can print it again by running
-`sudo hq-join --print-link` on the server.
+Otherwise, ask the person who set up your server for a new link. (For them: "Making a new
+login link" in `docs/HETZNER.md`.)
 
 ## When something looks wrong
 
