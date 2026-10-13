@@ -528,6 +528,11 @@ pub(crate) async fn screen_stream_handler(
         return ApiError::Unavailable("too many live views are open; try again in a moment".into())
             .into_response();
     };
+    // Like the chat socket, the view ends on a sign-out: it was opened with a credential that may be gone.
+    let mut auth_epoch = state.auth_epoch.subscribe();
+    let signed_out = async move {
+        let _ = auth_epoch.changed().await;
+    };
     let state = StreamState {
         db: Arc::new(state.db.clone()),
         id,
@@ -543,7 +548,10 @@ pub(crate) async fn screen_stream_handler(
         finished: false,
         _slot: slot,
     };
-    let events = futures::stream::unfold(state, next_stream_event);
+    let events = futures::StreamExt::take_until(
+        futures::stream::unfold(state, next_stream_event),
+        Box::pin(signed_out),
+    );
     let mut response = axum::response::sse::Sse::new(events)
         .keep_alive(
             axum::response::sse::KeepAlive::new()
@@ -1114,6 +1122,41 @@ mod tests {
             screen_fingerprint(&a),
             screen_fingerprint(&json!({"lines": ["y"], "source": "live"}))
         );
+    }
+
+    async fn stream_body(state: &Arc<WsState>, sign_out_first: bool) -> String {
+        let response = screen_stream_handler(
+            State(state.clone()),
+            AxumPath("hs-done".into()),
+            Query(ScreenQuery {
+                lines: None,
+                styled: None,
+            }),
+        )
+        .await;
+        if sign_out_first {
+            state.end_web_sessions();
+        }
+        let body = tokio::time::timeout(
+            std::time::Duration::from_secs(5),
+            axum::body::to_bytes(response.into_body(), usize::MAX),
+        )
+        .await
+        .expect("the stream ended")
+        .unwrap();
+        String::from_utf8_lossy(&body).into_owned()
+    }
+
+    #[tokio::test]
+    async fn a_sign_out_ends_a_live_view_before_it_sends_anything_more() {
+        let state = test_state();
+        seed(&state, "hs-done", None);
+        state
+            .db
+            .with_conn(|c| registry::set_status(c, "hs-done", registry::STATUS_STOPPED))
+            .unwrap();
+        assert!(stream_body(&state, false).await.contains("event: screen"));
+        assert!(!stream_body(&state, true).await.contains("event: screen"));
     }
 
     #[tokio::test]

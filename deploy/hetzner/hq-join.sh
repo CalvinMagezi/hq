@@ -32,9 +32,11 @@ esac
 # which would leave root-owned database files), so a link the owner signed out of from Settings is
 # never printed again. Older builds print the bootstrap token from mcp.env, as before.
 owner_link() {
-    local origin="$1" token
+    local origin="$1" token help
     token="$(sed -n 's/^HQ_WEB_AUTH_TOKEN=//p' "$MCP_ENV")"
-    if "$HQ_BIN" web --help 2>/dev/null | grep -qE '^[[:space:]]+link([[:space:]]|$)'; then
+    # Captured first: `grep -q` exiting early would SIGPIPE hq and fail the pipe under pipefail.
+    help="$("$HQ_BIN" web --help 2>/dev/null || true)"
+    if grep -qE '^[[:space:]]+link([[:space:]]|$)' <<< "$help"; then
         # In the environment, not on a command line, so other users cannot read it from ps.
         HQ_WEB_AUTH_TOKEN="$token" runuser -u hq -- \
             env HQ_CONFIG_PATH="$CONFIG" HQ_VAULT_PATH="$HQ_VAULT" "$HQ_BIN" web link \

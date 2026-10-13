@@ -90,6 +90,13 @@ pub struct WsState {
     pub(crate) device_codes: device_auth::DeviceCodes,
     /// Bumped on every sign-out, which closes the chat sockets opened before it.
     pub(crate) auth_epoch: tokio::sync::watch::Sender<u64>,
+    /// Held by a code exchange and by sign-out everywhere, so a code redeemed during a rotate
+    /// cannot mint a token after the rotate deleted them all, and two rotates run one at a time.
+    pub(crate) auth_lock: tokio::sync::Mutex<()>,
+    /// Whether the configured token was signed out (`auth::CONFIGURED_*`), cached.
+    pub(crate) configured_state: std::sync::atomic::AtomicU8,
+    /// When `configured_state` was last read from the database, unix seconds.
+    pub(crate) configured_checked_at: std::sync::atomic::AtomicI64,
 }
 
 impl WsState {
@@ -121,6 +128,9 @@ impl WsState {
             web_push: None,
             device_codes: device_auth::DeviceCodes::default(),
             auth_epoch: tokio::sync::watch::channel(0).0,
+            auth_lock: tokio::sync::Mutex::new(()),
+            configured_state: std::sync::atomic::AtomicU8::new(auth::CONFIGURED_UNKNOWN),
+            configured_checked_at: std::sync::atomic::AtomicI64::new(0),
         }
     }
 
@@ -224,6 +234,7 @@ const BROADCAST_CAPACITY: usize = 4096;
 
 /// Create the web router — vault-focused endpoints only.
 pub fn create_router(state: Arc<WsState>) -> Router {
+    state.load_configured_state();
     let static_dir = state
         .static_dir
         .as_deref()

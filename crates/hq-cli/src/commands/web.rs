@@ -783,6 +783,18 @@ const OPERATOR_LINK_LABEL: &str = "Operator link";
 /// Opens the vault database only as the user that owns it. A database root opens on a server
 /// gets root-owned WAL files, and the service can no longer write to it.
 pub(crate) fn open_db_as_owner(config: &HqConfig) -> Result<Database> {
+    require_vault_owner(config)?;
+    Database::open(&config.db_path()).context("failed to open database")
+}
+
+/// Like [`open_db_as_owner`], but only an existing database and without running migrations: a
+/// newer binary must not migrate the file under the daemon that is still using it.
+pub(crate) fn open_existing_db_as_owner(config: &HqConfig) -> Result<Database> {
+    require_vault_owner(config)?;
+    Database::open_existing(&config.db_path())
+}
+
+fn require_vault_owner(config: &HqConfig) -> Result<()> {
     let db_path = config.db_path();
     let probe = [
         db_path.clone(),
@@ -800,7 +812,7 @@ pub(crate) fn open_db_as_owner(config: &HqConfig) -> Result<Database> {
             config.vault_path.display()
         );
     }
-    Database::open(&db_path).context("failed to open database")
+    Ok(())
 }
 
 /// A login link for `token`: the first `web_allowed_origins` entry, else the local address.
@@ -838,7 +850,7 @@ fn signed_out(config: &HqConfig, token: Option<&str>) -> bool {
     if config.web_auth_token.as_deref().map(str::trim) != Some(token) {
         return false;
     }
-    let Ok(db) = open_db_as_owner(config) else {
+    let Ok(db) = open_existing_db_as_owner(config) else {
         return false;
     };
     hq_db::web_auth::is_revoked(&db, token).unwrap_or(false)

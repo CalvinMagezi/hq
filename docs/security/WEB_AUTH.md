@@ -222,10 +222,17 @@ minutes, so a request is not a write). A presented Bearer secret is valid when:
 - it starts with `hqw_` and its SHA-256 matches a row that has not expired. The
   lookup is by hash, so it leaks no timing an attacker can use without a preimage.
 
-A database error refuses the secret. The checks live in one place,
+A database error refuses a device token. Whether the configured token is signed
+out is cached in memory: read when the server starts, set by this server's own
+rotate, and read again at most every 60 seconds while it is live (another server on
+the same database may sign it out). So an instance that never rotates answers its
+configured token without a database read, and a database error keeps an earlier
+"live" rather than locking it out; with nothing known yet, the error refuses.
+Device-token lookups and the "is sign-in on" check run on a blocking thread
+(`spawn_blocking`), off the async workers. The checks live in one place,
 `WsState::web_credential` (`crates/hq-web/src/auth.rs`), and the matched
 credential rides in the request's extensions so the devices list can mark
-"this device".
+"this device". `hq_core::redact` also scrubs `hqw_` tokens from text it redacts.
 
 **Whether sign-in is on at all** (`WsState::web_auth_enabled`) means a configured
 token exists, signed out or not, or any device token row does. A signed-out
@@ -242,14 +249,23 @@ token, so a non-loopback bind still needs one at startup.
 
 - `GET /api/auth/devices`: id, label, created and last-used times, whether it is
   the caller, whether the configured token still works. Never a token or a hash.
-- `DELETE /api/auth/devices/{id}`: signs one device out. It also closes every open
-  chat socket and voids socket tickets; devices still signed in reconnect.
+- `DELETE /api/auth/devices/{id}`: signs one device out. It also drops the Web Push
+  subscriptions that device saved (each subscription records the device token it
+  was saved with), closes every open chat socket and live session view, and voids
+  socket tickets; devices still signed in reconnect.
 - `POST /api/auth/rotate` ("Sign out everywhere"): in one SQLite transaction it
   deletes every device token, records the configured token's hash as signed out,
   and mints one token labelled "Sign out everywhere", which it returns
-  (`Cache-Control: no-store`). It then voids the pending device code and socket
-  tickets, closes every open chat socket (an epoch every socket watches), and
-  notifies the owner without the token. The PWA stores the new token and reloads.
+  (`Cache-Control: no-store`). It voids the pending device code before and after
+  that transaction, and holds a lock that the code exchange also takes, so a code
+  redeemed during a rotate cannot mint a token after it and two rotates run one at a
+  time (the second caller's token is the one that survives). It then voids socket
+  tickets, closes every open chat socket and live session view (an epoch each one
+  watches), revokes every claude.ai connector grant and closes the connector's
+  approval window (`mcp_connector::revoke_all`), drops every Web Push subscription,
+  and only then notifies the owner without the token, so no stranger's browser is
+  pushed the notice. The PWA stores the new token and reloads; its own push
+  subscription is sent again on that load, and Claude has to be connected again.
 
 **The configured token after a sign-out everywhere.** It is refused from then on.
 Revocation is stored as the token's hash, not a flag, so an operator who puts a new
@@ -267,7 +283,9 @@ user running it, so root never creates WAL files the service cannot write.
 - `hq notify-restart` (run by the updater as the service user) sends the configured
   token while it is not signed out. After that it mints a device token labelled
   "Restart notice" that expires in 60 seconds, uses it for the one loopback call,
-  and deletes it. It opens the database only as its owner.
+  and deletes it. It opens the database only as its owner and never migrates it
+  (`Database::open_existing`), since the updater may run a newer binary than the
+  daemon; a database without the new tables reads as "not signed out".
 - `hq web` and `hq web --json` print the configured token while it works. Once it is
   signed out they print no token (`login_url` is the bare address, and the JSON
   carries `"token_signed_out": true`) and point at `hq web link`. They never mint, so
@@ -385,8 +403,9 @@ origin it is served from is missing from this list.
 - Any valid token can sign every other device out, the owner's included. That
   holder could already drive the whole agent; the owner gets back in with `/login`
   or a new operator link and signs out everywhere again.
-- Signing one device out closes every open chat socket, not only that device's,
-  because sockets are not tied to a device. The others reconnect at once.
+- Signing one device out closes every open chat socket and live session view, not
+  only that device's, because they are not tied to a device. The others reconnect
+  at once.
 - Tested with Axum request-level tests (`crates/hq-web/src/origin.rs`,
   `auth.rs`, `lib.rs`). They send the `Origin` and `Host` headers that Chrome,
   Firefox and Safari send, but no real browser runs them.

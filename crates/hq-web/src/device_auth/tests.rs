@@ -466,3 +466,123 @@ async fn signing_out_everywhere_closes_an_open_chat_socket() {
     );
     server.abort();
 }
+
+fn seed_push(state: &WsState, endpoint: &str, device: Option<&str>) {
+    hq_db::push_subscriptions::upsert(&state.db, endpoint, "k", "a", None, device).unwrap();
+}
+
+fn push_endpoints(state: &WsState) -> Vec<String> {
+    hq_db::push_subscriptions::list(&state.db)
+        .unwrap()
+        .into_iter()
+        .map(|s| s.endpoint)
+        .collect()
+}
+
+#[tokio::test]
+async fn sign_out_everywhere_ends_connector_grants_the_window_and_push() {
+    let _serial = SERIAL.lock().await;
+    let (app, state, _vault) = router_with_state(Some(TOKEN));
+    let now = chrono::Utc::now().timestamp();
+    state
+        .db
+        .with_conn(|c| {
+            c.execute(
+                "INSERT INTO mcp_oauth_grants (id, client_id, client_name, label, grant_scope,
+                 scope, resource, created_at, expires_at)
+                 VALUES ('g1', 'https://claude.example/c', 'Claude', 'Claude', 'full', 'mcp',
+                 'https://hq.example.ts.net/mcp', ?1, ?2)",
+                rusqlite_params(now),
+            )?;
+            hq_db::mcp_connector::arm(c, now + 600)
+        })
+        .unwrap();
+    seed_push(&state, "https://push.example.com/thief", None);
+
+    assert_eq!(rotate(&app, TOKEN).await.0, StatusCode::OK);
+
+    let (live, armed) = state
+        .db
+        .with_conn(|c| {
+            Ok((
+                hq_db::mcp_connector::list_grants(c, false, now)?.len(),
+                hq_db::mcp_connector::armed_until(c, now)?,
+            ))
+        })
+        .unwrap();
+    assert_eq!(live, 0, "connector grants are revoked");
+    assert_eq!(armed, None, "the approval window is closed");
+    assert!(
+        push_endpoints(&state).is_empty(),
+        "no stranger's browser gets the notice"
+    );
+}
+
+fn rusqlite_params(now: i64) -> [i64; 2] {
+    [now, now + 86_400]
+}
+
+#[tokio::test]
+async fn signing_a_device_out_drops_its_push_subscriptions_only() {
+    let _serial = SERIAL.lock().await;
+    let (app, state, _vault) = router_with_state(Some(TOKEN));
+    sign_in_with_code(&app).await;
+    let (_, body) = list_devices(&app, TOKEN).await;
+    let phone_id = body["devices"][0]["id"].as_str().unwrap().to_string();
+    // Push is off in this router; `web_push::api` tests that a subscribe stores the device id.
+    seed_push(&state, "https://push.example.com/phone", Some(&phone_id));
+    seed_push(&state, "https://push.example.com/laptop", None);
+
+    assert_eq!(
+        sign_out(&app, TOKEN, &phone_id).await,
+        StatusCode::NO_CONTENT
+    );
+    assert_eq!(
+        push_endpoints(&state),
+        vec!["https://push.example.com/laptop".to_string()]
+    );
+}
+
+#[tokio::test]
+async fn the_configured_token_is_answered_from_memory_once_known() {
+    let _serial = SERIAL.lock().await;
+    let (app, state, _vault) = router_with_state(Some(TOKEN));
+    assert_eq!(list_devices(&app, TOKEN).await.0, StatusCode::OK);
+    state
+        .db
+        .with_conn(|c| Ok(c.execute_batch("DROP TABLE web_revoked_tokens;")?))
+        .unwrap();
+    assert_eq!(
+        list_devices(&app, TOKEN).await.0,
+        StatusCode::OK,
+        "a database problem does not sign out a configured token already known to be live"
+    );
+}
+
+#[tokio::test]
+async fn a_rotate_waits_for_an_exchange_in_flight_and_voids_its_code() {
+    let _serial = SERIAL.lock().await;
+    let (app, state, _vault) = router_with_state(Some(TOKEN));
+    let code = issue(&app).await;
+    let held = state.auth_lock.lock().await;
+    let rotating = tokio::spawn({
+        let app = app.clone();
+        async move { rotate(&app, TOKEN).await }
+    });
+    tokio::task::yield_now().await;
+    assert!(!rotating.is_finished(), "rotate waits for the lock");
+    drop(held);
+    let (status, body) = rotating.await.unwrap();
+    assert_eq!(status, StatusCode::OK);
+    let kept = body["token"].as_str().unwrap().to_string();
+    assert_eq!(
+        send(&app, exchange(&code)).await.0,
+        StatusCode::UNAUTHORIZED
+    );
+    let (_, body) = list_devices(&app, &kept).await;
+    assert_eq!(
+        body["devices"].as_array().unwrap().len(),
+        1,
+        "only the rotating device"
+    );
+}

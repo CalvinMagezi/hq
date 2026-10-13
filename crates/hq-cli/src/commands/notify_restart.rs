@@ -48,14 +48,15 @@ impl Drop for Bearer {
 }
 
 /// Never opens the database as a user who does not own it (the updater runs this as the
-/// service user), so a manual root run cannot leave root-owned WAL files behind.
+/// service user), so a manual root run cannot leave root-owned WAL files behind, and never
+/// migrates it. Tables this binary knows but the database lacks read as "not signed out".
 fn broadcast_bearer(config: &HqConfig) -> Option<Bearer> {
     let configured = config
         .web_auth_token
         .as_deref()
         .map(str::trim)
         .filter(|t| !t.is_empty());
-    let Ok(db) = super::web::open_db_as_owner(config) else {
+    let Ok(db) = super::web::open_existing_db_as_owner(config) else {
         return configured.map(|t| Bearer::Configured(t.to_string()));
     };
     if let Some(token) = configured
@@ -230,6 +231,28 @@ mod tests {
         let left = hq_db::web_auth::list(&db, now).unwrap();
         assert_eq!(left.len(), 1, "only the owner's device remains");
         assert_eq!(left[0].id, kept.id);
+    }
+
+    #[test]
+    fn an_older_database_is_never_migrated_and_keeps_the_configured_token() {
+        let vault = tempfile::TempDir::new().unwrap();
+        let config = config_in(vault.path(), Some("operator-env-token"));
+        hq_db::Connection::open(config.db_path())
+            .unwrap()
+            .execute_batch("CREATE TABLE unrelated (a INTEGER);")
+            .unwrap();
+        let bearer = broadcast_bearer(&config).unwrap();
+        assert_eq!(bearer.token(), "operator-env-token");
+        drop(bearer);
+        let tables: i64 = hq_db::Connection::open(config.db_path())
+            .unwrap()
+            .query_row(
+                "SELECT COUNT(*) FROM sqlite_master WHERE name IN ('schema_version', 'web_device_tokens')",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(tables, 0, "notify-restart ran no migration");
     }
 
     #[test]

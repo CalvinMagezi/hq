@@ -80,7 +80,8 @@ with when it signed in and when it was last used. The one you are holding says *
   was shared by mistake. HQ signs out every device and the original link from whoever set up your
   server. The device you pressed it on is signed back in at once; every other phone, browser and
   home-screen app shows **Sign in to HQ** and needs a code from this device, `/login` from your
-  chat app, or a new link. HQ sends you a notice when it happens.
+  chat app, or a new link. HQ sends you a notice when it happens. It also stops notifications
+  on every other device and disconnects Claude (claude.ai), so connect Claude again afterwards.
 
 If someone else signs you out everywhere, send `/login` to your HQ bot, or ask whoever runs your
 server for a new link (`sudo hq-join --print-link`), then sign out everywhere again.

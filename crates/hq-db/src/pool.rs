@@ -169,6 +169,19 @@ impl Database {
         Ok(Self { pool })
     }
 
+    /// Open an existing database without creating it or running migrations, for a short-lived
+    /// command (`hq notify-restart`) that may be a newer binary than the daemon using the file.
+    pub fn open_existing(db_path: &Path) -> Result<Self> {
+        if !db_path.is_file() {
+            anyhow::bail!("no database at {}", db_path.display());
+        }
+        let pool = Pool::builder()
+            .max_size(1)
+            .connection_timeout(std::time::Duration::from_secs(10))
+            .build(SqliteConnectionManager::file(db_path))?;
+        Ok(Self { pool })
+    }
+
     /// Open an in-memory database (for testing).
     pub fn open_memory() -> Result<Self> {
         let manager = SqliteConnectionManager::memory();
@@ -201,5 +214,35 @@ impl std::fmt::Debug for Database {
         f.debug_struct("Database")
             .field("pool_size", &self.pool.max_size())
             .finish()
+    }
+}
+
+#[cfg(test)]
+mod open_existing_tests {
+    use super::*;
+
+    #[test]
+    fn open_existing_neither_creates_nor_migrates() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let path = dir.path().join("vault.db");
+        assert!(Database::open_existing(&path).is_err());
+        assert!(!path.exists(), "a missing database is not created");
+
+        Connection::open(&path)
+            .unwrap()
+            .execute_batch("CREATE TABLE unrelated (a INTEGER);")
+            .unwrap();
+        let db = Database::open_existing(&path).unwrap();
+        let migrated: i64 = db
+            .with_conn(|c| {
+                Ok(c.query_row(
+                    "SELECT COUNT(*) FROM sqlite_master WHERE name = 'schema_version'",
+                    [],
+                    |r| r.get(0),
+                )?)
+            })
+            .unwrap();
+        assert_eq!(migrated, 0);
+        assert!(crate::web_auth::is_revoked(&db, "operator-env-token").is_err());
     }
 }

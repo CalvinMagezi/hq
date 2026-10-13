@@ -155,7 +155,7 @@ pub(crate) async fn origin_guard(
     next: axum::middleware::Next,
 ) -> axum::response::Response {
     // Only protected paths read it, and it costs a database read when no token is configured.
-    let has_token = is_protected_path(request.uri().path()) && state.web_auth_enabled();
+    let has_token = is_protected_path(request.uri().path()) && state.web_auth_enabled_async().await;
     let host = request_host(&request);
     let origin = request
         .headers()

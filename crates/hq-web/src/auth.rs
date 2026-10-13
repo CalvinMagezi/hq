@@ -228,6 +228,15 @@ fn bearer(headers: &HeaderMap) -> Option<&str> {
         .and_then(|v| v.strip_prefix("Bearer "))
 }
 
+/// Whether the configured token was signed out, cached on `WsState` so the configured-token
+/// path needs no database read while the answer is fresh.
+pub(crate) const CONFIGURED_UNKNOWN: u8 = 0;
+const CONFIGURED_LIVE: u8 = 1;
+const CONFIGURED_SIGNED_OUT: u8 = 2;
+/// Another server on the same database (an `hq web` beside `hq start all`) may sign it out, so a
+/// "live" answer is read again after this long.
+const CONFIGURED_RECHECK_SECS: i64 = 60;
+
 impl crate::WsState {
     /// The configured web token, when it is set and not blank. It may have been signed out.
     pub(crate) fn configured_web_token(&self) -> Option<&str> {
@@ -270,17 +279,90 @@ impl crate::WsState {
         }
     }
 
+    /// [`Self::web_auth_enabled`] off the async worker threads. A configured token answers
+    /// without touching the database.
+    pub(crate) async fn web_auth_enabled_async(self: &std::sync::Arc<Self>) -> bool {
+        if self.configured_web_token().is_some() {
+            return true;
+        }
+        let state = self.clone();
+        tokio::task::spawn_blocking(move || state.web_auth_enabled())
+            .await
+            .unwrap_or(true)
+    }
+
+    /// The configured token, when `secret` is it and it was seen live within
+    /// [`CONFIGURED_RECHECK_SECS`]: no database read.
+    fn configured_credential_cached(&self, secret: &str) -> Option<WebCredential> {
+        let configured = self.configured_web_token()?;
+        (self.configured_live_and_fresh() && tokens_match(secret, configured))
+            .then_some(WebCredential::Configured)
+    }
+
+    fn configured_live_and_fresh(&self) -> bool {
+        use std::sync::atomic::Ordering;
+        let checked = self.configured_checked_at.load(Ordering::Acquire);
+        self.configured_state.load(Ordering::Acquire) == CONFIGURED_LIVE
+            && chrono::Utc::now().timestamp() - checked < CONFIGURED_RECHECK_SECS
+    }
+
+    /// Reads whether the configured token was signed out into the cache. Called when the server
+    /// starts; a database error leaves it unknown, to be read again on the next request.
+    pub(crate) fn load_configured_state(&self) {
+        if let Some(configured) = self.configured_web_token() {
+            let _ = self.configured_token_live(configured);
+        }
+    }
+
+    /// Records that the configured token is signed out. It stays so for this process: the
+    /// revocation is by hash, and only a new value (which needs a restart) undoes it.
+    pub(crate) fn mark_configured_signed_out(&self) {
+        self.configured_state
+            .store(CONFIGURED_SIGNED_OUT, std::sync::atomic::Ordering::Release);
+    }
+
+    /// Live or signed out, from the cache when fresh. A database error keeps an earlier "live"
+    /// (so an instance that never rotates is not locked out by a busy database) and refuses
+    /// when nothing is known yet.
     fn configured_token_live(&self, configured: &str) -> Option<WebCredential> {
+        use std::sync::atomic::Ordering;
+        if self.configured_state.load(Ordering::Acquire) == CONFIGURED_SIGNED_OUT {
+            return None;
+        }
+        if self.configured_live_and_fresh() {
+            return Some(WebCredential::Configured);
+        }
         match hq_db::web_auth::is_revoked(&self.db, configured) {
-            Ok(false) => Some(WebCredential::Configured),
-            Ok(true) => None,
+            Ok(false) => {
+                self.configured_checked_at
+                    .store(chrono::Utc::now().timestamp(), Ordering::Release);
+                let _ = self.configured_state.compare_exchange(
+                    CONFIGURED_UNKNOWN,
+                    CONFIGURED_LIVE,
+                    Ordering::AcqRel,
+                    Ordering::Acquire,
+                );
+                self.configured_token_known_live()
+            }
+            Ok(true) => {
+                self.mark_configured_signed_out();
+                None
+            }
             Err(e) => {
                 tracing::warn!(
                     "web auth: could not check whether the web token was signed out: {e}"
                 );
-                None
+                self.configured_token_known_live()
             }
         }
+    }
+
+    fn configured_token_known_live(&self) -> Option<WebCredential> {
+        (self
+            .configured_state
+            .load(std::sync::atomic::Ordering::Acquire)
+            == CONFIGURED_LIVE)
+            .then_some(WebCredential::Configured)
     }
 
     /// After a sign-out: closes every open chat socket and voids outstanding socket tickets.
@@ -299,10 +381,28 @@ pub(crate) async fn web_auth_middleware(
     mut request: axum::extract::Request,
     next: axum::middleware::Next,
 ) -> axum::response::Response {
-    if !web_path_is_guarded(request.uri().path()) || !state.web_auth_enabled() {
+    if !web_path_is_guarded(request.uri().path()) {
         return next.run(request).await;
     }
-    let credential = bearer(request.headers()).and_then(|t| state.web_credential(t));
+    let presented = bearer(request.headers()).map(str::to_string);
+    let cached = presented
+        .as_deref()
+        .and_then(|t| state.configured_credential_cached(t));
+    let (enabled, credential) = match cached {
+        Some(credential) => (true, Some(credential)),
+        None => {
+            let checking = state.clone();
+            tokio::task::spawn_blocking(move || {
+                let credential = presented.and_then(|t| checking.web_credential(&t));
+                (checking.web_auth_enabled(), credential)
+            })
+            .await
+            .unwrap_or((true, None))
+        }
+    };
+    if !enabled {
+        return next.run(request).await;
+    }
     if let Some(credential) = credential {
         request.extensions_mut().insert(credential);
         return next.run(request).await;

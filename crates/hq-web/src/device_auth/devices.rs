@@ -93,19 +93,45 @@ pub(crate) async fn delete_handler(
         Err(e) => ApiError::internal(e).into_response(),
         Ok(true) => {
             state.end_web_sessions();
+            if let Err(e) = hq_db::push_subscriptions::delete_for_device(&state.db, &id) {
+                tracing::warn!(device = %id, "web: a signed-out device keeps its push subscription: {e}");
+            }
             tracing::info!(device = %id, "web: a device was signed out");
             StatusCode::NO_CONTENT.into_response()
         }
     }
 }
 
+/// What else a stolen sign-in could have set up: claude.ai connector grants (and an open
+/// approval window), and Web Push subscriptions, dropped before the notice so no stranger's
+/// browser is pushed it. Each is best effort: the sign-out itself has already committed.
+fn end_other_access(state: &WsState, now: i64) {
+    let revoked = state
+        .db
+        .with_conn(|c| hq_db::mcp_connector::revoke_all(c, "owner signed out everywhere", now));
+    match revoked {
+        Ok(n) => tracing::info!(
+            grants = n,
+            "web: sign-out everywhere revoked connector grants"
+        ),
+        Err(e) => {
+            tracing::error!("web: sign-out everywhere could not revoke connector grants: {e}")
+        }
+    }
+    if let Err(e) = hq_db::push_subscriptions::delete_all(&state.db) {
+        tracing::error!("web: sign-out everywhere could not drop push subscriptions: {e}");
+    }
+}
+
 /// `POST /api/auth/rotate`: signs out every device and the configured token in one
-/// transaction, voids the pending sign-in code and open sockets, and returns the one new token
-/// this device keeps.
+/// transaction, voids the pending sign-in code and open sockets, revokes connector grants and
+/// push subscriptions, and returns the one new token this device keeps.
 pub(crate) async fn rotate_handler(State(state): State<Arc<WsState>>) -> Response {
     if let Some(refused) = sign_in_off(&state) {
         return refused;
     }
+    let _serialized = state.auth_lock.lock().await;
+    state.device_codes.clear();
     let at = chrono::Utc::now();
     let minted = hq_db::web_auth::rotate(
         &state.db,
@@ -121,8 +147,12 @@ pub(crate) async fn rotate_handler(State(state): State<Arc<WsState>>) -> Respons
                 .into_response();
         }
     };
+    if state.configured_web_token().is_some() {
+        state.mark_configured_signed_out();
+    }
     state.device_codes.clear();
     state.end_web_sessions();
+    end_other_access(&state, at.timestamp());
     tracing::info!(device = %minted.id, "web: signed out everywhere");
     state.notify_owner(
         DEVICE_SIGN_IN_SOURCE,

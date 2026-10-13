@@ -209,8 +209,9 @@ function SignOutEverywhere() {
       <p className="text-neutral-100">Sign out every device?</p>
       <p className="text-xs text-neutral-400">
         Every phone, browser and installed app must sign in again, including this one, which is signed back in for you
-        right away. The original login link from whoever set up your server stops working too. Use this when a phone is
-        lost or a link was shared by mistake.
+        right away. The original login link from whoever set up your server stops working too, other devices stop getting
+        notifications, and Claude (claude.ai) is disconnected. Use this when a phone is lost or a link was shared by
+        mistake.
       </p>
       <div className="flex flex-wrap gap-3">
         <button type="button" onClick={rotate} disabled={busy} className="hq-btn-ghost disabled:opacity-40" style={{ color: 'var(--accent-red)' }}>

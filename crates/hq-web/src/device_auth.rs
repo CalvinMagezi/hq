@@ -216,6 +216,7 @@ pub(crate) async fn exchange_handler(
     if !state.web_auth_enabled() {
         return ApiError::not_found().into_response();
     }
+    let _serialized = state.auth_lock.lock().await;
     let at = chrono::Utc::now();
     match state
         .device_codes
