@@ -116,10 +116,10 @@ impl Handler {
         let is_owner = is_human
             && is_message_author_allowed(&self.vault_path, user_id, &self.discord_allowed_user_ids)
                 .await;
-        let link = hq_core::config::HqConfig::load()
-            .ok()
-            .and_then(|c| c.web_login_link());
-        crate::chat_commands::login_reply(is_dm, is_owner, link)
+        crate::chat_commands::login_reply(is_dm, is_owner, || {
+            let cfg = hq_core::config::HqConfig::load().ok()?;
+            crate::chat_commands::mint_login_link(&cfg, crate::chat_commands::DISCORD_LOGIN_LABEL)
+        })
     }
 
     /// `!reset`, `!focus`, `!model`, `!help`, `!status`, `!cancel`, `!permission`

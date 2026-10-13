@@ -326,6 +326,10 @@ const MIGRATIONS: &[(&str, &str)] = &[
         "089_mcp_connector_audit",
         include_str!("../sql/089_mcp_connector_audit.sql"),
     ),
+    (
+        "090_web_device_tokens",
+        include_str!("../sql/090_web_device_tokens.sql"),
+    ),
 ];
 
 const MEMORY_SCHEMA_MIGRATION: &str = "058_memory_schema";
@@ -587,6 +591,43 @@ mod tests {
         assert_eq!(audit(&conn), 0, "087 as shipped has no call log");
         super::run(&conn).unwrap();
         assert_eq!(audit(&conn), 1);
+    }
+
+    #[test]
+    fn web_device_tokens_reach_a_fresh_and_an_existing_database() {
+        let tables = |c: &rusqlite::Connection| -> i64 {
+            c.query_row(
+                "SELECT COUNT(*) FROM sqlite_master WHERE type='table'
+                 AND name IN ('web_device_tokens','web_revoked_tokens')",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap()
+        };
+        let fresh = rusqlite::Connection::open_in_memory().unwrap();
+        super::run(&fresh).unwrap();
+        assert_eq!(tables(&fresh), 2);
+
+        let existing = rusqlite::Connection::open_in_memory().unwrap();
+        let idx = super::MIGRATIONS
+            .iter()
+            .position(|(v, _)| *v == "090_web_device_tokens")
+            .unwrap();
+        super::apply(&existing, &super::MIGRATIONS[..idx]).unwrap();
+        existing
+            .execute_batch(
+                "INSERT INTO push_subscriptions (endpoint, p256dh, auth, created_at)
+                 VALUES ('https://push.example.com/a', 'k', 'a', '2026-01-01T00:00:00Z');",
+            )
+            .unwrap();
+        assert_eq!(tables(&existing), 0);
+        super::run(&existing).unwrap();
+        assert_eq!(tables(&existing), 2);
+        let kept: i64 = existing
+            .query_row("SELECT COUNT(*) FROM push_subscriptions", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(kept, 1, "existing rows survive");
+        super::run(&existing).unwrap();
     }
 
     #[test]

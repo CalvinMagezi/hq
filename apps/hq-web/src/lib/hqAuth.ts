@@ -6,6 +6,7 @@ import { markSynced } from './offlineCache'
 
 const STORAGE_KEY = 'hq-web-token'
 const LINK_PARAM = 'token'
+const CODE_PARAM = 'code'
 
 /** Take a token from the link once, then drop it from the address bar. */
 function tokenFromLink(url: URL): string | null {
@@ -49,12 +50,40 @@ function tokenFromPaste(raw: string): string {
   return text.slice(at + marker.length).split('&')[0].trim()
 }
 
+/** Take a one-time sign-in code from a `#code=` link (the QR code in Settings, Devices) and drop it from the address bar. */
+function codeFromLink(url: URL): string | null {
+  const hash = new URLSearchParams(url.hash.replace(/^#/, ''))
+  const code = hash.get(CODE_PARAM)
+  if (!code) return null
+  hash.delete(CODE_PARAM)
+  url.hash = hash.toString()
+  window.history.replaceState(null, '', url.toString())
+  return code
+}
+
+// A code from the link, held until the sign-in banner trades it.
+let linkCode: string | null = null
+
 /**
- * Store the token from a `#token=` link right away. The index route redirects before any request
- * runs, and the redirect drops the fragment, so waiting for the first fetch to read it loses it.
+ * Store the token from a `#token=` link, and hold the code from a `#code=` link, right away. The
+ * index route redirects before any request runs, and the redirect drops the fragment, so waiting
+ * for the first fetch to read it loses it.
  */
 export function adoptLinkToken(): void {
   hqToken()
+  if (typeof window === 'undefined') return
+  try {
+    linkCode = codeFromLink(new URL(window.location.href)) ?? linkCode
+  } catch {
+    // An unparseable address carries no code.
+  }
+}
+
+/** The code a `#code=` link brought, once; the banner signs in with it. */
+export function takeLinkCode(): string | null {
+  const code = linkCode
+  linkCode = null
+  return code
 }
 
 /** Store a pasted token the way a `#token=` link does, replacing any older one. */

@@ -22,6 +22,7 @@ pub mod tool_usage;
 pub mod usage_ledger;
 pub mod value_items;
 pub mod vault_cache;
+pub mod web_auth;
 
 pub use pool::Database;
 

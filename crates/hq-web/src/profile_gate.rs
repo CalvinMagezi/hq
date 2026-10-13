@@ -38,6 +38,9 @@ const LITE_API: &[&str] = &[
     // Signing in another device.
     "/api/auth/device-code",
     "/api/auth/exchange",
+    // Signing devices out, one or all.
+    "/api/auth/devices",
+    "/api/auth/rotate",
 ];
 
 /// Whether `profile: lite` serves this request. Everything outside `/api` and `/hooks` is the
@@ -107,6 +110,9 @@ mod tests {
             (Method::POST, "/api/ws-ticket"),
             (Method::POST, "/api/auth/device-code"),
             (Method::POST, "/api/auth/exchange"),
+            (Method::GET, "/api/auth/devices"),
+            (Method::DELETE, "/api/auth/devices/abc"),
+            (Method::POST, "/api/auth/rotate"),
             (Method::GET, "/api/notifications"),
             (Method::POST, "/api/notifications/mark-all-read"),
             (Method::GET, "/health"),

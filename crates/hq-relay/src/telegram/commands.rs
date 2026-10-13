@@ -287,17 +287,17 @@ const LOGIN_LINK_WARNING: &str = "This link signs anyone on your Tailscale netwo
 /// `/login`: the owner's web login link, in a private chat only. Sent straight
 /// to the chat, never through the thread mirror, so the token stays out of the DB.
 pub async fn handle_login(ctx: &CommandContext<'_>) -> anyhow::Result<bool> {
-    use crate::chat_commands::{LOGIN_UNCONFIGURED_REPLY, LoginReply, login_reply};
+    use crate::chat_commands::{
+        LOGIN_UNCONFIGURED_REPLY, LoginReply, TELEGRAM_LOGIN_LABEL, login_reply, mint_login_link,
+    };
     use teloxide::prelude::Requester;
     if !crate::chat_commands::is_login_command(ctx.text_lower) {
         return Ok(false);
     }
     let is_owner = ctx.caller.role == TelegramRole::Owner;
-    let decision = login_reply(
-        ctx.msg.chat.is_private(),
-        is_owner,
-        ctx.hq_cfg.web_login_link(),
-    );
+    let decision = login_reply(ctx.msg.chat.is_private(), is_owner, || {
+        mint_login_link(ctx.hq_cfg, TELEGRAM_LOGIN_LABEL)
+    });
     let reply = match decision {
         LoginReply::NotOwner => return require_owner(ctx, "/login").await,
         LoginReply::NotPrivate => LOGIN_NOT_PRIVATE_REPLY.to_string(),

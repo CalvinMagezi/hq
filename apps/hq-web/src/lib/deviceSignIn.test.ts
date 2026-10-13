@@ -1,5 +1,14 @@
 import { afterEach, expect, test } from 'bun:test'
-import { exchangeCode, formatCountdown, loginLink, normalizeCode, secondsLeft } from './deviceSignIn'
+import {
+  codeLink,
+  exchangeCode,
+  formatCountdown,
+  lastUsedText,
+  normalizeCode,
+  secondsLeft,
+  signOutDevice,
+  signOutEverywhere,
+} from './deviceSignIn'
 
 const realFetch = globalThis.fetch
 
@@ -22,9 +31,43 @@ test('a code typed in lowercase, with spaces or the hyphen, is the same code', (
   expect(normalizeCode('ABCDE-FGH2J')).toBe('ABCDEFGH2J')
 })
 
-test('the login link carries the token in the fragment, never the query', () => {
-  const link = loginLink('https://hq.example.ts.net:8443', 'a+b/c')
-  expect(link).toBe('https://hq.example.ts.net:8443/vault#token=a%2Bb%2Fc')
+test('the QR link carries the one-time code in the fragment, never a token or the query', () => {
+  const link = codeLink('https://hq.example.ts.net:8443', 'abcde-fgh2j')
+  expect(link).toBe('https://hq.example.ts.net:8443/vault#code=ABCDEFGH2J')
+  expect(link).not.toContain('token')
+})
+
+test('last use reads as a short relative time', () => {
+  const now = 1_800_000_000_000
+  const secs = now / 1000
+  expect(lastUsedText(null, now)).toBe('not used yet')
+  expect(lastUsedText(secs - 5, now)).toBe('just now')
+  expect(lastUsedText(secs - 5 * 60, now)).toBe('5 min ago')
+  expect(lastUsedText(secs - 3 * 3600, now)).toBe('3 h ago')
+  expect(lastUsedText(secs - 86_400, now)).toBe('1 day ago')
+  expect(lastUsedText(secs - 2 * 86_400, now)).toBe('2 days ago')
+  expect(lastUsedText(secs + 60, now)).toBe('just now')
+})
+
+test('signing out everywhere returns the new token and refuses an answer without one', async () => {
+  const sent = serverAnswers(200, { token: 'hqw_new' })
+  expect(await signOutEverywhere()).toBe('hqw_new')
+  expect(sent[0].url).toBe('/api/auth/rotate')
+  expect(sent[0].init.method).toBe('POST')
+  expect(new Headers(sent[0].init.headers).get('X-HQ-Client')).toBe('web')
+  serverAnswers(200, {})
+  await expect(signOutEverywhere()).rejects.toThrow('without a token')
+})
+
+test('signing one device out deletes it by id', async () => {
+  const sent: { url: string; init: RequestInit }[] = []
+  globalThis.fetch = (async (url: string, init: RequestInit) => {
+    sent.push({ url, init })
+    return new Response(null, { status: 204 })
+  }) as unknown as typeof fetch
+  await signOutDevice('a/b')
+  expect(sent[0].url).toBe('/api/auth/devices/a%2Fb')
+  expect(sent[0].init.method).toBe('DELETE')
 })
 
 test('the countdown never goes below zero and shows minutes and seconds', () => {

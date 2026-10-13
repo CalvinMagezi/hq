@@ -1,6 +1,7 @@
 //! Signing in another device without pasting the web token. A signed-in device asks for a
-//! one-time code (`POST /api/auth/device-code`), and the new device trades it for the token
-//! (`POST /api/auth/exchange`, the one `/api` route the web token does not guard).
+//! one-time code (`POST /api/auth/device-code`), and the new device trades it for a device token
+//! of its own (`POST /api/auth/exchange`, the one `/api` route the web token does not guard).
+//! `devices` lists, signs out and rotates those tokens.
 
 use crate::WsState;
 use crate::error::ApiError;
@@ -19,6 +20,8 @@ pub(crate) const DEVICE_CODE_PATH: &str = "/api/auth/device-code";
 pub(crate) const EXCHANGE_PATH: &str = "/api/auth/exchange";
 /// Inbox source of the "a device signed in" notice; Web Push always sends it.
 pub(crate) const DEVICE_SIGN_IN_SOURCE: &str = "device-sign-in";
+/// How a device token minted by the exchange shows in Settings, Devices.
+pub(crate) const CODE_SIGN_IN_LABEL: &str = "Signed in with a code";
 
 const CODE_TTL_SECS: i64 = 10 * 60;
 const FAILURE_WINDOW_SECS: i64 = 10 * 60;
@@ -110,6 +113,11 @@ impl DeviceCodes {
         (format_code(&code), expires_at)
     }
 
+    /// Voids the pending code, for a sign-out everywhere.
+    pub(crate) fn clear(&self) {
+        self.ledger().pending = None;
+    }
+
     /// Checks `presented` against the pending code. A limited client is refused before any
     /// comparison, and a match spends the code.
     pub(crate) fn redeem(&self, presented: &str, client: &str, now: i64) -> Redeemed {
@@ -168,18 +176,11 @@ fn client_key(headers: &HeaderMap) -> String {
         .to_string()
 }
 
-fn configured_token(state: &WsState) -> Option<&str> {
-    state
-        .web_auth_token
-        .as_deref()
-        .filter(|t| !t.trim().is_empty())
-}
-
 fn now() -> i64 {
     chrono::Utc::now().timestamp()
 }
 
-fn no_store(status: StatusCode, body: serde_json::Value) -> Response {
+pub(crate) fn no_store(status: StatusCode, body: serde_json::Value) -> Response {
     let mut response = (status, Json(body)).into_response();
     response
         .headers_mut()
@@ -189,7 +190,7 @@ fn no_store(status: StatusCode, body: serde_json::Value) -> Response {
 
 /// `POST /api/auth/device-code`: behind the web token, so only a signed-in device gets one.
 pub(crate) async fn device_code_handler(State(state): State<Arc<WsState>>) -> Response {
-    if configured_token(&state).is_none() {
+    if !state.web_auth_enabled() {
         return ApiError::not_found().into_response();
     }
     let (code, expires_at) = state.device_codes.issue(now());
@@ -205,16 +206,16 @@ pub(crate) struct ExchangeBody {
     code: String,
 }
 
-/// `POST /api/auth/exchange`: trades a pending code for the web token. Unauthenticated, so a
-/// wrong, spent or expired code all get the same answer.
+/// `POST /api/auth/exchange`: trades a pending code for a new device token. Unauthenticated, so
+/// a wrong, spent or expired code all get the same answer.
 pub(crate) async fn exchange_handler(
     State(state): State<Arc<WsState>>,
     headers: HeaderMap,
     Json(body): Json<ExchangeBody>,
 ) -> Response {
-    let Some(token) = configured_token(&state) else {
+    if !state.web_auth_enabled() {
         return ApiError::not_found().into_response();
-    };
+    }
     let at = chrono::Utc::now();
     match state
         .device_codes
@@ -228,21 +229,35 @@ pub(crate) async fn exchange_handler(
             StatusCode::UNAUTHORIZED,
             json!({ "error": "that code is not valid" }),
         ),
-        Redeemed::Accepted => {
-            tracing::info!("web: a device signed in with a one-time code");
-            state.notify_owner(
-                DEVICE_SIGN_IN_SOURCE,
-                "A new device signed in to HQ",
-                &format!(
-                    "A device signed in with a one-time code at {} UTC. If it was not you, \
-                     ask whoever runs your server to rotate the web token.",
-                    at.format("%Y-%m-%d %H:%M")
-                ),
-            );
-            no_store(StatusCode::OK, json!({ "token": token }))
-        }
+        Redeemed::Accepted => sign_in_with_code(&state, at),
     }
 }
+
+fn sign_in_with_code(state: &WsState, at: chrono::DateTime<chrono::Utc>) -> Response {
+    let minted = match hq_db::web_auth::mint(&state.db, CODE_SIGN_IN_LABEL, at.timestamp(), None) {
+        Ok(minted) => minted,
+        Err(e) => {
+            tracing::error!(
+                "web: a one-time code was right but no device token could be saved: {e}"
+            );
+            return ApiError::internal("could not sign this device in, get a new code")
+                .into_response();
+        }
+    };
+    tracing::info!(device = %minted.id, "web: a device signed in with a one-time code");
+    state.notify_owner(
+        DEVICE_SIGN_IN_SOURCE,
+        "A new device signed in to HQ",
+        &format!(
+            "A device signed in with a one-time code at {} UTC. If it was not you, open \
+             Settings, Devices in HQ and sign it out.",
+            at.format("%Y-%m-%d %H:%M")
+        ),
+    );
+    no_store(StatusCode::OK, json!({ "token": minted.token }))
+}
+
+pub(crate) mod devices;
 
 #[cfg(test)]
 mod tests;
