@@ -18,6 +18,8 @@ import { QuickNoteOverlay } from '~/components/QuickNoteOverlay'
 import { GlobalChatOverlay } from '~/components/chat/GlobalChatOverlay'
 import { InstallPrompt } from '~/components/InstallPrompt'
 import { SignInPrompt } from '~/components/SignInPrompt'
+import { ReachabilityBanner } from '~/components/ReachabilityBanner'
+import { useDeviceOnline } from '~/lib/reachability'
 import { AppRail } from '~/components/AppRail'
 import { BottomNav } from '~/components/BottomNav'
 import { HeaderClock } from '~/components/HeaderClock'
@@ -133,7 +135,7 @@ function VaultShell() {
   const systemNotice = useHQStore((s) => s.systemNotice)
   const signInNeeded = useSyncExternalStore(onSignInChange, needsSignIn, () => false)
   const setSystemNotice = useHQStore((s) => s.setSystemNotice)
-  const [isOnline, setIsOnline] = useState(typeof navigator !== 'undefined' ? navigator.onLine : true)
+  const isOnline = useDeviceOnline()
   const [swUpdateAvailable, setSwUpdateAvailable] = useState(false)
 
   useEffect(() => {
@@ -146,17 +148,6 @@ function VaultShell() {
     window.addEventListener('keydown', handleKeyDown)
     return () => window.removeEventListener('keydown', handleKeyDown)
   }, [setGlobalChatOpen])
-
-  useEffect(() => {
-    const goOnline = () => setIsOnline(true)
-    const goOffline = () => setIsOnline(false)
-    window.addEventListener('online', goOnline)
-    window.addEventListener('offline', goOffline)
-    return () => {
-      window.removeEventListener('online', goOnline)
-      window.removeEventListener('offline', goOffline)
-    }
-  }, [])
 
   useEffect(() => {
     if (typeof window === 'undefined' || !('serviceWorker' in navigator)) return
@@ -218,6 +209,7 @@ function VaultShell() {
       <div className="flex flex-col flex-1 min-w-0 min-h-0 relative z-10">
       <InstallPrompt />
       <SignInPrompt />
+      <ReachabilityBanner />
 
       {systemNotice && (
         <div

@@ -48,7 +48,11 @@ Anyone with the link can sign in as you, so keep it out of chat history:
 Otherwise, ask the person who set up your server. They can print it again by running
 `sudo hq-join --print-link` on the server.
 
-## If HQ won't open at all
+## When something looks wrong
 
-- Check Tailscale is on, on that device, and signed in to your account.
-- Check the server still shows as connected in the Tailscale admin console.
+| You see | What to do |
+|---------|------------|
+| **Can't reach your HQ** | Switch Tailscale on, on this device, and tap **Try again**. If Tailscale is on, wait a minute (HQ may be updating). Still nothing: check your HQ server shows as connected in the Tailscale admin console, and if it doesn't, ask whoever set it up. |
+| **This device is offline** | You have no internet. HQ shows what it saved and reconnects by itself. |
+| **Sign in to HQ** | Paste your login link into the box. Lost it? See [If you're signed out](#if-youre-signed-out). |
+| A page won't open at all, not even saved data | Same as "Can't reach your HQ": Tailscale first. |
