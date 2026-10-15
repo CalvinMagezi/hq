@@ -180,19 +180,33 @@ tasks and handoff scopes (`HANDOFF_SCOPE_ARG`, `TASKS_SCOPE_ARG`, `mark_spawned_
    Workspace, `agent_send_message` (it reaches the owner's chat or an agent that acts on it),
    `config_manage`, `host_add`, `host_send` and `host_read` (any pane, including the owner's),
    self-update install and
-   rollback, skill and slash-command edits (they persist instructions), task and note deletes,
+   rollback, skill and slash-command edits (they persist instructions), task deletes,
    file edits, commits, PRs and clones on the HQ host, and the convert and OCR tools (they read
    and write host paths). Some count only by their arguments: a vault export with `output`
-   (it writes anywhere the HQ user can), a note write or move into `skills/`, `_commands/` or
-   `Agents/` (they become instructions), and a task call that sets tags or assignees (they put
-   text in a mailbox the owner's chat or an agent drains, the reach `agent_send_message` has).
-   Every remote MCP server's tools count too (they act on the owner's accounts), and `hq_ask` in
-   `full` mode, read by the tool's own parser (otherwise HQ's own agent is a way around the
-   list). Harness session
-   tools are deliberately not on it: Claude driving coding sessions is much of the point. The
-   consequence, stated plainly: a spawned coding agent runs with permissions skipped and a
-   shell on its host, so the list stops a single injected instruction from reaching mail or a
-   delete directly, but it is not a wall. Items 2 and 5 are the controls there.
+   (it writes anywhere the HQ user can), and a vault write, move or delete whose `path`, `from`
+   or `to` is inside `SYSTEM_VAULT_FOLDERS` (`skills/`, `_skills/`, `_commands/` and `agents/`
+   become instructions; `_system/`, `_threads/`, `_data/`, `_trash/` and `_mailboxes/` are HQ's
+   own state). Every remote MCP server's tools count too (they act on the owner's accounts), and
+   `hq_ask` in `full` mode, read by the tool's own parser (otherwise HQ's own agent is a way
+   around the list). Harness session tools are deliberately not on it: Claude driving coding
+   sessions is much of the point. The consequence, stated plainly: a spawned coding agent runs
+   with permissions skipped and a shell on its host, so the list stops a single injected
+   instruction from reaching mail or a system file directly, but it is not a wall. Items 2 and 5
+   are the controls there.
+
+   Everyday notes and tasks are not on the list, because asking before each one made the
+   connector unusable for its main job (2026-10-15, owner feedback). Creating, changing, moving
+   and trashing a note outside the system folders runs at once; a delete is a move into
+   `_trash/`, kept 30 days. Task creates and updates run at once too, including tags and
+   assignees, which used to wait because they put text in a mailbox. What replaced the check is
+   that a connector's task writes mail no one (`harness_session::writes_no_mail`, the rule
+   `task_create_from_note` already followed): the task keeps its tags and assignees as labels
+   and fields, and no agent mailbox or chat hears of the create, the update or an unblock. The
+   remaining reach is pull, not push: an agent that calls `task_next`, or the stack dispatcher
+   for a specialist the task is assigned to (`stack.rs`), reads the task's text when it takes
+   the task. That path is bounded by the stack's own lane, sandbox and daily run budget, and it
+   is the one to close first (for example by skipping `mcp:connector/*` tasks in `next_tasks`)
+   if a hostile page ever steers Claude into filing tasks.
 
    The check runs in `crates/hq-web/src/oauth/guard.rs`, only for tools inside the grant's
    scope. It files an `ActionNeeded` value item and sends it to the owner's chat at once as an

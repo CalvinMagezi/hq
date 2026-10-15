@@ -76,13 +76,21 @@ The access level you approve maps onto the gateway's existing scopes:
 On top of the scope:
 
 - **Your approval for high-risk calls.** Mail and other Google Workspace calls, remote MCP
-  accounts, messages into your chat or an agent's mailbox (including task tags and assignees),
-  config changes, pairing a machine, reading or typing into a terminal pane, self-update, skill,
-  slash-command and agent-definition edits, deletes, file reads and writes outside the vault
-  (file edits, exports to a path, convert and OCR), commits, PRs and clones, and `hq_ask` in full
-  mode each wait for you. HQ sends the exact call to your chat (and the web inbox) with Approve
-  and Dismiss. One approval runs that call once, with exactly those arguments. Claude is told to
-  call again after you approve. A request, and a dismissal, lasts a day.
+  accounts, messages into your chat or an agent's mailbox, config changes, pairing a machine,
+  reading or typing into a terminal pane, self-update, skill, slash-command and agent-definition
+  edits, deleting a task, file reads and writes outside the vault (file edits, exports to a path,
+  convert and OCR), commits, PRs and clones, and `hq_ask` in full mode each wait for you. HQ sends
+  the exact call to your chat (and the web inbox) with Approve and Dismiss. One approval runs that
+  call once, with exactly those arguments. Claude is told to call again after you approve. A
+  request, and a dismissal, lasts a day.
+- **Notes and tasks need no approval.** Claude can create, edit, move and trash notes, and
+  create and update tasks (tags, assignees and all), without asking you. A deleted note goes to
+  `_trash/` and stays there for 30 days. The exception is the vault's system folders: `skills/`,
+  `_commands/` and `agents/` (they become instructions), and `_system/`, `_threads/`, `_data/`,
+  `_trash/` and `_mailboxes/` (HQ's own identity, history and mail). A write, move or delete
+  that touches one of those waits for you like the calls above. A task Claude files or updates
+  keeps its tags and assignees but sends nobody a message: no agent mailbox and not your chat.
+  An agent sees the task when it looks at its queue, never as something pushed at it.
 - **Coding sessions are not gated**, so Claude can drive agents for you, but only in the host's
   HQ folder and `handoff_cwd_allow` folders, only the sessions it started (yours stay yours), and
   every one it starts sends you a notice with what it was told.
