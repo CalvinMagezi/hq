@@ -108,3 +108,19 @@ Readers cite `[S1]` and finish with `Sources used:` and `Gaps:` lists. For
 sub-agents, HQ runs `verify_citations` on the child's answer and the summary
 shows which citations were verified, changed or gone since retrieval, or never
 supplied.
+
+## Evaluation
+
+`crates/hq-memory/tests/context_packet_eval.rs` builds six small vaults with known ground
+truth and scores the packets built from a task id: multi-agent launch plan, an incident review
+with a hand-edited note, budget pressure, two tasks in one vault, a note that contains
+instructions, and a failed search plus graph. It asserts what the design promises (no stale or
+superseded note shown as current, review labels equal to the record, no needed note missing
+without a gap, nothing the task did not ask for, never over `budget_chars`, every fabricated or
+changed citation caught) and reports precision and recall without gating on them. Run it with
+`cargo test -p hq-memory --test context_packet_eval -- --nocapture`; `HQ_EVAL_REPORT=<file>`
+writes the table. Six scenarios are a regression harness, not an estimate of retrieval quality
+on a real vault. Known limits: every scenario retrieves through task links and recorded
+provenance (search-only recall is not measured), and excerpts are allocated first-come, so a
+tight budget lets one long note crowd out other linked notes. The omission is always an
+`over_budget` gap and a partial packet, never silent.
