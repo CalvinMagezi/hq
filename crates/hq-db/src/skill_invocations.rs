@@ -247,9 +247,13 @@ pub fn update_outcome_by_session(
 }
 
 /// Count invocations for a given skill.
+///
+/// Includes the invocations whose raw rows have aged out into the monthly roll-ups.
 pub fn count_invocations(conn: &Connection, skill_name: &str) -> Result<u32> {
     let count: u32 = conn.query_row(
-        "SELECT COUNT(*) FROM skill_invocations WHERE skill_name = ?1",
+        "SELECT (SELECT COUNT(*) FROM skill_invocations WHERE skill_name = ?1)
+              + COALESCE((SELECT SUM(invocations) FROM skill_invocation_rollups
+                           WHERE skill_name = ?1), 0)",
         params![skill_name],
         |row| row.get(0),
     )?;
@@ -257,10 +261,18 @@ pub fn count_invocations(conn: &Connection, skill_name: &str) -> Result<u32> {
 }
 
 /// Aggregate outcome score (mean of non-null scores) for a given skill.
+///
+/// Includes the scores of invocations whose raw rows have aged out into the monthly roll-ups.
 pub fn mean_outcome(conn: &Connection, skill_name: &str) -> Result<Option<f64>> {
     let score: Option<f64> = conn.query_row(
-        "SELECT AVG(outcome_score) FROM skill_invocations
-          WHERE skill_name = ?1 AND outcome_score IS NOT NULL",
+        "SELECT (COALESCE((SELECT SUM(outcome_score) FROM skill_invocations
+                            WHERE skill_name = ?1), 0)
+               + COALESCE((SELECT SUM(score_sum) FROM skill_invocation_rollups
+                            WHERE skill_name = ?1), 0))
+              / NULLIF((SELECT COUNT(outcome_score) FROM skill_invocations
+                         WHERE skill_name = ?1)
+                     + COALESCE((SELECT SUM(scored) FROM skill_invocation_rollups
+                                  WHERE skill_name = ?1), 0), 0)",
         params![skill_name],
         |row| row.get(0),
     )?;
@@ -363,6 +375,148 @@ pub fn set_latest_verdict(
         ],
     )?;
     Ok(updated)
+}
+
+/// How long a raw invocation row is kept, in days. Past this it is rolled up into counts.
+pub const RETENTION_DAYS: u32 = 90;
+
+/// What a retention pass did.
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
+pub struct Retained {
+    /// Raw rows folded into the monthly roll-ups and removed.
+    pub rolled_up: usize,
+}
+
+/// Fold raw invocation rows older than `days` into `skill_invocation_rollups` (counts and a score
+/// sum per skill, version and month, no ids) and delete them. The skills and the audit trail are
+/// not touched. Safe to run again: it only ever moves rows that are still there.
+pub fn apply_retention(conn: &Connection, days: u32) -> Result<Retained> {
+    let cutoff = format!("-{days} days");
+    conn.execute_batch("SAVEPOINT skill_retention")?;
+    let result = (|| -> Result<usize> {
+        conn.execute(
+            "INSERT INTO skill_invocation_rollups
+               (skill_name, skill_hash, month, invocations, scored, score_sum,
+                accepted, reworked, rejected, helped, hurt, unused)
+             SELECT skill_name, COALESCE(skill_hash, ''), strftime('%Y-%m', loaded_at),
+                    COUNT(*), COUNT(outcome_score), COALESCE(SUM(outcome_score), 0),
+                    COALESCE(SUM(outcome_status = 'accepted'), 0),
+                    COALESCE(SUM(outcome_status = 'reworked'), 0),
+                    COALESCE(SUM(outcome_status = 'rejected'), 0),
+                    COALESCE(SUM(used = 'helped'), 0),
+                    COALESCE(SUM(used = 'hurt'), 0),
+                    COALESCE(SUM(used = 'unused'), 0)
+               FROM skill_invocations
+              WHERE loaded_at < datetime('now', ?1)
+              GROUP BY skill_name, COALESCE(skill_hash, ''), strftime('%Y-%m', loaded_at)
+             ON CONFLICT (skill_name, skill_hash, month) DO UPDATE SET
+                invocations = invocations + excluded.invocations,
+                scored = scored + excluded.scored,
+                score_sum = score_sum + excluded.score_sum,
+                accepted = accepted + excluded.accepted,
+                reworked = reworked + excluded.reworked,
+                rejected = rejected + excluded.rejected,
+                helped = helped + excluded.helped,
+                hurt = hurt + excluded.hurt,
+                unused = unused + excluded.unused",
+            params![cutoff],
+        )?;
+        Ok(conn.execute(
+            "DELETE FROM skill_invocations WHERE loaded_at < datetime('now', ?1)",
+            params![cutoff],
+        )?)
+    })();
+    match result {
+        Ok(rolled_up) => {
+            conn.execute_batch("RELEASE skill_retention")?;
+            Ok(Retained { rolled_up })
+        }
+        Err(e) => {
+            let _ = conn.execute_batch("ROLLBACK TO skill_retention; RELEASE skill_retention");
+            Err(e)
+        }
+    }
+}
+
+/// What to remove when the owner asks for telemetry to be deleted.
+#[derive(Debug, Clone, Copy)]
+pub enum Purge<'a> {
+    /// One invocation, by its id.
+    Record(&'a str),
+    /// Invocations loaded in a date range, optionally of one skill. `from` is inclusive and
+    /// `before` exclusive, both `YYYY-MM-DD` (UTC). At least one of the three must be given:
+    /// there is no way to say "everything" by leaving the filters out.
+    Range {
+        skill: Option<&'a str>,
+        from: Option<&'a str>,
+        before: Option<&'a str>,
+    },
+}
+
+/// What a purge removed.
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
+pub struct Purged {
+    /// Raw invocation rows.
+    pub records: usize,
+    /// Monthly roll-ups that lie entirely inside the range. They hold counts only, but a month
+    /// the owner asked to be gone is gone.
+    pub rollups: usize,
+}
+
+fn date(label: &str, text: &str) -> Result<String> {
+    let parsed = chrono::NaiveDate::parse_from_str(text.trim(), "%Y-%m-%d")
+        .map_err(|_| anyhow::anyhow!("{label} must be a date like 2026-01-31, got '{text}'"))?;
+    Ok(parsed.format("%Y-%m-%d").to_string())
+}
+
+/// Delete telemetry on request. Only invocation rows and roll-ups go: the skills, their
+/// versions and the audit trail are not touched.
+pub fn purge(conn: &Connection, what: Purge<'_>) -> Result<Purged> {
+    match what {
+        Purge::Record(id) => {
+            let records =
+                conn.execute("DELETE FROM skill_invocations WHERE id = ?1", params![id])?;
+            Ok(Purged {
+                records,
+                rollups: 0,
+            })
+        }
+        Purge::Range {
+            skill,
+            from,
+            before,
+        } => {
+            if skill.is_none() && from.is_none() && before.is_none() {
+                anyhow::bail!(
+                    "give a skill, a start date or an end date: a purge is never unbounded"
+                );
+            }
+            let from = from.map(|d| date("--from", d)).transpose()?;
+            let before = before.map(|d| date("--before", d)).transpose()?;
+            if let (Some(f), Some(b)) = (&from, &before)
+                && f >= b
+            {
+                anyhow::bail!("the start date must be before the end date");
+            }
+            // Dates compare as text against `loaded_at` ("YYYY-MM-DD HH:MM:SS").
+            let records = conn.execute(
+                "DELETE FROM skill_invocations
+                  WHERE (?1 IS NULL OR skill_name = ?1)
+                    AND (?2 IS NULL OR loaded_at >= ?2)
+                    AND (?3 IS NULL OR loaded_at < ?3)",
+                params![skill, from, before],
+            )?;
+            // A roll-up month goes only when all of it is inside the range.
+            let rollups = conn.execute(
+                "DELETE FROM skill_invocation_rollups
+                  WHERE (?1 IS NULL OR skill_name = ?1)
+                    AND (?2 IS NULL OR date(month || '-01') >= ?2)
+                    AND (?3 IS NULL OR date(month || '-01', '+1 month') <= ?3)",
+                params![skill, from, before],
+            )?;
+            Ok(Purged { records, rollups })
+        }
+    }
 }
 
 #[cfg(test)]
@@ -652,6 +806,267 @@ mod tests {
                 (used.as_str(), score, source.as_str()),
                 ("hurt", 0.0, "review")
             );
+            Ok(())
+        })
+    }
+
+    /// A load `days_ago` days back, with an outcome score and status.
+    fn aged(
+        conn: &Connection,
+        skill: &str,
+        days_ago: i64,
+        score: Option<f64>,
+        status: Option<&str>,
+    ) -> Result<String> {
+        let id = log_invocation_with(
+            conn,
+            skill,
+            "sess",
+            InvocationTrigger::LoadSkill,
+            &Context {
+                skill_hash: Some("v1"),
+                used: Some(Used::Loaded),
+                ..Default::default()
+            },
+        )?;
+        conn.execute(
+            "UPDATE skill_invocations
+                SET loaded_at = datetime('now', ?2), outcome_score = ?3, outcome_status = ?4
+              WHERE id = ?1",
+            params![id, format!("-{days_ago} days"), score, status],
+        )?;
+        Ok(id)
+    }
+
+    fn raw_count(conn: &Connection) -> i64 {
+        conn.query_row("SELECT COUNT(*) FROM skill_invocations", [], |r| r.get(0))
+            .unwrap()
+    }
+
+    #[test]
+    fn old_rows_become_counts_and_the_aggregates_do_not_move() -> Result<()> {
+        let db = Database::open_memory()?;
+        db.with_conn(|conn| {
+            aged(conn, "sheets", 200, Some(1.0), Some("accepted"))?;
+            aged(conn, "sheets", 190, Some(0.0), Some("rejected"))?;
+            aged(conn, "sheets", 100, None, None)?;
+            aged(conn, "sheets", 5, Some(0.5), Some("reworked"))?;
+            aged(conn, "docs", 3, Some(1.0), Some("accepted"))?;
+            let count_before = count_invocations(conn, "sheets")?;
+            let mean_before = mean_outcome(conn, "sheets")?;
+
+            let kept = apply_retention(conn, RETENTION_DAYS)?;
+
+            assert_eq!(kept, Retained { rolled_up: 3 });
+            assert_eq!(raw_count(conn), 2, "the recent rows stay");
+            assert_eq!(count_invocations(conn, "sheets")?, count_before);
+            assert_eq!(count_invocations(conn, "sheets")?, 4);
+            let mean_after = mean_outcome(conn, "sheets")?.unwrap();
+            assert!((mean_after - mean_before.unwrap()).abs() < 1e-9);
+            assert!((mean_after - 0.5).abs() < 1e-9, "(1 + 0 + 0.5) / 3");
+
+            // The rolled-up counts by month.
+            let (invocations, scored, accepted, rejected): (i64, i64, i64, i64) = conn.query_row(
+                "SELECT SUM(invocations), SUM(scored), SUM(accepted), SUM(rejected)
+                   FROM skill_invocation_rollups WHERE skill_name = 'sheets'",
+                [],
+                |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?)),
+            )?;
+            assert_eq!((invocations, scored, accepted, rejected), (3, 2, 1, 1));
+            Ok(())
+        })
+    }
+
+    #[test]
+    fn a_second_pass_does_nothing_and_a_later_one_adds_to_the_same_month() -> Result<()> {
+        let db = Database::open_memory()?;
+        db.with_conn(|conn| {
+            aged(conn, "sheets", 200, Some(1.0), Some("accepted"))?;
+            assert_eq!(apply_retention(conn, 90)?.rolled_up, 1);
+            assert_eq!(apply_retention(conn, 90)?.rolled_up, 0);
+
+            // Another row from the same month ages out later.
+            let id = aged(conn, "sheets", 200, Some(0.0), Some("rejected"))?;
+            conn.execute(
+                "UPDATE skill_invocations SET loaded_at = (SELECT MIN(loaded_at) FROM skill_invocations)
+                  WHERE id = ?1",
+                [&id],
+            )?;
+            assert_eq!(apply_retention(conn, 90)?.rolled_up, 1);
+            let months: i64 =
+                conn.query_row("SELECT COUNT(*) FROM skill_invocation_rollups", [], |r| r.get(0))?;
+            assert_eq!(months, 1, "same skill, version and month is one row");
+            assert_eq!(count_invocations(conn, "sheets")?, 2);
+            Ok(())
+        })
+    }
+
+    #[test]
+    fn a_rollup_holds_nothing_that_identifies_a_use() -> Result<()> {
+        let db = Database::open_memory()?;
+        let mut columns: Vec<String> = db.with_conn(|conn| {
+            let mut stmt =
+                conn.prepare("SELECT name FROM pragma_table_info('skill_invocation_rollups')")?;
+            let rows = stmt.query_map([], |r| r.get::<_, String>(0))?;
+            Ok(rows.collect::<rusqlite::Result<_>>()?)
+        })?;
+        columns.sort();
+        let mut expected: Vec<String> = [
+            "skill_name",
+            "skill_hash",
+            "month",
+            "invocations",
+            "scored",
+            "score_sum",
+            "accepted",
+            "reworked",
+            "rejected",
+            "helped",
+            "hurt",
+            "unused",
+        ]
+        .iter()
+        .map(|s| s.to_string())
+        .collect();
+        expected.sort();
+        assert_eq!(
+            columns, expected,
+            "no id, session, task or ref survives a roll-up"
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn a_purge_by_id_removes_that_one_record() -> Result<()> {
+        let db = Database::open_memory()?;
+        db.with_conn(|conn| {
+            let keep = aged(conn, "sheets", 1, Some(1.0), None)?;
+            let drop = aged(conn, "sheets", 1, Some(0.0), None)?;
+            let gone = purge(conn, Purge::Record(&drop))?;
+            assert_eq!(
+                gone,
+                Purged {
+                    records: 1,
+                    rollups: 0
+                }
+            );
+            assert_eq!(raw_count(conn), 1);
+            let left: String =
+                conn.query_row("SELECT id FROM skill_invocations", [], |r| r.get(0))?;
+            assert_eq!(left, keep);
+            assert_eq!(purge(conn, Purge::Record("inv_nope"))?.records, 0);
+            Ok(())
+        })
+    }
+
+    #[test]
+    fn a_purge_by_range_is_bounded_by_skill_and_dates() -> Result<()> {
+        let db = Database::open_memory()?;
+        db.with_conn(|conn| {
+            aged(conn, "sheets", 40, None, None)?;
+            aged(conn, "sheets", 20, None, None)?;
+            aged(conn, "docs", 20, None, None)?;
+            let day = |n: i64| -> String {
+                conn.query_row("SELECT date('now', ?1)", [format!("-{n} days")], |r| {
+                    r.get(0)
+                })
+                .unwrap()
+            };
+
+            // Before 30 days ago: only the oldest sheets row.
+            let gone = purge(
+                conn,
+                Purge::Range {
+                    skill: None,
+                    from: None,
+                    before: Some(&day(30)),
+                },
+            )?;
+            assert_eq!(gone.records, 1);
+
+            // One skill, any date.
+            let gone = purge(
+                conn,
+                Purge::Range {
+                    skill: Some("docs"),
+                    from: None,
+                    before: None,
+                },
+            )?;
+            assert_eq!(gone.records, 1);
+            assert_eq!(
+                raw_count(conn),
+                1,
+                "the sheets row from 20 days ago is left"
+            );
+
+            // A window that holds nothing.
+            let gone = purge(
+                conn,
+                Purge::Range {
+                    skill: Some("sheets"),
+                    from: Some(&day(10)),
+                    before: Some(&day(5)),
+                },
+            )?;
+            assert_eq!(gone.records, 0);
+            Ok(())
+        })
+    }
+
+    #[test]
+    fn a_purge_takes_the_rollup_months_that_lie_inside_the_range() -> Result<()> {
+        let db = Database::open_memory()?;
+        db.with_conn(|conn| {
+            for (month, skill) in [("2025-01", "sheets"), ("2025-02", "sheets"), ("2025-02", "docs")] {
+                conn.execute(
+                    "INSERT INTO skill_invocation_rollups (skill_name, month, invocations) VALUES (?1, ?2, 3)",
+                    params![skill, month],
+                )?;
+            }
+            // Covers all of January and half of February for sheets.
+            let gone = purge(
+                conn,
+                Purge::Range { skill: Some("sheets"), from: Some("2025-01-01"), before: Some("2025-02-15") },
+            )?;
+            assert_eq!(gone.rollups, 1, "only the month entirely inside goes");
+            let left: i64 =
+                conn.query_row("SELECT COUNT(*) FROM skill_invocation_rollups", [], |r| r.get(0))?;
+            assert_eq!(left, 2);
+            Ok(())
+        })
+    }
+
+    #[test]
+    fn a_purge_that_names_nothing_or_names_it_badly_is_refused() -> Result<()> {
+        let db = Database::open_memory()?;
+        db.with_conn(|conn| {
+            aged(conn, "sheets", 1, None, None)?;
+            let none = Purge::Range {
+                skill: None,
+                from: None,
+                before: None,
+            };
+            assert!(purge(conn, none).is_err(), "never unbounded");
+            for (from, before) in [
+                (Some("yesterday"), None),
+                (None, Some("2026-13-40")),
+                (Some("2026-02-01"), Some("2026-01-01")),
+            ] {
+                assert!(
+                    purge(
+                        conn,
+                        Purge::Range {
+                            skill: None,
+                            from,
+                            before
+                        }
+                    )
+                    .is_err(),
+                    "{from:?} {before:?}"
+                );
+            }
+            assert_eq!(raw_count(conn), 1);
             Ok(())
         })
     }

@@ -342,6 +342,10 @@ const MIGRATIONS: &[(&str, &str)] = &[
         "093_skill_invocation_evidence",
         include_str!("../sql/093_skill_invocation_evidence.sql"),
     ),
+    (
+        "094_skill_invocation_rollups",
+        include_str!("../sql/094_skill_invocation_rollups.sql"),
+    ),
 ];
 
 const MEMORY_SCHEMA_MIGRATION: &str = "058_memory_schema";
