@@ -22,8 +22,15 @@ fn tools() -> Vec<Box<dyn HqTool>> {
 }
 
 #[test]
-fn factory_returns_thirty_tools() {
-    assert_eq!(tools().len(), 30);
+fn factory_returns_thirty_one_tools() {
+    assert_eq!(tools().len(), 31);
+}
+
+#[test]
+fn the_activity_view_is_among_them_and_reads_only() {
+    let all = tools();
+    let tool = all.iter().find(|t| t.name() == "task_activity").unwrap();
+    assert!(tool.is_read_only());
 }
 
 #[test]

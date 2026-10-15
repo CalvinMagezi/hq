@@ -139,7 +139,7 @@ fn notify_on_ok<T>(conn: &Connection, result: Result<T>) -> Result<T> {
     result
 }
 
-fn changed_outside_tx(conn: &Connection) {
+pub(crate) fn changed_outside_tx(conn: &Connection) {
     if conn.is_autocommit() {
         changed();
     }

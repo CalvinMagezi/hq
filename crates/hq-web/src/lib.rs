@@ -425,8 +425,16 @@ pub fn create_router(state: Arc<WsState>) -> Router {
             get(tasks_api::task_checkpoint_handler),
         )
         .route(
+            "/api/tasks/{id}/activity",
+            get(tasks_api::task_activity_handler),
+        )
+        .route(
             "/api/initiatives/{id}/progress",
             get(tasks_api::initiative_progress_handler),
+        )
+        .route(
+            "/api/initiatives/{id}/activity",
+            get(tasks_api::initiative_activity_handler),
         )
         .route("/api/task-time-report", get(tasks_api::time_report_handler))
         .route(

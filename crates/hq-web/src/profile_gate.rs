@@ -65,7 +65,14 @@ pub(crate) fn lite_allows(path: &str) -> bool {
                 .is_some_and(|rest| rest.starts_with('/'))
     });
     // Starting a conversation is chat, which Lite does not run.
-    listed && !is_export(path)
+    listed && !is_export(path) && !is_activity(path)
+}
+
+/// The activity view lists agent sessions, leases and who wrote which note; Lite runs no agents.
+fn is_activity(path: &str) -> bool {
+    let tail = path.trim_end_matches('/');
+    (tail.starts_with("/api/tasks/") || tail.starts_with("/api/initiatives/"))
+        && tail.ends_with("/activity")
 }
 
 /// Exports render documents with external tools; not part of Lite.
@@ -512,5 +519,15 @@ mod tests {
         assert!(hides(""), "the vault root");
         assert!(!hides("Notebooks/new/deeper/x.md"));
         assert!(hides("../elsewhere"), "outside the vault is hidden too");
+    }
+
+    #[test]
+    fn lite_does_not_serve_the_activity_view() {
+        assert!(!lite_allows("/api/tasks/abc/activity"));
+        assert!(!lite_allows("/api/initiatives/abc/activity"));
+        assert!(!lite_allows("/api/tasks/abc/activity/"));
+        // The rest of the task API is untouched.
+        assert!(lite_allows("/api/tasks/abc/comments"));
+        assert!(lite_allows("/api/initiatives/abc/progress"));
     }
 }

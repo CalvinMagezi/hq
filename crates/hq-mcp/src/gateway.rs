@@ -934,6 +934,20 @@ mod tests {
     }
 
     #[test]
+    fn the_activity_view_is_not_served_to_a_scoped_key() {
+        for (name, list) in [
+            ("spark", SPARK_READONLY_ALLOWLIST),
+            ("handoff", HANDOFF_ALLOWLIST),
+            ("tasks", TASKS_ALLOWLIST),
+        ] {
+            assert!(
+                !list.contains(&"task_activity"),
+                "the {name} key can read the activity view, which lists sessions and notes across spaces"
+            );
+        }
+    }
+
+    #[test]
     fn a_caller_cannot_pose_as_a_native_agent_session() {
         use hq_tools::provenance::{NATIVE_AGENT_ARG, NATIVE_LEASES_ARG, NATIVE_SESSION_ARG};
         let mut args = json!({

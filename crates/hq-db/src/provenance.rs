@@ -238,6 +238,8 @@ pub fn record(
     match result {
         Ok(row) => {
             conn.execute_batch("RELEASE note_provenance_record")?;
+            // A task's activity view lists these, so whoever watches tasks hears of it.
+            crate::tasks::changed_outside_tx(conn);
             Ok(row)
         }
         Err(e) => {
@@ -408,6 +410,7 @@ pub fn set_review_state(
          VALUES (?1, ?2, ?3, ?4, ?5)",
         params![id, state.as_str(), reviewer, reason, at],
     )?;
+    crate::tasks::changed_outside_tx(conn);
     Ok(())
 }
 

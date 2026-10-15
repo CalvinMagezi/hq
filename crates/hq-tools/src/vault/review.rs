@@ -326,6 +326,10 @@ impl HqTool for NoteProvenanceTool {
         "vault"
     }
 
+    fn is_read_only(&self) -> bool {
+        true
+    }
+
     async fn execute(&self, args: Value) -> Result<Value> {
         let path = args
             .get("path")
@@ -762,6 +766,13 @@ mod tests {
         let seen = view.execute(json!({ "path": NOTE })).await.unwrap();
         assert_eq!(seen["current_version_recorded"], false);
         assert_eq!(seen["versions"][0]["is_current"], false);
+    }
+
+    #[test]
+    fn only_the_review_action_is_a_write() {
+        let fx = Fx::new();
+        assert!(!NoteReviewTool::new(fx.vault.clone(), fx.db.clone()).is_read_only());
+        assert!(NoteProvenanceTool::new(fx.vault.clone(), fx.db.clone()).is_read_only());
     }
 
     #[tokio::test]
