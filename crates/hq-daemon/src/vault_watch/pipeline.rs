@@ -562,6 +562,19 @@ mod tests {
                 }
             }
 
+            /// Like `new`, with the database where production keeps it, under `_data/` beside
+            /// `Notebooks/`, so the index's own writes happen on the real file system.
+            fn on_disk() -> Self {
+                let dir = tempfile::tempdir().unwrap();
+                std::fs::create_dir_all(dir.path().join("Notebooks")).unwrap();
+                std::fs::create_dir_all(dir.path().join("_data")).unwrap();
+                let db = Database::open(&dir.path().join("_data/vault.db")).unwrap();
+                Self {
+                    dir,
+                    db: Arc::new(db),
+                }
+            }
+
             fn write(&self, rel: &str, body: &str) {
                 let path = self.dir.path().join(rel);
                 std::fs::create_dir_all(path.parent().unwrap()).unwrap();
@@ -728,7 +741,7 @@ mod tests {
         #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
         #[ignore = "uses real filesystem events and timing; run with --ignored"]
         async fn live_edits_reach_search_within_seconds() {
-            let vault = Vault::new();
+            let vault = Vault::on_disk();
             vault.write(
                 "Notebooks/seed.md",
                 "seed text from before the daemon started",
@@ -788,6 +801,26 @@ mod tests {
             let indexed = stats.notes_indexed.load(Ordering::Relaxed) - before;
             println!("50 saves caused {indexed} index operation(s)");
             assert!(indexed <= 3, "a burst should coalesce, saw {indexed}");
+
+            // The index writes its own database and cache on every change. Those writes must not
+            // come back as events: once the edits stop, the watcher goes quiet.
+            tokio::time::sleep(Duration::from_secs(1)).await;
+            let notifications = || {
+                let slot = stats.watcher.lock().unwrap();
+                slot.as_ref()
+                    .unwrap()
+                    .1
+                    .notifications
+                    .load(Ordering::Relaxed)
+            };
+            let settled = notifications();
+            tokio::time::sleep(Duration::from_secs(3)).await;
+            assert_eq!(
+                notifications(),
+                settled,
+                "the pipeline's own writes are feeding back into the watcher"
+            );
+            println!("no feedback after {settled} notifications");
 
             shutdown.trigger();
         }
