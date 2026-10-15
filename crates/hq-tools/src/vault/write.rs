@@ -114,6 +114,13 @@ impl HqTool for VaultWriteNoteTool {
         tokio::task::spawn_blocking(move || vault.write_note(&path, &note)).await??;
 
         sync_note_index_and_cache(self.db.as_ref(), &path_ret, &content, &title, &tags);
+        crate::provenance::record_tool_write(
+            self.db.as_ref(),
+            self.vault.vault_path(),
+            &path_ret,
+            &args,
+        )
+        .await;
 
         let abs_path = self.vault.vault_path().join(&path_ret);
         Ok(json!({ "ok": true, "path": path_ret, "abs_path": abs_path.to_string_lossy() }))
@@ -189,6 +196,13 @@ impl HqTool for VaultAppendNoteTool {
             .await??;
 
         sync_note_index_and_cache(self.db.as_ref(), &path, &updated_content, &title, &tags);
+        crate::provenance::record_tool_write(
+            self.db.as_ref(),
+            self.vault.vault_path(),
+            &path,
+            &args,
+        )
+        .await;
 
         Ok(json!({ "ok": true, "path": path, "target_heading": heading }))
     }
@@ -267,6 +281,13 @@ impl HqTool for VaultPatchSectionTool {
             .await??;
 
         sync_note_index_and_cache(self.db.as_ref(), &path, &updated_content, &title, &tags);
+        crate::provenance::record_tool_write(
+            self.db.as_ref(),
+            self.vault.vault_path(),
+            &path,
+            &args,
+        )
+        .await;
 
         Ok(json!({ "ok": true, "path": path, "patched_heading": heading }))
     }

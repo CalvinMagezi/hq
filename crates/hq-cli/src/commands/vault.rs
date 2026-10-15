@@ -142,6 +142,7 @@ pub async fn run(config: &HqConfig, sub: &str, args: &[String]) -> Result<()> {
             };
 
             vault.write_note(path, &note)?;
+            record_owner_write(config, path);
             println!("Wrote: {}", path);
         }
         "export" | "export-pdf" | "pdf" => {
@@ -299,6 +300,16 @@ pub async fn run(config: &HqConfig, sub: &str, args: &[String]) -> Result<()> {
 }
 
 /// What `hq vault repair` prints. A dry run lists what it found and changes nothing.
+/// Record that the person at this terminal wrote the note. Best effort: with no database yet
+/// (or one the daemon has not migrated), the write stands and nothing is recorded.
+fn record_owner_write(config: &HqConfig, rel: &str) {
+    let Ok(db) = hq_db::Database::open_existing(&config.db_path()) else {
+        return;
+    };
+    hq_tools::provenance::Recorder::new(std::sync::Arc::new(db), config.vault_path.clone())
+        .record(rel, &hq_tools::provenance::Writer::owner());
+}
+
 fn repair_summary(report: &hq_db::search::RepairReport, apply: bool) -> String {
     let orphans = report.orphan_paths();
     let mode = if apply { "" } else { " (dry run)" };
@@ -449,6 +460,40 @@ mod lite_tests {
                 .is_err()
         );
         assert!(!dir.path().join("_system/new.md").exists());
+    }
+
+    #[tokio::test]
+    async fn a_terminal_write_is_recorded_as_the_owners() {
+        let (dir, mut cfg) = vault_with_notes();
+        cfg.profile = Profile::Full;
+        // A migrated database must exist for there to be anywhere to record.
+        let db = hq_db::Database::open(&cfg.db_path()).unwrap();
+        run(
+            &cfg,
+            "write",
+            &args(&["Notebooks/b.md", "typed", "by", "hand"]),
+        )
+        .await
+        .unwrap();
+
+        let raw = std::fs::read_to_string(dir.path().join("Notebooks/b.md")).unwrap();
+        let hash = hq_db::search::content_hash(&raw);
+        let found = db
+            .with_conn(|c| hq_db::provenance::current(c, "Notebooks/b.md", &hash))
+            .unwrap()
+            .expect("the write was recorded");
+        assert_eq!(found.actor_id, "owner");
+        assert_eq!(found.source_kind, hq_db::provenance::SourceKind::Human);
+    }
+
+    #[tokio::test]
+    async fn a_terminal_write_without_a_database_still_writes() {
+        let (dir, mut cfg) = vault_with_notes();
+        cfg.profile = Profile::Full;
+        run(&cfg, "write", &args(&["Notebooks/c.md", "text"]))
+            .await
+            .unwrap();
+        assert!(dir.path().join("Notebooks/c.md").is_file());
     }
 
     #[tokio::test]

@@ -51,6 +51,14 @@ pub struct VaultMoveTool {
     db: Option<Arc<Database>>,
 }
 
+impl VaultMoveTool {
+    fn recorder(&self) -> Option<crate::provenance::Recorder> {
+        self.db.as_ref().map(|db| {
+            crate::provenance::Recorder::new(db.clone(), self.vault.vault_path().to_path_buf())
+        })
+    }
+}
+
 #[async_trait]
 impl HqTool for VaultMoveTool {
     fn name(&self) -> &str {
@@ -79,10 +87,42 @@ impl HqTool for VaultMoveTool {
         let dry_run = arg_dry_run(&args);
         let vault = self.vault.clone();
         let (f, t) = (from.clone(), to.clone());
+        let recorder = self.recorder();
+        // Moving rewrites links in other notes. Fingerprint them first so only the notes the move
+        // really changed are credited to the caller.
+        let before = match (&recorder, dry_run) {
+            (Some(recorder), false) => {
+                let (vault, f, t) = (self.vault.clone(), from.clone(), to.clone());
+                let recorder = recorder.clone();
+                tokio::task::spawn_blocking(move || {
+                    let mut rels = vault
+                        .move_note(&f, &t, true)
+                        .map(|r| r.referrers)
+                        .unwrap_or_default();
+                    rels.push(f);
+                    recorder.fingerprint(&rels)
+                })
+                .await
+                .ok()
+            }
+            _ => None,
+        };
         let report =
             tokio::task::spawn_blocking(move || vault.move_note(&f, &t, dry_run)).await??;
         if !dry_run {
             reindex_moved_note(self.db.as_ref(), &self.vault, &from, &to);
+            if let (Some(recorder), Some(before)) = (recorder, before) {
+                let (referrers, args, from, to) = (
+                    report.referrers.clone(),
+                    args.clone(),
+                    from.clone(),
+                    to.clone(),
+                );
+                let _ = tokio::task::spawn_blocking(move || {
+                    recorder.after_move(&from, &to, &referrers, &before, &args)
+                })
+                .await;
+            }
         }
         Ok(serde_json::to_value(&report)?)
     }
@@ -123,6 +163,10 @@ impl HqTool for VaultDeleteTool {
             tokio::task::spawn_blocking(move || vault.trash_note(&p, dry_run)).await??;
         if !dry_run {
             remove_from_index(self.db.as_ref(), &path);
+            if let Some(db) = self.db.as_ref() {
+                crate::provenance::Recorder::new(db.clone(), self.vault.vault_path().to_path_buf())
+                    .after_delete(&path);
+            }
         }
         Ok(json!({ "trashed_to": trashed_to, "dry_run": dry_run }))
     }
@@ -130,6 +174,7 @@ impl HqTool for VaultDeleteTool {
 
 pub struct VaultFrontmatterUpdateTool {
     vault: Arc<VaultClient>,
+    db: Option<Arc<Database>>,
 }
 
 #[async_trait]
@@ -169,6 +214,13 @@ impl HqTool for VaultFrontmatterUpdateTool {
         let vault = self.vault.clone();
         let p = path.clone();
         tokio::task::spawn_blocking(move || vault.update_frontmatter(&p, set, remove)).await??;
+        crate::provenance::record_tool_write(
+            self.db.as_ref(),
+            self.vault.vault_path(),
+            &path,
+            &args,
+        )
+        .await;
         Ok(json!({ "updated": path }))
     }
 }
@@ -178,6 +230,7 @@ pub fn create_vault_reorg_tools(
     vault: Arc<VaultClient>,
     db: Option<Arc<Database>>,
 ) -> Vec<Box<dyn HqTool>> {
+    let db_for_frontmatter = db.clone();
     vec![
         Box::new(VaultMoveTool {
             vault: vault.clone(),
@@ -187,7 +240,10 @@ pub fn create_vault_reorg_tools(
             vault: vault.clone(),
             db,
         }),
-        Box::new(VaultFrontmatterUpdateTool { vault }),
+        Box::new(VaultFrontmatterUpdateTool {
+            vault,
+            db: db_for_frontmatter,
+        }),
     ]
 }
 

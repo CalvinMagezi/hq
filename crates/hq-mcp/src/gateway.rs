@@ -619,6 +619,8 @@ fn mark_scope(args: &mut Value, allowed: Option<&[&str]>, connector: Option<&str
     obj.remove(hq_tools::harness_session::HANDOFF_SCOPE_ARG);
     obj.remove(hq_tools::harness_session::TASKS_SCOPE_ARG);
     obj.remove(hq_tools::harness_session::CONNECTOR_ARG);
+    // Native agent sessions set these themselves; a caller here never may.
+    obj.retain(|key, _| !key.starts_with(hq_tools::provenance::NATIVE_ARG_PREFIX));
     if let Some(label) = connector {
         obj.insert(
             hq_tools::harness_session::CONNECTOR_ARG.into(),
@@ -909,6 +911,28 @@ mod tests {
         let mut granted = json!({key: "forged-label"});
         mark_scope(&mut granted, None, Some("Claude"));
         assert_eq!(granted[key], "Claude");
+    }
+
+    #[test]
+    fn a_caller_cannot_pose_as_a_native_agent_session() {
+        use hq_tools::provenance::{NATIVE_AGENT_ARG, NATIVE_LEASES_ARG, NATIVE_SESSION_ARG};
+        let mut args = json!({
+            "path": "Notes/a.md",
+            NATIVE_SESSION_ARG: "someone-elses-session",
+            NATIVE_AGENT_ARG: "relay",
+            NATIVE_LEASES_ARG: ["lease-1"],
+            "_hq_native_future": true,
+        });
+        mark_scope(&mut args, None, None);
+        let obj = args.as_object().unwrap();
+        assert!(
+            obj.keys().all(|k| !k.starts_with("_hq_native_")),
+            "native markers survived: {obj:?}"
+        );
+        assert_eq!(
+            args["path"], "Notes/a.md",
+            "ordinary arguments are untouched"
+        );
     }
 
     #[test]

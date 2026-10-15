@@ -400,6 +400,16 @@ fn index_web_note(state: &WsState, abs: &Path, raw: &str) {
     }
 }
 
+/// Record that the owner wrote this note through the web app.
+pub(crate) fn record_owner_write(state: &WsState, abs: &Path) {
+    let rel = rel_to_vault(&state.vault_path, abs);
+    if rel.is_empty() {
+        return;
+    }
+    hq_tools::provenance::Recorder::new(Arc::new(state.db.clone()), state.vault_path.clone())
+        .record(&rel, &hq_tools::provenance::Writer::owner());
+}
+
 /// At most this many exports at once: a PDF or PNG of a long note takes real memory.
 static EXPORT_SLOTS: tokio::sync::Semaphore = tokio::sync::Semaphore::const_new(4);
 
@@ -553,6 +563,7 @@ pub(crate) async fn note_create_handler(
     match create_unique(&dir, title, content) {
         Ok(path) => {
             index_web_note(&state, &path, content);
+            record_owner_write(&state, &path);
             let rel = rel_to_vault(&state.vault_path, &path);
             Json(json!({"success": true, "path": rel})).into_response()
         }
@@ -606,6 +617,7 @@ pub(crate) async fn note_update_handler(
         return ApiError::internal(e).into_response();
     }
     index_web_note(&state, &abs, &updated);
+    record_owner_write(&state, &abs);
     Json(json!({"success": true, "path": rel})).into_response()
 }
 
@@ -925,6 +937,28 @@ mod tests {
         };
         assert_eq!(hits("quokka")[0].note_path, "Notebooks/Inbox/Plan.md");
         assert!(hits("zebra").is_empty());
+    }
+
+    #[tokio::test]
+    async fn web_note_writes_are_recorded_as_the_owners() {
+        let v = vault();
+        let state = Arc::new(WsState::new(v.path().to_path_buf(), None));
+        let body = json!({"folder": "Notebooks/Inbox", "title": "Plan", "content": "zebra"});
+        note_create_handler(State(state.clone()), Json(body)).await;
+        let edit = json!({"path": "Notebooks/Inbox/Plan.md", "content": "quokka"});
+        note_update_handler(State(state.clone()), Json(edit)).await;
+
+        let rel = "Notebooks/Inbox/Plan.md";
+        let history = state
+            .db
+            .with_conn(|c| hq_db::provenance::history(c, rel, 10))
+            .unwrap();
+        assert_eq!(history.len(), 2, "the create and the edit are two versions");
+        assert!(history.iter().all(|p| p.actor_id == "owner"));
+        // The latest record is for what is on disk now.
+        let raw = std::fs::read_to_string(v.path().join(rel)).unwrap();
+        let hash = hq_db::search::content_hash(&raw);
+        assert_eq!(history[0].content_hash, hash);
     }
 
     /// A note the index has not seen, found by a partial word through the walk.

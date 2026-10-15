@@ -125,9 +125,12 @@ impl AgentSession {
 
         let mut result = crate::middleware_runtime::tap_tool_elapsed(
             &tc.name,
-            tool.execute(&tc.id, tc.arguments.clone()),
+            tool.execute(&tc.id, self.attested_arguments(&tc.arguments)),
         )
         .await;
+        if let Ok(res) = &result {
+            self.note_lease(&tc.name, res);
+        }
         if tc.name == "bash"
             && let (Some(denial), Ok(res)) = (&self.role_denial, &mut result)
         {
@@ -162,6 +165,64 @@ impl AgentSession {
         }
 
         result
+    }
+
+    /// The arguments a tool is called with: the model's, minus anything that claims to be the
+    /// runtime's, plus what this session attests about itself.
+    ///
+    /// Tools learn who is calling only from `_hq_*` arguments (a connector's label, a verified
+    /// session, the markers below). The model chooses its arguments, so any `_hq_*` key it sent
+    /// is dropped before this session's own are added; otherwise it could name itself as another
+    /// session or a connector. The MCP gateway does the same for its callers.
+    pub(super) fn attested_arguments(&self, arguments: &serde_json::Value) -> serde_json::Value {
+        use hq_tools::provenance::{NATIVE_AGENT_ARG, NATIVE_LEASES_ARG, NATIVE_SESSION_ARG};
+
+        let mut args = arguments.clone();
+        let Some(object) = args.as_object_mut() else {
+            return args;
+        };
+        object.retain(|key, _| !key.starts_with("_hq_"));
+        object.insert(NATIVE_SESSION_ARG.into(), self.session_id.clone().into());
+        object.insert(
+            NATIVE_AGENT_ARG.into(),
+            self.config.agent_name.clone().into(),
+        );
+        let leases = self
+            .held_leases
+            .lock()
+            .map(|held| held.clone())
+            .unwrap_or_default();
+        if !leases.is_empty() {
+            object.insert(NATIVE_LEASES_ARG.into(), leases.into());
+        }
+        args
+    }
+
+    /// Remember the id of a task lease this session was just handed by `task_claim` or
+    /// `task_next`. The id is not secret (the token is, and is not kept).
+    pub(super) fn note_lease(&self, tool: &str, result: &hq_core::types::ToolResult) {
+        const MAX_HELD: usize = 8;
+        if !matches!(tool, "task_claim" | "task_next") {
+            return;
+        }
+        let text: String = result.content.iter().map(|c| c.text.as_str()).collect();
+        let Some(id) = serde_json::from_str::<serde_json::Value>(&text)
+            .ok()
+            .and_then(|v| {
+                v.get("lease_id")
+                    .and_then(|id| id.as_str().map(str::to_string))
+            })
+        else {
+            return;
+        };
+        if let Ok(mut held) = self.held_leases.lock()
+            && !held.contains(&id)
+        {
+            held.push(id);
+            if held.len() > MAX_HELD {
+                held.remove(0);
+            }
+        }
     }
 
     /// Handle the built-in `tool_search` meta-tool.

@@ -10,6 +10,8 @@ pub struct VaultFindShortcut {
 }
 pub struct VaultNoteShortcut {
     vault_path: PathBuf,
+    /// Records who wrote the note, when there is a database to record in.
+    recorder: Option<crate::provenance::Recorder>,
 }
 pub struct VaultLogShortcut {
     vault_path: PathBuf,
@@ -22,7 +24,16 @@ impl VaultFindShortcut {
 }
 impl VaultNoteShortcut {
     pub fn new(vault_path: PathBuf) -> Self {
-        Self { vault_path }
+        Self {
+            vault_path,
+            recorder: None,
+        }
+    }
+
+    /// Record who wrote each note this shortcut makes.
+    pub fn with_recorder(mut self, recorder: crate::provenance::Recorder) -> Self {
+        self.recorder = Some(recorder);
+        self
     }
 }
 impl VaultLogShortcut {
@@ -166,6 +177,11 @@ impl HqTool for VaultNoteShortcut {
             title, date, content
         );
         tokio::fs::write(&note_path, body).await?;
+
+        if let Some(recorder) = self.recorder.clone() {
+            let (rel, args) = (relative_path.clone(), args.clone());
+            let _ = tokio::task::spawn_blocking(move || recorder.after_write(&rel, &args)).await;
+        }
 
         Ok(json!({"written": true, "path": relative_path}))
     }

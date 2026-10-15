@@ -117,7 +117,8 @@ impl HqTool for HqGatewayTool {
         };
 
         // Determine dispatch args: explicit args > NL request > empty.
-        let dispatch_args = if let Some(explicit) = params.get("args").filter(|v| v.is_object()) {
+        let mut dispatch_args = if let Some(explicit) = params.get("args").filter(|v| v.is_object())
+        {
             explicit.clone()
         } else if let Some(request) = params.get("request").and_then(|v| v.as_str()) {
             match build_args_from_request(canonical, request) {
@@ -127,6 +128,10 @@ impl HqTool for HqGatewayTool {
         } else {
             json!({})
         };
+
+        // The model wrote these args. Who is calling comes from the runtime's own markers on this
+        // call, not from anything inside them.
+        crate::provenance::pass_on_attestation(&params, &mut dispatch_args);
 
         // Dispatch to the resolved tool.
         let result = self.dispatch(canonical, dispatch_args).await?;
@@ -157,6 +162,10 @@ impl HqGatewayTool {
             }
             "vault_note" => {
                 vault::VaultNoteShortcut::new(self.vault_path.clone())
+                    .with_recorder(crate::provenance::Recorder::new(
+                        self.db.clone(),
+                        self.vault_path.clone(),
+                    ))
                     .execute(args)
                     .await
             }

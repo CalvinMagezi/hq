@@ -471,6 +471,10 @@ impl HqTool for PersonRecordFactTool {
                     &note.title,
                     &note.tags,
                 );
+                if let Some(db) = db.as_ref() {
+                    crate::provenance::Recorder::new(db.clone(), vault.vault_path().to_path_buf())
+                        .after_write(&path, &args_owned);
+                }
             }
             Ok(outcome_json(&path, outcome))
         })
