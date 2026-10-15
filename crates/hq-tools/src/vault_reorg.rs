@@ -27,6 +27,8 @@ fn reindex_moved_note(db: Option<&Arc<Database>>, vault: &VaultClient, from: &st
     let note = vault.read_note(&to).ok();
     let _ = db.with_conn(move |conn| {
         let _ = hq_db::search::remove_note(conn, &from);
+        // Its links belong to the note, not the old path.
+        let _ = hq_db::search::move_graph_links(conn, &from, &to);
         if let Some(note) = note {
             let tags = note.tags.join(" ");
             let _ = hq_db::search::index_note(conn, &to, &note.title, &note.content, &tags);
@@ -187,4 +189,40 @@ pub fn create_vault_reorg_tools(
         }),
         Box::new(VaultFrontmatterUpdateTool { vault }),
     ]
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn moving_a_note_re_indexes_it_at_the_new_path_and_keeps_its_links() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join("Notebooks")).unwrap();
+        std::fs::write(dir.path().join("Notebooks/new.md"), "a note about herons").unwrap();
+        let vault = VaultClient::new(dir.path().to_path_buf()).unwrap();
+        let db = Arc::new(Database::open_memory().unwrap());
+        db.with_conn(|c| {
+            hq_db::search::index_note(c, "Notebooks/old.md", "old", "a note about herons", "")?;
+            hq_db::search::add_graph_link(c, "Notebooks/old.md", "Notebooks/x.md", 0.9, "applied")?;
+            Ok(())
+        })
+        .unwrap();
+
+        reindex_moved_note(Some(&db), &vault, "Notebooks/old.md", "Notebooks/new.md");
+
+        let (hits, related_new, related_old) = db
+            .with_conn(|c| {
+                Ok((
+                    hq_db::search::keyword_search(c, "herons", 10)?,
+                    hq_db::search::get_related_paths(c, "Notebooks/new.md", 10)?,
+                    hq_db::search::get_related_paths(c, "Notebooks/old.md", 10)?,
+                ))
+            })
+            .unwrap();
+        assert_eq!(hits.len(), 1);
+        assert_eq!(hits[0].note_path, "Notebooks/new.md");
+        assert_eq!(related_new, vec!["Notebooks/x.md"]);
+        assert!(related_old.is_empty());
+    }
 }

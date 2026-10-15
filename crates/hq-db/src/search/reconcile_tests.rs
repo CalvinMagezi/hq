@@ -774,3 +774,78 @@ fn repair_reports_leftovers_in_every_table_and_removes_them_only_when_asked() {
     assert!(again.orphan_paths().is_empty());
     assert_eq!(again.removed, 0);
 }
+
+#[test]
+fn a_moved_notes_links_follow_it_in_both_directions() {
+    let conn = db();
+    add_graph_link(&conn, "Notebooks/old.md", "Notebooks/a.md", 0.9, "applied").unwrap();
+    add_graph_link(
+        &conn,
+        "Notebooks/b.md",
+        "Notebooks/old.md",
+        0.8,
+        "suggested",
+    )
+    .unwrap();
+    add_graph_link(&conn, "Notebooks/c.md", "Notebooks/d.md", 0.7, "applied").unwrap();
+
+    assert_eq!(
+        move_graph_links(&conn, "Notebooks/old.md", "Notebooks/new.md").unwrap(),
+        2
+    );
+
+    let related = |path: &str| get_related_paths(&conn, path, 10).unwrap();
+    assert!(related("Notebooks/old.md").is_empty());
+    let mut moved = related("Notebooks/new.md");
+    moved.sort();
+    assert_eq!(moved, vec!["Notebooks/a.md", "Notebooks/b.md"]);
+    assert_eq!(related("Notebooks/a.md"), vec!["Notebooks/new.md"]);
+    assert_eq!(
+        related("Notebooks/c.md"),
+        vec!["Notebooks/d.md"],
+        "other links are untouched"
+    );
+}
+
+#[test]
+fn moving_a_note_over_one_it_was_linked_to_drops_the_self_link_and_keeps_the_rest() {
+    let conn = db();
+    add_graph_link(
+        &conn,
+        "Notebooks/old.md",
+        "Notebooks/new.md",
+        0.9,
+        "applied",
+    )
+    .unwrap();
+    add_graph_link(&conn, "Notebooks/old.md", "Notebooks/x.md", 0.6, "applied").unwrap();
+    // The destination already has a link to x; the move replaces it rather than failing.
+    add_graph_link(
+        &conn,
+        "Notebooks/new.md",
+        "Notebooks/x.md",
+        0.2,
+        "suggested",
+    )
+    .unwrap();
+
+    move_graph_links(&conn, "Notebooks/old.md", "Notebooks/new.md").unwrap();
+
+    assert_eq!(link_rows(&conn, "Notebooks/old.md"), 0);
+    assert_eq!(
+        get_related_paths(&conn, "Notebooks/new.md", 10).unwrap(),
+        vec!["Notebooks/x.md"]
+    );
+    let self_links: i64 = conn
+        .query_row(
+            "SELECT COUNT(*) FROM graph_links WHERE source_path = target_path",
+            [],
+            |r| r.get(0),
+        )
+        .unwrap();
+    assert_eq!(self_links, 0);
+    assert_eq!(
+        move_graph_links(&conn, "Notebooks/same.md", "Notebooks/same.md").unwrap(),
+        0
+    );
+}

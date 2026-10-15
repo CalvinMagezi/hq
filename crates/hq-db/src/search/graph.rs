@@ -22,6 +22,43 @@ pub fn add_graph_link(
     Ok(())
 }
 
+/// Point a moved note's link rows at its new path, in either direction.
+///
+/// Link rows describe the note, not where it sits, so a move must not leave them naming a path
+/// that no longer exists (search results list related notes from these rows). A link that would
+/// end up joining the note to itself is dropped. Returns how many rows were re-pointed.
+pub fn move_graph_links(conn: &Connection, from: &str, to: &str) -> Result<usize> {
+    if from == to {
+        return Ok(0);
+    }
+    conn.execute_batch("SAVEPOINT move_graph_links")?;
+    let moved = (|| -> Result<usize> {
+        let mut moved = conn.execute(
+            "UPDATE OR REPLACE graph_links SET source_path = ?2 WHERE source_path = ?1",
+            [from, to],
+        )?;
+        moved += conn.execute(
+            "UPDATE OR REPLACE graph_links SET target_path = ?2 WHERE target_path = ?1",
+            [from, to],
+        )?;
+        conn.execute(
+            "DELETE FROM graph_links WHERE source_path = target_path",
+            [],
+        )?;
+        Ok(moved)
+    })();
+    match moved {
+        Ok(moved) => {
+            conn.execute_batch("RELEASE move_graph_links")?;
+            Ok(moved)
+        }
+        Err(e) => {
+            let _ = conn.execute_batch("ROLLBACK TO move_graph_links; RELEASE move_graph_links");
+            Err(e)
+        }
+    }
+}
+
 /// Notes related to `path` via a similarity-based graph link, in either
 /// direction, ordered by score descending. Restricted to `suggested`/
 /// `applied` link types: `wikilink` rows store an absolute filesystem path as
