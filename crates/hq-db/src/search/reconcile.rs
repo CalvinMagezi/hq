@@ -511,6 +511,8 @@ pub struct IndexFreshness {
     pub awaiting_embedding: usize,
     /// Embeddings whose note is no longer in the keyword index.
     pub orphan_embeddings: usize,
+    /// Embeddings made from an older version of their note.
+    pub stale_embeddings: usize,
     /// When the last note was recorded in `sync_state` (seconds since the Unix epoch), if ever.
     pub last_synced_at: Option<i64>,
 }
@@ -526,6 +528,7 @@ pub fn index_freshness(conn: &Connection) -> Result<IndexFreshness> {
         orphan_embeddings: count(
             "SELECT COUNT(*) FROM embeddings WHERE note_path NOT IN (SELECT path FROM notes_fts)",
         )?,
+        stale_embeddings: super::semantic::stale_embedding_count(conn)?,
         last_synced_at: conn
             .query_row("SELECT MAX(synced_at) FROM sync_state", [], |r| r.get(0))?,
     })

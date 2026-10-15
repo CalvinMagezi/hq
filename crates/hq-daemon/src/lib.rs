@@ -5,6 +5,7 @@ pub mod agent_worker;
 pub mod email_gate;
 pub mod email_send;
 pub mod email_triage;
+pub mod embedding_worker;
 pub mod embeddings;
 pub mod family_confirm;
 pub mod instance_lock;

@@ -330,6 +330,10 @@ const MIGRATIONS: &[(&str, &str)] = &[
         "090_web_device_tokens",
         include_str!("../sql/090_web_device_tokens.sql"),
     ),
+    (
+        "091_embedding_content_hash",
+        include_str!("../sql/091_embedding_content_hash.sql"),
+    ),
 ];
 
 const MEMORY_SCHEMA_MIGRATION: &str = "058_memory_schema";

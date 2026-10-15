@@ -521,3 +521,140 @@ fn freshness_counts_each_index_on_its_own() {
     assert_eq!(f.orphan_embeddings, 1);
     assert!(f.last_synced_at.is_some_and(|t| t > 1_700_000_000));
 }
+
+fn note_hash(conn: &Connection, path: &str) -> String {
+    conn.query_row(
+        "SELECT content_hash FROM sync_state WHERE path = ?1",
+        [path],
+        |r| r.get(0),
+    )
+    .unwrap()
+}
+
+fn pending(conn: &Connection, model: &str) -> Vec<(String, EmbedReason)> {
+    pending_embeddings(conn, model, 100)
+        .unwrap()
+        .into_iter()
+        .map(|p| (p.path, p.reason))
+        .collect()
+}
+
+#[test]
+fn a_note_with_no_embedding_is_pending_and_one_made_from_its_current_text_is_not() {
+    let conn = db();
+    let vault = Vault::new();
+    vault.write("Notebooks/a.md", "alpha");
+    vault.sync(&conn);
+    assert_eq!(
+        pending(&conn, "m"),
+        vec![("Notebooks/a.md".to_string(), EmbedReason::Missing)]
+    );
+
+    let hash = note_hash(&conn, "Notebooks/a.md");
+    store_embedding_of(&conn, "Notebooks/a.md", &[1.0], "m", Some(&hash)).unwrap();
+    assert!(pending(&conn, "m").is_empty());
+    assert_eq!(stale_embedding_count(&conn).unwrap(), 0);
+}
+
+#[test]
+fn an_edit_makes_the_embedding_pending_again() {
+    let conn = db();
+    let vault = Vault::new();
+    vault.write("Notebooks/a.md", "first");
+    vault.sync(&conn);
+    let first = note_hash(&conn, "Notebooks/a.md");
+    store_embedding_of(&conn, "Notebooks/a.md", &[1.0], "m", Some(&first)).unwrap();
+
+    vault.write("Notebooks/a.md", "second, quite different");
+    vault.sync(&conn);
+
+    assert_eq!(
+        pending(&conn, "m"),
+        vec![("Notebooks/a.md".to_string(), EmbedReason::Edited)]
+    );
+    assert_eq!(stale_embedding_count(&conn).unwrap(), 1);
+    assert_eq!(index_freshness(&conn).unwrap().stale_embeddings, 1);
+
+    let second = note_hash(&conn, "Notebooks/a.md");
+    assert_ne!(first, second);
+    store_embedding_of(&conn, "Notebooks/a.md", &[2.0], "m", Some(&second)).unwrap();
+    assert!(pending(&conn, "m").is_empty());
+    assert_eq!(
+        get_embedding(&conn, "Notebooks/a.md").unwrap(),
+        Some(vec![2.0])
+    );
+}
+
+#[test]
+fn a_different_model_makes_every_embedding_pending() {
+    let conn = db();
+    let vault = Vault::new();
+    vault.write("Notebooks/a.md", "alpha");
+    vault.sync(&conn);
+    let hash = note_hash(&conn, "Notebooks/a.md");
+    store_embedding_of(&conn, "Notebooks/a.md", &[1.0], "old-model", Some(&hash)).unwrap();
+
+    assert!(pending(&conn, "old-model").is_empty());
+    assert_eq!(
+        pending(&conn, "new-model"),
+        vec![("Notebooks/a.md".to_string(), EmbedReason::OtherModel)]
+    );
+}
+
+#[test]
+fn new_notes_are_embedded_before_re_embedding_old_ones() {
+    let conn = db();
+    let vault = Vault::new();
+    vault.write("Notebooks/a-old.md", "one");
+    vault.write("Notebooks/z-new.md", "two");
+    vault.sync(&conn);
+    let hash = note_hash(&conn, "Notebooks/a-old.md");
+    store_embedding_of(&conn, "Notebooks/a-old.md", &[1.0], "m", Some(&hash)).unwrap();
+    vault.write("Notebooks/a-old.md", "one, edited");
+    vault.sync(&conn);
+
+    let order: Vec<_> = pending(&conn, "m").into_iter().map(|(_, r)| r).collect();
+    assert_eq!(order, vec![EmbedReason::Missing, EmbedReason::Edited]);
+    assert_eq!(pending_embeddings(&conn, "m", 1).unwrap().len(), 1);
+}
+
+#[test]
+fn an_embedding_from_before_the_hash_column_is_stale_only_if_the_note_changed_since() {
+    let conn = db();
+    let vault = Vault::new();
+    vault.write("Notebooks/fresh.md", "written long ago");
+    vault.write("Notebooks/edited.md", "edited after embedding");
+    let long_ago = std::time::UNIX_EPOCH + std::time::Duration::from_secs(1_000_000);
+    fs::File::options()
+        .write(true)
+        .open(vault.notebooks().join("fresh.md"))
+        .unwrap()
+        .set_modified(long_ago)
+        .unwrap();
+    vault.sync(&conn);
+
+    // Legacy rows: no hash, embedded at 'now' in milliseconds.
+    store_embedding(&conn, "Notebooks/fresh.md", &[1.0], "m").unwrap();
+    store_embedding(&conn, "Notebooks/edited.md", &[1.0], "m").unwrap();
+    // The second note's file changed a minute after its embedding was made.
+    conn.execute(
+        "UPDATE sync_state SET modified_at = ?1 WHERE path = 'Notebooks/edited.md'",
+        [chrono::Utc::now().timestamp() + 60],
+    )
+    .unwrap();
+
+    assert_eq!(
+        pending(&conn, "m"),
+        vec![("Notebooks/edited.md".to_string(), EmbedReason::Edited)]
+    );
+}
+
+#[test]
+fn notes_with_no_sync_state_are_pending_only_when_they_have_no_embedding() {
+    let conn = db();
+    // Written through a tool: in the keyword index, never seen by the scan.
+    index_note(&conn, "Notebooks/tool.md", "tool", "body", "").unwrap();
+    assert_eq!(pending(&conn, "m").len(), 1);
+    store_embedding(&conn, "Notebooks/tool.md", &[1.0], "m").unwrap();
+    assert!(pending(&conn, "m").is_empty());
+}

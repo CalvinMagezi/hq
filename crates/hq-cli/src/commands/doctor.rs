@@ -239,6 +239,7 @@ fn report_search_index(config: &HqConfig) {
     use hq_daemon::vault_watch::status;
 
     let report = status::read(&config.vault_path);
+    let worker = hq_daemon::embedding_worker::read(&config.vault_path);
     let freshness = hq_db::Database::open_existing(&config.db_path())
         .ok()
         .and_then(|db| db.with_conn(hq_db::search::index_freshness).ok());
@@ -252,6 +253,57 @@ fn report_search_index(config: &HqConfig) {
     for Line(label, text) in lines {
         println!("  {label}  {text}");
     }
+    if !config.profile.is_lite() {
+        for Line(label, text) in embedding_worker_lines(worker.as_ref(), chrono::Utc::now()) {
+            println!("  {label}  {text}");
+        }
+    }
+}
+
+/// What the background embedder is doing. It holds off for longer after each provider failure,
+/// which is worth saying: until it recovers, semantic search falls behind keyword search.
+fn embedding_worker_lines(
+    worker: Option<&hq_daemon::embedding_worker::EmbeddingWorkerStatus>,
+    now: chrono::DateTime<chrono::Utc>,
+) -> Vec<Line> {
+    let Some(worker) = worker else {
+        return vec![Line(
+            "--",
+            "no embedding report yet; the daemon writes one after its first embedding pass".into(),
+        )];
+    };
+    let last_pass = worker
+        .last_pass_at
+        .as_deref()
+        .and_then(parse_time)
+        .map_or("not yet".to_string(), |t| ago(t, now));
+    let mut lines = vec![Line(
+        "--",
+        format!(
+            "embedding worker: {} embedded since the daemon started, last pass {last_pass}",
+            worker.embedded
+        ),
+    )];
+    if worker.backoff_secs > 0 {
+        lines.push(Line(
+            "warn",
+            format!(
+                "embedding is holding off for {} s after a provider failure: {}",
+                worker.backoff_secs,
+                worker.last_error.as_deref().unwrap_or("no reason recorded")
+            ),
+        ));
+    }
+    if worker.unreadable > 0 {
+        lines.push(Line(
+            "--",
+            format!(
+                "{} note(s) could not be read for embedding",
+                worker.unreadable
+            ),
+        ));
+    }
+    lines
 }
 
 fn ago(since: chrono::DateTime<chrono::Utc>, now: chrono::DateTime<chrono::Utc>) -> String {
@@ -422,6 +474,15 @@ fn freshness_lines(
                 "{} of {} notes await an embedding ({} embedded). Embedding runs apart from \
                  search, so keyword results are current while semantic results lag",
                 f.awaiting_embedding, f.keyword_indexed, f.embedded
+            ),
+        ));
+    }
+    if f.stale_embeddings > 0 {
+        lines.push(Line(
+            "--",
+            format!(
+                "{} embedding(s) were made from an older version of their note and are queued to be redone",
+                f.stale_embeddings
             ),
         ));
     }
@@ -757,6 +818,45 @@ mod tests {
         }
 
         #[test]
+        fn the_embedding_worker_reports_its_back_off_and_its_reason() {
+            use hq_daemon::embedding_worker::EmbedStats;
+
+            assert_eq!(labels(&embedding_worker_lines(None, now())), vec!["--"]);
+
+            let stats = EmbedStats::default();
+            stats
+                .embedded
+                .store(12, std::sync::atomic::Ordering::Relaxed);
+            let healthy = embedding_worker_lines(Some(&stats.snapshot()), now());
+            assert_eq!(labels(&healthy), vec!["--"]);
+            assert!(texts(&healthy).contains("12 embedded since the daemon started"));
+
+            stats
+                .backoff_secs
+                .store(120, std::sync::atomic::Ordering::Relaxed);
+            *stats.last_error.lock().unwrap() = Some("rate limited".into());
+            let backing_off = embedding_worker_lines(Some(&stats.snapshot()), now());
+            assert_eq!(labels(&backing_off), vec!["--", "warn"]);
+            assert!(texts(&backing_off).contains("holding off for 120 s"));
+            assert!(texts(&backing_off).contains("rate limited"));
+        }
+
+        #[test]
+        fn edited_notes_awaiting_a_new_embedding_are_mentioned() {
+            let f = IndexFreshness {
+                keyword_indexed: 10,
+                embedded: 10,
+                stale_embeddings: 4,
+                ..IndexFreshness::default()
+            };
+            let text = texts(&search_index_lines(false, None, Some(&f), now()));
+            assert!(
+                text.contains("4 embedding(s) were made from an older version"),
+                "{text}"
+            );
+        }
+
+        #[test]
         fn keyword_and_embedding_freshness_are_reported_separately() {
             let current = IndexFreshness {
                 keyword_indexed: 120,
@@ -773,6 +873,7 @@ mod tests {
                 embedded: 100,
                 awaiting_embedding: 20,
                 orphan_embeddings: 3,
+                stale_embeddings: 0,
                 last_synced_at: Some((now() - Duration::minutes(2)).timestamp()),
             };
             let lines = search_index_lines(false, None, Some(&lagging), now());

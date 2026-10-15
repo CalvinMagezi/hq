@@ -2,14 +2,10 @@ use super::fts::{extract_tags_from_frontmatter, sanitize_fts_query, strip_frontm
 use super::semantic::embedding_to_bytes;
 use super::*;
 
+/// The real, fully migrated schema, so these tests cannot drift from what production runs.
 fn setup_test_db() -> Connection {
     let conn = Connection::open_in_memory().unwrap();
-    conn.execute_batch(include_str!("../../sql/001_initial.sql"))
-        .unwrap();
-    conn.execute_batch(include_str!("../../sql/002_graph_links.sql"))
-        .unwrap();
-    conn.execute_batch(include_str!("../../sql/010_vault_cache.sql"))
-        .unwrap();
+    crate::migrations::run(&conn).unwrap();
     conn
 }
 

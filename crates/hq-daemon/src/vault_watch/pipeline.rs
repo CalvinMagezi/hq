@@ -132,6 +132,9 @@ pub struct PipelineStats {
     pub last_scan_started_ms: AtomicI64,
     pub last_scan_finished_ms: AtomicI64,
     pub last_error: Mutex<Option<String>>,
+    /// Signalled whenever notes were indexed, so a consumer such as the embedding worker can run
+    /// without waiting for its timer. A signal sent while nobody waits is kept.
+    pub index_changed: Arc<tokio::sync::Notify>,
     /// The running watcher, if one has started.
     pub watcher: Mutex<Option<(WatchBackend, Arc<WatchStats>)>>,
 }
@@ -215,6 +218,9 @@ async fn run_due(
                     engine.scan_succeeded();
                 }
                 stats.record(&work, applied);
+                if applied.indexed > 0 {
+                    stats.index_changed.notify_one();
+                }
             }
             Err(e) => {
                 warn!(?work, error = %e, "vault watch: reconcile failed");
@@ -469,6 +475,18 @@ mod tests {
         assert_eq!(rig.stats.events_in.load(Ordering::Relaxed), 50);
         assert_eq!(rig.stats.coalesced.load(Ordering::Relaxed), 49);
         assert_eq!(rig.stats.notes_indexed.load(Ordering::Relaxed), 1);
+        rig.shutdown.trigger();
+        rig.task.await.unwrap();
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn indexing_a_note_signals_the_embedding_consumer() {
+        let rig = rig(false);
+        rig.tx.send(changed("Notebooks/a.md")).await.unwrap();
+        // The signal is kept until someone waits for it, so there is no race with the worker.
+        tokio::time::timeout(Duration::from_secs(60), rig.stats.index_changed.notified())
+            .await
+            .expect("no signal after a note was indexed");
         rig.shutdown.trigger();
         rig.task.await.unwrap();
     }
