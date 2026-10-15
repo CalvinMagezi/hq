@@ -498,6 +498,39 @@ fn sync_tree(conn: &Connection, notebooks_dir: &Path, subtree: Option<&str>) -> 
     Ok(report)
 }
 
+/// How current the derived search state is, each index counted on its own. The keyword index can
+/// be fully current while embeddings lag, and a health report must not call the vault current
+/// because only one of them is.
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
+pub struct IndexFreshness {
+    /// Notes in the keyword index.
+    pub keyword_indexed: usize,
+    /// Notes with an embedding.
+    pub embedded: usize,
+    /// Indexed notes that have no embedding yet.
+    pub awaiting_embedding: usize,
+    /// Embeddings whose note is no longer in the keyword index.
+    pub orphan_embeddings: usize,
+    /// When the last note was recorded in `sync_state` (seconds since the Unix epoch), if ever.
+    pub last_synced_at: Option<i64>,
+}
+
+pub fn index_freshness(conn: &Connection) -> Result<IndexFreshness> {
+    let count = |sql: &str| -> Result<usize> { Ok(conn.query_row(sql, [], |r| r.get(0))?) };
+    Ok(IndexFreshness {
+        keyword_indexed: count("SELECT COUNT(*) FROM notes_fts")?,
+        embedded: count("SELECT COUNT(*) FROM embeddings")?,
+        awaiting_embedding: count(
+            "SELECT COUNT(*) FROM notes_fts WHERE path NOT IN (SELECT note_path FROM embeddings)",
+        )?,
+        orphan_embeddings: count(
+            "SELECT COUNT(*) FROM embeddings WHERE note_path NOT IN (SELECT path FROM notes_fts)",
+        )?,
+        last_synced_at: conn
+            .query_row("SELECT MAX(synced_at) FROM sync_state", [], |r| r.get(0))?,
+    })
+}
+
 /// `sync_index` as `(indexed, removed, unchanged)`.
 pub fn sync_index_incremental(
     conn: &Connection,

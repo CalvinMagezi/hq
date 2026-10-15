@@ -499,3 +499,25 @@ fn a_notebooks_folder_that_is_itself_a_symlink_still_syncs() {
     let folder = sync_subtree(&conn, &vault_root, "Notebooks/Sub").unwrap();
     assert_eq!((folder.indexed, folder.unchanged), (0, 1));
 }
+
+#[test]
+fn freshness_counts_each_index_on_its_own() {
+    let conn = db();
+    let vault = Vault::new();
+    assert_eq!(index_freshness(&conn).unwrap(), IndexFreshness::default());
+
+    vault.write("Notebooks/a.md", "alpha");
+    vault.write("Notebooks/b.md", "bravo");
+    vault.write("Notebooks/c.md", "charlie");
+    vault.sync(&conn);
+    store_embedding(&conn, "Notebooks/a.md", &[1.0], "m").unwrap();
+    // An embedding whose note is gone from the keyword index.
+    store_embedding(&conn, "Notebooks/ghost.md", &[1.0], "m").unwrap();
+
+    let f = index_freshness(&conn).unwrap();
+    assert_eq!(f.keyword_indexed, 3);
+    assert_eq!(f.embedded, 2);
+    assert_eq!(f.awaiting_embedding, 2);
+    assert_eq!(f.orphan_embeddings, 1);
+    assert!(f.last_synced_at.is_some_and(|t| t > 1_700_000_000));
+}

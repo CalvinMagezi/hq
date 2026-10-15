@@ -9,6 +9,7 @@ pub async fn run(config: &HqConfig) -> Result<()> {
     report_skill_issues(config);
     report_bash_sandbox(config);
     report_machine_profile(config);
+    report_search_index(config);
     report_web_search(config).await;
     report_pdf_ocr();
     report_spend_ledger(config);
@@ -229,6 +230,213 @@ fn report_machine_profile(config: &HqConfig) {
     }
 }
 
+/// The daemon refreshes its report every tick, a few seconds apart; this much silence means it is
+/// not running.
+const WATCH_REPORT_MAX_AGE_SECS: i64 = 120;
+
+/// The watcher that keeps search current, and how current each index actually is.
+fn report_search_index(config: &HqConfig) {
+    use hq_daemon::vault_watch::status;
+
+    let report = status::read(&config.vault_path);
+    let freshness = hq_db::Database::open_existing(&config.db_path())
+        .ok()
+        .and_then(|db| db.with_conn(hq_db::search::index_freshness).ok());
+    println!("\nSearch index");
+    let lines = search_index_lines(
+        config.vault_watch.enabled,
+        report.as_ref(),
+        freshness.as_ref(),
+        chrono::Utc::now(),
+    );
+    for Line(label, text) in lines {
+        println!("  {label}  {text}");
+    }
+}
+
+fn ago(since: chrono::DateTime<chrono::Utc>, now: chrono::DateTime<chrono::Utc>) -> String {
+    let secs = (now - since).num_seconds().max(0);
+    match secs {
+        0..=89 => format!("{secs}s ago"),
+        90..=5399 => format!("{} min ago", secs / 60),
+        _ => format!("{} h ago", secs / 3600),
+    }
+}
+
+fn parse_time(text: &str) -> Option<chrono::DateTime<chrono::Utc>> {
+    chrono::DateTime::parse_from_rfc3339(text)
+        .ok()
+        .map(|t| t.with_timezone(&chrono::Utc))
+}
+
+fn search_index_lines(
+    watcher_enabled: bool,
+    report: Option<&hq_daemon::vault_watch::VaultWatchStatus>,
+    freshness: Option<&hq_db::search::IndexFreshness>,
+    now: chrono::DateTime<chrono::Utc>,
+) -> Vec<Line> {
+    let mut lines = Vec::new();
+    match (watcher_enabled, report) {
+        (false, _) => lines.push(Line(
+            "--",
+            "watcher off (vault_watch.enabled is false); search refreshes on the scheduled scan, \
+             every 30 minutes"
+                .into(),
+        )),
+        (true, None) => lines.push(Line(
+            "warn",
+            "no watcher report yet. The daemon writes it within seconds of `hq start`; if it is \
+             running, check its log"
+                .into(),
+        )),
+        (true, Some(report)) => lines.extend(watcher_lines(report, now)),
+    }
+    if let Some(freshness) = freshness {
+        lines.extend(freshness_lines(freshness, now));
+    }
+    lines
+}
+
+fn watcher_lines(
+    report: &hq_daemon::vault_watch::VaultWatchStatus,
+    now: chrono::DateTime<chrono::Utc>,
+) -> Vec<Line> {
+    use hq_daemon::vault_watch::WatchState;
+
+    let mut lines = Vec::new();
+    let reported = parse_time(&report.updated_at);
+    if let Some(reported) = reported
+        && (now - reported).num_seconds() > WATCH_REPORT_MAX_AGE_SECS
+    {
+        lines.push(Line(
+            "warn",
+            format!(
+                "the watcher report is {}; is the daemon running?",
+                ago(reported, now).replace(" ago", " old")
+            ),
+        ));
+    }
+
+    let roots = report.roots.join(", ");
+    let last_event = report
+        .last_notification_at
+        .as_deref()
+        .and_then(parse_time)
+        .map_or("none yet".to_string(), |t| ago(t, now));
+    lines.push(match report.state {
+        WatchState::Watching => Line(
+            "ok",
+            format!(
+                "watching {roots} with file events; {} waiting; last event {last_event}",
+                report.queue_depth
+            ),
+        ),
+        WatchState::Polling => Line(
+            "ok",
+            format!(
+                "polling {roots} for changes (file events are not available here); {} waiting",
+                report.queue_depth
+            ),
+        ),
+        WatchState::CatchingUp => Line(
+            "warn",
+            "watcher started but its first scan has not finished; search may be behind until it has"
+                .into(),
+        ),
+        WatchState::NotWatching => Line(
+            "warn",
+            format!(
+                "not watching: {}. The scheduled scan keeps search current, every 30 minutes",
+                report.detail.as_deref().unwrap_or("no reason recorded")
+            ),
+        ),
+    });
+
+    if let Some(finished) = report.last_scan_finished_at.as_deref().and_then(parse_time) {
+        lines.push(Line(
+            "--",
+            format!(
+                "last full scan finished {} ({} since the daemon started)",
+                ago(finished, now),
+                report.full_scans
+            ),
+        ));
+    }
+    let lost = report.queue_overflows + report.watcher_overflows + report.dropped_events;
+    if lost > 0 {
+        lines.push(Line(
+            "--",
+            format!(
+                "events were lost {} time(s) and recovered with a full scan",
+                report.queue_overflows
+                    + report.watcher_overflows
+                    + u64::from(report.dropped_events > 0)
+            ),
+        ));
+    }
+    if report.abandoned > 0 {
+        lines.push(Line(
+            "warn",
+            format!(
+                "{} update(s) failed after retries; the scheduled scan will pick them up",
+                report.abandoned
+            ),
+        ));
+    }
+    if report.files_failed > 0 {
+        lines.push(Line(
+            "warn",
+            format!(
+                "{} note(s) could not be read and were left as the index had them",
+                report.files_failed
+            ),
+        ));
+    }
+    lines
+}
+
+fn freshness_lines(
+    f: &hq_db::search::IndexFreshness,
+    now: chrono::DateTime<chrono::Utc>,
+) -> Vec<Line> {
+    let mut lines = Vec::new();
+    let synced = f
+        .last_synced_at
+        .and_then(|t| chrono::DateTime::from_timestamp(t, 0))
+        .map_or(String::new(), |t| {
+            format!("; last note indexed {}", ago(t, now))
+        });
+    lines.push(Line(
+        "ok",
+        format!("{} notes in the keyword index{synced}", f.keyword_indexed),
+    ));
+    if f.awaiting_embedding == 0 {
+        lines.push(Line(
+            "ok",
+            format!("all {} notes have an embedding", f.embedded),
+        ));
+    } else {
+        lines.push(Line(
+            "warn",
+            format!(
+                "{} of {} notes await an embedding ({} embedded). Embedding runs apart from \
+                 search, so keyword results are current while semantic results lag",
+                f.awaiting_embedding, f.keyword_indexed, f.embedded
+            ),
+        ));
+    }
+    if f.orphan_embeddings > 0 {
+        lines.push(Line(
+            "warn",
+            format!(
+                "{} embedding(s) belong to notes that are gone; the next scan removes them",
+                f.orphan_embeddings
+            ),
+        ));
+    }
+    lines
+}
+
 const PROBE_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(2);
 
 /// One line of the backend section: a label (`ok`, `warn`, `FAIL`, `--`) and text.
@@ -435,5 +643,152 @@ mod tests {
         // The environment counts too: a key exported in the shell is refused.
         let env = |n: &str| (n == "ANTHROPIC_API_KEY").then(|| "k".to_string());
         assert!(run_egress_with(&cfg, &env).is_err());
+    }
+
+    mod search_index {
+        use super::*;
+        use chrono::{Duration, TimeZone, Utc};
+        use hq_daemon::vault_watch::{PipelineStats, VaultWatchStatus, WatchState};
+        use hq_db::search::IndexFreshness;
+
+        fn now() -> chrono::DateTime<Utc> {
+            Utc.with_ymd_and_hms(2026, 10, 15, 12, 0, 0).unwrap()
+        }
+
+        fn report(state: WatchState) -> VaultWatchStatus {
+            let mut r = PipelineStats::default().snapshot();
+            r.state = state;
+            r.updated_at = now().to_rfc3339();
+            r
+        }
+
+        fn texts(lines: &[Line]) -> String {
+            lines
+                .iter()
+                .map(|l| format!("{} {}", l.0, l.1))
+                .collect::<Vec<_>>()
+                .join("\n")
+        }
+
+        #[test]
+        fn a_watcher_that_is_switched_off_says_so_and_names_the_fallback() {
+            let lines = search_index_lines(false, None, None, now());
+            assert_eq!(labels(&lines), vec!["--"]);
+            assert!(texts(&lines).contains("30 minutes"));
+        }
+
+        #[test]
+        fn no_report_yet_is_a_warning_not_silence() {
+            let lines = search_index_lines(true, None, None, now());
+            assert_eq!(labels(&lines), vec!["warn"]);
+        }
+
+        #[test]
+        fn a_running_watcher_shows_its_roots_queue_and_last_event() {
+            let mut r = report(WatchState::Watching);
+            r.queue_depth = 3;
+            r.last_notification_at = Some((now() - Duration::seconds(42)).to_rfc3339());
+            let lines = search_index_lines(true, Some(&r), None, now());
+            let text = texts(&lines);
+            assert_eq!(labels(&lines)[0], "ok");
+            assert!(text.contains("Notebooks"), "{text}");
+            assert!(text.contains("3 waiting"), "{text}");
+            assert!(text.contains("42s ago"), "{text}");
+        }
+
+        #[test]
+        fn a_watcher_that_is_down_is_degraded_with_its_reason() {
+            let mut r = report(WatchState::NotWatching);
+            r.detail = Some("Notebooks does not exist yet".into());
+            let text = texts(&search_index_lines(true, Some(&r), None, now()));
+            assert!(
+                text.starts_with("warn not watching: Notebooks does not exist yet"),
+                "{text}"
+            );
+            assert!(text.contains("scheduled scan"), "{text}");
+        }
+
+        #[test]
+        fn search_is_not_called_current_before_the_first_scan_finishes() {
+            let lines =
+                search_index_lines(true, Some(&report(WatchState::CatchingUp)), None, now());
+            assert_eq!(labels(&lines), vec!["warn"]);
+            assert!(texts(&lines).contains("first scan has not finished"));
+        }
+
+        #[test]
+        fn a_polling_watcher_is_ok_but_says_events_are_unavailable() {
+            let text = texts(&search_index_lines(
+                true,
+                Some(&report(WatchState::Polling)),
+                None,
+                now(),
+            ));
+            assert!(text.starts_with("ok polling"), "{text}");
+            assert!(text.contains("not available"), "{text}");
+        }
+
+        #[test]
+        fn a_report_the_daemon_stopped_updating_is_called_stale() {
+            let mut r = report(WatchState::Watching);
+            r.updated_at = (now() - Duration::minutes(10)).to_rfc3339();
+            let lines = search_index_lines(true, Some(&r), None, now());
+            assert_eq!(labels(&lines)[0], "warn");
+            assert!(texts(&lines).contains("10 min old"), "{}", texts(&lines));
+        }
+
+        #[test]
+        fn lost_events_and_failed_updates_are_surfaced() {
+            let mut r = report(WatchState::Watching);
+            r.watcher_overflows = 2;
+            r.dropped_events = 9;
+            r.abandoned = 1;
+            r.files_failed = 4;
+            r.full_scans = 3;
+            r.last_scan_finished_at = Some((now() - Duration::minutes(5)).to_rfc3339());
+            let text = texts(&search_index_lines(true, Some(&r), None, now()));
+            assert!(text.contains("events were lost 3 time(s)"), "{text}");
+            assert!(text.contains("warn 1 update(s) failed"), "{text}");
+            assert!(text.contains("warn 4 note(s) could not be read"), "{text}");
+            assert!(
+                text.contains("last full scan finished 5 min ago (3 since"),
+                "{text}"
+            );
+        }
+
+        #[test]
+        fn keyword_and_embedding_freshness_are_reported_separately() {
+            let current = IndexFreshness {
+                keyword_indexed: 120,
+                embedded: 120,
+                ..IndexFreshness::default()
+            };
+            assert_eq!(
+                labels(&search_index_lines(false, None, Some(&current), now())),
+                vec!["--", "ok", "ok"]
+            );
+
+            let lagging = IndexFreshness {
+                keyword_indexed: 120,
+                embedded: 100,
+                awaiting_embedding: 20,
+                orphan_embeddings: 3,
+                last_synced_at: Some((now() - Duration::minutes(2)).timestamp()),
+            };
+            let lines = search_index_lines(false, None, Some(&lagging), now());
+            let text = texts(&lines);
+            assert!(
+                text.contains("ok 120 notes in the keyword index; last note indexed 2 min ago"),
+                "{text}"
+            );
+            assert!(
+                text.contains("warn 20 of 120 notes await an embedding (100 embedded)"),
+                "{text}"
+            );
+            assert!(
+                text.contains("warn 3 embedding(s) belong to notes that are gone"),
+                "{text}"
+            );
+        }
     }
 }

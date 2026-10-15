@@ -8,8 +8,10 @@
 pub mod normalize;
 pub mod pipeline;
 pub mod queue;
+pub mod status;
 pub mod watcher;
 
 pub use normalize::{Normalized, WatchEvent, normalize};
 pub use pipeline::{PipelineStats, spawn};
+pub use status::{VaultWatchStatus, WatchState};
 pub use watcher::{VaultWatcher, WatchBackend, WatchStats};

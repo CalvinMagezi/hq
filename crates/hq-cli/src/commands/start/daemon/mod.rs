@@ -125,13 +125,13 @@ pub async fn run_daemon(
     // once it is listening and then follows edits as they happen; the scheduled sync stays as the
     // safety net. Without it, catch up once now rather than wait out the scheduled task's first
     // delay. Lite keeps the keyword index too, so this sits outside the profile split below.
-    if config.vault_watch.enabled {
-        hq_daemon::vault_watch::spawn(
+    let vault_watch = if config.vault_watch.enabled {
+        Some(hq_daemon::vault_watch::spawn(
             vault_path.clone(),
             db.clone(),
             config.vault_watch.clone(),
             shutdown.clone(),
-        );
+        ))
     } else {
         let (vault_path, db) = (vault_path.clone(), db.clone());
         tokio::spawn(async move {
@@ -139,7 +139,8 @@ pub async fn run_daemon(
                 warn!(error = %e, "daemon: startup index sync failed");
             }
         });
-    }
+        None
+    };
 
     if config.profile.is_lite() {
         // Local bookkeeping only; see LITE_DAEMON_TASKS.
@@ -177,7 +178,7 @@ pub async fn run_daemon(
                 }
                 reloader.poll(&mut config);
                 write_daemon_status(&vault_path, &tasks, &started_at);
-                write_daemon_metrics(&vault_path, &tasks, &started_at);
+                write_daemon_metrics(&vault_path, &tasks, &started_at, vault_watch.as_deref());
             }
             _ = shutdown.wait() => {
                 info!("daemon: shutdown signal received, cleaning up");
@@ -645,7 +646,12 @@ pub fn write_daemon_status(vault_path: &Path, tasks: &[DaemonTask], started_at: 
 }
 
 /// Write structured JSON metrics for programmatic consumption (by MCP health tools).
-fn write_daemon_metrics(vault_path: &Path, tasks: &[DaemonTask], started_at: &str) {
+fn write_daemon_metrics(
+    vault_path: &Path,
+    tasks: &[DaemonTask],
+    started_at: &str,
+    vault_watch: Option<&hq_daemon::vault_watch::PipelineStats>,
+) {
     use serde_json::{Map, Value, json};
 
     let total_runs: u64 = tasks.iter().map(|t| t.run_count).sum();
@@ -668,7 +674,7 @@ fn write_daemon_metrics(vault_path: &Path, tasks: &[DaemonTask], started_at: &st
         );
     }
 
-    let metrics = json!({
+    let mut metrics = json!({
         "started_at": started_at,
         "last_tick": chrono::Utc::now().to_rfc3339(),
         "total_runs": total_runs,
@@ -677,6 +683,14 @@ fn write_daemon_metrics(vault_path: &Path, tasks: &[DaemonTask], started_at: &st
         "task_count": tasks.len(),
         "tasks": Value::Object(task_map),
     });
+    if let (Some(stats), Some(map)) = (vault_watch, metrics.as_object_mut())
+        && let Ok(status) = serde_json::to_value(stats.snapshot())
+    {
+        map.insert(
+            hq_daemon::vault_watch::status::METRICS_KEY.to_string(),
+            status,
+        );
+    }
 
     let sys_dir = vault_path.join("_system");
     let tmp = sys_dir.join(".daemon-metrics.json.tmp");
@@ -845,5 +859,39 @@ mod lite_tests {
         assert!(accept_reload(&lite(), full.clone(), &no_env).is_err());
         assert!(accept_reload(&full, lite(), &no_env).is_err());
         assert!(accept_reload(&full, full.clone(), &no_env).is_ok());
+    }
+}
+
+#[cfg(test)]
+mod metrics_tests {
+    use super::*;
+
+    #[test]
+    fn the_watcher_report_travels_through_the_metrics_file_to_doctor() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join("_system")).unwrap();
+        let stats = hq_daemon::vault_watch::PipelineStats::default();
+        stats
+            .events_in
+            .store(11, std::sync::atomic::Ordering::Relaxed);
+
+        write_daemon_metrics(dir.path(), &[], "2026-10-15T00:00:00Z", Some(&stats));
+
+        let report = hq_daemon::vault_watch::status::read(dir.path()).unwrap();
+        assert_eq!(report.events_queued, 11);
+        assert_eq!(
+            report.state,
+            hq_daemon::vault_watch::WatchState::NotWatching
+        );
+    }
+
+    #[test]
+    fn a_daemon_without_a_watcher_writes_metrics_with_no_report() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join("_system")).unwrap();
+        write_daemon_metrics(dir.path(), &[], "2026-10-15T00:00:00Z", None);
+
+        assert!(dir.path().join("_system/.daemon-metrics.json").exists());
+        assert_eq!(hq_daemon::vault_watch::status::read(dir.path()), None);
     }
 }
