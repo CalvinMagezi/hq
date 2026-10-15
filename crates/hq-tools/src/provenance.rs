@@ -171,6 +171,18 @@ pub fn pass_on_attestation(outer: &Value, inner: &mut Value) {
     }
 }
 
+/// The one task the live leases among `lease_ids` are on, or `None` if none is live or they are
+/// on different tasks. For a session that holds leases and has to say what it is working on.
+pub fn task_for_leases(db: &Database, lease_ids: &[String]) -> Option<String> {
+    if lease_ids.is_empty() {
+        return None;
+    }
+    let ids = lease_ids.to_vec();
+    db.with_conn(move |conn| native_task(conn, &ids))
+        .ok()
+        .flatten()
+}
+
 /// Work out who made the tool call whose arguments are `args`.
 pub fn resolve(args: &Value, db: &Database) -> Writer {
     if let Some(label) = connector_label(args) {

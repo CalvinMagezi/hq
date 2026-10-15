@@ -1961,3 +1961,94 @@ async fn a_reply_that_is_not_a_lease_adds_nothing() {
         .unwrap();
     assert!(seen.lock().unwrap()[0].get("_hq_native_leases").is_none());
 }
+
+#[tokio::test]
+async fn an_auto_loaded_skill_is_logged_with_its_version_the_task_and_a_purpose() {
+    let vault = tempfile::tempdir().unwrap();
+    let skills = vault.path().join("skills");
+    let skill_dir = skills.join("sheets");
+    std::fs::create_dir_all(&skill_dir).unwrap();
+    let skill_md = "---\nname: sheets\ndescription: Work with spreadsheets\nhints:\n  - spreadsheet\nautoLoad: true\nloadFull: true\n---\n\n# Sheets\n\n1. Open the sheet.\n";
+    std::fs::write(skill_dir.join("SKILL.md"), skill_md).unwrap();
+
+    let db = Arc::new(hq_db::Database::open_memory().unwrap());
+    let lease = db
+        .with_conn(|c| {
+            hq_db::tasks::create_initiative(c, "in-1", "personal", None, "Work", "work", "WRK")?;
+            hq_db::tasks::create_task(
+                c,
+                "tk-1",
+                "in-1",
+                &hq_db::tasks::NewTask {
+                    title: "Compare the quarterly figures",
+                    tags: &["research".to_string()],
+                    created_by: "test",
+                    ..Default::default()
+                },
+            )?;
+            let who = hq_db::tasks::LeaseIdentity {
+                actor: "relay",
+                harness: "native",
+                external_session_ref: "relay",
+                ..Default::default()
+            };
+            Ok(hq_db::tasks::claim(c, "tk-1", &who, 900, false)?.session.id)
+        })
+        .unwrap();
+
+    let mut agent = session(idle_provider(), vec![]);
+    agent.set_vault_path(vault.path().to_path_buf());
+    agent.set_telemetry_db(db.clone());
+    agent.set_skill_index(
+        Arc::new(hq_tools::skills::SkillHintIndex::build(&skills)),
+        4000,
+    );
+    agent.set_system_prompt("base prompt".into());
+    agent.held_leases.lock().unwrap().push(lease);
+
+    agent.enrich_with_matching_skills("please tidy this spreadsheet");
+
+    // The log is written from a spawned task.
+    let mut row = None;
+    for _ in 0..100 {
+        row = db
+            .with_conn(|c| {
+                Ok(c.query_row(
+                    "SELECT skill_hash, task_id, purpose, used, trigger FROM skill_invocations",
+                    [],
+                    |r| {
+                        Ok((
+                            r.get::<_, Option<String>>(0)?,
+                            r.get::<_, Option<String>>(1)?,
+                            r.get::<_, Option<String>>(2)?,
+                            r.get::<_, Option<String>>(3)?,
+                            r.get::<_, String>(4)?,
+                        ))
+                    },
+                )
+                .ok())
+            })
+            .unwrap();
+        if row.is_some() {
+            break;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+    }
+    let (hash, task, purpose, used, trigger) = row.expect("the auto-load was logged");
+    let audit_digest = hq_tools::skill_audit::AuditEntry::new(
+        "sheets",
+        1,
+        skill_md,
+        hq_tools::skill_audit::Disposition::Adopted,
+    )
+    .sha256;
+    assert_eq!(
+        hash.as_deref(),
+        Some(audit_digest.as_str()),
+        "joinable to the audit trail"
+    );
+    assert_eq!(task.as_deref(), Some("tk-1"));
+    assert_eq!(purpose.as_deref(), Some("research"));
+    assert_eq!(used.as_deref(), Some("loaded"));
+    assert_eq!(trigger, "auto_load");
+}

@@ -12,7 +12,7 @@ use std::time::{Duration, Instant};
 use anyhow::{Result, bail};
 use hq_core::redact::redact_secrets;
 use hq_core::types::{ChatMessage, SessionResult, ValueItem, ValueKind};
-use hq_db::skill_invocations::{InvocationTrigger, RecentSkill};
+use hq_db::skill_invocations::{InvocationTrigger, RecentSkill, Used};
 use hq_tools::skill_audit::{AuditEntry, Disposition, append_audit, audit_history};
 use hq_tools::skill_edit::{SkillEdit, edited_text, is_managed, write_live};
 use hq_tools::skills::{
@@ -477,22 +477,18 @@ fn record_verdicts(
     verdicts: &HashMap<String, String>,
 ) {
     for (name, verdict) in verdicts {
-        let score = match verdict.as_str() {
-            "helped" => SCORE_GOOD,
-            "hurt" => SCORE_BAD,
+        let (used, outcome) = match verdict.as_str() {
+            "helped" => (Used::Helped, Some((SCORE_GOOD, OUTCOME_SOURCE_REVIEW))),
+            "hurt" => (Used::Hurt, Some((SCORE_BAD, OUTCOME_SOURCE_REVIEW))),
+            // Loaded and not applied: worth knowing, says nothing about whether the work was good.
+            "unused" => (Used::Unused, None),
             _ => continue,
         };
         if !loaded.iter().any(|l| &l.skill_name == name) {
             continue;
         }
         let result = db.with_conn(|c| {
-            hq_db::skill_invocations::set_latest_outcome(
-                c,
-                name,
-                RECENT_SKILL_HOURS,
-                score,
-                OUTCOME_SOURCE_REVIEW,
-            )
+            hq_db::skill_invocations::set_latest_verdict(c, name, RECENT_SKILL_HOURS, used, outcome)
         });
         if let Err(e) = result {
             tracing::warn!(%e, skill = %name, "skill review: verdict not recorded");

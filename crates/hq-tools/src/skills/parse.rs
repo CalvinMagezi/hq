@@ -39,7 +39,7 @@ pub struct SkillDefinition {
 pub struct SkillProvenance {
     /// "user" (manually written) or "genesis" (auto-minted from a successful run).
     pub minted_by: String,
-    /// Identifier of the run (AIDC run id, coordinator run id, etc.) that triggered minting.
+    /// Identifier of the run (a session id, a review run id, etc.) that triggered minting.
     pub minted_from_run_id: Option<String>,
     /// Monotonically incremented each time a refiner rewrites the skill body.
     pub version: u32,

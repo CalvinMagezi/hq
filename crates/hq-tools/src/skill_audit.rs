@@ -58,6 +58,14 @@ impl AuditEntry {
     }
 }
 
+/// SHA-256 (hex) of the live `SKILL.md`, the digest [`AuditEntry`] keeps, so an invocation can be
+/// read against the audit trail. `None` for a skill with no `SKILL.md` (a bundle) or an unsafe name.
+pub fn live_hash(skills_dir: &Path, name: &str) -> Option<String> {
+    validate_skill_name(name).ok()?;
+    let content = std::fs::read_to_string(skills_dir.join(name).join(SKILL_FILE)).ok()?;
+    Some(hex::encode(Sha256::digest(content.as_bytes())))
+}
+
 pub fn append_audit(skills_dir: &Path, entry: &AuditEntry) -> Result<()> {
     std::fs::create_dir_all(skills_dir)?;
     let mut file = std::fs::OpenOptions::new()

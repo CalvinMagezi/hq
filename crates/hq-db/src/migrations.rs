@@ -338,6 +338,10 @@ const MIGRATIONS: &[(&str, &str)] = &[
         "092_note_provenance",
         include_str!("../sql/092_note_provenance.sql"),
     ),
+    (
+        "093_skill_invocation_evidence",
+        include_str!("../sql/093_skill_invocation_evidence.sql"),
+    ),
 ];
 
 const MEMORY_SCHEMA_MIGRATION: &str = "058_memory_schema";
@@ -1042,5 +1046,47 @@ mod tests {
         super::run(&conn).expect("a second run is a no-op");
         drop(conn);
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn existing_skill_invocations_migrate_with_nulls_and_keep_working() {
+        use rusqlite::Connection;
+        let conn = Connection::open_in_memory().unwrap();
+        let (before, rest) = super::MIGRATIONS.split_at(
+            super::MIGRATIONS
+                .iter()
+                .position(|(n, _)| *n == "093_skill_invocation_evidence")
+                .unwrap(),
+        );
+        super::apply(&conn, before).unwrap();
+        conn.execute(
+            "INSERT INTO skill_invocations (id, skill_name, session_id, trigger, outcome_score, outcome_source)
+             VALUES ('old', 'sheets', 's-1', 'load_skill', 0.75, 'session_result')",
+            [],
+        )
+        .unwrap();
+
+        super::apply(&conn, rest).unwrap();
+
+        // Every new column reads NULL on a row that predates it.
+        let nulls: i64 = conn
+            .query_row(
+                "SELECT (skill_hash IS NULL) + (task_id IS NULL) + (purpose IS NULL)
+                      + (used IS NULL) + (outcome_status IS NULL) + (outcome_ref IS NULL)
+                   FROM skill_invocations WHERE id = 'old'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(nulls, 6);
+        // The aggregates the reviewer relies on still read the old row.
+        assert_eq!(
+            crate::skill_invocations::count_invocations(&conn, "sheets").unwrap(),
+            1
+        );
+        let mean = crate::skill_invocations::mean_outcome(&conn, "sheets")
+            .unwrap()
+            .unwrap();
+        assert!((mean - 0.75).abs() < 1e-9);
     }
 }

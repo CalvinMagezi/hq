@@ -496,6 +496,55 @@ async fn verdicts_score_only_recently_loaded_skills() {
     assert_eq!(mean("gws-docs"), None, "not in the loaded list");
 }
 
+#[tokio::test]
+async fn a_verdict_also_says_whether_the_skill_was_used() {
+    let dir = tempfile::tempdir().unwrap();
+    let db = hq_db::Database::open_memory().unwrap();
+    for name in ["a-helped", "b-hurt", "c-unused"] {
+        db.with_conn(|c| {
+            hq_db::skill_invocations::log_invocation(c, name, "s-0", InvocationTrigger::LoadSkill)
+        })
+        .unwrap();
+    }
+    // A session-exit score exists already; an `unused` verdict must not disturb it.
+    db.with_conn(|c| {
+        hq_db::skill_invocations::update_outcome_by_session(c, "s-0", 1.0, "session_result")
+    })
+    .unwrap();
+    let loaded = db
+        .with_conn(|c| hq_db::skill_invocations::recent_skills(c, RECENT_SKILL_HOURS, 5))
+        .unwrap();
+    let reply =
+        r#"{"ops":[],"verdicts":{"a-helped":"helped","b-hurt":"hurt","c-unused":"unused"}}"#;
+    let review = Review {
+        vault_path: dir.path(),
+        session_id: "sess-1",
+        write_approval: false,
+    };
+    review
+        .run(&session(), &loaded, Some(&db), &llm(reply))
+        .await
+        .unwrap();
+
+    let row = |name: &str| -> (String, f64, String) {
+        db.with_conn(|c| {
+            Ok(c.query_row(
+                "SELECT used, outcome_score, outcome_source FROM skill_invocations WHERE skill_name = ?1",
+                [name],
+                |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
+            )?)
+        })
+        .unwrap()
+    };
+    assert_eq!(row("a-helped"), ("helped".into(), 1.0, "review".into()));
+    assert_eq!(row("b-hurt"), ("hurt".into(), 0.0, "review".into()));
+    assert_eq!(
+        row("c-unused"),
+        ("unused".into(), 1.0, "session_result".into()),
+        "unused is recorded and the score is left alone"
+    );
+}
+
 #[test]
 fn session_results_map_to_outcome_scores() {
     assert_eq!(

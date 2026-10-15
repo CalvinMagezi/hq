@@ -2,7 +2,12 @@
 //!
 //! Each time a skill is loaded (via `load_skill` tool or hint-based auto-load),
 //! an invocation row is recorded. Outcome scores are backfilled later when
-//! signal is available (AIDC acceptance, coordinator success, etc.).
+//! signal is available (a task being accepted or reopened, a post-session review, how the
+//! session ended).
+//!
+//! A row holds ids, a hash and values from small fixed lists. It never holds a prompt, a
+//! document or any free text: the evidence the flywheel reads must not be a copy of what people
+//! asked for.
 
 use anyhow::Result;
 use rusqlite::{Connection, params};
@@ -24,12 +29,165 @@ impl InvocationTrigger {
     }
 }
 
-/// Log a new skill invocation. Returns the generated id.
+/// A coarse category for the work a skill was loaded for. Never free text.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Purpose {
+    Code,
+    Research,
+    Writing,
+    Review,
+    Planning,
+    Operations,
+    General,
+}
+
+impl Purpose {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Code => "code",
+            Self::Research => "research",
+            Self::Writing => "writing",
+            Self::Review => "review",
+            Self::Planning => "planning",
+            Self::Operations => "operations",
+            Self::General => "general",
+        }
+    }
+
+    pub fn parse(text: &str) -> Option<Self> {
+        Some(match text {
+            "code" => Self::Code,
+            "research" => Self::Research,
+            "writing" => Self::Writing,
+            "review" => Self::Review,
+            "planning" => Self::Planning,
+            "operations" => Self::Operations,
+            "general" => Self::General,
+            _ => return None,
+        })
+    }
+
+    /// The category a task's tags point at: the first tag that names one, else `General`. Only the
+    /// tags are read, never the task's title or text.
+    pub fn from_tags(tags: &[String]) -> Self {
+        tags.iter()
+            .find_map(|tag| match tag.trim().to_ascii_lowercase().as_str() {
+                "code" | "dev" | "bug" | "bugfix" | "feature" | "refactor" => Some(Self::Code),
+                "research" | "analysis" | "investigation" => Some(Self::Research),
+                "docs" | "documentation" | "writing" | "content" => Some(Self::Writing),
+                "review" | "qa" | "audit" => Some(Self::Review),
+                "planning" | "roadmap" | "strategy" | "scoping" => Some(Self::Planning),
+                "ops" | "infra" | "deploy" | "operations" | "devops" | "maintenance" => {
+                    Some(Self::Operations)
+                }
+                _ => None,
+            })
+            .unwrap_or(Self::General)
+    }
+}
+
+/// Whether a skill was only offered, was loaded into the session, or what the post-session review
+/// made of it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Used {
+    Suggested,
+    Loaded,
+    Helped,
+    Hurt,
+    Unused,
+}
+
+impl Used {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Suggested => "suggested",
+            Self::Loaded => "loaded",
+            Self::Helped => "helped",
+            Self::Hurt => "hurt",
+            Self::Unused => "unused",
+        }
+    }
+
+    pub fn parse(text: &str) -> Option<Self> {
+        Some(match text {
+            "suggested" => Self::Suggested,
+            "loaded" => Self::Loaded,
+            "helped" => Self::Helped,
+            "hurt" => Self::Hurt,
+            "unused" => Self::Unused,
+            _ => return None,
+        })
+    }
+}
+
+/// What an observable acceptance signal said about the work.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum OutcomeStatus {
+    Accepted,
+    Reworked,
+    Rejected,
+    Unknown,
+}
+
+impl OutcomeStatus {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Accepted => "accepted",
+            Self::Reworked => "reworked",
+            Self::Rejected => "rejected",
+            Self::Unknown => "unknown",
+        }
+    }
+
+    pub fn parse(text: &str) -> Option<Self> {
+        Some(match text {
+            "accepted" => Self::Accepted,
+            "reworked" => Self::Reworked,
+            "rejected" => Self::Rejected,
+            "unknown" => Self::Unknown,
+            _ => return None,
+        })
+    }
+}
+
+/// What is known about an invocation beyond which skill ran in which session. Every field is
+/// optional; `None` is stored as NULL and means "not recorded", never a guess.
+#[derive(Debug, Clone, Copy, Default)]
+pub struct Context<'a> {
+    /// SHA-256 (hex) of the skill's SKILL.md at load, the digest `skills/_audit.jsonl` keeps.
+    pub skill_hash: Option<&'a str>,
+    /// The HQ task the session was working on.
+    pub task_id: Option<&'a str>,
+    pub purpose: Option<Purpose>,
+    pub used: Option<Used>,
+}
+
+/// Log a new skill invocation. Returns the generated id. A load is recorded as `loaded`.
 pub fn log_invocation(
     conn: &Connection,
     skill_name: &str,
     session_id: &str,
     trigger: InvocationTrigger,
+) -> Result<String> {
+    log_invocation_with(
+        conn,
+        skill_name,
+        session_id,
+        trigger,
+        &Context {
+            used: Some(Used::Loaded),
+            ..Default::default()
+        },
+    )
+}
+
+/// [`log_invocation`] with the skill's version, the task and the purpose when they are known.
+pub fn log_invocation_with(
+    conn: &Connection,
+    skill_name: &str,
+    session_id: &str,
+    trigger: InvocationTrigger,
+    ctx: &Context<'_>,
 ) -> Result<String> {
     let id = format!(
         "inv_{}",
@@ -40,16 +198,26 @@ pub fn log_invocation(
             .unwrap_or("0")
     );
     conn.execute(
-        "INSERT INTO skill_invocations (id, skill_name, session_id, trigger)
-         VALUES (?1, ?2, ?3, ?4)",
-        params![id, skill_name, session_id, trigger.as_str()],
+        "INSERT INTO skill_invocations
+            (id, skill_name, session_id, trigger, skill_hash, task_id, purpose, used)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+        params![
+            id,
+            skill_name,
+            session_id,
+            trigger.as_str(),
+            ctx.skill_hash,
+            ctx.task_id,
+            ctx.purpose.map(Purpose::as_str),
+            ctx.used.map(Used::as_str),
+        ],
     )?;
     Ok(id)
 }
 
 /// Backfill outcome score on all invocations for a given session.
-/// Used when a downstream signal (AIDC accepted, coordinator success) becomes
-/// available after the skill was loaded.
+/// Used when a downstream signal (the session ending, an acceptance) becomes available after
+/// the skill was loaded.
 pub fn update_outcome_by_session(
     conn: &Connection,
     session_id: &str,
@@ -143,6 +311,41 @@ pub fn set_latest_outcome(
     Ok(updated)
 }
 
+/// Record the post-session review's verdict on the newest invocation of `skill_name` within the
+/// last `hours`. A verdict that carries a score (`helped`, `hurt`) overrides the score like
+/// [`set_latest_outcome`]; `unused` says the skill was loaded and not applied, and leaves the score
+/// alone.
+pub fn set_latest_verdict(
+    conn: &Connection,
+    skill_name: &str,
+    hours: u32,
+    used: Used,
+    outcome: Option<(f64, &str)>,
+) -> Result<usize> {
+    let (score, source) = match outcome {
+        Some((score, source)) => (Some(score), Some(source)),
+        None => (None, None),
+    };
+    let updated = conn.execute(
+        "UPDATE skill_invocations
+            SET used = ?1,
+                outcome_score = COALESCE(?2, outcome_score),
+                outcome_source = COALESCE(?3, outcome_source),
+                updated_at = datetime('now')
+          WHERE id = (SELECT id FROM skill_invocations
+                       WHERE skill_name = ?4 AND loaded_at >= datetime('now', ?5)
+                       ORDER BY loaded_at DESC, rowid DESC LIMIT 1)",
+        params![
+            used.as_str(),
+            score,
+            source,
+            skill_name,
+            format!("-{hours} hours")
+        ],
+    )?;
+    Ok(updated)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -183,7 +386,7 @@ mod tests {
             let id = log_invocation(conn, "skill-a", "sess-1", InvocationTrigger::LoadSkill)?;
             assert!(id.starts_with("inv_"));
 
-            let n = update_outcome_by_session(conn, "sess-1", 0.85, "aidc_accepted")?;
+            let n = update_outcome_by_session(conn, "sess-1", 0.85, "task_accepted")?;
             assert_eq!(n, 1);
 
             let mean = mean_outcome(conn, "skill-a")?.unwrap();
@@ -194,7 +397,7 @@ mod tests {
 
             let recent = recent_invocations(conn, "skill-a", 5)?;
             assert_eq!(recent.len(), 1);
-            assert_eq!(recent[0].outcome_source.as_deref(), Some("aidc_accepted"));
+            assert_eq!(recent[0].outcome_source.as_deref(), Some("task_accepted"));
 
             Ok(())
         })
@@ -257,6 +460,179 @@ mod tests {
             let s1 = rows.iter().find(|r| r.session_id == "sess-1").unwrap();
             assert_eq!(s1.outcome_score, None);
             assert_eq!(set_latest_outcome(conn, "missing", 6, 1.0, "review")?, 0);
+            Ok(())
+        })
+    }
+
+    #[test]
+    fn a_load_records_the_version_task_and_purpose_it_was_given() -> Result<()> {
+        let db = Database::open_memory()?;
+        db.with_conn(|conn| {
+            let id = log_invocation_with(
+                conn,
+                "sheets",
+                "sess-1",
+                InvocationTrigger::AutoLoad,
+                &Context {
+                    skill_hash: Some("ab12"),
+                    task_id: Some("tk-1"),
+                    purpose: Some(Purpose::Code),
+                    used: Some(Used::Loaded),
+                },
+            )?;
+            let row: (String, String, String, String) = conn.query_row(
+                "SELECT skill_hash, task_id, purpose, used FROM skill_invocations WHERE id = ?1",
+                [&id],
+                |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?)),
+            )?;
+            assert_eq!(
+                row,
+                ("ab12".into(), "tk-1".into(), "code".into(), "loaded".into())
+            );
+            Ok(())
+        })
+    }
+
+    #[test]
+    fn the_plain_log_call_records_a_load_and_nothing_it_does_not_know() -> Result<()> {
+        let db = Database::open_memory()?;
+        db.with_conn(|conn| {
+            let id = log_invocation(conn, "sheets", "sess-1", InvocationTrigger::LoadSkill)?;
+            let row: (
+                Option<String>,
+                Option<String>,
+                Option<String>,
+                Option<String>,
+            ) = conn.query_row(
+                "SELECT skill_hash, task_id, purpose, used FROM skill_invocations WHERE id = ?1",
+                [&id],
+                |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?)),
+            )?;
+            assert_eq!(row, (None, None, None, Some("loaded".into())));
+            Ok(())
+        })
+    }
+
+    #[test]
+    fn the_table_has_no_column_that_could_hold_a_prompt_or_a_document() -> Result<()> {
+        let db = Database::open_memory()?;
+        let columns: Vec<String> = db.with_conn(|conn| {
+            let mut stmt =
+                conn.prepare("SELECT name FROM pragma_table_info('skill_invocations')")?;
+            let rows = stmt.query_map([], |r| r.get::<_, String>(0))?;
+            Ok(rows.collect::<rusqlite::Result<_>>()?)
+        })?;
+        // Every column is an id, a hash, a timestamp, a score, or a value from a fixed list.
+        let expected = [
+            "id",
+            "skill_name",
+            "session_id",
+            "trigger",
+            "loaded_at",
+            "outcome_score",
+            "outcome_source",
+            "updated_at",
+            "skill_hash",
+            "task_id",
+            "purpose",
+            "used",
+            "outcome_status",
+            "outcome_ref",
+        ];
+        let mut got = columns.clone();
+        got.sort();
+        let mut want: Vec<String> = expected.iter().map(|s| s.to_string()).collect();
+        want.sort();
+        assert_eq!(
+            got, want,
+            "a new column needs a decision about what it may hold"
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn a_value_outside_the_fixed_lists_is_refused_by_the_database() -> Result<()> {
+        let db = Database::open_memory()?;
+        db.with_conn(|conn| {
+            log_invocation(conn, "sheets", "sess-1", InvocationTrigger::LoadSkill)?;
+            for (column, value) in [
+                ("purpose", "please summarise my private contract"),
+                ("used", "maybe"),
+                ("outcome_status", "pretty good"),
+            ] {
+                let result = conn.execute(
+                    &format!("UPDATE skill_invocations SET {column} = ?1"),
+                    [value],
+                );
+                assert!(result.is_err(), "{column} accepted {value:?}");
+            }
+            Ok(())
+        })
+    }
+
+    #[test]
+    fn purpose_comes_from_the_tags_and_never_from_the_text_of_a_task() {
+        let tags = |t: &[&str]| t.iter().map(|s| s.to_string()).collect::<Vec<_>>();
+        assert_eq!(
+            Purpose::from_tags(&tags(&["agent-hq", "Bugfix"])),
+            Purpose::Code
+        );
+        assert_eq!(Purpose::from_tags(&tags(&["research"])), Purpose::Research);
+        assert_eq!(Purpose::from_tags(&tags(&["docs"])), Purpose::Writing);
+        assert_eq!(Purpose::from_tags(&tags(&["qa"])), Purpose::Review);
+        assert_eq!(Purpose::from_tags(&tags(&["roadmap"])), Purpose::Planning);
+        assert_eq!(Purpose::from_tags(&tags(&["deploy"])), Purpose::Operations);
+        assert_eq!(
+            Purpose::from_tags(&tags(&["something-else"])),
+            Purpose::General
+        );
+        assert_eq!(Purpose::from_tags(&[]), Purpose::General);
+        for p in [
+            Purpose::Code,
+            Purpose::Research,
+            Purpose::Writing,
+            Purpose::Review,
+            Purpose::Planning,
+            Purpose::Operations,
+            Purpose::General,
+        ] {
+            assert_eq!(Purpose::parse(p.as_str()), Some(p));
+        }
+    }
+
+    #[test]
+    fn a_verdict_sets_used_and_only_a_scored_one_moves_the_score() -> Result<()> {
+        let db = Database::open_memory()?;
+        db.with_conn(|conn| {
+            log_invocation(conn, "sheets", "sess-1", InvocationTrigger::LoadSkill)?;
+            update_outcome_by_session(conn, "sess-1", 1.0, "session_result")?;
+
+            // Not applied: recorded, score untouched.
+            assert_eq!(
+                set_latest_verdict(conn, "sheets", 6, Used::Unused, None)?,
+                1
+            );
+            let (used, score, source): (String, f64, String) = conn.query_row(
+                "SELECT used, outcome_score, outcome_source FROM skill_invocations",
+                [],
+                |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
+            )?;
+            assert_eq!(
+                (used.as_str(), score, source.as_str()),
+                ("unused", 1.0, "session_result")
+            );
+
+            // Hurt: recorded and the score is overridden.
+            set_latest_verdict(conn, "sheets", 6, Used::Hurt, Some((0.0, "review")))?;
+            let (used, score, source): (String, f64, String) = conn.query_row(
+                "SELECT used, outcome_score, outcome_source FROM skill_invocations",
+                [],
+                |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
+            )?;
+            assert_eq!(
+                (used.as_str(), score, source.as_str()),
+                ("hurt", 0.0, "review")
+            );
             Ok(())
         })
     }

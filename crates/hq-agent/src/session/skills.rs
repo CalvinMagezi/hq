@@ -130,16 +130,34 @@ impl AgentSession {
         // actually earning their place in the catalog.
         if let Some(db) = self.telemetry_db.clone() {
             let session_id = self.session_id.clone();
+            let skills_dir = self.vault_path.as_deref().map(hq_core::skills_dir);
+            let leases = self
+                .held_leases
+                .lock()
+                .map(|l| l.clone())
+                .unwrap_or_default();
             tokio::spawn(async move {
+                // The task is the one the session's live leases agree on; with none, it is unknown.
+                let task_id = hq_tools::provenance::task_for_leases(&db, &leases);
                 for name in &loaded {
-                    let result = db.with_conn(|conn| {
-                        hq_db::skill_invocations::log_invocation(
-                            conn,
+                    let result = match &skills_dir {
+                        Some(dir) => hq_tools::skills::log_skill_load(
+                            &db,
+                            dir,
                             name,
                             &session_id,
                             hq_db::skill_invocations::InvocationTrigger::AutoLoad,
-                        )
-                    });
+                            task_id.as_deref(),
+                        ),
+                        None => db.with_conn(|conn| {
+                            hq_db::skill_invocations::log_invocation(
+                                conn,
+                                name,
+                                &session_id,
+                                hq_db::skill_invocations::InvocationTrigger::AutoLoad,
+                            )
+                        }),
+                    };
                     if let Err(e) = result {
                         tracing::warn!(%e, skill = %name, "failed to log skill auto-load");
                     }

@@ -4,6 +4,7 @@ mod hints;
 mod parse;
 mod proposals;
 mod security;
+mod telemetry;
 mod tools;
 mod validate;
 
@@ -11,6 +12,7 @@ pub use hints::*;
 pub use parse::*;
 pub use proposals::*;
 pub use security::*;
+pub use telemetry::log_skill_load;
 pub use tools::*;
 pub use validate::*;
 

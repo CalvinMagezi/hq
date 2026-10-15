@@ -58,7 +58,7 @@ pub struct LoadSkillTool {
     skills_dir: PathBuf,
     /// Optional telemetry sink. When set, every successful `load_skill` call is
     /// logged to `skill_invocations`, keyed by `session_id`. Outcomes are
-    /// backfilled later by callers with signal (AIDC, coordinator).
+    /// backfilled later by callers with signal (a task being accepted, a post-session review).
     ///
     /// NOTE: the default MCP registry instantiates `LoadSkillTool` once, ahead
     /// of any specific session, so it uses `new` (no telemetry). Wiring
@@ -135,15 +135,17 @@ impl HqTool for LoadSkillTool {
             match parse_skill(&self.skills_dir, name) {
                 Some(skill) => {
                     if let Some((db, session_id)) = &self.telemetry {
-                        let _ = db.with_conn(|conn| {
-                            hq_db::skill_invocations::log_invocation(
-                                conn,
-                                &skill.name,
-                                session_id,
-                                hq_db::skill_invocations::InvocationTrigger::LoadSkill,
-                            )?;
-                            Ok(())
-                        });
+                        // The task comes from the identity the runtime attested on this call, if
+                        // it did: never from anything the model wrote.
+                        let task_id = crate::provenance::resolve(&args, db).task_id;
+                        let _ = super::log_skill_load(
+                            db,
+                            &self.skills_dir,
+                            &skill.name,
+                            session_id,
+                            hq_db::skill_invocations::InvocationTrigger::LoadSkill,
+                            task_id.as_deref(),
+                        );
                     }
                     Ok(json!({
                         "name": skill.name,
