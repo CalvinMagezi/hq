@@ -51,8 +51,12 @@ pub async fn run_thread_log_rotation(vault_path: &Path) -> Result<()> {
     Ok(())
 }
 
-/// Daily vault cleanup: purge expired trash and clear dead presence files.
-pub async fn run_vault_cleanup(vault_path: &Path, _db: &Database) -> Result<()> {
+/// How long the record of who wrote a deleted note is kept, in days.
+const DELETED_PROVENANCE_DAYS: i64 = 90;
+
+/// Daily vault cleanup: purge expired trash and provenance records of deleted notes, and clear
+/// dead presence files.
+pub async fn run_vault_cleanup(vault_path: &Path, db: &Database) -> Result<()> {
     if !has_run_today(vault_path, "vault-cleanup") {
         let mut actions = Vec::new();
 
@@ -61,6 +65,15 @@ pub async fn run_vault_cleanup(vault_path: &Path, _db: &Database) -> Result<()> 
             Ok(0) => {}
             Ok(n) => actions.push(format!("Purged {n} expired _trash day-folders")),
             Err(e) => tracing::warn!(%e, "vault-cleanup: trash purge failed"),
+        }
+
+        // Who wrote a note is kept for a while after the note is deleted, then dropped.
+        match db.with_conn(|conn| hq_db::provenance::purge_deleted(conn, DELETED_PROVENANCE_DAYS)) {
+            Ok(0) => {}
+            Ok(n) => actions.push(format!(
+                "Dropped {n} provenance record(s) of notes deleted over {DELETED_PROVENANCE_DAYS} days ago"
+            )),
+            Err(e) => tracing::warn!(%e, "vault-cleanup: provenance purge failed"),
         }
 
         // Garbage-collect presence files whose process is long gone.

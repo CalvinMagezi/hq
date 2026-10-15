@@ -334,6 +334,10 @@ const MIGRATIONS: &[(&str, &str)] = &[
         "091_embedding_content_hash",
         include_str!("../sql/091_embedding_content_hash.sql"),
     ),
+    (
+        "092_note_provenance",
+        include_str!("../sql/092_note_provenance.sql"),
+    ),
 ];
 
 const MEMORY_SCHEMA_MIGRATION: &str = "058_memory_schema";
