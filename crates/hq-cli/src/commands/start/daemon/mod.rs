@@ -121,9 +121,18 @@ pub async fn run_daemon(
         .context("failed to check daemon lock")?
         .context("another daemon is already running — only one instance allowed")?;
 
-    // The scheduled sync is minutes away; catch up on edits made while the daemon was down.
-    // Lite keeps the keyword index too, so this is outside the profile split below.
-    {
+    // Keep the keyword index in step with notes edited outside HQ. With the watcher on, it scans
+    // once it is listening and then follows edits as they happen; the scheduled sync stays as the
+    // safety net. Without it, catch up once now rather than wait out the scheduled task's first
+    // delay. Lite keeps the keyword index too, so this sits outside the profile split below.
+    if config.vault_watch.enabled {
+        hq_daemon::vault_watch::spawn(
+            vault_path.clone(),
+            db.clone(),
+            config.vault_watch.clone(),
+            shutdown.clone(),
+        );
+    } else {
         let (vault_path, db) = (vault_path.clone(), db.clone());
         tokio::spawn(async move {
             if let Err(e) = tasks_periodic::run_fts_sync(&vault_path, &db).await {
