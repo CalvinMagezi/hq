@@ -274,7 +274,6 @@ pub fn remove_path_everywhere(conn: &Connection, path: &str) -> Result<()> {
             "DELETE FROM graph_links WHERE source_path = ?1 OR target_path = ?1",
             [path],
         )?;
-        conn.execute("DELETE FROM link_state WHERE note_path = ?1", [path])?;
         Ok(())
     })
 }

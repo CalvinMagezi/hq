@@ -3,17 +3,11 @@ use std::path::{Path, PathBuf};
 
 use super::*;
 
+/// The real, fully migrated schema. A hand-picked subset of migrations once hid a table that a
+/// later migration had dropped, so these tests use exactly what production runs.
 fn db() -> Connection {
     let conn = Connection::open_in_memory().unwrap();
-    for sql in [
-        include_str!("../../sql/001_initial.sql"),
-        include_str!("../../sql/002_graph_links.sql"),
-        include_str!("../../sql/010_vault_cache.sql"),
-        include_str!("../../sql/018_vault_cache_token_count.sql"),
-        include_str!("../../sql/019_vault_cache_content.sql"),
-    ] {
-        conn.execute_batch(sql).unwrap();
-    }
+    crate::migrations::run(&conn).unwrap();
     conn
 }
 
@@ -77,28 +71,16 @@ fn rows(conn: &Connection, path: &str) -> (i64, i64, i64, i64) {
     )
 }
 
-fn link_rows(conn: &Connection, path: &str) -> (i64, i64) {
-    (
-        count(
-            conn,
-            "SELECT COUNT(*) FROM graph_links WHERE source_path = ?1 OR target_path = ?1",
-            path,
-        ),
-        count(
-            conn,
-            "SELECT COUNT(*) FROM link_state WHERE note_path = ?1",
-            path,
-        ),
+fn link_rows(conn: &Connection, path: &str) -> i64 {
+    count(
+        conn,
+        "SELECT COUNT(*) FROM graph_links WHERE source_path = ?1 OR target_path = ?1",
+        path,
     )
 }
 
 fn seed_links(conn: &Connection, path: &str) {
     add_graph_link(conn, path, "Notebooks/other.md", 0.9, "applied").unwrap();
-    conn.execute(
-        "INSERT INTO link_state (note_path, last_linked_at, content_hash) VALUES (?1, 1, 'h')",
-        [path],
-    )
-    .unwrap();
 }
 
 #[test]
@@ -153,7 +135,7 @@ fn a_deleted_note_leaves_nothing_behind_in_any_derived_table() {
 
     assert_eq!((report.removed, report.unchanged), (1, 1));
     assert_eq!(rows(&conn, "Notebooks/gone.md"), (0, 0, 0, 0));
-    assert_eq!(link_rows(&conn, "Notebooks/gone.md"), (0, 0));
+    assert_eq!(link_rows(&conn, "Notebooks/gone.md"), 0);
     assert_eq!(rows(&conn, "Notebooks/kept.md"), (1, 1, 1, 1));
     let semantic = semantic_search(&conn, &[1.0, 2.0, 3.0], 10).unwrap();
     assert!(semantic.iter().all(|r| r.note_path != "Notebooks/gone.md"));
@@ -397,8 +379,8 @@ fn a_move_keeps_link_rows_but_a_delete_drops_them() {
     remove_path_everywhere(&conn, "Notebooks/deleted.md").unwrap();
 
     assert_eq!(rows(&conn, "Notebooks/moved.md"), (0, 0, 0, 0));
-    assert_eq!(link_rows(&conn, "Notebooks/moved.md"), (1, 1));
-    assert_eq!(link_rows(&conn, "Notebooks/deleted.md"), (0, 0));
+    assert_eq!(link_rows(&conn, "Notebooks/moved.md"), 1);
+    assert_eq!(link_rows(&conn, "Notebooks/deleted.md"), 0);
 }
 
 #[test]
