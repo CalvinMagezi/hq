@@ -360,7 +360,7 @@ pub(super) fn task_schema() -> Value {
         "timeout_secs": { "type": "integer" },
         "context_need": {
             "type": "object",
-            "description": "Vault context this child needs, retrieved when it starts and handed over as a bounded, source-linked packet. The child sees nothing else from the vault or from this conversation. Keys: why, refs (note paths), queries, graph_seeds, source_prefixes, time_sensitive, max_age_days, budget_chars, max_sources. The child is told to cite sources as [S1] and end with Sources used and Gaps lists, and its citations are checked."
+            "description": "Vault context this child needs, retrieved when it starts and handed over as a bounded, source-linked packet. The child sees nothing else from the vault or from this conversation. Keys: why, refs (note paths), queries, graph_seeds, source_prefixes, time_sensitive, max_age_days, budget_chars, max_sources, task_id (build the need from that HQ task: its record, the notes it links and the notes written under it). The child is told to cite sources as [S1] and end with Sources used and Gaps lists, and its citations are checked."
         }
     })
 }

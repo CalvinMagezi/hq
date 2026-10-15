@@ -29,6 +29,29 @@ Code: `crates/hq-memory/src/context_packet.rs`.
    retrieval. A packet built earlier can be passed as `context_packet`; its
    time-sensitive entries are re-read when it has aged past 30 minutes.
 
+## Packets built from a task
+
+Give `context_packet` (or a sub-agent's `context_need`) a `task_id` and the need is built from the
+task, in priority order:
+
+1. the task's own record, rendered in a `<task_record>` block: description, acceptance criteria
+   (the lines after an `Acceptance` label or heading), status, owner, the unfinished tasks it waits
+   on, a recorded blocker, what the last session left open, and its pull request, commit, URL,
+   session and task links (listed, not fetched)
+2. the vault notes it links (`via="task_link"`)
+3. notes recorded as written under the task or by the sessions it is linked to
+   (`via="task_produced"`, from the provenance store)
+4. explicit open questions, and the conflicts the packet already flags
+
+Explicit `refs` and `queries` come first and are never displaced. With no queries of its own, the
+task's title is searched as plain keywords. The task record is charged to the packet budget (at most
+half of it; the least important parts are trimmed first), so a packet never exceeds `budget_chars`.
+
+If the task cannot be read, or search or the graph index fails, the packet falls back to the explicit
+references and the task's direct links and says so as a gap; a packet with any gap is labelled
+`Completeness: partial`. Task text is written by people and agents, so it is fenced and escaped like
+note text and the reader is told it is data, not an instruction.
+
 ## What a packet says about each source
 
 Path, excerpt, note last-edited time, retrieval time, why it was picked, how it
