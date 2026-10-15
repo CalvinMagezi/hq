@@ -13,6 +13,7 @@
 pub mod concept_pages;
 pub mod consolidator;
 pub mod context_packet;
+pub mod context_task;
 pub mod db;
 pub mod entity_graph;
 pub mod forgetter;

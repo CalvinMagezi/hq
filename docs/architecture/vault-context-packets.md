@@ -29,6 +29,29 @@ Code: `crates/hq-memory/src/context_packet.rs`.
    retrieval. A packet built earlier can be passed as `context_packet`; its
    time-sensitive entries are re-read when it has aged past 30 minutes.
 
+## Packets built from a task
+
+Give `context_packet` (or a sub-agent's `context_need`) a `task_id` and the need is built from the
+task, in priority order:
+
+1. the task's own record, rendered in a `<task_record>` block: description, acceptance criteria
+   (the lines after an `Acceptance` label or heading), status, owner, the unfinished tasks it waits
+   on, a recorded blocker, what the last session left open, and its pull request, commit, URL,
+   session and task links (listed, not fetched)
+2. the vault notes it links (`via="task_link"`)
+3. notes recorded as written under the task or by the sessions it is linked to
+   (`via="task_produced"`, from the provenance store)
+4. explicit open questions, and the conflicts the packet already flags
+
+Explicit `refs` and `queries` come first and are never displaced. With no queries of its own, the
+task's title is searched as plain keywords. The task record is charged to the packet budget (at most
+half of it; the least important parts are trimmed first), so a packet never exceeds `budget_chars`.
+
+If the task cannot be read, or search or the graph index fails, the packet falls back to the explicit
+references and the task's direct links and says so as a gap; a packet with any gap is labelled
+`Completeness: partial`. Task text is written by people and agents, so it is fenced and escaped like
+note text and the reader is told it is data, not an instruction.
+
 ## What a packet says about each source
 
 Path, excerpt, note last-edited time, retrieval time, why it was picked, how it
@@ -42,6 +65,37 @@ was found (`direct`, `search`, `graph`), and a freshness verdict:
 | `recheck` | The need is `time_sensitive`: verify against the source of truth. |
 | `conflicting` | Two sources in the packet name each other in `conflicts_with`. |
 
+## Who wrote it, and whether anyone reviewed it
+
+Each entry also carries what the provenance store knows about the exact version it quotes,
+shown as attributes on the `<vault_note>` block and as a `Provenance:` line inside it:
+
+```
+<vault_note id="S1" path="..." ... actor="relay" source_kind="agent" task="tk-1" session="s-1"
+            provenance="recorded" review="unreviewed" reviewed_by="unknown">
+```
+
+| `provenance` | Meaning |
+|---|---|
+| `recorded` | a write of this exact version was recorded |
+| `unattributed` | it was recorded but the writer could not say who it was |
+| `changed_outside_tools` | the note has recorded writes, but this text is not one of them (edited in an editor or by a shell); its author is not known |
+| `no_record` | nothing was ever recorded for the note |
+| `unavailable` | no provenance store to ask (no database, or one from before the store existed) |
+| `outdated` | the note changed after the packet was built, and a refresh stopped crediting the earlier author |
+
+What is not known renders as `unknown` (and `review="none"` when there is no record to review).
+It is never filled in from an edit time or from which agent was active. `review` is one of
+`unreviewed`, `reviewed`, `accepted`, `disputed`, `superseded`, with `reviewed_by` beside it.
+
+Reading rules, repeated in the packet itself: `unknown` is not a sign of trust; `unreviewed`,
+`disputed` and `superseded` sources are claims to verify and never settled fact; even `accepted`
+is one person's judgement at one time and not proof the text is current. An edit date is still
+not proof of validity, and provenance does not change a source's freshness verdict. Packets saved
+before this existed read back as `unavailable`. The fencing and escaping of note text are
+unchanged, and provenance values are stripped of quotes and angle brackets before they go into the
+block header.
+
 Moved notes are found by file name and labelled. Missing notes, failed search,
 an unavailable graph and budget overflow each become an explicit gap. Retrieval
 never raises an error into the task.
@@ -54,3 +108,19 @@ Readers cite `[S1]` and finish with `Sources used:` and `Gaps:` lists. For
 sub-agents, HQ runs `verify_citations` on the child's answer and the summary
 shows which citations were verified, changed or gone since retrieval, or never
 supplied.
+
+## Evaluation
+
+`crates/hq-memory/tests/context_packet_eval.rs` builds six small vaults with known ground
+truth and scores the packets built from a task id: multi-agent launch plan, an incident review
+with a hand-edited note, budget pressure, two tasks in one vault, a note that contains
+instructions, and a failed search plus graph. It asserts what the design promises (no stale or
+superseded note shown as current, review labels equal to the record, no needed note missing
+without a gap, nothing the task did not ask for, never over `budget_chars`, every fabricated or
+changed citation caught) and reports precision and recall without gating on them. Run it with
+`cargo test -p hq-memory --test context_packet_eval -- --nocapture`; `HQ_EVAL_REPORT=<file>`
+writes the table. Six scenarios are a regression harness, not an estimate of retrieval quality
+on a real vault. Known limits: every scenario retrieves through task links and recorded
+provenance (search-only recall is not measured), and excerpts are allocated first-come, so a
+tight budget lets one long note crowd out other linked notes. The omission is always an
+`over_budget` gap and a partial packet, never silent.

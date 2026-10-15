@@ -12,7 +12,7 @@ use std::time::{Duration, Instant};
 use anyhow::{Result, bail};
 use hq_core::redact::redact_secrets;
 use hq_core::types::{ChatMessage, SessionResult, ValueItem, ValueKind};
-use hq_db::skill_invocations::{InvocationTrigger, RecentSkill};
+use hq_db::skill_invocations::{InvocationTrigger, RecentSkill, Used};
 use hq_tools::skill_audit::{AuditEntry, Disposition, append_audit, audit_history};
 use hq_tools::skill_edit::{SkillEdit, edited_text, is_managed, write_live};
 use hq_tools::skills::{
@@ -34,9 +34,11 @@ const MAX_RECENT_SKILLS: u32 = 5;
 const LIGHT_REVIEW_GAP: Duration = Duration::from_secs(5 * 60);
 /// `value_items.source_task` for the FYI; the value bus keeps it web-only.
 pub const VALUE_SOURCE: &str = "skill_review";
-/// `skill_invocations.outcome_source` for scores taken from how the session ended.
-pub const OUTCOME_SOURCE_SESSION: &str = "session_result";
-const OUTCOME_SOURCE_REVIEW: &str = "review";
+/// `skill_invocations.outcome_source` for scores taken from how the session ended. Weak
+/// evidence: a clean exit says the process finished, not that the work was accepted, so any
+/// observed outcome (`hq_db::skill_outcomes::settle`) replaces it.
+pub const OUTCOME_SOURCE_SESSION: &str = hq_db::skill_outcomes::SOURCE_SESSION;
+const OUTCOME_SOURCE_REVIEW: &str = hq_db::skill_outcomes::SOURCE_REVIEW;
 const SCORE_GOOD: f64 = 1.0;
 const SCORE_PARTIAL: f64 = 0.5;
 const SCORE_BAD: f64 = 0.0;
@@ -137,7 +139,8 @@ pub struct Applied {
     pub name: String,
     pub change: Change,
     pub reason: String,
-    /// Staged in `_proposed/` because `governance.skills_write_approval` is on.
+    /// Staged in `_proposed/`: `governance.skills_write_approval` is on, or the change broke one
+    /// of the skill's regression fixtures (named in `flags`).
     pub held: bool,
     pub flags: Vec<String>,
 }
@@ -316,7 +319,10 @@ impl Review<'_> {
         let reason = redact_secrets(reason.trim());
         let flags = self.screen(name, added, &reason)?;
         let edited = edited_text(&skills_dir, name, edit)?;
-        let held = self.commit(name, &edited.text, edited.version, &reason, &flags)?;
+        let (held, fixture_flags) =
+            self.commit(name, &edited.text, edited.version, &reason, &flags)?;
+        let mut flags = flags;
+        flags.extend(fixture_flags);
         Ok(Applied {
             name: name.to_string(),
             change,
@@ -353,7 +359,9 @@ impl Review<'_> {
             skill.hints.join("\n")
         );
         let flags = self.screen(name, &added, &reason)?;
-        let held = self.commit(name, &render_skill(&skill), 1, &reason, &flags)?;
+        let (held, fixture_flags) = self.commit(name, &render_skill(&skill), 1, &reason, &flags)?;
+        let mut flags = flags;
+        flags.extend(fixture_flags);
         Ok(Applied {
             name: name.to_string(),
             change: Change::Created,
@@ -380,20 +388,27 @@ impl Review<'_> {
         version: u32,
         reason: &str,
         flags: &[String],
-    ) -> Result<bool> {
+    ) -> Result<(bool, Vec<String>)> {
         let skills_dir = self.skills_dir();
-        if self.write_approval {
+        // A change has to pass the skill's regression fixtures before it goes live. One that
+        // does not is held in `_proposed/` for the owner, with what it broke on the audit line.
+        let failures = hq_tools::skills::candidate_failures(&skills_dir, name, text);
+        let held = self.write_approval || !failures.is_empty();
+        if held {
             write_proposal_text(&skills_dir, name, text)?;
         } else {
             write_live(&skills_dir, name, text)?;
         }
-        let disposition = if self.write_approval {
+        let disposition = if held {
             Disposition::Held
         } else {
             Disposition::Adopted
         };
-        self.audit(name, version, text, disposition, reason, flags)?;
-        Ok(self.write_approval)
+        let fixture_flags: Vec<String> = failures.iter().map(|f| format!("fixture: {f}")).collect();
+        let mut all = flags.to_vec();
+        all.extend(fixture_flags.iter().cloned());
+        self.audit(name, version, text, disposition, reason, &all)?;
+        Ok((held, fixture_flags))
     }
 
     fn audit(
@@ -477,22 +492,18 @@ fn record_verdicts(
     verdicts: &HashMap<String, String>,
 ) {
     for (name, verdict) in verdicts {
-        let score = match verdict.as_str() {
-            "helped" => SCORE_GOOD,
-            "hurt" => SCORE_BAD,
+        let (used, outcome) = match verdict.as_str() {
+            "helped" => (Used::Helped, Some((SCORE_GOOD, OUTCOME_SOURCE_REVIEW))),
+            "hurt" => (Used::Hurt, Some((SCORE_BAD, OUTCOME_SOURCE_REVIEW))),
+            // Loaded and not applied: worth knowing, says nothing about whether the work was good.
+            "unused" => (Used::Unused, None),
             _ => continue,
         };
         if !loaded.iter().any(|l| &l.skill_name == name) {
             continue;
         }
         let result = db.with_conn(|c| {
-            hq_db::skill_invocations::set_latest_outcome(
-                c,
-                name,
-                RECENT_SKILL_HOURS,
-                score,
-                OUTCOME_SOURCE_REVIEW,
-            )
+            hq_db::skill_invocations::set_latest_verdict(c, name, RECENT_SKILL_HOURS, used, outcome)
         });
         if let Err(e) = result {
             tracing::warn!(%e, skill = %name, "skill review: verdict not recorded");
@@ -663,7 +674,8 @@ fn notify(vault_path: &Path, applied: &[Applied]) {
         .collect();
     if held {
         body.push(
-            "governance.skills_write_approval is on: `hq skills approve|reject <name>`."
+            "Held because governance.skills_write_approval is on or a regression fixture failed \
+             (see Flags): `hq skills approve|reject <name>`."
                 .to_string(),
         );
     }

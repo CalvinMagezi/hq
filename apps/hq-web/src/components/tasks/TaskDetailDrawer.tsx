@@ -9,6 +9,7 @@ import { TaskSessions } from './TaskSessions'
 import { TaskTime } from './TaskTime'
 import { TaskLinks } from './TaskLinks'
 import { TaskCheckpoint } from './TaskCheckpoint'
+import { TaskActivity } from './TaskActivity'
 import { useIsStale } from './staleContext'
 import { DateRangeInputs, EstimateInput, PRIORITIES, SectionLabel, isInvalidEstimate, parseEstimate } from './taskFields'
 import { formatLocalTime } from './timeFormat'
@@ -435,6 +436,7 @@ export function TaskDetailDrawer({
           />
 
           <TaskCheckpoint key={`checkpoint-${task.id}`} task={task} />
+          <TaskActivity key={`activity-${task.id}`} task={task} />
           <TaskLinks key={`links-${task.id}`} task={task} />
           <TaskTime key={`time-${task.id}`} task={task} />
           <TaskSessions key={`sessions-${task.id}`} taskId={task.id} />

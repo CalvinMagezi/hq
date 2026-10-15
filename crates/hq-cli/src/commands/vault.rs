@@ -142,6 +142,7 @@ pub async fn run(config: &HqConfig, sub: &str, args: &[String]) -> Result<()> {
             };
 
             vault.write_note(path, &note)?;
+            record_owner_write(config, path);
             println!("Wrote: {}", path);
         }
         "export" | "export-pdf" | "pdf" => {
@@ -265,6 +266,14 @@ pub async fn run(config: &HqConfig, sub: &str, args: &[String]) -> Result<()> {
                 println!("  - {} ({})", note.title, note.path);
             }
         }
+        "repair" => {
+            let apply = args.iter().any(|a| a == "--apply");
+            let db = hq_db::Database::open_existing(&config.db_path())?;
+            let vault_path = config.vault_path.clone();
+            let report =
+                db.with_conn(move |conn| hq_db::search::repair_orphans(conn, &vault_path, apply))?;
+            print!("{}", repair_summary(&report, apply));
+        }
         _ => {
             println!("Usage: hq vault <subcommand>");
             println!();
@@ -279,12 +288,111 @@ pub async fn run(config: &HqConfig, sub: &str, args: &[String]) -> Result<()> {
             println!(
                 "  export-pdf <note>    Export a note as a shareable PDF (-o file, --brand slug)"
             );
+            println!(
+                "  repair [--apply]     Find (and with --apply remove) search rows left behind by deleted notes"
+            );
             println!("  stats                Show vault statistics");
             println!("  context              Show system context");
         }
     }
 
     Ok(())
+}
+
+/// What `hq vault repair` prints. A dry run lists what it found and changes nothing.
+/// Record that the person at this terminal wrote the note. Best effort: with no database yet
+/// (or one the daemon has not migrated), the write stands and nothing is recorded.
+fn record_owner_write(config: &HqConfig, rel: &str) {
+    let Ok(db) = hq_db::Database::open_existing(&config.db_path()) else {
+        return;
+    };
+    hq_tools::provenance::Recorder::new(std::sync::Arc::new(db), config.vault_path.clone())
+        .record(rel, &hq_tools::provenance::Writer::owner());
+}
+
+fn repair_summary(report: &hq_db::search::RepairReport, apply: bool) -> String {
+    let orphans = report.orphan_paths();
+    let mode = if apply { "" } else { " (dry run)" };
+    let mut out = format!("Search index repair{mode}\n");
+    if orphans.is_empty() {
+        out.push_str("  Nothing left behind: the index matches the notes on disk.\n");
+        return out;
+    }
+    for (label, found) in [
+        (
+            "keyword-index rows with no file",
+            &report.indexed_without_file,
+        ),
+        ("embeddings with no note", &report.embeddings_without_note),
+        ("cached copies with no file", &report.cached_without_file),
+        ("sync records with no file", &report.synced_without_file),
+    ] {
+        out.push_str(&format!("  {label:<34}{}\n", found.len()));
+    }
+    let examples: Vec<&str> = orphans.iter().take(5).copied().collect();
+    out.push_str(&format!("  e.g. {}\n", examples.join(", ")));
+    if apply {
+        out.push_str(&format!(
+            "Removed what was left behind for {} note(s).\n",
+            report.removed
+        ));
+    } else {
+        out.push_str(&format!(
+            "{} note(s) have rows left behind. Nothing was changed; run `hq vault repair --apply` to remove them.\n",
+            orphans.len()
+        ));
+    }
+    out
+}
+
+#[cfg(test)]
+mod repair_tests {
+    use super::*;
+    use hq_db::search::RepairReport;
+
+    fn found() -> RepairReport {
+        RepairReport {
+            indexed_without_file: vec!["Notebooks/a.md".into()],
+            embeddings_without_note: vec!["Notebooks/a.md".into(), "Skills/b.md".into()],
+            cached_without_file: vec![],
+            synced_without_file: vec!["Notebooks/a.md".into()],
+            removed: 0,
+        }
+    }
+
+    #[test]
+    fn a_dry_run_lists_counts_and_says_nothing_changed() {
+        let text = repair_summary(&found(), false);
+        assert!(text.starts_with("Search index repair (dry run)"), "{text}");
+        let line = text
+            .lines()
+            .find(|l| l.contains("embeddings with no note"))
+            .unwrap();
+        assert!(line.trim_end().ends_with(" 2"), "{line}");
+        assert!(text.contains("2 note(s) have rows left behind"), "{text}");
+        assert!(text.contains("hq vault repair --apply"), "{text}");
+    }
+
+    #[test]
+    fn an_applied_run_says_how_many_notes_were_cleaned() {
+        let mut report = found();
+        report.removed = 2;
+        let text = repair_summary(&report, true);
+        assert!(text.starts_with("Search index repair\n"), "{text}");
+        assert!(
+            text.contains("Removed what was left behind for 2 note(s)."),
+            "{text}"
+        );
+    }
+
+    #[test]
+    fn nothing_found_says_so() {
+        let text = repair_summary(&RepairReport::default(), false);
+        assert!(
+            text.contains("the index matches the notes on disk"),
+            "{text}"
+        );
+    }
 }
 
 #[cfg(test)]
@@ -352,6 +460,40 @@ mod lite_tests {
                 .is_err()
         );
         assert!(!dir.path().join("_system/new.md").exists());
+    }
+
+    #[tokio::test]
+    async fn a_terminal_write_is_recorded_as_the_owners() {
+        let (dir, mut cfg) = vault_with_notes();
+        cfg.profile = Profile::Full;
+        // A migrated database must exist for there to be anywhere to record.
+        let db = hq_db::Database::open(&cfg.db_path()).unwrap();
+        run(
+            &cfg,
+            "write",
+            &args(&["Notebooks/b.md", "typed", "by", "hand"]),
+        )
+        .await
+        .unwrap();
+
+        let raw = std::fs::read_to_string(dir.path().join("Notebooks/b.md")).unwrap();
+        let hash = hq_db::search::content_hash(&raw);
+        let found = db
+            .with_conn(|c| hq_db::provenance::current(c, "Notebooks/b.md", &hash))
+            .unwrap()
+            .expect("the write was recorded");
+        assert_eq!(found.actor_id, "owner");
+        assert_eq!(found.source_kind, hq_db::provenance::SourceKind::Human);
+    }
+
+    #[tokio::test]
+    async fn a_terminal_write_without_a_database_still_writes() {
+        let (dir, mut cfg) = vault_with_notes();
+        cfg.profile = Profile::Full;
+        run(&cfg, "write", &args(&["Notebooks/c.md", "text"]))
+            .await
+            .unwrap();
+        assert!(dir.path().join("Notebooks/c.md").is_file());
     }
 
     #[tokio::test]

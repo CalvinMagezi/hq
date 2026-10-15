@@ -33,6 +33,7 @@ pub mod imagegen;
 pub mod model_control;
 pub mod notify;
 pub mod prose_lint;
+pub mod provenance;
 pub mod registry;
 pub mod remote_mcp;
 pub mod self_update;

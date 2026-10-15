@@ -11,6 +11,7 @@ mod context;
 mod graph;
 mod person;
 mod read;
+mod review;
 mod scoped;
 mod write;
 
@@ -18,6 +19,7 @@ pub use context::*;
 pub use graph::*;
 pub use person::PersonRecordFactTool;
 pub use read::*;
+pub use review::{NoteProvenanceTool, NoteReviewTool, Reviewed, Reviewer, review_note};
 pub use scoped::scope_vault_tools;
 pub use write::*;
 
@@ -161,6 +163,8 @@ pub fn create_vault_tools(
     ));
 
     if let Some(db) = db {
+        tools.push(Box::new(NoteReviewTool::new(vault.clone(), db.clone())));
+        tools.push(Box::new(NoteProvenanceTool::new(vault.clone(), db.clone())));
         tools.push(Box::new(VaultSearchTool::new(db.clone())));
         tools.push(Box::new(VaultFindSimilarTool::new(db.clone())));
         tools.push(Box::new(VaultTagsTool::new(db.clone())));

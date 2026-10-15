@@ -20,7 +20,11 @@ pub fn create_shortcut_tools(vault_path: PathBuf, db: Arc<Database>) -> Vec<Box<
     vec![
         // Vault shortcuts
         Box::new(vault::VaultFindShortcut::new(db.clone())),
-        Box::new(vault::VaultNoteShortcut::new(vault_path.clone())),
+        Box::new(
+            vault::VaultNoteShortcut::new(vault_path.clone()).with_recorder(
+                crate::provenance::Recorder::new(db.clone(), vault_path.clone()),
+            ),
+        ),
         Box::new(vault::VaultLogShortcut::new(vault_path.clone())),
         // Fuzzy gateway (resolves any tool by name)
         Box::new(gateway::HqGatewayTool::new(db, vault_path)),

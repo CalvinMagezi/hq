@@ -76,6 +76,14 @@ pub fn approve_proposed_skill(skills_dir: &Path, name: &str) -> Result<PathBuf> 
     let proposed_dir = skills_dir.join("_proposed").join(name);
     let proposed_file = proposed_dir.join("SKILL.md");
     if !proposed_file.exists() {
+        if proposed_dir.join(super::PROPOSAL_FILE).exists() {
+            anyhow::bail!(
+                "'{name}' has an evidence proposal ({}) but no replacement text, so there is \
+                 nothing to approve: change the skill through `hq skills edit` or the review, \
+                 or `hq skills reject {name}` to dismiss the proposal",
+                super::PROPOSAL_FILE
+            );
+        }
         anyhow::bail!("proposed skill '{}' not found", name);
     }
 
@@ -85,6 +93,8 @@ pub fn approve_proposed_skill(skills_dir: &Path, name: &str) -> Result<PathBuf> 
     crate::skill_audit::archive_current(skills_dir, name)?;
     std::fs::create_dir_all(&live_dir)?;
     std::fs::rename(&proposed_file, &live_file)?;
+    // An evidence proposal beside the change has been acted on.
+    let _ = std::fs::remove_file(proposed_dir.join(super::PROPOSAL_FILE));
     std::fs::remove_dir(&proposed_dir)?;
     crate::skill_audit::audit_live(
         skills_dir,

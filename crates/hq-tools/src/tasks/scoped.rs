@@ -744,12 +744,40 @@ mod tests {
             "space_update",
             "task_related",
             "task_create_from_note",
+            "task_activity",
         ] {
             assert!(
                 denied(&call(&bob, tool, json!({ "id": theirs, "name": "n" })).await),
                 "{tool}"
             );
         }
+    }
+
+    #[tokio::test]
+    async fn the_activity_view_is_closed_to_a_restricted_audience_even_for_their_own_task() {
+        let f = fixture();
+        let bob = tools_for(&f, &scope_for("2"));
+        let mine = add(&bob, "bob private").await;
+        // It lists sessions, leases, notes and who wrote them: none of that is filtered per
+        // space, so a restricted audience gets the plain task and not this.
+        assert!(denied(
+            &call(&bob, "task_activity", json!({ "task_id": mine })).await
+        ));
+        let initiative =
+            f.db.with_conn(|c| Ok(t::get_task(c, &mine)?.unwrap().initiative_id))
+                .unwrap();
+        assert!(denied(
+            &call(
+                &bob,
+                "task_activity",
+                json!({ "initiative_id": initiative })
+            )
+            .await
+        ));
+        // An unrestricted caller gets it.
+        let all = super::super::create_task_tools(f.path.clone(), f.vault.clone(), f.db.clone());
+        let ok = call(&all, "task_activity", json!({ "task_id": mine })).await;
+        assert!(ok.is_ok(), "{ok:?}");
     }
 
     #[tokio::test]

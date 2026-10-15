@@ -102,6 +102,8 @@ placeholders (`example.com`, `hq.example.ts.net`, `<owner>/<repo>`).
   A firing whose reply contains `WATCH_DONE` delivers once and stops its watch.
   `background_turn_status` looks any turn up by its 8-character short ref.
 - The vault is the primary output target for knowledge and agent output.
+- **Search freshness has two sources.** The vault watcher (events, seconds) and the scheduled `embeddings` task's full scan (every 30 minutes, the correctness floor). Index writes go through `hq_db::search::reconcile`, never hand-written SQL on `notes_fts`, so a delete clears every derived row. Tests that touch the index use the real migrated schema (`crate::migrations::run`).
+- **Identity is never model-writable.** Tools learn the caller only from reserved `_hq_*` arguments the runtime sets (`_hq_connector`, `_hq_caller_session`, `_hq_native_*`). A native session strips every `_hq_*` key the model sent before it sets its own, and the MCP gateway strips `_hq_native_*` from callers. Provenance is recorded only where a write path knows the caller; otherwise it is `unknown`. Review state changes only through `note_review`.
 - **Disk watchdog**: `crates/hq-cli/src/commands/start/daemon/tasks_periodic/disk_watchdog.rs` is a 6-hour daemon task
   that checks overall disk usage, the bun install cache, and `node_modules` and
   `target` bloat under configurable roots, notifying via the configured relay on
@@ -133,6 +135,10 @@ placeholders (`example.com`, `hq.example.ts.net`, `<owner>/<repo>`).
 | Note export (pdf, docx, png, svg, html, md, xlsx, csv, json, jsonl, xml, latex, ipynb, jira, code): `hq vault export --format`, `hq vault export-pdf`, `vault_export`, `vault_export_pdf`, `/api/note/export`, `/api/note/pdf` | `crates/hq-export/` (document model `doc.rs`, writers, Typst layout `typst_markup.rs` and `render.rs`, vault glue `note.rs`), `crates/hq-convert/src/note_pdf.rs` (note preparation, legacy PDF engines behind `HQ_PDF_ENGINE`), `crates/hq-tools/src/convert.rs`, `crates/hq-web/src/vault_api.rs`, `docs/NOTE_EXPORT.md` |
 | Native task management | `crates/hq-db/src/tasks.rs` (shared write surface: spaces > initiatives > tasks > comments), `crates/hq-tools/src/tasks/` (MCP tools), `crates/hq-web/src/tasks_api.rs` (REST + WS broadcast), `apps/hq-web/src/routes/tasks.tsx` (UI). Tag-based agent routing pushes to `_mailboxes/<tag>/` synchronously via `hq_core::mailbox::notify_tagged_agents`. Sub-tasks, start dates, soft dependencies and List/Board/Timeline views: `docs/plans/native-tasks.md`. |
 | Web Push and `notify_owner` (`web_push:` config) | `crates/hq-tools/src/notify.rs` (tool), `crates/hq-web/src/web_push/` (VAPID, RFC 8291 encryption, dispatcher, `/api/notifications/push/*`), `crates/hq-db/src/push_subscriptions.rs`, `apps/hq-web/src/lib/webPush.ts`, `apps/hq-web/src/sw.ts`, `docs/WEB_PUSH.md` |
+| Vault change events: watcher, debounce queue, index and embedding freshness (`vault_watch:` config, `hq doctor` Search index, `hq vault repair`) | `crates/hq-daemon/src/vault_watch/` (`watcher.rs`, `queue.rs`, `pipeline.rs`, `status.rs`), `crates/hq-db/src/search/reconcile.rs` (the shared index writes and the full scan), `crates/hq-daemon/src/embeddings.rs` and `embedding_worker.rs`, `crates/hq-core/src/config/vault_watch.rs`, `docs/architecture/vault-events.md` |
+| Note provenance, review state and the task activity view | `crates/hq-db/src/provenance.rs` (tables `note_provenance`, `note_review_events`), `crates/hq-tools/src/provenance.rs` (who is calling, the `Recorder`), `crates/hq-tools/src/vault/review.rs` (`note_review`, `note_provenance`), `crates/hq-tools/src/tasks/activity.rs` (`task_activity`), `crates/hq-web/src/tasks_api.rs` (REST), `apps/hq-web/src/components/tasks/TaskActivity.tsx` and `InitiativeBriefing.tsx` |
+| Context packets (source-linked vault excerpts, built from a task id, with provenance and gaps) and their evaluation | `crates/hq-memory/src/context_packet.rs` (`build_packet`, `verify_citations`), `crates/hq-memory/src/context_task.rs` (the task record and its sources), `crates/hq-tools/src/vault/context.rs` (`context_packet`), `crates/hq-memory/tests/context_packet_eval.rs` (`cargo test -p hq-memory --test context_packet_eval`), `docs/architecture/vault-context-packets.md` |
+| Skill evidence, outcomes and fixtures (`hq skills evidence`) | `crates/hq-db/src/skill_invocations.rs`, `skill_outcomes.rs`, `skill_evidence.rs`, `crates/hq-tools/src/skills/fixtures.rs`, `evidence_proposal.rs`, `crates/hq-cli/src/commands/skills_evidence.rs`, `docs/SKILL_FLYWHEEL.md` |
 | Memory system | `crates/hq-memory/src/lib.rs` |
 | LLM usage report | `crates/hq-cli/src/commands/usage.rs` (`hq usage`/`cost`/`summary` read hq-db `task_outcomes`) |
 | Web and MCP auth, origin guard | `crates/hq-web/src/auth.rs`, `crates/hq-web/src/origin.rs`, `docs/security/WEB_AUTH.md` |
@@ -240,6 +246,12 @@ payloads, and are audited in `skills/_audit.jsonl`. `hq skills revert <name>`
 restores the newest archive and `hq skills history <name>` prints the trail.
 `governance.skills_write_approval` (default off) stages every change in
 `skills/_proposed/` for `hq skills approve|reject <name>`.
+
+Skill evidence and tests: `skill_invocations` records the skill hash, task, purpose and
+outcome of every load (ids and fixed values only, never prompt or document text),
+`hq_db::skill_outcomes::settle` scores outcomes from observable acceptance rather than the
+session exit, and `skills/<name>/fixtures.yaml` holds regression fixtures that gate edits. See
+`docs/SKILL_FLYWHEEL.md`.
 
 Document generation (docx, pptx, xlsx, pdf) is optional and depends on external
 skills you install yourself. Brands are vault content, not a compiled-in list:

@@ -49,20 +49,111 @@ pub fn bytes_to_embedding(bytes: &[u8]) -> Vec<f32> {
 
 // ─── Embedding Storage ───────────────────────────────────────────────────────
 
-/// Store (or replace) an embedding for a note.
+/// Store (or replace) an embedding for a note, without recording which version of the note it
+/// was made from. Prefer `store_embedding_of`.
 pub fn store_embedding(
     conn: &Connection,
     path: &str,
     embedding: &[f32],
     model: &str,
 ) -> Result<()> {
+    store_embedding_of(conn, path, embedding, model, None)
+}
+
+/// Store (or replace) an embedding for a note, recording the hash of the note it was made from
+/// (`content_hash` of the raw file). `pending_embeddings` compares it with the note's current
+/// hash to find embeddings that an edit has made stale.
+pub fn store_embedding_of(
+    conn: &Connection,
+    path: &str,
+    embedding: &[f32],
+    model: &str,
+    note_hash: Option<&str>,
+) -> Result<()> {
     let blob = embedding_to_bytes(embedding);
     let now = chrono::Utc::now().timestamp_millis();
     conn.execute(
-        "INSERT OR REPLACE INTO embeddings (note_path, embedding, model, embedded_at) VALUES (?1, ?2, ?3, ?4)",
-        rusqlite::params![path, blob, model, now],
+        "INSERT OR REPLACE INTO embeddings (note_path, embedding, model, embedded_at, content_hash)
+         VALUES (?1, ?2, ?3, ?4, ?5)",
+        rusqlite::params![path, blob, model, now, note_hash],
     )?;
     Ok(())
+}
+
+/// Why a note needs an embedding.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum EmbedReason {
+    /// It has none.
+    Missing,
+    /// It was edited after its embedding was made.
+    Edited,
+    /// Its embedding came from a different model than the one in use now.
+    OtherModel,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PendingEmbedding {
+    pub path: String,
+    pub reason: EmbedReason,
+}
+
+/// Restricts an `embeddings` query to notes that are still in the keyword index. The subquery does
+/// not depend on the outer row, so SQLite builds it once; a per-row lookup would scan the index
+/// for every embedding.
+const LIVE_NOTE: &str = "note_path IN (SELECT path FROM notes_fts)";
+
+/// SQL condition for an embedding made from an older version of its note. `e` is the embedding,
+/// `s` the note's `sync_state` row. With a recorded hash it is a comparison. Without one (made
+/// before the column existed) the note counts as edited only if its file changed after the
+/// embedding was made, so upgrading does not embed everything again.
+const STALE_EMBEDDING: &str = "(
+    (e.content_hash IS NOT NULL AND s.content_hash IS NOT NULL AND e.content_hash != s.content_hash)
+    OR (e.content_hash IS NULL AND s.modified_at IS NOT NULL AND s.modified_at * 1000 > e.embedded_at)
+)";
+
+/// Notes that need an embedding made, new notes first, then edited ones, then notes whose
+/// embedding came from another model. At most `limit`.
+pub fn pending_embeddings(
+    conn: &Connection,
+    model: &str,
+    limit: usize,
+) -> Result<Vec<PendingEmbedding>> {
+    let sql = format!(
+        "SELECT f.path,
+                CASE WHEN e.note_path IS NULL THEN 0
+                     WHEN e.model != ?1 THEN 2
+                     ELSE 1 END AS reason
+           FROM notes_fts f
+           LEFT JOIN embeddings e ON e.note_path = f.path
+           LEFT JOIN sync_state s ON s.path = f.path
+          WHERE e.note_path IS NULL OR e.model != ?1 OR {STALE_EMBEDDING}
+          ORDER BY (e.note_path IS NULL) DESC, (e.model != ?1) ASC, f.path
+          LIMIT ?2"
+    );
+    let mut stmt = conn.prepare(&sql)?;
+    let rows = stmt.query_map(rusqlite::params![model, limit as i64], |row| {
+        let reason = match row.get::<_, i64>(1)? {
+            0 => EmbedReason::Missing,
+            2 => EmbedReason::OtherModel,
+            _ => EmbedReason::Edited,
+        };
+        Ok(PendingEmbedding {
+            path: row.get(0)?,
+            reason,
+        })
+    })?;
+    Ok(rows.collect::<rusqlite::Result<_>>()?)
+}
+
+/// Embeddings made from an older version of their note, whatever model made them.
+pub fn stale_embedding_count(conn: &Connection) -> Result<usize> {
+    let sql = format!(
+        "SELECT COUNT(*)
+           FROM embeddings e
+           JOIN sync_state s ON s.path = e.note_path
+          WHERE {STALE_EMBEDDING}"
+    );
+    Ok(conn.query_row(&sql, [], |row| row.get(0))?)
 }
 
 /// Retrieve the stored embedding for a note. Returns `None` if not found.
@@ -90,7 +181,14 @@ pub fn semantic_search(
 ) -> Result<Vec<SearchResult>> {
     // Cap the number of loaded embeddings to avoid OOM on very large vaults.
     // 10 000 embeddings at 1536-dim f32 ≈ 60 MB, which is safe for in-memory scoring.
-    let mut stmt = conn.prepare("SELECT note_path, embedding FROM embeddings LIMIT 10000")?;
+    // Only notes still in the index count, so a stale row cannot return a deleted note; when the
+    // cap bites, the most recently embedded come first, the same every time.
+    let mut stmt = conn.prepare(&format!(
+        "SELECT note_path, embedding FROM embeddings
+          WHERE {LIVE_NOTE}
+          ORDER BY embedded_at DESC, note_path
+          LIMIT 10000"
+    ))?;
     let rows: Vec<(String, Vec<u8>)> = stmt
         .query_map([], |row| {
             Ok((row.get::<_, String>(0)?, row.get::<_, Vec<u8>>(1)?))
@@ -171,8 +269,12 @@ pub fn find_similar_notes(
     };
 
     // Cap loaded embeddings to avoid OOM on large vaults (see semantic_search for rationale).
-    let mut stmt = conn
-        .prepare("SELECT note_path, embedding FROM embeddings WHERE note_path != ?1 LIMIT 10000")?;
+    let mut stmt = conn.prepare(&format!(
+        "SELECT note_path, embedding FROM embeddings
+          WHERE note_path != ?1 AND {LIVE_NOTE}
+          ORDER BY embedded_at DESC, note_path
+          LIMIT 10000"
+    ))?;
     let rows: Vec<(String, Vec<u8>)> = stmt
         .query_map([path], |row| {
             Ok((row.get::<_, String>(0)?, row.get::<_, Vec<u8>>(1)?))

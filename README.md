@@ -33,7 +33,7 @@ No cloud backend. No vendor lock-in. One binary of about 58 MB.
 ## Features
 
 - **One agent, every channel.** Discord, Telegram, the web UI and `hq chat` share one conversation history and one memory, so you can switch platforms mid-thread.
-- **Markdown vault.** Notes, memory, skills and threads are plain files plus a single SQLite database (FTS5 search and embeddings). Nothing is locked inside a service.
+- **Markdown vault.** Notes, memory, skills and threads are plain files plus a single SQLite database (FTS5 search and embeddings). Nothing is locked inside a service. Notes edited outside HQ (an editor, git, an agent's shell) are picked up within seconds, and every version records who wrote it. See [docs/architecture/vault-events.md](docs/architecture/vault-events.md).
 - **Coding-agent sessions.** Start, watch, steer and resume Claude Code, Codex, OpenCode and others in the built-in host, on this machine or a paired one (macOS, Linux, and Windows through WSL2).
 - **Sub-agents.** Single, parallel, race and graph execution modes over an in-process agent service.
 - **Native tasks.** Spaces, initiatives, tasks and comments, as MCP tools and a list, board and timeline UI.
@@ -308,7 +308,7 @@ Tasks have no CLI command: they are MCP tools (`task_list`, `task_create` and fr
 |---------|-------------|
 | `hq agents [list\|show]` | List/inspect agent definitions |
 | `hq mailbox [list\|archive]` | Inspect and maintain the inter-agent mailboxes |
-| `hq skills <sub>` | Manage vault skills (list, show, create, validate, adopt, approve, revert, history and more) |
+| `hq skills <sub>` | Manage vault skills (list, show, create, validate, adopt, approve, revert, history, evidence and more) |
 | `hq queue [list\|stats\|clear]` | Inspect or clear the value-bus notification queue |
 | `hq decisions [--days N] [--site S]` | Show what the structured-decision gates did |
 
@@ -393,7 +393,7 @@ Agent-HQ is a Cargo workspace of 17 crates and about 143,000 lines of Rust (556 
 | Web server | axum + tower-http |
 | Discord | serenity |
 | Telegram | teloxide |
-| File watching | notify |
+| File watching | notify (notes edited outside HQ are indexed within seconds) |
 | Config | figment (YAML + env) |
 | HTTP | reqwest |
 
@@ -630,7 +630,7 @@ Cargo.toml       Workspace root
 | Web server | Axum + tower-http |
 | Discord | serenity |
 | Telegram | teloxide |
-| File watching | notify |
+| File watching | notify (notes edited outside HQ are indexed within seconds) |
 | Config | figment (YAML + env vars) |
 | PWA | TanStack Start + Vite PWA + React 19 |
 | Build | Cargo workspace, LTO + strip in release |

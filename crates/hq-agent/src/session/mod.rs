@@ -219,6 +219,10 @@ pub struct AgentSession {
     /// Latches after the first turn enriches. Re-running per turn would
     /// rewrite the system prompt every turn and destroy the cached prefix.
     pub(super) skills_enriched: bool,
+    /// Ids (not tokens) of the task leases this session was handed, oldest first. Passed to tools
+    /// as an attested marker so a note the session writes can be tied to the task it is working
+    /// on; the database says which of them are still live.
+    pub(super) held_leases: std::sync::Mutex<Vec<String>>,
     /// Token ceiling for auto-loaded skill content.
     pub(super) max_skill_tokens: usize,
     /// `tool_call_count` at the last skill review or `skill_manage` call.
@@ -288,6 +292,7 @@ impl AgentSession {
             role_denial: None,
             skill_index: None,
             skills_enriched: false,
+            held_leases: std::sync::Mutex::new(Vec::new()),
             max_skill_tokens: 3000,
             skill_review_mark: 0,
             skills_in_play: std::collections::HashSet::new(),

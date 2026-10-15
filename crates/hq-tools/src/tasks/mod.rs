@@ -12,6 +12,7 @@ use std::sync::Arc;
 
 use crate::registry::HqTool;
 
+pub mod activity;
 mod from_note;
 mod json;
 mod placement;
@@ -25,6 +26,7 @@ mod tools_org;
 mod tools_task;
 mod tools_time;
 
+use activity::TaskActivityTool;
 use from_note::TaskCreateFromNoteTool;
 pub use json::{
     added_tags, apply_dependency_changes, notify_ready_for_review, notify_recipients, notify_tags,
@@ -158,6 +160,10 @@ pub fn create_task_tools_for_chat(
         Box::new(FolderCreateTool { db: db.clone() }),
         Box::new(InitiativeListTool { db: db.clone() }),
         Box::new(InitiativeCreateTool { db: db.clone() }),
+        Box::new(TaskActivityTool {
+            vault: vault.clone(),
+            db: db.clone(),
+        }),
         Box::new(TaskCreateFromNoteTool {
             route_tags: settings.route_tags,
             vault,

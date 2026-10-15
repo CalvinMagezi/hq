@@ -197,6 +197,18 @@ pub fn live_lease(conn: &Connection, task_id: &str, ttl_secs: i64) -> Result<Opt
     Ok(live_on_task(conn, task_id)?.into_iter().next())
 }
 
+/// A lease by its id (`ws-...`, which is not secret, unlike the token), whether or not it has
+/// ended. `None` for an unknown id.
+pub fn lease_by_id(conn: &Connection, id: &str) -> Result<Option<WorkSession>> {
+    Ok(conn
+        .query_row(
+            &format!("SELECT {LEASE_COLS} FROM task_work_sessions WHERE id = ?1"),
+            params![id],
+            row_to_lease,
+        )
+        .optional()?)
+}
+
 /// A lease by its token, whether or not it has ended. `None` for an unknown token.
 pub fn lease_for_token(conn: &Connection, token: &str) -> Result<Option<WorkSession>> {
     if !token.starts_with(LEASE_TOKEN_PREFIX) {

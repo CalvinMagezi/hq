@@ -363,6 +363,129 @@ async fn network_urls_are_adopted_with_the_flag_recorded() {
     assert!(!history[0].flags.is_empty());
 }
 
+fn write_fixtures(vault: &Path, name: &str, yaml: &str) {
+    std::fs::write(skills_dir(vault).join(name).join("fixtures.yaml"), yaml).unwrap();
+}
+
+#[tokio::test]
+async fn a_patch_that_drops_a_required_step_is_held_not_applied() {
+    let dir = tempfile::tempdir().unwrap();
+    write_user_skill(dir.path(), "gws-sheets-workflow", "managed: true\n");
+    write_fixtures(
+        dir.path(),
+        "gws-sheets-workflow",
+        "required_steps:\n  - fill the rows\n",
+    );
+    let before = std::fs::read_to_string(skill_file(dir.path(), "gws-sheets-workflow")).unwrap();
+
+    let applied = review(
+        dir.path(),
+        &ops(&[patch_op("gws-sheets-workflow", "2. Fill the rows.\n", "")]),
+    )
+    .await
+    .unwrap();
+
+    assert_eq!(applied.len(), 1);
+    assert!(
+        applied[0].held,
+        "a change that fails its fixtures does not go live"
+    );
+    assert!(
+        applied[0]
+            .flags
+            .iter()
+            .any(|f| f.starts_with("fixture:") && f.contains("fill the rows")),
+        "{:?}",
+        applied[0].flags
+    );
+    assert_eq!(
+        std::fs::read_to_string(skill_file(dir.path(), "gws-sheets-workflow")).unwrap(),
+        before,
+        "the live skill is untouched"
+    );
+    let held = std::fs::read_to_string(proposed_file(dir.path(), "gws-sheets-workflow")).unwrap();
+    assert!(
+        !held.contains("Fill the rows"),
+        "the proposal is what the review wrote"
+    );
+    let trail = history(dir.path(), "gws-sheets-workflow");
+    assert_eq!(trail.last().unwrap().disposition, Disposition::Held);
+    assert!(
+        trail
+            .last()
+            .unwrap()
+            .flags
+            .iter()
+            .any(|f| f.starts_with("fixture:"))
+    );
+    assert!(notices(dir.path())[0].title.contains("held for review"));
+}
+
+#[tokio::test]
+async fn a_patch_that_keeps_its_fixtures_is_applied_as_before() {
+    let dir = tempfile::tempdir().unwrap();
+    write_user_skill(
+        dir.path(),
+        "gws-sheets-workflow",
+        "managed: true\nhints:\n  - sheet\n",
+    );
+    write_fixtures(
+        dir.path(),
+        "gws-sheets-workflow",
+        "triggers:\n  - open the sheet\nrequired_steps:\n  - fill the rows\n",
+    );
+
+    let applied = review(
+        dir.path(),
+        &ops(&[patch_op(
+            "gws-sheets-workflow",
+            "- Bold header row.",
+            "- Bold header row.\n- Freeze the top row.",
+        )]),
+    )
+    .await
+    .unwrap();
+
+    assert!(!applied[0].held);
+    assert!(!proposed_file(dir.path(), "gws-sheets-workflow").exists());
+    let live = std::fs::read_to_string(skill_file(dir.path(), "gws-sheets-workflow")).unwrap();
+    assert!(live.contains("Freeze the top row"));
+}
+
+#[tokio::test]
+async fn a_new_hint_that_would_fire_on_a_forbidden_phrase_is_held() {
+    let dir = tempfile::tempdir().unwrap();
+    write_user_skill(
+        dir.path(),
+        "gws-sheets-workflow",
+        "managed: true\nhints:\n  - sheet\n",
+    );
+    write_fixtures(
+        dir.path(),
+        "gws-sheets-workflow",
+        "not_triggers:\n  - write a poem\n",
+    );
+    let reply = serde_json::json!({"ops": [{
+        "op": "hints", "name": "gws-sheets-workflow", "add": ["write a poem"],
+        "reason": "Sessions about poems used it."
+    }]})
+    .to_string();
+
+    let applied = review(dir.path(), &reply).await.unwrap();
+
+    assert!(applied[0].held);
+    assert!(
+        applied[0]
+            .flags
+            .iter()
+            .any(|f| f.contains("must not trigger")),
+        "{:?}",
+        applied[0].flags
+    );
+    let live = std::fs::read_to_string(skill_file(dir.path(), "gws-sheets-workflow")).unwrap();
+    assert!(!live.contains("poem"));
+}
+
 #[tokio::test]
 async fn secrets_in_generated_text_are_redacted_and_flagged() {
     let dir = tempfile::tempdir().unwrap();
@@ -494,6 +617,65 @@ async fn verdicts_score_only_recently_loaded_skills() {
     };
     assert_eq!(mean("gws-sheets-workflow"), Some(0.0));
     assert_eq!(mean("gws-docs"), None, "not in the loaded list");
+}
+
+#[tokio::test]
+async fn a_verdict_also_says_whether_the_skill_was_used() {
+    let dir = tempfile::tempdir().unwrap();
+    let db = hq_db::Database::open_memory().unwrap();
+    for name in ["a-helped", "b-hurt", "c-unused"] {
+        db.with_conn(|c| {
+            hq_db::skill_invocations::log_invocation(c, name, "s-0", InvocationTrigger::LoadSkill)
+        })
+        .unwrap();
+    }
+    // A session-exit score exists already; an `unused` verdict must not disturb it.
+    db.with_conn(|c| {
+        hq_db::skill_invocations::update_outcome_by_session(c, "s-0", 1.0, "session_result")
+    })
+    .unwrap();
+    let loaded = db
+        .with_conn(|c| hq_db::skill_invocations::recent_skills(c, RECENT_SKILL_HOURS, 5))
+        .unwrap();
+    let reply =
+        r#"{"ops":[],"verdicts":{"a-helped":"helped","b-hurt":"hurt","c-unused":"unused"}}"#;
+    let review = Review {
+        vault_path: dir.path(),
+        session_id: "sess-1",
+        write_approval: false,
+    };
+    review
+        .run(&session(), &loaded, Some(&db), &llm(reply))
+        .await
+        .unwrap();
+
+    let row = |name: &str| -> (String, f64, String) {
+        db.with_conn(|c| {
+            Ok(c.query_row(
+                "SELECT used, outcome_score, outcome_source FROM skill_invocations WHERE skill_name = ?1",
+                [name],
+                |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
+            )?)
+        })
+        .unwrap()
+    };
+    assert_eq!(row("a-helped"), ("helped".into(), 1.0, "review".into()));
+    assert_eq!(row("b-hurt"), ("hurt".into(), 0.0, "review".into()));
+    assert_eq!(
+        row("c-unused"),
+        ("unused".into(), 1.0, "session_result".into()),
+        "unused is recorded and the score is left alone"
+    );
+}
+
+#[test]
+fn the_session_exit_is_labelled_as_the_weak_signal_it_is() {
+    assert_eq!(OUTCOME_SOURCE_SESSION, "session_result");
+    assert!(!hq_db::skill_outcomes::is_observed(OUTCOME_SOURCE_SESSION));
+    assert!(!hq_db::skill_outcomes::is_observed("review"));
+    for observed in ["task_acceptance", "run_review", "note_review"] {
+        assert!(hq_db::skill_outcomes::is_observed(observed));
+    }
 }
 
 #[test]

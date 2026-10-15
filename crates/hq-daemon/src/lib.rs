@@ -5,6 +5,7 @@ pub mod agent_worker;
 pub mod email_gate;
 pub mod email_send;
 pub mod email_triage;
+pub mod embedding_worker;
 pub mod embeddings;
 pub mod family_confirm;
 pub mod instance_lock;
@@ -15,6 +16,7 @@ pub mod task_state;
 pub mod turn_reconciler;
 pub mod user_model;
 pub mod value_bus;
+pub mod vault_watch;
 
 pub use email_triage::{EmailAction, parse_email_command, resolve_email_action};
 pub use embeddings::process_embeddings;

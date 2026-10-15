@@ -14,9 +14,9 @@ use axum::{
 };
 use hq_db::tasks as t;
 use hq_tools::tasks::{
-    apply_dependency_changes, derive_id_prefix, find_or_create_folder, find_or_create_initiative,
-    notify_unblocked, resolve_space_id, slug, task_json, task_json_with_warnings,
-    unblocked_by_transition,
+    activity, apply_dependency_changes, derive_id_prefix, find_or_create_folder,
+    find_or_create_initiative, notify_unblocked, resolve_space_id, slug, task_json,
+    task_json_with_warnings, unblocked_by_transition,
 };
 use serde::Deserialize;
 use serde_json::json;
@@ -674,6 +674,72 @@ pub(crate) async fn task_checkpoint_handler(
     match result {
         Ok(checkpoint) => Json(json!({ "checkpoint": checkpoint })).into_response(),
         Err(e) => ApiError::from(e).into_response(),
+    }
+}
+
+#[derive(Debug, Deserialize)]
+pub(crate) struct ActivityParams {
+    notes_limit: Option<u64>,
+}
+
+/// `GET /api/tasks/{id}/activity`: the generated view of one task (see `hq_tools::tasks::activity`).
+pub(crate) async fn task_activity_handler(
+    State(state): State<Arc<WsState>>,
+    AxumPath(id): AxumPath<String>,
+    Query(params): Query<ActivityParams>,
+) -> Response {
+    activity_response(&state, params, move |db, vault, opts| {
+        db.with_conn(|c| {
+            t::get_task(c, &id)?.ok_or_else(|| not_found("no task found for that id"))?;
+            Ok(())
+        })?;
+        activity::task_activity(db, vault, &id, opts)
+    })
+    .await
+}
+
+/// `GET /api/initiatives/{id}/activity`: the same across an initiative's tasks.
+pub(crate) async fn initiative_activity_handler(
+    State(state): State<Arc<WsState>>,
+    AxumPath(id): AxumPath<String>,
+    Query(params): Query<ActivityParams>,
+) -> Response {
+    activity_response(&state, params, move |db, vault, opts| {
+        db.with_conn(|c| {
+            t::get_initiative(c, &id)?
+                .ok_or_else(|| not_found("no initiative found for that id"))?;
+            Ok(())
+        })?;
+        activity::initiative_activity(db, vault, &id, opts)
+    })
+    .await
+}
+
+async fn activity_response<F>(state: &Arc<WsState>, params: ActivityParams, build: F) -> Response
+where
+    F: FnOnce(
+            &hq_db::Database,
+            &hq_vault::VaultClient,
+            activity::Options,
+        ) -> anyhow::Result<serde_json::Value>
+        + Send
+        + 'static,
+{
+    // Lite runs no agents and the router gate already answers 404; this keeps the handler safe
+    // if it is ever mounted elsewhere.
+    if state.profile().is_lite() {
+        return ApiError::not_found().into_response();
+    }
+    let vault = match hq_vault::VaultClient::new(state.vault_path.clone()) {
+        Ok(v) => v,
+        Err(e) => return ApiError::internal(e).into_response(),
+    };
+    let db = state.db.clone();
+    let opts = activity::Options::with_notes_limit(params.notes_limit);
+    match tokio::task::spawn_blocking(move || build(&db, &vault, opts)).await {
+        Ok(Ok(view)) => Json(view).into_response(),
+        Ok(Err(e)) => ApiError::from(e).into_response(),
+        Err(e) => ApiError::internal(e).into_response(),
     }
 }
 
@@ -1514,5 +1580,103 @@ mod tests {
             .unwrap();
         let faulted = list_comments_handler(State(state.clone()), AxumPath(id)).await;
         assert_eq!(faulted.status(), StatusCode::INTERNAL_SERVER_ERROR);
+    }
+
+    async fn json_of(r: Response) -> (StatusCode, serde_json::Value) {
+        let status = r.status();
+        let bytes = axum::body::to_bytes(r.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        (status, serde_json::from_slice(&bytes).unwrap_or_default())
+    }
+
+    fn activity_state(profile: hq_core::config::Profile) -> (Arc<WsState>, tempfile::TempDir) {
+        let vault = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(vault.path().join("Notebooks")).unwrap();
+        let state = Arc::new(WsState::new(vault.path().to_path_buf(), None).with_profile(profile));
+        state
+            .db
+            .with_conn(|c| {
+                t::create_initiative(c, "in-a", "personal", None, "Work", "work", "WRK")?;
+                t::create_task(
+                    c,
+                    "tk-a",
+                    "in-a",
+                    &t::NewTask {
+                        title: "Task",
+                        created_by: "test",
+                        ..Default::default()
+                    },
+                )
+                .map(|_| ())
+            })
+            .unwrap();
+        (state, vault)
+    }
+
+    #[tokio::test]
+    async fn the_activity_endpoints_serve_a_task_and_an_initiative() {
+        let (state, vault) = activity_state(hq_core::config::Profile::Full);
+        std::fs::write(vault.path().join("Notebooks/a.md"), "text").unwrap();
+        hq_tools::provenance::Recorder::new(Arc::new(state.db.clone()), vault.path().to_path_buf())
+            .record("Notebooks/a.md", &hq_tools::provenance::Writer::owner());
+        let params = || Query(ActivityParams { notes_limit: None });
+
+        let (status, task) = json_of(
+            task_activity_handler(State(state.clone()), AxumPath("tk-a".into()), params()).await,
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(task["scope"], "task");
+        assert_eq!(task["task"]["display_id"], "WRK-001");
+
+        let (status, initiative) = json_of(
+            initiative_activity_handler(State(state.clone()), AxumPath("in-a".into()), params())
+                .await,
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(initiative["scope"], "initiative");
+        assert_eq!(initiative["tasks_shown"], 1);
+    }
+
+    #[tokio::test]
+    async fn an_unknown_task_or_initiative_is_a_404_not_a_400() {
+        let (state, _vault) = activity_state(hq_core::config::Profile::Full);
+        let (status, _) = json_of(
+            task_activity_handler(
+                State(state.clone()),
+                AxumPath("nope".into()),
+                Query(ActivityParams { notes_limit: None }),
+            )
+            .await,
+        )
+        .await;
+        assert_eq!(status, StatusCode::NOT_FOUND);
+        let (status, _) = json_of(
+            initiative_activity_handler(
+                State(state),
+                AxumPath("nope".into()),
+                Query(ActivityParams { notes_limit: None }),
+            )
+            .await,
+        )
+        .await;
+        assert_eq!(status, StatusCode::NOT_FOUND);
+    }
+
+    #[tokio::test]
+    async fn lite_gets_no_activity_view_even_if_the_route_were_reached() {
+        let (state, _vault) = activity_state(hq_core::config::Profile::Lite);
+        let (status, _) = json_of(
+            task_activity_handler(
+                State(state),
+                AxumPath("tk-a".into()),
+                Query(ActivityParams { notes_limit: None }),
+            )
+            .await,
+        )
+        .await;
+        assert_eq!(status, StatusCode::NOT_FOUND);
     }
 }

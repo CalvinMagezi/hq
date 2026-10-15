@@ -51,8 +51,12 @@ pub async fn run_thread_log_rotation(vault_path: &Path) -> Result<()> {
     Ok(())
 }
 
-/// Daily vault cleanup: purge expired trash and clear dead presence files.
-pub async fn run_vault_cleanup(vault_path: &Path, _db: &Database) -> Result<()> {
+/// How long the record of who wrote a deleted note is kept, in days.
+const DELETED_PROVENANCE_DAYS: i64 = 90;
+
+/// Daily vault cleanup: purge expired trash and provenance records of deleted notes, and clear
+/// dead presence files.
+pub async fn run_vault_cleanup(vault_path: &Path, db: &Database) -> Result<()> {
     if !has_run_today(vault_path, "vault-cleanup") {
         let mut actions = Vec::new();
 
@@ -61,6 +65,32 @@ pub async fn run_vault_cleanup(vault_path: &Path, _db: &Database) -> Result<()> 
             Ok(0) => {}
             Ok(n) => actions.push(format!("Purged {n} expired _trash day-folders")),
             Err(e) => tracing::warn!(%e, "vault-cleanup: trash purge failed"),
+        }
+
+        // Who wrote a note is kept for a while after the note is deleted, then dropped.
+        match db.with_conn(|conn| hq_db::provenance::purge_deleted(conn, DELETED_PROVENANCE_DAYS)) {
+            Ok(0) => {}
+            Ok(n) => actions.push(format!(
+                "Dropped {n} provenance record(s) of notes deleted over {DELETED_PROVENANCE_DAYS} days ago"
+            )),
+            Err(e) => tracing::warn!(%e, "vault-cleanup: provenance purge failed"),
+        }
+
+        // Raw skill invocations past the retention window become monthly counts; the skills and
+        // their audit trail are not touched.
+        match db.with_conn(|conn| {
+            hq_db::skill_invocations::apply_retention(
+                conn,
+                hq_db::skill_invocations::RETENTION_DAYS,
+            )
+        }) {
+            Ok(kept) if kept.rolled_up == 0 => {}
+            Ok(kept) => actions.push(format!(
+                "Rolled {} skill invocation(s) older than {} days into monthly counts",
+                kept.rolled_up,
+                hq_db::skill_invocations::RETENTION_DAYS
+            )),
+            Err(e) => tracing::warn!(%e, "vault-cleanup: skill telemetry retention failed"),
         }
 
         // Garbage-collect presence files whose process is long gone.
@@ -201,4 +231,58 @@ fn measure_dir_size(path: &Path) -> u64 {
         }
     }
     total
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn the_daily_cleanup_ages_out_skill_telemetry_and_provenance_of_deleted_notes() {
+        let vault = tempfile::tempdir().unwrap();
+        let db = Database::open_memory().unwrap();
+        db.with_conn(|c| {
+            use hq_db::skill_invocations::{InvocationTrigger, log_invocation};
+            log_invocation(c, "sheets", "s-old", InvocationTrigger::LoadSkill)?;
+            log_invocation(c, "sheets", "s-new", InvocationTrigger::LoadSkill)?;
+            c.execute(
+                "UPDATE skill_invocations SET loaded_at = datetime('now', '-200 days') WHERE session_id = 's-old'",
+                [],
+            )?;
+            // A note deleted long ago keeps its author record only for the retention period.
+            let who = hq_db::provenance::Attribution::default();
+            hq_db::provenance::record(c, "Notebooks/gone.md", "h1", &who)?;
+            hq_db::provenance::record(c, "Notebooks/recent.md", "h2", &who)?;
+            hq_db::provenance::mark_deleted(c, "Notebooks/gone.md")?;
+            hq_db::provenance::mark_deleted(c, "Notebooks/recent.md")?;
+            c.execute(
+                "UPDATE note_provenance SET deleted_at = '2020-01-01T00:00:00+00:00' WHERE path = 'Notebooks/gone.md'",
+                [],
+            )?;
+            Ok(())
+        })
+        .unwrap();
+
+        run_vault_cleanup(vault.path(), &db).await.unwrap();
+
+        let (raw, counted, rollups, provenance): (i64, u32, i64, i64) = db
+            .with_conn(|c| {
+                Ok((
+                    c.query_row("SELECT COUNT(*) FROM skill_invocations", [], |r| r.get(0))?,
+                    hq_db::skill_invocations::count_invocations(c, "sheets")?,
+                    c.query_row("SELECT COUNT(*) FROM skill_invocation_rollups", [], |r| {
+                        r.get(0)
+                    })?,
+                    c.query_row("SELECT COUNT(*) FROM note_provenance", [], |r| r.get(0))?,
+                ))
+            })
+            .unwrap();
+        assert_eq!(raw, 1, "the old raw row is gone");
+        assert_eq!(counted, 2, "the count still includes it");
+        assert_eq!(rollups, 1);
+        assert_eq!(
+            provenance, 1,
+            "the long-deleted note's record is dropped, the recent one kept"
+        );
+    }
 }

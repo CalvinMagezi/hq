@@ -732,8 +732,8 @@ mod tests {
     #[test]
     fn derive_search_hint_preserves_leading_acronyms() {
         assert_eq!(
-            derive_search_hint("AIDC project status"),
-            "AIDC project status"
+            derive_search_hint("NASA project status"),
+            "NASA project status"
         );
         assert_eq!(derive_search_hint("Get the agenda"), "get the agenda");
     }
@@ -758,7 +758,7 @@ mod tests {
             "Search the vault. Returns ranked notes.",
             "Use this tool to commit staged changes",
             "Alpha bravo charlie delta echo foxtrot golf hotel india juliett",
-            "AIDC project status",
+            "NASA project status",
             "",
         ];
         for case in cases {

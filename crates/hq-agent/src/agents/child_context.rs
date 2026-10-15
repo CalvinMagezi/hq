@@ -118,6 +118,52 @@ mod tests {
     }
 
     #[test]
+    fn a_child_whose_need_names_a_task_builds_its_own_task_packet() {
+        let dir = vault_with_notes();
+        let db = hq_db::Database::open(&dir.path().join("test.db")).unwrap();
+        db.with_conn(|c| {
+            hq_db::tasks::create_initiative(c, "in-1", "personal", None, "Work", "work", "WRK")?;
+            hq_db::tasks::create_task(
+                c,
+                "tk-1",
+                "in-1",
+                &hq_db::tasks::NewTask {
+                    title: "Chase overdue invoices",
+                    created_by: "test",
+                    ..Default::default()
+                },
+            )?;
+            hq_db::tasks::add_task_link(
+                c,
+                "tk-1",
+                hq_db::tasks::LINK_VAULT_NOTE,
+                "Notebooks/billing.md",
+                "",
+                None,
+                "test",
+            )
+            .map(|_| ())
+        })
+        .unwrap();
+        let mut req = ChildRequest::new("a", "chase the invoices");
+        req.context_need = Some(ContextNeed {
+            task_id: Some("tk-1".to_string()),
+            ..Default::default()
+        });
+
+        let (prepared, packet) = prepare(dir.path(), Some(&db), req, Utc::now());
+
+        let packet = packet.unwrap();
+        assert_eq!(packet.task_record.as_ref().unwrap().display_id, "WRK-001");
+        assert_eq!(packet.entries[0].path, "Notebooks/billing.md");
+        let context = prepared.context.unwrap();
+        assert!(
+            context.contains("<task_record") && context.contains("Invoices are due"),
+            "{context}"
+        );
+    }
+
+    #[test]
     fn child_without_a_need_gets_no_packet_and_missing_vault_notes_become_gaps() {
         let dir = vault_with_notes();
         let (req, packet) = prepare(dir.path(), None, ChildRequest::new("x", "g"), Utc::now());

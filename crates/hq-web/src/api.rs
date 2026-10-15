@@ -313,7 +313,10 @@ pub(crate) async fn pin_toggle_handler(
     let new_content = crate::vault_api::set_pinned(&content, pin);
 
     match hq_vault::notes::write_atomic(&abs, new_content.as_bytes()) {
-        Ok(_) => axum::Json(serde_json::json!({"success": true})).into_response(),
+        Ok(_) => {
+            crate::vault_api::record_owner_write(&state, &abs);
+            axum::Json(serde_json::json!({"success": true})).into_response()
+        }
         Err(e) => ApiError::internal(e).into_response(),
     }
 }

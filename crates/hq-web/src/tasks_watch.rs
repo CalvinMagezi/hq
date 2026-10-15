@@ -20,6 +20,8 @@ struct TasksSnapshot {
     // the fingerprint: an agent's comment over MCP then reaches an open drawer.
     leases: String,
     comments: i64,
+    // Who wrote which note, and what was decided about it, feed a task's activity view.
+    provenance: String,
 }
 
 fn take_tasks_snapshot(db: &hq_db::Database) -> TasksSnapshot {
@@ -28,7 +30,10 @@ fn take_tasks_snapshot(db: &hq_db::Database) -> TasksSnapshot {
             "SELECT COALESCE(MAX(updated_at), ''), COUNT(*), \
                     (SELECT COUNT(*) || '/' || COALESCE(MAX(started_at), '') || '/' || COALESCE(MAX(ended_at), '') \
                        FROM task_work_sessions), \
-                    (SELECT COALESCE(MAX(id), 0) FROM task_comments) \
+                    (SELECT COALESCE(MAX(id), 0) FROM task_comments), \
+                    (SELECT COALESCE(MAX(id), 0) || '/' || COUNT(*) || '/' || COALESCE(SUM(recorded_late), 0) \
+                       FROM note_provenance) || '/' || \
+                    (SELECT COALESCE(MAX(id), 0) FROM note_review_events) \
              FROM tasks",
             [],
             |row| {
@@ -37,6 +42,7 @@ fn take_tasks_snapshot(db: &hq_db::Database) -> TasksSnapshot {
                     count: row.get(1)?,
                     leases: row.get(2)?,
                     comments: row.get(3)?,
+                    provenance: row.get(4)?,
                 })
             },
         )
@@ -103,6 +109,55 @@ mod tests {
         let event = tokio::time::timeout(Duration::from_secs(5), rx.recv())
             .await
             .expect("task:sync should arrive well before the 30s fallback poll")
+            .unwrap();
+        assert!(event.contains("task:sync"), "{event}");
+    }
+
+    #[tokio::test]
+    async fn a_note_record_or_a_review_wakes_web_clients_like_any_other_task_change() {
+        let vault = tempfile::TempDir::new().unwrap();
+        let state = Arc::new(WsState::new(vault.path().to_path_buf(), None));
+        let mut rx = state.tx.subscribe();
+        spawn_tasks_watcher(state.clone());
+        tokio::task::yield_now().await;
+
+        let record = state
+            .db
+            .with_conn(|c| {
+                hq_db::provenance::record(
+                    c,
+                    "Notebooks/a.md",
+                    "h1",
+                    &hq_db::provenance::Attribution {
+                        actor_id: Some("relay"),
+                        source_kind: Some(hq_db::provenance::SourceKind::Agent),
+                        session_id: Some("s-1"),
+                        task_id: Some("tk-x"),
+                    },
+                )
+            })
+            .unwrap();
+        let event = tokio::time::timeout(Duration::from_secs(5), rx.recv())
+            .await
+            .expect("a record should wake the watcher before the fallback poll")
+            .unwrap();
+        assert!(event.contains("task:sync"), "{event}");
+
+        state
+            .db
+            .with_conn(|c| {
+                hq_db::provenance::set_review_state(
+                    c,
+                    record.id,
+                    hq_db::provenance::ReviewState::Accepted,
+                    "owner",
+                    None,
+                )
+            })
+            .unwrap();
+        let event = tokio::time::timeout(Duration::from_secs(5), rx.recv())
+            .await
+            .expect("a review should wake the watcher too")
             .unwrap();
         assert!(event.contains("task:sync"), "{event}");
     }

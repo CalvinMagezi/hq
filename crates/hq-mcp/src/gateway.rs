@@ -468,6 +468,7 @@ pub const CONNECTOR_CONFIRM_TOOLS: &[&str] = &[
     "skill_manage",
     "slash_command_manage",
     "task_delete",
+    "note_review",
     "file_edit_batch",
     "git_commit",
     "git_pr",
@@ -616,6 +617,8 @@ fn mark_scope(args: &mut Value, allowed: Option<&[&str]>, connector: Option<&str
     obj.remove(hq_tools::harness_session::HANDOFF_SCOPE_ARG);
     obj.remove(hq_tools::harness_session::TASKS_SCOPE_ARG);
     obj.remove(hq_tools::harness_session::CONNECTOR_ARG);
+    // Native agent sessions set these themselves; a caller here never may.
+    obj.retain(|key, _| !key.starts_with(hq_tools::provenance::NATIVE_ARG_PREFIX));
     if let Some(label) = connector {
         obj.insert(
             hq_tools::harness_session::CONNECTOR_ARG.into(),
@@ -906,6 +909,61 @@ mod tests {
         let mut granted = json!({key: "forged-label"});
         mark_scope(&mut granted, None, Some("Claude"));
         assert_eq!(granted[key], "Claude");
+    }
+
+    #[test]
+    fn review_decisions_are_closed_to_every_scoped_key_and_need_the_owner_through_a_connector() {
+        for (name, list) in [
+            ("spark", SPARK_READONLY_ALLOWLIST),
+            ("handoff", HANDOFF_ALLOWLIST),
+            ("tasks", TASKS_ALLOWLIST),
+        ] {
+            assert!(
+                !list.contains(&"note_review"),
+                "the {name} key can set review state"
+            );
+        }
+        assert!(needs_owner_confirmation(
+            &ToolRegistry::new(),
+            "note_review",
+            &json!({"path": "Notebooks/a.md", "state": "accepted"})
+        ));
+    }
+
+    #[test]
+    fn the_activity_view_is_not_served_to_a_scoped_key() {
+        for (name, list) in [
+            ("spark", SPARK_READONLY_ALLOWLIST),
+            ("handoff", HANDOFF_ALLOWLIST),
+            ("tasks", TASKS_ALLOWLIST),
+        ] {
+            assert!(
+                !list.contains(&"task_activity"),
+                "the {name} key can read the activity view, which lists sessions and notes across spaces"
+            );
+        }
+    }
+
+    #[test]
+    fn a_caller_cannot_pose_as_a_native_agent_session() {
+        use hq_tools::provenance::{NATIVE_AGENT_ARG, NATIVE_LEASES_ARG, NATIVE_SESSION_ARG};
+        let mut args = json!({
+            "path": "Notes/a.md",
+            NATIVE_SESSION_ARG: "someone-elses-session",
+            NATIVE_AGENT_ARG: "relay",
+            NATIVE_LEASES_ARG: ["lease-1"],
+            "_hq_native_future": true,
+        });
+        mark_scope(&mut args, None, None);
+        let obj = args.as_object().unwrap();
+        assert!(
+            obj.keys().all(|k| !k.starts_with("_hq_native_")),
+            "native markers survived: {obj:?}"
+        );
+        assert_eq!(
+            args["path"], "Notes/a.md",
+            "ordinary arguments are untouched"
+        );
     }
 
     #[test]

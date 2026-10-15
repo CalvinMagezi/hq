@@ -121,6 +121,45 @@ pub async fn run_daemon(
         .context("failed to check daemon lock")?
         .context("another daemon is already running — only one instance allowed")?;
 
+    // Keep the keyword index in step with notes edited outside HQ. With the watcher on, it scans
+    // once it is listening and then follows edits as they happen; the scheduled sync stays as the
+    // safety net. Without it, catch up once now rather than wait out the scheduled task's first
+    // delay. Lite keeps the keyword index too, so this sits outside the profile split below.
+    let vault_watch = if config.vault_watch.enabled {
+        Some(hq_daemon::vault_watch::spawn(
+            vault_path.clone(),
+            db.clone(),
+            config.vault_watch.clone(),
+            shutdown.clone(),
+        ))
+    } else {
+        let (vault_path, db) = (vault_path.clone(), db.clone());
+        tokio::spawn(async move {
+            if let Err(e) = tasks_periodic::run_fts_sync(&vault_path, &db).await {
+                warn!(error = %e, "daemon: startup index sync failed");
+            }
+        });
+        None
+    };
+
+    // Embeddings follow edits: made when the watcher indexes notes, on a timer otherwise. Lite
+    // sends no note text anywhere, so it makes none.
+    let embedding_worker = if config.profile.is_lite() {
+        None
+    } else {
+        let changed = vault_watch
+            .as_ref()
+            .map(|stats| stats.index_changed.clone())
+            .unwrap_or_default();
+        Some(hq_daemon::embedding_worker::spawn(
+            vault_path.clone(),
+            db.clone(),
+            config.openrouter_api_key.clone(),
+            changed,
+            shutdown.clone(),
+        ))
+    };
+
     if config.profile.is_lite() {
         // Local bookkeeping only; see LITE_DAEMON_TASKS.
         ensure_dir(&vault_path.join("_system"));
@@ -157,7 +196,13 @@ pub async fn run_daemon(
                 }
                 reloader.poll(&mut config);
                 write_daemon_status(&vault_path, &tasks, &started_at);
-                write_daemon_metrics(&vault_path, &tasks, &started_at);
+                write_daemon_metrics(
+                    &vault_path,
+                    &tasks,
+                    &started_at,
+                    vault_watch.as_deref(),
+                    embedding_worker.as_deref(),
+                );
             }
             _ = shutdown.wait() => {
                 info!("daemon: shutdown signal received, cleaning up");
@@ -383,6 +428,9 @@ fn default_tasks() -> Vec<DaemonTask> {
         DaemonTask::with_default_timeout("disk-watchdog", Duration::from_secs(21600)),
         DaemonTask::with_default_timeout("usage-ledger", Duration::from_secs(86400)),
         DaemonTask::with_default_timeout("harness-usage", Duration::from_secs(300)),
+        // Settle skill outcomes from what happened to the work: a task accepted or reopened,
+        // a reviewed run, a corrected note. Cheap, and idempotent.
+        DaemonTask::with_default_timeout("skill-outcomes", Duration::from_secs(600)),
         DaemonTask::with_default_timeout("vault-health", Duration::from_secs(21600)),
         DaemonTask::with_default_timeout("thread-log-rotation", Duration::from_secs(21600)),
         DaemonTask::with_default_timeout("memory-forgetting", Duration::from_secs(86400)),
@@ -531,6 +579,7 @@ async fn dispatch_task(
         "copilot-usage" => tasks_periodic::run_copilot_usage(db, config).await,
         "usage-ledger" => tasks_periodic::run_usage_ledger(db, config).await,
         "harness-usage" => tasks_periodic::run_harness_usage(db).await,
+        "skill-outcomes" => tasks_periodic::run_skill_outcomes(db),
 
         // Slow cycle (6h — daily)
         "vault-health" => tasks_slow::run_vault_health(vault_path, db).await,
@@ -625,7 +674,13 @@ pub fn write_daemon_status(vault_path: &Path, tasks: &[DaemonTask], started_at: 
 }
 
 /// Write structured JSON metrics for programmatic consumption (by MCP health tools).
-fn write_daemon_metrics(vault_path: &Path, tasks: &[DaemonTask], started_at: &str) {
+fn write_daemon_metrics(
+    vault_path: &Path,
+    tasks: &[DaemonTask],
+    started_at: &str,
+    vault_watch: Option<&hq_daemon::vault_watch::PipelineStats>,
+    embedding: Option<&hq_daemon::embedding_worker::EmbedStats>,
+) {
     use serde_json::{Map, Value, json};
 
     let total_runs: u64 = tasks.iter().map(|t| t.run_count).sum();
@@ -648,7 +703,7 @@ fn write_daemon_metrics(vault_path: &Path, tasks: &[DaemonTask], started_at: &st
         );
     }
 
-    let metrics = json!({
+    let mut metrics = json!({
         "started_at": started_at,
         "last_tick": chrono::Utc::now().to_rfc3339(),
         "total_runs": total_runs,
@@ -657,6 +712,19 @@ fn write_daemon_metrics(vault_path: &Path, tasks: &[DaemonTask], started_at: &st
         "task_count": tasks.len(),
         "tasks": Value::Object(task_map),
     });
+    if let (Some(stats), Some(map)) = (vault_watch, metrics.as_object_mut())
+        && let Ok(status) = serde_json::to_value(stats.snapshot())
+    {
+        map.insert(
+            hq_daemon::vault_watch::status::METRICS_KEY.to_string(),
+            status,
+        );
+    }
+    if let (Some(stats), Some(map)) = (embedding, metrics.as_object_mut())
+        && let Ok(status) = serde_json::to_value(stats.snapshot())
+    {
+        map.insert(hq_daemon::embedding_worker::METRICS_KEY.to_string(), status);
+    }
 
     let sys_dir = vault_path.join("_system");
     let tmp = sys_dir.join(".daemon-metrics.json.tmp");
@@ -825,5 +893,55 @@ mod lite_tests {
         assert!(accept_reload(&lite(), full.clone(), &no_env).is_err());
         assert!(accept_reload(&full, lite(), &no_env).is_err());
         assert!(accept_reload(&full, full.clone(), &no_env).is_ok());
+    }
+}
+
+#[cfg(test)]
+mod metrics_tests {
+    use super::*;
+
+    #[test]
+    fn the_watcher_report_travels_through_the_metrics_file_to_doctor() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join("_system")).unwrap();
+        let stats = hq_daemon::vault_watch::PipelineStats::default();
+        stats
+            .events_in
+            .store(11, std::sync::atomic::Ordering::Relaxed);
+
+        write_daemon_metrics(dir.path(), &[], "2026-10-15T00:00:00Z", Some(&stats), None);
+
+        let report = hq_daemon::vault_watch::status::read(dir.path()).unwrap();
+        assert_eq!(report.events_queued, 11);
+        assert_eq!(
+            report.state,
+            hq_daemon::vault_watch::WatchState::NotWatching
+        );
+    }
+
+    #[test]
+    fn the_embedding_worker_report_travels_the_same_way() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join("_system")).unwrap();
+        let stats = hq_daemon::embedding_worker::EmbedStats::default();
+        stats
+            .embedded
+            .store(42, std::sync::atomic::Ordering::Relaxed);
+
+        write_daemon_metrics(dir.path(), &[], "2026-10-15T00:00:00Z", None, Some(&stats));
+
+        let report = hq_daemon::embedding_worker::read(dir.path()).unwrap();
+        assert_eq!(report.embedded, 42);
+        assert_eq!(hq_daemon::vault_watch::status::read(dir.path()), None);
+    }
+
+    #[test]
+    fn a_daemon_without_a_watcher_writes_metrics_with_no_report() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join("_system")).unwrap();
+        write_daemon_metrics(dir.path(), &[], "2026-10-15T00:00:00Z", None, None);
+
+        assert!(dir.path().join("_system/.daemon-metrics.json").exists());
+        assert_eq!(hq_daemon::vault_watch::status::read(dir.path()), None);
     }
 }
