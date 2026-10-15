@@ -15,6 +15,7 @@ pub mod search;
 pub mod self_update_runs;
 pub mod session_tokens;
 pub mod skill_invocations;
+pub mod skill_outcomes;
 pub mod subagent_runs;
 pub mod task_graph;
 pub mod task_outcomes;

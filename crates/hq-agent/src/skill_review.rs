@@ -34,9 +34,11 @@ const MAX_RECENT_SKILLS: u32 = 5;
 const LIGHT_REVIEW_GAP: Duration = Duration::from_secs(5 * 60);
 /// `value_items.source_task` for the FYI; the value bus keeps it web-only.
 pub const VALUE_SOURCE: &str = "skill_review";
-/// `skill_invocations.outcome_source` for scores taken from how the session ended.
-pub const OUTCOME_SOURCE_SESSION: &str = "session_result";
-const OUTCOME_SOURCE_REVIEW: &str = "review";
+/// `skill_invocations.outcome_source` for scores taken from how the session ended. Weak
+/// evidence: a clean exit says the process finished, not that the work was accepted, so any
+/// observed outcome (`hq_db::skill_outcomes::settle`) replaces it.
+pub const OUTCOME_SOURCE_SESSION: &str = hq_db::skill_outcomes::SOURCE_SESSION;
+const OUTCOME_SOURCE_REVIEW: &str = hq_db::skill_outcomes::SOURCE_REVIEW;
 const SCORE_GOOD: f64 = 1.0;
 const SCORE_PARTIAL: f64 = 0.5;
 const SCORE_BAD: f64 = 0.0;

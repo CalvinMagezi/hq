@@ -546,6 +546,16 @@ async fn a_verdict_also_says_whether_the_skill_was_used() {
 }
 
 #[test]
+fn the_session_exit_is_labelled_as_the_weak_signal_it_is() {
+    assert_eq!(OUTCOME_SOURCE_SESSION, "session_result");
+    assert!(!hq_db::skill_outcomes::is_observed(OUTCOME_SOURCE_SESSION));
+    assert!(!hq_db::skill_outcomes::is_observed("review"));
+    for observed in ["task_acceptance", "run_review", "note_review"] {
+        assert!(hq_db::skill_outcomes::is_observed(observed));
+    }
+}
+
+#[test]
 fn session_results_map_to_outcome_scores() {
     assert_eq!(
         outcome_score(&SessionResult::Complete(String::new())),

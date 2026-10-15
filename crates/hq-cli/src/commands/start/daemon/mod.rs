@@ -428,6 +428,9 @@ fn default_tasks() -> Vec<DaemonTask> {
         DaemonTask::with_default_timeout("disk-watchdog", Duration::from_secs(21600)),
         DaemonTask::with_default_timeout("usage-ledger", Duration::from_secs(86400)),
         DaemonTask::with_default_timeout("harness-usage", Duration::from_secs(300)),
+        // Settle skill outcomes from what happened to the work: a task accepted or reopened,
+        // a reviewed run, a corrected note. Cheap, and idempotent.
+        DaemonTask::with_default_timeout("skill-outcomes", Duration::from_secs(600)),
         DaemonTask::with_default_timeout("vault-health", Duration::from_secs(21600)),
         DaemonTask::with_default_timeout("thread-log-rotation", Duration::from_secs(21600)),
         DaemonTask::with_default_timeout("memory-forgetting", Duration::from_secs(86400)),
@@ -576,6 +579,7 @@ async fn dispatch_task(
         "copilot-usage" => tasks_periodic::run_copilot_usage(db, config).await,
         "usage-ledger" => tasks_periodic::run_usage_ledger(db, config).await,
         "harness-usage" => tasks_periodic::run_harness_usage(db).await,
+        "skill-outcomes" => tasks_periodic::run_skill_outcomes(db),
 
         // Slow cycle (6h — daily)
         "vault-health" => tasks_slow::run_vault_health(vault_path, db).await,

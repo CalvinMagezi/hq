@@ -130,6 +130,16 @@ pub enum OutcomeStatus {
 }
 
 impl OutcomeStatus {
+    /// The score an outcome counts as in `mean_outcome`. `Unknown` says nothing, so it has none.
+    pub fn score(self) -> Option<f64> {
+        match self {
+            Self::Accepted => Some(1.0),
+            Self::Reworked => Some(0.5),
+            Self::Rejected => Some(0.0),
+            Self::Unknown => None,
+        }
+    }
+
     pub fn as_str(self) -> &'static str {
         match self {
             Self::Accepted => "accepted",
@@ -295,12 +305,15 @@ pub fn set_latest_outcome(
     outcome_score: f64,
     outcome_source: &str,
 ) -> Result<usize> {
+    // An outcome someone observed (a task accepted or reopened, a run review, a correction) is
+    // stronger evidence than an opinion formed from the transcript, and is left as it is.
     let updated = conn.execute(
         "UPDATE skill_invocations
             SET outcome_score = ?1, outcome_source = ?2, updated_at = datetime('now')
           WHERE id = (SELECT id FROM skill_invocations
                        WHERE skill_name = ?3 AND loaded_at >= datetime('now', ?4)
-                       ORDER BY loaded_at DESC, rowid DESC LIMIT 1)",
+                       ORDER BY loaded_at DESC, rowid DESC LIMIT 1)
+            AND COALESCE(outcome_source, '') NOT IN ('task_acceptance', 'run_review', 'note_review')",
         params![
             outcome_score,
             outcome_source,
@@ -326,11 +339,17 @@ pub fn set_latest_verdict(
         Some((score, source)) => (Some(score), Some(source)),
         None => (None, None),
     };
+    // `used` is always recorded; the score and its source change only when the verdict carries
+    // one and the existing outcome is not an observed one.
     let updated = conn.execute(
         "UPDATE skill_invocations
             SET used = ?1,
-                outcome_score = COALESCE(?2, outcome_score),
-                outcome_source = COALESCE(?3, outcome_source),
+                outcome_score = CASE
+                    WHEN COALESCE(outcome_source, '') IN ('task_acceptance', 'run_review', 'note_review')
+                    THEN outcome_score ELSE COALESCE(?2, outcome_score) END,
+                outcome_source = CASE
+                    WHEN COALESCE(outcome_source, '') IN ('task_acceptance', 'run_review', 'note_review')
+                    THEN outcome_source ELSE COALESCE(?3, outcome_source) END,
                 updated_at = datetime('now')
           WHERE id = (SELECT id FROM skill_invocations
                        WHERE skill_name = ?4 AND loaded_at >= datetime('now', ?5)
