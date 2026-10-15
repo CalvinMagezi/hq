@@ -176,6 +176,17 @@ fn by_version(conn: &Connection, path: &str, content_hash: &str) -> Result<Optio
         .optional()?)
 }
 
+/// One record by id. Redacted records are not returned.
+pub fn get(conn: &Connection, id: i64) -> Result<Option<Provenance>> {
+    Ok(conn
+        .query_row(
+            &format!("SELECT {COLS} FROM note_provenance WHERE id = ?1 AND redacted = 0"),
+            params![id],
+            from_row,
+        )
+        .optional()?)
+}
+
 /// Record who produced the version of `path` whose raw file hashes to `content_hash`.
 ///
 /// If that version is already recorded the first attribution stands: a later write of the same

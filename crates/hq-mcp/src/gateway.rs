@@ -466,6 +466,7 @@ pub const CONNECTOR_CONFIRM_TOOLS: &[&str] = &[
     "skill_manage",
     "slash_command_manage",
     "task_delete",
+    "note_review",
     "vault_delete",
     "file_edit_batch",
     "git_commit",
@@ -911,6 +912,25 @@ mod tests {
         let mut granted = json!({key: "forged-label"});
         mark_scope(&mut granted, None, Some("Claude"));
         assert_eq!(granted[key], "Claude");
+    }
+
+    #[test]
+    fn review_decisions_are_closed_to_every_scoped_key_and_need_the_owner_through_a_connector() {
+        for (name, list) in [
+            ("spark", SPARK_READONLY_ALLOWLIST),
+            ("handoff", HANDOFF_ALLOWLIST),
+            ("tasks", TASKS_ALLOWLIST),
+        ] {
+            assert!(
+                !list.contains(&"note_review"),
+                "the {name} key can set review state"
+            );
+        }
+        assert!(needs_owner_confirmation(
+            &ToolRegistry::new(),
+            "note_review",
+            &json!({"path": "Notebooks/a.md", "state": "accepted"})
+        ));
     }
 
     #[test]
