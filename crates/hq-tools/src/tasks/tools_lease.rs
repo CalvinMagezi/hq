@@ -695,6 +695,7 @@ impl HqTool for TaskReleaseTool {
             .filter(|cp| !cp.is_empty())
         });
         let scoped = crate::harness_session::is_tasks_scope(&args);
+        let mails_no_one = crate::harness_session::writes_no_mail(&args);
         let (done, previous_status, unblocked) = self.db.with_conn(move |c| {
             t::in_write_tx(c, |c| {
                 check_scope_owns_lease(c, &args, &token)?;
@@ -729,13 +730,15 @@ impl HqTool for TaskReleaseTool {
         // A release says where the work stands just as task_update does, so it tells the same
         // people: the agents behind tasks it unblocked, and the owner's review queue. Not on the
         // tasks scope, whose text must not reach a mailbox or the owner's approvals.
-        if !scoped {
+        if !mails_no_one {
             notify_unblocked(
                 &self.vault_path,
                 &done.task,
                 &unblocked,
                 self.settings.route_tags,
             );
+        }
+        if !scoped {
             let became_ready = done.task.status == t::STATUS_READY_FOR_REVIEW
                 && previous_status.as_deref() != Some(t::STATUS_READY_FOR_REVIEW);
             if became_ready {

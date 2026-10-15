@@ -453,9 +453,11 @@ const MARKED_DENIED_TOOLS: &[&str] = &["config_manage"];
 
 /// Tools a claude.ai connector may run only once the owner approves that exact call: they act
 /// on the owner's outside accounts, reach the owner's chat or an agent that acts on what it is
-/// sent, persist instructions or settings, pair a machine, delete, or write and publish on the
-/// HQ host. Only tools the gateway serves belong here; a registry test checks each name.
-/// Coding-agent session tools are deliberately absent (`docs/plans/claude-connector.md`).
+/// sent, persist instructions or settings, pair a machine, delete tasks, or write and publish on
+/// the HQ host. Only tools the gateway serves belong here; a registry test checks each name.
+/// Coding-agent session tools are deliberately absent (`docs/plans/claude-connector.md`), and so
+/// are everyday vault and task writes: a vault call waits only when it touches a system folder
+/// ([`SYSTEM_VAULT_FOLDERS`]), and a task call never does.
 pub const CONNECTOR_CONFIRM_TOOLS: &[&str] = &[
     "google_workspace",
     "agent_send_message",
@@ -466,7 +468,6 @@ pub const CONNECTOR_CONFIRM_TOOLS: &[&str] = &[
     "skill_manage",
     "slash_command_manage",
     "task_delete",
-    "vault_delete",
     "file_edit_batch",
     "git_commit",
     "git_pr",
@@ -478,24 +479,35 @@ pub const CONNECTOR_CONFIRM_TOOLS: &[&str] = &[
     "ocr_extract_text",
 ];
 
-/// Vault folders whose notes become instructions: skills, slash commands and agent definitions.
-const INSTRUCTION_FOLDERS: &[&str] = &["skills/", "_skills/", "_commands/", "agents/"];
-/// Vault tools that write a note at `path` (or move one to `to`).
+/// Vault folders a connector may not change without the owner's approval. Notes in the first
+/// four become instructions (skills, slash commands and agent definitions); the rest hold HQ's
+/// own identity, threads, databases, retired notes and agent mailboxes. The vault tools refuse
+/// most of the second group themselves, so this also covers a tool that stops doing so.
+/// Everything else in the vault is the owner's notes, which Claude may create, change, move and
+/// trash freely: a delete there is a move into `_trash/`, kept for 30 days.
+pub const SYSTEM_VAULT_FOLDERS: &[&str] = &[
+    "skills/",
+    "_skills/",
+    "_commands/",
+    "agents/",
+    "_system/",
+    "_threads/",
+    "_data/",
+    "_trash/",
+    "_mailboxes/",
+];
+/// Vault tools that create, change, move or trash a note at `path` (or move one from `from` to
+/// `to`). They wait for approval only when one of those paths is in a system folder.
 const VAULT_WRITE_TOOLS: &[&str] = &[
     "vault_write_note",
     "vault_append_note",
     "vault_patch_section",
     "vault_frontmatter_update",
     "vault_move",
+    "vault_delete",
 ];
-/// Task tools whose tags and assignees put text in a mailbox that the owner's chat or an agent
-/// drains, the same reach `agent_send_message` has.
-pub const TASK_ROUTING_TOOLS: &[&str] = &[
-    "task_create",
-    "task_update",
-    "task_create_many",
-    "task_update_many",
-];
+/// The arguments of [`VAULT_WRITE_TOOLS`] that name a note path.
+const VAULT_PATH_ARGS: &[&str] = &["path", "from", "to", "destination", "dest"];
 
 /// Whether a connector's call to `tool` with `args` waits for the owner's approval. Remote MCP
 /// servers proxy the owner's accounts, and `hq_ask` in full mode hands the question to HQ's own
@@ -516,13 +528,10 @@ pub fn needs_owner_confirmation(registry: &ToolRegistry, tool: &str, args: &Valu
             .is_some_and(|o| !o.is_empty());
     }
     if VAULT_WRITE_TOOLS.contains(&tool) {
-        return ["path", "to", "destination", "dest"]
+        return VAULT_PATH_ARGS
             .iter()
             .filter_map(|k| args.get(*k).and_then(Value::as_str))
-            .any(in_instruction_folder);
-    }
-    if TASK_ROUTING_TOOLS.contains(&tool) {
-        return routes_to_mailbox(args);
+            .any(in_system_folder);
     }
     CONNECTOR_CONFIRM_TOOLS.contains(&tool)
         || registry
@@ -530,29 +539,17 @@ pub fn needs_owner_confirmation(registry: &ToolRegistry, tool: &str, args: &Valu
             .is_some_and(|t| t.category() == hq_tools::remote_mcp::REMOTE_MCP_CATEGORY)
 }
 
-fn in_instruction_folder(path: &str) -> bool {
+/// Whether `path` is, or is inside, one of [`SYSTEM_VAULT_FOLDERS`], however it is spelled
+/// (`./Skills/x`, `/_System/x`, or the folder alone).
+fn in_system_folder(path: &str) -> bool {
     let path = path
         .trim()
         .trim_start_matches("./")
         .trim_start_matches('/')
         .to_ascii_lowercase();
-    INSTRUCTION_FOLDERS.iter().any(|f| path.starts_with(f))
-}
-
-/// Whether a task call sets tags or assignees, on the call, its `defaults` or any item.
-fn routes_to_mailbox(args: &Value) -> bool {
-    let sets = |v: &Value| {
-        ["tags", "assignees"].iter().any(|k| {
-            v.get(*k)
-                .and_then(Value::as_array)
-                .is_some_and(|a| !a.is_empty())
-        })
-    };
-    let items = ["tasks", "updates"]
+    SYSTEM_VAULT_FOLDERS
         .iter()
-        .filter_map(|k| args.get(*k).and_then(Value::as_array))
-        .flatten();
-    sets(args) || args.get("defaults").is_some_and(sets) || items.into_iter().any(sets)
+        .any(|f| path.starts_with(f) || path == f.trim_end_matches('/'))
 }
 
 /// The longest session id a marker carries; anything else is cut.
@@ -915,7 +912,6 @@ mod tests {
     fn connector_confirmation_covers_the_listed_tools_remote_mcp_and_full_asks_only() {
         let registry = ToolRegistry::new();
         let none = json!({});
-        assert!(needs_owner_confirmation(&registry, "vault_delete", &none));
         assert!(needs_owner_confirmation(
             &registry,
             "google_workspace",
@@ -941,51 +937,75 @@ mod tests {
             "vault_export",
             &json!({"path": "a.md"})
         ));
-        for path in [
-            "skills/x/SKILL.md",
-            "/_commands/deploy.md",
-            "./Agents/coder.md",
+        for tool in ["vault_write_note", "vault_append_note", "vault_delete"] {
+            for path in [
+                "skills/x/SKILL.md",
+                "/_commands/deploy.md",
+                "./Agents/coder.md",
+                "_system/SOUL.md",
+                "_System/SOUL.md",
+                "_mailboxes/relay/m.md",
+                "_data",
+            ] {
+                assert!(
+                    needs_owner_confirmation(&registry, tool, &json!({ "path": path })),
+                    "{tool} {path}"
+                );
+            }
+        }
+        // Ordinary notes are Claude's to create, change, move and trash.
+        for tool in [
+            "vault_write_note",
+            "vault_append_note",
+            "vault_patch_section",
+            "vault_frontmatter_update",
+            "vault_delete",
         ] {
-            assert!(
-                needs_owner_confirmation(&registry, "vault_write_note", &json!({ "path": path })),
-                "{path}"
-            );
+            for path in [
+                "Notebooks/a.md",
+                "Notebooks/Projects/skills-notes.md",
+                "Inbox/agents.md",
+            ] {
+                assert!(
+                    !needs_owner_confirmation(&registry, tool, &json!({ "path": path })),
+                    "{tool} {path}"
+                );
+            }
         }
         assert!(!needs_owner_confirmation(
             &registry,
-            "vault_write_note",
-            &json!({"path": "Notebooks/a.md"})
+            "vault_move",
+            &json!({"from": "Notebooks/a.md", "to": "Notebooks/b.md"})
+        ));
+        // A move counts at either end: into a system folder, or out of one (a delete in effect).
+        assert!(needs_owner_confirmation(
+            &registry,
+            "vault_move",
+            &json!({"from": "Notebooks/a.md", "to": "skills/a.md"})
         ));
         assert!(needs_owner_confirmation(
             &registry,
             "vault_move",
-            &json!({"path": "a.md", "to": "skills/a.md"})
+            &json!({"from": "skills/a.md", "to": "Notebooks/a.md"})
         ));
-        assert!(needs_owner_confirmation(
-            &registry,
-            "task_create",
-            &json!({"title": "t", "tags": ["relay"]})
-        ));
-        assert!(!needs_owner_confirmation(
-            &registry,
-            "task_create",
-            &json!({"title": "t", "tags": []})
-        ));
-        assert!(needs_owner_confirmation(
-            &registry,
-            "task_create_many",
-            &json!({"tasks": [{"title": "a"}, {"title": "b", "assignees": ["hq"]}]})
-        ));
-        assert!(needs_owner_confirmation(
-            &registry,
-            "task_update_many",
-            &json!({"updates": [{"id": "x"}], "defaults": {"tags": ["relay"]}})
-        ));
-        assert!(!needs_owner_confirmation(
-            &registry,
-            "task_update",
-            &json!({"id": "x", "status": "complete"})
-        ));
+        // Tasks are never held, whatever they route to; only deleting one is.
+        for (tool, args) in [
+            ("task_create", json!({"title": "t", "tags": ["relay"]})),
+            ("task_create", json!({"title": "t", "assignees": ["hq"]})),
+            (
+                "task_create_many",
+                json!({"tasks": [{"title": "a"}, {"title": "b", "assignees": ["hq"]}]}),
+            ),
+            ("task_update", json!({"id": "x", "tags": ["relay"]})),
+            (
+                "task_update_many",
+                json!({"updates": [{"id": "x"}], "defaults": {"tags": ["relay"]}}),
+            ),
+            ("task_update", json!({"id": "x", "status": "complete"})),
+        ] {
+            assert!(!needs_owner_confirmation(&registry, tool, &args), "{tool}");
+        }
+        assert!(needs_owner_confirmation(&registry, "task_delete", &none));
         assert!(!needs_owner_confirmation(
             &registry,
             "hq_ask",

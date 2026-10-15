@@ -223,7 +223,7 @@ impl HqTool for TaskCreateTool {
             out["deduplicated"] = json!(true);
             return Ok(out);
         }
-        if !scoped {
+        if !crate::harness_session::writes_no_mail(&args) {
             notify_recipients(&self.vault_path, &task, None, self.settings.route_tags);
         }
         let (links, advice) = self
@@ -796,7 +796,7 @@ impl HqTool for TaskUpdateTool {
         })?;
         let became_ready_for_review = task.status == t::STATUS_READY_FOR_REVIEW
             && previous.status != t::STATUS_READY_FOR_REVIEW;
-        if !scoped {
+        if !crate::harness_session::writes_no_mail(&args) {
             notify_unblocked(
                 &self.vault_path,
                 &task,

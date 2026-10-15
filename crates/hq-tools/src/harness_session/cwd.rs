@@ -327,6 +327,15 @@ pub fn is_tasks_scope(args: &Value) -> bool {
     args.get(TASKS_SCOPE_ARG).and_then(Value::as_bool) == Some(true)
 }
 
+/// Whether a task write must mail no one: not an agent mailbox behind a tag or assignee, and
+/// not the owner's chat. The tasks scope and every claude.ai connector grant write this way, so
+/// text from a Claude conversation (which may have read a hostile page) reaches an agent only
+/// when the agent looks at the task, never as a message pushed at it. The owner needs no
+/// approval for these writes because of it.
+pub fn writes_no_mail(args: &Value) -> bool {
+    is_tasks_scope(args) || connector_label(args).is_some()
+}
+
 /// Whether a tool call arrived on the handoff-scoped key.
 pub fn is_handoff_scope(args: &Value) -> bool {
     args.get(HANDOFF_SCOPE_ARG).and_then(Value::as_bool) == Some(true)

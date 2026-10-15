@@ -78,6 +78,7 @@ fn app_and_db() -> (axum::Router, Arc<WsState>, tempfile::TempDir) {
         "vault_search",
         "config_manage",
         "vault_delete",
+        "vault_write_note",
         "task_create",
     ] {
         registry.register(Box::new(Fake(name)));
@@ -461,14 +462,14 @@ async fn a_high_risk_call_runs_once_per_approval_with_exactly_its_arguments() {
     let (app, state, _vault) = app_and_db();
     let db = &state.db;
     let token = full_access(&app).await;
-    let target = json!({"path": "Notebooks/a.md"});
+    let target = json!({"path": "skills/a/SKILL.md"});
 
     let (_, _, first) = send(&app, mcp(&token, call_with("vault_delete", target.clone()))).await;
     assert!(text_of(&first).contains("Waiting for the owner"), "{first}");
     assert_eq!(first["result"]["isError"], false);
     let ask = newest_request(db);
     assert!(
-        ask.body.contains("Notebooks/a.md"),
+        ask.body.contains("skills/a/SKILL.md"),
         "the owner sees the real arguments"
     );
 
@@ -482,7 +483,7 @@ async fn a_high_risk_call_runs_once_per_approval_with_exactly_its_arguments() {
         "an approval is spent by one call: {again}"
     );
 
-    let other = json!({"path": "Notebooks/b.md"});
+    let other = json!({"path": "skills/b/SKILL.md"});
     assert!(hq_db::value_items::approve_by_id(db, &newest_request(db).id).unwrap());
     let (_, _, swapped) = send(&app, mcp(&token, call_with("vault_delete", other))).await;
     assert!(
@@ -499,7 +500,7 @@ async fn a_declined_call_stays_declined_and_ordinary_calls_never_wait() {
     let (_, _, quick) = send(&app, mcp(&token, call_with("vault_search", json!({})))).await;
     assert!(text_of(&quick).contains("vault_search"), "{quick}");
 
-    let target = json!({"path": "x.md"});
+    let target = json!({"path": "skills/x/SKILL.md"});
     send(&app, mcp(&token, call_with("vault_delete", target.clone()))).await;
     assert!(hq_db::value_items::dismiss_by_id(db, &newest_request(db).id).unwrap());
     let (_, _, no) = send(&app, mcp(&token, call_with("vault_delete", target))).await;
@@ -557,7 +558,10 @@ async fn connecting_tells_the_owner_at_once() {
 async fn approving_while_the_call_waits_lets_it_run() {
     let (app, state, _vault) = app_and_db();
     let token = full_access(&app).await;
-    let request = mcp(&token, call_with("vault_delete", json!({"path": "w.md"})));
+    let request = mcp(
+        &token,
+        call_with("vault_delete", json!({"path": "skills/w/SKILL.md"})),
+    );
     let owner = async {
         loop {
             let found = hq_db::value_items::list_filtered(&state.db, None, None, 50)
@@ -580,13 +584,19 @@ async fn a_connection_cannot_flood_the_owner_with_requests() {
     let (app, _state, _vault) = app_and_db();
     let token = full_access(&app).await;
     for i in 0..super::guard::MAX_WAITING_APPROVALS {
-        let call = call_with("vault_delete", json!({ "path": format!("{i}.md") }));
+        let call = call_with(
+            "vault_delete",
+            json!({ "path": format!("skills/{i}/SKILL.md") }),
+        );
         let (_, _, r) = send(&app, mcp(&token, call)).await;
         assert!(text_of(&r).contains("Waiting"), "{r}");
     }
     let (_, _, refused) = send(
         &app,
-        mcp(&token, call_with("vault_delete", json!({"path": "x.md"}))),
+        mcp(
+            &token,
+            call_with("vault_delete", json!({"path": "skills/x/SKILL.md"})),
+        ),
     )
     .await;
     assert_eq!(refused["result"]["isError"], true);
@@ -594,25 +604,54 @@ async fn a_connection_cannot_flood_the_owner_with_requests() {
 }
 
 #[tokio::test]
-async fn a_tasks_scope_task_write_never_waits_for_routing_approval() {
-    let (app, _state, _vault) = app_and_db();
-    let code = approved_code(&app, "tasks").await;
-    let token = exchange(&app, &code).await.1["access_token"]
+async fn task_writes_never_wait_for_approval_on_any_grant() {
+    let (app, state, _vault) = app_and_db();
+    let tasks_scope = approved_code(&app, "tasks").await;
+    let tasks_token = exchange(&app, &tasks_scope).await.1["access_token"]
         .as_str()
         .unwrap()
         .to_string();
-    let call = call_with("task_create", json!({"title": "t", "tags": ["relay"]}));
-    let (_, _, done) = send(&app, mcp(&token, call)).await;
-    assert!(
-        text_of(&done).contains("task_create"),
-        "the scope drops tags itself: {done}"
-    );
-
     let full = full_access(&app).await;
-    let call = call_with("task_create", json!({"title": "t", "tags": ["relay"]}));
-    let (_, _, held) = send(&app, mcp(&full, call)).await;
-    assert!(
-        text_of(&held).contains("Waiting"),
-        "a full grant routing to a mailbox asks first: {held}"
-    );
+
+    // Tags and assignees, which used to ask first on a full grant, run straight away.
+    for token in [&tasks_token, &full] {
+        for args in [
+            json!({"title": "t", "tags": ["relay"]}),
+            json!({"title": "t", "assignees": ["hq"]}),
+        ] {
+            let (_, _, done) = send(&app, mcp(token, call_with("task_create", args))).await;
+            assert!(text_of(&done).contains("task_create"), "{done}");
+        }
+    }
+    let asked = hq_db::value_items::list_filtered(&state.db, None, None, 50)
+        .unwrap()
+        .into_iter()
+        .any(|i| i.title.starts_with("Claude wants to run"));
+    assert!(!asked, "the owner was never asked");
+}
+
+#[tokio::test]
+async fn notes_are_free_to_write_and_trash_but_system_folders_ask_first() {
+    let (app, state, _vault) = app_and_db();
+    let token = full_access(&app).await;
+
+    // Creating and deleting the owner's own notes runs at once.
+    for path in ["Notebooks/a.md", "Inbox/b.md"] {
+        for tool in ["vault_write_note", "vault_delete"] {
+            let (_, _, r) = send(&app, mcp(&token, call_with(tool, json!({ "path": path })))).await;
+            assert!(text_of(&r).contains("\"ran\""), "{tool} {path}: {r}");
+        }
+    }
+
+    // A system folder waits, and the owner sees the call.
+    let (_, _, held) = send(
+        &app,
+        mcp(
+            &token,
+            call_with("vault_delete", json!({"path": "_system/SOUL.md"})),
+        ),
+    )
+    .await;
+    assert!(text_of(&held).contains("Waiting for the owner"), "{held}");
+    assert!(newest_request(&state.db).body.contains("_system/SOUL.md"));
 }
