@@ -308,7 +308,7 @@ Tasks have no CLI command: they are MCP tools (`task_list`, `task_create` and fr
 |---------|-------------|
 | `hq agents [list\|show]` | List/inspect agent definitions |
 | `hq mailbox [list\|archive]` | Inspect and maintain the inter-agent mailboxes |
-| `hq skills <sub>` | Manage vault skills (list, show, create, validate, adopt, approve, revert, history and more) |
+| `hq skills <sub>` | Manage vault skills (list, show, create, validate, adopt, approve, revert, history, evidence and more) |
 | `hq queue [list\|stats\|clear]` | Inspect or clear the value-bus notification queue |
 | `hq decisions [--days N] [--site S]` | Show what the structured-decision gates did |
 

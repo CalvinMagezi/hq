@@ -79,3 +79,55 @@ here and fail in a session.
   `hq skills approve` or `hq skills reject`. An unreadable fixtures file blocks the change too.
 - Approving a held change is your decision to override: update the fixtures if they are out
   of date, or `validate` will keep reporting the failure.
+
+## Evidence reports and proposals
+
+`hq skills evidence [name] [--days N] [--json]` reads the invocation records (after settling the
+latest outcomes) and prints, per skill and per version of it: loads, sessions, the outcome mix,
+the verdicts, and the patterns that repeat. A pattern is one of:
+
+| Pattern | Means |
+|---|---|
+| `reworked_outcomes` | work that used the skill keeps being reopened or rejected |
+| `judged_harmful` | the post-session review keeps judging the skill harmful |
+| `loaded_but_unused` | the skill loads and is then not applied |
+| `reworked_for_purpose` | work of one kind (`code`, `research`, ...) that used it keeps coming back |
+| `hints_did_not_activate` | an auto-loading skill keeps being loaded by hand |
+
+A step missed again and again is not on the list: that would need the text of the work, which is
+never stored.
+
+**Thresholds.** A pattern counts as evidence only when it shows in at least 5 loads across at
+least 3 sessions inside the window (30 days unless `--days` says otherwise). Smaller ones are
+printed as "too small to count" with their sizes, and a skill with no pattern at that size is
+reported as `insufficient evidence`. No proposal is made for it. Two versions of a skill are
+compared with their load counts and flagged "small sample" when either has fewer than 5; a
+difference is a correlation, not proof that the change caused it.
+
+**Proposals.** `hq skills evidence --propose` writes `skills/_proposed/<name>/PROPOSAL.md` for each
+skill with a finding: the pattern, counts, date range, skill version, example loads by invocation
+id (with the task and the outcome reference where known, never quoted text), the likely kind of
+change, and the regression fixtures that any change has to keep passing. It is evidence, not an
+edit: it has no replacement text, `hq skills approve` refuses it, and `hq skills reject <name>`
+dismisses it. The skill changes only through `hq skills edit` or the review, where the fixtures
+gate the change.
+
+## Retention and deletion
+
+Raw invocation rows are kept 90 days. The daily `vault-cleanup` task then folds older rows into
+monthly roll-ups per skill, version and month: counts, a score sum and outcome and verdict
+tallies, with no invocation id, session, task or reference. `count_invocations` and
+`mean_outcome` read the roll-ups too, so the numbers do not move when rows age out.
+
+`hq skills evidence purge` deletes telemetry on request, for the owner at the command line only
+(no tool, MCP route or web endpoint exposes the evidence or the purge):
+
+```
+hq skills evidence purge --id inv_1a2b3c4d          # one record
+hq skills evidence purge --skill sheets             # one skill's records
+hq skills evidence purge --from 2026-01-01 --before 2026-02-01
+```
+
+It prints what it would delete and changes nothing until `--yes` is added. A purge with no id,
+skill or date is refused. Roll-up months that lie entirely inside a date range go with it.
+Skills, their versions and `_audit.jsonl` are never touched.

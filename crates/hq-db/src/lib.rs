@@ -14,6 +14,7 @@ pub mod push_subscriptions;
 pub mod search;
 pub mod self_update_runs;
 pub mod session_tokens;
+pub mod skill_evidence;
 pub mod skill_invocations;
 pub mod skill_outcomes;
 pub mod subagent_runs;

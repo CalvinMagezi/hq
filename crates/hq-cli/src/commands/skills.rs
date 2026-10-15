@@ -38,6 +38,8 @@ pub enum SkillsAction {
     Adopt { name: String },
     /// Make an adopted skill read-only to the review again
     Unadopt { name: String },
+    /// How skills have done, from the invocation records; `purge` deletes them
+    Evidence(super::skills_evidence::EvidenceArgs),
 }
 
 pub async fn run(config: &HqConfig, action: SkillsAction) -> Result<()> {
@@ -74,6 +76,7 @@ async fn run_with_output(
         SkillsAction::History { name } => skill_history(&skills_dir, &name, output),
         SkillsAction::Adopt { name } => set_managed(&skills_dir, &name, true, output),
         SkillsAction::Unadopt { name } => set_managed(&skills_dir, &name, false, output),
+        SkillsAction::Evidence(args) => super::skills_evidence::run(config, args, output),
     }
 }
 
