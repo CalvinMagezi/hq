@@ -20,7 +20,7 @@ pub mod usage_ledger;
 pub use copilot_usage::run_copilot_usage;
 pub use disk_watchdog::run_disk_watchdog;
 pub use email_ingest::run_email_poll;
-pub use embeddings::{run_embeddings, run_inbox_triage};
+pub use embeddings::{run_embeddings, run_fts_sync, run_inbox_triage};
 pub use harness_usage::run_harness_usage;
 pub use health::{run_heartbeat, run_memory_consolidation};
 pub use stack_dispatch::run_stack_dispatch;

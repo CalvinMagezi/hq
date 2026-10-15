@@ -5,12 +5,16 @@
 
 mod fts;
 mod graph;
+mod reconcile;
+#[cfg(test)]
+mod reconcile_tests;
 mod semantic;
 #[cfg(test)]
 mod tests;
 
 pub use fts::*;
 pub use graph::*;
+pub use reconcile::*;
 pub use semantic::*;
 
 use std::collections::HashMap;

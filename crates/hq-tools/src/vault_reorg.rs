@@ -39,7 +39,7 @@ fn remove_from_index(db: Option<&Arc<Database>>, path: &str) {
     let Some(db) = db else { return };
     let path = path.to_string();
     let _ = db.with_conn(move |conn| {
-        let _ = hq_db::search::remove_note(conn, &path);
+        let _ = hq_db::search::remove_path_everywhere(conn, &path);
         Ok(())
     });
 }

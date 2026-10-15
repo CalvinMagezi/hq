@@ -8,8 +8,9 @@ use rusqlite::{Connection, OptionalExtension};
 
 /// Write a note into vault_cache after a filesystem write succeeds.
 ///
-/// Stores the full content, mtime (seconds since Unix epoch), a fast hash,
-/// title, JSON frontmatter, and pre-computed token count.
+/// Stores the full content, mtime (seconds since Unix epoch), a content hash,
+/// title, JSON frontmatter, and pre-computed token count. The mtime is the time of the write;
+/// use `write_note_cached_at` to record the file's own modification time instead.
 pub fn write_note_cached(
     conn: &Connection,
     rel_path: &str,
@@ -18,16 +19,42 @@ pub fn write_note_cached(
     metadata_json: Option<&str>,
     token_count: Option<i64>,
 ) -> Result<()> {
+    write_note_cached_at(
+        conn,
+        rel_path,
+        content,
+        title,
+        metadata_json,
+        token_count,
+        None,
+    )
+}
+
+/// Like `write_note_cached`, with an explicit mtime (seconds since Unix epoch). `None` means now.
+///
+/// A sync that re-reads an old note passes the file's mtime, so ordering by recency does not
+/// jump just because the note was indexed again.
+pub fn write_note_cached_at(
+    conn: &Connection,
+    rel_path: &str,
+    content: &str,
+    title: &str,
+    metadata_json: Option<&str>,
+    token_count: Option<i64>,
+    mtime: Option<i64>,
+) -> Result<()> {
     // Truncate the preview on a UTF-8 char boundary — slicing by raw byte index
     // panics when byte 512 lands inside a multi-byte character.
     fn preview_512(s: &str) -> &str {
         &s[..s.floor_char_boundary(512)]
     }
-    let mtime = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map(|d| d.as_secs() as i64)
-        .unwrap_or(0);
-    let hash = fast_hash(content);
+    let mtime = mtime.unwrap_or_else(|| {
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_secs() as i64)
+            .unwrap_or(0)
+    });
+    let hash = crate::search::content_hash(content);
 
     conn.execute(
         "INSERT INTO vault_cache (path, mtime, hash, title, metadata, content_preview, content, token_count, updated_at)
@@ -65,14 +92,6 @@ pub fn get_mtime(conn: &Connection, path: &str) -> Result<Option<i64>> {
     )
     .optional()
     .map_err(Into::into)
-}
-
-fn fast_hash(s: &str) -> String {
-    use std::collections::hash_map::DefaultHasher;
-    use std::hash::{Hash, Hasher};
-    let mut h = DefaultHasher::new();
-    s.hash(&mut h);
-    format!("{:x}", h.finish())
 }
 
 #[cfg(test)]

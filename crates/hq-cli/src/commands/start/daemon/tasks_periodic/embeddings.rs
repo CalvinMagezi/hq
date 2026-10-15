@@ -11,30 +11,49 @@ use super::super::helpers::*;
 
 const TRIAGE_SAMPLE_CHARS: usize = 500;
 
-/// Index notes into FTS5 for full-text search, and queue for embedding.
+/// Bring the keyword index in step with the notes on disk.
 /// Uses incremental hash-based diffing: skips unchanged files, handles deletions.
-pub async fn run_embeddings(vault_path: &Path, db: &Database, config: &HqConfig) -> Result<()> {
+///
+/// Runs on every scheduled embeddings tick and once when the daemon starts, so edits made
+/// while it was down are searchable without waiting out the first tick's delay.
+pub async fn run_fts_sync(vault_path: &Path, db: &Database) -> Result<()> {
     let notebooks_dir = vault_path.join("Notebooks");
     if !notebooks_dir.exists() {
         return Ok(());
     }
 
-    let notebooks_dir_clone = notebooks_dir.clone();
-    match db
-        .with_conn(move |conn| hq_db::search::sync_index_incremental(conn, &notebooks_dir_clone))
-    {
-        Ok((indexed, removed, unchanged)) => {
-            if indexed > 0 || removed > 0 {
+    match db.with_conn(move |conn| hq_db::search::sync_index(conn, &notebooks_dir)) {
+        Ok(report) => {
+            if report.indexed > 0 || report.removed > 0 {
                 info!(
-                    indexed,
-                    removed, unchanged, "embeddings: FTS5 sync complete"
+                    indexed = report.indexed,
+                    removed = report.removed,
+                    unchanged = report.unchanged,
+                    "embeddings: FTS5 sync complete"
                 );
             } else {
-                debug!(unchanged, "embeddings: FTS5 up to date");
+                debug!(unchanged = report.unchanged, "embeddings: FTS5 up to date");
+            }
+            if report.failed > 0 || report.unlisted_dirs > 0 {
+                warn!(
+                    failed = report.failed,
+                    unlisted_dirs = report.unlisted_dirs,
+                    "embeddings: FTS5 sync left some notes and folders as they were"
+                );
             }
         }
         Err(e) => warn!(error = %e, "embeddings: FTS5 sync failed"),
     }
+    Ok(())
+}
+
+/// Index notes into FTS5 for full-text search, and queue for embedding.
+pub async fn run_embeddings(vault_path: &Path, db: &Database, config: &HqConfig) -> Result<()> {
+    if !vault_path.join("Notebooks").exists() {
+        return Ok(());
+    }
+
+    run_fts_sync(vault_path, db).await?;
 
     // Lite keeps the keyword index current and sends no note text anywhere for vectors.
     if config.profile.is_lite() {

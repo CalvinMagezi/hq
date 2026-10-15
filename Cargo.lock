@@ -2874,6 +2874,7 @@ name = "hq-db"
 version = "0.9.1"
 dependencies = [
  "anyhow",
+ "blake3",
  "chrono",
  "hq-core",
  "r2d2",

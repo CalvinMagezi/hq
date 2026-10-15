@@ -46,10 +46,10 @@ pub fn index_note(
     Ok(())
 }
 
-/// Remove a note from both FTS index and embeddings table.
+/// Remove everything derived from a note's text: its FTS row, embedding, sync state and cached
+/// copy. Link rows stay, so a move can keep them; use `remove_path_everywhere` for a delete.
 pub fn remove_note(conn: &Connection, path: &str) -> Result<()> {
-    conn.execute("DELETE FROM notes_fts WHERE path = ?1", [path])?;
-    conn.execute("DELETE FROM embeddings WHERE note_path = ?1", [path])?;
+    super::reconcile::delete_content_rows(conn, path)?;
     Ok(())
 }
 
@@ -170,11 +170,8 @@ pub fn recent_notes(conn: &Connection, limit: usize) -> Result<Vec<SearchResult>
 /// Rebuild the full-text index by scanning all `.md` files under `notebooks_dir`.
 /// Returns (indexed_count, error_count).
 ///
-/// The caller is responsible for parsing frontmatter and calling `index_note`
-/// for each file; this function provides the batch scaffolding.
+/// Walks the same way `sync_index` does: hidden folders, the trash and symlinks are skipped.
 pub fn rebuild_index(conn: &Connection, notebooks_dir: &std::path::Path) -> Result<(usize, usize)> {
-    use std::fs;
-
     // Clear existing FTS data
     conn.execute_batch("DELETE FROM notes_fts")?;
 
@@ -185,214 +182,26 @@ pub fn rebuild_index(conn: &Connection, notebooks_dir: &std::path::Path) -> Resu
     let mut indexed = 0usize;
     let mut errors = 0usize;
 
-    fn scan_dir(
-        conn: &Connection,
-        dir: &std::path::Path,
-        vault_path: &std::path::Path,
-        indexed: &mut usize,
-        errors: &mut usize,
-    ) {
-        let entries = match std::fs::read_dir(dir) {
-            Ok(e) => e,
-            Err(_) => return,
+    for (path, rel_path) in super::reconcile::indexable_files(notebooks_dir) {
+        let Ok(raw) = std::fs::read_to_string(&path) else {
+            errors += 1;
+            continue;
         };
-        for entry in entries.flatten() {
-            let path = entry.path();
-            if path.is_dir() {
-                scan_dir(conn, &path, vault_path, indexed, errors);
-            } else if let Some(ext) = path.extension()
-                && ext == "md"
-            {
-                if let Some(name) = path.file_name()
-                    && name == "_meta.md"
-                {
-                    continue;
-                }
-                match fs::read_to_string(&path) {
-                    Ok(raw) => {
-                        // Simple frontmatter extraction: skip YAML block between --- delimiters
-                        let content = strip_frontmatter(&raw);
-                        let title = path
-                            .file_stem()
-                            .and_then(|s| s.to_str())
-                            .unwrap_or("")
-                            .to_string();
-
-                        // Extract tags from frontmatter (simple parsing)
-                        let tags = extract_tags_from_frontmatter(&raw);
-
-                        let rel_path = path
-                            .strip_prefix(vault_path)
-                            .map(|p| p.to_string_lossy().to_string())
-                            .unwrap_or_else(|_| path.to_string_lossy().to_string());
-
-                        if index_note(conn, &rel_path, &title, &content, &tags).is_ok() {
-                            *indexed += 1;
-                        } else {
-                            *errors += 1;
-                        }
-                    }
-                    Err(_) => {
-                        *errors += 1;
-                    }
-                }
-            }
+        let content = strip_frontmatter(&raw);
+        let title = path
+            .file_stem()
+            .and_then(|s| s.to_str())
+            .unwrap_or("")
+            .to_string();
+        let tags = extract_tags_from_frontmatter(&raw);
+        if index_note(conn, &rel_path, &title, &content, &tags).is_ok() {
+            indexed += 1;
+        } else {
+            errors += 1;
         }
     }
-
-    // vault_path is the parent of Notebooks
-    let vault_path = notebooks_dir.parent().unwrap_or(notebooks_dir);
-
-    scan_dir(conn, notebooks_dir, vault_path, &mut indexed, &mut errors);
 
     Ok((indexed, errors))
-}
-
-/// Incrementally update the FTS index, skipping unchanged files.
-///
-/// Compares each `.md` file's content hash against `sync_state`. Files with a
-/// matching hash are skipped entirely. Changed or new files are re-indexed and
-/// their hash stored. FTS entries for deleted files are removed.
-///
-/// Returns `(indexed, removed, unchanged)` counts.
-pub fn sync_index_incremental(
-    conn: &Connection,
-    notebooks_dir: &std::path::Path,
-) -> Result<(usize, usize, usize)> {
-    use std::collections::hash_map::DefaultHasher;
-    use std::hash::{Hash, Hasher};
-
-    // Load known hashes from sync_state
-    let mut known_hashes: HashMap<String, String> = {
-        let mut stmt = conn.prepare("SELECT path, content_hash FROM sync_state")?;
-        let rows = stmt.query_map([], |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?)))?;
-        let mut m = HashMap::new();
-        for row in rows {
-            let (p, h) = row?;
-            m.insert(p, h);
-        }
-        m
-    };
-
-    if !notebooks_dir.exists() {
-        return Ok((0, 0, 0));
-    }
-
-    let vault_path = notebooks_dir.parent().unwrap_or(notebooks_dir);
-    let mut indexed = 0usize;
-    let mut unchanged = 0usize;
-    let mut seen_paths: std::collections::HashSet<String> = std::collections::HashSet::new();
-
-    fn hash_content(s: &str) -> String {
-        let mut h = DefaultHasher::new();
-        s.hash(&mut h);
-        format!("{:x}", h.finish())
-    }
-
-    fn walk(
-        conn: &Connection,
-        dir: &std::path::Path,
-        vault_path: &std::path::Path,
-        known: &mut HashMap<String, String>,
-        seen: &mut std::collections::HashSet<String>,
-        indexed: &mut usize,
-        unchanged: &mut usize,
-    ) {
-        let entries = match std::fs::read_dir(dir) {
-            Ok(e) => e,
-            Err(_) => return,
-        };
-        for entry in entries.flatten() {
-            let path = entry.path();
-            if path.is_dir() {
-                walk(conn, &path, vault_path, known, seen, indexed, unchanged);
-                continue;
-            }
-            let Some(ext) = path.extension() else {
-                continue;
-            };
-            if ext != "md" {
-                continue;
-            }
-            if path.file_name().map(|n| n == "_meta.md").unwrap_or(false) {
-                continue;
-            }
-
-            let Ok(raw) = std::fs::read_to_string(&path) else {
-                continue;
-            };
-            let hash = hash_content(&raw);
-
-            let rel_path = path
-                .strip_prefix(vault_path)
-                .map(|p| p.to_string_lossy().to_string())
-                .unwrap_or_else(|_| path.to_string_lossy().to_string());
-
-            seen.insert(rel_path.clone());
-
-            if known.get(&rel_path).map(|h| h == &hash).unwrap_or(false) {
-                *unchanged += 1;
-                continue;
-            }
-
-            // Index the changed/new file
-            let content = strip_frontmatter(&raw);
-            let title = path
-                .file_stem()
-                .and_then(|s| s.to_str())
-                .unwrap_or("")
-                .to_string();
-            let tags = extract_tags_from_frontmatter(&raw);
-
-            if index_note(conn, &rel_path, &title, &content, &tags).is_ok() {
-                let now = chrono::Utc::now().timestamp();
-                let _ = conn.execute(
-                    "INSERT INTO sync_state (path, content_hash, modified_at, synced_at)
-                     VALUES (?1, ?2, ?3, ?3)
-                     ON CONFLICT(path) DO UPDATE SET content_hash = excluded.content_hash, synced_at = excluded.synced_at",
-                    rusqlite::params![rel_path, hash, now],
-                );
-                // Populate vault_cache with token count so context engine can skip counting.
-                let token_count = ((raw.len() * 2).div_ceil(7)) as i64;
-                if let Err(e) = crate::vault_cache::write_note_cached(
-                    conn,
-                    &rel_path,
-                    &raw,
-                    &title,
-                    None,
-                    Some(token_count),
-                ) {
-                    tracing::debug!(path = %rel_path, error = %e, "vault_cache write failed during FTS sync");
-                }
-                known.insert(rel_path, hash);
-                *indexed += 1;
-            }
-        }
-    }
-
-    walk(
-        conn,
-        notebooks_dir,
-        vault_path,
-        &mut known_hashes,
-        &mut seen_paths,
-        &mut indexed,
-        &mut unchanged,
-    );
-
-    // Remove FTS + sync_state entries for deleted files
-    let stale: Vec<String> = known_hashes
-        .keys()
-        .filter(|p| !seen_paths.contains(*p))
-        .cloned()
-        .collect();
-    let removed = stale.len();
-    for path in &stale {
-        let _ = conn.execute("DELETE FROM notes_fts WHERE path = ?1", [path.as_str()]);
-        let _ = conn.execute("DELETE FROM sync_state WHERE path = ?1", [path.as_str()]);
-    }
-
-    Ok((indexed, removed, unchanged))
 }
 
 /// Strip YAML frontmatter from markdown content. Delegates to `hq_core::frontmatter_utils`.

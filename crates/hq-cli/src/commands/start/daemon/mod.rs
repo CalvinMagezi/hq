@@ -121,6 +121,17 @@ pub async fn run_daemon(
         .context("failed to check daemon lock")?
         .context("another daemon is already running — only one instance allowed")?;
 
+    // The scheduled sync is minutes away; catch up on edits made while the daemon was down.
+    // Lite keeps the keyword index too, so this is outside the profile split below.
+    {
+        let (vault_path, db) = (vault_path.clone(), db.clone());
+        tokio::spawn(async move {
+            if let Err(e) = tasks_periodic::run_fts_sync(&vault_path, &db).await {
+                warn!(error = %e, "daemon: startup index sync failed");
+            }
+        });
+    }
+
     if config.profile.is_lite() {
         // Local bookkeeping only; see LITE_DAEMON_TASKS.
         ensure_dir(&vault_path.join("_system"));
