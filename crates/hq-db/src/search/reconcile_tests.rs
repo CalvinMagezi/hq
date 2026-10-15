@@ -658,3 +658,119 @@ fn notes_with_no_sync_state_are_pending_only_when_they_have_no_embedding() {
     store_embedding(&conn, "Notebooks/tool.md", &[1.0], "m").unwrap();
     assert!(pending(&conn, "m").is_empty());
 }
+
+/// Rows left by the old delete path, for notes that exist nowhere: in every table, inside and
+/// outside Notebooks/.
+fn seed_ghost(conn: &Connection, path: &str) {
+    index_note(conn, path, "ghost", "left behind", "").unwrap();
+    store_embedding(conn, path, &[1.0, 0.0], "m").unwrap();
+    crate::vault_cache::write_note_cached(conn, path, "left behind", "ghost", None, None).unwrap();
+    conn.execute(
+        "INSERT INTO sync_state (path, content_hash, modified_at, synced_at) VALUES (?1, 'h', 1, 1)",
+        [path],
+    )
+    .unwrap();
+    seed_links(conn, path);
+}
+
+#[test]
+fn semantic_search_never_returns_a_note_that_is_gone_from_the_index() {
+    let conn = db();
+    index_note(&conn, "Notebooks/live.md", "live", "body", "").unwrap();
+    store_embedding(&conn, "Notebooks/live.md", &[1.0, 0.0], "m").unwrap();
+    // A stale embedding the old delete path left behind: no keyword-index row.
+    store_embedding(&conn, "Notebooks/deleted.md", &[1.0, 0.0], "m").unwrap();
+
+    let found = semantic_search(&conn, &[1.0, 0.0], 10).unwrap();
+    let paths: Vec<_> = found.iter().map(|r| r.note_path.as_str()).collect();
+    assert_eq!(paths, vec!["Notebooks/live.md"]);
+
+    store_embedding(&conn, "Notebooks/other.md", &[0.9, 0.1], "m").unwrap();
+    index_note(&conn, "Notebooks/other.md", "other", "body", "").unwrap();
+    let similar = find_similar_notes(&conn, "Notebooks/live.md", 10, 0.1).unwrap();
+    let paths: Vec<_> = similar.iter().map(|r| r.note_path.as_str()).collect();
+    assert_eq!(
+        paths,
+        vec!["Notebooks/other.md"],
+        "the deleted note is not similar to anything"
+    );
+}
+
+#[test]
+fn which_embeddings_a_capped_search_loads_does_not_depend_on_row_order() {
+    let conn = db();
+    for (i, name) in ["a", "b", "c"].iter().enumerate() {
+        let path = format!("Notebooks/{name}.md");
+        index_note(&conn, &path, name, "body", "").unwrap();
+        store_embedding(&conn, &path, &[1.0, 0.0], "m").unwrap();
+        // Same score for all three, so only the tie-break decides the order.
+        conn.execute(
+            "UPDATE embeddings SET embedded_at = ?1 WHERE note_path = ?2",
+            rusqlite::params![1_000 + i as i64, path],
+        )
+        .unwrap();
+    }
+    let order = |conn: &Connection| -> Vec<String> {
+        semantic_search(conn, &[1.0, 0.0], 10)
+            .unwrap()
+            .into_iter()
+            .map(|r| r.note_path)
+            .collect()
+    };
+    let first = order(&conn);
+    assert_eq!(first, order(&conn));
+}
+
+#[test]
+fn repair_reports_leftovers_in_every_table_and_removes_them_only_when_asked() {
+    let conn = db();
+    let vault = Vault::new();
+    vault.write("Notebooks/real.md", "a real note");
+    vault.write("Skills/real.md", "a real note outside Notebooks");
+    vault.sync(&conn);
+    index_note(
+        &conn,
+        "Skills/real.md",
+        "real",
+        "a real note outside Notebooks",
+        "",
+    )
+    .unwrap();
+    seed_ghost(&conn, "Notebooks/ghost.md");
+    seed_ghost(&conn, "Skills/ghost.md");
+    // A note that exists on disk but has an embedding and no keyword row is not an orphan.
+    vault.write("Notebooks/unindexed.md", "present, just not indexed yet");
+    store_embedding(&conn, "Notebooks/unindexed.md", &[1.0], "m").unwrap();
+    // Something that could never be a note.
+    store_embedding(&conn, "../../etc/passwd", &[1.0], "m").unwrap();
+
+    let dry = repair_orphans(&conn, vault.root(), false).unwrap();
+    assert_eq!(
+        dry.orphan_paths().into_iter().collect::<Vec<_>>(),
+        vec!["../../etc/passwd", "Notebooks/ghost.md", "Skills/ghost.md"]
+    );
+    assert_eq!(dry.removed, 0);
+    assert_eq!(
+        rows(&conn, "Notebooks/ghost.md"),
+        (1, 1, 1, 1),
+        "a dry run changes nothing"
+    );
+
+    let applied = repair_orphans(&conn, vault.root(), true).unwrap();
+    assert_eq!(applied.removed, 3);
+    for ghost in ["Notebooks/ghost.md", "Skills/ghost.md"] {
+        assert_eq!(rows(&conn, ghost), (0, 0, 0, 0), "{ghost}");
+        assert_eq!(link_rows(&conn, ghost), 0, "{ghost}");
+    }
+    assert_eq!(rows(&conn, "Notebooks/real.md"), (1, 1, 1, 0));
+    assert_eq!(
+        rows(&conn, "Notebooks/unindexed.md").3,
+        1,
+        "its embedding stays"
+    );
+    assert!(get_embedding(&conn, "../../etc/passwd").unwrap().is_none());
+
+    let again = repair_orphans(&conn, vault.root(), true).unwrap();
+    assert!(again.orphan_paths().is_empty());
+    assert_eq!(again.removed, 0);
+}

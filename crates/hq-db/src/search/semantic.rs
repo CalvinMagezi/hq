@@ -97,6 +97,11 @@ pub struct PendingEmbedding {
     pub reason: EmbedReason,
 }
 
+/// Restricts an `embeddings` query to notes that are still in the keyword index. The subquery does
+/// not depend on the outer row, so SQLite builds it once; a per-row lookup would scan the index
+/// for every embedding.
+const LIVE_NOTE: &str = "note_path IN (SELECT path FROM notes_fts)";
+
 /// SQL condition for an embedding made from an older version of its note. `e` is the embedding,
 /// `s` the note's `sync_state` row. With a recorded hash it is a comparison. Without one (made
 /// before the column existed) the note counts as edited only if its file changed after the
@@ -176,7 +181,14 @@ pub fn semantic_search(
 ) -> Result<Vec<SearchResult>> {
     // Cap the number of loaded embeddings to avoid OOM on very large vaults.
     // 10 000 embeddings at 1536-dim f32 ≈ 60 MB, which is safe for in-memory scoring.
-    let mut stmt = conn.prepare("SELECT note_path, embedding FROM embeddings LIMIT 10000")?;
+    // Only notes still in the index count, so a stale row cannot return a deleted note; when the
+    // cap bites, the most recently embedded come first, the same every time.
+    let mut stmt = conn.prepare(&format!(
+        "SELECT note_path, embedding FROM embeddings
+          WHERE {LIVE_NOTE}
+          ORDER BY embedded_at DESC, note_path
+          LIMIT 10000"
+    ))?;
     let rows: Vec<(String, Vec<u8>)> = stmt
         .query_map([], |row| {
             Ok((row.get::<_, String>(0)?, row.get::<_, Vec<u8>>(1)?))
@@ -257,8 +269,12 @@ pub fn find_similar_notes(
     };
 
     // Cap loaded embeddings to avoid OOM on large vaults (see semantic_search for rationale).
-    let mut stmt = conn
-        .prepare("SELECT note_path, embedding FROM embeddings WHERE note_path != ?1 LIMIT 10000")?;
+    let mut stmt = conn.prepare(&format!(
+        "SELECT note_path, embedding FROM embeddings
+          WHERE note_path != ?1 AND {LIVE_NOTE}
+          ORDER BY embedded_at DESC, note_path
+          LIMIT 10000"
+    ))?;
     let rows: Vec<(String, Vec<u8>)> = stmt
         .query_map([path], |row| {
             Ok((row.get::<_, String>(0)?, row.get::<_, Vec<u8>>(1)?))

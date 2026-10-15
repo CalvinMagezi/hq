@@ -534,6 +534,91 @@ pub fn index_freshness(conn: &Connection) -> Result<IndexFreshness> {
     })
 }
 
+/// Leftover rows for notes that no longer exist, found by `repair_orphans`.
+#[derive(Debug, Default, Clone, PartialEq, Eq)]
+pub struct RepairReport {
+    /// Notes in the keyword index with no file.
+    pub indexed_without_file: Vec<String>,
+    /// Embeddings for notes that are neither indexed nor on disk.
+    pub embeddings_without_note: Vec<String>,
+    /// Cached copies of notes with no file.
+    pub cached_without_file: Vec<String>,
+    /// Sync records for files that are gone.
+    pub synced_without_file: Vec<String>,
+    /// Notes whose rows were removed (0 unless applied).
+    pub removed: usize,
+}
+
+impl RepairReport {
+    /// Distinct note paths with something left behind.
+    pub fn orphan_paths(&self) -> BTreeSet<&str> {
+        [
+            &self.indexed_without_file,
+            &self.embeddings_without_note,
+            &self.cached_without_file,
+            &self.synced_without_file,
+        ]
+        .into_iter()
+        .flatten()
+        .map(String::as_str)
+        .collect()
+    }
+}
+
+/// Whether `rel` names a note file under `vault_path`. A path that could not be a note (absolute,
+/// or climbing out of the vault) does not exist, and is never looked up on disk.
+fn note_file_exists(vault_path: &Path, rel: &str) -> bool {
+    let plain = Path::new(rel)
+        .components()
+        .all(|c| matches!(c, Component::Normal(_) | Component::CurDir));
+    plain && !rel.is_empty() && vault_path.join(rel).is_file()
+}
+
+fn column_values(conn: &Connection, sql: &str) -> Result<Vec<String>> {
+    let mut stmt = conn.prepare(sql)?;
+    let rows = stmt.query_map([], |r| r.get::<_, String>(0))?;
+    Ok(rows.collect::<rusqlite::Result<_>>()?)
+}
+
+/// Find rows left behind for notes that no longer exist, anywhere in the vault, and remove them
+/// when `apply` is set. The scan already does this for `Notebooks/`; this also covers notes
+/// outside it and rows left by older versions that did not clean up on delete.
+///
+/// A row is an orphan only when its note is absent from disk. An embedding with no keyword-index
+/// row whose file still exists is not one: the next scan indexes it.
+pub fn repair_orphans(conn: &Connection, vault_path: &Path, apply: bool) -> Result<RepairReport> {
+    let missing = |paths: Vec<String>| -> Vec<String> {
+        let mut gone: Vec<String> = paths
+            .into_iter()
+            .filter(|p| !note_file_exists(vault_path, p))
+            .collect();
+        gone.sort();
+        gone
+    };
+    let mut report = RepairReport {
+        indexed_without_file: missing(column_values(conn, "SELECT path FROM notes_fts")?),
+        embeddings_without_note: missing(column_values(
+            conn,
+            "SELECT note_path FROM embeddings WHERE note_path NOT IN (SELECT path FROM notes_fts)",
+        )?),
+        cached_without_file: missing(column_values(conn, "SELECT path FROM vault_cache")?),
+        synced_without_file: missing(column_values(conn, "SELECT path FROM sync_state")?),
+        removed: 0,
+    };
+    if apply {
+        let orphans: Vec<String> = report
+            .orphan_paths()
+            .into_iter()
+            .map(String::from)
+            .collect();
+        for path in &orphans {
+            remove_path_everywhere(conn, path)?;
+        }
+        report.removed = orphans.len();
+    }
+    Ok(report)
+}
+
 /// `sync_index` as `(indexed, removed, unchanged)`.
 pub fn sync_index_incremental(
     conn: &Connection,
