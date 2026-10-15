@@ -1,7 +1,7 @@
 import { HqHttpError } from '~/lib/hqAuth'
 import { createFileRoute } from '@tanstack/react-router'
 import { useState, useMemo, useEffect, useRef } from 'react'
-import { CheckSquare, ListChecks, Plus, RefreshCw, Search, Loader2, PanelLeftOpen, List, Columns3, GanttChart, X } from 'lucide-react'
+import { CheckSquare, ClipboardList, ListChecks, Plus, RefreshCw, Search, Loader2, PanelLeftOpen, List, Columns3, GanttChart, X } from 'lucide-react'
 import {
   createTaskClient,
   updateTaskClient,
@@ -35,6 +35,7 @@ import { usePolled } from '~/components/sessions/usePolled'
 import { StaleIdsContext, stableSet } from '~/components/tasks/staleContext'
 import { WorkingNowContext, workingNow } from '~/components/tasks/workingContext'
 import { WorkingNowPanel } from '~/components/tasks/WorkingNowPanel'
+import { InitiativeBriefing } from '~/components/tasks/InitiativeBriefing'
 import { VaultNoteDrawer } from '~/components/VaultNoteDrawer'
 import { useRefreshOn } from '~/lib/useRefreshOn'
 
@@ -127,6 +128,8 @@ function TasksPage() {
   const [selection, setSelection] = useState<TaskSelection>(ALL_SELECTION)
   const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false)
   const [searchQuery, setSearchQuery] = useState('')
+  // The initiative whose briefing is open; picking another initiative closes it.
+  const [briefingFor, setBriefingFor] = useState<string | null>(null)
   const [formOpen, setFormOpen] = useState(false)
   const [busy, setBusy] = useState(false)
 
@@ -397,6 +400,27 @@ function TasksPage() {
             else picking.start()
           }}
         />
+
+        {selection.initiativeId && (
+          <div className="mb-4">
+            {briefingFor === selection.initiativeId ? (
+              <InitiativeBriefing
+                initiativeId={selection.initiativeId}
+                name={initiativeById.get(selection.initiativeId)?.name ?? 'Initiative'}
+                onClose={() => setBriefingFor(null)}
+              />
+            ) : (
+              <button
+                type="button"
+                onClick={() => setBriefingFor(selection.initiativeId ?? null)}
+                className="px-3 py-1.5 rounded-xl text-xs font-semibold flex items-center gap-1.5 hq-field text-neutral-300 hover:text-neutral-100"
+              >
+                <ClipboardList className="w-3.5 h-3.5" />
+                Briefing
+              </button>
+            )}
+          </div>
+        )}
 
         <WorkingNowPanel sessions={liveSessions} taskById={taskById} onSelect={setSelectedTaskId} />
 
