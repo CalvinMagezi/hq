@@ -21,6 +21,7 @@ serde_yaml = { workspace = true }
 gray_matter = { workspace = true }
 libc = "0.2"
 filetime = "0.2"
+notify = { workspace = true }
 
 [dev-dependencies]
 tempfile = "3"

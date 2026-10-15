@@ -20,6 +20,7 @@ mod self_update;
 mod stack;
 mod tasks;
 mod usage_ledger;
+mod vault_watch;
 mod web_push;
 
 pub use agent::*;
@@ -55,6 +56,7 @@ pub use tasks::{
     DEFAULT_LEASE_TTL_SECS, DEFAULT_STALE_AFTER_HOURS, LeaseMode, MIN_LEASE_TTL_SECS, TasksConfig,
 };
 pub use usage_ledger::UsageLedgerConfig;
+pub use vault_watch::{VaultWatchConfig, VaultWatchMode};
 pub use web_push::{PUSH_SERVICE_HOSTS, WebPushConfig};
 
 use figment::{
@@ -248,6 +250,10 @@ pub struct HqConfig {
     #[serde(default)]
     pub disk_watchdog: DiskWatchdogConfig,
 
+    /// Watches Notebooks/ so edits made outside HQ reach search in seconds.
+    #[serde(default)]
+    pub vault_watch: VaultWatchConfig,
+
     /// Retention for the LLM spend ledger.
     #[serde(default)]
     pub usage_ledger: UsageLedgerConfig,
@@ -437,6 +443,7 @@ impl Default for HqConfig {
             backends: BackendsConfig::default(),
             self_update: SelfUpdateConfig::default(),
             disk_watchdog: DiskWatchdogConfig::default(),
+            vault_watch: VaultWatchConfig::default(),
             usage_ledger: UsageLedgerConfig::default(),
             mcp_connector: McpConnectorConfig::default(),
             web_push: WebPushConfig::default(),

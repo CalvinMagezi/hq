@@ -15,6 +15,7 @@ pub mod task_state;
 pub mod turn_reconciler;
 pub mod user_model;
 pub mod value_bus;
+pub mod vault_watch;
 
 pub use email_triage::{EmailAction, parse_email_command, resolve_email_action};
 pub use embeddings::process_embeddings;
