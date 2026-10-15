@@ -427,6 +427,64 @@ mod tests {
         Ok(())
     }
 
+    fn write_valid_skill(root: &Path, name: &str) -> PathBuf {
+        let dir = root.join("Skills").join(name);
+        std::fs::create_dir_all(&dir).unwrap();
+        let steps: String = (1..=10)
+            .map(|i| format!("{i}. Step number {i}.\n"))
+            .collect();
+        std::fs::write(
+            dir.join("SKILL.md"),
+            format!(
+                "---\nname: {name}\ndescription: Does a thing.\nhints:\n  - spreadsheet\n---\n\n# {name}\n\n{steps}"
+            ),
+        )
+        .unwrap();
+        dir
+    }
+
+    #[tokio::test]
+    async fn validate_reports_fixture_failures_and_leaves_skills_without_fixtures_alone()
+    -> Result<()> {
+        let temp = tempfile::tempdir()?;
+        let config = test_config(temp.path());
+        write_valid_skill(temp.path(), "plain");
+        let tested = write_valid_skill(temp.path(), "tested");
+
+        // Without fixtures, and with fixtures it meets: clean.
+        let mut out = Vec::new();
+        run_with_output(&config, SkillsAction::Validate, &mut out).await?;
+        let out = String::from_utf8(out)?;
+        assert!(out.contains("0 failures"), "{out}");
+
+        std::fs::write(
+            tested.join("fixtures.yaml"),
+            "triggers:\n  - fix this spreadsheet\nnot_triggers:\n  - write a poem\nrequired_steps:\n  - step number 3\n",
+        )?;
+        let mut out = Vec::new();
+        run_with_output(&config, SkillsAction::Validate, &mut out).await?;
+        assert!(String::from_utf8(out)?.contains("0 failures"));
+
+        // Drop a required step: the failure names the skill and the step.
+        let skill =
+            std::fs::read_to_string(tested.join("SKILL.md"))?.replace("3. Step number 3.\n", "");
+        std::fs::write(tested.join("SKILL.md"), skill)?;
+        let mut out = Vec::new();
+        let result = run_with_output(&config, SkillsAction::Validate, &mut out).await;
+        let out = String::from_utf8(out)?;
+        assert!(result.is_err(), "{out}");
+        assert!(
+            out.contains("FAIL  tested: fixture: required step is missing"),
+            "{out}"
+        );
+        assert!(out.contains("step number 3"), "{out}");
+        assert!(
+            !out.contains("plain:"),
+            "the skill without fixtures is not mentioned: {out}"
+        );
+        Ok(())
+    }
+
     #[tokio::test]
     async fn revert_then_history_shows_the_trail() -> Result<()> {
         let temp = tempfile::tempdir()?;

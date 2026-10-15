@@ -199,6 +199,11 @@ fn check_skill(
         ));
     }
 
+    // Regression fixtures beside the skill, if it has any: triggers, non-triggers, required steps.
+    for failure in super::fixtures::skill_failures(skills_dir, name) {
+        issues.push(SkillIssue::error(name, format!("fixture: {failure}")));
+    }
+
     for next in &skill.next_skills {
         if !known.contains(next) && !is_bundle_skill(skills_dir, next) {
             issues.push(SkillIssue::error(

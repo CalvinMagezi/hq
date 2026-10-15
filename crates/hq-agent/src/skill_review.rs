@@ -139,7 +139,8 @@ pub struct Applied {
     pub name: String,
     pub change: Change,
     pub reason: String,
-    /// Staged in `_proposed/` because `governance.skills_write_approval` is on.
+    /// Staged in `_proposed/`: `governance.skills_write_approval` is on, or the change broke one
+    /// of the skill's regression fixtures (named in `flags`).
     pub held: bool,
     pub flags: Vec<String>,
 }
@@ -318,7 +319,10 @@ impl Review<'_> {
         let reason = redact_secrets(reason.trim());
         let flags = self.screen(name, added, &reason)?;
         let edited = edited_text(&skills_dir, name, edit)?;
-        let held = self.commit(name, &edited.text, edited.version, &reason, &flags)?;
+        let (held, fixture_flags) =
+            self.commit(name, &edited.text, edited.version, &reason, &flags)?;
+        let mut flags = flags;
+        flags.extend(fixture_flags);
         Ok(Applied {
             name: name.to_string(),
             change,
@@ -355,7 +359,9 @@ impl Review<'_> {
             skill.hints.join("\n")
         );
         let flags = self.screen(name, &added, &reason)?;
-        let held = self.commit(name, &render_skill(&skill), 1, &reason, &flags)?;
+        let (held, fixture_flags) = self.commit(name, &render_skill(&skill), 1, &reason, &flags)?;
+        let mut flags = flags;
+        flags.extend(fixture_flags);
         Ok(Applied {
             name: name.to_string(),
             change: Change::Created,
@@ -382,20 +388,27 @@ impl Review<'_> {
         version: u32,
         reason: &str,
         flags: &[String],
-    ) -> Result<bool> {
+    ) -> Result<(bool, Vec<String>)> {
         let skills_dir = self.skills_dir();
-        if self.write_approval {
+        // A change has to pass the skill's regression fixtures before it goes live. One that
+        // does not is held in `_proposed/` for the owner, with what it broke on the audit line.
+        let failures = hq_tools::skills::candidate_failures(&skills_dir, name, text);
+        let held = self.write_approval || !failures.is_empty();
+        if held {
             write_proposal_text(&skills_dir, name, text)?;
         } else {
             write_live(&skills_dir, name, text)?;
         }
-        let disposition = if self.write_approval {
+        let disposition = if held {
             Disposition::Held
         } else {
             Disposition::Adopted
         };
-        self.audit(name, version, text, disposition, reason, flags)?;
-        Ok(self.write_approval)
+        let fixture_flags: Vec<String> = failures.iter().map(|f| format!("fixture: {f}")).collect();
+        let mut all = flags.to_vec();
+        all.extend(fixture_flags.iter().cloned());
+        self.audit(name, version, text, disposition, reason, &all)?;
+        Ok((held, fixture_flags))
     }
 
     fn audit(
@@ -661,7 +674,8 @@ fn notify(vault_path: &Path, applied: &[Applied]) {
         .collect();
     if held {
         body.push(
-            "governance.skills_write_approval is on: `hq skills approve|reject <name>`."
+            "Held because governance.skills_write_approval is on or a regression fixture failed \
+             (see Flags): `hq skills approve|reject <name>`."
                 .to_string(),
         );
     }

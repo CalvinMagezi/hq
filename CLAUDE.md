@@ -245,6 +245,12 @@ restores the newest archive and `hq skills history <name>` prints the trail.
 `governance.skills_write_approval` (default off) stages every change in
 `skills/_proposed/` for `hq skills approve|reject <name>`.
 
+Skill evidence and tests: `skill_invocations` records the skill hash, task, purpose and
+outcome of every load (ids and fixed values only, never prompt or document text),
+`hq_db::skill_outcomes::settle` scores outcomes from observable acceptance rather than the
+session exit, and `skills/<name>/fixtures.yaml` holds regression fixtures that gate edits. See
+`docs/SKILL_FLYWHEEL.md`.
+
 Document generation (docx, pptx, xlsx, pdf) is optional and depends on external
 skills you install yourself. Brands are vault content, not a compiled-in list:
 `hq_convert::brand::discover_brands` scans `Notebooks/Projects/*/Branding/` at

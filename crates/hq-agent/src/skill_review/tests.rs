@@ -363,6 +363,129 @@ async fn network_urls_are_adopted_with_the_flag_recorded() {
     assert!(!history[0].flags.is_empty());
 }
 
+fn write_fixtures(vault: &Path, name: &str, yaml: &str) {
+    std::fs::write(skills_dir(vault).join(name).join("fixtures.yaml"), yaml).unwrap();
+}
+
+#[tokio::test]
+async fn a_patch_that_drops_a_required_step_is_held_not_applied() {
+    let dir = tempfile::tempdir().unwrap();
+    write_user_skill(dir.path(), "gws-sheets-workflow", "managed: true\n");
+    write_fixtures(
+        dir.path(),
+        "gws-sheets-workflow",
+        "required_steps:\n  - fill the rows\n",
+    );
+    let before = std::fs::read_to_string(skill_file(dir.path(), "gws-sheets-workflow")).unwrap();
+
+    let applied = review(
+        dir.path(),
+        &ops(&[patch_op("gws-sheets-workflow", "2. Fill the rows.\n", "")]),
+    )
+    .await
+    .unwrap();
+
+    assert_eq!(applied.len(), 1);
+    assert!(
+        applied[0].held,
+        "a change that fails its fixtures does not go live"
+    );
+    assert!(
+        applied[0]
+            .flags
+            .iter()
+            .any(|f| f.starts_with("fixture:") && f.contains("fill the rows")),
+        "{:?}",
+        applied[0].flags
+    );
+    assert_eq!(
+        std::fs::read_to_string(skill_file(dir.path(), "gws-sheets-workflow")).unwrap(),
+        before,
+        "the live skill is untouched"
+    );
+    let held = std::fs::read_to_string(proposed_file(dir.path(), "gws-sheets-workflow")).unwrap();
+    assert!(
+        !held.contains("Fill the rows"),
+        "the proposal is what the review wrote"
+    );
+    let trail = history(dir.path(), "gws-sheets-workflow");
+    assert_eq!(trail.last().unwrap().disposition, Disposition::Held);
+    assert!(
+        trail
+            .last()
+            .unwrap()
+            .flags
+            .iter()
+            .any(|f| f.starts_with("fixture:"))
+    );
+    assert!(notices(dir.path())[0].title.contains("held for review"));
+}
+
+#[tokio::test]
+async fn a_patch_that_keeps_its_fixtures_is_applied_as_before() {
+    let dir = tempfile::tempdir().unwrap();
+    write_user_skill(
+        dir.path(),
+        "gws-sheets-workflow",
+        "managed: true\nhints:\n  - sheet\n",
+    );
+    write_fixtures(
+        dir.path(),
+        "gws-sheets-workflow",
+        "triggers:\n  - open the sheet\nrequired_steps:\n  - fill the rows\n",
+    );
+
+    let applied = review(
+        dir.path(),
+        &ops(&[patch_op(
+            "gws-sheets-workflow",
+            "- Bold header row.",
+            "- Bold header row.\n- Freeze the top row.",
+        )]),
+    )
+    .await
+    .unwrap();
+
+    assert!(!applied[0].held);
+    assert!(!proposed_file(dir.path(), "gws-sheets-workflow").exists());
+    let live = std::fs::read_to_string(skill_file(dir.path(), "gws-sheets-workflow")).unwrap();
+    assert!(live.contains("Freeze the top row"));
+}
+
+#[tokio::test]
+async fn a_new_hint_that_would_fire_on_a_forbidden_phrase_is_held() {
+    let dir = tempfile::tempdir().unwrap();
+    write_user_skill(
+        dir.path(),
+        "gws-sheets-workflow",
+        "managed: true\nhints:\n  - sheet\n",
+    );
+    write_fixtures(
+        dir.path(),
+        "gws-sheets-workflow",
+        "not_triggers:\n  - write a poem\n",
+    );
+    let reply = serde_json::json!({"ops": [{
+        "op": "hints", "name": "gws-sheets-workflow", "add": ["write a poem"],
+        "reason": "Sessions about poems used it."
+    }]})
+    .to_string();
+
+    let applied = review(dir.path(), &reply).await.unwrap();
+
+    assert!(applied[0].held);
+    assert!(
+        applied[0]
+            .flags
+            .iter()
+            .any(|f| f.contains("must not trigger")),
+        "{:?}",
+        applied[0].flags
+    );
+    let live = std::fs::read_to_string(skill_file(dir.path(), "gws-sheets-workflow")).unwrap();
+    assert!(!live.contains("poem"));
+}
+
 #[tokio::test]
 async fn secrets_in_generated_text_are_redacted_and_flagged() {
     let dir = tempfile::tempdir().unwrap();

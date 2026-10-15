@@ -96,7 +96,7 @@ impl SkillHintIndex {
 ///
 /// Prevents "test" from matching "latest" or "contest".
 /// Multi-word hints like "dark mode" are matched as a phrase.
-fn word_boundary_match(text: &str, hint: &str) -> bool {
+pub(super) fn word_boundary_match(text: &str, hint: &str) -> bool {
     let mut start = 0;
     let text_bytes = text.as_bytes();
     let hint_len = hint.len();
