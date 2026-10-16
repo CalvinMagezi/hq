@@ -25,6 +25,9 @@ use crate::embeddings::{Embedder, embed_pending, embedder_for};
 /// Key under which the report sits in `.daemon-metrics.json`.
 pub const METRICS_KEY: &str = "embedding_worker";
 
+/// How many skipped notes the status names. Enough to find them, few enough to read.
+pub const MAX_UNREADABLE_PATHS: usize = 5;
+
 #[derive(Debug, Clone, Copy)]
 pub struct WorkerConfig {
     /// Notes per provider batch.
@@ -72,6 +75,9 @@ pub struct EmbedStats {
     pub embedded: AtomicU64,
     pub failed: AtomicU64,
     pub unreadable: AtomicU64,
+    /// Notes the worker is passing over because they could not be read, a few of them, so a
+    /// health report can name them. The count above only grows; this is what is skipped now.
+    pub unreadable_paths: Mutex<Vec<String>>,
     pub passes: AtomicU64,
     /// Wall-clock milliseconds since the Unix epoch of the latest pass, 0 for none.
     pub last_pass_ms: AtomicI64,
@@ -86,6 +92,9 @@ pub struct EmbeddingWorkerStatus {
     pub embedded: u64,
     pub failed: u64,
     pub unreadable: u64,
+    /// Up to [`MAX_UNREADABLE_PATHS`] notes being skipped now, in path order.
+    #[serde(default)]
+    pub unreadable_paths: Vec<String>,
     pub passes: u64,
     pub last_pass_at: Option<String>,
     pub backoff_secs: u64,
@@ -100,6 +109,11 @@ impl EmbedStats {
             embedded: self.embedded.load(Ordering::Relaxed),
             failed: self.failed.load(Ordering::Relaxed),
             unreadable: self.unreadable.load(Ordering::Relaxed),
+            unreadable_paths: self
+                .unreadable_paths
+                .lock()
+                .map(|paths| paths.clone())
+                .unwrap_or_default(),
             passes: self.passes.load(Ordering::Relaxed),
             last_pass_at: (last_pass > 0)
                 .then(|| DateTime::from_timestamp_millis(last_pass))
@@ -108,6 +122,16 @@ impl EmbedStats {
             backoff_secs: self.backoff_secs.load(Ordering::Relaxed),
             last_error: self.last_error.lock().ok().and_then(|e| (*e).clone()),
             updated_at: Utc::now().to_rfc3339(),
+        }
+    }
+
+    /// Keep the first few of the notes being skipped, in path order.
+    fn set_unreadable_paths(&self, skipped: &HashSet<String>) {
+        let mut paths: Vec<String> = skipped.iter().cloned().collect();
+        paths.sort();
+        paths.truncate(MAX_UNREADABLE_PATHS);
+        if let Ok(mut slot) = self.unreadable_paths.lock() {
+            *slot = paths;
         }
     }
 
@@ -241,6 +265,7 @@ pub async fn run_worker(
             stats
                 .unreadable
                 .fetch_add(report.unreadable as u64, Ordering::Relaxed);
+            stats.set_unreadable_paths(&skip);
 
             if report.gave_up || (report.failed > 0 && report.embedded == 0) {
                 stats.set_error(report.last_error.clone());
@@ -477,6 +502,24 @@ mod tests {
     async fn shutdown_ends_the_worker_even_while_it_waits() {
         let rig = rig(WorkerConfig::default());
         rig.finish().await;
+    }
+
+    #[test]
+    fn the_status_names_a_few_skipped_notes_in_path_order() {
+        let stats = EmbedStats::default();
+        let skipped: HashSet<String> = (0..8).map(|i| format!("Notebooks/n{i}.md")).collect();
+
+        stats.set_unreadable_paths(&skipped);
+
+        let status = stats.snapshot();
+        assert_eq!(status.unreadable_paths.len(), MAX_UNREADABLE_PATHS);
+        assert_eq!(status.unreadable_paths[0], "Notebooks/n0.md");
+
+        // A metrics file written by the build before this field existed still loads.
+        let old = r#"{"embedded":1,"failed":0,"unreadable":0,"passes":1,"last_pass_at":null,
+            "backoff_secs":0,"last_error":null,"updated_at":"2026-10-16T00:00:00Z"}"#;
+        let parsed: EmbeddingWorkerStatus = serde_json::from_str(old).unwrap();
+        assert!(parsed.unreadable_paths.is_empty());
     }
 
     #[test]

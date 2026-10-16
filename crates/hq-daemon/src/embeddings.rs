@@ -16,7 +16,8 @@ use std::sync::Arc;
 use anyhow::Result;
 use hq_db::Database;
 use hq_db::search::{
-    PathOutcome, content_hash, pending_embeddings, reconcile_path, store_embedding_of,
+    NOTEBOOKS_DIR, PathOutcome, content_hash, pending_embeddings, reconcile_path,
+    remove_path_everywhere, store_embedding_of,
 };
 use hq_memory::generate_embedding;
 use hq_vault::VaultClient;
@@ -191,7 +192,17 @@ fn forget_if_gone(
 ) {
     if error.kind() == std::io::ErrorKind::NotFound {
         let (vault_path, rel) = (vault.vault_path().to_path_buf(), path.to_string());
-        let cleaned = db.with_conn(move |conn| reconcile_path(conn, &vault_path, &rel));
+        let cleaned = db.with_conn(move |conn| match reconcile_path(conn, &vault_path, &rel)? {
+            // The scan only covers Notebooks/, so a note outside it (a skill, say) that was
+            // deleted behind HQ's back is never cleaned there and would be skipped on every
+            // run. Its file is missing, so drop what is held for it. An absent Notebooks/ is a
+            // missing mount as likely as an empty vault, so remove nothing then.
+            PathOutcome::Ignored if vault_path.join(NOTEBOOKS_DIR).is_dir() => {
+                remove_path_everywhere(conn, &rel)?;
+                Ok(PathOutcome::Removed)
+            }
+            other => Ok(other),
+        });
         if matches!(cleaned, Ok(PathOutcome::Removed)) {
             debug!(path, "note is gone; removed it from the index");
             return;
@@ -476,6 +487,52 @@ mod tests {
         assert!(rig.vector("Notebooks/gone.md").is_none());
         assert_eq!(rig.keyword_hits("vanish"), 0, "removed from the index");
         assert!(rig.pending("m").is_empty());
+    }
+
+    #[tokio::test]
+    async fn a_note_deleted_from_outside_notebooks_is_cleaned_out_too() {
+        let rig = Rig::new();
+        let fake = Fake::new();
+        // A tool indexed a skill; its folder was later removed some other way. The scan only
+        // covers Notebooks/, so nothing else would ever clear it.
+        rig.db
+            .with_conn(|c| {
+                hq_db::search::index_note(c, "skills/old/SKILL.md", "old", "stale words", "")
+            })
+            .unwrap();
+        assert_eq!(rig.keyword_hits("stale"), 1);
+
+        let report = rig.embed(&fake, "m", 10).await;
+
+        assert_eq!(report.unreadable, 1);
+        assert_eq!(rig.keyword_hits("stale"), 0, "removed from the index");
+        assert!(rig.pending("m").is_empty());
+        assert!(
+            rig.embed(&fake, "m", 10).await.idle(),
+            "nothing left to retry"
+        );
+    }
+
+    #[tokio::test]
+    async fn nothing_is_removed_when_notebooks_itself_is_missing() {
+        let rig = Rig::new();
+        let fake = Fake::new();
+        rig.db
+            .with_conn(|c| {
+                hq_db::search::index_note(c, "skills/old/SKILL.md", "old", "stale words", "")
+            })
+            .unwrap();
+        // An unmounted vault looks like this: the folder that should hold everything is gone.
+        std::fs::remove_dir_all(rig.dir.path().join("Notebooks")).unwrap();
+
+        let report = rig.embed(&fake, "m", 10).await;
+
+        assert_eq!(report.unreadable, 1);
+        assert_eq!(
+            rig.keyword_hits("stale"),
+            1,
+            "kept: this may be a missing mount"
+        );
     }
 
     #[tokio::test]

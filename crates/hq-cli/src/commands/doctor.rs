@@ -303,6 +303,12 @@ fn embedding_worker_lines(
             ),
         ));
     }
+    if !worker.unreadable_paths.is_empty() {
+        lines.push(Line(
+            "--",
+            format!("skipping now: {}", worker.unreadable_paths.join(", ")),
+        ));
+    }
     lines
 }
 
@@ -839,6 +845,28 @@ mod tests {
             assert_eq!(labels(&backing_off), vec!["--", "warn"]);
             assert!(texts(&backing_off).contains("holding off for 120 s"));
             assert!(texts(&backing_off).contains("rate limited"));
+        }
+
+        #[test]
+        fn notes_the_embedder_is_skipping_are_named() {
+            use hq_daemon::embedding_worker::EmbedStats;
+
+            let stats = EmbedStats::default();
+            stats
+                .unreadable
+                .store(2, std::sync::atomic::Ordering::Relaxed);
+            *stats.unreadable_paths.lock().unwrap() = vec![
+                "Notebooks/a-broken.md".to_string(),
+                "skills/old/SKILL.md".to_string(),
+            ];
+
+            let text = texts(&embedding_worker_lines(Some(&stats.snapshot()), now()));
+
+            assert!(text.contains("2 note(s) could not be read for embedding"));
+            assert!(
+                text.contains("skipping now: Notebooks/a-broken.md, skills/old/SKILL.md"),
+                "{text}"
+            );
         }
 
         #[test]
