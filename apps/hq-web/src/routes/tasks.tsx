@@ -36,7 +36,6 @@ import { StaleIdsContext, stableSet } from '~/components/tasks/staleContext'
 import { WorkingNowContext, workingNow } from '~/components/tasks/workingContext'
 import { WorkingNowPanel } from '~/components/tasks/WorkingNowPanel'
 import { InitiativeBriefing } from '~/components/tasks/InitiativeBriefing'
-import { VaultNoteDrawer } from '~/components/VaultNoteDrawer'
 import { useRefreshOn } from '~/lib/useRefreshOn'
 
 type TasksView = 'list' | 'board' | 'timeline'
@@ -512,8 +511,6 @@ function TasksPage() {
           onTaxonomyChanged={loadTaxonomy}
           onCreate={handleCreate}
         />
-
-        <VaultNoteDrawer />
       </div>
     </div>
     </StaleIdsContext.Provider>

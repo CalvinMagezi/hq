@@ -15,7 +15,6 @@ import { useDraft } from './draftStore'
 import { useFileDrop } from './useFileDrop'
 import { useThreadSessions } from './useThreadSessions'
 import { SessionsPanel } from './SessionsPanel'
-import { VaultNoteDrawer } from '../VaultNoteDrawer'
 
 const FOCUS_DELAY_MS = 50
 const SIDEBAR_COLLAPSED_KEY = 'hq.chat.sidebarCollapsed'
@@ -324,7 +323,6 @@ export function ChatView({ active, onClose }: Props) {
           hasKeptFiles={(editing?.attachments.length ?? 0) > 0}
         />
       </div>
-      <VaultNoteDrawer />
     </div>
   )
 }
