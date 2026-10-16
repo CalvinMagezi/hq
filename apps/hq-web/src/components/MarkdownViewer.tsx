@@ -6,6 +6,7 @@ import { useHQStore } from '~/store/hqStore'
 import { useVaultNoteStore } from '~/store/vaultNoteStore'
 import { blockRemoteImages } from '~/lib/remoteImages'
 import { parseChart, parseMermaidPie, renderChartHtml } from '~/lib/chart'
+import { codespanHtml, vaultLinkTarget } from '~/lib/noteRefs'
 
 // Lazy-load shiki only when first needed (avoids bundling all grammars eagerly)
 let highlighterPromise: Promise<any> | null = null
@@ -80,6 +81,10 @@ async function configureMarked() {
                     highlighted = `<pre><code>${escapeHtml(token.text)}</code></pre>`
                 }
                 return `<div class="code-block-wrapper">${langLabel ? `<div class="code-block-header">${langLabel}</div>` : ''}<button class="code-copy-btn" data-copy-text="${encodeURIComponent(token.text)}">Copy</button>${highlighted}</div>`
+            },
+            // A backticked vault path opens the note, the way agents most often name one in chat.
+            codespan(token: any) {
+                return codespanHtml(token.text)
             },
             // Inline tokens go back through the parser, so **bold** and `code` inside them render.
             heading(this: any, token: any) {
@@ -195,20 +200,27 @@ export function MarkdownViewer({ content, activePath, zoom, bare }: { content: s
 
             const link = (e.target as Element).closest<HTMLAnchorElement>('a')
             if (link) {
-                const href = link.getAttribute('href') || ''
-                const isVaultLink =
-                    href.startsWith('vault:') ||
-                    href.startsWith('note:') ||
-                    href.startsWith('/api/note') ||
-                    (href.endsWith('.md') && !href.includes('://'))
-                if (isVaultLink) {
+                const target = vaultLinkTarget(link.getAttribute('href'))
+                if (target) {
                     e.preventDefault()
-                    useVaultNoteStore.getState().openNote(href, link)
+                    useVaultNoteStore.getState().openNote(target, link)
                 }
             }
         }
+        // The inline-code note chip is not a native button, so Enter and Space click it.
+        const keyHandler = (e: KeyboardEvent) => {
+            if (e.key !== 'Enter' && e.key !== ' ') return
+            const chip = (e.target as Element).closest<HTMLElement>('code[data-vault-note]')
+            if (!chip) return
+            e.preventDefault()
+            chip.click()
+        }
         container.addEventListener('click', handler)
-        return () => container.removeEventListener('click', handler)
+        container.addEventListener('keydown', keyHandler)
+        return () => {
+            container.removeEventListener('click', handler)
+            container.removeEventListener('keydown', keyHandler)
+        }
     }, [html])
 
     return (

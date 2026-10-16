@@ -94,7 +94,8 @@ export function VaultNoteDrawer() {
 
   const content = (
     <div
-      className="fixed inset-0 z-[60] flex justify-end hq-scrim transition-all duration-300"
+      // Above the full-screen chat overlay (z-[150]), which is where most notes get opened from.
+      className="fixed inset-0 z-[160] flex justify-end hq-scrim transition-all duration-300"
       onClick={(e) => {
         if (e.target === e.currentTarget) closeNote()
       }}

@@ -1,5 +1,6 @@
 import { useEffect } from 'react'
 import { useHQStore } from '~/store/hqStore'
+import { useVaultNoteStore } from '~/store/vaultNoteStore'
 import { ChatView } from './ChatView'
 
 /** The chat, full screen over any page (Cmd+K). Same ChatView as the /chat route. */
@@ -12,7 +13,8 @@ export function GlobalChatOverlay() {
     if (!open) return
     clearChatUnread()
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') setOpen(false)
+      // A note open on top of the chat takes the Escape; the chat stays.
+      if (e.key === 'Escape' && !useVaultNoteStore.getState().open) setOpen(false)
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)

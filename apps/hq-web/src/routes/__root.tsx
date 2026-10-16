@@ -16,6 +16,7 @@ import { WebSocketProvider } from '~/context/WebSocketContext'
 import { SearchOverlay } from '~/components/SearchOverlay'
 import { QuickNoteOverlay } from '~/components/QuickNoteOverlay'
 import { GlobalChatOverlay } from '~/components/chat/GlobalChatOverlay'
+import { VaultNoteDrawer } from '~/components/VaultNoteDrawer'
 import { InstallPrompt } from '~/components/InstallPrompt'
 import { SignInPrompt } from '~/components/SignInPrompt'
 import { ReachabilityBanner } from '~/components/ReachabilityBanner'
@@ -65,6 +66,8 @@ function RootComponent() {
         <SearchOverlay />
         <QuickNoteOverlay />
         <GlobalChatOverlay />
+        {/* One drawer for every note link, whatever page or overlay it was clicked in. */}
+        <VaultNoteDrawer />
       </WebSocketProvider>
     </RootDocument>
   )

@@ -407,6 +407,23 @@ body {
   font-family: var(--font-mono);
 }
 
+/* A backticked vault path that opens the note. cursor:pointer is what makes iOS Safari deliver the
+   tap to the delegated click handler on a non-button element. */
+.markdown-viewer :not(pre) > code.md-note-ref {
+  color: var(--accent-blue);
+  border: 1px solid rgba(0, 173, 238, 0.25);
+  cursor: pointer;
+  overflow-wrap: anywhere;
+  touch-action: manipulation;
+  -webkit-tap-highlight-color: rgba(0, 173, 238, 0.2);
+}
+
+.markdown-viewer :not(pre) > code.md-note-ref:hover,
+.markdown-viewer :not(pre) > code.md-note-ref:focus-visible {
+  background: rgba(0, 173, 238, 0.14);
+  outline: none;
+}
+
 .markdown-viewer ul {
   list-style-type: disc;
   padding-left: 2em;
