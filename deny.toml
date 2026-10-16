@@ -32,6 +32,20 @@ ignore = [
     # with .cargo/audit.toml, which `cargo audit` reads.
     { id = "RUSTSEC-2026-0194", reason = "quick-xml 0.38.4 quadratic duplicate-attribute check, via typst/citationberg. Parser is not reachable from note content; see the comment above." },
     { id = "RUSTSEC-2026-0195", reason = "quick-xml 0.38.4 unbounded namespace-declaration allocation, via typst/citationberg. Parser is not reachable from note content; see the comment above." },
+    # A yanked crate, accepted on purpose and only until 2026-10-31.
+    # zip 8.6.0 is yanked, and so is every zip release except 9.0.3. The maintainers
+    # yanked them for GHSA-4v9h-p7m9-rh26, GHSA-vv5m-jxxh-4627 and GHSA-4684-h2q9-2vcp
+    # (symlink and permission handling when extracting an archive to disk) and say more
+    # advisories will follow later in October 2026 (zip-rs/zip2 issue 1075).
+    # Nothing here calls the extraction code: hq-export only writes zips (it reads them
+    # only in tests), docx-rs and umya-spreadsheet read entries into memory, rust_xlsxwriter
+    # only writes, and transmutation only lists entry names and sizes.
+    # No upgrade exists: docx-rs 0.4.22, rust_xlsxwriter 0.99.1 and transmutation 0.3.5 are
+    # their latest releases and all require zip 8, so even hq-export alone cannot move to 9.
+    # Review on 2026-10-31, when the promised advisories should be out: re-read them against
+    # the code above, and drop this entry once those crates ship builds that use zip 9.
+    # Tracked as HQ-VMS-036.
+    { crate = "zip@8.6.0", reason = "Yanked with all other zip releases except 9.0.3 after GHSA-4v9h-p7m9-rh26, GHSA-vv5m-jxxh-4627 and GHSA-4684-h2q9-2vcp, which are all in archive extraction that nothing here calls. No upgrade exists yet because docx-rs, rust_xlsxwriter and transmutation require zip 8. Expires 2026-10-31; see the comment above." },
 ]
 
 [licenses]
