@@ -3,8 +3,8 @@ import { codespanHtml, noteRefFromCode, vaultLinkTarget } from './noteRefs'
 
 test('noteRefFromCode recognises a backticked vault path', () => {
   expect(
-    noteRefFromCode('Notebooks/Projects/Agent-HQ/Markdown-Canonical-Vault-Bidirectional-Conversion-Pipeline.md'),
-  ).toBe('Notebooks/Projects/Agent-HQ/Markdown-Canonical-Vault-Bidirectional-Conversion-Pipeline.md')
+    noteRefFromCode('Notebooks/Projects/Example/A-Long-Note-Title-About-A-Conversion-Pipeline.md'),
+  ).toBe('Notebooks/Projects/Example/A-Long-Note-Title-About-A-Conversion-Pipeline.md')
   expect(noteRefFromCode('Notebooks/Projects/My Project/Plan.md')).toBe('Notebooks/Projects/My Project/Plan.md')
   expect(noteRefFromCode('Notebooks/Inbox/PLAN.MD')).toBe('Notebooks/Inbox/PLAN.MD')
 })
