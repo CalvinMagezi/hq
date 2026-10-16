@@ -17,6 +17,14 @@ use crate::harness_session::{CONNECTOR_ACTOR, spawned_session};
 use crate::provenance::{Writer, resolve};
 use crate::registry::HqTool;
 
+/// Why a note's author is not known, for the two ways that happens.
+const NOT_RECORDED_NOTE: &str = "The file on disk was changed outside HQ's tools, or was never \
+    written through them, so its author is not known. Nothing is guessed.";
+const UNIDENTIFIED_CALLER_NOTE: &str = "This version was recorded exactly, but the caller did not \
+    say who it was, so the writer is shown as unknown. HQ names a writer only when the runtime \
+    vouches for the caller: the claude.ai connector, an HQ session or a coding-agent session. A \
+    client that connects with the API key alone does not identify itself.";
+
 /// How many versions `note_provenance` returns unless asked for fewer or more.
 const DEFAULT_VERSIONS: usize = 20;
 const MAX_VERSIONS: usize = 100;
@@ -308,7 +316,8 @@ impl HqTool for NoteProvenanceTool {
         "Who wrote a vault note and what has been decided about it, newest version first: actor, \
          source kind, session, task, when, and each version's review state with its reviewer, \
          reason and history. `current_version_recorded` is false when the file on disk was changed \
-         outside the tools, in which case its author is not known."
+         outside the tools, in which case its author is not known. `writer_note` says why an \
+         author is unknown, and is null when it is known."
     }
 
     fn parameters(&self) -> Value {
@@ -365,6 +374,15 @@ impl HqTool for NoteProvenanceTool {
             }
             None => false,
         };
+        let current = on_disk
+            .as_deref()
+            .and_then(|hash| versions.iter().find(|(p, _)| p.content_hash == hash))
+            .map(|(p, _)| p);
+        let writer_note = match (on_disk.is_some(), recorded, current) {
+            (true, false, _) => Some(NOT_RECORDED_NOTE),
+            (true, true, Some(p)) if p.is_unattributed() => Some(UNIDENTIFIED_CALLER_NOTE),
+            _ => None,
+        };
         let listed: Vec<Value> = versions
             .iter()
             .map(|(p, events)| version_json(p, on_disk.as_deref() == Some(&p.content_hash), events))
@@ -373,6 +391,7 @@ impl HqTool for NoteProvenanceTool {
             "path": path,
             "exists": on_disk.is_some(),
             "current_version_recorded": recorded,
+            "writer_note": writer_note,
             "versions": listed,
         }))
     }
@@ -761,11 +780,43 @@ mod tests {
         assert_eq!(v["review_state"], "disputed");
         assert_eq!(v["review_history"][0]["reason"], "no source");
 
+        assert!(
+            seen["writer_note"].is_null(),
+            "a known author needs no explanation"
+        );
+
         // Edited outside the tools: the view says so instead of crediting the earlier writer.
         std::fs::write(fx.dir.path().join(NOTE), "hand edit").unwrap();
         let seen = view.execute(json!({ "path": NOTE })).await.unwrap();
         assert_eq!(seen["current_version_recorded"], false);
         assert_eq!(seen["versions"][0]["is_current"], false);
+        assert!(
+            seen["writer_note"]
+                .as_str()
+                .unwrap()
+                .contains("outside HQ's tools"),
+            "{seen}"
+        );
+    }
+
+    #[tokio::test]
+    async fn a_caller_that_did_not_identify_itself_is_explained_not_blamed() {
+        let fx = Fx::new();
+        // No connector, session or native identity in the arguments: an API-key client.
+        fx.write_as(NOTE, "from a client with only the key", &json!({}));
+        let view = NoteProvenanceTool::new(fx.vault.clone(), fx.db.clone());
+
+        let seen = view.execute(json!({ "path": NOTE })).await.unwrap();
+
+        assert_eq!(seen["current_version_recorded"], true);
+        assert_eq!(seen["versions"][0]["unattributed"], true);
+        assert!(
+            seen["writer_note"]
+                .as_str()
+                .unwrap()
+                .contains("did not say who it was"),
+            "{seen}"
+        );
     }
 
     #[test]

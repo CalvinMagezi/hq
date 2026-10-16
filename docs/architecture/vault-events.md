@@ -129,7 +129,10 @@ caller cannot:
 | owner via the web app or `hq vault write` | recorded as `human`, actor `owner` |
 
 The MCP gateway removes every `_hq_native_*` key from callers. If a call carries nothing
-attested, it is `unknown`.
+attested, it is `unknown`. That includes a local MCP client that connects with the API key
+alone: the key proves the caller may use HQ, not which session or agent it is, so its writes are
+recorded exactly but with no author. `note_provenance` says so in `writer_note`, and it says
+something different for a file changed outside the tools.
 
 Recorded at: `vault_write_note`, `vault_append_note`, `vault_patch_section`,
 `vault_frontmatter_update`, person facts, the `vault_note` shortcut, `vault_move` (records
