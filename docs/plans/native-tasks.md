@@ -133,6 +133,11 @@ nullable columns on `tasks` (`parent_task_id`, `start_date`) and a
   skipped with a 409, named in the notice, and stays ticked for a retry. Only tasks
   still on screen count as ticked, and tasks already at the target are left alone.
   Archive and restore are not bulk actions yet: they depend on sub-task order.
+- **Collapsible sections** (list view): each initiative header folds its tasks away, and
+  "Collapse all" / "Expand all" fold every section at once. The folded names are kept in
+  the browser (`hq-tasks-collapsed-sections`), so a section skipped once stays skipped.
+  A folded section is not on screen, so "Select all" leaves it out, folding it un-ticks
+  what was ticked inside it, and its group box is disabled until it is expanded again.
 
 ## Lifecycle timestamps (FR-068)
 

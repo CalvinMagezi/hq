@@ -1,5 +1,5 @@
 import { expect, test } from 'bun:test'
-import { groupByInitiative, nestRows, compareTasksByActivity } from './hierarchy'
+import { groupByInitiative, nestRows, compareTasksByActivity, sectionName, withoutSections } from './hierarchy'
 import type { Initiative, TaskItem } from '~/lib/tasksApi'
 
 const makeTask = (id: string, display_id: string, initiative_id: string, updated_at: string, created_at = updated_at): TaskItem => ({
@@ -86,4 +86,34 @@ test('nestRows orders subtasks by newest activity first', () => {
     '1:C-002',
     '1:C-001',
   ])
+})
+
+const sectionsFixture = () => {
+  const initiatives = new Map<string, Initiative>([
+    ['init-a', { id: 'init-a', space_id: 's', folder_id: null, name: 'Oakstone', slug: 'oak', id_prefix: 'OAK' }],
+    ['init-b', { id: 'init-b', space_id: 's', folder_id: null, name: 'Academy', slug: 'acad', id_prefix: 'ACA' }],
+  ])
+  const tasks = [
+    makeTask('1', 'OAK-1', 'init-a', '2026-09-28 10:00:00'),
+    makeTask('2', 'ACA-1', 'init-b', '2026-09-28 10:00:00'),
+    makeTask('3', 'OAK-2', 'init-a', '2026-09-28 10:00:00'),
+    makeTask('4', 'X-1', 'init-gone', '2026-09-28 10:00:00'),
+  ]
+  return { initiatives, tasks }
+}
+
+test('a task sits in the section named after its initiative, or Other when that is unknown', () => {
+  const { initiatives, tasks } = sectionsFixture()
+  expect(tasks.map((t) => sectionName(t, initiatives))).toEqual(['Oakstone', 'Academy', 'Oakstone', 'Other'])
+})
+
+test('withoutSections drops every task in a folded section and keeps the rest in order', () => {
+  const { initiatives, tasks } = sectionsFixture()
+  expect(withoutSections(tasks, new Set(['Oakstone']), initiatives).map((t) => t.display_id)).toEqual(['ACA-1', 'X-1'])
+  expect(withoutSections(tasks, new Set(['Oakstone', 'Other']), initiatives).map((t) => t.display_id)).toEqual(['ACA-1'])
+})
+
+test('withoutSections hands back the same list when nothing is folded', () => {
+  const { initiatives, tasks } = sectionsFixture()
+  expect(withoutSections(tasks, new Set(), initiatives)).toBe(tasks)
 })
