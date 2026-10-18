@@ -31,6 +31,10 @@ const HOME_SECRET_PATHS: &[&str] = &[
     ".hq/wallet.enc",
     ".hq/seed.enc",
     ".hq/secret.key",
+    // The macOS code-signing keychains: an empty password protects them, so reading the file
+    // gives away a key that signs as HQ.
+    ".hq/hq-signing.keychain-db",
+    ".hq/signing.keychain",
     ".herenow/credentials",
 ];
 
@@ -329,6 +333,7 @@ mod tests {
             ".config/gws/token_cache.json",
             ".aws/credentials",
             ".hq/config.yaml",
+            ".hq/hq-signing.keychain-db",
             ".netrc",
         ] {
             assert_eq!(

@@ -20,6 +20,8 @@ const HQ_KEY_FILES: &[&str] = &[
     ".hq/wallet.enc",
     ".hq/seed.enc",
     ".hq/secret.key",
+    ".hq/hq-signing.keychain-db",
+    ".hq/signing.keychain",
 ];
 
 const DOCKER_SOCKETS: &[&str] = &["/var/run/docker.sock", "/run/docker.sock"];
