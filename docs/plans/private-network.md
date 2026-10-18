@@ -103,8 +103,11 @@ What it costs, said plainly:
 - Peers: hub `10.77.0.1`, devices `10.77.0.2` and up. On a device, `AllowedIPs` is the hub's `/32`
   only (never `0.0.0.0/0`): no other traffic is tunnelled. On the hub, each peer's `AllowedIPs` is
   its own `/32`.
-- The hub does not forward between peers (`ip_forward` stays 0, and a firewall rule drops hq0 to
-  hq0), so a stolen phone cannot reach the laptop's gate.
+- The hub does not forward between peers: a firewall rule drops hq0 to hq0 explicitly, and the
+  default for routed traffic is deny. On a hub that already forwards for something else (the
+  owner's server has `ip_forward` at 1 while Tailscale runs), those two rules are what hold; `hq net
+  init` reports the sysctl value and does not assume it is 0. A stolen phone cannot reach the
+  laptop's gate.
 - The only public listeners: `udp/51820` (silent to unauthenticated packets), `tcp/22` (key-only,
   already there), and optionally the connector's `tcp/443` fenced by a source allow-list.
 - Addressing: the subnet is chosen at `hq net init`, avoiding any subnet already routed on the
@@ -326,6 +329,36 @@ For this install, with the owner's agreement at each step:
 2. Choose a neutral label for the HQ name (`hq` is free). An A record from it to the hub's tunnel
    address, and a `_acme-challenge` CNAME only if route 2 or 3 of 9.2 is used.
 3. Issue the first certificate from the workstation (route 1), then `hq net cert push`.
+
+### 9.4 Android phones and tablets
+
+Source: the vault note `Android-On-Device-Assessment` (2026-10-18), checked against the code and, for
+the build claims, against a real build on the owner's Mac. This section keeps only what changes the
+network plan. HQ running on the phone (a hub, or a native client) is a separate track, Spike E of the
+Native Bridge work, and is not part of this plan.
+
+- An Android device joins as a spoke through the official WireGuard app. The key pair is made in the
+  app and never leaves the device; the hub entry is `AllowedIPs` of the hub's single address.
+  `PersistentKeepalive` is left off on a phone: the phone starts every exchange, and Web Push reaches it
+  through the browser vendor's service, not through the tunnel. Android's "Block connections without
+  VPN" must stay off for this tunnel, because it would cut off everything outside the hub address.
+- Cost of an idle tunnel, measured on the owner's Mac with a keepalive of 25 seconds: 3,744 bytes of
+  WireGuard payload in 603 seconds, about 16 MB a month, roughly 23 MB with IP and UDP headers
+  (estimate). At the small-bundle price of about UGX 3,250 a GB that is about UGX 75 a month, against
+  the 2 GB a month the Native Bridge client idled at. A phone on mobile data will rekey more often when
+  its network changes; measure that on the tablet.
+- The web UI needs Chrome 111 or newer on Android (Tailwind v4 uses `@property` and `color-mix()`).
+  The installed web app and push need HTTPS, so they are Tier 1. A public certificate (route 1 in 9.2)
+  is also what makes the page work on phones without installing a certificate authority on each one:
+  Android apps and WebViews do not trust user-installed authorities by default, and Chrome shows a
+  standing warning for them. That is from Android's documentation, not yet seen on the tablet.
+- Budget phones from Tecno, Infinix and itel ship a per-app power manager that can stop background apps,
+  a VPN service included. The Phase 2 phone task tests the tunnel on the Android tablet first and on a
+  budget phone if one can be had, and the phone guide lists the per-brand setting that keeps it alive.
+- A code rule that follows: everything that needs root (the privileged applier, its systemd path unit,
+  the part of `hq net` that applies peers) is gated with `cfg(target_os = "linux")`, never `cfg(unix)`,
+  so a build for Android or any other unix target never contains it. `hq-gate` is `cfg(unix)` and
+  checks clean for `aarch64-linux-android`.
 
 ## 10. Phase 3: cutover and removal
 
