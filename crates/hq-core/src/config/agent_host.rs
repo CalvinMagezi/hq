@@ -41,6 +41,20 @@ pub struct AgentHostConfig {
     #[serde(default)]
     pub hosts: BTreeMap<String, RemoteHostConfig>,
 
+    /// This machine's host answers the TCP gate on this `address:port`, which must be one address
+    /// of the tunnel interface (never all interfaces). Unset: no listener.
+    #[serde(default)]
+    pub gate_listen: Option<String>,
+
+    /// Source addresses allowed to connect to the gate: the server's address on the tunnel.
+    /// Required when `gate_listen` is set.
+    #[serde(default)]
+    pub gate_allowed_sources: Vec<String>,
+
+    /// The keys allowed to call the gate. Default: `~/.hq/gate_authorized_keys`.
+    #[serde(default)]
+    pub gate_authorized_keys: Option<String>,
+
     /// Reuse one ssh connection per remote host (ControlMaster) so each the host
     /// call skips the handshake. If the control socket cannot be set up, HQ
     /// falls back to a fresh connection per call. Set false to always do that.
@@ -212,11 +226,34 @@ pub struct HarnessProfileConfig {
     pub env: BTreeMap<String, String>,
 }
 
-/// One remote machine running HQ's built-in host, reached with `ssh`.
+/// How HQ reaches a remote host: through `ssh` (the default) or the signed TCP gate on a tunnel.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum HostTransport {
+    #[default]
+    Ssh,
+    Tcp,
+}
+
+/// One remote machine running HQ's built-in host, reached with `ssh` or the TCP gate.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RemoteHostConfig {
-    /// `user@address` for ssh, usually a Tailscale address or MagicDNS name.
+    /// `ssh` (default) or `tcp`.
+    #[serde(default)]
+    pub transport: HostTransport,
+
+    /// `user@address` for ssh, usually a Tailscale address or MagicDNS name. Required for the
+    /// `ssh` transport.
+    #[serde(default)]
     pub ssh: String,
+
+    /// `address:port` of the host's gate on the tunnel. Required for the `tcp` transport.
+    #[serde(default)]
+    pub addr: Option<String>,
+
+    /// The `tcp` transport's key for this host. Default: `~/.hq/gate/<name>.key`.
+    #[serde(default)]
+    pub gate_key_file: Option<String>,
 
     /// ssh port when the server does not listen on 22.
     #[serde(default)]
@@ -340,6 +377,9 @@ impl Default for AgentHostConfig {
             agent_mcp_url: None,
             default_host: default_host(),
             hosts: BTreeMap::new(),
+            gate_listen: None,
+            gate_allowed_sources: Vec::new(),
+            gate_authorized_keys: None,
             ssh_multiplex: default_ssh_multiplex(),
             launch_bound_secs: default_launch_bound_secs(),
             command_timeout_secs: default_command_timeout_secs(),
@@ -382,6 +422,19 @@ mod tests {
         );
         let deny: AgentHostConfig = serde_yaml::from_str("spawn_cwd_deny: [/secret]").unwrap();
         assert_eq!(deny.spawn_cwd_deny, ["/secret"]);
+    }
+
+    #[test]
+    fn the_gate_is_off_unless_configured_and_hosts_default_to_ssh() {
+        let cfg: AgentHostConfig = serde_yaml::from_str("{}").unwrap();
+        assert!(cfg.gate_listen.is_none() && cfg.gate_allowed_sources.is_empty());
+        let yaml =
+            "hosts:\n  a:\n    ssh: me@h\n  b:\n    transport: tcp\n    addr: 10.77.0.2:47801\n";
+        let cfg: AgentHostConfig = serde_yaml::from_str(yaml).unwrap();
+        assert_eq!(cfg.hosts["a"].transport, HostTransport::Ssh);
+        assert_eq!(cfg.hosts["b"].transport, HostTransport::Tcp);
+        assert_eq!(cfg.hosts["b"].addr.as_deref(), Some("10.77.0.2:47801"));
+        assert!(cfg.hosts["b"].ssh.is_empty());
     }
 
     #[test]

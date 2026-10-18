@@ -124,6 +124,16 @@ impl NativeBackend {
         })
     }
 
+    /// A host on another machine reached through the signed TCP gate at `addr`, with this
+    /// server's key for it at `key_path`.
+    pub fn remote_tcp(name: &str, addr: std::net::SocketAddr, key_path: PathBuf) -> Self {
+        Self::with_link(Link::Remote {
+            name: name.to_string(),
+            transport: Transport::Tcp { addr, key_path },
+            ssh_program: "tcp".to_string(),
+        })
+    }
+
     fn with_link(link: Link) -> Self {
         Self {
             link,
@@ -205,6 +215,10 @@ impl NativeBackend {
     fn is_real_host(&self) -> bool {
         match &self.link {
             Link::Local(dir) => !own_host_dir(dir, &real_host_dir()),
+            Link::Remote {
+                transport: Transport::Tcp { addr, .. },
+                ..
+            } => !addr.ip().is_loopback(),
             Link::Remote { ssh_program, .. } => ssh_program == "ssh",
         }
     }
