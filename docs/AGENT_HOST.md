@@ -13,11 +13,31 @@ on this machine or on a machine you paired (see [JOIN_A_MACHINE.md](JOIN_A_MACHI
 macOS ties its folder-access approvals (Documents, Desktop, Downloads) to a program's code
 signature, and an ad-hoc signature changes with every build, so every update would ask again,
 and an agent started with no one at the screen hangs waiting. `hq host install` therefore
-signs `hq` once with a certificate it makes for itself (`HQ Local Code Signing`, in
+makes a certificate for this machine (`HQ Local Code Signing`, in
 `~/.hq/hq-signing.keychain-db`, an empty-password keychain holding nothing else) and signs
-again with the same one after each update. Approve the prompt macOS shows the first time; it
-stays approved. If signing fails the host still runs, with a warning, and macOS will ask
-again after updates. Run `hq host install` again after replacing the binary.
+`hq` with it. Approve the prompt macOS shows the first time; it stays approved.
+
+After that, `hq update` signs each new build with the same certificate before it replaces the
+old one, and so do a source rebuild through `scripts/install-hq.sh` and a self-update. They do
+this only on a machine that has already run `hq host install`, so an update never creates a
+keychain for someone who did not ask for one. `hq host sign <path>` does the same for a binary
+you put in place yourself. If signing fails, the update and the host still go ahead with a
+warning, and macOS asks again. `hq doctor` shows whether the running `hq` has the stable
+signature.
+
+The update that first brings this in is applied by the older `hq`, which does not sign, so it
+lands ad hoc. Run `hq host sign "$(command -v hq)"` once afterwards (it only replaces the file,
+nothing running is touched); macOS asks once more at the next host restart, because this is a
+new identity to it. Later updates sign by themselves.
+
+The certificate's key sits in that keychain and `codesign` uses it without a prompt. A program
+running as you can therefore sign its own binary with it, and macOS would treat that binary as
+HQ for folder approvals. HQ's host-run agents cannot reach it (the host sandbox hides `~/.hq`),
+and the keychain files are masked from agent file tools and from the chat shell's sandbox (unless
+`governance.bash.sandbox` is `off`). A
+program that may run `codesign` can still ask macOS to use the key without reading the file, so
+treat it like the other keys in your home folder. A Developer ID signature held in CI would
+close this and replace the local certificate; the project has no Apple developer account yet.
 
 ## Run it
 
@@ -27,6 +47,7 @@ hq host status           # protocol and host version, pid, number of agents, loc
 hq host stop             # ask a running host to exit
 hq host lockdown "why"   # emergency stop: stop every agent, start none (see Lockdown)
 hq host unlock           # lift a lockdown; only works on this machine
+hq host sign <path>     # macOS: give an hq binary the stable local signature (see above)
 ```
 
 All of them take `--dir <path>` (default `~/.hq/run/host`). The directory is

@@ -13,28 +13,7 @@ use std::sync::Arc;
 use std::time::Duration;
 use tracing::info;
 
-fn unlock_signing_keychain() {
-    let home = std::env::var("HOME").unwrap_or_default();
-    let keychain = format!("{}/.hq/signing.keychain", home);
-    if !std::path::Path::new(&keychain).exists() {
-        return;
-    }
-    let hostname = std::process::Command::new("hostname")
-        .arg("-s")
-        .output()
-        .ok()
-        .and_then(|o| String::from_utf8(o.stdout).ok())
-        .unwrap_or_default();
-    let pass = format!("hq-{}-signing", hostname.trim());
-    let _ = std::process::Command::new("security")
-        .args(["unlock-keychain", "-p", &pass, &keychain])
-        .output();
-}
-
 pub async fn run(config: &HqConfig, component: &str) -> Result<()> {
-    // Unlock signing keychain at startup so codesign works during self-update
-    unlock_signing_keychain();
-
     let vault =
         Arc::new(VaultClient::new(config.vault_path.clone()).context("failed to open vault")?);
 

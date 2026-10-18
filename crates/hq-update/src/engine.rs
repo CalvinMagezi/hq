@@ -99,6 +99,12 @@ struct Resolved {
     warnings: Vec<String>,
 }
 
+/// Size and modification time: enough to tell that a signer replaced the file.
+fn file_stamp(path: &Path) -> Option<(u64, std::time::SystemTime)> {
+    let meta = std::fs::metadata(path).ok()?;
+    Some((meta.len(), meta.modified().ok()?))
+}
+
 fn sha256_file(path: &Path) -> Result<String> {
     use std::io::Read;
     let mut file = std::fs::File::open(path)?;
@@ -686,9 +692,15 @@ impl Engine<'_> {
             }
         }
 
-        // Exec failures pass through as plain errors; only a clean run that
-        // reports the wrong build counts against the release.
-        let reported = self.host.staged_version(&staged_bin).await?;
+        self.check_staged(m, &staged_bin).await?;
+        Ok(web_tgz.is_some())
+    }
+
+    /// Runs the staged binary's `--version` and compares it with the manifest.
+    /// Exec failures pass through as plain errors; only a clean run that
+    /// reports the wrong build counts against the release.
+    async fn check_staged(&self, m: &Manifest, staged_bin: &Path) -> Result<()> {
+        let reported = self.host.staged_version(staged_bin).await?;
         let sha_prefix = &m.git_sha[..m.git_sha.len().min(VERSION_SHA_PREFIX)];
         let matches = parse_version_line(&reported).is_some_and(|i| {
             i.version == m.version
@@ -703,7 +715,26 @@ impl Engine<'_> {
                 m.version
             )));
         }
-        Ok(web_tgz.is_some())
+        Ok(())
+    }
+
+    /// Lets the platform sign the staged binary, then proves it still runs and is still the
+    /// release. A signing problem is a warning, because the old signature state is what
+    /// every update had before; a signed binary that no longer runs stops the update.
+    async fn sign_staged(&self, m: &Manifest, warnings: &mut Vec<String>) -> Result<()> {
+        let staged = self.layout.staged_binary();
+        let before = file_stamp(&staged);
+        if let Err(e) = self.host.prepare_staged(&staged).await {
+            let warning = format!(
+                "the new binary was not given a stable code signature, so macOS may ask for folder access again: {e}"
+            );
+            tracing::warn!("{warning}");
+            warnings.push(warning);
+        }
+        if file_stamp(&staged) == before {
+            return Ok(());
+        }
+        self.check_staged(m, &staged).await
     }
 
     fn cleanup_staging(&self) {
@@ -795,13 +826,19 @@ impl Engine<'_> {
             }
         };
 
+        // Before the notice, so a binary signing broke is dropped without alarming anyone.
+        let mut warnings = resolved.warnings.clone();
+        if let Err(e) = self.sign_staged(m, &mut warnings).await {
+            self.cleanup_staging();
+            return Err(e);
+        }
+
         self.notify("pre", &m.git_sha).await;
         tokio::time::sleep(Duration::from_secs(self.cfg.notify.grace_secs)).await;
 
         // Taken after the grace period so the restore point is as fresh as possible.
         // The service user can make this fail, so it only stops the update when
         // the release says it cannot run without a restore point.
-        let mut warnings = resolved.warnings.clone();
         let snapshot = match self.snapshot_db(state).await {
             Ok(s) => s,
             Err(e) if !m.requires_db_snapshot => {

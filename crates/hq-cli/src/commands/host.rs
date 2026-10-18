@@ -75,12 +75,13 @@ pub async fn run(args: HostArgs) -> Result<()> {
         "relay" => relay(port, unix),
         "sandbox-init" => sandbox_init(port, unix, &rest),
         "install" => super::host_install::install(),
+        "sign" => super::host_install::sign(arg.as_deref()),
         "join" => super::host_install::join(arg.as_deref(), addr.as_deref()),
         "add" => super::host_install::add(arg.as_deref(), from.as_deref()),
         "check" => super::host_install::check(arg.as_deref()),
         "authorize" => super::host_install::authorize(key.as_deref(), from.as_deref()),
         other => bail!(
-            "unknown subcommand '{other}': use serve, status, stop, lockdown, unlock, install, authorize, report or gate"
+            "unknown subcommand '{other}': use serve, status, stop, lockdown, unlock, install, sign, authorize, report or gate"
         ),
     }
 }

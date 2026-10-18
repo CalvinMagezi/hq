@@ -18,6 +18,8 @@ const PROBE_TIMEOUT: Duration = Duration::from_secs(3);
 const VERSION_TIMEOUT: Duration = Duration::from_secs(15);
 const NOTIFY_TIMEOUT: Duration = Duration::from_secs(30);
 const UPGRADE_TIMEOUT: Duration = Duration::from_secs(300);
+/// The signer gives `codesign` 60 s before it assumes a keychain dialog is blocking it.
+const SIGN_TIMEOUT: Duration = Duration::from_secs(90);
 const SYSTEMCTL_TIMEOUT: Duration = Duration::from_secs(120);
 const DB_TIMEOUT: Duration = Duration::from_secs(120);
 const MAX_REDIRECTS: usize = 5;
@@ -339,6 +341,32 @@ impl Host for RealHost {
             return Err(anyhow::anyhow!("`--version` exited with {}", out.status).into());
         }
         Ok(String::from_utf8_lossy(&out.stdout).into_owned())
+    }
+
+    async fn prepare_staged(&self, bin: &Path) -> Result<()> {
+        if !cfg!(target_os = "macos") {
+            return Ok(());
+        }
+        // SAFETY: geteuid has no preconditions.
+        if unsafe { libc::geteuid() } == 0 {
+            return Err(anyhow::anyhow!(
+                "not signing as root; the signing identity belongs to the owner"
+            )
+            .into());
+        }
+        // The signing identity is in the owner's keychain, so this runs with the owner's own
+        // HOME. The service-user builder points HOME at the vault, which would find no keychain
+        // and skip the signature without a word.
+        let home = std::env::var_os("HOME").ok_or_else(|| {
+            anyhow::anyhow!("HOME is not set, so the signing keychain is not found")
+        })?;
+        let mut cmd = Command::new(bin);
+        cmd.args(["host", "sign"])
+            .arg(bin)
+            .env_clear()
+            .env("PATH", CHILD_PATH)
+            .env("HOME", home);
+        run_status(cmd, "hq host sign", SIGN_TIMEOUT).await
     }
 
     async fn post_upgrade(&self) -> Result<()> {
