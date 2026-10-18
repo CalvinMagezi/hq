@@ -25,7 +25,7 @@ mod web_push;
 
 pub use agent::*;
 pub use agent_host::{
-    AgentHostConfig, HarnessProfileConfig, LOCAL_HOST, MAX_LAUNCH_BOUND_SECS,
+    AgentHostConfig, HarnessProfileConfig, HostTransport, LOCAL_HOST, MAX_LAUNCH_BOUND_SECS,
     MIN_LAUNCH_BOUND_SECS, NATIVE_HOST, RemoteHostConfig, SandboxConfig, SandboxMode,
     native_host_dir,
 };

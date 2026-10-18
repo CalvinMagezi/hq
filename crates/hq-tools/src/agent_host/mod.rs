@@ -29,7 +29,7 @@ use anyhow::Context;
 use hq_core::config::{AgentHostConfig, HqConfig, LOCAL_HOST, NATIVE_HOST};
 #[cfg(unix)]
 use hq_core::config::{
-    MAX_LAUNCH_BOUND_SECS, MIN_LAUNCH_BOUND_SECS, RemoteHostConfig, native_host_dir,
+    HostTransport, MAX_LAUNCH_BOUND_SECS, MIN_LAUNCH_BOUND_SECS, RemoteHostConfig, native_host_dir,
 };
 use serde::Serialize;
 #[cfg(unix)]
@@ -261,33 +261,103 @@ fn build(cfg: &AgentHostConfig, name: &str) -> anyhow::Result<Host> {
             known.join(", ")
         )
     })?;
-    Ok(Arc::new(remote_native(cfg, name, remote)))
+    Ok(Arc::new(remote_native(cfg, name, remote)?))
 }
 
-/// A built-in host on another machine. Its gate command defaults to
-/// `hq host gate` unless the config names one.
+/// A built-in host on another machine, through ssh or the signed TCP gate. Its ssh gate command
+/// defaults to `hq host gate` unless the config names one.
 #[cfg(unix)]
-fn remote_native(cfg: &AgentHostConfig, name: &str, remote: &RemoteHostConfig) -> NativeBackend {
-    let gate = remote.gate_command.as_str();
+fn remote_native(
+    cfg: &AgentHostConfig,
+    name: &str,
+    remote: &RemoteHostConfig,
+) -> anyhow::Result<NativeBackend> {
+    let backend = match remote.transport {
+        HostTransport::Ssh => ssh_backend(cfg, name, remote)?,
+        HostTransport::Tcp => tcp_backend(name, remote)?,
+    };
+    Ok(backend
+        .with_launch_bound(Duration::from_secs(
+            cfg.launch_bound_secs
+                .clamp(MIN_LAUNCH_BOUND_SECS, MAX_LAUNCH_BOUND_SECS),
+        ))
+        .with_command_timeout(Duration::from_secs(cfg.command_timeout_secs))
+        .with_sandbox(sandbox::plan(cfg))
+        .with_idle_ttl(sandbox::idle_ttl_secs(cfg)))
+}
+
+#[cfg(unix)]
+fn ssh_backend(
+    cfg: &AgentHostConfig,
+    name: &str,
+    remote: &RemoteHostConfig,
+) -> anyhow::Result<NativeBackend> {
+    anyhow::ensure!(
+        !remote.ssh.trim().is_empty(),
+        "host '{name}' uses the ssh transport and needs `ssh: user@address`"
+    );
     let mux_dir = cfg
         .ssh_multiplex
         .then(|| transport::prepare_mux_dir(&HqConfig::hq_dir().join("run").join("ssh")))
         .flatten();
-    NativeBackend::remote(
+    Ok(NativeBackend::remote(
         name,
         &remote.ssh,
         remote.port,
         remote.identity_file.clone(),
-        gate,
+        remote.gate_command.as_str(),
         mux_dir,
-    )
-    .with_launch_bound(Duration::from_secs(
-        cfg.launch_bound_secs
-            .clamp(MIN_LAUNCH_BOUND_SECS, MAX_LAUNCH_BOUND_SECS),
     ))
-    .with_command_timeout(Duration::from_secs(cfg.command_timeout_secs))
-    .with_sandbox(sandbox::plan(cfg))
-    .with_idle_ttl(sandbox::idle_ttl_secs(cfg))
+}
+
+#[cfg(unix)]
+fn tcp_backend(name: &str, remote: &RemoteHostConfig) -> anyhow::Result<NativeBackend> {
+    let addr = remote.addr.as_deref().with_context(|| {
+        format!("host '{name}' uses the tcp transport and needs `addr: <tunnel address>:<port>`")
+    })?;
+    let addr: std::net::SocketAddr = addr
+        .parse()
+        .with_context(|| format!("host '{name}': addr {addr:?} is not an address:port"))?;
+    let key_path = match remote.gate_key_file.as_deref() {
+        Some(path) => expand_home(path),
+        None => gate_key_path(name),
+    };
+    Ok(NativeBackend::remote_tcp(name, addr, key_path))
+}
+
+/// Where this server keeps its gate key for the host `name`.
+pub fn gate_key_path(name: &str) -> std::path::PathBuf {
+    HqConfig::hq_dir().join("gate").join(format!("{name}.key"))
+}
+
+/// The key file for the host `name` as the config sets it, or the default location.
+pub fn configured_gate_key_path(name: &str) -> std::path::PathBuf {
+    let custom = HqConfig::load().ok().and_then(|c| {
+        c.agent_host
+            .hosts
+            .get(name)
+            .and_then(|h| h.gate_key_file.clone())
+    });
+    match custom {
+        Some(path) => expand_home(&path),
+        None => gate_key_path(name),
+    }
+}
+
+/// The file that lists which keys may call this machine's TCP gate.
+pub fn gate_authorized_keys_path(cfg: &AgentHostConfig) -> std::path::PathBuf {
+    match cfg.gate_authorized_keys.as_deref() {
+        Some(path) => expand_home(path),
+        None => HqConfig::hq_dir().join("gate_authorized_keys"),
+    }
+}
+
+/// A leading `~/` means the home directory, as people write it in a config.
+pub fn expand_home(path: &str) -> std::path::PathBuf {
+    match (path.strip_prefix("~/"), std::env::var_os("HOME")) {
+        (Some(rest), Some(home)) => std::path::PathBuf::from(home).join(rest),
+        _ => std::path::PathBuf::from(path),
+    }
 }
 
 /// The machine HQ itself runs on.

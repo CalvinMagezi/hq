@@ -378,6 +378,23 @@ fn authorized_keys_is_read_only_and_control_sockets_are_masked() {
 }
 
 #[test]
+fn gate_keys_are_masked_and_the_gate_authorized_keys_file_is_read_only() {
+    let home = tempfile::tempdir().unwrap();
+    let hq = home.path().join(".hq");
+    std::fs::create_dir_all(hq.join("gate")).unwrap();
+    std::fs::write(hq.join("gate/laptop.key"), "k").unwrap();
+    std::fs::write(hq.join("gate_authorized_keys"), "").unwrap();
+    let masked = masked_files(Some(home.path()));
+    assert!(masked.iter().any(|p| p.ends_with(".hq/gate/laptop.key")));
+    let read_only = readonly_files(Some(home.path()));
+    assert!(
+        read_only
+            .iter()
+            .any(|p| p.ends_with(".hq/gate_authorized_keys"))
+    );
+}
+
+#[test]
 fn refusing_status_files_one_notification_per_boot() {
     let db = hq_db::Database::open_memory().unwrap();
     let settings = BashSettings::default();

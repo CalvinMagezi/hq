@@ -31,6 +31,8 @@ const HOME_SECRET_PATHS: &[&str] = &[
     ".hq/wallet.enc",
     ".hq/seed.enc",
     ".hq/secret.key",
+    ".hq/gate",
+    ".hq/gate_authorized_keys",
     ".herenow/credentials",
 ];
 
@@ -329,6 +331,8 @@ mod tests {
             ".config/gws/token_cache.json",
             ".aws/credentials",
             ".hq/config.yaml",
+            ".hq/gate/laptop.key",
+            ".hq/gate_authorized_keys",
             ".netrc",
         ] {
             assert_eq!(

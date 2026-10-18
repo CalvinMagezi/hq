@@ -312,6 +312,7 @@ a document.
 | `hq-export` | Native note export (PDF, PNG, SVG through embedded Typst; DOCX; HTML, spreadsheets, JSON, XML, LaTeX, notebooks, Jira markup) with no external tools |
 | `hq-update` | Signed pull-based updater (library behind `hq update`) |
 | `hq-host` | Built-in coding-agent host: pty panes, emulated screen, control socket, state detection |
+| `hq-gate` | Signed TCP transport for the host gate over a private tunnel (Ed25519 challenge, unix only); used by `hq host serve` and the `tcp` host transport |
 | `hq-sandbox` | Process sandbox policy for one coding agent (`sandbox-exec` or `bwrap`) |
 | `hq-cli` | The `hq` binary and its CLI commands |
 

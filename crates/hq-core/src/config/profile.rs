@@ -332,12 +332,21 @@ pub fn egress_report(cfg: &HqConfig, env: EnvLookup<'_>) -> Vec<EgressItem> {
     }
 
     for (name, host) in &cfg.agent_host.hosts {
-        let target = host.ssh.rsplit('@').next().unwrap_or(&host.ssh);
+        let (target, how) = match host.transport {
+            crate::config::HostTransport::Ssh => (
+                host.ssh.rsplit('@').next().unwrap_or(&host.ssh),
+                "agent commands, files and screens, over ssh",
+            ),
+            crate::config::HostTransport::Tcp => (
+                host.addr.as_deref().unwrap_or_default(),
+                "agent commands, files and screens, over the signed TCP gate",
+            ),
+        };
         items.push(item(
             &format!("agent-host:{name}"),
             &format!("Remote coding-agent host {name}"),
             &[target],
-            "agent commands, files and screens, over ssh",
+            how,
         ));
     }
     if let Some(host) = cfg.agent_host.agent_mcp_url.as_deref().and_then(host_of)
@@ -795,6 +804,9 @@ mod tests {
         cfg.agent_host.hosts.insert(
             "build".into(),
             crate::config::RemoteHostConfig {
+                transport: crate::config::HostTransport::Ssh,
+                addr: None,
+                gate_key_file: None,
                 ssh: "ci@build.example.com".into(),
                 port: None,
                 identity_file: None,

@@ -49,6 +49,9 @@ gws = []
 # Test doubles other crates' tests use (a scripted host).
 test-support = []
 
+[target.'cfg(unix)'.dependencies]
+hq-gate = { workspace = true }
+
 [dev-dependencies]
 tempfile = "3"
 filetime = "0.2"

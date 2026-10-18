@@ -227,8 +227,21 @@ pub fn check_host(name: &str) -> serde_json::Value {
             "host": name,
             "reachable": false,
             "error": e.to_string(),
-            "hint": "check that `hq host install` ran on the machine, that its `hq host authorize` command was run, that the machine is on the same tailnet, and that its sshd is running",
+            "hint": unreachable_hint(name),
         }),
+    }
+}
+
+/// What to check when a host does not answer, for the transport the host is configured with.
+fn unreachable_hint(name: &str) -> &'static str {
+    let tcp = hq_core::config::HqConfig::load()
+        .ok()
+        .and_then(|c| c.agent_host.hosts.get(name).map(|h| h.transport))
+        == Some(hq_core::config::HostTransport::Tcp);
+    if tcp {
+        "check that the tunnel is up, that `hq host serve` runs there with agent_host.gate_listen set, that this server's key was added there with `hq host authorize --gate-key`, and that this server's tunnel address is in gate_allowed_sources"
+    } else {
+        "check that `hq host install` ran on the machine, that its `hq host authorize` command was run, that the machine is on the same tailnet, and that its sshd is running"
     }
 }
 

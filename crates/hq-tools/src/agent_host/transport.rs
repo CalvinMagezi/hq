@@ -3,6 +3,7 @@
 
 use super::AgentHostError;
 use std::io::{Read, Write};
+use std::net::SocketAddr;
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
 use std::time::{Duration, Instant};
@@ -37,6 +38,8 @@ pub(super) enum Transport {
         /// every call opens its own connection.
         mux_dir: Option<PathBuf>,
     },
+    /// The signed TCP gate on a tunnel address (see the `hq-gate` crate).
+    Tcp { addr: SocketAddr, key_path: PathBuf },
 }
 
 #[derive(Debug)]
@@ -54,6 +57,9 @@ impl Transport {
         args: &[String],
         timeout: Duration,
     ) -> Result<RawOutput, AgentHostError> {
+        if let Transport::Tcp { addr, key_path } = self {
+            return run_tcp(host, *addr, key_path, args, timeout);
+        }
         let unreachable = |detail: String| AgentHostError::Unreachable {
             host: host.to_string(),
             detail,
@@ -105,6 +111,7 @@ impl Transport {
                 gate_command,
                 mux_dir: None,
             },
+            tcp @ Transport::Tcp { .. } => tcp,
         }
     }
 
@@ -134,8 +141,55 @@ impl Transport {
                 ));
                 Ok((c, Some(payload)))
             }
+            Transport::Tcp { .. } => Err("the tcp transport does not run a command".into()),
         }
     }
+}
+
+/// One request through the signed TCP gate. The reply is the same JSON line the ssh gate prints,
+/// and a request the gate refuses is reported the way the ssh gate does (exit status 64), so
+/// `NativeBackend::call_remote` reads both transports the same way.
+fn run_tcp(
+    host: &str,
+    addr: SocketAddr,
+    key_path: &Path,
+    args: &[String],
+    timeout: Duration,
+) -> Result<RawOutput, AgentHostError> {
+    let unreachable = |detail: String| AgentHostError::Unreachable {
+        host: host.to_string(),
+        detail,
+    };
+    let key = hq_gate::ClientKey::load(key_path).map_err(|e| unreachable(e.to_string()))?;
+    let request = serde_json::to_string(args).map_err(|e| unreachable(e.to_string()))?;
+    let started = Instant::now();
+    let reply =
+        hq_gate::call(addr, &key, &request, timeout).map_err(|e| unreachable(e.to_string()))?;
+    tracing::debug!(
+        host,
+        elapsed_ms = started.elapsed().as_millis() as u64,
+        "host call over the tcp gate"
+    );
+    if let Some(message) = denied_message(&reply) {
+        return Ok(RawOutput {
+            exit_code: hq_host::GATE_DENIED_EXIT,
+            stdout: String::new(),
+            stderr: message,
+        });
+    }
+    Ok(RawOutput {
+        exit_code: 0,
+        stdout: reply,
+        stderr: String::new(),
+    })
+}
+
+/// The refusal text when the reply is the gate's `gate_denied` error.
+fn denied_message(reply: &str) -> Option<String> {
+    let value: serde_json::Value = serde_json::from_str(reply.trim()).ok()?;
+    let error = value.get("error")?;
+    (error.get("code")?.as_str()? == "gate_denied")
+        .then(|| error.get("message")?.as_str().map(str::to_string))?
 }
 
 pub(super) fn ssh_args(
@@ -571,5 +625,89 @@ mod tests {
         let err = run_with_deadline(&mut command, None, Duration::from_millis(300)).unwrap_err();
         assert!(started.elapsed() < Duration::from_secs(5));
         assert!(err.contains("timed out"), "{err}");
+    }
+    /// A gate on loopback that answers every verified request with `reply`, and the key the
+    /// caller must use. The listener thread ends with the test process.
+    fn serve_gate(
+        dir: &Path,
+        reply: &'static str,
+    ) -> (SocketAddr, PathBuf, hq_gate::ShutdownHandle) {
+        let key_path = dir.join("gate/host.key");
+        let key = hq_gate::ClientKey::load_or_create(&key_path).unwrap();
+        let authorized = dir.join("authorized");
+        hq_gate::append_authorized(&authorized, &key.public_key(), &[], "test").unwrap();
+        let listener = hq_gate::Listener::bind(hq_gate::ServerConfig {
+            listen: "127.0.0.1:0".parse().unwrap(),
+            allowed_sources: vec!["127.0.0.1".parse().unwrap()],
+            authorized_keys: authorized,
+            limits: hq_gate::Limits::default(),
+        })
+        .unwrap();
+        let addr = listener.local_addr();
+        let stop = listener.shutdown_handle();
+        std::thread::spawn(move || {
+            listener.serve(std::sync::Arc::new(move |_: &str| reply.to_string()))
+        });
+        (addr, key_path, stop)
+    }
+
+    #[test]
+    fn a_tcp_call_returns_the_gates_reply_as_stdout() {
+        let dir = tempfile::tempdir().unwrap();
+        let (addr, key_path, stop) = serve_gate(dir.path(), r#"{"result":{"ok":true}}"#);
+        let out = run_tcp(
+            "laptop",
+            addr,
+            &key_path,
+            &["agent.list".to_string()],
+            Duration::from_secs(5),
+        )
+        .unwrap();
+        stop.shutdown();
+        assert_eq!(out.exit_code, 0);
+        assert_eq!(out.stdout, r#"{"result":{"ok":true}}"#);
+    }
+
+    #[test]
+    fn a_gate_refusal_reads_like_the_ssh_gates_exit_status() {
+        let dir = tempfile::tempdir().unwrap();
+        let (addr, key_path, stop) = serve_gate(
+            dir.path(),
+            r#"{"error":{"code":"gate_denied","message":"that method is not allowed"}}"#,
+        );
+        let out = run_tcp("laptop", addr, &key_path, &[], Duration::from_secs(5)).unwrap();
+        stop.shutdown();
+        assert_eq!(out.exit_code, hq_host::GATE_DENIED_EXIT);
+        assert_eq!(out.stderr, "that method is not allowed");
+        assert!(out.stdout.is_empty());
+    }
+
+    #[test]
+    fn an_unknown_key_or_a_missing_key_file_is_unreachable_not_a_panic() {
+        let dir = tempfile::tempdir().unwrap();
+        let (addr, _key, stop) = serve_gate(dir.path(), "{}");
+        let missing = dir.path().join("none.key");
+        let err = run_tcp("laptop", addr, &missing, &[], Duration::from_secs(2)).unwrap_err();
+        assert!(err.to_string().contains("gate-key"), "{err}");
+
+        let stranger = dir.path().join("stranger.key");
+        hq_gate::ClientKey::load_or_create(&stranger).unwrap();
+        let err = run_tcp("laptop", addr, &stranger, &[], Duration::from_secs(2)).unwrap_err();
+        stop.shutdown();
+        assert!(matches!(err, AgentHostError::Unreachable { .. }), "{err}");
+    }
+
+    #[test]
+    fn only_a_gate_denied_error_counts_as_a_refusal() {
+        assert_eq!(
+            denied_message(r#"{"error":{"code":"gate_denied","message":"no"}}"#).as_deref(),
+            Some("no")
+        );
+        assert_eq!(
+            denied_message(r#"{"error":{"code":"other","message":"no"}}"#),
+            None
+        );
+        assert_eq!(denied_message(r#"{"result":1}"#), None);
+        assert_eq!(denied_message("not json"), None);
     }
 }
