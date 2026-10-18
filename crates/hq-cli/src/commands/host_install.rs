@@ -494,7 +494,6 @@ pub fn check(name: Option<&str>) -> Result<()> {
     Ok(())
 }
 
-#[cfg(target_os = "macos")]
 mod signing;
 
 #[cfg(test)]

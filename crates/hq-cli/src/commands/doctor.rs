@@ -133,6 +133,7 @@ fn report_pdf_ocr() {
 
 /// macOS ties folder-access approvals to the code signature, so an ad-hoc `hq` asks again
 /// after every update. Shown only where the host is set up.
+#[cfg(unix)]
 fn report_code_signature() {
     let Some((healthy, text)) = super::host_install::signature_report() else {
         return;
@@ -140,6 +141,10 @@ fn report_code_signature() {
     println!("\nCode signature (macOS folder access)");
     println!("  {}  {text}", if healthy { "ok" } else { "warn" });
 }
+
+/// There is no coding-agent host, and so no host install module, off Unix.
+#[cfg(not(unix))]
+fn report_code_signature() {}
 
 fn on_path(tool: &str) -> bool {
     std::env::var_os("PATH")

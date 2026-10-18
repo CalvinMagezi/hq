@@ -7,6 +7,10 @@
 //! The certificate lives in its own keychain with an empty password, so signing
 //! never prompts. It holds nothing but this self-signed key.
 
+// Only macOS makes or uses the identity, but the parsing and policy here are plain functions,
+// so they compile and are tested everywhere the host does.
+#![cfg_attr(not(target_os = "macos"), allow(dead_code))]
+
 use anyhow::{Context, Result, bail};
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
