@@ -40,12 +40,20 @@ ignore = [
     # Nothing here calls the extraction code: hq-export only writes zips (it reads them
     # only in tests), docx-rs and umya-spreadsheet read entries into memory, rust_xlsxwriter
     # only writes, and transmutation only lists entry names and sizes.
-    # No upgrade exists: docx-rs 0.4.22, rust_xlsxwriter 0.99.1 and transmutation 0.3.5 are
-    # their latest releases and all require zip 8, so even hq-export alone cannot move to 9.
+    # Upgrade status on 2026-10-18: rust_xlsxwriter 0.100 requires zip 9, but docx-rs 0.4.22,
+    # umya-spreadsheet 3.1.1 and transmutation 0.3.5 are their latest releases and all still
+    # require zip 8, so zip 8.6.0 stays in Cargo.lock until all three move.
     # Review on 2026-10-31, when the promised advisories should be out: re-read them against
     # the code above, and drop this entry once those crates ship builds that use zip 9.
     # Tracked as HQ-VMS-036.
-    { crate = "zip@8.6.0", reason = "Yanked with all other zip releases except 9.0.3 after GHSA-4v9h-p7m9-rh26, GHSA-vv5m-jxxh-4627 and GHSA-4684-h2q9-2vcp, which are all in archive extraction that nothing here calls. No upgrade exists yet because docx-rs, rust_xlsxwriter and transmutation require zip 8. Expires 2026-10-31; see the comment above." },
+    { crate = "zip@8.6.0", reason = "Yanked with all other zip releases except 9.0.3 after GHSA-4v9h-p7m9-rh26, GHSA-vv5m-jxxh-4627 and GHSA-4684-h2q9-2vcp, which are all in archive extraction that nothing here calls. No upgrade exists yet because docx-rs, umya-spreadsheet and transmutation require zip 8. Expires 2026-10-31; see the comment above." },
+    # Advisories published after the yank (the follow-ups announced above). All three are in
+    # ZipArchive::extract and ZipStreamReader::extract, which nothing here calls (the
+    # callers are checked in the comment above). Same exit and same review date as the
+    # yanked entry. Keep in step with .cargo/audit.toml, which `cargo audit` reads.
+    { id = "RUSTSEC-2026-0367", reason = "zip 8.6.0 keeps SUID/SGID bits when extracting an archive to disk. Nothing calls ZipArchive::extract or ZipStreamReader::extract; see the comment above. Expires 2026-10-31." },
+    { id = "RUSTSEC-2026-0368", reason = "zip 8.6.0 ZipArchive::extract creates symlinks whose targets can leave the destination directory. Nothing calls the extraction code; see the comment above. Expires 2026-10-31." },
+    { id = "RUSTSEC-2026-0369", reason = "zip 8.6.0 ZipArchive::extract and ZipStreamReader::extract apply Unix permissions through symlinks. Nothing calls the extraction code; see the comment above. Expires 2026-10-31." },
 ]
 
 [licenses]
