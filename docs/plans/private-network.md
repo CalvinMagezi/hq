@@ -199,7 +199,8 @@ the Mac keeps using the current URL.)
 - Unit tests for the line parser (oversized, truncated, extra lines, bad base64, wrong signature,
   signature over a different request, replay of a captured exchange on a new connection, unknown key,
   `from=` mismatch, source not allowed, denied method, slow client, the connection cap, the failure
-  rate limit), a fuzz target for the parser, and a refusal test for unspecified bind addresses.
+  rate limit), a seeded randomized test that feeds the parser garbage and mutated valid exchanges (a
+  libFuzzer target is a follow-up, see TECHDEBT.md), and a refusal test for unspecified bind addresses.
 - An integration test that runs a real listener in a thread and drives it with `Transport::Tcp`.
 - Exit: on the owner's machine, Remote Login is off, Tailscale is off, the host is reached over the
   tunnel, a session starts from the Sessions page, and a 24 hour soak with sleep and wake loses no
@@ -233,10 +234,48 @@ feed them hostile files.
 
 ## 9. Phase 2: the front door
 
-- Caddy on the hub binds only to `10.77.0.1:443`, with a certificate for `hq.example.com` from
-  Let's Encrypt using DNS-01 (HTTP-01 cannot reach a private address). The DNS credential is
-  narrow: delegate `_acme-challenge.hq` by CNAME to a zone only the certificate client may write, or
-  use a provider token scoped to that zone. It is readable by the certificate client only.
+### 9.1 Two tiers, so a domain is optional
+
+A domain is needed only for the installed web app and push alerts on phones, because browsers
+switch those on only in a secure context (HTTPS with a trusted certificate, or `localhost`), and a
+certificate is issued for a name, never for a private address.
+
+| Tier | Needs a domain | What works |
+|---|---|---|
+| 0 | No | The tunnel, the host gate, MCP, and the web UI over plain HTTP on the tunnel address (WireGuard still encrypts it). On a laptop, `hq net proxy` listens on `127.0.0.1` and forwards to the tunnel address, so the page is on `localhost` and gets the secure-context features without a certificate. Phones use the web UI in a browser tab without install or push |
+| 1 | Yes | The installed web app and push on phones, at `https://hq.example.com` |
+
+The domain is per-install configuration. It is never in the code or the default config; the
+documentation uses `hq.example.com`. The project does not run a naming service and gives nobody a
+subdomain of its own domain. The `hq net proxy` listener is on loopback, so any local process can
+reach it (the finding from Spike B): it uses a per-launch token in the request path or a unix socket,
+and the web login stays the real guard.
+
+### 9.2 Tier 1 mechanics
+
+- Caddy on the hub binds only to `10.77.0.1:443`, with a certificate for the HQ name from Let's
+  Encrypt using DNS-01 (HTTP-01 cannot reach a private address). It fails closed if the address is
+  absent.
+- **No credential that can write the whole zone ever sits on the server.** The server is reachable
+  from the internet (ssh) and holds the hub key; a stolen zone credential would let an attacker
+  rewrite everything the domain serves. Three ways to keep the credential narrow, in order of
+  preference for a single-owner install:
+  1. **Issue from the owner's workstation.** `_acme-challenge.<name>` is a CNAME to nothing the server
+     controls; a short script on the owner's own machine (a lego `exec` hook or a few lines calling
+     the DNS provider's API) creates the TXT record, completes the challenge, and `hq net cert push`
+     sends the finished certificate and key to the server over the tunnel (files 0600, certificate
+     client only). The provider token stays in the workstation's keychain and never on the server.
+     Renewal needs the workstation awake once in each 30 day window.
+  2. **acme-dns on the server.** Delegate `_acme-challenge.<name>` by CNAME to an acme-dns
+     instance. Its credentials can write only that one TXT record. Cost: a small DNS server on
+     public port 53.
+  3. **A scoped token at a provider that supports it**, with `_acme-challenge.<name>` delegated by
+     CNAME to a zone that holds nothing else.
+- Name resolution inside the tunnel: a public A record from the HQ name to the hub's tunnel address
+  is the simple default (it reveals a private address and, through certificate logs, the name; a
+  wildcard certificate keeps individual names out of the logs). Some home routers drop public
+  answers that point at private addresses (DNS rebinding protection); then use a hosts entry on
+  the laptop, or have the hub answer DNS for the tunnel only, with the WireGuard `DNS` line.
 - `web_allowed_origins` and `agent_mcp_url` move to the new name. HQ itself keeps listening on
   `127.0.0.1`.
 - Firewall: allow `51820/udp` and `22/tcp` publicly; allow `443/tcp` and the web port only on `hq0`;
@@ -248,9 +287,31 @@ feed them hostile files.
   tunnel site.
 - Phones: install the official WireGuard app, add the peer, open `https://hq.example.com`.
 
-Needs from the owner: a domain, and a DNS provider that supports the DNS-01 method or CNAME
-delegation. A shared free name (sslip.io, nip.io) does not work: the TXT record cannot be set,
-HTTP-01 cannot validate a private address, and those suffixes share one rate-limit bucket.
+A shared free name (sslip.io, nip.io) does not work: the TXT record cannot be set, HTTP-01 cannot
+validate a private address, and those suffixes share one rate-limit bucket.
+
+### 9.3 The first install: the project's own domain
+
+Read-only inspection of the project's registrar and public DNS on 2026-10-18:
+
+- The zone is hosted at the registrar on its default name servers. Records: `@` A and AAAA to the
+  static site host, `www` CNAME to `@`, `deploy` A to the deploy wizard's host, one TXT for site
+  verification. No MX record and **no CAA record**. No API token exists in the account, and I did
+  not find a way to restrict a token to one domain, so assume a token covers the whole account.
+- The same zone serves the install scripts and the deploy wizard. Anyone who can write it can
+  hand new users a malicious installer. This is why a zone credential must never live on the
+  server (9.2).
+- The site, `www` and `deploy` certificates all come from Let's Encrypt, so a CAA record that names
+  only Let's Encrypt cannot break their renewal.
+- DNSSEC: the registrar's form accepts DS records, but the default name servers do not appear to
+  sign the zone, so it is not turned on; revisit if the zone moves to a provider that signs.
+
+For this install, with the owner's agreement at each step:
+
+1. Add `CAA 0 issue "letsencrypt.org"` to the zone. Registrar lock and two-factor sign-in stay on.
+2. Choose a neutral label for the HQ name (`hq` is free). An A record from it to the hub's tunnel
+   address, and a `_acme-challenge` CNAME only if route 2 or 3 of 9.2 is used.
+3. Issue the first certificate from the workstation (route 1), then `hq net cert push`.
 
 ## 10. Phase 3: cutover and removal
 
@@ -269,9 +330,13 @@ Rollback at any step is putting the old route back; nothing is deleted until the
 
 ## 12. Decisions for the owner
 
-1. Approve WireGuard as the private plane, with the iroh bridge deferred.
-2. A domain, and the DNS provider for it.
-3. A permanent public `udp/51820` on the server (silent to scans).
-4. The privileged applier as specified in section 8, or manual `wg` commands in Phase 1a only.
-5. The connector's fenced public `443`, or dropping the connector (claude.ai cannot reach a private tunnel).
-6. Who reviews the gate protocol and the applier before they ship.
+1. WireGuard as the private plane, iroh bridge deferred: **approved 2026-10-18.**
+2. The domain: the project's own domain at its registrar, with a neutral label for the HQ name, and
+   certificates issued from the owner's workstation (9.2 route 1) so no zone credential sits on the
+   server: **proposed, agreed in principle.** The CAA record (9.3 step 1) waits for a yes at the time.
+3. A permanent public `udp/51820` on the server (silent to scans): approved in principle, not yet
+   opened.
+4. The privileged applier as specified in section 8, or manual `wg` commands in Phase 1a only: open.
+5. The connector's fenced public `443`, or dropping the connector (claude.ai cannot reach a private
+   tunnel): open.
+6. Who reviews the gate protocol and the applier before they ship: open.

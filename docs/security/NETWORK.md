@@ -53,6 +53,8 @@ itself is in [WEB_AUTH.md](WEB_AUTH.md) and stays as a second layer behind every
 | T17 | Weak or reused enrolment of a device | Devices generate their own keys and send only public keys; the operator checks the label and the key's fingerprint; optional per-peer preshared key | Social engineering of the operator |
 | T18 | Supply chain | WireGuard from the distribution and the official stores; `cargo deny` and `cargo audit` stay in CI; no bundled third-party VPN code | Normal dependency risk |
 | T19 | UDP blocked | Documented limit. Owners on such networks need a TCP wrapper or the deferred relay path | Availability, not secrecy |
+| T21 | A DNS credential on the server is used to rewrite the domain (installers, site, deploy wizard) | No credential that can write the whole zone is ever stored on the server: certificates are issued from the owner's workstation, or the challenge name is delegated by CNAME to a place that holds only validation records. A CAA record limits which authority may issue | A stolen narrow credential can mint certificates for the HQ name only |
+| T22 | A local process uses the laptop's loopback proxy (`hq net proxy`) | Per-launch token in the request path or a unix socket; the web login remains the real guard; the proxy forwards only to the hub's tunnel address, never to another destination | Same-user processes can still read the token from the process list unless a unix socket is used |
 | T20 | The old path stays open after cutover | Phase 3 checklist closes Funnel, `serve` and the tailnet; verified from outside | Operator error |
 
 ## 4. Security requirements (each one testable)
@@ -79,6 +81,10 @@ itself is in [WEB_AUTH.md](WEB_AUTH.md) and stays as a second layer behind every
 - SR-N11. The connector's public port is reachable only from the published source ranges and serves
   no tunnel route.
 - SR-N12. After the Tailscale cutover, an outside scan finds no Funnel or `serve` endpoint left.
+- SR-N13. No credential that can write a whole DNS zone is stored on the server; the project's own
+  zone has a CAA record naming the authority that issues its certificates.
+- SR-N14. `hq net proxy` forwards only to the hub's tunnel address and is not usable by a process
+  that lacks the per-launch token.
 
 ## 5. Failure modes of operation
 
