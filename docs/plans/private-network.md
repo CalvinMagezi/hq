@@ -1,6 +1,8 @@
 # A private network for HQ, without Tailscale
 
-Status: proposal for review, 2026-10-18. Nothing here is built. The threat model and the testable
+Status, 2026-10-18: Phase 1a is built and on `main` (the signed TCP gate, `transport: tcp`, `hq host
+gate-key`, `hq host authorize --gate-key`), and a WireGuard hub with one peer has been run by hand and
+scanned from outside. Phases 1b, 2 and 3 are proposals for review. The threat model and the testable
 security requirements are in [docs/security/NETWORK.md](../security/NETWORK.md). Use placeholders
 (`example.com`, `10.77.0.0/24`) everywhere; nothing in this file names a real host.
 
