@@ -452,6 +452,82 @@ the host's own `spawn_failed` error naming the command. The hook settings file i
 written on the remote machine by the host (`agent.hook_flags`), so hooks,
 conversation ids and resume work the same as locally.
 
+### Over a private tunnel instead of ssh
+
+A host can also be reached over TCP on a private tunnel address (for example a
+WireGuard network between your server and your laptop), with no ssh on either side.
+The caller proves itself with an Ed25519 key, so there is no shared secret and no
+password to leak. Nothing listens unless `agent_host.gate_listen` is set.
+
+On the machine that runs the host:
+
+```yaml
+agent_host:
+  gate_listen: "10.77.0.2:7747"          # the machine's tunnel address, never 0.0.0.0
+  gate_allowed_sources: ["10.77.0.1"]    # the server's tunnel address; required
+```
+
+On the HQ server, make a key for the host and read its public half:
+
+```
+hq host gate-key laptop
+```
+
+Then, on the machine, authorize it from the server's tunnel address only:
+
+```
+hq host authorize --gate-key <public key> --from 10.77.0.1 laptop
+```
+
+and point the server's config at the machine:
+
+```yaml
+agent_host:
+  hosts:
+    laptop:
+      transport: tcp
+      addr: "10.77.0.2:7747"
+```
+
+How it holds up:
+
+- The listener refuses to start on an unspecified address, on an address that is not loopback
+  or private (a public one), or with an empty `gate_allowed_sources`. A gate that is configured
+  but invalid stops `hq host serve` before it starts anything, instead of leaving you unsure
+  whether it is open. If the address is one the machine does not have yet (the tunnel comes up
+  after login), the host starts and the gate binds as soon as the address exists. A config file
+  that cannot be read at all leaves the gate off, with a warning.
+- A source outside `gate_allowed_sources` gets a closed connection and nothing else. An
+  allowed source gets a one-line challenge with a fresh random nonce. A caller whose key is not in
+  `~/.hq/gate_authorized_keys` (or who connects from an address that key is not pinned
+  to with `from=`) gets a closed connection, with no reply to tell it why.
+- The signature covers the nonce and a digest of the request, so a recorded exchange
+  cannot be replayed, and the request is read only after the key is known. The request
+  then goes through the same method allowlist as `hq host gate`.
+- Limits: 5 s to authenticate, 10 s to read and write, 16 connections at once. There is no
+  lockout after failures, because keys cannot be guessed and a lockout would let anyone who
+  can reach the gate from the allowed address shut the real caller out. Whoever can connect
+  from an allowed address can still hold the 16 slots for a few seconds each, which is why
+  `gate_allowed_sources` should be only the server's address on the tunnel.
+- The authorized keys file is read on every connection, so revoking a key takes effect at
+  once. It and the key files must be plain files (no links) owned by the user running HQ; the
+  authorized keys file must not be writable by group or others, and a key file not readable by
+  them. Otherwise the gate refuses every key.
+- The chat shell cannot read `~/.hq/gate/*` or write `~/.hq/gate_authorized_keys`. If you point
+  `gate_key_file` or `gate_authorized_keys` somewhere else, keep that path out of reach of
+  agents yourself.
+- The key can start any command as you inside the agent sandbox, like an ssh login: keep
+  `gate_allowed_sources` to the one address the server uses on the tunnel.
+
+What the gate does not do: it does not encrypt, and the server does not prove who it is to the
+caller. Both come from the tunnel (WireGuard encrypts and only the peer holding the other key
+can answer on that address). Use it on a machine only you log in to: on a shared machine
+another local user could listen on the tunnel address while the host is down and receive the
+server's calls, which include the HQ MCP token. Use the ssh transport there. Signed replies and a
+pinned server key would close this and are listed in `TECHDEBT.md`.
+
+The wire protocol is written out in `crates/hq-gate/src/lib.rs`.
+
 ## Day to day
 
 - A call costs one ssh round trip plus about 40 ms for the gate on the laptop;

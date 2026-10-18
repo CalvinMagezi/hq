@@ -22,6 +22,11 @@ const HQ_KEY_FILES: &[&str] = &[
     ".hq/secret.key",
 ];
 
+/// Where this machine keeps the signing keys it uses to call a host's TCP gate, and the file that
+/// lists which keys may call this machine's gate.
+const HQ_GATE_KEY_DIR: &str = ".hq/gate";
+const HQ_GATE_AUTHORIZED_KEYS: &str = ".hq/gate_authorized_keys";
+
 const DOCKER_SOCKETS: &[&str] = &["/var/run/docker.sock", "/run/docker.sock"];
 
 /// Relative to `XDG_RUNTIME_DIR`.
@@ -127,6 +132,7 @@ fn masked_files(home: Option<&Path>) -> Vec<PathBuf> {
     if let Some(home) = home {
         files.extend(HQ_KEY_FILES.iter().map(|rel| home.join(rel)));
         files.extend(ssh_private_keys(&home.join(".ssh")));
+        files.extend(gate_key_files(&home.join(HQ_GATE_KEY_DIR)));
     }
     files
 }
@@ -137,15 +143,16 @@ fn readonly_files(home: Option<&Path>) -> Vec<PathBuf> {
     let Some(home) = home else {
         return Vec::new();
     };
-    let ssh = home.join(".ssh");
-    let Ok(entries) = std::fs::read_dir(&ssh) else {
-        return Vec::new();
-    };
-    entries
-        .flatten()
-        .map(|e| e.path())
-        .filter(|p| p.is_file() && is_authorized_keys(p))
-        .collect()
+    let mut files = vec![home.join(HQ_GATE_AUTHORIZED_KEYS)];
+    if let Ok(entries) = std::fs::read_dir(home.join(".ssh")) {
+        files.extend(
+            entries
+                .flatten()
+                .map(|e| e.path())
+                .filter(|p| p.is_file() && is_authorized_keys(p)),
+        );
+    }
+    files
 }
 
 fn is_authorized_keys(path: &Path) -> bool {
@@ -202,6 +209,18 @@ fn ssh_private_keys(ssh_dir: &Path) -> Vec<PathBuf> {
                 name.ends_with(".pub") || SSH_PUBLIC_FILES.iter().any(|f| name.starts_with(f));
             !public
         })
+        .collect()
+}
+
+/// Every file in the gate key directory: each is a private signing key.
+fn gate_key_files(dir: &Path) -> Vec<PathBuf> {
+    let Ok(entries) = std::fs::read_dir(dir) else {
+        return Vec::new();
+    };
+    entries
+        .flatten()
+        .map(|e| e.path())
+        .filter(|p| p.is_file())
         .collect()
 }
 
