@@ -18,7 +18,18 @@ Date: 2026-10-18. Machine: macOS 26.6 on Apple Silicon, Rust 1.98, Xcode command
 | Run directory under a writable temp dir | The host refuses to sandbox an agent (`sandbox_unavailable`), which is a good guard but trips up anyone who puts the run dir in `/tmp` |
 | Unix socket path | macOS limits it to 104 characters, so long scratch paths break `host.sock` |
 
-Not covered here, and why: folder-privacy (TCC) prompts and which process they name need someone at the screen; a Developer ID signature and notarization need a paid account; the Gatekeeper cost for a downloaded, un-notarized app was not measured.
+Folder-privacy (macOS TCC) checks, run with a person at the screen to answer the prompts. Each host ran as its own launchd job so the prompt names the right program. The decisions and the program they were credited to were read from the unified log (`tcclog.py`).
+
+| Check | Result |
+|---|---|
+| Ad-hoc signed `hq`, first read of `~/Documents/HQ` from a sandboxed pane | macOS credits the access to the `hq` binary itself (read from the log). The pane blocks until it is answered (18.7 s here, however long the person takes) |
+| Same binary after an update, re-signed ad-hoc | The code hash changes and the access is decided again (34 s blocked, so a prompt waited for an answer). An agent started with nobody at the screen hangs |
+| Binary signed with a self-made certificate, then updated and re-signed with the same certificate | The designated requirement is unchanged (`identifier` plus certificate) and the updated binary ran in 0.1 s with no prompt |
+| Host started by a `.app` | macOS credits the access to the app (its bundle id), not to the `hq` child |
+| Host as its own LaunchAgent, app killed | Host (same pid) and a running pane survived |
+| Host as a child of the app, app killed with SIGTERM | The orphaned host and its pane also survived. Survival does not separate the two shapes; attribution and lifecycle control do |
+
+Not covered here, and why: a Developer ID signature and notarization need a paid account; the Gatekeeper cost for a downloaded, un-notarized app was not measured; whether the very first prompt appeared for the self-signed binary and for the app was not confirmed by the person at the screen (the pane returned in about two seconds).
 
 ## Repeat it
 
@@ -64,5 +75,18 @@ $WORK/hq-copy host stop --dir ~/.hq-spike-run
 ```
 
 For the hardened-runtime variant, sign the copy with `codesign --force --options runtime -s -` instead.
+
+Folder-privacy checks (needs you at the screen; the prompts appear on your display):
+
+```
+export WORK=$(mktemp -d); cp "$(command -v hq)" $WORK/hq-a && codesign --force -s - $WORK/hq-a
+printf 'ws_port: 5791\n' > $WORK/config.yaml
+. tcc/lib.sh; start_host a $WORK/hq-a
+python3 tcc/probe.py ~/.hqs-spike/a ~/Documents/<a-folder-you-can-read>   # answer the prompt
+python3 tcc/tcclog.py 120 hq-a                                          # who was credited, allowed or denied
+stop_host a
+```
+
+Change the binary and re-sign it (`install_name_tool -add_rpath /usr/lib/x hq-a; codesign --force -s - hq-a`) to see the prompt return. Repeat with a binary signed by a certificate you made yourself to see it stay quiet. Use `/usr/bin/log`, not the shell builtin.
 
 Stop the web server with `kill` on the pid it printed, and delete `$WORK` and `~/.hq-spike-run` afterwards.
