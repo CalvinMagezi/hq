@@ -1,0 +1,28 @@
+--- a/src/interface/ipv6_addr_flags.rs
++++ b/src/interface/ipv6_addr_flags.rs
+@@ -48,9 +48,16 @@
+ 
+ // Platform dispatch for `get_ipv6_addr_flags`, called from `unix_interfaces()`.
+ 
+-#[cfg(target_vendor = "apple")]
++// libc defines `in6_ifreq` for macOS only, so the ioctl version cannot build for iOS and the
++// other Apple targets; they report no flags, like Linux does on its fallback path.
++#[cfg(target_os = "macos")]
+ pub(crate) use crate::os::darwin::ipv6_addr_flags::*;
+ 
++#[cfg(all(target_vendor = "apple", not(target_os = "macos")))]
++pub(crate) fn get_ipv6_addr_flags(_ifname: &str, _addr: &std::net::Ipv6Addr) -> Ipv6AddrFlags {
++    Ipv6AddrFlags::default()
++}
++
+ #[cfg(any(target_os = "freebsd", target_os = "openbsd", target_os = "netbsd"))]
+ pub(crate) use crate::os::bsd::ipv6_addr_flags::*;
+ 
+--- a/src/os/darwin/mod.rs
++++ b/src/os/darwin/mod.rs
+@@ -1,4 +1,5 @@
+ pub mod flags;
++#[cfg(target_os = "macos")]
+ pub mod ipv6_addr_flags;
+ pub mod mtu;
+ #[cfg(feature = "gateway")]
