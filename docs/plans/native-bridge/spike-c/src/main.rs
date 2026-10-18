@@ -30,6 +30,9 @@ use std::{
 
 const HUB_ALPN: &[u8] = b"hq/hub/1";
 const REJECT_CODE: u32 = 403;
+const SUPERSEDED_CODE: u32 = 409;
+/// One measurement round may not take longer than this, so a dead peer cannot stall the others.
+const ROUND_TIMEOUT: Duration = Duration::from_secs(60);
 const KEY_BYTES: usize = 32;
 const MAX_REPLY_BYTES: usize = 2_000_000;
 const DEFAULT_STATUS_SECS: u64 = 30;
@@ -136,6 +139,12 @@ fn path_kind(conn: &Connection) -> &'static str {
     }
 }
 
+/// The transport's own round-trip time on the selected path, apart from anything the host adds.
+fn path_rtt(conn: &Connection) -> Option<Duration> {
+    let paths = conn.paths();
+    paths.iter().find(|p| p.is_selected()).map(|p| p.rtt())
+}
+
 /// Waits briefly for a direct path to take over from a relay path, then reports what is in use.
 async fn settle_path(conn: &Connection) -> &'static str {
     let deadline = Instant::now() + PATH_WAIT;
@@ -196,10 +205,22 @@ impl ProtocolHandler for Hub {
     async fn accept(&self, conn: Connection) -> Result<(), AcceptError> {
         let id = conn.remote_id();
         self.reached_handler.fetch_add(1, Ordering::SeqCst);
-        self.live.lock().unwrap().insert(id, conn.clone());
+        // A device that reconnects supersedes its old connection, which may be a dead one
+        // that has not timed out yet. Closing it keeps one live connection per device.
+        let previous = self.live.lock().unwrap().insert(id, conn.clone());
+        if let Some(old) = previous {
+            old.close(SUPERSEDED_CODE.into(), b"replaced by a newer connection");
+        }
         println!("  [hub] device {} connected", id.fmt_short());
         let why = conn.closed().await;
-        self.live.lock().unwrap().remove(&id);
+        // Only remove our own entry: a newer connection may have taken the slot.
+        let mut live = self.live.lock().unwrap();
+        if live
+            .get(&id)
+            .is_some_and(|c| c.stable_id() == conn.stable_id())
+        {
+            live.remove(&id);
+        }
         println!("  [hub] device {} gone: {why}", id.fmt_short());
         Ok(())
     }
@@ -264,19 +285,32 @@ async fn report_devices(live: &Arc<Mutex<HashMap<EndpointId, Connection>>>, call
         .iter()
         .map(|(k, v)| (*k, v.clone()))
         .collect();
-    for (id, conn) in devices {
-        match measure(&conn, calls).await {
-            Ok(t) => println!(
-                "[hub] device {} path={} calls={} p50={:?} p95={:?} max={:?}",
-                id.fmt_short(),
-                path_kind(&conn),
-                t.len(),
-                percentile(&t, 50),
-                percentile(&t, 95),
-                t[t.len() - 1]
-            ),
-            Err(e) => println!("[hub] device {} status failed: {e:#}", id.fmt_short()),
-        }
+    let rounds: Vec<_> = devices
+        .into_iter()
+        .map(|(id, conn)| tokio::spawn(report_one(id, conn, calls)))
+        .collect();
+    for round in rounds {
+        let _ = round.await;
+    }
+}
+
+async fn report_one(id: EndpointId, conn: Connection, calls: usize) {
+    match tokio::time::timeout(ROUND_TIMEOUT, measure(&conn, calls)).await {
+        Ok(Ok(t)) => println!(
+            "[hub] device {} path={} quic_rtt={:?} calls={} p50={:?} p95={:?} max={:?}",
+            id.fmt_short(),
+            path_kind(&conn),
+            path_rtt(&conn).unwrap_or_default(),
+            t.len(),
+            percentile(&t, 50),
+            percentile(&t, 95),
+            t[t.len() - 1]
+        ),
+        Ok(Err(e)) => println!("[hub] device {} status failed: {e:#}", id.fmt_short()),
+        Err(_) => println!(
+            "[hub] device {} did not answer within {ROUND_TIMEOUT:?}",
+            id.fmt_short()
+        ),
     }
 }
 

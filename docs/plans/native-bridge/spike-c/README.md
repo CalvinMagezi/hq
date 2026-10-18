@@ -66,5 +66,33 @@ public relays, for comparison only: they are meant for development and testing.
 | Stranger | Handshake completes, no answer, connection closed by the hub with code 403 and reason "not paired" |
 | Hub restart on the same key | The device kept its dead connection for about 48 s before it noticed, then reconnected in about 30 ms with the same pairing. Dead-peer detection needs a shorter keep-alive; the cost is data on mobile (N5, N8) |
 
-Real-network rows (home fibre, a carrier hotspot, UDP blocked) are recorded in section 16 of the
-plan note.
+## Real-network results (home fibre in Uganda to a London VPS, 2026-10-18)
+
+The hub's UDP port was open only to the test machine's public address, for about an hour, and
+closed afterwards. Direct only (`--relay none`).
+
+| Check | Result |
+|---|---|
+| Path | Direct in all 10 connect trials and in every status sample; never relayed |
+| Connect time, 10 trials | 319 to 360 ms, median about 328 ms. That is two round trips: the retry token, then the handshake |
+| Transport round trip (QUIC path RTT) | 158 to 166 ms. ICMP ping to the same server: 155 to 241 ms, mean 173 ms |
+| `host.status` called down the connection, 250 calls | p50 174 to 176 ms, p95 220 to 277 ms, max 293 ms. About 15 ms above the transport round trip |
+| Unpaired key (stranger) | Handshake completes (about 430 ms), then closed with 403 before any handler runs |
+| Idle traffic, 2 minutes, hub sending nothing | About 90 kB in total, roughly 750 bytes per second, about 2.7 MB per hour. A single short sample; worth chasing before a mobile app (N8) |
+| Active traffic, calls every 0.2 s | About 0.8 kB per call, both directions |
+| Dead peer | A device whose process was killed, or a hub restarted on the same key, is noticed only after the QUIC idle timeout (about 30 to 48 s). Until then calls to it hang |
+
+## Lessons for phase 1
+
+- Keep one live connection per device. A device that reconnects while its dead connection has not
+  timed out yet must replace it, and the old connection's cleanup must only remove its own entry.
+  The first version of this hub got that wrong and lost its only live connection.
+- Put a timeout on every call to a device and run devices concurrently, so one silent laptop
+  cannot stall the others.
+- Dead-peer detection needs a shorter keep-alive than the default. The price is data, which
+  matters on mobile; the idle figure above says it is not free even now.
+- The key check belongs in a post-handshake hook (it sees the peer id). The incoming filter only
+  sees addresses, so it can ask for a retry token but cannot refuse by key.
+
+Rows still to measure: a carrier hotspot, public wifi, UDP blocked with a relay, sleep and wake,
+and a change of network mid-session (N1 to N5).
