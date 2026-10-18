@@ -1,0 +1,15 @@
+# Reason: memory detection reads /proc/meminfo only on linux; off Linux it assumes 16 GB, so a phone would be told it has far more RAM than it does.
+
+diff --git a/crates/hq-core/src/hardware.rs b/crates/hq-core/src/hardware.rs
+index cad35c7..162e2b1 100644
+--- a/crates/hq-core/src/hardware.rs
++++ b/crates/hq-core/src/hardware.rs
+@@ -192,7 +192,7 @@ fn detect_total_memory_gb() -> u64 {
+         }
+     }
+ 
+-    #[cfg(target_os = "linux")]
++    #[cfg(any(target_os = "linux", target_os = "android"))]
+     {
+         if let Ok(content) = std::fs::read_to_string("/proc/meminfo") {
+             for line in content.lines() {

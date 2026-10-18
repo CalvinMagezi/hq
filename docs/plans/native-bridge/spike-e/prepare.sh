@@ -3,7 +3,7 @@
 set -euo pipefail
 repo=${1:?path to a clone of the hq repo}
 dest=${2:-../hq-android-scratch}
-base=${BASE:-f81d703}
+base=${BASE:-c39a328}
 here=$(cd "$(dirname "$0")" && pwd)
 git -C "$repo" worktree add --detach "$dest" "$base"
 for patch in "$here"/patches/*.patch; do

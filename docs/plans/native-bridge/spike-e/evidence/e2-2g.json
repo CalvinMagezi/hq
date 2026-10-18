@@ -1,0 +1,87 @@
+{
+ "label": "hqe-2g",
+ "serial": "emulator-5570",
+ "android": "16 (api 36)",
+ "abi": "arm64-v8a",
+ "mem_total_kB": 2531868,
+ "cpus": 4,
+ "webview": "Current WebView package (name, version): (com.google.android.webview, 133.0.6943.137) Valid package com.google.android.webview (versionName: 133.0.6943.137, versionCode: 694313732, targetSdkVersion: 34) is installed/enabled for all users",
+ "start_empty_s": 0.24,
+ "run1_start": {
+  "VmRSS": 37888,
+  "VmHWM": 37888,
+  "Threads": 11,
+  "PSS_kB": 35692
+ },
+ "run1_30s": {
+  "VmRSS": 37312,
+  "VmHWM": 37888,
+  "Threads": 11,
+  "PSS_kB": 35035
+ },
+ "doctor_memory": [],
+ "cpu_idle": "PID USER PR NI VIRT RES SHR S[%CPU] %MEM TIME+ ARGS 5996 shell 20 0 12G 36M 24M S 0.0 1.4 0:00.17 hq web --no-open --port 5678",
+ "notes_bytes": 49964039,
+ "push_notes_s": 0.3,
+ "start_with_notes_s": 0.21,
+ "run2_before_index": {
+  "VmRSS": 38144,
+  "VmHWM": 38144,
+  "Threads": 14,
+  "PSS_kB": 35579
+ },
+ "reindex_s": 4.7,
+ "reindex_rc": "0",
+ "reindex_peaks_kB": {
+  "6079": {
+   "VmHWM": 38144,
+   "VmRSS": 38144
+  },
+  "6109": {
+   "VmHWM": 88064,
+   "VmRSS": 88064
+  }
+ },
+ "vault_db_bytes": [
+  "64339968"
+ ],
+ "searches": {
+  "first_a": {
+   "status": 200,
+   "bytes": 7964,
+   "ms": 20
+  },
+  "first_b": {
+   "status": 200,
+   "bytes": 8011,
+   "ms": 42
+  },
+  "first_c": {
+   "status": 200,
+   "bytes": 8044,
+   "ms": 41
+  },
+  "first_d": {
+   "status": 200,
+   "bytes": 7965,
+   "ms": 20
+  },
+  "warm_repeat": {
+   "status": 200,
+   "bytes": 7964,
+   "ms": 19
+  }
+ },
+ "run2_after_search": {
+  "VmRSS": 57376,
+  "VmHWM": 57376,
+  "Threads": 14,
+  "PSS_kB": 55055
+ },
+ "run2_idle_45s": {
+  "VmRSS": 57888,
+  "VmHWM": 57888,
+  "Threads": 11,
+  "PSS_kB": 55312
+ }
+}

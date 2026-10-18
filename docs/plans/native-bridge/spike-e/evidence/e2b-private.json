@@ -1,0 +1,29 @@
+{
+ "label": "private",
+ "vault": "/data/local/tmp/hqhome/.vault",
+ "serial": "emulator-5572",
+ "web_up": true,
+ "procs": {},
+ "rss_kB": {},
+ "daemon_log_tail": [],
+ "doctor_watcher": [
+  "Search index",
+  "ok  watching Notebooks with file events; 0 waiting; last event 20s ago",
+  "ok  200 notes in the keyword index; last note indexed 20s ago"
+ ],
+ "seconds_until_new_note_is_searchable": 0.0,
+ "vault_files": [
+  ".",
+  "..",
+  "vault.db",
+  "vault.db-shm",
+  "vault.db-wal"
+ ],
+ "db_files": [
+  " 7372",
+  "2883584 vault.db",
+  "32768 vault.db-shm",
+  "4618552 vault.db-wal",
+  ""
+ ]
+}

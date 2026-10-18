@@ -2,7 +2,7 @@
 # openssl-sys finds no OpenSSL. Extending the cfg builds OpenSSL from source with the NDK (openssl-src).
 
 diff --git a/crates/hq-cli/Cargo.toml b/crates/hq-cli/Cargo.toml
-index 80bc66a..f2ead60 100644
+index 5be0c20..b377c33 100644
 --- a/crates/hq-cli/Cargo.toml
 +++ b/crates/hq-cli/Cargo.toml
 @@ -55,7 +55,7 @@ mimalloc = { version = "0.1", default-features = false }
@@ -13,4 +13,4 @@ index 80bc66a..f2ead60 100644
 +[target.'cfg(any(target_os = "linux", target_os = "android"))'.dependencies]
  openssl-sys = { version = "*", features = ["vendored"] }
  
- [target.'cfg(windows)'.dependencies]
+ [target.'cfg(unix)'.dependencies]

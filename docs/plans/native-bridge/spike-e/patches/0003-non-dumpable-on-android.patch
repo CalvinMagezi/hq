@@ -1,0 +1,24 @@
+# Reason: set_non_dumpable (stops bash children reading the daemon environment) is a no-op off linux, but prctl works on Android.
+
+diff --git a/crates/hq-agent/src/bash_sandbox.rs b/crates/hq-agent/src/bash_sandbox.rs
+index 24e662a..008b6c1 100644
+--- a/crates/hq-agent/src/bash_sandbox.rs
++++ b/crates/hq-agent/src/bash_sandbox.rs
+@@ -403,7 +403,7 @@ pub fn hide_process_environment() {
+     DONE.get_or_init(set_non_dumpable);
+ }
+ 
+-#[cfg(target_os = "linux")]
++#[cfg(any(target_os = "linux", target_os = "android"))]
+ fn set_non_dumpable() {
+     // SAFETY: PR_SET_DUMPABLE takes plain integer arguments and touches no
+     // memory owned by Rust.
+@@ -413,7 +413,7 @@ fn set_non_dumpable() {
+     }
+ }
+ 
+-#[cfg(not(target_os = "linux"))]
++#[cfg(not(any(target_os = "linux", target_os = "android")))]
+ fn set_non_dumpable() {}
+ 
+ /// The working sandbox backend on this host, probed once per process.
