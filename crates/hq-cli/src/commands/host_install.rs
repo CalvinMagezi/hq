@@ -388,6 +388,47 @@ pub fn authorize(key: Option<&str>, from: Option<&str>) -> Result<()> {
     Ok(())
 }
 
+/// `hq host authorize --gate-key <key> --from <address> [label]`: lets one server call this
+/// machine's TCP gate. The file is private and read on every connection.
+pub fn authorize_gate(
+    gate_key: Option<&str>,
+    from: Option<&str>,
+    label: Option<&str>,
+) -> Result<()> {
+    let (Some(key), Some(from)) = (gate_key, from) else {
+        bail!(
+            "usage: hq host authorize --gate-key '<public key from hq host gate-key>' --from <this server's address on the tunnel> [label]"
+        );
+    };
+    let sources = from
+        .split(',')
+        .map(|a| {
+            a.trim()
+                .parse::<std::net::IpAddr>()
+                .with_context(|| format!("{a:?} is not an address"))
+        })
+        .collect::<Result<Vec<_>>>()?;
+    let file = match hq_core::config::HqConfig::load() {
+        Ok(config) => hq_tools::agent_host::gate_authorized_keys_path(&config.agent_host),
+        Err(_) => home()?.join(".hq/gate_authorized_keys"),
+    };
+    let added = hq_gate::append_authorized(&file, key, &sources, label.unwrap_or("server"))
+        .map_err(|e| anyhow::anyhow!("{e}"))?;
+    if added {
+        println!(
+            "key added to {}: it can call the TCP gate, from {from} only",
+            file.display()
+        );
+    } else {
+        println!("that key is already in {}", file.display());
+    }
+    println!("The gate runs only when agent_host.gate_listen is set, on one tunnel address.");
+    println!(
+        "The key can start commands as you, inside the agent sandbox; treat it like an ssh login."
+    );
+    Ok(())
+}
+
 /// A host name for this machine: its hostname as HQ's name rules allow it.
 pub(crate) fn default_host_name(hostname: &str) -> String {
     let mut name: String = hostname

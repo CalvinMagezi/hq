@@ -1,0 +1,18 @@
+[package]
+name = "hq-gate"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "The host gate over TCP: a signed one-request exchange for a tunnel address"
+
+[dependencies]
+base64 = { workspace = true }
+ed25519-dalek = "2"
+libc = "0.2"
+rand = { workspace = true }
+sha2 = { workspace = true }
+thiserror = { workspace = true }
+tracing = { workspace = true }
+
+[dev-dependencies]
+tempfile = { workspace = true }

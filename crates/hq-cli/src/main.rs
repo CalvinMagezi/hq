@@ -109,7 +109,7 @@ enum Commands {
 
     /// Run or inspect the built-in agent host (long-lived coding agents in pseudo-terminals)
     Host {
-        /// serve (run the host in this terminal), status, stop, lockdown [reason] (stop every agent and refuse new ones), unlock (lift a lockdown; only on this machine), install (run it as a login service), sign <path> (macOS: give an hq binary the stable local signature when this machine has one), join (print this machine's join code), add <code> (pair a machine, on the HQ side), check <host>, authorize (pin a remote key to the gate), report (used by agent hooks), or gate (the ssh forced command for remote access)
+        /// serve (run the host in this terminal), status, stop, lockdown [reason] (stop every agent and refuse new ones), unlock (lift a lockdown; only on this machine), install (run it as a login service), sign <path> (macOS: give an hq binary the stable local signature when this machine has one), join (print this machine's join code), add <code> (pair a machine, on the HQ side), check <host>, authorize (pin a remote key to the gate; with --gate-key, a server's key for the TCP gate), gate-key <host> (make this server's key for a host's TCP gate), report (used by agent hooks), or gate (the ssh forced command for remote access)
         #[arg(default_value = "status")]
         sub: String,
         /// add: the join code; check: the host name; join: the name for this machine; lockdown: the reason; sign: the binary to sign
@@ -129,7 +129,10 @@ enum Commands {
         /// authorize only: the ssh public key to pin to `hq host gate`
         #[arg(long)]
         key: Option<String>,
-        /// authorize only: the address the key may connect from (ssh `from=`)
+        /// authorize only: a server's gate public key (from `hq host gate-key`) for the TCP gate
+        #[arg(long)]
+        gate_key: Option<String>,
+        /// authorize only: the address the key may connect from (ssh `from=`, or the TCP gate's `from=`)
         #[arg(long)]
         from: Option<String>,
         /// relay and sandbox-init (run inside a Linux sandbox): the loopback port to serve
@@ -623,6 +626,7 @@ async fn async_main() -> Result<()> {
         max_agents,
         max_starts,
         key,
+        gate_key,
         from,
         port,
         unix,
@@ -643,6 +647,7 @@ async fn async_main() -> Result<()> {
             max_agents: *max_agents,
             max_starts: *max_starts,
             key: key.clone(),
+            gate_key: gate_key.clone(),
             from: from.clone(),
             port: *port,
             unix: unix.clone(),
@@ -918,6 +923,7 @@ async fn dispatch(command: Commands, config: &HqConfig) -> Result<()> {
             max_agents,
             max_starts,
             key,
+            gate_key,
             from,
             port,
             unix,
@@ -932,6 +938,7 @@ async fn dispatch(command: Commands, config: &HqConfig) -> Result<()> {
                 max_agents,
                 max_starts,
                 key,
+                gate_key,
                 from,
                 port,
                 unix,

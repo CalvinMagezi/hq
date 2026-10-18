@@ -2783,6 +2783,7 @@ dependencies = [
  "hq-daemon",
  "hq-db",
  "hq-export",
+ "hq-gate",
  "hq-host",
  "hq-llm",
  "hq-mcp",
@@ -2924,6 +2925,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "hq-gate"
+version = "0.9.1"
+dependencies = [
+ "base64 0.22.1",
+ "ed25519-dalek",
+ "libc",
+ "rand 0.8.8",
+ "sha2 0.10.9",
+ "tempfile",
+ "thiserror 2.0.18",
+ "tracing",
+]
+
+[[package]]
 name = "hq-host"
 version = "0.9.1"
 dependencies = [
@@ -3055,6 +3070,7 @@ dependencies = [
  "hq-core",
  "hq-db",
  "hq-export",
+ "hq-gate",
  "hq-host",
  "hq-llm",
  "hq-memory",

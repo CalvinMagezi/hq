@@ -35,6 +35,8 @@ const HOME_SECRET_PATHS: &[&str] = &[
     // gives away a key that signs as HQ.
     ".hq/hq-signing.keychain-db",
     ".hq/signing.keychain",
+    ".hq/gate",
+    ".hq/gate_authorized_keys",
     ".herenow/credentials",
 ];
 
@@ -334,6 +336,8 @@ mod tests {
             ".aws/credentials",
             ".hq/config.yaml",
             ".hq/hq-signing.keychain-db",
+            ".hq/gate/laptop.key",
+            ".hq/gate_authorized_keys",
             ".netrc",
         ] {
             assert_eq!(

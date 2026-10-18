@@ -2,6 +2,7 @@
 resolver = "2"
 members = [
     "crates/hq-cli",
+    "crates/hq-gate",
     "crates/hq-core",
     "crates/hq-vault",
     "crates/hq-db",
@@ -145,6 +146,7 @@ hq-web = { path = "crates/hq-web" }
 hq-memory = { path = "crates/hq-memory" }
 hq-update = { path = "crates/hq-update" }
 hq-host = { path = "crates/hq-host" }
+hq-gate = { path = "crates/hq-gate" }
 
 
 [profile.release]
