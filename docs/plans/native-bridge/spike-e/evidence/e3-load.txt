@@ -1,0 +1,54 @@
+[    9s] seeded vault files: 2000
+[    9s] phantom settings: monitor=null max_phantom_processes=32
+[   15s] hq processes=2 pids=7673,7690 app=7606 rss=83792 kB
+[   45s] hq processes=2 pids=7690,7746 app=7606 rss=66720 kB
+[   75s] hq processes=2 pids=7690,7814 app=7606 rss=67248 kB
+[  105s] hq processes=2 pids=7690,7838 app=7606 rss=68948 kB
+[  135s] hq processes=1 pids=7690 app=7606 rss=92984 kB
+[  165s] hq processes=1 pids=7690 app=7606 rss=95056 kB
+[  195s] hq processes=1 pids=7690 app=7606 rss=96500 kB
+[  225s] hq processes=1 pids=7690 app=7606 rss=102252 kB
+[  255s] hq processes=1 pids=7690 app=7606 rss=97932 kB
+[  285s] hq processes=1 pids=7690 app=7606 rss=89888 kB
+[  315s] hq processes=2 pids=7690,8007 app=7606 rss=46392 kB
+[  345s] hq processes=2 pids=7690,8036 app=7606 rss=50636 kB
+[  375s] hq processes=2 pids=7690,8066 app=7606 rss=79680 kB
+[  406s] hq processes=1 pids=7690 app=7606 rss=73720 kB
+[  436s] hq processes=1 pids=7690 app=7606 rss=75248 kB
+[  466s] hq processes=1 pids=7690 app=7606 rss=74580 kB
+[  496s] hq processes=1 pids=7690 app=7606 rss=76672 kB
+[  526s] hq processes=1 pids=7690 app=7606 rss=83384 kB
+[  556s] hq processes=2 pids=7690,8207 app=7606 rss=48180 kB
+[  586s] hq processes=2 pids=7690,8232 app=7606 rss=49448 kB
+[  616s] hq processes=2 pids=7690,8256 app=7606 rss=72064 kB
+[  646s] hq processes=1 pids=7690 app=7606 rss=68356 kB
+[  676s] hq processes=1 pids=7690 app=7606 rss=94132 kB
+[  706s] hq processes=1 pids=7690 app=7606 rss=94600 kB
+[  736s] hq processes=1 pids=7690 app=7606 rss=103544 kB
+[  766s] hq processes=2 pids=7690,8385 app=7606 rss=68404 kB
+[  797s] hq processes=2 pids=7690,8410 app=7606 rss=68332 kB
+[  827s] hq processes=2 pids=7690,8434 app=7606 rss=70676 kB
+[  857s] hq processes=1 pids=7690 app=7606 rss=98284 kB
+[  887s] hq processes=1 pids=7690 app=7606 rss=102300 kB
+[  917s] hq processes=1 pids=7690 app=7606 rss=96648 kB
+[  947s] hq processes=1 pids=7690 app=7606 rss=119812 kB
+[  977s] hq processes=2 pids=7690,8551 app=7606 rss=92336 kB
+[ 1007s] hq processes=2 pids=7690,8608 app=7606 rss=92276 kB
+[ 1037s] hq processes=2 pids=7690,8651 app=7606 rss=97004 kB
+[ 1067s] hq processes=1 pids=7690 app=7606 rss=115800 kB
+[ 1097s] hq processes=1 pids=7690 app=7606 rss=115088 kB
+[ 1127s] hq processes=1 pids=7690 app=7606 rss=118048 kB
+[ 1157s] hq processes=1 pids=7690 app=7606 rss=111808 kB
+[ 1188s] hq processes=1 pids=7690 app=7606 rss=119144 kB
+[ 1218s] hq processes=1 pids=7690 app=7606 rss=121808 kB
+[ 1248s] --- LOAD lines (first, last)
+    10-18 21:30:15.297  7606  7670 I HQSPIKE : LOAD start minutes=20
+    10-18 21:30:21.171  7606  7670 I HQSPIKE : LOAD it=1 reindexMs=5762 searchMs=112 rc=0 
+    10-18 21:49:52.005  7606  7670 I HQSPIKE : LOAD it=74 reindexMs=6414 searchMs=109 rc=0 
+    10-18 21:50:07.906  7606  7670 I HQSPIKE : LOAD it=75 reindexMs=5787 searchMs=112 rc=0 
+    10-18 21:50:17.907  7606  7670 I HQSPIKE : LOAD done iterations=75
+[ 1248s] --- LOAD iterations logged: 75
+[ 1248s] --- system lines about the package being killed or trimmed
+    10-18 21:30:21.059   661   692 I ActivityManager: Process PhantomProcessRecord {647fff3 7673:7606:libhq.so/u0a213} died
+    10-18 21:40:43.069   661   692 I ActivityManager: Process PhantomProcessRecord {f924733 8272:7606:libhq.so/u0a213} died
+[ 1248s] done

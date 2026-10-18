@@ -1,0 +1,24 @@
+[   3s] launch: up after 1.8 s
+[   3s] running: hq child pid=6895 app pid=6799 health=200
+[  64s] after Home and 60 s: hq child pid=6895 app pid=6799 health=200
+[ 364s] after screen off for 300 s: hq child pid=6895 app pid=6799 health=200
+[ 377s] after swiping the app away in recents: hq child pid=6895 app pid=6799 health=200
+[ 377s] tasks: 0 mentions of the package
+[ 377s] service: * ServiceRecord{26507d2 u0 example.hq.spike/.HubService c:example.hq.spike} | isForeground=true foregroundId=1 types=0x40000000 foregroundNoti=Notification(channel=hub shortcut=null contentView=null vibrate=null sound=null defaults=0 flags=NO_CLEAR|FOREGROUND_SERVICE color=0x00000000 vis=PRIVATE) | * ServiceRecord{c3d5264 u0 example.hq.spike/org.chromium.content.app.SandboxedProcessService0:0 c:example.hq.spike}
+[ 378s] am kill: sent
+[ 383s] after am kill: hq child pid=6895 app pid=6799 health=200
+[ 383s] run-as kill -9 of the app process 6799
+[ 386s] after kill -9 of the app (sticky restart back in 0.1 s): hq child pid=7191 app pid=7166 health=200
+[ 386s] run-as kill -9 of the hq child 7191
+[ 396s] after kill -9 of the hq child only (the service does not respawn it): hq child pid=None app pid=7166 health=RemoteDisconnected
+[ 397s] am force-stop: sent
+[ 402s] after force-stop: hq child pid=None app pid=None health=RemoteDisconnected
+[ 402s] logcat (service and kill lines):
+    10-18 21:22:52.633  6799  6799 I HQSPIKE : service onStartCommand flags=0 startId=1 intent=present
+    10-18 21:22:52.636  6799  6799 I HQSPIKE : service onStartCommand flags=0 startId=2 intent=present
+    10-18 21:22:53.169  6799  6877 I HQSPIKE : hq web started (child of the service process)
+    10-18 21:29:14.836  7166  7166 I HQSPIKE : service onStartCommand flags=0 startId=3 intent=null (sticky restart)
+    10-18 21:29:14.956  7166  7181 I HQSPIKE : hq web started (child of the service process)
+    10-18 21:29:15.874  7166  7181 W HQSPIKE : hq web exited rc=137 after 0 s
+    10-18 21:29:26.531  7166  7166 I HQSPIKE : service onStartCommand flags=0 startId=4 intent=present
+    10-18 21:29:26.764  7166  7298 I HQSPIKE : hq web started (child of the service process)

@@ -1,0 +1,7 @@
+[  38s] baseline, screen on and plugged in: 5 probes ok, 0 failed in 30 s; hq /health=200; deep idle=ACTIVE; bucket=10
+[  38s] force-idle: Now forced in to deep idle mode
+[  98s] forced deep Doze, screen off: 10 probes ok, 0 failed in 60 s; hq /health=200; deep idle=IDLE; bucket=10
+[  98s] whitelist: Added: example.hq.spike
+[ 158s] forced Doze with the app on the battery optimization allow list: 11 probes ok, 0 failed in 60 s; hq /health=200; deep idle=IDLE; bucket=5
+[ 219s] App Standby bucket rare, not in Doze: 11 probes ok, 0 failed in 60 s; hq /health=200; deep idle=ACTIVE; bucket=40
+[ 219s] done
