@@ -136,7 +136,11 @@ agent_host:
 ```
 
 The listener is off unless `gate_listen` is set. It refuses to start on an unspecified address
-(`0.0.0.0`, `::`) so that it can never listen on the home network by accident.
+(`0.0.0.0`, `::`), and on any address that is not loopback or private (RFC 1918, carrier-grade NAT,
+link-local, IPv6 unique-local), so that it can never listen on the public internet by accident. A
+setting that fails these checks stops `hq host serve` before it starts anything. An address the
+machine does not have yet (the tunnel comes up after login) is retried in the background, so the
+host and its local agents still start.
 
 Protocol, version 1. Everything is ASCII lines, no length-prefixed binary.
 
@@ -156,9 +160,19 @@ Protocol, version 1. Everything is ASCII lines, no length-prefixed binary.
    closes. One request per connection, like the ssh gate's one process per call.
 
 Limits: 5 seconds for the whole authentication exchange, 10 seconds to read the request, at most
-16 connections at once (more are accepted and closed at once), at most 3 failed authentications per
-source per minute before that source is ignored for 60 seconds. Reads are bounded; nothing is
-parsed before the signature verifies. The log records source, key label and method, never params.
+16 connections at once (more are accepted and closed at once). There is deliberately no lockout after
+failed authentications: keys cannot be guessed, and a lockout would let anyone who can reach the gate
+from the one allowed address shut the real caller out. Reads are bounded; nothing is parsed before
+the signature verifies. The log records source, key label and method, never params.
+
+The protocol authenticates the caller, not the server, and encrypts nothing: the tunnel does both. That
+is sound on a machine only the owner logs in to. On a shared machine another local user could listen
+on the tunnel address while the host is down; use the ssh transport there. Signed replies with a
+pinned server key (a v2 of this protocol) would remove the assumption and are tracked in TECHDEBT.md.
+
+The authorized keys file and the key files must be plain files (no links) owned by the user running
+HQ, checked on the open handle; the authorized keys file must not be writable by group or others.
+The chat shell cannot read `~/.hq/gate/*` or write `~/.hq/gate_authorized_keys`.
 
 Why a signature and not a shared token: there is no secret to put in a join code or a chat message,
 a captured exchange cannot be replayed (fresh nonce, bound to the request), and revoking a server
@@ -198,9 +212,9 @@ the Mac keeps using the current URL.)
 
 - Unit tests for the line parser (oversized, truncated, extra lines, bad base64, wrong signature,
   signature over a different request, replay of a captured exchange on a new connection, unknown key,
-  `from=` mismatch, source not allowed, denied method, slow client, the connection cap, the failure
-  rate limit), a seeded randomized test that feeds the parser garbage and mutated valid exchanges (a
-  libFuzzer target is a follow-up, see TECHDEBT.md), and a refusal test for unspecified bind addresses.
+  `from=` mismatch, source not allowed, denied method, slow client, the connection cap, repeated
+  failures not locking out the real caller, a panicking handler not leaking a slot), a seeded randomized test that feeds the parser garbage and mutated valid exchanges (a
+  libFuzzer target is a follow-up, see TECHDEBT.md), and refusal tests for unspecified and public bind addresses.
 - An integration test that runs a real listener in a thread and drives it with `Transport::Tcp`.
 - Exit: on the owner's machine, Remote Login is off, Tailscale is off, the host is reached over the
   tunnel, a session starts from the Sessions page, and a 24 hour soak with sleep and wake loses no
