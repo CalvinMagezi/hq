@@ -68,7 +68,7 @@ public relays, for comparison only: they are meant for development and testing.
 
 ## Real-network results (home fibre in Uganda to a London VPS, 2026-10-18)
 
-The hub's UDP port was open only to the test machine's public address, for about an hour, and
+The hub's UDP port was open only to the test machine's public address, for under an hour, and
 closed afterwards. Direct only (`--relay none`).
 
 | Check | Result |
