@@ -1,0 +1,16 @@
+# Reason: native-tls pulls openssl-sys, and hq-cli vendors OpenSSL only for target_os = "linux". Android is "android", so
+# openssl-sys finds no OpenSSL. Extending the cfg builds OpenSSL from source with the NDK (openssl-src).
+
+diff --git a/crates/hq-cli/Cargo.toml b/crates/hq-cli/Cargo.toml
+index 80bc66a..f2ead60 100644
+--- a/crates/hq-cli/Cargo.toml
++++ b/crates/hq-cli/Cargo.toml
+@@ -55,7 +55,7 @@ mimalloc = { version = "0.1", default-features = false }
+ # target OpenSSL to find via pkg-config, so build OpenSSL from source
+ # instead — irrelevant on macOS/Windows, where native-tls uses the
+ # platform's own TLS backend and openssl-sys isn't even pulled in.
+-[target.'cfg(target_os = "linux")'.dependencies]
++[target.'cfg(any(target_os = "linux", target_os = "android"))'.dependencies]
+ openssl-sys = { version = "*", features = ["vendored"] }
+ 
+ [target.'cfg(windows)'.dependencies]
