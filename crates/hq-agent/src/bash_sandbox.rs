@@ -20,6 +20,8 @@ const HQ_KEY_FILES: &[&str] = &[
     ".hq/wallet.enc",
     ".hq/seed.enc",
     ".hq/secret.key",
+    ".hq/hq-signing.keychain-db",
+    ".hq/signing.keychain",
 ];
 
 /// Where this machine keeps the signing keys it uses to call a host's TCP gate, and the file that

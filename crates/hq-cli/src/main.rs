@@ -109,10 +109,10 @@ enum Commands {
 
     /// Run or inspect the built-in agent host (long-lived coding agents in pseudo-terminals)
     Host {
-        /// serve (run the host in this terminal), status, stop, lockdown [reason] (stop every agent and refuse new ones), unlock (lift a lockdown; only on this machine), install (run it as a login service), join (print this machine's join code), add <code> (pair a machine, on the HQ side), check <host>, authorize (pin a remote key to the gate; with --gate-key, a server's key for the TCP gate), gate-key <host> (make this server's key for a host's TCP gate), report (used by agent hooks), or gate (the ssh forced command for remote access)
+        /// serve (run the host in this terminal), status, stop, lockdown [reason] (stop every agent and refuse new ones), unlock (lift a lockdown; only on this machine), install (run it as a login service), sign <path> (macOS: give an hq binary the stable local signature when this machine has one), join (print this machine's join code), add <code> (pair a machine, on the HQ side), check <host>, authorize (pin a remote key to the gate; with --gate-key, a server's key for the TCP gate), gate-key <host> (make this server's key for a host's TCP gate), report (used by agent hooks), or gate (the ssh forced command for remote access)
         #[arg(default_value = "status")]
         sub: String,
-        /// add: the join code; check: the host name; join: the name for this machine; lockdown: the reason
+        /// add: the join code; check: the host name; join: the name for this machine; lockdown: the reason; sign: the binary to sign
         arg: Option<String>,
         /// Directory holding host.sock and operator.token (default: ~/.hq/run/host)
         #[arg(long)]
@@ -577,9 +577,11 @@ fn main() -> Result<()> {
         Some("update" | "update-db")
     );
     // An agent's hook runs inside its sandbox, where the user's env files and
-    // config are unreadable on purpose; it needs neither.
+    // config are unreadable on purpose; it needs neither. Nor does `host sign`, which `hq update`
+    // runs on a build it has not installed yet and which must not read a config or env file
+    // that could redirect it.
     let args: Vec<String> = std::env::args().skip(1).take(2).collect();
-    let hook_command = matches!(args.as_slice(), [host, sub] if host == "host" && (sub == "report" || sub == "gate"));
+    let hook_command = matches!(args.as_slice(), [host, sub] if host == "host" && (sub == "report" || sub == "gate" || sub == "sign"));
     if !privileged_command && !hook_command {
         if let Ok(home) = std::env::var("HOME") {
             load_env_file(&std::path::PathBuf::from(home).join(".env.local"));
@@ -614,7 +616,8 @@ async fn async_main() -> Result<()> {
     }
 
     // The host's hook reporter and ssh gate need no config, and the reporter
-    // runs where the config is unreadable.
+    // runs where the config is unreadable. `sign` runs under `hq update`, where a Lite
+    // profile or a bad config must not turn into a warning on every macOS update.
     if let Some(Commands::Host {
         sub,
         arg,
@@ -632,7 +635,7 @@ async fn async_main() -> Result<()> {
     }) = &cli.command
         && matches!(
             sub.as_str(),
-            "report" | "gate" | "relay" | "sandbox-init" | "lockdown" | "unlock"
+            "report" | "gate" | "relay" | "sandbox-init" | "lockdown" | "unlock" | "sign"
         )
     {
         return commands::host::run(commands::host::HostArgs {

@@ -45,7 +45,14 @@ fn copy_to_install_paths(src: &Path, dests: &[PathBuf]) -> (Vec<String>, Vec<Str
     let mut failed = Vec::new();
     for dest in dests {
         match std::fs::copy(src, dest) {
-            Ok(_) => ok.push(dest.to_string_lossy().to_string()),
+            Ok(_) => {
+                // Copying a rebuilt binary over the install path drops its signature, and with
+                // it the macOS folder approvals.
+                if let Some(warning) = super::host_install::keep_stable_signature(dest) {
+                    tracing::warn!("{warning}");
+                }
+                ok.push(dest.to_string_lossy().to_string());
+            }
             Err(e) => failed.push(format!("{}: {e}", dest.display())),
         }
     }

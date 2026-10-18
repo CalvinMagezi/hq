@@ -180,6 +180,88 @@ fn sign_for_macos(home: &Path, exe: &Path) {
 #[cfg(not(target_os = "macos"))]
 fn sign_for_macos(_home: &Path, _exe: &Path) {}
 
+/// `hq host sign <path>`: gives an `hq` binary the stable local signature, on a machine
+/// that already has the identity. `hq update` runs this on the staged build so a new
+/// version keeps the folder-access approval the old one had.
+pub fn sign(path: Option<&str>) -> Result<()> {
+    let path = Path::new(path.context("usage: hq host sign <path to an hq binary>")?);
+    if !cfg!(target_os = "macos") {
+        println!("nothing to sign: only macOS ties folder approvals to a signature");
+        return Ok(());
+    }
+    let meta = std::fs::metadata(path).with_context(|| format!("reading {}", path.display()))?;
+    if !meta.is_file() {
+        bail!("{} is not a regular file", path.display());
+    }
+    match signing::sign_if_enrolled(&home()?, path)? {
+        signing::Signed::Now => {
+            println!("signed {} with the stable local identity", path.display())
+        }
+        signing::Signed::AlreadyStable => {
+            println!("{} already has the stable signature", path.display());
+        }
+        signing::Signed::NotEnrolled => println!(
+            "left {} as it is: this machine has no HQ signing identity yet, and `hq host install` makes one",
+            path.display()
+        ),
+    }
+    Ok(())
+}
+
+/// For a binary that was just put in place by a source rebuild: keeps it on the stable
+/// signature when the machine has one. The warning is for the caller to show; the
+/// binary works either way and macOS just asks for folder access again.
+pub(crate) fn keep_stable_signature(exe: &Path) -> Option<String> {
+    if !cfg!(target_os = "macos") {
+        return None;
+    }
+    let signed = home().and_then(|h| signing::sign_if_enrolled(&h, exe));
+    signed.err().map(|e| {
+        format!(
+            "could not give {} a stable signature ({e:#}); macOS will ask for folder access again",
+            exe.display()
+        )
+    })
+}
+
+/// For `hq doctor`: how the running binary is signed, and whether that is a problem.
+/// `None` off macOS and on a machine that never set the host up.
+pub(crate) fn signature_report() -> Option<(bool, String)> {
+    if !cfg!(target_os = "macos") {
+        return None;
+    }
+    let home = home().ok()?;
+    let exe = std::env::current_exe().ok()?;
+    let has_service = home
+        .join("Library/LaunchAgents")
+        .join(format!("{LAUNCHD_LABEL}.plist"))
+        .exists();
+    let enrolled = signing::enrolled(&home);
+    if !has_service && !enrolled {
+        return None;
+    }
+    if signing::has_stable_signature(&home, &exe) {
+        return Some((
+            true,
+            "hq has the stable local signature, so folder approvals survive updates".into(),
+        ));
+    }
+    let fix = if enrolled {
+        format!(
+            "run `hq host sign {}` (macOS asks once more at the next host restart)",
+            exe.display()
+        )
+    } else {
+        "run `hq host install` once".into()
+    };
+    Some((
+        false,
+        format!(
+            "hq is signed ad hoc, so macOS asks for folder access again after each update and an unattended agent waits for an answer nobody sees; {fix}"
+        ),
+    ))
+}
+
 pub fn install() -> Result<()> {
     let home = home()?;
     let exe = service_binary(&home)?;
@@ -453,7 +535,6 @@ pub fn check(name: Option<&str>) -> Result<()> {
     Ok(())
 }
 
-#[cfg(target_os = "macos")]
 mod signing;
 
 #[cfg(test)]

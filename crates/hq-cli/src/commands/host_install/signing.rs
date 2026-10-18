@@ -7,6 +7,10 @@
 //! The certificate lives in its own keychain with an empty password, so signing
 //! never prompts. It holds nothing but this self-signed key.
 
+// Only macOS makes or uses the identity, but the parsing and policy here are plain functions,
+// so they compile and are tested everywhere the host does.
+#![cfg_attr(not(target_os = "macos"), allow(dead_code))]
+
 use anyhow::{Context, Result, bail};
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
@@ -30,12 +34,27 @@ pub(super) fn lists_identity(output: &str) -> bool {
     output.lines().any(|l| l.contains(CERT_NAME))
 }
 
-/// Whether `codesign -dr -` output says the binary is signed by a certificate
-/// (anything but an ad-hoc cdhash requirement) for our identifier.
-pub(super) fn is_stably_signed(requirement: &str) -> bool {
+/// The hash of the HQ certificate as `find-identity` lists it, lowercased.
+pub(super) fn parse_identity_hash(output: &str) -> Option<String> {
+    let line = output.lines().find(|l| l.contains(CERT_NAME))?;
+    let hash = line.split_whitespace().nth(1)?;
+    (hash.len() == 40 && hash.bytes().all(|b| b.is_ascii_hexdigit()))
+        .then(|| hash.to_ascii_lowercase())
+}
+
+/// Whether `codesign -dr -` output says the binary is signed by a certificate for our
+/// identifier (anything but an ad-hoc cdhash requirement). With `root`, that certificate must
+/// be the HQ one: the older `setup-signing.sh` identity uses the same identifier, and
+/// folder approvals granted under one do not carry over to the other.
+pub(super) fn is_stably_signed(requirement: &str, root: Option<&str>) -> bool {
     requirement.contains(SIGN_IDENTIFIER)
         && requirement.contains("certificate")
         && !requirement.contains("cdhash")
+        && root.is_none_or(|r| {
+            requirement
+                .to_ascii_lowercase()
+                .contains(&format!("h\"{r}\""))
+        })
 }
 
 fn tool(program: &str, args: &[&str]) -> Result<std::process::Output> {
@@ -201,29 +220,120 @@ fn wait_with_deadline(child: &mut std::process::Child) -> Result<bool> {
     }
 }
 
-/// Signs `exe` with the stable identity, replacing the file atomically so a running
-/// copy keeps its old inode (changing a running binary's signature in place kills
-/// it). Does nothing when it is already signed that way. Returns whether it signed.
-pub(super) fn sign(home: &Path, exe: &Path) -> Result<bool> {
-    let current = Command::new("codesign")
+/// What `sign_if_enrolled` did.
+#[derive(Debug, PartialEq, Eq)]
+pub(super) enum Signed {
+    Now,
+    AlreadyStable,
+    NotEnrolled,
+}
+
+fn identity_hash(keychain: &Path) -> Option<String> {
+    if !keychain.exists() {
+        return None;
+    }
+    let out = Command::new("security")
+        .args(["find-identity", "-p", "codesigning"])
+        .arg(keychain)
+        .stdin(Stdio::null())
+        .output()
+        .ok()?;
+    parse_identity_hash(&String::from_utf8_lossy(&out.stdout))
+}
+
+/// Whether this machine already has the signing identity, which `hq host install` makes.
+pub(super) fn enrolled(home: &Path) -> bool {
+    identity_hash(&keychain_path(home)).is_some()
+}
+
+/// Removes the file when dropped, so no failure leaves a partial copy next to the binary.
+struct Scratch(PathBuf);
+
+impl Drop for Scratch {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_file(&self.0);
+    }
+}
+
+/// Whether `exe` is signed with the stable identity right now. `codesign -dr` prints the
+/// requirement of a binary whose bytes were changed after signing too, so the signature must
+/// also verify, or a broken binary would be skipped instead of repaired.
+fn is_stably_signed_file(exe: &Path, root: Option<&str>) -> bool {
+    let shaped = Command::new("codesign")
         .args(["-dr", "-"])
         .arg(exe)
         .stdin(Stdio::null())
-        .output()?;
-    let text = format!(
-        "{}{}",
-        String::from_utf8_lossy(&current.stdout),
-        String::from_utf8_lossy(&current.stderr)
-    );
-    if is_stably_signed(&text) {
+        .output()
+        .is_ok_and(|o| {
+            let text = format!(
+                "{}{}",
+                String::from_utf8_lossy(&o.stdout),
+                String::from_utf8_lossy(&o.stderr)
+            );
+            is_stably_signed(&text, root)
+        });
+    shaped
+        && Command::new("codesign")
+            .arg("--verify")
+            .arg(exe)
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .status()
+            .is_ok_and(|s| s.success())
+}
+
+/// For `hq doctor`: whether `exe` carries this machine's identity, or on a machine without
+/// one, any stable certificate signature for our identifier.
+pub(super) fn has_stable_signature(home: &Path, exe: &Path) -> bool {
+    let root = identity_hash(&keychain_path(home));
+    is_stably_signed_file(exe, root.as_deref())
+}
+
+/// A signature macOS would reject makes the binary die at launch, so check it before
+/// the file replaces a working one.
+fn verify(signed: &Path) -> Result<()> {
+    tool("codesign", &["--verify", &signed.to_string_lossy()])
+        .context("the new signature did not verify")?;
+    Ok(())
+}
+
+/// The first bytes of a 64-bit Mach-O executable and of a universal (fat) one.
+const MACHO_MAGICS: [[u8; 4]; 2] = [[0xcf, 0xfa, 0xed, 0xfe], [0xca, 0xfe, 0xba, 0xbe]];
+
+fn is_macho(path: &Path) -> bool {
+    use std::io::Read;
+    let mut magic = [0u8; 4];
+    std::fs::File::open(path)
+        .and_then(|mut f| f.read_exact(&mut magic))
+        .is_ok()
+        && MACHO_MAGICS.contains(&magic)
+}
+
+/// Signs `exe` with the identity in `keychain`, replacing the file atomically so a running
+/// copy keeps its old inode (changing a running binary's signature in place kills it).
+/// Does nothing when it already carries that identity. Returns whether it signed.
+fn sign_with(keychain: &Path, exe: &Path) -> Result<bool> {
+    // The swap below replaces the path it is given, which would turn a symlink such as
+    // /usr/local/bin/hq into a separate copy.
+    let exe =
+        &std::fs::canonicalize(exe).with_context(|| format!("resolving {}", exe.display()))?;
+    // `codesign` signs any file, and the key signs as HQ, so only an executable gets it.
+    if !is_macho(exe) {
+        bail!("{} is not a macOS executable", exe.display());
+    }
+    let root = identity_hash(keychain).context("the HQ signing identity is not in its keychain")?;
+    if is_stably_signed_file(exe, Some(&root)) {
         return Ok(false);
     }
-    let keychain = ensure_identity(home)?;
     let staged = exe.with_extension("signing");
+    // A killed earlier run can leave its copy behind.
+    let _ = std::fs::remove_file(&staged);
+    let _scratch = Scratch(staged.clone());
     std::fs::copy(exe, &staged).with_context(|| format!("copying {}", exe.display()))?;
     let mut child = Command::new("codesign")
         .args(["-f", "-s", CERT_NAME, "--keychain"])
-        .arg(&keychain)
+        .arg(keychain)
         .args(["--identifier", SIGN_IDENTIFIER])
         .arg(&staged)
         .stdin(Stdio::null())
@@ -231,21 +341,38 @@ pub(super) fn sign(home: &Path, exe: &Path) -> Result<bool> {
         .stderr(Stdio::null())
         .spawn()
         .context("running codesign")?;
-    let signed = wait_with_deadline(&mut child);
-    match signed {
-        Ok(true) => {
-            std::fs::rename(&staged, exe)?;
-            Ok(true)
-        }
-        Ok(false) => {
-            let _ = std::fs::remove_file(&staged);
-            bail!("codesign could not sign with the {CERT_NAME} identity")
-        }
-        Err(e) => {
-            let _ = std::fs::remove_file(&staged);
-            Err(e)
-        }
+    if !wait_with_deadline(&mut child)? {
+        bail!("codesign could not sign with the {CERT_NAME} identity");
     }
+    verify(&staged)?;
+    std::fs::rename(&staged, exe)?;
+    Ok(true)
+}
+
+/// Signs `exe`, making the identity and its keychain first if this machine has none.
+pub(super) fn sign(home: &Path, exe: &Path) -> Result<bool> {
+    let keychain = ensure_identity(home)?;
+    sign_with(&keychain, exe)
+}
+
+/// Signs `exe` only on a machine that has the identity. An update must not add a keychain to
+/// a machine whose owner never opted in, and it must not rebuild an identity either: a new
+/// certificate would invalidate every folder approval, so a hiccup finding the old one is an
+/// error here, not a reason to start over.
+pub(super) fn sign_if_enrolled(home: &Path, exe: &Path) -> Result<Signed> {
+    if !enrolled(home) {
+        return Ok(Signed::NotEnrolled);
+    }
+    let keychain = keychain_path(home);
+    tool(
+        "security",
+        &["unlock-keychain", "-p", "", &keychain.to_string_lossy()],
+    )?;
+    Ok(if sign_with(&keychain, exe)? {
+        Signed::Now
+    } else {
+        Signed::AlreadyStable
+    })
 }
 
 #[cfg(test)]
@@ -260,14 +387,75 @@ mod tests {
     }
 
     #[test]
+    fn a_machine_without_the_keychain_is_not_enrolled_and_nothing_is_created() {
+        let home = tempfile::tempdir().unwrap();
+        let exe = home.path().join("hq");
+        std::fs::write(&exe, b"not a real binary").unwrap();
+        assert!(!enrolled(home.path()));
+        assert_eq!(
+            sign_if_enrolled(home.path(), &exe).unwrap(),
+            Signed::NotEnrolled
+        );
+        assert!(!keychain_path(home.path()).exists(), "no keychain is made");
+        assert!(!exe.with_extension("signing").exists(), "no copy is left");
+        assert_eq!(std::fs::read(&exe).unwrap(), b"not a real binary");
+    }
+
+    #[test]
     fn only_a_certificate_requirement_counts_as_stable() {
         assert!(is_stably_signed(
-            "designated => identifier \"com.agent-hq.hq\" and certificate root = H\"7d1c\""
+            "designated => identifier \"com.agent-hq.hq\" and certificate root = H\"7d1c\"",
+            None
         ));
-        assert!(!is_stably_signed("designated => cdhash H\"a6fd\""));
+        assert!(!is_stably_signed("designated => cdhash H\"a6fd\"", None));
         assert!(!is_stably_signed(
-            "designated => identifier \"other\" and certificate root = H\"7d1c\""
+            "designated => identifier \"other\" and certificate root = H\"7d1c\"",
+            None
         ));
-        assert!(!is_stably_signed("code object is not signed at all"));
+        assert!(!is_stably_signed("code object is not signed at all", None));
+    }
+
+    #[test]
+    fn a_signature_by_another_certificate_does_not_count_when_the_hq_one_is_known() {
+        let hash = "d2ca559e1ba11de6999a8a16e8c30ca92b313d73";
+        let mine = format!(
+            "designated => identifier \"com.agent-hq.hq\" and certificate root = H\"{hash}\""
+        );
+        let older_identity = "designated => identifier \"com.agent-hq.hq\" and certificate root = H\"0123456789abcdef0123456789abcdef01234567\"";
+        assert!(is_stably_signed(&mine, Some(hash)));
+        assert!(!is_stably_signed(older_identity, Some(hash)));
+        assert!(
+            is_stably_signed(older_identity, None),
+            "without an HQ identity any stable signature is better than none"
+        );
+    }
+
+    #[test]
+    fn only_executables_are_signed() {
+        let dir = tempfile::tempdir().unwrap();
+        let write = |name: &str, bytes: &[u8]| {
+            let p = dir.path().join(name);
+            std::fs::write(&p, bytes).unwrap();
+            p
+        };
+        assert!(is_macho(&write("arm", &[0xcf, 0xfa, 0xed, 0xfe, 7, 7])));
+        assert!(is_macho(&write("fat", &[0xca, 0xfe, 0xba, 0xbe, 0, 2])));
+        assert!(!is_macho(&write("script", b"#!/bin/sh\necho hi\n")));
+        assert!(!is_macho(&write("short", &[0xcf, 0xfa])));
+        assert!(!is_macho(&dir.path().join("missing")));
+    }
+
+    #[test]
+    fn the_certificate_hash_is_read_from_find_identity_output() {
+        let listed = "  1) D2CA559E1BA11DE6999A8A16E8C30CA92B313D73 \"HQ Local Code Signing\" (CSSMERR_TP_NOT_TRUSTED)\n     1 identities found\n";
+        assert_eq!(
+            parse_identity_hash(listed).as_deref(),
+            Some("d2ca559e1ba11de6999a8a16e8c30ca92b313d73")
+        );
+        assert_eq!(parse_identity_hash("     0 identities found\n"), None);
+        assert_eq!(
+            parse_identity_hash("  1) XYZ \"HQ Local Code Signing\"\n"),
+            None
+        );
     }
 }

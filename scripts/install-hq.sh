@@ -155,8 +155,31 @@ if [[ ! -f "$BINARY" ]]; then
 fi
 
 # ─── Sign function ────────────────────────────────────────────
+# The binary signs itself with the identity `hq host install` made, the same one
+# `hq update` uses, so one folder-access approval holds across both. The older
+# setup-signing.sh identity is the fallback only for a machine that never made the
+# HQ one (it only ever used this script and its grant-fda.sh profile).
+HQ_SIGNING_KEYCHAIN="$USER_HOME/.hq/hq-signing.keychain-db"
+
+signed_with_hq_identity() {
+    codesign -dr - "$1" 2>&1 | grep -q 'identifier "com.agent-hq.hq" and certificate' \
+        && codesign --verify "$1" 2>/dev/null
+}
+
 sign_binary() {
-    local path="$1"
+    local path="$1" out
+    if ! out=$("$path" host sign "$path" 2>&1); then
+        echo "Warning: hq host sign failed: $out" >&2
+    fi
+    if signed_with_hq_identity "$path"; then
+        return 0
+    fi
+    if [[ -f "$HQ_SIGNING_KEYCHAIN" ]]; then
+        # This machine has the HQ identity, so the older one must not take its place:
+        # approvals granted under one do not carry over to the other.
+        echo "Warning: $path is not signed with this machine's HQ identity; folder approvals will be asked again." >&2
+        return 1
+    fi
     # Check without -v: self-signed certs show as CSSMERR_TP_NOT_TRUSTED but still
     # produce a stable CSREQ (identifier + cert hash). TCC uses that hash for FDA
     # persistence — it doesn't require a CA-trusted cert.
@@ -176,8 +199,8 @@ sign_binary() {
             return 0
         fi
     fi
-    # Fallback: ad-hoc (FDA may need re-granting after this)
-    echo "Warning: stable cert not found. Run ./scripts/setup-signing.sh for permanent FDA." >&2
+    # Fallback: ad-hoc (folder approvals are asked again after this)
+    echo "Warning: no stable signing identity. Run 'hq host install' once to make one." >&2
     codesign -f -s - --identifier "com.agent-hq.hq" "$path" 2>/dev/null || true
     return 1
 }
@@ -233,7 +256,7 @@ fi
 if ! $STABLE_SIGN; then
     echo ""
     echo "⚠️  Using ad-hoc signature — FDA may need re-granting."
-    echo "   Run ./scripts/setup-signing.sh first for a permanent fix."
+    echo "   Run 'hq host install' once to make a stable signing identity."
 fi
 
 # ─── Restart daemon ───────────────────────────────────────────

@@ -12,6 +12,7 @@ pub async fn run(config: &HqConfig) -> Result<()> {
     report_search_index(config);
     report_web_search(config).await;
     report_pdf_ocr();
+    report_code_signature();
     report_spend_ledger(config);
     Ok(())
 }
@@ -129,6 +130,21 @@ fn report_pdf_ocr() {
         );
     }
 }
+
+/// macOS ties folder-access approvals to the code signature, so an ad-hoc `hq` asks again
+/// after every update. Shown only where the host is set up.
+#[cfg(unix)]
+fn report_code_signature() {
+    let Some((healthy, text)) = super::host_install::signature_report() else {
+        return;
+    };
+    println!("\nCode signature (macOS folder access)");
+    println!("  {}  {text}", if healthy { "ok" } else { "warn" });
+}
+
+/// There is no coding-agent host, and so no host install module, off Unix.
+#[cfg(not(unix))]
+fn report_code_signature() {}
 
 fn on_path(tool: &str) -> bool {
     std::env::var_os("PATH")

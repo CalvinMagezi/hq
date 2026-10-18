@@ -247,6 +247,16 @@ impl Http for FakeHttp {
     }
 }
 
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub enum Signing {
+    Off,
+    Signs,
+    Fails,
+    FailsAfterChanging,
+    SignsAndBreaksTheBinary,
+    SignsAsAnotherBuild,
+}
+
 /// A simulated host: "restarting" reads the installed binary file to decide
 /// what is running, so swaps and rollbacks are observed, not assumed.
 pub struct World {
@@ -259,6 +269,8 @@ pub struct World {
     pub db_content: Mutex<String>,
     pub events: Mutex<Vec<String>>,
     pub upgrade_fails: Mutex<bool>,
+    /// What `prepare_staged` does: nothing (the default), sign, fail, or sign and break the binary.
+    pub signing: Mutex<Signing>,
     pub snapshot_fails: Mutex<bool>,
     pub restore_fails: Mutex<bool>,
     pub crash_on_restart: Mutex<bool>,
@@ -276,6 +288,7 @@ impl World {
             db_content: Mutex::new("db-v0".into()),
             events: Mutex::default(),
             upgrade_fails: Mutex::new(false),
+            signing: Mutex::new(Signing::Off),
             snapshot_fails: Mutex::new(false),
             restore_fails: Mutex::new(false),
             crash_on_restart: Mutex::new(false),
@@ -356,6 +369,31 @@ impl Host for World {
                 .to_string()
         };
         Ok(format!("hq {} ({})", field("version="), field("sha=")))
+    }
+
+    async fn prepare_staged(&self, bin: &Path) -> Result<()> {
+        let mode = *self.signing.lock().unwrap();
+        if mode == Signing::Off {
+            return Ok(());
+        }
+        self.log("sign-staged");
+        match mode {
+            Signing::Fails => return Err(anyhow::anyhow!("codesign did not finish").into()),
+            Signing::SignsAndBreaksTheBinary => std::fs::write(bin, "BROKEN")?,
+            Signing::SignsAsAnotherBuild => {
+                std::fs::write(bin, binary_content("0.9.1", "deadbeef999"))?;
+            }
+            Signing::FailsAfterChanging => {
+                let text = std::fs::read_to_string(bin)?;
+                std::fs::write(bin, format!("{text} SIGNED"))?;
+                return Err(anyhow::anyhow!("verify failed after signing").into());
+            }
+            _ => {
+                let text = std::fs::read_to_string(bin)?;
+                std::fs::write(bin, format!("{text} SIGNED"))?;
+            }
+        }
+        Ok(())
     }
 
     async fn post_upgrade(&self) -> Result<()> {

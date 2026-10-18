@@ -39,6 +39,11 @@ pub trait Host: Send + Sync {
     async fn staged_version(&self, bin: &Path) -> Result<String>;
     /// Runs `hq install --upgrade` from the new binary, as the service user.
     async fn post_upgrade(&self) -> Result<()>;
+    /// Gives the staged binary the code signature the platform wants kept stable (macOS ties
+    /// folder-access approvals to it). The engine treats a failure as a warning.
+    async fn prepare_staged(&self, _bin: &Path) -> Result<()> {
+        Ok(())
+    }
     /// Best effort: phases are `pre`, `post-ok` and `post-rolled-back`.
     async fn notify(&self, phase: &str, sha: &str);
     /// A loud message for an operator (automatic rollback, skipped snapshot).

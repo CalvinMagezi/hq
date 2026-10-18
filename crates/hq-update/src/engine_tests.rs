@@ -408,6 +408,103 @@ async fn staged_binary_reporting_the_wrong_build_blocks_until_the_block_expires(
 }
 
 #[tokio::test]
+async fn the_signed_staged_binary_is_what_gets_installed_and_it_is_signed_before_the_restart() {
+    let f = fixture_with_release();
+    *f.world.signing.lock().unwrap() = Signing::Signs;
+    let outcome = f.engine().apply(&ApplyOptions::default()).await.unwrap();
+    assert!(applied(&outcome), "{outcome:?}");
+    assert!(f.installed_binary().contains("SIGNED"));
+    let layout = Layout::from_config(&f.cfg);
+    let backup = fs::read_to_string(layout.backup(1)).unwrap();
+    assert!(backup.contains(OLD_SHA) && !backup.contains("SIGNED"));
+    let events = f.world.events();
+    let signed = events.iter().position(|e| e == "sign-staged").unwrap();
+    let restarted = events
+        .iter()
+        .position(|e| e.starts_with("restart:"))
+        .unwrap();
+    assert!(signed < restarted, "{events:?}");
+    let Outcome::Applied { warnings, .. } = outcome else {
+        unreachable!()
+    };
+    assert!(warnings.is_empty(), "{warnings:?}");
+}
+
+#[tokio::test]
+async fn a_signing_failure_is_a_warning_and_the_update_goes_ahead() {
+    let f = fixture_with_release();
+    *f.world.signing.lock().unwrap() = Signing::Fails;
+    let outcome = f.engine().apply(&ApplyOptions::default()).await.unwrap();
+    assert!(applied(&outcome), "{outcome:?}");
+    assert!(f.installed_binary().contains(NEW_SHA));
+    assert!(!f.installed_binary().contains("SIGNED"));
+    let Outcome::Applied { warnings, .. } = outcome else {
+        unreachable!()
+    };
+    assert!(
+        warnings.iter().any(|w| w.contains("stable code signature")),
+        "{warnings:?}"
+    );
+}
+
+#[tokio::test]
+async fn a_binary_that_no_longer_runs_after_signing_stops_the_update_before_anything_changes() {
+    let f = fixture_with_release();
+    *f.world.signing.lock().unwrap() = Signing::SignsAndBreaksTheBinary;
+    let err = f
+        .engine()
+        .apply(&ApplyOptions::default())
+        .await
+        .unwrap_err();
+    assert!(!matches!(err, UpdateError::StagedBinary(_)), "{err}");
+    assert!(err.to_string().contains("exec format error"), "{err}");
+    assert!(f.installed_binary().contains(OLD_SHA));
+    assert_eq!(f.web_index(), "web 0.9.0 index.html");
+    assert_eq!(f.world.events(), vec!["sign-staged".to_string()]);
+    assert!(!Layout::from_config(&f.cfg).staged_binary().exists());
+    assert!(
+        !State::load(&Layout::from_config(&f.cfg))
+            .unwrap()
+            .is_blocked("0.9.1")
+    );
+}
+
+#[tokio::test]
+async fn a_signer_that_fails_after_changing_the_file_still_has_the_result_checked() {
+    let f = fixture_with_release();
+    *f.world.signing.lock().unwrap() = Signing::FailsAfterChanging;
+    let outcome = f.engine().apply(&ApplyOptions::default()).await.unwrap();
+    assert!(applied(&outcome), "{outcome:?}");
+    assert!(f.installed_binary().contains("SIGNED"));
+    let Outcome::Applied { warnings, .. } = outcome else {
+        unreachable!()
+    };
+    assert!(
+        warnings.iter().any(|w| w.contains("verify failed")),
+        "{warnings:?}"
+    );
+}
+
+#[tokio::test]
+async fn a_signed_binary_that_reports_another_build_is_refused_and_blocks_the_version() {
+    let f = fixture_with_release();
+    *f.world.signing.lock().unwrap() = Signing::SignsAsAnotherBuild;
+    let err = f
+        .engine()
+        .apply(&ApplyOptions::default())
+        .await
+        .unwrap_err();
+    assert!(matches!(err, UpdateError::StagedBinary(_)), "{err}");
+    assert!(f.installed_binary().contains(OLD_SHA));
+    assert_eq!(f.world.events(), vec!["sign-staged".to_string()]);
+    assert!(
+        State::load(&Layout::from_config(&f.cfg))
+            .unwrap()
+            .is_blocked("0.9.1")
+    );
+}
+
+#[tokio::test]
 async fn web_archive_missing_files_or_escaping_is_refused() {
     let f = Fixture::new();
     let mut spec = ReleaseSpec::new("0.9.1", NEW_SHA);
