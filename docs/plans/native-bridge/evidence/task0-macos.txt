@@ -1,0 +1,27 @@
+# Task 0: spike on macOS (2026-10-18)
+
+Host: macOS 26.6.2, Apple Silicon (aarch64), rustc 1.98.1, cargo run --release from docs/plans/native-bridge/spike, no source changes.
+
+[laptop] real hq-host serving at <tmpdir>/host
+[0] baseline, gate_forward on the same machine, no transport: 53.943643ms per call
+[pairing] laptop id  87e2fb9ce0
+[pairing] HQ id      c0c8fc720f  (the only key the laptop trusts)
+
+[1] HQ -> laptop: encrypted QUIC connection up in 2.845125ms, peer authenticated as 87e2fb9ce0
+[2] host.status through the bridge -> protocol 1 host "0.9.1" agents 0
+[3] agent.spawn -> name "demo" pid 83753 status "running"
+[4] agent.read  -> "hello-from-the-laptop"
+[5] long-poll parked on the same connection; a status call answered in 14.199792ms meanwhile; event delivered: 1
+[6] host.stop     -> "denied" / "method \"host.stop\" is not allowed through the gate"
+[6] agent.report  -> "denied" / "method \"agent.report\" is not allowed through the gate"
+[6] host.unlock   -> "denied" / "method \"host.unlock\" is not allowed through the gate"
+  [laptop] REFUSED unpaired peer de6f175d9b
+[7] unpaired key calling host.status -> read error: connection lost
+[8] 300 sequential host.status calls: 53.738136ms each (loopback; compare ~ssh RTT + 40ms gate spawn today)
+
+--- inverted: laptop dials HQ, HQ calls back down that connection ---
+[B1] HQ -> laptop over the laptop's own outbound connection: host "0.9.1" agents listed 2
+[B2] host.stop down the same pipe -> "denied" / "method \"host.stop\" is not allowed through the gate"
+[B3] 100 calls HQ->laptop over the inverted connection: 53.797107ms each
+  [hub] REFUSED unknown device 7101979562
+[B4] unknown device dialing the hub was closed by the hub

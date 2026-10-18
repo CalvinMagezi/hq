@@ -1,0 +1,12 @@
+[package]
+name = "spike-shell"
+version = "0.0.0"
+edition = "2021"
+
+[workspace]
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri = { version = "2", features = [] }
