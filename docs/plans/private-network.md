@@ -1,8 +1,11 @@
 # A private network for HQ, without Tailscale
 
-Status, 2026-10-18: Phase 1a is built and on `main` (the signed TCP gate, `transport: tcp`, `hq host
+Status, 2026-10-19: Phase 1a is built and on `main` (the signed TCP gate, `transport: tcp`, `hq host
 gate-key`, `hq host authorize --gate-key`), and a WireGuard hub with one peer has been run by hand and
-scanned from outside. Phases 1b, 2 and 3 are proposals for review. The threat model and the testable
+scanned from outside. Phase 1b (`hq net` and the root applier `hq-net-apply`, crate `hq-net`) is built and
+open as a pull request; two independent read-only reviews of the applier are described in
+[docs/security/NETWORK.md](../security/NETWORK.md) section 8 (what they covered and what they did not run); the owner steps are in
+[docs/PRIVATE_NETWORK.md](../PRIVATE_NETWORK.md). Phases 2 and 3 are proposals for review. The threat model and the testable
 security requirements are in [docs/security/NETWORK.md](../security/NETWORK.md). Use placeholders
 (`example.com`, `10.77.0.0/24`) everywhere; nothing in this file names a real host.
 
@@ -232,6 +235,8 @@ stay in the repository as evidence and as the basis of the deferred optional tra
 
 ## 8. Phase 1b: `hq net`, so a stranger can do it
 
+Status 2026-10-19: built (crate `hq-net`, `hq net`, `hq-net-apply`, units in `deploy/net/`). "As built" at the end of this section lists where the code differs from the text.
+
 Commands (hub side unless noted); each prints exactly what it will change before it changes it.
 
 - `hq net init [--subnet CIDR] [--port 51820] [--endpoint host:port]`: generates the hub key pair,
@@ -250,6 +255,57 @@ an optional `PresharedKey`, and comments. Everything else, including `PostUp`, `
 any other interface line, is rejected and nothing is applied. At most 64 peers. It then runs
 `wg syncconf`. The path unit and the applier are part of the repository and are covered by tests that
 feed them hostile files.
+
+As built, where it adds to or differs from the text above:
+
+- `wg syncconf` takes its whole file as the interface's truth: wireguard-tools marks the private key,
+  listen port and firewall mark as set before it reads a line, so a peers-only file would clear them.
+  The applier therefore runs `wg showconf` first, keeps `PrivateKey`, `ListenPort` and `FwMark`, and
+  puts the validated peers after them. An empty peer list uses `wg setconf`, which removes every peer;
+  `syncconf` returns early for an empty list and is not relied on for the last revocation.
+- The input is a spool file `/var/lib/hq-net/<interface>.conf` in a directory the HQ user owns,
+  written by `hq net apply` (and by `peer add` and `peer revoke`). The subnet, the hub address and the
+  owner's user id come from a root-owned `/etc/hq-net/<interface>.env`, never from the input. The units
+  are templates, `hq-net-apply@<interface>.service`, `.path` and `.timer`, so they ship unchanged.
+  The service starts after every start of the tunnel (`WantedBy=wg-quick@<interface>.service`), the path
+  unit on a change, and the timer at boot and every five minutes: a path unit does not fire when it
+  starts, is blind while its service runs, and dies if the service hits its start limit, so the service
+  sets `StartLimitIntervalSec=0` and the timer is the backstop. The applier reads its input again after
+  it applies and repeats (at most three rounds) if it changed. The unit uses `Requisite=` on the tunnel,
+  not `Wants=`, so a file change never starts a tunnel that was stopped on purpose. It lists each applied
+  peer's address and key fingerprint in the journal.
+- The input must start with `# hq-net peers v1` and end with `# hq-net end <n>` (the number of peers),
+  and each block ends with `AllowedIPs`, so an empty or truncated file applies nothing. A file with no
+  peers is the header and `# hq-net end 0`.
+- Opening is one component at a time with links refused at every step, `O_NONBLOCK` so a planted FIFO
+  cannot hang root, then checks on the open handle: regular file, expected owner, mode without group or
+  other bits, one name, at most 64 KiB, in a directory only root or the owner can write.
+- The applier finds `wg` only in the distribution's directories (`/usr/bin`, `/usr/sbin`, `/bin`, `/sbin`)
+  or at an explicit `--wg`, and only if root owns it and others cannot write it. It runs with an empty
+  environment and receives text over a pipe that it rendered from the parsed peers. It is installed in
+  `/opt/hq-net/hq-net-apply`, not under `/usr/local`, which a group can write on some systems.
+- The applier limits what a peers file can do; it does not decide who is admitted. Anything running as
+  the HQ user can add a device within the subnet. The journal lists every applied peer.
+- `hq net init` does not print the hub's private key. It stages the key in `~/.hq/net/hub.key` (0600)
+  and the printed `wg-quick` config reads it from `/etc/wireguard/hq0.key` with a `PostUp`; the owner
+  moves the key with `install` and deletes the staging copy.
+- `peer add` refuses a key with the clamped shape of a private key unless `--confirm-public` is given;
+  `net.toml` and `peers.toml` are read with unknown fields refused; the retired addresses are a file of
+  their own (`retired`) so damage to `peers.toml` cannot lose them; every value that is printed into a
+  root command or a path is validated on load and shell-quoted; `hq net apply` refuses to drop a device
+  the hub has unless it was revoked here, and `peer add` and `apply` refuse while the staged hub key is
+  still in the HQ user's directory.
+- `hq net peer forget <address>` retires an address no device owns and removes what the hub has on it. It is the way out of the drop guard (which stops `apply` and `peer add`, never a revoke), for a rogue entry or a restored `peers.toml`. The interface in `net.toml` must be `hq0`.
+- `hq net peer add --psk` makes a preshared key, as the key lifecycle table in
+  [docs/security/NETWORK.md](../security/NETWORK.md) expects.
+- The QR code is the device config without a private key, as specified. The Android app refuses to
+  import a config without a `PrivateKey` line (checked in its source; iOS not checked), so on a phone
+  it is for reading values from a second screen; see TECHDEBT.md for the choice this leaves the owner.
+- The applier ships as its own binary, built with `--no-default-features` so it links `base64` and
+  `libc` only. It is not yet part of the signed release (TECHDEBT.md).
+- `systemctl reload wg-quick@<interface>` must not be used on the hub: the stock `ExecReload` runs
+  `wg syncconf` with a stripped config that has neither the key (read from its file by `PostUp`) nor
+  the peers, and `syncconf` would clear both. Restart instead; the service re-applies the peers.
 
 ## 9. Phase 2: the front door
 
@@ -385,7 +441,7 @@ Rollback at any step is putting the old route back; nothing is deleted until the
    server: **proposed, agreed in principle.** The CAA record (9.3 step 1) waits for a yes at the time.
 3. A permanent public `udp/51820` on the server (silent to scans): approved in principle, not yet
    opened.
-4. The privileged applier as specified in section 8, or manual `wg` commands in Phase 1a only: open.
+4. The privileged applier as specified in section 8, or manual `wg` commands in Phase 1a only: **built as specified (with the additions listed under "As built"), pending the owner's decision to ship it.**
 5. The connector's fenced public `443`, or dropping the connector (claude.ai cannot reach a private
    tunnel): open.
 6. Who reviews the gate protocol and the applier before they ship: open.

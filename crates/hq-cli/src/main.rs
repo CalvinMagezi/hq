@@ -10,6 +10,7 @@ static GLOBAL: mimalloc::MiMalloc = mimalloc::MiMalloc;
 mod commands;
 mod render;
 use commands::connector::ConnectorAction;
+use commands::net::NetAction;
 use commands::queue::QueueAction;
 use commands::skills::SkillsAction;
 
@@ -105,6 +106,18 @@ enum Commands {
         /// Print JSON (list)
         #[arg(long)]
         json: bool,
+    },
+
+    /// Run a WireGuard private plane for HQ: init, peer add|revoke|list, status, apply (`hq net --help`)
+    Net {
+        #[command(subcommand)]
+        action: NetAction,
+        /// Where hq keeps the plane's settings and peers (default: ~/.hq/net)
+        #[arg(long, global = true, hide = true)]
+        dir: Option<PathBuf>,
+        /// The directory the root applier reads its input from (default: /var/lib/hq-net)
+        #[arg(long, global = true, hide = true)]
+        spool: Option<PathBuf>,
     },
 
     /// Run or inspect the built-in agent host (long-lived coding agents in pseudo-terminals)
@@ -612,6 +625,10 @@ async fn async_main() -> Result<()> {
     match cli.command {
         Some(Commands::Update(args)) => std::process::exit(commands::update::run(args).await),
         Some(Commands::UpdateDb { args }) => std::process::exit(commands::update::run_db(&args)),
+        // `hq net` keeps its own files under ~/.hq/net and needs no vault or config.
+        Some(Commands::Net { action, dir, spool }) => {
+            return commands::net::run(action, dir, spool);
+        }
         _ => {}
     }
 
@@ -951,7 +968,7 @@ async fn dispatch(command: Commands, config: &HqConfig) -> Result<()> {
         Commands::NotifyRestart { phase, reason, sha } => {
             commands::notify_restart::run(config, &phase, &reason, sha.as_deref()).await
         }
-        Commands::Update(_) | Commands::UpdateDb { .. } => {
+        Commands::Update(_) | Commands::UpdateDb { .. } | Commands::Net { .. } => {
             unreachable!("handled before config load")
         }
         Commands::Health => commands::health::run(config).await,

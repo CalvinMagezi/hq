@@ -1,0 +1,12 @@
+[Unit]
+Description=Re-apply the HQ private network peers to %i every few minutes
+
+[Timer]
+# A backstop for a missed file event. Applying the same peers again changes nothing, and a
+# revocation that was missed is picked up within five minutes.
+OnBootSec=30s
+OnCalendar=*:0/5
+AccuracySec=1s
+
+[Install]
+WantedBy=timers.target

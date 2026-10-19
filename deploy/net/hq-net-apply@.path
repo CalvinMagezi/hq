@@ -1,0 +1,17 @@
+[Unit]
+Description=Apply the HQ private network peers to %i when they change
+
+[Path]
+# A change made while the applier is running is not seen by this unit; the applier re-reads its
+# input after it applies, and the timer applies again every few minutes.
+PathChanged=/var/lib/hq-net/%i.conf
+# systemd stops a path unit that triggers more than 200 times in 2 seconds, after which it watches
+# nothing until restarted. The systemd.path man page marks this setting v250; systemd older than
+# that (Ubuntu 22.04 has 249) ignores the key with a warning and has no such limit to hit. A writer
+# who loops on the file could trip it, so it is off here. The service's one-second pause is what
+# bounds how often the applier runs (the only bound on 249), and the timer applies the peers again
+# whatever the path unit is doing.
+TriggerLimitIntervalSec=0
+
+[Install]
+WantedBy=multi-user.target

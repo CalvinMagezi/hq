@@ -49,7 +49,7 @@ itself is in [WEB_AUTH.md](WEB_AUTH.md) and stays as a second layer behind every
 | T13 | The name leaks | A public A record shows a private address; certificate logs show the name | Metadata only. A wildcard certificate keeps individual names out of the logs |
 | T14 | Hub restarts or the tunnel interface is down at boot and Caddy falls back to a public address | Caddy binds only to the tunnel address; start order requires the interface first; if the address is absent it fails to start. Never fall back to all interfaces | Operator override. Checked by SR-N4 |
 | T15 | The connector's public port is attacked | Firewall allow-list of the connector's published source ranges, a separate site that serves only the filtered routes, no tunnel services on it | The connector vendor's ranges are broad; the application layer (OAuth, path filter) still applies |
-| T16 | Hostile input to the privileged applier | The applier is a separate root program with a strict grammar and no shell; it opens the input without following links, validates every line, and refuses everything else, including interface and hook lines | A parser bug is root. Hence tests with hostile files and an outside reviewer (SR-N9) |
+| T16 | Hostile input to the privileged applier | The applier is a separate root program with a strict grammar and no shell; it opens the input without following links, validates every line, and refuses everything else, including interface and hook lines | A parser bug is root. Hence tests with hostile files and an outside reviewer (SR-N9). The applier limits what a peers file can do, not who is admitted: anything running as the HQ user can add a device within the subnet. Every applied peer is written to the journal (address and key fingerprint) so a change is visible |
 | T17 | Weak or reused enrolment of a device | Devices generate their own keys and send only public keys; the operator checks the label and the key's fingerprint; optional per-peer preshared key | Social engineering of the operator |
 | T18 | Supply chain | WireGuard from the distribution and the official stores; `cargo deny` and `cargo audit` stay in CI; no bundled third-party VPN code | Normal dependency risk |
 | T19 | UDP blocked | Documented limit. Owners on such networks need a TCP wrapper or the deferred relay path | Availability, not secrecy |
@@ -97,7 +97,7 @@ SR-N1, which the documentation tells the owner to run after every network change
 
 | Key | Made by | Stored | Rotated | Revoked by |
 |---|---|---|---|---|
-| Hub WireGuard key | `hq net init` | Server, root-owned, 0600 | On suspicion; every device re-enrols | Replacing it |
+| Hub WireGuard key | `hq net init`, staged in `~/.hq/net/hub.key` (0600, the HQ user's) | `/etc/wireguard/<interface>.key`, root-owned, 0600, after the owner moves it with `install`; `hq net peer add` and `hq net apply` refuse while the staged copy exists (a revoke does not) | On suspicion; every device re-enrols | Replacing it |
 | Device WireGuard key | The device's WireGuard app or `wg genkey` | On the device | On suspicion | `hq net peer revoke` |
 | Optional preshared key | `hq net peer add --psk` | Both ends | With the peer | With the peer |
 | Server gate key (per host) | `hq host add` | `~/.hq/gate/<host>.key`, 0600, service user | On suspicion | Deleting its line in the laptop's `gate_authorized_keys` |
@@ -118,3 +118,12 @@ SR-N1, which the documentation tells the owner to run after every network change
 Before Phase 1a ships: a second reviewer reads the gate code and this file; the fuzz target for the
 line parser has run for a stated time; the outside scan in SR-N1 is recorded in the pull request.
 Before Phase 1b ships: the applier is reviewed and tested as in SR-N9.
+
+Phase 1b status, 2026-10-19: the applier (`crates/hq-net/src/grammar.rs`, `applier.rs`, `wgconf.rs`) has hostile-file and seeded randomized tests, an integration test of the renderer against the grammar, and the units are checked against the program's argument parser.
+
+Two reviews were done by readers other than the author, both read-only:
+
+1. A review agent with no part in writing the code read the grammar, the file opener, `wgconf`, the units and the tests, with the wireguard-tools and systemd sources fetched for comparison. It found no parser or file-opener hole, and found problems in the units (a start limit that would stop the path unit, writes lost while the service runs, no apply at boot, `Wants=` starting a stopped tunnel). It compiled and ran only the macOS-visible tests: it did not run the Linux-only code, a live systemd, a real `wg` or a kernel.
+2. A second independent review of the pull request found one blocker (a peer applied in a first round was not recorded if the second round failed) and seven items on the units, the stored files, the pasted-key case, the hub key's location, the revoke message and the trigger rate. It read the code and ran nothing as root.
+
+Every finding of both reviews is closed in the pull request or listed in TECHDEBT.md with the reason. Not yet done: a run on a live server or a spare VM (the ignored real-interface test and the first apply of the units; see [docs/PRIVATE_NETWORK.md](../PRIVATE_NETWORK.md), "What is not done yet"), and a human reviewer other than the author for the shipped release.
