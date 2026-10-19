@@ -112,7 +112,11 @@ impl fmt::Display for DetectedFormat {
 }
 
 /// Target format for outbound (Markdown → X) conversion via pandoc.
-#[derive(Debug, Clone, PartialEq, Eq)]
+///
+/// A closed set on purpose. The format name becomes pandoc's `-t` argument, and
+/// pandoc reads a name that is a file path ending in `.lua` as a custom writer
+/// and runs it. Nothing a caller types may reach `-t` except through this enum.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ExportFormat {
     Pdf,
     Docx,
@@ -120,13 +124,21 @@ pub enum ExportFormat {
     Html,
     Epub,
     Rtf,
-    /// Pandoc format string (passthrough for advanced usage)
-    Custom(String),
 }
 
 impl ExportFormat {
+    /// Every format, in the order the tool schema lists them.
+    pub const ALL: [ExportFormat; 6] = [
+        Self::Pdf,
+        Self::Docx,
+        Self::Pptx,
+        Self::Html,
+        Self::Epub,
+        Self::Rtf,
+    ];
+
     /// Pandoc format string.
-    pub fn pandoc_format(&self) -> &str {
+    pub fn pandoc_format(&self) -> &'static str {
         match self {
             Self::Pdf => "pdf",
             Self::Docx => "docx",
@@ -134,8 +146,16 @@ impl ExportFormat {
             Self::Html => "html",
             Self::Epub => "epub",
             Self::Rtf => "rtf",
-            Self::Custom(s) => s.as_str(),
         }
+    }
+
+    /// The names a caller may use, for messages and schemas.
+    pub fn names() -> String {
+        Self::ALL
+            .iter()
+            .map(Self::pandoc_format)
+            .collect::<Vec<_>>()
+            .join(", ")
     }
 }
 
@@ -149,14 +169,79 @@ impl std::str::FromStr for ExportFormat {
     type Err = ConvertError;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
-        Ok(match s.to_lowercase().as_str() {
+        Ok(match s.trim().to_lowercase().as_str() {
             "pdf" => Self::Pdf,
             "docx" | "word" => Self::Docx,
             "pptx" | "powerpoint" => Self::Pptx,
             "html" => Self::Html,
             "epub" => Self::Epub,
             "rtf" => Self::Rtf,
-            other => Self::Custom(other.to_string()),
+            _ => {
+                return Err(ConvertError::UnsupportedFormat(format!(
+                    "'{}' is not an export format here; use one of: {}",
+                    s.chars().take(40).collect::<String>(),
+                    Self::names()
+                )));
+            }
         })
+    }
+}
+
+#[cfg(test)]
+mod export_format_tests {
+    use super::*;
+
+    #[test]
+    fn the_known_names_and_their_aliases_parse() {
+        for (name, want) in [
+            ("pdf", ExportFormat::Pdf),
+            ("DOCX", ExportFormat::Docx),
+            ("word", ExportFormat::Docx),
+            (" powerpoint ", ExportFormat::Pptx),
+            ("html", ExportFormat::Html),
+            ("epub", ExportFormat::Epub),
+            ("rtf", ExportFormat::Rtf),
+        ] {
+            assert_eq!(name.parse::<ExportFormat>().unwrap(), want, "{name}");
+        }
+        for f in ExportFormat::ALL {
+            assert_eq!(f.pandoc_format().parse::<ExportFormat>().unwrap(), f);
+        }
+    }
+
+    /// Pandoc takes a path ending in `.lua` as a custom writer and runs it, and
+    /// `name+ext` or `name-ext` switches extensions on. None of it may get through.
+    #[test]
+    fn anything_else_is_refused_and_the_message_lists_what_is_allowed() {
+        for bad in [
+            "/tmp/writer.lua",
+            "./writer.lua",
+            "../writer.lua",
+            "writer.lua",
+            "C:\\w\\writer.lua",
+            "latex",
+            "markdown",
+            "docx+smart",
+            "html-raw_html",
+            "docx;touch x",
+            "",
+            "   ",
+        ] {
+            let err = bad.parse::<ExportFormat>().unwrap_err().to_string();
+            assert!(
+                err.contains("pdf, docx, pptx, html, epub, rtf"),
+                "{bad:?}: {err}"
+            );
+        }
+    }
+
+    #[test]
+    fn a_long_refused_name_is_cut_in_the_message() {
+        let err = "x"
+            .repeat(5000)
+            .parse::<ExportFormat>()
+            .unwrap_err()
+            .to_string();
+        assert!(err.len() < 200, "{}", err.len());
     }
 }

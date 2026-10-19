@@ -761,3 +761,77 @@ mod import_tests {
         assert!(junk.contains("conversion failed"), "{junk}");
     }
 }
+
+#[cfg(test)]
+mod format_safety_tests {
+    use super::*;
+
+    fn tool(dir: &tempfile::TempDir) -> ConvertFromMarkdownTool {
+        ConvertFromMarkdownTool {
+            vault_path: dir.path().join("vault"),
+        }
+    }
+
+    /// pandoc runs a Lua file given as the output format. The format must be refused
+    /// before pandoc is anywhere near it.
+    #[tokio::test]
+    async fn a_lua_writer_named_as_the_format_is_refused_and_never_run() {
+        let dir = tempfile::tempdir().unwrap();
+        let proof = dir.path().join("PROOF");
+        let writer = dir.path().join("writer.lua");
+        std::fs::write(
+            &writer,
+            format!(
+                "function Writer(doc, opts)\n  local f = io.open('{}', 'w'); f:write('ran'); f:close()\n  return 'x'\nend\n",
+                proof.display()
+            ),
+        )
+        .unwrap();
+        let out = dir.path().join("out/result.txt");
+
+        for format in [
+            writer.to_string_lossy().into_owned(),
+            "writer.lua".to_string(),
+            "docx+smart".to_string(),
+            "latex".to_string(),
+        ] {
+            let err = tool(&dir)
+                .execute(
+                    json!({"content": "# hi", "format": format, "output": out.to_string_lossy()}),
+                )
+                .await
+                .unwrap_err()
+                .to_string();
+            assert!(
+                err.contains("not an export format")
+                    && err.contains("pdf, docx, pptx, html, epub, rtf"),
+                "{format}: {err}"
+            );
+        }
+        assert!(!proof.exists(), "the writer script ran");
+        assert!(!out.exists(), "nothing is written for a refused format");
+        assert!(!out.parent().unwrap().exists(), "not even the folder");
+    }
+
+    #[test]
+    fn the_schema_offers_exactly_the_formats_that_parse() {
+        let dir = tempfile::tempdir().unwrap();
+        let schema = tool(&dir).parameters();
+        let offered: Vec<&str> = schema["properties"]["format"]["enum"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .filter_map(Value::as_str)
+            .collect();
+        let known: Vec<&str> = ExportFormat::ALL
+            .iter()
+            .map(ExportFormat::pandoc_format)
+            .collect();
+        assert_eq!(offered, known);
+        assert!(
+            tool(&dir)
+                .description()
+                .contains("DOCX, PDF, PPTX, HTML, EPUB, RTF")
+        );
+    }
+}
