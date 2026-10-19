@@ -53,6 +53,7 @@ pub mod mcp;
 pub mod mcp_serve;
 pub mod memory;
 pub mod models;
+pub mod net;
 pub mod notify_restart;
 pub mod onboard;
 pub mod pair;

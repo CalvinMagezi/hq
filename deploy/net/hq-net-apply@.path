@@ -1,0 +1,10 @@
+[Unit]
+Description=Apply the HQ private network peers to %i when they change
+
+[Path]
+# A change made while the applier is running is not seen by this unit; the applier re-reads its
+# input after it applies, and the timer applies again every few minutes.
+PathChanged=/var/lib/hq-net/%i.conf
+
+[Install]
+WantedBy=multi-user.target

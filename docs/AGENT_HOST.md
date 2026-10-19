@@ -478,7 +478,8 @@ conversation ids and resume work the same as locally.
 A host can also be reached over TCP on a private tunnel address (for example a
 WireGuard network between your server and your laptop), with no ssh on either side.
 The caller proves itself with an Ed25519 key, so there is no shared secret and no
-password to leak. Nothing listens unless `agent_host.gate_listen` is set.
+password to leak. Nothing listens unless `agent_host.gate_listen` is set. `hq net` sets up the
+WireGuard tunnel itself without hand-written `wg` commands: see [PRIVATE_NETWORK.md](PRIVATE_NETWORK.md).
 
 On the machine that runs the host:
 
