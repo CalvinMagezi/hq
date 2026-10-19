@@ -372,7 +372,7 @@ Agent-HQ is a Cargo workspace of 17 crates and about 143,000 lines of Rust (556 
 | `hq-memory` | Memory consolidator, ingester, querier, forgetter, entity graph |
 | `hq-relay` | Platform bridge trait, unified bot, cancel/interrupt, background turns, watches |
 | `hq-web` | Axum WebSocket server, REST API, embedded static web UI |
-| `hq-convert` | Document format conversion utilities |
+| `hq-convert` | Document import (PDF, Office, OpenDocument, RTF, HTML, XML, spreadsheets and scans to Markdown with a report) and conversion helpers |
 | `hq-export` | Native note export to PDF, PNG, SVG, HTML, spreadsheets, JSON and more |
 | `hq-update` | Signed pull-based updater behind `hq update` |
 | `hq-host` | Built-in host for long-lived coding agents: pseudo-terminal panes with a readable screen, a control socket, state detection |
