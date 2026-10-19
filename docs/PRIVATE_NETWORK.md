@@ -256,11 +256,17 @@ wireguard-go would need.
 
 - Release builds do not include `hq-net-apply`, so step 4 builds it from source. Packaging it with
   the signed release is tracked separately because the updater replaces only `hq`.
-- The systemd units, the firewall table and the real `wg` calls were written to match the
-  documentation and an independent reading of systemd's and wireguard-tools' source, not run on a
-  live server in the change that added them. Run the first apply with a spare device and watch
-  `journalctl -u hq-net-apply@hq0`. The test that drives a real interface is ignored by default;
-  see below. A CI job that applies to a dummy WireGuard link in a user namespace is not built.
+- The real `wg` calls have run once: the ignored real-interface test passed as root in a throwaway
+  container (rust:1.98.1-slim-bookworm on Docker Desktop's Linux VM, kernel 7.0.14, its own network
+  namespace, wireguard-tools v1.0.20210914, iproute2 6.1.0), creating and deleting one interface.
+  That container has no systemd, so it did not cover the units: PrivateDevices,
+  `SystemCallFilter=@system-service` with `SystemCallErrorNumber=EPERM`,
+  `RestrictAddressFamilies=AF_NETLINK`, the path unit, `TriggerLimitIntervalSec` on systemd 249
+  against newer versions, and whether `wg` runs under the filter on Ubuntu 22.04 (`clone3` and
+  `posix_spawn` in glibc 2.35). The firewall table has not been loaded either. Those were written
+  against the documentation and an independent reading of systemd's and wireguard-tools' source.
+  Run the first apply with a spare device and watch `journalctl -u hq-net-apply@hq0`. A CI job that
+  applies to a dummy WireGuard link in a user namespace is not built.
 - The service carries confinement directives (capability bounding set, read-only system, no new
   privileges, no core dumps and others) that were not run under a live systemd either. If the unit
   fails to start, `systemctl status hq-net-apply@hq0` names the directive.
@@ -273,7 +279,8 @@ Before this is trusted on the real hub, run it once on a throwaway Linux machine
 break, not the hub). It needs: a kernel with WireGuard (5.6 or newer, or `wireguard-dkms`), the
 `wireguard-tools` and `iproute2` packages, systemd, a Rust toolchain, and root.
 
-1. The ignored test. It creates an interface called `hqnettest0`, applies one peer and then an
+1. The ignored test (it has passed once in a container; see above, but a container has no systemd,
+   so the checks below still need a VM). It creates an interface called `hqnettest0`, applies one peer and then an
    empty list with the real `wg`, and deletes the interface; it touches no other interface,
    firewall rule or file. `sudo -E env "PATH=$PATH" cargo test -p hq-net -- --ignored --nocapture`
    should report one test passed.
