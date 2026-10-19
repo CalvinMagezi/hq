@@ -318,6 +318,28 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn the_import_tools_are_owner_only() {
+        let (d, vault) = vault_with_notes();
+        std::fs::write(d.path().join("Notebooks/People/bob/plain.txt"), "words").unwrap();
+        let t = scoped(&vault, "2");
+        for (tool, args) in [
+            ("vault_inventory", json!({})),
+            (
+                "vault_import",
+                json!({ "path": "Notebooks/People/bob/plain.txt" }),
+            ),
+            (
+                "vault_import",
+                json!({ "directory": "Notebooks", "dry_run": true }),
+            ),
+        ] {
+            let err = call(&t, tool, args).await.unwrap_err();
+            assert_eq!(err.to_string(), DENIED_MESSAGE, "{tool}");
+        }
+        assert!(!d.path().join("Notebooks/People/bob/plain.md").exists());
+    }
+
+    #[tokio::test]
     async fn members_write_only_inside_their_own_private_space() {
         let (_d, vault) = vault_with_notes();
         let t = scoped(&vault, "2");

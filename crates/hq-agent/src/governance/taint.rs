@@ -14,6 +14,7 @@ const UNTRUSTED_SOURCE_TOOLS: &[&str] = &[
     "github_clone",
     "google_workspace",
     "convert_to_markdown",
+    "vault_import",
     "ocr_extract_text",
     "agent_read_inbox",
     "harness_session_logs",

@@ -506,9 +506,20 @@ const VAULT_WRITE_TOOLS: &[&str] = &[
     "vault_frontmatter_update",
     "vault_move",
     "vault_delete",
+    "vault_import",
 ];
-/// The arguments of [`VAULT_WRITE_TOOLS`] that name a note path.
-const VAULT_PATH_ARGS: &[&str] = &["path", "from", "to", "destination", "dest"];
+/// The arguments of [`VAULT_WRITE_TOOLS`] that name a note path, a folder, or (as a list)
+/// several files. `vault_import` reads the named files and writes notes beside them or under
+/// `destination`, so a system folder at any of these waits like a direct write there.
+const VAULT_PATH_ARGS: &[&str] = &[
+    "path",
+    "paths",
+    "from",
+    "to",
+    "destination",
+    "dest",
+    "directory",
+];
 
 /// Whether a connector's call to `tool` with `args` waits for the owner's approval. Remote MCP
 /// servers proxy the owner's accounts, and `hq_ask` in full mode hands the question to HQ's own
@@ -531,7 +542,11 @@ pub fn needs_owner_confirmation(registry: &ToolRegistry, tool: &str, args: &Valu
     if VAULT_WRITE_TOOLS.contains(&tool) {
         return VAULT_PATH_ARGS
             .iter()
-            .filter_map(|k| args.get(*k).and_then(Value::as_str))
+            .filter_map(|k| args.get(*k))
+            .flat_map(|v| match v {
+                Value::Array(items) => items.iter().filter_map(Value::as_str).collect(),
+                other => other.as_str().into_iter().collect::<Vec<_>>(),
+            })
             .any(in_system_folder);
     }
     CONNECTOR_CONFIRM_TOOLS.contains(&tool)
@@ -1034,6 +1049,36 @@ mod tests {
             &registry,
             "vault_move",
             &json!({"from": "Notebooks/a.md", "to": "Notebooks/b.md"})
+        ));
+        // An import is a vault write of the same kind: held only when it reads from or writes
+        // into a system folder, by a single path, a list of them, a folder or a destination.
+        for args in [
+            json!({"path": "Notebooks/Docs/a.docx"}),
+            json!({"paths": ["Notebooks/a.docx", "_media/2026-01-01/b.pdf"]}),
+            json!({"directory": "_media", "dry_run": true}),
+            json!({"directory": "Notebooks/Docs", "destination": "Notebooks/Imports"}),
+            json!({}),
+        ] {
+            assert!(
+                !needs_owner_confirmation(&registry, "vault_import", &args),
+                "{args}"
+            );
+        }
+        for args in [
+            json!({"path": "skills/x/notes.docx"}),
+            json!({"paths": ["Notebooks/a.docx", "_system/b.docx"]}),
+            json!({"directory": "./_Commands"}),
+            json!({"path": "Notebooks/a.docx", "destination": "Agents/a.md"}),
+        ] {
+            assert!(
+                needs_owner_confirmation(&registry, "vault_import", &args),
+                "{args}"
+            );
+        }
+        assert!(!needs_owner_confirmation(
+            &registry,
+            "vault_inventory",
+            &none
         ));
         // A move counts at either end: into a system folder, or out of one (a delete in effect).
         assert!(needs_owner_confirmation(

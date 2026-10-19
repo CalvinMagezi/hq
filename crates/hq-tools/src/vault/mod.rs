@@ -9,6 +9,7 @@ use std::sync::Arc;
 
 mod context;
 mod graph;
+mod import;
 mod person;
 mod read;
 mod review;
@@ -17,6 +18,10 @@ mod write;
 
 pub use context::*;
 pub use graph::*;
+pub use import::{
+    Caller, Conflict, ImportSettings, Importer, InventoryFilter, Source, VaultImportTool,
+    VaultInventoryTool,
+};
 pub use person::PersonRecordFactTool;
 pub use read::*;
 pub use review::{NoteProvenanceTool, NoteReviewTool, Reviewed, Reviewer, review_note};
@@ -116,7 +121,7 @@ fn sync_note_index_and_cache(
 
 // ─── Tool Factory ────────────────────────────────────────────────
 
-/// Create all 15 native vault and memory tools as HqTool trait objects.
+/// Create the native vault and memory tools as HqTool trait objects.
 /// Non-fatal: returns an empty vec if VaultClient cannot be opened.
 pub fn create_vault_tools(
     vault_path: std::path::PathBuf,
@@ -139,6 +144,8 @@ pub fn create_vault_tools(
         Box::new(VaultWriteNoteTool::new(vault.clone()))
     };
 
+    let importer = Arc::new(Importer::new(vault.clone(), db.clone()));
+
     let mut tools: Vec<Box<dyn crate::registry::HqTool>> = vec![
         Box::new(VaultReadTool::new(vault.clone())),
         Box::new(VaultOutlineTool::new(vault.clone())),
@@ -156,6 +163,8 @@ pub fn create_vault_tools(
         ),
         write_tool,
         Box::new(ContextPacketTool::new(vault.clone(), db.clone())),
+        Box::new(VaultInventoryTool::new(importer.clone())),
+        Box::new(VaultImportTool::new(importer)),
     ];
     tools.extend(crate::vault_reorg::create_vault_reorg_tools(
         vault.clone(),

@@ -212,6 +212,7 @@ mod tests {
             "vault_backlinks",
             "vault_links",
             "vault_tags",
+            "vault_inventory",
             "memory_entity_graph",
             "context_packet",
             "list_agents",
@@ -226,6 +227,7 @@ mod tests {
             "vault_write_note",
             "vault_append_note",
             "vault_patch_section",
+            "vault_import",
             "vault_reindex",
             "hq_ask",
         ] {
