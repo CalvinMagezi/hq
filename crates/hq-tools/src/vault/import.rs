@@ -238,6 +238,11 @@ pub struct ImportSettings {
     /// Move the original into `_archive/originals/` after its note is written.
     pub archive_originals: bool,
     pub preview_chars: usize,
+    /// For a folder: only these formats (as the inventory names them, such as `pdf`, `docx`).
+    pub formats: Option<Vec<String>>,
+    /// For a folder: also import pictures. Left out by default, because photos, screenshots and
+    /// slide renders read by OCR in bulk mostly make notes nobody wants; name one to import it.
+    pub include_images: bool,
 }
 
 impl Default for ImportSettings {
@@ -249,6 +254,8 @@ impl Default for ImportSettings {
             tags: Vec::new(),
             archive_originals: false,
             preview_chars: 0,
+            formats: None,
+            include_images: false,
         }
     }
 }
@@ -773,6 +780,7 @@ impl Importer {
     ) -> Result<Value> {
         let limit = limit.clamp(1, MAX_BATCH);
         let mut more_pending = 0usize;
+        let mut images_left_out = 0usize;
         let sources: Vec<String> = match source {
             Source::Path(p) => vec![p],
             Source::Paths(paths) => {
@@ -782,22 +790,31 @@ impl Importer {
                 paths
             }
             Source::Directory(dir) => {
+                let formats: Option<Vec<String>> = settings
+                    .formats
+                    .as_ref()
+                    .map(|f| f.iter().map(|k| k.trim().to_ascii_lowercase()).collect());
                 let inv = self.inventory(
                     &dir,
                     InventoryFilter {
                         statuses: Some(vec!["pending".into(), "changed".into()]),
-                        kinds: None,
+                        kinds: formats.clone(),
                         limit: 5000,
                     },
                 )?;
-                let mut all: Vec<String> = inv["entries"]
-                    .as_array()
-                    .map(|e| {
-                        e.iter()
-                            .filter_map(|x| x["path"].as_str().map(str::to_string))
-                            .collect()
-                    })
-                    .unwrap_or_default();
+                let wants_images = settings.include_images
+                    || formats
+                        .as_ref()
+                        .is_some_and(|f| f.iter().any(|k| k == "image"));
+                let entries = inv["entries"].as_array().cloned().unwrap_or_default();
+                let (images, documents): (Vec<_>, Vec<_>) = entries
+                    .iter()
+                    .partition(|x| x["format"] == "image" && !wants_images);
+                images_left_out = images.len();
+                let mut all: Vec<String> = documents
+                    .iter()
+                    .filter_map(|x| x["path"].as_str().map(str::to_string))
+                    .collect();
                 more_pending = all.len().saturating_sub(limit);
                 all.truncate(limit);
                 all
@@ -824,6 +841,7 @@ impl Importer {
             "failed": count("failed"),
             "degraded": degraded,
             "more_pending": more_pending,
+            "images_left_out": images_left_out,
             "results": results,
         }))
     }
@@ -1047,6 +1065,8 @@ impl HqTool for VaultImportTool {
                 "tags": { "type": "array", "items": { "type": "string" }, "description": "Extra tags; imported notes always get 'imported' and their format" },
                 "archive_originals": { "type": "boolean", "description": "After the note is written, move the original to _archive/originals/ (never for files in _media). Default false." },
                 "preview_chars": { "type": "integer", "description": "Include this many characters of each converted note in the result (default 0, or 600 for a dry run)" },
+                "format": { "type": "array", "items": { "type": "string" }, "description": "For directory: only these formats, such as pdf or docx" },
+                "include_images": { "type": "boolean", "description": "For directory: also import pictures (photos, screenshots, slide renders). Default false: they are listed as images_left_out, and one can be imported by naming it." },
                 "limit": { "type": "integer", "description": "For directory: most files to handle in one call (default 10, at most 200). Call again for the next batch." }
             }
         })
@@ -1092,6 +1112,11 @@ impl HqTool for VaultImportTool {
                 .and_then(Value::as_u64)
                 .map(|n| n.min(5000) as usize)
                 .unwrap_or(if dry_run { 600 } else { 0 }),
+            formats: Some(str_list(&args, "format")).filter(|f| !f.is_empty()),
+            include_images: args
+                .get("include_images")
+                .and_then(Value::as_bool)
+                .unwrap_or(false),
         };
         let limit = args.get("limit").and_then(Value::as_u64).unwrap_or(10) as usize;
         let source = match (path, paths.is_empty(), directory) {
@@ -1220,6 +1245,63 @@ mod tests {
         )
         .await;
         assert_eq!(replaced["updated"], 1, "{replaced}");
+    }
+
+    const PHOTO: &[u8] = include_bytes!("../../../hq-convert/tests/fixtures/corpus/receipt.jpg");
+
+    fn sources(out: &Value) -> Vec<String> {
+        out["results"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|r| r["source"].as_str().unwrap().to_string())
+            .collect()
+    }
+
+    #[tokio::test]
+    async fn a_folder_import_leaves_pictures_out_unless_asked_and_a_named_one_always_goes() {
+        let (dir, imp) = vault();
+        put(&dir, "Notebooks/Docs/Invoice.docx", INVOICE);
+        put(&dir, "Notebooks/Docs/photo.jpg", PHOTO);
+        let ocr = ingest::capabilities().ocr;
+
+        let plain = run(&imp, json!({"directory": "Notebooks/Docs"})).await;
+        assert_eq!(sources(&plain), ["Notebooks/Docs/Invoice.docx"], "{plain}");
+        // A host with no OCR lists the picture as blocked, not pending, so nothing is left out.
+        assert_eq!(plain["images_left_out"], if ocr { 1 } else { 0 }, "{plain}");
+
+        if ocr {
+            let with = run(
+                &imp,
+                json!({"directory": "Notebooks/Docs", "include_images": true}),
+            )
+            .await;
+            assert_eq!(sources(&with).len(), 2, "{with}");
+            let only = run(
+                &imp,
+                json!({"directory": "Notebooks/Docs", "format": ["image"]}),
+            )
+            .await;
+            assert_eq!(sources(&only), ["Notebooks/Docs/photo.jpg"], "{only}");
+        }
+        let only_docs = run(
+            &imp,
+            json!({"directory": "Notebooks/Docs", "format": ["PDF", "docx"]}),
+        )
+        .await;
+        assert_eq!(
+            sources(&only_docs),
+            ["Notebooks/Docs/Invoice.docx"],
+            "{only_docs}"
+        );
+
+        // Naming the picture imports it whatever the folder rules say.
+        let named = run(
+            &imp,
+            json!({"path": "Notebooks/Docs/photo.jpg", "dry_run": true}),
+        )
+        .await;
+        assert_eq!(sources(&named), ["Notebooks/Docs/photo.jpg"]);
     }
 
     #[tokio::test]

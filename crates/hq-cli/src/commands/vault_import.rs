@@ -14,7 +14,7 @@ use hq_vault::VaultClient;
 use serde_json::Value;
 
 const INVENTORY_USAGE: &str = "Usage: hq vault inventory [folder] [--status pending,changed,imported,blocked] [--format pdf,docx,...] [--limit N] [--json]";
-const IMPORT_USAGE: &str = "Usage: hq vault import <file>... | <folder> | --all [--apply] [--dry-run] [--destination <folder>] [--on-conflict skip|suffix|overwrite] [--archive] [--tag <tag>]... [--limit N] [--preview N] [--json]\n\
+const IMPORT_USAGE: &str = "Usage: hq vault import <file>... | <folder> | --all [--apply] [--dry-run] [--destination <folder>] [--on-conflict skip|suffix|overwrite] [--archive] [--format pdf,docx,...] [--images] [--tag <tag>]... [--limit N] [--preview N] [--json]\n\
      A folder (or --all) is a dry run until you add --apply. Files named one by one are imported straight away.";
 
 /// What the command line asked for, before it meets the vault.
@@ -30,6 +30,8 @@ struct ImportArgs {
     tags: Vec<String>,
     limit: Option<usize>,
     preview: Option<usize>,
+    formats: Vec<String>,
+    images: bool,
     json: bool,
 }
 
@@ -56,11 +58,18 @@ fn parse_import(args: &[String]) -> Result<ImportArgs> {
             "--apply" | "--yes" => out.apply = true,
             "--dry-run" | "-n" => out.dry_run = true,
             "--archive" => out.archive = true,
+            "--images" => out.images = true,
             "--json" => out.json = true,
             "--destination" | "--dest" => {
                 out.destination = Some(value_of(&mut it, a, IMPORT_USAGE)?.clone())
             }
             "--on-conflict" => out.on_conflict = Some(value_of(&mut it, a, IMPORT_USAGE)?.clone()),
+            "--format" => out.formats.extend(
+                value_of(&mut it, a, IMPORT_USAGE)?
+                    .split(',')
+                    .map(|f| f.trim().to_ascii_lowercase())
+                    .filter(|f| !f.is_empty()),
+            ),
             "--tag" => out.tags.push(value_of(&mut it, a, IMPORT_USAGE)?.clone()),
             "--limit" => out.limit = Some(number(value_of(&mut it, a, IMPORT_USAGE)?, a)?),
             "--preview" => out.preview = Some(number(value_of(&mut it, a, IMPORT_USAGE)?, a)?),
@@ -190,6 +199,8 @@ pub async fn import(
         tags: a.tags.clone(),
         archive_originals: a.archive,
         preview_chars: a.preview.unwrap_or(0).min(5000),
+        formats: Some(a.formats.clone()).filter(|f| !f.is_empty()),
+        include_images: a.images,
     };
     // A person at a terminal can take a bigger batch than an agent in one turn.
     let limit = a.limit.unwrap_or(200);
@@ -376,7 +387,14 @@ fn import_text(r: &Value, offer_apply: bool) -> String {
     }
     let n = |k: &str| r[k].as_u64().unwrap_or(0);
     if n("requested") == 0 {
-        return "Nothing pending: every file here is already imported.\n".to_string();
+        return if n("images_left_out") > 0 {
+            format!(
+                "No documents pending; {} picture(s) left out (add --images to include them, or import one by name).\n",
+                n("images_left_out")
+            )
+        } else {
+            "Nothing pending: every file here is already imported.\n".to_string()
+        };
     }
     let wrote = if dry {
         n("would_create")
@@ -390,6 +408,12 @@ fn import_text(r: &Value, offer_apply: bool) -> String {
         n("failed"),
         n("degraded"),
     ));
+    if n("images_left_out") > 0 {
+        out.push_str(&format!(
+            "{} picture(s) left out of this batch (photos and screenshots are noisy to read by OCR in bulk). Add --images to include them, or import one by name.\n",
+            n("images_left_out")
+        ));
+    }
     if n("more_pending") > 0 {
         out.push_str(&format!(
             "{} more pending; run the same command again for the next batch (or raise --limit).\n",
@@ -454,6 +478,9 @@ mod tests {
             "skip",
             "--destination",
             "Notebooks/In",
+            "--format",
+            "pdf, DOCX",
+            "--images",
             "--json",
         ]))
         .unwrap();
@@ -464,6 +491,8 @@ mod tests {
             (true, true, true, Some(5))
         );
         assert_eq!(a.on_conflict.as_deref(), Some("skip"));
+        assert_eq!(a.formats, ["pdf", "docx"]);
+        assert!(a.images);
         assert!(parse_import(&args(&["--wat"])).is_err());
         assert!(parse_import(&args(&["--limit"])).is_err());
         assert!(parse_import(&args(&["--limit", "many"])).is_err());
@@ -629,5 +658,11 @@ mod tests {
 
         let idle = serde_json::json!({"dry_run": false, "requested": 0, "results": []});
         assert!(import_text(&idle, false).starts_with("Nothing pending"));
+        let pictures = serde_json::json!({"dry_run": true, "requested": 0, "images_left_out": 3, "results": []});
+        let text = import_text(&pictures, true);
+        assert!(
+            text.contains("3 picture(s) left out") && text.contains("--images"),
+            "{text}"
+        );
     }
 }

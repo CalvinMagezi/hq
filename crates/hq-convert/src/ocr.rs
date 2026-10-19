@@ -46,6 +46,9 @@ pub struct OcrRead {
     pub confidence: OcrConfidence,
 }
 
+/// The recognised words of one page: (text, confidence), with the page number for a PDF.
+type PageWords = (Option<usize>, Vec<(String, f32)>);
+
 /// A word under this confidence (out of 100) is worth a look.
 const DOUBT_BELOW: f32 = 60.0;
 const MAX_DOUBTFUL: usize = 8;
@@ -78,7 +81,7 @@ fn token(word: &str) -> String {
 }
 
 /// Summarises the words of one or more pages, given as (page, words).
-pub(crate) fn confidence_of(pages: &[(Option<usize>, Vec<(String, f32)>)]) -> OcrConfidence {
+pub(crate) fn confidence_of(pages: &[PageWords]) -> OcrConfidence {
     let all: Vec<(Option<usize>, &str, f32)> = pages
         .iter()
         .flat_map(|(page, words)| words.iter().map(move |(w, c)| (*page, w.as_str(), *c)))
@@ -292,7 +295,7 @@ impl OcrEngine {
         pages.sort();
 
         let mut text = String::new();
-        let mut words_by_page: Vec<(Option<usize>, Vec<(String, f32)>)> = Vec::new();
+        let mut words_by_page: Vec<PageWords> = Vec::new();
         for (i, page) in pages.iter().enumerate() {
             let (page_text, words) = Self::read_words(page).await?;
             if !page_text.trim().is_empty() {

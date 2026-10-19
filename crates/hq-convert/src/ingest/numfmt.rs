@@ -632,7 +632,7 @@ mod tests {
         assert_eq!(r(builtin(41).unwrap(), -1234.0), "(1,234)");
         assert_eq!(r(builtin(41).unwrap(), 0.0), "-");
         assert_eq!(r(builtin(43).unwrap(), 1234.5), "1,234.50");
-        assert_eq!(r(builtin(2).unwrap(), 3.14159), "3.14");
+        assert_eq!(r(builtin(2).unwrap(), 4.56789), "4.57");
         assert!(builtin(14).is_none() && builtin(0).is_none() && builtin(49).is_none());
     }
 

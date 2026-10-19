@@ -29,6 +29,11 @@ Both read only files inside the vault. Nothing outside it is touched.
    note's `source` at the new place. Originals are moved, never deleted, and files in
    `_media/` stay where they are because conversations refer to them.
 
+A folder import leaves pictures (photos, screenshots, slide renders) out of the batch and
+says how many it left, because reading dozens of them by OCR mostly makes notes nobody
+wants. `--images` (`include_images` from an agent) brings them in, `--format pdf,docx` picks
+formats, and a picture named on its own is always imported.
+
 Named files (`hq vault import report.docx`) are imported straight away, and
 `--dry-run` holds them back. From an agent, `path` and `paths` write at once, and
 `directory` is a dry run until you pass `dry_run: false` and handles 10 files per
@@ -154,7 +159,9 @@ adding a note.
 | Intermediate form and the one Markdown writer | `ingest/ir.rs` |
 | Report and loss kinds | `ingest/report.rs` |
 | Safe zip and XML reading, limits | `ingest/package.rs` |
-| Readers | `ingest/docx.rs`, `pptx.rs`, `odf.rs`, `rtf.rs`, `html.rs`, `xmlconv.rs`, `sheet.rs`, `text.rs`, `pdf.rs`, `pdf_layout.rs`, `legacy.rs` |
+| Readers | `ingest/docx.rs`, `pptx.rs`, `odf.rs`, `rtf.rs`, `html.rs`, `xmlconv.rs`, `sheet.rs`, `ods.rs`, `text.rs`, `pdf.rs`, `pdf_layout.rs`, `legacy.rs` |
+| Spreadsheet number formats | `ingest/numfmt.rs` (format codes), `ingest/xlsx_formats.rs` (which cell has which) |
+| OCR and its confidence | `crates/hq-convert/src/ocr.rs` |
 | The vault flow (inventory, import, idempotency, archive) and the two tools | `crates/hq-tools/src/vault/import.rs` |
 | Terminal commands | `crates/hq-cli/src/commands/vault_import.rs` |
 | Connector approval and taint rules | `crates/hq-mcp/src/gateway.rs`, `crates/hq-agent/src/governance/taint.rs` |
