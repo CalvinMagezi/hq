@@ -1,26 +1,27 @@
-//! Inbound conversion — any supported format → Markdown.
+//! Inbound conversion: a file in any supported format to Markdown.
 //!
-//! Uses the `transmutation` crate (pure Rust, zero Python deps).
-//! Format detection uses the file extension as primary signal.
+//! This is the original entry point and keeps its shape. The work is done by
+//! the import pipeline in [`crate::ingest`], which looks at the file's content
+//! (not only its name), reads Office, OpenDocument, RTF, HTML and XML natively,
+//! rebuilds tables in PDFs, and reports what it kept and dropped. Use
+//! [`InboundConverter::convert_with_report`] when the report matters.
 
 use std::path::Path;
-use transmutation::{ConversionOptions, Converter, OutputFormat};
 
+use crate::ingest::{self, ConvertOptions, Converted, OcrMode};
 use crate::types::{ConvertError, DetectedFormat};
 
 /// Converts arbitrary documents to Markdown text.
-pub struct InboundConverter {
-    converter: Converter,
-}
+pub struct InboundConverter;
 
 impl InboundConverter {
     /// Create a new converter.
     pub fn new() -> Result<Self, ConvertError> {
-        let converter = Converter::new().map_err(|e| ConvertError::InboundFailed(e.to_string()))?;
-        Ok(Self { converter })
+        Ok(Self)
     }
 
-    /// Detect the format of a file from its extension alone.
+    /// The format a file's extension suggests. A first guess only: conversion
+    /// itself looks at the content.
     pub fn detect_format(path: &Path) -> DetectedFormat {
         let ext = path
             .extension()
@@ -31,8 +32,10 @@ impl InboundConverter {
         match ext.as_str() {
             "pdf" => DetectedFormat::Pdf,
             "docx" => DetectedFormat::Docx,
+            "doc" => DetectedFormat::Doc,
             "xlsx" | "xls" => DetectedFormat::Xlsx,
-            "pptx" | "ppt" => DetectedFormat::Pptx,
+            "pptx" => DetectedFormat::Pptx,
+            "ppt" => DetectedFormat::Ppt,
             "html" | "htm" => DetectedFormat::Html,
             "xml" => DetectedFormat::Xml,
             "txt" => DetectedFormat::Txt,
@@ -40,6 +43,8 @@ impl InboundConverter {
             "tsv" => DetectedFormat::Tsv,
             "rtf" => DetectedFormat::Rtf,
             "odt" => DetectedFormat::Odt,
+            "ods" => DetectedFormat::Ods,
+            "odp" => DetectedFormat::Odp,
             "jpg" | "jpeg" | "png" | "tiff" | "tif" | "bmp" | "gif" | "webp" => {
                 DetectedFormat::Image(ext)
             }
@@ -49,55 +54,23 @@ impl InboundConverter {
 
     /// Convert a file at `path` to Markdown text.
     ///
-    /// Returns `ConvertError::UnsupportedFormat` for `.md` inputs and
-    /// unknown extensions.
+    /// A PDF with no text layer is an error here; use [`Self::convert_with_report`]
+    /// with OCR on to read it.
     pub async fn convert(&self, path: &Path) -> Result<String, ConvertError> {
-        let format = Self::detect_format(path);
-
-        if !format.is_supported_inbound() {
-            return Err(ConvertError::UnsupportedFormat(format.to_string()));
-        }
-
-        if let DetectedFormat::Image(_) = format {
-            return crate::ocr::OcrEngine::extract_text(path).await;
-        }
-
-        let opts = ConversionOptions {
-            optimize_for_llm: true,
-            normalize_whitespace: true,
-            include_metadata: true,
-            ..Default::default()
+        let opts = ConvertOptions {
+            ocr: OcrMode::Off,
+            ..ConvertOptions::default()
         };
+        Ok(ingest::convert_file(path, &opts).await?.markdown)
+    }
 
-        let result =
-            self.converter
-                .convert(path.to_str().ok_or_else(|| {
-                    ConvertError::Other("path contains invalid UTF-8".to_string())
-                })?)
-                .to(OutputFormat::Markdown {
-                    split_pages: false,
-                    optimize_for_llm: true,
-                })
-                .with_options(opts)
-                .execute()
-                .await
-                .map_err(|e| ConvertError::InboundFailed(e.to_string()))?;
-
-        // Collect all page outputs and join as text
-        let markdown = result
-            .content
-            .iter()
-            .map(|output| String::from_utf8_lossy(&output.data).into_owned())
-            .collect::<Vec<_>>()
-            .join("\n\n");
-
-        if markdown.trim().is_empty() {
-            return Err(ConvertError::InboundFailed(
-                "conversion produced no text".to_string(),
-            ));
-        }
-
-        Ok(markdown)
+    /// Convert with explicit options and get the report back with the Markdown.
+    pub async fn convert_with_report(
+        &self,
+        path: &Path,
+        opts: &ConvertOptions,
+    ) -> Result<Converted, ConvertError> {
+        ingest::convert_file(path, opts).await
     }
 }
 
@@ -136,5 +109,19 @@ mod tests {
         let p = Path::new("archive.7z");
         let fmt = InboundConverter::detect_format(p);
         assert!(!fmt.is_supported_inbound());
+    }
+
+    #[test]
+    fn opendocument_and_legacy_office_are_recognised() {
+        for (name, label) in [
+            ("a.ods", "ods"),
+            ("a.odp", "odp"),
+            ("a.doc", "doc"),
+            ("a.ppt", "ppt"),
+        ] {
+            let f = InboundConverter::detect_format(Path::new(name));
+            assert_eq!(f.label(), label);
+            assert!(f.is_supported_inbound());
+        }
     }
 }

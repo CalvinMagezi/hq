@@ -6,12 +6,12 @@
 
 use std::path::{Path, PathBuf};
 
-use crate::{DetectedFormat, InboundConverter, OcrEngine};
+use crate::OcrEngine;
+use crate::ingest::{self, ConvertOptions};
+use crate::types::ConvertError;
 
 /// Inline document text cap, shared by plain-text files and converted documents.
 pub const INLINE_DOC_CHAR_LIMIT: usize = 10_000;
-/// Below this many characters a PDF is treated as scanned and sent to OCR.
-const MIN_PDF_TEXT_CHARS: usize = 50;
 /// Keeps failure reasons in the inventory to one short line.
 const MAX_FAILURE_REASON_CHARS: usize = 120;
 
@@ -134,28 +134,16 @@ pub fn build_inventory(files: &[FileEntry]) -> String {
     out
 }
 
-/// Pulls text out of a non-plain-text document, falling back to page OCR for
-/// PDFs whose text layer is missing or near-empty.
+/// Pulls text out of a non-plain-text document. The import pipeline reads the
+/// file by its content, rebuilds tables, and falls back to OCR for a PDF whose
+/// text layer is missing or near-empty.
 pub async fn extract_document(path: &Path) -> (Option<String>, FileStatus) {
-    let format = InboundConverter::detect_format(path);
-    if !format.is_supported_inbound() {
-        return (None, FileStatus::Unsupported);
-    }
-    let converted = match InboundConverter::new() {
-        Ok(converter) => converter.convert(path).await,
-        Err(e) => Err(e),
-    };
-    let is_pdf = format == DetectedFormat::Pdf;
-    match converted {
-        Ok(text) if !is_pdf || text.trim().chars().count() >= MIN_PDF_TEXT_CHARS => {
-            (Some(text), FileStatus::Extracted)
-        }
-        Err(e) if !is_pdf => (None, failed(e)),
-        _ => match OcrEngine::extract_pdf(path).await {
-            Ok(text) if !text.trim().is_empty() => (Some(text), FileStatus::Ocr),
-            Ok(_) => (None, failed("no text found, even after OCR")),
-            Err(e) => (None, failed(e)),
-        },
+    let opts = ConvertOptions::default();
+    match ingest::convert_file(path, &opts).await {
+        Ok(c) if c.report.engine.starts_with("ocr") => (Some(c.markdown), FileStatus::Ocr),
+        Ok(c) => (Some(c.markdown), FileStatus::Extracted),
+        Err(ConvertError::UnsupportedFormat(_)) => (None, FileStatus::Unsupported),
+        Err(e) => (None, failed(e)),
     }
 }
 

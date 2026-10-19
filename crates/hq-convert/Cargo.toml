@@ -2,7 +2,7 @@
 name = "hq-convert"
 version.workspace = true
 edition.workspace = true
-description = "Bidirectional file conversion: any-format→Markdown (via transmutation) and Markdown→any-format (via pandoc)"
+description = "Bidirectional file conversion: any-format→Markdown (native readers with a conversion report) and Markdown→any-format (via pandoc)"
 
 [dependencies]
 thiserror = { workspace = true }
@@ -19,5 +19,19 @@ regex = { workspace = true }
 transmutation = { version = "0.3.5", features = ["office"] }
 tempfile = "3"
 
+# Native readers. They replace transmutation where it flattens or drops content
+# (docx, pptx, odf, rtf, html, xml) and add formats it lacks (xls, ods).
+# zip 9 is the first release that is not yanked; transmutation still pulls zip 8.
+zip = { version = "9", default-features = false, features = ["deflate"] }
+roxmltree = "0.21"
+calamine = { version = "0.37", features = ["chrono"] }
+scraper = { workspace = true }
+encoding_rs = "0.8"
+sha2 = { workspace = true }
+chrono = { workspace = true }
+
 [features]
 default = []
+
+[dev-dependencies]
+serde_json = { workspace = true }

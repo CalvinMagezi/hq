@@ -39,7 +39,8 @@ ignore = [
     # advisories will follow later in October 2026 (zip-rs/zip2 issue 1075).
     # Nothing here calls the extraction code: hq-export only writes zips (it reads them
     # only in tests), docx-rs and umya-spreadsheet read entries into memory, rust_xlsxwriter
-    # only writes, and transmutation only lists entry names and sizes.
+    # only writes, and transmutation only lists entry names and sizes. hq-convert's import
+    # reader uses zip 9 and reads entries into memory under size limits; it never extracts.
     # Upgrade status on 2026-10-18: rust_xlsxwriter 0.100 requires zip 9, but docx-rs 0.4.22,
     # umya-spreadsheet 3.1.1 and transmutation 0.3.5 are their latest releases and all still
     # require zip 8, so zip 8.6.0 stays in Cargo.lock until all three move.

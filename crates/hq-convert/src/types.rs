@@ -15,6 +15,14 @@ pub enum ConvertError {
     #[error("outbound conversion failed: {0}")]
     OutboundFailed(String),
 
+    /// An input or part of one is over a safety limit (size, entry count, expansion).
+    #[error("too large to convert safely: {0}")]
+    TooLarge(String),
+
+    /// The file needs a password; nothing was read.
+    #[error("password protected: {0}")]
+    Encrypted(String),
+
     #[error(
         "pandoc not found in PATH.\n\
          Install it with:\n  \
@@ -53,6 +61,10 @@ pub enum DetectedFormat {
     Tsv,
     Rtf,
     Odt,
+    Ods,
+    Odp,
+    Doc,
+    Ppt,
     /// Routed to the `ocr` module rather than transmutation.
     Image(String),
     /// Rejected, carrying the extension. Audio, video and zip land here because
@@ -75,6 +87,10 @@ impl DetectedFormat {
             Self::Tsv => "tsv",
             Self::Rtf => "rtf",
             Self::Odt => "odt",
+            Self::Ods => "ods",
+            Self::Odp => "odp",
+            Self::Doc => "doc",
+            Self::Ppt => "ppt",
             Self::Image(_) => "image",
             Self::Unknown(_) => "unknown",
         }

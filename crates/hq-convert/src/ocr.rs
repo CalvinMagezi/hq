@@ -74,6 +74,25 @@ async fn compiled_binary_path() -> Result<&'static Path, ConvertError> {
 }
 
 impl OcrEngine {
+    /// Whether this host can run OCR: `tesseract` on Linux, the Swift toolchain on macOS.
+    pub fn available() -> bool {
+        #[cfg(target_os = "linux")]
+        {
+            which::which("tesseract").is_ok()
+                || TESSERACT_BIN_FALLBACKS
+                    .iter()
+                    .any(|p| std::path::Path::new(p).exists())
+        }
+        #[cfg(target_os = "macos")]
+        {
+            which::which("swiftc").is_ok()
+        }
+        #[cfg(not(any(target_os = "linux", target_os = "macos")))]
+        {
+            false
+        }
+    }
+
     /// Extract text from an image file using Apple's Vision framework.
     #[cfg(target_os = "macos")]
     pub async fn extract_text(image_path: &Path) -> Result<String, ConvertError> {
