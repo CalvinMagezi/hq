@@ -20,6 +20,12 @@ import './tasks.css'
 import { t } from '~/strings'
 import { MarkdownViewer } from '../MarkdownViewer'
 
+export interface HiddenBy {
+  kind: 'list' | 'parent'
+  name: string
+  onUnarchive: () => void
+}
+
 interface Props {
   task: TaskItem | null
   allTasks: TaskItem[]
@@ -28,9 +34,14 @@ interface Props {
   /** Opens the details pane as a side sheet; shown only below 1400 px. */
   onDetails?: () => void
   onUpdate: (id: string, patch: Record<string, unknown>) => Promise<void>
-  /** Brings an archived task back. */
+  /** Brings a deleted task back. */
   onRestore?: (id: string) => Promise<void>
-  /** Archives the task; `purge` deletes an archived one for good. */
+  /** Hides the task from the lists, or shows it again. Agents are not affected either way. */
+  onArchive?: (task: TaskItem) => Promise<void>
+  onUnarchive?: (task: TaskItem) => Promise<void>
+  /** Set when the task has no stamp of its own but its list or parent is archived, which hides it all the same. */
+  hiddenBy?: HiddenBy
+  /** Deletes the task; `purge` deletes a deleted one for good. */
   onDelete: (id: string, cascade: boolean, purge?: boolean) => Promise<void>
   onSelectTask: (id: string) => void
   onCreateSubtask: (parent: TaskItem, title: string) => Promise<void>
@@ -46,6 +57,9 @@ export function TaskDetailMain({
   onDetails,
   onUpdate,
   onRestore,
+  onArchive,
+  onUnarchive,
+  hiddenBy,
   onDelete,
   onSelectTask,
   onCreateSubtask,
@@ -85,7 +99,8 @@ export function TaskDetailMain({
   const stale = useIsStale(task?.id ?? '')
 
   if (!task) return null
-  const archived = task.archived_at !== null
+  const removed = task.archived_at !== null
+  const shelved = task.shelved_at !== null
 
   const handleSaveEdit = async () => {
     if (isInvalidEstimate(draftEstimate)) return
@@ -140,7 +155,7 @@ export function TaskDetailMain({
             </button>
           </>
         ) : (
-          !archived && (
+          !removed && (
             <button type="button" onClick={() => setEditing(true)} className="a-ib" aria-label={t('note_editor_edit')}>
               <Pencil className="a-ic" aria-hidden="true" />
             </button>
@@ -152,12 +167,17 @@ export function TaskDetailMain({
           </button>
           {menuOpen && (
             <div role="menu" className="a-menu tk-pop">
-              {!archived && (
-                <button type="button" role="menuitem" className="a-menu-item" disabled={busy} onClick={handleDeleteClick}>
-                  {t('chat_archive')}
+              {!removed && !shelved && onArchive && (
+                <button type="button" role="menuitem" className="a-menu-item" disabled={busy} onClick={() => { setMenuOpen(false); void onArchive(task) }}>
+                  {t('tasks_archive_action')}
                 </button>
               )}
-              {archived && (
+              {!removed && (
+                <button type="button" role="menuitem" className="a-menu-item" disabled={busy} onClick={handleDeleteClick}>
+                  {t('tasks_delete_action')}
+                </button>
+              )}
+              {removed && (
                 <button type="button" role="menuitem" className="a-menu-item danger" disabled={busy} onClick={() => { setMenuOpen(false); setConfirmingDelete(true) }}>
                   {t('delete_task_act')}
                 </button>
@@ -191,7 +211,27 @@ export function TaskDetailMain({
 
       <div className="tk-body">
         <div className="tk-stack a-pad">
-          {archived && (
+          {shelved && !removed && (
+            <div className="a-stale" role="status">
+              <span>{t('tasks_shelved_notice', { when: formatLocalTime(task.shelved_at ?? '') })}</span>
+              {onUnarchive && (
+                <button type="button" onClick={() => void onUnarchive(task)} disabled={busy} className="a-btn compact secondary">
+                  {t('tasks_unarchive_action')}
+                </button>
+              )}
+            </div>
+          )}
+
+          {hiddenBy && !shelved && !removed && (
+            <div className="a-stale" role="status">
+              <span>{t('tasks_hidden_by_notice', { kind: hiddenBy.kind, name: hiddenBy.name })}</span>
+              <button type="button" onClick={hiddenBy.onUnarchive} disabled={busy} className="a-btn compact secondary">
+                {t('tasks_unarchive_kind', { kind: hiddenBy.kind })}
+              </button>
+            </div>
+          )}
+
+          {removed && (
             <div className="a-stale" role="status">
               <span>{t('tasks_archived_notice', { when: formatLocalTime(task.archived_at ?? '') })}</span>
               {onRestore && (
@@ -232,7 +272,7 @@ export function TaskDetailMain({
                 key={status}
                 type="button"
                 aria-pressed={status === task.status}
-                disabled={busy || archived || status === task.status}
+                disabled={busy || removed || status === task.status}
                 onClick={() => onUpdate(task.id, { status, expected_status: task.status })}
                 className="a-chip"
               >
@@ -325,7 +365,7 @@ export function TaskDetailMain({
           <TaskDecisions key={`decisions-${task.id}`} taskId={task.id} />
           <TaskCheckpoint key={`checkpoint-${task.id}`} task={task} />
           <TaskTime key={`time-${task.id}`} task={task} />
-          <TaskSessions key={`sessions-${task.id}`} taskId={task.id} taskTitle={task.title} done={archived || task.status === 'complete'} />
+          <TaskSessions key={`sessions-${task.id}`} taskId={task.id} taskTitle={task.title} done={removed || task.status === 'complete'} />
           <TaskComments key={`comments-${task.id}`} taskId={task.id} />
         </div>
       </div>

@@ -41,6 +41,7 @@ pub fn create_task(
     )?;
     set_tags(conn, id, new.tags)?;
     set_assignees(conn, id, new.assignees)?;
+    surface(conn, id)?;
     notify_on_ok(
         conn,
         get_task(conn, id)?
@@ -106,7 +107,13 @@ pub fn create_task_dedup(
         None => Ok(None),
     };
     if let Some(task) = existing(&key)? {
-        return Ok((task, false));
+        // Filing open work again is work resuming on it: it must not stay hidden.
+        if task.status == STATUS_COMPLETE {
+            return Ok((task, false));
+        }
+        surface(conn, &task.id)?;
+        let fresh = get_task(conn, &task.id)?.unwrap_or(task);
+        return Ok((fresh, false));
     }
     match create_task(conn, id, initiative_id, new) {
         Ok(task) => Ok((task, true)),
@@ -157,6 +164,11 @@ fn filter_sql(filter: &TaskFilter) -> (String, SqlParams) {
         "t.archived_at IS NULL"
     }];
     let mut vals: SqlParams = Vec::new();
+
+    if let Some(condition) = shelf_condition(filter.shelf) {
+        sql.push_str(SHELF_PARENT_JOIN);
+        conditions.push(condition);
+    }
 
     if let Some(tag) = &filter.tag {
         sql.push_str(" JOIN task_tags tg ON tg.task_id = t.id");
@@ -459,6 +471,9 @@ fn apply_update(
     if let Some(status) = patch.status.as_deref().filter(|s| *s != current.status) {
         record_transition(conn, &current.id, &current.status, status, ctx)?;
         track_blocked(conn, &current.id, &current.status, status, patch)?;
+        if status != STATUS_COMPLETE {
+            surface(conn, &current.id)?;
+        }
     }
     if let Some(verification::Completion::Owner { tier }) = completion {
         verification::record_owner_completion(

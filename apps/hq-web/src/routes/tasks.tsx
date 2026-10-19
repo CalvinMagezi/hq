@@ -11,12 +11,18 @@ import {
   HTTP_CONFLICT,
   fetchRecentWorkSessionsClient,
   fetchStaleTasksClient,
+  fetchRelatedTasksClient,
+  fetchTaskClient,
   fetchTasksClient,
   restoreTaskClient,
+  shelveInitiativeClient,
+  shelveTasksClient,
+  unshelveTasksClient,
   type Initiative,
   type TaskItem,
   type TaskPriority,
   type WorkSession,
+  type SweepScope,
   type TaskStatus,
   type TaskUpdateResult,
   type UpdateTaskInput,
@@ -39,7 +45,7 @@ import { CHIPS, TABS, chipStatus, matchesTab, type TaskChip, type TaskTab } from
 import { formatDay, todayDay } from '~/components/tasks/dates'
 import { TaskBoardView } from '~/components/tasks/TaskBoardView'
 import { TaskGanttView } from '~/components/tasks/TaskGanttView'
-import { TaskDetailMain, TaskDetailSide } from '~/components/tasks/TaskDetailDrawer'
+import { TaskDetailMain, TaskDetailSide, type HiddenBy } from '~/components/tasks/TaskDetailDrawer'
 import { Panes, PaneHead } from '~/components/ui/Panes'
 import { useEdition } from '~/lib/edition'
 import { useSharedConnection } from '~/lib/connection'
@@ -59,6 +65,8 @@ import { AwayPage } from '~/components/tasks/AwayPage'
 import { AwayLinkRow } from '~/components/tasks/TasksBody'
 import { SweepSheet } from '~/components/tasks/verification/SweepSheet'
 import { AuditSheet } from '~/components/tasks/verification/AuditSheet'
+import { ArchiveSweep } from '~/components/tasks/ArchiveSweep'
+import { shelveNotice, withoutShelved } from '~/components/tasks/shelf'
 
 type TasksView = 'list' | 'board' | 'timeline'
 const VIEW_KEY = 'hq.tasks.view'
@@ -73,8 +81,9 @@ const VIEWS: { id: TasksView; label: string; icon: typeof List }[] = [
 /** How far back the timeline draws actual work, and how often it refreshes. */
 const TIMELINE_WORK_DAYS = 60
 const TIMELINE_WORK_POLL_MS = 60_000
-/** How often the archived list and the stale ids refresh while shown. */
+/** How often the archived and deleted lists, and a task's relations, refresh while shown. */
 const ARCHIVED_POLL_MS = 60_000
+const RELATED_POLL_MS = 120_000
 const STALE_POLL_MS = 120_000
 /** Who is working right now: a short window and a quick poll, since a lease can start or end any minute. */
 const LIVE_WORK_DAYS = 1
@@ -92,7 +101,15 @@ export const Route = createFileRoute('/tasks')({
   component: TasksPage,
 })
 
-type StatusTab = 'active' | 'all' | 'complete' | 'archived'
+/** `archived` is tidied away but live for agents; `deleted` is removed until restored. */
+type StatusTab = 'active' | 'all' | 'complete' | 'archived' | 'deleted'
+const STATUS_TABS: StatusTab[] = ['active', 'all', 'complete', 'archived', 'deleted']
+
+/** A line under the page that offers to take the last archive back. */
+interface Undo {
+  label: string
+  run: () => Promise<void>
+}
 
 const FOLDED_SECTIONS_KEY = 'hq-tasks-collapsed-sections'
 const isStringArray = (v: unknown) => Array.isArray(v) && v.every((x) => typeof x === 'string')
@@ -164,7 +181,7 @@ function TasksPage() {
   const [tab, setTab] = useState<TaskTab>('all')
   const [chip, setChip] = useState<TaskChip>('active')
   const onAll = tab === 'all' && view !== 'board'
-  const statusTab: StatusTab = onAll && chip === 'archived' ? 'archived' : onAll && chip === 'done' ? 'complete' : 'active'
+  const statusTab: StatusTab = onAll && chip === 'deleted' ? 'deleted' : onAll && chip === 'archived' ? 'archived' : onAll && chip === 'done' ? 'complete' : 'active'
   const statusFilter: TaskStatus | 'all' = (onAll && chipStatus(chip)) || 'all'
   const [tagFilter, setTagFilter] = useState<string>('all')
   const [selection, setSelection] = useState<TaskSelection>(ALL_SELECTION)
@@ -214,9 +231,17 @@ function TasksPage() {
     ['task:sync']
   )
 
+  const deleted = usePolled(
+    'deleted-tasks',
+    async () => (await fetchTasksClient({ archived: true })).tasks,
+    ARCHIVED_POLL_MS,
+    statusTab === 'deleted',
+    true,
+    ['task:sync']
+  )
   const archived = usePolled(
     'archived-tasks',
-    async () => (await fetchTasksClient({ archived: true })).tasks,
+    async () => (await fetchTasksClient({ shelf: 'only' })).tasks,
     ARCHIVED_POLL_MS,
     statusTab === 'archived',
     true,
@@ -235,6 +260,7 @@ function TasksPage() {
     true,
     ['task:sync']
   )
+  const deletedTasks = deleted.data ?? []
   const archivedTasks = archived.data ?? []
 
   const { task: linkedSearchId } = Route.useSearch()
@@ -248,10 +274,38 @@ function TasksPage() {
     if (linkedTaskId) setSelectedTaskId(linkedTaskId)
   }, [linkedTaskId, setSelectedTaskId])
 
-  const selectedTask = useMemo(
-    () => tasks.find((t) => t.id === selectedTaskId) ?? archivedTasks.find((t) => t.id === selectedTaskId) ?? null,
-    [tasks, archivedTasks, selectedTaskId]
+  const listedTask = useMemo(
+    () =>
+      tasks.find((t) => t.id === selectedTaskId) ??
+      archivedTasks.find((t) => t.id === selectedTaskId) ??
+      deletedTasks.find((t) => t.id === selectedTaskId) ??
+      null,
+    [tasks, archivedTasks, deletedTasks, selectedTaskId]
   )
+  // An archived task is not in the store, so a link to one (or a relation chip) fetches it on demand.
+  const pinned = usePolled(
+    `task:${selectedTaskId}`,
+    () => fetchTaskClient(selectedTaskId ?? ''),
+    RELATED_POLL_MS,
+    Boolean(selectedTaskId) && listedTask === null,
+    true,
+    ['task:sync']
+  )
+  const selectedTask = listedTask ?? pinned.data
+
+  // What the open task points at or is pointed at by, archived or not: the store leaves archived tasks out.
+  const related = usePolled(
+    `related:${selectedTask?.id}`,
+    () => fetchRelatedTasksClient(selectedTask?.id ?? ''),
+    RELATED_POLL_MS,
+    Boolean(selectedTask),
+    true,
+    ['task:sync']
+  )
+  const drawerTasks = useMemo(() => {
+    const extra = (related.data ?? []).filter((r) => !tasks.some((t) => t.id === r.id))
+    return extra.length ? [...tasks, ...extra] : tasks
+  }, [tasks, related.data])
 
   // Inside the Android app, Back closes the task drawer and the new-task form before it leaves the page.
   useBackClosesLayer(selectedTask != null, () => setSelectedTaskId(null))
@@ -263,21 +317,33 @@ function TasksPage() {
 
   const initiativeById = useMemo(() => new Map(initiatives.map((i) => [i.id, i])), [initiatives])
 
+  const shownInitiatives = useMemo(() => initiatives.filter((i) => !i.shelved_at), [initiatives])
+
+  // The lists show what is not archived. An archived task can still reach the store (a push for it,
+  // a task opened from a link), so the store is filtered here rather than trusted.
+  const everyday = useMemo(() => withoutShelved(tasks, initiativeById), [tasks, initiativeById])
+
   const allTags = useMemo(() => {
     const tags = new Set<string>()
-    for (const t of tasks) for (const tag of t.tags) tags.add(tag)
+    for (const t of everyday) for (const tag of t.tags) tags.add(tag)
     return Array.from(tags).sort((a, b) => a.localeCompare(b))
-  }, [tasks])
+  }, [everyday])
 
   const filtered = useMemo(
     () =>
       filterTasks(
-        statusTab === 'archived' ? archivedTasks : tasks,
+        statusTab === 'deleted' ? deletedTasks : statusTab === 'archived' ? archivedTasks : everyday,
         { statusTab, statusFilter, tab, tagFilter, selection, searchQuery, view },
         initiativeById
       ),
-    [tasks, archivedTasks, statusTab, statusFilter, tab, tagFilter, selection, initiativeById, searchQuery, view]
+    [everyday, archivedTasks, deletedTasks, statusTab, statusFilter, tab, tagFilter, selection, initiativeById, searchQuery, view]
   )
+
+  // A list archived elsewhere while it is open would leave an empty page behind.
+  useEffect(() => {
+    const open = selection.initiativeId ? initiativeById.get(selection.initiativeId) : undefined
+    if (open?.shelved_at && statusTab !== 'archived') setSelection(ALL_SELECTION)
+  }, [selection.initiativeId, initiativeById, statusTab])
 
   // Initiative sections the list folds away. Kept in the browser, so a section skipped once stays skipped.
   const [foldedNames, setFoldedNames] = usePersistedState<string[]>(FOLDED_SECTIONS_KEY, [], isStringArray)
@@ -298,8 +364,8 @@ function TasksPage() {
     [filtered, sections, initiativeById]
   )
 
-  // Picking tasks for a bulk action only makes sense in the list, and not in the archive.
-  const picking = useTaskSelection(onScreen, view === 'list' && statusTab !== 'archived')
+  // Picking tasks for a bulk action only makes sense in the list, and not among the deleted.
+  const picking = useTaskSelection(onScreen, view === 'list' && statusTab !== 'deleted')
   const [bulkProgress, setBulkProgress] = useState<{ settled: number; total: number } | null>(null)
   const [bulkResult, setBulkResult] = useState<string | null>(null)
 
@@ -435,8 +501,73 @@ function TasksPage() {
   const handleRestore = (id: string) =>
     withBusy(async () => {
       upsertTask(await restoreTaskClient(id))
-      await archived.refresh()
+      await deleted.refresh()
     }, t('tasks_restore_failed'))
+
+  const [undo, setUndo] = useState<Undo | null>(null)
+
+  // The server is the source of truth for what is archived; refetch rather than guess at it.
+  const refreshShelves = async () => {
+    await Promise.all([loadTasks(), loadTaxonomy(), archived.refresh()])
+  }
+
+  const displayIdOf = (ref: string) =>
+    (taskById.get(ref) ?? archivedTasks.find((t) => t.id === ref) ?? deletedTasks.find((t) => t.id === ref))?.display_id ?? ref
+
+  const unarchiveIds = (ids: string[]) => async () => {
+    const result = await unshelveTasksClient(ids)
+    setNotice(result.skipped.length ? shelveNotice(result, 'Unarchived', displayIdOf) : null)
+    await refreshShelves()
+  }
+
+  const reportArchived = (changed: string[], label: string) => {
+    setUndo(changed.length ? { label, run: unarchiveIds(changed) } : null)
+  }
+
+  const archiveTasks = (targets: TaskItem[]) =>
+    withBusy(async () => {
+      const result = await shelveTasksClient(targets.map((t) => t.id))
+      const notice = shelveNotice(result, 'Archived', displayIdOf)
+      reportArchived(result.changed, notice)
+      setNotice(result.changed.length ? null : notice)
+      picking.setMany(targets.filter((t) => result.changed.includes(t.id)), false)
+      await refreshShelves()
+    }, 'Archive failed')
+
+  const unarchiveTasks = (targets: TaskItem[]) =>
+    withBusy(async () => {
+      const result = await unshelveTasksClient(targets.map((t) => t.id))
+      setUndo(null)
+      setNotice(shelveNotice(result, 'Unarchived', displayIdOf))
+      picking.setMany(targets.filter((t) => result.changed.includes(t.id)), false)
+      await refreshShelves()
+    }, 'Unarchive failed')
+
+  const setListArchived = (initiative: Initiative, shelve: boolean) =>
+    withBusy(async () => {
+      const res = await shelveInitiativeClient(initiative.id, shelve)
+      if (shelve && selection.initiativeId === initiative.id) setSelection(ALL_SELECTION)
+      const open = res.open_tasks > 0 ? ` ${res.open_tasks} task${res.open_tasks === 1 ? ' is' : 's are'} still open.` : ''
+      setNotice(null)
+      setUndo(
+        shelve
+          ? {
+              label: `Archived the list ${initiative.name}.${open}`,
+              run: async () => {
+                await shelveInitiativeClient(initiative.id, false)
+                await refreshShelves()
+              },
+            }
+          : null
+      )
+      await refreshShelves()
+    }, 'Could not change the list')
+
+  const handleSweep = (changed: string[]) => {
+    setNotice(null)
+    reportArchived(changed, `Archived ${changed.length} completed task${changed.length === 1 ? '' : 's'}.`)
+    return refreshShelves()
+  }
 
   // One PATCH per task, a few at a time: each keeps its own checks, notifications and
   // soft-dependency warnings, and one task failing leaves the rest done.
@@ -529,16 +660,33 @@ function TasksPage() {
     fn(...args)
   }
 
-  const activeCount = tasks.filter((t) => t.status !== 'complete').length
+  // Why the open task is out of the lists when it has no archive stamp of its own.
+  const hiddenBy = ((): HiddenBy | undefined => {
+    if (!selectedTask || selectedTask.shelved_at) return undefined
+    const list = initiativeById.get(selectedTask.initiative_id)
+    if (list?.shelved_at) return { kind: 'list', name: list.name, onUnarchive: () => void setListArchived(list, false) }
+    const parent = selectedTask.parent_task_id ? drawerTasks.find((t) => t.id === selectedTask.parent_task_id) : undefined
+    if (parent?.shelved_at) return { kind: 'parent', name: parent.display_id, onUnarchive: () => void unarchiveTasks([parent]) }
+    return undefined
+  })()
+
+  const activeCount = everyday.filter((t) => t.status !== 'complete').length
   const todayStr = formatDay(todayDay())
   const tabCounts: Record<TaskTab, number> = {
-    today: tasks.filter((x) => x.status !== 'complete' && matchesTab(x, 'today', todayStr)).length,
-    upcoming: tasks.filter((x) => x.status !== 'complete' && matchesTab(x, 'upcoming', todayStr)).length,
+    today: everyday.filter((x) => x.status !== 'complete' && matchesTab(x, 'today', todayStr)).length,
+    upcoming: everyday.filter((x) => x.status !== 'complete' && matchesTab(x, 'upcoming', todayStr)).length,
     all: activeCount,
   }
-  const readyCount = tasks.filter((x) => x.status === 'ready_for_review').length
+  const readyCount = everyday.filter((x) => x.status === 'ready_for_review').length
   const unreachable = connection === 'unreachable' || connection === 'offline'
-  const canSelect = view === 'list' && statusTab !== 'archived'
+  const canSelect = view === 'list' && statusTab !== 'deleted'
+  const sweepSpace = selection.spaceId ? spaces.find((s) => s.id === selection.spaceId) : undefined
+  const sweepList = selection.initiativeId ? initiativeById.get(selection.initiativeId) : undefined
+  const sweepScope = {
+    space_id: selection.spaceId ?? undefined,
+    initiative_id: selection.initiativeId ?? undefined,
+  }
+  const sweepLabel = sweepList?.name ?? sweepSpace?.name ?? t('tasks_all_lists')
   const detailOpen = selectedTask != null || away
   const closeDetail = () => {
     setSideOpen(false)
@@ -622,6 +770,9 @@ function TasksPage() {
           </option>
         ))}
       </select>
+      {statusTab !== 'archived' && statusTab !== 'deleted' && (
+        <ArchiveSweep scope={sweepScope} scopeLabel={sweepLabel} onArchived={handleSweep} onError={setNotice} />
+      )}
     </div>
   )
 
@@ -636,6 +787,8 @@ function TasksPage() {
       onDone={afterPick(picking.stop)}
       onStatus={handleBulkStatus}
       onPriority={handleBulkPriority}
+      archiveLabel={statusTab === 'archived' ? 'Unarchive' : 'Archive'}
+      onArchive={() => (statusTab === 'archived' ? unarchiveTasks(picking.selected) : archiveTasks(picking.selected))}
     />
   ) : (
     <div className="a-tabs fit" role="tablist" aria-label={t('place_tasks')}>
@@ -728,6 +881,18 @@ function TasksPage() {
     </div>
   )
 
+  const undoNode = undo && (
+    <div className="a-stale" role="status">
+      <span>{undo.label}</span>
+      <button type="button" disabled={busy} onClick={() => withBusy(async () => { await undo.run(); setUndo(null) }, t('tasks_undo_failed'))} className="a-btn compact secondary">
+        {t('tasks_undo')}
+      </button>
+      <button type="button" aria-label={t('close')} onClick={() => setUndo(null)} className="a-ib">
+        <X className="a-ic sm" aria-hidden="true" />
+      </button>
+    </div>
+  )
+
   const briefing = selection.initiativeId && (
     <div className="a-pad">
       {briefingFor === selection.initiativeId ? (
@@ -761,6 +926,7 @@ function TasksPage() {
       <div className="tk-scroll">
         {staleNote}
         {noticeNode}
+        {undoNode}
         {briefing}
         {!lite && <WorkingNowPanel sessions={liveSessions} taskById={taskById} onSelect={openTask} />}
         {rows}
@@ -835,12 +1001,15 @@ function TasksPage() {
     detail = (
       <TaskDetailMain
         task={selectedTask}
-        allTasks={tasks}
+        allTasks={drawerTasks}
         onClose={closeDetail}
         onDetails={() => setSideOpen(true)}
         onUpdate={handleUpdate}
         onDelete={handleDelete}
         onRestore={handleRestore}
+        onArchive={(task) => archiveTasks([task])}
+        onUnarchive={(task) => unarchiveTasks([task])}
+        hiddenBy={hiddenBy}
         onSelectTask={openTask}
         onCreateSubtask={handleCreateSubtask}
         busy={busy}
@@ -934,9 +1103,15 @@ function TasksPage() {
               spaces={spaces}
               folders={folders}
               initiatives={initiatives}
-              tasks={tasks}
+              tasks={everyday}
               selection={selection}
               onSelect={setSelection}
+              onSetListArchived={setListArchived}
+              onOpenArchivedList={(sel) => {
+                setSelection(sel)
+                setTab('all')
+                setChip('archived')
+              }}
               onTaxonomyChanged={loadTaxonomy}
               onClose={() => setListsOpen(false)}
             />
@@ -947,8 +1122,8 @@ function TasksPage() {
             onClose={() => setFormOpen(false)}
             spaces={spaces}
             folders={folders}
-            initiatives={initiatives}
-            tasks={tasks}
+            initiatives={shownInitiatives}
+            tasks={everyday}
             onTaxonomyChanged={loadTaxonomy}
             onCreate={handleCreate}
           />
@@ -961,5 +1136,7 @@ function TasksPage() {
 function chipLabel(id: TaskChip): string {
   const status = chipStatus(id)
   if (status) return STATUS_LABELS[status]
-  return id === 'archived' ? t('tasks_chip_archived') : t('tasks_chip_active')
+  if (id === 'archived') return t('tasks_chip_archived')
+  if (id === 'deleted') return t('tasks_chip_deleted')
+  return t('tasks_chip_active')
 }
