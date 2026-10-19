@@ -296,9 +296,21 @@ pub fn peer_revoke(
         ),
     )?;
     // A damaged retired file must not stop a device being cut off: it is rebuilt from what can be read.
-    let outcome = store.retire_lenient(&record.address)?;
-    if outcome.damaged {
-        say_warnings(out, &[store.damaged_notice(&outcome)])?;
+    // Recording the address as retired must not stop a device being cut off. If it cannot be
+    // recorded, the revoke goes on and says so; `peer add` reads the record strictly and refuses
+    // while it is damaged, and `hq net peer forget` records the address once the cause is fixed.
+    match store.retire_lenient(&record.address) {
+        Ok(outcome) if outcome.damaged => {
+            say_warnings(out, &[store.damaged_notice(&outcome)])?;
+        }
+        Ok(_) => {}
+        Err(e) => say_warnings(
+            out,
+            &[format!(
+                "{} could NOT be recorded as retired ({e}). The revoke goes on, because a lost device must be cut off. Do not add devices until that is fixed; then run `hq net peer forget {}` to record it",
+                record.address, record.address
+            )],
+        )?,
     }
     store.save_peers(&peers)?;
     // Revoking never waits for the hub key to be moved, and never stops for an entry the hub has
@@ -729,7 +741,7 @@ mod tests {
         let mut net = sample_net();
         net.endpoint = None;
         f.store.save_net(&net).unwrap();
-        let key = PrivateKey::generate().public();
+        let key = crate::store::tests::device_key();
         let err = peer_add(
             &f.store,
             &f.spool,
@@ -763,7 +775,7 @@ mod tests {
     #[test]
     fn a_preshared_key_flows_to_the_input_and_the_device_config() {
         let f = fixture();
-        let key = PrivateKey::generate().public();
+        let key = crate::store::tests::device_key();
         let mut out = Vec::new();
         let req = AddRequest {
             preshared: true,
@@ -785,7 +797,7 @@ mod tests {
     #[test]
     fn the_qr_code_is_printed_only_when_asked() {
         let f = fixture();
-        let key = PrivateKey::generate().public();
+        let key = crate::store::tests::device_key();
         let mut out = Vec::new();
         let req = AddRequest {
             with_qr: true,
@@ -1094,6 +1106,47 @@ mod tests {
         assert!(
             retired.contains(&"10.77.0.9".to_string())
                 && retired.contains(&"10.77.0.5".to_string())
+        );
+    }
+
+    #[test]
+    fn a_damaged_retired_file_that_cannot_be_set_aside_is_left_alone_and_a_revoke_still_cuts_the_device_off()
+     {
+        let f = fixture();
+        run_add(&f, "mac", Kind::Laptop);
+        run_add(&f, "pixel", Kind::Phone);
+        let retired_path = f.store.dir().join(crate::store::RETIRED_FILE);
+        let damaged = "10.77.0.9\njunk\n";
+        crate::files::write_private_atomic(&retired_path, damaged).unwrap();
+        // Every name for a copy is taken.
+        std::fs::write(f.store.dir().join("retired.damaged"), "x").unwrap();
+        for n in 1..100 {
+            std::fs::write(f.store.dir().join(format!("retired.damaged.{n}")), "x").unwrap();
+        }
+        let mut out = Vec::new();
+        peer_revoke(&f.store, &f.spool, "mac", &mut out).unwrap();
+        let out = String::from_utf8(out).unwrap();
+        assert!(out.contains("could NOT be recorded as retired"), "{out}");
+        assert!(out.contains("peer forget 10.77.0.2"), "{out}");
+        assert!(
+            !applier_input(&f).contains("# mac"),
+            "the device was cut off all the same"
+        );
+        assert_eq!(
+            std::fs::read_to_string(&retired_path).unwrap(),
+            damaged,
+            "the damaged file is untouched"
+        );
+        // Adding is refused while the record is damaged, so the revoked address cannot be reused.
+        let key = crate::store::tests::device_key();
+        assert!(
+            peer_add(
+                &f.store,
+                &f.spool,
+                &request("tablet", &key, Kind::Phone),
+                &mut Vec::new()
+            )
+            .is_err()
         );
     }
 }

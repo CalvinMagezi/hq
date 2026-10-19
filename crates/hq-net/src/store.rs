@@ -165,6 +165,7 @@ pub struct RetiredRead {
 }
 
 /// What rebuilding the retired file did.
+#[derive(Debug)]
 pub struct RetireOutcome {
     pub damaged: bool,
     /// Where the damaged original went, if there was one and it could be moved.
@@ -381,40 +382,82 @@ impl Store {
     /// kept, and the outcome says so. Nothing already recorded is lost unless it cannot be read at
     /// all, and then the set-aside copy still holds it.
     pub fn retire_all_lenient(&self, addresses: &[String]) -> Result<RetireOutcome> {
+        self.retire_all_with(addresses, &|from, to| std::fs::rename(from, to))
+    }
+
+    /// `retire_all_lenient` with the rename it uses passed in, so a test can make one fail.
+    ///
+    /// The new content is written to a temporary file first, so a full disk or a missing
+    /// permission fails before the old file is touched. A damaged original is then moved aside and
+    /// the new file moved in; if that second move fails the original is moved back. If the
+    /// original cannot be set aside at all, nothing is rewritten: replacing it would destroy the
+    /// lines that could not be read.
+    fn retire_all_with(
+        &self,
+        addresses: &[String],
+        rename: &dyn Fn(&Path, &Path) -> std::io::Result<()>,
+    ) -> Result<RetireOutcome> {
+        let path = self.dir.join(RETIRED_FILE);
         let read = self.read_retired_salvage();
-        let kept_as = if read.damaged {
-            self.set_retired_aside()
-        } else {
-            None
-        };
         let mut list = read.addresses;
         for address in addresses {
             if !list.contains(address) {
                 list.push(address.clone());
             }
         }
-        self.write_retired(&list)?;
+        let staged = files::stage_private(&path, &(list.join("\n") + "\n"))?;
+        let discard = |staged: &Path| {
+            let _ = std::fs::remove_file(staged);
+        };
+        let aside = if read.damaged {
+            match self.free_aside_name() {
+                Some(target) => match rename(&path, &target) {
+                    Ok(()) => Some(target),
+                    Err(e) => {
+                        discard(&staged);
+                        return fail(format!(
+                            "{} is damaged and could not be moved aside ({e}); it was left untouched. Move it by hand (for example to {RETIRED_FILE}.damaged) and run the command again",
+                            path.display()
+                        ));
+                    }
+                },
+                None => {
+                    discard(&staged);
+                    return fail(format!(
+                        "{} is damaged and cannot be set aside because the {MAX_ASIDE_COPIES} names for copies of it are taken; it was left untouched. Move or delete the old {RETIRED_FILE}.damaged files, or move it by hand, and run the command again",
+                        path.display()
+                    ));
+                }
+            }
+        } else {
+            None
+        };
+        if let Err(e) = rename(&staged, &path) {
+            discard(&staged);
+            if let Some(target) = &aside {
+                // Put the original back, so a failed write never leaves the record missing.
+                let _ = rename(target, &path);
+            }
+            return fail(format!("could not write {}: {e}", path.display()));
+        }
         Ok(RetireOutcome {
             damaged: read.damaged,
-            kept_as,
+            kept_as: aside,
         })
     }
 
-    fn set_retired_aside(&self) -> Option<PathBuf> {
-        let path = self.dir.join(RETIRED_FILE);
-        for n in 0..MAX_ASIDE_COPIES {
-            let name = if n == 0 {
-                format!("{RETIRED_FILE}.damaged")
-            } else {
-                format!("{RETIRED_FILE}.damaged.{n}")
-            };
-            let target = self.dir.join(name);
-            if std::fs::symlink_metadata(&target).is_ok() {
-                continue;
-            }
-            return std::fs::rename(&path, &target).ok().map(|()| target);
-        }
-        None
+    /// The first name for a set-aside copy that is not taken.
+    fn free_aside_name(&self) -> Option<PathBuf> {
+        (0..MAX_ASIDE_COPIES)
+            .map(|n| {
+                if n == 0 {
+                    format!("{RETIRED_FILE}.damaged")
+                } else {
+                    format!("{RETIRED_FILE}.damaged.{n}")
+                }
+            })
+            .map(|name| self.dir.join(name))
+            .find(|target| std::fs::symlink_metadata(target).is_err())
     }
 
     /// The warning for a retired file that had to be rebuilt.
@@ -1181,5 +1224,141 @@ pub(crate) mod tests {
             let err = store.load_peers().unwrap_err().to_string();
             assert!(!err.chars().any(char::is_control), "{err:?}");
         }
+    }
+
+    fn damaged_retired(store: &Store, text: &str) {
+        write_private(store, RETIRED_FILE, text);
+    }
+
+    #[test]
+    fn a_damaged_file_that_cannot_be_set_aside_is_not_rewritten() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = Store::new(dir.path());
+        let text = "10.77.0.2\n\u{1b}[31m junk\n10.77.0.5\n";
+        damaged_retired(&store, text);
+        std::fs::write(dir.path().join("retired.damaged"), "x").unwrap();
+        for n in 1..MAX_ASIDE_COPIES {
+            std::fs::write(dir.path().join(format!("retired.damaged.{n}")), "x").unwrap();
+        }
+        let err = store.retire_lenient("10.77.0.9").unwrap_err().to_string();
+        assert!(
+            err.contains("cannot be set aside") && err.contains("left untouched"),
+            "{err}"
+        );
+        assert_eq!(std::fs::read_to_string(retired_path(&store)).unwrap(), text);
+        let leftovers: Vec<_> = std::fs::read_dir(dir.path())
+            .unwrap()
+            .map(|e| e.unwrap().file_name().to_string_lossy().into_owned())
+            .filter(|n| n.ends_with(".tmp"))
+            .collect();
+        assert!(
+            leftovers.is_empty(),
+            "no staged file stays behind: {leftovers:?}"
+        );
+        // A rename that fails does the same.
+        let dir2 = tempfile::tempdir().unwrap();
+        let store2 = Store::new(dir2.path());
+        damaged_retired(&store2, text);
+        let refuse_aside = |from: &Path, to: &Path| -> std::io::Result<()> {
+            if from == retired_path(&store2) {
+                return Err(std::io::Error::other("no"));
+            }
+            std::fs::rename(from, to)
+        };
+        let err = store2
+            .retire_all_with(&["10.77.0.9".to_string()], &refuse_aside)
+            .unwrap_err()
+            .to_string();
+        assert!(err.contains("could not be moved aside"), "{err}");
+        assert_eq!(
+            std::fs::read_to_string(retired_path(&store2)).unwrap(),
+            text
+        );
+    }
+
+    #[test]
+    fn a_write_that_fails_after_the_original_was_set_aside_puts_the_original_back() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = Store::new(dir.path());
+        let text = "10.77.0.2\njunk\n10.77.0.5\n";
+        damaged_retired(&store, text);
+        let path = retired_path(&store);
+        // The move of the original aside works; the move of the new file into place fails.
+        let fail_install = |from: &Path, to: &Path| -> std::io::Result<()> {
+            // Only the move of the staged file into place fails; putting the original back works.
+            if to == path && from.to_string_lossy().ends_with(".tmp") {
+                return Err(std::io::Error::other("disk full"));
+            }
+            std::fs::rename(from, to)
+        };
+        let err = store
+            .retire_all_with(&["10.77.0.9".to_string()], &fail_install)
+            .unwrap_err()
+            .to_string();
+        assert!(
+            err.contains("could not write") && err.contains("disk full"),
+            "{err}"
+        );
+        assert_eq!(
+            std::fs::read_to_string(&path).unwrap(),
+            text,
+            "the record is back where it was"
+        );
+        assert!(
+            !dir.path().join("retired.damaged").exists(),
+            "no stray copy"
+        );
+        assert!(
+            std::fs::read_dir(dir.path()).unwrap().all(|e| !e
+                .unwrap()
+                .file_name()
+                .to_string_lossy()
+                .ends_with(".tmp"))
+        );
+    }
+
+    #[test]
+    fn a_directory_that_cannot_be_written_fails_before_the_record_is_touched() {
+        use std::os::unix::fs::PermissionsExt;
+        if crate::files::effective_uid() == 0 {
+            return; // root ignores directory permissions
+        }
+        let dir = tempfile::tempdir().unwrap();
+        let store = Store::new(dir.path());
+        let text = "10.77.0.2\njunk\n";
+        damaged_retired(&store, text);
+        std::fs::set_permissions(dir.path(), std::fs::Permissions::from_mode(0o500)).unwrap();
+        let result = store.retire_lenient("10.77.0.9");
+        std::fs::set_permissions(dir.path(), std::fs::Permissions::from_mode(0o700)).unwrap();
+        assert!(result.is_err());
+        assert_eq!(
+            std::fs::read_to_string(retired_path(&store)).unwrap(),
+            text,
+            "untouched"
+        );
+        assert!(!dir.path().join("retired.damaged").exists());
+        // Once the directory can be written again the same call works and nothing was lost.
+        assert!(store.retire_lenient("10.77.0.9").unwrap().damaged);
+        assert_eq!(
+            store.load_retired().unwrap(),
+            vec!["10.77.0.2", "10.77.0.9"]
+        );
+    }
+
+    #[test]
+    fn a_clean_file_is_replaced_in_one_step_with_no_stray_files() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = Store::new(dir.path());
+        store.retire_lenient("10.77.0.2").unwrap();
+        store.retire_lenient("10.77.0.3").unwrap();
+        assert_eq!(
+            store.load_retired().unwrap(),
+            vec!["10.77.0.2", "10.77.0.3"]
+        );
+        let names: Vec<_> = std::fs::read_dir(dir.path())
+            .unwrap()
+            .map(|e| e.unwrap().file_name())
+            .collect();
+        assert_eq!(names.len(), 1, "{names:?}");
     }
 }

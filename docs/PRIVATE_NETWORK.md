@@ -202,7 +202,13 @@ retires the address and removes the entry. The refusal message says which of the
 A damaged `retired` file does not stop a revoke or a forget either. It is moved aside untouched as
 `~/.hq/net/retired.damaged` (never over an earlier copy), the lines that can be read are kept (a
 file other users can read, one byte that is not UTF-8, or one junk line does not lose the rest),
-and the owner is warned. `peer add` and `apply` still refuse to run on a damaged file.
+and the owner is warned. The new file is written first and the original moved aside only after
+that, and put back if the last step fails, so a full disk or a missing permission cannot leave the
+record missing. If the original cannot be moved aside at all (every name for a copy is taken, or the
+rename fails), nothing is rewritten and the damaged file stays exactly as it is: a revoke still
+cuts the device off and says the address could NOT be recorded as retired; move the file aside by
+hand and run `hq net peer forget <address>` to record it. `peer add` and `apply` still refuse to
+run on a damaged file.
 
 If the hub's key might have leaked, make a new plane: remove `~/.hq/net`, stop and delete the
 interface, run `hq net init` again and re-enrol every device. Remove the old server key from every

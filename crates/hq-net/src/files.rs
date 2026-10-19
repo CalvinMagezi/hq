@@ -117,9 +117,9 @@ fn temp_sibling(path: &Path) -> PathBuf {
     path.with_file_name(format!(".{name}.{hex}.tmp"))
 }
 
-/// Writes `text` to `path` by creating a private temporary file next to it and renaming it into
-/// place. A reader sees the old file or the new one, never a partial one.
-pub fn write_private_atomic(path: &Path, text: &str) -> IoResult<()> {
+/// Writes `text` to a new private file next to `path` and returns its name. Nothing at `path` is
+/// touched; the caller renames the file into place when it is ready. A failure leaves no file.
+pub fn stage_private(path: &Path, text: &str) -> IoResult<PathBuf> {
     let temp = temp_sibling(path);
     let written = (|| {
         let mut file = std::fs::OpenOptions::new()
@@ -128,13 +128,24 @@ pub fn write_private_atomic(path: &Path, text: &str) -> IoResult<()> {
             .mode(PRIVATE_FILE_MODE)
             .open(&temp)?;
         file.write_all(text.as_bytes())?;
-        file.sync_all()?;
-        std::fs::rename(&temp, path)
+        file.sync_all()
     })();
-    if written.is_err() {
-        let _ = std::fs::remove_file(&temp);
+    match written {
+        Ok(()) => Ok(temp),
+        Err(e) => {
+            let _ = std::fs::remove_file(&temp);
+            Err(e)
+        }
     }
-    written
+}
+
+/// Writes `text` to `path` by staging a private temporary file next to it and renaming it into
+/// place. A reader sees the old file or the new one, never a partial one.
+pub fn write_private_atomic(path: &Path, text: &str) -> IoResult<()> {
+    let temp = stage_private(path, text)?;
+    std::fs::rename(&temp, path).inspect_err(|_| {
+        let _ = std::fs::remove_file(&temp);
+    })
 }
 
 /// Creates a private file that must not exist yet.
