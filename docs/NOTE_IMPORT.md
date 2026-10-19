@@ -94,7 +94,21 @@ The format comes from the file's content, and its name is only the fallback. A W
 file called `.pdf` is read as Word, and the report says the name was wrong.
 Password-protected files are refused, not guessed at.
 
-`hq vault inventory` shows what this host can do (OCR, PDF tables, old Office files).
+## What the host needs
+
+The built-in readers need nothing installed. Three optional tools widen what a host can read:
+
+| Tool | Package (Debian, Ubuntu) | What it adds |
+|------|--------------------------|--------------|
+| tesseract and pdftoppm | `tesseract-ocr poppler-utils` | scans, photos and PDFs with no text layer |
+| pdftotext | `poppler-utils` | tables in PDFs |
+| LibreOffice | `libreoffice-writer libreoffice-impress libreoffice-calc` (`--no-install-recommends`) | old `.doc`, `.ppt` and `.xls` files |
+
+`hq doctor` lists which of them this machine has, under "Importing files as notes", and
+`hq vault inventory` shows the same under "this host" and marks the files that need a missing
+tool as `blocked`. On macOS, OCR uses the system's Vision framework, and `brew install poppler`
+and `brew install --cask libreoffice` add the others. On a server, install them by hand: the
+installer leaves them out (`deploy/README.md`).
 
 ## Limits
 
