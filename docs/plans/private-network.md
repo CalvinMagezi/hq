@@ -3,8 +3,8 @@
 Status, 2026-10-19: Phase 1a is built and on `main` (the signed TCP gate, `transport: tcp`, `hq host
 gate-key`, `hq host authorize --gate-key`), and a WireGuard hub with one peer has been run by hand and
 scanned from outside. Phase 1b (`hq net` and the root applier `hq-net-apply`, crate `hq-net`) is built and
-open as a pull request, with an independent review of the applier grammar recorded in
-[docs/security/NETWORK.md](../security/NETWORK.md) section 8; the owner steps are in
+open as a pull request; two independent read-only reviews of the applier are described in
+[docs/security/NETWORK.md](../security/NETWORK.md) section 8 (what they covered and what they did not run); the owner steps are in
 [docs/PRIVATE_NETWORK.md](../PRIVATE_NETWORK.md). Phases 2 and 3 are proposals for review. The threat model and the testable
 security requirements are in [docs/security/NETWORK.md](../security/NETWORK.md). Use placeholders
 (`example.com`, `10.77.0.0/24`) everywhere; nothing in this file names a real host.
@@ -289,6 +289,12 @@ As built, where it adds to or differs from the text above:
 - `hq net init` does not print the hub's private key. It stages the key in `~/.hq/net/hub.key` (0600)
   and the printed `wg-quick` config reads it from `/etc/wireguard/hq0.key` with a `PostUp`; the owner
   moves the key with `install` and deletes the staging copy.
+- `peer add` refuses a key with the clamped shape of a private key unless `--confirm-public` is given;
+  `net.toml` and `peers.toml` are read with unknown fields refused; the retired addresses are a file of
+  their own (`retired`) so damage to `peers.toml` cannot lose them; every value that is printed into a
+  root command or a path is validated on load and shell-quoted; `hq net apply` refuses to drop a device
+  the hub has unless it was revoked here, and `peer add` and `apply` refuse while the staged hub key is
+  still in the HQ user's directory.
 - `hq net peer add --psk` makes a preshared key, as the key lifecycle table in
   [docs/security/NETWORK.md](../security/NETWORK.md) expects.
 - The QR code is the device config without a private key, as specified. The Android app refuses to

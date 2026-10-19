@@ -73,3 +73,99 @@ fn a_missing_or_untrusted_wg_stops_the_run_with_exit_1() {
     assert_eq!(code, Some(1));
     assert!(stderr.contains("/nonexistent/wg"), "{stderr}");
 }
+
+fn me() -> u32 {
+    // SAFETY: geteuid has no preconditions and cannot fail.
+    unsafe { libc::geteuid() }
+}
+
+/// A root-owned program that does nothing and succeeds, so `wg` can be located without root. The
+/// tests below are refused before `wg` would be asked anything.
+const ROOT_OWNED_NOOP: &str = "/usr/bin/true";
+
+fn run_with_input(path: &std::path::Path) -> (Option<i32>, String) {
+    let uid = me().to_string();
+    let input = path.to_str().unwrap();
+    run(&[
+        "--interface",
+        "hq0",
+        "--subnet",
+        "10.77.0.0/24",
+        "--hub",
+        "10.77.0.1",
+        "--owner-uid",
+        &uid,
+        "--input",
+        input,
+        "--wg",
+        ROOT_OWNED_NOOP,
+    ])
+}
+
+fn private_file(dir: &std::path::Path, name: &str, text: &str) -> std::path::PathBuf {
+    use std::os::unix::fs::PermissionsExt;
+    let path = dir.join(name);
+    std::fs::write(&path, text).unwrap();
+    std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600)).unwrap();
+    path
+}
+
+#[test]
+fn a_hostile_peers_file_is_refused_with_a_line_and_a_rule_and_nothing_else() {
+    if !std::path::Path::new(ROOT_OWNED_NOOP).exists() {
+        return;
+    }
+    let dir = tempfile::tempdir().unwrap();
+    let text =
+        "# hq-net peers v1\n[Interface]\nPostUp = touch /tmp/pwned-by-the-test\n# hq-net end 0\n";
+    let (code, stderr) = run_with_input(&private_file(dir.path(), "peers.conf", text));
+    assert_eq!(code, Some(1));
+    assert!(
+        stderr.contains("nothing applied: refused at line 2"),
+        "{stderr}"
+    );
+    assert!(
+        !stderr.contains("PostUp") && !stderr.contains("pwned"),
+        "the line must not be echoed: {stderr}"
+    );
+}
+
+#[test]
+fn a_linked_or_missing_input_is_refused_by_the_real_program() {
+    if !std::path::Path::new(ROOT_OWNED_NOOP).exists() {
+        return;
+    }
+    let dir = tempfile::tempdir().unwrap();
+    let real = private_file(
+        dir.path(),
+        "real.conf",
+        "# hq-net peers v1\n# hq-net end 0\n",
+    );
+    let link = dir.path().join("link.conf");
+    std::os::unix::fs::symlink(&real, &link).unwrap();
+    let (code, stderr) = run_with_input(&link);
+    assert_eq!(code, Some(1));
+    assert!(stderr.contains("link"), "{stderr}");
+    let (code, stderr) = run_with_input(&dir.path().join("absent.conf"));
+    assert_eq!(code, Some(1));
+    assert!(stderr.contains("nothing applied"), "{stderr}");
+}
+
+#[test]
+fn a_valid_file_reaches_wg_and_a_wg_that_says_nothing_fails_the_run() {
+    if !std::path::Path::new(ROOT_OWNED_NOOP).exists() {
+        return;
+    }
+    let dir = tempfile::tempdir().unwrap();
+    let path = private_file(
+        dir.path(),
+        "peers.conf",
+        "# hq-net peers v1\n# hq-net end 0\n",
+    );
+    let (code, stderr) = run_with_input(&path);
+    assert_eq!(code, Some(1));
+    assert!(
+        stderr.contains("failed:") && stderr.contains("[Interface]"),
+        "{stderr}"
+    );
+}

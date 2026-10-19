@@ -20,6 +20,13 @@ pub fn encode(bytes: &[u8; KEY_BYTES]) -> String {
     STANDARD.encode(bytes)
 }
 
+/// Whether the key has the shape `wg genkey` gives a PRIVATE key: the clamped low three bits of the
+/// first byte clear and the top two bits of the last byte `01`. A public key has that shape by
+/// chance about one time in sixteen, so this is a warning sign, never proof.
+pub fn looks_like_private_key(text: &str) -> bool {
+    decode(text).is_some_and(|b| b[0] & 0b111 == 0 && b[KEY_BYTES - 1] & 0b1100_0000 == 0b0100_0000)
+}
+
 /// A key the applier will carry: well formed and not all zero. An all-zero preshared key means
 /// "none" to WireGuard, and an all-zero public key is not a device.
 pub fn is_usable(text: &str) -> bool {
@@ -110,6 +117,16 @@ mod tests {
                 "base64url is not WireGuard text"
             );
         }
+    }
+
+    #[cfg(feature = "tools")]
+    #[test]
+    fn a_generated_private_key_has_the_private_shape_and_a_known_public_key_does_not() {
+        assert!(looks_like_private_key(&PrivateKey::generate().reveal()));
+        // RFC 7748 section 6.1, Alice's public key: first byte 0x85, so not clamped.
+        let alice_public = "hSDwCYkwp1R0i33ctD73Wg2/Og0mOBr066SpjqqbTmo=";
+        assert!(!looks_like_private_key(alice_public));
+        assert!(!looks_like_private_key("short"));
     }
 
     #[test]

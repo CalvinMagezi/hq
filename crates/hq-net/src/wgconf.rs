@@ -8,6 +8,7 @@
 
 use crate::grammar::{self, Peer};
 use crate::key;
+use std::collections::BTreeMap;
 
 const INTERFACE_HEADER: &str = "[Interface]";
 const PEER_HEADER: &str = "[Peer]";
@@ -94,6 +95,81 @@ pub fn interface_section(showconf: &str) -> Result<String, &'static str> {
     Ok(out)
 }
 
+const FINGERPRINT_CHARS: usize = 8;
+const MAX_ALLOWED_IPS_LOG: usize = 64;
+
+/// The peers the running interface has, from the same `wg showconf` output: public key to its
+/// `AllowedIPs` text. This feeds the journal only and never a decision, so a line it cannot read
+/// is skipped.
+pub fn current_peers(showconf: &str) -> BTreeMap<String, String> {
+    let mut found = BTreeMap::new();
+    let mut key: Option<String> = None;
+    let mut allowed = String::new();
+    let mut finish = |key: &mut Option<String>, allowed: &mut String| {
+        if let Some(k) = key.take() {
+            found.insert(k, std::mem::take(allowed));
+        }
+        allowed.clear();
+    };
+    let mut in_peer = false;
+    for line in showconf.lines().map(str::trim) {
+        if line == PEER_HEADER {
+            finish(&mut key, &mut allowed);
+            in_peer = true;
+        } else if line.starts_with('[') {
+            finish(&mut key, &mut allowed);
+            in_peer = false;
+        } else if let (true, Some((name, value))) = (in_peer, line.split_once('=')) {
+            let value = value.trim();
+            match name.trim() {
+                "PublicKey" if key::decode(value).is_some() => key = Some(value.to_string()),
+                "AllowedIPs" => {
+                    allowed = value
+                        .chars()
+                        .filter(|c| c.is_ascii_graphic())
+                        .take(MAX_ALLOWED_IPS_LOG)
+                        .collect();
+                }
+                _ => {}
+            }
+        }
+    }
+    finish(&mut key, &mut allowed);
+    found
+}
+
+fn fingerprint(public_key: &str) -> String {
+    public_key.chars().take(FINGERPRINT_CHARS).collect()
+}
+
+/// What this run changes on the interface, one line each: a peer added, removed, or given a
+/// different address. A changed preshared key is not listed (the interface prints it in clear and
+/// it is not tracked here).
+pub fn changes(current: &BTreeMap<String, String>, peers: &[Peer]) -> Vec<String> {
+    let mut lines = Vec::new();
+    for peer in peers {
+        let wanted = format!("{}/32", peer.address);
+        match current.get(&peer.public_key) {
+            None => lines.push(format!(
+                "added {} {}",
+                peer.address,
+                fingerprint(&peer.public_key)
+            )),
+            Some(old) if *old != wanted => lines.push(format!(
+                "changed {}: {old} -> {wanted}",
+                fingerprint(&peer.public_key)
+            )),
+            Some(_) => {}
+        }
+    }
+    for (public_key, allowed) in current {
+        if !peers.iter().any(|p| p.public_key == *public_key) {
+            lines.push(format!("removed {allowed} {}", fingerprint(public_key)));
+        }
+    }
+    lines
+}
+
 /// The whole file for `wg`, and the subcommand to hand it to.
 pub fn build(peers: &[Peer], showconf: &str) -> Result<(Subcommand, String), &'static str> {
     let interface = interface_section(showconf)?;
@@ -177,5 +253,46 @@ mod tests {
         assert_eq!(sub, Subcommand::Setconf);
         assert!(!text.contains("[Peer]"));
         assert_eq!(sub.arg(), "setconf");
+    }
+
+    #[test]
+    fn the_peers_on_the_interface_are_read_for_the_journal_only() {
+        let text = format!(
+            "[Interface]\nListenPort = 1\n\n[Peer]\nPublicKey = {}\nAllowedIPs = 10.77.0.2/32\nEndpoint = 1.2.3.4:5\n\n[Peer]\nPublicKey = nonsense\nAllowedIPs = 10.77.0.3/32\n\n[Peer]\nPublicKey = {}\nAllowedIPs = 10.77.0.4/32, 10.77.0.5/32\n",
+            k(1),
+            k(2)
+        );
+        let found = current_peers(&text);
+        assert_eq!(found.len(), 2);
+        assert_eq!(found[&k(1)], "10.77.0.2/32");
+        assert_eq!(found[&k(2)], "10.77.0.4/32,10.77.0.5/32");
+        assert!(current_peers("garbage \u{0} [Peer").is_empty());
+    }
+
+    #[test]
+    fn changes_list_additions_removals_and_moves_and_nothing_for_an_unchanged_peer() {
+        let peer = |seed: u8, last: u8| Peer {
+            public_key: k(seed),
+            address: Ipv4Addr::new(10, 77, 0, last),
+            preshared_key: None,
+        };
+        let mut current = BTreeMap::new();
+        current.insert(k(1), "10.77.0.2/32".to_string());
+        current.insert(k(2), "10.77.0.3/32".to_string());
+        current.insert(k(3), "10.77.0.4/32".to_string());
+        let lines = changes(&current, &[peer(1, 2), peer(2, 9), peer(4, 5)]);
+        assert_eq!(lines.len(), 3, "{lines:?}");
+        assert!(
+            lines
+                .iter()
+                .any(|l| l.starts_with("changed ") && l.contains("10.77.0.3/32 -> 10.77.0.9/32"))
+        );
+        assert!(lines.iter().any(|l| l.starts_with("added 10.77.0.5 ")));
+        assert!(lines.iter().any(|l| l.starts_with("removed 10.77.0.4/32 ")));
+        assert!(changes(&current, &[peer(1, 2), peer(2, 3), peer(3, 4)]).is_empty());
+        assert!(
+            lines.iter().all(|l| !l.contains(&k(1))),
+            "only short fingerprints are listed"
+        );
     }
 }

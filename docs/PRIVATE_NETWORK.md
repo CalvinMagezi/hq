@@ -30,16 +30,21 @@ hq net init --endpoint example.com:51820
 
 This makes the hub's key pair and chooses a subnet (`10.77.0.0/24`, or the next free `/24` if the
 machine already routes it; the Tailscale range `100.64.0.0/10` is always avoided, so the two can
-run side by side during a move). It prints five steps. Read them, then run them:
+run side by side during a move). The routing check reads only the main routing table, not policy
+tables such as the one Tailscale keeps its routes in, so also run `ip route show table all`. It
+prints five steps. Read them, then run them:
 
 1. Move the hub's private key to `/etc/wireguard/hq0.key`, readable by root only, and delete the
    staging copy in `~/.hq/net`. The private key is never printed and never appears in a config.
+   The copy and the delete are one command joined with `&&`, so the staged copy is not deleted if
+   the install fails. Until it is gone, `hq net peer add` and `hq net apply` refuse to run (a
+   revoke does not wait), because the key must not sit where the HQ user and its agents can read it.
 2. Create `/etc/wireguard/hq0.conf`. It reads the key from its file and turns forwarding off for
    the interface.
 3. Load a small firewall table that drops anything that would cross `hq0`, so one device cannot
    reach another. Add the same table to your own firewall configuration to keep it after a reboot.
    If your firewall drops inbound UDP by default, allow `51820/udp` too.
-4. Install the applier (below) and the two systemd units.
+4. Install the applier (below) and the three systemd units (service, path unit and timer).
 5. Start the interface and enable the applier's service, path unit and timer; the exact `systemctl` commands are printed.
 
 The command also reports the machine's real `net.ipv4.ip_forward` value. The hub does not need
@@ -64,8 +69,14 @@ meanwhile.
 Build it without the rest of `hq`, so it links `base64` and `libc` and nothing else:
 
 ```
-cargo build --release -p hq-net --no-default-features --bin hq-net-apply
+cargo build --release --locked -p hq-net --no-default-features --bin hq-net-apply
 ```
+
+Build it as an account other than the one HQ runs as, in a clean checkout. HQ's agents can rewrite
+files in the HQ account between your build and your `sudo install`. If you have to build in that
+account, note `sha256sum target/release/hq-net-apply` after the build and check it again just
+before installing. A signed release would remove this step; it is listed under "What is not done
+yet".
 
 Do not point a root unit at `~/bin/hq` or `/usr/local/bin/hq`: the installer makes that a link to a
 file your user can rewrite.
@@ -79,7 +90,7 @@ What the applier does, in order, and what it refuses:
 | Check the open file | A plain file, owned by the expected user, mode without group or other access, exactly one name, at most 64 KiB, in a directory only root or that user owns and others cannot write. |
 | Parse | Printable ASCII only. First line `# hq-net peers v1`, last line `# hq-net end <n>` with the number of peers read. Only `[Peer]` sections with `PublicKey` (44 characters of base64, 32 bytes), `PresharedKey` (same, optional) and `AllowedIPs` (exactly one IPv4 address written `a.b.c.d/32`, inside the subnet, not the hub, not the network or broadcast address). No duplicate address or key, at most 64 peers. `[Interface]`, `PostUp`, `PreUp`, `Table`, `Endpoint`, `PrivateKey`, any other key, a key in another case, inline comments, tabs and carriage returns all refuse the whole file. |
 | Apply | Only then `wg` is started, by absolute path in a distribution directory (and only if root owns it and others cannot write it; use `--wg` for another place), with an empty environment and no shell. It receives text the applier rendered from the parsed peers, never the file's own bytes. |
-| Record | It prints each applied peer's address and the first characters of its public key, so the journal (`journalctl -u 'hq-net-apply@*'`) shows every change. |
+| Record | After each successful `wg` call it prints how many peers the interface has and what that run added, removed or moved (address and the first characters of the public key); an unchanged run prints one line, so the timer does not fill the journal. The record is written before the input is read again. If that second read or round fails, the error says how many peers were already applied. `journalctl -u 'hq-net-apply@*'` shows the history. |
 
 A refusal prints the line number and the rule, never the text of the line, and changes nothing. A
 file that fails parsing does not even cause `wg showconf` to run. A failure inside `wg` can leave a
@@ -110,6 +121,11 @@ the public key.
 ```
 hq net peer add mac --pubkey <public key from the app> --kind laptop
 ```
+
+HQ refuses a key that has the shape of a WireGuard private key (the clamped bits `wg genkey` sets):
+a device's private key must never leave the device, and anything pasted here is stored and sent to
+the hub. About one real public key in sixteen has that shape by chance; if you are sure it is a
+public key, repeat the command with `--confirm-public`.
 
 HQ gives the device the next free address (`10.77.0.2`, then `.3`, and so on), updates
 `~/.hq/net/peers.toml` and the applier's input, and prints the device's config. Paste its lines
@@ -142,7 +158,7 @@ Other commands:
 
 ```
 hq net peer list              devices, addresses, short key fingerprints
-hq net peer revoke <label>    remove a device; its address is retired and never reused
+hq net peer revoke <label>    remove a device; its address is retired and hq net never reuses it
 hq net status                 each device's last handshake
 hq net apply                  write the applier's input again from peers.toml
 ```
@@ -154,8 +170,10 @@ key and are never used for this.
 
 ## 4. When a device is lost
 
-1. `hq net peer revoke <label>`. The applier removes the peer within seconds, and any session
-   keys it held stop working.
+1. `hq net peer revoke <label>`. The applier removes the peer within seconds in the normal case
+   and within five minutes at the latest (the timer), and any session keys it held stop working.
+   If the command says the device is NOT yet removed from the hub, it is still connected: fix what
+   it names and run `hq net apply`.
 2. Check: `sudo wg show hq0 peers` no longer lists its key.
 3. Sign the device out of the web UI and rotate any token it held.
 
@@ -179,10 +197,19 @@ trusted certificate is the next phase of the plan and is not part of `hq net` ye
 
 ## Files
 
+`net.toml` and `peers.toml` are read strictly. The interface name and the server address are
+checked again every time the file is loaded (they end up in printed `sudo` commands and in device
+configs), every printed path is shell-quoted, and `hq net apply` refuses to write an input that
+would remove a device the hub has now unless that device was revoked with `hq net peer revoke`, so a
+damaged or emptied `peers.toml` cannot remove everyone. Only the kernel WireGuard is supported: the
+unit allows netlink sockets and nothing else, which a userspace implementation such as
+wireguard-go would need.
+
 | Path | What | Who writes it |
 |---|---|---|
 | `~/.hq/net/net.toml` | Subnet, hub address, port, endpoint, hub public key. Nothing secret. | `hq net init` |
-| `~/.hq/net/peers.toml` | Devices and retired addresses. Mode 0600. | `hq net peer ...` |
+| `~/.hq/net/peers.toml` | Devices. Mode 0600. An unknown field or table is an error, not an empty list. | `hq net peer ...` |
+| `~/.hq/net/retired` | Addresses of revoked devices, one per line. Kept apart from `peers.toml` so damage to that file cannot lose it. `hq net` never reuses them. The applier does not read this file, so a hand edit of it or of `peers.toml` can hand an address out again. | `hq net peer revoke` |
 | `~/.hq/net/hub.key` | The hub's private key, until you move it in step 1. | `hq net init` |
 | `/var/lib/hq-net/hq0.conf` | The applier's input. Owned by your user, mode 0600. | `hq net apply` |
 | `/etc/hq-net/hq0.env` | Subnet, hub address and owner id the applier trusts. Root-owned. | you, step 4 |
@@ -203,6 +230,27 @@ trusted certificate is the next phase of the plan and is not part of `hq net` ye
   fails to start, `systemctl status hq-net-apply@hq0` names the directive.
 - The web UI and MCP are not yet served on the tunnel address (phase 2), and Tailscale is not
   removed by this command (phase 3).
+
+### First run on a spare VM
+
+Before this is trusted on the real hub, run it once on a throwaway Linux machine (a VM you can
+break, not the hub). It needs: a kernel with WireGuard (5.6 or newer, or `wireguard-dkms`), the
+`wireguard-tools` and `iproute2` packages, systemd, a Rust toolchain, and root.
+
+1. The ignored test. It creates an interface called `hqnettest0`, applies one peer and then an
+   empty list with the real `wg`, and deletes the interface; it touches no other interface,
+   firewall rule or file. `sudo -E env "PATH=$PATH" cargo test -p hq-net -- --ignored --nocapture`
+   should report one test passed.
+2. The printed steps from `hq net init`, on that VM, then `hq net peer add` for a made-up public
+   key. Look for `hq-net-apply: 1 peer(s) on hq0 after this run` in
+   `journalctl -u 'hq-net-apply@*'`, and for the peer in `sudo wg show hq0`.
+3. Touch the input file twenty times in five seconds, then revoke the device: it must still be
+   removed, and `systemctl status` for the applier's path unit (instance `hq0`) must still say `active (waiting)`.
+4. `sudo systemctl restart wg-quick@hq0`: the peer must be back within a few seconds. (Do not try
+   `reload`.)
+5. `systemd-analyze security` on the applier's service (instance `hq0`), and `systemctl status` after a run: the
+   confinement directives have only been read against upstream documentation so far. If one makes
+   the unit fail, the journal names it.
 
 ## Tests
 

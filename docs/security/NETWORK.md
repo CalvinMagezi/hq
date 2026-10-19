@@ -97,7 +97,7 @@ SR-N1, which the documentation tells the owner to run after every network change
 
 | Key | Made by | Stored | Rotated | Revoked by |
 |---|---|---|---|---|
-| Hub WireGuard key | `hq net init` | Server, root-owned, 0600 | On suspicion; every device re-enrols | Replacing it |
+| Hub WireGuard key | `hq net init`, staged in `~/.hq/net/hub.key` (0600, the HQ user's) | `/etc/wireguard/<interface>.key`, root-owned, 0600, after the owner moves it with `install`; `hq net peer add` and `hq net apply` refuse while the staged copy exists (a revoke does not) | On suspicion; every device re-enrols | Replacing it |
 | Device WireGuard key | The device's WireGuard app or `wg genkey` | On the device | On suspicion | `hq net peer revoke` |
 | Optional preshared key | `hq net peer add --psk` | Both ends | With the peer | With the peer |
 | Server gate key (per host) | `hq host add` | `~/.hq/gate/<host>.key`, 0600, service user | On suspicion | Deleting its line in the laptop's `gate_authorized_keys` |
@@ -119,4 +119,11 @@ Before Phase 1a ships: a second reviewer reads the gate code and this file; the 
 line parser has run for a stated time; the outside scan in SR-N1 is recorded in the pull request.
 Before Phase 1b ships: the applier is reviewed and tested as in SR-N9.
 
-Phase 1b status, 2026-10-19: the applier (`crates/hq-net/src/grammar.rs`, `applier.rs`, `wgconf.rs`) has hostile-file and seeded randomized tests, an integration test of the renderer against the grammar, and the units are checked against the program's argument parser. It was read by a reviewer other than its author; the findings and what was done about each are in the pull request. Not yet done: a run on a live server (see [docs/PRIVATE_NETWORK.md](../PRIVATE_NETWORK.md), "What is not done yet"), and a second human reviewer for the shipped release.
+Phase 1b status, 2026-10-19: the applier (`crates/hq-net/src/grammar.rs`, `applier.rs`, `wgconf.rs`) has hostile-file and seeded randomized tests, an integration test of the renderer against the grammar, and the units are checked against the program's argument parser.
+
+Two reviews were done by readers other than the author, both read-only:
+
+1. A review agent with no part in writing the code read the grammar, the file opener, `wgconf`, the units and the tests, with the wireguard-tools and systemd sources fetched for comparison. It found no parser or file-opener hole, and found problems in the units (a start limit that would stop the path unit, writes lost while the service runs, no apply at boot, `Wants=` starting a stopped tunnel). It compiled and ran only the macOS-visible tests: it did not run the Linux-only code, a live systemd, a real `wg` or a kernel.
+2. A second independent review of the pull request found one blocker (a peer applied in a first round was not recorded if the second round failed) and seven items on the units, the stored files, the pasted-key case, the hub key's location, the revoke message and the trigger rate. It read the code and ran nothing as root.
+
+Every finding of both reviews is closed in the pull request or listed in TECHDEBT.md with the reason. Not yet done: a run on a live server or a spare VM (the ignored real-interface test and the first apply of the units; see [docs/PRIVATE_NETWORK.md](../PRIVATE_NETWORK.md), "What is not done yet"), and a human reviewer other than the author for the shipped release.

@@ -1,7 +1,7 @@
 //! Seeded randomized tests of the applier grammar. They assert invariants about what is accepted,
 //! not only that nothing panics: whatever the mutated bytes are, an accepted file holds nothing
 //! but the three allowed settings, every peer obeys the policy, and rendering and parsing again
-//! gives the same peers. The seeds are fixed so a failure reproduces; change `SEED` to explore.
+//! gives the same peers. The seeds are fixed so a failure reproduces; set `HQ_NET_FUZZ_SEED` to explore.
 
 use hq_net::grammar::{self, MAX_PEERS, Peer, Policy, parse, render, render_labeled};
 use hq_net::key;
@@ -12,7 +12,15 @@ use rand::{Rng, SeedableRng};
 use std::collections::HashSet;
 use std::net::Ipv4Addr;
 
-const SEED: u64 = 0x5eed_0001_4851;
+const DEFAULT_SEED: u64 = 0x5eed_0001_4851;
+
+/// The seed is fixed so a failure reproduces; set `HQ_NET_FUZZ_SEED` to explore other runs.
+fn seed() -> u64 {
+    std::env::var("HQ_NET_FUZZ_SEED")
+        .ok()
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(DEFAULT_SEED)
+}
 const ROUNDS: usize = 6_000;
 const MAX_MUTATIONS: usize = 4;
 
@@ -257,7 +265,7 @@ fn assert_accepted_is_sound(input: &[u8], peers: &[Peer], policy: &Policy) {
 
 #[test]
 fn mutated_valid_files_are_refused_or_sound() {
-    let mut rng = StdRng::seed_from_u64(SEED);
+    let mut rng = StdRng::seed_from_u64(seed());
     let policies = policies();
     let (mut accepted, mut refused) = (0usize, 0usize);
     for round in 0..ROUNDS {
@@ -298,7 +306,7 @@ fn mutated_valid_files_are_refused_or_sound() {
 
 #[test]
 fn a_forbidden_line_anywhere_in_a_valid_file_is_always_refused() {
-    let mut rng = StdRng::seed_from_u64(SEED ^ 1);
+    let mut rng = StdRng::seed_from_u64(seed() ^ 1);
     let policies = policies();
     for round in 0..ROUNDS {
         let policy = &policies[round % policies.len()];
@@ -321,7 +329,7 @@ fn a_forbidden_line_anywhere_in_a_valid_file_is_always_refused() {
 
 #[test]
 fn random_bytes_and_random_printable_lines_never_panic_and_are_sound_if_accepted() {
-    let mut rng = StdRng::seed_from_u64(SEED ^ 2);
+    let mut rng = StdRng::seed_from_u64(seed() ^ 2);
     let policies = policies();
     for round in 0..ROUNDS {
         let policy = &policies[round % policies.len()];
@@ -350,7 +358,7 @@ fn random_bytes_and_random_printable_lines_never_panic_and_are_sound_if_accepted
 
 #[test]
 fn a_file_cut_short_at_any_byte_is_always_refused() {
-    let mut rng = StdRng::seed_from_u64(SEED ^ 3);
+    let mut rng = StdRng::seed_from_u64(seed() ^ 3);
     let policy = &policies()[0];
     for _ in 0..60 {
         let peers = random_peers(&mut rng, policy);

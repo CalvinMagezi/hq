@@ -5,6 +5,11 @@ Description=Apply the HQ private network peers to %i when they change
 # A change made while the applier is running is not seen by this unit; the applier re-reads its
 # input after it applies, and the timer applies again every few minutes.
 PathChanged=/var/lib/hq-net/%i.conf
+# systemd stops a path unit that triggers more than 200 times in 2 seconds (v250 and later), after
+# which it watches nothing until restarted. A writer who loops on the file could do that, so the
+# limit is off here; the service's one-second pause bounds how often the applier runs, and the
+# timer applies the peers again whatever the path unit is doing.
+TriggerLimitIntervalSec=0
 
 [Install]
 WantedBy=multi-user.target

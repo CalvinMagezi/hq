@@ -5,7 +5,8 @@ use crate::device;
 use crate::files;
 use crate::status;
 use crate::store::{
-    Kind, NetError, NewPeer, Result, Store, add_peer, render_applier_input, revoke_peer,
+    Kind, NetError, NewPeer, RETIRED_FILE, Result, Store, add_peer, render_applier_input,
+    revoke_peer,
 };
 use std::io::Write;
 use std::path::Path;
@@ -24,12 +25,76 @@ pub struct AddRequest<'a> {
     pub kind: Kind,
     pub preshared: bool,
     pub with_qr: bool,
+    /// The caller confirms the key is public although it has the shape of a private one.
+    pub confirm_public: bool,
+}
+
+fn staged_key_error(store: &Store) -> NetError {
+    NetError(format!(
+        "the hub's private key is still at {}, where the HQ user and its agents can read it. Move it as root first (step 1 of the `hq net init` output), then run this again",
+        store.hub_key_path().display()
+    ))
+}
+
+/// Devices the hub has now (read from the applier's current input) that the new input drops
+/// without any record of revoking them. A damaged or emptied `peers.toml` would otherwise turn
+/// into "remove everyone" at the next apply.
+fn removals_without_a_revoke(
+    net: &crate::store::Net,
+    current_input: &str,
+    wanted: &[crate::store::PeerRecord],
+    retired: &[String],
+) -> Vec<String> {
+    let Ok(policy) = net.policy() else {
+        return Vec::new();
+    };
+    let Ok(current) = crate::grammar::parse(current_input.as_bytes(), &policy) else {
+        return Vec::new();
+    };
+    // By key, not by address: a new device given a revoked-by-damage device's address is still the
+    // old one being dropped.
+    current
+        .iter()
+        .filter(|p| !wanted.iter().any(|w| w.public_key == p.public_key))
+        .map(|p| p.address.to_string())
+        .filter(|address| !retired.contains(address))
+        .collect()
+}
+
+/// The text for the applier's input, after two checks that touch nothing: the applier's own
+/// grammar accepts it, and it does not drop a device the hub has now unless that device was
+/// revoked here.
+fn checked_input(
+    net: &crate::store::Net,
+    peers: &crate::store::PeersFile,
+    retired: &[String],
+    target: &Path,
+) -> Result<String> {
+    let text = render_applier_input(net, peers)?;
+    if let Ok(Some(current)) = files::read_private(target) {
+        let dropped = removals_without_a_revoke(net, &current, &peers.peer, retired);
+        if !dropped.is_empty() {
+            return crate::store::fail(format!(
+                "refusing to write the applier's input: it would remove {} from the hub, and none of them was revoked here. peers.toml may have been damaged or edited; restore it, or run `hq net peer revoke` for a device you mean to remove",
+                dropped.join(", ")
+            ));
+        }
+    }
+    Ok(text)
 }
 
 /// Renders `peers.toml` into the applier's input file in the spool directory, replacing it
 /// whole. The applier is started by its path unit when the file changes.
-pub fn apply(store: &Store, spool_dir: &Path, out: &mut dyn Write) -> Result<()> {
+fn write_applier_input(
+    store: &Store,
+    spool_dir: &Path,
+    out: &mut dyn Write,
+    require_key_moved: bool,
+) -> Result<()> {
     let net = store.require_net()?;
+    if require_key_moved && store.hub_key_staged() {
+        return Err(staged_key_error(store));
+    }
     // An empty list tells the applier to remove every device. That must come from a peers.toml
     // that exists and lists none, not from one that is missing (a wrong HOME, a deleted file).
     if !store.has_peers_file() {
@@ -39,8 +104,8 @@ pub fn apply(store: &Store, spool_dir: &Path, out: &mut dyn Write) -> Result<()>
         ));
     }
     let peers = store.load_peers()?;
-    let text = render_applier_input(&net, &peers)?;
     let target = net.spool_file(spool_dir);
+    let text = checked_input(&net, &peers, &store.load_retired()?, &target)?;
     say(
         out,
         &format!(
@@ -54,10 +119,16 @@ pub fn apply(store: &Store, spool_dir: &Path, out: &mut dyn Write) -> Result<()>
     say(
         out,
         &format!(
-            "Done. The path unit hq-net-apply@{0}.path applies it within a few seconds, and a timer applies it again every five minutes. To apply now: sudo systemctl start hq-net-apply@{0}.service\n",
+            "Done. The path unit applies it within a few seconds, and a timer applies it again every five minutes at the latest. To apply now: sudo systemctl start hq-net-apply@{0}.service\n",
             net.interface
         ),
     )
+}
+
+/// Writes the applier's input from `peers.toml`. It refuses while the hub's private key is still
+/// in the HQ user's directory.
+pub fn apply(store: &Store, spool_dir: &Path, out: &mut dyn Write) -> Result<()> {
+    write_applier_input(store, spool_dir, out, true)
 }
 
 pub fn peer_add(
@@ -67,19 +138,27 @@ pub fn peer_add(
     out: &mut dyn Write,
 ) -> Result<()> {
     let net = store.require_net()?;
+    if store.hub_key_staged() {
+        return Err(staged_key_error(store));
+    }
     let mut peers = store.load_peers()?;
+    let retired = store.load_retired()?;
     let record = add_peer(
         &net,
         &mut peers,
+        &retired,
         NewPeer {
             label: request.label,
             public_key: request.public_key,
             kind: request.kind,
             preshared: request.preshared,
+            confirm_public: request.confirm_public,
         },
     )?;
-    // Checked before anything is saved, so a missing server address leaves no half-added device.
+    // Checked before anything is saved, so a missing server address or an input that would drop
+    // devices nobody revoked leaves no half-added device and no changed file.
     let description = device::describe(&net, &record, request.with_qr)?;
+    checked_input(&net, &peers, &retired, &net.spool_file(spool_dir))?;
     say(
         out,
         &format!(
@@ -96,7 +175,7 @@ pub fn peer_add(
         say(
             out,
             &format!(
-                "The device is saved in peers.toml, but the applier's input was not written: {e}\nFix that, then run: hq net apply\n"
+                "The device is saved in peers.toml, but it is NOT yet on the hub, because the applier's input was not written: {e}\nFix that, then run: hq net apply\n"
             ),
         )?;
     }
@@ -115,16 +194,24 @@ pub fn peer_revoke(
     say(
         out,
         &format!(
-            "Revoking \"{}\" ({}, {}). This changes {}/peers.toml and {}. The address is retired and will not be reused.\n",
+            "Revoking \"{}\" ({}, {}). This changes {}/peers.toml, {}/{RETIRED_FILE} and {}. The address is retired and will not be reused by hq net.\n",
             record.label,
             record.kind.name(),
             record.address,
             store.dir().display(),
+            store.dir().display(),
             net.spool_file(spool_dir).display()
         ),
     )?;
+    store.retire(&record.address)?;
     store.save_peers(&peers)?;
-    apply(store, spool_dir, out)?;
+    // Revoking never waits for the hub key to be moved: a lost device must be cut off now.
+    if let Err(e) = write_applier_input(store, spool_dir, out, false) {
+        return Err(NetError(format!(
+            "\"{}\" is removed from peers.toml but is NOT yet removed from the hub, so it can still connect: {e}\nFix that, then run: hq net apply",
+            record.label
+        )));
+    }
     say(
         out,
         "If this device was lost or stolen, also sign it out of the web UI and rotate any token it held. Check that it is gone with: sudo wg show hq0 peers\n",
@@ -157,7 +244,7 @@ pub fn peer_list(store: &Store, out: &mut dyn Write) -> Result<()> {
         peers.peer.len(),
         net.subnet,
         net.hub,
-        peers.retired.len()
+        store.load_retired()?.len()
     ));
     say(out, &text)
 }
@@ -221,11 +308,12 @@ mod tests {
             kind,
             preshared: false,
             with_qr: false,
+            confirm_public: false,
         }
     }
 
     fn run_add(f: &Fixture, label: &str, kind: Kind) -> (String, String) {
-        let key = PrivateKey::generate().public();
+        let key = crate::store::tests::device_key();
         let mut out = Vec::new();
         peer_add(&f.store, &f.spool, &request(label, &key, kind), &mut out).unwrap();
         (String::from_utf8(out).unwrap(), key)
@@ -304,7 +392,7 @@ mod tests {
         let f = fixture();
         std::fs::remove_dir(&f.spool).unwrap();
         let (out, _) = run_add(&f, "mac", Kind::Laptop);
-        assert!(out.contains("saved in peers.toml, but the applier's input was not written"));
+        assert!(out.contains("saved in peers.toml, but it is NOT yet on the hub"));
         assert!(out.contains("hq net apply"));
         assert_eq!(f.store.load_peers().unwrap().peer.len(), 1);
     }
@@ -322,11 +410,159 @@ mod tests {
             before,
             "the applier's input must not change"
         );
-        // A peers.toml that exists and lists nobody (everyone revoked) is a real, empty list.
+        // A peers.toml that exists and lists nobody because everyone was revoked is a real list.
         let g = fixture();
         run_add(&g, "mac", Kind::Laptop);
         peer_revoke(&g.store, &g.spool, "mac", &mut Vec::new()).unwrap();
         assert!(applier_input(&g).contains("# hq-net end 0"));
+    }
+
+    #[test]
+    fn an_emptied_or_damaged_peers_file_cannot_remove_devices_nobody_revoked() {
+        let f = fixture();
+        run_add(&f, "mac", Kind::Laptop);
+        run_add(&f, "pixel", Kind::Phone);
+        let before = applier_input(&f);
+        let path = f.store.dir().join("peers.toml");
+        // A zero byte file, as a crash or a full disk leaves it, reads as no devices.
+        std::fs::write(&path, "").unwrap();
+        for attempt in [
+            apply(&f.store, &f.spool, &mut Vec::new()),
+            // Adding to an emptied list must not quietly drop the two devices the hub has.
+            peer_add(
+                &f.store,
+                &f.spool,
+                &request("new", &crate::store::tests::device_key(), Kind::Laptop),
+                &mut Vec::new(),
+            ),
+        ] {
+            let err = attempt.unwrap_err().to_string();
+            assert!(
+                err.contains("10.77.0.2") && err.contains("10.77.0.3"),
+                "{err}"
+            );
+            assert!(err.contains("none of them was revoked here"), "{err}");
+            assert_eq!(
+                std::fs::read(&path).unwrap(),
+                b"",
+                "a refused add must not write peers.toml"
+            );
+            assert_eq!(
+                applier_input(&f),
+                before,
+                "the applier's input must not change"
+            );
+        }
+        // A typo in the table name is an error, not an empty list.
+        std::fs::write(&path, "[[peers]]\nlabel = \"mac\"\n").unwrap();
+        assert!(apply(&f.store, &f.spool, &mut Vec::new()).is_err());
+    }
+
+    #[test]
+    fn revoking_one_device_may_remove_exactly_that_device() {
+        let f = fixture();
+        run_add(&f, "mac", Kind::Laptop);
+        run_add(&f, "pixel", Kind::Phone);
+        peer_revoke(&f.store, &f.spool, "mac", &mut Vec::new()).unwrap();
+        assert!(!applier_input(&f).contains("# mac"));
+        assert_eq!(f.store.load_retired().unwrap(), vec!["10.77.0.2"]);
+    }
+
+    #[test]
+    fn a_lost_retired_record_still_cannot_hand_out_an_address_the_hub_has_removed_by_mistake() {
+        // The retired list lives in its own file, so damage to peers.toml cannot take it along.
+        let f = fixture();
+        run_add(&f, "mac", Kind::Laptop);
+        peer_revoke(&f.store, &f.spool, "mac", &mut Vec::new()).unwrap();
+        std::fs::write(f.store.dir().join("peers.toml"), "").unwrap();
+        let (added, _) = run_add(&f, "tablet", Kind::Phone);
+        assert!(
+            added.contains("at 10.77.0.3."),
+            "10.77.0.2 stays retired: {added}"
+        );
+    }
+
+    #[test]
+    fn a_private_key_pasted_as_the_public_key_is_refused_with_the_way_out() {
+        let f = fixture();
+        let private = PrivateKey::generate().reveal();
+        let err = peer_add(
+            &f.store,
+            &f.spool,
+            &request("mac", &private, Kind::Laptop),
+            &mut Vec::new(),
+        )
+        .unwrap_err()
+        .to_string();
+        assert!(
+            err.contains("PRIVATE key") && err.contains("--confirm-public"),
+            "{err}"
+        );
+        assert!(f.store.load_peers().unwrap().peer.is_empty());
+        assert!(!f.spool.join("hq0.conf").exists());
+        let mut out = Vec::new();
+        let confirm = AddRequest {
+            confirm_public: true,
+            ..request("mac", &private, Kind::Laptop)
+        };
+        peer_add(&f.store, &f.spool, &confirm, &mut out).unwrap();
+        assert_eq!(f.store.load_peers().unwrap().peer.len(), 1);
+    }
+
+    #[test]
+    fn adding_and_applying_wait_for_the_hub_key_to_leave_the_users_directory() {
+        let f = fixture();
+        run_add(&f, "mac", Kind::Laptop);
+        std::fs::write(f.store.hub_key_path(), "staged\n").unwrap();
+        let key = crate::store::tests::device_key();
+        let err = peer_add(
+            &f.store,
+            &f.spool,
+            &request("pixel", &key, Kind::Phone),
+            &mut Vec::new(),
+        )
+        .unwrap_err()
+        .to_string();
+        assert!(
+            err.contains("hub's private key is still at") && err.contains("step 1"),
+            "{err}"
+        );
+        assert_eq!(
+            f.store.load_peers().unwrap().peer.len(),
+            1,
+            "nothing was added"
+        );
+        assert!(apply(&f.store, &f.spool, &mut Vec::new()).is_err());
+        // Cutting a device off never waits for that.
+        run_add_after_key_moved(&f);
+    }
+
+    fn run_add_after_key_moved(f: &Fixture) {
+        peer_revoke(&f.store, &f.spool, "mac", &mut Vec::new()).unwrap();
+        assert!(!applier_input(f).contains("# mac"));
+        std::fs::remove_file(f.store.hub_key_path()).unwrap();
+        assert!(apply(&f.store, &f.spool, &mut Vec::new()).is_ok());
+    }
+
+    #[test]
+    fn a_revoke_that_cannot_reach_the_applier_says_plainly_the_device_is_still_on_the_hub() {
+        let f = fixture();
+        run_add(&f, "mac", Kind::Laptop);
+        std::fs::set_permissions(&f.spool, std::fs::Permissions::from_mode(0o777)).unwrap();
+        let err = peer_revoke(&f.store, &f.spool, "mac", &mut Vec::new())
+            .unwrap_err()
+            .to_string();
+        assert!(err.contains("NOT yet removed from the hub"), "{err}");
+        assert!(
+            err.contains("can still connect") && err.contains("hq net apply"),
+            "{err}"
+        );
+        // peers.toml and the retired record are already updated, so `hq net apply` finishes the job.
+        assert!(f.store.load_peers().unwrap().peer.is_empty());
+        assert_eq!(f.store.load_retired().unwrap(), vec!["10.77.0.2"]);
+        std::fs::set_permissions(&f.spool, std::fs::Permissions::from_mode(0o700)).unwrap();
+        apply(&f.store, &f.spool, &mut Vec::new()).unwrap();
+        assert!(applier_input(&f).contains("# hq-net end 0"));
     }
 
     #[test]

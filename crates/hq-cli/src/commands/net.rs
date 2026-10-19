@@ -52,6 +52,9 @@ pub enum PeerAction {
         /// Do not print the QR code
         #[arg(long)]
         no_qr: bool,
+        /// The key has the shape of a private key but is a public one (about 1 in 16 public keys do)
+        #[arg(long)]
+        confirm_public: bool,
     },
     /// Remove a device; its address is retired and never reused
     Revoke { label: String },
@@ -188,6 +191,7 @@ mod unix {
                         kind,
                         psk,
                         no_qr,
+                        confirm_public,
                     },
             } => {
                 let request = AddRequest {
@@ -196,6 +200,7 @@ mod unix {
                     kind: kind_of(kind),
                     preshared: psk,
                     with_qr: !no_qr,
+                    confirm_public,
                 };
                 Ok(ops::peer_add(&store, &spool, &request, &mut out)?)
             }

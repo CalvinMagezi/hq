@@ -4,6 +4,7 @@
 
 use crate::files;
 use crate::key::PrivateKey;
+use crate::names::{shell_quote, valid_endpoint};
 use crate::store::{
     DEFAULT_INTERFACE, DEFAULT_PORT, HUB_KEY_FILE, NET_FILE, Net, NetError, Result, SPOOL_DIR,
     Store, fail,
@@ -20,7 +21,6 @@ pub const APPLIER_PATH: &str = "/opt/hq-net/hq-net-apply";
 const WG_DIR: &str = "/etc/wireguard";
 const ENV_DIR: &str = "/etc/hq-net";
 const UNIT_DIR: &str = "/etc/systemd/system";
-const MIN_PORT: u16 = 1;
 
 #[derive(Debug, Default)]
 pub struct InitOptions {
@@ -51,31 +51,6 @@ impl InitContext {
             spool_dir: PathBuf::from(SPOOL_DIR),
         }
     }
-}
-
-/// Host and port, where the host is a DNS name or an IPv4 address (an IPv6 address in brackets).
-/// It goes into device configs and QR codes, so nothing else is let through.
-pub fn valid_endpoint(text: &str) -> bool {
-    let Some((host, port)) = text.rsplit_once(':') else {
-        return false;
-    };
-    let port_ok = port.parse::<u16>().is_ok_and(|p| p >= MIN_PORT)
-        && !port.starts_with('0')
-        && !port.starts_with('+');
-    let host_ok = if let Some(inner) = host.strip_prefix('[').and_then(|h| h.strip_suffix(']')) {
-        inner.parse::<std::net::Ipv6Addr>().is_ok()
-    } else {
-        !host.is_empty()
-            && host.len() <= 253
-            && host.split('.').all(|label| {
-                !label.is_empty()
-                    && label.len() <= 63
-                    && !label.starts_with('-')
-                    && !label.ends_with('-')
-                    && label.chars().all(|c| c.is_ascii_alphanumeric() || c == '-')
-            })
-    };
-    port_ok && host_ok
 }
 
 fn choose_subnet(requested: Option<Subnet>, routed: Option<&[Subnet]>) -> Result<Subnet> {
@@ -197,11 +172,11 @@ fn forwarding_note(ip_forward: Option<&str>, interface: &str) -> String {
 fn route_note(subnet: &str, routed: &Option<Vec<Subnet>>) -> String {
     match routed {
         Some(list) => format!(
-            "Checked {} routes on this machine: none overlaps {subnet} or 100.64.0.0/10.\n",
+            "Checked {} routes in this machine's main routing table: none overlaps {subnet} or 100.64.0.0/10. Policy routing tables (Tailscale keeps its routes in table 52) are not read; also run `ip route show table all` and make sure nothing there uses {subnet}.\n",
             list.len()
         ),
         None => format!(
-            "The routing table could not be read here. Before step 2, check that nothing else uses {subnet}: ip route\n"
+            "The routing table could not be read here. Before step 2, check that nothing else uses {subnet}, in every table: ip route show table all\n"
         ),
     }
 }
@@ -211,7 +186,8 @@ fn instructions(store: &Store, net: &Net, ctx: &InitContext) -> String {
     let staged_present = staged.exists();
     let (interface, subnet, hub, port) = (&net.interface, &net.subnet, &net.hub, net.port);
     let prefix = net.subnet().map(|s| s.prefix()).unwrap_or(24);
-    let spool = ctx.spool_dir.display();
+    let spool = shell_quote(&ctx.spool_dir.display().to_string());
+    let staged_q = shell_quote(&staged.display().to_string());
     let (uid, gid) = (ctx.owner_uid, ctx.owner_gid);
     let mut out = String::new();
     out.push_str(&format!(
@@ -231,14 +207,11 @@ fn instructions(store: &Store, net: &Net, ctx: &InitContext) -> String {
     out.push_str("Step 1. Move the hub's private key where only root can read it:\n");
     if staged_present {
         out.push_str(&format!(
-            "  sudo install -m 0600 -o root -g root {} {WG_DIR}/{interface}.key\n  rm {}\n\n",
-            staged.display(),
-            staged.display()
+            "  sudo install -m 0600 -o root -g root {staged_q} {WG_DIR}/{interface}.key && rm {staged_q}\n(One line on purpose: the copy is deleted only if the install worked. Until the key is moved, `hq net peer add` and `hq net apply` refuse to run, because the key must not sit where the HQ user and its agents can read it.)\n\n"
         ));
     } else {
         out.push_str(&format!(
-            "  {} is gone, so the key was moved already. Check that {WG_DIR}/{interface}.key exists.\n\n",
-            staged.display()
+            "  {staged_q} is gone, so the key was moved already. Check that {WG_DIR}/{interface}.key exists.\n\n"
         ));
     }
     out.push_str(&format!(
@@ -248,7 +221,7 @@ fn instructions(store: &Store, net: &Net, ctx: &InitContext) -> String {
         "Step 3. Do not forward between devices. This adds its own nftables table and leaves your other rules alone:\n  sudo nft -f - <<'EOF'\ntable inet hq_net {{\n  chain forward {{\n    type filter hook forward priority -10; policy accept;\n    iifname \"{interface}\" drop\n    oifname \"{interface}\" drop\n  }}\n}}\nEOF\nThat is lost at reboot: include the same table from your nftables configuration to keep it. With iptables instead:\n  sudo iptables -I FORWARD -i {interface} -j DROP\n  sudo iptables -I FORWARD -o {interface} -j DROP\nIf your firewall drops inbound UDP by default, also allow {port}/udp.\n\n"
     ));
     out.push_str(&format!(
-        "Step 4. The applier: a small program that runs as root, accepts only a public key, one address and an optional preshared key per device, and refuses everything else. Build it without the rest of hq, and install it where only root can change it (a directory under /opt that only root owns; /usr/local can be writable by a group). Never point the unit at ~/bin/hq, which your user can rewrite.\n  cargo build --release -p hq-net --no-default-features --bin hq-net-apply\n  sudo install -d -o root -g root -m 0755 {}\n  sudo install -o root -g root -m 0755 target/release/hq-net-apply {APPLIER_PATH}\n  sudo install -d -o {uid} -g {gid} -m 0700 {spool}\n  sudo install -d -o root -g root -m 0755 {ENV_DIR}\n  sudo tee {ENV_DIR}/{interface}.env >/dev/null <<'EOF'\nHQ_NET_SUBNET={subnet}\nHQ_NET_HUB={hub}\nHQ_NET_OWNER_UID={uid}\nEOF\n  sudo tee {UNIT_DIR}/hq-net-apply@.service >/dev/null <<'EOF'\n{SERVICE_UNIT}EOF\n  sudo tee {UNIT_DIR}/hq-net-apply@.path >/dev/null <<'EOF'\n{PATH_UNIT}EOF\n  sudo tee {UNIT_DIR}/hq-net-apply@.timer >/dev/null <<'EOF'\n{TIMER_UNIT}EOF\n  sudo systemctl daemon-reload\n\n",
+        "Step 4. The applier: a small program that runs as root, accepts only a public key, one address and an optional preshared key per device, and refuses everything else. Build it without the rest of hq, and install it where only root can change it (a directory under /opt that only root owns; /usr/local can be writable by a group). Never point the unit at ~/bin/hq, which your user can rewrite. Build it as an account other than the one HQ runs as, in a clean checkout, because HQ's agents can rewrite files in the HQ account between the build and the install. If you must build in that account, note the hash and check it again just before the install:\n  cargo build --release --locked -p hq-net --no-default-features --bin hq-net-apply\n  sha256sum target/release/hq-net-apply\n  sudo install -d -o root -g root -m 0755 {}\n  sudo install -o root -g root -m 0755 target/release/hq-net-apply {APPLIER_PATH}\n  sudo install -d -o {uid} -g {gid} -m 0700 {spool}\n  sudo install -d -o root -g root -m 0755 {ENV_DIR}\n  sudo tee {ENV_DIR}/{interface}.env >/dev/null <<'EOF'\nHQ_NET_SUBNET={subnet}\nHQ_NET_HUB={hub}\nHQ_NET_OWNER_UID={uid}\nEOF\n  sudo tee {UNIT_DIR}/hq-net-apply@.service >/dev/null <<'EOF'\n{SERVICE_UNIT}EOF\n  sudo tee {UNIT_DIR}/hq-net-apply@.path >/dev/null <<'EOF'\n{PATH_UNIT}EOF\n  sudo tee {UNIT_DIR}/hq-net-apply@.timer >/dev/null <<'EOF'\n{TIMER_UNIT}EOF\n  sudo systemctl daemon-reload\n\n",
         Path::new(APPLIER_PATH).parent().map(|p| p.display().to_string()).unwrap_or_default()
     ));
     out.push_str(&format!(
@@ -443,36 +416,6 @@ mod tests {
     }
 
     #[test]
-    fn endpoints_are_host_and_port_with_nothing_that_could_break_a_config() {
-        for ok in [
-            "example.com:51820",
-            "vpn.example.com:1",
-            "203.0.113.7:51820",
-            "[2001:db8::1]:51820",
-            "a-b.example:65535",
-        ] {
-            assert!(valid_endpoint(ok), "{ok}");
-        }
-        for bad in [
-            "",
-            "example.com",
-            "example.com:",
-            "example.com:0",
-            "example.com:65536",
-            "example.com:+1",
-            "exa mple.com:1",
-            "example.com:1\nPostUp = x",
-            "-a.example:1",
-            "a..b:1",
-            ":51820",
-            "ex_ample.com:1",
-            "2001:db8::1:51820",
-        ] {
-            assert!(!valid_endpoint(bad), "{bad:?}");
-        }
-    }
-
-    #[test]
     fn a_bad_endpoint_or_port_changes_nothing() {
         let (_dir, store) = store();
         let bad = InitOptions {
@@ -493,5 +436,65 @@ mod tests {
         );
         assert!(store.load_net().unwrap().is_none());
         assert!(!store.hub_key_path().exists());
+    }
+
+    #[test]
+    fn the_copy_of_the_hub_key_is_deleted_only_if_the_install_worked() {
+        let (_dir, store) = store();
+        let text = init(&store, &InitOptions::default(), &ctx(Some(vec![]))).unwrap();
+        let line = text
+            .lines()
+            .find(|l| l.contains("install -m 0600 -o root -g root"))
+            .expect("the install step");
+        assert!(
+            line.contains(" && rm "),
+            "install and rm must be one command: {line}"
+        );
+        assert!(
+            !text.lines().any(|l| l.trim_start().starts_with("rm ")),
+            "no separate rm line"
+        );
+    }
+
+    #[test]
+    fn printed_paths_are_quoted_so_a_directory_name_cannot_inject_a_command() {
+        let dir = tempfile::tempdir().unwrap();
+        let hostile = dir.path().join("my dir; touch pwned #'x");
+        let store = Store::new(hostile.join("net"));
+        let mut context = ctx(Some(vec![]));
+        context.spool_dir = hostile.join("spool dir");
+        let text = init(&store, &InitOptions::default(), &context).unwrap();
+        let staged = store.hub_key_path().display().to_string();
+        assert!(
+            !text.contains(&format!("root {staged}")),
+            "the staged path must be quoted"
+        );
+        let quoted = shell_quote(&staged);
+        assert!(quoted.starts_with('\''));
+        assert!(text.contains(&format!(
+            "root -g root {quoted} /etc/wireguard/hq0.key && rm {quoted}"
+        )));
+        let spool = shell_quote(&context.spool_dir.display().to_string());
+        assert!(text.contains(&format!("-m 0700 {spool}\n")));
+    }
+
+    #[test]
+    fn the_route_check_says_it_read_only_the_main_table() {
+        let (_dir, store) = store();
+        let text = init(&store, &InitOptions::default(), &ctx(Some(vec![]))).unwrap();
+        assert!(text.contains("main routing table") && text.contains("ip route show table all"));
+        let (_dir2, store2) = self::store();
+        let blind = init(&store2, &InitOptions::default(), &ctx(None)).unwrap();
+        assert!(blind.contains("could not be read") && blind.contains("show table all"));
+    }
+
+    #[test]
+    fn the_build_step_warns_about_building_in_the_account_hq_runs_as() {
+        let (_dir, store) = store();
+        let text = init(&store, &InitOptions::default(), &ctx(Some(vec![]))).unwrap();
+        assert!(
+            text.contains("account other than the one HQ runs as")
+                && text.contains("sha256sum target/release/hq-net-apply")
+        );
     }
 }

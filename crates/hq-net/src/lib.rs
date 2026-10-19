@@ -13,6 +13,7 @@
 
 pub mod grammar;
 pub mod key;
+pub mod names;
 pub mod subnet;
 pub mod wgconf;
 

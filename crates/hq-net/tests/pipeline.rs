@@ -16,6 +16,8 @@ struct Plane {
     _dir: tempfile::TempDir,
     store: Store,
     spool: PathBuf,
+    /// The hub's private key as `init` staged it, before the owner moved it.
+    hub_private: String,
 }
 
 impl Plane {
@@ -37,21 +39,26 @@ impl Plane {
             ..Default::default()
         };
         init(&store, &options, &ctx).unwrap();
+        // Step 1 of the printed steps: the owner moves the hub key out of the user's directory.
+        let hub_private = std::fs::read_to_string(store.hub_key_path()).unwrap();
+        std::fs::remove_file(store.hub_key_path()).unwrap();
         Self {
             _dir: dir,
             store,
             spool,
+            hub_private,
         }
     }
 
     fn add(&self, label: &str, kind: Kind, preshared: bool) -> String {
-        let key = PrivateKey::generate().public();
+        let key = device_key();
         let request = AddRequest {
             label,
             public_key: &key,
             kind,
             preshared,
             with_qr: false,
+            confirm_public: false,
         };
         peer_add(&self.store, &self.spool, &request, &mut Vec::new()).unwrap();
         key
@@ -63,6 +70,16 @@ impl Plane {
 
     fn input(&self) -> Vec<u8> {
         std::fs::read(self.spool.join("hq0.conf")).unwrap()
+    }
+}
+
+/// A public key that does not happen to look like a private one.
+fn device_key() -> String {
+    loop {
+        let key = PrivateKey::generate().public();
+        if !hq_net::key::looks_like_private_key(&key) {
+            return key;
+        }
     }
 }
 
@@ -177,8 +194,7 @@ fn the_applier_input_is_private_and_leaves_no_temporary_files_in_the_spool() {
 #[test]
 fn the_hub_key_is_never_in_the_applier_input_or_the_device_config_output() {
     let plane = Plane::new();
-    let private = std::fs::read_to_string(plane.store.hub_key_path()).unwrap();
-    let key = PrivateKey::generate().public();
+    let key = device_key();
     let mut out = Vec::new();
     let request = AddRequest {
         label: "mac",
@@ -186,6 +202,7 @@ fn the_hub_key_is_never_in_the_applier_input_or_the_device_config_output() {
         kind: Kind::Laptop,
         preshared: true,
         with_qr: true,
+        confirm_public: false,
     };
     peer_add(&plane.store, &plane.spool, &request, &mut out).unwrap();
     let shown = String::from_utf8(out).unwrap();
@@ -195,8 +212,27 @@ fn the_hub_key_is_never_in_the_applier_input_or_the_device_config_output() {
         std::fs::read_to_string(plane.store.dir().join("net.toml")).unwrap(),
     ] {
         assert!(
-            !text.contains(private.trim()),
+            !text.contains(plane.hub_private.trim()),
             "SR-N2: the hub's private key leaked"
         );
     }
+}
+
+#[test]
+fn nothing_is_added_while_the_hub_key_is_still_staged_and_a_revoke_still_works() {
+    let plane = Plane::new();
+    plane.add("mac", Kind::Laptop, false);
+    std::fs::write(plane.store.hub_key_path(), &plane.hub_private).unwrap();
+    let key = device_key();
+    let request = AddRequest {
+        label: "pixel",
+        public_key: &key,
+        kind: Kind::Phone,
+        preshared: false,
+        with_qr: false,
+        confirm_public: false,
+    };
+    assert!(peer_add(&plane.store, &plane.spool, &request, &mut Vec::new()).is_err());
+    peer_revoke(&plane.store, &plane.spool, "mac", &mut Vec::new()).unwrap();
+    assert!(!String::from_utf8(plane.input()).unwrap().contains("# mac"));
 }

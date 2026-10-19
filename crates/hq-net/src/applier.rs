@@ -16,6 +16,7 @@
 //! peers it applied, by address and a short key fingerprint, so the journal shows every change.
 
 use crate::grammar::{self, MAX_INPUT_BYTES, Policy, Reject};
+use crate::names::valid_interface;
 use crate::subnet::{Subnet, parse_canonical_ipv4};
 use crate::wgconf;
 use std::ffi::{CString, OsStr};
@@ -29,7 +30,6 @@ use std::path::{Component, Path, PathBuf};
 use std::process::{Command, Stdio};
 
 const USAGE: &str = "usage: hq-net-apply --interface NAME --subnet CIDR --hub ADDRESS --owner-uid UID --input /ABSOLUTE/PATH [--wg /ABSOLUTE/PATH]";
-const MAX_INTERFACE_NAME: usize = 15;
 /// Where `wg` may be, in order: the distribution's own directories only. The first that exists
 /// and is root-owned and not writable by others is used; no `PATH` search ever happens. A `wg` in
 /// `/usr/local` (writable by the `staff` group on Debian) needs an explicit `--wg`.
@@ -37,7 +37,9 @@ const WG_CANDIDATES: [&str; 4] = ["/usr/bin/wg", "/usr/sbin/wg", "/bin/wg", "/sb
 /// How many times a run applies again because the input changed while it was applying. A change
 /// after the last re-read is caught by the timer, not by this loop.
 const MAX_ROUNDS: usize = 3;
-const FINGERPRINT_CHARS: usize = 8;
+/// `wg` reads the config from its own standard input through this path, which exists in every
+/// mount namespace (unlike a `/dev/stdin` link a private `/dev` may or may not carry).
+const STDIN_PATH: &str = "/proc/self/fd/0";
 const GROUP_OTHER_ACCESS: u32 = 0o077;
 const GROUP_OTHER_WRITE: u32 = 0o022;
 const ROOT_UID: u32 = 0;
@@ -50,13 +52,6 @@ pub struct Config {
     pub input: PathBuf,
     pub owner_uid: u32,
     pub wg: Option<PathBuf>,
-}
-
-pub fn valid_interface(name: &str) -> bool {
-    let mut chars = name.chars();
-    name.len() <= MAX_INTERFACE_NAME
-        && chars.next().is_some_and(|c| c.is_ascii_lowercase())
-        && chars.all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '_')
 }
 
 fn take_once(slot: &mut Option<String>, flag: &str, value: Option<String>) -> Result<(), String> {
@@ -161,16 +156,66 @@ fn open_error(error: std::io::Error) -> InputError {
 
 /// The directory that holds the input must belong to root or the expected user, and no one else
 /// may be able to add, remove or rename names in it.
+/// What `fstat` says about an open file or directory: the only inputs to the ownership and mode
+/// rules, kept apart from the system calls so every rule can be tested without root.
+#[derive(Debug, Clone, Copy)]
+pub struct Facts {
+    pub is_file: bool,
+    pub uid: u32,
+    pub mode: u32,
+    pub nlink: u64,
+    pub len: u64,
+}
+
+impl Facts {
+    fn of(meta: &std::fs::Metadata) -> Self {
+        Self {
+            is_file: meta.file_type().is_file(),
+            uid: meta.uid(),
+            mode: meta.mode(),
+            nlink: meta.nlink(),
+            len: meta.len(),
+        }
+    }
+}
+
+/// The directory that holds the input: root's or the expected user's, and closed to writes by
+/// anyone else.
+pub fn check_parent_facts(facts: &Facts, owner_uid: u32) -> Result<(), InputError> {
+    let owner_ok = facts.uid == ROOT_UID || facts.uid == owner_uid;
+    if !owner_ok || facts.mode & GROUP_OTHER_WRITE != 0 {
+        return Err(InputError::ParentUnsafe);
+    }
+    Ok(())
+}
+
+/// The input itself: a plain file of the expected user, no group or other access, one name, and
+/// small enough to be a peers file.
+pub fn check_file_facts(facts: &Facts, owner_uid: u32) -> Result<(), InputError> {
+    if !facts.is_file {
+        return Err(InputError::NotRegular);
+    }
+    if facts.uid != owner_uid {
+        return Err(InputError::WrongOwner);
+    }
+    if facts.mode & GROUP_OTHER_ACCESS != 0 {
+        return Err(InputError::TooOpen);
+    }
+    if facts.nlink != 1 {
+        return Err(InputError::OtherNames);
+    }
+    if facts.len > MAX_INPUT_BYTES as u64 {
+        return Err(InputError::TooLarge);
+    }
+    Ok(())
+}
+
 fn check_parent(dir: &OwnedFd, owner_uid: u32) -> Result<(), InputError> {
     let copy = dir.try_clone().map_err(|e| InputError::Io(e.to_string()))?;
     let meta = File::from(copy)
         .metadata()
         .map_err(|e| InputError::Io(e.to_string()))?;
-    let owner_ok = meta.uid() == ROOT_UID || meta.uid() == owner_uid;
-    if !owner_ok || meta.mode() & GROUP_OTHER_WRITE != 0 {
-        return Err(InputError::ParentUnsafe);
-    }
-    Ok(())
+    check_parent_facts(&Facts::of(&meta), owner_uid)
 }
 
 /// Opens `path` without following a link at any component and reads it, if the open handle is
@@ -215,21 +260,7 @@ pub fn read_input(path: &Path, owner_uid: u32) -> Result<Vec<u8>, InputError> {
     let fd = open_at(dir.as_raw_fd(), file_name, flags).map_err(open_error)?;
     let file = File::from(fd);
     let meta = file.metadata().map_err(|e| InputError::Io(e.to_string()))?;
-    if !meta.file_type().is_file() {
-        return Err(InputError::NotRegular);
-    }
-    if meta.uid() != owner_uid {
-        return Err(InputError::WrongOwner);
-    }
-    if meta.mode() & GROUP_OTHER_ACCESS != 0 {
-        return Err(InputError::TooOpen);
-    }
-    if meta.nlink() != 1 {
-        return Err(InputError::OtherNames);
-    }
-    if meta.len() > MAX_INPUT_BYTES as u64 {
-        return Err(InputError::TooLarge);
-    }
+    check_file_facts(&Facts::of(&meta), owner_uid)?;
     let mut bytes = Vec::new();
     file.take(MAX_INPUT_BYTES as u64 + 1)
         .read_to_end(&mut bytes)
@@ -319,7 +350,7 @@ impl Wg for SystemWg {
         config: &str,
     ) -> Result<(), String> {
         let mut child = self
-            .command(&[subcommand.arg(), interface, "/dev/stdin"])
+            .command(&[subcommand.arg(), interface, STDIN_PATH])
             .stdin(Stdio::piped())
             .stdout(Stdio::null())
             .stderr(Stdio::inherit())
@@ -349,6 +380,12 @@ pub enum ApplyError {
     Input(InputError),
     Rejected(Reject),
     Wg(String),
+    /// A later round failed after an earlier one had already changed the interface. The peers of
+    /// that earlier round stay in place, so the message says how many.
+    AfterApply {
+        applied: usize,
+        cause: Box<ApplyError>,
+    },
 }
 
 impl fmt::Display for ApplyError {
@@ -357,43 +394,97 @@ impl fmt::Display for ApplyError {
             ApplyError::Input(e) => e.fmt(f),
             ApplyError::Rejected(e) => e.fmt(f),
             ApplyError::Wg(e) => f.write_str(e),
+            ApplyError::AfterApply { applied, cause } => write!(
+                f,
+                "{cause}. The input changed after {applied} peer(s) had already been applied; they stay on the interface until the next run succeeds"
+            ),
         }
     }
 }
 
+/// What one round applied: the bytes it read, the peers in them, and the changes it made.
+struct Round {
+    bytes: Vec<u8>,
+    peers: Vec<grammar::Peer>,
+    changes: Vec<String>,
+}
+
 /// One round: read the input, validate it, and only if every line is acceptable ask `wg`. A refused
-/// file never causes `wg` to be started.
-fn apply_once(config: &Config, wg: &dyn Wg) -> Result<(Vec<u8>, Vec<grammar::Peer>), ApplyError> {
+/// file never causes `wg` to be started. Returns the bytes applied, the peers, and the changes
+/// made to the interface.
+fn apply_once(config: &Config, wg: &dyn Wg) -> Result<Round, ApplyError> {
     let bytes = read_input(&config.input, config.owner_uid).map_err(ApplyError::Input)?;
     let peers = grammar::parse(&bytes, &config.policy).map_err(ApplyError::Rejected)?;
     let current = wg.show_config(&config.interface).map_err(ApplyError::Wg)?;
+    let changes = wgconf::changes(&wgconf::current_peers(&current), &peers);
     let (subcommand, text) =
         wgconf::build(&peers, &current).map_err(|e| ApplyError::Wg(e.to_string()))?;
     wg.apply(&config.interface, subcommand, &text)
         .map_err(ApplyError::Wg)?;
-    Ok((bytes, peers))
+    Ok(Round {
+        bytes,
+        peers,
+        changes,
+    })
+}
+
+/// The journal record of a round that changed the interface: how many peers it has now and what
+/// was added, removed or moved. An unchanged interface gets one line, so a timer that runs every
+/// few minutes does not fill the journal. It is written the moment `wg` has succeeded, before the
+/// input is read again, so a peer that went live is on record even if a later round is refused.
+fn log_round(out: &mut dyn Write, config: &Config, peers: &[grammar::Peer], changes: &[String]) {
+    let mut text = if changes.is_empty() {
+        format!(
+            "hq-net-apply: no change, {} peer(s) on {}\n",
+            peers.len(),
+            config.interface
+        )
+    } else {
+        format!(
+            "hq-net-apply: {} peer(s) on {} after this run\n",
+            peers.len(),
+            config.interface
+        )
+    };
+    for change in changes {
+        text.push_str(&format!("hq-net-apply:   {change}\n"));
+    }
+    // A journal that cannot be written to must not stop a revocation that has already happened.
+    let _ = out.write_all(text.as_bytes()).and_then(|()| out.flush());
 }
 
 /// Applies the input, then reads it again: systemd stops watching the file while this runs, so a
 /// change made meanwhile would otherwise wait for the timer. Returns the peers the interface now
 /// has. A refusal changes nothing; a failure inside `wg` can leave a partial update (a large
-/// peer list goes to the kernel in more than one message), which the next run repairs.
-pub fn run(config: &Config, wg: &dyn Wg) -> Result<Vec<grammar::Peer>, ApplyError> {
-    let (mut applied_bytes, mut peers) = apply_once(config, wg)?;
+/// peer list goes to the kernel in more than one message), which the next run repairs. If a later
+/// round fails, the error says how many peers an earlier round had already applied.
+pub fn run(
+    config: &Config,
+    wg: &dyn Wg,
+    out: &mut dyn Write,
+) -> Result<Vec<grammar::Peer>, ApplyError> {
+    let first = apply_once(config, wg)?;
+    log_round(out, config, &first.peers, &first.changes);
+    let (mut applied_bytes, mut peers) = (first.bytes, first.peers);
     for _ in 1..MAX_ROUNDS {
-        let latest = read_input(&config.input, config.owner_uid).map_err(ApplyError::Input)?;
+        let after = |cause: ApplyError, peers: &[grammar::Peer]| ApplyError::AfterApply {
+            applied: peers.len(),
+            cause: Box::new(cause),
+        };
+        let latest = read_input(&config.input, config.owner_uid)
+            .map_err(|e| after(ApplyError::Input(e), &peers))?;
         if latest == applied_bytes {
             break;
         }
-        (applied_bytes, peers) = apply_once(config, wg)?;
+        match apply_once(config, wg) {
+            Ok(next) => {
+                log_round(out, config, &next.peers, &next.changes);
+                (applied_bytes, peers) = (next.bytes, next.peers);
+            }
+            Err(cause) => return Err(after(cause, &peers)),
+        }
     }
     Ok(peers)
-}
-
-/// A line for the journal per peer: the address and the first characters of the public key.
-fn peer_log_line(peer: &grammar::Peer) -> String {
-    let fingerprint: String = peer.public_key.chars().take(FINGERPRINT_CHARS).collect();
-    format!("hq-net-apply:   {} {fingerprint}", peer.address)
 }
 
 /// The program: returns the exit code. 0 applied, 1 refused or failed, 2 usage.
@@ -420,20 +511,16 @@ pub fn main() -> i32 {
             return 1;
         }
     };
-    match run(&config, &wg) {
-        Ok(peers) => {
-            println!(
-                "hq-net-apply: {} peer(s) applied to {}",
-                peers.len(),
-                config.interface
-            );
-            for peer in &peers {
-                println!("{}", peer_log_line(peer));
-            }
-            0
-        }
+    match run(&config, &wg, &mut std::io::stdout()) {
+        Ok(_) => 0,
         Err(why) => {
-            eprintln!("hq-net-apply: nothing applied: {why}");
+            match &why {
+                ApplyError::Input(_) | ApplyError::Rejected(_) => {
+                    eprintln!("hq-net-apply: nothing applied: {why}")
+                }
+                ApplyError::Wg(_) => eprintln!("hq-net-apply: failed: {why}"),
+                ApplyError::AfterApply { .. } => eprintln!("hq-net-apply: {why}"),
+            }
             1
         }
     }

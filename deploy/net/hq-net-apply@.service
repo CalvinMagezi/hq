@@ -5,12 +5,15 @@ After=wg-quick@%i.service
 Requisite=wg-quick@%i.service
 ConditionPathExists=/var/lib/hq-net/%i.conf
 # A burst of changes must not trip the start limit: that would leave the path unit dead and every
-# later revocation unapplied.
+# later revocation unapplied. The one-second pause below is what bounds how often this runs.
 StartLimitIntervalSec=0
 
 [Service]
 Type=oneshot
 TimeoutStartSec=30s
+# Debounce: a writer that opens and closes the file in a loop starts this once a second at most.
+# A change made during the pause is still read afterwards, because the input is read last.
+ExecStartPre=/usr/bin/sleep 1
 # HQ_NET_SUBNET, HQ_NET_HUB and HQ_NET_OWNER_UID come from a root-owned file, never from the
 # input the applier is about to read.
 EnvironmentFile=/etc/hq-net/%i.env
@@ -29,7 +32,15 @@ ProtectControlGroups=yes
 ProtectClock=yes
 ProtectHostname=yes
 ProtectProc=invisible
-RestrictAddressFamilies=AF_NETLINK AF_UNIX
+# Kernel WireGuard is configured over netlink only (wireguard-tools ipc-linux.h opens
+# NETLINK_ROUTE and generic netlink); a userspace implementation would need AF_UNIX.
+RestrictAddressFamilies=AF_NETLINK
+# Only the pseudo devices wg and this program need; nothing under /dev can be written.
+PrivateDevices=yes
+SystemCallFilter=@system-service
+# A denied call fails with EPERM instead of killing the process, so a missed syscall shows up as
+# an error in the journal rather than a silent SIGSYS.
+SystemCallErrorNumber=EPERM
 RestrictNamespaces=yes
 RestrictRealtime=yes
 RestrictSUIDSGID=yes

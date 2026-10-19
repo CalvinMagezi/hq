@@ -65,6 +65,8 @@ struct Recorder {
     calls: RefCell<Vec<(String, String)>>,
     shown: RefCell<usize>,
     fail_apply: bool,
+    /// What `wg showconf` prints; the default has one old peer the file never lists.
+    show_text: Option<String>,
     /// Runs inside `apply`, to stand in for the input changing while the applier works.
     during_apply: RefCell<Option<Box<dyn FnMut()>>>,
 }
@@ -74,6 +76,9 @@ const SHOWCONF_KEY_SEED: u8 = 99;
 impl Wg for Recorder {
     fn show_config(&self, _interface: &str) -> Result<String, String> {
         *self.shown.borrow_mut() += 1;
+        if let Some(text) = &self.show_text {
+            return Ok(text.clone());
+        }
         Ok(format!(
             "[Interface]\nListenPort = 51820\nPrivateKey = {}\n\n[Peer]\nPublicKey = {}\nAllowedIPs = 10.77.0.200/32\n",
             k(SHOWCONF_KEY_SEED),
@@ -183,14 +188,93 @@ fn a_second_name_for_the_file_is_refused() {
 }
 
 #[test]
-fn another_owner_is_refused() {
+fn another_owner_is_refused_at_the_open_file_not_only_at_the_directory() {
+    // Through the real opener the directory rule fires first (the test user cannot make a file
+    // that someone else owns inside a directory it owns), so this covers that path...
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("peers.conf");
     write(&path, valid_text(1).as_bytes(), 0o600);
     assert!(matches!(
         read_input(&path, me() + 1),
-        Err(InputError::WrongOwner | InputError::ParentUnsafe)
+        Err(InputError::ParentUnsafe)
     ));
+    // ...and the file rule itself is checked on the facts an open file reports.
+    let facts = |f: &dyn Fn(&mut Facts)| {
+        let mut facts = Facts {
+            is_file: true,
+            uid: 1000,
+            mode: 0o100600,
+            nlink: 1,
+            len: 100,
+        };
+        f(&mut facts);
+        facts
+    };
+    assert!(check_file_facts(&facts(&|_| {}), 1000).is_ok());
+    assert!(matches!(
+        check_file_facts(&facts(&|_| {}), 1001),
+        Err(InputError::WrongOwner)
+    ));
+    assert!(
+        matches!(
+            check_file_facts(&facts(&|f| f.uid = 0), 1000),
+            Err(InputError::WrongOwner)
+        ),
+        "root-owned is not the expected owner either"
+    );
+    assert!(matches!(
+        check_file_facts(&facts(&|f| f.is_file = false), 1000),
+        Err(InputError::NotRegular)
+    ));
+    assert!(matches!(
+        check_file_facts(&facts(&|f| f.mode = 0o100640), 1000),
+        Err(InputError::TooOpen)
+    ));
+    assert!(matches!(
+        check_file_facts(&facts(&|f| f.mode = 0o100604), 1000),
+        Err(InputError::TooOpen)
+    ));
+    assert!(matches!(
+        check_file_facts(&facts(&|f| f.nlink = 2), 1000),
+        Err(InputError::OtherNames)
+    ));
+    assert!(matches!(
+        check_file_facts(&facts(&|f| f.len = MAX_INPUT_BYTES as u64 + 1), 1000),
+        Err(InputError::TooLarge)
+    ));
+    assert!(check_file_facts(&facts(&|f| f.len = MAX_INPUT_BYTES as u64), 1000).is_ok());
+}
+
+#[test]
+fn the_directory_rule_takes_root_or_the_owner_and_nobody_else() {
+    let dir = |uid: u32, mode: u32| Facts {
+        is_file: false,
+        uid,
+        mode,
+        nlink: 2,
+        len: 0,
+    };
+    assert!(check_parent_facts(&dir(0, 0o040755), 1000).is_ok());
+    assert!(check_parent_facts(&dir(1000, 0o040700), 1000).is_ok());
+    assert!(matches!(
+        check_parent_facts(&dir(1001, 0o040700), 1000),
+        Err(InputError::ParentUnsafe)
+    ));
+    assert!(matches!(
+        check_parent_facts(&dir(1000, 0o040770), 1000),
+        Err(InputError::ParentUnsafe)
+    ));
+    assert!(matches!(
+        check_parent_facts(&dir(1000, 0o040707), 1000),
+        Err(InputError::ParentUnsafe)
+    ));
+    assert!(
+        matches!(
+            check_parent_facts(&dir(0, 0o041777), 1000),
+            Err(InputError::ParentUnsafe)
+        ),
+        "a sticky world-writable directory such as /tmp"
+    );
 }
 
 #[test]
@@ -252,7 +336,7 @@ fn a_valid_file_is_applied_with_the_live_interface_carried_forward() {
     let path = dir.path().join("peers.conf");
     write(&path, valid_text(2).as_bytes(), 0o600);
     let wg = Recorder::default();
-    assert_eq!(run(&config(path), &wg).unwrap().len(), 2);
+    assert_eq!(run(&config(path), &wg, &mut Vec::new()).unwrap().len(), 2);
     let calls = wg.calls.borrow();
     assert_eq!(calls.len(), 1);
     assert_eq!(calls[0].0, "syncconf");
@@ -274,7 +358,7 @@ fn an_empty_peer_list_uses_setconf_so_the_last_peer_really_goes() {
     let path = dir.path().join("peers.conf");
     write(&path, valid_text(0).as_bytes(), 0o600);
     let wg = Recorder::default();
-    assert_eq!(run(&config(path), &wg).unwrap().len(), 0);
+    assert_eq!(run(&config(path), &wg, &mut Vec::new()).unwrap().len(), 0);
     assert_eq!(wg.calls.borrow()[0].0, "setconf");
 }
 
@@ -300,7 +384,7 @@ fn a_refused_file_never_starts_wg_at_all() {
         let path = dir.path().join("peers.conf");
         write(&path, text.as_bytes(), 0o600);
         let wg = Recorder::default();
-        let err = run(&config(path), &wg).unwrap_err();
+        let err = run(&config(path), &wg, &mut Vec::new()).unwrap_err();
         assert!(matches!(err, ApplyError::Rejected(_)), "{err}");
         assert!(wg.calls.borrow().is_empty());
         assert_eq!(
@@ -321,11 +405,14 @@ fn a_failing_wg_is_reported_and_unreadable_input_never_reaches_it() {
         fail_apply: true,
         ..Recorder::default()
     };
-    assert!(matches!(run(&config(path), &wg), Err(ApplyError::Wg(_))));
+    assert!(matches!(
+        run(&config(path), &wg, &mut Vec::new()),
+        Err(ApplyError::Wg(_))
+    ));
     let wg = Recorder::default();
     let missing = dir.path().join("missing.conf");
     assert!(matches!(
-        run(&config(missing), &wg),
+        run(&config(missing), &wg, &mut Vec::new()),
         Err(ApplyError::Input(_))
     ));
     assert!(wg.calls.borrow().is_empty());
@@ -396,27 +483,6 @@ fn the_units_arguments_are_taken_strictly() {
 }
 
 #[test]
-fn interface_names_match_the_kernels_limit_and_a_safe_alphabet() {
-    for ok in ["hq0", "a", "wg_hq", "abcdefghijklmno"] {
-        assert!(valid_interface(ok), "{ok}");
-    }
-    for bad in [
-        "",
-        "Hq0",
-        "1hq",
-        "hq.0",
-        "hq 0",
-        "hq/0",
-        "hq0\n",
-        "abcdefghijklmnop",
-        "hq-0",
-        "é",
-    ] {
-        assert!(!valid_interface(bad), "{bad:?}");
-    }
-}
-
-#[test]
 fn a_path_to_wg_that_others_can_replace_is_not_trusted() {
     let dir = tempfile::tempdir().unwrap();
     let fake = dir.path().join("wg");
@@ -444,7 +510,7 @@ fn a_change_made_while_applying_is_applied_in_the_same_run() {
             write(&target, valid_text(3).as_bytes(), 0o600);
         }
     }));
-    assert_eq!(run(&config(path), &wg).unwrap().len(), 3);
+    assert_eq!(run(&config(path), &wg, &mut Vec::new()).unwrap().len(), 3);
     let calls = wg.calls.borrow();
     assert_eq!(calls.len(), 2, "the second round applies the new file");
     assert_eq!(calls[1].1.matches("[Peer]").count(), 3);
@@ -463,12 +529,12 @@ fn an_input_that_keeps_changing_is_applied_a_bounded_number_of_times() {
         write(&target, valid_text(next).as_bytes(), 0o600);
         next += 1;
     }));
-    assert!(run(&config(path), &wg).is_ok());
+    assert!(run(&config(path), &wg, &mut Vec::new()).is_ok());
     assert_eq!(wg.calls.borrow().len(), MAX_ROUNDS);
 }
 
 #[test]
-fn a_file_replaced_by_something_hostile_after_the_first_apply_is_refused() {
+fn a_file_replaced_by_something_hostile_after_the_first_apply_is_refused_and_the_first_is_logged() {
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("peers.conf");
     write(&path, valid_text(1).as_bytes(), 0o600);
@@ -478,30 +544,96 @@ fn a_file_replaced_by_something_hostile_after_the_first_apply_is_refused() {
         std::fs::remove_file(&target).unwrap();
         write(&target, b"[Interface]\nPostUp = id\n", 0o600);
     }));
-    assert!(matches!(
-        run(&config(path), &wg),
-        Err(ApplyError::Rejected(_))
-    ));
+    let (result, log) = run_logged(path, &wg);
+    let err = result.unwrap_err();
+    assert!(
+        matches!(&err, ApplyError::AfterApply { applied: 1, cause } if matches!(**cause, ApplyError::Rejected(_))),
+        "{err}"
+    );
+    assert!(!err.to_string().contains("PostUp"));
     assert_eq!(
         wg.calls.borrow().len(),
         1,
         "only the valid first version reached wg"
     );
+    assert!(
+        log.contains(&format!("added 10.77.0.2 {}", &k(1)[..8])),
+        "{log}"
+    );
+}
+
+fn run_logged(path: PathBuf, wg: &Recorder) -> (Result<Vec<grammar::Peer>, ApplyError>, String) {
+    let mut out = Vec::new();
+    let result = run(&config(path), wg, &mut out);
+    (result, String::from_utf8(out).unwrap())
 }
 
 #[test]
-fn the_journal_line_has_the_address_and_a_short_key_fingerprint_only() {
-    let peer = grammar::Peer {
-        public_key: k(7),
-        address: std::net::Ipv4Addr::new(10, 77, 0, 9),
-        preshared_key: Some(k(8)),
-    };
-    let line = peer_log_line(&peer);
-    assert_eq!(
-        line,
-        format!("hq-net-apply:   10.77.0.9 {}", &k(7)[..FINGERPRINT_CHARS])
+fn the_journal_lists_what_a_run_changed_by_address_and_short_fingerprint_only() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("peers.conf");
+    write(&path, valid_text(2).as_bytes(), 0o600);
+    let wg = Recorder::default();
+    let (result, log) = run_logged(path, &wg);
+    assert_eq!(result.unwrap().len(), 2);
+    assert!(log.contains("2 peer(s) on hq0 after this run"), "{log}");
+    assert!(
+        log.contains(&format!("added 10.77.0.2 {}", &k(1)[..8])),
+        "{log}"
     );
-    assert!(!line.contains(&k(8)), "a preshared key is never logged");
+    assert!(
+        log.contains("removed 10.77.0.200/32"),
+        "the peer the file no longer lists: {log}"
+    );
+    assert!(!log.contains(&k(1)), "only short fingerprints are written");
+}
+
+#[test]
+fn a_run_that_changes_nothing_writes_one_line() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("peers.conf");
+    write(&path, valid_text(0).as_bytes(), 0o600);
+    let wg = Recorder {
+        shown: RefCell::new(0),
+        show_text: Some("[Interface]\nListenPort = 1\n".to_string()),
+        ..Recorder::default()
+    };
+    let (result, log) = run_logged(path, &wg);
+    assert_eq!(result.unwrap().len(), 0);
+    assert_eq!(log, "hq-net-apply: no change, 0 peer(s) on hq0\n");
+}
+
+#[test]
+fn a_peer_that_went_live_is_on_record_even_if_the_next_round_is_refused() {
+    // The blocker case: root applies a peer, the writer then garbles the file before the re-read.
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("peers.conf");
+    write(&path, valid_text(2).as_bytes(), 0o600);
+    let wg = Recorder::default();
+    let target = path.clone();
+    *wg.during_apply.borrow_mut() = Some(Box::new(move || {
+        std::fs::set_permissions(&target, std::fs::Permissions::from_mode(0o666)).unwrap();
+    }));
+    let (result, log) = run_logged(path, &wg);
+    let err = result.unwrap_err();
+    assert!(
+        matches!(&err, ApplyError::AfterApply { applied: 2, .. }),
+        "{err}"
+    );
+    assert!(
+        err.to_string()
+            .contains("2 peer(s) had already been applied"),
+        "{err}"
+    );
+    assert!(
+        log.contains(&format!("added 10.77.0.2 {}", &k(1)[..8])),
+        "audit lines missing: {log}"
+    );
+    assert!(
+        log.contains(&format!("added 10.77.0.3 {}", &k(2)[..8])),
+        "audit lines missing: {log}"
+    );
+    assert_eq!(wg.calls.borrow().len(), 1);
 }
 
 fn script_wg(dir: &Path, body: &str) -> SystemWg {
@@ -511,14 +643,14 @@ fn script_wg(dir: &Path, body: &str) -> SystemWg {
 }
 
 #[test]
-fn the_real_spawn_path_feeds_the_config_over_a_pipe_to_dev_stdin() {
-    // A stand-in program: it must be given `syncconf <interface> /dev/stdin` and the text on stdin.
+fn the_real_spawn_path_feeds_the_config_over_a_pipe_to_proc_self_fd_0() {
+    // A stand-in program: it must be given `syncconf <interface> /proc/self/fd/0` and the text on stdin.
     let dir = tempfile::tempdir().unwrap();
     let out = dir.path().join("received");
     let wg = script_wg(
         dir.path(),
         &format!(
-            "[ \"$1\" = syncconf ] && [ \"$2\" = hq0 ] && [ \"$3\" = /dev/stdin ] || exit 3\ncat /dev/stdin > {}",
+            "[ \"$1\" = syncconf ] && [ \"$2\" = hq0 ] && [ \"$3\" = /proc/self/fd/0 ] || exit 3\ncat /proc/self/fd/0 > {}",
             out.display()
         ),
     );

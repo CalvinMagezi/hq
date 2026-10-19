@@ -34,27 +34,50 @@ fn the_service_runs_a_root_owned_program_and_never_the_users_hq() {
 }
 
 #[test]
-fn the_service_is_confined_to_the_two_capabilities_it_needs() {
+fn the_service_is_confined_to_what_the_applier_and_wg_need() {
     assert_eq!(setting(SERVICE, "NoNewPrivileges"), vec!["yes"]);
+    // Capabilities: only the two root needs, one to configure the interface and one to read the
+    // user's private input file.
     assert_eq!(
         setting(SERVICE, "CapabilityBoundingSet"),
         vec!["CAP_NET_ADMIN CAP_DAC_READ_SEARCH"]
     );
+    // Filesystem: read-only everywhere, no home directories, private /tmp, a private /dev.
     assert_eq!(setting(SERVICE, "ProtectSystem"), vec!["strict"]);
     assert_eq!(setting(SERVICE, "ProtectHome"), vec!["yes"]);
+    assert_eq!(setting(SERVICE, "PrivateTmp"), vec!["yes"]);
+    assert_eq!(setting(SERVICE, "PrivateDevices"), vec!["yes"]);
+    // Network: kernel WireGuard is netlink only.
     assert_eq!(
         setting(SERVICE, "RestrictAddressFamilies"),
-        vec!["AF_NETLINK AF_UNIX"]
+        vec!["AF_NETLINK"]
     );
+    // System calls: the standard service set, failing with EPERM rather than SIGSYS.
+    assert_eq!(
+        setting(SERVICE, "SystemCallFilter"),
+        vec!["@system-service"]
+    );
+    assert_eq!(setting(SERVICE, "SystemCallErrorNumber"), vec!["EPERM"]);
     for (name, value) in [
         ("ProtectKernelTunables", "yes"),
+        ("ProtectKernelModules", "yes"),
+        ("ProtectControlGroups", "yes"),
         ("RestrictSUIDSGID", "yes"),
+        ("RestrictNamespaces", "yes"),
         ("MemoryDenyWriteExecute", "yes"),
         ("LimitCORE", "0"),
         ("UMask", "0077"),
     ] {
         assert_eq!(setting(SERVICE, name), vec![value], "{name}");
     }
+}
+
+#[test]
+fn the_applier_is_debounced_so_a_writer_in_a_loop_cannot_flood_root_or_the_journal() {
+    assert_eq!(setting(SERVICE, "ExecStartPre"), vec!["/usr/bin/sleep 1"]);
+    // systemd's own trigger limit would stop the path unit; it is switched off because the pause
+    // above bounds the rate and the timer covers whatever the path unit misses.
+    assert_eq!(setting(PATH, "TriggerLimitIntervalSec"), vec!["0"]);
 }
 
 #[test]
