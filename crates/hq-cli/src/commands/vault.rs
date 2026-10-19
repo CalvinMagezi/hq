@@ -266,6 +266,8 @@ pub async fn run(config: &HqConfig, sub: &str, args: &[String]) -> Result<()> {
                 println!("  - {} ({})", note.title, note.path);
             }
         }
+        "inventory" => super::vault_import::inventory(config, args, &deny).await?,
+        "import" => super::vault_import::import(config, args, &deny).await?,
         "repair" => {
             let apply = args.iter().any(|a| a == "--apply");
             let db = hq_db::Database::open_existing(&config.db_path())?;
@@ -287,6 +289,12 @@ pub async fn run(config: &HqConfig, sub: &str, args: &[String]) -> Result<()> {
             );
             println!(
                 "  export-pdf <note>    Export a note as a shareable PDF (-o file, --brand slug)"
+            );
+            println!(
+                "  inventory [folder]   List files that are not notes (PDF, Word, Excel, ...) and whether each is imported"
+            );
+            println!(
+                "  import <file|folder> Convert them to Markdown notes (a folder is a dry run until --apply; --archive, --destination, --on-conflict)"
             );
             println!(
                 "  repair [--apply]     Find (and with --apply remove) search rows left behind by deleted notes"

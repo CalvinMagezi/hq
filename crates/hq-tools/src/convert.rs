@@ -19,6 +19,7 @@ use tracing::info;
 
 use hq_convert::brand::load_brand_kit;
 use hq_convert::inbound::InboundConverter;
+use hq_convert::ingest::{ConvertOptions, OcrMode};
 use hq_convert::note_pdf::resolve_note;
 use hq_convert::ocr::OcrEngine;
 use hq_export::{Format, export_note};
@@ -31,7 +32,9 @@ use crate::registry::HqTool;
 
 // ─── ConvertToMarkdownTool ─────────────────────────────────────────────────
 
-pub struct ConvertToMarkdownTool;
+pub struct ConvertToMarkdownTool {
+    vault_path: PathBuf,
+}
 
 #[async_trait]
 impl HqTool for ConvertToMarkdownTool {
@@ -40,8 +43,13 @@ impl HqTool for ConvertToMarkdownTool {
     }
 
     fn description(&self) -> &str {
-        "Convert a file (PDF, DOCX, XLSX, PPTX, HTML, CSV, image, etc.) to Markdown text. \
-         Uses transmutation (pure Rust, no Python). The result can be written to the vault."
+        "Convert a file to Markdown text and return it with a conversion report. Reads \
+         DOCX, DOC, ODT, RTF, PPTX, PPT, ODP, XLSX, XLS, ODS, CSV/TSV, HTML, XML, plain text, \
+         PDF (tables rebuilt, scanned pages read by OCR when available) and images (OCR). \
+         The format is decided from the file's content, not only its name. The report names \
+         the engine, whether anything was dropped (images, charts, text boxes) and the \
+         source hash. Nothing is written; to turn files already in the vault into notes use \
+         vault_import."
     }
 
     fn parameters(&self) -> Value {
@@ -50,7 +58,11 @@ impl HqTool for ConvertToMarkdownTool {
             "properties": {
                 "path": {
                     "type": "string",
-                    "description": "Absolute or relative path to the source file."
+                    "description": "Absolute path, or a path relative to the vault (such as _media/2026-09-19/statement.pdf)."
+                },
+                "ocr": {
+                    "type": "boolean",
+                    "description": "Read scanned PDFs and pictures of text with OCR when the host has it (default true)."
                 }
             },
             "required": ["path"]
@@ -71,35 +83,44 @@ impl HqTool for ConvertToMarkdownTool {
             .and_then(|v| v.as_str())
             .ok_or_else(|| anyhow::anyhow!("missing required arg: path"))?;
 
-        let path = PathBuf::from(path_str);
+        // A relative path that is not found as given is looked for in the vault, which is where
+        // an agent that has just listed files will have found it.
+        let given = PathBuf::from(path_str);
+        let in_vault = self.vault_path.join(&given);
+        let path = if given.is_absolute() || given.exists() || !in_vault.exists() {
+            given
+        } else {
+            in_vault
+        };
 
         if !path.exists() {
             anyhow::bail!("file not found: {}", path.display());
         }
 
-        let format = InboundConverter::detect_format(&path);
+        let ocr = if args.get("ocr").and_then(Value::as_bool).unwrap_or(true) {
+            OcrMode::Auto
+        } else {
+            OcrMode::Off
+        };
+        let opts = ConvertOptions {
+            ocr,
+            ..ConvertOptions::default()
+        };
 
-        if !format.is_supported_inbound() {
-            anyhow::bail!(
-                "unsupported format '{}' — cannot convert to markdown",
-                format
-            );
-        }
+        info!(path = %path.display(), "convert_to_markdown: converting");
 
-        let converter = InboundConverter::new()
-            .map_err(|e| anyhow::anyhow!("failed to initialise converter: {e}"))?;
-
-        info!(path = %path.display(), format = %format, "convert_to_markdown: converting");
-
-        let markdown = converter
-            .convert(&path)
+        let converted = InboundConverter::new()
+            .map_err(|e| anyhow::anyhow!("failed to initialise converter: {e}"))?
+            .convert_with_report(&path, &opts)
             .await
             .map_err(|e| anyhow::anyhow!("conversion failed: {e}"))?;
 
         Ok(json!({
-            "markdown": markdown,
+            "markdown": converted.markdown,
+            "title": converted.title,
             "source_path": path.to_string_lossy(),
-            "format_detected": format.label(),
+            "format_detected": converted.report.source_format,
+            "report": converted.report,
         }))
     }
 }
@@ -441,10 +462,11 @@ impl HqTool for OcrExtractTextTool {
     }
 
     fn description(&self) -> &str {
-        "Extract text from an image (screenshot, photo, scan) using the macOS Vision framework. \
-         Runs entirely on-device — no LLM call, so it works regardless of which model is active. \
+        "Extract text from an image (screenshot, photo, scan) with on-device OCR (macOS Vision, or \
+         tesseract on Linux). No LLM call, so it works regardless of which model is active. \
          Use this whenever you're handed an image and need its text (e.g. a screenshot of a card, \
-         chat, or document)."
+         chat, or document). With tesseract the result also says how sure OCR was: an average \
+         confidence and the words it doubted most, numbers first. Check those against the image."
     }
 
     fn parameters(&self) -> Value {
@@ -480,16 +502,26 @@ impl HqTool for OcrExtractTextTool {
             anyhow::bail!("file not found: {}", path.display());
         }
 
-        info!(path = %path.display(), "ocr_extract_text: running Vision OCR");
+        info!(path = %path.display(), "ocr_extract_text: running OCR");
 
-        let text = OcrEngine::extract_text(&path)
+        let read = OcrEngine::read_image(&path)
             .await
             .map_err(|e| anyhow::anyhow!("OCR failed: {e}"))?;
+        let c = &read.confidence;
+        let confidence = c.mean.map(|mean| {
+            json!({
+                "average": mean.round(),
+                "words": c.words,
+                "uncertain_words": c.low_words,
+                "least_sure": c.doubtful.iter().map(|d| json!({"word": d.text, "confidence": d.confidence.round()})).collect::<Vec<_>>(),
+            })
+        });
 
         Ok(json!({
-            "text": text,
+            "text": read.text,
             "source_path": path.to_string_lossy(),
-            "engine": "vision",
+            "engine": if cfg!(target_os = "macos") { "vision" } else { "tesseract" },
+            "confidence": confidence,
         }))
     }
 }
@@ -497,7 +529,9 @@ impl HqTool for OcrExtractTextTool {
 /// Create all conversion tools.
 pub fn create_convert_tools(vault_path: PathBuf) -> Vec<Box<dyn HqTool>> {
     vec![
-        Box::new(ConvertToMarkdownTool),
+        Box::new(ConvertToMarkdownTool {
+            vault_path: vault_path.clone(),
+        }),
         Box::new(ConvertFromMarkdownTool {
             vault_path: vault_path.clone(),
         }),
@@ -654,5 +688,161 @@ mod export_tests {
         .parameters();
         assert!(alias["properties"].get("format").is_none());
         assert_eq!(alias["required"], json!(["path"]));
+    }
+}
+
+#[cfg(test)]
+mod import_tests {
+    use super::*;
+
+    const RTF: &[u8] = include_bytes!("../../hq-convert/tests/fixtures/corpus/invoice.rtf");
+    const ODT: &[u8] = include_bytes!("../../hq-convert/tests/fixtures/corpus/proposal.odt");
+
+    fn tool(dir: &tempfile::TempDir) -> ConvertToMarkdownTool {
+        ConvertToMarkdownTool {
+            vault_path: dir.path().to_path_buf(),
+        }
+    }
+
+    fn file(dir: &tempfile::TempDir, name: &str, bytes: &[u8]) -> String {
+        let p = dir.path().join(name);
+        std::fs::write(&p, bytes).unwrap();
+        p.to_string_lossy().into_owned()
+    }
+
+    #[tokio::test]
+    async fn formats_the_old_extractor_could_not_read_now_convert_with_a_report() {
+        let dir = tempfile::tempdir().unwrap();
+        for (name, bytes, format) in [("a.rtf", RTF, "rtf"), ("b.odt", ODT, "odt")] {
+            let out = tool(&dir)
+                .execute(json!({"path": file(&dir, name, bytes)}))
+                .await
+                .unwrap();
+            assert_eq!(out["format_detected"], format, "{out}");
+            assert!(!out["markdown"].as_str().unwrap().trim().is_empty());
+            assert_eq!(out["report"]["source_format"], format);
+            assert!(out["report"]["source_sha256"].as_str().unwrap().len() == 64);
+        }
+    }
+
+    #[tokio::test]
+    async fn the_format_comes_from_the_content_when_the_name_is_wrong() {
+        let dir = tempfile::tempdir().unwrap();
+        let out = tool(&dir)
+            .execute(json!({"path": file(&dir, "scan.pdf", RTF)}))
+            .await
+            .unwrap();
+        assert_eq!(out["format_detected"], "rtf", "{out}");
+        let warned = out["report"]["warnings"].to_string();
+        assert!(warned.contains("extension_mismatch"), "{warned}");
+    }
+
+    #[tokio::test]
+    async fn a_path_relative_to_the_vault_is_found() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join("_media/2026-09-19")).unwrap();
+        file(&dir, "_media/2026-09-19/invoice.rtf", RTF);
+        let out = tool(&dir)
+            .execute(json!({"path": "_media/2026-09-19/invoice.rtf"}))
+            .await
+            .unwrap();
+        assert_eq!(out["format_detected"], "rtf", "{out}");
+        assert!(
+            out["source_path"]
+                .as_str()
+                .unwrap()
+                .starts_with(&*dir.path().to_string_lossy())
+        );
+    }
+
+    #[tokio::test]
+    async fn a_missing_file_and_an_unreadable_one_fail_with_a_reason() {
+        let dir = tempfile::tempdir().unwrap();
+        let missing = tool(&dir)
+            .execute(json!({"path": dir.path().join("nope.docx").to_string_lossy()}))
+            .await
+            .unwrap_err()
+            .to_string();
+        assert!(missing.contains("not found"), "{missing}");
+        let junk = tool(&dir)
+            .execute(json!({"path": file(&dir, "blob.bin", &[0, 159, 146, 150, 0, 1, 2, 3, 0, 0, 0, 0, 255, 254, 0, 0, 1, 2])}))
+            .await
+            .unwrap_err()
+            .to_string();
+        assert!(junk.contains("conversion failed"), "{junk}");
+    }
+}
+
+#[cfg(test)]
+mod format_safety_tests {
+    use super::*;
+
+    fn tool(dir: &tempfile::TempDir) -> ConvertFromMarkdownTool {
+        ConvertFromMarkdownTool {
+            vault_path: dir.path().join("vault"),
+        }
+    }
+
+    /// pandoc runs a Lua file given as the output format. The format must be refused
+    /// before pandoc is anywhere near it.
+    #[tokio::test]
+    async fn a_lua_writer_named_as_the_format_is_refused_and_never_run() {
+        let dir = tempfile::tempdir().unwrap();
+        let proof = dir.path().join("PROOF");
+        let writer = dir.path().join("writer.lua");
+        std::fs::write(
+            &writer,
+            format!(
+                "function Writer(doc, opts)\n  local f = io.open('{}', 'w'); f:write('ran'); f:close()\n  return 'x'\nend\n",
+                proof.display()
+            ),
+        )
+        .unwrap();
+        let out = dir.path().join("out/result.txt");
+
+        for format in [
+            writer.to_string_lossy().into_owned(),
+            "writer.lua".to_string(),
+            "docx+smart".to_string(),
+            "latex".to_string(),
+        ] {
+            let err = tool(&dir)
+                .execute(
+                    json!({"content": "# hi", "format": format, "output": out.to_string_lossy()}),
+                )
+                .await
+                .unwrap_err()
+                .to_string();
+            assert!(
+                err.contains("not an export format")
+                    && err.contains("pdf, docx, pptx, html, epub, rtf"),
+                "{format}: {err}"
+            );
+        }
+        assert!(!proof.exists(), "the writer script ran");
+        assert!(!out.exists(), "nothing is written for a refused format");
+        assert!(!out.parent().unwrap().exists(), "not even the folder");
+    }
+
+    #[test]
+    fn the_schema_offers_exactly_the_formats_that_parse() {
+        let dir = tempfile::tempdir().unwrap();
+        let schema = tool(&dir).parameters();
+        let offered: Vec<&str> = schema["properties"]["format"]["enum"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .filter_map(Value::as_str)
+            .collect();
+        let known: Vec<&str> = ExportFormat::ALL
+            .iter()
+            .map(ExportFormat::pandoc_format)
+            .collect();
+        assert_eq!(offered, known);
+        assert!(
+            tool(&dir)
+                .description()
+                .contains("DOCX, PDF, PPTX, HTML, EPUB, RTF")
+        );
     }
 }

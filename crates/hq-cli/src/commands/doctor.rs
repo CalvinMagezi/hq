@@ -11,7 +11,7 @@ pub async fn run(config: &HqConfig) -> Result<()> {
     report_machine_profile(config);
     report_search_index(config);
     report_web_search(config).await;
-    report_pdf_ocr();
+    report_import_tools();
     report_code_signature();
     report_spend_ledger(config);
     Ok(())
@@ -108,27 +108,76 @@ fn report_spend_ledger(config: &HqConfig) {
     }
 }
 
-/// Scanned PDFs (no text layer) are read with `pdftoppm` and `tesseract` off
-/// macOS; without them `web_fetch` fails on those files only.
-fn report_pdf_ocr() {
-    // macOS reads scans with Vision, and other platforms are not supported hosts.
-    if !cfg!(all(unix, not(target_os = "macos"))) {
-        return;
+/// What this machine can do when importing files (`hq vault import`, `convert_to_markdown`):
+/// OCR for scans and photos, tables in PDFs, and old Office files. The built-in readers need
+/// none of it; each missing tool narrows only the files that need it, and the inventory marks
+/// those files `blocked`.
+fn report_import_tools() {
+    println!("\nImporting files as notes");
+    let caps = hq_convert::ingest::capabilities();
+    for Line(label, text) in
+        import_tool_lines(&caps, on_path("pdftoppm"), cfg!(target_os = "macos"))
+    {
+        println!("  {label}  {text}");
     }
-    println!("\nPDF OCR (scanned PDFs in web_fetch)");
-    let missing: Vec<&str> = ["pdftoppm", "tesseract"]
-        .into_iter()
-        .filter(|tool| !on_path(tool))
-        .collect();
-    if missing.is_empty() {
-        println!("  ok  pdftoppm and tesseract found");
+}
+
+fn import_tool_lines(
+    caps: &hq_convert::ingest::Capabilities,
+    pdftoppm: bool,
+    macos: bool,
+) -> Vec<Line> {
+    let mut lines = Vec::new();
+    let install = |apt: &str, brew: &str| {
+        if macos {
+            format!("Install with `brew install {brew}`.")
+        } else {
+            format!("Install with `apt install {apt}`.")
+        }
+    };
+    lines.push(match (caps.ocr, pdftoppm) {
+        (true, true) => Line("ok", "OCR for scans and photos".into()),
+        (true, false) => Line(
+            "warn",
+            format!(
+                "OCR works for pictures, but scanned PDFs need pdftoppm. {}",
+                install("poppler-utils", "poppler")
+            ),
+        ),
+        (false, _) => Line(
+            "warn",
+            format!(
+                "no OCR, so scans and photos cannot be imported (they show as blocked, and a PDF with no text layer fails). {}",
+                install("tesseract-ocr poppler-utils", "tesseract poppler")
+            ),
+        ),
+    });
+    lines.push(if caps.pdf_tables {
+        Line("ok", "tables in PDFs are rebuilt from the page layout (pdftotext)".into())
     } else {
-        println!(
-            "  warn  {} not found, so scanned PDFs cannot be read. PDFs with a text layer still work. \
-             Install with `apt install poppler-utils tesseract-ocr`.",
-            missing.join(" and ")
-        );
-    }
+        Line(
+            "--",
+            format!(
+                "pdftotext not found: PDFs still import, but their tables come out as loose text. {}",
+                install("poppler-utils", "poppler")
+            ),
+        )
+    });
+    lines.push(if caps.legacy_office {
+        Line("ok", "old .doc, .ppt and .xls files open through LibreOffice".into())
+    } else {
+        Line(
+            "--",
+            format!(
+                "LibreOffice not found: old .doc and .ppt files show as blocked, and an old .xls imports without its number formats. {}",
+                install(
+                    "--no-install-recommends libreoffice-writer libreoffice-impress libreoffice-calc",
+                    "--cask libreoffice"
+                )
+            ),
+        )
+    });
+    lines
 }
 
 /// macOS ties folder-access approvals to the code signature, so an ad-hoc `hq` asks again
@@ -935,5 +984,76 @@ mod tests {
                 "{text}"
             );
         }
+    }
+}
+
+#[cfg(test)]
+mod import_tool_tests {
+    use super::*;
+    use hq_convert::ingest::Capabilities;
+
+    fn caps(ocr: bool, pdf_tables: bool, legacy_office: bool) -> Capabilities {
+        Capabilities {
+            ocr,
+            pdf_tables,
+            legacy_office,
+        }
+    }
+
+    #[test]
+    fn a_machine_with_everything_says_so_in_three_lines() {
+        let lines = import_tool_lines(&caps(true, true, true), true, false);
+        assert_eq!(
+            lines.iter().map(|l| l.0).collect::<Vec<_>>(),
+            ["ok", "ok", "ok"]
+        );
+    }
+
+    #[test]
+    fn a_bare_server_is_told_what_each_tool_buys_and_how_to_get_it() {
+        let lines = import_tool_lines(&caps(false, false, false), false, false);
+        assert_eq!(
+            lines.iter().map(|l| l.0).collect::<Vec<_>>(),
+            ["warn", "--", "--"]
+        );
+        assert!(
+            lines[0]
+                .1
+                .contains("apt install tesseract-ocr poppler-utils"),
+            "{}",
+            lines[0].1
+        );
+        assert!(lines[0].1.contains("blocked"), "{}", lines[0].1);
+        assert!(
+            lines[1].1.contains("loose text") && lines[1].1.contains("apt install poppler-utils")
+        );
+        assert!(lines[2].1.contains("libreoffice-writer") && lines[2].1.contains(".xls"));
+    }
+
+    #[test]
+    fn ocr_without_pdftoppm_works_for_pictures_only() {
+        let lines = import_tool_lines(&caps(true, true, true), false, false);
+        assert_eq!(lines[0].0, "warn");
+        assert!(
+            lines[0].1.contains("scanned PDFs need pdftoppm"),
+            "{}",
+            lines[0].1
+        );
+    }
+
+    #[test]
+    fn macos_is_pointed_at_brew() {
+        let lines = import_tool_lines(&caps(false, false, false), false, true);
+        assert!(
+            lines[0].1.contains("brew install tesseract poppler"),
+            "{}",
+            lines[0].1
+        );
+        assert!(
+            lines[2].1.contains("brew install --cask libreoffice"),
+            "{}",
+            lines[2].1
+        );
+        assert!(lines.iter().all(|l| !l.1.contains("apt ")));
     }
 }

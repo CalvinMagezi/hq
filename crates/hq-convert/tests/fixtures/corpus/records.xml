@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<visits>
+  <visit site="Mukono" farmers="42"><note>Done on time</note></visit>
+  <visit site="Wakiso" farmers="17"><note>Rain delay</note></visit>
+  <visit site="Jinja" farmers="23"><note>Pending</note></visit>
+</visits>

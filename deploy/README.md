@@ -166,6 +166,22 @@ The server vault (`/opt/hq/.vault`) is the primary copy. There is no sync
 script, because an `rsync --delete` from a dev machine would erase notes created
 on the server. Read and write the vault through HQ's MCP tools instead.
 
+## Optional tools for importing files
+
+`hq vault import` converts PDFs, Office files, spreadsheets and the like with
+built-in readers, so a bare server already handles most of them. Three optional
+packages widen it (the installer leaves them out; none is needed to run HQ):
+
+```bash
+sudo apt install -y tesseract-ocr poppler-utils            # scans and photos (OCR); tables in PDFs
+sudo apt install -y --no-install-recommends \
+    libreoffice-writer libreoffice-impress libreoffice-calc  # old .doc, .ppt and .xls files (large)
+```
+
+`hq doctor` lists which of them this machine has under "Importing files as
+notes", and `hq vault inventory` marks the files that need a missing one as
+`blocked`. See [`docs/NOTE_IMPORT.md`](../docs/NOTE_IMPORT.md).
+
 ## What does not carry over from a Mac dev setup
 
 - launchd jobs such as the weekly `scripts/cargo-gc.sh` are macOS scheduling.
