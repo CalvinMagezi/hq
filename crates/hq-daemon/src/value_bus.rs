@@ -21,6 +21,7 @@ const SAME_DAY_ACTION_SOURCES: &[&str] = &["email-triage"];
 pub const WEB_ONLY_SOURCES: &[&str] = &[
     "task_ready_for_review",
     "task_stale_digest",
+    "task_auto_archive",
     "skill_review",
     "session_chat",
     "agent_notify",

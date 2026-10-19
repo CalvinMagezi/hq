@@ -430,6 +430,52 @@ ALTER TABLE background_turns DROP COLUMN watch_task_id;
 
 Archived tasks must be restored or purged before rolling back: the old code would show them.
 
+## Archiving for the view (shelving)
+
+The owner's lists grow without bound, so a task or a list can be archived: hidden from the web
+lists and counts, and nothing else. It is a different thing from "removing archives" above, which
+is a deletion that agents see. In code the new one is `shelved_at`, so `archived_at` keeps meaning
+a removed task; the web labels the first Archived and the second Deleted.
+
+- **Display only.** `shelved_at` is read by exactly one thing: a list asking for `Shelf::Exclude`
+  or `Shelf::Only` (`TaskFilter.shelf`, `?shelf=` on `GET /api/tasks` and `GET /api/initiatives`,
+  `task_list shelf=`). The default is `include`, so `task_list`, `task_next`, claims, updates,
+  links, dependencies, the graph, search, stale detection and time reports see an archived task
+  exactly as before. It keeps its status, its `external_id` and its leases; archiving writes no
+  event, no audit row and does not touch `updated_at`, so polling agents and sort order are not
+  disturbed.
+- **Lists are one row.** Archiving a list sets `initiatives.shelved_at`; its tasks are hidden by a
+  join, not rewritten, so unarchiving the list brings back exactly what was visible. A sub-task is
+  hidden with its parent the same way.
+- **Live work comes back.** Claiming a task, moving it out of `complete`, or adding a task or
+  sub-task clears the stamp on that task, its parent and its list, so work an agent resumes is
+  never hidden from the owner. Editing an archived complete task leaves it archived.
+- **Safe by construction.** A task an agent holds a lease on is skipped, a removed task is
+  refused, and every call reports what it skipped and why. The sweep (`task_shelve_completed`,
+  `POST /api/tasks/shelve-completed`, the web "Tidy up" button) archives only completed tasks
+  older than a chosen number of days (`COALESCE(completed_at, updated_at)`), never one with an open
+  sub-task, and counts first: the MCP tool and the endpoint are a dry run unless told otherwise.
+  Every archive returns the ids it changed and `task_unshelve` takes them back; the web offers Undo.
+- **Scheduled sweep (opt in).** `tasks.auto_archive_after_days` (default absent, 0 is off) makes
+  the daemon task `task-auto-archive` run `shelve_completed` once a day over every list. Values
+  are clamped to 7 to 3650 days, so a typo of 1 cannot hide last week's work. It touches only what
+  the manual sweep touches, and posts one web-only inbox item (`task_auto_archive`, deduplicated per
+  day, silent when nothing was archived) with the count, the first ten tasks and how to undo.
+- **Surfaces.** MCP: `task_shelve`, `task_unshelve`, `task_shelve_completed`, `initiative_shelve`;
+  a launched agent may shelve its own tasks only. REST: `POST /api/tasks/shelve`, `.../unshelve`,
+  `.../shelve-completed`, `POST /api/initiatives/{id}/shelf`, plus `GET /api/tasks/{id}` and
+  `GET /api/tasks/{id}/related` so a link or a relation to an archived task still opens. The task
+  watcher fingerprints the stamps, so other open pages refresh.
+
+Rollback of 095, then delete the `095_task_shelf` row from `schema_version` (SQLite 3.35+):
+
+```sql
+DROP INDEX IF EXISTS idx_tasks_shelved;
+DROP INDEX IF EXISTS idx_initiatives_shelved;
+ALTER TABLE tasks DROP COLUMN shelved_at;
+ALTER TABLE initiatives DROP COLUMN shelved_at;
+```
+
 ## The agent protocol (TSV2 WS6)
 
 Any agent, whatever harness it runs in, can use tasks as its headquarters. Migration

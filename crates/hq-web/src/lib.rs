@@ -394,8 +394,29 @@ pub fn create_router(state: Arc<WsState>) -> Router {
         )
         .route(
             "/api/tasks/{id}",
-            axum::routing::patch(tasks_api::update_task_handler)
+            get(tasks_api::get_task_handler)
+                .patch(tasks_api::update_task_handler)
                 .delete(tasks_api::delete_task_handler),
+        )
+        .route(
+            "/api/tasks/{id}/related",
+            get(tasks_api::related_tasks_handler),
+        )
+        .route(
+            "/api/tasks/shelve",
+            axum::routing::post(tasks_api::shelve_tasks_handler),
+        )
+        .route(
+            "/api/tasks/unshelve",
+            axum::routing::post(tasks_api::unshelve_tasks_handler),
+        )
+        .route(
+            "/api/tasks/shelve-completed",
+            axum::routing::post(tasks_api::shelve_completed_handler),
+        )
+        .route(
+            "/api/initiatives/{id}/shelf",
+            axum::routing::post(tasks_api::shelve_initiative_handler),
         )
         .route(
             "/api/tasks/{id}/comments",

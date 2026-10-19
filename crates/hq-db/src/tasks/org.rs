@@ -137,10 +137,25 @@ pub fn list_initiatives(
     space_id: Option<&str>,
     folder_id: Option<Option<&str>>,
 ) -> Result<Vec<Initiative>> {
+    list_initiatives_on_shelf(conn, space_id, folder_id, Shelf::Include)
+}
+
+/// `list_initiatives`, narrowed to the shelved lists, the shown ones, or both.
+pub fn list_initiatives_on_shelf(
+    conn: &Connection,
+    space_id: Option<&str>,
+    folder_id: Option<Option<&str>>,
+    shelf: Shelf,
+) -> Result<Vec<Initiative>> {
     let mut sql = format!("SELECT {INITIATIVE_COLS} FROM initiatives");
     let mut conditions: Vec<&'static str> = Vec::new();
     let mut vals: Vec<Box<dyn rusqlite::types::ToSql>> = Vec::new();
 
+    match shelf {
+        Shelf::Include => {}
+        Shelf::Exclude => conditions.push("shelved_at IS NULL"),
+        Shelf::Only => conditions.push("shelved_at IS NOT NULL"),
+    }
     if let Some(sid) = space_id {
         conditions.push("space_id = ?");
         vals.push(Box::new(sid.to_string()));

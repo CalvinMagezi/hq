@@ -24,6 +24,8 @@ export interface Initiative {
   name: string
   slug: string
   id_prefix: string
+  /** UTC time the list was archived (hidden from the lists); null while shown. */
+  shelved_at: string | null
 }
 
 export interface TaskItem {
@@ -50,8 +52,10 @@ export interface TaskItem {
   blocked_since: string | null
   /** Work over many turns: a session finishing a turn or exiting does not move the task. */
   long_horizon: boolean
-  /** UTC time it was archived; null for an active task. */
+  /** UTC time it was deleted (restorable); null for a task that is not. */
   archived_at: string | null
+  /** UTC time it was archived (hidden from the lists, still live for agents); null while shown. */
+  shelved_at: string | null
   /** Set on sub-tasks; nesting is one level deep. */
   parent_task_id: string | null
   tags: string[]
@@ -84,8 +88,10 @@ interface ListTasksFilter {
   status?: TaskStatus
   tag?: string
   priority?: TaskPriority
-  /** List archived tasks instead of active ones. */
+  /** List deleted tasks instead of the rest. */
   archived?: boolean
+  /** Whether archived tasks are listed: the server's default is `include`. */
+  shelf?: 'include' | 'exclude' | 'only'
 }
 
 export const HTTP_CONFLICT = 409
@@ -128,6 +134,7 @@ export async function fetchTasksClient(
   if (filter?.tag) qs.set('tag', filter.tag)
   if (filter?.priority) qs.set('priority', filter.priority)
   if (filter?.archived) qs.set('archived', 'true')
+  if (filter?.shelf) qs.set('shelf', filter.shelf)
   qs.set('limit', String(TASK_PAGE_SIZE))
   return collectTaskPages(async (offset) => {
     qs.set('offset', String(offset))
@@ -354,6 +361,91 @@ export async function fetchTasksLinkedToClient(kind: LinkKind, ref: string): Pro
 /** Brings an archived task, and the sub-tasks archived with it, back. */
 export async function restoreTaskClient(id: string): Promise<TaskItem> {
   return readJson(await hqFetch(`/api/tasks/${encodeURIComponent(id)}/restore`, { method: 'POST' }))
+}
+
+/** One task, archived or not, so a link to it always opens. */
+export async function fetchTaskClient(id: string): Promise<TaskItem> {
+  return readJson(await hqFetch(`/api/tasks/${encodeURIComponent(id)}`))
+}
+
+/** The parent, sub-tasks, dependencies and dependents of a task, archived ones included. */
+export async function fetchRelatedTasksClient(id: string): Promise<TaskItem[]> {
+  const res: { tasks: TaskItem[] } = await readJson(await hqFetch(`/api/tasks/${encodeURIComponent(id)}/related`))
+  return res.tasks
+}
+
+/** Most tasks one archive request takes; the server refuses more. */
+export const SHELVE_BATCH = 500
+
+export interface ShelveSkip {
+  task: string
+  reason: string
+}
+
+export interface ShelveResult {
+  changed: string[]
+  skipped: ShelveSkip[]
+}
+
+async function shelveRequest(path: 'shelve' | 'unshelve', ids: readonly string[]): Promise<ShelveResult> {
+  const total: ShelveResult = { changed: [], skipped: [] }
+  for (let at = 0; at < ids.length; at += SHELVE_BATCH) {
+    const part: ShelveResult = await readJson(
+      await hqFetch(`/api/tasks/${path}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ids: ids.slice(at, at + SHELVE_BATCH) }),
+      })
+    )
+    total.changed.push(...part.changed)
+    total.skipped.push(...part.skipped)
+  }
+  return total
+}
+
+/** Hides tasks from the lists. Agents, the queue and the graph still see them. */
+export const shelveTasksClient = (ids: readonly string[]) => shelveRequest('shelve', ids)
+export const unshelveTasksClient = (ids: readonly string[]) => shelveRequest('unshelve', ids)
+
+export interface SweepScope {
+  space_id?: string
+  initiative_id?: string
+}
+
+export interface SweepResult {
+  matched: number
+  /** Ids archived, empty on a dry run. Pass them to `unshelveTasksClient` to undo. */
+  changed: string[]
+  dry_run: boolean
+}
+
+/** Archives completed tasks older than `olderThanDays`, or only counts them with `dryRun`. */
+export async function shelveCompletedClient(
+  olderThanDays: number,
+  dryRun: boolean,
+  scope: SweepScope = {}
+): Promise<SweepResult> {
+  return readJson(
+    await hqFetch('/api/tasks/shelve-completed', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ older_than_days: olderThanDays, dry_run: dryRun, ...scope }),
+    })
+  )
+}
+
+/** Archives or unarchives a list. Its tasks are not touched. `open_tasks` is how many are unfinished. */
+export async function shelveInitiativeClient(
+  id: string,
+  shelved: boolean
+): Promise<{ id: string; name: string; shelved_at: string | null; open_tasks: number }> {
+  return readJson(
+    await hqFetch(`/api/initiatives/${encodeURIComponent(id)}/shelf`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ shelved }),
+    })
+  )
 }
 
 export interface StaleTaskItem {

@@ -22,8 +22,8 @@ fn tools() -> Vec<Box<dyn HqTool>> {
 }
 
 #[test]
-fn factory_returns_thirty_one_tools() {
-    assert_eq!(tools().len(), 31);
+fn factory_returns_thirty_five_tools() {
+    assert_eq!(tools().len(), 35);
 }
 
 #[test]
@@ -380,6 +380,7 @@ fn candidate(
         id_prefix: prefix_slug(initiative_name),
         next_sequence: 1,
         created_at: String::new(),
+        shelved_at: None,
     };
     let label = match folder_name {
         Some(f) => format!("{space_name} > {f} > {initiative_name}"),
@@ -4233,4 +4234,118 @@ fn only_project_relative_checkpoint_paths_reach_the_scope() {
     ]});
     super::tools_lease::hide_machine_paths(&mut resume);
     assert_eq!(resume["files"], json!(["src/lib.rs", "docs/a b.md"]));
+}
+
+#[tokio::test]
+async fn shelving_tidies_the_lists_but_agents_still_see_and_work_the_task() {
+    let tools = tools_with(hq_core::config::LeaseMode::Off);
+    let task = call_tool(&tools, "task_create", json!({ "title": "Old but live" }))
+        .await
+        .unwrap();
+    let id = task["display_id"].as_str().unwrap().to_string();
+
+    let shelved = call_tool(&tools, "task_shelve", json!({ "ids": [id] }))
+        .await
+        .unwrap();
+    assert_eq!(shelved["changed"].as_array().map(Vec::len), Some(1));
+
+    let count = |shelf: &'static str| {
+        let tools = &tools;
+        async move {
+            call_tool(tools, "task_list", json!({ "shelf": shelf }))
+                .await
+                .unwrap()["total"]
+                .clone()
+        }
+    };
+    assert_eq!(count("include").await, 1);
+    assert_eq!(count("exclude").await, 0);
+    assert_eq!(count("only").await, 1);
+    assert_eq!(
+        call_tool(&tools, "task_list", json!({})).await.unwrap()["total"],
+        1,
+        "an agent's default list is unchanged"
+    );
+    assert!(
+        call_tool(&tools, "task_list", json!({ "shelf": "hidden" }))
+            .await
+            .is_err()
+    );
+
+    let got = call_tool(&tools, "task_get", json!({ "id": id }))
+        .await
+        .unwrap();
+    assert!(got["shelved_at"].is_string());
+    let picked = call_tool(
+        &tools,
+        "task_next",
+        json!({ "assignee": "builder", "include_unassigned": true }),
+    )
+    .await
+    .unwrap();
+    assert_eq!(
+        picked["task"]["display_id"],
+        id.as_str(),
+        "the queue still offers it"
+    );
+    assert!(
+        call_tool(&tools, "task_get", json!({ "id": id }))
+            .await
+            .unwrap()["shelved_at"]
+            .is_null(),
+        "claiming brings it back"
+    );
+}
+
+#[tokio::test]
+async fn the_sweep_defaults_to_a_dry_run_and_a_launched_agent_cannot_use_it() {
+    let tools = tools_with(hq_core::config::LeaseMode::Off);
+    let sweep = |extra: serde_json::Value| {
+        let mut args = json!({ "older_than_days": 30 });
+        args.as_object_mut()
+            .unwrap()
+            .extend(extra.as_object().unwrap().clone());
+        args
+    };
+
+    let dry = call_tool(&tools, "task_shelve_completed", sweep(json!({})))
+        .await
+        .unwrap();
+    assert_eq!(dry["dry_run"], true);
+    assert!(
+        call_tool(
+            &tools,
+            "task_shelve_completed",
+            sweep(json!({ "older_than_days": 0 }))
+        )
+        .await
+        .is_err()
+    );
+
+    let made = call_tool(
+        &tools,
+        "task_create",
+        json!({ "title": "Someone else's task" }),
+    )
+    .await
+    .unwrap();
+    let existing = made["display_id"].as_str().unwrap().to_string();
+    let launched = json!({ crate::harness_session::CALLER_SESSION_ARG: "hs-agent" });
+    for (tool, args) in [
+        ("task_shelve_completed", sweep(launched.clone())),
+        (
+            "initiative_shelve",
+            json!({ "initiative_id": "in-x", crate::harness_session::CALLER_SESSION_ARG: "hs-agent" }),
+        ),
+        (
+            "task_shelve",
+            json!({ "ids": [existing], crate::harness_session::CALLER_SESSION_ARG: "hs-agent" }),
+        ),
+    ] {
+        let err = call_tool(&tools, tool, args).await.unwrap_err().to_string();
+        assert!(
+            !err.contains("no task"),
+            "{tool} must refuse on scope, not on a missing task: {err}"
+        );
+    }
 }

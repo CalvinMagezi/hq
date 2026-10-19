@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { createPortal } from 'react-dom'
-import { X, Trash2, Pencil, Check, X as XIcon, CornerLeftUp } from 'lucide-react'
+import { X, Trash2, Pencil, Check, X as XIcon, CornerLeftUp, Archive } from 'lucide-react'
 import type { TaskItem, TaskStatus } from '~/lib/tasksApi'
 import { STATUS_LABELS, STATUS_ORDER } from '~/lib/tasksApi'
 import { TaskRelations } from './TaskRelations'
@@ -15,13 +15,24 @@ import { DateRangeInputs, EstimateInput, PRIORITIES, SectionLabel, isInvalidEsti
 import { formatLocalTime } from './timeFormat'
 import { MarkdownViewer } from '../MarkdownViewer'
 
+export interface HiddenBy {
+  kind: 'list' | 'parent'
+  name: string
+  onUnarchive: () => void
+}
+
 interface Props {
   task: TaskItem | null
   allTasks: TaskItem[]
   onClose: () => void
   onUpdate: (id: string, patch: Record<string, unknown>) => Promise<void>
-  /** Brings an archived task back. */
+  /** Brings a deleted task back. */
   onRestore?: (id: string) => Promise<void>
+  /** Hides the task from the lists, or shows it again. Agents are not affected either way. */
+  onArchive?: (task: TaskItem) => Promise<void>
+  onUnarchive?: (task: TaskItem) => Promise<void>
+  /** Set when the task has no stamp of its own but its list or parent is archived, which hides it all the same. */
+  hiddenBy?: HiddenBy
   onDelete: (id: string, cascade: boolean) => Promise<void>
   onSelectTask: (id: string) => void
   onCreateSubtask: (parent: TaskItem, title: string) => Promise<void>
@@ -37,6 +48,9 @@ export function TaskDetailDrawer({
   onClose,
   onUpdate,
   onRestore,
+  onArchive,
+  onUnarchive,
+  hiddenBy,
   onDelete,
   onSelectTask,
   onCreateSubtask,
@@ -74,7 +88,8 @@ export function TaskDetailDrawer({
   const stale = useIsStale(task?.id ?? '')
 
   if (!task) return null
-  const archived = task.archived_at !== null
+  const removed = task.archived_at !== null
+  const shelved = task.shelved_at !== null
 
   const handleSaveEdit = async () => {
     if (isInvalidEstimate(draftEstimate)) return
@@ -162,7 +177,7 @@ export function TaskDetailDrawer({
                   <XIcon className="w-4 h-4" />
                 </button>
               </>
-            ) : archived ? null : (
+            ) : removed ? null : (
               <button
                 type="button"
                 onClick={() => setEditing(true)}
@@ -172,7 +187,18 @@ export function TaskDetailDrawer({
                 <Pencil className="w-4 h-4" />
               </button>
             )}
-            {!archived && <button
+            {!removed && !shelved && onArchive && (
+              <button
+                type="button"
+                onClick={() => onArchive(task)}
+                disabled={busy}
+                className="p-1.5 rounded-lg text-neutral-400 hover:text-white hover:bg-white/10 transition-colors disabled:opacity-50"
+                title="Archive: hide it from the lists. Agents still see it."
+              >
+                <Archive className="w-4 h-4" />
+              </button>
+            )}
+            {!removed && <button
               type="button"
               onClick={handleDeleteClick}
               disabled={busy}
@@ -216,10 +242,44 @@ export function TaskDetailDrawer({
           </div>
         )}
 
-        {archived && (
+        {shelved && !removed && (
           <div className="flex items-center justify-between gap-3 px-6 py-3 border-b border-white/10 bg-white/[0.03]">
             <span className="text-xs text-neutral-300">
-              Archived {formatLocalTime(task.archived_at ?? '')}. It keeps its comments, time and links.
+              Archived {formatLocalTime(task.shelved_at ?? '')}. Hidden from the lists only: agents still see it and can work on it.
+            </span>
+            {onUnarchive && (
+              <button
+                type="button"
+                onClick={() => onUnarchive(task)}
+                disabled={busy}
+                className="px-3 py-1 rounded-lg text-xs font-semibold text-neutral-200 border border-white/20 hover:bg-white/10 disabled:opacity-50 shrink-0"
+              >
+                Unarchive
+              </button>
+            )}
+          </div>
+        )}
+
+        {hiddenBy && !shelved && !removed && (
+          <div className="flex items-center justify-between gap-3 px-6 py-3 border-b border-white/10 bg-white/[0.03]">
+            <span className="text-xs text-neutral-300">
+              Its {hiddenBy.kind} {hiddenBy.name} is archived, so it is hidden from the lists. Agents still see it.
+            </span>
+            <button
+              type="button"
+              onClick={hiddenBy.onUnarchive}
+              disabled={busy}
+              className="px-3 py-1 rounded-lg text-xs font-semibold text-neutral-200 border border-white/20 hover:bg-white/10 disabled:opacity-50 shrink-0"
+            >
+              Unarchive {hiddenBy.kind}
+            </button>
+          </div>
+        )}
+
+        {removed && (
+          <div className="flex items-center justify-between gap-3 px-6 py-3 border-b border-white/10 bg-white/[0.03]">
+            <span className="text-xs text-neutral-300">
+              Deleted {formatLocalTime(task.archived_at ?? '')}. It keeps its comments, time and links.
             </span>
             {onRestore && (
               <button
@@ -252,7 +312,7 @@ export function TaskDetailDrawer({
             <button
               key={status}
               type="button"
-              disabled={busy || archived || status === task.status}
+              disabled={busy || removed || status === task.status}
               onClick={() => onUpdate(task.id, { status, expected_status: task.status })}
               className={`px-3 py-1.5 rounded-xl text-xs font-semibold transition-all disabled:cursor-default ${
                 status === task.status
