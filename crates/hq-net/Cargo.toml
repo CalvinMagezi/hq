@@ -1,0 +1,39 @@
+[package]
+name = "hq-net"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "hq net: the WireGuard private plane (peer store, renderers) and the strict-grammar root applier"
+
+[lib]
+name = "hq_net"
+path = "src/lib.rs"
+
+# The root applier. Its code is compiled only for Linux (src/applier.rs); on any other target this
+# binary is a stub that refuses to run. Build the one you install as root without the `tools`
+# feature, so it links base64 and libc and nothing else:
+#   cargo build --release -p hq-net --no-default-features --bin hq-net-apply
+[[bin]]
+name = "hq-net-apply"
+path = "src/bin/hq-net-apply.rs"
+
+[features]
+default = ["tools"]
+# Everything `hq net` needs that the applier must never carry: key generation, the peer store,
+# the config and QR renderers.
+tools = ["dep:curve25519-dalek", "dep:qrcodegen", "dep:rand", "dep:serde", "dep:toml"]
+
+[dependencies]
+base64 = { workspace = true }
+curve25519-dalek = { version = "4", optional = true }
+qrcodegen = { version = "1.8", optional = true }
+rand = { workspace = true, optional = true }
+serde = { workspace = true, optional = true }
+toml = { workspace = true, optional = true }
+
+[target.'cfg(unix)'.dependencies]
+libc = "0.2"
+
+[dev-dependencies]
+rand = { workspace = true }
+tempfile = { workspace = true }

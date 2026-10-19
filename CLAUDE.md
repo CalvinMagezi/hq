@@ -117,6 +117,7 @@ placeholders (`example.com`, `hq.example.ts.net`, `<owner>/<repo>`).
 | Agent session | `crates/hq-agent/src/session/mod.rs` |
 | Sub-agent dispatch | `crates/hq-agent/src/agents/service.rs`, `crates/hq-agent/src/agents/tool.rs` |
 | Coding-agent runtime (built-in host) | `crates/hq-host/`, `crates/hq-tools/src/agent_host/`, `crates/hq-tools/src/harness_session/`, `docs/AGENT_HOST.md` |
+| Private network (`hq net`, WireGuard hub and spoke), the root applier and its grammar | `crates/hq-net/` (`grammar.rs` is the only language the applier reads, `applier.rs` the Linux-only opener and `wg` caller, `wgconf.rs`, `store.rs`, `init.rs`, `ops.rs`), `crates/hq-cli/src/commands/net.rs`, `deploy/net/` (systemd units), `docs/PRIVATE_NETWORK.md`, `docs/plans/private-network.md`, `docs/security/NETWORK.md` |
 | Windows users (WSL2), adding a machine | `docs/WINDOWS.md`, `docs/JOIN_A_MACHINE.md` |
 | Task-linked and chat-driven harness sessions | `crates/hq-tools/src/harness_session/mission.rs`, `crates/hq-web/src/session_driver.rs`, `crates/hq-web/src/sessions_api.rs`, "Sessions that work on a task" and "Watching and driving from a web chat" in `docs/AGENT_SESSIONS.md` |
 | Pull-based updates | `crates/hq-update/`, `crates/hq-cli/src/commands/update.rs`, `deploy/install.sh`, `deploy/update/`, `docs/UPDATE_SYSTEM.md` |
@@ -313,6 +314,7 @@ a document.
 | `hq-update` | Signed pull-based updater (library behind `hq update`) |
 | `hq-host` | Built-in coding-agent host: pty panes, emulated screen, control socket, state detection |
 | `hq-gate` | Signed TCP transport for the host gate over a private tunnel (Ed25519 challenge, unix only); used by `hq host serve` and the `tcp` host transport |
+| `hq-net` | `hq net`: the WireGuard private plane (key and subnet setup, peer store, device configs, QR) and `hq-net-apply`, the Linux-only strict-grammar root applier. Root-only code is `cfg(target_os = "linux")`, never `cfg(unix)` |
 | `hq-sandbox` | Process sandbox policy for one coding agent (`sandbox-exec` or `bwrap`) |
 | `hq-cli` | The `hq` binary and its CLI commands |
 
