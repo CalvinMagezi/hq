@@ -71,6 +71,33 @@ impl<'a> Package<'a> {
         })
     }
 
+    /// Refuses a container whose parts claim to unpack past the limits, before another reader
+    /// (one that opens the zip itself) is handed the bytes.
+    pub fn check_sizes(&mut self) -> Result<(), ConvertError> {
+        let mut total: u64 = 0;
+        for i in 0..self.zip.len() {
+            let size = self
+                .zip
+                .by_index_raw(i)
+                .map_err(|e| ConvertError::InboundFailed(format!("unreadable zip entry: {e}")))?
+                .size();
+            if size > self.limits.max_entry_bytes {
+                return Err(ConvertError::TooLarge(format!(
+                    "a part claims {size} bytes (limit {})",
+                    self.limits.max_entry_bytes
+                )));
+            }
+            total = total.saturating_add(size);
+            if total > self.limits.max_total_bytes {
+                return Err(ConvertError::TooLarge(format!(
+                    "the container unpacks to more than {} bytes",
+                    self.limits.max_total_bytes
+                )));
+            }
+        }
+        Ok(())
+    }
+
     pub fn names(&self) -> &[String] {
         &self.names
     }

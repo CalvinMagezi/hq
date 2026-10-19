@@ -10,7 +10,9 @@ mod docx;
 mod html;
 pub mod ir;
 mod legacy;
+mod numfmt;
 mod odf;
+mod ods;
 pub mod package;
 mod pdf;
 mod pdf_layout;
@@ -22,6 +24,7 @@ pub mod sniff;
 #[cfg(test)]
 pub(crate) mod testutil;
 mod text;
+mod xlsx_formats;
 mod xmlconv;
 
 use std::path::Path;
@@ -196,14 +199,30 @@ pub async fn convert_bytes(
             finish(parsed, &mut losses, "native:rtf".into())
         }
         Kind::Xlsx | Kind::Xls | Kind::Ods => {
-            let b = bytes.clone();
-            let rows = opts.max_sheet_rows;
-            let parsed = blocking(move || sheet::read(&b, rows)).await?;
-            finish(
-                parsed,
-                &mut losses,
-                format!("calamine:{}", sniffed.kind.label()),
-            )
+            // An old .xls has no format table to read here, so LibreOffice re-saves it as .xlsx
+            // when it can; without it the numbers are shown as stored, and the report says so.
+            let mut source = (bytes.clone(), sniffed.kind, false);
+            if sniffed.kind == Kind::Xls && opts.external_office && legacy::available() {
+                match legacy::upgrade(&bytes, Kind::Xls).await {
+                    Ok((modern, kind)) => {
+                        losses.note(
+                            LossKind::LegacyConverted,
+                            "old xls format opened through LibreOffice",
+                        );
+                        source = (Arc::new(modern), kind, true);
+                    }
+                    Err(e) => tracing::debug!("LibreOffice could not re-save the .xls: {e}"),
+                }
+            }
+            let (data, kind, via_office) = source;
+            let (rows, limits) = (opts.max_sheet_rows, opts.limits.clone());
+            let parsed = blocking(move || sheet::read(&data, kind, rows, &limits)).await?;
+            let engine = match (via_office, kind) {
+                (true, _) => format!("libreoffice+calamine:{}", kind.label()),
+                (false, Kind::Ods) => "native:ods".to_string(),
+                (false, k) => format!("calamine:{}", k.label()),
+            };
+            finish(parsed, &mut losses, engine)
         }
         Kind::Pdf => {
             let dir = tempfile::tempdir().map_err(ConvertError::Io)?;

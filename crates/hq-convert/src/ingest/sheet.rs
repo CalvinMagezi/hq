@@ -1,21 +1,70 @@
-//! Spreadsheets (`.xlsx`, `.xls`, `.ods`) to Markdown tables, one per visible
-//! sheet, through the `calamine` reader.
+//! Spreadsheets (`.xlsx`, `.xls`, `.ods`) to Markdown tables, one per visible sheet.
 //!
-//! Dates come out as dates, not serial numbers. Values are shown as stored:
-//! number formats such as percentages and currency symbols are not applied,
-//! because the reader does not expose them.
+//! Values come from `calamine` for Excel files and from the shown text for
+//! OpenDocument files. Dates come out as dates, not serial numbers, and number
+//! formats are applied: a stored 0.097 under a `0.0%` format reads "9.7%".
+//! Excel's old binary `.xls` has no readable format table here, so its numbers
+//! are shown as stored unless LibreOffice re-saves the file first.
 
 use std::io::Cursor;
 
 use calamine::{Data, Reader, SheetVisible, open_workbook_auto_from_rs};
+use chrono::Timelike;
 
 use super::ir::{Block, Inline, Parsed, Table};
+use super::numfmt;
+use super::package::{Limits, Package};
 use super::report::{LossKind, Losses};
+use super::sniff::Kind;
+use super::xlsx_formats::{self, CellFormat, CellFormats};
 use crate::types::ConvertError;
 
 const MAX_COLUMNS: usize = 100;
 
-pub fn read(bytes: &[u8], max_rows: usize) -> Result<Parsed, ConvertError> {
+/// One visible sheet as rows of cell text.
+pub struct Sheet {
+    pub name: String,
+    pub rows: Vec<Vec<String>>,
+}
+
+/// A workbook's visible sheets and how many hidden ones were left out.
+#[derive(Default)]
+pub struct Book {
+    pub sheets: Vec<Sheet>,
+    pub hidden: usize,
+}
+
+pub fn read(
+    bytes: &[u8],
+    kind: Kind,
+    max_rows: usize,
+    limits: &Limits,
+) -> Result<Parsed, ConvertError> {
+    let mut losses = Losses::default();
+    let book = match kind {
+        Kind::Ods => {
+            let mut pkg = Package::open(bytes, limits)?;
+            pkg.check_sizes()?;
+            super::ods::read(&mut pkg)?
+        }
+        Kind::Xlsx => {
+            let mut pkg = Package::open(bytes, limits)?;
+            pkg.check_sizes()?;
+            let formats = xlsx_formats::read(&mut pkg);
+            read_calamine(bytes, Some(&formats))?
+        }
+        _ => {
+            losses.note(
+                LossKind::NumberFormatsNotApplied,
+                "old .xls file: percentages, currency and thousands separators show as plain numbers (LibreOffice, when installed, re-saves the file so they are kept)",
+            );
+            read_calamine(bytes, None)?
+        }
+    };
+    assemble(book, max_rows, losses)
+}
+
+fn read_calamine(bytes: &[u8], formats: Option<&CellFormats>) -> Result<Book, ConvertError> {
     let mut wb = open_workbook_auto_from_rs(Cursor::new(bytes.to_vec()))
         .map_err(|e| ConvertError::InboundFailed(format!("cannot open spreadsheet: {e}")))?;
     let sheets: Vec<(String, bool)> = wb
@@ -23,26 +72,51 @@ pub fn read(bytes: &[u8], max_rows: usize) -> Result<Parsed, ConvertError> {
         .iter()
         .map(|s| (s.name.clone(), s.visible == SheetVisible::Visible))
         .collect();
-    let visible = sheets.iter().filter(|(_, v)| *v).count();
-    let mut losses = Losses::default();
-    let mut blocks: Vec<Block> = Vec::new();
+    let mut book = Book::default();
     for (name, is_visible) in &sheets {
         if !is_visible {
-            losses.hit(LossKind::HiddenContentSkipped);
+            book.hidden += 1;
             continue;
         }
         let range = wb
             .worksheet_range(name)
             .map_err(|e| ConvertError::InboundFailed(format!("cannot read sheet {name}: {e}")))?;
-        let mut rows: Vec<Vec<String>> = range
+        // The range starts at its first filled cell; styles are keyed by position on the sheet.
+        let (top, left) = range.start().unwrap_or((0, 0));
+        let rows = range
             .rows()
-            .map(|r| r.iter().map(cell_text).collect())
+            .enumerate()
+            .map(|(i, r)| {
+                r.iter()
+                    .enumerate()
+                    .map(|(j, d)| {
+                        let format =
+                            formats.and_then(|f| f.get(name, top + i as u32, left + j as u32));
+                        cell_text(d, format)
+                    })
+                    .collect()
+            })
             .collect();
+        book.sheets.push(Sheet {
+            name: name.clone(),
+            rows,
+        });
+    }
+    Ok(book)
+}
+
+/// The sheets as Markdown blocks: a heading per sheet when there is more than one,
+/// a lone title cell above a table as bold text, and long sheets cut and counted.
+fn assemble(book: Book, max_rows: usize, mut losses: Losses) -> Result<Parsed, ConvertError> {
+    losses.hit_n(LossKind::HiddenContentSkipped, book.hidden);
+    let visible = book.sheets.len();
+    let mut blocks: Vec<Block> = Vec::new();
+    for Sheet { name, mut rows } in book.sheets {
         trim_empty(&mut rows);
         if rows.is_empty() {
             continue;
         }
-        if visible > 1 || !generic_name(name) {
+        if visible > 1 || !generic_name(&name) {
             blocks.push(Block::Heading(2, vec![Inline::text(name.clone())]));
         }
         // A lone cell above the table is a title, not a header.
@@ -150,12 +224,16 @@ fn text_cell(s: &str) -> Vec<Inline> {
     out
 }
 
-fn cell_text(d: &Data) -> String {
+fn cell_text(d: &Data, format: Option<&CellFormat>) -> String {
+    let formatted = |f: f64| match format {
+        Some(CellFormat::Number(code)) => numfmt::render(code, f),
+        _ => None,
+    };
     match d {
         Data::Empty => String::new(),
         Data::String(s) => s.trim().to_string(),
-        Data::Int(i) => i.to_string(),
-        Data::Float(f) => number(*f),
+        Data::Int(i) => formatted(*i as f64).unwrap_or_else(|| i.to_string()),
+        Data::Float(f) => formatted(*f).unwrap_or_else(|| number(*f)),
         Data::Bool(b) => if *b { "TRUE" } else { "FALSE" }.to_string(),
         Data::DateTime(dt) => {
             if dt.is_duration() {
@@ -168,10 +246,7 @@ fn cell_text(d: &Data) -> String {
                 }
             } else {
                 match dt.as_datetime() {
-                    Some(t) if t.time() == chrono::NaiveTime::MIN => {
-                        t.format("%Y-%m-%d").to_string()
-                    }
-                    Some(t) => t.format("%Y-%m-%d %H:%M").to_string(),
+                    Some(t) => date_text(t, dt.as_f64(), format),
                     None => number(dt.as_f64()),
                 }
             }
@@ -181,8 +256,28 @@ fn cell_text(d: &Data) -> String {
     }
 }
 
+/// A date and time the way the cell's format shows them: only the date, only the time, or both.
+/// Without a format, a value under one day is a time of day, midnight is a plain date.
+fn date_text(t: chrono::NaiveDateTime, serial: f64, format: Option<&CellFormat>) -> String {
+    let (date, time, seconds) = match format {
+        Some(CellFormat::Date(k)) => (k.date, k.time, k.seconds),
+        _ if serial.abs() < 1.0 => (false, true, t.time().second() != 0),
+        _ => (
+            true,
+            t.time() != chrono::NaiveTime::MIN,
+            t.time().second() != 0,
+        ),
+    };
+    let clock = if seconds { "%H:%M:%S" } else { "%H:%M" };
+    match (date, time) {
+        (true, true) => t.format(&format!("%Y-%m-%d {clock}")).to_string(),
+        (false, true) => t.format(clock).to_string(),
+        _ => t.format("%Y-%m-%d").to_string(),
+    }
+}
+
 /// A number without float noise: 0.30000000000000004 prints as 0.3, 42.0 as 42.
-fn number(f: f64) -> String {
+pub(super) fn number(f: f64) -> String {
     if !f.is_finite() {
         return f.to_string();
     }
@@ -234,6 +329,113 @@ mod tests {
 
     #[test]
     fn something_that_is_not_a_workbook_is_an_error() {
-        assert!(read(b"not a spreadsheet", 10).is_err());
+        for kind in [Kind::Xlsx, Kind::Xls, Kind::Ods] {
+            assert!(read(b"not a spreadsheet", kind, 10, &Limits::default()).is_err());
+        }
+    }
+
+    const CT: &str = r#"<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="xml" ContentType="application/xml"/><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/><Override PartName="/xl/worksheets/sheet1.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/><Override PartName="/xl/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.styles+xml"/></Types>"#;
+
+    /// A one-sheet workbook whose data starts at C3, with five number formats.
+    fn workbook() -> Vec<u8> {
+        let main = "http://schemas.openxmlformats.org/spreadsheetml/2006/main";
+        let rel = "http://schemas.openxmlformats.org/officeDocument/2006/relationships";
+        let parts: Vec<(&str, Vec<u8>)> = vec![
+            ("[Content_Types].xml", CT.as_bytes().to_vec()),
+            (
+                "_rels/.rels",
+                format!(r#"<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="{rel}/officeDocument" Target="xl/workbook.xml"/></Relationships>"#).into_bytes(),
+            ),
+            (
+                "xl/workbook.xml",
+                format!(r#"<workbook xmlns="{main}" xmlns:r="{rel}"><sheets><sheet name="Budget" sheetId="1" r:id="rId1"/></sheets></workbook>"#).into_bytes(),
+            ),
+            (
+                "xl/_rels/workbook.xml.rels",
+                format!(r#"<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="{rel}/worksheet" Target="worksheets/sheet1.xml"/></Relationships>"#).into_bytes(),
+            ),
+            (
+                "xl/styles.xml",
+                format!(r##"<styleSheet xmlns="{main}"><numFmts count="2"><numFmt numFmtId="164" formatCode="&quot;UGX&quot; #,##0"/><numFmt numFmtId="165" formatCode="#,##0;(#,##0)"/></numFmts><cellXfs count="5"><xf numFmtId="0"/><xf numFmtId="9"/><xf numFmtId="164"/><xf numFmtId="165"/><xf numFmtId="2"/></cellXfs></styleSheet>"##).into_bytes(),
+            ),
+            (
+                "xl/worksheets/sheet1.xml",
+                format!(
+                    r#"<worksheet xmlns="{main}"><sheetData>
+                    <row r="3"><c r="C3" t="inlineStr"><is><t>Item</t></is></c><c r="D3" t="inlineStr"><is><t>Value</t></is></c></row>
+                    <row r="4"><c r="C4" t="inlineStr"><is><t>Margin</t></is></c><c r="D4" s="1"><v>0.256</v></c></row>
+                    <row r="5"><c r="C5" t="inlineStr"><is><t>Rent</t></is></c><c r="D5" s="2"><v>1500000</v></c></row>
+                    <row r="6"><c r="C6" t="inlineStr"><is><t>Loss</t></is></c><c r="D6" s="3"><v>-2500</v></c></row>
+                    <row r="7"><c r="C7" t="inlineStr"><is><t>Rate</t></is></c><c r="D7" s="4"><v>3.14159</v></c></row>
+                    <row r="8"><c r="C8" t="inlineStr"><is><t>Plain</t></is></c><c r="D8" s="0"><v>12.5</v></c></row>
+                    </sheetData></worksheet>"#
+                )
+                .into_bytes(),
+            ),
+        ];
+        crate::ingest::testutil::zip_of(&parts)
+    }
+
+    #[test]
+    fn formats_are_found_by_position_even_when_the_data_starts_below_and_right_of_a1() {
+        let parsed = read(&workbook(), Kind::Xlsx, 100, &Limits::default()).unwrap();
+        let md = crate::ingest::ir::render(parsed.blocks);
+        for want in [
+            "| Margin | 26% |",
+            "| Rent | UGX 1,500,000 |",
+            "| Loss | (2,500) |",
+            "| Rate | 3.14 |",
+            "| Plain | 12.5 |",
+        ] {
+            assert!(md.contains(want), "{want}:\n{md}");
+        }
+    }
+
+    #[test]
+    fn a_workbook_that_claims_to_unpack_past_the_limit_is_refused_before_calamine_sees_it() {
+        let tiny = Limits {
+            max_total_bytes: 200,
+            ..Limits::default()
+        };
+        let err = read(&workbook(), Kind::Xlsx, 100, &tiny).unwrap_err();
+        assert!(matches!(err, ConvertError::TooLarge(_)), "{err}");
+    }
+
+    #[test]
+    fn a_time_of_day_is_not_shown_as_1899_and_a_format_decides_what_is_shown() {
+        use crate::ingest::numfmt::DateKind;
+        let at = |y, mo, d, h, mi| {
+            chrono::NaiveDate::from_ymd_opt(y, mo, d)
+                .unwrap()
+                .and_hms_opt(h, mi, 0)
+                .unwrap()
+        };
+        // 0.65 of a day, no format: a time, not 1899-12-30 15:36.
+        assert_eq!(date_text(at(1899, 12, 30, 15, 36), 0.65, None), "15:36");
+        // Midnight with no format is a plain date; a clock time on a date shows both.
+        assert_eq!(date_text(at(2026, 7, 1, 0, 0), 46204.0, None), "2026-07-01");
+        assert_eq!(
+            date_text(at(2026, 7, 1, 9, 30), 46204.4, None),
+            "2026-07-01 09:30"
+        );
+        // A date format shows the date even when the stored value has a time.
+        let date_only = CellFormat::Date(DateKind {
+            date: true,
+            time: false,
+            seconds: false,
+        });
+        assert_eq!(
+            date_text(at(2026, 7, 1, 9, 30), 46204.4, Some(&date_only)),
+            "2026-07-01"
+        );
+        let time_only = CellFormat::Date(DateKind {
+            date: false,
+            time: true,
+            seconds: false,
+        });
+        assert_eq!(
+            date_text(at(2026, 7, 1, 9, 30), 46204.4, Some(&time_only)),
+            "09:30"
+        );
     }
 }

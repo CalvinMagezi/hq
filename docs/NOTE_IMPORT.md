@@ -83,7 +83,8 @@ or a layout that could not be kept).
 | RTF | native | text, styles, lists, tables, Unicode |
 | HTML | native | encoding detected (UTF-8, UTF-16, Latin-1 and others), scripts and styles dropped, tables kept |
 | XML | native | records become a table, anything else an outline; XML that is not well formed is kept as a code block |
-| XLSX, XLS, ODS | calamine | one section per sheet, dates read as dates |
+| XLSX, XLS | calamine, with number formats applied | one section per sheet; old XLS through LibreOffice when it is installed |
+| ODS | native, from the text the sheet shows | one section per sheet |
 | CSV, TSV, text | native | delimiter and encoding detected |
 | PDF | poppler `pdftotext -layout` when present, else the text layer | tables rebuilt from column layout, including a table that runs across pages; a PDF with no text is read by OCR |
 | Images | OCR (tesseract on Linux, Vision on macOS) | marked `degraded`: check names and amounts against the original |
@@ -100,8 +101,12 @@ Password-protected files are refused, not guessed at.
 - Files over 64 MiB, archives with more than 20,000 parts or that unpack to more than
   256 MiB, and XML with millions of nodes are refused. Output is cut at 2,000,000
   characters and the cut is reported.
-- Spreadsheet cells are written as stored: a percentage shows as `0.097`, not `9.7%`.
-  Formulas show their last computed value.
+- Spreadsheet cells are shown the way the sheet shows them: `9.7%`, `UGX 2,700,000`,
+  `(2,500)`, dates as `2026-07-01`, times as `15:36`. Formulas show their last computed
+  value, and a file saved without computing them (some generated ones) has none.
+  Fractions (`# ?/?`), conditional formats and engineering notation fall back to the
+  plain number. An old `.xls` keeps its formats only when LibreOffice can re-save it first;
+  otherwise its numbers show as stored, and the report says so.
 - Pictures, charts and embedded objects are not carried into the note. The report
   counts them.
 - RTF tables written by LibreOffice can run together when two follow each other with no text between.

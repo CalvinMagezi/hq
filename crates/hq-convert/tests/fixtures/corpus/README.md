@@ -9,7 +9,7 @@ here comes from a real vault, client or bank.
 | `invoice.docx` `.odt` `.rtf` `.doc` | one invoice in four formats: title, bold, a link, two tables, bullets |
 | `invoice.pdf` | a PDF invoice: tables rebuilt from the page layout |
 | `proposal.docx` `.odt` | headings, nested and numbered lists, a quote, a code block, a merged table cell |
-| `tracker.xlsx` `.xls` `.ods` | dates that must not become serial numbers, a title row, two sheets |
+| `tracker.xlsx` `.xls` `.ods` | dates that must not become serial numbers, percentages and thousands separators, a title row, two sheets |
 | `training.pptx` `.odp` | slides, bullets with levels, speaker notes, a table, a picture |
 | `statement.pdf` | a two-page mobile-money-style statement: one table across pages |
 | `receipt.jpg` | a photographed receipt, for OCR |

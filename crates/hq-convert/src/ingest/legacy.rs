@@ -1,4 +1,4 @@
-//! Old binary Word and PowerPoint files (`.doc`, `.ppt`).
+//! Old binary Word, PowerPoint and Excel files (`.doc`, `.ppt`, `.xls`).
 //!
 //! No Rust reader exists for these layouts, so an installed LibreOffice is
 //! asked to save a modern copy, which the native reader then converts. The
@@ -34,6 +34,7 @@ fn target(kind: Kind) -> Option<(&'static str, Kind)> {
     match kind {
         Kind::Doc => Some(("docx", Kind::Docx)),
         Kind::Ppt => Some(("pptx", Kind::Pptx)),
+        Kind::Xls => Some(("xlsx", Kind::Xlsx)),
         _ => None,
     }
 }
@@ -119,8 +120,9 @@ mod tests {
     }
 
     #[test]
-    fn only_word_and_powerpoint_are_upgraded() {
+    fn word_powerpoint_and_excel_are_upgraded() {
         assert!(target(Kind::Doc).is_some() && target(Kind::Ppt).is_some());
-        assert!(target(Kind::Xls).is_none());
+        assert_eq!(target(Kind::Xls), Some(("xlsx", Kind::Xlsx)));
+        assert!(target(Kind::Pdf).is_none());
     }
 }

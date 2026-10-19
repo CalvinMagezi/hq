@@ -101,11 +101,27 @@ async fn the_proposal_keeps_its_structure_in_docx_and_odt() {
     }
 }
 
+/// Without LibreOffice in the way, so the result does not depend on the machine.
+async fn convert_without_office(name: &str) -> (String, ConversionReport) {
+    let opts = ConvertOptions {
+        external_office: false,
+        ..ConvertOptions::default()
+    };
+    let c = convert_file(&fixture(name), &opts)
+        .await
+        .unwrap_or_else(|e| panic!("{name}: {e}"));
+    (c.markdown, c.report)
+}
+
 #[tokio::test]
 async fn spreadsheets_show_dates_as_dates_in_all_three_formats() {
     for name in ["tracker.xlsx", "tracker.xls", "tracker.ods"] {
-        let (md, r) = convert(name).await;
-        assert!(r.engine.starts_with("calamine:"), "{name}: {}", r.engine);
+        let (md, r) = convert_without_office(name).await;
+        assert!(
+            r.engine.starts_with("calamine:") || r.engine == "native:ods",
+            "{name}: {}",
+            r.engine
+        );
         assert_has(
             &md,
             name,
@@ -120,6 +136,50 @@ async fn spreadsheets_show_dates_as_dates_in_all_three_formats() {
         );
         assert!(!md.contains("46"), "{name} shows a serial number:\n{md}");
     }
+}
+
+#[tokio::test]
+async fn number_formats_are_applied_in_xlsx_and_ods() {
+    for name in ["tracker.xlsx", "tracker.ods"] {
+        let (md, r) = convert_without_office(name).await;
+        // 2700000 under `#,##0` and 0.097 under `0.0%`.
+        assert_has(&md, name, &["| 2,700,000 |", "| 9.7% |", "| -8.1% |"]);
+        assert!(!md.contains("0.097"), "{name}:\n{md}");
+        assert!(
+            r.warnings
+                .iter()
+                .all(|w| w.kind != LossKind::NumberFormatsNotApplied),
+            "{name}"
+        );
+        assert_eq!(r.outcome, Outcome::Ok, "{name}");
+    }
+}
+
+#[tokio::test]
+async fn an_old_xls_without_libreoffice_keeps_plain_numbers_and_says_so() {
+    let (md, r) = convert_without_office("tracker.xls").await;
+    assert_eq!(r.engine, "calamine:xls");
+    assert_has(&md, "tracker.xls", &["| 0.097 |"]);
+    assert!(
+        r.warnings
+            .iter()
+            .any(|w| w.kind == LossKind::NumberFormatsNotApplied),
+        "{:?}",
+        r.warnings
+    );
+}
+
+#[tokio::test]
+#[ignore = "needs LibreOffice (soffice)"]
+async fn an_old_xls_is_re_saved_by_libreoffice_so_its_formats_survive() {
+    let (md, r) = convert("tracker.xls").await;
+    assert_eq!(r.engine, "libreoffice+calamine:xlsx");
+    assert_has(&md, "tracker.xls", &["| 2,700,000 |", "| 9.7% |"]);
+    assert!(
+        r.warnings
+            .iter()
+            .all(|w| w.kind != LossKind::NumberFormatsNotApplied)
+    );
 }
 
 #[tokio::test]

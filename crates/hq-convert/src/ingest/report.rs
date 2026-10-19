@@ -27,6 +27,7 @@ pub enum LossKind {
     LegacyConverted,
     ExtensionMismatch,
     FormulasShownAsValues,
+    NumberFormatsNotApplied,
     Other,
 }
 
@@ -44,6 +45,7 @@ impl LossKind {
                 | LossKind::LegacyConverted
                 | LossKind::ExtensionMismatch
                 | LossKind::FormulasShownAsValues
+                | LossKind::NumberFormatsNotApplied
         )
     }
 
