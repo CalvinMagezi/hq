@@ -26,6 +26,9 @@ const SVG: &str = "urn:oasis:names:tc:opendocument:xmlns:svg-compatible:1.0";
 const PRES: &str = "urn:oasis:names:tc:opendocument:xmlns:presentation:1.0";
 const DC: &str = "http://purl.org/dc/elements/1.1/";
 
+/// How much further in (points) one list must sit than the one before to count as a deeper level.
+const INDENT_STEP: f32 = 4.0;
+
 pub fn read_text(pkg: &mut Package<'_>) -> Result<Parsed, ConvertError> {
     read(pkg, false)
 }
@@ -204,9 +207,32 @@ impl Styles {
     }
 }
 
-/// `text:list-style` definitions: which levels are numbered.
+/// `text:list-style` definitions: which levels are numbered, and how far in the first level sits.
 #[derive(Default)]
-struct ListStyles(HashMap<String, Vec<bool>>);
+struct ListStyles {
+    ordered: HashMap<String, Vec<bool>>,
+    /// Left margin of level 1, in points. It tells a list that is really a deeper level of the
+    /// one above it (LibreOffice writes a Word multi-level list as separate lists, one per level).
+    margin: HashMap<String, f32>,
+}
+
+/// A length such as `0.5in`, `1.27cm` or `12pt`, in points.
+fn points(len: &str) -> Option<f32> {
+    let len = len.trim();
+    let split = len.find(|c: char| c.is_ascii_alphabetic())?;
+    let (num, unit) = len.split_at(split);
+    let n: f32 = num.parse().ok()?;
+    let per = match unit {
+        "in" => 72.0,
+        "cm" => 28.3465,
+        "mm" => 2.83465,
+        "pt" => 1.0,
+        "pc" => 12.0,
+        "px" => 0.75,
+        _ => return None,
+    };
+    Some(n * per)
+}
 
 impl ListStyles {
     fn load(&mut self, doc: &Document<'_>) {
@@ -224,17 +250,32 @@ impl ListStyles {
                     levels.resize(level, false);
                 }
                 levels[level - 1] = ordered;
+                if level == 1
+                    && let Some(props) = child(l, STYLE, "list-level-properties")
+                {
+                    let margin = child(props, STYLE, "list-level-label-alignment")
+                        .and_then(|a| attr(a, FO, "margin-left"))
+                        .or_else(|| attr(props, TEXT, "space-before"))
+                        .and_then(points);
+                    if let Some(m) = margin {
+                        self.margin.insert(name.to_string(), m);
+                    }
+                }
             }
-            self.0.insert(name.to_string(), levels);
+            self.ordered.insert(name.to_string(), levels);
         }
     }
 
     fn ordered(&self, style: Option<&str>, level: usize) -> bool {
         style
-            .and_then(|s| self.0.get(s))
+            .and_then(|s| self.ordered.get(s))
             .and_then(|l| l.get(level))
             .copied()
             .unwrap_or(false)
+    }
+
+    fn margin(&self, style: Option<&str>) -> Option<f32> {
+        style.and_then(|s| self.margin.get(s)).copied()
     }
 }
 
@@ -259,8 +300,13 @@ struct Ctx {
 
 impl Ctx {
     fn blocks_into(&mut self, parent: Node<'_, '_>, out: &mut Vec<Block>) {
+        // Left margin and depth of the lists that follow one another here; anything else ends the run.
+        let mut run: Vec<(f32, usize)> = Vec::new();
         for n in parent.children().filter(|n| n.is_element()) {
             let ns = n.tag_name().namespace();
+            if !(ns == Some(TEXT) && n.tag_name().name() == "list") {
+                run.clear();
+            }
             match (ns, n.tag_name().name()) {
                 (Some(TEXT), "h") => {
                     let level = attr(n, TEXT, "outline-level")
@@ -273,14 +319,45 @@ impl Ctx {
                 }
                 (Some(TEXT), "p") => self.paragraph(n, out),
                 (Some(TEXT), "list") => {
+                    let style = attr(n, TEXT, "style-name").map(str::to_string);
+                    let margin = self.lists.margin(style.as_deref());
+                    let adjacent = matches!(out.last(), Some(Block::List(_))) && !run.is_empty();
+                    // Where this list sits relative to the lists just before it, by indent.
+                    let mut base = 0;
+                    let mut merge = false;
+                    if let (true, Some(m)) = (adjacent, margin) {
+                        while run.len() > 1
+                            && run.last().is_some_and(|(pm, _)| *pm > m + INDENT_STEP)
+                        {
+                            run.pop();
+                        }
+                        if let Some(&(pm, plevel)) = run.last() {
+                            if pm + INDENT_STEP < m {
+                                (base, merge) = (plevel + 1, true);
+                                run.push((m, base));
+                            } else if (pm - m).abs() <= INDENT_STEP && run.len() > 1 {
+                                (base, merge) = (plevel, true);
+                            } else {
+                                run.clear();
+                                run.push((m, 0));
+                            }
+                        }
+                    } else {
+                        run.clear();
+                        if let Some(m) = margin {
+                            run.push((m, 0));
+                        }
+                    }
                     let mut items = Vec::new();
                     let mut after = Vec::new();
-                    let style = attr(n, TEXT, "style-name").map(str::to_string);
-                    self.list(n, style.as_deref(), 0, &mut items, &mut after);
-                    if !items.is_empty() {
-                        out.push(Block::List(items));
+                    self.list(n, style.as_deref(), base, base, &mut items, &mut after);
+                    match out.last_mut() {
+                        Some(Block::List(prev)) if merge => prev.extend(items),
+                        _ if items.is_empty() => {}
+                        _ => out.push(Block::List(items)),
                     }
                     out.extend(after);
+                    continue;
                 }
                 (Some(TABLE), "table") => {
                     if let Some(t) = self.table(n) {
@@ -355,6 +432,7 @@ impl Ctx {
         list: Node<'_, '_>,
         style: Option<&str>,
         level: usize,
+        start: usize,
         items: &mut Vec<ListItem>,
         after: &mut Vec<Block>,
     ) {
@@ -389,14 +467,15 @@ impl Ctx {
             if content.iter().any(|i| !matches!(i, Inline::Break)) {
                 items.push(ListItem {
                     level,
-                    ordered: self.lists.ordered(style, level),
+                    // `start` is the depth this list began at; its own style counts from there.
+                    ordered: self.lists.ordered(style, level - start),
                     content,
                 });
             }
             for (n, own) in nested {
                 // A nested list without a style of its own continues its parent's.
                 let s = own.as_deref().or(style);
-                self.list(n, s, level + 1, items, after);
+                self.list(n, s, level + 1, start, items, after);
             }
         }
     }
@@ -723,6 +802,51 @@ mod tests {
             <text:list-item><text:p>first</text:p><text:list><text:list-item><text:p>inner</text:p></text:list-item></text:list></text:list-item>
             <text:list-item><text:p>second</text:p></text:list-item></text:list>"#;
         assert_eq!(odt(auto, body), "1. first\n    - inner\n2. second\n");
+    }
+
+    /// LibreOffice writes a Word multi-level list as one list per level, each with its own style
+    /// and a deeper left margin, one after the other.
+    #[test]
+    fn lists_that_follow_each_other_with_a_deeper_indent_are_a_deeper_level() {
+        let level1 = |name: &str, margin: &str| {
+            format!(
+                r#"<text:list-style style:name="{name}"><text:list-level-style-bullet text:level="1"><style:list-level-properties text:list-level-position-and-space-mode="label-alignment"><style:list-level-label-alignment fo:margin-left="{margin}"/></style:list-level-properties></text:list-level-style-bullet></text:list-style>"#
+            )
+        };
+        let auto = format!(
+            "{}{}{}",
+            level1("A", "0.25in"),
+            level1("B", "0.5in"),
+            level1("C", "0.75in")
+        );
+        let item = |t: &str| format!("<text:list-item><text:p>{t}</text:p></text:list-item>");
+        let body = format!(
+            r#"<text:list text:style-name="A">{}{}</text:list>
+               <text:list text:style-name="B">{}{}</text:list>
+               <text:list text:style-name="C">{}</text:list>
+               <text:list text:style-name="A">{}</text:list>
+               <text:p>After</text:p>
+               <text:list text:style-name="B">{}</text:list>"#,
+            item("one"),
+            item("two"),
+            item("two-a"),
+            item("two-b"),
+            item("two-b-i"),
+            item("three"),
+            item("alone")
+        );
+        assert_eq!(
+            odt(&auto, &body),
+            "- one\n- two\n    - two-a\n    - two-b\n        - two-b-i\n- three\n\nAfter\n\n- alone\n"
+        );
+    }
+
+    #[test]
+    fn two_lists_at_the_same_indent_are_not_nested_and_a_list_with_no_indent_known_is_left_alone() {
+        let auto = r#"<text:list-style style:name="N"><text:list-level-style-number text:level="1"/></text:list-style>"#;
+        let body = r#"<text:list text:style-name="N"><text:list-item><text:p>a</text:p></text:list-item></text:list>
+                      <text:list text:style-name="N"><text:list-item><text:p>b</text:p></text:list-item></text:list>"#;
+        assert_eq!(odt(auto, body), "1. a\n\n1. b\n");
     }
 
     #[test]

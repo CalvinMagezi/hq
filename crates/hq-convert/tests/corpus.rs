@@ -59,6 +59,10 @@ async fn the_same_invoice_reads_the_same_from_docx_and_odt() {
 async fn the_invoice_survives_rtf_too() {
     let (md, r) = convert("invoice.rtf").await;
     assert_eq!(r.engine, "native:rtf");
+    // The two tables sit side by side in the file with nothing between them; they stay two.
+    assert_eq!(r.stats.tables, 2, "{md}");
+    let (docx, _) = convert("invoice.docx").await;
+    assert_eq!(md, docx, "the same invoice in RTF and DOCX reads the same");
     assert_has(
         &md,
         "invoice.rtf",
@@ -71,6 +75,17 @@ async fn the_invoice_survives_rtf_too() {
             "[example.com/pay](https://example.com/pay/INV-0042)",
         ],
     );
+}
+
+#[tokio::test]
+async fn a_word_multi_level_list_saved_as_odt_keeps_its_levels() {
+    // LibreOffice writes each level of the list as its own list; the indent says how deep each is.
+    let (docx, _) = convert("proposal.docx").await;
+    let (odt, _) = convert("proposal.odt").await;
+    let nested = "- Publish open results\n    - Storage units\n    - Hermetic bags";
+    assert!(docx.contains(nested), "{docx}");
+    assert!(odt.contains(nested), "{odt}");
+    assert_eq!(docx, odt);
 }
 
 #[tokio::test]

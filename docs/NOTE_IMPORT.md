@@ -109,7 +109,9 @@ Password-protected files are refused, not guessed at.
   otherwise its numbers show as stored, and the report says so.
 - Pictures, charts and embedded objects are not carried into the note. The report
   counts them.
-- RTF tables written by LibreOffice can run together when two follow each other with no text between.
+- In RTF, two tables with nothing between them are told apart only by a change in the
+  number of cells per row (Word marks merged cells, so those stay in their table). Two
+  adjacent tables with the same number of columns read as one.
 - A scan is only as good as OCR. Check numbers.
 
 ## For agents

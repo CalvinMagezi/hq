@@ -91,6 +91,11 @@ struct Parser<'a> {
     list_items: Vec<ListItem>,
     row: Vec<Vec<Inline>>,
     rows: Vec<Vec<Vec<Inline>>>,
+    /// The row being defined: how many `\cellx` it has and whether any cell is marked merged.
+    def_cells: usize,
+    def_merged: bool,
+    /// The same for the rows collected so far.
+    table_cells: usize,
     losses: Losses,
 }
 
@@ -124,6 +129,9 @@ impl<'a> Parser<'a> {
             list_items: Vec::new(),
             row: Vec::new(),
             rows: Vec::new(),
+            def_cells: 0,
+            def_merged: false,
+            table_cells: 0,
             losses: Losses::default(),
         }
     }
@@ -384,7 +392,12 @@ impl<'a> Parser<'a> {
             "trowd" => {
                 self.flush_paragraph_for_table();
                 self.row.clear();
+                self.def_cells = 0;
+                self.def_merged = false;
             }
+            "cellx" => self.def_cells += 1,
+            // A cell marked as merged: the row has fewer cells on purpose.
+            "clmgf" | "clmrg" | "clvmgf" | "clvmrg" => self.def_merged = true,
             "cell" | "nestcell" => self.end_cell(),
             "row" | "nestrow" => self.end_row(),
             "emdash" => self.emit("\u{2014}"),
@@ -629,6 +642,20 @@ impl<'a> Parser<'a> {
             self.end_cell();
         }
         if !self.row.is_empty() {
+            // Two tables with nothing between them arrive as consecutive rows. A row defined with
+            // a different number of cells, and no merge marks to explain it, starts a new table
+            // instead of being padded into the one before.
+            let starts_new = !self.rows.is_empty()
+                && self.def_cells > 0
+                && self.table_cells > 0
+                && self.def_cells != self.table_cells
+                && !self.def_merged;
+            if starts_new {
+                self.flush_table();
+            }
+            if self.rows.is_empty() {
+                self.table_cells = self.def_cells;
+            }
             self.rows.push(std::mem::take(&mut self.row));
         }
     }
@@ -783,6 +810,27 @@ mod tests {
         assert_eq!(
             md(rtf),
             "| Site | Farmers |\n| --- | --- |\n| Mukono | 42 |\n\nAfter\n"
+        );
+    }
+
+    #[test]
+    fn two_tables_with_nothing_between_stay_two_tables() {
+        let rtf = r"{\rtf1\ansi\trowd\cellx2000\cellx4000\intbl Bill to\cell Details\cell\row\trowd\cellx2000\cellx4000\intbl Farmers\cell INV-1\cell\row\trowd\cellx1000\cellx2000\cellx3000\cellx4000\intbl Item\cell Qty\cell Price\cell Amount\cell\row\trowd\cellx1000\cellx2000\cellx3000\cellx4000\intbl Seed\cell 2\cell 5\cell 10\cell\row\pard After\par}";
+        assert_eq!(
+            md(rtf),
+            "| Bill to | Details |\n| --- | --- |\n| Farmers | INV-1 |\n\n| Item | Qty | Price | Amount |\n| --- | --- | --- | --- |\n| Seed | 2 | 5 | 10 |\n\nAfter\n"
+        );
+    }
+
+    #[test]
+    fn a_row_with_merged_cells_stays_in_its_table() {
+        // Word marks merged cells; the row keeps its place and is padded as before.
+        let rtf = r"{\rtf1\ansi\trowd\cellx1000\cellx2000\cellx3000\intbl A\cell B\cell C\cell\row\trowd\clmgf\cellx1000\clmrg\cellx2000\cellx3000\intbl Wide\cell\cell D\cell\row\pard\par}";
+        let out = md(rtf);
+        assert_eq!(
+            out.lines().filter(|l| l.contains("---")).count(),
+            1,
+            "{out}"
         );
     }
 
