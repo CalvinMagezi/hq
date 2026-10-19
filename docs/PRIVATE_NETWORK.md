@@ -185,11 +185,24 @@ key and are never used for this.
 A revoke is never held up by the check above. If the hub has an entry that no device in
 `peers.toml` owns (one a writer put straight into the applier's input, or a device lost when
 `peers.toml` was restored from an older copy), the revoke goes through, drops that entry too, and
-prints a warning that names its address. `hq net apply` and `peer add` stop instead and name the
-way out: `hq net peer forget <address>` retires the address and removes whatever the hub has on it
-(it is refused for an address a device in `peers.toml` owns; use `revoke` for that). A damaged
-`retired` file does not stop a revoke or a forget either: it is rebuilt from the lines that can be
-read, with a warning.
+prints a warning that names its address. That also means a legitimate device whose record was lost
+can be removed by a revoke of another device: it is always warned about, and entries are matched by
+public key, so look at the warning. One more thing to know about the check: it excuses an address
+that is in `retired`, by address and not by key, so a hub entry sitting on a retired address is
+dropped without a warning.
+
+`hq net apply` and `peer add` stop instead and name the way out for each address.
+`hq net peer forget <address>` retires an address no device owns and removes whatever the hub has
+on it; with several unnamed entries it needs one `forget` each, and it also refuses to go on while
+another unnamed entry is there. It is refused for an address a device in `peers.toml` owns, even if
+the hub has a different key at that address (a restored `peers.toml` with an old key): there the
+way out is to correct `peers.toml`, or `hq net peer revoke <label>` for the owning device, which
+retires the address and removes the entry. The refusal message says which of the two applies.
+
+A damaged `retired` file does not stop a revoke or a forget either. It is moved aside untouched as
+`~/.hq/net/retired.damaged` (never over an earlier copy), the lines that can be read are kept (a
+file other users can read, one byte that is not UTF-8, or one junk line does not lose the rest),
+and the owner is warned. `peer add` and `apply` still refuse to run on a damaged file.
 
 If the hub's key might have leaked, make a new plane: remove `~/.hq/net`, stop and delete the
 interface, run `hq net init` again and re-enrol every device. Remove the old server key from every

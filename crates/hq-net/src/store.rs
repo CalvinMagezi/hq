@@ -152,6 +152,43 @@ pub struct PeersFile {
     /// are read once, moved into `retired`, and never written back.
     #[serde(default, rename = "retired", skip_serializing)]
     legacy_retired: Vec<String>,
+    /// Things `load_peers` did that the owner should be told about (a damaged `retired` file met
+    /// during the migration). The caller prints them; they are never written.
+    #[serde(skip)]
+    pub notices: Vec<String>,
+}
+
+/// The retired addresses that could be read, and whether anything about the file was wrong.
+pub struct RetiredRead {
+    pub addresses: Vec<String>,
+    pub damaged: bool,
+}
+
+/// What rebuilding the retired file did.
+pub struct RetireOutcome {
+    pub damaged: bool,
+    /// Where the damaged original went, if there was one and it could be moved.
+    pub kept_as: Option<PathBuf>,
+}
+
+/// A retired file larger than this is read only as far as this; the rest stays in the copy that is
+/// set aside.
+const MAX_SALVAGE_BYTES: u64 = 8 * 1024 * 1024;
+const MAX_ASIDE_COPIES: usize = 100;
+
+fn classify_retired(text: &str, already_damaged: bool) -> RetiredRead {
+    let mut damaged = already_damaged;
+    let mut addresses: Vec<String> = Vec::new();
+    for line in text.lines().map(str::trim).filter(|l| !l.is_empty()) {
+        if crate::subnet::parse_canonical_ipv4(line).is_some() {
+            if !addresses.iter().any(|a| a == line) {
+                addresses.push(line.to_string());
+            }
+        } else {
+            damaged = true;
+        }
+    }
+    RetiredRead { addresses, damaged }
 }
 
 impl PeersFile {
@@ -244,13 +281,19 @@ impl Store {
             toml::from_str(&text).map_err(|e| toml_error(PEERS_FILE, &text, &e))?;
         file.validate()?;
         if !file.legacy_retired.is_empty() {
-            for address in std::mem::take(&mut file.legacy_retired) {
-                if crate::subnet::parse_canonical_ipv4(&address).is_none() {
-                    return fail(format!(
-                        "{PEERS_FILE}: retired holds a value that is not an address"
-                    ));
-                }
-                self.retire_lenient(&address)?;
+            let legacy = std::mem::take(&mut file.legacy_retired);
+            if legacy
+                .iter()
+                .any(|a| crate::subnet::parse_canonical_ipv4(a).is_none())
+            {
+                return fail(format!(
+                    "{PEERS_FILE}: retired holds a value that is not an address"
+                ));
+            }
+            // One write for the whole list, however long it is.
+            let outcome = self.retire_all_lenient(&legacy)?;
+            if outcome.damaged {
+                file.notices.push(self.damaged_notice(&outcome));
             }
             self.save_peers(&file)?;
         }
@@ -283,45 +326,110 @@ impl Store {
             .collect()
     }
 
-    /// The retired addresses that can be read, and whether the file was damaged (unreadable, or
-    /// holding a line that is not an address). Used where the job must go on regardless: cutting
-    /// a device off.
-    pub fn load_retired_lenient(&self) -> (Vec<String>, bool) {
-        let text = match files::read_private(&self.dir.join(RETIRED_FILE)) {
-            Ok(Some(text)) => text,
-            Ok(None) => return (Vec::new(), false),
-            Err(_) => return (Vec::new(), true),
-        };
-        let mut damaged = false;
-        let mut kept = Vec::new();
-        for line in text.lines().map(str::trim).filter(|l| !l.is_empty()) {
-            if crate::subnet::parse_canonical_ipv4(line).is_some() {
-                kept.push(line.to_string());
-            } else {
-                damaged = true;
+    /// What can be read of the retired file, without changing anything. A file the strict reader
+    /// refuses (other users can read it, a byte that is not UTF-8, too large) is still read as far
+    /// as it goes, line by line, so one bad byte costs one line and not the whole record.
+    pub fn read_retired_salvage(&self) -> RetiredRead {
+        let path = self.dir.join(RETIRED_FILE);
+        let meta = match std::fs::symlink_metadata(&path) {
+            Ok(meta) => meta,
+            Err(e) => {
+                return RetiredRead {
+                    addresses: Vec::new(),
+                    damaged: e.kind() != std::io::ErrorKind::NotFound,
+                };
             }
+        };
+        if let Ok(Some(text)) = files::read_private(&path) {
+            return classify_retired(&text, false);
         }
-        (kept, damaged)
+        if !meta.file_type().is_file() {
+            return RetiredRead {
+                addresses: Vec::new(),
+                damaged: true,
+            };
+        }
+        let mut raw = Vec::new();
+        let read = std::fs::File::open(&path).and_then(|f| {
+            std::io::Read::read_to_end(&mut std::io::Read::take(f, MAX_SALVAGE_BYTES), &mut raw)
+        });
+        if read.is_err() && raw.is_empty() {
+            return RetiredRead {
+                addresses: Vec::new(),
+                damaged: true,
+            };
+        }
+        classify_retired(&String::from_utf8_lossy(&raw), true)
     }
 
     /// Adds an address to the retired list (once). A damaged list is an error.
     pub fn retire(&self, address: &str) -> Result<()> {
-        let retired = self.load_retired()?;
-        self.write_retired(retired, address)
-    }
-
-    /// Adds an address to the retired list, rebuilding the list from the lines that can be read if
-    /// the file is damaged. Returns whether it was damaged, so the caller can say so.
-    pub fn retire_lenient(&self, address: &str) -> Result<bool> {
-        let (retired, damaged) = self.load_retired_lenient();
-        self.write_retired(retired, address)?;
-        Ok(damaged)
-    }
-
-    fn write_retired(&self, mut retired: Vec<String>, address: &str) -> Result<()> {
+        let mut retired = self.load_retired()?;
         if !retired.iter().any(|a| a == address) {
             retired.push(address.to_string());
         }
+        self.write_retired(&retired)
+    }
+
+    /// Adds an address to the retired list even if the file is damaged. See `retire_all_lenient`.
+    pub fn retire_lenient(&self, address: &str) -> Result<RetireOutcome> {
+        self.retire_all_lenient(&[address.to_string()])
+    }
+
+    /// Adds addresses to the retired list in one write. If the file is damaged, the original is
+    /// first set aside untouched (never over an earlier copy), the lines that can be read are
+    /// kept, and the outcome says so. Nothing already recorded is lost unless it cannot be read at
+    /// all, and then the set-aside copy still holds it.
+    pub fn retire_all_lenient(&self, addresses: &[String]) -> Result<RetireOutcome> {
+        let read = self.read_retired_salvage();
+        let kept_as = if read.damaged {
+            self.set_retired_aside()
+        } else {
+            None
+        };
+        let mut list = read.addresses;
+        for address in addresses {
+            if !list.contains(address) {
+                list.push(address.clone());
+            }
+        }
+        self.write_retired(&list)?;
+        Ok(RetireOutcome {
+            damaged: read.damaged,
+            kept_as,
+        })
+    }
+
+    fn set_retired_aside(&self) -> Option<PathBuf> {
+        let path = self.dir.join(RETIRED_FILE);
+        for n in 0..MAX_ASIDE_COPIES {
+            let name = if n == 0 {
+                format!("{RETIRED_FILE}.damaged")
+            } else {
+                format!("{RETIRED_FILE}.damaged.{n}")
+            };
+            let target = self.dir.join(name);
+            if std::fs::symlink_metadata(&target).is_ok() {
+                continue;
+            }
+            return std::fs::rename(&path, &target).ok().map(|()| target);
+        }
+        None
+    }
+
+    /// The warning for a retired file that had to be rebuilt.
+    pub fn damaged_notice(&self, outcome: &RetireOutcome) -> String {
+        let copy = match &outcome.kept_as {
+            Some(path) => format!("The damaged file was kept as {}.", path.display()),
+            None => "A copy of the damaged file could not be kept.".to_string(),
+        };
+        format!(
+            "{}/{RETIRED_FILE} was damaged; it was rebuilt from the lines that could be read. {copy} Addresses whose lines could not be read can be handed out again by `hq net peer add`: compare with that copy before adding",
+            self.dir.display()
+        )
+    }
+
+    fn write_retired(&self, retired: &[String]) -> Result<()> {
         let text = retired.join("\n") + "\n";
         files::write_private_atomic(&self.dir.join(RETIRED_FILE), &text).map_err(NetError::from)
     }
@@ -361,7 +469,14 @@ fn toml_error(file: &str, text: &str, error: &toml::de::Error) -> NetError {
             }
         })
         .collect();
-    let reason: String = words.join(" ").chars().take(MAX_ERROR_CHARS).collect();
+    // A key name or a value in the message comes from the file; a control character in it would
+    // reach the terminal.
+    let reason: String = words
+        .join(" ")
+        .chars()
+        .take(MAX_ERROR_CHARS)
+        .map(|c| if c.is_control() { '?' } else { c })
+        .collect();
     match line {
         Some(line) => NetError(format!("{file}: line {line}: {reason}")),
         None => NetError(format!("{file}: {reason}")),
@@ -880,8 +995,12 @@ pub(crate) mod tests {
         assert!(store.load_peers().is_ok());
     }
 
+    fn retired_path(store: &Store) -> std::path::PathBuf {
+        store.dir().join(RETIRED_FILE)
+    }
+
     #[test]
-    fn a_damaged_retired_file_is_rebuilt_from_its_readable_lines_when_retiring_leniently() {
+    fn a_retired_file_with_a_junk_line_keeps_its_good_lines_and_the_original_is_set_aside() {
         let dir = tempfile::tempdir().unwrap();
         let store = Store::new(dir.path());
         write_private(
@@ -890,20 +1009,177 @@ pub(crate) mod tests {
             "10.77.0.2\n\u{1b}[31m junk\n10.77.0.5\n",
         );
         assert!(store.load_retired().is_err());
-        let (kept, damaged) = store.load_retired_lenient();
-        assert_eq!((kept.len(), damaged), (2, true));
+        let read = store.read_retired_salvage();
+        assert_eq!((read.addresses.len(), read.damaged), (2, true));
         assert!(
             store.retire("10.77.0.7").is_err(),
             "the strict path still refuses"
         );
-        assert!(store.retire_lenient("10.77.0.7").unwrap());
+        let outcome = store.retire_lenient("10.77.0.7").unwrap();
+        assert!(outcome.damaged);
+        let kept = outcome
+            .kept_as
+            .clone()
+            .expect("the damaged original is kept");
+        assert!(
+            std::fs::read_to_string(&kept).unwrap().contains("junk"),
+            "set aside untouched"
+        );
         assert_eq!(
             store.load_retired().unwrap(),
             vec!["10.77.0.2", "10.77.0.5", "10.77.0.7"]
         );
         assert!(
-            !store.retire_lenient("10.77.0.7").unwrap(),
+            !store.retire_lenient("10.77.0.7").unwrap().damaged,
             "a clean file is not reported as damaged"
         );
+        assert!(store.damaged_notice(&outcome).contains(".damaged"));
+    }
+
+    #[test]
+    fn a_retired_file_that_is_merely_unreadable_loses_no_earlier_address() {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = tempfile::tempdir().unwrap();
+        let store = Store::new(dir.path());
+        write_private(&store, RETIRED_FILE, "10.77.0.2\n10.77.0.3\n10.77.0.4\n");
+        // Other users can read it, so the strict reader refuses it.
+        std::fs::set_permissions(retired_path(&store), std::fs::Permissions::from_mode(0o644))
+            .unwrap();
+        assert!(store.load_retired().is_err());
+        let outcome = store.retire_lenient("10.77.0.9").unwrap();
+        assert!(outcome.damaged && outcome.kept_as.is_some());
+        assert_eq!(
+            store.load_retired().unwrap(),
+            vec!["10.77.0.2", "10.77.0.3", "10.77.0.4", "10.77.0.9"],
+            "every earlier address survives"
+        );
+        let mode = std::fs::metadata(retired_path(&store))
+            .unwrap()
+            .permissions()
+            .mode()
+            & 0o777;
+        assert_eq!(mode, 0o600, "the rebuilt file is private again");
+    }
+
+    #[test]
+    fn one_byte_that_is_not_utf8_costs_one_line_not_the_record() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = Store::new(dir.path());
+        store.ensure_dir().unwrap();
+        let mut bytes = b"10.77.0.2\n10.77.0.3\n".to_vec();
+        bytes.extend_from_slice(b"10.77.0.\xff\n");
+        bytes.extend_from_slice(b"10.77.0.5\n");
+        std::fs::write(retired_path(&store), &bytes).unwrap();
+        std::fs::set_permissions(
+            retired_path(&store),
+            std::os::unix::fs::PermissionsExt::from_mode(0o600),
+        )
+        .unwrap();
+        let read = store.read_retired_salvage();
+        assert!(read.damaged);
+        assert_eq!(read.addresses, vec!["10.77.0.2", "10.77.0.3", "10.77.0.5"]);
+        let outcome = store.retire_lenient("10.77.0.9").unwrap();
+        assert_eq!(
+            store.load_retired().unwrap(),
+            vec!["10.77.0.2", "10.77.0.3", "10.77.0.5", "10.77.0.9"]
+        );
+        assert_eq!(
+            std::fs::read(outcome.kept_as.unwrap()).unwrap(),
+            bytes,
+            "the original is byte for byte"
+        );
+    }
+
+    #[test]
+    fn a_second_damage_never_overwrites_the_first_copy() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = Store::new(dir.path());
+        write_private(&store, RETIRED_FILE, "10.77.0.2\njunk one\n");
+        let first = store.retire_lenient("10.77.0.3").unwrap().kept_as.unwrap();
+        write_private_again(&store, "10.77.0.2\njunk two\n");
+        let second = store.retire_lenient("10.77.0.4").unwrap().kept_as.unwrap();
+        assert_ne!(first, second);
+        assert!(
+            std::fs::read_to_string(&first)
+                .unwrap()
+                .contains("junk one")
+        );
+        assert!(
+            std::fs::read_to_string(&second)
+                .unwrap()
+                .contains("junk two")
+        );
+    }
+
+    fn write_private_again(store: &Store, text: &str) {
+        crate::files::write_private_atomic(&retired_path(store), text).unwrap();
+    }
+
+    #[test]
+    fn a_retired_file_that_is_a_link_or_a_directory_is_set_aside_not_followed() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = Store::new(dir.path());
+        let secret = dir.path().join("elsewhere");
+        std::fs::write(&secret, "10.77.0.2\n").unwrap();
+        std::os::unix::fs::symlink(&secret, retired_path(&store)).unwrap();
+        let read = store.read_retired_salvage();
+        assert!(
+            read.damaged && read.addresses.is_empty(),
+            "a link is not followed"
+        );
+        let outcome = store.retire_lenient("10.77.0.9").unwrap();
+        assert!(outcome.damaged);
+        assert_eq!(store.load_retired().unwrap(), vec!["10.77.0.9"]);
+        assert_eq!(
+            std::fs::read_to_string(&secret).unwrap(),
+            "10.77.0.2\n",
+            "the link target is untouched"
+        );
+    }
+
+    #[test]
+    fn the_migration_writes_the_retired_file_once_keeps_the_damage_notice_and_loses_nothing() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = Store::new(dir.path());
+        write_private(&store, RETIRED_FILE, "10.77.0.2\nnot an address\n");
+        let many: Vec<String> = (3..=200).map(|n| format!("\"10.77.0.{n}\"")).collect();
+        write_private(
+            &store,
+            PEERS_FILE,
+            &format!("retired = [{}]\n", many.join(", ")),
+        );
+        let peers = store.load_peers().unwrap();
+        assert_eq!(
+            peers.notices.len(),
+            1,
+            "the damage is reported through the migration"
+        );
+        assert!(peers.notices[0].contains(".damaged"));
+        let retired = store.load_retired().unwrap();
+        assert_eq!(
+            retired.len(),
+            199,
+            "10.77.0.2 from the old record plus the 198 migrated"
+        );
+        assert!(
+            retired.contains(&"10.77.0.2".to_string())
+                && retired.contains(&"10.77.0.200".to_string())
+        );
+        assert!(store.load_peers().unwrap().notices.is_empty(), "told once");
+    }
+
+    #[test]
+    fn a_toml_error_never_carries_a_control_character() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = Store::new(dir.path());
+        for bad in [
+            "\"a\\u001b[2Jb\" = 1\n".to_string(),
+            "[[peer]]\n\"x\\u0007y\" = \"v\"\n".to_string(),
+            "[[peer]]\nlabel = 5\n".to_string(),
+        ] {
+            write_private(&store, PEERS_FILE, &bad);
+            let err = store.load_peers().unwrap_err().to_string();
+            assert!(!err.chars().any(char::is_control), "{err:?}");
+        }
     }
 }

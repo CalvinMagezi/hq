@@ -94,13 +94,7 @@ fn checked_input(
             Ok(current) => {
                 let dropped = removals_without_a_revoke(&current, &peers.peer, retired);
                 if !dropped.is_empty() && guard == Guard::Enforce {
-                    let forget: Vec<String> =
-                        dropped.iter().map(|a| format!("`hq net peer forget {a}`")).collect();
-                    return crate::store::fail(format!(
-                        "refusing to write the applier's input: it would remove {} from the hub, and none of them was revoked here. If peers.toml was damaged or restored from an older copy, restore the newer one. If you mean to remove them (a device nobody can name any more, or one you did not add), run {} and then `hq net apply`",
-                        dropped.join(", "),
-                        forget.join(" and ")
-                    ));
+                    return crate::store::fail(guard_refusal(&dropped, &peers.peer));
                 }
                 if !dropped.is_empty() {
                     warnings.push(format!(
@@ -112,6 +106,45 @@ fn checked_input(
         },
     }
     Ok(Checked { text, warnings })
+}
+
+/// Loads `peers.toml` and prints anything the load had to tell the owner (a migration that met a
+/// damaged `retired` file).
+fn load_peers_noted(store: &Store, out: &mut dyn Write) -> Result<crate::store::PeersFile> {
+    let mut peers = store.load_peers()?;
+    say_warnings(out, &std::mem::take(&mut peers.notices))?;
+    Ok(peers)
+}
+
+/// The refusal for an input that would drop devices nobody revoked here, with the way out for each
+/// address: `forget` for one nobody owns, and for one a device in `peers.toml` owns (under another
+/// key than the hub has) correcting `peers.toml` or revoking that device, because `forget` refuses
+/// an address a record owns.
+fn guard_refusal(dropped: &[String], records: &[crate::store::PeerRecord]) -> String {
+    let (mut unowned, mut owned) = (Vec::new(), Vec::new());
+    for address in dropped {
+        match records.iter().find(|r| r.address == *address) {
+            Some(owner) => owned.push(format!(
+                "{address} is the address of \"{0}\" in peers.toml, but the hub has another key there: correct peers.toml, or run `hq net peer revoke {0}`",
+                owner.label
+            )),
+            None => unowned.push(format!("`hq net peer forget {address}`")),
+        }
+    }
+    let mut text = format!(
+        "refusing to write the applier's input: it would remove {} from the hub, and none of them was revoked here. If peers.toml was damaged or restored from an older copy, restore the newer one.",
+        dropped.join(", ")
+    );
+    if !unowned.is_empty() {
+        text.push_str(&format!(
+            " To remove entries no device owns, run {} and then `hq net apply`.",
+            unowned.join(" and ")
+        ));
+    }
+    for line in owned {
+        text.push_str(&format!(" {line}."));
+    }
+    text
 }
 
 fn say_warnings(out: &mut dyn Write, warnings: &[String]) -> Result<()> {
@@ -142,16 +175,20 @@ fn write_applier_input(
             store.dir().display()
         ));
     }
-    let peers = store.load_peers()?;
+    let peers = load_peers_noted(store, out)?;
     let target = net.spool_file(spool_dir);
     let (retired, damaged) = if guard == Guard::Enforce {
         (store.load_retired()?, false)
     } else {
-        store.load_retired_lenient()
+        let read = store.read_retired_salvage();
+        (read.addresses, read.damaged)
     };
     let checked = checked_input(&net, &peers, &retired, &target, guard)?;
     if damaged {
-        say_warnings(out, &[retired_damaged_warning(store)])?;
+        say_warnings(
+            out,
+            &["the retired record could not be read in full, so the check below may miss an address revoked earlier".to_string()],
+        )?;
     }
     say_warnings(out, &checked.warnings)?;
     say(
@@ -173,13 +210,6 @@ fn write_applier_input(
     )
 }
 
-fn retired_damaged_warning(store: &Store) -> String {
-    format!(
-        "{}/{RETIRED_FILE} was damaged; it was rebuilt from the lines that could be read. Addresses revoked earlier whose lines were lost can be handed out again by `hq net peer add`: check `hq net peer list` before adding",
-        store.dir().display()
-    )
-}
-
 /// Writes the applier's input from `peers.toml`. It refuses while the hub's private key is still
 /// in the HQ user's directory, and while it would drop a device nobody revoked here.
 pub fn apply(store: &Store, spool_dir: &Path, out: &mut dyn Write) -> Result<()> {
@@ -196,7 +226,7 @@ pub fn peer_add(
     if store.hub_key_staged() {
         return Err(staged_key_error(store));
     }
-    let mut peers = store.load_peers()?;
+    let mut peers = load_peers_noted(store, out)?;
     let retired = store.load_retired()?;
     let record = add_peer(
         &net,
@@ -251,7 +281,7 @@ pub fn peer_revoke(
     out: &mut dyn Write,
 ) -> Result<()> {
     let net = store.require_net()?;
-    let mut peers = store.load_peers()?;
+    let mut peers = load_peers_noted(store, out)?;
     let record = revoke_peer(&mut peers, label)?;
     say(
         out,
@@ -266,8 +296,9 @@ pub fn peer_revoke(
         ),
     )?;
     // A damaged retired file must not stop a device being cut off: it is rebuilt from what can be read.
-    if store.retire_lenient(&record.address)? {
-        say_warnings(out, &[retired_damaged_warning(store)])?;
+    let outcome = store.retire_lenient(&record.address)?;
+    if outcome.damaged {
+        say_warnings(out, &[store.damaged_notice(&outcome)])?;
     }
     store.save_peers(&peers)?;
     // Revoking never waits for the hub key to be moved, and never stops for an entry the hub has
@@ -304,11 +335,11 @@ pub fn peer_forget(
                 net.subnet, "10.77.0.9"
             ))
         })?;
-    let peers = store.load_peers()?;
+    let peers = load_peers_noted(store, out)?;
     if let Some(owner) = peers.peer.iter().find(|p| p.address == addr.to_string()) {
         return crate::store::fail(format!(
-            "{addr} belongs to the device \"{}\"; use `hq net peer revoke {}` for it",
-            owner.label, owner.label
+            "{addr} belongs to the device \"{0}\" in peers.toml; use `hq net peer revoke {0}` for it. If the hub has a different key at that address than peers.toml records for it, correct peers.toml first, or revoke {0}, which retires the address",
+            owner.label
         ));
     }
     say(
@@ -319,10 +350,13 @@ pub fn peer_forget(
             net.spool_file(spool_dir).display()
         ),
     )?;
-    if store.retire_lenient(&addr.to_string())? {
-        say_warnings(out, &[retired_damaged_warning(store)])?;
+    let outcome = store.retire_lenient(&addr.to_string())?;
+    if outcome.damaged {
+        say_warnings(out, &[store.damaged_notice(&outcome)])?;
     }
-    if let Err(e) = write_applier_input(store, spool_dir, out, false, Guard::Warn) {
+    // Enforce: each entry the hub has that nobody can name needs a forget of its own. The address
+    // above is retired already, so it is not what stops this.
+    if let Err(e) = write_applier_input(store, spool_dir, out, false, Guard::Enforce) {
         return Err(NetError(format!(
             "{addr} is retired but is NOT yet removed from the hub: {e}\nFix that, then run: hq net apply"
         )));
@@ -332,7 +366,7 @@ pub fn peer_forget(
 
 pub fn peer_list(store: &Store, out: &mut dyn Write) -> Result<()> {
     let net = store.require_net()?;
-    let peers = store.load_peers()?;
+    let peers = load_peers_noted(store, out)?;
     let mut text = format!(
         "{:<16} {:<7} {:<12} {:<10} {}\n",
         "DEVICE", "KIND", "ADDRESS", "KEY", "PRESHARED"
@@ -555,7 +589,7 @@ mod tests {
             );
             assert!(err.contains("none of them was revoked here"), "{err}");
             assert!(
-                err.contains("hq net peer forget 10.77.0.2"),
+                err.contains("hq net peer forget 10.77.0.3"),
                 "the way out is named: {err}"
             );
             assert_eq!(
@@ -951,5 +985,115 @@ mod tests {
         let net = f.store.require_net().unwrap();
         assert!(out.contains("sudo wg show hq0 public-key"), "{out}");
         assert!(out.contains(&net.hub_public_key));
+    }
+
+    #[test]
+    fn forget_needs_its_own_forget_for_each_unnamed_entry() {
+        let f = fixture();
+        run_add(&f, "mac", Kind::Laptop);
+        let first = put_rogue_peer_in_the_spool(&f);
+        // A second unnamed entry, at another address.
+        let net = f.store.require_net().unwrap();
+        let mut peers =
+            crate::grammar::parse(applier_input(&f).as_bytes(), &net.policy().unwrap()).unwrap();
+        let second = crate::store::tests::device_key();
+        peers.push(crate::grammar::Peer {
+            public_key: second.clone(),
+            address: "10.77.0.88".parse().unwrap(),
+            preshared_key: None,
+        });
+        let path = f.spool.join("hq0.conf");
+        std::fs::remove_file(&path).unwrap();
+        crate::files::write_private_atomic(&path, &crate::grammar::render(&peers)).unwrap();
+
+        let err = peer_forget(&f.store, &f.spool, "10.77.0.77", &mut Vec::new())
+            .unwrap_err()
+            .to_string();
+        assert!(
+            err.contains("is retired but is NOT yet removed from the hub"),
+            "{err}"
+        );
+        assert!(
+            err.contains("hq net peer forget 10.77.0.88"),
+            "the other entry is named: {err}"
+        );
+        assert!(
+            applier_input(&f).contains(&first),
+            "nothing was removed yet"
+        );
+        peer_forget(&f.store, &f.spool, "10.77.0.88", &mut Vec::new()).unwrap();
+        let after = applier_input(&f);
+        assert!(
+            !after.contains(&first) && !after.contains(&second),
+            "both gone: {after}"
+        );
+        assert!(after.contains("# mac"));
+    }
+
+    #[test]
+    fn when_the_hub_has_another_key_at_a_devices_address_the_guard_does_not_send_you_to_forget() {
+        let f = fixture();
+        run_add(&f, "mac", Kind::Laptop);
+        let net = f.store.require_net().unwrap();
+        // The hub has a different key at mac's address (a restored peers.toml with an old key).
+        let other = crate::store::tests::device_key();
+        let swapped = crate::grammar::render(&[crate::grammar::Peer {
+            public_key: other.clone(),
+            address: "10.77.0.2".parse().unwrap(),
+            preshared_key: None,
+        }]);
+        let path = f.spool.join("hq0.conf");
+        std::fs::remove_file(&path).unwrap();
+        crate::files::write_private_atomic(&path, &swapped).unwrap();
+        let _ = net;
+
+        let err = apply(&f.store, &f.spool, &mut Vec::new())
+            .unwrap_err()
+            .to_string();
+        assert!(
+            !err.contains("peer forget"),
+            "forget would refuse here: {err}"
+        );
+        assert!(
+            err.contains("correct peers.toml, or run `hq net peer revoke mac`"),
+            "{err}"
+        );
+        let refused = peer_forget(&f.store, &f.spool, "10.77.0.2", &mut Vec::new())
+            .unwrap_err()
+            .to_string();
+        assert!(
+            refused.contains("correct peers.toml first") && refused.contains("revoke mac"),
+            "{refused}"
+        );
+        // The way out the message names works, and the entry on the retired address goes.
+        peer_revoke(&f.store, &f.spool, "mac", &mut Vec::new()).unwrap();
+        assert!(!applier_input(&f).contains(&other));
+    }
+
+    #[test]
+    fn a_migration_notice_about_a_damaged_retired_file_is_printed() {
+        let f = fixture();
+        run_add(&f, "mac", Kind::Laptop);
+        crate::files::write_private_atomic(
+            &f.store.dir().join(crate::store::RETIRED_FILE),
+            "10.77.0.9\njunk\n",
+        )
+        .unwrap();
+        let path = f.store.dir().join("peers.toml");
+        let text = std::fs::read_to_string(&path).unwrap();
+        crate::files::write_private_atomic(&path, &format!("retired = [\"10.77.0.5\"]\n{text}"))
+            .unwrap();
+        let mut out = Vec::new();
+        peer_list(&f.store, &mut out).unwrap();
+        let out = String::from_utf8(out).unwrap();
+        assert!(
+            out.contains("Warning:") && out.contains("was damaged"),
+            "{out}"
+        );
+        let retired = f.store.load_retired().unwrap();
+        assert!(
+            retired.contains(&"10.77.0.9".to_string())
+                && retired.contains(&"10.77.0.5".to_string())
+        );
     }
 }
