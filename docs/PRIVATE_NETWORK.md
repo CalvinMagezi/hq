@@ -90,7 +90,7 @@ What the applier does, in order, and what it refuses:
 | Check the open file | A plain file, owned by the expected user, mode without group or other access, exactly one name, at most 64 KiB, in a directory only root or that user owns and others cannot write. |
 | Parse | Printable ASCII only. First line `# hq-net peers v1`, last line `# hq-net end <n>` with the number of peers read. Only `[Peer]` sections with `PublicKey` (44 characters of base64, 32 bytes), `PresharedKey` (same, optional) and `AllowedIPs` (exactly one IPv4 address written `a.b.c.d/32`, inside the subnet, not the hub, not the network or broadcast address). No duplicate address or key, at most 64 peers. `[Interface]`, `PostUp`, `PreUp`, `Table`, `Endpoint`, `PrivateKey`, any other key, a key in another case, inline comments, tabs and carriage returns all refuse the whole file. |
 | Apply | Only then `wg` is started, by absolute path in a distribution directory (and only if root owns it and others cannot write it; use `--wg` for another place), with an empty environment and no shell. It receives text the applier rendered from the parsed peers, never the file's own bytes. |
-| Record | After each successful `wg` call it prints how many peers the interface has and what that run added, removed or moved (address and the first characters of the public key); an unchanged run prints one line, so the timer does not fill the journal. The record is written before the input is read again. If that second read or round fails, the error says how many peers were already applied. `journalctl -u 'hq-net-apply@*'` shows the history. |
+| Record | After each successful `wg` call it prints how many peers the interface has and what that run added, removed or moved (address and the first characters of the public key); an unchanged run prints one line, so the timer does not fill the journal. The record is written before the input is read again. If that second read or round fails, the error says how many peers were already applied. If `wg` itself fails, the run records what it was trying to change as "attempted", because the kernel may have taken part of it. A changed preshared key is not shown in these lines. `journalctl -u 'hq-net-apply@*'` shows the history. |
 
 A refusal prints the line number and the rule, never the text of the line, and changes nothing. A
 file that fails parsing does not even cause `wg showconf` to run. A failure inside `wg` can leave a
@@ -127,6 +127,10 @@ a device's private key must never leave the device, and anything pasted here is 
 the hub. About one real public key in sixteen has that shape by chance; if you are sure it is a
 public key, repeat the command with `--confirm-public`.
 
+Before you give the printed config to the device, compare the hub public key in it with what the
+server itself reports, `sudo wg show hq0 public-key`. A config with another hub key or another
+endpoint would send the device's traffic somewhere else; the output of `peer add` says the same.
+
 HQ gives the device the next free address (`10.77.0.2`, then `.3`, and so on), updates
 `~/.hq/net/peers.toml` and the applier's input, and prints the device's config. Paste its lines
 below the `PrivateKey` line the app wrote, and activate the tunnel.
@@ -159,6 +163,7 @@ Other commands:
 ```
 hq net peer list              devices, addresses, short key fingerprints
 hq net peer revoke <label>    remove a device; its address is retired and hq net never reuses it
+hq net peer forget <address>  retire an address no device owns and remove what the hub has on it
 hq net status                 each device's last handshake
 hq net apply                  write the applier's input again from peers.toml
 ```
@@ -176,6 +181,15 @@ key and are never used for this.
    it names and run `hq net apply`.
 2. Check: `sudo wg show hq0 peers` no longer lists its key.
 3. Sign the device out of the web UI and rotate any token it held.
+
+A revoke is never held up by the check above. If the hub has an entry that no device in
+`peers.toml` owns (one a writer put straight into the applier's input, or a device lost when
+`peers.toml` was restored from an older copy), the revoke goes through, drops that entry too, and
+prints a warning that names its address. `hq net apply` and `peer add` stop instead and name the
+way out: `hq net peer forget <address>` retires the address and removes whatever the hub has on it
+(it is refused for an address a device in `peers.toml` owns; use `revoke` for that). A damaged
+`retired` file does not stop a revoke or a forget either: it is rebuilt from the lines that can be
+read, with a warning.
 
 If the hub's key might have leaked, make a new plane: remove `~/.hq/net`, stop and delete the
 interface, run `hq net init` again and re-enrol every device. Remove the old server key from every
@@ -197,11 +211,14 @@ trusted certificate is the next phase of the plan and is not part of `hq net` ye
 
 ## Files
 
-`net.toml` and `peers.toml` are read strictly. The interface name and the server address are
-checked again every time the file is loaded (they end up in printed `sudo` commands and in device
-configs), every printed path is shell-quoted, and `hq net apply` refuses to write an input that
-would remove a device the hub has now unless that device was revoked with `hq net peer revoke`, so a
-damaged or emptied `peers.toml` cannot remove everyone. Only the kernel WireGuard is supported: the
+`net.toml` and `peers.toml` are read strictly. The interface name (always `hq0`; anything else was
+edited in) and the server address are checked again every time `net.toml` is loaded, because they
+end up in printed `sudo` commands, unit names and device configs. Device labels are checked on load
+too, so a terminal escape in an edited file cannot reach `peer list`. Every printed path is
+shell-quoted. `hq net apply` and `peer add` refuse to write an input that would remove a device the
+hub has now unless that device was revoked here, so a damaged, emptied or restored-from-an-older-copy
+`peers.toml` cannot remove everyone. If the applier's current input cannot be read or parsed, the
+check cannot run and they warn instead of refusing, so a damaged input can still be replaced. Only the kernel WireGuard is supported: the
 unit allows netlink sockets and nothing else, which a userspace implementation such as
 wireguard-go would need.
 
@@ -251,6 +268,11 @@ break, not the hub). It needs: a kernel with WireGuard (5.6 or newer, or `wiregu
 5. `systemd-analyze security` on the applier's service (instance `hq0`), and `systemctl status` after a run: the
    confinement directives have only been read against upstream documentation so far. If one makes
    the unit fail, the journal names it.
+6. On Ubuntu 22.04 (systemd 249, glibc 2.35), confirm `wg` still runs under
+   `SystemCallFilter=@system-service`: start the service and read the journal for an `EPERM` from
+   `clone3` or `posix_spawn`. The ignored cargo test runs outside the unit's sandbox and cannot
+   catch this. systemd 249 also ignores `TriggerLimitIntervalSec` (the man page marks it v250),
+   so there the one-second pause before each run is the only bound on how often the applier starts.
 
 ## Tests
 

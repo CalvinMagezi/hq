@@ -397,18 +397,34 @@ fn a_refused_file_never_starts_wg_at_all() {
 }
 
 #[test]
-fn a_failing_wg_is_reported_and_unreadable_input_never_reaches_it() {
+fn a_failing_wg_is_reported_with_what_it_was_trying_to_change() {
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("peers.conf");
-    write(&path, valid_text(1).as_bytes(), 0o600);
+    write(&path, valid_text(2).as_bytes(), 0o600);
     let wg = Recorder {
         fail_apply: true,
         ..Recorder::default()
     };
-    assert!(matches!(
-        run(&config(path), &wg, &mut Vec::new()),
-        Err(ApplyError::Wg(_))
-    ));
+    let (result, log) = run_logged(path, &wg);
+    assert!(matches!(result, Err(ApplyError::Wg(_))));
+    assert!(
+        log.contains("wg failed while putting 2 peer(s) on hq0"),
+        "{log}"
+    );
+    assert!(
+        log.contains(&format!("attempted added 10.77.0.2 {}", &k(1)[..8])),
+        "{log}"
+    );
+    assert!(log.contains("attempted removed 10.77.0.200/32"), "{log}");
+    assert!(
+        !log.contains("peer(s) on hq0 after this run"),
+        "a failed run is not recorded as applied: {log}"
+    );
+}
+
+#[test]
+fn unreadable_input_never_reaches_wg() {
+    let dir = tempfile::tempdir().unwrap();
     let wg = Recorder::default();
     let missing = dir.path().join("missing.conf");
     assert!(matches!(

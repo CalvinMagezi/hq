@@ -58,6 +58,11 @@ pub enum PeerAction {
     },
     /// Remove a device; its address is retired and never reused
     Revoke { label: String },
+    /// Retire an address no device owns and remove whatever the hub has on it (an entry nobody can name)
+    Forget {
+        /// A device address in the plane's subnet, for example 10.77.0.9
+        address: String,
+    },
     /// List devices
     List,
 }
@@ -207,6 +212,9 @@ mod unix {
             NetAction::Peer {
                 action: PeerAction::Revoke { label },
             } => Ok(ops::peer_revoke(&store, &spool, &label, &mut out)?),
+            NetAction::Peer {
+                action: PeerAction::Forget { address },
+            } => Ok(ops::peer_forget(&store, &spool, &address, &mut out)?),
             NetAction::Peer {
                 action: PeerAction::List,
             } => Ok(ops::peer_list(&store, &mut out)?),

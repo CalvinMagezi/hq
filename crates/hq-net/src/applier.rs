@@ -412,15 +412,19 @@ struct Round {
 /// One round: read the input, validate it, and only if every line is acceptable ask `wg`. A refused
 /// file never causes `wg` to be started. Returns the bytes applied, the peers, and the changes
 /// made to the interface.
-fn apply_once(config: &Config, wg: &dyn Wg) -> Result<Round, ApplyError> {
+fn apply_once(config: &Config, wg: &dyn Wg, out: &mut dyn Write) -> Result<Round, ApplyError> {
     let bytes = read_input(&config.input, config.owner_uid).map_err(ApplyError::Input)?;
     let peers = grammar::parse(&bytes, &config.policy).map_err(ApplyError::Rejected)?;
     let current = wg.show_config(&config.interface).map_err(ApplyError::Wg)?;
     let changes = wgconf::changes(&wgconf::current_peers(&current), &peers);
     let (subcommand, text) =
         wgconf::build(&peers, &current).map_err(|e| ApplyError::Wg(e.to_string()))?;
-    wg.apply(&config.interface, subcommand, &text)
-        .map_err(ApplyError::Wg)?;
+    if let Err(e) = wg.apply(&config.interface, subcommand, &text) {
+        // The kernel may have taken some of the update before wg failed, so what the run meant to
+        // change is on record even though it did not finish.
+        log_attempt(out, config, &peers, &changes);
+        return Err(ApplyError::Wg(e));
+    }
     Ok(Round {
         bytes,
         peers,
@@ -453,6 +457,23 @@ fn log_round(out: &mut dyn Write, config: &Config, peers: &[grammar::Peer], chan
     let _ = out.write_all(text.as_bytes()).and_then(|()| out.flush());
 }
 
+/// The journal record of a run whose `wg` call failed: what it was trying to do. Part of it may
+/// be on the interface.
+fn log_attempt(out: &mut dyn Write, config: &Config, peers: &[grammar::Peer], changes: &[String]) {
+    let mut text = format!(
+        "hq-net-apply: wg failed while putting {} peer(s) on {}; part of this may already be on the interface. The run was trying to make these changes:\n",
+        peers.len(),
+        config.interface
+    );
+    if changes.is_empty() {
+        text.push_str("hq-net-apply:   attempted no change to the peer list\n");
+    }
+    for change in changes {
+        text.push_str(&format!("hq-net-apply:   attempted {change}\n"));
+    }
+    let _ = out.write_all(text.as_bytes()).and_then(|()| out.flush());
+}
+
 /// Applies the input, then reads it again: systemd stops watching the file while this runs, so a
 /// change made meanwhile would otherwise wait for the timer. Returns the peers the interface now
 /// has. A refusal changes nothing; a failure inside `wg` can leave a partial update (a large
@@ -463,7 +484,7 @@ pub fn run(
     wg: &dyn Wg,
     out: &mut dyn Write,
 ) -> Result<Vec<grammar::Peer>, ApplyError> {
-    let first = apply_once(config, wg)?;
+    let first = apply_once(config, wg, out)?;
     log_round(out, config, &first.peers, &first.changes);
     let (mut applied_bytes, mut peers) = (first.bytes, first.peers);
     for _ in 1..MAX_ROUNDS {
@@ -476,7 +497,7 @@ pub fn run(
         if latest == applied_bytes {
             break;
         }
-        match apply_once(config, wg) {
+        match apply_once(config, wg, out) {
             Ok(next) => {
                 log_round(out, config, &next.peers, &next.changes);
                 (applied_bytes, peers) = (next.bytes, next.peers);

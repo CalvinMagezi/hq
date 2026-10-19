@@ -81,9 +81,11 @@ impl Net {
     /// path component through any of them.
     pub fn validate(&self) -> Result<()> {
         self.policy()?;
-        if !valid_interface(&self.interface) {
+        if !valid_interface(&self.interface) || self.interface != DEFAULT_INTERFACE {
+            // hq net only ever makes the default interface, so any other value was edited in. It
+            // reaches printed root commands, unit instance names and a file path.
             return fail(format!(
-                "{NET_FILE}: interface must be a lowercase letter then lowercase letters, digits or _, at most 15 characters"
+                "{NET_FILE}: interface must be {DEFAULT_INTERFACE}; delete {NET_FILE} and run `hq net init` again only if you mean to start a new plane"
             ));
         }
         if self.port == 0 {
@@ -146,6 +148,46 @@ pub struct PeerRecord {
 pub struct PeersFile {
     #[serde(default)]
     pub peer: Vec<PeerRecord>,
+    /// Test files from before the `retired` file existed kept the revoked addresses here. They
+    /// are read once, moved into `retired`, and never written back.
+    #[serde(default, rename = "retired", skip_serializing)]
+    legacy_retired: Vec<String>,
+}
+
+impl PeersFile {
+    /// Every field that is printed back to the owner or put in a file, checked on load. A label
+    /// from an edited file could otherwise carry a terminal escape into `peer list`; the message
+    /// names the device by position and never repeats the bad value.
+    fn validate(&self) -> Result<()> {
+        for (i, record) in self.peer.iter().enumerate() {
+            let n = i + 1;
+            if !valid_label(&record.label) {
+                return fail(format!(
+                    "{PEERS_FILE}: device number {n} has a label that is not valid (1 to 32 lowercase letters, digits, - or _)"
+                ));
+            }
+            if !key::is_usable(&record.public_key) {
+                return fail(format!(
+                    "{PEERS_FILE}: device number {n} has a public key that is not a WireGuard key"
+                ));
+            }
+            if record
+                .preshared_key
+                .as_deref()
+                .is_some_and(|k| !key::is_usable(k))
+            {
+                return fail(format!(
+                    "{PEERS_FILE}: device number {n} has a preshared key that is not a WireGuard key"
+                ));
+            }
+            if crate::subnet::parse_canonical_ipv4(&record.address).is_none() {
+                return fail(format!(
+                    "{PEERS_FILE}: device number {n} has an address that is not an IPv4 address"
+                ));
+            }
+        }
+        Ok(())
+    }
 }
 
 pub struct Store {
@@ -198,7 +240,21 @@ impl Store {
         let Some(text) = files::read_private(&self.dir.join(PEERS_FILE))? else {
             return Ok(PeersFile::default());
         };
-        toml::from_str(&text).map_err(|e| toml_error(PEERS_FILE, &text, &e))
+        let mut file: PeersFile =
+            toml::from_str(&text).map_err(|e| toml_error(PEERS_FILE, &text, &e))?;
+        file.validate()?;
+        if !file.legacy_retired.is_empty() {
+            for address in std::mem::take(&mut file.legacy_retired) {
+                if crate::subnet::parse_canonical_ipv4(&address).is_none() {
+                    return fail(format!(
+                        "{PEERS_FILE}: retired holds a value that is not an address"
+                    ));
+                }
+                self.retire_lenient(&address)?;
+            }
+            self.save_peers(&file)?;
+        }
+        Ok(file)
     }
 
     /// The staged hub private key is still in the HQ user's directory.
@@ -227,13 +283,45 @@ impl Store {
             .collect()
     }
 
-    /// Adds an address to the retired list (once).
-    pub fn retire(&self, address: &str) -> Result<()> {
-        let mut retired = self.load_retired()?;
-        if retired.iter().any(|a| a == address) {
-            return Ok(());
+    /// The retired addresses that can be read, and whether the file was damaged (unreadable, or
+    /// holding a line that is not an address). Used where the job must go on regardless: cutting
+    /// a device off.
+    pub fn load_retired_lenient(&self) -> (Vec<String>, bool) {
+        let text = match files::read_private(&self.dir.join(RETIRED_FILE)) {
+            Ok(Some(text)) => text,
+            Ok(None) => return (Vec::new(), false),
+            Err(_) => return (Vec::new(), true),
+        };
+        let mut damaged = false;
+        let mut kept = Vec::new();
+        for line in text.lines().map(str::trim).filter(|l| !l.is_empty()) {
+            if crate::subnet::parse_canonical_ipv4(line).is_some() {
+                kept.push(line.to_string());
+            } else {
+                damaged = true;
+            }
         }
-        retired.push(address.to_string());
+        (kept, damaged)
+    }
+
+    /// Adds an address to the retired list (once). A damaged list is an error.
+    pub fn retire(&self, address: &str) -> Result<()> {
+        let retired = self.load_retired()?;
+        self.write_retired(retired, address)
+    }
+
+    /// Adds an address to the retired list, rebuilding the list from the lines that can be read if
+    /// the file is damaged. Returns whether it was damaged, so the caller can say so.
+    pub fn retire_lenient(&self, address: &str) -> Result<bool> {
+        let (retired, damaged) = self.load_retired_lenient();
+        self.write_retired(retired, address)?;
+        Ok(damaged)
+    }
+
+    fn write_retired(&self, mut retired: Vec<String>, address: &str) -> Result<()> {
+        if !retired.iter().any(|a| a == address) {
+            retired.push(address.to_string());
+        }
         let text = retired.join("\n") + "\n";
         files::write_private_atomic(&self.dir.join(RETIRED_FILE), &text).map_err(NetError::from)
     }
@@ -635,6 +723,8 @@ pub(crate) mod tests {
             ("interface", "hq0\\nEOF\\nsudo id"),
             ("interface", "../../etc/x"),
             ("interface", "Hq0"),
+            ("interface", "wg_hq"),
+            ("interface", "hq1"),
             ("interface", "hq0;id"),
             ("interface", ""),
             ("endpoint", "vpn.example.com:51820\\nPostUp = id"),
@@ -677,7 +767,6 @@ pub(crate) mod tests {
             format!("[[peers]]\n{entry}"),
             format!("[[peer]]\n{entry}adress = \"10.77.0.3\"\n"),
             format!("[[peer]]\n{entry}retired = \"x\"\n"),
-            "retired = [\"10.77.0.2\"]\n".to_string(),
         ] {
             write_private(&store, PEERS_FILE, &bad);
             assert!(store.load_peers().is_err(), "{bad}");
@@ -728,5 +817,93 @@ pub(crate) mod tests {
             assert!(err.starts_with("peers.toml: line "), "{err}");
             assert!(err.len() < 400);
         }
+    }
+
+    #[test]
+    fn a_peers_file_from_before_the_retired_file_is_migrated_once() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = Store::new(dir.path());
+        let key = device_key();
+        let entry = format!(
+            "label = \"mac\"\nkind = \"laptop\"\npublic_key = \"{key}\"\naddress = \"10.77.0.3\"\n"
+        );
+        write_private(
+            &store,
+            PEERS_FILE,
+            &format!("retired = [\"10.77.0.2\", \"10.77.0.9\"]\n\n[[peer]]\n{entry}"),
+        );
+        store.retire("10.77.0.9").unwrap();
+        let peers = store.load_peers().unwrap();
+        assert_eq!(peers.peer.len(), 1);
+        assert_eq!(
+            store.load_retired().unwrap(),
+            vec!["10.77.0.9", "10.77.0.2"]
+        );
+        // The old key is gone from the file, so the next load has nothing left to migrate.
+        let rewritten = std::fs::read_to_string(dir.path().join(PEERS_FILE)).unwrap();
+        assert!(!rewritten.contains("retired"), "{rewritten}");
+        assert_eq!(store.load_peers().unwrap(), peers);
+        write_private(&store, PEERS_FILE, "retired = [\"not an address\"]\n");
+        assert!(store.load_peers().is_err());
+    }
+
+    #[test]
+    fn a_label_with_a_terminal_escape_or_a_bad_key_is_refused_on_load_without_being_echoed() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = Store::new(dir.path());
+        let key = device_key();
+        let record = |label: &str, key: &str, address: &str| {
+            format!(
+                "[[peer]]\nlabel = \"{label}\"\nkind = \"phone\"\npublic_key = \"{key}\"\naddress = \"{address}\"\n"
+            )
+        };
+        for (text, hidden) in [
+            (record("mac\\u001b[2J", &key, "10.77.0.2"), "\u{1b}"),
+            (record("MAC", &key, "10.77.0.2"), "MAC"),
+            (record("", &key, "10.77.0.2"), "zzz"),
+            (record("ok", "nope", "10.77.0.2"), "nope"),
+            (record("ok", &key, "10.77.0.02"), "10.77.0.02"),
+            (
+                format!(
+                    "{}preshared_key = \"short\"\n",
+                    record("ok", &key, "10.77.0.2")
+                ),
+                "short",
+            ),
+        ] {
+            write_private(&store, PEERS_FILE, &text);
+            let err = store.load_peers().unwrap_err().to_string();
+            assert!(err.starts_with("peers.toml: device number 1 "), "{err}");
+            assert!(!err.contains(hidden), "the bad value was echoed: {err:?}");
+        }
+        write_private(&store, PEERS_FILE, &record("ok", &key, "10.77.0.2"));
+        assert!(store.load_peers().is_ok());
+    }
+
+    #[test]
+    fn a_damaged_retired_file_is_rebuilt_from_its_readable_lines_when_retiring_leniently() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = Store::new(dir.path());
+        write_private(
+            &store,
+            RETIRED_FILE,
+            "10.77.0.2\n\u{1b}[31m junk\n10.77.0.5\n",
+        );
+        assert!(store.load_retired().is_err());
+        let (kept, damaged) = store.load_retired_lenient();
+        assert_eq!((kept.len(), damaged), (2, true));
+        assert!(
+            store.retire("10.77.0.7").is_err(),
+            "the strict path still refuses"
+        );
+        assert!(store.retire_lenient("10.77.0.7").unwrap());
+        assert_eq!(
+            store.load_retired().unwrap(),
+            vec!["10.77.0.2", "10.77.0.5", "10.77.0.7"]
+        );
+        assert!(
+            !store.retire_lenient("10.77.0.7").unwrap(),
+            "a clean file is not reported as damaged"
+        );
     }
 }

@@ -295,6 +295,7 @@ As built, where it adds to or differs from the text above:
   root command or a path is validated on load and shell-quoted; `hq net apply` refuses to drop a device
   the hub has unless it was revoked here, and `peer add` and `apply` refuse while the staged hub key is
   still in the HQ user's directory.
+- `hq net peer forget <address>` retires an address no device owns and removes what the hub has on it. It is the way out of the drop guard (which stops `apply` and `peer add`, never a revoke), for a rogue entry or a restored `peers.toml`. The interface in `net.toml` must be `hq0`.
 - `hq net peer add --psk` makes a preshared key, as the key lifecycle table in
   [docs/security/NETWORK.md](../security/NETWORK.md) expects.
 - The QR code is the device config without a private key, as specified. The Android app refuses to

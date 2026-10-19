@@ -49,6 +49,10 @@ pub fn describe(net: &Net, record: &PeerRecord, with_qr: bool) -> Result<String>
         record.kind.name(),
         record.address
     ));
+    out.push_str(&format!(
+        "Before this config goes to the device, compare the hub public key in it ({}) with what the server itself reports: sudo wg show {} public-key. A config with another hub key or another endpoint would send the device's traffic somewhere else.\n\n",
+        net.hub_public_key, net.interface
+    ));
     if with_qr {
         match qr::terminal(&config) {
             Some(code) => out.push_str(&format!(
