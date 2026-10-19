@@ -462,10 +462,11 @@ impl HqTool for OcrExtractTextTool {
     }
 
     fn description(&self) -> &str {
-        "Extract text from an image (screenshot, photo, scan) using the macOS Vision framework. \
-         Runs entirely on-device — no LLM call, so it works regardless of which model is active. \
+        "Extract text from an image (screenshot, photo, scan) with on-device OCR (macOS Vision, or \
+         tesseract on Linux). No LLM call, so it works regardless of which model is active. \
          Use this whenever you're handed an image and need its text (e.g. a screenshot of a card, \
-         chat, or document)."
+         chat, or document). With tesseract the result also says how sure OCR was: an average \
+         confidence and the words it doubted most, numbers first. Check those against the image."
     }
 
     fn parameters(&self) -> Value {
@@ -501,16 +502,26 @@ impl HqTool for OcrExtractTextTool {
             anyhow::bail!("file not found: {}", path.display());
         }
 
-        info!(path = %path.display(), "ocr_extract_text: running Vision OCR");
+        info!(path = %path.display(), "ocr_extract_text: running OCR");
 
-        let text = OcrEngine::extract_text(&path)
+        let read = OcrEngine::read_image(&path)
             .await
             .map_err(|e| anyhow::anyhow!("OCR failed: {e}"))?;
+        let c = &read.confidence;
+        let confidence = c.mean.map(|mean| {
+            json!({
+                "average": mean.round(),
+                "words": c.words,
+                "uncertain_words": c.low_words,
+                "least_sure": c.doubtful.iter().map(|d| json!({"word": d.text, "confidence": d.confidence.round()})).collect::<Vec<_>>(),
+            })
+        });
 
         Ok(json!({
-            "text": text,
+            "text": read.text,
             "source_path": path.to_string_lossy(),
-            "engine": "vision",
+            "engine": if cfg!(target_os = "macos") { "vision" } else { "tesseract" },
+            "confidence": confidence,
         }))
     }
 }

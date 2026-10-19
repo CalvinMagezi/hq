@@ -443,3 +443,25 @@ async fn a_photographed_receipt_is_read_by_ocr_and_marked_uncertain() {
     assert!(r.warnings.iter().any(|w| w.kind == LossKind::OcrDerived));
     assert_has(&md, "receipt.jpg", &["RECEIPT", "370,000"]);
 }
+
+#[tokio::test]
+#[ignore = "needs tesseract-ocr"]
+async fn a_poor_scan_says_how_unsure_ocr_was_and_which_words_to_check() {
+    let (_, clean) = convert("receipt.jpg").await;
+    let (_, poor) = convert("receipt-poor.jpg").await;
+    let note = |r: &ConversionReport| {
+        r.warnings
+            .iter()
+            .find(|w| w.kind == LossKind::OcrDerived)
+            .map(|w| w.detail.clone())
+            .unwrap_or_default()
+    };
+    let (clean, poor) = (note(&clean), note(&poor));
+    assert!(clean.contains("average confidence"), "{clean}");
+    assert!(clean.contains("no words flagged as uncertain"), "{clean}");
+    assert!(poor.contains("average confidence"), "{poor}");
+    assert!(
+        poor.contains("uncertain") && poor.contains("least sure"),
+        "{poor}"
+    );
+}

@@ -8,7 +8,7 @@ use transmutation::{ConversionOptions, Converter, OutputFormat};
 use super::ir::{Block, Inline, Parsed};
 use super::pdf_layout::{self, Layout};
 use super::report::{LossKind, Losses};
-use crate::ocr::OcrEngine;
+use crate::ocr::{OcrConfidence, OcrEngine};
 use crate::types::ConvertError;
 
 /// Below this many characters a PDF is treated as having no text layer.
@@ -72,18 +72,16 @@ pub async fn layout(pdf: &Path) -> Option<Layout> {
 
 /// OCR of every page of a scanned PDF.
 pub async fn ocr_pdf(pdf: &Path) -> Result<Parsed, ConvertError> {
-    let text = OcrEngine::extract_pdf(pdf)
-        .await
-        .map_err(with_install_hint)?;
-    ocr_parsed(&text, true)
+    let read = OcrEngine::read_pdf(pdf).await.map_err(with_install_hint)?;
+    ocr_parsed(&read.text, true, &read.confidence)
 }
 
 /// OCR of a picture of text, such as a photographed receipt or a screenshot.
 pub async fn ocr_image(image: &Path) -> Result<Parsed, ConvertError> {
-    let text = OcrEngine::extract_text(image)
+    let read = OcrEngine::read_image(image)
         .await
         .map_err(with_install_hint)?;
-    ocr_parsed(&text, false)
+    ocr_parsed(&read.text, false, &read.confidence)
 }
 
 fn with_install_hint(e: ConvertError) -> ConvertError {
@@ -95,15 +93,49 @@ fn with_install_hint(e: ConvertError) -> ConvertError {
     }
 }
 
+/// What the report says about an OCR read: how sure it was, and which words to check.
+fn ocr_note(c: &OcrConfidence) -> String {
+    let advice =
+        "OCR can be confidently wrong, so check names, numbers and amounts against the original";
+    let Some(mean) = c.mean else {
+        return format!("text was read from an image by OCR; {advice}");
+    };
+    let mut note = format!(
+        "text was read from an image by OCR (average confidence {:.0}%)",
+        mean
+    );
+    if c.low_words == 0 {
+        note.push_str(", no words flagged as uncertain");
+    } else {
+        note.push_str(&format!(
+            "; {} of {} words are uncertain",
+            c.low_words, c.words
+        ));
+        if !c.doubtful.is_empty() {
+            let listed: Vec<String> = c
+                .doubtful
+                .iter()
+                .map(|d| match d.page {
+                    Some(p) => format!("{} (page {p}, {:.0}%)", d.text, d.confidence),
+                    None => format!("{} ({:.0}%)", d.text, d.confidence),
+                })
+                .collect();
+            note.push_str(&format!(", least sure: {}", listed.join(", ")));
+        }
+    }
+    format!("{note}; {advice}")
+}
+
 /// OCR text as paragraphs. Line breaks inside a paragraph are kept, because a
 /// receipt or a statement is a list of lines. `[page N]` markers from the PDF
 /// path become page headings when there is more than one page.
-fn ocr_parsed(text: &str, from_pdf: bool) -> Result<Parsed, ConvertError> {
+fn ocr_parsed(
+    text: &str,
+    from_pdf: bool,
+    confidence: &OcrConfidence,
+) -> Result<Parsed, ConvertError> {
     let mut losses = Losses::default();
-    losses.note(
-        LossKind::OcrDerived,
-        "text was read from an image by OCR; check names, numbers and amounts against the original",
-    );
+    losses.note(LossKind::OcrDerived, ocr_note(confidence));
     let mut blocks: Vec<Block> = Vec::new();
     let pages = text.matches("[page ").count();
     for chunk in text.split("\n\n") {
@@ -154,6 +186,7 @@ mod tests {
         let p = ocr_parsed(
             "[page 1]\nTOTAL 370,000\nPaid by MoMo\n\n[page 2]\nThank you",
             true,
+            &OcrConfidence::default(),
         )
         .unwrap();
         let md = super::super::ir::render(p.blocks);
@@ -165,12 +198,58 @@ mod tests {
 
     #[test]
     fn a_single_page_has_no_page_heading() {
-        let p = ocr_parsed("[page 1]\nOnly page", true).unwrap();
+        let p = ocr_parsed("[page 1]\nOnly page", true, &OcrConfidence::default()).unwrap();
         assert_eq!(super::super::ir::render(p.blocks), "Only page\n");
     }
 
     #[test]
     fn empty_ocr_is_an_error() {
-        assert!(ocr_parsed("  \n\n", false).is_err());
+        assert!(ocr_parsed("  \n\n", false, &OcrConfidence::default()).is_err());
+    }
+
+    #[test]
+    fn the_ocr_note_says_how_sure_it_was_and_what_to_check() {
+        use crate::ocr::Doubtful;
+        let none = ocr_note(&OcrConfidence::default());
+        assert!(
+            none.contains("by OCR;") && none.contains("check names, numbers and amounts"),
+            "{none}"
+        );
+
+        let sure = ocr_note(&OcrConfidence {
+            words: 40,
+            mean: Some(93.4),
+            low_words: 0,
+            doubtful: vec![],
+        });
+        assert!(
+            sure.contains("average confidence 93%")
+                && sure.contains("no words flagged as uncertain")
+                && sure.contains("confidently wrong"),
+            "{sure}"
+        );
+
+        let unsure = ocr_note(&OcrConfidence {
+            words: 38,
+            mean: Some(41.0),
+            low_words: 27,
+            doubtful: vec![
+                Doubtful {
+                    text: "370,000".into(),
+                    confidence: 16.0,
+                    page: None,
+                },
+                Doubtful {
+                    text: "0731".into(),
+                    confidence: 30.2,
+                    page: Some(2),
+                },
+            ],
+        });
+        assert!(unsure.contains("27 of 38 words are uncertain"), "{unsure}");
+        assert!(
+            unsure.contains("least sure: 370,000 (16%), 0731 (page 2, 30%)"),
+            "{unsure}"
+        );
     }
 }

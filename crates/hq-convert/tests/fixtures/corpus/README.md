@@ -12,7 +12,7 @@ here comes from a real vault, client or bank.
 | `tracker.xlsx` `.xls` `.ods` | dates that must not become serial numbers, percentages and thousands separators, a title row, two sheets |
 | `training.pptx` `.odp` | slides, bullets with levels, speaker notes, a table, a picture |
 | `statement.pdf` | a two-page mobile-money-style statement: one table across pages |
-| `receipt.jpg` | a photographed receipt, for OCR |
+| `receipt.jpg` `receipt-poor.jpg` | a photographed receipt, for OCR; the second is the same receipt scaled to 75%, blurred, speckled and saved as JPEG quality 30, so OCR is unsure of many words |
 | `page.html` `page-latin1.html` `page-utf16.html` | one page in three encodings |
 | `records.xml` `notes.xml` | records become a table, other XML an outline |
 | `data.csv` `data.tsv` `plain.txt` | delimited text and plain text |

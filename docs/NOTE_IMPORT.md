@@ -87,7 +87,7 @@ or a layout that could not be kept).
 | ODS | native, from the text the sheet shows | one section per sheet |
 | CSV, TSV, text | native | delimiter and encoding detected |
 | PDF | poppler `pdftotext -layout` when present, else the text layer | tables rebuilt from column layout, including a table that runs across pages; a PDF with no text is read by OCR |
-| Images | OCR (tesseract on Linux, Vision on macOS) | marked `degraded`: check names and amounts against the original |
+| Images | OCR (tesseract on Linux, Vision on macOS) | always `degraded`; with tesseract the note says the average confidence and lists the words it was least sure of, numbers first |
 | DOC, PPT | LibreOffice, when installed | `blocked` in the inventory on a host without it |
 
 The format comes from the file's content, and its name is only the fallback. A Word
@@ -112,7 +112,11 @@ Password-protected files are refused, not guessed at.
 - In RTF, two tables with nothing between them are told apart only by a change in the
   number of cells per row (Word marks merged cells, so those stay in their table). Two
   adjacent tables with the same number of columns read as one.
-- A scan is only as good as OCR. Check numbers.
+- A scan is only as good as OCR. The confidence figure finds the words OCR doubted, but it
+  can be confidently wrong (a digit clipped at the edge of a page read as another digit with 96%
+  confidence in one of the test files), so check names, numbers and amounts against the original.
+- Tesseract runs on one thread per picture with a three-minute limit. Left to itself it starts a
+  thread per core in every process, and a few pictures at once took minutes instead of seconds.
 
 ## For agents
 
