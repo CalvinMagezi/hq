@@ -22,7 +22,7 @@ import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.Supplier;
 
-/** Keeps `hq web` and, when the owner supplied a Caddyfile, Caddy running as children of this app. */
+/** Keeps `hq` and, when the owner supplied a Caddyfile, Caddy running as children of this app, and turns unread HQ notifications into Android ones. */
 public class HubService extends Service {
     static final String TAG = "HQHUB";
     static final String CHANNEL = "hub";
@@ -41,6 +41,12 @@ public class HubService extends Service {
     private static volatile Process hqProc;
     private static volatile Process caddyProc;
 
+    /** The notification glyph, looked up by name because the build makes no R class. */
+    static int statIcon(Context c) {
+        int id = c.getResources().getIdentifier("ic_stat_agenthq", "drawable", c.getPackageName());
+        return id != 0 ? id : android.R.drawable.stat_notify_sync;
+    }
+
     static String token(Context c) {
         return SecretStore.webToken(c);
     }
@@ -48,7 +54,7 @@ public class HubService extends Service {
     @Override
     public int onStartCommand(Intent intent, int flags, int startId) {
         getSystemService(NotificationManager.class)
-                .createNotificationChannel(new NotificationChannel(CHANNEL, "HQ hub", NotificationManager.IMPORTANCE_LOW));
+                .createNotificationChannel(new NotificationChannel(CHANNEL, "AgentHQ service", NotificationManager.IMPORTANCE_LOW));
         Notification n = notification(HubConfig.isActive(readSmall(new File(getFilesDir(), "mode"))));
         try {
             if (Build.VERSION.SDK_INT >= 34) startForeground(NOTIFICATION_ID, n, ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE);
@@ -60,14 +66,15 @@ public class HubService extends Service {
             int gen = generation.incrementAndGet();
             new Thread(() -> supervise(gen, "hq", this::hqProcess, true), "hq-supervisor").start();
             new Thread(() -> supervise(gen, "caddy", this::caddyProcess, false), "caddy-supervisor").start();
+            new Thread(() -> Alerts.watch(getApplicationContext(), () -> gen == generation.get()), "alerts").start();
         }
         return START_STICKY;
     }
 
     private Notification notification(boolean active) {
         String text = (active ? "Active: relays and scheduler on. " : "") + "Serving this device on 127.0.0.1:" + PORT;
-        return new Notification.Builder(this, CHANNEL).setContentTitle("HQ hub running")
-                .setContentText(text).setSmallIcon(android.R.drawable.stat_notify_sync).build();
+        return new Notification.Builder(this, CHANNEL).setContentTitle("AgentHQ is running")
+                .setContentText(text).setSmallIcon(statIcon(this)).build();
     }
 
     /** Restarts a child with exponential backoff; a null command means "not configured", so it is skipped. */

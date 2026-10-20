@@ -1,4 +1,4 @@
-# HQ hub app for Android
+# AgentHQ app for Android
 
 Packages `hq` (as `libhq.so`) and Caddy (as `libcaddy.so`) with the web UI into one APK. A
 foreground service runs both as children of the app and restarts them with backoff. Caddy starts
@@ -17,6 +17,24 @@ the app's private directory. Build without it for the version that stays on the 
 it over the debuggable one with `adb install -r` (same signing key) keeps the data and closes
 `run-as`. The first build creates a signing key at `apps/android/debug.keystore` (ignored by git), or at
 `$KEYSTORE` if set. Keep that file: only the same key can update the installed app.
+
+## Name, icon and notifications
+
+The launcher label is `AgentHQ` (the package id stays `example.hq.spike`, so an update keeps the data).
+The icon reuses the web app's own artwork: the adaptive icon's foreground is `hq-icon-maskable-512.png`
+on the manifest's background colour, with a monochrome layer for themed icons, and the notification
+glyph is a white silhouette of the same mark at the five densities, so the launcher icon and the
+notification icon are one mark. Regenerate them from `apps/hq-web/public/icons/` if the artwork changes.
+
+HQ's web push needs a browser push service, which a WebView does not have, so the app does its own:
+every 20 seconds `Alerts` asks the local `hq` for unread notifications (approvals waiting on you and
+`notify_owner` messages) and posts each new one as an Android notification on the `Alerts` channel;
+tapping one opens the app on `/notifications`. The first poll after an install only records what is
+already unread. Alerts arrive while the app's service is running and `hq` is up, within about 20
+seconds; they need no Google services. Web push for browsers and Home Screen apps is a separate
+server setting (`web_push.enabled`) and is not needed for this app. Android 13 asks once for the
+notification permission; also turn off "Remove permissions if app is unused" for the app, or Android
+can revoke it after months without opening it.
 
 ## Credentials and the mode flag
 

@@ -9,8 +9,12 @@ import java.nio.file.NoSuchFileException;
 import java.nio.file.Path;
 import java.nio.file.StandardOpenOption;
 import java.nio.file.attribute.BasicFileAttributes;
+import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.regex.Pattern;
 
 /** Parsing, file handling and decisions that need no Android classes, so apps/android/check.sh can test them on a plain JDK. */
@@ -19,6 +23,7 @@ final class HubConfig {
     static final int MAX_VALUE_CHARS = 4096;
     static final long MAX_FILE_BYTES = 64 * 1024;
     static final String MODE_ACTIVE = "active";
+    static final int SEEN_CAP = 300;
 
     // Credentials only. A name that ends in _API_KEY or _TOKEN cannot be one of the switches hq reads
     // straight from the environment (HQ_MCP_DEV_NO_AUTH, HQ_BIN_PATH, HQ_VAULT_PATH, ...), and LD_PRELOAD,
@@ -56,6 +61,33 @@ final class HubConfig {
     /** True for a name a credential file may set; the same rule filters what is already stored. */
     static boolean isCredentialName(String name) {
         return NAME.matcher(name).matches() && !RESERVED.equals(name);
+    }
+
+    /** Ids in the order given that are not in seen. */
+    static List<String> unseen(List<String> ids, List<String> seen) {
+        Set<String> known = new HashSet<>(seen);
+        List<String> out = new ArrayList<>();
+        for (String id : ids) {
+            if (known.add(id)) out.add(id);
+        }
+        return out;
+    }
+
+    /** The seen list after adding ids: no repeats, newest last, the oldest dropped past the cap. */
+    static List<String> remember(List<String> seen, List<String> added, int cap) {
+        List<String> out = new ArrayList<>();
+        Set<String> kept = new HashSet<>();
+        for (List<String> part : java.util.Arrays.asList(seen, added)) {
+            for (String id : part) {
+                if (kept.add(id)) out.add(id);
+            }
+        }
+        return out.size() <= cap ? out : new ArrayList<>(out.subList(out.size() - cap, out.size()));
+    }
+
+    /** A page to open from outside the app: a short lowercase path, else the home page. */
+    static String safePath(String path) {
+        return path != null && path.matches("/[a-z]{1,20}") ? path : "/";
     }
 
     /** The child's environment: credentials first, then the app's own settings, which always win. */

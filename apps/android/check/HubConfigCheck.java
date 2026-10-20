@@ -15,6 +15,7 @@ public class HubConfigCheck {
         parsing();
         rejections();
         environment();
+        alerts();
         files();
         System.out.println("HubConfig checks passed");
     }
@@ -51,6 +52,18 @@ public class HubConfigCheck {
         StringBuilder many = new StringBuilder();
         for (int i = 0; i <= HubConfig.MAX_SECRETS; i++) many.append("N").append(i).append("_TOKEN=").append(MARK).append('\n');
         rejected(many.toString(), "too many names");
+    }
+
+    private static void alerts() {
+        java.util.List<String> seen = java.util.Arrays.asList("a", "b");
+        assert HubConfig.unseen(java.util.Arrays.asList("d", "b", "c", "a", "d"), seen).equals(java.util.Arrays.asList("d", "c")) : "new ids only, in order, once";
+        assert HubConfig.unseen(java.util.Arrays.asList("a"), seen).isEmpty() && HubConfig.unseen(java.util.Collections.<String>emptyList(), seen).isEmpty();
+        assert HubConfig.remember(seen, java.util.Arrays.asList("c", "a", "d"), 10).equals(java.util.Arrays.asList("a", "b", "c", "d")) : "no repeats, newest last";
+        assert HubConfig.remember(java.util.Arrays.asList("1", "2", "3"), java.util.Arrays.asList("4", "5"), 3).equals(java.util.Arrays.asList("3", "4", "5")) : "oldest dropped past the cap";
+        assert HubConfig.safePath("/notifications").equals("/notifications") && HubConfig.safePath("/").equals("/") : "plain paths pass";
+        for (String bad : new String[] {null, "", "notifications", "/../x", "/a/b", "/Tasks", "//evil.example", "/a?x=1", "/a#t", "/" + "a".repeat(21)}) {
+            assert HubConfig.safePath(bad).equals("/") : bad;
+        }
     }
 
     private static void environment() {

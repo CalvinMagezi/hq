@@ -2,6 +2,8 @@ package example.hq.spike;
 
 import android.app.Activity;
 import android.content.Intent;
+import android.content.pm.PackageManager;
+import android.os.Build;
 import android.os.Bundle;
 import android.os.Handler;
 import android.os.Looper;
@@ -20,6 +22,10 @@ public class MainActivity extends Activity {
     private static final String BASE = "http://127.0.0.1:" + HubService.PORT;
     private static final int HEALTH_POLLS = 600;
     private static final int HEALTH_POLL_MS = 100;
+    static final String EXTRA_PATH = "path";
+    private static final String POST_NOTIFICATIONS = "android.permission.POST_NOTIFICATIONS";
+    private static final int REQUEST_NOTIFICATIONS = 1;
+    private String path = "/";
     private WebView web;
     private final Handler ui = new Handler(Looper.getMainLooper());
 
@@ -32,6 +38,10 @@ public class MainActivity extends Activity {
             Log.e(HubService.TAG, "asset copy failed: " + e);
         }
         startForegroundService(new Intent(this, HubService.class));
+        path = HubConfig.safePath(getIntent().getStringExtra(EXTRA_PATH));
+        if (Build.VERSION.SDK_INT >= 33 && checkSelfPermission(POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) {
+            requestPermissions(new String[] {POST_NOTIFICATIONS}, REQUEST_NOTIFICATIONS);
+        }
 
         web = new WebView(this);
         WebSettings s = web.getSettings();
@@ -43,6 +53,16 @@ public class MainActivity extends Activity {
         new Thread(this::waitHealthThenLoad, "health").start();
     }
 
+    @Override
+    protected void onNewIntent(Intent intent) {
+        super.onNewIntent(intent);
+        try {
+            web.loadUrl(BASE + HubConfig.safePath(intent.getStringExtra(EXTRA_PATH)) + "#token=" + HubService.token(this));
+        } catch (IllegalStateException e) {
+            Log.e(HubService.TAG, "cannot open the web token: " + e.getMessage());
+        }
+    }
+
     private void waitHealthThenLoad() {
         for (int i = 0; i < HEALTH_POLLS; i++) {
             try {
@@ -50,7 +70,7 @@ public class MainActivity extends Activity {
                 c.setConnectTimeout(500);
                 c.setReadTimeout(500);
                 if (c.getResponseCode() == 200) {
-                    String url = BASE + "/#token=" + HubService.token(this);
+                    String url = BASE + path + "#token=" + HubService.token(this);
                     ui.post(() -> web.loadUrl(url));
                     return;
                 }
