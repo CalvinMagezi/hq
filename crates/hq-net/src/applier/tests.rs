@@ -4,9 +4,10 @@
 use super::*;
 use crate::key;
 use std::cell::RefCell;
+use std::ops::Deref;
 use std::os::unix::fs::{OpenOptionsExt, PermissionsExt, symlink};
 use std::rc::Rc;
-use std::sync::mpsc;
+use std::sync::{Mutex, MutexGuard, PoisonError, mpsc};
 use std::time::Duration;
 
 fn me() -> u32 {
@@ -719,10 +720,37 @@ fn a_peer_that_went_live_is_on_record_even_if_the_next_round_is_refused() {
     assert_eq!(wg.calls.borrow().len(), 1);
 }
 
-fn script_wg(dir: &Path, body: &str) -> SystemWg {
+/// Taken while a stand-in program is written and run: a fork in another test thread would hold a
+/// copy of the writer's open fd until its own exec, and our exec would fail with ETXTBSY.
+static SPAWN: Mutex<()> = Mutex::new(());
+
+/// A stand-in program that keeps `SPAWN` until the test drops it, so a test cannot forget the lock.
+/// Take one per test: a second would wait on the first for ever.
+struct Scripted<T> {
+    program: T,
+    _spawn: MutexGuard<'static, ()>,
+}
+
+impl<T> Deref for Scripted<T> {
+    type Target = T;
+    fn deref(&self) -> &T {
+        &self.program
+    }
+}
+
+fn spawn_lock() -> MutexGuard<'static, ()> {
+    // A test that failed an assertion poisons the lock; the next test must still run.
+    SPAWN.lock().unwrap_or_else(PoisonError::into_inner)
+}
+
+fn script_wg(dir: &Path, body: &str) -> Scripted<SystemWg> {
+    let _spawn = spawn_lock();
     let path = dir.join("wg");
     write(&path, format!("#!/bin/sh\n{body}\n").as_bytes(), 0o700);
-    SystemWg { path }
+    Scripted {
+        program: SystemWg { path },
+        _spawn,
+    }
 }
 
 #[test]
@@ -785,6 +813,7 @@ fn the_real_wg_applies_a_peer_to_a_real_interface() {
     // Opt-in only. Creates and deletes an interface named hqnettest0, so it needs root and
     // wireguard support in the kernel, and it must not run on a machine whose network matters.
     assert_eq!(me(), ROOT_UID, "run this as root");
+    let _spawn = spawn_lock();
     let wg = SystemWg::locate(None).expect("wg must be installed");
     let ip = |args: &[&str]| {
         Command::new("ip")
@@ -1039,12 +1068,16 @@ fn the_nft_path_is_taken_once_and_must_be_absolute_and_roots() {
     assert!(SystemNft::new(Some(&fake)).resolve().is_err());
 }
 
-fn script_nft(dir: &Path, body: &str) -> SystemNft {
+fn script_nft(dir: &Path, body: &str) -> Scripted<SystemNft> {
+    let _spawn = spawn_lock();
     let path = dir.join("nft");
     write(&path, format!("#!/bin/sh\n{body}\n").as_bytes(), 0o700);
-    SystemNft {
-        explicit: None,
-        resolved: Some(path),
+    Scripted {
+        program: SystemNft {
+            explicit: None,
+            resolved: Some(path),
+        },
+        _spawn,
     }
 }
 
