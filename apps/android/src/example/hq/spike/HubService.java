@@ -12,7 +12,13 @@ import android.os.Build;
 import android.os.IBinder;
 import android.util.Log;
 import java.io.File;
+import java.io.IOException;
+import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
 import java.security.SecureRandom;
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.List;
 import java.util.Map;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -94,12 +100,25 @@ public class HubService extends Service {
         }
     }
 
+    /**
+     * Standby runs the web app only. files/mode containing "active" runs the daemon with the relays
+     * and the scheduler, which must never run at the same time as another instance on the same data.
+     * Credentials come from the Keystore-backed store and are applied before the fixed settings, so
+     * they cannot change the vault, config, bind address or port.
+     */
     private ProcessBuilder hqProcess() {
+        SecretStore.importPending(this, new File(getFilesDir(), "secrets.in"));
+        boolean active = HubConfig.isActive(readSmall(new File(getFilesDir(), "mode")));
+        Log.i(TAG, "hq mode: " + (active ? "active (daemon, relays)" : "standby (web only)"));
         File lib = new File(getApplicationInfo().nativeLibraryDir, "libhq.so");
         File home = new File(getFilesDir(), "hqhome");
         home.mkdirs();
-        ProcessBuilder pb = new ProcessBuilder(lib.getPath(), "web", "--no-open", "--port", String.valueOf(PORT), "--bind", "127.0.0.1");
+        List<String> cmd = new ArrayList<>();
+        cmd.add(lib.getPath());
+        cmd.addAll(Arrays.asList(HubConfig.hqArgs(active, PORT)));
+        ProcessBuilder pb = new ProcessBuilder(cmd);
         Map<String, String> env = pb.environment();
+        env.putAll(SecretStore.load(this));
         env.put("HOME", home.getPath());
         env.put("TMPDIR", getCacheDir().getPath());
         env.put("HQ_PROFILE", "mobile");
@@ -107,8 +126,18 @@ public class HubService extends Service {
         env.put("HQ_CONFIG_PATH", new File(home, "config.yaml").getPath());
         env.put("HQ_WEB_STATIC_DIR", new File(getFilesDir(), "web").getPath());
         env.put("HQ_WEB_AUTH_TOKEN", token(this));
+        env.put("HQ_WEB_BIND", "127.0.0.1");
+        env.put("HQ_WS_PORT", String.valueOf(PORT));
         pb.redirectErrorStream(true).redirectOutput(ProcessBuilder.Redirect.appendTo(trimmed(new File(getFilesDir(), "hq.log"))));
         return pb;
+    }
+
+    private static String readSmall(File f) {
+        try {
+            return f.isFile() ? new String(Files.readAllBytes(f.toPath()), StandardCharsets.UTF_8) : null;
+        } catch (IOException e) {
+            return null;
+        }
     }
 
     /** The owner pushes files/Caddyfile (sites, bind address, certificates); without it Caddy stays off. */
