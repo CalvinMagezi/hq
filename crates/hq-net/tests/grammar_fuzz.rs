@@ -3,8 +3,12 @@
 //! but the three allowed settings, every peer obeys the policy, and rendering and parsing again
 //! gives the same peers. The seeds are fixed so a failure reproduces; set `HQ_NET_FUZZ_SEED` to explore.
 
-use hq_net::grammar::{self, MAX_PEERS, Peer, Policy, parse, render, render_labeled};
+use hq_net::grammar::{
+    self, Link, MAX_LINKS, MAX_PEERS, Parsed, Peer, Policy, parse, parse_file, render, render_file,
+    render_labeled,
+};
 use hq_net::key;
+use hq_net::links;
 use hq_net::subnet::Subnet;
 use hq_net::wgconf;
 use rand::rngs::StdRng;
@@ -367,6 +371,201 @@ fn a_file_cut_short_at_any_byte_is_always_refused() {
             assert!(
                 parse(&bytes[..cut], policy).is_err(),
                 "a file cut at byte {cut} of {} was accepted",
+                bytes.len()
+            );
+        }
+    }
+}
+
+/// A random set of links among `peers`, each pair once.
+fn random_links(rng: &mut StdRng, peers: &[Peer]) -> Vec<Link> {
+    let mut links = Vec::new();
+    let mut seen = HashSet::new();
+    if peers.len() < 2 {
+        return links;
+    }
+    for _ in 0..rng.gen_range(0..=12usize.min(MAX_LINKS)) {
+        let x = peers[rng.gen_range(0..peers.len())].address;
+        let y = peers[rng.gen_range(0..peers.len())].address;
+        if let Some(link) = Link::new(x, y)
+            && seen.insert(link)
+        {
+            links.push(link);
+        }
+    }
+    links
+}
+
+/// What an accepted version 2 file must look like, checked on the bytes: the version 1 rules plus
+/// the two link settings, and no forwarding language of any other kind.
+fn assert_only_allowed_lines_v2(input: &[u8]) {
+    assert!(
+        input
+            .iter()
+            .all(|b| *b == b'\n' || (0x20..=0x7e).contains(b)),
+        "bytes outside printable ASCII were accepted"
+    );
+    let text = std::str::from_utf8(input).unwrap();
+    assert!(text.ends_with('\n'));
+    for line in text.lines().skip(1) {
+        let line = line.trim_matches(' ');
+        if line.is_empty() || line.starts_with('#') || line == "[Peer]" || line == "[Link]" {
+            continue;
+        }
+        let name = line.split('=').next().unwrap().trim_matches(' ');
+        assert!(
+            ["PublicKey", "AllowedIPs", "PresharedKey", "A", "B"].contains(&name)
+                && line.contains('='),
+            "an accepted file holds a line that is not allowed: {line:?}"
+        );
+    }
+}
+
+/// Whatever was accepted, the pairs the hub would be told to allow are exactly the addresses of
+/// admitted peers, in order, once each, and the nft script holds nothing else.
+fn assert_accepted_v2_is_sound(input: &[u8], parsed: &Parsed, policy: &Policy) {
+    assert_only_allowed_lines_v2(input);
+    assert_accepted_is_sound_peers(&parsed.peers, policy);
+    let Some(parsed_links) = &parsed.links else {
+        panic!("a version 2 file must carry a list of links, even an empty one");
+    };
+    assert!(parsed_links.len() <= MAX_LINKS);
+    let addresses: HashSet<Ipv4Addr> = parsed.peers.iter().map(|p| p.address).collect();
+    let mut seen = HashSet::new();
+    for link in parsed_links {
+        assert!(
+            link.a < link.b,
+            "a link must be in order and between two devices"
+        );
+        assert!(addresses.contains(&link.a) && addresses.contains(&link.b));
+        assert!(seen.insert(*link), "a pair was accepted twice");
+    }
+    let script = links::script("hq0", parsed_links).unwrap();
+    for word in script.split(|c: char| " ,{}\n".contains(c)) {
+        if let Ok(address) = word.parse::<Ipv4Addr>() {
+            assert!(addresses.contains(&address), "the script names {address}");
+        } else {
+            assert!(
+                [
+                    "flush",
+                    "set",
+                    "inet",
+                    "hq_net",
+                    "links_hq0",
+                    "add",
+                    "element",
+                    ".",
+                    ""
+                ]
+                .contains(&word),
+                "unexpected word in the script: {word:?}"
+            );
+        }
+    }
+}
+
+fn assert_accepted_is_sound_peers(peers: &[Peer], policy: &Policy) {
+    let mut addresses = HashSet::new();
+    let mut keys = HashSet::new();
+    for peer in peers {
+        assert!(policy.subnet().is_usable_host(peer.address));
+        assert_ne!(peer.address, policy.hub());
+        assert!(key::is_usable(&peer.public_key));
+        assert!(addresses.insert(peer.address));
+        assert!(keys.insert(peer.public_key.clone()));
+    }
+}
+
+#[test]
+fn mutated_valid_version_2_files_are_refused_or_sound() {
+    let mut rng = StdRng::seed_from_u64(seed() ^ 4);
+    let policies = policies();
+    let (mut accepted, mut refused) = (0usize, 0usize);
+    for round in 0..ROUNDS {
+        let policy = &policies[round % policies.len()];
+        let peers = random_peers(&mut rng, policy);
+        let wanted = random_links(&mut rng, &peers);
+        let labels: Vec<String> = (0..peers.len()).map(|i| format!("device-{i}")).collect();
+        let entries: Vec<(&str, &Peer)> = labels
+            .iter()
+            .map(String::as_str)
+            .zip(peers.iter())
+            .collect();
+        let mut bytes = render_file(&entries, Some(&wanted)).into_bytes();
+        let parsed = parse_file(&bytes, policy).expect("the unmutated file must parse");
+        assert_eq!(parsed.peers, peers);
+        assert_eq!(parsed.links.as_deref(), Some(wanted.as_slice()));
+        assert!(
+            parse(&bytes, policy).is_err(),
+            "the version 1 reader must refuse it"
+        );
+        for _ in 0..rng.gen_range(1..=MAX_MUTATIONS) {
+            mutate(&mut rng, &mut bytes);
+        }
+        match parse_file(&bytes, policy) {
+            Ok(parsed) if parsed.links.is_some() => {
+                accepted += 1;
+                assert_accepted_v2_is_sound(&bytes, &parsed, policy);
+            }
+            Ok(parsed) => {
+                accepted += 1;
+                assert_accepted_is_sound(&bytes, &parsed.peers, policy);
+            }
+            Err(_) => refused += 1,
+        }
+    }
+    assert!(refused > ROUNDS / 4, "{refused} of {ROUNDS}");
+    assert!(accepted > 0, "{accepted}");
+}
+
+#[test]
+fn a_forbidden_line_anywhere_in_a_valid_version_2_file_is_always_refused() {
+    let mut rng = StdRng::seed_from_u64(seed() ^ 5);
+    let policies = policies();
+    let extra: [&str; 5] = [
+        "[Link] [Peer]",
+        "A = 10.77.0.2/32, 10.77.0.3/32",
+        "C = 10.77.0.2/32",
+        "Ports = 22",
+        "Policy = accept",
+    ];
+    for round in 0..ROUNDS {
+        let policy = &policies[round % policies.len()];
+        let peers = random_peers(&mut rng, policy);
+        let wanted = random_links(&mut rng, &peers);
+        let entries: Vec<(&str, &Peer)> = peers.iter().map(|p| ("", p)).collect();
+        let text = render_file(&entries, Some(&wanted));
+        let mut lines: Vec<&str> = text.lines().collect();
+        let all: Vec<&str> = FORBIDDEN_LINES
+            .iter()
+            .chain(extra.iter())
+            .copied()
+            .collect();
+        let forbidden = all[rng.gen_range(0..all.len())];
+        let at = rng.gen_range(1..lines.len());
+        lines.insert(at, forbidden);
+        let mutated = lines.join("\n") + "\n";
+        assert!(
+            parse_file(mutated.as_bytes(), policy).is_err(),
+            "accepted {forbidden:?} at line {}",
+            at + 1
+        );
+    }
+}
+
+#[test]
+fn a_version_2_file_cut_short_at_any_byte_is_always_refused() {
+    let mut rng = StdRng::seed_from_u64(seed() ^ 6);
+    let policy = &policies()[0];
+    for _ in 0..60 {
+        let peers = random_peers(&mut rng, policy);
+        let wanted = random_links(&mut rng, &peers);
+        let entries: Vec<(&str, &Peer)> = peers.iter().map(|p| ("", p)).collect();
+        let bytes = render_file(&entries, Some(&wanted)).into_bytes();
+        for cut in 0..bytes.len() {
+            assert!(
+                parse_file(&bytes[..cut], policy).is_err(),
+                "a version 2 file cut at byte {cut} of {} was accepted",
                 bytes.len()
             );
         }

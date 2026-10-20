@@ -6,7 +6,8 @@
 use hq_net::grammar::{self, Policy};
 use hq_net::init::{InitContext, InitOptions, init};
 use hq_net::key::PrivateKey;
-use hq_net::ops::{AddRequest, apply, peer_add, peer_revoke};
+use hq_net::links;
+use hq_net::ops::{AddRequest, apply, link_add, link_remove, peer_add, peer_revoke};
 use hq_net::store::{Kind, Store};
 use hq_net::wgconf;
 use std::os::unix::fs::PermissionsExt;
@@ -235,4 +236,69 @@ fn nothing_is_added_while_the_hub_key_is_still_staged_and_a_revoke_still_works()
     assert!(peer_add(&plane.store, &plane.spool, &request, &mut Vec::new()).is_err());
     peer_revoke(&plane.store, &plane.spool, "mac", &mut Vec::new()).unwrap();
     assert!(!String::from_utf8(plane.input()).unwrap().contains("# mac"));
+}
+
+#[test]
+fn a_link_reaches_the_firewall_script_as_two_directed_pairs_and_nothing_else() {
+    let plane = Plane::new();
+    plane.add("mac", Kind::Laptop, false);
+    plane.add("pixel", Kind::Phone, false);
+    plane.add("tablet", Kind::Laptop, false);
+    link_add(
+        &plane.store,
+        &plane.spool,
+        "pixel",
+        "mac",
+        true,
+        &mut Vec::new(),
+    )
+    .unwrap();
+
+    let parsed = grammar::parse_file(&plane.input(), &plane.policy()).unwrap();
+    assert_eq!(parsed.peers.len(), 3);
+    let wanted = parsed.links.expect("a version 2 file");
+    let script = links::script("hq0", &wanted).unwrap();
+    assert_eq!(
+        script,
+        "flush set inet hq_net links_hq0\nadd element inet hq_net links_hq0 { 10.77.0.2 . 10.77.0.3, 10.77.0.3 . 10.77.0.2 }\n",
+        "the tablet at 10.77.0.4 is in no pair"
+    );
+    assert!(
+        grammar::parse(&plane.input(), &plane.policy()).is_err(),
+        "a reader that does not know links refuses the file"
+    );
+
+    link_remove(&plane.store, &plane.spool, "mac", "pixel", &mut Vec::new()).unwrap();
+    let parsed = grammar::parse_file(&plane.input(), &plane.policy()).unwrap();
+    assert_eq!(parsed.links, Some(vec![]));
+    assert_eq!(
+        links::script("hq0", &[]).unwrap(),
+        "flush set inet hq_net links_hq0\n"
+    );
+}
+
+#[test]
+fn revoking_a_linked_device_leaves_no_pair_for_its_address() {
+    let plane = Plane::new();
+    plane.add("mac", Kind::Laptop, false);
+    plane.add("pixel", Kind::Phone, false);
+    link_add(
+        &plane.store,
+        &plane.spool,
+        "mac",
+        "pixel",
+        true,
+        &mut Vec::new(),
+    )
+    .unwrap();
+    peer_revoke(&plane.store, &plane.spool, "pixel", &mut Vec::new()).unwrap();
+    let parsed = grammar::parse_file(&plane.input(), &plane.policy()).unwrap();
+    assert_eq!(parsed.peers.len(), 1);
+    assert_eq!(parsed.links, Some(vec![]));
+    // The address is retired: a new device does not get the revoked one's pairs by taking its place.
+    let again = plane.add("watch", Kind::Phone, false);
+    let parsed = grammar::parse_file(&plane.input(), &plane.policy()).unwrap();
+    let newcomer = parsed.peers.iter().find(|p| p.public_key == again).unwrap();
+    assert_ne!(newcomer.address.to_string(), "10.77.0.3");
+    assert_eq!(parsed.links, Some(vec![]));
 }

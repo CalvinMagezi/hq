@@ -42,14 +42,15 @@ prints five steps. Read them, then run them:
 2. Create `/etc/wireguard/hq0.conf`. It reads the key from its file and turns forwarding off for
    the interface.
 3. Load a small firewall table that drops anything that would cross `hq0`, so one device cannot
-   reach another. Add the same table to your own firewall configuration to keep it after a reboot.
-   If your firewall drops inbound UDP by default, allow `51820/udp` too.
+   reach another, except the pairs you link later (below; the table has an empty set for them).
+   Add the same table to your own firewall configuration to keep it after a reboot. If your
+   firewall drops inbound UDP by default, allow `51820/udp` too.
 4. Install the applier (below) and the three systemd units (service, path unit and timer).
 5. Start the interface and enable the applier's service, path unit and timer; the exact `systemctl` commands are printed.
 
 The command also reports the machine's real `net.ipv4.ip_forward` value. The hub does not need
 forwarding and does not depend on it; step 2 and step 3 hold whether it is 0 or 1. Do not change
-it for this.
+it for this. (Linking two devices does need forwarding on `hq0`; see "Linking two devices".)
 
 Running `hq net init` again never makes a second key. It shows the steps again, and `--endpoint`
 updates the server address.
@@ -88,8 +89,8 @@ What the applier does, in order, and what it refuses:
 | Arguments | Interface, subnet, hub address and the owner's user id come from the unit and a root-owned file in `/etc/hq-net`, never from the input. Each flag once, nothing unknown. |
 | Open | The input path is walked one component at a time with links refused at every step, and the file is opened without blocking, so a link or a FIFO planted there cannot redirect or hang it. |
 | Check the open file | A plain file, owned by the expected user, mode without group or other access, exactly one name, at most 64 KiB, in a directory only root or that user owns and others cannot write. |
-| Parse | Printable ASCII only. First line `# hq-net peers v1`, last line `# hq-net end <n>` with the number of peers read. Only `[Peer]` sections with `PublicKey` (44 characters of base64, 32 bytes), `PresharedKey` (same, optional) and `AllowedIPs` (exactly one IPv4 address written `a.b.c.d/32`, inside the subnet, not the hub, not the network or broadcast address). No duplicate address or key, at most 64 peers. `[Interface]`, `PostUp`, `PreUp`, `Table`, `Endpoint`, `PrivateKey`, any other key, a key in another case, inline comments, tabs and carriage returns all refuse the whole file. |
-| Apply | Only then `wg` is started, by absolute path in a distribution directory (and only if root owns it and others cannot write it; use `--wg` for another place), with an empty environment and no shell. It receives text the applier rendered from the parsed peers, never the file's own bytes. |
+| Parse | Printable ASCII only. First line `# hq-net peers v1`, last line `# hq-net end <n>` with the number of peers read. (Version 2, written only after the owner links two devices, has `# hq-net peers v2`, `[Link]` sections with `A` and `B` after all the peers, each naming the address of a peer in the file, and the last line `# hq-net end <n> links <m>`.) Only `[Peer]` sections with `PublicKey` (44 characters of base64, 32 bytes), `PresharedKey` (same, optional) and `AllowedIPs` (exactly one IPv4 address written `a.b.c.d/32`, inside the subnet, not the hub, not the network or broadcast address). No duplicate address or key, at most 64 peers. `[Interface]`, `PostUp`, `PreUp`, `Table`, `Endpoint`, `PrivateKey`, any other key, a key in another case, inline comments, tabs and carriage returns all refuse the whole file. |
+| Apply | For a version 2 file, first `nft` replaces the contents of the set of linked pairs in one transaction (see "Linking two devices"); a failure there is reported and does not stop `wg`. Then `wg` is started, by absolute path in a distribution directory (and only if root owns it and others cannot write it; use `--wg` for another place), with an empty environment and no shell. It receives text the applier rendered from the parsed peers, never the file's own bytes. |
 | Record | After each successful `wg` call it prints how many peers the interface has and what that run added, removed or moved (address and the first characters of the public key); an unchanged run prints one line, so the timer does not fill the journal. The record is written before the input is read again. If that second read or round fails, the error says how many peers were already applied. If `wg` itself fails, the run records what it was trying to change as "attempted", because the kernel may have taken part of it. A changed preshared key is not shown in these lines. `journalctl -u 'hq-net-apply@*'` shows the history. |
 
 A refusal prints the line number and the rule, never the text of the line, and changes nothing. A
@@ -228,6 +229,93 @@ nmap -p- example.com
 HQ's web UI, MCP and host gate must not appear. Putting the web UI on the tunnel address behind a
 trusted certificate is the next phase of the plan and is not part of `hq net` yet.
 
+## Linking two devices
+
+By default no device can reach another: the hub drops everything that crosses `hq0`. When one
+device must reach one other (a Mac reaching an HQ that runs on a phone, say), link the two:
+
+```
+hq net link add mac phone --applier-updated   # the first time; see below
+hq net link list
+hq net link remove mac phone
+```
+
+The hub then forwards between exactly those two addresses, in both directions and on every port,
+and between no other pair. A link names two devices that exist; revoking either device removes its
+links in the same write, and its address is retired, so a device added later cannot inherit them.
+`hq net link add` also prints, for each of the two devices, the `AllowedIPs` line to set in its
+WireGuard app (the hub's address plus the other device's), because a device only sends into the
+tunnel what its own `AllowedIPs` names. A phone that must be reachable from outside its own
+network also needs `PersistentKeepalive = 25` on its side, or the carrier closes the path.
+
+Two things on the hub have to be in place first, once. Do them before the first `link add`: an
+applier that does not know links refuses the version 2 file that `link add` writes, and applies
+nothing from it until it is replaced (the timer tries again every five minutes).
+
+1. Build and install the applier again (step 4 of the setup), from a checkout that has links.
+2. Load the firewall table with its set and turn forwarding on in the same place, so a hub that
+   lost its table cannot be left forwarding. Put the table in `/etc/hq-net/hq_net.nft`:
+
+   ```
+   add table inet hq_net
+   delete table inet hq_net
+   table inet hq_net {
+     set links_hq0 {
+       type ipv4_addr . ipv4_addr
+     }
+     chain forward {
+       type filter hook forward priority -10; policy accept;
+       iifname "hq0" oifname "hq0" ip saddr . ip daddr @links_hq0 accept
+       iifname "hq0" drop
+       oifname "hq0" drop
+     }
+   }
+   ```
+
+   and in `/etc/wireguard/hq0.conf` replace the `sysctl` line of step 2 with these two, in this
+   order. If `nft` fails, `wg-quick` stops before the second line, so forwarding stays off:
+
+   ```
+   PostUp = nft -f /etc/hq-net/hq_net.nft
+   PostUp = sysctl -q -w net.ipv4.conf.%i.forwarding=1
+   ```
+
+   Also include the same file from the system's nftables configuration, after any `flush
+   ruleset` it starts with (on Debian and Ubuntu `/etc/nftables.conf`: add `include
+   "/etc/hq-net/hq_net.nft"` as its last line). Without that, `systemctl reload nftables` removes
+   the table while `hq0` still forwards, and every device can reach every other until the table is
+   back. The set is empty after such a reload and the applier fills it again within five minutes;
+   until then the linked pairs do not work, which is the safe way round.
+
+   Then `sudo systemctl restart wg-quick@hq0`. The applier starts with the tunnel and fills the
+   set from the input file. Never `reload` (see step 5 of the setup).
+
+How the applier handles it: a version 1 file (no link was ever added) is applied as before and
+never touches `nft`. A version 2 file replaces the contents of the `links_hq0` set in one `nft`
+transaction, before the peers go to `wg`, so a pair is closed no later than a device is cut off.
+If `nft` fails, the peers are still applied (a revocation never waits for the firewall), the run
+fails, and the journal says that forwarding is unchanged and may allow more than the file does. The
+set holds addresses and nothing else; the rules are yours and never change.
+
+Check it after every change, from a third device that is in no pair: it must not reach either end.
+`sudo nft list set inet hq_net links_hq0` shows the pairs the hub allows, both directions of each.
+
+What linking does not do:
+
+- It does not restrict ports. A linked device can reach every port of the other. Put the guard on
+  the service: the web login, the gate's signature.
+- It does not hide traffic from the hub. The hub decrypts a packet from one device and encrypts it
+  again for the other, so whoever controls the hub can read what passes between linked devices.
+  Every service across a link has to protect itself (TLS for the web UI, an encrypted channel for
+  the gate).
+- If another firewall (ufw, firewalld) also filters forwarded traffic, it has to allow traffic from
+  `hq0` out through `hq0`, and then the table above is the only thing limiting who may talk. Keep
+  it loaded at boot (the `PostUp` line does that) and run the check above after every change.
+- The set is IPv4 only, like the plane.
+- Once a link has been added there is no way back to a version 1 input, and a build of `hq`
+  from before links refuses the new `peers.toml` (an unknown table is an error, on purpose), so a
+  revocation made with it would not be written. Keep `hq` and the applier current together.
+
 ## Files
 
 `net.toml` and `peers.toml` are read strictly. The interface name (always `hq0`; anything else was
@@ -244,13 +332,14 @@ wireguard-go would need.
 | Path | What | Who writes it |
 |---|---|---|
 | `~/.hq/net/net.toml` | Subnet, hub address, port, endpoint, hub public key. Nothing secret. | `hq net init` |
-| `~/.hq/net/peers.toml` | Devices. Mode 0600. An unknown field or table is an error, not an empty list. | `hq net peer ...` |
+| `~/.hq/net/peers.toml` | Devices and, once `hq net link add` has been used, their links. Mode 0600. An unknown field or table is an error, not an empty list. | `hq net peer ...`, `hq net link ...` |
 | `~/.hq/net/retired` | Addresses of revoked devices, one per line. Kept apart from `peers.toml` so damage to that file cannot lose it. `hq net` never reuses them. The applier does not read this file, so a hand edit of it or of `peers.toml` can hand an address out again. | `hq net peer revoke` |
 | `~/.hq/net/hub.key` | The hub's private key, until you move it in step 1. | `hq net init` |
-| `/var/lib/hq-net/hq0.conf` | The applier's input. Owned by your user, mode 0600. | `hq net apply` |
+| `/var/lib/hq-net/hq0.conf` | The applier's input. Owned by your user, mode 0600. Version 1 until the first link is added, version 2 after. | `hq net apply` |
 | `/etc/hq-net/hq0.env` | Subnet, hub address and owner id the applier trusts. Root-owned. | you, step 4 |
 | `/opt/hq-net/hq-net-apply` | The applier. Root-owned directory and file. | you, step 4 |
 | `/etc/wireguard/hq0.{conf,key}` | The interface and its key. Root-owned. | you, steps 1 and 2 |
+| `/etc/hq-net/hq_net.nft` | The firewall table with the set of linked pairs, if you link devices. Root-owned. | you, "Linking two devices" |
 
 ## What is not done yet
 
@@ -270,6 +359,18 @@ wireguard-go would need.
 - The service carries confinement directives (capability bounding set, read-only system, no new
   privileges, no core dumps and others) that were not run under a live systemd either. If the unit
   fails to start, `systemctl status hq-net-apply@hq0` names the directive.
+- Linking has not been run on a live hub. What was run: the table, the set and the script on a
+  real kernel (Docker Desktop's Linux VM, kernel 7.0.14, nftables 1.0.6, kernel WireGuard, four
+  network namespaces standing in for a hub and three devices). There, with `hq0` forwarding at 1
+  and the global `ip_forward` at 0 and then at 1: nothing was forwarded with an empty set; after
+  the script for one pair, those two devices reached each other in both directions and a third
+  device reached neither; an empty script closed the pair again; a script with a bad line left
+  the set as it was; and with the table deleted and forwarding still 1, every device reached every
+  other (why the table is included from the nftables configuration). Still to check on a spare
+  VM: that `nft -f -` runs under the unit's confinement (`PrivateDevices`, netlink only,
+  `CAP_NET_ADMIN`, `SystemCallFilter=@system-service`), that the path holds with `ufw` or
+  `firewalld` running, and that changing the global `ip_forward` later does not undo the
+  per-interface setting (writing `net.ipv4.ip_forward` rewrites every interface's value).
 - The web UI and MCP are not yet served on the tunnel address (phase 2), and Tailscale is not
   removed by this command (phase 3).
 

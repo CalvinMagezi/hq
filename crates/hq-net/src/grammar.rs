@@ -10,6 +10,23 @@
 //! # hq-net end <number of peers>
 //! ```
 //!
+//! A version 2 file adds pairs of devices the hub may forward between, after all the peers:
+//!
+//! ```text
+//! # hq-net peers v2
+//! [Peer]
+//! ...
+//! [Link]
+//! A = <the lower of two admitted addresses>/32
+//! B = <the higher>/32
+//! # hq-net end <number of peers> links <number of links>
+//! ```
+//!
+//! A link names two addresses that belong to peers in the same file. Nothing else about the hub's
+//! forwarding can be said in this language: no ports, no ranges, no interfaces, no rules. A file
+//! with no `[Link]` section is still written as version 1 until the owner adds a first link, so a
+//! hub whose applier knows only version 1 keeps working.
+//!
 //! Anything else is refused and nothing is applied: other sections (`[Interface]`), other keys
 //! (`PostUp`, `PreUp`, `Table`, `Endpoint`, `PrivateKey`), a key spelled in another case, two
 //! values on one line, inline comments, tabs, carriage returns, bytes outside printable ASCII.
@@ -27,14 +44,22 @@ use std::fmt;
 use std::net::Ipv4Addr;
 
 pub const HEADER: &str = "# hq-net peers v1";
+/// The header of a file that carries `[Link]` sections (possibly none: the applier then clears the
+/// hub's list of allowed pairs).
+pub const HEADER_V2: &str = "# hq-net peers v2";
 /// The last line is this followed by the number of peers, so a file cut at a line boundary is caught.
 pub const TRAILER_PREFIX: &str = "# hq-net end ";
 pub const MAX_PEERS: usize = 64;
-/// 64 peers at about 200 bytes each is 13 KiB; anything near this is not a peers file.
+/// A pair for every two of 64 devices would be 2016; nothing here needs more than a few.
+pub const MAX_LINKS: usize = 128;
+/// 64 peers at about 200 bytes each and 128 links at about 60 is 21 KiB; anything near this is not
+/// a peers file.
 pub const MAX_INPUT_BYTES: usize = 64 * 1024;
 pub const MAX_LINE_BYTES: usize = 200;
 const ADDRESS_SUFFIX: &str = "/32";
 const PEER_HEADER: &str = "[Peer]";
+const LINK_HEADER: &str = "[Link]";
+const LINKS_WORD: &str = " links ";
 
 /// One admitted device: its public key, the one address it may use, and an optional preshared key.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -42,6 +67,33 @@ pub struct Peer {
     pub public_key: String,
     pub address: Ipv4Addr,
     pub preshared_key: Option<String>,
+}
+
+/// Two admitted devices the hub may forward between, in both directions. `a` is the lower address,
+/// so a pair has one spelling.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct Link {
+    pub a: Ipv4Addr,
+    pub b: Ipv4Addr,
+}
+
+impl Link {
+    /// The pair of two different addresses, put in order. `None` for a device with itself.
+    pub fn new(x: Ipv4Addr, y: Ipv4Addr) -> Option<Self> {
+        match x.cmp(&y) {
+            std::cmp::Ordering::Less => Some(Self { a: x, b: y }),
+            std::cmp::Ordering::Greater => Some(Self { a: y, b: x }),
+            std::cmp::Ordering::Equal => None,
+        }
+    }
+}
+
+/// What a peers file says. `links` is `None` for a version 1 file, which says nothing about
+/// forwarding, and `Some` (possibly empty) for a version 2 file, which says exactly which pairs.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Parsed {
+    pub peers: Vec<Peer>,
+    pub links: Option<Vec<Link>>,
 }
 
 /// What the applier is told by root, never by the file: the subnet and the hub's own address.
@@ -99,6 +151,14 @@ pub enum Why {
     DuplicatePublicKey,
     DuplicateAddress,
     TooManyPeers,
+    PeerAfterLink,
+    UnknownLinkKey,
+    MissingLinkEnd,
+    LinkToSelf,
+    LinkNotOrdered,
+    LinkToUnknownPeer,
+    DuplicateLink,
+    TooManyLinks,
 }
 
 impl Why {
@@ -113,10 +173,12 @@ impl Why {
             Why::LineTooLong => "the line is too long",
             Why::MissingHeader => "the first line is not the exact header",
             Why::BadTrailer => {
-                "the last line is not the exact trailer for the number of peers read"
+                "the last line is not the exact trailer for the number of peers (and links) read"
             }
-            Why::UnknownSection => "only [Peer] sections are allowed",
-            Why::KeyOutsidePeer => "a setting appears before any [Peer] section",
+            Why::UnknownSection => {
+                "only [Peer] sections (and [Link] sections in a version 2 file) are allowed"
+            }
+            Why::KeyOutsidePeer => "a setting appears before any [Peer] or [Link] section",
             Why::NotKeyValue => "the line is neither a comment, a [Peer] header nor Key = Value",
             Why::UnknownKey => "only PublicKey, AllowedIPs and PresharedKey are allowed",
             Why::DuplicateKey => "the setting appears twice in one peer",
@@ -135,6 +197,14 @@ impl Why {
             Why::DuplicatePublicKey => "another peer already has this PublicKey",
             Why::DuplicateAddress => "another peer already has this address",
             Why::TooManyPeers => "more than 64 peers",
+            Why::PeerAfterLink => "a [Peer] section comes after a [Link] section",
+            Why::UnknownLinkKey => "only A and B are allowed in a [Link] section",
+            Why::MissingLinkEnd => "the link has no A or no B",
+            Why::LinkToSelf => "a link joins a device to itself",
+            Why::LinkNotOrdered => "A must be the lower address and B the higher",
+            Why::LinkToUnknownPeer => "a link names an address that no peer in the file has",
+            Why::DuplicateLink => "another link already joins these two addresses",
+            Why::TooManyLinks => "more than 128 links",
         }
     }
 }
@@ -196,6 +266,32 @@ impl Draft {
     }
 }
 
+/// A link being read: its header line and its two ends.
+struct LinkDraft {
+    line: usize,
+    a: Option<Ipv4Addr>,
+    b: Option<Ipv4Addr>,
+}
+
+impl LinkDraft {
+    fn finish(self) -> Result<(usize, Link), Reject> {
+        let (Some(a), Some(b)) = (self.a, self.b) else {
+            return reject(self.line, Why::MissingLinkEnd);
+        };
+        match a.cmp(&b) {
+            std::cmp::Ordering::Equal => reject(self.line, Why::LinkToSelf),
+            std::cmp::Ordering::Greater => reject(self.line, Why::LinkNotOrdered),
+            std::cmp::Ordering::Less => Ok((self.line, Link { a, b })),
+        }
+    }
+}
+
+/// The section being read.
+enum Block {
+    Peer(Draft),
+    Link(LinkDraft),
+}
+
 /// Bytes the language allows: printable ASCII and the newline.
 fn check_bytes(input: &[u8]) -> Result<(), Reject> {
     let mut line = 1;
@@ -233,6 +329,19 @@ fn set_once<T>(slot: &mut Option<T>, value: T) -> Result<(), Why> {
     Ok(())
 }
 
+fn apply_link_setting(
+    draft: &mut LinkDraft,
+    key_name: &str,
+    value: &str,
+    policy: &Policy,
+) -> Result<(), Why> {
+    match key_name {
+        "A" => set_once(&mut draft.a, parse_address(value, policy)?),
+        "B" => set_once(&mut draft.b, parse_address(value, policy)?),
+        _ => Err(Why::UnknownLinkKey),
+    }
+}
+
 fn apply_setting(
     draft: &mut Draft,
     key_name: &str,
@@ -253,9 +362,37 @@ fn apply_setting(
     }
 }
 
-/// Reads a peers file. Either every line is acceptable and the peers come back in file order, or
-/// the first rule broken comes back and nothing else does.
+/// Reads a version 1 peers file: the peers, and nothing about forwarding. A version 2 file is
+/// refused here; callers that must understand links use [`parse_file`].
 pub fn parse(input: &[u8], policy: &Policy) -> Result<Vec<Peer>, Reject> {
+    read(input, policy, false).map(|parsed| parsed.peers)
+}
+
+/// Reads a peers file of either version. Either every line is acceptable and the contents come
+/// back in file order, or the first rule broken comes back and nothing else does.
+pub fn parse_file(input: &[u8], policy: &Policy) -> Result<Parsed, Reject> {
+    read(input, policy, true)
+}
+
+/// The peers and links read so far, and the section being read.
+struct Reading {
+    peers: Vec<(usize, Peer)>,
+    links: Vec<(usize, Link)>,
+    block: Option<Block>,
+}
+
+impl Reading {
+    fn close(&mut self) -> Result<(), Reject> {
+        match self.block.take() {
+            Some(Block::Peer(done)) => self.peers.push(done.finish()?),
+            Some(Block::Link(done)) => self.links.push(done.finish()?),
+            None => {}
+        }
+        Ok(())
+    }
+}
+
+fn read(input: &[u8], policy: &Policy, accept_links: bool) -> Result<Parsed, Reject> {
     if input.len() > MAX_INPUT_BYTES {
         return reject(0, Why::TooLarge);
     }
@@ -274,15 +411,20 @@ pub fn parse(input: &[u8], policy: &Policy) -> Result<Vec<Peer>, Reject> {
         );
     }
     let all: Vec<&str> = text.lines().collect();
-    if all.first() != Some(&HEADER) {
-        return reject(1, Why::MissingHeader);
-    }
+    let version2 = match all.first() {
+        Some(&HEADER) => false,
+        Some(&HEADER_V2) if accept_links => true,
+        _ => return reject(1, Why::MissingHeader),
+    };
     let Some((&trailer, body)) = all[1..].split_last() else {
         return reject(all.len(), Why::BadTrailer);
     };
     let lines = body.iter().enumerate().map(|(i, l)| (i + 2, *l));
-    let mut peers: Vec<(usize, Peer)> = Vec::new();
-    let mut draft: Option<Draft> = None;
+    let mut reading = Reading {
+        peers: Vec::new(),
+        links: Vec::new(),
+        block: None,
+    };
     for (n, raw) in lines {
         if raw.len() > MAX_LINE_BYTES {
             return reject(n, Why::LineTooLong);
@@ -292,39 +434,73 @@ pub fn parse(input: &[u8], policy: &Policy) -> Result<Vec<Peer>, Reject> {
             continue;
         }
         if line == PEER_HEADER {
-            if let Some(done) = draft.take() {
-                peers.push(done.finish()?);
+            reading.close()?;
+            if !reading.links.is_empty() {
+                return reject(n, Why::PeerAfterLink);
             }
-            if peers.len() >= MAX_PEERS {
+            if reading.peers.len() >= MAX_PEERS {
                 return reject(n, Why::TooManyPeers);
             }
-            draft = Some(Draft::new(n));
+            reading.block = Some(Block::Peer(Draft::new(n)));
+        } else if line == LINK_HEADER && version2 {
+            reading.close()?;
+            if reading.links.len() >= MAX_LINKS {
+                return reject(n, Why::TooManyLinks);
+            }
+            reading.block = Some(Block::Link(LinkDraft {
+                line: n,
+                a: None,
+                b: None,
+            }));
         } else if line.starts_with('[') {
             return reject(n, Why::UnknownSection);
         } else {
             let Some((name, value)) = line.split_once('=') else {
                 return reject(n, Why::NotKeyValue);
             };
-            let Some(current) = draft.as_mut() else {
-                return reject(n, Why::KeyOutsidePeer);
-            };
-            apply_setting(
-                current,
-                name.trim_matches(' '),
-                value.trim_matches(' '),
-                policy,
-            )
+            let (name, value) = (name.trim_matches(' '), value.trim_matches(' '));
+            match reading.block.as_mut() {
+                None => return reject(n, Why::KeyOutsidePeer),
+                Some(Block::Peer(current)) => apply_setting(current, name, value, policy),
+                Some(Block::Link(current)) => apply_link_setting(current, name, value, policy),
+            }
             .or_else(|why| reject(n, why))?;
         }
     }
-    if let Some(done) = draft.take() {
-        peers.push(done.finish()?);
-    }
-    if trailer != format!("{TRAILER_PREFIX}{}", peers.len()) {
+    reading.close()?;
+    let expected = if version2 {
+        format!(
+            "{TRAILER_PREFIX}{}{LINKS_WORD}{}",
+            reading.peers.len(),
+            reading.links.len()
+        )
+    } else {
+        format!("{TRAILER_PREFIX}{}", reading.peers.len())
+    };
+    if trailer != expected {
         return reject(all.len(), Why::BadTrailer);
     }
-    check_unique(&peers)?;
-    Ok(peers.into_iter().map(|(_, peer)| peer).collect())
+    check_unique(&reading.peers)?;
+    check_links(&reading.peers, &reading.links)?;
+    Ok(Parsed {
+        peers: reading.peers.into_iter().map(|(_, peer)| peer).collect(),
+        links: version2.then(|| reading.links.into_iter().map(|(_, link)| link).collect()),
+    })
+}
+
+/// Every end of every link is the address of a peer in the same file, and no pair appears twice.
+fn check_links(peers: &[(usize, Peer)], links: &[(usize, Link)]) -> Result<(), Reject> {
+    let known: HashSet<Ipv4Addr> = peers.iter().map(|(_, p)| p.address).collect();
+    let mut seen = HashSet::new();
+    for (line, link) in links {
+        if !known.contains(&link.a) || !known.contains(&link.b) {
+            return reject(*line, Why::LinkToUnknownPeer);
+        }
+        if !seen.insert(*link) {
+            return reject(*line, Why::DuplicateLink);
+        }
+    }
+    Ok(())
 }
 
 fn check_unique(peers: &[(usize, Peer)]) -> Result<(), Reject> {
@@ -351,7 +527,15 @@ pub fn render(peers: &[Peer]) -> String {
 /// `render` with a `# label` comment above each peer that has one. A label is reduced to
 /// letters, digits, `-` and `_` so a hostile one cannot add a line.
 pub fn render_labeled(peers: &[(&str, &Peer)]) -> String {
-    let mut out = format!("{HEADER}\n");
+    render_file(peers, None)
+}
+
+/// The canonical text for a file. With `links` it is version 2, even with no links in it, which
+/// tells the applier to leave no pair allowed; without, it is version 1 and says nothing about
+/// forwarding.
+pub fn render_file(peers: &[(&str, &Peer)], links: Option<&[Link]>) -> String {
+    let header = if links.is_some() { HEADER_V2 } else { HEADER };
+    let mut out = format!("{header}\n");
     for (label, peer) in peers {
         let label: String = label
             .chars()
@@ -368,7 +552,20 @@ pub fn render_labeled(peers: &[(&str, &Peer)]) -> String {
         }
         out.push_str(&format!("AllowedIPs = {}{ADDRESS_SUFFIX}\n", peer.address));
     }
-    out.push_str(&format!("{TRAILER_PREFIX}{}\n", peers.len()));
+    for link in links.unwrap_or_default() {
+        out.push_str(&format!(
+            "\n{LINK_HEADER}\nA = {}{ADDRESS_SUFFIX}\nB = {}{ADDRESS_SUFFIX}\n",
+            link.a, link.b
+        ));
+    }
+    match links {
+        Some(links) => out.push_str(&format!(
+            "{TRAILER_PREFIX}{}{LINKS_WORD}{}\n",
+            peers.len(),
+            links.len()
+        )),
+        None => out.push_str(&format!("{TRAILER_PREFIX}{}\n", peers.len())),
+    }
     out
 }
 
@@ -709,5 +906,280 @@ mod tests {
             .is_err()
         );
         assert!(Policy::new(net, Ipv4Addr::new(10, 77, 0, 1)).is_ok());
+    }
+
+    fn ip(host: u8) -> Ipv4Addr {
+        Ipv4Addr::new(10, 77, 0, host)
+    }
+
+    /// A whole version 2 file around `body`, with the trailer counting its sections.
+    fn file2(body: &str) -> Vec<u8> {
+        let count = |header: &str| {
+            body.lines()
+                .filter(|l| l.trim_matches(' ') == header)
+                .count()
+        };
+        format!(
+            "{HEADER_V2}\n{body}{TRAILER_PREFIX}{}{LINKS_WORD}{}\n",
+            count(PEER_HEADER),
+            count(LINK_HEADER)
+        )
+        .into_bytes()
+    }
+
+    fn link_block(a: u8, b: u8) -> String {
+        format!("[Link]\nA = 10.77.0.{a}/32\nB = 10.77.0.{b}/32\n")
+    }
+
+    /// Three peers at .2, .3 and .4, then `links`.
+    fn with_links(links: &str) -> Vec<u8> {
+        file2(&format!(
+            "{}\n{}\n{}\n{links}",
+            peer_block(1, 2),
+            peer_block(2, 3),
+            peer_block(3, 4)
+        ))
+    }
+
+    fn refused2(input: &[u8]) -> Why {
+        parse_file(input, &policy()).unwrap_err().why
+    }
+
+    #[test]
+    fn a_version_2_file_carries_links_and_a_version_1_file_says_nothing_about_them() {
+        let parsed =
+            parse_file(&with_links(&format!("{}\n", link_block(2, 3))), &policy()).unwrap();
+        assert_eq!(parsed.peers.len(), 3);
+        assert_eq!(parsed.links, Some(vec![Link::new(ip(2), ip(3)).unwrap()]));
+
+        let empty = parse_file(&with_links(""), &policy()).unwrap();
+        assert_eq!(
+            empty.links,
+            Some(vec![]),
+            "version 2 with no links clears pairs"
+        );
+
+        let v1 = parse_file(&file(&peer_block(1, 2)), &policy()).unwrap();
+        assert_eq!(v1.links, None, "version 1 leaves forwarding alone");
+    }
+
+    #[test]
+    fn the_version_1_reader_refuses_a_version_2_file_and_version_1_refuses_links() {
+        let v2 = with_links(&format!("{}\n", link_block(2, 3)));
+        assert_eq!(parse(&v2, &policy()).unwrap_err().why, Why::MissingHeader);
+        let in_v1 = file(&format!("{}\n{}", peer_block(1, 2), link_block(2, 3)));
+        let r = parse_file(&in_v1, &policy()).unwrap_err();
+        assert_eq!(r.why, Why::UnknownSection);
+        assert_eq!(
+            parse(&in_v1, &policy()).unwrap_err().why,
+            Why::UnknownSection
+        );
+    }
+
+    #[test]
+    fn a_link_must_name_two_different_ordered_addresses_of_peers_in_the_file() {
+        let cases: [(&str, Why); 12] = [
+            (
+                "[Link]\nA = 10.77.0.2/32\nB = 10.77.0.2/32\n",
+                Why::LinkToSelf,
+            ),
+            (
+                "[Link]\nA = 10.77.0.3/32\nB = 10.77.0.2/32\n",
+                Why::LinkNotOrdered,
+            ),
+            (
+                "[Link]\nA = 10.77.0.2/32\nB = 10.77.0.9/32\n",
+                Why::LinkToUnknownPeer,
+            ),
+            (
+                "[Link]\nA = 10.77.0.8/32\nB = 10.77.0.9/32\n",
+                Why::LinkToUnknownPeer,
+            ),
+            ("[Link]\nA = 10.77.0.2/32\n", Why::MissingLinkEnd),
+            ("[Link]\nB = 10.77.0.3/32\n", Why::MissingLinkEnd),
+            ("[Link]\n", Why::MissingLinkEnd),
+            (
+                "[Link]\nA = 10.77.0.2/32\nA = 10.77.0.2/32\nB = 10.77.0.3/32\n",
+                Why::DuplicateKey,
+            ),
+            (
+                "[Link]\nA = 10.77.0.2/32\nC = 10.77.0.3/32\n",
+                Why::UnknownLinkKey,
+            ),
+            (
+                "[Link]\nA = 10.77.0.2/32\nB = 10.77.0.3/32\nPostUp = x\n",
+                Why::UnknownLinkKey,
+            ),
+            (
+                "[Link]\nA = 10.77.0.2/32\nB = 10.77.0.1/32\n",
+                Why::AddressIsHub,
+            ),
+            (
+                "[Link]\nA = 10.77.0.2/24\nB = 10.77.0.3/32\n",
+                Why::BadAddress,
+            ),
+        ];
+        for (block, why) in cases {
+            assert_eq!(refused2(&with_links(block)), why, "{block:?}");
+        }
+        for (block, why) in [
+            (
+                "[Link]\nA = 10.77.1.2/32\nB = 10.77.1.3/32\n",
+                Why::AddressOutsideSubnet,
+            ),
+            (
+                "[Link]\nA = 10.77.0.0/32\nB = 10.77.0.3/32\n",
+                Why::AddressNotUsable,
+            ),
+            (
+                "[Link]\nA = 10.77.0.2/32,10.77.0.3/32\nB = 10.77.0.4/32\n",
+                Why::BadAddress,
+            ),
+            (
+                "[Link]\nA = 10.77.0.2/32 # c\nB = 10.77.0.3/32\n",
+                Why::BadAddress,
+            ),
+        ] {
+            assert_eq!(refused2(&with_links(block)), why, "{block:?}");
+        }
+    }
+
+    #[test]
+    fn keys_belong_to_their_own_section() {
+        let k = key(1);
+        let wrong_in_link = format!("[Link]\nPublicKey = {k}\n");
+        assert_eq!(refused2(&with_links(&wrong_in_link)), Why::UnknownLinkKey);
+        let wrong_in_peer =
+            format!("[Peer]\nPublicKey = {k}\nAllowedIPs = 10.77.0.9/32\nA = 10.77.0.2/32\n");
+        assert_eq!(refused2(&file2(&wrong_in_peer)), Why::UnknownKey);
+        assert_eq!(refused2(&file2("A = 10.77.0.2/32\n")), Why::KeyOutsidePeer);
+        for case in ["[link]", "[Link] x", "[Link", "[Links]", "[Peer]x"] {
+            let text = file2(&format!("{case}\n"));
+            assert_eq!(refused2(&text), Why::UnknownSection, "{case:?}");
+        }
+    }
+
+    #[test]
+    fn a_pair_is_listed_once_and_every_peer_comes_before_every_link() {
+        let twice = format!("{}\n{}\n", link_block(2, 3), link_block(2, 3));
+        assert_eq!(refused2(&with_links(&twice)), Why::DuplicateLink);
+        let two_pairs = format!("{}\n{}\n", link_block(2, 3), link_block(2, 4));
+        assert_eq!(
+            parse_file(&with_links(&two_pairs), &policy())
+                .unwrap()
+                .links
+                .unwrap()
+                .len(),
+            2
+        );
+        let late_peer = file2(&format!(
+            "{}\n{}\n{}\n{}\n",
+            peer_block(1, 2),
+            peer_block(2, 3),
+            link_block(2, 3),
+            peer_block(3, 4)
+        ));
+        assert_eq!(refused2(&late_peer), Why::PeerAfterLink);
+    }
+
+    #[test]
+    fn a_version_2_trailer_states_both_counts() {
+        let body = format!(
+            "{}\n{}\n{}\n",
+            peer_block(1, 2),
+            peer_block(2, 3),
+            link_block(2, 3)
+        );
+        let bad_trailers = [
+            format!("{TRAILER_PREFIX}2"),
+            format!("{TRAILER_PREFIX}2 links 0"),
+            format!("{TRAILER_PREFIX}1 links 1"),
+            format!("{TRAILER_PREFIX}2 links 01"),
+            format!("{TRAILER_PREFIX}2  links 1"),
+            format!("{TRAILER_PREFIX}2 links 1 "),
+            format!("{TRAILER_PREFIX}2 links"),
+            format!("{TRAILER_PREFIX}links 1"),
+        ];
+        for trailer in bad_trailers {
+            let text = format!("{HEADER_V2}\n{body}{trailer}\n");
+            assert_eq!(refused2(text.as_bytes()), Why::BadTrailer, "{trailer:?}");
+        }
+        let good = format!("{HEADER_V2}\n{body}{TRAILER_PREFIX}2 links 1\n");
+        assert!(parse_file(good.as_bytes(), &policy()).is_ok());
+        let v1_trailer_on_v1 = format!("{HEADER}\n{}{TRAILER_PREFIX}1 links 0\n", peer_block(1, 2));
+        assert_eq!(refused2(v1_trailer_on_v1.as_bytes()), Why::BadTrailer);
+    }
+
+    #[test]
+    fn a_version_2_file_cut_at_any_byte_is_refused() {
+        let peers: Vec<Peer> = (0..3u8)
+            .map(|i| Peer {
+                public_key: key(i + 1),
+                address: ip(i + 2),
+                preshared_key: None,
+            })
+            .collect();
+        let entries: Vec<(&str, &Peer)> = peers.iter().map(|p| ("d", p)).collect();
+        let links = [
+            Link::new(ip(2), ip(3)).unwrap(),
+            Link::new(ip(3), ip(4)).unwrap(),
+        ];
+        let whole = render_file(&entries, Some(&links)).into_bytes();
+        assert!(parse_file(&whole, &policy()).is_ok());
+        for cut in 0..whole.len() {
+            assert!(
+                parse_file(&whole[..cut], &policy()).is_err(),
+                "a version 2 file cut at byte {cut} was accepted"
+            );
+        }
+    }
+
+    #[test]
+    fn at_most_128_links_are_accepted() {
+        let peers: String = (0..20u8).map(|i| peer_block(i + 1, i + 2) + "\n").collect();
+        let mut pairs = Vec::new();
+        'outer: for a in 2..22u8 {
+            for b in (a + 1)..22u8 {
+                pairs.push(link_block(a, b) + "\n");
+                if pairs.len() == MAX_LINKS + 1 {
+                    break 'outer;
+                }
+            }
+        }
+        let build = |count: usize| file2(&format!("{peers}{}", pairs[..count].concat()));
+        assert_eq!(
+            parse_file(&build(MAX_LINKS), &policy())
+                .unwrap()
+                .links
+                .unwrap()
+                .len(),
+            MAX_LINKS
+        );
+        assert_eq!(refused2(&build(MAX_LINKS + 1)), Why::TooManyLinks);
+    }
+
+    #[test]
+    fn rendering_links_gives_one_spelling_that_parses_back_and_a_label_cannot_add_a_line() {
+        let peers: Vec<Peer> = (0..3u8)
+            .map(|i| Peer {
+                public_key: key(i + 1),
+                address: ip(i + 2),
+                preshared_key: None,
+            })
+            .collect();
+        let entries = [
+            ("mac", &peers[0]),
+            ("phone\n[Link]\nA = 10.77.0.2/32", &peers[1]),
+            ("tablet", &peers[2]),
+        ];
+        let links = [Link::new(ip(4), ip(2)).unwrap()];
+        assert_eq!((links[0].a, links[0].b), (ip(2), ip(4)));
+        let text = render_file(&entries, Some(&links));
+        assert_eq!(text.matches("[Link]").count(), 1, "{text}");
+        let parsed = parse_file(text.as_bytes(), &policy()).unwrap();
+        assert_eq!(parsed.peers, peers);
+        assert_eq!(parsed.links.as_deref(), Some(&links[..]));
+        assert!(render_file(&entries, None).starts_with(HEADER));
+        assert!(Link::new(ip(5), ip(5)).is_none());
     }
 }

@@ -5,8 +5,8 @@ use crate::device;
 use crate::files;
 use crate::status;
 use crate::store::{
-    Kind, NetError, NewPeer, RETIRED_FILE, Result, Store, add_peer, render_applier_input,
-    revoke_peer,
+    Kind, NetError, NewPeer, RETIRED_FILE, Result, Store, add_link, add_peer, remove_link,
+    render_applier_input, revoke_peer,
 };
 use std::io::Write;
 use std::path::Path;
@@ -87,12 +87,24 @@ fn checked_input(
         Err(e) => warnings.push(format!(
             "the applier's current input could not be read ({e}), so I cannot check whether this drops a device the hub has"
         )),
-        Ok(Some(current)) => match crate::grammar::parse(current.as_bytes(), &net.policy()?) {
+        Ok(Some(current)) => match crate::grammar::parse_file(current.as_bytes(), &net.policy()?) {
             Err(e) => warnings.push(format!(
                 "the applier's current input is not a valid peers file ({e}), so I cannot check whether this drops a device the hub has"
             )),
             Ok(current) => {
-                let dropped = removals_without_a_revoke(&current, &peers.peer, retired);
+                // A version 1 file says nothing about forwarding, so the applier would leave the
+                // pairs of the version 2 file it replaces open.
+                let open_pairs = current.links.as_ref().map_or(0, Vec::len);
+                if open_pairs > 0 && !peers.uses_links() {
+                    let why = format!(
+                        "the hub's current input links {open_pairs} pair(s) of devices, and this one is version 1, which the applier does not read as \"no links\": those pairs would stay open. peers.toml has lost its links (restored from an older copy?). Restore the newer one, or run `hq net link remove` for each pair after adding them back"
+                    );
+                    if guard == Guard::Enforce {
+                        return crate::store::fail(format!("refusing to write the applier's input: {why}"));
+                    }
+                    warnings.push(why);
+                }
+                let dropped = removals_without_a_revoke(&current.peers, &peers.peer, retired);
                 if !dropped.is_empty() && guard == Guard::Enforce {
                     return crate::store::fail(guard_refusal(&dropped, &peers.peer));
                 }
@@ -191,10 +203,15 @@ fn write_applier_input(
         )?;
     }
     say_warnings(out, &checked.warnings)?;
+    let links = if peers.uses_links() {
+        format!(" and {} link(s)", peers.link.len())
+    } else {
+        String::new()
+    };
     say(
         out,
         &format!(
-            "Writing {} device(s) to {} for the applier.\n",
+            "Writing {} device(s){links} to {} for the applier.\n",
             peers.peer.len(),
             target.display()
         ),
@@ -282,7 +299,7 @@ pub fn peer_revoke(
 ) -> Result<()> {
     let net = store.require_net()?;
     let mut peers = load_peers_noted(store, out)?;
-    let record = revoke_peer(&mut peers, label)?;
+    let (record, dropped_links) = revoke_peer(&mut peers, label)?;
     say(
         out,
         &format!(
@@ -295,6 +312,19 @@ pub fn peer_revoke(
             net.spool_file(spool_dir).display()
         ),
     )?;
+    for link in &dropped_links {
+        say(
+            out,
+            &format!(
+                "Its link with \"{}\" goes with it.\n",
+                if link.a == record.label {
+                    &link.b
+                } else {
+                    &link.a
+                }
+            ),
+        )?;
+    }
     // A damaged retired file must not stop a device being cut off: it is rebuilt from what can be read.
     // Recording the address as retired must not stop a device being cut off. If it cannot be
     // recorded, the revoke goes on and says so; `peer add` reads the record strictly and refuses
@@ -374,6 +404,161 @@ pub fn peer_forget(
         )));
     }
     say(out, "Check that it is gone with: sudo wg show hq0 peers\n")
+}
+
+/// What a device must add to the tunnel it already has so that it can reach the devices linked to
+/// it: their addresses next to the hub's, as the one `AllowedIPs` line the WireGuard app shows.
+fn allowed_ips_line(hub: &str, linked: &[String]) -> String {
+    let mut all = vec![format!("{hub}/32")];
+    all.extend(linked.iter().map(|a| format!("{a}/32")));
+    all.join(", ")
+}
+
+fn device_lines(
+    net: &crate::store::Net,
+    peers: &crate::store::PeersFile,
+    labels: [&str; 2],
+) -> String {
+    let mut text = String::new();
+    for label in labels {
+        let Some(record) = peers.peer.iter().find(|p| p.label == label) else {
+            continue;
+        };
+        let linked = peers.linked_addresses(label);
+        text.push_str(&format!(
+            "  {label} ({}): AllowedIPs = {}\n",
+            record.address,
+            allowed_ips_line(&net.hub, &linked)
+        ));
+    }
+    text
+}
+
+/// Joins two devices so the hub forwards between them. Every other pair of devices stays unable to
+/// reach each other.
+///
+/// The first link turns the applier's input into a version 2 file, which an applier built before
+/// links existed refuses whole, a revocation included. So the first link needs the owner to say the
+/// applier on the hub is new enough (`applier_updated`).
+pub fn link_add(
+    store: &Store,
+    spool_dir: &Path,
+    a: &str,
+    b: &str,
+    applier_updated: bool,
+    out: &mut dyn Write,
+) -> Result<()> {
+    let net = store.require_net()?;
+    let mut peers = load_peers_noted(store, out)?;
+    if !peers.links_enabled && !applier_updated {
+        return crate::store::fail(
+            "the first link makes the applier's input a version 2 file, and an applier built before links existed refuses a version 2 file whole, so even a revocation would not reach the hub. Build and install the new applier, load the firewall set (docs/PRIVATE_NETWORK.md, \"Linking two devices\"), then run this again with --applier-updated",
+        );
+    }
+    let record = add_link(&mut peers, a, b)?;
+    let retired = store.load_retired()?;
+    // Checked before anything is saved, as `peer add` does.
+    let checked = checked_input(
+        &net,
+        &peers,
+        &retired,
+        &net.spool_file(spool_dir),
+        Guard::Enforce,
+    )?;
+    say_warnings(out, &checked.warnings)?;
+    say(
+        out,
+        &format!(
+            "Linking \"{}\" and \"{}\". This changes {}/peers.toml and {} (the applier's input), which becomes a version 2 file that only an applier built with links accepts. The hub then forwards between those two devices, in both directions and on every port, and between no other pair.\n",
+            record.a,
+            record.b,
+            store.dir().display(),
+            net.spool_file(spool_dir).display()
+        ),
+    )?;
+    store.save_peers(&peers)?;
+    if let Err(e) = apply(store, spool_dir, out) {
+        say(
+            out,
+            &format!(
+                "The link is saved in peers.toml, but it is NOT yet on the hub, because the applier's input was not written: {e}\nFix that, then run: hq net apply\n"
+            ),
+        )?;
+    }
+    say(
+        out,
+        &format!(
+            "Each device must also route the other's address into its tunnel. In the WireGuard app, change the hub peer's allowed addresses to:\n{}The hub needs the firewall set and an applier that knows links first: see docs/PRIVATE_NETWORK.md, \"Linking two devices\". A device that is behind a mobile network also needs PersistentKeepalive = 25 to stay reachable.\n",
+            device_lines(&net, &peers, [&record.a, &record.b])
+        ),
+    )
+}
+
+/// Takes a link away; the two devices can no longer reach each other through the hub.
+pub fn link_remove(
+    store: &Store,
+    spool_dir: &Path,
+    a: &str,
+    b: &str,
+    out: &mut dyn Write,
+) -> Result<()> {
+    let net = store.require_net()?;
+    let mut peers = load_peers_noted(store, out)?;
+    let record = remove_link(&mut peers, a, b)?;
+    say(
+        out,
+        &format!(
+            "Unlinking \"{}\" and \"{}\". This changes {}/peers.toml and {}.\n",
+            record.a,
+            record.b,
+            store.dir().display(),
+            net.spool_file(spool_dir).display()
+        ),
+    )?;
+    store.save_peers(&peers)?;
+    // A pair is closed on the hub whether or not the guard would have objected to something else.
+    if let Err(e) = write_applier_input(store, spool_dir, out, false, Guard::Warn) {
+        return Err(NetError(format!(
+            "the link is removed from peers.toml but is NOT yet closed on the hub: {e}\nFix that, then run: hq net apply"
+        )));
+    }
+    say(
+        out,
+        &format!(
+            "You can take the other device's address out of each device's AllowedIPs; it no longer routes anywhere useful:\n{}",
+            device_lines(&net, &peers, [&record.a, &record.b])
+        ),
+    )
+}
+
+pub fn link_list(store: &Store, out: &mut dyn Write) -> Result<()> {
+    let peers = load_peers_noted(store, out)?;
+    let address = |label: &str| {
+        peers
+            .peer
+            .iter()
+            .find(|p| p.label == label)
+            .map_or("?", |p| p.address.as_str())
+            .to_string()
+    };
+    let mut text = format!(
+        "{:<16} {:<12} {:<16} {}\n",
+        "DEVICE", "ADDRESS", "DEVICE", "ADDRESS"
+    );
+    for link in &peers.link {
+        text.push_str(&format!(
+            "{:<16} {:<12} {:<16} {}\n",
+            link.a,
+            address(&link.a),
+            link.b,
+            address(&link.b)
+        ));
+    }
+    text.push_str(&format!(
+        "{} link(s) in peers.toml. `sudo nft list set inet hq_net links_hq0` shows what the hub allows.\n",
+        peers.link.len()
+    ));
+    say(out, &text)
 }
 
 pub fn peer_list(store: &Store, out: &mut dyn Write) -> Result<()> {
@@ -1148,5 +1333,210 @@ mod tests {
             )
             .is_err()
         );
+    }
+
+    fn two_devices(f: &Fixture) {
+        run_add(f, "mac", Kind::Laptop);
+        run_add(f, "phone", Kind::Phone);
+    }
+
+    fn linked_in_input(f: &Fixture) -> crate::grammar::Parsed {
+        let net = f.store.require_net().unwrap();
+        crate::grammar::parse_file(applier_input(f).as_bytes(), &net.policy().unwrap()).unwrap()
+    }
+
+    #[test]
+    fn until_a_link_is_added_the_applier_input_stays_version_1() {
+        let f = fixture();
+        two_devices(&f);
+        let input = applier_input(&f);
+        assert!(input.starts_with(crate::grammar::HEADER), "{input}");
+        assert!(!input.contains("[Link]"));
+        assert_eq!(linked_in_input(&f).links, None);
+    }
+
+    #[test]
+    fn linking_two_devices_writes_a_version_2_file_and_says_what_each_device_must_add() {
+        let f = fixture();
+        two_devices(&f);
+        let mut out = Vec::new();
+        link_add(&f.store, &f.spool, "phone", "mac", true, &mut out).unwrap();
+        let out = String::from_utf8(out).unwrap();
+        assert!(out.starts_with("Linking \"mac\" and \"phone\"."), "{out}");
+        assert!(out.contains("version 2"), "{out}");
+        assert!(
+            out.contains("mac (10.77.0.2): AllowedIPs = 10.77.0.1/32, 10.77.0.3/32"),
+            "{out}"
+        );
+        assert!(
+            out.contains("phone (10.77.0.3): AllowedIPs = 10.77.0.1/32, 10.77.0.2/32"),
+            "{out}"
+        );
+        assert!(out.contains("PersistentKeepalive"), "{out}");
+
+        let parsed = linked_in_input(&f);
+        assert_eq!(parsed.peers.len(), 2);
+        let expected =
+            crate::grammar::Link::new("10.77.0.2".parse().unwrap(), "10.77.0.3".parse().unwrap())
+                .unwrap();
+        assert_eq!(parsed.links, Some(vec![expected]));
+
+        let peers = f.store.load_peers().unwrap();
+        assert!(peers.links_enabled);
+        assert_eq!(peers.link.len(), 1);
+        assert_eq!(
+            (peers.link[0].a.as_str(), peers.link[0].b.as_str()),
+            ("mac", "phone")
+        );
+    }
+
+    #[test]
+    fn bad_link_requests_are_refused_and_change_nothing() {
+        let f = fixture();
+        two_devices(&f);
+        let before = applier_input(&f);
+        for (a, b) in [
+            ("mac", "mac"),
+            ("mac", "nobody"),
+            ("nobody", "phone"),
+            ("", ""),
+        ] {
+            let err = link_add(&f.store, &f.spool, a, b, true, &mut Vec::new()).unwrap_err();
+            assert!(!err.to_string().is_empty());
+        }
+        assert_eq!(applier_input(&f), before);
+        assert!(f.store.load_peers().unwrap().link.is_empty());
+
+        link_add(&f.store, &f.spool, "mac", "phone", true, &mut Vec::new()).unwrap();
+        let err = link_add(&f.store, &f.spool, "phone", "mac", true, &mut Vec::new()).unwrap_err();
+        assert!(err.to_string().contains("linked already"), "{err}");
+    }
+
+    #[test]
+    fn removing_the_last_link_keeps_version_2_so_the_hub_is_told_to_forward_nothing() {
+        let f = fixture();
+        two_devices(&f);
+        link_add(&f.store, &f.spool, "mac", "phone", true, &mut Vec::new()).unwrap();
+        let mut out = Vec::new();
+        link_remove(&f.store, &f.spool, "phone", "mac", &mut out).unwrap();
+        assert_eq!(linked_in_input(&f).links, Some(vec![]));
+        assert!(applier_input(&f).contains(crate::grammar::HEADER_V2));
+        assert!(f.store.load_peers().unwrap().link.is_empty());
+        let err = link_remove(&f.store, &f.spool, "mac", "phone", &mut Vec::new()).unwrap_err();
+        assert!(err.to_string().contains("not linked"), "{err}");
+    }
+
+    #[test]
+    fn revoking_a_device_takes_its_links_with_it_in_the_same_write() {
+        let f = fixture();
+        two_devices(&f);
+        run_add(&f, "tablet", Kind::Laptop);
+        link_add(&f.store, &f.spool, "mac", "phone", true, &mut Vec::new()).unwrap();
+        link_add(&f.store, &f.spool, "phone", "tablet", true, &mut Vec::new()).unwrap();
+        let mut out = Vec::new();
+        peer_revoke(&f.store, &f.spool, "phone", &mut out).unwrap();
+        let out = String::from_utf8(out).unwrap();
+        assert!(out.contains("Its link with \"mac\" goes with it."), "{out}");
+        assert!(
+            out.contains("Its link with \"tablet\" goes with it."),
+            "{out}"
+        );
+        let parsed = linked_in_input(&f);
+        assert_eq!(parsed.peers.len(), 2);
+        assert_eq!(
+            parsed.links,
+            Some(vec![]),
+            "no pair names the revoked address"
+        );
+        assert!(f.store.load_peers().unwrap().link.is_empty());
+        // The address is retired, so a new device cannot inherit what the old one was linked to.
+        let (_, key) = run_add(&f, "newer", Kind::Phone);
+        let peers = f.store.load_peers().unwrap();
+        let newer = peers.peer.iter().find(|p| p.public_key == key).unwrap();
+        assert_ne!(newer.address, "10.77.0.3");
+    }
+
+    #[test]
+    fn the_link_list_names_each_pair_with_its_addresses() {
+        let f = fixture();
+        two_devices(&f);
+        link_add(&f.store, &f.spool, "mac", "phone", true, &mut Vec::new()).unwrap();
+        let mut out = Vec::new();
+        link_list(&f.store, &mut out).unwrap();
+        let out = String::from_utf8(out).unwrap();
+        assert!(out.contains("mac"), "{out}");
+        assert!(
+            out.contains("10.77.0.2") && out.contains("10.77.0.3"),
+            "{out}"
+        );
+        assert!(out.contains("1 link(s) in peers.toml."), "{out}");
+    }
+
+    #[test]
+    fn a_hand_edited_links_table_that_names_nobody_is_refused_on_load() {
+        let f = fixture();
+        two_devices(&f);
+        link_add(&f.store, &f.spool, "mac", "phone", true, &mut Vec::new()).unwrap();
+        let path = f.store.dir().join(crate::store::PEERS_FILE);
+        let text = std::fs::read_to_string(&path).unwrap();
+        for edited in [
+            text.replace("b = \"phone\"", "b = \"ghost\""),
+            text.replace("b = \"phone\"", "b = \"mac\""),
+            format!("{text}\n[[link]]\na = \"phone\"\nb = \"mac\"\n"),
+            format!("{text}\n[[link]]\na = \"mac\"\nb = \"phone\"\nextra = 1\n"),
+        ] {
+            std::fs::write(&path, &edited).unwrap();
+            let err = f.store.load_peers().unwrap_err().to_string();
+            assert!(!err.contains("ghost"), "{err}");
+            assert!(
+                err.contains("link") || err.contains("unknown field"),
+                "{err}"
+            );
+        }
+    }
+
+    #[test]
+    fn the_first_link_needs_the_owner_to_say_the_applier_is_new_enough() {
+        let f = fixture();
+        two_devices(&f);
+        let before = applier_input(&f);
+        let err = link_add(&f.store, &f.spool, "mac", "phone", false, &mut Vec::new()).unwrap_err();
+        assert!(err.to_string().contains("--applier-updated"), "{err}");
+        assert_eq!(applier_input(&f), before, "a refused link changes nothing");
+        assert!(!f.store.load_peers().unwrap().links_enabled);
+        link_add(&f.store, &f.spool, "mac", "phone", true, &mut Vec::new()).unwrap();
+        // Once links are in use the question was answered.
+        run_add(&f, "tablet", Kind::Laptop);
+        link_add(&f.store, &f.spool, "mac", "tablet", false, &mut Vec::new()).unwrap();
+    }
+
+    #[test]
+    fn a_peers_file_that_lost_its_links_cannot_replace_one_that_has_them() {
+        let f = fixture();
+        two_devices(&f);
+        link_add(&f.store, &f.spool, "mac", "phone", true, &mut Vec::new()).unwrap();
+        let before = applier_input(&f);
+        // peers.toml restored from a copy made before the first link.
+        let mut peers = f.store.load_peers().unwrap();
+        peers.link.clear();
+        peers.links_enabled = false;
+        f.store.save_peers(&peers).unwrap();
+        let err = apply(&f.store, &f.spool, &mut Vec::new()).unwrap_err();
+        assert!(
+            err.to_string().contains("those pairs would stay open"),
+            "{err}"
+        );
+        assert_eq!(
+            applier_input(&f),
+            before,
+            "the version 2 input is untouched"
+        );
+
+        // A revoke is never held up; it says so instead.
+        let mut out = Vec::new();
+        peer_revoke(&f.store, &f.spool, "phone", &mut out).unwrap();
+        let out = String::from_utf8(out).unwrap();
+        assert!(out.contains("those pairs would stay open"), "{out}");
+        assert!(!applier_input(&f).contains("# phone"));
     }
 }

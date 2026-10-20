@@ -25,6 +25,11 @@ pub enum NetAction {
         #[command(subcommand)]
         action: PeerAction,
     },
+    /// Let two devices reach each other through the hub; every other pair stays unable to
+    Link {
+        #[command(subcommand)]
+        action: LinkAction,
+    },
     /// Show each device with its last handshake (needs root to read WireGuard)
     Status {
         /// Read `wg show <interface> latest-handshakes` output from this file, or `-` for stdin
@@ -67,6 +72,25 @@ pub enum PeerAction {
     List,
 }
 
+#[derive(Subcommand)]
+pub enum LinkAction {
+    /// Allow two devices to reach each other through the hub, in both directions
+    Add {
+        /// A device, as `hq net peer list` shows it
+        a: String,
+        /// The other device
+        b: String,
+        /// The first link only: the applier on the hub is built with links (a version 2 file is
+        /// refused whole by one that is not, revocations included)
+        #[arg(long)]
+        applier_updated: bool,
+    },
+    /// Take a link away
+    Remove { a: String, b: String },
+    /// List the links
+    List,
+}
+
 #[derive(Clone, Copy, ValueEnum)]
 pub enum KindArg {
     Laptop,
@@ -87,7 +111,7 @@ pub fn run(
 
 #[cfg(unix)]
 mod unix {
-    use super::{KindArg, NetAction, PathBuf, PeerAction};
+    use super::{KindArg, LinkAction, NetAction, PathBuf, PeerAction};
     use anyhow::{Context, Result, bail};
     use hq_net::init::{InitContext, InitOptions, init};
     use hq_net::ops::{self, AddRequest};
@@ -218,6 +242,27 @@ mod unix {
             NetAction::Peer {
                 action: PeerAction::List,
             } => Ok(ops::peer_list(&store, &mut out)?),
+            NetAction::Link {
+                action:
+                    LinkAction::Add {
+                        a,
+                        b,
+                        applier_updated,
+                    },
+            } => Ok(ops::link_add(
+                &store,
+                &spool,
+                &a,
+                &b,
+                applier_updated,
+                &mut out,
+            )?),
+            NetAction::Link {
+                action: LinkAction::Remove { a, b },
+            } => Ok(ops::link_remove(&store, &spool, &a, &b, &mut out)?),
+            NetAction::Link {
+                action: LinkAction::List,
+            } => Ok(ops::link_list(&store, &mut out)?),
             NetAction::Apply => Ok(ops::apply(&store, &spool, &mut out)?),
             NetAction::Status { handshakes } => {
                 let net = store.require_net()?;

@@ -5,7 +5,7 @@
 //! - The unprivileged half (`tools` feature, on by default): key generation, the peer store under
 //!   `~/.hq/net`, the renderers for hub and device configs, the QR code. It never runs as root.
 //! - The root half: `grammar` (the only language the applier reads), `wgconf` (what it hands to
-//!   `wg`) and, on Linux only, `applier` (the file opener and the `wg` caller). A build with
+//!   `wg`), `links` (what it hands to `nft`) and, on Linux only, `applier` (the file opener and the `wg` caller). A build with
 //!   `--no-default-features` links these and nothing else.
 //!
 //! Everything that needs root is `cfg(target_os = "linux")`, never `cfg(unix)`, so a build for
@@ -13,6 +13,7 @@
 
 pub mod grammar;
 pub mod key;
+pub mod links;
 pub mod names;
 pub mod subnet;
 pub mod wgconf;

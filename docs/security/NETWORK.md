@@ -37,7 +37,7 @@ itself is in [WEB_AUTH.md](WEB_AUTH.md) and stays as a second layer behind every
 | T1 | A scan finds and probes HQ | HQ's web, MCP and gate listen on private addresses only. WireGuard does not answer a packet that is not from a key it knows, and a handshake needs the hub's public key. Public ports: tunnel UDP, ssh, and optionally the fenced connector port | The tunnel port itself exists. A scan can see "no answer", not "WireGuard" |
 | T2 | Tunnel flood or handshake spam | Kernel WireGuard sends cookie replies under load (its built-in handshake DoS control); rate limits at the firewall | A large volumetric flood still saturates the link. Accepted |
 | T3 | A stolen or lost device | Remove the peer (effective at once, existing session keys die), sign the device out of the web UI, rotate any token it held | Until noticed, the holder is limited to this device's reach and still needs the web login |
-| T4 | A compromised device attacks other devices | The hub does not forward between peers (hq0 to hq0 is dropped explicitly and routed traffic is denied by default; `ip_forward` is not relied on, and is 1 on the owner's server while Tailscale runs); each device's `AllowedIPs` is the hub's single address; the laptop gate also checks the source address | A bug in forwarding configuration. Checked by SR-N5 |
+| T4 | A compromised device attacks other devices | The hub does not forward between peers, except between pairs the owner links (T26 to T28): hq0 to hq0 is dropped explicitly and routed traffic is denied by default; `ip_forward` is not relied on, and is 1 on the owner's server while Tailscale runs; each device's `AllowedIPs` is the hub's single address plus the addresses of devices linked to it; the laptop gate also checks the source address | A bug in forwarding configuration. Checked by SR-N5 and SR-N15 |
 | T5 | The gate is called by someone who is not the server | Source address allow-list, then an Ed25519 signature over a per-connection nonce and the request, then the existing 23-method allow-list. No secret travels in a join code | Compromise of the server's gate key (T9) |
 | T6 | Replay or tampering of a gate request | A fresh nonce per connection bound into the signature together with the request digest; one request per connection | None known on this path; the tunnel adds its own protection |
 | T7 | Resource exhaustion of the gate (slow client, many connections, huge request) | Auth deadline 5 s, read deadline 10 s, request size cap, 16 connections, a slot released even when a handler panics, nothing parsed before the signature verifies. No failure lockout, which would let the allowed source lock out the real caller | Whoever can connect from the allowed address can still hold 16 slots briefly, so the allow-list is only the server's tunnel address |
@@ -57,6 +57,9 @@ itself is in [WEB_AUTH.md](WEB_AUTH.md) and stays as a second layer behind every
 | T22 | A local process uses the laptop's loopback proxy (`hq net proxy`) | Per-launch token in the request path or a unix socket; the web login remains the real guard; the proxy forwards only to the hub's tunnel address, never to another destination | Same-user processes can still read the token from the process list unless a unix socket is used |
 | T20 | The old path stays open after cutover | Phase 3 checklist closes Funnel, `serve` and the tailnet; verified from outside | Operator error |
 | T23 | On a shared machine, another local user listens on the tunnel address while the host is down and receives the server's calls | The gate authenticates the caller, not the server, and the tunnel supplies server identity; documented as single-user only, the ssh transport stays for shared machines | A local user on a shared laptop can still impersonate the gate until signed replies with a pinned server key exist (TECHDEBT.md) |
+| T26 | Whoever controls the HQ user's files links two devices that should not talk, or re-keys a linked address | A link joins two addresses that belong to admitted peers in the same file; nothing else about forwarding can be said in the grammar (no ports, ranges, interfaces or rules); the applier replaces the contents of a set the owner created and never writes a rule; each added or removed pair is written to the journal, and so is a new key at an address that is in a link | A pair names an address, not a key. A process running as the HQ user can put its own key at a linked device's address and then reaches the other end of the pair on every port. What limits it is the other end's own `AllowedIPs` (the HQ user cannot edit a device's config) and the service's own login; so a service across a link must authenticate. Beyond this the HQ user can already admit a device, which reaches only the hub |
+| T27 | A missing table, a failed or hung `nft`, or a stale set leaves more forwarding open than the file says | The owner's `PostUp` loads the table before it turns forwarding on, and `wg-quick` stops if it fails; the table is also included from the system's nftables configuration so a reload cannot drop it; an empty set forwards nothing; the applier runs `nft` first, in one transaction that changes nothing if any line fails, with a 10 second deadline, and a failed `nft` never stops `wg` but fails the run with a journal line that says forwarding may be wider than the file | If the table is removed while `hq0` forwarding is 1 (a `flush ruleset` reload not covered by the include), every device can reach every other until it is loaded again; every applier run then fails visibly in the journal but cannot repair it. After a failed `nft`, a pair already removed from the file stays open until the timer's next run (five minutes). Another firewall that allows `hq0` to `hq0` makes the table the only gate. Verified on a Linux 7.0 kernel with nftables 1.0.6 (see PRIVATE_NETWORK.md) |
+| T28 | The hub reads or alters traffic between linked devices | None at the hub: it decrypts and encrypts again | Accepted. Every service across a link must be TLS or otherwise end to end encrypted; the host gate authenticates but does not encrypt, so it must not cross a link until it has an encrypted channel |
 
 ## 4. Security requirements (each one testable)
 
@@ -67,10 +70,11 @@ itself is in [WEB_AUTH.md](WEB_AUTH.md) and stays as a second layer behind every
   a QR code or a config an operator is asked to share.
 - SR-N3. The gate refuses to bind an unspecified or public address and defaults to off.
 - SR-N4. The server's web proxy binds to the tunnel address only and fails closed when it is absent.
-- SR-N5. No forwarding between peers: a device cannot reach another device's gate. Test from a
-  second device.
-- SR-N6. On a device, the hub is the only peer and `AllowedIPs` is the hub's single address; `hq
-  net` never emits a full-tunnel configuration.
+- SR-N5. No forwarding between peers except linked pairs: a device cannot reach another device's
+  gate unless the owner linked the two. Test from a second device that is in no pair.
+- SR-N6. On a device, the hub is the only peer and `AllowedIPs` is the hub's address, plus only
+  the addresses of devices the owner linked to it; `hq net` never emits a full-tunnel
+  configuration.
 - SR-N7. Gate authentication happens before any parsing of the request; a captured exchange fails
   when replayed on a new connection; all limits in section 6.1 of the plan are enforced and tested.
 - SR-N8. Removing a peer or a gate key takes effect on the next connection, and the documentation
@@ -86,6 +90,10 @@ itself is in [WEB_AUTH.md](WEB_AUTH.md) and stays as a second layer behind every
   zone has a CAA record naming the authority that issues its certificates.
 - SR-N14. `hq net proxy` forwards only to the hub's tunnel address and is not usable by a process
   that lacks the per-launch token.
+- SR-N15. The hub forwards a packet between devices only if its source and destination are a listed
+  pair. Test: with one link, the two ends reach each other and a third device reaches neither;
+  after `hq net link remove` neither direction works; after revoking one end, a new device given
+  the next free address does not reach the other end.
 
 ## 5. Failure modes of operation
 

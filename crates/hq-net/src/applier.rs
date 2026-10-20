@@ -11,11 +11,19 @@
 //! given text this program rendered from the parsed peers, never the file. Refusals name a line
 //! and a rule, not the line.
 //!
+//! A version 2 file also lists the pairs of admitted devices the hub may forward between. The
+//! applier turns those into one `nft` script that replaces the contents of a set the owner created
+//! with the firewall rules (`links`); it never writes a rule. The script goes to `nft` before the
+//! peers go to `wg`, so a pair is closed no later than a device is cut off, and a failure of `nft`
+//! never stops `wg`: a revocation must not wait for the firewall.
+//!
 //! What this program does not decide is who may be admitted: anything running as the input's owner
-//! can add a device within the subnet. It limits what such a file can do, and it records the
-//! peers it applied, by address and a short key fingerprint, so the journal shows every change.
+//! can add a device within the subnet, and join admitted devices in pairs. It limits what such a
+//! file can do, and it records the peers and pairs it applied, by address and a short key
+//! fingerprint, so the journal shows every change.
 
-use crate::grammar::{self, MAX_INPUT_BYTES, Policy, Reject};
+use crate::grammar::{self, Link, MAX_INPUT_BYTES, Policy, Reject};
+use crate::links;
 use crate::names::valid_interface;
 use crate::subnet::{Subnet, parse_canonical_ipv4};
 use crate::wgconf;
@@ -23,17 +31,23 @@ use std::ffi::{CString, OsStr};
 use std::fmt;
 use std::fs::File;
 use std::io::{Read, Write};
+use std::net::Ipv4Addr;
 use std::os::fd::{AsRawFd, FromRawFd, OwnedFd, RawFd};
 use std::os::unix::ffi::OsStrExt;
 use std::os::unix::fs::MetadataExt;
 use std::path::{Component, Path, PathBuf};
 use std::process::{Command, Stdio};
+use std::time::{Duration, Instant};
 
-const USAGE: &str = "usage: hq-net-apply --interface NAME --subnet CIDR --hub ADDRESS --owner-uid UID --input /ABSOLUTE/PATH [--wg /ABSOLUTE/PATH]";
+const USAGE: &str = "usage: hq-net-apply --interface NAME --subnet CIDR --hub ADDRESS --owner-uid UID --input /ABSOLUTE/PATH [--wg /ABSOLUTE/PATH] [--nft /ABSOLUTE/PATH]";
 /// Where `wg` may be, in order: the distribution's own directories only. The first that exists
 /// and is root-owned and not writable by others is used; no `PATH` search ever happens. A `wg` in
 /// `/usr/local` (writable by the `staff` group on Debian) needs an explicit `--wg`.
 const WG_CANDIDATES: [&str; 4] = ["/usr/bin/wg", "/usr/sbin/wg", "/bin/wg", "/sbin/wg"];
+/// The same rule for `nft`, which is only run for a version 2 file.
+const NFT_CANDIDATES: [&str; 4] = ["/usr/sbin/nft", "/sbin/nft", "/usr/bin/nft", "/bin/nft"];
+/// `nft -f -` reads the script from standard input.
+const NFT_STDIN: &str = "-";
 /// How many times a run applies again because the input changed while it was applying. A change
 /// after the last re-read is caught by the timer, not by this loop.
 const MAX_ROUNDS: usize = 3;
@@ -52,6 +66,7 @@ pub struct Config {
     pub input: PathBuf,
     pub owner_uid: u32,
     pub wg: Option<PathBuf>,
+    pub nft: Option<PathBuf>,
 }
 
 fn take_once(slot: &mut Option<String>, flag: &str, value: Option<String>) -> Result<(), String> {
@@ -64,7 +79,7 @@ fn take_once(slot: &mut Option<String>, flag: &str, value: Option<String>) -> Re
 
 /// Reads the unit's arguments. Each flag once, `--flag value` form only, nothing unknown.
 pub fn parse_args(args: impl IntoIterator<Item = String>) -> Result<Config, String> {
-    let mut slots: [Option<String>; 6] = Default::default();
+    let mut slots: [Option<String>; 7] = Default::default();
     let flags = [
         "--interface",
         "--subnet",
@@ -72,6 +87,7 @@ pub fn parse_args(args: impl IntoIterator<Item = String>) -> Result<Config, Stri
         "--owner-uid",
         "--input",
         "--wg",
+        "--nft",
     ];
     let mut args = args.into_iter();
     while let Some(arg) = args.next() {
@@ -80,7 +96,7 @@ pub fn parse_args(args: impl IntoIterator<Item = String>) -> Result<Config, Stri
         };
         take_once(&mut slots[index], &arg, args.next())?;
     }
-    let [interface, subnet, hub, owner, input, wg] = slots;
+    let [interface, subnet, hub, owner, input, wg, nft] = slots;
     let need =
         |value: Option<String>, flag: &str| value.ok_or_else(|| format!("{flag} is required"));
     let interface = need(interface, "--interface")?;
@@ -96,12 +112,14 @@ pub fn parse_args(args: impl IntoIterator<Item = String>) -> Result<Config, Stri
         .map_err(|_| "--owner-uid is not a number".to_string())?;
     let input = PathBuf::from(need(input, "--input")?);
     let wg = wg.map(PathBuf::from);
+    let nft = nft.map(PathBuf::from);
     Ok(Config {
         interface,
         policy,
         input,
         owner_uid,
         wg,
+        nft,
     })
 }
 
@@ -375,11 +393,148 @@ impl Wg for SystemWg {
     }
 }
 
+/// The two things the applier asks of `nft`. A trait only so tests can stand in for the program.
+pub trait Firewall {
+    /// What `nft list set` prints for the interface's set of pairs.
+    fn list_links(&self, interface: &str) -> Result<String, String>;
+    /// Runs a script made by `links::script`.
+    fn set_links(&self, interface: &str, script: &str) -> Result<(), String>;
+}
+
+/// How long `nft` may take. The pairs are set before `wg` runs, so a program that hangs instead
+/// of failing would hold up a revocation until systemd's own timeout; this is shorter.
+const NFT_DEADLINE: Duration = Duration::from_secs(10);
+const NFT_POLL: Duration = Duration::from_millis(25);
+/// More than any listing of 256 pairs can be.
+const NFT_MAX_OUTPUT: u64 = 1024 * 1024;
+
+/// The real `nft`, found and run the way `wg` is: by absolute path, root's own, empty environment.
+pub struct SystemNft {
+    explicit: Option<PathBuf>,
+    /// Set by tests, which cannot own a root-owned program.
+    resolved: Option<PathBuf>,
+}
+
+impl SystemNft {
+    /// Nothing is looked for yet: a version 1 file never needs `nft`, so a hub without it is fine
+    /// until a version 2 file arrives.
+    pub fn new(explicit: Option<&Path>) -> Self {
+        Self {
+            explicit: explicit.map(Path::to_path_buf),
+            resolved: None,
+        }
+    }
+
+    fn resolve(&self) -> Result<PathBuf, String> {
+        if let Some(path) = &self.resolved {
+            return Ok(path.clone());
+        }
+        let candidates: Vec<PathBuf> = match &self.explicit {
+            Some(path) => vec![path.clone()],
+            None => NFT_CANDIDATES.iter().map(PathBuf::from).collect(),
+        };
+        let mut last = "nft was not found in a standard location".to_string();
+        for path in candidates {
+            match trusted_binary(&path) {
+                Ok(()) => return Ok(path),
+                Err(why) => last = format!("{}: {why}", path.display()),
+            }
+        }
+        Err(last)
+    }
+
+    /// Runs `nft` with `args`, gives it `input` on standard input if there is any, and waits at
+    /// most `deadline`. A program that is still running then is killed.
+    fn run(
+        &self,
+        args: &[&str],
+        input: Option<&[u8]>,
+        quiet: bool,
+        deadline: Duration,
+    ) -> Result<(std::process::ExitStatus, Vec<u8>), String> {
+        let mut command = Command::new(self.resolve()?);
+        command
+            .args(args)
+            .env_clear()
+            .stdin(if input.is_some() {
+                Stdio::piped()
+            } else {
+                Stdio::null()
+            })
+            .stdout(Stdio::piped())
+            .stderr(if quiet {
+                Stdio::null()
+            } else {
+                Stdio::inherit()
+            });
+        let mut child = command
+            .spawn()
+            .map_err(|e| format!("cannot run nft: {e}"))?;
+        if let (Some(bytes), Some(mut stdin)) = (input, child.stdin.take()) {
+            // The script is far below a pipe's capacity, so this write cannot block on a full
+            // pipe. The pipe closes when `stdin` is dropped, which is what ends nft's read.
+            let _ = stdin.write_all(bytes);
+        }
+        let started = Instant::now();
+        loop {
+            match child.try_wait() {
+                Ok(Some(status)) => {
+                    let mut out = Vec::new();
+                    if let Some(stdout) = child.stdout.take() {
+                        let _ = stdout.take(NFT_MAX_OUTPUT).read_to_end(&mut out);
+                    }
+                    return Ok((status, out));
+                }
+                Ok(None) if started.elapsed() >= deadline => {
+                    let _ = child.kill();
+                    let _ = child.wait();
+                    return Err(format!(
+                        "nft did not finish within {} seconds and was stopped",
+                        deadline.as_secs()
+                    ));
+                }
+                Ok(None) => std::thread::sleep(NFT_POLL),
+                Err(e) => return Err(format!("cannot wait for nft: {e}")),
+            }
+        }
+    }
+}
+
+impl Firewall for SystemNft {
+    fn list_links(&self, interface: &str) -> Result<String, String> {
+        let args = links::list_args(interface).ok_or("the interface name is not valid")?;
+        let args: Vec<&str> = args.iter().map(String::as_str).collect();
+        let (status, out) = self.run(&args, None, true, NFT_DEADLINE)?;
+        if !status.success() {
+            return Err(format!("nft list set failed ({status})"));
+        }
+        String::from_utf8(out).map_err(|_| "nft printed bytes that are not text".into())
+    }
+
+    fn set_links(&self, interface: &str, script: &str) -> Result<(), String> {
+        let (status, _) = self.run(
+            &["-f", NFT_STDIN],
+            Some(script.as_bytes()),
+            false,
+            NFT_DEADLINE,
+        )?;
+        if !status.success() {
+            return Err(format!(
+                "nft failed to set the links for {interface} ({status}); is the table from step 3 loaded? If forwarding is on for {interface} and the table is missing, nothing limits which devices can reach each other"
+            ));
+        }
+        Ok(())
+    }
+}
+
 #[derive(Debug)]
 pub enum ApplyError {
     Input(InputError),
     Rejected(Reject),
     Wg(String),
+    /// The peers were applied but the pairs could not be set. Forwarding between devices is as it
+    /// was before the run, which can be more than the file allows.
+    Links(String),
     /// A later round failed after an earlier one had already changed the interface. The peers of
     /// that earlier round stay in place, so the message says how many.
     AfterApply {
@@ -394,6 +549,7 @@ impl fmt::Display for ApplyError {
             ApplyError::Input(e) => e.fmt(f),
             ApplyError::Rejected(e) => e.fmt(f),
             ApplyError::Wg(e) => f.write_str(e),
+            ApplyError::Links(e) => f.write_str(e),
             ApplyError::AfterApply { applied, cause } => write!(
                 f,
                 "{cause}. The input changed after {applied} peer(s) had already been applied; they stay on the interface until the next run succeeds"
@@ -407,28 +563,103 @@ struct Round {
     bytes: Vec<u8>,
     peers: Vec<grammar::Peer>,
     changes: Vec<String>,
+    /// What happened to the pairs: `None` for a version 1 file, which does not mention them.
+    links: Option<LinksOutcome>,
+}
+
+struct LinksOutcome {
+    count: usize,
+    changes: Vec<String>,
+    /// Why the set could not be updated, if it could not.
+    error: Option<String>,
+}
+
+/// Linked addresses whose device has a different key than the interface has now. A pair names an
+/// address, not a key, so whoever holds the new key inherits the pair; the journal says so.
+fn rekeyed_linked(
+    current: &std::collections::BTreeMap<String, String>,
+    peers: &[grammar::Peer],
+    wanted: &[Link],
+) -> Vec<Ipv4Addr> {
+    let mut addresses: Vec<Ipv4Addr> = wanted.iter().flat_map(|l| [l.a, l.b]).collect();
+    addresses.sort();
+    addresses.dedup();
+    addresses
+        .into_iter()
+        .filter(|address| {
+            let text = format!("{address}/32");
+            let before = current
+                .iter()
+                .find(|(_, allowed)| allowed.split(',').any(|a| a.trim() == text))
+                .map(|(key, _)| key);
+            let after = peers.iter().find(|p| p.address == *address);
+            matches!((before, after), (Some(old), Some(new)) if *old != new.public_key)
+        })
+        .collect()
+}
+
+/// Puts the pairs of a version 2 file in the firewall's set. The previous contents are read first
+/// only to say what changed; nothing is decided from them.
+fn set_links(
+    config: &Config,
+    fw: &dyn Firewall,
+    wanted: &[Link],
+    rekeyed: &[Ipv4Addr],
+) -> LinksOutcome {
+    let previous = fw
+        .list_links(&config.interface)
+        .ok()
+        .and_then(|listing| links::current_pairs(&listing));
+    let mut changes = links::changes(previous.as_ref(), wanted);
+    changes.extend(rekeyed.iter().map(|address| {
+        format!("note: the device at {address} is in a link and now has a different key")
+    }));
+    let error = match links::script(&config.interface, wanted) {
+        Some(script) => fw.set_links(&config.interface, &script).err(),
+        None => Some("the interface name is not valid".to_string()),
+    };
+    LinksOutcome {
+        count: wanted.len(),
+        changes,
+        error,
+    }
 }
 
 /// One round: read the input, validate it, and only if every line is acceptable ask `wg`. A refused
 /// file never causes `wg` to be started. Returns the bytes applied, the peers, and the changes
 /// made to the interface.
-fn apply_once(config: &Config, wg: &dyn Wg, out: &mut dyn Write) -> Result<Round, ApplyError> {
+fn apply_once(
+    config: &Config,
+    wg: &dyn Wg,
+    fw: &dyn Firewall,
+    out: &mut dyn Write,
+) -> Result<Round, ApplyError> {
     let bytes = read_input(&config.input, config.owner_uid).map_err(ApplyError::Input)?;
-    let peers = grammar::parse(&bytes, &config.policy).map_err(ApplyError::Rejected)?;
+    let grammar::Parsed { peers, links } =
+        grammar::parse_file(&bytes, &config.policy).map_err(ApplyError::Rejected)?;
     let current = wg.show_config(&config.interface).map_err(ApplyError::Wg)?;
     let changes = wgconf::changes(&wgconf::current_peers(&current), &peers);
     let (subcommand, text) =
         wgconf::build(&peers, &current).map_err(|e| ApplyError::Wg(e.to_string()))?;
+    // Pairs first: closing one must not wait for anything, and a failure here must not stop wg.
+    let links = links.map(|wanted| {
+        let rekeyed = rekeyed_linked(&wgconf::current_peers(&current), &peers, &wanted);
+        set_links(config, fw, &wanted, &rekeyed)
+    });
     if let Err(e) = wg.apply(&config.interface, subcommand, &text) {
         // The kernel may have taken some of the update before wg failed, so what the run meant to
         // change is on record even though it did not finish.
         log_attempt(out, config, &peers, &changes);
+        if let Some(outcome) = &links {
+            log_links(out, config, outcome);
+        }
         return Err(ApplyError::Wg(e));
     }
     Ok(Round {
         bytes,
         peers,
         changes,
+        links,
     })
 }
 
@@ -457,6 +688,32 @@ fn log_round(out: &mut dyn Write, config: &Config, peers: &[grammar::Peer], chan
     let _ = out.write_all(text.as_bytes()).and_then(|()| out.flush());
 }
 
+/// The journal record of the pairs: what was allowed or removed, or why the set could not be
+/// changed. A run that changed nothing gets one line.
+fn log_links(out: &mut dyn Write, config: &Config, outcome: &LinksOutcome) {
+    let text = match &outcome.error {
+        Some(why) => format!(
+            "hq-net-apply: could not set the links on {}: {why}. Forwarding between devices is unchanged and may allow more than the file does; the peers were still applied\n",
+            config.interface
+        ),
+        None if outcome.changes.is_empty() => format!(
+            "hq-net-apply: no link change, {} link(s) on {}\n",
+            outcome.count, config.interface
+        ),
+        None => {
+            let mut text = format!(
+                "hq-net-apply: {} link(s) on {} after this run\n",
+                outcome.count, config.interface
+            );
+            for change in &outcome.changes {
+                text.push_str(&format!("hq-net-apply:   {change}\n"));
+            }
+            text
+        }
+    };
+    let _ = out.write_all(text.as_bytes()).and_then(|()| out.flush());
+}
+
 /// The journal record of a run whose `wg` call failed: what it was trying to do. Part of it may
 /// be on the interface.
 fn log_attempt(out: &mut dyn Write, config: &Config, peers: &[grammar::Peer], changes: &[String]) {
@@ -482,10 +739,12 @@ fn log_attempt(out: &mut dyn Write, config: &Config, peers: &[grammar::Peer], ch
 pub fn run(
     config: &Config,
     wg: &dyn Wg,
+    fw: &dyn Firewall,
     out: &mut dyn Write,
 ) -> Result<Vec<grammar::Peer>, ApplyError> {
-    let first = apply_once(config, wg, out)?;
+    let first = apply_once(config, wg, fw, out)?;
     log_round(out, config, &first.peers, &first.changes);
+    let mut links_error = log_and_take_error(out, config, first.links.as_ref());
     let (mut applied_bytes, mut peers) = (first.bytes, first.peers);
     for _ in 1..MAX_ROUNDS {
         let after = |cause: ApplyError, peers: &[grammar::Peer]| ApplyError::AfterApply {
@@ -497,15 +756,34 @@ pub fn run(
         if latest == applied_bytes {
             break;
         }
-        match apply_once(config, wg, out) {
+        match apply_once(config, wg, fw, out) {
             Ok(next) => {
                 log_round(out, config, &next.peers, &next.changes);
+                // A later version 1 file does not touch the set, so it does not wash away the
+                // failure of an earlier round.
+                if next.links.is_some() {
+                    links_error = log_and_take_error(out, config, next.links.as_ref());
+                }
                 (applied_bytes, peers) = (next.bytes, next.peers);
             }
             Err(cause) => return Err(after(cause, &peers)),
         }
     }
-    Ok(peers)
+    match links_error {
+        Some(why) => Err(ApplyError::Links(why)),
+        None => Ok(peers),
+    }
+}
+
+/// Writes the pairs' journal record and returns the error, if the set could not be changed.
+fn log_and_take_error(
+    out: &mut dyn Write,
+    config: &Config,
+    outcome: Option<&LinksOutcome>,
+) -> Option<String> {
+    let outcome = outcome?;
+    log_links(out, config, outcome);
+    outcome.error.clone()
 }
 
 /// The program: returns the exit code. 0 applied, 1 refused or failed, 2 usage.
@@ -532,7 +810,8 @@ pub fn main() -> i32 {
             return 1;
         }
     };
-    match run(&config, &wg, &mut std::io::stdout()) {
+    let nft = SystemNft::new(config.nft.as_deref());
+    match run(&config, &wg, &nft, &mut std::io::stdout()) {
         Ok(_) => 0,
         Err(why) => {
             match &why {
@@ -540,6 +819,9 @@ pub fn main() -> i32 {
                     eprintln!("hq-net-apply: nothing applied: {why}")
                 }
                 ApplyError::Wg(_) => eprintln!("hq-net-apply: failed: {why}"),
+                ApplyError::Links(_) => {
+                    eprintln!("hq-net-apply: peers applied, links not set: {why}")
+                }
                 ApplyError::AfterApply { .. } => eprintln!("hq-net-apply: {why}"),
             }
             1

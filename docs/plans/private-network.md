@@ -108,7 +108,8 @@ What it costs, said plainly:
 - Peers: hub `10.77.0.1`, devices `10.77.0.2` and up. On a device, `AllowedIPs` is the hub's `/32`
   only (never `0.0.0.0/0`): no other traffic is tunnelled. On the hub, each peer's `AllowedIPs` is
   its own `/32`.
-- The hub does not forward between peers: a firewall rule drops hq0 to hq0 explicitly, and the
+- The hub does not forward between peers, except between pairs the owner links with `hq net link`
+  (`docs/PRIVATE_NETWORK.md`, "Linking two devices"): a firewall rule drops hq0 to hq0 explicitly, and the
   default for routed traffic is deny. On a hub that already forwards for something else (the
   owner's server has `ip_forward` at 1 while Tailscale runs), those two rules are what hold; `hq net
   init` reports the sysctl value and does not assume it is 0. A stolen phone cannot reach the
@@ -274,7 +275,7 @@ As built, where it adds to or differs from the text above:
   it applies and repeats (at most three rounds) if it changed. The unit uses `Requisite=` on the tunnel,
   not `Wants=`, so a file change never starts a tunnel that was stopped on purpose. It lists each applied
   peer's address and key fingerprint in the journal.
-- The input must start with `# hq-net peers v1` and end with `# hq-net end <n>` (the number of peers),
+- The input must start with `# hq-net peers v1` (or `v2`, which adds `[Link]` sections and a trailer with the link count) and end with `# hq-net end <n>` (the number of peers),
   and each block ends with `AllowedIPs`, so an empty or truncated file applies nothing. A file with no
   peers is the header and `# hq-net end 0`.
 - Opening is one component at a time with links refused at every step, `O_NONBLOCK` so a planted FIFO
