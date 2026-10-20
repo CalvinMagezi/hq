@@ -41,7 +41,7 @@ placeholders (`example.com`, `hq.example.ts.net`, `<owner>/<repo>`).
 
 ## Architecture
 
-- **Language**: Rust (edition 2024, Cargo workspace of 17 crates)
+- **Language**: Rust (edition 2024, Cargo workspace of 20 crates)
 - **Binary**: `hq`, built from `crates/hq-cli`. `scripts/install-hq.sh` installs it
   to `~/bin/hq`; servers use `/usr/local/bin/hq`.
 - **Config**: `~/.hq/config.yaml` (override with `HQ_CONFIG_PATH`); any key can
@@ -121,6 +121,7 @@ placeholders (`example.com`, `hq.example.ts.net`, `<owner>/<repo>`).
 | Windows users (WSL2), adding a machine | `docs/WINDOWS.md`, `docs/JOIN_A_MACHINE.md` |
 | Task-linked and chat-driven harness sessions | `crates/hq-tools/src/harness_session/mission.rs`, `crates/hq-web/src/session_driver.rs`, `crates/hq-web/src/sessions_api.rs`, "Sessions that work on a task" and "Watching and driving from a web chat" in `docs/AGENT_SESSIONS.md` |
 | Pull-based updates | `crates/hq-update/`, `crates/hq-cli/src/commands/update.rs`, `deploy/install.sh`, `deploy/update/`, `docs/UPDATE_SYSTEM.md` |
+| Encrypted backup and restore (`hq backup create|verify|restore|keygen|prune`, `hq restore`, the opt-in `backup:` daemon task) | `crates/hq-backup/` (`archive.rs` create, verify and restore with every check, `crypto.rs` the sealed container, `key.rs` passphrase and key file, `snapshot.rs` the consistent database copy, `retention.rs`), `crates/hq-cli/src/commands/backup.rs`, `crates/hq-cli/src/commands/start/daemon/tasks_periodic/backup.rs`, `BackupConfig` in `crates/hq-core/src/config/backup.rs`, `hq_db::migrations::newer_migrations`, `docs/BACKUP.md` |
 | Restart notices | `crates/hq-cli/src/commands/notify_restart.rs` (`hq notify-restart`) |
 | MCP server | `crates/hq-mcp/src/server.rs` |
 | Asking HQ from an MCP client (`hq_ask`, `hq_ask_result`) | `crates/hq-tools/src/ask.rs` (tools and the `AskRunner` seam), `crates/hq-web/src/ws/ask.rs` (runner, read-only enforcement via the permission preset), `crates/hq-db/src/ask_requests.rs`, `docs/MCP_ASK.md` |
@@ -313,6 +314,7 @@ a document.
 | `hq-convert` | Document conversion both ways, OCR, brand kits |
 | `hq-export` | Native note export (PDF, PNG, SVG through embedded Typst; DOCX; HTML, spreadsheets, JSON, XML, LaTeX, notebooks, Jira markup) with no external tools |
 | `hq-update` | Signed pull-based updater (library behind `hq update`) |
+| `hq-backup` | Encrypted backup and restore of a vault and its database: ChaCha20-Poly1305 in authenticated chunks, Argon2id or a key file, a hash manifest, hostile-archive checks. Pure Rust, no network |
 | `hq-host` | Built-in coding-agent host: pty panes, emulated screen, control socket, state detection |
 | `hq-gate` | Signed TCP transport for the host gate over a private tunnel (Ed25519 challenge, unix only); used by `hq host serve` and the `tcp` host transport |
 | `hq-net` | `hq net`: the WireGuard private plane (key and subnet setup, peer store, device configs, QR) and `hq-net-apply`, the Linux-only strict-grammar root applier. Root-only code is `cfg(target_os = "linux")`, never `cfg(unix)` |
