@@ -345,36 +345,42 @@ wireguard-go would need.
 
 - Release builds do not include `hq-net-apply`, so step 4 builds it from source. Packaging it with
   the signed release is tracked separately because the updater replaces only `hq`.
-- The real `wg` calls have run once: the ignored real-interface test passed as root in a throwaway
-  container (rust:1.98.1-slim-bookworm on Docker Desktop's Linux VM, kernel 7.0.14, its own network
-  namespace, wireguard-tools v1.0.20210914, iproute2 6.1.0), creating and deleting one interface.
-  That container has no systemd, so it did not cover the units: PrivateDevices,
-  `SystemCallFilter=@system-service` with `SystemCallErrorNumber=EPERM`,
-  `RestrictAddressFamilies=AF_NETLINK`, the path unit, `TriggerLimitIntervalSec` on systemd 249
-  against newer versions, and whether `wg` runs under the filter on Ubuntu 22.04 (`clone3` and
-  `posix_spawn` in glibc 2.35). The firewall table has not been loaded either. Those were written
-  against the documentation and an independent reading of systemd's and wireguard-tools' source.
-  Run the first apply with a spare device and watch `journalctl -u hq-net-apply@hq0`. A CI job that
-  applies to a dummy WireGuard link in a user namespace is not built.
-- The service carries confinement directives (capability bounding set, read-only system, no new
-  privileges, no core dumps and others) that were not run under a live systemd either. If the unit
-  fails to start, `systemctl status hq-net-apply@hq0` names the directive.
-- Linking has not been run on a live hub. What was run: the table, the set and the script on a
-  real kernel (Docker Desktop's Linux VM, kernel 7.0.14, nftables 1.0.6, kernel WireGuard, four
-  network namespaces standing in for a hub and three devices). There, with `hq0` forwarding at 1
-  and the global `ip_forward` at 0 and then at 1: nothing was forwarded with an empty set; after
-  the script for one pair, those two devices reached each other in both directions and a third
-  device reached neither; an empty script closed the pair again; a script with a bad line left
-  the set as it was; and with the table deleted and forwarding still 1, every device reached every
-  other (why the table is included from the nftables configuration). Still to check on a spare
-  VM: that `nft -f -` runs under the unit's confinement (`PrivateDevices`, netlink only,
-  `CAP_NET_ADMIN`, `SystemCallFilter=@system-service`), that the path holds with `ufw` or
-  `firewalld` running, and that changing the global `ip_forward` later does not undo the
-  per-interface setting (writing `net.ipv4.ip_forward` rewrites every interface's value).
+- The real `wg` calls have run as root in a throwaway container (the ignored real-interface test:
+  rust:1.98.1-slim-bookworm on Docker Desktop's Linux VM, kernel 7.0.14, wireguard-tools v1.0.20210914),
+  creating and deleting one interface.
+- The units and the applier have run under real systemd. `deploy/net/test/run.sh` starts the real
+  units and the real applier in throwaway privileged containers (Debian 12 with systemd 252 and
+  Ubuntu 22.04 with systemd 249, on the same Linux VM, nftables 1.0.6), puts three devices in
+  network namespaces, and checks, each check printing PASS or FAIL: starting the tunnel applies the
+  peers and the pair; the pair works both ways and a third device reaches neither; a file replaced
+  by a rename is picked up by the path unit; a removed link and a revoked device are cut off;
+  twenty rewrites in five seconds then a revoke still revokes and the path unit keeps watching; a
+  missing table fails the run visibly while the peers are still applied (and, with forwarding on,
+  leaves every pair open, as documented); another firewall's drop policy breaks the pair until
+  `hq0` to `hq0` is allowed, after which the table still blocks unlinked pairs; a file with a
+  `PostUp` line is refused and nothing runs; and `systemd-analyze security` scores the service 2.1
+  (OK). That covers `PrivateDevices`, `SystemCallFilter=@system-service`,
+  `RestrictAddressFamilies=AF_NETLINK`, the capability set, `nft -f -` and `wg` under them, the
+  path unit on both systemd versions (249 ignores `TriggerLimitIntervalSec`; the burst of rewrites
+  did not stop it) and glibc 2.35. What it is not: a real host, a real `ufw` or `firewalld`
+  (iptables-nft with a drop policy stands in), or the droplet. Run the first apply there with a
+  spare device and watch `journalctl -u hq-net-apply@hq0`. No CI job runs it.
+- Linking has been run on a real kernel and under real systemd (above), not on a live hub. Still
+  not checked: a real `ufw` or `firewalld`, whether a later write to the global
+  `net.ipv4.ip_forward` undoes the per-interface setting (it rewrites every interface's value),
+  and the droplet itself. In the container runs, with `hq0` forwarding at 1 and the global
+  `ip_forward` at 0 and then at 1, an empty set forwarded nothing, one pair worked both ways while
+  a third device reached neither, an empty script closed the pair, a script with a bad line left
+  the set as it was, and with the table deleted and forwarding still 1 every device reached every
+  other (why the table is included from the nftables configuration).
 - The web UI and MCP are not yet served on the tunnel address (phase 2), and Tailscale is not
   removed by this command (phase 3).
 
 ### First run on a spare VM
+
+`deploy/net/test/run.sh` does most of the checks below in containers (see above); it needs Docker
+with WireGuard and nf_tables in the Linux kernel. Still run the list on a real machine before the
+hub, because a container shares its host VM's kernel and networking.
 
 Before this is trusted on the real hub, run it once on a throwaway Linux machine (a VM you can
 break, not the hub). It needs: a kernel with WireGuard (5.6 or newer, or `wireguard-dkms`), the
@@ -407,6 +413,7 @@ break, not the hub). It needs: a kernel with WireGuard (5.6 or newer, or `wiregu
 cargo test -p hq-net                                      # grammar, store, renderers, randomized tests
 cargo test -p hq-net --test grammar_fuzz                  # the seeded randomized grammar tests
 sudo -E cargo test -p hq-net -- --ignored                 # drives a real wg interface; Linux, root, wireguard module
+deploy/net/test/run.sh                                    # the real units and applier under systemd 252 and 249, in Docker
 ```
 
 The applier module and its tests compile only on Linux. On another system run them in a container
