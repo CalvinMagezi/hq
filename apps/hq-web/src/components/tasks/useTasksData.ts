@@ -41,10 +41,19 @@ export function useTasksData() {
     }
   }, [setSpaces, setFolders, setInitiatives])
 
+  // Archived lists stay in the store (their name still labels their tasks); archived tasks never load.
+  const loadInitiatives = useCallback(async () => {
+    try {
+      setInitiatives((await fetchInitiativesClient()).initiatives)
+    } catch (e) {
+      console.error('Failed to load lists:', e)
+    }
+  }, [setInitiatives])
+
   const loadTasks = useCallback(async () => {
     setIsRefreshing(true)
     try {
-      const res = await fetchTasksClient({})
+      const res = await fetchTasksClient({ shelf: 'exclude' })
       setTasks(res.tasks)
     } catch (e) {
       console.error('Failed to load tasks:', e)
@@ -61,11 +70,14 @@ export function useTasksData() {
   // Fallback for task mutations that didn't originate in this browser tab
   // (agent tool calls via MCP): tasks_watch.rs polls the DB and broadcasts
   // task:sync; the event carries no per-task delta, so a change refetches all.
+  // Lists come too, since archiving one changes no task row.
   useEffect(() => {
     return subscribe((msg) => {
-      if (msg.type === 'task:sync') loadTasks()
+      if (msg.type !== 'task:sync') return
+      loadTasks()
+      loadInitiatives()
     })
-  }, [subscribe, loadTasks])
+  }, [subscribe, loadTasks, loadInitiatives])
 
   return { ...store, isRefreshing, loadTaxonomy, loadTasks }
 }

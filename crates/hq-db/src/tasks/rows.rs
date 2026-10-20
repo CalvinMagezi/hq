@@ -20,7 +20,7 @@ pub(super) fn row_to_folder(row: &rusqlite::Row) -> rusqlite::Result<Folder> {
 }
 
 pub(super) const INITIATIVE_COLS: &str =
-    "id, space_id, folder_id, name, slug, id_prefix, next_sequence, created_at";
+    "id, space_id, folder_id, name, slug, id_prefix, next_sequence, created_at, shelved_at";
 
 pub(super) fn row_to_initiative(row: &rusqlite::Row) -> rusqlite::Result<Initiative> {
     Ok(Initiative {
@@ -32,6 +32,7 @@ pub(super) fn row_to_initiative(row: &rusqlite::Row) -> rusqlite::Result<Initiat
         id_prefix: row.get(5)?,
         next_sequence: row.get(6)?,
         created_at: row.get(7)?,
+        shelved_at: row.get(8)?,
     })
 }
 
@@ -39,7 +40,7 @@ pub(super) const TASK_COLS: &str = "t.id, t.initiative_id, t.display_id, t.title
      t.priority, t.due_date, t.clickup_task_id, t.created_by, t.created_at, t.updated_at, \
      t.parent_task_id, t.start_date, t.work_started_at, t.first_ready_for_review_at, t.external_id, \
      t.completed_at, t.estimate_minutes, t.blocked_reason, t.waiting_on, t.blocked_since, \
-     t.long_horizon, t.archived_at";
+     t.long_horizon, t.archived_at, t.shelved_at";
 
 pub(super) fn row_to_task(row: &rusqlite::Row) -> rusqlite::Result<Task> {
     Ok(Task {
@@ -67,6 +68,7 @@ pub(super) fn row_to_task(row: &rusqlite::Row) -> rusqlite::Result<Task> {
         blocked_since: row.get(21)?,
         long_horizon: row.get::<_, i64>(22)? != 0,
         archived_at: row.get(23)?,
+        shelved_at: row.get(24)?,
         tags: Vec::new(),
         assignees: Vec::new(),
         depends_on: Vec::new(),

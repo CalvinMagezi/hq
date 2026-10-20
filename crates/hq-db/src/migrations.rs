@@ -346,6 +346,7 @@ const MIGRATIONS: &[(&str, &str)] = &[
         "094_skill_invocation_rollups",
         include_str!("../sql/094_skill_invocation_rollups.sql"),
     ),
+    ("095_task_shelf", include_str!("../sql/095_task_shelf.sql")),
 ];
 
 const MEMORY_SCHEMA_MIGRATION: &str = "058_memory_schema";
@@ -893,6 +894,11 @@ mod tests {
             count("SELECT COUNT(*) FROM tasks WHERE archived_at IS NOT NULL"),
             0,
             "nothing is archived by migrating"
+        );
+        assert_eq!(
+            count("SELECT COUNT(*) FROM tasks WHERE shelved_at IS NOT NULL"),
+            0,
+            "nothing is shelved by migrating"
         );
         assert_eq!(
             count("SELECT COUNT(*) FROM tasks WHERE title LIKE 'Task %'"),

@@ -128,7 +128,7 @@ function VaultHome() {
     const pinnedQuery = useQuery({ ...pinnedNotesQuery, select: (d) => d.notes })
     const tasksQuery = useQuery({
         queryKey: ['tasks', 'in_progress'],
-        queryFn: () => fetchTasksClient({ status: 'in_progress' }),
+        queryFn: () => fetchTasksClient({ status: 'in_progress', shelf: 'exclude' }),
         select: (d) => inProgressTasks(d.tasks),
     })
     const queryClient = useQueryClient()

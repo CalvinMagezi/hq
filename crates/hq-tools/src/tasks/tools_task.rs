@@ -317,7 +317,8 @@ impl HqTool for TaskListTool {
                 "search": { "type": "string", "description": "Words that must all appear in the title, description or display id" },
                 "updated_since": { "type": "string", "description": "Only tasks changed after this UTC time (2026-10-09T12:00:00Z, 2026-10-09 12:00:00 or a date). Pass the previous reply's `as_of` to poll for changes." },
                 "sort": { "type": "string", "enum": ["updated", "created", "priority"], "description": "Order: latest activity (default), newest, or most urgent first" },
-                "archived": { "type": "boolean", "description": "List archived tasks instead of active ones" },
+                "archived": { "type": "boolean", "description": "List deleted tasks (see task_delete) instead of the rest" },
+                "shelf": { "type": "string", "enum": ["include", "exclude", "only"], "description": "Shelved tasks (see task_shelve): include them (default), leave them out, or list only them. They are never otherwise hidden from you." },
                 "stale": { "type": "boolean", "description": "Only in-progress tasks nobody holds that look abandoned (see task_stale for why and what to do)" },
                 "limit": { "type": "integer", "minimum": 1, "maximum": 500, "description": "Page size (default 100). The reply has `total` and `has_more`; read the next page with `offset`." },
                 "offset": { "type": "integer", "minimum": 0, "description": "Rows to skip, for the next page" }
@@ -357,6 +358,7 @@ impl HqTool for TaskListTool {
                 .get("archived")
                 .and_then(Value::as_bool)
                 .unwrap_or(false),
+            shelf: t::Shelf::parse(&arg_str(&args, "shelf"))?,
             assignee: opt_str(&args, "assignee"),
             search: opt_str(&args, "search"),
             updated_since: opt_str(&args, "updated_since")

@@ -1,5 +1,5 @@
 import { useMemo, useState, useCallback } from 'react'
-import { ChevronRight, LayoutGrid, Folder as FolderIcon, FolderOpen, ListChecks, X, Plus, Loader2 } from 'lucide-react'
+import { Archive, ArchiveRestore, ChevronRight, LayoutGrid, Folder as FolderIcon, FolderOpen, ListChecks, X, Plus, Loader2 } from 'lucide-react'
 import type { Space, Folder, Initiative, TaskItem } from '~/lib/tasksApi'
 import { createSpaceClient, createFolderClient, createInitiativeClient } from '~/lib/tasksApi'
 import { usePersistedState } from '~/lib/usePersistedState'
@@ -18,6 +18,10 @@ interface Props {
   selection: TaskSelection
   onSelect: (sel: TaskSelection) => void
   onTaxonomyChanged: () => Promise<void>
+  /** Archives a list (hidden here and from the task lists) or brings it back. Its tasks are not touched. */
+  onSetListArchived: (initiative: Initiative, archived: boolean) => void
+  /** Opens an archived list's tasks in the Archived tab. */
+  onOpenArchivedList: (selection: TaskSelection) => void
   mobileOpen: boolean
   onMobileClose: () => void
 }
@@ -94,6 +98,42 @@ function AddRow({
 
 export const ALL_SELECTION: TaskSelection = { spaceId: null, folderId: null, initiativeId: null }
 
+/** A list and the control that archives it; the control shows on hover, and always on touch screens. */
+function ListRow({
+  initiative,
+  count,
+  active,
+  indent,
+  onSelect,
+  onArchive,
+}: {
+  initiative: Initiative
+  count: number
+  active: boolean
+  indent: number
+  onSelect: () => void
+  onArchive: () => void
+}) {
+  return (
+    <div className="flex items-center gap-0.5 group">
+      <button type="button" onClick={onSelect} className={`${rowClass(active)} flex-1 min-w-0`} style={{ paddingLeft: `${indent}px` }}>
+        <ListChecks className="w-3.5 h-3.5 shrink-0" />
+        <span className="truncate">{initiative.name}</span>
+        <span className="ml-auto text-[11px] text-neutral-600">{count}</span>
+      </button>
+      <button
+        type="button"
+        onClick={onArchive}
+        title="Archive this list"
+        aria-label={`Archive ${initiative.name}`}
+        className="p-1 rounded-md text-neutral-600 hover:text-neutral-200 hover:bg-white/5 transition-all shrink-0 opacity-0 group-hover:opacity-100 focus-visible:opacity-100 [@media(hover:none)]:opacity-100"
+      >
+        <Archive className="w-3 h-3" />
+      </button>
+    </div>
+  )
+}
+
 
 function rowClass(active: boolean) {
   return `w-full text-left py-1.5 px-2 text-xs flex items-center gap-1.5 rounded-lg transition-all mx-0.5 group ${
@@ -101,7 +141,10 @@ function rowClass(active: boolean) {
   }`
 }
 
-export function TasksSidebar({ spaces, folders, initiatives, tasks, selection, onSelect, onTaxonomyChanged, mobileOpen, onMobileClose }: Props) {
+export function TasksSidebar({ spaces, folders, initiatives: allInitiatives, tasks, selection, onSelect, onTaxonomyChanged, onSetListArchived, onOpenArchivedList, mobileOpen, onMobileClose }: Props) {
+  const initiatives = useMemo(() => allInitiatives.filter((i) => !i.shelved_at), [allInitiatives])
+  const archivedLists = useMemo(() => allInitiatives.filter((i) => i.shelved_at), [allInitiatives])
+  const [archivedOpen, setArchivedOpen] = useState(false)
   const [expandedKeys, setExpandedKeys] = usePersistedState<string[]>('hq-tasks-sidebar-expanded', [], Array.isArray)
   const expanded = useMemo(() => new Set(expandedKeys), [expandedKeys])
   const expand = useCallback(
@@ -260,20 +303,18 @@ export function TasksSidebar({ spaces, folders, initiatives, tasks, selection, o
                         {folderOpen && (
                           <div className="ml-4 border-l border-white/5 pl-1">
                             {folderInitiatives.map((initiative) => (
-                              <button
+                              <ListRow
                                 key={initiative.id}
-                                type="button"
-                                onClick={() => {
+                                initiative={initiative}
+                                count={initiativeCount(initiative.id)}
+                                active={isSelected({ spaceId: space.id, folderId: folder.id, initiativeId: initiative.id })}
+                                indent={22}
+                                onSelect={() => {
                                   onSelect({ spaceId: space.id, folderId: folder.id, initiativeId: initiative.id })
                                   onMobileClose()
                                 }}
-                                className={rowClass(isSelected({ spaceId: space.id, folderId: folder.id, initiativeId: initiative.id }))}
-                                style={{ paddingLeft: '22px' }}
-                              >
-                                <ListChecks className="w-3.5 h-3.5 shrink-0" />
-                                <span className="truncate">{initiative.name}</span>
-                                <span className="ml-auto text-[11px] text-neutral-600">{initiativeCount(initiative.id)}</span>
-                              </button>
+                                onArchive={() => onSetListArchived(initiative, true)}
+                              />
                             ))}
                           </div>
                         )}
@@ -282,26 +323,64 @@ export function TasksSidebar({ spaces, folders, initiatives, tasks, selection, o
                   })}
 
                   {folderlessInitiatives.map((initiative) => (
-                    <button
+                    <ListRow
                       key={initiative.id}
-                      type="button"
-                      onClick={() => {
+                      initiative={initiative}
+                      count={initiativeCount(initiative.id)}
+                      active={isSelected({ spaceId: space.id, initiativeId: initiative.id })}
+                      indent={10}
+                      onSelect={() => {
                         onSelect({ spaceId: space.id, folderId: null, initiativeId: initiative.id })
                         onMobileClose()
                       }}
-                      className={rowClass(isSelected({ spaceId: space.id, initiativeId: initiative.id }))}
-                      style={{ paddingLeft: '10px' }}
-                    >
-                      <ListChecks className="w-3.5 h-3.5 shrink-0" />
-                      <span className="truncate">{initiative.name}</span>
-                      <span className="ml-auto text-[11px] text-neutral-600">{initiativeCount(initiative.id)}</span>
-                    </button>
+                      onArchive={() => onSetListArchived(initiative, true)}
+                    />
                   ))}
                 </div>
               )}
             </div>
           )
         })}
+
+        {archivedLists.length > 0 && (
+          <div className="mt-3 pt-2 border-t border-white/5">
+            <button
+              type="button"
+              onClick={() => setArchivedOpen((open) => !open)}
+              aria-expanded={archivedOpen}
+              className="w-full flex items-center gap-1.5 px-2 py-1 text-[11px] uppercase tracking-widest font-bold text-neutral-500 hover:text-neutral-300"
+            >
+              <ChevronRight className={`w-3 h-3 transition-transform ${archivedOpen ? 'rotate-90' : ''}`} />
+              Archived lists
+              <span className="ml-auto font-normal">{archivedLists.length}</span>
+            </button>
+            {archivedOpen &&
+              archivedLists.map((initiative) => (
+                <div key={initiative.id} className="flex items-center gap-0.5 group">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      onOpenArchivedList({ spaceId: initiative.space_id, folderId: initiative.folder_id, initiativeId: initiative.id })
+                      onMobileClose()
+                    }}
+                    className={`${rowClass(false)} flex-1 min-w-0`}
+                  >
+                    <Archive className="w-3.5 h-3.5 shrink-0" />
+                    <span className="truncate">{initiative.name}</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => onSetListArchived(initiative, false)}
+                    title="Bring this list back"
+                    aria-label={`Unarchive ${initiative.name}`}
+                    className="p-1 rounded-md text-neutral-500 hover:text-neutral-200 hover:bg-white/5 transition-all shrink-0"
+                  >
+                    <ArchiveRestore className="w-3 h-3" />
+                  </button>
+                </div>
+              ))}
+          </div>
+        )}
       </div>
     </div>
   )

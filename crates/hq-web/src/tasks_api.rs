@@ -165,23 +165,30 @@ pub(crate) async fn create_folder_handler(
 pub(crate) struct ListInitiativesParams {
     pub(crate) space_id: Option<String>,
     pub(crate) folder_id: Option<String>,
+    /// `include` (default), `exclude` or `only`: whether shelved lists are listed.
+    pub(crate) shelf: Option<String>,
 }
 
 pub(crate) async fn list_initiatives_handler(
     State(state): State<Arc<WsState>>,
     Query(params): Query<ListInitiativesParams>,
 ) -> Response {
+    let shelf = match t::Shelf::parse(params.shelf.as_deref().unwrap_or("")) {
+        Ok(shelf) => shelf,
+        Err(e) => return ApiError::from(e).into_response(),
+    };
     match state.db.with_conn(move |c| {
-        t::list_initiatives(
+        t::list_initiatives_on_shelf(
             c,
             params.space_id.as_deref(),
             params.folder_id.as_deref().map(Some),
+            shelf,
         )
     }) {
         Ok(initiatives) => Json(json!({
             "initiatives": initiatives.iter().map(|i| json!({
                 "id": i.id, "space_id": i.space_id, "folder_id": i.folder_id, "name": i.name,
-                "slug": i.slug, "id_prefix": i.id_prefix,
+                "slug": i.slug, "id_prefix": i.id_prefix, "shelved_at": i.shelved_at,
             })).collect::<Vec<_>>()
         }))
         .into_response(),
@@ -254,6 +261,8 @@ pub(crate) struct ListTasksParams {
     /// List archived tasks instead of active ones.
     #[serde(default)]
     pub(crate) archived: bool,
+    /// `include` (default), `exclude` or `only`: whether shelved tasks are listed.
+    pub(crate) shelf: Option<String>,
     pub(crate) assignee: Option<String>,
     pub(crate) search: Option<String>,
     pub(crate) updated_since: Option<String>,
@@ -278,6 +287,10 @@ pub(crate) async fn list_tasks_handler(
         limit: params.limit,
         offset: params.offset.unwrap_or(0),
         archived: params.archived,
+        shelf: match t::Shelf::parse(params.shelf.as_deref().unwrap_or("")) {
+            Ok(shelf) => shelf,
+            Err(e) => return ApiError::from(e).into_response(),
+        },
         assignee: params.assignee.filter(|a| !a.is_empty()),
         search: params.search.filter(|s| !s.trim().is_empty()),
         updated_since: match params
@@ -883,6 +896,134 @@ pub(crate) async fn restore_task_handler(
     }
 }
 
+/// One task by id or display id, shelved or not, so a link to it always opens.
+pub(crate) async fn get_task_handler(
+    State(state): State<Arc<WsState>>,
+    AxumPath(id): AxumPath<String>,
+) -> Response {
+    match state.db.with_conn(move |c| {
+        t::get_task(c, &id)?.ok_or_else(|| not_found("no task found for that id"))
+    }) {
+        Ok(task) => Json(task_json(&task)).into_response(),
+        Err(e) => ApiError::from(e).into_response(),
+    }
+}
+
+/// The tasks a task points at or is pointed at by (parent, sub-tasks, what it waits on, what
+/// waits on it), shelved or not. The web list leaves shelved tasks out, so the drawer asks for
+/// these to show every relation of an open task.
+pub(crate) async fn related_tasks_handler(
+    State(state): State<Arc<WsState>>,
+    AxumPath(id): AxumPath<String>,
+) -> Response {
+    let result = state.db.with_conn(move |c| {
+        let task = t::get_task(c, &id)?.ok_or_else(|| not_found("no task found for that id"))?;
+        let mut related: Vec<t::Task> = Vec::new();
+        if let Some(parent) = &task.parent_task_id {
+            related.extend(t::get_task(c, parent)?);
+        }
+        for waiting_on in &task.depends_on {
+            related.extend(t::get_task(c, waiting_on)?);
+        }
+        related.extend(t::list_subtasks(c, &task.id)?);
+        related.extend(t::list_dependents(c, &task.id)?);
+        // A deleted task is not a relation anyone can act on.
+        related.retain(|r| r.archived_at.is_none());
+        let mut seen = std::collections::HashSet::new();
+        related.retain(|r| seen.insert(r.id.clone()));
+        Ok::<_, anyhow::Error>(related)
+    });
+    match result {
+        Ok(related) => Json(json!({ "tasks": related.iter().map(task_json).collect::<Vec<_>>() }))
+            .into_response(),
+        Err(e) => ApiError::from(e).into_response(),
+    }
+}
+
+#[derive(Debug, Deserialize)]
+pub(crate) struct ShelveBody {
+    pub(crate) ids: Vec<String>,
+}
+
+/// Hides tasks from the everyday lists. Nothing else about them changes.
+pub(crate) async fn shelve_tasks_handler(
+    State(state): State<Arc<WsState>>,
+    Json(body): Json<ShelveBody>,
+) -> Response {
+    match state.db.with_conn(move |c| t::shelve_tasks(c, &body.ids)) {
+        Ok(out) => Json(json!({ "changed": out.changed, "skipped": out.skipped })).into_response(),
+        Err(e) => ApiError::from(e).into_response(),
+    }
+}
+
+pub(crate) async fn unshelve_tasks_handler(
+    State(state): State<Arc<WsState>>,
+    Json(body): Json<ShelveBody>,
+) -> Response {
+    match state.db.with_conn(move |c| t::unshelve_tasks(c, &body.ids)) {
+        Ok(out) => Json(json!({ "changed": out.changed, "skipped": out.skipped })).into_response(),
+        Err(e) => ApiError::from(e).into_response(),
+    }
+}
+
+#[derive(Debug, Deserialize)]
+pub(crate) struct ShelveCompletedBody {
+    pub(crate) older_than_days: u32,
+    pub(crate) space_id: Option<String>,
+    pub(crate) initiative_id: Option<String>,
+    /// Count only. Defaults to true so a bare call never changes anything.
+    #[serde(default = "default_true")]
+    pub(crate) dry_run: bool,
+}
+
+fn default_true() -> bool {
+    true
+}
+
+/// Shelves completed tasks older than `older_than_days`, or counts them with `dry_run`.
+pub(crate) async fn shelve_completed_handler(
+    State(state): State<Arc<WsState>>,
+    Json(body): Json<ShelveCompletedBody>,
+) -> Response {
+    let scope = t::SweepScope {
+        space_id: body.space_id.filter(|s| !s.is_empty()),
+        initiative_id: body.initiative_id.filter(|s| !s.is_empty()),
+    };
+    match state
+        .db
+        .with_conn(move |c| t::shelve_completed(c, body.older_than_days, &scope, body.dry_run))
+    {
+        Ok(out) => Json(json!({
+            "matched": out.matched, "changed": out.changed, "dry_run": out.dry_run,
+        }))
+        .into_response(),
+        Err(e) => ApiError::from(e).into_response(),
+    }
+}
+
+#[derive(Debug, Deserialize)]
+pub(crate) struct ShelfBody {
+    pub(crate) shelved: bool,
+}
+
+/// Shelves or unshelves a list; its tasks are not touched.
+pub(crate) async fn shelve_initiative_handler(
+    State(state): State<Arc<WsState>>,
+    AxumPath(id): AxumPath<String>,
+    Json(body): Json<ShelfBody>,
+) -> Response {
+    match state.db.with_conn(move |c| {
+        t::get_initiative(c, &id)?.ok_or_else(|| not_found("no list found for that id"))?;
+        t::set_initiative_shelved(c, &id, body.shelved)
+    }) {
+        Ok((list, open)) => Json(json!({
+            "id": list.id, "name": list.name, "shelved_at": list.shelved_at, "open_tasks": open,
+        }))
+        .into_response(),
+        Err(e) => ApiError::from(e).into_response(),
+    }
+}
+
 pub(crate) async fn list_comments_handler(
     State(state): State<Arc<WsState>>,
     AxumPath(id): AxumPath<String>,
@@ -1051,6 +1192,7 @@ mod tests {
                 limit: None,
                 offset: None,
                 archived: false,
+                shelf: None,
                 assignee: None,
                 search: None,
                 updated_since: None,
@@ -1242,6 +1384,7 @@ mod tests {
                     limit: None,
                     offset: None,
                     archived,
+                    shelf: None,
                     assignee: None,
                     search: None,
                     updated_since: None,
@@ -1313,6 +1456,7 @@ mod tests {
                 limit: Some(limit),
                 offset: Some(offset),
                 archived: false,
+                shelf: None,
                 assignee: None,
                 search: None,
                 updated_since: None,
@@ -1379,6 +1523,227 @@ mod tests {
     fn claim_body() -> UpdateTaskBody {
         serde_json::from_value(json!({ "status": "in_progress", "expected_status": "to_do" }))
             .unwrap()
+    }
+
+    fn list_on(
+        state: &Arc<WsState>,
+        shelf: Option<&str>,
+    ) -> impl std::future::Future<Output = Response> {
+        list_tasks_handler(
+            State(state.clone()),
+            Query(ListTasksParams {
+                space_id: None,
+                initiative_id: None,
+                status: None,
+                tag: None,
+                priority: None,
+                parent_task_id: None,
+                top_level_only: None,
+                limit: None,
+                offset: None,
+                archived: false,
+                shelf: shelf.map(String::from),
+                assignee: None,
+                search: None,
+                updated_since: None,
+                sort: None,
+            }),
+        )
+    }
+
+    #[tokio::test]
+    async fn shelving_hides_a_task_from_the_everyday_list_and_nothing_else() {
+        let state = test_state();
+        let id: String = create_titled(&state, "Old work").await["id"]
+            .as_str()
+            .unwrap()
+            .into();
+        create_titled(&state, "Current work").await;
+
+        let shelved = body_json(
+            shelve_tasks_handler(
+                State(state.clone()),
+                Json(ShelveBody {
+                    ids: vec![id.clone()],
+                }),
+            )
+            .await,
+        )
+        .await;
+        assert_eq!(shelved["changed"], json!([id]));
+
+        assert_eq!(
+            body_json(list_on(&state, Some("exclude")).await).await["total"],
+            1
+        );
+        assert_eq!(
+            body_json(list_on(&state, Some("only")).await).await["total"],
+            1
+        );
+        assert_eq!(body_json(list_on(&state, None).await).await["total"], 2);
+        assert_eq!(
+            list_on(&state, Some("sideways")).await.status(),
+            StatusCode::BAD_REQUEST
+        );
+
+        let one =
+            body_json(get_task_handler(State(state.clone()), AxumPath(id.clone())).await).await;
+        assert!(
+            one["shelved_at"].is_string(),
+            "a shelved task still opens by id"
+        );
+
+        let back = body_json(
+            unshelve_tasks_handler(State(state.clone()), Json(ShelveBody { ids: vec![id] })).await,
+        )
+        .await;
+        assert_eq!(back["changed"].as_array().map(Vec::len), Some(1));
+        assert_eq!(
+            body_json(list_on(&state, Some("exclude")).await).await["total"],
+            2
+        );
+    }
+
+    #[tokio::test]
+    async fn the_sweep_is_a_dry_run_unless_told_otherwise_and_a_list_can_be_shelved() {
+        let state = test_state();
+        let created = create_titled(&state, "Finished long ago").await;
+        let id = created["id"].as_str().unwrap().to_string();
+        let initiative = created["initiative_id"].as_str().unwrap().to_string();
+        let done = id.clone();
+        state
+            .db
+            .with_conn(move |c| {
+                let patch = t::TaskPatch {
+                    status: Some(t::STATUS_COMPLETE.to_string()),
+                    ..Default::default()
+                };
+                t::update_task(c, &done, &patch, None)?;
+                c.execute(
+                    "UPDATE tasks SET completed_at = datetime('now', '-90 days') WHERE id = ?1",
+                    [&done],
+                )?;
+                Ok(())
+            })
+            .unwrap();
+
+        let body = |dry_run| ShelveCompletedBody {
+            older_than_days: 30,
+            space_id: None,
+            initiative_id: None,
+            dry_run,
+        };
+        let dry =
+            body_json(shelve_completed_handler(State(state.clone()), Json(body(true))).await).await;
+        assert_eq!(
+            (
+                dry["matched"].as_u64(),
+                dry["changed"].as_array().map(Vec::len)
+            ),
+            (Some(1), Some(0))
+        );
+        assert_eq!(
+            body_json(list_on(&state, Some("only")).await).await["total"],
+            0
+        );
+
+        let done =
+            body_json(shelve_completed_handler(State(state.clone()), Json(body(false))).await)
+                .await;
+        assert_eq!(done["changed"], json!([id]));
+        assert_eq!(
+            shelve_completed_handler(
+                State(state.clone()),
+                Json(ShelveCompletedBody {
+                    older_than_days: 0,
+                    ..body(true)
+                }),
+            )
+            .await
+            .status(),
+            StatusCode::BAD_REQUEST
+        );
+
+        let list = body_json(
+            shelve_initiative_handler(
+                State(state.clone()),
+                AxumPath(initiative.clone()),
+                Json(ShelfBody { shelved: true }),
+            )
+            .await,
+        )
+        .await;
+        assert!(list["shelved_at"].is_string());
+        let shown = body_json(
+            list_initiatives_handler(
+                State(state.clone()),
+                Query(ListInitiativesParams {
+                    space_id: None,
+                    folder_id: None,
+                    shelf: Some("exclude".into()),
+                }),
+            )
+            .await,
+        )
+        .await;
+        assert_eq!(shown["initiatives"].as_array().map(Vec::len), Some(0));
+    }
+
+    #[tokio::test]
+    async fn related_tasks_include_shelved_ones_the_list_leaves_out() {
+        let state = test_state();
+        let parent = create_titled(&state, "Parent").await;
+        let parent_id = parent["id"].as_str().unwrap().to_string();
+        let child: serde_json::Value = {
+            let body = serde_json::from_value(json!({
+                "title": "Child", "parent_task_id": parent_id,
+            }))
+            .unwrap();
+            body_json(create_task_handler(State(state.clone()), Json(body)).await).await
+        };
+        let child_id = child["id"].as_str().unwrap().to_string();
+        let shelved = child_id.clone();
+        state
+            .db
+            .with_conn(move |c| t::shelve_tasks(c, &[shelved]))
+            .unwrap();
+
+        let related = body_json(
+            related_tasks_handler(State(state.clone()), AxumPath(parent_id.clone())).await,
+        )
+        .await;
+        assert_eq!(related["tasks"][0]["id"], child_id.as_str());
+
+        let deleted = child_id.clone();
+        state
+            .db
+            .with_conn(move |c| t::archive_task(c, &deleted, false, "test"))
+            .unwrap();
+        let after = body_json(
+            related_tasks_handler(State(state.clone()), AxumPath(parent_id.clone())).await,
+        )
+        .await;
+        assert_eq!(
+            after["tasks"].as_array().map(Vec::len),
+            Some(0),
+            "a deleted task is no relation"
+        );
+        assert_eq!(
+            shelve_initiative_handler(
+                State(state.clone()),
+                AxumPath("in-nope".into()),
+                Json(ShelfBody { shelved: true }),
+            )
+            .await
+            .status(),
+            StatusCode::NOT_FOUND
+        );
+        assert_eq!(
+            related_tasks_handler(State(state.clone()), AxumPath("nope".into()))
+                .await
+                .status(),
+            StatusCode::NOT_FOUND
+        );
     }
 
     async fn body_json(response: Response) -> serde_json::Value {

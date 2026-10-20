@@ -53,7 +53,8 @@ pub use relay::*;
 pub use self_update::SelfUpdateConfig;
 pub use stack::{Specialist, StackConfig};
 pub use tasks::{
-    DEFAULT_LEASE_TTL_SECS, DEFAULT_STALE_AFTER_HOURS, LeaseMode, MIN_LEASE_TTL_SECS, TasksConfig,
+    DEFAULT_LEASE_TTL_SECS, DEFAULT_STALE_AFTER_HOURS, LeaseMode, MAX_AUTO_ARCHIVE_DAYS,
+    MIN_AUTO_ARCHIVE_DAYS, MIN_LEASE_TTL_SECS, TasksConfig,
 };
 pub use usage_ledger::UsageLedgerConfig;
 pub use vault_watch::{VaultWatchConfig, VaultWatchMode};

@@ -400,6 +400,7 @@ pub fn claim(
             update_task_as(conn, &task.id, &patch, Some(&task.status), &ctx)?;
         }
         stamp_start_date(conn, &task)?;
+        surface(conn, &task.id)?;
         add_comment(conn, &task.id, &actor, &claimed_comment(who, &actor), None)?;
         let session = conn.query_row(
             &format!("SELECT {LEASE_COLS} FROM task_work_sessions WHERE id = ?1"),
@@ -615,6 +616,7 @@ pub fn open_for_session(
             hash_token(&new_token())
         ],
     )?;
+    surface(conn, task_id)?;
     changed_outside_tx(conn);
     Ok(id)
 }
