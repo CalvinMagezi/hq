@@ -6,7 +6,6 @@ import android.app.NotificationManager;
 import android.app.Service;
 import android.content.Context;
 import android.content.Intent;
-import android.content.SharedPreferences;
 import android.content.pm.ServiceInfo;
 import android.os.Build;
 import android.os.IBinder;
@@ -14,10 +13,9 @@ import android.util.Log;
 import java.io.File;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
-import java.nio.file.Files;
-import java.security.SecureRandom;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.atomic.AtomicBoolean;
@@ -33,7 +31,9 @@ public class HubService extends Service {
     private static final long BACKOFF_MAX_MS = 60_000;
     private static final long STABLE_RUN_MS = 60_000;
     private static final long MAX_LOG_BYTES = 5L << 20;
+    private static final long MODE_FILE_MAX_BYTES = 64;
 
+    private static final Object LOCK = new Object();
     private static final AtomicBoolean started = new AtomicBoolean(false);
     // A supervisor from before a stop must not outlive it if the service starts again meanwhile.
     private static final AtomicInteger generation = new AtomicInteger();
@@ -41,17 +41,7 @@ public class HubService extends Service {
     private static volatile Process caddyProc;
 
     static String token(Context c) {
-        SharedPreferences p = c.getSharedPreferences("hq", MODE_PRIVATE);
-        String t = p.getString("token", null);
-        if (t == null) {
-            byte[] b = new byte[18];
-            new SecureRandom().nextBytes(b);
-            StringBuilder s = new StringBuilder("t");
-            for (byte x : b) s.append(String.format("%02x", x));
-            t = s.toString();
-            p.edit().putString("token", t).apply();
-        }
-        return t;
+        return SecretStore.webToken(c);
     }
 
     @Override
@@ -59,7 +49,7 @@ public class HubService extends Service {
         NotificationManager nm = getSystemService(NotificationManager.class);
         nm.createNotificationChannel(new NotificationChannel(CHANNEL, "HQ hub", NotificationManager.IMPORTANCE_LOW));
         Notification n = new Notification.Builder(this, CHANNEL).setContentTitle("HQ hub running")
-                .setContentText("Serving this device on 127.0.0.1:" + PORT).setSmallIcon(android.R.drawable.stat_notify_sync).build();
+                .setContentText((HubConfig.isActive(readSmall(new File(getFilesDir(), "mode"))) ? "Active: relays and scheduler on. " : "") + "Serving this device on 127.0.0.1:" + PORT).setSmallIcon(android.R.drawable.stat_notify_sync).build();
         try {
             if (Build.VERSION.SDK_INT >= 34) startForeground(1, n, ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE);
             else startForeground(1, n);
@@ -77,27 +67,51 @@ public class HubService extends Service {
     /** Restarts a child with exponential backoff; a null command means "not configured", so it is skipped. */
     private void supervise(int gen, String name, Supplier<ProcessBuilder> command, boolean isHq) {
         long backoff = BACKOFF_MIN_MS;
-        try {
-            while (gen == generation.get()) {
+        boolean saidUnconfigured = false;
+        while (gen == generation.get()) {
+            long ranMs = 0;
+            try {
                 ProcessBuilder pb = command.get();
                 if (pb == null) {
-                    Log.i(TAG, name + " not configured, not started");
-                    return;
+                    if (!saidUnconfigured) Log.i(TAG, name + " not configured, waiting for its files");
+                    saidUnconfigured = true;
+                    if (!pause(gen, BACKOFF_MAX_MS)) return;
+                    continue;
                 }
                 long t0 = System.currentTimeMillis();
-                Process p = pb.start();
-                if (isHq) hqProc = p; else caddyProc = p;
+                Process p = launch(gen, pb, isHq);
+                if (p == null) return;
                 Log.i(TAG, name + " started");
                 int rc = p.waitFor();
-                long ranMs = System.currentTimeMillis() - t0;
+                ranMs = System.currentTimeMillis() - t0;
                 Log.w(TAG, name + " exited rc=" + rc + " after " + ranMs / 1000 + " s");
-                if (gen != generation.get()) return;
-                backoff = ranMs >= STABLE_RUN_MS ? BACKOFF_MIN_MS : Math.min(backoff * 2, BACKOFF_MAX_MS);
-                Thread.sleep(backoff);
+            } catch (InterruptedException e) {
+                return;
+            } catch (Exception e) {
+                Log.e(TAG, name + " failed, will retry: " + e);
             }
-        } catch (Exception e) {
-            Log.e(TAG, name + " supervisor failed: " + e);
+            backoff = ranMs >= STABLE_RUN_MS ? BACKOFF_MIN_MS : Math.min(backoff * 2, BACKOFF_MAX_MS);
+            if (!pause(gen, backoff)) return;
         }
+    }
+
+    /** Starts the child only if no stop happened since the supervisor began; the stop path takes the same lock. */
+    private static Process launch(int gen, ProcessBuilder pb, boolean isHq) throws IOException {
+        synchronized (LOCK) {
+            if (gen != generation.get()) return null;
+            Process p = pb.start();
+            if (isHq) hqProc = p; else caddyProc = p;
+            return p;
+        }
+    }
+
+    private static boolean pause(int gen, long ms) {
+        try {
+            Thread.sleep(ms);
+        } catch (InterruptedException e) {
+            return false;
+        }
+        return gen == generation.get();
     }
 
     /**
@@ -117,24 +131,24 @@ public class HubService extends Service {
         cmd.add(lib.getPath());
         cmd.addAll(Arrays.asList(HubConfig.hqArgs(active, PORT)));
         ProcessBuilder pb = new ProcessBuilder(cmd);
-        Map<String, String> env = pb.environment();
-        env.putAll(SecretStore.load(this));
-        env.put("HOME", home.getPath());
-        env.put("TMPDIR", getCacheDir().getPath());
-        env.put("HQ_PROFILE", "mobile");
-        env.put("HQ_VAULT_PATH", new File(home, ".vault").getPath());
-        env.put("HQ_CONFIG_PATH", new File(home, "config.yaml").getPath());
-        env.put("HQ_WEB_STATIC_DIR", new File(getFilesDir(), "web").getPath());
-        env.put("HQ_WEB_AUTH_TOKEN", token(this));
-        env.put("HQ_WEB_BIND", "127.0.0.1");
-        env.put("HQ_WS_PORT", String.valueOf(PORT));
+        Map<String, String> fixed = new LinkedHashMap<>();
+        fixed.put("HOME", home.getPath());
+        fixed.put("TMPDIR", getCacheDir().getPath());
+        fixed.put("HQ_PROFILE", "mobile");
+        fixed.put("HQ_VAULT_PATH", new File(home, ".vault").getPath());
+        fixed.put("HQ_CONFIG_PATH", new File(home, "config.yaml").getPath());
+        fixed.put("HQ_WEB_STATIC_DIR", new File(getFilesDir(), "web").getPath());
+        fixed.put("HQ_WEB_AUTH_TOKEN", token(this));
+        fixed.put("HQ_WEB_BIND", "127.0.0.1");
+        fixed.put("HQ_WS_PORT", String.valueOf(PORT));
+        pb.environment().putAll(HubConfig.childEnv(SecretStore.load(this), fixed));
         pb.redirectErrorStream(true).redirectOutput(ProcessBuilder.Redirect.appendTo(trimmed(new File(getFilesDir(), "hq.log"))));
         return pb;
     }
 
     private static String readSmall(File f) {
         try {
-            return f.isFile() ? new String(Files.readAllBytes(f.toPath()), StandardCharsets.UTF_8) : null;
+            return new String(HubConfig.readRegular(f.toPath(), MODE_FILE_MAX_BYTES), StandardCharsets.UTF_8);
         } catch (IOException e) {
             return null;
         }
@@ -166,10 +180,12 @@ public class HubService extends Service {
 
     @Override
     public void onDestroy() {
-        generation.incrementAndGet();
-        started.set(false);
-        if (hqProc != null) hqProc.destroy();
-        if (caddyProc != null) caddyProc.destroy();
+        synchronized (LOCK) {
+            generation.incrementAndGet();
+            started.set(false);
+            if (hqProc != null) hqProc.destroy();
+            if (caddyProc != null) caddyProc.destroy();
+        }
         super.onDestroy();
     }
 
