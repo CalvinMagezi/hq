@@ -1,0 +1,91 @@
+name: Android
+
+# Builds hq for 64-bit Android (aarch64-linux-android) with the NDK and keeps the binary as a
+# workflow artifact. It also fails when a LOAD segment is not aligned to 16 KB pages, which Google
+# Play requires of native code in apps that target Android 15 or newer. The artifact is not
+# signed and not attached to a release: the phone app that packages it is separate work.
+# Runs on main, on pull requests that could break the Android build (dependencies, manifests, this
+# file), weekly, and by hand.
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+    paths:
+      - ".github/workflows/android.yml"
+      - "scripts/check-android-alignment.sh"
+      - "Cargo.toml"
+      - "Cargo.lock"
+      - "crates/*/Cargo.toml"
+  # Weekly, so a Rust-only change that breaks the Android build is found even when no pull request
+  # touched the files above.
+  schedule:
+    - cron: "17 5 * * 1"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+  RUST_TOOLCHAIN: "1.98.1"
+  NDK_VERSION: "28.2.13676358"
+  # The oldest Android release the build targets; the NDK's clang wrappers are named after it.
+  ANDROID_API: "26"
+  HQ_TARGET: aarch64-linux-android
+
+jobs:
+  build:
+    name: Build hq (aarch64-linux-android)
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Install Rust toolchain
+        run: |
+          rustup toolchain install "$RUST_TOOLCHAIN" --profile minimal --target "$HQ_TARGET"
+          rustup default "$RUST_TOOLCHAIN"
+
+      - name: Install the NDK
+        run: |
+          sdk="${ANDROID_HOME:-$ANDROID_SDK_ROOT}"
+          yes | "$sdk/cmdline-tools/latest/bin/sdkmanager" --licenses > /dev/null || true
+          "$sdk/cmdline-tools/latest/bin/sdkmanager" "ndk;$NDK_VERSION"
+          echo "NDK=$sdk/ndk/$NDK_VERSION" >> "$GITHUB_ENV"
+
+      - name: Build hq
+        env:
+          HQ_GIT_SHA: ${{ github.sha }}
+        run: |
+          tc="$NDK/toolchains/llvm/prebuilt/linux-x86_64/bin"
+          export ANDROID_NDK_HOME="$NDK" ANDROID_NDK_ROOT="$NDK"
+          export CC_aarch64_linux_android="$tc/aarch64-linux-android${ANDROID_API}-clang"
+          export AR_aarch64_linux_android="$tc/llvm-ar"
+          export CARGO_TARGET_AARCH64_LINUX_ANDROID_LINKER="$tc/aarch64-linux-android${ANDROID_API}-clang"
+          export PATH="$tc:$PATH"
+          cargo build -p hq-cli --profile release-small --target "$HQ_TARGET" --locked
+
+      - name: Check the binary
+        run: |
+          bin="target/$HQ_TARGET/release-small/hq"
+          file "$bin" | grep -q "ARM aarch64" || { echo "not an aarch64 binary" >&2; file "$bin" >&2; exit 1; }
+          bash scripts/check-android-alignment.sh "$bin" "$NDK/toolchains/llvm/prebuilt/linux-x86_64/bin/llvm-objdump"
+          ls -l "$bin"
+
+      - name: Package
+        run: |
+          mkdir -p dist
+          cp "target/$HQ_TARGET/release-small/hq" dist/hq-android-arm64
+          (cd dist && sha256sum hq-android-arm64 > hq-android-arm64.sha256)
+
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: hq-android-arm64
+          path: |
+            dist/hq-android-arm64
+            dist/hq-android-arm64.sha256
+          if-no-files-found: error
+          retention-days: 14

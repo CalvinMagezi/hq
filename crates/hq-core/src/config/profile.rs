@@ -23,11 +23,84 @@ pub enum Profile {
     Full,
     /// The web app, tasks and vault only, with no outbound traffic you did not list.
     Lite,
+    /// An instance that lives on a phone: Full for a machine with no shell sandbox, no `git`
+    /// and no way to swap its own binary, with a data-saver mode that keeps note text from being
+    /// embedded over a metered connection. It still talks to model providers, runs the chat
+    /// relays and drives coding agents on remote hosts (a laptop, a server) as Full does.
+    Mobile,
 }
 
 impl Profile {
     pub fn is_lite(self) -> bool {
         self == Self::Lite
+    }
+
+    pub fn is_mobile(self) -> bool {
+        self == Self::Mobile
+    }
+
+    /// The name this edition goes by in `profile:` and in output.
+    pub fn name(self) -> &'static str {
+        match self {
+            Self::Full => "full",
+            Self::Lite => "lite",
+            Self::Mobile => "mobile",
+        }
+    }
+
+    /// Whether this edition drops every tool of `category`. Both places that assemble a tool set,
+    /// the MCP registry and the chat agent's own builder, ask this one question, so an edition
+    /// cannot be narrowed in one and left wide in the other.
+    pub fn drops_tool_category(self, category: &str) -> bool {
+        self == Self::Mobile && MOBILE_REMOVED_TOOL_CATEGORIES.contains(&category)
+    }
+
+    /// Whether the agent's shell is expected to run inside an OS sandbox (bubblewrap on Linux,
+    /// sandbox-exec on macOS). Only Full is. A phone has no such backend, so its shell is always
+    /// refused and there is nothing to warn about at start-up; Lite has no shell at all.
+    pub fn expects_shell_sandbox(self) -> bool {
+        self == Self::Full
+    }
+}
+
+/// The tool categories `profile: mobile` drops: git (there is no `git` on a phone) and the
+/// self-updater (a phone is updated by installing a new app, not by swapping a binary). Everything
+/// else stays, including the coding-agent tools that drive sessions on a remote host, since a
+/// phone instance's owner keeps their coding hosts elsewhere.
+pub const MOBILE_REMOVED_TOOL_CATEGORIES: &[&str] = &["git", "self_update"];
+
+/// Settings that only apply under `profile: mobile`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct MobileConfig {
+    /// Keep note text from being embedded (sent to an embedding provider) so a metered
+    /// connection pays for chat and nothing else. The keyword index still follows every edit.
+    /// On by default; env `HQ_MOBILE__DATA_SAVER`, which a phone shell can set from the
+    /// connection type before it starts HQ.
+    #[serde(default = "default_data_saver")]
+    pub data_saver: bool,
+}
+
+fn default_data_saver() -> bool {
+    true
+}
+
+impl Default for MobileConfig {
+    fn default() -> Self {
+        Self {
+            data_saver: default_data_saver(),
+        }
+    }
+}
+
+impl HqConfig {
+    /// Whether this instance sends note text to an embedding provider. Lite never does, and a
+    /// mobile instance does not while its data saver is on.
+    pub fn embeds_notes(&self) -> bool {
+        match self.profile {
+            Profile::Lite => false,
+            Profile::Mobile => !self.mobile.data_saver,
+            Profile::Full => true,
+        }
     }
 }
 
@@ -730,6 +803,62 @@ mod tests {
         );
         assert!(plain.lite.allow_egress.is_empty());
     }
+
+    #[test]
+    fn only_full_expects_a_shell_sandbox_and_each_edition_answers_for_itself() {
+        assert!(Profile::Full.expects_shell_sandbox());
+        assert!(!Profile::Lite.expects_shell_sandbox());
+        assert!(!Profile::Mobile.expects_shell_sandbox());
+        assert!(
+            Profile::Mobile.is_mobile() && !Profile::Full.is_mobile() && !Profile::Lite.is_mobile()
+        );
+        // Mobile is not Lite: it keeps the model calls and relays Lite refuses.
+        assert!(!Profile::Mobile.is_lite());
+    }
+
+    #[test]
+    fn the_mobile_profile_and_its_data_saver_load_from_the_config_file() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("config.yaml");
+        std::fs::write(
+            &path,
+            format!(
+                "vault_path: {}\nprofile: mobile\nmobile:\n  data_saver: false\n",
+                dir.path().display()
+            ),
+        )
+        .unwrap();
+        let cfg = HqConfig::load_from_path(&path).unwrap();
+        assert_eq!(cfg.profile, Profile::Mobile);
+        assert!(!cfg.mobile.data_saver);
+
+        std::fs::write(
+            &path,
+            format!("vault_path: {}\nprofile: mobile\n", dir.path().display()),
+        )
+        .unwrap();
+        let saving = HqConfig::load_from_path(&path).unwrap();
+        assert!(
+            saving.mobile.data_saver,
+            "the data saver is on unless the owner turns it off"
+        );
+    }
+
+    #[test]
+    fn note_text_is_embedded_only_when_nothing_asks_to_keep_it_local() {
+        let with = |profile: Profile, data_saver: bool| HqConfig {
+            profile,
+            mobile: MobileConfig { data_saver },
+            ..HqConfig::default()
+        };
+        assert!(with(Profile::Full, true).embeds_notes());
+        assert!(with(Profile::Full, false).embeds_notes());
+        assert!(!with(Profile::Lite, false).embeds_notes());
+        assert!(!with(Profile::Lite, true).embeds_notes());
+        assert!(!with(Profile::Mobile, true).embeds_notes());
+        assert!(with(Profile::Mobile, false).embeds_notes());
+    }
+
     #[test]
     fn env_only_providers_and_remote_endpoints_are_listed() {
         let env: HashMap<&str, &str> = HashMap::from([

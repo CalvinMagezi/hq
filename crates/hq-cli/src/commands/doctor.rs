@@ -27,10 +27,7 @@ fn run_egress_with(config: &HqConfig, env: hq_core::config::EnvLookup<'_>) -> Re
     use hq_core::config::{egress_report, lite_violations};
     let report = egress_report(config, env);
     let lite = config.profile.is_lite();
-    println!(
-        "Outbound destinations (profile: {})",
-        if lite { "lite" } else { "full" }
-    );
+    println!("Outbound destinations (profile: {})", config.profile.name());
     if report.is_empty() {
         println!("  none: nothing configured sends data to another service");
     }
@@ -318,7 +315,9 @@ fn report_search_index(config: &HqConfig) {
     for Line(label, text) in lines {
         println!("  {label}  {text}");
     }
-    if !config.profile.is_lite() {
+    // Lite and a mobile instance with its data saver on run no embedding worker, so there is
+    // nothing to report and "no report yet" would never clear.
+    if config.embeds_notes() {
         for Line(label, text) in embedding_worker_lines(worker.as_ref(), chrono::Utc::now()) {
             println!("  {label}  {text}");
         }

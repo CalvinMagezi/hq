@@ -120,8 +120,14 @@ pub fn create_default_registry(
     for tool in tools {
         registry.register(tool);
     }
-    if config.is_some_and(|c| c.profile.is_lite()) {
-        registry.retain(|t| LITE_CATEGORIES.contains(&t.category()));
+    if let Some(profile) = config.map(|c| c.profile) {
+        if profile.is_lite() {
+            registry.retain(|t| LITE_CATEGORIES.contains(&t.category()));
+        } else {
+            // Mobile drops git and the self-updater; the other editions drop nothing here. The
+            // chat agent's own builder asks the same question (`Profile::drops_tool_category`).
+            registry.retain(|t| !profile.drops_tool_category(t.category()));
+        }
     }
     registry
 }
@@ -146,6 +152,62 @@ mod tests {
             vault_path.join("agents"),
             None,
         )
+    }
+
+    /// The self-updater's tools exist only when `self_update.enabled` is set, so the profile tests
+    /// turn it on; otherwise "mobile drops them" would hold for the wrong reason.
+    fn registry_for(vault: &tempfile::TempDir, profile: hq_core::config::Profile) -> ToolRegistry {
+        let vault_path = vault.path().to_path_buf();
+        let config = HqConfig {
+            profile,
+            self_update: hq_core::config::SelfUpdateConfig {
+                enabled: true,
+                ..hq_core::config::SelfUpdateConfig::default()
+            },
+            ..HqConfig::default()
+        };
+        create_default_registry(
+            Arc::new(VaultClient::new(vault_path.clone()).unwrap()),
+            Arc::new(Database::open_memory().unwrap()),
+            vault_path.join("skills"),
+            vault_path.join("agents"),
+            Some(&config),
+        )
+    }
+
+    /// A phone has no `git` and no binary self-updater, so neither is reachable through any
+    /// transport; the chat agent, vault, tasks and web tools stay, and so do the coding-agent
+    /// tools, because a phone instance drives sessions on hosts elsewhere.
+    #[test]
+    fn the_mobile_registry_drops_git_and_the_self_updater_and_keeps_the_rest() {
+        use hq_core::config::Profile;
+        let vault = tempfile::TempDir::new().unwrap();
+        let full = registry_for(&vault, Profile::Full).categories();
+        let mobile = registry_for(&vault, Profile::Mobile).categories();
+        for removed in hq_core::config::MOBILE_REMOVED_TOOL_CATEGORIES {
+            assert!(
+                full.iter().any(|c| c == removed),
+                "{removed} missing from full, so mobile dropping it proves nothing"
+            );
+            assert!(
+                !mobile.iter().any(|c| c == removed),
+                "{removed} still on mobile"
+            );
+        }
+        for kept in ["tasks", "vault", "web", "harness"] {
+            assert!(mobile.iter().any(|c| c == kept), "{kept} missing on mobile");
+        }
+        assert!(mobile.len() < full.len());
+    }
+
+    /// Lite stays narrower than mobile, and a mobile instance is never made narrower than Lite.
+    #[test]
+    fn mobile_keeps_more_than_lite() {
+        use hq_core::config::Profile;
+        let vault = tempfile::TempDir::new().unwrap();
+        let lite = registry_for(&vault, Profile::Lite).list().len();
+        let mobile = registry_for(&vault, Profile::Mobile).list().len();
+        assert!(mobile > lite, "mobile {mobile} vs lite {lite}");
     }
 
     /// A typo or a renamed tool would silently drop a confirmation, so every entry must be a

@@ -405,7 +405,7 @@ pub fn hide_process_environment() {
     DONE.get_or_init(set_non_dumpable);
 }
 
-#[cfg(target_os = "linux")]
+#[cfg(any(target_os = "linux", target_os = "android"))]
 fn set_non_dumpable() {
     // SAFETY: PR_SET_DUMPABLE takes plain integer arguments and touches no
     // memory owned by Rust.
@@ -415,7 +415,7 @@ fn set_non_dumpable() {
     }
 }
 
-#[cfg(not(target_os = "linux"))]
+#[cfg(not(any(target_os = "linux", target_os = "android")))]
 fn set_non_dumpable() {}
 
 /// The working sandbox backend on this host, probed once per process.
