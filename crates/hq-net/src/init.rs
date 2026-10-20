@@ -161,7 +161,7 @@ pub fn init(store: &Store, options: &InitOptions, ctx: &InitContext) -> Result<S
 fn forwarding_note(ip_forward: Option<&str>, interface: &str) -> String {
     match ip_forward.map(str::trim) {
         Some(value) => format!(
-            "net.ipv4.ip_forward is {value} on this machine. The hub does not need forwarding and does not rely on it: the firewall rule in step 3 and the per-interface setting in step 2 both stop traffic from crossing {interface}, whatever the global value is. Leave it as it is.\n"
+            "net.ipv4.ip_forward is {value} on this machine. The hub does not need forwarding and does not rely on it: the firewall rule in step 3 and the per-interface setting in step 2 both stop traffic from crossing {interface}, whatever the global value is. Leave it as it is. (Linking two devices needs forwarding turned on for {interface}; docs/PRIVATE_NETWORK.md explains how, and why the firewall table must then be loaded first.)\n"
         ),
         None => format!(
             "Could not read net.ipv4.ip_forward here. The hub does not rely on it: step 2 and step 3 stop traffic from crossing {interface} either way. Check it with: sysctl net.ipv4.ip_forward\n"
@@ -186,6 +186,7 @@ fn instructions(store: &Store, net: &Net, ctx: &InitContext) -> String {
     let staged_present = staged.exists();
     let (interface, subnet, hub, port) = (&net.interface, &net.subnet, &net.hub, net.port);
     let prefix = net.subnet().map(|s| s.prefix()).unwrap_or(24);
+    let set = crate::links::set_name(interface).unwrap_or_default();
     let spool = shell_quote(&ctx.spool_dir.display().to_string());
     let staged_q = shell_quote(&staged.display().to_string());
     let (uid, gid) = (ctx.owner_uid, ctx.owner_gid);
@@ -218,7 +219,7 @@ fn instructions(store: &Store, net: &Net, ctx: &InitContext) -> String {
         "Step 2. The WireGuard interface. The key is read from its file, so it never appears in this config:\n  sudo tee {WG_DIR}/{interface}.conf >/dev/null <<'EOF'\n[Interface]\nAddress = {hub}/{prefix}\nListenPort = {port}\nPostUp = wg set %i private-key {WG_DIR}/%i.key\nPostUp = sysctl -q -w net.ipv4.conf.%i.forwarding=0\nEOF\n  sudo chmod 600 {WG_DIR}/{interface}.conf\n\n"
     ));
     out.push_str(&format!(
-        "Step 3. Do not forward between devices. This adds its own nftables table and leaves your other rules alone:\n  sudo nft -f - <<'EOF'\ntable inet hq_net {{\n  chain forward {{\n    type filter hook forward priority -10; policy accept;\n    iifname \"{interface}\" drop\n    oifname \"{interface}\" drop\n  }}\n}}\nEOF\nThat is lost at reboot: include the same table from your nftables configuration to keep it. With iptables instead:\n  sudo iptables -I FORWARD -i {interface} -j DROP\n  sudo iptables -I FORWARD -o {interface} -j DROP\nIf your firewall drops inbound UDP by default, also allow {port}/udp.\n\n"
+        "Step 3. Do not forward between devices, except between the pairs you name later with `hq net link add` (none yet; linking also needs step 2's forwarding setting changed, see docs/PRIVATE_NETWORK.md, \"Linking two devices\"). This adds its own nftables table, replacing an earlier copy of it, and leaves your other rules alone. The pairs live in the set; the rules never change, and the applier only replaces the set's contents (after replacing the table, run `sudo systemctl start hq-net-apply@{interface}.service` to fill the set again):\n  sudo nft -f - <<'EOF'\nadd table inet hq_net\ndelete table inet hq_net\ntable inet hq_net {{\n  set {set} {{\n    type ipv4_addr . ipv4_addr\n  }}\n  chain forward {{\n    type filter hook forward priority -10; policy accept;\n    iifname \"{interface}\" oifname \"{interface}\" ip saddr . ip daddr @{set} accept\n    iifname \"{interface}\" drop\n    oifname \"{interface}\" drop\n  }}\n}}\nEOF\nThat is lost at reboot: include the same table from your nftables configuration to keep it (the set may start empty). If another firewall (ufw, firewalld) also filters forwarded traffic, it has to let {interface} traffic back out of {interface} for pairs to work, and this table is then the only thing limiting who may talk: load it at boot, and after every change check that two devices you did not link cannot reach each other. With iptables instead there is no per-pair form; use these, and do not link devices:\n  sudo iptables -I FORWARD -i {interface} -j DROP\n  sudo iptables -I FORWARD -o {interface} -j DROP\nIf your firewall drops inbound UDP by default, also allow {port}/udp.\n\n"
     ));
     out.push_str(&format!(
         "Step 4. The applier: a small program that runs as root, accepts only a public key, one address and an optional preshared key per device, and refuses everything else. Build it without the rest of hq, and install it where only root can change it (a directory under /opt that only root owns; /usr/local can be writable by a group). Never point the unit at ~/bin/hq, which your user can rewrite. Build it as an account other than the one HQ runs as, in a clean checkout, because HQ's agents can rewrite files in the HQ account between the build and the install. If you must build in that account, note the hash and check it again just before the install:\n  cargo build --release --locked -p hq-net --no-default-features --bin hq-net-apply\n  sha256sum target/release/hq-net-apply\n  sudo install -d -o root -g root -m 0755 {}\n  sudo install -o root -g root -m 0755 target/release/hq-net-apply {APPLIER_PATH}\n  sudo install -d -o {uid} -g {gid} -m 0700 {spool}\n  sudo install -d -o root -g root -m 0755 {ENV_DIR}\n  sudo tee {ENV_DIR}/{interface}.env >/dev/null <<'EOF'\nHQ_NET_SUBNET={subnet}\nHQ_NET_HUB={hub}\nHQ_NET_OWNER_UID={uid}\nEOF\n  sudo tee {UNIT_DIR}/hq-net-apply@.service >/dev/null <<'EOF'\n{SERVICE_UNIT}EOF\n  sudo tee {UNIT_DIR}/hq-net-apply@.path >/dev/null <<'EOF'\n{PATH_UNIT}EOF\n  sudo tee {UNIT_DIR}/hq-net-apply@.timer >/dev/null <<'EOF'\n{TIMER_UNIT}EOF\n  sudo systemctl daemon-reload\n\n",
@@ -496,5 +497,33 @@ mod tests {
             text.contains("account other than the one HQ runs as")
                 && text.contains("sha256sum target/release/hq-net-apply")
         );
+    }
+
+    #[test]
+    fn step_3_holds_one_set_and_a_rule_for_it_before_the_drops_and_nothing_else_is_forwarded() {
+        let (_dir, store) = store();
+        let text = init(&store, &InitOptions::default(), &ctx(Some(vec![]))).unwrap();
+        let step = text
+            .split("Step 3.")
+            .nth(1)
+            .and_then(|rest| rest.split("Step 4.").next())
+            .expect("step 3");
+        let table = &step[step.find("table inet hq_net {").unwrap()..step.find("\nEOF").unwrap()];
+        assert_eq!(table.matches("set links_hq0 {").count(), 1, "{table}");
+        assert!(table.contains("type ipv4_addr . ipv4_addr"));
+        let accept = table.find("ip saddr . ip daddr @links_hq0 accept").unwrap();
+        let first_drop = table.find("drop").unwrap();
+        assert!(
+            accept < first_drop,
+            "the pairs must be accepted before the drops: {table}"
+        );
+        assert_eq!(table.matches("drop").count(), 2, "{table}");
+        assert!(table.contains("iifname \"hq0\" drop") && table.contains("oifname \"hq0\" drop"));
+        assert!(
+            step.find("add table inet hq_net").unwrap()
+                < step.find("delete table inet hq_net").unwrap(),
+            "replacing the table must not fail when it is missing"
+        );
+        assert!(step.contains("docs/PRIVATE_NETWORK.md"));
     }
 }

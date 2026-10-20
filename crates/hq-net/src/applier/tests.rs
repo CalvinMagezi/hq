@@ -5,6 +5,7 @@ use super::*;
 use crate::key;
 use std::cell::RefCell;
 use std::os::unix::fs::{OpenOptionsExt, PermissionsExt, symlink};
+use std::rc::Rc;
 use std::sync::mpsc;
 use std::time::Duration;
 
@@ -69,6 +70,54 @@ struct Recorder {
     show_text: Option<String>,
     /// Runs inside `apply`, to stand in for the input changing while the applier works.
     during_apply: RefCell<Option<Box<dyn FnMut()>>>,
+    order: Option<Order>,
+}
+
+/// A firewall that must never be asked: a version 1 file says nothing about forwarding.
+struct NoFirewall;
+
+impl Firewall for NoFirewall {
+    fn list_links(&self, _: &str) -> Result<String, String> {
+        panic!("a version 1 file reached the firewall")
+    }
+
+    fn set_links(&self, _: &str, _: &str) -> Result<(), String> {
+        panic!("a version 1 file reached the firewall")
+    }
+}
+
+type Order = Rc<RefCell<Vec<&'static str>>>;
+
+/// Records the scripts it is given, and in what order relative to `wg` when both share an `Order`.
+#[derive(Default)]
+struct FwRecorder {
+    scripts: RefCell<Vec<String>>,
+    /// What `nft list set` prints; `None` makes it fail.
+    listing: Option<String>,
+    fail_set: bool,
+    /// Fails the first call only, to stand in for a firewall that was briefly unavailable.
+    fail_first: std::cell::Cell<bool>,
+    order: Option<Order>,
+}
+
+impl Firewall for FwRecorder {
+    fn list_links(&self, _: &str) -> Result<String, String> {
+        self.listing
+            .clone()
+            .ok_or_else(|| "no such set".to_string())
+    }
+
+    fn set_links(&self, _: &str, script: &str) -> Result<(), String> {
+        if let Some(order) = &self.order {
+            order.borrow_mut().push("nft");
+        }
+        self.scripts.borrow_mut().push(script.to_string());
+        if self.fail_set || self.fail_first.replace(false) {
+            Err("nft failed".into())
+        } else {
+            Ok(())
+        }
+    }
 }
 
 const SHOWCONF_KEY_SEED: u8 = 99;
@@ -92,6 +141,9 @@ impl Wg for Recorder {
         subcommand: wgconf::Subcommand,
         config: &str,
     ) -> Result<(), String> {
+        if let Some(order) = &self.order {
+            order.borrow_mut().push("wg");
+        }
         self.calls
             .borrow_mut()
             .push((subcommand.arg().to_string(), config.to_string()));
@@ -336,7 +388,12 @@ fn a_valid_file_is_applied_with_the_live_interface_carried_forward() {
     let path = dir.path().join("peers.conf");
     write(&path, valid_text(2).as_bytes(), 0o600);
     let wg = Recorder::default();
-    assert_eq!(run(&config(path), &wg, &mut Vec::new()).unwrap().len(), 2);
+    assert_eq!(
+        run(&config(path), &wg, &NoFirewall, &mut Vec::new())
+            .unwrap()
+            .len(),
+        2
+    );
     let calls = wg.calls.borrow();
     assert_eq!(calls.len(), 1);
     assert_eq!(calls[0].0, "syncconf");
@@ -358,7 +415,12 @@ fn an_empty_peer_list_uses_setconf_so_the_last_peer_really_goes() {
     let path = dir.path().join("peers.conf");
     write(&path, valid_text(0).as_bytes(), 0o600);
     let wg = Recorder::default();
-    assert_eq!(run(&config(path), &wg, &mut Vec::new()).unwrap().len(), 0);
+    assert_eq!(
+        run(&config(path), &wg, &NoFirewall, &mut Vec::new())
+            .unwrap()
+            .len(),
+        0
+    );
     assert_eq!(wg.calls.borrow()[0].0, "setconf");
 }
 
@@ -384,7 +446,7 @@ fn a_refused_file_never_starts_wg_at_all() {
         let path = dir.path().join("peers.conf");
         write(&path, text.as_bytes(), 0o600);
         let wg = Recorder::default();
-        let err = run(&config(path), &wg, &mut Vec::new()).unwrap_err();
+        let err = run(&config(path), &wg, &NoFirewall, &mut Vec::new()).unwrap_err();
         assert!(matches!(err, ApplyError::Rejected(_)), "{err}");
         assert!(wg.calls.borrow().is_empty());
         assert_eq!(
@@ -428,7 +490,7 @@ fn unreadable_input_never_reaches_wg() {
     let wg = Recorder::default();
     let missing = dir.path().join("missing.conf");
     assert!(matches!(
-        run(&config(missing), &wg, &mut Vec::new()),
+        run(&config(missing), &wg, &NoFirewall, &mut Vec::new()),
         Err(ApplyError::Input(_))
     ));
     assert!(wg.calls.borrow().is_empty());
@@ -526,7 +588,12 @@ fn a_change_made_while_applying_is_applied_in_the_same_run() {
             write(&target, valid_text(3).as_bytes(), 0o600);
         }
     }));
-    assert_eq!(run(&config(path), &wg, &mut Vec::new()).unwrap().len(), 3);
+    assert_eq!(
+        run(&config(path), &wg, &NoFirewall, &mut Vec::new())
+            .unwrap()
+            .len(),
+        3
+    );
     let calls = wg.calls.borrow();
     assert_eq!(calls.len(), 2, "the second round applies the new file");
     assert_eq!(calls[1].1.matches("[Peer]").count(), 3);
@@ -545,7 +612,7 @@ fn an_input_that_keeps_changing_is_applied_a_bounded_number_of_times() {
         write(&target, valid_text(next).as_bytes(), 0o600);
         next += 1;
     }));
-    assert!(run(&config(path), &wg, &mut Vec::new()).is_ok());
+    assert!(run(&config(path), &wg, &NoFirewall, &mut Vec::new()).is_ok());
     assert_eq!(wg.calls.borrow().len(), MAX_ROUNDS);
 }
 
@@ -580,7 +647,7 @@ fn a_file_replaced_by_something_hostile_after_the_first_apply_is_refused_and_the
 
 fn run_logged(path: PathBuf, wg: &Recorder) -> (Result<Vec<grammar::Peer>, ApplyError>, String) {
     let mut out = Vec::new();
-    let result = run(&config(path), wg, &mut out);
+    let result = run(&config(path), wg, &NoFirewall, &mut out);
     (result, String::from_utf8(out).unwrap())
 }
 
@@ -746,4 +813,383 @@ fn the_real_wg_applies_a_peer_to_a_real_interface() {
     });
     assert!(ip(&["link", "del", "hqnettest0"]));
     outcome.unwrap();
+}
+
+fn valid_text_v2(peers: u8, links: &[(u8, u8)]) -> String {
+    let mut text = format!("{}\n", grammar::HEADER_V2);
+    for i in 0..peers {
+        text.push_str(&format!(
+            "\n[Peer]\nPublicKey = {}\nAllowedIPs = 10.77.0.{}/32\n",
+            k(i + 1),
+            i + 2
+        ));
+    }
+    for (a, b) in links {
+        text.push_str(&format!(
+            "\n[Link]\nA = 10.77.0.{a}/32\nB = 10.77.0.{b}/32\n"
+        ));
+    }
+    text.push_str(&format!(
+        "{}{peers} links {}\n",
+        grammar::TRAILER_PREFIX,
+        links.len()
+    ));
+    text
+}
+
+fn run_with_firewall(
+    path: PathBuf,
+    wg: &Recorder,
+    fw: &FwRecorder,
+) -> (Result<Vec<grammar::Peer>, ApplyError>, String) {
+    let mut out = Vec::new();
+    let result = run(&config(path), wg, fw, &mut out);
+    (result, String::from_utf8(out).unwrap())
+}
+
+fn file_in(dir: &tempfile::TempDir, text: &str) -> PathBuf {
+    let path = dir.path().join("peers.conf");
+    write(&path, text.as_bytes(), 0o600);
+    path
+}
+
+#[test]
+fn a_version_2_file_sets_the_pairs_before_it_applies_the_peers() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = file_in(&dir, &valid_text_v2(3, &[(2, 4)]));
+    let order: Order = Rc::default();
+    let wg = Recorder {
+        order: Some(order.clone()),
+        ..Recorder::default()
+    };
+    let fw = FwRecorder {
+        order: Some(order.clone()),
+        listing: Some("set links_hq0 {\n}".into()),
+        ..FwRecorder::default()
+    };
+    let (result, log) = run_with_firewall(path, &wg, &fw);
+    assert_eq!(result.unwrap().len(), 3);
+    assert_eq!(*order.borrow(), vec!["nft", "wg"]);
+    assert_eq!(
+        fw.scripts.borrow().as_slice(),
+        [
+            "flush set inet hq_net links_hq0\nadd element inet hq_net links_hq0 { 10.77.0.2 . 10.77.0.4, 10.77.0.4 . 10.77.0.2 }\n"
+        ]
+    );
+    assert!(log.contains("1 link(s) on hq0 after this run"), "{log}");
+    assert!(log.contains("allowed 10.77.0.2 <-> 10.77.0.4"), "{log}");
+}
+
+#[test]
+fn a_version_2_file_with_no_links_clears_the_set() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = file_in(&dir, &valid_text_v2(2, &[]));
+    let fw = FwRecorder {
+        listing: Some(
+            "set links_hq0 {\n elements = { 10.77.0.2 . 10.77.0.3, 10.77.0.3 . 10.77.0.2 }\n}"
+                .into(),
+        ),
+        ..FwRecorder::default()
+    };
+    let (result, log) = run_with_firewall(path, &Recorder::default(), &fw);
+    assert!(result.is_ok());
+    assert_eq!(
+        fw.scripts.borrow().as_slice(),
+        ["flush set inet hq_net links_hq0\n"]
+    );
+    assert!(log.contains("removed 10.77.0.2 <-> 10.77.0.3"), "{log}");
+}
+
+#[test]
+fn a_version_1_file_never_touches_the_firewall() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = file_in(&dir, &valid_text(2));
+    let fw = FwRecorder::default();
+    let (result, log) = run_with_firewall(path, &Recorder::default(), &fw);
+    assert!(result.is_ok());
+    assert!(fw.scripts.borrow().is_empty());
+    assert!(!log.contains("link"), "{log}");
+}
+
+#[test]
+fn a_pair_that_is_already_set_is_one_line_in_the_journal() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = file_in(&dir, &valid_text_v2(2, &[(2, 3)]));
+    let fw = FwRecorder {
+        listing: Some(
+            "set links_hq0 {\n elements = { 10.77.0.2 . 10.77.0.3, 10.77.0.3 . 10.77.0.2 }\n}"
+                .into(),
+        ),
+        ..FwRecorder::default()
+    };
+    let (_, log) = run_with_firewall(path, &Recorder::default(), &fw);
+    assert!(
+        log.contains("hq-net-apply: no link change, 1 link(s) on hq0\n"),
+        "{log}"
+    );
+}
+
+#[test]
+fn when_the_set_cannot_be_read_every_pair_is_listed_as_set() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = file_in(&dir, &valid_text_v2(2, &[(2, 3)]));
+    let fw = FwRecorder::default();
+    let (result, log) = run_with_firewall(path, &Recorder::default(), &fw);
+    assert!(result.is_ok());
+    assert!(log.contains("set 10.77.0.2 <-> 10.77.0.3"), "{log}");
+}
+
+#[test]
+fn a_firewall_that_fails_does_not_stop_the_peers_but_fails_the_run_and_says_so() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = file_in(&dir, &valid_text_v2(2, &[(2, 3)]));
+    let wg = Recorder::default();
+    let fw = FwRecorder {
+        fail_set: true,
+        ..FwRecorder::default()
+    };
+    let (result, log) = run_with_firewall(path, &wg, &fw);
+    assert_eq!(
+        wg.calls.borrow().len(),
+        1,
+        "a revocation must not wait for nft"
+    );
+    let err = result.unwrap_err();
+    assert!(matches!(err, ApplyError::Links(_)), "{err}");
+    assert!(log.contains("could not set the links on hq0"), "{log}");
+    assert!(log.contains("peers were still applied"), "{log}");
+}
+
+#[test]
+fn a_wg_failure_after_the_pairs_were_set_still_records_the_pairs() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = file_in(&dir, &valid_text_v2(2, &[(2, 3)]));
+    let wg = Recorder {
+        fail_apply: true,
+        ..Recorder::default()
+    };
+    let fw = FwRecorder::default();
+    let (result, log) = run_with_firewall(path, &wg, &fw);
+    assert!(matches!(result.unwrap_err(), ApplyError::Wg(_)));
+    assert!(log.contains("wg failed"), "{log}");
+    assert!(log.contains("1 link(s) on hq0 after this run"), "{log}");
+}
+
+#[test]
+fn a_refused_version_2_file_reaches_neither_wg_nor_the_firewall() {
+    let dir = tempfile::tempdir().unwrap();
+    let bad = [
+        valid_text_v2(2, &[(2, 9)]),
+        valid_text_v2(2, &[(3, 2)]),
+        valid_text_v2(2, &[(2, 3), (2, 3)]),
+        valid_text_v2(2, &[(2, 3)]).replace("links 1", "links 2"),
+        valid_text_v2(2, &[(2, 3)]).replace("B = 10.77.0.3/32", "PostUp = x"),
+    ];
+    for (n, text) in bad.iter().enumerate() {
+        let path = dir.path().join(format!("peers{n}.conf"));
+        write(&path, text.as_bytes(), 0o600);
+        let wg = Recorder::default();
+        let fw = FwRecorder::default();
+        let (result, _) = run_with_firewall(path, &wg, &fw);
+        assert!(matches!(result, Err(ApplyError::Rejected(_))), "case {n}");
+        assert!(
+            wg.calls.borrow().is_empty() && fw.scripts.borrow().is_empty(),
+            "case {n}"
+        );
+        assert_eq!(*wg.shown.borrow(), 0, "case {n}: not even wg showconf");
+    }
+}
+
+#[test]
+fn the_nft_path_is_taken_once_and_must_be_absolute_and_roots() {
+    let config = |extra: &[&str]| {
+        let mut args: Vec<String> = [
+            "--interface",
+            "hq0",
+            "--subnet",
+            "10.77.0.0/24",
+            "--hub",
+            "10.77.0.1",
+            "--owner-uid",
+            "1000",
+            "--input",
+            "/var/lib/hq-net/hq0.conf",
+        ]
+        .map(String::from)
+        .to_vec();
+        args.extend(extra.iter().map(|a| a.to_string()));
+        parse_args(args)
+    };
+    assert_eq!(
+        config(&["--nft", "/opt/nft"]).unwrap().nft,
+        Some(PathBuf::from("/opt/nft"))
+    );
+    assert!(config(&["--nft", "/a", "--nft", "/b"]).is_err());
+    assert!(config(&["--nft"]).is_err());
+    assert_eq!(config(&[]).unwrap().nft, None);
+
+    for bad in ["nft", "./nft", "/nonexistent/nft"] {
+        let nft = SystemNft::new(Some(Path::new(bad)));
+        assert!(nft.resolve().is_err(), "{bad}");
+    }
+    // Writable by others: refused even though it exists.
+    let dir = tempfile::tempdir().unwrap();
+    let fake = dir.path().join("nft");
+    write(&fake, b"#!/bin/sh\n", 0o777);
+    assert!(SystemNft::new(Some(&fake)).resolve().is_err());
+}
+
+fn script_nft(dir: &Path, body: &str) -> SystemNft {
+    let path = dir.join("nft");
+    write(&path, format!("#!/bin/sh\n{body}\n").as_bytes(), 0o700);
+    SystemNft {
+        explicit: None,
+        resolved: Some(path),
+    }
+}
+
+#[test]
+fn the_real_nft_spawn_path_feeds_the_script_over_stdin_with_f_dash_and_an_empty_environment() {
+    let dir = tempfile::tempdir().unwrap();
+    let (script_out, env_out) = (dir.path().join("script"), dir.path().join("env"));
+    let nft = script_nft(
+        dir.path(),
+        &format!(
+            "[ \"$1\" = -f ] && [ \"$2\" = - ] && [ $# -eq 2 ] || exit 3\ncat > {}\n/usr/bin/env > {} 2>/dev/null",
+            script_out.display(),
+            env_out.display()
+        ),
+    );
+    let script = "flush set inet hq_net links_hq0\n";
+    nft.set_links("hq0", script).unwrap();
+    assert_eq!(std::fs::read_to_string(&script_out).unwrap(), script);
+    let env = std::fs::read_to_string(&env_out).unwrap_or_default();
+    assert!(!env.contains("HOME=") && !env.contains("CARGO"), "{env}");
+}
+
+#[test]
+fn listing_asks_for_exactly_the_named_set_and_returns_what_nft_prints() {
+    let dir = tempfile::tempdir().unwrap();
+    let nft = script_nft(
+        dir.path(),
+        "[ \"$1 $2 $3 $4 $5\" = 'list set inet hq_net links_hq0' ] || exit 3\nprintf 'set links_hq0 {}'",
+    );
+    assert_eq!(nft.list_links("hq0").unwrap(), "set links_hq0 {}");
+    assert!(
+        nft.list_links("hq0 -x").is_err(),
+        "an invalid name never reaches nft"
+    );
+}
+
+#[test]
+fn a_failing_nft_is_an_error_that_names_the_risk() {
+    let dir = tempfile::tempdir().unwrap();
+    let nft = script_nft(dir.path(), "cat >/dev/null; exit 1");
+    let err = nft
+        .set_links("hq0", "flush set inet hq_net links_hq0\n")
+        .unwrap_err();
+    assert!(
+        err.contains("nothing limits which devices can reach each other"),
+        "{err}"
+    );
+    assert!(nft.list_links("hq0").is_err());
+}
+
+#[test]
+fn a_hung_nft_is_stopped_at_the_deadline_not_left_to_systemd() {
+    let dir = tempfile::tempdir().unwrap();
+    let nft = script_nft(dir.path(), "exec sleep 30");
+    let started = std::time::Instant::now();
+    let err = nft
+        .run(&["-f", "-"], Some(b"x"), true, Duration::from_millis(300))
+        .unwrap_err();
+    assert!(err.contains("did not finish"), "{err}");
+    assert!(started.elapsed() < Duration::from_secs(5));
+}
+
+#[test]
+fn a_firewall_failure_in_one_round_is_not_washed_away_by_a_later_version_1_round() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = file_in(&dir, &valid_text_v2(2, &[(2, 3)]));
+    let wg = Recorder::default();
+    let target = path.clone();
+    let mut rewrote = false;
+    *wg.during_apply.borrow_mut() = Some(Box::new(move || {
+        if !rewrote {
+            rewrote = true;
+            std::fs::remove_file(&target).unwrap();
+            write(&target, valid_text(3).as_bytes(), 0o600);
+        }
+    }));
+    let fw = FwRecorder {
+        fail_set: true,
+        ..FwRecorder::default()
+    };
+    let (result, _) = run_with_firewall(path, &wg, &fw);
+    assert_eq!(wg.calls.borrow().len(), 2, "both rounds reached wg");
+    assert!(matches!(result.unwrap_err(), ApplyError::Links(_)));
+}
+
+#[test]
+fn a_later_version_2_round_that_sets_the_pairs_clears_an_earlier_failure() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = file_in(&dir, &valid_text_v2(2, &[(2, 3)]));
+    let wg = Recorder::default();
+    let target = path.clone();
+    let mut rewrote = false;
+    *wg.during_apply.borrow_mut() = Some(Box::new(move || {
+        if !rewrote {
+            rewrote = true;
+            std::fs::remove_file(&target).unwrap();
+            write(&target, valid_text_v2(3, &[(2, 3)]).as_bytes(), 0o600);
+        }
+    }));
+    let fw = FwRecorder {
+        fail_first: std::cell::Cell::new(true),
+        ..FwRecorder::default()
+    };
+    let (result, log) = run_with_firewall(path, &wg, &fw);
+    assert_eq!(fw.scripts.borrow().len(), 2);
+    assert_eq!(result.unwrap().len(), 3, "{log}");
+}
+
+#[test]
+fn a_new_key_at_a_linked_address_is_called_out_in_the_journal() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = file_in(&dir, &valid_text_v2(2, &[(2, 3)]));
+    let show = |seed: u8| {
+        format!(
+            "[Interface]\nListenPort = 51820\nPrivateKey = {}\n\n[Peer]\nPublicKey = {}\nAllowedIPs = 10.77.0.2/32\n",
+            k(SHOWCONF_KEY_SEED),
+            k(seed)
+        )
+    };
+    // The interface has another key at .2 than the file does.
+    let wg = Recorder {
+        show_text: Some(show(50)),
+        ..Recorder::default()
+    };
+    let (_, log) = run_with_firewall(path, &wg, &FwRecorder::default());
+    assert!(
+        log.contains("note: the device at 10.77.0.2 is in a link and now has a different key"),
+        "{log}"
+    );
+    // The same key at .2: nothing to call out.
+    let dir = tempfile::tempdir().unwrap();
+    let path = file_in(&dir, &valid_text_v2(2, &[(2, 3)]));
+    let wg = Recorder {
+        show_text: Some(show(1)),
+        ..Recorder::default()
+    };
+    let (_, log) = run_with_firewall(path, &wg, &FwRecorder::default());
+    assert!(!log.contains("different key"), "{log}");
+}
+
+#[test]
+fn clearing_a_set_that_cannot_be_read_is_still_journaled() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = file_in(&dir, &valid_text_v2(2, &[]));
+    let (result, log) = run_with_firewall(path, &Recorder::default(), &FwRecorder::default());
+    assert!(result.is_ok());
+    assert!(log.contains("cleared the list"), "{log}");
 }

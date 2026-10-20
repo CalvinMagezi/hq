@@ -4,7 +4,7 @@
 //! name or a damaged file is an error and never an empty list.
 
 use crate::files;
-use crate::grammar::{self, MAX_PEERS, Peer, Policy};
+use crate::grammar::{self, Link, MAX_LINKS, MAX_PEERS, Peer, Policy};
 use crate::key;
 use crate::names::{valid_endpoint, valid_interface};
 use crate::subnet::Subnet;
@@ -141,6 +141,28 @@ pub struct PeerRecord {
     pub preshared_key: Option<String>,
 }
 
+/// Two devices, by label, that the hub may forward between in both directions.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub struct LinkRecord {
+    pub a: String,
+    pub b: String,
+}
+
+impl LinkRecord {
+    fn joins(&self, x: &str, y: &str) -> bool {
+        (self.a == x && self.b == y) || (self.a == y && self.b == x)
+    }
+
+    fn touches(&self, label: &str) -> bool {
+        self.a == label || self.b == label
+    }
+}
+
+fn is_false(value: &bool) -> bool {
+    !*value
+}
+
 /// `peers.toml`: the admitted devices. An unknown table or key is an error, so a typo cannot read
 /// back as "no devices".
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
@@ -148,6 +170,14 @@ pub struct PeerRecord {
 pub struct PeersFile {
     #[serde(default)]
     pub peer: Vec<PeerRecord>,
+    /// Pairs of devices the hub may forward between. Everything else between devices is dropped.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub link: Vec<LinkRecord>,
+    /// Set by the first `hq net link add` and never cleared. Until then the applier's input is a
+    /// version 1 file, which an applier built before links existed still reads; from then on it is
+    /// version 2, even with no links in it, so removing the last link also empties the hub's list.
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub links_enabled: bool,
     /// Test files from before the `retired` file existed kept the revoked addresses here. They
     /// are read once, moved into `retired`, and never written back.
     #[serde(default, rename = "retired", skip_serializing)]
@@ -224,7 +254,64 @@ impl PeersFile {
                 ));
             }
         }
+        self.validate_links()
+    }
+
+    /// Every link joins two different devices that exist, once, and there are not too many. The
+    /// message names the link by position and never repeats the bad value.
+    fn validate_links(&self) -> Result<()> {
+        if self.link.len() > MAX_LINKS {
+            return fail(format!(
+                "{PEERS_FILE}: more than {MAX_LINKS} links; the applier accepts no more"
+            ));
+        }
+        for (i, link) in self.link.iter().enumerate() {
+            let n = i + 1;
+            if !self.has_device(&link.a) || !self.has_device(&link.b) {
+                return fail(format!(
+                    "{PEERS_FILE}: link number {n} names a device that is not in the list"
+                ));
+            }
+            if link.a == link.b {
+                return fail(format!(
+                    "{PEERS_FILE}: link number {n} joins a device to itself"
+                ));
+            }
+            if self.link[..i]
+                .iter()
+                .any(|earlier| earlier.joins(&link.a, &link.b))
+            {
+                return fail(format!(
+                    "{PEERS_FILE}: link number {n} repeats an earlier link"
+                ));
+            }
+        }
         Ok(())
+    }
+
+    fn has_device(&self, label: &str) -> bool {
+        self.peer.iter().any(|p| p.label == label)
+    }
+
+    /// Whether the applier's input is version 2: links were ever used here, or are listed now.
+    pub fn uses_links(&self) -> bool {
+        self.links_enabled || !self.link.is_empty()
+    }
+
+    /// The addresses of the devices linked to `label`, lowest first.
+    pub fn linked_addresses(&self, label: &str) -> Vec<String> {
+        let mut found: Vec<Ipv4Addr> = self
+            .link
+            .iter()
+            .filter(|l| l.touches(label))
+            .filter_map(|l| {
+                let other = if l.a == label { &l.b } else { &l.a };
+                let record = self.peer.iter().find(|p| &p.label == other)?;
+                record.address.parse().ok()
+            })
+            .collect();
+        found.sort();
+        found.into_iter().map(|a| a.to_string()).collect()
     }
 }
 
@@ -602,14 +689,91 @@ pub fn add_peer(
     Ok(record)
 }
 
-/// Removes a device from the list. The caller retires its address before it saves.
-pub fn revoke_peer(peers: &mut PeersFile, label: &str) -> Result<PeerRecord> {
+/// Removes a device from the list, and every link that names it, so a revoked device cannot leave
+/// a pair behind for whatever takes its place. The caller retires its address before it saves.
+pub fn revoke_peer(peers: &mut PeersFile, label: &str) -> Result<(PeerRecord, Vec<LinkRecord>)> {
     let Some(at) = peers.peer.iter().position(|p| p.label == label) else {
         return fail(format!(
             "there is no device called {label}; `hq net peer list` shows them"
         ));
     };
-    Ok(peers.peer.remove(at))
+    let record = peers.peer.remove(at);
+    let (dropped, kept) = std::mem::take(&mut peers.link)
+        .into_iter()
+        .partition(|l| l.touches(label));
+    peers.link = kept;
+    Ok((record, dropped))
+}
+
+fn require_device(peers: &PeersFile, label: &str) -> Result<()> {
+    if peers.has_device(label) {
+        return Ok(());
+    }
+    fail(format!(
+        "there is no device called {label}; `hq net peer list` shows them"
+    ))
+}
+
+/// Joins two devices so the hub forwards between them, in both directions and for every port.
+/// Nothing is written; the caller saves `peers` and applies it.
+pub fn add_link(peers: &mut PeersFile, a: &str, b: &str) -> Result<LinkRecord> {
+    require_device(peers, a)?;
+    require_device(peers, b)?;
+    if a == b {
+        return fail("a link joins two different devices");
+    }
+    if peers.link.iter().any(|l| l.joins(a, b)) {
+        return fail(format!("{a} and {b} are linked already"));
+    }
+    if peers.link.len() >= MAX_LINKS {
+        return fail(format!(
+            "the applier accepts at most {MAX_LINKS} links; remove one first"
+        ));
+    }
+    let (first, second) = if a < b { (a, b) } else { (b, a) };
+    let record = LinkRecord {
+        a: first.to_string(),
+        b: second.to_string(),
+    };
+    peers.link.push(record.clone());
+    peers.links_enabled = true;
+    Ok(record)
+}
+
+/// Takes a link away. The devices stay.
+pub fn remove_link(peers: &mut PeersFile, a: &str, b: &str) -> Result<LinkRecord> {
+    let Some(at) = peers.link.iter().position(|l| l.joins(a, b)) else {
+        return fail(format!(
+            "{a} and {b} are not linked; `hq net link list` shows the links"
+        ));
+    };
+    Ok(peers.link.remove(at))
+}
+
+/// The links as the applier's grammar states them: addresses, the lower first, in order.
+fn grammar_links(peers: &PeersFile) -> Result<Vec<Link>> {
+    let address = |label: &str| -> Result<Ipv4Addr> {
+        peers
+            .peer
+            .iter()
+            .find(|p| p.label == label)
+            .and_then(|p| crate::subnet::parse_canonical_ipv4(&p.address))
+            .ok_or_else(|| {
+                NetError(format!(
+                    "{PEERS_FILE}: a link names a device that is not in the list"
+                ))
+            })
+    };
+    let mut links: Vec<Link> = peers
+        .link
+        .iter()
+        .map(|l| {
+            Link::new(address(&l.a)?, address(&l.b)?)
+                .ok_or_else(|| NetError(format!("{PEERS_FILE}: a link joins a device to itself")))
+        })
+        .collect::<Result<_>>()?;
+    links.sort();
+    Ok(links)
 }
 
 fn to_grammar(record: &PeerRecord) -> Result<Peer> {
@@ -637,8 +801,12 @@ pub fn render_applier_input(net: &Net, peers: &PeersFile) -> Result<String> {
         .map(|r| r.label.as_str())
         .zip(converted.iter())
         .collect();
-    let text = grammar::render_labeled(&labeled);
-    grammar::parse(text.as_bytes(), &net.policy()?).map_err(|e| {
+    let links = peers
+        .uses_links()
+        .then(|| grammar_links(peers))
+        .transpose()?;
+    let text = grammar::render_file(&labeled, links.as_deref());
+    grammar::parse_file(text.as_bytes(), &net.policy()?).map_err(|e| {
         NetError(format!(
             "{PEERS_FILE} would be refused by the applier ({e}); fix it before applying"
         ))
@@ -706,7 +874,8 @@ pub(crate) mod tests {
         let mut peers = PeersFile::default();
         add(&net, &mut peers, "a", Kind::Laptop).unwrap();
         add(&net, &mut peers, "b", Kind::Laptop).unwrap();
-        let gone = revoke_peer(&mut peers, "a").unwrap();
+        let (gone, dropped) = revoke_peer(&mut peers, "a").unwrap();
+        assert!(dropped.is_empty());
         assert_eq!(gone.address, "10.77.0.2");
         let retired = vec![gone.address];
         let key = device_key();
@@ -1360,5 +1529,90 @@ pub(crate) mod tests {
             .map(|e| e.unwrap().file_name())
             .collect();
         assert_eq!(names.len(), 1, "{names:?}");
+    }
+
+    fn two(net: &Net) -> PeersFile {
+        let mut peers = PeersFile::default();
+        for label in ["a", "b", "c"] {
+            add(net, &mut peers, label, Kind::Laptop).unwrap();
+        }
+        peers
+    }
+
+    #[test]
+    fn a_link_is_stored_once_with_its_labels_in_order_and_needs_both_devices() {
+        let net = sample_net();
+        let mut peers = two(&net);
+        let link = add_link(&mut peers, "c", "a").unwrap();
+        assert_eq!((link.a.as_str(), link.b.as_str()), ("a", "c"));
+        assert!(peers.links_enabled && peers.uses_links());
+        for (x, y) in [
+            ("a", "c"),
+            ("c", "a"),
+            ("a", "a"),
+            ("a", "zzz"),
+            ("zzz", "a"),
+        ] {
+            assert!(add_link(&mut peers, x, y).is_err(), "{x} {y}");
+        }
+        assert_eq!(peers.link.len(), 1);
+        assert_eq!(peers.linked_addresses("a"), vec!["10.77.0.4"]);
+        assert_eq!(peers.linked_addresses("b"), Vec::<String>::new());
+        assert!(remove_link(&mut peers, "b", "c").is_err());
+        remove_link(&mut peers, "c", "a").unwrap();
+        assert!(
+            peers.link.is_empty() && peers.uses_links(),
+            "version 2 stays once used"
+        );
+    }
+
+    #[test]
+    fn revoking_a_device_removes_only_its_links() {
+        let net = sample_net();
+        let mut peers = two(&net);
+        add_link(&mut peers, "a", "b").unwrap();
+        add_link(&mut peers, "b", "c").unwrap();
+        add_link(&mut peers, "a", "c").unwrap();
+        let (_, dropped) = revoke_peer(&mut peers, "b").unwrap();
+        assert_eq!(dropped.len(), 2);
+        assert_eq!(peers.link.len(), 1);
+        assert!(peers.link[0].joins("a", "c"));
+    }
+
+    #[test]
+    fn the_applier_input_is_version_1_until_links_are_used_then_version_2_with_sorted_links() {
+        let net = sample_net();
+        let mut peers = two(&net);
+        let v1 = render_applier_input(&net, &peers).unwrap();
+        assert!(v1.starts_with(grammar::HEADER) && !v1.contains("[Link]"));
+        add_link(&mut peers, "b", "c").unwrap();
+        add_link(&mut peers, "a", "b").unwrap();
+        let v2 = render_applier_input(&net, &peers).unwrap();
+        assert!(v2.starts_with(grammar::HEADER_V2));
+        let first = v2.find("A = 10.77.0.2/32").unwrap();
+        let second = v2.find("A = 10.77.0.3/32").unwrap();
+        assert!(first < second, "{v2}");
+        assert!(v2.ends_with("# hq-net end 3 links 2\n"), "{v2}");
+    }
+
+    #[test]
+    fn at_most_the_applier_limit_of_links_can_be_added() {
+        let net = sample_net();
+        let mut peers = PeersFile::default();
+        for i in 0..20 {
+            add(&net, &mut peers, &format!("d{i}"), Kind::Laptop).unwrap();
+        }
+        let mut made = 0;
+        'outer: for i in 0..20 {
+            for j in (i + 1)..20 {
+                if made == MAX_LINKS {
+                    break 'outer;
+                }
+                add_link(&mut peers, &format!("d{i}"), &format!("d{j}")).unwrap();
+                made += 1;
+            }
+        }
+        let err = add_link(&mut peers, "d18", "d19").unwrap_err().to_string();
+        assert!(err.contains("at most"), "{err}");
     }
 }
