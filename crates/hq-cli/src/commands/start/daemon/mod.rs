@@ -143,8 +143,9 @@ pub async fn run_daemon(
     };
 
     // Embeddings follow edits: made when the watcher indexes notes, on a timer otherwise. Lite
-    // sends no note text anywhere, so it makes none.
-    let embedding_worker = if config.profile.is_lite() {
+    // sends no note text anywhere, and a mobile instance with its data saver on keeps it local,
+    // so neither makes any.
+    let embedding_worker = if !config.embeds_notes() {
         None
     } else {
         let changed = vault_watch
@@ -166,7 +167,7 @@ pub async fn run_daemon(
     } else {
         run_startup_hooks(&config, &vault_path, &db);
     }
-    let mut tasks = scheduled_tasks(config.profile);
+    let mut tasks = scheduled_tasks(&config);
     let (mut task_state, missed) = load_task_state(&vault_path, &tasks);
     let mut save_ticker = TickCounter::every_secs(STATE_SAVE_INTERVAL_SECS);
 
@@ -259,18 +260,35 @@ const LITE_DAEMON_TASKS: &[&str] = &[
     "vault-cap-enforcer",
 ];
 
-/// The tasks the scheduler runs for `profile`.
-fn scheduled_tasks(profile: hq_core::config::Profile) -> Vec<DaemonTask> {
+/// The scheduled tasks `profile: mobile` never runs: only the one that watches the disk, the
+/// package caches and `node_modules` of a development machine. The session supervisor and the
+/// other host tasks stay, because a phone instance drives coding agents on remote hosts.
+const MOBILE_REMOVED_DAEMON_TASKS: &[&str] = &["disk-watchdog"];
+
+/// The tasks a mobile instance also skips while its data saver is on: the ones that call a model
+/// or a mail API on a timer, which a metered connection should only pay for when asked.
+const MOBILE_DATA_SAVER_REMOVED_DAEMON_TASKS: &[&str] =
+    &["memory-consolidation", "inbox-triage", "email-poll"];
+
+/// The tasks the scheduler runs for `config`.
+fn scheduled_tasks(config: &HqConfig) -> Vec<DaemonTask> {
     let mut tasks = default_tasks();
-    if profile.is_lite() {
+    if config.profile.is_lite() {
         tasks.retain(|t| LITE_DAEMON_TASKS.contains(&t.name));
+    } else if config.profile.is_mobile() {
+        tasks.retain(|t| !MOBILE_REMOVED_DAEMON_TASKS.contains(&t.name));
+        if config.mobile.data_saver {
+            tasks.retain(|t| !MOBILE_DATA_SAVER_REMOVED_DAEMON_TASKS.contains(&t.name));
+        }
     }
     tasks
 }
 
 /// The config to run with after the file changed: `new` if it may replace `old`, else why not.
-/// A running instance does not change edition (restart to do that), and a Lite instance does not
-/// pick up a setting it would have refused to start with.
+/// A running instance does not change edition (restart to do that), a Lite instance does not
+/// pick up a setting it would have refused to start with, and a mobile instance does not change
+/// its data saver, because the embedding worker and the task list are fixed when the daemon
+/// starts and a half-applied switch would keep sending note text after the owner turned it off.
 fn accept_reload(
     old: &HqConfig,
     new: HqConfig,
@@ -278,6 +296,9 @@ fn accept_reload(
 ) -> std::result::Result<HqConfig, String> {
     if new.profile != old.profile {
         return Err("profile changed; restart hq to switch edition".into());
+    }
+    if old.profile.is_mobile() && new.mobile.data_saver != old.mobile.data_saver {
+        return Err("mobile.data_saver changed; restart hq to apply it".into());
     }
     hq_core::config::enforce_lite(&new, env).map_err(|e| e.to_string())?;
     Ok(new)
@@ -760,7 +781,7 @@ fn write_daemon_status_stopped(vault_path: &Path, tasks: &[DaemonTask], started_
 #[cfg(test)]
 mod lite_tests {
     use super::*;
-    use hq_core::config::{LiteConfig, Profile};
+    use hq_core::config::{LiteConfig, MobileConfig, Profile};
 
     fn no_env(_: &str) -> Option<String> {
         None
@@ -775,11 +796,11 @@ mod lite_tests {
 
     #[test]
     fn the_scheduler_runs_only_the_lite_tasks_under_lite_and_all_of_them_otherwise() {
-        let full: Vec<&str> = scheduled_tasks(Profile::Full)
+        let full: Vec<&str> = scheduled_tasks(&HqConfig::default())
             .iter()
             .map(|t| t.name)
             .collect();
-        let lite: Vec<&str> = scheduled_tasks(Profile::Lite)
+        let lite: Vec<&str> = scheduled_tasks(&self::lite())
             .iter()
             .map(|t| t.name)
             .collect();
@@ -800,6 +821,54 @@ mod lite_tests {
         ] {
             assert!(!lite.contains(&reaches_out), "{reaches_out}");
         }
+    }
+
+    fn mobile(data_saver: bool) -> HqConfig {
+        HqConfig {
+            profile: Profile::Mobile,
+            mobile: MobileConfig { data_saver },
+            ..HqConfig::default()
+        }
+    }
+
+    fn names(config: &HqConfig) -> Vec<&'static str> {
+        scheduled_tasks(config).iter().map(|t| t.name).collect()
+    }
+
+    #[test]
+    fn a_mobile_instance_drops_only_the_disk_watchdog_and_still_supervises_remote_hosts() {
+        let full = names(&HqConfig::default());
+        let phone = names(&mobile(false));
+        for gone in MOBILE_REMOVED_DAEMON_TASKS {
+            assert!(full.contains(gone), "{gone} should exist under full");
+            assert!(!phone.contains(gone), "{gone} must not run on a phone");
+        }
+        for kept in [
+            "embeddings",
+            "expire-approvals",
+            "db-vacuum",
+            "email-poll",
+            "session-supervisor",
+            "stack-dispatch",
+        ] {
+            assert!(phone.contains(&kept), "{kept}");
+        }
+        assert_eq!(phone.len(), full.len() - MOBILE_REMOVED_DAEMON_TASKS.len());
+    }
+
+    #[test]
+    fn the_data_saver_also_stops_the_timers_that_call_a_model_or_a_mail_api() {
+        let saving = names(&mobile(true));
+        let spending = names(&mobile(false));
+        for task in MOBILE_DATA_SAVER_REMOVED_DAEMON_TASKS {
+            assert!(
+                !saving.contains(task),
+                "{task} must wait for the data saver to be off"
+            );
+            assert!(spending.contains(task), "{task}");
+        }
+        // The keyword index is local and keeps following edits either way.
+        assert!(saving.contains(&"embeddings"));
     }
 
     /// The reload path itself, not just the rule it calls: a refused config leaves the running one.
@@ -897,6 +966,29 @@ mod lite_tests {
         assert!(accept_reload(&lite(), full.clone(), &no_env).is_err());
         assert!(accept_reload(&full, lite(), &no_env).is_err());
         assert!(accept_reload(&full, full.clone(), &no_env).is_ok());
+    }
+
+    /// The embedding worker and the task list are fixed at start, so flipping the data saver in
+    /// the file must not be half applied while the daemon runs. Other mobile settings still reload.
+    #[test]
+    fn a_reload_cannot_flip_the_data_saver_of_a_running_mobile_daemon() {
+        let running = mobile(true);
+        let err = accept_reload(&running, mobile(false), &no_env).unwrap_err();
+        assert!(err.contains("data_saver"), "{err}");
+        assert!(accept_reload(&mobile(false), mobile(true), &no_env).is_err());
+        assert!(accept_reload(&running, mobile(true), &no_env).is_ok());
+        let renamed = HqConfig {
+            default_model: "relay".into(),
+            ..mobile(true)
+        };
+        assert!(accept_reload(&running, renamed, &no_env).is_ok());
+        // The setting means nothing outside the mobile edition, so it never blocks a Full reload.
+        let full = HqConfig::default();
+        let tweaked = HqConfig {
+            mobile: MobileConfig { data_saver: false },
+            ..full.clone()
+        };
+        assert!(accept_reload(&full, tweaked, &no_env).is_ok());
     }
 }
 

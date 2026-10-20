@@ -195,6 +195,14 @@ fn concept_search_results_populated_when_user_message_names_a_known_concept() {
 /// get, with no network call — `build_provider_from_config` only constructs
 /// lazy HTTP clients.
 async fn build_measurement_session(profile: SessionProfile) -> AgentSession {
+    build_measurement_session_with(profile, |_| {}).await
+}
+
+/// The same session, with the config adjusted first (an edition, a feature switched on).
+async fn build_measurement_session_with(
+    profile: SessionProfile,
+    adjust: impl FnOnce(&mut HqConfig),
+) -> AgentSession {
     let dir = std::env::temp_dir().join(format!(
         "hq-builder-measure-{}",
         std::time::SystemTime::now()
@@ -211,6 +219,7 @@ async fn build_measurement_session(profile: SessionProfile) -> AgentSession {
         ..Default::default()
     };
     config.relay.model = Some("relay".to_string());
+    adjust(&mut config);
 
     let session_config = SessionConfig {
         model: "relay".to_string(),
@@ -224,6 +233,44 @@ async fn build_measurement_session(profile: SessionProfile) -> AgentSession {
         .build()
         .await
         .expect("session should build without any network call")
+}
+
+/// A phone has no `git` and cannot swap its own binary, so a mobile chat session (web, Telegram,
+/// `hq chat`) never offers either. Full is built beside it to show the names are real tools here,
+/// not absent for another reason.
+#[tokio::test]
+async fn a_mobile_chat_session_offers_neither_git_nor_the_self_updater() {
+    use hq_core::config::Profile;
+    let names_for = |edition: Profile| async move {
+        build_measurement_session_with(SessionProfile::Full, |config| {
+            config.profile = edition;
+            config.self_update.enabled = true;
+        })
+        .await
+        .tool_names()
+        .await
+    };
+    let full = names_for(Profile::Full).await;
+    let mobile = names_for(Profile::Mobile).await;
+    for name in ["git_status", "git_commit", "git_pr"] {
+        assert!(full.iter().any(|n| n == name), "{name} missing from full");
+        assert!(
+            !mobile.iter().any(|n| n == name),
+            "{name} offered on mobile"
+        );
+    }
+    assert!(
+        full.iter().any(|n| n.starts_with("self_update")),
+        "full should offer the self-updater here, or the check below proves nothing: {full:?}"
+    );
+    assert!(
+        !mobile.iter().any(|n| n.starts_with("self_update")),
+        "a mobile session offered a self-update tool: {mobile:?}"
+    );
+    // What a phone is for is still there, including the tools that drive remote coding hosts.
+    for name in ["bash", "read_file", "task_list"] {
+        assert!(mobile.iter().any(|n| n == name), "{name} missing on mobile");
+    }
 }
 
 struct AutonomyRestrictedStub;

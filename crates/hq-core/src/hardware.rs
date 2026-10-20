@@ -4,7 +4,7 @@
 //! models that fit the hardware. Used by the LLM router and CLI.
 
 use serde::{Deserialize, Serialize};
-#[cfg_attr(windows, allow(unused_imports))]
+#[cfg_attr(any(windows, target_os = "android"), allow(unused_imports))]
 use std::process::Command;
 
 /// GPU type detected on the system.
@@ -192,7 +192,7 @@ fn detect_total_memory_gb() -> u64 {
         }
     }
 
-    #[cfg(target_os = "linux")]
+    #[cfg(any(target_os = "linux", target_os = "android"))]
     {
         if let Ok(content) = std::fs::read_to_string("/proc/meminfo") {
             for line in content.lines() {

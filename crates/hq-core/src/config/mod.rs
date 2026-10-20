@@ -48,8 +48,8 @@ pub use llm::*;
 pub use mcp_connector::{CONNECTOR_SCOPES, ConnectorSettings, McpConnectorConfig};
 pub use memory::*;
 pub use profile::{
-    EgressItem, EnvLookup, LiteConfig, Profile, egress_report, enforce_lite, lite_violations,
-    process_env,
+    EgressItem, EnvLookup, LiteConfig, MOBILE_REMOVED_TOOL_CATEGORIES, MobileConfig, Profile,
+    egress_report, enforce_lite, lite_violations, process_env,
 };
 pub use relay::*;
 pub use self_update::SelfUpdateConfig;
@@ -92,14 +92,19 @@ pub struct HqConfig {
     /// Path to the vault directory
     pub vault_path: PathBuf,
 
-    /// `full` (default) or `lite`: the web app, tasks and vault only, with no outbound traffic
-    /// you did not list. See `docs/HQ_LITE.md`. Env: `HQ_PROFILE`.
+    /// `full` (default), `lite` (the web app, tasks and vault only, with no outbound traffic
+    /// you did not list, see `docs/HQ_LITE.md`) or `mobile` (an instance on a phone, see
+    /// `docs/HQ_MOBILE.md`). Env: `HQ_PROFILE`.
     #[serde(default)]
     pub profile: Profile,
 
     /// Settings that apply only under `profile: lite`.
     #[serde(default)]
     pub lite: LiteConfig,
+
+    /// Settings that apply only under `profile: mobile`.
+    #[serde(default)]
+    pub mobile: MobileConfig,
 
     /// OpenRouter API key
     pub openrouter_api_key: Option<String>,
@@ -368,13 +373,35 @@ fn default_web_bind() -> String {
 const SERVER_CONFIG_PATH: &str = "/opt/hq/config.yaml";
 const SERVER_VAULT_PATH: &str = "/opt/hq/.vault";
 
+/// The platform an HQ build runs on, as far as the edition it can be is concerned.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Platform {
+    NativeWindows,
+    Android,
+    Other,
+}
+
+impl Platform {
+    fn current() -> Self {
+        if cfg!(windows) {
+            Self::NativeWindows
+        } else if cfg!(target_os = "android") {
+            Self::Android
+        } else {
+            Self::Other
+        }
+    }
+}
+
 /// The profile a config runs as. Native Windows builds have no coding-agent host, sandbox or
-/// chat relay, so they are HQ Lite whatever the file says; Full HQ on Windows is WSL2.
-fn effective_profile(configured: Profile, native_windows: bool) -> Profile {
-    if native_windows {
-        Profile::Lite
-    } else {
-        configured
+/// chat relay, so they are HQ Lite whatever the file says; Full HQ on Windows is WSL2. An
+/// Android build has no shell sandbox backend, so a config left at the default (`full`) runs as
+/// the phone edition; Full cannot be chosen there, and a config that asks for Lite keeps it.
+fn effective_profile(configured: Profile, platform: Platform) -> Profile {
+    match (platform, configured) {
+        (Platform::NativeWindows, _) => Profile::Lite,
+        (Platform::Android, Profile::Full) => Profile::Mobile,
+        _ => configured,
     }
 }
 
@@ -432,6 +459,7 @@ impl Default for HqConfig {
             local_only: false,
             profile: Profile::default(),
             lite: LiteConfig::default(),
+            mobile: MobileConfig::default(),
             ws_port: default_ws_port(),
             chat_turn_timeout_secs: default_chat_turn_timeout_secs(),
             web_bind: default_web_bind(),
@@ -619,7 +647,7 @@ impl HqConfig {
             .merge(Env::prefixed("HQ_").split("__"));
 
         let mut config: HqConfig = figment.extract()?;
-        config.profile = effective_profile(config.profile, cfg!(windows));
+        config.profile = effective_profile(config.profile, Platform::current());
         set_http_referer(config.http_referer.clone());
         Self::warn_unrecognized_top_level_keys(config_path);
         Ok(config)
@@ -939,9 +967,39 @@ mod effective_profile_tests {
 
     #[test]
     fn native_windows_is_always_lite_and_other_platforms_keep_their_setting() {
-        assert_eq!(effective_profile(Profile::Full, true), Profile::Lite);
-        assert_eq!(effective_profile(Profile::Lite, true), Profile::Lite);
-        assert_eq!(effective_profile(Profile::Full, false), Profile::Full);
-        assert_eq!(effective_profile(Profile::Lite, false), Profile::Lite);
+        for configured in [Profile::Full, Profile::Lite, Profile::Mobile] {
+            assert_eq!(
+                effective_profile(configured, Platform::NativeWindows),
+                Profile::Lite
+            );
+        }
+        assert_eq!(
+            effective_profile(Profile::Full, Platform::Other),
+            Profile::Full
+        );
+        assert_eq!(
+            effective_profile(Profile::Lite, Platform::Other),
+            Profile::Lite
+        );
+        assert_eq!(
+            effective_profile(Profile::Mobile, Platform::Other),
+            Profile::Mobile
+        );
+    }
+
+    #[test]
+    fn android_runs_a_default_config_as_the_phone_edition_and_honours_lite() {
+        assert_eq!(
+            effective_profile(Profile::Full, Platform::Android),
+            Profile::Mobile
+        );
+        assert_eq!(
+            effective_profile(Profile::Mobile, Platform::Android),
+            Profile::Mobile
+        );
+        assert_eq!(
+            effective_profile(Profile::Lite, Platform::Android),
+            Profile::Lite
+        );
     }
 }

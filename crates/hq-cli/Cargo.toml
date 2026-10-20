@@ -53,10 +53,11 @@ mimalloc = { version = "0.1", default-features = false }
 
 # native-tls (pulled in transitively via reqwest/teloxide) links system
 # OpenSSL on Linux. Cross-compiling for Linux from a non-Linux host has no
-# target OpenSSL to find via pkg-config, so build OpenSSL from source
-# instead — irrelevant on macOS/Windows, where native-tls uses the
-# platform's own TLS backend and openssl-sys isn't even pulled in.
-[target.'cfg(target_os = "linux")'.dependencies]
+# target OpenSSL to find via pkg-config, and Android has none to find at
+# all, so build OpenSSL from source instead — irrelevant on macOS/Windows,
+# where native-tls uses the platform's own TLS backend and openssl-sys
+# isn't even pulled in.
+[target.'cfg(any(target_os = "linux", target_os = "android"))'.dependencies]
 openssl-sys = { version = "*", features = ["vendored"] }
 
 [target.'cfg(unix)'.dependencies]
