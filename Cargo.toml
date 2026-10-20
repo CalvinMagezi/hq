@@ -19,6 +19,7 @@ members = [
     "crates/hq-convert",
     "crates/hq-export",
     "crates/hq-update",
+    "crates/hq-backup",
     "crates/hq-host",
     "crates/hq-sandbox",
 
@@ -146,6 +147,7 @@ hq-web = { path = "crates/hq-web" }
 
 hq-memory = { path = "crates/hq-memory" }
 hq-update = { path = "crates/hq-update" }
+hq-backup = { path = "crates/hq-backup" }
 hq-host = { path = "crates/hq-host" }
 hq-gate = { path = "crates/hq-gate" }
 hq-net = { path = "crates/hq-net" }

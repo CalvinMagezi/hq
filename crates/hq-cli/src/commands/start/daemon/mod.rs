@@ -447,6 +447,9 @@ fn default_tasks() -> Vec<DaemonTask> {
             Duration::from_secs(720),
         ),
         DaemonTask::with_default_timeout("disk-watchdog", Duration::from_secs(21600)),
+        // Wakes hourly and acts only when `backup.enabled` and the newest backup is old enough.
+        // The backup itself runs detached, so the task returns at once however big the vault is.
+        DaemonTask::with_default_timeout("backup", Duration::from_secs(3600)),
         DaemonTask::with_default_timeout("usage-ledger", Duration::from_secs(86400)),
         DaemonTask::with_default_timeout("harness-usage", Duration::from_secs(300)),
         // Settle skill outcomes from what happened to the work: a task accepted or reopened,
@@ -597,6 +600,7 @@ async fn dispatch_task(
             }
         }
         "disk-watchdog" => tasks_periodic::run_disk_watchdog(vault_path, config).await,
+        "backup" => tasks_periodic::run_backup(config).await,
         "copilot-usage" => tasks_periodic::run_copilot_usage(db, config).await,
         "usage-ledger" => tasks_periodic::run_usage_ledger(db, config).await,
         "harness-usage" => tasks_periodic::run_harness_usage(db).await,
