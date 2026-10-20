@@ -43,6 +43,7 @@ pub mod host {
         )
     }
 }
+pub mod backup;
 pub mod connector;
 pub mod install;
 pub mod kill;

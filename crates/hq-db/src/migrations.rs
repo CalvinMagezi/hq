@@ -427,6 +427,41 @@ fn apply_one(conn: &Connection, version: &str, sql: &str) -> Result<()> {
     Ok(())
 }
 
+/// The leading number of a migration name (`007_codegraph_v2` is 7).
+fn migration_number(name: &str) -> Option<u32> {
+    name.split('_').next()?.parse().ok()
+}
+
+/// The migrations recorded in `conn`'s `schema_version` table that are newer than this build: a
+/// database from a later HQ, which this build must not open. Old databases also carry rows for
+/// migrations that were retired from the code (`006_model_cards`), so a name this build does not
+/// know is only "newer" when its number is above the highest this build has. A name with no
+/// number is treated as newer. An empty list also covers a database with no such table.
+pub fn newer_migrations(conn: &Connection) -> Result<Vec<String>> {
+    let has_table: bool = conn.query_row(
+        "SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'schema_version')",
+        [],
+        |row| row.get(0),
+    )?;
+    if !has_table {
+        return Ok(Vec::new());
+    }
+    let highest_known = MIGRATIONS
+        .iter()
+        .filter_map(|(name, _)| migration_number(name))
+        .max()
+        .unwrap_or(0);
+    let mut stmt = conn.prepare("SELECT version FROM schema_version")?;
+    let applied = stmt
+        .query_map([], |row| row.get::<_, String>(0))?
+        .collect::<std::result::Result<Vec<_>, _>>()?;
+    Ok(applied
+        .into_iter()
+        .filter(|name| !MIGRATIONS.iter().any(|(known, _)| known == name))
+        .filter(|name| migration_number(name).is_none_or(|n| n > highest_known))
+        .collect())
+}
+
 pub fn run(conn: &Connection) -> Result<()> {
     apply(conn, MIGRATIONS)?;
 
@@ -463,6 +498,36 @@ mod tests {
             assert!(ident(table) && ident(col), "{table}.{col}");
             assert!(typedef(def), "{table}.{col}: {def}");
         }
+    }
+
+    #[test]
+    fn retired_migrations_are_not_newer_but_a_higher_number_is() {
+        let conn = rusqlite::Connection::open_in_memory().unwrap();
+        super::run(&conn).unwrap();
+        assert!(super::newer_migrations(&conn).unwrap().is_empty());
+        // A row for a migration that was retired from the code long ago (number below the highest).
+        conn.execute(
+            "INSERT INTO schema_version (version) VALUES ('006_model_cards')",
+            [],
+        )
+        .unwrap();
+        assert!(super::newer_migrations(&conn).unwrap().is_empty());
+        // A migration from a later build, and a name that carries no number at all.
+        conn.execute(
+            "INSERT INTO schema_version (version) VALUES ('999_from_the_future')",
+            [],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO schema_version (version) VALUES ('mystery')",
+            [],
+        )
+        .unwrap();
+        let mut newer = super::newer_migrations(&conn).unwrap();
+        newer.sort();
+        assert_eq!(newer, ["999_from_the_future", "mystery"]);
+        let bare = rusqlite::Connection::open_in_memory().unwrap();
+        assert!(super::newer_migrations(&bare).unwrap().is_empty());
     }
 
     use crate::pool::Database;

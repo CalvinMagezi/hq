@@ -1,6 +1,7 @@
 mod agent;
 mod agent_host;
 mod backends;
+mod backup;
 mod budgets;
 mod collaboration;
 pub mod company;
@@ -30,6 +31,7 @@ pub use agent_host::{
     native_host_dir,
 };
 pub use backends::{BACKENDS_SCHEMA_VERSION, BackendEntry, BackendKind, BackendsConfig, WireApi};
+pub use backup::BackupConfig;
 pub use budgets::{Budget, BudgetAction, BudgetPeriod, BudgetScope, BudgetsConfig};
 pub use collaboration::*;
 pub use company::{CompanyConfig, CompanyIdentity, ConnectorBinding, ListenerDef, company_by_id};
@@ -255,6 +257,10 @@ pub struct HqConfig {
     #[serde(default)]
     pub disk_watchdog: DiskWatchdogConfig,
 
+    /// Scheduled encrypted backups of the vault and database. Off by default. See `docs/BACKUP.md`.
+    #[serde(default)]
+    pub backup: BackupConfig,
+
     /// Watches Notebooks/ so edits made outside HQ reach search in seconds.
     #[serde(default)]
     pub vault_watch: VaultWatchConfig,
@@ -471,6 +477,7 @@ impl Default for HqConfig {
             backends: BackendsConfig::default(),
             self_update: SelfUpdateConfig::default(),
             disk_watchdog: DiskWatchdogConfig::default(),
+            backup: BackupConfig::default(),
             vault_watch: VaultWatchConfig::default(),
             usage_ledger: UsageLedgerConfig::default(),
             mcp_connector: McpConnectorConfig::default(),

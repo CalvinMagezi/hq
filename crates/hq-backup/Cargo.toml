@@ -1,0 +1,30 @@
+[package]
+name = "hq-backup"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Encrypted backup and restore of an HQ vault and its database"
+
+[dependencies]
+hq-db = { workspace = true }
+# Memory-hard key derivation for passphrases. The only new crate: its own dependencies (blake2,
+# base64ct) are already in the tree. Pure Rust, so it builds for Android with no C toolchain.
+argon2 = { version = "0.5", default-features = false, features = ["alloc"] }
+chrono = { workspace = true }
+flate2 = { workspace = true }
+hex = { workspace = true }
+# ChaCha20-Poly1305 for the archive; already in the tree through rustls.
+ring = "0.17"
+rusqlite = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+sha2 = { workspace = true }
+tar = { version = "0.4", default-features = false }
+thiserror = { workspace = true }
+zeroize = "1"
+
+[target.'cfg(unix)'.dependencies]
+libc = "0.2"
+
+[dev-dependencies]
+tempfile = { workspace = true }

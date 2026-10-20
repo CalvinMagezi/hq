@@ -9,6 +9,7 @@ static GLOBAL: mimalloc::MiMalloc = mimalloc::MiMalloc;
 
 mod commands;
 mod render;
+use commands::backup::{BackupCommand, RestoreArgs};
 use commands::connector::ConnectorAction;
 use commands::net::NetAction;
 use commands::queue::QueueAction;
@@ -224,6 +225,15 @@ enum Commands {
         sub: String,
         folder: Option<std::path::PathBuf>,
     },
+
+    /// Encrypted backup and restore of the vault and its database: create, verify, restore, keygen, prune (`hq backup --help`)
+    Backup {
+        #[command(subcommand)]
+        command: BackupCommand,
+    },
+
+    /// Restore an encrypted backup into a new or empty folder (the same as `hq backup restore`)
+    Restore(RestoreArgs),
 
     /// Set up API keys interactively
     Env,
@@ -842,6 +852,8 @@ fn lite_rule(command: &Commands) -> LiteRule {
         | Commands::Doctor { windows: true, .. }
         | Commands::Autostart { .. }
         | Commands::Lite { .. }
+        | Commands::Backup { .. }
+        | Commands::Restore(_)
         | Commands::Env
         | Commands::Task { .. }
         | Commands::Copilot { .. }
@@ -977,6 +989,8 @@ async fn dispatch(command: Commands, config: &HqConfig) -> Result<()> {
         Commands::Doctor { egress: false, .. } => commands::doctor::run(config).await,
         Commands::Autostart { sub } => commands::lite::autostart(&sub),
         Commands::Lite { sub, folder } => commands::lite::lite(config, &sub, folder.as_deref()),
+        Commands::Backup { command } => commands::backup::run(config, command),
+        Commands::Restore(args) => commands::backup::restore(config, &args),
         Commands::Pair { platform } => commands::pair::run(config, &platform),
         Commands::Env => commands::env::run(config).await,
         Commands::Task { cmd } => commands::task::run(config, cmd).await,
@@ -1221,6 +1235,9 @@ mod lite_rule_tests {
             &["copilot", "link"],
             &["autostart", "status"],
             &["lite", "export", "x"],
+            &["backup", "keygen", "x"],
+            &["backup", "verify", "x"],
+            &["restore", "x", "--into", "y"],
             &["doctor", "--windows"],
             &["uninstall", "lite"],
             &["task", "list"],

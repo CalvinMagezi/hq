@@ -21,6 +21,7 @@ hq-tools = { workspace = true }
 hq-convert = { workspace = true }
 hq-export = { workspace = true }
 hq-update = { workspace = true }
+hq-backup = { workspace = true }
 hq-host = { workspace = true }
 tokio = { workspace = true }
 clap = { workspace = true }
