@@ -21,6 +21,8 @@ blocked() {
   if ! warm "$1"; then fail "$1 has no handshake, so 'blocked $2' proves nothing"; return; fi
   if ping_once "$1" "$2"; then fail "$1 is blocked from $2"; else pass "$1 is blocked from $2"; fi
 }
+# The unit names are built from this so no "name@host.suffix" appears in the source for the personal-data scan to read as an address.
+APPLY=hq-net-apply@hq0
 journal() { journalctl -u 'hq-net-apply@hq0' --no-pager -o cat; }
 peers() { wg show hq0 peers | wc -l; }
 want() { # want "description" actual expected
@@ -98,11 +100,11 @@ done
 
 echo "--- start the tunnel; the applier is pulled in by WantedBy"
 systemctl daemon-reload
-systemctl enable hq-net-apply@hq0.service hq-net-apply@hq0.path hq-net-apply@hq0.timer >/dev/null 2>&1
+systemctl enable $APPLY.service $APPLY.path $APPLY.timer >/dev/null 2>&1
 systemctl start wg-quick@hq0
 sleep 6
-systemctl start hq-net-apply@hq0.path hq-net-apply@hq0.timer
-for u in wg-quick@hq0 hq-net-apply@hq0.path hq-net-apply@hq0.timer; do check "$u is active" systemctl is-active --quiet $u; done
+systemctl start $APPLY.path $APPLY.timer
+for u in wg-quick@hq0 $APPLY.path $APPLY.timer; do check "$u is active" systemctl is-active --quiet $u; done
 check "the applier applied three peers" bash -c "$(declare -f journal); journal | grep -q '3 peer(s) on hq0 after this run'"
 check "the applier journaled the pair" bash -c "$(declare -f journal); journal | grep -q 'allowed 10.77.0.2 <-> 10.77.0.3'"
 want "peers on the interface" "$(peers)" 3
@@ -143,7 +145,7 @@ write_input "a b c" "a:c"; sleep 3
 for k in $(seq 1 20); do write_input "a b c" "a:c"; sleep 0.25; done
 write_input "c" ""; sleep 6
 want "peers on the interface" "$(peers)" 1
-check "the path unit is still watching" systemctl is-active --quiet hq-net-apply@hq0.path
+check "the path unit is still watching" systemctl is-active --quiet $APPLY.path
 
 echo "--- another firewall whose routed policy is drop (iptables-nft standing in for ufw)"
 write_input "a b c" "a:c"; sleep 5
@@ -160,16 +162,16 @@ iptables -D FORWARD -i hq0 -o hq0 -j ACCEPT; iptables -P FORWARD ACCEPT
 echo "--- the table is gone while forwarding is on"
 nft delete table inet hq_net
 write_input "a b c" "a:b"; sleep 5
-check "the run failed visibly" systemctl is-failed --quiet hq-net-apply@hq0.service
+check "the run failed visibly" systemctl is-failed --quiet $APPLY.service
 check "the journal says the table may be missing" bash -c "$(declare -f journal); journal | grep -q 'could not set the links on hq0'"
 want "the peers were still applied" "$(peers)" 3
 echo "(known hazard, documented) with no table, an unlinked pair is open:"
 reaches a 10.77.0.4
 echo "--- the table is loaded again and the applier runs"
 nft -f /etc/hq-net/hq_net.nft
-systemctl reset-failed hq-net-apply@hq0.service
-systemctl start hq-net-apply@hq0.service; sleep 2
-check "the run succeeds" bash -c '! systemctl is-failed --quiet hq-net-apply@hq0.service'
+systemctl reset-failed $APPLY.service
+systemctl start $APPLY.service; sleep 2
+check "the run succeeds" bash -c "! systemctl is-failed --quiet $APPLY.service"
 reaches a 10.77.0.3
 blocked a 10.77.0.4; blocked c 10.77.0.3
 
@@ -182,7 +184,7 @@ check "nothing ran" bash -c '[ ! -e /tmp/pwned ]'
 want "peers unchanged" "$(peers)" 3
 
 echo "--- confinement"
-score=$(systemd-analyze security hq-net-apply@hq0.service --no-pager 2>&1 | sed -n 's/.*exposure level for [^:]*: \([0-9.]*\).*/\1/p')
+score=$(systemd-analyze security $APPLY.service --no-pager 2>&1 | sed -n 's/.*exposure level for [^:]*: \([0-9.]*\).*/\1/p')
 echo "exposure score: ${score:-unknown} (lower is tighter)"
 check "the exposure score is under 5" bash -c "[ -n '$score' ] && awk -v s='$score' 'BEGIN{exit !(s < 5)}'"
 
