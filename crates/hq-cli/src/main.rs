@@ -108,7 +108,7 @@ enum Commands {
         json: bool,
     },
 
-    /// Run a WireGuard private plane for HQ: init, peer add|revoke|list, status, apply (`hq net --help`)
+    /// Run a WireGuard private plane for HQ: init, peer add|revoke|list, link add|remove|list, status, apply (`hq net --help`)
     Net {
         #[command(subcommand)]
         action: NetAction,
