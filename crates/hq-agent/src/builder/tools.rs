@@ -41,7 +41,13 @@ impl SessionBuilder {
         shared_db: Option<Arc<hq_db::Database>>,
     ) -> Vec<Box<dyn AgentTool>> {
         let mut tools = self.coding_tools(vault_path);
+        // The edition decides which categories exist at all (a phone has no `git`), the same way
+        // the MCP registry does, so a chat turn never advertises a tool that cannot work.
+        let profile = self.config.profile;
         for tool in self.hq_tool_catalog(vault_path, shared_db) {
+            if profile.drops_tool_category(tool.category()) {
+                continue;
+            }
             tools.push(Box::new(HqToolAdapter { inner: tool }));
         }
 

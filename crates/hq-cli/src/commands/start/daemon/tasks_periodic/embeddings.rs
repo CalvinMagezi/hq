@@ -55,8 +55,9 @@ pub async fn run_embeddings(vault_path: &Path, db: &Database, config: &HqConfig)
 
     run_fts_sync(vault_path, db).await?;
 
-    // Lite keeps the keyword index current and sends no note text anywhere for vectors.
-    if config.profile.is_lite() {
+    // Lite, and a mobile instance with its data saver on, keep the keyword index current and
+    // send no note text anywhere for vectors.
+    if !config.embeds_notes() {
         return Ok(());
     }
 
