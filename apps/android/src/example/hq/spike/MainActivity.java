@@ -11,6 +11,7 @@ import android.webkit.WebView;
 import android.webkit.WebViewClient;
 import java.io.File;
 import java.io.FileOutputStream;
+import java.io.IOException;
 import java.io.InputStream;
 import java.net.HttpURLConnection;
 import java.net.URL;
@@ -49,11 +50,15 @@ public class MainActivity extends Activity {
                 c.setConnectTimeout(500);
                 c.setReadTimeout(500);
                 if (c.getResponseCode() == 200) {
-                    ui.post(() -> web.loadUrl(BASE + "/#token=" + HubService.token(this)));
+                    String url = BASE + "/#token=" + HubService.token(this);
+                    ui.post(() -> web.loadUrl(url));
                     return;
                 }
-            } catch (Exception e) {
+            } catch (IOException e) {
                 // not up yet
+            } catch (IllegalStateException e) {
+                Log.e(HubService.TAG, "cannot open the web token: " + e.getMessage());
+                return;
             }
             try { Thread.sleep(HEALTH_POLL_MS); } catch (InterruptedException ignored) { }
         }

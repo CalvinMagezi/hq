@@ -17,7 +17,7 @@ mkdir -p "$work/compiled" "$work/classes" "$work/apk/lib/arm64-v8a" "$work/apk/a
 "$BT/aapt2" compile --dir "$here/res" -o "$work/compiled/res.zip"
 "$BT/aapt2" link -o "$work/base.apk" -I "$JAR" --manifest "$here/AndroidManifest.xml" \
   --min-sdk-version 26 --target-sdk-version "${TARGET_SDK:-35}" ${DEBUGGABLE:+--debug-mode} --version-code 1 --version-name hub "$work/compiled/res.zip"
-"$JBR/bin/javac" --release 11 -d "$work/classes" -classpath "$JAR" "$here"/src/example/hq/spike/*.java
+"$JBR/bin/javac" --release 8 -Xlint:-options -d "$work/classes" -classpath "$JAR" "$here"/src/example/hq/spike/*.java
 "$JBR/bin/jar" cf "$work/classes.jar" -C "$work/classes" .
 "$BT/d8" --min-api 26 --lib "$JAR" --output "$work" "$work/classes.jar"
 cp "$hq_bin" "$work/apk/lib/arm64-v8a/libhq.so"

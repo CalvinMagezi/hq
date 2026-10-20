@@ -1,11 +1,13 @@
 package example.hq.spike;
 
 import java.io.IOException;
-import java.io.RandomAccessFile;
+import java.nio.ByteBuffer;
+import java.nio.channels.FileChannel;
 import java.nio.file.Files;
 import java.nio.file.LinkOption;
 import java.nio.file.NoSuchFileException;
 import java.nio.file.Path;
+import java.nio.file.StandardOpenOption;
 import java.nio.file.attribute.BasicFileAttributes;
 import java.util.LinkedHashMap;
 import java.util.Map;
@@ -42,14 +44,18 @@ final class HubConfig {
             if (eq < 1) throw bad(i, "expected NAME=value");
             String name = line.substring(0, eq);
             String value = line.substring(eq + 1);
-            if (!NAME.matcher(name).matches()) throw bad(i, "name not allowed");
-            if (RESERVED.equals(name)) throw bad(i, "name reserved for the app");
+            if (!isCredentialName(name)) throw bad(i, RESERVED.equals(name) ? "name reserved for the app" : "name not allowed");
             if (value.length() > MAX_VALUE_CHARS) throw bad(i, "value too long");
             if (hasControlChar(value)) throw bad(i, "control character in value");
             if (out.put(name, value) != null) throw bad(i, "name repeated");
             if (out.size() > MAX_SECRETS) throw bad(i, "too many names");
         }
         return out;
+    }
+
+    /** True for a name a credential file may set; the same rule filters what is already stored. */
+    static boolean isCredentialName(String name) {
+        return NAME.matcher(name).matches() && !RESERVED.equals(name);
     }
 
     /** The child's environment: credentials first, then the app's own settings, which always win. */
@@ -70,12 +76,21 @@ final class HubConfig {
         return new String[] {"web", "--no-open", "--port", String.valueOf(port), "--bind", "127.0.0.1"};
     }
 
-    /** Reads a regular file of at most max bytes; a link, a directory or a larger file is refused. */
+    /**
+     * Reads a regular file of at most max bytes; a link, a directory or a larger file is refused.
+     * The attribute check gives the reason, and the open itself refuses a link, so a swap between
+     * the two cannot read through one.
+     */
     static byte[] readRegular(Path p, long max) throws IOException {
         BasicFileAttributes a = Files.readAttributes(p, BasicFileAttributes.class, LinkOption.NOFOLLOW_LINKS);
         if (!a.isRegularFile()) throw new IOException("not a regular file");
         if (a.size() > max) throw new IOException("file larger than " + max + " bytes");
-        return Files.readAllBytes(p);
+        try (FileChannel ch = FileChannel.open(p, StandardOpenOption.READ, LinkOption.NOFOLLOW_LINKS)) {
+            if (ch.size() > max) throw new IOException("file larger than " + max + " bytes");
+            ByteBuffer buf = ByteBuffer.allocate((int) ch.size());
+            while (buf.hasRemaining() && ch.read(buf) >= 0) { /* keep reading */ }
+            return buf.array();
+        }
     }
 
     /**
@@ -95,12 +110,13 @@ final class HubConfig {
     }
 
     private static void zero(Path p, long length) throws IOException {
-        byte[] chunk = new byte[ZERO_CHUNK];
-        try (RandomAccessFile raf = new RandomAccessFile(p.toFile(), "rw")) {
-            for (long done = 0; done < length; done += chunk.length) {
-                raf.write(chunk, 0, (int) Math.min(chunk.length, length - done));
+        ByteBuffer chunk = ByteBuffer.allocate(ZERO_CHUNK);
+        try (FileChannel ch = FileChannel.open(p, StandardOpenOption.WRITE, LinkOption.NOFOLLOW_LINKS)) {
+            for (long done = 0; done < length; done += ZERO_CHUNK) {
+                chunk.clear().limit((int) Math.min(ZERO_CHUNK, length - done));
+                while (chunk.hasRemaining()) ch.write(chunk, done + chunk.position());
             }
-            raf.getFD().sync();
+            ch.force(true);
         }
     }
 

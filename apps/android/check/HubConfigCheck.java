@@ -11,7 +11,7 @@ import java.util.Map;
 public class HubConfigCheck {
     private static final String MARK = "SECRETVALUE";
 
-    public static void main(String[] args) throws IOException {
+    public static void main(String[] args) throws Exception {
         parsing();
         rejections();
         environment();
@@ -26,6 +26,10 @@ public class HubConfigCheck {
         assert ok.get("DEEPSEEK_API_KEY").isEmpty() : "empty value means remove";
         assert HubConfig.parseSecrets("").isEmpty();
         assert HubConfig.parseSecrets("\n# only a comment\n").isEmpty();
+        assert HubConfig.isCredentialName("OPENROUTER_API_KEY") && HubConfig.isCredentialName("HQ_RELAY__DISCORD_TOKEN");
+        for (String name : new String[] {"HQ_MCP_DEV_NO_AUTH", "HQ_WEB_AUTH_TOKEN", "LD_PRELOAD", "", "token", "A_TOKEN\n"}) {
+            assert !HubConfig.isCredentialName(name) : name;
+        }
         assert HubConfig.isActive("active\n") && HubConfig.isActive("  active ");
         assert !HubConfig.isActive(null) && !HubConfig.isActive("") && !HubConfig.isActive("ACTIVE") && !HubConfig.isActive("standby");
         assert String.join(" ", HubConfig.hqArgs(true, 5678)).equals("start all");
@@ -59,7 +63,7 @@ public class HubConfigCheck {
         assert env.get("OPENROUTER_API_KEY").equals("k") && env.get("HQ_WS_PORT").equals("5678");
     }
 
-    private static void files() throws IOException {
+    private static void files() throws Exception {
         Path dir = Files.createTempDirectory("hubcheck");
         try {
             Path inbox = dir.resolve("secrets.in");
@@ -84,11 +88,23 @@ public class HubConfigCheck {
             assert !Files.exists(inbox, java.nio.file.LinkOption.NOFOLLOW_LINKS) : "link removed";
             assert new String(Files.readAllBytes(target), StandardCharsets.UTF_8).equals("KEEP") : "target untouched";
 
-            // a file over the cap is refused and deleted
+            // exactly at the cap is read; one byte over is refused and deleted
+            Files.write(inbox, new byte[(int) HubConfig.MAX_FILE_BYTES]);
+            assert HubConfig.readRegular(inbox, HubConfig.MAX_FILE_BYTES).length == HubConfig.MAX_FILE_BYTES : "file at the cap is read whole";
+            HubConfig.wipe(inbox);
+            assert !Files.exists(inbox);
+
             Files.write(inbox, new byte[(int) HubConfig.MAX_FILE_BYTES + 1]);
             refused(inbox);
             HubConfig.wipe(inbox);
             assert !Files.exists(inbox);
+
+            // a named pipe would block a reader; it is refused without being opened
+            if (new ProcessBuilder("mkfifo", inbox.toString()).start().waitFor() == 0) {
+                refused(inbox);
+                HubConfig.wipe(inbox);
+                assert !Files.exists(inbox) : "pipe removed";
+            }
 
             // a directory is refused; wiping a missing path is quiet
             Files.createDirectory(inbox);

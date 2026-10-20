@@ -18,6 +18,7 @@ import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import javax.crypto.AEADBadTagException;
 import javax.crypto.Cipher;
 import javax.crypto.KeyGenerator;
 import javax.crypto.SecretKey;
@@ -76,26 +77,32 @@ final class SecretStore {
 
     /**
      * The token that gates the web app and API. It is kept sealed like the credentials; one left in
-     * plain preferences by an earlier build is moved here on first use.
+     * plain preferences by an earlier build is moved here on first use. A new token is made only when
+     * the stored one is unreadable for good (the key was replaced or the value is damaged); any other
+     * failure is thrown so the caller retries, because a new token locks out every signed-in device.
      */
     static synchronized String webToken(Context c) {
         SharedPreferences internal = c.getSharedPreferences(INTERNAL_PREFS, Context.MODE_PRIVATE);
+        SharedPreferences legacy = c.getSharedPreferences("hq", Context.MODE_PRIVATE);
         try {
             String stored = internal.getString(WEB_TOKEN, null);
-            if (stored != null) return open(WEB_TOKEN, stored);
-        } catch (GeneralSecurityException | IOException e) {
-            Log.e(HubService.TAG, "web token cannot be opened, making a new one: " + e.getClass().getSimpleName());
-        }
-        SharedPreferences legacy = c.getSharedPreferences("hq", Context.MODE_PRIVATE);
-        String token = legacy.getString("token", null);
-        if (token == null) token = newToken();
-        try {
+            if (stored != null) {
+                try {
+                    String token = open(WEB_TOKEN, stored);
+                    if (legacy.contains("token")) legacy.edit().remove("token").apply();
+                    return token;
+                } catch (AEADBadTagException | IllegalArgumentException | ArrayIndexOutOfBoundsException lost) {
+                    Log.e(HubService.TAG, "web token is unreadable for good, making a new one: " + lost.getClass().getSimpleName());
+                }
+            }
+            String token = legacy.getString("token", null);
+            if (token == null) token = newToken();
             if (!internal.edit().putString(WEB_TOKEN, seal(WEB_TOKEN, token)).commit()) throw new IOException("preferences not written");
-            legacy.edit().remove("token").commit();
+            legacy.edit().remove("token").apply();
+            return token;
         } catch (GeneralSecurityException | IOException e) {
-            throw new IllegalStateException("web token cannot be stored: " + e.getMessage());
+            throw new IllegalStateException("web token unavailable: " + e.getClass().getSimpleName());
         }
-        return token;
     }
 
     private static String newToken() {
@@ -106,16 +113,30 @@ final class SecretStore {
         return s.toString();
     }
 
-    /** Every stored secret, decrypted. A value that cannot be opened is logged by name and skipped. */
+    /**
+     * Every stored secret, decrypted. A name the current rule no longer allows (kept by an older build)
+     * is dropped from the store and never reaches the child. A value that cannot be opened is logged
+     * by name and skipped.
+     */
     static Map<String, String> load(Context c) {
+        SharedPreferences prefs = c.getSharedPreferences(PREFS, Context.MODE_PRIVATE);
         Map<String, String> out = new LinkedHashMap<>();
-        for (Map.Entry<String, ?> e : c.getSharedPreferences(PREFS, Context.MODE_PRIVATE).getAll().entrySet()) {
+        SharedPreferences.Editor drop = prefs.edit();
+        boolean dropped = false;
+        for (Map.Entry<String, ?> e : prefs.getAll().entrySet()) {
+            if (!HubConfig.isCredentialName(e.getKey())) {
+                drop.remove(e.getKey());
+                dropped = true;
+                Log.w(HubService.TAG, "stored name " + e.getKey() + " is not allowed any more, removed");
+                continue;
+            }
             try {
                 out.put(e.getKey(), open(e.getKey(), (String) e.getValue()));
             } catch (Exception ex) {
                 Log.e(HubService.TAG, "secret " + e.getKey() + " cannot be opened: " + ex.getClass().getSimpleName());
             }
         }
+        if (dropped) drop.commit();
         return out;
     }
 

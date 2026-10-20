@@ -27,6 +27,7 @@ public class HubService extends Service {
     static final String TAG = "HQHUB";
     static final String CHANNEL = "hub";
     static final int PORT = 5678;
+    private static final int NOTIFICATION_ID = 1;
     private static final long BACKOFF_MIN_MS = 2_000;
     private static final long BACKOFF_MAX_MS = 60_000;
     private static final long STABLE_RUN_MS = 60_000;
@@ -46,13 +47,12 @@ public class HubService extends Service {
 
     @Override
     public int onStartCommand(Intent intent, int flags, int startId) {
-        NotificationManager nm = getSystemService(NotificationManager.class);
-        nm.createNotificationChannel(new NotificationChannel(CHANNEL, "HQ hub", NotificationManager.IMPORTANCE_LOW));
-        Notification n = new Notification.Builder(this, CHANNEL).setContentTitle("HQ hub running")
-                .setContentText((HubConfig.isActive(readSmall(new File(getFilesDir(), "mode"))) ? "Active: relays and scheduler on. " : "") + "Serving this device on 127.0.0.1:" + PORT).setSmallIcon(android.R.drawable.stat_notify_sync).build();
+        getSystemService(NotificationManager.class)
+                .createNotificationChannel(new NotificationChannel(CHANNEL, "HQ hub", NotificationManager.IMPORTANCE_LOW));
+        Notification n = notification(HubConfig.isActive(readSmall(new File(getFilesDir(), "mode"))));
         try {
-            if (Build.VERSION.SDK_INT >= 34) startForeground(1, n, ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE);
-            else startForeground(1, n);
+            if (Build.VERSION.SDK_INT >= 34) startForeground(NOTIFICATION_ID, n, ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE);
+            else startForeground(NOTIFICATION_ID, n);
         } catch (Exception e) {
             Log.e(TAG, "startForeground failed: " + e);
         }
@@ -62,6 +62,12 @@ public class HubService extends Service {
             new Thread(() -> supervise(gen, "caddy", this::caddyProcess, false), "caddy-supervisor").start();
         }
         return START_STICKY;
+    }
+
+    private Notification notification(boolean active) {
+        String text = (active ? "Active: relays and scheduler on. " : "") + "Serving this device on 127.0.0.1:" + PORT;
+        return new Notification.Builder(this, CHANNEL).setContentTitle("HQ hub running")
+                .setContentText(text).setSmallIcon(android.R.drawable.stat_notify_sync).build();
     }
 
     /** Restarts a child with exponential backoff; a null command means "not configured", so it is skipped. */
@@ -87,7 +93,7 @@ public class HubService extends Service {
                 Log.w(TAG, name + " exited rc=" + rc + " after " + ranMs / 1000 + " s");
             } catch (InterruptedException e) {
                 return;
-            } catch (Exception e) {
+            } catch (Exception | LinkageError e) {
                 Log.e(TAG, name + " failed, will retry: " + e);
             }
             backoff = ranMs >= STABLE_RUN_MS ? BACKOFF_MIN_MS : Math.min(backoff * 2, BACKOFF_MAX_MS);
@@ -124,6 +130,7 @@ public class HubService extends Service {
         SecretStore.importPending(this, new File(getFilesDir(), "secrets.in"));
         boolean active = HubConfig.isActive(readSmall(new File(getFilesDir(), "mode")));
         Log.i(TAG, "hq mode: " + (active ? "active (daemon, relays)" : "standby (web only)"));
+        getSystemService(NotificationManager.class).notify(NOTIFICATION_ID, notification(active));
         File lib = new File(getApplicationInfo().nativeLibraryDir, "libhq.so");
         File home = new File(getFilesDir(), "hqhome");
         home.mkdirs();

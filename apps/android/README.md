@@ -41,14 +41,19 @@ reserved. Switches that `hq` reads from the environment (`HQ_MCP_DEV_NO_AUTH`, `
 and non-secret settings such as chat ids belong in `files/hqhome/config.yaml`. The vault, config
 path, web token, bind address and port are applied after the credentials, so a credential cannot
 change them. A link, a directory or a file over 64 KiB at `secrets.in` is refused and removed
-without being read. `adb logcat -s HQHUB` shows the names imported, never a value.
+without being read. A push that stops half way leaves `files/secrets.tmp` holding plaintext; delete it
+and push again. Stored names that the rule no longer allows (from an older build) are dropped when
+`hq` starts. `adb logcat -s HQHUB` shows the names imported, never a value.
 
 `hq` starts as standby: the web app only, no relays and no scheduler. Write `active` into
-`files/mode` and restart `hq` to run `hq start all` instead; the notification then says so. Do that
+`files/mode` and restart `hq` to run `hq start all` instead; the notification then says so, and `adb
+logcat -s HQHUB` shows `hq mode`. Do that
 only on one machine at a time: a second daemon on a copy of the same data would poll the same bots
 and fire the same schedules.
 
-`check.sh` runs the parsing and file checks on a plain JDK and bans Java 9+ collection factories and
-string methods by name (Android 8 to 10 lack them). Set `ANDROID_JAR` to also compile every source
-against that platform's jar. That finds a misspelled Android API but not one added after SDK 26,
-the minimum. CI does both.
+`check.sh` runs the parsing and file checks on a plain JDK. The app is compiled with `javac --release 8`,
+so a Java 9+ API (collection factories, `String.repeat`, `Path.of`, ...) fails the build instead of
+crashing Android 8 to 10. Set `ANDROID_JAR` to also compile every source against that platform's
+jar. That finds a misspelled Android API but not one added after SDK 26, the minimum. CI does both.
+The service and the Keystore code have no automated test; the checks cover the logic moved into
+`HubConfig`.
