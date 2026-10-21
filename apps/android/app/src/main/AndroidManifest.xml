@@ -13,6 +13,7 @@
         <category android:name="android.intent.category.LAUNCHER"/>
       </intent-filter>
     </activity>
+    <activity android:name=".ShellActivity" android:exported="true" android:theme="@style/Theme.AgentHQ.Shell"/>
     <service android:name=".HubService" android:exported="false" android:foregroundServiceType="specialUse">
       <property android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
                 android:value="Local-first notes and tasks hub that serves only this device over loopback"/>

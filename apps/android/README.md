@@ -34,6 +34,21 @@ or higher. Install with `adb install -r`
 only. Without `-Phq.keystore` Gradle signs with its own debug key, which is fine for CI and for a
 throwaway emulator but cannot update a phone that already runs the app.
 
+## The native shell (in progress)
+
+`ShellActivity` is the Kotlin and Jetpack Compose app described by the mobile design (page 3): the same
+two bars on every main screen, five places (Notes, Tasks, a raised Chat button, Helpers, Inbox), Back
+from any place to Chat and then out. It is not the launcher screen yet; the WebView app (`MainActivity`)
+stays the way in until the places behind the bar are built. Open it with
+`adb shell am start -S -n example.hq.spike/.ShellActivity --es place chat --ei badge 3`.
+
+Sizes, colours and type come from the design's own stylesheet, one value for one value (dp are the
+design's px): `ui/theme/HqTheme.kt` holds the MTS tokens and type styles, `ui/shell/Icons.kt` the icons
+from the same SVG paths, `ui/shell/HqShell.kt` the bars. Clear Sans (Apache 2.0, `licenses/`) is bundled.
+`drawable-nodpi/hq_mark.png` is the mark embedded in the design. On a real phone the status and
+navigation bar insets replace the design's fixed 28 dp and 16 dp, so the bars can sit a few dp
+higher or lower than the board.
+
 ## Name, icon and notifications
 
 The launcher label is `AgentHQ` (the package id stays `example.hq.spike`, so an update keeps the data).

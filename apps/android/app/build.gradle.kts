@@ -103,7 +103,10 @@ kotlin {
 }
 
 dependencies {
-    // The Compose libraries join with the first Compose screen: they merge manifest entries and add dex, which
-    // this build must not do. The plugin and the compose build feature are on so that screen can start at once.
+    implementation(platform("androidx.compose:compose-bom:2026.03.01"))
+    implementation("androidx.compose.ui:ui")
+    implementation("androidx.compose.material3:material3")
+    implementation("androidx.activity:activity-compose:1.12.3")
+
     testImplementation("junit:junit:4.13.2")
 }
