@@ -4,7 +4,13 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.ui.text.style.TextOverflow
+import example.hq.spike.ui.chat.blocks.NoteRefs
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
@@ -34,9 +40,39 @@ private val FieldShape = RoundedCornerShape(24.dp)
 /** The message box with Send. While HQ writes, Send turns into Stop in the same place. Enter adds a line; only the button sends. */
 @Composable
 fun Composer(state: ChatUiState, actions: ChatActions) {
-    Row(
+    Column(
         Modifier.fillMaxWidth().background(Mts.Surface000).drawBehind { drawLine(Mts.Hairline, Offset.Zero, Offset(size.width, 0f), 1.dp.toPx()) }
             .padding(start = 8.dp, top = 8.dp, end = 8.dp, bottom = 16.dp),
+        verticalArrangement = Arrangement.spacedBy(6.dp),
+    ) {
+        if (state.contexts.isNotEmpty()) ContextChips(state.contexts, actions.onRemoveContext)
+        MessageRow(state, actions)
+    }
+}
+
+/** What is attached to the next message. HQ reads only what is shown here. */
+@Composable
+private fun ContextChips(paths: List<String>, onRemove: (String) -> Unit) {
+    Row(Modifier.horizontalScroll(rememberScrollState()).padding(horizontal = 8.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        paths.forEach { path ->
+            Row(
+                Modifier.heightIn(min = 36.dp).widthIn(max = 220.dp).clip(CircleShape).background(Mts.Surface200).border(1.dp, Mts.Hairline, CircleShape).padding(start = 12.dp),
+                horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Icon(HqIcons.Notes, null, Modifier.size(16.dp), tint = Mts.Ink)
+                Text(NoteRefs.title(path), style = HqType.ToolLine, color = Mts.Ink, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f, fill = false))
+                Box(Modifier.size(36.dp).clickable(role = Role.Button, onClickLabel = "Remove ${NoteRefs.title(path)}") { onRemove(path) }, contentAlignment = Alignment.Center) {
+                    Icon(HqIcons.Close, null, Modifier.size(16.dp), tint = Mts.Ink)
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun MessageRow(state: ChatUiState, actions: ChatActions) {
+    Row(
+        Modifier.fillMaxWidth(),
         horizontalArrangement = Arrangement.spacedBy(4.dp), verticalAlignment = Alignment.Bottom,
     ) {
         BasicTextField(

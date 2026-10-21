@@ -51,6 +51,9 @@ data class StoredMessage(
     }
 }
 
+/** A note's text as saved, front matter included. [truncated] when hq cut a very long note. */
+data class NoteBody(val path: String, val content: String, val truncated: Boolean)
+
 data class ThreadList(val threads: List<ChatThread>, val running: Set<String>)
 
 private fun JSONArray?.toToolSteps(): List<ToolStep> {

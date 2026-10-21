@@ -36,6 +36,12 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.unit.dp
 import example.hq.spike.data.ToolStep
+import example.hq.spike.ui.chat.blocks.Attachment
+import example.hq.spike.ui.chat.blocks.BlockActions
+import example.hq.spike.ui.chat.blocks.FileCardView
+import example.hq.spike.ui.chat.blocks.ReplyBody
+import example.hq.spike.ui.chat.blocks.ReplyCards
+import example.hq.spike.ui.chat.blocks.StepCards
 import example.hq.spike.ui.shell.HqIcons
 import example.hq.spike.ui.theme.HqType
 import example.hq.spike.ui.theme.Mts
@@ -45,13 +51,14 @@ private val ReplyShape = RoundedCornerShape(topStart = 6.dp, topEnd = 20.dp, bot
 private const val USER_BUBBLE_SHARE = 0.84f
 
 @Composable
-fun UserBubble(text: String, sending: Boolean) {
+fun UserBubble(text: String, sending: Boolean, files: List<Attachment> = emptyList(), onOpenFile: (Attachment) -> Unit = {}) {
     BoxWithConstraints(Modifier.fillMaxWidth()) {
-        Text(
-            text, style = HqType.Body, color = Mts.Ink,
-            modifier = Modifier.align(Alignment.CenterEnd).widthIn(max = maxWidth * USER_BUBBLE_SHARE).alpha(if (sending) 0.7f else 1f)
-                .background(Mts.Surface200, UserShape).padding(horizontal = 16.dp, vertical = 12.dp),
-        )
+        Column(Modifier.align(Alignment.CenterEnd).widthIn(max = maxWidth * USER_BUBBLE_SHARE).alpha(if (sending) 0.7f else 1f), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            if (text.isNotBlank()) {
+                Text(text, style = HqType.Body, color = Mts.Ink, modifier = Modifier.align(Alignment.End).background(Mts.Surface200, UserShape).padding(horizontal = 16.dp, vertical = 12.dp))
+            }
+            files.forEach { FileCardView(it, { onOpenFile(it) }) }
+        }
     }
 }
 
@@ -65,9 +72,12 @@ private fun ReplyFrame(content: @Composable () -> Unit) {
 }
 
 @Composable
-fun ReplyBubble(text: String, tools: List<ToolStep>) = ReplyFrame {
-    if (text.isNotBlank()) Text(markdown(text), style = HqType.Body, color = Mts.Ink)
-    if (tools.isNotEmpty()) ToolLine(tools)
+fun ReplyBubble(message: UiMessage, blocks: BlockActions) = ReplyFrame {
+    if (message.text.isNotBlank()) ReplyBody(message.text, blocks)
+    val cards = remember(message.tools) { StepCards.of(message.tools) }
+    message.files.forEach { FileCardView(it, { blocks.onOpenFile(it) }, Modifier.padding(top = 12.dp)) }
+    ReplyCards(cards, message.createdAt.let { if (it.isBlank()) "just now" else ChatTime.since(it) }, blocks, Modifier.padding(top = 12.dp))
+    if (message.tools.isNotEmpty()) ToolLine(message.tools)
 }
 
 /** The collapsed "What I did" line under a finished reply; one tap shows the steps in plain words. */
@@ -103,7 +113,7 @@ fun Spinner(size: Int, color: androidx.compose.ui.graphics.Color = Mts.BrandBlue
 
 /** The reply being written: what HQ is doing, its steps so far, and the text as it arrives. */
 @Composable
-fun LiveReplyBubble(live: LiveReply) = ReplyFrame {
+fun LiveReplyBubble(live: LiveReply, blocks: BlockActions) = ReplyFrame {
     Row(horizontalArrangement = Arrangement.spacedBy(10.dp), verticalAlignment = Alignment.CenterVertically) {
         Spinner(18)
         Text(live.headline, style = HqType.BodySmBold, color = Mts.Ink)
@@ -113,7 +123,7 @@ fun LiveReplyBubble(live: LiveReply) = ReplyFrame {
             Modifier.padding(top = 8.dp).drawBehind { drawRect(Mts.Hairline, size = Size(2.dp.toPx(), size.height)) }.padding(start = 6.dp),
         ) { live.steps.forEach { Step(it.label, it.done) } }
     }
-    if (live.text.isNotBlank()) Text(markdown(live.text), style = HqType.Body, color = Mts.Ink, modifier = Modifier.padding(top = 8.dp))
+    if (live.text.isNotBlank()) ReplyBody(live.text, blocks, Modifier.padding(top = 8.dp))
 }
 
 @Composable

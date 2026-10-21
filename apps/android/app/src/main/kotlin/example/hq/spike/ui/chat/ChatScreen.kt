@@ -22,6 +22,7 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -36,7 +37,11 @@ import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import example.hq.spike.R
+import example.hq.spike.ui.chat.blocks.BlockActions
+import example.hq.spike.ui.chat.blocks.ChipState
 import example.hq.spike.ui.shell.HqIcons
+import example.hq.spike.ui.shell.LocalGoTo
+import example.hq.spike.ui.shell.Place
 import example.hq.spike.ui.theme.HqType
 import example.hq.spike.ui.theme.Mts
 import kotlinx.coroutines.delay
@@ -56,10 +61,42 @@ fun ChatScreen(state: ChatUiState, actions: ChatActions) {
     }
 }
 
-/** What sits over the whole shell, bars included: the chats sheet and the line at the bottom. */
+/** Chip and tap behaviour for rich blocks, built from the chat state. */
+@Composable
+private fun rememberBlockActions(state: ChatUiState, actions: ChatActions): BlockActions {
+    val go = LocalGoTo.current
+    return remember(state.openingNote, state.missingNotes, actions) {
+        BlockActions(
+            onOpenNote = actions.onOpenNote, onOpenChart = actions.onOpenChart, onOpenTable = actions.onOpenTable,
+            onOpenTasks = { go(Place.Tasks) }, onCopied = { actions.onNotice("Copied") }, onOpenFile = actions.onOpenFile,
+            chipState = { path ->
+                when {
+                    path in state.missingNotes -> ChipState.Missing
+                    path == state.openingNote -> ChipState.Opening
+                    else -> ChipState.Ready
+                }
+            },
+        )
+    }
+}
+
+/** What sits over the whole shell, bars included: pages, the note sheet, the chats sheet and the line at the bottom. */
 @Composable
 fun ChatOverlays(state: ChatUiState, actions: ChatActions) {
+    val go = LocalGoTo.current
+    val blocks = rememberBlockActions(state, actions)
     Box(Modifier.fillMaxSize()) {
+        when (val page = state.page) {
+            is Page.Chart -> ChartPage(page.spec, actions.onClosePage)
+            is Page.Table -> TablePage(page, actions.onClosePage) { actions.onNotice("Copied the table") }
+            null -> {}
+        }
+        state.note?.let { sheet ->
+            NoteSheetView(
+                sheet, blocks, actions.onCloseNote, onOpenInNotes = { actions.onCloseNote(); go(Place.Notes) },
+                onAsk = { actions.onAskAboutNote(sheet.path) }, onCopied = { actions.onNotice("Copied") },
+            )
+        }
         if (state.chatsOpen) ChatsSheet(state, actions)
         state.notice?.let { Snack(it, actions, Modifier.align(Alignment.BottomCenter)) }
     }
@@ -95,14 +132,15 @@ private fun NameRow(title: String, onClick: () -> Unit) {
 private fun Conversation(state: ChatUiState, actions: ChatActions) {
     // The list runs from the bottom, so the newest item is first and the failed card sits under a half-written reply.
     val newestFirst = state.messages.asReversed()
+    val blocks = rememberBlockActions(state, actions)
     LazyColumn(
         Modifier.fillMaxSize(), reverseLayout = true, contentPadding = PaddingValues(start = 16.dp, top = 12.dp, end = 16.dp, bottom = 8.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp, Alignment.Bottom),
     ) {
         if (state.failed && state.live == null) item(key = "failed") { FailedCard(actions.onRetry) }
-        state.live?.let { item(key = "live") { LiveReplyBubble(it) } }
+        state.live?.let { item(key = "live") { LiveReplyBubble(it, blocks) } }
         items(newestFirst, key = { it.id }) { m ->
-            if (m.speaker == Speaker.User) UserBubble(m.text, m.sending) else ReplyBubble(m.text, m.tools)
+            if (m.speaker == Speaker.User) UserBubble(m.text, m.sending, m.files, actions.onOpenFile) else ReplyBubble(m, blocks)
         }
     }
 }

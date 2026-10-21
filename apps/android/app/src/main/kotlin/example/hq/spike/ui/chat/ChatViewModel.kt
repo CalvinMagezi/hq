@@ -1,14 +1,24 @@
 package example.hq.spike.ui.chat
 
 import android.app.Application
+import android.content.ActivityNotFoundException
 import android.content.Context
+import android.content.Intent
+import androidx.core.content.FileProvider
+import java.io.File
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import example.hq.spike.data.ChatEvent
 import example.hq.spike.data.HqServices
 import example.hq.spike.data.HqStatus
 import example.hq.spike.data.HqUnavailable
+import example.hq.spike.data.NoteNotFound
 import example.hq.spike.data.StoredMessage
+import example.hq.spike.ui.chat.blocks.Attachment
+import example.hq.spike.ui.chat.blocks.Block
+import example.hq.spike.ui.chat.blocks.ChartSpec
+import example.hq.spike.ui.chat.blocks.NoteRefs
+import example.hq.spike.ui.chat.blocks.StepCards
 import java.util.UUID
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
@@ -31,6 +41,15 @@ class ChatActions(
     val onArchive: (String) -> Unit = {},
     val onUndo: () -> Unit = {},
     val onDismissNotice: () -> Unit = {},
+    val onNotice: (String) -> Unit = {},
+    val onOpenNote: (String) -> Unit = {},
+    val onCloseNote: () -> Unit = {},
+    val onAskAboutNote: (String) -> Unit = {},
+    val onOpenChart: (ChartSpec) -> Unit = {},
+    val onOpenTable: (Block.Table) -> Unit = {},
+    val onClosePage: () -> Unit = {},
+    val onOpenFile: (Attachment) -> Unit = {},
+    val onRemoveContext: (String) -> Unit = {},
 )
 
 class ChatViewModel(app: Application) : AndroidViewModel(app) {
@@ -42,6 +61,9 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
 
     /** Client ids of the questions this phone sent, so their saved copies can replace the local ones. */
     private val pending = mutableSetOf<String>()
+
+    /** What was attached to each question in flight, so a send that fails puts the chips back. */
+    private val sentContexts = mutableMapOf<String, List<String>>()
     private var lastQuestion: String? = null
     private var archiving: Pair<String, Job>? = null
     private var frozen = false
@@ -51,6 +73,11 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
         onOpenChats = ::openChats, onCloseChats = { _state.update { it.copy(chatsOpen = false) } }, onNewChat = { newChat() },
         onOpenChat = ::openThread, onSearchChats = { q -> _state.update { it.copy(chatSearch = q) } },
         onArchive = ::archive, onUndo = ::undoArchive, onDismissNotice = { _state.update { it.copy(notice = null) } },
+        onNotice = { text -> _state.update { it.copy(notice = Notice(text)) } },
+        onOpenNote = ::openNote, onCloseNote = { _state.update { it.copy(note = null) } }, onAskAboutNote = ::askAbout,
+        onOpenChart = { spec -> _state.update { it.copy(page = Page.Chart(spec)) } }, onOpenTable = ::openTable,
+        onClosePage = { _state.update { it.copy(page = null) } }, onOpenFile = ::openFile,
+        onRemoveContext = { path -> _state.update { it.copy(contexts = it.contexts - path) } },
     )
 
     init {
@@ -70,6 +97,7 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
         _state.update { ChatReducer.apply(it, event, pending) }
         when (event) {
             is ChatEvent.Rejected -> if (event.clientId in pending) restore(event.clientId!!, event.reason)
+            is ChatEvent.TurnStart -> event.clientId?.let { sentContexts.remove(it) }
             is ChatEvent.TurnEnd -> if (event.threadId == _state.value.threadId) viewModelScope.launch { refreshChats() }
             is ChatEvent.Lagged -> _state.value.threadId?.let { id -> viewModelScope.launch { loadMessages(id) } }
             else -> {}
@@ -90,9 +118,10 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
         pending += clientId
         lastQuestion = text
         val kept = if (replaceFrom == null) s.messages else s.messages.takeWhile { it.id != replaceFrom }
-        _state.update { it.copy(messages = kept + UiMessage(clientId, Speaker.User, text, sending = true), draft = "", failed = false) }
+        sentContexts[clientId] = s.contexts
+        _state.update { it.copy(messages = kept + UiMessage(clientId, Speaker.User, text, sending = true), draft = "", failed = false, contexts = emptyList()) }
         drafts.edit().remove(draftKey(s.threadId)).apply()
-        if (!services.connection.sendChat(text, s.threadId, clientId, replaceFrom)) restore(clientId, "Not connected to HQ. Your message is back in the box.")
+        if (!services.connection.sendChat(withContext(text, s.contexts), s.threadId, clientId, replaceFrom)) restore(clientId, "Not connected to HQ. Your message is back in the box.")
     }
 
     /** A send that did not go through: the text returns to the field, with the reason. */
@@ -100,7 +129,7 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
         pending -= clientId
         _state.update { s ->
             val text = s.messages.firstOrNull { it.id == clientId }?.text ?: s.draft
-            s.copy(messages = s.messages.filter { it.id != clientId }, draft = text, notice = Notice(reason))
+            s.copy(messages = s.messages.filter { it.id != clientId }, draft = text, notice = Notice(reason), contexts = sentContexts.remove(clientId) ?: s.contexts)
         }
     }
 
@@ -136,7 +165,60 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
         _state.update { if (it.threadId == id && !it.running) it.copy(messages = shown) else it }
     }
 
-    private fun toUi(m: StoredMessage) = UiMessage(m.id, if (m.role == "user") Speaker.User else Speaker.Reply, m.content, m.tools)
+    private fun toUi(m: StoredMessage) = UiMessage.saved(m.id, if (m.role == "user") Speaker.User else Speaker.Reply, m.content, m.tools, m.createdAt)
+
+    /** Fetches the note first and opens the sheet when it is in hand, so a chip can say "Opening…" and a missing note never flashes an empty sheet. */
+    private fun openNote(path: String) {
+        val s = _state.value
+        if (path in s.missingNotes) { _state.update { it.copy(notice = Notice(NOTE_GONE)) }; return }
+        if (s.openingNote != null) return
+        _state.update { it.copy(openingNote = path) }
+        viewModelScope.launch {
+            try {
+                val body = client.note(path)
+                _state.update { st ->
+                    val writer = st.messages.lastOrNull { m -> StepCards.of(m.tools).written.any { it.path == body.path } }
+                    val age = writer?.let { if (it.createdAt.isBlank()) "just now" else ChatTime.since(it.createdAt) }
+                    val sheet = NoteSheet(body.path, NoteRefs.title(body.path), NoteRefs.folderTrail(body.path), body.content, body.truncated, age)
+                    st.copy(openingNote = null, note = sheet)
+                }
+            } catch (e: NoteNotFound) {
+                _state.update { it.copy(openingNote = null, missingNotes = it.missingNotes + path, notice = Notice(NOTE_GONE)) }
+            } catch (e: HqUnavailable) {
+                _state.update { it.copy(openingNote = null, notice = Notice("Could not open the note. HQ is not answering.")) }
+            }
+        }
+    }
+
+    /** The note joins the next message as a chip; HQ reads only what is attached. */
+    private fun askAbout(path: String) {
+        _state.update { it.copy(contexts = if (path in it.contexts) it.contexts else it.contexts + path, note = null) }
+    }
+
+    /** Fetches the file to the app's cache and hands it to whichever app opens that kind of file. */
+    private fun openFile(file: Attachment) {
+        viewModelScope.launch {
+            try {
+                val dest = File(getApplication<Application>().cacheDir, "chat-files/${file.name.replace('/', '_')}")
+                client.download(file.path, dest)
+                val app = getApplication<Application>()
+                val uri = FileProvider.getUriForFile(app, "${app.packageName}.files", dest)
+                val view = Intent(Intent.ACTION_VIEW).setDataAndType(uri, file.mime.ifBlank { "*/*" })
+                    .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_ACTIVITY_NEW_TASK)
+                app.startActivity(view)
+            } catch (e: HqUnavailable) {
+                _state.update { it.copy(notice = Notice("Could not fetch the file. HQ is not answering.")) }
+            } catch (e: ActivityNotFoundException) {
+                _state.update { it.copy(notice = Notice("No app on this phone can open that file.")) }
+            }
+        }
+    }
+
+    private fun openTable(table: Block.Table) {
+        val title = _state.value.title
+        val caption = "$title · ${table.rows.size} rows · ${table.headers.size} columns"
+        _state.update { it.copy(page = Page.Table(table, caption)) }
+    }
 
     private fun openChats() {
         _state.update { it.copy(chatsOpen = true, chatSearch = "") }
@@ -194,5 +276,6 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
         const val DRAFT_PREFS = "chat_drafts"
         const val NEW_CHAT_KEY = "new"
         const val UNDO_MS = 5_000L
+        const val NOTE_GONE = "That note is not in your notes any more"
     }
 }

@@ -31,6 +31,8 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.saveable.rememberSaveable
@@ -75,6 +77,9 @@ private val RaisedLift = 10.dp
  * The same two bars on every main screen. Each place keeps where the user was; Back from any other
  * place goes to Chat, and Back from Chat leaves the app. The bottom bar steps aside while the keyboard is up.
  */
+/** Lets a screen or an overlay send the shell to another place, such as a note card going to Notes. */
+val LocalGoTo = staticCompositionLocalOf<(Place) -> Unit> { {} }
+
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
 fun HqShell(
@@ -92,13 +97,15 @@ fun HqShell(
         HqStatus.Live -> "Live" to Mts.BrandGreen
         is HqStatus.Starting -> "Starting HQ \u00b7 ${status.seconds} s" to Mts.Amber
     }
-    Box(Modifier.fillMaxSize().background(Mts.Surface000)) {
-        Column(Modifier.fillMaxSize().statusBarsPadding()) {
-            TopBar(title = current.label, status = statusText, statusColor = statusColor, onSearch = onSearch, onSettings = onSettings)
-            Box(Modifier.weight(1f).fillMaxWidth().imePadding()) { content(current) }
-            if (!WindowInsets.isImeVisible) BottomBar(current, inboxBadge) { current = it }
+    CompositionLocalProvider(LocalGoTo provides { current = it }) {
+        Box(Modifier.fillMaxSize().background(Mts.Surface000)) {
+            Column(Modifier.fillMaxSize().statusBarsPadding()) {
+                TopBar(title = current.label, status = statusText, statusColor = statusColor, onSearch = onSearch, onSettings = onSettings)
+                Box(Modifier.weight(1f).fillMaxWidth().imePadding()) { content(current) }
+                if (!WindowInsets.isImeVisible) BottomBar(current, inboxBadge) { current = it }
+            }
+            overlay()
         }
-        overlay()
     }
 }
 

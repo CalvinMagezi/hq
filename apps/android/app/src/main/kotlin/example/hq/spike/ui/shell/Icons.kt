@@ -29,6 +29,29 @@ object HqIcons {
         "m21.854 2.147-10.94 10.939",
     )
     val Spark = outline("spark", "M12 3l1.9 4.7L19 9.6l-5.1 1.9L12 16l-1.9-4.5L5 9.6l5.1-1.9z")
+    val BarChart = outline("bar-chart", "M18 20V10", "M12 20V4", "M6 20v-6")
+    val Expand = outline("expand", "m15 3 6 0 0 6", "M21 3l-7 7", "M9 21H3v-6", "M3 21l7-7")
+    val Copy = outline(
+        "copy", "M10 8h10a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H10a2 2 0 0 1-2-2V10a2 2 0 0 1 2-2z",
+        "M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2",
+    )
+    val Code = outline("code", "m16 18 6-6-6-6", "m8 6-6 6 6 6")
+    val Image = outline(
+        "image", "M5 3h14a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2z", "M9 8a1 1 0 1 0 0 2a1 1 0 1 0 0-2",
+        "m21 15-3.086-3.086a2 2 0 0 0-2.828 0L6 21",
+    )
+    val External = outline("external", "M15 3h6v6", "M10 14 21 3", "M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6")
+    val ChevronRight = outline("chevron-right", "m9 18 6-6-6-6")
+    val ArrowBack = outline("arrow-back", "m12 19-7-7 7-7", "M19 12H5")
+    val MoreVertical = outline("more-vertical", "M12 11a1 1 0 1 0 0 2a1 1 0 1 0 0-2", "M12 4a1 1 0 1 0 0 2a1 1 0 1 0 0-2", "M12 18a1 1 0 1 0 0 2a1 1 0 1 0 0-2")
+    val Table = outline("table", "M5 3h14a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2z", "M3 9h18", "M3 15h18", "M9 3v18")
+    val CheckSmall = outline("check-small", "M20 6 9 17l-5-5")
+    val File = outline("file", "M15 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7Z", "M14 2v4a2 2 0 0 0 2 2h4")
+    val Camera = outline(
+        "camera", "M14.5 4h-5L7 7H4a2 2 0 0 0-2 2v9a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2V9a2 2 0 0 0-2-2h-3l-2.5-3z",
+        "M12 10a3 3 0 1 0 0 6a3 3 0 1 0 0-6",
+    )
+    val Close = outline("close", "M18 6 6 18", "m6 6 12 12")
     val Check = outline("check", "M20 6 9 17l-5-5")
     val Plus = outline("plus", "M5 12h14", "M12 5v14")
     val Warning = outline(

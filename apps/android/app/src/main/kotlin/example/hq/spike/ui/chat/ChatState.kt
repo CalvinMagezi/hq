@@ -2,6 +2,10 @@ package example.hq.spike.ui.chat
 
 import example.hq.spike.data.ChatEvent
 import example.hq.spike.data.ToolStep
+import example.hq.spike.ui.chat.blocks.Attachment
+import example.hq.spike.ui.chat.blocks.Attachments
+import example.hq.spike.ui.chat.blocks.Block
+import example.hq.spike.ui.chat.blocks.ChartSpec
 import java.time.Duration
 import java.time.Instant
 import java.time.ZoneId
@@ -16,7 +20,18 @@ data class UiMessage(
     val tools: List<ToolStep> = emptyList(),
     /** True for a question shown at once, before the server has saved it. */
     val sending: Boolean = false,
-)
+    /** When the server saved it; blank for a reply that just finished in this session. */
+    val createdAt: String = "",
+    val files: List<Attachment> = emptyList(),
+) {
+    companion object {
+        /** A saved message: the attachment marker the server appends is split off into [files]. */
+        fun saved(id: String, speaker: Speaker, content: String, tools: List<ToolStep> = emptyList(), createdAt: String = ""): UiMessage {
+            val (text, files) = Attachments.split(content)
+            return UiMessage(id, speaker, text, tools, createdAt = createdAt, files = files)
+        }
+    }
+}
 
 data class LiveStep(val step: ToolStep, val done: Boolean) {
     val id: String get() = step.id
@@ -45,6 +60,14 @@ data class ChatUiState(
     val chatsOpen: Boolean = false,
     val chats: List<ChatRow> = emptyList(),
     val chatSearch: String = "",
+    /** A chart or a table on its own page, over the whole shell. */
+    val page: Page? = null,
+    val note: NoteSheet? = null,
+    /** The note being fetched after a tap, so its chip can say "Opening…". */
+    val openingNote: String? = null,
+    val missingNotes: Set<String> = emptySet(),
+    /** Vault paths attached to the next message, shown as chips above the field. */
+    val contexts: List<String> = emptyList(),
 ) {
     val running: Boolean get() = live != null
     val canSend: Boolean get() = draft.isNotBlank() && connected && !running
@@ -53,6 +76,14 @@ data class ChatUiState(
         const val NEW_CHAT = "New chat"
     }
 }
+
+sealed interface Page {
+    data class Chart(val spec: ChartSpec) : Page
+    data class Table(val table: Block.Table, val caption: String) : Page
+}
+
+/** A note open in the sheet. [savedAge] is "just now", "3m ago" and so on when a reply in this chat wrote it, else null. */
+data class NoteSheet(val path: String, val title: String, val trail: String, val body: String, val truncated: Boolean, val savedAge: String?)
 
 /** A line at the bottom of the screen, with an optional action word (Undo). */
 data class Notice(val text: String, val action: String? = null)
@@ -69,7 +100,7 @@ object ChatReducer {
         val mine = e.clientId != null && e.clientId in pending
         val here = e.threadId != null && (e.threadId == state.threadId || (state.threadId == null && mine))
         if (!here) return state
-        val saved = e.userMessage?.let { UiMessage(it.id, Speaker.User, it.content) }
+        val saved = e.userMessage?.let { UiMessage.saved(it.id, Speaker.User, it.content) }
         val messages = when {
             mine && saved != null -> state.messages.map { if (it.id == e.clientId) saved else it }
             saved != null && state.messages.none { it.id == saved.id } -> state.messages + saved
@@ -158,8 +189,26 @@ object ChatTime {
         }
     }
 
+    /** "just now", "3m ago", "2h ago", "yesterday", "4d ago"; blank when the time is not known. */
+    fun since(at: String, now: Instant = Instant.now(), zone: ZoneId = ZoneId.systemDefault()): String {
+        val then = parse(at) ?: return ""
+        val minutes = Duration.between(then, now).toMinutes()
+        return when {
+            minutes < 1 -> "just now"
+            minutes < MINUTES_PER_HOUR -> "${minutes}m ago"
+            minutes < MINUTES_PER_HOUR * HOURS_PER_DAY -> "${minutes / MINUTES_PER_HOUR}h ago"
+            then.atZone(zone).toLocalDate() == now.atZone(zone).toLocalDate().minusDays(1) -> "yesterday"
+            else -> "${minutes / (MINUTES_PER_HOUR * HOURS_PER_DAY)}d ago"
+        }
+    }
+
     private fun parse(value: String): Instant? = try { Instant.parse(value) } catch (e: DateTimeParseException) { null }
 
     private const val WEEK_DAYS = 7L
     private const val MINUTES_PER_HOUR = 60L
+    private const val HOURS_PER_DAY = 24L
 }
+
+/** The server strips a leading `<hq-context>` block from the saved copy; the model still reads it. */
+internal fun withContext(text: String, notes: List<String>): String =
+    if (notes.isEmpty()) text else "<hq-context>The user attached these notes. Read each one before you answer: ${notes.joinToString(", ")}</hq-context>\n\n$text"
