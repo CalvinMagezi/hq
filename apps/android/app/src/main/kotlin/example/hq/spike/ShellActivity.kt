@@ -19,6 +19,11 @@ import example.hq.spike.ui.shell.LocalGoTo
 import example.hq.spike.ui.notes.NotesViewModel
 import example.hq.spike.ui.notes.NotesUi
 import example.hq.spike.ui.notes.NotesOverlays
+import example.hq.spike.ui.inbox.InboxDetails
+import example.hq.spike.ui.inbox.InboxScreen
+import example.hq.spike.ui.inbox.InboxUi
+import example.hq.spike.ui.inbox.InboxViewModel
+import example.hq.spike.ui.inbox.inboxFixture
 import example.hq.spike.ui.notes.NotesHome
 import example.hq.spike.ui.notes.notesFixture
 import example.hq.spike.ui.chat.ContextRef
@@ -40,6 +45,7 @@ import example.hq.spike.ui.theme.HqTheme
 class ShellActivity : ComponentActivity() {
     private val chat: ChatViewModel by viewModels()
     private val notes: NotesViewModel by viewModels()
+    private val inbox: InboxViewModel by viewModels()
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -48,17 +54,20 @@ class ShellActivity : ComponentActivity() {
             statusBarStyle = SystemBarStyle.dark(Color.TRANSPARENT),
             navigationBarStyle = SystemBarStyle.dark(Color.TRANSPARENT),
         )
-        val start = intent.getStringExtra("place")?.let { name -> Place.entries.firstOrNull { it.name.equals(name, true) } } ?: if (intent.getStringExtra("fixture")?.startsWith("n-") == true) Place.Notes else Place.Chat
+        val start = intent.getStringExtra("place")?.let { name -> Place.entries.firstOrNull { it.name.equals(name, true) } } ?: if (intent.getStringExtra("fixture")?.startsWith("n-") == true) Place.Notes else if (intent.getStringExtra("fixture")?.startsWith("i-") == true) Place.Inbox else Place.Chat
         val badge = intent.getIntExtra("badge", 0)
         val fixtureName = intent.getStringExtra("fixture")
         val notesFixture = notesFixture(fixtureName)
-        val fixture = chatFixture(fixtureName) ?: notesFixture?.let { ChatUiState() }
+        val inboxFixture = inboxFixture(fixtureName)
+        val fixture = chatFixture(fixtureName) ?: (notesFixture ?: inboxFixture)?.let { ChatUiState() }
         val services = HqServices.get(this)
+        inboxFixture?.let(inbox::freeze)
         if (notesFixture != null) notes.freeze(notesFixture) else fixture?.let(chat::freeze)
         setContent {
             val status by services.status.collectAsStateWithLifecycle()
             val chatState by chat.state.collectAsStateWithLifecycle()
             val notesState by notes.state.collectAsStateWithLifecycle()
+            val inboxState by inbox.state.collectAsStateWithLifecycle()
             val offlineSince = chatState.offlineSince
             val now by produceState(System.currentTimeMillis(), offlineSince) {
                 value = System.currentTimeMillis()
@@ -72,13 +81,14 @@ class ShellActivity : ComponentActivity() {
             }
             HqTheme {
                 HqShell(
-                    startAt = start, inboxBadge = badge, status = shown,
+                    startAt = start, inboxBadge = if (badge > 0) badge else inboxState.shownNeeds.size, status = shown,
                     onSearch = { notes.actions.onOpenSearch() },
-                    overlay = { ShellOverlays(chatState, notesState) },
+                    overlay = { ShellOverlays(chatState, notesState, inboxState) },
                 ) { place ->
                     when (place) {
                         Place.Chat -> ChatScreen(chatState, chat.actions)
                         Place.Notes -> NotesPlace(notesState)
+                        Place.Inbox -> InboxPlace(inboxState)
                         else -> NotBuilt(place)
                     }
                 }
@@ -92,9 +102,15 @@ class ShellActivity : ComponentActivity() {
         NotesHome(notesState, notes.actions, onAskHq = { go(Place.Chat); chat.actions.onDraft("Write me a note about ") })
     }
 
+    @androidx.compose.runtime.Composable
+    private fun InboxPlace(inboxState: InboxUi) {
+        val go = LocalGoTo.current
+        InboxScreen(inboxState, inbox.actions, onTakeLook = { go(Place.Helpers) })
+    }
+
     /** What sits over the whole shell: Notes pages first (they cover the bars), then Chat's sheets and pages. */
     @androidx.compose.runtime.Composable
-    private fun ShellOverlays(chatState: ChatUiState, notesState: NotesUi) {
+    private fun ShellOverlays(chatState: ChatUiState, notesState: NotesUi, inboxState: InboxUi) {
         val go = LocalGoTo.current
         NotesOverlays(notesState, notes.actions) { items ->
             notes.closeAll()
@@ -102,6 +118,7 @@ class ShellActivity : ComponentActivity() {
             go(Place.Chat)
         }
         ChatOverlays(chatState, chat.actions) { path -> notes.openNote(path) }
+        inboxState.details?.let { InboxDetails(it, inboxState.answering[it.id], inboxState.offline, inbox.actions) }
     }
 
     private companion object {

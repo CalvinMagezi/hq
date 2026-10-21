@@ -116,6 +116,50 @@ class HqClient(private val token: () -> String, private val base: String = LOCAL
         }
     }
 
+    /** One row of the owner's inbox: an approval, a helper waiting, or an update. [actions] says what can be answered. */
+    data class InboxItem(
+        val id: String,
+        val kind: String,
+        val title: String,
+        val description: String,
+        val state: String,
+        val createdAt: String,
+        val link: String?,
+        val sourceTask: String?,
+        val valKind: String?,
+        val actions: List<String>,
+    )
+
+    data class InboxList(val items: List<InboxItem>, val unread: Int, val pending: Int)
+
+    /** The inbox, newest first. [state] is pending, approved, dismissed, resolved or history; null for all. */
+    suspend fun notifications(state: String?, limit: Int = 50): InboxList =
+        send(authed("/api/notifications?limit=$limit" + (state?.let { "&state=$it" } ?: "")).build()) { text ->
+            val o = JSONObject(text)
+            InboxList(
+                o.optJSONArray("notifications").objects().map { n ->
+                    val meta = n.optJSONObject("metadata")
+                    val extra = meta?.optJSONObject("extra")
+                    InboxItem(
+                        n.getString("id"), n.optString("kind", ""), n.optString("title", ""), n.optString("description", ""), n.optString("state", ""),
+                        n.optString("created_at", ""), meta?.optStringOrNull("link"), extra?.optStringOrNull("source_task"), extra?.optStringOrNull("val_kind"),
+                        n.optJSONArray("actions").strings(),
+                    )
+                },
+                o.optInt("unread_count", 0), o.optInt("pending_approvals_count", 0),
+            )
+        }
+
+    /** Records the owner's answer: approve, reject or dismiss. The thing that asked acts on it. */
+    suspend fun answerNotification(id: String, action: String) {
+        send(authed("/api/notifications/${java.net.URLEncoder.encode(id, "UTF-8")}/action").post(JSONObject().put("action", action).toString().toRequestBody("application/json".toMediaType())).build()) { }
+    }
+
+    /** Types keys such as enter or esc into a helper's terminal. 409 means it is no longer at a prompt. */
+    suspend fun sendSessionKeys(sessionId: String, keys: List<String>) {
+        send(authed("/api/harness-sessions/${java.net.URLEncoder.encode(sessionId, "UTF-8")}/send").post(JSONObject().put("keys", JSONArray(keys)).toString().toRequestBody("application/json".toMediaType())).build()) { }
+    }
+
     /** Notes in a list: path, title, a short preview, when it changed and whether it is pinned. */
     data class NoteItem(val path: String, val title: String, val preview: String, val mtime: String, val pinned: Boolean)
 
