@@ -2965,9 +2965,11 @@ dependencies = [
  "hq-relay",
  "hq-sandbox",
  "hq-tools",
+ "hq-tunnel",
  "hq-update",
  "hq-vault",
  "hq-web",
+ "libc",
  "mimalloc",
  "openssl-sys",
  "reqwest",
@@ -2984,6 +2986,7 @@ dependencies = [
  "url",
  "uuid",
  "windows-sys 0.61.2",
+ "zeroize",
 ]
 
 [[package]]

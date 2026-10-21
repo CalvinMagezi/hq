@@ -22,7 +22,18 @@ const HQ_KEY_FILES: &[&str] = &[
     ".hq/secret.key",
     ".hq/hq-signing.keychain-db",
     ".hq/signing.keychain",
+    // The private plane's secrets: the hub's key and the devices' preshared keys, and the userspace
+    // tunnel's key and join text (a preshared key).
+    ".hq/net/hub.key",
+    ".hq/net/peers.toml",
+    ".hq/tunnel/key",
+    ".hq/tunnel/join.conf",
 ];
+
+/// Directories whose contents decide who the machine trusts on the private plane (the hub's
+/// devices, the tunnel's hub and its serve and reach maps). A command may read them but not change
+/// them: a write through bash would move the trust root without the owner.
+const HQ_READONLY_DIRS: &[&str] = &[".hq/net", ".hq/tunnel"];
 
 /// Where this machine keeps the signing keys it uses to call a host's TCP gate, and the file that
 /// lists which keys may call this machine's gate.
@@ -96,6 +107,8 @@ pub struct SandboxContext {
     /// Files inside a writable root that must stay read-only (persistence
     /// targets such as `~/.ssh/authorized_keys`).
     pub readonly_files: Vec<PathBuf>,
+    /// Directories inside a writable root that must stay read-only, with everything in them.
+    pub readonly_dirs: Vec<PathBuf>,
     pub network: bool,
 }
 
@@ -119,6 +132,7 @@ impl SandboxContext {
             writable: existing_canonical(writable),
             masked_files: existing_canonical(masked_files(home.as_deref())),
             readonly_files: existing_canonical(readonly_files(home.as_deref())),
+            readonly_dirs: existing_canonical(readonly_dirs(home.as_deref())),
             network: settings.network,
         }
     }
@@ -155,6 +169,11 @@ fn readonly_files(home: Option<&Path>) -> Vec<PathBuf> {
         );
     }
     files
+}
+
+fn readonly_dirs(home: Option<&Path>) -> Vec<PathBuf> {
+    home.map(|home| HQ_READONLY_DIRS.iter().map(|rel| home.join(rel)).collect())
+        .unwrap_or_default()
 }
 
 fn is_authorized_keys(path: &Path) -> bool {
@@ -498,8 +517,8 @@ pub fn bwrap_args(ctx: &SandboxContext, command: &str) -> Vec<OsString> {
     for dir in &ctx.writable {
         args.extend(["--bind".into(), dir.into(), dir.into()]);
     }
-    for file in &ctx.readonly_files {
-        args.extend(["--ro-bind".into(), file.into(), file.into()]);
+    for path in ctx.readonly_dirs.iter().chain(&ctx.readonly_files) {
+        args.extend(["--ro-bind".into(), path.into(), path.into()]);
     }
     if !ctx.network {
         args.push("--unshare-net".into());
@@ -536,6 +555,14 @@ pub fn seatbelt_profile(ctx: &SandboxContext) -> String {
             .map(|p| format!("(literal {})", sbpl_string(p)))
             .collect();
         profile.push_str(&format!("(deny file-write* {})", files.join(" ")));
+    }
+    if !ctx.readonly_dirs.is_empty() {
+        let dirs: Vec<String> = ctx
+            .readonly_dirs
+            .iter()
+            .map(|p| format!("(subpath {})", sbpl_string(p)))
+            .collect();
+        profile.push_str(&format!("(deny file-write* {})", dirs.join(" ")));
     }
     if !ctx.masked_files.is_empty() {
         let masked: Vec<String> = ctx

@@ -38,6 +38,15 @@ pub enum NetAction {
     },
     /// Write the applier's input from peers.toml
     Apply,
+    /// Join the plane from this device as a userspace WireGuard peer (keygen, import, check, run, status)
+    #[cfg(all(unix, feature = "tunnel"))]
+    Tunnel {
+        /// Where the tunnel keeps its files (default: ~/.hq/tunnel)
+        #[arg(long, global = true, value_name = "DIR")]
+        tunnel_dir: Option<PathBuf>,
+        #[command(subcommand)]
+        action: super::net_tunnel::TunnelAction,
+    },
 }
 
 #[derive(Subcommand)]
@@ -175,7 +184,12 @@ mod unix {
     /// The plane's files and the applier's input belong to the user that runs HQ. As root they
     /// would land in root's home and the applier would be told to trust root-owned input.
     fn refuse_root(action: &NetAction) -> Result<()> {
-        let reads_only = matches!(action, NetAction::Status { .. });
+        let reads_only = match action {
+            NetAction::Status { .. } => true,
+            #[cfg(feature = "tunnel")]
+            NetAction::Tunnel { action, .. } => super::super::net_tunnel::reads_only(action),
+            _ => false,
+        };
         if !reads_only && hq_net::files::effective_uid() == 0 {
             bail!(
                 "run hq net as the user that runs HQ, not as root; it prints the steps that need sudo"
@@ -186,6 +200,10 @@ mod unix {
 
     pub fn run(action: NetAction, dir: Option<PathBuf>, spool: Option<PathBuf>) -> Result<()> {
         refuse_root(&action)?;
+        #[cfg(feature = "tunnel")]
+        if let NetAction::Tunnel { tunnel_dir, action } = action {
+            return super::super::net_tunnel::run(tunnel_dir, action);
+        }
         let store = Store::new(state_dir(dir));
         let spool = spool.unwrap_or_else(|| PathBuf::from(SPOOL_DIR));
         let mut out = std::io::stdout();
@@ -271,6 +289,8 @@ mod unix {
                 action: LinkAction::List,
             } => Ok(ops::link_list(&store, &mut out)?),
             NetAction::Apply => Ok(ops::apply(&store, &spool, &mut out)?),
+            #[cfg(feature = "tunnel")]
+            NetAction::Tunnel { .. } => unreachable!("handled before the plane's store is opened"),
             NetAction::Status { handshakes } => {
                 let net = store.require_net()?;
                 let text = read_handshakes(&net.interface, handshakes.as_deref())?;

@@ -11,6 +11,9 @@ path = "src/main.rs"
 default = ["discord", "telegram"]
 discord = ["hq-relay/discord"]
 telegram = ["hq-relay/telegram"]
+# `hq net tunnel`: this device as a userspace WireGuard peer (the phone app builds with it; a
+# server build leaves it out). Unix only: the dependency is not pulled on Windows.
+tunnel = ["dep:hq-tunnel", "dep:libc", "dep:zeroize"]
 
 [dependencies]
 hq-core = { workspace = true }
@@ -63,6 +66,10 @@ openssl-sys = { version = "*", features = ["vendored"] }
 [target.'cfg(unix)'.dependencies]
 hq-gate = { workspace = true }
 hq-net = { workspace = true }
+hq-tunnel = { workspace = true, optional = true }
+# Only the tunnel commands use these two: a terminal check, and wiping a key they print.
+libc = { version = "0.2", optional = true }
+zeroize = { version = "1", optional = true }
 
 [target.'cfg(windows)'.dependencies]
 windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_System_Console"] }

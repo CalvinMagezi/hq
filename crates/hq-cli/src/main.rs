@@ -745,6 +745,11 @@ fn init_tracing() {
     let args: Vec<String> = std::env::args().collect();
     let is_mcp = args.iter().any(|a| a == "mcp-serve");
     let is_chat = args.len() <= 1 || args.iter().any(|a| a == "chat");
+    // The tunnel peer runs as a child whose output nobody may be reading; it reports through its
+    // status file and event log, and a pipe nobody drains would block it once it filled.
+    let is_tunnel_run = args.get(1).is_some_and(|a| a == "net")
+        && args.iter().any(|a| a == "tunnel")
+        && args.iter().any(|a| a == "run");
     // `hq task` and `--json` print data for another program: logs go to stderr, quietly.
     let before_dashes = args.iter().skip(1).take_while(|a| *a != "--");
     let is_data = before_dashes.clone().take(4).any(|a| a == "task")
@@ -753,7 +758,7 @@ fn init_tracing() {
             .is_some_and(|a| a == "search" || a == "vault" || a == "web")
             && before_dashes.clone().any(|a| a == "--json"))
         || (args.get(1).is_some_and(|a| a == "web") && before_dashes.clone().any(|a| a == "link"));
-    let default_level = if is_chat {
+    let default_level = if is_chat || is_tunnel_run {
         "off"
     } else if is_data {
         "warn"
@@ -762,7 +767,7 @@ fn init_tracing() {
     };
     let filter =
         EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new(default_level));
-    if is_mcp || is_data {
+    if is_mcp || is_data || is_tunnel_run {
         fmt()
             .with_env_filter(filter)
             .with_target(false)
@@ -1261,6 +1266,38 @@ mod lite_rule_tests {
 mod net_args_tests {
     use super::Cli;
     use clap::Parser;
+
+    #[cfg(all(unix, feature = "tunnel"))]
+    #[test]
+    fn tunnel_commands_parse_and_nothing_takes_a_key_on_the_command_line() {
+        let parse = |args: &[&str]| {
+            let mut argv = vec!["hq", "net", "tunnel"];
+            argv.extend_from_slice(args);
+            Cli::try_parse_from(argv)
+        };
+        for ok in [
+            &["keygen"][..],
+            &["keygen", "--stdout"],
+            &["import", "--confirm-hub", "k"],
+            &["import", "join.txt"],
+            &["check"],
+            &["--tunnel-dir", "d", "run"],
+            &["run", "--tunnel-dir", "d"],
+            &["run", "--key-file", "k", "--no-control"],
+            &["status", "--json"],
+        ] {
+            assert!(parse(ok).is_ok(), "{ok:?}");
+        }
+        for bad in [
+            &["run", "--key", "x"][..],
+            &["run", "--private-key", "x"],
+            &["run", "--secret", "x"],
+            &["import", "--private-key", "x"],
+            &["keygen", "--private-key", "x"],
+        ] {
+            assert!(parse(bad).is_err(), "{bad:?}");
+        }
+    }
 
     #[test]
     fn peer_add_parses_a_keepalive_as_whole_seconds_and_leaves_the_range_to_add_peer() {

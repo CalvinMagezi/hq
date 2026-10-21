@@ -17,6 +17,8 @@ on:
       - "Cargo.toml"
       - "Cargo.lock"
       - "crates/*/Cargo.toml"
+      - "crates/hq-tunnel/**"
+      - "crates/hq-cli/src/commands/net_tunnel.rs"
   # Weekly, so a Rust-only change that breaks the Android build is found even when no pull request
   # touched the files above.
   schedule:
@@ -66,7 +68,8 @@ jobs:
           export AR_aarch64_linux_android="$tc/llvm-ar"
           export CARGO_TARGET_AARCH64_LINUX_ANDROID_LINKER="$tc/aarch64-linux-android${ANDROID_API}-clang"
           export PATH="$tc:$PATH"
-          cargo build -p hq-cli --profile release-small --target "$HQ_TARGET" --locked
+          # `tunnel`: the phone runs `hq net tunnel run` as a second process beside the hub.
+          cargo build -p hq-cli --profile release-small --target "$HQ_TARGET" --features tunnel --locked
 
       - name: Check the binary
         run: |

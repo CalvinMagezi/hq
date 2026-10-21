@@ -2,15 +2,15 @@
 //! event log. Neither is a network listener, and neither holds a key or any traffic. The status
 //! file is how a screen shows "what it did" without the app asking the peer anything.
 
+use crate::fsutil::{PRIVATE_FILE_MODE, private_file, temp_path, write_private_atomic};
 use serde::Serialize;
-use std::fs::{self, File, OpenOptions};
+use std::fs::{self, OpenOptions};
 use std::io::{self, Read, Write};
-use std::os::unix::fs::{OpenOptionsExt, PermissionsExt};
+use std::os::unix::fs::OpenOptionsExt;
 use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 pub const STATUS_VERSION: u32 = 1;
-const PRIVATE_FILE_MODE: u32 = 0o600;
 pub const MAX_EVENT_LOG_BYTES: u64 = 64 * 1024;
 
 #[derive(Debug, Clone, Serialize)]
@@ -44,37 +44,12 @@ pub fn unix_now() -> u64 {
         .map_or(0, |d| d.as_secs())
 }
 
-/// A fresh private file: any file already at the path is replaced, a link is never followed, and
-/// the mode is set on the open file rather than left to the umask.
-fn private_file(path: &Path) -> io::Result<File> {
-    let _ = fs::remove_file(path);
-    let file = OpenOptions::new()
-        .write(true)
-        .create_new(true)
-        .mode(PRIVATE_FILE_MODE)
-        .custom_flags(libc::O_NOFOLLOW)
-        .open(path)?;
-    file.set_permissions(fs::Permissions::from_mode(PRIVATE_FILE_MODE))?;
-    Ok(file)
-}
-
-/// `status.json` writes through `status.json.tmp`, so two files in one directory never share one.
-fn temp_path(path: &Path) -> PathBuf {
-    let mut name = path.file_name().unwrap_or_default().to_os_string();
-    name.push(".tmp");
-    path.with_file_name(name)
-}
-
 /// Writes `status` to `path` through a temporary file and a rename, so a reader never sees half.
 /// The directory must be private to the app: a rename into a shared one could be raced.
 pub fn write_atomic(path: &Path, status: &Status) -> io::Result<()> {
-    let tmp = temp_path(path);
-    let mut file = private_file(&tmp)?;
-    let text = serde_json::to_string_pretty(status).map_err(io::Error::other)?;
-    file.write_all(text.as_bytes())?;
-    file.write_all(b"\n")?;
-    file.sync_all()?;
-    fs::rename(&tmp, path)
+    let mut text = serde_json::to_string_pretty(status).map_err(io::Error::other)?;
+    text.push('\n');
+    write_private_atomic(path, text.as_bytes())
 }
 
 /// Lines of `unix-time text`, newest last. When the file passes its limit the older half goes.
@@ -146,6 +121,7 @@ impl EventLog {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::os::unix::fs::PermissionsExt;
 
     fn sample() -> Status {
         Status {

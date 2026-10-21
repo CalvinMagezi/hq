@@ -12,8 +12,17 @@ pub fn decode(text: &str) -> Option<[u8; KEY_BYTES]> {
     if text.len() != KEY_TEXT_LEN {
         return None;
     }
-    let bytes = STANDARD.decode(text).ok()?;
-    <[u8; KEY_BYTES]>::try_from(bytes).ok()
+    // Decoded into a buffer on the stack, so no heap copy of a private key is left behind. The
+    // buffer has room for one more group than the 32 bytes, which `decode_slice` needs.
+    let mut bytes = [0u8; KEY_BYTES + 3];
+    let written = STANDARD.decode_slice(text, &mut bytes).ok()?;
+    let key = (written == KEY_BYTES).then(|| {
+        let mut key = [0u8; KEY_BYTES];
+        key.copy_from_slice(&bytes[..KEY_BYTES]);
+        key
+    });
+    bytes.fill(0);
+    key
 }
 
 pub fn encode(bytes: &[u8; KEY_BYTES]) -> String {

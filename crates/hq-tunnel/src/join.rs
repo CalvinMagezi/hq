@@ -11,8 +11,9 @@ use std::net::{Ipv4Addr, SocketAddr, ToSocketAddrs};
 pub const MAX_JOIN_BYTES: usize = 4096;
 const HOST_PREFIX: &str = "/32";
 /// A keepalive keeps the radio busy; the join text is not trusted to set it to a second.
-const MIN_KEEPALIVE_SECS: u16 = 10;
-const MAX_KEEPALIVE_SECS: u16 = 300;
+use hq_net::keepalive::{
+    KEEPALIVE_MAX_SECS as MAX_KEEPALIVE_SECS, KEEPALIVE_MIN_SECS as MIN_KEEPALIVE_SECS,
+};
 const MAX_NAMED_CHARS: usize = 32;
 const CGNAT_FIRST_OCTET: u8 = 100;
 const CGNAT_SECOND_MASK: u8 = 0b1100_0000;
@@ -210,6 +211,27 @@ fn peer_line(seen: &mut Seen, key_name: &str, value: &str) -> Result<()> {
     }
 }
 
+/// The join text inside what `hq net peer add` prints, which wraps it in prose and a QR code: from
+/// the `[Interface]` line to the end of the `[Peer]` section (the first blank line after it). Text
+/// with no `[Interface]` line comes back as it is, for the parser to refuse. Only this block is
+/// ever parsed or kept; whatever surrounds it is dropped.
+pub fn extract_block(text: &str) -> &str {
+    let mut start = None;
+    let mut in_peer = false;
+    let mut offset = 0;
+    for line in text.split_inclusive('\n') {
+        let trimmed = line.trim_end();
+        match (start, trimmed) {
+            (None, "[Interface]") => start = Some(offset),
+            (Some(_), "[Peer]") => in_peer = true,
+            (Some(from), "") if in_peer => return &text[from..offset],
+            _ => {}
+        }
+        offset += line.len();
+    }
+    start.map_or(text, |from| &text[from..])
+}
+
 pub fn parse(text: &str) -> Result<JoinConfig> {
     if text.len() > MAX_JOIN_BYTES {
         return invalid("the join text is too long to be a device config");
@@ -278,6 +300,33 @@ fn finish(seen: Seen) -> Result<JoinConfig> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_join_text_is_found_inside_what_peer_add_prints() {
+        let config = "[Interface]\n# PrivateKey is not here\nAddress = 10.77.0.2/32\n\n[Peer]\nPublicKey = k\nEndpoint = h:1\nAllowedIPs = 10.77.0.1/32\n";
+        let printed = format!(
+            "Adding phone \"p\" at 10.77.0.2.\n\nConfig for the device:\n{config}\nScan this:\n\u{2588}\u{2580} qr\n\nTreat it like a password.\n"
+        );
+        assert_eq!(extract_block(&printed), config);
+        assert_eq!(
+            extract_block(config),
+            config,
+            "a bare join text is unchanged"
+        );
+        assert_eq!(extract_block("nothing here"), "nothing here");
+        assert_eq!(extract_block(""), "");
+        // A second block, or lines after the blank one, are never part of what is kept.
+        let two = format!("{config}\n{config}");
+        assert_eq!(extract_block(&two), config);
+        let late = format!("{config}\nPrivateKey = x\n");
+        assert_eq!(extract_block(&late), config);
+        // No blank line after the peer section: the block runs to the end.
+        let bare = config.trim_end();
+        assert_eq!(extract_block(bare), bare);
+        // CRLF line ends.
+        let crlf = config.replace('\n', "\r\n");
+        assert_eq!(extract_block(&crlf), crlf);
+    }
 
     fn k(n: u8) -> String {
         key::encode(&[n; 32])
@@ -471,17 +520,36 @@ mod tests {
             endpoint: Some("vpn.example.com:51820".into()),
             hub_public_key: k(3),
         };
-        for (kind, psk, keepalive) in [
-            ("laptop", None, Some(25)),
-            ("phone", None, None),
-            ("phone", Some(k(4)), None),
+        // The keepalive column is what the record asks for; the last column is what the join text
+        // must then carry: the laptop default, none, or the exact value at each end of the range.
+        for (kind, psk, asked, keepalive) in [
+            ("laptop", None, None, Some(25)),
+            ("laptop", None, Some(0), None),
+            ("phone", None, None, None),
+            ("phone", Some(k(4)), None, None),
+            (
+                "phone",
+                None,
+                Some(hq_net::keepalive::KEEPALIVE_MIN_SECS),
+                Some(hq_net::keepalive::KEEPALIVE_MIN_SECS),
+            ),
+            ("phone", None, Some(25), Some(25)),
+            (
+                "phone",
+                None,
+                Some(hq_net::keepalive::KEEPALIVE_MAX_SECS),
+                Some(hq_net::keepalive::KEEPALIVE_MAX_SECS),
+            ),
         ] {
             let psk_line = psk
                 .as_ref()
                 .map(|p| format!("preshared_key = \"{p}\"\n"))
                 .unwrap_or_default();
+            let keepalive_line = asked
+                .map(|s| format!("keepalive = {s}\n"))
+                .unwrap_or_default();
             let record: PeerRecord = toml::from_str(&format!(
-                "label = \"dev\"\nkind = \"{kind}\"\npublic_key = \"{}\"\naddress = \"10.77.0.4\"\n{psk_line}",
+                "label = \"dev\"\nkind = \"{kind}\"\npublic_key = \"{}\"\naddress = \"10.77.0.4\"\n{psk_line}{keepalive_line}",
                 k(5)
             ))
             .unwrap();
@@ -491,7 +559,7 @@ mod tests {
             assert_eq!(join.hub_key, [3; 32]);
             assert_eq!(join.preshared_key.is_some(), psk.is_some());
             assert_eq!(join.endpoint.to_string(), "vpn.example.com:51820");
-            assert_eq!(join.keepalive_secs, keepalive, "{kind}");
+            assert_eq!(join.keepalive_secs, keepalive, "{kind} asked {asked:?}");
         }
     }
 }

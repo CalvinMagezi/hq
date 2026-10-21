@@ -20,7 +20,7 @@ const MAX_MAX_CONNECTIONS: usize = 128;
 const DEFAULT_REACH_IDLE_SECS: u64 = 600;
 const MIN_REACH_IDLE_SECS: u64 = 30;
 const MAX_REACH_IDLE_SECS: u64 = 86_400;
-const MAX_CONFIG_BYTES: usize = 16 * 1024;
+pub(crate) const MAX_CONFIG_BYTES: usize = 16 * 1024;
 
 fn default_tcp_buffer_kb() -> usize {
     DEFAULT_TCP_BUFFER_KB

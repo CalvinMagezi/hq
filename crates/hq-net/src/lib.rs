@@ -12,6 +12,7 @@
 //! Android or any other unix target does not contain it.
 
 pub mod grammar;
+pub mod keepalive;
 pub mod key;
 pub mod links;
 pub mod names;

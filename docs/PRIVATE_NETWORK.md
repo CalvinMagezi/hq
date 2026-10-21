@@ -162,8 +162,8 @@ hq net peer add pixel --pubkey <public key from the app> --kind phone --keepaliv
 ```
 
 `--keepalive <seconds>` sets the interval for any device (10 to 300; the in-app tunnel refuses a join
-text outside that range), and `--keepalive 0` turns the laptop's default off. It applies when the device is added: the printed config carries it, and the phone's
-app has to have it entered ("Persistent keepalive" on the hub peer). For a device that already
+text outside that range), and `--keepalive 0` turns the laptop's default off. It applies when the
+device is added: the printed config carries it, and the phone's app has to have it entered ("Persistent keepalive" on the hub peer). For a device that already
 exists, set it in its app; there is no command to change it afterwards. `hq net peer list` shows
 the value in the config `hq net` printed, not what the device runs. The setting changes only that
 config; the applier's input is the same with or without it. A keepalive keeps a phone's radio
@@ -339,6 +339,77 @@ What linking does not do:
   from before links refuses the new `peers.toml` (an unknown table is an error, on purpose), so a
   revocation made with it would not be written. Keep `hq` and the applier current together.
 
+## A phone without the WireGuard app
+
+The default for a phone is the WireGuard app (step 3). The alternative runs the tunnel inside the HQ
+app, as a second process, with no system VPN slot and no second app. It is a different kind of peer,
+not a VPN: it has two fixed maps and routes nothing else. A **serve** entry hands one port on the
+phone's tunnel address to one loopback port, for the tunnel addresses it names. A **reach** entry
+forwards one loopback port to one fixed tunnel destination. Nothing else gets in or out.
+
+The commands exist only in a build with the `tunnel` feature (`cargo build -p hq-cli --features
+tunnel`); the Android build turns it on, a server build leaves it out. Everything lives in
+`~/.hq/tunnel` (or the directory given by `--tunnel-dir`). The commands make the directory 0700 and
+write their files 0600, and they refuse a directory that is a link, belongs to someone else or is
+open to others, rather than tightening it, because files others could have put there are not to be
+trusted. `maps.toml` is written by you; it has to belong to you but may have any mode.
+
+```
+hq net tunnel keygen                  make the private key (a file only you can read), print the public key
+hq net peer add pixel --pubkey <public key> --kind phone --keepalive 25 > added.txt      on the hub
+hq net tunnel import added.txt --confirm-hub <hub public key>                  on the phone
+hq net tunnel check                   the join text, the maps and the key, without connecting
+hq net tunnel run --key-file ~/.hq/tunnel/key --no-control        or: the key as the first line of stdin
+hq net tunnel status                  what the running peer last reported
+```
+
+`import` takes what `hq net peer add` printed, as it is or as the bare join text, from a file or
+stdin; it keeps only the join text inside (from `[Interface]` to the end of the `[Peer]` section)
+and parses that strictly. A hub the device has not seen before is taken only when you name its
+public key with `--confirm-hub`. Read that key on the hub (`sudo wg show hq0 public-key`, or the
+"Hub public key" line `hq net init` printed) and type or paste it from there, not from the message
+`import` prints: it shows the key the text names so that you can compare, and it does not offer a
+command to copy, because a text that points the phone at someone else's hub would otherwise be
+confirmed by whoever pastes the suggestion. A wrong key is an error. Taking a new hub also deletes
+`maps.toml`, before the new join text is written, because the entries in it were written for the old
+hub and would otherwise now be trusted by the new one. The same hub again (a new keepalive, say)
+needs no confirmation and keeps the maps. `import` exits 0 when it saved the text, 2 when the hub
+needs confirming and nothing was written, and 1 for any refusal.
+
+`maps.toml` is yours to write; import never does. A missing file serves and reaches nothing:
+
+```toml
+[[serve]]
+port = 4751                  # the port on the phone's tunnel address
+to = "127.0.0.1:4751"        # loopback only
+from = ["10.77.0.1"]         # the tunnel addresses allowed to connect; a connection from any other is refused
+
+[[reach]]
+listen = "127.0.0.1:47801"   # loopback only
+to = "10.77.0.9:4751"        # one tunnel destination
+```
+
+Optional limits in the same file: `tcp_buffer_kb` (16 to 4096, default 256), `idle_listeners` (up to 8,
+default 4), `max_connections` (up to 128, default 32, per entry) and `reach_idle_secs` (30 to 86400,
+default 600). Anything else in the file is an error. A service behind a serve entry sees every tunnel
+peer as `127.0.0.1`, so it must not trust "localhost" and must have its own login; one behind a reach
+entry is reachable by any app on the phone, so it needs one too.
+
+The peer reads two control lines from stdin after the key, `network-changed` (the device moved to
+another network: rebind and shake hands again) and `quit`. The end of stdin stops it, because the app
+that started it is gone, so `hq net tunnel run < key` ends at once: from a shell or a service, use
+`--key-file` with `--no-control`, and stop it with a signal. It prints nothing (set `RUST_LOG` to
+see its logs, on stderr) and writes `status.json` (`state`: `up`, `connecting`, `down`, `idle` for a session that aged out with
+nothing in flight, `stopped`) and a bounded `events.log` beside it. A peer that was killed leaves its
+last report behind, and `hq net tunnel status` says it is not running once that is 15 seconds old. It
+opens one UDP socket to the hub, the loopback listeners of the reach entries and nothing else; there
+is no listener for the status. The private key never goes on a command line or in the environment:
+`keygen --stdout` prints it and the public key to a pipe for an app that keeps it in a keystore, and
+refuses a terminal.
+
+The threat model and the tests behind each claim are in `docs/security/NETWORK.md`, section 9.
+Nothing here has run on a phone yet.
+
 ## Files
 
 `net.toml` and `peers.toml` are read strictly. The interface name (always `hq0`; anything else was
@@ -358,6 +429,10 @@ wireguard-go would need.
 | `~/.hq/net/peers.toml` | Devices and, once `hq net link add` has been used, their links. Mode 0600. An unknown field or table is an error, not an empty list. | `hq net peer ...`, `hq net link ...` |
 | `~/.hq/net/retired` | Addresses of revoked devices, one per line. Kept apart from `peers.toml` so damage to that file cannot lose it. `hq net` never reuses them. The applier does not read this file, so a hand edit of it or of `peers.toml` can hand an address out again. | `hq net peer revoke` |
 | `~/.hq/net/hub.key` | The hub's private key, until you move it in step 1. | `hq net init` |
+| `~/.hq/tunnel/join.conf` | The join text for the in-app tunnel. Mode 0600: it may hold a preshared key. | `hq net tunnel import` |
+| `~/.hq/tunnel/maps.toml` | The serve and reach entries and their limits. | you; import deletes it for a new hub |
+| `~/.hq/tunnel/key` | The tunnel's private key, for a desktop run. Mode 0600, never overwritten. | `hq net tunnel keygen` |
+| `~/.hq/tunnel/status.json`, `events.log` | What the running peer reports. No keys, no traffic. | `hq net tunnel run` |
 | `/var/lib/hq-net/hq0.conf` | The applier's input. Owned by your user, mode 0600. Version 1 until the first link is added, version 2 after. | `hq net apply` |
 | `/etc/hq-net/hq0.env` | Subnet, hub address and owner id the applier trusts. Root-owned. | you, step 4 |
 | `/opt/hq-net/hq-net-apply` | The applier. Root-owned directory and file. | you, step 4 |

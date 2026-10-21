@@ -37,6 +37,11 @@ const HOME_SECRET_PATHS: &[&str] = &[
     ".hq/signing.keychain",
     ".hq/gate",
     ".hq/gate_authorized_keys",
+    // `hq net` keeps the hub's private key and the devices' preshared keys here, and the userspace
+    // tunnel keeps its private key, its join text (a preshared key) and the maps that decide which
+    // local ports the plane can reach.
+    ".hq/net",
+    ".hq/tunnel",
     ".herenow/credentials",
 ];
 
@@ -338,6 +343,11 @@ mod tests {
             ".hq/hq-signing.keychain-db",
             ".hq/gate/laptop.key",
             ".hq/gate_authorized_keys",
+            ".hq/net/hub.key",
+            ".hq/net/peers.toml",
+            ".hq/tunnel/key",
+            ".hq/tunnel/join.conf",
+            ".hq/tunnel/maps.toml",
             ".netrc",
         ] {
             assert_eq!(
