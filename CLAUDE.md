@@ -41,7 +41,7 @@ placeholders (`example.com`, `hq.example.ts.net`, `<owner>/<repo>`).
 
 ## Architecture
 
-- **Language**: Rust (edition 2024, Cargo workspace of 20 crates)
+- **Language**: Rust (edition 2024, Cargo workspace of 21 crates)
 - **Binary**: `hq`, built from `crates/hq-cli`. `scripts/install-hq.sh` installs it
   to `~/bin/hq`; servers use `/usr/local/bin/hq`.
 - **Config**: `~/.hq/config.yaml` (override with `HQ_CONFIG_PATH`); any key can
@@ -118,6 +118,7 @@ placeholders (`example.com`, `hq.example.ts.net`, `<owner>/<repo>`).
 | Sub-agent dispatch | `crates/hq-agent/src/agents/service.rs`, `crates/hq-agent/src/agents/tool.rs` |
 | Coding-agent runtime (built-in host) | `crates/hq-host/`, `crates/hq-tools/src/agent_host/`, `crates/hq-tools/src/harness_session/`, `docs/AGENT_HOST.md` |
 | Private network (`hq net`, WireGuard hub and spoke), the root applier and its grammar | `crates/hq-net/` (`grammar.rs` is the only language the applier reads, `applier.rs` the Linux-only opener and the `wg` and `nft` caller, `wgconf.rs`, `links.rs` (the set of linked device pairs the applier hands to `nft`; version 2 of the peers file), `store.rs`, `init.rs`, `ops.rs`), `crates/hq-cli/src/commands/net.rs`, `deploy/net/` (systemd units; `deploy/net/test/run.sh` runs them for real in Docker), `docs/PRIVATE_NETWORK.md`, `docs/plans/private-network.md`, `docs/security/NETWORK.md` |
+| The phone as a WireGuard peer without `VpnService` (library) | `crates/hq-tunnel/` (`join.rs` the strict join-text parser, `config.rs` the serve and reach maps, `stack.rs` the smoltcp side and the source fence, `run.rs` the poll loop, `status.rs` the status file, `session.rs` boringtun), `docs/security/NETWORK.md` section 9. Not yet wired to any command |
 | Editions (`profile: full`, `lite`, `mobile`) and the Android build | `crates/hq-core/src/config/profile.rs` (`Profile`, `MobileConfig`, `embeds_notes`), `effective_profile` in `crates/hq-core/src/config/mod.rs` (Windows is always Lite, Android defaults to Mobile), `Profile::drops_tool_category` (used by `crates/hq-mcp/src/registry.rs` and `crates/hq-agent/src/builder/tools.rs`), `scheduled_tasks` in `crates/hq-cli/src/commands/start/daemon/mod.rs`, `.github/workflows/android.yml`, `scripts/check-android-alignment.sh`, `docs/HQ_MOBILE.md`, `docs/HQ_LITE.md` |
 | Windows users (WSL2), adding a machine | `docs/WINDOWS.md`, `docs/JOIN_A_MACHINE.md` |
 | Task-linked and chat-driven harness sessions | `crates/hq-tools/src/harness_session/mission.rs`, `crates/hq-web/src/session_driver.rs`, `crates/hq-web/src/sessions_api.rs`, "Sessions that work on a task" and "Watching and driving from a web chat" in `docs/AGENT_SESSIONS.md` |
@@ -319,6 +320,7 @@ a document.
 | `hq-host` | Built-in coding-agent host: pty panes, emulated screen, control socket, state detection |
 | `hq-gate` | Signed TCP transport for the host gate over a private tunnel (Ed25519 challenge, unix only); used by `hq host serve` and the `tcp` host transport |
 | `hq-net` | `hq net`: the WireGuard private plane (key and subnet setup, peer store, device configs, QR) and `hq-net-apply`, the Linux-only strict-grammar root applier. Root-only code is `cfg(target_os = "linux")`, never `cfg(unix)` |
+| `hq-tunnel` | A userspace WireGuard peer for a phone (boringtun and smoltcp, no `VpnService`): serve and reach maps between the tunnel and loopback, join-text parser, status file. Library only so far |
 | `hq-sandbox` | Process sandbox policy for one coding agent (`sandbox-exec` or `bwrap`) |
 | `hq-cli` | The `hq` binary and its CLI commands |
 
