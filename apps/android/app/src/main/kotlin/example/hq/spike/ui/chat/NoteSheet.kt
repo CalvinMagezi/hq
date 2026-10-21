@@ -21,8 +21,6 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
-import androidx.compose.material3.DropdownMenu
-import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -45,7 +43,6 @@ import example.hq.spike.ui.chat.blocks.HeaderLabel
 import example.hq.spike.ui.chat.blocks.IconAction
 import example.hq.spike.ui.chat.blocks.NoteText
 import example.hq.spike.ui.chat.blocks.parseBlocks
-import example.hq.spike.ui.chat.blocks.rememberCopier
 import example.hq.spike.ui.shell.HqIcons
 import example.hq.spike.ui.theme.HqType
 import example.hq.spike.ui.theme.Mts
@@ -60,13 +57,13 @@ private val FadeHeight = 40.dp
  * board; the half-height start the board mentions is not built (see TECHDEBT). Footer: Open in Notes, Ask about this.
  */
 @Composable
-fun NoteSheetView(sheet: NoteSheet, blocks: BlockActions, onClose: () -> Unit, onOpenInNotes: () -> Unit, onAsk: () -> Unit, onCopied: () -> Unit) {
+fun NoteSheetView(sheet: NoteSheet, blocks: BlockActions, onClose: () -> Unit, onOpenInNotes: () -> Unit, onAsk: () -> Unit, onMenu: () -> Unit) {
     BackHandler(onBack = onClose)
     Box(Modifier.fillMaxSize()) {
         Box(Modifier.fillMaxSize().background(Scrim).clickable(interactionSource = remember { MutableInteractionSource() }, indication = null, onClick = onClose))
         Column(Modifier.align(Alignment.BottomCenter).fillMaxWidth().padding(top = SheetTop).fillMaxHeight().clip(SheetShape).background(Mts.Surface100)) {
             Box(Modifier.padding(top = 12.dp, bottom = 12.dp).size(width = 32.dp, height = 4.dp).align(Alignment.CenterHorizontally).background(Mts.Line, RoundedCornerShape(2.dp)))
-            Header(sheet, onCopied)
+            Header(sheet, onMenu)
             sheet.savedAge?.let { SavedPill(it) }
             NoteBody(sheet, blocks, Modifier.weight(1f))
             Footer(onOpenInNotes, onAsk)
@@ -75,9 +72,7 @@ fun NoteSheetView(sheet: NoteSheet, blocks: BlockActions, onClose: () -> Unit, o
 }
 
 @Composable
-private fun Header(sheet: NoteSheet, onCopied: () -> Unit) {
-    var menu by remember { mutableStateOf(false) }
-    val copy = rememberCopier()
+private fun Header(sheet: NoteSheet, onMenu: () -> Unit) {
     Row(Modifier.fillMaxWidth().padding(start = 16.dp, end = 4.dp, bottom = 8.dp), horizontalArrangement = Arrangement.spacedBy(12.dp), verticalAlignment = Alignment.CenterVertically) {
         Box(Modifier.size(40.dp).background(Mts.Surface200, RoundedCornerShape(10.dp)), contentAlignment = Alignment.Center) {
             Icon(HqIcons.Notes, null, Modifier.size(22.dp), tint = Mts.Ink)
@@ -86,15 +81,7 @@ private fun Header(sheet: NoteSheet, onCopied: () -> Unit) {
             Text(sheet.title, style = HqType.ScreenTitle, color = Mts.Ink, maxLines = 1, overflow = TextOverflow.Ellipsis)
             if (sheet.trail.isNotBlank()) Text(sheet.trail, style = HqType.Caption.copy(fontSize = 13.sp, lineHeight = 18.sp), color = Mts.InkMuted, maxLines = 1, overflow = TextOverflow.Ellipsis)
         }
-        Box {
-            IconAction(HqIcons.MoreVertical, "More", iconSize = 24.dp) { menu = true }
-            DropdownMenu(expanded = menu, onDismissRequest = { menu = false }, containerColor = Mts.Surface200) {
-                DropdownMenuItem(
-                    text = { Text("Copy note text", style = HqType.Body, color = Mts.Ink) },
-                    onClick = { copy(NoteText.withoutFrontmatter(sheet.body)); menu = false; onCopied() },
-                )
-            }
-        }
+        IconAction(HqIcons.MoreVertical, "More", iconSize = 24.dp, onClick = onMenu)
     }
 }
 
@@ -120,7 +107,7 @@ private fun NoteBody(sheet: NoteSheet, blocks: BlockActions, modifier: Modifier)
             }
         }
         Box(Modifier.fillMaxWidth().height(1.dp).background(Mts.Hairline))
-        if (scroll.value < scroll.maxValue) {
+        if (scroll.canScrollForward) {
             Box(Modifier.align(Alignment.BottomCenter).fillMaxWidth().height(FadeHeight).background(Brush.verticalGradient(listOf(Color.Transparent, Mts.Surface100))))
         }
     }

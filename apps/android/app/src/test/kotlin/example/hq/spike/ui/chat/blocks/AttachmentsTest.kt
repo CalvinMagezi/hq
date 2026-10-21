@@ -15,6 +15,11 @@ class AttachmentsTest {
         assertEquals("_media/web/d/x.docx", f.path)
     }
 
+    @Test fun onlyFilesUnderTheUploadFolderAreFiles() {
+        val m = """ <hq-attachments>[{"name":"a","path":"_media/web/d/a.png","mime":"image/png","size":1},{"name":"b","path":"Notebooks/secret.md","mime":"text/plain","size":1},{"name":"c","path":"_media/web/../x","mime":"","size":1}]</hq-attachments>"""
+        assertEquals(listOf("a"), Attachments.split("hi$m").second.map { it.name })
+    }
+
     @Test fun aMessageWithNoMarkerIsUnchanged() {
         assertEquals("plain" to emptyList<Attachment>(), Attachments.split("plain"))
     }

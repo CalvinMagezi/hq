@@ -15,6 +15,7 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Icon
@@ -147,7 +148,7 @@ fun TableBlockView(t: Block.Table, onExpand: () -> Unit) {
             }
             Box {
                 TableLayout(t, widths, pin = !fits, hs = hs, vs = null)
-                if (!fits && hs.value < hs.maxValue) RightFade()
+                if (!fits && hs.canScrollForward) RightFade()
             }
         }
     }
@@ -197,16 +198,19 @@ fun ChartSpec.numbersTable(): Block.Table {
 
 private fun plainNumber(n: Double): String = if (n == kotlin.math.floor(n) && kotlin.math.abs(n) < 1e15) n.toLong().toString() else Charts.round2(n).toString().trimEnd('0').trimEnd('.')
 
-/** The numbers under a chart: 120 dp for the labels, 104 dp for each value, in a rounded box whose lines run the full width. */
+/** The numbers under a chart: 120 dp for the labels, 104 dp for each value, in a rounded box that scrolls sideways when the series do not fit. */
 @Composable
 fun NumbersTable(t: Block.Table, modifier: Modifier = Modifier) {
     val widths = remember(t) { t.headers.indices.map { if (it == 0) 120.dp else 104.dp } }
     val shape = RoundedCornerShape(12.dp)
-    Column(modifier.fillMaxWidth().padding(horizontal = 16.dp).clip(shape).border(1.dp, Mts.Hairline, shape)) {
-        Row(Modifier.fillMaxWidth().background(Mts.Surface100)) { t.headers.indices.forEach { Cell(t.headers[it], widths[it], t.aligns[it], true) } }
-        t.rows.forEach { row ->
-            Row(Modifier.fillMaxWidth().drawBehind { drawLine(Mts.Hairline, Offset(0f, 0f), Offset(size.width, 0f), 1.dp.toPx()) }) {
-                row.indices.forEach { Cell(row[it], widths[it], t.aligns[it], false) }
+    BoxWithConstraints(modifier.fillMaxWidth().padding(horizontal = 16.dp)) {
+        val room = maxWidth
+        Column(Modifier.fillMaxWidth().clip(shape).border(1.dp, Mts.Hairline, shape).horizontalScroll(rememberScrollState())) {
+            Row(Modifier.widthIn(min = room).background(Mts.Surface100)) { t.headers.indices.forEach { Cell(t.headers[it], widths[it], t.aligns[it], true) } }
+            t.rows.forEach { row ->
+                Row(Modifier.widthIn(min = room).drawBehind { drawLine(Mts.Hairline, Offset(0f, 0f), Offset(size.width, 0f), 1.dp.toPx()) }) {
+                    row.indices.forEach { Cell(row[it], widths[it], t.aligns[it], false) }
+                }
             }
         }
     }

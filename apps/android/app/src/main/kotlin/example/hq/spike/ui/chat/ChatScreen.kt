@@ -42,7 +42,10 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.semantics.LiveRegionMode
 import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.liveRegion
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import example.hq.spike.R
@@ -95,6 +98,7 @@ private fun rememberBlockActions(state: ChatUiState, actions: ChatActions): Bloc
 fun ChatOverlays(state: ChatUiState, actions: ChatActions) {
     val go = LocalGoTo.current
     val blocks = rememberBlockActions(state, actions)
+    val pickers = rememberSystemPickers(actions.onFiles)
     Box(Modifier.fillMaxSize()) {
         when (val page = state.page) {
             is Page.SelectText -> SelectTextPage(page.text, actions.onClosePage)
@@ -105,11 +109,13 @@ fun ChatOverlays(state: ChatUiState, actions: ChatActions) {
         state.note?.let { sheet ->
             NoteSheetView(
                 sheet, blocks, actions.onCloseNote, onOpenInNotes = { actions.onCloseNote(); go(Place.Notes) },
-                onAsk = { actions.onAskAboutNote(sheet.path) }, onCopied = { actions.onNotice("Copied") },
+                onAsk = { actions.onAskAboutNote(sheet.path) }, onMenu = { actions.onNoteMenu(true) },
             )
         }
+        if (state.noteMenu) state.note?.let { NoteMenuSheet(it, actions) }
+        state.export?.let { ExportOverlay(it, actions) }
         if (state.chatsOpen) ChatsSheet(state, actions)
-        if (state.addOpen) AddSheet(actions)
+        if (state.addOpen) AddSheet(actions, pickers)
         state.picker?.let { PickerSheet(it, actions) }
         state.pressed?.let { id -> state.messages.firstOrNull { it.id == id }?.let { MessageActionsSheet(state, it, blocks, actions) } }
         state.notice?.let { Snack(it, actions, Modifier.align(Alignment.BottomCenter)) }
@@ -228,7 +234,7 @@ private fun Snack(notice: Notice, actions: ChatActions, modifier: Modifier) {
         actions.onDismissNotice()
     }
     Row(
-        modifier.navigationBarsPadding().padding(horizontal = 8.dp, vertical = 8.dp).fillMaxWidth().heightIn(min = 48.dp).background(Mts.Ink, RoundedCornerShape(6.dp)).padding(start = 16.dp),
+        modifier.navigationBarsPadding().padding(horizontal = 8.dp, vertical = 8.dp).fillMaxWidth().semantics { liveRegion = LiveRegionMode.Polite }.heightIn(min = 48.dp).background(Mts.Ink, RoundedCornerShape(6.dp)).padding(start = 16.dp),
         horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically,
     ) {
         Text(notice.text, style = HqType.BodySm, color = Mts.Surface100, modifier = Modifier.weight(1f))

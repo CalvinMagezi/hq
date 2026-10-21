@@ -17,6 +17,7 @@ import example.hq.spike.data.HqUnavailable
 import example.hq.spike.data.NoteNotFound
 import example.hq.spike.data.StoredMessage
 import example.hq.spike.ui.chat.blocks.Attachment
+import example.hq.spike.ui.chat.blocks.Attachments
 import example.hq.spike.ui.chat.blocks.Block
 import example.hq.spike.ui.chat.blocks.ChartSpec
 import example.hq.spike.ui.chat.blocks.NoteRefs
@@ -69,6 +70,12 @@ class ChatActions(
     val onCancelEdit: () -> Unit = {},
     val onLoadOlder: () -> Unit = {},
     val onSlash: (String) -> Unit = {},
+    val onNoteMenu: (Boolean) -> Unit = {},
+    val onTogglePin: () -> Unit = {},
+    val onExport: () -> Unit = {},
+    val onExportFormat: (ExportFormat) -> Unit = {},
+    val onExportClose: () -> Unit = {},
+    val onExportAgain: () -> Unit = {},
 )
 
 class ChatViewModel(app: Application) : AndroidViewModel(app) {
@@ -85,8 +92,11 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
     private val sentContexts = mutableMapOf<String, List<ContextRef>>()
     private val sentFiles = mutableMapOf<String, List<PendingFile>>()
     private val composer = ComposerController(app, client, _state, viewModelScope)
+    private val exporter = NoteExporter(app, client, _state, viewModelScope)
     private var loadingOlder = false
-    private var lastQuestion: Triple<String, List<Attachment>, List<ContextRef>>? = null
+    private class LastQuestion(val threadId: String?, val text: String, val files: List<Attachment>, val contexts: List<ContextRef>)
+    private var lastQuestion: LastQuestion? = null
+    private val sentReplace = mutableMapOf<String, String>()
     private var archiving: Pair<String, Job>? = null
     private var frozen = false
 
@@ -104,13 +114,21 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
         onClosePicker = composer::closePicker, onChoose = composer::choose, onFiles = composer::addFiles, onRetryFile = composer::retry,
         onRemoveFile = composer::removeFile, onLongPress = { id -> _state.update { it.copy(pressed = id) } },
         onCloseSheet = { _state.update { it.copy(pressed = null) } }, onSelectText = { text -> _state.update { it.copy(pressed = null, page = Page.SelectText(text)) } },
-        onRegenerate = ::regenerate, onEditResend = ::editResend, onCancelEdit = { _state.update { it.copy(editing = null, draft = "") } },
+        onRegenerate = ::regenerate, onEditResend = ::editResend, onCancelEdit = { _state.update { s -> s.copy(editing = null, draft = "", files = s.files.filter { it.uri.isNotEmpty() }) } },
+        onNoteMenu = { open -> _state.update { it.copy(noteMenu = open) } }, onTogglePin = ::togglePin,
+        onExport = { _state.value.note?.let(exporter::choose) }, onExportFormat = exporter::start, onExportClose = exporter::close, onExportAgain = exporter::again,
         onLoadOlder = ::loadOlder, onSlash = { name -> setDraft(if (name == "/topic") "/topic " else name) },
     )
 
     init {
         viewModelScope.launch { services.connection.events.collect { if (!frozen) handle(it) } }
-        viewModelScope.launch { services.connection.connected.collect { c -> if (!frozen) _state.update { it.copy(connected = c, offlineSince = if (c) null else it.offlineSince ?: System.currentTimeMillis()) } } }
+        viewModelScope.launch {
+            services.connection.connected.collect { c ->
+                if (frozen) return@collect
+                _state.update { it.copy(connected = c, offlineSince = if (c) null else it.offlineSince ?: System.currentTimeMillis()) }
+                if (c) reconcile()
+            }
+        }
         // hq may still be starting when the app opens; open the latest chat the first time it answers.
         viewModelScope.launch { services.status.collect { if (it == HqStatus.Live && !frozen) openLatest() } }
     }
@@ -125,11 +143,24 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
         _state.update { ChatReducer.apply(it, event, pending) }
         when (event) {
             is ChatEvent.Rejected -> if (event.clientId in pending) restore(event.clientId!!, event.reason)
-            is ChatEvent.TurnStart -> event.clientId?.let { sentContexts.remove(it); sentFiles.remove(it) }
-            is ChatEvent.TurnEnd -> if (event.threadId == _state.value.threadId) viewModelScope.launch { refreshChats() }
+            is ChatEvent.TurnStart -> event.clientId?.let { sentContexts.remove(it); sentFiles.remove(it); sentReplace.remove(it) }
+            is ChatEvent.TurnEnd -> if (event.threadId == _state.value.threadId) viewModelScope.launch {
+                // The live copy has tool arguments cut at 4000 characters and no ids; the saved one is whole.
+                event.threadId?.let { loadMessages(it) }
+                refreshChats()
+            }
             is ChatEvent.Lagged -> _state.value.threadId?.let { id -> viewModelScope.launch { loadMessages(id) } }
             else -> {}
         }
+    }
+
+    /** After a reconnect: a reply we think is still running may have finished while the socket was down. */
+    private suspend fun reconcile() {
+        val s = _state.value
+        val id = s.threadId ?: return
+        val running = try { client.threads().running } catch (e: HqUnavailable) { return }
+        if (s.live != null && id !in running) _state.update { it.copy(live = null) }
+        loadMessages(id)
     }
 
     private fun setDraft(text: String) {
@@ -139,26 +170,29 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
 
     private fun send() {
         val s = _state.value
-        SlashCommands.parse(s.draft)?.let { return runSlash(it) }
+        if (s.editing == null && s.files.isEmpty()) SlashCommands.parse(s.draft)?.let { return runSlash(it) }
         submit(s.draft.trim(), replaceFrom = s.editing)
     }
 
     /** [files] and [contexts] default to what is attached now; a retry or a regenerate passes what the question had. */
     private fun submit(text: String, replaceFrom: String?, files: List<Attachment>? = null, contexts: List<ContextRef>? = null) {
         val s = _state.value
+        // A retry or a regenerate re-asks an old question and must leave what is being typed alone.
+        val fromComposer = files == null && contexts == null
         val sendFiles = files ?: s.files.mapNotNull { it.uploaded }
         val sendContexts = contexts ?: s.contexts
         if ((text.isBlank() && sendFiles.isEmpty()) || !s.connected || s.running) return
         val clientId = "local-${UUID.randomUUID()}"
         pending += clientId
-        lastQuestion = Triple(text, sendFiles, sendContexts)
+        lastQuestion = LastQuestion(s.threadId, text, sendFiles, sendContexts)
         val kept = if (replaceFrom == null) s.messages else s.messages.takeWhile { it.id != replaceFrom }
-        sentContexts[clientId] = sendContexts
-        sentFiles[clientId] = s.files
+        if (fromComposer) { sentContexts[clientId] = sendContexts; sentFiles[clientId] = s.files }
+        if (replaceFrom != null) sentReplace[clientId] = replaceFrom
         _state.update {
-            it.copy(messages = kept + UiMessage(clientId, Speaker.User, text, sending = true, files = sendFiles), draft = "", failed = false, contexts = emptyList(), files = emptyList(), editing = null)
+            val sent = it.copy(messages = kept + UiMessage(clientId, Speaker.User, text, sending = true, files = sendFiles), failed = false, editing = null)
+            if (fromComposer) sent.copy(draft = "", contexts = emptyList(), files = emptyList()) else sent
         }
-        drafts.edit().remove(draftKey(s.threadId)).apply()
+        if (fromComposer) drafts.edit().remove(draftKey(s.threadId)).apply()
         if (!services.connection.sendChat(withContext(text, sendContexts), s.threadId, clientId, replaceFrom, sendFiles)) restore(clientId, "Not connected to HQ. Your message is back in the box.")
     }
 
@@ -226,13 +260,17 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
     /** A send that did not go through: the text returns to the field, with the reason. */
     private fun restore(clientId: String, reason: String) {
         pending -= clientId
+        val replaced = sentReplace.remove(clientId)
         _state.update { s ->
             val text = s.messages.firstOrNull { it.id == clientId }?.text ?: s.draft
             s.copy(
-                messages = s.messages.filter { it.id != clientId }, draft = text, notice = Notice(reason),
+                messages = s.messages.filter { it.id != clientId }, draft = if (replaced == null) text else s.draft.ifBlank { text }, notice = Notice(reason),
                 contexts = sentContexts.remove(clientId) ?: s.contexts, files = sentFiles.remove(clientId) ?: s.files,
+                editing = if (replaced != null && s.editing == null) replaced else s.editing,
             )
         }
+        // The questions the failed replace cut off locally are still on the server.
+        if (replaced != null) _state.value.threadId?.let { id -> viewModelScope.launch { loadMessages(id) } }
     }
 
     private fun stop() {
@@ -241,9 +279,9 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     private fun retry() {
-        val (text, files, contexts) = lastQuestion ?: return
+        val q = lastQuestion?.takeIf { it.threadId == _state.value.threadId } ?: return
         val last = _state.value.messages.lastOrNull { it.speaker == Speaker.User && !it.sending } ?: return
-        submit(text, replaceFrom = last.id, files = files, contexts = contexts)
+        submit(q.text, replaceFrom = last.id, files = q.files, contexts = q.contexts)
     }
 
     private fun newChat(keepSheet: Boolean = false) {
@@ -264,7 +302,12 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
     private suspend fun loadMessages(id: String) {
         val page = try { client.messages(id) } catch (e: HqUnavailable) { return }
         val shown = page.sortedBy { it.createdAt }.map(::toUi)
-        _state.update { if (it.threadId == id && !it.running) it.copy(messages = shown, hasOlder = page.size >= HqClient.MESSAGE_PAGE) else it }
+        _state.update {
+            if (it.threadId != id) return@update it
+            // Sends the server has not acknowledged yet stay at the end.
+            val unsaved = it.messages.filter { m -> m.id.startsWith("local-") && shown.none { s -> s.id == m.id } }
+            it.copy(messages = shown + unsaved, hasOlder = page.size >= HqClient.MESSAGE_PAGE)
+        }
     }
 
     private fun toUi(m: StoredMessage) = UiMessage.saved(m.id, if (m.role == "user") Speaker.User else Speaker.Reply, m.content, m.tools, m.createdAt)
@@ -278,16 +321,31 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
         viewModelScope.launch {
             try {
                 val body = client.note(path)
+                val pinned = try { body.path in client.pinned() } catch (e: HqUnavailable) { false }
                 _state.update { st ->
                     val writer = st.messages.lastOrNull { m -> StepCards.of(m.tools).written.any { it.path == body.path } }
                     val age = writer?.let { if (it.createdAt.isBlank()) "just now" else ChatTime.since(it.createdAt) }
-                    val sheet = NoteSheet(body.path, NoteRefs.title(body.path), NoteRefs.folderTrail(body.path), body.content, body.truncated, age)
+                    val sheet = NoteSheet(body.path, NoteRefs.title(body.path), NoteRefs.folderTrail(body.path), body.content, body.truncated, age, pinned)
                     st.copy(openingNote = null, note = sheet)
                 }
             } catch (e: NoteNotFound) {
                 _state.update { it.copy(openingNote = null, missingNotes = it.missingNotes + path, notice = Notice(NOTE_GONE)) }
             } catch (e: HqUnavailable) {
                 _state.update { it.copy(openingNote = null, notice = Notice("Could not open the note. HQ is not answering.")) }
+            }
+        }
+    }
+
+    private fun togglePin() {
+        val sheet = _state.value.note ?: return
+        val pin = !sheet.pinned
+        _state.update { it.copy(noteMenu = false) }
+        viewModelScope.launch {
+            try {
+                client.setPinned(sheet.path, pin)
+                _state.update { s -> s.copy(note = s.note?.takeIf { it.path == sheet.path }?.copy(pinned = pin) ?: s.note, notice = Notice(if (pin) "Pinned to the top of Notes" else "Unpinned")) }
+            } catch (e: HqUnavailable) {
+                _state.update { it.copy(notice = Notice("Could not change the pin. HQ is not answering.")) }
             }
         }
     }
@@ -341,7 +399,8 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
         val list = try { client.threads() } catch (e: HqUnavailable) { return }
         val rows = list.threads.map { t ->
             val group = ChatTime.group(t.updatedAt)
-            val snippet = t.preview.orEmpty()
+            val (cut, files) = Attachments.split(t.preview.orEmpty())
+            val snippet = if (cut.isBlank() && files.isNotEmpty()) "[${files.size} file${if (files.size == 1) "" else "s"}]" else cut.trim()
             val subtitle = if (group == Group.Today && snippet.isNotEmpty()) "${ChatTime.age(t.updatedAt)} · $snippet" else snippet
             ChatRow(t.id, t.title.ifBlank { ChatUiState.NEW_CHAT }, subtitle, group, t.id in list.running, t.unread > 0)
         }

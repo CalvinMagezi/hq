@@ -14,6 +14,7 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.withPermit
 import kotlinx.coroutines.withContext
 
 /** What sits around the message field: the plus menu, the note and task pickers, attached items, and files going up. */
@@ -24,6 +25,7 @@ class ComposerController(
     private val scope: CoroutineScope,
 ) {
     private var search: Job? = null
+    private val slots = kotlinx.coroutines.sync.Semaphore(UPLOADS_AT_ONCE)
 
     fun openAdd() = state.update { it.copy(addOpen = true) }
 
@@ -97,24 +99,20 @@ class ComposerController(
     private fun upload(id: String) {
         val file = state.value.files.firstOrNull { it.id == id } ?: return
         scope.launch {
-            val result = withContext(Dispatchers.IO) {
-                try {
-                    val bytes = app.contentResolver.openInputStream(Uri.parse(file.uri))?.use { it.readBytes() }
-                    when {
-                        bytes == null -> Result.failure(HqUnavailable("The file could not be read"))
-                        bytes.size > MAX_BYTES -> Result.failure(TooBig())
-                        else -> Result.success(client.uploadFile(file.name, file.mime, bytes))
+            // Two at a time: a handful of large files read together would not fit in the app's memory.
+            val result = slots.withPermit {
+                withContext(Dispatchers.IO) {
+                    try {
+                        Result.success(client.uploadFile(file.name, file.mime, file.size, MAX_BYTES.toLong()) { app.contentResolver.openInputStream(Uri.parse(file.uri)) })
+                    } catch (e: Exception) {
+                        Result.failure(e)
                     }
-                } catch (e: java.io.IOException) {
-                    Result.failure(e)
                 }
             }
             result.onSuccess { saved -> update(id) { it.copy(status = FileStatus.Ready, uploaded = saved, error = null) } }
-                .onFailure { e -> update(id) { it.copy(status = FileStatus.Failed, error = if (e is TooBig) "over 25 MB" else PendingFile.UPLOAD_FAILED) } }
+                .onFailure { e -> update(id) { it.copy(status = FileStatus.Failed, error = if (e.message?.contains("over the limit") == true) "over 25 MB" else PendingFile.UPLOAD_FAILED) } }
         }
     }
-
-    private class TooBig : java.io.IOException()
 
     private fun update(id: String, change: (PendingFile) -> PendingFile) =
         state.update { s -> s.copy(files = s.files.map { if (it.id == id) change(it) else it }) }
@@ -131,5 +129,6 @@ class ComposerController(
         const val MAX_BYTES = 25 * 1024 * 1024
         private const val MAX_CONTEXT = 10
         private const val SEARCH_WAIT_MS = 250L
+        private const val UPLOADS_AT_ONCE = 2
     }
 }

@@ -21,13 +21,16 @@ data class Attachment(val name: String, val path: String, val mime: String, val 
             "pdf" to "PDF document", "doc" to "Word document", "docx" to "Word document", "xls" to "Excel spreadsheet",
             "xlsx" to "Excel spreadsheet", "csv" to "CSV spreadsheet", "ppt" to "PowerPoint deck", "pptx" to "PowerPoint deck",
             "png" to "Picture", "jpg" to "Picture", "jpeg" to "Picture", "gif" to "Picture", "webp" to "Picture", "heic" to "Picture",
-            "md" to "Markdown note", "txt" to "Text file", "json" to "JSON file", "zip" to "Zip archive",
+            "md" to "Markdown note", "txt" to "Text file", "json" to "JSON file", "zip" to "Zip archive", "html" to "Web page", "svg" to "Vector picture",
         )
     }
 }
 
 /** The server appends `<hq-attachments>[...]</hq-attachments>` to a saved message; the chat shows the files as cards, not as that text. */
 object Attachments {
+    /** The server keeps every chat upload under this folder; a path anywhere else is not one of its files. */
+    const val UPLOAD_ROOT = "_media/web/"
+
     private val MARKER = Regex("\\s*<hq-attachments>([\\s\\S]*?)(?:</hq-attachments>|$)")
 
     fun split(content: String): Pair<String, List<Attachment>> {
@@ -38,7 +41,7 @@ object Attachments {
             (0 until arr.length()).map { i ->
                 val o = arr.getJSONObject(i)
                 Attachment(o.getString("name"), o.getString("path"), o.optString("mime", ""), o.optLong("size", 0))
-            }
+            }.filter { it.path.startsWith(UPLOAD_ROOT) && !it.path.contains("..") }
         } catch (e: JSONException) {
             emptyList()
         }

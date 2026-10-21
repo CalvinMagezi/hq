@@ -41,7 +41,7 @@ fun ScrollingMono(text: String, modifier: Modifier = Modifier) {
     val scroll = rememberScrollState()
     Box(modifier.fillMaxWidth()) {
         Text(text, style = MonoStyle, color = Mts.Ink, softWrap = false, modifier = Modifier.horizontalScroll(scroll).padding(horizontal = 12.dp, vertical = 10.dp))
-        if (scroll.value < scroll.maxValue) RightFade()
+        if (scroll.canScrollForward) RightFade()
     }
 }
 

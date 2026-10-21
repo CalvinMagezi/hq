@@ -28,6 +28,7 @@ class MessageBlocksTest {
     @Test fun aBadChartKeepsItsSourceAndReason() {
         val b = parseBlocks("```chart\n{\"type\":\"bar\",\"labels\":[\"A\",\"B\",\"C\"],\"series\":[{\"name\":\"Runs\",\"values\":[4,7]}]}\n```").single() as Block.ChartBlock
         assertTrue((b.result as ChartParse.Bad).reason.contains("series 1 needs 3 values"))
+        assertTrue(b.source.contains("\"Runs\""))
     }
 
     @Test fun mermaidPieBecomesAChartAndOtherMermaidStaysCode() {

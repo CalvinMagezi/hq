@@ -115,6 +115,12 @@ private fun richFixture(name: String?): ChatUiState? {
         "note" -> chat("Samsung battery steps", "Write up the Samsung battery steps and say what the roadmap wants").copy(
             note = NoteSheet("$LONG_RUN/Samsung battery steps.md", "Samsung battery steps", "Projects › Agent-HQ", NOTE_BODY, truncated = false, savedAge = "just now"),
         )
+        "notemenu" -> noteOpen().let { it.copy(note = it.note, noteMenu = true) }
+        "export" -> noteOpen().copy(export = ExportState.Choosing(exportNote))
+        "making" -> noteOpen().copy(export = ExportState.Making(exportNote, ExportFormat.Pdf))
+        "ready" -> noteOpen().copy(export = ExportState.Ready(exportNote, ExportFormat.Pdf, "Samsung battery steps.pdf", "application/pdf", "", 86_016))
+        "readyzip" -> noteOpen().copy(export = ExportState.Ready(exportNote.copy(tables = 3), ExportFormat.Csv, "Samsung-battery-steps.zip", "application/zip", "", 2_048))
+        "exportfailed" -> noteOpen().copy(export = ExportState.Failed(exportNote, ExportFormat.Pdf, "Could not make the PDF. Try again."))
         "tables" -> chat(
             "Soak test results", "Show me the soak test results",
             reply("r", "Three runs finished.\n\n$SMALL_TABLE\n\nThe latest run, test by test:\n\n$WIDE_TABLE"),
@@ -163,5 +169,11 @@ private fun richFixture(name: String?): ChatUiState? {
         else -> null
     }
 }
+
+private val exportNote = ExportNote("$LONG_RUN/Samsung battery steps.md", "Samsung battery steps", 1)
+
+private fun noteOpen() = chat("Samsung battery steps", "Write up the Samsung battery steps and say what the roadmap wants").copy(
+    note = NoteSheet("$LONG_RUN/Samsung battery steps.md", "Samsung battery steps", "Projects › Agent-HQ", NOTE_BODY, truncated = false, savedAge = "just now"),
+)
 
 private fun spec(fence: String) = ((parseBlocks(fence).first() as Block.ChartBlock).result as ChartParse.Ok).spec

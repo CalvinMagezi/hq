@@ -5,6 +5,7 @@ import java.util.concurrent.TimeUnit
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import okhttp3.MediaType.Companion.toMediaType
+import okhttp3.MediaType.Companion.toMediaTypeOrNull
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.RequestBody.Companion.toRequestBody
@@ -16,6 +17,12 @@ import org.json.JSONObject
 
 /** The local hq is not answering, or answered with an error. */
 class HqUnavailable(message: String, cause: Throwable? = null) : IOException(message, cause)
+
+/** hq cannot make that export from this note (no tables, a file that is not Markdown); [message] says why. */
+class ExportRefused(message: String) : IOException(message)
+
+/** An export saved in the app's cache. */
+data class ExportedFile(val file: java.io.File, val name: String, val mime: String)
 
 /** hq answered, and the note is not there (or the path is not one it will serve). */
 class NoteNotFound(path: String) : IOException("No note at $path")
@@ -85,16 +92,68 @@ class HqClient(private val token: () -> String, private val base: String = LOCAL
         }
     }
 
+    /** Makes one export of a note on hq and saves it under [dir]; cancelling the calling coroutine cancels the request. */
+    suspend fun exportNote(path: String, format: String, dir: java.io.File): ExportedFile {
+        val request = authed("/api/note/export?path=${java.net.URLEncoder.encode(path, "UTF-8")}&format=$format").build()
+        val response = kotlinx.coroutines.suspendCancellableCoroutine { cont ->
+            val call = http.newCall(request)
+            cont.invokeOnCancellation { call.cancel() }
+            call.enqueue(object : okhttp3.Callback {
+                override fun onFailure(call: okhttp3.Call, e: IOException) = cont.resumeWith(Result.failure(HqUnavailable("hq is not reachable", e)))
+                override fun onResponse(call: okhttp3.Call, response: okhttp3.Response) = cont.resumeWith(Result.success(response))
+            })
+        }
+        return withContext(Dispatchers.IO) {
+            response.use { r ->
+                if (r.code == HTTP_BAD_REQUEST) throw ExportRefused(runCatching { JSONObject(r.body.string()).optString("error") }.getOrNull().orEmpty())
+                if (!r.isSuccessful) throw HqUnavailable("HTTP ${r.code} for /api/note/export")
+                val name = fileNameOf(r.header("Content-Disposition")) ?: "note.$format"
+                val dest = java.io.File(dir, name)
+                dest.parentFile?.mkdirs()
+                r.body.byteStream().use { input -> dest.outputStream().use { input.copyTo(it) } }
+                ExportedFile(dest, name, r.header("Content-Type")?.substringBefore(';')?.trim().orEmpty())
+            }
+        }
+    }
+
+    /** The vault paths of the pinned notes. */
+    suspend fun pinned(): Set<String> =
+        send(authed("/api/pinned").build()) { text -> JSONObject(text).optJSONArray("notes").objects().mapNotNull { it.optString("path").ifBlank { null } }.toSet() }
+
+    suspend fun setPinned(path: String, pin: Boolean) {
+        send(authed("/api/pin").post(JSONObject().put("path", path).put("pin", pin).toString().toRequestBody("application/json".toMediaType())).build()) { }
+    }
+
     /** A new empty chat with a title, as `/topic <name>` makes. */
     suspend fun createThread(title: String): ChatThread =
         send(authed("/api/threads").post(JSONObject().put("title", title).toString().toRequestBody("application/json".toMediaType())).build()) { ChatThread.from(JSONObject(it)) }
 
-    /** Saves a file for the next message; the reply carries its vault path and is sent back with the message. */
-    suspend fun uploadFile(name: String, mime: String, bytes: ByteArray): Attachment {
-        val body = bytes.toRequestBody(mime.ifBlank { "application/octet-stream" }.toMediaType())
+    /**
+     * Saves a file for the next message; the reply carries its vault path and is sent back with the message.
+     * The file is streamed from [open], not read into memory, and the upload stops past [maxBytes].
+     */
+    suspend fun uploadFile(name: String, mime: String, size: Long, maxBytes: Long, open: () -> java.io.InputStream?): Attachment {
+        val body = object : okhttp3.RequestBody() {
+            override fun contentType() = mime.ifBlank { "application/octet-stream" }.toMediaTypeOrNull()
+            override fun contentLength() = size
+            override fun writeTo(sink: okio.BufferedSink) {
+                val input = open() ?: throw IOException("The file could not be read")
+                input.use {
+                    val buffer = ByteArray(UPLOAD_CHUNK)
+                    var total = 0L
+                    while (true) {
+                        val n = it.read(buffer)
+                        if (n < 0) break
+                        total += n
+                        if (total > maxBytes) throw IOException("The file is over the limit")
+                        sink.write(buffer, 0, n)
+                    }
+                }
+            }
+        }
         return send(authed("/api/chat/uploads?name=${java.net.URLEncoder.encode(name, "UTF-8")}").post(body).build()) { text ->
             val o = JSONObject(text)
-            Attachment(o.getString("name"), o.getString("path"), o.optString("mime", ""), o.optLong("size", bytes.size.toLong()))
+            Attachment(o.getString("name"), o.getString("path"), o.optString("mime", ""), o.optLong("size", size))
         }
     }
 
@@ -130,6 +189,14 @@ class HqClient(private val token: () -> String, private val base: String = LOCAL
         }
     }
 
+    /** The file name a download asks for: the UTF-8 form when there is one, else the plain one; never a path. */
+    private fun fileNameOf(disposition: String?): String? {
+        val d = disposition ?: return null
+        val raw = Regex("filename\\*=UTF-8''([^;]+)").find(d)?.groupValues?.get(1)?.let { java.net.URLDecoder.decode(it, "UTF-8") }
+            ?: Regex("filename=\"([^\"]+)\"").find(d)?.groupValues?.get(1)
+        return raw?.substringAfterLast('/')?.replace('\\', '_')?.takeIf { it.isNotBlank() && it != ".." }
+    }
+
     companion object {
         const val LOCAL_HQ = "http://127.0.0.1:5678"
         private const val HTTP_NOT_FOUND = 404
@@ -139,6 +206,7 @@ class HqClient(private val token: () -> String, private val base: String = LOCAL
         private const val PING_SECONDS = 20L
         private const val THREAD_PAGE = 50
         private const val PICKER_PAGE = 20
+        private const val UPLOAD_CHUNK = 64 * 1024
         const val MESSAGE_PAGE = 100
         private val EMPTY_JSON = "{}".toRequestBody("application/json".toMediaType())
     }

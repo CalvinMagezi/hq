@@ -137,6 +137,7 @@ private fun Modifier.chipBorder(dashed: Boolean): Modifier = if (!dashed) border
 fun FileCardView(file: Attachment, onOpen: () -> Unit, modifier: Modifier = Modifier) {
     Row(
         modifier.fillMaxWidth().heightIn(min = 64.dp).clip(CardShape).background(Mts.Surface000).border(1.dp, Mts.Hairline, CardShape)
+            .clickable(role = Role.Button, onClickLabel = "Open ${file.name}", onClick = onOpen)
             .padding(start = 12.dp, top = 8.dp, end = 8.dp, bottom = 8.dp),
         horizontalArrangement = Arrangement.spacedBy(12.dp), verticalAlignment = Alignment.CenterVertically,
     ) {
@@ -148,7 +149,7 @@ fun FileCardView(file: Attachment, onOpen: () -> Unit, modifier: Modifier = Modi
             Text("${file.kind} · ${file.sizeWords}", style = SmallText, color = Mts.InkMuted, maxLines = 1, overflow = TextOverflow.Ellipsis)
         }
         Box(
-            Modifier.heightIn(min = 32.dp).clip(CircleShape).border(1.dp, Mts.Line, CircleShape).clickable(role = Role.Button, onClickLabel = "Open ${file.name}", onClick = onOpen).padding(horizontal = 12.dp),
+            Modifier.heightIn(min = 32.dp).clip(CircleShape).border(1.dp, Mts.Line, CircleShape).padding(horizontal = 12.dp),
             contentAlignment = Alignment.Center,
         ) { Text("Open", style = HqType.ToolLine, color = Mts.Ink, maxLines = 1) }
     }

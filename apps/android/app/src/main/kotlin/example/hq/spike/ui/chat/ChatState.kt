@@ -27,6 +27,8 @@ data class UiMessage(
     companion object {
         /** A saved message: the attachment marker the server appends is split off into [files]. */
         fun saved(id: String, speaker: Speaker, content: String, tools: List<ToolStep> = emptyList(), createdAt: String = ""): UiMessage {
+            // Only the user's own messages carry the marker; a model reply that contains one is just text.
+            if (speaker != Speaker.User) return UiMessage(id, speaker, content, tools, createdAt = createdAt)
             val (text, files) = Attachments.split(content)
             return UiMessage(id, speaker, text, tools, createdAt = createdAt, files = files)
         }
@@ -79,6 +81,8 @@ data class ChatUiState(
     val editing: String? = null,
     /** Older messages are still on the server beyond what is loaded. */
     val hasOlder: Boolean = false,
+    val noteMenu: Boolean = false,
+    val export: ExportState? = null,
 ) {
     val running: Boolean get() = live != null
     val canSend: Boolean get() = (draft.isNotBlank() || files.isNotEmpty()) && connected && !running && files.all { it.status == FileStatus.Ready }
@@ -124,7 +128,42 @@ sealed interface Page {
 }
 
 /** A note open in the sheet. [savedAge] is "just now", "3m ago" and so on when a reply in this chat wrote it, else null. */
-data class NoteSheet(val path: String, val title: String, val trail: String, val body: String, val truncated: Boolean, val savedAge: String?)
+data class NoteSheet(
+    val path: String,
+    val title: String,
+    val trail: String,
+    val body: String,
+    val truncated: Boolean,
+    val savedAge: String?,
+    val pinned: Boolean = false,
+)
+
+enum class ExportGroup(val label: String) { Document("Document"), Picture("Picture"), Tables("Tables in this note") }
+
+/** The formats the web app offers, in the board's order, each with the plain words under it. [word] is how a message names the file ("Making your PDF"). */
+enum class ExportFormat(val key: String, val label: String, val blurb: String, val ext: String, val group: ExportGroup, val word: String) {
+    Pdf("pdf", "PDF document", "Best for printing and sending", ".pdf", ExportGroup.Document, "PDF"),
+    Docx("docx", "Word document", "Opens in Word", ".docx", ExportGroup.Document, "Word document"),
+    Html("html", "Web page", "Opens in a browser", ".html", ExportGroup.Document, "web page"),
+    Markdown("md", "Markdown", "Plain text with the marks", ".md", ExportGroup.Document, "Markdown file"),
+    Png("png", "Whole note as one image", "One tall picture", ".png", ExportGroup.Picture, "picture"),
+    Svg("svg", "Sharp at any size", "A vector image", ".svg", ExportGroup.Picture, "image"),
+    Xlsx("xlsx", "Excel workbook", "Opens in Excel", ".xlsx", ExportGroup.Tables, "Excel workbook"),
+    Csv("csv", "CSV", "Opens in any spreadsheet", ".csv", ExportGroup.Tables, "CSV file"),
+    Json("json", "JSON", "For programs", ".json", ExportGroup.Tables, "JSON file"),
+}
+
+data class ExportNote(val path: String, val title: String, val tables: Int)
+
+/** Where an export stands: picking a format, being made on hq, ready to send or keep, or failed. */
+sealed interface ExportState {
+    val note: ExportNote
+
+    data class Choosing(override val note: ExportNote) : ExportState
+    data class Making(override val note: ExportNote, val format: ExportFormat) : ExportState
+    data class Ready(override val note: ExportNote, val format: ExportFormat, val name: String, val mime: String, val file: String, val size: Long) : ExportState
+    data class Failed(override val note: ExportNote, val format: ExportFormat, val reason: String) : ExportState
+}
 
 /** A line at the bottom of the screen, with an optional action word (Undo). */
 data class Notice(val text: String, val action: String? = null)
@@ -142,15 +181,19 @@ object ChatReducer {
         val here = e.threadId != null && (e.threadId == state.threadId || (state.threadId == null && mine))
         if (!here) return state
         val saved = e.userMessage?.let { UiMessage.saved(it.id, Speaker.User, it.content) }
+        // An edit made in another tab or on another device replaced a question and what followed it.
+        val base = if (!mine && e.replaceFrom != null) state.messages.takeWhile { it.id != e.replaceFrom } else state.messages
         val messages = when {
-            mine && saved != null -> state.messages.map { if (it.id == e.clientId) saved else it }
-            saved != null && state.messages.none { it.id == saved.id } -> state.messages + saved
-            else -> state.messages
+            mine && saved != null -> base.map { if (it.id == e.clientId) saved else it }
+            saved != null && base.none { it.id == saved.id } -> base + saved
+            else -> base
         }
         return state.copy(threadId = e.threadId, messages = messages, live = LiveReply(), failed = false)
     }
 
     private fun reply(state: ChatUiState, event: ChatEvent): ChatUiState {
+        // A turn_end with no turn running here is a message the server posted (a helper's update): the caller reloads the chat.
+        if (event is ChatEvent.TurnEnd && state.live == null) return state
         val live = state.live ?: LiveReply()
         return when (event) {
             is ChatEvent.Text -> state.copy(live = live.copy(text = live.text + event.text))
@@ -258,7 +301,8 @@ object ChatTime {
     fun clock(at: String, zone: ZoneId = ZoneId.systemDefault()): String =
         parse(at)?.atZone(zone)?.toLocalTime()?.format(java.time.format.DateTimeFormatter.ofPattern("HH:mm")).orEmpty()
 
-    private fun parse(value: String): Instant? = try { Instant.parse(value) } catch (e: DateTimeParseException) { null }
+    /** hq writes `+00:00`, not `Z`; Instant.parse takes only `Z` before Android 14, so the offset form is read instead. */
+    private fun parse(value: String): Instant? = try { java.time.OffsetDateTime.parse(value).toInstant() } catch (e: DateTimeParseException) { null }
 
     private const val WEEK_DAYS = 7L
     private const val MINUTES_PER_HOUR = 60L

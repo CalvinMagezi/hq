@@ -29,6 +29,8 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -72,7 +74,7 @@ private fun Chip(icon: ImageVector, label: String, removeLabel: String, onRemove
     ) {
         Icon(icon, null, Modifier.size(16.dp), tint = Mts.Ink)
         Text(label, style = HqType.ToolLine, color = Mts.Ink, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f, fill = false))
-        Box(Modifier.size(36.dp).clickable(role = Role.Button, onClickLabel = removeLabel, onClick = onRemove), contentAlignment = Alignment.Center) {
+        Box(Modifier.size(36.dp).clickable(role = Role.Button, onClickLabel = removeLabel, onClick = onRemove).semantics { contentDescription = removeLabel }, contentAlignment = Alignment.Center) {
             Icon(HqIcons.Close, null, Modifier.size(16.dp), tint = Mts.Ink)
         }
     }
@@ -85,7 +87,9 @@ private fun FileChips(files: List<PendingFile>, actions: ChatActions) {
         files.forEach { file ->
             val failed = file.status == FileStatus.Failed
             Row(
-                Modifier.heightIn(min = 48.dp).widthIn(max = 200.dp).clip(ChipShape).background(Mts.Surface100).border(1.dp, if (failed) Mts.DangerText else Mts.Hairline, ChipShape).padding(start = 8.dp, top = 4.dp, bottom = 4.dp),
+                Modifier.heightIn(min = 48.dp).widthIn(max = 200.dp).clip(ChipShape).background(Mts.Surface100).border(1.dp, if (failed) Mts.DangerText else Mts.Hairline, ChipShape)
+                    .then(if (file.retryable) Modifier.clickable(role = Role.Button, onClickLabel = "Try uploading ${file.name} again") { actions.onRetryFile(file.id) } else Modifier)
+                    .padding(start = 8.dp, top = 4.dp, bottom = 4.dp),
                 horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically,
             ) {
                 Box(Modifier.size(32.dp).background(Mts.Surface200, RoundedCornerShape(6.dp)), contentAlignment = Alignment.Center) {
@@ -95,10 +99,10 @@ private fun FileChips(files: List<PendingFile>, actions: ChatActions) {
                     Text(file.name, style = HqType.ToolLine, color = Mts.Ink, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.widthIn(max = 110.dp))
                     Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                         Text(fileLine(file), style = HqType.Caption, color = if (failed) Mts.DangerText else Mts.InkMuted, maxLines = 1)
-                        if (file.retryable) Text("Retry", style = HqType.NavLabel, color = Mts.Ink, modifier = Modifier.clickable(role = Role.Button) { actions.onRetryFile(file.id) })
+                        if (file.retryable) Text("Retry", style = HqType.NavLabel, color = Mts.Ink)
                     }
                 }
-                Box(Modifier.size(36.dp).clickable(role = Role.Button, onClickLabel = "Remove ${file.name}") { actions.onRemoveFile(file.id) }, contentAlignment = Alignment.Center) {
+                Box(Modifier.size(36.dp).clickable(role = Role.Button, onClickLabel = "Remove ${file.name}") { actions.onRemoveFile(file.id) }.semantics { contentDescription = "Remove ${file.name}" }, contentAlignment = Alignment.Center) {
                     Icon(HqIcons.Close, null, Modifier.size(20.dp), tint = Mts.Ink)
                 }
             }
@@ -122,7 +126,7 @@ private fun sizeWords(size: Long): String = when {
 @Composable
 private fun MessageRow(state: ChatUiState, actions: ChatActions) {
     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(4.dp), verticalAlignment = Alignment.Bottom) {
-        Box(Modifier.size(48.dp).clip(CircleShape).clickable(role = Role.Button, onClickLabel = "Add to this chat", onClick = actions.onOpenAdd), contentAlignment = Alignment.Center) {
+        Box(Modifier.size(48.dp).clip(CircleShape).clickable(role = Role.Button, onClickLabel = "Add to this chat", onClick = actions.onOpenAdd).semantics { contentDescription = "Add to this chat" }, contentAlignment = Alignment.Center) {
             Icon(HqIcons.Plus, null, Modifier.size(24.dp), tint = Mts.Ink)
         }
         BasicTextField(
@@ -174,7 +178,7 @@ private fun SendButton(enabled: Boolean, onSend: () -> Unit) {
 private fun StopButton(onStop: () -> Unit) {
     Box(
         Modifier.size(48.dp).clip(CircleShape).background(Mts.Surface200).border(1.dp, Mts.Line, CircleShape)
-            .clickable(role = Role.Button, onClickLabel = "Stop", onClick = onStop),
+            .clickable(role = Role.Button, onClickLabel = "Stop", onClick = onStop).semantics { contentDescription = "Stop" },
         contentAlignment = Alignment.Center,
     ) {
         Box(Modifier.size(16.dp).background(Mts.Ink, RoundedCornerShape(4.dp)))

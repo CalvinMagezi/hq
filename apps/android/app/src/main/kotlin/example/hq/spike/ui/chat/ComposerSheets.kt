@@ -57,7 +57,7 @@ private val LiftedTop = 190.dp
 private val SmallText = HqType.Caption.copy(fontSize = 13.sp, lineHeight = 18.sp)
 
 @Composable
-private fun SheetFrame(onClose: () -> Unit, top: androidx.compose.ui.unit.Dp?, content: @Composable ColumnScope.() -> Unit) {
+internal fun SheetFrame(onClose: () -> Unit, top: androidx.compose.ui.unit.Dp?, content: @Composable ColumnScope.() -> Unit) {
     BackHandler(onBack = onClose)
     Box(Modifier.fillMaxSize()) {
         Box(Modifier.fillMaxSize().background(Scrim).clickable(interactionSource = remember { MutableInteractionSource() }, indication = null, onClick = onClose))
@@ -71,11 +71,24 @@ private fun SheetFrame(onClose: () -> Unit, top: androidx.compose.ui.unit.Dp?, c
     }
 }
 
+/** The system pickers. Registered where the screen stays composed: a launcher registered inside the sheet is unregistered when the sheet closes, before the picker returns. */
+class SystemPickers(val photos: () -> Unit, val files: () -> Unit)
+
+@Composable
+fun rememberSystemPickers(onFiles: (List<android.net.Uri>) -> Unit): SystemPickers {
+    val photos = rememberLauncherForActivityResult(ActivityResultContracts.PickMultipleVisualMedia()) { onFiles(it) }
+    val files = rememberLauncherForActivityResult(ActivityResultContracts.OpenMultipleDocuments()) { onFiles(it) }
+    return remember(photos, files) {
+        SystemPickers(
+            photos = { photos.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)) },
+            files = { files.launch(arrayOf("*/*")) },
+        )
+    }
+}
+
 /** "Add to this chat": a note or a task from a picker, a photo or a file from the system's own pickers. */
 @Composable
-fun AddSheet(actions: ChatActions) {
-    val photos = rememberLauncherForActivityResult(ActivityResultContracts.PickMultipleVisualMedia()) { actions.onFiles(it) }
-    val files = rememberLauncherForActivityResult(ActivityResultContracts.OpenMultipleDocuments()) { actions.onFiles(it) }
+fun AddSheet(actions: ChatActions, pickers: SystemPickers) {
     SheetFrame(actions.onCloseAdd, top = null) {
         Column(Modifier.padding(start = 16.dp, end = 16.dp, bottom = 28.dp)) {
             Text("Add to this chat", style = HqType.H2, color = Mts.Ink)
@@ -85,8 +98,8 @@ fun AddSheet(actions: ChatActions) {
                 Tile(HqIcons.Tasks, "A task", Modifier.weight(1f)) { actions.onPickKind(ContextRef.Kind.Task) }
             }
             Row(Modifier.padding(top = 12.dp), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                Tile(HqIcons.Camera, "A photo", Modifier.weight(1f)) { actions.onCloseAdd(); photos.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)) }
-                Tile(HqIcons.File, "A file", Modifier.weight(1f)) { actions.onCloseAdd(); files.launch(arrayOf("*/*")) }
+                Tile(HqIcons.Camera, "A photo", Modifier.weight(1f)) { actions.onCloseAdd(); pickers.photos() }
+                Tile(HqIcons.File, "A file", Modifier.weight(1f)) { actions.onCloseAdd(); pickers.files() }
             }
         }
     }
@@ -165,24 +178,24 @@ fun MessageActionsSheet(state: ChatUiState, message: UiMessage, blocks: BlockAct
             Column(Modifier.fillMaxWidth().clip(SheetShape).background(Mts.Surface100).navigationBarsPadding().padding(bottom = 24.dp)) {
                 Box(Modifier.padding(top = 12.dp, bottom = 12.dp).size(width = 32.dp, height = 4.dp).align(Alignment.CenterHorizontally).background(Mts.Line, RoundedCornerShape(2.dp)))
                 Text(header.uppercase(), style = HqType.Group.copy(letterSpacing = 0.06.em), color = Mts.InkMuted, modifier = Modifier.padding(start = 24.dp, end = 24.dp, bottom = 8.dp))
-                ActionRow(HqIcons.Copy, "Copy text", null) { copy(message.text); actions.onCloseSheet(); actions.onNotice("Copied") }
-                ActionRow(HqIcons.TextCursor, "Select text", null) { actions.onSelectText(message.text) }
-                if (canRegenerate) ActionRow(HqIcons.RotateCw, "Regenerate reply", "Runs the last question again. This reply is replaced.") { actions.onRegenerate(message.id) }
-                if (canEdit) ActionRow(HqIcons.Edit, "Edit and resend", "Puts the question back in the box. Sending it replaces what came after.") { actions.onEditResend(message.id) }
+                ActionRow(HqIcons.Copy, "Copy text", null, { copy(message.text); actions.onCloseSheet(); actions.onNotice("Copied") })
+                ActionRow(HqIcons.TextCursor, "Select text", null, { actions.onSelectText(message.text) })
+                if (canRegenerate) ActionRow(HqIcons.RotateCw, "Regenerate reply", "Runs the last question again. This reply is replaced.", { actions.onRegenerate(message.id) })
+                if (canEdit) ActionRow(HqIcons.Edit, "Edit and resend", "Puts the question back in the box. Sending it replaces what came after.", { actions.onEditResend(message.id) })
             }
         }
     }
 }
 
 @Composable
-private fun ActionRow(icon: ImageVector, label: String, subtitle: String?, onClick: () -> Unit) {
+internal fun ActionRow(icon: ImageVector, label: String, subtitle: String?, onClick: () -> Unit, tint: Color = Mts.Ink, minHeight: androidx.compose.ui.unit.Dp? = null) {
     Row(
-        Modifier.padding(horizontal = 8.dp).fillMaxWidth().heightIn(min = if (subtitle == null) 56.dp else 64.dp).clip(RoundedCornerShape(16.dp)).clickable(role = Role.Button, onClick = onClick).padding(horizontal = 16.dp, vertical = 8.dp),
+        Modifier.padding(horizontal = 8.dp).fillMaxWidth().heightIn(min = minHeight ?: if (subtitle == null) 56.dp else 64.dp).clip(RoundedCornerShape(16.dp)).clickable(role = Role.Button, onClick = onClick).padding(horizontal = 16.dp, vertical = 8.dp),
         horizontalArrangement = Arrangement.spacedBy(16.dp), verticalAlignment = Alignment.CenterVertically,
     ) {
-        Icon(icon, null, Modifier.size(24.dp), tint = Mts.Ink)
+        Icon(icon, null, Modifier.size(24.dp), tint = tint)
         Column(Modifier.weight(1f)) {
-            Text(label, style = HqType.BodyBold, color = Mts.Ink)
+            Text(label, style = HqType.BodyBold, color = tint)
             if (subtitle != null) Text(subtitle, style = HqType.BodySm, color = Mts.InkMuted)
         }
     }

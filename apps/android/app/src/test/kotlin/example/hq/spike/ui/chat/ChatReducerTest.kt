@@ -55,6 +55,24 @@ class ChatReducerTest {
     }
 
     @Test
+    fun aMessagePostedByTheServerIsNotAFailedReply() {
+        val idle = ChatUiState(threadId = "t1", messages = listOf(UiMessage("u1", Speaker.User, "hi")))
+        val out = ChatReducer.apply(idle, ChatEvent.TurnEnd("t1", "m9", false), emptySet())
+        assertEquals(idle, out)
+    }
+
+    @Test
+    fun anEditElsewhereReplacesTheQuestionAndWhatFollowedIt() {
+        val open = ChatUiState(
+            threadId = "t1",
+            messages = listOf(UiMessage("u1", Speaker.User, "first"), UiMessage("r1", Speaker.Reply, "answer"), UiMessage("u2", Speaker.User, "second"), UiMessage("r2", Speaker.Reply, "again")),
+        )
+        val saved = StoredMessage("u3", "t1", "user", "second, edited", "", emptyList(), false)
+        val out = ChatReducer.apply(open, ChatEvent.TurnStart("t1", "other", saved, replaceFrom = "u2"), emptySet())
+        assertEquals(listOf("u1", "r1", "u3"), out.messages.map { it.id })
+    }
+
+    @Test
     fun toolWordsAreThePlainOnes() {
         assertEquals("Read \"Mobile-First-Roadmap\"", ToolWords.running(ToolStep("c", "vault_read", "{\"path\":\"Notebooks/Projects/Mobile-First-Roadmap.md\"}", null, null)))
         assertEquals("Did a step", ToolWords.running(ToolStep("c", "something_new", null, null, null)))
@@ -68,5 +86,13 @@ class ChatReducerTest {
         assertEquals(Group.Week, ChatTime.group("2026-10-17T10:00:00Z", now, ZoneOffset.UTC))
         assertEquals(Group.Older, ChatTime.group("2026-09-01T10:00:00Z", now, ZoneOffset.UTC))
         assertEquals("3m ago", ChatTime.age("2026-10-21T11:57:00Z", now))
+    }
+
+    @Test
+    fun timesAsHqWritesThemAreRead() {
+        // hq stores Rust's to_rfc3339(): an offset and fractional seconds, never a Z.
+        val now = Instant.parse("2026-10-21T12:00:00Z")
+        assertEquals(Group.Today, ChatTime.group("2026-10-21T01:00:00.123456+00:00", now, ZoneOffset.UTC))
+        assertEquals("3m ago", ChatTime.age("2026-10-21T11:56:59.5+00:00", now))
     }
 }
