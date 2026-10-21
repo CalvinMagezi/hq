@@ -135,3 +135,75 @@ Two reviews were done by readers other than the author, both read-only:
 2. A second independent review of the pull request found one blocker (a peer applied in a first round was not recorded if the second round failed) and seven items on the units, the stored files, the pasted-key case, the hub key's location, the revoke message and the trigger rate. It read the code and ran nothing as root.
 
 Every finding of both reviews is closed in the pull request or listed in TECHDEBT.md with the reason. Not yet done: a run on a live server or a spare VM (the ignored real-interface test and the first apply of the units; see [docs/PRIVATE_NETWORK.md](../PRIVATE_NETWORK.md), "What is not done yet"), and a human reviewer other than the author for the shipped release.
+
+## 9. The userspace peer inside the app (`hq-tunnel`)
+
+Status, 2026-10-21: the library is built (`crates/hq-tunnel`). The commands that run it, its
+configuration key and the Android wiring come in later pull requests; the rows below that depend on
+them say so. A phone joins the plane as a WireGuard peer made of boringtun (the protocol) and smoltcp
+(TCP) inside the app, with no `VpnService`, so it takes no system VPN slot and needs no second app. It
+is a peer with exactly two maps and no routing:
+
+- a **serve** entry hands one port on the device's tunnel address to one loopback port, for the
+  tunnel addresses it names;
+- a **reach** entry forwards one loopback port to one fixed tunnel destination.
+
+It does not route other apps into the tunnel and has no mode that forwards to an address nobody
+listed. The design and the measurements behind it are in the vault notes `WireGuard-In-App-Design`
+and `WireGuard-In-App-Phase2-Results`.
+
+What the join text is: the trust root. Its hub key, endpoint and addresses decide who the peer talks
+to, and a hub can put any source address on a packet it forwards. Both source checks below compare
+tunnel source addresses, so they hold exactly as far as the hub is trusted (T28). The serve and reach
+maps are local settings, not part of the join text, and importing a join text never writes to them.
+
+### Threats
+
+| # | Threat | Mitigation | Residual risk |
+|---|---|---|---|
+| T29 | A memory-safety or logic bug in boringtun or smoltcp, reached from the network | Both are Rust. The UDP socket is connected to the hub's address, so the kernel drops datagrams from anyone else, and the receive loop checks the source address again, so a socket whose connect failed (for instance during a network change) is not open to strangers: with no connected endpoint nothing is sent or believed until a lookup connects again. smoltcp sees only packets that already decrypted under a session key, and a packet is dropped before it unless it is plain, unfragmented TCP over IPv4 to this device from a source that may speak to its port. The peer is meant to run as its own process so a panic cannot take down the relays. Versions of both are pinned exactly | A flaw in the handshake parser is reachable by a sender who can spoof the hub's address and port; boringtun checks the MAC first, as WireGuard does |
+| T30 | Another app on the phone connects to a reach listener | Loopback only (a listener on another address is refused at load); each forwarded service must authenticate itself; per-entry and total connection caps and an idle timeout | Any app on a phone can connect to loopback, and a local app or a web page can open enough connections to use up a reach entry's cap. A web page can also try `fetch` to the port, so the destination service must check `Origin` and `Host`. The service's own login is the guard |
+| T31 | Confused deputy: a tunnel peer reaches a loopback port it was not meant to | The serve map is fixed: no wildcard, no range, a non-empty list of allowed sources per entry, targets loopback only. The source is checked three times: at ingress against the list of the port the packet is going to (so an unlisted source cannot even start a connection that holds a slot), again at accept, and by never connecting anywhere but loopback whatever the connector is asked | The target sees every tunnel peer as `127.0.0.1`: a target with a "localhost is trusted" shortcut must not sit behind a serve entry. A hub that spoofs a listed address passes the checks (T28) |
+| T32 | A hostile or tampered join text | The parser takes only the lines `hq net` writes, one `[Interface]` then one `[Peer]`, one `/32` for the device and one for the hub, a plain a.b.c.d or DNS name for the endpoint, a keepalive of 0 or 10 to 300 seconds, and refuses everything else (including any `PrivateKey`, `DNS`, `PostUp`). Importing never touches the serve or reach maps | A text that points the phone at another hub gives that hub the trust root above. The command that imports one must show the hub key and endpoint for confirmation, and must not keep serve or reach entries written for an earlier hub (SR-N22, with the command) |
+| T33 | A sender floods the UDP port to drain the battery or block the handshake | Datagrams from other addresses never arrive (connected socket). From the hub's address, at most 128 are taken per wake, a refusal costs a counter and not a log line, and the source address is handed to boringtun so its handshake rate limiter can answer with cookies | A sender who can spoof the hub's address and port can still cost CPU |
+| T34 | A key or a setting ends up in a log, a status file, a command line or the environment | The private key is wrapped (`Secret32`: wiped on drop, redacted in `Debug`), handed over once, and the copy in the options is wiped at once; boringtun wipes its own. The status file and event log record states and counters only. The command line and environment half of this is the later pull request's | Copies of a preshared key made while parsing are not wiped; same-user processes on the phone can read the peer's memory |
+| T35 | The peer spins and keeps the CPU awake | The loop sleeps until the earliest of smoltcp's timer, the next WireGuard deadline, the stack's own housekeeping and a ready descriptor; a descriptor with nothing to wait for is left out of the poll set; resolution runs on its own thread. An established idle tunnel wakes about once per keepalive, or every two minutes with none. A handshake nobody answers is retried every second for 10 seconds, every 5 seconds until a minute, then every 15 seconds. Time the device spends asleep does not time out a TCP connection, as with the kernel's own TCP | A tunnel whose hub is unreachable still wakes every 15 seconds, and one with no endpoint retries the lookup every 5 seconds. A network change retries at once |
+| T36 | A peer holds connection slots without using them | A half-open or never-attached serve connection is torn down after 10 seconds; at most four connections are handed to their targets per pass; a quiet reach connection is closed after its idle time; every entry has a cap and there is a cap on all of them together | A listed source can still use up its entry's cap while it is busy |
+| T37 | A path under the status directory is a link, or is replaced by another process | The files are created fresh with the mode set on the open file, never through a link (a link at the path is removed, and what it pointed at is neither read nor written); a temporary name is per file | The directory must be private to the app. A shared directory could still be raced |
+
+### Security requirements
+
+- SR-N16. A connection from a source the entry does not list never reaches the target, and an
+  unlisted source never holds a slot. Tests: `a_packet_gets_in_only_from_a_source_that_may_speak_to_its_port`,
+  `a_syn_from_an_unlisted_source_takes_no_slot`, `a_source_the_entry_does_not_name_never_reaches_the_target`,
+  `a_source_listed_only_for_another_entry_is_dropped_at_the_door`.
+- SR-N17. Serve targets and reach listeners are loopback only, the maps hold no wildcard, and the
+  connector refuses a non-loopback address. Tests: `nothing_that_widens_the_maps_is_accepted`,
+  `the_connector_refuses_anything_but_loopback_whatever_it_is_asked`. The part "with the feature off no
+  socket is opened" belongs to the pull request that adds the command.
+- SR-N18. No key of the peer appears in a status file, an event log, a refusal message or `Debug`
+  output. Tests: `the_status_and_event_files_never_hold_a_key` (private keys and a preshared key, in
+  base64 and hex, after refusals and a network change), `a_secret_is_redacted_in_debug_output`,
+  `a_refusal_names_the_line_and_never_the_value`. Absence from the command line and the environment
+  is tested with the command.
+- SR-N19. The join parser refuses every line `hq net` does not write, and never panics on hostile
+  input. Tests: `anything_hq_net_does_not_write_is_refused`, `garbage_never_panics` (join) and `garbage_settings_never_panic` (config),
+  `the_text_the_hub_renderer_writes_is_accepted`, `the_keepalive_range_and_plain_addresses_are_accepted`.
+- SR-N20. The status channel is a private file replaced atomically and never through a link, not a
+  listener. The peer's own sockets are one UDP socket (replaced on a network change), the reach
+  listeners the configuration names, and the lookup of the endpoint's name. Tests:
+  `the_status_file_is_private_whole_and_versioned`, `a_link_at_the_path_is_replaced_not_followed`,
+  `datagrams_from_anyone_but_the_endpoint_never_reach_the_session`,
+  `a_link_at_the_event_log_is_replaced_and_what_it_pointed_at_is_never_read_or_written`,
+  `a_log_far_past_its_limit_is_started_again_not_read_whole`.
+- SR-N21. Connections are capped per entry and in total, a quiet reach connection is closed after its
+  idle time, a never-completed serve connection is torn down, and a closed or hung-up stream does not
+  keep the loop awake. Tests: `many_connections_stop_at_the_limit_and_recover_when_they_close`,
+  `a_reach_entry_stops_at_its_own_cap`, `an_idle_reach_connection_is_closed_after_its_idle_time`,
+  `a_connection_that_never_completes_is_torn_down`,
+  `a_target_that_closes_at_once_does_not_make_the_loop_spin`,
+  `a_closed_connection_with_bytes_its_target_has_not_taken_does_not_keep_the_loop_awake`,
+  `a_flood_from_the_endpoint_costs_the_log_one_summary_not_a_line_each`.
+- SR-N22 (with the command, not in this library). Importing a join text shows the hub key and the
+  endpoint for confirmation and clears the serve and reach maps when the hub key or the endpoint
+  differs from the previous join.

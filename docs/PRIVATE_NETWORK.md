@@ -150,8 +150,29 @@ Leave Android's "Block connections without VPN" off for this tunnel. Budget phon
 aggressive battery manager can stop a VPN in the background: exempt the WireGuard app.
 
 A laptop's config sets `PersistentKeepalive = 25`, because the server calls the laptop and the
-laptop has to keep the path open. A phone's does not: the phone starts every exchange, and a timer
-only costs data and battery.
+laptop has to keep the path open. A phone's does not by default: a phone that only starts exchanges
+gains nothing from a timer, which only costs data and battery.
+
+A phone that other devices must reach (HQ running on it, a device linked to it) is the exception:
+without a keepalive its carrier closes the path, and the hub's packets for it are dropped. Add it
+with `--keepalive`:
+
+```
+hq net peer add pixel --pubkey <public key from the app> --kind phone --keepalive 25
+```
+
+`--keepalive <seconds>` sets the interval for any device (10 to 300; the in-app tunnel refuses a join
+text outside that range), and `--keepalive 0` turns the laptop's default off. It applies when the device is added: the printed config carries it, and the phone's
+app has to have it entered ("Persistent keepalive" on the hub peer). For a device that already
+exists, set it in its app; there is no command to change it afterwards. `hq net peer list` shows
+the value in the config `hq net` printed, not what the device runs. The setting changes only that
+config; the applier's input is the same with or without it. A keepalive keeps a phone's radio
+busy, so expect extra battery use.
+
+`peers.toml` gains an optional `keepalive` line for such a device. A device without one writes
+nothing, so the file reads as before; once a device has the line, an older `hq net` refuses the
+whole file (it reads it strictly), revokes included. Do not roll `hq` back on the hub while a
+device carries the line; if you must, delete the `keepalive` lines from `peers.toml` first.
 
 `--psk` also makes a preshared key for the device. It is shown once, in the config, and kept in
 `peers.toml`. Treat it like a password.
@@ -162,7 +183,7 @@ produces a full-tunnel config (`0.0.0.0/0`).
 Other commands:
 
 ```
-hq net peer list              devices, addresses, short key fingerprints
+hq net peer list              devices, kinds, addresses, short key fingerprints, keepalive
 hq net peer revoke <label>    remove a device; its address is retired and hq net never reuses it
 hq net peer forget <address>  retire an address no device owns and remove what the hub has on it
 hq net status                 each device's last handshake
@@ -246,7 +267,9 @@ links in the same write, and its address is retired, so a device added later can
 `hq net link add` also prints, for each of the two devices, the `AllowedIPs` line to set in its
 WireGuard app (the hub's address plus the other device's), because a device only sends into the
 tunnel what its own `AllowedIPs` names. A phone that must be reachable from outside its own
-network also needs `PersistentKeepalive = 25` on its side, or the carrier closes the path.
+network also needs `PersistentKeepalive = 25` on its side, or the carrier closes the path. Set
+"Persistent keepalive" in that device's app; `hq net peer add --keepalive 25` only does it for a
+device added with it.
 
 Two things on the hub have to be in place first, once. Do them before the first `link add`: an
 applier that does not know links refuses the version 2 file that `link add` writes, and applies

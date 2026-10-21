@@ -1,6 +1,7 @@
 # cargo-deny policy for an MIT-licensed project. Run: cargo deny check
 [graph]
-targets = ["x86_64-unknown-linux-gnu", "aarch64-apple-darwin"]
+# aarch64-linux-android is here so dependencies only the phone build pulls in are checked too.
+targets = ["x86_64-unknown-linux-gnu", "aarch64-apple-darwin", "aarch64-linux-android"]
 
 [advisories]
 version = 2
