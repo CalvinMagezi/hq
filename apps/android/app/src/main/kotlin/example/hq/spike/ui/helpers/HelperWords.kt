@@ -121,6 +121,9 @@ object HelperWords {
 
     private fun ago(from: String, now: LocalDateTime): String = span(from, now)?.let { if (it == "just now") it else "$it ago" }.orEmpty()
 
+    /** When a helper was last seen; the oldest rows never had a last-seen time (the server sends null), so they fall back to when they started. */
+    fun lastSeen(row: HelperRow): String = row.lastSeenAt.takeIf { parse(it) != null } ?: row.createdAt
+
     /** The last words on a helper's screen worth showing: no box drawing, no empty lines. */
     fun lastWords(lines: List<String>): String? =
         lines.asReversed().map { cleanLine(it) }.firstOrNull { l -> l.any(Char::isLetter) && l.length > 2 }?.let { if (it.length > MAX_LINE) it.take(MAX_LINE).trimEnd() + "…" else it }
@@ -264,10 +267,10 @@ object HelperWords {
             HelperState.Ready -> "Waiting for your next instruction"
             HelperState.Offline -> hostProblem(row.host, row.detail).removeSuffix(".")
             HelperState.Lost -> "HQ lost contact with this helper"
-            HelperState.Finished -> "Finished ${ago(row.lastSeenAt, now)}".trim()
-            HelperState.Stopped -> "Stopped ${ago(row.lastSeenAt, now)}".trim()
+            HelperState.Finished -> "Finished ${ago(lastSeen(row), now)}".trim()
+            HelperState.Stopped -> "Stopped ${ago(lastSeen(row), now)}".trim()
         }
-        val time = if (state == HelperState.Working || state == HelperState.NeedsOk) span(row.createdAt, now).orEmpty() else ago(row.lastSeenAt, now)
+        val time = if (state == HelperState.Working || state == HelperState.NeedsOk) span(row.createdAt, now).orEmpty() else ago(lastSeen(row), now)
         return HelperCard(row.id, title(row), agent, where, state, line, time, ask.takeIf { state == HelperState.NeedsOk }, row.id, isGeneric(row), folderOf(row.cwd))
     }
 

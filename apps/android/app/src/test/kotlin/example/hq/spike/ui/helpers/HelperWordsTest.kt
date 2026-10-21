@@ -291,4 +291,32 @@ class HelperWordsTest {
         assertEquals("This phone has no key to reach your laptop yet", offline.line)
         assertEquals("HQ cannot reach your mac-mini right now", HelperWords.card(row(agent = "unknown", reachable = false, alive = null), null, now).line)
     }
+
+    @Test fun aRowWithNoLastSeenTimeUsesWhenItStarted() {
+        val old = row(status = "stopped", agent = "idle", seen = "", created = "2026-10-19 10:00:00")
+        val c = HelperWords.card(old, null, now)
+        assertEquals("Stopped 2 d ago", c.line)
+        assertEquals("2 d ago", c.time)
+        assertEquals("2026-10-19 10:00:00", HelperWords.lastSeen(old))
+        assertEquals("2026-10-21 11:58:00", HelperWords.lastSeen(row()))
+    }
+
+    @Test fun aLastSeenTimeThatIsNotATimeIsIgnored() {
+        assertEquals("2026-10-19 10:00:00", HelperWords.lastSeen(row(seen = "null", created = "2026-10-19 10:00:00")))
+        assertEquals("2026-10-19 10:00:00", HelperWords.lastSeen(row(seen = "soon", created = "2026-10-19 10:00:00")))
+    }
+
+    @Test fun theRealListShapeWithNullTimesGivesAnAgeForEveryRow() {
+        val json = """{"sessions":[
+            {"id":"h1","harness":"claude-code","label":"","host":"laptop","cwd":"/Users/x/Documents/HQ/kola-check","status":"stopped","agent_status":"idle","last_seen_at":null,"created_at":"2026-09-24 16:10:41","goal":null,"alive":false,"reachable":true,"archived":false},
+            {"id":"h2","harness":"codex","label":"pilot","host":"laptop","cwd":"/work/p","status":"exited","agent_status":"done","last_seen_at":"2026-10-19 17:32:03","created_at":"2026-10-19 17:31:22","goal":"Prove it","task":null,"alive":null,"reachable":false,"detail":"host 'laptop' unreachable: no gate key at /x","archived":false}]}"""
+        val rows = example.hq.spike.data.helperRows(json)
+        assertEquals("", rows[0].lastSeenAt)
+        assertNull(rows[0].goal)
+        assertNull(rows[1].alive)
+        val cards = rows.map { HelperWords.card(it, null, now) }
+        assertEquals("Stopped 26 d ago", cards[0].line)
+        assertEquals("26 d ago", cards[0].time)
+        assertEquals("Finished 1 d ago", cards[1].line)
+    }
 }

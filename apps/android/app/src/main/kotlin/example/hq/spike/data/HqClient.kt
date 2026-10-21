@@ -237,17 +237,7 @@ class HqClient(private val token: () -> String, private val base: String = LOCAL
     data class HelperHost(val name: String, val reachable: Boolean, val error: String?)
 
     /** Every helper, newest first, including stopped ones. */
-    suspend fun helpers(): List<HelperRow> = send(authed("/api/harness-sessions").build()) { text ->
-        JSONObject(text).optJSONArray("sessions").objects().map { o ->
-            HelperRow(
-                o.getString("id"), o.optString("harness", ""), o.optString("label", ""), o.optString("host", ""), o.optString("cwd", ""),
-                o.optString("status", ""), o.optString("agent_status", ""), o.optString("last_seen_at", ""), o.optString("created_at", ""),
-                o.optStringOrNull("goal"), o.optJSONObject("task")?.optStringOrNull("title"),
-                if (o.isNull("alive") || !o.has("alive")) null else o.optBoolean("alive"),
-                o.optBoolean("reachable", true), o.optStringOrNull("detail"), o.optBoolean("archived", false),
-            )
-        }
-    }
+    suspend fun helpers(): List<HelperRow> = send(authed("/api/harness-sessions").build()) { helperRows(it) }
 
     /** What a helper's terminal shows: its last lines, and whether they were read from the live terminal or are an old snapshot. */
     data class HelperScreen(val lines: List<String>, val live: Boolean)
@@ -436,3 +426,14 @@ class HqClient(private val token: () -> String, private val base: String = LOCAL
 
 internal fun JSONArray?.objects(): List<JSONObject> = if (this == null) emptyList() else (0 until length()).map { getJSONObject(it) }
 internal fun JSONArray?.strings(): List<String> = if (this == null) emptyList() else (0 until length()).map { getString(it) }
+
+/** The helper list as the server sends it. A time the server has not got is JSON null, which is read as empty, never as the word "null". */
+internal fun helperRows(text: String): List<HqClient.HelperRow> = JSONObject(text).optJSONArray("sessions").objects().map { o ->
+    HqClient.HelperRow(
+        o.getString("id"), o.optString("harness", ""), o.optString("label", ""), o.optString("host", ""), o.optString("cwd", ""),
+        o.optString("status", ""), o.optString("agent_status", ""), o.optStringOrNull("last_seen_at").orEmpty(), o.optString("created_at", ""),
+        o.optStringOrNull("goal"), o.optJSONObject("task")?.optStringOrNull("title"),
+        if (o.isNull("alive") || !o.has("alive")) null else o.optBoolean("alive"),
+        o.optBoolean("reachable", true), o.optStringOrNull("detail"), o.optBoolean("archived", false),
+    )
+}

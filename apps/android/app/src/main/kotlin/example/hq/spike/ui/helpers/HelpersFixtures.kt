@@ -45,6 +45,7 @@ fun helpersFixture(name: String?): HelpersUi? {
         "h-nohost" -> base.copy(start = StartForm("Move the build", hosts = listOf(HelperHost("laptop", false, "no gate key"))))
         "h-real" -> realHelpers(now)
         "h-real-open" -> realHelpers(now).copy(finishedOpen = true)
+        "h-real-old" -> realHelpers(now).let { it.copy(finishedOpen = true, rows = it.rows.filter { r -> r.id == "r9" || r.id == "r10" || r.id == "r1" }) }
         "h-real-page" -> realHelpers(now).let { it.copy(open = HelperOpen("r0", HelperPage.Detail)) }
         else -> null
     }
@@ -63,6 +64,9 @@ private fun realHelpers(now: LocalDateTime): HelpersUi {
         HelperRow("r6", "cursor", "", "laptop", "/Users/someone/Documents/HQ/cursor-probe 2026-10-08 1215", "stopped", "idle", at(309), at(309), null, null, false, true, null, false),
         HelperRow("r7", "claude-kola", "", "laptop", "/Users/someone/Documents/HQ/kola-check", "stopped", "idle", at(308), at(308), null, null, false, true, null, false),
         HelperRow("r8", "pi", "", "laptop", "/Users/someone/Documents/HQ/pi-check", "stopped", "idle", at(307), at(307), null, null, false, true, null, false),
+        // The oldest rows on the phone have no last-seen time at all: the server sends null, which the client reads as empty.
+        HelperRow("r9", "claude-kola", "fr034-kola-test", "laptop", "/Users/someone/Documents/HQ/kola-test", "stopped", "idle", "", at(24 * 26), null, null, false, true, null, false),
+        HelperRow("r10", "claude-code", "family-tree-app", "laptop", "/Users/someone/Documents/HQ/family-tree", "exited", "done", "", at(24 * 27), null, null, false, true, null, false),
     )
     return HelpersUi(loaded = true, rows = rows, now = now)
 }
