@@ -35,6 +35,9 @@ data class TaskDetail(
     val subKey: String = newKey(),
 ) {
     val draft: String get() = drafts[prompt ?: COMMENT_DRAFT] ?: ""
+
+    /** The draft kept for [place] once [sent] has gone out, unless more was typed meanwhile. */
+    fun withoutSent(place: String, sent: String): Map<String, String> = if (drafts[place]?.trim() == sent) drafts - place else drafts
 }
 
 private const val COMMENT_DRAFT = ""
@@ -112,7 +115,7 @@ class TasksViewModel(app: Application) : AndroidViewModel(app) {
         onToggleGroup = { k -> _state.update { it.copy(expanded = if (k in it.expanded) it.expanded - k else it.expanded + k) } },
         onDone = ::done, onTomorrow = ::tomorrow, onUndo = ::undoLast, onDismissLine = { _state.update { it.copy(line = null) } },
         onOpen = ::open, onClose = { _state.update { it.copy(detail = null) } }, onMarkDone = { _state.value.detail?.task?.let(::done); _state.update { it.copy(detail = null) } },
-        onPrompt = { p -> detail { it.copy(prompt = p, drafts = if (it.prompt != null) it.drafts - it.prompt else it.drafts) } },
+        onPrompt = { p -> detail { it.copy(prompt = p) } },
         onDraft = { d -> detail { it.copy(drafts = it.drafts + ((it.prompt ?: COMMENT_DRAFT) to d)) } }, onSendBack = ::sendBack,
         onStatus = { s -> patchDetail(JSONObject().put("status", s)) }, onPriority = { p -> patchDetail(JSONObject().put("priority", p ?: JSONObject.NULL)) },
         onToggleSub = ::toggleSub, onAddSub = ::addSub, onComment = ::comment, onArchive = ::archive,
@@ -273,16 +276,17 @@ class TasksViewModel(app: Application) : AndroidViewModel(app) {
         val d = _state.value.detail ?: return
         if (d.draft.isBlank() || d.busy) return
         val id = d.task.id
+        val sent = d.draft.trim()
         detailOf(id) { it.copy(busy = true, error = null) }
         viewModelScope.launch {
             try {
-                client.addTaskComment(id, d.draft.trim())
+                client.addTaskComment(id, sent)
             } catch (e: HqUnavailable) {
                 detailOf(id) { it.copy(busy = false, error = "Could not send it back. HQ is not answering.") }
                 return@launch
             }
             // The note is in, so it is not typed again if the move below fails.
-            detailOf(id) { it.copy(drafts = it.drafts - "sendback") }
+            detailOf(id) { it.copy(drafts = it.withoutSent("sendback", sent)) }
             try {
                 client.patchTask(id, JSONObject().put("status", "in_progress").put("expected_status", "ready_for_review"))
                 closeIfOpen(id)
@@ -320,16 +324,18 @@ class TasksViewModel(app: Application) : AndroidViewModel(app) {
         val d = _state.value.detail ?: return
         if (d.draft.isBlank() || d.prompt != "sub" || d.busy) return
         val id = d.task.id
+        val sent = d.draft.trim()
         detailOf(id) { it.copy(busy = true, error = null) }
         viewModelScope.launch {
             try {
-                client.createTask(JSONObject().put("title", d.draft.trim()).put("parent_task_id", id).put("created_by", "operator").put("external_id", d.subKey))
+                // The key follows the words, so sending the same ones again after a lost answer adds nothing twice, and different ones are new.
+                client.createTask(JSONObject().put("title", sent).put("parent_task_id", id).put("created_by", "operator").put("external_id", "${d.subKey}-${sent.hashCode()}"))
             } catch (e: HqUnavailable) {
                 detailOf(id) { it.copy(busy = false, error = why(e, "Could not add it. HQ is not answering.")) }
                 return@launch
             }
             val subs = try { client.tasks(parentId = id) } catch (e: HqUnavailable) { null }
-            detailOf(id) { it.copy(prompt = null, drafts = it.drafts - "sub", subtasks = subs ?: it.subtasks, busy = false, subKey = newKey()) }
+            detailOf(id) { it.copy(prompt = null, drafts = it.withoutSent("sub", sent), subtasks = subs ?: it.subtasks, busy = false, subKey = newKey()) }
             refresh()
         }
     }
@@ -338,16 +344,17 @@ class TasksViewModel(app: Application) : AndroidViewModel(app) {
         val d = _state.value.detail ?: return
         if (d.draft.isBlank() || d.prompt != null || d.busy) return
         val id = d.task.id
+        val sent = d.draft.trim()
         detailOf(id) { it.copy(busy = true, error = null) }
         viewModelScope.launch {
             try {
-                client.addTaskComment(id, d.draft.trim())
+                client.addTaskComment(id, sent)
             } catch (e: HqUnavailable) {
                 detailOf(id) { it.copy(busy = false, error = why(e, "Could not post the comment. HQ is not answering.")) }
                 return@launch
             }
             val comments = try { client.taskComments(id) } catch (e: HqUnavailable) { null }
-            detailOf(id) { it.copy(drafts = it.drafts - COMMENT_DRAFT, comments = comments ?: it.comments, busy = false) }
+            detailOf(id) { it.copy(drafts = it.withoutSent(COMMENT_DRAFT, sent), comments = comments ?: it.comments, busy = false) }
         }
     }
 
@@ -374,7 +381,7 @@ class TasksViewModel(app: Application) : AndroidViewModel(app) {
         _state.update { it.copy(quick = q.copy(saving = true, error = null)) }
         viewModelScope.launch {
             try {
-                val body = JSONObject().put("title", parsed.title).put("created_by", "operator").put("external_id", q.key)
+                val body = JSONObject().put("title", parsed.title).put("created_by", "operator").put("external_id", "${q.key}-${listOf(q.text, q.notes, q.priority, q.due).hashCode()}")
                 (q.priority ?: parsed.priority)?.let { body.put("priority", it) }
                 parsed.startDate?.let { body.put("start_date", it.toString()) }
                 q.due?.let { body.put("due_date", it.toString()) }

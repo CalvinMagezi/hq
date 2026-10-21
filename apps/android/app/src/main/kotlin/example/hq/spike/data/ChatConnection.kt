@@ -44,6 +44,7 @@ class ChatConnection(private val client: HqClient, scope: CoroutineScope) {
 
     /** Set when the current attempt got as far as an open socket, so a later drop retries quickly instead of at the longest wait. */
     @Volatile private var opened = false
+    @Volatile private var openedAt = 0L
 
     private suspend fun keepConnected() {
         var wait = MIN_WAIT_MS
@@ -54,7 +55,7 @@ class ChatConnection(private val client: HqClient, scope: CoroutineScope) {
                 val ticket = client.wsTicket()
                 socket = client.openSocket(ticket, listener(closed))
                 closed.await()
-                if (opened) wait = MIN_WAIT_MS
+                if (opened && System.currentTimeMillis() - openedAt >= STABLE_OPEN_MS) wait = MIN_WAIT_MS
             } catch (e: HqUnavailable) {
                 // hq is down or still starting; the wait below is the retry.
             } catch (e: IllegalStateException) {
@@ -70,6 +71,7 @@ class ChatConnection(private val client: HqClient, scope: CoroutineScope) {
     private fun listener(closed: CompletableDeferred<Boolean>) = object : WebSocketListener() {
         override fun onOpen(webSocket: WebSocket, response: Response) {
             opened = true
+            openedAt = System.currentTimeMillis()
             _connected.value = true
         }
 
@@ -90,5 +92,7 @@ class ChatConnection(private val client: HqClient, scope: CoroutineScope) {
         const val EVENT_BUFFER = 512
         const val MIN_WAIT_MS = 1_000L
         const val MAX_WAIT_MS = 15_000L
+        /** A connection that lasted this long was a working one; a shorter one keeps the growing wait. */
+        const val STABLE_OPEN_MS = 5_000L
     }
 }

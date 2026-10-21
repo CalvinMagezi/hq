@@ -100,8 +100,8 @@ class NotesViewModel(app: Application) : AndroidViewModel(app) {
         _state.update { s -> s.copy(stack = s.stack.dropLast(1), menu = false, write = if (s.top is NotesRoute.Write) null else s.write) }
         // The folder and the note each have one slot, so the page now showing is loaded again rather than left as the one just closed.
         when (val top = _state.value.top) {
-            is NotesRoute.Folder -> loadFolder(top.path)
-            is NotesRoute.Reader -> loadReader(top.path)
+            is NotesRoute.Folder -> if (_state.value.folder?.path != top.path) loadFolder(top.path)
+            is NotesRoute.Reader -> if ((_state.value.reader as? ReaderPhase.Ready)?.note?.path != top.path) loadReader(top.path)
             else -> {}
         }
         if (_state.value.stack.isEmpty()) refresh()

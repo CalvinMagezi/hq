@@ -147,7 +147,7 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
             is ChatEvent.TurnStart -> {
                 event.clientId?.let { sentContexts.remove(it); sentFiles.remove(it); sentReplace.remove(it) }
                 // A first message was sent before its chat had an id; Retry finds it by that id.
-                lastQuestion = lastQuestion?.let { q -> if (q.threadId == null && event.threadId != null) LastQuestion(event.threadId, q.text, q.files, q.contexts) else q }
+                lastQuestion = lastQuestion?.let { q -> if (q.threadId == null && event.threadId != null && event.clientId != null && event.clientId in pending) LastQuestion(event.threadId, q.text, q.files, q.contexts) else q }
             }
             is ChatEvent.TurnEnd -> if (event.threadId == _state.value.threadId) viewModelScope.launch {
                 // The live copy has tool arguments cut at 4000 characters and no ids; the saved one is whole.

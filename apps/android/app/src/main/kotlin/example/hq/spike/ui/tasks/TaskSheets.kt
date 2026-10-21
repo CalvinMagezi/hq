@@ -291,7 +291,7 @@ private fun SubTasks(d: TaskDetail, actions: TasksActions) {
             Text(s.title, style = HqType.Body, color = if (on) Mts.InkMuted else Mts.Ink, textDecoration = if (on) androidx.compose.ui.text.style.TextDecoration.LineThrough else null)
         }
     }
-    if (d.prompt == "sub") Entry("Add a sub-task", d.draft, actions.onDraft, actions.onAddSub)
+    if (d.prompt == "sub") Entry("Add a sub-task", d.draft, !d.busy, actions.onDraft, actions.onAddSub)
     else Row(Modifier.heightIn(min = 48.dp).clickable(role = Role.Button) { actions.onPrompt("sub") }, horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
         Icon(HqIcons.Plus, null, Modifier.size(20.dp), tint = Mts.BrandBlue); Text("Add a sub-task", style = HqType.BodySmBold, color = Mts.BrandBlue)
     }
@@ -303,20 +303,21 @@ private fun Comments(d: TaskDetail, actions: TasksActions) {
     d.comments.forEach { c ->
         Column { Text(c.author.ifBlank { "Someone" }, style = HqType.BodySmBold, color = Mts.Ink); Text(c.body, style = HqType.BodySm, color = Mts.InkMuted) }
     }
-    if (d.prompt == null) Entry("Add a comment", d.draft, actions.onDraft, actions.onComment)
+    if (d.prompt == null) Entry("Add a comment", d.draft, !d.busy, actions.onDraft, actions.onComment)
 }
 
 @Composable
-private fun Entry(hint: String, value: String, onChange: (String) -> Unit, onSend: () -> Unit) {
+private fun Entry(hint: String, value: String, enabled: Boolean, onChange: (String) -> Unit, onSend: () -> Unit) {
     val shape = RoundedCornerShape(24.dp)
+    val canSend = enabled && value.isNotBlank()
     Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
         BasicTextField(
             value, onChange, Modifier.weight(1f).heightIn(min = 48.dp).clip(shape).background(Mts.Surface100).border(1.dp, Mts.Line, shape).padding(horizontal = 16.dp, vertical = 11.dp),
             textStyle = HqType.Body.copy(color = Mts.Ink), cursorBrush = SolidColor(Mts.Ink),
             decorationBox = { inner -> Box { if (value.isEmpty()) Text(hint, style = HqType.Body, color = Mts.InkMuted); inner() } },
         )
-        Box(Modifier.size(48.dp).clip(CircleShape).background(if (value.isBlank()) Mts.Surface200 else Mts.BrandGreen).alpha(if (value.isBlank()) 0.5f else 1f).clickable(enabled = value.isNotBlank(), role = Role.Button, onClickLabel = "Send", onClick = onSend), contentAlignment = Alignment.Center) {
-            Icon(HqIcons.Send, null, Modifier.size(24.dp), tint = if (value.isBlank()) Mts.InkMuted else Mts.OnGreen)
+        Box(Modifier.size(48.dp).clip(CircleShape).background(if (canSend) Mts.BrandGreen else Mts.Surface200).alpha(if (canSend) 1f else 0.5f).clickable(enabled = canSend, role = Role.Button, onClickLabel = "Send", onClick = onSend), contentAlignment = Alignment.Center) {
+            Icon(HqIcons.Send, null, Modifier.size(24.dp), tint = if (canSend) Mts.OnGreen else Mts.InkMuted)
         }
     }
 }
@@ -331,7 +332,7 @@ private fun SendBackDialog(d: TaskDetail, actions: TasksActions) {
             Text("Your answer goes on the task as a comment, and it moves back to In progress.", style = HqType.BodySm, color = Mts.InkMuted)
             val shape = RoundedCornerShape(12.dp)
             BasicTextField(d.draft, actions.onDraft, Modifier.fillMaxWidth().heightIn(min = 96.dp).clip(shape).background(Mts.Surface000).border(1.dp, Mts.Line, shape).padding(12.dp), textStyle = HqType.Body.copy(color = Mts.Ink), cursorBrush = SolidColor(Mts.Ink))
-            Box(Modifier.fillMaxWidth().heightIn(min = 48.dp).clip(CircleShape).background(Mts.BrandGreen).alpha(if (d.draft.isBlank()) 0.5f else 1f).clickable(enabled = d.draft.isNotBlank(), role = Role.Button, onClick = actions.onSendBack), contentAlignment = Alignment.Center) { Text("Send back", style = HqType.BodySmBold, color = Mts.OnGreen) }
+            Box(Modifier.fillMaxWidth().heightIn(min = 48.dp).clip(CircleShape).background(Mts.BrandGreen).alpha(if (d.draft.isBlank() || d.busy) 0.5f else 1f).clickable(enabled = d.draft.isNotBlank() && !d.busy, role = Role.Button, onClick = actions.onSendBack), contentAlignment = Alignment.Center) { Text("Send back", style = HqType.BodySmBold, color = Mts.OnGreen) }
         }
     }
 }

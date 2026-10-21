@@ -222,7 +222,7 @@ fun ChartSpec.numbersTable(): Block.Table {
         labels.mapIndexed { i, l -> listOf(l) + series.map { plainNumber(it.values[i]) } })
 }
 
-private fun plainNumber(n: Double): String = if (n == kotlin.math.floor(n) && kotlin.math.abs(n) < 1e15) n.toLong().toString() else Charts.round2(n).toString().trimEnd('0').trimEnd('.')
+private fun plainNumber(n: Double): String = Charts.plain(n)
 
 /** The numbers under a chart: 120 dp for the labels, 104 dp for each value, in a rounded box that scrolls sideways when the series do not fit. */
 @Composable

@@ -77,7 +77,7 @@ const val PAGE_CHART_HEIGHT = 270
 fun chartDescription(spec: ChartSpec): String =
     "${spec.type.title} chart" + spec.title.takeIf { it.isNotBlank() }?.let { ": " + it.replaceFirstChar { c -> c.lowercase() } }.orEmpty()
 
-private fun plain(n: Double): String = if (n == kotlin.math.floor(n) && abs(n) < 1e15) n.toLong().toString() else Charts.round2(n).toString().trimEnd('0').trimEnd('.')
+private fun plain(n: Double): String = Charts.plain(n)
 
 /** The card in a reply: header with Expand, legend, and the drawing. Tapping the chart also expands it. */
 @Composable

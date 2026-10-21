@@ -44,13 +44,15 @@ object Charts {
     private const val Y_TICKS = 4
     private const val MAX_TICKS = 12
     /** Far more than any figure a chart shows; keeps the scale and its arithmetic inside what a Double and a Long hold. */
-    private const val MAX_MAGNITUDE = 1e15
+    private const val MAX_MAGNITUDE = 9e16
     private const val MAX_SOURCE_CHARS = 32_000
     private const val MAX_DEPTH = 16
+    /** Android's parser also reads single-quoted strings and comments, which the depth count above does not follow, so the brackets are limited outright too. */
+    private const val MAX_BRACKETS = 1_000
     private val MERMAID_PIE_ROW = Regex("^\\s*\"([^\"]+)\"\\s*:\\s*(-?\\d+(?:\\.\\d+)?)\\s*$")
 
     fun parse(source: String): ChartParse {
-        if (source.length > MAX_SOURCE_CHARS || nesting(source) > MAX_DEPTH) return bad("payload is too large")
+        if (source.length > MAX_SOURCE_CHARS || source.count { it == '[' || it == '{' } > MAX_BRACKETS || nesting(source) > MAX_DEPTH) return bad("payload is too large")
         val raw = try { JSONTokenerStrict.value(source) } catch (e: JSONException) { return bad("payload is not valid JSON") }
         if (raw !is JSONObject) return bad("payload must be a JSON object")
         val type = ChartType.entries.firstOrNull { it.name.lowercase() == raw.opt("type") } ?: return bad("type must be one of line, bar, pie, donut")
@@ -137,6 +139,10 @@ object Charts {
     }
 
     fun round2(n: Double): Double = Math.round(n * 100) / 100.0
+
+    /** A figure the way it is printed in a tooltip or a table: whole numbers whole, others to two places, never in scientific form. */
+    fun plain(n: Double): String =
+        if (n == floor(n) && abs(n) < MAX_MAGNITUDE) n.toLong().toString() else java.math.BigDecimal.valueOf(round2(n)).stripTrailingZeros().toPlainString()
 
     /** How deep the brackets go, ignoring any inside strings; a payload nested past a few levels is not a chart, and parsing it could overflow the stack. */
     private fun nesting(s: String): Int {

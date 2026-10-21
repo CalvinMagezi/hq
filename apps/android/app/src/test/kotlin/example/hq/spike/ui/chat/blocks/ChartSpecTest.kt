@@ -37,6 +37,24 @@ class ChartSpecTest {
         assertEquals("payload is too large", reason("x".repeat(40_000).let { "[\"$it\"]" }))
     }
 
+    @Test fun singleQuotesAndCommentsCannotHideDepthFromTheCheck() {
+        // Android's parser reads 'a"b' as one string, so a count that follows only double quotes would lose track of what is nested.
+        val sneaky = "{'a':'\"','b':" + "[".repeat(5_000) + "1" + "]".repeat(5_000) + "}"
+        assertEquals("payload is too large", reason(sneaky))
+    }
+
+    @Test fun figuresArePrintedPlainNeverInScientificForm() {
+        assertEquals("30000000.5", Charts.plain(30_000_000.5))
+        assertEquals("2.5", Charts.plain(2.5))
+        assertEquals("-0.25", Charts.plain(-0.25))
+        assertEquals("1200", Charts.plain(1200.0))
+        assertEquals("25000000000000000", Charts.plain(2.5e16))
+    }
+
+    @Test fun figuresInTheTrillionsAndBeyondAreStillAccepted() {
+        assertTrue(Charts.parse(payload("series" to series("s", 2.5e16, 1.0, 2.0))) is ChartParse.Ok)
+    }
+
     @Test fun bracketsInsideTextDoNotCountAsDepth() {
         val labels = JSONArray(listOf("[[[[[[[[[[[[[[[[[[[[", "{{{{{{{{{{{{{{{{{{{{{", "Mar"))
         assertTrue(Charts.parse(payload("labels" to labels)) is ChartParse.Ok)
