@@ -65,6 +65,9 @@ class SettingsViewModel(app: Application) : AndroidViewModel(app) {
         onRefresh = ::refreshNow,
     )
 
+    /** Closes Settings and every page inside it. */
+    fun close() = _state.update { it.copy(open = false, stack = emptyList()) }
+
     fun freeze(fixed: SettingsUi) {
         frozen = true
         _state.value = fixed

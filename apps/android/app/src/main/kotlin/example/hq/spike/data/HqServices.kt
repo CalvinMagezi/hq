@@ -30,6 +30,7 @@ class HqServices private constructor(app: Context) {
     val status: StateFlow<HqStatus> = _status
 
     init {
+        scope.launch(Dispatchers.IO) { client.warmUp() }
         scope.launch {
             var downSince = System.currentTimeMillis()
             while (true) {

@@ -81,6 +81,20 @@ class ShellActivity : ComponentActivity() {
         super.onNewIntent(intent)
         setIntent(intent)
         requested = placeOf(intent)
+        if (requested != null) closePages()
+    }
+
+    /** Pages and sheets open over the shell would hide the place a tapped notification asks for. */
+    private fun closePages() {
+        notes.closeAll()
+        inbox.actions.onDetails(null)
+        tasks.actions.onClose()
+        tasks.actions.onQuick(null)
+        helpers.actions.onClose()
+        settings.close()
+        chat.actions.onCloseNote()
+        chat.actions.onClosePage()
+        chat.actions.onCloseChats()
     }
 
     private fun placeOf(intent: Intent): Place? = intent.getStringExtra("place")?.let { name -> Place.entries.firstOrNull { it.name.equals(name, true) } }

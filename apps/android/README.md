@@ -16,6 +16,8 @@ cd apps/android
   -Phq.web=<apps/hq-web/dist/client> -Phq.keystore=<the signing key>      # the APK for a phone
 ```
 
+The `hq` binary must be built from 2026-10-08 or later: the standby start passes `hq web --supervised`, which keeps the web token out of `hq.log`, and an older binary exits on the unknown flag.
+
 All four `-P` paths must be absolute and must exist, and they come together: the build stops if one is
 missing or wrong, so it cannot produce an APK without hq or signed with the wrong key. Put them in
 `~/.gradle/gradle.properties` if you build often; never in the repository.

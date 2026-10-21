@@ -15,6 +15,7 @@ import org.junit.Test
 class HqClientTest {
     private lateinit var server: ServerSocket
     private val requests = CopyOnWriteArrayList<String>()
+    private val auths = CopyOnWriteArrayList<String>()
     private var answer: (String) -> Pair<Int, String> = { 200 to """{"tasks":[],"has_more":false}""" }
 
     /** A one-thread HTTP/1.1 responder: reads a request's head, answers with Content-Length and closes. */
@@ -26,7 +27,11 @@ class HqClientTest {
                     server.accept().use { socket ->
                         val input = socket.getInputStream().bufferedReader()
                         val line = input.readLine() ?: return@use
-                        while (input.readLine().orEmpty().isNotEmpty()) { /* skip the headers; none of these requests has a body to read */ }
+                        while (true) {
+                            val header = input.readLine().orEmpty()
+                            if (header.isEmpty()) break
+                            if (header.startsWith("Authorization:", ignoreCase = true)) auths += header.substringAfter(':').trim()
+                        }
                         val query = line.split(' ').getOrElse(1) { "" }.substringAfter('?', "")
                         requests += query
                         val (code, body) = answer(query)
@@ -58,6 +63,29 @@ class HqClientTest {
         assertEquals("id502", tasks.last().id)
         assertEquals(2, requests.size)
         assertTrue(requests[1].contains("offset=500"))
+    }
+
+    @Test fun aRowThatCamesInTwoPagesIsKeptOnce() = runBlocking {
+        // A task changed between the two reads, so the last row of the first page is the first row of the second.
+        answer = { q -> if (q.contains("offset=0")) 200 to page(0, 500, true) else 200 to page(499, 3, false) }
+        val ids = client().tasks().map { it.id }
+        assertEquals(502, ids.size)
+        assertEquals(ids.distinct(), ids)
+    }
+
+    @Test fun aPageThatAddsNothingNewEndsTheReadEvenIfTheServerSaysThereIsMore() = runBlocking {
+        answer = { 200 to page(0, 3, true) }
+        assertEquals(3, client().tasks().size)
+        assertEquals(2, requests.size)
+    }
+
+    @Test fun aTokenReplacedMeanwhileGetsOneRetryWithTheNewOne() = runBlocking {
+        var current = "t-old"
+        answer = { if (auths.last() == "Bearer t-old") 401 to """{"error":"unauthorized"}""" else 200 to """{"tasks":[],"has_more":false}""" }
+        // The first 401 makes the client forget its token; by then another part of the app has sealed a new one.
+        val c = client(token = { current }, signedOut = { current = "t-new" })
+        assertEquals(0, c.tasks().size)
+        assertEquals(listOf("Bearer t-old", "Bearer t-new"), auths.toList())
     }
 
     @Test fun anAnswerOf401MeansSignedOutAndTheTokenIsReadAgainNextTime() = runBlocking {

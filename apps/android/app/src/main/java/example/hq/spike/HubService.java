@@ -9,6 +9,7 @@ import android.content.Intent;
 import android.content.pm.ServiceInfo;
 import android.os.Build;
 import android.os.IBinder;
+import android.os.SystemClock;
 import android.util.Log;
 import java.io.File;
 import java.io.IOException;
@@ -54,7 +55,13 @@ public class HubService extends Service {
         return SecretStore.webToken(c);
     }
 
-    private static final AtomicLong lastRecovery = new AtomicLong();
+    private static final AtomicLong lastRecovery = new AtomicLong(-RECOVER_MIN_GAP_MS);
+    private static volatile Runnable tokenListener;
+
+    /** The visible web page asks to hear when the token is replaced, so it can sign in again with the new one. */
+    static void setTokenListener(Runnable r) {
+        tokenListener = r;
+    }
 
     /**
      * The owner chose "Sign out everywhere", which signs out the token this app gave hq as well. Seals a new
@@ -62,7 +69,7 @@ public class HubService extends Service {
      * RECOVER_MIN_GAP_MS, so a 401 with another cause cannot make hq restart over and over.
      */
     public static void recoverToken(Context c) {
-        long now = System.currentTimeMillis();
+        long now = SystemClock.elapsedRealtime();
         long last = lastRecovery.get();
         if (now - last < RECOVER_MIN_GAP_MS || !lastRecovery.compareAndSet(last, now)) return;
         try {
@@ -70,8 +77,11 @@ public class HubService extends Service {
             Log.w(TAG, "web token was signed out, replaced it and restarting hq");
             Process p = hqProc;
             if (p != null) p.destroy();
-        } catch (IllegalStateException e) {
-            Log.e(TAG, "could not replace the web token: " + e.getMessage());
+            Runnable heard = tokenListener;
+            if (heard != null) heard.run();
+        } catch (RuntimeException e) {
+            lastRecovery.set(last);
+            Log.e(TAG, "could not replace the web token: " + e);
         }
     }
 

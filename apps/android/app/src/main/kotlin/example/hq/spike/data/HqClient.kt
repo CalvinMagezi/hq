@@ -72,8 +72,9 @@ class HqClient(private val token: () -> String, private val base: String = LOCAL
         val request = authed("/api/note?path=${java.net.URLEncoder.encode(path, "UTF-8")}").build()
         try {
             http.newCall(request).execute().use { r ->
+                if (r.code == HTTP_UNAUTHORIZED) refused()
                 if (r.code == HTTP_NOT_FOUND || r.code == HTTP_BAD_REQUEST) throw NoteNotFound(path)
-                if (!r.isSuccessful) throw HqUnavailable("HTTP ${r.code} for /api/note")
+                if (!r.isSuccessful) throw HqUnavailable("HTTP ${r.code} for /api/note", status = r.code)
                 val o = JSONObject(r.body.string())
                 if (o.optBoolean("isDir", false)) throw NoteNotFound(path)
                 NoteBody(o.optString("path", path), o.optString("content", ""), o.optBoolean("truncated", false))
@@ -90,7 +91,8 @@ class HqClient(private val token: () -> String, private val base: String = LOCAL
         val request = authed("/api/vault-asset?path=${java.net.URLEncoder.encode(path, "UTF-8")}").build()
         try {
             http.newCall(request).execute().use { r ->
-                if (!r.isSuccessful) throw HqUnavailable("HTTP ${r.code} for /api/vault-asset")
+                if (r.code == HTTP_UNAUTHORIZED) refused()
+                if (!r.isSuccessful) throw HqUnavailable("HTTP ${r.code} for /api/vault-asset", status = r.code)
                 dest.parentFile?.mkdirs()
                 r.body.byteStream().use { input -> dest.outputStream().use { input.copyTo(it) } }
             }
@@ -113,7 +115,8 @@ class HqClient(private val token: () -> String, private val base: String = LOCAL
         return withContext(Dispatchers.IO) {
             response.use { r ->
                 if (r.code == HTTP_BAD_REQUEST) throw ExportRefused(runCatching { JSONObject(r.body.string()).optString("error") }.getOrNull().orEmpty())
-                if (!r.isSuccessful) throw HqUnavailable("HTTP ${r.code} for /api/note/export")
+                if (r.code == HTTP_UNAUTHORIZED) refused()
+                if (!r.isSuccessful) throw HqUnavailable("HTTP ${r.code} for /api/note/export", status = r.code)
                 val name = fileNameOf(r.header("Content-Disposition")) ?: "note.$format"
                 val dest = java.io.File(dir, name)
                 try {
@@ -161,17 +164,21 @@ class HqClient(private val token: () -> String, private val base: String = LOCAL
 
     /** Active tasks, or the sub-tasks of one. The lists group and count them on the phone. */
     suspend fun tasks(parentId: String? = null): List<TaskItem> {
-        val all = mutableListOf<TaskItem>()
+        // Pages are read one after another while tasks change, so a row can come twice (or be missed); each id is kept once.
+        val all = LinkedHashMap<String, TaskItem>()
+        var offset = 0
         while (all.size < TASK_CAP) {
-            val query = "limit=$TASK_PAGE&offset=${all.size}" + (parentId?.let { "&parent_task_id=$it" } ?: "&top_level_only=true")
+            val query = "limit=$TASK_PAGE&offset=$offset" + (parentId?.let { "&parent_task_id=$it" } ?: "&top_level_only=true")
             val (page, more) = send(authed("/api/tasks?$query").build()) { text ->
                 val o = JSONObject(text)
                 o.optJSONArray("tasks").objects().map(::taskOf) to o.optBoolean("has_more", false)
             }
-            all += page
-            if (!more || page.isEmpty()) break
+            val before = all.size
+            page.forEach { all[it.id] = it }
+            offset += page.size
+            if (!more || page.isEmpty() || all.size == before) break
         }
-        return all
+        return all.values.toList()
     }
 
     /** Changes some fields of a task; a field left out is untouched, a JSON null clears it. 409 means it changed meanwhile. */
@@ -410,6 +417,15 @@ class HqClient(private val token: () -> String, private val base: String = LOCAL
     /** The server wants this header on requests that change a helper, setup or a credential; sending it on every request is harmless. */
     private fun authed(path: String) = Request.Builder().url(base + path).header("Authorization", "Bearer ${bearerToken()}").header("X-HQ-Client", "android")
 
+    /** Reads the sealed token now, so the first call from a screen does not wait on the Keystore. */
+    fun warmUp() { runCatching { bearerToken() } }
+
+    /** hq refused the token: forget it and let the hub replace it if the owner signed it out. */
+    private fun refused() {
+        bearer = null
+        onSignedOut()
+    }
+
     private fun bearerToken(): String = bearer ?: try {
         token().also { bearer = it }
     } catch (e: IllegalStateException) {
@@ -418,11 +434,17 @@ class HqClient(private val token: () -> String, private val base: String = LOCAL
 
     private suspend fun <T> send(request: Request, caller: OkHttpClient = http, parse: (String) -> T): T = withContext(Dispatchers.IO) {
         try {
-            caller.newCall(request).execute().use { r ->
-                if (r.code == HTTP_UNAUTHORIZED) {
-                    bearer = null
-                    onSignedOut()
+            var response = caller.newCall(request).execute()
+            if (response.code == HTTP_UNAUTHORIZED) {
+                refused()
+                // Something else (the alert poller) may have replaced the token already; that one gets a single try.
+                val fresh = "Bearer ${bearerToken()}"
+                if (fresh != request.header("Authorization")) {
+                    response.close()
+                    response = caller.newCall(request.newBuilder().header("Authorization", fresh).build()).execute()
                 }
+            }
+            response.use { r ->
                 if (!r.isSuccessful) throw HqUnavailable("HTTP ${r.code} for ${request.url.encodedPath}", status = r.code)
                 parse(r.body.string())
             }
