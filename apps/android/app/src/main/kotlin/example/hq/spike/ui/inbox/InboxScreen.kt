@@ -117,12 +117,12 @@ private fun Modifier.widthIn20() = this.then(Modifier.defaultMinSize(minWidth = 
 @Composable
 private fun NeedsFeed(ui: InboxUi, actions: InboxActions, onTakeLook: (InboxCard) -> Unit) {
     val cards = ui.shownNeeds
-    if (cards.isEmpty() && ui.loaded) {
+    if (cards.isEmpty() && ui.loaded && !ui.offline) {
         CaughtUp(ui)
         return
     }
     LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(start = 16.dp, top = 12.dp, end = 16.dp, bottom = 24.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-        if (ui.offline) item { Text("HQ is not running. These are the last things it asked.", style = HqType.BodySm, color = Mts.Amber) }
+        if (ui.offline) item { Text(if (cards.isEmpty()) "HQ is not answering yet, so what is waiting on you cannot be shown." else "HQ is not running. These are the last things it asked.", style = HqType.BodySm, color = Mts.Amber) }
         items(cards, key = { it.id }) { card -> NeedCard(card, ui.answering[card.id], ui.offline, actions, onTakeLook) }
     }
 }
@@ -150,17 +150,17 @@ private fun NeedCard(card: InboxCard, answer: Answer?, offline: Boolean, actions
 }
 
 @Composable
-private fun AnswerRow(card: InboxCard, answer: Answer?, offline: Boolean, actions: InboxActions, onTakeLook: (InboxCard) -> Unit, modifier: Modifier = Modifier) {
+private fun AnswerRow(card: InboxCard, answer: Answer?, offline: Boolean, actions: InboxActions, onTakeLook: (InboxCard) -> Unit, modifier: Modifier = Modifier, onDetailsPage: Boolean = false) {
     val sending = answer == Answer.Sending
     Row(modifier, horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
-        if (card.canAllow) {
+        if (card.canAllow || (onDetailsPage && card.kind == CardKind.Approval)) {
             PrimaryButton(if (sending) "Answering…" else card.allowLabel, Modifier.weight(1f), enabled = !sending && !offline) { actions.onAllow(card) }
             TextButton("Not now", enabled = !sending && !offline) { actions.onNotNow(card) }
         } else if (card.kind == CardKind.TaskReview) {
             PrimaryButton(card.allowLabel, Modifier.weight(1f)) { onTakeLook(card) }
             TextButton("Not now", enabled = !sending && !offline) { actions.onNotNow(card) }
         } else if (card.kind == CardKind.Approval) {
-            // Too long to approve from a card: it is read in full on the details page first.
+            // Too long to approve from a card: it is read in full on the details page, which answers it.
             PrimaryButton("Open", Modifier.weight(1f)) { actions.onDetails(card) }
         } else {
             PrimaryButton(card.allowLabel.ifBlank { "Take a look" }, Modifier.weight(1f)) { onTakeLook(card) }
@@ -304,7 +304,7 @@ fun InboxDetails(card: InboxCard, answer: Answer?, offline: Boolean, actions: In
         }
         Column(Modifier.weight(1f).verticalScroll(rememberScrollState()).padding(start = 16.dp, top = 8.dp, end = 16.dp, bottom = 16.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
             Text(card.title, style = HqType.H2.copy(fontSize = 26.sp, lineHeight = 32.sp), color = Mts.Ink)
-            Text(card.body, style = HqType.Body, color = Mts.InkMuted)
+            Text(card.fullBody.ifEmpty { card.body }, style = HqType.Body, color = Mts.InkMuted)
             if (card.canAllow || card.kind == CardKind.Approval) {
                 Outcome(HqIcons.Check, Mts.BrandBlue, "If you allow it", "HQ records your yes. What asked then goes ahead.")
                 Outcome(HqIcons.Pause, Mts.InkMuted, "If you say not now", "Nothing is done.")
@@ -316,7 +316,7 @@ fun InboxDetails(card: InboxCard, answer: Answer?, offline: Boolean, actions: In
         }
         Column(Modifier.fillMaxWidth().background(Mts.Surface100).drawBehind { drawLine(Mts.Hairline, Offset.Zero, Offset(size.width, 0f), 1.dp.toPx()) }.padding(start = 16.dp, top = 12.dp, end = 16.dp, bottom = 24.dp)) {
             (answer as? Answer.Failed)?.let { Text(it.reason, style = HqType.BodySm, color = Mts.Amber, modifier = Modifier.padding(bottom = 8.dp)) }
-            AnswerRow(card, answer, offline, actions, onTakeLook = onTakeLook)
+            AnswerRow(card, answer, offline, actions, onTakeLook = onTakeLook, onDetailsPage = true)
         }
     }
 }

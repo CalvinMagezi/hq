@@ -98,6 +98,12 @@ class NotesViewModel(app: Application) : AndroidViewModel(app) {
 
     private fun popNow() {
         _state.update { s -> s.copy(stack = s.stack.dropLast(1), menu = false, write = if (s.top is NotesRoute.Write) null else s.write) }
+        // The folder and the note each have one slot, so the page now showing is loaded again rather than left as the one just closed.
+        when (val top = _state.value.top) {
+            is NotesRoute.Folder -> loadFolder(top.path)
+            is NotesRoute.Reader -> loadReader(top.path)
+            else -> {}
+        }
         if (_state.value.stack.isEmpty()) refresh()
     }
 
@@ -122,6 +128,10 @@ class NotesViewModel(app: Application) : AndroidViewModel(app) {
 
     private fun openFolder(path: String) {
         push(NotesRoute.Folder(path))
+        loadFolder(path)
+    }
+
+    private fun loadFolder(path: String) {
         _state.update { it.copy(folder = FolderView(path)) }
         viewModelScope.launch {
             val listing = try { client.folderListing(path) } catch (e: HqUnavailable) { null }
@@ -136,6 +146,10 @@ class NotesViewModel(app: Application) : AndroidViewModel(app) {
     fun openNote(path: String) {
         if (_state.value.top == NotesRoute.Reader(path)) return
         push(NotesRoute.Reader(path))
+        loadReader(path)
+    }
+
+    private fun loadReader(path: String) {
         _state.update { it.copy(reader = ReaderPhase.Loading) }
         viewModelScope.launch {
             val phase = try {

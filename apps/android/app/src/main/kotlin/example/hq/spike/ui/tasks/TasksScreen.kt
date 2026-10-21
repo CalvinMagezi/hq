@@ -28,6 +28,8 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.rememberSwipeToDismissBoxState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -126,10 +128,11 @@ private fun GroupHeader(g: TaskGroup, open: Boolean, onToggle: (String) -> Unit)
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun TaskRow(t: TaskItem, today: LocalDate, actions: TasksActions) {
+    val latest by rememberUpdatedState(t)
     val swipe = rememberSwipeToDismissBoxState(confirmValueChange = {
         when (it) {
-            SwipeToDismissBoxValue.StartToEnd -> { actions.onDone(t); true }
-            SwipeToDismissBoxValue.EndToStart -> { actions.onTomorrow(t); true }
+            SwipeToDismissBoxValue.StartToEnd -> { actions.onDone(latest); true }
+            SwipeToDismissBoxValue.EndToStart -> { actions.onTomorrow(latest); true }
             else -> false
         }
     })

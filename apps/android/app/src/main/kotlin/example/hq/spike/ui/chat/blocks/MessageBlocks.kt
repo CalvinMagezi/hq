@@ -18,9 +18,9 @@ sealed interface Block {
 /**
  * Splits a reply into blocks the way marked does for the web app: fenced code (a `chart` fence or a Mermaid pie
  * becomes a chart), headings, quotes, lists, checklists, GFM tables, pictures, paragraphs. A fence that has not
- * closed yet (the reply is still streaming) is returned with `closed = false` so it can say "Drawing the chart".
+ * closed yet while the reply is still [streaming] is returned with `closed = false` so it can say "Drawing the chart".
  */
-fun parseBlocks(text: String): List<Block> {
+fun parseBlocks(text: String, streaming: Boolean = false): List<Block> {
     val lines = text.lines()
     val out = mutableListOf<Block>()
     var i = 0
@@ -29,7 +29,7 @@ fun parseBlocks(text: String): List<Block> {
         val fence = FENCE.matchEntire(line)
         when {
             line.isBlank() -> i++
-            fence != null -> i = fenced(lines, i, fence.groupValues[1], out)
+            fence != null -> i = fenced(lines, i, fence.groupValues[1], out, streaming)
             HEADING.matches(line) -> { val m = HEADING.matchEntire(line)!!; out += Block.Heading(m.groupValues[1].length, m.groupValues[2].trim()); i++ }
             HRULE.matches(line) -> i++
             IMAGE.matches(line) -> { out += Block.Image(IMAGE.matchEntire(line)!!.groupValues[1]); i++ }
@@ -54,11 +54,12 @@ private val CHECK = Regex("^\\s*[-*+]\\s+\\[( |x|X)]\\s+.*$")
 private val BULLET = Regex("^\\s*[-*+]\\s+.*$")
 private val ORDERED = Regex("^\\s*\\d+[.)]\\s+.*$")
 
-private fun fenced(lines: List<String>, start: Int, lang: String, out: MutableList<Block>): Int {
+private fun fenced(lines: List<String>, start: Int, lang: String, out: MutableList<Block>, streaming: Boolean): Int {
     var j = start + 1
     val body = mutableListOf<String>()
     while (j < lines.size && !CLOSING_FENCE.matches(lines[j])) { body += lines[j]; j++ }
-    val closed = j < lines.size
+    // Only a reply still arriving can have a fence that is about to close; a finished one never will.
+    val closed = j < lines.size || !streaming
     val text = body.joinToString("\n")
     out += when (lang.lowercase()) {
         "chart" -> Block.ChartBlock(if (closed) Charts.parse(text) else ChartParse.Bad("still arriving"), text, closed)

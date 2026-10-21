@@ -23,7 +23,7 @@ sealed interface HqStatus {
 /** The parts of the app that live as long as the process: the client, its socket and the health status. */
 class HqServices private constructor(app: Context) {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
-    val client = HqClient(token = { HubService.token(app) })
+    val client = HqClient(token = { HubService.token(app) }, onSignedOut = { HubService.recoverToken(app) })
     val connection = ChatConnection(client, scope)
 
     private val _status = MutableStateFlow<HqStatus>(HqStatus.Starting(0))

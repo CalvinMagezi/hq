@@ -34,6 +34,8 @@ data class InboxCard(
     val taskRef: String? = null,
     /** For a helper at a prompt: the lines the notice quoted from its screen. An answer is sent only if the helper's screen still shows this dialog. */
     val excerpt: List<String> = emptyList(),
+    /** For an approval: everything it says. The card shows [body], cut short; the details page shows this, and answers from there. */
+    val fullBody: String = "",
 )
 
 /** Turns what the server stores into the plain titles, bodies and buttons of the Inbox board. */
@@ -56,8 +58,9 @@ object InboxWords {
                 InboxCard(item.id, CardKind.TaskReview, Plain.strip(item.title.trim()).replace(TASK_PREFIX, ""), body, "Task ready to check", item.createdAt, CardIcon.Task, null, false, "Check it", item.link, askedBy(item, null), item.state, taskRef = TASK_PREFIX.find(item.title.trim())?.value?.trim()?.removeSuffix(":"))
             }
             item.actions.any { it == "approve" || it == "reject" } -> {
-                val body = Plain.strip(item.description.trim()).let { if (it.length > APPROVAL_BODY) it.take(APPROVAL_BODY).trimEnd() + "…" else it }
-                InboxCard(item.id, CardKind.Approval, Plain.strip(item.title.trim()), body, whereOf(item, null), item.createdAt, CardIcon.Info, null, body.length < APPROVAL_BODY, "Allow", item.link, askedBy(item, null), item.state)
+                val full = Plain.strip(item.description.trim())
+                val body = if (full.length > APPROVAL_BODY) full.take(APPROVAL_BODY).trimEnd() + "…" else full
+                InboxCard(item.id, CardKind.Approval, Plain.strip(item.title.trim()), body, whereOf(item, null), item.createdAt, CardIcon.Info, null, full.length <= APPROVAL_BODY, "Allow", item.link, askedBy(item, null), item.state, fullBody = full)
             }
             else -> InboxCard(item.id, CardKind.Update, Plain.strip(item.title.trim()), Plain.strip(item.description.trim()), whereOf(item, null), item.createdAt, updateIcon(item), null, false, "", item.link, askedBy(item, null), item.state)
         }

@@ -86,7 +86,7 @@ class InboxViewModel(app: Application) : AndroidViewModel(app) {
     val badge: Int get() = _state.value.shownNeeds.size
 
     suspend fun refresh() {
-        val pending = try { client.notifications("pending") } catch (e: HqUnavailable) { null }
+        val pending = try { client.notifications("pending", PENDING_LIMIT) } catch (e: HqUnavailable) { null }
         if (frozen) return
         if (pending == null) {
             _state.update { it.copy(loaded = true, offline = true) }
@@ -95,7 +95,7 @@ class InboxViewModel(app: Application) : AndroidViewModel(app) {
         val history = try { client.notifications("history", HISTORY_LIMIT) } catch (e: HqUnavailable) { null }
         if (frozen) return
         val lists = inboxLists(pending.items, history?.items.orEmpty())
-        _state.update { it.copy(loaded = true, offline = false, needs = lists.needs, updates = lists.updates, done = lists.done, checkedAt = InboxWords.clock(java.time.OffsetDateTime.now().toString())) }
+        _state.update { it.copy(loaded = true, offline = false, needs = lists.needs, updates = lists.updates, done = lists.done, details = it.details?.let { d -> lists.needs.firstOrNull { n -> n.id == d.id } }, checkedAt = InboxWords.clock(java.time.OffsetDateTime.now().toString())) }
     }
 
     private fun answer(card: InboxCard, allow: Boolean) {
@@ -168,7 +168,8 @@ class InboxViewModel(app: Application) : AndroidViewModel(app) {
     private companion object {
         const val POLL_MS = 20_000L
         const val UNDO_MS = 5_000L
-        const val HISTORY_LIMIT = 30
+        const val HISTORY_LIMIT = 200
+        const val PENDING_LIMIT = 500
         /** More lines than the Helpers poll reads, so the check never shares its cached read. */
         const val CHECK_LINES = 81
     }

@@ -123,7 +123,7 @@ fun LiveReplyBubble(live: LiveReply, blocks: BlockActions) = ReplyFrame {
             Modifier.padding(top = 8.dp).drawBehind { drawRect(Mts.Hairline, size = Size(2.dp.toPx(), size.height)) }.padding(start = 6.dp),
         ) { live.steps.forEach { Step(it.label, it.done) } }
     }
-    if (live.text.isNotBlank()) ReplyBody(live.text, blocks, Modifier.padding(top = 8.dp))
+    if (live.text.isNotBlank()) ReplyBody(live.text, blocks, Modifier.padding(top = 8.dp), streaming = true)
 }
 
 @Composable

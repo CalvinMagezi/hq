@@ -42,9 +42,15 @@ object Charts {
     private const val MAX_TEXT = 120
     private const val MAX_TICK_LABEL = 10
     private const val Y_TICKS = 4
+    private const val MAX_TICKS = 12
+    /** Far more than any figure a chart shows; keeps the scale and its arithmetic inside what a Double and a Long hold. */
+    private const val MAX_MAGNITUDE = 1e15
+    private const val MAX_SOURCE_CHARS = 32_000
+    private const val MAX_DEPTH = 16
     private val MERMAID_PIE_ROW = Regex("^\\s*\"([^\"]+)\"\\s*:\\s*(-?\\d+(?:\\.\\d+)?)\\s*$")
 
     fun parse(source: String): ChartParse {
+        if (source.length > MAX_SOURCE_CHARS || nesting(source) > MAX_DEPTH) return bad("payload is too large")
         val raw = try { JSONTokenerStrict.value(source) } catch (e: JSONException) { return bad("payload is not valid JSON") }
         if (raw !is JSONObject) return bad("payload must be a JSON object")
         val type = ChartType.entries.firstOrNull { it.name.lowercase() == raw.opt("type") } ?: return bad("type must be one of line, bar, pie, donut")
@@ -75,7 +81,9 @@ object Charts {
             Regex("^\\s*title\\s+(.+)$").find(line)?.let { title = it.groupValues[1].trim(); continue }
             val row = MERMAID_PIE_ROW.find(line) ?: return bad("unsupported Mermaid pie syntax")
             labels += row.groupValues[1]
-            values += row.groupValues[2].toDouble()
+            val value = row.groupValues[2].toDouble()
+            if (!value.isFinite() || abs(value) >= MAX_MAGNITUDE) return bad("a value is too large")
+            values += value
         }
         val payload = JSONObject().put("type", "pie").put("title", title).put("labels", JSONArray(labels))
             .put("series", JSONArray().put(JSONObject().put("name", title.ifEmpty { "Value" }).put("values", JSONArray(values))))
@@ -93,6 +101,7 @@ object Charts {
             if (values.length() != pointCount) return "series ${i + 1} needs $pointCount values, one for each label"
             val numbers = (0 until values.length()).map { values.opt(it) }
             if (!numbers.all { it is Number && it.toDouble().isFinite() }) return "series ${i + 1} has a non-numeric value"
+            if (numbers.any { abs((it as Number).toDouble()) >= MAX_MAGNITUDE }) return "series ${i + 1} has a value that is too large"
             out += ChartSeries(text(item.opt("name"), "Series ${i + 1}"), numbers.map { (it as Number).toDouble() })
         }
         return out
@@ -123,11 +132,30 @@ object Charts {
         val max = ceil(hi / step) * step
         val ticks = mutableListOf<Double>()
         var v = min
-        while (v <= max + step / 2) { ticks += round2(v); v += step }
+        while (v <= max + step / 2 && ticks.size < MAX_TICKS) { ticks += round2(v); v += step }
         return YScale(min, if (max == min) min + step else max, ticks)
     }
 
-    fun round2(n: Double): Double = (n * 100).roundToInt() / 100.0
+    fun round2(n: Double): Double = Math.round(n * 100) / 100.0
+
+    /** How deep the brackets go, ignoring any inside strings; a payload nested past a few levels is not a chart, and parsing it could overflow the stack. */
+    private fun nesting(s: String): Int {
+        var depth = 0
+        var deepest = 0
+        var inString = false
+        var escaped = false
+        for (c in s) {
+            when {
+                escaped -> escaped = false
+                inString && c == '\\' -> escaped = true
+                c == '"' -> inString = !inString
+                inString -> {}
+                c == '{' || c == '[' -> { depth++; if (depth > deepest) deepest = depth }
+                c == '}' || c == ']' -> depth--
+            }
+        }
+        return deepest
+    }
 
     /** 1200 as "1.2K", 1500000 as "1.5M": the compact form the web charts print on their axes and in legends. */
     fun compact(n: Double): String {

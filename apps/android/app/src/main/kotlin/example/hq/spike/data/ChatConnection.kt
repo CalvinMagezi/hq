@@ -42,14 +42,19 @@ class ChatConnection(private val client: HqClient, scope: CoroutineScope) {
 
     private fun write(frame: JSONObject): Boolean = socket?.send(frame.toString()) ?: false
 
+    /** Set when the current attempt got as far as an open socket, so a later drop retries quickly instead of at the longest wait. */
+    @Volatile private var opened = false
+
     private suspend fun keepConnected() {
         var wait = MIN_WAIT_MS
         while (true) {
             val closed = CompletableDeferred<Boolean>()
+            opened = false
             try {
                 val ticket = client.wsTicket()
                 socket = client.openSocket(ticket, listener(closed))
-                if (closed.await()) wait = MIN_WAIT_MS
+                closed.await()
+                if (opened) wait = MIN_WAIT_MS
             } catch (e: HqUnavailable) {
                 // hq is down or still starting; the wait below is the retry.
             } catch (e: IllegalStateException) {
@@ -64,6 +69,7 @@ class ChatConnection(private val client: HqClient, scope: CoroutineScope) {
 
     private fun listener(closed: CompletableDeferred<Boolean>) = object : WebSocketListener() {
         override fun onOpen(webSocket: WebSocket, response: Response) {
+            opened = true
             _connected.value = true
         }
 

@@ -34,7 +34,7 @@ public class HubConfigCheck {
         assert HubConfig.isActive("active\n") && HubConfig.isActive("  active ");
         assert !HubConfig.isActive(null) && !HubConfig.isActive("") && !HubConfig.isActive("ACTIVE") && !HubConfig.isActive("standby");
         assert String.join(" ", HubConfig.hqArgs(true, 5678)).equals("start all");
-        assert String.join(" ", HubConfig.hqArgs(false, 5678)).equals("web --no-open --port 5678 --bind 127.0.0.1");
+        assert String.join(" ", HubConfig.hqArgs(false, 5678)).equals("web --no-open --supervised --port 5678 --bind 127.0.0.1");
     }
 
     // Every refusal must name the line and say why, and none may echo the value.

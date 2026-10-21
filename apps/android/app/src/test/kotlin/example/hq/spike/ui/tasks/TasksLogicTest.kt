@@ -31,6 +31,22 @@ class TasksLogicTest {
         assertEquals(listOf("d", "e"), groups[2].tasks.map { it.id }.sorted())
     }
 
+    @Test fun whatIsTypedInOnePlaceSurvivesOpeningAnother() {
+        val d = TaskDetail(task("a"), drafts = mapOf("" to "a comment I was typing"))
+        assertEquals("a comment I was typing", d.draft)
+        val status = d.copy(prompt = "status")
+        assertEquals("the status sheet has its own empty box", "", status.draft)
+        assertEquals("a comment I was typing", status.copy(prompt = null).draft)
+        val sub = d.copy(prompt = "sub", drafts = d.drafts + ("sub" to "Map the screens"))
+        assertEquals("Map the screens", sub.draft)
+    }
+
+    @Test fun aNewTaskKeepsItsKeyAcrossATryAndARetry() {
+        val q = QuickState(text = "Pay the invoice")
+        assertEquals(q.key, q.copy(saving = true).copy(saving = false, error = "Could not add it.").key)
+        assertTrue(QuickState().key != QuickState().key)
+    }
+
     @Test fun priorityThenOldestOrdersARow() {
         val tasks = listOf(task("old", updated = "2026-09-01 00:00:00"), task("high", priority = "high", updated = "2026-10-10 00:00:00"), task("new", updated = "2026-10-11 00:00:00"))
         assertEquals(listOf("high", "old", "new"), tasks.sortedWith(TasksLogic.byUrgency).map { it.id })

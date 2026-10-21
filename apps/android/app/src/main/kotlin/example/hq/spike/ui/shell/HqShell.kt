@@ -7,6 +7,7 @@ import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxScope
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
@@ -32,6 +33,7 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -88,10 +90,14 @@ fun HqShell(
     status: HqStatus = HqStatus.Live,
     onSearch: () -> Unit = {},
     onSettings: () -> Unit = {},
+    request: Place? = null,
+    onRequestHandled: () -> Unit = {},
+    aboveBar: @Composable BoxScope.(Place) -> Unit = {},
     overlay: @Composable () -> Unit = {},
     content: @Composable (Place) -> Unit,
 ) {
     var current by rememberSaveable { mutableStateOf(startAt) }
+    LaunchedEffect(request) { if (request != null) { current = request; onRequestHandled() } }
     BackHandler(enabled = current != Place.Chat) { current = Place.Chat }
     val (statusText, statusColor) = when (status) {
         HqStatus.Live -> "Live" to Mts.BrandGreen
@@ -102,7 +108,7 @@ fun HqShell(
         Box(Modifier.fillMaxSize().background(Mts.Surface000)) {
             Column(Modifier.fillMaxSize().statusBarsPadding()) {
                 TopBar(title = current.label, status = statusText, statusColor = statusColor, onSearch = onSearch, onSettings = onSettings)
-                Box(Modifier.weight(1f).fillMaxWidth().imePadding()) { content(current) }
+                Box(Modifier.weight(1f).fillMaxWidth().imePadding()) { content(current); aboveBar(current) }
                 if (!WindowInsets.isImeVisible) BottomBar(current, inboxBadge) { current = it }
             }
             overlay()

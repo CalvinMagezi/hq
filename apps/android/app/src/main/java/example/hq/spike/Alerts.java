@@ -78,6 +78,7 @@ final class Alerts {
         h.setConnectTimeout(TIMEOUT_MS);
         h.setReadTimeout(TIMEOUT_MS);
         h.setRequestProperty("Authorization", "Bearer " + HubService.token(c));
+        if (h.getResponseCode() == 401) HubService.recoverToken(c);
         if (h.getResponseCode() != 200) throw new IOException("status " + h.getResponseCode());
         JSONArray arr = new JSONObject(read(h.getInputStream())).getJSONArray("notifications");
         Map<String, JSONObject> out = new LinkedHashMap<>();

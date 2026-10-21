@@ -102,10 +102,10 @@ final class HubConfig {
         return modeFile != null && modeFile.trim().equals(MODE_ACTIVE);
     }
 
-    /** Standby serves the web app only; active is the daemon with relays, which serves it too. */
+    /** Standby serves the web app only; active is the daemon with relays, which serves it too. Supervised keeps the sign-in token out of the log. */
     static String[] hqArgs(boolean active, int port) {
         if (active) return new String[] {"start", "all"};
-        return new String[] {"web", "--no-open", "--port", String.valueOf(port), "--bind", "127.0.0.1"};
+        return new String[] {"web", "--no-open", "--supervised", "--port", String.valueOf(port), "--bind", "127.0.0.1"};
     }
 
     /**

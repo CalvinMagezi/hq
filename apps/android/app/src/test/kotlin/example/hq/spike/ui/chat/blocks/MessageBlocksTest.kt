@@ -7,6 +7,13 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class MessageBlocksTest {
+    @Test fun aChartFenceThatNeverClosedIsShownAsItIsOnceTheReplyIsFinished() {
+        val md = "Here it is:\n```chart\n{\"type\":\"bar\",\"labels\":[\"a\""
+        assertFalse((parseBlocks(md, streaming = true).last() as Block.ChartBlock).closed)
+        assertTrue((parseBlocks(md, streaming = false).last() as Block.ChartBlock).closed)
+        assertTrue((parseBlocks("```kotlin\nval x = 1", streaming = false).single() as Block.Code).closed)
+    }
+
     @Test fun theBoardsTableParsesWithRightAlignedColumns() {
         val md = "Three runs finished.\n\n|Run|Result|Time|\n|---|---|---:|\n|Run 1|Passed|2 h 10 m|\n|Run 3|Failed|41 m|\n\nThe latest run:"
         val blocks = parseBlocks(md)
@@ -21,7 +28,7 @@ class MessageBlocksTest {
     @Test fun aChartFenceBecomesAChartAndAnUnclosedOneSaysItIsStillArriving() {
         val closed = parseBlocks("```chart\n{\"type\":\"bar\",\"labels\":[\"a\"],\"series\":[{\"name\":\"s\",\"values\":[2]}]}\n```") .single() as Block.ChartBlock
         assertTrue(closed.result is ChartParse.Ok)
-        val open = parseBlocks("Here:\n```chart\n{\"type\":\"bar\",\"lab").last() as Block.ChartBlock
+        val open = parseBlocks("Here:\n```chart\n{\"type\":\"bar\",\"lab", streaming = true).last() as Block.ChartBlock
         assertFalse(open.closed)
     }
 

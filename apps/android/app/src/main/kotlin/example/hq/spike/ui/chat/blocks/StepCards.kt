@@ -1,6 +1,7 @@
 package example.hq.spike.ui.chat.blocks
 
 import example.hq.spike.data.ToolStep
+import example.hq.spike.data.optStringOrNull
 import java.time.LocalDate
 import java.time.format.DateTimeFormatter
 import java.time.format.DateTimeParseException
@@ -58,7 +59,7 @@ data class StepCards(val written: List<NoteCard>, val read: List<String>, val ta
         }
 
         private fun field(args: String?, key: String): String? = try {
-            args?.let { JSONObject(it).optString(key, "").trim().ifEmpty { null } }
+            args?.let { JSONObject(it).optStringOrNull(key)?.trim()?.ifEmpty { null } }
         } catch (e: JSONException) {
             null
         }

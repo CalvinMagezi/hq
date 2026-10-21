@@ -36,12 +36,24 @@ fun inboxFixture(name: String?): InboxUi? {
         "i-clear" -> base.copy(tab = InboxTab.Updates, cleared = setOf("u3"), line = InboxLine("Update cleared", "Undo"))
         "i-details" -> base.copy(details = needs[1])
         "i-caught" -> base.copy(needs = emptyList(), updates = emptyList())
+        "i-long" -> InboxUi(loaded = true, needs = listOf(longApproval(::ago)), checkedAt = "14:32")
+        "i-long-details" -> longApproval(::ago).let { InboxUi(loaded = true, needs = listOf(it), details = it, checkedAt = "14:32") }
+        "i-offline" -> InboxUi(loaded = true, offline = true)
         "i-answering" -> base.copy(answering = mapOf("1" to Answer.Sending, "2" to Answer.Failed("Couldn't send your answer. HQ didn't reply. It may be restarting.")))
         else -> null
     }
 }
 
 /** The shapes the live server sends: task reviews with a whole description, notices with backticks, answers from several days. */
+/** An approval too long for a card, made the way the app makes every card, so the card and its page show what a real one would. */
+private fun longApproval(ago: (Long) -> String): InboxCard {
+    val body = "The export clean-up wants to remove every export older than 30 days from the exports folder on this phone. " +
+        "That is 214 files, about 1.2 GB. It keeps the newest copy of each note and anything you shared in the last week. " +
+        "Nothing is removed from your notes themselves, only the exported copies. It cannot be undone, but each note can be exported again. " +
+        "It will run once now and then every Sunday night unless you turn it off in Settings."
+    return InboxWords.card(InboxItem("val_9", "action_needed", "Run the export clean-up?", body, "pending", ago(7), null, "export-task", null, listOf("approve", "reject")))
+}
+
 private fun realInbox(ago: (Long) -> String): InboxLists {
     val long = "Add a service to the app so it can be chosen under Settings, Apps, Choose default apps. On the test phone check that the side button reaches the app; that a microphone-type foreground service can be started with no visible screen (the official while-in-use exemption says it should); and what happens after a reboot and unlock. Exit: a written result for each case, with the evidence kept in the project folder for the next review."
     fun item(id: String, title: String, body: String, minutes: Long, source: String?, actions: List<String>, state: String = "pending", kind: String = "action_needed") =

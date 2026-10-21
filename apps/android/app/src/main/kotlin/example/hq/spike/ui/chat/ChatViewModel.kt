@@ -144,13 +144,18 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
         _state.update { ChatReducer.apply(it, event, pending) }
         when (event) {
             is ChatEvent.Rejected -> if (event.clientId in pending) restore(event.clientId!!, event.reason)
-            is ChatEvent.TurnStart -> event.clientId?.let { sentContexts.remove(it); sentFiles.remove(it); sentReplace.remove(it) }
+            is ChatEvent.TurnStart -> {
+                event.clientId?.let { sentContexts.remove(it); sentFiles.remove(it); sentReplace.remove(it) }
+                // A first message was sent before its chat had an id; Retry finds it by that id.
+                lastQuestion = lastQuestion?.let { q -> if (q.threadId == null && event.threadId != null) LastQuestion(event.threadId, q.text, q.files, q.contexts) else q }
+            }
             is ChatEvent.TurnEnd -> if (event.threadId == _state.value.threadId) viewModelScope.launch {
                 // The live copy has tool arguments cut at 4000 characters and no ids; the saved one is whole.
                 event.threadId?.let { loadMessages(it) }
                 refreshChats()
             }
-            is ChatEvent.Lagged -> _state.value.threadId?.let { id -> viewModelScope.launch { loadMessages(id) } }
+            // A turn_end may be among the frames that were lost, so the running state is checked as after a reconnect.
+            is ChatEvent.Lagged -> viewModelScope.launch { reconcile() }
             else -> {}
         }
     }
@@ -172,6 +177,8 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
     private fun send() {
         val s = _state.value
         if (s.editing == null && s.files.isEmpty()) SlashCommands.parse(s.draft)?.let { return runSlash(it) }
+        // hq swallows exactly this text and never answers, which would leave the message "sending" for good.
+        if (s.draft.trim() == "/reset") return _state.update { it.copy(notice = Notice("That command is not used here. Send /clear to start a new chat.")) }
         submit(s.draft.trim(), replaceFrom = s.editing)
     }
 

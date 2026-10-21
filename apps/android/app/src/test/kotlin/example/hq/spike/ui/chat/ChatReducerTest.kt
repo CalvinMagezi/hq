@@ -24,6 +24,22 @@ class ChatReducerTest {
     }
 
     @Test
+    fun aMessageThatIsAlreadyShownIsNotAddedTwiceWhenItsTurnEnds() {
+        // The chat was reloaded after a lag and already holds the saved reply.
+        val reloaded = ChatUiState(threadId = "t1", live = LiveReply(text = "Done."), messages = listOf(UiMessage("m1", Speaker.User, "hello"), UiMessage("r1", Speaker.Reply, "Done.")))
+        val out = ChatReducer.apply(reloaded, ChatEvent.TurnEnd("t1", "r1", false), emptySet())
+        assertEquals(listOf("m1", "r1"), out.messages.map { it.id })
+        assertNull(out.live)
+    }
+
+    @Test
+    fun theSavedQuestionAppearsOnceWhenTheChatWasReloadedBeforeItsTurnStarted() {
+        val s = ChatUiState(messages = listOf(UiMessage("m1", Speaker.User, "hello"), UiMessage("c1", Speaker.User, "hello", sending = true)))
+        val out = ChatReducer.apply(s, ChatEvent.TurnStart("t1", "c1", saved), setOf("c1"))
+        assertEquals(listOf("m1"), out.messages.map { it.id })
+    }
+
+    @Test
     fun otherChatsAndOtherPeoplesQuestionsAreIgnoredOrAdded() {
         val open = ChatUiState(threadId = "t1")
         assertEquals(open, ChatReducer.apply(open, ChatEvent.Text("t2", "x"), emptySet()))

@@ -81,6 +81,22 @@ class InboxWordsTest {
         assertTrue(long.body.length <= 401)
     }
 
+    @Test fun aLongApprovalIsReadInFullOnItsOwnPageAndStaysAnswerableThere() {
+        val words = (1..120).joinToString(" ") { "word$it" }
+        val c = InboxWords.card(item("Run this?", words))
+        assertEquals(CardKind.Approval, c.kind)
+        assertFalse("the card is too short to approve from", c.canAllow)
+        assertTrue(c.body.endsWith("…"))
+        assertEquals("the page shows all of it", words, c.fullBody)
+    }
+
+    @Test fun anApprovalOfExactlyTheCapIsNotCutAndCanBeAnsweredFromTheCard() {
+        val exact = InboxWords.card(item("Run this?", "y".repeat(400)))
+        assertTrue(exact.canAllow)
+        assertEquals("y".repeat(400), exact.body)
+        assertFalse(InboxWords.card(item("Run this?", "y".repeat(401))).canAllow)
+    }
+
     @Test fun anUpdateHasNoAnswerAndAFittingIcon() {
         val c = InboxWords.card(item("Backup finished", "2,860 notes saved.", actions = listOf("dismiss"), kind = "value_item"))
         assertEquals(CardKind.Update, c.kind)

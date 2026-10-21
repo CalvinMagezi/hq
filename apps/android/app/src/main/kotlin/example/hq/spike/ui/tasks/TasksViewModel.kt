@@ -25,10 +25,20 @@ data class TaskDetail(
     val subtasks: List<TaskItem> = emptyList(),
     val comments: List<TaskComment> = emptyList(),
     val prompt: String? = null,
-    val draft: String = "",
+    /** What was typed, per place it was typed in (the comment box, send back, a new sub-task), so opening one does not erase another. */
+    val drafts: Map<String, String> = emptyMap(),
     val error: String? = null,
     val loading: Boolean = true,
-)
+    /** A write from this page is on its way; another tap waits for it. */
+    val busy: Boolean = false,
+    /** Goes with a new sub-task, so sending it again after a lost answer cannot add it twice. */
+    val subKey: String = newKey(),
+) {
+    val draft: String get() = drafts[prompt ?: COMMENT_DRAFT] ?: ""
+}
+
+private const val COMMENT_DRAFT = ""
+private fun newKey() = "phone-" + UUID.randomUUID()
 
 /** The quick-add sheet: one line, or the longer form after "Add details". */
 data class QuickState(
@@ -39,6 +49,8 @@ data class QuickState(
     val due: LocalDate? = null,
     val saving: Boolean = false,
     val error: String? = null,
+    /** Goes with the new task, so sending it again after a lost answer cannot add it twice. */
+    val key: String = newKey(),
 )
 
 data class TasksUi(
@@ -92,13 +104,16 @@ class TasksViewModel(app: Application) : AndroidViewModel(app) {
     private var frozen = false
     private var undo: (suspend () -> Unit)? = null
     private var lineJob: Job? = null
+    private var refreshSeq = 0
+    private val writing = mutableSetOf<String>()
 
     val actions = TasksActions(
         onTab = { t -> _state.update { it.copy(tab = t) } }, onRefresh = { viewModelScope.launch { refresh() } },
         onToggleGroup = { k -> _state.update { it.copy(expanded = if (k in it.expanded) it.expanded - k else it.expanded + k) } },
         onDone = ::done, onTomorrow = ::tomorrow, onUndo = ::undoLast, onDismissLine = { _state.update { it.copy(line = null) } },
         onOpen = ::open, onClose = { _state.update { it.copy(detail = null) } }, onMarkDone = { _state.value.detail?.task?.let(::done); _state.update { it.copy(detail = null) } },
-        onPrompt = { p -> detail { it.copy(prompt = p, draft = "") } }, onDraft = { d -> detail { it.copy(draft = d) } }, onSendBack = ::sendBack,
+        onPrompt = { p -> detail { it.copy(prompt = p, drafts = if (it.prompt != null) it.drafts - it.prompt else it.drafts) } },
+        onDraft = { d -> detail { it.copy(drafts = it.drafts + ((it.prompt ?: COMMENT_DRAFT) to d)) } }, onSendBack = ::sendBack,
         onStatus = { s -> patchDetail(JSONObject().put("status", s)) }, onPriority = { p -> patchDetail(JSONObject().put("priority", p ?: JSONObject.NULL)) },
         onToggleSub = ::toggleSub, onAddSub = ::addSub, onComment = ::comment, onArchive = ::archive,
         onQuick = { q -> _state.update { it.copy(quick = q) } }, onQuickSave = ::saveQuick,
@@ -118,13 +133,46 @@ class TasksViewModel(app: Application) : AndroidViewModel(app) {
         _state.value = fixed
     }
 
+    /** A refresh that began before a write finished is dropped, so it cannot bring a finished task back. */
     suspend fun refresh() {
+        val seq = ++refreshSeq
         val tasks = try { client.tasks() } catch (e: HqUnavailable) { null }
-        if (frozen) return
-        _state.update { if (tasks == null) it.copy(loaded = true, offline = true) else it.copy(loaded = true, offline = false, tasks = tasks, hidden = emptySet(), today = LocalDate.now()) }
+        if (frozen || seq != refreshSeq) return
+        _state.update { s ->
+            if (tasks == null) s.copy(loaded = true, offline = true)
+            else s.copy(
+                loaded = true, offline = false, tasks = tasks, hidden = s.hidden.filter { it in writing }.toSet(), today = LocalDate.now(),
+                detail = s.detail?.let { d -> tasks.firstOrNull { it.id == d.task.id }?.let { fresh -> d.copy(task = fresh) } ?: d },
+            )
+        }
     }
 
     private fun detail(change: (TaskDetail) -> TaskDetail) = _state.update { s -> s.detail?.let { s.copy(detail = change(it)) } ?: s }
+
+    /** Changes the open page only if it is still the page of task [id]; an answer for a task left behind is ignored. */
+    private fun detailOf(id: String, change: (TaskDetail) -> TaskDetail) = _state.update { s -> if (s.detail?.task?.id == id) s.copy(detail = change(s.detail)) else s }
+
+    private fun begin(id: String) {
+        writing += id
+        _state.update { it.copy(hidden = it.hidden + id) }
+    }
+
+    private fun succeeded(id: String) {
+        writing -= id
+        refreshSeq++
+    }
+
+    private fun failed(id: String) {
+        writing -= id
+        _state.update { it.copy(hidden = it.hidden - id) }
+    }
+
+    private fun why(e: HqUnavailable, notAnswering: String) = when (e.status) {
+        HTTP_CONFLICT -> "Changed meanwhile. Updated."
+        HTTP_BAD_REQUEST -> "HQ would not accept that."
+        HTTP_NOT_FOUND -> "That task is not there any more."
+        else -> notAnswering
+    }
 
     private fun say(text: String, action: String? = null, undoWith: (suspend () -> Unit)? = null) {
         undo = undoWith
@@ -135,17 +183,21 @@ class TasksViewModel(app: Application) : AndroidViewModel(app) {
 
     /** Finishes a task at once and offers Undo; a 409 says it changed meanwhile and reloads. */
     private fun done(t: TaskItem) {
-        _state.update { it.copy(hidden = it.hidden + t.id) }
+        begin(t.id)
         viewModelScope.launch {
             try {
                 client.patchTask(t.id, JSONObject().put("status", "complete").put("expected_status", t.status))
+                succeeded(t.id)
                 say("Done: ${t.title.take(TITLE_IN_LINE)}", "Undo") {
-                    client.patchTask(t.id, JSONObject().put("status", t.status).put("expected_status", "complete"))
+                    val back = JSONObject().put("status", t.status).put("expected_status", "complete")
+                    // Leaving "blocked" clears the reason, so it goes back with the status.
+                    if (t.status == "blocked") t.blockedReason?.let { back.put("blocked_reason", it) }
+                    client.patchTask(t.id, back)
                     refresh()
                 }
             } catch (e: HqUnavailable) {
-                _state.update { it.copy(hidden = it.hidden - t.id) }
-                say(if (e.message?.contains("HTTP 409") == true) "Changed meanwhile. Updated." else "Could not finish it. HQ is not answering.")
+                failed(t.id)
+                say(why(e, "Could not finish it. HQ is not answering."))
                 refresh()
             }
         }
@@ -154,18 +206,19 @@ class TasksViewModel(app: Application) : AndroidViewModel(app) {
     /** Moves a task to tomorrow by setting its start date; refused when it is due before then. */
     private fun tomorrow(t: TaskItem) {
         val date = LocalDate.now().plusDays(1)
-        _state.update { it.copy(hidden = it.hidden + t.id) }
+        begin(t.id)
         viewModelScope.launch {
             try {
                 client.patchTask(t.id, JSONObject().put("start_date", date.toString()))
+                succeeded(t.id)
                 say("Moved to tomorrow", "Undo") {
                     client.patchTask(t.id, JSONObject().put("start_date", t.startDate ?: JSONObject.NULL))
                     refresh()
                 }
                 refresh()
             } catch (e: HqUnavailable) {
-                _state.update { it.copy(hidden = it.hidden - t.id) }
-                say(if (e.message?.contains("HTTP 400") == true) "It is due before tomorrow, so it cannot move." else "Could not move it. HQ is not answering.")
+                failed(t.id)
+                say(if (e.status == HTTP_BAD_REQUEST) "It is due before tomorrow, so it cannot move." else why(e, "Could not move it. HQ is not answering."))
             }
         }
     }
@@ -194,20 +247,23 @@ class TasksViewModel(app: Application) : AndroidViewModel(app) {
         viewModelScope.launch {
             val subs = try { client.tasks(parentId = t.id) } catch (e: HqUnavailable) { emptyList() }
             val comments = try { client.taskComments(t.id) } catch (e: HqUnavailable) { emptyList() }
-            detail { if (it.task.id == t.id) it.copy(subtasks = subs, comments = comments, loading = false) else it }
+            detailOf(t.id) { it.copy(subtasks = subs, comments = comments, loading = false) }
         }
     }
 
     private fun patchDetail(change: JSONObject) {
         val d = _state.value.detail ?: return
-        detail { it.copy(prompt = null) }
+        if (d.busy) return
+        val id = d.task.id
+        detailOf(id) { it.copy(prompt = null, busy = true, error = null) }
         viewModelScope.launch {
             try {
-                val updated = client.patchTask(d.task.id, change.put("expected_status", d.task.status))
-                detail { it.copy(task = updated) }
+                val updated = client.patchTask(id, change.put("expected_status", d.task.status))
+                detailOf(id) { it.copy(task = updated, busy = false) }
                 refresh()
             } catch (e: HqUnavailable) {
-                detail { it.copy(error = if (e.message?.contains("HTTP 409") == true) "Changed meanwhile." else "Could not save. HQ is not answering.") }
+                detailOf(id) { it.copy(busy = false, error = why(e, "Could not save. HQ is not answering.")) }
+                if (e.status == HTTP_CONFLICT) refresh()
             }
         }
     }
@@ -215,63 +271,98 @@ class TasksViewModel(app: Application) : AndroidViewModel(app) {
     /** "Send back": the answer to "What should change?" goes in as a comment, then the task returns to In progress. */
     private fun sendBack() {
         val d = _state.value.detail ?: return
-        if (d.draft.isBlank()) return
+        if (d.draft.isBlank() || d.busy) return
+        val id = d.task.id
+        detailOf(id) { it.copy(busy = true, error = null) }
         viewModelScope.launch {
             try {
-                client.addTaskComment(d.task.id, d.draft.trim())
-                client.patchTask(d.task.id, JSONObject().put("status", "in_progress").put("expected_status", "ready_for_review"))
-                _state.update { it.copy(detail = null) }
-                say("Sent back to hq")
-                refresh()
+                client.addTaskComment(id, d.draft.trim())
             } catch (e: HqUnavailable) {
-                detail { it.copy(error = "Could not send it back. HQ is not answering.") }
+                detailOf(id) { it.copy(busy = false, error = "Could not send it back. HQ is not answering.") }
+                return@launch
             }
+            // The note is in, so it is not typed again if the move below fails.
+            detailOf(id) { it.copy(drafts = it.drafts - "sendback") }
+            try {
+                client.patchTask(id, JSONObject().put("status", "in_progress").put("expected_status", "ready_for_review"))
+                closeIfOpen(id)
+                say("Sent back to hq")
+            } catch (e: HqUnavailable) {
+                if (e.status == HTTP_CONFLICT) {
+                    closeIfOpen(id)
+                    say("Changed meanwhile. Your note was added.")
+                } else {
+                    detailOf(id) { it.copy(busy = false, prompt = null, error = "Your note was added, but the task did not move. Use the status button to move it.") }
+                }
+            }
+            refresh()
         }
     }
 
+    private fun closeIfOpen(id: String) = _state.update { s -> if (s.detail?.task?.id == id) s.copy(detail = null) else s }
+
     private fun toggleSub(s: TaskItem) {
+        val parent = _state.value.detail?.task?.id ?: return
         val to = if (s.status == "complete") "to_do" else "complete"
-        detail { d -> d.copy(subtasks = d.subtasks.map { if (it.id == s.id) it.copy(status = to) else it }) }
+        detailOf(parent) { d -> d.copy(subtasks = d.subtasks.map { if (it.id == s.id) it.copy(status = to) else it }) }
         viewModelScope.launch {
-            try { client.patchTask(s.id, JSONObject().put("status", to).put("expected_status", s.status)); refresh() } catch (e: HqUnavailable) { open(_state.value.detail?.task ?: return@launch) }
+            try {
+                client.patchTask(s.id, JSONObject().put("status", to).put("expected_status", s.status))
+                refresh()
+            } catch (e: HqUnavailable) {
+                val subs = try { client.tasks(parentId = parent) } catch (e2: HqUnavailable) { null }
+                detailOf(parent) { d -> d.copy(subtasks = subs ?: d.subtasks, error = why(e, "Could not save. HQ is not answering.")) }
+            }
         }
     }
 
     private fun addSub() {
         val d = _state.value.detail ?: return
-        if (d.draft.isBlank() || d.prompt != "sub") return
+        if (d.draft.isBlank() || d.prompt != "sub" || d.busy) return
+        val id = d.task.id
+        detailOf(id) { it.copy(busy = true, error = null) }
         viewModelScope.launch {
             try {
-                client.createTask(JSONObject().put("title", d.draft.trim()).put("parent_task_id", d.task.id).put("created_by", "operator"))
-                open(d.task)
-                refresh()
-            } catch (e: HqUnavailable) { detail { it.copy(error = "Could not add it. HQ is not answering.") } }
+                client.createTask(JSONObject().put("title", d.draft.trim()).put("parent_task_id", id).put("created_by", "operator").put("external_id", d.subKey))
+            } catch (e: HqUnavailable) {
+                detailOf(id) { it.copy(busy = false, error = why(e, "Could not add it. HQ is not answering.")) }
+                return@launch
+            }
+            val subs = try { client.tasks(parentId = id) } catch (e: HqUnavailable) { null }
+            detailOf(id) { it.copy(prompt = null, drafts = it.drafts - "sub", subtasks = subs ?: it.subtasks, busy = false, subKey = newKey()) }
+            refresh()
         }
     }
 
     private fun comment() {
         val d = _state.value.detail ?: return
-        if (d.draft.isBlank() || d.prompt != null) return
+        if (d.draft.isBlank() || d.prompt != null || d.busy) return
+        val id = d.task.id
+        detailOf(id) { it.copy(busy = true, error = null) }
         viewModelScope.launch {
             try {
-                client.addTaskComment(d.task.id, d.draft.trim())
-                detail { it.copy(draft = "", comments = emptyList()) }
-                val comments = client.taskComments(d.task.id)
-                detail { it.copy(comments = comments) }
-            } catch (e: HqUnavailable) { detail { it.copy(error = "Could not post the comment. HQ is not answering.") } }
+                client.addTaskComment(id, d.draft.trim())
+            } catch (e: HqUnavailable) {
+                detailOf(id) { it.copy(busy = false, error = why(e, "Could not post the comment. HQ is not answering.")) }
+                return@launch
+            }
+            val comments = try { client.taskComments(id) } catch (e: HqUnavailable) { null }
+            detailOf(id) { it.copy(drafts = it.drafts - COMMENT_DRAFT, comments = comments ?: it.comments, busy = false) }
         }
     }
 
     private fun archive() {
         val t = _state.value.detail?.task ?: return
-        _state.update { it.copy(detail = null, hidden = it.hidden + t.id) }
+        _state.update { it.copy(detail = null) }
+        begin(t.id)
         viewModelScope.launch {
             try {
                 client.archiveTask(t.id)
+                succeeded(t.id)
                 say("Task archived", "Undo") { client.restoreTask(t.id); refresh() }
             } catch (e: HqUnavailable) {
-                _state.update { it.copy(hidden = it.hidden - t.id) }
-                say("Could not archive it. HQ is not answering.")
+                failed(t.id)
+                say(if (e.status == HTTP_BAD_REQUEST && t.subtaskCount > 0) "Archive its sub-tasks first." else why(e, "Could not archive it. HQ is not answering."))
             }
         }
     }
@@ -283,7 +374,7 @@ class TasksViewModel(app: Application) : AndroidViewModel(app) {
         _state.update { it.copy(quick = q.copy(saving = true, error = null)) }
         viewModelScope.launch {
             try {
-                val body = JSONObject().put("title", parsed.title).put("created_by", "operator").put("external_id", "phone-" + UUID.randomUUID())
+                val body = JSONObject().put("title", parsed.title).put("created_by", "operator").put("external_id", q.key)
                 (q.priority ?: parsed.priority)?.let { body.put("priority", it) }
                 parsed.startDate?.let { body.put("start_date", it.toString()) }
                 q.due?.let { body.put("due_date", it.toString()) }
@@ -294,7 +385,7 @@ class TasksViewModel(app: Application) : AndroidViewModel(app) {
                 say("Task added")
                 refresh()
             } catch (e: HqUnavailable) {
-                _state.update { it.copy(quick = it.quick?.copy(saving = false, error = "Could not add it. HQ is not answering.")) }
+                _state.update { it.copy(quick = it.quick?.copy(saving = false, error = why(e, "Could not add it. HQ is not answering."))) }
             }
         }
     }
@@ -303,5 +394,8 @@ class TasksViewModel(app: Application) : AndroidViewModel(app) {
         const val POLL_MS = 30_000L
         const val LINE_MS = 5_000L
         const val TITLE_IN_LINE = 40
+        const val HTTP_BAD_REQUEST = 400
+        const val HTTP_NOT_FOUND = 404
+        const val HTTP_CONFLICT = 409
     }
 }

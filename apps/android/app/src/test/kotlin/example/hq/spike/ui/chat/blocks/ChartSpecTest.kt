@@ -22,6 +22,40 @@ class ChartSpecTest {
 
     private fun reason(src: String) = (Charts.parse(src) as ChartParse.Bad).reason
 
+    @Test fun aValueTooLargeToDrawIsRefusedInsteadOfHangingTheScale() {
+        assertEquals("series 1 has a value that is too large", reason(payload("series" to series("s", 1.7e308, 1.0, 2.0))))
+        assertEquals("series 1 has a value that is too large", reason(payload("series" to series("s", -1.7e308, 1.0, 2.0))))
+    }
+
+    @Test fun theScaleAlwaysEndsWithFewTicks() {
+        for (top in listOf(1.0, 9.9e14, 0.000001, 123456789012.0)) assertTrue(Charts.yScale(listOf(0.0, top)).ticks.size <= 13)
+    }
+
+    @Test fun aPayloadNestedFarTooDeepIsRefusedNotParsed() {
+        assertEquals("payload is too large", reason("[".repeat(50_000)))
+        assertEquals("payload is too large", reason("{\"a\":".repeat(40) + "1" + "}".repeat(40)))
+        assertEquals("payload is too large", reason("x".repeat(40_000).let { "[\"$it\"]" }))
+    }
+
+    @Test fun bracketsInsideTextDoNotCountAsDepth() {
+        val labels = JSONArray(listOf("[[[[[[[[[[[[[[[[[[[[", "{{{{{{{{{{{{{{{{{{{{{", "Mar"))
+        assertTrue(Charts.parse(payload("labels" to labels)) is ChartParse.Ok)
+    }
+
+    @Test fun roundingKeepsFiguresInTheTensOfMillions() {
+        assertEquals(30_000_000.0, Charts.round2(30_000_000.0), 0.0)
+        assertEquals(30_000_000.5, Charts.round2(30_000_000.5), 0.0)
+        assertEquals(1.24, Charts.round2(1.2449), 0.0)
+        val ticks = Charts.yScale(listOf(25_000_000.0, 40_000_000.0)).ticks
+        assertEquals(ticks.sorted().distinct(), ticks)
+        assertEquals(40_000_000.0, ticks.last(), 0.0)
+    }
+
+    @Test fun aMermaidPieWithAnEnormousNumberIsRefused() {
+        val src = "pie title Spend\n\"a\": ${"9".repeat(400)}\n\"b\": 1"
+        assertEquals("a value is too large", (Charts.parseMermaidPie(src) as ChartParse.Bad).reason)
+    }
+
     @Test fun aValidChartParses() {
         val spec = (Charts.parse(payload()) as ChartParse.Ok).spec
         assertEquals(ChartType.Line, spec.type)

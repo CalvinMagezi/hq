@@ -16,7 +16,8 @@ import org.json.JSONArray
 import org.json.JSONObject
 
 /** The local hq is not answering, or answered with an error. */
-class HqUnavailable(message: String, cause: Throwable? = null) : IOException(message, cause)
+/** hq did not answer, or answered with an error; [status] is the HTTP status when there was one. */
+class HqUnavailable(message: String, cause: Throwable? = null, val status: Int = 0) : IOException(message, cause)
 
 /** hq cannot make that export from this note (no tables, a file that is not Markdown); [message] says why. */
 class ExportRefused(message: String) : IOException(message)
@@ -28,8 +29,11 @@ data class ExportedFile(val file: java.io.File, val name: String, val mime: Stri
 class NoteNotFound(path: String) : IOException("No note at $path")
 
 /** The same REST and web socket API the web app uses, over loopback. Auth is the sealed web token. */
-class HqClient(private val token: () -> String, private val base: String = LOCAL_HQ) {
-    /** Starting a helper answers only once the agent has settled, which can take longer than any other call here. */
+class HqClient(private val token: () -> String, private val base: String = LOCAL_HQ, private val onSignedOut: () -> Unit = {}) {
+    /** The sealed token is decrypted once, off the main thread, and forgotten when hq refuses it. */
+    @Volatile private var bearer: String? = null
+
+    /** Starting a helper answers only once the agent has settled, and an export of a large note is made before it is sent; both can take longer than any other call here. */
     private val startHttp by lazy { http.newBuilder().readTimeout(START_READ_SECONDS, TimeUnit.SECONDS).build() }
 
     private val http = OkHttpClient.Builder()
@@ -99,7 +103,7 @@ class HqClient(private val token: () -> String, private val base: String = LOCAL
     suspend fun exportNote(path: String, format: String, dir: java.io.File): ExportedFile {
         val request = authed("/api/note/export?path=${java.net.URLEncoder.encode(path, "UTF-8")}&format=$format").build()
         val response = kotlinx.coroutines.suspendCancellableCoroutine { cont ->
-            val call = http.newCall(request)
+            val call = startHttp.newCall(request)
             cont.invokeOnCancellation { call.cancel() }
             call.enqueue(object : okhttp3.Callback {
                 override fun onFailure(call: okhttp3.Call, e: IOException) = cont.resumeWith(Result.failure(HqUnavailable("hq is not reachable", e)))
@@ -112,8 +116,13 @@ class HqClient(private val token: () -> String, private val base: String = LOCAL
                 if (!r.isSuccessful) throw HqUnavailable("HTTP ${r.code} for /api/note/export")
                 val name = fileNameOf(r.header("Content-Disposition")) ?: "note.$format"
                 val dest = java.io.File(dir, name)
-                dest.parentFile?.mkdirs()
-                r.body.byteStream().use { input -> dest.outputStream().use { input.copyTo(it) } }
+                try {
+                    dest.parentFile?.mkdirs()
+                    r.body.byteStream().use { input -> dest.outputStream().use { input.copyTo(it) } }
+                } catch (e: IOException) {
+                    dest.delete()
+                    throw HqUnavailable("the export could not be saved", e)
+                }
                 ExportedFile(dest, name, r.header("Content-Type")?.substringBefore(';')?.trim().orEmpty())
             }
         }
@@ -151,8 +160,19 @@ class HqClient(private val token: () -> String, private val base: String = LOCAL
     private fun json(body: JSONObject) = body.toString().toRequestBody("application/json".toMediaType())
 
     /** Active tasks, or the sub-tasks of one. The lists group and count them on the phone. */
-    suspend fun tasks(parentId: String? = null, limit: Int = TASK_PAGE): List<TaskItem> =
-        send(authed("/api/tasks?limit=$limit" + (parentId?.let { "&parent_task_id=$it" } ?: "&top_level_only=true")).build()) { text -> JSONObject(text).optJSONArray("tasks").objects().map(::taskOf) }
+    suspend fun tasks(parentId: String? = null): List<TaskItem> {
+        val all = mutableListOf<TaskItem>()
+        while (all.size < TASK_CAP) {
+            val query = "limit=$TASK_PAGE&offset=${all.size}" + (parentId?.let { "&parent_task_id=$it" } ?: "&top_level_only=true")
+            val (page, more) = send(authed("/api/tasks?$query").build()) { text ->
+                val o = JSONObject(text)
+                o.optJSONArray("tasks").objects().map(::taskOf) to o.optBoolean("has_more", false)
+            }
+            all += page
+            if (!more || page.isEmpty()) break
+        }
+        return all
+    }
 
     /** Changes some fields of a task; a field left out is untouched, a JSON null clears it. 409 means it changed meanwhile. */
     suspend fun patchTask(id: String, change: JSONObject): TaskItem =
@@ -388,12 +408,22 @@ class HqClient(private val token: () -> String, private val base: String = LOCAL
         http.newWebSocket(Request.Builder().url("${base.replaceFirst("http", "ws")}/ws?ticket=$ticket").build(), listener)
 
     /** The server wants this header on requests that change a helper, setup or a credential; sending it on every request is harmless. */
-    private fun authed(path: String) = Request.Builder().url(base + path).header("Authorization", "Bearer ${token()}").header("X-HQ-Client", "android")
+    private fun authed(path: String) = Request.Builder().url(base + path).header("Authorization", "Bearer ${bearerToken()}").header("X-HQ-Client", "android")
+
+    private fun bearerToken(): String = bearer ?: try {
+        token().also { bearer = it }
+    } catch (e: IllegalStateException) {
+        throw HqUnavailable("the web token is not available", e)
+    }
 
     private suspend fun <T> send(request: Request, caller: OkHttpClient = http, parse: (String) -> T): T = withContext(Dispatchers.IO) {
         try {
             caller.newCall(request).execute().use { r ->
-                if (!r.isSuccessful) throw HqUnavailable("HTTP ${r.code} for ${request.url.encodedPath}")
+                if (r.code == HTTP_UNAUTHORIZED) {
+                    bearer = null
+                    onSignedOut()
+                }
+                if (!r.isSuccessful) throw HqUnavailable("HTTP ${r.code} for ${request.url.encodedPath}", status = r.code)
                 parse(r.body.string())
             }
         } catch (e: IOException) {
@@ -415,6 +445,7 @@ class HqClient(private val token: () -> String, private val base: String = LOCAL
         const val LOCAL_HQ = "http://127.0.0.1:5678"
         private const val HTTP_NOT_FOUND = 404
         private const val HTTP_BAD_REQUEST = 400
+        private const val HTTP_UNAUTHORIZED = 401
         private const val CONNECT_SECONDS = 3L
         private const val READ_SECONDS = 20L
         private const val START_READ_SECONDS = 150L
@@ -422,6 +453,7 @@ class HqClient(private val token: () -> String, private val base: String = LOCAL
         private const val THREAD_PAGE = 50
         private const val PICKER_PAGE = 20
         private const val TASK_PAGE = 500
+        private const val TASK_CAP = 5_000
         private const val SCREEN_LINES = 80
         private const val UPLOAD_CHUNK = 64 * 1024
         const val MESSAGE_PAGE = 100

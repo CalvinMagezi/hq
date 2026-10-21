@@ -184,7 +184,7 @@ object ChatReducer {
         // An edit made in another tab or on another device replaced a question and what followed it.
         val base = if (!mine && e.replaceFrom != null) state.messages.takeWhile { it.id != e.replaceFrom } else state.messages
         val messages = when {
-            mine && saved != null -> base.map { if (it.id == e.clientId) saved else it }
+            mine && saved != null -> base.map { if (it.id == e.clientId) saved else it }.distinctBy { it.id }
             saved != null && base.none { it.id == saved.id } -> base + saved
             else -> base
         }
@@ -215,7 +215,7 @@ object ChatReducer {
         val message = UiMessage(e.messageId ?: "reply-${state.messages.size}", Speaker.Reply, live.text, steps)
         return state.copy(
             live = null,
-            messages = if (empty) state.messages else state.messages + message,
+            messages = if (empty || state.messages.any { it.id == message.id }) state.messages else state.messages + message,
             failed = state.failed || (empty && !e.stopped),
         )
     }

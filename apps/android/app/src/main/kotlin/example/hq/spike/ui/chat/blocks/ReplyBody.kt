@@ -66,8 +66,8 @@ fun blockGap(blocks: List<Block>, i: Int): androidx.compose.ui.unit.Dp =
 
 /** A reply's text as blocks, in the order it was written. */
 @Composable
-fun ReplyBody(text: String, actions: BlockActions, modifier: Modifier = Modifier) {
-    val blocks = remember(text) { parseBlocks(text) }
+fun ReplyBody(text: String, actions: BlockActions, modifier: Modifier = Modifier, streaming: Boolean = false) {
+    val blocks = remember(text, streaming) { parseBlocks(text, streaming) }
     Blocks(blocks, actions, modifier)
 }
 
