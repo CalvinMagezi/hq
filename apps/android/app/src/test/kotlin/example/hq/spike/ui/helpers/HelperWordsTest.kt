@@ -14,7 +14,7 @@ class HelperWordsTest {
     private fun row(
         status: String = "running", agent: String = "working", label: String = "", goal: String? = null, harness: String = "claude-code", host: String = "mac-mini",
         reachable: Boolean = true, alive: Boolean? = true, detail: String? = null, seen: String = "2026-10-21 11:58:00", created: String = "2026-10-21 11:48:00", task: String? = null,
-    ) = HelperRow("h1", harness, label, host, "/Users/x/hq-orch-probe", status, agent, seen, created, goal, task, alive, reachable, detail, false)
+    ) = HelperRow("h1", harness, label, host, "/Users/example/hq-orch-probe", status, agent, seen, created, goal, task, alive, reachable, detail, false)
 
     @Test fun theTitleIsTheJobAndNeverTheFolder() {
         assertEquals("Fix the backup script", HelperWords.title(row(label = "Fix the backup script", goal = "ignored")))
@@ -80,11 +80,11 @@ class HelperWordsTest {
     }
 
     @Test fun aPathIsReducedToItsFileName() {
-        val ask = HelperWords.blocked(listOf("Do you want to edit /Users/x/work/src/main.rs?"))!!
+        val ask = HelperWords.blocked(listOf("Do you want to edit /Users/example/work/src/main.rs?"))!!
         // The owner sees the whole path: "hosts" could be /etc/hosts or a file of the same name in the project.
-        assertEquals("/Users/x/work/src/main.rs", ask.subject)
+        assertEquals("/Users/example/work/src/main.rs", ask.subject)
         assertEquals("main.rs", HelperWords.fileName(ask))
-        assertEquals("Wants to edit one file: /Users/x/work/src/main.rs", HelperWords.askLine(ask))
+        assertEquals("Wants to edit one file: /Users/example/work/src/main.rs", HelperWords.askLine(ask))
     }
 
     @Test fun aCreateQuestionAndACommandQuestionAreTold() {
@@ -278,7 +278,7 @@ class HelperWordsTest {
     }
 
     @Test fun aHelperWithNoNameIsGenericAndShowsItsFolder() {
-        val nameless = row(label = "", goal = null, task = null).copy(cwd = "/Users/x/Documents/HQ/egress-probe 2026-10-19 1731/")
+        val nameless = row(label = "", goal = null, task = null).copy(cwd = "/Users/example/Documents/HQ/egress-probe 2026-10-19 1731/")
         val c = HelperWords.card(nameless, null, now)
         assertTrue(c.generic)
         assertEquals("Claude helper", c.title)
@@ -313,7 +313,7 @@ class HelperWordsTest {
 
     @Test fun theRealListShapeWithNullTimesGivesAnAgeForEveryRow() {
         val json = """{"sessions":[
-            {"id":"h1","harness":"claude-code","label":"","host":"laptop","cwd":"/Users/x/Documents/HQ/kola-check","status":"stopped","agent_status":"idle","last_seen_at":null,"created_at":"2026-09-24 16:10:41","goal":null,"alive":false,"reachable":true,"archived":false},
+            {"id":"h1","harness":"claude-code","label":"","host":"laptop","cwd":"/Users/example/Documents/HQ/kola-check","status":"stopped","agent_status":"idle","last_seen_at":null,"created_at":"2026-09-24 16:10:41","goal":null,"alive":false,"reachable":true,"archived":false},
             {"id":"h2","harness":"codex","label":"pilot","host":"laptop","cwd":"/work/p","status":"exited","agent_status":"done","last_seen_at":"2026-10-19 17:32:03","created_at":"2026-10-19 17:31:22","goal":"Prove it","task":null,"alive":null,"reachable":false,"detail":"host 'laptop' unreachable: no gate key at /x","archived":false}]}"""
         val rows = example.hq.spike.data.helperRows(json)
         assertEquals("", rows[0].lastSeenAt)

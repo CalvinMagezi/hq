@@ -59,18 +59,18 @@ fun helpersFixture(name: String?): HelpersUi? {
 private fun realHelpers(now: LocalDateTime): HelpersUi {
     fun at(hours: Long) = now.minusHours(hours).toString().replace('T', ' ').substringBefore('.')
     val rows = listOf(
-        HelperRow("r0", "claude-code", "", "laptop", "/Users/someone/work/egress-probe", "running", "unknown", at(30), at(30), null, null, null, false, "host 'laptop' unreachable: no gate key at /data/user/0/example.hq.spike/files/hqhome/.hq/gate/laptop.key; make one with `hq host gate-key <host>`", false),
+        HelperRow("r0", "claude-code", "", "laptop", "/Users/example/work/egress-probe", "running", "unknown", at(30), at(30), null, null, null, false, "host 'laptop' unreachable: no gate key at /data/user/0/example.hq.spike/files/hqhome/.hq/gate/laptop.key; make one with `hq host gate-key <host>`", false),
         HelperRow("r1", "claude-code", "egress-probe", "laptop", "/work/p", "stopped", "blocked", at(30), at(31), null, null, false, true, null, false),
         HelperRow("r2", "claude-code", "phase2-mcp-check-2", "laptop", "/work/p", "stopped", "done", at(31), at(31), "Prove a host session reaches HQ over the new tunnel URL for MCP", null, false, true, null, false),
         HelperRow("r3", "claude-code", "pwd-check", "laptop", "/tmp", "stopped", "idle", at(250), at(250), "Run pwd in the new Claude Code session and report its exact output.", null, false, true, null, false),
-        HelperRow("r4", "claude-code", "", "laptop", "/Users/someone/hq-orch-probe", "stopped", "done", at(260), at(260), "print ready then done", null, false, true, null, false),
-        HelperRow("r5", "cursor", "", "laptop", "/Users/someone/Documents/HQ/cursor-probe 2026-10-08 1102", "stopped", "idle", at(310), at(310), null, null, false, true, null, false),
-        HelperRow("r6", "cursor", "", "laptop", "/Users/someone/Documents/HQ/cursor-probe 2026-10-08 1215", "stopped", "idle", at(309), at(309), null, null, false, true, null, false),
-        HelperRow("r7", "claude-kola", "", "laptop", "/Users/someone/Documents/HQ/kola-check", "stopped", "idle", at(308), at(308), null, null, false, true, null, false),
-        HelperRow("r8", "pi", "", "laptop", "/Users/someone/Documents/HQ/pi-check", "stopped", "idle", at(307), at(307), null, null, false, true, null, false),
+        HelperRow("r4", "claude-code", "", "laptop", "/Users/example/hq-orch-probe", "stopped", "done", at(260), at(260), "print ready then done", null, false, true, null, false),
+        HelperRow("r5", "cursor", "", "laptop", "/Users/example/Documents/HQ/cursor-probe 2026-10-08 1102", "stopped", "idle", at(310), at(310), null, null, false, true, null, false),
+        HelperRow("r6", "cursor", "", "laptop", "/Users/example/Documents/HQ/cursor-probe 2026-10-08 1215", "stopped", "idle", at(309), at(309), null, null, false, true, null, false),
+        HelperRow("r7", "claude-kola", "", "laptop", "/Users/example/Documents/HQ/kola-check", "stopped", "idle", at(308), at(308), null, null, false, true, null, false),
+        HelperRow("r8", "pi", "", "laptop", "/Users/example/Documents/HQ/pi-check", "stopped", "idle", at(307), at(307), null, null, false, true, null, false),
         // The oldest rows on the phone have no last-seen time at all: the server sends null, which the client reads as empty.
-        HelperRow("r9", "claude-kola", "fr034-kola-test", "laptop", "/Users/someone/Documents/HQ/kola-test", "stopped", "idle", "", at(24 * 26), null, null, false, true, null, false),
-        HelperRow("r10", "claude-code", "family-tree-app", "laptop", "/Users/someone/Documents/HQ/family-tree", "exited", "done", "", at(24 * 27), null, null, false, true, null, false),
+        HelperRow("r9", "claude-kola", "fr034-kola-test", "laptop", "/Users/example/Documents/HQ/kola-test", "stopped", "idle", "", at(24 * 26), null, null, false, true, null, false),
+        HelperRow("r10", "claude-code", "family-tree-app", "laptop", "/Users/example/Documents/HQ/family-tree", "exited", "done", "", at(24 * 27), null, null, false, true, null, false),
     )
     return HelpersUi(loaded = true, rows = rows, now = now)
 }
