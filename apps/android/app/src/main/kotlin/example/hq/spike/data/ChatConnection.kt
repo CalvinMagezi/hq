@@ -30,8 +30,9 @@ class ChatConnection(private val client: HqClient, scope: CoroutineScope) {
     }
 
     /** False when there is no open socket, so the caller can keep the message as a draft. */
-    fun sendChat(content: String, threadId: String?, clientId: String): Boolean = write(
-        JSONObject().put("type", "chat").put("content", content).put("thread_id", threadId ?: JSONObject.NULL).put("client_id", clientId),
+    fun sendChat(content: String, threadId: String?, clientId: String, replaceFrom: String? = null): Boolean = write(
+        JSONObject().put("type", "chat").put("content", content).put("thread_id", threadId ?: JSONObject.NULL).put("client_id", clientId)
+            .apply { replaceFrom?.let { put("replace_from", it) } },
     )
 
     fun stop(threadId: String): Boolean = write(JSONObject().put("type", "stop").put("thread_id", threadId))

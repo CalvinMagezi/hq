@@ -27,6 +27,9 @@ object Mts {
     val Amber = Color(0xFFFFB300)
     val DangerText = Color(0xFFFF6B6B)
     val LauncherGround = Color(0xFF0A0A0F)
+    val BrandIndigo = Color(0xFF2E3191)
+    /** Undo on the snackbar; the design uses it outside the MTS set. */
+    val UndoBlue = Color(0xFF00668F)
 }
 
 val ClearSans = FontFamily(
@@ -44,10 +47,16 @@ private fun style(size: Int, line: Int, weight: FontWeight) = TextStyle(
 object HqType {
     val Body = style(16, 24, FontWeight.Normal)
     val BodySm = style(14, 20, FontWeight.Normal)
+    val BodyBold = style(16, 24, FontWeight.Bold)
     val Caption = style(12, 16, FontWeight.Normal)
     val ScreenTitle = style(18, 24, FontWeight.Bold)
     val NavLabel = style(12, 16, FontWeight.Bold)
     val Badge = style(11, 16, FontWeight.Bold)
+    val BodySmBold = style(14, 20, FontWeight.Bold)
+    val ToolLine = style(13, 16, FontWeight.Bold)
+    val H2 = style(22, 28, FontWeight.Bold)
+    val ChipTitle = style(15, 20, FontWeight.Bold)
+    val Group = style(13, 16, FontWeight.Bold)
 }
 
 @Composable
