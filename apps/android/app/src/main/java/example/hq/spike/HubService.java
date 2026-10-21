@@ -54,7 +54,7 @@ public class HubService extends Service {
     @Override
     public int onStartCommand(Intent intent, int flags, int startId) {
         getSystemService(NotificationManager.class)
-                .createNotificationChannel(new NotificationChannel(CHANNEL, "AgentHQ service", NotificationManager.IMPORTANCE_LOW));
+                .createNotificationChannel(new NotificationChannel(CHANNEL, "HQ is running", NotificationManager.IMPORTANCE_LOW));
         Notification n = notification(HubConfig.isActive(readSmall(new File(getFilesDir(), "mode"))));
         try {
             if (Build.VERSION.SDK_INT >= 34) startForeground(NOTIFICATION_ID, n, ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE);
@@ -72,8 +72,8 @@ public class HubService extends Service {
     }
 
     private Notification notification(boolean active) {
-        String text = (active ? "Active: relays and scheduler on. " : "") + "Serving this device on 127.0.0.1:" + PORT;
-        return new Notification.Builder(this, CHANNEL).setContentTitle("AgentHQ is running")
+        String text = active ? "Answering your chats and running scheduled tasks." : "Only the app is on. Chats and scheduled tasks are paused.";
+        return new Notification.Builder(this, CHANNEL).setContentTitle("HQ is running")
                 .setContentText(text).setSmallIcon(statIcon(this)).build();
     }
 

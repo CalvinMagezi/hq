@@ -57,6 +57,7 @@ class ShellActivity : ComponentActivity() {
         val start = intent.getStringExtra("place")?.let { name -> Place.entries.firstOrNull { it.name.equals(name, true) } } ?: if (intent.getStringExtra("fixture")?.startsWith("n-") == true) Place.Notes else if (intent.getStringExtra("fixture")?.startsWith("i-") == true) Place.Inbox else Place.Chat
         val badge = intent.getIntExtra("badge", 0)
         val fixtureName = intent.getStringExtra("fixture")
+        if (fixtureName == "a-alerts") sampleAlerts()
         val notesFixture = notesFixture(fixtureName)
         val inboxFixture = inboxFixture(fixtureName)
         val fixture = chatFixture(fixtureName) ?: (notesFixture ?: inboxFixture)?.let { ChatUiState() }
@@ -100,6 +101,21 @@ class ShellActivity : ComponentActivity() {
     private fun NotesPlace(notesState: NotesUi) {
         val go = LocalGoTo.current
         NotesHome(notesState, notes.actions, onAskHq = { go(Place.Chat); chat.actions.onDraft("Write me a note about ") })
+    }
+
+    /** Posts three sample notifications, for checking their words and buttons against the design with no hq. */
+    private fun sampleAlerts() {
+        fun item(id: String, title: String, body: String, actions: String, source: String? = null) = org.json.JSONObject(
+            """{"id":"$id","kind":"action_needed","title":"$title","description":"$body","state":"pending","created_at":"${java.time.OffsetDateTime.now()}","metadata":{"extra":{"source_task":${if (source == null) "null" else "\"$source\""}}},"actions":[$actions]}""",
+        )
+        val items = linkedMapOf(
+            "a1" to item("a1", "Harness session 'claude in hq-oss' is waiting for you", "Session s-1 on mac-mini is blocked on a prompt or approval:\\nDo you want to edit Chat.dc.html?\\nRead it with x", "\"approve\",\"reject\"", "session-supervisor"),
+            "a2" to item("a2", "Delete 3 old backups?", "The nightly backup wants to remove the 3 oldest copies.", "\"approve\",\"reject\"", "backup-task"),
+            "a3" to org.json.JSONObject("""{"id":"a3","kind":"value_item","title":"Backup finished","description":"2,860 notes saved to your Mac.","state":"pending","created_at":"${java.time.OffsetDateTime.now()}","actions":["dismiss"]}"""),
+        )
+        val nm = getSystemService(android.app.NotificationManager::class.java)
+        AlertPoster.channels().forEach { nm.createNotificationChannel(it) }
+        AlertPoster.post(this, items, items.keys.toList(), 5)
     }
 
     @androidx.compose.runtime.Composable

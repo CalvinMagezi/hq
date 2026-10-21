@@ -21,6 +21,7 @@
       <property android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
                 android:value="Local-first notes and tasks hub that serves only this device over loopback"/>
     </service>
+    <receiver android:name=".AnswerReceiver" android:exported="false"/>
     <receiver android:name=".BootReceiver" android:exported="true">
       <intent-filter><action android:name="android.intent.action.BOOT_COMPLETED"/></intent-filter>
     </receiver>
