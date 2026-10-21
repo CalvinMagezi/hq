@@ -31,7 +31,7 @@ fun chatFixture(name: String?): ChatUiState? {
             live = LiveReply(steps = listOf(LiveStep(checked, true), LiveStep(read, true), LiveStep(ToolStep("c3", "vault_write_note", null, null, null), false))),
         )
         "chats" -> open.copy(messages = settled.take(2), chats = rows, chatsOpen = true, notice = Notice("Chat archived", "Undo"))
-        "offline" -> open.copy(messages = settled.take(2), connected = false, draft = "Check the backup status")
+        "offline" -> open.copy(messages = settled.take(2), connected = false, offlineSince = System.currentTimeMillis() - 60_000, draft = "Check the backup status")
         "failed" -> open.copy(failed = true)
         else -> richFixture(name)
     }
@@ -139,7 +139,27 @@ private fun richFixture(name: String?): ChatUiState? {
             "Battery steps", "Can you check this?",
             reply("r", "Here is the checklist I made.\n\n<hq-attachments>[{\"name\":\"Battery-checklist.docx\",\"path\":\"_media/web/d/a.docx\",\"mime\":\"application/x\",\"size\":24576}]</hq-attachments>"),
         ).let { it.copy(messages = it.messages.map { m -> UiMessage.saved(m.id, m.speaker, m.text) }) }
-        "context" -> ChatUiState(contexts = listOf("$LONG_RUN/Mobile-First-Roadmap.md"))
+        "context" -> ChatUiState(contexts = listOf(ContextRef(ContextRef.Kind.Note, "$LONG_RUN/Mobile-First-Roadmap.md", "Mobile-First-Roadmap")))
+        "add" -> ChatUiState(addOpen = true)
+        "picker" -> ChatUiState(
+            picker = Picker(
+                ContextRef.Kind.Note, "roadmap", loading = false,
+                results = listOf(
+                    ContextRef(ContextRef.Kind.Note, "$LONG_RUN/Mobile-First-Roadmap.md", "Mobile-First-Roadmap"),
+                    ContextRef(ContextRef.Kind.Note, "Notebooks/Projects/Example/Roadmap-2026.md", "Roadmap-2026"),
+                ),
+            ),
+        )
+        "slash" -> chat("Samsung battery steps", "How do I stop Samsung putting the app to sleep?", reply("r1", "Open Settings, then Battery, find AgentHQ and choose Unrestricted.")).copy(draft = "/")
+        "attach" -> chat("Samsung battery steps", "How do I stop Samsung putting the app to sleep?", reply("r1", "Open Settings, then Battery, find AgentHQ and choose Unrestricted.")).copy(
+            draft = "Check these",
+            files = listOf(
+                PendingFile("f1", "", "soak-log.txt", 1_258_291, "text/plain", FileStatus.Ready),
+                PendingFile("f2", "", "A-very-long-video-name.mp4", 40_000_000, "video/mp4", FileStatus.Failed, "over 25 MB"),
+                PendingFile("f3", "", "photo.jpg", 2_000_000, "image/jpeg", FileStatus.Failed, PendingFile.UPLOAD_FAILED),
+            ),
+        )
+        "press" -> chat("Samsung battery steps", "How do I stop Samsung putting the app to sleep?", reply("r1", "Open Settings, then Battery, find AgentHQ and choose Unrestricted.")).let { it.copy(pressed = "r1") }
         else -> null
     }
 }

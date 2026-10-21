@@ -55,6 +55,8 @@ data class ChatUiState(
     /** The last reply did not finish; the card offers Retry. */
     val failed: Boolean = false,
     val connected: Boolean = true,
+    /** When the socket dropped (epoch milliseconds), so the status line can say how old what is shown is. */
+    val offlineSince: Long? = null,
     val draft: String = "",
     val notice: Notice? = null,
     val chatsOpen: Boolean = false,
@@ -66,18 +68,57 @@ data class ChatUiState(
     /** The note being fetched after a tap, so its chip can say "Opening…". */
     val openingNote: String? = null,
     val missingNotes: Set<String> = emptySet(),
-    /** Vault paths attached to the next message, shown as chips above the field. */
-    val contexts: List<String> = emptyList(),
+    /** Notes and tasks attached to the next message, shown as chips above the field. */
+    val contexts: List<ContextRef> = emptyList(),
+    val files: List<PendingFile> = emptyList(),
+    val addOpen: Boolean = false,
+    val picker: Picker? = null,
+    /** The message whose long-press sheet is open. */
+    val pressed: String? = null,
+    /** A saved question being edited; the next send replaces it and what came after. */
+    val editing: String? = null,
+    /** Older messages are still on the server beyond what is loaded. */
+    val hasOlder: Boolean = false,
 ) {
     val running: Boolean get() = live != null
-    val canSend: Boolean get() = draft.isNotBlank() && connected && !running
+    val canSend: Boolean get() = (draft.isNotBlank() || files.isNotEmpty()) && connected && !running && files.all { it.status == FileStatus.Ready }
 
     companion object {
         const val NEW_CHAT = "New chat"
     }
 }
 
+/** A note or task attached to the next message. [ref] is the vault path of a note or the display id of a task. */
+data class ContextRef(val kind: Kind, val ref: String, val label: String) {
+    enum class Kind { Note, Task }
+}
+
+enum class FileStatus { Uploading, Ready, Failed }
+
+/** A file picked for the next message, from pick to upload result. [uri] stays so a failed upload can be tried again. */
+data class PendingFile(
+    val id: String,
+    val uri: String,
+    val name: String,
+    val size: Long,
+    val mime: String,
+    val status: FileStatus,
+    val error: String? = null,
+    val uploaded: Attachment? = null,
+) {
+    /** A failed upload can be tried again; a file that is too big or empty cannot. */
+    val retryable: Boolean get() = status == FileStatus.Failed && uploaded == null && error == UPLOAD_FAILED
+
+    companion object {
+        const val UPLOAD_FAILED = "upload failed"
+    }
+}
+
+/** The note or task picker: what is typed and what matched. */
+data class Picker(val kind: ContextRef.Kind, val query: String = "", val results: List<ContextRef> = emptyList(), val loading: Boolean = true)
+
 sealed interface Page {
+    data class SelectText(val text: String) : Page
     data class Chart(val spec: ChartSpec) : Page
     data class Table(val table: Block.Table, val caption: String) : Page
 }
@@ -202,6 +243,21 @@ object ChatTime {
         }
     }
 
+    /** How long ago, for the status line: "<1m", "3m", "2h", "5d". */
+    fun short(sinceMillis: Long, nowMillis: Long): String {
+        val minutes = Duration.ofMillis((nowMillis - sinceMillis).coerceAtLeast(0)).toMinutes()
+        return when {
+            minutes < 1 -> "<1m"
+            minutes < MINUTES_PER_HOUR -> "${minutes}m"
+            minutes < MINUTES_PER_HOUR * HOURS_PER_DAY -> "${minutes / MINUTES_PER_HOUR}h"
+            else -> "${minutes / (MINUTES_PER_HOUR * HOURS_PER_DAY)}d"
+        }
+    }
+
+    /** The time of day a message was saved, as 14:28; blank when the time is not known. */
+    fun clock(at: String, zone: ZoneId = ZoneId.systemDefault()): String =
+        parse(at)?.atZone(zone)?.toLocalTime()?.format(java.time.format.DateTimeFormatter.ofPattern("HH:mm")).orEmpty()
+
     private fun parse(value: String): Instant? = try { Instant.parse(value) } catch (e: DateTimeParseException) { null }
 
     private const val WEEK_DAYS = 7L
@@ -210,5 +266,31 @@ object ChatTime {
 }
 
 /** The server strips a leading `<hq-context>` block from the saved copy; the model still reads it. */
-internal fun withContext(text: String, notes: List<String>): String =
-    if (notes.isEmpty()) text else "<hq-context>The user attached these notes. Read each one before you answer: ${notes.joinToString(", ")}</hq-context>\n\n$text"
+internal fun withContext(text: String, items: List<ContextRef>): String {
+    if (items.isEmpty()) return text
+    val list = items.joinToString("; ") { if (it.kind == ContextRef.Kind.Note) "note ${it.ref}" else "task ${it.ref} (${it.label})" }
+    return "<hq-context>The user attached these. Read each one before you answer: $list</hq-context>\n\n$text"
+}
+
+/** The two commands the web chat has: both archive this chat and open a fresh one, `/topic` with a name. */
+object SlashCommands {
+    data class Command(val name: String, val args: String?)
+
+    val All = listOf(
+        Triple("/clear", "", "Archive this chat and start a new one"),
+        Triple("/topic", "<name>", "Archive this chat and start a new one with that name"),
+    )
+
+    fun parse(input: String): Command? {
+        val t = input.trim()
+        if (!t.startsWith("/")) return null
+        val space = t.indexOf(' ')
+        val name = (if (space < 0) t else t.substring(0, space)).lowercase()
+        val args = if (space < 0) null else t.substring(space + 1).trim().ifEmpty { null }
+        return if (All.any { it.first == name }) Command(name, args) else null
+    }
+
+    /** The commands to offer while the field starts with a slash and no space has been typed yet. */
+    fun matching(draft: String): List<Triple<String, String, String>> =
+        if (!draft.startsWith("/") || draft.contains(' ') || draft.contains('\n')) emptyList() else All.filter { it.first.startsWith(draft.lowercase()) }
+}

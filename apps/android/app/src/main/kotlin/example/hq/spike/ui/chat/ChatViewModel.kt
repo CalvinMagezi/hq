@@ -4,11 +4,13 @@ import android.app.Application
 import android.content.ActivityNotFoundException
 import android.content.Context
 import android.content.Intent
+import android.net.Uri
 import androidx.core.content.FileProvider
 import java.io.File
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import example.hq.spike.data.ChatEvent
+import example.hq.spike.data.HqClient
 import example.hq.spike.data.HqServices
 import example.hq.spike.data.HqStatus
 import example.hq.spike.data.HqUnavailable
@@ -49,7 +51,24 @@ class ChatActions(
     val onOpenTable: (Block.Table) -> Unit = {},
     val onClosePage: () -> Unit = {},
     val onOpenFile: (Attachment) -> Unit = {},
-    val onRemoveContext: (String) -> Unit = {},
+    val onRemoveContext: (ContextRef) -> Unit = {},
+    val onOpenAdd: () -> Unit = {},
+    val onCloseAdd: () -> Unit = {},
+    val onPickKind: (ContextRef.Kind) -> Unit = {},
+    val onPickerQuery: (String) -> Unit = {},
+    val onClosePicker: () -> Unit = {},
+    val onChoose: (ContextRef) -> Unit = {},
+    val onFiles: (List<Uri>) -> Unit = {},
+    val onRetryFile: (String) -> Unit = {},
+    val onRemoveFile: (String) -> Unit = {},
+    val onLongPress: (String) -> Unit = {},
+    val onCloseSheet: () -> Unit = {},
+    val onSelectText: (String) -> Unit = {},
+    val onRegenerate: (String) -> Unit = {},
+    val onEditResend: (String) -> Unit = {},
+    val onCancelEdit: () -> Unit = {},
+    val onLoadOlder: () -> Unit = {},
+    val onSlash: (String) -> Unit = {},
 )
 
 class ChatViewModel(app: Application) : AndroidViewModel(app) {
@@ -63,8 +82,11 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
     private val pending = mutableSetOf<String>()
 
     /** What was attached to each question in flight, so a send that fails puts the chips back. */
-    private val sentContexts = mutableMapOf<String, List<String>>()
-    private var lastQuestion: String? = null
+    private val sentContexts = mutableMapOf<String, List<ContextRef>>()
+    private val sentFiles = mutableMapOf<String, List<PendingFile>>()
+    private val composer = ComposerController(app, client, _state, viewModelScope)
+    private var loadingOlder = false
+    private var lastQuestion: Triple<String, List<Attachment>, List<ContextRef>>? = null
     private var archiving: Pair<String, Job>? = null
     private var frozen = false
 
@@ -77,12 +99,18 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
         onOpenNote = ::openNote, onCloseNote = { _state.update { it.copy(note = null) } }, onAskAboutNote = ::askAbout,
         onOpenChart = { spec -> _state.update { it.copy(page = Page.Chart(spec)) } }, onOpenTable = ::openTable,
         onClosePage = { _state.update { it.copy(page = null) } }, onOpenFile = ::openFile,
-        onRemoveContext = { path -> _state.update { it.copy(contexts = it.contexts - path) } },
+        onRemoveContext = composer::removeContext,
+        onOpenAdd = composer::openAdd, onCloseAdd = composer::closeAdd, onPickKind = composer::openPicker, onPickerQuery = composer::queryPicker,
+        onClosePicker = composer::closePicker, onChoose = composer::choose, onFiles = composer::addFiles, onRetryFile = composer::retry,
+        onRemoveFile = composer::removeFile, onLongPress = { id -> _state.update { it.copy(pressed = id) } },
+        onCloseSheet = { _state.update { it.copy(pressed = null) } }, onSelectText = { text -> _state.update { it.copy(pressed = null, page = Page.SelectText(text)) } },
+        onRegenerate = ::regenerate, onEditResend = ::editResend, onCancelEdit = { _state.update { it.copy(editing = null, draft = "") } },
+        onLoadOlder = ::loadOlder, onSlash = { name -> setDraft(if (name == "/topic") "/topic " else name) },
     )
 
     init {
         viewModelScope.launch { services.connection.events.collect { if (!frozen) handle(it) } }
-        viewModelScope.launch { services.connection.connected.collect { c -> if (!frozen) _state.update { it.copy(connected = c) } } }
+        viewModelScope.launch { services.connection.connected.collect { c -> if (!frozen) _state.update { it.copy(connected = c, offlineSince = if (c) null else it.offlineSince ?: System.currentTimeMillis()) } } }
         // hq may still be starting when the app opens; open the latest chat the first time it answers.
         viewModelScope.launch { services.status.collect { if (it == HqStatus.Live && !frozen) openLatest() } }
     }
@@ -97,7 +125,7 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
         _state.update { ChatReducer.apply(it, event, pending) }
         when (event) {
             is ChatEvent.Rejected -> if (event.clientId in pending) restore(event.clientId!!, event.reason)
-            is ChatEvent.TurnStart -> event.clientId?.let { sentContexts.remove(it) }
+            is ChatEvent.TurnStart -> event.clientId?.let { sentContexts.remove(it); sentFiles.remove(it) }
             is ChatEvent.TurnEnd -> if (event.threadId == _state.value.threadId) viewModelScope.launch { refreshChats() }
             is ChatEvent.Lagged -> _state.value.threadId?.let { id -> viewModelScope.launch { loadMessages(id) } }
             else -> {}
@@ -109,19 +137,90 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
         drafts.edit().putString(draftKey(_state.value.threadId), text).apply()
     }
 
-    private fun send() = submit(_state.value.draft.trim(), replaceFrom = null)
-
-    private fun submit(text: String, replaceFrom: String?) {
+    private fun send() {
         val s = _state.value
-        if (text.isBlank() || !s.connected || s.running) return
+        SlashCommands.parse(s.draft)?.let { return runSlash(it) }
+        submit(s.draft.trim(), replaceFrom = s.editing)
+    }
+
+    /** [files] and [contexts] default to what is attached now; a retry or a regenerate passes what the question had. */
+    private fun submit(text: String, replaceFrom: String?, files: List<Attachment>? = null, contexts: List<ContextRef>? = null) {
+        val s = _state.value
+        val sendFiles = files ?: s.files.mapNotNull { it.uploaded }
+        val sendContexts = contexts ?: s.contexts
+        if ((text.isBlank() && sendFiles.isEmpty()) || !s.connected || s.running) return
         val clientId = "local-${UUID.randomUUID()}"
         pending += clientId
-        lastQuestion = text
+        lastQuestion = Triple(text, sendFiles, sendContexts)
         val kept = if (replaceFrom == null) s.messages else s.messages.takeWhile { it.id != replaceFrom }
-        sentContexts[clientId] = s.contexts
-        _state.update { it.copy(messages = kept + UiMessage(clientId, Speaker.User, text, sending = true), draft = "", failed = false, contexts = emptyList()) }
+        sentContexts[clientId] = sendContexts
+        sentFiles[clientId] = s.files
+        _state.update {
+            it.copy(messages = kept + UiMessage(clientId, Speaker.User, text, sending = true, files = sendFiles), draft = "", failed = false, contexts = emptyList(), files = emptyList(), editing = null)
+        }
         drafts.edit().remove(draftKey(s.threadId)).apply()
-        if (!services.connection.sendChat(withContext(text, s.contexts), s.threadId, clientId, replaceFrom)) restore(clientId, "Not connected to HQ. Your message is back in the box.")
+        if (!services.connection.sendChat(withContext(text, sendContexts), s.threadId, clientId, replaceFrom, sendFiles)) restore(clientId, "Not connected to HQ. Your message is back in the box.")
+    }
+
+    /** `/clear` and `/topic <name>` archive this chat and open a fresh one, as on the web. */
+    private fun runSlash(cmd: SlashCommands.Command) {
+        val old = _state.value.threadId
+        drafts.edit().remove(draftKey(old)).apply()
+        val topic = cmd.args.takeIf { cmd.name == "/topic" }
+        if (topic == null) {
+            newChat()
+            old?.let(::archive)
+            return
+        }
+        viewModelScope.launch {
+            try {
+                val made = client.createThread(topic)
+                _state.update { ChatUiState(connected = it.connected, threadId = made.id, title = made.title.ifBlank { topic }, chats = it.chats) }
+                old?.let(::archive)
+                refreshChats()
+            } catch (e: HqUnavailable) {
+                _state.update { it.copy(notice = Notice("Could not start the new chat. HQ is not answering.")) }
+            }
+        }
+    }
+
+    /** Runs the last question again; only the last reply can be replaced, since the server drops what came after. */
+    private fun regenerate(replyId: String) {
+        val s = _state.value
+        val i = s.messages.indexOfFirst { it.id == replyId }
+        val question = s.messages.getOrNull(i - 1)?.takeIf { it.speaker == Speaker.User }
+        if (question == null || i != s.messages.lastIndex) {
+            _state.update { it.copy(pressed = null, notice = Notice("Only the last reply can be run again.")) }
+            return
+        }
+        _state.update { it.copy(pressed = null) }
+        submit(question.text, replaceFrom = question.id, files = question.files, contexts = emptyList())
+    }
+
+    /** Puts a saved question back in the field; sending it replaces that question and everything after it. */
+    private fun editResend(id: String) {
+        val m = _state.value.messages.firstOrNull { it.id == id && it.speaker == Speaker.User } ?: return
+        val files = m.files.map { PendingFile(UUID.randomUUID().toString(), "", it.name, it.size, it.mime, FileStatus.Ready, uploaded = it) }
+        _state.update { it.copy(pressed = null, draft = m.text, editing = m.id, files = files) }
+    }
+
+    private fun loadOlder() {
+        val s = _state.value
+        val tid = s.threadId ?: return
+        val oldest = s.messages.firstOrNull { !it.id.startsWith("local-") } ?: return
+        if (!s.hasOlder || loadingOlder) return
+        loadingOlder = true
+        viewModelScope.launch {
+            try {
+                val page = client.messages(tid, before = oldest.id)
+                val older = page.sortedBy { it.createdAt }.map(::toUi)
+                _state.update { if (it.threadId == tid) it.copy(messages = older + it.messages, hasOlder = page.size >= HqClient.MESSAGE_PAGE) else it }
+            } catch (e: HqUnavailable) {
+                // The next time the top is reached it tries again.
+            } finally {
+                loadingOlder = false
+            }
+        }
     }
 
     /** A send that did not go through: the text returns to the field, with the reason. */
@@ -129,7 +228,10 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
         pending -= clientId
         _state.update { s ->
             val text = s.messages.firstOrNull { it.id == clientId }?.text ?: s.draft
-            s.copy(messages = s.messages.filter { it.id != clientId }, draft = text, notice = Notice(reason), contexts = sentContexts.remove(clientId) ?: s.contexts)
+            s.copy(
+                messages = s.messages.filter { it.id != clientId }, draft = text, notice = Notice(reason),
+                contexts = sentContexts.remove(clientId) ?: s.contexts, files = sentFiles.remove(clientId) ?: s.files,
+            )
         }
     }
 
@@ -139,9 +241,9 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     private fun retry() {
-        val question = lastQuestion ?: return
+        val (text, files, contexts) = lastQuestion ?: return
         val last = _state.value.messages.lastOrNull { it.speaker == Speaker.User && !it.sending } ?: return
-        submit(question, replaceFrom = last.id)
+        submit(text, replaceFrom = last.id, files = files, contexts = contexts)
     }
 
     private fun newChat(keepSheet: Boolean = false) {
@@ -154,7 +256,7 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
         val row = _state.value.chats.firstOrNull { it.id == id }
         _state.update {
             it.copy(threadId = id, title = row?.title ?: it.title, messages = emptyList(), live = null, failed = false, chatsOpen = false,
-                draft = drafts.getString(draftKey(id), "").orEmpty())
+                draft = drafts.getString(draftKey(id), "").orEmpty(), contexts = emptyList(), files = emptyList(), editing = null, pressed = null, hasOlder = false)
         }
         viewModelScope.launch { loadMessages(id) }
     }
@@ -162,7 +264,7 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
     private suspend fun loadMessages(id: String) {
         val page = try { client.messages(id) } catch (e: HqUnavailable) { return }
         val shown = page.sortedBy { it.createdAt }.map(::toUi)
-        _state.update { if (it.threadId == id && !it.running) it.copy(messages = shown) else it }
+        _state.update { if (it.threadId == id && !it.running) it.copy(messages = shown, hasOlder = page.size >= HqClient.MESSAGE_PAGE) else it }
     }
 
     private fun toUi(m: StoredMessage) = UiMessage.saved(m.id, if (m.role == "user") Speaker.User else Speaker.Reply, m.content, m.tools, m.createdAt)
@@ -192,7 +294,8 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
 
     /** The note joins the next message as a chip; HQ reads only what is attached. */
     private fun askAbout(path: String) {
-        _state.update { it.copy(contexts = if (path in it.contexts) it.contexts else it.contexts + path, note = null) }
+        val item = ContextRef(ContextRef.Kind.Note, path, NoteRefs.title(path))
+        _state.update { it.copy(contexts = if (item in it.contexts) it.contexts else it.contexts + item, note = null) }
     }
 
     /** Fetches the file to the app's cache and hands it to whichever app opens that kind of file. */

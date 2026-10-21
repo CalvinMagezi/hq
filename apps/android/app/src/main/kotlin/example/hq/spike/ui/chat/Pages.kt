@@ -66,6 +66,16 @@ private fun ChartSpec.kindLine(): String {
     }
 }
 
+/** The full text of a message, which can be selected by touch. */
+@Composable
+fun SelectTextPage(text: String, onBack: () -> Unit) {
+    PageFrame("Select text", onBack) {
+        androidx.compose.foundation.text.selection.SelectionContainer {
+            Text(text, style = HqType.Body, color = Mts.Ink, modifier = Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(16.dp))
+        }
+    }
+}
+
 /** A chart larger, with a value on touch and every number in a table under it. */
 @Composable
 fun ChartPage(spec: ChartSpec, onBack: () -> Unit) {

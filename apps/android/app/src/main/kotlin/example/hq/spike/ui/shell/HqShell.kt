@@ -96,6 +96,7 @@ fun HqShell(
     val (statusText, statusColor) = when (status) {
         HqStatus.Live -> "Live" to Mts.BrandGreen
         is HqStatus.Starting -> "Starting HQ \u00b7 ${status.seconds} s" to Mts.Amber
+        is HqStatus.Saved -> "Saved \u00b7 ${status.age}" to Mts.Amber
     }
     CompositionLocalProvider(LocalGoTo provides { current = it }) {
         Box(Modifier.fillMaxSize().background(Mts.Surface000)) {

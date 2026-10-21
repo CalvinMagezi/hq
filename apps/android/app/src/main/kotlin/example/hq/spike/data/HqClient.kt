@@ -8,6 +8,7 @@ import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.RequestBody.Companion.toRequestBody
+import example.hq.spike.ui.chat.blocks.Attachment
 import okhttp3.WebSocket
 import okhttp3.WebSocketListener
 import org.json.JSONArray
@@ -84,6 +85,31 @@ class HqClient(private val token: () -> String, private val base: String = LOCAL
         }
     }
 
+    /** A new empty chat with a title, as `/topic <name>` makes. */
+    suspend fun createThread(title: String): ChatThread =
+        send(authed("/api/threads").post(JSONObject().put("title", title).toString().toRequestBody("application/json".toMediaType())).build()) { ChatThread.from(JSONObject(it)) }
+
+    /** Saves a file for the next message; the reply carries its vault path and is sent back with the message. */
+    suspend fun uploadFile(name: String, mime: String, bytes: ByteArray): Attachment {
+        val body = bytes.toRequestBody(mime.ifBlank { "application/octet-stream" }.toMediaType())
+        return send(authed("/api/chat/uploads?name=${java.net.URLEncoder.encode(name, "UTF-8")}").post(body).build()) { text ->
+            val o = JSONObject(text)
+            Attachment(o.getString("name"), o.getString("path"), o.optString("mime", ""), o.optLong("size", bytes.size.toLong()))
+        }
+    }
+
+    /** Notes whose text matches, best first: (vault path, title, notebook). */
+    suspend fun searchNotes(query: String, limit: Int = PICKER_PAGE): List<Triple<String, String, String>> =
+        send(authed("/api/search?q=${java.net.URLEncoder.encode(query, "UTF-8")}&limit=$limit").build()) { text ->
+            JSONObject(text).optJSONArray("results").objects().map { Triple(it.getString("note_path"), it.optString("title", ""), it.optString("notebook", "")) }
+        }
+
+    /** Top-level tasks, newest first, optionally filtered by words: (display id, title, status). */
+    suspend fun searchTasks(query: String, limit: Int = PICKER_PAGE): List<Triple<String, String, String>> =
+        send(authed("/api/tasks?top_level_only=true&limit=$limit&search=${java.net.URLEncoder.encode(query, "UTF-8")}").build()) { text ->
+            JSONObject(text).optJSONArray("tasks").objects().map { Triple(it.getString("display_id"), it.optString("title", ""), it.optString("status", "")) }
+        }
+
     suspend fun wsTicket(): String = send(authed("/api/ws-ticket").post(EMPTY_JSON).build()) { JSONObject(it).getString("ticket") }
 
     fun openSocket(ticket: String, listener: WebSocketListener): WebSocket =
@@ -112,7 +138,8 @@ class HqClient(private val token: () -> String, private val base: String = LOCAL
         private const val READ_SECONDS = 20L
         private const val PING_SECONDS = 20L
         private const val THREAD_PAGE = 50
-        private const val MESSAGE_PAGE = 100
+        private const val PICKER_PAGE = 20
+        const val MESSAGE_PAGE = 100
         private val EMPTY_JSON = "{}".toRequestBody("application/json".toMediaType())
     }
 }

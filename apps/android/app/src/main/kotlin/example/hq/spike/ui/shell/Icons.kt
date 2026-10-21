@@ -51,6 +51,9 @@ object HqIcons {
         "camera", "M14.5 4h-5L7 7H4a2 2 0 0 0-2 2v9a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2V9a2 2 0 0 0-2-2h-3l-2.5-3z",
         "M12 10a3 3 0 1 0 0 6a3 3 0 1 0 0-6",
     )
+    val RotateCw = outline("rotate-cw", "M21 12a9 9 0 1 1-9-9c2.52 0 4.93 1 6.74 2.74L21 8", "M21 3v5h-5")
+    val Edit = outline("edit", "M17 3a2.85 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z")
+    val TextCursor = outline("text-cursor", "M8 4h8", "M12 4v16", "M8 20h8")
     val Close = outline("close", "M18 6 6 18", "m6 6 12 12")
     val Check = outline("check", "M20 6 9 17l-5-5")
     val Plus = outline("plus", "M5 12h14", "M12 5v14")

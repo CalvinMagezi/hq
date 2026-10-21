@@ -15,6 +15,9 @@ import kotlinx.coroutines.launch
 sealed interface HqStatus {
     data object Live : HqStatus
     data class Starting(val seconds: Long) : HqStatus
+
+    /** hq is up but the chat socket dropped; what is on screen is what was last saved, [age] ago ("1m", "<1m"). */
+    data class Saved(val age: String) : HqStatus
 }
 
 /** The parts of the app that live as long as the process: the client, its socket and the health status. */

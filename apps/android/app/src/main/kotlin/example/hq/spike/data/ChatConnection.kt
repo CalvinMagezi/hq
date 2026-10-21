@@ -11,6 +11,8 @@ import kotlinx.coroutines.launch
 import okhttp3.Response
 import okhttp3.WebSocket
 import okhttp3.WebSocketListener
+import example.hq.spike.ui.chat.blocks.Attachment
+import org.json.JSONArray
 import org.json.JSONObject
 
 /**
@@ -30,8 +32,9 @@ class ChatConnection(private val client: HqClient, scope: CoroutineScope) {
     }
 
     /** False when there is no open socket, so the caller can keep the message as a draft. */
-    fun sendChat(content: String, threadId: String?, clientId: String, replaceFrom: String? = null): Boolean = write(
+    fun sendChat(content: String, threadId: String?, clientId: String, replaceFrom: String? = null, files: List<Attachment> = emptyList()): Boolean = write(
         JSONObject().put("type", "chat").put("content", content).put("thread_id", threadId ?: JSONObject.NULL).put("client_id", clientId)
+            .put("attachments", JSONArray(files.map { JSONObject().put("name", it.name).put("path", it.path).put("mime", it.mime).put("size", it.size) }))
             .apply { replaceFrom?.let { put("replace_from", it) } },
     )
 

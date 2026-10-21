@@ -8,11 +8,14 @@ import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.viewModels
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.produceState
+import kotlinx.coroutines.delay
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import example.hq.spike.data.HqServices
 import example.hq.spike.data.HqStatus
 import example.hq.spike.ui.chat.ChatOverlays
 import example.hq.spike.ui.chat.ChatScreen
+import example.hq.spike.ui.chat.ChatTime
 import example.hq.spike.ui.chat.ChatViewModel
 import example.hq.spike.ui.chat.chatFixture
 import example.hq.spike.ui.shell.HqShell
@@ -44,14 +47,30 @@ class ShellActivity : ComponentActivity() {
         setContent {
             val status by services.status.collectAsStateWithLifecycle()
             val chatState by chat.state.collectAsStateWithLifecycle()
+            val offlineSince = chatState.offlineSince
+            val now by produceState(System.currentTimeMillis(), offlineSince) {
+                value = System.currentTimeMillis()
+                while (offlineSince != null) { delay(STATUS_TICK_MS); value = System.currentTimeMillis() }
+            }
+            // A socket that has only just dropped (or not yet opened) is not worth a "Saved" line.
+            val shown = when {
+                status is HqStatus.Starting && fixture == null -> status
+                offlineSince != null && now - offlineSince >= OFFLINE_GRACE_MS -> HqStatus.Saved(ChatTime.short(offlineSince, now))
+                else -> HqStatus.Live
+            }
             HqTheme {
                 HqShell(
-                    startAt = start, inboxBadge = badge, status = if (fixture != null) HqStatus.Live else status,
+                    startAt = start, inboxBadge = badge, status = shown,
                     overlay = { ChatOverlays(chatState, chat.actions) },
                 ) { place ->
                     if (place == Place.Chat) ChatScreen(chatState, chat.actions) else NotBuilt(place)
                 }
             }
         }
+    }
+
+    private companion object {
+        const val STATUS_TICK_MS = 5_000L
+        const val OFFLINE_GRACE_MS = 5_000L
     }
 }

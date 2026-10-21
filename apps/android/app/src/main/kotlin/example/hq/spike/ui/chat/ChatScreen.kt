@@ -22,6 +22,15 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.derivedStateOf
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.snapshotFlow
+import androidx.compose.foundation.ExperimentalFoundationApi
+import androidx.compose.foundation.combinedClickable
+import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.foundation.shape.CircleShape
+import kotlinx.coroutines.launch
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
@@ -55,6 +64,7 @@ fun ChatScreen(state: ChatUiState, actions: ChatActions) {
             NameRow(state.title, actions.onOpenChats)
             Box(Modifier.weight(1f).fillMaxWidth()) {
                 if (state.messages.isEmpty() && state.live == null) EmptyChat(actions.onDraft) else Conversation(state, actions)
+                SlashPalette(state.draft, actions.onSlash, Modifier.align(Alignment.BottomCenter))
             }
             Composer(state, actions)
         }
@@ -87,6 +97,7 @@ fun ChatOverlays(state: ChatUiState, actions: ChatActions) {
     val blocks = rememberBlockActions(state, actions)
     Box(Modifier.fillMaxSize()) {
         when (val page = state.page) {
+            is Page.SelectText -> SelectTextPage(page.text, actions.onClosePage)
             is Page.Chart -> ChartPage(page.spec, actions.onClosePage)
             is Page.Table -> TablePage(page, actions.onClosePage) { actions.onNotice("Copied the table") }
             null -> {}
@@ -98,6 +109,9 @@ fun ChatOverlays(state: ChatUiState, actions: ChatActions) {
             )
         }
         if (state.chatsOpen) ChatsSheet(state, actions)
+        if (state.addOpen) AddSheet(actions)
+        state.picker?.let { PickerSheet(it, actions) }
+        state.pressed?.let { id -> state.messages.firstOrNull { it.id == id }?.let { MessageActionsSheet(state, it, blocks, actions) } }
         state.notice?.let { Snack(it, actions, Modifier.align(Alignment.BottomCenter)) }
     }
 }
@@ -133,17 +147,47 @@ private fun Conversation(state: ChatUiState, actions: ChatActions) {
     // The list runs from the bottom, so the newest item is first and the failed card sits under a half-written reply.
     val newestFirst = state.messages.asReversed()
     val blocks = rememberBlockActions(state, actions)
-    LazyColumn(
-        Modifier.fillMaxSize(), reverseLayout = true, contentPadding = PaddingValues(start = 16.dp, top = 12.dp, end = 16.dp, bottom = 8.dp),
-        verticalArrangement = Arrangement.spacedBy(12.dp, Alignment.Bottom),
-    ) {
-        if (state.failed && state.live == null) item(key = "failed") { FailedCard(actions.onRetry) }
-        state.live?.let { item(key = "live") { LiveReplyBubble(it, blocks) } }
-        items(newestFirst, key = { it.id }) { m ->
-            if (m.speaker == Speaker.User) UserBubble(m.text, m.sending, m.files, actions.onOpenFile) else ReplyBubble(m, blocks)
+    val list = rememberLazyListState()
+    val away by remember { derivedStateOf { list.firstVisibleItemIndex > LATEST_AFTER } }
+    val scope = rememberCoroutineScope()
+    LaunchedEffect(list, state.hasOlder, state.threadId) {
+        snapshotFlow { list.layoutInfo.visibleItemsInfo.lastOrNull()?.index to list.layoutInfo.totalItemsCount }
+            .collect { (last, total) -> if (last != null && last >= total - OLDER_AHEAD) actions.onLoadOlder() }
+    }
+    Box(Modifier.fillMaxSize()) {
+        LazyColumn(
+            Modifier.fillMaxSize(), state = list, reverseLayout = true, contentPadding = PaddingValues(start = 16.dp, top = 12.dp, end = 16.dp, bottom = 8.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp, Alignment.Bottom),
+        ) {
+            if (state.failed && state.live == null) item(key = "failed") { FailedCard(actions.onRetry) }
+            state.live?.let { item(key = "live") { LiveReplyBubble(it, blocks) } }
+            items(newestFirst, key = { it.id }) { m ->
+                Box(
+                    Modifier.combinedClickable(
+                        interactionSource = remember { MutableInteractionSource() }, indication = null, onClickLabel = null,
+                        onLongClickLabel = "Message actions", onClick = {}, onLongClick = { if (!m.sending) actions.onLongPress(m.id) },
+                    ),
+                ) { if (m.speaker == Speaker.User) UserBubble(m.text, m.sending, m.files, actions.onOpenFile) else ReplyBubble(m, blocks) }
+            }
         }
+        if (away) LatestPill(Modifier.align(Alignment.BottomCenter).padding(bottom = 12.dp)) { scope.launch { list.animateScrollToItem(0) } }
     }
 }
+
+/** Shown when the list is scrolled up: one tap returns to the newest message. */
+@Composable
+private fun LatestPill(modifier: Modifier, onClick: () -> Unit) {
+    Row(
+        modifier.heightIn(min = 36.dp).clip(CircleShape).background(Mts.Surface200).border(1.dp, Mts.Hairline, CircleShape).clickable(role = Role.Button, onClick = onClick).padding(start = 14.dp, end = 10.dp),
+        horizontalArrangement = Arrangement.spacedBy(4.dp), verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Text("Latest", style = HqType.ToolLine, color = Mts.Ink)
+        Icon(HqIcons.ChevronDown, null, Modifier.size(18.dp), tint = Mts.Ink)
+    }
+}
+
+private const val LATEST_AFTER = 2
+private const val OLDER_AHEAD = 3
 
 private val Suggestions = listOf(
     Triple(HqIcons.Spark, "Summarise this note", "Summarise this note"),

@@ -51,8 +51,8 @@ private val ReplyShape = RoundedCornerShape(topStart = 6.dp, topEnd = 20.dp, bot
 private const val USER_BUBBLE_SHARE = 0.84f
 
 @Composable
-fun UserBubble(text: String, sending: Boolean, files: List<Attachment> = emptyList(), onOpenFile: (Attachment) -> Unit = {}) {
-    BoxWithConstraints(Modifier.fillMaxWidth()) {
+fun UserBubble(text: String, sending: Boolean, files: List<Attachment> = emptyList(), onOpenFile: (Attachment) -> Unit = {}, modifier: Modifier = Modifier) {
+    BoxWithConstraints(modifier.fillMaxWidth()) {
         Column(Modifier.align(Alignment.CenterEnd).widthIn(max = maxWidth * USER_BUBBLE_SHARE).alpha(if (sending) 0.7f else 1f), verticalArrangement = Arrangement.spacedBy(8.dp)) {
             if (text.isNotBlank()) {
                 Text(text, style = HqType.Body, color = Mts.Ink, modifier = Modifier.align(Alignment.End).background(Mts.Surface200, UserShape).padding(horizontal = 16.dp, vertical = 12.dp))
@@ -63,16 +63,16 @@ fun UserBubble(text: String, sending: Boolean, files: List<Attachment> = emptyLi
 }
 
 @Composable
-private fun ReplyFrame(content: @Composable () -> Unit) {
+private fun ReplyFrame(modifier: Modifier = Modifier, border: androidx.compose.ui.graphics.Color = Mts.Hairline, content: @Composable () -> Unit) {
     Column(
-        Modifier.fillMaxWidth().clip(ReplyShape).background(Mts.Surface100).border(1.dp, Mts.Hairline, ReplyShape)
+        modifier.fillMaxWidth().clip(ReplyShape).background(Mts.Surface100).border(1.dp, border, ReplyShape)
             .padding(horizontal = 16.dp, vertical = 12.dp),
         content = { content() },
     )
 }
 
 @Composable
-fun ReplyBubble(message: UiMessage, blocks: BlockActions) = ReplyFrame {
+fun ReplyBubble(message: UiMessage, blocks: BlockActions, lifted: Boolean = false, modifier: Modifier = Modifier) = ReplyFrame(modifier, if (lifted) Mts.Line else Mts.Hairline) {
     if (message.text.isNotBlank()) ReplyBody(message.text, blocks)
     val cards = remember(message.tools) { StepCards.of(message.tools) }
     message.files.forEach { FileCardView(it, { blocks.onOpenFile(it) }, Modifier.padding(top = 12.dp)) }
@@ -142,7 +142,7 @@ fun FailedCard(onRetry: () -> Unit) {
                 .padding(horizontal = 24.dp),
             horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically,
         ) {
-            Icon(HqIcons.Redo, null, Modifier.size(18.dp), tint = Mts.Ink)
+            Icon(HqIcons.RotateCw, null, Modifier.size(18.dp), tint = Mts.Ink)
             Text("Retry", style = HqType.BodySmBold, color = Mts.Ink)
         }
     }
