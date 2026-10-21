@@ -1,0 +1,21 @@
+# Copy to the app's files/Caddyfile on the phone (adb run-as) and edit. Without that file the app
+# does not start Caddy. Android apps cannot bind ports below 1024, so the site listens on a high
+# port, on the tunnel address only. The certificate and key are pushed to files/certs by the owner.
+{
+	admin off
+	auto_https off
+	servers {
+		protocols h1 h2
+	}
+}
+
+https://hq.example.com:8443 {
+	bind 10.77.0.4
+	tls certs/hq.fullchain.pem certs/hq.privkey.pem
+	reverse_proxy 127.0.0.1:5678 {
+		flush_interval -1
+		transport http {
+			versions 1.1
+		}
+	}
+}

@@ -1,0 +1,40 @@
+name: Android app
+
+# Compiles the hub app's Java sources against an Android platform and runs the checks that need no
+# device. The APK itself is built by hand (apps/android/README.md) because it packages binaries that
+# android.yml builds.
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - "apps/android/**"
+      - ".github/workflows/android-app.yml"
+  push:
+    branches: [main]
+    paths:
+      - "apps/android/**"
+      - ".github/workflows/android-app.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  sources:
+    name: Compile the app sources and run the checks
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Install an Android platform
+        run: |
+          sdk="${ANDROID_HOME:-$ANDROID_SDK_ROOT}"
+          yes | "$sdk/cmdline-tools/latest/bin/sdkmanager" --licenses > /dev/null || true
+          "$sdk/cmdline-tools/latest/bin/sdkmanager" "platforms;android-36"
+          echo "ANDROID_JAR=$sdk/platforms/android-36/android.jar" >> "$GITHUB_ENV"
+
+      - name: Compile and check
+        run: bash apps/android/check.sh
