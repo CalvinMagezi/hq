@@ -58,6 +58,7 @@ impl Plane {
             public_key: &key,
             kind,
             preshared,
+            keepalive: None,
             with_qr: false,
             confirm_public: false,
         };
@@ -202,6 +203,7 @@ fn the_hub_key_is_never_in_the_applier_input_or_the_device_config_output() {
         public_key: &key,
         kind: Kind::Laptop,
         preshared: true,
+        keepalive: None,
         with_qr: true,
         confirm_public: false,
     };
@@ -230,6 +232,7 @@ fn nothing_is_added_while_the_hub_key_is_still_staged_and_a_revoke_still_works()
         public_key: &key,
         kind: Kind::Phone,
         preshared: false,
+        keepalive: None,
         with_qr: false,
         confirm_public: false,
     };

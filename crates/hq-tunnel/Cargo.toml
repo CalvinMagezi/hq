@@ -1,0 +1,28 @@
+[package]
+name = "hq-tunnel"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "A userspace WireGuard peer for a phone: serves fixed loopback ports to tunnel peers and forwards fixed loopback ports into the tunnel, with no VpnService and no root"
+
+[dependencies]
+# Exact versions: the protocol and the TCP stack are the security-relevant parts of this crate,
+# so they move only when someone has read the changelog.
+boringtun = { version = "=0.7.1", default-features = false }
+smoltcp = { version = "=0.14.0", default-features = false, features = ["std", "medium-ip", "proto-ipv4", "socket-tcp", "socket-tcp-reno"] }
+# Key and endpoint checks shared with the `hq net` renderer that writes the join text.
+hq-net = { path = "../hq-net", default-features = false }
+libc = "0.2"
+serde = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+toml = { workspace = true }
+zeroize = "1"
+
+[dev-dependencies]
+# Controllable time for the rekey test; compiled into the tests only.
+boringtun = { version = "=0.7.1", default-features = false, features = ["mock-instant"] }
+hq-net = { path = "../hq-net" }
+mock_instant = "0.3"
+rand = { workspace = true }
+tempfile = { workspace = true }

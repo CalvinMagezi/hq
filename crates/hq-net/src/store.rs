@@ -139,6 +139,11 @@ pub struct PeerRecord {
     pub address: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub preshared_key: Option<String>,
+    /// Seconds between the keepalive packets the device sends. Absent means the default for its
+    /// kind (a laptop 25, a phone none); 0 means none. Only the device config carries it: the
+    /// applier never sees it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub keepalive: Option<u16>,
 }
 
 /// Two devices, by label, that the hub may forward between in both directions.
@@ -623,11 +628,19 @@ pub fn valid_label(label: &str) -> bool {
         && chars.all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-' || c == '_')
 }
 
+/// The range `--keepalive` accepts besides 0. Below the floor a device would wake the radio
+/// constantly; above the ceiling the carrier closes the path first. `hq-tunnel` refuses any
+/// other value in a join text, so the two must agree.
+pub const KEEPALIVE_MIN_SECS: u16 = 10;
+pub const KEEPALIVE_MAX_SECS: u16 = 300;
+
 pub struct NewPeer<'a> {
     pub label: &'a str,
     pub public_key: &'a str,
     pub kind: Kind,
     pub preshared: bool,
+    /// See `PeerRecord::keepalive`.
+    pub keepalive: Option<u16>,
     /// The caller says the key is a public key even though it has the shape of a private one.
     pub confirm_public: bool,
 }
@@ -644,6 +657,14 @@ pub fn add_peer(
         return fail(
             "a label is 1 to 32 characters: lowercase letters, digits, - and _, starting with a letter or digit",
         );
+    }
+    if let Some(secs) = new.keepalive
+        && secs != 0
+        && !(KEEPALIVE_MIN_SECS..=KEEPALIVE_MAX_SECS).contains(&secs)
+    {
+        return fail(format!(
+            "--keepalive is 0 (none) or {KEEPALIVE_MIN_SECS} to {KEEPALIVE_MAX_SECS} seconds"
+        ));
     }
     if !key::is_usable(new.public_key) {
         return fail("--pubkey is not a WireGuard public key (44 characters of base64)");
@@ -684,6 +705,12 @@ pub fn add_peer(
         public_key: new.public_key.to_string(),
         address: address.to_string(),
         preshared_key: new.preshared.then(key::new_preshared_key),
+        // An explicit value is kept on purpose, except a phone's 0, which is the same as the
+        // default for its kind: storing it would keep an older `hq net` from reading the file
+        // for nothing.
+        keepalive: new
+            .keepalive
+            .filter(|&s| s != 0 || new.kind == Kind::Laptop),
     };
     peers.peer.push(record.clone());
     Ok(record)
@@ -846,6 +873,7 @@ pub(crate) mod tests {
             public_key,
             kind,
             preshared: false,
+            keepalive: None,
             confirm_public: false,
         }
     }
@@ -1080,6 +1108,99 @@ pub(crate) mod tests {
         assert!(store.load_net().is_err());
         write_private(&store, NET_FILE, &good);
         assert!(store.load_net().unwrap().is_some());
+    }
+
+    #[test]
+    fn a_keepalive_is_optional_in_peers_toml_and_survives_a_save() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = Store::new(dir.path());
+        let key = device_key();
+        let entry = format!(
+            "label = \"pixel\"\nkind = \"phone\"\npublic_key = \"{key}\"\naddress = \"10.77.0.2\"\n"
+        );
+        // A file written before the field existed still loads, with no keepalive.
+        write_private(&store, PEERS_FILE, &format!("[[peer]]\n{entry}"));
+        let old = store.load_peers().unwrap();
+        assert_eq!(old.peer[0].keepalive, None);
+        // None is not written at all, so an older binary can still read what this one saves.
+        assert!(!toml::to_string_pretty(&old).unwrap().contains("keepalive"));
+        write_private(
+            &store,
+            PEERS_FILE,
+            &format!("[[peer]]\n{entry}keepalive = 25\n"),
+        );
+        let mut peers = store.load_peers().unwrap();
+        assert_eq!(peers.peer[0].keepalive, Some(25));
+        peers.peer[0].keepalive = Some(0);
+        store.save_peers(&peers).unwrap();
+        assert_eq!(store.load_peers().unwrap().peer[0].keepalive, Some(0));
+        for bad in [
+            "keepalive = -1\n",
+            "keepalive = 70000\n",
+            "keepalive = \"25\"\n",
+        ] {
+            write_private(&store, PEERS_FILE, &format!("[[peer]]\n{entry}{bad}"));
+            assert!(store.load_peers().is_err(), "{bad}");
+        }
+    }
+
+    #[test]
+    fn a_keepalive_outside_the_range_is_refused_before_anything_is_stored() {
+        let net = sample_net();
+        let key = device_key();
+        for secs in [1, KEEPALIVE_MIN_SECS - 1, KEEPALIVE_MAX_SECS + 1, u16::MAX] {
+            let mut peers = PeersFile::default();
+            let asked = NewPeer {
+                keepalive: Some(secs),
+                ..request("pixel", &key, Kind::Phone)
+            };
+            let err = add_peer(&net, &mut peers, &[], asked).unwrap_err();
+            assert!(err.to_string().contains("--keepalive"), "{secs}: {err}");
+            assert!(peers.peer.is_empty());
+        }
+        for secs in [0, KEEPALIVE_MIN_SECS, 25, KEEPALIVE_MAX_SECS] {
+            let asked = NewPeer {
+                keepalive: Some(secs),
+                ..request("pixel", &key, Kind::Phone)
+            };
+            add_peer(&net, &mut PeersFile::default(), &[], asked).unwrap();
+        }
+    }
+
+    #[test]
+    fn a_new_device_keeps_the_keepalive_it_was_added_with() {
+        let net = sample_net();
+        let mut peers = PeersFile::default();
+        let key = device_key();
+        let asked = NewPeer {
+            keepalive: Some(25),
+            ..request("pixel", &key, Kind::Phone)
+        };
+        let record = add_peer(&net, &mut peers, &[], asked).unwrap();
+        assert_eq!(record.keepalive, Some(25));
+        assert_eq!(peers.peer[0].keepalive, Some(25));
+        assert_eq!(
+            add(&net, &mut peers, "mac", Kind::Laptop)
+                .unwrap()
+                .keepalive,
+            None
+        );
+        let off = |kind, label| {
+            let key = device_key();
+            let ask = NewPeer {
+                keepalive: Some(0),
+                ..request(label, &key, kind)
+            };
+            add_peer(&net, &mut PeersFile::default(), &[], ask)
+                .unwrap()
+                .keepalive
+        };
+        assert_eq!(
+            off(Kind::Laptop, "a"),
+            Some(0),
+            "0 turns the laptop's default off"
+        );
+        assert_eq!(off(Kind::Phone, "b"), None, "0 on a phone is the default");
     }
 
     #[test]

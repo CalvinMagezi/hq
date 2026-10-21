@@ -297,6 +297,11 @@ As built, where it adds to or differs from the text above:
   the hub has unless it was revoked here, and `peer add` and `apply` refuse while the staged hub key is
   still in the HQ user's directory.
 - `hq net peer forget <address>` retires an address no device owns and removes what the hub has on it. It is the way out of the drop guard (which stops `apply` and `peer add`, never a revoke), for a rogue entry or a restored `peers.toml`. The interface in `net.toml` must be `hq0`.
+- `hq net peer add --keepalive <seconds>` sets the keepalive in the device's config (default: laptop 25, phone
+  none, 0 for none). It is stored in `peers.toml` as an optional `keepalive`, written only when set: a file
+  without one still loads, and an older `hq net` refuses a file once a device carries one (it reads the file
+  strictly). It applies at add time, the phone's app needs it entered, and the applier's grammar and input
+  are unchanged.
 - `hq net peer add --psk` makes a preshared key, as the key lifecycle table in
   [docs/security/NETWORK.md](../security/NETWORK.md) expects.
 - The QR code is the device config without a private key, as specified. The Android app refuses to
@@ -398,8 +403,9 @@ Native Bridge work, and is not part of this plan.
 
 - An Android device joins as a spoke through the official WireGuard app. The key pair is made in the
   app and never leaves the device; the hub entry is `AllowedIPs` of the hub's single address.
-  `PersistentKeepalive` is left off on a phone: the phone starts every exchange, and Web Push reaches it
-  through the browser vendor's service, not through the tunnel. Android's "Block connections without
+  `PersistentKeepalive` is left off on a phone by default: the phone starts every exchange, and Web Push
+  reaches it through the browser vendor's service, not through the tunnel. A phone that other devices must
+  reach (HQ running on it) is added with `hq net peer add --keepalive 25`. Android's "Block connections without
   VPN" must stay off for this tunnel, because it would cut off everything outside the hub address.
 - Cost of an idle tunnel, measured on the owner's Mac with a keepalive of 25 seconds: 3,744 bytes of
   WireGuard payload in 603 seconds, about 16 MB a month, roughly 23 MB with IP and UDP headers

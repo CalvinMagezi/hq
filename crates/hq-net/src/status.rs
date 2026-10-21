@@ -105,6 +105,7 @@ mod tests {
             public_key: k(1),
             address: "10.77.0.2".into(),
             preshared_key: None,
+            keepalive: None,
         }];
         assert!(table(&peers, None, 100).contains("unknown"));
         let map = parse_handshakes(&format!("{}\t90\n", k(1)));
