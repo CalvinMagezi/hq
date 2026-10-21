@@ -9,9 +9,21 @@ use crate::qr;
 use crate::store::{Kind, Net, PeerRecord, Result, fail};
 
 /// Keeps the path from a laptop to the hub open behind home routers and firewalls. A phone does
-/// not set it: the phone starts every exchange, and a timer would only cost battery and data.
-const LAPTOP_KEEPALIVE_SECS: u32 = 25;
+/// not set it unless asked: a phone that only starts exchanges gains nothing from a timer, which
+/// would only cost battery and data. A phone other devices must reach (HQ running on it) needs the
+/// same 25 seconds.
+const LAPTOP_KEEPALIVE_SECS: u16 = 25;
 const HOST_PREFIX: &str = "/32";
+
+/// The seconds between keepalive packets in the device's config, or none: the record's own value
+/// when it has one (0 meaning none), else the default for its kind.
+pub fn keepalive_secs(record: &PeerRecord) -> Option<u16> {
+    match record.keepalive {
+        Some(0) => None,
+        Some(secs) => Some(secs),
+        None => (record.kind == Kind::Laptop).then_some(LAPTOP_KEEPALIVE_SECS),
+    }
+}
 
 pub fn config_text(net: &Net, record: &PeerRecord) -> Result<String> {
     let endpoint = net.endpoint()?;
@@ -33,8 +45,8 @@ pub fn config_text(net: &Net, record: &PeerRecord) -> Result<String> {
     }
     out.push_str(&format!("Endpoint = {endpoint}\n"));
     out.push_str(&format!("AllowedIPs = {}{HOST_PREFIX}\n", net.hub));
-    if record.kind == Kind::Laptop {
-        out.push_str(&format!("PersistentKeepalive = {LAPTOP_KEEPALIVE_SECS}\n"));
+    if let Some(secs) = keepalive_secs(record) {
+        out.push_str(&format!("PersistentKeepalive = {secs}\n"));
     }
     Ok(out)
 }
@@ -64,7 +76,11 @@ pub fn describe(net: &Net, record: &PeerRecord, with_qr: bool) -> Result<String>
     out.push_str(&match record.kind {
         Kind::Laptop => "On the laptop: in the WireGuard app choose \"Add Empty Tunnel\". The app writes a PrivateKey line and shows the public key (that is what you gave --pubkey). Paste the lines above below it.\n".to_string(),
         Kind::Phone => format!(
-            "On the phone: in the WireGuard app create the tunnel from scratch, let the app generate the key, then enter the address, the hub's public key, the endpoint and the allowed address shown above.{} Leave \"Block connections without VPN\" off.\n",
+            "On the phone: in the WireGuard app create the tunnel from scratch, let the app generate the key, then enter the address, the hub's public key, the endpoint and the allowed address shown above.{}{} Leave \"Block connections without VPN\" off.\n",
+            match keepalive_secs(record) {
+                Some(secs) => format!(" Also set \"Persistent keepalive\" to {secs} on the hub peer."),
+                None => String::new(),
+            },
             if with_qr {
                 " The Android app refuses to import a config without a PrivateKey line (checked in its source; the iOS app was not checked), so expect a scan of the QR code to be refused; use it to read the values from another screen."
             } else {
@@ -72,6 +88,9 @@ pub fn describe(net: &Net, record: &PeerRecord, with_qr: bool) -> Result<String>
             }
         ),
     });
+    if record.kind == Kind::Phone && keepalive_secs(record).is_some() {
+        out.push_str("The keepalive keeps the path to this phone open, so the hub and any device linked to this phone can reach it, but only once it is set in the app. It keeps the radio busy: expect extra battery use.\n");
+    }
     if record.preshared_key.is_some() {
         out.push_str("This config holds a preshared key. Treat it like a password: share it only with that device.\n");
     }
@@ -90,6 +109,7 @@ mod tests {
             public_key: device_key(),
             address: "10.77.0.2".into(),
             preshared_key: psk.map(String::from),
+            keepalive: None,
         }
     }
 
@@ -133,6 +153,43 @@ mod tests {
                 .unwrap()
                 .contains("PersistentKeepalive")
         );
+    }
+
+    #[test]
+    fn a_keepalive_in_the_record_overrides_the_default_for_its_kind() {
+        let net = sample_net();
+        let with = |kind, keepalive| PeerRecord {
+            keepalive,
+            ..record(kind, None)
+        };
+        let phone = config_text(&net, &with(Kind::Phone, Some(25))).unwrap();
+        assert!(phone.contains("PersistentKeepalive = 25\n"));
+        assert_eq!(phone.matches("PersistentKeepalive").count(), 1);
+        let slow = config_text(&net, &with(Kind::Phone, Some(60))).unwrap();
+        assert!(slow.contains("PersistentKeepalive = 60\n"));
+        let off = config_text(&net, &with(Kind::Laptop, Some(0))).unwrap();
+        assert!(!off.contains("PersistentKeepalive"));
+        let default = config_text(&net, &with(Kind::Laptop, None)).unwrap();
+        assert!(default.contains("PersistentKeepalive = 25\n"));
+        assert_eq!(keepalive_secs(&with(Kind::Phone, None)), None);
+        assert_eq!(keepalive_secs(&with(Kind::Phone, Some(0))), None);
+    }
+
+    #[test]
+    fn only_a_phone_with_a_keepalive_is_told_about_the_battery() {
+        let net = sample_net();
+        let plain = describe(&net, &record(Kind::Phone, None), false).unwrap();
+        assert!(!plain.contains("battery use"));
+        let serving = PeerRecord {
+            keepalive: Some(25),
+            ..record(Kind::Phone, None)
+        };
+        let text = describe(&net, &serving, false).unwrap();
+        assert!(text.contains("battery use"));
+        assert!(text.contains("\"Persistent keepalive\" to 25"));
+        assert!(!plain.contains("Persistent keepalive"));
+        let laptop = describe(&net, &record(Kind::Laptop, None), false).unwrap();
+        assert!(!laptop.contains("battery use"));
     }
 
     #[test]
