@@ -1256,3 +1256,33 @@ mod lite_rule_tests {
         }
     }
 }
+
+#[cfg(test)]
+mod net_args_tests {
+    use super::Cli;
+    use clap::Parser;
+
+    #[test]
+    fn peer_add_takes_a_keepalive_of_zero_to_65535_seconds() {
+        let parse = |keepalive: &str| {
+            let argv = [
+                "hq",
+                "net",
+                "peer",
+                "add",
+                "pixel",
+                "--pubkey",
+                "k",
+                "--keepalive",
+                keepalive,
+            ];
+            Cli::try_parse_from(argv)
+        };
+        for ok in ["0", "25", "65535"] {
+            assert!(parse(ok).is_ok(), "{ok}");
+        }
+        for bad in ["-1", "65536", "x", ""] {
+            assert!(parse(bad).is_err(), "{bad}");
+        }
+    }
+}

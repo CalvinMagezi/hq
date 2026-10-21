@@ -24,6 +24,8 @@ pub struct AddRequest<'a> {
     pub public_key: &'a str,
     pub kind: Kind,
     pub preshared: bool,
+    /// Seconds between the device's keepalive packets; see `PeerRecord::keepalive`.
+    pub keepalive: Option<u16>,
     pub with_qr: bool,
     /// The caller confirms the key is public although it has the shape of a private one.
     pub confirm_public: bool,
@@ -254,6 +256,7 @@ pub fn peer_add(
             public_key: request.public_key,
             kind: request.kind,
             preshared: request.preshared,
+            keepalive: request.keepalive,
             confirm_public: request.confirm_public,
         },
     )?;
@@ -488,7 +491,7 @@ pub fn link_add(
     say(
         out,
         &format!(
-            "Each device must also route the other's address into its tunnel. In the WireGuard app, change the hub peer's allowed addresses to:\n{}The hub needs the firewall set and an applier that knows links first: see docs/PRIVATE_NETWORK.md, \"Linking two devices\". A device that is behind a mobile network also needs PersistentKeepalive = 25 to stay reachable.\n",
+            "Each device must also route the other's address into its tunnel. In the WireGuard app, change the hub peer's allowed addresses to:\n{}The hub needs the firewall set and an applier that knows links first: see docs/PRIVATE_NETWORK.md, \"Linking two devices\". A device that is behind a mobile network also needs PersistentKeepalive = 25 to stay reachable (set \"Persistent keepalive\" in its app; a device added with `--keepalive 25` already has it).\n",
             device_lines(&net, &peers, [&record.a, &record.b])
         ),
     )
@@ -565,8 +568,8 @@ pub fn peer_list(store: &Store, out: &mut dyn Write) -> Result<()> {
     let net = store.require_net()?;
     let peers = load_peers_noted(store, out)?;
     let mut text = format!(
-        "{:<16} {:<7} {:<12} {:<10} {}\n",
-        "DEVICE", "KIND", "ADDRESS", "KEY", "PRESHARED"
+        "{:<16} {:<7} {:<12} {:<10} {:<10} {}\n",
+        "DEVICE", "KIND", "ADDRESS", "KEY", "PRESHARED", "KEEPALIVE"
     );
     for p in &peers.peer {
         let short: String = p.public_key.chars().take(FINGERPRINT_CHARS).collect();
@@ -575,8 +578,9 @@ pub fn peer_list(store: &Store, out: &mut dyn Write) -> Result<()> {
         } else {
             "no"
         };
+        let keepalive = device::keepalive_secs(p).map_or("none".to_string(), |s| format!("{s} s"));
         text.push_str(&format!(
-            "{:<16} {:<7} {:<12} {short:<10} {psk}\n",
+            "{:<16} {:<7} {:<12} {short:<10} {psk:<10} {keepalive}\n",
             p.label,
             p.kind.name(),
             p.address
@@ -650,6 +654,7 @@ mod tests {
             public_key: key,
             kind,
             preshared: false,
+            keepalive: None,
             with_qr: false,
             confirm_public: false,
         }
@@ -977,6 +982,53 @@ mod tests {
                 .contains(&format!("PresharedKey = {psk}"))
         );
         assert!(applier_input(&f).contains(&format!("PresharedKey = {psk}")));
+    }
+
+    #[test]
+    fn a_keepalive_reaches_the_device_config_and_never_the_applier_input() {
+        let f = fixture();
+        let key = crate::store::tests::device_key();
+        let mut out = Vec::new();
+        let req = AddRequest {
+            keepalive: Some(25),
+            ..request("pixel", &key, Kind::Phone)
+        };
+        peer_add(&f.store, &f.spool, &req, &mut out).unwrap();
+        let printed = String::from_utf8(out).unwrap();
+        assert!(printed.contains("PersistentKeepalive = 25"));
+        assert!(printed.contains("battery use"));
+        let with = applier_input(&f);
+        assert!(!with.to_lowercase().contains("keepalive"));
+        // The same device without the field gives a byte for byte identical input.
+        let mut peers = f.store.load_peers().unwrap();
+        peers.peer[0].keepalive = None;
+        f.store.save_peers(&peers).unwrap();
+        apply(&f.store, &f.spool, &mut Vec::new()).unwrap();
+        assert_eq!(applier_input(&f), with);
+    }
+
+    #[test]
+    fn the_list_shows_each_devices_keepalive() {
+        let f = fixture();
+        run_add(&f, "mac", Kind::Laptop);
+        let key = crate::store::tests::device_key();
+        let req = AddRequest {
+            keepalive: Some(25),
+            ..request("pixel", &key, Kind::Phone)
+        };
+        peer_add(&f.store, &f.spool, &req, &mut Vec::new()).unwrap();
+        run_add(&f, "tablet", Kind::Phone);
+        let mut out = Vec::new();
+        peer_list(&f.store, &mut out).unwrap();
+        let rows: Vec<String> = String::from_utf8(out)
+            .unwrap()
+            .lines()
+            .map(String::from)
+            .collect();
+        let row = |label: &str| rows.iter().find(|l| l.starts_with(label)).unwrap().clone();
+        assert!(row("mac").trim_end().ends_with("25 s"));
+        assert!(row("pixel").trim_end().ends_with("25 s"));
+        assert!(row("tablet").trim_end().ends_with("none"));
     }
 
     #[test]
