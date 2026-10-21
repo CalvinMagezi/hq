@@ -6,6 +6,7 @@ import androidx.activity.ComponentActivity
 import androidx.activity.SystemBarStyle
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
+import example.hq.spike.data.HqServices
 import example.hq.spike.ui.shell.HqShell
 import example.hq.spike.ui.shell.Place
 import example.hq.spike.ui.theme.HqTheme
@@ -17,6 +18,7 @@ import example.hq.spike.ui.theme.HqTheme
 class ShellActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        HqServices.ensureHubRunning(this)
         enableEdgeToEdge(
             statusBarStyle = SystemBarStyle.dark(Color.TRANSPARENT),
             navigationBarStyle = SystemBarStyle.dark(Color.TRANSPARENT),

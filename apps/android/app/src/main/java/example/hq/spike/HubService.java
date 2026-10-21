@@ -47,7 +47,7 @@ public class HubService extends Service {
         return id != 0 ? id : android.R.drawable.stat_notify_sync;
     }
 
-    static String token(Context c) {
+    public static String token(Context c) {
         return SecretStore.webToken(c);
     }
 
