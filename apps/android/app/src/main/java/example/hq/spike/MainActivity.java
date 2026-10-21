@@ -22,6 +22,8 @@ public class MainActivity extends Activity {
     private static final String BASE = "http://127.0.0.1:" + HubService.PORT;
     private static final int HEALTH_POLLS = 600;
     private static final int HEALTH_POLL_MS = 100;
+    private static final int REAUTH_POLLS = 120;
+    private static final int REAUTH_POLL_MS = 500;
     static final String EXTRA_PATH = "path";
     private static final String POST_NOTIFICATIONS = "android.permission.POST_NOTIFICATIONS";
     private static final int REQUEST_NOTIFICATIONS = 1;
@@ -51,6 +53,40 @@ public class MainActivity extends Activity {
         web.setWebViewClient(new WebViewClient());
         setContentView(web);
         new Thread(this::waitHealthThenLoad, "health").start();
+    }
+
+    @Override
+    protected void onResume() {
+        super.onResume();
+        HubService.setTokenListener(() -> new Thread(this::reloadWhenNewTokenWorks, "token-reload").start());
+    }
+
+    @Override
+    protected void onPause() {
+        HubService.setTokenListener(null);
+        super.onPause();
+    }
+
+    /** hq is restarted with a replaced token; the page is loaded again only once hq accepts that token, since the old process may still be answering. */
+    private void reloadWhenNewTokenWorks() {
+        for (int i = 0; i < REAUTH_POLLS; i++) {
+            try {
+                String token = HubService.token(this);
+                HttpURLConnection c = (HttpURLConnection) new URL(BASE + "/api/notifications?limit=1").openConnection();
+                c.setConnectTimeout(500);
+                c.setReadTimeout(500);
+                c.setRequestProperty("Authorization", "Bearer " + token);
+                if (c.getResponseCode() == 200) {
+                    String url = BASE + path + "#token=" + token;
+                    ui.post(() -> web.loadUrl(url));
+                    return;
+                }
+            } catch (IOException | IllegalStateException e) {
+                // hq is restarting
+            }
+            try { Thread.sleep(REAUTH_POLL_MS); } catch (InterruptedException ignored) { return; }
+        }
+        Log.e(HubService.TAG, "hq never accepted the replaced token");
     }
 
     @Override

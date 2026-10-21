@@ -105,6 +105,16 @@ final class SecretStore {
         }
     }
 
+    /** Seals a fresh web token. hq must be restarted to read it; every device signed in with the old one keeps its own session. */
+    static synchronized void replaceWebToken(Context c) {
+        SharedPreferences internal = c.getSharedPreferences(INTERNAL_PREFS, Context.MODE_PRIVATE);
+        try {
+            if (!internal.edit().putString(WEB_TOKEN, seal(WEB_TOKEN, newToken())).commit()) throw new IOException("preferences not written");
+        } catch (GeneralSecurityException | IOException e) {
+            throw new IllegalStateException("web token not replaced: " + e.getClass().getSimpleName());
+        }
+    }
+
     private static String newToken() {
         byte[] b = new byte[TOKEN_BYTES];
         new SecureRandom().nextBytes(b);

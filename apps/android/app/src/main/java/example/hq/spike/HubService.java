@@ -9,6 +9,7 @@ import android.content.Intent;
 import android.content.pm.ServiceInfo;
 import android.os.Build;
 import android.os.IBinder;
+import android.os.SystemClock;
 import android.util.Log;
 import java.io.File;
 import java.io.IOException;
@@ -20,6 +21,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicLong;
 import java.util.function.Supplier;
 
 /** Keeps `hq` and, when the owner supplied a Caddyfile, Caddy running as children of this app, and turns unread HQ notifications into Android ones. */
@@ -32,6 +34,8 @@ public class HubService extends Service {
     private static final long BACKOFF_MAX_MS = 60_000;
     private static final long STABLE_RUN_MS = 60_000;
     private static final long MAX_LOG_BYTES = 5L << 20;
+    private static final long RECOVER_MIN_GAP_MS = 5 * 60 * 1000L;
+    private static final String SIGN_IN_MARK = "#token=";
     private static final long MODE_FILE_MAX_BYTES = 64;
 
     private static final Object LOCK = new Object();
@@ -47,14 +51,44 @@ public class HubService extends Service {
         return id != 0 ? id : android.R.drawable.stat_notify_sync;
     }
 
-    static String token(Context c) {
+    public static String token(Context c) {
         return SecretStore.webToken(c);
+    }
+
+    private static final AtomicLong lastRecovery = new AtomicLong(-RECOVER_MIN_GAP_MS);
+    private static volatile Runnable tokenListener;
+
+    /** The visible web page asks to hear when the token is replaced, so it can sign in again with the new one. */
+    static void setTokenListener(Runnable r) {
+        tokenListener = r;
+    }
+
+    /**
+     * The owner chose "Sign out everywhere", which signs out the token this app gave hq as well. Seals a new
+     * one and stops hq so its supervisor starts it again with the new token. Done at most once in
+     * RECOVER_MIN_GAP_MS, so a 401 with another cause cannot make hq restart over and over.
+     */
+    public static void recoverToken(Context c) {
+        long now = SystemClock.elapsedRealtime();
+        long last = lastRecovery.get();
+        if (now - last < RECOVER_MIN_GAP_MS || !lastRecovery.compareAndSet(last, now)) return;
+        try {
+            SecretStore.replaceWebToken(c);
+            Log.w(TAG, "web token was signed out, replaced it and restarting hq");
+            Process p = hqProc;
+            if (p != null) p.destroy();
+            Runnable heard = tokenListener;
+            if (heard != null) heard.run();
+        } catch (RuntimeException e) {
+            lastRecovery.set(last);
+            Log.e(TAG, "could not replace the web token: " + e);
+        }
     }
 
     @Override
     public int onStartCommand(Intent intent, int flags, int startId) {
         getSystemService(NotificationManager.class)
-                .createNotificationChannel(new NotificationChannel(CHANNEL, "AgentHQ service", NotificationManager.IMPORTANCE_LOW));
+                .createNotificationChannel(new NotificationChannel(CHANNEL, "HQ is running", NotificationManager.IMPORTANCE_LOW));
         Notification n = notification(HubConfig.isActive(readSmall(new File(getFilesDir(), "mode"))));
         try {
             if (Build.VERSION.SDK_INT >= 34) startForeground(NOTIFICATION_ID, n, ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE);
@@ -72,8 +106,8 @@ public class HubService extends Service {
     }
 
     private Notification notification(boolean active) {
-        String text = (active ? "Active: relays and scheduler on. " : "") + "Serving this device on 127.0.0.1:" + PORT;
-        return new Notification.Builder(this, CHANNEL).setContentTitle("AgentHQ is running")
+        String text = active ? "Answering your chats and running scheduled tasks." : "Only the app is on. Chats and scheduled tasks are paused.";
+        return new Notification.Builder(this, CHANNEL).setContentTitle("HQ is running")
                 .setContentText(text).setSmallIcon(statIcon(this)).build();
     }
 
@@ -186,10 +220,21 @@ public class HubService extends Service {
         return pb;
     }
 
-    /** Children append to their log across restarts, so start over once a log passes the cap. */
+    /**
+     * Children append to their log across restarts, so start over once a log passes the cap. A log that holds a
+     * sign-in link (an earlier build printed one at every start) is dropped too, so no token stays on disk in plain text.
+     */
     private static File trimmed(File log) {
-        if (log.length() > MAX_LOG_BYTES) log.delete();
+        if (log.length() > MAX_LOG_BYTES || holdsSignInLink(log)) log.delete();
         return log;
+    }
+
+    private static boolean holdsSignInLink(File log) {
+        try {
+            return new String(HubConfig.readRegular(log.toPath(), MAX_LOG_BYTES), StandardCharsets.ISO_8859_1).contains(SIGN_IN_MARK);
+        } catch (IOException e) {
+            return false;
+        }
     }
 
     @Override

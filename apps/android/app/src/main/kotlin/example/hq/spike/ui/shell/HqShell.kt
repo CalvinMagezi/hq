@@ -7,14 +7,18 @@ import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxScope
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.imePadding
+import androidx.compose.foundation.layout.isImeVisible
 import androidx.compose.foundation.layout.navigationBars
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
@@ -28,6 +32,9 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.saveable.rememberSaveable
@@ -48,6 +55,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import example.hq.spike.R
+import example.hq.spike.data.HqStatus
 import example.hq.spike.ui.theme.HqType
 import example.hq.spike.ui.theme.Mts
 
@@ -69,25 +77,53 @@ private val RaisedLift = 10.dp
 
 /**
  * The same two bars on every main screen. Each place keeps where the user was; Back from any other
- * place goes to Chat, and Back from Chat leaves the app.
+ * place goes to Chat, and Back from Chat leaves the app. The bottom bar steps aside while the keyboard is up.
  */
+/** Lets a screen or an overlay send the shell to another place, such as a note card going to Notes. */
+val LocalGoTo = staticCompositionLocalOf<(Place) -> Unit> { {} }
+
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
-fun HqShell(startAt: Place = Place.Chat, inboxBadge: Int = 0, onSearch: () -> Unit = {}, onSettings: () -> Unit = {}) {
+fun HqShell(
+    startAt: Place = Place.Chat,
+    inboxBadge: Int = 0,
+    status: HqStatus = HqStatus.Live,
+    onSearch: () -> Unit = {},
+    onSettings: () -> Unit = {},
+    request: Place? = null,
+    onRequestHandled: () -> Unit = {},
+    aboveBar: @Composable BoxScope.(Place) -> Unit = {},
+    overlay: @Composable () -> Unit = {},
+    content: @Composable (Place) -> Unit,
+) {
     var current by rememberSaveable { mutableStateOf(startAt) }
+    LaunchedEffect(request) { if (request != null) { current = request; onRequestHandled() } }
     BackHandler(enabled = current != Place.Chat) { current = Place.Chat }
-    Column(Modifier.fillMaxSize().background(Mts.Surface000).statusBarsPadding()) {
-        TopBar(title = current.label, status = "Live", statusColor = Mts.BrandGreen, onSearch = onSearch, onSettings = onSettings)
-        Box(Modifier.weight(1f).fillMaxWidth(), contentAlignment = Alignment.Center) { NotBuilt(current) }
-        BottomBar(current, inboxBadge) { current = it }
+    val (statusText, statusColor) = when (status) {
+        HqStatus.Live -> "Live" to Mts.BrandGreen
+        is HqStatus.Starting -> "Starting HQ \u00b7 ${status.seconds} s" to Mts.Amber
+        is HqStatus.Saved -> "Saved \u00b7 ${status.age}" to Mts.Amber
+    }
+    CompositionLocalProvider(LocalGoTo provides { current = it }) {
+        Box(Modifier.fillMaxSize().background(Mts.Surface000)) {
+            Column(Modifier.fillMaxSize().statusBarsPadding()) {
+                TopBar(title = current.label, status = statusText, statusColor = statusColor, onSearch = onSearch, onSettings = onSettings)
+                Box(Modifier.weight(1f).fillMaxWidth().imePadding()) { content(current); aboveBar(current) }
+                if (!WindowInsets.isImeVisible) BottomBar(current, inboxBadge) { current = it }
+            }
+            overlay()
+        }
     }
 }
 
 @Composable
-private fun NotBuilt(place: Place) {
-    Text(
-        "${place.label} is not built in the native app yet.",
-        style = HqType.BodySm, color = Mts.InkMuted, textAlign = TextAlign.Center, modifier = Modifier.padding(horizontal = 32.dp),
-    )
+fun NotBuilt(place: Place) {
+    Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+        Text(
+            "${place.label} is not built in the native app yet.",
+            style = HqType.BodySm, color = Mts.InkMuted, textAlign = TextAlign.Center, modifier = Modifier.padding(horizontal = 32.dp),
+        )
+    }
 }
 
 @Composable

@@ -35,6 +35,7 @@ renders as normal markdown.
 - Line and bar: up to 50 labels and 6 series. A legend appears with 2 or more series.
 - Pie and donut: up to 12 labels. Only the first series is drawn. Values must be zero or greater and must not all be zero. The legend lists each label with its value and percentage.
 - Values must be finite numbers. `null`, strings and missing values make the payload invalid.
+- The phone app also refuses a value of 9e16 or more in absolute size, a payload over 32,000 characters or with more than 1,000 brackets, and one nested deeper than 16 levels. They are far beyond any real chart, and they keep a hostile reply from hanging the axis or overflowing the parser.
 - Text is cut at 120 characters and x axis labels at 10 characters. When there are many labels, only some are printed on the axis.
 - Colors are fixed and come from the app theme. A payload cannot set colors.
 
