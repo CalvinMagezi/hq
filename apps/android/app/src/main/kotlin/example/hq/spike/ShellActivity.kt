@@ -15,6 +15,14 @@ import example.hq.spike.data.HqServices
 import example.hq.spike.data.HqStatus
 import example.hq.spike.ui.chat.ChatOverlays
 import example.hq.spike.ui.chat.ChatScreen
+import example.hq.spike.ui.shell.LocalGoTo
+import example.hq.spike.ui.notes.NotesViewModel
+import example.hq.spike.ui.notes.NotesUi
+import example.hq.spike.ui.notes.NotesOverlays
+import example.hq.spike.ui.notes.NotesHome
+import example.hq.spike.ui.notes.notesFixture
+import example.hq.spike.ui.chat.ContextRef
+import example.hq.spike.ui.chat.ChatUiState
 import example.hq.spike.ui.chat.ChatTime
 import example.hq.spike.ui.chat.ChatViewModel
 import example.hq.spike.ui.chat.chatFixture
@@ -31,6 +39,7 @@ import example.hq.spike.ui.theme.HqTheme
  */
 class ShellActivity : ComponentActivity() {
     private val chat: ChatViewModel by viewModels()
+    private val notes: NotesViewModel by viewModels()
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -39,14 +48,17 @@ class ShellActivity : ComponentActivity() {
             statusBarStyle = SystemBarStyle.dark(Color.TRANSPARENT),
             navigationBarStyle = SystemBarStyle.dark(Color.TRANSPARENT),
         )
-        val start = intent.getStringExtra("place")?.let { name -> Place.entries.firstOrNull { it.name.equals(name, true) } } ?: Place.Chat
+        val start = intent.getStringExtra("place")?.let { name -> Place.entries.firstOrNull { it.name.equals(name, true) } } ?: if (intent.getStringExtra("fixture")?.startsWith("n-") == true) Place.Notes else Place.Chat
         val badge = intent.getIntExtra("badge", 0)
-        val fixture = chatFixture(intent.getStringExtra("fixture"))
+        val fixtureName = intent.getStringExtra("fixture")
+        val notesFixture = notesFixture(fixtureName)
+        val fixture = chatFixture(fixtureName) ?: notesFixture?.let { ChatUiState() }
         val services = HqServices.get(this)
-        fixture?.let(chat::freeze)
+        if (notesFixture != null) notes.freeze(notesFixture) else fixture?.let(chat::freeze)
         setContent {
             val status by services.status.collectAsStateWithLifecycle()
             val chatState by chat.state.collectAsStateWithLifecycle()
+            val notesState by notes.state.collectAsStateWithLifecycle()
             val offlineSince = chatState.offlineSince
             val now by produceState(System.currentTimeMillis(), offlineSince) {
                 value = System.currentTimeMillis()
@@ -61,12 +73,35 @@ class ShellActivity : ComponentActivity() {
             HqTheme {
                 HqShell(
                     startAt = start, inboxBadge = badge, status = shown,
-                    overlay = { ChatOverlays(chatState, chat.actions) },
+                    onSearch = { notes.actions.onOpenSearch() },
+                    overlay = { ShellOverlays(chatState, notesState) },
                 ) { place ->
-                    if (place == Place.Chat) ChatScreen(chatState, chat.actions) else NotBuilt(place)
+                    when (place) {
+                        Place.Chat -> ChatScreen(chatState, chat.actions)
+                        Place.Notes -> NotesPlace(notesState)
+                        else -> NotBuilt(place)
+                    }
                 }
             }
         }
+    }
+
+    @androidx.compose.runtime.Composable
+    private fun NotesPlace(notesState: NotesUi) {
+        val go = LocalGoTo.current
+        NotesHome(notesState, notes.actions, onAskHq = { go(Place.Chat); chat.actions.onDraft("Write me a note about ") })
+    }
+
+    /** What sits over the whole shell: Notes pages first (they cover the bars), then Chat's sheets and pages. */
+    @androidx.compose.runtime.Composable
+    private fun ShellOverlays(chatState: ChatUiState, notesState: NotesUi) {
+        val go = LocalGoTo.current
+        NotesOverlays(notesState, notes.actions) { items ->
+            notes.closeAll()
+            chat.startChatWith(items.map { (path, title) -> ContextRef(ContextRef.Kind.Note, path, title) })
+            go(Place.Chat)
+        }
+        ChatOverlays(chatState, chat.actions) { path -> notes.openNote(path) }
     }
 
     private companion object {

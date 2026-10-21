@@ -116,6 +116,56 @@ class HqClient(private val token: () -> String, private val base: String = LOCAL
         }
     }
 
+    /** Notes in a list: path, title, a short preview, when it changed and whether it is pinned. */
+    data class NoteItem(val path: String, val title: String, val preview: String, val mtime: String, val pinned: Boolean)
+
+    private fun noteItems(array: JSONArray?) = array.objects().map {
+        NoteItem(it.getString("path"), it.optString("title", ""), it.optString("preview", ""), it.optString("mtime", ""), it.optBoolean("pinned", false))
+    }
+
+    /** The newest notes, as the home screen's Recent list. */
+    suspend fun recentNotes(): List<NoteItem> = send(authed("/api/vault-signals").build()) { noteItems(JSONObject(it).optJSONArray("recent")) }
+
+    suspend fun pinnedNotes(): List<NoteItem> = send(authed("/api/pinned").build()) { noteItems(JSONObject(it).optJSONArray("notes")) }
+
+    /** Every folder under Notebooks, Inbox first, as vault paths. */
+    suspend fun folders(): List<String> = send(authed("/api/vault/folders").build()) { JSONObject(it).optJSONArray("folders").strings() }
+
+    /** One folder's contents: sub-folders with the notes under each, and the notes directly inside. */
+    data class FolderListing(val folders: List<Pair<String, Int>>, val notes: List<String>)
+
+    suspend fun folderListing(path: String): FolderListing =
+        send(authed("/api/tree?recursive=true&path=${java.net.URLEncoder.encode(path, "UTF-8")}").build()) { text ->
+            val tree = JSONObject(text).optJSONObject("tree")
+            val children = tree?.optJSONArray("children").objects()
+            fun count(o: JSONObject): Int = if (o.optString("type") == "file") 1 else o.optJSONArray("children").objects().sumOf(::count)
+            FolderListing(
+                children.filter { it.optString("type") == "dir" }.map { it.optString("path") to count(it) },
+                children.filter { it.optString("type") == "file" && it.optString("name").endsWith(".md") }.map { it.optString("path") },
+            )
+        }
+
+    /** Full-text matches with a snippet of the text around the match. */
+    data class NoteHit(val path: String, val title: String, val notebook: String, val snippet: String)
+
+    suspend fun searchNoteHits(query: String, limit: Int = 30): List<NoteHit> =
+        send(authed("/api/search?q=${java.net.URLEncoder.encode(query, "UTF-8")}&limit=$limit").build()) { text ->
+            JSONObject(text).optJSONArray("results").objects().map {
+                NoteHit(it.getString("note_path"), it.optString("title", ""), it.optString("notebook", ""), it.optString("snippet", ""))
+            }
+        }
+
+    /** Makes a new note and returns its vault path; the title only names the file. */
+    suspend fun createNote(folder: String, title: String, content: String): String =
+        send(authed("/api/note/create").post(JSONObject().put("folder", folder).put("title", title).put("content", content).toString().toRequestBody("application/json".toMediaType())).build()) {
+            JSONObject(it).getString("path")
+        }
+
+    /** Replaces a note's text (body only: the server keeps the front matter). Last write wins; there is no version check yet. */
+    suspend fun saveNote(path: String, content: String) {
+        send(authed("/api/note").put(JSONObject().put("path", path).put("content", content).toString().toRequestBody("application/json".toMediaType())).build()) { }
+    }
+
     /** The vault paths of the pinned notes. */
     suspend fun pinned(): Set<String> =
         send(authed("/api/pinned").build()) { text -> JSONObject(text).optJSONArray("notes").objects().mapNotNull { it.optString("path").ifBlank { null } }.toSet() }
@@ -174,7 +224,8 @@ class HqClient(private val token: () -> String, private val base: String = LOCAL
     fun openSocket(ticket: String, listener: WebSocketListener): WebSocket =
         http.newWebSocket(Request.Builder().url("${base.replaceFirst("http", "ws")}/ws?ticket=$ticket").build(), listener)
 
-    private fun authed(path: String) = Request.Builder().url(base + path).header("Authorization", "Bearer ${token()}")
+    /** The server wants this header on requests that change a helper, setup or a credential; sending it on every request is harmless. */
+    private fun authed(path: String) = Request.Builder().url(base + path).header("Authorization", "Bearer ${token()}").header("X-HQ-Client", "android")
 
     private suspend fun <T> send(request: Request, parse: (String) -> T): T = withContext(Dispatchers.IO) {
         try {

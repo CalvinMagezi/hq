@@ -95,7 +95,7 @@ private fun rememberBlockActions(state: ChatUiState, actions: ChatActions): Bloc
 
 /** What sits over the whole shell, bars included: pages, the note sheet, the chats sheet and the line at the bottom. */
 @Composable
-fun ChatOverlays(state: ChatUiState, actions: ChatActions) {
+fun ChatOverlays(state: ChatUiState, actions: ChatActions, onOpenInNotes: (String) -> Unit = {}) {
     val go = LocalGoTo.current
     val blocks = rememberBlockActions(state, actions)
     val pickers = rememberSystemPickers(actions.onFiles)
@@ -108,12 +108,17 @@ fun ChatOverlays(state: ChatUiState, actions: ChatActions) {
         }
         state.note?.let { sheet ->
             NoteSheetView(
-                sheet, blocks, actions.onCloseNote, onOpenInNotes = { actions.onCloseNote(); go(Place.Notes) },
+                sheet, blocks, actions.onCloseNote, onOpenInNotes = { actions.onCloseNote(); go(Place.Notes); onOpenInNotes(sheet.path) },
                 onAsk = { actions.onAskAboutNote(sheet.path) }, onMenu = { actions.onNoteMenu(true) },
             )
         }
-        if (state.noteMenu) state.note?.let { NoteMenuSheet(it, actions) }
-        state.export?.let { ExportOverlay(it, actions) }
+        if (state.noteMenu) state.note?.let { sheet ->
+            NoteMenuSheet(sheet, NoteMenuActions(
+                onClose = { actions.onNoteMenu(false) }, onTogglePin = actions.onTogglePin, onAsk = { actions.onAskAboutNote(sheet.path) },
+                onExport = actions.onExport, onNotice = actions.onNotice,
+            ))
+        }
+        state.export?.let { ExportOverlay(it, ExportActions(actions.onExportFormat, actions.onExportClose, actions.onExportAgain, actions.onNotice)) }
         if (state.chatsOpen) ChatsSheet(state, actions)
         if (state.addOpen) AddSheet(actions, pickers)
         state.picker?.let { PickerSheet(it, actions) }

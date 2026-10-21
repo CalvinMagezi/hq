@@ -92,7 +92,7 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
     private val sentContexts = mutableMapOf<String, List<ContextRef>>()
     private val sentFiles = mutableMapOf<String, List<PendingFile>>()
     private val composer = ComposerController(app, client, _state, viewModelScope)
-    private val exporter = NoteExporter(app, client, _state, viewModelScope)
+    private val exporter = NoteExporter(app, client, viewModelScope)
     private var loadingOlder = false
     private class LastQuestion(val threadId: String?, val text: String, val files: List<Attachment>, val contexts: List<ContextRef>)
     private var lastQuestion: LastQuestion? = null
@@ -116,11 +116,12 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
         onCloseSheet = { _state.update { it.copy(pressed = null) } }, onSelectText = { text -> _state.update { it.copy(pressed = null, page = Page.SelectText(text)) } },
         onRegenerate = ::regenerate, onEditResend = ::editResend, onCancelEdit = { _state.update { s -> s.copy(editing = null, draft = "", files = s.files.filter { it.uri.isNotEmpty() }) } },
         onNoteMenu = { open -> _state.update { it.copy(noteMenu = open) } }, onTogglePin = ::togglePin,
-        onExport = { _state.value.note?.let(exporter::choose) }, onExportFormat = exporter::start, onExportClose = exporter::close, onExportAgain = exporter::again,
+        onExport = { _state.value.note?.let { n -> _state.update { it.copy(noteMenu = false) }; exporter.choose(n.path, n.title, n.body) } }, onExportFormat = exporter::start, onExportClose = exporter::close, onExportAgain = exporter::again,
         onLoadOlder = ::loadOlder, onSlash = { name -> setDraft(if (name == "/topic") "/topic " else name) },
     )
 
     init {
+        viewModelScope.launch { exporter.state.collect { e -> _state.update { it.copy(export = e) } } }
         viewModelScope.launch { services.connection.events.collect { if (!frozen) handle(it) } }
         viewModelScope.launch {
             services.connection.connected.collect { c ->
@@ -381,6 +382,12 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
         _state.update { it.copy(page = Page.Table(table, caption)) }
     }
 
+    /** Starts a fresh chat with these notes attached, as "Ask HQ about these notes" does from search. */
+    fun startChatWith(items: List<ContextRef>) {
+        newChat()
+        _state.update { it.copy(contexts = items.take(MAX_ATTACHED)) }
+    }
+
     private fun openChats() {
         _state.update { it.copy(chatsOpen = true, chatSearch = "") }
         viewModelScope.launch { refreshChats() }
@@ -438,6 +445,7 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
         const val DRAFT_PREFS = "chat_drafts"
         const val NEW_CHAT_KEY = "new"
         const val UNDO_MS = 5_000L
+        const val MAX_ATTACHED = 10
         const val NOTE_GONE = "That note is not in your notes any more"
     }
 }

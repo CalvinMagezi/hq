@@ -19,20 +19,21 @@ import kotlinx.coroutines.launch
 class NoteExporter(
     private val app: Application,
     private val client: HqClient,
-    private val state: MutableStateFlow<ChatUiState>,
     private val scope: CoroutineScope,
 ) {
     private var job: Job? = null
+    private val _state = MutableStateFlow<ExportState?>(null)
+    val state: kotlinx.coroutines.flow.StateFlow<ExportState?> = _state
 
-    fun choose(sheet: NoteSheet) {
-        val tables = parseBlocks(NoteText.withoutFrontmatter(sheet.body)).count { it is Block.Table }
-        state.update { it.copy(noteMenu = false, export = ExportState.Choosing(ExportNote(sheet.path, sheet.title, tables))) }
+    fun choose(path: String, title: String, body: String) {
+        val tables = parseBlocks(NoteText.withoutFrontmatter(body)).count { it is Block.Table }
+        _state.value = ExportState.Choosing(ExportNote(path, title, tables))
     }
 
     fun start(format: ExportFormat) {
-        val note = state.value.export?.note ?: return
+        val note = _state.value?.note ?: return
         job?.cancel()
-        state.update { it.copy(export = ExportState.Making(note, format)) }
+        _state.value = ExportState.Making(note, format)
         job = scope.launch {
             val next = try {
                 val done = client.exportNote(note.path, format.key, File(app.cacheDir, EXPORT_DIR))
@@ -44,18 +45,18 @@ class NoteExporter(
             } catch (e: HqUnavailable) {
                 ExportState.Failed(note, format, "HQ is not running")
             }
-            state.update { s -> if (s.export is ExportState.Making) s.copy(export = next) else s }
+            _state.update { s -> if (s is ExportState.Making) next else s }
         }
     }
 
     /** Cancel while it is being made, or Close on any other step: back to the note. */
     fun close() {
         job?.cancel()
-        state.update { it.copy(export = null) }
+        _state.value = null
     }
 
     /** Back from a failure to the list of formats. */
-    fun again() = state.update { s -> s.export?.let { s.copy(export = ExportState.Choosing(it.note)) } ?: s }
+    fun again() = _state.update { s -> s?.let { ExportState.Choosing(it.note) } }
 
     private fun failed(format: ExportFormat) = "Could not make the ${format.word}. Try again."
 

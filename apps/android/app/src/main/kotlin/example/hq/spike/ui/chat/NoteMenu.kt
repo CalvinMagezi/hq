@@ -56,23 +56,41 @@ private val Small = HqType.Caption.copy(fontSize = 13.sp, lineHeight = 18.sp)
 private val MenuTop = 150.dp
 private val ExportTop = 70.dp
 
+/** What the note menu and the export steps can ask for; Chat and Notes each supply their own. */
+class NoteMenuActions(
+    val onClose: () -> Unit = {},
+    val onEdit: (() -> Unit)? = null,
+    val onTogglePin: () -> Unit = {},
+    val onAsk: () -> Unit = {},
+    val onExport: () -> Unit = {},
+    val onNotice: (String) -> Unit = {},
+)
+
+class ExportActions(
+    val onFormat: (ExportFormat) -> Unit = {},
+    val onClose: () -> Unit = {},
+    val onAgain: () -> Unit = {},
+    val onNotice: (String) -> Unit = {},
+)
+
 /** Everything you can do with the open note, in one place: pin, ask HQ, share, export, copy. Rename, move and delete wait for server routes. */
 @Composable
-fun NoteMenuSheet(sheet: NoteSheet, actions: ChatActions) {
+fun NoteMenuSheet(sheet: NoteSheet, actions: NoteMenuActions) {
     val copy = rememberCopier()
     val context = LocalContext.current
-    SheetFrame({ actions.onNoteMenu(false) }, top = MenuTop) {
+    SheetFrame(actions.onClose, top = MenuTop) {
         Column(Modifier.padding(start = 16.dp, end = 16.dp, bottom = 8.dp)) {
             Text(sheet.title, style = HqType.ScreenTitle, color = Mts.Ink, maxLines = 1)
             if (sheet.trail.isNotBlank()) Text(sheet.trail, style = Small, color = Mts.InkMuted)
         }
         Column(Modifier.verticalScroll(rememberScrollState())) {
+            actions.onEdit?.let { ActionRow(HqIcons.Edit, "Edit", null, { it() }, minHeight = ROW_HEIGHT) }
             ActionRow(HqIcons.Pin, if (sheet.pinned) "Unpin" else "Pin to top", null, { actions.onTogglePin() }, minHeight = ROW_HEIGHT)
-            ActionRow(HqIcons.Spark, "Ask HQ about this note", null, { actions.onNoteMenu(false); actions.onAskAboutNote(sheet.path) }, minHeight = ROW_HEIGHT)
-            ActionRow(HqIcons.Share, "Share", null, { actions.onNoteMenu(false); shareText(context, sheet) }, minHeight = ROW_HEIGHT)
-            ActionRow(HqIcons.Download, "Export as…", "PDF, Word, a picture and more", { actions.onExport() }, minHeight = ROW_HEIGHT)
-            ActionRow(HqIcons.Copy, "Copy path", null, { copy(sheet.path); actions.onNoteMenu(false); actions.onNotice("Copied the note path") }, minHeight = ROW_HEIGHT)
-            ActionRow(HqIcons.Copy, "Copy note text", null, { copy(NoteText.withoutFrontmatter(sheet.body)); actions.onNoteMenu(false); actions.onNotice("Copied") }, minHeight = ROW_HEIGHT)
+            ActionRow(HqIcons.Spark, "Ask HQ about this note", null, { actions.onClose(); actions.onAsk() }, minHeight = ROW_HEIGHT)
+            ActionRow(HqIcons.Share, "Share", null, { actions.onClose(); shareText(context, sheet) }, minHeight = ROW_HEIGHT)
+            ActionRow(HqIcons.Download, "Export as…", "PDF, Word, a picture and more", { actions.onClose(); actions.onExport() }, minHeight = ROW_HEIGHT)
+            ActionRow(HqIcons.Copy, "Copy path", null, { copy(sheet.path); actions.onClose(); actions.onNotice("Copied the note path") }, minHeight = ROW_HEIGHT)
+            ActionRow(HqIcons.Copy, "Copy note text", null, { copy(NoteText.withoutFrontmatter(sheet.body)); actions.onClose(); actions.onNotice("Copied") }, minHeight = ROW_HEIGHT)
         }
     }
 }
@@ -86,7 +104,7 @@ private fun shareText(context: Context, sheet: NoteSheet) {
 
 /** The export steps over the note: pick a format, wait with Cancel, then send or keep the file; a failure says what to do. */
 @Composable
-fun ExportOverlay(state: ExportState, actions: ChatActions) {
+fun ExportOverlay(state: ExportState, actions: ExportActions) {
     when (state) {
         is ExportState.Choosing -> ExportChooser(state, actions)
         is ExportState.Making -> MakingDialog(state, actions)
@@ -96,8 +114,8 @@ fun ExportOverlay(state: ExportState, actions: ChatActions) {
 }
 
 @Composable
-private fun ExportChooser(state: ExportState.Choosing, actions: ChatActions) {
-    SheetFrame(actions.onExportClose, top = ExportTop) {
+private fun ExportChooser(state: ExportState.Choosing, actions: ExportActions) {
+    SheetFrame(actions.onClose, top = ExportTop) {
         Column(Modifier.padding(start = 16.dp, end = 16.dp, bottom = 4.dp)) {
             Text("Export as", style = HqType.H2, color = Mts.Ink)
             Text(state.note.title, style = Small, color = Mts.InkMuted)
@@ -107,7 +125,7 @@ private fun ExportChooser(state: ExportState.Choosing, actions: ChatActions) {
                 val formats = ExportFormat.entries.filter { it.group == group }
                 if (group == ExportGroup.Tables && state.note.tables == 0) return@forEach
                 Text(group.label.uppercase(), style = HqType.Caption.copy(fontWeight = androidx.compose.ui.text.font.FontWeight.Bold, letterSpacing = 0.06.em), color = Mts.InkMuted, modifier = Modifier.padding(start = 16.dp, top = 10.dp, end = 16.dp, bottom = 2.dp))
-                formats.forEach { FormatRow(it) { actions.onExportFormat(it) } }
+                formats.forEach { FormatRow(it) { actions.onFormat(it) } }
             }
         }
     }
@@ -137,8 +155,8 @@ private fun Dialog(top: androidx.compose.ui.unit.Dp, onDismiss: () -> Unit, cont
 }
 
 @Composable
-private fun MakingDialog(state: ExportState.Making, actions: ChatActions) {
-    Dialog(DIALOG_TOP, actions.onExportClose) {
+private fun MakingDialog(state: ExportState.Making, actions: ExportActions) {
+    Dialog(DIALOG_TOP, actions.onClose) {
         Text("Making your ${state.format.word}…", style = HqType.H2, color = Mts.Ink, modifier = Modifier.padding(bottom = 12.dp))
         Row(Modifier.padding(bottom = 20.dp), horizontalArrangement = Arrangement.spacedBy(16.dp), verticalAlignment = Alignment.CenterVertically) {
             example.hq.spike.ui.chat.Spinner(28)
@@ -147,19 +165,19 @@ private fun MakingDialog(state: ExportState.Making, actions: ChatActions) {
                 style = HqType.BodySm, color = Mts.InkMuted,
             )
         }
-        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) { TextButton("Cancel", actions.onExportClose) }
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) { TextButton("Cancel", actions.onClose) }
     }
 }
 
 @Composable
-private fun FailedDialog(state: ExportState.Failed, actions: ChatActions) {
-    Dialog(DIALOG_TOP, actions.onExportClose) {
+private fun FailedDialog(state: ExportState.Failed, actions: ExportActions) {
+    Dialog(DIALOG_TOP, actions.onClose) {
         Text("Could not export", style = HqType.H2, color = Mts.Ink, modifier = Modifier.padding(bottom = 12.dp))
         Text(state.reason, style = HqType.BodySm, color = Mts.InkMuted, modifier = Modifier.padding(bottom = 20.dp))
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.End)) {
-            TextButton("Close", actions.onExportClose)
+            TextButton("Close", actions.onClose)
             Box(
-                Modifier.heightIn(min = 48.dp).clip(CircleShape).background(Mts.BrandGreen).clickable(role = Role.Button) { actions.onExportFormat(state.format) }.padding(horizontal = 24.dp),
+                Modifier.heightIn(min = 48.dp).clip(CircleShape).background(Mts.BrandGreen).clickable(role = Role.Button) { actions.onFormat(state.format) }.padding(horizontal = 24.dp),
                 contentAlignment = Alignment.Center,
             ) { Text("Try again", style = HqType.BodySmBold, color = Mts.OnGreen) }
         }
@@ -177,7 +195,7 @@ private fun TextButton(label: String, onClick: () -> Unit) {
 
 /** The finished file: Share is the green button, Save to Files opens the system file picker, Open shows it in a viewer. */
 @Composable
-private fun ReadySheet(state: ExportState.Ready, actions: ChatActions) {
+private fun ReadySheet(state: ExportState.Ready, actions: ExportActions) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     val save = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument(state.mime.ifBlank { "application/octet-stream" })) { uri ->
@@ -189,7 +207,7 @@ private fun ReadySheet(state: ExportState.Ready, actions: ChatActions) {
         }
     }
     val kind = Attachment(state.name, "", state.mime, state.size)
-    SheetFrame(actions.onExportClose, top = null) {
+    SheetFrame(actions.onClose, top = null) {
         Row(Modifier.padding(start = 16.dp, end = 16.dp, bottom = 8.dp), horizontalArrangement = Arrangement.spacedBy(12.dp), verticalAlignment = Alignment.CenterVertically) {
             Box(Modifier.size(48.dp).background(Mts.Surface200, RoundedCornerShape(10.dp)), contentAlignment = Alignment.Center) { Icon(HqIcons.File, null, Modifier.size(26.dp), tint = Mts.Ink) }
             Column {
@@ -225,12 +243,12 @@ private fun WideButton(icon: ImageVector, label: String, primary: Boolean, onCli
 
 private fun uriOf(context: Context, state: ExportState.Ready) = FileProvider.getUriForFile(context, "${context.packageName}.files", File(state.file))
 
-private fun shareFile(context: Context, state: ExportState.Ready, actions: ChatActions) {
+private fun shareFile(context: Context, state: ExportState.Ready, actions: ExportActions) {
     val send = Intent(Intent.ACTION_SEND).setType(state.mime.ifBlank { "*/*" }).putExtra(Intent.EXTRA_STREAM, uriOf(context, state)).addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
     try { context.startActivity(Intent.createChooser(send, null)) } catch (e: ActivityNotFoundException) { actions.onNotice("No app on this phone can take that file.") }
 }
 
-private fun viewFile(context: Context, state: ExportState.Ready, actions: ChatActions) {
+private fun viewFile(context: Context, state: ExportState.Ready, actions: ExportActions) {
     val view = Intent(Intent.ACTION_VIEW).setDataAndType(uriOf(context, state), state.mime.ifBlank { "*/*" }).addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
     try { context.startActivity(view) } catch (e: ActivityNotFoundException) { actions.onNotice("No app on this phone can open that file.") }
 }
