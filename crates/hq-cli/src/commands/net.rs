@@ -54,9 +54,9 @@ pub enum PeerAction {
         /// Also make a preshared key for this device (shown once, in the config)
         #[arg(long)]
         psk: bool,
-        /// Seconds between the keepalive packets the device sends; 0 for none. Default: 25 for a
-        /// laptop, none for a phone. A phone that other devices must reach (HQ running on it)
-        /// needs 25 or the carrier closes the path; it costs battery
+        /// Seconds between the keepalive packets the device sends; 0 for none, or 10 to 300.
+        /// Default: 25 for a laptop, none for a phone. A phone that other devices must reach (HQ
+        /// running on it) needs 25 or the carrier closes the path; it costs battery
         #[arg(long, value_name = "SECONDS")]
         keepalive: Option<u16>,
         /// Do not print the QR code

@@ -1263,7 +1263,7 @@ mod net_args_tests {
     use clap::Parser;
 
     #[test]
-    fn peer_add_takes_a_keepalive_of_zero_to_65535_seconds() {
+    fn peer_add_parses_a_keepalive_as_whole_seconds_and_leaves_the_range_to_add_peer() {
         let parse = |keepalive: &str| {
             let argv = [
                 "hq",

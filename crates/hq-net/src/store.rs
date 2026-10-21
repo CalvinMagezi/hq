@@ -628,6 +628,12 @@ pub fn valid_label(label: &str) -> bool {
         && chars.all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-' || c == '_')
 }
 
+/// The range `--keepalive` accepts besides 0. Below the floor a device would wake the radio
+/// constantly; above the ceiling the carrier closes the path first. `hq-tunnel` refuses any
+/// other value in a join text, so the two must agree.
+pub const KEEPALIVE_MIN_SECS: u16 = 10;
+pub const KEEPALIVE_MAX_SECS: u16 = 300;
+
 pub struct NewPeer<'a> {
     pub label: &'a str,
     pub public_key: &'a str,
@@ -651,6 +657,14 @@ pub fn add_peer(
         return fail(
             "a label is 1 to 32 characters: lowercase letters, digits, - and _, starting with a letter or digit",
         );
+    }
+    if let Some(secs) = new.keepalive
+        && secs != 0
+        && !(KEEPALIVE_MIN_SECS..=KEEPALIVE_MAX_SECS).contains(&secs)
+    {
+        return fail(format!(
+            "--keepalive is 0 (none) or {KEEPALIVE_MIN_SECS} to {KEEPALIVE_MAX_SECS} seconds"
+        ));
     }
     if !key::is_usable(new.public_key) {
         return fail("--pubkey is not a WireGuard public key (44 characters of base64)");
@@ -1127,6 +1141,29 @@ pub(crate) mod tests {
         ] {
             write_private(&store, PEERS_FILE, &format!("[[peer]]\n{entry}{bad}"));
             assert!(store.load_peers().is_err(), "{bad}");
+        }
+    }
+
+    #[test]
+    fn a_keepalive_outside_the_range_is_refused_before_anything_is_stored() {
+        let net = sample_net();
+        let key = device_key();
+        for secs in [1, KEEPALIVE_MIN_SECS - 1, KEEPALIVE_MAX_SECS + 1, u16::MAX] {
+            let mut peers = PeersFile::default();
+            let asked = NewPeer {
+                keepalive: Some(secs),
+                ..request("pixel", &key, Kind::Phone)
+            };
+            let err = add_peer(&net, &mut peers, &[], asked).unwrap_err();
+            assert!(err.to_string().contains("--keepalive"), "{secs}: {err}");
+            assert!(peers.peer.is_empty());
+        }
+        for secs in [0, KEEPALIVE_MIN_SECS, 25, KEEPALIVE_MAX_SECS] {
+            let asked = NewPeer {
+                keepalive: Some(secs),
+                ..request("pixel", &key, Kind::Phone)
+            };
+            add_peer(&net, &mut PeersFile::default(), &[], asked).unwrap();
         }
     }
 

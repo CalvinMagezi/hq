@@ -161,8 +161,8 @@ with `--keepalive`:
 hq net peer add pixel --pubkey <public key from the app> --kind phone --keepalive 25
 ```
 
-`--keepalive <seconds>` sets the interval for any device, and `--keepalive 0` turns the laptop's
-default off. It applies when the device is added: the printed config carries it, and the phone's
+`--keepalive <seconds>` sets the interval for any device (10 to 300; the in-app tunnel refuses a join
+text outside that range), and `--keepalive 0` turns the laptop's default off. It applies when the device is added: the printed config carries it, and the phone's
 app has to have it entered ("Persistent keepalive" on the hub peer). For a device that already
 exists, set it in its app; there is no command to change it afterwards. `hq net peer list` shows
 the value in the config `hq net` printed, not what the device runs. The setting changes only that
