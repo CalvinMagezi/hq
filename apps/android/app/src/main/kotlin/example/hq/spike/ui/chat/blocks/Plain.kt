@@ -19,8 +19,18 @@ object Plain {
         m.groups[1]?.value ?: m.groups[2]?.value ?: (m.groups[4]?.value ?: m.groups[3]?.value) ?: m.groups[5]?.value.orEmpty()
     }.replace(HEADING, "").trim()
 
-    /** [strip], on a single line: a snippet whose text had line breaks would otherwise leave a lone "…" on a line of its own. */
-    fun oneLine(text: String): String = strip(text).replace(WHITESPACE, " ")
+    /**
+     * [strip], on a single line: a snippet whose text had line breaks would otherwise leave a lone "…" on a line of its own.
+     * A break between a line that ends in a word and a line that starts a capital is a sentence break (a heading or a list
+     * item had no full stop), so it is joined with one; any other break is joined with a space.
+     */
+    fun oneLine(text: String): String {
+        val lines = strip(text).lines().map { it.replace(WHITESPACE, " ").trim() }.filter { it.isNotEmpty() }
+        return lines.foldIndexed("") { i, acc, line ->
+            val sentenceBreak = i > 0 && acc.last().isLetterOrDigit() && line.first().isUpperCase()
+            if (i == 0) line else acc + (if (sentenceBreak) ". " else " ") + line
+        }
+    }
 
     /** A table cell: bold and code keep their look, links and wikilinks show only their words. */
     fun cell(text: String): AnnotatedString = buildAnnotatedString {

@@ -117,7 +117,7 @@ object TasksLogic {
                 dueWords(t.dueDate, today)?.let { parts += listOf(Run(it)) }
                 parse(t.startDate)?.takeIf { it.isAfter(today) }?.let { parts += listOf(Run(if (it == today.plusDays(1)) "starts tomorrow" else "starts " + it.format(DateTimeFormatter.ofPattern("EEE", Locale.getDefault())))) }
                 startedWords(t, today)?.let { parts += listOf(Run(it)) }
-                if (t.subtaskCount > 0) parts += listOf(Run("${t.subtaskDone} of ${t.subtaskCount} steps done"))
+                if (t.subtaskCount > 0) parts += listOf(Run("${t.subtaskDone} of ${t.subtaskCount} steps${NBSP}done"))
                 if (t.assignees.isNotEmpty() && t.status == "to_do") parts += listOf(Run("for ${t.assignees.first()}"))
                 parts.flatMapIndexed { i, p -> if (i == 0) p else listOf(sep) + p }
             }

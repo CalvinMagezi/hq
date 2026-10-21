@@ -58,7 +58,7 @@ class TasksLogicTest {
 
     @Test fun anOrdinaryRowShowsPriorityDueAndSteps() {
         val m = TasksLogic.meta(task("c", "in_progress", priority = "high", due = "2026-10-24", steps = 1 to 3), today)
-        assertEquals("High · due Saturday · 1 of 3 steps done", m.joinToString("") { it.text })
+        assertEquals("High · due Saturday · 1 of 3 steps\u00A0done", m.joinToString("") { it.text })
         assertEquals("due Oct 30", TasksLogic.dueWords("2026-10-30", today))
         assertEquals("due today", TasksLogic.dueWords("2026-10-21", today))
         assertNull(TasksLogic.dueWords(null, today))

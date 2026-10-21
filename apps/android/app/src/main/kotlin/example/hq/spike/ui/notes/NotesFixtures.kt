@@ -45,7 +45,7 @@ fun notesFixture(name: String?): NotesUi? {
     val longSheet = NoteSheet("Notebooks/Projects/Agent-HQ/Build-Plan-And-Cutover.md", "Build-Plan-And-Cutover", "Projects › Agent-HQ", longNote(), false, null)
     val longReader = ReaderPhase.Ready(longSheet, "edited 33m ago")
     val realHits = (1..13).map { i ->
-        SearchHit("Notebooks/Projects/Agent-HQ/Design-Note-$i.md", "Design-Note-$i", "Projects", if (i % 2 == 0) "…1. **What it is.** A userspace tunnel that runs inside the app, configured by `hq net`, with [[Private-Network-Plan]] as the source…" else "…a plan for the tunnel, see [the design](Design.md) and the **first test round** results…")
+        SearchHit("Notebooks/Projects/Agent-HQ/Design-Note-$i.md", "Design-Note-$i", "Projects", if (i == 1) "…reuse what is already built\nThe tunnel hub (hq0, hq net, the root applier, ufw) stays on the current droplet and carries the traffic until the cutover…" else if (i % 2 == 0) "…1. **What it is.** A userspace tunnel that runs inside the app, configured by `hq net`, with [[Private-Network-Plan]] as the source…" else "…a plan for the tunnel, see [the design](Design.md) and the **first test round** results…")
     }
     return when (name) {
         "n-real-reader" -> home.copy(stack = listOf(NotesRoute.Reader(longSheet.path)), reader = longReader)

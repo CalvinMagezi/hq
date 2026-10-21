@@ -52,4 +52,20 @@ class PlainTest {
         assertEquals("reuse what is already built ...", Plain.oneLine("reuse what is\n  already built\n..."))
         assertEquals("a tunnel inside the app", Plain.oneLine("**a** tunnel\ninside the app"))
     }
+
+    @Test fun aBreakBetweenAWordAndACapitalIsASentenceBreak() {
+        assertEquals("reuse what is already built. The WireGuard hub stays", Plain.oneLine("reuse what is already built\nThe WireGuard hub stays"))
+        assertEquals("1. What it is. A userspace tunnel", Plain.oneLine("1. What it is.\nA userspace tunnel"))
+    }
+
+    @Test fun aBreakInsideASentenceIsOnlyASpace() {
+        assertEquals("runs inside the app, configured by hq net", Plain.oneLine("runs inside the app,\nconfigured by hq net"))
+        assertEquals("the app on the phone", Plain.oneLine("the app\non the phone"))
+        assertEquals("see the plan: Private-Network-Plan", Plain.oneLine("see the plan:\nPrivate-Network-Plan"))
+    }
+
+    @Test fun aSnippetWithNoBreakIsUntouched() {
+        assertEquals("a plan for the tunnel", Plain.oneLine("a plan for the tunnel"))
+        assertEquals("", Plain.oneLine("  \n "))
+    }
 }
