@@ -47,8 +47,6 @@ data class TasksUi(
     val tab: TaskTab = TaskTab.Today,
     val tasks: List<TaskItem> = emptyList(),
     val expanded: Set<String> = emptySet(),
-    /** A task to open once the list has it: asked for from the Inbox before the list was loaded. */
-    val pendingRef: String? = null,
     val hidden: Set<String> = emptySet(),
     val detail: TaskDetail? = null,
     val quick: QuickState? = null,
@@ -124,11 +122,6 @@ class TasksViewModel(app: Application) : AndroidViewModel(app) {
         val tasks = try { client.tasks() } catch (e: HqUnavailable) { null }
         if (frozen) return
         _state.update { if (tasks == null) it.copy(loaded = true, offline = true) else it.copy(loaded = true, offline = false, tasks = tasks, hidden = emptySet(), today = LocalDate.now()) }
-        val ref = _state.value.pendingRef
-        if (ref != null && tasks != null) {
-            _state.update { it.copy(pendingRef = null) }
-            tasks.firstOrNull { it.displayId == ref }?.let(::open) ?: say("Could not find $ref in your tasks.")
-        }
     }
 
     private fun detail(change: (TaskDetail) -> TaskDetail) = _state.update { s -> s.detail?.let { s.copy(detail = change(it)) } ?: s }
@@ -185,12 +178,15 @@ class TasksViewModel(app: Application) : AndroidViewModel(app) {
         viewModelScope.launch { try { action() } catch (e: HqUnavailable) { say("Could not undo that. HQ is not answering.") } }
     }
 
-    /** Opens the task with this short id; if the list does not have it yet, it is looked for after the next load, and said so if missing. */
-    fun openRef(ref: String) {
-        val known = _state.value.tasks.firstOrNull { it.displayId == ref }
-        if (known != null) { open(known); return }
-        _state.update { it.copy(pendingRef = ref) }
-        viewModelScope.launch { refresh() }
+    /**
+     * Opens the task with this short id over whatever is showing, so Back returns there. If the list does not have it
+     * (not loaded yet, a sub-task, offline) it is looked for once more, and [onMissing] is called if it is still not there.
+     */
+    fun openRef(ref: String, onMissing: () -> Unit) {
+        viewModelScope.launch {
+            val task = _state.value.tasks.firstOrNull { it.displayId == ref } ?: run { refresh(); _state.value.tasks.firstOrNull { it.displayId == ref } }
+            if (task != null) open(task) else { say("Could not find $ref in your tasks."); onMissing() }
+        }
     }
 
     private fun open(t: TaskItem) {

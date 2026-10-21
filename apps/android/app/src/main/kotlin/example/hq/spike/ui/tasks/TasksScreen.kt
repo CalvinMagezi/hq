@@ -56,6 +56,7 @@ import kotlinx.coroutines.delay
 
 private const val LINE_MS = 4_000L
 private const val TITLE_LINES = 2
+private const val META_LINES = 2
 
 /** The Tasks place: Today, Upcoming and All, with a checkbox on each row and swipes to finish or move. */
 @Composable
@@ -157,7 +158,7 @@ private fun TaskRow(t: TaskItem, today: LocalDate, actions: TasksActions) {
                 val meta = TasksLogic.meta(t, today)
                 if (meta.isNotEmpty()) Text(
                     buildAnnotatedString { meta.forEach { r -> withStyle(SpanStyle(color = if (r.amber) Mts.Amber else Mts.InkMuted, fontWeight = if (r.bold) FontWeight.Bold else FontWeight.Normal)) { append(r.text) } } },
-                    style = HqType.BodySm,
+                    style = HqType.BodySm, maxLines = META_LINES, overflow = TextOverflow.Ellipsis,
                 )
             }
             if (t.status == "ready_for_review") Box(

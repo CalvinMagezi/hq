@@ -28,6 +28,7 @@ import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
+import example.hq.spike.ui.chat.blocks.Block
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -172,12 +173,17 @@ private fun ReaderReady(phase: ReaderPhase.Ready, actions: NotesActions) {
             IconAction(HqIcons.MoreVertical, "More", iconSize = 24.dp) { actions.onMenu(true) }
         }
         // Lazy, so a long note opens by drawing the screenful in view, not every block of it.
-        SelectionContainer(Modifier.weight(1f)) {
-            LazyColumn(Modifier.fillMaxSize(), contentPadding = androidx.compose.foundation.layout.PaddingValues(start = 16.dp, top = 16.dp, end = 16.dp, bottom = 32.dp)) {
-                itemsIndexed(blocks) { i, block -> Box(Modifier.padding(top = blockGap(blocks, i))) { BlockView(block, handlers) } }
-                if (note.truncated) item { Text("This note is long. Only the start is shown.", style = HqType.BodySm, color = Mts.InkMuted, modifier = Modifier.padding(top = 12.dp)) }
-            }
-        }
+        SelectionContainer(Modifier.weight(1f)) { NoteBody(blocks, handlers, note.truncated) }
+    }
+}
+
+private val ReaderPadding = androidx.compose.foundation.layout.PaddingValues(start = 16.dp, top = 16.dp, end = 16.dp, bottom = 32.dp)
+
+@Composable
+private fun NoteBody(blocks: List<Block>, handlers: BlockActions, truncated: Boolean) {
+    LazyColumn(Modifier.fillMaxSize(), contentPadding = ReaderPadding) {
+        itemsIndexed(blocks) { i, block -> Box(Modifier.padding(top = blockGap(blocks, i))) { BlockView(block, handlers) } }
+        if (truncated) item { Text("This note is long. Only the start is shown.", style = HqType.BodySm, color = Mts.InkMuted, modifier = Modifier.padding(top = 12.dp)) }
     }
 }
 
@@ -334,7 +340,7 @@ private fun HitRow(hit: SearchHit, query: String, onClick: () -> Unit) {
         }
         val trail = NoteRefs.folderTrail(hit.path)
         if (trail.isNotBlank()) Text(trail, style = SmallText, color = Mts.BrandBlue, maxLines = 1, overflow = TextOverflow.Ellipsis)
-        if (hit.snippet.isNotBlank()) Text(marked(Plain.strip(hit.snippet), query), style = HqType.BodySm, color = Mts.InkMuted, maxLines = 2, overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(top = 2.dp))
+        if (hit.snippet.isNotBlank()) Text(marked(Plain.oneLine(hit.snippet), query), style = HqType.BodySm, color = Mts.InkMuted, maxLines = 2, overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(top = 2.dp))
     }
 }
 

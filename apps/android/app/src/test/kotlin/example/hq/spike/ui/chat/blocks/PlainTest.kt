@@ -47,4 +47,9 @@ class PlainTest {
     @Test fun codeNeverSpansLines() {
         assertEquals("a ` b\nc ` d", Plain.strip("a ` b\nc ` d"))
     }
+
+    @Test fun aSnippetWithLineBreaksIsOneLine() {
+        assertEquals("reuse what is already built ...", Plain.oneLine("reuse what is\n  already built\n..."))
+        assertEquals("a tunnel inside the app", Plain.oneLine("**a** tunnel\ninside the app"))
+    }
 }

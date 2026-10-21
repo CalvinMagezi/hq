@@ -137,13 +137,12 @@ class ShellActivity : ComponentActivity() {
         InboxScreen(inboxState, inbox.actions, onTakeLook = { card -> openFromInbox(card, go) })
     }
 
-    /** "Check it" on a task waiting for review opens that task; any other card sends the owner to Helpers. */
+    /** "Check it" on a task waiting for review opens that task over the Inbox; any other card sends the owner to Helpers. */
     private fun openFromInbox(card: InboxCard, go: (Place) -> Unit) {
-        if (card.kind == CardKind.TaskReview) {
-            go(Place.Tasks)
-            card.taskRef?.let(tasks::openRef)
-        } else {
-            go(Place.Helpers)
+        when {
+            card.kind != CardKind.TaskReview -> go(Place.Helpers)
+            card.taskRef == null -> go(Place.Tasks)
+            else -> tasks.openRef(card.taskRef) { go(Place.Tasks) }
         }
     }
 

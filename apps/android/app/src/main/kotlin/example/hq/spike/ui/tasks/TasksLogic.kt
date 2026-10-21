@@ -25,6 +25,8 @@ data class Run(val text: String, val bold: Boolean = false, val amber: Boolean =
 object TasksLogic {
     private const val SOON_DAYS = 7L
     const val WAITING_PREVIEW = 5
+    /** A no-break space keeps "10 d ago" together when a row wraps. */
+    private const val NBSP = '\u00A0'
     private val PRIORITY_ORDER = listOf("urgent", "high", "normal", "low")
 
     fun parse(date: String?): LocalDate? = try { date?.let(LocalDate::parse) } catch (e: DateTimeParseException) { null }
@@ -91,7 +93,9 @@ object TasksLogic {
     /** Why a to-do is on the Today list when it is not due today: it starts today, or it started earlier and is still open. */
     fun startedWords(t: TaskItem, today: LocalDate): String? {
         val start = parse(t.startDate) ?: return null
-        if (t.status != "to_do" || parse(t.dueDate) == today) return null
+        val due = parse(t.dueDate)
+        // A task that is already due or overdue says so in its due words; "started" would only repeat it.
+        if (t.status != "to_do" || (due != null && !due.isAfter(today))) return null
         return when {
             start == today -> "starts today"
             start.isBefore(today) -> "started " + start.format(DateTimeFormatter.ofPattern("MMM d", Locale.getDefault()))
@@ -106,7 +110,7 @@ object TasksLogic {
         val sep = Run(" · ")
         return when (t.status) {
             "blocked" -> listOf(Run("Stuck", bold = true, amber = true)) + listOfNotNull(t.blockedReason?.takeIf { it.isNotBlank() }?.let { listOf(sep, Run(it)) }).flatten()
-            "ready_for_review" -> listOf(Run("Ready to check", bold = true, amber = true)) + (readyAgo(t.readyAt, now)?.let { listOf(sep, Run("hq finished $it")) } ?: emptyList())
+            "ready_for_review" -> listOf(Run("Ready to check", bold = true, amber = true)) + (readyAgo(t.readyAt, now)?.let { listOf(sep, Run("hq finished " + it.replace(' ', NBSP))) } ?: emptyList())
             else -> {
                 val parts = mutableListOf<List<Run>>()
                 priorityWords(t.priority)?.let { parts += listOf(Run(it, bold = true)) }

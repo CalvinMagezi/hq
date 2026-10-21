@@ -53,7 +53,7 @@ class TasksLogicTest {
         assertEquals("Stuck · needs a reboot window", stuck.joinToString("") { it.text })
         assertTrue(stuck[0].amber && stuck[0].bold)
         val ready = TasksLogic.meta(task("b", "ready_for_review", readyAt = "2026-10-21 09:00:00"), today, LocalDateTime.of(2026, 10, 21, 12, 0))
-        assertEquals("Ready to check · hq finished 3 h ago", ready.joinToString("") { it.text })
+        assertEquals("Ready to check · hq finished 3\u00A0h\u00A0ago", ready.joinToString("") { it.text })
     }
 
     @Test fun anOrdinaryRowShowsPriorityDueAndSteps() {
@@ -97,6 +97,8 @@ class TasksLogicTest {
         assertNull(TasksLogic.startedWords(task("d", "in_progress", start = "2026-10-01"), today))
         assertNull(TasksLogic.startedWords(task("e", start = "2026-10-30"), today))
         assertNull(TasksLogic.startedWords(task("f"), today))
+        // Overdue says so already in the due words.
+        assertNull(TasksLogic.startedWords(task("g", start = "2026-10-12", due = "2026-10-14"), today))
     }
 
     @Test fun theRowMetaCarriesThatReason() {
