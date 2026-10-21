@@ -1,3 +1,9 @@
 debug.keystore
 *.apk
 *.idsig
+
+build/
+.gradle/
+local.properties
+*.hprof
+.kotlin/

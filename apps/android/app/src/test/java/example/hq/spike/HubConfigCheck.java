@@ -7,7 +7,7 @@ import java.nio.file.Path;
 import java.util.LinkedHashMap;
 import java.util.Map;
 
-/** Run by check.sh with assertions on: java -ea. Exits non-zero on the first failed check. */
+/** The checks behind HubConfigTest; assertions must be on (Gradle tests enable them). */
 public class HubConfigCheck {
     private static final String MARK = "SECRETVALUE";
 

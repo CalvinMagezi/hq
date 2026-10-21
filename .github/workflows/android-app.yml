@@ -1,8 +1,8 @@
 name: Android app
 
-# Compiles the hub app's Java sources against an Android platform and runs the checks that need no
-# device. The APK itself is built by hand (apps/android/README.md) because it packages binaries that
-# android.yml builds.
+# Builds the hub app with Gradle (no hq inside), runs its unit tests and the NewApi lint check that
+# keeps post-Android-8 APIs out. The phone APK is built by hand (apps/android/README.md) because it
+# packages binaries that android.yml builds.
 on:
   pull_request:
     branches: [main]
@@ -21,7 +21,7 @@ permissions:
 
 jobs:
   sources:
-    name: Compile the app sources and run the checks
+    name: Build, test and lint the app
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
@@ -34,7 +34,13 @@ jobs:
           sdk="${ANDROID_HOME:-$ANDROID_SDK_ROOT}"
           yes | "$sdk/cmdline-tools/latest/bin/sdkmanager" --licenses > /dev/null || true
           "$sdk/cmdline-tools/latest/bin/sdkmanager" "platforms;android-36"
-          echo "ANDROID_JAR=$sdk/platforms/android-36/android.jar" >> "$GITHUB_ENV"
 
-      - name: Compile and check
-        run: bash apps/android/check.sh
+      - name: Check the Gradle wrapper jar
+        # The sha256 Gradle publishes for gradle-8.14.3-wrapper.jar; bump it with the wrapper version.
+        run: echo "7d3a4ac4de1c32b59bc6a4eb8ecb8e612ccd0cf1ae1e99f66902da64df296172  apps/android/gradle/wrapper/gradle-wrapper.jar" | sha256sum -c -
+
+      - name: Build, test and lint
+        working-directory: apps/android
+        run: |
+          export JAVA_HOME="$JAVA_HOME_21_X64"
+          ./gradlew :app:assembleDebug :app:testDebugUnitTest :app:lintDebug --no-daemon --console=plain

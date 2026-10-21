@@ -5,18 +5,34 @@ foreground service runs both as children of the app and restarts them with backo
 only when `files/Caddyfile` exists (see `Caddyfile.example`); `hq` reads its settings from
 `files/hqhome/config.yaml`.
 
-Build (JDK 17+, Android SDK build-tools 36, platform android-36):
+Build (Android Studio's JDK or any JDK 17+, Android SDK with platform android-36). Gradle wraps itself:
 
 ```bash
-export JAVA_HOME=<a JDK 17 or newer>
-DEBUGGABLE=1 apps/android/build.sh <hq aarch64-linux-android> <apps/hq-web/dist/client> <caddy linux arm64> out.apk
+export JAVA_HOME=<a JDK 17 or newer> ANDROID_HOME=<the Android SDK>
+cd apps/android
+./gradlew :app:assembleDebug :app:testDebugUnitTest :app:lintDebug      # what CI runs; no hq inside
+./gradlew :app:assembleDebug \
+  -Phq.bin=<hq aarch64-linux-android> -Phq.caddy=<caddy linux arm64> \
+  -Phq.web=<apps/hq-web/dist/client> -Phq.keystore=<the signing key>      # the APK for a phone
 ```
 
-`DEBUGGABLE=1` lets `adb shell run-as` place certificates, the Caddyfile and a restored vault in
-the app's private directory. Build without it for the version that stays on the phone; installing
-it over the debuggable one with `adb install -r` (same signing key) keeps the data and closes
-`run-as`. The first build creates a signing key at `apps/android/debug.keystore` (ignored by git), or at
-`$KEYSTORE` if set. Keep that file: only the same key can update the installed app.
+All four `-P` paths must be absolute and must exist, and they come together: the build stops if one is
+missing or wrong, so it cannot produce an APK without hq or signed with the wrong key. Put them in
+`~/.gradle/gradle.properties` if you build often; never in the repository.
+The APK is `app/build/outputs/apk/debug/app-debug.apk`. It is a debug build on purpose: the debuggable
+flag lets `adb shell run-as` place certificates, the Caddyfile and a restored vault in the app's
+private directory. The cost is that anyone with `adb` access to an unlocked phone can run as the app, so
+keep USB debugging off when you are not using it; a non-debuggable build comes with release work. Release signing, the final package id and an update channel are separate work
+(PERSONAL-INBOX-064).
+
+**Do not change the id or the key.** The package id stays `example.hq.spike` and the APK must be signed
+with the key the installed app was signed with (`-Phq.keystore`, alias `debug`): only an update with the
+same id and the same signature keeps the vault, the Keystore key and the signed-in sessions, and
+uninstalling deletes all three. **Keep the key file and back it up off this machine**: if it is lost, the
+phone can only be moved to a new key by uninstalling, which deletes its data. Keep `versionCode` the same
+or higher. Install with `adb install -r`
+only. Without `-Phq.keystore` Gradle signs with its own debug key, which is fine for CI and for a
+throwaway emulator but cannot update a phone that already runs the app.
 
 ## Name, icon and notifications
 
@@ -69,9 +85,8 @@ logcat -s HQHUB` shows `hq mode`. Do that
 only on one machine at a time: a second daemon on a copy of the same data would poll the same bots
 and fire the same schedules.
 
-`check.sh` runs the parsing and file checks on a plain JDK. The app is compiled with `javac --release 8`,
-so a Java 9+ API (collection factories, `String.repeat`, `Path.of`, ...) fails the build instead of
-crashing Android 8 to 10. Set `ANDROID_JAR` to also compile every source against that platform's
-jar. That finds a misspelled Android API but not one added after SDK 26, the minimum. CI does both.
-The service and the Keystore code have no automated test; the checks cover the logic moved into
-`HubConfig`.
+`./gradlew :app:testDebugUnitTest` runs the parsing and file checks (`HubConfigCheck`, wrapped in a JUnit
+test). `:app:lintDebug` runs Android Lint's `NewApi` check against `minSdk` 26, so a call to an Android
+or Java API added after Android 8 fails the build instead of crashing Android 8 to 10 (APIs that D8
+backports, such as `List.of` and `String.repeat`, are fine). CI does both. The service and the Keystore code have no automated
+test; the checks cover the logic moved into `HubConfig`.
