@@ -214,6 +214,77 @@ class HqClient(private val token: () -> String, private val base: String = LOCAL
         send(authed("/api/harness-sessions/${java.net.URLEncoder.encode(sessionId, "UTF-8")}/send").post(JSONObject().put("keys", JSONArray(keys)).toString().toRequestBody("application/json".toMediaType())).build()) { }
     }
 
+    /** A helper (a coding agent in a terminal on one of the owner's computers), as the list route sends it. */
+    data class HelperRow(
+        val id: String,
+        val harness: String,
+        val label: String,
+        val host: String,
+        val cwd: String,
+        val status: String,
+        val agentStatus: String,
+        val lastSeenAt: String,
+        val createdAt: String,
+        val goal: String?,
+        val taskTitle: String?,
+        /** Null when the computer did not answer, so nothing is known about the agent. */
+        val alive: Boolean?,
+        val reachable: Boolean,
+        val detail: String?,
+        val archived: Boolean,
+    )
+
+    data class HelperHost(val name: String, val reachable: Boolean, val error: String?)
+
+    /** Every helper, newest first, including stopped ones. */
+    suspend fun helpers(): List<HelperRow> = send(authed("/api/harness-sessions").build()) { text ->
+        JSONObject(text).optJSONArray("sessions").objects().map { o ->
+            HelperRow(
+                o.getString("id"), o.optString("harness", ""), o.optString("label", ""), o.optString("host", ""), o.optString("cwd", ""),
+                o.optString("status", ""), o.optString("agent_status", ""), o.optString("last_seen_at", ""), o.optString("created_at", ""),
+                o.optStringOrNull("goal"), o.optJSONObject("task")?.optStringOrNull("title"),
+                if (o.isNull("alive") || !o.has("alive")) null else o.optBoolean("alive"),
+                o.optBoolean("reachable", true), o.optStringOrNull("detail"), o.optBoolean("archived", false),
+            )
+        }
+    }
+
+    /** What a helper's terminal shows: its last lines, and whether they were read from the live terminal or are an old snapshot. */
+    data class HelperScreen(val lines: List<String>, val live: Boolean)
+
+    suspend fun helperScreen(id: String, lines: Int = SCREEN_LINES): HelperScreen =
+        send(authed("/api/harness-sessions/${java.net.URLEncoder.encode(id, "UTF-8")}/screen?lines=$lines").build()) {
+            val o = JSONObject(it)
+            HelperScreen(o.optJSONArray("lines").strings(), o.optString("source", "live") == "live")
+        }
+
+    /** Types a line into a helper. 409 means it is waiting at a prompt and must be answered there first. */
+    suspend fun sendHelperText(id: String, text: String) {
+        send(authed("/api/harness-sessions/${java.net.URLEncoder.encode(id, "UTF-8")}/send").post(JSONObject().put("text", text).toString().toRequestBody("application/json".toMediaType())).build()) { }
+    }
+
+    suspend fun stopHelper(id: String) {
+        send(authed("/api/harness-sessions/${java.net.URLEncoder.encode(id, "UTF-8")}/stop").post(EMPTY_JSON).build()) { }
+    }
+
+    suspend fun renameHelper(id: String, label: String) {
+        send(authed("/api/harness-sessions/${java.net.URLEncoder.encode(id, "UTF-8")}/rename").post(JSONObject().put("label", label).toString().toRequestBody("application/json".toMediaType())).build()) { }
+    }
+
+    /** Starts a helper in a new folder on [host], given its first instruction; returns the new session's id. */
+    suspend fun startHelper(harness: String, host: String, prompt: String, label: String): String =
+        send(
+            authed("/api/harness-sessions").post(JSONObject().put("harness", harness).put("host", host).put("prompt", prompt).put("label", label).toString().toRequestBody("application/json".toMediaType())).build(),
+        ) { JSONObject(it).getString("session_id") }
+
+    /** The computers helpers can run on, and whether each answered. */
+    suspend fun helperHosts(): List<HelperHost> = send(authed("/api/workbench/hosts").build()) { text ->
+        JSONObject(text).optJSONArray("hosts").objects().map { HelperHost(it.getString("host"), it.optBoolean("reachable", false), it.optStringOrNull("error")) }
+    }
+
+    /** A read-only JSON route as it is, for the Settings pages that only show what the server says. */
+    suspend fun json(path: String): JSONObject = send(authed(path).build()) { JSONObject(it) }
+
     /** Notes in a list: path, title, a short preview, when it changed and whether it is pinned. */
     data class NoteItem(val path: String, val title: String, val preview: String, val mtime: String, val pinned: Boolean)
 
@@ -356,6 +427,7 @@ class HqClient(private val token: () -> String, private val base: String = LOCAL
         private const val THREAD_PAGE = 50
         private const val PICKER_PAGE = 20
         private const val TASK_PAGE = 500
+        private const val SCREEN_LINES = 80
         private const val UPLOAD_CHUNK = 64 * 1024
         const val MESSAGE_PAGE = 100
         private val EMPTY_JSON = "{}".toRequestBody("application/json".toMediaType())

@@ -1,0 +1,217 @@
+package example.hq.spike.ui.settings
+
+import java.time.Duration
+import java.time.Instant
+import java.time.format.DateTimeParseException
+import org.json.JSONArray
+import org.json.JSONObject
+
+/** What each Settings route answered; a null is a route that did not answer, so its rows say so instead of guessing. */
+data class SettingsSnapshot(
+    val settings: JSONObject? = null,
+    val chatApps: JSONObject? = null,
+    val connector: JSONObject? = null,
+    val devices: JSONObject? = null,
+    val budgets: JSONObject? = null,
+    val health: JSONObject? = null,
+)
+
+enum class SettingsPage { Home, Safety, Keys, Messaging, Claude, Devices, Spending, About }
+
+data class HomeRow(val page: SettingsPage?, val key: String, val title: String, val status: String, val warn: Boolean = false)
+
+data class HomeGroup(val title: String, val rows: List<HomeRow>)
+
+/** A line on a read-only page: a title with its value, and a sentence that says what it means. */
+data class FactRow(val title: String, val value: String, val text: String? = null)
+
+/** The words of the Settings board, built from what the server sent. Pure, so each line can be tested from a real response. */
+object SettingsWords {
+    private const val NOT_ANSWERED = "Not answering"
+
+    fun yesNo(v: Boolean) = if (v) "Yes" else "No"
+    fun onOff(v: Boolean) = if (v) "On" else "Off"
+
+    private fun JSONObject?.obj(name: String): JSONObject? = this?.optJSONObject(name)
+    private fun JSONObject?.arr(name: String): JSONArray? = this?.optJSONArray(name)
+    private fun JSONArray?.items(): List<JSONObject> = if (this == null) emptyList() else (0 until length()).mapNotNull { optJSONObject(it) }
+    private fun JSONObject?.text(name: String): String? = this?.takeIf { has(name) && !isNull(name) }?.optString(name)?.takeIf { it.isNotBlank() }
+
+    fun configuredKeys(s: JSONObject?): List<String> = s.arr("provider_keys").items().filter { it.optBoolean("configured") }.map { it.optString("name") }
+
+    fun keysStatus(s: JSONObject?): String {
+        if (s == null) return NOT_ANSWERED
+        val keys = configuredKeys(s)
+        if (keys.isEmpty()) return "No key yet"
+        return "${keys.first()} · ${keys.size} ${if (keys.size == 1) "key" else "keys"}"
+    }
+
+    private fun app(chat: JSONObject?, name: String): String = if (chat.obj(name)?.let { it.optBoolean("enabled") && it.optBoolean("token_set") } == true) "on" else "off"
+
+    fun messagingStatus(chat: JSONObject?): String = if (chat == null) NOT_ANSWERED else "Telegram ${app(chat, "telegram")} · Discord ${app(chat, "discord")}"
+
+    private fun parse(t: String?): Instant? = try { t?.let(Instant::parse) } catch (e: DateTimeParseException) { null }
+
+    /** Grants that still let a client in: not revoked and not past their end. */
+    fun liveGrants(c: JSONObject?, now: Instant): List<JSONObject> =
+        c.arr("grants").items().filter { g -> g.text("revoked_at") == null && (parse(g.text("expires_at"))?.isAfter(now) ?: true) }
+
+    fun clock(seconds: Long): String = "%d:%02d".format(seconds / 60, seconds % 60)
+
+    fun connectorStatus(c: JSONObject?, now: Instant): String {
+        if (c == null) return NOT_ANSWERED
+        if (!c.optBoolean("enabled")) return "Off"
+        val left = parse(c.text("armed_until"))?.let { Duration.between(now, it).seconds }?.takeIf { it > 0 }
+        val n = liveGrants(c, now).size
+        val connected = if (n == 0) "none connected" else "$n connected"
+        return (if (left != null) "Open for ${clock(left)}" else "Closed") + " · $connected"
+    }
+
+    fun devicesStatus(d: JSONObject?): String {
+        if (d == null) return NOT_ANSWERED
+        val n = d.arr("devices").items().size
+        return if (n == 0) "None signed in" else "$n signed in"
+    }
+
+    private fun money(v: Double) = "$" + "%.2f".format(v)
+
+    fun spendingStatus(b: JSONObject?): String {
+        if (b == null) return NOT_ANSWERED
+        val day = b.arr("budgets").items().firstOrNull { it.optString("period") == "day" } ?: b.arr("budgets").items().firstOrNull() ?: return "No limit set"
+        val period = when (day.optString("period")) { "day" -> "today"; "week" -> "this week"; "month" -> "this month"; else -> "" }
+        return "${money(day.optDouble("spent_usd"))} of ${money(day.optDouble("limit_usd"))} $period".trim()
+    }
+
+    fun home(snap: SettingsSnapshot, now: Instant = Instant.now(), phone: List<HomeRow> = emptyList()): List<HomeGroup> = listOf(
+        HomeGroup("This phone", phone),
+        HomeGroup(
+            "Your accounts", listOf(
+                HomeRow(SettingsPage.Keys, "key", "AI service and keys", keysStatus(snap.settings)),
+                HomeRow(SettingsPage.Messaging, "chat", "Messaging apps", messagingStatus(snap.chatApps)),
+                HomeRow(SettingsPage.Claude, "plug", "Connect Claude", connectorStatus(snap.connector, now)),
+                HomeRow(SettingsPage.Devices, "phone", "Other devices", devicesStatus(snap.devices)),
+            ),
+        ),
+        HomeGroup("How HQ behaves", listOf(HomeRow(SettingsPage.Safety, "shield", "Safety and limits", if (snap.settings == null) NOT_ANSWERED else "Read only"))),
+        HomeGroup(
+            "Your data", listOf(
+                HomeRow(SettingsPage.Spending, "gauge", "Spending limits", spendingStatus(snap.budgets)),
+                HomeRow(SettingsPage.About, "arch", "About", aboutStatus(snap.health)),
+            ),
+        ),
+    )
+
+    fun aboutStatus(h: JSONObject?): String = h?.text("version")?.let { "HQ $it" } ?: if (h == null) NOT_ANSWERED else "HQ is running"
+
+    // ------------------------------------------------------------ Safety and limits (read only, four tabs)
+
+    enum class SafetyTab(val label: String) { Safety("Safety"), Time("Time limits"), Helpers("Helpers"), Tools("Tools") }
+
+    private fun secs(v: Int): String = when {
+        v <= 0 -> "Off"
+        v % 3600 == 0 -> "${v / 3600} h"
+        v % 60 == 0 -> "${v / 60} min"
+        else -> "$v s"
+    }
+
+    private fun sandbox(v: String): String = when (v) { "required" -> "Required"; "best_effort" -> "When the phone can"; "off" -> "Off"; else -> v.ifBlank { "Off" } }
+
+    fun safetyRows(s: JSONObject?, tab: SafetyTab): List<FactRow> {
+        if (s == null) return emptyList()
+        val safety = s.obj("safety")
+        val limits = s.obj("limits")
+        val host = s.obj("agent_host")
+        val integ = s.obj("integrations")
+        return when (tab) {
+            SafetyTab.Safety -> listOf(
+                FactRow("Run commands in a safe box", sandbox(safety.text("bash_sandbox").orEmpty()), "Fences in the commands a helper runs, when the phone can."),
+                FactRow("Commands can use the internet", yesNo(safety?.optBoolean("bash_network", true) ?: true), "Lets those commands download things and reach websites."),
+                FactRow("Ask me before HQ changes its skills", yesNo(safety?.optBoolean("skills_write_approval") == true), "When on, a change to one of HQ's skills waits for your yes."),
+                FactRow("Addresses allowed to open HQ", "${safety.arr("web_allowed_origins")?.length() ?: 0}", "The web addresses that may show HQ's screens."),
+            )
+            SafetyTab.Time -> listOf(
+                FactRow("Longest time for one reply", secs(limits?.optInt("chat_turn_timeout_secs") ?: 0)),
+                FactRow("How long a reply can take before it moves to the background", secs(limits?.optInt("turn_ack_timeout_secs") ?: 0)),
+                FactRow("How long background work can run", "${limits?.optInt("background_turn_max_days") ?: 0} days"),
+                FactRow("How often long work checks in", secs(limits?.optInt("background_progress_secs") ?: 0)),
+            )
+            SafetyTab.Helpers -> listOf(
+                FactRow("Default computer", host.text("default_host") ?: "None set"),
+                FactRow("Computers", "${host.arr("hosts")?.length() ?: 0}"),
+                FactRow("Safe box for helpers", sandbox(host.text("sandbox_mode").orEmpty())),
+                FactRow("Stop idle helpers after", host?.optInt("idle_reap_hours")?.let { if (it <= 0) "Never" else "$it h" } ?: "Never"),
+                FactRow("New helpers: HQ answers their questions", yesNo(host?.optBoolean("drive_new_watches") == true)),
+                FactRow("How often HQ checks on helpers", host?.optInt("driver_checkin_minutes")?.let { "$it min" } ?: "Not set"),
+                FactRow("How many instructions HQ may give one helper", "${host?.optInt("driver_nudge_budget") ?: 0}"),
+                FactRow("Stop a helper that makes no progress after", "${host?.optInt("driver_no_progress_limit") ?: 0} checks"),
+            )
+            SafetyTab.Tools -> listOf(
+                FactRow("Connected tools", "${integ.arr("remote_mcp")?.length() ?: 0}"),
+                FactRow("Search server", integ.text("searxng_host") ?: "Built in"),
+                FactRow("Disk space check", onOff(integ?.optBoolean("disk_watchdog_enabled") == true)),
+            )
+        }
+    }
+
+    // ------------------------------------------------------------ AI service and keys
+
+    fun keyRows(s: JSONObject?): List<Triple<String, Boolean, String?>> =
+        s.arr("provider_keys").items().map { Triple(it.optString("name"), it.optBoolean("configured"), it.text("source")) }
+
+    fun activeModel(s: JSONObject?): String = s.obj("model").text("active") ?: s.obj("model").text("default_model") ?: "Not set"
+
+    fun fallbackRows(s: JSONObject?): List<Pair<String, String>> {
+        val b = s.obj("backends") ?: return emptyList()
+        val primary = b.text("primary")
+        val fallbacks = b.arr("fallbacks")?.let { a -> (0 until a.length()).map { a.optString(it) } }.orEmpty()
+        val first = primary?.let { listOf("1 · $it" to "primary") } ?: listOf("1 · None set" to "no AI is set")
+        return first + if (fallbacks.isEmpty()) listOf("2 · None set" to "no fallback") else fallbacks.mapIndexed { i, f -> "${i + 2} · $f" to "fallback" }
+    }
+
+    // ------------------------------------------------------------ Messaging apps
+
+    data class AppCard(val name: String, val on: Boolean, val line: String, val bot: String?, val owner: String)
+
+    fun appCard(chat: JSONObject?, key: String, name: String): AppCard {
+        val a = chat.obj(key)
+        val on = a?.let { it.optBoolean("enabled") && it.optBoolean("token_set") } == true
+        val relay = a.obj("relay")
+        val status = relay.text("status")
+        val line = when {
+            !on -> "Off"
+            status == "connected" || status == "running" || status == "online" -> "Running"
+            status != null -> status.replaceFirstChar(Char::uppercase)
+            else -> "Saved"
+        } + if (a?.optBoolean("needs_restart") == true) " · restart needed" else ""
+        val bot = a.obj("bot").text("username")?.let { if (key == "telegram") "@$it" else it }
+        val paired = a.obj("owner")?.optBoolean("paired") == true
+        return AppCard(name, on, line, bot, if (paired) "Linked" else "Not linked")
+    }
+
+    // ------------------------------------------------------------ Connect Claude
+
+    data class Grant(val id: String, val client: String, val scope: String, val since: String)
+
+    fun scopeWords(scope: String) = when (scope) { "read_only" -> "Read only"; "tasks" -> "Tasks"; "full" -> "Full"; else -> scope }
+
+    fun grants(c: JSONObject?, now: Instant): List<Grant> = liveGrants(c, now).map {
+        Grant(it.optString("id"), it.text("label") ?: it.text("client_name") ?: "A client", scopeWords(it.optString("grant_scope")), it.text("created_at").orEmpty().take(10))
+    }
+
+    // ------------------------------------------------------------ Other devices
+
+    data class Device(val id: String, val label: String, val line: String, val current: Boolean)
+
+    fun devices(d: JSONObject?): List<Device> = d.arr("devices").items().map {
+        Device(it.optString("id"), it.text("label") ?: "A device", "Signed in ${it.text("created_at").orEmpty().take(10)}" + (it.text("last_used_at")?.let { u -> " · used ${u.take(10)}" } ?: ""), it.optBoolean("current"))
+    }
+
+    // ------------------------------------------------------------ Spending limits
+
+    fun budgetRows(b: JSONObject?): List<FactRow> = b.arr("budgets").items().map {
+        val period = when (it.optString("period")) { "day" -> "a day"; "week" -> "a week"; "month" -> "a month"; else -> it.optString("period") }
+        FactRow(it.optString("name").ifBlank { "Limit" }.replaceFirstChar(Char::uppercase), "${money(it.optDouble("spent_usd"))} of ${money(it.optDouble("limit_usd"))}", "Per $period · ${stateWords(it.optString("state"))}")
+    }
+
+    private fun stateWords(s: String) = when (s) { "ok", "within", "" -> "within the limit"; "warn", "warning" -> "close to the limit"; "blocked", "exceeded" -> "limit reached"; else -> s }
+}

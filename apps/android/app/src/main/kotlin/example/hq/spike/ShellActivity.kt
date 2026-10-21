@@ -19,7 +19,15 @@ import example.hq.spike.ui.shell.LocalGoTo
 import example.hq.spike.ui.notes.NotesViewModel
 import example.hq.spike.ui.notes.NotesUi
 import example.hq.spike.ui.notes.NotesOverlays
+import example.hq.spike.ui.helpers.HelperOverlays
+import example.hq.spike.ui.helpers.HelpersScreen
+import example.hq.spike.ui.helpers.HelpersUi
+import example.hq.spike.ui.helpers.HelpersViewModel
+import example.hq.spike.ui.helpers.helpersFixture
 import example.hq.spike.ui.inbox.CardKind
+import example.hq.spike.ui.settings.SettingsHost
+import example.hq.spike.ui.settings.SettingsViewModel
+import example.hq.spike.ui.settings.settingsFixture
 import example.hq.spike.ui.inbox.InboxCard
 import example.hq.spike.ui.inbox.InboxDetails
 import example.hq.spike.ui.inbox.InboxScreen
@@ -55,6 +63,8 @@ class ShellActivity : ComponentActivity() {
     private val notes: NotesViewModel by viewModels()
     private val inbox: InboxViewModel by viewModels()
     private val tasks: TasksViewModel by viewModels()
+    private val helpers: HelpersViewModel by viewModels()
+    private val settings: SettingsViewModel by viewModels()
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -63,17 +73,21 @@ class ShellActivity : ComponentActivity() {
             statusBarStyle = SystemBarStyle.dark(Color.TRANSPARENT),
             navigationBarStyle = SystemBarStyle.dark(Color.TRANSPARENT),
         )
-        val start = intent.getStringExtra("place")?.let { name -> Place.entries.firstOrNull { it.name.equals(name, true) } } ?: if (intent.getStringExtra("fixture")?.startsWith("n-") == true) Place.Notes else if (intent.getStringExtra("fixture")?.startsWith("i-") == true) Place.Inbox else if (intent.getStringExtra("fixture")?.startsWith("t-") == true) Place.Tasks else Place.Chat
+        val start = intent.getStringExtra("place")?.let { name -> Place.entries.firstOrNull { it.name.equals(name, true) } } ?: if (intent.getStringExtra("fixture")?.startsWith("n-") == true) Place.Notes else if (intent.getStringExtra("fixture")?.startsWith("i-") == true) Place.Inbox else if (intent.getStringExtra("fixture")?.startsWith("t-") == true) Place.Tasks else if (intent.getStringExtra("fixture")?.startsWith("h-") == true) Place.Helpers else Place.Chat
         val badge = intent.getIntExtra("badge", 0)
         val fixtureName = intent.getStringExtra("fixture")
         if (fixtureName == "a-alerts") sampleAlerts()
         val notesFixture = notesFixture(fixtureName)
         val inboxFixture = inboxFixture(fixtureName)
         val tasksFixture = tasksFixture(fixtureName)
-        val fixture = chatFixture(fixtureName) ?: (notesFixture ?: inboxFixture ?: tasksFixture)?.let { ChatUiState() }
+        val helpersFixture = helpersFixture(fixtureName)
+        val settingsFixture = settingsFixture(fixtureName)
+        val fixture = chatFixture(fixtureName) ?: (notesFixture ?: inboxFixture ?: tasksFixture ?: helpersFixture ?: settingsFixture)?.let { ChatUiState() }
         val services = HqServices.get(this)
         inboxFixture?.let(inbox::freeze)
         tasksFixture?.let(tasks::freeze)
+        helpersFixture?.let(helpers::freeze)
+        settingsFixture?.let(settings::freeze)
         if (notesFixture != null) notes.freeze(notesFixture) else fixture?.let(chat::freeze)
         setContent {
             val status by services.status.collectAsStateWithLifecycle()
@@ -81,6 +95,8 @@ class ShellActivity : ComponentActivity() {
             val notesState by notes.state.collectAsStateWithLifecycle()
             val inboxState by inbox.state.collectAsStateWithLifecycle()
             val tasksState by tasks.state.collectAsStateWithLifecycle()
+            val helpersState by helpers.state.collectAsStateWithLifecycle()
+            val settingsState by settings.state.collectAsStateWithLifecycle()
             val offlineSince = chatState.offlineSince
             val now by produceState(System.currentTimeMillis(), offlineSince) {
                 value = System.currentTimeMillis()
@@ -95,14 +111,15 @@ class ShellActivity : ComponentActivity() {
             HqTheme {
                 HqShell(
                     startAt = start, inboxBadge = if (badge > 0) badge else inboxState.shownNeeds.size, status = shown,
-                    onSearch = { notes.actions.onOpenSearch() },
-                    overlay = { ShellOverlays(chatState, notesState, inboxState, tasksState) },
+                    onSearch = { notes.actions.onOpenSearch() }, onSettings = settings.actions.onOpen,
+                    overlay = { ShellOverlays(chatState, notesState, inboxState, tasksState, helpersState); SettingsHost(settingsState, settings.actions) },
                 ) { place ->
                     when (place) {
                         Place.Chat -> ChatScreen(chatState, chat.actions)
                         Place.Notes -> NotesPlace(notesState)
                         Place.Inbox -> InboxPlace(inboxState)
                         Place.Tasks -> TasksScreen(tasksState, tasks.actions)
+                        Place.Helpers -> HelpersScreen(helpersState, helpers.actions)
                         else -> NotBuilt(place)
                     }
                 }
@@ -148,7 +165,7 @@ class ShellActivity : ComponentActivity() {
 
     /** What sits over the whole shell: Notes pages first (they cover the bars), then Chat's sheets and pages. */
     @androidx.compose.runtime.Composable
-    private fun ShellOverlays(chatState: ChatUiState, notesState: NotesUi, inboxState: InboxUi, tasksState: TasksUi) {
+    private fun ShellOverlays(chatState: ChatUiState, notesState: NotesUi, inboxState: InboxUi, tasksState: TasksUi, helpersState: HelpersUi) {
         val go = LocalGoTo.current
         NotesOverlays(notesState, notes.actions) { items ->
             notes.closeAll()
@@ -159,6 +176,7 @@ class ShellActivity : ComponentActivity() {
         inboxState.details?.let { InboxDetails(it, inboxState.answering[it.id], inboxState.offline, inbox.actions) { card -> inbox.actions.onDetails(null); openFromInbox(card, go) } }
         tasksState.detail?.let { TaskPage(it, tasksState.today, tasks.actions) }
         tasksState.quick?.let { QuickAddSheet(it, tasksState.today, tasks.actions) }
+        HelperOverlays(helpersState, helpers.actions)
     }
 
     private companion object {
