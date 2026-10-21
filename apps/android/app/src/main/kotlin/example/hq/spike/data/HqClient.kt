@@ -116,6 +116,60 @@ class HqClient(private val token: () -> String, private val base: String = LOCAL
         }
     }
 
+    /** A task as the lists and the detail page need it. Dates are `YYYY-MM-DD`; the ready time is UTC without a zone. */
+    data class TaskItem(
+        val id: String,
+        val displayId: String,
+        val title: String,
+        val description: String,
+        val status: String,
+        val priority: String?,
+        val dueDate: String?,
+        val startDate: String?,
+        val tags: List<String>,
+        val assignees: List<String>,
+        val parentId: String?,
+        val subtaskCount: Int,
+        val subtaskDone: Int,
+        val blockedReason: String?,
+        val readyAt: String?,
+        val updatedAt: String,
+    )
+
+    data class TaskComment(val id: String, val author: String, val body: String, val createdAt: String)
+
+    private fun taskOf(o: JSONObject) = TaskItem(
+        o.getString("id"), o.optString("display_id", ""), o.optString("title", ""), o.optString("description", ""), o.optString("status", "to_do"),
+        o.optStringOrNull("priority"), o.optStringOrNull("due_date"), o.optStringOrNull("start_date"), o.optJSONArray("tags").strings(), o.optJSONArray("assignees").strings(),
+        o.optStringOrNull("parent_task_id"), o.optInt("subtask_count", 0), o.optInt("subtask_done", 0), o.optStringOrNull("blocked_reason"),
+        o.optStringOrNull("first_ready_for_review_at"), o.optString("updated_at", ""),
+    )
+
+    private fun json(body: JSONObject) = body.toString().toRequestBody("application/json".toMediaType())
+
+    /** Active tasks, or the sub-tasks of one. The lists group and count them on the phone. */
+    suspend fun tasks(parentId: String? = null, limit: Int = TASK_PAGE): List<TaskItem> =
+        send(authed("/api/tasks?limit=$limit" + (parentId?.let { "&parent_task_id=$it" } ?: "&top_level_only=true")).build()) { text -> JSONObject(text).optJSONArray("tasks").objects().map(::taskOf) }
+
+    /** Changes some fields of a task; a field left out is untouched, a JSON null clears it. 409 means it changed meanwhile. */
+    suspend fun patchTask(id: String, change: JSONObject): TaskItem =
+        send(authed("/api/tasks/${java.net.URLEncoder.encode(id, "UTF-8")}").patch(json(change)).build()) { taskOf(JSONObject(it)) }
+
+    suspend fun createTask(body: JSONObject): TaskItem = send(authed("/api/tasks").post(json(body)).build()) { taskOf(JSONObject(it)) }
+
+    suspend fun taskComments(id: String): List<TaskComment> =
+        send(authed("/api/tasks/${java.net.URLEncoder.encode(id, "UTF-8")}/comments").build()) { text ->
+            JSONObject(text).optJSONArray("comments").objects().map { TaskComment(it.optString("id"), it.optString("author", ""), it.optString("body", ""), it.optString("created_at", "")) }
+        }
+
+    suspend fun addTaskComment(id: String, body: String) {
+        send(authed("/api/tasks/${java.net.URLEncoder.encode(id, "UTF-8")}/comments").post(json(JSONObject().put("body", body).put("author", "operator"))).build()) { }
+    }
+
+    suspend fun archiveTask(id: String) { send(authed("/api/tasks/${java.net.URLEncoder.encode(id, "UTF-8")}").delete().build()) { } }
+
+    suspend fun restoreTask(id: String) { send(authed("/api/tasks/${java.net.URLEncoder.encode(id, "UTF-8")}/restore").post(json(JSONObject())).build()) { } }
+
     /** One row of the owner's inbox: an approval, a helper waiting, or an update. [actions] says what can be answered. */
     data class InboxItem(
         val id: String,
@@ -301,6 +355,7 @@ class HqClient(private val token: () -> String, private val base: String = LOCAL
         private const val PING_SECONDS = 20L
         private const val THREAD_PAGE = 50
         private const val PICKER_PAGE = 20
+        private const val TASK_PAGE = 500
         private const val UPLOAD_CHUNK = 64 * 1024
         const val MESSAGE_PAGE = 100
         private val EMPTY_JSON = "{}".toRequestBody("application/json".toMediaType())
