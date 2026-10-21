@@ -271,4 +271,24 @@ class HelperWordsTest {
         assertEquals(80, cut.codePointCount(0, cut.length))
         assertEquals("", HelperWords.oneLineLabel("\n\n"))
     }
+
+    @Test fun aHelperWithNoNameIsGenericAndShowsItsFolder() {
+        val nameless = row(label = "", goal = null, task = null).copy(cwd = "/Users/x/Documents/HQ/egress-probe 2026-10-19 1731/")
+        val c = HelperWords.card(nameless, null, now)
+        assertTrue(c.generic)
+        assertEquals("Claude helper", c.title)
+        assertEquals("egress-probe 2026-10-19 1731", c.folder)
+        assertFalse(HelperWords.card(row(label = "Fix the backup"), null, now).generic)
+        assertFalse(HelperWords.card(row(goal = "Print ready"), null, now).generic)
+    }
+
+    @Test fun aMissingKeyIsSaidInPlainWords() {
+        val error = "host 'laptop' unreachable: no gate key at /data/user/0/example.hq.spike/files/hqhome/.hq/gate/laptop.key; make one with `hq host gate-key <host>`"
+        assertEquals("This phone has no key to reach your laptop yet.", HelperWords.hostProblem("laptop", error))
+        assertEquals("HQ cannot reach your laptop right now.", HelperWords.hostProblem("laptop", "connection refused"))
+        assertEquals("HQ cannot reach your laptop right now.", HelperWords.hostProblem("laptop", null))
+        val offline = HelperWords.card(row(agent = "unknown", reachable = false, alive = null, host = "laptop", detail = error), null, now)
+        assertEquals("This phone has no key to reach your laptop yet", offline.line)
+        assertEquals("HQ cannot reach your mac-mini right now", HelperWords.card(row(agent = "unknown", reachable = false, alive = null), null, now).line)
+    }
 }

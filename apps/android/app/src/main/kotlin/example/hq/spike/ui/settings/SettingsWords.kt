@@ -50,18 +50,44 @@ object SettingsWords {
 
     fun messagingStatus(chat: JSONObject?): String = if (chat == null) NOT_ANSWERED else "Telegram ${app(chat, "telegram")} · Discord ${app(chat, "discord")}"
 
-    private fun parse(t: String?): Instant? = try { t?.let(Instant::parse) } catch (e: DateTimeParseException) { null }
+    private const val MILLIS_FROM = 100_000_000_000L
+
+    /** A time from a JSON field: epoch seconds (what the server sends), epoch milliseconds, or ISO text. Null when absent or unreadable. */
+    fun time(o: JSONObject?, name: String): Instant? {
+        val v = o?.takeIf { it.has(name) && !it.isNull(name) }?.opt(name) ?: return null
+        return when (v) {
+            is Number -> epoch(v.toLong())
+            is String -> v.trim().let { t -> t.toLongOrNull()?.let(::epoch) ?: try { Instant.parse(t.replace(' ', 'T').let { if (it.endsWith("Z") || it.contains('+')) it else it + "Z" }) } catch (e: DateTimeParseException) { null } }
+            else -> null
+        }
+    }
+
+    private fun epoch(n: Long): Instant = if (n >= MILLIS_FROM) Instant.ofEpochMilli(n) else Instant.ofEpochSecond(n)
+
+    private fun dayOf(t: Instant?, zone: java.time.ZoneId): String = t?.atZone(zone)?.format(java.time.format.DateTimeFormatter.ofPattern("MMM d", java.util.Locale.getDefault())).orEmpty()
+
+    /** "3 h ago": how long before [now], for a "used" line. */
+    fun ago(t: Instant?, now: Instant): String {
+        if (t == null) return ""
+        val minutes = Duration.between(t, now).toMinutes().coerceAtLeast(0)
+        return when {
+            minutes < 1 -> "just now"
+            minutes < 60 -> "$minutes min ago"
+            minutes < 24 * 60 -> "${minutes / 60} h ago"
+            else -> "${minutes / (24 * 60)} d ago"
+        }
+    }
 
     /** Grants that still let a client in: not revoked and not past their end. */
     fun liveGrants(c: JSONObject?, now: Instant): List<JSONObject> =
-        c.arr("grants").items().filter { g -> g.text("revoked_at") == null && (parse(g.text("expires_at"))?.isAfter(now) ?: true) }
+        c.arr("grants").items().filter { g -> time(g, "revoked_at") == null && (time(g, "expires_at")?.isAfter(now) ?: true) }
 
     fun clock(seconds: Long): String = "%d:%02d".format(seconds / 60, seconds % 60)
 
     fun connectorStatus(c: JSONObject?, now: Instant): String {
         if (c == null) return NOT_ANSWERED
         if (!c.optBoolean("enabled")) return "Off"
-        val left = parse(c.text("armed_until"))?.let { Duration.between(now, it).seconds }?.takeIf { it > 0 }
+        val left = time(c, "armed_until")?.let { Duration.between(now, it).seconds }?.takeIf { it > 0 }
         val n = liveGrants(c, now).size
         val connected = if (n == 0) "none connected" else "$n connected"
         return (if (left != null) "Open for ${clock(left)}" else "Closed") + " · $connected"
@@ -114,7 +140,13 @@ object SettingsWords {
         else -> "$v s"
     }
 
-    private fun sandbox(v: String): String = when (v) { "required" -> "Required"; "best_effort" -> "When the phone can"; "off" -> "Off"; else -> v.ifBlank { "Off" } }
+    private fun sandbox(v: String): String = when (v) {
+        "required" -> "Required"
+        "best_effort" -> "When the phone can"
+        "process" -> "In a separate process"
+        "off", "none", "" -> "Off"
+        else -> v.replaceFirstChar(Char::uppercase)
+    }
 
     fun safetyRows(s: JSONObject?, tab: SafetyTab): List<FactRow> {
         if (s == null) return emptyList()
@@ -194,16 +226,18 @@ object SettingsWords {
 
     fun scopeWords(scope: String) = when (scope) { "read_only" -> "Read only"; "tasks" -> "Tasks"; "full" -> "Full"; else -> scope }
 
-    fun grants(c: JSONObject?, now: Instant): List<Grant> = liveGrants(c, now).map {
-        Grant(it.optString("id"), it.text("label") ?: it.text("client_name") ?: "A client", scopeWords(it.optString("grant_scope")), it.text("created_at").orEmpty().take(10))
+    fun grants(c: JSONObject?, now: Instant, zone: java.time.ZoneId = java.time.ZoneId.systemDefault()): List<Grant> = liveGrants(c, now).map {
+        Grant(it.optString("id"), it.text("label") ?: it.text("client_name") ?: "A client", scopeWords(it.optString("grant_scope")), dayOf(time(it, "created_at"), zone))
     }
 
     // ------------------------------------------------------------ Other devices
 
     data class Device(val id: String, val label: String, val line: String, val current: Boolean)
 
-    fun devices(d: JSONObject?): List<Device> = d.arr("devices").items().map {
-        Device(it.optString("id"), it.text("label") ?: "A device", "Signed in ${it.text("created_at").orEmpty().take(10)}" + (it.text("last_used_at")?.let { u -> " · used ${u.take(10)}" } ?: ""), it.optBoolean("current"))
+    fun devices(d: JSONObject?, now: Instant = Instant.now(), zone: java.time.ZoneId = java.time.ZoneId.systemDefault()): List<Device> = d.arr("devices").items().map {
+        val signed = dayOf(time(it, "created_at"), zone)
+        val used = time(it, "last_used_at")?.let { u -> " · used ${ago(u, now)}" }.orEmpty()
+        Device(it.optString("id"), it.text("label") ?: "A device", (if (signed.isEmpty()) "Signed in" else "Signed in $signed") + used, it.optBoolean("current"))
     }
 
     // ------------------------------------------------------------ Spending limits

@@ -16,6 +16,7 @@ import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -46,6 +47,7 @@ import kotlinx.coroutines.delay
 
 private val SmallText = HqType.Caption.copy(fontSize = 13.sp, lineHeight = 18.sp)
 private const val LINE_MS = 4_000L
+private val KEY_COLUMN = 120.dp
 
 private fun icon(key: String): ImageVector = when (key) {
     "background" -> HqIcons.Power
@@ -289,7 +291,7 @@ private fun AppCardView(c: SettingsWords.AppCard) {
 @Composable
 private fun KeyValue(key: String, value: String, color: Color = Mts.Ink) {
     Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-        Text(key, style = HqType.BodySm, color = Mts.InkMuted, modifier = Modifier.size(90.dp, 20.dp))
+        Text(key, style = HqType.BodySm, color = Mts.InkMuted, modifier = Modifier.width(KEY_COLUMN))
         Text(value, style = HqType.BodySm, color = color)
     }
 }
@@ -373,7 +375,7 @@ private fun About(ui: SettingsUi, actions: SettingsActions) {
         Label("About")
         Facts(
             listOf(
-                FactRow("AgentHQ", "hub · build ${ui.build}"),
+                FactRow("AgentHQ", ui.build),
                 FactRow("Run mode", if (ui.mode == "active") "Active" else "Standby"),
                 FactRow("HQ", ui.snap.health?.optString("version")?.takeIf { it.isNotBlank() } ?: "Not answering"),
             ),

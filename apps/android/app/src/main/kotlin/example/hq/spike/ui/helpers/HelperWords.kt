@@ -35,6 +35,10 @@ data class HelperCard(
     val time: String,
     val ask: BlockedPrompt?,
     val sessionId: String,
+    /** True when the title is only "Claude helper": the row had no label, goal or task to name its job. */
+    val generic: Boolean = false,
+    /** The folder it ran in, to tell two nameless helpers apart. */
+    val folder: String = "",
 )
 
 /** The words the Helpers board uses, kept out of the screens so they can be tested. */
@@ -64,6 +68,17 @@ object HelperWords {
     }
 
     /** The job, never a folder name: the label, else the goal, else the task it serves, else a plain name. */
+    fun isGeneric(row: HelperRow): Boolean = listOf(row.label, row.goal, row.taskTitle).none { !it.isNullOrBlank() }
+
+    /** The last part of the folder a helper ran in, without a trailing slash. */
+    fun folderOf(cwd: String): String = cwd.trimEnd('/').substringAfterLast('/').trim()
+
+    /** Why a computer cannot be reached, in the owner's words. The server's own text names a missing key file and a command to run. */
+    fun hostProblem(name: String, error: String?): String = when {
+        error?.contains("no gate key", ignoreCase = true) == true -> "This phone has no key to reach ${placeName(name)} yet."
+        else -> "HQ cannot reach ${placeName(name)} right now."
+    }
+
     fun title(row: HelperRow): String {
         val job = listOf(row.label, row.goal, row.taskTitle).firstOrNull { !it.isNullOrBlank() }?.trim()?.lineSequence()?.first()?.trim()
         return job?.let { if (it.length > MAX_TITLE) it.take(MAX_TITLE).trimEnd() + "…" else it } ?: "${agentName(row.harness)} helper"
@@ -247,13 +262,13 @@ object HelperWords {
             HelperState.NeedsOk -> ask?.let(::askLine) ?: "Waiting for your answer"
             HelperState.Working -> row.detail?.takeIf { it.isNotBlank() }?.let { cleanLine(it) } ?: lastWords ?: "Working"
             HelperState.Ready -> "Waiting for your next instruction"
-            HelperState.Offline -> "HQ cannot reach $where right now"
+            HelperState.Offline -> hostProblem(row.host, row.detail).removeSuffix(".")
             HelperState.Lost -> "HQ lost contact with this helper"
             HelperState.Finished -> "Finished ${ago(row.lastSeenAt, now)}".trim()
             HelperState.Stopped -> "Stopped ${ago(row.lastSeenAt, now)}".trim()
         }
         val time = if (state == HelperState.Working || state == HelperState.NeedsOk) span(row.createdAt, now).orEmpty() else ago(row.lastSeenAt, now)
-        return HelperCard(row.id, title(row), agent, where, state, line, time, ask.takeIf { state == HelperState.NeedsOk }, row.id)
+        return HelperCard(row.id, title(row), agent, where, state, line, time, ask.takeIf { state == HelperState.NeedsOk }, row.id, isGeneric(row), folderOf(row.cwd))
     }
 
     /** The order on the list: waiting for the owner first, then working, then the rest, newest first within each. */

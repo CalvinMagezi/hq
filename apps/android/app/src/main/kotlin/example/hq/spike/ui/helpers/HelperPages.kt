@@ -371,5 +371,5 @@ private fun whereWords(f: StartForm): String = when {
     f.hosts == null -> "Looking for your computers…"
     f.host != null -> HelperWords.placeName(f.host).replaceFirstChar(Char::uppercase)
     f.hosts.isEmpty() -> "HQ could not list your computers."
-    else -> "No computer answers from this phone. Check that it is on."
+    else -> f.hosts.first().let { HelperWords.hostProblem(it.name, it.error) }
 }

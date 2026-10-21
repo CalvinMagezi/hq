@@ -44,6 +44,8 @@ fun helpersFixture(name: String?): HelpersUi? {
         "h-start" -> base.copy(start = StartForm("Move the build from scripts to Gradle", hosts = listOf(HelperHost("Mac mini", true, null)), host = "Mac mini"))
         "h-nohost" -> base.copy(start = StartForm("Move the build", hosts = listOf(HelperHost("laptop", false, "no gate key"))))
         "h-real" -> realHelpers(now)
+        "h-real-open" -> realHelpers(now).copy(finishedOpen = true)
+        "h-real-page" -> realHelpers(now).let { it.copy(open = HelperOpen("r0", HelperPage.Detail)) }
         else -> null
     }
 }
@@ -57,6 +59,10 @@ private fun realHelpers(now: LocalDateTime): HelpersUi {
         HelperRow("r2", "claude-code", "phase2-mcp-check-2", "laptop", "/work/p", "stopped", "done", at(31), at(31), "Prove a host session reaches HQ over the new tunnel URL for MCP", null, false, true, null, false),
         HelperRow("r3", "claude-code", "pwd-check", "laptop", "/tmp", "stopped", "idle", at(250), at(250), "Run pwd in the new Claude Code session and report its exact output.", null, false, true, null, false),
         HelperRow("r4", "claude-code", "", "laptop", "/Users/someone/hq-orch-probe", "stopped", "done", at(260), at(260), "print ready then done", null, false, true, null, false),
+        HelperRow("r5", "cursor", "", "laptop", "/Users/someone/Documents/HQ/cursor-probe 2026-10-08 1102", "stopped", "idle", at(310), at(310), null, null, false, true, null, false),
+        HelperRow("r6", "cursor", "", "laptop", "/Users/someone/Documents/HQ/cursor-probe 2026-10-08 1215", "stopped", "idle", at(309), at(309), null, null, false, true, null, false),
+        HelperRow("r7", "claude-kola", "", "laptop", "/Users/someone/Documents/HQ/kola-check", "stopped", "idle", at(308), at(308), null, null, false, true, null, false),
+        HelperRow("r8", "pi", "", "laptop", "/Users/someone/Documents/HQ/pi-check", "stopped", "idle", at(307), at(307), null, null, false, true, null, false),
     )
     return HelpersUi(loaded = true, rows = rows, now = now)
 }

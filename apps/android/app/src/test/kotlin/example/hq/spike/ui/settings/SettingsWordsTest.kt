@@ -1,6 +1,7 @@
 package example.hq.spike.ui.settings
 
 import java.time.Instant
+import java.time.ZoneOffset
 import org.json.JSONObject
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
@@ -103,5 +104,61 @@ class SettingsWordsTest {
         assertEquals(listOf("AI service and keys", "Messaging apps", "Connect Claude", "Other devices"), groups[1].rows.map { it.title })
         assertEquals("Read only", groups[2].rows.single().status)
         assertNull(groups[0].rows.firstOrNull())
+    }
+
+    // The server sends every connector and device time as epoch seconds.
+    private val nowSec = now.epochSecond
+
+    private val realConnector = JSONObject(
+        """{"enabled":true,"url":"https://hq-connector.example.com/mcp","consent_origin":"https://hq.example.com","default_scope":"full","armed_until":${nowSec + 581},
+        "grants":[{"id":"g1","client_id":"c1","client_name":"Claude","label":null,"grant_scope":"full","created_at":${nowSec - 90_000},"expires_at":${nowSec + 86_400},"last_used_at":null,"revoked_at":null,"revoked_reason":null},
+        {"id":"g2","client_name":"Old","grant_scope":"read_only","created_at":${nowSec - 900_000},"expires_at":${nowSec - 60},"revoked_at":null},
+        {"id":"g3","client_name":"Gone","grant_scope":"full","created_at":${nowSec - 900_000},"expires_at":${nowSec + 500},"revoked_at":${nowSec - 5}}]}""",
+    )
+
+    @Test fun epochSecondsAreReadForTheConnectorWindowAndTheGrants() {
+        assertEquals("Open for 9:41 · 1 connected", SettingsWords.connectorStatus(realConnector, now))
+        val grants = SettingsWords.grants(realConnector, now, ZoneOffset.UTC)
+        assertEquals(1, grants.size)
+        assertEquals("Claude", grants.single().client)
+        assertEquals("Full", grants.single().scope)
+        assertEquals("Oct 20", grants.single().since)
+    }
+
+    @Test fun aWindowInThePastIsClosedAndAnExpiredOrRevokedGrantIsNotCounted() {
+        val c = JSONObject(realConnector.toString().replace("\"armed_until\":${nowSec + 581}", "\"armed_until\":${nowSec - 30}"))
+        assertEquals("Closed · 1 connected", SettingsWords.connectorStatus(c, now))
+        assertEquals(listOf("g1"), SettingsWords.liveGrants(c, now).map { it.optString("id") })
+        assertEquals("Closed · none connected", SettingsWords.connectorStatus(JSONObject("""{"enabled":true,"armed_until":null,"grants":[]}"""), now))
+    }
+
+    @Test fun deviceTimesAreDatesAndHowLongAgoNeverRawNumbers() {
+        val d = JSONObject("""{"devices":[{"id":"d1","label":"Signed in with a code","created_at":${nowSec - 170_000},"last_used_at":${nowSec - 10_800},"expires_at":null},{"id":"d2","label":"MacBook","created_at":${nowSec - 90_000},"last_used_at":null,"expires_at":null}]}""")
+        val list = SettingsWords.devices(d, now, ZoneOffset.UTC)
+        assertEquals("Signed in Oct 19 · used 3 h ago", list[0].line)
+        assertEquals("Signed in Oct 20", list[1].line)
+        assertEquals("2 signed in", SettingsWords.devicesStatus(d))
+    }
+
+    @Test fun aTimeIsReadFromSecondsMillisecondsDigitsAndText() {
+        val o = JSONObject("""{"a":1792591376,"b":1792591376000,"c":"1792591376","d":"2026-10-21 12:00:00","e":"2026-10-21T12:00:00+00:00","f":null,"g":"soon"}""")
+        val expected = Instant.ofEpochSecond(1792591376)
+        assertEquals(expected, SettingsWords.time(o, "a"))
+        assertEquals(expected, SettingsWords.time(o, "b"))
+        assertEquals(expected, SettingsWords.time(o, "c"))
+        assertEquals(Instant.parse("2026-10-21T12:00:00Z"), SettingsWords.time(o, "d"))
+        assertEquals(Instant.parse("2026-10-21T12:00:00Z"), SettingsWords.time(o, "e"))
+        assertNull(SettingsWords.time(o, "f"))
+        assertNull(SettingsWords.time(o, "g"))
+        assertNull(SettingsWords.time(o, "missing"))
+        assertNull(SettingsWords.time(null, "a"))
+    }
+
+    @Test fun theSandboxIsNamedInWordsNotConfigValues() {
+        fun row(mode: String) = JSONObject("""{"agent_host":{"sandbox_mode":"$mode","hosts":[]}}""").let { SettingsWords.safetyRows(it, SettingsWords.SafetyTab.Helpers)[2].value }
+        assertEquals("In a separate process", row("process"))
+        assertEquals("Off", row("none"))
+        assertEquals("When the phone can", row("best_effort"))
+        assertEquals("Required", row("required"))
     }
 }

@@ -48,7 +48,7 @@ class SettingsActions(
 
 class SettingsViewModel(app: Application) : AndroidViewModel(app) {
     private val client = HqServices.get(app).client
-    private val _state = MutableStateFlow(SettingsUi(build = app.packageManager.getPackageInfo(app.packageName, 0).versionName.orEmpty()))
+    private val _state = MutableStateFlow(SettingsUi(build = buildText(app)))
     val state: StateFlow<SettingsUi> = _state
     private var frozen = false
 
@@ -86,6 +86,14 @@ class SettingsViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     private fun ctx(): Application = getApplication()
+
+    /** "hub · build 1": the version name and the build number, as the board writes them. */
+    private fun buildText(app: Application): String {
+        val info = app.packageManager.getPackageInfo(app.packageName, 0)
+        @Suppress("DEPRECATION")
+        val number = if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.P) info.longVersionCode else info.versionCode.toLong()
+        return "${info.versionName.orEmpty().ifBlank { "hub" }} \u00b7 build $number"
+    }
 
     private fun modeOf(): String = try { File(ctx().filesDir, "mode").takeIf { it.length() <= MODE_MAX }?.readText()?.trim().orEmpty().ifEmpty { "standby" } } catch (e: java.io.IOException) { "standby" }
 

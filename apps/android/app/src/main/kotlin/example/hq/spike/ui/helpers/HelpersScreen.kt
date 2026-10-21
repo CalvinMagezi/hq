@@ -175,6 +175,7 @@ private fun PastRow(c: HelperCard, onClick: () -> Unit) {
     Column(Modifier.fillMaxWidth().clip(shape).border(1.dp, Mts.Hairline, shape).clickable(role = Role.Button, onClick = onClick).padding(horizontal = 16.dp, vertical = 10.dp)) {
         Text(c.title, style = HqType.BodyBold, color = Mts.Ink, maxLines = 2, overflow = TextOverflow.Ellipsis)
         Text(listOf(HelperWords.stateWords(c.state), c.agent, c.time).filter { it.isNotBlank() }.joinToString(" · "), style = HqType.BodySm, color = Mts.InkMuted, maxLines = 1)
+        if (c.generic && c.folder.isNotBlank()) Text(c.folder, style = SmallText, color = Mts.InkMuted, maxLines = 1, overflow = TextOverflow.Ellipsis)
     }
 }
 
