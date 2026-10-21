@@ -6,6 +6,7 @@ import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import example.hq.spike.data.ChatEvent
 import example.hq.spike.data.HqServices
+import example.hq.spike.data.HqStatus
 import example.hq.spike.data.HqUnavailable
 import example.hq.spike.data.StoredMessage
 import java.util.UUID
@@ -47,7 +48,7 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
 
     val actions = ChatActions(
         onDraft = ::setDraft, onSend = ::send, onStop = ::stop, onRetry = ::retry,
-        onOpenChats = ::openChats, onCloseChats = { _state.update { it.copy(chatsOpen = false) } }, onNewChat = ::newChat,
+        onOpenChats = ::openChats, onCloseChats = { _state.update { it.copy(chatsOpen = false) } }, onNewChat = { newChat() },
         onOpenChat = ::openThread, onSearchChats = { q -> _state.update { it.copy(chatSearch = q) } },
         onArchive = ::archive, onUndo = ::undoArchive, onDismissNotice = { _state.update { it.copy(notice = null) } },
     )
@@ -55,7 +56,8 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
     init {
         viewModelScope.launch { services.connection.events.collect { if (!frozen) handle(it) } }
         viewModelScope.launch { services.connection.connected.collect { c -> if (!frozen) _state.update { it.copy(connected = c) } } }
-        viewModelScope.launch { openLatest() }
+        // hq may still be starting when the app opens; open the latest chat the first time it answers.
+        viewModelScope.launch { services.status.collect { if (it == HqStatus.Live && !frozen) openLatest() } }
     }
 
     /** Draws a fixed state and stops listening to hq, for checking the screen against the design on a phone with no hq. */
@@ -113,8 +115,10 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
         submit(question, replaceFrom = last.id)
     }
 
-    private fun newChat() {
-        _state.update { ChatUiState(connected = it.connected, draft = drafts.getString(draftKey(null), "").orEmpty(), chats = it.chats) }
+    private fun newChat(keepSheet: Boolean = false) {
+        _state.update {
+            ChatUiState(connected = it.connected, draft = drafts.getString(draftKey(null), "").orEmpty(), chats = it.chats, chatsOpen = keepSheet && it.chatsOpen)
+        }
     }
 
     private fun openThread(id: String) {
@@ -139,10 +143,13 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
         viewModelScope.launch { refreshChats() }
     }
 
+    private var openedLatest = false
+
     private suspend fun openLatest() {
         refreshChats()
         val s = _state.value
-        if (s.threadId == null && s.messages.isEmpty()) s.chats.firstOrNull()?.let { openThread(it.id) }
+        val untouched = s.threadId == null && s.messages.isEmpty() && s.draft.isBlank() && !s.chatsOpen
+        if (!openedLatest && untouched) s.chats.firstOrNull()?.let { openedLatest = true; openThread(it.id) }
     }
 
     private suspend fun refreshChats() {
@@ -170,7 +177,7 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
     private fun commit(id: String) {
         viewModelScope.launch {
             try { client.archive(id) } catch (e: HqUnavailable) { return@launch }
-            if (_state.value.threadId == id) newChat()
+            if (_state.value.threadId == id) newChat(keepSheet = true)
         }
     }
 
