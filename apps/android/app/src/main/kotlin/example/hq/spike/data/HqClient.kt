@@ -29,6 +29,9 @@ class NoteNotFound(path: String) : IOException("No note at $path")
 
 /** The same REST and web socket API the web app uses, over loopback. Auth is the sealed web token. */
 class HqClient(private val token: () -> String, private val base: String = LOCAL_HQ) {
+    /** Starting a helper answers only once the agent has settled, which can take longer than any other call here. */
+    private val startHttp by lazy { http.newBuilder().readTimeout(START_READ_SECONDS, TimeUnit.SECONDS).build() }
+
     private val http = OkHttpClient.Builder()
         .connectTimeout(CONNECT_SECONDS, TimeUnit.SECONDS)
         .readTimeout(READ_SECONDS, TimeUnit.SECONDS)
@@ -245,7 +248,7 @@ class HqClient(private val token: () -> String, private val base: String = LOCAL
     suspend fun helperScreen(id: String, lines: Int = SCREEN_LINES): HelperScreen =
         send(authed("/api/harness-sessions/${java.net.URLEncoder.encode(id, "UTF-8")}/screen?lines=$lines").build()) {
             val o = JSONObject(it)
-            HelperScreen(o.optJSONArray("lines").strings(), o.optString("source", "live") == "live")
+            HelperScreen(o.optJSONArray("lines").strings(), o.optString("source", "") == "live")
         }
 
     /** Types a line into a helper. 409 means it is waiting at a prompt and must be answered there first. */
@@ -265,11 +268,12 @@ class HqClient(private val token: () -> String, private val base: String = LOCAL
     suspend fun startHelper(harness: String, host: String, prompt: String, label: String): String =
         send(
             authed("/api/harness-sessions").post(JSONObject().put("harness", harness).put("host", host).put("prompt", prompt).put("label", label).toString().toRequestBody("application/json".toMediaType())).build(),
+            caller = startHttp,
         ) { JSONObject(it).getString("session_id") }
 
     /** The computers helpers can run on, and whether each answered. */
     suspend fun helperHosts(): List<HelperHost> = send(authed("/api/workbench/hosts").build()) { text ->
-        JSONObject(text).optJSONArray("hosts").objects().map { HelperHost(it.getString("host"), it.optBoolean("reachable", false), it.optStringOrNull("error")) }
+        JSONObject(text).optJSONArray("hosts").objects().mapNotNull { h -> h.optStringOrNull("host")?.let { HelperHost(it, h.optBoolean("reachable", false), h.optStringOrNull("error")) } }
     }
 
     /** A read-only JSON route as it is, for the Settings pages that only show what the server says. */
@@ -386,9 +390,9 @@ class HqClient(private val token: () -> String, private val base: String = LOCAL
     /** The server wants this header on requests that change a helper, setup or a credential; sending it on every request is harmless. */
     private fun authed(path: String) = Request.Builder().url(base + path).header("Authorization", "Bearer ${token()}").header("X-HQ-Client", "android")
 
-    private suspend fun <T> send(request: Request, parse: (String) -> T): T = withContext(Dispatchers.IO) {
+    private suspend fun <T> send(request: Request, caller: OkHttpClient = http, parse: (String) -> T): T = withContext(Dispatchers.IO) {
         try {
-            http.newCall(request).execute().use { r ->
+            caller.newCall(request).execute().use { r ->
                 if (!r.isSuccessful) throw HqUnavailable("HTTP ${r.code} for ${request.url.encodedPath}")
                 parse(r.body.string())
             }
@@ -413,6 +417,7 @@ class HqClient(private val token: () -> String, private val base: String = LOCAL
         private const val HTTP_BAD_REQUEST = 400
         private const val CONNECT_SECONDS = 3L
         private const val READ_SECONDS = 20L
+        private const val START_READ_SECONDS = 150L
         private const val PING_SECONDS = 20L
         private const val THREAD_PAGE = 50
         private const val PICKER_PAGE = 20

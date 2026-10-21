@@ -43,6 +43,10 @@ fun helpersFixture(name: String?): HelpersUi? {
         "h-menu" -> base.copy(open = HelperOpen("b", HelperPage.Detail, menu = true))
         "h-start" -> base.copy(start = StartForm("Move the build from scripts to Gradle", hosts = listOf(HelperHost("Mac mini", true, null)), host = "Mac mini"))
         "h-nohost" -> base.copy(start = StartForm("Move the build", hosts = listOf(HelperHost("laptop", false, "no gate key"))))
+        "h-cmd" -> commandHelpers(now)
+        "h-cmd-page" -> commandHelpers(now).let { it.copy(open = HelperOpen("c1", HelperPage.Ask, screen = LONG_COMMAND)) }
+        "h-cmd-raw" -> commandHelpers(now).let { it.copy(open = HelperOpen("c1", HelperPage.Ask, screen = LONG_COMMAND, raw = true)) }
+        "h-cmd-tech" -> commandHelpers(now).let { it.copy(open = HelperOpen("c1", HelperPage.Detail, screen = LONG_COMMAND, technical = true)) }
         "h-real" -> realHelpers(now)
         "h-real-open" -> realHelpers(now).copy(finishedOpen = true)
         "h-real-old" -> realHelpers(now).let { it.copy(finishedOpen = true, rows = it.rows.filter { r -> r.id == "r9" || r.id == "r10" || r.id == "r1" }) }
@@ -69,4 +73,21 @@ private fun realHelpers(now: LocalDateTime): HelpersUi {
         HelperRow("r10", "claude-code", "family-tree-app", "laptop", "/Users/someone/Documents/HQ/family-tree", "exited", "done", "", at(24 * 27), null, null, false, true, null, false),
     )
     return HelpersUi(loaded = true, rows = rows, now = now)
+}
+
+/** A command that wraps over several rows, and a short one: the first is read on the helper's own page, the second on its card. */
+internal val LONG_COMMAND = listOf(
+    "Bash command", "  rm -rf build --flag-one --flag-two --flag-three", "  --flag-four --flag-five --flag-six --flag-seven",
+    "  --flag-eight --flag-nine --flag-ten --flag-eleven", "  > /tmp/out.log", "Do you want to proceed?", "❯ 1. Yes", "  2. No",
+)
+internal val SHORT_COMMAND = listOf("Bash command", "  ls -la", "Do you want to proceed?", "❯ 1. Yes", "  2. No")
+
+private fun commandHelpers(now: LocalDateTime): HelpersUi {
+    fun at(minutes: Long) = now.minusMinutes(minutes).toString().replace('T', ' ').substringBefore('.')
+    fun blocked(id: String, label: String, minutes: Long) = HelperRow(id, "claude-code", label, "Mac mini", "/work/$id", "running", "blocked", at(1), at(minutes), null, null, true, true, null, false)
+    return HelpersUi(
+        loaded = true, now = now,
+        rows = listOf(blocked("c1", "Clean the build folder", 30), blocked("c2", "List the project files", 20)),
+        asks = mapOf("c1" to HelperWords.blocked(LONG_COMMAND)!!, "c2" to HelperWords.blocked(SHORT_COMMAND)!!),
+    )
 }

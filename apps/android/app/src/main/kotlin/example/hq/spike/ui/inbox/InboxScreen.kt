@@ -21,6 +21,7 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.selection.selectable
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
@@ -51,6 +52,7 @@ import androidx.compose.ui.unit.em
 import androidx.compose.ui.unit.sp
 import example.hq.spike.ui.chat.blocks.IconAction
 import example.hq.spike.ui.shell.HqIcons
+import example.hq.spike.ui.shell.consumeTouches
 import example.hq.spike.ui.theme.HqType
 import example.hq.spike.ui.theme.Mts
 import kotlinx.coroutines.delay
@@ -93,7 +95,7 @@ private fun Tabs(ui: InboxUi, onTab: (InboxTab) -> Unit) {
         ).forEach { (tab, label, count) ->
             val on = ui.tab == tab
             Box(
-                Modifier.weight(1f).heightIn(min = 48.dp).clickable(role = Role.Tab, onClickLabel = label) { onTab(tab) }
+                Modifier.weight(1f).heightIn(min = 48.dp).selectable(selected = on, role = Role.Tab, onClick = { onTab(tab) })
                     .drawBehind { if (on) drawRoundRect(Mts.BrandGreen, Offset(16.dp.toPx(), size.height - 3.dp.toPx()), Size(size.width - 32.dp.toPx(), 3.dp.toPx()), CornerRadius(3.dp.toPx())) },
                 contentAlignment = Alignment.Center,
             ) {
@@ -295,7 +297,7 @@ private fun Snack(line: InboxLine, actions: InboxActions, modifier: Modifier) {
 @Composable
 fun InboxDetails(card: InboxCard, answer: Answer?, offline: Boolean, actions: InboxActions, onTakeLook: (InboxCard) -> Unit = { actions.onDetails(null) }) {
     BackHandler { actions.onDetails(null) }
-    Column(Modifier.fillMaxSize().background(Mts.Surface000).statusBarsPadding().navigationBarsPadding()) {
+    Column(Modifier.fillMaxSize().background(Mts.Surface000).consumeTouches().statusBarsPadding().navigationBarsPadding()) {
         Row(Modifier.fillMaxWidth().heightIn(min = 64.dp).padding(start = 4.dp), verticalAlignment = Alignment.CenterVertically) {
             IconAction(HqIcons.ArrowBack, "Back", iconSize = 24.dp) { actions.onDetails(null) }
             Text("Details", style = HqType.BodyBold, color = Mts.Ink, modifier = Modifier.padding(start = 4.dp))

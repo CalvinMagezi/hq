@@ -2,6 +2,8 @@ package example.hq.spike.ui.inbox
 
 import example.hq.spike.data.HqClient.InboxItem
 import example.hq.spike.ui.chat.blocks.Plain
+import example.hq.spike.ui.helpers.AskKind
+import example.hq.spike.ui.helpers.HelperWords
 import java.time.Duration
 import java.time.Instant
 import java.time.OffsetDateTime
@@ -30,6 +32,8 @@ data class InboxCard(
     val state: String,
     /** For a task waiting to be checked: its short id (such as FR-12), to open it in Tasks. */
     val taskRef: String? = null,
+    /** For a helper at a prompt: the lines the notice quoted from its screen. An answer is sent only if the helper's screen still shows this dialog. */
+    val excerpt: List<String> = emptyList(),
 )
 
 /** Turns what the server stores into the plain titles, bodies and buttons of the Inbox board. */
@@ -63,10 +67,21 @@ object InboxWords {
         val who = label.trim().split(' ', '(').firstOrNull { it.isNotBlank() }?.replaceFirstChar { it.uppercase() } ?: "A helper"
         val line = lastLine(item.description)
         return when (what) {
-            "is waiting for you" -> InboxCard(
-                item.id, CardKind.HelperAsks, "$who needs your OK", if (line.isNotEmpty()) "It stopped to ask: $line" else "It stopped to ask before going on.",
-                whereOf(item, host), item.createdAt, CardIcon.Sparkle, sessionId, sessionId != null, "Allow once", item.link, askedBy(item, host), item.state,
-            )
+            "is waiting for you" -> {
+                val excerpt = HelperWords.excerptLines(item.description)
+                val ask = HelperWords.blocked(excerpt)
+                // Answered from the card only when the card shows everything the owner needs to decide; otherwise the helper's own page does.
+                val inline = sessionId != null && ask != null && HelperWords.canAnswerInline(ask)
+                val body = when {
+                    ask == null -> if (line.isNotEmpty()) "It stopped to ask: $line" else "It stopped to ask before going on."
+                    ask.kind == AskKind.Other -> "It stopped to ask: ${ask.question}"
+                    else -> HelperWords.askText(ask)
+                }
+                InboxCard(
+                    item.id, CardKind.HelperAsks, "$who needs your OK", body, whereOf(item, host), item.createdAt, CardIcon.Sparkle, sessionId, inline,
+                    if (inline) "Allow once" else "Open helper", item.link, askedBy(item, host), item.state, excerpt = excerpt,
+                )
+            }
             "keeps showing a prompt" -> InboxCard(
                 item.id, CardKind.HelperStuck, "A helper is stuck", "$who keeps hitting the same question, so HQ stopped answering it.",
                 whereOf(item, host), item.createdAt, CardIcon.Pause, sessionId, false, "Take a look", item.link, askedBy(item, host), item.state,

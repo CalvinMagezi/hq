@@ -17,6 +17,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.selection.selectable
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Icon
@@ -65,7 +66,7 @@ private fun Chips(ui: HelpersUi, actions: HelpersActions) {
             val count = if (f == HelperFilter.All) null else ui.count(f)
             val label = when (f) { HelperFilter.All -> "All"; HelperFilter.Needs -> "Needs your OK"; HelperFilter.Working -> "Working"; HelperFilter.Finished -> "Finished" }
             Box(
-                Modifier.heightIn(min = 48.dp).clip(CircleShape).clickable(role = Role.Tab, onClickLabel = label) { actions.onFilter(f) },
+                Modifier.heightIn(min = 48.dp).clip(CircleShape).selectable(selected = on, role = Role.Tab, onClick = { actions.onFilter(f) }),
                 contentAlignment = Alignment.Center,
             ) {
                 Box(
@@ -116,13 +117,17 @@ private fun HelperCardView(c: HelperCard, actions: HelpersActions) {
         }
         Text(listOf("${c.agent} · on ${c.where}", c.time).filter { it.isNotBlank() }.joinToString(" · "), style = HqType.BodySm, color = Mts.InkMuted, maxLines = 1, overflow = TextOverflow.Ellipsis)
         Text(c.line, style = HqType.BodySm, color = Mts.Ink, maxLines = 2, overflow = TextOverflow.Ellipsis)
-        if (waiting && c.ask != null) {
+        if (waiting && c.ask != null && HelperWords.canAnswerInline(c.ask)) {
+            if (c.ask.kind == AskKind.Command) Column(Modifier.fillMaxWidth().clip(RoundedCornerShape(8.dp)).background(Mts.Surface000).padding(horizontal = 10.dp, vertical = 8.dp)) {
+                c.ask.detail.forEach { Text(it, style = HqType.Caption.copy(fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace, fontSize = 12.sp, lineHeight = 17.sp), color = Mts.Ink) }
+            }
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                PrimaryButton("Allow once", Modifier.weight(1f)) { actions.onAllow(c.sessionId) }
-                OutlineButton("Not now", Modifier.weight(1f)) { actions.onNotNow(c.sessionId) }
+                PrimaryButton("Allow once", Modifier.weight(1f)) { actions.onAllow(c.sessionId, c.ask) }
+                OutlineButton("Not now", Modifier.weight(1f)) { actions.onNotNow(c.sessionId, c.ask) }
             }
             Text(HelperWords.allowHint(c.ask), style = SmallText, color = Mts.InkMuted)
         } else if (waiting) {
+            // What it asks is too long to read here, or cannot be read at all: the owner reads all of it on the helper's own page.
             PrimaryButton("Open helper", Modifier.fillMaxWidth()) { actions.onOpen(c.id) }
         }
     }

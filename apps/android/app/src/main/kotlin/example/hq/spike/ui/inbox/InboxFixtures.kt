@@ -27,6 +27,7 @@ fun inboxFixture(name: String?): InboxUi? {
     val real = realInbox(::ago)
     val base = InboxUi(loaded = true, needs = needs, updates = updates, done = done, checkedAt = "14:32")
     return when (name) {
+        "i-helpers" -> InboxUi(loaded = true, needs = helperNotices().needs, checkedAt = "14:32")
         "i-real" -> InboxUi(loaded = true, needs = real.needs, updates = real.updates, done = real.done, checkedAt = "14:32")
         "i-real-updates" -> InboxUi(loaded = true, tab = InboxTab.Updates, needs = real.needs, updates = real.updates, done = real.done, checkedAt = "14:32")
         "i-real-done" -> InboxUi(loaded = true, tab = InboxTab.Done, needs = real.needs, updates = real.updates, done = real.done, checkedAt = "14:32")
@@ -62,4 +63,14 @@ private fun realInbox(ago: (Long) -> String): InboxLists {
         item("h5", "FR-288: Passport and sharing", "", 60 * 24 * 4, "task_ready_for_review", emptyList(), state = "dismissed"),
     )
     return inboxLists(pending, history)
+}
+
+/** Two helpers at a Bash prompt as the supervisor words them: a short command the card can show whole, and one that wraps over five rows. */
+private fun helperNotices(): InboxLists {
+    fun notice(id: String, session: String, lines: List<String>) = InboxItem(
+        id, "action_needed", "Harness session 'claude in hq-oss' is waiting for you",
+        "Session $session on mac-mini is blocked on a prompt or approval:\n<hq-output>\n${lines.joinToString("\n")}\n</hq-output>\nRead it with harness_session_logs.",
+        "pending", OffsetDateTime.now(ZoneOffset.UTC).minusMinutes(3).toString(), null, "session-supervisor", null, listOf("approve", "reject"),
+    )
+    return inboxLists(listOf(notice("p1", "c2", example.hq.spike.ui.helpers.SHORT_COMMAND), notice("p2", "c1", example.hq.spike.ui.helpers.LONG_COMMAND)), emptyList())
 }

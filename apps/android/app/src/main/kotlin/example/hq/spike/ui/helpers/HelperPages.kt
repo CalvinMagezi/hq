@@ -43,6 +43,7 @@ import example.hq.spike.ui.chat.Spinner
 import example.hq.spike.ui.chat.blocks.IconAction
 import example.hq.spike.ui.inbox.PrimaryButton
 import example.hq.spike.ui.shell.HqIcons
+import example.hq.spike.ui.shell.consumeTouches
 import example.hq.spike.ui.theme.HqType
 import example.hq.spike.ui.theme.Mts
 
@@ -95,7 +96,7 @@ private fun statusOf(card: HelperCard): Pair<String, Color> {
     return listOf(HelperWords.stateWords(card.state), card.time).filter { it.isNotBlank() }.joinToString(" · ") to color
 }
 
-private fun Modifier.page() = fillMaxSize().background(Mts.Surface000).statusBarsPadding().imePadding().navigationBarsPadding()
+private fun Modifier.page() = fillMaxSize().background(Mts.Surface000).consumeTouches().statusBarsPadding().imePadding().navigationBarsPadding()
 
 @Composable
 private fun Caps(text: String) = Text(text.uppercase(), style = HqType.Group.copy(letterSpacing = 0.06.em), color = Mts.InkMuted)
@@ -215,15 +216,15 @@ private fun AskPage(card: HelperCard, open: HelperOpen, actions: HelpersActions)
                 Text(ask.subject, style = HqType.BodyBold.copy(fontFamily = FontFamily.Monospace), color = Mts.Ink)
             } else Column(Modifier.fillMaxWidth().clip(shape).background(Mts.Surface100).border(1.dp, Mts.Hairline, shape).padding(16.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
                 Caps(if (ask.kind == AskKind.Command) "Command" else "It asked")
-                ask.detail?.let { Text(it, style = HqType.BodyBold.copy(fontFamily = FontFamily.Monospace, fontSize = 14.sp, lineHeight = 20.sp), color = Mts.Ink) }
+                ask.detail.forEach { Text(it, style = HqType.BodyBold.copy(fontFamily = FontFamily.Monospace, fontSize = 14.sp, lineHeight = 20.sp), color = Mts.Ink) }
                 Text(ask.question, style = HqType.BodySm, color = Mts.InkMuted)
             }
             Outcome(HqIcons.Check, Mts.BrandBlue, "If you allow it", HelperWords.ifAllowed(ask, card.where))
             Outcome(HqIcons.Pause, Mts.InkMuted, "If you say not now", HelperWords.IF_NOT_NOW)
             open.error?.let { Text(it, style = HqType.BodySm, color = Mts.Amber) }
             Row(Modifier.padding(top = 4.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                PrimaryButton(if (open.answering) "Answering…" else "Allow once", Modifier.weight(1f), enabled = !open.answering) { actions.onAllow(card.sessionId) }
-                OutlineButton("Not now", Modifier.weight(1f), enabled = !open.answering) { actions.onNotNow(card.sessionId) }
+                PrimaryButton(if (open.answering) "Answering…" else "Allow once", Modifier.weight(1f), enabled = !open.answering) { actions.onAllow(card.sessionId, ask) }
+                OutlineButton("Not now", Modifier.weight(1f), enabled = !open.answering) { actions.onNotNow(card.sessionId, ask) }
             }
             Row(
                 Modifier.heightIn(min = 48.dp).clip(RoundedCornerShape(12.dp)).clickable(role = Role.Button, onClick = actions.onToggleRaw).padding(end = 12.dp),
@@ -269,7 +270,7 @@ private fun TechnicalPage(card: HelperCard, open: HelperOpen, actions: HelpersAc
         PageBar("Technical details", statusOf(card), { actions.onTechnical(false) })
         Column(Modifier.weight(1f).verticalScroll(rememberScrollState(), reverseScrolling = true).padding(start = 16.dp, end = 16.dp, bottom = 8.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
             Text("Terminal · read only", style = SmallText, color = Mts.InkMuted)
-            Terminal(open.screen.map { HelperWords.cleanLine(it) }.filter { it.isNotEmpty() }.takeLast(TECH_LINES))
+            Terminal(HelperWords.rawTail(open.screen, TECH_LINES))
         }
         open.error?.let { Text(it, style = HqType.BodySm, color = Mts.Amber, modifier = Modifier.padding(horizontal = 16.dp)) }
         Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(horizontal = 16.dp, vertical = 4.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -311,7 +312,7 @@ private fun RenameDialog(text: String, actions: HelpersActions) {
         Column(Modifier.padding(start = 24.dp, top = 220.dp, end = 24.dp).fillMaxWidth().clip(RoundedCornerShape(28.dp)).background(Mts.Surface200).padding(24.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
             Text("Rename this helper", style = HqType.H2, color = Mts.Ink)
             val shape = RoundedCornerShape(12.dp)
-            BasicTextField(text, { actions.onRename(it) }, Modifier.fillMaxWidth().heightIn(min = 48.dp).clip(shape).background(Mts.Surface000).border(1.dp, Mts.Line, shape).padding(12.dp), textStyle = HqType.Body.copy(color = Mts.Ink), cursorBrush = SolidColor(Mts.Ink))
+            BasicTextField(text, { actions.onRename(it) }, Modifier.fillMaxWidth().heightIn(min = 48.dp).clip(shape).background(Mts.Surface000).border(1.dp, Mts.Line, shape).padding(12.dp), textStyle = HqType.Body.copy(color = Mts.Ink), cursorBrush = SolidColor(Mts.Ink), singleLine = true)
             PrimaryButton("Save", Modifier.fillMaxWidth(), enabled = text.isNotBlank(), onClick = actions.onSaveRename)
         }
     }

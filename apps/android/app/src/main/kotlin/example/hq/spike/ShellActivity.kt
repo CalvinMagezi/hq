@@ -157,9 +157,10 @@ class ShellActivity : ComponentActivity() {
     /** "Check it" on a task waiting for review opens that task over the Inbox; any other card sends the owner to Helpers. */
     private fun openFromInbox(card: InboxCard, go: (Place) -> Unit) {
         when {
-            card.kind != CardKind.TaskReview -> go(Place.Helpers)
-            card.taskRef == null -> go(Place.Tasks)
-            else -> tasks.openRef(card.taskRef) { go(Place.Tasks) }
+            card.kind == CardKind.TaskReview && card.taskRef != null -> tasks.openRef(card.taskRef) { go(Place.Tasks) }
+            card.kind == CardKind.TaskReview -> go(Place.Tasks)
+            card.sessionId != null -> { go(Place.Helpers); helpers.openSession(card.sessionId) }
+            else -> go(Place.Helpers)
         }
     }
 

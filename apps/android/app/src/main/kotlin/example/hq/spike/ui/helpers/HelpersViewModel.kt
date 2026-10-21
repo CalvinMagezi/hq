@@ -81,8 +81,9 @@ class HelpersActions(
     val onToggleFinished: () -> Unit = {},
     val onOpen: (String) -> Unit = {},
     val onClose: () -> Unit = {},
-    val onAllow: (String) -> Unit = {},
-    val onNotNow: (String) -> Unit = {},
+    /** The helper and the dialog the button was drawn for: the answer is checked against that dialog, not against whatever is on the list by then. */
+    val onAllow: (String, BlockedPrompt?) -> Unit = { _, _ -> },
+    val onNotNow: (String, BlockedPrompt?) -> Unit = { _, _ -> },
     val onToggleRaw: () -> Unit = {},
     val onSeeHelper: () -> Unit = {},
     val onSeeAsk: () -> Unit = {},
@@ -116,7 +117,7 @@ class HelpersViewModel(app: Application) : AndroidViewModel(app) {
     private val refreshLock = Mutex()
     @Volatile private var generation = 0
     /** For each helper answered from here: the dialog that was answered, hidden until the screen shows a different one. */
-    private val answered = mutableMapOf<String, List<String>>()
+    private val answered = mutableMapOf<String, Pair<List<String>, Long>>()
 
     /** The number on the Helpers tab: helpers waiting for the owner. */
     val waiting: Int get() = _state.value.count(HelperFilter.Needs)
@@ -126,20 +127,20 @@ class HelpersViewModel(app: Application) : AndroidViewModel(app) {
         onToggleFinished = { _state.update { it.copy(finishedOpen = !it.finishedOpen) } },
         onOpen = ::open,
         onClose = ::close,
-        onAllow = { answer(it, "enter", "Allowed once.") },
-        onNotNow = { answer(it, "esc", "Not now. It waits.") },
+        onAllow = { id, shown -> answer(id, "enter", "Allowed once.", shown) },
+        onNotNow = { id, shown -> answer(id, "esc", "Not now. It waits.", shown) },
         onToggleRaw = { editOpen { it.copy(raw = !it.raw) } },
         onSeeHelper = { editOpen { it.copy(page = HelperPage.Detail) } },
         onSeeAsk = { editOpen { it.copy(page = HelperPage.Ask) } },
         onDraft = { t -> editOpen { it.copy(draft = t, error = null) } },
         onSend = ::sendDraft,
-        onQuick = ::sendText,
+        onQuick = { sendText(it, clearDraft = false) },
         onKey = ::sendKey,
         onMenu = { m -> editOpen { it.copy(menu = m) } },
         onTechnical = { t -> editOpen { it.copy(technical = t, menu = false) } },
         onAskStop = { a -> editOpen { it.copy(confirmStop = a, menu = false) } },
         onStop = ::stop,
-        onRename = { r -> editOpen { it.copy(rename = r?.let(HelperWords::oneLineLabel), menu = false) } },
+        onRename = { r -> editOpen { it.copy(rename = r?.let(HelperWords::typedLabel), menu = false) } },
         onSaveRename = ::saveRename,
         onStartOpen = ::openStart,
         onStartClose = { _state.update { it.copy(start = null) } },
@@ -184,7 +185,7 @@ class HelpersViewModel(app: Application) : AndroidViewModel(app) {
         // An answer finished while this read was out, so what it saw is older than the answer: drop it, the next poll is fresh.
         if (frozen || started != generation) return@withLock
         val read = screens.mapNotNull { (id, lines) -> rows.first { it.id == id }.takeIf { it.agentStatus == "blocked" }?.let { HelperWords.blocked(lines)?.let { a -> id to a } } }.toMap()
-        val asks = HelperWords.visibleAsks(read, answered)
+        val asks = HelperWords.visibleAsks(read, answered, System.currentTimeMillis())
         val words = screens.mapNotNull { (id, lines) -> HelperWords.lastWords(lines)?.let { id to it } }.toMap()
         _state.update { it.copy(loaded = true, offline = false, rows = rows, asks = asks, lastWords = words, now = LocalDateTime.now(ZoneOffset.UTC)) }
         val open = _state.value.open
@@ -206,6 +207,15 @@ class HelpersViewModel(app: Application) : AndroidViewModel(app) {
         watchScreen(id)
     }
 
+    /** Opens a helper from outside the list (an Inbox card): its own page, loading the list first when it does not have it yet. */
+    fun openSession(id: String) {
+        if (_state.value.cards.any { it.id == id }) { open(id); return }
+        viewModelScope.launch {
+            refresh()
+            if (_state.value.cards.any { it.id == id }) open(id) else say("That helper is not in the list.")
+        }
+    }
+
     private fun close() {
         screenJob?.cancel()
         _state.update { it.copy(open = null) }
@@ -225,28 +235,25 @@ class HelpersViewModel(app: Application) : AndroidViewModel(app) {
 
     /**
      * Sends enter or esc to a helper that is waiting, but only after a fresh read of its live screen shows the very dialog the
-     * owner was shown (every line of it, cursor included), and, for enter, a highlighted choice that is a plain yes.
+     * owner was shown ([shown], the one the button was drawn for), and, for enter, a highlighted choice that is a plain yes.
      */
-    private fun answer(id: String, key: String, done: String) {
+    private fun answer(id: String, key: String, done: String, shown: BlockedPrompt?) {
         if (!answering.add(id)) return
         if (_state.value.open?.id == id) editOpen { it.copy(answering = true, error = null) }
         viewModelScope.launch {
             try {
-                val shown = _state.value.asks[id]
-                val screen = client.helperScreen(id)
-                val check = if (screen.live) HelperWords.checkAnswer(shown, screen.lines, key) else null
-                when (check) {
-                    AnswerCheck.Ok -> {
-                        client.sendSessionKeys(id, listOf(key))
-                        generation++
-                        shown?.let { answered[id] = it.block }
-                        if (_state.value.open?.id == id) { screenJob?.cancel(); _state.update { it.copy(open = null) } }
-                        say(done)
-                        refresh()
-                    }
-                    null -> refuse(id, "Couldn't read its screen just now. Look again before you answer.")
-                    AnswerCheck.NoPrompt, AnswerCheck.Changed -> refuse(id, "It asked something else just now. Look again before you answer.")
-                    AnswerCheck.BroadYes, AnswerCheck.NoCursor -> refuse(id, "Its highlighted choice would say yes for good, or cannot be read. Open the helper to pick the answer.")
+                // A read of its own, not the poll's: the poll's is cached for a second and could be older than the dialog.
+                val screen = client.helperScreen(id, CHECK_LINES)
+                val check = HelperWords.checkAnswer(shown, screen.lines, key, screen.live)
+                if (check == AnswerCheck.Ok) {
+                    client.sendSessionKeys(id, listOf(key))
+                    generation++
+                    answered[id] = shown!!.block to System.currentTimeMillis()
+                    closeIfOpen(id)
+                    say(done)
+                    refresh()
+                } else {
+                    refuse(id, HelperWords.checkWords(check))
                 }
             } catch (e: HqUnavailable) {
                 if (e.message?.contains("HTTP 409") == true) { closeIfOpen(id); say("That helper is no longer running."); refresh() }
@@ -273,31 +280,43 @@ class HelpersViewModel(app: Application) : AndroidViewModel(app) {
 
     private fun sendDraft() {
         val text = _state.value.open?.draft?.trim().orEmpty()
-        if (text.isNotEmpty()) sendText(text)
+        if (text.isNotEmpty()) sendText(text, clearDraft = true)
     }
 
-    private fun sendText(text: String) {
+    /** Edits the open helper's page only if it is still the helper [id] that the work was started for. */
+    private fun editFor(id: String, change: (HelperOpen) -> HelperOpen) = editOpen { if (it.id == id) change(it) else it }
+
+    private fun sendText(text: String, clearDraft: Boolean) {
         val id = _state.value.open?.id ?: return
         if (_state.value.open?.sending == true) return
         editOpen { it.copy(sending = true, error = null) }
         viewModelScope.launch {
             try {
                 client.sendHelperText(id, text)
-                editOpen { it.copy(sending = false, draft = "") }
+                editFor(id) { it.copy(sending = false, draft = if (clearDraft) "" else it.draft) }
                 say("Sent.")
             } catch (e: HqUnavailable) {
                 val conflict = e.message?.contains("HTTP 409") == true
-                val waiting = _state.value.cards.firstOrNull { it.id == id }?.state == HelperState.NeedsOk
-                val why = when { !conflict -> "Couldn't send that. HQ didn't reply."; waiting -> "It is waiting for your OK first."; else -> "That helper is no longer running." }
-                editOpen { it.copy(sending = false, error = why) }
+                val why = if (conflict) "HQ would not pass that on: the helper is waiting at a question, or is no longer running." else "Couldn't send that. HQ didn't reply."
+                editFor(id) { it.copy(sending = false, error = why) }
             }
         }
     }
 
+    /** One key into the open helper's terminal, from the keys row. Owners use it when a prompt cannot be answered with Allow once. */
     private fun sendKey(key: String) {
         val id = _state.value.open?.id ?: return
+        if (!answering.add(id)) return
         viewModelScope.launch {
-            try { client.sendSessionKeys(id, listOf(key)) } catch (e: HqUnavailable) { editOpen { it.copy(error = "Couldn't send that key. HQ didn't reply.") } }
+            try {
+                client.sendSessionKeys(id, listOf(key))
+                generation++
+                answered.remove(id)
+            } catch (e: HqUnavailable) {
+                editFor(id) { it.copy(error = "Couldn't send that key. HQ didn't reply.") }
+            } finally {
+                answering.remove(id)
+            }
         }
     }
 
@@ -306,27 +325,32 @@ class HelpersViewModel(app: Application) : AndroidViewModel(app) {
         viewModelScope.launch {
             try {
                 client.stopHelper(id)
-                screenJob?.cancel()
-                _state.update { it.copy(open = null) }
+                closeIfOpen(id)
                 say("Stopped.")
                 refresh()
             } catch (e: HqUnavailable) {
-                editOpen { it.copy(confirmStop = false, error = "Couldn't stop it. HQ didn't reply.") }
+                editFor(id) { it.copy(confirmStop = false, error = "Couldn't stop it. HQ didn't reply.") }
             }
         }
     }
 
     private fun saveRename() {
         val o = _state.value.open ?: return
-        val name = o.rename?.trim().orEmpty()
+        val id = o.id
+        val name = HelperWords.oneLineLabel(o.rename.orEmpty())
         if (name.isEmpty()) { editOpen { it.copy(rename = null) }; return }
         viewModelScope.launch {
             try {
-                client.renameHelper(o.id, HelperWords.oneLineLabel(name))
-                editOpen { it.copy(rename = null) }
+                client.renameHelper(id, name)
+                editFor(id) { it.copy(rename = null) }
                 refresh()
             } catch (e: HqUnavailable) {
-                editOpen { it.copy(rename = null, error = "Couldn't rename it. HQ didn't reply.") }
+                val why = when {
+                    e.message?.contains("HTTP 400") == true -> "HQ did not accept that name. Use plain words."
+                    e.message?.contains("HTTP 404") == true -> "That helper is not there any more."
+                    else -> "Couldn't rename it. HQ didn't reply."
+                }
+                editFor(id) { it.copy(rename = null, error = why) }
             }
         }
     }
@@ -358,21 +382,26 @@ class HelpersViewModel(app: Application) : AndroidViewModel(app) {
                 refresh()
                 open(id)
             } catch (e: HqUnavailable) {
-                _state.update { s -> s.copy(start = s.start?.copy(busy = false, error = "Couldn't start it. ${startReason(e)}")) }
+                _state.update { s -> s.copy(start = s.start?.copy(busy = false, error = startReason(e))) }
+                // A start that took too long may still have started: show what is on the list before the owner tries again.
+                if (e.message?.startsWith("HTTP ") != true) refresh()
             }
         }
     }
 
     private fun startReason(e: HqUnavailable) = when {
-        e.message?.contains("HTTP 409") == true -> "That computer is not ready for another helper."
-        e.message?.contains("HTTP 404") == true -> "This edition of HQ cannot start helpers."
-        e.message?.contains("HTTP 400") == true -> "HQ did not accept that text. Try shorter, plain words."
-        else -> "HQ didn't reply."
+        e.message?.contains("HTTP 409") == true -> "Couldn't start it. That computer is not ready for another helper."
+        e.message?.contains("HTTP 404") == true -> "Couldn't start it. HQ does not know that computer, or this edition cannot start helpers."
+        e.message?.contains("HTTP 400") == true -> "Couldn't start it. HQ did not accept that text. Try shorter, plain words."
+        e.message?.startsWith("HTTP ") == true -> "Couldn't start it. HQ answered with an error."
+        else -> "HQ did not answer in time. The helper may still be starting. Check the list before you try again."
     }
 
     private companion object {
         const val POLL_MS = 8_000L
         const val SCREEN_MS = 5_000L
         const val LINE_MS = 4_000L
+        /** More lines than the poll reads, so the check never shares the poll's cached read. */
+        const val CHECK_LINES = 81
     }
 }

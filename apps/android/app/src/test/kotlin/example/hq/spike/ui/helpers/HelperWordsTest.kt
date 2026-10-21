@@ -81,7 +81,10 @@ class HelperWordsTest {
 
     @Test fun aPathIsReducedToItsFileName() {
         val ask = HelperWords.blocked(listOf("Do you want to edit /Users/x/work/src/main.rs?"))!!
-        assertEquals("main.rs", ask.subject)
+        // The owner sees the whole path: "hosts" could be /etc/hosts or a file of the same name in the project.
+        assertEquals("/Users/x/work/src/main.rs", ask.subject)
+        assertEquals("main.rs", HelperWords.fileName(ask))
+        assertEquals("Wants to edit one file: /Users/x/work/src/main.rs", HelperWords.askLine(ask))
     }
 
     @Test fun aCreateQuestionAndACommandQuestionAreTold() {
@@ -199,8 +202,9 @@ class HelperWordsTest {
     @Test fun theCommandIsShownToTheOwner() {
         val ask = HelperWords.blocked(bash("rm -rf build"))!!
         assertEquals(AskKind.Command, ask.kind)
-        assertTrue(ask.detail!!.contains("rm -rf build"))
-        assertEquals("Wants to run: rm -rf build", HelperWords.askLine(ask))
+        assertTrue(ask.detail.any { it.contains("rm -rf build") })
+        assertEquals("Wants to run a command", HelperWords.askLine(ask))
+        assertTrue(HelperWords.askText(ask).contains("rm -rf build"))
     }
 
     @Test fun theCursorMovingMakesItADifferentDialog() {
@@ -229,7 +233,8 @@ class HelperWordsTest {
         assertFalse(HelperWords.enterMeansOnce(noCursor))
         assertEquals(AnswerCheck.NoCursor, HelperWords.checkAnswer(HelperWords.blocked(noCursor), noCursor, "enter"))
         assertEquals(AnswerCheck.Ok, HelperWords.checkAnswer(HelperWords.blocked(noCursor), noCursor, "esc"))
-        assertTrue(HelperWords.enterMeansOnce(listOf("Which colour do you prefer?")))
+        // Nothing at all to read the choice from: Enter is not safe either.
+        assertFalse(HelperWords.enterMeansOnce(listOf("Which colour do you prefer?")))
     }
 
     @Test fun otherCursorGlyphsAreRead() {
@@ -254,12 +259,12 @@ class HelperWordsTest {
     @Test fun anAnsweredDialogStaysHiddenUntilTheScreenShowsAnother() {
         val one = HelperWords.blocked(bash("ls"))!!
         val two = HelperWords.blocked(bash("pwd"))!!
-        val answered = mutableMapOf("h" to one.block)
-        assertEquals(emptyMap<String, BlockedPrompt>(), HelperWords.visibleAsks(mapOf("h" to one), answered))
-        assertEquals(mapOf("h" to two), HelperWords.visibleAsks(mapOf("h" to two), answered))
+        val answered = mutableMapOf("h" to (one.block to 1_000L))
+        assertEquals(emptyMap<String, BlockedPrompt>(), HelperWords.visibleAsks(mapOf("h" to one), answered, 2_000L))
+        assertEquals(mapOf("h" to two), HelperWords.visibleAsks(mapOf("h" to two), answered, 2_000L))
         assertTrue(answered.isEmpty())
-        val again = mutableMapOf("h" to one.block)
-        HelperWords.visibleAsks(emptyMap(), again)
+        val again = mutableMapOf("h" to (one.block to 1_000L))
+        HelperWords.visibleAsks(emptyMap(), again, 2_000L)
         assertTrue(again.isEmpty())
     }
 
@@ -318,5 +323,78 @@ class HelperWordsTest {
         assertEquals("Stopped 26 d ago", cards[0].line)
         assertEquals("26 d ago", cards[0].time)
         assertEquals("Finished 1 d ago", cards[1].line)
+    }
+
+    // A long command wraps over several rows: the head of it must be shown, and must be part of what is compared.
+    private fun wrapped(head: String) = listOf(
+        "Bash command",
+        "  $head --flag-one --flag-two --flag-three",
+        "  --flag-four --flag-five --flag-six --flag-seven",
+        "  --flag-eight --flag-nine --flag-ten --flag-eleven",
+        "  > /tmp/out.log",
+        "Do you want to proceed?",
+        "❯ 1. Yes",
+        "  2. No",
+    )
+
+    @Test fun theWholeOfAWrappedCommandIsShownAndCompared() {
+        val a = HelperWords.blocked(wrapped("rm -rf build"))!!
+        assertEquals(5, a.detail.size)
+        assertEquals("rm -rf build --flag-one --flag-two --flag-three", a.detail[1])
+        val b = HelperWords.blocked(wrapped("rm -rf /"))!!
+        assertFalse(HelperWords.sameDialog(a, b))
+        assertEquals(AnswerCheck.Changed, HelperWords.checkAnswer(a, wrapped("rm -rf /"), "enter"))
+        assertEquals(AnswerCheck.Ok, HelperWords.checkAnswer(a, wrapped("rm -rf build"), "enter"))
+    }
+
+    @Test fun aCardAnswersInlineOnlyWhenEverythingToDecideIsOnIt() {
+        assertTrue(HelperWords.canAnswerInline(HelperWords.blocked(bash("ls -la"))!!))
+        assertFalse(HelperWords.canAnswerInline(HelperWords.blocked(wrapped("rm -rf build"))!!))
+        assertFalse(HelperWords.canAnswerInline(HelperWords.blocked(listOf("Would you like to proceed?", "❯ 1. Yes", "  2. No"))!!))
+        assertTrue(HelperWords.canAnswerInline(HelperWords.blocked(editScreen)!!))
+        val long = "/very/long/" + "folder/".repeat(30) + "file.txt"
+        assertFalse(HelperWords.canAnswerInline(HelperWords.blocked(listOf("Do you want to edit $long?", "❯ 1. Yes", "  2. No"))!!))
+        assertTrue(HelperWords.canAnswerInline(HelperWords.blocked(listOf("Which colour do you prefer?"))!!))
+    }
+
+    @Test fun aNoticeQuotesOnlyTheEndOfTheScreenAndStillMatchesALongerRead() {
+        val notice = "Session s-1 on mac is blocked on a prompt or approval:\n<hq-output>\n${editScreen.takeLast(4).joinToString("\n")}\n</hq-output>\nRead it with x"
+        val quoted = HelperWords.excerptLines(notice)
+        assertEquals(4, quoted.size)
+        val shown = HelperWords.blocked(quoted)!!
+        assertEquals(AnswerCheck.Ok, HelperWords.checkAnswer(shown, listOf("older output") + editScreen, "enter"))
+        // The same question with different options is a different dialog.
+        val other = editScreen.map { it.replace("2. Yes, allow all edits during this session", "2. Yes, and delete everything") }
+        assertEquals(AnswerCheck.Changed, HelperWords.checkAnswer(shown, other, "enter"))
+        assertEquals(emptyList<String>(), HelperWords.excerptLines("no markers here"))
+    }
+
+    @Test fun aReadThatIsNotLiveIsNeverUsed() {
+        val ask = HelperWords.blocked(editScreen)
+        assertEquals(AnswerCheck.NotLive, HelperWords.checkAnswer(ask, editScreen, "esc", live = false))
+        assertTrue(HelperWords.checkWords(AnswerCheck.NotLive).isNotBlank())
+        assertEquals("", HelperWords.checkWords(AnswerCheck.Ok))
+    }
+
+    @Test fun anAnsweredDialogComesBackAfterTheGraceIfItIsStillUp() {
+        val one = HelperWords.blocked(bash("ls"))!!
+        val answered = mutableMapOf("h" to (one.block to 0L))
+        assertTrue(HelperWords.visibleAsks(mapOf("h" to one), answered, HelperWords.ANSWERED_GRACE_MS - 1).isEmpty())
+        assertEquals(mapOf("h" to one), HelperWords.visibleAsks(mapOf("h" to one), answered, HelperWords.ANSWERED_GRACE_MS))
+        assertTrue(answered.isEmpty())
+    }
+
+    @Test fun aParentheticalConditionIsNotAKeyHint() {
+        listOf("Yes (don't ask again)", "Yes (for this session)", "Yes (always)").forEach {
+            assertFalse(it, HelperWords.enterMeansOnce(listOf("Do you want to proceed?", "❯ 1. $it", "  2. No")))
+        }
+        assertTrue(HelperWords.enterMeansOnce(listOf("Do you want to proceed?", "❯ 1. Yes (y)", "  2. No (n)")))
+    }
+
+    @Test fun aLabelKeepsItsTrailingSpaceWhileItIsTypedAndLosesItOnSave() {
+        assertEquals("Fix ", HelperWords.typedLabel("Fix "))
+        assertEquals("Fix the build", HelperWords.typedLabel("Fix the build"))
+        assertEquals("Fix", HelperWords.oneLineLabel("Fix "))
+        assertEquals("a b", HelperWords.typedLabel("a\u0007 b"))
     }
 }

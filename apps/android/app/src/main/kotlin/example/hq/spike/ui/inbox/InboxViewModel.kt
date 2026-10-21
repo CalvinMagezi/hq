@@ -5,6 +5,8 @@ import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import example.hq.spike.data.HqServices
 import example.hq.spike.data.HqUnavailable
+import example.hq.spike.ui.helpers.AnswerCheck
+import example.hq.spike.ui.helpers.HelperWords
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -101,8 +103,8 @@ class InboxViewModel(app: Application) : AndroidViewModel(app) {
         _state.update { it.copy(answering = it.answering + (card.id to Answer.Sending)) }
         viewModelScope.launch {
             try {
-                // A helper is answered in its own terminal first; the inbox row is only a record of the answer.
-                if (card.kind == CardKind.HelperAsks && card.sessionId != null) client.sendSessionKeys(card.sessionId, listOf(if (allow) "enter" else "esc"))
+                // A helper is answered in its own terminal first, and only if its screen still shows the dialog this card quoted.
+                if (card.kind == CardKind.HelperAsks && card.sessionId != null && !answerHelper(card, if (allow) "enter" else "esc")) return@launch
                 client.answerNotification(card.id, if (allow) "approve" else "reject")
                 _state.update { it.copy(answering = it.answering - card.id, details = null, line = InboxLine(if (allow) "Allowed." else "Not now. Nothing was done.")) }
                 refresh()
@@ -115,6 +117,25 @@ class InboxViewModel(app: Application) : AndroidViewModel(app) {
                 }
             }
         }
+    }
+
+    /** Sends [key] to the helper if its live screen still shows the quoted dialog; says why and returns false if not. */
+    private suspend fun answerHelper(card: InboxCard, key: String): Boolean {
+        val screen = client.helperScreen(card.sessionId!!, CHECK_LINES)
+        val check = HelperWords.checkAnswer(HelperWords.blocked(card.excerpt), screen.lines, key, screen.live)
+        if (check != AnswerCheck.Ok) {
+            _state.update { it.copy(answering = it.answering + (card.id to Answer.Failed(HelperWords.checkWords(check)))) }
+            refresh()
+            return false
+        }
+        try {
+            client.sendSessionKeys(card.sessionId, listOf(key))
+        } catch (e: HqUnavailable) {
+            if (e.message?.contains("HTTP 409") != true) throw e
+            _state.update { it.copy(answering = it.answering + (card.id to Answer.Failed("That helper is no longer running."))) }
+            return false
+        }
+        return true
     }
 
     /** Hides the updates now and dismisses them after a few seconds; Undo inside that time puts them back. */
@@ -148,6 +169,8 @@ class InboxViewModel(app: Application) : AndroidViewModel(app) {
         const val POLL_MS = 20_000L
         const val UNDO_MS = 5_000L
         const val HISTORY_LIMIT = 30
+        /** More lines than the Helpers poll reads, so the check never shares its cached read. */
+        const val CHECK_LINES = 81
     }
 }
 

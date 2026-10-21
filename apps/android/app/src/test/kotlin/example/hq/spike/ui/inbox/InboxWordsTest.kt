@@ -30,7 +30,36 @@ class InboxWordsTest {
         assertEquals("mac-mini", c.where)
         assertTrue(c.canAllow)
         assertEquals("Allow once", c.allowLabel)
-        assertTrue(c.body.startsWith("It stopped to ask:"))
+        assertEquals("Wants to edit one file: Chat.dc.html", c.body)
+        assertEquals(listOf("Do you want to edit Chat.dc.html?", "1. Yes", "2. No"), c.excerpt)
+    }
+
+    private fun bashNotice(vararg command: String) = "Session s-7 on mac-mini is blocked on a prompt or approval:\n<hq-output>\n" +
+        (listOf("Bash command") + command + listOf("Do you want to proceed?", "❯ 1. Yes", "  2. No")).joinToString("\n") + "\n</hq-output>\nRead it with x"
+
+    @Test fun aShortCommandIsShownOnTheCardAndCanBeAnsweredThere() {
+        val c = InboxWords.card(item("Harness session 'claude in x' is waiting for you", bashNotice("ls -la"), source = "session-supervisor"))
+        assertTrue(c.canAllow)
+        assertEquals("Allow once", c.allowLabel)
+        assertTrue(c.body.contains("ls -la"))
+    }
+
+    @Test fun aLongCommandOrAPlanIsNotAnsweredFromTheCardOrTheShade() {
+        val long = InboxWords.card(item("Harness session 'claude in x' is waiting for you", bashNotice("rm -rf build", "--flag-one --flag-two", "--flag-three --flag-four", "> /tmp/out.log"), source = "session-supervisor"))
+        assertFalse(long.canAllow)
+        assertEquals("Open helper", long.allowLabel)
+        assertEquals("s-7", long.sessionId)
+        val plan = "Session s-8 on mac is blocked on a prompt or approval:\n<hq-output>\nWould you like to proceed?\n❯ 1. Yes, and auto-accept edits\n  2. No\n</hq-output>"
+        val p = InboxWords.card(item("Harness session 'claude in x' is waiting for you", plan, source = "session-supervisor"))
+        assertFalse(p.canAllow)
+        assertEquals("Open helper", p.allowLabel)
+    }
+
+    @Test fun aNoticeThatQuotesNoQuestionCannotBeAnsweredFromTheCard() {
+        val c = InboxWords.card(item("Harness session 'claude in x' is waiting for you", "Session s-9 on mac is blocked on a prompt or approval:\nRead it with x", source = "session-supervisor"))
+        assertFalse(c.canAllow)
+        assertEquals("Open helper", c.allowLabel)
+        assertEquals(emptyList<String>(), c.excerpt)
     }
 
     @Test fun aHelperWithNoSessionInTheTextCannotBeAllowedFromHere() {

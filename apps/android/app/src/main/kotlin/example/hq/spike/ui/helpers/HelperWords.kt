@@ -9,19 +9,22 @@ enum class HelperState { NeedsOk, Working, Ready, Offline, Lost, Finished, Stopp
 
 enum class AskKind { Edit, Create, Command, Plan, Other }
 
-/** What a blocked helper is asking, read from the end of its terminal: [question] as written, [subject] the file when there is one. */
+/** What a blocked helper is asking, read from the end of its terminal. */
 data class BlockedPrompt(
     val kind: AskKind,
+    /** The file as the dialog wrote it, a path or a name; null for anything that is not about one file. */
     val subject: String?,
     val question: String,
-    /** The dialog as drawn (what led up to the question, the question, the options, the cursor): two prompts are the same only if all of it matches. */
+    /** The dialog as drawn: the lines leading up to the question, the question, the options and the cursor. Two prompts are the same only if all of it matches. */
     val block: List<String> = emptyList(),
-    /** What it wants to do, in its own words: the command or the lines above the question. */
-    val detail: String? = null,
+    /** What it wants to do, in its own words: every line between the top of the dialog and the question. */
+    val detail: List<String> = emptyList(),
+    /** How many lines at the end of [block] are the question and what follows it: a later read must match at least these. */
+    val core: Int = 0,
 )
 
 /** The verdict on a tap of Allow once or Not now, from a fresh read of the screen. */
-enum class AnswerCheck { Ok, NoPrompt, Changed, BroadYes, NoCursor }
+enum class AnswerCheck { Ok, NoPrompt, Changed, BroadYes, NoCursor, NotLive }
 
 /** A helper as a card: the job as the title, who and where, and one line on what it does or asks. */
 data class HelperCard(
@@ -128,12 +131,15 @@ object HelperWords {
     fun lastWords(lines: List<String>): String? =
         lines.asReversed().map { cleanLine(it) }.firstOrNull { l -> l.any(Char::isLetter) && l.length > 2 }?.let { if (it.length > MAX_LINE) it.take(MAX_LINE).trimEnd() + "…" else it }
 
-    /** A label the server accepts: the first line only, no control characters, at most 80 characters (cut between whole characters). */
-    fun oneLineLabel(text: String): String {
+    /** What a label field may hold while it is typed: the first line, no control characters, at most 80 characters. A trailing space stays, or words could not be typed. */
+    fun typedLabel(text: String): String {
         val first = text.trimStart().lineSequence().firstOrNull().orEmpty().filter { !it.isISOControl() }
         val cut = first.codePointCount(0, first.length).takeIf { it > MAX_TITLE }?.let { first.offsetByCodePoints(0, MAX_TITLE) } ?: first.length
-        return first.substring(0, cut).trim()
+        return first.substring(0, cut)
     }
+
+    /** A label the server accepts: [typedLabel] with its ends trimmed. */
+    fun oneLineLabel(text: String): String = typedLabel(text).trim()
 
     fun cleanLine(line: String): String = line.replace(BOX, " ").replace(Regex("\\s+"), " ").trim()
 
@@ -142,10 +148,16 @@ object HelperWords {
     private val OPTION_LINE = Regex("^(?:[\\u276F\\u203A>\\u2192\\u25B6\\u25B8\\u279C\\u25CF]\\s*)?\\d+[.)]\\s+\\S")
     private val POINTER = Regex("^(?:[\\u276F\\u203A>\\u2192\\u25B6\\u25B8\\u279C]|[\\u25CF\\u25CB](?=\\s*\\d+[.)]))\\s*(.+)$")
     private val PLAN = Regex("(?i)would you like to proceed|ready to code|exit plan|\\bplan\\b")
-    private val KEY_HINT = Regex("\\s*\\([^)]*\\)\\s*$")
+    /** A trailing "(y)", "(esc)" or "(shift+tab)": what the key is, not a condition on the choice. */
+    private val KEY_HINT = Regex("(?i)\\s*\\((?:[a-z]|esc|enter|tab|shift\\+tab|ctrl\\+\\w|alt\\+\\w)\\)\\s*$")
     private val HINT_LINE = Regex("(?i)^(?:esc|enter|tab|press|use|\\u2191|ctrl)\\b")
-    private const val CONTEXT = 6
-    private const val WINDOW = 20
+    private const val CONTEXT = 10
+    private const val WINDOW = 28
+    private const val MAX_AFTER_QUESTION = 12
+    private const val INLINE_DETAIL_LINES = 3
+    private const val INLINE_CHARS = 120
+    /** How long an answered dialog stays hidden before it may be shown again, in case the key did nothing. */
+    const val ANSWERED_GRACE_MS = 10_000L
 
     /** What a plain "yes, once" is called by the agents HQ drives; anything else (for the session, always, and so on) is not once. */
     private val ONCE = setOf("yes", "yes, proceed", "yes, allow once", "allow", "allow once", "approve", "accept", "ok", "proceed", "continue")
@@ -161,16 +173,39 @@ object HelperWords {
     fun blocked(screen: List<String>): BlockedPrompt? {
         val lines = tail(screen)
         val qi = lines.indexOfLast { QUESTION.containsMatchIn(it) }
-        if (qi < 0) return null
+        // A dialog has a question and a few options under it; a question with a screenful of output after it is old.
+        if (qi < 0 || lines.size - qi > MAX_AFTER_QUESTION) return null
         val q = cleanLine(lines[qi])
-        val block = lines.subList((qi - CONTEXT).coerceAtLeast(0), lines.size)
-        val detail = lines.subList((qi - CONTEXT).coerceAtLeast(0), qi).map { cleanLine(it) }.filter { it.isNotEmpty() }.takeLast(4).joinToString("\n").ifBlank { null }
-        fun prompt(kind: AskKind, subject: String? = null) = BlockedPrompt(kind, subject, q, block, detail)
+        val from = (qi - CONTEXT).coerceAtLeast(0)
+        val block = lines.subList(from, lines.size)
+        val detail = lines.subList(from, qi).map { cleanLine(it) }.filter { it.isNotEmpty() }
+        val core = lines.size - qi
+        fun prompt(kind: AskKind, subject: String? = null) = BlockedPrompt(kind, subject, q, block, detail, core)
         if (PLAN.containsMatchIn(q)) return prompt(AskKind.Plan)
-        EDIT.find(q)?.let { return prompt(AskKind.Edit, it.groupValues[1].substringAfterLast('/')) }
-        CREATE.find(q)?.let { return prompt(AskKind.Create, it.groupValues[1].substringAfterLast('/')) }
+        EDIT.find(q)?.let { return prompt(AskKind.Edit, it.groupValues[1]) }
+        CREATE.find(q)?.let { return prompt(AskKind.Create, it.groupValues[1]) }
         if (COMMAND.containsMatchIn(q)) return prompt(AskKind.Command)
         return prompt(AskKind.Other)
+    }
+
+    /** The file name of a path as the dialog wrote it. */
+    fun fileName(ask: BlockedPrompt): String = ask.subject.orEmpty().substringAfterLast('/')
+
+    /**
+     * Whether [now] is the dialog [shown] was. A notice carries only the end of the screen, so the shorter of the two is compared
+     * against the same number of lines at the end of the other, and that must cover the question and the options.
+     */
+    fun sameDialog(shown: BlockedPrompt, now: BlockedPrompt): Boolean {
+        val n = minOf(shown.block.size, now.block.size)
+        return n >= shown.core && n >= now.core && shown.block.takeLast(n) == now.block.takeLast(n)
+    }
+
+    /** Whether everything the owner needs to decide is on the card itself; otherwise the card opens the helper's own page. */
+    fun canAnswerInline(ask: BlockedPrompt): Boolean = when (ask.kind) {
+        AskKind.Plan -> false
+        AskKind.Command -> ask.detail.isNotEmpty() && ask.detail.size <= INLINE_DETAIL_LINES && ask.detail.sumOf { it.length } <= INLINE_CHARS
+        AskKind.Edit, AskKind.Create -> !ask.subject.isNullOrBlank() && ask.subject.length <= INLINE_CHARS
+        AskKind.Other -> ask.question.length <= INLINE_CHARS
     }
 
     /**
@@ -193,30 +228,47 @@ object HelperWords {
         option.replace(Regex("^\\d+[.)]\\s*"), "").replace(KEY_HINT, "").replace(Regex("[.!\\s]+$"), "").replace(Regex("[\\u2018\\u2019]"), "'").lowercase().trim()
 
     /**
-     * Enter takes whatever is highlighted, so "Allow once" is only safe when the highlighted choice is on the short list of
-     * plain yeses. With options on the screen and no cursor to read, nothing says which one Enter takes, so it is not safe.
+     * Enter takes whatever is highlighted, so "Allow once" is only safe when the cursor can be read and sits on one of the short
+     * list of plain yeses. With no cursor to read, nothing says which choice Enter takes, so it is not safe.
      */
-    fun enterMeansOnce(screen: List<String>): Boolean {
-        val option = highlightedOption(screen)
-        return if (option != null) normalOption(option) in ONCE else tail(screen).none { OPTION_LINE.containsMatchIn(it) }
-    }
+    fun enterMeansOnce(screen: List<String>): Boolean = highlightedOption(screen)?.let { normalOption(it) in ONCE } == true
 
-    /** The checks run on a fresh read of the screen just before an answer is sent. */
-    fun checkAnswer(shown: BlockedPrompt?, screen: List<String>, key: String): AnswerCheck {
+    /** The checks run on a fresh read of the screen just before an answer is sent. [live] is whether that read came from the terminal itself. */
+    fun checkAnswer(shown: BlockedPrompt?, screen: List<String>, key: String, live: Boolean = true): AnswerCheck {
         val now = blocked(screen)
         return when {
+            !live -> AnswerCheck.NotLive
             shown == null || now == null -> AnswerCheck.NoPrompt
-            now.block != shown.block -> AnswerCheck.Changed
-            key == "enter" && highlightedOption(screen) == null && tail(screen).any { OPTION_LINE.containsMatchIn(it) } -> AnswerCheck.NoCursor
+            !sameDialog(shown, now) -> AnswerCheck.Changed
+            key == "enter" && highlightedOption(screen) == null -> AnswerCheck.NoCursor
             key == "enter" && !enterMeansOnce(screen) -> AnswerCheck.BroadYes
             else -> AnswerCheck.Ok
         }
     }
 
-    /** Asks the owner has already answered stay hidden until the screen shows a different dialog or none. */
-    fun visibleAsks(asks: Map<String, BlockedPrompt>, answered: MutableMap<String, List<String>>): Map<String, BlockedPrompt> {
+    /** What to tell the owner when a check refuses the key, in the words used on every screen that answers a helper. */
+    fun checkWords(check: AnswerCheck): String = when (check) {
+        AnswerCheck.Ok -> ""
+        AnswerCheck.NotLive -> "Couldn't read its screen just now. Look again before you answer."
+        AnswerCheck.NoPrompt, AnswerCheck.Changed -> "It asked something else just now. Open the helper and look again before you answer."
+        AnswerCheck.BroadYes, AnswerCheck.NoCursor -> "Its highlighted choice would say yes for good, or cannot be read. Open the helper to pick the answer."
+    }
+
+    /** The lines a notice quotes from the helper's screen, between its output markers; empty when it quotes none. */
+    fun excerptLines(description: String): List<String> {
+        val lines = description.lines()
+        val from = lines.indexOfFirst { it.trim() == "<hq-output>" }
+        val to = lines.indexOfFirst { it.trim() == "</hq-output>" }
+        return if (from >= 0 && to > from) lines.subList(from + 1, to) else emptyList()
+    }
+
+    /**
+     * Asks the owner has already answered stay hidden until the screen shows a different dialog or none, or until [ANSWERED_GRACE_MS]
+     * have passed with the same dialog still up (the key may have done nothing, and the owner must not be left with no buttons).
+     */
+    fun visibleAsks(asks: Map<String, BlockedPrompt>, answered: MutableMap<String, Pair<List<String>, Long>>, nowMs: Long): Map<String, BlockedPrompt> {
         answered.keys.retainAll(asks.keys)
-        answered.entries.removeAll { (id, block) -> asks[id]?.block != block }
+        answered.entries.removeAll { (id, mark) -> asks[id]?.block != mark.first || nowMs - mark.second >= ANSWERED_GRACE_MS }
         return asks.filterKeys { it !in answered }
     }
 
@@ -234,10 +286,13 @@ object HelperWords {
     fun askLine(ask: BlockedPrompt): String = when (ask.kind) {
         AskKind.Edit -> "Wants to edit one file: ${ask.subject}"
         AskKind.Create -> "Wants to create one file: ${ask.subject}"
-        AskKind.Command -> ask.detail?.lines()?.lastOrNull()?.let { "Wants to run: $it" } ?: "Wants to run a command"
+        AskKind.Command -> "Wants to run a command"
         AskKind.Plan -> "Wants your OK on its plan"
         AskKind.Other -> ask.question
     }
+
+    /** [askLine] and, for a command, the lines it ran: for a place with no room to draw them apart, such as a notification. */
+    fun askText(ask: BlockedPrompt): String = askLine(ask) + if (ask.kind == AskKind.Command && ask.detail.isNotEmpty()) ":\n" + ask.detail.joinToString("\n") else ""
 
     fun allowHint(ask: BlockedPrompt): String = when (ask.kind) {
         AskKind.Edit -> "Allow once lets it change this file one time."
