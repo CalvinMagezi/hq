@@ -1,5 +1,6 @@
 package example.hq.spike.ui.inbox
 
+import example.hq.spike.data.HqClient.InboxItem
 import java.time.OffsetDateTime
 import java.time.ZoneOffset
 
@@ -23,8 +24,12 @@ fun inboxFixture(name: String?): InboxUi? {
         DoneEntry("d1", "Allowed: Claude edits Chat.dc.html", ago(30)),
         DoneEntry("d2", "Not now: Delete 3 old backups", ago(45)),
     )
+    val real = realInbox(::ago)
     val base = InboxUi(loaded = true, needs = needs, updates = updates, done = done, checkedAt = "14:32")
     return when (name) {
+        "i-real" -> InboxUi(loaded = true, needs = real.needs, updates = real.updates, done = real.done, checkedAt = "14:32")
+        "i-real-updates" -> InboxUi(loaded = true, tab = InboxTab.Updates, needs = real.needs, updates = real.updates, done = real.done, checkedAt = "14:32")
+        "i-real-done" -> InboxUi(loaded = true, tab = InboxTab.Done, needs = real.needs, updates = real.updates, done = real.done, checkedAt = "14:32")
         "i-needs" -> base
         "i-updates" -> base.copy(tab = InboxTab.Updates)
         "i-clear" -> base.copy(tab = InboxTab.Updates, cleared = setOf("u3"), line = InboxLine("Update cleared", "Undo"))
@@ -33,4 +38,28 @@ fun inboxFixture(name: String?): InboxUi? {
         "i-answering" -> base.copy(answering = mapOf("1" to Answer.Sending, "2" to Answer.Failed("Couldn't send your answer. HQ didn't reply. It may be restarting.")))
         else -> null
     }
+}
+
+/** The shapes the live server sends: task reviews with a whole description, notices with backticks, answers from several days. */
+private fun realInbox(ago: (Long) -> String): InboxLists {
+    val long = "Add a service to the app so it can be chosen under Settings, Apps, Choose default apps. On the test phone check that the side button reaches the app; that a microphone-type foreground service can be started with no visible screen (the official while-in-use exemption says it should); and what happens after a reboot and unlock. Exit: a written result for each case, with the evidence kept in the project folder for the next review."
+    fun item(id: String, title: String, body: String, minutes: Long, source: String?, actions: List<String>, state: String = "pending", kind: String = "action_needed") =
+        InboxItem(id, kind, title, body, state, ago(minutes), null, source, null, actions)
+    val review = listOf("approve", "reject")
+    val pending = listOf(
+        item("r1", "FR-58: Voice entry: assistant service skeleton and the first on-device test round", long, 480, "task_ready_for_review", review),
+        item("r2", "FR-61: Native chat screen against the existing REST and web-socket API", "Spike a native chat screen that talks to the local hq over the existing API, with streaming replies and the notifications list. Compare feel and effort with the WebView; decide whether the app moves to Gradle.", 120, "task_ready_for_review", review),
+        item("r3", "FR-62: Userspace tunnel inside the app plus QR pairing", "Prototype a tunnel inside the app with no VPN permission, configured by scanning a QR code from `hq net`.", 118, "task_ready_for_review", review),
+        item("u1", "Install check", "Native build installed on this phone.", 90, "backup", emptyList(), kind = "fyi"),
+        item("u2", "Skills improved: note-authoring", "note-authoring (hints learned): These phrases should help select the workflow directly for similar requests.\nUndo any change with `hq skills revert <name>`.", 300, "skills", emptyList(), kind = "fyi"),
+        item("u3", "Backup finished", "2,860 notes saved to your Mac.", 60 * 30, "backup", emptyList(), kind = "fyi"),
+    )
+    val history = listOf(
+        item("h1", "FR-278: Phase 5: game layer", "", 40, "task_ready_for_review", emptyList(), state = "dismissed"),
+        item("h2", "FR-277: Phase 4: employers and sponsors", "", 45, "task_ready_for_review", emptyList(), state = "dismissed"),
+        item("h3", "Delete 3 old backups?", "", 60 * 26, "backup", emptyList(), state = "approved"),
+        item("h4", "FR-289: Phone sign-in", "", 60 * 27, "task_ready_for_review", emptyList(), state = "dismissed"),
+        item("h5", "FR-288: Passport and sharing", "", 60 * 24 * 4, "task_ready_for_review", emptyList(), state = "dismissed"),
+    )
+    return inboxLists(pending, history)
 }

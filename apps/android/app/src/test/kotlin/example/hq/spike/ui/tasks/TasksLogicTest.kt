@@ -3,6 +3,8 @@ package example.hq.spike.ui.tasks
 import example.hq.spike.data.HqClient.TaskItem
 import java.time.LocalDate
 import java.time.LocalDateTime
+import java.util.Locale
+import org.junit.Before
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
@@ -10,6 +12,8 @@ import org.junit.Test
 
 class TasksLogicTest {
     private val today = LocalDate.of(2026, 10, 21)
+
+    @Before fun words() = Locale.setDefault(Locale.ENGLISH)
 
     private fun task(
         id: String, status: String = "to_do", priority: String? = null, due: String? = null, start: String? = null, updated: String = "2026-10-01 10:00:00",
@@ -22,7 +26,7 @@ class TasksLogicTest {
             task("f", due = "2026-10-30"), task("g", "complete"), task("h", parent = "a"),
         )
         val groups = TasksLogic.today(tasks, today)
-        assertEquals(listOf("Waiting on you", "In progress", "Due today"), groups.map { it.title })
+        assertEquals(listOf("Waiting on you", "In progress", "Due or starting today"), groups.map { it.title })
         assertEquals(listOf("a", "b"), groups[0].tasks.map { it.id }.sorted())
         assertEquals(listOf("d", "e"), groups[2].tasks.map { it.id }.sorted())
     }
@@ -76,5 +80,27 @@ class TasksLogicTest {
         assertEquals("Next week", q.understood.single().label)
         assertEquals("Call mum!", QuickAdd.parse("Call mum!", today).title)
         assertNull(QuickAdd.parse("plain", today).priority)
+    }
+
+    @Test fun aLongWaitingGroupKeepsEveryTaskButAsksToShowOnlyTheFirstFive() {
+        val tasks = (1..74).map { task("r$it", "ready_for_review") }
+        val waiting = TasksLogic.today(tasks, today).first()
+        assertEquals(74, waiting.tasks.size)
+        assertEquals(TasksLogic.WAITING_PREVIEW, waiting.preview)
+        assertEquals(null, TasksLogic.today(listOf(task("c", "in_progress")), today).first().preview)
+    }
+
+    @Test fun aToDoOnTheTodayListSaysWhyItIsThere() {
+        assertEquals("starts today", TasksLogic.startedWords(task("a", start = "2026-10-21", due = "2026-12-06"), today))
+        assertEquals("started Oct 1", TasksLogic.startedWords(task("b", start = "2026-10-01"), today))
+        assertNull(TasksLogic.startedWords(task("c", start = "2026-10-21", due = "2026-10-21"), today))
+        assertNull(TasksLogic.startedWords(task("d", "in_progress", start = "2026-10-01"), today))
+        assertNull(TasksLogic.startedWords(task("e", start = "2026-10-30"), today))
+        assertNull(TasksLogic.startedWords(task("f"), today))
+    }
+
+    @Test fun theRowMetaCarriesThatReason() {
+        val words = TasksLogic.meta(task("a", priority = "high", start = "2026-10-21", due = "2026-12-06"), today).joinToString("") { it.text }
+        assertEquals("High · due Dec 6 · starts today", words)
     }
 }

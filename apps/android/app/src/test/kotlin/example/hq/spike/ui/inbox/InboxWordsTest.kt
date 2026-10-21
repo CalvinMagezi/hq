@@ -72,4 +72,49 @@ class InboxWordsTest {
         assertEquals("Do you want to edit Chat.dc.html?", InboxWords.lastLine(blocked))
         assertEquals("Proceed", InboxWords.lastLine("Session s on h is blocked on a prompt or approval:\nProceed\nRead it with x"))
     }
+
+    @Test fun aTaskReadyToCheckIsNotOfferedAsAllow() {
+        val c = InboxWords.card(item("FR-58: Voice entry: skeleton and first test", "Add **a service** so it can be chosen. See `hq net`.", source = "task_ready_for_review"))
+        assertEquals(CardKind.TaskReview, c.kind)
+        assertEquals("Voice entry: skeleton and first test", c.title)
+        assertEquals("FR-58", c.taskRef)
+        assertEquals("Check it", c.allowLabel)
+        assertFalse(c.canAllow)
+        assertEquals("Add a service so it can be chosen. See hq net.", c.body)
+        assertEquals("Task ready to check", c.where)
+    }
+
+    @Test fun taskReviewsSitBetweenHelperQuestionsAndOtherApprovals() {
+        val pending = listOf(
+            item("Delete 3 old backups?", "The nightly backup wants to remove them.", source = "backup"),
+            item("FR-1: Check me", "done", source = "task_ready_for_review"),
+            item("Harness session 'claude in x' is waiting for you", blocked, source = "session-supervisor"),
+            item("Backup finished", "ok", actions = emptyList(), kind = "fyi"),
+        )
+        val lists = inboxLists(pending, emptyList())
+        assertEquals(listOf(CardKind.HelperAsks, CardKind.TaskReview, CardKind.Approval), lists.needs.map { it.kind })
+        assertEquals(1, lists.updates.size)
+    }
+
+    @Test fun anUpdateShowsNoBackticksOrStars() {
+        val c = InboxWords.card(item("Skills improved: x", "Undo any change with `hq skills revert <name>`. **Done.**", actions = emptyList(), kind = "fyi"))
+        assertEquals("Undo any change with hq skills revert <name>. Done.", c.body)
+    }
+
+    @Test fun aDayIsNamedTodayYesterdayOrByDate() {
+        val now = Instant.parse("2026-10-21T12:00:00Z")
+        val utc = ZoneOffset.UTC
+        assertEquals("Today", InboxWords.dayLabel("2026-10-21T01:00:00+00:00", now, utc))
+        assertEquals("Yesterday", InboxWords.dayLabel("2026-10-20T23:00:00+00:00", now, utc))
+        assertEquals(java.time.LocalDate.of(2026, 10, 17).format(java.time.format.DateTimeFormatter.ofPattern("EEE d MMM", java.util.Locale.getDefault())), InboxWords.dayLabel("2026-10-17T10:00:00+00:00", now, utc))
+        assertEquals("Earlier", InboxWords.dayLabel("not a date", now, utc))
+    }
+
+    @Test fun whatTheOwnerDecidedIsListedWithTheTaskTitleOnly() {
+        val history = listOf(
+            // The server sends no actions for an item that is no longer pending.
+            InboxItem("h1", "action_needed", "FR-278: Phase 5: game layer", "", "dismissed", "2026-10-21T12:00:00+00:00", null, "task_ready_for_review", null, emptyList()),
+        )
+        assertEquals("Not now: Phase 5: game layer", inboxLists(emptyList(), history).done.single().title)
+    }
 }

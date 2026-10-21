@@ -69,6 +69,10 @@ import example.hq.spike.ui.chat.blocks.Blocks
 import example.hq.spike.ui.chat.blocks.IconAction
 import example.hq.spike.ui.chat.blocks.NoteRefs
 import example.hq.spike.ui.chat.blocks.NoteText
+import androidx.compose.foundation.lazy.itemsIndexed
+import example.hq.spike.ui.chat.blocks.BlockView
+import example.hq.spike.ui.chat.blocks.blockGap
+import example.hq.spike.ui.chat.blocks.Plain
 import example.hq.spike.ui.chat.blocks.parseBlocks
 import example.hq.spike.ui.shell.HqIcons
 import example.hq.spike.ui.theme.HqType
@@ -167,10 +171,11 @@ private fun ReaderReady(phase: ReaderPhase.Ready, actions: NotesActions) {
             GreenPill("Edit", Modifier.padding(end = 4.dp), onClick = actions.onEdit)
             IconAction(HqIcons.MoreVertical, "More", iconSize = 24.dp) { actions.onMenu(true) }
         }
+        // Lazy, so a long note opens by drawing the screenful in view, not every block of it.
         SelectionContainer(Modifier.weight(1f)) {
-            Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(start = 16.dp, top = 16.dp, end = 16.dp, bottom = 32.dp)) {
-                Blocks(blocks, handlers)
-                if (note.truncated) Text("This note is long. Only the start is shown.", style = HqType.BodySm, color = Mts.InkMuted, modifier = Modifier.padding(top = 12.dp))
+            LazyColumn(Modifier.fillMaxSize(), contentPadding = androidx.compose.foundation.layout.PaddingValues(start = 16.dp, top = 16.dp, end = 16.dp, bottom = 32.dp)) {
+                itemsIndexed(blocks) { i, block -> Box(Modifier.padding(top = blockGap(blocks, i))) { BlockView(block, handlers) } }
+                if (note.truncated) item { Text("This note is long. Only the start is shown.", style = HqType.BodySm, color = Mts.InkMuted, modifier = Modifier.padding(top = 12.dp)) }
             }
         }
     }
@@ -283,7 +288,7 @@ private fun SearchPage(ui: NotesUi, actions: NotesActions, onAskHq: (List<Pair<S
                     horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.CenterHorizontally), verticalAlignment = Alignment.CenterVertically,
                 ) {
                     Icon(HqIcons.Spark, null, Modifier.size(20.dp), tint = Mts.Ink)
-                    Text("Ask HQ about ${if (n == 1) "this note" else "these $n notes"}", style = HqType.BodySmBold, color = Mts.Ink)
+                    Text(askWords(hits.size), style = HqType.BodySmBold, color = Mts.Ink)
                 }
             }
         }
@@ -291,6 +296,12 @@ private fun SearchPage(ui: NotesUi, actions: NotesActions, onAskHq: (List<Pair<S
 }
 
 private const val ASK_MAX = 10
+
+/** The label on the Ask HQ pill: HQ is given at most ten notes, and the label says so when there are more hits than that. */
+internal fun askWords(found: Int): String {
+    val n = found.coerceAtMost(ASK_MAX)
+    return "Ask HQ about " + when { n == 1 -> "this note"; found > n -> "the first $n notes"; else -> "these $n notes" }
+}
 
 private fun folderOf(path: String) = path.removePrefix("Notebooks/").substringBefore('/', "")
 
@@ -323,7 +334,7 @@ private fun HitRow(hit: SearchHit, query: String, onClick: () -> Unit) {
         }
         val trail = NoteRefs.folderTrail(hit.path)
         if (trail.isNotBlank()) Text(trail, style = SmallText, color = Mts.BrandBlue, maxLines = 1, overflow = TextOverflow.Ellipsis)
-        if (hit.snippet.isNotBlank()) Text(marked(hit.snippet, query), style = HqType.BodySm, color = Mts.InkMuted, maxLines = 2, overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(top = 2.dp))
+        if (hit.snippet.isNotBlank()) Text(marked(Plain.strip(hit.snippet), query), style = HqType.BodySm, color = Mts.InkMuted, maxLines = 2, overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(top = 2.dp))
     }
 }
 

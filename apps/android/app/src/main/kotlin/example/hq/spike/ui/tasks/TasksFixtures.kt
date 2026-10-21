@@ -23,7 +23,11 @@ fun tasksFixture(name: String?): TasksUi? {
         t("9", "Tidy the vault folders"),
     )
     val base = TasksUi(loaded = true, tasks = tasks, today = today)
+    val real = TasksUi(loaded = true, tasks = realTasks(today), today = today)
     return when (name) {
+        "t-real" -> real
+        "t-real-open" -> real.copy(expanded = setOf("waiting"))
+        "t-real-all" -> real.copy(tab = TaskTab.All)
         "t-today" -> base
         "t-upcoming" -> base.copy(tab = TaskTab.Upcoming)
         "t-all" -> base.copy(tab = TaskTab.All)
@@ -33,4 +37,31 @@ fun tasksFixture(name: String?): TasksUi? {
         "t-detail" -> base.copy(detail = TaskDetail(tasks[3].copy(description = "A native view for the whole app."), subtasks = listOf(t("a", "Map the current mobile UI", "complete"), t("b", "Draft the Compose design"), t("c", "Spike chat for T5")), loading = false))
         else -> null
     }
+}
+
+/** The shapes the live list has: dozens of tasks waiting to be checked with long titles, and to-dos that only start today. */
+private fun realTasks(today: LocalDate): List<TaskItem> {
+    val days = listOf(9L, 8L, 6L, 5L, 3L, 3L, 2L, 2L, 1L, 1L)
+    val subjects = listOf(
+        "Security: public user lookups return full user records (emails and phones) with no sign-in",
+        "Production API: rollout stuck since last week (migrations init container crash-loops, 512 restarts); prod still serves the old image",
+        "Phase 0: switch CI on for main (allow-list safe actions, pinned toolchain, required checks)",
+        "Quick win: UTF-8 safe truncation (worker panic on multibyte instruction) and audit the route extractor",
+        "Contracts import check lets a department-scoped admin import the master list",
+        "Decide and apply the approval stage for imported contracts (all 93 are in draft)",
+    )
+    val ready = (1..74).map { i ->
+        val ago = LocalDateTime.now(ZoneOffset.UTC).minusDays(days[i % days.size]).toString().replace('T', ' ').substringBefore('.')
+        TaskItem("r$i", "FR-$i", subjects[i % subjects.size] + if (i > subjects.size) " (part $i)" else "", "", "ready_for_review", null, null, null, emptyList(), emptyList(), null, 0, 0, null, ago, "2026-10-1${i % 10} 10:00:00")
+    }
+    fun open(id: String, title: String, status: String, priority: String? = null, start: LocalDate? = null, due: LocalDate? = null, steps: Pair<Int, Int> = 0 to 0) =
+        TaskItem(id, "FR-$id", title, "", status, priority, due?.toString(), start?.toString(), emptyList(), emptyList(), null, steps.second, steps.first, null, null, "2026-10-0${id.takeLast(1)} 10:00:00")
+    return ready + listOf(
+        open("901", "Phase 0: reconcile the two branches, port the access rules, audit, add the network policy and the image scan gate into main", "in_progress", "urgent"),
+        open("902", "Harden the script runner: environment allowlist, process-group kill, resource limits, separate user", "in_progress", "high"),
+        open("903", "Move the app to Gradle with Kotlin and Compose enabled, no behaviour change", "to_do", "high", start = today),
+        open("904", "Push-to-talk loop latency through the chat API", "to_do", "high", start = today.minusDays(1)),
+        open("905", "Cut over from the old cloud host to self-hosted infrastructure", "to_do", "urgent", due = today.minusDays(7), steps = 2 to 12),
+        open("906", "Compliance pack for the first paying customer (tax, folio, register, privacy)", "to_do", "high", start = today.minusDays(20), due = today.plusDays(46), steps = 4 to 11),
+    )
 }

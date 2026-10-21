@@ -191,7 +191,7 @@ class NotesViewModel(app: Application) : AndroidViewModel(app) {
             _state.update { it.copy(menu = false, notice = Notice("This note is too long to edit on the phone.")) }
             return
         }
-        val body = NoteText.withoutFrontmatter(ready.note.body)
+        val body = NoteText.withoutFirstBlock(ready.note.body)
         val draft = drafts.getString(draftKey(ready.note.path, ""), null)
         val text = draft ?: body
         _state.update {

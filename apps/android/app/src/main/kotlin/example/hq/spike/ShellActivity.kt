@@ -19,6 +19,8 @@ import example.hq.spike.ui.shell.LocalGoTo
 import example.hq.spike.ui.notes.NotesViewModel
 import example.hq.spike.ui.notes.NotesUi
 import example.hq.spike.ui.notes.NotesOverlays
+import example.hq.spike.ui.inbox.CardKind
+import example.hq.spike.ui.inbox.InboxCard
 import example.hq.spike.ui.inbox.InboxDetails
 import example.hq.spike.ui.inbox.InboxScreen
 import example.hq.spike.ui.inbox.InboxUi
@@ -132,7 +134,17 @@ class ShellActivity : ComponentActivity() {
     @androidx.compose.runtime.Composable
     private fun InboxPlace(inboxState: InboxUi) {
         val go = LocalGoTo.current
-        InboxScreen(inboxState, inbox.actions, onTakeLook = { go(Place.Helpers) })
+        InboxScreen(inboxState, inbox.actions, onTakeLook = { card -> openFromInbox(card, go) })
+    }
+
+    /** "Check it" on a task waiting for review opens that task; any other card sends the owner to Helpers. */
+    private fun openFromInbox(card: InboxCard, go: (Place) -> Unit) {
+        if (card.kind == CardKind.TaskReview) {
+            go(Place.Tasks)
+            card.taskRef?.let(tasks::openRef)
+        } else {
+            go(Place.Helpers)
+        }
     }
 
     /** What sits over the whole shell: Notes pages first (they cover the bars), then Chat's sheets and pages. */
@@ -145,7 +157,7 @@ class ShellActivity : ComponentActivity() {
             go(Place.Chat)
         }
         ChatOverlays(chatState, chat.actions) { path -> notes.openNote(path) }
-        inboxState.details?.let { InboxDetails(it, inboxState.answering[it.id], inboxState.offline, inbox.actions) }
+        inboxState.details?.let { InboxDetails(it, inboxState.answering[it.id], inboxState.offline, inbox.actions) { card -> inbox.actions.onDetails(null); openFromInbox(card, go) } }
         tasksState.detail?.let { TaskPage(it, tasksState.today, tasks.actions) }
         tasksState.quick?.let { QuickAddSheet(it, tasksState.today, tasks.actions) }
     }

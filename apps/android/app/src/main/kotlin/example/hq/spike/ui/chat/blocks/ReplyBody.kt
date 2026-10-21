@@ -56,12 +56,13 @@ private fun ChartBlockView(block: Block.ChartBlock, actions: BlockActions) {
 @Composable
 fun Blocks(blocks: List<Block>, actions: BlockActions, modifier: Modifier = Modifier) {
     Column(modifier) {
-        blocks.forEachIndexed { i, block ->
-            val gap = when { i == 0 -> 0.dp; blocks[i - 1] is Block.Heading -> HeadingGap; blocks[i - 1] is Block.Quote -> QuoteGap; else -> BlockGap }
-            Box(Modifier.padding(top = gap)) { BlockView(block, actions) }
-        }
+        blocks.forEachIndexed { i, block -> Box(Modifier.padding(top = blockGap(blocks, i))) { BlockView(block, actions) } }
     }
 }
+
+/** The space above block [i]: none at the top, a little under a heading or a quote, a normal gap otherwise. */
+fun blockGap(blocks: List<Block>, i: Int): androidx.compose.ui.unit.Dp =
+    when { i == 0 -> 0.dp; blocks[i - 1] is Block.Heading -> HeadingGap; blocks[i - 1] is Block.Quote -> QuoteGap; else -> BlockGap }
 
 /** A reply's text as blocks, in the order it was written. */
 @Composable

@@ -47,6 +47,8 @@ data class TasksUi(
     val tab: TaskTab = TaskTab.Today,
     val tasks: List<TaskItem> = emptyList(),
     val expanded: Set<String> = emptySet(),
+    /** A task to open once the list has it: asked for from the Inbox before the list was loaded. */
+    val pendingRef: String? = null,
     val hidden: Set<String> = emptySet(),
     val detail: TaskDetail? = null,
     val quick: QuickState? = null,
@@ -122,6 +124,11 @@ class TasksViewModel(app: Application) : AndroidViewModel(app) {
         val tasks = try { client.tasks() } catch (e: HqUnavailable) { null }
         if (frozen) return
         _state.update { if (tasks == null) it.copy(loaded = true, offline = true) else it.copy(loaded = true, offline = false, tasks = tasks, hidden = emptySet(), today = LocalDate.now()) }
+        val ref = _state.value.pendingRef
+        if (ref != null && tasks != null) {
+            _state.update { it.copy(pendingRef = null) }
+            tasks.firstOrNull { it.displayId == ref }?.let(::open) ?: say("Could not find $ref in your tasks.")
+        }
     }
 
     private fun detail(change: (TaskDetail) -> TaskDetail) = _state.update { s -> s.detail?.let { s.copy(detail = change(it)) } ?: s }
@@ -176,6 +183,14 @@ class TasksViewModel(app: Application) : AndroidViewModel(app) {
         lineJob?.cancel()
         _state.update { it.copy(line = null) }
         viewModelScope.launch { try { action() } catch (e: HqUnavailable) { say("Could not undo that. HQ is not answering.") } }
+    }
+
+    /** Opens the task with this short id; if the list does not have it yet, it is looked for after the next load, and said so if missing. */
+    fun openRef(ref: String) {
+        val known = _state.value.tasks.firstOrNull { it.displayId == ref }
+        if (known != null) { open(known); return }
+        _state.update { it.copy(pendingRef = ref) }
+        viewModelScope.launch { refresh() }
     }
 
     private fun open(t: TaskItem) {

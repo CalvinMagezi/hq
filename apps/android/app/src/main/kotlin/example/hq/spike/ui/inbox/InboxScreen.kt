@@ -57,6 +57,8 @@ import kotlinx.coroutines.delay
 
 private val SmallText = HqType.Caption.copy(fontSize = 13.sp, lineHeight = 18.sp)
 private const val LINE_MS = 4_000L
+private const val BODY_LINES = 4
+private const val UPDATE_BODY_LINES = 3
 
 private fun CardIcon.vector(): ImageVector = when (this) {
     CardIcon.Sparkle -> HqIcons.Spark
@@ -139,7 +141,7 @@ private fun NeedCard(card: InboxCard, answer: Answer?, offline: Boolean, actions
                 Text(listOf(card.where, InboxWords.ago(card.createdAt)).filter { it.isNotBlank() }.joinToString(" · "), style = SmallText, color = Mts.InkMuted, maxLines = 1)
             }
         }
-        Text(card.body, style = HqType.BodySm.copy(fontSize = 15.sp, lineHeight = 22.sp), color = Mts.Ink)
+        Text(card.body, style = HqType.BodySm.copy(fontSize = 15.sp, lineHeight = 22.sp), color = Mts.Ink, maxLines = BODY_LINES, overflow = TextOverflow.Ellipsis)
         (answer as? Answer.Failed)?.let { Text(it.reason, style = HqType.BodySm, color = Mts.Amber) }
         AnswerRow(card, answer, offline, actions, onTakeLook)
     }
@@ -151,6 +153,9 @@ private fun AnswerRow(card: InboxCard, answer: Answer?, offline: Boolean, action
     Row(modifier, horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
         if (card.canAllow) {
             PrimaryButton(if (sending) "Answering…" else card.allowLabel, Modifier.weight(1f), enabled = !sending && !offline) { actions.onAllow(card) }
+            TextButton("Not now", enabled = !sending && !offline) { actions.onNotNow(card) }
+        } else if (card.kind == CardKind.TaskReview) {
+            PrimaryButton(card.allowLabel, Modifier.weight(1f)) { onTakeLook(card) }
             TextButton("Not now", enabled = !sending && !offline) { actions.onNotNow(card) }
         } else if (card.kind == CardKind.Approval) {
             // Too long to approve from a card: it is read in full on the details page first.
@@ -216,7 +221,11 @@ private fun DoneList(entries: List<DoneEntry>) {
 @Composable
 private fun DoneFeed(ui: InboxUi) {
     LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(16.dp)) {
-        if (ui.done.isEmpty()) item { Text("Nothing decided yet.", style = HqType.BodySm, color = Mts.InkMuted) } else item { DoneList(ui.done) }
+        if (ui.done.isEmpty()) item { Text("Nothing decided yet.", style = HqType.BodySm, color = Mts.InkMuted) }
+        else ui.done.groupBy { InboxWords.dayLabel(it.createdAt) }.forEach { (day, entries) ->
+            item(key = "d-$day") { Text(day.uppercase(), style = HqType.Group.copy(letterSpacing = 0.06.em), color = Mts.InkMuted, modifier = Modifier.padding(top = 8.dp, bottom = 8.dp)) }
+            item(key = "l-$day") { DoneList(entries) }
+        }
     }
 }
 
@@ -230,7 +239,7 @@ private fun UpdatesFeed(ui: InboxUi, actions: InboxActions) {
             }
         }
         if (rows.isEmpty() && ui.loaded) item { Text("No updates.", style = HqType.BodySm, color = Mts.InkMuted, modifier = Modifier.padding(16.dp)) }
-        val groups = rows.groupBy { if (InboxWords.sameDay(it.createdAt)) "Today" else "Earlier" }
+        val groups = rows.groupBy { InboxWords.dayLabel(it.createdAt) }
         groups.forEach { (label, group) ->
             item(key = "g-$label") { Text(label.uppercase(), style = HqType.Group.copy(letterSpacing = 0.06.em), color = Mts.InkMuted, modifier = Modifier.padding(start = 16.dp, top = 8.dp, end = 16.dp, bottom = 8.dp)) }
             items(group, key = { it.id }) { UpdateRow(it, actions) }
@@ -263,7 +272,7 @@ private fun UpdateRow(card: InboxCard, actions: InboxActions) {
             Avatar(card.icon.vector())
             Column(Modifier.weight(1f)) {
                 Text(card.title, style = HqType.BodyBold, color = Mts.Ink)
-                if (card.body.isNotBlank()) Text(card.body, style = HqType.BodySm, color = Mts.InkMuted)
+                if (card.body.isNotBlank()) Text(card.body, style = HqType.BodySm, color = Mts.InkMuted, maxLines = UPDATE_BODY_LINES, overflow = TextOverflow.Ellipsis)
             }
             Text(InboxWords.clock(card.createdAt), style = HqType.Caption.copy(lineHeight = 20.sp), color = Mts.InkMuted)
         }
@@ -284,7 +293,7 @@ private fun Snack(line: InboxLine, actions: InboxActions, modifier: Modifier) {
 
 /** A question on its own page: what is asked, what each answer does, who asked and when, and the answers at the foot. */
 @Composable
-fun InboxDetails(card: InboxCard, answer: Answer?, offline: Boolean, actions: InboxActions) {
+fun InboxDetails(card: InboxCard, answer: Answer?, offline: Boolean, actions: InboxActions, onTakeLook: (InboxCard) -> Unit = { actions.onDetails(null) }) {
     BackHandler { actions.onDetails(null) }
     Column(Modifier.fillMaxSize().background(Mts.Surface000).statusBarsPadding().navigationBarsPadding()) {
         Row(Modifier.fillMaxWidth().heightIn(min = 64.dp).padding(start = 4.dp), verticalAlignment = Alignment.CenterVertically) {
@@ -305,7 +314,7 @@ fun InboxDetails(card: InboxCard, answer: Answer?, offline: Boolean, actions: In
         }
         Column(Modifier.fillMaxWidth().background(Mts.Surface100).drawBehind { drawLine(Mts.Hairline, Offset.Zero, Offset(size.width, 0f), 1.dp.toPx()) }.padding(start = 16.dp, top = 12.dp, end = 16.dp, bottom = 24.dp)) {
             (answer as? Answer.Failed)?.let { Text(it.reason, style = HqType.BodySm, color = Mts.Amber, modifier = Modifier.padding(bottom = 8.dp)) }
-            AnswerRow(card, answer, offline, actions, onTakeLook = { actions.onDetails(null) })
+            AnswerRow(card, answer, offline, actions, onTakeLook = onTakeLook)
         }
     }
 }

@@ -42,6 +42,7 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.em
@@ -54,6 +55,7 @@ import java.time.LocalDate
 import kotlinx.coroutines.delay
 
 private const val LINE_MS = 4_000L
+private const val TITLE_LINES = 2
 
 /** The Tasks place: Today, Upcoming and All, with a checkbox on each row and swipes to finish or move. */
 @Composable
@@ -90,12 +92,23 @@ private fun Feed(ui: TasksUi, actions: TasksActions) {
         if (groups.isEmpty() && ui.loaded && !ui.offline) item { Text(emptyWords(ui.tab), style = HqType.BodySm, color = Mts.InkMuted, modifier = Modifier.padding(16.dp)) }
         groups.forEach { g ->
             item(key = "h-${g.key}") { GroupHeader(g, g.key in ui.expanded, actions.onToggleGroup) }
-            if (!g.collapsible || g.key in ui.expanded) items(g.tasks.size, key = { "${g.key}-${g.tasks[it].id}" }) { TaskRow(g.tasks[it], ui.today, actions) }
+            val open = g.key in ui.expanded
+            val shown = if (g.preview != null && !open) g.tasks.take(g.preview) else g.tasks
+            if (!g.collapsible || open) items(shown.size, key = { "${g.key}-${shown[it].id}" }) { TaskRow(shown[it], ui.today, actions) }
+            if (g.preview != null && g.tasks.size > g.preview) item(key = "m-${g.key}") { MoreRow(g.tasks.size - g.preview, open) { actions.onToggleGroup(g.key) } }
         }
     }
 }
 
 private fun emptyWords(tab: TaskTab) = when (tab) { TaskTab.Today -> "Nothing for today."; TaskTab.Upcoming -> "Nothing coming up."; TaskTab.All -> "No open tasks." }
+
+/** "Show 69 more" under a long group, and "Show fewer" once it is open. */
+@Composable
+private fun MoreRow(hidden: Int, open: Boolean, onToggle: () -> Unit) {
+    Box(Modifier.fillMaxWidth().heightIn(min = 48.dp).clickable(role = Role.Button, onClick = onToggle).padding(horizontal = 16.dp), contentAlignment = Alignment.CenterStart) {
+        Text(if (open) "Show fewer" else "Show $hidden more", style = HqType.BodySmBold, color = Mts.BrandBlue)
+    }
+}
 
 @Composable
 private fun GroupHeader(g: TaskGroup, open: Boolean, onToggle: (String) -> Unit) {
@@ -140,7 +153,7 @@ private fun TaskRow(t: TaskItem, today: LocalDate, actions: TasksActions) {
                 Box(Modifier.size(22.dp).border(2.dp, Mts.Line, RoundedCornerShape(6.dp)))
             }
             Column(Modifier.weight(1f).padding(vertical = 8.dp)) {
-                Text(t.title, style = HqType.BodyBold, color = Mts.Ink)
+                Text(t.title, style = HqType.BodyBold, color = Mts.Ink, maxLines = TITLE_LINES, overflow = TextOverflow.Ellipsis)
                 val meta = TasksLogic.meta(t, today)
                 if (meta.isNotEmpty()) Text(
                     buildAnnotatedString { meta.forEach { r -> withStyle(SpanStyle(color = if (r.amber) Mts.Amber else Mts.InkMuted, fontWeight = if (r.bold) FontWeight.Bold else FontWeight.Normal)) { append(r.text) } } },

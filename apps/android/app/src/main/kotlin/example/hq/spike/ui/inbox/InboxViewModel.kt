@@ -92,12 +92,8 @@ class InboxViewModel(app: Application) : AndroidViewModel(app) {
         }
         val history = try { client.notifications("history", HISTORY_LIMIT) } catch (e: HqUnavailable) { null }
         if (frozen) return
-        val cards = pending.items.map(InboxWords::card)
-        val needs = cards.filter { it.kind != CardKind.Update }.sortedWith(compareBy({ ORDER.indexOf(it.kind) }, { if (it.kind == CardKind.Approval) it.createdAt else "" }))
-        val updates = cards.filter { it.kind == CardKind.Update }
-        val done = history?.items.orEmpty().filter { it.kind == "action_needed" && (it.state == "approved" || it.state == "dismissed") }
-            .map { DoneEntry(it.id, (if (it.state == "approved") "Allowed: " else "Not now: ") + InboxWords.card(it).title, it.createdAt) }
-        _state.update { it.copy(loaded = true, offline = false, needs = needs, updates = updates, done = done, checkedAt = InboxWords.clock(java.time.OffsetDateTime.now().toString())) }
+        val lists = inboxLists(pending.items, history?.items.orEmpty())
+        _state.update { it.copy(loaded = true, offline = false, needs = lists.needs, updates = lists.updates, done = lists.done, checkedAt = InboxWords.clock(java.time.OffsetDateTime.now().toString())) }
     }
 
     private fun answer(card: InboxCard, allow: Boolean) {
@@ -152,6 +148,19 @@ class InboxViewModel(app: Application) : AndroidViewModel(app) {
         const val POLL_MS = 20_000L
         const val UNDO_MS = 5_000L
         const val HISTORY_LIMIT = 30
-        val ORDER = listOf(CardKind.HelperAsks, CardKind.Approval, CardKind.HelperStuck)
     }
+}
+
+class InboxLists(val needs: List<InboxCard>, val updates: List<InboxCard>, val done: List<DoneEntry>)
+
+private val NEEDS_ORDER = listOf(CardKind.HelperAsks, CardKind.TaskReview, CardKind.Approval, CardKind.HelperStuck)
+
+/** What the three tabs show for what the server holds: things that need the owner, updates, and what the owner already decided. */
+fun inboxLists(pending: List<example.hq.spike.data.HqClient.InboxItem>, history: List<example.hq.spike.data.HqClient.InboxItem>): InboxLists {
+    val cards = pending.map(InboxWords::card)
+    val needs = cards.filter { it.kind != CardKind.Update }
+        .sortedWith(compareBy({ NEEDS_ORDER.indexOf(it.kind) }, { if (it.kind == CardKind.Approval || it.kind == CardKind.TaskReview) it.createdAt else "" }))
+    val done = history.filter { it.kind == "action_needed" && (it.state == "approved" || it.state == "dismissed") }
+        .map { DoneEntry(it.id, (if (it.state == "approved") "Allowed: " else "Not now: ") + InboxWords.card(it).title, it.createdAt) }
+    return InboxLists(needs, cards.filter { it.kind == CardKind.Update }, done)
 }

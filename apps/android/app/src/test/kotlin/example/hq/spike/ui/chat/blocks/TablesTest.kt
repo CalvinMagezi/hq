@@ -1,5 +1,6 @@
 package example.hq.spike.ui.chat.blocks
 
+import androidx.compose.ui.unit.dp
 import org.junit.Assert.assertEquals
 import org.junit.Test
 
@@ -20,5 +21,13 @@ class TablesTest {
     @Test fun theNumbersUnderADonutGiveValueAndShare() {
         val spec = ChartSpec(ChartType.Donut, "t", "", "min", listOf("A", "B"), listOf(ChartSeries("m", listOf(3.0, 1.0))))
         assertEquals(listOf(listOf("A", "3", "75%"), listOf("B", "1", "25%")), spec.numbersTable().rows)
+    }
+
+    @Test fun aNarrowTableStretchesItsLastColumnToTheEdge() {
+        assertEquals(listOf(104.dp, 241.dp), filled(listOf(104.dp, 200.dp), 345.dp))
+    }
+
+    @Test fun aTableThatAlreadyFillsTheBoxIsLeftAlone() {
+        assertEquals(listOf(104.dp, 300.dp), filled(listOf(104.dp, 300.dp), 345.dp))
     }
 }

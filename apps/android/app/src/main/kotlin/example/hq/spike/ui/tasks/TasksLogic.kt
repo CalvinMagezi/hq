@@ -13,14 +13,18 @@ import java.util.Locale
 
 enum class TaskTab { Today, Upcoming, All }
 
-/** A heading and the tasks under it. [count] is shown in a badge; [collapsed] groups (Later, No date) show only their count until tapped. */
-data class TaskGroup(val key: String, val title: String, val tasks: List<TaskItem>, val badge: Boolean = true, val collapsible: Boolean = false)
+/**
+ * A heading and the tasks under it. The badge counts them; [collapsible] groups (Later, No date) show only their count until tapped;
+ * a group with a [preview] shows that many and a row to show the rest.
+ */
+data class TaskGroup(val key: String, val title: String, val tasks: List<TaskItem>, val badge: Boolean = true, val collapsible: Boolean = false, val preview: Int? = null)
 
 /** One piece of a row's second line: some words, bold or not, plain or highlighted. */
 data class Run(val text: String, val bold: Boolean = false, val amber: Boolean = false)
 
 object TasksLogic {
     private const val SOON_DAYS = 7L
+    const val WAITING_PREVIEW = 5
     private val PRIORITY_ORDER = listOf("urgent", "high", "normal", "low")
 
     fun parse(date: String?): LocalDate? = try { date?.let(LocalDate::parse) } catch (e: DateTimeParseException) { null }
@@ -39,7 +43,7 @@ object TasksLogic {
         val going = live.filter { it.status == "in_progress" }.sortedWith(byUrgency)
         val due = live.filter { it.status == "to_do" }.filter { t -> listOfNotNull(parse(t.startDate), parse(t.dueDate)).any { !it.isAfter(today) } }.sortedWith(byUrgency)
         return listOf(
-            TaskGroup("waiting", "Waiting on you", waiting), TaskGroup("going", "In progress", going), TaskGroup("due", "Due today", due),
+            TaskGroup("waiting", "Waiting on you", waiting, preview = WAITING_PREVIEW), TaskGroup("going", "In progress", going), TaskGroup("due", "Due or starting today", due),
         ).filter { it.tasks.isNotEmpty() }
     }
 
@@ -84,6 +88,17 @@ object TasksLogic {
         }
     }
 
+    /** Why a to-do is on the Today list when it is not due today: it starts today, or it started earlier and is still open. */
+    fun startedWords(t: TaskItem, today: LocalDate): String? {
+        val start = parse(t.startDate) ?: return null
+        if (t.status != "to_do" || parse(t.dueDate) == today) return null
+        return when {
+            start == today -> "starts today"
+            start.isBefore(today) -> "started " + start.format(DateTimeFormatter.ofPattern("MMM d", Locale.getDefault()))
+            else -> null
+        }
+    }
+
     fun priorityWords(p: String?) = when (p) { "urgent" -> "Urgent"; "high" -> "High"; "low" -> "Low"; else -> null }
 
     /** The second line of a row, in the board's words: Stuck and Ready to check in amber, the rest plain. */
@@ -97,6 +112,7 @@ object TasksLogic {
                 priorityWords(t.priority)?.let { parts += listOf(Run(it, bold = true)) }
                 dueWords(t.dueDate, today)?.let { parts += listOf(Run(it)) }
                 parse(t.startDate)?.takeIf { it.isAfter(today) }?.let { parts += listOf(Run(if (it == today.plusDays(1)) "starts tomorrow" else "starts " + it.format(DateTimeFormatter.ofPattern("EEE", Locale.getDefault())))) }
+                startedWords(t, today)?.let { parts += listOf(Run(it)) }
                 if (t.subtaskCount > 0) parts += listOf(Run("${t.subtaskDone} of ${t.subtaskCount} steps done"))
                 if (t.assignees.isNotEmpty() && t.status == "to_do") parts += listOf(Run("for ${t.assignees.first()}"))
                 parts.flatMapIndexed { i, p -> if (i == 0) p else listOf(sep) + p }

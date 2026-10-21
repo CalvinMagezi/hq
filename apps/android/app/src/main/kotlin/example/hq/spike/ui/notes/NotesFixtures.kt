@@ -42,7 +42,14 @@ fun notesFixture(name: String?): NotesUi? {
         SearchHit("Notebooks/Projects/Agent-HQ/Native-Bridge-Plan.md", "Native-Bridge-Plan", "Projects", "The bridge between the roadmap and the app."),
         SearchHit("Notebooks/Inbox/Quick idea widget copy.md", "Quick idea: widget copy", "Inbox", "A roadmap item for later."),
     )
+    val longSheet = NoteSheet("Notebooks/Projects/Agent-HQ/Build-Plan-And-Cutover.md", "Build-Plan-And-Cutover", "Projects › Agent-HQ", longNote(), false, null)
+    val longReader = ReaderPhase.Ready(longSheet, "edited 33m ago")
+    val realHits = (1..13).map { i ->
+        SearchHit("Notebooks/Projects/Agent-HQ/Design-Note-$i.md", "Design-Note-$i", "Projects", if (i % 2 == 0) "…1. **What it is.** A userspace tunnel that runs inside the app, configured by `hq net`, with [[Private-Network-Plan]] as the source…" else "…a plan for the tunnel, see [the design](Design.md) and the **first test round** results…")
+    }
     return when (name) {
+        "n-real-reader" -> home.copy(stack = listOf(NotesRoute.Reader(longSheet.path)), reader = longReader)
+        "n-real-search" -> home.copy(stack = listOf(NotesRoute.Search), search = SearchState("tunnel", realHits))
         "n-home" -> home
         "n-empty" -> NotesUi(loaded = true)
         "n-offline" -> NotesUi(loaded = true, offline = true)
@@ -71,5 +78,21 @@ fun notesFixture(name: String?): NotesUi? {
         }
         "n-chooser" -> home.copy(stack = listOf(NotesRoute.Write(null)), write = WriteState(null, INBOX, "Samsung battery steps", TextFieldValue(""), "", chooser = true))
         else -> null
+    }
+}
+
+/** A note the size and shape of the project notes on the phone: a doubled frontmatter block, a long table with bold cells, many paragraphs. */
+private fun longNote(): String = buildString {
+    append("---\ntitle: ''\n---\n\n---\ntitle: Build-Plan-And-Cutover\ntags: [plan, android, cutover]\n---\n\n")
+    append("# Native app: build order, design validation and cutover\n\nSources: the design canvas, the roadmap and the voice plan. Code: branch `feat/android-gradle`, `apps/android`.\n\n")
+    append("## Where it stands\n|Slice|State|\n|---|---|\n")
+    repeat(7) { i ->
+        append("|S${i + 1} Gradle build and the first screens|**Done and live**, the pull request is open and not merged. The last install kept the sealed token and the credentials, and the vault database grew by the expected amount.|\n")
+    }
+    append("\n")
+    repeat(14) { section ->
+        append("## Section ${section + 1}\n\n")
+        append("Method: a render of each board frame, the app on an emulator at 390 dp, and the app on the phone. Matching: name row, bubble shapes and padding, streaming headline and steps, the sheet with its header, search, group labels and rows. Differences are listed with their reasons.\n\n")
+        append("- **Fixed** the quote bar height inside a list, the fades that never drew, the first column width.\n- Found only by using it: archiving the open chat closed the sheet five seconds later.\n- `Where it goes next` is written in the project notes.\n\n")
     }
 }

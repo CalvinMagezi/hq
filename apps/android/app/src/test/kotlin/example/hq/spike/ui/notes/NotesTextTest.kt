@@ -58,4 +58,11 @@ class NotesTextTest {
         assertEquals("see [the guide](https://)", t.text)
         assertEquals("https://", t.text.substring(t.selection.min, t.selection.max))
     }
+
+    @Test fun theAskPillSaysWhenItTakesOnlyTheFirstTen() {
+        assertEquals("Ask HQ about this note", askWords(1))
+        assertEquals("Ask HQ about these 7 notes", askWords(7))
+        assertEquals("Ask HQ about these 10 notes", askWords(10))
+        assertEquals("Ask HQ about the first 10 notes", askWords(13))
+    }
 }

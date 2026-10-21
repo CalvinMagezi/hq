@@ -70,10 +70,28 @@ object NoteRefs {
 object NoteText {
     private val FENCE = Regex("^---\\s*$")
 
+    private val YAML_LINE = Regex("^(\\s+\\S.*|-\\s.*|[A-Za-z_][\\w-]*\\s*:(?!//).*)$")
+    private const val MAX_EXTRA_BLOCKS = 3
+    private const val MAX_BLOCK_LINES = 30
+
+    /**
+     * What the reader shows. Some notes carry a second block (a tool added an empty one above the real one), so blocks that
+     * follow the first are also hidden when every line in them reads like YAML. Display only: editing uses [withoutFirstBlock].
+     */
     fun withoutFrontmatter(text: String): String {
+        var rest = dropBlock(text, strict = false) ?: return text
+        repeat(MAX_EXTRA_BLOCKS) { rest = dropBlock(rest.trimStart('\n'), strict = true) ?: return rest }
+        return rest
+    }
+
+    /** What the editor holds: the server keeps only the first block when a note is saved, so a second one must stay in the text. */
+    fun withoutFirstBlock(text: String): String = dropBlock(text, strict = false) ?: text
+
+    private fun dropBlock(text: String, strict: Boolean): String? {
         val lines = text.lines()
-        if (lines.isEmpty() || !FENCE.matches(lines[0])) return text
-        val end = (1 until lines.size).firstOrNull { FENCE.matches(lines[it]) } ?: return text
+        if (lines.isEmpty() || !FENCE.matches(lines[0])) return null
+        val end = (1 until lines.size).firstOrNull { FENCE.matches(lines[it]) } ?: return null
+        if (strict && (end - 1 > MAX_BLOCK_LINES || !lines.subList(1, end).all { it.isBlank() || YAML_LINE.matches(it) })) return null
         return lines.drop(end + 1).joinToString("\n").trimStart('\n')
     }
 }

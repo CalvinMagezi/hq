@@ -1,6 +1,7 @@
 package example.hq.spike.ui.inbox
 
 import example.hq.spike.data.HqClient.InboxItem
+import example.hq.spike.ui.chat.blocks.Plain
 import java.time.Duration
 import java.time.Instant
 import java.time.OffsetDateTime
@@ -8,7 +9,7 @@ import java.time.ZoneId
 import java.time.format.DateTimeFormatter
 import java.time.format.DateTimeParseException
 
-enum class CardKind { HelperAsks, Approval, HelperStuck, Update }
+enum class CardKind { HelperAsks, TaskReview, Approval, HelperStuck, Update }
 
 enum class CardIcon { Sparkle, Info, Pause, Check, Task, Warning }
 
@@ -27,12 +28,16 @@ data class InboxCard(
     val link: String?,
     val asked: String,
     val state: String,
+    /** For a task waiting to be checked: its short id (such as FR-12), to open it in Tasks. */
+    val taskRef: String? = null,
 )
 
 /** Turns what the server stores into the plain titles, bodies and buttons of the Inbox board. */
 object InboxWords {
     private val HELPER_TITLE = Regex("^Harness session '(.*)' (is waiting for you|needs an answer|keeps showing a prompt)$")
     private val SESSION = Regex("Session (\\S+) on (\\S+) is (?:blocked on a prompt or approval|waiting at a prompt)")
+    private const val TASK_REVIEW_SOURCE = "task_ready_for_review"
+    private val TASK_PREFIX = Regex("^[A-Za-z][A-Za-z0-9]*(?:-[A-Za-z0-9]+)*-\\d+:\\s+")
     private const val MAX_BODY = 160
     private const val APPROVAL_BODY = 400
 
@@ -41,11 +46,16 @@ object InboxWords {
         val session = SESSION.find(item.description)
         return when {
             helper != null -> helperCard(item, helper.groupValues[1], helper.groupValues[2], session?.groupValues?.get(1), session?.groupValues?.get(2))
-            item.actions.any { it == "approve" || it == "reject" } -> {
-                val body = item.description.trim().let { if (it.length > APPROVAL_BODY) it.take(APPROVAL_BODY).trimEnd() + "…" else it }
-                InboxCard(item.id, CardKind.Approval, item.title.trim(), body, whereOf(item, null), item.createdAt, CardIcon.Info, null, body.length < APPROVAL_BODY, "Allow", item.link, askedBy(item, null), item.state)
+            item.kind == "action_needed" && item.sourceTask == TASK_REVIEW_SOURCE -> {
+                // Saying yes here only clears the notice, so it is not offered as "Allow": the owner is asked to look at the task.
+                val body = Plain.strip(item.description.trim()).let { if (it.length > APPROVAL_BODY) it.take(APPROVAL_BODY).trimEnd() + "…" else it }
+                InboxCard(item.id, CardKind.TaskReview, Plain.strip(item.title.trim()).replace(TASK_PREFIX, ""), body, "Task ready to check", item.createdAt, CardIcon.Task, null, false, "Check it", item.link, askedBy(item, null), item.state, taskRef = TASK_PREFIX.find(item.title.trim())?.value?.trim()?.removeSuffix(":"))
             }
-            else -> InboxCard(item.id, CardKind.Update, item.title.trim(), item.description.trim(), whereOf(item, null), item.createdAt, updateIcon(item), null, false, "", item.link, askedBy(item, null), item.state)
+            item.actions.any { it == "approve" || it == "reject" } -> {
+                val body = Plain.strip(item.description.trim()).let { if (it.length > APPROVAL_BODY) it.take(APPROVAL_BODY).trimEnd() + "…" else it }
+                InboxCard(item.id, CardKind.Approval, Plain.strip(item.title.trim()), body, whereOf(item, null), item.createdAt, CardIcon.Info, null, body.length < APPROVAL_BODY, "Allow", item.link, askedBy(item, null), item.state)
+            }
+            else -> InboxCard(item.id, CardKind.Update, Plain.strip(item.title.trim()), Plain.strip(item.description.trim()), whereOf(item, null), item.createdAt, updateIcon(item), null, false, "", item.link, askedBy(item, null), item.state)
         }
     }
 
@@ -116,6 +126,17 @@ object InboxWords {
     /** 14:02, in the phone's own time zone, for the end of an update row. */
     fun clock(createdAt: String, zone: ZoneId = ZoneId.systemDefault()): String =
         parse(createdAt)?.atZone(zone)?.toLocalTime()?.format(DateTimeFormatter.ofPattern("HH:mm")).orEmpty()
+
+    /** "Today", "Yesterday", or "Mon 19 Oct": the heading over a day of rows. */
+    fun dayLabel(createdAt: String, now: Instant = Instant.now(), zone: ZoneId = ZoneId.systemDefault()): String {
+        val day = parse(createdAt)?.atZone(zone)?.toLocalDate() ?: return "Earlier"
+        val today = now.atZone(zone).toLocalDate()
+        return when (day) {
+            today -> "Today"
+            today.minusDays(1) -> "Yesterday"
+            else -> day.format(DateTimeFormatter.ofPattern("EEE d MMM", java.util.Locale.getDefault()))
+        }
+    }
 
     fun sameDay(createdAt: String, now: Instant = Instant.now(), zone: ZoneId = ZoneId.systemDefault()): Boolean =
         parse(createdAt)?.atZone(zone)?.toLocalDate() == now.atZone(zone).toLocalDate()

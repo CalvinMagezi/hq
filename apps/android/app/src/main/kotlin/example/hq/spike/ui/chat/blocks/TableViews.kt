@@ -56,15 +56,36 @@ private val ResultIcon = 14.dp
 private val ResultGap = 4.dp
 private val HeaderStyle = HqType.Caption.copy(fontWeight = FontWeight.Bold)
 private val CellStyle = HqType.BodySm
+private val CellPadV = 10.dp
+private val CellPadH = 12.dp
+private const val MAX_CELL_LINES = 4
 
 /** How wide each column is: its widest cell plus padding, kept between 72 and 200 dp (the board does not say how it chooses). */
 private fun columnWidths(t: Block.Table, tm: TextMeasurer, d: Density): List<Dp> = t.headers.indices.map { c ->
     val cells = t.rows.map { row ->
         val word = Results.of(row[c])
-        if (word == null) tm.measure(row[c], CellStyle).size.width else tm.measure(row[c], CellStyle.copy(fontWeight = FontWeight.Bold)).size.width + with(d) { (ResultIcon + ResultGap).roundToPx() }
+        if (word == null) tm.measure(Plain.cell(row[c]), CellStyle).size.width else tm.measure(Plain.strip(row[c]), CellStyle.copy(fontWeight = FontWeight.Bold)).size.width + with(d) { (ResultIcon + ResultGap).roundToPx() }
     }
-    val widest = (listOf(tm.measure(t.headers[c], HeaderStyle).size.width) + cells).max()
+    val widest = (listOf(tm.measure(Plain.cell(t.headers[c]), HeaderStyle).size.width) + cells).max()
     with(d) { (widest.toDp() + CellPad).coerceIn(MinColumn, MaxColumn) }
+}
+
+/**
+ * Each body row is 40 dp unless a cell needs more: a long cell wraps (up to four lines) instead of being cut off, and the
+ * whole row grows with it so the pinned column and the sliding ones stay level.
+ */
+private fun rowHeights(t: Block.Table, widths: List<Dp>, tm: TextMeasurer, d: Density): List<Dp> = t.rows.map { row ->
+    val text = row.indices.maxOf { c ->
+        val room = with(d) { (widths[c] - CellPadH * 2).roundToPx() }.coerceAtLeast(1)
+        tm.measure(Plain.cell(row[c]), CellStyle, overflow = TextOverflow.Ellipsis, maxLines = MAX_CELL_LINES, constraints = androidx.compose.ui.unit.Constraints(maxWidth = room)).size.height
+    }
+    maxOf(BodyRowHeight, with(d) { text.toDp() } + CellPadV * 2)
+}
+
+/** A table narrower than its box stretches its last column to the box edge, so the heading shade and row lines reach it. */
+internal fun filled(widths: List<Dp>, room: Dp): List<Dp> {
+    val extra = room - widths.fold(0.dp) { a, w -> a + w }
+    return if (extra > 0.dp) widths.dropLast(1) + (widths.last() + extra) else widths
 }
 
 /** With the first column pinned it is a fixed 104 dp; longer names are cut with an ellipsis. */
@@ -73,16 +94,16 @@ private fun pinned(widths: List<Dp>): List<Dp> = listOf(PinnedColumn) + widths.d
 private fun Align.toAlignment() = when (this) { Align.Start -> Alignment.CenterStart; Align.End -> Alignment.CenterEnd; Align.Center -> Alignment.Center }
 
 @Composable
-private fun Cell(text: String, width: Dp, align: Align, header: Boolean) {
+private fun Cell(text: String, width: Dp, align: Align, header: Boolean, height: Dp = if (header) HeaderRowHeight else BodyRowHeight, maxLines: Int = if (header) 1 else MAX_CELL_LINES) {
     val result = if (header) null else Results.of(text)
-    Box(Modifier.width(width).height(if (header) HeaderRowHeight else BodyRowHeight).padding(horizontal = 12.dp), contentAlignment = align.toAlignment()) {
+    Box(Modifier.width(width).height(height).padding(horizontal = CellPadH), contentAlignment = align.toAlignment()) {
         if (result != null) {
             Row(horizontalArrangement = Arrangement.spacedBy(ResultGap), verticalAlignment = Alignment.CenterVertically) {
                 Icon(result.icon, null, Modifier.size(ResultIcon), tint = result.color)
                 Text(text, style = CellStyle.copy(fontWeight = FontWeight.Bold), color = result.color, maxLines = 1)
             }
         } else {
-            Text(text, style = if (header) HeaderStyle else CellStyle, color = if (header) Mts.InkMuted else Mts.Ink, maxLines = 1, overflow = TextOverflow.Ellipsis,
+            Text(Plain.cell(text), style = if (header) HeaderStyle else CellStyle, color = if (header) Mts.InkMuted else Mts.Ink, maxLines = maxLines, overflow = TextOverflow.Ellipsis,
                 textAlign = if (align == Align.End) TextAlign.End else TextAlign.Start)
         }
     }
@@ -103,11 +124,11 @@ private object Results {
  * body in a vertical scroll with the heading row held at the top. Both parts share [hs] so heading and rows move together.
  */
 @Composable
-private fun TableLayout(t: Block.Table, widths: List<Dp>, pin: Boolean, hs: ScrollState, vs: ScrollState?, modifier: Modifier = Modifier) {
+private fun TableLayout(t: Block.Table, widths: List<Dp>, heights: List<Dp>, pin: Boolean, hs: ScrollState, vs: ScrollState?, modifier: Modifier = Modifier) {
     val firstScrolling = if (pin) 1 else 0
     @Composable fun column(c: Int) = Column {
         t.rows.forEachIndexed { r, row ->
-            Box(Modifier.drawBehind { drawLine(Mts.Hairline, Offset(0f, 0f), Offset(size.width, 0f), 1.dp.toPx()) }) { Cell(row[c], widths[c], t.aligns[c], false) }
+            Box(Modifier.drawBehind { drawLine(Mts.Hairline, Offset(0f, 0f), Offset(size.width, 0f), 1.dp.toPx()) }) { Cell(row[c], widths[c], t.aligns[c], false, heights[r]) }
         }
     }
     Column(modifier) {
@@ -140,14 +161,15 @@ fun TableBlockView(t: Block.Table, onExpand: () -> Unit) {
     BoxWithConstraints(Modifier.fillMaxWidth()) {
         val room = maxWidth - 2.dp
         val fits = natural.fold(0.dp) { a, w -> a + w } <= room
-        val widths = if (fits) natural.map { it * (room.value / natural.fold(0.dp) { a, w -> a + w }.value) } else pinned(natural)
+        val widths = if (fits) natural.map { it * (room.value / natural.fold(0.dp) { a, w -> a + w }.value) } else filled(pinned(natural), room)
+        val heights = remember(t, widths) { rowHeights(t, widths, tm, density) }
         val hs = rememberScrollState()
         BlockFrame {
             if (!fits) {
                 BlockHeader(HqIcons.Table, "${t.rows.size} rows · ${t.headers.size} columns", HeaderLabel, Mts.InkMuted) { IconAction(HqIcons.Expand, "Expand table", onClick = onExpand) }
             }
             Box {
-                TableLayout(t, widths, pin = !fits, hs = hs, vs = null)
+                TableLayout(t, widths, heights, pin = !fits, hs = hs, vs = null)
                 if (!fits && hs.canScrollForward) RightFade()
             }
         }
@@ -159,13 +181,17 @@ fun TableBlockView(t: Block.Table, onExpand: () -> Unit) {
 fun TablePageBody(t: Block.Table, modifier: Modifier = Modifier) {
     val tm = rememberTextMeasurer()
     val density = LocalDensity.current
-    val widths = remember(t) { pinned(columnWidths(t, tm, density)) }
+    val natural = remember(t) { pinned(columnWidths(t, tm, density)) }
     val hs = rememberScrollState()
     val vs = rememberScrollState()
-    Column(modifier) {
-        Box(Modifier.fillMaxWidth().height(1.dp).background(Mts.Hairline))
-        TableLayout(t, widths, pin = true, hs = hs, vs = vs, modifier = Modifier.weight(1f, fill = false))
-        ScrollHint(hs)
+    BoxWithConstraints(modifier) {
+        val widths = filled(natural, maxWidth)
+        val heights = remember(t, widths) { rowHeights(t, widths, tm, density) }
+        Column {
+            Box(Modifier.fillMaxWidth().height(1.dp).background(Mts.Hairline))
+            TableLayout(t, widths, heights, pin = true, hs = hs, vs = vs, modifier = Modifier.weight(1f, fill = false))
+            ScrollHint(hs)
+        }
     }
 }
 
@@ -209,7 +235,7 @@ fun NumbersTable(t: Block.Table, modifier: Modifier = Modifier) {
             Row(Modifier.widthIn(min = room).background(Mts.Surface100)) { t.headers.indices.forEach { Cell(t.headers[it], widths[it], t.aligns[it], true) } }
             t.rows.forEach { row ->
                 Row(Modifier.widthIn(min = room).drawBehind { drawLine(Mts.Hairline, Offset(0f, 0f), Offset(size.width, 0f), 1.dp.toPx()) }) {
-                    row.indices.forEach { Cell(row[it], widths[it], t.aligns[it], false) }
+                    row.indices.forEach { Cell(row[it], widths[it], t.aligns[it], false, maxLines = 1) }
                 }
             }
         }
