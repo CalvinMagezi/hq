@@ -76,6 +76,7 @@ import example.hq.spike.ui.chat.blocks.blockGap
 import example.hq.spike.ui.chat.blocks.Plain
 import example.hq.spike.ui.chat.blocks.parseBlocks
 import example.hq.spike.ui.shell.HqIcons
+import example.hq.spike.ui.shell.consumeTouches
 import example.hq.spike.ui.theme.HqType
 import example.hq.spike.ui.theme.Mts
 import kotlinx.coroutines.delay
@@ -89,7 +90,7 @@ fun NotesOverlays(ui: NotesUi, actions: NotesActions, onAskHq: (List<Pair<String
     val top = ui.top
     if (top != null) {
         BackHandler(onBack = actions.onBack)
-        Box(Modifier.fillMaxSize().background(Mts.Surface000).statusBarsPadding().navigationBarsPadding()) {
+        Box(Modifier.fillMaxSize().background(Mts.Surface000).consumeTouches().statusBarsPadding().navigationBarsPadding()) {
             when (top) {
                 is NotesRoute.Reader -> ReaderPage(ui, actions)
                 is NotesRoute.Folder -> FolderPage(ui, actions)

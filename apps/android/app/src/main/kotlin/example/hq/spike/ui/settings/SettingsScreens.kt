@@ -18,6 +18,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.selection.selectable
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
@@ -25,6 +26,14 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import java.time.Instant
+import androidx.lifecycle.repeatOnLifecycle
+import androidx.lifecycle.compose.LocalLifecycleOwner
+import androidx.lifecycle.Lifecycle
+import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.runtime.produceState
+import androidx.compose.runtime.getValue
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -41,12 +50,15 @@ import androidx.compose.ui.unit.em
 import androidx.compose.ui.unit.sp
 import example.hq.spike.ui.chat.blocks.IconAction
 import example.hq.spike.ui.shell.HqIcons
+import example.hq.spike.ui.shell.consumeTouches
 import example.hq.spike.ui.theme.HqType
 import example.hq.spike.ui.theme.Mts
 import kotlinx.coroutines.delay
 
 private val SmallText = HqType.Caption.copy(fontSize = 13.sp, lineHeight = 18.sp)
 private const val LINE_MS = 4_000L
+private const val REFRESH_MS = 15_000L
+private val VALUE_MAX = 180.dp
 private val KEY_COLUMN = 120.dp
 
 private fun icon(key: String): ImageVector = when (key) {
@@ -77,9 +89,16 @@ private fun title(page: SettingsPage) = when (page) {
 /** Settings over the whole shell, with its own pages: Back goes up one page, then closes. */
 @Composable
 fun SettingsHost(ui: SettingsUi, actions: SettingsActions) {
+    val owner = LocalLifecycleOwner.current
+    // One loop for as long as Settings is open and the app is in front: closing Settings ends it, and opening it again starts one.
+    LaunchedEffect(ui.open) {
+        if (ui.open) owner.lifecycle.repeatOnLifecycle(Lifecycle.State.STARTED) {
+            while (true) { actions.onRefresh(); delay(REFRESH_MS) }
+        }
+    }
     if (!ui.open) return
     BackHandler(onBack = actions.onBack)
-    Box(Modifier.fillMaxSize().background(Mts.Surface000).statusBarsPadding().navigationBarsPadding()) {
+    Box(Modifier.fillMaxSize().background(Mts.Surface000).consumeTouches().statusBarsPadding().navigationBarsPadding()) {
         Column(Modifier.fillMaxSize()) {
             Row(Modifier.fillMaxWidth().heightIn(min = 64.dp).padding(start = 4.dp, end = 16.dp), verticalAlignment = Alignment.CenterVertically) {
                 IconAction(HqIcons.ArrowBack, "Back", iconSize = 24.dp, onClick = actions.onBack)
@@ -159,7 +178,7 @@ private fun Fact(row: FactRow, first: Boolean) {
     Column(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 12.dp), verticalArrangement = Arrangement.spacedBy(2.dp)) {
         Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
             Text(row.title, style = HqType.BodyBold, color = Mts.Ink, modifier = Modifier.weight(1f))
-            Text(row.value, style = HqType.BodySm, color = Mts.InkMuted)
+            Text(row.value, style = HqType.BodySm, color = Mts.InkMuted, textAlign = TextAlign.End, modifier = Modifier.widthIn(max = VALUE_MAX))
         }
         row.text?.let { Text(it, style = SmallText, color = Mts.InkMuted) }
     }
@@ -173,6 +192,18 @@ private fun Waiting(ui: SettingsUi) {
     if (!ui.loaded) Text("Asking HQ…", style = HqType.BodySm, color = Mts.InkMuted, modifier = Modifier.padding(16.dp))
 }
 
+/** True when the page has nothing to show yet: it says it is asking, or why there is nothing (no answer, or an error answer). */
+@Composable
+private fun Unanswered(ui: SettingsUi, route: String, have: Boolean): Boolean {
+    if (have) return false
+    when {
+        !ui.loaded -> Waiting(ui)
+        route in ui.snap.unavailable -> Notice("HQ answered, but this page is not available here. It may be switched off in this edition or setup.", HqIcons.Info)
+        else -> NoAnswer()
+    }
+    return true
+}
+
 @Composable
 private fun NoAnswer(text: String = "HQ is not running, so there is nothing to show yet. Try again when it is back.") =
     Notice(text, HqIcons.WifiOff, warn = true)
@@ -182,13 +213,12 @@ private fun NoAnswer(text: String = "HQ is not running, so there is nothing to s
 @Composable
 private fun Home(ui: SettingsUi, actions: SettingsActions) {
     Page {
-        SettingsWords.home(ui.snap, ui.now, ui.phone).forEachIndexed { gi, g ->
+        SettingsWords.home(ui.snap, ui.now, ui.phone, ui.loaded).forEachIndexed { gi, g ->
             Text(g.title.uppercase(), style = HqType.Group.copy(letterSpacing = 0.06.em), color = Mts.InkMuted, modifier = Modifier.padding(start = 16.dp, top = if (gi == 0) 8.dp else 20.dp, end = 16.dp, bottom = 4.dp))
             Group {
                 g.rows.forEachIndexed { i, r -> NavRow(r, i == 0) { if (r.page != null) actions.onPage(r.page) else actions.onPhoneRow(r.key) } }
             }
         }
-        Waiting(ui)
     }
 }
 
@@ -200,7 +230,7 @@ private fun Safety(ui: SettingsUi, actions: SettingsActions) {
         Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(horizontal = 16.dp, vertical = 10.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             SettingsWords.SafetyTab.entries.forEach { t ->
                 val on = t == ui.safetyTab
-                Box(Modifier.heightIn(min = 48.dp).clip(CircleShape).clickable(role = Role.Tab, onClickLabel = t.label) { actions.onTab(t) }, contentAlignment = Alignment.Center) {
+                Box(Modifier.heightIn(min = 48.dp).clip(CircleShape).selectable(selected = on, role = Role.Tab, onClick = { actions.onTab(t) }), contentAlignment = Alignment.Center) {
                     Box(
                         Modifier.heightIn(min = 36.dp).clip(CircleShape).then(if (on) Modifier.background(Mts.BrandGreen, CircleShape).border(1.dp, Mts.BrandGreen, CircleShape) else Modifier.border(1.dp, Mts.Line, CircleShape)).padding(horizontal = 14.dp),
                         contentAlignment = Alignment.Center,
@@ -211,8 +241,7 @@ private fun Safety(ui: SettingsUi, actions: SettingsActions) {
         Page {
             Notice("Read only. You can change these in the config file on this phone.")
             val rows = SettingsWords.safetyRows(ui.snap.settings, ui.safetyTab)
-            Box(Modifier.padding(top = 12.dp)) { if (rows.isEmpty()) NoAnswer() else Facts(rows) }
-            Waiting(ui)
+            Box(Modifier.padding(top = 12.dp)) { if (rows.isEmpty()) Unanswered(ui, "settings", false) else Facts(rows) }
         }
     }
 }
@@ -223,7 +252,7 @@ private fun Safety(ui: SettingsUi, actions: SettingsActions) {
 private fun Keys(ui: SettingsUi) {
     val s = ui.snap.settings
     Page {
-        if (s == null) { NoAnswer(); Waiting(ui); return@Page }
+        if (Unanswered(ui, "settings", s != null) || s == null) return@Page
         Label("Model")
         Facts(listOf(FactRow("Which AI HQ uses", SettingsWords.activeModel(s)), FactRow("Only AI that runs on this phone", SettingsWords.onOff(s.optJSONObject("model")?.optBoolean("local_only") == true))))
         Text("The model is set in the config file on this phone.", style = SmallText, color = Mts.InkMuted, modifier = Modifier.padding(start = 20.dp, top = 8.dp, end = 20.dp))
@@ -259,7 +288,7 @@ private fun Keys(ui: SettingsUi) {
 @Composable
 private fun Messaging(ui: SettingsUi) {
     Page {
-        if (ui.snap.chatApps == null) { NoAnswer(); Waiting(ui); return@Page }
+        if (Unanswered(ui, "chatApps", ui.snap.chatApps != null)) return@Page
         Column(Modifier.padding(start = 16.dp, top = 8.dp, end = 16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
             listOf("telegram" to "Telegram", "discord" to "Discord").forEach { (key, name) -> AppCardView(SettingsWords.appCard(ui.snap.chatApps, key, name)) }
         }
@@ -276,7 +305,7 @@ private fun AppCardView(c: SettingsWords.AppCard) {
             Column {
                 Text(c.name, style = HqType.ScreenTitle, color = Mts.Ink)
                 Row(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
-                    Box(Modifier.size(8.dp).background(if (c.on) Mts.BrandGreen else Mts.Line, CircleShape))
+                    Box(Modifier.size(8.dp).background(if (c.line.startsWith("Running")) Mts.BrandGreen else if (c.on) Mts.Amber else Mts.Line, CircleShape))
                     Text(c.line, style = HqType.BodySm, color = Mts.InkMuted)
                 }
             }
@@ -301,8 +330,14 @@ private fun KeyValue(key: String, value: String, color: Color = Mts.Ink) {
 @Composable
 private fun Claude(ui: SettingsUi) {
     val c = ui.snap.connector
+    val armed = SettingsWords.time(c, "armed_until")?.isAfter(ui.now) == true
+    // Between reads the clock stands still; while a window is open it is the countdown, so it is kept moving.
+    val now by produceState(ui.now, armed, ui.now) {
+        value = ui.now
+        while (armed) { delay(1_000); value = Instant.now() }
+    }
     Page {
-        if (c == null) { NoAnswer(); Waiting(ui); return@Page }
+        if (Unanswered(ui, "connector", c != null) || c == null) return@Page
         if (!c.optBoolean("enabled")) {
             Notice("Set mcp_connector.enabled and mcp_connector.public_url in the config, then restart HQ.", HqIcons.Info)
             return@Page
@@ -313,10 +348,10 @@ private fun Claude(ui: SettingsUi) {
                 Text("ADDRESS TO GIVE CLAUDE", style = HqType.Group.copy(fontSize = 12.sp, letterSpacing = 0.06.em), color = Mts.InkMuted)
                 Text(c.optString("url", "Not set"), style = HqType.BodySm.copy(fontFamily = FontFamily.Monospace), color = Mts.Ink)
             }
-            Text(SettingsWords.connectorStatus(c, ui.now), style = HqType.BodyBold, color = Mts.Ink)
+            Text(SettingsWords.connectorStatus(c, now), style = HqType.BodyBold, color = Mts.Ink)
         }
         Label("Connected")
-        val grants = SettingsWords.grants(c, ui.now)
+        val grants = SettingsWords.grants(c, now)
         if (grants.isEmpty()) Text("Nothing is connected.", style = HqType.BodySm, color = Mts.InkMuted, modifier = Modifier.padding(start = 20.dp, top = 8.dp))
         else Group {
             grants.forEachIndexed { i, g ->
@@ -337,7 +372,7 @@ private fun Claude(ui: SettingsUi) {
 private fun Devices(ui: SettingsUi) {
     Page {
         val d = ui.snap.devices
-        if (d == null) { NoAnswer(); Waiting(ui); return@Page }
+        if (Unanswered(ui, "devices", d != null) || d == null) return@Page
         val list = SettingsWords.devices(d)
         if (list.isEmpty()) Text("No other device is signed in.", style = HqType.BodySm, color = Mts.InkMuted, modifier = Modifier.padding(16.dp))
         else Group {
@@ -359,7 +394,7 @@ private fun Devices(ui: SettingsUi) {
 private fun Spending(ui: SettingsUi) {
     Page {
         val b = ui.snap.budgets
-        if (b == null) { NoAnswer(); Waiting(ui); return@Page }
+        if (Unanswered(ui, "budgets", b != null) || b == null) return@Page
         val rows = SettingsWords.budgetRows(b)
         Box(Modifier.padding(top = 8.dp)) { if (rows.isEmpty()) Notice("No spending limit is set.", HqIcons.Info) else Facts(rows) }
         Text("Changing a limit, and the full usage page, are in the web app for now.", style = SmallText, color = Mts.InkMuted, modifier = Modifier.padding(start = 20.dp, top = 12.dp, end = 20.dp))

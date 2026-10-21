@@ -14,6 +14,8 @@ data class SettingsSnapshot(
     val devices: JSONObject? = null,
     val budgets: JSONObject? = null,
     val health: JSONObject? = null,
+    /** Routes HQ answered with an error (not found, a server error): the page says that, not that HQ is not running. */
+    val unavailable: Set<String> = emptySet(),
 )
 
 enum class SettingsPage { Home, Safety, Keys, Messaging, Claude, Devices, Spending, About }
@@ -37,7 +39,10 @@ object SettingsWords {
     private fun JSONArray?.items(): List<JSONObject> = if (this == null) emptyList() else (0 until length()).mapNotNull { optJSONObject(it) }
     private fun JSONObject?.text(name: String): String? = this?.takeIf { has(name) && !isNull(name) }?.optString(name)?.takeIf { it.isNotBlank() }
 
-    fun configuredKeys(s: JSONObject?): List<String> = s.arr("provider_keys").items().filter { it.optBoolean("configured") }.map { it.optString("name") }
+    /** Keys for search or other tools, not for an AI service: they are listed but not counted as "keys" on the home line. */
+    private val TOOL_KEYS = setOf("Brave Search")
+
+    fun configuredKeys(s: JSONObject?): List<String> = s.arr("provider_keys").items().filter { it.optBoolean("configured") && it.optString("name") !in TOOL_KEYS }.map { it.optString("name") }
 
     fun keysStatus(s: JSONObject?): String {
         if (s == null) return NOT_ANSWERED
@@ -57,8 +62,16 @@ object SettingsWords {
         val v = o?.takeIf { it.has(name) && !it.isNull(name) }?.opt(name) ?: return null
         return when (v) {
             is Number -> epoch(v.toLong())
-            is String -> v.trim().let { t -> t.toLongOrNull()?.let(::epoch) ?: try { Instant.parse(t.replace(' ', 'T').let { if (it.endsWith("Z") || it.contains('+')) it else it + "Z" }) } catch (e: DateTimeParseException) { null } }
+            is String -> v.trim().let { t -> t.toLongOrNull()?.let(::epoch) ?: iso(t) }
             else -> null
+        }
+    }
+
+    /** ISO text with an offset (+00:00, Z) or none (taken as UTC). OffsetDateTime reads the offsets that Instant.parse refuses before Android 14. */
+    private fun iso(t: String): Instant? {
+        val text = t.replace(' ', 'T')
+        return try { java.time.OffsetDateTime.parse(text).toInstant() } catch (e: DateTimeParseException) {
+            try { java.time.LocalDateTime.parse(text).toInstant(java.time.ZoneOffset.UTC) } catch (e2: DateTimeParseException) { null }
         }
     }
 
@@ -82,7 +95,7 @@ object SettingsWords {
     fun liveGrants(c: JSONObject?, now: Instant): List<JSONObject> =
         c.arr("grants").items().filter { g -> time(g, "revoked_at") == null && (time(g, "expires_at")?.isAfter(now) ?: true) }
 
-    fun clock(seconds: Long): String = "%d:%02d".format(seconds / 60, seconds % 60)
+    fun clock(seconds: Long): String = String.format(java.util.Locale.ROOT, "%d:%02d", seconds / 60, seconds % 60)
 
     fun connectorStatus(c: JSONObject?, now: Instant): String {
         if (c == null) return NOT_ANSWERED
@@ -99,16 +112,19 @@ object SettingsWords {
         return if (n == 0) "None signed in" else "$n signed in"
     }
 
-    private fun money(v: Double) = "$" + "%.2f".format(v)
+    private fun money(v: Double) = "$" + String.format(java.util.Locale.ROOT, "%.2f", v)
 
     fun spendingStatus(b: JSONObject?): String {
         if (b == null) return NOT_ANSWERED
-        val day = b.arr("budgets").items().firstOrNull { it.optString("period") == "day" } ?: b.arr("budgets").items().firstOrNull() ?: return "No limit set"
-        val period = when (day.optString("period")) { "day" -> "today"; "week" -> "this week"; "month" -> "this month"; else -> "" }
-        return "${money(day.optDouble("spent_usd"))} of ${money(day.optDouble("limit_usd"))} $period".trim()
+        val all = b.arr("budgets").items()
+        // The whole-spend budget (scope global), daily if there is one; a budget for one provider or model is not today's total.
+        val head = all.firstOrNull { it.optString("scope") == "global" && it.optString("period") == "day" } ?: all.firstOrNull { it.optString("scope") == "global" }
+        if (head == null) return if (all.isEmpty()) "No limit set" else "${all.size} limits set"
+        val period = when (head.optString("period")) { "day" -> "today"; "week" -> "this week"; "month" -> "this month"; else -> "" }
+        return "${money(head.optDouble("spent_usd"))} of ${money(head.optDouble("limit_usd"))} $period".trim()
     }
 
-    fun home(snap: SettingsSnapshot, now: Instant = Instant.now(), phone: List<HomeRow> = emptyList()): List<HomeGroup> = listOf(
+    fun home(snap: SettingsSnapshot, now: Instant = Instant.now(), phone: List<HomeRow> = emptyList(), loaded: Boolean = true): List<HomeGroup> = withChecking(loaded, listOf(
         HomeGroup("This phone", phone),
         HomeGroup(
             "Your accounts", listOf(
@@ -125,7 +141,11 @@ object SettingsWords {
                 HomeRow(SettingsPage.About, "arch", "About", aboutStatus(snap.health)),
             ),
         ),
-    )
+    ))
+
+    /** Until the first read has finished, the rows that come from HQ say so, rather than "Not answering". */
+    private fun withChecking(loaded: Boolean, groups: List<HomeGroup>): List<HomeGroup> =
+        if (loaded) groups else groups.map { g -> if (g.title == "This phone") g else g.copy(rows = g.rows.map { it.copy(status = "Checking…") }) }
 
     fun aboutStatus(h: JSONObject?): String = h?.text("version")?.let { "HQ $it" } ?: if (h == null) NOT_ANSWERED else "HQ is running"
 
@@ -143,10 +163,13 @@ object SettingsWords {
     private fun sandbox(v: String): String = when (v) {
         "required" -> "Required"
         "best_effort" -> "When the phone can"
-        "process" -> "In a separate process"
+        "process" -> "Fenced in, internet limited to a list"
         "off", "none", "" -> "Off"
         else -> v.replaceFirstChar(Char::uppercase)
     }
+
+    /** The computer a helper runs on: the phone itself is "native" in the config. */
+    private fun computerName(host: String) = if (host == "native" || host == "local") "This phone" else host
 
     fun safetyRows(s: JSONObject?, tab: SafetyTab): List<FactRow> {
         if (s == null) return emptyList()
@@ -168,14 +191,14 @@ object SettingsWords {
                 FactRow("How often long work checks in", secs(limits?.optInt("background_progress_secs") ?: 0)),
             )
             SafetyTab.Helpers -> listOf(
-                FactRow("Default computer", host.text("default_host") ?: "None set"),
+                FactRow("Default computer", host.text("default_host")?.let(::computerName) ?: "None set"),
                 FactRow("Computers", "${host.arr("hosts")?.length() ?: 0}"),
                 FactRow("Safe box for helpers", sandbox(host.text("sandbox_mode").orEmpty())),
                 FactRow("Stop idle helpers after", host?.optInt("idle_reap_hours")?.let { if (it <= 0) "Never" else "$it h" } ?: "Never"),
                 FactRow("New helpers: HQ answers their questions", yesNo(host?.optBoolean("drive_new_watches") == true)),
                 FactRow("How often HQ checks on helpers", host?.optInt("driver_checkin_minutes")?.let { "$it min" } ?: "Not set"),
                 FactRow("How many instructions HQ may give one helper", "${host?.optInt("driver_nudge_budget") ?: 0}"),
-                FactRow("Stop a helper that makes no progress after", "${host?.optInt("driver_no_progress_limit") ?: 0} checks"),
+                FactRow("Stop answering a helper that makes no progress after", "${host?.optInt("driver_no_progress_limit") ?: 0} turns", "HQ stops answering its questions for you. The helper itself keeps running."),
             )
             SafetyTab.Tools -> listOf(
                 FactRow("Connected tools", "${integ.arr("remote_mcp")?.length() ?: 0}"),
@@ -194,6 +217,7 @@ object SettingsWords {
 
     fun fallbackRows(s: JSONObject?): List<Pair<String, String>> {
         val b = s.obj("backends") ?: return emptyList()
+        if (!b.optBoolean("configured", true)) return listOf("Whichever key is set" to "no order is set")
         val primary = b.text("primary")
         val fallbacks = b.arr("fallbacks")?.let { a -> (0 until a.length()).map { a.optString(it) } }.orEmpty()
         val first = primary?.let { listOf("1 · $it" to "primary") } ?: listOf("1 · None set" to "no AI is set")
@@ -209,8 +233,11 @@ object SettingsWords {
         val on = a?.let { it.optBoolean("enabled") && it.optBoolean("token_set") } == true
         val relay = a.obj("relay")
         val status = relay.text("status")
+        // `current` is false when the status file was written before this HQ started (an earlier Active run), so nothing is answering now.
+        val current = relay?.optBoolean("current", true) != false
         val line = when {
             !on -> "Off"
+            !current -> "Not running yet"
             status == "connected" || status == "running" || status == "online" -> "Running"
             status != null -> status.replaceFirstChar(Char::uppercase)
             else -> "Saved"
@@ -243,8 +270,18 @@ object SettingsWords {
     // ------------------------------------------------------------ Spending limits
 
     fun budgetRows(b: JSONObject?): List<FactRow> = b.arr("budgets").items().map {
-        val period = when (it.optString("period")) { "day" -> "a day"; "week" -> "a week"; "month" -> "a month"; else -> it.optString("period") }
-        FactRow(it.optString("name").ifBlank { "Limit" }.replaceFirstChar(Char::uppercase), "${money(it.optDouble("spent_usd"))} of ${money(it.optDouble("limit_usd"))}", "Per $period · ${stateWords(it.optString("state"))}")
+        val period = when (it.optString("period")) { "day" -> "Per day"; "week" -> "Per week"; "month" -> "Per month"; else -> it.optString("period") }
+        val scope = scopeOf(it.optString("scope"))
+        FactRow(it.optString("name").ifBlank { "Limit" }.replaceFirstChar(Char::uppercase), "${money(it.optDouble("spent_usd"))} of ${money(it.optDouble("limit_usd"))}", listOfNotNull(period, scope, stateWords(it.optString("state"))).joinToString(" · "))
+    }
+
+    /** What a budget covers, when it is not everything: "global" says nothing, "provider:openrouter" says which. */
+    private fun scopeOf(scope: String): String? = when {
+        scope == "global" || scope.isBlank() -> null
+        scope.startsWith("provider:") -> "Provider ${scope.removePrefix("provider:")}"
+        scope.startsWith("model:") -> "Model ${scope.removePrefix("model:")}"
+        scope.startsWith("origin:") -> "From ${scope.removePrefix("origin:")}"
+        else -> scope
     }
 
     private fun stateWords(s: String) = when (s) { "ok", "within", "" -> "within the limit"; "warn", "warning" -> "close to the limit"; "blocked", "exceeded" -> "limit reached"; else -> s }

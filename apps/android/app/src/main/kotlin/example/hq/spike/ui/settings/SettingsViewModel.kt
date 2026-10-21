@@ -8,17 +8,17 @@ import android.net.Uri
 import android.os.PowerManager
 import android.provider.Settings
 import androidx.lifecycle.AndroidViewModel
-import androidx.lifecycle.viewModelScope
 import example.hq.spike.AlertPoster
 import example.hq.spike.data.HqServices
 import example.hq.spike.data.HqUnavailable
 import java.io.File
 import java.time.Instant
-import kotlinx.coroutines.delay
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.update
-import kotlinx.coroutines.launch
 import org.json.JSONObject
 
 data class SettingsUi(
@@ -44,6 +44,8 @@ class SettingsActions(
     val onPhoneRow: (String) -> Unit = {},
     val onCopyDiagnostics: () -> Unit = {},
     val onDismissLine: () -> Unit = {},
+    /** One read of everything Settings shows; the page calls it every few seconds while it is showing and the app is in front. */
+    val onRefresh: suspend () -> Unit = {},
 )
 
 class SettingsViewModel(app: Application) : AndroidViewModel(app) {
@@ -60,6 +62,7 @@ class SettingsViewModel(app: Application) : AndroidViewModel(app) {
         onPhoneRow = ::phoneRow,
         onCopyDiagnostics = ::copyDiagnostics,
         onDismissLine = { _state.update { it.copy(line = null) } },
+        onRefresh = ::refreshNow,
     )
 
     fun freeze(fixed: SettingsUi) {
@@ -67,23 +70,29 @@ class SettingsViewModel(app: Application) : AndroidViewModel(app) {
         _state.value = fixed
     }
 
+    /** Opens Settings on its home page. What is on it comes from [refreshNow], which the page runs while it is showing. */
     private fun open() {
-        _state.update { it.copy(open = true, stack = emptyList()) }
-        if (frozen) return
-        viewModelScope.launch {
-            while (_state.value.open) {
-                refresh()
-                delay(REFRESH_MS)
-            }
-        }
+        _state.update { it.copy(open = true, stack = emptyList(), line = null, phone = if (frozen) it.phone else phoneRows(), mode = if (frozen) it.mode else modeOf(), now = Instant.now()) }
     }
 
-    private suspend fun refresh() {
-        suspend fun get(path: String): JSONObject? = try { client.json(path) } catch (e: HqUnavailable) { null }
-        val snap = SettingsSnapshot(get("/api/settings"), get("/api/chat-apps"), get("/api/oauth/connector"), get("/api/auth/devices"), get("/api/budgets"), get("/health"))
+    /** Reads every route at once, then what Android says about HQ; one route that fails shows as such on its own row only. */
+    suspend fun refreshNow() {
         if (frozen) return
+        val routes = listOf("settings" to "/api/settings", "chatApps" to "/api/chat-apps", "connector" to "/api/oauth/connector", "devices" to "/api/auth/devices", "budgets" to "/api/budgets", "health" to "/health")
+        val got = coroutineScope { routes.map { (key, path) -> async { key to get(path) } }.awaitAll() }.toMap()
+        if (frozen) return
+        fun body(key: String) = got[key]?.body
+        val snap = SettingsSnapshot(
+            body("settings"), body("chatApps"), body("connector"), body("devices"), body("budgets"), body("health"),
+            unavailable = got.filterValues { it.body == null && it.answered }.keys,
+        )
         _state.update { it.copy(snap = snap, loaded = true, phone = phoneRows(), mode = modeOf(), now = Instant.now()) }
     }
+
+    /** What one route gave back: its JSON, or none; and whether HQ answered at all (an error answer is not the same as no answer). */
+    private class Got(val body: JSONObject?, val answered: Boolean)
+
+    private suspend fun get(path: String): Got = try { Got(client.json(path), true) } catch (e: HqUnavailable) { Got(null, e.message?.startsWith("HTTP ") == true) }
 
     private fun ctx(): Application = getApplication()
 
@@ -140,7 +149,6 @@ class SettingsViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     private companion object {
-        const val REFRESH_MS = 15_000L
         const val MODE_MAX = 64L
     }
 }

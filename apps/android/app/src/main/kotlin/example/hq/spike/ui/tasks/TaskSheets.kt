@@ -53,6 +53,7 @@ import example.hq.spike.ui.chat.ActionRow
 import example.hq.spike.ui.chat.SheetFrame
 import example.hq.spike.ui.chat.blocks.IconAction
 import example.hq.spike.ui.shell.HqIcons
+import example.hq.spike.ui.shell.consumeTouches
 import example.hq.spike.ui.theme.HqType
 import example.hq.spike.ui.theme.Mts
 import java.time.LocalDate
@@ -171,7 +172,7 @@ fun TaskPage(d: TaskDetail, today: LocalDate, actions: TasksActions) {
     val t = d.task
     val menu = remember { androidx.compose.runtime.mutableStateOf(false) }
     val more = remember { androidx.compose.runtime.mutableStateOf(false) }
-    Column(Modifier.fillMaxSize().background(Mts.Surface000).statusBarsPadding().navigationBarsPadding()) {
+    Column(Modifier.fillMaxSize().background(Mts.Surface000).consumeTouches().statusBarsPadding().navigationBarsPadding()) {
         Row(Modifier.fillMaxWidth().heightIn(min = 64.dp).padding(start = 4.dp, end = 4.dp), verticalAlignment = Alignment.CenterVertically) {
             IconAction(HqIcons.ArrowBack, "Back", iconSize = 24.dp, onClick = actions.onClose)
             Text("Task", style = HqType.BodyBold, color = Mts.Ink, modifier = Modifier.weight(1f).padding(start = 4.dp))

@@ -17,6 +17,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.selection.selectable
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -77,7 +78,7 @@ private fun Tabs(tab: TaskTab, onTab: (TaskTab) -> Unit) {
         TaskTab.entries.forEach { t ->
             val on = t == tab
             Box(
-                Modifier.weight(1f).heightIn(min = 48.dp).clickable(role = Role.Tab, onClickLabel = t.name) { onTab(t) }
+                Modifier.weight(1f).heightIn(min = 48.dp).selectable(selected = on, role = Role.Tab, onClick = { onTab(t) })
                     .drawBehind { if (on) drawRoundRect(Mts.BrandGreen, Offset(16.dp.toPx(), size.height - 3.dp.toPx()), Size(size.width - 32.dp.toPx(), 3.dp.toPx()), CornerRadius(3.dp.toPx())) },
                 contentAlignment = Alignment.Center,
             ) { Text(t.name, style = HqType.BodySmBold, color = if (on) Mts.Ink else Mts.InkMuted) }

@@ -17,13 +17,13 @@ fun settingsFixture(name: String?): SettingsUi? {
         "integrations":{"remote_mcp":[],"searxng_host":null,"disk_watchdog_enabled":true}}""",
     )
     val chat = JSONObject(
-        """{"telegram":{"token_set":true,"enabled":true,"owner":{"paired":true},"bot":{"username":"example_bot"},"relay":{"status":"connected"}},"discord":{"token_set":false,"enabled":false}}""",
+        """{"telegram":{"token_set":true,"enabled":true,"owner":{"paired":true},"bot":{"username":"example_bot"},"relay":{"status":"connected","current":true}},"discord":{"token_set":true,"enabled":true,"relay":{"status":"connected","current":false}}}""",
     )
     val connector = JSONObject(
         """{"enabled":true,"url":"https://hq.example.ts.net/mcp","armed_until":${future(581)},"grants":[{"id":"g1","label":"Claude","grant_scope":"read_only","created_at":${now.minusSeconds(90_000).epochSecond},"expires_at":${future(86_400)},"last_used_at":null,"revoked_at":null}]}""",
     )
     val devices = JSONObject("""{"devices":[{"id":"d1","label":"MacBook","created_at":${now.minusSeconds(170_000).epochSecond},"last_used_at":${now.minusSeconds(10_800).epochSecond},"expires_at":null}]}""")
-    val budgets = JSONObject("""{"budgets":[{"name":"daily","period":"day","limit_usd":5,"spent_usd":2.1,"state":"ok"}]}""")
+    val budgets = JSONObject("""{"budgets":[{"name":"all","scope":"global","period":"day","limit_usd":5,"spent_usd":2.1,"state":"ok"},{"name":"openrouter","scope":"provider:openrouter","period":"week","limit_usd":10,"spent_usd":9.5,"state":"warn"}]}""")
     val health = JSONObject("""{"status":"ok","service":"hq","version":"0.9.1"}""")
     val phone = listOf(
         HomeRow(null, "background", "Background work", "On · answers chats, runs tasks"),
@@ -34,6 +34,7 @@ fun settingsFixture(name: String?): SettingsUi? {
     val base = SettingsUi(open = true, snap = SettingsSnapshot(settings, chat, connector, devices, budgets, health), loaded = true, phone = phone, mode = "active", build = "hub \u00b7 build 1", now = now)
     return when (name) {
         "s-home" -> base
+        "s-loading" -> SettingsUi(open = true, loaded = false, phone = phone, mode = "active", build = "hub \u00b7 build 1", now = now)
         "s-safety" -> base.copy(stack = listOf(SettingsPage.Safety))
         "s-time" -> base.copy(stack = listOf(SettingsPage.Safety), safetyTab = SettingsWords.SafetyTab.Time)
         "s-helpers" -> base.copy(stack = listOf(SettingsPage.Safety), safetyTab = SettingsWords.SafetyTab.Helpers)

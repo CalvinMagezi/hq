@@ -39,6 +39,7 @@ import example.hq.spike.ui.chat.blocks.numbersTable
 import example.hq.spike.ui.chat.blocks.rememberCopier
 import example.hq.spike.ui.chat.blocks.toTsv
 import example.hq.spike.ui.shell.HqIcons
+import example.hq.spike.ui.shell.consumeTouches
 import example.hq.spike.ui.theme.HqType
 import example.hq.spike.ui.theme.Mts
 
@@ -48,7 +49,7 @@ private val CaptionStyle = HqType.Caption.copy(fontSize = 13.sp, lineHeight = 18
 @Composable
 private fun PageFrame(title: String, onBack: () -> Unit, trailing: @Composable () -> Unit = {}, content: @Composable () -> Unit) {
     BackHandler(onBack = onBack)
-    Column(Modifier.fillMaxSize().background(Mts.Surface000).statusBarsPadding()) {
+    Column(Modifier.fillMaxSize().background(Mts.Surface000).consumeTouches().statusBarsPadding()) {
         Row(Modifier.fillMaxWidth().height(64.dp).padding(start = 4.dp, end = 4.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(0.dp)) {
             IconAction(HqIcons.ArrowBack, "Back", iconSize = 24.dp, onClick = onBack)
             Text(title, style = HqType.BodyBold, color = Mts.Ink, maxLines = 1, modifier = Modifier.weight(1f).padding(start = 4.dp))
