@@ -339,4 +339,11 @@ object HelperWords {
             HelperState.Finished, HelperState.Stopped -> 4
         }
     }
+
+    /** Why "Follow in chat" did not open a chat: [status] is the HTTP status HQ answered with, 0 when it did not answer, null when it answered with no chat. */
+    fun followFailed(status: Int?): String = when (status) {
+        404 -> "That helper is gone."
+        0, 503 -> "HQ is not answering."
+        else -> "Could not open the chat."
+    }
 }

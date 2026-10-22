@@ -397,4 +397,12 @@ class HelperWordsTest {
         assertEquals("Fix", HelperWords.oneLineLabel("Fix "))
         assertEquals("a b", HelperWords.typedLabel("a\u0007 b"))
     }
+
+    @Test fun followInChatSaysWhyItFailed() {
+        assertEquals("That helper is gone.", HelperWords.followFailed(404))
+        assertEquals("HQ is not answering.", HelperWords.followFailed(0))
+        assertEquals("HQ is not answering.", HelperWords.followFailed(503))
+        assertEquals("Could not open the chat.", HelperWords.followFailed(500))
+        assertEquals("Could not open the chat.", HelperWords.followFailed(null))
+    }
 }

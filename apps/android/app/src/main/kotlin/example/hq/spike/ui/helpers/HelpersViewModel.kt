@@ -45,11 +45,15 @@ data class HelperOpen(
     val rename: String? = null,
     val raw: Boolean = false,
     val technical: Boolean = false,
+    /** "Follow in chat" is waiting on HQ. */
+    val following: Boolean = false,
 )
 
 data class HelperLine(val text: String)
 
 data class HelpersUi(
+    /** The chat HQ opened to follow a helper; the shell takes it, shows that chat and clears it. */
+    val followed: String? = null,
     val loaded: Boolean = false,
     val offline: Boolean = false,
     val rows: List<HelperRow> = emptyList(),
@@ -96,6 +100,8 @@ class HelpersActions(
     val onAskStop: (Boolean) -> Unit = {},
     val onStop: () -> Unit = {},
     val onRename: (String?) -> Unit = {},
+    val onFollow: () -> Unit = {},
+    val onFollowedHandled: () -> Unit = {},
     val onSaveRename: () -> Unit = {},
     val onStartOpen: () -> Unit = {},
     val onStartClose: () -> Unit = {},
@@ -142,6 +148,8 @@ class HelpersViewModel(app: Application) : AndroidViewModel(app) {
         onStop = ::stop,
         onRename = { r -> editOpen { it.copy(rename = r?.let(HelperWords::typedLabel), menu = false) } },
         onSaveRename = ::saveRename,
+        onFollow = ::follow,
+        onFollowedHandled = { _state.update { it.copy(followed = null) } },
         onStartOpen = ::openStart,
         onStartClose = { _state.update { it.copy(start = null) } },
         onJob = { j -> _state.update { s -> s.copy(start = s.start?.copy(job = j, error = null)) } },
@@ -331,6 +339,22 @@ class HelpersViewModel(app: Application) : AndroidViewModel(app) {
             } catch (e: HqUnavailable) {
                 editFor(id) { it.copy(confirmStop = false, error = "Couldn't stop it. HQ didn't reply.") }
             }
+        }
+    }
+
+    private fun follow() {
+        val o = _state.value.open ?: return
+        if (o.following) return
+        editFor(o.id) { it.copy(following = true, menu = false) }
+        viewModelScope.launch {
+            val thread = try { client.followHelper(o.id) } catch (e: HqUnavailable) {
+                editFor(o.id) { it.copy(following = false) }
+                say(HelperWords.followFailed(e.status))
+                return@launch
+            }
+            editFor(o.id) { it.copy(following = false) }
+            // Opening the chat closes the helper page, so it is done only if the owner is still looking at this helper.
+            if (thread.isBlank()) say(HelperWords.followFailed(null)) else if (_state.value.open?.id == o.id) _state.update { it.copy(followed = thread) }
         }
     }
 

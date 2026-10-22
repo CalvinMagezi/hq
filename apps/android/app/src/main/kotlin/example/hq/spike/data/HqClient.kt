@@ -187,6 +187,9 @@ class HqClient(private val token: () -> String, private val base: String = LOCAL
 
     suspend fun createTask(body: JSONObject): TaskItem = send(authed("/api/tasks").post(json(body)).build()) { taskOf(JSONObject(it)) }
 
+    /** Adds a task with a repeat key; true when HQ already had one with that key and so added nothing. */
+    suspend fun createTaskOnce(body: JSONObject): Boolean = send(authed("/api/tasks").post(json(body)).build()) { JSONObject(it).optBoolean("deduplicated") }
+
     suspend fun taskComments(id: String): List<TaskComment> =
         send(authed("/api/tasks/${java.net.URLEncoder.encode(id, "UTF-8")}/comments").build()) { text ->
             JSONObject(text).optJSONArray("comments").objects().map { TaskComment(it.optString("id"), it.optString("author", ""), it.optString("body", ""), it.optString("created_at", "")) }
@@ -286,6 +289,10 @@ class HqClient(private val token: () -> String, private val base: String = LOCAL
     suspend fun stopHelper(id: String) {
         send(authed("/api/harness-sessions/${java.net.URLEncoder.encode(id, "UTF-8")}/stop").post(EMPTY_JSON).build()) { }
     }
+
+    /** Opens the chat that follows this helper, making one if no chat does yet; returns that chat's id. Asking again returns the same chat. */
+    suspend fun followHelper(id: String): String =
+        send(authed("/api/harness-sessions/${java.net.URLEncoder.encode(id, "UTF-8")}/adopt").post(EMPTY_JSON).build()) { JSONObject(it).optString("thread_id") }
 
     suspend fun renameHelper(id: String, label: String) {
         send(authed("/api/harness-sessions/${java.net.URLEncoder.encode(id, "UTF-8")}/rename").post(JSONObject().put("label", label).toString().toRequestBody("application/json".toMediaType())).build()) { }

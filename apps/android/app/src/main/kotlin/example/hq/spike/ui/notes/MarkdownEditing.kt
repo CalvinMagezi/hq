@@ -44,14 +44,12 @@ object MarkdownEditing {
         return replace(v, start, end, changed, cursorAtEnd = true)
     }
 
-    /** Inserts a link: the selection becomes the label, or `[link](https://)` when nothing is selected. */
+    /** Links to another note: the selection goes between `[[` and `]]`, or the cursor sits between them when nothing is selected. */
     fun link(v: TextFieldValue): TextFieldValue {
         val s = v.selection.min
         val e = v.selection.max
-        val label = v.text.substring(s, e).ifEmpty { "link" }
-        val text = v.text.substring(0, s) + "[$label](https://)" + v.text.substring(e)
-        val urlStart = s + label.length + 3
-        return TextFieldValue(text, TextRange(urlStart, urlStart + "https://".length))
+        val text = v.text.substring(0, s) + "[[" + v.text.substring(s, e) + "]]" + v.text.substring(e)
+        return TextFieldValue(text, if (s == e) TextRange(s + 2) else TextRange(e + 4))
     }
 
     private fun lineBounds(text: String, at: Int): Pair<Int, Int> {
