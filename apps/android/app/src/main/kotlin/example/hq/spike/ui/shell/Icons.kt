@@ -95,6 +95,7 @@ object HqIcons {
         "M19 15l.8 2 2.2.8-2.2.8-.8 2.2-.8-2.2L16 17.8l2.2-.8z",
     )
     val Inbox = outline("inbox", "M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9", "M10.3 21a1.94 1.94 0 0 0 3.4 0")
+    val Paste = outline("paste", "M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2", "M9 2h6a1 1 0 0 1 1 1v2a1 1 0 0 1-1 1H9a1 1 0 0 1-1-1V3a1 1 0 0 1 1-1z")
     val Filter = outline("filter", "M22 3H2l8 9.46V19l4 2v-8.54z")
     val Search = outline("search", "M3 11a8 8 0 1 0 16 0a8 8 0 1 0-16 0", "m21 21-4.3-4.3")
     val Gear = outline(

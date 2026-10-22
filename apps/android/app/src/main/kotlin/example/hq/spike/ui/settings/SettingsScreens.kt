@@ -447,7 +447,7 @@ private fun SetupApp(ui: SettingsUi, actions: SettingsActions) {
                         keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(keyboardType = androidx.compose.ui.text.input.KeyboardType.Password, autoCorrectEnabled = false),
                     )
                 }
-                IconAction(HqIcons.Copy, "Paste the token", iconSize = 22.dp) { clipboard.getText()?.text?.let { typed = it.trim() } }
+                IconAction(HqIcons.Paste, "Paste the token", iconSize = 22.dp) { clipboard.getText()?.text?.let { typed = it.trim() } }
             }
             if (checked) Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
                 Icon(HqIcons.Check, null, Modifier.size(20.dp), tint = Mts.BrandGreen)
