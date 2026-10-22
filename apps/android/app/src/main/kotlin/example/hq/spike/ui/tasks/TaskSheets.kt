@@ -176,10 +176,11 @@ fun TaskPage(d: TaskDetail, today: LocalDate, actions: TasksActions) {
         Row(Modifier.fillMaxWidth().heightIn(min = 64.dp).padding(start = 4.dp, end = 4.dp), verticalAlignment = Alignment.CenterVertically) {
             IconAction(HqIcons.ArrowBack, "Back", iconSize = 24.dp, onClick = actions.onClose)
             Text("Task", style = HqType.BodyBold, color = Mts.Ink, modifier = Modifier.weight(1f).padding(start = 4.dp))
-            IconAction(HqIcons.MoreVertical, "More", iconSize = 24.dp) { menu.value = true }
+            if (t.archivedAt == null) IconAction(HqIcons.MoreVertical, "More", iconSize = 24.dp) { menu.value = true }
         }
         Column(Modifier.weight(1f).verticalScroll(rememberScrollState()).padding(start = 16.dp, top = 8.dp, end = 16.dp, bottom = 24.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
             Text(t.title, style = HqType.H2, color = Mts.Ink)
+            if (t.archivedAt != null) { ArchivedCard(t, actions); if (t.description.isNotBlank()) Text(t.description, style = HqType.Body, color = Mts.Ink); return@Column }
             if (t.status == "ready_for_review") ReadyCard(t, actions) else StatusRow(t, actions)
             val ready = t.status == "ready_for_review"
             if (t.description.isNotBlank()) {
@@ -200,6 +201,16 @@ fun TaskPage(d: TaskDetail, today: LocalDate, actions: TasksActions) {
         }
     }
     if (d.prompt == "sendback") SendBackDialog(d, actions)
+}
+
+/** An archived task is read only: it says so, keeps its comments and links, and offers to bring it back. */
+@Composable
+private fun ArchivedCard(t: TaskItem, actions: TasksActions) {
+    val shape = RoundedCornerShape(12.dp)
+    Column(Modifier.fillMaxWidth().clip(shape).background(Mts.Surface100).border(1.dp, Mts.Hairline, shape).padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+        Text("Archived ${TasksLogic.readyAgo(t.archivedAt, java.time.LocalDateTime.now(java.time.ZoneOffset.UTC)) ?: "earlier"}. Restore it to work on it again, with its comments and sub-tasks.", style = HqType.BodySm, color = Mts.Ink)
+        Box(Modifier.heightIn(min = 48.dp).clip(CircleShape).background(Mts.BrandGreen).clickable(role = Role.Button, onClick = actions.onRestore).padding(horizontal = 24.dp), contentAlignment = Alignment.Center) { Text("Restore", style = HqType.BodySmBold, color = Mts.OnGreen) }
+    }
 }
 
 @Composable

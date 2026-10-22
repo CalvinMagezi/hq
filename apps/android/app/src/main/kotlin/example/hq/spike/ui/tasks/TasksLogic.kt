@@ -13,6 +13,12 @@ import java.util.Locale
 
 enum class TaskTab { Today, Upcoming, All }
 
+/** The lists on the All tab: what is open, the two states that need a person, what is finished, and what was put away. */
+enum class AllChip(val label: String) { Active("Active"), Stuck("Stuck"), Review("Ready to check"), Done("Done"), Archived("Archived") }
+
+/** The small tag on a row's first line: Urgent or High in amber, how long it has been stuck in red. */
+data class IdTag(val text: String, val danger: Boolean)
+
 /**
  * A heading and the tasks under it. The badge counts them; [collapsible] groups (Later, No date) show only their count until tapped;
  * a group with a [preview] shows that many and a row to show the rest.
@@ -69,6 +75,60 @@ object TasksLogic {
             TaskGroup("review", "Ready to check", live.filter { it.status == "ready_for_review" }.sortedWith(byUrgency)),
             TaskGroup("todo", "To do", live.filter { it.status == "to_do" }.sortedWith(byUrgency)),
         ).filter { it.tasks.isNotEmpty() }
+    }
+
+    /** What the All tab shows under [chip]. Done and Archived are one list with no headings. */
+    fun allList(tasks: List<TaskItem>, chip: AllChip, archived: List<TaskItem>): List<TaskGroup> = when (chip) {
+        AllChip.Active -> all(tasks)
+        AllChip.Stuck -> all(tasks).filter { it.key == "blocked" }
+        AllChip.Review -> all(tasks).filter { it.key == "review" }
+        AllChip.Done -> flat("done", tasks.filter { it.status == "complete" && it.parentId == null }.sortedByDescending { it.completedAt ?: it.updatedAt })
+        AllChip.Archived -> flat("archived", archived.sortedByDescending { it.archivedAt ?: it.updatedAt })
+    }
+
+    private fun flat(key: String, tasks: List<TaskItem>) = if (tasks.isEmpty()) emptyList() else listOf(TaskGroup(key, "", tasks, badge = false))
+
+    /** The number on a chip: only the two that ask something of the owner carry one. */
+    fun chipCount(tasks: List<TaskItem>, chip: AllChip): Int = when (chip) {
+        AllChip.Stuck -> tasks.count { open(it) && it.status == "blocked" }
+        AllChip.Review -> tasks.count { open(it) && it.status == "ready_for_review" }
+        else -> 0
+    }
+
+    fun emptyAll(chip: AllChip) = when (chip) {
+        AllChip.Active -> "No open tasks."; AllChip.Stuck -> "Nothing is stuck."; AllChip.Review -> "Nothing is waiting to be checked."
+        AllChip.Done -> "Nothing is done yet."; AllChip.Archived -> "Nothing is archived."
+    }
+
+    /** "Blocked 2d" while stuck, else the priority when it is Urgent or High. */
+    fun idTag(t: TaskItem, now: LocalDateTime = LocalDateTime.now(ZoneOffset.UTC)): IdTag? {
+        if (t.status == "blocked") return IdTag("Blocked" + (stuckFor(t.blockedSince, now)?.let { " $it" } ?: ""), danger = true)
+        return priorityWords(t.priority)?.takeIf { t.priority == "urgent" || t.priority == "high" }?.let { IdTag(it, danger = false) }
+    }
+
+    /** "2d", or "5h" within a day, from the server's `YYYY-MM-DD HH:MM:SS` UTC time. */
+    fun stuckFor(since: String?, now: LocalDateTime): String? {
+        val then = try { LocalDateTime.parse(since?.replace(' ', 'T') ?: return null) } catch (e: DateTimeParseException) { return null }
+        val hours = Duration.between(then, now).toHours().coerceAtLeast(0)
+        return if (hours >= 24) "${hours / 24}d" else if (hours < 1) "<1h" else "${hours}h"
+    }
+
+    /** The third line of an All row: what it is waiting on, who it is for, how far along, and when. */
+    fun allMeta(t: TaskItem, today: LocalDate, working: Boolean, now: LocalDateTime = LocalDateTime.now(ZoneOffset.UTC)): String {
+        val forWho = t.assignees.firstOrNull()?.let { "for $it" }
+        val tag = t.tags.firstOrNull()
+        val parts = when {
+            t.archivedAt != null -> listOfNotNull("Archived " + (readyAgo(t.archivedAt, now) ?: "earlier"))
+            t.status == "complete" -> listOfNotNull("Done " + (readyAgo(t.completedAt ?: t.updatedAt, now) ?: "earlier"))
+            t.status == "blocked" -> listOfNotNull(t.waitingOn?.takeIf { it.isNotBlank() }?.let { "Waiting on $it" }, t.blockedReason?.takeIf { it.isNotBlank() })
+            t.status == "ready_for_review" -> listOfNotNull(forWho, readyAgo(t.readyAt, now)?.let { "moved $it" })
+            else -> listOfNotNull(
+                "hq is working".takeIf { working },
+                "${t.subtaskDone} of ${t.subtaskCount} sub-tasks".takeIf { t.subtaskCount > 0 },
+                dueWords(t.dueDate, today), forWho, tag,
+            )
+        }
+        return parts.joinToString(" \u00b7 ")
     }
 
     private fun plural(n: Int) = if (n == 1) "1 task" else "$n tasks"
