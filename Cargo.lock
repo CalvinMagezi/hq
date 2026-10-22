@@ -3420,6 +3420,31 @@ dependencies = [
 ]
 
 [[package]]
+name = "hq-desktop"
+version = "0.9.1"
+dependencies = [
+ "anyhow",
+ "axum",
+ "dirs",
+ "futures",
+ "hostname",
+ "hq-bridge",
+ "hq-core",
+ "hq-db",
+ "libc",
+ "qrcodegen",
+ "reqwest 0.12.28",
+ "serde",
+ "serde_json",
+ "subtle",
+ "tempfile",
+ "thiserror 2.0.18",
+ "tokio",
+ "tokio-tungstenite 0.28.0",
+ "tracing",
+]
+
+[[package]]
 name = "hq-export"
 version = "0.9.1"
 dependencies = [
