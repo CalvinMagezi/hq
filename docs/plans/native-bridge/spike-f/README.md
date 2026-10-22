@@ -96,9 +96,41 @@ Findings:
   run as a plain process. Pairing, the relay path and reconnects all worked despite it. Inside the real
   app, the `hq` child process has no JVM context either, so this needs a decision: initialize the
   context, patch the two crates, or confirm what the resolver falls back to.
-- **Not measured yet** (need the owner's hands or a second network; `RUNBOOK.md` has the steps): a carrier hotspot, public wifi,
-  UDP blocked with only the relay, sleep and wake, a network change mid-session, and the time of the
-  whole pairing on a real phone camera.
+- **Still not measured:** a carrier hotspot (no second phone was available) and public wifi.
+  `RUNBOOK.md` has the steps.
+
+### Real phone, protocol v2 (2026-10-22)
+
+A physical Android 13 phone over USB (`adb`), the Mac host on a home LAN, n0's public relay, the
+exchange with commit-then-reveal and typed digits. One carrier, one home router: a start, not a survey.
+
+| Row | Result |
+|---|---|
+| Same LAN | Paired in 1.2 s. Reconnect by key 1.9 s, direct, p50 6.7 ms |
+| Mobile data, full ticket (335 chars) | Paired in 1.3 s. Reconnect 0.7 s, direct, p50 328 ms (the cell's own latency) |
+| Mobile data, relay-only ticket (211 chars) | Paired in 2.7 s. Reconnect 2.0 s, direct after the relay introduced the two, p50 326 ms |
+| UDP blocked (a Linux container whose firewall drops all outbound UDP but DNS; 160 packets dropped) | Paired over the relay. Reconnect 2.1 s, stays on the relay, p50 525 ms, p95 629 ms |
+| Screen off 10 minutes, then a failed attempt to force deep idle | 866 calls in 16 minutes, no reconnect, longest stall 3 s, stayed direct |
+| Wifi to mobile data mid-session | The connection survives but stalls about 18 s, recovers through the relay and is direct again 3 s later. Mobile data back to wifi: no gap |
+| Phone camera on the terminal QR (full ticket) | Read on the first try. The stock camera shows the text and offers no app to open it |
+
+What these say:
+
+- **Direct first holds.** Even from behind a carrier's address translation, a relay-only ticket ended on
+  a direct path in about two seconds. The relay is a fallback for hostile networks (UDP blocked), where
+  it works but costs about 0.5 s a call from here.
+- **A network change needs help.** The 18 s stall is the transport waiting for the old path to go
+  quiet. The app should tell iroh when Android reports a new network (`Endpoint::network_change`,
+  not tried here) and retry when a network becomes available: a dial started 15 s after wifi was
+  re-enabled timed out three times before it connected.
+- **The sleep row proves little.** The phone was charging, deep idle could not be forced, and the
+  process ran as the `adb` shell user, not as an app, so neither Doze nor app standby applied. It has
+  to be repeated inside the real app.
+- **The QR works but a plain text payload is a dead end.** The camera decoded the ticket and then had
+  nothing to open it with. A link the camera can hand to the app (a custom scheme such as
+  `hqpair://`, or an https link that also tells a person without the app where to get it) would make
+  "scan, and it opens" true. The https link needs a static page somewhere, which is a decision for the
+  owner.
 
 ## Independent review (2026-10-22)
 

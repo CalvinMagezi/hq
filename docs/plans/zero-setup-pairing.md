@@ -86,8 +86,14 @@ either way, and a paired device must work with no relay.
   revoke, unbounded pairing connections and an untrusted paired list. What the review left for the
   product (denial of service on the pairing door, per-ticket throwaway keys, push revocation) is in
   the spike's README.
-- Not yet measured: a carrier hotspot, public wifi, UDP blocked with only the relay, sleep and wake,
-  a network change mid-session, and a real camera scanning the QR.
+- On a real phone (details in the spike's README): pairing took 1.2 to 2.7 s on the same LAN and on
+  mobile data; a relay-only ticket still ended on a direct path from behind carrier address
+  translation; with all UDP dropped it pairs and works over the relay (about 0.5 s a call). A wifi to
+  mobile-data switch stalls a live connection about 18 s, so the app must report network changes
+  and retry. The phone camera read the terminal QR first time, but a plain `hqpair1.` text opens
+  nothing: the payload should be a link the camera can hand to the app.
+- Not yet measured: a carrier hotspot and public wifi (no second phone, guest wifi pending), and
+  the sleep rows inside a real app.
 
 ## After the slice, in order
 

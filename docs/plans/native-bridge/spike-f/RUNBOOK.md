@@ -1,5 +1,8 @@
 # Runbook: the real-network rows of Spike F
 
+Results from the first pass (a phone over USB, one carrier, one home router) are in the README.
+The hotspot and public wifi rows are the ones still open.
+
 The loopback tests and the emulator runs show that pairing works. They cannot show how it behaves on
 the networks people actually use. This runbook fills the rows still empty in the README: mobile data,
 a carrier hotspot, public wifi, a network that blocks UDP, sleep and wake, a network change in the
