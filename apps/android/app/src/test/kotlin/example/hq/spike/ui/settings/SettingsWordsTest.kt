@@ -361,4 +361,13 @@ class SettingsWordsTest {
         assertEquals("No budgets are set, so nothing is limited.", SettingsWords.noBudgets(JSONObject("""{"budgets":[]}""")))
         assertEquals("No budgets are set.", SettingsWords.noBudgets(JSONObject("""{"budgets":[],"background_run_usd":2.5}""")))
     }
+
+    @Test fun theNotesCountIsShownOnlyWhenThisHqSaysIt() {
+        fun snap(json: String?) = SettingsSnapshot(vault = json?.let { org.json.JSONObject(it) })
+        org.junit.Assert.assertEquals("2,860", SettingsWords.notesCount(snap("""{"vault_path":"/x","notes":2860}""")))
+        org.junit.Assert.assertEquals("0", SettingsWords.notesCount(snap("""{"notes":0}""")))
+        org.junit.Assert.assertNull(SettingsWords.notesCount(snap("""{"vault_path":"/x"}""")))
+        org.junit.Assert.assertNull(SettingsWords.notesCount(snap("""{"notes":null}""")))
+        org.junit.Assert.assertNull(SettingsWords.notesCount(snap(null)))
+    }
 }

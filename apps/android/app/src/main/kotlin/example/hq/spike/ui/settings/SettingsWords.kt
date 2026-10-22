@@ -23,6 +23,8 @@ data class SettingsSnapshot(
     val copilot: JSONObject? = null,
     /** This month's spend and where it is heading (/api/usage/forecast). */
     val forecast: JSONObject? = null,
+    /** What HQ says about the vault (/api/vault-status): its path and, from a build that has it, how many notes are indexed. */
+    val vault: JSONObject? = null,
 )
 
 enum class SettingsPage { Home, Safety, Keys, Messaging, Claude, Devices, Spending, About, Background, KeepRunning, Notifications, Origins, ConnectedTools, Computers, CaptureWidgets, SetupApp, PairApp }
@@ -124,6 +126,13 @@ object SettingsWords {
         if (d == null) return NOT_ANSWERED
         val n = d.arr("devices").items().size
         return if (n == 0) "None signed in" else "$n signed in"
+    }
+
+    /** "2,860" for the About page, or null when this HQ does not say how many notes there are (an older build). */
+    fun notesCount(snap: SettingsSnapshot): String? {
+        val v = snap.vault ?: return null
+        if (!v.has("notes") || v.isNull("notes")) return null
+        return v.optLong("notes", -1L).takeIf { it >= 0 }?.let { String.format(java.util.Locale.ROOT, "%,d", it) }
     }
 
     private fun money(v: Double) = "$" + String.format(java.util.Locale.ROOT, "%.2f", v)

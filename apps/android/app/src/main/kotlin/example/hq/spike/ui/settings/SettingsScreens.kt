@@ -993,7 +993,7 @@ private fun About(ui: SettingsUi, actions: SettingsActions) {
                 FactRow("AgentHQ", ui.build),
                 FactRow("Run mode", if (ui.mode == "active") "Active" else "Standby"),
                 FactRow("HQ", ui.snap.health?.optString("version")?.takeIf { it.isNotBlank() } ?: "Not answering"),
-            ),
+            ) + listOfNotNull(SettingsWords.notesCount(ui.snap)?.let { FactRow("Notes", it) }),
         )
         Label("Support")
         Group {
