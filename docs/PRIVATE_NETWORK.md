@@ -399,15 +399,19 @@ The peer reads two control lines from stdin after the key, `network-changed` (th
 another network: rebind and shake hands again) and `quit`. The end of stdin stops it, because the app
 that started it is gone, so `hq net tunnel run < key` ends at once: from a shell or a service, use
 `--key-file` with `--no-control`, and stop it with a signal. It prints nothing (set `RUST_LOG` to
-see its logs, on stderr) and writes `status.json` (`state`: `up`, `connecting`, `down`, `idle` for a session that aged out with
-nothing in flight, `stopped`) and a bounded `events.log` beside it. A peer that was killed leaves its
-last report behind, and `hq net tunnel status` says it is not running once that is 15 seconds old. It
+see its logs, on stderr) and writes `status.json` (`state`: `up`, `connecting`, `down` once a handshake has gone unanswered for 30
+seconds even beside a session that is still fresh, `idle` for a session that aged out with nothing in
+flight, `stopped`; also `max_age_s`, `wakeups`, `rss_kb` and `open_fds`) and a bounded `events.log` beside it. A peer that was killed leaves its
+last report behind. Every report says how long the peer can go without writing the next (`max_age_s`:
+its keepalive, at least 30 seconds), and `hq net tunnel status` says it is not running once the report
+is older than that plus 10 seconds. It
 opens one UDP socket to the hub, the loopback listeners of the reach entries and nothing else; there
 is no listener for the status. The private key never goes on a command line or in the environment:
 `keygen --stdout` prints it and the public key to a pipe for an app that keeps it in a keystore, and
 refuses a terminal.
 
 The threat model and the tests behind each claim are in `docs/security/NETWORK.md`, section 9.
+`deploy/net/tunnel-test/run.sh` runs it against a real hub in Docker (see "What is not done yet").
 Nothing here has run on a phone yet.
 
 ## Files
@@ -463,6 +467,34 @@ wireguard-go would need.
   did not stop it) and glibc 2.35. What it is not: a real host, a real `ufw` or `firewalld`
   (iptables-nft with a drop policy stands in), or the droplet. Run the first apply there with a
   spare device and watch `journalctl -u hq-net-apply@hq0`. No CI job runs it.
+- The userspace tunnel has run against a real hub. `deploy/net/tunnel-test/run.sh` builds the Linux
+  `hq` with the `tunnel` feature (about 3 minutes and 4 GB on arm64 the first time, kept in the Docker
+  volume `hqnet-cargo`), sets up the hub with the real `hq net` commands, the real units, applier and
+  nftables, and runs the device in its own network namespace, driven the way the phone app will drive
+  it (key on stdin, control lines, the status file read back). Each check prints PASS or FAIL: the
+  handshake and the status; the serve map from the hub and from a linked device; the hub's firewall
+  keeping an unlinked device out and, separately, the device's own source check ignoring a linked
+  device that its entry does not list; the reach map, including an entry towards an unlinked device;
+  a change of the device's address, recovered by `network-changed` and not before; a lost link (no
+  spinning while it is down); revoke and re-add (the new address, the maps kept); a killed, stopped
+  and abandoned device; a restarted hub; a flood of random datagrams at its UDP port, first from
+  the hub's address with another port (the socket turns them away) and then with the endpoint's own
+  address and port (the peer's receive path takes them, and one loop thread then uses a whole core while the held
+  stream stays up: a known cost, task PERSONAL-INBOX-095); one connection held across rekeys; and that the key is in no argument, variable,
+  output or file. On Docker Desktop's Linux VM (kernel 7.0.14, arm64, a debug build of `hq`) all of them passed. Numbers
+  from the runs: the flood (15.6 million datagrams in 30 seconds) cost the peer 10 to 30 ms of CPU
+  and no extra wakeups (116 with it, 132 for the same stream without it), because the kernel drops
+  datagrams from any other source before the peer sees them; three rekeys
+  in 400 seconds with two connections held open saw no error and no stall over 100 ms; a revoked
+  device reads `down` 62 seconds later; a restarted hub is found again 13 seconds later by a device
+  with traffic of its own. `SOAK=1 DURATION=3600` adds an hour with 170 ms of delay and 1 percent
+  loss, sampling memory, descriptors and wakeups; a five-minute run had no failed probe, no reset
+  and flat memory and descriptors, and the hour has not been run. An idle device does not notice a
+  restarted hub until its session expires, about three minutes, because a keepalive is not data (a
+  kernel peer behaves the same). What it is not: a phone, Android's power management, a real mobile
+  network, the Kotlin supervisor (a few lines of shell stand in for it), or the live hub. The test
+  container has no network besides the ones it makes, and the base images and the cargo volume stay
+  behind. No CI job runs it.
 - Linking has been run on a real kernel and under real systemd (above), not on a live hub. Still
   not checked: a real `ufw` or `firewalld`, whether a later write to the global
   `net.ipv4.ip_forward` undoes the per-interface setting (it rewrites every interface's value),
@@ -512,6 +544,8 @@ cargo test -p hq-net                                      # grammar, store, rend
 cargo test -p hq-net --test grammar_fuzz                  # the seeded randomized grammar tests
 sudo -E cargo test -p hq-net -- --ignored                 # drives a real wg interface; Linux, root, wireguard module
 deploy/net/test/run.sh                                    # the real units and applier under systemd 252 and 249, in Docker
+deploy/net/tunnel-test/run.sh                             # the real `hq net tunnel run` as a device against that hub, in Docker
+cargo test -p hq-cli --features tunnel --test net_tunnel  # the tunnel commands through the real binary
 ```
 
 The applier module and its tests compile only on Linux. On another system run them in a container

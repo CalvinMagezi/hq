@@ -73,3 +73,6 @@ dump.rdb
 .superpowers/
 autoresearch-results.tsv
 *.whl
+
+# Output of the tunnel harness (deploy/net/tunnel-test/run.sh)
+deploy/net/tunnel-test/results/
