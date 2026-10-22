@@ -9,7 +9,7 @@ use crate::code::{
     bind_host, new_bind_key, new_code, new_nonce, opens, printable,
 };
 use crate::limits::{Admission, LimitConfig, Limiter, Source};
-use crate::ticket::{Purpose, Ticket};
+use crate::ticket::{MAX_TICKET_ITEMS, Purpose, Ticket};
 use crate::wire::{
     Card, Details, Final, Hello, MAX_NAME_CHARS, Outcome, Reply, Reveal, b32, clean_addrs,
     clean_relays, commitment_from, nonce_from, read_line, send_line, unb32,
@@ -60,6 +60,10 @@ pub struct Joiner {
     pub id: EndpointId,
     /// What the device calls itself: unchecked text, made printable.
     pub name: String,
+    /// The address the pairing connection came from, when it came directly. The joiner dialed
+    /// from its long-term endpoint, so this is a way to dial it back that needs no relay and no
+    /// word from the joiner.
+    pub observed: Option<SocketAddr>,
 }
 
 /// What a purpose does with a device the person accepted. Pairing writes the peer into the
@@ -92,7 +96,10 @@ impl Tuning {
     /// reply, the reveal, the request to the person, the final answer, the details), then the
     /// person's decision and the two close waits.
     pub fn exchange_budget(&self) -> Duration {
-        self.hello_timeout * 7 + self.decision_timeout + CLOSE_GRACE * 2
+        self.hello_timeout
+            .saturating_mul(7)
+            .saturating_add(self.decision_timeout)
+            .saturating_add(CLOSE_GRACE * 2)
     }
 }
 
@@ -199,6 +206,18 @@ pub(crate) fn source_of(conn: &Connection) -> Source {
         TransportAddr::Relay(url) => Source::Relay(url.to_string()),
         _ => Source::Other,
     }
+}
+
+/// The socket address of the direct path a connection arrived on, if it has one.
+fn observed_addr(conn: &Connection) -> Option<SocketAddr> {
+    let paths = conn.paths();
+    let direct = |selected_only: bool| {
+        paths.iter().find_map(|p| match p.remote_addr() {
+            TransportAddr::Ip(addr) if p.is_selected() || !selected_only => Some(*addr),
+            _ => None,
+        })
+    };
+    direct(true).or_else(|| direct(false))
 }
 
 #[derive(Debug, Clone)]
@@ -394,6 +413,7 @@ impl PairHandler {
         let who = Joiner {
             id: joiner,
             name: printable(&reveal.name, MAX_NAME_CHARS),
+            observed: observed_addr(conn),
         };
         let (decide, answer) = oneshot::channel();
         self.step("the host person", async {
@@ -581,7 +601,12 @@ impl OpenTicket {
             endpoint.id(),
             &code,
             relay_urls(&endpoint),
-            ticket_addrs(&endpoint, spec.with_addrs, &spec.advertise),
+            ticket_addrs(
+                &endpoint,
+                spec.with_addrs,
+                &spec.advertise,
+                MAX_TICKET_ITEMS,
+            ),
         );
         let deadline = shared.window.lock().unwrap().deadline();
         let lifecycle = tokio::spawn(lifecycle(shared.clone(), router, deadline));
@@ -600,7 +625,8 @@ impl OpenTicket {
         self.pairing_endpoint.id()
     }
 
-    /// Whether the throwaway endpoint's socket has been closed.
+    /// Whether the throwaway endpoint has been closed (it refuses everything). Its socket is
+    /// released when this ticket is dropped, as the endpoint handle lives here.
     pub fn endpoint_closed(&self) -> bool {
         self.pairing_endpoint.is_closed()
     }
@@ -641,17 +667,21 @@ fn relay_urls(endpoint: &Endpoint) -> Vec<String> {
         .collect()
 }
 
+/// The addresses a ticket or card lists, the ones the person named first, then the sockets bound
+/// to one address, then what the machine found, with no repeats and no more than `limit` (a
+/// machine with many interfaces would otherwise make a ticket the other side refuses).
 pub(crate) fn ticket_addrs(
     endpoint: &Endpoint,
     with_addrs: bool,
     advertise: &[SocketAddr],
+    limit: usize,
 ) -> Vec<String> {
     if !with_addrs {
         return Vec::new();
     }
-    let mut addrs: Vec<String> = endpoint.addr().ip_addrs().map(|a| a.to_string()).collect();
     // A socket bound to one address is reachable at it; one bound to every address is not named
     // by that, so the person gives the address to advertise.
+    let mut addrs: Vec<String> = advertise.iter().map(|a| a.to_string()).collect();
     addrs.extend(
         endpoint
             .bound_sockets()
@@ -659,10 +689,18 @@ pub(crate) fn ticket_addrs(
             .filter(|a| !a.ip().is_unspecified())
             .map(|a| a.to_string()),
     );
-    addrs.extend(advertise.iter().map(|a| a.to_string()));
-    addrs.sort();
-    addrs.dedup();
-    addrs
+    addrs.extend(endpoint.addr().ip_addrs().map(|a| a.to_string()));
+    first_distinct(addrs, limit)
+}
+
+/// The first `limit` entries, in order, without repeats.
+fn first_distinct(items: Vec<String>, limit: usize) -> Vec<String> {
+    let mut seen = std::collections::HashSet::new();
+    items
+        .into_iter()
+        .filter(|item| seen.insert(item.clone()))
+        .take(limit)
+        .collect()
 }
 
 /// Keeps the throwaway endpoint up exactly as long as the ticket can be used: until the window
@@ -687,4 +725,18 @@ async fn lifecycle(shared: Arc<Shared>, router: Router, deadline: Instant) {
         changed.await;
     }
     let _ = router.shutdown().await;
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_ticket_never_lists_more_addresses_than_the_other_side_will_read() {
+        let many: Vec<String> = (0..20).map(|n| format!("192.0.2.{n}:7000")).collect();
+        let kept = first_distinct(many.clone(), MAX_TICKET_ITEMS);
+        assert_eq!(kept, many[..MAX_TICKET_ITEMS]);
+        let repeated = vec!["a".to_string(), "b".into(), "a".into(), "c".into()];
+        assert_eq!(first_distinct(repeated, 10), ["a", "b", "c"]);
+    }
 }

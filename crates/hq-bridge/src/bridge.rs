@@ -8,7 +8,7 @@ use crate::host::{self, OpenTicket, PairingSpec, Registrar, Tuning};
 use crate::join::{self, JoinOptions, JoinResult, target_from};
 use crate::key::load_or_create_key;
 use crate::ticket::{Purpose, Ticket};
-use crate::wire::Card;
+use crate::wire::{Card, MAX_DIAL_ITEMS};
 use anyhow::{Context, Result, anyhow, bail};
 use hq_db::{Database, bridge as peers};
 use iroh::{
@@ -230,7 +230,15 @@ pub struct PeerRegistrar {
 
 impl Registrar for PeerRegistrar {
     fn accept(&self, joiner: &host::Joiner) -> Result<Option<serde_json::Value>> {
-        peers::add_peer(&self.db, &joiner.id.to_string(), &joiner.name, &[], &[])?;
+        // The joiner may never send its details, so the address it came from is recorded now.
+        let observed: Vec<String> = joiner.observed.iter().map(|a| a.to_string()).collect();
+        peers::add_peer(
+            &self.db,
+            &joiner.id.to_string(),
+            &joiner.name,
+            &[],
+            &observed,
+        )?;
         Ok(None)
     }
 
@@ -332,7 +340,12 @@ impl Bridge {
                 .relay_urls()
                 .map(|r| r.to_string())
                 .collect(),
-            addrs: host::ticket_addrs(&self.endpoint, self.with_addrs, &self.advertise),
+            addrs: host::ticket_addrs(
+                &self.endpoint,
+                self.with_addrs,
+                &self.advertise,
+                MAX_DIAL_ITEMS,
+            ),
         }
     }
 

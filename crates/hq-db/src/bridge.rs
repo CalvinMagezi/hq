@@ -34,7 +34,9 @@ fn strings(json: &str) -> Vec<String> {
     serde_json::from_str(json).unwrap_or_default()
 }
 
-/// Records a pairing. Pairing a key that was revoked brings it back with the new details.
+/// Records a pairing. Pairing a key that was revoked brings it back with the new details. Empty
+/// relay or address lists keep what is already known: a pairing that learned nothing new must not
+/// forget how to dial the peer.
 pub fn add_peer(
     db: &Database,
     id: &str,
@@ -46,8 +48,10 @@ pub fn add_peer(
         c.execute(
             "INSERT INTO bridge_peers (id, label, relays, addrs, paired_at) \
              VALUES (?1, ?2, ?3, ?4, ?5) \
-             ON CONFLICT(id) DO UPDATE SET label = excluded.label, relays = excluded.relays, \
-             addrs = excluded.addrs, paired_at = excluded.paired_at, revoked_at = NULL",
+             ON CONFLICT(id) DO UPDATE SET label = excluded.label, \
+             relays = CASE WHEN excluded.relays = '[]' THEN bridge_peers.relays ELSE excluded.relays END, \
+             addrs = CASE WHEN excluded.addrs = '[]' THEN bridge_peers.addrs ELSE excluded.addrs END, \
+             paired_at = excluded.paired_at, revoked_at = NULL",
             params![
                 id,
                 label,
@@ -82,11 +86,15 @@ pub fn revoke(db: &Database, id: &str) -> Result<bool> {
     })
 }
 
-/// Records how to dial an active peer back. A peer revoked in between is left alone.
+/// Records how to dial an active peer back; an empty list keeps what is known. A peer revoked in
+/// between is left alone.
 pub fn set_dial_info(db: &Database, id: &str, relays: &[String], addrs: &[String]) -> Result<()> {
     db.with_conn(|c| {
         c.execute(
-            "UPDATE bridge_peers SET relays = ?2, addrs = ?3 WHERE id = ?1 AND revoked_at IS NULL",
+            "UPDATE bridge_peers SET \
+             relays = CASE WHEN ?2 = '[]' THEN relays ELSE ?2 END, \
+             addrs = CASE WHEN ?3 = '[]' THEN addrs ELSE ?3 END \
+             WHERE id = ?1 AND revoked_at IS NULL",
             params![
                 id,
                 serde_json::to_string(relays)?,
@@ -206,6 +214,32 @@ mod tests {
             1,
             "a revoked peer is not touched"
         );
+    }
+
+    #[test]
+    fn pairing_again_with_nothing_new_keeps_how_to_dial_the_peer() {
+        let db = Database::open_memory().unwrap();
+        add_peer(
+            &db,
+            ID,
+            "phone",
+            &["https://relay.example.com".into()],
+            &["192.0.2.1:7000".into()],
+        )
+        .unwrap();
+        add_peer(&db, ID, "phone again", &[], &[]).unwrap();
+        let peer = get(&db, ID).unwrap().unwrap();
+        assert_eq!(peer.label, "phone again");
+        assert_eq!((peer.relays.len(), peer.addrs.len()), (1, 1), "{peer:?}");
+        set_dial_info(&db, ID, &[], &[]).unwrap();
+        let peer = get(&db, ID).unwrap().unwrap();
+        assert_eq!(
+            (peer.relays.len(), peer.addrs.len()),
+            (1, 1),
+            "an empty update keeps them"
+        );
+        add_peer(&db, ID, "phone", &[], &["198.51.100.2:7000".into()]).unwrap();
+        assert_eq!(get(&db, ID).unwrap().unwrap().addrs, ["198.51.100.2:7000"]);
     }
 
     #[test]

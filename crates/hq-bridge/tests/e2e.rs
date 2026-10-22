@@ -1136,18 +1136,39 @@ async fn a_host_that_keeps_its_promise_is_stored_and_only_then_told_how_to_dial_
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn a_peer_that_leaves_before_sending_details_is_still_recorded_without_them() {
-    let (host, phone) = (Machine::host().await, Machine::phone().await);
+async fn a_peer_that_leaves_before_sending_details_is_still_recorded_and_can_be_dialed() {
+    let host = Machine::host().await;
     let open = host.bridge.open_ticket(tuning()).await.unwrap();
+    let client = raw_client(V4).await;
     let ticket = open.ticket.clone();
     let answering = answer_with(open, true);
-    assert!(paired(&join(&phone, &ticket).await));
+    let mut raw = raw_pair(&client, &ticket, &ticket.code, 3).await;
+    assert!(reply_of(&mut raw).await.ok);
+    wire::send_line(
+        &mut raw.send,
+        &Reveal {
+            nonce: wire::b32(&raw.nonce),
+            name: "raw".into(),
+        },
+    )
+    .await
+    .unwrap();
+    // Read the final answer and leave without sending the details.
+    let last: Final =
+        serde_json::from_str(&with_timeout(wire::read_line(&mut raw.recv)).await.unwrap()).unwrap();
+    assert_eq!(last.result, Outcome::Accepted);
+    raw.conn.close(0u32.into(), b"gone");
     answering.await.unwrap();
-    let peer = peers::get(&host.db, &phone.id()).unwrap().unwrap();
-    assert!(
-        !peer.addrs.is_empty() && peer.label == "phone",
-        "the host knows the phone's name and how to dial it: {peer:?}"
+
+    let id = client.id().to_string();
+    let peer = peers::get(&host.db, &id).unwrap().unwrap();
+    assert!(peer.is_active() && peer.label == "raw");
+    assert_eq!(
+        peer.addrs.len(),
+        1,
+        "the address the pairing came from stands in for the details that never came: {peer:?}"
     );
+    assert!(peer.addrs[0].starts_with("127.0.0.1:"), "{peer:?}");
 }
 
 /// A client whose receive window is zero and which never reads: a write to it can never finish.
@@ -1175,17 +1196,18 @@ async fn a_client_that_never_reads_cannot_hold_a_slot_or_keep_the_endpoint_up() 
         decision_timeout: Duration::from_secs(1),
         ..tuning()
     };
-    let budget = tuning.exchange_budget();
+    let write_bound = tuning.hello_timeout;
     let open = host.bridge.open_ticket(tuning).await.unwrap();
     let ticket = open.ticket.clone();
     let client = stalled_client().await;
     let raw = raw_pair(&client, &ticket, &wrong_code(), 3).await;
-    // The host answers a wrong code, and the answer can never be delivered.
+    // The host answers a wrong code and the answer can never be delivered: the write's own
+    // deadline closes the connection, long before the whole-exchange budget would.
     assert!(
-        tokio::time::timeout(budget + Duration::from_secs(3), raw.conn.closed())
+        tokio::time::timeout(write_bound * 3, raw.conn.closed())
             .await
             .is_ok(),
-        "a connection that never reads was kept for longer than the exchange budget"
+        "a connection that never reads outlived the write deadline"
     );
     // With the ticket cancelled, nothing keeps the throwaway endpoint up.
     tokio::time::timeout(Duration::from_secs(5), open.cancel())
@@ -1264,4 +1286,55 @@ async fn a_ticket_cannot_be_made_to_outlive_a_day() {
         .await
         .unwrap();
     assert!(open.is_open());
+}
+
+/// Accepts a pairing connection and then neither reads nor closes it.
+#[derive(Clone, Debug)]
+struct DeafHost;
+
+impl ProtocolHandler for DeafHost {
+    async fn accept(&self, conn: Connection) -> Result<(), AcceptError> {
+        let _streams = conn.accept_bi().await;
+        conn.closed().await;
+        Ok(())
+    }
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_host_that_never_reads_cannot_hold_the_joiner() {
+    let phone = Machine::phone().await;
+    let transport = iroh::endpoint::QuicTransportConfig::builder()
+        .stream_receive_window(0u32.into())
+        .build();
+    let deaf = Endpoint::builder(presets::Minimal)
+        .secret_key(SecretKey::generate())
+        .relay_mode(RelayMode::Disabled)
+        .clear_ip_transports()
+        .transport_config(transport)
+        .bind_addr(V4.parse::<SocketAddr>().unwrap())
+        .unwrap()
+        .bind()
+        .await
+        .unwrap();
+    let _router = Router::builder(deaf.clone())
+        .accept(Purpose::Pair.alpn(3), DeafHost)
+        .spawn();
+    let ticket = Ticket::new(
+        Purpose::Pair,
+        deaf.id(),
+        &code::new_code(),
+        vec![],
+        deaf.bound_sockets().iter().map(|a| a.to_string()).collect(),
+    );
+    let mut opts = JoinOptions::new("phone", vec![], vec![]);
+    opts.hello_timeout = Duration::from_secs(1);
+    let started = std::time::Instant::now();
+    let result = tokio::time::timeout(
+        Duration::from_secs(8),
+        hq_bridge::join::join(phone.bridge.endpoint(), &ticket, &opts, |_| {}),
+    )
+    .await
+    .expect("the joiner waited on a host that never reads");
+    assert!(result.is_err(), "{result:?}");
+    assert!(started.elapsed() < Duration::from_secs(5));
 }

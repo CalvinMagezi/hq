@@ -21,7 +21,8 @@ pub const TICKET_FORMAT: u8 = 3;
 pub const WIRE_VERSIONS: &[u16] = &[3];
 /// A link this long cannot be a ticket; it is refused before anything is decoded.
 const MAX_LINK_CHARS: usize = 2_000;
-const MAX_LIST: usize = 8;
+/// Relays and addresses a ticket may list; a longer list is refused.
+pub const MAX_TICKET_ITEMS: usize = 8;
 const MAX_ITEM_CHARS: usize = 300;
 
 /// What a ticket opens the door to. The purpose is part of the protocol name, so a pairing ticket
@@ -165,9 +166,9 @@ impl Ticket {
         self.endpoint_id()?;
         self.code_bytes()?;
         let list_ok = |items: &[String]| {
-            items.len() <= MAX_LIST && items.iter().all(|s| s.len() <= MAX_ITEM_CHARS)
+            items.len() <= MAX_TICKET_ITEMS && items.iter().all(|s| s.len() <= MAX_ITEM_CHARS)
         };
-        if !list_ok(&self.relays) || !list_ok(&self.addrs) || self.proto.len() > MAX_LIST {
+        if !list_ok(&self.relays) || !list_ok(&self.addrs) || self.proto.len() > MAX_TICKET_ITEMS {
             bail!("the ticket is damaged");
         }
         if self.proto.is_empty() {
@@ -329,7 +330,7 @@ mod tests {
         ] {
             assert!(Ticket::parse(&bad).is_err(), "{bad}");
         }
-        let many: Vec<String> = (0..=MAX_LIST)
+        let many: Vec<String> = (0..=MAX_TICKET_ITEMS)
             .map(|n| format!("192.0.2.1:{}", 7000 + n))
             .collect();
         let crowded = Ticket {

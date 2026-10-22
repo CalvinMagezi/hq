@@ -15,6 +15,9 @@ use iroh::{Endpoint, EndpointAddr, EndpointId, endpoint::ConnectOptions};
 use std::time::Duration;
 
 const SHOWN_ERROR_CHARS: usize = 200;
+/// Reaching a host that is not there takes the transport this long to give up on its own; this is
+/// the joiner's own limit, so a ticket that points nowhere ends in a message, not a wait.
+const CONNECT_TIMEOUT: Duration = Duration::from_secs(30);
 /// How long to wait for the host to read the details and close, so they are not cut off.
 const CLOSE_WAIT: Duration = Duration::from_secs(2);
 
@@ -25,6 +28,8 @@ pub struct JoinOptions {
     /// checked out, so a host that never accepts learns none of it.
     pub relays: Vec<String>,
     pub addrs: Vec<String>,
+    /// How long to reach the host before giving up.
+    pub connect_timeout: Duration,
     pub hello_timeout: Duration,
     pub decision_timeout: Duration,
 }
@@ -35,6 +40,7 @@ impl JoinOptions {
             name: printable(name, MAX_NAME_CHARS),
             relays,
             addrs,
+            connect_timeout: CONNECT_TIMEOUT,
             hello_timeout: HELLO_TIMEOUT,
             decision_timeout: DECISION_TIMEOUT,
         }
@@ -111,15 +117,18 @@ pub async fn join(
     let main = alpns
         .next()
         .ok_or_else(|| anyhow!("no pairing version in common"))?;
-    let conn = endpoint
-        .connect_with_opts(
-            target_from(pairing_endpoint, &ticket.relays, &ticket.addrs)?,
-            &main,
-            ConnectOptions::new().with_additional_alpns(alpns.collect()),
-        )
+    let target = target_from(pairing_endpoint, &ticket.relays, &ticket.addrs)?;
+    let options = ConnectOptions::new().with_additional_alpns(alpns.collect());
+    let dial = async {
+        endpoint
+            .connect_with_opts(target, &main, options)
+            .await?
+            .await
+            .map_err(anyhow::Error::from)
+    };
+    let conn = tokio::time::timeout(opts.connect_timeout, dial)
         .await
-        .context("reaching the host")?
-        .await
+        .map_err(|_| anyhow!("reaching the host timed out"))?
         .context("reaching the host")?;
     let alpn = conn.alpn().to_vec();
     let Some((purpose, version)) = Purpose::from_alpn(&alpn) else {
@@ -129,15 +138,19 @@ pub async fn join(
         bail!("the host answered for a different purpose than the ticket names");
     }
 
-    let (mut send, mut recv) = conn.open_bi().await?;
+    let (mut send, mut recv) =
+        within(opts.hello_timeout, async { Ok(conn.open_bi().await?) }).await?;
     let joiner_nonce = new_nonce();
-    send_line(
-        &mut send,
-        &Hello {
-            v: version,
-            code: ticket.code.clone(),
-            commit: b32(&commit(&alpn, &joiner_nonce)),
-        },
+    within(
+        opts.hello_timeout,
+        send_line(
+            &mut send,
+            &Hello {
+                v: version,
+                code: ticket.code.clone(),
+                commit: b32(&commit(&alpn, &joiner_nonce)),
+            },
+        ),
     )
     .await?;
     let reply: Reply = serde_json::from_str(
@@ -153,12 +166,15 @@ pub async fn join(
         nonce_from(&reply.nonce).ok_or_else(|| anyhow!("the host sent no usable nonce"))?;
     let binding =
         binding_from(&reply.bind).ok_or_else(|| anyhow!("the host sent no identity binding"))?;
-    send_line(
-        &mut send,
-        &Reveal {
-            nonce: b32(&joiner_nonce),
-            name: opts.name.clone(),
-        },
+    within(
+        opts.hello_timeout,
+        send_line(
+            &mut send,
+            &Reveal {
+                nonce: b32(&joiner_nonce),
+                name: opts.name.clone(),
+            },
+        ),
     )
     .await?;
     let sas = code::sas(&SasInputs {
@@ -173,7 +189,7 @@ pub async fn join(
     show_sas(&sas);
     let last: Final = serde_json::from_str(
         &tokio::time::timeout(
-            opts.decision_timeout + opts.hello_timeout,
+            opts.decision_timeout.saturating_add(opts.hello_timeout),
             read_line(&mut recv),
         )
         .await??,
@@ -205,6 +221,18 @@ pub async fn join(
         card,
         info: last.info,
     }))
+}
+
+/// Runs a step under a deadline: a host that never reads or never answers must not hold this
+/// device for ever.
+async fn within<T>(
+    limit: Duration,
+    step: impl std::future::Future<Output = Result<T>>,
+) -> Result<T> {
+    match tokio::time::timeout(limit, step).await {
+        Ok(result) => result,
+        Err(_) => bail!("the host did not answer in time"),
+    }
 }
 
 /// The card the host sent after the digits, checked against the binding it gave before them, and

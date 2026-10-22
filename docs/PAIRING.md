@@ -29,7 +29,7 @@ It prints a QR code and the same link as text (`hqpair://ticket/...`), then wait
 machine:
 
 ```bash
-hq bridge join                  # paste the link when asked
+hq bridge join                  # asks for the link: paste it and press Enter
 ```
 
 (`hq bridge join <link>` also works, but a link on the command line is visible to every user of

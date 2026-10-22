@@ -233,14 +233,17 @@ async fn pair(net: &NetArgs, db: Database, ttl: Duration) -> Result<()> {
 }
 
 fn read_link(arg: Option<String>) -> Result<String> {
-    use std::io::Read;
+    use std::io::{BufRead, Read};
     match arg.as_deref() {
         Some(link) if link != "-" => Ok(link.to_string()),
         _ => {
+            // One line: a person pastes the link and presses Enter, without an end of input.
+            eprintln!("Paste the pairing link, then press Enter:");
             let mut text = String::new();
             std::io::stdin()
+                .lock()
                 .take(LINK_READ_MAX)
-                .read_to_string(&mut text)?;
+                .read_line(&mut text)?;
             Ok(text)
         }
     }

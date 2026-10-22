@@ -211,10 +211,20 @@ fn hides_or_reorders(c: char) -> bool {
         || matches!(
             c,
             '\u{00AD}'
+                | '\u{034F}'
+                | '\u{061C}'
+                | '\u{115F}'..='\u{1160}'
+                | '\u{17B4}'..='\u{17B5}'
+                | '\u{180B}'..='\u{180F}'
                 | '\u{200B}'..='\u{200F}'
                 | '\u{2028}'..='\u{202E}'
-                | '\u{2060}'..='\u{2069}'
+                | '\u{2060}'..='\u{206F}'
+                | '\u{3164}'
+                | '\u{FE00}'..='\u{FE0F}'
                 | '\u{FEFF}'
+                | '\u{FFA0}'
+                | '\u{FFF9}'..='\u{FFFB}'
+                | '\u{E0000}'..='\u{E007F}'
         )
 }
 
@@ -407,6 +417,15 @@ mod tests {
         assert_eq!(
             bidi, "a?b?c?d?e?f",
             "text that reorders or hides is replaced"
+        );
+        let hidden = printable("a\u{061C}b\u{E0041}c\u{3164}d\u{FFF9}e\u{180E}f", 120);
+        assert_eq!(
+            hidden, "a?b?c?d?e?f",
+            "tag characters and blank fillers too"
+        );
+        assert_eq!(
+            printable("Pixel 8 (Anna\u{2019}s)", 120),
+            "Pixel 8 (Anna\u{2019}s)"
         );
         assert!(printable(&"x".repeat(10_000), 120).chars().count() <= 120);
     }

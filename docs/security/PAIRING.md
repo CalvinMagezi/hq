@@ -74,6 +74,8 @@ newer layout as "from a newer version".
 4. The joiner shows the digits. The person at the host types them. The host asks the registrar to
    record the joiner only if they match, the answer came inside the decision window and the joiner
    is still connected.
+   The record includes the address the pairing connection came from, so the peer can be dialed
+   even if its details never arrive.
 5. `Final`: the outcome and, on acceptance, the host's card (long-term id, name, how to dial it)
    and `k`. The joiner checks the card's id and `k` against the binding from step 2, makes the
    card safe to store (one spelling of the id, a printable name, parsed and capped lists) and
@@ -188,8 +190,25 @@ reported one must-fix and ten should-fix items. Each was checked against the cod
 
 The reviewer also listed what it found sound: what the digits bind, the commit-before-nonce order,
 the single-use code, the revoke ordering, `Notify` use, release of slots on cancellation, the line
-bound, the key file creation. A second look at the changes made for this section follows in the
-pull request.
+bound, the key file creation.
+
+### Review of the fix round
+
+A third fresh agent read the diff of the fixes above. It reported one must-fix and several
+should-fix items; each was checked and closed:
+
+| Finding | Fate |
+|---|---|
+| Must-fix: `hq bridge join` with no argument read to end of input, so the documented paste flow hung after Enter | It prompts and reads one line |
+| A peer whose details never arrive was recorded with no way to dial it (`Minimal` preset: no address lookup), and a re-pair wiped good dial info | The address the pairing connection came from is recorded at accept time; an empty list never replaces a known one. Test with a joiner that leaves before the details |
+| The joiner's own dial, writes and open had no deadline | `connect_timeout` and the step deadline on every joiner write. Test with a host that never reads |
+| Duration arithmetic on caller-supplied timeouts could panic | Saturating |
+| `printable` missed other invisible format characters (Arabic mark, tag block, blank fillers) | Wider list, test |
+| A machine with many interfaces made a ticket longer than the joiner accepts | The sender caps the list (8 for a ticket, 4 for a card), the person's addresses first |
+| Two tests did not guard what they named | One rewritten with a joiner that really leaves; the write-deadline test now fails when only that deadline is removed |
+| The protocol changed under version 3 | Version 3 never left this branch (nothing shipped speaks another v3), so it stays 3. The next change that has to interoperate with a released build bumps it |
+| The joiner dials with its long-term key, so a rogue QR learns its id and address | Documented in section 10 |
+| `endpoint_closed` is a state flag, not a released socket | Documented in the method; the socket goes when the ticket is dropped |
 
 ## 10. Residual risks
 
@@ -204,6 +223,16 @@ pull request.
   handshake and a database read per attempt before being refused. The id is not in any ticket, so
   this needs the id from somewhere else. A Router incoming filter or a short negative cache would
   cap it; tracked as NATIVE-BRIDGE-010.
+- **A rogue QR learns the joiner's long-term id and source address.** The joiner dials the
+  throwaway endpoint with its own long-term key so the host can record who it is, so whoever runs
+  the endpoint behind a QR code sees both from the handshake. Its dial-back relays and addresses
+  are held back until the host proved its identity, but the id and the address it connected from
+  are not hidden. A throwaway key for the joiner would hide them at the cost of the host not
+  learning the joiner's real id from the connection; a later version could prove the long-term
+  key inside the exchange.
+- **A two-party window remains at acceptance.** The host records the device, then sends the
+  answer. If that send fails, or the joiner cannot record the host, the host shows "paired" and
+  the joiner an error. Pairing again heals it (the record is an upsert).
 - **The name the joiner chooses reaches the person before the digits.** It is made printable and
   capped, and is never a reason to trust the device.
 - **Relays share a bucket.** Everything that arrives through one relay shares 20 strikes and one
