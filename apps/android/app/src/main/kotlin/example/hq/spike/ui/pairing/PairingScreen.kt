@@ -1,12 +1,16 @@
 package example.hq.spike.ui.pairing
 
 import android.Manifest
+import android.app.Activity
 import android.content.ClipData
+import android.content.ContextWrapper
+import android.content.pm.ApplicationInfo
 import android.content.ClipboardManager
 import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.os.PowerManager
+import android.view.WindowManager
 import android.provider.Settings
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
@@ -38,7 +42,9 @@ import androidx.compose.material3.SwitchDefaults
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -50,6 +56,7 @@ import androidx.compose.ui.graphics.FilterQuality
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
@@ -87,6 +94,7 @@ fun PairingHost(vm: PairingViewModel, onClose: () -> Unit) {
     val ui by vm.ui.collectAsStateWithLifecycle()
     val bridge by vm.bridge.collectAsStateWithLifecycle()
     BackHandler { if (ui.screen == PairingScreen.Home) onClose() else vm.home() }
+    ProtectScreen(secret = ui.screen == PairingScreen.Show || ui.screen == PairingScreen.Joining)
     Box(Modifier.fillMaxSize().background(Mts.Surface000).statusBarsPadding().navigationBarsPadding()) {
         Column(Modifier.fillMaxSize()) {
             TopBar(title(ui.screen)) { if (ui.screen == PairingScreen.Home) onClose() else vm.home() }
@@ -100,7 +108,26 @@ fun PairingHost(vm: PairingViewModel, onClose: () -> Unit) {
             }
         }
         ui.askRemove?.let { RemoveDialog(it, { vm.askRemove(null) }, vm::confirmRemove) }
-        ui.line?.let { Notice(it, Modifier.align(Alignment.BottomCenter), vm::dismissLine) }
+        (ui.line ?: bridge.line)?.let { Notice(it, Modifier.align(Alignment.BottomCenter), vm::dismissLine) }
+    }
+}
+
+/**
+ * The code and the digits are one-time secrets: where Android allows it, keep them out of screenshots and the
+ * recent-apps thumbnail. The app is built debuggable on purpose today (README), and `adb` screenshots are how it
+ * is checked, so the flag applies to a build that is not. Touches through another app's window are ignored.
+ */
+@Composable
+internal fun ProtectScreen(secret: Boolean) {
+    val view = LocalView.current
+    SideEffect { view.filterTouchesWhenObscured = true }
+    val context = LocalContext.current
+    DisposableEffect(secret) {
+        val window = generateSequence(context) { (it as? ContextWrapper)?.baseContext }.filterIsInstance<Activity>().firstOrNull()?.window
+        val debuggable = context.applicationInfo.flags and ApplicationInfo.FLAG_DEBUGGABLE != 0
+        val protect = secret && !debuggable
+        if (protect) window?.addFlags(WindowManager.LayoutParams.FLAG_SECURE)
+        onDispose { if (protect) window?.clearFlags(WindowManager.LayoutParams.FLAG_SECURE) }
     }
 }
 

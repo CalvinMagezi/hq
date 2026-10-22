@@ -30,6 +30,11 @@ class PairingActivity : ComponentActivity() {
         setContent { HqTheme { PairingHost(vm, ::finish) } }
     }
 
+    override fun onStop() {
+        super.onStop()
+        vm.dropQueuedJoin()
+    }
+
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
         setIntent(intent)

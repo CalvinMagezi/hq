@@ -66,4 +66,19 @@ class BridgeReducerTest {
         assertNull(s.ticket)
         assertNull(s.request)
     }
+
+    @Test fun aFailedOpenEndsTheWaitForACodeAndAFailedJoinEndsTheJoin() {
+        val open = fold(BridgeEvent.Failed("open", "could not bind"))
+        assertEquals(TicketEnd.Failed, open.ticketEnd)
+        assertNull(open.ticket)
+        assertEquals(JoinState.Failed("no route"), fold(BridgeEvent.Failed("join", "no route")).join)
+        assertEquals("busy", fold(BridgeEvent.Failed("digits", "busy")).line)
+    }
+
+    @Test fun aChildThatEndsTakesItsListAndAJoinInFlightWithIt() {
+        val s = BridgeReducer.stopped(fold(BridgeEvent.Peers(listOf(BridgePeer("aa", "A", 1, null, null))), BridgeEvent.Digits("123456")))
+        assertNull(s.peers)
+        assertEquals(JoinState.Failed(BridgeReducer.BRIDGE_STOPPED), s.join)
+        assertEquals(JoinState.Done("aa", "A"), BridgeReducer.stopped(fold(BridgeEvent.Joined("aa", "A"))).join)
+    }
 }

@@ -19,12 +19,15 @@ use hq_db::bridge as peers;
 use serde::Deserialize;
 use serde_json::{Value, json};
 use std::{
-    sync::{Arc, Mutex},
+    sync::{
+        Arc, Mutex,
+        atomic::{AtomicU64, Ordering},
+    },
     time::{Duration, Instant},
 };
 use tokio::{
     io::{AsyncBufRead, AsyncBufReadExt, AsyncReadExt, AsyncWrite, AsyncWriteExt},
-    sync::{Notify, mpsc, watch},
+    sync::{mpsc, watch},
     task::JoinHandle,
     time::{sleep, timeout},
 };
@@ -50,6 +53,10 @@ const KEEP_INTERVAL: Duration = Duration::from_secs(1);
 const KEEP_ECHO_LIMIT: Duration = Duration::from_secs(40);
 const SLOW_ECHO: Duration = Duration::from_millis(1500);
 /// How long a fresh probe may take after a network change before the connection is given up.
+const RECORD_CHECKS: usize = 30;
+const RECORD_CHECK_GAP: Duration = Duration::from_millis(100);
+const SHUTDOWN_GRACE: Duration = Duration::from_secs(3);
+const KEEP_MAX_BACKOFF: u32 = 30;
 const PROBE_LIMIT: Duration = Duration::from_millis(1500);
 
 #[derive(Deserialize)]
@@ -71,9 +78,11 @@ enum Command {
 
 /// The ticket this process is showing, so a second `open` repeats it and `digits` find their way.
 struct TicketSlot {
+    /// Tells the ticket's task and a waiting answer to stop; a plain permit would be used up by whichever of them looked first.
+    id: u64,
     link: String,
     ends_at: Instant,
-    stop: Arc<Notify>,
+    stop: watch::Sender<bool>,
     digits: mpsc::Sender<String>,
 }
 
@@ -82,6 +91,8 @@ struct Slots {
     ticket: Option<TicketSlot>,
     join: Option<JoinHandle<()>>,
     keep: Option<JoinHandle<()>>,
+    /// Pings run on their own until they answer or give up; shutdown ends the ones still going.
+    pings: tokio::task::JoinSet<()>,
 }
 
 pub struct Control {
@@ -90,6 +101,7 @@ pub struct Control {
     relay: String,
     name: String,
     slots: Mutex<Slots>,
+    next_ticket: AtomicU64,
     /// Counts network changes. A dial that is waiting between attempts hears it and tries at once.
     network: watch::Sender<u64>,
 }
@@ -116,6 +128,7 @@ where
         relay,
         name,
         slots: Mutex::new(Slots::default()),
+        next_ticket: AtomicU64::new(0),
         network,
     });
     control
@@ -132,8 +145,17 @@ where
             .read_line(&mut line)
             .await;
         match read {
-            Ok(0) | Err(_) => break,
-            Ok(n) if n as u64 >= MAX_COMMAND_BYTES && !line.ends_with('\n') => break,
+            Ok(0) => break,
+            // Not text: the bytes are gone from the pipe, so say so and carry on.
+            Err(e) if e.kind() == std::io::ErrorKind::InvalidData => {
+                control.fail("", "that is not a command").await;
+                continue;
+            }
+            Err(_) => break,
+            Ok(n) if n as u64 >= MAX_COMMAND_BYTES && !line.ends_with('\n') => {
+                control.fail("", "that line is too long").await;
+                break;
+            }
             Ok(_) => {}
         }
         if line.trim().is_empty() {
@@ -147,7 +169,8 @@ where
     control.bridge.endpoint().close().await;
     control.emit(json!({"event": "bye"})).await;
     drop(control);
-    let _ = writer.await;
+    // Tasks that still hold the event queue (a ticket closing) get a moment, not forever.
+    let _ = timeout(SHUTDOWN_GRACE, writer).await;
     Ok(())
 }
 
@@ -204,11 +227,12 @@ impl Control {
     fn stop_all(&self) {
         let mut slots = self.slots.lock().unwrap();
         if let Some(ticket) = slots.ticket.take() {
-            ticket.stop.notify_one();
+            let _ = ticket.stop.send(true);
         }
         for task in [slots.join.take(), slots.keep.take()].into_iter().flatten() {
             task.abort();
         }
+        slots.pings.abort_all();
     }
 
     async fn status(&self) {
@@ -244,52 +268,77 @@ impl Control {
         };
         let link = open.ticket.link();
         let (digits, digits_in) = mpsc::channel(DIGITS_QUEUE);
-        let stop = Arc::new(Notify::new());
+        let (stop, stop_in) = watch::channel(false);
+        let id = self.next_ticket.fetch_add(1, Ordering::SeqCst);
         self.slots.lock().unwrap().ticket = Some(TicketSlot {
+            id,
             link: link.clone(),
             ends_at: Instant::now() + ttl,
-            stop: stop.clone(),
+            stop,
             digits,
         });
         self.emit(json!({"event": "ticket", "link": link, "expires_in_secs": ttl.as_secs()}))
             .await;
-        tokio::spawn(self.clone().run_ticket(open, digits_in, stop));
+        tokio::spawn(self.clone().run_ticket(id, open, digits_in, stop_in));
     }
 
     fn open_ticket_event(&self) -> Option<Value> {
         let slots = self.slots.lock().unwrap();
         let ticket = slots.ticket.as_ref()?;
         let left = ticket.ends_at.saturating_duration_since(Instant::now());
+        if left.is_zero() {
+            return None;
+        }
         Some(json!({"event": "ticket", "link": ticket.link, "expires_in_secs": left.as_secs()}))
     }
 
+    /// Ends the ticket and a pairing in progress. The ticket leaves the slot at once, so an `open` that
+    /// follows makes a new one instead of being handed the dead link.
     fn cancel(&self) {
-        if let Some(ticket) = self.slots.lock().unwrap().ticket.as_ref() {
-            ticket.stop.notify_one();
+        let mut slots = self.slots.lock().unwrap();
+        if let Some(ticket) = slots.ticket.take() {
+            let _ = ticket.stop.send(true);
+        }
+        if let Some(task) = slots.join.take() {
+            task.abort();
         }
     }
 
     /// Owns the ticket until it ends. A device that passed the code waits here for the digits.
     async fn run_ticket(
         self: Arc<Self>,
+        id: u64,
         mut open: hq_bridge::OpenTicket,
         mut digits: mpsc::Receiver<String>,
-        stop: Arc<Notify>,
+        mut stop: watch::Receiver<bool>,
     ) {
         let mut paired = false;
         loop {
             let request = tokio::select! {
                 request = open.requests.recv() => request,
-                _ = stop.notified() => None,
+                _ = stop.wait_for(|stopped| *stopped) => None,
             };
             let Some(request) = request else { break };
             while digits.try_recv().is_ok() {}
-            if self.answer(request, &mut digits, &stop).await {
+            if self.answer(request, &mut digits, &mut stop).await {
                 paired = true;
+            }
+            if *stop.borrow() {
+                break;
+            }
+        }
+        // A request that arrived as the ticket stopped is dropped here, which declines it at once; left in
+        // the queue it would hold the exchange (and this task) for the person's whole two minutes.
+        open.requests.close();
+        while open.requests.try_recv().is_ok() {}
+        // Out of the slot before the slow close, so a new `open` is not given this ticket's dead link.
+        {
+            let mut slots = self.slots.lock().unwrap();
+            if slots.ticket.as_ref().is_some_and(|t| t.id == id) {
+                slots.ticket = None;
             }
         }
         open.cancel().await;
-        self.slots.lock().unwrap().ticket = None;
         self.emit(json!({"event": "ticket_closed", "paired": paired}))
             .await;
     }
@@ -299,7 +348,7 @@ impl Control {
         &self,
         request: PairRequest,
         digits: &mut mpsc::Receiver<String>,
-        stop: &Notify,
+        stop: &mut watch::Receiver<bool>,
     ) -> bool {
         let joiner = request.joiner.to_string();
         self.emit(json!({
@@ -313,13 +362,14 @@ impl Control {
         let typed = tokio::select! {
             typed = digits.recv() => typed,
             _ = decide.closed() => None,
-            _ = stop.notified() => None,
+            _ = stop.wait_for(|stopped| *stopped) => None,
         };
         let accept = typed.as_deref().map(str::trim) == Some(sas.as_str());
         let result = match typed {
             None => "too_late",
             Some(_) => match decide.send(accept) {
-                Ok(()) if accept => "paired",
+                Ok(()) if accept && self.recorded(&joiner).await => "paired",
+                Ok(()) if accept => "too_late",
                 Ok(()) => "declined",
                 Err(_) => "too_late",
             },
@@ -327,6 +377,25 @@ impl Control {
         self.emit(json!({"event": "decision", "joiner": joiner, "result": result}))
             .await;
         result == "paired"
+    }
+
+    /// Whether the device ended up on the paired list: the answer reaching it is not the same thing, since
+    /// it can leave in the instant the host records it.
+    async fn recorded(&self, joiner: &str) -> bool {
+        for _ in 0..RECORD_CHECKS {
+            let db = self.bridge.db().clone();
+            let key = joiner.to_string();
+            let found = tokio::task::spawn_blocking(move || peers::is_paired(&db, &key))
+                .await
+                .ok()
+                .and_then(Result::ok)
+                .unwrap_or(false);
+            if found {
+                return true;
+            }
+            sleep(RECORD_CHECK_GAP).await;
+        }
+        false
     }
 
     async fn digits(&self, value: String) {
@@ -364,7 +433,13 @@ impl Control {
         let result = self
             .bridge
             .join(&ticket, &Tuning::default(), |sas| {
-                self.emit_now(json!({"event": "digits", "value": sas}));
+                // Queued with a wait, not dropped when the queue is full: without them the person has
+                // nothing to type and the pairing times out.
+                let events = self.events.clone();
+                let digits = json!({"event": "digits", "value": sas});
+                tokio::spawn(async move {
+                    let _ = events.send(digits).await;
+                });
             })
             .await;
         match result {
@@ -470,7 +545,9 @@ impl Control {
     fn ping(self: &Arc<Self>, id: String, count: Option<usize>) {
         let count = count.unwrap_or(DEFAULT_PINGS).clamp(1, MAX_PINGS);
         let this = self.clone();
-        tokio::spawn(async move {
+        let mut slots = self.slots.lock().unwrap();
+        while slots.pings.try_join_next().is_some() {}
+        slots.pings.spawn(async move {
             let started = Instant::now();
             let conn = match this.dial(&id, DIAL_WINDOW).await {
                 Ok(conn) => conn,
@@ -520,12 +597,20 @@ impl Control {
         let mut changes = self.network.subscribe();
         let mut conn: Option<Connection> = None;
         let mut last_ok = Instant::now();
+        let mut failures: u32 = 0;
         loop {
             let c = match conn.take() {
                 Some(c) => c,
                 None => match self.dial(&id, DIAL_WINDOW).await {
                     Ok(c) => {
                         keep_trace(begun, &format!("connected path={}", path_kind(&c)));
+                        if failures > 0 {
+                            self.emit(json!({
+                                "event": "keep", "id": id, "state": "up",
+                                "down_ms": last_ok.elapsed().as_millis() as u64, "path": path_kind(&c),
+                            }))
+                            .await;
+                        }
                         c
                     }
                     Err(e) => {
@@ -550,9 +635,11 @@ impl Control {
                         .await;
                     }
                     last_ok = Instant::now();
+                    failures = 0;
                     conn = Some(c);
                 }
                 None => {
+                    failures = failures.saturating_add(1);
                     keep_trace(begun, "lost");
                     self.emit(json!({
                         "event": "keep", "id": id, "state": "down",
@@ -561,7 +648,9 @@ impl Control {
                     .await;
                 }
             }
-            sleep(KEEP_INTERVAL).await;
+            // A device that revoked us still lets the handshake through and then closes the stream:
+            // each failure in a row waits a little longer, so that does not become a loop.
+            sleep(KEEP_INTERVAL.saturating_mul(failures.clamp(1, KEEP_MAX_BACKOFF))).await;
         }
     }
 }
@@ -597,7 +686,10 @@ fn keep_trace(begun: Instant, what: &str) {
     let now = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .map_or(0, |d| d.as_millis());
-    eprintln!(
+    // `eprintln!` panics when the write fails (a full disk), and a panic aborts the process.
+    use std::io::Write;
+    let _ = writeln!(
+        std::io::stderr(),
         "keep ts={now} t={:.1}s {what}",
         begun.elapsed().as_secs_f32()
     );
@@ -878,6 +970,9 @@ mod tests {
         phone.send(json!({"cmd": "network_change"})).await;
         let down = phone.until("keep").await;
         assert_eq!(down["state"], "down", "{down}");
+        // A loss on a connection that was up, not a failure to dial in the first place.
+        assert!(down["error"].is_null(), "{down}");
+        assert!(down["down_ms"].is_u64(), "{down}");
         // The echo limit is 40 s; a network change cuts a stalled call down to the probe's limit.
         assert!(
             changed.elapsed() < Duration::from_secs(10),
@@ -906,5 +1001,60 @@ mod tests {
                 break;
             }
         }
+    }
+
+    #[tokio::test]
+    async fn a_new_ticket_after_a_cancel_is_a_new_ticket() {
+        let mut side = Side::new("desk").await;
+        side.send(json!({"cmd": "open"})).await;
+        let first = side.until("ticket").await["link"].clone();
+        side.send(json!({"cmd": "cancel"})).await;
+        side.send(json!({"cmd": "open"})).await;
+        let second = side.until("ticket").await["link"].clone();
+        assert_ne!(first, second, "the dead ticket's link was handed out again");
+    }
+
+    #[tokio::test]
+    async fn cancelling_while_a_device_waits_for_its_digits_ends_the_ticket() {
+        let mut host = Side::new("desk").await;
+        let mut phone = Side::new("phone").await;
+        start_pairing(&mut host, &mut phone).await;
+        host.until("request").await;
+        host.send(json!({"cmd": "cancel"})).await;
+        assert_eq!(host.until("decision").await["result"], "too_late");
+        assert_eq!(host.until("ticket_closed").await["paired"], false);
+        host.send(json!({"cmd": "peers"})).await;
+        assert_eq!(host.until("peers").await["peers"], json!([]));
+    }
+
+    #[tokio::test]
+    async fn cancelling_ends_a_join_in_progress_and_allows_the_next() {
+        let mut host = Side::new("desk").await;
+        let mut phone = Side::new("phone").await;
+        start_pairing(&mut host, &mut phone).await;
+        host.until("request").await;
+        // The host never types the digits; the phone gives up.
+        phone.send(json!({"cmd": "cancel"})).await;
+        host.send(json!({"cmd": "open"})).await;
+        let link = host.until("ticket").await["link"]
+            .as_str()
+            .unwrap()
+            .to_string();
+        phone.send(json!({"cmd": "join", "link": link})).await;
+        let next = phone.next().await;
+        assert_ne!(next["event"], "error", "a second join was refused: {next}");
+    }
+
+    #[tokio::test]
+    async fn a_join_with_a_link_that_is_not_a_ticket_fails_with_a_message() {
+        let mut phone = Side::new("phone").await;
+        phone
+            .send(json!({"cmd": "join", "link": "hqpair://ticket/not-a-real-ticket-body"}))
+            .await;
+        let failed = phone.until("join_failed").await;
+        assert!(
+            failed["why"].as_str().is_some_and(|why| !why.is_empty()),
+            "{failed}"
+        );
     }
 }

@@ -8,8 +8,8 @@ package example.hq.spike.ui.pairing
 object PairLink {
     private const val SCHEME = "hqpair"
     private const val ROUTE = "ticket"
-    /** The same bound `hq` applies when it parses one; a QR code never holds more. */
-    const val MAX_CHARS = 4096
+    /** The same bound `hq` applies when it parses a link (`MAX_LINK_CHARS` in crates/hq-bridge/src/ticket.rs). */
+    const val MAX_CHARS = 2000
     private const val MIN_BODY_CHARS = 16
 
     /** The link text if [text] looks like one of ours, else null. The ticket inside is checked by `hq`. */

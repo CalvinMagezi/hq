@@ -169,8 +169,12 @@ Without a handler, `Bridge::start` binds a socket to dial out but accepts no pro
 cargo test -p hq-db bridge
 cargo test -p hq-bridge                       # unit tests and the loopback end-to-end tests
 cargo clippy -p hq-cli --all-targets --features bridge -- -D warnings
-cargo test -p hq-cli --features bridge --bin hq -- bridge_commands
+cargo test -p hq-cli --features bridge --bin hq -- bridge_commands bridge_control
 ```
+
+`bridge_control` drives two machines through the JSON-line control channel the phone app uses (pairing with
+typed digits, wrong digits, ping, revoke, probe and redial). The Android side has JVM unit tests
+(`cd apps/android && ./gradlew :app:testDebugUnitTest`).
 
 The end-to-end tests use real iroh endpoints on loopback with no relay, the real migrated schema,
 and `::1` as a second source address. They need no network. The spike's tests carry over: its

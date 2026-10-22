@@ -13,6 +13,8 @@ object PairingWords {
     const val SCAN_TITLE = "Scan a code"
     const val SCAN_HELP = "Point the camera at the code on the other device."
     const val NOT_OURS = "That is not an HQ pairing code."
+    const val FINISH_FIRST = "Finish or cancel the pairing you are in before opening another link."
+    const val NOT_REMOVED = "Could not remove it: the bridge is not running. Try again in a moment."
     const val CAMERA_NEEDED = "Scanning needs the camera. You can paste the link instead."
     const val CONFIRM_TITLE = "Pair with another device?"
     const val CONFIRM_BODY = "A link asks this phone to pair with another device. Go on only if you just showed this code on a device of yours. Anyone can send you a link like this."
@@ -56,6 +58,7 @@ object PairingWords {
         TicketEnd.Declined -> "The digits did not match, so nothing was paired. Show a new code to try again."
         TicketEnd.TooLate -> "The other device gave up waiting. Show a new code to try again."
         TicketEnd.Expired -> "The code ran out. Show a new one."
+        TicketEnd.Failed -> "Could not make a code. Try again."
     }
 
     fun joined(name: String, id: String): String = "Paired with “${name.ifBlank { "a device" }}” (${PairLink.shortId(id)}). Check that this is the device you meant."

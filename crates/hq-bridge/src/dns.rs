@@ -20,9 +20,9 @@ type BoxFuture<T> = Pin<Box<dyn Future<Output = T> + Send + 'static>>;
 
 /// Per attempt, for the built-in public resolvers.
 const FALLBACK_TIMEOUT: Duration = Duration::from_secs(5);
-/// A phone on a bad network can wait on `getaddrinfo` for a long time; the fallback tier answers
-/// while it does.
-const PLATFORM_TIMEOUT: Duration = Duration::from_secs(5);
+/// iroh gives each lookup about 3 s in all. The platform has to answer well inside that, or the public
+/// resolvers (which are for a platform that is stuck) never get their turn.
+const PLATFORM_TIMEOUT: Duration = Duration::from_millis(1_500);
 
 /// The resolver every endpoint of the bridge is built with.
 pub fn resolver() -> DnsResolver {
@@ -53,12 +53,29 @@ impl Platform {
     }
 }
 
-/// Every address `getaddrinfo` returns for `host`, or none when it fails or times out.
-async fn system_lookup(host: &str) -> Vec<IpAddr> {
+/// What `getaddrinfo` said. `None` when it failed or timed out, the one case where the public resolvers
+/// may help; `Some` when it answered, with every address it has, even if there is none of the family
+/// that was asked for (a name with only an IPv4 address has no IPv6 one, and asking someone else would
+/// bypass the network's own DNS, private DNS and VPN).
+async fn system_lookup(host: &str) -> Option<Vec<IpAddr>> {
     let lookup = tokio::net::lookup_host((host, 0));
     match tokio::time::timeout(PLATFORM_TIMEOUT, lookup).await {
-        Ok(Ok(found)) => found.map(|addr| addr.ip()).collect(),
-        _ => Vec::new(),
+        Ok(Ok(found)) => Some(found.map(|addr| addr.ip()).collect()),
+        _ => None,
+    }
+}
+
+fn as_v4(ip: IpAddr) -> Option<Ipv4Addr> {
+    match ip {
+        IpAddr::V4(v4) => Some(v4),
+        IpAddr::V6(_) => None,
+    }
+}
+
+fn as_v6(ip: IpAddr) -> Option<Ipv6Addr> {
+    match ip {
+        IpAddr::V6(v6) => Some(v6),
+        IpAddr::V4(_) => None,
     }
 }
 
@@ -66,54 +83,38 @@ impl Resolver for Platform {
     fn lookup_ipv4(&self, host: String) -> BoxFuture<Result<BoxIter<Ipv4Addr>, DnsError>> {
         let fallback = self.fallback.clone();
         Box::pin(async move {
-            let found: Vec<Ipv4Addr> = system_lookup(&host)
-                .await
-                .into_iter()
-                .filter_map(|ip| match ip {
-                    IpAddr::V4(v4) => Some(v4),
-                    IpAddr::V6(_) => None,
-                })
-                .collect();
-            if !found.is_empty() {
-                let iter: BoxIter<Ipv4Addr> = Box::new(found.into_iter());
-                return Ok(iter);
+            if let Some(all) = system_lookup(&host).await {
+                let found: BoxIter<Ipv4Addr> = Box::new(
+                    all.into_iter()
+                        .filter_map(as_v4)
+                        .collect::<Vec<_>>()
+                        .into_iter(),
+                );
+                return Ok(found);
             }
             let list = fallback.lookup_ipv4(host, FALLBACK_TIMEOUT).await?;
-            let v4: Vec<Ipv4Addr> = list
-                .filter_map(|ip| match ip {
-                    IpAddr::V4(v4) => Some(v4),
-                    IpAddr::V6(_) => None,
-                })
-                .collect();
-            let iter: BoxIter<Ipv4Addr> = Box::new(v4.into_iter());
-            Ok(iter)
+            let found: BoxIter<Ipv4Addr> =
+                Box::new(list.filter_map(as_v4).collect::<Vec<_>>().into_iter());
+            Ok(found)
         })
     }
 
     fn lookup_ipv6(&self, host: String) -> BoxFuture<Result<BoxIter<Ipv6Addr>, DnsError>> {
         let fallback = self.fallback.clone();
         Box::pin(async move {
-            let found: Vec<Ipv6Addr> = system_lookup(&host)
-                .await
-                .into_iter()
-                .filter_map(|ip| match ip {
-                    IpAddr::V6(v6) => Some(v6),
-                    IpAddr::V4(_) => None,
-                })
-                .collect();
-            if !found.is_empty() {
-                let iter: BoxIter<Ipv6Addr> = Box::new(found.into_iter());
-                return Ok(iter);
+            if let Some(all) = system_lookup(&host).await {
+                let found: BoxIter<Ipv6Addr> = Box::new(
+                    all.into_iter()
+                        .filter_map(as_v6)
+                        .collect::<Vec<_>>()
+                        .into_iter(),
+                );
+                return Ok(found);
             }
             let list = fallback.lookup_ipv6(host, FALLBACK_TIMEOUT).await?;
-            let v6: Vec<Ipv6Addr> = list
-                .filter_map(|ip| match ip {
-                    IpAddr::V6(v6) => Some(v6),
-                    IpAddr::V4(_) => None,
-                })
-                .collect();
-            let iter: BoxIter<Ipv6Addr> = Box::new(v6.into_iter());
-            Ok(iter)
+            let found: BoxIter<Ipv6Addr> =
+                Box::new(list.filter_map(as_v6).collect::<Vec<_>>().into_iter());
+            Ok(found)
         })
     }
 
@@ -176,5 +177,23 @@ mod tests {
             .await
             .unwrap();
         assert!(found.next().is_some());
+    }
+
+    #[tokio::test]
+    async fn a_family_the_answered_name_lacks_is_empty_and_does_not_ask_the_public_resolvers() {
+        let dns = platform_resolver();
+        // The platform answers for this literal (one IPv4 address). Asking for IPv6 must not go on to
+        // the public resolvers, which would bypass the network's own DNS: the answer is "none".
+        let started = std::time::Instant::now();
+        let mut v6 = dns
+            .lookup_ipv6("127.0.0.1", Duration::from_secs(5))
+            .await
+            .expect("an answered lookup is not an error");
+        assert!(v6.next().is_none());
+        assert!(
+            started.elapsed() < Duration::from_millis(900),
+            "{:?}",
+            started.elapsed()
+        );
     }
 }

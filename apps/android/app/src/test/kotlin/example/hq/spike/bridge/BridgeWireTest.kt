@@ -71,4 +71,12 @@ class BridgeWireTest {
         assertFalse(line.contains('\n'))
         assertEquals("hqpair://ticket/a\"b\\c", JSONObject(line).getString("link"))
     }
+
+    @Test fun theRelayFileCanOnlyHoldWhatHqTakes() {
+        assertEquals("none", BridgeSupervisor.relayOrDefault("none"))
+        assertEquals("default", BridgeSupervisor.relayOrDefault(null))
+        assertEquals("https://relay.example.com", BridgeSupervisor.relayOrDefault("https://relay.example.com"))
+        assertEquals("default", BridgeSupervisor.relayOrDefault("--no-addrs"))
+        assertEquals("default", BridgeSupervisor.relayOrDefault("https://relay.example.com --bind 0.0.0.0:1"))
+    }
 }

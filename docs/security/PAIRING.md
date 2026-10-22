@@ -290,23 +290,28 @@ phone"). What that adds, and what it does not.
   standard input and output. There is no control socket, no loopback port and no token for them, so a
   process on the phone that is not the app cannot send it a command, and the child ends when the app's end
   of the pipe closes. The bridge's UDP sockets are the ones in section 3. They are off until the owner
-  turns "Paired devices" on, and the choice is remembered.
+  turns "Paired devices" on or starts a pairing; a pairing that does not succeed leaves them off, and one
+  that does turns the switch on for good.
 - **The digits stay in `hq`.** The `request` event names the device and carries no digits. The app
   sends what the person typed (`digits`) and `hq` compares it with the answer it computed. The app
   never learns the answer, so no "yes" button can be added to it and a bug in the screen cannot pair a
   device. A wrong answer declines the pairing and burns that ticket, as on the command line.
 - **A link is a screen to show, never an order.** `hqpair://ticket/...` can arrive from the stock
   camera, a browser or any app. `PairLinkActivity` checks its shape (a fixed prefix, URL-safe
-  characters, 4096 characters at most) and hands the text to the pairing screen, which asks the owner
+  characters, 2000 characters at most, the bound `hq` applies) and hands the text to the pairing screen, which asks the owner
   before anything is dialed. Following it would pair the phone with whoever made the link, which is the
   attack in section 7 that the QR code's authenticity is meant to stop; the stock camera cannot show who
-  made a code, so the confirmation says so. A code scanned inside the app, or a link pasted into it, is
-  the owner's own act and starts at once. The pairing screen is closed to other apps (it needs a
+  made a code, so the confirmation says so. A link does not replace a pairing already in progress. A code
+  scanned inside the app, or a link pasted into it, is the owner's own act and starts at once. The pairing screen is closed to other apps (it needs a
   permission only `adb` holds), so only the link door is open.
 - **The link and the digits are not logged.** The control events that hold them are never written to
   the device log (the log names the event type only), `hq bridge run` writes no event to a file, a
   line that does not parse is not echoed in the error, and "Copy the link" marks the clipboard entry as
-  sensitive where Android supports it. The link is shown on screen as a QR code while a ticket is open.
+  sensitive where Android supports it. The link is shown on screen as a QR code while a ticket is open;
+  in a build that is not debuggable the code and the digits screens carry `FLAG_SECURE` (no screenshots,
+  no recents thumbnail) and ignore touches that pass through another app's window.
+- **A line in `files/bridge_relay` cannot become a flag.** Only `none`, `default` or an `https://` address
+  without spaces is passed to `--relay`; anything else is the default.
 - **The child has no credentials.** It starts with an environment of its own (home, temp, the vault
   path) and none of the hub's secrets, and the paired list and key are in the app's private directory.
 - **The camera is used while the scan screen is in front.** Frames go to the QR decoder and nowhere

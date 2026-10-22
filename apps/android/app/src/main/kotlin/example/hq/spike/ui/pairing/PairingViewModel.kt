@@ -6,6 +6,8 @@ import androidx.lifecycle.viewModelScope
 import example.hq.spike.bridge.BridgePeer
 import example.hq.spike.bridge.BridgeState
 import example.hq.spike.bridge.BridgeSupervisor
+import example.hq.spike.bridge.JoinState
+import example.hq.spike.bridge.TicketEnd
 import example.hq.spike.data.HqServices
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -45,6 +47,11 @@ class PairingViewModel(app: Application) : AndroidViewModel(app) {
             ticketAsked = false
             return
         }
+        if (b.ticketEnd == TicketEnd.Failed) {
+            // The bridge could not make a code; ask again only when the person does.
+            wantsTicket = false
+            return
+        }
         if (wantsTicket && !ticketAsked && b.ticket == null && b.ticketEnd == null) {
             ticketAsked = true
             BridgeSupervisor.openTicket()
@@ -55,25 +62,36 @@ class PairingViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
-    private fun turnOn() {
+    /** Anything in progress that a link from another app must not replace. */
+    private fun pairingInProgress(): Boolean =
+        wantsTicket || pendingJoin != null || bridge.value.join.inFlight() || mutableUi.value.screen == PairingScreen.Joining
+
+    private fun runForPairing() {
         val app = getApplication<Application>()
         HqServices.ensureHubRunning(app)
-        if (!BridgeSupervisor.isEnabled(app)) BridgeSupervisor.setEnabled(app, true)
+        BridgeSupervisor.startForPairing(app)
     }
 
     fun setPairedDevices(on: Boolean) {
         val app = getApplication<Application>()
-        if (on) turnOn() else BridgeSupervisor.setEnabled(app, false)
+        if (on) {
+            HqServices.ensureHubRunning(app)
+            BridgeSupervisor.setEnabled(app, true)
+        } else {
+            BridgeSupervisor.setEnabled(app, false)
+        }
     }
 
-    fun go(screen: PairingScreen) = mutableUi.update { it.copy(screen = screen, line = null, typed = "") }
+    fun go(screen: PairingScreen) = mutableUi.update { it.copy(screen = screen, line = null, typed = "", link = "") }
 
     fun showCode() {
-        turnOn()
-        BridgeSupervisor.forgetTicketEnd()
         wantsTicket = true
         ticketAsked = false
+        runForPairing()
+        BridgeSupervisor.forgetTicketEnd()
         go(PairingScreen.Show)
+        // A state that does not change (the bridge already up, no end to forget) emits nothing for `drive` to hear.
+        drive(bridge.value)
     }
 
     fun typeDigits(text: String) = mutableUi.update { it.copy(typed = PairingWords.typed(text)) }
@@ -86,8 +104,12 @@ class PairingViewModel(app: Application) : AndroidViewModel(app) {
 
     fun editLink(text: String) = mutableUi.update { it.copy(link = text.take(PairLink.MAX_CHARS), line = null) }
 
-    /** A link from outside the app: it is shown for the person to confirm, never followed. */
+    /** A link from outside the app: it is shown for the person to confirm, never followed. It does not replace a pairing in progress. */
     fun confirmLink(link: String) {
+        if (pairingInProgress()) {
+            mutableUi.update { it.copy(line = PairingWords.FINISH_FIRST) }
+            return
+        }
         val ok = PairLink.accept(link)
         mutableUi.update { if (ok != null) it.copy(screen = PairingScreen.Confirm, link = ok, line = null) else it.copy(screen = PairingScreen.Home, line = PairingWords.NOT_OURS) }
     }
@@ -103,7 +125,9 @@ class PairingViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     fun startJoin(link: String) {
-        turnOn()
+        // The scanner can read the same code twice before its screen is gone.
+        if (mutableUi.value.screen == PairingScreen.Joining) return
+        runForPairing()
         BridgeSupervisor.forgetJoin()
         if (BridgeSupervisor.state.value.running) BridgeSupervisor.join(link) else pendingJoin = link
         mutableUi.update { it.copy(screen = PairingScreen.Joining, link = "", line = null) }
@@ -111,21 +135,29 @@ class PairingViewModel(app: Application) : AndroidViewModel(app) {
 
     /** Leaves whatever screen is open for the home screen, dropping a ticket or a join in progress. */
     fun home() {
-        if (wantsTicket) BridgeSupervisor.cancelTicket()
+        if (wantsTicket || bridge.value.join.inFlight()) BridgeSupervisor.cancelPairing()
         wantsTicket = false
         ticketAsked = false
         pendingJoin = null
         BridgeSupervisor.forgetJoin()
         BridgeSupervisor.forgetTicketEnd()
         go(PairingScreen.Home)
+        // The bridge was started only for this pairing unless the owner has it on.
+        BridgeSupervisor.stopUnlessEnabled(getApplication())
         BridgeSupervisor.refreshPeers()
+    }
+
+    /** The screen went out of sight: a join that was waiting for the bridge to start must not fire later, with nobody looking. */
+    fun dropQueuedJoin() {
+        pendingJoin = null
     }
 
     fun askRemove(peer: BridgePeer?) = mutableUi.update { it.copy(askRemove = peer) }
 
     fun confirmRemove() {
-        mutableUi.value.askRemove?.let { BridgeSupervisor.revoke(it.id) }
+        val peer = mutableUi.value.askRemove
         askRemove(null)
+        if (peer != null && !BridgeSupervisor.revoke(peer.id)) mutableUi.update { it.copy(line = PairingWords.NOT_REMOVED) }
     }
 
     fun refresh() {
@@ -138,6 +170,9 @@ class PairingViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     override fun onCleared() {
-        if (wantsTicket) BridgeSupervisor.cancelTicket()
+        if (wantsTicket || bridge.value.join.inFlight()) BridgeSupervisor.cancelPairing()
+        BridgeSupervisor.stopUnlessEnabled(getApplication())
     }
+
+    private fun JoinState.inFlight() = this is JoinState.Connecting || this is JoinState.ShowDigits
 }

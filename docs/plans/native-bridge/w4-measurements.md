@@ -19,7 +19,7 @@ process runs the bridge as a child of its foreground service, so these are not `
 |---|---|
 | `hq bridge pair --relay default` from the 2026-10-22 `release-small` Android build (no fix), emulator, run as a plain process | Aborted with SIGABRT (exit 134, a tombstone, no message on the terminal) right after the database opened, before any endpoint existed |
 | Same command, build with the fix | Ran to the QR code, relay registered (`home is now relay ...`) |
-| `hq bridge run` as a child of the app on the emulator and on the phone, ten minutes of use each | No abort; paired, reconnected, revoked |
+| `hq bridge run` as a child of the app, on the emulator and on the phone, through the rest of the session (pairing, keeping a connection, switching networks, forced idle) | No abort |
 
 What it says:
 
@@ -41,7 +41,7 @@ What it says:
 |---|---|
 | Emulator shows a code, a Mac `hq bridge join` scans its text | Paired. The request reached the app 4 s after the Mac started joining; digits typed in the app; both sides listed each other |
 | Mac `hq bridge pair` shows a ticket, link opened on the emulator with a VIEW intent (what the stock camera sends) | The confirmation screen opened. Pair, six digits on the phone, typed on the Mac: paired |
-| Same on the phone (real app process, relay) | Confirmation screen, Pair tap to digits on screen 2 s, digits typed on the Mac, "Paired with SM-A325F". The phone's side recorded the Mac and the Mac listed the phone |
+| Same on the phone (real app process, relay) | Confirmation screen, Pair tap to digits on screen in about 3 s (the bridge starting included), digits typed on the Mac, "Paired with" the Mac. The phone recorded the Mac and the Mac listed the phone |
 | Wrong digits on the Mac | Declined, nothing paired, the phone showed "the other device did not accept the digits" |
 | Ticket QR rendered by the app, read back by macOS CoreImage | Decoded to the same link. A 248 character link (relay, `--no-addrs`) is about half the size of the 375 and 540 character ones with addresses |
 | Camera: CameraX preview and the ZXing analyzer on the emulator's virtual scene | The preview and analysis ran (no crash, frames flowing). **No QR code was in the virtual scene's view**, so a decode from camera frames was not seen. The decoder is covered by unit tests on generated codes with camera-style row padding |
@@ -68,7 +68,6 @@ Silence is the longest gap between two successful echoes.
 | After, run 1 (emulator) | 4.0 s: Android reported the new network 2.1 s after the switch, the probe failed, the connection was dropped, a new one was up (direct) 1 s later | 1.2 s |
 | After, run 2 (emulator) | 4.0 s, the same sequence | 1.0 s |
 | Earlier, `network_change` alone, on a memory-starved headed emulator | One echo took 7.5 s, 6.0 s and 9.7 s | 0.3 s |
-| Before and after on the phone | see section 3a | |
 
 What these say:
 
@@ -90,7 +89,34 @@ What these say:
 
 ### 3a. On the phone
 
-PHONE_SWITCH_RESULTS
+The same procedure on the Samsung (Wi-Fi switched off with `svc wifi disable`, the phone falls back to LTE),
+with the keep connection running from the real app process to the Mac. This phone carries the owner's
+VPN (a WireGuard split tunnel), so its default network is the VPN.
+
+| Run | App build | Wi-Fi to mobile data | Mobile data to Wi-Fi |
+|---|---|---|---|
+| Before 1 | Network reports off | 17.6 s of silence | 1.4 s |
+| Before 2 | Network reports off | 17.4 s | 1.4 s |
+| First build 1 | Default-network callback | 17.4 s, no loss reported | 1.4 s |
+| First build 2 | Default-network callback | 18.9 s, no loss reported | 1.4 s |
+| After 1 | Physical-network callback, probe and redial | 4.6 s (probe failed 2.5 s after the switch, back on a direct path 0.5 s later) | 1.7 s |
+| After 2 | Physical-network callback, probe and redial | 4.3 s (the same sequence) | 2.6 s |
+| After 3 (final build) | Physical-network callback, probe and redial | 5.9 s (the connection was dropped twice, 2.4 s and 8.2 s after the switch: a second network update arrived while the new connection was settling) | 1.3 s |
+
+What these say:
+
+- **The spike's 18 s is reproduced on the phone, with and without the first version of the fix.** The
+  stall was 17 to 19 s in all four runs that did not have the final build.
+- **The first version never fired on this phone, and that is how a bug was found.** With a VPN up, Android's
+  default network is the VPN, and a switch underneath it does not change it: `registerDefaultNetworkCallback`
+  stayed silent (the app log showed one "network changed" at start and none at the switch). The emulator
+  has no VPN, so it had passed. The callback now watches every internet network that is not a VPN, and fires
+  on one coming, going or changing its addresses.
+- **With it, the silence fell from about 17.5 s to between 4.3 and 5.9 s.** About 2.4 s of that is Android reporting
+  the change, 1.5 s is the probe's limit, and the rest is the new connection.
+- **The way back costs a little.** Mobile data to Wi-Fi went from 1.4 s to 1.7 and 2.6 s: the change also
+  triggers a probe there, and a connection that was fine and slow for a moment gets dropped and dialed again.
+  That is the price of not waiting 17 s the other way.
 
 ## 4. A sleeping phone: Doze and the foreground service
 

@@ -47,22 +47,44 @@ object BridgeSupervisor {
     /** Off only for a measurement (see PairingActivity): the bridge then never hears of a network change. */
     @Volatile var watchNetwork = true
     private var appContext: Context? = null
+    /** Running for one pairing, without the owner having turned "Paired devices" on: it is remembered only once a pairing succeeds. */
+    @Volatile private var temporary = false
 
     fun isEnabled(context: Context): Boolean = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).getBoolean(KEY_ENABLED, false)
 
-    /** Turns the bridge on or off for good (it is remembered) and starts or stops the child now. */
+    private fun remember(context: Context, on: Boolean) = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit().putBoolean(KEY_ENABLED, on).apply()
+
+    /** The owner's switch: on or off for good (it is remembered), and the child starts or stops now. */
     fun setEnabled(context: Context, on: Boolean) {
-        context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit().putBoolean(KEY_ENABLED, on).apply()
+        remember(context, on)
+        temporary = false
         flow.update { it.copy(enabled = on) }
         if (on) start(context) else stop()
     }
 
-    /** Called when the service starts. Does nothing while the owner has not turned the bridge on. */
+    /**
+     * Runs the child for one pairing without remembering anything: a hostile link that is confirmed, or a
+     * code shown and never used, leaves the bridge off as it was. A pairing that succeeds remembers it.
+     */
+    fun startForPairing(context: Context) {
+        if (!isEnabled(context)) temporary = true
+        start(context)
+    }
+
+    /** After a pairing that did not happen: stop the child again unless the owner has it on. */
+    fun stopUnlessEnabled(context: Context) {
+        if (isEnabled(context)) return
+        temporary = false
+        flow.update { it.copy(enabled = false) }
+        stop()
+    }
+
+    /** Called when the service starts. Does nothing while neither the owner nor a pairing in progress wants the bridge. */
     fun start(context: Context) {
         val app = context.applicationContext
-        val enabled = isEnabled(app)
-        flow.update { it.copy(enabled = enabled) }
-        if (!enabled) return
+        val wanted = isEnabled(app) || temporary
+        flow.update { it.copy(enabled = wanted) }
+        if (!wanted) return
         synchronized(lock) {
             if (appContext != null) return
             appContext = app
@@ -71,15 +93,21 @@ object BridgeSupervisor {
         }
     }
 
-    /** Called when the service ends or the owner turns the bridge off. Does not wait for the child: the supervisor thread ends it. */
+    /**
+     * Called when the service ends or the owner turns the bridge off. Does not wait for the child: the supervisor
+     * thread ends it, and a watchdog kills it if it has not gone after [QUIT_WAIT_MS], so "off" means off.
+     */
     fun stop() {
+        val child: Process?
         synchronized(lock) {
             if (appContext == null) return
             appContext = null
             generation.incrementAndGet()
+            child = process
         }
         flow.update(BridgeReducer::stopped)
         send(BridgeWire.quit())
+        child?.let { Thread({ if (!it.waitFor(QUIT_WAIT_MS, TimeUnit.MILLISECONDS)) it.destroyForcibly() }, "bridge-watchdog").apply { isDaemon = true }.start() }
     }
 
     /** Sends one command line. False when the child is not running. */
@@ -95,11 +123,15 @@ object BridgeSupervisor {
     }
 
     fun openTicket(): Boolean = send(BridgeWire.open())
-    fun cancelTicket(): Boolean = send(BridgeWire.cancel())
+    /** Ends the ticket on show and a join in progress. */
+    fun cancelPairing(): Boolean = send(BridgeWire.cancel())
     fun submitDigits(typed: String): Boolean = send(BridgeWire.digits(typed))
     fun join(link: String): Boolean {
         flow.update { it.copy(join = JoinState.Connecting) }
-        return send(BridgeWire.join(link))
+        val sent = send(BridgeWire.join(link))
+        // A child that is not running will never answer: say so instead of waiting for it.
+        if (!sent) flow.update { it.copy(join = JoinState.Failed("The bridge is not running. Try again in a moment.")) }
+        return sent
     }
     fun refreshPeers(): Boolean = send(BridgeWire.peers())
     fun revoke(id: String): Boolean = send(BridgeWire.revoke(id))
@@ -137,24 +169,32 @@ object BridgeSupervisor {
             BufferedReader(InputStreamReader(child.inputStream, Charsets.UTF_8)).use { reader ->
                 while (gen == generation.get()) {
                     val line = reader.readLine() ?: break
-                    handle(line)
+                    if (handle(context, line)) break
                 }
             }
         } finally {
             net.stop()
             if (process === child) process = null
-            flow.update(BridgeReducer::stopped)
+            // A run that was stopped on purpose must not mark a newer run as stopped.
+            if (gen == generation.get()) flow.update(BridgeReducer::stopped)
             endChild(child)
         }
     }
 
-    private fun handle(line: String) {
-        val event = BridgeWire.parse(line) ?: return
+    /** Returns true after `bye`: nothing the child still says is true. */
+    private fun handle(context: Context, line: String): Boolean {
+        val event = BridgeWire.parse(line) ?: return false
         // Names of events only: a ticket's link holds the one-time code and the digits are secret to the person.
         Log.i(TAG, "bridge: ${event.javaClass.simpleName}")
         flow.update { BridgeReducer.reduce(it, event, System.currentTimeMillis()) }
         if (event is BridgeEvent.Ready) refreshPeers()
-        if (event is BridgeEvent.Joined || event is BridgeEvent.Decision) refreshPeers()
+        if (event is BridgeEvent.Joined || (event is BridgeEvent.Decision && event.result == "paired")) {
+            // A pairing that succeeded is what turns "Paired devices" on for good.
+            remember(context, true)
+            temporary = false
+            refreshPeers()
+        }
+        return event is BridgeEvent.Bye
     }
 
     private fun launch(context: Context): Process {
@@ -172,7 +212,7 @@ object BridgeSupervisor {
             put("HQ_PROFILE", "mobile")
             put("HQ_VAULT_PATH", File(home, ".vault").path)
             put("HQ_CONFIG_PATH", File(home, "config.yaml").path)
-            // Name lookups use the system resolver; the library path is what a bionic executable needs.
+            // What a bionic executable looks for at start.
             System.getenv("ANDROID_ROOT")?.let { put("ANDROID_ROOT", it) }
             System.getenv("ANDROID_DATA")?.let { put("ANDROID_DATA", it) }
         }
@@ -183,8 +223,11 @@ object BridgeSupervisor {
     /** The relay to use: "none", "default" (n0's public relays, for development) or a relay URL, from files/bridge_relay. */
     internal fun relay(context: Context): String {
         val text = runCatching { File(context.filesDir, RELAY_FILE).takeIf { it.isFile && it.length() < MAX_RELAY_FILE_BYTES }?.readText()?.trim() }.getOrNull()
-        return text?.takeIf { it.isNotEmpty() && it.none(Char::isWhitespace) } ?: DEFAULT_RELAY
+        return relayOrDefault(text)
     }
+
+    /** Only the three forms `hq` takes, so a stray line in the file can never become a command-line flag. */
+    internal fun relayOrDefault(text: String?): String = text?.takeIf { it == "none" || it == "default" || (it.startsWith("https://") && it.none(Char::isWhitespace)) } ?: DEFAULT_RELAY
 
     private const val MAX_RELAY_FILE_BYTES = 512L
 

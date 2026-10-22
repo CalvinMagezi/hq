@@ -817,8 +817,7 @@ fn init_tracing() {
         && args.iter().any(|a| a == "tunnel")
         && args.iter().any(|a| a == "run");
     // `hq bridge run` talks to the phone app in JSON lines on stdout; its logs must stay out of it.
-    let is_bridge_run =
-        args.get(1).is_some_and(|a| a == "bridge") && args.get(2).is_some_and(|a| a == "run");
+    let is_bridge_run = args.windows(2).any(|w| w[0] == "bridge" && w[1] == "run");
     // `hq task` and `--json` print data for another program: logs go to stderr, quietly.
     let before_dashes = args.iter().skip(1).take_while(|a| *a != "--");
     let is_data = before_dashes.clone().take(4).any(|a| a == "task")

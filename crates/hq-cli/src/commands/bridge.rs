@@ -126,7 +126,9 @@ fn relay_mode(text: &str) -> Result<RelayMode> {
     match text {
         "none" => Ok(RelayMode::Disabled),
         "default" => {
-            eprintln!(
+            use std::io::Write;
+            let _ = writeln!(
+                std::io::stderr(),
                 "note: n0's public relays are for development and testing, not for production."
             );
             Ok(RelayMode::Default)

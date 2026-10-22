@@ -29,7 +29,7 @@ data class BridgeState(
     val line: String? = null,
 )
 
-enum class TicketEnd { Paired, Declined, TooLate, Expired }
+enum class TicketEnd { Paired, Declined, TooLate, Expired, Failed }
 
 /** Folds what `hq bridge run` says into what the screens show. Pure, so each step is tested. */
 object BridgeReducer {
@@ -54,13 +54,25 @@ object BridgeReducer {
         is BridgeEvent.JoinFailed -> s.copy(join = JoinState.Failed(e.why))
         is BridgeEvent.Peers -> s.copy(peers = e.peers)
         is BridgeEvent.Revoked -> s.copy(peers = s.peers?.filterNot { it.id == e.id }, line = if (e.changed) "Device removed." else "That device was already removed.")
-        is BridgeEvent.Failed -> s.copy(line = e.message)
+        is BridgeEvent.Failed -> when (e.cmd) {
+            // These two have a screen waiting for an answer that will not come, so they end it.
+            "join" -> s.copy(join = JoinState.Failed(e.message))
+            "open" -> s.copy(ticket = null, ticketEnd = TicketEnd.Failed, line = e.message)
+            else -> s.copy(line = e.message)
+        }
         is BridgeEvent.Ping, is BridgeEvent.Keep -> s
         BridgeEvent.Bye -> s.copy(running = false, ticket = null, request = null)
     }
 
     /** The child ended: nothing it was showing is still true. */
-    fun stopped(s: BridgeState): BridgeState = s.copy(running = false, ticket = null, request = null)
+    fun stopped(s: BridgeState): BridgeState = s.copy(
+        running = false, ticket = null, request = null,
+        // Nothing can be removed from a list the child is not there to change, and a join in flight is over.
+        peers = null,
+        join = if (s.join is JoinState.Connecting || s.join is JoinState.ShowDigits) JoinState.Failed(BRIDGE_STOPPED) else s.join,
+    )
+
+    const val BRIDGE_STOPPED = "The bridge stopped. Try again."
 
     /** A join left running when its screen closed is no longer something to show. */
     fun resetJoin(s: BridgeState): BridgeState = s.copy(join = JoinState.Idle)

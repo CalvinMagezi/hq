@@ -1,6 +1,9 @@
 package example.hq.spike.ui.pairing
 
 import android.content.Context
+import android.os.Handler
+import android.os.Looper
+import android.util.Log
 import androidx.camera.core.CameraSelector
 import androidx.camera.core.ImageAnalysis
 import androidx.camera.core.ImageProxy
@@ -28,34 +31,53 @@ import java.util.concurrent.atomic.AtomicBoolean
 fun QrScanner(modifier: Modifier = Modifier, onText: (String) -> Unit) {
     val context = LocalContext.current
     val owner = LocalLifecycleOwner.current
-    val analyzer = remember { QrAnalyzer(onText) }
+    val main = remember { Handler(Looper.getMainLooper()) }
+    // The decoder runs on its own thread; what it finds is handled on the main thread, where the screen's state lives.
+    val analyzer = remember { QrAnalyzer { text -> main.post { onText(text) } } }
     val executor = remember { Executors.newSingleThreadExecutor() }
     val preview = remember { PreviewView(context).apply { scaleType = PreviewView.ScaleType.FILL_CENTER } }
     DisposableEffect(owner) {
-        val unbind = bind(context, owner, preview, executor, analyzer)
+        val binding = bind(context, owner, preview, executor, analyzer)
         onDispose {
-            unbind()
+            binding.release()
             executor.shutdown()
         }
     }
     AndroidView(factory = { preview }, modifier = modifier)
 }
 
-private fun bind(context: Context, owner: LifecycleOwner, preview: PreviewView, executor: ExecutorService, analyzer: QrAnalyzer): () -> Unit {
+/** A camera binding that can be released before it has finished starting. */
+private class Binding {
+    @Volatile var disposed = false
+    @Volatile var provider: ProcessCameraProvider? = null
+
+    fun release() {
+        disposed = true
+        provider?.unbindAll()
+    }
+}
+
+private fun bind(context: Context, owner: LifecycleOwner, preview: PreviewView, executor: ExecutorService, analyzer: QrAnalyzer): Binding {
+    val binding = Binding()
     val future = ProcessCameraProvider.getInstance(context)
-    var provider: ProcessCameraProvider? = null
     future.addListener({
-        val p = future.get()
-        provider = p
-        val view = Preview.Builder().build().also { it.surfaceProvider = preview.surfaceProvider }
-        val analysis = ImageAnalysis.Builder()
-            .setBackpressureStrategy(ImageAnalysis.STRATEGY_KEEP_ONLY_LATEST)
-            .build()
-            .also { it.setAnalyzer(executor, analyzer) }
-        p.unbindAll()
-        p.bindToLifecycle(owner, CameraSelector.DEFAULT_BACK_CAMERA, view, analysis)
+        // Left before the camera was ready, or a phone with no back camera: nothing to bind, and nothing to crash.
+        if (binding.disposed) return@addListener
+        try {
+            val p = future.get()
+            binding.provider = p
+            val view = Preview.Builder().build().also { it.surfaceProvider = preview.surfaceProvider }
+            val analysis = ImageAnalysis.Builder()
+                .setBackpressureStrategy(ImageAnalysis.STRATEGY_KEEP_ONLY_LATEST)
+                .build()
+                .also { it.setAnalyzer(executor, analyzer) }
+            p.unbindAll()
+            p.bindToLifecycle(owner, CameraSelector.DEFAULT_BACK_CAMERA, view, analysis)
+        } catch (e: Exception) {
+            Log.w("HQBRIDGE", "camera not started: ${e.javaClass.simpleName}")
+        }
     }, ContextCompat.getMainExecutor(context))
-    return { provider?.unbindAll() }
+    return binding
 }
 
 /** Decodes the brightness plane of each frame. */

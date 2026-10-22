@@ -5,6 +5,7 @@ import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import example.hq.spike.data.HqServices
 import java.io.File
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -33,19 +34,24 @@ class ConnectViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     private suspend fun refresh() {
+        // The stand-in is a file: read it off the main thread.
+        val stub = withContext(Dispatchers.IO) { standIn() }
         val facts = try {
-            facts(client.connectorStatus())
+            facts(client.connectorStatus(), stub)
+        } catch (e: CancellationException) {
+            throw e
         } catch (e: Exception) {
             // hq is starting or stopped: show the stand-in address if there is one and say nothing is on.
-            ConnectFacts(url = standIn(), source = standIn()?.let { UrlSource.Stub })
+            ConnectFacts(url = stub, source = stub?.let { UrlSource.Stub })
         }
         mutable.update { it.copy(facts = facts) }
     }
 
-    private fun facts(status: JSONObject): ConnectFacts {
+    private fun facts(status: JSONObject, standIn: String?): ConnectFacts {
         val enabled = status.optBoolean("enabled")
-        val hubUrl = status.optString("url").takeIf { enabled && it.isNotBlank() }
-        val stub = if (hubUrl == null) standIn() else null
+        // Whatever hq reports is shown as an address to give Claude, so it has to look like one.
+        val hubUrl = ConnectWords.address(status.optString("url")).takeIf { enabled }
+        val stub = if (hubUrl == null) standIn else null
         return ConnectFacts(
             enabled = enabled,
             url = hubUrl ?: stub,
@@ -69,6 +75,8 @@ class ConnectViewModel(app: Application) : AndroidViewModel(app) {
                 withContext(Dispatchers.IO) { call() }
                 refresh()
                 mutable.update { it.copy(busy = false) }
+            } catch (e: CancellationException) {
+                throw e
             } catch (e: Exception) {
                 mutable.update { it.copy(busy = false, line = failure) }
             }

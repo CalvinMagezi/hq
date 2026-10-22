@@ -104,9 +104,11 @@ all new files (`apps/android/.../bridge/`, `ui/pairing/`, `ui/connect/`):
   because anyone can send a link.
 
 **Off by default.** The child binds a UDP socket and accepts paired devices, so it runs only after the
-owner turned "Paired devices" on in the pairing screen (pairing a first device turns it on). The
-state is remembered; the hub service starts the bridge again with the app after that. Turning it off
-stops the child.
+owner turned "Paired devices" on in the pairing screen. Showing a code or scanning one starts it for that
+pairing only; it is remembered (and the hub service starts it again with the app) once a pairing succeeds,
+and leaving the screen without one stops it again. A link the owner confirmed but that failed therefore
+leaves the phone as it was. Turning the switch off stops the child, and kills it if it has not gone in
+three seconds.
 
 **The relay.** Pairing and reconnecting need a relay to find the direct path from behind a phone's
 address translation. The default is n0's public relays (`--relay default`), which are for development and
@@ -116,9 +118,10 @@ ticket carries no IP addresses (`--no-addrs`), which makes the QR code about hal
 
 **The control protocol.** One JSON object per line. Commands, from the app: `open` (show a ticket;
 `ttl_secs` optional), `cancel`, `digits` (the digits the person typed for a waiting device), `join` (a
-link), `peers`, `revoke`, `network_change`, `ping`, `keep`, `keep_stop`, `quit`. Events, from `hq`:
+link), `peers`, `revoke`, `network_change`, `ping`, `keep`, `keep_stop`, `quit`. `cancel` ends the
+ticket on show and a join in progress. Events, from `hq`:
 `ready`, `ticket`, `request` (a device waits for digits: its name and id, never the digits),
-`decision` (paired, declined or too late), `ticket_closed`, `digits` (what the phone shows while it
+`decision` (paired once the device is on the list, declined, or too late), `ticket_closed`, `digits` (what the phone shows while it
 joins), `joined`, `join_failed`, `peers`, `revoked`, `ping`, `keep`, `error`, `bye`. The six digits
 are compared inside `hq`: the app forwards what was typed and never learns the right answer, so a
 "yes" button cannot be built on it. Unknown events are skipped, so a newer `hq` does not break an older
@@ -133,11 +136,14 @@ printed the panic). `hq` now sets a null `ndk-context` on Android (`crates/hq-cl
 resolver that asks `getaddrinfo` first and iroh's public resolvers second (`hq_bridge::dns`), so the
 JNI read is never reached. A new iroh endpoint anywhere in `hq` must be given that resolver.
 
-**Network changes.** Android does not tell native code when the network changes. The app registers a
-default-network callback (`NetworkWatcher`) and sends `network_change`, which calls
-`Endpoint::network_change`. See `docs/plans/native-bridge/w4-measurements.md` for what that did and
-did not fix, and for `keep`, the diagnostic that holds a connection to a paired device and traces its
-round trips into `files/bridge.log`.
+**Network changes.** Android does not tell native code when the network changes. The app watches the
+internet networks that are not a VPN (`NetworkWatcher`; the default network is the VPN on a phone that has
+one, and does not change when Wi-Fi gives way to mobile data under it) and sends `network_change`, which
+calls `Endpoint::network_change`. A connection that `hq bridge run` holds also gets a probe when the
+network changes while a call waits, and is dropped and dialed again if the probe goes unanswered for 1.5 s
+(a Wi-Fi to mobile data switch went from about 17.5 s of silence to 4 to 6 s on a phone). See
+`docs/plans/native-bridge/w4-measurements.md`, and for `keep`, the diagnostic that holds a connection to a
+paired device and traces its round trips into `files/bridge.log` (a line a second until it is stopped).
 
 **Keeping the connection with the app in the background.** The bridge child lives inside the existing
 foreground service, so it runs for as long as `hq` does. What a sleeping phone then does is in

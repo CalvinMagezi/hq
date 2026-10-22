@@ -50,6 +50,7 @@ fun ConnectClaudeHost(vm: ConnectViewModel, onClose: () -> Unit) {
     var now by remember { mutableStateOf(System.currentTimeMillis() / MS_PER_SEC) }
     LaunchedEffect(Unit) { while (true) { now = System.currentTimeMillis() / MS_PER_SEC; delay(TICK_MS) } }
     BackHandler(onBack = onClose)
+    example.hq.spike.ui.pairing.ProtectScreen(secret = false)
     Box(Modifier.fillMaxSize().background(Mts.Surface000).statusBarsPadding().navigationBarsPadding()) {
         Column(Modifier.fillMaxSize()) {
             TopBar(ConnectWords.TITLE, onClose)

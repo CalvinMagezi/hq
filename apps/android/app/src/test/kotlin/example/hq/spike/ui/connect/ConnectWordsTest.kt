@@ -44,4 +44,11 @@ class ConnectWordsTest {
         assertNull(ConnectWords.standIn(null))
         assertNull(ConnectWords.standIn(""))
     }
+
+    @Test fun anAddressFromHqIsCheckedLikeTheStandIn() {
+        assertEquals("https://abc.example.com", ConnectWords.address(" https://abc.example.com "))
+        assertNull(ConnectWords.address("javascript:alert(1)"))
+        assertNull(ConnectWords.address("https://a b.example.com"))
+        assertNull(ConnectWords.address(""))
+    }
 }

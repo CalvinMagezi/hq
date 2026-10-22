@@ -48,8 +48,11 @@ object ConnectWords {
     }
 
     /** The stand-in file holds one https address; anything else is ignored rather than shown as an address to give Claude. */
-    fun standIn(text: String?): String? {
-        val t = text?.lineSequence()?.firstOrNull()?.trim() ?: return null
+    fun standIn(text: String?): String? = address(text?.lineSequence()?.firstOrNull())
+
+    /** An https address without spaces, of a sensible length, or null. */
+    fun address(text: String?): String? {
+        val t = text?.trim() ?: return null
         return t.takeIf { it.length in MIN_URL..MAX_URL && it.startsWith("https://") && it.none(Char::isWhitespace) }
     }
 
