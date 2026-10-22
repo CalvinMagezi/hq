@@ -16,8 +16,9 @@ pub const MAX_EVENT_LOG_BYTES: u64 = 64 * 1024;
 #[derive(Debug, Clone, Serialize)]
 pub struct Status {
     pub version: u32,
-    /// `up` while the session is fresh. `connecting` before the first handshake or while a
-    /// handshake has gone unanswered for under 30 seconds, `down` after that. `idle` when the
+    /// `up` while the session is fresh and no handshake has gone unanswered for 30 seconds.
+    /// `connecting` before the first handshake or while one is unanswered for under 30 seconds,
+    /// `down` after that, even if an older session is still fresh (the hub does not answer). `idle` when the
     /// session has aged out and nothing is in flight (a tunnel with no keepalive left alone).
     /// `stopped` on exit.
     pub state: &'static str,
@@ -25,6 +26,10 @@ pub struct Status {
     pub endpoint: String,
     pub started_unix: u64,
     pub updated_unix: u64,
+    /// The most seconds the peer can go without rewriting this file while it runs. An idle one
+    /// sleeps until its next keepalive, so a reader should call the peer stopped only when
+    /// `updated_unix` is older than this plus a margin, not after a fixed few seconds.
+    pub max_age_s: u64,
     pub last_handshake_age_s: Option<u64>,
     pub connections: usize,
     pub accepted: u64,
@@ -35,7 +40,32 @@ pub struct Status {
     pub udp_rx_bytes: u64,
     /// Seconds the CPU has been suspended since the peer started (boot time minus monotonic time).
     pub suspended_s: f64,
+    /// How many times the loop has woken since it started; an idle tunnel adds about one per
+    /// keepalive, so a number that climbs fast is a loop that is spinning.
+    pub wakeups: u64,
+    /// How many times the peer stopped reading its socket because it was turning away datagrams
+    /// faster than a hub ever causes. Not zero means something is flooding it.
+    pub read_pauses: u64,
+    /// Resident memory in kilobytes and open descriptors, where `/proc` says (Linux and Android).
+    pub rss_kb: Option<u64>,
+    pub open_fds: Option<u64>,
     pub error: Option<String>,
+}
+
+/// Resident memory of this process in kilobytes, from `/proc/self/statm`.
+pub fn process_rss_kb() -> Option<u64> {
+    let statm = fs::read_to_string("/proc/self/statm").ok()?;
+    let pages: u64 = statm.split_whitespace().nth(1)?.parse().ok()?;
+    // SAFETY: sysconf has no preconditions.
+    let page = u64::try_from(unsafe { libc::sysconf(libc::_SC_PAGESIZE) }).ok()?;
+    Some(pages * page / 1024)
+}
+
+/// How many descriptors this process has open, counted from `/proc/self/fd`.
+pub fn open_fd_count() -> Option<u64> {
+    let entries = fs::read_dir("/proc/self/fd").ok()?.count() as u64;
+    // The listing holds a descriptor of its own.
+    Some(entries.saturating_sub(1))
 }
 
 pub fn unix_now() -> u64 {
@@ -131,6 +161,7 @@ mod tests {
             endpoint: "192.0.2.1:51820".into(),
             started_unix: 1,
             updated_unix: 2,
+            max_age_s: 30,
             last_handshake_age_s: Some(5),
             connections: 1,
             accepted: 2,
@@ -140,8 +171,27 @@ mod tests {
             udp_tx_bytes: 10,
             udp_rx_bytes: 20,
             suspended_s: 0.0,
+            wakeups: 0,
+            read_pauses: 0,
+            rss_kb: None,
+            open_fds: None,
             error: None,
         }
+    }
+
+    #[test]
+    #[cfg(any(target_os = "linux", target_os = "android"))]
+    fn the_process_can_report_its_memory_and_descriptors() {
+        assert!(process_rss_kb().unwrap() > 100);
+        // Other tests open and close descriptors on their own threads, so count a crowd of them
+        // rather than expect an exact difference.
+        const HELD: u64 = 200;
+        let before = open_fd_count().unwrap();
+        let held: Vec<_> = (0..HELD)
+            .map(|_| fs::File::open("/proc/self/statm").unwrap())
+            .collect();
+        assert!(open_fd_count().unwrap() >= before + HELD / 2);
+        drop(held);
     }
 
     #[test]

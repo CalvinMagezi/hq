@@ -44,6 +44,13 @@ fn retry_tick(waited: Duration) -> Duration {
     }
 }
 
+/// The longest the loop can sleep with this keepalive: the keepalive itself, or the wake it takes
+/// instead of one when there is none. The status file is rewritten at every wake, so this is how old
+/// it can honestly be while the peer runs.
+pub fn longest_sleep(keepalive: Option<Duration>) -> Duration {
+    keepalive.unwrap_or(NO_KEEPALIVE_WAKE).max(SLOWEST_TICK)
+}
+
 pub fn next_deadline(i: &Inputs) -> Instant {
     let busy = i.now.saturating_duration_since(i.last_activity) < BUSY_WINDOW;
     if busy {
@@ -85,6 +92,19 @@ mod tests {
             keepalive: Some(Duration::from_secs(25)),
             handshake_unanswered: None,
         }
+    }
+
+    #[test]
+    fn the_longest_sleep_is_the_keepalive_or_the_wake_that_replaces_it() {
+        let s = Duration::from_secs;
+        assert_eq!(longest_sleep(Some(s(25))), s(25));
+        assert_eq!(longest_sleep(Some(s(300))), s(300));
+        assert_eq!(
+            longest_sleep(Some(s(10))),
+            s(15),
+            "never below the slowest retry tick"
+        );
+        assert_eq!(longest_sleep(None), s(120));
     }
 
     #[test]

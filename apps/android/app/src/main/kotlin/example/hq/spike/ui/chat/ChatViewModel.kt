@@ -413,8 +413,7 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
         val list = try { client.threads() } catch (e: HqUnavailable) { return }
         val rows = list.threads.map { t ->
             val group = ChatTime.group(t.updatedAt)
-            val (cut, files) = Attachments.split(t.preview.orEmpty())
-            val snippet = if (cut.isBlank() && files.isNotEmpty()) "[${files.size} file${if (files.size == 1) "" else "s"}]" else cut.trim()
+            val snippet = ChatPreview.snippet(t.preview)
             val subtitle = if (group == Group.Today && snippet.isNotEmpty()) "${ChatTime.age(t.updatedAt)} · $snippet" else snippet
             ChatRow(t.id, t.title.ifBlank { ChatUiState.NEW_CHAT }, subtitle, group, t.id in list.running, t.unread > 0)
         }

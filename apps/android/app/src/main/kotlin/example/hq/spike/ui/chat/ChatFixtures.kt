@@ -31,6 +31,11 @@ fun chatFixture(name: String?): ChatUiState? {
             live = LiveReply(steps = listOf(LiveStep(checked, true), LiveStep(read, true), LiveStep(ToolStep("c3", "vault_write_note", null, null, null), false))),
         )
         "chats" -> open.copy(messages = settled.take(2), chats = rows, chatsOpen = true, notice = Notice("Chat archived", "Undo"))
+        "chats-raw" -> open.copy(messages = settled.take(2), chats = listOf(
+            ChatRow("p1", "We're making more progress in the plan", ChatPreview.snippet("Yes, that\u2019s a stronger direction: **HQ on t"), Group.Yesterday, running = false, unread = false),
+            ChatRow("p2", "Help me read into reticulum", ChatPreview.snippet("# Deeper investigation: private networking"), Group.Week, running = false, unread = false),
+            ChatRow("p3", "Pinned note", ChatPreview.snippet("Pinned the note as `version 1`: **done**.\n\nNext, the roadmap."), Group.Week, running = false, unread = false),
+        ), chatsOpen = true)
         "offline" -> open.copy(messages = settled.take(2), connected = false, offlineSince = System.currentTimeMillis() - 60_000, draft = "Check the backup status")
         "failed" -> open.copy(failed = true)
         else -> richFixture(name)
@@ -103,6 +108,10 @@ private fun richFixture(name: String?): ChatUiState? {
                     ToolStep("s4", "task_create", "{\"title\":\"Check Samsung battery whitelist\",\"due_date\":\"$tomorrow\",\"priority\":\"high\"}", null, null),
                 ),
             ),
+        )
+        "ticks" -> chat(
+            "Sandboxes", "Where did you save it?",
+            reply("r", "I saved the comparison in ``$LONG_RUN/Remote-Coding-Agent-Sandboxes-Decentralized-Compute-Assessment.md``. A single tick works too: `$LONG_RUN/Roadmap.md`, and `code` stays code."),
         )
         "chips" -> chat(
             "Samsung battery steps", "Which notes did you use?",

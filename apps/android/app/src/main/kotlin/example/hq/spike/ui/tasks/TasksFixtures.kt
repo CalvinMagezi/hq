@@ -35,6 +35,7 @@ fun tasksFixture(name: String?): TasksUi? {
         "t-more" -> base.copy(quick = QuickState("Check Samsung battery whitelist", more = true, priority = "high", due = today.plusDays(1)))
         "t-ready" -> base.copy(detail = TaskDetail(tasks[1], loading = false))
         "t-detail" -> base.copy(detail = TaskDetail(tasks[3].copy(description = "A native view for the whole app."), subtasks = listOf(t("a", "Map the current mobile UI", "complete"), t("b", "Draft the Compose design"), t("c", "Spike chat for T5")), loading = false))
+        "t-links" -> base.copy(detail = TaskDetail(tasks[3].copy(description = "STATE: deployed and verified at https://dev.example.com/app (signed in as admin). Docs: https://example.com/docs/setup.\nSession: https://example.com/code/session_01AB, then check (https://example.com/a)."), subtasks = emptyList(), loading = false))
         else -> null
     }
 }

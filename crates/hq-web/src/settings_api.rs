@@ -68,6 +68,7 @@ fn backends_view(config: &HqConfig) -> Value {
                 "model": b.model,
                 "effort": b.effort,
                 "endpoint_host": b.endpoint.as_deref().map(host_of),
+                "enabled": b.enabled,
                 "primary": b.name == chain.primary,
                 "fallback_position": chain.fallbacks.iter().position(|f| *f == b.name),
             })
@@ -237,6 +238,27 @@ mod tests {
             settings_view(&config, &no_env)["model"]["active"],
             json!("model-b")
         );
+    }
+
+    #[test]
+    fn each_backend_says_whether_it_is_switched_off() {
+        let entry =
+            |yaml: &str| serde_yaml::from_str::<hq_core::config::BackendEntry>(yaml).unwrap();
+        let mut config = HqConfig::default();
+        config.backends.primary = "a".into();
+        config.backends.fallbacks = vec!["b".into()];
+        config.backends.backends = vec![
+            entry(
+                "name: a\nkind: openai-compatible\nendpoint: https://api.example.com/v1\nenabled: false\n",
+            ),
+            entry("name: b\nkind: openai-compatible\nendpoint: https://api.example.org/v1\n"),
+        ];
+        let view = settings_view(&config, &no_env);
+        let entries = view["backends"]["entries"].as_array().unwrap();
+        let enabled =
+            |name: &str| entries.iter().find(|e| e["name"] == name).unwrap()["enabled"].clone();
+        assert_eq!(enabled("a"), json!(false));
+        assert_eq!(enabled("b"), json!(true));
     }
 
     #[test]
