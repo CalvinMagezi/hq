@@ -358,6 +358,10 @@ const MIGRATIONS: &[(&str, &str)] = &[
         "097_task_sweeps",
         include_str!("../sql/097_task_sweeps.sql"),
     ),
+    (
+        "098_bridge_pairing",
+        include_str!("../sql/098_bridge_pairing.sql"),
+    ),
 ];
 
 const MEMORY_SCHEMA_MIGRATION: &str = "058_memory_schema";
