@@ -9,8 +9,21 @@ use std::time::{Duration, Instant};
 
 const WAIT: Duration = Duration::from_secs(15);
 
+/// The binary under test, already run once: macOS scans a binary on its first run, which for a
+/// fresh debug build under a parallel `cargo test` can outlast the 15 second deadlines here.
 fn hq() -> &'static str {
-    env!("CARGO_BIN_EXE_hq")
+    static WARMED: std::sync::Once = std::sync::Once::new();
+    let path = env!("CARGO_BIN_EXE_hq");
+    WARMED.call_once(|| warm(std::path::Path::new(path)));
+    path
+}
+
+fn warm(binary: &std::path::Path) {
+    let out = std::process::Command::new(binary)
+        .arg("--version")
+        .output()
+        .unwrap();
+    assert!(out.status.success(), "{out:?}");
 }
 
 fn hook_command() -> String {
@@ -66,21 +79,21 @@ fn a_hook_event_reaches_the_host_from_inside_the_sandbox() {
     if hq_sandbox::backend().is_none() {
         return;
     }
-    // Not under the temporary directory: that is writable to the agent, and the
-    // host refuses a run directory an agent could rename.
-    let tmp = tempfile::tempdir_in(env!("CARGO_MANIFEST_DIR")).unwrap();
+    // Directly under HOME, as `~/.hq/run/host` is: the temporary directory is writable to the
+    // agent and the host refuses a run directory an agent could rename, while a checkout's path
+    // (a worktree's, say) can push the socket past the unix socket path limit.
+    let home = std::env::var_os("HOME").expect("HOME is set");
+    let tmp = tempfile::Builder::new()
+        .prefix(".hq-host-test-")
+        .tempdir_in(home)
+        .unwrap();
     let dir = tmp.path().join("run");
     let project = tempfile::tempdir().unwrap();
     // The test binary lives under the user's home, which the sandbox hides.
     let copy = project.path().join("hq");
     std::fs::copy(hq(), &copy).unwrap();
-    // macOS checks a binary it has never seen on its first run, which takes seconds and more under
-    // parallel tests; run the copy once here so the hook's own run is not racing that check.
-    let warmed = std::process::Command::new(&copy)
-        .arg("--version")
-        .output()
-        .unwrap();
-    assert!(warmed.status.success(), "{warmed:?}");
+    // A copy is a binary macOS has not seen, so the hook's own run would race its first-run check.
+    warm(&copy);
     let server = Server::bind(&dir, Arc::new(Host::new().with_helper_binary(hq()))).unwrap();
     let stop = server.stop_handle();
     let thread = std::thread::spawn(move || server.serve());
