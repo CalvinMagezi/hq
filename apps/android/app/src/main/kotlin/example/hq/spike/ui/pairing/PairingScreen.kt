@@ -4,7 +4,10 @@ import android.Manifest
 import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Context
+import android.content.Intent
 import android.content.pm.PackageManager
+import android.os.PowerManager
+import android.provider.Settings
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
@@ -63,6 +66,7 @@ import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.layout.wrapContentSize
 import androidx.compose.runtime.collectAsState
 import androidx.core.content.ContextCompat
+import androidx.lifecycle.compose.LifecycleResumeEffect
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import example.hq.spike.bridge.BridgePeer
 import example.hq.spike.bridge.BridgeState
@@ -170,6 +174,7 @@ private fun Home(vm: PairingViewModel, ui: PairingUi, bridge: BridgeState) {
             )
         }
         PairingWords.relayLine(bridge.relay)?.let { Text(it, style = HqType.Caption, color = Mts.InkMuted, modifier = Modifier.padding(top = 4.dp)) }
+        BatteryNotice(bridge)
         Spacer(Modifier.height(20.dp))
         PillButton("Show a code", tag = "show-code") { vm.showCode() }
         Spacer(Modifier.height(12.dp))
@@ -182,6 +187,24 @@ private fun Home(vm: PairingViewModel, ui: PairingUi, bridge: BridgeState) {
             peers == null -> Body(if (bridge.enabled) "Looking…" else "Turn paired devices on to see them.")
             peers.isEmpty() -> Body("No device is paired.")
             else -> peers.forEach { PeerRow(it) { vm.askRemove(it) } }
+        }
+    }
+}
+
+/** Android may pause a sleeping app; the owner can allow this one to run freely (the same page as Settings, Keep running). */
+@Composable
+private fun BatteryNotice(bridge: BridgeState) {
+    val context = LocalContext.current
+    var ignoring by remember { mutableStateOf(true) }
+    LifecycleResumeEffect(Unit) {
+        ignoring = context.getSystemService(PowerManager::class.java).isIgnoringBatteryOptimizations(context.packageName)
+        onPauseOrDispose {}
+    }
+    if (!PairingWords.showBatteryNotice(bridge, ignoring)) return
+    Column(Modifier.fillMaxWidth().padding(top = 16.dp)) {
+        Text(PairingWords.BATTERY_NOTICE, style = HqType.BodySm, color = Mts.Amber, modifier = Modifier.testTag("battery-notice"))
+        TextButton(onClick = { context.startActivity(Intent(Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS)) }) {
+            Text(PairingWords.BATTERY_BUTTON, color = Mts.Ink, style = HqType.BodySmBold)
         }
     }
 }

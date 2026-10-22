@@ -43,6 +43,7 @@ hq bridge serve                  # on either machine: stay reachable (an echo se
 hq bridge peers                  # who is paired
 hq bridge ping <peer id>         # connect by key alone and time a few round trips
 hq bridge revoke <peer id>       # take a peer off the list
+hq bridge run                    # the phone app's helper: JSON lines on stdin and stdout, see docs/HQ_MOBILE.md
 ```
 
 `--relay none` (the default) uses direct paths only, which is what two machines on one network
@@ -82,8 +83,9 @@ it:
 </intent-filter>
 ```
 
-The camera's behavior with this link has not been tried yet (the spike's camera opened nothing for
-plain text).
+The app handles it (`PairLinkActivity`): the link opens a confirmation screen and nothing is dialed
+until the owner presses Pair. A VIEW intent for it was tried on an emulator and a phone; the stock
+Camera app itself has not been tried yet (the spike's camera opened nothing for plain text).
 
 ## Using the library
 
@@ -154,6 +156,9 @@ registration ticket cannot finish a pairing; both are covered by tests.
 |---|---|
 | Long-term endpoint (one UDP socket) | Between `Bridge::start` with a handler and `shutdown`. `hq bridge serve` runs it until interrupted |
 | Throwaway endpoint (one UDP socket per ticket) | From `open_ticket` until the ticket is used, expired or burned. `hq bridge pair` runs it until then |
+
+`hq bridge run` is both: the long-term endpoint for as long as it runs, and one throwaway endpoint while
+a ticket is open. The Android app starts it only after the owner turned paired devices on.
 
 Without a handler, `Bridge::start` binds a socket to dial out but accepts no protocol. The commands
 `join`, `ping`, `peers` and `revoke` never accept a connection.

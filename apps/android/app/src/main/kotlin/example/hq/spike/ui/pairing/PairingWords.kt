@@ -20,6 +20,8 @@ object PairingWords {
     const val PASTE_HINT = "hqpair://ticket/…"
     const val DIGITS_HELP = "Type these six digits on the other device. It pairs only if they match."
     const val TYPE_HELP = "Type the six digits it shows."
+    const val BATTERY_NOTICE = "Android may stop this phone from answering after it has been asleep for a long time. Turn off battery optimisation for AgentHQ to prevent that."
+    const val BATTERY_BUTTON = "Open battery settings"
     const val DIGITS_LENGTH = 6
     private const val SECONDS_PER_MINUTE = 60L
     private const val MS_PER_SEC = 1_000L
@@ -31,6 +33,9 @@ object PairingWords {
         !s.running -> "Starting…"
         else -> "On. Paired devices can reach this phone as ${PairLink.shortId(s.deviceId ?: "")}."
     }
+
+    /** The battery notice is for a phone that is meant to be reached and that Android is allowed to pause. */
+    fun showBatteryNotice(s: BridgeState, ignoringOptimisation: Boolean): Boolean = s.enabled && !ignoringOptimisation
 
     fun relayLine(relay: String?): String? = when (relay) {
         null, "" -> null

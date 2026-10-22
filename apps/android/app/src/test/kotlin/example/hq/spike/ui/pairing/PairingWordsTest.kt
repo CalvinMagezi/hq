@@ -48,4 +48,10 @@ class PairingWordsTest {
         assertEquals("2 d ago", PairingWords.ago(2 * 86_400))
         assertEquals("not seen yet", PairingWords.peerLine(BridgePeer("aabbccdd11", "x", 1, null, null), 100).substringAfter("· "))
     }
+
+    @Test fun theBatteryNoticeShowsOnlyForAPhoneThatIsOnAndPausable() {
+        assertEquals(false, PairingWords.showBatteryNotice(BridgeState(), false))
+        assertEquals(false, PairingWords.showBatteryNotice(BridgeState(enabled = true), true))
+        assertEquals(true, PairingWords.showBatteryNotice(BridgeState(enabled = true), false))
+    }
 }

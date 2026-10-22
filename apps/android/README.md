@@ -16,6 +16,11 @@ cd apps/android
   -Phq.web=<apps/hq-web/dist/client> -Phq.keystore=<the signing key>      # the APK for a phone
 ```
 
+Build `hq` with `--features tunnel,bridge` (the CI recipe in `.github/workflows/android.yml`): the pairing
+screens need `hq bridge run`. Scanning a pairing code uses CameraX and ZXing (both Apache-2.0, no Google
+Play services). `-Phq.appId=<id>` builds a copy that installs beside the real app for a phone test with its
+own data; it is not for a release, and the default id is what updates the installed app.
+
 The `hq` binary must be built from 2026-10-08 or later: the standby start passes `hq web --supervised`, which keeps the web token out of `hq.log`, and an older binary exits on the unknown flag.
 
 All four `-P` paths must be absolute and must exist, and they come together: the build stops if one is

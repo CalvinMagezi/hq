@@ -418,6 +418,8 @@ private fun Claude(ui: SettingsUi) {
 @Composable
 private fun Devices(ui: SettingsUi) {
     Page {
+        // Pairing does not need the web app to be up, so its row comes before the check for it.
+        OpenScreen("Pair a device with a QR code", example.hq.spike.ui.pairing.PairingActivity::class.java)
         val d = ui.snap.devices
         if (Unanswered(ui, "devices", d != null) || d == null) return@Page
         val list = SettingsWords.devices(d)
@@ -432,7 +434,7 @@ private fun Devices(ui: SettingsUi) {
             }
         }
         Text("Signing in another device and signing devices out are done in the web app for now.", style = SmallText, color = Mts.InkMuted, modifier = Modifier.padding(start = 20.dp, top = 12.dp, end = 20.dp))
-        OpenScreen("Pair a device with a QR code", example.hq.spike.ui.pairing.PairingActivity::class.java)
+
     }
 }
 
