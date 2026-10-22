@@ -167,11 +167,11 @@ impl Limiter {
     }
 
     pub fn release(&mut self, source: &Source) {
-        if let Some(entry) = self.sources.get_mut(source) {
-            if entry.active > 0 {
-                entry.active -= 1;
-                self.active = self.active.saturating_sub(1);
-            }
+        if let Some(entry) = self.sources.get_mut(source)
+            && entry.active > 0
+        {
+            entry.active -= 1;
+            self.active = self.active.saturating_sub(1);
         }
     }
 

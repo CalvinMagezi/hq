@@ -3286,6 +3286,7 @@ dependencies = [
  "futures",
  "hq-agent",
  "hq-backup",
+ "hq-bridge",
  "hq-convert",
  "hq-core",
  "hq-daemon",

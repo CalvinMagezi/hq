@@ -20,5 +20,6 @@ pub use bridge::{
     Bridge, BridgeConfig, PeerStream, SERVICE_ALPN, StreamHandler, echo, echo_handler,
 };
 pub use host::{Joiner, OpenTicket, PairRequest, PairingSpec, Registrar, Tuning};
+pub use iroh::{EndpointId, RelayMode};
 pub use join::{JoinOptions, JoinResult, Joined};
 pub use ticket::{LINK_SCHEME, Purpose, Ticket};
