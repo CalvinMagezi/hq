@@ -6,6 +6,7 @@ import android.content.ActivityNotFoundException
 import android.content.Intent
 import android.graphics.Bitmap
 import android.net.Uri
+import android.os.SystemClock
 import android.webkit.JsPromptResult
 import android.webkit.JsResult
 import android.webkit.RenderProcessGoneDetail
@@ -58,8 +59,10 @@ import androidx.compose.ui.viewinterop.AndroidView
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.compose.LifecycleEventEffect
 import example.hq.spike.HubService
+import example.hq.spike.data.HqClient
 import example.hq.spike.data.HqServices
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import example.hq.spike.ui.chat.blocks.IconAction
 import example.hq.spike.ui.shell.HqIcons
@@ -69,6 +72,21 @@ import example.hq.spike.ui.theme.Mts
 
 private val PROGRESS_HEIGHT = 4.dp
 private const val FULL = 100
+private const val WAITING_PROGRESS = 5
+private const val POLL_MS = 500L
+/** How long HQ is waited for: when the screen opens or the token changes it may be starting or restarting; after a tap it is not. */
+private const val PATIENT_MS = 20_000L
+private const val QUICK_MS = 2_000L
+
+/** True once HQ answers; [authed] also wants it to take the current token, which a restarting hq may not yet. */
+private suspend fun waitForHq(client: HqClient, authed: Boolean, giveUpMs: Long): Boolean {
+    val end = SystemClock.elapsedRealtime() + giveUpMs
+    while (true) {
+        if (client.healthy() && (!authed || runCatching { client.notifications("pending", 1) }.isSuccess)) return true
+        if (SystemClock.elapsedRealtime() >= end) return false
+        delay(POLL_MS)
+    }
+}
 
 /**
  * A page of the web app (Home, Usage, Board, Timeline) under the app's own bar. Only the local hq loads here, signed in without
@@ -81,6 +99,7 @@ fun WebHostScreen(page: WebPage, onClose: () -> Unit) {
     var progress by remember { mutableIntStateOf(0) }
     var webTitle by remember { mutableStateOf<String?>(null) }
     var failed by remember { mutableStateOf(false) }
+    var failedBody by remember { mutableStateOf(WebHost.FAILED_BODY) }
     var canBack by remember { mutableStateOf(false) }
     val state = remember { HostState() }
     val chooser = remember { arrayOfNulls<ValueCallback<Array<Uri>>>(1) }
@@ -113,13 +132,18 @@ fun WebHostScreen(page: WebPage, onClose: () -> Unit) {
      * Signs the page in, then loads it: the token is written into the local hq's own storage from a blank page of that origin.
      * HQ is asked first, because the web app's offline cache would otherwise show an old page and hide that HQ is not answering.
      */
-    fun start() {
+    fun start(patient: Boolean = false, newToken: Boolean = false) {
         failed = false
-        progress = 0
-        // A load still under way is ended first, so a slow answer from an earlier one cannot cover this page or load it twice.
+        failedBody = WebHost.FAILED_BODY
+        // A sliver of the line shows while HQ is waited for.
+        progress = WAITING_PROGRESS
+        // A load still under way is ended first, so a slow answer from an earlier one cannot cover this page or load it twice,
+        // and a blank sign-in page still loading cannot be left in the page's history.
         loading[0]?.cancel()
+        state.reset()
+        web.stopLoading()
         loading[0] = scope.launch {
-            if (!client.healthy()) { failed = true; return@launch }
+            if (!waitForHq(client, authed = newToken, giveUpMs = if (patient) PATIENT_MS else QUICK_MS)) { failed = true; progress = 0; return@launch }
             val token = try { HubService.token(context) } catch (e: IllegalStateException) { failed = true; return@launch }
             state.script = WebHost.tokenScript(token)
             state.hopping = true
@@ -160,7 +184,9 @@ fun WebHostScreen(page: WebPage, onClose: () -> Unit) {
         override fun onRenderProcessGone(view: WebView, detail: RenderProcessGoneDetail): Boolean {
             loading[0]?.cancel()
             state.reset()
+            failedBody = WebHost.RENDER_BODY
             failed = true
+            progress = 0
             canBack = false
             generation++
             return true
@@ -196,12 +222,13 @@ fun WebHostScreen(page: WebPage, onClose: () -> Unit) {
         }
     }
 
-    LaunchedEffect(page) { start() }
+    LaunchedEffect(page) { start(patient = true) }
     DisposableEffect(web) {
         // A new token (after "Sign out everywhere" or a recovery) is loaded in at once, so the page is not left signed out.
-        HubService.setTokenListener { web.post { start() } }
+        val onNewToken = Runnable { web.post { start(patient = true, newToken = true) } }
+        HubService.addTokenListener(onNewToken)
         onDispose {
-            HubService.setTokenListener(null)
+            HubService.removeTokenListener(onNewToken)
             loading[0]?.cancel()
             dialog[0]?.let { (d, r) -> runCatching { d.dismiss(); r.cancel() } }
             chooser[0]?.onReceiveValue(null)
@@ -226,7 +253,7 @@ fun WebHostScreen(page: WebPage, onClose: () -> Unit) {
         }
         Box(Modifier.weight(1f).fillMaxWidth().background(Mts.Surface000)) {
             key(web) { AndroidView(factory = { web }, modifier = Modifier.fillMaxSize()) }
-            if (failed) FailedPage(page, onRetry = { start() })
+            if (failed) FailedPage(page, failedBody, onRetry = { start() })
         }
     }
 }
@@ -241,10 +268,10 @@ private class HostState {
 }
 
 @Composable
-private fun FailedPage(page: WebPage, onRetry: () -> Unit) {
+private fun FailedPage(page: WebPage, body: String, onRetry: () -> Unit) {
     Column(Modifier.fillMaxSize().background(Mts.Surface000).padding(32.dp), verticalArrangement = Arrangement.spacedBy(12.dp, Alignment.CenterVertically), horizontalAlignment = Alignment.CenterHorizontally) {
         Text(WebHost.failedTitle(page), style = HqType.H2, color = Mts.Ink, textAlign = TextAlign.Center)
-        Text(WebHost.FAILED_BODY, style = HqType.BodySm, color = Mts.InkMuted, textAlign = TextAlign.Center)
+        Text(body, style = HqType.BodySm, color = Mts.InkMuted, textAlign = TextAlign.Center)
         Box(Modifier.padding(top = 8.dp).heightIn(min = 48.dp).clip(CircleShape).background(Mts.BrandGreen).clickable(role = Role.Button, onClick = onRetry).padding(horizontal = 32.dp), contentAlignment = Alignment.Center) {
             Text(WebHost.TRY_AGAIN, style = HqType.BodySmBold, color = Mts.OnGreen)
         }

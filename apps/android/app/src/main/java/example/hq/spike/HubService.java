@@ -62,11 +62,15 @@ public class HubService extends Service {
     }
 
     private static final AtomicLong lastRecovery = new AtomicLong(-RECOVER_MIN_GAP_MS);
-    private static volatile Runnable tokenListener;
+    private static final java.util.concurrent.CopyOnWriteArraySet<Runnable> tokenListeners = new java.util.concurrent.CopyOnWriteArraySet<>();
 
-    /** The visible web page asks to hear when the token is replaced, so it can sign in again with the new one. */
-    public static void setTokenListener(Runnable r) {
-        tokenListener = r;
+    /** A visible web page asks to hear when the token is replaced, so it can sign in again with the new one. Each page adds its own and removes only that one. */
+    public static void addTokenListener(Runnable r) {
+        tokenListeners.add(r);
+    }
+
+    public static void removeTokenListener(Runnable r) {
+        tokenListeners.remove(r);
     }
 
     /**
@@ -88,8 +92,9 @@ public class HubService extends Service {
             SecretStore.replaceWebToken(c);
             Log.w(TAG, "web token was signed out, replaced it and restarting hq");
             restartHq();
-            Runnable heard = tokenListener;
-            if (heard != null) heard.run();
+            for (Runnable heard : tokenListeners) {
+                try { heard.run(); } catch (RuntimeException e) { Log.w(TAG, "a token listener failed: " + e); }
+            }
         } catch (RuntimeException e) {
             lastRecovery.set(last);
             Log.e(TAG, "could not replace the web token: " + e);

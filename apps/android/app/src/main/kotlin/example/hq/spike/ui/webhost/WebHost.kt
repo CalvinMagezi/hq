@@ -65,5 +65,6 @@ object WebHost {
 
     fun failedTitle(page: WebPage) = "Couldn't load ${page.title}"
     const val FAILED_BODY = "HQ did not answer. Check that it is running, then try again."
+    const val RENDER_BODY = "The page stopped working. Try again."
     const val TRY_AGAIN = "Try again"
 }

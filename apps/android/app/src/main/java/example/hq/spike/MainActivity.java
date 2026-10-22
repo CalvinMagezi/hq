@@ -8,6 +8,7 @@ import android.os.Bundle;
 import android.os.Handler;
 import android.os.Looper;
 import android.util.Log;
+import android.webkit.RenderProcessGoneDetail;
 import android.webkit.WebSettings;
 import android.webkit.WebView;
 import android.webkit.WebViewClient;
@@ -50,20 +51,29 @@ public class MainActivity extends Activity {
         s.setJavaScriptEnabled(true);
         s.setDomStorageEnabled(true);
         s.setAllowFileAccess(false);
-        web.setWebViewClient(new WebViewClient());
+        web.setWebViewClient(new WebViewClient() {
+            // The renderer shares this process; a crash it caused would end hq too, so the page is built again instead.
+            @Override
+            public boolean onRenderProcessGone(WebView view, RenderProcessGoneDetail detail) {
+                ui.post(MainActivity.this::recreate);
+                return true;
+            }
+        });
         setContentView(web);
         new Thread(this::waitHealthThenLoad, "health").start();
     }
 
+    private final Runnable onNewToken = () -> new Thread(this::reloadWhenNewTokenWorks, "token-reload").start();
+
     @Override
     protected void onResume() {
         super.onResume();
-        HubService.setTokenListener(() -> new Thread(this::reloadWhenNewTokenWorks, "token-reload").start());
+        HubService.addTokenListener(onNewToken);
     }
 
     @Override
     protected void onPause() {
-        HubService.setTokenListener(null);
+        HubService.removeTokenListener(onNewToken);
         super.onPause();
     }
 
