@@ -41,7 +41,7 @@ placeholders (`example.com`, `hq.example.ts.net`, `<owner>/<repo>`).
 
 ## Architecture
 
-- **Language**: Rust (edition 2024, Cargo workspace of 23 crates)
+- **Language**: Rust (edition 2024, Cargo workspace of 24 crates)
 - **Binary**: `hq`, built from `crates/hq-cli`. `scripts/install-hq.sh` installs it
   to `~/bin/hq`; servers use `/usr/local/bin/hq`.
 - **Config**: `~/.hq/config.yaml` (override with `HQ_CONFIG_PATH`); any key can
