@@ -37,4 +37,17 @@ class AnswerWordsTest {
     @Test fun answersTurnedOffSayWhereToAnswer() {
         assertEquals(AnswerWords.Say("Answers from notifications are off", "Open the app to answer."), AnswerWords.answersOff)
     }
+
+    @Test fun anItemIsAnsweredElsewhereOnlyWhenTheHistoryPositivelySaysSo() {
+        val history = listOf("a" to "approved", "b" to "dismissed", "c" to "pending")
+        assertEquals(true, AnswerWords.answeredElsewhere("a", history))
+        assertEquals(true, AnswerWords.answeredElsewhere("b", history))
+        assertEquals(false, AnswerWords.answeredElsewhere("c", history))
+        assertEquals(false, AnswerWords.answeredElsewhere("missing", history))
+        assertEquals(false, AnswerWords.answeredElsewhere("a", emptyList()))
+    }
+
+    @Test fun theAlreadyAnsweredCardUsesTheBoardsWords() {
+        assertEquals(AnswerWords.Say("Already answered", "Someone answered this somewhere else."), AnswerWords.alreadyAnswered)
+    }
 }

@@ -60,6 +60,8 @@ import example.hq.spike.ui.chat.SheetFrame
 import example.hq.spike.ui.chat.blocks.IconAction
 import example.hq.spike.ui.shell.HqIcons
 import example.hq.spike.ui.theme.HqType
+import example.hq.spike.ui.webhost.LocalOpenWeb
+import example.hq.spike.ui.webhost.WebPage
 import example.hq.spike.ui.theme.Mts
 import java.time.LocalDate
 import kotlinx.coroutines.delay
@@ -120,6 +122,7 @@ private fun Feed(ui: TasksUi, actions: TasksActions, onHelpers: () -> Unit) {
     LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(bottom = 96.dp)) {
         if (ui.offline) item { Text("HQ is not running. These are the last tasks it had.", style = HqType.BodySm, color = Mts.Amber, modifier = Modifier.padding(16.dp)) }
         if (onAll) item(key = "chips") { AllChips(ui, actions.onChip) }
+        if (onAll && ui.scope != TaskScope.Everything) item(key = "scope") { ScopeChip(TaskFilters.label(ui.tree, ui.scope) ?: "Filtered") { actions.onScope(TaskScope.Everything) } }
         if (onAll && ui.sessions.isNotEmpty() && ui.chip == AllChip.Active) item(key = "strip") { WorkingStrip(ui.sessions, onHelpers) }
         if (groups.isEmpty() && ui.loaded && !ui.offline) item { Text(if (onAll && ui.chip == AllChip.Archived && !ui.archivedLoaded) "Asking HQ\u2026" else if (onAll) TasksLogic.emptyAll(ui.chip) else emptyWords(ui.tab), style = HqType.BodySm, color = Mts.InkMuted, modifier = Modifier.padding(16.dp)) }
         groups.forEach { g ->
@@ -130,6 +133,34 @@ private fun Feed(ui: TasksUi, actions: TasksActions, onHelpers: () -> Unit) {
                 if (onAll) AllRow(shown[it], ui.today, shown[it].id in ui.workingIds, ui.selected, ui.chip != AllChip.Archived, actions) else TaskRow(shown[it], ui.today, actions)
             }
             if (g.preview != null && g.tasks.size > g.preview) item(key = "m-${g.key}") { MoreRow(g.tasks.size - g.preview, open) { actions.onToggleGroup(g.key) } }
+        }
+        if (onAll && ui.loaded) item(key = "web") { WebViews() }
+    }
+}
+
+/** The filter the All tab is narrowed to, with a way to take it off. */
+@Composable
+private fun ScopeChip(name: String, onClear: () -> Unit) {
+    Row(
+        Modifier.padding(horizontal = 16.dp, vertical = 4.dp).heightIn(min = 48.dp).clip(CircleShape).border(1.dp, Mts.BrandGreen, CircleShape)
+            .clickable(role = Role.Button, onClickLabel = "Clear the filter", onClick = onClear).padding(start = 16.dp, end = 12.dp),
+        horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Text(name, style = HqType.BodySmBold, color = Mts.Ink, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f, fill = false))
+        Icon(HqIcons.Close, null, Modifier.size(18.dp), tint = Mts.InkMuted)
+    }
+}
+
+/** The end of the All tab: the web app's Board and Timeline, shown in the app's own screen. */
+@Composable
+private fun WebViews() {
+    val open = LocalOpenWeb.current
+    Column(Modifier.fillMaxWidth().padding(top = 16.dp)) {
+        listOf(WebPage.Board to "Board", WebPage.Timeline to "Timeline").forEach { (page, label) ->
+            Row(Modifier.fillMaxWidth().heightIn(min = 48.dp).clickable(role = Role.Button) { open(page) }.padding(horizontal = 16.dp), verticalAlignment = Alignment.CenterVertically) {
+                Text(label, style = HqType.BodySmBold, color = Mts.BrandBlue, modifier = Modifier.weight(1f))
+                Icon(HqIcons.ChevronRight, null, Modifier.size(20.dp), tint = Mts.InkMuted)
+            }
         }
     }
 }
@@ -142,7 +173,7 @@ private fun AllChips(ui: TasksUi, onChip: (AllChip) -> Unit) {
     Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(horizontal = 16.dp, vertical = 4.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
         AllChip.entries.forEach { c ->
             val on = c == ui.chip
-            val n = TasksLogic.chipCount(ui.tasks, c)
+            val n = TasksLogic.chipCount(ui.scoped, c)
             Box(Modifier.heightIn(min = 48.dp).clip(CircleShape).selectable(selected = on, role = Role.Tab, onClick = { onChip(c) }), contentAlignment = Alignment.Center) {
                 Row(
                     Modifier.heightIn(min = 36.dp).clip(CircleShape).then(if (on) Modifier.background(Mts.BrandGreen, CircleShape).border(1.dp, Mts.BrandGreen, CircleShape) else Modifier.border(1.dp, Mts.Line, CircleShape)).padding(horizontal = 14.dp),

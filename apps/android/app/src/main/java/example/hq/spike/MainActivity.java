@@ -8,13 +8,11 @@ import android.os.Bundle;
 import android.os.Handler;
 import android.os.Looper;
 import android.util.Log;
+import android.webkit.RenderProcessGoneDetail;
 import android.webkit.WebSettings;
 import android.webkit.WebView;
 import android.webkit.WebViewClient;
-import java.io.File;
-import java.io.FileOutputStream;
 import java.io.IOException;
-import java.io.InputStream;
 import java.net.HttpURLConnection;
 import java.net.URL;
 
@@ -34,11 +32,7 @@ public class MainActivity extends Activity {
     @Override
     protected void onCreate(Bundle b) {
         super.onCreate(b);
-        try {
-            copyAssets("web", new File(getFilesDir(), "web"));
-        } catch (Exception e) {
-            Log.e(HubService.TAG, "asset copy failed: " + e);
-        }
+        WebAssets.sync(this);
         startForegroundService(new Intent(this, HubService.class));
         path = HubConfig.safePath(getIntent().getStringExtra(EXTRA_PATH));
         if (Build.VERSION.SDK_INT >= 33 && checkSelfPermission(POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) {
@@ -50,20 +44,29 @@ public class MainActivity extends Activity {
         s.setJavaScriptEnabled(true);
         s.setDomStorageEnabled(true);
         s.setAllowFileAccess(false);
-        web.setWebViewClient(new WebViewClient());
+        web.setWebViewClient(new WebViewClient() {
+            // The renderer shares this process; a crash it caused would end hq too, so the page is built again instead.
+            @Override
+            public boolean onRenderProcessGone(WebView view, RenderProcessGoneDetail detail) {
+                ui.post(MainActivity.this::recreate);
+                return true;
+            }
+        });
         setContentView(web);
         new Thread(this::waitHealthThenLoad, "health").start();
     }
 
+    private final Runnable onNewToken = () -> new Thread(this::reloadWhenNewTokenWorks, "token-reload").start();
+
     @Override
     protected void onResume() {
         super.onResume();
-        HubService.setTokenListener(() -> new Thread(this::reloadWhenNewTokenWorks, "token-reload").start());
+        HubService.addTokenListener(onNewToken);
     }
 
     @Override
     protected void onPause() {
-        HubService.setTokenListener(null);
+        HubService.removeTokenListener(onNewToken);
         super.onPause();
     }
 
@@ -119,19 +122,5 @@ public class MainActivity extends Activity {
             try { Thread.sleep(HEALTH_POLL_MS); } catch (InterruptedException ignored) { }
         }
         Log.e(HubService.TAG, "health never answered");
-    }
-
-    private void copyAssets(String from, File to) throws Exception {
-        String[] kids = getAssets().list(from);
-        if (kids == null || kids.length == 0) {
-            to.getParentFile().mkdirs();
-            try (InputStream in = getAssets().open(from); FileOutputStream out = new FileOutputStream(to)) {
-                byte[] buf = new byte[1 << 16];
-                for (int r; (r = in.read(buf)) > 0; ) out.write(buf, 0, r);
-            }
-            return;
-        }
-        to.mkdirs();
-        for (String k : kids) copyAssets(from + "/" + k, new File(to, k));
     }
 }

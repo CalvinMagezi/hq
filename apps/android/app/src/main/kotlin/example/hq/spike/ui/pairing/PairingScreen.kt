@@ -181,6 +181,9 @@ private fun Home(vm: PairingViewModel, ui: PairingUi, bridge: BridgeState) {
         PillButton("Scan a code", primary = false, tag = "scan-code") { vm.go(PairingScreen.Scan) }
         Spacer(Modifier.height(12.dp))
         PillButton("Paste a link", primary = false, tag = "paste-link") { vm.go(PairingScreen.Paste) }
+        Spacer(Modifier.height(12.dp))
+        val context = LocalContext.current
+        PillButton("Connect Claude", primary = false, tag = "connect-claude") { context.startActivity(Intent(context, example.hq.spike.ui.connect.ConnectClaudeActivity::class.java)) }
         Label("Paired with this phone")
         val peers = bridge.peers
         when {

@@ -50,6 +50,11 @@ class AnswerReceiver : BroadcastReceiver() {
             try {
                 // The tap changes the asking card at once, with no buttons.
                 nm.notify(nid, say(context, AnswerWords.sending, null))
+                // An answer given elsewhere stands: the server would take a second one over it. A check that cannot be made lets this one go.
+                if (answeredElsewhere(id, context, deadline)) {
+                    nm.notify(nid, say(context, AnswerWords.alreadyAnswered, null))
+                    return@Thread
+                }
                 if (kind == CardKind.HelperAsks.name && session != null) {
                     val key = if (answer == "approve") "enter" else "esc"
                     // The key goes in only if the helper's live screen still shows the dialog this notification quoted.
@@ -77,6 +82,13 @@ class AnswerReceiver : BroadcastReceiver() {
                 pending.finish()
             }
         }.start()
+    }
+
+    private fun answeredElsewhere(id: String, c: Context, deadline: Long): Boolean = try {
+        val items = JSONObject(get("/api/notifications?state=history&limit=$HISTORY_LIMIT", c, deadline)).optJSONArray("notifications") ?: JSONArray()
+        AnswerWords.answeredElsewhere(id, (0 until items.length()).mapNotNull { i -> items.optJSONObject(i)?.let { o -> o.optString("id") to o.optString("state") } })
+    } catch (e: Exception) {
+        false
     }
 
     private fun get(path: String, c: Context, deadline: Long): String {
@@ -140,6 +152,7 @@ class AnswerReceiver : BroadcastReceiver() {
         private const val TITLE = "title"
         private const val EXCERPT = "excerpt"
         private const val CHECK_LINES = 81
+        private const val HISTORY_LIMIT = 100
         private const val DEADLINE_MS = 10_000L
         private const val CONNECT_MS = 2_000
         private const val CLEAR_AFTER_MS = 6_000L

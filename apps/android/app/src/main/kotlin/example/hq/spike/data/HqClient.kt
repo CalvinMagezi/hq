@@ -29,7 +29,7 @@ data class ExportedFile(val file: java.io.File, val name: String, val mime: Stri
 class NoteNotFound(path: String) : IOException("No note at $path")
 
 /** The same REST and web socket API the web app uses, over loopback. Auth is the sealed web token. */
-class HqClient(private val token: () -> String, private val base: String = LOCAL_HQ, private val onSignedOut: () -> Unit = {}) {
+class HqClient(private val token: () -> String, private val base: String = LOCAL_HQ, private val onSignedOut: () -> Unit = {}, private val callSeconds: Long = 0) {
     /** The sealed token is decrypted once, off the main thread, and forgotten when hq refuses it. */
     @Volatile private var bearer: String? = null
 
@@ -40,6 +40,7 @@ class HqClient(private val token: () -> String, private val base: String = LOCAL
         .connectTimeout(CONNECT_SECONDS, TimeUnit.SECONDS)
         .readTimeout(READ_SECONDS, TimeUnit.SECONDS)
         .pingInterval(PING_SECONDS, TimeUnit.SECONDS)
+        .apply { if (callSeconds > 0) callTimeout(callSeconds, TimeUnit.SECONDS) }
         .build()
 
     suspend fun healthy(): Boolean = withContext(Dispatchers.IO) {
@@ -153,7 +154,42 @@ class HqClient(private val token: () -> String, private val base: String = LOCAL
         val waitingOn: String? = null,
         val completedAt: String? = null,
         val archivedAt: String? = null,
+        val initiativeId: String? = null,
     )
+
+    /** Where tasks live: spaces hold folders and initiatives, a folder holds initiatives, and every task belongs to one initiative. */
+    suspend fun taskTree(): example.hq.spike.ui.tasks.TaskTree {
+        val spaces = send(authed("/api/spaces").build()) { t -> JSONObject(t).optJSONArray("spaces").objects().map { example.hq.spike.ui.tasks.TaskSpace(it.getString("id"), it.optString("name", it.getString("id"))) } }
+        val folders = send(authed("/api/folders").build()) { t -> JSONObject(t).optJSONArray("folders").objects().map { example.hq.spike.ui.tasks.TaskFolder(it.getString("id"), it.optString("space_id"), it.optString("name", it.getString("id"))) } }
+        val initiatives = send(authed("/api/initiatives").build()) { t ->
+            JSONObject(t).optJSONArray("initiatives").objects().map { example.hq.spike.ui.tasks.TaskInitiative(it.getString("id"), it.optString("space_id"), it.optStringOrNull("folder_id"), it.optString("name", it.getString("id"))) }
+        }
+        return example.hq.spike.ui.tasks.TaskTree(spaces, folders, initiatives)
+    }
+
+    /** The briefing for one initiative, as HQ generates it now. A 404 is an edition with no agents (Lite): the caller says so. */
+    suspend fun initiativeBriefing(id: String): example.hq.spike.ui.tasks.Briefing = send(authed("/api/initiatives/${java.net.URLEncoder.encode(id, "UTF-8").replace("+", "%20")}/activity").build()) { text ->
+        val o = JSONObject(text)
+        val counts = { name: String -> o.optJSONObject(name)?.let { c -> c.keys().asSequence().map { it to c.optInt(it) }.toList() }.orEmpty() }
+        example.hq.spike.ui.tasks.Briefing(
+            name = o.optJSONObject("initiative")?.optString("name").orEmpty(),
+            tasksShown = o.optInt("tasks_shown"),
+            statusCounts = counts("status_counts"),
+            awaiting = o.optJSONArray("awaiting_review").objects().map { example.hq.spike.ui.tasks.BriefTask(it.getString("id"), it.optString("display_id"), it.optString("title")) },
+            blocked = o.optJSONArray("blocked").objects().map { example.hq.spike.ui.tasks.BlockedTask(it.getString("id"), it.optString("display_id"), it.optString("title"), it.optStringOrNull("reason"), it.optStringOrNull("waiting_on")) },
+            contributors = o.optJSONArray("contributors").objects().map { example.hq.spike.ui.tasks.Contributor(it.optString("actor"), it.optInt("notes"), it.optInt("leases"), it.optStringOrNull("last_active")) },
+            reviewCounts = counts("review_counts"),
+            gapsTotal = o.optInt("gaps_total"),
+            notes = o.optJSONArray("recent_notes").objects().map {
+                example.hq.spike.ui.tasks.BriefNote(
+                    it.optString("path"), it.optString("task_display_id"),
+                    example.hq.spike.ui.tasks.BriefingWords.author(it.optString("attribution"), it.optStringOrNull("actor"), it.optStringOrNull("source_kind")),
+                    it.optStringOrNull("written_at"), it.optStringOrNull("review_state"),
+                )
+            },
+            freshness = o.optJSONObject("freshness")?.let { f -> f.keys().asSequence().map { it to f.optStringOrNull(it) }.toList() }.orEmpty(),
+        )
+    }
 
     /** A helper working on a task right now: who, where, and which task. */
     data class WorkSession(val taskId: String, val actor: String, val harness: String, val cwd: String)
@@ -166,9 +202,17 @@ class HqClient(private val token: () -> String, private val base: String = LOCAL
         o.optStringOrNull("parent_task_id"), o.optInt("subtask_count", 0), o.optInt("subtask_done", 0), o.optStringOrNull("blocked_reason"),
         o.optStringOrNull("first_ready_for_review_at"), o.optString("updated_at", ""),
         o.optStringOrNull("blocked_since"), o.optStringOrNull("waiting_on"), o.optStringOrNull("completed_at"), o.optStringOrNull("archived_at"),
+        o.optStringOrNull("initiative_id"),
     )
 
     private fun json(body: JSONObject) = body.toString().toRequestBody("application/json".toMediaType())
+
+    /** The tasks in progress, newest first, with their count: what the Tasks widget shows. */
+    suspend fun inProgress(limit: Int): Pair<List<example.hq.spike.capture.TaskLine>, Int> = send(authed("/api/tasks?status=in_progress&top_level_only=true&limit=$limit").build()) { text ->
+        val o = JSONObject(text)
+        val rows = o.optJSONArray("tasks").objects().map { example.hq.spike.capture.TaskLine(it.getString("id"), example.hq.spike.capture.Widgets.numberOf(it.optString("display_id", "")), it.optString("title", "")) }
+        rows to o.optInt("total", rows.size)
+    }
 
     /** The helpers working on a task now (a lease that has not ended). */
     suspend fun liveWorkSessions(): List<WorkSession> = send(authed("/api/work-sessions?days=1").build()) { text ->
@@ -379,6 +423,16 @@ class HqClient(private val token: () -> String, private val base: String = LOCAL
         send(authed("/api/note/create").post(JSONObject().put("folder", folder).put("title", title).put("content", content).toString().toRequestBody("application/json".toMediaType())).build()) {
             JSONObject(it).getString("path")
         }
+
+    /** A POST with a JSON body (empty by default) whose answer is a JSON object, or none. */
+    suspend fun postJson(path: String, body: JSONObject = JSONObject()): JSONObject = send(authed(path).post(json(body)).build()) { if (it.isBlank()) JSONObject() else JSONObject(it) }
+
+    suspend fun deleteAt(path: String) { send(authed(path).delete().build()) { } }
+
+    /** Checks an AI provider key with one small call to the provider and, if it works, stores it. 400 means the key was refused, 409 that the environment sets it. */
+    suspend fun setProviderKey(provider: String, key: String) {
+        send(authed("/api/settings/provider-key").post(JSONObject().put("provider", provider).put("api_key", key).toString().toRequestBody("application/json".toMediaType())).build()) { }
+    }
 
     /** Replaces a note's text (body only: the server keeps the front matter). Last write wins; there is no version check yet. */
     suspend fun saveNote(path: String, content: String) {

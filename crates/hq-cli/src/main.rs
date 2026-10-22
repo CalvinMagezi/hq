@@ -12,6 +12,7 @@ mod commands;
 mod render;
 use commands::backup::{BackupCommand, RestoreArgs};
 use commands::connector::ConnectorAction;
+use commands::edge::EdgeAction;
 use commands::net::NetAction;
 use commands::queue::QueueAction;
 use commands::skills::SkillsAction;
@@ -147,6 +148,13 @@ enum Commands {
         /// The directory the root applier reads its input from (default: /var/lib/hq-net)
         #[arg(long, global = true, hide = true)]
         spool: Option<PathBuf>,
+    },
+
+    /// Run a blind public forwarder for your devices: run, id, allow, revoke, list (`hq edge --help`)
+    #[command(long_about = EDGE_HELP)]
+    Edge {
+        #[command(subcommand)]
+        action: EdgeAction,
     },
 
     /// Pair machines with a QR code and reach them by key: pair, join, serve, ping, peers, revoke (`hq bridge --help`)
@@ -673,6 +681,10 @@ async fn async_main() -> Result<()> {
         Some(Commands::Net { action, dir, spool }) => {
             return commands::net::run(action, dir, spool);
         }
+        // `hq edge` reads only its own `edge:` section, and may run on a machine with no vault.
+        Some(Commands::Edge { action }) => {
+            return commands::edge::run(action).await;
+        }
         _ => {}
     }
 
@@ -772,6 +784,26 @@ fn apply_config_flag() -> Result<()> {
     Ok(())
 }
 
+/// The log filter `hq edge` starts with: its own messages at info, the transport libraries at
+/// warn, because they log full device endpoint ids otherwise.
+const EDGE_LOG_FILTER: &str = "info,iroh=warn,iroh_relay=warn,iroh_base=warn,noq=warn,noq_proto=warn,portmapper=warn,tokio_rustls_acme=warn";
+
+const EDGE_HELP: &str = "Run a blind public forwarder so a device that cannot be reached from the internet (a phone) can answer HTTPS on a name you own.
+
+The edge listens on one TCP port (443). It reads only the server name in each TLS ClientHello, never decrypts, and passes the bytes to the device registered under that name over an iroh stream. The device ends TLS. A name that belongs to no registered device is closed with no answer.
+
+Run it on a public machine you control, off by default. Set in config.yaml:
+
+  edge:
+    enabled: true
+    domain: edge.example.com      # point *.edge.example.com at this machine
+    relay:                        # optional: host an iroh relay for the household
+      enabled: false
+      hostname: relay.edge.example.com
+      acme_email: you@example.com
+
+Then: `hq edge id` (give this id to each device), `hq edge allow <device id>`, `hq edge run`. Full guide: docs/EDGE.md. Threats and limits: docs/security/EDGE.md.";
+
 /// MCP stdio uses stdout for JSON-RPC, so `mcp-serve` logs to stderr; chat
 /// (bare `hq` or `hq chat`) silences library logs. Both are read from the raw
 /// args because tracing must be set up before clap parses.
@@ -795,8 +827,16 @@ fn init_tracing() {
             .is_some_and(|a| a == "search" || a == "vault" || a == "web")
             && before_dashes.clone().any(|a| a == "--json"))
         || (args.get(1).is_some_and(|a| a == "web") && before_dashes.clone().any(|a| a == "link"));
+    // iroh logs full endpoint ids at info; the edge keeps them out of its log unless asked.
+    let is_edge = args
+        .iter()
+        .skip(1)
+        .take_while(|a| *a != "--")
+        .any(|a| a == "edge");
     let default_level = if is_chat || is_tunnel_run {
         "off"
+    } else if is_edge {
+        EDGE_LOG_FILTER
     } else if is_data || is_bridge_run {
         "warn"
     } else {
@@ -1050,7 +1090,10 @@ async fn dispatch(command: Commands, config: &HqConfig) -> Result<()> {
         Commands::NotifyRestart { phase, reason, sha } => {
             commands::notify_restart::run(config, &phase, &reason, sha.as_deref()).await
         }
-        Commands::Update(_) | Commands::UpdateDb { .. } | Commands::Net { .. } => {
+        Commands::Update(_)
+        | Commands::UpdateDb { .. }
+        | Commands::Net { .. }
+        | Commands::Edge { .. } => {
             unreachable!("handled before config load")
         }
         Commands::Health => commands::health::run(config).await,

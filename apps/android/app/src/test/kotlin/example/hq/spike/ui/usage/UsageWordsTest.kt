@@ -178,4 +178,11 @@ class UsageWordsTest {
         assertEquals("No key set", UsageWords.statusWords("no_key"))
         assertEquals("", UsageWords.statusWords("something-new"))
     }
+
+    @Test fun aNegativeAmountKeepsItsSignBeforeTheDollar() {
+        org.junit.Assert.assertEquals("-$0.04", UsageWords.usd(-0.04))
+        org.junit.Assert.assertEquals("-$12.50", UsageWords.usd(-12.5))
+        org.junit.Assert.assertEquals("-$0.0001", UsageWords.usd(-0.0001))
+        org.junit.Assert.assertEquals("$2.973", UsageWords.usd(2.973))
+    }
 }

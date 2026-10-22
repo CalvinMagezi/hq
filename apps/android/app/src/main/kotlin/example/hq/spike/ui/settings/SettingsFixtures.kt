@@ -44,7 +44,7 @@ fun settingsFixture(name: String?): SettingsUi? {
         HomeRow(SettingsPage.Background, "background", "Background work", SettingsWords.BACKGROUND_ON),
         HomeRow(SettingsPage.KeepRunning, "battery", "Keep running", "Good · 1 thing to check"),
         HomeRow(SettingsPage.Notifications, "notifications", "Notifications", "Needs you on · Updates on"),
-        HomeRow(null, "capture", "Capture and widgets", "Sharing opens a new note"),
+        HomeRow(SettingsPage.CaptureWidgets, "capture", "Capture and widgets", "Sharing opens a new note"),
     )
     val channels = listOf(ChannelFacts("needs", "Needs you", 4, true), ChannelFacts("updates", "Updates", 3, false), ChannelFacts("hub", "HQ is running", 2, false))
     val base = SettingsUi(open = true, snap = SettingsSnapshot(settings, chat, connector, devices, budgets, health, providers = providers, copilot = copilot, forecast = forecast), loaded = true, phone = phone, mode = "active", build = "hub \u00b7 build 1", now = now)
@@ -62,6 +62,18 @@ fun settingsFixture(name: String?): SettingsUi? {
         "s-keep-bad" -> base.copy(stack = listOf(SettingsPage.KeepRunning), keep = KeepFacts(batteryUnrestricted = false, autoRevokeOff = false, notificationsAllowed = false))
         "s-notif" -> base.copy(stack = listOf(SettingsPage.Notifications), notif = NotifFacts(true, channels, true))
         "s-notif-off" -> base.copy(stack = listOf(SettingsPage.Notifications), notif = NotifFacts(false, channels, false))
+        "s-pair" -> base.copy(stack = listOf(SettingsPage.Messaging, SettingsPage.PairApp), pair = PairState("telegram", "K4M7Q-2XPA9", "/pair K4M7Q-2XPA9", "https://t.me/example_bot?start=K4M7Q-2XPA9", Instant.now().epochSecond + 272))
+        "s-pair-discord" -> base.copy(stack = listOf(SettingsPage.Messaging, SettingsPage.PairApp), pair = PairState("discord", "K4M7Q-2XPA9", "!pair K4M7Q-2XPA9", null, Instant.now().epochSecond + 800), setup = SetupState("discord", appId = "123", intentOff = true))
+        "s-pair-expired" -> base.copy(stack = listOf(SettingsPage.Messaging, SettingsPage.PairApp), pair = PairState("telegram", "K4M7Q-2XPA9", "/pair K4M7Q-2XPA9", null, Instant.now().epochSecond - 5))
+        "s-setup" -> base.copy(stack = listOf(SettingsPage.Messaging, SettingsPage.SetupApp), setup = SetupState("telegram", found = "@example_bot"))
+        "s-messaging-ask" -> base.copy(stack = listOf(SettingsPage.Messaging), askDisconnect = "telegram")
+        "s-key" -> base.copy(stack = listOf(SettingsPage.Keys), keySheet = KeySheet("anthropic", "Anthropic", replace = false))
+        "s-key-error" -> base.copy(stack = listOf(SettingsPage.Keys), keySheet = KeySheet("anthropic", "Anthropic", replace = false, error = SettingsWords.KEY_REFUSED))
+        "s-capture" -> base.copy(stack = listOf(SettingsPage.CaptureWidgets))
+        "s-capture-waiting" -> base.copy(stack = listOf(SettingsPage.CaptureWidgets), capture = CaptureFacts("task", true, listOf(
+            example.hq.spike.capture.Queued("a", "note", "Why Compose beat the WebView for chat", org.json.JSONObject(), 1L),
+            example.hq.spike.capture.Queued("b", "task", "Check Samsung battery whitelist", org.json.JSONObject(), 2L, "HQ did not accept it"),
+        )))
         "s-background" -> base.copy(stack = listOf(SettingsPage.Background))
         "s-background-standby" -> base.copy(stack = listOf(SettingsPage.Background), mode = "standby")
         "s-background-ask" -> base.copy(stack = listOf(SettingsPage.Background), askMode = false)

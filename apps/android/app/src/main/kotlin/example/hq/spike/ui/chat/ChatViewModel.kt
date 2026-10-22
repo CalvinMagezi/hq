@@ -174,6 +174,12 @@ class ChatViewModel(app: Application) : AndroidViewModel(app) {
         drafts.edit().putString(draftKey(_state.value.threadId), text).apply()
     }
 
+    /** Text that came from outside (the share sheet): added after what is already typed, never over it. */
+    fun addToDraft(text: String) {
+        val now = _state.value.draft
+        setDraft(if (now.isBlank()) text else now.trimEnd() + "\n\n" + text)
+    }
+
     private fun send() {
         val s = _state.value
         if (s.editing == null && s.files.isEmpty()) SlashCommands.parse(s.draft)?.let { return runSlash(it) }

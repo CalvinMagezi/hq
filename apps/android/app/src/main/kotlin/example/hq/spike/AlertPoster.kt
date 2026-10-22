@@ -51,6 +51,10 @@ object AlertPoster {
         c.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit().putBoolean(ALLOW_ANSWERS, on).apply()
     }
 
+    /** True for an item that waits on the owner; an update is only news and does not count toward "Needs you". */
+    @JvmStatic
+    fun needsYou(o: JSONObject): Boolean = example.hq.spike.ui.inbox.InboxWords.card(itemOf(o)).kind != CardKind.Update
+
     fun itemOf(o: JSONObject): InboxItem {
         val meta = o.optJSONObject("metadata")
         val extra = meta?.optJSONObject("extra")
