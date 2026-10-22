@@ -37,6 +37,15 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import org.json.JSONObject
 
+/** A bot token being set up: whether it is being checked or saved, what was found, and what went wrong. The token itself is never kept here. */
+data class SetupState(
+    val platform: String, val checking: Boolean = false, val saving: Boolean = false, val found: String? = null, val appId: String? = null,
+    val intentOff: Boolean = false, val error: String? = null, val saved: Boolean = false,
+)
+
+/** A pairing code waiting for the owner's message. */
+data class PairState(val platform: String, val code: String, val command: String, val deepLink: String?, val expiresAt: Long, val error: String? = null)
+
 /** A sign-in code for another device, and when it stops working (epoch seconds). */
 data class DeviceCode(val code: String, val expiresAt: Long)
 
@@ -71,6 +80,10 @@ data class SettingsUi(
     val askClaudeOff: Boolean = false,
     val askSignOutAll: Boolean = false,
     val deviceCode: DeviceCode? = null,
+    val setup: SetupState? = null,
+    val pair: PairState? = null,
+    val askDisconnect: String? = null,
+    val askReplace: String? = null,
 ) {
     val page: SettingsPage get() = stack.lastOrNull() ?: SettingsPage.Home
 }
@@ -92,6 +105,14 @@ class SettingsActions(
     val onChannel: (String) -> Unit = {},
     val onAnswers: (Boolean) -> Unit = {},
     val onShareOpens: (String) -> Unit = {},
+    val onSetup: (String) -> Unit = {},
+    val onCheckToken: (String) -> Unit = {},
+    val onSaveToken: (String) -> Unit = {},
+    val onPair: (String, Boolean) -> Unit = { _, _ -> },
+    val onPairPoll: suspend () -> Unit = {},
+    val onAskDisconnect: (String?) -> Unit = {},
+    val onDisconnect: () -> Unit = {},
+    val onAskReplace: (String?) -> Unit = {},
     val onArm: () -> Unit = {},
     val onDisarm: () -> Unit = {},
     val onRevoke: (String) -> Unit = {},
@@ -134,6 +155,14 @@ class SettingsViewModel(app: Application) : AndroidViewModel(app) {
         onRestartConfirm = ::confirmRestart,
         onFix = ::fix,
         onChannel = ::openChannel,
+        onSetup = { p -> _state.update { it.copy(setup = SetupState(p), stack = it.stack + SettingsPage.SetupApp) } },
+        onCheckToken = ::checkToken,
+        onSaveToken = ::saveToken,
+        onPair = ::pairApp,
+        onPairPoll = ::pairPoll,
+        onAskDisconnect = { p -> _state.update { if (it.restarting) it else it.copy(askDisconnect = p) } },
+        onDisconnect = ::disconnectApp,
+        onAskReplace = { p -> _state.update { it.copy(askReplace = p) } },
         onArm = { act("arm", "Could not open the window. HQ is not answering.") { client.postJson("/api/oauth/connector/arm") } },
         onDisarm = { act("disarm", "Could not close it. HQ is not answering.") { client.postJson("/api/oauth/connector/disarm") } },
         onRevoke = { id -> act("revoke:$id", "Could not disconnect it. HQ is not answering.") { client.postJson("/api/oauth/grants/${java.net.URLEncoder.encode(id, "UTF-8")}/revoke") } },
@@ -155,7 +184,7 @@ class SettingsViewModel(app: Application) : AndroidViewModel(app) {
     )
 
     /** Closes Settings and every page inside it. */
-    fun close() = _state.update { it.copy(open = false, stack = emptyList(), askMode = null, askRestart = false, keySheet = null, askClaudeOff = false, askSignOutAll = false, deviceCode = null) }
+    fun close() = _state.update { it.copy(open = false, stack = emptyList(), askMode = null, askRestart = false, keySheet = null, askClaudeOff = false, askSignOutAll = false, deviceCode = null, setup = null, pair = null, askDisconnect = null, askReplace = null) }
 
     fun freeze(fixed: SettingsUi) {
         frozen = true
@@ -276,6 +305,89 @@ class SettingsViewModel(app: Application) : AndroidViewModel(app) {
             } catch (e: HqUnavailable) {
                 _state.update { it.copy(keySheet = it.keySheet?.copy(checking = false, error = SettingsWords.keyFailure(e.status))) }
             }
+        }
+    }
+
+    /** Asks HQ whether a bot token works, without keeping it. The server answers 200 either way; `ok` says which. */
+    private fun checkToken(typed: String) {
+        val setup = _state.value.setup ?: return
+        val token = typed.trim()
+        if (token.isEmpty() || setup.checking || setup.saving) return
+        _state.update { it.copy(setup = setup.copy(checking = true, error = null, found = null)) }
+        viewModelScope.launch {
+            val next = try {
+                val r = client.postJson("/api/chat-apps/${setup.platform}/verify", JSONObject().put("token", token))
+                if (r.optBoolean("ok")) {
+                    val name = r.optString("username").takeIf { n -> n.isNotBlank() }
+                    setup.copy(checking = false, found = name?.let { n -> if (setup.platform == "telegram") "@$n" else n } ?: "your bot", appId = r.optString("application_id").takeIf { a -> a.isNotBlank() }, intentOff = setup.platform == "discord" && r.has("message_content") && !r.optBoolean("message_content"))
+                } else setup.copy(checking = false, error = r.optString("error").takeIf { e -> e.isNotBlank() } ?: SettingsWords.TOKEN_REFUSED)
+            } catch (e: HqUnavailable) {
+                setup.copy(checking = false, error = SettingsWords.chatAppFailure(e.status, null))
+            }
+            _state.update { it.copy(setup = next) }
+        }
+    }
+
+    /** Saves the checked token, restarts hq so the relay starts, and goes on to pairing when no account is linked yet. */
+    private fun saveToken(typed: String) {
+        val setup = _state.value.setup ?: return
+        val token = typed.trim()
+        if (token.isEmpty() || setup.saving || _state.value.restarting) return
+        _state.update { it.copy(setup = setup.copy(saving = true, error = null), restarting = true) }
+        viewModelScope.launch {
+            val failure = withContext(Dispatchers.IO) {
+                val before = startStamp().second
+                try { client.postJson("/api/chat-apps/${setup.platform}", JSONObject().put("token", token)) } catch (e: HqUnavailable) { return@withContext SettingsWords.chatAppFailure(e.status, null) }
+                HubService.restartHq()
+                if (waitForHq(before)) null else RESTART_TIMEOUT_LINE
+            }
+            if (failure != null) { _state.update { it.copy(restarting = false, setup = it.setup?.copy(saving = false, error = failure)) }; return@launch }
+            refreshNow()
+            val linked = _state.value.snap.chatApps.let { SettingsWords.appCard(it, setup.platform, SettingsWords.appName(setup.platform)).owner == "Linked" }
+            _state.update { it.copy(restarting = false, setup = it.setup?.copy(saving = false, saved = true), line = SettingsWords.SAVED_RESTARTED) }
+            if (!linked) pairApp(setup.platform, false, replacePage = true) else _state.update { it.copy(stack = it.stack.dropLast(1), setup = null) }
+        }
+    }
+
+    /** Asks HQ for a code to send to the bot; [replacePage] swaps the setup page for the pairing page instead of stacking it. */
+    private fun pairApp(platform: String, replace: Boolean, replacePage: Boolean = false) {
+        _state.update { it.copy(askReplace = null) }
+        viewModelScope.launch {
+            try {
+                val r = client.postJson("/api/chat-apps/$platform/pair", JSONObject().put("replace", replace))
+                val pair = PairState(platform, r.optString("code"), r.optString("command"), r.takeIf { o -> o.has("deep_link") && !o.isNull("deep_link") }?.optString("deep_link"), r.optLong("expires_at"))
+                _state.update { it.copy(pair = pair, stack = (if (replacePage) it.stack.dropLast(1) else it.stack) + SettingsPage.PairApp) }
+            } catch (e: HqUnavailable) {
+                _state.update { it.copy(line = SettingsWords.chatAppFailure(e.status, null)) }
+            }
+        }
+    }
+
+    /** While a code waits: reads the chat apps again, and leaves for Messaging apps once the account is linked. */
+    private suspend fun pairPoll() {
+        val pair = _state.value.pair ?: return
+        val body = try { client.json("/api/chat-apps") } catch (e: HqUnavailable) { return }
+        val linked = SettingsWords.appCard(body, pair.platform, SettingsWords.appName(pair.platform)).owner == "Linked"
+        _state.update { s ->
+            val withBody = s.copy(snap = s.snap.copy(chatApps = body))
+            if (linked && s.page == SettingsPage.PairApp) withBody.copy(stack = s.stack.dropLast(1), pair = null, line = "Linked.") else withBody
+        }
+    }
+
+    /** Forgets the bot token and restarts hq so the relay stops. */
+    private fun disconnectApp() {
+        val platform = _state.value.askDisconnect ?: return
+        if (_state.value.restarting) return
+        _state.update { it.copy(askDisconnect = null, restarting = true) }
+        viewModelScope.launch {
+            val said = withContext(Dispatchers.IO) {
+                val before = startStamp().second
+                try { client.deleteAt("/api/chat-apps/$platform") } catch (e: HqUnavailable) { return@withContext if (e.status == 409) SettingsWords.chatAppFailure(409, null) else "Could not disconnect it. HQ is not answering." }
+                HubService.restartHq()
+                if (waitForHq(before)) SettingsWords.SAVED_RESTARTED else RESTART_TIMEOUT_LINE
+            }
+            _state.update { it.copy(restarting = false, line = said).withFacts() }
+            refreshNow()
         }
     }
 

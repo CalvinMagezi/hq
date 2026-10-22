@@ -135,4 +135,35 @@ class BackgroundWorkTest {
         assertEquals("Sign out", SettingsWords.SIGN_OUT_ALL_WORDS.confirm)
         assertEquals("Disconnect", SettingsWords.CLAUDE_OFF_WORDS.confirm)
     }
+
+    @Test fun aRelaySaysWhenItWasLastSeen() {
+        val now = java.time.Instant.parse("2026-10-22T14:00:00Z")
+        val chat = JSONObject("""{"telegram":{"enabled":true,"token_set":true,"relay":{"status":"connected","current":true,"last_seen":${now.epochSecond - 12}}},"discord":{"enabled":false,"token_set":false}}""")
+        assertEquals("Running \u00b7 seen 12 s ago", SettingsWords.appCard(chat, "telegram", "Telegram", now).line)
+        assertEquals("12 s ago", SettingsWords.seen(now.minusSeconds(12), now))
+        assertEquals("5 min ago", SettingsWords.seen(now.minusSeconds(300), now))
+        assertEquals("2 h ago", SettingsWords.seen(now.minusSeconds(7200), now))
+    }
+
+    @Test fun setupWordsFollowTheWebAppsSteps() {
+        assertEquals(4, SettingsWords.setupSteps("telegram").size)
+        assertEquals("Open @BotFather in Telegram.", SettingsWords.setupSteps("telegram").first())
+        assertEquals("Paste the token below.", SettingsWords.setupSteps("discord").last())
+        assertEquals("https://t.me/BotFather", SettingsWords.setupUrl("telegram"))
+        assertEquals("https://discord.com/oauth2/authorize?client_id=42&scope=bot%20applications.commands&permissions=309237730368", SettingsWords.inviteUrl("42"))
+    }
+
+    @Test fun pairingTellsWhereToSendTheCodeWithOrWithoutAButton() {
+        assertEquals("Tap the button to open your bot and press Start. Or send it /pair\u00A0K4M7Q-2XPA9 yourself.", SettingsWords.pairHelp("telegram", "/pair K4M7Q-2XPA9", true))
+        assertEquals("Open your bot in Telegram and send it /pair\u00A0K4M7Q-2XPA9.", SettingsWords.pairHelp("telegram", "/pair K4M7Q-2XPA9", false))
+        assertEquals("Open a direct message with your bot in Discord and send !pair\u00A0K4M7Q-2XPA9.", SettingsWords.pairHelp("discord", "!pair K4M7Q-2XPA9", false))
+        assertEquals("Waiting for the message. The code works for 4:32.", SettingsWords.pairWaiting("4:32"))
+    }
+
+    @Test fun aChatAppFailureUsesTheServersWordsWhenItGaveSome() {
+        assertEquals("HQ did not reply. Try again.", SettingsWords.chatAppFailure(0, null))
+        assertEquals("Token rejected by Telegram", SettingsWords.chatAppFailure(400, "Token rejected by Telegram"))
+        assertEquals(SettingsWords.TOKEN_REFUSED, SettingsWords.chatAppFailure(400, null))
+        assertEquals("Disconnect Telegram?", SettingsWords.disconnectWords("telegram").title)
+    }
 }

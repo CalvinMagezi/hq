@@ -52,7 +52,8 @@ class LinksTest {
     }
 
     @Test fun everyAllowedSettingsScreenIsAPageAndEveryPageIsAllowed() {
-        assertEquals(SettingsPage.entries.map { it.name.lowercase() }.toSet(), Links.SETTINGS_SCREENS)
+        // The set-up and pairing pages need a bot in hand, so a link cannot open them.
+        assertEquals(SettingsPage.entries.filter { it != SettingsPage.SetupApp && it != SettingsPage.PairApp }.map { it.name.lowercase() }.toSet(), Links.SETTINGS_SCREENS)
     }
 
     @Test fun searchOpensTheSearch() {

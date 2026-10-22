@@ -17,6 +17,7 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.navigationBarsPadding
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
@@ -72,6 +73,7 @@ import kotlinx.coroutines.delay
 private val SmallText = HqType.Caption.copy(fontSize = 13.sp, lineHeight = 18.sp)
 private const val LINE_MS = 4_000L
 private const val REFRESH_MS = 15_000L
+private const val PAIR_POLL_MS = 3_000L
 private val BAR_HEIGHT = 8.dp
 private const val DISABLED_ALPHA = 0.5f
 private const val SCRIM_ALPHA = 0.62f
@@ -92,6 +94,12 @@ private fun icon(key: String): ImageVector = when (key) {
     else -> HqIcons.Archive
 }
 
+private fun pageTitle(ui: SettingsUi): String = when (ui.page) {
+    SettingsPage.SetupApp -> "Set up ${SettingsWords.appName(ui.setup?.platform ?: "telegram")}"
+    SettingsPage.PairApp -> "Pair your ${SettingsWords.appName(ui.pair?.platform ?: "telegram")}"
+    else -> title(ui.page)
+}
+
 private fun title(page: SettingsPage) = when (page) {
     SettingsPage.Home -> "Settings"
     SettingsPage.Safety -> "Safety and limits"
@@ -108,6 +116,8 @@ private fun title(page: SettingsPage) = when (page) {
     SettingsPage.ConnectedTools -> "Connected tools"
     SettingsPage.Computers -> "Computers"
     SettingsPage.CaptureWidgets -> "Capture and widgets"
+    SettingsPage.SetupApp -> "Set up"
+    SettingsPage.PairApp -> "Pair"
 }
 
 /** Settings over the whole shell, with its own pages: Back goes up one page, then closes. */
@@ -126,13 +136,13 @@ fun SettingsHost(ui: SettingsUi, actions: SettingsActions) {
         Column(Modifier.fillMaxSize()) {
             Row(Modifier.fillMaxWidth().heightIn(min = 64.dp).padding(start = 4.dp, end = 16.dp), verticalAlignment = Alignment.CenterVertically) {
                 IconAction(HqIcons.ArrowBack, "Back", iconSize = 24.dp, onClick = actions.onBack)
-                Text(title(ui.page), style = HqType.ScreenTitle, color = Mts.Ink, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(start = 4.dp))
+                Text(pageTitle(ui), style = HqType.ScreenTitle, color = Mts.Ink, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(start = 4.dp))
             }
             when (ui.page) {
                 SettingsPage.Home -> Home(ui, actions)
                 SettingsPage.Safety -> Safety(ui, actions)
                 SettingsPage.Keys -> Keys(ui, actions)
-                SettingsPage.Messaging -> Messaging(ui)
+                SettingsPage.Messaging -> Messaging(ui, actions)
                 SettingsPage.Claude -> Claude(ui, actions)
                 SettingsPage.Devices -> Devices(ui, actions)
                 SettingsPage.Spending -> Spending(ui)
@@ -141,6 +151,8 @@ fun SettingsHost(ui: SettingsUi, actions: SettingsActions) {
                 SettingsPage.KeepRunning -> KeepRunning(ui, actions)
                 SettingsPage.Notifications -> Notifications(ui, actions)
                 SettingsPage.CaptureWidgets -> CaptureWidgets(ui, actions)
+                SettingsPage.SetupApp -> SetupApp(ui, actions)
+                SettingsPage.PairApp -> PairApp(ui, actions)
                 SettingsPage.Origins -> ReadOnlyList(ui, "No address is listed.") { SettingsWords.originRows(ui.snap.settings).forEach { MonoRow(it) } }
                 SettingsPage.ConnectedTools -> ReadOnlyList(ui, "No tool is connected.") { Facts(SettingsWords.toolRows(ui.snap.settings)) }
                 SettingsPage.Computers -> ReadOnlyList(ui, "No computer is listed.") { Facts(SettingsWords.computerRows(ui.snap.settings)) }
@@ -148,6 +160,8 @@ fun SettingsHost(ui: SettingsUi, actions: SettingsActions) {
         }
         ui.askMode?.let { ConfirmDialog(SettingsWords.modeDialog(it), actions.onModeCancel, actions.onModeConfirm) }
         ui.keySheet?.let { KeySheetView(it, actions) }
+        ui.askDisconnect?.let { p -> ConfirmDialog(SettingsWords.disconnectWords(p), { actions.onAskDisconnect(null) }, actions.onDisconnect) }
+        ui.askReplace?.let { p -> ConfirmDialog(SettingsWords.REPLACE_WORDS, { actions.onAskReplace(null) }) { actions.onPair(p, true) } }
         if (ui.askClaudeOff) ConfirmDialog(SettingsWords.CLAUDE_OFF_WORDS, { actions.onClaudeOff(false) }, actions.onClaudeOffConfirm)
         if (ui.askSignOutAll) ConfirmDialog(SettingsWords.SIGN_OUT_ALL_WORDS, { actions.onSignOutAll(false) }, actions.onSignOutAllConfirm)
         if (ui.askRestart) ConfirmDialog(SettingsWords.RESTART_WORDS, { actions.onRestart(false) }, actions.onRestartConfirm)
@@ -335,18 +349,18 @@ private fun Keys(ui: SettingsUi, actions: SettingsActions) {
 // ---------------------------------------------------------------- messaging apps
 
 @Composable
-private fun Messaging(ui: SettingsUi) {
+private fun Messaging(ui: SettingsUi, actions: SettingsActions) {
     Page {
         if (Unanswered(ui, "chatApps", ui.snap.chatApps != null)) return@Page
         Column(Modifier.padding(start = 16.dp, top = 8.dp, end = 16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-            listOf("telegram" to "Telegram", "discord" to "Discord").forEach { (key, name) -> AppCardView(SettingsWords.appCard(ui.snap.chatApps, key, name)) }
+            listOf("telegram" to "Telegram", "discord" to "Discord").forEach { (key, name) -> AppCardView(SettingsWords.appCard(ui.snap.chatApps, key, name, ui.now), key, ui.restarting, actions) }
         }
-        Text("Setting up or changing a messaging app is done in the web app for now.", style = SmallText, color = Mts.InkMuted, modifier = Modifier.padding(start = 20.dp, top = 12.dp, end = 20.dp))
+        Text(if (ui.restarting) "HQ is restarting\u2026" else "Changes restart HQ. This screen reconnects by itself.", style = SmallText, color = Mts.InkMuted, modifier = Modifier.padding(start = 20.dp, top = 12.dp, end = 20.dp))
     }
 }
 
 @Composable
-private fun AppCardView(c: SettingsWords.AppCard) {
+private fun AppCardView(c: SettingsWords.AppCard, platform: String, busy: Boolean, actions: SettingsActions) {
     val shape = RoundedCornerShape(12.dp)
     Column(Modifier.fillMaxWidth().clip(shape).background(Mts.Surface100).border(1.dp, Mts.Hairline, shape).padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
         Row(horizontalArrangement = Arrangement.spacedBy(12.dp), verticalAlignment = Alignment.CenterVertically) {
@@ -362,7 +376,135 @@ private fun AppCardView(c: SettingsWords.AppCard) {
         if (c.on) {
             c.bot?.let { KeyValue("Bot", it) }
             KeyValue("Your account", c.owner, if (c.owner == "Linked") Mts.BrandGreen else Mts.InkMuted)
-        } else Text("Add a bot so HQ can answer in ${c.name}.", style = HqType.BodySm, color = Mts.InkMuted)
+            if (c.owner != "Linked") GreenButton("Link my ${c.name}", enabled = !busy) { actions.onPair(platform, false) }
+            Row(Modifier.offset(x = (-12).dp), horizontalArrangement = Arrangement.spacedBy(0.dp)) {
+                if (c.owner == "Linked") TextLink("Link a different account", Mts.BrandBlue, enabled = !busy) { actions.onAskReplace(platform) }
+                TextLink("Disconnect", Mts.DangerText, enabled = !busy) { actions.onAskDisconnect(platform) }
+            }
+        } else {
+            Text("Add a bot so HQ can answer in ${c.name}.", style = HqType.BodySm, color = Mts.InkMuted)
+            GreenButton("Set up", enabled = !busy) { actions.onSetup(platform) }
+        }
+    }
+}
+
+@Composable
+private fun GreenButton(label: String, enabled: Boolean = true, busy: Boolean = false, modifier: Modifier = Modifier.fillMaxWidth(), onClick: () -> Unit) {
+    Row(
+        modifier.heightIn(min = 48.dp).clip(CircleShape).background(if (enabled) Mts.BrandGreen else Mts.Surface200).clickable(enabled = enabled, role = Role.Button, onClick = onClick),
+        horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.CenterHorizontally), verticalAlignment = Alignment.CenterVertically,
+    ) {
+        if (busy) Spinner(18, Mts.OnGreen)
+        Text(label, style = HqType.BodySmBold, color = if (enabled) Mts.OnGreen else Mts.InkMuted)
+    }
+}
+
+/** The Standby warning above the steps and the code: nothing listens while background work is paused. */
+@Composable
+private fun StandbyNotice(platform: String, onOpen: () -> Unit) {
+    Column(Modifier.padding(horizontal = 16.dp), verticalArrangement = Arrangement.spacedBy(0.dp)) {
+        Notice(SettingsWords.standbyNotice(platform), HqIcons.Warning, warn = true)
+        TextLink("Open Background work", Mts.BrandBlue, onClick = onOpen)
+    }
+}
+
+@Composable
+private fun SetupApp(ui: SettingsUi, actions: SettingsActions) {
+    val setup = ui.setup ?: return
+    val platform = setup.platform
+    val context = androidx.compose.ui.platform.LocalContext.current
+    val clipboard = androidx.compose.ui.platform.LocalClipboardManager.current
+    var typed by remember { androidx.compose.runtime.mutableStateOf("") }
+    var okFor by remember { androidx.compose.runtime.mutableStateOf<String?>(null) }
+    LaunchedEffect(setup.found) { if (setup.found != null) okFor = typed.trim() }
+    val checked = setup.found != null && okFor == typed.trim() && typed.isNotBlank()
+    val field = RoundedCornerShape(12.dp)
+    Page {
+        if (ui.mode != "active") StandbyNotice(platform) { actions.onPage(SettingsPage.Background) }
+        Column(Modifier.padding(start = 16.dp, top = 8.dp, end = 16.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
+            SettingsWords.setupSteps(platform).forEachIndexed { i, text ->
+                Row(horizontalArrangement = Arrangement.spacedBy(12.dp), verticalAlignment = Alignment.Top) {
+                    Box(Modifier.size(28.dp).background(Mts.Surface200, CircleShape), contentAlignment = Alignment.Center) { Text("${i + 1}", style = HqType.Caption.copy(fontWeight = androidx.compose.ui.text.font.FontWeight.Bold), color = Mts.Ink) }
+                    Text(text, style = HqType.BodySm, color = Mts.Ink, modifier = Modifier.padding(top = 4.dp))
+                }
+            }
+            Box(
+                Modifier.heightIn(min = 48.dp).clip(CircleShape).border(1.dp, Mts.Line, CircleShape).clickable(role = Role.Button) { runCatching { context.startActivity(android.content.Intent(android.content.Intent.ACTION_VIEW, android.net.Uri.parse(SettingsWords.setupUrl(platform))).addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)) } }.padding(horizontal = 24.dp),
+                contentAlignment = Alignment.Center,
+            ) { Text(SettingsWords.setupLabel(platform), style = HqType.BodySmBold, color = Mts.Ink) }
+            Row(
+                Modifier.fillMaxWidth().heightIn(min = 64.dp).clip(field).background(Mts.Surface100).border(1.dp, Mts.Line, field).padding(start = 16.dp, top = 8.dp, end = 8.dp, bottom = 8.dp),
+                horizontalArrangement = Arrangement.spacedBy(4.dp), verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Column(Modifier.weight(1f)) {
+                    Text("Bot token", style = HqType.Caption.copy(fontWeight = androidx.compose.ui.text.font.FontWeight.Bold), color = Mts.InkMuted)
+                    androidx.compose.foundation.text.BasicTextField(
+                        typed, { typed = it }, Modifier.fillMaxWidth(), enabled = !setup.saving, singleLine = true,
+                        textStyle = HqType.Body.copy(color = Mts.Ink, fontFamily = FontFamily.Monospace, letterSpacing = 0.1.em), cursorBrush = androidx.compose.ui.graphics.SolidColor(Mts.Ink),
+                        visualTransformation = androidx.compose.ui.text.input.PasswordVisualTransformation(),
+                        keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(keyboardType = androidx.compose.ui.text.input.KeyboardType.Password, autoCorrectEnabled = false),
+                    )
+                }
+                IconAction(HqIcons.Copy, "Paste the token", iconSize = 22.dp) { clipboard.getText()?.text?.let { typed = it.trim() } }
+            }
+            if (checked) Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+                Icon(HqIcons.Check, null, Modifier.size(20.dp), tint = Mts.BrandGreen)
+                Text("Found your bot: ${setup.found}", style = HqType.BodySmBold, color = Mts.Ink)
+            }
+            if (checked && setup.intentOff) Text(SettingsWords.INTENT_OFF, style = HqType.BodySm, color = Mts.Amber)
+            if (!checked) setup.error?.let { Text(it, style = HqType.BodySm, color = Mts.DangerText) }
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+                Row(
+                    Modifier.heightIn(min = 48.dp).clip(CircleShape).background(Mts.Surface200).clickable(enabled = typed.isNotBlank() && !setup.checking && !setup.saving, role = Role.Button) { actions.onCheckToken(typed) }.padding(horizontal = 24.dp),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    if (setup.checking) Spinner(18)
+                    Text(if (setup.checking) "Checking\u2026" else "Check token", style = HqType.BodySmBold, color = Mts.Ink)
+                }
+                GreenButton(if (setup.saving) "Restarting\u2026" else "Save and restart", enabled = checked && !setup.saving, busy = setup.saving, modifier = Modifier.weight(1f)) { actions.onSaveToken(typed) }
+            }
+        }
+    }
+}
+
+@Composable
+private fun PairApp(ui: SettingsUi, actions: SettingsActions) {
+    val pair = ui.pair ?: return
+    val platform = pair.platform
+    val context = androidx.compose.ui.platform.LocalContext.current
+    val left by produceState(pair.expiresAt - Instant.now().epochSecond, pair.code) {
+        while (true) { value = (pair.expiresAt - Instant.now().epochSecond).coerceAtLeast(0); delay(1_000) }
+    }
+    LaunchedEffect(pair.code) { while (true) { actions.onPairPoll(); delay(PAIR_POLL_MS) } }
+    val expired = left <= 0
+    Page {
+        if (ui.mode != "active") StandbyNotice(platform) { actions.onPage(SettingsPage.Background) }
+        Column(Modifier.fillMaxWidth().padding(start = 16.dp, top = 24.dp, end = 16.dp), verticalArrangement = Arrangement.spacedBy(16.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+            Text(SettingsWords.pairBlurb(platform), style = HqType.Body, color = Mts.InkMuted, textAlign = TextAlign.Center)
+            val shape = RoundedCornerShape(12.dp)
+            Row(Modifier.fillMaxWidth().clip(shape).background(Mts.Surface100).border(1.dp, Mts.Hairline, shape).padding(start = 20.dp, top = 12.dp, end = 8.dp, bottom = 12.dp), verticalAlignment = Alignment.CenterVertically) {
+                Text(pair.code, style = HqType.H2.copy(fontFamily = FontFamily.Monospace, fontSize = 34.sp, lineHeight = 44.sp, letterSpacing = 0.06.em), color = if (expired) Mts.InkMuted else Mts.Ink, modifier = Modifier.weight(1f))
+                IconAction(HqIcons.Copy, "Copy the code", iconSize = 22.dp) { actions.onCopy(pair.code) }
+            }
+            if (!expired) {
+                if (pair.deepLink != null) GreenButton("Open in ${SettingsWords.appName(platform)}") { runCatching { context.startActivity(android.content.Intent(android.content.Intent.ACTION_VIEW, android.net.Uri.parse(pair.deepLink)).addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)) } }
+                Text(SettingsWords.pairHelp(platform, pair.command, pair.deepLink != null), style = HqType.BodySm, color = Mts.InkMuted, textAlign = TextAlign.Center)
+                Row(horizontalArrangement = Arrangement.spacedBy(10.dp), verticalAlignment = Alignment.CenterVertically) {
+                    Spinner(18)
+                    Text(SettingsWords.pairWaiting(SettingsWords.clock(left)), style = HqType.BodySm, color = Mts.InkMuted)
+                }
+            } else {
+                Text(SettingsWords.PAIR_EXPIRED, style = HqType.BodySm, color = Mts.InkMuted)
+                GreenButton("Get a new code") { actions.onPair(platform, false) }
+            }
+            ui.setup?.appId?.takeIf { platform == "discord" }?.let { id ->
+                Box(Modifier.heightIn(min = 48.dp).clip(CircleShape).border(1.dp, Mts.Line, CircleShape).clickable(role = Role.Button) { runCatching { context.startActivity(android.content.Intent(android.content.Intent.ACTION_VIEW, android.net.Uri.parse(SettingsWords.inviteUrl(id))).addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)) } }.padding(horizontal = 24.dp), contentAlignment = Alignment.Center) {
+                    Text("Open the invite link", style = HqType.BodySmBold, color = Mts.Ink)
+                }
+                if (ui.setup?.intentOff == true) Text(SettingsWords.INTENT_OFF, style = HqType.BodySm, color = Mts.Amber, textAlign = TextAlign.Center)
+            }
+            TextLink("Cancel", Mts.BrandBlue, onClick = actions.onBack)
+        }
     }
 }
 

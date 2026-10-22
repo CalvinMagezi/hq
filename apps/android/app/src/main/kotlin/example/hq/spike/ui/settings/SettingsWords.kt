@@ -25,7 +25,7 @@ data class SettingsSnapshot(
     val forecast: JSONObject? = null,
 )
 
-enum class SettingsPage { Home, Safety, Keys, Messaging, Claude, Devices, Spending, About, Background, KeepRunning, Notifications, Origins, ConnectedTools, Computers, CaptureWidgets }
+enum class SettingsPage { Home, Safety, Keys, Messaging, Claude, Devices, Spending, About, Background, KeepRunning, Notifications, Origins, ConnectedTools, Computers, CaptureWidgets, SetupApp, PairApp }
 
 data class HomeRow(val page: SettingsPage?, val key: String, val title: String, val status: String, val warn: Boolean = false)
 
@@ -356,7 +356,7 @@ object SettingsWords {
 
     data class AppCard(val name: String, val on: Boolean, val line: String, val bot: String?, val owner: String)
 
-    fun appCard(chat: JSONObject?, key: String, name: String): AppCard {
+    fun appCard(chat: JSONObject?, key: String, name: String, now: Instant = Instant.now()): AppCard {
         val a = chat.obj(key)
         val on = a?.let { it.optBoolean("enabled") && it.optBoolean("token_set") } == true
         val relay = a.obj("relay")
@@ -366,7 +366,7 @@ object SettingsWords {
         val line = when {
             !on -> "Off"
             !current -> "Not running yet"
-            status == "connected" || status == "running" || status == "online" -> "Running"
+            status == "connected" || status == "running" || status == "online" -> "Running" + (time(relay, "last_seen")?.let { " \u00b7 seen ${seen(it, now)}" }.orEmpty())
             status != null -> status.replaceFirstChar(Char::uppercase)
             else -> "Saved"
         } + if (a?.optBoolean("needs_restart") == true) " · restart needed" else ""
@@ -423,6 +423,61 @@ object SettingsWords {
         ModeWords("Pause background work?", "HQ will stop answering your chats and running scheduled tasks. It restarts for a moment.", "Pause")
     }
 
+    /** "12 s ago", "3 min ago", "2 h ago": how long since a relay last said it was there. */
+    fun seen(t: Instant, now: Instant): String {
+        val s = Duration.between(t, now).seconds.coerceAtLeast(0)
+        return when {
+            s < 60 -> "$s s ago"
+            s < 3_600 -> "${s / 60} min ago"
+            else -> "${s / 3_600} h ago"
+        }
+    }
+
+    // ------------------------------------------------------------ Set up and pair a messaging app
+
+    /** The steps the web app gives for making a bot, plain, one per row. */
+    fun setupSteps(platform: String): List<String> = if (platform == "telegram") listOf(
+        "Open @BotFather in Telegram.", "Send /newbot.", "Pick a display name, then a username that ends in bot.", "BotFather replies with a token. Copy it and paste it below.",
+    ) else listOf(
+        "Open the Discord developer portal and choose New Application.", "Open Bot, press Reset Token and copy the token.",
+        "On the same page, under Privileged Gateway Intents, turn on Message Content Intent and save.", "Paste the token below.",
+    )
+
+    fun setupLabel(platform: String) = if (platform == "telegram") "Open Telegram" else "Open the Discord developer portal"
+    fun setupUrl(platform: String) = if (platform == "telegram") "https://t.me/BotFather" else "https://discord.com/developers/applications"
+    fun appName(platform: String) = if (platform == "telegram") "Telegram" else "Discord"
+    fun inviteUrl(appId: String) = "https://discord.com/oauth2/authorize?client_id=$appId&scope=bot%20applications.commands&permissions=309237730368"
+
+    const val TOKEN_REFUSED = "That token did not work."
+    const val INTENT_OFF = "Message Content Intent looks off. Turn it on under Bot, Privileged Gateway Intents, or the bot cannot read messages."
+    const val SAVED_RESTARTED = "HQ restarted with the new settings."
+
+    fun standbyNotice(platform: String) = "Background work is paused, so HQ cannot answer on ${appName(platform)} yet. Turn it on in Background work."
+
+    fun disconnectWords(platform: String) = ModeWords("Disconnect ${appName(platform)}?", "HQ stops answering on ${appName(platform)} and forgets the bot token. HQ restarts for a moment.", "Disconnect")
+    val REPLACE_WORDS = ModeWords("Link a different account?", "The current owner loses access until the new account pairs. Continue?", "Continue")
+
+    fun pairBlurb(platform: String) = "Send this code to your bot. It tells HQ which ${appName(platform)} account is yours."
+
+    /** What to do with the code when there is no button to press: where to send it. */
+    fun pairHelp(platform: String, rawCommand: String, hasLink: Boolean): String = pairText(platform, rawCommand.replace(' ', '\u00A0'), hasLink)
+
+    private fun pairText(platform: String, command: String, hasLink: Boolean): String = when {
+        platform == "telegram" && hasLink -> "Tap the button to open your bot and press Start. Or send it $command yourself."
+        platform == "telegram" -> "Open your bot in Telegram and send it $command."
+        else -> "Open a direct message with your bot in Discord and send $command."
+    }
+
+    fun pairWaiting(left: String) = "Waiting for the message. The code works for $left."
+    const val PAIR_EXPIRED = "The code ran out. Get a new one."
+
+    /** The sentence under a failed pairing or setup call: the server's own words when it gave some. */
+    fun chatAppFailure(status: Int, serverText: String?): String = when {
+        status == 0 -> "HQ did not reply. Try again."
+        status == 409 -> serverText ?: "That is set outside the app. Change it where it was set."
+        else -> serverText ?: TOKEN_REFUSED
+    }
+
     // ------------------------------------------------------------ Connect Claude
 
     data class Grant(val id: String, val client: String, val scope: String, val since: String)
@@ -438,7 +493,7 @@ object SettingsWords {
 
     fun window(c: JSONObject?, now: Instant, zone: java.time.ZoneId = java.time.ZoneId.systemDefault()): Window {
         val until = time(c, "armed_until")?.takeIf { it.isAfter(now) } ?: return Window(false, "", "")
-        return Window(true, clock(Duration.between(now, until).seconds), java.time.LocalTime.ofInstant(until, zone).format(java.time.format.DateTimeFormatter.ofPattern("HH:mm")))
+        return Window(true, clock(Duration.between(now, until).seconds), until.atZone(zone).toLocalTime().format(java.time.format.DateTimeFormatter.ofPattern("HH:mm")))
     }
 
     val CLAUDE_OFF_WORDS = ModeWords("Disconnect Claude everywhere?", "Every Claude connected to this HQ loses access now, and new connections stay closed until you open them again.", "Disconnect")
