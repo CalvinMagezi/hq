@@ -31,10 +31,27 @@ sha2 = { workspace = true }
 base64 = { workspace = true }
 reqwest = { workspace = true }
 ring = "0.17"
+tower = { workspace = true, features = ["util"] }
+hyper = { version = "1", features = ["server", "http1", "http2"] }
+hyper-util = { version = "0.1", features = ["server-auto", "tokio", "service"] }
+# The connector's own TLS (src/tls/). Exact versions: certificate issuance and the TLS-ALPN-01
+# challenge are security-relevant, so they move only when someone has read the changelog.
+instant-acme = { version = "=0.8.5", default-features = false, features = ["aws-lc-rs"] }
+rcgen = { version = "=0.14.10", default-features = false, features = ["aws_lc_rs", "pem"] }
+x509-parser = "=0.18.1"
+http = "1"
+http-body-util = "0.1"
+bytes = "1"
+zeroize = "1"
+thiserror = { workspace = true }
 
 [dev-dependencies]
 url = { workspace = true }
 hq-core = { workspace = true, features = ["test-util"] }
 tempfile = "3"
+time = "0.3"
+hyper = { version = "1", features = ["client"] }
+# The test ACME server reads the certificate request the client sends.
+rcgen = { version = "=0.14.10", default-features = false, features = ["aws_lc_rs", "pem", "x509-parser"] }
 tower = { workspace = true, features = ["util"] }
 tokio-tungstenite = { workspace = true }

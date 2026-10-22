@@ -29,6 +29,7 @@ mod subagent_followup;
 mod tasks_api;
 mod tasks_watch;
 mod threads_api;
+pub mod tls;
 mod usage_forecast_api;
 mod usage_providers_api;
 mod vault_api;
