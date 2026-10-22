@@ -32,6 +32,7 @@ mod threads_api;
 mod usage_forecast_api;
 mod usage_providers_api;
 mod vault_api;
+mod verification_api;
 mod web_push;
 mod workbench_api;
 mod ws;
@@ -419,6 +420,72 @@ pub fn create_router(state: Arc<WsState>) -> Router {
             axum::routing::post(tasks_api::restore_task_handler),
         )
         .route("/api/tasks/linked", get(tasks_api::tasks_linked_to_handler))
+        // Task verification: the owner's side. The web credential is the owner's; /mcp keys never
+        // reach these routes.
+        .route(
+            "/api/verification/status",
+            get(verification_api::status_handler),
+        )
+        .route(
+            "/api/verification/queue",
+            get(verification_api::queue_handler),
+        )
+        .route(
+            "/api/verification/briefing",
+            get(verification_api::briefing_handler),
+        )
+        .route(
+            "/api/verification/sweeps",
+            get(verification_api::list_sweeps_handler).post(verification_api::create_sweep_handler),
+        )
+        .route(
+            "/api/verification/sweeps/{id}",
+            get(verification_api::get_sweep_handler),
+        )
+        .route(
+            "/api/verification/sweeps/{id}/run",
+            post(verification_api::run_sweep_handler),
+        )
+        .route(
+            "/api/verification/sweeps/{id}/pause",
+            post(verification_api::pause_sweep_handler),
+        )
+        .route(
+            "/api/verification/sweeps/{id}/cancel",
+            post(verification_api::cancel_sweep_handler),
+        )
+        .route(
+            "/api/verification/sweeps/{id}/apply",
+            post(verification_api::apply_sweep_handler),
+        )
+        .route(
+            "/api/verification/sweeps/{id}/undo",
+            post(verification_api::undo_sweep_handler),
+        )
+        .route(
+            "/api/verification/audits",
+            get(verification_api::audits_handler),
+        )
+        .route(
+            "/api/verification/audits/{id}",
+            post(verification_api::answer_audit_handler),
+        )
+        .route(
+            "/api/verification/holds",
+            get(verification_api::holds_handler),
+        )
+        .route(
+            "/api/verification/holds/{id}/veto",
+            post(verification_api::veto_handler),
+        )
+        .route(
+            "/api/tasks/{id}/verification",
+            get(verification_api::task_verification_handler),
+        )
+        .route(
+            "/api/tasks/{id}/reverify",
+            post(verification_api::reverify_handler),
+        )
         .route("/api/tasks/stale", get(tasks_api::stale_tasks_handler))
         .route(
             "/api/tasks/{id}/checkpoint",

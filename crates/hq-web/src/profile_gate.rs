@@ -65,7 +65,16 @@ pub(crate) fn lite_allows(path: &str) -> bool {
                 .is_some_and(|rest| rest.starts_with('/'))
     });
     // Starting a conversation is chat, which Lite does not run.
-    listed && !is_export(path) && !is_activity(path)
+    listed && !is_export(path) && !is_activity(path) && !is_verification(path)
+}
+
+/// Verification reads GitHub and asks a model; Lite does neither, so a second opinion, the
+/// verdict view and everything under `/api/verification` are not part of it.
+fn is_verification(path: &str) -> bool {
+    let tail = path.trim_end_matches('/');
+    tail.starts_with("/api/verification")
+        || (tail.starts_with("/api/tasks/")
+            && (tail.ends_with("/verification") || tail.ends_with("/reverify")))
 }
 
 /// The activity view lists agent sessions, leases and who wrote which note; Lite runs no agents.

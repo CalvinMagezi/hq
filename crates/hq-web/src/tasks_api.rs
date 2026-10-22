@@ -56,7 +56,7 @@ fn notify_and_broadcast(
 /// Re-broadcasts tasks whose derived fields moved because of another task's
 /// write (a parent's sub-task counts, a dependent's `blocked_by`), without
 /// re-notifying their tagged agents.
-fn broadcast_related(state: &Arc<WsState>, ids: Vec<String>) {
+pub(crate) fn broadcast_related(state: &Arc<WsState>, ids: Vec<String>) {
     let related = state.db.with_conn(move |c| {
         let mut tasks = Vec::new();
         for id in ids {
