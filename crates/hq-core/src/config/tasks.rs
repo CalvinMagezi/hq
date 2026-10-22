@@ -71,6 +71,15 @@ pub struct VerificationConfig {
     /// Monthly spend allowed on reviewer (model) runs, in USD. Unset: no model is called and only
     /// deterministic checks run.
     pub reviewer_monthly_ceiling_usd: Option<f64>,
+    /// Models that review, as router aliases or model ids. Empty means the `premium` alias. A
+    /// tier 2 task needs reviewers from two different model families, so two entries that route
+    /// to one family leave it undecided rather than pretending to be independent.
+    pub reviewer_models: Vec<String>,
+    /// Seconds one reviewer call may take.
+    pub reviewer_timeout_secs: u64,
+    /// Let a code task pass on an independent review alone when its pull request has no checks to
+    /// read. Off by default: code needs machine evidence.
+    pub peer_only_code: bool,
 }
 
 impl Default for VerificationConfig {
@@ -102,6 +111,9 @@ impl Default for VerificationConfig {
             owner_queue_age_days: 3,
             shadow_e2_sample: 50,
             reviewer_monthly_ceiling_usd: None,
+            reviewer_models: Vec::new(),
+            reviewer_timeout_secs: 120,
+            peer_only_code: false,
         }
     }
 }
@@ -123,6 +135,21 @@ impl VerificationConfig {
             self.audit_rate.clamp(0.0, 1.0)
         } else {
             0.0
+        }
+    }
+
+    /// The models to review with: those configured, else the `premium` alias.
+    pub fn reviewers(&self) -> Vec<String> {
+        let configured: Vec<String> = self
+            .reviewer_models
+            .iter()
+            .map(|m| m.trim().to_string())
+            .filter(|m| !m.is_empty())
+            .collect();
+        if configured.is_empty() {
+            vec!["premium".to_string()]
+        } else {
+            configured
         }
     }
 
@@ -263,6 +290,19 @@ mod tests {
         assert!(v.reviewer_enabled());
         let shadow: TasksConfig = serde_yaml::from_str("verification:\n  mode: shadow\n").unwrap();
         assert!(!shadow.verification.enforces(0), "shadow gates nothing");
+    }
+
+    #[test]
+    fn the_reviewer_defaults_to_the_premium_alias_and_reads_a_list() {
+        let cfg: TasksConfig = serde_yaml::from_str("{}").unwrap();
+        assert_eq!(cfg.verification.reviewers(), ["premium"]);
+        assert!(!cfg.verification.peer_only_code);
+        let cfg: TasksConfig = serde_yaml::from_str(
+            "verification:\n  reviewer_models: [\" a/b \", \"\", c]\n  peer_only_code: true\n",
+        )
+        .unwrap();
+        assert_eq!(cfg.verification.reviewers(), ["a/b", "c"]);
+        assert!(cfg.verification.peer_only_code);
     }
 
     #[test]

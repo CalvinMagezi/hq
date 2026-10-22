@@ -59,7 +59,17 @@ pub struct PrFacts {
     pub base_ref: Option<String>,
     pub merged: bool,
     pub open: bool,
+    pub draft: bool,
+    /// GitHub's answer on conflicts with the base: `Some(false)` means it cannot merge cleanly.
+    pub mergeable: Option<bool>,
     pub changed_files: u64,
+}
+
+impl PrFacts {
+    /// Whether the change has landed or can: merged, or open, not a draft and without conflicts.
+    pub fn landed_or_landable(&self) -> bool {
+        self.merged || (self.open && !self.draft && self.mergeable != Some(false))
+    }
 }
 
 /// Reads a pull request's state. Merged supports completion; closed without merging contradicts
@@ -98,6 +108,8 @@ pub async fn collect_pr(
         base_ref: text(&["base", "ref"]),
         merged,
         open,
+        draft: v.get("draft").and_then(Value::as_bool).unwrap_or(false),
+        mergeable: v.get("mergeable").and_then(Value::as_bool),
         changed_files: v.get("changed_files").and_then(Value::as_u64).unwrap_or(0),
     };
     let (ok, fact) = if merged {
@@ -129,6 +141,8 @@ pub async fn collect_pr(
             "head_sha": facts.head_sha,
             "base_ref": facts.base_ref,
             "merged_at": text(&["merged_at"]),
+            "draft": facts.draft,
+            "mergeable": facts.mergeable,
             "author": text(&["user", "login"]),
             "changed_files": facts.changed_files,
             "additions": v.get("additions").and_then(Value::as_u64),
@@ -164,6 +178,24 @@ fn status_state(state: &str) -> CheckState {
     }
 }
 
+/// What the checks on a commit came to, for a gate that must tell "failed" from "still running"
+/// from "never reported".
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct ChecksSummary {
+    /// Distinct checks reported (check runs and commit statuses).
+    pub reported: usize,
+    pub failed: bool,
+    pub pending: bool,
+    /// At least one check ran, and every one succeeded.
+    pub green: bool,
+    /// The base branch's required checks could be read.
+    pub required_known: bool,
+    /// Every required check succeeded (`None` when there are none, or they could not be read).
+    pub required_green: Option<bool>,
+    /// Some required check has not reported or is still running: CI is not finished.
+    pub required_waiting: bool,
+}
+
 /// Reads the checks reported on `sha` (check runs and commit statuses), and, when `base_ref` is
 /// given, which of them the base branch requires. A failing check contradicts completion; one
 /// still running or one never reported is neither; required checks that all succeeded support it.
@@ -173,7 +205,8 @@ pub async fn collect_checks(
     repo: &str,
     sha: &str,
     base_ref: Option<&str>,
-) {
+) -> ChecksSummary {
+    let mut summary = ChecksSummary::default();
     let mut states: HashMap<String, CheckState> = HashMap::new();
     let runs = gh
         .api_json(&format!(
@@ -248,6 +281,10 @@ pub async fn collect_checks(
                 .map(|(n, _)| n.clone()),
         );
         let total = states.len();
+        summary.reported = total;
+        summary.failed = !failed.is_empty();
+        summary.pending = !pending.is_empty();
+        summary.green = total > 0 && failed.is_empty() && pending.is_empty();
         let (ok, fact) = if total == 0 {
             (None, format!("no checks are reported on {sha}"))
         } else if !failed.is_empty() {
@@ -285,7 +322,9 @@ pub async fn collect_checks(
         );
     }
 
-    let Some(base) = base_ref else { return };
+    let Some(base) = base_ref else {
+        return summary;
+    };
     let protection = gh
         .api_json(&format!(
             "repos/{repo}/branches/{}/protection/required_status_checks",
@@ -300,9 +339,10 @@ pub async fn collect_checks(
                 "required_checks",
                 format!("branch protection on {base} could not be read ({e}); it may need admin access, or none is set"),
             );
-            return;
+            return summary;
         }
     };
+    summary.required_known = true;
     let mut required: Vec<String> = v
         .get("contexts")
         .and_then(Value::as_array)
@@ -327,7 +367,7 @@ pub async fn collect_checks(
             None,
             json!({ "base": base, "required": [] }),
         );
-        return;
+        return summary;
     }
     let state_of = |name: &String| states.get(name).copied();
     let failed: Vec<String> = required
@@ -362,6 +402,8 @@ pub async fn collect_checks(
             ),
         )
     };
+    summary.required_green = ok;
+    summary.required_waiting = failed.is_empty() && !waiting.is_empty();
     log.record(
         "github",
         "required_checks",
@@ -369,6 +411,7 @@ pub async fn collect_checks(
         ok,
         json!({ "base": base, "sha": sha, "required": required, "failed": failed, "waiting": waiting }),
     );
+    summary
 }
 
 fn sorted(items: impl Iterator<Item = String>) -> Vec<String> {
@@ -380,6 +423,8 @@ fn sorted(items: impl Iterator<Item = String>) -> Vec<String> {
 /// What a pull request's change touches.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct DiffFacts {
+    /// The diff as read, for the excerpts a reviewer is shown.
+    pub text: String,
     pub files: Vec<String>,
     /// The change touches a path the owner marked as high blast radius.
     pub tier2: bool,
@@ -493,11 +538,68 @@ pub async fn collect_diff(
         );
     }
     Some(DiffFacts {
+        text: diff.text,
         tier2: !hits.is_empty(),
         files,
         flagged,
         report,
     })
+}
+
+/// Longest patch kept per file in an excerpt, and the most files and characters shown. A reviewer
+/// can only cite what is recorded, so these bound what it reads and what it costs.
+const EXCERPT_FILE_CHARS: usize = 3_000;
+const EXCERPT_MAX_FILES: usize = 30;
+const EXCERPT_TOTAL_CHARS: usize = 60_000;
+
+/// Splits a diff by file and records each patch (cut at a limit) as an observation of its own, so
+/// a reviewer can cite the very lines that show a criterion met. Non-test source comes first, since
+/// that is where a criterion is usually met, and tests, snapshots and lockfiles last.
+pub fn record_diff_excerpts(log: &mut ObservationLog, diff: &str) -> usize {
+    let mut sections: Vec<(String, String)> = Vec::new();
+    for line in diff.lines() {
+        if let Some(rest) = line.strip_prefix("diff --git ") {
+            let path = rest
+                .rsplit_once(" b/")
+                .map(|(_, new)| new.to_string())
+                .unwrap_or_else(|| rest.to_string());
+            sections.push((path, String::new()));
+        }
+        if let Some((_, body)) = sections.last_mut() {
+            body.push_str(line);
+            body.push('\n');
+        }
+    }
+    let rank = |path: &str| {
+        let p = path.to_ascii_lowercase();
+        if p.ends_with(".lock") || p.ends_with("package-lock.json") || p.ends_with(".snap") {
+            2
+        } else if super::tamper::is_test_path(path) {
+            1
+        } else {
+            0
+        }
+    };
+    sections.sort_by_key(|(path, _)| rank(path));
+    let mut recorded = 0;
+    let mut used = 0;
+    for (path, body) in &sections {
+        if recorded >= EXCERPT_MAX_FILES || used >= EXCERPT_TOTAL_CHARS {
+            break;
+        }
+        let cut = body.chars().count() > EXCERPT_FILE_CHARS;
+        let patch: String = body.chars().take(EXCERPT_FILE_CHARS).collect();
+        used += patch.chars().count();
+        log.record(
+            "github",
+            "diff_excerpt",
+            format!("the change to {path}{}", if cut { " (cut)" } else { "" }),
+            None,
+            json!({ "path": path, "patch": patch, "cut": cut }),
+        );
+        recorded += 1;
+    }
+    recorded
 }
 
 /// Records that a note exists and what its content hashes to. The path is relative to the vault
@@ -764,6 +866,126 @@ mod tests {
                 .is_none()
         );
         assert!(log.items()[0].unavailable && !log.supports("diff_scan"));
+    }
+
+    #[tokio::test]
+    async fn the_checks_summary_tells_failed_from_running_from_never_reported() {
+        let green = checks(json!([{"name": "t", "status": "completed", "conclusion": "success"}]));
+        let s = collect_checks(&green, &mut ObservationLog::new(), "o/r", "abc123", None).await;
+        assert!(s.green && !s.failed && !s.pending && s.reported == 1);
+
+        let red = checks(json!([{"name": "t", "status": "completed", "conclusion": "failure"}]));
+        let s = collect_checks(&red, &mut ObservationLog::new(), "o/r", "abc123", None).await;
+        assert!(s.failed && !s.green);
+
+        let running = checks(json!([{"name": "t", "status": "queued", "conclusion": null}]));
+        let s = collect_checks(&running, &mut ObservationLog::new(), "o/r", "abc123", None).await;
+        assert!(s.pending && !s.green && !s.failed);
+
+        let none = checks(json!([]));
+        let s = collect_checks(&none, &mut ObservationLog::new(), "o/r", "abc123", None).await;
+        assert_eq!(s.reported, 0);
+        assert!(!s.green, "nothing reported is not green");
+
+        let unreadable = FakeGitHub::default();
+        let s = collect_checks(
+            &unreadable,
+            &mut ObservationLog::new(),
+            "o/r",
+            "abc123",
+            None,
+        )
+        .await;
+        assert_eq!(
+            s,
+            ChecksSummary::default(),
+            "an unreadable source claims nothing"
+        );
+    }
+
+    #[tokio::test]
+    async fn a_pr_that_conflicts_or_is_a_draft_has_not_landed_but_a_clean_open_one_can() {
+        let mut v = pr_json(false, "open");
+        v["mergeable"] = json!(true);
+        let gh = FakeGitHub::default().with("repos/o/r/pulls/1", v.clone());
+        let f = collect_pr(&gh, &mut ObservationLog::new(), "o/r", 1)
+            .await
+            .unwrap();
+        assert!(f.landed_or_landable());
+
+        v["mergeable"] = json!(false);
+        let gh = FakeGitHub::default().with("repos/o/r/pulls/1", v.clone());
+        assert!(
+            !collect_pr(&gh, &mut ObservationLog::new(), "o/r", 1)
+                .await
+                .unwrap()
+                .landed_or_landable()
+        );
+
+        v["mergeable"] = json!(true);
+        v["draft"] = json!(true);
+        let gh = FakeGitHub::default().with("repos/o/r/pulls/1", v);
+        assert!(
+            !collect_pr(&gh, &mut ObservationLog::new(), "o/r", 1)
+                .await
+                .unwrap()
+                .landed_or_landable()
+        );
+
+        let gh = FakeGitHub::default().with("repos/o/r/pulls/1", pr_json(true, "closed"));
+        assert!(
+            collect_pr(&gh, &mut ObservationLog::new(), "o/r", 1)
+                .await
+                .unwrap()
+                .landed_or_landable()
+        );
+        let gh = FakeGitHub::default().with("repos/o/r/pulls/1", pr_json(false, "closed"));
+        assert!(
+            !collect_pr(&gh, &mut ObservationLog::new(), "o/r", 1)
+                .await
+                .unwrap()
+                .landed_or_landable()
+        );
+    }
+
+    #[test]
+    fn excerpts_are_recorded_per_file_source_first_and_bounded() {
+        let big = "+x\n".repeat(5000);
+        let diff = format!(
+            "diff --git a/tests/a.rs b/tests/a.rs\n+t\ndiff --git a/src/lib.rs b/src/lib.rs\n{big}diff --git a/Cargo.lock b/Cargo.lock\n+l\n"
+        );
+        let mut log = ObservationLog::new();
+        assert_eq!(record_diff_excerpts(&mut log, &diff), 3);
+        let paths: Vec<&str> = log
+            .items()
+            .iter()
+            .map(|o| o.data["path"].as_str().unwrap())
+            .collect();
+        assert_eq!(
+            paths,
+            ["src/lib.rs", "tests/a.rs", "Cargo.lock"],
+            "source, then tests, then lockfiles"
+        );
+        assert_eq!(log.items()[0].data["cut"], true);
+        assert!(
+            log.items()[0].data["patch"]
+                .as_str()
+                .unwrap()
+                .chars()
+                .count()
+                <= EXCERPT_FILE_CHARS
+        );
+        assert!(
+            log.items()
+                .iter()
+                .all(|o| o.ok.is_none() && o.kind == "diff_excerpt")
+        );
+
+        let many: String = (0..80)
+            .map(|i| format!("diff --git a/src/f{i}.rs b/src/f{i}.rs\n+x\n"))
+            .collect();
+        let mut log = ObservationLog::new();
+        assert_eq!(record_diff_excerpts(&mut log, &many), EXCERPT_MAX_FILES);
     }
 
     #[test]

@@ -73,6 +73,7 @@ fn pass_for<'a>(
         reasons: "",
         applied: true,
         canary: false,
+        submission: None,
     }
 }
 
@@ -383,23 +384,18 @@ fn a_verdict_for_an_earlier_submission_cannot_complete_reworked_work() {
     policy(&db, VerificationMode::Enforce);
     in_review(&db, &initiative, "tk-1", "alpha");
     let verdict = passing_verdict(&db, "tk-1", "verify:run-1");
-    // The work was sent back and submitted again after the verdict was made.
-    db.with_conn(|c| {
-        c.execute(
-            "UPDATE task_events SET occurred_at = datetime('now', '+1 hour') \
-             WHERE event_type = 'entered_ready_for_review'",
-            [],
-        )?;
-        Ok(())
-    })
-    .unwrap();
+    // The work was sent back and submitted again right after the verdict was made, inside the
+    // same second: only the submission id, never the clock, can tell the two apart.
+    move_to(&db, "tk-1", STATUS_IN_PROGRESS).unwrap();
+    set_status_as(&db, "tk-1", STATUS_READY_FOR_REVIEW, "alpha");
     let ctx = WriteCtx {
         verdict_id: Some(&verdict.id),
         ..Default::default()
     };
     let err = update_as(&db, "tk-1", STATUS_COMPLETE, &ctx).unwrap_err();
     assert!(
-        err.to_string().contains("after it last entered review"),
+        err.to_string()
+            .contains("about the submission it is in now"),
         "{err}"
     );
 }
@@ -664,4 +660,139 @@ fn moving_back_to_work_after_a_verdict_is_not_gated() {
     set_status_as(&db, "tk-1", STATUS_READY_FOR_REVIEW, "alpha");
     let err = update_as(&db, "tk-1", STATUS_COMPLETE, &WriteCtx::default()).unwrap_err();
     assert!(needs_verification(&err));
+}
+
+#[test]
+fn the_queue_lists_only_tasks_without_a_verdict_for_their_current_submission() {
+    let (db, initiative) = setup();
+    let cfg = VerificationConfig::default();
+    in_review(&db, &initiative, "fresh", "alpha");
+    in_review(&db, &initiative, "done", "alpha");
+    passing_verdict(&db, "done", "verify:run-1");
+    make(&db, "idle", &initiative, None).unwrap();
+
+    let ids = |db: &Database| -> Vec<String> {
+        db.with_conn(|c| verification_candidates(c, &cfg))
+            .unwrap()
+            .into_iter()
+            .map(|c| c.task.id)
+            .collect()
+    };
+    assert_eq!(
+        ids(&db),
+        ["fresh"],
+        "a verdict covers its submission; to_do is not in review"
+    );
+
+    // Sent back and submitted again, in the same second: the old verdict no longer covers it.
+    move_to(&db, "done", STATUS_IN_PROGRESS).unwrap();
+    set_status_as(&db, "done", STATUS_READY_FOR_REVIEW, "alpha");
+    assert_eq!(ids(&db).len(), 2);
+}
+
+#[test]
+fn the_queue_puts_what_others_wait_on_first_then_tier_two_then_the_oldest() {
+    let (db, initiative) = setup();
+    let cfg = VerificationConfig::default();
+    for id in ["old", "newer", "risky", "blocker"] {
+        in_review(&db, &initiative, id, "alpha");
+    }
+    // Spread the submissions in time: old < newer < risky < blocker.
+    for (id, hours) in [("old", 4), ("newer", 3), ("risky", 2), ("blocker", 1)] {
+        db.with_conn(|c| {
+            c.execute(
+                "UPDATE task_events SET occurred_at = datetime('now', ?1) \
+                 WHERE task_id = ?2 AND event_type = 'entered_ready_for_review'",
+                params![format!("-{hours} hours"), id],
+            )?;
+            Ok(())
+        })
+        .unwrap();
+    }
+    db.with_conn(|c| {
+        update_task(
+            c,
+            "risky",
+            &TaskPatch {
+                tags: Some(vec!["production".into()]),
+                ..Default::default()
+            },
+            None,
+        )
+    })
+    .unwrap();
+    make(&db, "waiting", &initiative, None).unwrap();
+    db.with_conn(|c| add_dependency(c, "waiting", "blocker", "t"))
+        .unwrap();
+
+    let order: Vec<String> = db
+        .with_conn(|c| verification_candidates(c, &cfg))
+        .unwrap()
+        .into_iter()
+        .map(|c| c.task.id)
+        .collect();
+    assert_eq!(order, ["blocker", "risky", "old", "newer"]);
+}
+
+#[test]
+fn a_submission_has_a_marker_that_changes_when_it_is_submitted_again() {
+    let (db, initiative) = setup();
+    in_review(&db, &initiative, "tk-1", "alpha");
+    let first = db.with_conn(|c| review_marker(c, "tk-1")).unwrap().unwrap();
+    set_status_as(&db, "tk-1", STATUS_IN_PROGRESS, "alpha");
+    set_status_as(&db, "tk-1", STATUS_READY_FOR_REVIEW, "alpha");
+    let second = db.with_conn(|c| review_marker(c, "tk-1")).unwrap().unwrap();
+    assert!(second > first);
+    make(&db, "never", &initiative, None).unwrap();
+    assert_eq!(db.with_conn(|c| review_marker(c, "never")).unwrap(), None);
+}
+
+#[test]
+fn reviewer_spend_is_read_from_the_ledger_by_its_origin() {
+    let (db, _) = setup();
+    assert_eq!(db.with_conn(reviewer_spend_this_month).unwrap(), 0.0);
+    let insert = |db: &Database, origin: &str, cost: f64, age_secs: i64| {
+        db.with_conn(|c| {
+            c.execute(
+                "INSERT INTO task_outcomes (session_id, turn_idx, model, provider, task_hint, latency_ms, \
+                     cost_usd, success, recorded_at, origin) \
+                 VALUES ('s', 0, 'm', 'p', 'h', 1, ?1, 1, strftime('%s','now') - ?2, ?3)",
+                params![cost, age_secs, origin],
+            )?;
+            Ok(())
+        })
+        .unwrap();
+    };
+    insert(&db, "verification", 1.25, 0);
+    insert(&db, "verification", 0.75, 0);
+    insert(&db, "chat", 10.0, 0);
+    insert(&db, "verification", 99.0, 400 * 24 * 3600);
+    assert_eq!(
+        db.with_conn(reviewer_spend_this_month).unwrap(),
+        2.0,
+        "this month's reviewer calls only: not chat, and not last year"
+    );
+}
+
+#[test]
+fn reviewer_runs_are_counted_from_the_verdicts_that_recorded_one() {
+    let (db, initiative) = setup();
+    in_review(&db, &initiative, "tk-1", "alpha");
+    assert_eq!(db.with_conn(reviewer_runs_recorded).unwrap(), 0);
+    let obs = json!([
+        {"id": "o1", "kind": "reviewer_run", "fact": "a reviewer ran"},
+    ]);
+    db.with_conn(|c| {
+        record_verdict(
+            c,
+            &NewVerdict {
+                verdict: VERDICT_INCONCLUSIVE,
+                level: LEVEL_NONE,
+                applied: false,
+                ..pass_for("tk-1", "verify:run-1", &obs, &json!([]))
+            },
+        )
+    })
+    .unwrap();
+    assert_eq!(db.with_conn(reviewer_runs_recorded).unwrap(), 1);
 }

@@ -18,6 +18,7 @@ pub mod subagent_supervisor;
 pub mod task_stale_digest;
 pub mod turn_reconcile;
 pub mod usage_ledger;
+pub mod verify_dispatch;
 
 pub use backup::run_backup;
 pub use copilot_usage::run_copilot_usage;
@@ -32,3 +33,4 @@ pub use subagent_supervisor::run_subagent_supervisor;
 pub use task_stale_digest::run_task_stale_digest;
 pub use turn_reconcile::run_turn_reconcile;
 pub use usage_ledger::run_usage_ledger;
+pub use verify_dispatch::run_verify_dispatch;

@@ -11,21 +11,35 @@
 //! - [`probe`]: a guarded probe of a URL the task says it deployed.
 //! - [`tamper`]: a deterministic scan of a diff for edits that weaken the checks themselves.
 //! - [`contract`]: the acceptance criteria a task states, and their hash.
+//! - [`pipeline`]: gather, decide, review and apply, for one task.
+//! - [`dispatch`]: the queue loop behind the `verify-dispatch` daemon task.
 
 pub mod artifact;
 pub mod collect;
 pub mod contract;
+pub mod dispatch;
 pub mod observation;
+pub mod pipeline;
+#[cfg(test)]
+mod pipeline_tests;
 pub mod probe;
 pub mod remote;
+pub mod reviewer;
 pub mod tamper;
 
 pub use artifact::{Artifact, Discovery, TaskFacts, discover, repo_of_checkout, repos_for_cwds};
 pub use collect::{
-    PrFacts, collect_checks, collect_diff, collect_note, collect_pr, touches_tier2_path,
+    ChecksSummary, PrFacts, collect_checks, collect_diff, collect_note, collect_pr,
+    record_diff_excerpts, touches_tier2_path,
 };
 pub use contract::{Contract, contract_of};
+pub use dispatch::{Backoff, DispatchReport, dispatch};
 pub use observation::{Observation, ObservationLog};
+pub use pipeline::{
+    Env, Evidence, Finished, Gate, Resolution, WaitingFor, finish, gate, gather, review,
+    verify_task,
+};
 pub use probe::{ProbePolicy, probe_url};
 pub use remote::{Diff, GhCli, GitHubRead};
+pub use reviewer::{LlmReviewer, NoReviewer, ReviewReply, ReviewRequest, Reviewer};
 pub use tamper::{TamperFlag, TamperReport, scan_diff};

@@ -3339,6 +3339,7 @@ async fn task_get_shows_how_a_task_was_verified() {
                 reasons: "",
                 applied: false,
                 canary: false,
+                submission: None,
             },
         )
         .map(|_| ())

@@ -169,10 +169,12 @@ pub struct Verdict {
     pub applied: bool,
     pub canary: bool,
     pub created_at: String,
+    /// The submission (see [`review_marker`]) this verdict is about.
+    pub submission: Option<i64>,
 }
 
 const VERDICT_COLS: &str = "id, task_id, artifact, contract_hash, tier, verdict, level, verifier, \
-     independence, observations, criteria, reasons, applied, canary, created_at";
+     independence, observations, criteria, reasons, applied, canary, created_at, submission";
 
 fn row_to_verdict(r: &rusqlite::Row) -> rusqlite::Result<Verdict> {
     let json = |i: usize| -> rusqlite::Result<Value> {
@@ -195,6 +197,7 @@ fn row_to_verdict(r: &rusqlite::Row) -> rusqlite::Result<Verdict> {
         applied: r.get::<_, i64>(12)? != 0,
         canary: r.get::<_, i64>(13)? != 0,
         created_at: r.get(14)?,
+        submission: r.get(15)?,
     })
 }
 
@@ -216,6 +219,9 @@ pub struct NewVerdict<'a> {
     /// True when the caller applies this verdict to the task in the same transaction.
     pub applied: bool,
     pub canary: bool,
+    /// The submission the facts were gathered for. `None` means the task's current one; a number
+    /// that is no longer current is refused, because the work was submitted again meanwhile.
+    pub submission: Option<i64>,
 }
 
 /// Longest reasons text kept.
@@ -285,8 +291,8 @@ fn insert_verdict(conn: &Connection, v: &NewVerdict) -> Result<Verdict> {
     conn.execute(
         "INSERT INTO task_verdicts \
          (id, task_id, artifact, contract_hash, tier, verdict, level, verifier, independence, \
-          observations, criteria, reasons, applied, canary) \
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14)",
+          observations, criteria, reasons, applied, canary, submission) \
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15)",
         params![
             id,
             v.task_id,
@@ -305,6 +311,7 @@ fn insert_verdict(conn: &Connection, v: &NewVerdict) -> Result<Verdict> {
                 .collect::<String>(),
             v.applied,
             v.canary,
+            v.submission,
         ],
     )?;
     conn.query_row(
@@ -360,8 +367,16 @@ pub fn record_verdict(conn: &Connection, v: &NewVerdict) -> Result<Verdict> {
         if v.applied && v.verdict != VERDICT_PASS {
             anyhow::bail!("only a pass can be applied to a task");
         }
+        let current = review_marker(conn, &task.id)?;
+        if v.submission.is_some() && v.submission != current {
+            anyhow::bail!(
+                "{} was submitted again since these facts were gathered; the verdict is about an earlier submission",
+                task.display_id
+            );
+        }
         let stored = NewVerdict {
             verifier: &verifier,
+            submission: current,
             ..v.clone()
         };
         insert_verdict(conn, &stored)
@@ -395,8 +410,8 @@ pub fn list_verdicts(conn: &Connection, task_id: &str, limit: usize) -> Result<V
     Ok(rows)
 }
 
-/// A verdict that may complete `task`: a pass, applied, with a level, made after the task last
-/// entered review (so one for an earlier submission cannot complete reworked work).
+/// A verdict that may complete `task`: a pass, applied, with a level, about the submission the
+/// task is in now (so one for an earlier submission cannot complete reworked work).
 fn verdict_allows_completion(conn: &Connection, task: &Task, verdict_id: &str) -> Result<bool> {
     let Some(v) = conn
         .query_row(
@@ -411,13 +426,7 @@ fn verdict_allows_completion(conn: &Connection, task: &Task, verdict_id: &str) -
     if v.task_id != task.id || v.verdict != VERDICT_PASS || !v.applied || v.level == LEVEL_NONE {
         return Ok(false);
     }
-    let review_at: Option<String> = conn.query_row(
-        "SELECT MAX(occurred_at) FROM task_events \
-         WHERE task_id = ?1 AND event_type = 'entered_ready_for_review'",
-        params![task.id],
-        |r| r.get(0),
-    )?;
-    Ok(review_at.is_none_or(|at| v.created_at >= at))
+    Ok(v.submission == review_marker(conn, &task.id)?)
 }
 
 /// How a transition into `complete` was authorised.
@@ -452,7 +461,7 @@ pub(super) fn authorize_completion(
     match ctx.verdict_id {
         Some(id) if verdict_allows_completion(conn, current, id)? => Ok(Completion::Verdict),
         Some(id) => anyhow::bail!(
-            "verdict {id} does not allow completing {}: it must be a passing, applied verdict for this task made after it last entered review",
+            "verdict {id} does not allow completing {}: it must be a passing, applied verdict for this task, about the submission it is in now",
             current.display_id
         ),
         None => Err(NeedsVerification {
@@ -492,7 +501,110 @@ pub(super) fn record_owner_completion(
             reasons: "",
             applied: true,
             canary: false,
+            submission: None,
         },
     )?;
     Ok(())
+}
+
+/// Id of the task's latest move into review. It names one submission: a verdict is about the
+/// submission it was made on, and is void if the task has been submitted again since.
+pub fn review_marker(conn: &Connection, task_id: &str) -> Result<Option<i64>> {
+    Ok(conn.query_row(
+        "SELECT MAX(id) FROM task_events WHERE task_id = ?1 AND event_type = 'entered_ready_for_review'",
+        params![task_id],
+        |r| r.get(0),
+    )?)
+}
+
+/// A task waiting for review and the facts that decide when it is verified.
+#[derive(Debug, Clone)]
+pub struct Candidate {
+    pub task: Task,
+    pub tier: u8,
+    /// Open tasks that depend on this one.
+    pub dependents: i64,
+    /// When it entered review. Empty for a task from before events were kept.
+    pub entered_at: String,
+    /// Names the submission, as [`review_marker`] does.
+    pub marker: Option<i64>,
+}
+
+/// Tasks in review that have no verdict for their current submission, in the order they should
+/// be verified: those other work waits on first, then tier 2 (its veto clock should start early),
+/// then the longest waiting.
+pub fn verification_candidates(
+    conn: &Connection,
+    cfg: &VerificationConfig,
+) -> Result<Vec<Candidate>> {
+    let mut stmt = conn.prepare(
+        "SELECT t.id, \
+                COALESCE((SELECT MAX(occurred_at) FROM task_events e \
+                          WHERE e.task_id = t.id AND e.event_type = 'entered_ready_for_review'), '') \
+         FROM tasks t \
+         WHERE t.status = 'ready_for_review' AND t.archived_at IS NULL \
+           AND NOT EXISTS (SELECT 1 FROM task_verdicts v WHERE v.task_id = t.id AND v.canary = 0 \
+                 AND v.submission IS (SELECT MAX(e.id) FROM task_events e \
+                       WHERE e.task_id = t.id AND e.event_type = 'entered_ready_for_review'))",
+    )?;
+    let rows: Vec<(String, String)> = stmt
+        .query_map([], |r| Ok((r.get(0)?, r.get(1)?)))?
+        .collect::<rusqlite::Result<_>>()?;
+    let mut out = Vec::with_capacity(rows.len());
+    for (id, entered_at) in rows {
+        let Some(task) = get_task(conn, &id)? else {
+            continue;
+        };
+        let dependents: i64 = conn.query_row(
+            "SELECT COUNT(*) FROM task_dependencies d JOIN tasks x ON x.id = d.task_id \
+             WHERE d.depends_on_task_id = ?1 AND x.status <> 'complete' AND x.archived_at IS NULL",
+            params![id],
+            |r| r.get(0),
+        )?;
+        let tier = task_tier(conn, &task, cfg)?;
+        let marker = review_marker(conn, &id)?;
+        out.push(Candidate {
+            task,
+            tier,
+            dependents,
+            entered_at,
+            marker,
+        });
+    }
+    out.sort_by(|a, b| {
+        (b.dependents > 0)
+            .cmp(&(a.dependents > 0))
+            .then((b.tier == MAX_TIER).cmp(&(a.tier == MAX_TIER)))
+            .then(a.entered_at.cmp(&b.entered_at))
+            .then(a.task.id.cmp(&b.task.id))
+    });
+    Ok(out)
+}
+
+/// Dollars the reviewer has cost in the current UTC month, from the usage ledger.
+pub fn reviewer_spend_this_month(conn: &Connection) -> Result<f64> {
+    use hq_core::config::{BudgetPeriod, BudgetScope};
+    let now = chrono::Utc::now().timestamp();
+    let (since, until) = crate::usage_ledger::period_bounds(BudgetPeriod::Month, now);
+    crate::usage_ledger::scope_spend(
+        conn,
+        &BudgetScope::Origin(hq_llm_origin().to_string()),
+        since,
+        until,
+    )
+}
+
+/// The origin tag reviewer calls carry in the usage ledger (`hq_llm::origin::VERIFICATION`).
+fn hq_llm_origin() -> &'static str {
+    "verification"
+}
+
+/// Verdicts in which a reviewer ran, not counting seeded tests: what shadow mode's sample is
+/// measured against.
+pub fn reviewer_runs_recorded(conn: &Connection) -> Result<i64> {
+    Ok(conn.query_row(
+        "SELECT COUNT(*) FROM task_verdicts WHERE canary = 0 AND observations LIKE '%\"kind\":\"reviewer_run\"%'",
+        [],
+        |r| r.get(0),
+    )?)
 }

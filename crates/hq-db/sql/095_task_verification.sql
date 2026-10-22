@@ -27,7 +27,10 @@ CREATE TABLE IF NOT EXISTS task_verdicts (
     applied INTEGER NOT NULL DEFAULT 0 CHECK (applied IN (0, 1)),
     -- 1 for a seeded test of the verifier, not a real task.
     canary INTEGER NOT NULL DEFAULT 0 CHECK (canary IN (0, 1)),
-    created_at TEXT NOT NULL DEFAULT (datetime('now'))
+    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+    -- The task_events id of the move into review the verdict is about. Timestamps are only
+    -- accurate to the second, so a verdict is tied to a submission by this id and never by time.
+    submission INTEGER
 );
 CREATE INDEX IF NOT EXISTS idx_task_verdicts_task ON task_verdicts(task_id, created_at);
 CREATE INDEX IF NOT EXISTS idx_task_verdicts_recent ON task_verdicts(created_at);

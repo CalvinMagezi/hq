@@ -18,6 +18,7 @@ serde_yaml = { workspace = true }
 gray_matter = { workspace = true }
 chrono = { workspace = true }
 tokio = { workspace = true }
+futures = { workspace = true }
 anyhow = { workspace = true }
 thiserror = { workspace = true }
 tracing = { workspace = true }
