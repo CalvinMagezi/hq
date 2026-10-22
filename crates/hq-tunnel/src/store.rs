@@ -189,11 +189,19 @@ fn same_hub(a: &JoinConfig, b: &JoinConfig) -> bool {
         && a.endpoint.host().eq_ignore_ascii_case(b.endpoint.host())
 }
 
-/// A new private key as text, wiped when dropped, and its public half.
+/// A new private key as text, wiped when dropped, and its public half. A key whose public half
+/// happens to have the shape of a private key (one in sixteen) is skipped: `hq net peer add` refuses
+/// such a key without `--confirm-public`, and a person who has just made a key should not meet
+/// that.
 #[cfg(feature = "keygen")]
 pub fn keygen_pair() -> (zeroize::Zeroizing<String>, String) {
-    let key = hq_net::key::PrivateKey::generate();
-    (zeroize::Zeroizing::new(key.reveal()), key.public())
+    loop {
+        let key = hq_net::key::PrivateKey::generate();
+        let public = key.public();
+        if !hq_net::key::looks_like_private_key(&public) {
+            return (zeroize::Zeroizing::new(key.reveal()), public);
+        }
+    }
 }
 
 #[cfg(test)]
@@ -468,6 +476,17 @@ mod tests {
         assert_eq!(tunnel.read_status().unwrap()["state"], "up");
         std::fs::write(tunnel.path(STATUS_FILE), "no").unwrap();
         assert!(tunnel.read_status().is_err());
+    }
+
+    #[cfg(feature = "keygen")]
+    #[test]
+    fn a_generated_public_key_never_looks_like_a_private_one() {
+        // One key in sixteen would, so without the filter this fails with near certainty.
+        for _ in 0..400 {
+            let (private, public) = keygen_pair();
+            assert!(!hq_net::key::looks_like_private_key(&public));
+            assert_eq!(hq_net::key::public_key_of(&private).unwrap(), public);
+        }
     }
 
     #[cfg(feature = "keygen")]

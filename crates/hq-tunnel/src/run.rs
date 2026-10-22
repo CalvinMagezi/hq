@@ -11,7 +11,8 @@ use crate::secret::Secret32;
 use crate::session::{Decapsulated, Session};
 use crate::stack::Stack;
 use crate::status::{
-    EventLog, MAX_EVENT_LOG_BYTES, STATUS_VERSION, Status, unix_now, write_atomic,
+    EventLog, MAX_EVENT_LOG_BYTES, STATUS_VERSION, Status, open_fd_count, process_rss_kb, unix_now,
+    write_atomic,
 };
 use crate::timers::{self, Inputs};
 use std::io::ErrorKind;
@@ -88,8 +89,10 @@ fn connection_state(
     had_session: bool,
 ) -> &'static str {
     match (age, unanswered) {
-        (Some(a), _) if a < REJECT_AFTER => "up",
+        // A rekey that nobody has answered for this long means the hub is gone or does not know
+        // this device, however fresh the old session still is.
         (_, Some(waited)) if waited >= DOWN_AFTER => "down",
+        (Some(a), _) if a < REJECT_AFTER => "up",
         (_, Some(_)) => "connecting",
         (Some(_), None) => "idle",
         // boringtun forgets a session after 180 s, so an aged-out one reads as no age at all.
@@ -467,14 +470,17 @@ impl Peer {
                 last_tx: self.last_tx,
                 last_rx: self.last_rx,
                 last_activity: self.last_activity,
-                keepalive: self
-                    .opts
-                    .join
-                    .keepalive_secs
-                    .map(|s| Duration::from_secs(u64::from(s))),
+                keepalive: self.keepalive(),
                 handshake_unanswered: self.unanswered,
             })
         };
+    }
+
+    fn keepalive(&self) -> Option<Duration> {
+        self.opts
+            .join
+            .keepalive_secs
+            .map(|s| Duration::from_secs(u64::from(s)))
     }
 
     fn state(&self) -> &'static str {
@@ -522,6 +528,9 @@ impl Peer {
             endpoint: self.opts.join.endpoint.to_string(),
             started_unix: self.started_unix,
             updated_unix: unix_now(),
+            max_age_s: timers::longest_sleep(self.keepalive())
+                .max(NO_ENDPOINT_WAIT)
+                .as_secs(),
             last_handshake_age_s: self.session.handshake_age().map(|a| a.as_secs()),
             connections: self.stack.connections(),
             accepted: stats.accepted,
@@ -531,6 +540,9 @@ impl Peer {
             udp_tx_bytes: self.tx_bytes,
             udp_rx_bytes: self.rx_bytes,
             suspended_s: (suspended_total() - self.suspended0).max(0.0),
+            wakeups: self.wakeups,
+            rss_kb: process_rss_kb(),
+            open_fds: open_fd_count(),
             error: self.last_error.clone(),
         };
         let _ = write_atomic(path, &status);
@@ -842,7 +854,9 @@ mod tests {
         let s = Duration::from_secs;
         assert_eq!(connection_state(None, None, false), "connecting");
         assert_eq!(connection_state(Some(s(5)), None, true), "up");
-        assert_eq!(connection_state(Some(s(179)), Some(s(100)), true), "up");
+        assert_eq!(connection_state(Some(s(179)), Some(s(29)), true), "up");
+        assert_eq!(connection_state(Some(s(120)), Some(s(30)), true), "down");
+        assert_eq!(connection_state(Some(s(179)), Some(s(100)), true), "down");
         assert_eq!(connection_state(None, Some(s(29)), false), "connecting");
         assert_eq!(connection_state(None, Some(s(30)), false), "down");
         assert_eq!(connection_state(None, Some(s(5)), true), "connecting");
