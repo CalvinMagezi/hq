@@ -78,16 +78,33 @@ class SettingsViewModel(app: Application) : AndroidViewModel(app) {
         _state.update { it.copy(open = true, stack = emptyList(), line = null, phone = if (frozen) it.phone else phoneRows(), mode = if (frozen) it.mode else modeOf(), now = Instant.now()) }
     }
 
-    /** Reads every route at once, then what Android says about HQ; one route that fails shows as such on its own row only. */
+    /**
+     * Reads every route at once. The six local ones are shown as soon as they answer; the two that ask a provider (which can
+     * take many seconds) are added when they arrive. One route that fails shows as such on its own row only.
+     */
     suspend fun refreshNow() {
         if (frozen) return
-        val routes = listOf("settings" to "/api/settings", "chatApps" to "/api/chat-apps", "connector" to "/api/oauth/connector", "devices" to "/api/auth/devices", "budgets" to "/api/budgets", "health" to "/health")
-        val got = coroutineScope { routes.map { (key, path) -> async { key to get(path) } }.awaitAll() }.toMap()
-        if (frozen) return
+        val local = listOf("settings" to "/api/settings", "chatApps" to "/api/chat-apps", "connector" to "/api/oauth/connector", "devices" to "/api/auth/devices", "budgets" to "/api/budgets", "health" to "/health")
+        val remote = listOf("providers" to "/api/usage/providers", "copilot" to "/api/copilot-usage")
+        coroutineScope {
+            val slow = remote.map { (key, path) -> async { key to get(path) } }
+            val fast = local.map { (key, path) -> async { key to get(path) } }.awaitAll().toMap()
+            if (frozen) return@coroutineScope
+            val before = _state.value.snap
+            publish(fast, mapOf("providers" to Got(before.providers, true), "copilot" to Got(before.copilot, true)))
+            val late = slow.awaitAll().toMap()
+            if (frozen) return@coroutineScope
+            publish(fast, late)
+        }
+    }
+
+    private fun publish(fast: Map<String, Got>, late: Map<String, Got>) {
+        val got = fast + late
         fun body(key: String) = got[key]?.body
         val snap = SettingsSnapshot(
             body("settings"), body("chatApps"), body("connector"), body("devices"), body("budgets"), body("health"),
             unavailable = got.filterValues { it.body == null && it.answered }.keys,
+            providers = body("providers"), copilot = body("copilot"),
         )
         _state.update { it.copy(snap = snap, loaded = true, phone = phoneRows(), mode = modeOf(), now = Instant.now()) }
     }

@@ -1,6 +1,11 @@
 package example.hq.spike.ui.shell
 
 import androidx.activity.compose.BackHandler
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.contentDescription
+import example.hq.spike.ui.usage.ChipTone
+import example.hq.spike.ui.usage.ChipTarget
+import example.hq.spike.ui.usage.BalanceChip
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -90,6 +95,8 @@ fun HqShell(
     status: HqStatus = HqStatus.Live,
     onSearch: () -> Unit = {},
     onSettings: () -> Unit = {},
+    balance: BalanceChip? = null,
+    onBalance: (ChipTarget) -> Unit = {},
     request: Place? = null,
     onRequestHandled: () -> Unit = {},
     aboveBar: @Composable BoxScope.(Place) -> Unit = {},
@@ -107,7 +114,7 @@ fun HqShell(
     CompositionLocalProvider(LocalGoTo provides { current = it }) {
         Box(Modifier.fillMaxSize().background(Mts.Surface000)) {
             Column(Modifier.fillMaxSize().statusBarsPadding()) {
-                TopBar(title = current.label, status = statusText, statusColor = statusColor, onSearch = onSearch, onSettings = onSettings)
+                TopBar(title = current.label, status = statusText, statusColor = statusColor, onSearch = onSearch, onSettings = onSettings, balance = balance, onBalance = onBalance)
                 Box(Modifier.weight(1f).fillMaxWidth().imePadding()) { content(current); aboveBar(current) }
                 if (!WindowInsets.isImeVisible) BottomBar(current, inboxBadge) { current = it }
             }
@@ -127,7 +134,7 @@ fun NotBuilt(place: Place) {
 }
 
 @Composable
-fun TopBar(title: String, status: String, statusColor: Color, onSearch: () -> Unit, onSettings: () -> Unit) {
+fun TopBar(title: String, status: String, statusColor: Color, onSearch: () -> Unit, onSettings: () -> Unit, balance: BalanceChip? = null, onBalance: (ChipTarget) -> Unit = {}) {
     Row(
         Modifier.fillMaxWidth().height(TopBarHeight).background(Mts.Surface000).padding(start = 16.dp, end = 4.dp),
         verticalAlignment = Alignment.CenterVertically,
@@ -139,10 +146,28 @@ fun TopBar(title: String, status: String, statusColor: Color, onSearch: () -> Un
                 Text(status, style = HqType.Caption, color = Mts.InkMuted, maxLines = 1)
             }
         }
+        balance?.let { BalancePill(it) { onBalance(it.target) } }
         IconButton(onSearch, Modifier.size(TouchTarget)) { Icon(HqIcons.Search, "Search", Modifier.size(24.dp), tint = Mts.Ink) }
         IconButton(onSettings, Modifier.size(TouchTarget)) { Icon(HqIcons.Gear, "Settings", Modifier.size(24.dp), tint = Mts.Ink) }
     }
 }
+
+/** What is left on the AI service in use, or the budget that needs attention; tapping it opens the page that explains it. */
+@Composable
+private fun BalancePill(chip: BalanceChip, onClick: () -> Unit) {
+    val tint = when (chip.tone) { ChipTone.Normal -> Mts.InkMuted; ChipTone.Warning -> Mts.Amber; ChipTone.Exceeded -> Mts.DangerText }
+    Box(
+        Modifier.widthIn(max = PillMaxWidth).heightIn(min = TouchTarget).clickable(role = Role.Button, onClickLabel = "Open", onClick = onClick).semantics { contentDescription = chip.title },
+        contentAlignment = Alignment.Center,
+    ) {
+        Text(
+            chip.label, style = HqType.Caption, color = tint, maxLines = 1, overflow = TextOverflow.Ellipsis,
+            modifier = Modifier.border(1.dp, if (chip.tone == ChipTone.Normal) Mts.Hairline else tint, CircleShape).padding(horizontal = 10.dp, vertical = 5.dp),
+        )
+    }
+}
+
+private val PillMaxWidth = 156.dp
 
 @Composable
 fun BottomBar(current: Place, inboxBadge: Int, onSelect: (Place) -> Unit) {

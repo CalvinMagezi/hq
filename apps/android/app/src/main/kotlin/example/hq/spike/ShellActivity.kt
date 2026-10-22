@@ -34,6 +34,7 @@ import example.hq.spike.ui.helpers.HelpersViewModel
 import example.hq.spike.ui.helpers.helpersFixture
 import example.hq.spike.ui.inbox.CardKind
 import example.hq.spike.ui.settings.SettingsHost
+import example.hq.spike.ui.settings.SettingsPage
 import example.hq.spike.ui.settings.SettingsViewModel
 import example.hq.spike.ui.settings.settingsFixture
 import example.hq.spike.ui.inbox.InboxCard
@@ -56,6 +57,9 @@ import example.hq.spike.ui.chat.ChatTime
 import example.hq.spike.ui.chat.ChatViewModel
 import example.hq.spike.ui.chat.chatFixture
 import example.hq.spike.ui.shell.HqShell
+import example.hq.spike.ui.usage.ChipTarget
+import example.hq.spike.ui.usage.UsageViewModel
+import example.hq.spike.ui.usage.balanceFixture
 import example.hq.spike.ui.shell.NotBuilt
 import example.hq.spike.ui.shell.Place
 import example.hq.spike.ui.theme.HqTheme
@@ -73,6 +77,7 @@ class ShellActivity : ComponentActivity() {
     private val tasks: TasksViewModel by viewModels()
     private val helpers: HelpersViewModel by viewModels()
     private val settings: SettingsViewModel by viewModels()
+    private val usage: UsageViewModel by viewModels()
 
     /** A place asked for by a tapped notification while the app is already open; the shell takes it and clears it. */
     private var requested by mutableStateOf<Place?>(null)
@@ -121,6 +126,7 @@ class ShellActivity : ComponentActivity() {
         tasksFixture?.let(tasks::freeze)
         helpersFixture?.let(helpers::freeze)
         settingsFixture?.let(settings::freeze)
+        intent.getStringExtra("balance")?.let { usage.freeze(balanceFixture(it)) }
         if (notesFixture != null) notes.freeze(notesFixture) else fixture?.let(chat::freeze)
         setContent {
             val status by services.status.collectAsStateWithLifecycle()
@@ -130,6 +136,7 @@ class ShellActivity : ComponentActivity() {
             val tasksState by tasks.state.collectAsStateWithLifecycle()
             val helpersState by helpers.state.collectAsStateWithLifecycle()
             val settingsState by settings.state.collectAsStateWithLifecycle()
+            val balance by usage.chip.collectAsStateWithLifecycle()
             val offlineSince = chatState.offlineSince
             val now by produceState(System.currentTimeMillis(), offlineSince) {
                 value = System.currentTimeMillis()
@@ -145,6 +152,8 @@ class ShellActivity : ComponentActivity() {
                 HqShell(
                     startAt = start, inboxBadge = if (badge > 0) badge else inboxState.shownNeeds.size, status = shown,
                     onSearch = { notes.actions.onOpenSearch() }, onSettings = settings.actions.onOpen,
+                    balance = if (shown is HqStatus.Starting) null else balance,
+                    onBalance = { target -> settings.actions.onOpen(); settings.actions.onPage(if (target == ChipTarget.Spending) SettingsPage.Spending else SettingsPage.Keys) },
                     request = requested, onRequestHandled = { requested = null },
                     aboveBar = { place -> if (place != Place.Tasks) tasksState.line?.let { Snack(it, tasks.actions, Modifier.align(Alignment.BottomCenter).padding(bottom = 4.dp)) } },
                     overlay = { ShellOverlays(chatState, notesState, inboxState, tasksState, helpersState); SettingsHost(settingsState, settings.actions) },
