@@ -44,4 +44,14 @@ class BulkEditTest {
         BulkEdit.STATUS_CHOICES.forEach { assertEquals(false, TasksLogic.statusWords(it) == it) }
         assertEquals("None", BulkEdit.PRIORITY_CHOICES.last().second)
     }
+
+    @Test fun movingToReadyToCheckSaysTheyAreWaitingInTheInbox() {
+        assertEquals("2 tasks moved to Ready to check. Each is waiting in your Inbox", BulkEdit.summary(Bulk.Status("ready_for_review"), listOf(Applied.Changed, Applied.Changed)))
+    }
+
+    @Test fun finishingManyAsksFirst() {
+        assertEquals(BulkEdit.ConfirmWords("Mark 3 tasks done?", "Anything that was waiting on them is told it can start.", "Mark 3 tasks done"), BulkEdit.confirmDone(3))
+        assertEquals("could not be saved", BulkEdit.failure(500))
+        assertEquals("could not be reached", BulkEdit.failure(0))
+    }
 }

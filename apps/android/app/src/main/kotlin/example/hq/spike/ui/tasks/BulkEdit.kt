@@ -32,7 +32,8 @@ object BulkEdit {
         409 -> "was changed by someone else"
         404 -> "is not there any more"
         400 -> "was not accepted"
-        else -> "could not be reached"
+        0 -> "could not be reached"
+        else -> "could not be saved"
     }
 
     private fun tasks(n: Int) = if (n == 1) "1 task" else "$n tasks"
@@ -53,6 +54,13 @@ object BulkEdit {
             if (already > 0) add(if (changed > 0) "$already already there" else "${tasks(already)} already ${if (change is Bulk.Status) "there" else "that"}")
         }.joinToString(", ")
         val bad = if (failed.isEmpty()) "" else "${failed.size} could not be updated: " + failed.joinToString("; ") { "${it.displayId} ${it.why}" }
-        return listOf(done, bad).filter { it.isNotEmpty() }.joinToString(". ")
+        // Moving a task to Ready to check puts one item per task in the Inbox, whoever moved it.
+        val inbox = if (change is Bulk.Status && change.to == "ready_for_review" && changed > 0) "Each is waiting in your Inbox" else ""
+        return listOf(done, inbox, bad).filter { it.isNotEmpty() }.joinToString(". ")
     }
+
+    /** The question asked before many tasks are finished at once, which cannot be taken back in one tap. */
+    fun confirmDone(n: Int) = ConfirmWords("Mark $n tasks done?", "Anything that was waiting on them is told it can start.", "Mark $n tasks done")
+
+    data class ConfirmWords(val title: String, val body: String, val confirm: String)
 }

@@ -44,6 +44,7 @@ import androidx.compose.ui.semantics.LiveRegionMode
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.liveRegion
+import androidx.compose.ui.semantics.selected
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.buildAnnotatedString
@@ -77,6 +78,15 @@ fun TasksScreen(ui: TasksUi, actions: TasksActions, onHelpers: () -> Unit = {}) 
             Box(Modifier.weight(1f).fillMaxWidth()) { Feed(ui, actions, onHelpers) }
         }
         if (ui.selected.isEmpty()) NewTaskButton(Modifier.align(Alignment.BottomEnd).padding(16.dp)) { actions.onQuick(QuickState()) }
+        ui.bulkAsk?.let { ask ->
+            val words = BulkEdit.confirmDone(ui.selected.size)
+            SheetFrame({ actions.onBulkAsk(null) }, top = null) {
+                Text(words.title, style = HqType.H2, color = Mts.Ink, modifier = Modifier.padding(start = 16.dp, end = 16.dp, bottom = 4.dp))
+                Text(words.body, style = HqType.BodySm, color = Mts.InkMuted, modifier = Modifier.padding(start = 16.dp, end = 16.dp, bottom = 8.dp))
+                ActionRow(HqIcons.Check, words.confirm, null, { actions.onBulkAsk(ask) })
+                ActionRow(HqIcons.Close, "Cancel", null, { actions.onBulkAsk(null) })
+            }
+        }
         when (ui.bulkPrompt) {
             "status" -> SheetFrame({ actions.onBulkPrompt(null) }, top = null) {
                 BulkEdit.STATUS_CHOICES.forEach { s -> ActionRow(HqIcons.Check, TasksLogic.statusWords(s), null, { actions.onBulk(Bulk.Status(s)) }) }
@@ -111,7 +121,7 @@ private fun Feed(ui: TasksUi, actions: TasksActions, onHelpers: () -> Unit) {
         if (ui.offline) item { Text("HQ is not running. These are the last tasks it had.", style = HqType.BodySm, color = Mts.Amber, modifier = Modifier.padding(16.dp)) }
         if (onAll) item(key = "chips") { AllChips(ui, actions.onChip) }
         if (onAll && ui.sessions.isNotEmpty() && ui.chip == AllChip.Active) item(key = "strip") { WorkingStrip(ui.sessions, onHelpers) }
-        if (groups.isEmpty() && ui.loaded && !ui.offline) item { Text(if (onAll) TasksLogic.emptyAll(ui.chip) else emptyWords(ui.tab), style = HqType.BodySm, color = Mts.InkMuted, modifier = Modifier.padding(16.dp)) }
+        if (groups.isEmpty() && ui.loaded && !ui.offline) item { Text(if (onAll && ui.chip == AllChip.Archived && !ui.archivedLoaded) "Asking HQ\u2026" else if (onAll) TasksLogic.emptyAll(ui.chip) else emptyWords(ui.tab), style = HqType.BodySm, color = Mts.InkMuted, modifier = Modifier.padding(16.dp)) }
         groups.forEach { g ->
             if (g.title.isNotBlank()) item(key = "h-${g.key}") { GroupHeader(g, g.key in ui.expanded, actions.onToggleGroup) }
             val open = g.key in ui.expanded
@@ -179,6 +189,7 @@ private fun AllRow(t: TaskItem, today: LocalDate, working: Boolean, selected: Se
     val on = t.id in selected
     Row(
         Modifier.fillMaxWidth().heightIn(min = 72.dp).then(if (on) Modifier.background(Mts.Surface100) else Modifier)
+            .semantics { this.selected = on }
             .combinedClickable(role = Role.Button, onLongClickLabel = if (bulkable) "Select" else null, onLongClick = if (bulkable) ({ actions.onSelect(t.id) }) else null) { if (selecting) actions.onSelect(t.id) else actions.onOpen(t) }
             .drawBehind { drawLine(Mts.Hairline, Offset(0f, size.height), Offset(size.width, size.height), 1.dp.toPx()) }.padding(horizontal = 16.dp, vertical = 12.dp),
         horizontalArrangement = Arrangement.spacedBy(12.dp),

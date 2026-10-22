@@ -110,7 +110,7 @@ object TasksLogic {
     fun stuckFor(since: String?, now: LocalDateTime): String? {
         val then = try { LocalDateTime.parse(since?.replace(' ', 'T') ?: return null) } catch (e: DateTimeParseException) { return null }
         val hours = Duration.between(then, now).toHours().coerceAtLeast(0)
-        return if (hours >= 24) "${hours / 24}d" else "${hours.coerceAtLeast(1)}h"
+        return if (hours >= 24) "${hours / 24}d" else if (hours < 1) "<1h" else "${hours}h"
     }
 
     /** The third line of an All row: what it is waiting on, who it is for, how far along, and when. */
@@ -121,7 +121,7 @@ object TasksLogic {
             t.archivedAt != null -> listOfNotNull("Archived " + (readyAgo(t.archivedAt, now) ?: "earlier"))
             t.status == "complete" -> listOfNotNull("Done " + (readyAgo(t.completedAt ?: t.updatedAt, now) ?: "earlier"))
             t.status == "blocked" -> listOfNotNull(t.waitingOn?.takeIf { it.isNotBlank() }?.let { "Waiting on $it" }, t.blockedReason?.takeIf { it.isNotBlank() })
-            t.status == "ready_for_review" -> listOfNotNull(forWho, readyAgo(t.updatedAt, now)?.let { "moved $it" })
+            t.status == "ready_for_review" -> listOfNotNull(forWho, readyAgo(t.readyAt, now)?.let { "moved $it" })
             else -> listOfNotNull(
                 "hq is working".takeIf { working },
                 "${t.subtaskDone} of ${t.subtaskCount} sub-tasks".takeIf { t.subtaskCount > 0 },

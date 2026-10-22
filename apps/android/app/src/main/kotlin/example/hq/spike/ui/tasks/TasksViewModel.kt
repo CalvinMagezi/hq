@@ -81,7 +81,12 @@ data class TasksUi(
     val selected: Set<String> = emptySet(),
     val bulkPrompt: String? = null,
     val bulking: Boolean = false,
+    /** A bulk change waiting for the owner's yes, and whether the archived list has been read at least once. */
+    val bulkAsk: Bulk? = null,
+    val archivedLoaded: Boolean = false,
 ) {
+    /** The tasks the All tab shows now: only these can be picked or changed. */
+    val visibleIds: Set<String> get() = groups.flatMapTo(HashSet()) { g -> g.tasks.map { it.id } }
     val workingIds: Set<String> get() = sessions.mapTo(HashSet()) { it.taskId }
     val shown: List<TaskItem> get() = tasks.filter { it.id !in hidden }
     val groups: List<TaskGroup> get() = when (tab) {
@@ -120,6 +125,7 @@ class TasksActions(
     val onClearSelection: () -> Unit = {},
     val onBulkPrompt: (String?) -> Unit = {},
     val onBulk: (Bulk) -> Unit = {},
+    val onBulkAsk: (Bulk?) -> Unit = {},
 )
 
 class TasksViewModel(app: Application) : AndroidViewModel(app) {
@@ -131,9 +137,10 @@ class TasksViewModel(app: Application) : AndroidViewModel(app) {
     private var lineJob: Job? = null
     private var refreshSeq = 0
     private val writing = mutableSetOf<String>()
+    private val restoring = mutableSetOf<String>()
 
     val actions = TasksActions(
-        onTab = { t -> _state.update { it.copy(tab = t, selected = emptySet(), bulkPrompt = null) } }, onRefresh = { viewModelScope.launch { refresh() } },
+        onTab = ::chooseTab, onRefresh = { viewModelScope.launch { refresh() } },
         onToggleGroup = { k -> _state.update { it.copy(expanded = if (k in it.expanded) it.expanded - k else it.expanded + k) } },
         onDone = ::done, onTomorrow = ::tomorrow, onUndo = ::undoLast, onDismissLine = { _state.update { it.copy(line = null) } },
         onOpen = ::open, onClose = { _state.update { it.copy(detail = null) } }, onMarkDone = { _state.value.detail?.task?.let(::done); _state.update { it.copy(detail = null) } },
@@ -146,7 +153,7 @@ class TasksViewModel(app: Application) : AndroidViewModel(app) {
         onSelect = { id -> _state.update { if (it.bulking) it else it.copy(selected = if (id in it.selected) it.selected - id else it.selected + id) } },
         onSelectAll = { ids -> _state.update { if (it.bulking) it else it.copy(selected = ids.toSet()) } },
         onClearSelection = { _state.update { if (it.bulking) it else it.copy(selected = emptySet(), bulkPrompt = null) } },
-        onBulkPrompt = { p -> _state.update { it.copy(bulkPrompt = p) } }, onBulk = ::runBulk,
+        onBulkPrompt = { p -> _state.update { it.copy(bulkPrompt = p) } }, onBulk = ::askBulk, onBulkAsk = { c -> if (c == null) _state.update { it.copy(bulkAsk = null) } else runBulk(c) },
     )
 
     init {
@@ -175,17 +182,30 @@ class TasksViewModel(app: Application) : AndroidViewModel(app) {
         _state.update { s ->
             if (tasks == null) s.copy(loaded = true, offline = true)
             else s.copy(
-                loaded = true, offline = false, tasks = tasks, sessions = sessions ?: s.sessions, archived = archived ?: s.archived, hidden = s.hidden.filter { it in writing }.toSet(), today = LocalDate.now(),
+                loaded = true, offline = false, tasks = tasks, sessions = sessions ?: s.sessions, archived = archived ?: s.archived, archivedLoaded = s.archivedLoaded || archived != null,
+                hidden = s.hidden.filter { it in writing }.toSet(), today = LocalDate.now(),
                 detail = s.detail?.let { d -> tasks.firstOrNull { it.id == d.task.id }?.let { fresh -> d.copy(task = fresh) } ?: d },
-            )
+            ).let { next -> next.copy(selected = next.selected intersect next.visibleIds) }
         }
     }
 
     /** Applies one change to every selected task, four at a time, and says what happened to each. Tasks that failed stay selected. */
+    /** Finishing many tasks at once asks first; every other change goes straight through. */
+    private fun askBulk(change: Bulk) {
+        val n = pickedTasks().size
+        if (change == Bulk.Status("complete") && n > 1) _state.update { it.copy(bulkPrompt = null, bulkAsk = change) } else runBulk(change)
+    }
+
+    /** The selected tasks that are still on the list: one that moved off it meanwhile is not changed by a tap on rows that no longer show it. */
+    private fun pickedTasks(): List<TaskItem> {
+        val visible = _state.value.visibleIds
+        return _state.value.tasks.filter { it.id in _state.value.selected && it.id in visible }
+    }
+
     private fun runBulk(change: Bulk) {
-        val picked = _state.value.tasks.filter { it.id in _state.value.selected }
+        val picked = pickedTasks()
         if (picked.isEmpty() || _state.value.bulking) return
-        _state.update { it.copy(bulkPrompt = null, bulking = true) }
+        _state.update { it.copy(bulkPrompt = null, bulkAsk = null, bulking = true) }
         viewModelScope.launch {
             val gate = Semaphore(BulkEdit.IN_FLIGHT)
             val results = coroutineScope { picked.map { t -> async { gate.withPermit { applyOne(change, t) } } }.awaitAll() }
@@ -207,14 +227,21 @@ class TasksViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
+    private fun chooseTab(tab: TaskTab) {
+        _state.update { if (it.bulking) it else it.copy(tab = tab, selected = emptySet(), bulkPrompt = null, bulkAsk = null) }
+        // Coming to All reads the helpers working now, which are not read while another tab shows.
+        if (tab == TaskTab.All) viewModelScope.launch { refresh() }
+    }
+
     private fun chooseChip(chip: AllChip) {
-        _state.update { it.copy(chip = chip, selected = emptySet(), bulkPrompt = null) }
+        _state.update { if (it.bulking) it else it.copy(chip = chip, selected = emptySet(), bulkPrompt = null, bulkAsk = null) }
         if (chip == AllChip.Archived) viewModelScope.launch { refresh() }
     }
 
     /** Brings an archived task back, with the sub-tasks archived along with it. */
     private fun restore() {
         val t = _state.value.detail?.task ?: return
+        if (!restoring.add(t.id)) return
         viewModelScope.launch {
             try {
                 client.restoreTask(t.id)
@@ -223,6 +250,8 @@ class TasksViewModel(app: Application) : AndroidViewModel(app) {
                 refresh()
             } catch (e: HqUnavailable) {
                 say(why(e, "Could not restore it. HQ is not answering."))
+            } finally {
+                restoring.remove(t.id)
             }
         }
     }

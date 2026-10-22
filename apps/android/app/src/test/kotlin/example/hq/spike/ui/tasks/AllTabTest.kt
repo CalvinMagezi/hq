@@ -52,6 +52,7 @@ class AllTabTest {
         assertEquals(IdTag("Blocked 2d", true), TasksLogic.idTag(t("1", "blocked").copy(blockedSince = "2026-10-20 12:00:00"), now))
         assertEquals(IdTag("Blocked 5h", true), TasksLogic.idTag(t("1", "blocked").copy(blockedSince = "2026-10-22 07:00:00"), now))
         assertEquals(IdTag("Blocked", true), TasksLogic.idTag(t("1", "blocked"), now))
+        assertEquals(IdTag("Blocked <1h", true), TasksLogic.idTag(t("1", "blocked").copy(blockedSince = "2026-10-22 11:30:00"), now))
         assertEquals(IdTag("High", false), TasksLogic.idTag(t("2", priority = "high"), now))
         assertEquals(IdTag("Urgent", false), TasksLogic.idTag(t("2", priority = "urgent"), now))
         assertNull(TasksLogic.idTag(t("3", priority = "low"), now))
@@ -61,8 +62,9 @@ class AllTabTest {
     @Test fun theThirdLineSaysWhatTheTaskIsWaitingOnOrWhoItIsFor() {
         assertEquals("Waiting on you \u00b7 needs a reboot window", TasksLogic.allMeta(t("1", "blocked").copy(waitingOn = "you", blockedReason = "needs a reboot window"), today, false, now))
         assertEquals("needs a reboot window", TasksLogic.allMeta(t("1", "blocked").copy(blockedReason = "needs a reboot window"), today, false, now))
-        val ready = t("2", "ready_for_review").copy(assignees = listOf("hq"), updatedAt = "2026-10-22 09:00:00")
+        val ready = t("2", "ready_for_review").copy(assignees = listOf("hq"), readyAt = "2026-10-22 09:00:00", updatedAt = "2026-10-22 11:59:00")
         assertEquals("for hq \u00b7 moved 3 h ago", TasksLogic.allMeta(ready, today, false, now))
+        assertEquals("for hq", TasksLogic.allMeta(ready.copy(readyAt = null), today, false, now))
     }
 
     @Test fun anOpenTaskNamesItsProgressDueDateAndOwner() {

@@ -208,7 +208,7 @@ fun TaskPage(d: TaskDetail, today: LocalDate, actions: TasksActions) {
 private fun ArchivedCard(t: TaskItem, actions: TasksActions) {
     val shape = RoundedCornerShape(12.dp)
     Column(Modifier.fillMaxWidth().clip(shape).background(Mts.Surface100).border(1.dp, Mts.Hairline, shape).padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-        Text("Archived ${TasksLogic.readyAgo(t.archivedAt, java.time.LocalDateTime.now(java.time.ZoneOffset.UTC)) ?: "earlier"}. It keeps its comments, time and links.", style = HqType.BodySm, color = Mts.Ink)
+        Text("Archived ${TasksLogic.readyAgo(t.archivedAt, java.time.LocalDateTime.now(java.time.ZoneOffset.UTC)) ?: "earlier"}. Restore it to work on it again, with its comments and sub-tasks.", style = HqType.BodySm, color = Mts.Ink)
         Box(Modifier.heightIn(min = 48.dp).clip(CircleShape).background(Mts.BrandGreen).clickable(role = Role.Button, onClick = actions.onRestore).padding(horizontal = 24.dp), contentAlignment = Alignment.Center) { Text("Restore", style = HqType.BodySmBold, color = Mts.OnGreen) }
     }
 }
