@@ -55,7 +55,8 @@ final class Alerts {
             try {
                 example.hq.spike.capture.OutboxSender.flushNow(c);
                 example.hq.spike.capture.Widgets.refreshTasks(c);
-            } catch (RuntimeException e) {
+            } catch (Exception e) {
+                // Kotlin does not declare the IOExceptions it throws, so Java sees them only here; nothing in this step may end the poll loop.
                 Log.w(HubService.TAG, "outbox flush failed: " + e.getClass().getSimpleName());
             }
             try {
@@ -72,7 +73,7 @@ final class Alerts {
         for (JSONObject item : items.values()) { newest = item.optString("title", ""); break; }
         try {
             example.hq.spike.capture.Widgets.needs(c, items.size(), newest);
-        } catch (RuntimeException e) {
+        } catch (Exception e) {
             Log.w(HubService.TAG, "widget update failed: " + e.getClass().getSimpleName());
         }
         SharedPreferences prefs = c.getSharedPreferences(PREFS, Context.MODE_PRIVATE);

@@ -73,7 +73,8 @@ object Widgets {
         if (now - tasksAt < TASKS_EVERY_MS || !present(c, TasksWidget::class.java)) return
         tasksAt = now
         val client = HqServices.get(c.applicationContext).client
-        val rows = runBlocking { client.inProgress(MAX_ROWS) }
+        // HQ may be starting or down: the widget keeps what it last showed.
+        val rows = try { runBlocking { client.inProgress(MAX_ROWS) } } catch (e: example.hq.spike.data.HqUnavailable) { return }
         prefs(c).edit().putString(TASKS, rows.first.joinToString("\n") { "${it.id}\t${it.number}\t${it.title.replace('\n', ' ')}" }).putInt(TASKS_TOTAL, rows.second).apply()
         renderAll(c)
     }

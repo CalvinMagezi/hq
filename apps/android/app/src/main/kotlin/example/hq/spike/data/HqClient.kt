@@ -379,6 +379,11 @@ class HqClient(private val token: () -> String, private val base: String = LOCAL
             JSONObject(it).getString("path")
         }
 
+    /** Checks an AI provider key with one small call to the provider and, if it works, stores it. 400 means the key was refused, 409 that the environment sets it. */
+    suspend fun setProviderKey(provider: String, key: String) {
+        send(authed("/api/settings/provider-key").post(JSONObject().put("provider", provider).put("api_key", key).toString().toRequestBody("application/json".toMediaType())).build()) { }
+    }
+
     /** Replaces a note's text (body only: the server keeps the front matter). Last write wins; there is no version check yet. */
     suspend fun saveNote(path: String, content: String) {
         send(authed("/api/note").put(JSONObject().put("path", path).put("content", content).toString().toRequestBody("application/json".toMediaType())).build()) { }

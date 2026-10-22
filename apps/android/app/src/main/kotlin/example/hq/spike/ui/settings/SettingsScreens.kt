@@ -15,6 +15,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -39,6 +40,7 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.runtime.produceState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -129,7 +131,7 @@ fun SettingsHost(ui: SettingsUi, actions: SettingsActions) {
             when (ui.page) {
                 SettingsPage.Home -> Home(ui, actions)
                 SettingsPage.Safety -> Safety(ui, actions)
-                SettingsPage.Keys -> Keys(ui)
+                SettingsPage.Keys -> Keys(ui, actions)
                 SettingsPage.Messaging -> Messaging(ui)
                 SettingsPage.Claude -> Claude(ui)
                 SettingsPage.Devices -> Devices(ui)
@@ -145,6 +147,7 @@ fun SettingsHost(ui: SettingsUi, actions: SettingsActions) {
             }
         }
         ui.askMode?.let { ConfirmDialog(SettingsWords.modeDialog(it), actions.onModeCancel, actions.onModeConfirm) }
+        ui.keySheet?.let { KeySheetView(it, actions) }
         if (ui.askRestart) ConfirmDialog(SettingsWords.RESTART_WORDS, { actions.onRestart(false) }, actions.onRestartConfirm)
         ui.line?.let { Snack(it, actions.onDismissLine, Modifier.align(Alignment.BottomCenter)) }
     }
@@ -282,7 +285,7 @@ private fun Safety(ui: SettingsUi, actions: SettingsActions) {
 // ---------------------------------------------------------------- AI service and keys
 
 @Composable
-private fun Keys(ui: SettingsUi) {
+private fun Keys(ui: SettingsUi, actions: SettingsActions) {
     val s = ui.snap.settings
     Page {
         if (Unanswered(ui, "settings", s != null) || s == null) return@Page
@@ -304,11 +307,14 @@ private fun Keys(ui: SettingsUi) {
                         Text(name, style = HqType.BodyBold, color = Mts.Ink)
                         Text(if (set) (if (source == "env") "Set outside the app" else "Set") else if (source == "unreadable") "Could not be checked" else "Not set", style = HqType.BodySm, color = if (set) Mts.BrandGreen else Mts.InkMuted)
                     }
-                    if (set) Icon(HqIcons.CheckSmall, null, Modifier.size(22.dp), tint = Mts.BrandGreen)
+                    SettingsWords.keyAction(s, name, set, source)?.let { a ->
+                        Box(Modifier.heightIn(min = 48.dp).clip(CircleShape).background(Mts.Surface200).clickable(role = Role.Button) { actions.onKeyOpen(KeySheet(a.id, name, replace = set)) }.padding(horizontal = 16.dp), contentAlignment = Alignment.Center) {
+                            Text(a.label, style = HqType.BodySmBold, color = Mts.Ink)
+                        }
+                    }
                 }
             }
         }
-        Text("Keys are added from the web app for now. They are never shown here.", style = SmallText, color = Mts.InkMuted, modifier = Modifier.padding(start = 20.dp, top = 8.dp, end = 20.dp))
         if (ai.isEmpty()) {
             Label("If the first AI is down")
             Group {
@@ -628,6 +634,72 @@ private fun Notifications(ui: SettingsUi, actions: SettingsActions) {
                     ),
                 )
             }
+        }
+    }
+}
+
+// ---------------------------------------------------------------- add a key
+
+/** The one place a key is typed: a sheet over Settings. The key lives only in this field, is shown as dots unless revealed, and goes away with the sheet. */
+@Composable
+private fun KeySheetView(sheet: KeySheet, actions: SettingsActions) {
+    var typed by remember { androidx.compose.runtime.mutableStateOf("") }
+    var reveal by remember { androidx.compose.runtime.mutableStateOf(false) }
+    val words = SettingsWords.keyWords(sheet.name, sheet.replace)
+    val context = androidx.compose.ui.platform.LocalContext.current
+    val shape = RoundedCornerShape(topStart = 28.dp, topEnd = 28.dp)
+    val field = RoundedCornerShape(12.dp)
+    val bad = sheet.error != null
+    BackHandler(enabled = !sheet.checking, onBack = actions.onKeyClose)
+    Box(Modifier.fillMaxSize()) {
+        Box(Modifier.fillMaxSize().background(Color.Black.copy(alpha = SCRIM_ALPHA)).clickable(enabled = !sheet.checking, interactionSource = remember { MutableInteractionSource() }, indication = null, onClick = actions.onKeyClose))
+        Column(
+            Modifier.align(Alignment.BottomCenter).fillMaxWidth().clip(shape).background(Mts.Surface100).clickable(interactionSource = remember { MutableInteractionSource() }, indication = null) {}
+                .imePadding().navigationBarsPadding().padding(start = 16.dp, end = 16.dp, top = 12.dp, bottom = 16.dp),
+            verticalArrangement = Arrangement.spacedBy(14.dp),
+        ) {
+            Box(Modifier.align(Alignment.CenterHorizontally).size(32.dp, 4.dp).clip(RoundedCornerShape(2.dp)).background(Mts.Line))
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(words.title, style = HqType.H2, color = Mts.Ink, modifier = Modifier.weight(1f))
+                IconAction(HqIcons.Close, "Close", iconSize = 24.dp, onClick = actions.onKeyClose)
+            }
+            Text(words.body, style = HqType.BodySm, color = Mts.InkMuted)
+            Row(
+                Modifier.fillMaxWidth().heightIn(min = 64.dp).clip(field).background(Mts.Surface000).border(2.dp, if (bad) Mts.DangerText else Mts.Line, field).padding(start = 16.dp, top = 8.dp, end = 8.dp, bottom = 8.dp),
+                horizontalArrangement = Arrangement.spacedBy(4.dp), verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Column(Modifier.weight(1f)) {
+                    Text("Your key", style = HqType.Caption.copy(fontWeight = androidx.compose.ui.text.font.FontWeight.Bold), color = if (bad) Mts.DangerText else Mts.InkMuted)
+                    androidx.compose.foundation.text.BasicTextField(
+                        typed, { typed = it }, Modifier.fillMaxWidth(), enabled = !sheet.checking, singleLine = true,
+                        textStyle = HqType.Body.copy(color = Mts.Ink, fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace, letterSpacing = 0.1.em),
+                        cursorBrush = androidx.compose.ui.graphics.SolidColor(Mts.Ink),
+                        visualTransformation = if (reveal) androidx.compose.ui.text.input.VisualTransformation.None else androidx.compose.ui.text.input.PasswordVisualTransformation(),
+                        keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(keyboardType = androidx.compose.ui.text.input.KeyboardType.Password, autoCorrectEnabled = false),
+                    )
+                }
+                IconAction(if (reveal) HqIcons.EyeOff else HqIcons.Eye, if (reveal) "Hide the key" else "Show the key", iconSize = 22.dp) { reveal = !reveal }
+            }
+            sheet.error?.let { Text(it, style = HqType.BodySm, color = Mts.DangerText, modifier = Modifier.padding(start = 16.dp, top = 0.dp)) }
+            SettingsWords.keyHelpUrl(sheet.id)?.let { url ->
+                Box(Modifier.heightIn(min = 48.dp).clickable(role = Role.Button) { runCatching { context.startActivity(android.content.Intent(android.content.Intent.ACTION_VIEW, android.net.Uri.parse(url)).addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)) } }.padding(horizontal = 12.dp), contentAlignment = Alignment.CenterStart) {
+                    Text("Where do I find my key?", style = HqType.BodySmBold, color = Mts.BrandBlue)
+                }
+            }
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+                val ready = typed.isNotBlank() && !sheet.checking
+                Row(
+                    Modifier.weight(1f).heightIn(min = 48.dp).clip(CircleShape).background(if (ready || sheet.checking) Mts.BrandGreen else Mts.Surface200).clickable(enabled = ready, role = Role.Button) { actions.onKeySave(typed) },
+                    horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.CenterHorizontally), verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    if (sheet.checking) Spinner(18, Mts.OnGreen)
+                    Text(if (sheet.checking) "Checking\u2026" else "Check and save", style = HqType.BodySmBold, color = if (ready || sheet.checking) Mts.OnGreen else Mts.InkMuted)
+                }
+                Box(Modifier.heightIn(min = 48.dp).clickable(enabled = !sheet.checking, role = Role.Button, onClick = actions.onKeyClose).padding(horizontal = 12.dp), contentAlignment = Alignment.Center) {
+                    Text("Cancel", style = HqType.BodySmBold, color = Mts.InkMuted)
+                }
+            }
+            Text(SettingsWords.KEY_NOTE, style = SmallText, color = Mts.InkMuted)
         }
     }
 }

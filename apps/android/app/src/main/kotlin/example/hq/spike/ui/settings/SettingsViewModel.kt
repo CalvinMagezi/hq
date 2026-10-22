@@ -37,6 +37,9 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import org.json.JSONObject
 
+/** Which provider the key is for, and whether HQ is checking it or refused it. */
+data class KeySheet(val id: String, val name: String, val replace: Boolean, val checking: Boolean = false, val error: String? = null)
+
 data class SettingsUi(
     val open: Boolean = false,
     val stack: List<SettingsPage> = emptyList(),
@@ -58,6 +61,8 @@ data class SettingsUi(
     val keep: KeepFacts = KeepFacts(),
     val notif: NotifFacts = NotifFacts(),
     val capture: CaptureFacts = CaptureFacts(),
+    /** The sheet that takes a key, while it is open. The key itself is never kept here. */
+    val keySheet: KeySheet? = null,
 ) {
     val page: SettingsPage get() = stack.lastOrNull() ?: SettingsPage.Home
 }
@@ -79,6 +84,9 @@ class SettingsActions(
     val onChannel: (String) -> Unit = {},
     val onAnswers: (Boolean) -> Unit = {},
     val onShareOpens: (String) -> Unit = {},
+    val onKeyOpen: (KeySheet) -> Unit = {},
+    val onKeyClose: () -> Unit = {},
+    val onKeySave: (String) -> Unit = {},
     val onShowTitles: (Boolean) -> Unit = {},
     val onAddWidget: (Int) -> Unit = {},
     val onSendNow: (String) -> Unit = {},
@@ -108,6 +116,9 @@ class SettingsViewModel(app: Application) : AndroidViewModel(app) {
         onRestartConfirm = ::confirmRestart,
         onFix = ::fix,
         onChannel = ::openChannel,
+        onKeyOpen = { k -> _state.update { it.copy(keySheet = k) } },
+        onKeyClose = { _state.update { if (it.keySheet?.checking == true) it else it.copy(keySheet = null) } },
+        onKeySave = ::saveKey,
         onShareOpens = { v -> CapturePrefs.setShareOpens(ctx(), v); _state.update { it.copy(capture = it.capture.copy(shareOpens = v)) } },
         onShowTitles = { on -> CapturePrefs.setShowTitles(ctx(), on); Widgets.renderAll(ctx()); _state.update { it.copy(capture = it.capture.copy(showTitles = on)) } },
         onAddWidget = ::addWidget, onSendNow = ::sendNow, onDiscard = { id -> Outbox.of(ctx()).remove(id); _state.update { it.copy(capture = captureFacts(), phone = phoneRows()) } },
@@ -116,7 +127,7 @@ class SettingsViewModel(app: Application) : AndroidViewModel(app) {
     )
 
     /** Closes Settings and every page inside it. */
-    fun close() = _state.update { it.copy(open = false, stack = emptyList(), askMode = null, askRestart = false) }
+    fun close() = _state.update { it.copy(open = false, stack = emptyList(), askMode = null, askRestart = false, keySheet = null) }
 
     fun freeze(fixed: SettingsUi) {
         frozen = true
@@ -222,6 +233,23 @@ class SettingsViewModel(app: Application) : AndroidViewModel(app) {
     @androidx.annotation.RequiresApi(Build.VERSION_CODES.R)
     private fun lastAndroidStop(am: ActivityManager, pkg: String): LastStop? =
         am.getHistoricalProcessExitReasons(pkg, 0, EXIT_SCAN).firstOrNull { PhoneWords.androidStopped(it.reason) }?.let { LastStop(it.reason, Instant.ofEpochMilli(it.timestamp)) }
+
+    /** Sends the key to HQ, which tries it with the provider before keeping it. Nothing about the key is kept or logged here. */
+    private fun saveKey(typed: String) {
+        val sheet = _state.value.keySheet ?: return
+        val key = typed.trim()
+        if (key.isEmpty() || sheet.checking) return
+        _state.update { it.copy(keySheet = sheet.copy(checking = true, error = null)) }
+        viewModelScope.launch {
+            try {
+                client.setProviderKey(sheet.id, key)
+                _state.update { it.copy(keySheet = null, line = SettingsWords.keySaved(sheet.name)) }
+                refreshNow()
+            } catch (e: HqUnavailable) {
+                _state.update { it.copy(keySheet = it.keySheet?.copy(checking = false, error = SettingsWords.keyFailure(e.status))) }
+            }
+        }
+    }
 
     private fun captureFacts() = CaptureFacts(CapturePrefs.shareOpens(ctx()), CapturePrefs.showTitles(ctx()), Outbox.of(ctx()).all())
 

@@ -62,6 +62,8 @@ fun settingsFixture(name: String?): SettingsUi? {
         "s-keep-bad" -> base.copy(stack = listOf(SettingsPage.KeepRunning), keep = KeepFacts(batteryUnrestricted = false, autoRevokeOff = false, notificationsAllowed = false))
         "s-notif" -> base.copy(stack = listOf(SettingsPage.Notifications), notif = NotifFacts(true, channels, true))
         "s-notif-off" -> base.copy(stack = listOf(SettingsPage.Notifications), notif = NotifFacts(false, channels, false))
+        "s-key" -> base.copy(stack = listOf(SettingsPage.Keys), keySheet = KeySheet("anthropic", "Anthropic", replace = false))
+        "s-key-error" -> base.copy(stack = listOf(SettingsPage.Keys), keySheet = KeySheet("anthropic", "Anthropic", replace = false, error = SettingsWords.KEY_REFUSED))
         "s-capture" -> base.copy(stack = listOf(SettingsPage.CaptureWidgets))
         "s-capture-waiting" -> base.copy(stack = listOf(SettingsPage.CaptureWidgets), capture = CaptureFacts("task", true, listOf(
             example.hq.spike.capture.Queued("a", "note", "Why Compose beat the WebView for chat", org.json.JSONObject(), 1L),

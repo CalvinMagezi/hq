@@ -245,6 +245,42 @@ object SettingsWords {
         }
     }
 
+    // ------------------------------------------------------------ Add a key
+
+    /** The button a key row gets: only the three providers HQ can check have one, and a key set by the environment cannot be changed here. */
+    data class KeyAction(val id: String, val label: String)
+
+    fun keyAction(s: JSONObject?, name: String, set: Boolean, source: String?): KeyAction? {
+        if (source == "env") return null
+        val id = s.arr("provider_keys").items().firstOrNull { it.optString("name") == name }?.text("id") ?: return null
+        return KeyAction(id, if (set) "Replace" else "Add")
+    }
+
+    data class KeyWords(val title: String, val body: String)
+
+    fun keyWords(name: String, replace: Boolean) = KeyWords(
+        if (replace) "Replace your $name key" else "Add your $name key",
+        "A key is a long code that lets HQ use an AI service. Copy it from your $name account, then paste it here.",
+    )
+
+    const val KEY_REFUSED = "That key didn't work. Check that you copied all of it."
+    const val KEY_NO_ANSWER = "HQ did not reply. Try again."
+    const val KEY_ENV = "This key is set outside the app. Change it where it was set."
+    const val KEY_NOTE = "HQ keeps the key on this phone and never shows it again."
+
+    /** What the sheet says when a key was not saved: the key was refused, the environment owns it, or HQ did not answer (not blamed on the key). */
+    fun keyFailure(status: Int): String = when (status) { 0 -> KEY_NO_ANSWER; 409 -> KEY_ENV; else -> KEY_REFUSED }
+
+    fun keySaved(name: String) = "$name key saved. Your next message uses it."
+
+    /** Where to find a provider's key, as the web app points. */
+    fun keyHelpUrl(id: String): String? = when (id) {
+        "open_router" -> "https://openrouter.ai/keys"
+        "anthropic" -> "https://console.anthropic.com/settings/keys"
+        "google" -> "https://aistudio.google.com/apikey"
+        else -> null
+    }
+
     // ------------------------------------------------------------ AI service and keys
 
     /** The stored API keys, with the GitHub Copilot plan first when HQ uses it: its token is set outside the key list, so the plan answering is what says it works. */

@@ -3,6 +3,7 @@ package example.hq.spike.ui.settings
 import org.json.JSONObject
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -94,5 +95,24 @@ class BackgroundWorkTest {
         assertEquals("Backup and about", row.title)
         assertEquals("No backup yet", row.status)
         assertTrue(row.warn)
+    }
+
+    @Test fun onlyTheThreeCheckableProvidersGetAKeyButton() {
+        val s = JSONObject("""{"provider_keys":[{"name":"OpenRouter","id":"open_router","configured":true,"source":"env"},{"name":"Anthropic","id":"anthropic","configured":false,"source":null},{"name":"Google AI","id":"google","configured":true,"source":"file"},{"name":"DeepSeek","configured":true}]}""")
+        assertNull(SettingsWords.keyAction(s, "OpenRouter", true, "env"))
+        assertEquals(SettingsWords.KeyAction("anthropic", "Add"), SettingsWords.keyAction(s, "Anthropic", false, null))
+        assertEquals(SettingsWords.KeyAction("google", "Replace"), SettingsWords.keyAction(s, "Google AI", true, "file"))
+        assertNull(SettingsWords.keyAction(s, "DeepSeek", true, null))
+    }
+
+    @Test fun theKeySheetSaysAddOrReplaceAndWhyItFailed() {
+        assertEquals("Add your Anthropic key", SettingsWords.keyWords("Anthropic", false).title)
+        assertEquals("Replace your Google AI key", SettingsWords.keyWords("Google AI", true).title)
+        assertEquals(SettingsWords.KEY_REFUSED, SettingsWords.keyFailure(400))
+        assertEquals(SettingsWords.KEY_NO_ANSWER, SettingsWords.keyFailure(0))
+        assertEquals(SettingsWords.KEY_ENV, SettingsWords.keyFailure(409))
+        assertEquals("Anthropic key saved. Your next message uses it.", SettingsWords.keySaved("Anthropic"))
+        assertEquals("https://openrouter.ai/keys", SettingsWords.keyHelpUrl("open_router"))
+        assertNull(SettingsWords.keyHelpUrl("deepseek"))
     }
 }
