@@ -95,6 +95,9 @@ either way, and a paired device must work with no relay.
 - Not yet measured: a carrier hotspot and public wifi (no second phone, guest wifi pending), and
   the sleep rows inside a real app.
 
+The decisions this plan left open, and the sprint that follows, are in
+`docs/plans/native-bridge-sprint.md`.
+
 ## After the slice, in order
 
 The pairing protocol written up with attack notes and an independent review; the desktop app (Tauri)
