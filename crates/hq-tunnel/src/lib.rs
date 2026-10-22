@@ -17,6 +17,7 @@ pub mod session;
 pub mod stack;
 pub mod status;
 pub mod store;
+mod throttle;
 mod timers;
 
 pub use error::{Error, Result};

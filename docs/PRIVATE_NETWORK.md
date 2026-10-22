@@ -401,7 +401,7 @@ that started it is gone, so `hq net tunnel run < key` ends at once: from a shell
 `--key-file` with `--no-control`, and stop it with a signal. It prints nothing (set `RUST_LOG` to
 see its logs, on stderr) and writes `status.json` (`state`: `up`, `connecting`, `down` once a handshake has gone unanswered for 30
 seconds even beside a session that is still fresh, `idle` for a session that aged out with nothing in
-flight, `stopped`; also `max_age_s`, `wakeups`, `rss_kb` and `open_fds`) and a bounded `events.log` beside it. A peer that was killed leaves its
+flight, `stopped`; also `max_age_s`, `wakeups`, `read_pauses`, `rss_kb` and `open_fds`) and a bounded `events.log` beside it. A peer that was killed leaves its
 last report behind. Every report says how long the peer can go without writing the next (`max_age_s`:
 its keepalive, at least 30 seconds), and `hq net tunnel status` says it is not running once the report
 is older than that plus 10 seconds. It
@@ -479,8 +479,9 @@ wireguard-go would need.
   spinning while it is down); revoke and re-add (the new address, the maps kept); a killed, stopped
   and abandoned device; a restarted hub; a flood of random datagrams at its UDP port, first from
   the hub's address with another port (the socket turns them away) and then with the endpoint's own
-  address and port (the peer's receive path takes them, and one loop thread then uses a whole core while the held
-  stream stays up: a known cost, task PERSONAL-INBOX-095); one connection held across rekeys; and that the key is in no argument, variable,
+  address and port (the peer's receive path takes them; it limits the refusals it spends time on, so the flood costs
+  it about 130 ms of CPU in 15 seconds and a held stream stalls until the flood ends); one connection
+  held across rekeys; and that the key is in no argument, variable,
   output or file. On Docker Desktop's Linux VM (kernel 7.0.14, arm64, a debug build of `hq`) all of them passed. Numbers
   from the runs: the flood (15.6 million datagrams in 30 seconds) cost the peer 10 to 30 ms of CPU
   and no extra wakeups (116 with it, 132 for the same stream without it), because the kernel drops

@@ -282,22 +282,28 @@ want "the stream saw no error during the flood" "$(echo "$summary" | python3 -c 
 check "the peer used under a tenth of a core ($(( (c1 - c0) * 1000 / ticks )) ms of CPU in $FLOOD_SECS s)" bash -c "[ $(( (c1 - c0) * 10 / ticks )) -lt $FLOOD_SECS ]"
 check "the kernel's filter kept it asleep ($((w1 - w0)) wakeups with the flood, $((wb1 - wb0)) without)" bash -c "[ -n '$w0' ] && [ -n '$w1' ] && [ -n '$wb0' ] && [ -n '$wb1' ] && [ $((w1 - w0)) -le $((wb1 - wb0 + 30)) ]"
 
-# From the hub's own address AND port the kernel lets the datagrams through, and the peer's receive
-# path takes them: at most 128 a wake, and boringtun turns them away. This is the cost the threat
-# model admits to (T33): the peer stays up and the stream keeps going. The CPU is printed, not
-# judged: one loop thread saturates a core under this flood (task: throttle refusals).
+# From the hub's own address AND port the kernel lets the datagrams through (T33). The peer has to
+# read each one to refuse it, so it limits how many refusals it spends time on and leaves the rest to
+# the kernel's buffer. The held stream may suffer while that lasts; the CPU must not, and the peer
+# must be back to normal soon after.
 SPOOF_SECS=15
+SPOOF_CPU_PERCENT=25
+p0=$(counter read_pauses)
 c0=$(cpu)
 helper.py spoof 192.168.1.9 "$port" 192.168.1.1 51820 $SPOOF_SECS >/tmp/spoof.out &
 spoof_pid=$!
 summary=$(helper.py stream $SERVE_ADDR $SERVE_PORT $SPOOF_SECS)
 wait $spoof_pid
 c1=$(cpu)
-echo "  spoofed flood sent $(cat /tmp/spoof.out) datagrams from the endpoint's address and port; stream: $summary; the peer used $(( (c1 - c0) * 1000 / ticks )) ms of CPU in $SPOOF_SECS s"
-check "datagrams were sent" bash -c "[ "$(cat /tmp/spoof.out)" -gt 1000 ]"
-want "the stream saw no error during the spoofed flood" "$(echo "$summary" | python3 -c 'import json,sys;print(json.load(sys.stdin)["errors"])')" 0
+sleep 6; p1=$(counter read_pauses)
+spent=$(( (c1 - c0) * 1000 / ticks ))
+echo "  spoofed flood sent $(cat /tmp/spoof.out) datagrams from the endpoint's address and port; stream: $summary; the peer used $spent ms of CPU in $SPOOF_SECS s, stopped reading $((p1 - p0)) times"
+check "datagrams were sent" bash -c "[ \"$(cat /tmp/spoof.out)\" -gt 1000 ]"
+check "the peer used under $SPOOF_CPU_PERCENT percent of a core ($spent ms of CPU in $SPOOF_SECS s)" bash -c "[ $spent -lt $((SPOOF_SECS * 10 * SPOOF_CPU_PERCENT)) ]"
+check "it stopped reading to do so (status read_pauses went from ${p0:-?} to ${p1:-?})" bash -c "[ -n '$p0' ] && [ -n '$p1' ] && [ $((p1 - p0)) -ge 1 ]"
 kill -0 "$pid" 2>/dev/null && pass "the peer is still running" || fail "the peer died under the spoofed flood"
-wait_for "and still answers" 15 echoes host $SERVE_ADDR $SERVE_PORT
+# Without a wake at the end of a pause an idle peer would sleep until its next keepalive, 25 s.
+wait_for "and answers again within seconds of the flood stopping" 8 echoes host $SERVE_ADDR $SERVE_PORT
 
 echo "--- 11. one connection held across rekeys ($REKEY_SECS s)"
 hs() { wg show hq0 latest-handshakes | awk -v k="$phone_pub" '$1 == k {print $2}'; }
