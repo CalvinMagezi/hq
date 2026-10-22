@@ -168,11 +168,11 @@ window uses, and the address the consent page is served on.
 | 20 | An open event stream | Keeps the proxy, and so the quit, waiting | The proxy stops after two seconds; the host is stopped in parallel | `stopping_the_proxy_does_not_wait_for_a_stream_that_never_ends` |
 | 21 | A double click, or a launch-time start plus a click | Starts two hosts, one untracked | Start and stop run one at a time | `two_starts_at_once_make_one_host` |
 | 22 | A host process that ignores the polite signal | Survives a stop after its leader exited | The group is killed at the end of the grace period | `stop_kills_group_members_that_ignore_the_polite_signal` |
+| 23 | A script in the control window | Passes a backslash URL to `open` that two parsers read differently | Refused; the address goes out in the parser's own spelling | `only_a_plain_address_on_the_proxy_is_handed_to_the_browser` |
 | 24 | The macOS quit command | Ends the app without the exit request, leaving the host running | The close also runs on the exit event | read from the tao and Tauri sources; not exercised (see section 6) |
 | 25 | A host that crashed | Leaves group members behind and a status poll has already reaped the leader | The group is remembered until it is empty, and a stop still reaches it | `stop_reaches_group_members_after_a_status_poll_reaped_the_leader` |
 | 26 | A launch-time start, or a click, during quit | Starts a host that nothing will stop | The final stop closes the door under the same gate | `nothing_starts_after_the_final_stop` |
 | 27 | A slow relay or revoke | Freezes the screen's refresh | The refresh reads a cached card, not the bridge lock | `the_screen_refresh_does_not_wait_for_the_bridge_lock` |
-| 23 | A script in the control window | Passes a backslash URL to `open` that two parsers read differently | Refused; the address goes out in the parser's own spelling | `only_a_plain_address_on_the_proxy_is_handed_to_the_browser` |
 
 ## 8. Guard checks
 
