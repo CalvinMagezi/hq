@@ -244,6 +244,10 @@ pub struct TaskEvent {
     pub work_session_id: Option<String>,
 }
 
+/// The actor the web board writes under: a person using the app, as opposed to any agent. Agents
+/// cannot take the name, so an event under it was made by someone at the board.
+pub const WEB_ACTOR: &str = "web";
+
 /// Who a write is made by, recorded on the events it produces.
 #[derive(Debug, Clone, Copy, Default)]
 pub struct WriteCtx<'a> {

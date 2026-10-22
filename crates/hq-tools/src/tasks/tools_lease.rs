@@ -126,7 +126,8 @@ impl ActorHints {
 
     /// A launched session proven by its token wins, then a live lease, then the
     /// name the caller gave. A lease token that is wrong or ended is an error,
-    /// never a silent downgrade to an anonymous write. A lease names who is
+    /// never a silent downgrade to an anonymous write; one that only expired
+    /// resumes when nobody took the task meanwhile. A lease names who is
     /// acting anywhere, but it is recorded as the work session only on its own
     /// task (`target_task`), so a lease never inflates another task's history.
     pub fn resolve(
@@ -144,7 +145,8 @@ impl ActorHints {
             });
         }
         if let Some(token) = &self.lease_token {
-            let lease = t::require_live_lease(conn, token, ttl_secs(settings))?;
+            // Working under a lease keeps it alive, and a lease that only expired resumes.
+            let lease = t::use_lease(conn, token, ttl_secs(settings))?;
             // The tasks scope never writes under a name it did not get on that scope.
             let own =
                 self.connector.as_deref().is_some_and(|label| {
@@ -161,6 +163,13 @@ impl ActorHints {
                 work_session_id: on_own_task.then(|| lease.id.clone()),
                 lease: Some(lease),
             });
+        }
+        // The web board's name would let an agent pass as the person at the board.
+        if t::clean_label(&self.named).eq_ignore_ascii_case(t::WEB_ACTOR) {
+            bail!(
+                "'{}' is the name of the web board; write under your own name",
+                t::WEB_ACTOR
+            );
         }
         // A name of the scope's shape would let the scope edit that task's text as its own.
         if !self.tasks_scope
@@ -444,18 +453,31 @@ fn claim_response(
     settings: &TasksConfig,
     scoped: bool,
 ) -> Value {
+    // Someone started this before: the notes they left are the place to begin.
+    let resuming = !claimed.moved && claimed.task.status == t::STATUS_IN_PROGRESS;
+    let mut next = String::new();
+    if resuming && resume.is_some() {
+        next.push_str(
+            "This task was already in progress: read `resume` first, check it against the task and \
+             the code, then carry on. ",
+        );
+    }
+    next.push_str(
+        "Work on the task. Pass `lease` on your task_update and task_comment_add calls; that keeps \
+         your lease alive. Call task_heartbeat with a checkpoint when you reach a good stopping point, \
+         and task_release with a status when you stop: ready_for_review when the work is done and \
+         needs checking, blocked when you cannot go on, to_do to hand it back. Use complete only for \
+         work that has been verified.",
+    );
     let mut out = json!({
         "lease": claimed.token,
         "lease_id": claimed.session.id,
         "moved_to_in_progress": claimed.moved,
+        "resuming": resuming,
         "ttl_secs": settings.lease_ttl(),
         "heartbeat_every_secs": settings.lease_ttl() / HEARTBEATS_PER_TTL,
         "task": task_json_with_warnings(&claimed.task),
-        "next": "Work on the task. Pass `lease` on your task_update and task_comment_add calls. \
-                 Call task_heartbeat (with a checkpoint when you reach a good stopping point) while you \
-                 work and task_release with a status when you stop: ready_for_review when the work is done \
-                 and needs checking, blocked when you cannot go on, to_do to hand it back. Use complete \
-                 only for work that has been verified.",
+        "next": next,
     });
     if let Some(checkpoint) = resume {
         out["resume"] = resume_json(checkpoint);
@@ -488,11 +510,12 @@ impl HqTool for TaskNextTool {
         "task_next"
     }
     fn description(&self) -> &str {
-        "Get your next task and start it in one step: picks the most urgent open task assigned to you \
-         (then soonest due, then oldest) that nothing blocks and nobody holds, and claims it like \
+        "Get your next task and start it in one step. Work an earlier session left in progress (nobody \
+         holds it, quiet past the lease ttl) comes first, with where it left off; then the most urgent \
+         open task assigned to you (then soonest due, then oldest) that nothing blocks. Claims it like \
          task_claim, so two agents asking at once never get the same one. Replies with the lease, the \
-         task and where the last session left off, or task null when there is nothing to start. \
-         Set include_unassigned to also take tasks nobody is assigned to."
+         task and `resume`, or task null when there is nothing to start. Set include_unassigned to also \
+         take tasks nobody is assigned to."
     }
     fn parameters(&self) -> Value {
         json!({
@@ -558,6 +581,9 @@ impl HqTool for TaskNextTool {
                 initiative_id: initiative_id.as_deref(),
                 tag: tag.as_deref(),
                 no_code_work: false,
+                // Work an earlier session left in progress comes first, once it has been quiet
+                // for as long as a lease may be.
+                resume_after_secs: Some(ttl),
             };
             t::in_write_tx(c, |c| match t::claim_next(c, &query, &who, ttl)? {
                 Some(claimed) => {
@@ -589,9 +615,10 @@ impl HqTool for TaskHeartbeatTool {
         "task_heartbeat"
     }
     fn description(&self) -> &str {
-        "Tell HQ you are still working on a claimed task. A lease that goes quiet for longer than its \
-         ttl ends at your last heartbeat, so a crashed session costs no phantom time. Call it every \
-         few minutes while you work. If it says the lease ended, claim the task again."
+        "Tell HQ you are still working on a claimed task, and save a checkpoint. Any call that carries \
+         your lease (task_update, task_comment_add) also keeps it alive. A lease quiet for longer than \
+         its ttl ends at your last sign of life, so a crashed session costs no phantom time; if nobody \
+         took the task meanwhile your next call resumes it, otherwise claim the task again."
     }
     fn parameters(&self) -> Value {
         json!({

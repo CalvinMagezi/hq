@@ -236,6 +236,8 @@ async fn dispatch_one(
                 initiative_id: None,
                 tag: None,
                 no_code_work: no_code,
+                // A run is launched on work nobody has started; resuming is for agents that hold leases.
+                resume_after_secs: None,
             },
             QUEUE_LOOKAHEAD,
         )

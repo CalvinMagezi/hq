@@ -133,7 +133,10 @@ pub(super) fn is_invisible(c: char) -> bool {
 /// are `hs-...` and the supervisor comments as `harness-session`.
 fn is_reserved_actor(actor: &str) -> bool {
     let lower = actor.to_ascii_lowercase();
-    lower.starts_with("hs-") || lower == "harness-session" || lower == "unknown"
+    lower.starts_with("hs-")
+        || lower == "harness-session"
+        || lower == "unknown"
+        || lower == WEB_ACTOR
 }
 
 fn hash_token(token: &str) -> String {
@@ -235,6 +238,111 @@ pub fn require_live_lease(conn: &Connection, token: &str, ttl_secs: i64) -> Resu
         ),
         Some(lease) => Ok(lease),
     }
+}
+
+/// A lease seen more recently than this is not written again by the call that uses it.
+const TOUCH_AFTER_SECS: i64 = 10;
+
+/// The live lease a token names, for a call that works under it. Using a lease keeps it alive,
+/// so an agent that makes writes but never heartbeats (it has no clock) does not lose its lease
+/// to a long tool call. A lease that only expired resumes as a new interval under the same token
+/// when nobody holds the task and nothing has changed it since, which is exactly the case in
+/// which `release` would still let it hand the task back. The silent gap is never counted as
+/// work: the expired interval keeps its end at the last sign of life. Any other ended lease, and
+/// an expired one whose task moved on, is an error that says what to do next.
+pub fn use_lease(conn: &Connection, token: &str, ttl_secs: i64) -> Result<WorkSession> {
+    // Closed in its own commit: a refusal below must not roll the expiry back.
+    expire_stale_leases(conn, ttl_secs)?;
+    in_write_tx(conn, |conn| {
+        let lease = lease_for_token(conn, token)?.ok_or_else(|| {
+            anyhow::anyhow!("unknown lease token; claim the task with task_claim")
+        })?;
+        match (&lease.ended_at, lease.end_reason.as_deref()) {
+            (None, _) => refresh_lease(conn, lease),
+            (Some(_), Some(END_EXPIRED)) if lease.harness_session_id.is_none() => {
+                resume_lease(conn, &lease, token)
+            }
+            (Some(_), reason) => anyhow::bail!(
+                "lease {} ended ({}); claim the task again with task_claim",
+                lease.id,
+                reason.unwrap_or("ended")
+            ),
+        }
+    })
+}
+
+/// Marks a live lease as seen now, unless it was seen a moment ago.
+fn refresh_lease(conn: &Connection, lease: WorkSession) -> Result<WorkSession> {
+    let touched = conn.execute(
+        "UPDATE task_work_sessions SET last_heartbeat_at = datetime('now') \
+         WHERE id = ?1 AND ended_at IS NULL AND last_heartbeat_at <= datetime('now', ?2)",
+        params![lease.id, format!("-{TOUCH_AFTER_SECS} seconds")],
+    )?;
+    if touched == 0 {
+        return Ok(lease);
+    }
+    lease_by_id(conn, &lease.id)?.ok_or_else(|| anyhow::anyhow!("lease vanished while refreshing"))
+}
+
+/// Opens a new interval for an expired lease and hands the same token to it. The old row keeps
+/// its end at the last heartbeat, so its time is not stretched across the gap.
+fn resume_lease(conn: &Connection, old: &WorkSession, token: &str) -> Result<WorkSession> {
+    let task = get_task(conn, &old.task_id)?
+        .ok_or_else(|| anyhow::anyhow!("task vanished while resuming a lease"))?;
+    if task.archived_at.is_some() {
+        anyhow::bail!(
+            "lease {} expired and {} is archived; restore it before claiming it",
+            old.id,
+            task.display_id
+        );
+    }
+    if let Some(holder) = live_on_task(conn, &task.id)?.into_iter().next() {
+        anyhow::bail!(
+            "lease {} expired, and {} is now held by {} since {} UTC; claim it with task_claim once that session is gone",
+            old.id,
+            task.display_id,
+            holder.actor,
+            holder.started_at
+        );
+    }
+    let ended_at = old.ended_at.as_deref().unwrap_or_default();
+    let moved: i64 = conn.query_row(
+        "SELECT (SELECT COUNT(*) FROM task_events WHERE task_id = ?1 AND occurred_at > ?2 \
+                 AND COALESCE(work_session_id, '') != ?3) \
+              + (SELECT COUNT(*) FROM task_work_sessions WHERE task_id = ?1 AND id != ?3 \
+                 AND started_at > ?2)",
+        params![task.id, ended_at, old.id],
+        |r| r.get(0),
+    )?;
+    if moved > 0 {
+        anyhow::bail!(
+            "lease {} expired, and {} has been changed since; read it with task_get, then claim it again with task_claim",
+            old.id,
+            task.display_id
+        );
+    }
+    let id = format!("ws-{}", uuid::Uuid::new_v4().simple());
+    // The token hash is unique, so the old row gives it up before the new one takes it. The
+    // tombstone is not a hex digest, so no token can ever match it.
+    conn.execute(
+        "UPDATE task_work_sessions SET token_hash = ?1 WHERE id = ?2",
+        params![format!("resumed:{}", old.id), old.id],
+    )?;
+    conn.execute(
+        "INSERT INTO task_work_sessions \
+         (id, task_id, actor, harness, external_session_ref, host, cwd, branch, token_hash) \
+         SELECT ?1, task_id, actor, harness, external_session_ref, host, cwd, branch, ?2 \
+         FROM task_work_sessions WHERE id = ?3",
+        params![id, hash_token(token), old.id],
+    )?;
+    add_comment(
+        conn,
+        &task.id,
+        &old.actor,
+        "Work lease resumed after a silent gap.",
+        None,
+    )?;
+    lease_by_id(conn, &id)?.ok_or_else(|| anyhow::anyhow!("lease vanished while resuming"))
 }
 
 /// Recent leases on a task, newest first, live ones included.
@@ -419,12 +527,14 @@ pub fn claim(
 }
 
 /// Marks a live lease as seen now. A lease that already went silent past the
-/// TTL is closed and refused, so time is never counted across a gap.
+/// TTL is closed at its last sign of life, so time is never counted across a gap;
+/// it resumes as a new interval when nobody took the task meanwhile (`use_lease`),
+/// and is refused when somebody did.
 pub fn heartbeat(conn: &Connection, token: &str, ttl_secs: i64) -> Result<WorkSession> {
-    // Closed in its own commit: the refusal below must not roll the expiry back.
+    // Closed in its own commit: a refusal below must not roll the expiry back.
     expire_stale_leases(conn, ttl_secs)?;
     in_write_tx(conn, |conn| {
-        let lease = require_live_lease(conn, token, ttl_secs)?;
+        let lease = use_lease(conn, token, ttl_secs)?;
         conn.execute(
             "UPDATE task_work_sessions SET last_heartbeat_at = datetime('now') WHERE id = ?1",
             params![lease.id],

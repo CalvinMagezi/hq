@@ -3,9 +3,12 @@
 //! A session exiting cleanly says the process finished, not that the work was accepted. The
 //! signals read here are what happened to the work afterwards:
 //!
-//! - **The task.** A task that went to `ready_for_review` and then to `complete` was accepted.
-//!   One that went back to `in_progress`, `to_do` or `blocked` was reworked. A task waiting in
-//!   review has not been judged yet and gives no signal.
+//! - **The task.** A task that went to `ready_for_review` and then to `complete` was accepted,
+//!   but only when someone other than the people who worked it completed it. The actor on the
+//!   completing event must be known and must not be an actor that held a lease on the task or
+//!   moved it into progress or review; a task its own worker closes, or one whose completer was
+//!   not recorded, is not judged. One that went back to `in_progress`, `to_do` or `blocked` was
+//!   reworked. A task waiting in review has not been judged yet and gives no signal.
 //! - **A sub-agent run review.** `accepted` is accepted and `partial` is reworked. `blocked`
 //!   says the run could not finish, which is not a judgement on the skill, so it is ignored.
 //! - **An owner's correction of a note.** Someone other than the writer accepting a version
@@ -17,7 +20,7 @@
 //! The session's own result (`session_result`) and the post-session review (`review`) stay as
 //! weaker evidence and are replaced by any of these.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use anyhow::Result;
 use chrono::{DateTime, Utc};
@@ -82,30 +85,75 @@ struct Load {
 struct TaskEvent {
     event_type: String,
     at: String,
+    /// Who made the move. `None` before actors were recorded, or when the writer said nothing.
+    actor: Option<String>,
 }
 
-fn task_events(conn: &Connection, task_id: &str) -> Result<Vec<TaskEvent>> {
+/// A task's lifecycle and the people who worked it.
+struct TaskHistory {
+    events: Vec<TaskEvent>,
+    /// Lower-cased actors that held a lease on the task or moved it into progress or review.
+    workers: HashSet<String>,
+}
+
+fn norm(actor: &str) -> String {
+    actor.trim().to_ascii_lowercase()
+}
+
+fn task_history(conn: &Connection, task_id: &str) -> Result<TaskHistory> {
     let mut stmt = conn.prepare(
-        "SELECT event_type, occurred_at FROM task_events WHERE task_id = ?1 ORDER BY id",
+        "SELECT event_type, occurred_at, actor FROM task_events WHERE task_id = ?1 ORDER BY id",
     )?;
-    let rows = stmt.query_map([task_id], |r| {
-        Ok(TaskEvent {
-            event_type: r.get(0)?,
-            at: r.get(1)?,
+    let events: Vec<TaskEvent> = stmt
+        .query_map([task_id], |r| {
+            Ok(TaskEvent {
+                event_type: r.get(0)?,
+                at: r.get(1)?,
+                actor: r.get(2)?,
+            })
+        })?
+        .collect::<rusqlite::Result<_>>()?;
+    let mut workers: HashSet<String> = events
+        .iter()
+        .filter(|e| {
+            matches!(
+                e.event_type.as_str(),
+                "entered_in_progress" | "entered_ready_for_review"
+            )
         })
-    })?;
-    Ok(rows.collect::<rusqlite::Result<_>>()?)
+        .filter_map(|e| e.actor.as_deref().map(norm))
+        .collect();
+    let mut stmt =
+        conn.prepare("SELECT DISTINCT actor FROM task_work_sessions WHERE task_id = ?1")?;
+    for actor in stmt.query_map([task_id], |r| r.get::<_, String>(0))? {
+        workers.insert(norm(&actor?));
+    }
+    Ok(TaskHistory { events, workers })
+}
+
+/// Whether `actor` completing a task counts as someone other than the people who worked it.
+/// An actor nobody recorded, or the anonymous `unknown`, proves nothing either way.
+fn is_independent(actor: Option<&str>, workers: &HashSet<String>) -> bool {
+    let Some(actor) = actor.map(norm).filter(|a| !a.is_empty() && a != "unknown") else {
+        return false;
+    };
+    !workers.contains(&actor)
 }
 
 /// What happened to the task after a load at `loaded_at`: the first review that followed, and
-/// whether the next move after it was to `complete` or back to work.
-fn task_signal(events: &[TaskEvent], task_id: &str, loaded_at: &str) -> Option<Signal> {
+/// whether the next move after it was to `complete` (by someone other than its workers) or back
+/// to work.
+fn task_signal(history: &TaskHistory, task_id: &str, loaded_at: &str) -> Option<Signal> {
+    let events = &history.events;
     let review = events
         .iter()
         .position(|e| e.event_type == "entered_ready_for_review" && e.at.as_str() >= loaded_at)?;
     let next = events.get(review + 1)?;
     let status = match next.event_type.as_str() {
-        "entered_complete" => OutcomeStatus::Accepted,
+        "entered_complete" if is_independent(next.actor.as_deref(), &history.workers) => {
+            OutcomeStatus::Accepted
+        }
+        "entered_complete" => return None,
         "entered_in_progress" | "entered_to_do" | "entered_blocked" => OutcomeStatus::Reworked,
         _ => return None,
     };
@@ -229,7 +277,7 @@ pub fn settle(conn: &Connection, window_days: u32) -> Result<Settled> {
 
     let runs = run_verdicts(conn)?;
     let notes = note_judgements(conn)?;
-    let mut events: HashMap<String, Vec<TaskEvent>> = HashMap::new();
+    let mut events: HashMap<String, TaskHistory> = HashMap::new();
     let mut settled = Settled::default();
 
     for load in &loads {
@@ -238,7 +286,7 @@ pub fn settle(conn: &Connection, window_days: u32) -> Result<Settled> {
 
         if let Some(task_id) = &load.task_id {
             if !events.contains_key(task_id) {
-                events.insert(task_id.clone(), task_events(conn, task_id)?);
+                events.insert(task_id.clone(), task_history(conn, task_id)?);
             }
             if let Some(s) = task_signal(&events[task_id], task_id, &load.loaded_at) {
                 signals.push(s);
@@ -326,9 +374,15 @@ mod tests {
         db
     }
 
-    fn move_to(db: &Database, task: &str, status: &str) {
+    /// Moves a task as `actor`. A completion with no actor named is made by `reviewer`, a person
+    /// other than anyone who worked the task: what most tests mean by a reviewed task.
+    fn move_as(db: &Database, task: &str, status: &str, actor: Option<&str>) {
+        let ctx = t::WriteCtx {
+            actor,
+            work_session_id: None,
+        };
         db.with_conn(|c| {
-            t::update_task(
+            t::update_task_as(
                 c,
                 task,
                 &t::TaskPatch {
@@ -336,10 +390,20 @@ mod tests {
                     ..Default::default()
                 },
                 None,
+                &ctx,
             )
             .map(|_| ())
         })
         .unwrap();
+    }
+
+    fn move_to(db: &Database, task: &str, status: &str) {
+        move_as(
+            db,
+            task,
+            status,
+            (status == "complete").then_some("reviewer"),
+        );
     }
 
     fn load(db: &Database, skill: &str, session: &str, task: Option<&str>) -> String {
@@ -748,5 +812,98 @@ mod tests {
         move_to(&db, "tk-1", "complete");
         assert_eq!(settle_now(&db), Settled::default());
         assert_eq!(outcome(&db, &id), (None, None, None, None));
+    }
+
+    /// A load on a task that `worker` took through progress and into review.
+    fn worked_by(db: &Database, worker: &str) -> String {
+        move_as(db, "tk-1", "in_progress", Some(worker));
+        let id = load(db, "sheets", "s-1", Some("tk-1"));
+        move_as(db, "tk-1", "ready_for_review", Some(worker));
+        id
+    }
+
+    #[test]
+    fn a_task_closed_by_its_own_worker_is_not_judged() {
+        let db = db();
+        let id = worked_by(&db, "alpha");
+        move_as(&db, "tk-1", "complete", Some("alpha"));
+        assert_eq!(settle_now(&db).updated, 0);
+        assert_eq!(outcome(&db, &id), (None, None, None, None));
+    }
+
+    #[test]
+    fn the_worker_name_matches_whatever_its_case_or_spacing() {
+        let db = db();
+        let id = worked_by(&db, "Alpha");
+        move_as(&db, "tk-1", "complete", Some(" alpha "));
+        settle_now(&db);
+        assert_eq!(outcome(&db, &id), (None, None, None, None));
+    }
+
+    #[test]
+    fn a_completion_nobody_recorded_or_made_anonymously_is_not_judged() {
+        for completer in [None, Some("unknown"), Some("  ")] {
+            let db = db();
+            let id = worked_by(&db, "alpha");
+            move_as(&db, "tk-1", "complete", completer);
+            settle_now(&db);
+            assert_eq!(
+                outcome(&db, &id),
+                (None, None, None, None),
+                "completer {completer:?} proves nothing"
+            );
+        }
+    }
+
+    #[test]
+    fn someone_other_than_the_worker_completing_it_is_acceptance() {
+        for completer in ["web", "gamma"] {
+            let db = db();
+            let id = worked_by(&db, "alpha");
+            move_as(&db, "tk-1", "complete", Some(completer));
+            settle_now(&db);
+            assert_eq!(
+                outcome(&db, &id),
+                some("accepted", 1.0, SOURCE_TASK, "task:tk-1"),
+                "completer {completer}"
+            );
+        }
+    }
+
+    #[test]
+    fn a_lease_holder_counts_as_a_worker_even_when_another_actor_moved_the_status() {
+        let db = db();
+        db.with_conn(|c| {
+            t::claim(
+                c,
+                "tk-1",
+                &t::LeaseIdentity {
+                    actor: "alpha",
+                    ..Default::default()
+                },
+                900,
+                false,
+            )
+            .map(|_| ())
+        })
+        .unwrap();
+        let id = load(&db, "sheets", "s-1", Some("tk-1"));
+        // Somebody else filed it for review; alpha, who held the lease, then closes it.
+        move_as(&db, "tk-1", "ready_for_review", Some("beta"));
+        move_as(&db, "tk-1", "complete", Some("alpha"));
+        settle_now(&db);
+        assert_eq!(outcome(&db, &id), (None, None, None, None));
+    }
+
+    #[test]
+    fn rework_counts_whoever_reopens_the_task() {
+        let db = db();
+        let id = worked_by(&db, "alpha");
+        move_as(&db, "tk-1", "in_progress", Some("alpha"));
+        settle_now(&db);
+        assert_eq!(
+            outcome(&db, &id),
+            some("reworked", 0.5, SOURCE_TASK, "task:tk-1")
+        );
     }
 }

@@ -1127,11 +1127,7 @@ fn a_silent_lease_is_closed_at_its_last_heartbeat() {
     backdate(&db, &claimed.session.id, "started_at", 2 * 3600);
     backdate(&db, &claimed.session.id, "last_heartbeat_at", 3600);
 
-    let err = db
-        .with_conn(|c| heartbeat(c, &claimed.token, TTL))
-        .unwrap_err()
-        .to_string();
-    assert!(err.contains("task_claim"), "{err}");
+    db.with_conn(|c| expire_stale_leases(c, TTL)).unwrap();
     let lease = db
         .with_conn(|c| lease_for_token(c, &claimed.token))
         .unwrap()
@@ -1146,6 +1142,190 @@ fn a_silent_lease_is_closed_at_its_last_heartbeat() {
             .unwrap()
             .is_none()
     );
+}
+
+/// A lease that went silent for two hours after one hour of work, on a task nothing else touched.
+fn silent_lease(db: &Database, task: &str, actor: &str) -> Claimed {
+    let claimed = claim_as(db, task, actor).unwrap();
+    backdate(db, &claimed.session.id, "started_at", 2 * 3600);
+    backdate(db, &claimed.session.id, "last_heartbeat_at", 3600);
+    // Everything that happened before the silence happened before it.
+    db.with_conn(|c| {
+        c.execute(
+            "UPDATE task_events SET occurred_at = datetime('now', '-2 hours')",
+            [],
+        )?;
+        Ok(())
+    })
+    .unwrap();
+    claimed
+}
+
+#[test]
+fn using_a_lease_keeps_it_alive_without_a_heartbeat() {
+    let (db, initiative) = setup();
+    make(&db, "tk-1", &initiative, None).unwrap();
+    let claimed = claim_as(&db, "tk-1", "alpha").unwrap();
+    backdate(&db, &claimed.session.id, "last_heartbeat_at", TTL - 60);
+    let before = db
+        .with_conn(|c| lease_by_id(c, &claimed.session.id))
+        .unwrap()
+        .unwrap()
+        .last_heartbeat_at;
+
+    let used = db.with_conn(|c| use_lease(c, &claimed.token, TTL)).unwrap();
+    assert_eq!(used.id, claimed.session.id, "the same lease, not a new one");
+    let seen = db
+        .with_conn(|c| lease_by_id(c, &claimed.session.id))
+        .unwrap()
+        .unwrap();
+    assert!(
+        seen.last_heartbeat_at > before,
+        "a call under the lease counts as a sign of life: {before} then {}",
+        seen.last_heartbeat_at
+    );
+    // Seen a moment ago, so the next call writes nothing.
+    let again = db.with_conn(|c| use_lease(c, &claimed.token, TTL)).unwrap();
+    assert_eq!(again.last_heartbeat_at, seen.last_heartbeat_at);
+}
+
+#[test]
+fn an_expired_lease_resumes_as_a_new_interval_when_nothing_moved() {
+    let (db, initiative) = setup();
+    make(&db, "tk-1", &initiative, None).unwrap();
+    let claimed = silent_lease(&db, "tk-1", "alpha");
+
+    let resumed = db.with_conn(|c| use_lease(c, &claimed.token, TTL)).unwrap();
+    assert_ne!(resumed.id, claimed.session.id, "a new interval, a new row");
+    assert!(resumed.ended_at.is_none());
+    assert_eq!(resumed.actor, "alpha");
+
+    let old = db
+        .with_conn(|c| lease_by_id(c, &claimed.session.id))
+        .unwrap()
+        .unwrap();
+    assert_eq!(old.end_reason.as_deref(), Some(END_EXPIRED));
+    assert_eq!(old.active_seconds, 3600, "the gap is not stretched into it");
+
+    let by_token = db
+        .with_conn(|c| lease_for_token(c, &claimed.token))
+        .unwrap()
+        .unwrap();
+    assert_eq!(
+        by_token.id, resumed.id,
+        "the same token now names the new interval"
+    );
+    let live = db
+        .with_conn(|c| live_lease(c, "tk-1", TTL))
+        .unwrap()
+        .unwrap();
+    assert_eq!(live.id, resumed.id);
+
+    let leased = db.with_conn(|c| leased_seconds(c, "tk-1")).unwrap();
+    assert!(
+        (3600..3700).contains(&leased),
+        "an hour of work plus a moment, not the two-hour gap: {leased}"
+    );
+    let comments = db.with_conn(|c| list_comments(c, "tk-1")).unwrap();
+    assert!(
+        comments
+            .iter()
+            .any(|c| c.body == "Work lease resumed after a silent gap.")
+    );
+}
+
+#[test]
+fn a_heartbeat_resumes_an_expired_lease_too() {
+    let (db, initiative) = setup();
+    make(&db, "tk-1", &initiative, None).unwrap();
+    let claimed = silent_lease(&db, "tk-1", "alpha");
+    let beat = db.with_conn(|c| heartbeat(c, &claimed.token, TTL)).unwrap();
+    assert_ne!(beat.id, claimed.session.id);
+    assert!(beat.ended_at.is_none());
+}
+
+#[test]
+fn an_expired_lease_does_not_resume_on_a_task_someone_else_holds() {
+    let (db, initiative) = setup();
+    make(&db, "tk-1", &initiative, None).unwrap();
+    let stale = silent_lease(&db, "tk-1", "alpha");
+    let fresh = claim_as(&db, "tk-1", "beta").unwrap();
+
+    let err = db
+        .with_conn(|c| use_lease(c, &stale.token, TTL))
+        .unwrap_err()
+        .to_string();
+    assert!(
+        err.contains("beta") && err.contains("task_claim"),
+        "it says who holds the task and how to proceed: {err}"
+    );
+    let live = db
+        .with_conn(|c| live_lease(c, "tk-1", TTL))
+        .unwrap()
+        .unwrap();
+    assert_eq!(live.id, fresh.session.id, "beta still holds it");
+    assert!(
+        db.with_conn(|c| heartbeat(c, &stale.token, TTL)).is_err(),
+        "a heartbeat is refused the same way"
+    );
+}
+
+#[test]
+fn an_expired_lease_does_not_resume_after_the_task_moved_on() {
+    let (db, initiative) = setup();
+    make(&db, "tk-1", &initiative, None).unwrap();
+    let stale = silent_lease(&db, "tk-1", "alpha");
+    move_to(&db, "tk-1", STATUS_BLOCKED).unwrap();
+
+    let err = db
+        .with_conn(|c| use_lease(c, &stale.token, TTL))
+        .unwrap_err()
+        .to_string();
+    assert!(
+        err.contains("changed since") && err.contains("task_claim"),
+        "{err}"
+    );
+    assert!(
+        db.with_conn(|c| live_lease(c, "tk-1", TTL))
+            .unwrap()
+            .is_none(),
+        "nothing was reopened"
+    );
+}
+
+#[test]
+fn an_expired_lease_does_not_resume_after_another_session_came_and_went() {
+    let (db, initiative) = setup();
+    make(&db, "tk-1", &initiative, None).unwrap();
+    let stale = silent_lease(&db, "tk-1", "alpha");
+    let other = claim_as(&db, "tk-1", "beta").unwrap();
+    db.with_conn(|c| release(c, &other.token, None, "looked, left it", TTL))
+        .unwrap();
+
+    let err = db
+        .with_conn(|c| use_lease(c, &stale.token, TTL))
+        .unwrap_err()
+        .to_string();
+    assert!(err.contains("changed since"), "{err}");
+}
+
+#[test]
+fn a_released_or_unknown_lease_never_resumes() {
+    let (db, initiative) = setup();
+    make(&db, "tk-1", &initiative, None).unwrap();
+    let claimed = claim_as(&db, "tk-1", "alpha").unwrap();
+    db.with_conn(|c| release(c, &claimed.token, None, "", TTL))
+        .unwrap();
+    let err = db
+        .with_conn(|c| use_lease(c, &claimed.token, TTL))
+        .unwrap_err()
+        .to_string();
+    assert!(err.contains("ended (released)"), "{err}");
+    let err = db
+        .with_conn(|c| use_lease(c, "hql_nope", TTL))
+        .unwrap_err()
+        .to_string();
+    assert!(err.contains("unknown lease token"), "{err}");
 }
 
 #[test]
@@ -3278,6 +3458,7 @@ fn want<'a>(assignee: &'a str, unassigned: bool) -> NextTaskQuery<'a> {
         initiative_id: None,
         tag: None,
         no_code_work: false,
+        resume_after_secs: None,
     }
 }
 
@@ -3425,6 +3606,216 @@ fn two_agents_asking_for_work_at_once_never_get_the_same_task() {
             .unwrap()
             .is_none(),
         "the queue is empty"
+    );
+}
+
+fn resuming(assignee: &str, unassigned: bool) -> NextTaskQuery<'_> {
+    NextTaskQuery {
+        resume_after_secs: Some(TTL),
+        ..want(assignee, unassigned)
+    }
+}
+
+/// What a crash leaves behind: the task in progress, assigned, and every sign of life old.
+fn left_in_progress(db: &Database, initiative: &str, id: &str, assignee: &str) {
+    make(db, id, initiative, None).unwrap();
+    assign(db, id, &[assignee]);
+    let claimed = claim_as(db, id, "crashed").unwrap();
+    db.with_conn(|c| {
+        c.execute(
+            "UPDATE task_work_sessions SET started_at = datetime('now', '-3 hours'), \
+             last_heartbeat_at = datetime('now', '-2 hours') WHERE id = ?1",
+            [&claimed.session.id],
+        )?;
+        c.execute(
+            "UPDATE task_comments SET created_at = datetime('now', '-3 hours') WHERE task_id = ?1",
+            [id],
+        )?;
+        c.execute(
+            "UPDATE tasks SET updated_at = datetime('now', '-3 hours') WHERE id = ?1",
+            [id],
+        )?;
+        Ok(())
+    })
+    .unwrap();
+}
+
+#[test]
+fn work_left_in_progress_and_gone_quiet_is_offered_before_any_to_do() {
+    let (db, initiative) = setup();
+    db.with_conn(|c| {
+        create_task(
+            c,
+            "urgent",
+            &initiative,
+            &NewTask {
+                title: "urgent",
+                priority: Some("urgent"),
+                created_by: "t",
+                ..Default::default()
+            },
+        )
+        .map(|_| ())
+    })
+    .unwrap();
+    assign(&db, "urgent", &["hq"]);
+    left_in_progress(&db, &initiative, "orphan", "hq");
+
+    let picked = db
+        .with_conn(|c| next_task(c, &resuming("hq", false)))
+        .unwrap()
+        .unwrap();
+    assert_eq!(
+        picked.id, "orphan",
+        "resuming beats a more urgent fresh task"
+    );
+    assert_eq!(
+        db.with_conn(|c| next_task(c, &want("hq", false)))
+            .unwrap()
+            .unwrap()
+            .id,
+        "urgent",
+        "a caller that does not resume still sees only to_do work"
+    );
+    // The orphan is not the only thing on offer: to_do work follows it.
+    let both = db
+        .with_conn(|c| next_tasks(c, &resuming("hq", false), 5))
+        .unwrap();
+    assert_eq!(
+        both.iter().map(|t| t.id.as_str()).collect::<Vec<_>>(),
+        ["orphan", "urgent"]
+    );
+}
+
+#[test]
+fn work_that_is_held_recent_blocked_or_someone_elses_is_not_offered_for_resuming() {
+    let (db, initiative) = setup();
+
+    // Quiet for less than the ttl: its session may only be thinking.
+    make(&db, "recent", &initiative, None).unwrap();
+    assign(&db, "recent", &["hq"]);
+    move_to(&db, "recent", STATUS_IN_PROGRESS).unwrap();
+
+    // Held right now.
+    make(&db, "held", &initiative, None).unwrap();
+    assign(&db, "held", &["hq"]);
+    claim_as(&db, "held", "alpha").unwrap();
+
+    // Assigned to somebody else.
+    left_in_progress(&db, &initiative, "theirs", "reviewer");
+
+    // Quiet, but waiting on something unfinished.
+    left_in_progress(&db, &initiative, "gated", "hq");
+    make(&db, "gate", &initiative, None).unwrap();
+    db.with_conn(|c| add_dependency(c, "gated", "gate", "t"))
+        .unwrap();
+
+    assert!(
+        db.with_conn(|c| next_task(c, &resuming("hq", false)))
+            .unwrap()
+            .is_none(),
+        "none of these is mine, quiet, unheld and unblocked"
+    );
+    assert_eq!(
+        db.with_conn(|c| next_task(c, &resuming("reviewer", false)))
+            .unwrap()
+            .unwrap()
+            .id,
+        "theirs"
+    );
+    // Unassigned work is offered only to a caller that asks for it.
+    left_in_progress(&db, &initiative, "nobodys", "hq");
+    db.with_conn(|c| {
+        c.execute("DELETE FROM task_assignees WHERE task_id = 'nobodys'", [])?;
+        Ok(())
+    })
+    .unwrap();
+    assert!(
+        db.with_conn(|c| next_task(c, &resuming("hq", false)))
+            .unwrap()
+            .is_none()
+    );
+    assert_eq!(
+        db.with_conn(|c| next_task(c, &resuming("hq", true)))
+            .unwrap()
+            .unwrap()
+            .id,
+        "nobodys"
+    );
+}
+
+#[test]
+fn a_lease_that_went_silent_does_not_hide_the_work_from_the_next_caller() {
+    let (db, initiative) = setup();
+    make(&db, "tk-1", &initiative, None).unwrap();
+    assign(&db, "tk-1", &["hq"]);
+    let claimed = claim_as(&db, "tk-1", "crashed").unwrap();
+    // Still marked live in the table: nobody has closed it. Everything about it is old.
+    db.with_conn(|c| {
+        c.execute(
+            "UPDATE task_work_sessions SET started_at = datetime('now', '-3 hours'), \
+             last_heartbeat_at = datetime('now', '-2 hours') WHERE id = ?1",
+            [&claimed.session.id],
+        )?;
+        c.execute(
+            "UPDATE task_comments SET created_at = datetime('now', '-3 hours')",
+            [],
+        )?;
+        c.execute(
+            "UPDATE tasks SET updated_at = datetime('now', '-3 hours')",
+            [],
+        )?;
+        Ok(())
+    })
+    .unwrap();
+
+    let resumed = db
+        .with_conn(|c| claim_next(c, &resuming("hq", false), &who("beta"), TTL))
+        .unwrap()
+        .expect("the silent lease is closed first, so the task is free");
+    assert_eq!(resumed.task.id, "tk-1");
+    let old = db
+        .with_conn(|c| lease_by_id(c, &claimed.session.id))
+        .unwrap()
+        .unwrap();
+    assert_eq!(old.end_reason.as_deref(), Some(END_EXPIRED));
+}
+
+#[test]
+fn resuming_writes_only_the_claim_and_two_callers_never_get_the_same_orphan() {
+    let (db, initiative) = setup();
+    left_in_progress(&db, &initiative, "a", "hq");
+    left_in_progress(&db, &initiative, "b", "hq");
+    let events = |db: &Database| {
+        ["a", "b"].map(|id| db.with_conn(|c| list_task_events(c, id)).unwrap().len())
+    };
+    let before = events(&db);
+
+    let first = db
+        .with_conn(|c| claim_next(c, &resuming("hq", false), &who("alpha"), TTL))
+        .unwrap()
+        .unwrap();
+    assert_eq!(first.task.status, STATUS_IN_PROGRESS);
+    assert!(
+        !first.moved,
+        "it was already in progress, so no status moved"
+    );
+    assert_eq!(
+        events(&db),
+        before,
+        "no status event was written, only the claim"
+    );
+
+    let second = db
+        .with_conn(|c| claim_next(c, &resuming("hq", false), &who("beta"), TTL))
+        .unwrap()
+        .unwrap();
+    assert_ne!(first.task.id, second.task.id);
+    assert!(
+        db.with_conn(|c| claim_next(c, &resuming("hq", false), &who("gamma"), TTL))
+            .unwrap()
+            .is_none(),
+        "both are held now"
     );
 }
 

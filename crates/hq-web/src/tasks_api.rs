@@ -499,7 +499,13 @@ pub(crate) async fn update_task_handler(
                 ))
                 .into());
             }
-            let mut task = t::update_task(c, &id, &patch, expected_status.as_deref())?;
+            // A person at the board, not an agent: the events say so, which is what lets a
+            // completion here count as someone other than the worker accepting the task.
+            let ctx = t::WriteCtx {
+                actor: Some(t::WEB_ACTOR),
+                work_session_id: None,
+            };
+            let mut task = t::update_task_as(c, &id, &patch, expected_status.as_deref(), &ctx)?;
             if !add_deps.is_empty() || !remove_deps.is_empty() {
                 apply_dependency_changes(c, &task.id, &add_deps, &remove_deps, "web")?;
                 task = t::get_task(c, &task.id)?.ok_or_else(|| vanished(&id))?;
@@ -1386,6 +1392,38 @@ mod tests {
             .await
             .unwrap();
         serde_json::from_slice(&bytes).unwrap()
+    }
+
+    #[tokio::test]
+    async fn a_status_change_at_the_board_is_recorded_as_the_web_actor() {
+        let state = test_state();
+        let response = create_task_handler(
+            State(state.clone()),
+            Json(serde_json::from_value(json!({ "title": "Review me" })).unwrap()),
+        )
+        .await;
+        let task = body_json(response).await;
+        let id: String = task["id"].as_str().unwrap().into();
+        for status in ["in_progress", "ready_for_review", "complete"] {
+            let body: UpdateTaskBody = serde_json::from_value(json!({ "status": status })).unwrap();
+            let response =
+                update_task_handler(State(state.clone()), AxumPath(id.clone()), Json(body)).await;
+            assert_eq!(response.status(), StatusCode::OK, "{status}");
+        }
+        let events = state
+            .db
+            .with_conn({
+                let id = id.clone();
+                move |c| t::list_task_events(c, &id)
+            })
+            .unwrap();
+        assert_eq!(events.len(), 3);
+        assert!(
+            events
+                .iter()
+                .all(|e| e.actor.as_deref() == Some(t::WEB_ACTOR)),
+            "a person at the board is not an anonymous or missing actor: {events:?}"
+        );
     }
 
     #[tokio::test]

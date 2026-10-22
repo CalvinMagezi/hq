@@ -3099,6 +3099,220 @@ async fn a_stale_lease_released_late_cannot_replace_the_resume_point_a_newer_ses
 }
 
 #[tokio::test]
+async fn an_agent_that_never_heartbeats_keeps_its_lease_and_resumes_after_a_long_silence() {
+    let vault_dir = tempfile::tempdir().unwrap();
+    let vault_path = vault_dir.keep();
+    let vault = Arc::new(VaultClient::new(vault_path.clone()).unwrap());
+    let db = Arc::new(Database::open_memory().unwrap());
+    let tools = create_task_tools_with(
+        vault_path,
+        vault,
+        db.clone(),
+        hq_core::config::TasksConfig::default(),
+    );
+    let task = call_tool(&tools, "task_create", json!({ "title": "long build" }))
+        .await
+        .unwrap();
+    let id = task["display_id"].as_str().unwrap().to_string();
+    let claim = call_tool(
+        &tools,
+        "task_claim",
+        json!({ "task_id": id, "actor": "alpha", "session_ref": "a" }),
+    )
+    .await
+    .unwrap();
+    let lease = claim["lease"].as_str().unwrap().to_string();
+    let silence = |hours: i64| {
+        db.with_conn(|c| {
+            c.execute(
+                "UPDATE task_work_sessions SET last_heartbeat_at = datetime('now', ?1), \
+                 started_at = datetime('now', ?2)",
+                [format!("-{hours} hours"), format!("-{} hours", hours + 1)],
+            )?;
+            c.execute(
+                "UPDATE task_events SET occurred_at = datetime('now', ?1)",
+                [format!("-{} hours", hours + 1)],
+            )?;
+            Ok(())
+        })
+        .unwrap();
+    };
+
+    // Writes under a lease keep it alive: no heartbeat is ever sent.
+    let wrote = call_tool(
+        &tools,
+        "task_comment_add",
+        json!({ "task_id": id, "body": "still going", "lease": lease }),
+    )
+    .await
+    .unwrap();
+    assert_eq!(wrote["author"], "alpha");
+
+    // A long build: the lease goes silent past its ttl. The next write still works.
+    silence(3);
+    let after = call_tool(
+        &tools,
+        "task_comment_add",
+        json!({ "task_id": id, "body": "build finished", "lease": lease }),
+    )
+    .await
+    .unwrap();
+    assert_eq!(after["author"], "alpha", "attributed to the same agent");
+    let got = call_tool(&tools, "task_get", json!({ "id": id }))
+        .await
+        .unwrap();
+    assert_eq!(got["held_by"]["actor"], "alpha", "it holds the task again");
+    assert_eq!(got["work_sessions"].as_array().unwrap().len(), 2);
+    let hours = got["time"]["leased_seconds"].as_i64().unwrap();
+    assert!(
+        hours < 2 * 3600,
+        "the three silent hours are not work: {hours} s"
+    );
+
+    // Once another session has the task, the old token is refused and says who holds it.
+    silence(3);
+    call_tool(
+        &tools,
+        "task_claim",
+        json!({ "task_id": id, "actor": "beta", "session_ref": "b" }),
+    )
+    .await
+    .unwrap();
+    let refused = call_tool(
+        &tools,
+        "task_comment_add",
+        json!({ "task_id": id, "body": "late", "lease": lease }),
+    )
+    .await
+    .unwrap_err()
+    .to_string();
+    assert!(
+        refused.contains("beta") && refused.contains("task_claim"),
+        "{refused}"
+    );
+}
+
+#[tokio::test]
+async fn an_agent_cannot_write_under_the_name_of_the_web_board() {
+    let tools = tools_with(hq_core::config::LeaseMode::Off);
+    let task = call_tool(&tools, "task_create", json!({ "title": "Ship" }))
+        .await
+        .unwrap();
+    let id = task["display_id"].as_str().unwrap().to_string();
+    for (tool, args) in [
+        (
+            "task_update",
+            json!({ "id": id, "status": "in_progress", "actor": "Web" }),
+        ),
+        (
+            "task_comment_add",
+            json!({ "task_id": id, "body": "hi", "author": "web" }),
+        ),
+        ("task_create", json!({ "title": "x", "created_by": "web" })),
+        ("task_claim", json!({ "task_id": id, "actor": "web" })),
+    ] {
+        let err = call_tool(&tools, tool, args).await.unwrap_err().to_string();
+        assert!(
+            err.contains("web"),
+            "{tool} must refuse the web board's name, got: {err}"
+        );
+    }
+    let got = call_tool(&tools, "task_get", json!({ "id": id }))
+        .await
+        .unwrap();
+    assert_eq!(got["status"], "to_do", "nothing was written");
+}
+
+#[tokio::test]
+async fn task_next_hands_a_crashed_sessions_work_to_its_owner_with_the_notes_it_left() {
+    let vault_dir = tempfile::tempdir().unwrap();
+    let vault_path = vault_dir.keep();
+    let vault = Arc::new(VaultClient::new(vault_path.clone()).unwrap());
+    let db = Arc::new(Database::open_memory().unwrap());
+    let tools = create_task_tools_with(
+        vault_path,
+        vault,
+        db.clone(),
+        hq_core::config::TasksConfig::default(),
+    );
+    let started = call_tool(
+        &tools,
+        "task_create",
+        json!({ "title": "half done", "assignees": ["worker"] }),
+    )
+    .await
+    .unwrap();
+    let half = started["display_id"].as_str().unwrap().to_string();
+    let first = call_tool(
+        &tools,
+        "task_claim",
+        json!({ "task_id": half, "actor": "worker", "session_ref": "s1" }),
+    )
+    .await
+    .unwrap();
+    call_tool(
+        &tools,
+        "task_heartbeat",
+        json!({ "lease": first["lease"], "checkpoint": {
+            "summary": "schema done, handler half written",
+            "next_step": "finish the handler in src/handler.rs",
+        } }),
+    )
+    .await
+    .unwrap();
+    // The session dies: no release, and every sign of life ages.
+    db.with_conn(|c| {
+        for sql in [
+            "UPDATE task_work_sessions SET started_at = datetime('now', '-4 hours'), last_heartbeat_at = datetime('now', '-3 hours')",
+            "UPDATE task_comments SET created_at = datetime('now', '-4 hours')",
+            "UPDATE tasks SET updated_at = datetime('now', '-4 hours')",
+            "UPDATE task_checkpoints SET created_at = datetime('now', '-3 hours')",
+        ] {
+            c.execute(sql, [])?;
+        }
+        Ok(())
+    })
+    .unwrap();
+    // A more urgent task is waiting too.
+    call_tool(
+        &tools,
+        "task_create",
+        json!({ "title": "fresh and urgent", "assignees": ["worker"], "priority": "urgent" }),
+    )
+    .await
+    .unwrap();
+
+    let next = call_tool(&tools, "task_next", json!({ "actor": "worker" }))
+        .await
+        .unwrap();
+    assert_eq!(
+        next["task"]["display_id"], half,
+        "the unfinished work comes first"
+    );
+    assert_eq!(next["resuming"], true);
+    assert_eq!(next["moved_to_in_progress"], false);
+    assert_eq!(
+        next["resume"]["next_step"],
+        "finish the handler in src/handler.rs"
+    );
+    assert!(
+        next["next"]
+            .as_str()
+            .unwrap()
+            .contains("read `resume` first"),
+        "{}",
+        next["next"]
+    );
+
+    // Its owner holds it now, so the next ask moves on to the fresh task.
+    let after = call_tool(&tools, "task_next", json!({ "actor": "worker" }))
+        .await
+        .unwrap();
+    assert_eq!(after["task"]["title"], "fresh and urgent");
+    assert_eq!(after["resuming"], false);
+}
+
+#[tokio::test]
 async fn the_blocked_reason_rule_cannot_be_met_with_nothing_or_dropped_later() {
     let tools = tools_with(hq_core::config::LeaseMode::Off);
     let task = call_tool(&tools, "task_create", json!({ "title": "t" }))

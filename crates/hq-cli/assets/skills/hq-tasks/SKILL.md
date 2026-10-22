@@ -10,10 +10,10 @@ HQ tracks work as tasks. When you work through the task tools, HQ records who di
 
 ## The loop
 
-1. **Find work.** `task_next {actor}` picks the most urgent open task assigned to you and starts it in one step. To look first, `task_list {assignee: "<your name>", sort: "priority"}` shows your queue, then `task_claim` the one you choose.
+1. **Find work.** `task_next {actor}` picks the most urgent open task assigned to you and starts it in one step. Work an earlier session left in progress and then went quiet on comes first; the reply says `resuming` and carries `resume`. To look first, `task_list {assignee: "<your name>", sort: "priority"}` shows your queue, then `task_claim` the one you choose.
 2. **Claim before you work.** `task_claim {task_id, actor, harness, session_ref, cwd, branch}` moves the task to in progress and returns a `lease` token. Keep the token for the whole session. If the task is held by someone else you are refused and told who; do not take it over unless that session is gone (`takeover: true`).
 3. **Work, and say so.** Pass `lease` on `task_update`, `task_comment_add` and `task_create` so everything is recorded as yours.
-4. **Heartbeat.** Call `task_heartbeat {lease}` every few minutes. A lease that goes quiet for the configured time ends at your last heartbeat, so a crash costs no phantom time. If it reports the lease ended, claim the task again.
+4. **Stay alive.** Any call that carries your `lease` (`task_update`, `task_comment_add`) keeps it alive, and `task_heartbeat {lease}` does too. A lease that goes quiet for the configured time ends at your last sign of life, so a crash costs no phantom time. If you were only quiet, for example during a long build, your next call resumes the lease as long as nobody took the task meanwhile. If it reports the lease ended, claim the task again.
 5. **Checkpoint.** At a good stopping point, `task_heartbeat {lease, checkpoint: {summary, next_step, open_questions, files}}`. Write it for another agent: where the work stands and the single next thing to do. The next session that claims the task gets it back as `resume`.
 6. **Release honestly.** `task_release {lease, status, summary}`:
    - `ready_for_review` when the work is done and needs checking.

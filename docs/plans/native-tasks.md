@@ -246,6 +246,14 @@ for sessions HQ spawns. Migration `081_task_work_sessions` adds the table and `a
   the work stands, and its summary is left on the thread, but its status change is applied only
   while nobody else holds the task and nothing else has moved it since the lease ended
   (`status_applied` in the reply says which).
+- **Working under a lease keeps it alive.** An agent has no clock, so `task_heartbeat` cannot be
+  the only thing that refreshes a lease. Any call that resolves a live lease (`task_update`,
+  `task_comment_add`, `task_create`, `task_link_add`) marks it seen, skipping the write when it was
+  seen in the last 10 seconds. A lease that only expired resumes as a new lease interval under the
+  same token (`hq_db::tasks::use_lease`) when nobody holds the task and nothing has changed it
+  since, the same condition `release` applies. The expired interval keeps its end at the last sign
+  of life, so the silent gap is never counted as work, and a comment says the lease resumed. If
+  another session took the task, or anything moved it, the call is refused and says which.
 - **Attribution is per task.** A lease names who is acting on any task, but an event is recorded
   under the lease (`work_session_id`) only on the lease's own task.
 - **`tasks.require_lease`** is `off` (default), `warn` or `enforce` and applies only to agents
@@ -449,7 +457,13 @@ Any agent, whatever harness it runs in, can use tasks as its headquarters. Migra
   change may be seen twice, never missed. `task_next {actor}` picks the most urgent `to_do` task
   assigned to you (or nobody, with `include_unassigned`) whose dependencies are done and that
   nobody holds, then soonest due, then oldest, and claims it in the same write, so two agents asking
-  at once never get the same task. It answers like `task_claim`, or `task: null` and why.
+  at once never get the same task. It answers like `task_claim`, or `task: null` and why. Work an
+  earlier session left in progress comes first: an `in_progress` task assigned to the caller (or to
+  no one, with `include_unassigned`) that nobody holds and that has shown no sign of life for the
+  lease ttl. Its reply has `resuming: true` and the last checkpoint as `resume`; nothing changes
+  but the claim. A crashed or compacted session is the usual way work stops, and this is what routes
+  its checkpoint to an agent without waiting for the 72 hour stale list. Callers that launch fresh
+  runs (the stack) do not ask for this and still see only `to_do` work.
 - **Bulk.** `task_create_many` (up to 100) takes `tasks`, `defaults` and `external_prefix`; a later
   item refers to an earlier one as `@key` in `parent_id`, `depends_on` or a task link, and the
   prefix makes the call safe to repeat. `task_update_many` takes `updates` and `defaults`. Each item
