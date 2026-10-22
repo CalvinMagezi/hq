@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android" android:layout_width="match_parent" android:layout_height="match_parent"
+    android:background="@drawable/widget_bg" android:gravity="center_vertical" android:orientation="horizontal" android:padding="12dp">
+    <ImageView android:id="@+id/capture_field" android:layout_width="48dp" android:layout_height="48dp" android:background="@drawable/widget_circle_green"
+        android:contentDescription="Capture a thought" android:padding="12dp" android:src="@drawable/ic_widget_plus_black"/>
+    <TextView android:id="@+id/capture_text" android:layout_width="0dp" android:layout_height="wrap_content" android:layout_marginStart="12dp" android:layout_weight="1"
+        android:text="Capture a thought" android:textColor="#D0D2D3" android:textSize="16sp" android:maxLines="1" android:ellipsize="end"/>
+    <ImageView android:id="@+id/capture_note" android:layout_width="48dp" android:layout_height="48dp" android:layout_marginStart="12dp" android:background="@drawable/widget_circle_dark"
+        android:contentDescription="Capture a note" android:padding="13dp" android:src="@drawable/ic_widget_file"/>
+    <ImageView android:id="@+id/capture_task" android:layout_width="48dp" android:layout_height="48dp" android:layout_marginStart="12dp" android:background="@drawable/widget_circle_dark"
+        android:contentDescription="Capture a task" android:padding="13dp" android:src="@drawable/ic_widget_task"/>
+</LinearLayout>

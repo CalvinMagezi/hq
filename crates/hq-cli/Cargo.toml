@@ -66,6 +66,12 @@ mimalloc = { version = "0.1", default-features = false }
 [target.'cfg(any(target_os = "linux", target_os = "android"))'.dependencies]
 openssl-sys = { version = "*", features = ["vendored"] }
 
+# The edge is a server program: it links iroh and the iroh relay, which the Android and Windows
+# builds do not carry. `hq edge` on those targets explains that and exits.
+[target.'cfg(all(unix, not(target_os = "android")))'.dependencies]
+hq-edge = { workspace = true }
+iroh = "=1.4.1"
+
 [target.'cfg(unix)'.dependencies]
 hq-gate = { workspace = true }
 hq-net = { workspace = true }

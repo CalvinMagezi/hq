@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android" android:layout_width="match_parent" android:layout_height="match_parent"
+    android:background="@drawable/widget_bg" android:orientation="vertical" android:padding="16dp">
+    <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content" android:gravity="center_vertical" android:orientation="horizontal">
+        <TextView android:id="@+id/tasks_label" android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1" android:text="IN PROGRESS"
+            android:textColor="#D0D2D3" android:textSize="12sp" android:textStyle="bold" android:letterSpacing="0.06"/>
+        <ImageView android:id="@+id/tasks_add" android:layout_width="40dp" android:layout_height="40dp"
+            android:background="@drawable/widget_circle_dark" android:contentDescription="New task" android:padding="10dp" android:src="@drawable/ic_widget_plus_white"/>
+    </LinearLayout>
+    <TextView android:id="@+id/task_row1" android:layout_width="match_parent" android:layout_height="wrap_content" android:minHeight="44dp" android:gravity="center_vertical"
+        android:textColor="#D0D2D3" android:textSize="14sp" android:maxLines="2" android:ellipsize="end"/>
+    <TextView android:id="@+id/task_row2" android:layout_width="match_parent" android:layout_height="wrap_content" android:minHeight="44dp" android:gravity="center_vertical"
+        android:textColor="#D0D2D3" android:textSize="14sp" android:maxLines="2" android:ellipsize="end"/>
+    <TextView android:id="@+id/task_row3" android:layout_width="match_parent" android:layout_height="wrap_content" android:minHeight="44dp" android:gravity="center_vertical"
+        android:textColor="#D0D2D3" android:textSize="14sp" android:maxLines="2" android:ellipsize="end"/>
+    <TextView android:id="@+id/tasks_empty" android:layout_width="match_parent" android:layout_height="wrap_content" android:text="Nothing in progress."
+        android:textColor="#D0D2D3" android:textSize="14sp" android:visibility="gone"/>
+</LinearLayout>

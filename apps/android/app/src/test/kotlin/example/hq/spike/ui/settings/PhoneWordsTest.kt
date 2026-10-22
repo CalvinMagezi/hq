@@ -75,4 +75,19 @@ class PhoneWordsTest {
         assertEquals("frozen", PhoneWords.exitWords(14))
         assertNull(null)
     }
+
+    @Test fun theCaptureRowSaysWhereASharegoesAndWhatWaits() {
+        assertEquals("Sharing opens a new note", PhoneWords.captureSummary(CaptureFacts()))
+        assertEquals("Sharing opens a new task", PhoneWords.captureSummary(CaptureFacts("task")))
+        assertEquals("Sharing opens the last one you used", PhoneWords.captureSummary(CaptureFacts("last")))
+        val q = example.hq.spike.capture.Queued("a", "note", "N", org.json.JSONObject(), 1L)
+        assertEquals("Sharing opens a new note \u00b7 1 waiting to send", PhoneWords.captureSummary(CaptureFacts(waiting = listOf(q))))
+    }
+
+    @Test fun aQueuedItemSaysWhatItIsAndWhyItIsStillThere() {
+        val q = example.hq.spike.capture.Queued("a", "task", "T", org.json.JSONObject(), 1L)
+        assertEquals("Task \u00b7 Waiting for HQ", PhoneWords.queuedLine(q))
+        assertEquals("Task \u00b7 HQ did not accept it", PhoneWords.queuedLine(q.copy(failure = "HQ did not accept it")))
+        assertEquals("Note \u00b7 Waiting for HQ", PhoneWords.queuedLine(q.copy(kind = "note")))
+    }
 }

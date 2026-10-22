@@ -60,10 +60,10 @@ import kotlinx.coroutines.delay
 
 /** The Chat v2 board of the design: chat name row, the conversation or the empty start, and the composer. */
 @Composable
-fun ChatScreen(state: ChatUiState, actions: ChatActions) {
+fun ChatScreen(state: ChatUiState, actions: ChatActions, starting: Boolean = false) {
     Box(Modifier.fillMaxSize()) {
         Column(Modifier.fillMaxSize()) {
-            if (!state.connected) ReconnectBanner()
+            if (starting) StartingBanner() else if (!state.connected) ReconnectBanner()
             NameRow(state.title, actions.onOpenChats)
             Box(Modifier.weight(1f).fillMaxWidth()) {
                 if (state.messages.isEmpty() && state.live == null) EmptyChat(actions.onDraft) else Conversation(state, actions)
@@ -124,6 +124,19 @@ fun ChatOverlays(state: ChatUiState, actions: ChatActions, onOpenInNotes: (Strin
         state.picker?.let { PickerSheet(it, actions) }
         state.pressed?.let { id -> state.messages.firstOrNull { it.id == id }?.let { MessageActionsSheet(state, it, blocks, actions) } }
         state.notice?.let { Snack(it, actions, Modifier.align(Alignment.BottomCenter)) }
+    }
+}
+
+/** While HQ is starting: the draft is kept and Send waits. */
+@Composable
+private fun StartingBanner() {
+    Row(
+        Modifier.fillMaxWidth().heightIn(min = 48.dp).background(Mts.Surface100).drawBehind { drawLine(Mts.Hairline, Offset(0f, size.height), Offset(size.width, size.height), 1.dp.toPx()) }
+            .padding(horizontal = 16.dp, vertical = 8.dp),
+        horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Icon(HqIcons.Warning, null, Modifier.size(20.dp), tint = Mts.Amber)
+        Text(example.hq.spike.ui.startup.StartupWords.STARTING_BANNER, style = HqType.BodySm, color = Mts.Ink)
     }
 }
 

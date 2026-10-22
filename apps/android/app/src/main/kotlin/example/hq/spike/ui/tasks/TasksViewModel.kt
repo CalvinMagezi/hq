@@ -84,7 +84,19 @@ data class TasksUi(
     /** A bulk change waiting for the owner's yes, and whether the archived list has been read at least once. */
     val bulkAsk: Bulk? = null,
     val archivedLoaded: Boolean = false,
+    /** What the All tab is narrowed to, the tree it is chosen from (read when the sheet first opens), and whether that sheet is open. */
+    val scope: TaskScope = TaskScope.Everything,
+    val tree: TaskTree? = null,
+    val treeFailed: Boolean = false,
+    val filterOpen: Boolean = false,
+    /** The briefing page for an initiative, while it is open. */
+    val briefing: BriefingUi? = null,
 ) {
+    /** Whether a task is inside what the All tab is narrowed to. */
+    val keep: (TaskItem) -> Boolean get() = TaskFilters.keeps(tree, scope)
+    /** The tasks the All tab counts and lists from, narrowed by the filter. */
+    val scoped: List<TaskItem> get() = tasks.filter(keep)
+
     /** The tasks the All tab shows now: only these can be picked or changed. */
     val visibleIds: Set<String> get() = groups.flatMapTo(HashSet()) { g -> g.tasks.map { it.id } }
     val workingIds: Set<String> get() = sessions.mapTo(HashSet()) { it.taskId }
@@ -92,7 +104,7 @@ data class TasksUi(
     val groups: List<TaskGroup> get() = when (tab) {
         TaskTab.Today -> TasksLogic.today(shown, today)
         TaskTab.Upcoming -> TasksLogic.upcoming(shown, today)
-        TaskTab.All -> TasksLogic.allList(shown, chip, archived)
+        TaskTab.All -> TasksLogic.allList(shown.filter(keep), chip, archived.filter(keep))
     }
 }
 
@@ -119,6 +131,9 @@ class TasksActions(
     val onQuick: (QuickState?) -> Unit = {},
     val onQuickSave: () -> Unit = {},
     val onChip: (AllChip) -> Unit = {},
+    val onFilter: (Boolean) -> Unit = {},
+    val onScope: (TaskScope) -> Unit = {},
+    val onBriefing: (Boolean) -> Unit = {},
     val onRestore: () -> Unit = {},
     val onSelect: (String) -> Unit = {},
     val onSelectAll: (List<String>) -> Unit = {},
@@ -149,7 +164,7 @@ class TasksViewModel(app: Application) : AndroidViewModel(app) {
         onStatus = { s -> patchDetail(JSONObject().put("status", s)) }, onPriority = { p -> patchDetail(JSONObject().put("priority", p ?: JSONObject.NULL)) },
         onToggleSub = ::toggleSub, onAddSub = ::addSub, onComment = ::comment, onArchive = ::archive,
         onQuick = { q -> _state.update { it.copy(quick = q) } }, onQuickSave = ::saveQuick,
-        onChip = ::chooseChip, onRestore = ::restore,
+        onChip = ::chooseChip, onRestore = ::restore, onFilter = ::openFilter, onScope = ::chooseScope, onBriefing = ::openBriefing,
         onSelect = { id -> _state.update { if (it.bulking) it else it.copy(selected = if (id in it.selected) it.selected - id else it.selected + id) } },
         onSelectAll = { ids -> _state.update { if (it.bulking) it else it.copy(selected = ids.toSet()) } },
         onClearSelection = { _state.update { if (it.bulking) it else it.copy(selected = emptySet(), bulkPrompt = null) } },
@@ -231,6 +246,37 @@ class TasksViewModel(app: Application) : AndroidViewModel(app) {
         _state.update { if (it.bulking) it else it.copy(tab = tab, selected = emptySet(), bulkPrompt = null, bulkAsk = null) }
         // Coming to All reads the helpers working now, which are not read while another tab shows.
         if (tab == TaskTab.All) viewModelScope.launch { refresh() }
+    }
+
+    /** The sheet opens at once with the last tree it read; the tree is read again each time, since a space or an initiative can appear with any new task. */
+    private fun openFilter(open: Boolean) {
+        _state.update { it.copy(filterOpen = open) }
+        if (!open) return
+        viewModelScope.launch {
+            try {
+                val tree = client.taskTree()
+                _state.update { it.copy(tree = tree, treeFailed = false) }
+            } catch (e: HqUnavailable) {
+                _state.update { it.copy(treeFailed = true) }
+            }
+        }
+    }
+
+    /** The briefing of the initiative the list is narrowed to; false closes it. */
+    private fun openBriefing(open: Boolean) {
+        val state = _state.value
+        val scope = state.scope as? TaskScope.Initiative
+        if (!open || scope == null) { _state.update { it.copy(briefing = null) }; return }
+        val name = TaskFilters.label(state.tree, scope) ?: scope.id
+        _state.update { it.copy(briefing = BriefingUi(scope.id, name), filterOpen = false) }
+        viewModelScope.launch {
+            val phase = try { BriefingPhase.Ready(client.initiativeBriefing(scope.id)) } catch (e: HqUnavailable) { BriefingPhase.Failed(missing = e.status == HTTP_NOT_FOUND) }
+            _state.update { s -> if (s.briefing?.initiativeId == scope.id) s.copy(briefing = s.briefing.copy(phase = phase)) else s }
+        }
+    }
+
+    private fun chooseScope(scope: TaskScope) {
+        _state.update { if (it.bulking) it else it.copy(scope = scope, filterOpen = false, selected = emptySet(), bulkPrompt = null, bulkAsk = null) }
     }
 
     private fun chooseChip(chip: AllChip) {

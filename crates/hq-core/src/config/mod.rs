@@ -541,6 +541,34 @@ pub fn http_referer() -> Option<String> {
 /// How configs written before the rename headed the agent-host section.
 const OLD_AGENT_HOST_HEADING: &str = "herdr:";
 
+/// Top-level sections that a command reads straight from the file instead of through
+/// `HqConfig` (the `hq-edge` crate owns `edge:`, so `hq` can run on a machine that only
+/// forwards). They are valid keys, not typos.
+const SECTIONS_READ_BY_OTHER_COMMANDS: &[&str] = &["edge"];
+
+/// The top-level keys of a config.yaml that no `HqConfig` field and no other command claims.
+/// Compares against `HqConfig::default()`'s own serialized field set rather than a hand-maintained
+/// list, so it can't drift from the struct.
+fn unrecognized_top_level_keys(raw_yaml: &str) -> Vec<String> {
+    let Ok(serde_yaml::Value::Mapping(user_keys)) = serde_yaml::from_str(raw_yaml) else {
+        return Vec::new();
+    };
+    let Ok(serde_yaml::Value::Mapping(known_keys)) = serde_yaml::to_value(HqConfig::default())
+    else {
+        return Vec::new();
+    };
+    user_keys
+        .keys()
+        .filter(|key| {
+            let name = key.as_str();
+            let old_heading = name == Some(OLD_AGENT_HOST_HEADING.trim_end_matches(':'));
+            let elsewhere = name.is_some_and(|n| SECTIONS_READ_BY_OTHER_COMMANDS.contains(&n));
+            !known_keys.contains_key(*key) && !old_heading && !elsewhere
+        })
+        .map(|key| key.as_str().unwrap_or("?").to_owned())
+        .collect()
+}
+
 /// The config file as a figment layer, with the agent-host section's old heading
 /// renamed when the file still uses it (figment's alias handling cannot cope with
 /// a defaults layer that already holds the new name). The file on disk is not
@@ -664,22 +692,12 @@ impl HqConfig {
         let Ok(raw) = std::fs::read_to_string(config_path) else {
             return;
         };
-        let Ok(serde_yaml::Value::Mapping(user_keys)) = serde_yaml::from_str(&raw) else {
-            return;
-        };
-        let Ok(serde_yaml::Value::Mapping(known_keys)) = serde_yaml::to_value(HqConfig::default())
-        else {
-            return;
-        };
-        for key in user_keys.keys() {
-            let old_heading = key.as_str() == Some(OLD_AGENT_HOST_HEADING.trim_end_matches(':'));
-            if !known_keys.contains_key(key) && !old_heading {
-                tracing::warn!(
-                    key = key.as_str().unwrap_or("?"),
-                    path = %config_path.display(),
-                    "config.yaml has an unrecognized top-level key (ignored — likely a typo)"
-                );
-            }
+        for key in unrecognized_top_level_keys(&raw) {
+            tracing::warn!(
+                key,
+                path = %config_path.display(),
+                "config.yaml has an unrecognized top-level key (ignored — likely a typo)"
+            );
         }
     }
 

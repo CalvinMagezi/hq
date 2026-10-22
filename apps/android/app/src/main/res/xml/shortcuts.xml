@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="utf-8"?>
+<shortcuts xmlns:android="http://schemas.android.com/apk/res/android">
+    <shortcut android:shortcutId="capture" android:enabled="true" android:icon="@drawable/ic_widget_plus_white" android:shortcutShortLabel="@string/shortcut_capture">
+        <intent android:action="android.intent.action.MAIN" android:targetPackage="example.hq.spike" android:targetClass="example.hq.spike.capture.CaptureActivity">
+            <extra android:name="mode" android:value="note"/>
+        </intent>
+    </shortcut>
+    <shortcut android:shortcutId="new_task" android:enabled="true" android:icon="@drawable/ic_widget_task" android:shortcutShortLabel="@string/shortcut_new_task">
+        <intent android:action="android.intent.action.MAIN" android:targetPackage="example.hq.spike" android:targetClass="example.hq.spike.capture.CaptureActivity">
+            <extra android:name="mode" android:value="task"/>
+        </intent>
+    </shortcut>
+    <shortcut android:shortcutId="ask_hq" android:enabled="true" android:icon="@drawable/ic_widget_chat" android:shortcutShortLabel="@string/shortcut_ask_hq">
+        <intent android:action="android.intent.action.VIEW" android:data="hq://chat" android:targetPackage="example.hq.spike" android:targetClass="example.hq.spike.LinkActivity"/>
+    </shortcut>
+</shortcuts>
