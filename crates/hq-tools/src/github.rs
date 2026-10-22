@@ -18,6 +18,10 @@ use crate::registry::HqTool;
 const COMMAND_TIMEOUT: Duration = Duration::from_secs(60);
 const CLONE_TIMEOUT: Duration = Duration::from_secs(300);
 const MAX_OUTPUT_CHARS: usize = 100_000;
+/// A diff read for verification may be longer than a tool reply; past this it is cut and says so.
+const MAX_DIFF_CHARS: usize = 2_000_000;
+/// What `cap` appends when it cuts, so a reader can tell a cut reply from a whole one.
+pub(crate) const TRUNCATED_MARK: &str = "\n[output truncated]";
 const DEFAULT_LIMIT: u64 = 20;
 const MAX_LIMIT: u64 = 100;
 const API_HOST_URL: &str = "https://api.github.com/";
@@ -169,15 +173,28 @@ fn child_env() -> Vec<(String, String)> {
         .collect()
 }
 
-fn cap(mut s: String) -> String {
-    if s.chars().count() > MAX_OUTPUT_CHARS {
-        s = s.chars().take(MAX_OUTPUT_CHARS).collect();
-        s.push_str("\n[output truncated]");
+fn cap(s: String) -> String {
+    cap_to(s, MAX_OUTPUT_CHARS)
+}
+
+fn cap_to(mut s: String, max_chars: usize) -> String {
+    if s.chars().count() > max_chars {
+        s = s.chars().take(max_chars).collect();
+        s.push_str(TRUNCATED_MARK);
     }
     s
 }
 
 async fn run(program: &str, args: &[String], timeout: Duration) -> Result<String> {
+    run_capped(program, args, timeout, MAX_OUTPUT_CHARS).await
+}
+
+async fn run_capped(
+    program: &str,
+    args: &[String],
+    timeout: Duration,
+    max_chars: usize,
+) -> Result<String> {
     let child = tokio::process::Command::new(program)
         .args(args)
         .env_clear()
@@ -194,7 +211,7 @@ async fn run(program: &str, args: &[String], timeout: Duration) -> Result<String
         .map_err(|_| anyhow::anyhow!("{program} timed out"))??;
     let stdout = String::from_utf8_lossy(&out.stdout).into_owned();
     if out.status.success() {
-        return Ok(cap(stdout));
+        return Ok(cap_to(stdout, max_chars));
     }
     bail!(
         "{program} failed: {}",
@@ -204,13 +221,17 @@ async fn run(program: &str, args: &[String], timeout: Duration) -> Result<String
 
 /// No `gh` on this machine: public data can still be read over HTTPS.
 async fn http_get(path: &str) -> Result<String> {
+    http_get_accepting(path, "application/vnd.github+json", MAX_OUTPUT_CHARS).await
+}
+
+async fn http_get_accepting(path: &str, accept: &str, max_chars: usize) -> Result<String> {
     let client = reqwest::Client::builder()
         .timeout(COMMAND_TIMEOUT)
         .user_agent("hq-github-read")
         .build()?;
     let mut req = client
         .get(format!("{API_HOST_URL}{path}"))
-        .header("Accept", "application/vnd.github+json");
+        .header("Accept", accept);
     if let Ok(token) = std::env::var("GITHUB_TOKEN").or_else(|_| std::env::var("GH_TOKEN")) {
         req = req.bearer_auth(token);
     }
@@ -220,7 +241,7 @@ async fn http_get(path: &str) -> Result<String> {
     if !status.is_success() {
         bail!("GitHub returned {status}: {}", cap(body));
     }
-    Ok(cap(body))
+    Ok(cap_to(body, max_chars))
 }
 
 pub fn create_github_tools() -> Vec<Box<dyn HqTool>> {
@@ -288,6 +309,59 @@ impl HqTool for GithubReadTool {
         };
         Ok(json!({ "output": output }))
     }
+}
+
+/// `owner/name`, as the tool validates a repository.
+pub(crate) fn is_valid_repo(repo: &str) -> bool {
+    REPO.is_match(repo) && !repo.starts_with('-') && !repo.contains("..")
+}
+
+/// GET of an API path read for verification: `gh` when installed, otherwise public data over
+/// HTTPS. The path is checked the way the tool checks `endpoint`.
+pub(crate) async fn api_get(path: &str) -> Result<String> {
+    let path = endpoint(path)?;
+    if which::which("gh").is_ok() {
+        run(
+            "gh",
+            &["api".into(), "--method".into(), "GET".into(), path],
+            COMMAND_TIMEOUT,
+        )
+        .await
+    } else {
+        http_get(&path).await
+    }
+}
+
+/// The unified diff of a pull request and whether it was cut. `gh` when installed, otherwise
+/// the public API's diff media type.
+pub(crate) async fn pr_diff_text(repo: &str, number: u64) -> Result<(String, bool)> {
+    if !is_valid_repo(repo) {
+        bail!("repository must look like owner/name");
+    }
+    let text = if which::which("gh").is_ok() {
+        run_capped(
+            "gh",
+            &[
+                "pr".into(),
+                "diff".into(),
+                number.to_string(),
+                "--repo".into(),
+                repo.to_string(),
+            ],
+            COMMAND_TIMEOUT,
+            MAX_DIFF_CHARS,
+        )
+        .await?
+    } else {
+        http_get_accepting(
+            &format!("repos/{repo}/pulls/{number}"),
+            "application/vnd.github.diff",
+            MAX_DIFF_CHARS,
+        )
+        .await?
+    };
+    let truncated = text.ends_with(TRUNCATED_MARK);
+    Ok((text, truncated))
 }
 
 pub struct GithubCloneTool;

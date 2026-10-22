@@ -15,25 +15,69 @@ pub struct NextTaskQuery<'a> {
     /// Leave out code-shaped tasks: tagged `code`, or linked to a commit or a
     /// pull request. What a general-purpose agent is never offered.
     pub no_code_work: bool,
+    /// Also offer work an earlier session left in progress: no live lease and no sign of life
+    /// for this many seconds (the lease ttl). Offered before any `to_do` task, because a
+    /// crashed or compacted session is the usual way work stops, and its checkpoint is waiting.
+    /// `None` offers `to_do` tasks only.
+    pub resume_after_secs: Option<i64>,
 }
 
 /// The tag that marks a task as code work for `no_code_work`.
 pub const CODE_TAG: &str = "code";
 
-/// The best task to start, or `None`. Open (`to_do`), not archived, with every dependency
-/// done, nobody holding it, and assigned to the asker (or to no one, when allowed). Most
-/// urgent first, then soonest due, then oldest.
+/// The best task to start, or `None`. Not archived, with every dependency done, nobody
+/// holding it, and assigned to the asker (or to no one, when allowed). Work left in progress
+/// by a session that went quiet comes first when `resume_after_secs` is set, then `to_do`
+/// tasks. Within each, most urgent first, then soonest due, then oldest.
 pub fn next_task(conn: &Connection, q: &NextTaskQuery) -> Result<Option<Task>> {
     Ok(next_tasks(conn, q, 1)?.into_iter().next())
+}
+
+/// Which tasks a pass of the queue looks at.
+#[derive(Clone, Copy)]
+enum Pool {
+    /// Open tasks nobody has started.
+    ToDo,
+    /// Tasks left in progress with no live lease, quiet for this many seconds.
+    Orphaned(i64),
 }
 
 /// The first `limit` tasks `next_task` would pick, best first, for a caller that
 /// may have to pass over some of them (the stack skips a task whose last launch
 /// failed). The order is `next_task`'s.
 pub fn next_tasks(conn: &Connection, q: &NextTaskQuery, limit: usize) -> Result<Vec<Task>> {
+    let limit = limit.max(1);
+    let mut tasks = Vec::new();
+    if let Some(secs) = q.resume_after_secs {
+        // A lease that went silent still counts as live until it is closed.
+        expire_stale_leases(conn, secs)?;
+        tasks = select_next(conn, q, Pool::Orphaned(secs), limit)?;
+    }
+    if tasks.len() < limit {
+        tasks.extend(select_next(conn, q, Pool::ToDo, limit - tasks.len())?);
+    }
+    Ok(tasks)
+}
+
+fn select_next(
+    conn: &Connection,
+    q: &NextTaskQuery,
+    pool: Pool,
+    limit: usize,
+) -> Result<Vec<Task>> {
+    let (status, quiet) = match pool {
+        Pool::ToDo => ("t.status = 'to_do'".to_string(), String::new()),
+        Pool::Orphaned(secs) => (
+            "t.status = 'in_progress'".to_string(),
+            format!(
+                "AND {} < datetime('now', '-{secs} seconds')",
+                super::stale::last_activity_sql("t")
+            ),
+        ),
+    };
     let sql = format!(
         "SELECT {TASK_COLS} FROM tasks t \
-         WHERE t.status = 'to_do' AND t.archived_at IS NULL \
+         WHERE {status} AND t.archived_at IS NULL {quiet} \
            AND NOT EXISTS (SELECT 1 FROM task_dependencies d JOIN tasks b ON b.id = d.depends_on_task_id \
                            WHERE d.task_id = t.id AND b.status <> 'complete' AND b.archived_at IS NULL) \
            AND NOT EXISTS (SELECT 1 FROM task_work_sessions s WHERE s.task_id = t.id AND s.ended_at IS NULL) \
@@ -56,7 +100,7 @@ pub fn next_tasks(conn: &Connection, q: &NextTaskQuery, limit: usize) -> Result<
                 q.initiative_id,
                 q.tag,
                 q.no_code_work,
-                limit.max(1) as i64
+                limit as i64
             ],
             row_to_task,
         )?

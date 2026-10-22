@@ -109,6 +109,33 @@ enum Commands {
         json: bool,
     },
 
+    /// How far HQ's verification of finished tasks can be trusted, the audits you answer, and sweeps that clear a queue
+    Verify {
+        /// status (default), rollout, audits, pull [n], agree <id>, disagree <id>, holds, veto <task>, briefing [hours], queue or sweep <verb>
+        #[arg(default_value = "status")]
+        sub: String,
+        /// A count (pull), an audit id (agree, disagree), a task (veto) or a sweep verb
+        /// (plan, list, show, run, pause, resume, cancel, apply, undo)
+        arg: Option<String>,
+        /// A sweep id (sweep show, run, pause, resume, cancel, apply, undo)
+        extra: Option<String>,
+        /// Why you disagree or veto (disagree, veto)
+        #[arg(long)]
+        note: Option<String>,
+        /// Sweep over one initiative (sweep plan)
+        #[arg(long)]
+        initiative: Option<String>,
+        /// Sweep over tasks that entered review on or after this date, YYYY-MM-DD (sweep plan)
+        #[arg(long)]
+        since: Option<String>,
+        /// Confirm an apply that moves more than the configured threshold (sweep apply)
+        #[arg(long)]
+        confirm: bool,
+        /// Print JSON (status, audits, holds, sweep list, sweep show)
+        #[arg(long)]
+        json: bool,
+    },
+
     /// Run a WireGuard private plane for HQ: init, peer add|revoke|list, link add|remove|list, status, apply (`hq net --help`)
     Net {
         #[command(subcommand)]
@@ -861,6 +888,7 @@ fn lite_rule(command: &Commands) -> LiteRule {
         | Commands::Restore(_)
         | Commands::Env
         | Commands::Task { .. }
+        | Commands::Verify { .. }
         | Commands::Copilot { .. }
         | Commands::Status
         | Commands::Stop { .. }
@@ -949,6 +977,31 @@ async fn dispatch(command: Commands, config: &HqConfig) -> Result<()> {
             task,
             json,
         } => commands::stack::run(config, &sub, name, task, json).await,
+        Commands::Verify {
+            sub,
+            arg,
+            extra,
+            note,
+            initiative,
+            since,
+            confirm,
+            json,
+        } => {
+            commands::verify::run(
+                config,
+                commands::verify::Opts {
+                    sub,
+                    arg,
+                    extra,
+                    note,
+                    json,
+                    initiative,
+                    since,
+                    confirm,
+                },
+            )
+            .await
+        }
         Commands::Host {
             sub,
             arg,

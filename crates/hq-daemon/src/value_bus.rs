@@ -20,6 +20,12 @@ const SAME_DAY_ACTION_SOURCES: &[&str] = &["email-triage"];
 /// `agent_notify` is `hq_tools::notify::NOTIFY_SOURCE`: `notify_owner` with `channels: web`.
 pub const WEB_ONLY_SOURCES: &[&str] = &[
     "task_ready_for_review",
+    "task_needs_owner",
+    "task_autonomy",
+    "task_briefing",
+    "task_queue_alert",
+    "task_veto_window",
+    "task_audit_digest",
     "task_stale_digest",
     "skill_review",
     "session_chat",

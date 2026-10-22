@@ -346,6 +346,18 @@ const MIGRATIONS: &[(&str, &str)] = &[
         "094_skill_invocation_rollups",
         include_str!("../sql/094_skill_invocation_rollups.sql"),
     ),
+    (
+        "095_task_verification",
+        include_str!("../sql/095_task_verification.sql"),
+    ),
+    (
+        "096_task_calibration",
+        include_str!("../sql/096_task_calibration.sql"),
+    ),
+    (
+        "097_task_sweeps",
+        include_str!("../sql/097_task_sweeps.sql"),
+    ),
 ];
 
 const MEMORY_SCHEMA_MIGRATION: &str = "058_memory_schema";
@@ -767,6 +779,144 @@ mod tests {
              ALTER TABLE tasks DROP COLUMN first_ready_for_review_at;",
         )
         .unwrap();
+        let title: String = conn
+            .query_row("SELECT title FROM tasks WHERE id = 't1'", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(title, "old");
+    }
+
+    #[test]
+    fn calibration_and_sweep_migrations_add_tables_keep_the_policy_and_start_unenforced() {
+        let conn = rusqlite::Connection::open_in_memory().unwrap();
+        let idx = super::MIGRATIONS
+            .iter()
+            .position(|(v, _)| *v == "096_task_calibration")
+            .unwrap();
+        super::apply(&conn, &super::MIGRATIONS[..idx]).unwrap();
+        conn.execute(
+            "UPDATE task_verification_policy SET config = '{\"mode\":\"shadow\"}' WHERE id = 1",
+            [],
+        )
+        .unwrap();
+        super::run(&conn).unwrap();
+        let (config, since): (String, Option<String>) = conn
+            .query_row(
+                "SELECT config, enforcing_since FROM task_verification_policy WHERE id = 1",
+                [],
+                |r| Ok((r.get(0)?, r.get(1)?)),
+            )
+            .unwrap();
+        assert_eq!(
+            config, "{\"mode\":\"shadow\"}",
+            "the policy in force survives"
+        );
+        assert_eq!(
+            since, None,
+            "nothing is enforcing yet, so nothing is legacy"
+        );
+        for table in [
+            "task_audits",
+            "task_canary_runs",
+            "task_veto_holds",
+            "task_sweeps",
+            "task_sweep_items",
+            "task_verification_skips",
+            "task_reverify_requests",
+        ] {
+            let n: i64 = conn
+                .query_row(&format!("SELECT COUNT(*) FROM {table}"), [], |r| r.get(0))
+                .unwrap();
+            assert_eq!(n, 0, "{table} starts empty");
+        }
+        // A sweep and its items round-trip, and a bad status is refused.
+        conn.execute_batch(
+            "INSERT INTO spaces (id, name, slug) VALUES ('s', 'S', 's');
+             INSERT INTO initiatives (id, space_id, name, slug, id_prefix) VALUES ('i', 's', 'I', 'i', 'I');
+             INSERT INTO tasks (id, initiative_id, display_id, title, status)
+                 VALUES ('t1', 'i', 'I-001', 'old', 'ready_for_review');
+             INSERT INTO task_sweeps (id, scope, status) VALUES ('sw-1', '{}', 'planning');
+             INSERT INTO task_sweep_items (sweep_id, task_id, rank, status_before)
+                 VALUES ('sw-1', 't1', 1, 'ready_for_review');",
+        )
+        .unwrap();
+        assert!(
+            conn.execute(
+                "INSERT INTO task_sweeps (id, scope, status) VALUES ('sw-2', '{}', 'bogus')",
+                []
+            )
+            .is_err()
+        );
+    }
+
+    #[test]
+    fn task_verification_migration_seeds_an_off_policy_keeps_tasks_and_rolls_back() {
+        let conn = rusqlite::Connection::open_in_memory().unwrap();
+        let idx = super::MIGRATIONS
+            .iter()
+            .position(|(v, _)| *v == "095_task_verification")
+            .unwrap();
+        super::apply(&conn, &super::MIGRATIONS[..idx]).unwrap();
+        conn.execute_batch(
+            "INSERT INTO spaces (id, name, slug) VALUES ('s', 'S', 's');
+             INSERT INTO initiatives (id, space_id, name, slug, id_prefix) VALUES ('i', 's', 'I', 'i', 'I');
+             INSERT INTO tasks (id, initiative_id, display_id, title, status)
+                 VALUES ('t1', 'i', 'I-001', 'old', 'complete');",
+        )
+        .unwrap();
+
+        super::run(&conn).unwrap();
+        let policy: String = conn
+            .query_row(
+                "SELECT config FROM task_verification_policy WHERE id = 1",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(policy, "{}", "a fresh policy is empty, which reads as off");
+        let verdicts: i64 = conn
+            .query_row("SELECT COUNT(*) FROM task_verdicts", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(verdicts, 0, "existing tasks get no invented verdict");
+        let status: String = conn
+            .query_row("SELECT status FROM tasks WHERE id = 't1'", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(status, "complete", "existing tasks are untouched");
+        assert!(
+            conn.execute(
+                "INSERT INTO task_verification_policy (id, config) VALUES (2, '{}')",
+                []
+            )
+            .is_err(),
+            "there is one policy row"
+        );
+
+        // The rollback documented in docs/plans/native-tasks.md: 097, then 096, then 095.
+        conn.execute_batch(
+            "DROP TABLE task_reverify_requests;
+             DROP TABLE task_verification_skips;
+             DROP TABLE task_sweep_items;
+             DROP TABLE task_sweeps;
+             ALTER TABLE task_verification_policy DROP COLUMN enforcing_since;
+             DROP TABLE task_veto_holds;
+             DROP TABLE task_canary_runs;
+             DROP TABLE task_audits;
+             DROP TABLE task_verification_waits;
+             DROP TRIGGER task_verdicts_no_delete;
+             DROP TRIGGER task_verdicts_no_update;
+             DROP TABLE task_verdicts;
+             DROP TABLE task_verification_policy;",
+        )
+        .unwrap();
+        let left: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM sqlite_master WHERE name LIKE 'task_verdict%' \
+                 OR name LIKE 'task_verification%' OR name LIKE 'task_sweep%' \
+                 OR name IN ('task_audits', 'task_canary_runs', 'task_veto_holds', 'task_reverify_requests')",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(left, 0, "the documented rollback leaves nothing behind");
         let title: String = conn
             .query_row("SELECT title FROM tasks WHERE id = 't1'", [], |r| r.get(0))
             .unwrap();

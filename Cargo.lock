@@ -3263,6 +3263,7 @@ dependencies = [
  "chrono",
  "dirs",
  "filetime",
+ "futures",
  "gray_matter",
  "hex",
  "hq-convert",

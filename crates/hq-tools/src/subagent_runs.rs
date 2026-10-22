@@ -230,7 +230,7 @@ impl HqTool for RunReviewTool {
         "subagent_run_review"
     }
     fn description(&self) -> &str {
-        "Record your verdict on a settled sub-agent run after checking the real deliverable: accepted, partial or blocked, with the deliverables still missing and a next action. A child that exited cleanly is only unverified until you do this. When the run is linked to an HQ task, an accepted verdict moves it to ready_for_review and a partial or blocked one to blocked; it is never marked complete."
+        "Record your verdict on a settled sub-agent run after checking the real deliverable: accepted, partial or blocked, with the deliverables still missing and a next action. A child that exited cleanly is only unverified until you do this. When the run is linked to an HQ task, an accepted verdict moves it to ready_for_review and a partial or blocked one to blocked. This never completes the task: the owner does, or HQ's verification once it is on."
     }
     fn parameters(&self) -> Value {
         json!({
@@ -325,7 +325,7 @@ pub struct TaskLink {
 /// Leave evidence of a run on its native task. Comments point at the run
 /// instead of quoting it (child output is untrusted, task comments are read
 /// back as trusted). A task moves to `blocked` on a blocker and to
-/// `ready_for_review` only on an accepted verdict; it is never completed.
+/// `ready_for_review` only on an accepted verdict; this path never completes it.
 /// Safe to call again for the same event: the comment carries a marker.
 pub fn record_on_task(
     conn: &Connection,

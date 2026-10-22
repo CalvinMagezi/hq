@@ -244,11 +244,21 @@ pub struct TaskEvent {
     pub work_session_id: Option<String>,
 }
 
+/// The actor the web board writes under: a person using the app, as opposed to any agent. Agents
+/// cannot take the name, so an event under it was made by someone at the board.
+pub const WEB_ACTOR: &str = "web";
+
 /// Who a write is made by, recorded on the events it produces.
 #[derive(Debug, Clone, Copy, Default)]
 pub struct WriteCtx<'a> {
     pub actor: Option<&'a str>,
     pub work_session_id: Option<&'a str>,
+    /// The write is the owner's, made at the board. While completion is verified, this and a
+    /// passing verdict are the only ways a task becomes complete. Agents and the supervisor
+    /// never set it.
+    pub owner: bool,
+    /// A passing, applied verdict that allows the completion this write makes.
+    pub verdict_id: Option<&'a str>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -371,6 +381,10 @@ pub struct TaskPatch {
 }
 
 mod archive;
+mod briefing;
+mod calibration;
+#[cfg(test)]
+mod calibration_tests;
 mod checkpoints;
 mod crud;
 mod leases;
@@ -379,13 +393,27 @@ mod messages;
 mod org;
 mod queue;
 mod refs;
+mod reverify;
+mod rework;
+mod rollout;
+#[cfg(test)]
+mod rollout_tests;
 mod rows;
+mod shadow;
 mod stale;
+mod sweeps;
 #[cfg(test)]
 mod tests;
 mod time;
+mod verification;
+#[cfg(test)]
+mod verification_tests;
+mod veto;
+mod waits;
 
 pub use archive::*;
+pub use briefing::*;
+pub use calibration::*;
 pub use checkpoints::*;
 pub use crud::*;
 pub use leases::*;
@@ -394,7 +422,15 @@ pub use messages::*;
 pub use org::*;
 pub use queue::*;
 pub use refs::*;
+pub use reverify::*;
+pub use rework::*;
+pub use rollout::*;
 use rows::*;
 pub use rows::{list_task_events, validate_date};
+pub use shadow::*;
 pub use stale::*;
+pub use sweeps::*;
 pub use time::*;
+pub use verification::*;
+pub use veto::*;
+pub use waits::*;

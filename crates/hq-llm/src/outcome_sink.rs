@@ -17,6 +17,8 @@ pub mod origin {
     pub const SUBAGENT: &str = "subagent";
     pub const MEMORY: &str = "memory";
     pub const SKILL_REVIEW: &str = "skill_review";
+    /// A reviewer deciding whether a task's work is done (docs/plans/task-verification.md).
+    pub const VERIFICATION: &str = "verification";
     pub const COMPACTION: &str = "compaction";
     pub const EMBEDDINGS: &str = "embeddings";
     pub const IMAGEGEN: &str = "imagegen";

@@ -246,6 +246,14 @@ for sessions HQ spawns. Migration `081_task_work_sessions` adds the table and `a
   the work stands, and its summary is left on the thread, but its status change is applied only
   while nobody else holds the task and nothing else has moved it since the lease ended
   (`status_applied` in the reply says which).
+- **Working under a lease keeps it alive.** An agent has no clock, so `task_heartbeat` cannot be
+  the only thing that refreshes a lease. Any call that resolves a live lease (`task_update`,
+  `task_comment_add`, `task_create`, `task_link_add`) marks it seen, skipping the write when it was
+  seen in the last 10 seconds. A lease that only expired resumes as a new lease interval under the
+  same token (`hq_db::tasks::use_lease`) when nobody holds the task and nothing has changed it
+  since, the same condition `release` applies. The expired interval keeps its end at the last sign
+  of life, so the silent gap is never counted as work, and a comment says the lease resumed. If
+  another session took the task, or anything moved it, the call is refused and says which.
 - **Attribution is per task.** A lease names who is acting on any task, but an event is recorded
   under the lease (`work_session_id`) only on the lease's own task.
 - **`tasks.require_lease`** is `off` (default), `warn` or `enforce` and applies only to agents
@@ -449,7 +457,13 @@ Any agent, whatever harness it runs in, can use tasks as its headquarters. Migra
   change may be seen twice, never missed. `task_next {actor}` picks the most urgent `to_do` task
   assigned to you (or nobody, with `include_unassigned`) whose dependencies are done and that
   nobody holds, then soonest due, then oldest, and claims it in the same write, so two agents asking
-  at once never get the same task. It answers like `task_claim`, or `task: null` and why.
+  at once never get the same task. It answers like `task_claim`, or `task: null` and why. Work an
+  earlier session left in progress comes first: an `in_progress` task assigned to the caller (or to
+  no one, with `include_unassigned`) that nobody holds and that has shown no sign of life for the
+  lease ttl. Its reply has `resuming: true` and the last checkpoint as `resume`; nothing changes
+  but the claim. A crashed or compacted session is the usual way work stops, and this is what routes
+  its checkpoint to an agent without waiting for the 72 hour stale list. Callers that launch fresh
+  runs (the stack) do not ask for this and still see only `to_do` work.
 - **Bulk.** `task_create_many` (up to 100) takes `tasks`, `defaults` and `external_prefix`; a later
   item refers to an earlier one as `@key` in `parent_id`, `depends_on` or a task link, and the
   prefix makes the call safe to repeat. `task_update_many` takes `updates` and `defaults`. Each item
@@ -509,6 +523,114 @@ Rollback of 085, then delete the `085_task_assignees` row from `schema_version`:
 
 ```sql
 DROP TABLE task_assignees;
+```
+
+## Verified completion (TVER WS1)
+
+The design is `docs/plans/task-verification.md`. This is the part that exists so far: the policy,
+the verdict record and the guard on the one edge into `complete`. Migration
+`095_task_verification` adds the verdict table, a waits table and the policy table.
+
+- **The policy lives in the database.** `task_verification_policy` holds one row, the
+  `tasks.verification` configuration. Every process that builds the task tools writes its own
+  configuration there (`sync_verification_policy`, a write only when it differs), so the web
+  server, the daemon and an MCP server meet the same rule where a task becomes complete, and tests
+  that run in parallel in one process each have their own. If two processes are configured
+  differently the last to start wins. `mode` is `off` (the default, nothing changes), `shadow`
+  (verdicts will be made and move nothing) or `enforce`.
+- **Verdicts are append-only.** `task_verdicts` records what a verifier decided about a task:
+  the artifact (`pr:<owner>/<repo>#<n>@<sha>`, `note:<path>@<sha256>` or `none`), the tier (0
+  to 2), `pass`, `fail` or `inconclusive`, the level of evidence (`machine_peer`, `peer`,
+  `machine`, `owner`, `none`), the verifier, the facts HQ recorded (`observations`) and the
+  per-criterion results that cite them (`criteria`). Triggers refuse any update, and refuse a
+  delete unless the task is archived, so only a purge removes them. `record_verdict` is the one way
+  in for a verifier and enforces the plan's rules: the verifier must not be an actor that worked
+  the task (`task_workers`: lease holders and whoever moved it into progress or review), an owner
+  verdict cannot be supplied, and a pass needs at least one observation and, per criterion, a
+  `pass` that cites observation ids that exist. Only a tier 0 task with no criteria may pass with
+  an empty list, as an assessment.
+- **The guard.** `apply_update` checks every transition into `complete`. With the policy `off`
+  nothing is gated. In `shadow` nothing is gated either. In `enforce`, for a task in an enforced
+  tier (`enforce_tiers`, default all), only a write with `WriteCtx.owner` or with a
+  `verdict_id` allows it, and the refusal is a `NeedsVerification` error. A verdict allows a
+  completion only if it is a passing, applied verdict for that task made after the task last
+  entered review. `WriteCtx` is set by HQ's own code, never by a caller's arguments: the web
+  handler sets `owner` (the web credential is the owner's), and nothing else does yet.
+- **Tiers from what is known cheaply.** `task_tier`: 2 for a tag in `tier2_tags`, 1 for a task
+  tagged `code` or linked to a commit or pull request, else 0. The verifier raises it when the
+  change touches a `tier2_paths` prefix.
+- **Agents are not refused for saying complete.** Under `enforce`, `task_update` with
+  `status: complete` and `task_release` with `status: complete` hand the task over as
+  `ready_for_review` instead and say so (`verification_queued: true` and a warning). HQ completes
+  it once it passes. Bulk updates meet the same rule item by item.
+- **The owner is recorded.** While the policy is `shadow` or `enforce`, a completion by the owner
+  at the board writes a `level: owner` verdict, so every completion says how it was verified.
+  With the policy `off` nothing is recorded.
+- **Reading.** `task_get` has `verification`: the newest verdict in short (verdict, level, tier,
+  artifact, verifier, applied, at), or null.
+
+### Evidence collectors (TVER WS2)
+
+`crates/hq-tools/src/tasks/verify/` reads facts from outside the task and records them as
+observations: `o1`, `o2`, ... with a source, a kind, one readable sentence, whether it supports,
+contradicts or says nothing about completion, and structured data. A source that cannot be read
+becomes an `unavailable` observation, which never supports anything. A verifier may only cite an
+observation that exists (WS1 enforces it when a pass is recorded).
+
+- **GitHub** goes through the `GitHubRead` trait (`gh` when installed, public HTTPS otherwise, the
+  same validation as the `github_read` tool), so every collector is tested on canned answers.
+  `collect_pr` reads a pull request (merged supports, closed unmerged contradicts, open is neither).
+  `collect_checks` reads check runs and commit statuses on a sha, and the checks the base branch
+  requires: any failure contradicts, still running or never reported is neither, all green
+  supports; a base with no required checks, or protection that cannot be read, is said plainly and
+  is not a pass.
+- **`collect_diff`** records the changed paths (flagging any under `tier2_paths`) and runs the
+  tamper scan: deleted test files, fewer tests or assertions than before in a test file, newly
+  skipped tests (`#[ignore]`, `.skip(`, `xit(`, `@pytest.mark.skip`, `t.Skip`, `@Disabled`),
+  relaxed lints (`#[allow(`, `eslint-disable`, `@ts-ignore`, `# noqa`), changed lint config, CI
+  workflow edits and updated snapshots. A flag is neither a pass nor a failure: it asks for
+  scrutiny. A diff that was cut short is itself a flag.
+- **`collect_note`** records that a note exists and its content hash (the same hash provenance
+  uses), for a path that cannot leave the vault.
+- **`probe_url`** fetches a URL a task says it deployed, from the machine HQ runs on, so it is
+  built not to be a way into that network: https only, public addresses only (loopback, private,
+  link-local, carrier-grade NAT, unique-local and reserved ranges are refused, for names and for
+  literal addresses), the checked address pinned for the request, no redirects followed, a ten
+  second timeout, no credentials in the URL, and the body never read.
+- **Artifact discovery** (`discover`) finds what a task produced: linked pull requests, commits
+  and produced notes first (a note the task came from is its source, not its product), plus notes
+  recorded as written under it. With no pull request linked it looks for one from the branch each
+  lease worked on, in the repositories its links name or that the lease's working directory pushes
+  to (read from the checkout's `.git/config`, following a worktree to its repository; git is never
+  run against a directory an agent named). A branch with no known repository is said, not guessed.
+- **The contract** is the `Acceptance` section of the description (the parser context packets
+  use) and its SHA-256, so a change to the criteria is detectable.
+
+Later migrations add to it. `096_task_calibration` adds `task_audits` (the owner's agree or not on what HQ
+completed, and a veto or a disagreeing second opinion), `task_canary_runs` (planted defects and clean controls put
+to the reviewer) and `task_veto_holds` (a tier 2 task inside its veto window, with a snapshot of what its verdict was
+about). `097_task_sweeps` adds `task_sweeps` and `task_sweep_items` (a persisted batch over the tasks waiting for
+review, advanced by the daemon), `task_verification_skips` (a task kept out of automatic verification for its current
+submission), `task_reverify_requests` (a second opinion the daemon answers) and `task_verification_policy.enforcing_since`
+(when enforcement began, which is what makes older work the legacy backlog a sweep handles).
+
+Rollback of 097, 096 and 095, in this order because the later tables refer to the earlier ones, then delete the
+`097_task_sweeps`, `096_task_calibration` and `095_task_verification` rows from `schema_version` (SQLite 3.35+):
+
+```sql
+DROP TABLE task_reverify_requests;
+DROP TABLE task_verification_skips;
+DROP TABLE task_sweep_items;
+DROP TABLE task_sweeps;
+ALTER TABLE task_verification_policy DROP COLUMN enforcing_since;
+DROP TABLE task_veto_holds;
+DROP TABLE task_canary_runs;
+DROP TABLE task_audits;
+DROP TABLE task_verification_waits;
+DROP TRIGGER task_verdicts_no_delete;
+DROP TRIGGER task_verdicts_no_update;
+DROP TABLE task_verdicts;
+DROP TABLE task_verification_policy;
 ```
 
 ## Task relationship graph (FR-069)

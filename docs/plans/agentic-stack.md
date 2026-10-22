@@ -42,7 +42,8 @@ cohort), whose language this document and the code use instead of an org chart:
   ops. HQ's config block is `stack:` and each entry is a *specialist*.
 - *Outcome orchestration, not task execution.* "You're the account, not a pair
   of hands. Judgment is the job." A specialist's run ends in `ready_for_review`,
-  never `complete`; a person signs off.
+  not `complete`; the owner completes it, or HQ's verifier does once task verification is on
+  (`docs/TASK_VERIFICATION.md`).
 - *The orchestratable-task test.* Hand off work whose first draft is mostly
   mechanical, that you have done twice before, where a mistake is cheap to
   catch; keep the review. Tasks assigned to a specialist are exactly that class.

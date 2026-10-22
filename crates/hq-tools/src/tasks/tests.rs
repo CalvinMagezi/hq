@@ -3099,6 +3099,447 @@ async fn a_stale_lease_released_late_cannot_replace_the_resume_point_a_newer_ses
 }
 
 #[tokio::test]
+async fn an_agent_that_never_heartbeats_keeps_its_lease_and_resumes_after_a_long_silence() {
+    let vault_dir = tempfile::tempdir().unwrap();
+    let vault_path = vault_dir.keep();
+    let vault = Arc::new(VaultClient::new(vault_path.clone()).unwrap());
+    let db = Arc::new(Database::open_memory().unwrap());
+    let tools = create_task_tools_with(
+        vault_path,
+        vault,
+        db.clone(),
+        hq_core::config::TasksConfig::default(),
+    );
+    let task = call_tool(&tools, "task_create", json!({ "title": "long build" }))
+        .await
+        .unwrap();
+    let id = task["display_id"].as_str().unwrap().to_string();
+    let claim = call_tool(
+        &tools,
+        "task_claim",
+        json!({ "task_id": id, "actor": "alpha", "session_ref": "a" }),
+    )
+    .await
+    .unwrap();
+    let lease = claim["lease"].as_str().unwrap().to_string();
+    let silence = |hours: i64| {
+        db.with_conn(|c| {
+            c.execute(
+                "UPDATE task_work_sessions SET last_heartbeat_at = datetime('now', ?1), \
+                 started_at = datetime('now', ?2)",
+                [format!("-{hours} hours"), format!("-{} hours", hours + 1)],
+            )?;
+            c.execute(
+                "UPDATE task_events SET occurred_at = datetime('now', ?1)",
+                [format!("-{} hours", hours + 1)],
+            )?;
+            Ok(())
+        })
+        .unwrap();
+    };
+
+    // Writes under a lease keep it alive: no heartbeat is ever sent.
+    let wrote = call_tool(
+        &tools,
+        "task_comment_add",
+        json!({ "task_id": id, "body": "still going", "lease": lease }),
+    )
+    .await
+    .unwrap();
+    assert_eq!(wrote["author"], "alpha");
+
+    // A long build: the lease goes silent past its ttl. The next write still works.
+    silence(3);
+    let after = call_tool(
+        &tools,
+        "task_comment_add",
+        json!({ "task_id": id, "body": "build finished", "lease": lease }),
+    )
+    .await
+    .unwrap();
+    assert_eq!(after["author"], "alpha", "attributed to the same agent");
+    let got = call_tool(&tools, "task_get", json!({ "id": id }))
+        .await
+        .unwrap();
+    assert_eq!(got["held_by"]["actor"], "alpha", "it holds the task again");
+    assert_eq!(got["work_sessions"].as_array().unwrap().len(), 2);
+    let hours = got["time"]["leased_seconds"].as_i64().unwrap();
+    assert!(
+        hours < 2 * 3600,
+        "the three silent hours are not work: {hours} s"
+    );
+
+    // Once another session has the task, the old token is refused and says who holds it.
+    silence(3);
+    call_tool(
+        &tools,
+        "task_claim",
+        json!({ "task_id": id, "actor": "beta", "session_ref": "b" }),
+    )
+    .await
+    .unwrap();
+    let refused = call_tool(
+        &tools,
+        "task_comment_add",
+        json!({ "task_id": id, "body": "late", "lease": lease }),
+    )
+    .await
+    .unwrap_err()
+    .to_string();
+    assert!(
+        refused.contains("beta") && refused.contains("task_claim"),
+        "{refused}"
+    );
+}
+
+fn tools_verifying(
+    mode: hq_core::config::VerificationMode,
+) -> (Vec<Box<dyn HqTool>>, Arc<Database>) {
+    let vault_dir = tempfile::tempdir().unwrap();
+    let vault_path = vault_dir.keep();
+    let vault = Arc::new(VaultClient::new(vault_path.clone()).unwrap());
+    let db = Arc::new(Database::open_memory().unwrap());
+    let settings = hq_core::config::TasksConfig {
+        verification: hq_core::config::VerificationConfig {
+            mode,
+            ..Default::default()
+        },
+        ..Default::default()
+    };
+    let tools = create_task_tools_with(vault_path, vault, db.clone(), settings);
+    (tools, db)
+}
+
+#[tokio::test]
+async fn building_the_tools_records_the_configured_completion_policy_in_the_database() {
+    let (_tools, db) = tools_verifying(hq_core::config::VerificationMode::Enforce);
+    let policy = db.with_conn(hq_db::tasks::verification_policy).unwrap();
+    assert_eq!(policy.mode, hq_core::config::VerificationMode::Enforce);
+    let (_tools, db) = tools_verifying(hq_core::config::VerificationMode::Off);
+    let policy = db.with_conn(hq_db::tasks::verification_policy).unwrap();
+    assert_eq!(policy.mode, hq_core::config::VerificationMode::Off);
+}
+
+#[tokio::test]
+async fn an_agent_asking_for_complete_under_enforcement_gets_a_queued_review_not_an_error() {
+    let (tools, _db) = tools_verifying(hq_core::config::VerificationMode::Enforce);
+    let task = call_tool(&tools, "task_create", json!({ "title": "Ship it" }))
+        .await
+        .unwrap();
+    let id = task["display_id"].as_str().unwrap().to_string();
+    let claim = call_tool(
+        &tools,
+        "task_claim",
+        json!({ "task_id": id, "actor": "builder" }),
+    )
+    .await
+    .unwrap();
+
+    let updated = call_tool(
+        &tools,
+        "task_update",
+        json!({ "id": id, "status": "complete", "lease": claim["lease"] }),
+    )
+    .await
+    .unwrap();
+    assert_eq!(updated["status"], "ready_for_review");
+    assert_eq!(updated["verification_queued"], true);
+    let warnings = updated["warnings"].to_string();
+    assert!(
+        warnings.contains("not complete") && warnings.contains("verified"),
+        "{warnings}"
+    );
+
+    // A bulk update meets the same rule, item by item.
+    let many = call_tool(
+        &tools,
+        "task_update_many",
+        json!({ "updates": [{ "id": id, "status": "in_progress" }, { "id": id, "status": "complete" }] }),
+    )
+    .await
+    .unwrap();
+    assert_eq!(many["failed"].as_u64().unwrap_or(0), 0, "{many}");
+    let got = call_tool(&tools, "task_get", json!({ "id": id }))
+        .await
+        .unwrap();
+    assert_eq!(
+        got["status"], "ready_for_review",
+        "never complete from an agent"
+    );
+    assert!(got["verification"].is_null(), "nobody has verified it yet");
+}
+
+#[tokio::test]
+async fn releasing_as_complete_under_enforcement_hands_the_task_over_for_review() {
+    let (tools, _db) = tools_verifying(hq_core::config::VerificationMode::Enforce);
+    let task = call_tool(&tools, "task_create", json!({ "title": "Ship it" }))
+        .await
+        .unwrap();
+    let id = task["display_id"].as_str().unwrap().to_string();
+    let claim = call_tool(
+        &tools,
+        "task_claim",
+        json!({ "task_id": id, "actor": "builder" }),
+    )
+    .await
+    .unwrap();
+    let released = call_tool(
+        &tools,
+        "task_release",
+        json!({ "lease": claim["lease"], "status": "complete", "summary": "done, PR is up" }),
+    )
+    .await
+    .unwrap();
+    assert_eq!(released["released"], true);
+    assert_eq!(released["task"]["status"], "ready_for_review");
+    assert_eq!(released["verification_queued"], true);
+    assert!(released["warnings"].to_string().contains("pull request"));
+}
+
+#[tokio::test]
+async fn with_verification_off_complete_means_complete_as_it_always_did() {
+    let (tools, _db) = tools_verifying(hq_core::config::VerificationMode::Off);
+    let task = call_tool(&tools, "task_create", json!({ "title": "Ship it" }))
+        .await
+        .unwrap();
+    let id = task["display_id"].as_str().unwrap().to_string();
+    let updated = call_tool(
+        &tools,
+        "task_update",
+        json!({ "id": id, "status": "complete" }),
+    )
+    .await
+    .unwrap();
+    assert_eq!(updated["status"], "complete");
+    assert!(updated.get("verification_queued").is_none());
+}
+
+#[tokio::test]
+async fn task_get_shows_how_a_task_was_verified() {
+    let (tools, db) = tools_verifying(hq_core::config::VerificationMode::Shadow);
+    let task = call_tool(&tools, "task_create", json!({ "title": "Write the note" }))
+        .await
+        .unwrap();
+    let id = task["display_id"].as_str().unwrap().to_string();
+    let internal = task["id"].as_str().unwrap().to_string();
+    db.with_conn(|c| {
+        hq_db::tasks::record_verdict(
+            c,
+            &hq_db::tasks::NewVerdict {
+                task_id: &internal,
+                artifact: "note:Notebooks/a.md@abc",
+                contract_hash: "",
+                tier: 0,
+                verdict: "pass",
+                level: "peer",
+                verifier: "verify:run-1",
+                independence: "different_session",
+                observations: &json!([{"id": "o1", "fact": "the note exists"}]),
+                criteria: &json!([]),
+                reasons: "",
+                applied: false,
+                canary: false,
+                submission: None,
+                waiting_for: None,
+                verifier_config: "",
+            },
+        )
+        .map(|_| ())
+    })
+    .unwrap();
+    let got = call_tool(&tools, "task_get", json!({ "id": id }))
+        .await
+        .unwrap();
+    assert_eq!(got["verification"]["verdict"], "pass");
+    assert_eq!(got["verification"]["level"], "peer");
+    assert_eq!(
+        got["verification"]["applied"], false,
+        "shadow moved nothing"
+    );
+    assert_eq!(got["status"], "to_do");
+}
+
+#[tokio::test]
+async fn verification_facts_come_from_a_tasks_links_lease_branch_and_produced_notes() {
+    use super::verify::{Artifact, TaskFacts, discover};
+    let vault_dir = tempfile::tempdir().unwrap();
+    let vault_path = vault_dir.keep();
+    let vault = Arc::new(VaultClient::new(vault_path.clone()).unwrap());
+    let db = Arc::new(Database::open_memory().unwrap());
+    let tools = create_task_tools_with(
+        vault_path,
+        vault,
+        db.clone(),
+        hq_core::config::TasksConfig::default(),
+    );
+    let task = call_tool(
+        &tools,
+        "task_create",
+        json!({ "title": "Ship", "links": [
+            { "kind": "vault_note", "ref": "Notebooks/plan.md", "direction": "origin" },
+            { "kind": "pr", "ref": "Example/Repo#9", "direction": "produced" },
+        ] }),
+    )
+    .await
+    .unwrap();
+    let id = task["display_id"].as_str().unwrap().to_string();
+    let internal = task["id"].as_str().unwrap().to_string();
+    call_tool(
+        &tools,
+        "task_claim",
+        json!({ "task_id": id, "actor": "builder", "branch": "claude/feature-x", "cwd": "/work/repo" }),
+    )
+    .await
+    .unwrap();
+
+    let facts = db.with_conn(|c| TaskFacts::load(c, &internal)).unwrap();
+    assert!(
+        facts
+            .links
+            .iter()
+            .any(|l| l.kind == "pr" && l.reference == "example/repo#9")
+    );
+    assert_eq!(facts.branches.len(), 1);
+    assert_eq!(facts.branches[0].branch, "claude/feature-x");
+    assert_eq!(facts.branches[0].cwd, "/work/repo");
+
+    // The linked pull request is the artifact; the note it came from is not.
+    let found = discover(
+        &super::verify::remote::fake_for_tests(),
+        &facts,
+        &std::collections::HashMap::new(),
+    )
+    .await;
+    assert_eq!(
+        found.artifacts,
+        [Artifact::Pr {
+            repo: "example/repo".into(),
+            number: 9
+        }]
+    );
+}
+
+#[tokio::test]
+async fn an_agent_cannot_write_under_the_name_of_the_web_board() {
+    let tools = tools_with(hq_core::config::LeaseMode::Off);
+    let task = call_tool(&tools, "task_create", json!({ "title": "Ship" }))
+        .await
+        .unwrap();
+    let id = task["display_id"].as_str().unwrap().to_string();
+    for (tool, args) in [
+        (
+            "task_update",
+            json!({ "id": id, "status": "in_progress", "actor": "Web" }),
+        ),
+        (
+            "task_comment_add",
+            json!({ "task_id": id, "body": "hi", "author": "web" }),
+        ),
+        ("task_create", json!({ "title": "x", "created_by": "web" })),
+        ("task_claim", json!({ "task_id": id, "actor": "web" })),
+    ] {
+        let err = call_tool(&tools, tool, args).await.unwrap_err().to_string();
+        assert!(
+            err.contains("web"),
+            "{tool} must refuse the web board's name, got: {err}"
+        );
+    }
+    let got = call_tool(&tools, "task_get", json!({ "id": id }))
+        .await
+        .unwrap();
+    assert_eq!(got["status"], "to_do", "nothing was written");
+}
+
+#[tokio::test]
+async fn task_next_hands_a_crashed_sessions_work_to_its_owner_with_the_notes_it_left() {
+    let vault_dir = tempfile::tempdir().unwrap();
+    let vault_path = vault_dir.keep();
+    let vault = Arc::new(VaultClient::new(vault_path.clone()).unwrap());
+    let db = Arc::new(Database::open_memory().unwrap());
+    let tools = create_task_tools_with(
+        vault_path,
+        vault,
+        db.clone(),
+        hq_core::config::TasksConfig::default(),
+    );
+    let started = call_tool(
+        &tools,
+        "task_create",
+        json!({ "title": "half done", "assignees": ["worker"] }),
+    )
+    .await
+    .unwrap();
+    let half = started["display_id"].as_str().unwrap().to_string();
+    let first = call_tool(
+        &tools,
+        "task_claim",
+        json!({ "task_id": half, "actor": "worker", "session_ref": "s1" }),
+    )
+    .await
+    .unwrap();
+    call_tool(
+        &tools,
+        "task_heartbeat",
+        json!({ "lease": first["lease"], "checkpoint": {
+            "summary": "schema done, handler half written",
+            "next_step": "finish the handler in src/handler.rs",
+        } }),
+    )
+    .await
+    .unwrap();
+    // The session dies: no release, and every sign of life ages.
+    db.with_conn(|c| {
+        for sql in [
+            "UPDATE task_work_sessions SET started_at = datetime('now', '-4 hours'), last_heartbeat_at = datetime('now', '-3 hours')",
+            "UPDATE task_comments SET created_at = datetime('now', '-4 hours')",
+            "UPDATE tasks SET updated_at = datetime('now', '-4 hours')",
+            "UPDATE task_checkpoints SET created_at = datetime('now', '-3 hours')",
+        ] {
+            c.execute(sql, [])?;
+        }
+        Ok(())
+    })
+    .unwrap();
+    // A more urgent task is waiting too.
+    call_tool(
+        &tools,
+        "task_create",
+        json!({ "title": "fresh and urgent", "assignees": ["worker"], "priority": "urgent" }),
+    )
+    .await
+    .unwrap();
+
+    let next = call_tool(&tools, "task_next", json!({ "actor": "worker" }))
+        .await
+        .unwrap();
+    assert_eq!(
+        next["task"]["display_id"], half,
+        "the unfinished work comes first"
+    );
+    assert_eq!(next["resuming"], true);
+    assert_eq!(next["moved_to_in_progress"], false);
+    assert_eq!(
+        next["resume"]["next_step"],
+        "finish the handler in src/handler.rs"
+    );
+    assert!(
+        next["next"]
+            .as_str()
+            .unwrap()
+            .contains("read `resume` first"),
+        "{}",
+        next["next"]
+    );
+
+    // Its owner holds it now, so the next ask moves on to the fresh task.
+    let after = call_tool(&tools, "task_next", json!({ "actor": "worker" }))
+        .await
+        .unwrap();
+    assert_eq!(after["task"]["title"], "fresh and urgent");
+    assert_eq!(after["resuming"], false);
+}
+
+#[tokio::test]
 async fn the_blocked_reason_rule_cannot_be_met_with_nothing_or_dropped_later() {
     let tools = tools_with(hq_core::config::LeaseMode::Off);
     let task = call_tool(&tools, "task_create", json!({ "title": "t" }))
@@ -4233,4 +4674,193 @@ fn only_project_relative_checkpoint_paths_reach_the_scope() {
     ]});
     super::tools_lease::hide_machine_paths(&mut resume);
     assert_eq!(resume["files"], json!(["src/lib.rs", "docs/a b.md"]));
+}
+
+/// Tools over a database file inside the vault, so the owner-notice writes land where the test
+/// can read them.
+fn tools_over_file_db(
+    vault_path: &std::path::Path,
+    verification: hq_core::config::VerificationConfig,
+    gh: Arc<dyn crate::tasks::verify::GitHubRead>,
+) -> Vec<Box<dyn HqTool>> {
+    let db = Arc::new(Database::open(&vault_path.join("_data").join("vault.db")).unwrap());
+    let vault = Arc::new(VaultClient::new(vault_path.to_path_buf()).unwrap());
+    let settings = hq_core::config::TasksConfig {
+        verification,
+        ..Default::default()
+    };
+    crate::tasks::build_task_tools(
+        vault_path.to_path_buf(),
+        vault,
+        db,
+        settings,
+        None,
+        gh,
+        true,
+    )
+}
+
+fn pending_value_items(vault_path: &std::path::Path) -> usize {
+    let value_db = Database::open(&vault_path.join("_data").join("vault.db")).unwrap();
+    hq_db::value_items::list_by_state(&value_db, hq_core::types::ValueState::Pending)
+        .unwrap()
+        .len()
+}
+
+#[tokio::test]
+async fn the_owner_is_asked_to_review_only_what_hq_will_not_verify() {
+    use hq_core::config::{VerificationConfig, VerificationMode};
+    for (mode, asked) in [
+        (VerificationMode::Off, 1),
+        (VerificationMode::Shadow, 1),
+        (VerificationMode::Enforce, 0),
+    ] {
+        let dir = tempfile::tempdir().unwrap();
+        let tools = tools_over_file_db(
+            dir.path(),
+            VerificationConfig {
+                mode,
+                ..Default::default()
+            },
+            Arc::new(crate::tasks::verify::remote::fake::FakeGitHub::default()),
+        );
+        let task = call_tool(&tools, "task_create", json!({ "title": "Write the note" }))
+            .await
+            .unwrap();
+        let claim = call_tool(
+            &tools,
+            "task_claim",
+            json!({ "task_id": task["display_id"], "actor": "builder" }),
+        )
+        .await
+        .unwrap();
+        call_tool(
+            &tools,
+            "task_release",
+            json!({ "lease": claim["lease"], "status": "ready_for_review", "summary": "done" }),
+        )
+        .await
+        .unwrap();
+        assert_eq!(pending_value_items(dir.path()), asked, "{mode:?}");
+    }
+}
+
+#[tokio::test]
+async fn a_code_task_handed_over_with_nothing_to_verify_is_told_what_to_link() {
+    use crate::tasks::verify::remote::fake::FakeGitHub;
+    use hq_core::config::{ReleaseCheck, VerificationConfig, VerificationMode};
+    let dir = tempfile::tempdir().unwrap();
+    let gh = FakeGitHub::default().with("repos/example/repo/pulls/7", json!({}));
+    let tools = tools_over_file_db(
+        dir.path(),
+        VerificationConfig {
+            mode: VerificationMode::Enforce,
+            release_check: ReleaseCheck::Enforce,
+            ..Default::default()
+        },
+        Arc::new(gh),
+    );
+    let task = call_tool(
+        &tools,
+        "task_create",
+        json!({ "title": "Fix the guard", "tags": ["code"] }),
+    )
+    .await
+    .unwrap();
+    let id = task["display_id"].as_str().unwrap().to_string();
+    let claim = call_tool(
+        &tools,
+        "task_claim",
+        json!({ "task_id": id, "actor": "builder" }),
+    )
+    .await
+    .unwrap();
+
+    // Refused, with the exact call to make, and the agent keeps its lease.
+    let refused = call_tool(
+        &tools,
+        "task_release",
+        json!({ "lease": claim["lease"], "status": "ready_for_review", "summary": "pushed" }),
+    )
+    .await
+    .unwrap_err()
+    .to_string();
+    assert!(
+        refused.contains("task_link_add") && refused.contains(&id),
+        "{refused}"
+    );
+    let still = call_tool(&tools, "task_get", json!({ "id": id }))
+        .await
+        .unwrap();
+    assert_eq!(still["status"], "in_progress");
+    assert_eq!(pending_value_items(dir.path()), 0);
+
+    // task_update is held to the same rule.
+    let update = call_tool(
+        &tools,
+        "task_update",
+        json!({ "id": id, "status": "ready_for_review", "lease": claim["lease"] }),
+    )
+    .await
+    .unwrap_err()
+    .to_string();
+    assert!(update.contains("task_link_add"), "{update}");
+
+    // Linked, it goes through.
+    call_tool(
+        &tools,
+        "task_link_add",
+        json!({ "task_id": id, "kind": "pr", "ref": "example/repo#7", "direction": "produced" }),
+    )
+    .await
+    .unwrap();
+    let released = call_tool(
+        &tools,
+        "task_release",
+        json!({ "lease": claim["lease"], "status": "ready_for_review", "summary": "pushed" }),
+    )
+    .await
+    .unwrap();
+    assert_eq!(released["task"]["status"], "ready_for_review");
+}
+
+#[tokio::test]
+async fn under_warn_the_handover_goes_through_with_what_to_link() {
+    use crate::tasks::verify::remote::fake::FakeGitHub;
+    use hq_core::config::{VerificationConfig, VerificationMode};
+    let dir = tempfile::tempdir().unwrap();
+    let tools = tools_over_file_db(
+        dir.path(),
+        VerificationConfig {
+            mode: VerificationMode::Enforce,
+            ..Default::default()
+        },
+        Arc::new(FakeGitHub::default()),
+    );
+    let task = call_tool(
+        &tools,
+        "task_create",
+        json!({ "title": "Fix the guard", "tags": ["code"] }),
+    )
+    .await
+    .unwrap();
+    let claim = call_tool(
+        &tools,
+        "task_claim",
+        json!({ "task_id": task["display_id"], "actor": "builder" }),
+    )
+    .await
+    .unwrap();
+    let released = call_tool(
+        &tools,
+        "task_release",
+        json!({ "lease": claim["lease"], "status": "ready_for_review", "summary": "pushed" }),
+    )
+    .await
+    .unwrap();
+    assert_eq!(released["task"]["status"], "ready_for_review");
+    assert!(
+        released["warnings"].to_string().contains("task_link_add"),
+        "{released}"
+    );
 }

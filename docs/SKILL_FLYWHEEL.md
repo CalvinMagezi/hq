@@ -36,8 +36,9 @@ The daemon task `skill-outcomes` (every 10 minutes, last 30 days) settles each l
 
 | Signal | Outcome |
 |---|---|
-| the task went `ready_for_review`, then `complete` | `accepted` (score 1.0) |
+| the task went `ready_for_review`, then `complete`, completed by someone other than the people who worked it | `accepted` (score 1.0) |
 | the task went `ready_for_review`, then back to `in_progress`, `to_do` or `blocked` | `reworked` (0.5) |
+| the task went `ready_for_review`, then `complete`, but the completing actor is one that held a lease or moved it into progress or review, or was not recorded | no outcome |
 | a sub-agent run review `accepted` / `partial` | `accepted` / `reworked`; `blocked` is ignored |
 | someone other than the writer `accepted` / `superseded` / `disputed` a note written under the task | `accepted` / `reworked` / `rejected` (0.0) |
 

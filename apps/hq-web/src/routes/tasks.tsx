@@ -39,6 +39,10 @@ import { WorkingNowContext, workingNow } from '~/components/tasks/workingContext
 import { WorkingNowPanel } from '~/components/tasks/WorkingNowPanel'
 import { InitiativeBriefing } from '~/components/tasks/InitiativeBriefing'
 import { useRefreshOn } from '~/lib/useRefreshOn'
+import { VerificationBar } from '~/components/tasks/verification/VerificationBar'
+import { BriefingCard } from '~/components/tasks/verification/BriefingCard'
+import { SweepSheet } from '~/components/tasks/verification/SweepSheet'
+import { AuditSheet } from '~/components/tasks/verification/AuditSheet'
 
 type TasksView = 'list' | 'board' | 'timeline'
 
@@ -136,6 +140,9 @@ function TasksPage() {
   const [briefingFor, setBriefingFor] = useState<string | null>(null)
   const [formOpen, setFormOpen] = useState(false)
   const [busy, setBusy] = useState(false)
+  // Task verification: the sweep sheet ("Verify now") and the audit stack.
+  const [sweepOpen, setSweepOpen] = useState(false)
+  const [auditOpen, setAuditOpen] = useState(false)
 
   const {
     tasks,
@@ -403,6 +410,14 @@ function TasksPage() {
           onOpenSidebar={() => setMobileSidebarOpen(true)}
         />
 
+        <VerificationBar onVerifyNow={() => setSweepOpen(true)} onAudit={() => setAuditOpen(true)} />
+        <BriefingCard
+          variant="tasks"
+          onOpenTask={setSelectedTaskId}
+          onPlanSweep={() => setSweepOpen(true)}
+          onAudit={() => setAuditOpen(true)}
+        />
+
         <TasksFilterBar
           view={view}
           setView={setView}
@@ -525,6 +540,15 @@ function TasksPage() {
           onCreateSubtask={handleCreateSubtask}
           busy={busy}
         />
+
+        <SweepSheet
+          key={sweepOpen ? 'open' : 'closed'}
+          open={sweepOpen}
+          onClose={() => setSweepOpen(false)}
+          inputs={{ initiativeId: selection.initiativeId ?? null, selectedIds: picking.selected.map((t) => t.id) }}
+          initiativeName={selection.initiativeId ? initiativeById.get(selection.initiativeId)?.name : undefined}
+        />
+        <AuditSheet open={auditOpen} onClose={() => setAuditOpen(false)} />
 
         <TaskFormModal
           open={formOpen}

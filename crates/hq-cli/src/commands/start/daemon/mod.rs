@@ -267,8 +267,12 @@ const MOBILE_REMOVED_DAEMON_TASKS: &[&str] = &["disk-watchdog"];
 
 /// The tasks a mobile instance also skips while its data saver is on: the ones that call a model
 /// or a mail API on a timer, which a metered connection should only pay for when asked.
-const MOBILE_DATA_SAVER_REMOVED_DAEMON_TASKS: &[&str] =
-    &["memory-consolidation", "inbox-triage", "email-poll"];
+const MOBILE_DATA_SAVER_REMOVED_DAEMON_TASKS: &[&str] = &[
+    "memory-consolidation",
+    "inbox-triage",
+    "email-poll",
+    "verify-dispatch",
+];
 
 /// The tasks the scheduler runs for `config`.
 fn scheduled_tasks(config: &HqConfig) -> Vec<DaemonTask> {
@@ -418,6 +422,8 @@ fn default_tasks() -> Vec<DaemonTask> {
         DaemonTask::with_default_timeout("expire-approvals", Duration::from_secs(60)),
         DaemonTask::with_default_timeout("session-supervisor", Duration::from_secs(60)),
         DaemonTask::with_default_timeout("stack-dispatch", Duration::from_secs(60)),
+        // Detaches its pass, so the one-minute timeout only covers starting it.
+        DaemonTask::with_default_timeout("verify-dispatch", Duration::from_secs(60)),
         DaemonTask::with_default_timeout("copilot-usage", Duration::from_secs(60)),
         DaemonTask::with_default_timeout("subagent-supervisor", Duration::from_secs(60)),
         // Every 5 minutes (periodic tier — 2min timeout)
@@ -465,6 +471,8 @@ fn default_tasks() -> Vec<DaemonTask> {
         DaemonTask::with_default_timeout("turn-reconcile", Duration::from_secs(21600)), // every 6h
         // In-progress tasks nobody holds or has touched; a once-a-day digest, never a status change.
         DaemonTask::with_default_timeout("task-stale-digest", Duration::from_secs(21600)),
+        DaemonTask::with_default_timeout("verify-audit", Duration::from_secs(21600)),
+        DaemonTask::with_default_timeout("verify-briefing", Duration::from_secs(3600)),
     ]
 }
 
@@ -583,6 +591,9 @@ async fn dispatch_task(
             tasks_periodic::session_supervisor::run_session_supervisor(vault_path, db, config).await
         }
         "stack-dispatch" => tasks_periodic::run_stack_dispatch(vault_path, db, config).await,
+        "verify-dispatch" => tasks_periodic::run_verify_dispatch(vault_path, db, config).await,
+        "verify-audit" => tasks_periodic::run_verify_audit(vault_path, db, config).await,
+        "verify-briefing" => tasks_periodic::run_verify_briefing(vault_path, db, config).await,
         "email-poll" => tasks_periodic::run_email_poll(vault_path, config).await,
         "memory-consolidation" => {
             if config.dream.enabled {
@@ -917,6 +928,7 @@ mod lite_tests {
             "session-supervisor",
             "stack-dispatch",
             "subagent-supervisor",
+            "verify-dispatch",
             "copilot-usage",
             "harness-usage",
             "usage-ledger",

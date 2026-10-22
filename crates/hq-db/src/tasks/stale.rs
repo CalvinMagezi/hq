@@ -28,6 +28,19 @@ pub fn stale_tasks(
     stale_rows(conn, stale_after_hours, limit, None)
 }
 
+/// SQL for the last sign of life on the task row aliased `alias`: its latest write, comment
+/// (a watch's note is not one) or lease heartbeat. The one definition of "quiet" that staleness
+/// and the queue's resume rule share.
+pub(super) fn last_activity_sql(alias: &str) -> String {
+    format!(
+        "MAX({alias}.updated_at, \
+             COALESCE((SELECT MAX(created_at) FROM task_comments \
+                       WHERE task_id = {alias}.id AND author NOT LIKE 'watch-%'), ''), \
+             COALESCE((SELECT MAX(COALESCE(ended_at, last_heartbeat_at)) \
+                       FROM task_work_sessions WHERE task_id = {alias}.id), ''))"
+    )
+}
+
 /// The rule itself. `only` narrows it to one task, so asking about one task does not scan them all.
 /// Leases are assumed already expired by the caller.
 fn stale_rows(
@@ -36,16 +49,13 @@ fn stale_rows(
     limit: usize,
     only: Option<&str>,
 ) -> Result<Vec<StaleTask>> {
+    let activity = last_activity_sql("t");
     let mut stmt = conn.prepare(&format!(
         "SELECT id, display_id, title, initiative_id, last_activity, \
                 CAST((strftime('%s','now') - strftime('%s', last_activity)) / 3600 AS INTEGER) \
          FROM ( \
              SELECT t.id, t.display_id, t.title, t.initiative_id, \
-                    MAX(t.updated_at, \
-                        COALESCE((SELECT MAX(created_at) FROM task_comments \
-                                  WHERE task_id = t.id AND author NOT LIKE 'watch-%'), ''), \
-                        COALESCE((SELECT MAX(COALESCE(ended_at, last_heartbeat_at)) \
-                                  FROM task_work_sessions WHERE task_id = t.id), '')) AS last_activity \
+                    {activity} AS last_activity \
              FROM tasks t \
              WHERE t.status = 'in_progress' AND t.archived_at IS NULL AND (?2 IS NULL OR t.id = ?2) \
                AND NOT EXISTS (SELECT 1 FROM task_work_sessions s WHERE s.task_id = t.id AND s.ended_at IS NULL) \

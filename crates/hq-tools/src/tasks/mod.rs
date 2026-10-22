@@ -25,12 +25,17 @@ mod tools_ops;
 mod tools_org;
 mod tools_task;
 mod tools_time;
+pub mod verify;
 
 use activity::TaskActivityTool;
 use from_note::TaskCreateFromNoteTool;
 pub use json::{
-    added_tags, apply_dependency_changes, notify_ready_for_review, notify_recipients, notify_tags,
-    notify_unblocked, task_json, task_json_with_warnings, unblocked_by_transition,
+    TASK_AUDIT_SOURCE, TASK_AUTONOMY_SOURCE, TASK_BRIEFING_SOURCE, TASK_EXCEPTION_SOURCE,
+    TASK_QUEUE_ALERT_SOURCE, TASK_REVIEW_SOURCE, TASK_VETO_SOURCE, added_tags,
+    apply_dependency_changes, notify_audit_digest, notify_autonomy_withdrawn, notify_briefing,
+    notify_owner_exception, notify_queue_alert, notify_ready_for_review, notify_recipients,
+    notify_tags, notify_unblocked, notify_veto_window, task_json, task_json_with_warnings,
+    unblocked_by_transition,
 };
 pub use placement::{
     Placement, create_task_in, derive_id_prefix, find_or_create_folder, find_or_create_initiative,
@@ -52,7 +57,28 @@ pub fn create_task_tools(
     vault: Arc<VaultClient>,
     db: Arc<Database>,
 ) -> Vec<Box<dyn HqTool>> {
-    create_task_tools_with(vault_path, vault, db, task_settings())
+    create_task_tools_from_config(vault_path, vault, db, None)
+}
+
+/// The tools for a process that loads its own configuration (the MCP server, HQ's chat
+/// sessions). It records the completion policy only when that configuration was really read:
+/// a process that fell back to defaults would otherwise switch verification off for everyone.
+pub fn create_task_tools_from_config(
+    vault_path: PathBuf,
+    vault: Arc<VaultClient>,
+    db: Arc<Database>,
+    origin_thread: Option<String>,
+) -> Vec<Box<dyn HqTool>> {
+    let (settings, read) = task_settings_read();
+    build_task_tools(
+        vault_path,
+        vault,
+        db,
+        settings,
+        origin_thread,
+        Arc::new(verify::GhCli),
+        read,
+    )
 }
 
 /// `create_task_tools` with explicit task settings, for tests and callers that
@@ -75,6 +101,39 @@ pub fn create_task_tools_for_chat(
     settings: TasksConfig,
     origin_thread: Option<String>,
 ) -> Vec<Box<dyn HqTool>> {
+    build_task_tools(
+        vault_path,
+        vault,
+        db,
+        settings,
+        origin_thread,
+        Arc::new(verify::GhCli),
+        true,
+    )
+}
+
+/// The task tools reading GitHub through `gh`. The release check is the only tool code that does;
+/// tests pass a client with canned answers.
+pub(crate) fn build_task_tools(
+    vault_path: PathBuf,
+    vault: Arc<VaultClient>,
+    db: Arc<Database>,
+    settings: TasksConfig,
+    origin_thread: Option<String>,
+    gh: Arc<dyn verify::GitHubRead>,
+    record_policy: bool,
+) -> Vec<Box<dyn HqTool>> {
+    // The completion policy lives in the database, so the web server, the daemon and an MCP
+    // server all meet the same rule. A process that holds a configuration it really read writes
+    // it there (the daemon also does, on every verification pass); one that fell back to defaults
+    // leaves the owner's policy alone.
+    if record_policy
+        && let Err(e) = db.with_conn(|c| {
+            hq_db::tasks::sync_verification_policy(c, &settings.verification).map(|_| ())
+        })
+    {
+        tracing::warn!(error = %e, "could not record the task verification policy");
+    }
     let create = || TaskCreateTool {
         settings: settings.clone(),
         origin_thread: origin_thread.clone(),
@@ -85,6 +144,7 @@ pub fn create_task_tools_for_chat(
         settings: settings.clone(),
         vault_path: vault_path.clone(),
         db: db.clone(),
+        gh: gh.clone(),
     };
     vec![
         Box::new(create()),
@@ -129,6 +189,7 @@ pub fn create_task_tools_for_chat(
             settings: settings.clone(),
             vault_path: vault_path.clone(),
             db: db.clone(),
+            gh: gh.clone(),
         }),
         Box::new(TaskTimeReportTool {
             settings: settings.clone(),
