@@ -5,6 +5,7 @@ import example.hq.spike.data.HqClient.NoteItem
 import example.hq.spike.ui.chat.ExportState
 import example.hq.spike.ui.chat.Notice
 import example.hq.spike.ui.chat.NoteSheet
+import example.hq.spike.ui.chat.blocks.NoteRefs
 
 /** A page pushed over the Notes home. Back pops one. */
 sealed interface NotesRoute {
@@ -76,3 +77,7 @@ data class NotesUi(
     /** The folders directly under Notebooks, Inbox first, for the chips on the home screen. */
     val topFolders: List<String> get() = folders.map { it.removePrefix("Notebooks/").substringBefore('/') }.filter { it.isNotBlank() }.distinct()
 }
+
+/** The task "Make a task" adds: the note's title, its path as the description (a task has no link field), and the path as the repeat key. */
+internal fun noteTaskBody(path: String, title: String): org.json.JSONObject =
+    org.json.JSONObject().put("title", title.ifBlank { NoteRefs.title(path) }).put("description", path).put("space_id", "personal").put("initiative", "Inbox").put("created_by", "operator").put("external_id", "note:$path")

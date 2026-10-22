@@ -12,6 +12,7 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.navigationBarsPadding
@@ -94,7 +95,7 @@ fun NotesOverlays(ui: NotesUi, actions: NotesActions, onAskHq: (List<Pair<String
         BackHandler(onBack = actions.onBack)
         Box(Modifier.fillMaxSize().background(Mts.Surface000).consumeTouches().statusBarsPadding().navigationBarsPadding()) {
             when (top) {
-                is NotesRoute.Reader -> ReaderPage(ui, actions)
+                is NotesRoute.Reader -> ReaderPage(ui, actions, onAskHq)
                 is NotesRoute.Folder -> FolderPage(ui, actions)
                 is NotesRoute.Search -> SearchPage(ui, actions, onAskHq)
                 is NotesRoute.Write -> ui.write?.let { WritePage(it, ui.folders, actions) }
@@ -150,9 +151,9 @@ private fun GreenPill(label: String, modifier: Modifier = Modifier, enabled: Boo
 // ---------------------------------------------------------------- reading
 
 @Composable
-private fun ReaderPage(ui: NotesUi, actions: NotesActions) {
+private fun ReaderPage(ui: NotesUi, actions: NotesActions, onAskHq: (List<Pair<String, String>>) -> Unit) {
     when (val phase = ui.reader) {
-        is ReaderPhase.Ready -> ReaderReady(phase, actions)
+        is ReaderPhase.Ready -> ReaderReady(phase, actions) { onAskHq(listOf(phase.note.path to phase.note.title)) }
         ReaderPhase.Loading -> Column { TopBar("Note", null, actions.onBack); Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) { Spinner(32) } }
         ReaderPhase.Gone -> GonePage(ui, actions)
         ReaderPhase.Failed -> Column {
@@ -166,7 +167,7 @@ private fun ReaderPage(ui: NotesUi, actions: NotesActions) {
 }
 
 @Composable
-private fun ReaderReady(phase: ReaderPhase.Ready, actions: NotesActions) {
+private fun ReaderReady(phase: ReaderPhase.Ready, actions: NotesActions, onAsk: () -> Unit) {
     val note = phase.note
     val blocks = remember(note.body) { parseBlocks(NoteText.withoutFrontmatter(note.body)) }
     val handlers = remember(actions) { BlockActions(onOpenNote = actions.onOpenNote, onCopied = { actions.onNotice("Copied") }) }
@@ -175,8 +176,35 @@ private fun ReaderReady(phase: ReaderPhase.Ready, actions: NotesActions) {
             GreenPill("Edit", Modifier.padding(end = 4.dp), onClick = actions.onEdit)
             IconAction(HqIcons.MoreVertical, "More", iconSize = 24.dp) { actions.onMenu(true) }
         }
+        ReaderChips(note, actions, onAsk)
         // Lazy, so a long note opens by drawing the screenful in view, not every block of it.
         SelectionContainer(Modifier.weight(1f)) { NoteBody(note.path, blocks, handlers, note.truncated, actions) }
+    }
+}
+
+/** What can be done with the note it is showing, under the bar. The row scrolls, so a narrow phone cuts the last chip. */
+@Composable
+private fun ReaderChips(note: example.hq.spike.ui.chat.NoteSheet, actions: NotesActions, onAsk: () -> Unit) {
+    val context = androidx.compose.ui.platform.LocalContext.current
+    Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(horizontal = 16.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        ReaderChip(HqIcons.Spark, "Ask HQ", Mts.BrandBlue, onAsk)
+        ReaderChip(HqIcons.Tasks, "Make a task", Mts.Ink, actions.onMakeTask)
+        ReaderChip(HqIcons.Pin, if (note.pinned) "Unpin" else "Pin", Mts.Ink, actions.onTogglePin)
+        ReaderChip(HqIcons.Share, "Share", Mts.Ink) { if (note.truncated) actions.onNotice("This note is too long to share as text.") else example.hq.spike.ui.chat.shareText(context, note) }
+    }
+}
+
+/** Drawn 40 high as the board has it; the touch target around it is 48. */
+@Composable
+private fun ReaderChip(icon: androidx.compose.ui.graphics.vector.ImageVector, label: String, tint: Color, onClick: () -> Unit) {
+    Box(Modifier.heightIn(min = 48.dp).clickable(role = Role.Button, onClick = onClick), contentAlignment = Alignment.Center) {
+        Row(
+            Modifier.height(40.dp).clip(CircleShape).border(1.dp, Mts.Line, CircleShape).padding(horizontal = 14.dp),
+            horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Icon(icon, null, Modifier.size(18.dp), tint = tint)
+            Text(label, style = HqType.BodySmBold, color = Mts.Ink, maxLines = 1)
+        }
     }
 }
 

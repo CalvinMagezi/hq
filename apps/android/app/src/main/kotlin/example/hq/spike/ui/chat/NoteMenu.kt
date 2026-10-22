@@ -97,7 +97,7 @@ fun NoteMenuSheet(sheet: NoteSheet, actions: NoteMenuActions) {
 
 private val ROW_HEIGHT = 64.dp
 
-private fun shareText(context: Context, sheet: NoteSheet) {
+internal fun shareText(context: Context, sheet: NoteSheet) {
     val send = Intent(Intent.ACTION_SEND).setType("text/plain").putExtra(Intent.EXTRA_SUBJECT, sheet.title).putExtra(Intent.EXTRA_TEXT, NoteText.withoutFrontmatter(sheet.body))
     context.startActivity(Intent.createChooser(send, null).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
 }

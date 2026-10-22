@@ -20,6 +20,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import org.json.JSONObject
 
 /** Everything the Notes pages can ask for. */
 class NotesActions(
@@ -34,6 +35,7 @@ class NotesActions(
     val onEdit: () -> Unit = {},
     val onMenu: (Boolean) -> Unit = {},
     val onTogglePin: () -> Unit = {},
+    val onMakeTask: () -> Unit = {},
     val onExport: () -> Unit = {},
     val onExportFormat: (example.hq.spike.ui.chat.ExportFormat) -> Unit = {},
     val onExportClose: () -> Unit = {},
@@ -71,7 +73,7 @@ class NotesViewModel(app: Application) : AndroidViewModel(app) {
         onOpenSearch = { push(NotesRoute.Search); _state.update { it.copy(search = SearchState()) } },
         onQuery = ::query, onFilter = { f -> _state.update { it.copy(search = it.search.copy(filter = f)) } },
         onBack = ::back, onNew = ::newNote, onEdit = ::edit, onMenu = { open -> _state.update { it.copy(menu = open) } },
-        onTogglePin = ::togglePin,
+        onTogglePin = ::togglePin, onMakeTask = ::makeTask,
         onExport = { (_state.value.reader as? ReaderPhase.Ready)?.note?.let { n -> _state.update { it.copy(menu = false) }; exporter.choose(n.path, n.title, n.body) } },
         onExportFormat = exporter::start, onExportClose = exporter::close, onExportAgain = exporter::again,
         onNotice = { text -> _state.update { it.copy(notice = Notice(text)) } }, onDismissNotice = { _state.update { it.copy(notice = null) } },
@@ -197,6 +199,15 @@ class NotesViewModel(app: Application) : AndroidViewModel(app) {
             } catch (e: HqUnavailable) {
                 _state.update { it.copy(notice = Notice("Could not change the pin. HQ is not answering.")) }
             }
+        }
+    }
+
+    /** A task in the Inbox that points at this note. The same note twice answers with the first task, so a second tap adds nothing. */
+    private fun makeTask() {
+        val note = (_state.value.reader as? ReaderPhase.Ready)?.note ?: return
+        viewModelScope.launch {
+            val said = try { client.createTask(noteTaskBody(note.path, note.title)); "Task added to your Inbox" } catch (e: HqUnavailable) { "Could not add the task. HQ is not answering." }
+            _state.update { it.copy(notice = Notice(said)) }
         }
     }
 
