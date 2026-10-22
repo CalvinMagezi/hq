@@ -3,6 +3,7 @@ resolver = "2"
 members = [
     "crates/hq-cli",
     "crates/hq-gate",
+    "crates/hq-bridge",
     "crates/hq-net",
     "crates/hq-tunnel",
     "crates/hq-edge",
@@ -152,6 +153,7 @@ hq-update = { path = "crates/hq-update" }
 hq-backup = { path = "crates/hq-backup" }
 hq-host = { path = "crates/hq-host" }
 hq-gate = { path = "crates/hq-gate" }
+hq-bridge = { path = "crates/hq-bridge" }
 hq-net = { path = "crates/hq-net" }
 hq-tunnel = { path = "crates/hq-tunnel" }
 hq-edge = { path = "crates/hq-edge" }

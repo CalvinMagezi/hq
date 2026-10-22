@@ -3,12 +3,14 @@ package example.hq.spike
 import android.content.Intent
 import android.graphics.Color
 import android.os.Bundle
+import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.SystemBarStyle
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.viewModels
 import androidx.compose.foundation.layout.padding
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
@@ -57,6 +59,8 @@ import example.hq.spike.ui.chat.ChatTime
 import example.hq.spike.ui.chat.ChatViewModel
 import example.hq.spike.ui.chat.chatFixture
 import example.hq.spike.ui.shell.HqShell
+import example.hq.spike.ui.shell.LinkTarget
+import example.hq.spike.ui.shell.Links
 import example.hq.spike.ui.usage.ChipTarget
 import example.hq.spike.ui.usage.UsageViewModel
 import example.hq.spike.ui.usage.balanceFixture
@@ -85,8 +89,44 @@ class ShellActivity : ComponentActivity() {
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
         setIntent(intent)
-        requested = placeOf(intent)
-        if (requested != null) closePages()
+        val link = linkOf(intent) ?: return
+        if (hasUnsavedWork()) {
+            Toast.makeText(this, UNSAVED_WORK, Toast.LENGTH_LONG).show()
+            return
+        }
+        closePages()
+        requested = link.place
+        applyLink(link)
+    }
+
+    /** The link an intent carries (an hq:// link, from a notification, a widget or another app), or the place a debug start names. */
+    private fun linkOf(intent: Intent): LinkTarget? {
+        intent.getStringExtra(Links.EXTRA)?.let { return Links.parse(it) }
+        return intent.getStringExtra("place")?.let { name -> Place.entries.firstOrNull { it.name.equals(name, true) } }?.let { LinkTarget(it) }
+    }
+
+    /** Shows what a link names, over the place it belongs to. Waiting for what is not loaded yet is the view model's job. */
+    private fun applyLink(t: LinkTarget) {
+        when (t.place) {
+            Place.Chat -> t.id?.let(chat::openLinked)
+            Place.Inbox -> t.id?.let(inbox::openItem)
+            Place.Tasks -> t.id?.let { tasks.openById(it) { } }
+            Place.Notes -> { t.path?.let(notes::openNote); if (t.search) notes.actions.onOpenSearch() }
+            Place.Helpers -> t.id?.let(helpers::openSession)
+        }
+        t.screen?.let { name ->
+            val page = SettingsPage.entries.firstOrNull { it.name.equals(name, true) } ?: return@let
+            settings.actions.onOpen()
+            if (page != SettingsPage.Home) settings.actions.onPage(page)
+        }
+    }
+
+    /** Closing the pages for a link would throw away what is being typed, and a link can come from another app. */
+    private fun hasUnsavedWork(): Boolean {
+        val tasksNow = tasks.state.value
+        val typedInTask = tasksNow.detail?.drafts?.values?.any { it.isNotBlank() } == true
+        val typedInQuickAdd = tasksNow.quick?.let { it.text.isNotBlank() || it.notes.isNotBlank() } == true
+        return notes.state.value.write?.dirty == true || typedInTask || typedInQuickAdd
     }
 
     /** Pages and sheets open over the shell would hide the place a tapped notification asks for. */
@@ -102,7 +142,7 @@ class ShellActivity : ComponentActivity() {
         chat.actions.onCloseChats()
     }
 
-    private fun placeOf(intent: Intent): Place? = intent.getStringExtra("place")?.let { name -> Place.entries.firstOrNull { it.name.equals(name, true) } }
+    private fun placeOf(intent: Intent): Place? = linkOf(intent)?.place
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -114,6 +154,8 @@ class ShellActivity : ComponentActivity() {
         val start = placeOf(intent) ?: if (intent.getStringExtra("fixture")?.startsWith("n-") == true) Place.Notes else if (intent.getStringExtra("fixture")?.startsWith("i-") == true) Place.Inbox else if (intent.getStringExtra("fixture")?.startsWith("t-") == true) Place.Tasks else if (intent.getStringExtra("fixture")?.startsWith("h-") == true) Place.Helpers else Place.Chat
         val badge = intent.getIntExtra("badge", 0)
         val fixtureName = intent.getStringExtra("fixture")
+        // A rotation or a restore runs onCreate again with the launch intent; the link was applied the first time.
+        if (savedInstanceState == null) linkOf(intent)?.let(::applyLink)
         if (fixtureName == "a-alerts") sampleAlerts()
         val notesFixture = notesFixture(fixtureName)
         val inboxFixture = inboxFixture(fixtureName)
@@ -162,7 +204,7 @@ class ShellActivity : ComponentActivity() {
                         Place.Chat -> ChatScreen(chatState, chat.actions)
                         Place.Notes -> NotesPlace(notesState)
                         Place.Inbox -> InboxPlace(inboxState)
-                        Place.Tasks -> TasksScreen(tasksState, tasks.actions)
+                        Place.Tasks -> TasksPlace(tasksState)
                         Place.Helpers -> HelpersScreen(helpersState, helpers.actions)
                         else -> NotBuilt(place)
                     }
@@ -193,6 +235,12 @@ class ShellActivity : ComponentActivity() {
     }
 
     @androidx.compose.runtime.Composable
+    private fun TasksPlace(tasksState: TasksUi) {
+        val go = LocalGoTo.current
+        TasksScreen(tasksState, tasks.actions, onHelpers = { go(Place.Helpers) })
+    }
+
+    @androidx.compose.runtime.Composable
     private fun InboxPlace(inboxState: InboxUi) {
         val go = LocalGoTo.current
         InboxScreen(inboxState, inbox.actions, onTakeLook = { card -> openFromInbox(card, go) })
@@ -217,6 +265,15 @@ class ShellActivity : ComponentActivity() {
             chat.startChatWith(items.map { (path, title) -> ContextRef(ContextRef.Kind.Note, path, title) })
             go(Place.Chat)
         }
+        helpersState.followed?.let { thread ->
+            LaunchedEffect(thread) {
+                helpers.actions.onFollowedHandled()
+                helpers.actions.onClose()
+                // HQ named this chat itself, so it opens even if the list has not caught up or the chat was archived.
+                chat.actions.onOpenChat(thread)
+                go(Place.Chat)
+            }
+        }
         ChatOverlays(chatState, chat.actions) { path -> notes.openNote(path) }
         inboxState.details?.let { InboxDetails(it, inboxState.answering[it.id], inboxState.offline, inbox.actions) { card -> inbox.actions.onDetails(null); openFromInbox(card, go) } }
         tasksState.detail?.let { TaskPage(it, tasksState.today, tasks.actions) }
@@ -227,5 +284,6 @@ class ShellActivity : ComponentActivity() {
     private companion object {
         const val STATUS_TICK_MS = 5_000L
         const val OFFLINE_GRACE_MS = 5_000L
+        const val UNSAVED_WORK = "Finish or discard what you are writing first"
     }
 }

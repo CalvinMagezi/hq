@@ -53,10 +53,16 @@ class NotesTextTest {
         assertEquals("one\ntwo\nthree", MarkdownEditing.prefixLines(v(on.text, 1, 9), "- ").text)
     }
 
-    @Test fun linkUsesTheSelectionAsItsLabel() {
+    @Test fun linkWrapsTheSelectionInDoubleBrackets() {
         val t = MarkdownEditing.link(v("see the guide", 4, 13))
-        assertEquals("see [the guide](https://)", t.text)
-        assertEquals("https://", t.text.substring(t.selection.min, t.selection.max))
+        assertEquals("see [[the guide]]", t.text)
+        assertEquals(17, t.selection.min)
+    }
+
+    @Test fun linkWithNothingSelectedLeavesTheCursorBetweenTheBrackets() {
+        val t = MarkdownEditing.link(v("see ", 4, 4))
+        assertEquals("see [[]]", t.text)
+        assertEquals(6, t.selection.min)
     }
 
     @Test fun theAskPillSaysWhenItTakesOnlyTheFirstTen() {
@@ -64,5 +70,14 @@ class NotesTextTest {
         assertEquals("Ask HQ about these 7 notes", askWords(7))
         assertEquals("Ask HQ about these 10 notes", askWords(10))
         assertEquals("Ask HQ about the first 10 notes", askWords(13))
+    }
+
+    @Test fun makeATaskPointsAtTheNoteAndRepeatsAsTheSameTask() {
+        val b = noteTaskBody("Notebooks/Projects/Mobile-First-Roadmap.md", "Mobile-First-Roadmap")
+        assertEquals("Mobile-First-Roadmap", b.getString("title"))
+        assertEquals("Notebooks/Projects/Mobile-First-Roadmap.md", b.getString("description"))
+        assertEquals("note:Notebooks/Projects/Mobile-First-Roadmap.md", b.getString("external_id"))
+        assertEquals("Inbox", b.getString("initiative"))
+        assertEquals("Mobile-First-Roadmap", noteTaskBody("Notebooks/Projects/Mobile-First-Roadmap.md", "").getString("title"))
     }
 }

@@ -1,5 +1,9 @@
 # Spike F: pairing with a one-time ticket, then reconnecting by key
 
+> **Historical record.** This spike was promoted to the workspace crate `crates/hq-bridge` (sprint
+> workstream W3, see `docs/PAIRING.md` and `docs/security/PAIRING.md`). The code here is not
+> maintained and its tickets (`hqpair1.`, layout 1) are refused by the product as an older version.
+
 Throwaway crate, outside the HQ workspace. Spikes A to E (on the branch
 `claude/native-bridge-validation`) showed that the host gate runs over iroh and that iroh runs on a
 phone. They paired by editing a file. This one builds the step a stranger needs: scan a QR code,

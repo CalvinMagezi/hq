@@ -16,6 +16,7 @@ class HqClientTest {
     private lateinit var server: ServerSocket
     private val requests = CopyOnWriteArrayList<String>()
     private val auths = CopyOnWriteArrayList<String>()
+    private val lines = CopyOnWriteArrayList<String>()
     private var answer: (String) -> Pair<Int, String> = { 200 to """{"tasks":[],"has_more":false}""" }
 
     /** A one-thread HTTP/1.1 responder: reads a request's head, answers with Content-Length and closes. */
@@ -27,6 +28,7 @@ class HqClientTest {
                     server.accept().use { socket ->
                         val input = socket.getInputStream().bufferedReader()
                         val line = input.readLine() ?: return@use
+                        lines += line
                         while (true) {
                             val header = input.readLine().orEmpty()
                             if (header.isEmpty()) break
@@ -109,5 +111,11 @@ class HqClientTest {
     @Test fun theStatusOfAnErrorAnswerIsKeptForTheScreensToWord() = runBlocking {
         answer = { 409 to """{"error":"changed"}""" }
         try { client().patchTask("x", org.json.JSONObject().put("status", "complete")); fail("a 409 is an error") } catch (e: HqUnavailable) { assertEquals(409, e.status) }
+    }
+
+    @Test fun followingAHelperPostsToAdoptAndReturnsTheChat() = runBlocking {
+        answer = { 200 to """{"session":{},"thread_id":"th-9","created_thread":true,"already_watched":false}""" }
+        assertEquals("th-9", client().followHelper("s 1"))
+        assertEquals("POST /api/harness-sessions/s+1/adopt HTTP/1.1", lines.single())
     }
 }

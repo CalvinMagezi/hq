@@ -5,6 +5,7 @@ import example.hq.spike.data.HqClient.NoteItem
 import example.hq.spike.ui.chat.ExportState
 import example.hq.spike.ui.chat.Notice
 import example.hq.spike.ui.chat.NoteSheet
+import example.hq.spike.ui.chat.blocks.NoteRefs
 
 /** A page pushed over the Notes home. Back pops one. */
 sealed interface NotesRoute {
@@ -43,6 +44,18 @@ data class WriteState(
 ) {
     val isNew: Boolean get() = path == null
     val dirty: Boolean get() = text.text != original || (isNew && title.isNotBlank())
+
+    /** What the leave dialog says: the note by name, and that the text stays on the phone unless it is discarded. */
+    val leaveBody: String get() {
+        val name = title.ifBlank { path?.substringAfterLast('/')?.removeSuffix(".md").orEmpty() }
+        // Only the text is kept on the phone, not a title typed over an empty note.
+        val kept = if (text.text.isBlank()) "" else " Your text is kept on this phone unless you discard it."
+        return when {
+            !isNew -> "You edited ${name.ifBlank { "this note" }} and have not saved.$kept"
+            name.isNotBlank() -> "You wrote $name and have not saved it.$kept"
+            else -> "You wrote a note and have not saved it.$kept"
+        }
+    }
 }
 
 data class NotesUi(
@@ -65,3 +78,7 @@ data class NotesUi(
     /** The folders directly under Notebooks, Inbox first, for the chips on the home screen. */
     val topFolders: List<String> get() = folders.map { it.removePrefix("Notebooks/").substringBefore('/') }.filter { it.isNotBlank() }.distinct()
 }
+
+/** The task "Make a task" adds: the note's title, its path as the description (a task has no link field), and the path as the repeat key. */
+internal fun noteTaskBody(path: String, title: String): org.json.JSONObject =
+    org.json.JSONObject().put("title", title.ifBlank { NoteRefs.title(path) }).put("description", path).put("space_id", "personal").put("initiative", "Inbox").put("created_by", "operator").put("external_id", "note:$path")

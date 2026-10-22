@@ -19,6 +19,7 @@ import java.util.Arrays;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicLong;
@@ -28,11 +29,12 @@ import java.util.function.Supplier;
 public class HubService extends Service {
     static final String TAG = "HQHUB";
     static final String CHANNEL = "hub";
-    static final int PORT = 5678;
+    public static final int PORT = 5678;
     private static final int NOTIFICATION_ID = 1;
     private static final long BACKOFF_MIN_MS = 2_000;
     private static final long BACKOFF_MAX_MS = 60_000;
     private static final long STABLE_RUN_MS = 60_000;
+    private static final long FORCE_STOP_AFTER_MS = 20_000;
     private static final long MAX_LOG_BYTES = 5L << 20;
     private static final long RECOVER_MIN_GAP_MS = 5 * 60 * 1000L;
     private static final String SIGN_IN_MARK = "#token=";
@@ -43,6 +45,10 @@ public class HubService extends Service {
     // A supervisor from before a stop must not outlive it if the service starts again meanwhile.
     private static final AtomicInteger generation = new AtomicInteger();
     private static volatile Process hqProc;
+    /** hq was stopped on purpose (a new run mode or token), so its exit is not a crash and the next start is not delayed. */
+    private static volatile boolean restartAsked;
+    /** The run mode the hq child was started with, so a switch that raced a start can be seen and repeated. */
+    private static volatile boolean childActive;
     private static volatile Process caddyProc;
 
     /** The notification glyph, looked up by name because the build makes no R class. */
@@ -75,14 +81,47 @@ public class HubService extends Service {
         try {
             SecretStore.replaceWebToken(c);
             Log.w(TAG, "web token was signed out, replaced it and restarting hq");
-            Process p = hqProc;
-            if (p != null) p.destroy();
+            restartHq();
             Runnable heard = tokenListener;
             if (heard != null) heard.run();
         } catch (RuntimeException e) {
             lastRecovery.set(last);
             Log.e(TAG, "could not replace the web token: " + e);
         }
+    }
+
+    /**
+     * Stops the hq child so its supervisor starts it again, which reads files/mode and the token again. Only hq: the
+     * service, Caddy and the alerts thread keep running. Callers write the new mode first.
+     */
+    public static void restartHq() {
+        synchronized (LOCK) {
+            Process p = hqProc;
+            if (p == null || !p.isAlive()) return;
+            restartAsked = true;
+            p.destroy();
+            // hq shuts down in about ten seconds; one that has not gone by then is killed, or the old mode would keep running.
+            Thread killer = new Thread(() -> {
+                try {
+                    if (!p.waitFor(FORCE_STOP_AFTER_MS, TimeUnit.MILLISECONDS)) p.destroyForcibly();
+                } catch (InterruptedException ignored) {
+                    Thread.currentThread().interrupt();
+                }
+            }, "hq-stop");
+            killer.setDaemon(true);
+            killer.start();
+        }
+    }
+
+    /** Records the owner's choice of run mode and restarts hq so it applies. Throws if the mode file cannot be written, and then nothing restarts. */
+    public static void switchMode(Context c, boolean active) throws IOException {
+        HubConfig.writeMode(new File(c.getFilesDir(), "mode").toPath(), active);
+        restartHq();
+    }
+
+    /** True when the running hq child was started in Active mode. */
+    public static boolean childActive() {
+        return childActive;
     }
 
     @Override
@@ -137,7 +176,9 @@ public class HubService extends Service {
             } catch (Exception | LinkageError e) {
                 Log.e(TAG, name + " failed, will retry: " + e);
             }
-            backoff = ranMs >= STABLE_RUN_MS ? BACKOFF_MIN_MS : Math.min(backoff * 2, BACKOFF_MAX_MS);
+            boolean asked = isHq && restartAsked;
+            if (asked) restartAsked = false;
+            backoff = HubConfig.nextBackoff(backoff, ranMs, asked, BACKOFF_MIN_MS, BACKOFF_MAX_MS, STABLE_RUN_MS);
             if (!pause(gen, backoff)) return;
         }
     }
@@ -170,6 +211,7 @@ public class HubService extends Service {
     private ProcessBuilder hqProcess() {
         SecretStore.importPending(this, new File(getFilesDir(), "secrets.in"));
         boolean active = HubConfig.isActive(readSmall(new File(getFilesDir(), "mode")));
+        childActive = active;
         Log.i(TAG, "hq mode: " + (active ? "active (daemon, relays)" : "standby (web only)"));
         getSystemService(NotificationManager.class).notify(NOTIFICATION_ID, notification(active));
         File lib = new File(getApplicationInfo().nativeLibraryDir, "libhq.so");

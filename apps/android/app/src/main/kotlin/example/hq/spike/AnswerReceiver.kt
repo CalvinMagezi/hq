@@ -6,8 +6,11 @@ import android.app.PendingIntent
 import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
+import android.os.Build
+import android.os.SystemClock
 import example.hq.spike.ui.inbox.CardKind
 import example.hq.spike.ui.helpers.AnswerCheck
+import example.hq.spike.ui.helpers.AnswerWords
 import example.hq.spike.ui.helpers.HelperWords
 import example.hq.spike.ui.inbox.InboxCard
 import java.net.HttpURLConnection
@@ -30,43 +33,57 @@ class AnswerReceiver : BroadcastReceiver() {
         val kind = intent.getStringExtra(KIND)
         val title = intent.getStringExtra(TITLE).orEmpty()
         val excerpt = intent.getStringExtra(EXCERPT).orEmpty().lines()
+        // Cards posted before the owner turned answers off still carry their buttons.
+        if (!AlertPoster.answersAllowed(context)) {
+            context.getSystemService(NotificationManager::class.java).notify(AlertPoster.notificationId(id), say(context, AnswerWords.answersOff, null))
+            return
+        }
+        // A second tap before the card has changed would send the same key twice.
+        if (!inFlight.add(id)) return
         val pending = goAsync()
+        val deadline = SystemClock.elapsedRealtime() + DEADLINE_MS
+        val nm = context.getSystemService(NotificationManager::class.java)
+        val nid = AlertPoster.notificationId(id)
+        AlertPoster.answeredNow(id)
         Thread {
-            val nm = context.getSystemService(NotificationManager::class.java)
-            val nid = AlertPoster.notificationId(id)
             var keySent = false
             try {
+                // The tap changes the asking card at once, with no buttons.
+                nm.notify(nid, say(context, AnswerWords.sending, null))
                 if (kind == CardKind.HelperAsks.name && session != null) {
                     val key = if (answer == "approve") "enter" else "esc"
                     // The key goes in only if the helper's live screen still shows the dialog this notification quoted.
-                    val screen = JSONObject(get("/api/harness-sessions/$session/screen?lines=$CHECK_LINES", context))
+                    val screen = JSONObject(get("/api/harness-sessions/$session/screen?lines=$CHECK_LINES", context, deadline))
                     val lines = screen.optJSONArray("lines")?.let { a -> (0 until a.length()).map { a.optString(it) } }.orEmpty()
                     val check = HelperWords.checkAnswer(HelperWords.blocked(excerpt), lines, key, screen.optString("source") == "live")
                     if (check != AnswerCheck.Ok) {
-                        nm.notify(nid, result(context, "Not sent", HelperWords.checkWords(check), null))
+                        nm.notify(nid, say(context, AnswerWords.Say("Not sent", HelperWords.checkWords(check)), null))
                         return@Thread
                     }
-                    post("/api/harness-sessions/$session/send", JSONObject().put("keys", JSONArray().put(key)), context)
-                    keySent = true
+                    // Counted as sent once the request has gone out: an answer that then timed out may still have reached the helper, and a retry would press the key again.
+                    post("/api/harness-sessions/$session/send", JSONObject().put("keys", JSONArray().put(key)), context, deadline) { keySent = true }
                 }
-                post("/api/notifications/$id/action", JSONObject().put("action", answer), context)
+                post("/api/notifications/$id/action", JSONObject().put("action", answer), context, deadline)
                 val at = LocalTime.now().format(DateTimeFormatter.ofPattern("HH:mm"))
-                nm.notify(nid, result(context, if (answer == "approve") "Allowed." else "Not now. Nothing was done.", "Sent at $at.", null))
+                val helper = kind == CardKind.HelperAsks.name && session != null
+                nm.notify(nid, say(context, AnswerWords.answered(helper, answer == "approve", AnswerWords.asker(title), at), null))
             } catch (e: Exception) {
                 // Once the key is in, a retry must not send it again: it would land on whatever the helper asks next.
-                if (keySent) nm.notify(nid, result(context, "Answer sent", "HQ did not record it. Open the app to check.", null))
-                else nm.notify(nid, result(context, "Couldn't send your answer", "HQ didn't reply. It may be restarting.", intent))
+                if (keySent) nm.notify(nid, say(context, AnswerWords.sentNotRecorded, null))
+                else nm.notify(nid, say(context, AnswerWords.failed, intent))
             } finally {
+                AlertPoster.answeredNow(id)
+                inFlight.remove(id)
                 pending.finish()
             }
         }.start()
     }
 
-    private fun get(path: String, c: Context): String {
+    private fun get(path: String, c: Context, deadline: Long): String {
         val h = URL("http://127.0.0.1:${HubService.PORT}$path").openConnection() as HttpURLConnection
         try {
-            h.connectTimeout = TIMEOUT_MS
-            h.readTimeout = TIMEOUT_MS
+            h.connectTimeout = minOf(CONNECT_MS, left(deadline))
+            h.readTimeout = left(deadline)
             h.setRequestProperty("Authorization", "Bearer " + HubService.token(c))
             h.setRequestProperty("X-HQ-Client", "android")
             if (h.responseCode !in 200..299) throw java.io.IOException("status ${h.responseCode}")
@@ -76,29 +93,42 @@ class AnswerReceiver : BroadcastReceiver() {
         }
     }
 
-    private fun post(path: String, body: JSONObject, c: Context) {
+    private fun post(path: String, body: JSONObject, c: Context, deadline: Long, afterWrite: () -> Unit = {}) {
         val h = URL("http://127.0.0.1:${HubService.PORT}$path").openConnection() as HttpURLConnection
         try {
             h.requestMethod = "POST"
-            h.connectTimeout = TIMEOUT_MS
-            h.readTimeout = TIMEOUT_MS
+            h.connectTimeout = minOf(CONNECT_MS, left(deadline))
+            h.readTimeout = left(deadline)
             h.doOutput = true
             h.setRequestProperty("Authorization", "Bearer " + HubService.token(c))
             h.setRequestProperty("X-HQ-Client", "android")
             h.setRequestProperty("Content-Type", "application/json")
             h.outputStream.use { it.write(body.toString().toByteArray()) }
+            afterWrite()
             if (h.responseCode !in 200..299) throw java.io.IOException("status ${h.responseCode}")
         } finally {
             h.disconnect()
         }
     }
 
-    private fun result(c: Context, title: String, body: String, retry: Intent?): Notification {
-        val b = Notification.Builder(c, AlertPoster.NEEDS).setSmallIcon(HubService.statIcon(c)).setContentTitle(title).setContentText(body)
-            .setAutoCancel(true).setOnlyAlertOnce(true)
-        if (retry == null) b.setTimeoutAfter(CLEAR_AFTER_MS)
-        else b.addAction(Notification.Action.Builder(android.graphics.drawable.Icon.createWithResource(c, HubService.statIcon(c)), "Try again",
-            PendingIntent.getBroadcast(c, retry.getStringExtra(ID).hashCode(), Intent(retry), PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT)).build())
+    /** Milliseconds left of the deadline an answer has, from the tap (a connect can add up to two seconds more); none left means the answer failed. */
+    private fun left(deadline: Long): Int = (deadline - SystemClock.elapsedRealtime()).toInt().also { if (it <= 0) throw java.io.IOException("no time left") }
+
+    /** The notification that replaces the asking card: the words, and for a failure Try again (the same tap again) and Open. */
+    private fun say(c: Context, words: AnswerWords.Say, retry: Intent?): Notification {
+        val icon = android.graphics.drawable.Icon.createWithResource(c, HubService.statIcon(c))
+        val b = Notification.Builder(c, AlertPoster.NEEDS).setSmallIcon(HubService.statIcon(c)).setContentTitle(words.title).setAutoCancel(true).setOnlyAlertOnce(true)
+            .setContentIntent(AlertPoster.open(c))
+        words.body?.let { b.setContentText(it) }
+        if (words === AnswerWords.sending) b.setProgress(0, 0, true).setTimeoutAfter(SENDING_STUCK_MS)
+        else if (retry == null) b.setTimeoutAfter(CLEAR_AFTER_MS)
+        else {
+            val again = Notification.Action.Builder(icon, "Try again", PendingIntent.getBroadcast(c, retry.getStringExtra(ID).hashCode(), Intent(retry), PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT))
+            // Allowing asks for the phone to be unlocked, so trying it again does too.
+            if (retry.getStringExtra(ANSWER) == "approve" && Build.VERSION.SDK_INT >= SDK_AUTH_ACTION) again.setAuthenticationRequired(true)
+            b.addAction(again.build())
+            b.addAction(Notification.Action.Builder(icon, "Open", AlertPoster.open(c)).build())
+        }
         return b.build()
     }
 
@@ -110,8 +140,12 @@ class AnswerReceiver : BroadcastReceiver() {
         private const val TITLE = "title"
         private const val EXCERPT = "excerpt"
         private const val CHECK_LINES = 81
-        private const val TIMEOUT_MS = 8_000
+        private const val DEADLINE_MS = 10_000L
+        private const val CONNECT_MS = 2_000
         private const val CLEAR_AFTER_MS = 6_000L
+        private const val SENDING_STUCK_MS = 15_000L
+        private const val SDK_AUTH_ACTION = 31
+        private val inFlight: MutableSet<String> = java.util.concurrent.ConcurrentHashMap.newKeySet()
 
         fun intent(c: Context, card: InboxCard, answer: String): PendingIntent {
             val i = Intent(c, AnswerReceiver::class.java).putExtra(ID, card.id).putExtra(ANSWER, answer).putExtra(SESSION, card.sessionId)

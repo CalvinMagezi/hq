@@ -143,12 +143,54 @@ class SettingsWordsTest {
         assertEquals("1 limits set", SettingsWords.spendingStatus(only))
     }
 
-    @Test fun eachBudgetRowSaysItsPeriodAndWhatItCovers() {
-        val b = JSONObject("""{"budgets":[{"name":"daily","scope":"global","period":"day","limit_usd":5,"spent_usd":2.1,"state":"ok"},{"name":"openrouter","scope":"provider:openrouter","period":"week","limit_usd":10,"spent_usd":9.5,"state":"warn"}]}""")
-        val rows = SettingsWords.budgetRows(b)
-        assertEquals("$2.10 of $5.00", rows[0].value)
-        assertEquals("Per day · within the limit", rows[0].text)
-        assertEquals("Per week · Provider openrouter · close to the limit", rows[1].text)
+    private val at = java.time.Instant.parse("2026-10-22T12:00:00Z")
+
+    @Test fun eachBudgetCardSaysWhatItCoversHowMuchIsUsedAndWhenItResets() {
+        val b = JSONObject("""{"budgets":[{"name":"daily cap","scope":"global","period":"day","action":"block","limit_usd":5,"spent_usd":2.1,"pct":42,"state":"ok","resets_at":${at.epochSecond + 9 * 3600}},{"name":"openrouter","scope":"provider:openrouter","period":"week","action":"notify","limit_usd":10,"spent_usd":9.5,"pct":95,"state":"warning","resets_at":${at.epochSecond + 3 * 86_400}}]}""")
+        val cards = SettingsWords.budgetCards(b, at)
+        assertEquals("Daily cap", cards[0].title)
+        assertEquals("global, daily, then block", cards[0].covers)
+        assertEquals("$2.10 of $5.00 (42%)", cards[0].used)
+        assertEquals("Within budget, resets in 9h", cards[0].stand)
+        assertEquals(0.42f, cards[0].fraction, 0.001f)
+        assertEquals("provider:openrouter, weekly, then notify", cards[1].covers)
+        assertEquals("Past the alert threshold, resets in 3 days", cards[1].stand)
+        assertEquals(SettingsWords.BudgetTone.Warning, cards[1].tone)
+    }
+
+    @Test fun aBudgetPastItsLimitFillsTheBarAndSaysSo() {
+        val b = JSONObject("""{"budgets":[{"name":"all","scope":"global","period":"day","limit_usd":5,"spent_usd":5.2,"pct":104,"state":"exceeded","resets_at":${at.epochSecond + 1800}}]}""")
+        val c = SettingsWords.budgetCards(b, at).single()
+        assertEquals("$5.20 of $5.00 (104%)", c.used)
+        assertEquals(1f, c.fraction, 0f)
+        assertEquals("Limit reached, resets in <1h", c.stand)
+        assertEquals(SettingsWords.BudgetTone.Exceeded, c.tone)
+    }
+
+    @Test fun aBudgetWithoutAPercentOrResetStillReads() {
+        val c = SettingsWords.budgetCards(JSONObject("""{"budgets":[{"name":"x","scope":"global","period":"month","limit_usd":50,"spent_usd":12}]}"""), at).single()
+        assertEquals("$12.00 of $50.00 (24%)", c.used)
+        assertEquals("Within budget", c.stand)
+        assertEquals("global, monthly", c.covers)
+    }
+
+    @Test fun spansReadAsTheBoardWritesThem() {
+        assertEquals("<1h", SettingsWords.span(0.4))
+        assertEquals("<1h", SettingsWords.span(-3.0))
+        assertEquals("9h", SettingsWords.span(9.2))
+        assertEquals("1 day", SettingsWords.span(24.0))
+        assertEquals("10 days", SettingsWords.span(240.0))
+    }
+
+    @Test fun theForecastGivesThreeRowsOrSaysThereIsNothingToForecast() {
+        val f = SettingsWords.forecast(JSONObject("""{"month":{"rate_per_hour":0.18,"spent_this_period":31.8,"hours_to_reset":240,"projected_period_total":74.0}}"""))!!
+        assertEquals(listOf("Spent so far" to "$31.80", "Projected month end" to "$74.00", "Resets in" to "10 days"), f.rows.map { it.title to it.value })
+        assertNull(f.note)
+        val none = SettingsWords.forecast(JSONObject("""{"month":{"rate_per_hour":null,"spent_this_period":0,"hours_to_reset":700,"projected_period_total":null}}"""))!!
+        assertEquals("No spend recorded yet, so there is nothing to forecast.", none.note)
+        assertEquals(0, none.rows.size)
+        assertNull(SettingsWords.forecast(JSONObject("""{}""")))
+        assertNull(SettingsWords.forecast(null))
     }
 
     @Test fun theSafetyTabsReadTheServersNumbers() {
@@ -306,5 +348,17 @@ class SettingsWordsTest {
         } finally {
             java.util.Locale.setDefault(before)
         }
+    }
+
+    @Test fun aForecastWithNoRateButSomeSpendStillShowsTheMonthSoFar() {
+        val f = SettingsWords.forecast(JSONObject("""{"month":{"rate_per_hour":null,"spent_this_period":3.4,"hours_to_reset":500,"projected_period_total":null,"confidence":"low"}}"""))!!
+        assertNull(f.note)
+        assertEquals(listOf("$3.40", "-", "21 days"), f.rows.map { it.value })
+        assertEquals("Not much history yet, so this is a rough guess.", f.rows[1].text)
+    }
+
+    @Test fun theEmptyBudgetsLineDoesNotClaimNothingIsLimitedWhenBackgroundRunsAreCapped() {
+        assertEquals("No budgets are set, so nothing is limited.", SettingsWords.noBudgets(JSONObject("""{"budgets":[]}""")))
+        assertEquals("No budgets are set.", SettingsWords.noBudgets(JSONObject("""{"budgets":[],"background_run_usd":2.5}""")))
     }
 }

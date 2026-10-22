@@ -14,6 +14,9 @@ telegram = ["hq-relay/telegram"]
 # `hq net tunnel`: this device as a userspace WireGuard peer (the phone app builds with it; a
 # server build leaves it out). Unix only: the dependency is not pulled on Windows.
 tunnel = ["dep:hq-tunnel", "dep:libc", "dep:zeroize"]
+# `hq bridge`: pair machines with a QR code and reach them by key over iroh. Off by default, and
+# nothing listens until a command is run. Unix only: the dependencies are not pulled on Windows.
+bridge = ["dep:hq-bridge"]
 
 [dependencies]
 hq-core = { workspace = true }
@@ -73,6 +76,7 @@ iroh = "=1.4.1"
 hq-gate = { workspace = true }
 hq-net = { workspace = true }
 hq-tunnel = { workspace = true, optional = true }
+hq-bridge = { workspace = true, optional = true }
 # Only the tunnel commands use these two: a terminal check, and wiping a key they print.
 libc = { version = "0.2", optional = true }
 zeroize = { version = "1", optional = true }

@@ -17,7 +17,34 @@ public class HubConfigCheck {
         environment();
         alerts();
         files();
+        restarts();
         System.out.println("HubConfig checks passed");
+    }
+
+    private static void restarts() throws IOException {
+        long min = 2_000, max = 60_000, stable = 60_000;
+        assert HubConfig.nextBackoff(min, 1_000, false, min, max, stable) == 4_000 : "a quick crash doubles the wait";
+        assert HubConfig.nextBackoff(32_000, 1_000, false, min, max, stable) == max : "the wait stops at the cap";
+        assert HubConfig.nextBackoff(32_000, 90_000, false, min, max, stable) == min : "a long run starts over";
+        assert HubConfig.nextBackoff(32_000, 1_000, true, min, max, stable) == min : "a restart asked for is not delayed";
+        Path dir = Files.createTempDirectory("mode");
+        Path mode = dir.resolve("mode");
+        HubConfig.writeMode(mode, true);
+        assert HubConfig.isActive(new String(Files.readAllBytes(mode), StandardCharsets.UTF_8));
+        HubConfig.writeMode(mode, false);
+        assert !HubConfig.isActive(new String(Files.readAllBytes(mode), StandardCharsets.UTF_8));
+        assert !Files.exists(dir.resolve("mode.tmp")) : "no temp file is left";
+        Files.delete(mode);
+        // A target that cannot be replaced (here a folder with something in it) fails, and leaves no temp file behind.
+        Files.createDirectory(mode);
+        Files.write(mode.resolve("x"), new byte[] {1});
+        boolean failed = false;
+        try { HubConfig.writeMode(mode, true); } catch (IOException expected) { failed = true; }
+        assert failed : "an unwritable mode is an error";
+        assert !Files.exists(dir.resolve("mode.tmp")) : "a failed write leaves no temp file";
+        Files.delete(mode.resolve("x"));
+        Files.delete(mode);
+        Files.delete(dir);
     }
 
     private static void parsing() {
