@@ -796,7 +796,7 @@ private fun KeepRunning(ui: SettingsUi, actions: SettingsActions) {
                     Icon(HqIcons.Info, null, Modifier.size(24.dp), tint = Mts.InkMuted)
                     Column(Modifier.weight(1f)) {
                         Text("Sleeping apps", style = HqType.BodyBold, color = Mts.Ink)
-                        Text("Samsung may put AgentHQ to sleep. Check that it is not on the list.", style = HqType.BodySm, color = Mts.InkMuted)
+                        Text("Samsung may put AgentHQ to sleep. Open Background usage limits, then Sleeping apps, and check that it is not on the list.", style = HqType.BodySm, color = Mts.InkMuted)
                     }
                     Icon(HqIcons.External, null, Modifier.size(20.dp), tint = Mts.InkMuted)
                 }
