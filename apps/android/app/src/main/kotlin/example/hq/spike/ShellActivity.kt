@@ -54,6 +54,17 @@ import example.hq.spike.ui.webhost.WebPage
 import example.hq.spike.ui.search.SearchUi
 import example.hq.spike.ui.search.SearchViewModel
 import example.hq.spike.ui.tasks.QuickAddSheet
+import androidx.compose.foundation.layout.size
+import androidx.compose.material3.IconButton
+import androidx.compose.material3.Icon
+import example.hq.spike.ui.theme.Mts
+import example.hq.spike.ui.shell.HqIcons
+import example.hq.spike.ui.tasks.TasksLogic
+import example.hq.spike.ui.tasks.TaskTab
+import example.hq.spike.ui.tasks.TaskScope
+import example.hq.spike.ui.tasks.TaskFilters
+import example.hq.spike.ui.tasks.TaskFilterWords
+import example.hq.spike.ui.tasks.TaskFilterSheet
 import example.hq.spike.ui.tasks.TaskPage
 import example.hq.spike.ui.tasks.TasksScreen
 import example.hq.spike.ui.tasks.TasksUi
@@ -262,6 +273,10 @@ class ShellActivity : ComponentActivity() {
                 else HqShell(
                     startAt = start, inboxBadge = if (badge > 0) badge else inboxState.shownNeeds.size, status = shown,
                     onSearch = { search.actions.onOpen(tasksState.tasks, chatState.chats) }, onSettings = settings.actions.onOpen,
+                    subline = { place -> if (place == Place.Tasks && tasksState.tab == TaskTab.All) TaskFilterWords.bar(tasksState.scoped.count { TasksLogic.open(it) }, TaskFilters.label(tasksState.tree, tasksState.scope)) else null },
+                    topActions = { place ->
+                        if (place == Place.Tasks && tasksState.tab == TaskTab.All) IconButton({ tasks.actions.onFilter(true) }, Modifier.size(48.dp)) { Icon(HqIcons.Filter, "Filter", Modifier.size(24.dp), tint = if (tasksState.scope == TaskScope.Everything) Mts.Ink else Mts.BrandGreen) }
+                    },
                     balance = if (shown is HqStatus.Starting) null else balance,
                     onBalance = { target -> settings.actions.onOpen(); settings.actions.onPage(if (target == ChipTarget.Spending) SettingsPage.Spending else SettingsPage.Keys) },
                     request = requested, onRequestHandled = { requested = null },
@@ -359,6 +374,7 @@ class ShellActivity : ComponentActivity() {
         inboxState.details?.let { InboxDetails(it, inboxState.answering[it.id], inboxState.offline, inbox.actions) { card -> inbox.actions.onDetails(null); openFromInbox(card, go) } }
         tasksState.detail?.let { TaskPage(it, tasksState.today, tasks.actions) }
         tasksState.quick?.let { QuickAddSheet(it, tasksState.today, tasks.actions) }
+        if (tasksState.filterOpen) TaskFilterSheet(tasksState, tasks.actions)
         HelperOverlays(helpersState, helpers.actions)
     }
 

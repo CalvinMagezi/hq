@@ -154,7 +154,18 @@ class HqClient(private val token: () -> String, private val base: String = LOCAL
         val waitingOn: String? = null,
         val completedAt: String? = null,
         val archivedAt: String? = null,
+        val initiativeId: String? = null,
     )
+
+    /** Where tasks live: spaces hold folders and initiatives, a folder holds initiatives, and every task belongs to one initiative. */
+    suspend fun taskTree(): example.hq.spike.ui.tasks.TaskTree {
+        val spaces = send(authed("/api/spaces").build()) { t -> JSONObject(t).optJSONArray("spaces").objects().map { example.hq.spike.ui.tasks.TaskSpace(it.getString("id"), it.optString("name", it.getString("id"))) } }
+        val folders = send(authed("/api/folders").build()) { t -> JSONObject(t).optJSONArray("folders").objects().map { example.hq.spike.ui.tasks.TaskFolder(it.getString("id"), it.optString("space_id"), it.optString("name", it.getString("id"))) } }
+        val initiatives = send(authed("/api/initiatives").build()) { t ->
+            JSONObject(t).optJSONArray("initiatives").objects().map { example.hq.spike.ui.tasks.TaskInitiative(it.getString("id"), it.optString("space_id"), it.optStringOrNull("folder_id"), it.optString("name", it.getString("id"))) }
+        }
+        return example.hq.spike.ui.tasks.TaskTree(spaces, folders, initiatives)
+    }
 
     /** A helper working on a task right now: who, where, and which task. */
     data class WorkSession(val taskId: String, val actor: String, val harness: String, val cwd: String)
@@ -167,6 +178,7 @@ class HqClient(private val token: () -> String, private val base: String = LOCAL
         o.optStringOrNull("parent_task_id"), o.optInt("subtask_count", 0), o.optInt("subtask_done", 0), o.optStringOrNull("blocked_reason"),
         o.optStringOrNull("first_ready_for_review_at"), o.optString("updated_at", ""),
         o.optStringOrNull("blocked_since"), o.optStringOrNull("waiting_on"), o.optStringOrNull("completed_at"), o.optStringOrNull("archived_at"),
+        o.optStringOrNull("initiative_id"),
     )
 
     private fun json(body: JSONObject) = body.toString().toRequestBody("application/json".toMediaType())

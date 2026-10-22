@@ -159,7 +159,7 @@ private fun AllChips(ui: TasksUi, onChip: (AllChip) -> Unit) {
     Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(horizontal = 16.dp, vertical = 4.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
         AllChip.entries.forEach { c ->
             val on = c == ui.chip
-            val n = TasksLogic.chipCount(ui.tasks, c)
+            val n = TasksLogic.chipCount(ui.scoped, c)
             Box(Modifier.heightIn(min = 48.dp).clip(CircleShape).selectable(selected = on, role = Role.Tab, onClick = { onChip(c) }), contentAlignment = Alignment.Center) {
                 Row(
                     Modifier.heightIn(min = 36.dp).clip(CircleShape).then(if (on) Modifier.background(Mts.BrandGreen, CircleShape).border(1.dp, Mts.BrandGreen, CircleShape) else Modifier.border(1.dp, Mts.Line, CircleShape)).padding(horizontal = 14.dp),
