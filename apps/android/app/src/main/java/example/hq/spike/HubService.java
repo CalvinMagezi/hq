@@ -65,7 +65,7 @@ public class HubService extends Service {
     private static volatile Runnable tokenListener;
 
     /** The visible web page asks to hear when the token is replaced, so it can sign in again with the new one. */
-    static void setTokenListener(Runnable r) {
+    public static void setTokenListener(Runnable r) {
         tokenListener = r;
     }
 

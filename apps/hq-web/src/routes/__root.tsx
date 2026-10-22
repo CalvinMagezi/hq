@@ -75,16 +75,16 @@ function RootComponent() {
       <WebSocketProvider>
         <SetupRedirect />
         <VaultShell embedded={embedded} />
-        {/* The app has its own search, quick note, chat and note screens. */}
+        {/* The app has its own search, quick note and chat screens. */}
         {!embedded && (
           <>
             <SearchOverlay />
             <QuickNoteOverlay />
             <GlobalChatOverlay />
-            {/* One drawer for every note link, whatever page or overlay it was clicked in. */}
-            <VaultNoteDrawer />
           </>
         )}
+        {/* One drawer for every note link, whatever page or overlay it was clicked in. It stays in the app's host, where a note link in a task would otherwise do nothing. */}
+        <VaultNoteDrawer />
       </WebSocketProvider>
     </RootDocument>
   )

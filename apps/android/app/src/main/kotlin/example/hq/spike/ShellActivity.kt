@@ -214,8 +214,15 @@ class ShellActivity : ComponentActivity() {
 
     private fun placeOf(intent: Intent): Place? = linkOf(intent)?.place
 
+    override fun onSaveInstanceState(outState: Bundle) {
+        super.onSaveInstanceState(outState)
+        web?.let { outState.putString(STATE_WEB, it.slug) }
+    }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        // A rotation keeps the web page open; it loads again from its start.
+        web = WebPage.fromSlug(savedInstanceState?.getString(STATE_WEB))
         HqServices.ensureHubRunning(this)
         enableEdgeToEdge(
             statusBarStyle = SystemBarStyle.dark(Color.TRANSPARENT),
@@ -379,6 +386,7 @@ class ShellActivity : ComponentActivity() {
     }
 
     private companion object {
+        const val STATE_WEB = "web"
         const val STATUS_TICK_MS = 5_000L
         const val OFFLINE_GRACE_MS = 5_000L
         const val MODE_FILE_MAX = 64L

@@ -1003,7 +1003,8 @@ textarea:focus {
 /* Inside the Android app's own screen (see lib/embedHost.ts): no header or bottom bar, so no room kept for them.
    The head script sets data-host before first paint, so the chrome never shows even for a frame. */
 html[data-host="android"] .hq-header,
-html[data-host="android"] .hq-bottom-nav {
+html[data-host="android"] .hq-bottom-nav,
+html[data-host="android"] .hq-rail {
   display: none !important;
 }
 html[data-host="android"] .main-content {

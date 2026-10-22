@@ -60,7 +60,7 @@ class SearchViewModel(app: Application) : AndroidViewModel(app) {
         _state.update { SearchUi(open = true, recent = recent()) }
     }
 
-    private fun recent(): List<String> = prefs.getString(RECENT, "").orEmpty().split('\n').filter { it.isNotBlank() }
+    private fun recent(): List<String> = prefs.getString(RECENT, "").orEmpty().split('\n').filter { it.isNotBlank() }.distinct()
 
     /** A result was chosen, so the words that found it are worth keeping. */
     private fun remember(q: String) {
@@ -71,7 +71,10 @@ class SearchViewModel(app: Application) : AndroidViewModel(app) {
 
     private fun query(q: String) {
         job?.cancel()
-        _state.update { it.copy(query = q, tasks = SearchMatch.tasks(allTasks, q), chats = SearchMatch.chats(allChats, q), notes = if (q.isBlank()) emptyList() else it.notes, notesFailed = false, loading = q.isNotBlank()) }
+        // Matched before the state is updated: a long task list is not walked inside the update, which can run again.
+        val tasks = SearchMatch.tasks(allTasks, q)
+        val chats = SearchMatch.chats(allChats, q)
+        _state.update { it.copy(query = q, tasks = tasks, chats = chats, notes = if (q.isBlank()) emptyList() else it.notes, notesFailed = false, loading = q.isNotBlank()) }
         if (q.isBlank()) return
         job = viewModelScope.launch {
             delay(DEBOUNCE_MS)

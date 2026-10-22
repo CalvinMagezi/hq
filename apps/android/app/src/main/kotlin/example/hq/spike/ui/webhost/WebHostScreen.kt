@@ -8,6 +8,7 @@ import android.graphics.Bitmap
 import android.net.Uri
 import android.webkit.JsPromptResult
 import android.webkit.JsResult
+import android.webkit.RenderProcessGoneDetail
 import android.webkit.ValueCallback
 import android.webkit.WebChromeClient
 import android.webkit.WebResourceError
@@ -37,6 +38,7 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.key
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
@@ -53,8 +55,11 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.compose.LifecycleEventEffect
 import example.hq.spike.HubService
 import example.hq.spike.data.HqServices
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
 import example.hq.spike.ui.chat.blocks.IconAction
 import example.hq.spike.ui.shell.HqIcons
@@ -83,20 +88,26 @@ fun WebHostScreen(page: WebPage, onClose: () -> Unit) {
         chooser[0]?.onReceiveValue(uris.toTypedArray())
         chooser[0] = null
     }
-    val web = remember {
+    // A new WebView replaces one whose renderer died: the old one cannot be loaded again.
+    var generation by remember { mutableIntStateOf(0) }
+    val web = remember(generation) {
         WebView(context).apply {
             setBackgroundColor(android.graphics.Color.BLACK)
             settings.javaScriptEnabled = true
             settings.domStorageEnabled = true
             settings.allowFileAccess = false
             settings.allowContentAccess = false
-            settings.setSupportZoom(false)
+            settings.setSupportZoom(true)
+            settings.builtInZoomControls = true
+            settings.displayZoomControls = false
             settings.mixedContentMode = WebSettings.MIXED_CONTENT_NEVER_ALLOW
         }
     }
 
     val client = remember { HqServices.get(context.applicationContext).client }
     val scope = rememberCoroutineScope()
+    val loading = remember { arrayOfNulls<Job>(1) }
+    val dialog = remember { arrayOfNulls<Pair<AlertDialog, JsResult>>(1) }
 
     /**
      * Signs the page in, then loads it: the token is written into the local hq's own storage from a blank page of that origin.
@@ -105,7 +116,9 @@ fun WebHostScreen(page: WebPage, onClose: () -> Unit) {
     fun start() {
         failed = false
         progress = 0
-        scope.launch {
+        // A load still under way is ended first, so a slow answer from an earlier one cannot cover this page or load it twice.
+        loading[0]?.cancel()
+        loading[0] = scope.launch {
             if (!client.healthy()) { failed = true; return@launch }
             val token = try { HubService.token(context) } catch (e: IllegalStateException) { failed = true; return@launch }
             state.script = WebHost.tokenScript(token)
@@ -140,7 +153,18 @@ fun WebHostScreen(page: WebPage, onClose: () -> Unit) {
             progress = FULL
         }
 
-        override fun doUpdateVisitedHistory(view: WebView, url: String?, isReload: Boolean) { canBack = view.canGoBack() }
+        // Back is the page's own only once the first real page is the oldest entry: before that it would reach the blank page.
+        override fun doUpdateVisitedHistory(view: WebView, url: String?, isReload: Boolean) { canBack = view.canGoBack() && !state.hopping && !state.clearHistory }
+
+        // The renderer shares this app's process: a crash it caused would take hq with it, so it ends here with the failure screen.
+        override fun onRenderProcessGone(view: WebView, detail: RenderProcessGoneDetail): Boolean {
+            loading[0]?.cancel()
+            state.reset()
+            failed = true
+            canBack = false
+            generation++
+            return true
+        }
 
         override fun onReceivedError(view: WebView, request: WebResourceRequest, error: WebResourceError) {
             if (request.isForMainFrame && !state.hopping) failed = true
@@ -151,13 +175,13 @@ fun WebHostScreen(page: WebPage, onClose: () -> Unit) {
         override fun onReceivedTitle(view: WebView, title: String?) { webTitle = title }
 
         override fun onJsAlert(view: WebView, url: String?, message: String?, result: JsResult): Boolean {
-            AlertDialog.Builder(context).setMessage(message).setPositiveButton(android.R.string.ok) { _, _ -> result.confirm() }.setOnCancelListener { result.cancel() }.show()
+            dialog[0] = AlertDialog.Builder(context).setMessage(message).setPositiveButton(android.R.string.ok) { _, _ -> result.confirm() }.setOnCancelListener { result.cancel() }.show() to result
             return true
         }
 
         override fun onJsConfirm(view: WebView, url: String?, message: String?, result: JsResult): Boolean {
-            AlertDialog.Builder(context).setMessage(message).setPositiveButton(android.R.string.ok) { _, _ -> result.confirm() }
-                .setNegativeButton(android.R.string.cancel) { _, _ -> result.cancel() }.setOnCancelListener { result.cancel() }.show()
+            dialog[0] = AlertDialog.Builder(context).setMessage(message).setPositiveButton(android.R.string.ok) { _, _ -> result.confirm() }
+                .setNegativeButton(android.R.string.cancel) { _, _ -> result.cancel() }.setOnCancelListener { result.cancel() }.show() to result
             return true
         }
 
@@ -168,12 +192,26 @@ fun WebHostScreen(page: WebPage, onClose: () -> Unit) {
             chooser[0]?.onReceiveValue(null)
             chooser[0] = callback
             val type = params.acceptTypes.firstOrNull { it.isNotBlank() } ?: "*/*"
-            return try { picker.launch(type); true } catch (e: ActivityNotFoundException) { chooser[0] = null; callback.onReceiveValue(null); false }
+            return try { picker.launch(type); true } catch (e: ActivityNotFoundException) { chooser[0] = null; callback.onReceiveValue(null); true }
         }
     }
 
     LaunchedEffect(page) { start() }
-    DisposableEffect(Unit) { onDispose { chooser[0]?.onReceiveValue(null); web.stopLoading(); web.destroy() } }
+    DisposableEffect(web) {
+        // A new token (after "Sign out everywhere" or a recovery) is loaded in at once, so the page is not left signed out.
+        HubService.setTokenListener { web.post { start() } }
+        onDispose {
+            HubService.setTokenListener(null)
+            loading[0]?.cancel()
+            dialog[0]?.let { (d, r) -> runCatching { d.dismiss(); r.cancel() } }
+            chooser[0]?.onReceiveValue(null)
+            chooser[0] = null
+            web.stopLoading()
+            web.destroy()
+        }
+    }
+    LifecycleEventEffect(Lifecycle.Event.ON_PAUSE) { web.onPause() }
+    LifecycleEventEffect(Lifecycle.Event.ON_RESUME) { web.onResume() }
     BackHandler(onBack = onClose)
     BackHandler(enabled = canBack && !failed) { web.goBack() }
 
@@ -187,7 +225,7 @@ fun WebHostScreen(page: WebPage, onClose: () -> Unit) {
             if (progress in 1 until FULL) Box(Modifier.fillMaxWidth(progress / FULL.toFloat()).fillMaxHeight().background(Mts.BrandBlue))
         }
         Box(Modifier.weight(1f).fillMaxWidth().background(Mts.Surface000)) {
-            AndroidView(factory = { web }, modifier = Modifier.fillMaxSize())
+            key(web) { AndroidView(factory = { web }, modifier = Modifier.fillMaxSize()) }
             if (failed) FailedPage(page, onRetry = { start() })
         }
     }
@@ -198,6 +236,8 @@ private class HostState {
     var hopping = false
     var script = ""
     var clearHistory = false
+
+    fun reset() { hopping = false; script = ""; clearHistory = false }
 }
 
 @Composable

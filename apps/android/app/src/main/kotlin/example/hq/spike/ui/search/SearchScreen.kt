@@ -37,6 +37,7 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.selected
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -50,6 +51,7 @@ import example.hq.spike.ui.chat.blocks.Plain
 import example.hq.spike.ui.notes.SearchHit
 import example.hq.spike.ui.notes.marked
 import example.hq.spike.ui.shell.HqIcons
+import example.hq.spike.ui.shell.consumeTouches
 import example.hq.spike.ui.theme.HqType
 import example.hq.spike.ui.theme.Mts
 
@@ -60,7 +62,7 @@ fun SearchScreen(ui: SearchUi, actions: SearchActions, onNote: (String) -> Unit,
     val focus = remember { FocusRequester() }
     LaunchedEffect(Unit) { focus.requestFocus() }
     val searching = ui.query.isNotBlank()
-    Column(Modifier.fillMaxSize().background(Mts.Surface000).statusBarsPadding().imePadding()) {
+    Column(Modifier.fillMaxSize().background(Mts.Surface000).consumeTouches().statusBarsPadding().imePadding()) {
         FieldRow(ui, actions, focus)
         if (searching) ScopeChips(ui, actions)
         LazyColumn(Modifier.weight(1f), contentPadding = PaddingValues(bottom = 24.dp)) {
@@ -83,7 +85,7 @@ private fun FieldRow(ui: SearchUi, actions: SearchActions, focus: FocusRequester
                 modifier = Modifier.weight(1f).focusRequester(focus),
                 decorationBox = { inner -> Box { if (ui.query.isEmpty()) Text(SearchWords.FIELD, style = HqType.Body, color = Mts.InkMuted); inner() } },
             )
-            if (ui.query.isNotEmpty()) Box(Modifier.size(32.dp).clickable(role = Role.Button, onClickLabel = "Clear") { actions.onQuery("") }.semantics { contentDescription = "Clear" }, contentAlignment = Alignment.Center) {
+            if (ui.query.isNotEmpty()) Box(Modifier.size(48.dp).clickable(role = Role.Button, onClickLabel = "Clear") { actions.onQuery("") }.semantics { contentDescription = "Clear" }, contentAlignment = Alignment.Center) {
                 Icon(HqIcons.Close, null, Modifier.size(20.dp), tint = Mts.InkMuted)
             }
         }
@@ -96,7 +98,7 @@ private fun ScopeChips(ui: SearchUi, actions: SearchActions) {
         SearchScope.entries.forEach { s ->
             val on = ui.scope == s
             Box(
-                Modifier.heightIn(min = 36.dp).clip(CircleShape).then(if (on) Modifier.background(Mts.BrandGreen) else Modifier.border(1.dp, Mts.Line, CircleShape)).clickable(role = Role.Button) { actions.onScope(s) }.padding(horizontal = 14.dp),
+                Modifier.heightIn(min = 36.dp).clip(CircleShape).then(if (on) Modifier.background(Mts.BrandGreen) else Modifier.border(1.dp, Mts.Line, CircleShape)).semantics { selected = on }.clickable(role = Role.Tab) { actions.onScope(s) }.padding(horizontal = 14.dp),
                 contentAlignment = Alignment.Center,
             ) { Text(SearchWords.chip(s, SearchWords.countOf(ui, s), true), style = HqType.BodySmBold, color = if (on) Mts.OnGreen else Mts.Ink, maxLines = 1) }
         }

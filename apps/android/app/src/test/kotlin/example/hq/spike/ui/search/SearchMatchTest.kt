@@ -35,4 +35,10 @@ class SearchMatchTest {
         assertEquals(listOf("a"), SearchMatch.remember(listOf("a"), "  "))
         assertEquals(SearchMatch.RECENT_KEPT, SearchMatch.remember((1..20).map { "q$it" }, "new").size)
     }
+
+    @Test fun aSearchWithALineBreakIsKeptAsOneLineAndNeverTwiceUnderOneKey() {
+        assertEquals(listOf("bar foo", "foo"), SearchMatch.remember(listOf("foo"), "bar\nfoo"))
+        assertEquals(listOf("foo"), SearchMatch.remember(listOf("foo"), "  foo \n "))
+        assertEquals(true, SearchMatch.hits("alpha beta", "alpha\n beta"))
+    }
 }

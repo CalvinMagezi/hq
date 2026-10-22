@@ -12,7 +12,7 @@ object SearchMatch {
     const val MAX_PER_GROUP = 20
     const val RECENT_KEPT = 8
 
-    private fun words(q: String) = q.trim().lowercase().split(' ').filter { it.isNotEmpty() }
+    private fun words(q: String) = tidy(q).lowercase().split(' ').filter { it.isNotEmpty() }
 
     /** Every word of the query has to be in the text, in any order. */
     fun hits(text: String, q: String): Boolean {
@@ -29,10 +29,13 @@ object SearchMatch {
 
     /** The newest search first, each once, and not the empty one. */
     fun remember(recent: List<String>, q: String): List<String> {
-        val t = q.trim()
+        val t = tidy(q)
         if (t.isEmpty()) return recent
-        return (listOf(t) + recent.filter { !it.equals(t, ignoreCase = true) }).take(RECENT_KEPT)
+        return (listOf(t) + recent.filter { !it.equals(t, ignoreCase = true) }).distinct().take(RECENT_KEPT)
     }
+
+    /** One line, single spaces: recent searches are stored one per line, so a query with a line break would split into two. */
+    fun tidy(q: String): String = q.trim().replace(Regex("\\s+"), " ")
 
     /** The words of a task's state, as the Tasks list says them. */
     fun statusWords(t: TaskItem): String = TasksLogic.statusWords(t.status)
