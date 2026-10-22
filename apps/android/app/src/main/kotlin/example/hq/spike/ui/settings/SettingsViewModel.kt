@@ -176,20 +176,21 @@ class SettingsViewModel(app: Application) : AndroidViewModel(app) {
     private fun keepFacts(): KeepFacts {
         val c = ctx()
         val pkg = c.packageName
-        val sdk = Build.VERSION.SDK_INT
         val am = c.getSystemService(ActivityManager::class.java)
-        val last = if (sdk >= Build.VERSION_CODES.R) {
-            am.getHistoricalProcessExitReasons(pkg, 0, EXIT_SCAN).firstOrNull { PhoneWords.androidStopped(it.reason) }?.let { LastStop(it.reason, Instant.ofEpochMilli(it.timestamp)) }
-        } else null
         return KeepFacts(
             batteryUnrestricted = (c.getSystemService(Context.POWER_SERVICE) as PowerManager).isIgnoringBatteryOptimizations(pkg),
-            backgroundRestricted = sdk >= Build.VERSION_CODES.P && am.isBackgroundRestricted,
-            autoRevokeOff = if (sdk >= Build.VERSION_CODES.R) c.packageManager.isAutoRevokeWhitelisted else null,
+            backgroundRestricted = Build.VERSION.SDK_INT >= Build.VERSION_CODES.P && am.isBackgroundRestricted,
+            autoRevokeOff = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) c.packageManager.isAutoRevokeWhitelisted else null,
             notificationsAllowed = c.getSystemService(NotificationManager::class.java).areNotificationsEnabled(),
             samsung = Build.MANUFACTURER.equals("samsung", ignoreCase = true),
-            lastStop = last,
+            lastStop = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) lastAndroidStop(am, pkg) else null,
         )
     }
+
+    /** The newest exit Android chose (not one the owner or the app asked for), from what it keeps about this app's recent exits. */
+    @androidx.annotation.RequiresApi(Build.VERSION_CODES.R)
+    private fun lastAndroidStop(am: ActivityManager, pkg: String): LastStop? =
+        am.getHistoricalProcessExitReasons(pkg, 0, EXIT_SCAN).firstOrNull { PhoneWords.androidStopped(it.reason) }?.let { LastStop(it.reason, Instant.ofEpochMilli(it.timestamp)) }
 
     private fun notifFacts(): NotifFacts {
         val nm = ctx().getSystemService(NotificationManager::class.java)
