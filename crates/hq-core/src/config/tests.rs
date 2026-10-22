@@ -217,6 +217,21 @@ mod serde_yaml_none_field_probe {
     }
 }
 
+mod unrecognized_key_tests {
+    use crate::config::unrecognized_top_level_keys;
+
+    #[test]
+    fn a_typo_is_flagged_but_a_section_another_command_reads_is_not() {
+        let yaml = "vault_path: /tmp/v\nedge:\n  enabled: true\nvualt_path: /tmp/x\n";
+        assert_eq!(unrecognized_top_level_keys(yaml), vec!["vualt_path"]);
+    }
+
+    #[test]
+    fn unreadable_yaml_flags_nothing() {
+        assert!(unrecognized_top_level_keys("{ not yaml").is_empty());
+    }
+}
+
 mod bash_config_tests {
     use crate::config::{BashSandboxMode, HqConfig};
     use figment::{

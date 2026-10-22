@@ -8,6 +8,7 @@ pub mod cursor_mcp_config;
 pub mod daemon;
 pub mod decisions;
 pub mod doctor;
+pub mod edge;
 pub mod env;
 pub mod health;
 #[cfg(unix)]
