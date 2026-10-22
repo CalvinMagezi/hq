@@ -53,10 +53,16 @@ class NotesTextTest {
         assertEquals("one\ntwo\nthree", MarkdownEditing.prefixLines(v(on.text, 1, 9), "- ").text)
     }
 
-    @Test fun linkUsesTheSelectionAsItsLabel() {
+    @Test fun linkWrapsTheSelectionInDoubleBrackets() {
         val t = MarkdownEditing.link(v("see the guide", 4, 13))
-        assertEquals("see [the guide](https://)", t.text)
-        assertEquals("https://", t.text.substring(t.selection.min, t.selection.max))
+        assertEquals("see [[the guide]]", t.text)
+        assertEquals(17, t.selection.min)
+    }
+
+    @Test fun linkWithNothingSelectedLeavesTheCursorBetweenTheBrackets() {
+        val t = MarkdownEditing.link(v("see ", 4, 4))
+        assertEquals("see [[]]", t.text)
+        assertEquals(6, t.selection.min)
     }
 
     @Test fun theAskPillSaysWhenItTakesOnlyTheFirstTen() {

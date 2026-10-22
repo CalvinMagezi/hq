@@ -397,7 +397,7 @@ private fun WritePage(w: WriteState, folders: List<String>, actions: NotesAction
                 Blocks(blocks, remember { BlockActions() })
             } else {
                 BasicTextField(
-                    value = w.text, onValueChange = actions.onText, textStyle = HqType.Body.copy(color = Mts.Ink, lineHeight = 26.sp), cursorBrush = SolidColor(Mts.BrandGreen),
+                    value = w.text, onValueChange = actions.onText, textStyle = HqType.Body.copy(color = Mts.Ink, lineHeight = 26.sp), cursorBrush = SolidColor(Mts.BrandGreen), visualTransformation = MarkdownTransformation,
                     modifier = Modifier.fillMaxWidth().heightIn(min = 240.dp),
                     decorationBox = { inner -> Box { if (w.text.text.isEmpty()) Text("Start writing", style = HqType.Body.copy(lineHeight = 26.sp), color = Mts.InkMuted); inner() } },
                 )
@@ -406,7 +406,7 @@ private fun WritePage(w: WriteState, folders: List<String>, actions: NotesAction
         if (!w.preview) FormatBar(w, actions) { focus.clearFocus() }
     }
     if (w.chooser) FolderChooser(w, folders, actions)
-    if (w.leaving) LeaveDialog(actions)
+    if (w.leaving) LeaveDialog(w.leaveBody, actions)
 }
 
 @Composable
@@ -480,13 +480,13 @@ private fun FolderChooser(w: WriteState, folders: List<String>, actions: NotesAc
 }
 
 @Composable
-private fun LeaveDialog(actions: NotesActions) {
+private fun LeaveDialog(body: String, actions: NotesActions) {
     BackHandler(onBack = actions.onKeepEditing)
     Box(Modifier.fillMaxSize()) {
         Box(Modifier.fillMaxSize().background(Color.Black.copy(alpha = 0.62f)).clickable(interactionSource = remember { MutableInteractionSource() }, indication = null, onClick = actions.onKeepEditing))
         Column(Modifier.padding(start = 24.dp, top = 240.dp, end = 24.dp).fillMaxWidth().clip(RoundedCornerShape(28.dp)).background(Mts.Surface200).padding(24.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
             Text("Save your changes?", style = HqType.H2, color = Mts.Ink)
-            Text("You have not saved what you wrote. Your text is kept on this phone either way.", style = HqType.BodySm, color = Mts.InkMuted, modifier = Modifier.padding(bottom = 12.dp))
+            Text(body, style = HqType.BodySm, color = Mts.InkMuted, modifier = Modifier.padding(bottom = 12.dp))
             GreenPill("Save", Modifier.fillMaxWidth(), onClick = actions.onSave)
             Box(Modifier.fillMaxWidth().heightIn(min = 48.dp).clip(CircleShape).border(1.dp, Mts.Line, CircleShape).clickable(role = Role.Button, onClick = actions.onKeepEditing), contentAlignment = Alignment.Center) { Text("Keep editing", style = HqType.BodySmBold, color = Mts.Ink) }
             Box(Modifier.fillMaxWidth().heightIn(min = 48.dp).clickable(role = Role.Button, onClick = actions.onDiscard), contentAlignment = Alignment.Center) { Text("Discard changes", style = HqType.BodySmBold, color = Mts.DangerText) }

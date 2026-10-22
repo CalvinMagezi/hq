@@ -43,6 +43,17 @@ data class WriteState(
 ) {
     val isNew: Boolean get() = path == null
     val dirty: Boolean get() = text.text != original || (isNew && title.isNotBlank())
+
+    /** What the leave dialog says: the note by name, and that the text stays on the phone unless it is discarded. */
+    val leaveBody: String get() {
+        val name = title.ifBlank { path?.substringAfterLast('/')?.removeSuffix(".md").orEmpty() }
+        val kept = "Your text is kept on this phone unless you discard it."
+        return when {
+            !isNew -> "You edited ${name.ifBlank { "this note" }} and have not saved. $kept"
+            name.isNotBlank() -> "You wrote $name and have not saved it. $kept"
+            else -> "You wrote a note and have not saved it. $kept"
+        }
+    }
 }
 
 data class NotesUi(
