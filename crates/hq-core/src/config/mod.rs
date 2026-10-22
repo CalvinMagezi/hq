@@ -45,7 +45,10 @@ pub use governance::*;
 pub use harness::*;
 pub use instance::*;
 pub use llm::*;
-pub use mcp_connector::{CONNECTOR_SCOPES, ConnectorSettings, McpConnectorConfig};
+pub use mcp_connector::{
+    ACME_DIRECTORY_LETSENCRYPT, ACME_DIRECTORY_LETSENCRYPT_STAGING, CONNECTOR_SCOPES,
+    ConnectorSettings, ConnectorTlsConfig, ConnectorTlsSettings, McpConnectorConfig,
+};
 pub use memory::*;
 pub use profile::{
     EgressItem, EnvLookup, LiteConfig, MOBILE_REMOVED_TOOL_CATEGORIES, MobileConfig, Profile,

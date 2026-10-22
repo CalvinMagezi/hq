@@ -9,7 +9,9 @@ default. Design, threat model and test notes: `docs/plans/claude-connector.md`.
 
 - A Claude plan with custom connectors (Pro, Max, Team or Enterprise).
 - HQ reachable from Anthropic's servers over public HTTPS. Connector traffic comes from
-  Anthropic's network, not your browser, so a tailnet-only HQ cannot be added on its own.
+  Anthropic's network, not your browser, so a tailnet-only HQ cannot be added on its own. Either
+  something in front of HQ ends TLS for it (Caddy, a tunnel, Tailscale Funnel), or HQ ends TLS
+  itself behind a forwarder that passes the encrypted bytes through (see "HQ ends TLS itself").
 - `web_auth_token` set, and a browser where you are signed in to HQ's web app: you approve each
   connection there.
 
@@ -50,6 +52,34 @@ default. Design, threat model and test notes: `docs/plans/claude-connector.md`.
    ```
 
    Anything outside the HQ folder and that list is refused.
+
+### HQ ends TLS itself
+
+The other way to be reachable: HQ keeps the certificate and ends TLS on the connector's own name,
+and a public forwarder (`hq edge`) in front only passes encrypted bytes to the device. No
+certificate or key is ever on the forwarder, and nothing else is published: the web app, `/api`
+and `/ws` are not served on this origin at all.
+
+```yaml
+mcp_connector:
+  enabled: true
+  public_url: https://phone.edge.example.com
+  tls:
+    enabled: true
+    acme_directory: letsencrypt        # or letsencrypt-staging while testing
+```
+
+- `public_url` must be a domain name the forwarder routes to this device; HQ gets a certificate
+  for it from the ACME CA (Let's Encrypt by default) over the same connection, and renews it two
+  thirds of the way through its life.
+- Use `authorize_url` here too. Without it the consent page would be on the public name, and this
+  origin does not serve it.
+- Off by default; not available under `profile: lite`. If it cannot start (no web token, a
+  `public_url` that is not a domain, a missing connector), HQ logs why and leaves it off.
+- The CA limits how many certificates one domain may get a week; a rate-limited first order waits
+  and says when it will try again. Keep the saved certificate: it is in `_data/connector_tls/`.
+- Details, the checks on every request, and what the forwarder must hand over:
+  `docs/security/CONNECTOR_TLS.md`.
 
 ## Connect
 
@@ -123,6 +153,10 @@ copy exists somewhere else.
   connection in Settings and press Connect again.
 - **"This request has expired, was already answered, or was started in another browser"**:
   approve in the browser that Claude opened, within ten minutes.
+- **Claude says it couldn't reach the server** with HQ ending TLS itself: the certificate may
+  not be issued yet (the connector's TLS status says so, with the reason and the time of the
+  next try), or the forwarder is not passing `acme-tls/1` connections through, which the CA needs
+  to issue it.
 - **Claude says it couldn't reach the server**: check that `https://<public_url>/mcp` answers
   `401` with a `WWW-Authenticate` header, and that `/.well-known/oauth-protected-resource` and
   `/.well-known/oauth-authorization-server` return JSON from outside your network.

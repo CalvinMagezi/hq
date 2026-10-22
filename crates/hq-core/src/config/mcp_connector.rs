@@ -21,7 +21,36 @@ pub struct McpConnectorConfig {
     /// `full`. The owner can still pick another one there.
     #[serde(default)]
     pub default_scope: Option<String>,
+
+    /// The connector's own TLS, for a device that a public forwarder reaches with the raw TLS
+    /// bytes (`hq edge`) instead of an ingress that ends TLS for it.
+    #[serde(default)]
+    pub tls: ConnectorTlsConfig,
 }
+
+/// Lets HQ end TLS itself for the connector's public name and get its certificate through
+/// ACME. Off by default. Design and threat model: `docs/security/CONNECTOR_TLS.md`.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct ConnectorTlsConfig {
+    #[serde(default)]
+    pub enabled: bool,
+
+    /// Where certificates come from: `letsencrypt` (the default), `letsencrypt-staging`, or the
+    /// https URL of another ACME directory.
+    #[serde(default)]
+    pub acme_directory: Option<String>,
+
+    /// An address the CA may write to about the certificate. Optional; leave it unset to give
+    /// the CA none.
+    #[serde(default)]
+    pub contact_email: Option<String>,
+}
+
+/// The ACME directory a bare `letsencrypt` means.
+pub const ACME_DIRECTORY_LETSENCRYPT: &str = "https://acme-v02.api.letsencrypt.org/directory";
+/// The one `letsencrypt-staging` means: untrusted certificates, far higher limits.
+pub const ACME_DIRECTORY_LETSENCRYPT_STAGING: &str =
+    "https://acme-staging-v02.api.letsencrypt.org/directory";
 
 /// Grant scopes a consent page may offer, narrowest first.
 pub const CONNECTOR_SCOPES: &[&str] = &["read_only", "tasks", "full"];
@@ -41,7 +70,75 @@ impl ConnectorSettings {
     }
 }
 
+/// What the connector's TLS needs once checked.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ConnectorTlsSettings {
+    /// The name the certificate is for and the only TLS server name answered.
+    pub host: String,
+    /// `host`, plus `:port` when the public origin names one: what a request's `Host` must be.
+    pub authority: String,
+    pub directory_url: String,
+    pub contact_email: Option<String>,
+}
+
 impl McpConnectorConfig {
+    /// The checked TLS settings, `None` when connector TLS is off, or why it cannot be turned
+    /// on. The certificate name is the public origin's host, so there is no second setting to
+    /// keep in step with it.
+    pub fn tls_settings(
+        &self,
+        web_auth_token: Option<&str>,
+    ) -> Result<Option<ConnectorTlsSettings>, String> {
+        if !self.tls.enabled {
+            return Ok(None);
+        }
+        let connector = self
+            .settings(web_auth_token)?
+            .ok_or("mcp_connector.tls needs mcp_connector.enabled")?;
+        let url = reqwest::Url::parse(&connector.public)
+            .map_err(|e| format!("mcp_connector.public_url: {e}"))?;
+        let host = match url.domain() {
+            Some(d) if d.contains('.') => d.to_string(),
+            _ => {
+                return Err(
+                    "mcp_connector.tls needs public_url to name a domain: a certificate is \
+                     issued for a DNS name, not an address or a single label"
+                        .into(),
+                );
+            }
+        };
+        let authority = match url.port() {
+            Some(port) => format!("{host}:{port}"),
+            None => host.clone(),
+        };
+        let directory_url = match self.tls.acme_directory.as_deref().map(str::trim) {
+            None | Some("") | Some("letsencrypt") => ACME_DIRECTORY_LETSENCRYPT.to_string(),
+            Some("letsencrypt-staging") => ACME_DIRECTORY_LETSENCRYPT_STAGING.to_string(),
+            Some(other) => {
+                let parsed = reqwest::Url::parse(other)
+                    .map_err(|e| format!("mcp_connector.tls.acme_directory: {e}"))?;
+                if parsed.scheme() != "https" {
+                    return Err("mcp_connector.tls.acme_directory must be https".into());
+                }
+                other.to_string()
+            }
+        };
+        let contact_email = self
+            .tls
+            .contact_email
+            .as_deref()
+            .map(str::trim)
+            .filter(|e| !e.is_empty())
+            .map(|e| contact_address(e).map(str::to_string))
+            .transpose()?;
+        Ok(Some(ConnectorTlsSettings {
+            host,
+            authority,
+            directory_url,
+            contact_email,
+        }))
+    }
+
     /// The checked settings, `None` when the connector is off, or why it cannot be turned on.
     pub fn settings(
         &self,
@@ -84,6 +181,20 @@ impl McpConnectorConfig {
     }
 }
 
+/// A plain mailbox address: it goes into an ACME `mailto:` contact, so nothing that could add a
+/// header or a second contact gets through.
+fn contact_address(raw: &str) -> Result<&str, String> {
+    let plain = raw
+        .bytes()
+        .all(|b| b.is_ascii_alphanumeric() || b"@.-_+".contains(&b));
+    let (local, domain) = raw.split_once('@').unwrap_or_default();
+    if plain && !local.is_empty() && domain.contains('.') && !domain.contains('@') {
+        Ok(raw)
+    } else {
+        Err("mcp_connector.tls.contact_email is not a plain email address".into())
+    }
+}
+
 /// An https origin with no path, query, fragment or credentials, normalised for comparison.
 fn https_origin(raw: &str) -> Result<String, String> {
     let url = reqwest::Url::parse(raw.trim()).map_err(|e| format!("{raw:?} is not a URL ({e})"))?;
@@ -118,6 +229,21 @@ mod tests {
             public_url: public.map(Into::into),
             authorize_url: authorize.map(Into::into),
             default_scope: None,
+            ..Default::default()
+        }
+    }
+
+    fn with_tls(public: &str, tls: ConnectorTlsConfig) -> McpConnectorConfig {
+        McpConnectorConfig {
+            tls,
+            ..cfg(Some(public), None)
+        }
+    }
+
+    fn tls_on() -> ConnectorTlsConfig {
+        ConnectorTlsConfig {
+            enabled: true,
+            ..Default::default()
         }
     }
 
@@ -192,6 +318,101 @@ mod tests {
                     .settings(Some("t"))
                     .is_err(),
                 "authorize {bad}"
+            );
+        }
+    }
+
+    #[test]
+    fn tls_is_off_unless_asked_for_and_asks_for_the_connector_first() {
+        assert_eq!(
+            cfg(Some("https://hq.example.com"), None).tls_settings(Some("t")),
+            Ok(None)
+        );
+        let off = McpConnectorConfig {
+            enabled: false,
+            ..with_tls("https://hq.example.com", tls_on())
+        };
+        assert!(
+            off.tls_settings(Some("t"))
+                .unwrap_err()
+                .contains("mcp_connector.enabled")
+        );
+    }
+
+    #[test]
+    fn the_certificate_name_is_the_public_origins_host() {
+        let c = with_tls("https://Dev1.Edge.Example.com", tls_on());
+        let t = c.tls_settings(Some("t")).unwrap().unwrap();
+        assert_eq!(t.host, "dev1.edge.example.com");
+        assert_eq!(t.authority, "dev1.edge.example.com");
+        assert_eq!(t.directory_url, ACME_DIRECTORY_LETSENCRYPT);
+        assert_eq!(t.contact_email, None);
+
+        let with_port = with_tls("https://hq.example.com:8443", tls_on());
+        let t = with_port.tls_settings(Some("t")).unwrap().unwrap();
+        assert_eq!(
+            (t.host.as_str(), t.authority.as_str()),
+            ("hq.example.com", "hq.example.com:8443")
+        );
+    }
+
+    #[test]
+    fn a_certificate_cannot_be_asked_for_an_address_or_a_bare_label() {
+        for bad in [
+            "https://192.0.2.7",
+            "https://[2001:db8::1]",
+            "https://localhost",
+            "https://hq",
+        ] {
+            let err = with_tls(bad, tls_on()).tls_settings(Some("t")).unwrap_err();
+            assert!(err.contains("domain"), "{bad}: {err}");
+        }
+    }
+
+    #[test]
+    fn the_directory_is_a_known_name_or_an_https_url_and_the_contact_is_plain() {
+        let mut tls = tls_on();
+        tls.acme_directory = Some("letsencrypt-staging".into());
+        tls.contact_email = Some("owner@example.com".into());
+        let t = with_tls("https://hq.example.com", tls)
+            .tls_settings(Some("t"))
+            .unwrap()
+            .unwrap();
+        assert_eq!(t.directory_url, ACME_DIRECTORY_LETSENCRYPT_STAGING);
+        assert_eq!(t.contact_email.as_deref(), Some("owner@example.com"));
+
+        let mut own = tls_on();
+        own.acme_directory = Some("https://acme.example.org/dir".into());
+        let t = with_tls("https://hq.example.com", own)
+            .tls_settings(Some("t"))
+            .unwrap()
+            .unwrap();
+        assert_eq!(t.directory_url, "https://acme.example.org/dir");
+
+        for bad_dir in ["http://acme.example.org/dir", "not a url"] {
+            let mut tls = tls_on();
+            tls.acme_directory = Some(bad_dir.into());
+            assert!(
+                with_tls("https://hq.example.com", tls)
+                    .tls_settings(Some("t"))
+                    .is_err(),
+                "{bad_dir}"
+            );
+        }
+        for bad_mail in [
+            "a@b",
+            "a@b.c,d@e.f",
+            "a b@c.d",
+            "a@b.c\r\nBcc: x@y.z",
+            "@b.c",
+        ] {
+            let mut tls = tls_on();
+            tls.contact_email = Some(bad_mail.into());
+            assert!(
+                with_tls("https://hq.example.com", tls)
+                    .tls_settings(Some("t"))
+                    .is_err(),
+                "{bad_mail:?}"
             );
         }
     }
