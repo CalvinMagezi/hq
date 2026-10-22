@@ -471,6 +471,30 @@ fn status_reports_a_stopped_peer_and_a_missing_one() {
     let out = home.run(&["status"], "");
     assert!(out.status.success());
     assert!(text(&out).contains("not running"), "{}", text(&out));
+    // A peer that sleeps between keepalives rewrites the file less often, and says so: sixty seconds
+    // old is a live peer when it promised a rewrite every 120, and a dead one when it promised 5.
+    let write = |max_age: u64, updated_ago: u64| {
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_secs();
+        std::fs::write(
+            home.tunnel_dir().join("status.json"),
+            format!(
+                r#"{{"version":1,"state":"idle","address":"10.77.0.4","endpoint":"x:1","updated_unix":{},"max_age_s":{max_age},"last_handshake_age_s":null,"connections":0,"accepted":0,"denied":0,"error":null}}"#,
+                now - updated_ago
+            ),
+        )
+        .unwrap();
+    };
+    write(120, 60);
+    let idle = text(&home.run(&["status"], ""));
+    assert!(
+        idle.contains("state: idle") && !idle.contains("not running"),
+        "{idle}"
+    );
+    write(5, 60);
+    assert!(text(&home.run(&["status"], "")).contains("not running"));
     let json = home.run(&["status", "--json"], "");
-    assert!(text(&json).contains("\"state\": \"up\""));
+    assert!(text(&json).contains("\"state\": \"idle\""));
 }

@@ -8,9 +8,10 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.withStyle
 import example.hq.spike.ui.theme.Mts
 
-private val MARKS = Regex("\\*\\*(.+?)\\*\\*|`([^`\\n]+)`|\\[\\[([^\\]|]+)(?:\\|([^\\]]+))?]]|!?\\[([^\\]]+)]\\(([^)]+)\\)")
+private val MARKS = Regex("\\*\\*(.+?)\\*\\*|`{1,2}([^`\\n]+)`{1,2}|\\[\\[([^\\]|]+)(?:\\|([^\\]]+))?]]|!?\\[([^\\]]+)]\\(([^)]+)\\)")
 private val FENCE_LINE = Regex("^\\s*```.*\\n?", RegexOption.MULTILINE)
 private val WHITESPACE = Regex("\\s+")
+private val OPEN_MARKS = Regex("\\*\\*|`")
 private val HEADING = Regex("^#{1,6}\\s+", RegexOption.MULTILINE)
 
 /** Markdown marks taken out of a line that is shown as plain text: a table cell, a search snippet, a notification. */
@@ -31,6 +32,9 @@ object Plain {
             if (i == 0) line else acc + (if (sentenceBreak) ". " else " ") + line
         }
     }
+
+    /** A line cut short by the server can end inside a mark, so any mark still open is dropped too. */
+    fun preview(text: String): String = oneLine(text).replace(OPEN_MARKS, "")
 
     /** A table cell: bold and code keep their look, links and wikilinks show only their words. */
     fun cell(text: String): AnnotatedString = buildAnnotatedString {

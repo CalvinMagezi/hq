@@ -21,6 +21,8 @@ import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.runtime.DisposableEffect
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
@@ -174,15 +176,18 @@ private fun ReaderReady(phase: ReaderPhase.Ready, actions: NotesActions) {
             IconAction(HqIcons.MoreVertical, "More", iconSize = 24.dp) { actions.onMenu(true) }
         }
         // Lazy, so a long note opens by drawing the screenful in view, not every block of it.
-        SelectionContainer(Modifier.weight(1f)) { NoteBody(blocks, handlers, note.truncated) }
+        SelectionContainer(Modifier.weight(1f)) { NoteBody(note.path, blocks, handlers, note.truncated, actions) }
     }
 }
 
 private val ReaderPadding = androidx.compose.foundation.layout.PaddingValues(start = 16.dp, top = 16.dp, end = 16.dp, bottom = 32.dp)
 
 @Composable
-private fun NoteBody(blocks: List<Block>, handlers: BlockActions, truncated: Boolean) {
-    LazyColumn(Modifier.fillMaxSize(), contentPadding = ReaderPadding) {
+private fun NoteBody(path: String, blocks: List<Block>, handlers: BlockActions, truncated: Boolean, actions: NotesActions) {
+    val spot = remember(path) { actions.scrollOf(path) }
+    val list = rememberLazyListState(spot?.first ?: 0, spot?.second ?: 0)
+    DisposableEffect(path) { onDispose { actions.onScrolled(path, list.firstVisibleItemIndex, list.firstVisibleItemScrollOffset) } }
+    LazyColumn(Modifier.fillMaxSize(), state = list, contentPadding = ReaderPadding) {
         itemsIndexed(blocks) { i, block -> Box(Modifier.padding(top = blockGap(blocks, i))) { BlockView(block, handlers) } }
         if (truncated) item { Text("This note is long. Only the start is shown.", style = HqType.BodySm, color = Mts.InkMuted, modifier = Modifier.padding(top = 12.dp)) }
     }

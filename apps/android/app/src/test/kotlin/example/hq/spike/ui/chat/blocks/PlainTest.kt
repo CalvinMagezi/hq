@@ -6,6 +6,11 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class PlainTest {
+    @Test fun aDoubleBacktickSpanLeavesNoTicksBehind() {
+        assertEquals("saved in notes/a.md now", Plain.strip("saved in ``notes/a.md`` now"))
+        assertEquals("a and b", Plain.strip("`a` and ``b``"))
+    }
+
     @Test fun marksAreTakenOutOfAPlainLine() {
         assertEquals("Done and live, PR open", Plain.strip("**Done and live**, PR open"))
         assertEquals("Undo with hq skills revert <name>.", Plain.strip("Undo with `hq skills revert <name>`."))

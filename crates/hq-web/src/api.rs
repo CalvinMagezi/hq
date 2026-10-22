@@ -36,7 +36,12 @@ pub(crate) async fn health_handler(State(state): State<Arc<WsState>>) -> axum::r
 }
 
 pub(crate) async fn vault_status_handler(State(state): State<Arc<WsState>>) -> impl IntoResponse {
-    axum::Json(serde_json::json!({ "vault_path": state.vault_path.to_string_lossy() }))
+    // How many notes the search index holds. Left null when the index cannot be read, so a status read never fails for it.
+    let notes = state.db.with_conn(hq_db::search::indexed_count).ok();
+    axum::Json(serde_json::json!({
+        "vault_path": state.vault_path.to_string_lossy(),
+        "notes": notes,
+    }))
 }
 
 pub(crate) async fn search_handler(

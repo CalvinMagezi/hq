@@ -23,9 +23,10 @@ const IMPORT_READ_MAX: u64 = 64 * 1024;
 const EXIT_NEEDS_CONFIRMATION: i32 = 2;
 const STDIN_FD: RawFd = 0;
 const STDOUT_FD: RawFd = 1;
-/// The peer rewrites its status at least this often while it runs; a file older than three times
-/// that belongs to a peer that is gone.
-const STATUS_STALE_SECS: u64 = 15;
+/// A file from before the status said how old it can be: the longest a busy peer goes unwritten.
+const STATUS_STALE_FALLBACK_SECS: u64 = 15;
+/// Slack on top of the peer's own promise of how often it rewrites the file.
+const STATUS_STALE_MARGIN_SECS: u64 = 10;
 const TUNNEL_SUBDIR: &str = "tunnel";
 
 #[derive(Subcommand)]
@@ -251,7 +252,12 @@ fn status(tunnel: &TunnelDir, json: bool) -> Result<()> {
     let updated = value["updated_unix"].as_u64().unwrap_or(0);
     let age = now_unix().saturating_sub(updated);
     let state = text("state");
-    if state != "stopped" && age > STATUS_STALE_SECS {
+    let allowed = value["max_age_s"]
+        .as_u64()
+        .map_or(STATUS_STALE_FALLBACK_SECS, |max| {
+            max + STATUS_STALE_MARGIN_SECS
+        });
+    if state != "stopped" && age > allowed {
         println!("state: not running (the last report was {age} s ago, as \"{state}\")");
     } else {
         println!("state: {state}");
@@ -265,6 +271,10 @@ fn status(tunnel: &TunnelDir, json: bool) -> Result<()> {
         text("accepted"),
         text("denied")
     );
+    println!("wakeups: {}", text("wakeups"));
+    if let Some(kb) = value["rss_kb"].as_u64() {
+        println!("memory: {kb} KB, {} open descriptors", text("open_fds"));
+    }
     if !value["error"].is_null() {
         println!("error: {}", text("error"));
     }

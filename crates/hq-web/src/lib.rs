@@ -1315,4 +1315,17 @@ mod security_header_tests {
             );
         }
     }
+
+    #[tokio::test]
+    async fn vault_status_says_how_many_notes_are_indexed() {
+        let (app, _v, _w) = app_with_vault(&[]);
+        let res = get(&app, "/api/vault-status").await;
+        assert_eq!(res.status(), StatusCode::OK);
+        let body = axum::body::to_bytes(res.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        assert!(json["vault_path"].is_string());
+        assert_eq!(json["notes"], 0, "an empty vault has no indexed notes");
+    }
 }

@@ -44,7 +44,7 @@ for base in $bases; do
   docker rm -f hqnet-test >/dev/null 2>&1
   docker run -d --name hqnet-test --platform "$platform" --privileged --cgroupns=host \
     -v /sys/fs/cgroup:/sys/fs/cgroup:rw --tmpfs /run --tmpfs /run/lock \
-    -v "$repo/deploy/net":/deploy:ro -v "$work":/out:ro -v "$here/inside.sh":/inside.sh:ro "$tag" >/dev/null
+    -v "$repo/deploy/net":/deploy:ro -v "$work":/out:ro -v "$here/inside.sh":/inside.sh:ro -v "$here/hub-lib.sh":/hub-lib.sh:ro "$tag" >/dev/null
   i=0
   while [ $i -lt 40 ]; do
     state=$(docker exec hqnet-test systemctl is-system-running 2>/dev/null)
