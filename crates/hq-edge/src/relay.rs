@@ -6,24 +6,32 @@
 //! and registered devices and nobody else, so it is not an open relay.
 
 use std::{
+    collections::HashMap,
     net::{Ipv4Addr, SocketAddr},
     path::PathBuf,
     sync::{
-        Arc,
+        Arc, Mutex,
         atomic::{AtomicU64, Ordering},
     },
+    time::Duration,
 };
 
 use anyhow::{Context, Result, anyhow};
 use iroh::{EndpointId, RelayUrl};
 use iroh_relay::server::{
-    Access, AccessControl, AcmeConfig, CertConfig, ClientRequest, QuicConfig, RelayConfig, Server,
-    ServerConfig, TlsConfig,
+    Access, AccessControl, AcmeConfig, CertConfig, ClientRequest, ConnectionId, QuicConfig,
+    RelayConfig, Server, ServerConfig, TlsConfig,
 };
+use tokio::task::JoinHandle;
 
 use crate::registry::Registry;
 
 const LOOPBACK: Ipv4Addr = Ipv4Addr::LOCALHOST;
+/// How often relay sessions of devices that have left the registry are cut.
+const REVOKE_SWEEP: Duration = Duration::from_secs(1);
+
+/// Endpoints with a live relay session, and how many sessions each has.
+type Admitted = Arc<Mutex<HashMap<EndpointId, usize>>>;
 
 /// How the relay gets its certificate.
 pub enum RelayTls {
@@ -48,11 +56,21 @@ pub struct RelayParams {
 
 /// A running relay and the loopback address the edge forwards its connections to.
 pub struct RelayHost {
-    _server: Server,
+    _server: Option<Server>,
     hostname: String,
     target: SocketAddr,
     url: RelayUrl,
     denied: Arc<AtomicU64>,
+    admitted: Admitted,
+    sweeper: Option<JoinHandle<()>>,
+}
+
+impl Drop for RelayHost {
+    fn drop(&mut self) {
+        if let Some(sweeper) = &self.sweeper {
+            sweeper.abort();
+        }
+    }
 }
 
 impl RelayHost {
@@ -64,11 +82,13 @@ impl RelayHost {
         edge_id: EndpointId,
     ) -> Result<Self> {
         let denied = Arc::new(AtomicU64::new(0));
+        let admitted = Admitted::default();
         let mut relay = RelayConfig::new((LOOPBACK, 0));
         relay.access = Arc::new(RegisteredOnly {
-            registry,
+            registry: registry.clone(),
             edge_id,
             denied: denied.clone(),
+            admitted: admitted.clone(),
         });
         let mut config = ServerConfig::default();
         match params.tls {
@@ -113,13 +133,41 @@ impl RelayHost {
             (None, Some(http)) => (http, format!("http://{http}").parse::<RelayUrl>()?),
             (None, None) => return Err(anyhow!("the relay bound no address")),
         };
+        let sweeper = server.relay_service().cloned().map(|service| {
+            tokio::spawn(sweep_revoked(service, registry, edge_id, admitted.clone()))
+        });
         Ok(Self {
-            _server: server,
+            _server: Some(server),
             hostname: params.hostname,
             target,
             url,
             denied,
+            admitted,
+            sweeper,
         })
+    }
+
+    /// Stands in for a relay that is already running at `target`, for tests of the edge's routing
+    /// and caps. It serves nothing itself.
+    #[doc(hidden)]
+    pub fn at(hostname: &str, target: SocketAddr, url: RelayUrl) -> Self {
+        Self {
+            _server: None,
+            hostname: hostname.to_owned(),
+            target,
+            url,
+            denied: Arc::default(),
+            admitted: Admitted::default(),
+            sweeper: None,
+        }
+    }
+
+    /// Whether `id` has a live session on the relay.
+    pub fn is_connected(&self, id: &EndpointId) -> bool {
+        self.admitted
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .contains_key(id)
     }
 
     /// The server name the edge routes to this relay.
@@ -143,12 +191,36 @@ impl RelayHost {
     }
 }
 
+/// Cuts the relay sessions of devices that were removed from the registry, so revoking a device
+/// ends its relay session too and not only its edge connections.
+async fn sweep_revoked(
+    service: iroh_relay::server::RelayService,
+    registry: Arc<dyn Registry>,
+    edge_id: EndpointId,
+    admitted: Admitted,
+) {
+    loop {
+        tokio::time::sleep(REVOKE_SWEEP).await;
+        let stale: Vec<EndpointId> = admitted
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .keys()
+            .filter(|id| **id != edge_id && !registry.is_registered(id))
+            .copied()
+            .collect();
+        for id in stale {
+            service.clients().disconnect(id, None);
+        }
+    }
+}
+
 /// Admits the edge and registered devices.
 #[derive(Debug)]
 struct RegisteredOnly {
     registry: Arc<dyn Registry>,
     edge_id: EndpointId,
     denied: Arc<AtomicU64>,
+    admitted: Admitted,
 }
 
 impl std::fmt::Debug for dyn Registry {
@@ -161,9 +233,25 @@ impl AccessControl for RegisteredOnly {
     async fn on_connect(&self, request: &ClientRequest) -> Access {
         let id = request.endpoint_id();
         if id == self.edge_id || self.registry.is_registered(&id) {
+            *self
+                .admitted
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .entry(id)
+                .or_insert(0) += 1;
             return Access::Allow;
         }
         self.denied.fetch_add(1, Ordering::Relaxed);
         Access::Deny { reason: None }
+    }
+
+    fn on_disconnect(&self, endpoint_id: EndpointId, _connection_id: ConnectionId) {
+        let mut admitted = self.admitted.lock().unwrap_or_else(|e| e.into_inner());
+        if let Some(count) = admitted.get_mut(&endpoint_id) {
+            *count -= 1;
+            if *count == 0 {
+                admitted.remove(&endpoint_id);
+            }
+        }
     }
 }

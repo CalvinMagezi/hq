@@ -58,35 +58,42 @@ where
     let to_device = copy(client_read, device_write, bucket, started, &last_activity);
     let to_client = copy(device_read, client_write, bucket, started, &last_activity);
     tokio::select! {
-        _ = async { tokio::join!(to_device, to_client) } => PipeEnd::Closed,
+        // Both sides finishing cleanly, or either one failing: a broken side ends the pipe at once
+        // and dropping the halves closes the other, instead of waiting for it to notice.
+        _ = async { tokio::try_join!(to_device, to_client) } => PipeEnd::Closed,
         () = idle_watch(started, &last_activity, limits.idle) => PipeEnd::Idle,
         () = cancel => PipeEnd::Cancelled,
     }
 }
 
+/// Copies until `from` ends (`Ok`, after shutting `to` down) or either side fails (`Err`).
 async fn copy<R: AsyncRead + Unpin, W: AsyncWrite + Unpin>(
     mut from: R,
     mut to: W,
     bucket: Option<&TokenBucket>,
     started: Instant,
     last_activity: &AtomicU64,
-) {
+) -> Result<(), ()> {
     let chunk = bucket.map_or(CHUNK, |b| b.burst().min(CHUNK));
     let mut buf = vec![0u8; chunk];
     loop {
         let n = match from.read(&mut buf).await {
-            Ok(0) | Err(_) => break,
+            Ok(0) => break,
             Ok(n) => n,
+            Err(_) => return Err(()),
         };
+        // Bytes arriving are activity even while the rate limit holds them back.
+        touch(started, last_activity);
         if let Some(bucket) = bucket {
             bucket.take(n).await;
         }
         if to.write_all(&buf[..n]).await.is_err() {
-            return;
+            return Err(());
         }
         touch(started, last_activity);
     }
     let _ = to.shutdown().await;
+    Ok(())
 }
 
 fn touch(started: Instant, last_activity: &AtomicU64) {
@@ -108,7 +115,25 @@ async fn idle_watch(started: Instant, last_activity: &AtomicU64, idle: Duration)
 #[cfg(test)]
 mod tests {
     use super::*;
-    use tokio::io::{duplex, split};
+    use std::{
+        io,
+        pin::Pin,
+        task::{Context, Poll},
+    };
+    use tokio::io::{ReadBuf, duplex, split};
+
+    /// A reader that fails at once, as a broken connection does.
+    struct Failing;
+
+    impl AsyncRead for Failing {
+        fn poll_read(
+            self: Pin<&mut Self>,
+            _: &mut Context<'_>,
+            _: &mut ReadBuf<'_>,
+        ) -> Poll<io::Result<()>> {
+            Poll::Ready(Err(io::Error::other("the device failed")))
+        }
+    }
 
     const IDLE: Duration = Duration::from_secs(30);
 
@@ -201,5 +226,26 @@ mod tests {
             started.elapsed()
         );
         let _client = sender.await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn a_failing_side_ends_the_pipe_even_when_the_other_is_silent() {
+        // The other side never sends and never closes; waiting for it would mean waiting for the
+        // idle timeout with the socket and the slot held.
+        let (_silent_client, client_inner) = duplex(1024);
+        let ended = tokio::time::timeout(
+            Duration::from_secs(1),
+            pipe(
+                split(client_inner),
+                (Failing, tokio::io::sink()),
+                limits(None),
+                std::future::pending(),
+            ),
+        )
+        .await;
+        assert_eq!(
+            ended.expect("the pipe waited for a silent client"),
+            PipeEnd::Closed
+        );
     }
 }

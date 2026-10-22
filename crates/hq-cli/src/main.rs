@@ -777,9 +777,6 @@ fn apply_config_flag() -> Result<()> {
     Ok(())
 }
 
-/// MCP stdio uses stdout for JSON-RPC, so `mcp-serve` logs to stderr; chat
-/// (bare `hq` or `hq chat`) silences library logs. Both are read from the raw
-/// args because tracing must be set up before clap parses.
 /// The log filter `hq edge` starts with: its own messages at info, the transport libraries at
 /// warn, because they log full device endpoint ids otherwise.
 const EDGE_LOG_FILTER: &str = "info,iroh=warn,iroh_relay=warn,iroh_base=warn,noq=warn,noq_proto=warn,portmapper=warn,tokio_rustls_acme=warn";
@@ -800,6 +797,9 @@ Run it on a public machine you control, off by default. Set in config.yaml:
 
 Then: `hq edge id` (give this id to each device), `hq edge allow <device id>`, `hq edge run`. Full guide: docs/EDGE.md. Threats and limits: docs/security/EDGE.md.";
 
+/// MCP stdio uses stdout for JSON-RPC, so `mcp-serve` logs to stderr; chat
+/// (bare `hq` or `hq chat`) silences library logs. Both are read from the raw
+/// args because tracing must be set up before clap parses.
 fn init_tracing() {
     let args: Vec<String> = std::env::args().collect();
     let is_mcp = args.iter().any(|a| a == "mcp-serve");

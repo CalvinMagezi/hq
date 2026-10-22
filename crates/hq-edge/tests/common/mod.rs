@@ -116,6 +116,8 @@ pub struct Device {
     pub alpn_seen: Arc<Mutex<Option<Vec<u8>>>>,
     /// Connections from anyone but the edge that the device turned away.
     pub strangers: Arc<AtomicU64>,
+    /// The connections the edge opened to this device, kept so a test can act on them.
+    pub connections: Arc<Mutex<Vec<iroh::endpoint::Connection>>>,
 }
 
 impl Device {
@@ -162,12 +164,14 @@ pub async fn start_device(
         sunk: Arc::default(),
         alpn_seen: Arc::default(),
         strangers: Arc::default(),
+        connections: Arc::default(),
     };
-    let (streams, sunk, seen, strangers) = (
+    let (streams, sunk, seen, strangers, connections) = (
         device.streams.clone(),
         device.sunk.clone(),
         device.alpn_seen.clone(),
         device.strangers.clone(),
+        device.connections.clone(),
     );
     tokio::spawn(async move {
         while let Some(incoming) = endpoint.accept().await {
@@ -177,6 +181,7 @@ pub async fn start_device(
                 conn.close(403u32.into(), b"not the edge");
                 continue;
             }
+            connections.lock().unwrap().push(conn.clone());
             let (acceptor, streams, sunk, seen) = (
                 acceptor.clone(),
                 streams.clone(),
@@ -261,6 +266,16 @@ impl Rig {
 /// An edge on loopback with the given devices registered and a relay without TLS. `tune` adjusts
 /// the config before the edge starts.
 pub async fn rig(devices: &[EndpointId], tune: impl FnOnce(&mut EdgeConfig)) -> Rig {
+    rig_with(devices, None, tune).await
+}
+
+/// Like [`rig`], with `relay` standing in for the co-hosted relay when given. The stand-in is made
+/// by the test, which needs the registry or the edge id for the real one, so it takes a closure.
+pub async fn rig_with(
+    devices: &[EndpointId],
+    relay: Option<RelayHost>,
+    tune: impl FnOnce(&mut EdgeConfig),
+) -> Rig {
     let dir = tempfile::tempdir().unwrap();
     let list = dir.path().join("devices.txt");
     for id in devices {
@@ -276,17 +291,20 @@ pub async fn rig(devices: &[EndpointId], tune: impl FnOnce(&mut EdgeConfig)) -> 
     let key = load_or_create_key(&dir.path().join("edge.key")).unwrap();
     let edge_id = key.public();
     let registry = Arc::new(AllowlistFile::open(&list).unwrap());
-    let relay = RelayHost::spawn(
-        RelayParams {
-            hostname: RELAY_NAME.into(),
-            tls: RelayTls::PlainHttp,
-            quic_bind: None,
-        },
-        registry.clone(),
-        edge_id,
-    )
-    .await
-    .unwrap();
+    let relay = match relay {
+        Some(relay) => relay,
+        None => RelayHost::spawn(
+            RelayParams {
+                hostname: RELAY_NAME.into(),
+                tls: RelayTls::PlainHttp,
+                quic_bind: None,
+            },
+            registry.clone(),
+            edge_id,
+        )
+        .await
+        .unwrap(),
+    };
     let relay_url = relay.url().clone();
     let mut config = EdgeConfig {
         enabled: true,
@@ -310,19 +328,29 @@ pub async fn rig(devices: &[EndpointId], tune: impl FnOnce(&mut EdgeConfig)) -> 
 }
 
 /// Reads until the peer closes, returning the bytes read and how long it took. A reset counts as
-/// a close. Gives up (and panics) after `limit`.
-pub async fn read_until_closed(stream: &mut TcpStream, limit: Duration) -> (Vec<u8>, Duration) {
+/// a close. `None` when it is still open after `limit`.
+pub async fn try_read_until_closed(
+    stream: &mut TcpStream,
+    limit: Duration,
+) -> Option<(Vec<u8>, Duration)> {
     let started = Instant::now();
     let mut got = Vec::new();
     let mut buf = [0u8; 4096];
     loop {
         let left = limit.saturating_sub(started.elapsed());
         match tokio::time::timeout(left, stream.read(&mut buf)).await {
-            Err(_) => panic!("still open after {limit:?} (read {} bytes)", got.len()),
-            Ok(Ok(0)) | Ok(Err(_)) => return (got, started.elapsed()),
+            Err(_) => return None,
+            Ok(Ok(0)) | Ok(Err(_)) => return Some((got, started.elapsed())),
             Ok(Ok(n)) => got.extend_from_slice(&buf[..n]),
         }
     }
+}
+
+/// Like [`try_read_until_closed`], and panics when the connection stays open.
+pub async fn read_until_closed(stream: &mut TcpStream, limit: Duration) -> (Vec<u8>, Duration) {
+    try_read_until_closed(stream, limit)
+        .await
+        .unwrap_or_else(|| panic!("still open after {limit:?}"))
 }
 
 /// Whether the connection is still open after `wait` (nothing arrived and it did not close).

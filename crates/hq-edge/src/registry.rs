@@ -3,7 +3,7 @@
 
 use std::{
     collections::{HashMap, HashSet},
-    io::Write,
+    io::{Read, Write},
     os::unix::fs::{MetadataExt, OpenOptionsExt, PermissionsExt},
     path::{Path, PathBuf},
     sync::Mutex,
@@ -51,6 +51,8 @@ pub enum ListError {
     WrongOwner(PathBuf),
     #[error("{0} can be written by others; chmod 600 it")]
     WritableByOthers(PathBuf),
+    #[error("the directory {0} can be written by others or belongs to another user")]
+    UntrustedDir(PathBuf),
     #[error("line {line}: {why}")]
     BadLine { line: usize, why: String },
     #[error("devices {first} and {second} share the name label {label}; remove one of them")]
@@ -79,7 +81,14 @@ struct Snapshot {
 pub struct AllowlistFile {
     path: PathBuf,
     owner: u32,
-    state: Mutex<(Instant, Snapshot)>,
+    state: Mutex<State>,
+}
+
+struct State {
+    checked: Instant,
+    snapshot: Snapshot,
+    /// The last refusal that was logged, so a list that stays bad is reported once, not every second.
+    last_error: Option<String>,
 }
 
 impl AllowlistFile {
@@ -93,23 +102,34 @@ impl AllowlistFile {
         Ok(Self {
             path,
             owner,
-            state: Mutex::new((Instant::now(), snapshot)),
+            state: Mutex::new(State {
+                checked: Instant::now(),
+                snapshot,
+                last_error: None,
+            }),
         })
     }
 
     fn with_fresh<T>(&self, f: impl FnOnce(&Snapshot) -> T) -> T {
         let mut state = self.state.lock().unwrap_or_else(|e| e.into_inner());
-        if state.0.elapsed() >= RELOAD_EVERY {
-            state.1 = match read_snapshot(&self.path, self.owner) {
-                Ok(snapshot) => snapshot,
-                Err(e) => {
-                    tracing::warn!("the device list is refused, nobody is forwarded: {e}");
-                    Snapshot::default()
+        if state.checked.elapsed() >= RELOAD_EVERY {
+            match read_snapshot(&self.path, self.owner) {
+                Ok(snapshot) => {
+                    state.snapshot = snapshot;
+                    state.last_error = None;
                 }
-            };
-            state.0 = Instant::now();
+                Err(e) => {
+                    let why = e.to_string();
+                    if state.last_error.as_deref() != Some(&why) {
+                        tracing::warn!("the device list is refused, nobody is forwarded: {why}");
+                    }
+                    state.last_error = Some(why);
+                    state.snapshot = Snapshot::default();
+                }
+            }
+            state.checked = Instant::now();
         }
-        f(&state.1)
+        f(&state.snapshot)
     }
 }
 
@@ -141,8 +161,8 @@ fn build_with(
         let label = label_of(&entry.id);
         if let Some(other) = snapshot.by_label.get(&label) {
             return Err(ListError::Collision {
-                first: other.id.to_string(),
-                second: entry.id.to_string(),
+                first: other.id.fmt_short().to_string(),
+                second: entry.id.fmt_short().to_string(),
                 label,
             });
         }
@@ -152,13 +172,28 @@ fn build_with(
     Ok(snapshot)
 }
 
-/// Checks the file's kind, owner and mode, then parses it. A missing file is an empty list.
+/// Opens the list without following a symlink, checks the open file's kind, owner and mode (so
+/// there is no gap between the check and the read), then parses it. A missing file is an empty list.
 fn read_entries(path: &Path, owner: u32) -> Result<Vec<Registered>, ListError> {
-    let meta = match std::fs::symlink_metadata(path) {
-        Ok(meta) => meta,
+    check_dir(path, owner)?;
+    read_file(path, owner)
+}
+
+fn read_file(path: &Path, owner: u32) -> Result<Vec<Registered>, ListError> {
+    let mut file = match std::fs::OpenOptions::new()
+        .read(true)
+        // O_NONBLOCK so that a FIFO cannot hang the open; it is refused as not a plain file below.
+        .custom_flags(libc::O_NOFOLLOW | libc::O_NONBLOCK)
+        .open(path)
+    {
+        Ok(file) => file,
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(Vec::new()),
+        Err(e) if e.raw_os_error() == Some(libc::ELOOP) => {
+            return Err(ListError::NotPlain(path.to_owned()));
+        }
         Err(e) => return Err(e.into()),
     };
+    let meta = file.metadata()?;
     if !meta.file_type().is_file() {
         return Err(ListError::NotPlain(path.to_owned()));
     }
@@ -168,7 +203,18 @@ fn read_entries(path: &Path, owner: u32) -> Result<Vec<Registered>, ListError> {
     if meta.permissions().mode() & GROUP_OTHER_WRITE_BITS != 0 {
         return Err(ListError::WritableByOthers(path.to_owned()));
     }
-    parse(&std::fs::read_to_string(path)?)
+    let mut text = String::new();
+    file.read_to_string(&mut text)?;
+    parse(&text)
+}
+
+/// The directory holding the list must be one only this user (or root) can change.
+fn check_dir(path: &Path, owner: u32) -> Result<(), ListError> {
+    let dir = path.parent().unwrap_or(Path::new("."));
+    if crate::identity::dir_is_trusted(dir, owner)? {
+        return Ok(());
+    }
+    Err(ListError::UntrustedDir(dir.to_owned()))
 }
 
 fn parse(text: &str) -> Result<Vec<Registered>, ListError> {
@@ -216,15 +262,26 @@ pub fn allow_device(path: &Path, device: Registered) -> Result<(), ListError> {
     if let Some(dir) = path.parent() {
         ensure_private_dir(dir).map_err(|e| std::io::Error::other(e.to_string()))?;
     }
+    // The list may not end in a newline (an editor left it so): without one, the new id would
+    // join the last line, or vanish into a trailing comment.
+    let needs_break =
+        std::fs::read(path).is_ok_and(|bytes| bytes.last().is_some_and(|b| *b != b'\n'));
+    let mut line = String::new();
+    if needs_break {
+        line.push('\n');
+    }
+    line.push_str(&device.id.to_string());
+    if let Some(relay) = &device.relay {
+        line.push(' ');
+        line.push_str(&relay.to_string());
+    }
+    line.push('\n');
     let mut file = std::fs::OpenOptions::new()
         .append(true)
         .create(true)
         .mode(PRIVATE_FILE_MODE)
         .open(path)?;
-    match device.relay {
-        Some(relay) => writeln!(file, "{} {relay}", device.id)?,
-        None => writeln!(file, "{}", device.id)?,
-    }
+    file.write_all(line.as_bytes())?;
     Ok(())
 }
 
@@ -349,7 +406,7 @@ mod tests {
         // SAFETY: geteuid has no preconditions and cannot fail.
         let someone_else = unsafe { libc::geteuid() } + 1;
         assert!(matches!(
-            read_entries(&path, someone_else),
+            read_file(&path, someone_else),
             Err(ListError::WrongOwner(_))
         ));
     }
@@ -373,6 +430,63 @@ mod tests {
             Err(ListError::Collision { .. })
         ));
         assert!(build_with(entries, device_label).is_ok());
+    }
+
+    #[test]
+    fn allow_survives_a_list_without_a_final_newline_or_ending_in_a_comment() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("devices.txt");
+        let (a, b, c) = (id(), id(), id());
+        write(&path, &a.to_string(), 0o600); // no trailing newline
+        allow_device(&path, Registered { id: b, relay: None }).unwrap();
+        let ids: Vec<_> = list_devices(&path).unwrap().iter().map(|d| d.id).collect();
+        assert_eq!(ids, vec![a, b], "the new id must not join the last line");
+
+        write(&path, &format!("{a}\n# the phone"), 0o600); // ends in a comment, no newline
+        allow_device(&path, Registered { id: c, relay: None }).unwrap();
+        let ids: Vec<_> = list_devices(&path).unwrap().iter().map(|d| d.id).collect();
+        assert_eq!(
+            ids,
+            vec![a, c],
+            "the new id must not vanish into the comment"
+        );
+    }
+
+    #[test]
+    fn a_list_that_is_not_a_regular_file_is_refused() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("devices.txt");
+        std::fs::create_dir(&path).unwrap();
+        assert!(matches!(
+            AllowlistFile::open(&path),
+            Err(ListError::NotPlain(_))
+        ));
+    }
+
+    #[test]
+    fn a_list_in_a_directory_others_can_write_is_refused() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("devices.txt");
+        write(&path, &format!("{}\n", id()), 0o600);
+        std::fs::set_permissions(dir.path(), std::fs::Permissions::from_mode(0o777)).unwrap();
+        assert!(matches!(
+            AllowlistFile::open(&path),
+            Err(ListError::UntrustedDir(_))
+        ));
+    }
+
+    #[test]
+    fn a_collision_names_short_ids_not_whole_ones() {
+        let (a, b) = (id(), id());
+        let entries = vec![
+            Registered { id: a, relay: None },
+            Registered { id: b, relay: None },
+        ];
+        let message = build_with(entries, |_| "same".into())
+            .err()
+            .unwrap()
+            .to_string();
+        assert!(!message.contains(&a.to_string()), "{message}");
     }
 
     #[test]

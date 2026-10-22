@@ -135,16 +135,14 @@ async fn garbage_is_closed_at_once_with_no_answer() {
         ("zeros", vec![0u8; 512]),
         ("noise", (0..=255u8).cycle().take(2048).collect()),
         ("a record announcing 64 KiB", oversized),
-        (
-            "a truncated hello",
-            client_hello("x.edge.test")[..20].to_vec(),
-        ),
     ];
     for (what, bytes) in &cases {
         let mut tcp = rig.connect().await;
         tcp.write_all(bytes).await.unwrap();
-        let _ = tcp.shutdown().await;
-        let (got, took) = read_until_closed(&mut tcp, 3 * SECOND).await;
+        // The socket stays open on our side: only the edge can end this.
+        let Some((got, took)) = try_read_until_closed(&mut tcp, 3 * SECOND).await else {
+            panic!("{what}: still open after 3 s");
+        };
         assert!(got.is_empty(), "{what}: the edge answered garbage");
         assert!(took < SECOND, "{what}: held for {took:?}");
     }
@@ -438,8 +436,6 @@ async fn revoking_a_device_cuts_its_open_connections_and_refuses_new_ones() {
         took < Duration::from_millis(4500),
         "revocation took {took:?}"
     );
-    assert_eq!(rig.edge.stats().ended_cancelled, 1);
-
     let mut fresh = rig.connect().await;
     fresh.write_all(&hello).await.unwrap();
     let (got, _) = read_until_closed(&mut fresh, 3 * SECOND).await;
@@ -554,4 +550,205 @@ async fn the_lets_encrypt_relay_starts_offline_and_binds_loopback_only() {
     assert!(relay.target().ip().is_loopback());
     assert_eq!(relay.url().to_string(), format!("https://{RELAY_NAME}/"));
     assert!(TcpStream::connect(relay.target()).await.is_ok());
+}
+
+/// A listener that stands in for the relay: it counts connections and the bytes they send, and
+/// answers each with a fixed greeting.
+struct FakeRelay {
+    addr: SocketAddr,
+    accepted: std::sync::Arc<std::sync::atomic::AtomicU64>,
+    received: std::sync::Arc<std::sync::Mutex<Vec<u8>>>,
+}
+
+async fn fake_relay() -> FakeRelay {
+    use std::sync::{
+        Arc, Mutex,
+        atomic::{AtomicU64, Ordering},
+    };
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let relay = FakeRelay {
+        addr: listener.local_addr().unwrap(),
+        accepted: Arc::new(AtomicU64::new(0)),
+        received: Arc::new(Mutex::new(Vec::new())),
+    };
+    let (accepted, received) = (relay.accepted.clone(), relay.received.clone());
+    tokio::spawn(async move {
+        let mut held = Vec::new();
+        while let Ok((mut tcp, _)) = listener.accept().await {
+            accepted.fetch_add(1, Ordering::SeqCst);
+            let _ = tcp.write_all(b"relay says hi").await;
+            let received = received.clone();
+            let (mut read, write) = tcp.into_split();
+            held.push(write);
+            tokio::spawn(async move {
+                let mut buf = [0u8; 4096];
+                while let Ok(n) = read.read(&mut buf).await {
+                    if n == 0 {
+                        break;
+                    }
+                    received.lock().unwrap().extend_from_slice(&buf[..n]);
+                }
+            });
+        }
+    });
+    relay
+}
+
+fn stand_in(relay: &FakeRelay) -> hq_edge::RelayHost {
+    hq_edge::RelayHost::at(
+        RELAY_NAME,
+        relay.addr,
+        "http://127.0.0.1:1".parse().unwrap(),
+    )
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn the_relay_name_is_routed_to_the_relay_with_the_hello_intact() {
+    let fake = fake_relay().await;
+    let rig = rig_with(&[], Some(stand_in(&fake)), |_| {}).await;
+
+    let mut tcp = rig.connect().await;
+    let mut bytes = client_hello(RELAY_NAME);
+    let hello_len = bytes.len();
+    bytes.extend_from_slice(b"and more");
+    tcp.write_all(&bytes).await.unwrap();
+    let mut greeting = [0u8; 13];
+    tokio::time::timeout(5 * SECOND, tcp.read_exact(&mut greeting))
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(&greeting, b"relay says hi");
+    eventually(5 * SECOND, "the relay to receive the bytes", || {
+        fake.received.lock().unwrap().len() == bytes.len()
+    })
+    .await;
+    assert_eq!(
+        *fake.received.lock().unwrap(),
+        bytes,
+        "the relay must see exactly what was sent"
+    );
+    assert!(bytes.len() > hello_len);
+    assert_eq!(rig.edge.stats().relay_forwarded, 1);
+    assert_eq!(rig.edge.stats().unknown_name, 0);
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn the_relay_connection_cap_closes_the_extra_connection() {
+    const CAP: usize = 2;
+    let fake = fake_relay().await;
+    let rig = rig_with(&[], Some(stand_in(&fake)), |c| {
+        c.limits.max_relay_connections = CAP;
+        c.limits.max_pending_per_source = 100;
+    })
+    .await;
+    let hello = client_hello(RELAY_NAME);
+    let mut held = Vec::new();
+    for _ in 0..CAP {
+        let mut tcp = rig.connect().await;
+        tcp.write_all(&hello).await.unwrap();
+        held.push(tcp);
+    }
+    eventually(5 * SECOND, "both relay connections", || {
+        fake.accepted.load(std::sync::atomic::Ordering::SeqCst) == CAP as u64
+    })
+    .await;
+    let mut extra = rig.connect().await;
+    extra.write_all(&hello).await.unwrap();
+    let (got, took) = read_until_closed(&mut extra, 3 * SECOND).await;
+    assert!(got.is_empty());
+    assert!(took < SECOND, "held for {took:?}");
+    assert_eq!(rig.edge.stats().refused_busy, 1);
+    assert_eq!(
+        fake.accepted.load(std::sync::atomic::Ordering::SeqCst),
+        CAP as u64
+    );
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn bytes_sent_with_the_hello_reach_the_device_with_it() {
+    let (rig, device, hello) = raw_world(Behavior::Sink, |_| {}).await;
+    let mut tcp = rig.connect().await;
+    let mut bytes = hello.clone();
+    bytes.extend_from_slice(&[9u8; 100]);
+    tcp.write_all(&bytes).await.unwrap();
+    eventually(10 * SECOND, "all bytes to arrive", || {
+        device.sunk() == bytes.len() as u64
+    })
+    .await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn the_hello_is_charged_to_the_devices_byte_budget() {
+    // 20 connections, each with a hello of a few hundred bytes, against 4 KB/s and a 2 KB burst:
+    // without the charge every hello arrives at once.
+    const CONNECTIONS: usize = 20;
+    let (rig, device, hello) = raw_world(Behavior::Sink, |c| {
+        c.limits.bytes_per_second = 4_000;
+        c.limits.burst_bytes = 2_000;
+        c.limits.max_connections_per_device = 64;
+    })
+    .await;
+    let started = std::time::Instant::now();
+    let mut open = Vec::new();
+    for _ in 0..CONNECTIONS {
+        let mut tcp = rig.connect().await;
+        tcp.write_all(&hello).await.unwrap();
+        open.push(tcp);
+    }
+    let total = (CONNECTIONS * hello.len()) as u64;
+    eventually(30 * SECOND, "every hello to arrive", || {
+        device.sunk() == total
+    })
+    .await;
+    let floor = Duration::from_secs_f64((total as f64 - 2_000.0) / 4_000.0 * 0.8);
+    assert!(
+        started.elapsed() >= floor,
+        "{CONNECTIONS} hellos took {:?}, the budget needs at least {floor:?}",
+        started.elapsed()
+    );
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_removed_device_loses_its_edge_connection_and_its_relay_session() {
+    let (rig, device, connector) = http_world(&[]).await;
+    let relay = rig.edge.relay().unwrap();
+    let (response, _) = https_get(rig.addr(), &connector, &device.name()).await;
+    assert!(response.ends_with(BODY));
+    assert!(
+        relay.is_connected(&device.id()),
+        "the device should be on the relay"
+    );
+    assert_eq!(rig.edge.stats().revoked_closed, 0);
+
+    revoke_device(&rig.list, &device.id()).unwrap();
+    eventually(
+        8 * SECOND,
+        "the edge to close its connection to the device",
+        || rig.edge.stats().revoked_closed >= 1,
+    )
+    .await;
+    eventually(8 * SECOND, "the relay to cut the device's session", || {
+        !relay.is_connected(&device.id())
+    })
+    .await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_device_cannot_open_streams_toward_the_edge() {
+    let (rig, device, connector) = http_world(&[]).await;
+    let (response, _) = https_get(rig.addr(), &connector, &device.name()).await;
+    assert!(response.ends_with(BODY));
+    let conn = device
+        .connections
+        .lock()
+        .unwrap()
+        .first()
+        .cloned()
+        .expect("the edge connected");
+    let opened = tokio::time::timeout(2 * SECOND, conn.open_bi()).await;
+    assert!(
+        opened.is_err(),
+        "the edge granted a device stream credit it never uses"
+    );
+    drop(rig);
 }

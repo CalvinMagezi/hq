@@ -61,7 +61,7 @@ the `hq` binary on that machine (`deploy/install.sh`, or the Docker image below)
    UDP 7842 (the relay's address discovery, `edge.relay.quic_bind`) and the UDP port of `iroh_bind`.
    Nothing else listens: there is no admin port and no metrics port.
 4. **Run it.** As a service: `deploy/edge/hq-edge.service` (a dedicated user, port 443 without root,
-   the sandboxing the service needs). In Docker: `deploy/edge/Dockerfile`, with host networking.
+   the sandboxing the service needs). In Docker: `deploy/edge/Dockerfile`, with host networking (the header of the file has the `docker run` line; mount the config at `/etc/hq-edge/config.yaml`, not inside `/data`, and manage devices with `docker exec hq-edge hq edge allow <id>`).
    In a terminal: `hq edge run`.
 5. **Register a device.** On the device, run its HQ and note its endpoint id. On the edge machine:
 
@@ -75,7 +75,10 @@ the `hq` binary on that machine (`deploy/install.sh`, or the Docker image below)
    Run these as the user that runs the edge (for the systemd unit:
    `sudo -u hq-edge env HOME=/var/lib/hq-edge HQ_CONFIG_PATH=/var/lib/hq-edge/.hq/config.yaml hq edge list`).
    The list is a text file (`~/.hq/edge/devices.txt`, mode 0600, owned by the user running the edge,
-   one `<endpoint id> [relay URL]` per line). A list with a bad line, a wrong mode or owner, or two
+   in a directory only that user can write to, one `<endpoint id> [relay URL]` per line). Change it
+   with `hq edge allow` and `hq edge revoke`, or replace it atomically (write a new file, then `mv`
+   it into place): an editor that saves in place can leave a half-written file for a moment, and a
+   list the edge cannot read completely is treated as empty until the next check. A list with a bad line, a wrong mode or owner, or two
    devices that share a name label is refused as a whole, and then nothing is forwarded. Registration
    by scanning a QR code replaces `hq edge allow` when the pairing protocol lands; the forwarder reads
    the list through the `hq_edge::Registry` trait and does not change.
@@ -102,7 +105,7 @@ All defaults are in `edge.limits`; a connection that breaks a limit is closed, n
 | `max_connections_per_device` | 16 | Concurrent forwarded connections per device |
 | `bytes_per_second`, `burst_bytes` | 2 MiB, 1 MiB | A device's traffic, both directions together |
 | `idle_timeout_secs` | 120 | No bytes either way |
-| `dial_timeout_secs` | 10 | Waiting for the device to accept a stream |
+| `dial_timeout_secs` | 10 | Reaching the device, opening a stream and sending the ClientHello (which is also charged to the device's byte budget) |
 | `max_relay_connections` | 128 | Concurrent connections to the co-hosted relay |
 
 The ClientHello is also capped at 18 KiB. The limits are per process and per device, not per client:

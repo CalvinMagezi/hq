@@ -16,6 +16,11 @@ use serde::{Deserialize, Serialize};
 use crate::LABEL_BYTES;
 
 const MIB: u64 = 1024 * 1024;
+/// The most connections any one count may allow (a semaphore cannot hold more, and a million
+/// descriptors is far past what a machine gives one process).
+const MAX_COUNT: u64 = 1_000_000;
+const MAX_SECONDS: u64 = 24 * 60 * 60;
+const MAX_BYTES: u64 = 1024 * 1024 * MIB;
 const HOSTNAME_MAX: usize = 253;
 const LABEL_MAX: usize = 63;
 /// The default UDP port for the iroh relay's address discovery (QUIC).
@@ -192,22 +197,40 @@ impl EdgeConfig {
             bail!("edge.domain needs at least two labels, for example edge.example.com");
         }
         let limits = &self.limits;
-        let zero = [
-            ("hello_timeout_secs", limits.hello_timeout_secs == 0),
-            ("max_pending", limits.max_pending == 0),
-            ("max_pending_per_source", limits.max_pending_per_source == 0),
+        let counts = [
+            ("max_pending", limits.max_pending as u64),
+            (
+                "max_pending_per_source",
+                limits.max_pending_per_source as u64,
+            ),
             (
                 "max_connections_per_device",
-                limits.max_connections_per_device == 0,
+                limits.max_connections_per_device as u64,
             ),
-            ("bytes_per_second", limits.bytes_per_second == 0),
-            ("burst_bytes", limits.burst_bytes == 0),
-            ("idle_timeout_secs", limits.idle_timeout_secs == 0),
-            ("dial_timeout_secs", limits.dial_timeout_secs == 0),
-            ("max_relay_connections", limits.max_relay_connections == 0),
+            ("max_relay_connections", limits.max_relay_connections as u64),
         ];
-        if let Some((name, _)) = zero.iter().find(|(_, is_zero)| *is_zero) {
-            bail!("edge.limits.{name} must not be 0");
+        for (name, value) in counts {
+            if value == 0 || value > MAX_COUNT {
+                bail!("edge.limits.{name} must be between 1 and {MAX_COUNT}");
+            }
+        }
+        let seconds = [
+            ("hello_timeout_secs", limits.hello_timeout_secs),
+            ("idle_timeout_secs", limits.idle_timeout_secs),
+            ("dial_timeout_secs", limits.dial_timeout_secs),
+        ];
+        for (name, value) in seconds {
+            if value == 0 || value > MAX_SECONDS {
+                bail!("edge.limits.{name} must be between 1 and {MAX_SECONDS}");
+            }
+        }
+        for (name, value) in [
+            ("bytes_per_second", limits.bytes_per_second),
+            ("burst_bytes", limits.burst_bytes),
+        ] {
+            if value == 0 || value > MAX_BYTES {
+                bail!("edge.limits.{name} must be between 1 and {MAX_BYTES}");
+            }
         }
         if let Some(url) = &self.relay_url {
             url.parse::<iroh::RelayUrl>()
@@ -306,6 +329,15 @@ mod tests {
     fn zero_limits_and_bad_names_are_refused() {
         let mut config = on();
         config.limits.max_pending = 0;
+        assert!(config.validate().is_err());
+        let mut config = on();
+        config.limits.max_connections_per_device = usize::MAX;
+        assert!(
+            config.validate().is_err(),
+            "an absurd cap must not reach a semaphore"
+        );
+        let mut config = on();
+        config.limits.hello_timeout_secs = u64::MAX;
         assert!(config.validate().is_err());
         for bad in [
             "",

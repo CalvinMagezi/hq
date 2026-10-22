@@ -14,7 +14,7 @@ use std::{
 use anyhow::{Context, Result};
 use iroh::{
     Endpoint, EndpointAddr, EndpointId, RelayMode, RelayUrl, SecretKey,
-    endpoint::{Connection, RecvStream, SendStream, presets},
+    endpoint::{Connection, QuicTransportConfig, RecvStream, SendStream, presets},
 };
 use tokio::{
     net::{TcpListener, TcpStream},
@@ -36,6 +36,8 @@ use crate::{
 const REVOKE_CHECK: Duration = Duration::from_secs(1);
 /// How long to wait for the relay's loopback listener.
 const RELAY_CONNECT_TIMEOUT: Duration = Duration::from_secs(5);
+/// The QUIC close code for a connection to a device that is no longer registered.
+const REVOKED_CODE: u32 = 403;
 /// Pause after an accept error (out of file descriptors, for one) so the loop does not spin.
 const ACCEPT_BACKOFF: Duration = Duration::from_millis(50);
 /// Characters of a device label that may appear in a log line.
@@ -56,6 +58,7 @@ pub struct Stats {
     relay_forwarded: AtomicU64,
     ended_idle: AtomicU64,
     ended_cancelled: AtomicU64,
+    revoked_closed: AtomicU64,
 }
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
@@ -76,8 +79,10 @@ pub struct StatsSnapshot {
     pub forwarded: u64,
     pub relay_forwarded: u64,
     pub ended_idle: u64,
-    /// Forwarded connections cut because the device was revoked or the edge stopped.
+    /// Forwarded connections cut because the edge stopped.
     pub ended_cancelled: u64,
+    /// Connections to devices that left the registry, closed by the edge.
+    pub revoked_closed: u64,
 }
 
 fn inc(counter: &AtomicU64) {
@@ -99,6 +104,7 @@ impl Stats {
             relay_forwarded: get(&self.relay_forwarded),
             ended_idle: get(&self.ended_idle),
             ended_cancelled: get(&self.ended_cancelled),
+            revoked_closed: get(&self.revoked_closed),
         }
     }
 }
@@ -143,6 +149,7 @@ pub struct Edge {
     shared: Arc<Shared>,
     stop: watch::Sender<bool>,
     task: JoinHandle<()>,
+    background: Vec<JoinHandle<()>>,
     _relay: Option<RelayHost>,
 }
 
@@ -195,9 +202,17 @@ impl Edge {
                 RelayMode::Default
             }
         };
+        // The edge only ever opens streams. A device that opens streams or sends datagrams toward
+        // it would otherwise be buffered, up to a window per stream, on a connection the edge keeps.
+        let transport = QuicTransportConfig::builder()
+            .max_concurrent_bidi_streams(0u32.into())
+            .max_concurrent_uni_streams(0u32.into())
+            .datagram_receive_buffer_size(None)
+            .build();
         let endpoint = Endpoint::builder(presets::Minimal)
             .secret_key(key)
             .relay_mode(relay_mode)
+            .transport_config(transport)
             .clear_ip_transports()
             .bind_addr(config.iroh_bind)
             .context("edge.iroh_bind")?
@@ -232,11 +247,16 @@ impl Edge {
             shutdown,
         });
         let task = tokio::spawn(accept_loop(shared.clone(), listener));
+        // Nothing dials the edge yet (pairing will, on its own protocol); refusing at the first
+        // packet keeps unsolicited QUIC handshakes from queueing inside the endpoint.
+        let refuse = tokio::spawn(refuse_incoming(shared.endpoint.clone()));
+        let janitor = tokio::spawn(sweep_revoked(shared.clone()));
         Ok(Self {
             addr,
             shared,
             stop,
             task,
+            background: vec![refuse, janitor],
             _relay: relay,
         })
     }
@@ -264,6 +284,9 @@ impl Edge {
     pub async fn shutdown(mut self) {
         let _ = self.stop.send(true);
         let _ = (&mut self.task).await;
+        for task in &self.background {
+            task.abort();
+        }
         self.shared.endpoint.close().await;
     }
 }
@@ -272,6 +295,9 @@ impl Drop for Edge {
     fn drop(&mut self) {
         let _ = self.stop.send(true);
         self.task.abort();
+        for task in &self.background {
+            task.abort();
+        }
     }
 }
 
@@ -290,6 +316,46 @@ async fn accept_loop(shared: Arc<Shared>, listener: TcpListener) {
                 }
             },
             _ = shutdown.changed() => return,
+        }
+    }
+}
+
+async fn refuse_incoming(endpoint: Endpoint) {
+    while let Some(incoming) = endpoint.accept().await {
+        incoming.refuse();
+    }
+}
+
+/// Closes the cached connection to every device that has left the registry and forgets the ones
+/// nothing is using, so a revoked device keeps neither a connection nor an entry.
+async fn sweep_revoked(shared: Arc<Shared>) {
+    let mut shutdown = shared.shutdown.clone();
+    loop {
+        tokio::select! {
+            () = tokio::time::sleep(REVOKE_CHECK) => {}
+            _ = shutdown.changed() => return,
+        }
+        let stale: Vec<(EndpointId, Arc<DeviceState>)> = {
+            let devices = shared.devices.lock().unwrap_or_else(|e| e.into_inner());
+            devices
+                .iter()
+                .filter(|(id, _)| !shared.registry.is_registered(id))
+                .map(|(id, state)| (*id, state.clone()))
+                .collect()
+        };
+        for (id, state) in stale {
+            // A dial in progress holds the lock; the next round will get it.
+            if let Ok(mut cached) = state.conn.try_lock()
+                && let Some(conn) = cached.take()
+            {
+                conn.close(REVOKED_CODE.into(), b"revoked");
+                inc(&shared.stats.revoked_closed);
+            }
+            let mut devices = shared.devices.lock().unwrap_or_else(|e| e.into_inner());
+            // Two references are the map's and the one in `stale`: nothing is forwarding.
+            if devices.get(&id).is_some_and(|s| Arc::strong_count(s) <= 2) {
+                devices.remove(&id);
+            }
         }
     }
 }
@@ -375,19 +441,19 @@ impl Shared {
             inc(&self.stats.device_busy);
             return;
         };
-        let opened = tokio::time::timeout(
-            self.limits.dial_timeout(),
-            self.open_stream(&state, &device),
-        )
-        .await;
-        let Ok(Ok((mut send, recv))) = opened else {
+        // Dialing, taking the hello's bytes out of the device's budget and writing it share one
+        // deadline: a device that grants no stream credit must not pin the slot and the socket.
+        let setup = async {
+            let (mut send, recv) = self.open_stream(&state, &device).await?;
+            state.bucket.take(hello.len()).await;
+            send.write_all(&hello).await?;
+            Ok::<_, anyhow::Error>((send, recv))
+        };
+        let Ok(Ok((send, recv))) = tokio::time::timeout(self.limits.dial_timeout(), setup).await
+        else {
             inc(&self.stats.dial_failed);
             return;
         };
-        if send.write_all(&hello).await.is_err() {
-            inc(&self.stats.dial_failed);
-            return;
-        }
         inc(&self.stats.forwarded);
         let label = device_label(&device.id);
         tracing::debug!(device = &label[..LOG_PREFIX], "forwarding a connection");
@@ -398,7 +464,7 @@ impl Shared {
                 idle: self.limits.idle_timeout(),
                 bucket: Some(state.bucket.clone()),
             },
-            self.revoked(label, device.id),
+            self.stopped(),
         )
         .await;
         self.note_end(end);
@@ -472,22 +538,6 @@ impl Shared {
         let mut shutdown = self.shutdown.clone();
         // An error means the sender is gone, which is also a stop.
         let _ = shutdown.wait_for(|stop| *stop).await;
-    }
-
-    /// Completes when the device is no longer registered under the same id, or the edge stops.
-    async fn revoked(&self, label: String, id: EndpointId) {
-        let still_registered = async {
-            loop {
-                tokio::time::sleep(REVOKE_CHECK).await;
-                if self.registry.lookup(&label).map(|r| r.id) != Some(id) {
-                    return;
-                }
-            }
-        };
-        tokio::select! {
-            () = still_registered => {}
-            () = self.stopped() => {}
-        }
     }
 }
 
