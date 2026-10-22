@@ -20,6 +20,7 @@ class UsageViewModel(app: Application) : AndroidViewModel(app) {
     private val _chip = MutableStateFlow<BalanceChip?>(null)
     val chip: StateFlow<BalanceChip?> = _chip
     private var frozen = false
+    private var lastSettings: JSONObject? = null
 
     init {
         viewModelScope.launch {
@@ -39,7 +40,10 @@ class UsageViewModel(app: Application) : AndroidViewModel(app) {
         val routes = listOf("/api/settings", "/api/usage/providers", "/api/copilot-usage", "/api/budgets")
         val got = coroutineScope { routes.map { path -> async { get(path) } }.awaitAll() }
         if (frozen || got.all { it == null }) return
-        _chip.value = UsageWords.chip(UsageSnapshot(got[0], got[1], got[2], got[3]))
+        // A poll where the settings did not answer keeps the order HQ was last seen with, so the chip does not switch service for a minute.
+        val settings = got[0] ?: lastSettings
+        lastSettings = settings
+        _chip.value = UsageWords.chip(UsageSnapshot(settings, got[1], got[2], got[3]))
     }
 
     private suspend fun get(path: String): JSONObject? = try { client.json(path) } catch (e: HqUnavailable) { null }

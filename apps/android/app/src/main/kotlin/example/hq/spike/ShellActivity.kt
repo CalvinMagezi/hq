@@ -152,7 +152,7 @@ class ShellActivity : ComponentActivity() {
                 HqShell(
                     startAt = start, inboxBadge = if (badge > 0) badge else inboxState.shownNeeds.size, status = shown,
                     onSearch = { notes.actions.onOpenSearch() }, onSettings = settings.actions.onOpen,
-                    balance = balance,
+                    balance = if (shown is HqStatus.Starting) null else balance,
                     onBalance = { target -> settings.actions.onOpen(); settings.actions.onPage(if (target == ChipTarget.Spending) SettingsPage.Spending else SettingsPage.Keys) },
                     request = requested, onRequestHandled = { requested = null },
                     aboveBar = { place -> if (place != Place.Tasks) tasksState.line?.let { Snack(it, tasks.actions, Modifier.align(Alignment.BottomCenter).padding(bottom = 4.dp)) } },

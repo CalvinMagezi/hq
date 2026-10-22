@@ -48,13 +48,15 @@ object UsageWords {
 
     /** Whose service a backend is, from the host it talks to; the kind says it where the host is not enough. */
     fun providerName(host: String?, kind: String?, backend: String = ""): String {
-        val h = host.orEmpty().lowercase()
+        // The server keeps a port on the host (localhost:11434), which is not part of whose service it is.
+        val h = host.orEmpty().lowercase().let { if (it.startsWith("[")) it.substringBefore("]") + "]" else it.substringBefore(":") }
         val k = kind.orEmpty().lowercase()
         return when {
             "githubcopilot.com" in h || "copilot" in k -> COPILOT
             "openrouter" in h || "openrouter" in k -> "OpenRouter"
             h == "api.deepseek.com" -> "DeepSeek"
-            h == "api.anthropic.com" || "anthropic" in k -> "Anthropic"
+            // An anthropic-compatible kind with another host is someone else's gateway, named by its host below.
+            h == "api.anthropic.com" || ("anthropic" in k && h.isBlank()) -> "Anthropic"
             "googleapis.com" in h -> "Google AI"
             h == "api.openai.com" -> "OpenAI"
             h == "api.groq.com" -> "Groq"
@@ -69,11 +71,17 @@ object UsageWords {
 
     private val LOCAL_HOSTS = setOf("localhost", "127.0.0.1", "[::1]", "0.0.0.0")
 
-    /** The AI services in the order HQ tries them, from `backends.entries` of /api/settings. Empty when no order is configured. */
-    fun chain(settings: JSONObject?): List<ChainRow> {
+    /**
+     * The AI services in the order HQ tries them, from `backends.entries` of /api/settings. Empty when no order is configured.
+     * A backend that is switched off is left out: HQ skips it, and /api/usage/providers (which lists only the ones that are on)
+     * is how it is known when the settings do not say.
+     */
+    fun chain(settings: JSONObject?, providers: JSONObject? = null): List<ChainRow> {
         val b = settings.obj("backends") ?: return emptyList()
         if (!b.optBoolean("configured", true)) return emptyList()
+        val enabled = providers.arr("backends")?.let { rows -> rows.items().map { it.optString("backend") }.toSet() }
         val rows = b.arr("entries").items().mapNotNull { e ->
+            if (!e.optBoolean("enabled", true) || (enabled != null && enabled.isNotEmpty() && e.optString("name") !in enabled)) return@mapNotNull null
             val position = when {
                 e.optBoolean("primary") -> 1
                 e.has("fallback_position") && !e.isNull("fallback_position") -> e.optInt("fallback_position") + 2
@@ -86,10 +94,10 @@ object UsageWords {
     }
 
     /** The AI service that answers first, or null when HQ has no order set. */
-    fun primaryProvider(settings: JSONObject?): String? = chain(settings).firstOrNull()?.provider
+    fun primaryProvider(settings: JSONObject?, providers: JSONObject? = null): String? = chain(settings, providers).firstOrNull()?.provider
 
     /** The distinct services in the chain, first choice first. */
-    fun providers(settings: JSONObject?): List<String> = chain(settings).map { it.provider }.distinct()
+    fun providers(settings: JSONObject?, providers: JSONObject? = null): List<String> = chain(settings, providers).map { it.provider }.distinct()
 
     /** The provider row HQ built for one backend (status, balance, spend), from /api/usage/providers. */
     fun providerRow(providers: JSONObject?, backend: String): JSONObject? = providers.arr("backends").items().firstOrNull { it.optString("backend") == backend }
@@ -98,8 +106,8 @@ object UsageWords {
         "ok" -> "Working"
         "subscription" -> "Subscription"
         "no_key" -> "No key set"
-        "refused" -> "Key refused"
-        "error" -> "Not reachable"
+        "refused" -> "Balance not readable"
+        "error" -> "Usage not readable"
         "ledger_only" -> "No balance from the provider"
         "local" -> "Runs on this phone"
         else -> ""
@@ -150,7 +158,7 @@ object UsageWords {
 
     /** One chip candidate per service, in the order HQ tries them; the order of the web app's chip when no order is set. */
     private fun serviceChips(s: UsageSnapshot): List<BalanceChip> {
-        val chain = chain(s.settings)
+        val chain = chain(s.settings, s.providers)
         if (chain.isEmpty()) return listOfNotNull(copilotChip(s.copilot)) + s.providers.arr("backends").items().mapNotNull { r -> providerChip(r.optString("backend"), r) }
         return chain.distinctBy { it.provider }.mapNotNull { row -> if (row.provider == COPILOT) copilotChip(s.copilot) else providerChip(row.provider, providerRow(s.providers, row.backend)) }
     }
@@ -159,6 +167,8 @@ object UsageWords {
     fun copilotChip(c: JSONObject?): BalanceChip? {
         if (c == null || !c.optBoolean("active")) return null
         val q = c.obj("quota") ?: return null
+        // A plan that is not metered has a quota and no burn: "0 of 0" is no balance, so there is no chip for it.
+        if (c.obj("burn") == null) return null
         val left = q.num("remaining") ?: return null
         val total = q.num("entitlement")
         val rate = c.obj("burn").arr("windows").items().firstOrNull { it.optInt("window_hours") == SIX_HOURS }?.num("per_hour")
@@ -166,13 +176,26 @@ object UsageWords {
         return BalanceChip("Copilot ${compact(left)} left", title, ChipTarget.AiService)
     }
 
+    /** Money in the currency the provider reports it in: dollars read as "$4.20", any other currency keeps its code. */
+    fun money(amount: Double, currency: String?): String =
+        if (currency.isNullOrBlank() || currency.equals("USD", ignoreCase = true)) usd(amount) else String.format(Locale.ROOT, "%.2f %s", amount, currency.uppercase(Locale.ROOT))
+
+    /** What is left on a key with a spend cap or on the account's balance, as the provider says it; null when it says neither. */
+    fun leftText(reading: JSONObject?): String? {
+        reading.num("limit_remaining")?.let { return usd(it) }
+        val b = reading.obj("balance") ?: return null
+        return b.num("amount")?.let { money(it, b.text("currency")) }
+    }
+
+    /** What the service cost today: the provider's figure when it gives one, else HQ's own record when that is more than nothing. */
+    fun todayAmount(row: JSONObject?): Double? = row.obj("provider").obj("spend").num("today") ?: row.obj("ledger").num("today")?.takeIf { it > 0 }
+
     /** What is left on a service that has a balance or a cap, else what it cost today. */
     private fun providerChip(provider: String, row: JSONObject?): BalanceChip? {
-        val reading = row.obj("provider")
-        val left = reading.num("limit_remaining") ?: reading.obj("balance").num("amount")
-        val today = reading.obj("spend").num("today") ?: row.obj("ledger").num("today")
+        val left = leftText(row.obj("provider"))
+        val today = todayAmount(row)
         return when {
-            left != null -> BalanceChip("${short(provider)} ${usd(left)} left", "$provider: ${usd(left)} left", ChipTarget.AiService)
+            left != null -> BalanceChip("${short(provider)} $left left", "$provider: $left left", ChipTarget.AiService)
             today != null -> BalanceChip("${short(provider)} ${usd(today)} today", "$provider: ${usd(today)} today", ChipTarget.AiService)
             else -> null
         }

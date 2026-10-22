@@ -30,6 +30,8 @@ class UsageWordsTest {
     private fun providers(openrouterBalance: Double?, deepseekToday: Double = 0.42) = JSONObject(
         """{"generated_at":"2026-10-22T04:00:00Z","backends":[
           {"backend":"luna","adapter":"subscription","source":"ledger","status":"subscription","provider":null,"ledger":{"today":0.0,"week":0.0,"month":0.0,"unpriced_calls":12},"rate_limit":null,"note":"Billed through a subscription quota."},
+          {"backend":"copilot","adapter":"subscription","source":"ledger","status":"subscription","provider":null,"ledger":{"today":0.0,"week":0.0,"month":0.0,"unpriced_calls":2},"rate_limit":null,"note":"Billed through a subscription quota."},
+          {"backend":"gpt-6-astra","adapter":"subscription","source":"ledger","status":"subscription","provider":null,"ledger":{"today":0.0,"week":0.0,"month":0.0,"unpriced_calls":0},"rate_limit":null,"note":"Billed through a subscription quota."},
           {"backend":"haiku","adapter":"openrouter","source":"provider","status":"ok","provider":{"balance":${if (openrouterBalance == null) "null" else """{"amount":$openrouterBalance,"currency":"USD"}"""},"spend":{"today":0.31,"week":1.2,"month":4.8},"limit_remaining":null},"ledger":{"today":0.3,"week":1.1,"month":4.7,"unpriced_calls":0},"rate_limit":null,"note":null},
           {"backend":"deepseek","adapter":"deepseek","source":"ledger","status":"no_key","provider":null,"ledger":{"today":$deepseekToday,"week":1.0,"month":3.0,"unpriced_calls":0},"rate_limit":null,"note":"No key is set."}]}""",
     )
@@ -119,6 +121,56 @@ class UsageWordsTest {
         assertEquals("$0.0042", UsageWords.usd(0.0042))
         assertEquals("$12.50", UsageWords.usd(12.5))
         assertEquals("-", UsageWords.usd(null))
+    }
+
+    @Test fun aPlanThatIsNotMeteredHasNoChipAndTheNextServiceShows() {
+        // What the server sends for a seat with no credit allowance: a quota of zero and no burn.
+        val unmetered = JSONObject("""{"active":true,"quota":{"entitlement":0,"credits_used":0,"remaining":0,"percent_remaining":0,"overage_permitted":false},"note":"This plan is not metered."}""")
+        assertNull(UsageWords.copilotChip(unmetered))
+        assertEquals("OpenRouter $4.20 left", UsageWords.chip(UsageSnapshot(settings = settings, providers = providers(4.2), copilot = unmetered))!!.label)
+    }
+
+    @Test fun aBackendThatIsSwitchedOffIsNotPartOfTheOrder() {
+        val rowsWithoutLuna = JSONObject(providers(4.2).toString()).also { p ->
+            val kept = org.json.JSONArray(); val all = p.getJSONArray("backends")
+            for (i in 0 until all.length()) if (all.getJSONObject(i).getString("backend") != "luna") kept.put(all.getJSONObject(i))
+            p.put("backends", kept)
+        }
+        // The providers route lists only backends that are on, so a backend with no row there is off.
+        assertEquals("copilot", UsageWords.chain(settings, rowsWithoutLuna).first().backend)
+        assertEquals(4, UsageWords.chain(settings, rowsWithoutLuna).size)
+        // The settings may also say so themselves.
+        val off = JSONObject(settings.toString().replace("\"name\":\"luna\",", "\"name\":\"luna\",\"enabled\":false,"))
+        assertEquals("copilot", UsageWords.chain(off).first().backend)
+        assertEquals(4, UsageWords.chain(off).size)
+    }
+
+    @Test fun aServiceWithNothingRecordedDoesNotHideTheNextOnesBalance() {
+        val s = JSONObject("""{"backends":{"configured":true,"primary":"deepseek","fallbacks":["haiku"],"entries":[${entry("deepseek", "api.deepseek.com", "deepseek-flash", primary = true)},${entry("haiku", "openrouter.ai", "x", fallback = 0)}]}}""")
+        val p = JSONObject("""{"backends":[{"backend":"deepseek","adapter":"deepseek","status":"no_key","provider":null,"ledger":{"today":0.0,"week":0.0,"month":0.0}},{"backend":"haiku","adapter":"openrouter","status":"ok","provider":{"balance":{"amount":4.2,"currency":"USD"},"spend":{"today":0.31},"limit_remaining":null},"ledger":{"today":0.3}}]}""")
+        assertEquals("OpenRouter $4.20 left", UsageWords.chip(UsageSnapshot(settings = s, providers = p))!!.label)
+    }
+
+    @Test fun aBalanceInAnotherCurrencyKeepsItsCode() {
+        val s = JSONObject("""{"backends":{"configured":true,"primary":"deepseek","fallbacks":[],"entries":[${entry("deepseek", "api.deepseek.com", "deepseek-flash", primary = true)}]}}""")
+        val p = JSONObject("""{"backends":[{"backend":"deepseek","adapter":"deepseek","status":"ok","provider":{"balance":{"amount":50.0,"currency":"CNY"},"spend":null,"limit_remaining":null},"ledger":{"today":0.0}}]}""")
+        assertEquals("DeepSeek 50.00 CNY left", UsageWords.chip(UsageSnapshot(settings = s, providers = p))!!.label)
+        assertEquals("$4.20", UsageWords.money(4.2, "USD"))
+        assertEquals("$4.20", UsageWords.money(4.2, null))
+    }
+
+    @Test fun aGatewayIsNamedByItsHostAndALocalEndpointWithAPortIsThisPhone() {
+        assertEquals("Kimi Code", UsageWords.providerName("api.kimi.com", "anthropic-compatible"))
+        assertEquals("Anthropic", UsageWords.providerName("api.anthropic.com", "anthropic-compatible"))
+        assertEquals("Anthropic", UsageWords.providerName(null, "anthropic-compatible"))
+        assertEquals("This phone", UsageWords.providerName("localhost:11434", "openai-compatible"))
+        assertEquals("This phone", UsageWords.providerName("127.0.0.1:8080", "openai-compatible"))
+        assertEquals("This phone", UsageWords.providerName("[::1]:8080", "openai-compatible"))
+    }
+
+    @Test fun aFailedUsageReadIsNotSaidAsIfTheAiWereDown() {
+        assertEquals("Balance not readable", UsageWords.statusWords("refused"))
+        assertEquals("Usage not readable", UsageWords.statusWords("error"))
     }
 
     @Test fun aStatusIsSaidInPlainWords() {

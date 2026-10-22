@@ -264,12 +264,12 @@ private fun Keys(ui: SettingsUi) {
         }
         Label("Your keys")
         Group {
-            SettingsWords.keyRows(s, ui.snap.copilot).forEachIndexed { i, (name, set, source) ->
+            SettingsWords.keyRows(s, ui.snap.copilot, ui.snap.providers).forEachIndexed { i, (name, set, source) ->
                 if (i > 0) Divider()
                 Row(Modifier.fillMaxWidth().heightIn(min = 56.dp).padding(horizontal = 16.dp, vertical = 8.dp), horizontalArrangement = Arrangement.spacedBy(12.dp), verticalAlignment = Alignment.CenterVertically) {
                     Column(Modifier.weight(1f)) {
                         Text(name, style = HqType.BodyBold, color = Mts.Ink)
-                        Text(if (set) (if (source == "env") "Set outside the app" else "Set") else "Not set", style = HqType.BodySm, color = if (set) Mts.BrandGreen else Mts.InkMuted)
+                        Text(if (set) (if (source == "env") "Set outside the app" else "Set") else if (source == "unreadable") "Could not be checked" else "Not set", style = HqType.BodySm, color = if (set) Mts.BrandGreen else Mts.InkMuted)
                     }
                     if (set) Icon(HqIcons.CheckSmall, null, Modifier.size(22.dp), tint = Mts.BrandGreen)
                 }

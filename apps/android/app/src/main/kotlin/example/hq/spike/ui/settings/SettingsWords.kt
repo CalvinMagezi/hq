@@ -50,10 +50,10 @@ object SettingsWords {
 
     fun configuredKeys(s: JSONObject?): List<String> = s.arr("provider_keys").items().filter { it.optBoolean("configured") && it.optString("name") !in TOOL_KEYS }.map { it.optString("name") }
 
-    fun keysStatus(s: JSONObject?): String {
+    fun keysStatus(s: JSONObject?, providers: JSONObject? = null): String {
         if (s == null) return NOT_ANSWERED
         // The AI HQ uses is the first one in its chain, whichever keys are stored: a stored key is not a choice.
-        val services = UsageWords.providers(s)
+        val services = UsageWords.providers(s, providers)
         if (services.isNotEmpty()) return "${services.first()} · ${services.size} ${if (services.size == 1) "service" else "services"}"
         val keys = configuredKeys(s)
         if (keys.isEmpty()) return "No key yet"
@@ -137,7 +137,7 @@ object SettingsWords {
         HomeGroup("This phone", phone),
         HomeGroup(
             "Your accounts", listOf(
-                HomeRow(SettingsPage.Keys, "key", "AI service and keys", keysStatus(snap.settings)),
+                HomeRow(SettingsPage.Keys, "key", "AI service and keys", keysStatus(snap.settings, snap.providers)),
                 HomeRow(SettingsPage.Messaging, "chat", "Messaging apps", messagingStatus(snap.chatApps)),
                 HomeRow(SettingsPage.Claude, "plug", "Connect Claude", connectorStatus(snap.connector, now)),
                 HomeRow(SettingsPage.Devices, "phone", "Other devices", devicesStatus(snap.devices)),
@@ -220,14 +220,16 @@ object SettingsWords {
     // ------------------------------------------------------------ AI service and keys
 
     /** The stored API keys, with the GitHub Copilot plan first when HQ uses it: its token is set outside the key list, so the plan answering is what says it works. */
-    fun keyRows(s: JSONObject?, copilot: JSONObject? = null): List<Triple<String, Boolean, String?>> {
+    fun keyRows(s: JSONObject?, copilot: JSONObject? = null, providers: JSONObject? = null): List<Triple<String, Boolean, String?>> {
         val stored = s.arr("provider_keys").items().map { Triple(it.optString("name"), it.optBoolean("configured"), it.text("source")) }
-        val usesCopilot = UsageWords.providers(s).contains(UsageWords.COPILOT)
-        return if (usesCopilot) listOf(Triple(UsageWords.COPILOT, copilot?.optBoolean("active") == true, "env")) + stored else stored
+        val usesCopilot = UsageWords.providers(s, providers).contains(UsageWords.COPILOT)
+        // The plan answering is what says the token works. When it cannot be read, that is said, not "Not set".
+        val known = copilot.obj("quota") != null
+        return if (usesCopilot) listOf(Triple(UsageWords.COPILOT, known, if (known) "env" else "unreadable")) + stored else stored
     }
 
     /** The AI services in the order HQ tries them, each with its model and whether the provider says it works. */
-    fun aiRows(snap: SettingsSnapshot): List<FactRow> = UsageWords.chain(snap.settings).map { r ->
+    fun aiRows(snap: SettingsSnapshot): List<FactRow> = UsageWords.chain(snap.settings, snap.providers).map { r ->
         val status = UsageWords.statusWords(UsageWords.providerRow(snap.providers, r.backend)?.optString("status"))
         FactRow("${r.position} · ${r.provider}", if (r.first) "First choice" else "If the one before is down", listOf(r.model, status).filter { it.isNotBlank() }.joinToString(" · ").ifBlank { null })
     }
@@ -236,7 +238,7 @@ object SettingsWords {
 
     /** What each AI service in use has left and what it cost: credits for a plan, a balance where the provider gives one, else HQ's own record. */
     fun serviceRows(snap: SettingsSnapshot): List<FactRow> {
-        val chain = UsageWords.chain(snap.settings)
+        val chain = UsageWords.chain(snap.settings, snap.providers)
         val services: List<ChainRow> = if (chain.isNotEmpty()) chain.distinctBy { it.provider } else snap.providers.arr("backends").items().map {
             val name = it.optString("backend")
             ChainRow(name, UsageWords.providerName(null, null, name), "", 0)
@@ -249,8 +251,9 @@ object SettingsWords {
         val left = q?.takeIf { c?.optBoolean("active") == true }?.optDouble("remaining", Double.NaN)?.takeIf { it.isFinite() }
         val total = q?.optDouble("entitlement", Double.NaN)?.takeIf { it.isFinite() }
         val value = when {
-            left != null -> "${UsageWords.compact(left)}${total?.let { " of ${UsageWords.compact(it)}" }.orEmpty()} credits left"
-            c?.optBoolean("unavailable") == true -> "Not readable"
+            left != null && c?.has("burn") == true -> "${UsageWords.compact(left)}${total?.let { " of ${UsageWords.compact(it)}" }.orEmpty()} credits left"
+            q != null && c?.optBoolean("active") == true -> "Not metered"
+            c?.optBoolean("unavailable") == true || c?.has("error") == true -> "Not readable"
             else -> "Not measured"
         }
         val reset = q.text("reset_at")?.let { iso(it)?.let { t -> "Resets ${RESET_DAY.format(t.atZone(java.time.ZoneId.systemDefault()))}" } }
@@ -261,11 +264,11 @@ object SettingsWords {
         val reading = row.obj("provider")
         val ledger = row.obj("ledger")
         fun num(o: JSONObject?, name: String): Double? = o?.takeIf { it.has(name) && !it.isNull(name) }?.optDouble(name)?.takeIf { it.isFinite() }
-        val left = num(reading, "limit_remaining") ?: num(reading.obj("balance"), "amount")
+        val left = UsageWords.leftText(reading)
         val spend = reading.obj("spend") ?: ledger
-        val today = num(spend, "today")
+        val today = UsageWords.todayAmount(row)
         val value = when {
-            left != null -> "${UsageWords.usd(left)} left"
+            left != null -> "$left left"
             today != null -> "${UsageWords.usd(today)} today"
             else -> UsageWords.statusWords(row?.optString("status")).ifBlank { "Not measured" }
         }

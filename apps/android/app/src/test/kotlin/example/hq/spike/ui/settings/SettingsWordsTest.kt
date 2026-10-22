@@ -43,6 +43,7 @@ class SettingsWordsTest {
     private val providerRows = JSONObject(
         """{"backends":[
         {"backend":"luna","adapter":"subscription","source":"ledger","status":"subscription","provider":null,"ledger":{"today":0.0,"week":0.0,"month":0.0}},
+        {"backend":"copilot","adapter":"subscription","source":"ledger","status":"subscription","provider":null,"ledger":{"today":0.0,"week":0.0,"month":0.0}},
         {"backend":"haiku","adapter":"openrouter","source":"provider","status":"ok","provider":{"balance":{"amount":4.2,"currency":"USD"},"spend":{"today":0.31,"week":1.2,"month":4.8},"limit_remaining":null},"ledger":{"today":0.3,"week":1.1,"month":4.7}},
         {"backend":"deepseek","adapter":"deepseek","source":"ledger","status":"no_key","provider":null,"ledger":{"today":0.42,"week":1.0,"month":3.0}}]}""",
     )
@@ -73,6 +74,25 @@ class SettingsWordsTest {
         assertEquals("Today $0.31 · This week $1.20 · This month $4.80", rows[1].text)
         assertEquals("$0.42 today", rows[2].value)
         assertEquals("Today $0.42 · This week $1.00 · This month $3.00 (HQ's own record)", rows[2].text)
+    }
+
+    @Test fun aCopilotTokenWhoseUsageCannotBeReadIsNotShownAsNotSet() {
+        val unreadable = JSONObject("""{"active":true,"unavailable":true,"note":"GitHub refused the usage read"}""")
+        val row = SettingsWords.keyRows(onCopilot, unreadable).first()
+        assertEquals(Triple("GitHub Copilot", false, "unreadable"), row)
+        assertEquals(Triple("GitHub Copilot", false, "unreadable"), SettingsWords.keyRows(onCopilot, null).first())
+    }
+
+    @Test fun aPlanWithNoCreditAllowanceSaysItIsNotMetered() {
+        val unmetered = JSONObject("""{"active":true,"quota":{"entitlement":0,"remaining":0},"note":"This plan is not metered."}""")
+        assertEquals("Not metered", SettingsWords.serviceRows(snapOnCopilot.copy(copilot = unmetered)).first().value)
+        assertEquals(Triple("GitHub Copilot", true, "env"), SettingsWords.keyRows(onCopilot, unmetered).first())
+    }
+
+    @Test fun aServiceReportingChinaYuanIsNotShownInDollars() {
+        val cny = JSONObject("""{"backends":[{"backend":"deepseek","adapter":"deepseek","status":"ok","provider":{"balance":{"amount":50.0,"currency":"CNY"},"spend":null,"limit_remaining":null},"ledger":{"today":0.0}}]}""")
+        val s = JSONObject("""{"backends":{"configured":true,"primary":"deepseek","fallbacks":[],"entries":[{"name":"deepseek","kind":"openai-compatible","model":"m","endpoint_host":"api.deepseek.com","primary":true,"fallback_position":null}]}}""")
+        assertEquals("50.00 CNY left", SettingsWords.serviceRows(SettingsSnapshot(settings = s, providers = cny)).first().value)
     }
 
     @Test fun aCopilotPlanThatCannotBeReadSaysSoInsteadOfGuessing() {
