@@ -8,7 +8,7 @@ use std::time::Duration;
 /// 45 days and 6.
 const RENEW_NUMERATOR: i64 = 2;
 const RENEW_DENOMINATOR: i64 = 3;
-/// The loop wakes at least this often, so a clock change or a replaced file is noticed.
+/// The loop wakes at least this often, so a clock change is noticed.
 pub(crate) const MAX_SLEEP: Duration = Duration::from_secs(6 * 60 * 60);
 /// After a failed order: 15 minutes, then longer. The CA allows 5 failed validations per name
 /// per hour, so the first retry must not come sooner than the limit refills.
@@ -25,6 +25,17 @@ const RATE_LIMIT_DEFAULT_WAIT: Duration = Duration::from_secs(6 * 60 * 60);
 const RATE_LIMIT_MIN_WAIT: Duration = Duration::from_secs(60);
 /// CAs' own limits refill within a week (Let's Encrypt: 7 days); longer is a mistake.
 const RATE_LIMIT_MAX_WAIT: Duration = Duration::from_secs(7 * 24 * 60 * 60);
+
+/// After an order succeeds, a certificate that is already due for renewal (a device clock far
+/// off, or a certificate with no life) must not start the next order at once: that would run
+/// the CA's weekly limit out in minutes. The next order waits this long.
+const SUCCESS_COOLDOWN: Duration = Duration::from_secs(6 * 60 * 60);
+
+/// When a new order may start after a successful one: `None` when the certificate is healthy.
+pub(crate) fn hold_after_success(now: i64, not_before: i64, not_after: i64) -> Option<i64> {
+    (renew_at(not_before, not_after) <= now)
+        .then(|| now + i64::try_from(SUCCESS_COOLDOWN.as_secs()).unwrap_or(i64::MAX))
+}
 
 /// The moment a certificate valid from `not_before` to `not_after` is due for renewal.
 pub(crate) fn renew_at(not_before: i64, not_after: i64) -> i64 {
@@ -85,6 +96,23 @@ mod tests {
             renew_at(900, 100),
             900,
             "a window that ends before it starts is due at once"
+        );
+    }
+
+    #[test]
+    fn a_new_certificate_that_is_already_due_waits_before_the_next_order() {
+        assert_eq!(hold_after_success(100, 0, 90 * DAY), None);
+        assert_eq!(
+            hold_after_success(100 * DAY, 0, 90 * DAY),
+            Some(100 * DAY + 6 * 60 * 60)
+        );
+        assert!(
+            hold_after_success(1000, 500, 500).is_some(),
+            "no life at all"
+        );
+        assert!(
+            hold_after_success(1000, 900, 100).is_some(),
+            "ends before it starts"
         );
     }
 

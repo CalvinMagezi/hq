@@ -20,10 +20,16 @@ pub(crate) struct Issued {
 pub(crate) fn issued_from_der(
     chain: Vec<CertificateDer<'static>>,
     pkcs8: &[u8],
+    host: &str,
 ) -> Result<Issued, TlsError> {
     let leaf = chain
         .first()
         .ok_or_else(|| TlsError::Certificate("the chain is empty".into()))?;
+    if !names_host(leaf, host)? {
+        return Err(TlsError::Certificate(
+            "the certificate is not for the connector's name".into(),
+        ));
+    }
     let (not_before, not_after) = validity(leaf)?;
     let signing = aws_lc_rs::sign::any_supported_type(&PrivateKeyDer::Pkcs8(
         PrivatePkcs8KeyDer::from(pkcs8.to_vec()),
@@ -37,6 +43,21 @@ pub(crate) fn issued_from_der(
         not_before,
         not_after,
     })
+}
+
+/// Whether the certificate names `host` among its DNS names.
+fn names_host(cert: &CertificateDer<'_>, host: &str) -> Result<bool, TlsError> {
+    let (_, parsed) = x509_parser::parse_x509_certificate(cert.as_ref())
+        .map_err(|e| TlsError::Certificate(format!("the certificate does not parse: {e}")))?;
+    let Some(san) = parsed
+        .subject_alternative_name()
+        .map_err(|e| TlsError::Certificate(format!("the certificate's names do not parse: {e}")))?
+    else {
+        return Ok(false);
+    };
+    Ok(san.value.general_names.iter().any(|name| {
+        matches!(name, x509_parser::extensions::GeneralName::DNSName(n) if n.eq_ignore_ascii_case(host))
+    }))
 }
 
 /// A certificate's `notBefore` and `notAfter`, unix seconds.
@@ -219,9 +240,28 @@ mod tests {
             .self_signed(&a)
             .unwrap();
         let chain = vec![cert.der().clone()];
-        assert!(issued_from_der(chain.clone(), &a.serialize_der()).is_ok());
-        let err = issued_from_der(chain, &b.serialize_der()).err().unwrap();
+        assert!(issued_from_der(chain.clone(), &a.serialize_der(), "hq.example.com").is_ok());
+        let err = issued_from_der(chain, &b.serialize_der(), "hq.example.com")
+            .err()
+            .unwrap();
         assert!(err.to_string().contains("not for this private key"));
+    }
+
+    #[test]
+    fn a_chain_for_another_name_is_refused() {
+        let pair = rcgen::KeyPair::generate_for(&rcgen::PKCS_ECDSA_P256_SHA256).unwrap();
+        let cert = rcgen::CertificateParams::new(vec!["other.example.com".to_string()])
+            .unwrap()
+            .self_signed(&pair)
+            .unwrap();
+        let err = issued_from_der(
+            vec![cert.der().clone()],
+            &pair.serialize_der(),
+            "hq.example.com",
+        )
+        .err()
+        .unwrap();
+        assert!(err.to_string().contains("not for the connector's name"));
     }
 
     #[test]

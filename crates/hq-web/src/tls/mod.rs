@@ -103,6 +103,7 @@ struct Progress {
 /// The connector's TLS door: the acceptor and the machinery that keeps its certificate fresh.
 pub struct ConnectorTls {
     host: String,
+    directory_url: String,
     acceptor: ConnectorAcceptor,
     live: Arc<LiveCert>,
     #[cfg(test)]
@@ -145,6 +146,13 @@ impl ConnectorTls {
         if connector.public != format!("https://{}", tls.authority) {
             return Err("mcp_connector.tls is for a different origin than the connector".into());
         }
+        if connector.consent == connector.public {
+            return Err(
+                "mcp_connector.tls needs authorize_url: the consent page is never served on the \
+                 public name this door answers on"
+                    .into(),
+            );
+        }
         let checking = state.clone();
         let live_grant = Arc::new(move |token: &str| {
             checking
@@ -171,6 +179,7 @@ impl ConnectorTls {
 
     pub(crate) fn from_parts(parts: Parts) -> Result<Self, TlsError> {
         let host = parts.acme.host.to_ascii_lowercase();
+        let directory_url = parts.acme.directory_url.clone();
         let live = Arc::new(LiveCert::new(&host));
         let challenge = Arc::new(ChallengeSlot::new(&host));
         let acceptor = ConnectorAcceptor::new(
@@ -188,6 +197,7 @@ impl ConnectorTls {
         );
         let this = Self {
             host,
+            directory_url,
             acceptor,
             live,
             #[cfg(test)]
@@ -221,6 +231,11 @@ impl ConnectorTls {
     }
 
     #[cfg(test)]
+    pub(crate) fn acceptor(&self) -> &ConnectorAcceptor {
+        &self.acceptor
+    }
+
+    #[cfg(test)]
     pub(crate) fn acceptor_mut(&mut self) -> &mut ConnectorAcceptor {
         &mut self.acceptor
     }
@@ -251,40 +266,68 @@ impl ConnectorTls {
     }
 
     fn finish_order(&self, outcome: Result<Fresh, TlsError>) {
-        let mut p = self.progress.lock().unwrap_or_else(|e| e.into_inner());
-        match outcome {
-            Ok(fresh) => {
-                let path = self.store.issued_path(&self.host);
-                if let Err(e) = self.store.write(&path, fresh.bundle.expose()) {
-                    // Serving matters more than remembering: the next start orders again.
-                    tracing::warn!("connector tls: the new certificate was not saved: {e}");
+        // Disk first and outside the lock: a save is not a reason to hold up `status()`.
+        if let Ok(fresh) = &outcome {
+            let path = self.store.issued_path(&self.host, &self.directory_url);
+            if let Err(e) = self.store.write(&path, fresh.bundle.expose()) {
+                // Serving matters more than remembering: the next start orders again.
+                tracing::warn!("connector tls: the new certificate was not saved: {e}");
+            }
+        }
+        let remembered = {
+            let mut p = self.progress.lock().unwrap_or_else(|e| e.into_inner());
+            match outcome {
+                Ok(fresh) => {
+                    let Issued {
+                        key,
+                        not_before,
+                        not_after,
+                    } = fresh.issued;
+                    p.validity = Some((not_before, not_after));
+                    self.live.install(key);
+                    p.state = TlsState::Valid;
+                    p.failures = 0;
+                    p.not_before_retry = renew::hold_after_success(now(), not_before, not_after);
+                    p.last_error = None;
+                    tracing::info!(host = %self.host, not_after, "connector tls: certificate installed");
                 }
-                p.validity = Some((fresh.issued.not_before, fresh.issued.not_after));
-                self.live.install(fresh.issued.key);
-                p.state = TlsState::Valid;
-                p.failures = 0;
-                p.not_before_retry = None;
-                p.last_error = None;
-                tracing::info!(host = %self.host, not_after = fresh.issued.not_after, "connector tls: certificate installed");
+                Err(TlsError::RateLimited {
+                    retry_after,
+                    detail,
+                }) => {
+                    let wait = renew::rate_limit_wait(retry_after);
+                    p.state = TlsState::RateLimited;
+                    p.not_before_retry = Some(now() + wait_secs(wait));
+                    p.last_error = Some(format!("the CA's rate limit was reached: {detail}"));
+                    tracing::warn!(host = %self.host, wait_secs = wait.as_secs(), "connector tls: rate limited");
+                }
+                Err(e) => {
+                    p.failures += 1;
+                    let wait = renew::backoff(p.failures);
+                    p.state = TlsState::Failed;
+                    p.not_before_retry = Some(now() + wait_secs(wait));
+                    p.last_error = Some(e.to_string());
+                    tracing::warn!(host = %self.host, wait_secs = wait.as_secs(), "connector tls: order failed: {e}");
+                }
             }
-            Err(TlsError::RateLimited {
-                retry_after,
-                detail,
-            }) => {
-                let wait = renew::rate_limit_wait(retry_after);
-                p.state = TlsState::RateLimited;
-                p.not_before_retry = Some(now() + wait_secs(wait));
-                p.last_error = Some(format!("the CA's rate limit was reached: {detail}"));
-                tracing::warn!(host = %self.host, wait_secs = wait.as_secs(), "connector tls: rate limited");
-            }
-            Err(e) => {
-                p.failures += 1;
-                let wait = renew::backoff(p.failures);
-                p.state = TlsState::Failed;
-                p.not_before_retry = Some(now() + wait_secs(wait));
-                p.last_error = Some(e.to_string());
-                tracing::warn!(host = %self.host, wait_secs = wait.as_secs(), "connector tls: order failed: {e}");
-            }
+            Remembered::of(&p)
+        };
+        self.remember(&remembered);
+    }
+
+    /// Keeps the wait and the failure count across a restart, so a process that starts over and
+    /// over (a phone's service being restarted) does not order each time and trip the CA's limits.
+    fn remember(&self, remembered: &Remembered) {
+        let path = self.store.retry_path(&self.host, &self.directory_url);
+        if remembered.failures == 0 && remembered.not_before_retry.is_none() {
+            self.store.remove(&path);
+            return;
+        }
+        let saved = serde_json::to_vec(remembered)
+            .map_err(|e| TlsError::Store(format!("the order state: {e}")))
+            .and_then(|json| self.store.write(&path, &json));
+        if let Err(e) = saved {
+            tracing::warn!("connector tls: the order state was not saved: {e}");
         }
     }
 
@@ -307,14 +350,17 @@ impl ConnectorTls {
         }
     }
 
-    /// Picks up the certificate a previous run saved, so a restart serves at once instead of
-    /// ordering again (the CA allows five certificates a week for one name).
+    /// Picks up what a previous run saved: the certificate, so a restart serves at once instead
+    /// of ordering again (the CA allows five certificates a week for one name), and the wait
+    /// after a failure or a rate limit.
     fn load_stored(&self) {
-        let path = self.store.issued_path(&self.host);
-        let loaded = self
-            .store
-            .read(&path)
-            .and_then(|saved| saved.map(|s| issued_from_bundle(&s)).transpose());
+        let path = self.store.issued_path(&self.host, &self.directory_url);
+        let loaded = self.store.read(&path).and_then(|saved| {
+            saved
+                .map(|s| issued_from_bundle(&s, &self.host))
+                .transpose()
+        });
+        let mut p = self.progress.lock().unwrap_or_else(|e| e.into_inner());
         match loaded {
             Ok(Some(Issued {
                 key,
@@ -322,7 +368,6 @@ impl ConnectorTls {
                 not_after,
             })) if not_after > now() => {
                 self.live.install(key);
-                let mut p = self.progress.lock().unwrap_or_else(|e| e.into_inner());
                 p.validity = Some((not_before, not_after));
                 p.state = TlsState::Valid;
             }
@@ -330,6 +375,45 @@ impl ConnectorTls {
             Ok(Some(_)) => tracing::info!("connector tls: the saved certificate has expired"),
             Ok(None) => {}
             Err(e) => tracing::warn!("connector tls: the saved certificate is unusable: {e}"),
+        }
+        let retry = self.store.retry_path(&self.host, &self.directory_url);
+        let remembered = self
+            .store
+            .read(&retry)
+            .ok()
+            .flatten()
+            .and_then(|saved| serde_json::from_slice::<Remembered>(saved.expose()).ok());
+        if let Some(r) = remembered.filter(|r| r.not_before_retry.is_some_and(|t| t > now())) {
+            p.failures = r.failures;
+            p.not_before_retry = r.not_before_retry;
+            p.last_error = r.last_error;
+            p.state = if r.rate_limited {
+                TlsState::RateLimited
+            } else if r.failures > 0 {
+                TlsState::Failed
+            } else {
+                p.state
+            };
+        }
+    }
+}
+
+/// What survives a restart of the order loop.
+#[derive(Serialize, serde::Deserialize)]
+struct Remembered {
+    failures: u32,
+    not_before_retry: Option<i64>,
+    rate_limited: bool,
+    last_error: Option<String>,
+}
+
+impl Remembered {
+    fn of(p: &Progress) -> Self {
+        Self {
+            failures: p.failures,
+            not_before_retry: p.not_before_retry,
+            rate_limited: p.state == TlsState::RateLimited,
+            last_error: p.last_error.clone(),
         }
     }
 }

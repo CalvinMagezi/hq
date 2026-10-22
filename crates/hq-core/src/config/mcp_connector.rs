@@ -44,6 +44,12 @@ pub struct ConnectorTlsConfig {
     /// the CA none.
     #[serde(default)]
     pub contact_email: Option<String>,
+
+    /// Agreement to the CA's subscriber agreement, which registering an ACME account accepts on
+    /// the owner's behalf. Let's Encrypt's is at <https://letsencrypt.org/repository/>. HQ
+    /// registers no account until this is `true`.
+    #[serde(default)]
+    pub agree_to_ca_terms: bool,
 }
 
 /// The ACME directory a bare `letsencrypt` means.
@@ -95,10 +101,22 @@ impl McpConnectorConfig {
         let connector = self
             .settings(web_auth_token)?
             .ok_or("mcp_connector.tls needs mcp_connector.enabled")?;
+        if !self.tls.agree_to_ca_terms {
+            return Err(
+                "mcp_connector.tls needs agree_to_ca_terms: true, because getting a certificate \
+                 registers an account that accepts the CA's subscriber agreement"
+                    .into(),
+            );
+        }
         let url = reqwest::Url::parse(&connector.public)
             .map_err(|e| format!("mcp_connector.public_url: {e}"))?;
+        // The CA validates the name on port 443 only, and a name ending in a dot never matches
+        // the server name a client sends.
+        if url.port().is_some() {
+            return Err("mcp_connector.tls needs public_url on the default https port".into());
+        }
         let host = match url.domain() {
-            Some(d) if d.contains('.') => d.to_string(),
+            Some(d) if d.contains('.') && !d.ends_with('.') => d.to_string(),
             _ => {
                 return Err(
                     "mcp_connector.tls needs public_url to name a domain: a certificate is \
@@ -243,6 +261,7 @@ mod tests {
     fn tls_on() -> ConnectorTlsConfig {
         ConnectorTlsConfig {
             enabled: true,
+            agree_to_ca_terms: true,
             ..Default::default()
         }
     }
@@ -347,13 +366,26 @@ mod tests {
         assert_eq!(t.authority, "dev1.edge.example.com");
         assert_eq!(t.directory_url, ACME_DIRECTORY_LETSENCRYPT);
         assert_eq!(t.contact_email, None);
+    }
 
-        let with_port = with_tls("https://hq.example.com:8443", tls_on());
-        let t = with_port.tls_settings(Some("t")).unwrap().unwrap();
-        assert_eq!(
-            (t.host.as_str(), t.authority.as_str()),
-            ("hq.example.com", "hq.example.com:8443")
-        );
+    #[test]
+    fn the_ca_is_only_asked_once_its_terms_are_agreed_to() {
+        let mut tls = tls_on();
+        tls.agree_to_ca_terms = false;
+        let err = with_tls("https://hq.example.com", tls)
+            .tls_settings(Some("t"))
+            .unwrap_err();
+        assert!(err.contains("agree_to_ca_terms"), "{err}");
+    }
+
+    #[test]
+    fn a_name_the_ca_cannot_validate_or_a_client_cannot_match_is_refused() {
+        for bad in ["https://hq.example.com:8443", "https://hq.example.com./"] {
+            assert!(
+                with_tls(bad, tls_on()).tls_settings(Some("t")).is_err(),
+                "{bad}"
+            );
+        }
     }
 
     #[test]

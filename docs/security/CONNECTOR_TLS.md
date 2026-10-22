@@ -6,6 +6,10 @@ byte stream a public forwarder hands it. The forwarder (`hq edge`, built separat
 TLS server name to choose a device and passes the bytes on. It cannot read them, and no key
 is ever on it. Code: `crates/hq-web/src/tls/`. Off by default.
 
+**Status.** The door is a library surface: nothing in `hq start` feeds it streams yet. That is the
+connector-on-the-bridge work, once the forwarder and the pairing bridge exist. Until then
+`mcp_connector.tls.enabled` is validated and does nothing; the tests drive the door directly.
+
 ```
 claude.ai ──TLS──▶ forwarder (SNI only) ──one stream per connection──▶ device
                                                                          │
@@ -18,21 +22,33 @@ claude.ai ──TLS──▶ forwarder (SNI only) ──one stream per connectio
 mcp_connector:
   enabled: true
   public_url: https://phone.edge.example.com   # the name the certificate is for
+  authorize_url: https://hq.example.ts.net     # required: the consent page is never on this name
   tls:
     enabled: true
+    agree_to_ca_terms: true                    # required: see below
     acme_directory: letsencrypt                # letsencrypt | letsencrypt-staging | https URL
     contact_email: null                        # optional; the CA may write to it about the certificate
 ```
 
-- `tls.enabled` needs `mcp_connector.enabled` and a `public_url` that is a domain name (not an
-  address, not a single label). The certificate name is that host; there is no second setting.
+- `tls.enabled` needs `mcp_connector.enabled` and a `public_url` that is a domain name on the
+  default https port (not an address, not a single label, no trailing dot, because the CA
+  validates on port 443 and a client's server name never ends in a dot). The certificate name is
+  that host; there is no second setting.
+- `authorize_url` must name a different origin. `/oauth/authorize` answers only on the consent
+  origin, and with no `authorize_url` that origin is the public name itself. `for_state` refuses
+  that configuration.
+- `agree_to_ca_terms: true` is required because registering an ACME account accepts the CA's
+  subscriber agreement for the owner (Let's Encrypt's: <https://letsencrypt.org/repository/>).
+  HQ registers no account until it is set.
 - Refused under `profile: lite`, like the connector. `ConnectorTls::for_state` returns the
   reason and the door is not built.
-- State is in `<vault>/_data/connector_tls/`: `account-<hash of the directory>.json` (the ACME
-  account key) and `<name>.pem` (the certificate key and chain). The directory is `0700` and the
-  files `0600`, created with that mode from the first byte and replaced by rename. Neither is
-  ever logged or shown: the types that hold them print as nothing, and the status carries only
-  the name, the expiry and a one-line reason.
+- State is in `<vault>/_data/connector_tls/`, all `0600` in a `0700` directory, created with that
+  mode from the first byte and replaced by rename: `account-<tag>.json` (the ACME account key),
+  `<name>-<tag>.pem` (the certificate key and chain) and `<name>-<tag>.retry.json` (the failure
+  count and the wait before the next order, not secret). `<tag>` is a hash of the ACME directory,
+  so a staging certificate is never found after a switch to production. Neither secret file is
+  ever logged or shown: the types that hold them print as nothing, and the status carries only the
+  name, the expiry and a one-line reason.
 - The module opens no listener. Whoever owns the stream source (the edge bridge) calls
   `ConnectorTls::serve(stream)` once per connection and spawns `ConnectorTls::run()` once.
   `run()` orders a certificate when there is none and again two thirds of the way through each
@@ -41,48 +57,52 @@ mcp_connector:
 ## What the forwarder must hand over
 
 - The raw bytes of the client's TCP connection, from the first byte of the ClientHello, with
-  nothing prepended (no PROXY header) and nothing stripped.
+  nothing prepended (no PROXY header) and nothing stripped. (The W1 forwarder's interface note
+  says the same: one iroh stream per TCP connection, no preamble, no framing.)
 - `acme-tls/1` connections unchanged. The CA validates the device's name by connecting to it on
   port 443 offering only that ALPN; a forwarder that routes on SNI alone passes it through.
 - One stream per client connection, closed when either side closes.
 
 The device never learns the client's address. Abuse limits per client address therefore belong
-on the forwarder; the device bounds itself (below).
+on the forwarder; the device bounds itself (below), but a flood of silent connections can still
+fill those bounds for as long as it lasts. The certificate is renewed from two thirds of its life,
+so weeks of retries stand between such a flood and an expired certificate.
 
 ## What the door does with a connection
 
 | Step | Rule |
 |---|---|
-| ClientHello | Read before any certificate is chosen. A server name that is not the connector's, or none, is dropped. A hello with no certificate installed yet is dropped. |
-| `acme-tls/1` | Offered alone, for the connector's name, with a challenge pending: the challenge certificate (self-signed, critical `acmeIdentifier` extension), handshake, then the stream is shut down without reading a byte of HTTP. With no challenge pending, dropped. Offered beside `h2` or `http/1.1`, it is a web client and gets the issued certificate. |
-| Handshake | TLS 1.2 and 1.3 on rustls with the aws-lc provider, named explicitly because the process links two. ALPN `h2`, `http/1.1`. Hello and handshake share a 10 s limit; a peer that opens a stream and says nothing is closed. |
-| Request | Request line and headers within 10 s; a request, body and handler together, within 120 s; a connection lives at most 15 minutes; HTTP/2 keep-alive pings, at most 32 streams. At most 64 connections at once; the 65th is dropped, not queued. |
+| ClientHello | At most 256 connections are in this stage at once, 10 s each. The name is read before any certificate is chosen. A server name that is not the connector's, or none, is dropped. A hello with no certificate installed yet is dropped. |
+| `acme-tls/1` | Offered alone, for the connector's name, with a challenge pending: the challenge certificate (self-signed, critical `acmeIdentifier` extension), handshake, then the stream is shut down without reading a byte of HTTP. These connections have 8 slots of their own, so a full door can still renew. With no challenge pending, dropped. Offered beside `h2` or `http/1.1`, it is a web client and gets the issued certificate. |
+| Handshake | TLS 1.2 and 1.3 on rustls with the aws-lc provider, named explicitly because the process links two. ALPN `h2`, `http/1.1`, and the protocol served is the one ALPN settled on, never sniffed from the first bytes. 10 s for the handshake itself. At most 64 web connections at once; the 65th is dropped, not queued. |
+| Connection | A connection with no request in flight for 60 s is wound down, whatever the protocol (a session that says nothing, an HTTP/2 session that only answers pings). HTTP/1 request line and headers within 10 s. A connection lives at most 5 minutes and is then wound down gracefully. At most 32 HTTP/2 streams. |
+| Request | At most 16 requests in flight across all connections (a 17th is a 503). A body past 1 MiB is a 413. A request, body and handler together, within 120 s (a 408). |
 | Gate | Before the router sees anything (see below). A refusal is a plain `404 Not found` whichever check failed. |
 
 ### The gate
 
 Everything Caddy or a tunnel used to do in front of HQ happens here, on every request:
 
-1. **Path allow-list**, byte for byte, no decoding or normalising: `/mcp`, `/oauth/authorize`,
-   `/oauth/token`, `/oauth/revoke`, `/.well-known/oauth-protected-resource`,
+1. **Path allow-list**, byte for byte, no decoding or normalising: `/mcp`, `/oauth/token`,
+   `/oauth/revoke`, `/.well-known/oauth-protected-resource`,
    `/.well-known/oauth-protected-resource/mcp`, `/.well-known/oauth-authorization-server`. This is
-   `deploy/Caddyfile.connector`'s list plus `/oauth/authorize`. (The sprint brief says "two
-   `.well-known` paths": they are two documents; the protected-resource document is also served
-   at its `/mcp` suffix, which clients try first.) `/oauth/authorize` is listed only so that the
-   handler's own check can refuse it: it answers on the consent origin alone. The consent page
-   (`/connect`, `/api/oauth/requests/*`) is not served here. Whether a public name serves it is
-   decided with the connector-on-the-bridge work.
-   `/mcp/`, `//mcp`, `/%6Dcp`, `/.well-known/../api/tree` and everything else are 404s.
-2. **Host.** `Host` and, for HTTP/2, `:authority` must each be exactly the connector's name (with
-   its port if `public_url` names one). Two `Host` headers, or a disagreement, is a 404. Without
-   this a client could send the private consent origin's name through the forwarder and reach
-   `/oauth/authorize`, whose own check trusts `Host`. The door also sets `Host` for HTTP/2
-   requests that have none, because the handlers read that header.
-3. **Credentials.** Only a live connector grant's access token goes on. Anything else a client
-   presents (the owner's web token, a device token, an `AGENTHQ_*` API key, an agent's session
-   token, in `Authorization` or `x-api-key`) is replaced by a token that matches nothing, so the
-   handler answers `401 invalid_token` and Claude refreshes or starts over as it would anyway.
-   Without this the door would accept a full-access API key from the internet.
+   exactly `deploy/Caddyfile.connector`'s list. (The sprint brief says "two `.well-known` paths":
+   they are two documents; the protected-resource document is also served at its `/mcp` suffix,
+   which clients try first.) The consent side (`/oauth/authorize`, `/connect`,
+   `/api/oauth/requests/*`) is not served on this name, so the arming window cannot be probed or
+   filled from the internet. Whether a public name serves a consent page at all is decided with
+   the connector-on-the-bridge work. `/mcp/`, `//mcp`, `/%6Dcp`, `/.well-known/../api/tree` and
+   everything else are 404s.
+2. **Host.** `Host` and, for HTTP/2, `:authority` must each be exactly the connector's name.
+   Two `Host` headers, or a disagreement, is a 404. The door then sets `Host` to the canonical
+   value, which also gives HTTP/2 requests the header the handlers read. A client that names a
+   different origin through the forwarder therefore reaches nothing that trusts `Host`.
+3. **Credentials.** Only a live connector grant's access token goes on, as a single
+   `Authorization` value. Anything else a client presents (the owner's web token, a device token,
+   an `AGENTHQ_*` API key, an agent's session token, in `Authorization` or `x-api-key`, or a
+   second `Authorization` header) is replaced by a token that matches nothing, so the handler
+   answers `401 invalid_token` and Claude refreshes or starts over as it would anyway. Without
+   this the door would accept a full-access API key from the internet.
 4. **Not local.** Proxy and tunnel identity headers are removed (`x-forwarded-*`, `x-real-ip`,
    `tailscale-*`, `x-hq-session-id`) and `Forwarded` is set on every request. `mcp_http` opens
    `/mcp` for `HQ_MCP_DEV_NO_AUTH=1` only when no such header is present, so a mistaken
@@ -105,13 +125,16 @@ the same TLS stack and roots as the rest of HQ. `rcgen` (MIT or Apache-2.0) make
 challenge certificate; `x509-parser` (MIT or Apache-2.0) reads the validity window. All three are
 pinned exactly in `crates/hq-web/Cargo.toml`.
 
-**Flow.** Account (stored, one per ACME directory; a stored account that cannot be read is an
-error, never a reason to register another) → order for the one name → TLS-ALPN-01 challenge armed
-on the acceptor → `set_ready` → poll until ready → ECDSA P-256 key and CSR → finalize → chain →
-the leaf is checked to be for that key → saved, then swapped into the acceptor without a restart.
-Renewal starts two thirds of the way through the certificate's life, so the rule holds for 90, 45
-and 6 day certificates. A restart serves the saved certificate at once. ARI (RFC 9773) is not used
-yet (`TECHDEBT.md`).
+**Flow.** Account (one per ACME directory, kept in memory once loaded or made so that a failed save
+cannot lead to a second registration; a stored account that cannot be read is an error, never a
+reason to register another) → order for the one name → TLS-ALPN-01 challenge armed on the acceptor
+→ `set_ready` → poll until ready → ECDSA P-256 key and CSR → finalize → chain → the leaf is checked
+to name the connector and to be for that key → saved, then swapped into the acceptor without a
+restart. Renewal starts two thirds of the way through the certificate's life, so the rule holds for
+90, 45 and 6 day certificates; a new certificate that is already due (a device clock far off) waits
+6 hours before the next order. A restart serves the saved certificate at once, drops one that has
+expired, and remembers the failure count and the wait. ARI (RFC 9773) is not used yet
+(`TECHDEBT.md`).
 
 **Tests.** `cargo test -p hq-web --lib tls::` runs the whole flow against an in-process ACME
 server (`tests/test_ca.rs`). It is not Pebble: it is a test double that checks every request's
@@ -131,7 +154,7 @@ Source: <https://letsencrypt.org/docs/rate-limits/>, page last updated 2026-08-0
 | Certificates per exact set of names | 5 per 7 days, refilling 1 per 34 hours | A device that loses its state and re-orders daily is stopped on day 6. Keep `_data/connector_tls/`. |
 | New orders per account | 300 per 3 hours | Not reachable by one device. |
 | New accounts per IPv4 address | 10 per 3 hours, no overrides | A fleet behind one address creating accounts. The account is made once and stored. |
-| Failed validations per name per account | 5 per hour, refilling 1 per 12 minutes | The retry wait starts at 15 minutes (below). |
+| Failed validations per name per account | 5 per hour, refilling 1 per 12 minutes | The retry wait starts at 15 minutes (below) and, with the failure count, survives a restart, so a process that is restarted over and over does not order each time. |
 | Consecutive failed validations | 1,152, refilling 1 a day | Not reachable by the retry waits. |
 
 Renewals are designed to rarely hit a limit. The edge operator has one structural fix for the
@@ -145,7 +168,10 @@ or HTTP 429) is not a failure of the certificate in use:
 - The next order waits for the CA's `Retry-After` (kept from the response), at least a minute and
   at most seven days; with none, six hours. Other failures wait 15, 30 and 60 minutes, then 2, 4
   and 6 hours, so the first retry is after the failed-validation limit has refilled.
-- No new account is created to get round a limit.
+- No new account is created to get round a limit: the account is made once, kept in memory for
+  the life of the process even if saving it failed, and read from disk after a restart. (A CA
+  that has forgotten the account, as staging CAs do after a reset, leaves the door in `failed`
+  with a message that says to delete `account-*.json`; it does not register another by itself.)
 - `ConnectorTls::status()` reports `state` (`no_certificate`, `valid`, `renewing`, `rate_limited`,
   `failed`), `not_after`, `next_attempt_at` and a one-line `last_error`. The status surfaces
   (`hq connector status`, the app's Connect Claude screen) read it; wiring them is the
@@ -160,13 +186,20 @@ or HTTP 429) is not a failure of the certificate in use:
 `docs/plans/zero-setup-pairing.md` keeps the own-devices door (iroh, paired keys) and the
 connector door (public HTTPS, OAuth) apart. Neither depends on the other. The tests in
 `tests/doors.rs` hold the four promises. Each was broken on purpose and failed, as recorded here.
+The doors share no state, so the assertions that a door is unchanged when the other is stopped or
+revoked can only fail if code couples them; the ones with teeth are named in the last column.
 
 | Promise | Test | Mutation that makes it fail |
 |---|---|---|
 | The own-devices listener never serves connector paths | `the_own_devices_door_never_serves_connector_paths` | `refuse_connector_paths` returns the router unchanged |
-| The connector door never accepts own-devices credentials | `the_connector_door_never_accepts_the_credentials_of_the_own_devices_door` | The gate leaves `Authorization` and `x-api-key` as they came |
+| The connector door never accepts own-devices credentials | `the_connector_door_never_accepts_the_credentials_of_the_own_devices_door`, and in `gate.rs` `no_configured_api_key_gets_a_caller_an_identity_through_the_gate`, which runs the real `resolve_identity` with all four `AGENTHQ_*` keys set | The gate leaves `Authorization` and `x-api-key` as they came (an agent session token then works on `/mcp`) |
 | Turning one off leaves the other unchanged | `turning_one_door_off_leaves_the_other_unchanged` | `ConnectorTls::for_state` ignores that the connector is off |
 | Revoking one leaves the other alone | `revoking_one_leaves_the_other_alone` | Revoking a grant also signs out device tokens |
+
+Two properties are covered by pure-function tests, not through the door, because the first needs a
+process-wide environment variable that would race the other tests: that the development switch
+(`HQ_MCP_DEV_NO_AUTH`) never opens the door, and that no `AGENTHQ_*` key resolves an identity. Both
+call the real `mcp_dev_open` and `resolve_identity` on the headers the gate leaves behind.
 
 The own-devices listener does not exist in this crate yet. `refuse_connector_paths(router)` is the
 guard it must wrap its router in, and `is_connector_territory(path)` is the predicate behind it
@@ -176,14 +209,22 @@ TCP listener for it; the pairing work should point the same assertions at the re
 ## Not covered
 
 - **No per-client limits on the device.** It cannot see client addresses. The forwarder must cap
-  connections and bytes per device; the device caps itself at 64 connections. The existing 120
-  calls a minute per grant still applies.
+  connections and bytes per device; the device caps itself (64 served connections, 256 in the
+  hello, 16 requests in flight, 1 MiB bodies). The existing 120 calls a minute per grant still
+  applies. A flood of silent connections can fill the hello and web slots for as long as it
+  lasts; only the forwarder can tell the flood from clients.
+- **A finalized order whose download times out** makes a new order and key next time, spending
+  one of the five certificates a week (`TECHDEBT.md`).
 - **The consent page on the public name.** Not served here. If claude.ai refuses an
   `authorization_endpoint` private to the phone, the public-name consent page has to be added to
   the allow-list together with its own arming-window protections.
 - **The forwarder.** It sees who connects, when and how much, never the content. Its own limits
   and registration are its own document.
 - **Certificate Transparency.** Every certificate for the name is public in CT logs, so the name
-  of every device is public. Name devices with random labels.
-- **Revocation of a certificate** (compromise of the device's key) is not wired; delete the state
-  directory and the next order issues a new key. The old certificate expires on its own.
+  of every device is public. The forwarder derives the label from the device's key id, which is
+  not secret but is not a random label either.
+- **Revocation of a certificate** (compromise of the device's key) is not wired. Delete the
+  `.pem` and `.retry.json` files for the name in the state directory and restart: the next order
+  issues a new key, and the running process keeps serving the old one until it restarts. Keep the
+  `account-*.json` file or the CA's account limit applies again. The old certificate expires on its
+  own.

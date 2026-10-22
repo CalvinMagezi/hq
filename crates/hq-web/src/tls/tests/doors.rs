@@ -272,11 +272,15 @@ async fn turning_one_door_off_leaves_the_other_unchanged() {
         public_url: Some(format!("https://{HOST}")),
         tls: hq_core::config::ConnectorTlsConfig {
             enabled: true,
+            agree_to_ca_terms: true,
             ..Default::default()
         },
         ..Default::default()
     };
-    assert!(crate::tls::ConnectorTls::for_state(&off.state, off.router.clone(), &cfg).is_err());
+    let refused = crate::tls::ConnectorTls::for_state(&off.state, off.router.clone(), &cfg)
+        .err()
+        .expect("no door without the connector");
+    assert!(refused.contains("connector to be on"), "{refused}");
     let (off_addr, _t) = own_devices_door(off.router.clone()).await;
     assert_eq!(
         own(off_addr, "GET", "/api/tree", Some(WEB_TOKEN)).await.0,

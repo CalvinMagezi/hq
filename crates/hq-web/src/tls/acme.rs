@@ -21,6 +21,7 @@ use tokio_rustls::rustls::pki_types::{CertificateDer, PrivatePkcs8KeyDer};
 
 /// RFC 8555 section 6.7: what a CA says when a limit stops a request.
 const RATE_LIMITED: &str = "urn:ietf:params:acme:error:rateLimited";
+const ACCOUNT_UNKNOWN: &str = "urn:ietf:params:acme:error:accountDoesNotExist";
 /// A CA's answer is a small JSON document or a certificate chain; anything larger is not one.
 const MAX_ACME_RESPONSE: usize = 1 << 20;
 const ACME_HTTP_TIMEOUT: Duration = Duration::from_secs(30);
@@ -128,6 +129,9 @@ pub(crate) struct AcmeIssuer {
     http: AcmeHttp,
     store: PrivateDir,
     challenge: Arc<ChallengeSlot>,
+    /// The account once loaded or made, so later orders in this process use it even when it
+    /// could not be saved.
+    account: tokio::sync::Mutex<Option<Account>>,
 }
 
 /// Disarms the challenge when an order ends, however it ends.
@@ -151,6 +155,7 @@ impl AcmeIssuer {
             http,
             store,
             challenge,
+            account: tokio::sync::Mutex::new(None),
         }
     }
 
@@ -219,7 +224,7 @@ impl AcmeIssuer {
             .map_err(|e| self.failure(e))?;
 
         let chain = chain_from_pem(chain_pem.as_bytes())?;
-        let issued = issued_from_der(chain, &pair.serialize_der())?;
+        let issued = issued_from_der(chain, &pair.serialize_der(), &self.settings.host)?;
         let mut bundle = pair.serialize_pem().into_bytes();
         bundle.extend_from_slice(chain_pem.as_bytes());
         Ok(Fresh {
@@ -228,9 +233,20 @@ impl AcmeIssuer {
         })
     }
 
-    /// The account for this CA: the stored one, or a new one made once and stored. A stored
-    /// account that cannot be read is an error, never a reason to register another.
+    /// The account for this CA: the one in use, the stored one, or a new one made once and
+    /// stored. A stored account that cannot be read is an error, never a reason to register
+    /// another.
     async fn account(&self) -> Result<Account, TlsError> {
+        let mut cached = self.account.lock().await;
+        if let Some(account) = cached.as_ref() {
+            return Ok(account.clone());
+        }
+        let account = self.load_or_create_account().await?;
+        *cached = Some(account.clone());
+        Ok(account)
+    }
+
+    async fn load_or_create_account(&self) -> Result<Account, TlsError> {
         let path = self.store.account_path(&self.settings.directory_url);
         let builder = || Account::builder_with_http(Box::new(self.http.clone()));
         if let Some(saved) = self.store.read(&path)? {
@@ -252,6 +268,7 @@ impl AcmeIssuer {
             .create(
                 &NewAccount {
                     contact: &contact,
+                    // `mcp_connector.tls.agree_to_ca_terms` is required to get this far.
                     terms_of_service_agreed: true,
                     only_return_existing: false,
                 },
@@ -260,9 +277,14 @@ impl AcmeIssuer {
             )
             .await
             .map_err(|e| self.failure(e))?;
-        let json = serde_json::to_vec(&credentials)
-            .map_err(|e| TlsError::Store(format!("the ACME account: {e}")))?;
-        self.store.write(&path, &json)?;
+        // The account exists at the CA now; a failed save must not make the next try register
+        // another, so the account stays in use for this process either way.
+        let saved = serde_json::to_vec(&credentials)
+            .map_err(|e| TlsError::Store(format!("the ACME account: {e}")))
+            .and_then(|json| self.store.write(&path, &json));
+        if let Err(e) = saved {
+            tracing::warn!("connector tls: the ACME account was not saved: {e}");
+        }
         Ok(account)
     }
 
@@ -277,6 +299,15 @@ impl AcmeIssuer {
                     retry_after: self.http.take_retry_after(),
                     detail: problem.detail.clone().unwrap_or_default(),
                 }
+            }
+            instant_acme::Error::Api(problem)
+                if problem.r#type.as_deref() == Some(ACCOUNT_UNKNOWN) =>
+            {
+                TlsError::Acme(
+                    "the CA does not know the saved account (staging CAs are reset now and then); \
+                     delete account-*.json in the connector's TLS folder to register again"
+                        .into(),
+                )
             }
             instant_acme::Error::Api(problem) => TlsError::Acme(format!(
                 "the CA refused: {} {}",
@@ -296,9 +327,9 @@ pub(crate) fn chain_from_pem(pem: &[u8]) -> Result<Vec<CertificateDer<'static>>,
 }
 
 /// The issued certificate restored from the file `issue` produced.
-pub(crate) fn issued_from_bundle(bundle: &Secret) -> Result<Issued, TlsError> {
+pub(crate) fn issued_from_bundle(bundle: &Secret, host: &str) -> Result<Issued, TlsError> {
     let key = PrivatePkcs8KeyDer::from_pem_slice(bundle.expose())
         .map_err(|e| TlsError::Certificate(format!("the stored key does not parse: {e}")))?;
     let chain = chain_from_pem(bundle.expose())?;
-    issued_from_der(chain, key.secret_pkcs8_der())
+    issued_from_der(chain, key.secret_pkcs8_der(), host)
 }

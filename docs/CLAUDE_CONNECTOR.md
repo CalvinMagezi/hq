@@ -64,18 +64,22 @@ and `/ws` are not served on this origin at all.
 mcp_connector:
   enabled: true
   public_url: https://phone.edge.example.com
+  authorize_url: https://hq.example.ts.net   # required with this option
   tls:
     enabled: true
+    agree_to_ca_terms: true            # accepts the CA's subscriber agreement for you
     acme_directory: letsencrypt        # or letsencrypt-staging while testing
 ```
 
 - `public_url` must be a domain name the forwarder routes to this device; HQ gets a certificate
   for it from the ACME CA (Let's Encrypt by default) over the same connection, and renews it two
   thirds of the way through its life.
-- Use `authorize_url` here too. Without it the consent page would be on the public name, and this
-  origin does not serve it.
-- Off by default; not available under `profile: lite`. If it cannot start (no web token, a
-  `public_url` that is not a domain, a missing connector), HQ logs why and leaves it off.
+- `authorize_url` is required here: the consent page is never served on this origin, so it must
+  be on a private one.
+- Off by default; not available under `profile: lite`. **Not usable from `hq start` yet:** the
+  option is checked and the TLS door exists in `crates/hq-web/src/tls/`, but nothing feeds it
+  connections until the forwarder and the pairing bridge are wired in (the Native Bridge sprint,
+  `docs/plans/native-bridge-sprint.md`). Until then use Caddy, a tunnel or Funnel as above.
 - The CA limits how many certificates one domain may get a week; a rate-limited first order waits
   and says when it will try again. Keep the saved certificate: it is in `_data/connector_tls/`.
 - Details, the checks on every request, and what the forwarder must hand over:

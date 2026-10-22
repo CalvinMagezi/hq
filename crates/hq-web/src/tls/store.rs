@@ -52,20 +52,32 @@ impl PrivateDir {
         Self { root }
     }
 
-    /// The file holding the key and chain issued for `host`.
-    pub fn issued_path(&self, host: &str) -> PathBuf {
-        self.root.join(format!("{host}.pem"))
+    /// The file holding the key and chain issued for `host` by one ACME directory. Kept per
+    /// directory: a certificate from staging means nothing to production, and must not be
+    /// taken for one after the switch.
+    pub fn issued_path(&self, host: &str, directory_url: &str) -> PathBuf {
+        self.root
+            .join(format!("{host}-{}.pem", directory_tag(directory_url)))
+    }
+
+    /// The file holding what a restart must remember about orders: failures in a row and the
+    /// earliest time the next one may start.
+    pub fn retry_path(&self, host: &str, directory_url: &str) -> PathBuf {
+        self.root.join(format!(
+            "{host}-{}.retry.json",
+            directory_tag(directory_url)
+        ))
     }
 
     /// The file holding the account for one ACME directory. Accounts are per directory: a
     /// staging account means nothing to production.
     pub fn account_path(&self, directory_url: &str) -> PathBuf {
-        let tag: String = Sha256::digest(directory_url.as_bytes())
-            .iter()
-            .map(|b| format!("{b:02x}"))
-            .collect();
         self.root
-            .join(format!("account-{}.json", &tag[..ACCOUNT_TAG_LEN]))
+            .join(format!("account-{}.json", directory_tag(directory_url)))
+    }
+
+    pub fn remove(&self, path: &Path) {
+        let _ = std::fs::remove_file(path);
     }
 
     pub fn read(&self, path: &Path) -> Result<Option<Secret>, TlsError> {
@@ -106,6 +118,15 @@ impl PrivateDir {
     }
 }
 
+/// A short stable name for a directory URL, with or without a trailing slash.
+fn directory_tag(directory_url: &str) -> String {
+    let tag: String = Sha256::digest(directory_url.trim_end_matches('/').as_bytes())
+        .iter()
+        .map(|b| format!("{b:02x}"))
+        .collect();
+    tag[..ACCOUNT_TAG_LEN].to_string()
+}
+
 fn write_new_private(path: &Path, bytes: &[u8]) -> std::io::Result<()> {
     // A leftover from a crash is ours to replace; create_new then refuses a link planted at the path.
     let _ = std::fs::remove_file(path);
@@ -138,7 +159,7 @@ mod tests {
     #[cfg(unix)]
     fn files_and_their_directory_are_owner_only_and_stay_so_on_rewrite() {
         let (_tmp, store) = dir();
-        let path = store.issued_path("hq.example.com");
+        let path = store.issued_path("hq.example.com", "https://acme.example.org/dir");
         store.write(&path, b"first").unwrap();
         store.write(&path, b"second").unwrap();
         assert_eq!(mode(&path), FILE_MODE);
@@ -159,7 +180,10 @@ mod tests {
         )
         .unwrap();
         store
-            .write(&store.issued_path("hq.example.com"), b"k")
+            .write(
+                &store.issued_path("hq.example.com", "https://acme.example.org/dir"),
+                b"k",
+            )
             .unwrap();
         assert_eq!(mode(&store.root), DIR_MODE);
     }
@@ -168,7 +192,7 @@ mod tests {
     #[cfg(unix)]
     fn a_link_planted_at_the_temporary_path_is_not_followed() {
         let (tmp, store) = dir();
-        let path = store.issued_path("hq.example.com");
+        let path = store.issued_path("hq.example.com", "https://acme.example.org/dir");
         std::fs::create_dir_all(&store.root).unwrap();
         let victim = tmp.path().join("victim");
         std::fs::write(&victim, b"keep").unwrap();
@@ -183,7 +207,7 @@ mod tests {
         let (_tmp, store) = dir();
         assert!(
             store
-                .read(&store.issued_path("nothing.example.com"))
+                .read(&store.issued_path("nothing.example.com", "https://acme.example.org/dir"))
                 .unwrap()
                 .is_none()
         );
@@ -191,6 +215,12 @@ mod tests {
         let b = store.account_path("https://acme-staging.example.org/dir");
         assert_ne!(a, b);
         assert_eq!(a, store.account_path("https://acme.example.org/dir"));
+        assert_eq!(a, store.account_path("https://acme.example.org/dir/"));
+        assert_ne!(
+            store.issued_path("hq.example.com", "https://acme.example.org/dir"),
+            store.issued_path("hq.example.com", "https://acme-staging.example.org/dir"),
+            "a staging certificate is never found under the production name"
+        );
     }
 
     #[test]

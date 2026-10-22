@@ -6,7 +6,10 @@
 #   scripts/test-connector-tls-pebble.sh
 #
 # Pebble resolves every name to this machine through pebble-challtestsrv, dials port 5001 on it and
-# validates the challenge the door answers. The containers and the network are removed at the end.
+# validates the challenge the door answers. While the test runs the door listens on every interface of
+# this machine (the containers reach it from the Docker network), and it serves only the connector's
+# own paths. Pebble's own ports are published on loopback only. The containers and the network are
+# removed at the end.
 set -u
 repo=$(cd "$(dirname "$0")/.." && pwd)
 # Pinned by tag and digest (checked 2026-10-22; 2.10.1 is the release of 2026-04-20).
@@ -38,7 +41,7 @@ echo "containers reach this machine at $host_ip"
 
 docker run -d --name hq-challtestsrv --network "$NET" "$CHALLTESTSRV" \
   -defaultIPv4 "$host_ip" -defaultIPv6 "" -http01 "" -https01 "" -tlsalpn01 "" -doh "" >/dev/null || exit 2
-docker run -d --name hq-pebble --network "$NET" -p 14000:14000 -p 15000:15000 \
+docker run -d --name hq-pebble --network "$NET" -p 127.0.0.1:14000:14000 -p 127.0.0.1:15000:15000 \
   -e PEBBLE_VA_NOSLEEP=1 -e PEBBLE_VA_ALWAYS_VALID=0 "$PEBBLE" \
   -config test/config/pebble-config.json -dnsserver hq-challtestsrv:8053 >/dev/null || exit 2
 

@@ -15,14 +15,13 @@ use axum::middleware::Next;
 use axum::response::{IntoResponse, Response};
 use std::sync::Arc;
 
-/// The paths Claude's servers and the owner's consent browser call, matched exactly. Mirrors
-/// `deploy/Caddyfile.connector` plus `/oauth/authorize`, which answers only on the consent origin
-/// (the handler checks `Host`, and this door has checked it first). The consent page itself
-/// (`/connect`, `/api/oauth/requests/*`) is not here: serving it on a public name is a decision
-/// for the connector-on-the-bridge work, not for this door.
-pub const CONNECTOR_PATHS: [&str; 7] = [
+/// The paths Claude's servers call, matched exactly: `deploy/Caddyfile.connector`'s list. The
+/// consent side (`/oauth/authorize`, `/connect`, `/api/oauth/requests/*`) is not here and is
+/// never served on this door: it belongs to the owner's browser on a private origin, and the
+/// handler that starts it trusts `Host`, which a public name must not be asked to protect.
+/// Whether a public name serves consent at all is decided with the connector-on-the-bridge work.
+pub const CONNECTOR_PATHS: [&str; 6] = [
     "/mcp",
-    "/oauth/authorize",
     "/oauth/token",
     "/oauth/revoke",
     "/.well-known/oauth-protected-resource",
@@ -172,36 +171,38 @@ impl Gate {
     /// belongs to another door and is replaced by a credential that matches nothing.
     fn scrub_credentials(&self, parts: &mut Parts) {
         let api_key = parts.headers.remove(API_KEY_HEADER).is_some();
-        let authorization = parts.headers.get(AUTHORIZATION).cloned();
-        let Some(value) = authorization else {
-            if api_key {
-                parts
-                    .headers
-                    .insert(AUTHORIZATION, self.refused_credential.clone());
-            }
-            return;
-        };
-        let token = value
-            .to_str()
-            .ok()
-            .and_then(|v| v.strip_prefix(BEARER))
-            .map(str::trim)
-            .filter(|t| !t.is_empty());
+        let values: Vec<HeaderValue> = parts
+            .headers
+            .get_all(AUTHORIZATION)
+            .iter()
+            .cloned()
+            .collect();
+        // Whatever arrived, at most one value leaves, so nothing downstream can read another.
+        parts.headers.remove(AUTHORIZATION);
+        let foreign = api_key || values.len() > 1;
+        let token = values.first().and_then(|v| {
+            v.to_str()
+                .ok()
+                .and_then(|v| v.strip_prefix(BEARER))
+                .map(str::trim)
+                .filter(|t| !t.is_empty())
+                .map(|t| (v.clone(), t.to_string()))
+        });
         match token {
-            Some(t) if !api_key && (self.live_grant)(t) => {}
+            Some((value, t)) if !foreign && (self.live_grant)(&t) => {
+                parts.headers.insert(AUTHORIZATION, value);
+            }
             Some(_) => {
                 parts
                     .headers
                     .insert(AUTHORIZATION, self.refused_credential.clone());
             }
-            None => {
-                parts.headers.remove(AUTHORIZATION);
-                if api_key {
-                    parts
-                        .headers
-                        .insert(AUTHORIZATION, self.refused_credential.clone());
-                }
+            None if foreign => {
+                parts
+                    .headers
+                    .insert(AUTHORIZATION, self.refused_credential.clone());
             }
+            None => {}
         }
     }
 }
@@ -260,6 +261,8 @@ mod tests {
             "/.well-known/oauth-protected-resource/",
             "/.well-known/../api/tree",
             "/.well-known/oauth-protected-resource/../../api/tree",
+            "/oauth/authorize",
+            "/oauth/authorize?response_type=code",
             "/oauth/authorize/../../api/tree",
             "/assets/index.js",
         ] {
@@ -335,9 +338,9 @@ mod tests {
     #[test]
     fn an_http2_request_with_only_an_authority_gets_the_host_the_handlers_read() {
         let g = gate();
-        let p = admitted(&g, "https://hq.example.com/oauth/authorize", &[]).unwrap();
+        let p = admitted(&g, "https://hq.example.com/oauth/token", &[]).unwrap();
         assert_eq!(header(&p, "host"), Some("hq.example.com"));
-        assert!(admitted(&g, "https://hq.example.ts.net/oauth/authorize", &[]).is_none());
+        assert!(admitted(&g, "https://hq.example.ts.net/oauth/token", &[]).is_none());
     }
 
     #[test]
@@ -373,8 +376,79 @@ mod tests {
         ] {
             assert!(p.headers.get(gone).is_none(), "{gone}");
         }
-        // The property mcp_http relies on, asked of the real function.
-        assert!(!crate::auth::mcp_dev_open(&p.headers, true, true));
+        // The property mcp_http relies on, asked of the real functions: with the development
+        // switch on and no key configured, this request still resolves to nobody.
+        let dev_open = crate::auth::mcp_dev_open(&p.headers, true, true);
+        assert!(!dev_open);
+        assert_eq!(
+            crate::auth::resolve_identity(&p.headers, None, None, None, None, dev_open),
+            None
+        );
+    }
+
+    #[test]
+    fn no_configured_api_key_gets_a_caller_an_identity_through_the_gate() {
+        let g = gate();
+        let host = ("host", "hq.example.com");
+        let grant = format!("Bearer {GRANT_TOKEN}");
+        let resolve = |p: &Parts| {
+            crate::auth::resolve_identity(
+                &p.headers,
+                Some("full-key"),
+                Some("spark-key"),
+                Some("handoff-key"),
+                Some("tasks-key"),
+                false,
+            )
+        };
+        for key in ["full-key", "spark-key", "handoff-key", "tasks-key"] {
+            let bearer = format!("Bearer {key}");
+            // A key in `x-api-key`, in `Authorization`, in both, and behind a good grant token.
+            for headers in [
+                vec![host, ("x-api-key", key)],
+                vec![host, ("authorization", bearer.as_str())],
+                vec![host, ("x-api-key", key), ("authorization", bearer.as_str())],
+                vec![
+                    host,
+                    ("authorization", grant.as_str()),
+                    ("authorization", bearer.as_str()),
+                ],
+                vec![
+                    host,
+                    ("authorization", bearer.as_str()),
+                    ("authorization", grant.as_str()),
+                ],
+            ] {
+                let p = admitted(&g, "/mcp", &headers).unwrap();
+                assert_eq!(resolve(&p), None, "{key} via {headers:?}");
+                assert!(p.headers.get_all("authorization").iter().count() <= 1);
+            }
+        }
+        // Control: the same resolver does accept those keys when they arrive untouched.
+        let raw = parts("/mcp", &[host, ("x-api-key", "full-key")]);
+        assert_eq!(
+            crate::auth::resolve_identity(&raw.headers, Some("full-key"), None, None, None, false),
+            Some(crate::auth::ApiIdentity::Full)
+        );
+    }
+
+    #[test]
+    fn two_authorization_headers_leave_as_one_that_is_not_the_good_one() {
+        let g = gate();
+        let good = format!("Bearer {GRANT_TOKEN}");
+        let p = admitted(
+            &g,
+            "/mcp",
+            &[
+                ("host", "hq.example.com"),
+                ("authorization", good.as_str()),
+                ("authorization", "Bearer something-else"),
+            ],
+        )
+        .unwrap();
+        let all: Vec<_> = p.headers.get_all("authorization").iter().collect();
+        assert_eq!(all.len(), 1);
+        assert_ne!(all[0].to_str().unwrap(), good);
     }
 
     #[test]
@@ -443,7 +517,7 @@ mod tests {
     }
 
     #[test]
-    fn the_refusing_credential_differs_per_gate_and_matches_no_chosen_key() {
+    fn the_refusing_credential_is_random_per_gate() {
         let a = gate();
         let b = gate();
         assert_ne!(a.refused_credential, b.refused_credential);

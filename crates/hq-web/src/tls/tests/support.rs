@@ -37,22 +37,27 @@ pub fn world() -> World {
 }
 
 pub fn world_with(profile: hq_core::config::Profile) -> World {
-    build_world(profile, true)
+    build_world(profile, Some(CONSENT_HOST))
+}
+
+/// A server whose consent page is on the public name, as with no `authorize_url`.
+pub fn world_single_origin() -> World {
+    build_world(hq_core::config::Profile::Full, Some(HOST))
 }
 
 /// A server whose connector is not configured: no OAuth routes, no door possible.
 pub fn world_without_connector() -> World {
-    build_world(hq_core::config::Profile::Full, false)
+    build_world(hq_core::config::Profile::Full, None)
 }
 
-fn build_world(profile: hq_core::config::Profile, connector: bool) -> World {
+fn build_world(profile: hq_core::config::Profile, consent: Option<&str>) -> World {
     let vault = tempfile::TempDir::new().unwrap();
     let mut state = WsState::new(vault.path().to_path_buf(), None).with_profile(profile);
     state.web_auth_token = Some(WEB_TOKEN.into());
-    if connector {
+    if let Some(consent) = consent {
         state.connector = Some(hq_core::config::ConnectorSettings {
             public: format!("https://{HOST}"),
-            consent: format!("https://{CONSENT_HOST}"),
+            consent: format!("https://{consent}"),
             default_scope: "read_only".into(),
         });
     }
@@ -274,7 +279,8 @@ pub async fn exchange(
         "Content-Length: {}\r\nConnection: close\r\n\r\n{body}",
         body.len()
     ));
-    tls.write_all(request.as_bytes()).await.unwrap();
+    // A server that answers early (a refused body) may close before the whole request is sent.
+    let _ = tls.write_all(request.as_bytes()).await;
     let mut raw = Vec::new();
     let _ = tls.read_to_end(&mut raw).await;
     parse(&String::from_utf8_lossy(&raw))
