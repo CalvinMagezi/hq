@@ -43,6 +43,7 @@ async fn pebble_issues_a_certificate_through_the_acme_flow_and_the_door_serves_i
                 host: HOST.into(),
                 directory_url: directory,
                 contact_email: None,
+                agreed_to_terms: true,
             },
             http: AcmeHttp::new(acme_client.clone()),
             store: PrivateDir::at(store_dir.path().join("connector_tls")),

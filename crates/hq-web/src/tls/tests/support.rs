@@ -169,6 +169,7 @@ pub fn build_tls(
             host: HOST.into(),
             directory_url: ca.directory_url.clone(),
             contact_email: Some("owner@example.com".into()),
+            agreed_to_terms: true,
         },
         http: AcmeHttp::new(reqwest::Client::new()),
         store: PrivateDir::at(store_dir.path().join("connector_tls")),

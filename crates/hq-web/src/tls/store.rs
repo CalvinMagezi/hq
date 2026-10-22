@@ -76,6 +76,15 @@ impl PrivateDir {
             .join(format!("account-{}.json", directory_tag(directory_url)))
     }
 
+    /// Whether a file can be created and removed here. Checked before an ACME account is
+    /// registered, so a store that cannot keep the account never lets one be made.
+    pub fn check_writable(&self) -> Result<(), TlsError> {
+        self.ensure()?;
+        let probe = self.root.join("write-probe.tmp");
+        let result = write_new_private(&probe, b"").and_then(|()| std::fs::remove_file(&probe));
+        result.map_err(|e| TlsError::Store(format!("{} is not writable: {e}", self.root.display())))
+    }
+
     pub fn remove(&self, path: &Path) {
         let _ = std::fs::remove_file(path);
     }
@@ -200,6 +209,22 @@ mod tests {
         store.write(&path, b"secret").unwrap();
         assert_eq!(std::fs::read(&victim).unwrap(), b"keep");
         assert_eq!(store.read(&path).unwrap().unwrap().expose(), b"secret");
+    }
+
+    #[test]
+    fn a_store_that_can_be_written_says_so_and_leaves_nothing_behind() {
+        let (_tmp, store) = dir();
+        store.check_writable().unwrap();
+        let left = std::fs::read_dir(&store.root).unwrap().count();
+        assert_eq!(left, 0, "the probe file is removed");
+    }
+
+    #[test]
+    fn a_store_that_cannot_be_written_says_so() {
+        let (_tmp, store) = dir();
+        std::fs::create_dir_all(store.root.join("write-probe.tmp")).unwrap();
+        let err = store.check_writable().unwrap_err();
+        assert!(err.to_string().contains("not writable"), "{err}");
     }
 
     #[test]

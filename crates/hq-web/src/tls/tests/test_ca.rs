@@ -33,6 +33,8 @@ struct Knobs {
     rate_limit: Option<Option<u64>>,
     /// Fail every validation, as a CA that cannot reach the name.
     reject_validation: bool,
+    /// Issue certificates that are nearly over, as a clock far ahead of the CA's makes them look.
+    short_lived: bool,
 }
 
 /// What the CA saw, for assertions.
@@ -143,6 +145,10 @@ impl TestCa {
     /// The next `newOrder` is refused as rate limited.
     pub fn rate_limit_next_order(&self, retry_after_secs: Option<u64>) {
         self.lock().knobs.rate_limit = Some(retry_after_secs);
+    }
+
+    pub fn issue_short_lived(&self, on: bool) {
+        self.lock().knobs.short_lived = on;
     }
 
     pub fn reject_validation(&self, on: bool) {
@@ -525,7 +531,11 @@ impl TestCa {
         }
         csr.params.extended_key_usages = vec![rcgen::ExtendedKeyUsagePurpose::ServerAuth];
         csr.params.not_before = time_now(-1);
-        csr.params.not_after = time_now(ISSUED_DAYS * 24);
+        csr.params.not_after = if ca.knobs.short_lived {
+            time_now(0) + time::Duration::minutes(1)
+        } else {
+            time_now(ISSUED_DAYS * 24)
+        };
         let issuer = rcgen::Issuer::from_params(&self.issuer_params, self.issuer_key.as_ref());
         let leaf = csr.signed_by(&issuer).unwrap();
         let chain = format!("{}{}", leaf.pem(), self.issuer_pem);

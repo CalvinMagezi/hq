@@ -119,7 +119,9 @@ impl Gate {
         }
     }
 
-    /// Whether `parts` may go on, rewriting them for the router if so.
+    /// Whether `parts` may go on, rewriting them for the router if so. Cheap and free of IO: it
+    /// runs before a request is allowed to cost anything. The credential check that follows
+    /// (`scrub_credentials`) reads the database and so runs after the request holds a slot.
     pub fn admit(&self, parts: &mut Parts) -> bool {
         if !is_connector_path(parts.uri.path()) || !self.host_is_ours(parts) {
             return false;
@@ -132,7 +134,6 @@ impl Gate {
             HeaderName::from_static("forwarded"),
             HeaderValue::from_static(FORWARDED_VALUE),
         );
-        self.scrub_credentials(parts);
         true
     }
 
@@ -169,7 +170,7 @@ impl Gate {
     /// Only a live connector grant's access token goes through. Anything else a client
     /// presents, the owner's web token, a device token, an API key or an agent's session token,
     /// belongs to another door and is replaced by a credential that matches nothing.
-    fn scrub_credentials(&self, parts: &mut Parts) {
+    pub(crate) fn scrub_credentials(&self, parts: &mut Parts) {
         let api_key = parts.headers.remove(API_KEY_HEADER).is_some();
         let values: Vec<HeaderValue> = parts
             .headers
@@ -225,9 +226,14 @@ mod tests {
         builder.body(()).unwrap().into_parts().0
     }
 
+    /// The request as the router would get it: admitted, then its credentials scrubbed.
     fn admitted(gate: &Gate, uri: &str, headers: &[(&str, &str)]) -> Option<Parts> {
         let mut p = parts(uri, headers);
-        gate.admit(&mut p).then_some(p)
+        if !gate.admit(&mut p) {
+            return None;
+        }
+        gate.scrub_credentials(&mut p);
+        Some(p)
     }
 
     fn header<'a>(p: &'a Parts, name: &str) -> Option<&'a str> {

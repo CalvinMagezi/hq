@@ -11,7 +11,7 @@ use super::certs::{ChallengeSlot, LiveCert, sni_is};
 use super::gate::{Gate, not_found};
 use super::{ACME_TLS_ALPN, TlsError};
 use axum::Router;
-use axum::body::Body;
+use axum::body::{Body, Bytes};
 use hyper::body::Incoming;
 use hyper::server::conn::{http1, http2};
 use hyper::service::service_fn;
@@ -20,10 +20,10 @@ use std::convert::Infallible;
 use std::future::Future;
 use std::pin::Pin;
 use std::sync::Arc;
-use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
 use std::time::{Duration, Instant};
 use tokio::io::{AsyncRead, AsyncWrite, AsyncWriteExt};
-use tokio::sync::Semaphore;
+use tokio::sync::{OwnedSemaphorePermit, Semaphore};
 use tokio_rustls::LazyConfigAcceptor;
 use tokio_rustls::rustls::ServerConfig;
 use tokio_rustls::rustls::crypto::aws_lc_rs;
@@ -33,10 +33,17 @@ use tower::ServiceExt;
 /// Every limit that keeps one stalled or hostile connection from holding the door.
 #[derive(Debug, Clone, Copy)]
 pub struct Timeouts {
-    /// ClientHello, and separately the rest of the handshake. A peer that opens a stream and
-    /// says nothing is closed when the first runs out.
+    /// The ClientHello. A peer that opens a stream and says nothing is closed when this runs out.
+    pub hello: Duration,
+    /// The rest of the TLS handshake.
     pub handshake: Duration,
-    /// HTTP/1 request line and headers.
+    /// The rest of the handshake for the CA's validation connection, which has no reason to be
+    /// slow: shorter, so a stalled one gives its slot back quickly.
+    pub validation: Duration,
+    /// Reading a request's body, from its first byte to its last.
+    pub request_body: Duration,
+    /// HTTP/1 request line and headers; also how long a connection may go without sending its
+    /// first request, under either protocol.
     pub request_headers: Duration,
     /// One request, body and handler together. Longer than the 40 s a call waits for the
     /// owner's approval.
@@ -57,7 +64,10 @@ pub struct Timeouts {
 impl Default for Timeouts {
     fn default() -> Self {
         Self {
+            hello: Duration::from_secs(5),
             handshake: Duration::from_secs(10),
+            validation: Duration::from_secs(3),
+            request_body: Duration::from_secs(10),
             request_headers: Duration::from_secs(10),
             request: Duration::from_secs(120),
             idle: Duration::from_secs(60),
@@ -82,8 +92,11 @@ const MAX_HTTP2_STREAMS: u32 = 32;
 /// Requests being answered at once, across all connections.
 const MAX_IN_FLIGHT_REQUESTS: usize = 16;
 /// A request body past this is refused. The largest legitimate call is a note written through
-/// `/mcp`; with the in-flight cap this bounds what the door holds in memory.
+/// `/mcp`.
 const MAX_REQUEST_BODY_BYTES: usize = 1 << 20;
+/// Request bytes held at once across every connection, counted as they arrive: a body that is
+/// still coming costs what it has sent, not what it promised, so a slow one pins almost nothing.
+const MAX_BUFFERED_BODY_BYTES: usize = 16 << 20;
 /// How often the idle and lifetime checks look at a connection, at most.
 const WATCH_TICK: Duration = Duration::from_secs(1);
 const MIN_WATCH_TICK: Duration = Duration::from_millis(10);
@@ -110,6 +123,7 @@ pub struct ConnectorAcceptor {
     web_slots: Arc<Semaphore>,
     validation_slots: Arc<Semaphore>,
     requests: Arc<Semaphore>,
+    body_budget: Arc<Semaphore>,
     pub(crate) timeouts: Timeouts,
 }
 
@@ -135,6 +149,7 @@ impl ConnectorAcceptor {
             web_slots: Arc::new(Semaphore::new(MAX_CONNECTIONS)),
             validation_slots: Arc::new(Semaphore::new(RESERVED_VALIDATIONS)),
             requests: Arc::new(Semaphore::new(MAX_IN_FLIGHT_REQUESTS)),
+            body_budget: Arc::new(Semaphore::new(MAX_BUFFERED_BODY_BYTES)),
             timeouts: Timeouts::default(),
         })
     }
@@ -162,7 +177,7 @@ impl ConnectorAcceptor {
             .try_acquire_owned()
             .map_err(|_| TlsError::Busy)?;
         let hello = tokio::time::timeout(
-            self.timeouts.handshake,
+            self.timeouts.hello,
             LazyConfigAcceptor::new(Acceptor::default(), stream),
         )
         .await
@@ -184,7 +199,12 @@ impl ConnectorAcceptor {
             .try_acquire_owned()
             .map_err(|_| TlsError::Busy)?;
 
-        let tls = tokio::time::timeout(self.timeouts.handshake, hello.into_stream(config))
+        let handshake_limit = if challenge {
+            self.timeouts.validation
+        } else {
+            self.timeouts.handshake
+        };
+        let tls = tokio::time::timeout(handshake_limit, hello.into_stream(config))
             .await
             .map_err(|_| TlsError::Timeout("the TLS handshake"))?
             .map_err(|e| TlsError::Handshake(e.to_string()))?;
@@ -192,7 +212,7 @@ impl ConnectorAcceptor {
         if challenge {
             let mut tls = tls;
             // The peer is the CA and we are done; a stalled close must not hold the slot.
-            let _ = tokio::time::timeout(self.timeouts.handshake, tls.shutdown()).await;
+            let _ = tokio::time::timeout(self.timeouts.validation, tls.shutdown()).await;
             return Ok(Served::Challenge);
         }
         self.serve_http(tls).await?;
@@ -230,23 +250,41 @@ impl ConnectorAcceptor {
         let activity = Arc::new(Activity::new());
         let service = {
             let (gate, router) = (self.gate.clone(), self.router.clone());
-            let (requests, activity) = (self.requests.clone(), activity.clone());
-            let request_timeout = self.timeouts.request;
+            let (requests, budget) = (self.requests.clone(), self.body_budget.clone());
+            let activity = activity.clone();
+            let (request_timeout, body_timeout) =
+                (self.timeouts.request, self.timeouts.request_body);
             service_fn(move |req: hyper::Request<Incoming>| {
                 let (gate, router) = (gate.clone(), router.clone());
-                let (requests, working) = (requests.clone(), Working::begin(&activity));
+                let (requests, budget) = (requests.clone(), budget.clone());
+                let working = Working::begin(&activity);
                 async move {
                     let _working = working;
                     let (mut parts, body) = req.into_parts();
+                    // Each step costs more than the one before, so a request pays for the next
+                    // only after the last: the path and Host, then the body (against a byte
+                    // budget, so a slow one pins what it has sent and nothing more), then one of
+                    // the few slots for answering, then the credential check, which reads the
+                    // database.
                     if !gate.admit(&mut parts) {
                         return Ok::<_, Infallible>(not_found());
                     }
+                    let (bytes, _held) = match read_body(body, &budget, body_timeout).await {
+                        Ok(read) => read,
+                        Err(code) => return Ok(status(code)),
+                    };
                     let Ok(_slot) = requests.try_acquire_owned() else {
                         return Ok(status(axum::http::StatusCode::SERVICE_UNAVAILABLE));
                     };
-                    let body =
-                        Body::new(http_body_util::Limited::new(body, MAX_REQUEST_BODY_BYTES));
-                    let request = hyper::Request::from_parts(parts, body);
+                    let scrubbed = tokio::task::spawn_blocking(move || {
+                        gate.scrub_credentials(&mut parts);
+                        parts
+                    })
+                    .await;
+                    let Ok(parts) = scrubbed else {
+                        return Ok(status(axum::http::StatusCode::INTERNAL_SERVER_ERROR));
+                    };
+                    let request = hyper::Request::from_parts(parts, Body::from(bytes));
                     match tokio::time::timeout(request_timeout, router.oneshot(request)).await {
                         Ok(Ok(response)) => Ok(response),
                         Ok(Err(never)) => match never {},
@@ -303,6 +341,9 @@ impl ConnectorAcceptor {
             if started.elapsed() >= t.connection {
                 break t.request;
             }
+            if !activity.has_started() && started.elapsed() >= t.request_headers {
+                break t.shutdown_grace;
+            }
             if activity.idle_for().is_some_and(|idle| idle >= t.idle) {
                 break t.shutdown_grace;
             }
@@ -321,6 +362,8 @@ struct Activity {
     in_flight: AtomicUsize,
     /// Milliseconds since `started` at which the last request ended (0: none yet).
     last_end_ms: AtomicU64,
+    /// Whether any request has begun.
+    began: AtomicBool,
 }
 
 impl Activity {
@@ -329,7 +372,12 @@ impl Activity {
             started: Instant::now(),
             in_flight: AtomicUsize::new(0),
             last_end_ms: AtomicU64::new(0),
+            began: AtomicBool::new(false),
         }
+    }
+
+    fn has_started(&self) -> bool {
+        self.began.load(Ordering::SeqCst)
     }
 
     /// How long the connection has been idle, or `None` while a request is in flight.
@@ -347,6 +395,7 @@ struct Working(Arc<Activity>);
 
 impl Working {
     fn begin(activity: &Arc<Activity>) -> Self {
+        activity.began.store(true, Ordering::SeqCst);
         activity.in_flight.fetch_add(1, Ordering::SeqCst);
         Self(activity.clone())
     }
@@ -357,6 +406,50 @@ impl Drop for Working {
         let now = u64::try_from(self.0.started.elapsed().as_millis()).unwrap_or(u64::MAX);
         self.0.last_end_ms.store(now, Ordering::SeqCst);
         self.0.in_flight.fetch_sub(1, Ordering::SeqCst);
+    }
+}
+
+/// A request body, read to the end within `deadline`, no larger than the limit, and counted
+/// against the shared byte budget as it arrives. The permit returned holds those bytes until the
+/// request is done.
+async fn read_body(
+    mut body: Incoming,
+    budget: &Arc<Semaphore>,
+    deadline: Duration,
+) -> Result<(Bytes, Option<OwnedSemaphorePermit>), axum::http::StatusCode> {
+    use axum::http::StatusCode;
+    use http_body_util::BodyExt as _;
+    use hyper::body::Body as _;
+    if body.size_hint().lower() > MAX_REQUEST_BODY_BYTES as u64 {
+        return Err(StatusCode::PAYLOAD_TOO_LARGE);
+    }
+    let read = async {
+        let mut bytes = Vec::new();
+        let mut held: Option<OwnedSemaphorePermit> = None;
+        while let Some(frame) = body.frame().await {
+            let frame = frame.map_err(|_| StatusCode::BAD_REQUEST)?;
+            let Ok(data) = frame.into_data() else {
+                continue;
+            };
+            if bytes.len() + data.len() > MAX_REQUEST_BODY_BYTES {
+                return Err(StatusCode::PAYLOAD_TOO_LARGE);
+            }
+            let size = u32::try_from(data.len()).unwrap_or(u32::MAX);
+            let permit = budget
+                .clone()
+                .try_acquire_many_owned(size)
+                .map_err(|_| StatusCode::SERVICE_UNAVAILABLE)?;
+            match held.as_mut() {
+                Some(all) => all.merge(permit),
+                None => held = Some(permit),
+            }
+            bytes.extend_from_slice(&data);
+        }
+        Ok((Bytes::from(bytes), held))
+    };
+    match tokio::time::timeout(deadline, read).await {
+        Ok(read) => read,
+        Err(_) => Err(StatusCode::REQUEST_TIMEOUT),
     }
 }
 

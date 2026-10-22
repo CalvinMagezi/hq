@@ -36,6 +36,9 @@ pub(crate) struct AcmeSettings {
     pub host: String,
     pub directory_url: String,
     pub contact_email: Option<String>,
+    /// Whether the owner agreed to the CA's subscriber agreement. No account is registered
+    /// without it.
+    pub agreed_to_terms: bool,
 }
 
 /// The `reqwest` client ACME talks through, with the `Retry-After` of the latest refusal kept
@@ -171,10 +174,13 @@ impl AcmeIssuer {
     async fn order(&self) -> Result<Fresh, TlsError> {
         let account = self.account().await?;
         let identifiers = [Identifier::Dns(self.settings.host.clone())];
-        let mut order = account
-            .new_order(&NewOrder::new(&identifiers))
-            .await
-            .map_err(|e| self.failure(e))?;
+        let mut order = match account.new_order(&NewOrder::new(&identifiers)).await {
+            Ok(order) => order,
+            Err(e) => {
+                self.forget_account_if_unknown(&e).await;
+                return Err(self.failure(e));
+            }
+        };
 
         let _armed = Armed(&self.challenge);
         let mut authorizations = order.authorizations();
@@ -257,6 +263,15 @@ impl AcmeIssuer {
                 .await
                 .map_err(|e| self.failure(e));
         }
+        if !self.settings.agreed_to_terms {
+            return Err(TlsError::Config(
+                "the CA's terms have not been agreed to (mcp_connector.tls.agree_to_ca_terms)"
+                    .into(),
+            ));
+        }
+        // Registering is not undone by a store that cannot keep the result, and the next start
+        // would register again: find out first.
+        self.store.check_writable()?;
         let contact: Vec<String> = self
             .settings
             .contact_email
@@ -268,8 +283,7 @@ impl AcmeIssuer {
             .create(
                 &NewAccount {
                     contact: &contact,
-                    // `mcp_connector.tls.agree_to_ca_terms` is required to get this far.
-                    terms_of_service_agreed: true,
+                    terms_of_service_agreed: self.settings.agreed_to_terms,
                     only_return_existing: false,
                 },
                 self.settings.directory_url.clone(),
@@ -288,6 +302,16 @@ impl AcmeIssuer {
         Ok(account)
     }
 
+    /// A CA that has forgotten the account (a staging reset) fails the next order, not the load;
+    /// the account kept in memory is dropped so that deleting the file and trying again works
+    /// without a restart.
+    async fn forget_account_if_unknown(&self, error: &instant_acme::Error) {
+        if matches!(error, instant_acme::Error::Api(p) if p.r#type.as_deref() == Some(ACCOUNT_UNKNOWN))
+        {
+            *self.account.lock().await = None;
+        }
+    }
+
     /// A library error as ours: a CA's rate limit keeps its `Retry-After`.
     fn failure(&self, error: instant_acme::Error) -> TlsError {
         match &error {
@@ -303,11 +327,16 @@ impl AcmeIssuer {
             instant_acme::Error::Api(problem)
                 if problem.r#type.as_deref() == Some(ACCOUNT_UNKNOWN) =>
             {
-                TlsError::Acme(
+                let file = self
+                    .store
+                    .account_path(&self.settings.directory_url)
+                    .file_name()
+                    .map(|n| n.to_string_lossy().into_owned())
+                    .unwrap_or_default();
+                TlsError::Acme(format!(
                     "the CA does not know the saved account (staging CAs are reset now and then); \
-                     delete account-*.json in the connector's TLS folder to register again"
-                        .into(),
-                )
+                     delete {file} in the connector's TLS folder to register again"
+                ))
             }
             instant_acme::Error::Api(problem) => TlsError::Acme(format!(
                 "the CA refused: {} {}",

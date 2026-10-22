@@ -298,15 +298,17 @@ impl ConnectorTls {
                     let wait = renew::rate_limit_wait(retry_after);
                     p.state = TlsState::RateLimited;
                     p.not_before_retry = Some(now() + wait_secs(wait));
-                    p.last_error = Some(format!("the CA's rate limit was reached: {detail}"));
+                    p.last_error = Some(one_line(&format!(
+                        "the CA's rate limit was reached: {detail}"
+                    )));
                     tracing::warn!(host = %self.host, wait_secs = wait.as_secs(), "connector tls: rate limited");
                 }
                 Err(e) => {
-                    p.failures += 1;
+                    p.failures = p.failures.saturating_add(1);
                     let wait = renew::backoff(p.failures);
                     p.state = TlsState::Failed;
                     p.not_before_retry = Some(now() + wait_secs(wait));
-                    p.last_error = Some(e.to_string());
+                    p.last_error = Some(one_line(&e.to_string()));
                     tracing::warn!(host = %self.host, wait_secs = wait.as_secs(), "connector tls: order failed: {e}");
                 }
             }
@@ -383,20 +385,30 @@ impl ConnectorTls {
             .ok()
             .flatten()
             .and_then(|saved| serde_json::from_slice::<Remembered>(saved.expose()).ok());
-        if let Some(r) = remembered.filter(|r| r.not_before_retry.is_some_and(|t| t > now())) {
-            p.failures = r.failures;
-            p.not_before_retry = r.not_before_retry;
-            p.last_error = r.last_error;
-            p.state = if r.rate_limited {
-                TlsState::RateLimited
-            } else if r.failures > 0 {
-                TlsState::Failed
-            } else {
-                p.state
-            };
+        if let Some(r) = remembered {
+            // The count outlives the wait: a process restarted every few minutes still backs
+            // off further each time instead of starting over.
+            p.failures = r.failures.min(MAX_REMEMBERED_FAILURES);
+            let wait = r
+                .not_before_retry
+                .filter(|t| *t > now() && *t - now() <= renew::max_wait_secs());
+            if wait.is_some() {
+                p.not_before_retry = wait;
+                p.last_error = r.last_error.map(|e| one_line(&e));
+                p.state = if r.rate_limited {
+                    TlsState::RateLimited
+                } else if r.failures > 0 {
+                    TlsState::Failed
+                } else {
+                    p.state
+                };
+            }
         }
     }
 }
+
+/// A count read from disk is capped, so a damaged file cannot make the next wait absurd.
+const MAX_REMEMBERED_FAILURES: u32 = 1_000;
 
 /// What survives a restart of the order loop.
 #[derive(Serialize, serde::Deserialize)]
@@ -423,7 +435,20 @@ fn acme_settings(tls: &ConnectorTlsSettings) -> AcmeSettings {
         host: tls.host.clone(),
         directory_url: tls.directory_url.clone(),
         contact_email: tls.contact_email.clone(),
+        // `tls_settings` refuses a configuration that has not agreed.
+        agreed_to_terms: true,
     }
+}
+
+/// What the CA said, as one short line fit for a status screen and a small file.
+fn one_line(text: &str) -> String {
+    const MAX_CHARS: usize = 300;
+    let flat: String = text
+        .chars()
+        .map(|c| if c.is_control() { ' ' } else { c })
+        .take(MAX_CHARS)
+        .collect();
+    flat.trim().to_string()
 }
 
 fn now() -> i64 {

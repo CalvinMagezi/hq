@@ -28,8 +28,9 @@ const RATE_LIMIT_MAX_WAIT: Duration = Duration::from_secs(7 * 24 * 60 * 60);
 
 /// After an order succeeds, a certificate that is already due for renewal (a device clock far
 /// off, or a certificate with no life) must not start the next order at once: that would run
-/// the CA's weekly limit out in minutes. The next order waits this long.
-const SUCCESS_COOLDOWN: Duration = Duration::from_secs(6 * 60 * 60);
+/// the CA's weekly limit out in minutes. The next order waits this long, a little more than the
+/// 34 hours in which the CA gives back one certificate for the same name.
+const SUCCESS_COOLDOWN: Duration = Duration::from_secs(36 * 60 * 60);
 
 /// When a new order may start after a successful one: `None` when the certificate is healthy.
 pub(crate) fn hold_after_success(now: i64, not_before: i64, not_after: i64) -> Option<i64> {
@@ -55,6 +56,9 @@ pub(crate) enum Next {
 /// `cert` is the installed certificate's validity, if there is one; `not_before_retry` is the
 /// earliest time a new attempt is allowed after a failure or a rate limit.
 pub(crate) fn decide(now: i64, cert: Option<(i64, i64)>, not_before_retry: Option<i64>) -> Next {
+    // A wait further off than any a CA names was set by a clock that has since been corrected
+    // (or by a file nobody should trust): holding to it would stop renewal for years.
+    let not_before_retry = not_before_retry.filter(|t| t.saturating_sub(now) <= max_wait_secs());
     let due = match cert {
         None => now,
         Some((from, to)) => renew_at(from, to),
@@ -65,6 +69,11 @@ pub(crate) fn decide(now: i64, cert: Option<(i64, i64)>, not_before_retry: Optio
     }
     let wait = Duration::from_secs(u64::try_from(at - now).unwrap_or(0));
     Next::Wait(wait.min(MAX_SLEEP))
+}
+
+/// The longest wait a stored or computed retry time may be ahead of the clock.
+pub(crate) fn max_wait_secs() -> i64 {
+    i64::try_from(RATE_LIMIT_MAX_WAIT.as_secs()).unwrap_or(i64::MAX)
 }
 
 /// How long to wait after the `failures`-th failure in a row (the first is 1).
@@ -104,7 +113,7 @@ mod tests {
         assert_eq!(hold_after_success(100, 0, 90 * DAY), None);
         assert_eq!(
             hold_after_success(100 * DAY, 0, 90 * DAY),
-            Some(100 * DAY + 6 * 60 * 60)
+            Some(100 * DAY + 36 * 60 * 60)
         );
         assert!(
             hold_after_success(1000, 500, 500).is_some(),
@@ -141,12 +150,21 @@ mod tests {
     #[test]
     fn a_due_certificate_still_waits_out_a_rate_limit_and_keeps_serving() {
         let cert = Some((0, 90 * DAY));
-        let held_until = 70 * DAY;
+        let held_until = 64 * DAY;
         assert_eq!(
             decide(61 * DAY, cert, Some(held_until)),
             Next::Wait(MAX_SLEEP)
         );
-        assert_eq!(decide(70 * DAY, cert, Some(held_until)), Next::Now);
+        assert_eq!(decide(64 * DAY, cert, Some(held_until)), Next::Now);
+    }
+
+    #[test]
+    fn a_wait_set_by_a_clock_that_was_wrong_does_not_stop_renewal() {
+        let now = 1_000_000;
+        // A day ahead is a real wait; a year ahead, or the largest number, is not one.
+        assert!(matches!(decide(now, None, Some(now + DAY)), Next::Wait(_)));
+        assert_eq!(decide(now, None, Some(now + 365 * DAY)), Next::Now);
+        assert_eq!(decide(now, None, Some(i64::MAX)), Next::Now);
     }
 
     #[test]

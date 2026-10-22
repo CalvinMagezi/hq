@@ -77,7 +77,7 @@ mcp_connector:
 - `authorize_url` is required here: the consent page is never served on this origin, so it must
   be on a private one.
 - Off by default; not available under `profile: lite`. **Not usable from `hq start` yet:** the
-  option is checked and the TLS door exists in `crates/hq-web/src/tls/`, but nothing feeds it
+  TLS door exists and is tested in `crates/hq-web/src/tls/`, but nothing builds it or feeds it
   connections until the forwarder and the pairing bridge are wired in (the Native Bridge sprint,
   `docs/plans/native-bridge-sprint.md`). Until then use Caddy, a tunnel or Funnel as above.
 - The CA limits how many certificates one domain may get a week; a rate-limited first order waits

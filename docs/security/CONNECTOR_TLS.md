@@ -6,9 +6,11 @@ byte stream a public forwarder hands it. The forwarder (`hq edge`, built separat
 TLS server name to choose a device and passes the bytes on. It cannot read them, and no key
 is ever on it. Code: `crates/hq-web/src/tls/`. Off by default.
 
-**Status.** The door is a library surface: nothing in `hq start` feeds it streams yet. That is the
-connector-on-the-bridge work, once the forwarder and the pairing bridge exist. Until then
-`mcp_connector.tls.enabled` is validated and does nothing; the tests drive the door directly.
+**Status.** The door is a library surface: nothing in `hq start` builds it or feeds it streams yet.
+That is the connector-on-the-bridge work, once the forwarder and the pairing bridge exist.
+`mcp_connector.tls` is parsed with the rest of the config and checked by `ConnectorTls::for_state`,
+but nothing calls that at startup, so enabling it changes nothing today; the tests drive the door
+directly.
 
 ```
 claude.ai ──TLS──▶ forwarder (SNI only) ──one stream per connection──▶ device
@@ -65,18 +67,20 @@ mcp_connector:
 
 The device never learns the client's address. Abuse limits per client address therefore belong
 on the forwarder; the device bounds itself (below), but a flood of silent connections can still
-fill those bounds for as long as it lasts. The certificate is renewed from two thirds of its life,
-so weeks of retries stand between such a flood and an expired certificate.
+fill those bounds for as long as it lasts. The CA's validation is the part that matters: it has
+slots of its own and a short deadline, but it still has to get through the hello stage, so a flood
+of silent connections can delay an order. A 90 or 45 day certificate is renewed from two thirds of
+its life, leaving weeks of retries; the first certificate and a 6 day one leave far less.
 
 ## What the door does with a connection
 
 | Step | Rule |
 |---|---|
-| ClientHello | At most 256 connections are in this stage at once, 10 s each. The name is read before any certificate is chosen. A server name that is not the connector's, or none, is dropped. A hello with no certificate installed yet is dropped. |
-| `acme-tls/1` | Offered alone, for the connector's name, with a challenge pending: the challenge certificate (self-signed, critical `acmeIdentifier` extension), handshake, then the stream is shut down without reading a byte of HTTP. These connections have 8 slots of their own, so a full door can still renew. With no challenge pending, dropped. Offered beside `h2` or `http/1.1`, it is a web client and gets the issued certificate. |
+| ClientHello | At most 256 connections are in this stage at once, 5 s each. The name is read before any certificate is chosen. A server name that is not the connector's, or none, is dropped. A hello with no certificate installed yet is dropped. |
+| `acme-tls/1` | Offered alone, for the connector's name, with a challenge pending: the challenge certificate (self-signed, critical `acmeIdentifier` extension), handshake, then the stream is shut down without reading a byte of HTTP. These connections have 8 slots of their own and 3 s for the handshake, so a full web door can still renew; they still pass through the hello stage above. With no challenge pending, dropped. Offered beside `h2` or `http/1.1`, it is a web client and gets the issued certificate. |
 | Handshake | TLS 1.2 and 1.3 on rustls with the aws-lc provider, named explicitly because the process links two. ALPN `h2`, `http/1.1`, and the protocol served is the one ALPN settled on, never sniffed from the first bytes. 10 s for the handshake itself. At most 64 web connections at once; the 65th is dropped, not queued. |
-| Connection | A connection with no request in flight for 60 s is wound down, whatever the protocol (a session that says nothing, an HTTP/2 session that only answers pings). HTTP/1 request line and headers within 10 s. A connection lives at most 5 minutes and is then wound down gracefully. At most 32 HTTP/2 streams. |
-| Request | At most 16 requests in flight across all connections (a 17th is a 503). A body past 1 MiB is a 413. A request, body and handler together, within 120 s (a 408). |
+| Connection | A connection with no request in flight for 60 s is wound down, whatever the protocol (a session that says nothing, an HTTP/2 session that only answers pings), and one that sends no first request within 10 s likewise. HTTP/1 request line and headers within 10 s. A connection lives at most 5 minutes, then is wound down gracefully (an answer in flight may take up to 2 more minutes). A wind-down for idleness that does not finish in 10 s drops the connection, so an HTTP/2 peer that never sent its preface holds a slot for about 20 s, not 60. At most 32 HTTP/2 streams. |
+| Request | The body is read first, within 10 s and no larger than 1 MiB (a 413), counted as it arrives against 16 MiB held across all connections (a 503 past that): a body that is still coming costs what it has sent, and a slow one holds nothing else. Then one of 16 answering slots (a 17th is a 503). Then the credential check, which reads the database, off the async workers. The handler gets 120 s (a 408). |
 | Gate | Before the router sees anything (see below). A refusal is a plain `404 Not found` whichever check failed. |
 
 ### The gate
@@ -125,15 +129,20 @@ the same TLS stack and roots as the rest of HQ. `rcgen` (MIT or Apache-2.0) make
 challenge certificate; `x509-parser` (MIT or Apache-2.0) reads the validity window. All three are
 pinned exactly in `crates/hq-web/Cargo.toml`.
 
-**Flow.** Account (one per ACME directory, kept in memory once loaded or made so that a failed save
-cannot lead to a second registration; a stored account that cannot be read is an error, never a
-reason to register another) → order for the one name → TLS-ALPN-01 challenge armed on the acceptor
+**Flow.** Account (one per ACME directory; the store is checked to be writable before one is
+registered, and the account is kept in memory once loaded or made, so a store that fails later
+does not lead to a second registration in the same run; a stored account that cannot be read is an
+error, never a reason to register another; no account is registered without
+`agree_to_ca_terms`) → order for the one name → TLS-ALPN-01 challenge armed on the acceptor
 → `set_ready` → poll until ready → ECDSA P-256 key and CSR → finalize → chain → the leaf is checked
 to name the connector and to be for that key → saved, then swapped into the acceptor without a
 restart. Renewal starts two thirds of the way through the certificate's life, so the rule holds for
 90, 45 and 6 day certificates; a new certificate that is already due (a device clock far off) waits
-6 hours before the next order. A restart serves the saved certificate at once, drops one that has
-expired, and remembers the failure count and the wait. ARI (RFC 9773) is not used yet
+36 hours before the next order, a little more than the 34 hours in which the CA gives back one
+certificate for the same name. A restart serves the saved certificate at once, drops one that has
+expired, and remembers the failure count (even after the wait is over) and the wait. A wait more
+than seven days ahead of the clock was set by a clock that has been corrected, or by a damaged
+file, and is ignored. ARI (RFC 9773) is not used yet
 (`TECHDEBT.md`).
 
 **Tests.** `cargo test -p hq-web --lib tls::` runs the whole flow against an in-process ACME
@@ -168,10 +177,10 @@ or HTTP 429) is not a failure of the certificate in use:
 - The next order waits for the CA's `Retry-After` (kept from the response), at least a minute and
   at most seven days; with none, six hours. Other failures wait 15, 30 and 60 minutes, then 2, 4
   and 6 hours, so the first retry is after the failed-validation limit has refilled.
-- No new account is created to get round a limit: the account is made once, kept in memory for
-  the life of the process even if saving it failed, and read from disk after a restart. (A CA
-  that has forgotten the account, as staging CAs do after a reset, leaves the door in `failed`
-  with a message that says to delete `account-*.json`; it does not register another by itself.)
+- No new account is created to get round a limit: the account is made once and read from disk
+  after a restart. (A CA that has forgotten the account, as staging CAs do after a reset, leaves
+  the door in `failed` with a message that names the file to delete; it does not register another
+  by itself, and the next try after deleting it needs no restart.)
 - `ConnectorTls::status()` reports `state` (`no_certificate`, `valid`, `renewing`, `rate_limited`,
   `failed`), `not_after`, `next_attempt_at` and a one-line `last_error`. The status surfaces
   (`hq connector status`, the app's Connect Claude screen) read it; wiring them is the
@@ -226,5 +235,5 @@ TCP listener for it; the pairing work should point the same assertions at the re
 - **Revocation of a certificate** (compromise of the device's key) is not wired. Delete the
   `.pem` and `.retry.json` files for the name in the state directory and restart: the next order
   issues a new key, and the running process keeps serving the old one until it restarts. Keep the
-  `account-*.json` file or the CA's account limit applies again. The old certificate expires on its
-  own.
+  account file for the directory in use, or the CA's account limit applies again. The old
+  certificate expires on its own.
