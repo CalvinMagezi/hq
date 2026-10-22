@@ -11,6 +11,11 @@ import example.hq.spike.data.HqUnavailable
 import java.time.LocalDate
 import java.util.UUID
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
+import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.sync.Semaphore
+import kotlinx.coroutines.sync.withPermit
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -72,6 +77,10 @@ data class TasksUi(
     val chip: AllChip = AllChip.Active,
     val archived: List<TaskItem> = emptyList(),
     val sessions: List<HqClient.WorkSession> = emptyList(),
+    /** The tasks picked on the All tab, what is being asked of them ("status" or "priority"), and a change in flight. */
+    val selected: Set<String> = emptySet(),
+    val bulkPrompt: String? = null,
+    val bulking: Boolean = false,
 ) {
     val workingIds: Set<String> get() = sessions.mapTo(HashSet()) { it.taskId }
     val shown: List<TaskItem> get() = tasks.filter { it.id !in hidden }
@@ -106,6 +115,11 @@ class TasksActions(
     val onQuickSave: () -> Unit = {},
     val onChip: (AllChip) -> Unit = {},
     val onRestore: () -> Unit = {},
+    val onSelect: (String) -> Unit = {},
+    val onSelectAll: (List<String>) -> Unit = {},
+    val onClearSelection: () -> Unit = {},
+    val onBulkPrompt: (String?) -> Unit = {},
+    val onBulk: (Bulk) -> Unit = {},
 )
 
 class TasksViewModel(app: Application) : AndroidViewModel(app) {
@@ -119,7 +133,7 @@ class TasksViewModel(app: Application) : AndroidViewModel(app) {
     private val writing = mutableSetOf<String>()
 
     val actions = TasksActions(
-        onTab = { t -> _state.update { it.copy(tab = t) } }, onRefresh = { viewModelScope.launch { refresh() } },
+        onTab = { t -> _state.update { it.copy(tab = t, selected = emptySet(), bulkPrompt = null) } }, onRefresh = { viewModelScope.launch { refresh() } },
         onToggleGroup = { k -> _state.update { it.copy(expanded = if (k in it.expanded) it.expanded - k else it.expanded + k) } },
         onDone = ::done, onTomorrow = ::tomorrow, onUndo = ::undoLast, onDismissLine = { _state.update { it.copy(line = null) } },
         onOpen = ::open, onClose = { _state.update { it.copy(detail = null) } }, onMarkDone = { _state.value.detail?.task?.let(::done); _state.update { it.copy(detail = null) } },
@@ -129,6 +143,10 @@ class TasksViewModel(app: Application) : AndroidViewModel(app) {
         onToggleSub = ::toggleSub, onAddSub = ::addSub, onComment = ::comment, onArchive = ::archive,
         onQuick = { q -> _state.update { it.copy(quick = q) } }, onQuickSave = ::saveQuick,
         onChip = ::chooseChip, onRestore = ::restore,
+        onSelect = { id -> _state.update { if (it.bulking) it else it.copy(selected = if (id in it.selected) it.selected - id else it.selected + id) } },
+        onSelectAll = { ids -> _state.update { if (it.bulking) it else it.copy(selected = ids.toSet()) } },
+        onClearSelection = { _state.update { if (it.bulking) it else it.copy(selected = emptySet(), bulkPrompt = null) } },
+        onBulkPrompt = { p -> _state.update { it.copy(bulkPrompt = p) } }, onBulk = ::runBulk,
     )
 
     init {
@@ -163,8 +181,34 @@ class TasksViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
+    /** Applies one change to every selected task, four at a time, and says what happened to each. Tasks that failed stay selected. */
+    private fun runBulk(change: Bulk) {
+        val picked = _state.value.tasks.filter { it.id in _state.value.selected }
+        if (picked.isEmpty() || _state.value.bulking) return
+        _state.update { it.copy(bulkPrompt = null, bulking = true) }
+        viewModelScope.launch {
+            val gate = Semaphore(BulkEdit.IN_FLIGHT)
+            val results = coroutineScope { picked.map { t -> async { gate.withPermit { applyOne(change, t) } } }.awaitAll() }
+            val failedIds = picked.zip(results).filter { it.second is Applied.Failed }.mapTo(HashSet()) { it.first.id }
+            refreshSeq++
+            _state.update { it.copy(bulking = false, selected = failedIds) }
+            say(BulkEdit.summary(change, results))
+            refresh()
+        }
+    }
+
+    private suspend fun applyOne(change: Bulk, t: TaskItem): Applied {
+        val body = BulkEdit.patchFor(change, t) ?: return Applied.Already
+        return try {
+            client.patchTask(t.id, body)
+            Applied.Changed
+        } catch (e: HqUnavailable) {
+            Applied.Failed(t.displayId.ifBlank { t.title }, BulkEdit.failure(e.status))
+        }
+    }
+
     private fun chooseChip(chip: AllChip) {
-        _state.update { it.copy(chip = chip) }
+        _state.update { it.copy(chip = chip, selected = emptySet(), bulkPrompt = null) }
         if (chip == AllChip.Archived) viewModelScope.launch { refresh() }
     }
 

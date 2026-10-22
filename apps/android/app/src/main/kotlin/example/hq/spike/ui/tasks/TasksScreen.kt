@@ -3,6 +3,7 @@ package example.hq.spike.ui.tasks
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -53,6 +54,9 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.em
 import androidx.compose.ui.unit.sp
 import example.hq.spike.data.HqClient.TaskItem
+import example.hq.spike.ui.chat.ActionRow
+import example.hq.spike.ui.chat.SheetFrame
+import example.hq.spike.ui.chat.blocks.IconAction
 import example.hq.spike.ui.shell.HqIcons
 import example.hq.spike.ui.theme.HqType
 import example.hq.spike.ui.theme.Mts
@@ -66,12 +70,21 @@ private const val META_LINES = 2
 /** The Tasks place: Today, Upcoming and All, with a checkbox on each row and swipes to finish or move. */
 @Composable
 fun TasksScreen(ui: TasksUi, actions: TasksActions, onHelpers: () -> Unit = {}) {
+    androidx.activity.compose.BackHandler(enabled = ui.selected.isNotEmpty(), onBack = actions.onClearSelection)
     Box(Modifier.fillMaxSize()) {
         Column(Modifier.fillMaxSize()) {
-            Tabs(ui.tab, actions.onTab)
+            if (ui.selected.isEmpty()) Tabs(ui.tab, actions.onTab) else SelectionBar(ui, actions)
             Box(Modifier.weight(1f).fillMaxWidth()) { Feed(ui, actions, onHelpers) }
         }
-        NewTaskButton(Modifier.align(Alignment.BottomEnd).padding(16.dp)) { actions.onQuick(QuickState()) }
+        if (ui.selected.isEmpty()) NewTaskButton(Modifier.align(Alignment.BottomEnd).padding(16.dp)) { actions.onQuick(QuickState()) }
+        when (ui.bulkPrompt) {
+            "status" -> SheetFrame({ actions.onBulkPrompt(null) }, top = null) {
+                BulkEdit.STATUS_CHOICES.forEach { s -> ActionRow(HqIcons.Check, TasksLogic.statusWords(s), null, { actions.onBulk(Bulk.Status(s)) }) }
+            }
+            "priority" -> SheetFrame({ actions.onBulkPrompt(null) }, top = null) {
+                BulkEdit.PRIORITY_CHOICES.forEach { (key, label) -> ActionRow(HqIcons.Check, label, null, { actions.onBulk(Bulk.Priority(key)) }) }
+            }
+        }
         ui.line?.let { Snack(it, actions, Modifier.align(Alignment.BottomCenter).padding(bottom = 4.dp)) }
     }
 }
@@ -104,7 +117,7 @@ private fun Feed(ui: TasksUi, actions: TasksActions, onHelpers: () -> Unit) {
             val open = g.key in ui.expanded
             val shown = if (g.preview != null && !open) g.tasks.take(g.preview) else g.tasks
             if (!g.collapsible || open) items(shown.size, key = { "${g.key}-${shown[it].id}" }) {
-                if (onAll) AllRow(shown[it], ui.today, shown[it].id in ui.workingIds, actions) else TaskRow(shown[it], ui.today, actions)
+                if (onAll) AllRow(shown[it], ui.today, shown[it].id in ui.workingIds, ui.selected, ui.chip != AllChip.Archived, actions) else TaskRow(shown[it], ui.today, actions)
             }
             if (g.preview != null && g.tasks.size > g.preview) item(key = "m-${g.key}") { MoreRow(g.tasks.size - g.preview, open) { actions.onToggleGroup(g.key) } }
         }
@@ -158,18 +171,54 @@ private fun WorkingStrip(sessions: List<example.hq.spike.data.HqClient.WorkSessi
 
 /** A task on the All tab: its number and what stands out, its title, and what it is waiting on. No checkbox and no swipe: it is opened to be changed. */
 @Composable
-private fun AllRow(t: TaskItem, today: LocalDate, working: Boolean, actions: TasksActions) {
+@OptIn(androidx.compose.foundation.ExperimentalFoundationApi::class)
+private fun AllRow(t: TaskItem, today: LocalDate, working: Boolean, selected: Set<String>, bulkable: Boolean, actions: TasksActions) {
     val tag = TasksLogic.idTag(t)
     val meta = TasksLogic.allMeta(t, today, working)
-    Column(
-        Modifier.fillMaxWidth().heightIn(min = 72.dp).clickable(role = Role.Button) { actions.onOpen(t) }.drawBehind { drawLine(Mts.Hairline, Offset(0f, size.height), Offset(size.width, size.height), 1.dp.toPx()) }.padding(horizontal = 16.dp, vertical = 12.dp),
+    val selecting = selected.isNotEmpty()
+    val on = t.id in selected
+    Row(
+        Modifier.fillMaxWidth().heightIn(min = 72.dp).then(if (on) Modifier.background(Mts.Surface100) else Modifier)
+            .combinedClickable(role = Role.Button, onLongClickLabel = if (bulkable) "Select" else null, onLongClick = if (bulkable) ({ actions.onSelect(t.id) }) else null) { if (selecting) actions.onSelect(t.id) else actions.onOpen(t) }
+            .drawBehind { drawLine(Mts.Hairline, Offset(0f, size.height), Offset(size.width, size.height), 1.dp.toPx()) }.padding(horizontal = 16.dp, vertical = 12.dp),
+        horizontalArrangement = Arrangement.spacedBy(12.dp),
     ) {
-        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            Text(t.displayId, style = HqType.Caption.copy(fontWeight = FontWeight.Bold), color = Mts.InkMuted)
-            tag?.let { Text(it.text, style = HqType.Caption.copy(fontWeight = FontWeight.Bold), color = if (it.danger) Mts.DangerText else Mts.Amber) }
+        if (selecting) Box(
+            Modifier.padding(top = 2.dp).size(22.dp).clip(RoundedCornerShape(6.dp)).then(if (on) Modifier.background(Mts.BrandGreen) else Modifier.border(2.dp, Mts.Line, RoundedCornerShape(6.dp))),
+            contentAlignment = Alignment.Center,
+        ) { if (on) Icon(HqIcons.Check, null, Modifier.size(16.dp), tint = Mts.OnGreen) }
+        Column(Modifier.weight(1f)) {
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text(t.displayId, style = HqType.Caption.copy(fontWeight = FontWeight.Bold), color = Mts.InkMuted)
+                tag?.let { Text(it.text, style = HqType.Caption.copy(fontWeight = FontWeight.Bold), color = if (it.danger) Mts.DangerText else Mts.Amber) }
+            }
+            Text(t.title, style = HqType.BodyBold, color = Mts.Ink, maxLines = TITLE_LINES, overflow = TextOverflow.Ellipsis)
+            if (meta.isNotEmpty()) Text(meta, style = HqType.BodySm, color = Mts.InkMuted, maxLines = META_LINES, overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(top = 2.dp))
         }
-        Text(t.title, style = HqType.BodyBold, color = Mts.Ink, maxLines = TITLE_LINES, overflow = TextOverflow.Ellipsis)
-        if (meta.isNotEmpty()) Text(meta, style = HqType.BodySm, color = Mts.InkMuted, maxLines = META_LINES, overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(top = 2.dp))
+    }
+}
+
+/** Replaces the tabs while tasks are picked: how many, a way to pick them all or none, and what to do to them. */
+@Composable
+private fun SelectionBar(ui: TasksUi, actions: TasksActions) {
+    val ids = ui.groups.flatMap { g -> g.tasks.map { it.id } }
+    val all = ui.selected.size >= ids.size
+    Column(Modifier.fillMaxWidth().drawBehind { drawLine(Mts.Hairline, Offset(0f, size.height), Offset(size.width, size.height), 1.dp.toPx()) }.padding(bottom = 8.dp)) {
+        Row(Modifier.fillMaxWidth().heightIn(min = 48.dp), verticalAlignment = Alignment.CenterVertically) {
+            IconAction(HqIcons.Close, "Clear selection", iconSize = 24.dp, onClick = actions.onClearSelection)
+            Text("${ui.selected.size} selected", style = HqType.BodyBold, color = Mts.Ink, modifier = Modifier.weight(1f).padding(start = 4.dp))
+            Box(Modifier.heightIn(min = 48.dp).clickable(role = Role.Button) { if (all) actions.onClearSelection() else actions.onSelectAll(ids) }.padding(horizontal = 16.dp), contentAlignment = Alignment.Center) {
+                Text(if (all) "Clear" else "Select all ${ids.size}", style = HqType.BodySmBold, color = Mts.BrandBlue)
+            }
+        }
+        Row(Modifier.padding(horizontal = 16.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            listOf("Set status" to "status", "Set priority" to "priority").forEach { (label, prompt) ->
+                Box(
+                    Modifier.heightIn(min = 40.dp).clip(CircleShape).border(1.dp, Mts.Line, CircleShape).clickable(enabled = !ui.bulking, role = Role.Button) { actions.onBulkPrompt(prompt) }.padding(horizontal = 16.dp),
+                    contentAlignment = Alignment.Center,
+                ) { Text(if (ui.bulking) "Working\u2026" else label, style = HqType.BodySmBold, color = Mts.Ink) }
+            }
+        }
     }
 }
 

@@ -36,6 +36,8 @@ fun tasksFixture(name: String?): TasksUi? {
         "t-today" -> base
         "t-upcoming" -> base.copy(tab = TaskTab.Upcoming)
         "t-all" -> base.copy(tab = TaskTab.All)
+        "t-select" -> base.copy(tab = TaskTab.All, selected = setOf("3", "4"))
+        "t-select-status" -> base.copy(tab = TaskTab.All, selected = setOf("3", "4"), bulkPrompt = "status")
         "t-all-stuck" -> base.copy(tab = TaskTab.All, chip = AllChip.Stuck)
         "t-all-done" -> base.copy(tab = TaskTab.All, chip = AllChip.Done)
         "t-all-archived" -> base.copy(tab = TaskTab.All, chip = AllChip.Archived)
