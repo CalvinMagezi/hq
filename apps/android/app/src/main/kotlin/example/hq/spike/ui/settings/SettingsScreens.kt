@@ -418,7 +418,7 @@ private fun Spending(ui: SettingsUi) {
         if (Unanswered(ui, "budgets", b != null) || b == null) return@Page
         val cards = SettingsWords.budgetCards(b, ui.now)
         Label("Budgets")
-        if (cards.isEmpty()) Notice("No budgets are set, so nothing is limited.", HqIcons.Info)
+        if (cards.isEmpty()) Notice(SettingsWords.noBudgets(b), HqIcons.Info)
         else Group { cards.forEachIndexed { i, c -> if (i > 0) Divider(); BudgetCardView(c) } }
         val forecast = SettingsWords.forecast(ui.snap.forecast)
         when {

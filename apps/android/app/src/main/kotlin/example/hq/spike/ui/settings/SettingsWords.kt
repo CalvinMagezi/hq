@@ -401,6 +401,10 @@ object SettingsWords {
         )
     }
 
+    /** The empty Budgets page: nothing is capped, unless HQ also holds a cap for each background run. */
+    fun noBudgets(b: JSONObject?): String =
+        if ((numOrNull(b, "background_run_usd") ?: 0.0) > 0.0) "No budgets are set." else "No budgets are set, so nothing is limited."
+
     /** Hours as the board writes them: under an hour "<1h", under a day "9h", then "3 days". */
     fun span(hours: Double): String = when {
         !hours.isFinite() || hours < 1 -> "<1h"
@@ -413,11 +417,13 @@ object SettingsWords {
 
     fun forecast(f: JSONObject?): Forecast? {
         val m = f.obj("month") ?: return null
-        if (numOrNull(m, "rate_per_hour") == null) return Forecast(emptyList(), "No spend recorded yet, so there is nothing to forecast.")
+        val spent = numOrNull(m, "spent_this_period") ?: 0.0
+        if (numOrNull(m, "rate_per_hour") == null && spent <= 0.0) return Forecast(emptyList(), "No spend recorded yet, so there is nothing to forecast.")
+        val rough = if (m.optString("confidence") == "low") "Not much history yet, so this is a rough guess." else null
         return Forecast(
             listOf(
-                FactRow("Spent so far", UsageWords.usd(numOrNull(m, "spent_this_period"))),
-                FactRow("Projected month end", UsageWords.usd(numOrNull(m, "projected_period_total"))),
+                FactRow("Spent so far", UsageWords.usd(spent)),
+                FactRow("Projected month end", UsageWords.usd(numOrNull(m, "projected_period_total")), rough),
                 FactRow("Resets in", numOrNull(m, "hours_to_reset")?.let(::span) ?: "-"),
             ),
             null,

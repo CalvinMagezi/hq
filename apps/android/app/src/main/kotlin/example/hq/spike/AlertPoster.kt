@@ -9,6 +9,7 @@ import android.content.Intent
 import android.graphics.drawable.Icon
 import android.net.Uri
 import android.os.Build
+import android.os.SystemClock
 import example.hq.spike.data.HqClient.InboxItem
 import example.hq.spike.ui.inbox.CardKind
 import example.hq.spike.ui.shell.Links
@@ -30,6 +31,8 @@ object AlertPoster {
     private const val SDK_AUTH_ACTION = 31
     private const val PREFS = "alerts"
     private const val ALLOW_ANSWERS = "allow_answers"
+    private const val RESULT_KEEP_MS = 15_000L
+    private val answeredAt = java.util.concurrent.ConcurrentHashMap<String, Long>()
 
     @JvmStatic
     fun channels(): List<NotificationChannel> = listOf(
@@ -72,7 +75,14 @@ object AlertPoster {
     @JvmStatic
     fun cancelGone(c: Context, seen: List<String>, current: Set<String>) {
         val nm = c.getSystemService(NotificationManager::class.java)
-        seen.filter { it !in current }.forEach { nm.cancel(notificationId(it)) }
+        val now = SystemClock.elapsedRealtime()
+        // An item answered from its notification is no longer pending, but the card that says what happened must stay its few seconds.
+        seen.filter { it !in current && now - (answeredAt[it] ?: Long.MIN_VALUE / 2) > RESULT_KEEP_MS }.forEach { nm.cancel(notificationId(it)) }
+    }
+
+    /** Records that [id] was just answered from its notification, so the sweep leaves the card that replaced the question alone. */
+    internal fun answeredNow(id: String) {
+        answeredAt[id] = SystemClock.elapsedRealtime()
     }
 
     /** Taps open what the notification is about: the helper for a helper's question, else the Inbox item; the Inbox when it is about nothing in particular. */

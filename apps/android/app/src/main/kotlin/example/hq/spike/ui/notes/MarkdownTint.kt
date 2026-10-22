@@ -18,6 +18,9 @@ data class TintSpan(val start: Int, val end: Int, val kind: TintKind)
 object MarkdownTint {
     /** A longer text is left plain so typing in a big note stays quick. */
     const val MAX_CHARS = 200_000
+
+    /** A longer line is left plain: the patterns slow down on a line with thousands of unclosed marks. */
+    const val MAX_LINE = 2_000
     private const val HEADING_SIZE = 18
 
     private val HEADING = Regex("^(#{1,6} )")
@@ -29,8 +32,10 @@ object MarkdownTint {
     fun spans(text: String): List<TintSpan> {
         val out = ArrayList<TintSpan>()
         var lineStart = 0
+        var fenced = false
         for (line in text.split('\n')) {
-            tintLine(line, lineStart, out)
+            if (line.trimStart().startsWith("```")) fenced = !fenced
+            else if (!fenced && line.length <= MAX_LINE) tintLine(line, lineStart, out)
             lineStart += line.length + 1
         }
         return out
@@ -67,14 +72,18 @@ object MarkdownTransformation : VisualTransformation {
     private val Heading = SpanStyle(color = Mts.Ink, fontWeight = FontWeight.Bold, fontSize = 18.sp)
     private val Wiki = SpanStyle(color = Mts.BrandBlue, fontWeight = FontWeight.Normal)
 
+    /** The last text tinted and its result: a cursor move runs the transformation again over the same text. */
+    @Volatile private var last: Pair<String, TransformedText>? = null
+
     override fun filter(text: AnnotatedString): TransformedText {
         if (text.length > MarkdownTint.MAX_CHARS) return TransformedText(text, OffsetMapping.Identity)
+        last?.let { (was, result) -> if (was == text.text) return result }
         val tinted = buildAnnotatedString {
             append(text.text)
             for (s in MarkdownTint.spans(text.text)) {
                 addStyle(when (s.kind) { TintKind.Mark -> Mark; TintKind.Heading -> Heading; TintKind.Wiki -> Wiki }, s.start, s.end)
             }
         }
-        return TransformedText(tinted, OffsetMapping.Identity)
+        return TransformedText(tinted, OffsetMapping.Identity).also { last = text.text to it }
     }
 }

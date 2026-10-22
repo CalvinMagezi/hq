@@ -353,7 +353,8 @@ class HelpersViewModel(app: Application) : AndroidViewModel(app) {
                 return@launch
             }
             editFor(o.id) { it.copy(following = false) }
-            if (thread.isBlank()) say(HelperWords.followFailed(null)) else _state.update { it.copy(followed = thread) }
+            // Opening the chat closes the helper page, so it is done only if the owner is still looking at this helper.
+            if (thread.isBlank()) say(HelperWords.followFailed(null)) else if (_state.value.open?.id == o.id) _state.update { it.copy(followed = thread) }
         }
     }
 

@@ -108,7 +108,7 @@ class SettingsViewModel(app: Application) : AndroidViewModel(app) {
             val fast = local.map { (key, path) -> async { key to get(path) } }.awaitAll().toMap()
             if (frozen) return@coroutineScope
             val before = _state.value.snap
-            publish(fast, mapOf("providers" to Got(before.providers, true), "copilot" to Got(before.copilot, true), "forecast" to Got(before.forecast, true)))
+            publish(fast, mapOf("providers" to Got(before.providers, before.providers != null), "copilot" to Got(before.copilot, before.copilot != null), "forecast" to Got(before.forecast, before.forecast != null)))
             val late = slow.awaitAll().toMap()
             if (frozen) return@coroutineScope
             publish(fast, late)

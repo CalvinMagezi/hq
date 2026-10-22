@@ -6,6 +6,7 @@ import android.app.PendingIntent
 import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
+import android.os.Build
 import android.os.SystemClock
 import example.hq.spike.ui.inbox.CardKind
 import example.hq.spike.ui.helpers.AnswerCheck
@@ -32,15 +33,18 @@ class AnswerReceiver : BroadcastReceiver() {
         val kind = intent.getStringExtra(KIND)
         val title = intent.getStringExtra(TITLE).orEmpty()
         val excerpt = intent.getStringExtra(EXCERPT).orEmpty().lines()
+        // A second tap before the card has changed would send the same key twice.
+        if (!inFlight.add(id)) return
         val pending = goAsync()
         val deadline = SystemClock.elapsedRealtime() + DEADLINE_MS
         val nm = context.getSystemService(NotificationManager::class.java)
         val nid = AlertPoster.notificationId(id)
-        // The tap changes the asking card at once, with no buttons, so a second tap cannot send twice.
-        nm.notify(nid, say(context, AnswerWords.sending, null))
+        AlertPoster.answeredNow(id)
         Thread {
             var keySent = false
             try {
+                // The tap changes the asking card at once, with no buttons.
+                nm.notify(nid, say(context, AnswerWords.sending, null))
                 if (kind == CardKind.HelperAsks.name && session != null) {
                     val key = if (answer == "approve") "enter" else "esc"
                     // The key goes in only if the helper's live screen still shows the dialog this notification quoted.
@@ -51,8 +55,9 @@ class AnswerReceiver : BroadcastReceiver() {
                         nm.notify(nid, say(context, AnswerWords.Say("Not sent", HelperWords.checkWords(check)), null))
                         return@Thread
                     }
-                    post("/api/harness-sessions/$session/send", JSONObject().put("keys", JSONArray().put(key)), context, deadline)
+                    // Counted as sent before the call: an answer that timed out may still have reached the helper, and a retry would press the key again.
                     keySent = true
+                    post("/api/harness-sessions/$session/send", JSONObject().put("keys", JSONArray().put(key)), context, deadline)
                 }
                 post("/api/notifications/$id/action", JSONObject().put("action", answer), context, deadline)
                 val at = LocalTime.now().format(DateTimeFormatter.ofPattern("HH:mm"))
@@ -63,6 +68,8 @@ class AnswerReceiver : BroadcastReceiver() {
                 if (keySent) nm.notify(nid, say(context, AnswerWords.sentNotRecorded, null))
                 else nm.notify(nid, say(context, AnswerWords.failed, intent))
             } finally {
+                AlertPoster.answeredNow(id)
+                inFlight.remove(id)
                 pending.finish()
             }
         }.start()
@@ -99,18 +106,22 @@ class AnswerReceiver : BroadcastReceiver() {
         }
     }
 
-    /** Milliseconds left of the one deadline an answer has, from the tap; none left means the answer failed. */
+    /** Milliseconds left of the deadline an answer has, from the tap (a connect can add up to two seconds more); none left means the answer failed. */
     private fun left(deadline: Long): Int = (deadline - SystemClock.elapsedRealtime()).toInt().also { if (it <= 0) throw java.io.IOException("no time left") }
 
     /** The notification that replaces the asking card: the words, and for a failure Try again (the same tap again) and Open. */
     private fun say(c: Context, words: AnswerWords.Say, retry: Intent?): Notification {
         val icon = android.graphics.drawable.Icon.createWithResource(c, HubService.statIcon(c))
         val b = Notification.Builder(c, AlertPoster.NEEDS).setSmallIcon(HubService.statIcon(c)).setContentTitle(words.title).setAutoCancel(true).setOnlyAlertOnce(true)
+            .setContentIntent(AlertPoster.open(c))
         words.body?.let { b.setContentText(it) }
-        if (words === AnswerWords.sending) b.setProgress(0, 0, true)
+        if (words === AnswerWords.sending) b.setProgress(0, 0, true).setTimeoutAfter(SENDING_STUCK_MS)
         else if (retry == null) b.setTimeoutAfter(CLEAR_AFTER_MS)
         else {
-            b.addAction(Notification.Action.Builder(icon, "Try again", PendingIntent.getBroadcast(c, retry.getStringExtra(ID).hashCode(), Intent(retry), PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT)).build())
+            val again = Notification.Action.Builder(icon, "Try again", PendingIntent.getBroadcast(c, retry.getStringExtra(ID).hashCode(), Intent(retry), PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT))
+            // Allowing asks for the phone to be unlocked, so trying it again does too.
+            if (retry.getStringExtra(ANSWER) == "approve" && Build.VERSION.SDK_INT >= SDK_AUTH_ACTION) again.setAuthenticationRequired(true)
+            b.addAction(again.build())
             b.addAction(Notification.Action.Builder(icon, "Open", AlertPoster.open(c)).build())
         }
         return b.build()
@@ -127,6 +138,9 @@ class AnswerReceiver : BroadcastReceiver() {
         private const val DEADLINE_MS = 10_000L
         private const val CONNECT_MS = 2_000
         private const val CLEAR_AFTER_MS = 6_000L
+        private const val SENDING_STUCK_MS = 15_000L
+        private const val SDK_AUTH_ACTION = 31
+        private val inFlight: MutableSet<String> = java.util.concurrent.ConcurrentHashMap.newKeySet()
 
         fun intent(c: Context, card: InboxCard, answer: String): PendingIntent {
             val i = Intent(c, AnswerReceiver::class.java).putExtra(ID, card.id).putExtra(ANSWER, answer).putExtra(SESSION, card.sessionId)

@@ -263,7 +263,8 @@ class ShellActivity : ComponentActivity() {
             LaunchedEffect(thread) {
                 helpers.actions.onFollowedHandled()
                 helpers.actions.onClose()
-                chat.openLinked(thread)
+                // HQ named this chat itself, so it opens even if the list has not caught up or the chat was archived.
+                chat.actions.onOpenChat(thread)
                 go(Place.Chat)
             }
         }

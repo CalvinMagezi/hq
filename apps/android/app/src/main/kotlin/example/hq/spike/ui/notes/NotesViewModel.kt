@@ -206,7 +206,11 @@ class NotesViewModel(app: Application) : AndroidViewModel(app) {
     private fun makeTask() {
         val note = (_state.value.reader as? ReaderPhase.Ready)?.note ?: return
         viewModelScope.launch {
-            val said = try { client.createTask(noteTaskBody(note.path, note.title)); "Task added to your Inbox" } catch (e: HqUnavailable) { "Could not add the task. HQ is not answering." }
+            val said = try {
+                if (client.createTaskOnce(noteTaskBody(note.path, note.title))) "This note already has a task" else "Task added to your Inbox"
+            } catch (e: HqUnavailable) {
+                if (e.status == 0) "Could not add the task. HQ is not answering." else "Could not add the task."
+            }
             _state.update { it.copy(notice = Notice(said)) }
         }
     }
@@ -261,11 +265,12 @@ class NotesViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     private fun reloadReader(path: String) {
+        val pinned = (_state.value.reader as? ReaderPhase.Ready)?.note?.pinned ?: false
         _state.update { it.copy(reader = ReaderPhase.Loading) }
         viewModelScope.launch {
             val phase = try {
                 val body = client.note(path)
-                ReaderPhase.Ready(NoteSheet(body.path, NoteRefs.title(body.path), NoteRefs.folderTrail(body.path), body.content, body.truncated, null, false), "edited just now")
+                ReaderPhase.Ready(NoteSheet(body.path, NoteRefs.title(body.path), NoteRefs.folderTrail(body.path), body.content, body.truncated, null, pinned), "edited just now")
             } catch (e: NoteNotFound) { ReaderPhase.Gone } catch (e: HqUnavailable) { ReaderPhase.Failed }
             _state.update { if (it.top == NotesRoute.Reader(path)) it.copy(reader = phase) else it }
         }

@@ -349,4 +349,16 @@ class SettingsWordsTest {
             java.util.Locale.setDefault(before)
         }
     }
+
+    @Test fun aForecastWithNoRateButSomeSpendStillShowsTheMonthSoFar() {
+        val f = SettingsWords.forecast(JSONObject("""{"month":{"rate_per_hour":null,"spent_this_period":3.4,"hours_to_reset":500,"projected_period_total":null,"confidence":"low"}}"""))!!
+        assertNull(f.note)
+        assertEquals(listOf("$3.40", "-", "21 days"), f.rows.map { it.value })
+        assertEquals("Not much history yet, so this is a rough guess.", f.rows[1].text)
+    }
+
+    @Test fun theEmptyBudgetsLineDoesNotClaimNothingIsLimitedWhenBackgroundRunsAreCapped() {
+        assertEquals("No budgets are set, so nothing is limited.", SettingsWords.noBudgets(JSONObject("""{"budgets":[]}""")))
+        assertEquals("No budgets are set.", SettingsWords.noBudgets(JSONObject("""{"budgets":[],"background_run_usd":2.5}""")))
+    }
 }

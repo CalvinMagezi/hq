@@ -78,4 +78,20 @@ class MarkdownTintTest {
         assertEquals("You wrote Ideas and have not saved it. Your text is kept on this phone unless you discard it.", write(null, "Ideas").leaveBody)
         assertEquals("You wrote a note and have not saved it. Your text is kept on this phone unless you discard it.", write(null, "").leaveBody)
     }
+
+    @Test fun aLongLineIsLeftPlain() {
+        val line = "**x ".repeat(MarkdownTint.MAX_LINE)
+        assertEquals(0, MarkdownTint.spans(line).size)
+        assertEquals(2, MarkdownTint.spans("**x**").size)
+    }
+
+    @Test fun aCodeFenceIsNotTinted() {
+        assertEquals(emptyList<Pair<String, TintKind>>(), tinted("```\n# not a heading\n- not a list\n```"))
+        assertEquals("## " to TintKind.Mark, tinted("```\ncode\n```\n## Real").first())
+    }
+
+    @Test fun aNewNoteWithOnlyATitleDoesNotPromiseItsText() {
+        val w = WriteState(null, "Notebooks/Inbox", "Ideas", TextFieldValue("", TextRange(0)), original = "")
+        assertEquals("You wrote Ideas and have not saved it.", w.leaveBody)
+    }
 }
