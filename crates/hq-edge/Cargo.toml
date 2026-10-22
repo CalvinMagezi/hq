@@ -1,0 +1,27 @@
+[package]
+name = "hq-edge"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "hq edge: a blind public forwarder that routes TLS connections by server name to a paired device over iroh"
+
+[dependencies]
+# Pinned: the wire behavior of iroh and its relay is what the device side is tested against.
+iroh = "=1.4.1"
+iroh-relay = { version = "=1.4.1", features = ["server"] }
+anyhow = { workspace = true }
+dirs = { workspace = true }
+figment = { workspace = true }
+hex = { workspace = true }
+libc = "0.2"
+# Parses the ClientHello (server name) without deriving any keys; never completes a handshake.
+rustls = { version = "0.23.46", default-features = false, features = ["ring", "std"] }
+serde = { workspace = true }
+thiserror = { workspace = true }
+tokio = { workspace = true }
+tracing = { workspace = true }
+
+[dev-dependencies]
+rcgen = { version = "0.14", default-features = false, features = ["ring", "pem"] }
+tempfile = { workspace = true }
+tokio-rustls = { version = "0.26", default-features = false, features = ["ring"] }

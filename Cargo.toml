@@ -5,6 +5,7 @@ members = [
     "crates/hq-gate",
     "crates/hq-net",
     "crates/hq-tunnel",
+    "crates/hq-edge",
     "crates/hq-core",
     "crates/hq-vault",
     "crates/hq-db",
@@ -153,6 +154,7 @@ hq-host = { path = "crates/hq-host" }
 hq-gate = { path = "crates/hq-gate" }
 hq-net = { path = "crates/hq-net" }
 hq-tunnel = { path = "crates/hq-tunnel" }
+hq-edge = { path = "crates/hq-edge" }
 
 
 [profile.release]
