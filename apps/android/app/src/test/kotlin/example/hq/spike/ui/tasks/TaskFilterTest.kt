@@ -47,7 +47,7 @@ class TaskFilterTest {
         assertNull(TaskFilters.label(tree, TaskScope.Everything))
         assertEquals("Clients", TaskFilters.label(tree, TaskScope.Folder("f1")))
         assertNull(TaskFilters.label(null, TaskScope.Space("work")))
-        assertEquals("12 active", TaskFilterWords.bar(12, null))
-        assertEquals("12 active · Alpha", TaskFilterWords.bar(12, "Alpha"))
+        assertEquals("12 active", TaskFilterWords.bar(12, false))
+        assertEquals("12 active · filtered", TaskFilterWords.bar(12, true))
     }
 }

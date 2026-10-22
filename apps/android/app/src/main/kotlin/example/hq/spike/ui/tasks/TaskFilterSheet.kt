@@ -89,6 +89,6 @@ object TaskFilterWords {
     const val READING = "Reading your spaces"
     const val FAILED = "Could not read your spaces. HQ is not answering."
 
-    /** The bar's line on the All tab: how many open tasks the list shows, and what it is narrowed to. */
-    fun bar(open: Int, scopeName: String?): String = if (scopeName == null) "$open active" else "$open active · $scopeName"
+    /** The bar's line on the All tab: how many open tasks the list shows, and that it is filtered (the name of the filter is on the chip under the tabs, where a long one fits). */
+    fun bar(open: Int, filtered: Boolean): String = if (filtered) "$open active \u00b7 filtered" else "$open active"
 }

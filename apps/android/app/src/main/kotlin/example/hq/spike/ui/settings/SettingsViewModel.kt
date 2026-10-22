@@ -73,6 +73,8 @@ data class SettingsUi(
     val keep: KeepFacts = KeepFacts(),
     val notif: NotifFacts = NotifFacts(),
     val capture: CaptureFacts = CaptureFacts(),
+    /** What the config file and the backup folder say about backups on this phone. */
+    val backup: BackupFacts = BackupFacts(),
     /** The sheet that takes a key, while it is open. The key itself is never kept here. */
     val keySheet: KeySheet? = null,
     /** What is being asked or done on the Connect Claude and Other devices pages. */
@@ -263,7 +265,7 @@ class SettingsViewModel(app: Application) : AndroidViewModel(app) {
         )
     }
 
-    private fun SettingsUi.withFacts(): SettingsUi = if (frozen) this else copy(keep = keepFacts(), notif = notifFacts(), capture = captureFacts())
+    private fun SettingsUi.withFacts(): SettingsUi = if (frozen) this else copy(keep = keepFacts(), notif = notifFacts(), capture = captureFacts(), backup = backupFacts())
 
     /** What Android says about this app staying alive: the battery setting, permission auto-removal, notifications, and the last time it stopped it. */
     private var keepCache: Pair<Long, KeepFacts>? = null
@@ -273,6 +275,16 @@ class SettingsViewModel(app: Application) : AndroidViewModel(app) {
         val now = SystemClock.elapsedRealtime()
         keepCache?.let { (at, facts) -> if (now - at < KEEP_CACHE_MS) return facts }
         return readKeepFacts().also { keepCache = now to it }
+    }
+
+    /** Read from the app's own files each time Settings refreshes; the config file is parsed only for its `backup:` block. */
+    private fun backupFacts(): BackupFacts {
+        val files = ctx().filesDir
+        val config = runCatching { BackupWords.parseConfig(java.io.File(files, "hqhome/config.yaml").readText()) }.getOrNull()
+        val dir = config?.dir?.let { java.io.File(it) }?.takeIf { runCatching { it.canonicalPath.startsWith(files.canonicalPath + "/") }.getOrDefault(false) } ?: java.io.File(files, "backups")
+        val status = runCatching { BackupWords.parseStatus(java.io.File(dir, "backup-status.json").readText()) }.getOrNull()
+        val newest = dir.listFiles { f -> f.name.startsWith("hq-backup-") && f.name.endsWith(".hqbak") }?.maxOfOrNull { it.lastModified() }
+        return BackupFacts(config, status, newest)
     }
 
     private fun readKeepFacts(): KeepFacts {

@@ -986,7 +986,7 @@ private fun CaptureWidgets(ui: SettingsUi, actions: SettingsActions) {
 @Composable
 private fun About(ui: SettingsUi, actions: SettingsActions) {
     Page {
-        BackupCard()
+        BackupCard(BackupWords.card(ui.backup, Instant.now()))
         Label("About")
         Facts(
             listOf(
@@ -1010,20 +1010,22 @@ private fun About(ui: SettingsUi, actions: SettingsActions) {
     }
 }
 
-/** The backup is not something the app can set up yet, so the card says so and its button is drawn but off. */
+/** What backups on this phone are doing; the button to set one up is drawn but off, since the app cannot set it up yet. */
 @Composable
-private fun BackupCard() {
+private fun BackupCard(card: BackupWords.Card) {
     val shape = RoundedCornerShape(12.dp)
+    val warn = card.tone == BackupWords.Tone.Warn
+    val tint = if (warn) Mts.Amber else Mts.BrandGreen
     Column(
-        Modifier.padding(start = 16.dp, top = 4.dp, end = 16.dp).fillMaxWidth().clip(shape).background(Mts.Surface100).border(1.dp, Mts.Amber, shape).padding(16.dp),
+        Modifier.padding(start = 16.dp, top = 4.dp, end = 16.dp).fillMaxWidth().clip(shape).background(Mts.Surface100).border(1.dp, if (warn) Mts.Amber else Mts.Line, shape).padding(16.dp),
         verticalArrangement = Arrangement.spacedBy(10.dp),
     ) {
         Row(horizontalArrangement = Arrangement.spacedBy(10.dp), verticalAlignment = Alignment.CenterVertically) {
-            Icon(HqIcons.Warning, null, Modifier.size(22.dp), tint = Mts.Amber)
-            Text("Backup is not set up", style = HqType.BodyBold, color = Mts.Amber)
+            Icon(if (warn) HqIcons.Warning else HqIcons.Check, null, Modifier.size(22.dp), tint = tint)
+            Text(card.title, style = HqType.BodyBold, color = tint)
         }
-        Text("If the app is uninstalled or the phone is lost, your notes and tasks go with it. Backup today runs from the config file.", style = HqType.BodySm, color = Mts.Ink)
-        Row(
+        Text(card.body, style = HqType.BodySm, color = Mts.Ink)
+        if (card.offerSetUp) Row(
             Modifier.heightIn(min = 48.dp).clip(CircleShape).background(Mts.Surface200).padding(horizontal = 24.dp).semantics { disabled(); contentDescription = "Set up backup, needs a decision" },
             horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically,
         ) {

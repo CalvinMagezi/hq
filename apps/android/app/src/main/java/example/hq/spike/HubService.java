@@ -242,6 +242,7 @@ public class HubService extends Service {
      */
     private ProcessBuilder hqProcess() {
         SecretStore.importPending(this, new File(getFilesDir(), "secrets.in"));
+        WebAssets.sync(this);
         boolean active = HubConfig.isActive(readSmall(new File(getFilesDir(), "mode")));
         childActive = active;
         Log.i(TAG, "hq mode: " + (active ? "active (daemon, relays)" : "standby (web only)"));

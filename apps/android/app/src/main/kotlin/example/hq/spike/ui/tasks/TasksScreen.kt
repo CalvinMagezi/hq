@@ -122,6 +122,7 @@ private fun Feed(ui: TasksUi, actions: TasksActions, onHelpers: () -> Unit) {
     LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(bottom = 96.dp)) {
         if (ui.offline) item { Text("HQ is not running. These are the last tasks it had.", style = HqType.BodySm, color = Mts.Amber, modifier = Modifier.padding(16.dp)) }
         if (onAll) item(key = "chips") { AllChips(ui, actions.onChip) }
+        if (onAll && ui.scope != TaskScope.Everything) item(key = "scope") { ScopeChip(TaskFilters.label(ui.tree, ui.scope) ?: "Filtered") { actions.onScope(TaskScope.Everything) } }
         if (onAll && ui.sessions.isNotEmpty() && ui.chip == AllChip.Active) item(key = "strip") { WorkingStrip(ui.sessions, onHelpers) }
         if (groups.isEmpty() && ui.loaded && !ui.offline) item { Text(if (onAll && ui.chip == AllChip.Archived && !ui.archivedLoaded) "Asking HQ\u2026" else if (onAll) TasksLogic.emptyAll(ui.chip) else emptyWords(ui.tab), style = HqType.BodySm, color = Mts.InkMuted, modifier = Modifier.padding(16.dp)) }
         groups.forEach { g ->
@@ -134,6 +135,19 @@ private fun Feed(ui: TasksUi, actions: TasksActions, onHelpers: () -> Unit) {
             if (g.preview != null && g.tasks.size > g.preview) item(key = "m-${g.key}") { MoreRow(g.tasks.size - g.preview, open) { actions.onToggleGroup(g.key) } }
         }
         if (onAll && ui.loaded) item(key = "web") { WebViews() }
+    }
+}
+
+/** The filter the All tab is narrowed to, with a way to take it off. */
+@Composable
+private fun ScopeChip(name: String, onClear: () -> Unit) {
+    Row(
+        Modifier.padding(horizontal = 16.dp, vertical = 4.dp).heightIn(min = 48.dp).clip(CircleShape).border(1.dp, Mts.BrandGreen, CircleShape)
+            .clickable(role = Role.Button, onClickLabel = "Clear the filter", onClick = onClear).padding(start = 16.dp, end = 12.dp),
+        horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Text(name, style = HqType.BodySmBold, color = Mts.Ink, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f, fill = false))
+        Icon(HqIcons.Close, null, Modifier.size(18.dp), tint = Mts.InkMuted)
     }
 }
 
