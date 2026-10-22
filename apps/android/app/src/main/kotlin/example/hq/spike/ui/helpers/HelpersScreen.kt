@@ -1,5 +1,14 @@
 package example.hq.spike.ui.helpers
 
+import androidx.compose.runtime.getValue
+import androidx.compose.ui.geometry.Size
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.draw.drawBehind
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.core.rememberInfiniteTransition
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.LinearEasing
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -11,6 +20,7 @@ import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -117,6 +127,7 @@ private fun HelperCardView(c: HelperCard, actions: HelpersActions) {
         }
         Text(listOf("${c.agent} · on ${c.where}", c.time).filter { it.isNotBlank() }.joinToString(" · "), style = HqType.BodySm, color = Mts.InkMuted, maxLines = 1, overflow = TextOverflow.Ellipsis)
         Text(c.line, style = HqType.BodySm, color = Mts.Ink, maxLines = 2, overflow = TextOverflow.Ellipsis)
+        if (c.state == HelperState.Working) WorkingBar()
         if (waiting && c.ask != null && HelperWords.canAnswerInline(c.ask)) {
             if (c.ask.kind == AskKind.Command) Column(Modifier.fillMaxWidth().clip(RoundedCornerShape(8.dp)).background(Mts.Surface000).padding(horizontal = 10.dp, vertical = 8.dp)) {
                 c.ask.detail.forEach { Text(it, style = HqType.Caption.copy(fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace, fontSize = 12.sp, lineHeight = 17.sp), color = Mts.Ink) }
@@ -132,6 +143,23 @@ private fun HelperCardView(c: HelperCard, actions: HelpersActions) {
         }
     }
 }
+
+/** A helper that is working: a 4 dp track with a Blue stretch moving along it. HQ has no percent to give, so none is drawn. */
+@Composable
+private fun WorkingBar() {
+    val sweep by rememberInfiniteTransition(label = "working").animateFloat(0f, 1f, infiniteRepeatable(tween(SWEEP_MS, easing = LinearEasing)), label = "sweep")
+    Box(
+        Modifier.fillMaxWidth().height(4.dp).clip(RoundedCornerShape(2.dp)).background(Mts.Surface200).drawBehind {
+            val stretch = size.width * SWEEP_SHARE
+            val from = ((size.width + stretch) * sweep - stretch).coerceAtLeast(0f)
+            val to = ((size.width + stretch) * sweep).coerceAtMost(size.width)
+            if (to > from) drawRect(Mts.BrandBlue, Offset(from, 0f), Size(to - from, size.height))
+        },
+    )
+}
+
+private const val SWEEP_MS = 1_600
+private const val SWEEP_SHARE = 0.4f
 
 @Composable
 internal fun OutlineButton(label: String, modifier: Modifier = Modifier, enabled: Boolean = true, color: Color = Mts.Ink, onClick: () -> Unit) {
