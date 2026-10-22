@@ -26,6 +26,8 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Icon
+import androidx.compose.material3.Switch
+import androidx.compose.material3.SwitchDefaults
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -95,6 +97,8 @@ private fun title(page: SettingsPage) = when (page) {
     SettingsPage.Spending -> "Spending limits"
     SettingsPage.About -> "About"
     SettingsPage.Background -> "Background work"
+    SettingsPage.KeepRunning -> "Keep running"
+    SettingsPage.Notifications -> "Notifications"
 }
 
 /** Settings over the whole shell, with its own pages: Back goes up one page, then closes. */
@@ -125,6 +129,8 @@ fun SettingsHost(ui: SettingsUi, actions: SettingsActions) {
                 SettingsPage.Spending -> Spending(ui)
                 SettingsPage.About -> About(ui, actions)
                 SettingsPage.Background -> Background(ui, actions)
+                SettingsPage.KeepRunning -> KeepRunning(ui, actions)
+                SettingsPage.Notifications -> Notifications(ui, actions)
             }
         }
         ui.askMode?.let { ModeDialog(it, actions) }
@@ -509,6 +515,103 @@ private fun ModeDialog(toActive: Boolean, actions: SettingsActions) {
 private fun DialogButton(label: String, onClick: () -> Unit) {
     Box(Modifier.heightIn(min = 48.dp).clip(CircleShape).clickable(role = Role.Button, onClick = onClick).padding(horizontal = 24.dp), contentAlignment = Alignment.Center) {
         Text(label, style = HqType.BodySmBold, color = Mts.Ink)
+    }
+}
+
+// ---------------------------------------------------------------- keep running and notifications
+
+/** A card with a bold line over a plain one, amber-bordered when something needs a look. */
+@Composable
+private fun NoticeCard(title: String, text: String, warn: Boolean) {
+    val shape = RoundedCornerShape(12.dp)
+    Row(
+        Modifier.padding(start = 16.dp, top = 4.dp, end = 16.dp).fillMaxWidth().clip(shape).background(Mts.Surface100).border(1.dp, if (warn) Mts.Amber else Mts.Hairline, shape).padding(16.dp),
+        horizontalArrangement = Arrangement.spacedBy(12.dp), verticalAlignment = Alignment.Top,
+    ) {
+        Icon(if (warn) HqIcons.Warning else HqIcons.Check, null, Modifier.padding(top = 1.dp).size(24.dp), tint = if (warn) Mts.Amber else Mts.BrandGreen)
+        Column {
+            Text(title, style = HqType.BodyBold, color = Mts.Ink)
+            Text(text, style = HqType.BodySm, color = Mts.Ink)
+        }
+    }
+}
+
+@Composable
+private fun KeepRunning(ui: SettingsUi, actions: SettingsActions) {
+    val page = PhoneWords.keepRunning(ui.keep, ui.now)
+    Page {
+        Box(Modifier.padding(top = 4.dp)) { NoticeCard(page.noticeTitle, page.notice, page.warn) }
+        Label("Checked")
+        Group {
+            page.checked.forEachIndexed { i, r ->
+                if (i > 0) Divider()
+                val tap = r.fix?.let { fix -> Modifier.clickable(role = Role.Button) { actions.onFix(fix) } } ?: Modifier
+                Row(Modifier.fillMaxWidth().heightIn(min = 64.dp).then(tap).padding(horizontal = 16.dp, vertical = 8.dp), horizontalArrangement = Arrangement.spacedBy(16.dp), verticalAlignment = Alignment.CenterVertically) {
+                    Column(Modifier.weight(1f)) {
+                        Text(r.title, style = HqType.BodyBold, color = Mts.Ink)
+                        Text(r.value, style = HqType.BodySm, color = if (r.ok) Mts.InkMuted else Mts.Amber)
+                    }
+                    if (r.ok) Icon(HqIcons.Check, null, Modifier.size(22.dp), tint = Mts.BrandGreen) else Icon(HqIcons.ChevronRight, null, Modifier.size(20.dp), tint = Mts.InkMuted)
+                }
+            }
+        }
+        if (page.sleepingApps) {
+            Label("Cannot be checked")
+            Group {
+                Row(Modifier.fillMaxWidth().heightIn(min = 64.dp).clickable(role = Role.Button) { actions.onFix(PhoneFix.SleepingApps) }.padding(horizontal = 16.dp, vertical = 8.dp), horizontalArrangement = Arrangement.spacedBy(16.dp), verticalAlignment = Alignment.CenterVertically) {
+                    Icon(HqIcons.Info, null, Modifier.size(24.dp), tint = Mts.InkMuted)
+                    Column(Modifier.weight(1f)) {
+                        Text("Sleeping apps", style = HqType.BodyBold, color = Mts.Ink)
+                        Text("Samsung may put AgentHQ to sleep. Check that it is not on the list.", style = HqType.BodySm, color = Mts.InkMuted)
+                    }
+                    Icon(HqIcons.External, null, Modifier.size(20.dp), tint = Mts.InkMuted)
+                }
+            }
+        }
+        Label("History")
+        Facts(listOf(page.history))
+    }
+}
+
+@Composable
+private fun Notifications(ui: SettingsUi, actions: SettingsActions) {
+    val n = ui.notif
+    Page {
+        Box(Modifier.padding(top = 4.dp)) {
+            if (n.allowed) NoticeCard("Allowed.", "AgentHQ can post notifications.", false)
+            else NoticeCard("Notifications are off for AgentHQ", "Approvals wait in the Inbox until they are on again.", true)
+        }
+        if (!n.allowed) Box(Modifier.padding(start = 16.dp, top = 8.dp)) { DialogButton("Open settings") { actions.onFix(PhoneFix.Notifications) } }
+        Label("Channels")
+        Group {
+            n.channels.forEachIndexed { i, c ->
+                if (i > 0) Divider()
+                Row(Modifier.fillMaxWidth().heightIn(min = 64.dp).clickable(role = Role.Button) { actions.onChannel(c.id) }.padding(horizontal = 16.dp, vertical = 8.dp), horizontalArrangement = Arrangement.spacedBy(16.dp), verticalAlignment = Alignment.CenterVertically) {
+                    Column(Modifier.weight(1f)) {
+                        Text(c.name, style = HqType.BodyBold, color = Mts.Ink)
+                        Text(PhoneWords.channelLine(c), style = HqType.BodySm, color = Mts.InkMuted)
+                    }
+                    Icon(HqIcons.External, null, Modifier.size(20.dp), tint = Mts.InkMuted)
+                }
+            }
+        }
+        Text("Each opens that channel in Android settings. Turning Needs you off means approvals only wait in the Inbox.", style = SmallText, color = Mts.InkMuted, modifier = Modifier.padding(start = 20.dp, top = 8.dp, end = 20.dp))
+        Label("Buttons on notifications")
+        Group {
+            Row(Modifier.fillMaxWidth().heightIn(min = 64.dp).padding(horizontal = 16.dp, vertical = 8.dp), horizontalArrangement = Arrangement.spacedBy(16.dp), verticalAlignment = Alignment.CenterVertically) {
+                Column(Modifier.weight(1f)) {
+                    Text("Allow answers from notifications", style = HqType.BodyBold, color = Mts.Ink)
+                    Text("Allow and Not now on the notification. Allow asks you to unlock first.", style = HqType.BodySm, color = Mts.InkMuted)
+                }
+                Switch(
+                    checked = n.answers, onCheckedChange = actions.onAnswers,
+                    colors = SwitchDefaults.colors(
+                        checkedTrackColor = Mts.BrandGreen, checkedThumbColor = Mts.OnGreen, checkedBorderColor = Mts.BrandGreen,
+                        uncheckedTrackColor = Mts.Surface200, uncheckedThumbColor = Mts.Line, uncheckedBorderColor = Mts.Line,
+                    ),
+                )
+            }
+        }
     }
 }
 

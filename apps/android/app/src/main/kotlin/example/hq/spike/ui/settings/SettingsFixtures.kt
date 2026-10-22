@@ -42,10 +42,11 @@ fun settingsFixture(name: String?): SettingsUi? {
     )
     val phone = listOf(
         HomeRow(SettingsPage.Background, "background", "Background work", SettingsWords.BACKGROUND_ON),
-        HomeRow(null, "battery", "Keep running", "Good · 1 thing to check"),
-        HomeRow(null, "notifications", "Notifications", "Needs you on · Updates on"),
+        HomeRow(SettingsPage.KeepRunning, "battery", "Keep running", "Good · 1 thing to check"),
+        HomeRow(SettingsPage.Notifications, "notifications", "Notifications", "Needs you on · Updates on"),
         HomeRow(null, "capture", "Capture and widgets", "Sharing opens a new note"),
     )
+    val channels = listOf(ChannelFacts("needs", "Needs you", 4, true), ChannelFacts("updates", "Updates", 3, false), ChannelFacts("hub", "HQ is running", 2, false))
     val base = SettingsUi(open = true, snap = SettingsSnapshot(settings, chat, connector, devices, budgets, health, providers = providers, copilot = copilot, forecast = forecast), loaded = true, phone = phone, mode = "active", build = "hub \u00b7 build 1", now = now)
     return when (name) {
         "s-home" -> base
@@ -57,6 +58,10 @@ fun settingsFixture(name: String?): SettingsUi? {
         "s-chat" -> base.copy(stack = listOf(SettingsPage.Messaging))
         "s-claude" -> base.copy(stack = listOf(SettingsPage.Claude))
         "s-devices" -> base.copy(stack = listOf(SettingsPage.Devices))
+        "s-keep" -> base.copy(stack = listOf(SettingsPage.KeepRunning), keep = KeepFacts(autoRevokeOff = true, samsung = true, lastStop = LastStop(android.app.ApplicationExitInfo.REASON_LOW_MEMORY, now.minusSeconds(172_800))))
+        "s-keep-bad" -> base.copy(stack = listOf(SettingsPage.KeepRunning), keep = KeepFacts(batteryUnrestricted = false, autoRevokeOff = false, notificationsAllowed = false))
+        "s-notif" -> base.copy(stack = listOf(SettingsPage.Notifications), notif = NotifFacts(true, channels, true))
+        "s-notif-off" -> base.copy(stack = listOf(SettingsPage.Notifications), notif = NotifFacts(false, channels, false))
         "s-background" -> base.copy(stack = listOf(SettingsPage.Background))
         "s-background-standby" -> base.copy(stack = listOf(SettingsPage.Background), mode = "standby")
         "s-background-ask" -> base.copy(stack = listOf(SettingsPage.Background), askMode = false)

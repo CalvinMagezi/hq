@@ -44,7 +44,12 @@ object AlertPoster {
     @JvmStatic
     fun notificationId(id: String): Int = ID_BASE + Math.abs(id.hashCode() % ID_SPAN)
 
-    private fun answersAllowed(c: Context) = c.getSharedPreferences(PREFS, Context.MODE_PRIVATE).getBoolean(ALLOW_ANSWERS, true)
+    internal fun answersAllowed(c: Context) = c.getSharedPreferences(PREFS, Context.MODE_PRIVATE).getBoolean(ALLOW_ANSWERS, true)
+
+    /** Off removes Allow and Not now from notifications, so an approval waits in the Inbox. */
+    internal fun setAnswersAllowed(c: Context, on: Boolean) {
+        c.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit().putBoolean(ALLOW_ANSWERS, on).apply()
+    }
 
     fun itemOf(o: JSONObject): InboxItem {
         val meta = o.optJSONObject("metadata")

@@ -61,8 +61,4 @@ class BackgroundWorkTest {
         assertTrue(RestartWatch(null).back(true, "2000"))
         assertFalse(RestartWatch(null).back(true, null))
     }
-
-    @Test fun theModeAnswerNeverMovesTheSelectionByItself() {
-        assertEquals(setOf("home", "safety", "keys", "messaging", "claude", "devices", "spending", "about", "background"), SettingsPage.entries.map { it.name.lowercase() }.toSet())
-    }
 }

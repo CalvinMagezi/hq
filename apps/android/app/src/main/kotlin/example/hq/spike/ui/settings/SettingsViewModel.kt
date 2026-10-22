@@ -1,10 +1,12 @@
 package example.hq.spike.ui.settings
 
+import android.app.ActivityManager
 import android.app.Application
 import android.app.NotificationManager
 import android.content.Context
 import android.content.Intent
 import android.net.Uri
+import android.os.Build
 import android.os.PowerManager
 import android.provider.Settings
 import android.os.SystemClock
@@ -43,6 +45,9 @@ data class SettingsUi(
     val askMode: Boolean? = null,
     /** hq is restarting for a new run mode; the choices are off until it is back. */
     val restarting: Boolean = false,
+    /** What Android says about keeping AgentHQ running and about its notifications; read again whenever Settings is refreshed. */
+    val keep: KeepFacts = KeepFacts(),
+    val notif: NotifFacts = NotifFacts(),
 ) {
     val page: SettingsPage get() = stack.lastOrNull() ?: SettingsPage.Home
 }
@@ -58,6 +63,9 @@ class SettingsActions(
     val onMode: (Boolean) -> Unit = {},
     val onModeCancel: () -> Unit = {},
     val onModeConfirm: () -> Unit = {},
+    val onFix: (PhoneFix) -> Unit = {},
+    val onChannel: (String) -> Unit = {},
+    val onAnswers: (Boolean) -> Unit = {},
     /** One read of everything Settings shows; the page calls it every few seconds while it is showing and the app is in front. */
     val onRefresh: suspend () -> Unit = {},
 )
@@ -79,6 +87,9 @@ class SettingsViewModel(app: Application) : AndroidViewModel(app) {
         onMode = { toActive -> _state.update { if (it.restarting || toActive == (it.mode == "active")) it else it.copy(askMode = toActive) } },
         onModeCancel = { _state.update { it.copy(askMode = null) } },
         onModeConfirm = ::confirmMode,
+        onFix = ::fix,
+        onChannel = ::openChannel,
+        onAnswers = { on -> AlertPoster.setAnswersAllowed(ctx(), on); _state.update { it.copy(notif = it.notif.copy(answers = on)) } },
         onRefresh = ::refreshNow,
     )
 
@@ -92,7 +103,7 @@ class SettingsViewModel(app: Application) : AndroidViewModel(app) {
 
     /** Opens Settings on its home page. What is on it comes from [refreshNow], which the page runs while it is showing. */
     private fun open() {
-        _state.update { it.copy(open = true, stack = emptyList(), line = null, phone = if (frozen) it.phone else phoneRows(), mode = if (frozen) it.mode else modeOf(), now = Instant.now()) }
+        _state.update { it.copy(open = true, stack = emptyList(), line = null, phone = if (frozen) it.phone else phoneRows(), mode = if (frozen) it.mode else modeOf(), now = Instant.now()).withFacts() }
     }
 
     /**
@@ -123,7 +134,7 @@ class SettingsViewModel(app: Application) : AndroidViewModel(app) {
             unavailable = got.filterValues { it.body == null && it.answered }.keys,
             providers = body("providers"), copilot = body("copilot"), forecast = body("forecast"),
         )
-        _state.update { it.copy(snap = snap, loaded = true, phone = phoneRows(), mode = modeOf(), now = Instant.now()) }
+        _state.update { it.copy(snap = snap, loaded = true, phone = phoneRows(), mode = modeOf(), now = Instant.now()).withFacts() }
     }
 
     /** What one route gave back: its JSON, or none; and whether HQ answered at all (an error answer is not the same as no answer). */
@@ -153,10 +164,63 @@ class SettingsViewModel(app: Application) : AndroidViewModel(app) {
         val allowed = nm.areNotificationsEnabled()
         return listOf(
             HomeRow(SettingsPage.Background, "background", "Background work", if (active) SettingsWords.BACKGROUND_ON else SettingsWords.BACKGROUND_OFF),
-            HomeRow(null, "battery", "Keep running", if (battery) "Good · 1 thing to check" else "Battery use is limited", warn = !battery),
-            HomeRow(null, "notifications", "Notifications", if (!allowed) "Off in Android" else "Needs you ${if (on(AlertPoster.NEEDS)) "on" else "off"} · Updates ${if (on(AlertPoster.UPDATES)) "on" else "off"}", warn = !allowed),
+            HomeRow(SettingsPage.KeepRunning, "battery", "Keep running", PhoneWords.keepSummary(keepFacts(), Instant.now()), warn = keepFacts().let { PhoneWords.keepRunning(it, Instant.now()).checked.any { r -> !r.ok } }),
+            HomeRow(SettingsPage.Notifications, "notifications", "Notifications", if (!allowed) "Off in Android" else "Needs you ${if (on(AlertPoster.NEEDS)) "on" else "off"} · Updates ${if (on(AlertPoster.UPDATES)) "on" else "off"}", warn = !allowed),
             HomeRow(null, "capture", "Capture and widgets", "Sharing opens a new note"),
         )
+    }
+
+    private fun SettingsUi.withFacts(): SettingsUi = if (frozen) this else copy(keep = keepFacts(), notif = notifFacts())
+
+    /** What Android says about this app staying alive: the battery setting, permission auto-removal, notifications, and the last time it stopped it. */
+    private fun keepFacts(): KeepFacts {
+        val c = ctx()
+        val pkg = c.packageName
+        val sdk = Build.VERSION.SDK_INT
+        val am = c.getSystemService(ActivityManager::class.java)
+        val last = if (sdk >= Build.VERSION_CODES.R) {
+            am.getHistoricalProcessExitReasons(pkg, 0, EXIT_SCAN).firstOrNull { PhoneWords.androidStopped(it.reason) }?.let { LastStop(it.reason, Instant.ofEpochMilli(it.timestamp)) }
+        } else null
+        return KeepFacts(
+            batteryUnrestricted = (c.getSystemService(Context.POWER_SERVICE) as PowerManager).isIgnoringBatteryOptimizations(pkg),
+            backgroundRestricted = sdk >= Build.VERSION_CODES.P && am.isBackgroundRestricted,
+            autoRevokeOff = if (sdk >= Build.VERSION_CODES.R) c.packageManager.isAutoRevokeWhitelisted else null,
+            notificationsAllowed = c.getSystemService(NotificationManager::class.java).areNotificationsEnabled(),
+            samsung = Build.MANUFACTURER.equals("samsung", ignoreCase = true),
+            lastStop = last,
+        )
+    }
+
+    private fun notifFacts(): NotifFacts {
+        val nm = ctx().getSystemService(NotificationManager::class.java)
+        val channels = listOf(AlertPoster.NEEDS, AlertPoster.UPDATES, HUB_CHANNEL).mapNotNull { nm.getNotificationChannel(it) }
+            .map { ChannelFacts(it.id, it.name.toString(), it.importance, it.sound != null) }
+        return NotifFacts(nm.areNotificationsEnabled(), channels, AlertPoster.answersAllowed(ctx()))
+    }
+
+    /** Opens the Android page that changes a setting the owner was told about; a page this phone does not have is tried past, never a crash. */
+    private fun fix(what: PhoneFix) {
+        val c = ctx()
+        val details = Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.parse("package:${c.packageName}"))
+        val tries = when (what) {
+            PhoneFix.Battery -> listOf(Intent(Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS), details)
+            PhoneFix.AutoRevoke -> listOf(Intent(Intent.ACTION_AUTO_REVOKE_PERMISSIONS, Uri.parse("package:${c.packageName}")), details)
+            PhoneFix.Notifications -> listOf(Intent(Settings.ACTION_APP_NOTIFICATION_SETTINGS).putExtra(Settings.EXTRA_APP_PACKAGE, c.packageName), details)
+            PhoneFix.SleepingApps -> listOf(Intent().setClassName(SAMSUNG_BATTERY_PACKAGE, SAMSUNG_BATTERY_PAGE), Intent(Settings.ACTION_BATTERY_SAVER_SETTINGS), details)
+        }
+        startFirst(tries)
+    }
+
+    private fun openChannel(id: String) {
+        val c = ctx()
+        startFirst(listOf(Intent(Settings.ACTION_CHANNEL_NOTIFICATION_SETTINGS).putExtra(Settings.EXTRA_APP_PACKAGE, c.packageName).putExtra(Settings.EXTRA_CHANNEL_ID, id)))
+    }
+
+    private fun startFirst(tries: List<Intent>) {
+        for (i in tries) {
+            try { ctx().startActivity(i.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)); return } catch (e: android.content.ActivityNotFoundException) { continue } catch (e: SecurityException) { continue }
+        }
+        _state.update { it.copy(line = "Android could not open that screen.") }
     }
 
     private fun phoneRow(key: String) {
@@ -183,7 +247,7 @@ class SettingsViewModel(app: Application) : AndroidViewModel(app) {
         _state.update { it.copy(askMode = null, restarting = true) }
         viewModelScope.launch {
             val ok = withContext(Dispatchers.IO) { switchAndWait(toActive) }
-            _state.update { it.copy(restarting = false, mode = modeOf(), phone = phoneRows(), line = if (ok) null else RESTART_TIMEOUT_LINE) }
+            _state.update { it.copy(restarting = false, mode = modeOf(), phone = phoneRows(), line = if (ok) null else RESTART_TIMEOUT_LINE).withFacts() }
             refreshNow()
         }
     }
@@ -228,6 +292,10 @@ class SettingsViewModel(app: Application) : AndroidViewModel(app) {
 
     private companion object {
         const val MODE_MAX = 64L
+        const val EXIT_SCAN = 10
+        const val HUB_CHANNEL = "hub"
+        const val SAMSUNG_BATTERY_PACKAGE = "com.samsung.android.lool"
+        const val SAMSUNG_BATTERY_PAGE = "com.samsung.android.sm.battery.ui.BatteryActivity"
         const val RESTART_TIMEOUT_LINE = "HQ did not come back within two minutes."
     }
 }
