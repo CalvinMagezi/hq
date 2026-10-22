@@ -48,11 +48,15 @@ the `hq` binary on that machine (`deploy/install.sh`, or the Docker image below)
        enabled: true                       # host the household relay (off by default)
        hostname: relay.edge.example.com
        acme_email: you@example.com
-       acme_production: false              # staging first; set true once it works
+       acme_production: false              # staging: a dry run; set true to use the relay
    ```
 
+   Let's Encrypt staging certificates are trusted by no client, so with `acme_production: false`
+   the relay is a dry run of issuance: devices cannot use it until you set it to `true`.
+
    Everything else has a default; `hq edge --help` lists the commands, and the limits are described
-   under "Limits" below.
+   under "Limits" below. `listen` is IPv4 only by default; set `listen: "[::]:443"` to accept IPv6
+   as well (and add `AAAA` records).
 3. **Open the ports.** TCP 443 (the forwarder and, through it, the relay). If the relay is on, also
    UDP 7842 (the relay's address discovery, `edge.relay.quic_bind`) and the UDP port of `iroh_bind`.
    Nothing else listens: there is no admin port and no metrics port.
@@ -68,6 +72,8 @@ the `hq` binary on that machine (`deploy/install.sh`, or the Docker image below)
    hq edge revoke <device id> # cut it off; open connections end within a few seconds
    ```
 
+   Run these as the user that runs the edge (for the systemd unit:
+   `sudo -u hq-edge env HOME=/var/lib/hq-edge HQ_CONFIG_PATH=/var/lib/hq-edge/.hq/config.yaml hq edge list`).
    The list is a text file (`~/.hq/edge/devices.txt`, mode 0600, owned by the user running the edge,
    one `<endpoint id> [relay URL]` per line). A list with a bad line, a wrong mode or owner, or two
    devices that share a name label is refused as a whole, and then nothing is forwarded. Registration

@@ -26,7 +26,7 @@ pub enum EdgeAction {
 pub use supported::run;
 
 #[cfg(not(all(unix, not(target_os = "android"))))]
-pub async fn run(_action: EdgeAction, _config: Option<std::path::PathBuf>) -> anyhow::Result<()> {
+pub async fn run(_action: EdgeAction) -> anyhow::Result<()> {
     anyhow::bail!(
         "hq edge runs on Linux and macOS servers, not on Android or Windows. Run it on a public machine you control."
     )
@@ -41,13 +41,12 @@ mod supported {
         AllowlistFile, Edge, EdgeConfig, Registered, allow_device, device_label, list_devices,
         revoke_device,
     };
-    use std::{path::PathBuf, sync::Arc};
+    use std::sync::Arc;
 
-    /// Runs one `hq edge` subcommand. `config` is the config file to read the `edge:` section
-    /// from (default: the one the rest of `hq` reads).
-    pub async fn run(action: EdgeAction, config: Option<PathBuf>) -> Result<()> {
-        let path = config.unwrap_or_else(HqConfig::config_read_path);
-        let config = EdgeConfig::load(&path)?;
+    /// Runs one `hq edge` subcommand. The `edge:` section comes from the config file every other
+    /// `hq` command reads (`--config` or `HQ_CONFIG_PATH`, else `~/.hq/config.yaml`).
+    pub async fn run(action: EdgeAction) -> Result<()> {
+        let config = EdgeConfig::load(&HqConfig::config_read_path())?;
         match action {
             EdgeAction::Run => serve(config).await,
             EdgeAction::Id => {

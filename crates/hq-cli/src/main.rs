@@ -154,9 +154,6 @@ enum Commands {
     Edge {
         #[command(subcommand)]
         action: EdgeAction,
-        /// The config file whose `edge:` section to read (default: the one hq reads)
-        #[arg(long, global = true, value_name = "FILE")]
-        config: Option<PathBuf>,
     },
 
     /// Run or inspect the built-in agent host (long-lived coding agents in pseudo-terminals)
@@ -678,8 +675,8 @@ async fn async_main() -> Result<()> {
             return commands::net::run(action, dir, spool);
         }
         // `hq edge` reads only its own `edge:` section, and may run on a machine with no vault.
-        Some(Commands::Edge { action, config }) => {
-            return commands::edge::run(action, config).await;
+        Some(Commands::Edge { action }) => {
+            return commands::edge::run(action).await;
         }
         _ => {}
     }
@@ -821,7 +818,11 @@ fn init_tracing() {
             && before_dashes.clone().any(|a| a == "--json"))
         || (args.get(1).is_some_and(|a| a == "web") && before_dashes.clone().any(|a| a == "link"));
     // iroh logs full endpoint ids at info; the edge keeps them out of its log unless asked.
-    let is_edge = args.get(1).is_some_and(|a| a == "edge");
+    let is_edge = args
+        .iter()
+        .skip(1)
+        .take_while(|a| *a != "--")
+        .any(|a| a == "edge");
     let default_level = if is_chat || is_tunnel_run {
         "off"
     } else if is_edge {
