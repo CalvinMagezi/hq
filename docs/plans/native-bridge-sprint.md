@@ -24,7 +24,7 @@ forwarder, because it only carries iroh traffic. The forwarder is a new componen
 | Who reviews pairing | The owner signs off the sprint. Gate before anyone outside the household installs: a second independent review of the written-up protocol and implementation, plus one outside human security reviewer for pairing and the connector | Owner names the human reviewer |
 | Connector scope | Bundled in this sprint (the owner's call), through `hq edge` and TLS on the device, reusing the merged OAuth server (`crates/hq-web/src/oauth/`) unchanged. The Mobile profile already allows it; only Lite refuses | Decided |
 | First platforms | Android as the hub, macOS desktop app (Tauri) as the first desktop, the Linux `hq` binary for servers (it can also be the edge). iOS later: it gives no background inbound connections, so an iPhone cannot be a hub, and iroh on iOS loses network-change detection. Windows through WSL2 as today | Decided |
-| Who runs the forwarder | Recommended: the owner, `hq edge` on a public machine, invite-only (a device registers by scanning the edge's QR), off by default in the app. A project-run open endpoint is the rejected "R4" under a new name: abuse, cost and a hosted default. Third parties (Tailscale Funnel, Cloudflare Tunnel) stay guided options for people with an account | Owner |
+| Who runs the forwarder | Decided (2026-10-22): the owner runs `hq edge` on a public machine they control, invite-only (a device registers by scanning the edge's QR), off by default in the app. A project-run open endpoint stays rejected: it is the "R4" option under a new name (abuse, cost and a hosted default). Third parties (Tailscale Funnel, Cloudflare Tunnel) stay guided options for people with an account | Decided |
 
 ## Shape
 
