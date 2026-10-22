@@ -486,6 +486,34 @@ mod tests {
         }
     }
 
+    #[tokio::test]
+    async fn the_screen_refresh_does_not_wait_for_the_bridge_lock() {
+        let dir = tempfile::tempdir().unwrap();
+        let db = Database::open_memory().unwrap();
+        let controller = PairingController::new(
+            PairingConfig {
+                key: dir.path().join("bridge.key"),
+                bind: vec!["127.0.0.1:0".parse().unwrap()],
+                relay: RelayMode::Disabled,
+                name: "desk".into(),
+                with_addrs: true,
+                tuning: Tuning::default(),
+            },
+            move || Ok(db.clone()),
+            None,
+        );
+        controller.start().await.unwrap();
+        // A slow start or revoke holds this lock; the screen must still be able to refresh.
+        let held = controller.bridge.lock().await;
+        let snapshot =
+            tokio::time::timeout(std::time::Duration::from_secs(2), controller.snapshot())
+                .await
+                .expect("the refresh waited for the bridge lock");
+        assert!(snapshot.running && snapshot.host.is_some());
+        drop(held);
+        controller.stop().await;
+    }
+
     #[test]
     fn only_equal_digits_match() {
         assert!(digits_match("918273", "918273"));

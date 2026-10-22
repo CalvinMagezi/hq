@@ -74,12 +74,18 @@ pub enum HostError {
     ProgramNotFound(Vec<PathBuf>),
     #[error("could not start the HQ host: {0}")]
     Spawn(String),
+    #[error("the app is closing")]
+    Closing,
 }
 
 #[derive(Default)]
 struct Inner {
     child: Option<Child>,
     last_exit: Option<Option<i32>>,
+    /// The process group of the host this app started. It outlives the leader while any member
+    /// lives, so a stop can still reach the survivors, and is forgotten the moment the group is
+    /// empty, because a group id can be reused once it has no member.
+    group: Option<u32>,
 }
 
 pub struct HostController {
@@ -88,7 +94,12 @@ pub struct HostController {
     /// Held for the whole of a start or a stop, so two clicks cannot start two hosts and a start
     /// cannot slip in while a stop is still waiting.
     gate: tokio::sync::Mutex<()>,
+    /// Set by the final stop, under the gate, so nothing starts a host while the app is closing.
+    closed: std::sync::atomic::AtomicBool,
 }
+
+/// After a kill, how long a stop waits for the group to go before it reports what it sees.
+const KILL_WAIT: Duration = Duration::from_secs(2);
 
 impl HostController {
     pub fn new(spec: HostSpec) -> Self {
@@ -96,6 +107,7 @@ impl HostController {
             spec,
             inner: Mutex::new(Inner::default()),
             gate: tokio::sync::Mutex::new(()),
+            closed: std::sync::atomic::AtomicBool::new(false),
         }
     }
 
@@ -116,6 +128,9 @@ impl HostController {
 
     pub async fn start(&self) -> Result<HostStatus, HostError> {
         let _gate = self.gate.lock().await;
+        if self.closed.load(std::sync::atomic::Ordering::SeqCst) {
+            return Err(HostError::Closing);
+        }
         if self.reap_and_pid().is_some() {
             return Ok(self.status().await);
         }
@@ -126,17 +141,32 @@ impl HostController {
         {
             let mut inner = self.inner.lock().unwrap();
             inner.last_exit = None;
+            inner.group = Some(child.id());
             inner.child = Some(child);
         }
         Ok(self.status().await)
     }
 
-    /// Stops the child this app started: a polite signal to its whole process group, then a kill
+    /// Stops the host this app started: a polite signal to its whole process group, then a kill
     /// of whatever is left of the group once the grace period is over, however the leader fared.
     /// Refuses when the host was not started here.
     pub async fn stop(&self) -> Result<HostStatus, HostError> {
         let _gate = self.gate.lock().await;
-        let Some(pid) = self.reap_and_pid() else {
+        self.stop_locked().await
+    }
+
+    /// The stop for when the app quits: nothing can start a host afterwards.
+    pub async fn stop_for_good(&self) -> Result<HostStatus, HostError> {
+        let _gate = self.gate.lock().await;
+        self.closed.store(true, std::sync::atomic::Ordering::SeqCst);
+        self.stop_locked().await
+    }
+
+    async fn stop_locked(&self) -> Result<HostStatus, HostError> {
+        let Some(group) = self
+            .reap_and_pid()
+            .or_else(|| self.inner.lock().unwrap().group)
+        else {
             return if probe_health(self.spec.health_port).await {
                 Err(HostError::NotOurs)
             } else {
@@ -145,47 +175,55 @@ impl HostController {
                 Ok(HostStatus::Stopped)
             };
         };
-        signal_group(pid, Signal::Term);
-        let deadline = tokio::time::Instant::now() + self.spec.stop_grace;
+        signal_group(group, Signal::Term);
+        let mut deadline = tokio::time::Instant::now() + self.spec.stop_grace;
+        let mut killed = false;
         loop {
             let leader_gone = self.reap_and_pid().is_none();
-            if leader_gone && !group_alive(pid) {
+            if leader_gone && !group_alive(group) {
                 break;
             }
-            if tokio::time::Instant::now() >= deadline {
-                signal_group(pid, Signal::Kill);
-                self.reap_after_kill();
-                break;
+            let now = tokio::time::Instant::now();
+            if now >= deadline {
+                if killed {
+                    break;
+                }
+                signal_group(group, Signal::Kill);
+                killed = true;
+                deadline = now + KILL_WAIT;
             }
             tokio::time::sleep(STOP_POLL).await;
         }
-        self.inner.lock().unwrap().last_exit = None;
+        {
+            let mut inner = self.inner.lock().unwrap();
+            inner.last_exit = None;
+            if !group_alive(group) {
+                inner.group = None;
+            }
+        }
         Ok(self.status().await)
     }
 
-    /// After a kill: collect the leader if it is still ours to collect.
-    fn reap_after_kill(&self) {
-        let mut inner = self.inner.lock().unwrap();
-        if let Some(child) = inner.child.as_mut() {
-            let _ = child.kill();
-            let _ = child.wait();
-        }
-        inner.child = None;
-    }
-
-    /// The pid of the live child, forgetting one that ended.
+    /// The pid of the live child, forgetting one that ended and a group that is empty.
     fn reap_and_pid(&self) -> Option<u32> {
         let mut inner = self.inner.lock().unwrap();
-        let child = inner.child.as_mut()?;
-        match child.try_wait() {
-            Ok(None) => Some(child.id()),
-            Ok(Some(status)) => {
+        let alive = match inner.child.as_mut().map(Child::try_wait) {
+            Some(Ok(None)) => inner.child.as_ref().map(Child::id),
+            Some(Ok(Some(status))) => {
                 inner.last_exit = Some(status.code());
                 inner.child = None;
                 None
             }
-            Err(_) => None,
+            Some(Err(_)) => {
+                inner.child = None;
+                None
+            }
+            None => None,
+        };
+        if alive.is_none() && inner.group.is_some_and(|g| !group_alive(g)) {
+            inner.group = None;
         }
+        alive
     }
 }
 
@@ -478,6 +516,58 @@ mod tests {
             gone(stubborn).await,
             "a group member that ignored the signal survived"
         );
+    }
+
+    #[tokio::test]
+    async fn stop_reaches_group_members_after_a_status_poll_reaped_the_leader() {
+        let dir = tempfile::tempdir().unwrap();
+        let pidfile = dir.path().join("orphan.pid");
+        // The leader exits at once and leaves a child that ignores the polite signal.
+        let script = format!(
+            "(trap '' TERM; exec sleep 60) & echo $! > {}",
+            pidfile.display()
+        );
+        let host = HostController::new(spec(dir.path(), &script, free_port()));
+        host.start().await.unwrap();
+        for _ in 0..50 {
+            if matches!(host.status().await, HostStatus::Exited { .. }) {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(50)).await;
+        }
+        assert_eq!(host.status().await, HostStatus::Exited { code: Some(0) });
+        let orphan: i32 = std::fs::read_to_string(&pidfile)
+            .unwrap()
+            .trim()
+            .parse()
+            .unwrap();
+        assert!(alive(orphan), "the orphan ended on its own");
+        assert_eq!(host.stop().await.unwrap(), HostStatus::Stopped);
+        assert!(gone(orphan).await, "a group member outlived the stop");
+    }
+
+    #[tokio::test]
+    async fn stop_kills_a_host_that_ignores_the_polite_signal() {
+        let dir = tempfile::tempdir().unwrap();
+        let host = HostController::new(spec(dir.path(), "trap '' TERM; sleep 60", free_port()));
+        let HostStatus::Starting { pid } = host.start().await.unwrap() else {
+            panic!("not starting");
+        };
+        tokio::time::sleep(Duration::from_millis(200)).await;
+        assert_eq!(host.stop().await.unwrap(), HostStatus::Stopped);
+        assert!(
+            gone(pid as i32).await,
+            "the host ignored the signal and lived on"
+        );
+    }
+
+    #[tokio::test]
+    async fn nothing_starts_after_the_final_stop() {
+        let dir = tempfile::tempdir().unwrap();
+        let host = HostController::new(spec(dir.path(), "sleep 60", free_port()));
+        host.stop_for_good().await.unwrap();
+        assert!(matches!(host.start().await, Err(HostError::Closing)));
+        assert_eq!(host.status().await, HostStatus::Stopped);
     }
 
     #[tokio::test]

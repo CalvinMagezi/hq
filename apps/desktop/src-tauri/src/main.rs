@@ -108,8 +108,8 @@ fn main() {
         .build(tauri::generate_context!())
         .expect("could not build the app");
 
-    app.run(move |app, event| {
-        if let RunEvent::ExitRequested { api, .. } = event {
+    app.run(move |app, event| match event {
+        RunEvent::ExitRequested { api, .. } => {
             // Close what the app opened, including a host it started, before the process ends.
             // Until that is done every quit request is held, so a second one cannot skip it.
             if phase.load(Ordering::SeqCst) != CLOSED {
@@ -121,7 +121,18 @@ fn main() {
                 ));
             }
         }
+        // On macOS, Cmd-Q and logout end the loop without asking first, so the request above never
+        // comes. Close here too, with the windows already gone.
+        RunEvent::Exit if phase.load(Ordering::SeqCst) != CLOSED => {
+            tauri::async_runtime::block_on(close_all(desktop.clone()));
+        }
+        _ => {}
     });
+}
+
+/// Closes everything the app opened; `Desktop::shutdown` is bounded.
+async fn close_all(desktop: Arc<Desktop>) {
+    desktop.shutdown().await;
 }
 
 /// Closes everything once, then ends the app. Later calls while it runs do nothing.
@@ -130,7 +141,8 @@ async fn close_then_exit(app: tauri::AppHandle, desktop: Arc<Desktop>, phase: Ar
         .compare_exchange(RUNNING, CLOSING, Ordering::SeqCst, Ordering::SeqCst)
         .is_ok()
     {
-        desktop.shutdown().await;
+        // In a task of its own, so a panic inside cannot leave the phase at CLOSING for good.
+        let _ = tauri::async_runtime::spawn(close_all(desktop)).await;
         phase.store(CLOSED, Ordering::SeqCst);
         app.exit(0);
     }

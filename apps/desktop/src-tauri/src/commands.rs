@@ -87,11 +87,15 @@ async fn open_in_browser(app: App<'_>, url: String) -> Reply<()> {
     let origin = app.proxy_origin().await.map_err(shown)?;
     let target = hq_desktop::window::browser_target(&url, &origin)
         .ok_or_else(|| "only this app's own address can be opened".to_string())?;
-    std::process::Command::new("/usr/bin/open")
+    let status = std::process::Command::new("/usr/bin/open")
         .arg(target)
         .status()
-        .map(|_| ())
-        .map_err(shown)
+        .map_err(shown)?;
+    if status.success() {
+        Ok(())
+    } else {
+        Err("the system could not open the address".into())
+    }
 }
 
 #[tauri::command]

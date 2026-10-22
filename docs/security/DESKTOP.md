@@ -90,10 +90,12 @@ window uses, and the address the consent page is served on.
   time, so two clicks cannot make two hosts. The app never runs `hq stop` (it kills by
   name and by port) and never signals a pid it did not spawn. If something already answers
   `/health` and is not the child, start and stop both refuse.
-- **Quitting closes everything, and is held until it has.** Cmd-Q, closing the last window and
-  SIGTERM or ctrl-c all close the host, the proxy and the pairing endpoints side by side, each
-  with its own bound, so an open event stream or a slow relay cannot keep the host from being
-  stopped. A second quit while that runs is held, not let through.
+- **Quitting closes everything, and is held until it has.** Closing the last window, SIGTERM and
+  ctrl-c close the host, the proxy and the pairing endpoints side by side, each with its own bound, so an open event stream or a slow relay cannot keep the host from being
+  stopped. A second quit while that runs is held, not let through. On macOS Cmd-Q and logout end the event
+  loop without asking first (the app delegate only implements `applicationWillTerminate:`), so the
+  same close also runs on the final exit event, with the windows already gone. After the final
+  stop nothing can start a host.
 - **The token reaches the HQ window in the URL fragment** (`/#token=…`), built in process: it never
   passes through argv, the environment, a log, or the proxy (a fragment is not sent). HQ's web app
   moves it into the window's local storage and removes it from the address bar. The sign-in link
@@ -131,9 +133,14 @@ window uses, and the address the consent page is served on.
   handshake, and the service behind it is an echo until the host gate is built on it, but a
   stranger who learned this Mac's id costs it a handshake and a database read per attempt
   (NATIVE-BRIDGE-010).
-- **Not verified:** the built app was not driven by a person across a real phone camera in this
-  change; the real-camera `hqpair://` hand-off is W4's. The IPC isolation of the HQ window is
-  from the Tauri source and the configuration test, not from a running attack.
+- **Not verified:** no UI of the built app was driven (screen access was not granted), and the
+  HQ window was never loaded through the proxy against the real web app (the tests use a fake
+  HQ), so HQ's own CSP together with the proxy's second policy, the chat socket and event streams
+  through the proxy, and whether the path rule meets any real request are untested at runtime.
+  The built app was launched with an isolated HOME: it opened no socket while idle and ended on
+  SIGTERM; quitting with a host running, and Cmd-Q, were not exercised. The IPC isolation of the
+  HQ window is from the Tauri source and the configuration test, not from a running attack. The
+  real-camera `hqpair://` hand-off is W4's.
 
 ## 7. Attack notes
 
@@ -161,6 +168,10 @@ window uses, and the address the consent page is served on.
 | 20 | An open event stream | Keeps the proxy, and so the quit, waiting | The proxy stops after two seconds; the host is stopped in parallel | `stopping_the_proxy_does_not_wait_for_a_stream_that_never_ends` |
 | 21 | A double click, or a launch-time start plus a click | Starts two hosts, one untracked | Start and stop run one at a time | `two_starts_at_once_make_one_host` |
 | 22 | A host process that ignores the polite signal | Survives a stop after its leader exited | The group is killed at the end of the grace period | `stop_kills_group_members_that_ignore_the_polite_signal` |
+| 24 | The macOS quit command | Ends the app without the exit request, leaving the host running | The close also runs on the exit event | read from the tao and Tauri sources; not exercised (see section 6) |
+| 25 | A host that crashed | Leaves group members behind and a status poll has already reaped the leader | The group is remembered until it is empty, and a stop still reaches it | `stop_reaches_group_members_after_a_status_poll_reaped_the_leader` |
+| 26 | A launch-time start, or a click, during quit | Starts a host that nothing will stop | The final stop closes the door under the same gate | `nothing_starts_after_the_final_stop` |
+| 27 | A slow relay or revoke | Freezes the screen's refresh | The refresh reads a cached card, not the bridge lock | `the_screen_refresh_does_not_wait_for_the_bridge_lock` |
 | 23 | A script in the control window | Passes a backslash URL to `open` that two parsers read differently | Refused; the address goes out in the parser's own spelling | `only_a_plain_address_on_the_proxy_is_handed_to_the_browser` |
 
 ## 8. Guard checks
@@ -205,5 +216,9 @@ Each guard below was broken one at a time and `cargo test -p hq-desktop` run; ev
 | Localhost accepted as the proxy's name | `a_request_for_another_host_never_reaches_hq`, `a_foreign_or_null_origin_is_refused_and_the_proxys_own_passes`, `the_proxys_own_name_passes_and_every_other_host_does_not` |
 | Backslash allowed in the address handed to the browser | `only_a_plain_address_on_the_proxy_is_handed_to_the_browser` |
 | IPv6 loopback accepted as HQ's web bind | `the_app_reaches_hq_over_loopback_or_not_at_all` |
+| A host's leftover group members are forgotten once the leader is reaped | `stop_reaches_group_members_after_a_status_poll_reaped_the_leader` |
+| A host can start after the final stop | `nothing_starts_after_the_final_stop` |
+| A host that ignores the polite signal is never killed | `stop_kills_a_host_that_ignores_the_polite_signal`, `stop_kills_group_members_that_ignore_the_polite_signal` |
+| The screen refresh waits on the bridge lock | `the_screen_refresh_does_not_wait_for_the_bridge_lock` |
 
-36 guards, 36 caught. The script edits the source, runs the tests and restores the file; it covers the proxy, the host, the pairing controller, settings, the navigation allow-lists and the shell's configuration files.
+40 guards, 40 caught. The script edits the source, runs the tests and restores the file; it covers the proxy, the host, the pairing controller, settings, the navigation allow-lists and the shell's configuration files.

@@ -16,6 +16,8 @@ use std::sync::Mutex;
 use tokio::sync::Mutex as AsyncMutex;
 
 const HOST_LOG: &str = "host.log";
+/// The longest closing may take in all: the host's grace period, a kill and a little slack.
+const SHUTDOWN_LIMIT: std::time::Duration = std::time::Duration::from_secs(30);
 /// How long closing the pairing endpoints may take before the app stops waiting for them.
 const SHUTDOWN_STEP: std::time::Duration = std::time::Duration::from_secs(5);
 const DEFAULT_DEVICE_NAME: &str = "hq-desktop";
@@ -211,8 +213,12 @@ impl Desktop {
     /// closes run side by side and each is bounded, so an open event stream or a slow relay
     /// cannot keep the host from being stopped.
     pub async fn shutdown(&self) {
+        let _ = tokio::time::timeout(SHUTDOWN_LIMIT, self.close_everything()).await;
+    }
+
+    async fn close_everything(&self) {
         let host = async {
-            let _ = self.host.stop().await;
+            let _ = self.host.stop_for_good().await;
         };
         let pairing = async {
             let _ = tokio::time::timeout(SHUTDOWN_STEP, self.pairing.stop()).await;
