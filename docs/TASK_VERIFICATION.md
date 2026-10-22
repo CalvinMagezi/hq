@@ -257,6 +257,19 @@ agree with an audit of its own work. The daemon tasks are `verify-dispatch` (eve
   The `hq verify` commands open the database directly, so a process that can run `hq` as you on your machine can use
   them, as it could open the database itself. Coding agents run in the host's sandbox, which keeps HQ's own folder out
   of their reach; an agent you start outside it is as trusted as you are.
+- The tier and the acceptance criteria are read from the task when it is verified. A worker can edit its own task's
+  tags and `Acceptance` section before handing it over, and nothing records what they were before. After the
+  verdict that is covered: a task whose criteria were edited or whose tier rose since it was checked is not
+  completed on the old verdict, whether it waits in a sweep or a veto window. Before it, the audits are what catch
+  it, and the task's event log shows who changed what.
+- Only the first three pull requests and five notes a task links are checked, and the rest are not looked at. Link
+  what the task produced and nothing else.
+- Several processes can share one database. The daemon writes the completion policy from its configuration on every
+  verification pass, and another process (the MCP server, a chat session) does so only when it really read a
+  configuration file, so one started under another user with no config cannot switch verification off. A policy that
+  cannot be read at all is treated as enforcing.
 - The daemon does the slow work, so a sweep moves only while the daemon runs. `hq verify sweep show` says where it is.
+  The queue health panel says when tasks have waited for verification with nothing verified for a day, which usually
+  means the daemon is not running, and when they wait only because no reviewer budget is set.
 - Turning it on for a real instance is a decision to make in steps (see "Turning it on"), reading `hq verify status`
   between them. Nothing in HQ does that for you.

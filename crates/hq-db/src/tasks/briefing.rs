@@ -44,6 +44,9 @@ pub struct QueueHealth {
     pub alerts: Vec<String>,
 }
 
+/// Queued for verification this long with no verdict at all in a day: the verifier is not running.
+const STALLED_AFTER_HOURS: i64 = 2;
+
 fn hours_since(stamp: &str) -> Option<i64> {
     let then = chrono::NaiveDateTime::parse_from_str(stamp, "%Y-%m-%d %H:%M:%S").ok()?;
     Some((chrono::Utc::now().naive_utc() - then).num_hours().max(0))
@@ -54,8 +57,14 @@ pub fn queue_health(conn: &Connection, cfg: &VerificationConfig) -> Result<Queue
     let mut backlog: BTreeMap<String, i64> = BTreeMap::new();
     let mut owner_by_kind: BTreeMap<String, i64> = BTreeMap::new();
     let mut oldest_owner: Option<i64> = None;
+    let mut oldest_queued: Option<i64> = None;
     for item in &items {
         *backlog.entry(item.who.clone()).or_insert(0) += 1;
+        if item.who == WAIT_VERIFIER
+            && let Some(h) = hours_since(&item.since)
+        {
+            oldest_queued = Some(oldest_queued.map_or(h, |o| o.max(h)));
+        }
         if item.who == WAIT_OWNER {
             *owner_by_kind.entry(item.kind.to_string()).or_insert(0) += 1;
             if let Some(h) = hours_since(&item.since) {
@@ -64,7 +73,8 @@ pub fn queue_health(conn: &Connection, cfg: &VerificationConfig) -> Result<Queue
         }
     }
     let (verdicts_24h, completed_24h): (i64, i64) = conn.query_row(
-        "SELECT COUNT(*), COALESCE(SUM(verdict = ?1 AND applied = 1 AND level <> ?2), 0) \
+        "SELECT COUNT(*), COALESCE(SUM(verdict = ?1 AND applied = 1 AND level <> ?2 \
+                AND EXISTS (SELECT 1 FROM tasks t WHERE t.id = task_id AND t.status = 'complete')), 0) \
          FROM task_verdicts WHERE canary = 0 AND created_at >= datetime('now', '-1 day')",
         params![VERDICT_PASS, LEVEL_OWNER],
         |r| Ok((r.get(0)?, r.get(1)?)),
@@ -110,6 +120,23 @@ pub fn queue_health(conn: &Connection, cfg: &VerificationConfig) -> Result<Queue
         {
             alerts.push(format!(
                 "at the current rate the verification queue takes {h:.0} hours to clear"
+            ));
+        }
+        let waiting_for_budget = backlog.get(WAIT_BUDGET).copied().unwrap_or(0);
+        if waiting_for_budget > 0 && !cfg.reviewer_enabled() {
+            // Every tier needs a review to pass, so with no budget nothing but a failing check is
+            // ever settled, and without this line the queue would just grow.
+            alerts.push(format!(
+                "{waiting_for_budget} tasks wait because no reviewer budget is set: set tasks.verification.reviewer_monthly_ceiling_usd, or decide them yourself"
+            ));
+        }
+        if let Some(h) = oldest_queued
+            && verdicts_24h == 0
+            && h >= STALLED_AFTER_HOURS
+        {
+            alerts.push(format!(
+                "{} tasks are queued for verification, the oldest {h} hours, and none was verified in the last day: is the HQ daemon running?",
+                backlog.get(WAIT_VERIFIER).copied().unwrap_or(0)
             ));
         }
         if let Some(ceiling) = cfg.reviewer_monthly_ceiling_usd {
@@ -285,8 +312,11 @@ pub fn briefing(conn: &Connection, cfg: &VerificationConfig, since: &str) -> Res
     // Failed and sent back to their worker since then.
     let mut stmt = conn.prepare(
         "SELECT v.task_id, COUNT(*), MAX(v.created_at) FROM task_verdicts v \
-         WHERE v.canary = 0 AND v.waiting_for = ?1 AND v.created_at >= ?2 GROUP BY v.task_id \
-         ORDER BY MAX(v.created_at) DESC",
+         WHERE v.canary = 0 AND v.waiting_for = ?1 AND v.created_at >= ?2 \
+           AND EXISTS (SELECT 1 FROM task_events e WHERE e.task_id = v.task_id \
+                         AND e.from_status = 'ready_for_review' AND e.to_status IN ('to_do', 'blocked') \
+                         AND e.actor LIKE 'verify:%' AND e.occurred_at >= ?2) \
+         GROUP BY v.task_id ORDER BY MAX(v.created_at) DESC",
     )?;
     let reworked_rows: Vec<(String, i64)> = stmt
         .query_map(params![WAIT_WORKER, since], |r| Ok((r.get(0)?, r.get(1)?)))?

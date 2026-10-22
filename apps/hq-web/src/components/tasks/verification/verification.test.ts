@@ -133,7 +133,24 @@ test('calibration never states a rate it has no audits for', () => {
   expect(auditEstimate(cal([tier({})]))).toContain('no error estimate')
   expect(auditEstimate(cal([tier({ audits: 12, disagreements: 1 })]))).toContain('Too few to say')
   const enough = auditEstimate(cal([tier({ audits: 35, disagreements: 1, disagreement_upper: 0.12 })]))
-  expect(enough).toBe('1 of 35 audits disagreed. HQ is wrong at most 12% of the time, with 95% confidence.')
+  expect(enough).toBe('1 of 35 audits disagreed. For tier 1, HQ is wrong at most 12% of the time, with 95% confidence.')
+  // Thirty-odd audits spread over three tiers say nothing about any one of them.
+  const spread = auditEstimate(
+    cal([
+      tier({ tier: 0, audits: 12, disagreements: 0, disagreement_upper: 0.24 }),
+      tier({ tier: 1, audits: 12, disagreements: 1, disagreement_upper: 0.3 }),
+      tier({ tier: 2, audits: 12, disagreements: 0, disagreement_upper: 0.24 }),
+    ])
+  )
+  expect(spread).toContain('Too few to say')
+  // A thin tier's wide bound does not colour a tier that has a sample.
+  const mixed = auditEstimate(
+    cal([
+      tier({ tier: 1, audits: 40, disagreements: 1, disagreement_upper: 0.09 }),
+      tier({ tier: 2, audits: 3, disagreements: 0, disagreement_upper: 0.56 }),
+    ])
+  )
+  expect(mixed).toBe('1 of 43 audits disagreed. For tier 1, HQ is wrong at most 9% of the time, with 95% confidence.')
 })
 
 test('the veto countdown reads in the largest sensible unit', () => {

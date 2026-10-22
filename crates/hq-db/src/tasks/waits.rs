@@ -117,7 +117,8 @@ pub struct WaitingState {
     /// What kind of wait it is: `review` (not verified, so yours), `legacy` (older than
     /// enforcement, a sweep handles it), `veto_window`, `held` (a pass the autonomy gate kept for
     /// you), `returns_exhausted`, `returned` (back with its worker), `queued`, `wait` (checks
-    /// running, no reviewer reachable, budget) or `findings`.
+    /// running, no reviewer reachable, budget), `findings`, `skipped` (kept out of automatic verification) or
+    /// `unapplied` (a sweep's verdict that has not been applied).
     pub kind: &'static str,
 }
 
@@ -177,6 +178,15 @@ pub fn waiting_state(conn: &Connection, task: &Task) -> Result<Option<WaitingSta
             if let Some(wait) = current_wait(conn, &task.id)? {
                 return Ok(WaitingState::new(&wait.waiting_for, "wait", wait.reason));
             }
+            if is_skipped(conn, &task.id)? {
+                // Kept out of automatic verification (a sweep was undone, or the owner wants to
+                // decide it): nothing else will look at it.
+                return Ok(WaitingState::new(
+                    WAIT_OWNER,
+                    "skipped",
+                    "kept out of automatic verification for this submission: decide it yourself",
+                ));
+            }
             let marker = review_marker(conn, &task.id)?;
             let latest: Option<(Option<String>, String, String)> = conn
                 .query_row(
@@ -188,7 +198,11 @@ pub fn waiting_state(conn: &Connection, task: &Task) -> Result<Option<WaitingSta
                 )
                 .optional()?;
             Ok(match latest {
-                Some((Some(who), reasons, verdict)) => WaitingState::new(
+                // Only the owner and the budget, checks and verifier waits can hold a task that
+                // is still in review. A verdict that says "the worker" or says nothing was
+                // recorded for a sweep and never applied, so the task did not move: it waits on
+                // whoever applies or decides it.
+                Some((Some(who), reasons, verdict)) if who != WAIT_WORKER => WaitingState::new(
                     &who,
                     if verdict == VERDICT_PASS {
                         "held"
@@ -197,7 +211,14 @@ pub fn waiting_state(conn: &Connection, task: &Task) -> Result<Option<WaitingSta
                     },
                     first_line(&reasons),
                 ),
-                Some((None, _, _)) => None,
+                Some((_, reasons, verdict)) => WaitingState::new(
+                    WAIT_OWNER,
+                    "unapplied",
+                    format!(
+                        "verified ({verdict}) but not applied: apply the sweep that recorded it, or decide it yourself. {}",
+                        first_line(&reasons)
+                    ),
+                ),
                 None => WaitingState::new(WAIT_VERIFIER, "queued", "queued for verification"),
             })
         }

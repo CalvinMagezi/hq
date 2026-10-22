@@ -324,7 +324,8 @@ pub fn record_second_opinion_disagreement(
 pub fn weekly_audit_target(conn: &Connection, cfg: &VerificationConfig) -> Result<i64> {
     let completed: i64 = conn.query_row(
         "SELECT COUNT(*) FROM task_verdicts WHERE canary = 0 AND verdict = ?1 AND applied = 1 \
-         AND level <> ?2 AND created_at >= datetime('now', '-7 days')",
+         AND level <> ?2 AND created_at >= datetime('now', '-7 days') \
+         AND EXISTS (SELECT 1 FROM tasks t WHERE t.id = task_id AND t.status = 'complete')",
         params![VERDICT_PASS, LEVEL_OWNER],
         |r| r.get(0),
     )?;
@@ -447,7 +448,9 @@ pub fn canary_stats(conn: &Connection, verifier_config: &str) -> Result<CanarySt
 }
 
 /// Escapes in the window: completed tasks, verified by this configuration at this tier, that were
-/// reopened or that have a follow-up tagged `regression` linked to them.
+/// reopened or that have a follow-up tagged `regression` linked to them. A pass that never
+/// completed the task (one a sweep recorded and has not applied, or one the owner vetoed) did not
+/// escape: the task was not completed, so there is nothing to reopen.
 pub fn escapes(conn: &Connection, tier: u8, verifier_config: &str) -> Result<i64> {
     Ok(conn.query_row(
         "SELECT COUNT(DISTINCT v.task_id) FROM task_verdicts v JOIN tasks t ON t.id = v.task_id \
@@ -455,7 +458,9 @@ pub fn escapes(conn: &Connection, tier: u8, verifier_config: &str) -> Result<i64
            AND v.tier = ?3 AND v.verifier_config = ?4 \
            AND v.created_at >= datetime('now', ?5) \
            AND NOT EXISTS (SELECT 1 FROM task_veto_holds h WHERE h.task_id = t.id) \
-           AND (t.status <> 'complete' \
+           AND ((t.status <> 'complete' \
+                 AND EXISTS (SELECT 1 FROM task_events e WHERE e.task_id = t.id \
+                               AND e.to_status = 'complete' AND e.occurred_at >= v.created_at)) \
                 OR EXISTS (SELECT 1 FROM task_links l JOIN task_tags g \
                              ON g.task_id = l.task_id AND lower(g.tag) = 'regression' \
                            WHERE l.kind = 'task' AND l.ref = t.id) \

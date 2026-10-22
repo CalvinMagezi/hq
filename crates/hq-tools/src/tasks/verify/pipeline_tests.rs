@@ -980,6 +980,128 @@ async fn work_that_changed_during_the_window_is_checked_again_not_completed_on_a
     );
 }
 
+/// Edits the task's description as its worker could: the Acceptance section is part of it.
+fn edit_description(db: &Database, description: &str) {
+    db.with_conn(|c| {
+        t::update_task(
+            c,
+            "tk-1",
+            &t::TaskPatch {
+                description: Some(description.to_string()),
+                ..Default::default()
+            },
+            None,
+        )
+    })
+    .unwrap();
+}
+
+#[tokio::test]
+async fn criteria_edited_during_the_window_are_not_completed_on_the_old_verdict() {
+    let w = World::code(merged_pr_github(SKIP_DIFF));
+    held_tier_two(&w).await;
+    close_the_window(&w);
+    edit_description(
+        &w.db,
+        "Reject applications to closed jobs.\n\nAcceptance:\n- it compiles\n",
+    );
+    let released = run_pass(&w, &ScriptedReviewer::new(&["a"], vec![])).await;
+    assert_eq!(
+        (released.released, released.changed_in_window),
+        (0, 1),
+        "{released:?}"
+    );
+    assert_eq!(get(&w.db).status, t::STATUS_TO_DO);
+    let last = verdicts(&w.db).into_iter().next().unwrap();
+    assert!(
+        last.reasons.contains("acceptance criteria were edited"),
+        "{}",
+        last.reasons
+    );
+}
+
+#[tokio::test]
+async fn a_window_that_closes_while_the_verifier_is_not_trusted_completes_nothing() {
+    let mut w = World::code(merged_pr_github(SKIP_DIFF));
+    held_tier_two(&w).await;
+    close_the_window(&w);
+    // Trust was withdrawn (or is not yet earned, under `require`) after the verdict was made.
+    w.cfg.autonomy_gate = hq_core::config::AutonomyGate::Require;
+    let released = run_pass(&w, &ScriptedReviewer::new(&["a"], vec![])).await;
+    assert_eq!((released.released, released.changed_in_window), (0, 0));
+    assert_eq!(get(&w.db).status, t::STATUS_READY_FOR_REVIEW);
+    assert!(
+        w.db.with_conn(|c| t::get_hold(c, "tk-1"))
+            .unwrap()
+            .is_none()
+    );
+    let note = w.db.with_conn(|c| t::list_comments(c, "tk-1")).unwrap();
+    assert!(
+        note.last().unwrap().body.contains("no longer trusted"),
+        "{:?}",
+        note.last().map(|n| &n.body)
+    );
+    // And it is the owner's, not nobody's.
+    let state =
+        w.db.with_conn(|c| t::waiting_state(c, &get(&w.db)))
+            .unwrap()
+            .unwrap();
+    assert_eq!(state.who, "owner");
+}
+
+#[tokio::test]
+async fn a_pull_request_whose_diff_cannot_be_read_goes_to_the_owner_unscanned() {
+    let db = db_with_task(DESCRIPTION);
+    link(&db, "pr", "example/repo#7", "produced");
+    submitted(&db);
+    // Everything GitHub would say about the pull request except its diff, which it refuses when
+    // the change is very large.
+    let gh = FakeGitHub::default()
+        .with(
+            "repos/example/repo/pulls/7",
+            json!({"state": "closed", "merged": true, "head": {"sha": "abc123"}, "base": {"ref": "main"},
+                   "user": {"login": "dev"}, "changed_files": 1, "mergeable": null}),
+        )
+        .with(
+            "repos/example/repo/commits/abc123/check-runs?per_page=100",
+            json!({"check_runs": [{"name": "test", "status": "completed", "conclusion": "success"}]}),
+        )
+        .with(
+            "repos/example/repo/branches/main/protection/required_status_checks",
+            json!({"contexts": ["test"]}),
+        );
+    let w = World {
+        db,
+        gh: Arc::new(gh),
+        vault: tempfile::tempdir().unwrap(),
+        cfg: enforce(),
+    };
+    let reviewer = ScriptedReviewer::new(&["premium"], vec![]);
+    let Finished::Recorded {
+        verdict,
+        waiting_for,
+        ..
+    } = w.verify(&reviewer).await
+    else {
+        panic!("expected a verdict");
+    };
+    assert_eq!(verdict.verdict, "inconclusive");
+    assert_eq!(waiting_for, Some(WaitingFor::Owner));
+    assert!(
+        verdict
+            .reasons
+            .contains("diff of the pull request could not be read"),
+        "{}",
+        verdict.reasons
+    );
+    assert_eq!(
+        reviewer.calls(),
+        0,
+        "nothing was passed on an unscanned change"
+    );
+    assert_eq!(get(&w.db).status, t::STATUS_READY_FOR_REVIEW);
+}
+
 #[tokio::test]
 async fn a_task_the_owner_completed_in_the_window_is_left_alone_and_zero_hours_means_no_window() {
     let w = World::code(merged_pr_github(SKIP_DIFF));
@@ -1346,6 +1468,7 @@ fn tools_for(w: &World) -> Vec<Box<dyn crate::registry::HqTool>> {
         settings,
         None,
         Arc::new(super::remote::fake::FakeGitHub::default()),
+        true,
     )
 }
 
@@ -1964,6 +2087,63 @@ mod sweeps {
         advance_sweeps(&w.env(), &idle, 1).await.unwrap();
         assert_eq!(sweep_of(&w.db, &sweep.id).status, t::SWEEP_PLANNED);
         assert_eq!(sweep_of(&w.db, &sweep.id).plan["total"], 3);
+    }
+
+    #[tokio::test]
+    async fn criteria_edited_after_the_run_and_a_verifier_no_longer_trusted_are_not_applied() {
+        let w = queue();
+        let sweep = plan(&w).await;
+        start(&w, &sweep.id);
+        advance_sweeps(&w.env(), &passing_reviewer(&w).await, 50)
+            .await
+            .unwrap();
+        w.db.with_conn(|c| t::request_apply(c, &w.cfg, &sweep.id, false))
+            .unwrap();
+        // The worker rewrites what "done" means for tk-1 after it was judged against the old text.
+        super::edit_description(
+            &w.db,
+            "Reject applications to closed jobs.\n\nAcceptance:\n- it compiles\n",
+        );
+        advance_sweeps(&w.env(), &ScriptedReviewer::new(&["p"], vec![]), 50)
+            .await
+            .unwrap();
+        let tk1 = items(&w.db, &sweep.id)
+            .into_iter()
+            .find(|i| i.task_id == "tk-1")
+            .unwrap();
+        assert_eq!(tk1.state, t::ITEM_STALE, "{tk1:?}");
+        assert!(
+            tk1.detail.contains("acceptance criteria were edited"),
+            "{}",
+            tk1.detail
+        );
+        assert_eq!(status_of(&w.db, "tk-1"), t::STATUS_READY_FOR_REVIEW);
+
+        // A second sweep, applied while trust is withdrawn: the pass is kept for the owner.
+        let mut other = queue();
+        let s = plan(&other).await;
+        start(&other, &s.id);
+        advance_sweeps(&other.env(), &passing_reviewer(&other).await, 50)
+            .await
+            .unwrap();
+        other.cfg.autonomy_gate = hq_core::config::AutonomyGate::Require;
+        other
+            .db
+            .with_conn(|c| t::request_apply(c, &other.cfg, &s.id, false))
+            .unwrap();
+        advance_sweeps(&other.env(), &ScriptedReviewer::new(&["p"], vec![]), 50)
+            .await
+            .unwrap();
+        assert_eq!(
+            status_of(&other.db, "tk-1"),
+            t::STATUS_READY_FOR_REVIEW,
+            "an unearned verifier completes nothing"
+        );
+        let tk1 = items(&other.db, &s.id)
+            .into_iter()
+            .find(|i| i.task_id == "tk-1")
+            .unwrap();
+        assert!(tk1.detail.contains("held for you"), "{}", tk1.detail);
     }
 
     #[tokio::test]

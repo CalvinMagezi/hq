@@ -293,6 +293,15 @@ pub async fn gather(env: &Env<'_>, task: &Task) -> Result<Evidence> {
             collect_checks(env.gh, &mut log, repo, sha, None).await;
         }
     }
+    // Code is code however it was found. A pull request or commit discovered from the lease's
+    // branch, with nothing linked and no `code` tag, still needs what tier 1 asks for.
+    if discovery
+        .artifacts
+        .iter()
+        .any(|a| matches!(a, Artifact::Pr { .. } | Artifact::Commit { .. }))
+    {
+        tier = tier.max(1);
+    }
     let mut seen_notes = 0;
     for artifact in &discovery.artifacts {
         let Artifact::Note { path } = artifact else {
@@ -448,6 +457,19 @@ pub fn gate(ev: &Evidence, cfg: &VerificationConfig) -> Gate {
             return Gate::Settled(Resolution::inconclusive(
                 format!("{}#{} {why}.", p.facts.repo, p.facts.number),
                 WaitingFor::Worker,
+            ));
+        }
+        // A diff that could not be read (GitHub refuses very large ones) is a diff nobody scanned
+        // for skipped tests, weakened CI or a tier 2 path: that is the owner's to look at.
+        if ev
+            .log
+            .items()
+            .iter()
+            .any(|o| o.kind == "diff_scan" && o.unavailable)
+        {
+            return Gate::Settled(Resolution::inconclusive(
+                "the diff of the pull request could not be read, so the check for skipped tests, weakened CI and tier 2 paths could not run. Look at the change yourself.",
+                WaitingFor::Owner,
             ));
         }
         let checks: Vec<&ChecksSummary> = ev.prs.iter().filter_map(|p| p.checks.as_ref()).collect();
@@ -776,6 +798,9 @@ pub(super) async fn still_current(env: &Env<'_>, currency: &Currency) -> Option<
         }
     }
     for (path, hash) in &currency.notes {
+        if let Some(problem) = super::collect::note_path_problem(env.vault_path, path) {
+            return Some(problem);
+        }
         match std::fs::read_to_string(env.vault_path.join(path)) {
             Ok(raw) if &hq_db::search::content_hash(&raw) == hash => {}
             Ok(_) => return Some(format!("{path} was edited since it was checked")),
@@ -783,6 +808,38 @@ pub(super) async fn still_current(env: &Env<'_>, currency: &Currency) -> Option<
         }
     }
     None
+}
+
+/// Whether the bar a verdict was made against still holds: the acceptance criteria are the ones
+/// it judged, and the task is not in a higher tier than it was checked for. A worker can edit
+/// both on its own task, and a verdict can wait hours in a sweep or a veto window.
+pub(super) fn bar_changed(
+    env: &Env<'_>,
+    task: &Task,
+    verdict: &t::Verdict,
+) -> Result<Option<String>> {
+    if contract_of(&task.description).hash != verdict.contract_hash {
+        return Ok(Some(
+            "its acceptance criteria were edited since it was checked".to_string(),
+        ));
+    }
+    let (cfg, task) = (env.cfg.clone(), task.clone());
+    let tier = env.db.with_conn(move |c| t::task_tier(c, &task, &cfg))?;
+    Ok((tier > verdict.tier).then(|| {
+        format!(
+            "it is tier {tier} now and was checked as tier {}",
+            verdict.tier
+        )
+    }))
+}
+
+/// Why the measured trust in the verifier does not allow completing a tier now, if it does not.
+/// An error reading calibration holds the task: trust is not assumed.
+pub(super) fn autonomy_hold(env: &Env<'_>, tier: u8) -> Option<String> {
+    let cfg = env.cfg.clone();
+    env.db
+        .with_conn(move |c| t::autonomy_block(c, &cfg, tier))
+        .unwrap_or_else(|e| Some(format!("calibration could not be read ({e})")))
 }
 
 pub(super) fn new_verifier_id() -> String {
@@ -903,7 +960,8 @@ pub async fn finish_as(
         let (cfg, tier) = (env.cfg.clone(), ev.tier);
         env.db
             .with_conn(move |c| t::autonomy_block(c, &cfg, tier))
-            .unwrap_or(None)
+            // If calibration cannot be read, the pass is held: trust is not assumed.
+            .unwrap_or_else(|e| Some(format!("calibration could not be read ({e})")))
     } else {
         None
     };
@@ -1117,7 +1175,18 @@ pub async fn release_due_holds(env: &Env<'_>) -> Result<Released> {
     let due = env.db.with_conn(move |c| t::due_holds(c, now))?;
     for hold in due {
         let currency = Currency::from_json(&hold.currency);
-        let stale = still_current(env, &currency).await;
+        let (task_id, verdict_id) = (hold.task_id.clone(), hold.verdict_id.clone());
+        let (task_now, approved_now) = env
+            .db
+            .with_conn(move |c| Ok((t::get_task(c, &task_id)?, t::get_verdict(c, &verdict_id)?)))?;
+        let (bar, autonomy) = match (&task_now, &approved_now) {
+            (Some(task), Some(v)) => (bar_changed(env, task, v)?, autonomy_hold(env, v.tier)),
+            _ => (None, None),
+        };
+        let stale = match still_current(env, &currency).await {
+            Some(why) => Some(why),
+            None => bar,
+        };
         let (max_attempts, route_tags, vault_path) =
             (env.cfg.max_attempts, env.route_tags, env.vault_path);
         let verifier = new_verifier_id();
@@ -1173,6 +1242,19 @@ pub async fn release_due_holds(env: &Env<'_>) -> Result<Released> {
                     )?;
                     t::send_back(c, &task.id, &verifier, &reasons, max_attempts)?;
                     return Ok(Some((Released::default().with_changed(), None)));
+                }
+                if let Some(why) = autonomy {
+                    // The window passed, but the trust that approved it was withdrawn since.
+                    t::add_comment(
+                        c,
+                        &task.id,
+                        "verifier",
+                        &format!(
+                            "The veto window closed without a veto, but the verifier is no longer trusted to complete this tier on its own ({why}), so it was not completed. Decide it yourself."
+                        ),
+                        None,
+                    )?;
+                    return Ok(Some((Released::default(), None)));
                 }
                 let ctx = t::WriteCtx {
                     actor: Some(&verifier),

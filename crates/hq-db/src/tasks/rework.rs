@@ -17,10 +17,11 @@ pub enum Reworked {
 }
 
 /// Times a task's verification has waited on its worker, counting all submissions: what "reopen
-/// count" means.
+/// count" means. A submission counts once however many verdicts were recorded about it (a
+/// shadow run, a sweep and the live pass can each record one).
 pub fn rejections(conn: &Connection, task_id: &str) -> Result<i64> {
     Ok(conn.query_row(
-        "SELECT COUNT(*) FROM task_verdicts \
+        "SELECT COUNT(DISTINCT COALESCE(submission, -rowid)) FROM task_verdicts \
          WHERE task_id = ?1 AND canary = 0 AND waiting_for = ?2 AND verdict IN (?3, ?4)",
         params![task_id, WAIT_WORKER, VERDICT_FAIL, VERDICT_INCONCLUSIVE],
         |r| r.get(0),

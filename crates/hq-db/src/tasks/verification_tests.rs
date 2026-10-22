@@ -199,6 +199,93 @@ fn off_and_shadow_gate_nothing() {
 }
 
 #[test]
+fn a_policy_row_that_cannot_be_read_enforces_instead_of_turning_verification_off() {
+    let (db, initiative) = setup();
+    policy(&db, VerificationMode::Enforce);
+    in_review(&db, &initiative, "tk-1", "alpha");
+    db.with_conn(|c| {
+        c.execute(
+            "UPDATE task_verification_policy SET config = '{not json' WHERE id = 1",
+            [],
+        )?;
+        Ok(())
+    })
+    .unwrap();
+    let cfg = db.with_conn(verification_policy).unwrap();
+    assert_eq!(cfg.mode, VerificationMode::Enforce, "fails closed");
+    let refused = update_as(&db, "tk-1", STATUS_COMPLETE, &WriteCtx::default()).unwrap_err();
+    assert!(needs_verification(&refused), "{refused}");
+    // A row that was never written still means off, which is what a new install is.
+    let (fresh, _) = setup();
+    assert_eq!(
+        fresh.with_conn(verification_policy).unwrap().mode,
+        VerificationMode::Off
+    );
+}
+
+#[test]
+fn a_task_worked_on_a_branch_is_code_even_when_nothing_was_linked_or_tagged() {
+    let (db, initiative) = setup();
+    let cfg = VerificationConfig::default();
+    make(&db, "tk-1", &initiative, None).unwrap();
+    claim_as(&db, "tk-1", "alpha").unwrap();
+    let tier = |db: &Database| {
+        let task = get_one(db, "tk-1");
+        db.with_conn(|c| task_tier(c, &task, &cfg)).unwrap()
+    };
+    assert_eq!(
+        tier(&db),
+        0,
+        "a lease with no branch says nothing about code"
+    );
+    db.with_conn(|c| {
+        c.execute(
+            "UPDATE task_work_sessions SET branch = 'feat/closed-jobs' WHERE task_id = 'tk-1'",
+            [],
+        )?;
+        Ok(())
+    })
+    .unwrap();
+    assert_eq!(
+        tier(&db),
+        1,
+        "a pull request found from that branch is held to the code bar"
+    );
+}
+
+#[test]
+fn a_verdict_made_for_a_lower_tier_than_the_task_has_now_does_not_complete_it() {
+    let (db, initiative) = setup();
+    policy(&db, VerificationMode::Enforce);
+    in_review(&db, &initiative, "tk-1", "alpha");
+    // Checked as tier 1; then the worker's tags change so the task is tier 2.
+    let v = passing_verdict(&db, "tk-1", "verify:run-1");
+    db.with_conn(|c| {
+        update_task(
+            c,
+            "tk-1",
+            &TaskPatch {
+                tags: Some(vec!["security".into()]),
+                ..Default::default()
+            },
+            None,
+        )
+    })
+    .unwrap();
+    let ctx = WriteCtx {
+        actor: Some("verify:run-1"),
+        verdict_id: Some(&v.id),
+        ..Default::default()
+    };
+    let refused = update_as(&db, "tk-1", STATUS_COMPLETE, &ctx).unwrap_err();
+    assert!(
+        refused.to_string().contains("does not allow completing"),
+        "{refused}"
+    );
+    assert_eq!(get_one(&db, "tk-1").status, STATUS_READY_FOR_REVIEW);
+}
+
+#[test]
 fn enforced_completion_needs_a_verdict_or_the_owner() {
     let (db, initiative) = setup();
     policy(&db, VerificationMode::Enforce);

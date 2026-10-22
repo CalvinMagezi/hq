@@ -358,6 +358,211 @@ fn a_reopened_task_and_a_regression_follow_up_each_count_as_an_escape() {
     );
 }
 
+/// A verdict a sweep recorded and left unapplied: the task stays in review.
+fn recorded_in_review(db: &Database, id: &str, tier: u8, verdict: &str, config: &str) -> Verdict {
+    let obs = json!([{"id": "o1", "source": "github", "fact": "checks passed"}]);
+    let crit = json!([{"text": "works", "result": verdict, "observation_ids": ["o1"]}]);
+    db.with_conn(|c| {
+        record_verdict(
+            c,
+            &NewVerdict {
+                task_id: id,
+                artifact: "pr:example/repo#1@abc",
+                contract_hash: "h",
+                tier,
+                verdict,
+                level: if verdict == VERDICT_PASS {
+                    LEVEL_MACHINE_PEER
+                } else {
+                    LEVEL_NONE
+                },
+                verifier: "verify:run-1",
+                independence: "different_session",
+                observations: &obs,
+                criteria: &crit,
+                reasons: "recorded by a sweep",
+                applied: verdict == VERDICT_PASS,
+                canary: false,
+                submission: None,
+                waiting_for: (verdict != VERDICT_PASS).then_some("worker"),
+                verifier_config: config,
+            },
+        )
+    })
+    .unwrap()
+}
+
+#[test]
+fn a_pass_that_never_completed_the_task_is_not_an_escape() {
+    let (db, initiative) = setup();
+    let c = cfg();
+    let key = current_config_key(&c);
+    // Three passes a sweep recorded and has not applied: the tasks are still in review.
+    for n in 0..3 {
+        let id = format!("swept-{n}");
+        waiting(&db, &initiative, &id);
+        recorded_in_review(&db, &id, 1, VERDICT_PASS, &key);
+    }
+    assert_eq!(
+        db.with_conn(|x| escapes(x, 1, &key)).unwrap(),
+        0,
+        "nothing was completed, so nothing came back"
+    );
+    // One that was completed and then reopened is.
+    verified(&db, &initiative, "reopened", 1, &key);
+    move_to(&db, "reopened", STATUS_IN_PROGRESS).unwrap();
+    assert_eq!(db.with_conn(|x| escapes(x, 1, &key)).unwrap(), 1);
+    let cal = db.with_conn(|x| calibration(x, &c)).unwrap();
+    assert_ne!(
+        cal.tiers[1].state,
+        Autonomy::Withdrawn,
+        "unapplied sweep verdicts must not withdraw a tier: {:?}",
+        cal.tiers[1].why
+    );
+    // Nor are they "completed by HQ" in the day's figures: three never completed and the fourth
+    // was reopened.
+    let health = db.with_conn(|x| queue_health(x, &enforcing())).unwrap();
+    assert_eq!(health.completed_24h, 0, "{health:?}");
+}
+
+#[test]
+fn a_verdict_recorded_by_a_sweep_is_neither_a_return_nor_a_reworked_task() {
+    let (db, initiative) = setup();
+    let key = current_config_key(&cfg());
+    waiting(&db, &initiative, "swept");
+    // Two verdicts about one submission (a shadow run and a sweep) are one rejection, and the
+    // task, still in review, was not sent back.
+    recorded_in_review(&db, "swept", 1, VERDICT_FAIL, &key);
+    recorded_in_review(&db, "swept", 1, VERDICT_FAIL, &key);
+    assert_eq!(db.with_conn(|c| rejections(c, "swept")).unwrap(), 1);
+    let b = db
+        .with_conn(|c| briefing(c, &enforcing(), "2000-01-01 00:00:00"))
+        .unwrap();
+    assert_eq!(b.reworked_total, 0, "{:?}", b.reworked);
+}
+
+fn state_of(db: &Database, id: &str) -> WaitingState {
+    let task = get_one(db, id);
+    db.with_conn(|c| waiting_state(c, &task))
+        .unwrap()
+        .unwrap_or_else(|| panic!("{id} waits on no one"))
+}
+
+#[test]
+fn a_task_a_sweep_recorded_a_verdict_for_but_never_moved_waits_on_the_owner_not_on_no_one() {
+    let (db, initiative) = setup();
+    enforce_policy(&db, &enforcing());
+    let key = current_config_key(&enforcing());
+    waiting(&db, &initiative, "swept-pass");
+    recorded_in_review(&db, "swept-pass", 1, VERDICT_PASS, &key);
+    waiting(&db, &initiative, "swept-fail");
+    recorded_in_review(&db, "swept-fail", 1, VERDICT_FAIL, &key);
+    for id in ["swept-pass", "swept-fail"] {
+        let state = state_of(&db, id);
+        assert_eq!(
+            (state.who.as_str(), state.kind),
+            (WAIT_OWNER, "unapplied"),
+            "{id}"
+        );
+        assert!(state.reason.contains("sweep"), "{}", state.reason);
+    }
+    // A task the owner kept out of automatic verification is theirs as well, not "queued".
+    waiting(&db, &initiative, "kept-out");
+    db.with_conn(|c| skip_verification(c, "kept-out", "a sweep was undone"))
+        .unwrap();
+    let state = state_of(&db, "kept-out");
+    assert_eq!((state.who.as_str(), state.kind), (WAIT_OWNER, "skipped"));
+    // A task nobody has looked at yet is still the verifier's.
+    waiting(&db, &initiative, "fresh");
+    assert_eq!(state_of(&db, "fresh").who, WAIT_VERIFIER);
+}
+
+#[test]
+fn the_queue_says_when_no_reviewer_budget_is_set_and_when_nothing_has_been_verified_for_a_day() {
+    let (db, initiative) = setup();
+    let cfg = enforcing();
+    enforce_policy(&db, &cfg);
+    waiting(&db, &initiative, "tk-1");
+    db.with_conn(|c| record_wait(c, "tk-1", WAIT_BUDGET, "no reviewer is configured", 1800, 0))
+        .unwrap();
+    let health = db.with_conn(|c| queue_health(c, &cfg)).unwrap();
+    assert!(
+        health
+            .alerts
+            .iter()
+            .any(|a| a.contains("no reviewer budget is set")),
+        "{:?}",
+        health.alerts
+    );
+
+    // A task queued for hours with no verdict anywhere in a day: the verifier is not running.
+    waiting(&db, &initiative, "tk-2");
+    assert!(
+        !db.with_conn(|c| queue_health(c, &cfg))
+            .unwrap()
+            .alerts
+            .iter()
+            .any(|a| a.contains("none was verified")),
+        "a task queued a moment ago is not a stall"
+    );
+    db.with_conn(|c| {
+        // Enforcement began a day ago, so a task queued five hours ago is live work, not legacy.
+        c.execute(
+            "UPDATE task_verification_policy SET enforcing_since = datetime('now', '-1 day')",
+            [],
+        )?;
+        c.execute(
+            "UPDATE task_events SET occurred_at = datetime('now', '-5 hours') \
+             WHERE task_id = 'tk-2' AND event_type = 'entered_ready_for_review'",
+            [],
+        )?;
+        Ok(())
+    })
+    .unwrap();
+    let alerts = db.with_conn(|c| queue_health(c, &cfg)).unwrap().alerts;
+    assert!(
+        alerts
+            .iter()
+            .any(|a| a.contains("none was verified in the last day")),
+        "{alerts:?}"
+    );
+}
+
+#[test]
+fn a_veto_window_for_an_earlier_submission_is_not_offered_but_is_still_cleared() {
+    let (db, initiative) = setup();
+    let key = current_config_key(&cfg());
+    waiting(&db, &initiative, "tk-1");
+    let v = recorded_in_review(&db, "tk-1", 2, VERDICT_PASS, &key);
+    db.with_conn(|c| {
+        create_hold(
+            c,
+            "tk-1",
+            &v.id,
+            chrono::Utc::now().timestamp() + 3600,
+            &json!({}),
+        )
+    })
+    .unwrap();
+    assert!(db.with_conn(|c| get_hold(c, "tk-1")).unwrap().is_some());
+    assert_eq!(db.with_conn(list_holds).unwrap().len(), 1);
+
+    // The worker takes it back and submits again during the window.
+    move_to(&db, "tk-1", STATUS_IN_PROGRESS).unwrap();
+    move_to(&db, "tk-1", STATUS_READY_FOR_REVIEW).unwrap();
+    assert!(db.with_conn(|c| get_hold(c, "tk-1")).unwrap().is_none());
+    assert!(db.with_conn(list_holds).unwrap().is_empty());
+    let err = db
+        .with_conn(|c| veto_hold(c, "tk-1", "too late", "owner"))
+        .unwrap_err();
+    assert!(err.to_string().contains("no veto window"), "{err}");
+    assert_eq!(
+        db.with_conn(|c| due_holds(c, i64::MAX)).unwrap().len(),
+        1,
+        "the release pass still sees it, so it can clear it"
+    );
+}
+
 #[test]
 fn a_canary_counts_a_missed_defect_and_a_rejected_control_but_not_an_error() {
     let (db, _) = setup();

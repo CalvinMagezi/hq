@@ -20,8 +20,8 @@ use serde_json::{Value, json};
 
 use super::dispatch::review_allowed;
 use super::pipeline::{
-    Currency, Disposition, Env, Evidence, Finished, Gate, Resolution, WaitingFor, clock,
-    completion_note, gate, gather, still_current, verify_task_as,
+    Currency, Disposition, Env, Evidence, Finished, Gate, Resolution, WaitingFor, autonomy_hold,
+    bar_changed, clock, completion_note, gate, gather, still_current, verify_task_as,
 };
 use super::reviewer::Reviewer;
 
@@ -512,6 +512,14 @@ async fn apply_item(env: &Env<'_>, sweep: &t::Sweep, item: &t::SweepItem) -> Res
         let currency = Currency::from_observations(&verdict.observations);
         if let Some(why) = still_current(env, &currency).await {
             return Ok(Applied::Stale(format!("not applied: {why}")));
+        }
+        if let Some(why) = bar_changed(env, &task, &verdict)? {
+            return Ok(Applied::Stale(format!("not applied: {why}")));
+        }
+        if let Some(why) = autonomy_hold(env, verdict.tier) {
+            return Ok(Applied::Kept(format!(
+                "held for you: the verifier is not trusted to complete this tier on its own right now ({why})"
+            )));
         }
         let (sweep_id, hold) = (
             sweep.id.clone(),

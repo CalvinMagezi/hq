@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { Check, Loader2, MinusCircle, SkipForward, ThumbsDown, ThumbsUp, X } from 'lucide-react'
 import { answerAudit, fetchAudits, type AuditCard, type AuditStack } from '~/lib/verificationApi'
 import { usePolled } from '../../sessions/usePolled'
@@ -200,10 +200,21 @@ export function AuditSheet({ open, onClose }: Props) {
   const [error, setError] = useState<string | null>(null)
   const [disagreeing, setDisagreeing] = useState(false)
   const [note, setNote] = useState('')
-  const [extra, setExtra] = useState<AuditStack | null>(null)
+  // What was skipped, half-written or failed belongs to one sitting: a sheet that is closed and
+  // opened again starts clean, on the server's current open list.
+  useEffect(() => {
+    if (open) return
+    setSkipped(new Set())
+    setBusy(false)
+    setError(null)
+    setDisagreeing(false)
+    setNote('')
+  }, [open])
   if (!open) return null
 
-  const base = extra ?? stack.data
+  // The server's open list is the only source: answering or drawing more refreshes it, so a card
+  // answered on another device, or a weekly push that arrived meanwhile, shows up here too.
+  const base = stack.data
   // Skipped cards go to the back; answered ones are gone from the server's open list.
   const cards = base ? [...base.cards.filter((c) => !skipped.has(c.audit.id)), ...base.cards.filter((c) => skipped.has(c.audit.id))] : []
   const view: AuditStack | null = base ? { ...base, cards } : null
@@ -227,7 +238,6 @@ export function AuditSheet({ open, onClose }: Props) {
       await answerAudit(card.audit.id, a, a === 'disagree' ? note : '')
       setNote('')
       setDisagreeing(false)
-      setExtra(await fetchAudits(0))
       await stack.refresh()
     })
 
@@ -252,7 +262,8 @@ export function AuditSheet({ open, onClose }: Props) {
           }}
           onMore={() =>
             guard(async () => {
-              setExtra(await fetchAudits(MORE))
+              await fetchAudits(MORE)
+              await stack.refresh()
             })
           }
         />

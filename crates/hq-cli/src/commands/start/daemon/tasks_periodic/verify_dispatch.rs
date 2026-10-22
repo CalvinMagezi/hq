@@ -39,6 +39,12 @@ pub async fn run_verify_dispatch(
     config: &HqConfig,
 ) -> Result<()> {
     let cfg = &config.tasks.verification;
+    // The daemon runs on a configuration it really loaded (a failed reload keeps the old one), so
+    // it keeps the shared policy in step with it, turning verification off included. Other
+    // processes record theirs only when they too read a file.
+    if let Err(e) = db.with_conn(|c| hq_db::tasks::sync_verification_policy(c, cfg).map(|_| ())) {
+        tracing::warn!(error = %e, "verify-dispatch: could not record the verification policy");
+    }
     if cfg.mode == VerificationMode::Off {
         return Ok(());
     }

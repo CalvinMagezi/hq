@@ -16,10 +16,21 @@ use crate::util::arg_str;
 /// A heartbeat this many times per TTL keeps a lease alive through a missed one.
 const HEARTBEATS_PER_TTL: u64 = 3;
 
+/// The task settings in force, and whether they come from a configuration file that was read.
+/// A process that could not read one (another HOME, no `HQ_CONFIG_PATH`, a file caught
+/// mid-write) holds only defaults, and the defaults say verification is off. It must not write
+/// that over the policy the owner set, because every process on the machine shares that row.
+pub(super) fn task_settings_read() -> (TasksConfig, bool) {
+    match HqConfig::load() {
+        Ok(c) => (c.tasks, HqConfig::config_read_path().is_file()),
+        Err(_) => (TasksConfig::default(), false),
+    }
+}
+
 /// The task settings in force. Read once when the tools are built, like the other
 /// sections, so a config change applies on the next start.
 pub fn task_settings() -> TasksConfig {
-    HqConfig::load().map(|c| c.tasks).unwrap_or_default()
+    task_settings_read().0
 }
 
 /// The lease ttl in force, for callers outside the tools such as the REST layer.

@@ -209,14 +209,22 @@ export function calibrationLine(t: TierCalibration): string {
 }
 
 /** The running error estimate for the audit view. It never states a rate it has no sample for. */
+const AUDITS_FOR_A_RATE = 30
+
 export function auditEstimate(cal: Calibration): string {
   const audits = cal.tiers.reduce((n, t) => n + t.audits, 0)
   const disagreed = cal.tiers.reduce((n, t) => n + t.disagreements, 0)
   if (audits === 0) return 'No audits answered yet, so there is no error estimate.'
-  const upper = cal.tiers.reduce((m, t) => (t.disagreement_upper === null ? m : Math.max(m, t.disagreement_upper)), 0)
   const sample = `${audits} ${audits === 1 ? 'audit' : 'audits'}`
-  if (audits < 30) return `${disagreed} of ${sample} disagreed. Too few to say how often HQ is wrong: it takes about 30 for one tier.`
-  return `${disagreed} of ${sample} disagreed. HQ is wrong at most ${PERCENT(upper)} of the time, with 95% confidence.`
+  // A rate is only stated for a tier with a sample of its own: a thin tier's bound is wide and
+  // would make a well-audited one look worse than it is.
+  const sampled = cal.tiers.filter((t) => t.audits >= AUDITS_FOR_A_RATE && t.disagreement_upper !== null)
+  if (sampled.length === 0) {
+    return `${disagreed} of ${sample} disagreed. Too few to say how often HQ is wrong: it takes about ${AUDITS_FOR_A_RATE} in one tier.`
+  }
+  const upper = sampled.reduce((m, t) => Math.max(m, t.disagreement_upper ?? 0), 0)
+  const names = sampled.map((t) => `tier ${t.tier}`).join(' and ')
+  return `${disagreed} of ${sample} disagreed. For ${names}, HQ is wrong at most ${PERCENT(upper)} of the time, with 95% confidence.`
 }
 
 /** "5h 20m", "3d 4h" or "now" for the time until a unix-second moment. */

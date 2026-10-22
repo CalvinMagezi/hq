@@ -59,11 +59,19 @@ pub fn create_hold(
     get_hold(conn, task_id)?.ok_or_else(|| anyhow::anyhow!("the veto window was not recorded"))
 }
 
+/// A window is about one submission. When the worker submits again during it, the window no
+/// longer says anything about the work in review: it stays in the table until the daemon's next
+/// release pass clears it, and is not offered to the owner meanwhile.
+const CURRENT_SUBMISSION: &str = "submission IS (SELECT MAX(e.id) FROM task_events e \
+     WHERE e.task_id = task_veto_holds.task_id AND e.event_type = 'entered_ready_for_review')";
+
 /// The window open on a task, if any.
 pub fn get_hold(conn: &Connection, task_id: &str) -> Result<Option<VetoHold>> {
     Ok(conn
         .query_row(
-            &format!("SELECT {HOLD_COLS} FROM task_veto_holds WHERE task_id = ?1"),
+            &format!(
+                "SELECT {HOLD_COLS} FROM task_veto_holds WHERE task_id = ?1 AND {CURRENT_SUBMISSION}"
+            ),
             params![task_id],
             row_to_hold,
         )
@@ -73,7 +81,8 @@ pub fn get_hold(conn: &Connection, task_id: &str) -> Result<Option<VetoHold>> {
 /// Every open window, soonest to close first.
 pub fn list_holds(conn: &Connection) -> Result<Vec<VetoHold>> {
     let mut stmt = conn.prepare(&format!(
-        "SELECT {HOLD_COLS} FROM task_veto_holds ORDER BY release_at, task_id"
+        "SELECT {HOLD_COLS} FROM task_veto_holds WHERE {CURRENT_SUBMISSION} \
+         ORDER BY release_at, task_id"
     ))?;
     let rows = stmt
         .query_map([], row_to_hold)?

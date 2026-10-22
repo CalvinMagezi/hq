@@ -310,11 +310,10 @@ impl SessionBuilder {
                 .as_ref()
                 .and_then(|id| id.web_thread())
                 .map(str::to_string);
-            let task_tools = hq_tools::tasks::create_task_tools_for_chat(
+            let task_tools = hq_tools::tasks::create_task_tools_from_config(
                 vault_path.to_path_buf(),
                 Arc::new(vault),
                 db.clone(),
-                hq_tools::tasks::task_settings(),
                 origin_thread,
             );
             // Restricted audiences (FR-073) only reach their own person-scoped task space.

@@ -57,7 +57,28 @@ pub fn create_task_tools(
     vault: Arc<VaultClient>,
     db: Arc<Database>,
 ) -> Vec<Box<dyn HqTool>> {
-    create_task_tools_with(vault_path, vault, db, task_settings())
+    create_task_tools_from_config(vault_path, vault, db, None)
+}
+
+/// The tools for a process that loads its own configuration (the MCP server, HQ's chat
+/// sessions). It records the completion policy only when that configuration was really read:
+/// a process that fell back to defaults would otherwise switch verification off for everyone.
+pub fn create_task_tools_from_config(
+    vault_path: PathBuf,
+    vault: Arc<VaultClient>,
+    db: Arc<Database>,
+    origin_thread: Option<String>,
+) -> Vec<Box<dyn HqTool>> {
+    let (settings, read) = task_settings_read();
+    build_task_tools(
+        vault_path,
+        vault,
+        db,
+        settings,
+        origin_thread,
+        Arc::new(verify::GhCli),
+        read,
+    )
 }
 
 /// `create_task_tools` with explicit task settings, for tests and callers that
@@ -87,6 +108,7 @@ pub fn create_task_tools_for_chat(
         settings,
         origin_thread,
         Arc::new(verify::GhCli),
+        true,
     )
 }
 
@@ -99,12 +121,17 @@ pub(crate) fn build_task_tools(
     settings: TasksConfig,
     origin_thread: Option<String>,
     gh: Arc<dyn verify::GitHubRead>,
+    record_policy: bool,
 ) -> Vec<Box<dyn HqTool>> {
     // The completion policy lives in the database, so the web server, the daemon and an MCP
-    // server all meet the same rule. Whoever builds the tools writes its configuration there.
-    if let Err(e) = db.with_conn(|c| {
-        hq_db::tasks::sync_verification_policy(c, &settings.verification).map(|_| ())
-    }) {
+    // server all meet the same rule. A process that holds a configuration it really read writes
+    // it there (the daemon also does, on every verification pass); one that fell back to defaults
+    // leaves the owner's policy alone.
+    if record_policy
+        && let Err(e) = db.with_conn(|c| {
+            hq_db::tasks::sync_verification_policy(c, &settings.verification).map(|_| ())
+        })
+    {
         tracing::warn!(error = %e, "could not record the task verification policy");
     }
     let create = || TaskCreateTool {

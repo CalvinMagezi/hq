@@ -85,9 +85,19 @@ pub fn verification_policy(conn: &Connection) -> Result<VerificationConfig> {
             |r| r.get(0),
         )
         .optional()?;
-    Ok(text
-        .and_then(|t| serde_json::from_str(&t).ok())
-        .unwrap_or_default())
+    let Some(text) = text else {
+        return Ok(VerificationConfig::default());
+    };
+    // A row that cannot be read is not "off": the guard is a safety control, so it fails closed.
+    // Completion then needs the owner or a verdict until the row is written again by a process
+    // that holds a configuration, which the daemon does on its next verification pass.
+    Ok(serde_json::from_str(&text).unwrap_or_else(|e| {
+        tracing::warn!(error = %e, "the task verification policy could not be read; enforcing it");
+        VerificationConfig {
+            mode: VerificationMode::Enforce,
+            ..Default::default()
+        }
+    }))
 }
 
 /// Writes a process's configuration as the policy in force. Returns whether it changed.
@@ -203,8 +213,11 @@ pub fn task_tier(conn: &Connection, task: &Task, cfg: &VerificationConfig) -> Re
     {
         return Ok(2);
     }
+    // Code, however it was found: linked to a commit or pull request, or worked on a branch (the
+    // lease records it), so a change nobody linked is not read as a note.
     let has_code_link: bool = conn.query_row(
-        "SELECT EXISTS(SELECT 1 FROM task_links WHERE task_id = ?1 AND kind IN ('commit', 'pr'))",
+        "SELECT EXISTS(SELECT 1 FROM task_links WHERE task_id = ?1 AND kind IN ('commit', 'pr')) \
+             OR EXISTS(SELECT 1 FROM task_work_sessions WHERE task_id = ?1 AND branch <> '')",
         params![task.id],
         |r| r.get(0),
     )?;
@@ -547,6 +560,12 @@ fn verdict_allows_completion(conn: &Connection, task: &Task, verdict_id: &str) -
         return Ok(false);
     };
     if v.task_id != task.id || v.verdict != VERDICT_PASS || !v.applied || v.level == LEVEL_NONE {
+        return Ok(false);
+    }
+    // The verdict must have been made for at least the tier the task has now: a task whose tags
+    // were edited after the check (a `security` tag taken off) is not completed on the lower bar.
+    let cfg = verification_policy(conn)?;
+    if v.tier < task_tier(conn, task, &cfg)? {
         return Ok(false);
     }
     Ok(v.submission == review_marker(conn, &task.id)?)

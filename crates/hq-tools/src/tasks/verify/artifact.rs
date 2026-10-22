@@ -69,6 +69,9 @@ pub struct LinkFact {
 pub struct LeaseBranch {
     pub branch: String,
     pub cwd: String,
+    /// When the first lease on this branch began (UTC `YYYY-MM-DD HH:MM:SS`), or empty when not
+    /// known. A pull request opened before this was not opened for this task's work.
+    pub started_at: String,
 }
 
 /// What the database knows about a task that discovery needs.
@@ -90,16 +93,28 @@ impl TaskFacts {
                 direction: l.direction,
             })
             .collect();
-        let mut seen = BTreeSet::new();
-        let branches = t::list_work_sessions(conn, task_id, 30)?
+        // One entry per branch and directory, with the earliest start among the leases on it.
+        let mut branches: Vec<LeaseBranch> = Vec::new();
+        for s in t::list_work_sessions(conn, task_id, 30)?
             .into_iter()
             .filter(|s| !s.branch.is_empty())
-            .filter(|s| seen.insert((s.branch.clone(), s.cwd.clone())))
-            .map(|s| LeaseBranch {
-                branch: s.branch,
-                cwd: s.cwd,
-            })
-            .collect();
+        {
+            match branches
+                .iter_mut()
+                .find(|b| b.branch == s.branch && b.cwd == s.cwd)
+            {
+                Some(b) => {
+                    if s.started_at < b.started_at {
+                        b.started_at = s.started_at;
+                    }
+                }
+                None => branches.push(LeaseBranch {
+                    branch: s.branch,
+                    cwd: s.cwd,
+                    started_at: s.started_at,
+                }),
+            }
+        }
         let produced_notes = hq_db::provenance::for_task(conn, task_id, 50)?
             .into_iter()
             .map(|p| p.path)
@@ -231,6 +246,19 @@ pub async fn discover(
                 Ok(Value::Array(prs)) if !prs.is_empty() => {
                     for pr in prs.iter().take(PRS_PER_BRANCH) {
                         if let Some(number) = pr.get("number").and_then(Value::as_u64) {
+                            // A branch name gets reused: a merged pull request from an earlier job
+                            // must not stand in for this one. One opened before this task's work
+                            // began has to be linked, which is a statement that it is this task's.
+                            if opened_before(
+                                pr.get("created_at").and_then(Value::as_str),
+                                &lease.started_at,
+                            ) {
+                                out.notes.push(format!(
+                                    "{repo}#{number} has the head branch {} but was opened before this task's work began; link it if it is this task's pull request",
+                                    lease.branch
+                                ));
+                                continue;
+                            }
                             add(
                                 &mut out,
                                 Artifact::Pr {
@@ -257,6 +285,19 @@ pub async fn discover(
         }
     }
     out
+}
+
+/// Whether a pull request created at `created_at` (RFC 3339) was opened before `started_at`
+/// (`YYYY-MM-DD HH:MM:SS`, UTC). Either being unknown or unreadable says no: nothing is dropped
+/// on a guess.
+fn opened_before(created_at: Option<&str>, started_at: &str) -> bool {
+    let (Some(created), Ok(started)) = (
+        created_at.and_then(|c| chrono::DateTime::parse_from_rfc3339(c).ok()),
+        chrono::NaiveDateTime::parse_from_str(started_at, "%Y-%m-%d %H:%M:%S"),
+    ) else {
+        return false;
+    };
+    created.naive_utc() < started
 }
 
 /// `owner/repo` from a git remote URL, lower-cased, when it is a GitHub one.
@@ -391,6 +432,7 @@ mod tests {
             branches: vec![LeaseBranch {
                 branch: "claude/fix-x".into(),
                 cwd: "/work/repo".into(),
+                started_at: String::new(),
             }],
             ..Default::default()
         };
@@ -408,6 +450,40 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn a_pull_request_from_before_the_work_began_is_not_taken_for_this_tasks() {
+        let gh = FakeGitHub::default().with(
+            "repos/example/repo/pulls?head=example:claude/fix-x&state=all&per_page=3",
+            json!([
+                {"number": 41, "created_at": "2026-10-21T09:30:00Z"},
+                {"number": 12, "created_at": "2026-03-02T08:00:00Z"},
+                {"number": 7},
+            ]),
+        );
+        let facts = TaskFacts {
+            branches: vec![LeaseBranch {
+                branch: "claude/fix-x".into(),
+                cwd: "/work/repo".into(),
+                started_at: "2026-10-21 09:00:00".into(),
+            }],
+            ..Default::default()
+        };
+        let cwd_repos = HashMap::from([("/work/repo".to_string(), "example/repo".to_string())]);
+        let d = discover(&gh, &facts, &cwd_repos).await;
+        assert_eq!(
+            d.prs().collect::<Vec<_>>(),
+            [("example/repo", 41), ("example/repo", 7)],
+            "the earlier job's merged pull request is left out; one with no date is not guessed away"
+        );
+        assert!(
+            d.notes
+                .iter()
+                .any(|n| n.contains("#12") && n.contains("opened before this task's work began")),
+            "{:?}",
+            d.notes
+        );
+    }
+
+    #[tokio::test]
     async fn a_linked_pr_is_enough_and_the_branch_is_not_searched() {
         let gh = FakeGitHub::default();
         let facts = TaskFacts {
@@ -415,6 +491,7 @@ mod tests {
             branches: vec![LeaseBranch {
                 branch: "feature".into(),
                 cwd: "/w".into(),
+                started_at: String::new(),
             }],
             ..Default::default()
         };
@@ -430,10 +507,12 @@ mod tests {
                 LeaseBranch {
                     branch: "main".into(),
                     cwd: "/w".into(),
+                    started_at: String::new(),
                 },
                 LeaseBranch {
                     branch: "feature".into(),
                     cwd: "/elsewhere".into(),
+                    started_at: String::new(),
                 },
             ],
             ..Default::default()

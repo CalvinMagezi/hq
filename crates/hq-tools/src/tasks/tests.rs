@@ -4689,7 +4689,15 @@ fn tools_over_file_db(
         verification,
         ..Default::default()
     };
-    crate::tasks::build_task_tools(vault_path.to_path_buf(), vault, db, settings, None, gh)
+    crate::tasks::build_task_tools(
+        vault_path.to_path_buf(),
+        vault,
+        db,
+        settings,
+        None,
+        gh,
+        true,
+    )
 }
 
 fn pending_value_items(vault_path: &std::path::Path) -> usize {

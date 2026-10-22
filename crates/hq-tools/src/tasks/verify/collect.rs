@@ -436,24 +436,34 @@ pub struct DiffFacts {
 /// Whether `path` is under one of the configured high-risk prefixes. `deploy/` matches
 /// `deploy/x.yml` and `infra/deploy/x.yml`.
 pub fn touches_tier2_path(path: &str, prefixes: &[String]) -> bool {
-    let p = path.trim_start_matches("./").trim_start_matches('/');
+    let p = path
+        .trim_start_matches("./")
+        .trim_start_matches('/')
+        .to_ascii_lowercase();
     prefixes.iter().any(|raw| {
-        let prefix = raw.trim().trim_start_matches("./").trim_start_matches('/');
-        !prefix.is_empty() && (p.starts_with(prefix) || p.contains(&format!("/{prefix}")))
+        let prefix = raw
+            .trim()
+            .trim_start_matches("./")
+            .trim_start_matches('/')
+            .to_ascii_lowercase();
+        !prefix.is_empty() && (p.starts_with(&prefix) || p.contains(&format!("/{prefix}")))
     })
 }
 
-/// The paths a unified diff changes, in order.
+/// The paths a unified diff changes, in order. A rename names both ends: moving a workflow or a
+/// `deploy/` file out of its folder is still a change to it.
 fn changed_paths(diff: &str) -> Vec<String> {
     let mut out: Vec<String> = Vec::new();
     for line in diff.lines() {
         if let Some(rest) = line.strip_prefix("diff --git ") {
-            let path = rest
-                .rsplit_once(" b/")
-                .map(|(_, new)| new.to_string())
-                .unwrap_or_else(|| rest.to_string());
-            if !out.contains(&path) {
-                out.push(path);
+            let (old, new) = match rest.rsplit_once(" b/") {
+                Some((old, new)) => (old.strip_prefix("a/").unwrap_or(old), new),
+                None => (rest, rest),
+            };
+            for path in [new, old] {
+                if !out.iter().any(|p| p == path) {
+                    out.push(path.to_string());
+                }
             }
         }
     }
@@ -602,20 +612,40 @@ pub fn record_diff_excerpts(log: &mut ObservationLog, diff: &str) -> usize {
     recorded
 }
 
-/// Records that a note exists and what its content hashes to. The path is relative to the vault
-/// and may not leave it.
-pub fn collect_note(vault_root: &Path, log: &mut ObservationLog, rel_path: &str) -> Option<String> {
+/// Folders the vault tools never hand out: identity, threads and databases. A produced note may
+/// not be in one, because its text goes into a reviewer's prompt and the stored observations.
+const PRIVATE_FOLDERS: [&str; 3] = ["_system", "_threads", "_data"];
+
+/// Why `rel` may not be read as a produced note, if it may not: it leaves the vault (by its
+/// spelling or through a symlink) or sits in a private folder.
+pub(super) fn note_path_problem(vault_root: &Path, rel_path: &str) -> Option<String> {
     let rel = rel_path.trim();
     let escapes = rel.is_empty()
         || rel.starts_with('/')
         || rel.contains('\\')
         || rel.split('/').any(|part| part == ".." || part.is_empty());
     if escapes {
-        log.unavailable(
-            "vault",
-            "note_hash",
-            format!("{rel_path} is not a path inside the vault"),
-        );
+        return Some(format!("{rel_path} is not a path inside the vault"));
+    }
+    let first = rel
+        .split('/')
+        .find(|part| *part != ".")
+        .unwrap_or_default()
+        .to_ascii_lowercase();
+    if PRIVATE_FOLDERS.contains(&first.as_str()) {
+        return Some(format!("{rel} is in a private folder of the vault"));
+    }
+    crate::util::assert_within_vault(vault_root, rel)
+        .err()
+        .map(|_| format!("{rel} resolves outside the vault"))
+}
+
+/// Records that a note exists and what its content hashes to. The path is relative to the vault
+/// and may not leave it or name a private folder.
+pub fn collect_note(vault_root: &Path, log: &mut ObservationLog, rel_path: &str) -> Option<String> {
+    let rel = rel_path.trim();
+    if let Some(problem) = note_path_problem(vault_root, rel_path) {
+        log.unavailable("vault", "note_hash", problem);
         return None;
     }
     let full = vault_root.join(rel);
@@ -1043,5 +1073,59 @@ mod tests {
             assert!(collect_note(dir.path(), &mut log, bad).is_none(), "{bad}");
             assert!(log.items()[0].unavailable, "{bad}");
         }
+    }
+
+    #[test]
+    fn tier_two_paths_match_whatever_the_case_and_a_rename_counts_at_both_ends() {
+        let prefixes = vec!["migrations/".to_string(), "deploy/".to_string()];
+        assert!(touches_tier2_path("Migrations/001.sql", &prefixes));
+        assert!(touches_tier2_path("db/MIGRATIONS/001.sql", &prefixes));
+        assert!(!touches_tier2_path("docs/readme.md", &prefixes));
+        let diff = "diff --git a/deploy/prod.yml b/docs/prod.yml\nsimilarity index 100%\nrename from deploy/prod.yml\nrename to docs/prod.yml\n";
+        let files = changed_paths(diff);
+        assert_eq!(files, vec!["docs/prod.yml", "deploy/prod.yml"]);
+        assert!(files.iter().any(|f| touches_tier2_path(f, &prefixes)));
+        // A plain edit lists its path once.
+        assert_eq!(
+            changed_paths("diff --git a/src/a.rs b/src/a.rs\n"),
+            vec!["src/a.rs"]
+        );
+    }
+
+    #[test]
+    fn a_produced_note_cannot_be_a_private_vault_file_or_a_link_out_of_the_vault() {
+        let dir = tempfile::tempdir().unwrap();
+        for private in ["_threads", "_system", "_data", "_Threads", "./_system"] {
+            std::fs::create_dir_all(dir.path().join(private)).unwrap();
+            std::fs::write(dir.path().join(private).join("x.md"), "private text").unwrap();
+            let mut log = ObservationLog::new();
+            let path = format!("{private}/x.md");
+            assert!(
+                collect_note(dir.path(), &mut log, &path).is_none(),
+                "{path}"
+            );
+            let item = &log.items()[0];
+            assert!(item.unavailable, "{path}");
+            assert!(
+                !item.fact.contains("private text")
+                    && !item.data.to_string().contains("private text"),
+                "nothing from the file is recorded: {item:?}"
+            );
+        }
+        // A symlink inside the vault that points out of it.
+        let outside = tempfile::tempdir().unwrap();
+        std::fs::write(outside.path().join("secret.md"), "outside").unwrap();
+        #[cfg(unix)]
+        {
+            std::os::unix::fs::symlink(outside.path(), dir.path().join("link")).unwrap();
+            let mut log = ObservationLog::new();
+            assert!(collect_note(dir.path(), &mut log, "link/secret.md").is_none());
+            assert!(log.items()[0].unavailable);
+        }
+        // Ordinary folders, including ones that merely start with an underscore, still work.
+        std::fs::create_dir_all(dir.path().join("_notes")).unwrap();
+        std::fs::write(dir.path().join("_notes/a.md"), "ok").unwrap();
+        let mut log = ObservationLog::new();
+        assert!(collect_note(dir.path(), &mut log, "_notes/a.md").is_some());
     }
 }
