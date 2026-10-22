@@ -6,8 +6,13 @@
 //! throwaway endpoint per QR code) exists only after a caller asks for it; see
 //! `docs/security/DESKTOP.md`.
 
+pub mod connect;
+pub mod desktop;
 pub mod host;
 pub mod pairing;
 pub mod proxy;
 pub mod qr;
 pub mod settings;
+pub mod window;
+
+pub use desktop::{Desktop, DesktopInit};

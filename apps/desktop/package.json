@@ -1,0 +1,19 @@
+{
+  "name": "hq-desktop",
+  "private": true,
+  "version": "0.9.1",
+  "type": "module",
+  "scripts": {
+    "build:ui": "bun run scripts/build-ui.ts",
+    "typecheck": "tsc --noEmit",
+    "tauri": "tauri",
+    "build": "tauri build --bundles app"
+  },
+  "dependencies": {
+    "@tauri-apps/api": "2.12.4"
+  },
+  "devDependencies": {
+    "@tauri-apps/cli": "2.12.4",
+    "typescript": "5.9.3"
+  }
+}

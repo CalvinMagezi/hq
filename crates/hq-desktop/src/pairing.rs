@@ -197,6 +197,9 @@ impl PairingController {
 
     async fn ensure_started<'a>(&self, slot: &'a mut Option<Bridge>) -> Result<&'a Bridge> {
         if slot.is_none() {
+            if let Some(dir) = self.cfg.key.parent() {
+                crate::settings::create_private_dir(dir)?;
+            }
             let bridge = Bridge::start(
                 BridgeConfig {
                     key: self.cfg.key.clone(),

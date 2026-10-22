@@ -95,11 +95,12 @@ impl HostController {
     pub async fn status(&self) -> HostStatus {
         let own = self.reap_and_pid();
         let answering = probe_health(self.spec.health_port).await;
+        let last_exit = self.inner.lock().unwrap().last_exit;
         match own {
             Some(pid) if answering => HostStatus::Running { pid },
             Some(pid) => HostStatus::Starting { pid },
             None if answering => HostStatus::External,
-            None => match self.inner.lock().unwrap().last_exit {
+            None => match last_exit {
                 Some(code) => HostStatus::Exited { code },
                 None => HostStatus::Stopped,
             },
@@ -114,17 +115,19 @@ impl HostController {
             return Err(HostError::AlreadyRunning);
         }
         let child = spawn(&self.spec)?;
-        let mut inner = self.inner.lock().unwrap();
-        inner.last_exit = None;
-        inner.child = Some(child);
-        drop(inner);
+        {
+            let mut inner = self.inner.lock().unwrap();
+            inner.last_exit = None;
+            inner.child = Some(child);
+        }
         Ok(self.status().await)
     }
 
     /// Stops the child this app started: a polite signal to its whole process group, then a kill
     /// after the grace period. Refuses when the host was not started here.
     pub async fn stop(&self) -> Result<HostStatus, HostError> {
-        let Some(mut child) = self.inner.lock().unwrap().child.take() else {
+        let taken = self.inner.lock().unwrap().child.take();
+        let Some(mut child) = taken else {
             return if probe_health(self.spec.health_port).await {
                 Err(HostError::NotOurs)
             } else {
@@ -284,6 +287,16 @@ fn is_runnable(path: &Path) -> bool {
     }
 }
 
+/// A port nothing listens on, for tests in other modules.
+#[cfg(test)]
+pub(crate) fn tests_support_unused_port() -> u16 {
+    std::net::TcpListener::bind("127.0.0.1:0")
+        .unwrap()
+        .local_addr()
+        .unwrap()
+        .port()
+}
+
 #[cfg(all(test, unix))]
 mod tests {
     use super::*;
@@ -350,6 +363,18 @@ mod tests {
             tokio::time::sleep(Duration::from_millis(100)).await;
         }
         false
+    }
+
+    fn assert_send<T: Send>(_: &T) {}
+
+    /// The shell spawns these on a multi-threaded runtime, so their futures must be `Send`.
+    #[tokio::test]
+    async fn the_futures_can_cross_threads() {
+        let dir = tempfile::tempdir().unwrap();
+        let host = HostController::new(spec(dir.path(), "exit 0", free_port()));
+        assert_send(&host.status());
+        assert_send(&host.start());
+        assert_send(&host.stop());
     }
 
     #[tokio::test]

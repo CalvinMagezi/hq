@@ -1,0 +1,86 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>HQ</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <header>
+    <h1>HQ</h1>
+    <nav aria-label="Sections">
+      <button type="button" data-tab="host" aria-selected="true">Host</button>
+      <button type="button" data-tab="devices" aria-selected="false">Devices</button>
+      <button type="button" data-tab="claude" aria-selected="false">Connect Claude</button>
+    </nav>
+  </header>
+
+  <main>
+    <section id="tab-host">
+      <h2>Host</h2>
+      <p>The HQ host runs your agents, tasks and notes on this Mac. This app starts it only when you press Start, and stops what it started when you quit. It never starts anything when you log in.</p>
+      <p class="row"><span id="host-state" class="badge">Checking</span><span id="host-detail" class="muted"></span></p>
+      <p class="row">
+        <button type="button" id="host-start">Start host</button>
+        <button type="button" id="host-stop">Stop host</button>
+        <button type="button" id="open-hq">Open HQ</button>
+      </p>
+      <p><label><input type="checkbox" id="set-start-on-launch"> Start the host when this app opens</label></p>
+      <p id="host-error" class="error" role="alert"></p>
+    </section>
+
+    <section id="tab-devices" hidden>
+      <h2>Devices</h2>
+      <div id="devices-off">
+        <p>Pair a phone or another computer with a QR code. Switching this on opens a network port for devices you have paired; nobody else is let in. Nothing listens until you do.</p>
+        <p class="row"><button type="button" id="devices-on">Switch on</button></p>
+      </div>
+      <div id="devices-on-block" hidden>
+        <p class="row"><strong id="this-name"></strong><span class="muted">id <code id="this-id"></code></span></p>
+        <p class="row">
+          <button type="button" id="show-code">Show pairing code</button>
+          <button type="button" id="devices-off-btn">Switch off</button>
+        </p>
+
+        <div id="ticket" class="card" hidden>
+          <p>Scan this with the other device's camera, or paste the link into <code>hq bridge join</code>. It works once and expires <span id="ticket-expires"></span>.</p>
+          <canvas id="qr" width="256" height="256" aria-label="Pairing QR code"></canvas>
+          <p class="row"><code id="ticket-link" class="link"></code></p>
+          <p class="row"><button type="button" id="copy-link">Copy link</button><button type="button" id="cancel-ticket">Cancel</button></p>
+        </div>
+
+        <div id="pending"></div>
+
+        <h3>Paired devices</h3>
+        <ul id="peers" class="list"></ul>
+        <p id="peers-empty" class="muted">No devices paired yet.</p>
+      </div>
+      <p id="devices-error" class="error" role="alert"></p>
+    </section>
+
+    <section id="tab-claude" hidden>
+      <h2>Connect Claude</h2>
+      <p id="claude-state" class="row"></p>
+      <div id="claude-url-block" hidden>
+        <p>Add this address in claude.ai under Settings, Connectors.</p>
+        <p class="row"><code id="claude-url" class="link"></code><button type="button" id="copy-url">Copy</button></p>
+      </div>
+      <ul id="claude-notes" class="notes"></ul>
+      <p class="row">
+        <button type="button" id="arm">Allow a new connection</button>
+        <button type="button" id="disarm">Close the window</button>
+      </p>
+      <p id="armed" class="muted"></p>
+      <h3>Consent on this Mac</h3>
+      <p>The consent page is served on <code id="local-consent"></code>. To approve there, sign that browser in first.</p>
+      <p class="row"><button type="button" id="signin">Get a sign-in link</button></p>
+      <p id="signin-out" class="row" hidden><code id="signin-link" class="link"></code><button type="button" id="open-signin">Open in browser</button></p>
+      <p id="claude-error" class="error" role="alert"></p>
+    </section>
+  </main>
+
+  <p id="toast" role="status"></p>
+  <script type="module" src="main.js"></script>
+</body>
+</html>
