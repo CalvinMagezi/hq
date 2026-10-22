@@ -21,6 +21,8 @@ data class SettingsSnapshot(
     /** What each AI service in use says about its balance and spend (/api/usage/providers), and the GitHub Copilot credits (/api/copilot-usage). */
     val providers: JSONObject? = null,
     val copilot: JSONObject? = null,
+    /** This month's spend and where it is heading (/api/usage/forecast). */
+    val forecast: JSONObject? = null,
 )
 
 enum class SettingsPage { Home, Safety, Keys, Messaging, Claude, Devices, Spending, About }
@@ -35,6 +37,9 @@ data class FactRow(val title: String, val value: String, val text: String? = nul
 /** The words of the Settings board, built from what the server sent. Pure, so each line can be tested from a real response. */
 object SettingsWords {
     private const val NOT_ANSWERED = "Not answering"
+    private const val PERCENT = 100.0
+    private const val SECONDS_PER_HOUR = 3_600.0
+    private const val HOURS_PER_DAY = 24.0
     private val RESET_DAY: java.time.format.DateTimeFormatter get() = java.time.format.DateTimeFormatter.ofPattern("d MMM", java.util.Locale.getDefault())
 
     fun yesNo(v: Boolean) = if (v) "Yes" else "No"
@@ -333,11 +338,54 @@ object SettingsWords {
 
     // ------------------------------------------------------------ Spending limits
 
-    fun budgetRows(b: JSONObject?): List<FactRow> = b.arr("budgets").items().map {
-        val period = when (it.optString("period")) { "day" -> "Per day"; "week" -> "Per week"; "month" -> "Per month"; else -> it.optString("period") }
-        val scope = scopeOf(it.optString("scope"))
-        FactRow(it.optString("name").ifBlank { "Limit" }.replaceFirstChar(Char::uppercase), "${money(it.optDouble("spent_usd"))} of ${money(it.optDouble("limit_usd"))}", listOfNotNull(period, scope, stateWords(it.optString("state"))).joinToString(" · "))
+    enum class BudgetTone { Ok, Warning, Exceeded }
+
+    /** One budget as the Spending page draws it: its name and what it covers, how much is used, a bar, and where it stands. */
+    data class BudgetCard(val title: String, val covers: String, val used: String, val fraction: Float, val stand: String, val tone: BudgetTone)
+
+    fun budgetCards(b: JSONObject?, now: Instant): List<BudgetCard> = b.arr("budgets").items().map {
+        val spent = numOrNull(it, "spent_usd") ?: 0.0
+        val limit = numOrNull(it, "limit_usd")
+        val pct = numOrNull(it, "pct") ?: if (limit != null && limit > 0) spent / limit * PERCENT else 0.0
+        val tone = when (it.optString("state")) { "warning", "warn" -> BudgetTone.Warning; "exceeded", "blocked" -> BudgetTone.Exceeded; else -> BudgetTone.Ok }
+        val state = when (tone) { BudgetTone.Ok -> "Within budget"; BudgetTone.Warning -> "Past the alert threshold"; BudgetTone.Exceeded -> "Limit reached" }
+        val resets = numOrNull(it, "resets_at")?.let { at -> ", resets in ${span((at - now.epochSecond) / SECONDS_PER_HOUR)}" }.orEmpty()
+        val period = when (it.optString("period")) { "day" -> "daily"; "week" -> "weekly"; "month" -> "monthly"; else -> it.optString("period") }
+        val action = it.optString("action").takeIf { a -> a.isNotBlank() }?.let { a -> ", then $a" }.orEmpty()
+        BudgetCard(
+            it.optString("name").ifBlank { "Limit" }.replaceFirstChar(Char::uppercase),
+            it.optString("scope").ifBlank { "global" } + ", " + period + action,
+            "${UsageWords.usd(spent)} of ${UsageWords.usd(limit)} (${Math.round(pct)}%)",
+            (pct / PERCENT).coerceIn(0.0, 1.0).toFloat(),
+            state + resets,
+            tone,
+        )
     }
+
+    /** Hours as the board writes them: under an hour "<1h", under a day "9h", then "3 days". */
+    fun span(hours: Double): String = when {
+        !hours.isFinite() || hours < 1 -> "<1h"
+        hours < HOURS_PER_DAY -> "${Math.round(hours)}h"
+        else -> Math.round(hours / HOURS_PER_DAY).coerceAtLeast(1).let { d -> "$d day${if (d == 1L) "" else "s"}" }
+    }
+
+    /** The month so far, where it ends, and when it resets; one line saying so when nothing has been spent yet. Null when the route gave no month. */
+    data class Forecast(val rows: List<FactRow>, val note: String?)
+
+    fun forecast(f: JSONObject?): Forecast? {
+        val m = f.obj("month") ?: return null
+        if (numOrNull(m, "rate_per_hour") == null) return Forecast(emptyList(), "No spend recorded yet, so there is nothing to forecast.")
+        return Forecast(
+            listOf(
+                FactRow("Spent so far", UsageWords.usd(numOrNull(m, "spent_this_period"))),
+                FactRow("Projected month end", UsageWords.usd(numOrNull(m, "projected_period_total"))),
+                FactRow("Resets in", numOrNull(m, "hours_to_reset")?.let(::span) ?: "-"),
+            ),
+            null,
+        )
+    }
+
+    private fun numOrNull(o: JSONObject?, name: String): Double? = o?.takeIf { it.has(name) && !it.isNull(name) }?.optDouble(name)?.takeIf { it.isFinite() }
 
     /** What a budget covers, when it is not everything: "global" says nothing, "provider:openrouter" says which. */
     private fun scopeOf(scope: String): String? = when {

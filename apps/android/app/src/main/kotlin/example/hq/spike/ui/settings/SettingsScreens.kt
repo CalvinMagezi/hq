@@ -11,6 +11,8 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.fillMaxHeight
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
@@ -40,8 +42,10 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.semantics.LiveRegionMode
+import androidx.compose.ui.semantics.ProgressBarRangeInfo
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.liveRegion
+import androidx.compose.ui.semantics.progressBarRangeInfo
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.style.TextOverflow
@@ -58,6 +62,7 @@ import kotlinx.coroutines.delay
 private val SmallText = HqType.Caption.copy(fontSize = 13.sp, lineHeight = 18.sp)
 private const val LINE_MS = 4_000L
 private const val REFRESH_MS = 15_000L
+private val BAR_HEIGHT = 8.dp
 private val VALUE_MAX = 180.dp
 private val KEY_COLUMN = 120.dp
 
@@ -403,14 +408,39 @@ private fun Spending(ui: SettingsUi) {
     Page {
         val b = ui.snap.budgets
         if (Unanswered(ui, "budgets", b != null) || b == null) return@Page
-        val rows = SettingsWords.budgetRows(b)
-        Box(Modifier.padding(top = 8.dp)) { if (rows.isEmpty()) Notice("No spending limit is set.", HqIcons.Info) else Facts(rows) }
+        val cards = SettingsWords.budgetCards(b, ui.now)
+        Label("Budgets")
+        if (cards.isEmpty()) Notice("No budgets are set, so nothing is limited.", HqIcons.Info)
+        else Group { cards.forEachIndexed { i, c -> if (i > 0) Divider(); BudgetCardView(c) } }
+        val forecast = SettingsWords.forecast(ui.snap.forecast)
+        when {
+            forecast == null && "forecast" in ui.snap.unavailable -> { Label("Forecast, this month"); Text("The forecast is not available here.", style = HqType.BodySm, color = Mts.InkMuted, modifier = Modifier.padding(start = 16.dp, top = 4.dp, end = 16.dp)) }
+            forecast?.note != null -> { Label("Forecast, this month"); Text(forecast.note, style = HqType.BodySm, color = Mts.InkMuted, modifier = Modifier.padding(start = 16.dp, top = 4.dp, end = 16.dp)) }
+            forecast != null -> { Label("Forecast, this month"); Facts(forecast.rows) }
+        }
         val services = SettingsWords.serviceRows(ui.snap)
         if (services.isNotEmpty()) {
             Label("By AI service")
             Facts(services)
         }
         Text("Changing a limit, and the full usage page, are in the web app for now.", style = SmallText, color = Mts.InkMuted, modifier = Modifier.padding(start = 20.dp, top = 12.dp, end = 20.dp))
+    }
+}
+
+@Composable
+private fun BudgetCardView(c: SettingsWords.BudgetCard) {
+    val fill = when (c.tone) { SettingsWords.BudgetTone.Ok -> Mts.BrandGreen; SettingsWords.BudgetTone.Warning -> Mts.Amber; SettingsWords.BudgetTone.Exceeded -> Mts.DangerText }
+    Column(Modifier.fillMaxWidth().padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.Bottom) {
+            Text(c.title, style = HqType.BodyBold, color = Mts.Ink)
+            Text(c.covers, style = SmallText, color = Mts.InkMuted, modifier = Modifier.weight(1f))
+        }
+        Text(c.used, style = HqType.BodySm, color = Mts.Ink)
+        Box(
+            Modifier.fillMaxWidth().height(BAR_HEIGHT).clip(RoundedCornerShape(BAR_HEIGHT / 2)).background(Mts.Surface200)
+                .semantics { progressBarRangeInfo = ProgressBarRangeInfo(c.fraction, 0f..1f) },
+        ) { Box(Modifier.fillMaxWidth(c.fraction).fillMaxHeight().background(fill)) }
+        Text(c.stand, style = SmallText, color = Mts.InkMuted)
     }
 }
 

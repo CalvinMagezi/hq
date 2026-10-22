@@ -27,7 +27,8 @@ fun settingsFixture(name: String?): SettingsUi? {
         """{"enabled":true,"url":"https://hq.example.ts.net/mcp","armed_until":${future(581)},"grants":[{"id":"g1","label":"Claude","grant_scope":"read_only","created_at":${now.minusSeconds(90_000).epochSecond},"expires_at":${future(86_400)},"last_used_at":null,"revoked_at":null}]}""",
     )
     val devices = JSONObject("""{"devices":[{"id":"d1","label":"MacBook","created_at":${now.minusSeconds(170_000).epochSecond},"last_used_at":${now.minusSeconds(10_800).epochSecond},"expires_at":null}]}""")
-    val budgets = JSONObject("""{"budgets":[{"name":"all","scope":"global","period":"day","limit_usd":5,"spent_usd":2.1,"state":"ok"},{"name":"openrouter","scope":"provider:openrouter","period":"week","limit_usd":10,"spent_usd":9.5,"state":"warn"}]}""")
+    val budgets = JSONObject("""{"budgets":[{"name":"all","scope":"global","period":"day","action":"block","limit_usd":5,"spent_usd":2.1,"pct":42,"state":"ok","resets_at":${future(32_400)}},{"name":"openrouter","scope":"provider:openrouter","period":"week","action":"notify","limit_usd":10,"spent_usd":9.5,"pct":95,"state":"warning","resets_at":${future(259_200)}}]}""")
+    val forecast = JSONObject("""{"month":{"rate_per_hour":0.18,"spent_this_period":31.8,"hours_to_reset":240,"projected_period_total":74.0,"limit_usd":null,"hours_to_limit":null,"exhausts_before_reset":false,"confidence":"medium","history_hours":72,"seasonality_note":null,"windows":[]},"budgets":[],"drivers":{"models":[],"origins":[]}}""")
     val health = JSONObject("""{"status":"ok","service":"hq","version":"0.9.1"}""")
     val providers = JSONObject(
         """{"generated_at":"2026-10-22T04:00:00Z","backends":[
@@ -45,7 +46,7 @@ fun settingsFixture(name: String?): SettingsUi? {
         HomeRow(null, "notifications", "Notifications", "Needs you on · Updates on"),
         HomeRow(null, "capture", "Capture and widgets", "Sharing opens a new note"),
     )
-    val base = SettingsUi(open = true, snap = SettingsSnapshot(settings, chat, connector, devices, budgets, health, providers = providers, copilot = copilot), loaded = true, phone = phone, mode = "active", build = "hub \u00b7 build 1", now = now)
+    val base = SettingsUi(open = true, snap = SettingsSnapshot(settings, chat, connector, devices, budgets, health, providers = providers, copilot = copilot, forecast = forecast), loaded = true, phone = phone, mode = "active", build = "hub \u00b7 build 1", now = now)
     return when (name) {
         "s-home" -> base
         "s-loading" -> SettingsUi(open = true, loaded = false, phone = phone, mode = "active", build = "hub \u00b7 build 1", now = now)
@@ -57,6 +58,7 @@ fun settingsFixture(name: String?): SettingsUi? {
         "s-claude" -> base.copy(stack = listOf(SettingsPage.Claude))
         "s-devices" -> base.copy(stack = listOf(SettingsPage.Devices))
         "s-spend" -> base.copy(stack = listOf(SettingsPage.Spending))
+        "s-spend-exceeded" -> base.copy(stack = listOf(SettingsPage.Spending), snap = base.snap.copy(budgets = JSONObject("""{"budgets":[{"name":"all","scope":"global","period":"day","action":"block","limit_usd":5,"spent_usd":5.2,"pct":104,"state":"exceeded","resets_at":${future(1_800)}}]}"""), forecast = JSONObject("""{"month":{"rate_per_hour":null,"spent_this_period":0,"hours_to_reset":700,"projected_period_total":null}}""")))
         "s-about" -> base.copy(stack = listOf(SettingsPage.About))
         "s-down" -> base.copy(stack = listOf(SettingsPage.Keys), snap = SettingsSnapshot(), loaded = true)
         else -> null

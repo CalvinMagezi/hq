@@ -79,19 +79,19 @@ class SettingsViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     /**
-     * Reads every route at once. The six local ones are shown as soon as they answer; the two that ask a provider (which can
+     * Reads every route at once. The six local ones are shown as soon as they answer; the three that ask a provider or add up a month (which can
      * take many seconds) are added when they arrive. One route that fails shows as such on its own row only.
      */
     suspend fun refreshNow() {
         if (frozen) return
         val local = listOf("settings" to "/api/settings", "chatApps" to "/api/chat-apps", "connector" to "/api/oauth/connector", "devices" to "/api/auth/devices", "budgets" to "/api/budgets", "health" to "/health")
-        val remote = listOf("providers" to "/api/usage/providers", "copilot" to "/api/copilot-usage")
+        val remote = listOf("providers" to "/api/usage/providers", "copilot" to "/api/copilot-usage", "forecast" to "/api/usage/forecast")
         coroutineScope {
             val slow = remote.map { (key, path) -> async { key to get(path) } }
             val fast = local.map { (key, path) -> async { key to get(path) } }.awaitAll().toMap()
             if (frozen) return@coroutineScope
             val before = _state.value.snap
-            publish(fast, mapOf("providers" to Got(before.providers, true), "copilot" to Got(before.copilot, true)))
+            publish(fast, mapOf("providers" to Got(before.providers, true), "copilot" to Got(before.copilot, true), "forecast" to Got(before.forecast, true)))
             val late = slow.awaitAll().toMap()
             if (frozen) return@coroutineScope
             publish(fast, late)
@@ -104,7 +104,7 @@ class SettingsViewModel(app: Application) : AndroidViewModel(app) {
         val snap = SettingsSnapshot(
             body("settings"), body("chatApps"), body("connector"), body("devices"), body("budgets"), body("health"),
             unavailable = got.filterValues { it.body == null && it.answered }.keys,
-            providers = body("providers"), copilot = body("copilot"),
+            providers = body("providers"), copilot = body("copilot"), forecast = body("forecast"),
         )
         _state.update { it.copy(snap = snap, loaded = true, phone = phoneRows(), mode = modeOf(), now = Instant.now()) }
     }
