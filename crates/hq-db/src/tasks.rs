@@ -381,6 +381,7 @@ pub struct TaskPatch {
 }
 
 mod archive;
+mod briefing;
 mod calibration;
 #[cfg(test)]
 mod calibration_tests;
@@ -392,9 +393,11 @@ mod messages;
 mod org;
 mod queue;
 mod refs;
+mod reverify;
 mod rework;
 mod rows;
 mod stale;
+mod sweeps;
 #[cfg(test)]
 mod tests;
 mod time;
@@ -405,6 +408,7 @@ mod veto;
 mod waits;
 
 pub use archive::*;
+pub use briefing::*;
 pub use calibration::*;
 pub use checkpoints::*;
 pub use crud::*;
@@ -414,10 +418,12 @@ pub use messages::*;
 pub use org::*;
 pub use queue::*;
 pub use refs::*;
+pub use reverify::*;
 pub use rework::*;
 use rows::*;
 pub use rows::{list_task_events, validate_date};
 pub use stale::*;
+pub use sweeps::*;
 pub use time::*;
 pub use verification::*;
 pub use veto::*;

@@ -11,7 +11,8 @@ use anyhow::Result;
 use hq_core::config::{HqConfig, VerificationMode};
 use hq_db::Database;
 use hq_tools::tasks::verify::{
-    DispatchReport, Env, GhCli, LlmReviewer, NoReviewer, Reviewer, dispatch,
+    DispatchReport, Env, GhCli, LlmReviewer, NoReviewer, Reviewer, advance_sweeps,
+    answer_second_opinions, dispatch,
 };
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -83,7 +84,40 @@ async fn pass(vault_path: &Path, db: &Database, config: &HqConfig) -> Result<Dis
     } else {
         Box::new(NoReviewer)
     };
-    dispatch(&env, reviewer.as_ref()).await
+    let report = dispatch(&env, reviewer.as_ref()).await?;
+    // The live queue comes first; sweeps use what is left of the pass.
+    match advance_sweeps(
+        &env,
+        reviewer.as_ref(),
+        hq_tools::tasks::verify::sweep::BATCH,
+    )
+    .await
+    {
+        Ok(progress) => {
+            for error in &progress.errors {
+                tracing::warn!(%error, "verify-dispatch: a sweep could not advance");
+            }
+            if progress.planned + progress.verified + progress.applied > 0 {
+                tracing::info!(
+                    planned = progress.planned,
+                    verified = progress.verified,
+                    applied = progress.applied,
+                    "verify-dispatch: sweeps advanced"
+                );
+            }
+        }
+        Err(e) => {
+            tracing::warn!(error = %format!("{e:#}"), "verify-dispatch: sweeps could not advance")
+        }
+    }
+    match answer_second_opinions(&env, reviewer.as_ref(), 3).await {
+        Ok(n) if n > 0 => tracing::info!(answered = n, "verify-dispatch: second opinions answered"),
+        Ok(_) => {}
+        Err(e) => {
+            tracing::warn!(error = %format!("{e:#}"), "verify-dispatch: second opinions could not be answered")
+        }
+    }
+    Ok(report)
 }
 
 fn log(report: &DispatchReport) {

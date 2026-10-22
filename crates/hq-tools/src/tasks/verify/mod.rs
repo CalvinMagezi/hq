@@ -27,6 +27,8 @@ pub mod probe;
 pub mod release_check;
 pub mod remote;
 pub mod reviewer;
+pub mod second_opinion;
+pub mod sweep;
 pub mod tamper;
 
 pub use artifact::{Artifact, Discovery, TaskFacts, discover, repo_of_checkout, repos_for_cwds};
@@ -38,11 +40,15 @@ pub use contract::{Contract, contract_of};
 pub use dispatch::{DispatchReport, dispatch};
 pub use observation::{Observation, ObservationLog};
 pub use pipeline::{
-    Env, Evidence, Finished, Gate, Moved, Resolution, WaitingFor, finish, gate, gather, review,
-    verify_task,
+    Disposition, Env, Evidence, Finished, Gate, Moved, Resolution, WaitingFor, finish, finish_as,
+    gate, gather, review, verify_task, verify_task_as,
 };
 pub use probe::{ProbePolicy, probe_url};
 pub use release_check::{Checked, check_release};
 pub use remote::{Diff, GhCli, GitHubRead};
 pub use reviewer::{LlmReviewer, NoReviewer, ReviewReply, ReviewRequest, Reviewer};
+pub use second_opinion::answer_second_opinions;
+pub use sweep::{
+    SweepProgress, UndoReport, advance_sweeps, plan_summary, start_sweep, sweep_action, undo_sweep,
+};
 pub use tamper::{TamperFlag, TamperReport, scan_diff};

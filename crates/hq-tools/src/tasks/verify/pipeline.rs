@@ -109,6 +109,37 @@ impl Currency {
         })
     }
 
+    /// What a verdict was about, read back from the observations stored on it: the head commit of
+    /// each pull request and the content hash of each note.
+    pub fn from_observations(observations: &Value) -> Self {
+        let mut out = Self::default();
+        for o in observations.as_array().into_iter().flatten() {
+            match o["kind"].as_str() {
+                Some("pr_state") => {
+                    if let (Some(repo), Some(number)) =
+                        (o["data"]["repo"].as_str(), o["data"]["number"].as_u64())
+                    {
+                        out.prs.push((
+                            repo.to_string(),
+                            number,
+                            o["data"]["head_sha"].as_str().map(String::from),
+                        ));
+                    }
+                }
+                Some("note_hash") => {
+                    if let (Some(path), Some(hash)) = (
+                        o["data"]["path"].as_str(),
+                        o["data"]["content_hash"].as_str(),
+                    ) {
+                        out.notes.push((path.to_string(), hash.to_string()));
+                    }
+                }
+                _ => {}
+            }
+        }
+        out
+    }
+
     pub fn from_json(v: &Value) -> Self {
         let prs = v["prs"]
             .as_array()
@@ -725,7 +756,7 @@ pub enum Finished {
 }
 
 /// Whether the artifacts are still the ones that were verified.
-async fn still_current(env: &Env<'_>, currency: &Currency) -> Option<String> {
+pub(super) async fn still_current(env: &Env<'_>, currency: &Currency) -> Option<String> {
     for (repo, number, sha) in &currency.prs {
         let Some(sha) = sha else { continue };
         match env
@@ -754,7 +785,7 @@ async fn still_current(env: &Env<'_>, currency: &Currency) -> Option<String> {
     None
 }
 
-fn new_verifier_id() -> String {
+pub(super) fn new_verifier_id() -> String {
     format!(
         "verify:{}",
         &uuid::Uuid::new_v4().simple().to_string()[..12]
@@ -767,6 +798,26 @@ fn new_verifier_id() -> String {
 /// has failed `max_attempts` times. A resolution that could not decide yet records a wait instead
 /// of a verdict.
 pub async fn finish(env: &Env<'_>, ev: &Evidence, resolution: Resolution) -> Result<Finished> {
+    finish_as(env, ev, resolution, Disposition::Act).await
+}
+
+/// What `finish` does with the verdict.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Disposition {
+    /// Record it and act: complete, hold, send back.
+    Act,
+    /// Record it and move nothing. A sweep does this, then applies all its verdicts together once
+    /// the owner has read the buckets. A pass is recorded as approved (`applied`), so the sweep
+    /// can complete the task with it later.
+    Record,
+}
+
+pub async fn finish_as(
+    env: &Env<'_>,
+    ev: &Evidence,
+    resolution: Resolution,
+    disposition: Disposition,
+) -> Result<Finished> {
     let marker = ev.marker;
     let task_id = ev.task.id.clone();
     let (verdict, level, independence, criteria, reasons, waiting_for) = match resolution {
@@ -865,7 +916,10 @@ pub async fn finish(env: &Env<'_>, ev: &Evidence, resolution: Resolution) -> Res
     };
     let applies = verdict == t::VERDICT_PASS && enforced && held.is_none();
     // Tier 2 work is approved now and completed when its veto window closes.
-    let hold_for = (applies && ev.tier >= t::MAX_TIER && env.cfg.veto_hours > 0)
+    let hold_for = (applies
+        && disposition == Disposition::Act
+        && ev.tier >= t::MAX_TIER
+        && env.cfg.veto_hours > 0)
         .then(|| i64::from(env.cfg.veto_hours) * 3600);
     let release_at = hold_for.map(|secs| chrono::Utc::now().timestamp().saturating_add(secs));
     let (reasons, waiting_for) = match release_at {
@@ -878,7 +932,8 @@ pub async fn finish(env: &Env<'_>, ev: &Evidence, resolution: Resolution) -> Res
         ),
         None => (reasons, waiting_for),
     };
-    let sends_back = enforced && waiting_for == Some(WaitingFor::Worker);
+    let sends_back =
+        enforced && disposition == Disposition::Act && waiting_for == Some(WaitingFor::Worker);
     if applies && let Some(reason) = still_current(env, &ev.currency).await {
         return Ok(Finished::Voided { reason });
     }
@@ -935,6 +990,9 @@ pub async fn finish(env: &Env<'_>, ev: &Evidence, resolution: Resolution) -> Res
             };
             let recorded = t::record_verdict(c, &new)?;
             t::clear_wait(c, &task_id)?;
+            if disposition == Disposition::Record {
+                return Ok(Ok((recorded, Moved::Nothing, None)));
+            }
             if let Some(at) = release_at {
                 t::create_hold(c, &task_id, &recorded.id, at, &currency_snapshot)?;
                 t::add_comment(
@@ -1031,7 +1089,7 @@ pub async fn finish(env: &Env<'_>, ev: &Evidence, resolution: Resolution) -> Res
 }
 
 /// `YYYY-MM-DD HH:MM` for unix seconds.
-fn clock(secs: i64) -> String {
+pub(super) fn clock(secs: i64) -> String {
     chrono::DateTime::from_timestamp(secs, 0)
         .map(|d| d.format("%Y-%m-%d %H:%M").to_string())
         .unwrap_or_default()
@@ -1173,7 +1231,7 @@ impl Released {
 
 /// The thread comment for a completion HQ made: what HQ did, then the reviewer's words quoted so
 /// they cannot pass for a line HQ wrote.
-fn completion_note(v: &t::Verdict) -> String {
+pub(super) fn completion_note(v: &t::Verdict) -> String {
     let head = format!(
         "Verified complete by HQ: {} evidence, tier {}, artifact {}.",
         v.level, v.tier, v.artifact
@@ -1200,6 +1258,17 @@ pub async fn verify_task(
     task: &Task,
     allow_review: bool,
 ) -> Result<Finished> {
+    verify_task_as(env, reviewer, task, allow_review, Disposition::Act).await
+}
+
+/// `verify_task` that can record without acting.
+pub async fn verify_task_as(
+    env: &Env<'_>,
+    reviewer: &dyn Reviewer,
+    task: &Task,
+    allow_review: bool,
+    disposition: Disposition,
+) -> Result<Finished> {
     let mut ev = gather(env, task).await?;
     let resolution = match gate(&ev, env.cfg) {
         Gate::Settled(r) => r,
@@ -1209,5 +1278,5 @@ pub async fn verify_task(
         ),
         Gate::NeedsReview { level } => review(env, &mut ev, level, reviewer).await,
     };
-    finish(env, &ev, resolution).await
+    finish_as(env, &ev, resolution, disposition).await
 }

@@ -161,7 +161,7 @@ async fn test_the_reviewer(env: &Env<'_>, reviewer: &dyn Reviewer, reviews: usiz
 /// Whether a reviewer may be called for the next batch. In enforce mode always (the monthly
 /// ceiling is what limits it). In shadow mode only until the sample is used, so a try of E2 prices
 /// the rest without paying for all of it. A batch can overshoot the sample by less than its size.
-fn review_allowed(env: &Env<'_>) -> Result<bool> {
+pub(super) fn review_allowed(env: &Env<'_>) -> Result<bool> {
     if env.cfg.mode != VerificationMode::Shadow {
         return Ok(true);
     }

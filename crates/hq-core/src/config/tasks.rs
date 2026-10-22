@@ -96,6 +96,9 @@ pub struct VerificationConfig {
     pub sweep_confirm_over: u32,
     /// Items waiting on the owner past which the briefing offers a bulk policy, not a list.
     pub owner_queue_alert: u32,
+    /// UTC hour (0 to 23) at which the "while you were away" briefing is posted once a day. Unset:
+    /// it is built on demand only (`hq verify briefing`, the tasks page).
+    pub briefing_hour_utc: Option<u8>,
     /// Days the oldest owner-waiting item may age before one alert is raised.
     pub owner_queue_age_days: u32,
     /// Tasks given a reviewer run in shadow mode, to price the rest.
@@ -154,6 +157,7 @@ impl Default for VerificationConfig {
             concurrency: 2,
             sweep_confirm_over: 25,
             owner_queue_alert: 20,
+            briefing_hour_utc: None,
             owner_queue_age_days: 3,
             shadow_e2_sample: 50,
             reviewer_monthly_ceiling_usd: None,

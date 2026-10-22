@@ -30,9 +30,10 @@ pub mod verify;
 use activity::TaskActivityTool;
 use from_note::TaskCreateFromNoteTool;
 pub use json::{
-    TASK_AUDIT_SOURCE, TASK_AUTONOMY_SOURCE, TASK_EXCEPTION_SOURCE, TASK_REVIEW_SOURCE,
-    TASK_VETO_SOURCE, added_tags, apply_dependency_changes, notify_audit_digest,
-    notify_autonomy_withdrawn, notify_owner_exception, notify_ready_for_review, notify_recipients,
+    TASK_AUDIT_SOURCE, TASK_AUTONOMY_SOURCE, TASK_BRIEFING_SOURCE, TASK_EXCEPTION_SOURCE,
+    TASK_QUEUE_ALERT_SOURCE, TASK_REVIEW_SOURCE, TASK_VETO_SOURCE, added_tags,
+    apply_dependency_changes, notify_audit_digest, notify_autonomy_withdrawn, notify_briefing,
+    notify_owner_exception, notify_queue_alert, notify_ready_for_review, notify_recipients,
     notify_tags, notify_unblocked, notify_veto_window, task_json, task_json_with_warnings,
     unblocked_by_transition,
 };

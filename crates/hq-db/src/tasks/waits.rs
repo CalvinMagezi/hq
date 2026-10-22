@@ -114,13 +114,19 @@ pub fn current_wait(conn: &Connection, task_id: &str) -> Result<Option<Wait>> {
 pub struct WaitingState {
     pub who: String,
     pub reason: String,
+    /// What kind of wait it is: `review` (not verified, so yours), `legacy` (older than
+    /// enforcement, a sweep handles it), `veto_window`, `held` (a pass the autonomy gate kept for
+    /// you), `returns_exhausted`, `returned` (back with its worker), `queued`, `wait` (checks
+    /// running, no reviewer reachable, budget) or `findings`.
+    pub kind: &'static str,
 }
 
 impl WaitingState {
-    fn new(who: &str, reason: impl Into<String>) -> Option<Self> {
+    fn new(who: &str, kind: &'static str, reason: impl Into<String>) -> Option<Self> {
         Some(Self {
             who: who.to_string(),
             reason: reason.into(),
+            kind,
         })
     }
 }
@@ -145,12 +151,21 @@ pub fn waiting_state(conn: &Connection, task: &Task) -> Result<Option<WaitingSta
             if !(cfg.mode == VerificationMode::Enforce && cfg.enforces(tier)) {
                 return Ok(WaitingState::new(
                     WAIT_OWNER,
+                    "review",
                     "waiting for you to review it",
+                ));
+            }
+            if is_legacy(conn, task)? && !has_verdict_now(conn, task)? {
+                return Ok(WaitingState::new(
+                    WAIT_OWNER,
+                    "legacy",
+                    "it was submitted before verification was enforced: a sweep handles older work",
                 ));
             }
             if let Some(hold) = get_hold(conn, &task.id)? {
                 return Ok(WaitingState::new(
                     WAIT_OWNER,
+                    "veto_window",
                     format!(
                         "tier 2: it completes at {} UTC unless you veto it",
                         chrono::DateTime::from_timestamp(hold.release_at, 0)
@@ -160,22 +175,30 @@ pub fn waiting_state(conn: &Connection, task: &Task) -> Result<Option<WaitingSta
                 ));
             }
             if let Some(wait) = current_wait(conn, &task.id)? {
-                return Ok(WaitingState::new(&wait.waiting_for, wait.reason));
+                return Ok(WaitingState::new(&wait.waiting_for, "wait", wait.reason));
             }
             let marker = review_marker(conn, &task.id)?;
-            let latest: Option<(Option<String>, String)> = conn
+            let latest: Option<(Option<String>, String, String)> = conn
                 .query_row(
-                    "SELECT waiting_for, reasons FROM task_verdicts \
+                    "SELECT waiting_for, reasons, verdict FROM task_verdicts \
                      WHERE task_id = ?1 AND canary = 0 AND submission IS ?2 \
                      ORDER BY created_at DESC, rowid DESC LIMIT 1",
                     params![task.id, marker],
-                    |r| Ok((r.get(0)?, r.get(1)?)),
+                    |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
                 )
                 .optional()?;
             Ok(match latest {
-                Some((Some(who), reasons)) => WaitingState::new(&who, first_line(&reasons)),
-                Some((None, _)) => None,
-                None => WaitingState::new(WAIT_VERIFIER, "queued for verification"),
+                Some((Some(who), reasons, verdict)) => WaitingState::new(
+                    &who,
+                    if verdict == VERDICT_PASS {
+                        "held"
+                    } else {
+                        "findings"
+                    },
+                    first_line(&reasons),
+                ),
+                Some((None, _, _)) => None,
+                None => WaitingState::new(WAIT_VERIFIER, "queued", "queued for verification"),
             })
         }
         STATUS_TO_DO | STATUS_BLOCKED => {
@@ -192,11 +215,13 @@ pub fn waiting_state(conn: &Connection, task: &Task) -> Result<Option<WaitingSta
             let owner_blocked = task.status == STATUS_BLOCKED
                 && current_wait(conn, &task.id)?.is_some_and(|w| w.waiting_for == WAIT_OWNER);
             Ok(match latest {
-                _ if owner_blocked => {
-                    WaitingState::new(WAIT_OWNER, task.blocked_reason.clone().unwrap_or_default())
-                }
+                _ if owner_blocked => WaitingState::new(
+                    WAIT_OWNER,
+                    "returns_exhausted",
+                    task.blocked_reason.clone().unwrap_or_default(),
+                ),
                 Some((Some(who), reasons)) if task.status == STATUS_TO_DO => {
-                    WaitingState::new(&who, first_line(&reasons))
+                    WaitingState::new(&who, "returned", first_line(&reasons))
                 }
                 _ => None,
             })
@@ -205,9 +230,25 @@ pub fn waiting_state(conn: &Connection, task: &Task) -> Result<Option<WaitingSta
     }
 }
 
-/// How many tasks wait on each party right now: every task in review, and every task a
-/// verification touched that is still open. Only `owner` counts against the owner.
-pub fn waiting_summary(conn: &Connection) -> Result<std::collections::BTreeMap<String, i64>> {
+/// A task that is waiting, with whom and since when.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct WaitingItem {
+    pub task_id: String,
+    pub display_id: String,
+    pub title: String,
+    pub initiative_id: String,
+    pub tier: u8,
+    pub who: String,
+    pub kind: &'static str,
+    pub reason: String,
+    /// When the wait began: the task's entry into review (UTC `YYYY-MM-DD HH:MM:SS`), or empty.
+    pub since: String,
+}
+
+/// Every task that is waiting on someone because of verification: each task in review, and each
+/// open task a verification sent back or escalated.
+pub fn waiting_items(conn: &Connection) -> Result<Vec<WaitingItem>> {
+    let cfg = verification_policy(conn)?;
     let mut stmt = conn.prepare(
         "SELECT t.id FROM tasks t WHERE t.archived_at IS NULL AND ( \
              t.status = 'ready_for_review' \
@@ -217,14 +258,54 @@ pub fn waiting_summary(conn: &Connection) -> Result<std::collections::BTreeMap<S
     let ids: Vec<String> = stmt
         .query_map([], |r| r.get(0))?
         .collect::<rusqlite::Result<_>>()?;
-    let mut out = std::collections::BTreeMap::new();
+    let mut out = Vec::new();
     for id in ids {
         let Some(task) = get_task(conn, &id)? else {
             continue;
         };
-        if let Some(state) = waiting_state(conn, &task)? {
-            *out.entry(state.who).or_insert(0) += 1;
-        }
+        let Some(state) = waiting_state(conn, &task)? else {
+            continue;
+        };
+        let since: String = conn.query_row(
+            "SELECT COALESCE(MAX(occurred_at), '') FROM task_events \
+             WHERE task_id = ?1 AND event_type = 'entered_ready_for_review'",
+            params![task.id],
+            |r| r.get(0),
+        )?;
+        out.push(WaitingItem {
+            tier: task_tier(conn, &task, &cfg)?,
+            task_id: task.id,
+            display_id: task.display_id,
+            title: task.title,
+            initiative_id: task.initiative_id,
+            who: state.who,
+            kind: state.kind,
+            reason: state.reason,
+            since,
+        });
+    }
+    out.sort_by(|a, b| a.since.cmp(&b.since).then(a.display_id.cmp(&b.display_id)));
+    Ok(out)
+}
+
+/// How many tasks wait on each party right now. Only `owner` counts against the owner.
+pub fn waiting_summary(conn: &Connection) -> Result<std::collections::BTreeMap<String, i64>> {
+    let mut out = std::collections::BTreeMap::new();
+    for item in waiting_items(conn)? {
+        *out.entry(item.who).or_insert(0) += 1;
     }
     Ok(out)
+}
+
+/// Whether the task has a verdict for the submission it is in now.
+fn has_verdict_now(conn: &Connection, task: &Task) -> Result<bool> {
+    let marker = review_marker(conn, &task.id)?;
+    Ok(conn
+        .query_row(
+            "SELECT 1 FROM task_verdicts WHERE task_id = ?1 AND canary = 0 AND submission IS ?2 LIMIT 1",
+            params![task.id, marker],
+            |_| Ok(()),
+        )
+        .optional()?
+        .is_some())
 }

@@ -44,7 +44,24 @@ fn verified(db: &Database, initiative: &str, id: &str, tier: u8, config: &str) -
             )
         })
         .unwrap();
-    move_to(db, id, STATUS_COMPLETE).unwrap();
+    // Completed the way the verifier does it: presenting the verdict, which enforcement requires.
+    db.with_conn(|c| {
+        update_task_as(
+            c,
+            id,
+            &TaskPatch {
+                status: Some(STATUS_COMPLETE.into()),
+                ..Default::default()
+            },
+            None,
+            &WriteCtx {
+                actor: Some("verify:test"),
+                verdict_id: Some(&v.id),
+                ..Default::default()
+            },
+        )
+    })
+    .unwrap();
     v
 }
 
@@ -410,4 +427,268 @@ fn a_few_clean_audits_are_neither_trust_nor_distrust() {
         "{:?}",
         cal.tiers[1].why
     );
+}
+
+// ---- queue health and the briefing ----
+
+fn enforce_policy(db: &Database, cfg: &VerificationConfig) {
+    let cfg = VerificationConfig {
+        mode: hq_core::config::VerificationMode::Enforce,
+        ..cfg.clone()
+    };
+    db.with_conn(|c| sync_verification_policy(c, &cfg)).unwrap();
+}
+
+fn enforcing() -> VerificationConfig {
+    VerificationConfig {
+        mode: hq_core::config::VerificationMode::Enforce,
+        owner_queue_alert: 5,
+        owner_queue_age_days: 3,
+        ..Default::default()
+    }
+}
+
+/// A task in review, submitted by a worker, with nothing else done to it.
+fn waiting(db: &Database, initiative: &str, id: &str) {
+    make(db, id, initiative, None).unwrap();
+    move_to(db, id, STATUS_IN_PROGRESS).unwrap();
+    move_to(db, id, STATUS_READY_FOR_REVIEW).unwrap();
+}
+
+#[test]
+fn a_weekend_of_completions_is_one_line_per_initiative_and_never_a_pass_by_pass_list() {
+    let (db, initiative) = setup();
+    let cfg = enforcing();
+    enforce_policy(&db, &cfg);
+    db.with_conn(|c| {
+        c.execute(
+            "INSERT INTO initiatives (id, space_id, name, slug, id_prefix) VALUES ('in-2', 'personal', 'Website', 'website', 'WEB')",
+            [],
+        )?;
+        Ok(())
+    })
+    .unwrap();
+    for n in 0..200 {
+        let target = if n % 4 == 0 {
+            "in-2"
+        } else {
+            initiative.as_str()
+        };
+        verified(
+            &db,
+            target,
+            &format!("tk-{n}"),
+            u8::from(n % 50 == 0) * 2,
+            "m",
+        );
+    }
+    let b = db
+        .with_conn(|c| briefing(c, &cfg, "2000-01-01 00:00:00"))
+        .unwrap();
+    assert_eq!(b.completed_total, 200);
+    assert_eq!(b.completed.len(), 2, "grouped by initiative, not listed");
+    assert_eq!(b.completed[0].count, 150);
+    assert_eq!(b.completed[1].initiative, "Website");
+    assert_eq!(b.completed[0].by_level.get("machine_peer"), Some(&150));
+    assert_eq!(b.completed.iter().map(|g| g.tier2).sum::<i64>(), 4);
+    assert!(b.needs_you.is_empty() && b.needs_you_total == 0);
+    let text = briefing_text(&b);
+    assert!(text.contains("Nothing needs you."), "{text}");
+    assert!(text.contains("HQ verified and completed 200"), "{text}");
+    assert!(!text.contains("tk-"), "no task is named for a pass: {text}");
+    assert_eq!(b.audit_pool, 200, "all of it is auditable");
+}
+
+#[test]
+fn what_waits_on_each_party_sums_to_the_whole_backlog() {
+    let (db, initiative) = setup();
+    let cfg = enforcing();
+    enforce_policy(&db, &cfg);
+    // queued behind the verifier, checks running, a failed task back with its worker, and a pass
+    // held for the owner by the autonomy gate.
+    waiting(&db, &initiative, "queued");
+    waiting(&db, &initiative, "ci");
+    db.with_conn(|c| record_wait(c, "ci", WAIT_CI, "checks are running", 300, 0))
+        .unwrap();
+    waiting(&db, &initiative, "failed");
+    let obs = json!([{"id": "o1", "source": "github", "fact": "a check failed", "ok": false}]);
+    db.with_conn(|c| {
+        record_verdict(
+            c,
+            &NewVerdict {
+                task_id: "failed",
+                artifact: "pr:example/repo#1",
+                contract_hash: "h",
+                tier: 1,
+                verdict: VERDICT_FAIL,
+                level: LEVEL_NONE,
+                verifier: "verify:a",
+                independence: "none",
+                observations: &obs,
+                criteria: &json!([]),
+                reasons: "a required check failed",
+                applied: false,
+                canary: false,
+                submission: None,
+                waiting_for: Some(WAIT_WORKER),
+                verifier_config: "m",
+            },
+        )?;
+        send_back(c, "failed", "verify:a", "a required check failed", 3)
+    })
+    .unwrap();
+    waiting(&db, &initiative, "held");
+    db.with_conn(|c| {
+        record_verdict(
+            c,
+            &NewVerdict {
+                task_id: "held",
+                artifact: "pr:example/repo#2",
+                contract_hash: "h",
+                tier: 1,
+                verdict: VERDICT_PASS,
+                level: LEVEL_MACHINE_PEER,
+                verifier: "verify:b",
+                independence: "different_session",
+                observations: &json!([{"id": "o1", "source": "github", "fact": "ok"}]),
+                criteria: &json!([{"text": "x", "result": "pass", "observation_ids": ["o1"]}]),
+                reasons: "Held for the owner: the reviewer missed planted defects.",
+                applied: false,
+                canary: false,
+                submission: review_marker(c, "held")?,
+                waiting_for: Some(WAIT_OWNER),
+                verifier_config: "m",
+            },
+        )
+        .map(|_| ())
+    })
+    .unwrap();
+
+    let health = db.with_conn(|c| queue_health(c, &cfg)).unwrap();
+    assert_eq!(health.backlog.get("verifier"), Some(&1));
+    assert_eq!(health.backlog.get("ci"), Some(&1));
+    assert_eq!(health.backlog.get("worker"), Some(&1));
+    assert_eq!(health.backlog.get("owner"), Some(&1));
+    assert_eq!(
+        health.backlog.values().sum::<i64>(),
+        4,
+        "every waiting task is counted once"
+    );
+    assert_eq!(health.owner_by_kind.get("held"), Some(&1));
+    assert_eq!(health.deferrals[0].waiting_for, "ci");
+    assert!(health.alerts.is_empty(), "{:?}", health.alerts);
+    let b = db
+        .with_conn(|c| briefing(c, &cfg, "2000-01-01 00:00:00"))
+        .unwrap();
+    assert_eq!(b.needs_you.len(), 1);
+    assert!(!b.needs_you[0].display_id.is_empty());
+    assert_eq!(b.reworked_total, 1);
+    assert!(
+        b.reworked[0].last_finding.contains("required check"),
+        "{:?}",
+        b.reworked
+    );
+}
+
+#[test]
+fn past_the_threshold_the_list_becomes_one_offer_and_an_old_item_raises_one_alert() {
+    let (db, initiative) = setup();
+    let cfg = enforcing();
+    // Work from before enforcement: a sweep's job.
+    for n in 0..8 {
+        waiting(&db, &initiative, &format!("old-{n}"));
+    }
+    enforce_policy(&db, &cfg);
+    db.with_conn(|c| {
+        c.execute(
+            "UPDATE task_verification_policy SET enforcing_since = datetime('now', '+1 hour')",
+            [],
+        )?;
+        c.execute(
+            "UPDATE task_events SET occurred_at = datetime('now', '-5 days') \
+             WHERE event_type = 'entered_ready_for_review'",
+            [],
+        )?;
+        Ok(())
+    })
+    .unwrap();
+    let b = db
+        .with_conn(|c| briefing(c, &cfg, "2000-01-01 00:00:00"))
+        .unwrap();
+    assert_eq!(b.needs_you_total, 8);
+    assert!(b.needs_you.is_empty(), "no flat list past the threshold");
+    let offer = b.bulk_offer.expect("an offer");
+    assert_eq!(offer.count, 8);
+    assert!(
+        offer.text.contains("before verification was enforced"),
+        "{}",
+        offer.text
+    );
+    assert_eq!(offer.command, "hq verify sweep plan");
+    assert_eq!(b.health.owner_by_kind.get("legacy"), Some(&8));
+    let alerts = b.health.alerts.join(" | ");
+    assert!(alerts.contains("8 items wait on you"), "{alerts}");
+    assert!(alerts.contains("5 days old"), "{alerts}");
+}
+
+#[test]
+fn spending_the_reviewer_budget_is_an_alert_only_while_tasks_actually_wait_for_it() {
+    let (db, initiative) = setup();
+    let cfg = VerificationConfig {
+        reviewer_monthly_ceiling_usd: Some(1.0),
+        ..enforcing()
+    };
+    enforce_policy(&db, &cfg);
+    waiting(&db, &initiative, "tk-1");
+    db.with_conn(|c| {
+        c.execute(
+            "INSERT INTO task_outcomes (session_id, turn_idx, model, provider, task_hint, latency_ms, \
+                 cost_usd, success, recorded_at, origin) \
+             VALUES ('s', 0, 'm', 'p', 'h', 1, 5.0, 1, strftime('%s','now'), 'verification')",
+            [],
+        )?;
+        Ok(())
+    })
+    .unwrap();
+    assert!(
+        db.with_conn(|c| queue_health(c, &cfg))
+            .unwrap()
+            .alerts
+            .is_empty(),
+        "spent, but nothing waits for it"
+    );
+    db.with_conn(|c| {
+        record_wait(
+            c,
+            "tk-1",
+            WAIT_BUDGET,
+            "the monthly reviewer ceiling is used up",
+            1800,
+            0,
+        )
+    })
+    .unwrap();
+    let health = db.with_conn(|c| queue_health(c, &cfg)).unwrap();
+    assert!(
+        health
+            .alerts
+            .iter()
+            .any(|a| a.contains("budget") && a.contains("machine checks continue")),
+        "{:?}",
+        health.alerts
+    );
+    assert_eq!(health.spent_this_month_usd, 5.0);
+}
+
+#[test]
+fn with_verification_off_there_is_nothing_to_alert_about() {
+    let (db, initiative) = setup();
+    for n in 0..30 {
+        waiting(&db, &initiative, &format!("tk-{n}"));
+    }
+    let off = VerificationConfig::default();
+    let b = db
+        .with_conn(|c| briefing(c, &off, "2000-01-01 00:00:00"))
+        .unwrap();
+    assert!(b.bulk_offer.is_none() && b.health.alerts.is_empty());
 }

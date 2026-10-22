@@ -1652,3 +1652,631 @@ async fn a_pass_that_used_the_reviewer_is_followed_by_a_canary_at_the_configured
     assert_eq!(report.canaries, 0);
     assert_eq!(reviewer.calls(), 1);
 }
+
+// ---- sweeps ----
+
+mod sweeps {
+    use super::super::sweep::{advance_sweeps, plan_summary, undo_sweep};
+    use super::*;
+
+    fn move_task(db: &Database, id: &str, status: &str, actor: &str) {
+        db.with_conn(|c| {
+            t::update_task_as(
+                c,
+                id,
+                &t::TaskPatch {
+                    status: Some(status.into()),
+                    ..Default::default()
+                },
+                None,
+                &t::WriteCtx {
+                    actor: Some(actor),
+                    ..Default::default()
+                },
+            )
+        })
+        .unwrap();
+    }
+
+    /// A task a worker has submitted, with an optional pull request.
+    fn submit(db: &Database, id: &str, pr: Option<&str>) {
+        db.with_conn(|c| {
+            t::create_task(
+                c,
+                id,
+                "in-1",
+                &t::NewTask {
+                    title: id,
+                    description: DESCRIPTION,
+                    created_by: "test",
+                    tags: &["code".to_string()],
+                    ..Default::default()
+                },
+            )?;
+            if let Some(pr) = pr {
+                t::add_task_link(c, id, "pr", pr, "", Some("produced"), "t")?;
+            }
+            Ok(())
+        })
+        .unwrap();
+        move_task(db, id, t::STATUS_IN_PROGRESS, "worker");
+        move_task(db, id, t::STATUS_READY_FOR_REVIEW, "worker");
+    }
+
+    fn github() -> FakeGitHub {
+        merged_pr_github(CLEAN_DIFF)
+            .with(
+                "repos/example/repo/pulls/8",
+                json!({"state": "closed", "merged": true, "head": {"sha": "bad111"}, "base": {"ref": "main"},
+                       "user": {"login": "dev"}, "changed_files": 1, "mergeable": null}),
+            )
+            .with(
+                "repos/example/repo/commits/bad111/check-runs?per_page=100",
+                json!({"check_runs": [{"name": "test", "status": "completed", "conclusion": "failure"}]}),
+            )
+            .with_diff("example/repo", 8, CLEAN_DIFF, false)
+    }
+
+    /// tk-1 passes after a review, tk-2 has nothing to inspect, tk-3's checks failed.
+    fn queue() -> World {
+        let w = World::code(github());
+        submit(&w.db, "tk-2", None);
+        submit(&w.db, "tk-3", Some("example/repo#8"));
+        w
+    }
+
+    fn status_of(db: &Database, id: &str) -> String {
+        db.with_conn(|c| Ok(t::get_task(c, id)?.unwrap().status))
+            .unwrap()
+    }
+
+    fn sweep_of(db: &Database, id: &str) -> t::Sweep {
+        db.with_conn(|c| Ok(t::get_sweep(c, id)?.unwrap())).unwrap()
+    }
+
+    fn items(db: &Database, id: &str) -> Vec<t::SweepItem> {
+        db.with_conn(|c| t::sweep_items(c, id)).unwrap()
+    }
+
+    fn bucket(db: &Database, sweep: &str, task: &str) -> String {
+        items(db, sweep)
+            .into_iter()
+            .find(|i| i.task_id == task)
+            .unwrap()
+            .bucket
+    }
+
+    async fn plan(w: &World) -> t::Sweep {
+        let sweep =
+            w.db.with_conn(|c| t::plan_sweep_items(c, &t::SweepScope::All, &w.cfg))
+                .unwrap();
+        let reviewer = ScriptedReviewer::new(&["premium"], vec![]);
+        advance_sweeps(&w.env(), &reviewer, 50).await.unwrap();
+        assert_eq!(reviewer.calls(), 0, "planning asks no model");
+        sweep_of(&w.db, &sweep.id)
+    }
+
+    fn start(w: &World, id: &str) {
+        w.db.with_conn(|c| {
+            t::set_sweep_status(
+                c,
+                id,
+                &[t::SWEEP_PLANNED, t::SWEEP_PAUSED],
+                t::SWEEP_RUNNING,
+            )
+        })
+        .unwrap();
+    }
+
+    async fn passing_reviewer(w: &World) -> ScriptedReviewer {
+        let answer = w
+            .answer(
+                "pass",
+                &["pr_state", "required_checks", "diff_excerpt"],
+                &[],
+            )
+            .await;
+        ScriptedReviewer::new(&["premium"], vec![reply("anthropic/claude-x", &answer)])
+    }
+
+    #[tokio::test]
+    async fn a_plan_changes_no_status_makes_no_model_call_and_puts_every_task_in_a_bucket() {
+        let w = queue();
+        let sweep = plan(&w).await;
+        assert_eq!(sweep.status, t::SWEEP_PLANNED);
+        assert_eq!(bucket(&w.db, &sweep.id, "tk-1"), t::BUCKET_NEEDS_REVIEW);
+        assert_eq!(bucket(&w.db, &sweep.id, "tk-2"), t::BUCKET_NO_ARTIFACT);
+        assert_eq!(bucket(&w.db, &sweep.id, "tk-3"), t::BUCKET_FAILED);
+        for id in ["tk-1", "tk-2", "tk-3"] {
+            assert_eq!(
+                status_of(&w.db, id),
+                t::STATUS_READY_FOR_REVIEW,
+                "{id} did not move"
+            );
+        }
+        assert!(verdicts(&w.db).is_empty(), "a plan records no verdict");
+
+        // The plan says what the reviewer runs would cost, and says it is an estimate.
+        assert_eq!(sweep.plan["total"], 3);
+        assert_eq!(sweep.plan["buckets"]["needs_review"], 1);
+        assert_eq!(sweep.plan["estimate"]["reviewer_runs"], 1);
+        assert!(sweep.plan["estimate"]["usd"].as_f64().unwrap() > 0.0);
+        assert!(
+            sweep.plan["estimate"]["basis"]
+                .as_str()
+                .unwrap()
+                .contains("assumed")
+        );
+    }
+
+    #[tokio::test]
+    async fn a_sweep_runs_to_verdicts_and_moves_nothing_until_it_is_applied() {
+        let w = queue();
+        let sweep = plan(&w).await;
+        start(&w, &sweep.id);
+        let reviewer = passing_reviewer(&w).await;
+        advance_sweeps(&w.env(), &reviewer, 50).await.unwrap();
+
+        let ready = sweep_of(&w.db, &sweep.id);
+        assert_eq!(ready.status, t::SWEEP_READY);
+        assert_eq!(bucket(&w.db, &sweep.id, "tk-1"), t::BUCKET_PASSED);
+        assert_eq!(bucket(&w.db, &sweep.id, "tk-2"), t::BUCKET_NO_ARTIFACT);
+        assert_eq!(bucket(&w.db, &sweep.id, "tk-3"), t::BUCKET_FAILED);
+        for id in ["tk-1", "tk-2", "tk-3"] {
+            assert_eq!(status_of(&w.db, id), t::STATUS_READY_FOR_REVIEW);
+        }
+        assert_eq!(
+            reviewer.calls(),
+            1,
+            "only the task that needed judgement was reviewed"
+        );
+        assert_eq!(ready.plan["buckets"]["passed"], 1);
+    }
+
+    #[tokio::test]
+    async fn applying_completes_the_passed_returns_the_rest_and_carries_the_sweep_id() {
+        let w = queue();
+        let sweep = plan(&w).await;
+        start(&w, &sweep.id);
+        advance_sweeps(&w.env(), &passing_reviewer(&w).await, 50)
+            .await
+            .unwrap();
+
+        w.db.with_conn(|c| t::request_apply(c, &w.cfg, &sweep.id, false))
+            .unwrap();
+        let idle = ScriptedReviewer::new(&["premium"], vec![]);
+        advance_sweeps(&w.env(), &idle, 50).await.unwrap();
+
+        assert_eq!(sweep_of(&w.db, &sweep.id).status, t::SWEEP_APPLIED);
+        assert_eq!(status_of(&w.db, "tk-1"), t::STATUS_COMPLETE);
+        assert_eq!(
+            status_of(&w.db, "tk-2"),
+            t::STATUS_TO_DO,
+            "no artifact is never completed"
+        );
+        assert_eq!(status_of(&w.db, "tk-3"), t::STATUS_TO_DO);
+        let events = w.db.with_conn(|c| t::list_task_events(c, "tk-1")).unwrap();
+        assert_eq!(
+            events.last().unwrap().actor.as_deref(),
+            Some(format!("verify:sweep-{}", sweep.id).as_str()),
+            "every change carries the sweep id"
+        );
+        let note =
+            w.db.with_conn(|c| t::latest_checkpoint(c, "tk-2"))
+                .unwrap()
+                .unwrap();
+        assert!(
+            note.summary.contains("nothing to inspect"),
+            "{}",
+            note.summary
+        );
+        assert_eq!(idle.calls(), 0);
+    }
+
+    #[tokio::test]
+    async fn a_large_apply_needs_confirmation_whatever_the_mode_and_a_shadow_sweep_cannot_apply() {
+        let mut w = queue();
+        w.cfg.sweep_confirm_over = 1;
+        sync(&w.db, &w.cfg);
+        let sweep = plan(&w).await;
+        start(&w, &sweep.id);
+        advance_sweeps(&w.env(), &passing_reviewer(&w).await, 50)
+            .await
+            .unwrap();
+
+        let preview =
+            w.db.with_conn(|c| t::apply_preview(c, &w.cfg, &sweep.id))
+                .unwrap();
+        assert_eq!((preview.will_move, preview.needs_confirmation), (3, true));
+        let refused =
+            w.db.with_conn(|c| t::request_apply(c, &w.cfg, &sweep.id, false))
+                .unwrap_err();
+        assert!(
+            refused.to_string().contains("confirm it explicitly"),
+            "{refused}"
+        );
+        assert_eq!(sweep_of(&w.db, &sweep.id).status, t::SWEEP_READY);
+        w.db.with_conn(|c| t::request_apply(c, &w.cfg, &sweep.id, true))
+            .unwrap();
+        assert_eq!(sweep_of(&w.db, &sweep.id).status, t::SWEEP_APPLYING);
+
+        let mut shadow = w.cfg.clone();
+        shadow.mode = VerificationMode::Shadow;
+        let other = queue();
+        let s = plan(&other).await;
+        let err = other
+            .db
+            .with_conn(|c| t::request_apply(c, &shadow, &s.id, true))
+            .unwrap_err();
+        assert!(err.to_string().contains("not enforcing"), "{err}");
+    }
+
+    #[tokio::test]
+    async fn pausing_stops_the_run_between_tasks_and_resuming_finishes_it() {
+        let w = queue();
+        let sweep = plan(&w).await;
+        start(&w, &sweep.id);
+        let reviewer = passing_reviewer(&w).await;
+        // One item at a time, as the daemon does, and pause after the first.
+        advance_sweeps(&w.env(), &reviewer, 1).await.unwrap();
+        w.db.with_conn(|c| t::set_sweep_status(c, &sweep.id, &[t::SWEEP_RUNNING], t::SWEEP_PAUSED))
+            .unwrap();
+        let before = items(&w.db, &sweep.id)
+            .iter()
+            .filter(|i| i.state == t::ITEM_VERDICT)
+            .count();
+        advance_sweeps(&w.env(), &reviewer, 50).await.unwrap();
+        let after = items(&w.db, &sweep.id)
+            .iter()
+            .filter(|i| i.state == t::ITEM_VERDICT)
+            .count();
+        assert_eq!((before, after), (1, 1), "paused means no more work");
+        assert_eq!(sweep_of(&w.db, &sweep.id).status, t::SWEEP_PAUSED);
+
+        start(&w, &sweep.id);
+        advance_sweeps(&w.env(), &reviewer, 50).await.unwrap();
+        assert_eq!(sweep_of(&w.db, &sweep.id).status, t::SWEEP_READY);
+
+        // A cancelled sweep stops for good and moved nothing.
+        let other = queue();
+        let s = plan(&other).await;
+        other
+            .db
+            .with_conn(|c| t::set_sweep_status(c, &s.id, &[t::SWEEP_PLANNED], t::SWEEP_CANCELLED))
+            .unwrap();
+        advance_sweeps(&other.env(), &ScriptedReviewer::new(&["p"], vec![]), 50)
+            .await
+            .unwrap();
+        assert_eq!(status_of(&other.db, "tk-1"), t::STATUS_READY_FOR_REVIEW);
+    }
+
+    #[tokio::test]
+    async fn a_sweep_picks_up_where_it_stopped_on_a_new_environment_after_a_restart() {
+        let w = queue();
+        let sweep =
+            w.db.with_conn(|c| t::plan_sweep_items(c, &t::SweepScope::All, &w.cfg))
+                .unwrap();
+        let idle = ScriptedReviewer::new(&["premium"], vec![]);
+        // Two ticks of one item each: the state is all in the database.
+        advance_sweeps(&w.env(), &idle, 1).await.unwrap();
+        assert_eq!(sweep_of(&w.db, &sweep.id).status, t::SWEEP_PLANNING);
+        advance_sweeps(&w.env(), &idle, 1).await.unwrap();
+        advance_sweeps(&w.env(), &idle, 1).await.unwrap();
+        assert_eq!(sweep_of(&w.db, &sweep.id).status, t::SWEEP_PLANNED);
+        assert_eq!(sweep_of(&w.db, &sweep.id).plan["total"], 3);
+    }
+
+    #[tokio::test]
+    async fn work_that_changed_between_the_run_and_the_apply_is_not_applied() {
+        let mut w = queue();
+        let sweep = plan(&w).await;
+        start(&w, &sweep.id);
+        advance_sweeps(&w.env(), &passing_reviewer(&w).await, 50)
+            .await
+            .unwrap();
+        w.db.with_conn(|c| t::request_apply(c, &w.cfg, &sweep.id, false))
+            .unwrap();
+
+        // tk-1's pull request gets a new head commit before the apply.
+        w.gh = Arc::new(
+            github().with(
+                "repos/example/repo/pulls/7",
+                json!({"state": "closed", "merged": true, "head": {"sha": "fff999"}, "base": {"ref": "main"},
+                       "user": {"login": "dev"}, "changed_files": 1, "mergeable": null}),
+            ),
+        );
+        // tk-3 is submitted again by its worker, so the sweep's finding is about an old submission.
+        move_task(&w.db, "tk-3", t::STATUS_IN_PROGRESS, "worker");
+        move_task(&w.db, "tk-3", t::STATUS_READY_FOR_REVIEW, "worker");
+
+        advance_sweeps(&w.env(), &ScriptedReviewer::new(&["p"], vec![]), 50)
+            .await
+            .unwrap();
+        let by_task: std::collections::HashMap<_, _> = items(&w.db, &sweep.id)
+            .into_iter()
+            .map(|i| (i.task_id.clone(), i))
+            .collect();
+        assert_eq!(
+            by_task["tk-1"].state,
+            t::ITEM_STALE,
+            "{:?}",
+            by_task["tk-1"]
+        );
+        assert!(by_task["tk-1"].detail.contains("new head commit"));
+        assert_eq!(by_task["tk-3"].state, t::ITEM_STALE);
+        assert_eq!(
+            status_of(&w.db, "tk-1"),
+            t::STATUS_READY_FOR_REVIEW,
+            "never completed on a stale verdict"
+        );
+        assert_eq!(
+            status_of(&w.db, "tk-2"),
+            t::STATUS_TO_DO,
+            "the unchanged one was applied"
+        );
+    }
+
+    #[tokio::test]
+    async fn undo_restores_what_the_sweep_moved_reports_what_changed_since_and_is_not_redone() {
+        let w = queue();
+        let sweep = plan(&w).await;
+        start(&w, &sweep.id);
+        advance_sweeps(&w.env(), &passing_reviewer(&w).await, 50)
+            .await
+            .unwrap();
+        w.db.with_conn(|c| t::request_apply(c, &w.cfg, &sweep.id, false))
+            .unwrap();
+        advance_sweeps(&w.env(), &ScriptedReviewer::new(&["p"], vec![]), 50)
+            .await
+            .unwrap();
+        assert_eq!(status_of(&w.db, "tk-1"), t::STATUS_COMPLETE);
+
+        // A worker picks up tk-3 after the sweep returned it.
+        move_task(&w.db, "tk-3", t::STATUS_IN_PROGRESS, "worker");
+
+        let report = w.db.with_conn(|c| undo_sweep(c, &sweep.id)).unwrap();
+        assert_eq!(report.restored, 2);
+        assert_eq!(report.left_alone.len(), 1);
+        assert!(report.left_alone[0].1.contains("in_progress"), "{report:?}");
+        assert_eq!(status_of(&w.db, "tk-1"), t::STATUS_READY_FOR_REVIEW);
+        assert_eq!(status_of(&w.db, "tk-2"), t::STATUS_READY_FOR_REVIEW);
+        assert_eq!(
+            status_of(&w.db, "tk-3"),
+            t::STATUS_IN_PROGRESS,
+            "left as it is"
+        );
+        assert_eq!(sweep_of(&w.db, &sweep.id).status, t::SWEEP_UNDONE);
+
+        // The live queue does not immediately redo what the owner undid.
+        let again = run_pass(&w, &ScriptedReviewer::new(&["p"], vec![])).await;
+        assert_eq!((again.queued, again.attempted), (0, 0), "{again:?}");
+        // Undone twice is refused.
+        assert!(w.db.with_conn(|c| undo_sweep(c, &sweep.id)).is_err());
+        // A new submission is looked at again.
+        move_task(&w.db, "tk-2", t::STATUS_IN_PROGRESS, "worker");
+        move_task(&w.db, "tk-2", t::STATUS_READY_FOR_REVIEW, "worker");
+        let later = run_pass(&w, &ScriptedReviewer::new(&["p"], vec![])).await;
+        assert_eq!(later.queued, 1, "{later:?}");
+    }
+
+    #[tokio::test]
+    async fn work_from_before_enforcement_waits_for_a_sweep_instead_of_being_bulk_processed() {
+        let w = queue();
+        // Enforcement began after these three entered review.
+        w.db.with_conn(|c| {
+            c.execute(
+                "UPDATE task_verification_policy SET enforcing_since = datetime('now', '+1 hour')",
+                [],
+            )?;
+            Ok(())
+        })
+        .unwrap();
+        let idle = ScriptedReviewer::new(&["premium"], vec![]);
+        let live = run_pass(&w, &idle).await;
+        assert_eq!((live.queued, live.attempted), (0, 0), "{live:?}");
+        for id in ["tk-1", "tk-2", "tk-3"] {
+            assert_eq!(status_of(&w.db, id), t::STATUS_READY_FOR_REVIEW, "{id}");
+        }
+        // They say whose move it is.
+        let state =
+            w.db.with_conn(|c| t::waiting_state(c, &t::get_task(c, "tk-2")?.unwrap()))
+                .unwrap()
+                .unwrap();
+        assert_eq!(state.who, "owner");
+        assert!(state.reason.contains("sweep"), "{}", state.reason);
+
+        // A sweep does handle them.
+        let sweep = plan(&w).await;
+        assert_eq!(sweep.plan["total"], 3);
+    }
+
+    #[tokio::test]
+    async fn the_controls_only_move_a_sweep_along_its_own_path() {
+        use super::super::sweep::{start_sweep, sweep_action};
+        let w = queue();
+        let off = VerificationConfig::default();
+        let refused =
+            w.db.with_conn(|c| start_sweep(c, &off, &t::SweepScope::All))
+                .unwrap_err();
+        assert!(
+            refused.to_string().contains("verification is off"),
+            "{refused}"
+        );
+
+        let sweep =
+            w.db.with_conn(|c| start_sweep(c, &w.cfg, &t::SweepScope::All))
+                .unwrap();
+        // Still planning: it cannot be run, applied or paused yet.
+        for action in ["run", "pause", "apply"] {
+            assert!(
+                w.db.with_conn(|c| sweep_action(c, &w.cfg, &sweep.id, action, true))
+                    .is_err(),
+                "{action} while planning"
+            );
+        }
+        advance_sweeps(&w.env(), &ScriptedReviewer::new(&["p"], vec![]), 50)
+            .await
+            .unwrap();
+        let running =
+            w.db.with_conn(|c| sweep_action(c, &w.cfg, &sweep.id, "run", false))
+                .unwrap();
+        assert_eq!(running.status, t::SWEEP_RUNNING);
+        assert_eq!(
+            w.db.with_conn(|c| sweep_action(c, &w.cfg, &sweep.id, "pause", false))
+                .unwrap()
+                .status,
+            t::SWEEP_PAUSED
+        );
+        assert_eq!(
+            w.db.with_conn(|c| sweep_action(c, &w.cfg, &sweep.id, "cancel", false))
+                .unwrap()
+                .status,
+            t::SWEEP_CANCELLED
+        );
+        assert!(
+            w.db.with_conn(|c| sweep_action(c, &w.cfg, &sweep.id, "run", false))
+                .is_err()
+        );
+        assert!(
+            w.db.with_conn(|c| sweep_action(c, &w.cfg, &sweep.id, "explode", false))
+                .is_err()
+        );
+    }
+
+    #[tokio::test]
+    async fn the_plan_can_be_scoped_to_one_initiative_or_a_hand_picked_set() {
+        let w = queue();
+        let picked =
+            w.db.with_conn(|c| {
+                t::plan_sweep_items(
+                    c,
+                    &t::SweepScope::Tasks {
+                        ids: vec!["tk-2".into()],
+                    },
+                    &w.cfg,
+                )
+            })
+            .unwrap();
+        assert_eq!(items(&w.db, &picked.id).len(), 1);
+        let none = w.db.with_conn(|c| {
+            t::plan_sweep_items(
+                c,
+                &t::SweepScope::Initiative {
+                    id: "in-elsewhere".into(),
+                },
+                &w.cfg,
+            )
+        });
+        assert!(none.unwrap_err().to_string().contains("nothing is waiting"));
+        let plan_text =
+            w.db.with_conn(|c| plan_summary(c, &w.cfg, &picked.id))
+                .unwrap();
+        assert_eq!(plan_text["total"], 1);
+    }
+}
+
+// ---- second opinions ----
+
+mod second_opinions {
+    use super::super::second_opinion::answer_second_opinions;
+    use super::*;
+
+    async fn completed_world() -> World {
+        let w = World::code(merged_pr_github(CLEAN_DIFF));
+        let reviewer = {
+            let answer = w
+                .answer(
+                    "pass",
+                    &["pr_state", "required_checks", "diff_excerpt"],
+                    &[],
+                )
+                .await;
+            ScriptedReviewer::new(&["premium"], vec![reply("anthropic/claude-x", &answer)])
+        };
+        assert!(completed(&w.verify(&reviewer).await));
+        w
+    }
+
+    #[tokio::test]
+    async fn a_second_opinion_that_disagrees_is_an_audit_datum_and_changes_nothing_by_itself() {
+        let w = completed_world().await;
+        w.db.with_conn(|c| t::request_reverify(c, "tk-1")).unwrap();
+        let answer = w
+            .answer("fail", &["pr_state", "required_checks"], &[])
+            .await;
+        let second = ScriptedReviewer::new(&["other"], vec![reply("openai/gpt-5", &answer)]);
+        let n = answer_second_opinions(&w.env(), &second, 5).await.unwrap();
+        assert_eq!(n, 1);
+        assert_eq!(second.calls(), 1);
+
+        let request =
+            w.db.with_conn(|c| t::get_reverify(c, "tk-1"))
+                .unwrap()
+                .unwrap();
+        assert_eq!(request.state, t::REVERIFY_DISAGREED);
+        assert_eq!(get(&w.db).status, t::STATUS_COMPLETE, "it only informs");
+        let (source, answer): (String, String) =
+            w.db.with_conn(|c| {
+                c.query_row(
+                    "SELECT source, answer FROM task_audits WHERE task_id = 'tk-1'",
+                    [],
+                    |r| Ok((r.get(0)?, r.get(1)?)),
+                )
+                .map_err(Into::into)
+            })
+            .unwrap();
+        assert_eq!(
+            (source.as_str(), answer.as_str()),
+            ("second_opinion", "disagree")
+        );
+        let comments = w.db.with_conn(|c| t::list_comments(c, "tk-1")).unwrap();
+        assert!(
+            comments.last().unwrap().body.contains("disagreed"),
+            "{}",
+            comments.last().unwrap().body
+        );
+        // Answered requests are not answered again.
+        let again = answer_second_opinions(&w.env(), &second, 5).await.unwrap();
+        assert_eq!(again, 0);
+    }
+
+    #[tokio::test]
+    async fn an_agreeing_second_opinion_is_noted_and_adds_no_audit_row() {
+        let w = completed_world().await;
+        w.db.with_conn(|c| t::request_reverify(c, "tk-1")).unwrap();
+        let answer = w
+            .answer(
+                "pass",
+                &["pr_state", "required_checks", "diff_excerpt"],
+                &[],
+            )
+            .await;
+        let second = ScriptedReviewer::new(&["other"], vec![reply("openai/gpt-5", &answer)]);
+        answer_second_opinions(&w.env(), &second, 5).await.unwrap();
+        let request =
+            w.db.with_conn(|c| t::get_reverify(c, "tk-1"))
+                .unwrap()
+                .unwrap();
+        assert_eq!(request.state, t::REVERIFY_AGREED);
+        let rows: i64 =
+            w.db.with_conn(|c| {
+                c.query_row("SELECT COUNT(*) FROM task_audits", [], |r| r.get(0))
+                    .map_err(Into::into)
+            })
+            .unwrap();
+        assert_eq!(rows, 0);
+    }
+
+    #[tokio::test]
+    async fn there_must_be_a_verdict_to_give_a_second_opinion_on() {
+        let w = World::code(merged_pr_github(CLEAN_DIFF));
+        let err =
+            w.db.with_conn(|c| t::request_reverify(c, "tk-1"))
+                .unwrap_err();
+        assert!(err.to_string().contains("no verdict yet"), "{err}");
+        let err =
+            w.db.with_conn(|c| t::request_reverify(c, "tk-nope"))
+                .unwrap_err();
+        assert!(err.to_string().contains("no task"), "{err}");
+    }
+}

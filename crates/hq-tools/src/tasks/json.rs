@@ -218,6 +218,10 @@ pub const TASK_EXCEPTION_SOURCE: &str = "task_needs_owner";
 pub const TASK_AUTONOMY_SOURCE: &str = "task_autonomy";
 /// The value source of a tier 2 task inside its veto window.
 pub const TASK_VETO_SOURCE: &str = "task_veto_window";
+/// The value source of the daily briefing.
+pub const TASK_BRIEFING_SOURCE: &str = "task_briefing";
+/// The value source of the one daily alert about the verification queue.
+pub const TASK_QUEUE_ALERT_SOURCE: &str = "task_queue_alert";
 /// The value source of the weekly audit digest.
 pub const TASK_AUDIT_SOURCE: &str = "task_audit_digest";
 
@@ -301,5 +305,47 @@ pub async fn notify_veto_window(vault_path: PathBuf, task: t::Task, release: Str
         .and_then(|db| hq_db::value_items::emit(&db, &item).map(|_| ()));
     if let Err(e) = emitted {
         tracing::warn!(error = %e, "task-notify: failed to emit the veto window item");
+    }
+}
+
+/// Best-effort: the briefing as one summary item, once a day. It never lists a pass by itself.
+pub async fn notify_briefing(vault_path: PathBuf, text: String) {
+    let item = hq_core::types::ValueItem::new(
+        TASK_BRIEFING_SOURCE,
+        hq_core::types::ValueKind::Fyi,
+        "While you were away".to_string(),
+        text,
+    )
+    .with_dedup_key(format!(
+        "task-briefing-{}",
+        chrono::Utc::now().format("%Y-%m-%d")
+    ));
+    emit_value(vault_path, item, "the briefing");
+}
+
+/// Best-effort: one alert a day when the verification queue needs the owner's attention.
+pub async fn notify_queue_alert(vault_path: PathBuf, alerts: &[String]) {
+    if alerts.is_empty() {
+        return;
+    }
+    let item = hq_core::types::ValueItem::new(
+        TASK_QUEUE_ALERT_SOURCE,
+        hq_core::types::ValueKind::ActionNeeded,
+        "The verification queue needs attention".to_string(),
+        alerts.join("\n"),
+    )
+    .with_dedup_key(format!(
+        "task-queue-alert-{}",
+        chrono::Utc::now().format("%Y-%m-%d")
+    ));
+    emit_value(vault_path, item, "the queue alert");
+}
+
+fn emit_value(vault_path: PathBuf, item: hq_core::types::ValueItem, what: &str) {
+    let db_path = vault_path.join("_data").join("vault.db");
+    let emitted = hq_db::Database::open(&db_path)
+        .and_then(|db| hq_db::value_items::emit(&db, &item).map(|_| ()));
+    if let Err(e) = emitted {
+        tracing::warn!(error = %e, "task-notify: failed to emit {what}");
     }
 }

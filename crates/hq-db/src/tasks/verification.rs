@@ -103,12 +103,88 @@ pub fn sync_verification_policy(conn: &Connection, cfg: &VerificationConfig) -> 
     if current.as_deref() == Some(json.as_str()) {
         return Ok(false);
     }
+    let was_enforcing = current
+        .as_deref()
+        .and_then(|c| serde_json::from_str::<VerificationConfig>(c).ok())
+        .is_some_and(|c| c.mode == VerificationMode::Enforce);
     conn.execute(
         "INSERT INTO task_verification_policy (id, config) VALUES (1, ?1) \
          ON CONFLICT(id) DO UPDATE SET config = excluded.config, updated_at = datetime('now')",
         params![json],
     )?;
+    // Work that entered review before enforcement began is the legacy backlog: a sweep handles it,
+    // so turning enforcement on never bulk-processes old work.
+    if cfg.mode != VerificationMode::Enforce {
+        conn.execute(
+            "UPDATE task_verification_policy SET enforcing_since = NULL WHERE id = 1",
+            [],
+        )?;
+    } else if !was_enforcing {
+        conn.execute(
+            "UPDATE task_verification_policy SET enforcing_since = datetime('now') WHERE id = 1",
+            [],
+        )?;
+    }
     Ok(true)
+}
+
+/// When enforcement began (UTC `YYYY-MM-DD HH:MM:SS`), or `None` while it is not enforcing.
+pub fn enforcing_since(conn: &Connection) -> Result<Option<String>> {
+    Ok(conn
+        .query_row(
+            "SELECT enforcing_since FROM task_verification_policy WHERE id = 1",
+            [],
+            |r| r.get::<_, Option<String>>(0),
+        )
+        .optional()?
+        .flatten())
+}
+
+/// Whether a task entered review before enforcement began. Only meaningful while enforcing.
+pub fn is_legacy(conn: &Connection, task: &Task) -> Result<bool> {
+    let Some(since) = enforcing_since(conn)? else {
+        return Ok(false);
+    };
+    if task.status != STATUS_READY_FOR_REVIEW {
+        return Ok(false);
+    }
+    let entered: String = conn.query_row(
+        "SELECT COALESCE(MAX(occurred_at), '') FROM task_events \
+         WHERE task_id = ?1 AND event_type = 'entered_ready_for_review'",
+        params![task.id],
+        |r| r.get(0),
+    )?;
+    Ok(entered.as_str() < since.as_str())
+}
+
+/// Keeps a task out of automatic verification for its current submission (the owner undid a
+/// sweep's move, or wants to decide it). A new submission is looked at again.
+pub fn skip_verification(conn: &Connection, task_id: &str, reason: &str) -> Result<()> {
+    let marker = review_marker(conn, task_id)?;
+    conn.execute(
+        "INSERT INTO task_verification_skips (task_id, submission, reason) VALUES (?1, ?2, ?3) \
+         ON CONFLICT(task_id) DO UPDATE SET submission = excluded.submission, \
+           reason = excluded.reason, created_at = datetime('now')",
+        params![
+            task_id,
+            marker,
+            reason.chars().take(300).collect::<String>()
+        ],
+    )?;
+    Ok(())
+}
+
+/// Whether the task's current submission is kept out of automatic verification.
+pub fn is_skipped(conn: &Connection, task_id: &str) -> Result<bool> {
+    let marker = review_marker(conn, task_id)?;
+    Ok(conn
+        .query_row(
+            "SELECT 1 FROM task_verification_skips WHERE task_id = ?1 AND submission IS ?2",
+            params![task_id, marker],
+            |_| Ok(()),
+        )
+        .optional()?
+        .is_some())
 }
 
 /// The risk tier of a task from what is known without looking at its change: a tier 2 tag, else
@@ -588,12 +664,25 @@ pub fn verification_candidates(
     now: i64,
 ) -> Result<Vec<Candidate>> {
     let mut out = Vec::new();
+    // While enforcing, work from before enforcement began waits for a sweep.
+    let legacy_before = if cfg.mode == VerificationMode::Enforce {
+        enforcing_since(conn)?
+    } else {
+        None
+    };
     for (task, wait) in tasks_awaiting_verdict(conn)? {
-        if wait.is_some_and(|w| w.retry_at > now) {
+        if wait.is_some_and(|w| w.retry_at > now) || is_skipped(conn, &task.id)? {
             continue;
         }
         let tier = task_tier(conn, &task, cfg)?;
-        out.push(candidate(conn, task, tier)?);
+        let c = candidate(conn, task, tier)?;
+        if legacy_before
+            .as_deref()
+            .is_some_and(|since| c.entered_at.as_str() < since)
+        {
+            continue;
+        }
+        out.push(c);
     }
     sort_candidates(&mut out);
     Ok(out)

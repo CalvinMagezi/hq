@@ -354,6 +354,10 @@ const MIGRATIONS: &[(&str, &str)] = &[
         "096_task_calibration",
         include_str!("../sql/096_task_calibration.sql"),
     ),
+    (
+        "097_task_sweeps",
+        include_str!("../sql/097_task_sweeps.sql"),
+    ),
 ];
 
 const MEMORY_SCHEMA_MIGRATION: &str = "058_memory_schema";
@@ -779,6 +783,69 @@ mod tests {
             .query_row("SELECT title FROM tasks WHERE id = 't1'", [], |r| r.get(0))
             .unwrap();
         assert_eq!(title, "old");
+    }
+
+    #[test]
+    fn calibration_and_sweep_migrations_add_tables_keep_the_policy_and_start_unenforced() {
+        let conn = rusqlite::Connection::open_in_memory().unwrap();
+        let idx = super::MIGRATIONS
+            .iter()
+            .position(|(v, _)| *v == "096_task_calibration")
+            .unwrap();
+        super::apply(&conn, &super::MIGRATIONS[..idx]).unwrap();
+        conn.execute(
+            "UPDATE task_verification_policy SET config = '{\"mode\":\"shadow\"}' WHERE id = 1",
+            [],
+        )
+        .unwrap();
+        super::run(&conn).unwrap();
+        let (config, since): (String, Option<String>) = conn
+            .query_row(
+                "SELECT config, enforcing_since FROM task_verification_policy WHERE id = 1",
+                [],
+                |r| Ok((r.get(0)?, r.get(1)?)),
+            )
+            .unwrap();
+        assert_eq!(
+            config, "{\"mode\":\"shadow\"}",
+            "the policy in force survives"
+        );
+        assert_eq!(
+            since, None,
+            "nothing is enforcing yet, so nothing is legacy"
+        );
+        for table in [
+            "task_audits",
+            "task_canary_runs",
+            "task_veto_holds",
+            "task_sweeps",
+            "task_sweep_items",
+            "task_verification_skips",
+            "task_reverify_requests",
+        ] {
+            let n: i64 = conn
+                .query_row(&format!("SELECT COUNT(*) FROM {table}"), [], |r| r.get(0))
+                .unwrap();
+            assert_eq!(n, 0, "{table} starts empty");
+        }
+        // A sweep and its items round-trip, and a bad status is refused.
+        conn.execute_batch(
+            "INSERT INTO spaces (id, name, slug) VALUES ('s', 'S', 's');
+             INSERT INTO initiatives (id, space_id, name, slug, id_prefix) VALUES ('i', 's', 'I', 'i', 'I');
+             INSERT INTO tasks (id, initiative_id, display_id, title, status)
+                 VALUES ('t1', 'i', 'I-001', 'old', 'ready_for_review');
+             INSERT INTO task_sweeps (id, scope, status) VALUES ('sw-1', '{}', 'planning');
+             INSERT INTO task_sweep_items (sweep_id, task_id, rank, status_before)
+                 VALUES ('sw-1', 't1', 1, 'ready_for_review');",
+        )
+        .unwrap();
+        assert!(
+            conn.execute(
+                "INSERT INTO task_sweeps (id, scope, status) VALUES ('sw-2', '{}', 'bogus')",
+                []
+            )
+            .is_err()
+        );
     }
 
     #[test]
