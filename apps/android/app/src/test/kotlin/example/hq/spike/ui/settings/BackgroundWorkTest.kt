@@ -111,7 +111,9 @@ class BackgroundWorkTest {
         assertEquals(SettingsWords.KEY_REFUSED, SettingsWords.keyFailure(400))
         assertEquals(SettingsWords.KEY_NO_ANSWER, SettingsWords.keyFailure(0))
         assertEquals(SettingsWords.KEY_ENV, SettingsWords.keyFailure(409))
-        assertEquals("Anthropic key saved. Your next message uses it.", SettingsWords.keySaved("Anthropic"))
+        assertEquals(SettingsWords.KEY_NO_ANSWER, SettingsWords.keyFailure(503))
+        assertEquals(SettingsWords.KEY_OTHER, SettingsWords.keyFailure(403))
+        assertEquals("Anthropic key saved.", SettingsWords.keySaved("Anthropic"))
         assertEquals("https://openrouter.ai/keys", SettingsWords.keyHelpUrl("open_router"))
         assertNull(SettingsWords.keyHelpUrl("deepseek"))
     }

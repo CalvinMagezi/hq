@@ -28,6 +28,9 @@ class HqServices private constructor(private val app: Context) {
 
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
     val client = HqClient(token = { HubService.token(app) }, onSignedOut = { HubService.recoverToken(app) })
+
+    /** For the thread that polls HQ: a call that is accepted and never answered ends after a few seconds instead of holding up the alerts. */
+    val background = HqClient(token = { HubService.token(app) }, onSignedOut = { HubService.recoverToken(app) }, callSeconds = BACKGROUND_CALL_SECONDS)
     val connection = ChatConnection(client, scope)
 
     private val _status = MutableStateFlow<HqStatus>(HqStatus.Starting(0))
@@ -57,6 +60,7 @@ class HqServices private constructor(private val app: Context) {
     }
 
     companion object {
+        private const val BACKGROUND_CALL_SECONDS = 10L
         private const val LIVE_POLL_MS = 5_000L
         private const val DOWN_POLL_MS = 1_000L
         private const val MS_PER_SECOND = 1_000L

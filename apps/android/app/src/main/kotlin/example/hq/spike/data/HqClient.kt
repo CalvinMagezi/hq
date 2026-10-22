@@ -29,7 +29,7 @@ data class ExportedFile(val file: java.io.File, val name: String, val mime: Stri
 class NoteNotFound(path: String) : IOException("No note at $path")
 
 /** The same REST and web socket API the web app uses, over loopback. Auth is the sealed web token. */
-class HqClient(private val token: () -> String, private val base: String = LOCAL_HQ, private val onSignedOut: () -> Unit = {}) {
+class HqClient(private val token: () -> String, private val base: String = LOCAL_HQ, private val onSignedOut: () -> Unit = {}, private val callSeconds: Long = 0) {
     /** The sealed token is decrypted once, off the main thread, and forgotten when hq refuses it. */
     @Volatile private var bearer: String? = null
 
@@ -40,6 +40,7 @@ class HqClient(private val token: () -> String, private val base: String = LOCAL
         .connectTimeout(CONNECT_SECONDS, TimeUnit.SECONDS)
         .readTimeout(READ_SECONDS, TimeUnit.SECONDS)
         .pingInterval(PING_SECONDS, TimeUnit.SECONDS)
+        .apply { if (callSeconds > 0) callTimeout(callSeconds, TimeUnit.SECONDS) }
         .build()
 
     suspend fun healthy(): Boolean = withContext(Dispatchers.IO) {

@@ -43,6 +43,9 @@ object Links {
         }
     }
 
+    /** The link to a vault note. Each part of the path is percent-encoded, since a title with a space or a # would not parse as a link otherwise. */
+    fun noteLink(path: String): String = "$SCHEME://notes/" + path.split('/').joinToString("/") { java.net.URLEncoder.encode(it, "UTF-8").replace("+", "%20") }
+
     private fun id(s: String): String? = s.takeIf { ID.matches(it) }
 
     /** A vault path: relative, no way out of the vault and no control characters. The server decides whether it exists and may be read. */

@@ -64,8 +64,17 @@ object CaptureWords {
     /** "hq, mobile" or "hq mobile" into names, each once, at most twenty. */
     fun assignees(typed: String): List<String> = typed.split(',', ' ', '\n').map { it.trim().trimStart('@') }.filter { it.isNotEmpty() }.distinct().take(ASSIGNEES_MAX)
 
-    /** The text a draft in the open chat starts with: what was written, then the link if it is not already in it. */
-    fun chatDraft(title: String, body: String): String = listOf(title.trim(), body.trim()).filter { it.isNotEmpty() }.distinct().joinToString("\n\n")
+    /** The text a draft in the open chat starts with: the title and the text, each once when one holds the other. */
+    fun chatDraft(title: String, body: String): String {
+        val t = title.trim()
+        val b = body.trim()
+        return when {
+            t.isEmpty() -> b
+            b.isEmpty() || b in t -> t
+            t in b -> b
+            else -> "$t\n\n$b"
+        }
+    }
 
     fun taskBody(id: String, title: String, notes: String, priority: String?, due: String?, assignees: List<String>): JSONObject {
         val b = JSONObject().put("title", title.trim()).put("space_id", "personal").put("initiative", "Inbox").put("created_by", "operator").put("external_id", id)

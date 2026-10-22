@@ -102,14 +102,16 @@ class ShellActivity : ComponentActivity() {
         super.onNewIntent(intent)
         setIntent(intent)
         val link = linkOf(intent) ?: return
+        // Shared text is kept even when the pages cannot be closed: it joins the chat's draft, and nothing typed there is lost.
+        val shared = intent.getStringExtra(example.hq.spike.capture.CaptureActivity.EXTRA_DRAFT)
+        shared?.let(chat::addToDraft)
         if (hasUnsavedWork()) {
-            Toast.makeText(this, UNSAVED_WORK, Toast.LENGTH_LONG).show()
+            Toast.makeText(this, if (shared != null) SHARED_KEPT else UNSAVED_WORK, Toast.LENGTH_LONG).show()
             return
         }
         closePages()
         requested = link.place
         applyLink(link)
-        intent.getStringExtra(example.hq.spike.capture.CaptureActivity.EXTRA_DRAFT)?.let(chat.actions.onDraft)
     }
 
     /** The link an intent carries (an hq:// link, from a notification, a widget or another app), or the place a debug start names. */
@@ -356,5 +358,6 @@ class ShellActivity : ComponentActivity() {
         const val MODE_FILE_MAX = 64L
         const val TAIL_BYTES = 16_384L
         const val UNSAVED_WORK = "Finish or discard what you are writing first"
+        const val SHARED_KEPT = "Added to your chat message. Finish what you are writing first to open it."
     }
 }

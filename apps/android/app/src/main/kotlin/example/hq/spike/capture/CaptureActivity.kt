@@ -36,6 +36,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -64,20 +65,23 @@ import kotlinx.coroutines.runBlocking
  */
 class CaptureActivity : ComponentActivity() {
     private val inbox = "Notebooks/Inbox"
+    /** A save and open is waiting for HQ: the buttons are off so a second tap cannot queue another note. */
+    private val sending = androidx.compose.runtime.mutableStateOf(false)
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge(statusBarStyle = SystemBarStyle.dark(android.graphics.Color.TRANSPARENT), navigationBarStyle = SystemBarStyle.dark(android.graphics.Color.TRANSPARENT))
-        val subject = intent.getStringExtra(Intent.EXTRA_SUBJECT)
-        val text = intent.getCharSequenceExtra(Intent.EXTRA_TEXT)?.toString()
+        // Another app can send any extra to this exported screen; one that cannot be read is treated as not sent.
+        val subject = runCatching { intent.getStringExtra(Intent.EXTRA_SUBJECT) }.getOrNull()
+        val text = runCatching { intent.getCharSequenceExtra(Intent.EXTRA_TEXT)?.toString() }.getOrNull()
         val shared = intent.action == Intent.ACTION_SEND
-        val asked = intent.getStringExtra(EXTRA_MODE)
+        val asked = runCatching { intent.getStringExtra(EXTRA_MODE) }.getOrNull()
         val start = if (shared && asked == null) CapturePrefs.startMode(null, CapturePrefs.shareOpens(this), CapturePrefs.lastMode(this)) else CapturePrefs.modeOf(asked) ?: CaptureMode.Note
         val client = HqServices.get(applicationContext).client
         setContent {
             HqTheme {
                 val folders by produceFolders { runCatching { client.folders() }.getOrDefault(emptyList()) }
-                CaptureSheet(start, subject, text, folders, onClose = ::finish, onSave = ::save)
+                CaptureSheet(start, subject, text, folders, sending.value, onClose = ::finish, onSave = ::save)
             }
         }
     }
@@ -104,17 +108,28 @@ class CaptureActivity : ComponentActivity() {
             Queued(id, Queued.KIND_TASK, draft.title.trim(), CaptureWords.taskBody(id, draft.title, draft.body, draft.priority, draft.due, CaptureWords.assignees(draft.assignTo)), System.currentTimeMillis())
         }
         val box = Outbox.of(this)
-        box.add(q)
         val app = applicationContext
-        if (andOpen && q.isNote) {
+        val waits = andOpen && q.isNote
+        // Claimed before it is stored, so the poller's flush cannot send it a second time while this one waits for the path.
+        if (waits) OutboxSender.hold(q.id)
+        try { box.add(q) } catch (e: java.io.IOException) {
+            Toast.makeText(app, "Could not save. This phone's storage did not accept it.", Toast.LENGTH_LONG).show()
+            return
+        }
+        if (waits) {
             // The note's path only comes back from HQ, so opening it waits for the send; if HQ is down it opens later from the outbox.
+            sending.value = true
             Thread {
-                val result = runBlocking { OutboxSender.send(HqServices.get(app).client, q) }
+                val result = runBlocking { OutboxSender.sendHeld(HqServices.get(app).client, q) }
                 runOnUiThread {
-                    if (result is Sent.Done && result.path != null) {
-                        box.remove(q.id)
-                        startActivity(Intent(this, ShellActivity::class.java).putExtra(Links.EXTRA, "hq://notes/" + result.path).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP))
-                    } else Toast.makeText(app, "Saved. It is sent when HQ is back.", Toast.LENGTH_LONG).show()
+                    when {
+                        result is Sent.Done && result.path != null -> {
+                            box.remove(q.id)
+                            startActivity(Intent(this, ShellActivity::class.java).putExtra(Links.EXTRA, Links.noteLink(result.path)).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP))
+                        }
+                        result is Sent.Refused -> Toast.makeText(app, "Saved on this phone. HQ would not take it: ${result.why}.", Toast.LENGTH_LONG).show()
+                        else -> Toast.makeText(app, "Saved. It is sent when HQ is back.", Toast.LENGTH_LONG).show()
+                    }
                     finish()
                 }
             }.start()
@@ -141,21 +156,21 @@ private const val SCRIM_ALPHA = 0.62f
 private val Priorities = listOf<Pair<String?, String>>(null to "None", "low" to "Low", "normal" to "Normal", "high" to "High", "urgent" to "Urgent")
 
 @Composable
-private fun CaptureSheet(start: CaptureMode, subject: String?, text: String?, folders: List<String>, onClose: () -> Unit, onSave: (CaptureDraft, Boolean) -> Unit) {
-    var mode by remember { mutableStateOf(start) }
-    var title by remember { mutableStateOf(CaptureWords.titleFor(subject, text)) }
+private fun CaptureSheet(start: CaptureMode, subject: String?, text: String?, folders: List<String>, sending: Boolean, onClose: () -> Unit, onSave: (CaptureDraft, Boolean) -> Unit) {
+    var mode by rememberSaveable { mutableStateOf(start) }
+    var title by rememberSaveable { mutableStateOf(CaptureWords.titleFor(subject, text)) }
     // A link goes in the note's text; when the app shared only a link there is nothing else to write.
-    var body by remember { mutableStateOf(text.orEmpty()) }
-    var folder by remember { mutableStateOf("Notebooks/Inbox") }
+    var body by rememberSaveable { mutableStateOf(text.orEmpty()) }
+    var folder by rememberSaveable { mutableStateOf("Notebooks/Inbox") }
     var pickFolder by remember { mutableStateOf(false) }
     var more by remember { mutableStateOf(false) }
-    var priority by remember { mutableStateOf<String?>(null) }
-    var due by remember { mutableStateOf<String?>(null) }
-    var assignTo by remember { mutableStateOf("") }
+    var priority by rememberSaveable { mutableStateOf<String?>(null) }
+    var due by rememberSaveable { mutableStateOf<String?>(null) }
+    var assignTo by rememberSaveable { mutableStateOf("") }
     LaunchedEffect(folders) { if (folder !in folders && folders.isNotEmpty()) folder = folders.first() }
     val preview = remember(subject, text) { CaptureWords.preview(subject, text) }
     val shape = RoundedCornerShape(topStart = 28.dp, topEnd = 28.dp)
-    val canSave = when (mode) { CaptureMode.Note -> title.isNotBlank() || body.isNotBlank(); CaptureMode.Task -> title.isNotBlank(); CaptureMode.Chat -> title.isNotBlank() || body.isNotBlank() }
+    val canSave = !sending && when (mode) { CaptureMode.Note -> title.isNotBlank() || body.isNotBlank(); CaptureMode.Task -> title.isNotBlank(); CaptureMode.Chat -> title.isNotBlank() || body.isNotBlank() }
     Box(Modifier.fillMaxSize()) {
         Box(Modifier.fillMaxSize().background(Color.Black.copy(alpha = SCRIM_ALPHA)).clickable(interactionSource = remember { MutableInteractionSource() }, indication = null, onClick = onClose))
         Column(

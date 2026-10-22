@@ -36,7 +36,7 @@ class TasksWidget : AppWidgetProvider() {
 }
 
 /** What the Needs you widget says: a count, or that it is quiet and when that was last checked. */
-data class NeedsFacts(val count: Int, val title: String?, val checkedAt: String)
+data class NeedsFacts(val count: Int, val title: String?, val checkedAt: String, val checkedMs: Long = 0L)
 
 /** One row of the Tasks widget: the task's id for opening it, its number and its title. */
 data class TaskLine(val id: String, val number: String, val title: String)
@@ -46,6 +46,11 @@ object Widgets {
     private const val COUNT = "needs_count"
     private const val TITLE = "needs_title"
     private const val CHECKED = "checked"
+    private const val CHECKED_MS = "checked_ms"
+    /** How old the last answer from HQ may be before the widget says when it was read. */
+    private const val STALE_MS = 10 * 60 * 1000L
+    /** The most items one poll reads, so a count at this size means "at least". */
+    private const val NEEDS_CAP = 30
     private const val TASKS = "tasks"
     private const val TASKS_TOTAL = "tasks_total"
     private const val TASKS_EVERY_MS = 60_000L
@@ -57,12 +62,12 @@ object Widgets {
     private fun prefs(c: Context) = c.getSharedPreferences(FILE, Context.MODE_PRIVATE)
 
     /** The last thing HQ said about what needs the owner, kept so the widget has something to show while HQ is still starting. */
-    fun needsFacts(c: Context): NeedsFacts = prefs(c).let { NeedsFacts(it.getInt(COUNT, 0), it.getString(TITLE, null), it.getString(CHECKED, "") ?: "") }
+    fun needsFacts(c: Context): NeedsFacts = prefs(c).let { NeedsFacts(it.getInt(COUNT, 0), it.getString(TITLE, null), it.getString(CHECKED, "") ?: "", it.getLong(CHECKED_MS, 0L)) }
 
     /** Called by the hub's poll with how many items wait and the newest one's title. */
     @JvmStatic
     fun needs(c: Context, count: Int, newestTitle: String?) {
-        prefs(c).edit().putInt(COUNT, count).putString(TITLE, newestTitle).putString(CHECKED, LocalTime.now().format(CLOCK)).apply()
+        prefs(c).edit().putInt(COUNT, count).putString(TITLE, newestTitle).putString(CHECKED, LocalTime.now().format(CLOCK)).putLong(CHECKED_MS, System.currentTimeMillis()).apply()
         renderAll(c)
     }
 
@@ -72,7 +77,7 @@ object Widgets {
         val now = SystemClock.elapsedRealtime()
         if (now - tasksAt < TASKS_EVERY_MS || !present(c, TasksWidget::class.java)) return
         tasksAt = now
-        val client = HqServices.get(c.applicationContext).client
+        val client = HqServices.get(c.applicationContext).background
         // HQ may be starting or down: the widget keeps what it last showed.
         val rows = try { runBlocking { client.inProgress(MAX_ROWS) } } catch (e: example.hq.spike.data.HqUnavailable) { return }
         prefs(c).edit().putString(TASKS, rows.first.joinToString("\n") { "${it.id}\t${it.number}\t${it.title.replace('\n', ' ')}" }).putInt(TASKS_TOTAL, rows.second).apply()
@@ -112,17 +117,28 @@ object Widgets {
         val showTitles = CapturePrefs.showTitles(c)
         return RemoteViews(c.packageName, R.layout.widget_needs).apply {
             setOnClickPendingIntent(R.id.needs_root, AlertPoster.open(c, "hq://inbox"))
-            if (f.count > 0) {
-                setTextViewText(R.id.needs_label, "NEEDS YOU")
-                setViewVisibility(R.id.needs_count, View.VISIBLE)
-                setTextViewText(R.id.needs_count, f.count.toString())
-                setTextViewText(R.id.needs_hint, if (showTitles && !f.title.isNullOrBlank()) f.title else "Tap to review")
-                setTextViewText(R.id.needs_footer, "")
-            } else {
-                setTextViewText(R.id.needs_label, "QUIET")
-                setViewVisibility(R.id.needs_count, View.GONE)
-                setTextViewText(R.id.needs_hint, "Nothing needs you right now.")
-                setTextViewText(R.id.needs_footer, if (f.checkedAt.isBlank()) "" else "Checked ${f.checkedAt}")
+            val stale = f.checkedMs != 0L && System.currentTimeMillis() - f.checkedMs > STALE_MS
+            val footer = if (stale && f.checkedAt.isNotBlank()) "Last checked ${f.checkedAt}" else ""
+            when {
+                f.checkedMs == 0L -> {
+                    setTextViewText(R.id.needs_label, "HQ")
+                    setViewVisibility(R.id.needs_count, View.GONE)
+                    setTextViewText(R.id.needs_hint, "Waiting for HQ")
+                    setTextViewText(R.id.needs_footer, "")
+                }
+                f.count > 0 -> {
+                    setTextViewText(R.id.needs_label, "NEEDS YOU")
+                    setViewVisibility(R.id.needs_count, View.VISIBLE)
+                    setTextViewText(R.id.needs_count, if (f.count >= NEEDS_CAP) "$NEEDS_CAP+" else f.count.toString())
+                    setTextViewText(R.id.needs_hint, if (showTitles && !f.title.isNullOrBlank()) f.title else "Tap to review")
+                    setTextViewText(R.id.needs_footer, footer)
+                }
+                else -> {
+                    setTextViewText(R.id.needs_label, "QUIET")
+                    setViewVisibility(R.id.needs_count, View.GONE)
+                    setTextViewText(R.id.needs_hint, "Nothing needs you right now.")
+                    setTextViewText(R.id.needs_footer, if (f.checkedAt.isBlank()) "" else if (stale) footer else "Checked ${f.checkedAt}")
+                }
             }
         }
     }

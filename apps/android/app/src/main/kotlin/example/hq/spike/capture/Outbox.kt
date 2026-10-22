@@ -29,7 +29,14 @@ class Outbox(private val file: File) {
 
     fun all(): List<Queued> = synchronized(lock) { read() }
 
-    fun add(q: Queued) = synchronized(lock) { write((read().filter { it.id != q.id } + q).takeLast(MAX_ITEMS)) }
+    fun add(q: Queued) = synchronized(lock) { write(trimmed(read().filter { it.id != q.id } + q)) }
+
+    /** Over the limit, the oldest refused items go first; a thought still waiting to be sent is never dropped. */
+    private fun trimmed(items: List<Queued>): List<Queued> {
+        var over = items.size - MAX_ITEMS
+        if (over <= 0) return items
+        return items.filter { !(it.failure != null && over-- > 0) }
+    }
 
     fun remove(id: String) = synchronized(lock) { write(read().filter { it.id != id }) }
 
@@ -44,13 +51,21 @@ class Outbox(private val file: File) {
             val o = items.optJSONObject(i) ?: return@mapNotNull null
             Queued(o.getString("id"), o.getString("kind"), o.optString("title"), o.getJSONObject("payload"), o.optLong("created_at"), if (o.isNull("failure")) null else o.optString("failure"))
         }
-    } catch (e: IOException) { emptyList() } catch (e: org.json.JSONException) { emptyList() }
+    } catch (e: java.io.FileNotFoundException) { emptyList() } catch (e: IOException) { emptyList() } catch (e: org.json.JSONException) { setAside(); emptyList() }
+
+    /** A file that cannot be read is kept as it is, so the next save does not write over what was in it. */
+    private fun setAside() {
+        runCatching { Files.move(file.toPath(), File(file.path + ".bad").toPath(), StandardCopyOption.REPLACE_EXISTING) }
+    }
 
     private fun write(items: List<Queued>) {
         val arr = JSONArray()
         items.forEach { arr.put(JSONObject().put("id", it.id).put("kind", it.kind).put("title", it.title).put("payload", it.payload).put("created_at", it.createdAt).put("failure", it.failure ?: JSONObject.NULL)) }
         val tmp = File(file.path + ".tmp")
-        tmp.writeText(JSONObject().put("items", arr).toString())
+        java.io.FileOutputStream(tmp).use { out ->
+            out.write(JSONObject().put("items", arr).toString().toByteArray())
+            out.fd.sync()
+        }
         Files.move(tmp.toPath(), file.toPath(), StandardCopyOption.ATOMIC_MOVE, StandardCopyOption.REPLACE_EXISTING)
     }
 
@@ -69,20 +84,35 @@ sealed interface Sent {
     data object Down : Sent
     /** HQ answered and would not take it: the item stays, marked, until the owner decides. */
     data class Refused(val why: String) : Sent
+    /** Another send of this same item is under way. */
+    data object Busy : Sent
 }
 
 object OutboxSender {
     private val running = AtomicBoolean(false)
+    private val inFlight: MutableSet<String> = java.util.concurrent.ConcurrentHashMap.newKeySet()
 
-    suspend fun send(client: HqClient, q: Queued): Sent = try {
+    /** Claims an item for a send the caller makes itself ([sendHeld]), so a flush does not send it a second time. */
+    fun hold(id: String) { inFlight.add(id) }
+
+    /** One send of one item at a time: a second caller for the same item is told it is [Sent.Busy]. */
+    suspend fun send(client: HqClient, q: Queued): Sent {
+        if (!inFlight.add(q.id)) return Sent.Busy
+        return sendHeld(client, q)
+    }
+
+    /** The send for an item already claimed with [hold]; the claim ends with it. */
+    suspend fun sendHeld(client: HqClient, q: Queued): Sent = try {
         if (q.isNote) Sent.Done(client.createNote(q.payload.getString("folder"), q.payload.getString("title"), q.payload.optString("content")))
         else { client.createTask(q.payload); Sent.Done(null) }
     } catch (e: HqUnavailable) {
         when {
-            e.status == 0 || e.status >= HTTP_SERVER -> Sent.Down
+            e.status == 0 || e.status >= HTTP_SERVER || e.status in RETRY_LATER -> Sent.Down
             e.status == HTTP_NOT_FOUND -> Sent.Refused("HQ could not find where it goes")
             else -> Sent.Refused("HQ did not accept it")
         }
+    } finally {
+        inFlight.remove(q.id)
     }
 
     /** Sends what is waiting, oldest first, and stops at the first time HQ does not answer. Returns how many went. */
@@ -92,6 +122,7 @@ object OutboxSender {
             when (val r = send(client, q)) {
                 is Sent.Done -> { box.remove(q.id); sent++ }
                 Sent.Down -> return sent
+                Sent.Busy -> Unit
                 is Sent.Refused -> box.fail(q.id, r.why)
             }
         }
@@ -102,9 +133,13 @@ object OutboxSender {
     @JvmStatic
     fun flushNow(c: Context) {
         if (!running.compareAndSet(false, true)) return
-        try { runBlocking { flush(HqServices.get(c.applicationContext).client, Outbox.of(c)) } } finally { running.set(false) }
+        try { runBlocking { flush(HqServices.get(c.applicationContext).background, Outbox.of(c)) } }
+        catch (e: Exception) { android.util.Log.w("hq-outbox", "flush stopped: " + e.javaClass.simpleName) }
+        finally { running.set(false) }
     }
 
     private const val HTTP_SERVER = 500
     private const val HTTP_NOT_FOUND = 404
+    /** Unauthorised (a token HQ has not yet accepted), timed out and too many requests all pass, so they wait. */
+    private val RETRY_LATER = listOf(401, 408, 429)
 }

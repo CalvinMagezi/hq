@@ -266,12 +266,22 @@ object SettingsWords {
     const val KEY_REFUSED = "That key didn't work. Check that you copied all of it."
     const val KEY_NO_ANSWER = "HQ did not reply. Try again."
     const val KEY_ENV = "This key is set outside the app. Change it where it was set."
+    const val KEY_OTHER = "HQ could not save the key. Try again later."
     const val KEY_NOTE = "HQ keeps the key on this phone and never shows it again."
 
     /** What the sheet says when a key was not saved: the key was refused, the environment owns it, or HQ did not answer (not blamed on the key). */
-    fun keyFailure(status: Int): String = when (status) { 0 -> KEY_NO_ANSWER; 409 -> KEY_ENV; else -> KEY_REFUSED }
+    fun keyFailure(status: Int): String = when {
+        status == 0 || status >= HTTP_SERVER -> KEY_NO_ANSWER
+        status == HTTP_CONFLICT -> KEY_ENV
+        status == HTTP_BAD_KEY -> KEY_REFUSED
+        else -> KEY_OTHER
+    }
 
-    fun keySaved(name: String) = "$name key saved. Your next message uses it."
+    private const val HTTP_SERVER = 500
+    private const val HTTP_CONFLICT = 409
+    private const val HTTP_BAD_KEY = 400
+
+    fun keySaved(name: String) = "$name key saved."
 
     /** Where to find a provider's key, as the web app points. */
     fun keyHelpUrl(id: String): String? = when (id) {

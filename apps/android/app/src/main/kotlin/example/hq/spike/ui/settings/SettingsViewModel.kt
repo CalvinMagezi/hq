@@ -86,6 +86,9 @@ data class SettingsUi(
     val askReplace: String? = null,
 ) {
     val page: SettingsPage get() = stack.lastOrNull() ?: SettingsPage.Home
+
+    /** A key is being checked or a bot token saved: Back waits, so it does not close the page that work belongs to. */
+    fun busyBehind(): Boolean = keySheet?.checking == true || setup?.saving == true
 }
 
 class SettingsActions(
@@ -142,7 +145,7 @@ class SettingsViewModel(app: Application) : AndroidViewModel(app) {
 
     val actions = SettingsActions(
         onOpen = ::open,
-        onBack = { _state.update { if (it.stack.isEmpty()) it.copy(open = false) else it.copy(stack = it.stack.dropLast(1)) } },
+        onBack = { _state.update { if (it.busyBehind()) it else if (it.stack.isEmpty()) it.copy(open = false) else it.copy(stack = it.stack.dropLast(1)) } },
         onPage = { p -> _state.update { it.copy(stack = it.stack + p) } },
         onTab = { t -> _state.update { it.copy(safetyTab = t) } },
         onPhoneRow = ::phoneRow,
@@ -324,7 +327,7 @@ class SettingsViewModel(app: Application) : AndroidViewModel(app) {
             } catch (e: HqUnavailable) {
                 setup.copy(checking = false, error = SettingsWords.chatAppFailure(e.status, null))
             }
-            _state.update { it.copy(setup = next) }
+            _state.update { if (it.setup == null) it else it.copy(setup = next) }
         }
     }
 
@@ -345,7 +348,8 @@ class SettingsViewModel(app: Application) : AndroidViewModel(app) {
             refreshNow()
             val linked = _state.value.snap.chatApps.let { SettingsWords.appCard(it, setup.platform, SettingsWords.appName(setup.platform)).owner == "Linked" }
             _state.update { it.copy(restarting = false, setup = it.setup?.copy(saving = false, saved = true), line = SettingsWords.SAVED_RESTARTED) }
-            if (!linked) pairApp(setup.platform, false, replacePage = true) else _state.update { it.copy(stack = it.stack.dropLast(1), setup = null) }
+            if (!linked) pairApp(setup.platform, false, replacePage = true)
+            else _state.update { if (it.stack.lastOrNull() == SettingsPage.SetupApp) it.copy(stack = it.stack.dropLast(1), setup = null) else it.copy(setup = null) }
         }
     }
 
@@ -356,7 +360,11 @@ class SettingsViewModel(app: Application) : AndroidViewModel(app) {
             try {
                 val r = client.postJson("/api/chat-apps/$platform/pair", JSONObject().put("replace", replace))
                 val pair = PairState(platform, r.optString("code"), r.optString("command"), r.takeIf { o -> o.has("deep_link") && !o.isNull("deep_link") }?.optString("deep_link"), r.optLong("expires_at"))
-                _state.update { it.copy(pair = pair, stack = (if (replacePage) it.stack.dropLast(1) else it.stack) + SettingsPage.PairApp) }
+                _state.update {
+                    val top = it.stack.lastOrNull()
+                    val swaps = top == SettingsPage.PairApp || replacePage && top == SettingsPage.SetupApp
+                    it.copy(pair = pair, stack = (if (swaps) it.stack.dropLast(1) else it.stack) + SettingsPage.PairApp)
+                }
             } catch (e: HqUnavailable) {
                 _state.update { it.copy(line = SettingsWords.chatAppFailure(e.status, null)) }
             }
@@ -366,6 +374,7 @@ class SettingsViewModel(app: Application) : AndroidViewModel(app) {
     /** While a code waits: reads the chat apps again, and leaves for Messaging apps once the account is linked. */
     private suspend fun pairPoll() {
         val pair = _state.value.pair ?: return
+        if (pair.expiresAt <= java.time.Instant.now().epochSecond) return
         val body = try { client.json("/api/chat-apps") } catch (e: HqUnavailable) { return }
         val linked = SettingsWords.appCard(body, pair.platform, SettingsWords.appName(pair.platform)).owner == "Linked"
         _state.update { s ->

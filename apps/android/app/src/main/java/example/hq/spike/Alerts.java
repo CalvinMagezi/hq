@@ -70,9 +70,14 @@ final class Alerts {
     private static void poll(Context c) throws IOException, JSONException {
         Map<String, JSONObject> items = fetch(c);
         String newest = null;
-        for (JSONObject item : items.values()) { newest = item.optString("title", ""); break; }
+        int needing = 0;
+        for (JSONObject item : items.values()) {
+            if (!AlertPoster.needsYou(item)) continue;
+            if (newest == null) newest = item.optString("title", "");
+            needing++;
+        }
         try {
-            example.hq.spike.capture.Widgets.needs(c, items.size(), newest);
+            example.hq.spike.capture.Widgets.needs(c, needing, newest);
         } catch (Exception e) {
             Log.w(HubService.TAG, "widget update failed: " + e.getClass().getSimpleName());
         }
