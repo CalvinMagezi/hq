@@ -29,7 +29,7 @@ import androidx.compose.ui.text.withLink
 import androidx.compose.ui.text.withStyle
 import example.hq.spike.ui.theme.Mts
 
-private val INLINE = Regex("\\*\\*(.+?)\\*\\*|`([^`]+)`|\\[\\[([^\\]]+)]]|\\[([^\\]]+)]\\(([^)]+)\\)")
+private val INLINE = Regex("\\*\\*(.+?)\\*\\*|`{1,2}([^`]+)`{1,2}|\\[\\[([^\\]]+)]]|\\[([^\\]]+)]\\(([^)]+)\\)")
 private val LinkStyle = TextLinkStyles(SpanStyle(color = Mts.BrandBlue, fontWeight = FontWeight.Bold, textDecoration = TextDecoration.Underline))
 
 /**

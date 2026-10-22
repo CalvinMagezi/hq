@@ -184,7 +184,7 @@ fun TaskPage(d: TaskDetail, today: LocalDate, actions: TasksActions) {
             val ready = t.status == "ready_for_review"
             if (t.description.isNotBlank()) {
                 if (ready) Label("What was done")
-                Text(t.description, style = HqType.Body, color = Mts.Ink)
+                Text(remember(t.description) { TaskLinks.annotated(t.description) }, style = HqType.Body, color = Mts.Ink)
             }
             d.error?.let { Text(it, style = HqType.BodySm, color = Mts.Amber) }
             if (ready) MoreAbout(open = more.value, onToggle = { more.value = !more.value }) { Details(d, today, actions) } else Details(d, today, actions)
