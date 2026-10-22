@@ -156,6 +156,25 @@ public class HubService extends Service {
                 .setContentText(text).setSmallIcon(statIcon(this)).build();
     }
 
+    private static final String PREFS = "hub";
+    private static final String LAST_START = "last_start";
+    private static final String LAST_EXIT = "last_exit";
+
+    private android.content.SharedPreferences hubPrefs() {
+        return getSharedPreferences(PREFS, MODE_PRIVATE);
+    }
+
+    /** When hq was last launched (epoch millis), or 0 if it never was; what the "HQ did not start" screen reports. */
+    public static long lastStart(Context c) {
+        return c.getSharedPreferences(PREFS, MODE_PRIVATE).getLong(LAST_START, 0);
+    }
+
+    /** The exit code of the hq run that ended last, or null while it has not ended. */
+    public static Integer lastExit(Context c) {
+        android.content.SharedPreferences p = c.getSharedPreferences(PREFS, MODE_PRIVATE);
+        return p.contains(LAST_EXIT) ? p.getInt(LAST_EXIT, 0) : null;
+    }
+
     /** Restarts a child with exponential backoff; a null command means "not configured", so it is skipped. */
     private void supervise(int gen, String name, Supplier<ProcessBuilder> command, boolean isHq) {
         long backoff = BACKOFF_MIN_MS;
@@ -174,9 +193,11 @@ public class HubService extends Service {
                 Process p = launch(gen, pb, isHq);
                 if (p == null) return;
                 Log.i(TAG, name + " started");
+                if (isHq) hubPrefs().edit().putLong(LAST_START, System.currentTimeMillis()).remove(LAST_EXIT).apply();
                 int rc = p.waitFor();
                 ranMs = System.currentTimeMillis() - t0;
                 Log.w(TAG, name + " exited rc=" + rc + " after " + ranMs / 1000 + " s");
+                if (isHq) hubPrefs().edit().putInt(LAST_EXIT, rc).apply();
             } catch (InterruptedException e) {
                 return;
             } catch (Exception | LinkageError e) {

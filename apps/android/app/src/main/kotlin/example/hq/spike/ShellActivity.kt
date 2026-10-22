@@ -61,6 +61,14 @@ import example.hq.spike.ui.chat.chatFixture
 import example.hq.spike.ui.shell.HqShell
 import example.hq.spike.ui.shell.LinkTarget
 import example.hq.spike.ui.shell.Links
+import androidx.compose.runtime.remember
+import example.hq.spike.ui.settings.PhoneFix
+import example.hq.spike.ui.settings.PhoneIntents
+import example.hq.spike.ui.startup.DidNotStartScreen
+import example.hq.spike.ui.startup.StartingScreen
+import example.hq.spike.ui.startup.StartupWords
+import example.hq.spike.ui.startup.Startup
+import example.hq.spike.ui.startup.FirstLaunch
 import example.hq.spike.ui.usage.ChipTarget
 import example.hq.spike.ui.usage.UsageViewModel
 import example.hq.spike.ui.usage.balanceFixture
@@ -143,6 +151,40 @@ class ShellActivity : ComponentActivity() {
         chat.actions.onCloseChats()
     }
 
+    private fun openCapture() {
+        startActivity(Intent(this, example.hq.spike.capture.CaptureActivity::class.java))
+    }
+
+    /** "Try again": make sure the service that runs hq is up and start counting the wait from now. */
+    private fun tryStartAgain() {
+        HqServices.get(applicationContext).restartWait()
+        HqServices.ensureHubRunning(this)
+    }
+
+    private fun openBatterySettings() {
+        // Samsung's own page first, then the battery optimisation list and app info: what stops an app is the optimisation, not Battery Saver.
+        PhoneIntents.startFirst(this, PhoneIntents.tries(this, PhoneFix.SleepingApps).take(1) + PhoneIntents.tries(this, PhoneFix.Battery))
+    }
+
+    /** Puts the two lines on the screen, the build, the mode and the end of hq's log on the clipboard, with anything token-like blanked. */
+    private fun copyStartDetails() {
+        val active = (java.io.File(filesDir, "mode").takeIf { it.length() <= MODE_FILE_MAX }?.readText()?.trim() ?: "") == "active"
+        val log = StartupWords.cleanLog(tailOf(java.io.File(filesDir, "hq.log")))
+        val build = packageManager.getPackageInfo(packageName, 0).let { "${it.versionName.orEmpty().ifBlank { "hub" }} \u00b7 build ${if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.P) it.longVersionCode else it.versionCode.toLong()}" }
+        val text = StartupWords.details(build, active, StartupWords.failedLines(HubService.lastStart(this), HubService.lastExit(this)), log)
+        (getSystemService(CLIPBOARD_SERVICE) as android.content.ClipboardManager).setPrimaryClip(android.content.ClipData.newPlainText("HQ details", text))
+        android.widget.Toast.makeText(this, "Copied", android.widget.Toast.LENGTH_SHORT).show()
+    }
+
+    private fun tailOf(f: java.io.File): List<String> = try {
+        java.io.RandomAccessFile(f, "r").use { r ->
+            val from = (r.length() - TAIL_BYTES).coerceAtLeast(0)
+            r.seek(from)
+            val bytes = ByteArray((r.length() - from).toInt()).also { r.readFully(it) }
+            String(bytes, Charsets.UTF_8).lines().drop(if (from > 0) 1 else 0).filter { it.isNotBlank() }
+        }
+    } catch (e: java.io.IOException) { emptyList() }
+
     private fun placeOf(intent: Intent): Place? = linkOf(intent)?.place
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -194,8 +236,13 @@ class ShellActivity : ComponentActivity() {
                 offlineSince != null && now - offlineSince >= OFFLINE_GRACE_MS -> HqStatus.Saved(ChatTime.short(offlineSince, now))
                 else -> HqStatus.Live
             }
+            val startupFixture = when (fixtureName) { "x-starting" -> Startup.Starting; "x-failed" -> Startup.DidNotStart; else -> null }
+            val firstDone = remember(status) { FirstLaunch.isDone(this@ShellActivity) }
+            val startup = startupFixture ?: if (fixture == null) StartupWords.decide(status, firstDone) else Startup.None
             HqTheme {
-                HqShell(
+                if (startup == Startup.Starting) StartingScreen((status as? HqStatus.Starting)?.seconds ?: 12) { openCapture() }
+                else if (startup == Startup.DidNotStart) DidNotStartScreen(StartupWords.failedLines(HubService.lastStart(this@ShellActivity), HubService.lastExit(this@ShellActivity)), ::tryStartAgain, ::openBatterySettings, ::copyStartDetails)
+                else HqShell(
                     startAt = start, inboxBadge = if (badge > 0) badge else inboxState.shownNeeds.size, status = shown,
                     onSearch = { notes.actions.onOpenSearch() }, onSettings = settings.actions.onOpen,
                     balance = if (shown is HqStatus.Starting) null else balance,
@@ -205,7 +252,7 @@ class ShellActivity : ComponentActivity() {
                     overlay = { ShellOverlays(chatState, notesState, inboxState, tasksState, helpersState); SettingsHost(settingsState, settings.actions) },
                 ) { place ->
                     when (place) {
-                        Place.Chat -> ChatScreen(chatState, chat.actions)
+                        Place.Chat -> ChatScreen(chatState, chat.actions, starting = shown is HqStatus.Starting)
                         Place.Notes -> NotesPlace(notesState)
                         Place.Inbox -> InboxPlace(inboxState)
                         Place.Tasks -> TasksPlace(tasksState)
@@ -288,6 +335,8 @@ class ShellActivity : ComponentActivity() {
     private companion object {
         const val STATUS_TICK_MS = 5_000L
         const val OFFLINE_GRACE_MS = 5_000L
+        const val MODE_FILE_MAX = 64L
+        const val TAIL_BYTES = 16_384L
         const val UNSAVED_WORK = "Finish or discard what you are writing first"
     }
 }

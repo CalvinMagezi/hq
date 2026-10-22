@@ -476,15 +476,7 @@ class SettingsViewModel(app: Application) : AndroidViewModel(app) {
     /** Opens the Android page that changes a setting the owner was told about; a page this phone does not have is tried past, never a crash. */
     private fun fix(what: PhoneFix) {
         keepCache = null
-        val c = ctx()
-        val details = Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.parse("package:${c.packageName}"))
-        val tries = when (what) {
-            PhoneFix.Battery -> if (_state.value.keep.backgroundRestricted) listOf(details) else listOf(Intent(Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS), details)
-            PhoneFix.AutoRevoke -> listOf(Intent(Intent.ACTION_AUTO_REVOKE_PERMISSIONS, Uri.parse("package:${c.packageName}")), details)
-            PhoneFix.Notifications -> listOf(Intent(Settings.ACTION_APP_NOTIFICATION_SETTINGS).putExtra(Settings.EXTRA_APP_PACKAGE, c.packageName), details)
-            PhoneFix.SleepingApps -> listOf(Intent().setClassName(SAMSUNG_BATTERY_PACKAGE, SAMSUNG_BATTERY_PAGE), Intent(Settings.ACTION_BATTERY_SAVER_SETTINGS), details)
-        }
-        startFirst(tries)
+        startFirst(PhoneIntents.tries(ctx(), what, _state.value.keep.backgroundRestricted))
     }
 
     private fun openChannel(id: String) {
@@ -493,10 +485,7 @@ class SettingsViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     private fun startFirst(tries: List<Intent>) {
-        for (i in tries) {
-            try { ctx().startActivity(i.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)); return } catch (e: android.content.ActivityNotFoundException) { continue } catch (e: SecurityException) { continue }
-        }
-        _state.update { it.copy(line = "Android could not open that screen.") }
+        if (!PhoneIntents.startFirst(ctx(), tries)) _state.update { it.copy(line = "Android could not open that screen.") }
     }
 
     private fun phoneRow(key: String) {
