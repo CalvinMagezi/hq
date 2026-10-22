@@ -228,7 +228,7 @@ function renderPending(list: Pending[]) {
       const outcome = await invoke<Submitted>('pairing_submit', { id: p.id, typed: input.value })
       input.value = ''
       if (outcome.result === 'wrong_digits') toast(`Not the right digits. ${outcome.tries_left} tries left.`)
-      else if (outcome.result === 'accepted') toast('Paired')
+      else if (outcome.result === 'accepted') toast('Accepted. It shows in the list once the other device finishes.')
       else if (outcome.result === 'declined') toast('Too many wrong tries: the device was declined.')
       else if (outcome.result === 'not_digits') toast('Type the six digits.')
       else toast('That device is no longer waiting.')

@@ -57,7 +57,7 @@ refused.
 | `device_name` | the host name | What this Mac is called to the devices it pairs with |
 | `hq_path` | unset | The `hq` program to run. Unset: next to the app, `~/bin`, `/usr/local/bin`, then `PATH` |
 
-Port, relay and name changes apply the next time the app opens. The host's own output goes to
+Port, relay, name and `hq_path` changes apply the next time the app opens. The host's own output goes to
 `~/.hq/desktop/host.log` (owner-only). The app reads the same `~/.hq/config.yaml` as `hq`.
 
 ## Connect Claude

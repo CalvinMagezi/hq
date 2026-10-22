@@ -71,6 +71,7 @@ async fn rig() -> Rig {
     let seen = Seen::default();
     let app = Router::new()
         .route("/ws", get(socket))
+        .route("/api/socket", get(socket))
         .route("/health", get(|| async { "ok" }))
         .fallback(any(echo_request))
         .with_state(seen.clone());
@@ -316,10 +317,16 @@ async fn the_chat_socket_passes_through_and_other_upgrades_do_not() {
     assert_eq!(got, M::text("echo:hi"));
     ws.close(None).await.unwrap();
 
-    let elsewhere = format!("ws://127.0.0.1:{}/mcp", rig.port())
-        .into_client_request()
-        .unwrap();
-    assert!(tokio_tungstenite::connect_async(elsewhere).await.is_err());
+    // A socket HQ would accept on another path is not carried, and the machine paths are not either.
+    for path in ["/api/socket", "/mcp"] {
+        let elsewhere = format!("ws://127.0.0.1:{}{path}", rig.port())
+            .into_client_request()
+            .unwrap();
+        assert!(
+            tokio_tungstenite::connect_async(elsewhere).await.is_err(),
+            "{path}"
+        );
+    }
     let mut foreign = format!("ws://127.0.0.1:{}/ws", rig.port())
         .into_client_request()
         .unwrap();

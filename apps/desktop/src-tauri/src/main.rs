@@ -23,6 +23,19 @@ pub struct Startup {
     pub warning: Option<String>,
 }
 
+/// Tells the person why the app cannot open. A double-clicked app has no terminal to print to.
+fn fatal(message: &str) -> ! {
+    eprintln!("{message}");
+    let escaped = message.replace('\\', "\\\\").replace('"', "\\\"");
+    let _ = std::process::Command::new("osascript")
+        .args([
+            "-e",
+            &format!("display alert \"HQ could not start\" message \"{escaped}\""),
+        ])
+        .status();
+    std::process::exit(1);
+}
+
 fn open_desktop() -> (Arc<Desktop>, Startup) {
     let (config, warning) = match HqConfig::load() {
         Ok(config) => (config, None),
@@ -33,13 +46,13 @@ fn open_desktop() -> (Arc<Desktop>, Startup) {
             )),
         ),
     };
-    let init = DesktopInit::from_environment(config).expect("this Mac has a home folder");
+    let init = match DesktopInit::from_environment(config) {
+        Ok(init) => init,
+        Err(e) => fatal(&format!("{e:#}")),
+    };
     match Desktop::open(init) {
         Ok(desktop) => (Arc::new(desktop), Startup { warning }),
-        Err(e) => {
-            eprintln!("could not open HQ: {e:#}");
-            std::process::exit(1);
-        }
+        Err(e) => fatal(&format!("{e:#}")),
     }
 }
 

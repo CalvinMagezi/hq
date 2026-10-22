@@ -148,6 +148,38 @@ window uses, and the address the consent page is served on.
 
 ## 8. Guard checks
 
-Each guard below was removed by hand and the named tests run; every removal made the tests fail.
+Each guard below was broken one at a time and `cargo test -p hq-desktop` run; every break made at least the tests named fail. `python3 scripts/check-desktop-guards.py` repeats the run (about twenty minutes, so a pre-release check rather than part of CI).
 
-GUARD_TABLE_PLACEHOLDER
+| Guard removed or broken | Tests that failed |
+|---|---|
+| Digits compare forced true | `a_wrong_try_then_the_right_digits_still_pairs`, `only_equal_digits_match`, `wrong_digits_decline_after_the_allowed_tries_and_pair_nobody` |
+| Revoke through the database instead of the running bridge | `a_device_pairs_when_the_digits_are_typed_connects_and_is_cut_by_a_revoke` |
+| Expected digits written into the request view | `the_screen_never_gets_the_digits_it_has_to_compare` |
+| Unlimited digit tries | `wrong_digits_decline_after_the_allowed_tries_and_pair_nobody` |
+| Proxy Host check removed | `a_request_for_another_host_never_reaches_hq`, `the_proxys_own_names_pass_and_every_other_host_does_not` |
+| Non-loopback bind allowed | `a_second_proxy_on_a_taken_port_says_so_and_a_non_loopback_one_never_binds`, `only_loopback_ends_are_accepted` |
+| Non-loopback upstream allowed | `only_loopback_ends_are_accepted` |
+| Absolute-form and CONNECT allowed | `it_does_not_fetch_other_urls_for_a_client`, `it_never_acts_as_a_forward_proxy` |
+| Origin check removed | `another_sites_origin_is_refused_before_hq_sees_it`, `a_foreign_or_null_origin_is_refused_and_the_proxys_own_passes`, `the_chat_socket_passes_through_and_other_upgrades_do_not` |
+| Cross-site fetch allowed | `a_cross_site_fetch_is_refused_but_a_cross_site_navigation_is_not` |
+| Machine endpoints served | `the_machine_endpoints_stay_off_this_door`, `the_machine_endpoints_are_not_served_here` |
+| Proxy adds a credential | `a_request_is_forwarded_with_its_own_host_and_credentials_and_none_added` |
+| Any websocket path carried | `the_chat_socket_passes_through_and_other_upgrades_do_not` |
+| Second CSP not added | `responses_gain_a_second_policy_and_lose_cross_origin_grants` |
+| CORS grants kept | `responses_gain_a_second_policy_and_lose_cross_origin_grants` |
+| Web window origin compared as a prefix | `the_web_window_stays_on_the_proxy_origin` |
+| Stopping a host the app did not start is allowed | `a_host_this_app_did_not_start_is_reported_and_never_stopped` |
+| Starting over a host that is already running is allowed | `a_host_this_app_did_not_start_is_reported_and_never_stopped` |
+| Stop signals the child, not its group | `start_runs_the_child_and_stop_ends_its_whole_group` |
+| Unknown settings keys accepted | `unknown_keys_are_refused` |
+| Host starts at launch whatever the setting says | `opening_the_app_starts_nothing_and_saves_nothing_it_was_not_told_to` |
+| CSP allows inline scripts | `the_csp_is_strict_and_names_no_remote_origin` |
+| CSP allows any https connection | `the_csp_is_strict_and_names_no_remote_origin` |
+| Global Tauri object on | `the_web_view_is_locked_down` |
+| A remote URL granted app commands | `only_the_control_window_has_a_capability_and_it_grants_exactly_the_app_commands` |
+| A command granted that is not in the manifest | `only_the_control_window_has_a_capability_and_it_grants_exactly_the_app_commands` |
+| An updater plugin added | `the_shell_has_no_plugin_and_so_no_login_item_shell_access_or_updater` |
+| InnerHTML in the control window script | `the_control_window_loads_nothing_from_outside` |
+| A window without a navigation guard | `both_windows_are_made_in_code_with_a_navigation_guard_and_no_new_windows` |
+
+29 guards, 29 caught. The script edits the source, runs the tests and restores the file; it covers the proxy, the host, the pairing controller, settings, the navigation allow-lists and the shell's configuration files.
