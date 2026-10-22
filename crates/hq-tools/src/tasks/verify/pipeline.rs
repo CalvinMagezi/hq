@@ -1106,7 +1106,7 @@ pub struct Released {
 
 /// Completes the tier 2 tasks whose veto window has closed, after checking that the pull requests
 /// and notes the verdict was about are still the ones it was about. A task that changed meanwhile
-/// is sent back with a verdict that says so, never completed on a stale one. A task the owner
+/// is sent back with a verdict that says so, and not completed on a stale one. A task the owner
 /// already completed, vetoed or that was submitted again is left alone.
 pub async fn release_due_holds(env: &Env<'_>) -> Result<Released> {
     let mut out = Released::default();

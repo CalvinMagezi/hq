@@ -1852,7 +1852,7 @@ mod sweeps {
         assert_eq!(
             status_of(&w.db, "tk-2"),
             t::STATUS_TO_DO,
-            "no artifact is never completed"
+            "a task with no artifact is not completed"
         );
         assert_eq!(status_of(&w.db, "tk-3"), t::STATUS_TO_DO);
         let events = w.db.with_conn(|c| t::list_task_events(c, "tk-1")).unwrap();
@@ -2068,7 +2068,7 @@ mod sweeps {
         assert_eq!(
             status_of(&w.db, "tk-1"),
             t::STATUS_READY_FOR_REVIEW,
-            "never completed on a stale verdict"
+            "not completed on a stale verdict"
         );
         assert_eq!(
             status_of(&w.db, "tk-2"),

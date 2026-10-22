@@ -51,13 +51,13 @@ advances a few tasks a minute, so it survives a restart and no request waits on 
 |---|---|---|
 | Passed | Evidence met the tier's bar | Completes it, with the evidence level recorded |
 | Failed | A criterion is unmet | Back to `to_do` with the findings as the checkpoint |
-| Nothing to check | No pull request, commit or note HQ can find | Back to `to_do` with what to link; never completed |
+| Nothing to check | No pull request, commit or note HQ can find | Back to `to_do` with what to link; not completed |
 | Could not decide | Checks running, a reviewer unsure, budget spent | Left where it is and retried; shown after the retries |
 | Need you | Tier 2 (opens its veto window), held passes, three failures | Stays in your list |
 
 4. **Apply.** One confirmation applies the groups. Above `sweep_confirm_over` tasks (25) apply always needs your
    explicit confirmation, whatever the mode. Each task and the pull request or note behind its verdict is read again
-   first: work that changed since is left alone and reported, never completed on an old verdict. Every change carries the
+   first: work that changed since is left alone and reported, not completed on an old verdict. Every change carries the
    sweep id (the actor is `verify:sweep-<id>`).
 
 **Undo** puts back every task the sweep moved that has not changed since, and reports the ones it left alone. A
