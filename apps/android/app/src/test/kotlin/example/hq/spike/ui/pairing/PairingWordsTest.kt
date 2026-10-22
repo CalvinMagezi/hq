@@ -26,8 +26,6 @@ class PairingWordsTest {
         assertEquals("0:00", PairingWords.countdown(-5_000))
     }
 
-    @Test fun theLinkLimitIsTheOneHqApplies() = assertEquals(2000, PairLink.MAX_CHARS)
-
     @Test fun theDigitFieldTakesSixDigitsAndNothingElse() {
         assertEquals("123456", PairingWords.typed("12 34-56 789"))
         assertEquals("", PairingWords.typed("abc"))

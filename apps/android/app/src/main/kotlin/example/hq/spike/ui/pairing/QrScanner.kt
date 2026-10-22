@@ -41,6 +41,8 @@ fun QrScanner(modifier: Modifier = Modifier, onText: (String) -> Unit) {
         onDispose {
             binding.release()
             executor.shutdown()
+            // A frame decoded just before the screen went away must not start a pairing after it.
+            main.removeCallbacksAndMessages(null)
         }
     }
     AndroidView(factory = { preview }, modifier = modifier)

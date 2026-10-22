@@ -52,11 +52,11 @@ const KEEP_INTERVAL: Duration = Duration::from_secs(1);
 /// and not as a loss.
 const KEEP_ECHO_LIMIT: Duration = Duration::from_secs(40);
 const SLOW_ECHO: Duration = Duration::from_millis(1500);
-/// How long a fresh probe may take after a network change before the connection is given up.
-const RECORD_CHECKS: usize = 30;
-const RECORD_CHECK_GAP: Duration = Duration::from_millis(100);
+/// How long shutdown waits for the last events to be written.
 const SHUTDOWN_GRACE: Duration = Duration::from_secs(3);
+/// The most failures in a row that lengthen the pause between `keep` attempts.
 const KEEP_MAX_BACKOFF: u32 = 30;
+/// How long a fresh probe may take after a network change before the connection is given up.
 const PROBE_LIMIT: Duration = Duration::from_millis(1500);
 
 #[derive(Deserialize)]
@@ -312,7 +312,9 @@ impl Control {
         mut digits: mpsc::Receiver<String>,
         mut stop: watch::Receiver<bool>,
     ) {
-        let mut paired = false;
+        // A device whose digits were accepted: whether it is on the list is looked at once the exchange
+        // has ended (the host records it before it finishes), not by asking while it is being written.
+        let mut accepted: Option<String> = None;
         loop {
             let request = tokio::select! {
                 request = open.requests.recv() => request,
@@ -320,8 +322,8 @@ impl Control {
             };
             let Some(request) = request else { break };
             while digits.try_recv().is_ok() {}
-            if self.answer(request, &mut digits, &mut stop).await {
-                paired = true;
+            if let Some(joiner) = self.answer(request, &mut digits, &mut stop).await {
+                accepted = Some(joiner);
             }
             if *stop.borrow() {
                 break;
@@ -338,7 +340,15 @@ impl Control {
                 slots.ticket = None;
             }
         }
+        // Closing waits for the exchange to end, so the device is on the list by now if it is going to be.
         open.cancel().await;
+        let mut paired = false;
+        if let Some(joiner) = accepted {
+            paired = self.on_list(&joiner).await;
+            let result = if paired { "paired" } else { "too_late" };
+            self.emit(json!({"event": "decision", "joiner": joiner, "result": result}))
+                .await;
+        }
         self.emit(json!({"event": "ticket_closed", "paired": paired}))
             .await;
     }
@@ -349,7 +359,7 @@ impl Control {
         request: PairRequest,
         digits: &mut mpsc::Receiver<String>,
         stop: &mut watch::Receiver<bool>,
-    ) -> bool {
+    ) -> Option<String> {
         let joiner = request.joiner.to_string();
         self.emit(json!({
             "event": "request", "joiner": joiner, "name": printable(&request.name, SHOWN_CHARS),
@@ -368,34 +378,27 @@ impl Control {
         let result = match typed {
             None => "too_late",
             Some(_) => match decide.send(accept) {
-                Ok(()) if accept && self.recorded(&joiner).await => "paired",
-                Ok(()) if accept => "too_late",
+                // Delivered. Whether it was recorded is for the end of the ticket to say.
+                Ok(()) if accept => return Some(joiner),
                 Ok(()) => "declined",
                 Err(_) => "too_late",
             },
         };
         self.emit(json!({"event": "decision", "joiner": joiner, "result": result}))
             .await;
-        result == "paired"
+        None
     }
 
-    /// Whether the device ended up on the paired list: the answer reaching it is not the same thing, since
-    /// it can leave in the instant the host records it.
-    async fn recorded(&self, joiner: &str) -> bool {
-        for _ in 0..RECORD_CHECKS {
-            let db = self.bridge.db().clone();
-            let key = joiner.to_string();
-            let found = tokio::task::spawn_blocking(move || peers::is_paired(&db, &key))
-                .await
-                .ok()
-                .and_then(Result::ok)
-                .unwrap_or(false);
-            if found {
-                return true;
-            }
-            sleep(RECORD_CHECK_GAP).await;
-        }
-        false
+    /// Whether the device is on the paired list: the answer reaching it is not the same thing, since it
+    /// can leave in the instant the host records it.
+    async fn on_list(&self, joiner: &str) -> bool {
+        let db = self.bridge.db().clone();
+        let key = joiner.to_string();
+        tokio::task::spawn_blocking(move || peers::is_paired(&db, &key))
+            .await
+            .ok()
+            .and_then(Result::ok)
+            .unwrap_or(false)
     }
 
     async fn digits(&self, value: String) {
@@ -604,13 +607,6 @@ impl Control {
                 None => match self.dial(&id, DIAL_WINDOW).await {
                     Ok(c) => {
                         keep_trace(begun, &format!("connected path={}", path_kind(&c)));
-                        if failures > 0 {
-                            self.emit(json!({
-                                "event": "keep", "id": id, "state": "up",
-                                "down_ms": last_ok.elapsed().as_millis() as u64, "path": path_kind(&c),
-                            }))
-                            .await;
-                        }
                         c
                     }
                     Err(e) => {
@@ -627,7 +623,8 @@ impl Control {
                         begun,
                         &format!("rtt={}ms path={}", rtt.as_millis(), path_kind(&c)),
                     );
-                    if rtt >= SLOW_ECHO {
+                    // Back up means an echo came back, not just a handshake (a device that revoked us completes one).
+                    if rtt >= SLOW_ECHO || failures > 0 {
                         self.emit(json!({
                             "event": "keep", "id": id, "state": "up", "rtt_ms": rtt.as_millis() as u64,
                             "down_ms": t.duration_since(last_ok).as_millis() as u64, "path": path_kind(&c),
@@ -650,7 +647,10 @@ impl Control {
             }
             // A device that revoked us still lets the handshake through and then closes the stream:
             // each failure in a row waits a little longer, so that does not become a loop.
-            sleep(KEEP_INTERVAL.saturating_mul(failures.clamp(1, KEEP_MAX_BACKOFF))).await;
+            tokio::select! {
+                _ = sleep(KEEP_INTERVAL.saturating_mul(failures.clamp(1, KEEP_MAX_BACKOFF))) => {}
+                _ = changes.changed() => {}
+            }
         }
     }
 }

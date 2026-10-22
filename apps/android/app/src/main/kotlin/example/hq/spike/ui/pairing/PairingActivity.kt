@@ -32,7 +32,7 @@ class PairingActivity : ComponentActivity() {
 
     override fun onStop() {
         super.onStop()
-        vm.dropQueuedJoin()
+        vm.onHidden()
     }
 
     override fun onNewIntent(intent: Intent) {

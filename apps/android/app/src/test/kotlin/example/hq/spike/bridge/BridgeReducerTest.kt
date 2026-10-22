@@ -81,4 +81,11 @@ class BridgeReducerTest {
         assertEquals(JoinState.Failed(BridgeReducer.BRIDGE_STOPPED), s.join)
         assertEquals(JoinState.Done("aa", "A"), BridgeReducer.stopped(fold(BridgeEvent.Joined("aa", "A"))).join)
     }
+
+    @Test fun theEndOfATicketHasTheLastWordOnWhetherADevicePaired() {
+        // "Too late" was said, and then the device turned out to be on the list.
+        val s = fold(BridgeEvent.Decision("j", "too_late"), BridgeEvent.TicketClosed(true))
+        assertEquals(TicketEnd.Paired, s.ticketEnd)
+        assertEquals(TicketEnd.TooLate, fold(BridgeEvent.Decision("j", "too_late"), BridgeEvent.TicketClosed(false)).ticketEnd)
+    }
 }

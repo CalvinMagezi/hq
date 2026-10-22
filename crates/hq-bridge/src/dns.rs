@@ -145,6 +145,10 @@ impl Resolver for Platform {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::sync::{
+        Arc,
+        atomic::{AtomicUsize, Ordering},
+    };
 
     #[tokio::test]
     async fn the_platform_resolver_answers_without_the_system_dns_read() {
@@ -179,21 +183,68 @@ mod tests {
         assert!(found.next().is_some());
     }
 
+    /// A fallback that counts how often it is asked, and always fails.
+    #[derive(Debug)]
+    struct Counting(Arc<AtomicUsize>);
+
+    impl Resolver for Counting {
+        fn lookup_ipv4(&self, _: String) -> BoxFuture<Result<BoxIter<Ipv4Addr>, DnsError>> {
+            self.0.fetch_add(1, Ordering::SeqCst);
+            Box::pin(async {
+                Err(DnsError::NxDomain {
+                    meta: Default::default(),
+                })
+            })
+        }
+        fn lookup_ipv6(&self, _: String) -> BoxFuture<Result<BoxIter<Ipv6Addr>, DnsError>> {
+            self.0.fetch_add(1, Ordering::SeqCst);
+            Box::pin(async {
+                Err(DnsError::NxDomain {
+                    meta: Default::default(),
+                })
+            })
+        }
+        fn lookup_txt(&self, _: String) -> BoxFuture<Result<BoxIter<TxtRecordData>, DnsError>> {
+            self.0.fetch_add(1, Ordering::SeqCst);
+            Box::pin(async {
+                Err(DnsError::NxDomain {
+                    meta: Default::default(),
+                })
+            })
+        }
+        fn clear_cache(&self) {}
+        fn reset(&self) -> Box<dyn Resolver> {
+            Box::new(Counting(self.0.clone()))
+        }
+    }
+
+    fn counted() -> (DnsResolver, Arc<AtomicUsize>) {
+        let asked = Arc::new(AtomicUsize::new(0));
+        let fallback = DnsResolver::custom(Counting(asked.clone()));
+        (DnsResolver::custom(Platform { fallback }), asked)
+    }
+
     #[tokio::test]
-    async fn a_family_the_answered_name_lacks_is_empty_and_does_not_ask_the_public_resolvers() {
-        let dns = platform_resolver();
-        // The platform answers for this literal (one IPv4 address). Asking for IPv6 must not go on to
-        // the public resolvers, which would bypass the network's own DNS: the answer is "none".
-        let started = std::time::Instant::now();
+    async fn a_family_the_answered_name_lacks_is_empty_and_the_public_resolvers_are_not_asked() {
+        let (dns, asked) = counted();
+        // The platform answers for this literal with one IPv4 address. Asking for IPv6 is "none", not a
+        // reason to ask someone else (which would bypass the network's own DNS, private DNS and VPN).
         let mut v6 = dns
             .lookup_ipv6("127.0.0.1", Duration::from_secs(5))
             .await
             .expect("an answered lookup is not an error");
         assert!(v6.next().is_none());
-        assert!(
-            started.elapsed() < Duration::from_millis(900),
-            "{:?}",
-            started.elapsed()
-        );
+        assert_eq!(asked.load(Ordering::SeqCst), 0);
+    }
+
+    #[tokio::test]
+    async fn a_lookup_the_platform_could_not_answer_goes_to_the_public_resolvers() {
+        let (dns, asked) = counted();
+        // `.invalid` never resolves: the platform fails (or times out), so the fallback is asked.
+        let result = dns
+            .lookup_ipv4("hq-bridge-test.invalid", Duration::from_secs(5))
+            .await;
+        assert!(result.is_err());
+        assert!(asked.load(Ordering::SeqCst) >= 1);
     }
 }

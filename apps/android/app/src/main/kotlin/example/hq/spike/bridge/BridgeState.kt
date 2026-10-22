@@ -47,7 +47,8 @@ object BridgeReducer {
         )
         is BridgeEvent.TicketClosed -> s.copy(
             ticket = null, request = null,
-            ticketEnd = s.ticketEnd ?: if (e.paired) TicketEnd.Paired else TicketEnd.Expired,
+            // The device can be on the list after "too late" was said; the end of the ticket has the last word.
+            ticketEnd = if (e.paired) TicketEnd.Paired else s.ticketEnd ?: TicketEnd.Expired,
         )
         is BridgeEvent.Digits -> s.copy(join = JoinState.ShowDigits(e.value))
         is BridgeEvent.Joined -> s.copy(join = JoinState.Done(e.id, e.name))

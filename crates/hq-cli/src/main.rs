@@ -1402,6 +1402,17 @@ mod net_args_tests {
             &["hq", "bridge", "join", "-"],
             &["hq", "bridge", "join"],
             &["hq", "bridge", "serve"],
+            &["hq", "bridge", "run"],
+            &[
+                "hq",
+                "bridge",
+                "run",
+                "--relay",
+                "none",
+                "--name",
+                "phone",
+                "--no-addrs",
+            ],
             &["hq", "bridge", "ping", "abcd", "--count", "3"],
             &["hq", "bridge", "peers", "--all", "--json"],
             &["hq", "bridge", "revoke", "abcd"],
@@ -1412,6 +1423,7 @@ mod net_args_tests {
         // cannot be answered from the command line: the digits are typed at the prompt.
         for argv in [
             &["hq", "bridge", "pair", "--code", "x"][..],
+            &["hq", "bridge", "run", "--digits", "123456"],
             &["hq", "bridge", "pair", "--auto-accept"],
             &["hq", "bridge", "pair", "--ttl", "99999999999"],
             &["hq", "bridge", "pair", "--ttl", "1"],

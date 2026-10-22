@@ -73,8 +73,10 @@ object BridgeSupervisor {
 
     /** After a pairing that did not happen: stop the child again unless the owner has it on. */
     fun stopUnlessEnabled(context: Context) {
-        if (isEnabled(context)) return
-        temporary = false
+        synchronized(lock) {
+            if (isEnabled(context)) return
+            temporary = false
+        }
         flow.update { it.copy(enabled = false) }
         stop()
     }
@@ -159,7 +161,14 @@ object BridgeSupervisor {
             Log.e(TAG, "could not start the bridge: ${e.javaClass.simpleName}")
             return
         }
-        process = child
+        // Stopped while it was starting: this run is not wanted, and must not take the handle of the one that is.
+        val wanted = synchronized(lock) {
+            (gen == generation.get()).also { if (it) process = child }
+        }
+        if (!wanted) {
+            endChild(child)
+            return
+        }
         val net = NetworkWatcher(context) {
             Log.i(TAG, if (watchNetwork) "network changed, telling the bridge" else "network changed, not telling the bridge (measurement)")
             if (watchNetwork) networkChanged()
@@ -169,7 +178,8 @@ object BridgeSupervisor {
             BufferedReader(InputStreamReader(child.inputStream, Charsets.UTF_8)).use { reader ->
                 while (gen == generation.get()) {
                     val line = reader.readLine() ?: break
-                    if (handle(context, line)) break
+                    // A line read just as the run was stopped belongs to a run nobody is looking at.
+                    if (gen != generation.get() || handle(context, line)) break
                 }
             }
         } finally {
@@ -181,6 +191,14 @@ object BridgeSupervisor {
         }
     }
 
+    /** A pairing that succeeded is what turns "Paired devices" on for good. */
+    private fun rememberPairing(context: Context) {
+        synchronized(lock) {
+            remember(context, true)
+            temporary = false
+        }
+    }
+
     /** Returns true after `bye`: nothing the child still says is true. */
     private fun handle(context: Context, line: String): Boolean {
         val event = BridgeWire.parse(line) ?: return false
@@ -189,11 +207,11 @@ object BridgeSupervisor {
         flow.update { BridgeReducer.reduce(it, event, System.currentTimeMillis()) }
         if (event is BridgeEvent.Ready) refreshPeers()
         if (event is BridgeEvent.Joined || (event is BridgeEvent.Decision && event.result == "paired")) {
-            // A pairing that succeeded is what turns "Paired devices" on for good.
-            remember(context, true)
-            temporary = false
+            rememberPairing(context)
             refreshPeers()
         }
+        // The host can see the device on its list a moment after it answered "too late"; the end of the ticket knows.
+        if (event is BridgeEvent.TicketClosed && event.paired) rememberPairing(context)
         return event is BridgeEvent.Bye
     }
 

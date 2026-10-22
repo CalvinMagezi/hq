@@ -47,11 +47,8 @@ class PairingViewModel(app: Application) : AndroidViewModel(app) {
             ticketAsked = false
             return
         }
-        if (b.ticketEnd == TicketEnd.Failed) {
-            // The bridge could not make a code; ask again only when the person does.
-            wantsTicket = false
-            return
-        }
+        // The bridge could not make a code: ask again only when the person does.
+        if (b.ticketEnd == TicketEnd.Failed) wantsTicket = false
         if (wantsTicket && !ticketAsked && b.ticket == null && b.ticketEnd == null) {
             ticketAsked = true
             BridgeSupervisor.openTicket()
@@ -62,9 +59,11 @@ class PairingViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
-    /** Anything in progress that a link from another app must not replace. */
-    private fun pairingInProgress(): Boolean =
-        wantsTicket || pendingJoin != null || bridge.value.join.inFlight() || mutableUi.value.screen == PairingScreen.Joining
+    /** Something live that a link from another app must not replace: a code on show, a device waiting for digits, a join under way. */
+    private fun pairingInProgress(): Boolean {
+        val b = bridge.value
+        return b.ticket != null || b.request != null || b.join.inFlight() || pendingJoin != null
+    }
 
     private fun runForPairing() {
         val app = getApplication<Application>()
@@ -125,8 +124,9 @@ class PairingViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     fun startJoin(link: String) {
-        // The scanner can read the same code twice before its screen is gone.
-        if (mutableUi.value.screen == PairingScreen.Joining) return
+        // Only from where a code is taken: the scanner can read the same code twice before its screen is gone,
+        // or once more after the person has left it.
+        if (mutableUi.value.screen !in TAKES_A_CODE) return
         runForPairing()
         BridgeSupervisor.forgetJoin()
         if (BridgeSupervisor.state.value.running) BridgeSupervisor.join(link) else pendingJoin = link
@@ -147,9 +147,14 @@ class PairingViewModel(app: Application) : AndroidViewModel(app) {
         BridgeSupervisor.refreshPeers()
     }
 
-    /** The screen went out of sight: a join that was waiting for the bridge to start must not fire later, with nobody looking. */
-    fun dropQueuedJoin() {
+    /**
+     * The screen went out of sight: a join that was waiting for the bridge to start must not fire later, with
+     * nobody looking, and a bridge that was started only for a pairing that is not live goes off again.
+     */
+    fun onHidden() {
         pendingJoin = null
+        val b = bridge.value
+        if (b.ticket == null && b.request == null && !b.join.inFlight()) BridgeSupervisor.stopUnlessEnabled(getApplication())
     }
 
     fun askRemove(peer: BridgePeer?) = mutableUi.update { it.copy(askRemove = peer) }
@@ -172,6 +177,10 @@ class PairingViewModel(app: Application) : AndroidViewModel(app) {
     override fun onCleared() {
         if (wantsTicket || bridge.value.join.inFlight()) BridgeSupervisor.cancelPairing()
         BridgeSupervisor.stopUnlessEnabled(getApplication())
+    }
+
+    private companion object {
+        val TAKES_A_CODE = setOf(PairingScreen.Scan, PairingScreen.Paste, PairingScreen.Confirm)
     }
 
     private fun JoinState.inFlight() = this is JoinState.Connecting || this is JoinState.ShowDigits
