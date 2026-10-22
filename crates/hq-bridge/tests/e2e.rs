@@ -343,6 +343,43 @@ async fn a_ticket_works_once_and_its_endpoint_is_gone_afterwards() {
         "only the first device was paired"
     );
     assert_eq!(open.stats.reached.load(Ordering::SeqCst), 1);
+    assert_eq!(
+        open.stats.refused.load(Ordering::SeqCst),
+        0,
+        "nothing answered, not even with a refusal: the endpoint is gone"
+    );
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn connections_that_stall_are_strikes_and_shut_their_source_out() {
+    let host = Machine::host().await;
+    let open = host
+        .bridge
+        .open_ticket(Tuning {
+            hello_timeout: Duration::from_secs(1),
+            limits: LimitConfig {
+                ip_strikes: 2,
+                ..LimitConfig::default()
+            },
+            ..tuning()
+        })
+        .await
+        .unwrap();
+    let ticket = open.ticket.clone();
+    let loiterer = raw_client(V4).await;
+    for _ in 0..2 {
+        let conn = with_timeout(loiterer.connect(ticket_addr(&ticket), &ticket.k.alpn(3)))
+            .await
+            .unwrap();
+        with_timeout(conn.closed()).await;
+    }
+    // Two stalls were two strikes: this address is now closed at the handshake.
+    let third = with_timeout(loiterer.connect(ticket_addr(&ticket), &ticket.k.alpn(3))).await;
+    if let Ok(conn) = third {
+        with_timeout(conn.closed()).await;
+    }
+    assert_eq!(open.stats.reached.load(Ordering::SeqCst), 2);
+    assert!(open.stats.refused.load(Ordering::SeqCst) >= 1);
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -715,22 +752,108 @@ async fn a_reveal_that_does_not_match_the_commitment_never_reaches_the_person() 
 
 #[tokio::test(flavor = "multi_thread")]
 async fn a_name_with_a_terminal_escape_reaches_the_person_clean() {
-    let (host, phone) = (
+    // By hand: an honest joiner cleans its own name, a hostile one does not.
+    let host = Machine::host().await;
+    let mut open = host.bridge.open_ticket(tuning()).await.unwrap();
+    let client = raw_client(V4).await;
+    let ticket = open.ticket.clone();
+    let mut raw = raw_pair(&client, &ticket, &ticket.code, 3).await;
+    assert!(reply_of(&mut raw).await.ok);
+    wire::send_line(
+        &mut raw.send,
+        &Reveal {
+            nonce: wire::b32(&raw.nonce),
+            name: "\u{1b}[2Jevil\u{7}".into(),
+            ..Reveal::default()
+        },
+    )
+    .await
+    .unwrap();
+    let request = with_timeout(open.requests.recv()).await.unwrap();
+    assert!(
+        !request.name.chars().any(char::is_control),
+        "{:?}",
+        request.name
+    );
+    assert!(request.name.contains("evil"));
+    let _ = request.decide.send(false);
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn while_one_device_waits_for_the_person_the_ticket_is_closed_to_everyone_else() {
+    let (host, first, second) = (
         Machine::host().await,
-        Machine::new("\u{1b}[2Jevil\u{7}", &[V4], true).await,
+        Machine::phone().await,
+        Machine::phone().await,
     );
     let mut open = host.bridge.open_ticket(tuning()).await.unwrap();
     let ticket = open.ticket.clone();
-    let asked = tokio::spawn(async move {
+    let (answer_now, may_answer) = oneshot::channel::<()>();
+    let waiting = tokio::spawn(async move {
         let request = open.requests.recv().await.unwrap();
-        let name = request.name.clone();
+        may_answer.await.unwrap();
         let _ = request.decide.send(true);
-        (open, name)
+        open
     });
-    assert!(paired(&join(&phone, &ticket).await));
-    let (_open, name) = asked.await.unwrap();
-    assert!(!name.chars().any(char::is_control), "{name:?}");
-    assert!(name.contains("evil"));
+    let joining = {
+        let ticket = ticket.clone();
+        let tuning = tuning();
+        tokio::spawn(async move {
+            first
+                .bridge
+                .join(&ticket, &tuning, |_| {})
+                .await
+                .map(|r| (r, first))
+        })
+    };
+    // The first device has passed the code and waits for the digits; the endpoint is still up.
+    tokio::time::sleep(Duration::from_millis(1_000)).await;
+    let late = tokio::time::timeout(GONE, second.bridge.join(&ticket, &tuning(), |_| {})).await;
+    assert!(!matches!(late, Ok(Ok(JoinResult::Paired(_)))), "{late:?}");
+    answer_now.send(()).unwrap();
+    let open = waiting.await.unwrap();
+    let (result, first) = with_timeout(joining).await.unwrap().unwrap();
+    assert!(matches!(result, JoinResult::Paired(_)));
+    assert_eq!(host.peers(), [first.id()]);
+    assert_eq!(
+        open.stats.reached.load(Ordering::SeqCst),
+        1,
+        "the second device was closed at the gate, before the handler"
+    );
+    assert!(open.stats.refused.load(Ordering::SeqCst) >= 1);
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_device_that_leaves_before_the_answer_is_not_recorded() {
+    let edge = Machine::host().await;
+    let registrar = Arc::new(Recording {
+        seen: Mutex::default(),
+        calls: AtomicUsize::new(0),
+    });
+    let mut open = open_register(&edge, registrar.clone()).await;
+    let client = raw_client(V4).await;
+    let ticket = open.ticket.clone();
+    let mut raw = raw_pair(&client, &ticket, &ticket.code, 3).await;
+    assert!(reply_of(&mut raw).await.ok);
+    wire::send_line(
+        &mut raw.send,
+        &Reveal {
+            nonce: wire::b32(&raw.nonce),
+            ..Reveal::default()
+        },
+    )
+    .await
+    .unwrap();
+    let request = with_timeout(open.requests.recv()).await.unwrap();
+    raw.conn.close(0u32.into(), b"gone");
+    tokio::time::sleep(Duration::from_millis(500)).await;
+    let _ = request.decide.send(true);
+    tokio::time::sleep(Duration::from_millis(500)).await;
+    assert_eq!(
+        registrar.calls.load(Ordering::SeqCst),
+        0,
+        "a device that disconnected was recorded"
+    );
 }
 
 struct Recording {

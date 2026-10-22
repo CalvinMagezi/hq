@@ -41,7 +41,7 @@ placeholders (`example.com`, `hq.example.ts.net`, `<owner>/<repo>`).
 
 ## Architecture
 
-- **Language**: Rust (edition 2024, Cargo workspace of 21 crates)
+- **Language**: Rust (edition 2024, Cargo workspace of 22 crates)
 - **Binary**: `hq`, built from `crates/hq-cli`. `scripts/install-hq.sh` installs it
   to `~/bin/hq`; servers use `/usr/local/bin/hq`.
 - **Config**: `~/.hq/config.yaml` (override with `HQ_CONFIG_PATH`); any key can
@@ -124,6 +124,7 @@ placeholders (`example.com`, `hq.example.ts.net`, `<owner>/<repo>`).
 | Task-linked and chat-driven harness sessions | `crates/hq-tools/src/harness_session/mission.rs`, `crates/hq-web/src/session_driver.rs`, `crates/hq-web/src/sessions_api.rs`, "Sessions that work on a task" and "Watching and driving from a web chat" in `docs/AGENT_SESSIONS.md` |
 | Pull-based updates | `crates/hq-update/`, `crates/hq-cli/src/commands/update.rs`, `deploy/install.sh`, `deploy/update/`, `docs/UPDATE_SYSTEM.md` |
 | Encrypted backup and restore (`hq backup create|verify|restore|keygen|prune`, `hq restore`, the opt-in `backup:` daemon task) | `crates/hq-backup/` (`archive.rs` create, verify and restore with every check, `crypto.rs` the sealed container, `key.rs` passphrase and key file, `snapshot.rs` the consistent database copy, `retention.rs`), `crates/hq-cli/src/commands/backup.rs`, `crates/hq-cli/src/commands/start/daemon/tasks_periodic/backup.rs`, `BackupConfig` in `crates/hq-core/src/config/backup.rs`, `hq_db::migrations::newer_migrations`, `docs/BACKUP.md` |
+| Pairing machines with a QR code and reconnecting by key (`hq bridge`, cargo feature `bridge`, off by default; the library does nothing until a caller starts it) | `crates/hq-bridge/` (`ticket.rs` the `hqpair://` link and protocol versions, `code.rs` the one-time code, commitment and six digits, `limits.rs` per-source limits, `host.rs` the ticket and its throwaway endpoint, `join.rs`, `bridge.rs` the long-term endpoint, the paired-only gate and pushed revocation, `wire.rs`), `crates/hq-db/src/bridge.rs` and `sql/098_bridge_pairing.sql` (the `bridge_peers` list), `crates/hq-cli/src/commands/bridge.rs`, `docs/PAIRING.md`, `docs/security/PAIRING.md`, `docs/plans/native-bridge-sprint.md`, `docs/plans/native-bridge/spike-f/` (the historical spike) |
 | Restart notices | `crates/hq-cli/src/commands/notify_restart.rs` (`hq notify-restart`) |
 | MCP server | `crates/hq-mcp/src/server.rs` |
 | Asking HQ from an MCP client (`hq_ask`, `hq_ask_result`) | `crates/hq-tools/src/ask.rs` (tools and the `AskRunner` seam), `crates/hq-web/src/ws/ask.rs` (runner, read-only enforcement via the permission preset), `crates/hq-db/src/ask_requests.rs`, `docs/MCP_ASK.md` |
@@ -321,6 +322,7 @@ a document.
 | `hq-host` | Built-in coding-agent host: pty panes, emulated screen, control socket, state detection |
 | `hq-gate` | Signed TCP transport for the host gate over a private tunnel (Ed25519 challenge, unix only); used by `hq host serve` and the `tcp` host transport |
 | `hq-net` | `hq net`: the WireGuard private plane (key and subnet setup, peer store, device configs, QR) and `hq-net-apply`, the Linux-only strict-grammar root applier. Root-only code is `cfg(target_os = "linux")`, never `cfg(unix)` |
+| `hq-bridge` | Native Bridge pairing over iroh: a one-time ticket shown as an `hqpair://` link and QR code, a throwaway endpoint per ticket, six digits typed on the host, the paired list in `hq-db`, reconnect by key, revocation pushed to open connections. Library only: nothing listens until a caller starts a `Bridge` or opens a ticket |
 | `hq-tunnel` | A userspace WireGuard peer for a phone (boringtun and smoltcp, no `VpnService`): serve and reach maps between the tunnel and loopback, join-text parser, status file. Library only so far |
 | `hq-sandbox` | Process sandbox policy for one coding agent (`sandbox-exec` or `bwrap`) |
 | `hq-cli` | The `hq` binary and its CLI commands |
