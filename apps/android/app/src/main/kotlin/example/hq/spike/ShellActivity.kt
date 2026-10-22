@@ -204,7 +204,7 @@ class ShellActivity : ComponentActivity() {
                         Place.Chat -> ChatScreen(chatState, chat.actions)
                         Place.Notes -> NotesPlace(notesState)
                         Place.Inbox -> InboxPlace(inboxState)
-                        Place.Tasks -> TasksScreen(tasksState, tasks.actions)
+                        Place.Tasks -> TasksPlace(tasksState)
                         Place.Helpers -> HelpersScreen(helpersState, helpers.actions)
                         else -> NotBuilt(place)
                     }
@@ -232,6 +232,12 @@ class ShellActivity : ComponentActivity() {
         val nm = getSystemService(android.app.NotificationManager::class.java)
         AlertPoster.channels().forEach { nm.createNotificationChannel(it) }
         AlertPoster.post(this, items, items.keys.toList(), 5)
+    }
+
+    @androidx.compose.runtime.Composable
+    private fun TasksPlace(tasksState: TasksUi) {
+        val go = LocalGoTo.current
+        TasksScreen(tasksState, tasks.actions, onHelpers = { go(Place.Helpers) })
     }
 
     @androidx.compose.runtime.Composable

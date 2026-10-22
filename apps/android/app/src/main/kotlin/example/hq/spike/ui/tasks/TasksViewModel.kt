@@ -4,6 +4,7 @@ import android.app.Application
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import example.hq.spike.data.HqClient.TaskComment
+import example.hq.spike.data.HqClient
 import example.hq.spike.data.HqClient.TaskItem
 import example.hq.spike.data.HqServices
 import example.hq.spike.data.HqUnavailable
@@ -67,12 +68,17 @@ data class TasksUi(
     val quick: QuickState? = null,
     val line: TaskLine? = null,
     val today: LocalDate = LocalDate.now(),
+    /** Which list the All tab shows, the archived tasks (read only when that list is chosen), and the helpers working now. */
+    val chip: AllChip = AllChip.Active,
+    val archived: List<TaskItem> = emptyList(),
+    val sessions: List<HqClient.WorkSession> = emptyList(),
 ) {
+    val workingIds: Set<String> get() = sessions.mapTo(HashSet()) { it.taskId }
     val shown: List<TaskItem> get() = tasks.filter { it.id !in hidden }
     val groups: List<TaskGroup> get() = when (tab) {
         TaskTab.Today -> TasksLogic.today(shown, today)
         TaskTab.Upcoming -> TasksLogic.upcoming(shown, today)
-        TaskTab.All -> TasksLogic.all(shown)
+        TaskTab.All -> TasksLogic.allList(shown, chip, archived)
     }
 }
 
@@ -98,6 +104,8 @@ class TasksActions(
     val onArchive: () -> Unit = {},
     val onQuick: (QuickState?) -> Unit = {},
     val onQuickSave: () -> Unit = {},
+    val onChip: (AllChip) -> Unit = {},
+    val onRestore: () -> Unit = {},
 )
 
 class TasksViewModel(app: Application) : AndroidViewModel(app) {
@@ -120,6 +128,7 @@ class TasksViewModel(app: Application) : AndroidViewModel(app) {
         onStatus = { s -> patchDetail(JSONObject().put("status", s)) }, onPriority = { p -> patchDetail(JSONObject().put("priority", p ?: JSONObject.NULL)) },
         onToggleSub = ::toggleSub, onAddSub = ::addSub, onComment = ::comment, onArchive = ::archive,
         onQuick = { q -> _state.update { it.copy(quick = q) } }, onQuickSave = ::saveQuick,
+        onChip = ::chooseChip, onRestore = ::restore,
     )
 
     init {
@@ -140,13 +149,37 @@ class TasksViewModel(app: Application) : AndroidViewModel(app) {
     suspend fun refresh() {
         val seq = ++refreshSeq
         val tasks = try { client.tasks() } catch (e: HqUnavailable) { null }
+        // The extras are only read for the list that shows them, and a failed read keeps what was there.
+        val onAll = _state.value.tab == TaskTab.All
+        val sessions = if (onAll && tasks != null) try { client.liveWorkSessions() } catch (e: HqUnavailable) { null } else null
+        val archived = if (onAll && tasks != null && _state.value.chip == AllChip.Archived) try { client.tasks(archived = true) } catch (e: HqUnavailable) { null } else null
         if (frozen || seq != refreshSeq) return
         _state.update { s ->
             if (tasks == null) s.copy(loaded = true, offline = true)
             else s.copy(
-                loaded = true, offline = false, tasks = tasks, hidden = s.hidden.filter { it in writing }.toSet(), today = LocalDate.now(),
+                loaded = true, offline = false, tasks = tasks, sessions = sessions ?: s.sessions, archived = archived ?: s.archived, hidden = s.hidden.filter { it in writing }.toSet(), today = LocalDate.now(),
                 detail = s.detail?.let { d -> tasks.firstOrNull { it.id == d.task.id }?.let { fresh -> d.copy(task = fresh) } ?: d },
             )
+        }
+    }
+
+    private fun chooseChip(chip: AllChip) {
+        _state.update { it.copy(chip = chip) }
+        if (chip == AllChip.Archived) viewModelScope.launch { refresh() }
+    }
+
+    /** Brings an archived task back, with the sub-tasks archived along with it. */
+    private fun restore() {
+        val t = _state.value.detail?.task ?: return
+        viewModelScope.launch {
+            try {
+                client.restoreTask(t.id)
+                _state.update { it.copy(detail = null, archived = it.archived.filter { a -> a.id != t.id }) }
+                say("Task restored")
+                refresh()
+            } catch (e: HqUnavailable) {
+                say(why(e, "Could not restore it. HQ is not answering."))
+            }
         }
     }
 
@@ -255,6 +288,7 @@ class TasksViewModel(app: Application) : AndroidViewModel(app) {
 
     private fun open(t: TaskItem) {
         _state.update { it.copy(detail = TaskDetail(t)) }
+        if (t.archivedAt != null) { detailOf(t.id) { it.copy(loading = false) }; return }
         viewModelScope.launch {
             val subs = try { client.tasks(parentId = t.id) } catch (e: HqUnavailable) { emptyList() }
             val comments = try { client.taskComments(t.id) } catch (e: HqUnavailable) { emptyList() }
