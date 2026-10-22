@@ -11,6 +11,8 @@ import org.junit.Test
 class SettingsWordsTest {
     private val now = Instant.parse("2026-10-21T12:00:00Z")
 
+    @org.junit.Before fun english() = java.util.Locale.setDefault(java.util.Locale.ENGLISH)
+
     private val settings = JSONObject(
         """{"model":{"active":"openrouter/auto","default_model":"openrouter/auto"},
         "provider_keys":[{"name":"OpenRouter","id":"open_router","configured":true,"source":"config"},{"name":"Anthropic","id":"anthropic","configured":false,"source":null},{"name":"Groq","configured":false}],
@@ -25,6 +27,58 @@ class SettingsWordsTest {
         assertEquals("OpenRouter · 1 key", SettingsWords.keysStatus(settings))
         assertEquals("No key yet", SettingsWords.keysStatus(JSONObject("""{"provider_keys":[{"name":"OpenRouter","configured":false}]}""")))
         assertEquals("Not answering", SettingsWords.keysStatus(null))
+    }
+
+    /** /api/settings for a config whose first choice runs on GitHub Copilot while an OpenRouter and a DeepSeek key are also stored. */
+    private val onCopilot = JSONObject(
+        """{"model":{"active":"gpt-6-luna","default_model":"gpt-6-luna","local_only":false},
+        "provider_keys":[{"name":"OpenRouter","id":"open_router","configured":true,"source":"env"},{"name":"DeepSeek","configured":true},{"name":"Brave Search","configured":true}],
+        "backends":{"configured":true,"primary":"luna","fallbacks":["copilot","haiku","deepseek"],"entries":[
+          {"name":"luna","kind":"openai-compatible","model":"gpt-6-luna","endpoint_host":"api.githubcopilot.com","primary":true,"fallback_position":null},
+          {"name":"copilot","kind":"openai-compatible","model":"claude-haiku-5.5","endpoint_host":"api.githubcopilot.com","primary":false,"fallback_position":0},
+          {"name":"haiku","kind":"openai-compatible","model":"anthropic/claude-haiku-5.5","endpoint_host":"openrouter.ai","primary":false,"fallback_position":1},
+          {"name":"deepseek","kind":"openai-compatible","model":"deepseek-flash","endpoint_host":"api.deepseek.com","primary":false,"fallback_position":2}]}}""",
+    )
+    private val copilotUsage = JSONObject("""{"active":true,"quota":{"entitlement":1500,"remaining":912,"reset_at":"2026-11-01T00:00:00Z"},"burn":{"windows":[]}}""")
+    private val providerRows = JSONObject(
+        """{"backends":[
+        {"backend":"luna","adapter":"subscription","source":"ledger","status":"subscription","provider":null,"ledger":{"today":0.0,"week":0.0,"month":0.0}},
+        {"backend":"haiku","adapter":"openrouter","source":"provider","status":"ok","provider":{"balance":{"amount":4.2,"currency":"USD"},"spend":{"today":0.31,"week":1.2,"month":4.8},"limit_remaining":null},"ledger":{"today":0.3,"week":1.1,"month":4.7}},
+        {"backend":"deepseek","adapter":"deepseek","source":"ledger","status":"no_key","provider":null,"ledger":{"today":0.42,"week":1.0,"month":3.0}}]}""",
+    )
+    private val snapOnCopilot = SettingsSnapshot(settings = onCopilot, providers = providerRows, copilot = copilotUsage)
+
+    @Test fun theAiServiceLineNamesTheOneHqUsesNotTheFirstStoredKey() {
+        assertEquals("GitHub Copilot · 3 services", SettingsWords.keysStatus(onCopilot))
+    }
+
+    @Test fun theKeysPageListsCopilotAndTheOrderHqTries() {
+        assertEquals("GitHub Copilot", SettingsWords.keyRows(onCopilot, copilotUsage).first().first)
+        assertTrue(SettingsWords.keyRows(onCopilot, copilotUsage).first().second)
+        assertEquals(false, SettingsWords.keyRows(onCopilot, JSONObject("""{"active":false}""")).first().second)
+        val rows = SettingsWords.aiRows(snapOnCopilot)
+        assertEquals(listOf("1 · GitHub Copilot", "2 · GitHub Copilot", "3 · OpenRouter", "4 · DeepSeek"), rows.map { it.title })
+        assertEquals("First choice", rows[0].value)
+        assertEquals("If the one before is down", rows[1].value)
+        assertEquals("gpt-6-luna · Subscription", rows[0].text)
+        assertEquals("deepseek-flash · No key set", rows[3].text)
+    }
+
+    @Test fun spendingIsShownPerServiceWithWhatIsLeft() {
+        val rows = SettingsWords.serviceRows(snapOnCopilot)
+        assertEquals(listOf("GitHub Copilot", "OpenRouter", "DeepSeek"), rows.map { it.title })
+        assertEquals("912 of 1.5k credits left", rows[0].value)
+        assertEquals("Credits on your plan · Resets 1 Nov", rows[0].text)
+        assertEquals("$4.20 left", rows[1].value)
+        assertEquals("Today $0.31 · This week $1.20 · This month $4.80", rows[1].text)
+        assertEquals("$0.42 today", rows[2].value)
+        assertEquals("Today $0.42 · This week $1.00 · This month $3.00 (HQ's own record)", rows[2].text)
+    }
+
+    @Test fun aCopilotPlanThatCannotBeReadSaysSoInsteadOfGuessing() {
+        val unreadable = snapOnCopilot.copy(copilot = JSONObject("""{"active":true,"unavailable":true,"note":"GitHub refused the usage read"}"""))
+        assertEquals("Not readable", SettingsWords.serviceRows(unreadable).first().value)
+        assertEquals("Not measured", SettingsWords.serviceRows(snapOnCopilot.copy(copilot = null)).first().value)
     }
 
     @Test fun messagingNeedsBothTheTokenAndTheSwitch() {

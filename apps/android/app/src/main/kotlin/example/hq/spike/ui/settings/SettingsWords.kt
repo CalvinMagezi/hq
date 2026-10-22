@@ -3,6 +3,8 @@ package example.hq.spike.ui.settings
 import java.time.Duration
 import java.time.Instant
 import java.time.format.DateTimeParseException
+import example.hq.spike.ui.usage.ChainRow
+import example.hq.spike.ui.usage.UsageWords
 import org.json.JSONArray
 import org.json.JSONObject
 
@@ -16,6 +18,9 @@ data class SettingsSnapshot(
     val health: JSONObject? = null,
     /** Routes HQ answered with an error (not found, a server error): the page says that, not that HQ is not running. */
     val unavailable: Set<String> = emptySet(),
+    /** What each AI service in use says about its balance and spend (/api/usage/providers), and the GitHub Copilot credits (/api/copilot-usage). */
+    val providers: JSONObject? = null,
+    val copilot: JSONObject? = null,
 )
 
 enum class SettingsPage { Home, Safety, Keys, Messaging, Claude, Devices, Spending, About }
@@ -30,6 +35,7 @@ data class FactRow(val title: String, val value: String, val text: String? = nul
 /** The words of the Settings board, built from what the server sent. Pure, so each line can be tested from a real response. */
 object SettingsWords {
     private const val NOT_ANSWERED = "Not answering"
+    private val RESET_DAY: java.time.format.DateTimeFormatter get() = java.time.format.DateTimeFormatter.ofPattern("d MMM", java.util.Locale.getDefault())
 
     fun yesNo(v: Boolean) = if (v) "Yes" else "No"
     fun onOff(v: Boolean) = if (v) "On" else "Off"
@@ -46,6 +52,9 @@ object SettingsWords {
 
     fun keysStatus(s: JSONObject?): String {
         if (s == null) return NOT_ANSWERED
+        // The AI HQ uses is the first one in its chain, whichever keys are stored: a stored key is not a choice.
+        val services = UsageWords.providers(s)
+        if (services.isNotEmpty()) return "${services.first()} · ${services.size} ${if (services.size == 1) "service" else "services"}"
         val keys = configuredKeys(s)
         if (keys.isEmpty()) return "No key yet"
         return "${keys.first()} · ${keys.size} ${if (keys.size == 1) "key" else "keys"}"
@@ -210,8 +219,60 @@ object SettingsWords {
 
     // ------------------------------------------------------------ AI service and keys
 
-    fun keyRows(s: JSONObject?): List<Triple<String, Boolean, String?>> =
-        s.arr("provider_keys").items().map { Triple(it.optString("name"), it.optBoolean("configured"), it.text("source")) }
+    /** The stored API keys, with the GitHub Copilot plan first when HQ uses it: its token is set outside the key list, so the plan answering is what says it works. */
+    fun keyRows(s: JSONObject?, copilot: JSONObject? = null): List<Triple<String, Boolean, String?>> {
+        val stored = s.arr("provider_keys").items().map { Triple(it.optString("name"), it.optBoolean("configured"), it.text("source")) }
+        val usesCopilot = UsageWords.providers(s).contains(UsageWords.COPILOT)
+        return if (usesCopilot) listOf(Triple(UsageWords.COPILOT, copilot?.optBoolean("active") == true, "env")) + stored else stored
+    }
+
+    /** The AI services in the order HQ tries them, each with its model and whether the provider says it works. */
+    fun aiRows(snap: SettingsSnapshot): List<FactRow> = UsageWords.chain(snap.settings).map { r ->
+        val status = UsageWords.statusWords(UsageWords.providerRow(snap.providers, r.backend)?.optString("status"))
+        FactRow("${r.position} · ${r.provider}", if (r.first) "First choice" else "If the one before is down", listOf(r.model, status).filter { it.isNotBlank() }.joinToString(" · ").ifBlank { null })
+    }
+
+    // ------------------------------------------------------------ Spending by AI service
+
+    /** What each AI service in use has left and what it cost: credits for a plan, a balance where the provider gives one, else HQ's own record. */
+    fun serviceRows(snap: SettingsSnapshot): List<FactRow> {
+        val chain = UsageWords.chain(snap.settings)
+        val services: List<ChainRow> = if (chain.isNotEmpty()) chain.distinctBy { it.provider } else snap.providers.arr("backends").items().map {
+            val name = it.optString("backend")
+            ChainRow(name, UsageWords.providerName(null, null, name), "", 0)
+        }
+        return services.map { r -> if (r.provider == UsageWords.COPILOT) copilotRow(snap.copilot) else providerRow(r, UsageWords.providerRow(snap.providers, r.backend)) }
+    }
+
+    private fun copilotRow(c: JSONObject?): FactRow {
+        val q = c.obj("quota")
+        val left = q?.takeIf { c?.optBoolean("active") == true }?.optDouble("remaining", Double.NaN)?.takeIf { it.isFinite() }
+        val total = q?.optDouble("entitlement", Double.NaN)?.takeIf { it.isFinite() }
+        val value = when {
+            left != null -> "${UsageWords.compact(left)}${total?.let { " of ${UsageWords.compact(it)}" }.orEmpty()} credits left"
+            c?.optBoolean("unavailable") == true -> "Not readable"
+            else -> "Not measured"
+        }
+        val reset = q.text("reset_at")?.let { iso(it)?.let { t -> "Resets ${RESET_DAY.format(t.atZone(java.time.ZoneId.systemDefault()))}" } }
+        return FactRow(UsageWords.COPILOT, value, listOfNotNull("Credits on your plan", reset).joinToString(" · "))
+    }
+
+    private fun providerRow(r: ChainRow, row: JSONObject?): FactRow {
+        val reading = row.obj("provider")
+        val ledger = row.obj("ledger")
+        fun num(o: JSONObject?, name: String): Double? = o?.takeIf { it.has(name) && !it.isNull(name) }?.optDouble(name)?.takeIf { it.isFinite() }
+        val left = num(reading, "limit_remaining") ?: num(reading.obj("balance"), "amount")
+        val spend = reading.obj("spend") ?: ledger
+        val today = num(spend, "today")
+        val value = when {
+            left != null -> "${UsageWords.usd(left)} left"
+            today != null -> "${UsageWords.usd(today)} today"
+            else -> UsageWords.statusWords(row?.optString("status")).ifBlank { "Not measured" }
+        }
+        val windows = listOfNotNull(today?.let { "Today ${UsageWords.usd(it)}" }, num(spend, "week")?.let { "This week ${UsageWords.usd(it)}" }, num(spend, "month")?.let { "This month ${UsageWords.usd(it)}" })
+        val fromLedger = reading == null && ledger != null
+        return FactRow(r.provider, value, (windows.joinToString(" · ") + if (fromLedger && windows.isNotEmpty()) " (HQ's own record)" else "").ifBlank { null })
+    }
 
     fun activeModel(s: JSONObject?): String = s.obj("model").text("active") ?: s.obj("model").text("default_model") ?: "Not set"
 

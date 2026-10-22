@@ -256,9 +256,15 @@ private fun Keys(ui: SettingsUi) {
         Label("Model")
         Facts(listOf(FactRow("Which AI HQ uses", SettingsWords.activeModel(s)), FactRow("Only AI that runs on this phone", SettingsWords.onOff(s.optJSONObject("model")?.optBoolean("local_only") == true))))
         Text("The model is set in the config file on this phone.", style = SmallText, color = Mts.InkMuted, modifier = Modifier.padding(start = 20.dp, top = 8.dp, end = 20.dp))
+        val ai = SettingsWords.aiRows(ui.snap)
+        if (ai.isNotEmpty()) {
+            Label("Which AI answers")
+            Facts(ai)
+            Text("HQ tries them in this order and uses the first one that answers.", style = SmallText, color = Mts.InkMuted, modifier = Modifier.padding(start = 20.dp, top = 8.dp, end = 20.dp))
+        }
         Label("Your keys")
         Group {
-            SettingsWords.keyRows(s).forEachIndexed { i, (name, set, source) ->
+            SettingsWords.keyRows(s, ui.snap.copilot).forEachIndexed { i, (name, set, source) ->
                 if (i > 0) Divider()
                 Row(Modifier.fillMaxWidth().heightIn(min = 56.dp).padding(horizontal = 16.dp, vertical = 8.dp), horizontalArrangement = Arrangement.spacedBy(12.dp), verticalAlignment = Alignment.CenterVertically) {
                     Column(Modifier.weight(1f)) {
@@ -270,13 +276,15 @@ private fun Keys(ui: SettingsUi) {
             }
         }
         Text("Keys are added from the web app for now. They are never shown here.", style = SmallText, color = Mts.InkMuted, modifier = Modifier.padding(start = 20.dp, top = 8.dp, end = 20.dp))
-        Label("If the first AI is down")
-        Group {
-            SettingsWords.fallbackRows(s).forEachIndexed { i, (a, b) ->
-                if (i > 0) Divider()
-                Row(Modifier.fillMaxWidth().heightIn(min = 56.dp).padding(horizontal = 16.dp, vertical = 8.dp), horizontalArrangement = Arrangement.spacedBy(12.dp), verticalAlignment = Alignment.CenterVertically) {
-                    Text(a, style = HqType.BodyBold, color = Mts.Ink, modifier = Modifier.weight(1f))
-                    Text(b, style = HqType.BodySm, color = Mts.InkMuted)
+        if (ai.isEmpty()) {
+            Label("If the first AI is down")
+            Group {
+                SettingsWords.fallbackRows(s).forEachIndexed { i, (a, b) ->
+                    if (i > 0) Divider()
+                    Row(Modifier.fillMaxWidth().heightIn(min = 56.dp).padding(horizontal = 16.dp, vertical = 8.dp), horizontalArrangement = Arrangement.spacedBy(12.dp), verticalAlignment = Alignment.CenterVertically) {
+                        Text(a, style = HqType.BodyBold, color = Mts.Ink, modifier = Modifier.weight(1f))
+                        Text(b, style = HqType.BodySm, color = Mts.InkMuted)
+                    }
                 }
             }
         }
@@ -397,6 +405,11 @@ private fun Spending(ui: SettingsUi) {
         if (Unanswered(ui, "budgets", b != null) || b == null) return@Page
         val rows = SettingsWords.budgetRows(b)
         Box(Modifier.padding(top = 8.dp)) { if (rows.isEmpty()) Notice("No spending limit is set.", HqIcons.Info) else Facts(rows) }
+        val services = SettingsWords.serviceRows(ui.snap)
+        if (services.isNotEmpty()) {
+            Label("By AI service")
+            Facts(services)
+        }
         Text("Changing a limit, and the full usage page, are in the web app for now.", style = SmallText, color = Mts.InkMuted, modifier = Modifier.padding(start = 20.dp, top = 12.dp, end = 20.dp))
     }
 }

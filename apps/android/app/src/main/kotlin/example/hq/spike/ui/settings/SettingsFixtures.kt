@@ -8,9 +8,13 @@ fun settingsFixture(name: String?): SettingsUi? {
     val now = Instant.now()
     fun future(seconds: Long) = now.plusSeconds(seconds).epochSecond
     val settings = JSONObject(
-        """{"model":{"active":"openrouter/auto","default_model":"openrouter/auto","local_only":false},
-        "provider_keys":[{"name":"OpenRouter","id":"open_router","configured":true,"source":"config"},{"name":"Anthropic","id":"anthropic","configured":false,"source":null},{"name":"Google AI","id":"google","configured":false,"source":null}],
-        "backends":{"configured":true,"primary":"OpenRouter","fallbacks":[]},
+        """{"model":{"active":"gpt-6-luna","default_model":"gpt-6-luna","local_only":false},
+        "provider_keys":[{"name":"OpenRouter","id":"open_router","configured":true,"source":"env"},{"name":"Anthropic","id":"anthropic","configured":false,"source":null},{"name":"Google AI","id":"google","configured":false,"source":null},{"name":"DeepSeek","configured":true},{"name":"OpenAI","configured":false},{"name":"Brave Search","configured":true}],
+        "backends":{"configured":true,"primary":"luna","fallbacks":["copilot","haiku","deepseek"],"entries":[
+          {"name":"luna","kind":"openai-compatible","model":"gpt-6-luna","endpoint_host":"api.githubcopilot.com","primary":true,"fallback_position":null},
+          {"name":"copilot","kind":"openai-compatible","model":"claude-haiku-5.5","endpoint_host":"api.githubcopilot.com","primary":false,"fallback_position":0},
+          {"name":"haiku","kind":"openai-compatible","model":"anthropic/claude-haiku-5.5","endpoint_host":"openrouter.ai","primary":false,"fallback_position":1},
+          {"name":"deepseek","kind":"openai-compatible","model":"deepseek-flash","endpoint_host":"api.deepseek.com","primary":false,"fallback_position":2}]},
         "limits":{"chat_turn_timeout_secs":600,"turn_ack_timeout_secs":270,"background_turn_max_days":5,"background_progress_secs":300},
         "safety":{"bash_sandbox":"required","bash_network":false,"skills_write_approval":false,"web_allowed_origins":["https://hq.example.ts.net"]},
         "agent_host":{"default_host":"mac-mini","hosts":["mac-mini"],"sandbox_mode":"process","idle_reap_hours":6,"drive_new_watches":false,"driver_checkin_minutes":5,"driver_nudge_budget":3,"driver_no_progress_limit":4},
@@ -25,13 +29,23 @@ fun settingsFixture(name: String?): SettingsUi? {
     val devices = JSONObject("""{"devices":[{"id":"d1","label":"MacBook","created_at":${now.minusSeconds(170_000).epochSecond},"last_used_at":${now.minusSeconds(10_800).epochSecond},"expires_at":null}]}""")
     val budgets = JSONObject("""{"budgets":[{"name":"all","scope":"global","period":"day","limit_usd":5,"spent_usd":2.1,"state":"ok"},{"name":"openrouter","scope":"provider:openrouter","period":"week","limit_usd":10,"spent_usd":9.5,"state":"warn"}]}""")
     val health = JSONObject("""{"status":"ok","service":"hq","version":"0.9.1"}""")
+    val providers = JSONObject(
+        """{"generated_at":"2026-10-22T04:00:00Z","backends":[
+        {"backend":"luna","adapter":"subscription","source":"ledger","status":"subscription","provider":null,"ledger":{"today":0.0,"week":0.0,"month":0.0,"unpriced_calls":12},"rate_limit":null,"note":null},
+        {"backend":"copilot","adapter":"subscription","source":"ledger","status":"subscription","provider":null,"ledger":{"today":0.0,"week":0.0,"month":0.0,"unpriced_calls":3},"rate_limit":null,"note":null},
+        {"backend":"haiku","adapter":"openrouter","source":"provider","status":"ok","provider":{"balance":{"amount":4.2,"currency":"USD"},"spend":{"today":0.31,"week":1.2,"month":4.8},"limit_remaining":null},"ledger":{"today":0.3,"week":1.1,"month":4.7,"unpriced_calls":0},"rate_limit":null,"note":null},
+        {"backend":"deepseek","adapter":"deepseek","source":"ledger","status":"no_key","provider":null,"ledger":{"today":0.42,"week":1.0,"month":3.0,"unpriced_calls":0},"rate_limit":null,"note":"No key is set for this backend."}]}""",
+    )
+    val copilot = JSONObject(
+        """{"active":true,"quota":{"login":"example","plan":"pro","entitlement":1500,"credits_used":588,"remaining":912,"percent_remaining":60.8,"overage_permitted":false,"reset_at":"2026-11-01T00:00:00Z"},"burn":{"windows":[{"window_hours":6,"credits_used":50,"per_hour":8.3}]}}""",
+    )
     val phone = listOf(
         HomeRow(null, "background", "Background work", "On · answers chats, runs tasks"),
         HomeRow(null, "battery", "Keep running", "Good · 1 thing to check"),
         HomeRow(null, "notifications", "Notifications", "Needs you on · Updates on"),
         HomeRow(null, "capture", "Capture and widgets", "Sharing opens a new note"),
     )
-    val base = SettingsUi(open = true, snap = SettingsSnapshot(settings, chat, connector, devices, budgets, health), loaded = true, phone = phone, mode = "active", build = "hub \u00b7 build 1", now = now)
+    val base = SettingsUi(open = true, snap = SettingsSnapshot(settings, chat, connector, devices, budgets, health, providers = providers, copilot = copilot), loaded = true, phone = phone, mode = "active", build = "hub \u00b7 build 1", now = now)
     return when (name) {
         "s-home" -> base
         "s-loading" -> SettingsUi(open = true, loaded = false, phone = phone, mode = "active", build = "hub \u00b7 build 1", now = now)

@@ -81,13 +81,14 @@ class SettingsViewModel(app: Application) : AndroidViewModel(app) {
     /** Reads every route at once, then what Android says about HQ; one route that fails shows as such on its own row only. */
     suspend fun refreshNow() {
         if (frozen) return
-        val routes = listOf("settings" to "/api/settings", "chatApps" to "/api/chat-apps", "connector" to "/api/oauth/connector", "devices" to "/api/auth/devices", "budgets" to "/api/budgets", "health" to "/health")
+        val routes = listOf("settings" to "/api/settings", "chatApps" to "/api/chat-apps", "connector" to "/api/oauth/connector", "devices" to "/api/auth/devices", "budgets" to "/api/budgets", "health" to "/health", "providers" to "/api/usage/providers", "copilot" to "/api/copilot-usage")
         val got = coroutineScope { routes.map { (key, path) -> async { key to get(path) } }.awaitAll() }.toMap()
         if (frozen) return
         fun body(key: String) = got[key]?.body
         val snap = SettingsSnapshot(
             body("settings"), body("chatApps"), body("connector"), body("devices"), body("budgets"), body("health"),
             unavailable = got.filterValues { it.body == null && it.answered }.keys,
+            providers = body("providers"), copilot = body("copilot"),
         )
         _state.update { it.copy(snap = snap, loaded = true, phone = phoneRows(), mode = modeOf(), now = Instant.now()) }
     }
