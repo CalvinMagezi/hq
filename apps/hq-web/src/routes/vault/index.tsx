@@ -5,6 +5,7 @@ import type { VaultSignals } from '~/lib/vaultApi'
 import { pinnedNotesQuery, vaultSignalsQuery } from '~/lib/queries'
 import { HomeSections } from '~/components/vault/HomeSections'
 import { GetStartedCard } from '~/components/vault/GetStartedCard'
+import { BriefingCard } from '~/components/tasks/verification/BriefingCard'
 import { fetchTasksClient } from '~/lib/tasksApi'
 import { inProgressTasks, sectionState } from '~/lib/homeSections'
 import { useWS } from '~/context/WebSocketContext'
@@ -157,6 +158,7 @@ function VaultHome() {
                 </div>
 
                 <GetStartedCard />
+                <BriefingCard variant="home" />
 
                 <HomeSections
                     pinned={sectionState(pinnedQuery)}

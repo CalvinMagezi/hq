@@ -10,6 +10,7 @@ import { TaskTime } from './TaskTime'
 import { TaskLinks } from './TaskLinks'
 import { TaskCheckpoint } from './TaskCheckpoint'
 import { TaskActivity } from './TaskActivity'
+import { TaskVerification } from './verification/TaskVerification'
 import { useIsStale } from './staleContext'
 import { DateRangeInputs, EstimateInput, PRIORITIES, SectionLabel, isInvalidEstimate, parseEstimate } from './taskFields'
 import { formatLocalTime } from './timeFormat'
@@ -435,6 +436,7 @@ export function TaskDetailDrawer({
             onCreateSubtask={onCreateSubtask}
           />
 
+          <TaskVerification key={`verification-${task.id}`} task={task} onUpdate={onUpdate} />
           <TaskCheckpoint key={`checkpoint-${task.id}`} task={task} />
           <TaskActivity key={`activity-${task.id}`} task={task} />
           <TaskLinks key={`links-${task.id}`} task={task} />

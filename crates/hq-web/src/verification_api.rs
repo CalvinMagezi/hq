@@ -189,8 +189,7 @@ pub(crate) async fn undo_sweep_handler(
         .with_conn(move |c| hq_tools::tasks::verify::undo_sweep(c, &id));
     match result {
         Ok(report) => {
-            // The sweep moved many tasks; tell open boards to reload them.
-            state.broadcast(&json!({ "type": "tasks:changed" }).to_string());
+            // The task watcher tells open boards that the tasks changed.
             Json(json!({
                 "restored": report.restored,
                 "left_alone": report.left_alone.iter()
