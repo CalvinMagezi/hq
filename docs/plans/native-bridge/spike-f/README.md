@@ -96,7 +96,7 @@ Findings:
   run as a plain process. Pairing, the relay path and reconnects all worked despite it. Inside the real
   app, the `hq` child process has no JVM context either, so this needs a decision: initialize the
   context, patch the two crates, or confirm what the resolver falls back to.
-- **Not measured yet** (need the owner's hands or a second network): a carrier hotspot, public wifi,
+- **Not measured yet** (need the owner's hands or a second network; `RUNBOOK.md` has the steps): a carrier hotspot, public wifi,
   UDP blocked with only the relay, sleep and wake, a network change mid-session, and the time of the
   whole pairing on a real phone camera.
 
