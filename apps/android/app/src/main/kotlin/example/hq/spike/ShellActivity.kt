@@ -46,6 +46,9 @@ import example.hq.spike.ui.inbox.InboxUi
 import example.hq.spike.ui.inbox.InboxViewModel
 import example.hq.spike.ui.inbox.inboxFixture
 import example.hq.spike.ui.notes.NotesHome
+import example.hq.spike.ui.search.SearchScreen
+import example.hq.spike.ui.search.SearchUi
+import example.hq.spike.ui.search.SearchViewModel
 import example.hq.spike.ui.tasks.QuickAddSheet
 import example.hq.spike.ui.tasks.TaskPage
 import example.hq.spike.ui.tasks.TasksScreen
@@ -90,6 +93,7 @@ class ShellActivity : ComponentActivity() {
     private val helpers: HelpersViewModel by viewModels()
     private val settings: SettingsViewModel by viewModels()
     private val usage: UsageViewModel by viewModels()
+    private val search: SearchViewModel by viewModels()
 
     /** A place asked for by a tapped notification while the app is already open; the shell takes it and clears it. */
     private var requested by mutableStateOf<Place?>(null)
@@ -224,6 +228,7 @@ class ShellActivity : ComponentActivity() {
             val tasksState by tasks.state.collectAsStateWithLifecycle()
             val helpersState by helpers.state.collectAsStateWithLifecycle()
             val settingsState by settings.state.collectAsStateWithLifecycle()
+            val searchState by search.state.collectAsStateWithLifecycle()
             val balance by usage.chip.collectAsStateWithLifecycle()
             val offlineSince = chatState.offlineSince
             val now by produceState(System.currentTimeMillis(), offlineSince) {
@@ -244,12 +249,12 @@ class ShellActivity : ComponentActivity() {
                 else if (startup == Startup.DidNotStart) DidNotStartScreen(StartupWords.failedLines(HubService.lastStart(this@ShellActivity), HubService.lastExit(this@ShellActivity)), ::tryStartAgain, ::openBatterySettings, ::copyStartDetails)
                 else HqShell(
                     startAt = start, inboxBadge = if (badge > 0) badge else inboxState.shownNeeds.size, status = shown,
-                    onSearch = { notes.actions.onOpenSearch() }, onSettings = settings.actions.onOpen,
+                    onSearch = { search.actions.onOpen(tasksState.tasks, chatState.chats) }, onSettings = settings.actions.onOpen,
                     balance = if (shown is HqStatus.Starting) null else balance,
                     onBalance = { target -> settings.actions.onOpen(); settings.actions.onPage(if (target == ChipTarget.Spending) SettingsPage.Spending else SettingsPage.Keys) },
                     request = requested, onRequestHandled = { requested = null },
                     aboveBar = { place -> if (place != Place.Tasks) tasksState.line?.let { Snack(it, tasks.actions, Modifier.align(Alignment.BottomCenter).padding(bottom = 4.dp)) } },
-                    overlay = { ShellOverlays(chatState, notesState, inboxState, tasksState, helpersState); SettingsHost(settingsState, settings.actions) },
+                    overlay = { ShellOverlays(chatState, notesState, inboxState, tasksState, helpersState); SettingsHost(settingsState, settings.actions); SearchHost(searchState) },
                 ) { place ->
                     when (place) {
                         Place.Chat -> ChatScreen(chatState, chat.actions, starting = shown is HqStatus.Starting)
@@ -268,6 +273,19 @@ class ShellActivity : ComponentActivity() {
     private fun NotesPlace(notesState: NotesUi) {
         val go = LocalGoTo.current
         NotesHome(notesState, notes.actions, onAskHq = { go(Place.Chat); chat.actions.onDraft("Write me a note about ") })
+    }
+
+    /** Search sits over everything but a chosen result: the screen closes first, then the note, task or chat opens in its own place. */
+    @androidx.compose.runtime.Composable
+    private fun SearchHost(searchState: SearchUi) {
+        if (!searchState.open) return
+        val go = LocalGoTo.current
+        SearchScreen(
+            searchState, search.actions,
+            onNote = { path -> search.actions.onClose(); notes.openNote(path) },
+            onTask = { t -> search.actions.onClose(); go(Place.Tasks); tasks.openById(t.id) { } },
+            onChat = { c -> search.actions.onClose(); go(Place.Chat); chat.actions.onOpenChat(c.id) },
+        )
     }
 
     /** Posts three sample notifications, for checking their words and buttons against the design with no hq. */
