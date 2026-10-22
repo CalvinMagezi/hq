@@ -109,6 +109,21 @@ enum Commands {
         json: bool,
     },
 
+    /// How far HQ's verification of finished tasks can be trusted, and the audits you answer to find out
+    Verify {
+        /// status (default), audits, pull [n], agree <id> or disagree <id>
+        #[arg(default_value = "status")]
+        sub: String,
+        /// A count (pull) or an audit id (agree, disagree)
+        arg: Option<String>,
+        /// Why you disagree (disagree)
+        #[arg(long)]
+        note: Option<String>,
+        /// Print JSON (status, audits)
+        #[arg(long)]
+        json: bool,
+    },
+
     /// Run a WireGuard private plane for HQ: init, peer add|revoke|list, link add|remove|list, status, apply (`hq net --help`)
     Net {
         #[command(subcommand)]
@@ -856,6 +871,7 @@ fn lite_rule(command: &Commands) -> LiteRule {
         | Commands::Restore(_)
         | Commands::Env
         | Commands::Task { .. }
+        | Commands::Verify { .. }
         | Commands::Copilot { .. }
         | Commands::Status
         | Commands::Stop { .. }
@@ -944,6 +960,12 @@ async fn dispatch(command: Commands, config: &HqConfig) -> Result<()> {
             task,
             json,
         } => commands::stack::run(config, &sub, name, task, json).await,
+        Commands::Verify {
+            sub,
+            arg,
+            note,
+            json,
+        } => commands::verify::run(config, &sub, arg, note, json).await,
         Commands::Host {
             sub,
             arg,

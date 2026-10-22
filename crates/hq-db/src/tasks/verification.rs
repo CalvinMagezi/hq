@@ -40,6 +40,18 @@ pub const INDEPENDENCE_LEVELS: [&str; 4] = [
     "different_model",
 ];
 
+/// The configuration a verdict was made under: `e1` when only machine checks ran, else the
+/// reviewer models, sorted and joined. Calibration is recorded per configuration.
+pub fn verifier_config_key(reviewers: &[String], reviewer_ran: bool) -> String {
+    if !reviewer_ran {
+        return "e1".to_string();
+    }
+    let mut models: Vec<String> = reviewers.iter().map(|m| m.trim().to_string()).collect();
+    models.sort();
+    models.dedup();
+    models.join("+")
+}
+
 /// The highest tier a task can sit in.
 pub const MAX_TIER: u8 = 2;
 
@@ -173,10 +185,13 @@ pub struct Verdict {
     pub submission: Option<i64>,
     /// Who acts next when this is not a pass (see [`WAITING_FOR`]).
     pub waiting_for: Option<String>,
+    /// Which verifier made it (see [`verifier_config_key`]).
+    pub verifier_config: String,
 }
 
 const VERDICT_COLS: &str = "id, task_id, artifact, contract_hash, tier, verdict, level, verifier, \
-     independence, observations, criteria, reasons, applied, canary, created_at, submission, waiting_for";
+     independence, observations, criteria, reasons, applied, canary, created_at, submission, waiting_for, \
+     verifier_config";
 
 fn row_to_verdict(r: &rusqlite::Row) -> rusqlite::Result<Verdict> {
     let json = |i: usize| -> rusqlite::Result<Value> {
@@ -201,6 +216,7 @@ fn row_to_verdict(r: &rusqlite::Row) -> rusqlite::Result<Verdict> {
         created_at: r.get(14)?,
         submission: r.get(15)?,
         waiting_for: r.get(16)?,
+        verifier_config: r.get(17)?,
     })
 }
 
@@ -227,6 +243,8 @@ pub struct NewVerdict<'a> {
     pub submission: Option<i64>,
     /// Who acts next when this is not a pass (see [`WAITING_FOR`]).
     pub waiting_for: Option<&'a str>,
+    /// Which verifier made it (see [`verifier_config_key`]).
+    pub verifier_config: &'a str,
 }
 
 /// Longest reasons text kept.
@@ -296,8 +314,9 @@ fn insert_verdict(conn: &Connection, v: &NewVerdict) -> Result<Verdict> {
     conn.execute(
         "INSERT INTO task_verdicts \
          (id, task_id, artifact, contract_hash, tier, verdict, level, verifier, independence, \
-          observations, criteria, reasons, applied, canary, submission, waiting_for) \
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16)",
+          observations, criteria, reasons, applied, canary, submission, waiting_for, \
+          verifier_config) \
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17)",
         params![
             id,
             v.task_id,
@@ -318,6 +337,7 @@ fn insert_verdict(conn: &Connection, v: &NewVerdict) -> Result<Verdict> {
             v.canary,
             v.submission,
             v.waiting_for,
+            v.verifier_config,
         ],
     )?;
     conn.query_row(
@@ -377,8 +397,10 @@ pub fn record_verdict(conn: &Connection, v: &NewVerdict) -> Result<Verdict> {
             if !WAITING_FOR.contains(&w) {
                 anyhow::bail!("waiting_for must be one of {}", WAITING_FOR.join(", "));
             }
-            if v.verdict == VERDICT_PASS {
-                anyhow::bail!("a pass waits on no one");
+            if v.verdict == VERDICT_PASS && w != WAIT_OWNER {
+                anyhow::bail!(
+                    "a pass waits on no one but the owner, who may be asked to finish it"
+                );
             }
         }
         let current = review_marker(conn, &task.id)?;
@@ -517,6 +539,7 @@ pub(super) fn record_owner_completion(
             canary: false,
             submission: review_marker(conn, task_id)?,
             waiting_for: None,
+            verifier_config: "owner",
         },
     )?;
     Ok(())

@@ -427,7 +427,7 @@ const UNCITED_NOTE: &str = "the reviewer called it met without citing a recorded
 /// Merges the answers of one or more reviewers into one result per criterion: any fail fails it,
 /// otherwise any unclear leaves it unclear, otherwise it passes. A pass that cites nothing, or
 /// cites an observation that was never recorded, is unclear: it shows nothing.
-fn merge(
+pub(super) fn merge(
     criteria: &[String],
     answers: &[Answer],
     known_ids: &[&str],
@@ -808,7 +808,24 @@ pub async fn finish(env: &Env<'_>, ev: &Evidence, resolution: Resolution) -> Res
         ),
     };
     let enforced = env.cfg.mode == VerificationMode::Enforce && env.cfg.enforces(ev.tier);
-    let applies = verdict == t::VERDICT_PASS && enforced;
+    // A pass completes the task only while measured trust in the verifier allows it; otherwise
+    // the verdict is kept and the task is left for the owner, who is told why once.
+    let held = if verdict == t::VERDICT_PASS && enforced {
+        let (cfg, tier) = (env.cfg.clone(), ev.tier);
+        env.db
+            .with_conn(move |c| t::autonomy_block(c, &cfg, tier))
+            .unwrap_or(None)
+    } else {
+        None
+    };
+    let (reasons, waiting_for) = match &held {
+        Some(why) => (
+            format!("{reasons}\nHeld for the owner: {why}."),
+            Some(WaitingFor::Owner),
+        ),
+        None => (reasons, waiting_for),
+    };
+    let applies = verdict == t::VERDICT_PASS && enforced && held.is_none();
     let sends_back = enforced && waiting_for == Some(WaitingFor::Worker);
     if applies && let Some(reason) = still_current(env, ev).await {
         return Ok(Finished::Voided { reason });
@@ -823,6 +840,10 @@ pub async fn finish(env: &Env<'_>, ev: &Evidence, resolution: Resolution) -> Res
     let max_attempts = env.cfg.max_attempts;
     let vault_path = env.vault_path;
     let findings = reasons.clone();
+    let verifier_config = t::verifier_config_key(
+        &env.cfg.reviewers(),
+        ev.log.of_kind("reviewer_run").next().is_some(),
+    );
     let outcome = env.db.with_conn(move |c| {
         t::in_write_tx(c, |c| {
             // The work must still be the submission that was checked: a verdict recorded about
@@ -857,6 +878,7 @@ pub async fn finish(env: &Env<'_>, ev: &Evidence, resolution: Resolution) -> Res
                 canary: false,
                 submission: marker,
                 waiting_for: waiting_for.map(WaitingFor::as_str),
+                verifier_config: &verifier_config,
             };
             let recorded = t::record_verdict(c, &new)?;
             t::clear_wait(c, &task_id)?;
@@ -899,6 +921,14 @@ pub async fn finish(env: &Env<'_>, ev: &Evidence, resolution: Resolution) -> Res
     match outcome {
         Err(reason) => Ok(Finished::Voided { reason }),
         Ok((verdict, moved, follow_up)) => {
+            if let Some(why) = &held {
+                crate::tasks::notify_autonomy_withdrawn(
+                    vault_path.to_path_buf(),
+                    ev.tier,
+                    why.clone(),
+                )
+                .await;
+            }
             match (moved, follow_up) {
                 (Moved::Completed, Some((task, unblocked))) => {
                     crate::tasks::notify_unblocked(vault_path, &task, &unblocked, route_tags);

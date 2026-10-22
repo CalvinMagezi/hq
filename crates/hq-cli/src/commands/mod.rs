@@ -92,3 +92,4 @@ pub mod update;
 pub mod usage;
 pub mod vault;
 pub mod vault_import;
+pub mod verify;

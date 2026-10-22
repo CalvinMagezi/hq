@@ -33,7 +33,10 @@ CREATE TABLE IF NOT EXISTS task_verdicts (
     submission INTEGER,
     -- Who acts next when the verdict is not a pass: worker, ci, verifier, budget or owner.
     waiting_for TEXT CHECK (waiting_for IS NULL
-        OR waiting_for IN ('worker', 'ci', 'verifier', 'budget', 'owner'))
+        OR waiting_for IN ('worker', 'ci', 'verifier', 'budget', 'owner')),
+    -- Which verifier made it: 'e1' for machine checks alone, else the reviewer models that ran.
+    -- Calibration is kept per configuration, so changing the reviewers starts a new record.
+    verifier_config TEXT NOT NULL DEFAULT ''
 );
 CREATE INDEX IF NOT EXISTS idx_task_verdicts_task ON task_verdicts(task_id, created_at);
 CREATE INDEX IF NOT EXISTS idx_task_verdicts_recent ON task_verdicts(created_at);

@@ -38,6 +38,8 @@ pub struct DispatchReport {
     pub deferred: usize,
     /// Verdicts dropped because the work changed while it was checked.
     pub voided: usize,
+    /// Reviews of the reviewer itself run after this pass's reviews (see [`super::canary`]).
+    pub canaries: usize,
     /// Verifications that failed to run at all.
     pub errors: Vec<String>,
 }
@@ -56,6 +58,7 @@ pub async fn dispatch(env: &Env<'_>, reviewer: &dyn Reviewer) -> Result<Dispatch
     report.queued = queue.len();
 
     let ready: Vec<&t::Candidate> = queue.iter().take(MAX_PER_PASS).collect();
+    let mut reviews = 0usize;
     for batch in ready.chunks(env.cfg.parallelism()) {
         let allow_review = review_allowed(env)?;
         let runs = batch
@@ -64,8 +67,15 @@ pub async fn dispatch(env: &Env<'_>, reviewer: &dyn Reviewer) -> Result<Dispatch
         for (c, result) in join_all(runs).await {
             report.attempted += 1;
             match result {
-                Ok(Finished::Recorded { moved, .. }) => {
+                Ok(Finished::Recorded { moved, verdict, .. }) => {
                     report.recorded += 1;
+                    if verdict
+                        .observations
+                        .as_array()
+                        .is_some_and(|all| all.iter().any(|o| o["kind"] == "reviewer_run"))
+                    {
+                        reviews += 1;
+                    }
                     match moved {
                         Moved::Completed => report.completed += 1,
                         Moved::Returned => report.returned += 1,
@@ -100,7 +110,37 @@ pub async fn dispatch(env: &Env<'_>, reviewer: &dyn Reviewer) -> Result<Dispatch
             }
         }
     }
+    report.canaries = test_the_reviewer(env, reviewer, reviews).await;
     Ok(report)
+}
+
+/// After a pass that used the reviewer, tests it now and then: each review is followed by a
+/// canary with probability `canary_rate`, drawn from the clock so the reviewer cannot tell when.
+/// A failure to test is logged and never fails the pass.
+async fn test_the_reviewer(env: &Env<'_>, reviewer: &dyn Reviewer, reviews: usize) -> usize {
+    let share = env.cfg.canary_share();
+    if reviews == 0 || share == 0.0 || !env.cfg.reviewer_enabled() {
+        return 0;
+    }
+    let seed = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_nanos() as u64)
+        .unwrap_or(1);
+    let expected = reviews as f64 * share;
+    let whole = expected.floor() as usize;
+    // The fractional part is a coin toss from the same clock.
+    let extra = usize::from(((seed >> 7) % 10_000) as f64 / 10_000.0 < expected.fract());
+    let count = whole + extra;
+    if count == 0 {
+        return 0;
+    }
+    match super::canary::run_canaries(env.db, env.cfg, reviewer, count, seed).await {
+        Ok(done) => done.len(),
+        Err(e) => {
+            tracing::warn!(error = %format!("{e:#}"), "verify-dispatch: canaries could not run");
+            0
+        }
+    }
 }
 
 /// Whether a reviewer may be called for the next batch. In enforce mode always (the monthly

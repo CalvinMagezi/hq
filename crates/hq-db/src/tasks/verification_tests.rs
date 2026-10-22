@@ -75,6 +75,7 @@ fn pass_for<'a>(
         canary: false,
         submission: None,
         waiting_for: None,
+        verifier_config: "",
     }
 }
 

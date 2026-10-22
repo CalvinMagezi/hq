@@ -381,6 +381,9 @@ pub struct TaskPatch {
 }
 
 mod archive;
+mod calibration;
+#[cfg(test)]
+mod calibration_tests;
 mod checkpoints;
 mod crud;
 mod leases;
@@ -401,6 +404,7 @@ mod verification_tests;
 mod waits;
 
 pub use archive::*;
+pub use calibration::*;
 pub use checkpoints::*;
 pub use crud::*;
 pub use leases::*;

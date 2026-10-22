@@ -193,3 +193,27 @@ pub fn waiting_state(conn: &Connection, task: &Task) -> Result<Option<WaitingSta
         _ => Ok(None),
     }
 }
+
+/// How many tasks wait on each party right now: every task in review, and every task a
+/// verification touched that is still open. Only `owner` counts against the owner.
+pub fn waiting_summary(conn: &Connection) -> Result<std::collections::BTreeMap<String, i64>> {
+    let mut stmt = conn.prepare(
+        "SELECT t.id FROM tasks t WHERE t.archived_at IS NULL AND ( \
+             t.status = 'ready_for_review' \
+          OR (t.status IN ('to_do', 'blocked') \
+              AND EXISTS (SELECT 1 FROM task_verdicts v WHERE v.task_id = t.id AND v.canary = 0)))",
+    )?;
+    let ids: Vec<String> = stmt
+        .query_map([], |r| r.get(0))?
+        .collect::<rusqlite::Result<_>>()?;
+    let mut out = std::collections::BTreeMap::new();
+    for id in ids {
+        let Some(task) = get_task(conn, &id)? else {
+            continue;
+        };
+        if let Some(state) = waiting_state(conn, &task)? {
+            *out.entry(state.who).or_insert(0) += 1;
+        }
+    }
+    Ok(out)
+}

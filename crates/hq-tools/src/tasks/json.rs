@@ -213,6 +213,11 @@ pub async fn notify_ready_for_review(vault_path: PathBuf, task: t::Task) {
 pub const TASK_REVIEW_SOURCE: &str = "task_ready_for_review";
 /// The value source of a task verification could not settle and only the owner can.
 pub const TASK_EXCEPTION_SOURCE: &str = "task_needs_owner";
+/// The value source of a tier whose auto-completion was held back by what the audits and canaries
+/// show.
+pub const TASK_AUTONOMY_SOURCE: &str = "task_autonomy";
+/// The value source of the weekly audit digest.
+pub const TASK_AUDIT_SOURCE: &str = "task_audit_digest";
 
 /// Best-effort: tells the owner, in the web inbox, about one task that verification returned to its
 /// worker as often as it allows. This is the "exception" of the exception-first model; it is
@@ -233,5 +238,44 @@ pub async fn notify_owner_exception(vault_path: PathBuf, task: t::Task, findings
         .and_then(|db| hq_db::value_items::emit(&db, &item).map(|_| ()));
     if let Err(e) = emitted {
         tracing::warn!(error = %e, task_id = %task.id, "task-notify: failed to emit the owner exception");
+    }
+}
+
+/// Best-effort: tells the owner, once per tier, that auto-completion is held back and why. The
+/// alert says which numbers did it, because the fix is to read them, not to dismiss the alert.
+pub async fn notify_autonomy_withdrawn(vault_path: PathBuf, tier: u8, why: String) {
+    let item = hq_core::types::ValueItem::new(
+        TASK_AUTONOMY_SOURCE,
+        hq_core::types::ValueKind::ActionNeeded,
+        format!("HQ stopped completing tier {tier} tasks on its own"),
+        why,
+    )
+    .with_dedup_key(format!("task-autonomy-tier-{tier}"));
+    let db_path = vault_path.join("_data").join("vault.db");
+    let emitted = hq_db::Database::open(&db_path)
+        .and_then(|db| hq_db::value_items::emit(&db, &item).map(|_| ()));
+    if let Err(e) = emitted {
+        tracing::warn!(error = %e, tier, "task-notify: failed to emit the autonomy alert");
+    }
+}
+
+/// Best-effort: one weekly digest saying how many completed tasks are waiting for the owner's
+/// agree or not.
+pub async fn notify_audit_digest(vault_path: PathBuf, selected: usize, open: usize) {
+    let item = hq_core::types::ValueItem::new(
+        TASK_AUDIT_SOURCE,
+        hq_core::types::ValueKind::Fyi,
+        format!("{selected} completed tasks to check this week"),
+        format!(
+            "HQ completed these on its own. Open the audit view and answer agree or not for each; \
+             {open} are waiting in all. A disagreement reopens the task and teaches HQ how far to trust itself."
+        ),
+    )
+    .with_dedup_key(format!("task-audit-digest-{}", chrono::Utc::now().format("%G-W%V")));
+    let db_path = vault_path.join("_data").join("vault.db");
+    let emitted = hq_db::Database::open(&db_path)
+        .and_then(|db| hq_db::value_items::emit(&db, &item).map(|_| ()));
+    if let Err(e) = emitted {
+        tracing::warn!(error = %e, "task-notify: failed to emit the audit digest");
     }
 }

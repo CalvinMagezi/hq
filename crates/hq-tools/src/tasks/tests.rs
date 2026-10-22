@@ -3341,6 +3341,7 @@ async fn task_get_shows_how_a_task_was_verified() {
                 canary: false,
                 submission: None,
                 waiting_for: None,
+                verifier_config: "",
             },
         )
         .map(|_| ())

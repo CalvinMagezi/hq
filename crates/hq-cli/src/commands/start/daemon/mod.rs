@@ -471,6 +471,7 @@ fn default_tasks() -> Vec<DaemonTask> {
         DaemonTask::with_default_timeout("turn-reconcile", Duration::from_secs(21600)), // every 6h
         // In-progress tasks nobody holds or has touched; a once-a-day digest, never a status change.
         DaemonTask::with_default_timeout("task-stale-digest", Duration::from_secs(21600)),
+        DaemonTask::with_default_timeout("verify-audit", Duration::from_secs(21600)),
     ]
 }
 
@@ -590,6 +591,7 @@ async fn dispatch_task(
         }
         "stack-dispatch" => tasks_periodic::run_stack_dispatch(vault_path, db, config).await,
         "verify-dispatch" => tasks_periodic::run_verify_dispatch(vault_path, db, config).await,
+        "verify-audit" => tasks_periodic::run_verify_audit(vault_path, db, config).await,
         "email-poll" => tasks_periodic::run_email_poll(vault_path, config).await,
         "memory-consolidation" => {
             if config.dream.enabled {

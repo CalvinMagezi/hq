@@ -15,6 +15,7 @@
 //! - [`dispatch`]: the queue loop behind the `verify-dispatch` daemon task.
 
 pub mod artifact;
+pub mod canary;
 pub mod collect;
 pub mod contract;
 pub mod dispatch;

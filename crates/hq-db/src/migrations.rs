@@ -350,6 +350,10 @@ const MIGRATIONS: &[(&str, &str)] = &[
         "095_task_verification",
         include_str!("../sql/095_task_verification.sql"),
     ),
+    (
+        "096_task_calibration",
+        include_str!("../sql/096_task_calibration.sql"),
+    ),
 ];
 
 const MEMORY_SCHEMA_MIGRATION: &str = "058_memory_schema";

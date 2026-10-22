@@ -49,6 +49,22 @@ pub enum ReleaseCheck {
     Enforce,
 }
 
+/// What measured trust does to auto-completion (`tasks.verification.autonomy_gate`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum AutonomyGate {
+    /// Calibration is reported and nothing is held back by it.
+    Off,
+    /// A tier whose audits or canaries show the verifier cannot be trusted stops auto-completing
+    /// and goes to the owner as exceptions. A tier without enough data yet keeps going, because
+    /// the owner enabled it. The default.
+    #[default]
+    Demote,
+    /// A tier auto-completes only once its calibration is earned. Needs a data source: audits of
+    /// shadow verdicts, or canaries, before anything has completed.
+    Require,
+}
+
 /// Risk tiers a task can sit in. The default is every tier, so `mode: enforce` means all of them
 /// until `enforce_tiers` narrows it for a staged rollout.
 pub const ALL_TIERS: [u8; 3] = [0, 1, 2];
@@ -93,6 +109,19 @@ pub struct VerificationConfig {
     pub reviewer_models: Vec<String>,
     /// Seconds one reviewer call may take.
     pub reviewer_timeout_secs: u64,
+    /// Share of reviewer runs followed by a canary: a planted defect or a clean control that the
+    /// reviewer must judge correctly. Unpredictable, so a reviewer cannot learn when it is tested.
+    pub canary_rate: f64,
+    /// What measured trust does to auto-completion.
+    pub autonomy_gate: AutonomyGate,
+    /// Audited verdicts a tier needs before its error rate means anything.
+    pub autonomy_min_audits: u32,
+    /// Canary runs a configuration needs before its catch rate means anything.
+    pub autonomy_min_canaries: u32,
+    /// Largest share of audits the owner disagreed with, as an upper bound at 95% confidence.
+    pub autonomy_max_disagreement: f64,
+    /// Smallest share of planted defects the reviewer must catch.
+    pub autonomy_min_catch_rate: f64,
     /// Let a code task pass on an independent review alone when its pull request has no checks to
     /// read. Off by default: code needs machine evidence.
     pub peer_only_code: bool,
@@ -130,6 +159,12 @@ impl Default for VerificationConfig {
             reviewer_monthly_ceiling_usd: None,
             reviewer_models: Vec::new(),
             reviewer_timeout_secs: 120,
+            canary_rate: 0.1,
+            autonomy_gate: AutonomyGate::Demote,
+            autonomy_min_audits: 30,
+            autonomy_min_canaries: 20,
+            autonomy_max_disagreement: 0.10,
+            autonomy_min_catch_rate: 0.90,
             peer_only_code: false,
         }
     }
@@ -167,6 +202,15 @@ impl VerificationConfig {
             vec!["premium".to_string()]
         } else {
             configured
+        }
+    }
+
+    /// The canary share, kept inside 0 to 1.
+    pub fn canary_share(&self) -> f64 {
+        if self.canary_rate.is_finite() {
+            self.canary_rate.clamp(0.0, 1.0)
+        } else {
+            0.0
         }
     }
 

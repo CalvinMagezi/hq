@@ -149,6 +149,10 @@ impl World {
     }
 
     async fn verify(&self, reviewer: &ScriptedReviewer) -> Finished {
+        self.verify_with(reviewer).await
+    }
+
+    async fn verify_with(&self, reviewer: &dyn super::reviewer::Reviewer) -> Finished {
         verify_task(&self.env(), reviewer, &get(&self.db), true)
             .await
             .unwrap()
@@ -1219,4 +1223,196 @@ async fn work_is_sent_back_once_then_passes_and_the_owner_is_never_asked() {
         1,
         "the reopen count survives completion"
     );
+}
+
+// ---- measured trust gates auto-completion ----
+
+#[tokio::test]
+async fn a_reviewer_that_missed_planted_defects_cannot_complete_tasks_but_its_pass_is_kept() {
+    let w = World::code(merged_pr_github(CLEAN_DIFF));
+    let key = t::current_config_key(&w.cfg);
+    // Canaries: the reviewer passed every planted defect it was given.
+    w.db.with_conn(|c| {
+        for _ in 0..25 {
+            t::record_canary(c, "unmet_criterion", "fail", "pass", &key, "")?;
+        }
+        Ok(())
+    })
+    .unwrap();
+    let answer = w
+        .answer(
+            "pass",
+            &["pr_state", "required_checks", "diff_excerpt"],
+            &[],
+        )
+        .await;
+    let reviewer = ScriptedReviewer::new(&["premium"], vec![reply("anthropic/claude-x", &answer)]);
+
+    let Finished::Recorded {
+        verdict,
+        moved,
+        waiting_for,
+    } = w.verify(&reviewer).await
+    else {
+        panic!("expected a recorded verdict");
+    };
+    assert_eq!(verdict.verdict, "pass", "the evidence is kept");
+    assert!(!verdict.applied);
+    assert_eq!(moved, Moved::Nothing);
+    assert_eq!(waiting_for, Some(WaitingFor::Owner));
+    assert_eq!(get(&w.db).status, t::STATUS_READY_FOR_REVIEW);
+    assert!(
+        verdict.reasons.contains("Held for the owner") && verdict.reasons.contains("planted"),
+        "{}",
+        verdict.reasons
+    );
+    // The owner can see why in the task.
+    let state =
+        w.db.with_conn(|c| t::waiting_state(c, &get(&w.db)))
+            .unwrap()
+            .unwrap();
+    assert_eq!(state.who, "owner");
+
+    // With the gate off the same verdict completes.
+    let mut off = World::code(merged_pr_github(CLEAN_DIFF));
+    off.cfg.autonomy_gate = hq_core::config::AutonomyGate::Off;
+    sync(&off.db, &off.cfg);
+    let key = t::current_config_key(&off.cfg);
+    off.db
+        .with_conn(|c| {
+            for _ in 0..25 {
+                t::record_canary(c, "unmet_criterion", "fail", "pass", &key, "")?;
+            }
+            Ok(())
+        })
+        .unwrap();
+    let answer = off
+        .answer(
+            "pass",
+            &["pr_state", "required_checks", "diff_excerpt"],
+            &[],
+        )
+        .await;
+    let reviewer = ScriptedReviewer::new(&["premium"], vec![reply("anthropic/claude-x", &answer)]);
+    assert!(completed(&off.verify(&reviewer).await));
+}
+
+#[tokio::test]
+async fn a_verdict_records_which_verifier_configuration_made_it() {
+    let w = World::code(merged_pr_github(CLEAN_DIFF));
+    let answer = w
+        .answer(
+            "pass",
+            &["pr_state", "required_checks", "diff_excerpt"],
+            &[],
+        )
+        .await;
+    let reviewer = ScriptedReviewer::new(&["premium"], vec![reply("anthropic/claude-x", &answer)]);
+    w.verify(&reviewer).await;
+    assert_eq!(
+        verdicts(&w.db)[0].verifier_config,
+        t::verifier_config_key(&w.cfg.reviewers(), true)
+    );
+
+    // Machine checks alone are their own configuration.
+    let failing = World::code(failing_checks_github());
+    failing
+        .verify(&ScriptedReviewer::new(&["premium"], vec![]))
+        .await;
+    assert_eq!(verdicts(&failing.db)[0].verifier_config, "e1");
+}
+
+// ---- the reviewer is tested too ----
+
+/// A reviewer that approves every criterion, citing the first observation.
+struct ApprovesEverything;
+
+#[async_trait::async_trait]
+impl super::reviewer::Reviewer for ApprovesEverything {
+    fn models(&self) -> Vec<String> {
+        vec!["premium".into()]
+    }
+    async fn review(
+        &self,
+        request: &super::reviewer::ReviewRequest,
+    ) -> anyhow::Result<super::reviewer::ReviewReply> {
+        let text = json!({
+            "criteria": request.criteria.iter().map(|c| json!({"text": c, "result": "pass", "observation_ids": ["o1"], "note": "fine"})).collect::<Vec<_>>(),
+            "flags_addressed": [],
+            "summary": "done",
+        })
+        .to_string();
+        Ok(super::reviewer::ReviewReply {
+            text,
+            model: "anthropic/claude-x".into(),
+        })
+    }
+}
+
+#[tokio::test]
+async fn a_reviewer_that_approves_everything_is_demoted_by_its_own_canaries_before_it_completes_more()
+ {
+    let w = World::code(merged_pr_github(CLEAN_DIFF));
+    // Two thirds of the canaries are planted defects, so forty-five give well over the twenty the
+    // catch rate needs before it means anything.
+    let ran = super::canary::run_canaries(&w.db, &w.cfg, &ApprovesEverything, 45, 5)
+        .await
+        .unwrap();
+    assert_eq!(ran.len(), 45);
+    let cal = w.db.with_conn(|c| t::calibration(c, &w.cfg)).unwrap();
+    assert!(cal.canaries.defects >= 20, "{:?}", cal.canaries);
+    assert_eq!(cal.canaries.catch_rate, Some(0.0));
+    assert!(
+        cal.tiers.iter().all(|t| t.state == t::Autonomy::Withdrawn),
+        "{:?}",
+        cal.tiers
+    );
+
+    // The same reviewer now passes a real task, and the pass is kept but not applied.
+    let Finished::Recorded {
+        verdict,
+        moved,
+        waiting_for,
+    } = w.verify_with(&ApprovesEverything).await
+    else {
+        panic!("expected a recorded verdict");
+    };
+    assert_eq!((verdict.verdict.as_str(), verdict.applied), ("pass", false));
+    assert_eq!(moved, Moved::Nothing);
+    assert_eq!(waiting_for, Some(WaitingFor::Owner));
+    assert_eq!(get(&w.db).status, t::STATUS_READY_FOR_REVIEW);
+}
+
+#[tokio::test]
+async fn a_pass_that_used_the_reviewer_is_followed_by_a_canary_at_the_configured_rate() {
+    let mut w = World::code(merged_pr_github(CLEAN_DIFF));
+    w.cfg.canary_rate = 1.0;
+    let answer = w
+        .answer(
+            "pass",
+            &["pr_state", "required_checks", "diff_excerpt"],
+            &[],
+        )
+        .await;
+    // One reply for the task; the canary asks again and the script has nothing left, which is
+    // recorded as an error, not a judgement.
+    let reviewer = ScriptedReviewer::new(&["premium"], vec![reply("anthropic/claude-x", &answer)]);
+    let report = run_pass(&w, &reviewer).await;
+    assert_eq!((report.completed, report.canaries), (1, 1), "{report:?}");
+    assert_eq!(reviewer.calls(), 2, "one review and one canary");
+
+    // At rate zero the reviewer is never tested.
+    let mut quiet = World::code(merged_pr_github(CLEAN_DIFF));
+    quiet.cfg.canary_rate = 0.0;
+    let answer = quiet
+        .answer(
+            "pass",
+            &["pr_state", "required_checks", "diff_excerpt"],
+            &[],
+        )
+        .await;
+    let reviewer = ScriptedReviewer::new(&["premium"], vec![reply("anthropic/claude-x", &answer)]);
+    let report = run_pass(&quiet, &reviewer).await;
+    assert_eq!(report.canaries, 0);
+    assert_eq!(reviewer.calls(), 1);
 }
