@@ -208,6 +208,7 @@ async fn pair(net: &NetArgs, db: Database, ttl: Duration) -> Result<()> {
     };
     let Some(request) = request else {
         println!("No device paired: the ticket ended.");
+        bridge.shutdown().await;
         return Ok(());
     };
     println!(
@@ -254,8 +255,10 @@ async fn join(net: &NetArgs, db: Database, link: &str) -> Result<()> {
                 "Digits: {sas}   (type them on the other machine; it pairs only if they match)"
             );
         })
-        .await?;
-    match result {
+        .await;
+    // Close the endpoint on every path, so a failure does not end in a second, noisy error.
+    bridge.shutdown().await;
+    match result? {
         JoinResult::Paired(joined) => println!(
             "Paired with \"{}\" ({}).",
             printable(&joined.card.name, SHOWN_CHARS),
@@ -264,7 +267,6 @@ async fn join(net: &NetArgs, db: Database, link: &str) -> Result<()> {
         JoinResult::Refused(why) => bail!("refused: {why}"),
         JoinResult::Declined { .. } => bail!("the other machine did not accept"),
     }
-    bridge.shutdown().await;
     Ok(())
 }
 
@@ -278,6 +280,12 @@ async fn serve(net: &NetArgs, db: Database) -> Result<()> {
 
 async fn ping(net: &NetArgs, db: Database, peer: &str, count: usize) -> Result<()> {
     let bridge = start(net, db, false).await?;
+    let result = ping_peer(&bridge, peer, count).await;
+    bridge.shutdown().await;
+    result
+}
+
+async fn ping_peer(bridge: &Bridge, peer: &str, count: usize) -> Result<()> {
     let started = Instant::now();
     let conn = bridge.connect(peer).await?;
     println!("Connected in {:?}.", started.elapsed());
@@ -295,7 +303,6 @@ async fn ping(net: &NetArgs, db: Database, peer: &str, count: usize) -> Result<(
         times[times.len() / 2],
         times[times.len() - 1]
     );
-    bridge.shutdown().await;
     Ok(())
 }
 

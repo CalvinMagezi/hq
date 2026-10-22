@@ -49,7 +49,9 @@ hq bridge revoke <peer id>       # take a peer off the list
 need. `--relay default` adds n0's public relays, which are for development and testing, not for
 production. `--relay <url>` uses a relay you run. `--no-addrs` keeps this machine's IP addresses
 out of the ticket (smaller QR code; the other side then needs a relay to find the direct path).
-`--bind <ip:port>` chooses where it listens; the default is every address and any port.
+`--bind <ip:port>` chooses where it listens; the default is every address and any port. A peer
+stores the address it was paired at, so with `--relay none` (no relay to find the new one) give
+`pair`, `serve` and `ping` the same fixed `--bind` port, or a restart makes the stored address stale.
 
 A ticket works for 10 minutes (`--ttl` 10 to 3600 seconds) and once. Run `hq bridge pair` again for another device.
 
