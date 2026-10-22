@@ -529,7 +529,7 @@ DROP TABLE task_assignees;
 
 The design is `docs/plans/task-verification.md`. This is the part that exists so far: the policy,
 the verdict record and the guard on the one edge into `complete`. Migration
-`095_task_verification` adds two tables.
+`095_task_verification` adds the verdict table, a waits table and the policy table.
 
 - **The policy lives in the database.** `task_verification_policy` holds one row, the
   `tasks.verification` configuration. Every process that builds the task tools writes its own
@@ -606,9 +606,27 @@ observation that exists (WS1 enforces it when a pass is recorded).
 - **The contract** is the `Acceptance` section of the description (the parser context packets
   use) and its SHA-256, so a change to the criteria is detectable.
 
-Rollback of 095, then delete the `095_task_verification` row from `schema_version`:
+Later migrations add to it. `096_task_calibration` adds `task_audits` (the owner's agree or not on what HQ
+completed, and a veto or a disagreeing second opinion), `task_canary_runs` (planted defects and clean controls put
+to the reviewer) and `task_veto_holds` (a tier 2 task inside its veto window, with a snapshot of what its verdict was
+about). `097_task_sweeps` adds `task_sweeps` and `task_sweep_items` (a persisted batch over the tasks waiting for
+review, advanced by the daemon), `task_verification_skips` (a task kept out of automatic verification for its current
+submission), `task_reverify_requests` (a second opinion the daemon answers) and `task_verification_policy.enforcing_since`
+(when enforcement began, which is what makes older work the legacy backlog a sweep handles).
+
+Rollback of 097, 096 and 095, in this order because the later tables refer to the earlier ones, then delete the
+`097_task_sweeps`, `096_task_calibration` and `095_task_verification` rows from `schema_version` (SQLite 3.35+):
 
 ```sql
+DROP TABLE task_reverify_requests;
+DROP TABLE task_verification_skips;
+DROP TABLE task_sweep_items;
+DROP TABLE task_sweeps;
+ALTER TABLE task_verification_policy DROP COLUMN enforcing_since;
+DROP TABLE task_veto_holds;
+DROP TABLE task_canary_runs;
+DROP TABLE task_audits;
+DROP TABLE task_verification_waits;
 DROP TRIGGER task_verdicts_no_delete;
 DROP TRIGGER task_verdicts_no_update;
 DROP TABLE task_verdicts;

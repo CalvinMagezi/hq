@@ -33,6 +33,53 @@ in_progress --release / update--> ready_for_review     ("verification queued", n
 - A task that comes back arrives with `resume`: the findings, in a checkpoint, from `task_next`. After
   `max_attempts` returns (3) it goes to you once instead of bouncing again.
 - `task_get` shows `waiting_for`: `worker`, `ci`, `verifier`, `budget` or `owner`. Only `owner` is waiting on you.
+- Turning enforcement on does not bulk-process old work. Tasks that entered review before enforcement began are the
+  legacy backlog: the live queue leaves them alone, they say so in `waiting_for`, and a sweep (below) handles them.
+
+## Clearing a queue: sweeps
+
+A sweep is one decision about a whole backlog instead of a review of each task. It works in phases the daemon
+advances a few tasks a minute, so it survives a restart and no request waits on GitHub or a model.
+
+1. **Plan.** HQ reads each task's evidence with no model and no spend, and sorts every task into a group with an
+   estimate of the reviewer runs it would need. Nothing moves.
+2. **Run.** You start it. Verdicts are recorded in priority order (tasks others wait on, then tier 2, then oldest),
+   with the reviewer where one is needed and the budget allows. Nothing moves yet. Pause and cancel work between tasks.
+3. **Read the groups, not the tasks.**
+
+| Group | Meaning | What apply does |
+|---|---|---|
+| Passed | Evidence met the tier's bar | Completes it, with the evidence level recorded |
+| Failed | A criterion is unmet | Back to `to_do` with the findings as the checkpoint |
+| Nothing to check | No pull request, commit or note HQ can find | Back to `to_do` with what to link; never completed |
+| Could not decide | Checks running, a reviewer unsure, budget spent | Left where it is and retried; shown after the retries |
+| Need you | Tier 2 (opens its veto window), held passes, three failures | Stays in your list |
+
+4. **Apply.** One confirmation applies the groups. Above `sweep_confirm_over` tasks (25) apply always needs your
+   explicit confirmation, whatever the mode. Each task and the pull request or note behind its verdict is read again
+   first: work that changed since is left alone and reported, never completed on an old verdict. Every change carries the
+   sweep id (the actor is `verify:sweep-<id>`).
+
+**Undo** puts back every task the sweep moved that has not changed since, and reports the ones it left alone. A
+restored task is not verified automatically until it is submitted again, so the undo is not simply redone. It cannot
+unsend the notices a completion already sent to the agents waiting on it.
+
+A sweep can be applied only while `mode` is `enforce`; in `shadow` it can be planned and run to see the numbers.
+
+## The briefing and queue health
+
+`hq verify briefing` (and the card at the top of the tasks page and on the home screen) is exception first: what needs
+you; then what HQ verified and completed, one line per initiative and never a pass at a time; what failed and was sent
+back without you; tier 2 tasks inside their veto window; and the audit prompt. Past `owner_queue_alert` items waiting
+on you it stops listing and offers one decision for the biggest group ("40 of 47 were submitted before verification was
+enforced: plan a sweep"), because a long flat list is the bottleneck this exists to remove.
+
+`hq verify queue` shows the backlog by who it waits on, the oldest item waiting on you, the last 24 hours, how long
+the queue behind the verifier takes to clear at that rate, what is deferred and why, and reviewer spend against the
+ceiling. When the budget runs out, machine checks keep running and the tasks that need a reviewer wait, with the
+reason shown. A daemon task raises at most one alert a day when more than `owner_queue_alert` items wait on you, the
+oldest has waited `owner_queue_age_days`, the queue would take over 24 hours to clear, or the budget is spent with
+tasks waiting for it. Set `briefing_hour_utc` to also have the briefing posted once a day.
 
 ## What counts as evidence
 
@@ -108,6 +155,10 @@ tasks:
 | `tier2_tags`, `tier2_paths` | see above | What raises a task to tier 2 |
 | `veto_hours` | `24` | Tier 2 veto window; `0` completes tier 2 at once |
 | `concurrency` | `2` | Verifications at once |
+| `sweep_confirm_over` | `25` | A sweep that moves more tasks than this needs your explicit confirmation to apply |
+| `owner_queue_alert` | `20` | Items waiting on you past which the briefing offers one group decision, and an alert is raised |
+| `owner_queue_age_days` | `3` | Days the oldest item waiting on you may age before an alert |
+| `briefing_hour_utc` | unset | UTC hour to post the briefing once a day; unset builds it on demand only |
 | `reviewer_monthly_ceiling_usd` | unset | Spend allowed on reviewer calls this month; unset means no model |
 | `reviewer_models` | `premium` alias | Reviewers; tier 2 needs two different families |
 | `reviewer_timeout_secs` | `120` | One reviewer call |
@@ -157,7 +208,22 @@ hq verify agree <id>
 hq verify disagree <id> --note "the test is empty"
 hq verify holds         # tier 2 tasks inside their veto window
 hq verify veto <task> --note "needs a backfill"
+hq verify briefing 72   # what happened in the last 72 hours, exceptions first
+hq verify queue         # who tasks wait on, how old, how fast it clears, spend
+hq verify sweep plan [--initiative <id> | --since 2026-10-01]
+hq verify sweep show <sweep-id>   # groups, estimate, progress
+hq verify sweep run|pause|cancel <sweep-id>
+hq verify sweep apply <sweep-id> [--confirm]
+hq verify sweep undo <sweep-id>
 ```
+
+The same things are on the tasks page, which is built for a phone: a verification bar (who tasks wait on, **Verify
+now** with a scope of everything waiting, this initiative, since a date or the tasks you picked, **Audit**, and queue
+health), the briefing card, a sweep sheet with live progress, a stack of audit cards (Agree, Disagree, Skip, **Audit 10
+more**, and the running error estimate with its sample size), and a Verification section in each task with the verdict
+history and evidence, **Second opinion**, **Complete anyway** and **Return to to_do**. A **second opinion** asks another
+model (the first verdict's models are left out when others are configured) to judge the task again; one that disagrees
+counts as an audit datum against the first verdict and puts the task in front of you. It never changes the task.
 
 These read and write this machine's database. They are deliberately not agent tools: an agent must not be able to
 agree with an audit of its own work. The daemon tasks are `verify-dispatch` (every minute, only when `mode` is not
@@ -169,6 +235,11 @@ agree with an audit of its own work. The daemon tasks are `verify-dispatch` (eve
   what to link.
 - A criterion no fact can show ("the page looks good") stays with a reviewer, who can only say pass, fail or
   unclear, and is checked by canaries rather than trusted.
-- Not built yet: on-demand sweeps over an existing backlog with a plan and undo, the Monday briefing and queue
-  health view, and the web and phone screens for audits, holds and the exceptions list. Today those are the
-  `hq verify` commands and the web inbox items.
+- Sweeps and the other owner actions are for the owner only: the web credential, or the `hq` command on the machine.
+  No agent key, of any scope, can start, apply or undo a sweep, answer an audit, veto a task or ask for a second opinion.
+  The `hq verify` commands open the database directly, so a process that can run `hq` as you on your machine can use
+  them, as it could open the database itself. Coding agents run in the host's sandbox, which keeps HQ's own folder out
+  of their reach; an agent you start outside it is as trusted as you are.
+- The daemon does the slow work, so a sweep moves only while the daemon runs. `hq verify sweep show` says where it is.
+- Turning it on for a real instance is a decision to make in steps (see "Turning it on"), reading `hq verify status`
+  between them. Nothing in HQ does that for you.

@@ -1,11 +1,12 @@
 # Task verification: completion without a person in the queue
 
-Status: approved 2026-10-22 (see "Decisions"). Work streams 0 to 6 are built and described for
-operators in `docs/TASK_VERIFICATION.md`. Not built: WS7 (rollout on a live instance), WS8 (sweeps),
-WS9 (briefing and queue health) and WS10 (web and phone surfaces). Where the build differs from this
-text: the report and the audit commands are `hq verify` (not `hq tasks verification`); an inconclusive
-verdict that waits on the worker returns the task to `to_do` like a fail, rather than blocking it
-(decision 4); and `waiting_for` is stored, so a restart forgets nothing.
+Status: implemented on the branch that carries this plan (work streams 0 to 6 and 8 to 10), described for
+operators in `docs/TASK_VERIFICATION.md`. WS7, the rollout on a live instance, is a sequence of decisions for the
+owner, taken from the numbers `hq verify status` prints, and is deliberately not automated. Where the build differs
+from this text: the report and the owner commands are `hq verify` (not `hq tasks verification`); an inconclusive
+verdict that waits on the worker returns the task to `to_do` like a fail, rather than blocking it (decision 4);
+`waiting_for` is stored, so a restart forgets nothing; tasks that entered review before enforcement began are left to
+a sweep instead of the live queue; and a second opinion is a request the daemon answers.
 
 One person cannot review every task that several agents finish. This plan takes
 the owner out of per-task review and replaces it with a gate that moves a task
